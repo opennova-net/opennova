@@ -53,6 +53,11 @@ public:
 	}
 	// The table as the engine reads it, rebuilt from the rows.
 	rtxt::File table() const;
+	// A string moved to another section (its Move's parent that section): added there with its key, its
+	// text and its position, removed here, one step. A lookup finds a string by its section and its key
+	// [orig: TextResource_FindEntryBySectionAndKey @ 0x75D250], so a string moves between sections only
+	// so; a string moves nowhere else.
+	bool move_out_edits(const Edit &move, std::vector<Edit> &out, std::string &error) const override;
 
 protected:
 	// A string's key defines its string id in "TABLE.BIN/Section" (the table's file name, the
@@ -65,6 +70,10 @@ protected:
 	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id,
 	                                const std::vector<std::shared_ptr<const Node>> &rows,
 	                                std::string &error) override;
+	// A section added under a name a section of the table has, in any case: that section, the one a
+	// lookup by the name reads (the first of a name [orig: TextResource_FindEntryBySectionAndKey @
+	// 0x75D250, the stricmp walk @0x75D2B0]), so no second is made that no lookup reaches.
+	NodeId existing_row_for(const Edit &add, const std::vector<std::shared_ptr<const Node>> &rows) const override;
 	bool set_field(Node &row, const NodeAddress &address, const std::string &field, const Value &value,
 	               std::string &error) override;
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
@@ -93,7 +102,9 @@ std::vector<Diagnostic> validate_strings_file(const DocumentBase &document);
 // (strings_document.cpp, static_asserted into this order): input the typed model cannot carry
 // (the file does not serialize); a table whose sections the reader takes regrouped (a rewrite
 // writes them grouped, as the game reads them); a section with no name or with the name of an
-// earlier one; a key empty, or repeated within its section.
+// earlier one; a key empty, or repeated within its section; and, of the project's gametext.bin where
+// the project has a mission, a key the single-player flow reads that it lacks or holds empty
+// (graph/use_checks' gametext check).
 enum class StringsFinding {
 	InvalidInput,
 	Regrouped,
@@ -101,6 +112,7 @@ enum class StringsFinding {
 	SectionDuplicate,
 	KeyEmpty,
 	KeyDuplicate,
+	FlowKeyMissing,
 	kCount
 };
 const FindingCodeRow &finding_code(StringsFinding code);

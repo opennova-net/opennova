@@ -1108,6 +1108,21 @@ bool removes_only(const std::vector<Edit> &edits) {
 	return !edits.empty();
 }
 
+// A batch of Moves alone, each naming a record it holds and a destination (a Move to another row: a
+// string to another section).
+bool moves_only(const std::vector<Edit> &edits) {
+	for (const Edit &edit : edits)
+		if (edit.operation != EditOperation::Move || is_batch_made(edit.address.row) ||
+		    is_batch_made(edit.address.child) || is_batch_made(edit.parent))
+			return false;
+	return !edits.empty();
+}
+
+// An identity a batch's edit names, its batch_made label moved past the `base` edits before it.
+NodeId rebased(NodeId id, size_t base) {
+	return is_batch_made(id) ? batch_made(size_t(id - kBatchMadeBase) + base) : id;
+}
+
 // A batch of Sets of one field, each naming a record it holds (the Inspector's edit of a field, on
 // one record or on several together).
 bool sets_one_field(const std::vector<Edit> &edits) {
@@ -1151,6 +1166,35 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &r
 		}
 		for (Edit &edit : expanded) edit.gesture = requested.front().gesture;
 		edits = &expanded;
+	} else if (records && moves_only(requested)) {
+		// A Move into another row is what the type makes of it (Document::move_out_edits: a string added
+		// to the other section with what it holds and removed here), refused as the type refuses it; a
+		// Move within its row stays as asked.
+		bool out_of_row = false;
+		for (const Edit &edit : requested) {
+			const NodeId to = edit.parent ? records->address_of(edit.parent).row : 0;
+			if (!to || to == edit.address.row) {
+				expanded.push_back(edit);
+				continue;
+			}
+			std::vector<Edit> planned;
+			std::string why;
+			if (!records->move_out_edits(edit, planned, why)) {
+				core_.refuse_now(CoreFinding::DocumentCollection,
+				                 why.empty() ? std::string("These records cannot be moved there.") : why, document.path());
+				return false;
+			}
+			const size_t base = expanded.size();
+			for (Edit &step : planned) {
+				step.address.row = rebased(step.address.row, base);
+				step.address.child = rebased(step.address.child, base);
+				step.parent = rebased(step.parent, base);
+				step.gesture = edit.gesture;
+				expanded.push_back(std::move(step));
+			}
+			out_of_row = true;
+		}
+		if (out_of_row) edits = &expanded;
 	}
 	NodeAddress owner;
 	Document::Placement at;
@@ -1205,6 +1249,13 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &r
 	} else if (document.revision() != before) {
 		repair_selection(document, generation, before, owner);
 	}
+	// An Add the type found a row for in place of making one (a string table's section of the name
+	// asked, which a lookup reads first): that row selected when the batch made nothing of its own.
+	const NodeId found = records && !records->last_found_rows().empty() ? records->last_found_rows().front() : 0;
+	if (found && !(made && !records->last_added_records().empty())) {
+		activate(document.path());
+		view_.documents.selection.select_only(document.path(), records->address_of(found));
+	}
 	if (view_.documents.active != active || view_.documents.selection.serial != serial)
 		core_.touch(ViewConcern::Selection);
 	update_view();
@@ -1216,6 +1267,14 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &r
 		else core_.problems().validate_later();
 	}
 	view_.activity.status = removal ? "Removed " + named + "." : records ? edit_words(*records, *edits, named) : std::string();
+	if (found && document.revision() == before) {
+		std::optional<GraphNameSource> names;
+		if (view_.findings.graph) names.emplace(*view_.findings.graph);
+		const NodeAddress at = records->address_of(found);
+		view_.activity.status = std::string(records->kind_label(at.kind)) + " " +
+		                        record_display(*records, at, names ? &*names : nullptr) + " is already in " +
+		                        document.path() + ": selected it, nothing added.";
+	}
 	if (view_.activity.status.empty()) view_.activity.status = "Edited " + document.path() + ".";
 	// The step is named with the same words, what Undo and Redo say and the Edit menu names.
 	if (document.revision() != before) name_step(document);
