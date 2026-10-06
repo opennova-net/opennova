@@ -483,9 +483,11 @@ int test_project() {
 	            sidecar.options == ImportOptions({{"format", "dds"}}) && sidecar.outputs == std::vector<std::string>({"body.dds"}));
 	const AssetEntry *body = output_of(view, body_source);
 	TEST_EXPECT(body && body->logical_name == "body.dds" && !view.project.scan->find("body.tga"));
-	// The model row now loads it (its loader reads body.dds for body.tga): nothing missing.
+	// The model row now loads it (its loader reads body.dds for body.tga): no texture missing (its
+	// material's shader, which no shader of this project registers, is another finding).
 	for (const Diagnostic &d : view.findings.diagnostics)
-		TEST_EXPECT(!(d.code() == "reference.missing" && d.asset == "models/thing.3di"));
+		TEST_EXPECT(!(d.code() == "reference.missing" && d.asset == "models/thing.3di" &&
+		              editor_test::reference_of(d).kind == ReferenceKind::Texture));
 	// An empty value goes back to the default; a key or a value no row takes is refused, nothing written.
 	editor_test::handle_to_end(session, request::set_import_options(body_source, {{"format", ""}}));
 	session.run_operations();
