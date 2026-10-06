@@ -29,6 +29,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_menu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_mission.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_mission_menus.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_sound.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_strings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_style.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_texture.cpp
@@ -80,6 +81,10 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_map_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_slots.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/text_types.cpp
+    # the sound lane: a bank's waves and sets, SndProf.def's profiles
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_bank_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_profile_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/wave_check.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_image.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_budget.cpp
@@ -132,6 +137,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/import/sidecar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/terrain_import.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/texture_import.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/import/wave_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/texture_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/tga_source.cpp
     # terrain — TrnGen.exe's terrain bake ported (a depth map to the .cpt's depth atlas and its
@@ -159,6 +165,7 @@ add_library(opennova_editor STATIC
     # document's text as its Godot control shows it, the span edit a control's text plans, the
     # keystroke burst its edits fold in, the gutter marks and the highlights it colours)
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/animation_uses.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/sound_preview.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/canvas_gesture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_arrange.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_canvas.cpp
@@ -281,6 +288,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/unsaved_guard.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/workspace_parts.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/sound_play.cpp
     # session/view — the view the windows draw, an aggregate of sub-views (S13 V4: the project,
     # the documents, the findings, the activity, the dialogs, the workspace's own, the navigation
     # history's places), the events a request posts, and the findings by file and record
@@ -301,6 +309,7 @@ add_library(opennova_editor STATIC
 if(OPENNOVA_IMGUI)
     target_sources(opennova_editor PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/animation_inspector.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/sound_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_toolbar.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_views.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_window.cpp
