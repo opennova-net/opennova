@@ -34,7 +34,7 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/model/text_document.h>
 #include <editor/preview/canvas_half.h>
-#include <editor/preview/effect_canvas.h>
+#include <editor/preview/orbit_canvas.h>
 #include <editor/preview/effect_playback.h>
 #include <editor/preview/effect_viewport.h>
 #include <editor/preview/viewport_json.h>
@@ -497,7 +497,8 @@ int test_canvas() {
 	const EffectViewport *viewport = rig.viewport(rig.second);
 	TEST_EXPECT(viewport);
 	const ViewportContext context = viewport_context(rig.view(), *viewport);
-	EffectCanvas canvas;
+	const std::unique_ptr<CanvasHalf> made = viewport->make_canvas();
+	CanvasHalf &canvas = *made;
 	editor_test::Gathered out;
 	canvas.follow(*viewport, context, out);
 	CanvasInput in;

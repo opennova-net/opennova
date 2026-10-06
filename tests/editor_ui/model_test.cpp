@@ -4,6 +4,7 @@
 // step) and Select the faces that differ one SelectRecord of them; a bullet face names the material it
 // was made from; a LOD says what it draws at; a user point what the game reads it as; a collision
 // record (a volume, a face, the collision row) what the game does with it.
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -254,11 +255,80 @@ void test_damage_popup() {
 	      "the register in its group, in the game's words");
 }
 
+// A definition table's record in the Preview (DI-21, preview/definition_viewport) over a real session: the
+// record's picture beside the table, its line naming the model it draws with a Go to of the model's file (an
+// OpenDocument, a step of the navigation history), Replay the clock at 0 and run.
+void test_definition_view() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_definition");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(session.handle(request::new_project(dir.file("project"), "Definition")), "a project");
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const SessionView &v = session.view();
+	const std::string repo = test_paths_repo_root(__FILE__);
+	CHECK(editor_test::write_bytes(v.project.root + "/models/crate.3di",
+	                               test_io::read_file(repo + "/fixtures/threedi/synth/crate.3di")) &&
+	              editor_test::write_bytes(v.project.root + "/models/armory.3di",
+	                                       test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di")) &&
+	              editor_test::write_text(v.project.root + "/defs/items.def",
+	                                      "begin \"Pump station\"\nid 100500\ntype object\ngraphic crate\n"
+	                                      "ai_function gnrc\nhusk armory\nend\n"),
+	      "the models and the item");
+	editor_test::handle_to_end(session, request::rescan());
+	while (v.activity.validation.running) session.poll();
+	DrawnDevices devices;
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	std::vector<EditorRequest> taken;
+	const auto serve = [&]() {
+		EditorRequest request;
+		while (ui.windows.take_request(request)) {
+			taken.push_back(request);
+			session.handle(request);
+		}
+		devices.sync(session.viewports(), v);
+	};
+	const auto settle = [&](int frames) {
+		for (int i = 0; i < frames; ++i) {
+			serve();
+			ui.frames(1);
+		}
+		serve();
+	};
+	const std::string path = "defs/items.def";
+	session.handle(request::open_document(path));
+	const Document *table = session.document_for(path);
+	CHECK(table && !table->rows().empty(), "the table open");
+	if (!table || table->rows().empty()) return;
+	session.handle(request::select_record(path, NodeAddress{table->rows()[0]->id, table->rows()[0]->kind, 0}));
+	session.handle(request::set_viewport(path, R"({"kind": "definition", "clock": {"playing": false, "ticks": 5}})"));
+	settle(3);
+	CHECK(v.documents.preview_shown == ViewportKind::Definition, "the record's picture is the Preview's");
+	std::string text = logged_frame(ui);
+	CHECK(text.find("Draws crate (graphic)") != std::string::npos, "its line names the model it draws");
+	const ImGuiID scope = item_id(Ui::window_id("Preview"), {"definition", path.c_str()});
+	taken.clear();
+	ui.activate(item_id(scope, {"Replay"}));
+	settle(1);
+	CHECK(session.viewports().clock().playing() && session.viewports().clock().ticks() < 5, "Replay: the clock at 0, run");
+	taken.clear();
+	ui.activate(item_id(scope, {"Go to"}));
+	settle(1);
+	const bool opened = std::any_of(taken.begin(), taken.end(), [](const EditorRequest &request) {
+		return request.kind == EditorRequestKind::OpenDocument && request.path == "models/crate.3di";
+	});
+	CHECK(opened && v.documents.active == "models/crate.3di", "Go to opens the model's file");
+}
+
 } // namespace
 
 void run_model_tests() {
 	test_material_surface();
 	test_damage_popup();
+	test_definition_view();
 }
 
 } // namespace editor_ui_test

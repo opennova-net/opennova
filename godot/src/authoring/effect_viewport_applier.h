@@ -1,5 +1,6 @@
 #pragma once
 
+#include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
@@ -14,6 +15,10 @@
 namespace godot {
 
 class MissionEnvironment;
+
+// A metre's squares on the ground a preview's picture stands on (the editor's aid: the effect device's and the
+// definition device's), the lines through the origin brighter.
+Ref<ArrayMesh> preview_grid_mesh();
 
 // An effect viewport's device work (ADR 0046 DI-14): the scene the viewport's playback steps
 // (editor/preview/effect_viewport: the engine's effect scene, the effect spawned and played on the
