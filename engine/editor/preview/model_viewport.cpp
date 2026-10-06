@@ -1104,25 +1104,11 @@ std::vector<ClipSoundFired> ModelViewport::fire_damage_sounds(const PreviewClock
 	// The legs on the ticks [from, now): the death on tick 0 heard as the clock leaves it.
 	for (const DamageLeg &leg : damage_plan_.legs) {
 		if (leg.kind != "sound" || leg.tick < from || leg.tick >= now) continue;
-		ClipSoundFired fired;
+		// Played at the item, the preview's origin, as the camera hears it.
+		ClipSoundFired fired =
+				plan_set_at_origin(leg.name, leg.tick, "the death sound", sound_sources_, camera().eye(), selector);
 		fired.seq = ++next_seq;
 		fired.path = path();
-		fired.tick = leg.tick;
-		fired.slot = -1;
-		fired.set = leg.name;
-		// Played at the item, the preview's origin, as the camera hears it.
-		PreviewHearing heard;
-		const PreviewVec3 eye = camera().eye();
-		heard.listener[0] = eye.x;
-		heard.listener[1] = eye.y;
-		heard.listener[2] = eye.z;
-		const PreviewPlay play = plan_set_play(sound_sources_.banks(), sound_sources_.expansion(), leg.name, std::string(),
-		                                       selector, kClipSoundListenerView, &heard);
-		fired.bank = play.bank;
-		fired.words = "Tick " + std::to_string(leg.tick) + " (the death sound): " + play.words;
-		fired.state = !play.found ? "missing" : !play.in_range ? "out_of_range" : play.voices.empty() ? "silent" : "played";
-		for (const PreviewVoice &voice : play.voices)
-			fired.voices.push_back({voice.wave, voice.file, std::string(), voice.pitch_q16, voice.volume});
 		if (scan) find_clip_sound_waves(fired, *scan);
 		fired_.push_back(fired);
 		out.push_back(std::move(fired));

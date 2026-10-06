@@ -61,6 +61,10 @@ struct ViewportKindRow {
 	// Preview window shows as the file is selected; its viewport reads the project's file while no
 	// document is open at its path): the Preview window shows it for that selection, whatever its role.
 	bool files = false;
+	// The row it shows (a `part` kind's) is a page of its document, so a record picked on another row is
+	// a step of the navigation history (a menu's screen); else a row is a record picked one after another
+	// (a definition table's, DI-21), no step.
+	bool pages = false;
 };
 
 // A kind's row; Menu's for a value past the last kind.
@@ -91,8 +95,9 @@ ViewportKind file_preview_kind(DocumentTypeId type);
 // there since the active document last changed, DocumentsView::files_lead) the kind that draws the
 // selected file, unless that file is the active document, which its tab shows; else the active
 // document's (the kind its type shows in or feeds, preview_kind_of), else `last` (the one it showed;
-// kCount before it showed one). When that kind has no target (its document never opened, or closed),
-// the first Preview-role kind that has one; kCount when none has.
+// kCount before it showed one). When that kind has no target (its document never opened, or closed; a
+// definition table's with no record selected yet), `last` while it has one, else the first Preview-role
+// kind that has one; kCount when none has.
 ViewportKind preview_kind(const DocumentsView &documents, ViewportKind last);
 // What the Preview window follows after a change of the view (the session's touch, before its
 // viewports are tracked): of each Preview-role kind, the active document when the kind shows its
