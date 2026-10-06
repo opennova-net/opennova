@@ -476,6 +476,22 @@ void TextureView::draw_uses(Workspace &workspace, const DocumentBase &document) 
 		if (use.budget.known) draw_budget(use.budget);
 		ImGui::PopID();
 	}
+	// No use reads it (each one's loader opens another file of its name: the .tga the Blender add-on leaves
+	// beside the .dds its model row loads): set aside, never deleted (S18, set_aside_texture).
+	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(document.path()) : nullptr;
+	const bool unread = std::none_of(uses.begin(), uses.end(), [](const TextureUse &use) { return use.reads_file; });
+	if (unread && entry && entry->imported_from.empty()) {
+		ImGui::PushTextWrapPos(0.0f);
+		ImGui::TextColored(ui_kit::severity_color(DiagnosticSeverity::Warning), "The game never reads this file: %s.",
+		                   uses.front().served.empty() ? "no loader opens it"
+		                                               : ("its loader opens " + basename_of(uses.front().served) + " in its place").c_str());
+		ImGui::PopTextWrapPos();
+		ui_kit::WrapRow row;
+		if (ui_kit::tool(row, "Set it aside", view.allows(EditorRequestKind::SetAsideTexture) && !document.dirty(),
+		                 "Moves " + document.path() + " under " + std::string(kReplacedFolder) +
+		                         "/, never deleted, so the build no longer packs it. Undo does not take it back."))
+			workspace.request(request::set_aside_texture(document.path()));
+	}
 }
 
 // A use's budget under its line: what the game makes of the file at full object texture detail and what

@@ -329,8 +329,9 @@ func test_a_normal_map_lit() -> void:
 	assert_gt(int(_viewport("textures/brick.tga").get("builds", 0)), builds, "the light moved, the picture made again")
 
 
-## S18: a texture replaced by an image through the wire: the image an import source in art/, the texture its
-## import's output under its own name, the file it replaced set aside.
+## S18: a texture replaced by an image through the wire: the image an import source in art/ under the
+## texture's stem (brick.tga's art/brick.png, whatever the image is called), the texture its import's output
+## under its own name, the file it replaced set aside.
 func test_a_texture_replaced_by_an_image() -> void:
 	if _app == null:
 		return
@@ -352,7 +353,7 @@ func test_a_texture_replaced_by_an_image() -> void:
 	for file in _seam.every("files", "files", {"limit": 200}):
 		if String(file.get("name", "")) == "brick.tga":
 			made = String(file.get("imported_from", ""))
-	assert_eq(made, "art/mine.png", "the texture is the image's import output now")
+	assert_eq(made, "art/brick.png", "the texture is the image's import output now")
 	assert_false(FileAccess.file_exists(root.path_join("textures/brick.tga")), "the file it replaced is set aside")
 
 
@@ -373,7 +374,8 @@ func test_an_os_drop_is_held_where_the_cursor_let_go() -> void:
 
 
 ## S18: a texture opened in its program through the wire: edit_externally's open_externally event taken by
-## the Shell at the next pump (kept, not opened, with open_externally off); what the program saves comes
+## the Shell at the next pump (kept, not opened, with open_externally off), the source a PNG of the TGA's
+## texels (art/brick.png); what the program saves comes
 ## back of the Shell's own: the window gaining the focus checks at once (a file written just now waits,
 ## never read half-written), then once a second while it has the focus, the texture made from it again.
 func test_a_texture_edited_in_its_program() -> void:
@@ -387,7 +389,7 @@ func test_a_texture_edited_in_its_program() -> void:
 	assert_true(_seam.done({"kind": "edit_externally", "path": "textures/brick.tga"}), "edit_externally is served")
 	assert_true(_seam.settle())
 	_app.pump()
-	var source := root.path_join("art/brick_src.tga")
+	var source := root.path_join("art/brick.png")
 	assert_eq(String(_app.get_last_external_open()).replace("\\", "/"), source.replace("\\", "/"),
 			"the Shell takes the source it names")
 	var output := ""
@@ -406,7 +408,10 @@ func test_a_texture_edited_in_its_program() -> void:
 	saved[18] = 0
 	saved[19] = 0
 	saved[20] = 255
-	_write(source, saved)
+	# Saved as the PNG it is, the TGA's texels where an image program puts them (its first stored row the bottom).
+	var saved_image := Image.new()
+	assert_eq(saved_image.load_tga_from_buffer(saved), OK)
+	assert_eq(saved_image.save_png(source), OK)
 	_app.notification(NOTIFICATION_APPLICATION_FOCUS_IN)
 	assert_true(_seam.settle())
 	_app.pump()

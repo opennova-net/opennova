@@ -121,6 +121,7 @@ const char *finding_fix_token(FindingFix fixes) {
 	case F::ItemId: return "item_id";
 	case F::FallbackRow: return "fallback_row";
 	case F::NormalRowType: return "normal_row_type";
+	case F::SetAsideUnread: return "set_aside_unread";
 	}
 	return "none";
 }
