@@ -434,10 +434,10 @@ bool ModelDocument::set_value(Node &node, const Located &at, size_t field, const
 }
 
 bool ModelDocument::accept_step(const EditStep &step, const StagedRows &,
-                                std::string &error) const {
+                                StepRefusal &refusal) const {
 	for (const RowSwap &swap : step.swaps) {
 		if (swap.before && swap.after) continue;
-		error = "A model keeps its model and collision rows.";
+		refusal.message = "A model keeps its model and collision rows.";
 		return false;
 	}
 	return true;
