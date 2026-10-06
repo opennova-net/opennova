@@ -1039,7 +1039,9 @@ notification (the OS's), signal (Godot's)
 Where the person has been in the editor, which Back and Forward take them to again, as a browser's
 pages (`session/navigation_history.h`, the session's `NavigationController`). A place is the pane that
 shows it and the file: a document's tab with the record selected there (by its locator once the
-document is read again), a text's line a Go to showed, a file's page, or Files on a file. A step is a
+document is read again), a text's line a Go to showed, a file's page (with the record a Go to marked
+there: a Go to always lands, on its page where the editor has no editor for the file), or Files on a
+file. A step is a
 move the request table marks as one (`navigates`: a document switched to, a Go to, a Problems row, a
 find's hit, another of a menu's screens, Show in Files), whoever raised it; a record picked within what
 shows, an edit or a camera move is none, and a run of quick steps is one. The open project's alone.
