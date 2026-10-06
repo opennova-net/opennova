@@ -7,11 +7,10 @@ end
 begin "Wooden supply crate"
 	graphic oncrate1
 	ai_function gnrl
-	move_function genx
 	id 100010
-	hp 100
+	hp 10
 	type decoration
-	armor 10 10
+	armor -1
 end
 begin "Player #1, Single player"
 	graphic onsold1
@@ -78,12 +77,11 @@ end
 
 begin "Wooden barrel"
 	graphic onbarl1
-	ai_function gnrl
-	move_function genx
+	ai_function gnrc
 	id 100011
-	hp 100
+	hp 10
 	type decoration
-	armor 10 10
+	armor -1
 end
 begin "Mud-brick hut"
 	graphic onhut1

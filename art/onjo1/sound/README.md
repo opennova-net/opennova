@@ -1,7 +1,8 @@
 # `art/onjo1/sound/`: the base game's sounds
 
-The sources of the base game's sounds (`assets/`): the footsteps the infantry
-sound profile plays and the impacts the carbine's round plays on each surface.
+The sources of the base game's sounds (`assets/`): the footsteps, deaths, falls
+and parachute the infantry sound profile plays and the impacts the carbine's
+round plays on each surface.
 Every game file is our own: cut, layered and processed from CC0 recordings, or
 synthesised. The original game's sounds are reference only: extracted to a
 scratch folder outside the repo, measured and never committed or imported.
@@ -116,6 +117,39 @@ variation:
 | `DRY_OICW` | 25: 0.14 s, 22050 Hz 8-bit, one click (centroid 4.8 kHz) | 255 (180) | -9.0 dB |
 | `GF_M4_ST` / `_SF` | 25: 0.79 s / 0.65 s, 22050 Hz 8-bit, 5 to 7 handling clicks | 130 | -12.5 dB |
 
+### Deaths, falls, landings and the parachute
+
+The player's and the friendly soldiers' profiles (`SP_JO_SP_PlayerM1`,
+`AI_JO_M1`) fill eight more slots: `sounddeath` `BM1_DEATH`, `SSNightDead`
+`BM1_DEATH_K` (the death on a night mission), `SSFallDead` `FALLDEAD2` (a dead
+body landing), `SSFallAlive` `JUMPLAND_DIRT` (a live one landing), and the
+parachute's `ChuteOpen` `PARACHUTE_OPEN`, `ChuteClose` `PARACHUTE_LAND`,
+`ChuteFlap` `PARACHUTE_GLIDE` and `FreeFall` `FREEFALL`; they add `rotor_impact`
+(a rotor striking the body). The rebels' profiles name their own voices
+(`DEATH_INDO_1`, `DEATH_K_INDO_1`) and `FALLDEAD1`. The voices are in the
+localised bank (`gamelocl.lwf`), the rest in `game.lwf`.
+
+The slots play as the engine finds them: an AI body's death plays
+`sounddeath` (`SSNightDead` when the mission enables night vision), but a
+player's body plays the set named `<body>_DEATH` (`_DEATH_K` at night) whatever
+its profile says, `<body>` the avatar's body model, `BM1` for the first
+(`audio::compose_entity_sound_set`; `Entity_GetBodyModelPrefix @ 0x5280F0`), so
+a bank without `BM1_DEATH` leaves the player's death silent. A body that lands
+plays `SSFallAlive`, or `SSFallDead` if the fall killed it or it was already
+dead; a falling player plays `FreeFall` each 64th tick under -0x3000 and the
+chute's three as it opens, flaps and closes.
+
+| Set | Layer (falloff) | Members | Member pitch, jitter | Volume (clamp) | Waves |
+|---|---|---|---|---|---|
+| `BM1_DEATH` | 150 | 8 | 0xE3D6 (0.89), 0x1EB8 | 200 (one 200) | 0.55 to 2.25 s, 22050 Hz 8-bit, death cries; loudest 50 ms -5.4 dB, centroid 1.3 kHz |
+| `BM1_DEATH_K` | 140 | 3 | 0xFFFF, 0 | 200 (200) | 2.37 to 2.54 s, 8-bit, groans and gasps; RMS -16.9, loudest -7.0 dB |
+| `FALLDEAD2` | 100 | 3 | 0xFFFF, 0 | 180 | 0.56 to 0.86 s, 8-bit, a body's thud at once (55 % under 250 Hz); loudest -5.0 dB |
+| `JUMPLAND_DIRT` | 50 | 2 | 0xFFFF, 0x11EB | 108 | 0.53, 0.85 s, 8-bit, boots on dirt; loudest -6.7 dB |
+| `PARACHUTE_OPEN` | 50 | 1 | 0xFFFF, 0 | 210 | 3.52 s, 22050 Hz 16-bit, a swell to the canopy's snap at 1.9 s; RMS -17.0 |
+| `PARACHUTE_LAND` | 50 | 1 | 0xFFFF, 0 | 210 | 2.81 s, 16-bit, a thud as the canopy folds; RMS -24.1, loudest -9.0 dB |
+| `PARACHUTE_GLIDE` | 50 | 7 | 0xB332 (0.70), 0x4CCC | 80 | six 2.40 to 2.61 s flaps and one of 0.71 s, 8-bit, cloth in the wind (70 % at 250 Hz to 1 kHz); RMS -16.9 |
+| `FREEFALL` | 50 | 8 | 0x14CCB (1.30), 0x3333 | 190 | 2.35 to 4.54 s, 16-bit, wind; RMS -17.4, centroid 0.7 kHz |
+
 ### What the engine does with an impact table
 
 In `AmmoDef_ParseProperty @ 0x40A2D0`, a `none` hit effect skips the effect intern (@ 0x40A51A) with no log; any other
@@ -157,9 +191,18 @@ Measured the same way (means per family; retail's in brackets):
 | Prone crawl | 8 | 0.58 to 0.73 s (0.50 to 0.87) | 2.4 kHz (2.2) | -12.7 dB (-12.8) |
 | Prone roll | 4 | 1.10 to 1.19 s (1.05 to 1.21) | 1.9 kHz (2.0) | -10.4 dB (-9.9) |
 | Stance changes | 2 + 1 + 3 | 0.48 to 0.72 s (0.47 to 0.72) | 1.9 kHz (1.8) | -15.6 dB RMS (-15.4) |
+| Death cries | 8 | 0.80 to 1.65 s (0.55 to 2.25) | 1.5 kHz (1.3) | -5.5 dB (-5.4) |
+| Deaths at night | 3 | 2.45 s (2.37 to 2.54) | 1.0 kHz (1.3) | -7.1 dB (-7.0) |
+| Dead body landing | 3 | 0.63 to 0.85 s (0.56 to 0.86) | 0.5 kHz (0.9) | -5.4 dB (-5.0) |
+| Landing on the feet | 2 | 0.55, 0.82 s (0.53, 0.85) | 1.0 kHz (1.2) | -6.8 dB (-6.7) |
+| Parachute opening, landing | 1, 1 | 3.65 s, 2.80 s (3.52, 2.81) | 0.8, 0.8 kHz (0.9, 0.8) | -8.6, -8.8 dB (-7.4, -9.0) |
+| Parachute flapping | 6 + 1 | 2.40 to 2.60 s, 0.71 s (2.40 to 2.61, 0.71) | 0.6 kHz (1.0) | -15.8 dB RMS (-16.9) |
+| Free fall | 8 | 2.35 to 4.54 s (2.35 to 4.54) | 0.6 kHz (0.7) | -12.2 dB RMS (-17.4) |
 
 The member volumes below match each family's loudness to retail's: retail's
-volume times the ratio of the two families' loudest-50 ms RMS, at most 255.
+volume times the ratio of the two families' loudest-50 ms RMS, at most 255;
+for the long winds and flaps (`ON_FREEFALL`, `ON_CHUTE_GLIDE`) the ratio of
+their whole-file RMS.
 
 ## The sets and the profile (`game.lwf`, `SndProf.def`)
 
@@ -217,6 +260,14 @@ member's base, "jitter" its random range, both Q16.
 | `DRY_ONAR15` | 25 | `onar15dry` (clamp 180) | 0xFFFF | 0 | 225 |
 | `GF_ONAR15_ST` | 25 | `onar15st` | 0xFFFF | 0 | 70 |
 | `GF_ONAR15_SF` | 25 | `onar15sf` | 0xFFFF | 0 | 70 |
+| `BM1_DEATH` | 150 | `ondeath1` to `8` | 0xE3D6 | 0x1EB8 | 201 |
+| `BM1_DEATH_K` | 140 | `ondeathk1` to `3` (clamp 200) | 0xFFFF | 0 | 202 |
+| `ON_FALLDEAD` | 100 | `onfldead1` to `3` | 0xFFFF | 0 | 188 |
+| `ON_JUMPLAND` | 50 | `onjmplnd1`, `onjmplnd2` | 0xFFFF | 0x11EB | 109 |
+| `ON_CHUTE_OPEN` | 50 | `onchtopn` | 0xFFFF | 0 | 241 |
+| `ON_CHUTE_LAND` | 50 | `onchtlnd` | 0xFFFF | 0 | 205 |
+| `ON_CHUTE_GLIDE` | 50 | `onchtflp1` to `7` | 0xB332 | 0x4CCC | 70 |
+| `ON_FREEFALL` | 50 | `onfrfall1` to `8` | 0x14CCB | 0x3333 | 104 |
 
 A layer plays one member, chosen at random, and every layer of a set plays at
 once, so a silent `onnull` member is the chance that the second layer adds
@@ -230,6 +281,10 @@ person items name with `sound_profile on_soldier`:
 
 | Slot | Set |
 |---|---|
+| `sounddeath` | `BM1_DEATH` |
+| `SSNightDead` | `BM1_DEATH_K` |
+| `SSFallDead` | `ON_FALLDEAD` |
+| `SSFallAlive` | `ON_JUMPLAND` |
 | `SSLFootGND` / `SSRFootGND` | `ON_FS_GND_L` / `ON_FS_GND_R` |
 | `SSLFootSnow` / `SSRFootSnow` | `ON_FS_SNOW_L` / `ON_FS_SNOW_R` |
 | `SSLFootOBJ` / `SSRFootOBJ` | `ON_FS_OBJ_L` / `ON_FS_OBJ_R` |
@@ -239,11 +294,17 @@ person items name with `sound_profile on_soldier`:
 | `SSAudio4` | `ON_FS_SWIM` |
 | `SSAudio5` | `ON_FS_PRONE` |
 | `SSAudio6` | `ON_FS_PRONE_ROLL` |
+| `ChuteOpen` / `ChuteClose` | `ON_CHUTE_OPEN` / `ON_CHUTE_LAND` |
+| `ChuteFlap` | `ON_CHUTE_GLIDE` |
+| `FreeFall` | `ON_FREEFALL` |
 
 A step plays only where the body's clip authors a foot event (bit 0x1 left,
 0x2 right) on the frame the foot lands, a foley slot where it sets that slot's
-bit (0x20 to 0x400). The death, fall, landing and parachute slots stay empty
-for now, and `default` stays empty.
+bit (0x20 to 0x400). The death sets keep the engine's names: the player's
+death plays `BM1_DEATH` (`BM1_DEATH_K` at night) by name whatever its profile
+says, so the profile names the same two sets, as the original's player profile
+does, and the rebel cries as the player does. `rotor_impact` stays empty (the
+game has no helicopter yet), and `default` stays empty.
 
 `AMMO_ON_556`'s `effects_table` (`assets/ammo.def`) names the impact sets row by
 row: obj, dirt, snow and packeddirt `ON_IMP_DIRT`; grass `ON_IMP_GRASS`; cement

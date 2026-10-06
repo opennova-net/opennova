@@ -12,7 +12,7 @@ length, loudness, spectrum and variation count only (`README.md`).
 
 ## Source files
 
-Every third-party file is CC0 1.0, downloaded 2026-10-05, and kept as downloaded under `sources/`.
+Every third-party file is CC0 1.0, downloaded 2026-10-05 (the death, fall, landing and parachute sources 2026-10-06), and kept as downloaded under `sources/`.
 
 | File under `sources/` | Title | Author | Page | Licence |
 |---|---|---|---|---|
@@ -26,52 +26,71 @@ Every third-party file is CC0 1.0, downloaded 2026-10-05, and kept as downloaded
 | `freesound/fs384878_Ali_6868.ogg` | Right Gravel Footstep 4 | Ali_6868 | [freesound.org/s/384878](https://freesound.org/s/384878/) | CC0 1.0 |
 | `freesound/fs384879_Ali_6868.ogg` | Right Gravel Footstep 3 | Ali_6868 | [freesound.org/s/384879](https://freesound.org/s/384879/) | CC0 1.0 |
 | `freesound/fs384880_Ali_6868.ogg` | Right Gravel Footstep 5 | Ali_6868 | [freesound.org/s/384880](https://freesound.org/s/384880/) | CC0 1.0 |
+| `freesound/fs345456_Artmasterrich.ogg` | Male_Death_04 | Artmasterrich | [freesound.org/s/345456](https://freesound.org/s/345456/) | CC0 1.0 |
+| `freesound/fs718904_BaggoNotes.ogg` | DyingBreaths_Male | BaggoNotes | [freesound.org/s/718904](https://freesound.org/s/718904/) | CC0 1.0 |
 | `freesound/fs378056_bajko.ogg` | sfx_snow_footstep-01.wav | bajko | [freesound.org/s/378056](https://freesound.org/s/378056/) | CC0 1.0 |
+| `freesound/fs554443_Blankened.ogg` | Male Death Sound | Blankened | [freesound.org/s/554443](https://freesound.org/s/554443/) | CC0 1.0 |
+| `freesound/fs577033_Blankened.ogg` | MaleDeathSound12.wav | Blankened | [freesound.org/s/577033](https://freesound.org/s/577033/) | CC0 1.0 |
 | `freesound/fs399550_BorekPL.ogg` | bullet hits the car | BorekPL | [freesound.org/s/399550](https://freesound.org/s/399550/) | CC0 1.0 |
 | `freesound/fs445109_Breviceps.ogg` | Mud Splat | Breviceps | [freesound.org/s/445109](https://freesound.org/s/445109/) | CC0 1.0 |
 | `freesound/fs447928_Breviceps.ogg` | Muddy Boots | Breviceps | [freesound.org/s/447928](https://freesound.org/s/447928/) | CC0 1.0 |
 | `freesound/fs447929_Breviceps.ogg` | Step on a slug (Splat!) 1 | Breviceps | [freesound.org/s/447929](https://freesound.org/s/447929/) | CC0 1.0 |
 | `freesound/fs447930_Breviceps.ogg` | Step on a slug (Splat!) 2 | Breviceps | [freesound.org/s/447930](https://freesound.org/s/447930/) | CC0 1.0 |
+| `freesound/fs870604_CHallSmith.ogg` | Wild Cloth Movement for Foley | CHallSmith | [freesound.org/s/870604](https://freesound.org/s/870604/) | CC0 1.0 |
 | `freesound/fs861369_ChristopherJngs.ogg` | Splashing Footsteps Shallow Water | ChristopherJngs | [freesound.org/s/861369](https://freesound.org/s/861369/) | CC0 1.0 |
+| `freesound/fs438636_craigsmith.ogg` | G39-19-Parachute Swish Snap.wav | craigsmith | [freesound.org/s/438636](https://freesound.org/s/438636/) | CC0 1.0 |
 | `freesound/fs486068_craigsmith.ogg` | R12-29-Gun Shot through Window.wav | craigsmith | [freesound.org/s/486068](https://freesound.org/s/486068/) | CC0 1.0 |
 | `freesound/fs675951_craigsmith.ogg` | S31-15 Shooting gallery; hitting metal targets.wav | craigsmith | [freesound.org/s/675951](https://freesound.org/s/675951/) | CC0 1.0 |
 | `freesound/fs675955_craigsmith.ogg` | S20-02 Rifle ricochets.wav | craigsmith | [freesound.org/s/675955](https://freesound.org/s/675955/) | CC0 1.0 |
+| `freesound/fs811077_DangerLaef.ogg` | Solo Skydive Interior Plane and Freefall | DangerLaef | [freesound.org/s/811077](https://freesound.org/s/811077/) | CC0 1.0 |
+| `freesound/fs272376_danhelbling.ogg` | Feet Land On Gravel.wav | danhelbling | [freesound.org/s/272376](https://freesound.org/s/272376/) | CC0 1.0 |
+| `freesound/fs132901_EchoCinematics.ogg` | Jump Into Gravel.MP3 | EchoCinematics | [freesound.org/s/132901](https://freesound.org/s/132901/) | CC0 1.0 |
 | `freesound/fs390730_FunWithSound.ogg` | Glass Tinkle 2.mp3 | FunWithSound | [freesound.org/s/390730](https://freesound.org/s/390730/) | CC0 1.0 |
 | `freesound/fs390731_FunWithSound.ogg` | Glass Tinkle 1.mp3 | FunWithSound | [freesound.org/s/390731](https://freesound.org/s/390731/) | CC0 1.0 |
 | `freesound/fs390732_FunWithSound.ogg` | Glass Tinkle 3.mp3 | FunWithSound | [freesound.org/s/390732](https://freesound.org/s/390732/) | CC0 1.0 |
 | `freesound/fs390735_FunWithSound.ogg` | Glass Tinkle 4.mp3 | FunWithSound | [freesound.org/s/390735](https://freesound.org/s/390735/) | CC0 1.0 |
+| `freesound/fs701647_IENBA.ogg` | Fabric Flapping | IENBA | [freesound.org/s/701647](https://freesound.org/s/701647/) | CC0 1.0 |
+| `freesound/fs395331_ihitokage.ogg` | Body falling on the ground 1 | ihitokage | [freesound.org/s/395331](https://freesound.org/s/395331/) | CC0 1.0 |
 | `freesound/fs138478_JustInvoke.ogg` | Bullet Blood 1 | JustInvoke | [freesound.org/s/138478](https://freesound.org/s/138478/) | CC0 1.0 |
 | `freesound/fs138479_JustInvoke.ogg` | Bullet Blood 2 | JustInvoke | [freesound.org/s/138479](https://freesound.org/s/138479/) | CC0 1.0 |
 | `freesound/fs138481_JustInvoke.ogg` | Bullet Blood 4 | JustInvoke | [freesound.org/s/138481](https://freesound.org/s/138481/) | CC0 1.0 |
 | `freesound/fs481075_khenshom.ogg` | Foley - Cotton clothes rustling - Fabric movement sound.wav | khenshom | [freesound.org/s/481075](https://freesound.org/s/481075/) | CC0 1.0 |
 | `freesound/fs481081_khenshom.ogg` | Foley - Jeans - Rustling - Fabric movement sound.wav | khenshom | [freesound.org/s/481081](https://freesound.org/s/481081/) | CC0 1.0 |
+| `freesound/fs504626_leonelmail.ogg` | BODY FALL - V HVY - DIRT | leonelmail | [freesound.org/s/504626](https://freesound.org/s/504626/) | CC0 1.0 |
 | `freesound/fs182263_martian.ogg` | Foley bullet hit metal 02.wav | martian | [freesound.org/s/182263](https://freesound.org/s/182263/) | CC0 1.0 |
 | `freesound/fs427596_michorvath.ogg` | AR15 rifle shot | michorvath | [freesound.org/s/427596](https://freesound.org/s/427596/) | CC0 1.0 |
 | `freesound/fs427597_michorvath.ogg` | AR15 rifle shot from 50 yards away | michorvath | [freesound.org/s/427597](https://freesound.org/s/427597/) | CC0 1.0 |
 | `freesound/fs789388_modusmogulus.ogg` | Bullet impact ground (subsonic) SFX | modusmogulus | [freesound.org/s/789388](https://freesound.org/s/789388/) | CC0 1.0 |
 | `freesound/fs144444_pushkin.ogg` | bullet impacts | pushkin | [freesound.org/s/144444](https://freesound.org/s/144444/) | CC0 1.0 |
+| `freesound/fs166944_qubodup.ogg` | Grunts of pain by military soldiers.flac | qubodup | [freesound.org/s/166944](https://freesound.org/s/166944/) | CC0 1.0 |
 | `freesound/fs565716_ralph.whitehead.ogg` | Footsteps Walking On Wooden Floor Medium Pace.wav | ralph.whitehead | [freesound.org/s/565716](https://freesound.org/s/565716/) | CC0 1.0 |
 | `freesound/fs565720_ralph.whitehead.ogg` | Footsteps Walking On Gravel Stones Medium Pace.wav | ralph.whitehead | [freesound.org/s/565720](https://freesound.org/s/565720/) | CC0 1.0 |
+| `freesound/fs798649_randbsoundbites.ogg` | The Last gasp before death | randbsoundbites | [freesound.org/s/798649](https://freesound.org/s/798649/) | CC0 1.0 |
+| `freesound/fs396801_scorpion67890.ogg` | Male Death 4 | scorpion67890 | [freesound.org/s/396801](https://freesound.org/s/396801/) | CC0 1.0 |
 | `freesound/fs725397_ser_ut_nin--depriv_d.ogg` | An M16 Rifle being reloaded while empty; full sequence | serøutōnin--deprivəd | [freesound.org/s/725397](https://freesound.org/s/725397/) | CC0 1.0 |
 | `freesound/fs725402_ser_ut_nin--depriv_d.ogg` | A rifle being dry fired once | serøutōnin--deprivəd | [freesound.org/s/725402](https://freesound.org/s/725402/) | CC0 1.0 |
 | `freesound/fs725403_ser_ut_nin--depriv_d.ogg` | A rifle being moved around and handled w/ magazine removals | serøutōnin--deprivəd | [freesound.org/s/725403](https://freesound.org/s/725403/) | CC0 1.0 |
+| `freesound/fs643671_SnowFightStudios.ogg` | Various Man Dying Grunts.mp3 | SnowFightStudios | [freesound.org/s/643671](https://freesound.org/s/643671/) | CC0 1.0 |
 | `freesound/fs398036_swordofkings128.ogg` | water swimming 2 | swordofkings128 | [freesound.org/s/398036](https://freesound.org/s/398036/) | CC0 1.0 |
 | `freesound/fs398037_swordofkings128.ogg` | water swimming 1 | swordofkings128 | [freesound.org/s/398037](https://freesound.org/s/398037/) | CC0 1.0 |
 | `freesound/fs398040_swordofkings128.ogg` | water swimming 5 | swordofkings128 | [freesound.org/s/398040](https://freesound.org/s/398040/) | CC0 1.0 |
 | `freesound/fs398041_swordofkings128.ogg` | water swimming 4 | swordofkings128 | [freesound.org/s/398041](https://freesound.org/s/398041/) | CC0 1.0 |
+| `freesound/fs610998_unfa.ogg` | Medium Male Pain Grunts | unfa | [freesound.org/s/610998](https://freesound.org/s/610998/) | CC0 1.0 |
 | `freesound/fs770112_Vrymaa.ogg` | Plants or ferns - Manipulation & Hit | Vrymaa | [freesound.org/s/770112](https://freesound.org/s/770112/) | CC0 1.0 |
 | `freesound/fs641380_WhiteFire43.ogg` | Clothing Ruffle 03-2.wav | WhiteFire43 | [freesound.org/s/641380](https://freesound.org/s/641380/) | CC0 1.0 |
 | `freesound/fs641383_WhiteFire43.ogg` | Clothing Ruffle 01.wav | WhiteFire43 | [freesound.org/s/641383](https://freesound.org/s/641383/) | CC0 1.0 |
 | `freesound/fs641387_WhiteFire43.ogg` | Clothing Ruffle 04.wav | WhiteFire43 | [freesound.org/s/641387](https://freesound.org/s/641387/) | CC0 1.0 |
+| `freesound/fs853591_Wigglesworth.ogg` | A body falling to the ground, with leaf crush | Wigglesworth | [freesound.org/s/853591](https://freesound.org/s/853591/) | CC0 1.0 |
 | `freesound/fs319223_worthahep88.ogg` | Single Rock Hitting wood 3.wav | worthahep88 | [freesound.org/s/319223](https://freesound.org/s/319223/) | CC0 1.0 |
 | `freesound/fs319226_worthahep88.ogg` | Single rock hitting wood.wav | worthahep88 | [freesound.org/s/319226](https://freesound.org/s/319226/) | CC0 1.0 |
 | `freesound/fs319227_worthahep88.ogg` | Single Rock hitting wood 4.wav | worthahep88 | [freesound.org/s/319227](https://freesound.org/s/319227/) | CC0 1.0 |
 | `freesound/fs319228_worthahep88.ogg` | Single Rock hitting wood 2.wav | worthahep88 | [freesound.org/s/319228](https://freesound.org/s/319228/) | CC0 1.0 |
+| `freesound/fs540272_zepurple.ogg` | land a jump.wav | zepurple | [freesound.org/s/540272](https://freesound.org/s/540272/) | CC0 1.0 |
 | `kenney/*.ogg` (30 files: `footstep_concrete_000`, `footstep_concrete_001`, `footstep_concrete_002`, `footstep_concrete_003`, `footstep_concrete_004`, `impactMetal_heavy_000`, `impactMetal_heavy_001`, `impactMetal_heavy_002`, `impactMetal_heavy_003`, `impactMetal_heavy_004`, `impactPlate_heavy_000`, `impactPlate_heavy_001`, `impactPlate_heavy_002`, `impactPlate_heavy_003`, `impactPlate_heavy_004`, `impactPunch_medium_000`, `impactPunch_medium_001`, `impactPunch_medium_003`, `impactSoft_heavy_000`, `impactSoft_heavy_001`, `impactSoft_heavy_002`, `impactSoft_heavy_003`, `impactSoft_heavy_004`, `impactSoft_medium_000`, `impactSoft_medium_001`, `impactSoft_medium_002`, `impactSoft_medium_003`, `impactSoft_medium_004`, `impactWood_light_000`, `impactWood_light_002`) | Impact Sounds 1.0 | Kenney (kenney.nl) | [kenney.nl/assets/impact-sounds](https://kenney.nl/assets/impact-sounds) | CC0 1.0 (`kenney/License.txt`) |
 
 ## Game files
 
-Each file in `assets/`, what it was made from and how (PCM mono; the rate and bits retail uses for its counterpart). Every export ends normalised to -0.3 dBFS peak and peak-limited (0.8 ms look-ahead, at most 14 dB on a step, 18 dB on a hit) toward its retail family's loudness: a step toward the whole file's RMS, a hit toward the loudest 50 ms window (where the limiter alone fell short, a tanh soft-clip, its drive in the row, like the original's clipped hits); then faded out over its last quarter (at most 30 ms), resampled, TPDF-dithered and quantised. The RMS column is the whole file's.
+Each file in `assets/`, what it was made from and how (PCM mono; the rate and bits retail uses for its counterpart). Every export ends normalised to -0.3 dBFS peak and peak-limited (0.8 ms look-ahead, at most 14 dB on a step, 18 dB on a hit) toward its retail family's loudness: a step toward the whole file's RMS, a hit toward the loudest 50 ms window (where the limiter alone fell short, a tanh soft-clip, its drive in the row, like the original's clipped hits); then faded out over its last quarter (at most 30 ms), resampled, TPDF-dithered and quantised. The RMS column is the whole file's. The profile's death, fall, landing and parachute files follow the same chain with at most 12 dB of limiting and 6 dB of soft-clip drive: a voice, a body fall, a landing and the canopy's landing toward the loudest 50 ms window, the canopy opening, its flapping and the free-fall winds toward the whole file's RMS; their fades run longer (a voice 0.12 s, a gasp or the canopy 0.2 to 0.3 s, a wind 0.6 s).
 
 | File | Format | Length | RMS | Made from |
 |---|---|---|---|---|
@@ -214,3 +233,36 @@ Each file in `assets/`, what it was made from and how (PCM mono; the rate and bi
 | `ontostd1.wav` | 22050 Hz 8-bit | 0.610 s | -15.5 dB | WhiteFire43 [#641383](https://freesound.org/s/641383/) @5.69s; cut 0.61 s, band 0.4-7 kHz, +8 dB above 1.5 kHz |
 | `ontostd2.wav` | 22050 Hz 8-bit | 0.700 s | -15.6 dB | WhiteFire43 [#641380](https://freesound.org/s/641380/) @2.91s; cut 0.70 s, band 0.4-7 kHz, +8 dB above 1.5 kHz |
 | `ontostd3.wav` | 22050 Hz 8-bit | 0.540 s | -16.6 dB | khenshom [#481081](https://freesound.org/s/481081/) @2.56s; cut 0.54 s, band 0.4-7 kHz, +8 dB above 1.5 kHz |
+| `ondeath1.wav` | 22050 Hz 8-bit | 1.300 s | -7.5 dB | scorpion67890 [#396801](https://freesound.org/s/396801/) @0.05s; cut 1.30 s, band 0.1-7.5 kHz |
+| `ondeath2.wav` | 22050 Hz 8-bit | 0.900 s | -10.9 dB | Artmasterrich [#345456](https://freesound.org/s/345456/) @0.05s; cut 0.90 s, band 0.1-7.5 kHz |
+| `ondeath3.wav` | 22050 Hz 8-bit | 0.850 s | -11.3 dB | Blankened [#554443](https://freesound.org/s/554443/) @0.07s; cut 0.85 s, band 0.1-7.5 kHz; soft-clipped (tanh, 4.1 dB drive) |
+| `ondeath4.wav` | 22050 Hz 8-bit | 1.650 s | -8.7 dB | Blankened [#577033](https://freesound.org/s/577033/) @0.04s; cut 1.65 s, band 0.1-7.5 kHz; soft-clipped (tanh, 4.1 dB drive) |
+| `ondeath5.wav` | 22050 Hz 8-bit | 0.800 s | -8.5 dB | qubodup [#166944](https://freesound.org/s/166944/) @0.00s; cut 0.80 s, band 0.1-7.5 kHz; soft-clipped (tanh, 2.9 dB drive) |
+| `ondeath6.wav` | 22050 Hz 8-bit | 1.500 s | -9.6 dB | qubodup [#166944](https://freesound.org/s/166944/) @0.95s; cut 1.50 s, band 0.1-7.5 kHz; soft-clipped (tanh, 6.0 dB drive) |
+| `ondeath7.wav` | 22050 Hz 8-bit | 1.400 s | -9.1 dB | unfa [#610998](https://freesound.org/s/610998/) @12.62s; cut 1.40 s, band 0.1-7.5 kHz |
+| `ondeath8.wav` | 22050 Hz 8-bit | 1.300 s | -11.7 dB | unfa [#610998](https://freesound.org/s/610998/) @19.20s; cut 1.30 s, band 0.1-7.5 kHz |
+| `ondeathk1.wav` | 22050 Hz 8-bit | 2.450 s | -14.7 dB | randbsoundbites [#798649](https://freesound.org/s/798649/) @0.45s; cut 2.45 s, band 0.09-7 kHz |
+| `ondeathk2.wav` | 22050 Hz 8-bit | 2.450 s | -15.5 dB | SnowFightStudios [#643671](https://freesound.org/s/643671/) @0.15s; cut 2.45 s, band 0.09-7 kHz |
+| `ondeathk3.wav` | 22050 Hz 8-bit | 2.450 s | -16.7 dB | BaggoNotes [#718904](https://freesound.org/s/718904/) @6.30s; cut 2.45 s, band 0.09-7 kHz; soft-clipped (tanh, 0.6 dB drive) |
+| `onfldead1.wav` | 22050 Hz 8-bit | 0.850 s | -12.9 dB | leonelmail [#504626](https://freesound.org/s/504626/) @0.10s; cut 0.85 s, high-pass 45 Hz; soft-clipped (tanh, 6.0 dB drive) |
+| `onfldead2.wav` | 22050 Hz 8-bit | 0.720 s | -11.1 dB | ihitokage [#395331](https://freesound.org/s/395331/) @0.06s, cut 0.72 s, high-pass 45 Hz, with Kenney impactSoft_heavy_000.ogg (low-pass 900 Hz) at -7 dB under it; soft-clipped (tanh, 2.6 dB drive) |
+| `onfldead3.wav` | 22050 Hz 8-bit | 0.630 s | -12.0 dB | Wigglesworth [#853591](https://freesound.org/s/853591/) @11.98s, cut 0.62 s, high-pass 45 Hz, with Kenney impactSoft_heavy_003.ogg (low-pass 900 Hz) at -5 dB and khenshom [#481081](https://freesound.org/s/481081/) (jeans rustling) @2.56s at -12 dB, band 0.18-5 kHz |
+| `onjmplnd1.wav` | 22050 Hz 8-bit | 0.550 s | -10.5 dB | danhelbling [#272376](https://freesound.org/s/272376/) @2.44s, cut 0.55 s, high-pass 50 Hz, with Kenney footstep_concrete_002.ogg (low-pass 1.5 kHz) at -6 dB and again at -9 dB 65 ms later (the two heels); soft-clipped (tanh, 0.5 dB drive) |
+| `onjmplnd2.wav` | 22050 Hz 8-bit | 0.820 s | -14.6 dB | zepurple [#540272](https://freesound.org/s/540272/), 0.3 s, high-pass 50 Hz, with Kenney impactSoft_medium_001.ogg (low-pass 1.2 kHz) at -4 dB, footstep_concrete_002.ogg at -8 dB 60 ms in, and EchoCinematics [#132901](https://freesound.org/s/132901/) @0.20s (gravel) at -10 dB, band 0.2-6 kHz; soft-clipped (tanh, 3.8 dB drive) |
+| `onchtopn.wav` | 22050 Hz 16-bit | 3.650 s | -17.0 dB | DangerLaef [#811077](https://freesound.org/s/811077/) @40.0s (free-fall wind), 2.0 s, band 0.12-2.5 kHz, swelling; craigsmith [#438636](https://freesound.org/s/438636/) @4.85s (a parachute swish and snap) at 1.85 s, high-pass 150 Hz; Kenney impactSoft_heavy_002.ogg (low-pass 300 Hz) at -2 dB under the snap; DangerLaef [#811077](https://freesound.org/s/811077/) @116.5s (the canopy in flight) at -6 dB from 1.95 s, band 0.12-3 kHz; 3.55 s |
+| `onchtlnd.wav` | 22050 Hz 16-bit | 2.800 s | -20.8 dB | leonelmail [#504626](https://freesound.org/s/504626/) @0.10s (a body landing on dirt), 0.6 s, high-pass 45 Hz; IENBA [#701647](https://freesound.org/s/701647/) @9.0s (fabric flapping) at -17 dB from 0.12 s, fading over 1.6 s, band 0.15-5 kHz; CHallSmith [#870604](https://freesound.org/s/870604/) @20.0s (cloth movement) at -21 dB from 0.4 s, band 0.18-5 kHz; 2.8 s |
+| `onchtflp1.wav` | 22050 Hz 8-bit | 2.550 s | -14.6 dB | DangerLaef [#811077](https://freesound.org/s/811077/) @116.2s; cut 2.55 s, band 0.15-3.5 kHz, faded in and out |
+| `onchtflp2.wav` | 22050 Hz 8-bit | 2.400 s | -13.1 dB | DangerLaef [#811077](https://freesound.org/s/811077/) @118.8s; cut 2.40 s, band 0.15-3.5 kHz, faded in and out |
+| `onchtflp3.wav` | 22050 Hz 8-bit | 2.600 s | -16.1 dB | DangerLaef [#811077](https://freesound.org/s/811077/) @121.4s; cut 2.60 s, band 0.15-3.5 kHz, faded in and out |
+| `onchtflp4.wav` | 22050 Hz 8-bit | 2.550 s | -17.0 dB | IENBA [#701647](https://freesound.org/s/701647/) @0.8s; cut 2.55 s, band 0.15-3.5 kHz, faded in and out |
+| `onchtflp5.wav` | 22050 Hz 8-bit | 2.500 s | -17.0 dB | IENBA [#701647](https://freesound.org/s/701647/) @3.6s; cut 2.50 s, band 0.15-3.5 kHz, faded in and out |
+| `onchtflp6.wav` | 22050 Hz 8-bit | 2.500 s | -17.0 dB | IENBA [#701647](https://freesound.org/s/701647/) @8.6s; cut 2.50 s, band 0.15-3.5 kHz, faded in and out |
+| `onchtflp7.wav` | 22050 Hz 8-bit | 0.710 s | -18.6 dB | IENBA [#701647](https://freesound.org/s/701647/) @12.4s; cut 0.71 s, band 0.15-3.5 kHz, faded in and out |
+| `onfrfall1.wav` | 22050 Hz 16-bit | 2.350 s | -11.0 dB | DangerLaef [#811077](https://freesound.org/s/811077/) @20.0s (free fall); cut 2.35 s, band 0.12-2.2 kHz, faded in and out |
+| `onfrfall2.wav` | 22050 Hz 16-bit | 3.670 s | -12.4 dB | DangerLaef [#811077](https://freesound.org/s/811077/) @24.5s (free fall); cut 3.67 s, band 0.12-2.2 kHz, faded in and out |
+| `onfrfall3.wav` | 22050 Hz 16-bit | 4.540 s | -11.1 dB | DangerLaef [#811077](https://freesound.org/s/811077/) @29.0s (free fall); cut 4.54 s, band 0.12-2.2 kHz, faded in and out |
+| `onfrfall4.wav` | 22050 Hz 16-bit | 3.070 s | -13.3 dB | DangerLaef [#811077](https://freesound.org/s/811077/) @34.0s (free fall); cut 3.07 s, band 0.12-2.2 kHz, faded in and out |
+| `onfrfall5.wav` | 22050 Hz 16-bit | 3.310 s | -13.8 dB | DangerLaef [#811077](https://freesound.org/s/811077/) @45.0s (free fall); cut 3.31 s, band 0.12-2.2 kHz, faded in and out |
+| `onfrfall6.wav` | 22050 Hz 16-bit | 3.710 s | -12.4 dB | DangerLaef [#811077](https://freesound.org/s/811077/) @50.5s (free fall); cut 3.71 s, band 0.12-2.2 kHz, faded in and out |
+| `onfrfall7.wav` | 22050 Hz 16-bit | 4.180 s | -11.5 dB | DangerLaef [#811077](https://freesound.org/s/811077/) @60.5s (free fall); cut 4.18 s, band 0.12-2.2 kHz, faded in and out |
+| `onfrfall8.wav` | 22050 Hz 16-bit | 3.560 s | -11.8 dB | DangerLaef [#811077](https://freesound.org/s/811077/) @76.0s (free fall); cut 3.56 s, band 0.12-2.2 kHz, faded in and out |
