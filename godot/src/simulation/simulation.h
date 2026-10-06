@@ -1761,8 +1761,7 @@ public:
 	// fp_viewmodel_spec (engine: runtime/inmatch/joiner_role.cpp)). `character_arms` is the local
 	// player's resolved combo arms graphic (retail's CharacterEntity arms model,
 	// the ONLY arms source — weapon.def gfx1a/gfx1b are discarded tokens);
-	// has_def=false is the bring-up path; an empty gun on a resolved def means
-	// submit no FP gun.
+	// has_def=false (no equipped def) or an empty gun submits nothing.
 	// The witnessed viewmodel placement units, re-exported from engine
 	// renderer/fp_viewmodel_spec.h.
 	static double weapon_def_pos_scale();
@@ -1770,7 +1769,6 @@ public:
 	static Vector3 viewmodel_fallback_tpos_units();
 	static Vector3 viewmodel_fallback_rot_bias_deg();
 	static double viewmodel_pass_near_z();
-	static String viewmodel_bringup_fallback_weapon();
 	// Player-view calibration re-exports (world/player_view.h).
 	static double player_eye_min_above_position();
 	static double player_non_person_eye_bump();

@@ -706,6 +706,10 @@ int def_parse_weapons(const char *path, DefWeaponsFile *out, const DefFileProbe 
 int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out,
                              const DefFileProbe *files) {
     memset(out, 0, sizeof(*out));
+    // A zero-length file is an empty table: the walk finds no line, and the
+    // game's loadout catalog keeps only its seeded "None" row [orig:
+    // WeaponDef_LoadAll @0x54dd10 never reads File_ParseASCIIFile's result].
+    if (size == 0) return 0;
     if (!data) return -1;
     return parse_weapons_buf((const char *)data, size, out, files);
 }

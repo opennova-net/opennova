@@ -67,7 +67,7 @@ namespace opennova::serve {
 
 struct ServeOptions {
 	std::string resource_dir; // --resource-dir
-	std::string expansion;    // /exp <name>
+	std::string expansion;    // /exp or /mod <name>: the last one, its first 32 bytes
 	bool loose_override = false; // /d
 	std::string game;         // /game <code>
 	bool loose_root = false;  // --loose-root: a directory with no archives mounts loose
