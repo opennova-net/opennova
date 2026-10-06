@@ -82,6 +82,11 @@ class Workspace;
 // raises the add into `owner`.
 using OutlineAddsByMenuHook = bool (*)(NodeKind kind);
 using OutlineAddMenuHook = void (*)(Workspace &workspace, const Document &document, const NodeAddress &owner, NodeKind kind);
+// A list's own Add menu beside its kinds' Add (an items.def's rows the engine looks for by their ids,
+// ADR 0046 S19): whether the document offers it, and the body of the popup it opens, which raises the
+// add.
+using OutlineListMenuOffersHook = bool (*)(const Document &document);
+using OutlineListMenuHook = void (*)(Workspace &workspace, const Document &document);
 
 // A heading a tree groups rows under (OutlineSpec::groups): its key among its siblings, which orders
 // them (a mission's pools by their band, its teams and groups by number: "03", "t001"), and its words
@@ -121,6 +126,11 @@ struct OutlineSpec {
 	OutlineGroupsHook groups = nullptr;
 	// The rows whose titles read other rows, made again with any change (null: none; S15).
 	OutlineRowReadsOthersHook reads_others = nullptr;
+	// A list's own Add menu (null: none; S19), with its tool's words and tooltip.
+	OutlineListMenuOffersHook list_menu_offers = nullptr;
+	OutlineListMenuHook list_menu = nullptr;
+	const char *list_menu_label = "";
+	const char *list_menu_tip = "";
 };
 
 // What a click on a record's line selects (OutlineModel::click): the record, how it joins the

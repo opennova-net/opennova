@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -69,6 +70,11 @@ struct CatalogKindRow {
 // words, `name_2`, `name_3`, ... for a token, the name cut short to leave the suffix room.
 std::string copy_name(const std::string &name, CopyName how, size_t limit, const std::vector<std::string> &taken);
 const CatalogKindRow &catalog_kind_row(NodeKind kind);
+// The first items.def id from 100000 on that `used` does not hold and the engine keeps for no use
+// (def::reserved_item_by_id: a start, a waypoint, a flag, a model it draws; itemdef-re.md, "The ids
+// and rows the engine fixes"): a new item's, a copy's, a Use fix's. An item's id is its type_id, which
+// a mission names it by.
+int free_item_id(const std::function<bool(int)> &used);
 // The field that names a record of a kind: an item's display_name, a weapon's weapon_name, an ammo's
 // and a carry limit's name, a powerup's name ("" for a kind no name names).
 const char *catalog_name_field(NodeKind kind);
