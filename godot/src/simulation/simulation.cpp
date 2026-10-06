@@ -92,7 +92,7 @@ opennova::bms::File make_demo_mission() {
 	// radius + a name id so the view surfaces meaningful fields).
 	m.markers[0].wp_distance = 25;
 	m.markers[0].ttool_index = 1;
-	m.waypoint_records[2].flags = opennova::bms::WaypointFlags::BlueTeam;
+	m.waypoint_records[2].flags = opennova::bms::WaypointFlags::PlayerRoute;
 	m.waypoint_records[2].marker_count = 3;
 	m.waypoint_records[2].waypoint_numbers = {0, 1, 2};
 

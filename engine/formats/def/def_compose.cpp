@@ -207,10 +207,33 @@ public:
 		if (!found) first_eol(n_.trailing);
 	}
 
+	// The file's ending stays its own: records the file did not have that come after its last record of
+	// its own (an Add at the end) stand between that record and the file's trailing lines, each set off by
+	// the blank lines that ended the file (its separation from its last record) in place of the blank the
+	// writer's own form puts after a record, so however many are added the file ends as it did.
 	std::string run() {
 		for (const DefNotedLine &line : n_.leading) put_tokens(line);
-		for (size_t slot = 0; slot < w_.slots.size(); ++slot)
-			if (w_.slots[slot].parent < 0) record(int(slot));
+		size_t tail = w_.slots.size(); // the first top-level record after the file's last noted one
+		for (size_t slot = w_.slots.size(); slot-- > 0;) {
+			if (w_.slots[slot].parent >= 0) continue;
+			if (n_.record(w_.slots[slot].note, w_.slots[slot].kind)) break;
+			tail = slot;
+		}
+		std::vector<const DefNotedLine *> separation;
+		for (const DefNotedLine &line : n_.trailing) {
+			if (!line.words.empty() || !line.tail.empty() || !line.indent.empty()) break;
+			separation.push_back(&line);
+		}
+		const bool appended = tail < w_.slots.size() && n_.records.size() > 0;
+		for (size_t slot = 0; slot < w_.slots.size(); ++slot) {
+			if (w_.slots[slot].parent >= 0) continue;
+			if (appended && slot >= tail) {
+				for (const DefNotedLine *line : separation) put_tokens(*line);
+				canonical(int(slot), nullptr, true);
+			} else {
+				record(int(slot));
+			}
+		}
 		for (const DefNotedLine &line : n_.trailing) put_tokens(line);
 		return std::move(out_);
 	}
@@ -270,7 +293,9 @@ private:
 	// form reads back otherwise). The lines it had that the game reads nothing of stand: those before its
 	// header where they were, those within it after its header; a block a later one replaced (which would
 	// read again) goes. What it does not keep of the file's form is said (`lost_`).
-	void canonical(int slot, const DefNotedRecord *noted = nullptr) {
+	// `set_off`: a record added at the file's end (run), the blank the writer's form puts after its end left
+	// out (the file's own ending set it off).
+	void canonical(int slot, const DefNotedRecord *noted = nullptr, bool set_off = false) {
 		std::vector<const DefNotedLine *> within;
 		size_t skipped = 0;
 		std::vector<std::string> replaced;
@@ -289,9 +314,11 @@ private:
 					replaced.push_back(line.words[1]);
 			}
 		}
-		bool header = false;
+		bool header = false, ended = false;
 		for (size_t i : owned_[size_t(slot)]) {
 			const Written &x = w_.written[i];
+			if (set_off && ended && x.role == DefNotedRole::Free) continue;
+			ended = ended || x.role == DefNotedRole::End;
 			if (x.role == DefNotedRole::Nested) record(x.nested);
 			else put_own(text_of(i));
 			if (x.role == DefNotedRole::Header && !header) {

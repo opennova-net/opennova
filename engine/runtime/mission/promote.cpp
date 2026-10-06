@@ -842,7 +842,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
     world.script.waypoints.clear();
     for (const bms::WaypointRecord &wr : m.waypoint_records) {
         if ((static_cast<uint32_t>(wr.flags) &
-             static_cast<uint32_t>(bms::WaypointFlags::BlueTeam)) == 0)
+             static_cast<uint32_t>(bms::WaypointFlags::PlayerRoute)) == 0)
             continue;
         const int count = std::min<int>({static_cast<int>(wr.marker_count),
                                          static_cast<int>(wr.waypoint_numbers.size()), 128});

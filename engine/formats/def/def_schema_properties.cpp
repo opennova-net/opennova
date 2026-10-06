@@ -144,7 +144,7 @@ const std::vector<DefProperty> kItemProperties = {
 	{"sound_profilefemale", {"sound_profile_female"}, DefEncoding::Plain, 1.0, ""},
 	{"acceleration", {"acceleration"}, DefEncoding::ScaledInteger, 4.0, "", {}, kPhysics, {}, kTimesFour},
 	{"deceleration", {"deceleration"}, DefEncoding::ScaledInteger, 4.0, "", {}, kPhysics, {}, kDeceleration},
-	{"type", {"type"}, DefEncoding::ItemType, 1.0, ""},
+	{"type", {"type", "type_word"}, DefEncoding::ItemType, 1.0, ""},
 	{"attrib2", {"attrib2"}, DefEncoding::ItemAttrib2, 1.0, ""},
 	{"parent", {"attrib_parent"}, DefEncoding::ItemParent, 1.0, ""},
 	{"armor", {"armor_kz", "armor_impact"}, DefEncoding::Plain, 1.0, ""},

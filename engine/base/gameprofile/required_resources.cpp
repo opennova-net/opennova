@@ -300,6 +300,20 @@ const RequiredResource k_required_resources[] = {
     { "couri20b.fnt", BOOT_PHASE_MISSION, RES_OPTIONAL, 0,
       "graceful",
       "[orig: @ 0x572a67 / @ 0x572f24]", "font_couri20b" },
+    /* The single-player end screens' backdrops, loaded as the epilog builds its screen at the
+       round's end: the .tga, else the .dds of its name; with neither the image node holds no
+       texture and draws nothing, so the screen's lines stand over the live world. */
+    { "jo_Epil.tga", BOOT_PHASE_MISSION, RES_OPTIONAL, 0,
+      "missing (and no jo_Epil.dds) -> the single-player win screen draws over the live world, no backdrop",
+      "[orig: Cine_EpilogStateMachineUpdate @ 0x576240, the name @ 0x57658e -> CinematicFadeEvent_LoadTexture "
+      "@ 0x570d00 (the .tga @ 0x570da3, else the .dds @ 0x570de3; a miss leaves the texture null @ 0x570ded); "
+      "sub_5710B0 @ 0x5710b0 draws none @ 0x5710e1]", "jo_epil_tga" },
+    { "jo_Epil2.tga", BOOT_PHASE_MISSION, RES_OPTIONAL, 0,
+      "missing (and no jo_Epil2.dds) -> the single-player lose screen (MISSION FAILED) draws over the live world, "
+      "no backdrop",
+      "[orig: Cinematic_EpilogUpdate @ 0x574491, the name @ 0x5745aa -> CinematicFadeEvent_LoadTexture "
+      "@ 0x570d00 (the .tga @ 0x570da3, else the .dds @ 0x570de3; a miss leaves the texture null @ 0x570ded); "
+      "sub_5710B0 @ 0x5710b0 draws none @ 0x5710e1]", "jo_epil2_tga" },
 };
 
 enum { k_required_resource_count =

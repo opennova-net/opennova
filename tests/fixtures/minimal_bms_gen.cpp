@@ -96,7 +96,7 @@ bool build(std::vector<uint8_t> &bytes, std::string &err) {
 		}
 		(void)mission::waypoint_path(doc, path, authored);
 		const int flags = path == 2 ? static_cast<int>(opennova::bms::WaypointFlags::DoesNotLoop) |
-		                                  static_cast<int>(opennova::bms::WaypointFlags::BlueTeam)
+		                                  static_cast<int>(opennova::bms::WaypointFlags::PlayerRoute)
 		                            : 0;
 		if (!mission::set_waypoint_path(doc, path, authored.marker_indices, flags, edit_error)) {
 			err = "set_waypoint_path failed";

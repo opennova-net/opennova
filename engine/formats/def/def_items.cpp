@@ -43,6 +43,15 @@ static int item_type_from_string(const char *s, size_t len) {
     return DEF_ITEM_TYPE_UNSET;
 }
 
+/* Which of a value's two words the token is (DefItemDef::type_word): 1 for foliage and object, the
+   second the chain reads for 2 and 6, else 0. */
+static uint8_t item_type_word(const char *s, size_t len) {
+    char low[16];
+    size_t ll = len < 15 ? len : 15;
+    to_lower_buf(low, s, ll);
+    return ((ll == 7 && memcmp(low, "foliage", 7) == 0) || (ll == 6 && memcmp(low, "object", 6) == 0)) ? 1 : 0;
+}
+
 /* The twelve weapon userpoint keys in slot order (def.h weapon_userpoints), -1
    for any other key [orig: ItemDef_ParseProperty @ 0x4a0ff2..0x4a12e1] */
 static int weapon_userpoint_slot(const char *key) {
@@ -336,7 +345,11 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
             /* A token the chain does not know leaves the type as it was
                [orig: the type chain @0x4A02E4..0x4A04B7] */
             const int type = item_type_from_string(v, vl);
-            if (type != DEF_ITEM_TYPE_UNSET) current.type = type;
+            if (type != DEF_ITEM_TYPE_UNSET) {
+                current.type = type;
+                /* The word the file spells the value with, of the two the chain reads for it */
+                current.type_word = item_type_word(v, vl);
+            }
             parsed = 1;
         } else if (key_is(key, "graphic")) {
             copy_token(current.graphic, sizeof(current.graphic), tokens, 1);

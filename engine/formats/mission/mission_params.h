@@ -44,6 +44,13 @@ enum class ParamKind : uint8_t {
 // A row's sub-type where the row is every sub-type's of its type that has no row of its own.
 inline constexpr int32_t kAnySubType = -1;
 
+// What a trigger's or an action's parameter holds where its type does not read it: every shipped
+// record holds -1 there (19,596 of the install's 19,596 such slots over its 115 missions, the
+// mission_logic ctest's retail leg; the original editor's initializer is unread), so a new record is
+// born with it in each of its four, and a retype writes it into a slot the new type does not read.
+// (A sub-type its type does not read holds 0: 501 of 501.)
+inline constexpr int32_t kUnreadParam = -1;
+
 // One row: a trigger's main type (an action's type) and sub-type, and its four parameters: what each
 // is and what the editor calls it (null: the kind's own words, param_kind_label).
 struct ParamRow {
