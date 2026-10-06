@@ -427,9 +427,31 @@ private:
 		} else {
 			outputs.push_back({name, std::move(bytes)});
 		}
-		// The files one source makes come together (import_assets writes them all): the cap
+		// An author's file an importer converts becomes an import source, its record written with it
+		// (import_assets); the game's own file (an archive's, the install's, one copied native) gets no
+		// record and is the kind its name and bytes give: a PNG of it the texture the game loads.
+		const bool authored = !source.install && source.entry.empty() && !source.native;
+		// An author's import source brings the files its import reads besides it (a font set's glyph
+		// sheet), as import_assets brings them: each a row of the source's, copied as it is to where the
+		// import reads it, with no record. One that cannot come refuses the source, as the import does.
+		std::vector<ImportSourceInput> inputs;
+		if (authored && !converter) {
+			inputs = import_source_inputs(name, outputs.front().bytes, source.path,
+			                              import_destination(scan_, name, AssetKind::ImportSource), paths_.root, scan_);
+			bool broken = false;
+			for (const ImportSourceInput &input : inputs) {
+				cost_ += input.bytes.size();
+				if (!input.problem.empty()) {
+					plan_.diagnostics.push_back(
+					        make_finding(CoreFinding::ImportInput, DiagnosticSeverity::Error, input.problem, name));
+					broken = true;
+				}
+			}
+			if (broken) return;
+		}
+		// The files one source makes or brings come together (import_assets writes them all): the cap
 		// takes all of them or none.
-		if (files_ + outputs.size() > cap_) {
+		if (files_ + outputs.size() + inputs.size() > cap_) {
 			plan_.truncated = true;
 			return;
 		}
@@ -439,11 +461,6 @@ private:
 			row.selected = true;
 			row.source = source;
 			row.name = output.name;
-			// An author's file an importer converts becomes an import source, its record written with
-			// it (import_assets); the game's own file (an archive's, the install's, one copied native)
-			// gets no record and is the kind its name and bytes give: a PNG of it the texture the game
-			// loads.
-			const bool authored = !source.install && source.entry.empty() && !source.native;
 			row.kind = authored && authored_importer_for(output.name) ? AssetKind::ImportSource
 			           : loaded                              ? classify_asset(output.name, &output.bytes)
 			                                                 : from->file_kind(name);
@@ -472,6 +489,33 @@ private:
 				planned(index, from);
 				queue(index, from, std::move(output.bytes), loaded);
 			}
+		}
+		// The source's inputs, each beside it where its import reads it; read as they are, never walked
+		// (a glyph sheet names no file).
+		for (ImportSourceInput &input : inputs) {
+			ImportPlanRow row;
+			row.state = ImportPlanRow::State::Selected;
+			row.selected = true;
+			row.source = source;
+			row.name = input.name;
+			row.kind = classify_asset(input.name, &input.bytes);
+			row.size = input.bytes.size();
+			row.made_from = name;
+			row.found_in = found_in;
+			const bool first = !provided_.count(key(input.name));
+			if (first)
+				provided_[key(input.name)] = {plan_.rows.size(), row.kind};
+			else
+				row.problem = "More than one selected file has the name " + input.name + ".";
+			place(row, input.destination);
+			if (const AssetEntry *own = scan_.find(input.name)) {
+				row.held = true;
+				row.selected = false;
+				row.held_as = compare_held(*own, &input.bytes, from, input.name);
+			}
+			plan_.rows.push_back(std::move(row));
+			++files_;
+			made_[plan_.rows.size() - 1] = std::make_shared<const std::vector<uint8_t>>(std::move(input.bytes));
 		}
 	}
 
@@ -777,9 +821,10 @@ private:
 		queue_.push_back(std::move(node));
 	}
 
-	// Where import_assets writes the file, and why the project could not take it.
-	void place(ImportPlanRow &row) const {
-		row.destination = import_destination(scan_, row.name, row.kind);
+	// Where import_assets writes the file (`destination` where it is the place an import source's input
+	// goes, else by its name and kind), and why the project could not take it.
+	void place(ImportPlanRow &row, const std::string &destination = std::string()) const {
+		row.destination = destination.empty() ? import_destination(scan_, row.name, row.kind) : destination;
 		if (!row.problem.empty()) return;
 		FileNameProblem problem = FileNameProblem::None;
 		std::string message;
