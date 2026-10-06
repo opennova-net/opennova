@@ -133,8 +133,10 @@ void ModelDocument::refine_field(const NodeAddress &address, FieldUse &use) cons
 	if (!node || !locate(*node, address.child, at) || at.record.kind != address.kind) return;
 	const size_t place = model_table().kind(at.record.kind)->place_of(*use.schema);
 	if (place == TableKind::npos) return;
-	// What an index names is decided below by what the model row holds, never by the declaration alone.
-	if (use.reference != ReferenceKind::Texture) use.reference = ReferenceKind::None;
+	// What an index names is decided below by what the model row holds, never by the declaration alone (a
+	// texture's file and a material's shader name no index).
+	if (use.reference != ReferenceKind::Texture && use.reference != ReferenceKind::Shader)
+		use.reference = ReferenceKind::None;
 	// An index names what the model row holds: its registers and frames are its records, named
 	// by their index (a Record reference, S13 D8: the picker offers them, the core renumbers it);
 	// LOD 0's parts are not records (record_choices offers them). A model with no CTRL table skips
