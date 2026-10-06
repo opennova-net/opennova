@@ -124,6 +124,14 @@ begin "Sandbag wall, 4.6 m"
 	id 100017
 	type decoration
 end
+begin "Wooden guard tower"
+	graphic ontower1
+	id 100018
+	hp 10
+	type building
+	armor -1 -1
+end
+
 
 
 
