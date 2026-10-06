@@ -217,7 +217,7 @@ void ModelViewportApplier::update(const opennova::editor::ViewportModel &model, 
 void ModelViewportApplier::apply_state_(const opennova::editor::ViewportModel &viewport,
 		const opennova::editor::PreviewClock &clock) {
 	if (applied_skeleton_ != model_of(viewport).skeleton_serial()) bind_rig_(viewport);
-	apply_registers_(viewport);
+	apply_registers_(viewport, clock);
 	play_clip_(viewport, clock);
 	place_camera_(viewport);
 }
@@ -231,10 +231,19 @@ void ModelViewportApplier::clear() {
 	applied_lod_ = -1;
 }
 
-// The CTRL registers the options hold (a register let go reads 0 again); nothing when the model holds
-// them already (every pump applies the state).
-void ModelViewportApplier::apply_registers_(const opennova::editor::ViewportModel &viewport) {
-	const std::map<std::string, int64_t> &held = model_of(viewport).options().ctrl;
+// The CTRL registers the picture reads at the clock (a register let go reads 0 again), and the sections
+// the death pieces left hidden; nothing when the model holds them already (every pump applies the state,
+// and every frame while the clock runs: the destroy fade moves with it).
+void ModelViewportApplier::apply_registers_(const opennova::editor::ViewportModel &viewport,
+		const opennova::editor::PreviewClock &clock) {
+	const opennova::editor::ModelViewport &model = model_of(viewport);
+	// The model keeps its mask across the scenes it builds (each part made visible by it).
+	const uint32_t hidden = model.hidden_sections_at(clock);
+	if (hidden != applied_hidden_) {
+		object_->set_destroyed_section_mask(int64_t(hidden));
+		applied_hidden_ = hidden;
+	}
+	const std::map<std::string, int64_t> held = model.ctrl_at(clock);
 	if (held == applied_ctrl_) return;
 	object_->begin_ctrl_update();
 	for (const auto &entry : applied_ctrl_) {
@@ -297,7 +306,10 @@ void ModelViewportApplier::apply(const opennova::editor::ViewportModel &viewport
 }
 
 void ModelViewportApplier::tick(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &clock) {
-	if (!build_) play_clip_(viewport, clock);
+	if (!build_) {
+		apply_registers_(viewport, clock);
+		play_clip_(viewport, clock);
+	}
 	// A model with live part animations or a dynamic material stays awake and reads it.
 	clock_->sample(int64_t(clock.ms()), ++frame_);
 }
