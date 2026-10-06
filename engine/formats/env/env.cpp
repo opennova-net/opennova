@@ -56,10 +56,28 @@ std::string rgb_to_string(const Rgb &color) {
 	return buffer;
 }
 
+// An atof keyword's value (envscale, iris_percent, iris_center, water_murk): the fewest
+// significant digits, from six, that the parser's atof reads back as the same float
+// [orig: TimeOfDay_ParseProperty @ 0x57c5d8, its atof of tokens[2]].
 std::string number_to_string(float value) {
-	std::ostringstream output;
-	output << std::setprecision(6) << std::defaultfloat << value;
-	return output.str();
+	std::string text;
+	for (int digits = 6; digits <= 9; ++digits) {
+		std::ostringstream output;
+		output << std::setprecision(digits) << std::defaultfloat << value;
+		text = output.str();
+		if (static_cast<float>(io::retail_atof(text.c_str())) == value) break;
+	}
+	return text;
+}
+
+// An atol keyword's value (fog_level, sky_height, sky_speed, water_height): the whole number
+// the parser's atol reads from the value, saturating at the 32-bit long [orig:
+// TimeOfDay_ParseProperty @ 0x57ccbf, j__atol of tokens[2]].
+std::string whole_to_string(float value) {
+	double whole = std::trunc(static_cast<double>(value));
+	if (!(whole >= -2147483648.0)) whole = -2147483648.0;
+	if (whole > 2147483647.0) whole = 2147483647.0;
+	return std::to_string(static_cast<long long>(whole));
 }
 
 std::string format_tod_time(int time) {
@@ -67,6 +85,15 @@ std::string format_tod_time(int time) {
 	std::ostringstream output;
 	output << std::setw(4) << std::setfill('0') << normalized;
 	return output.str();
+}
+
+// A name as a value token: quoted where the tokenizer would cut it (a space, a comma or a tab
+// ends a token, a ';' or "//" outside quotes cuts the line); '"' toggles quoting and ends a
+// token, so a name holding one has no line form [orig: File_ParseASCIIFile @ 0x53d810, the
+// tokenizer's delimiters @0x53CC33..0x53CC4C and quote @0x53CC4E..0x53CC70].
+std::string name_token(const std::string &name) {
+	const bool quoted = name.find_first_of(" ,\t;") != std::string::npos || name.find("//") != std::string::npos;
+	return quoted ? "\"" + name + "\"" : name;
 }
 
 // The parser's color pack: each byte times the envscale read so far, truncated, clamped
@@ -80,13 +107,6 @@ void parse_rgb_baked(const io::ConfigTokens &tokens, Rgb &out, float envscale) {
 		const int baked = clamp_int(static_cast<int>(static_cast<float>(rgb[i]) * envscale), 0, 255);
 		*channels[i] = static_cast<float>(baked) / 255.0f;
 	}
-}
-
-bool is_tod_color_key(const std::string &key) {
-	return key == "sun_rgb" || key == "ground_rgb" || key == "ambient_rgb" || key == "fog_rgb" ||
-			key == "sky_rgb" || key == "moon_rgb" || key == "skyfog_rgb" || key == "skybase_rgb" ||
-			key == "skybright_rgb" || key == "skyhighlight_rgb" || key == "cloudbase_rgb" ||
-			key == "cloudhighlight_rgb" || key == "cloudedge_rgb";
 }
 
 // `baked`: the keyframe is the scratch slot, whose colors are kept as the parser packs them
@@ -133,22 +153,6 @@ void assign_tod_color(Keyframe &keyframe, const std::string &key, const io::Conf
 	}
 }
 
-// A time token as HHMM, read by position: the last two characters are the
-// minutes, the one or two before them the hours, each digit's byte less '0';
-// a token shorter than three characters reads 0; hours clamp to 23 and
-// minutes to 59 from above [orig: Environment_ParseTimeString @ 0x57c500].
-int parse_time_string(const char *text) {
-	const size_t len = std::strlen(text);
-	if (len < 3) return 0;
-	const auto byte = [text](size_t i) { return static_cast<int>(static_cast<signed char>(text[i])); };
-	int minutes = byte(len - 1) + 10 * byte(len - 2) - 528;
-	int hours = byte(len - 3) - '0';
-	if (len >= 4) hours += 10 * (byte(len - 4) - '0');
-	if (minutes > 59) minutes = 59;
-	if (hours > 23) hours = 23;
-	return hours * 100 + minutes;
-}
-
 // Quantize one channel the way the parser stores it: file byte scaled by
 // envscale, truncated, clamped to 255 [orig: Color_ScaleRGBAndPack @ 0x57f890].
 // (The original has no lower clamp and packs garbage for negative inputs; we
@@ -173,6 +177,56 @@ Rgb lerp_rgb_quantized(const Rgb &a, const Rgb &b, int fraction_fp, float envsca
 }
 
 } // namespace
+
+// A time token as HHMM, read by position: the last two characters are the
+// minutes, the one or two before them the hours, each digit's byte less '0';
+// a token shorter than three characters reads 0; hours clamp to 23 and
+// minutes to 59 from above [orig: Environment_ParseTimeString @ 0x57c500].
+int parse_tod_time(const char *text) {
+	const size_t len = std::strlen(text);
+	if (len < 3) return 0;
+	const auto byte = [text](size_t i) { return static_cast<int>(static_cast<signed char>(text[i])); };
+	int minutes = byte(len - 1) + 10 * byte(len - 2) - 528;
+	int hours = byte(len - 3) - '0';
+	if (len >= 4) hours += 10 * (byte(len - 4) - '0');
+	if (minutes > 59) minutes = 59;
+	if (hours > 23) hours = 23;
+	return hours * 100 + minutes;
+}
+
+bool is_tod_color_key(const std::string &key) {
+	return key == "sun_rgb" || key == "ground_rgb" || key == "ambient_rgb" || key == "fog_rgb" ||
+			key == "sky_rgb" || key == "moon_rgb" || key == "skyfog_rgb" || key == "skybase_rgb" ||
+			key == "skybright_rgb" || key == "skyhighlight_rgb" || key == "cloudbase_rgb" ||
+			key == "cloudhighlight_rgb" || key == "cloudedge_rgb";
+}
+
+// The keys the parser reads [orig: TimeOfDay_ParseProperty @ 0x57c590, each stricmp of
+// tokens[1]], with enviro_name and vertex_rgb, which this reader keeps for the round trip
+// (retail has no arm for either: it skips both lines).
+bool is_env_key(const std::string &key) {
+	static const char *const kKeys[] = {
+		"envscale", "iris_percent", "iris_center", "tod_begin", "tod_end", "lightning_rgb", "cloud_rgb",
+		"ceiling_rgb", "floor_rgb", "terrain_rgb", "water_rgb", "water_height", "water_murk", "sky_height",
+		"sky_speed", "sky_map1", "sky_map2", "fog_level", "fog_type", "sun_3di", "moon_3di", "glare_3di",
+		"star_3di", "timeofday", "advanced_clouds", "curtime", "tod_rate", "enviro_name", "vertex_rgb",
+	};
+	if (is_tod_color_key(key)) return true;
+	for (const char *known : kKeys)
+		if (key == known) return true;
+	return false;
+}
+
+bool is_envscaled_key(const std::string &key) {
+	return (is_tod_color_key(key) || key == "lightning_rgb" || key == "cloud_rgb" || key == "ceiling_rgb" ||
+	        key == "floor_rgb" || key == "water_rgb");
+}
+
+bool env_name_writable(const std::string &name) {
+	for (const unsigned char c : name)
+		if (c < 0x20 || c == 0x7F || c == '"') return false;
+	return true;
+}
 
 int hhmm_to_hours_fp(float hhmm) {
 	if (hhmm < 0.0f) {
@@ -265,65 +319,51 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 	// color line inside a block or out of one, and every other key reads the
 	// same either way: the parser keeps no block state but the slot pointer.
 	const std::string text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-	bool in_tod = false;
-	bool overflow_block = false;
-	bool skyfog_set = false;
+	// The slot pointer: a keyframe of out.keyframes by index, or -1 for the scratch keyframe,
+	// where it sits for the pass and after every tod_end [orig: g_EnvTodCurrentSlotPtr, set to
+	// the scratch @ 0x57dc56 and by tod_end @ 0x57c6a3]. Each keyframe's fog mirrors into its
+	// skyfog until a skyfog line sets it (divergence #9: a flag per keyframe for the 0xC0C0FF
+	// sentinel test @ 0x57c9b8).
+	int slot = -1;
+	std::vector<bool> skyfog_set;
 	bool scratch_skyfog_set = false; // the scratch's skyfog still holds its 0xC0C0FF seed
-	Keyframe current;
 
 	io::for_each_config_line(text.data(), text.size(), [&](const io::ConfigTokens &tokens) {
 		const std::string key = strutil::to_lower(tokens.tokens[0]);
 		const char *value = tokens.token(1);
 
 		if (key == "tod_begin") {
-			// The engine has no block-nesting state: tod_begin simply advances
-			// to the next slot, so tod_end is optional and a new tod_begin
-			// implicitly closes the open block (shipped FULL_03/FULL_05.ENV
-			// rely on this) [orig: TimeOfDay_ParseProperty @ 0x57c647].
-			if (in_tod) {
-				if (overflow_block) {
-					out.keyframes.back() = current;
-				} else {
-					out.keyframes.push_back(current);
-				}
-			}
-			in_tod = true;
-			skyfog_set = false;
-			if (static_cast<int>(out.keyframes.size()) >= kMaxTodKeyframes) {
-				// The engine's 17th tod_begin neither allocates a slot nor stores
-				// its time; its color lines keep writing into slot 16
-				// [orig: TimeOfDay_ParseProperty @ 0x57c65b].
-				overflow_block = true;
-				current = out.keyframes.back();
-			} else {
-				overflow_block = false;
-				current = Keyframe();
-				current.time = parse_time_string(value);
+			// The engine has no block-nesting state: tod_begin takes the next slot and points
+			// there, so tod_end is optional and a new tod_begin simply moves on (shipped
+			// FULL_03/FULL_05.ENV rely on this). With all 16 slots taken it neither takes a
+			// slot, stores its time nor moves the pointer: its color lines land where the
+			// pointer is, the 16th slot while that block is open, the scratch after a tod_end
+			// [orig: TimeOfDay_ParseProperty @ 0x57c647, the count test @ 0x57c65b].
+			if (static_cast<int>(out.keyframes.size()) < kMaxTodKeyframes) {
+				Keyframe keyframe;
+				keyframe.time = parse_tod_time(value);
+				out.keyframes.push_back(keyframe);
+				skyfog_set.push_back(false);
+				slot = static_cast<int>(out.keyframes.size()) - 1;
 			}
 			return;
 		}
 		if (key == "tod_end") {
-			// A stray tod_end just resets the engine's slot pointer to scratch;
-			// it is not an error [orig: TimeOfDay_ParseProperty @ 0x57c696].
-			if (in_tod) {
-				if (overflow_block) {
-					out.keyframes.back() = current;
-				} else {
-					out.keyframes.push_back(current);
-				}
-				in_tod = false;
-			}
+			// The pointer back on the scratch keyframe; a stray tod_end is no error
+			// [orig: TimeOfDay_ParseProperty @ 0x57c696].
+			slot = -1;
 			return;
 		}
 
 		if (is_tod_color_key(key)) {
-			if (in_tod) {
-				assign_tod_color(current, key, tokens, skyfog_set);
+			if (slot >= 0) {
+				bool mirrored = skyfog_set[static_cast<size_t>(slot)];
+				assign_tod_color(out.keyframes[static_cast<size_t>(slot)], key, tokens, mirrored);
+				skyfog_set[static_cast<size_t>(slot)] = mirrored;
 			} else {
-				// Outside a block the slot pointer sits on the scratch keyframe, so the
-				// color lands there, packed with the envscale read so far [orig:
-				// TimeOfDay_ParseProperty @ 0x57c590 through g_EnvTodCurrentSlotPtr, reset
-				// to the scratch slot for the pass @ 0x57dc56 and by a tod_end @ 0x57c696].
+				// On the scratch keyframe the color lands packed with the envscale read so
+				// far [orig: TimeOfDay_ParseProperty @ 0x57c590 through g_EnvTodCurrentSlotPtr;
+				// Color_ScaleRGBAndPack @ 0x57f890].
 				assign_tod_color(out.scratch, key, tokens, scratch_skyfog_set, true, out.envscale);
 			}
 			return;
@@ -337,7 +377,7 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 			out.envscale = static_cast<float>(io::retail_atof(value));
 		} else if (key == "curtime") {
 			// [orig: TimeOfDay_ParseProperty @ 0x57d0b6] via Environment_ParseTimeString.
-			out.curtime = parse_time_string(value);
+			out.curtime = parse_tod_time(value);
 		} else if (key == "fog_level") {
 			// Integer parse (atol truncation), stored <<16 by the engine
 			// [orig: TimeOfDay_ParseProperty @ 0x57cca3].
@@ -389,17 +429,13 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 			out.water_murk = clamp_water_murk_upper(static_cast<float>(io::retail_atof(value)));
 		} else if (key == "advanced_clouds") {
 			out.advanced_clouds = io::retail_atol(value);
+		} else if (key == "tod_rate") {
+			// The day's length in minutes, kept as written: the engine makes it the clock's
+			// advance a tick on the spot [orig: TimeOfDay_ParseProperty @ 0x57d0f9..0x57d118].
+			out.tod_rate = io::retail_atol(value);
+			out.tod_rate_set = true;
 		}
 	});
-
-	if (in_tod) {
-		// An unterminated final block is still a counted slot in the engine.
-		if (overflow_block) {
-			out.keyframes.back() = current;
-		} else {
-			out.keyframes.push_back(current);
-		}
-	}
 
 	// Stable, matching the engine's bubble sort (duplicate times keep file order)
 	// [orig: Environment_SortAndSnapshotKeyframes @ 0x57c240].
@@ -410,12 +446,22 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 }
 
 bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
-	// No stock writer exists in the engine; the editor emits a normalized
-	// stock-style text file using the keyword vocabulary parsed by
-	// [orig: TimeOfDay_ParseProperty @ 0x57c590] and CRLF line endings used by
-	// shipped assets. (enviro_name is an authoring extension; the engine ignores
-	// unknown keywords.)
+	// No stock writer exists in the engine; this emits a normalized stock-style text file from
+	// scratch in the keyword vocabulary parsed by [orig: TimeOfDay_ParseProperty @ 0x57c590]
+	// and the CRLF line endings of shipped assets, each value in the form that parser reads back
+	// as the Config holds it (env.h). (enviro_name is an authoring extension; the engine skips
+	// a keyword it has no arm for.)
 	error.clear();
+	for (const std::string *name : {&cfg.name, &cfg.timeofday, &cfg.sky_map1, &cfg.sky_map2, &cfg.sun_3di,
+	                                &cfg.moon_3di, &cfg.glare_3di, &cfg.star_3di})
+		if (!env_name_writable(*name)) {
+			error = "The name '" + *name + "' holds a '\"' or a control character, which no line can carry.";
+			return false;
+		}
+	if (static_cast<int>(cfg.keyframes.size()) > kMaxTodKeyframes) {
+		error = "The game reads 16 keyframes at most.";
+		return false;
+	}
 
 	output << "enviro_name \"" << cfg.name << "\"" << NL;
 	output << NL;
@@ -458,21 +504,21 @@ bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
 	output << NL;
 	output << "water_rgb " << rgb_to_string(cfg.water_rgb) << NL;
 	if (cfg.water_height_set) {
-		output << "water_height " << number_to_string(cfg.water_height) << NL;
+		output << "water_height " << whole_to_string(cfg.water_height) << NL;
 	}
 	output << NL;
-	output << "sky_map1 " << cfg.sky_map1 << NL;
-	output << "sky_map2 " << cfg.sky_map2 << NL;
+	output << "sky_map1 " << name_token(cfg.sky_map1) << NL;
+	output << "sky_map2 " << name_token(cfg.sky_map2) << NL;
 	// The keyword reads whole units (atol, stored << 16 [orig: TimeOfDay_ParseProperty
 	// @ 0x57cbc3]), so the engine's raw-200 default (~0.003 units [orig:
 	// Environment_InitDefaults @ 0x57c1ab]) has no file form: left unwritten, it reads back
 	// as itself, where any line would read back as 0.
 	if (cfg.sky_height != Config().sky_height) {
-		output << "sky_height " << number_to_string(cfg.sky_height) << NL;
+		output << "sky_height " << whole_to_string(cfg.sky_height) << NL;
 	}
-	output << "sky_speed " << number_to_string(cfg.sky_speed) << NL;
+	output << "sky_speed " << whole_to_string(cfg.sky_speed) << NL;
 	output << NL;
-	output << "fog_level " << number_to_string(cfg.fog_level) << NL;
+	output << "fog_level " << whole_to_string(cfg.fog_level) << NL;
 	output << "fog_type " << cfg.fog_type << NL;
 	output << NL;
 	output << "cloud_rgb " << rgb_to_string(cfg.cloud_rgb) << NL;
@@ -480,15 +526,19 @@ bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
 	output << "vertex_rgb " << rgb_to_string(cfg.vertex_rgb) << NL;
 	output << NL;
 	output << "lightning_rgb " << rgb_to_string(cfg.lightning_rgb) << NL;
-	output << "sun_3di " << cfg.sun_3di << NL;
-	output << "moon_3di " << cfg.moon_3di << NL;
-	output << "glare_3di " << cfg.glare_3di << NL;
-	output << "star_3di " << cfg.star_3di << NL;
+	output << "sun_3di " << name_token(cfg.sun_3di) << NL;
+	output << "moon_3di " << name_token(cfg.moon_3di) << NL;
+	output << "glare_3di " << name_token(cfg.glare_3di) << NL;
+	output << "star_3di " << name_token(cfg.star_3di) << NL;
 	output << NL;
 	output << "ceiling_rgb " << rgb_to_string(cfg.ceiling_rgb) << NL;
 	output << "floor_rgb " << rgb_to_string(cfg.floor_rgb) << NL;
 	output << NL;
-	output << "curtime " << cfg.curtime << NL;
+	// Four HHMM digits: the time token reads by position, so a time before 01:00 written short
+	// ("30") would read as 00:00 [orig: Environment_ParseTimeString @ 0x57c500, a token shorter
+	// than three characters reads 0].
+	output << "curtime " << format_tod_time(cfg.curtime) << NL;
+	if (cfg.tod_rate_set) output << "tod_rate " << cfg.tod_rate << NL;
 	output << NL;
 	output << "water_murk " << number_to_string(cfg.water_murk) << NL;
 	output << "advanced_clouds " << cfg.advanced_clouds << NL;
