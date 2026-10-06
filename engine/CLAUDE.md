@@ -91,8 +91,12 @@
     project's files: the graph's update, each file's own findings, the use checks, the graph's
     findings), `import` (the importers: a PNG to the texture file its uses read, by the
     record's options, each a row of its importer's (S18), the `.import` sidecars, the import pass
-    whose outputs the scan lists; and the
-    one-shot converters: an `.o3d` to a `.3di`, an `.o3a` to its `.adm` and `.bad` files), `preview`
+    whose outputs the scan lists; the terrain importer (S20: a terrain set's images to a terrain's files,
+    `terrain_import`); and the
+    one-shot converters: an `.o3d` to a `.3di`, an `.o3a` to its `.adm` and `.bad` files), `terrain`
+    (S20: TrnGen.exe's terrain bake ported, a depth map to the `.cpt`'s depth atlas and ground mesh,
+    its tile files kept in memory, its nodes of one quadtree level made side by side: a port, cited
+    `[orig: TrnGen.exe ...]`), `preview`
     (the viewports, S13 V5: a document's picture as the game would draw it, one per (document,
     kind) from a compiled-in kind table (`viewport_kinds`: the menu's and the model's, each a
     Preview or a Main role), kept by the session (`viewports`, with the one preview clock) and
@@ -242,7 +246,11 @@
   migration needing a CPT-corpus byte diff, not a swap. That byte diff is
   NOT in ctest today: `tests/cpt/cpt_roundtrip_test` (ctest `cpt_roundtrip`) pins the
   bit codec and the DPTH/CDEP/POLY round-trips on synthetic buffers only, so run a
-  retail-corpus byte diff by hand whenever you touch the CPT encoder. Three more stay
+  retail-corpus byte diff by hand whenever you touch the CPT encoder:
+  `editor_terrain_bake_test --reencode <the extracted retail tree>` reads and writes every
+  `.cpt` again (all 23 of JO:CA's byte-identical since S20), and `editor_terrain_bake_test
+  <dir>` bakes the retired TrnGen corpus (`git show d57608b3d^:fixtures/terrain`) against
+  TrnGen's own `.cpt` files. Three more stay
   by design: `formats/bink`'s
   `BitReader` is a fail-latching decoder contract (`peek`, `align32`, the first short
   read poisons it), the `wire_cursor` posture rather than `io::BitReader`'s lenient
