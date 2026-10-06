@@ -201,10 +201,20 @@ void AssetScan::set_import_findings(std::vector<Diagnostic> findings) {
 void AssetScan::compose() {
 	entries.clear();
 	diagnostics.clear();
+	std::set<std::string> inputs;
 	for (const auto &[path, visit] : visits_) {
 		entries.insert(entries.end(), visit.entries.begin(), visit.entries.end());
 		diagnostics.insert(diagnostics.end(), visit.findings.begin(), visit.findings.end());
+		for (const std::string &input : visit.inputs) inputs.insert(strutil::to_lower(input));
 	}
+	// A file an import record lists among its inputs is that import's (S20: a terrain set's images),
+	// whatever its name makes it: the build packs the import's outputs, never it. Paths compare as the
+	// game's names do, their case aside.
+	if (!inputs.empty())
+		for (AssetEntry &entry : entries)
+			if (entry.imported_from.empty() && entry.kind != AssetKind::ImportSource &&
+			    inputs.count(strutil::to_lower(entry.relative_path)))
+				entry.kind = AssetKind::ImportInput;
 	index();
 	name_findings(entries, diagnostics);
 	for (const Diagnostic &d : import_findings_)
