@@ -79,6 +79,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/loadout_screen.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/loadout_labels.cpp # the loadout screens' labels, row order and weight readout
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_runtime.cpp # the compiled-menu interaction runtime (id tree, nav, state, actions, input)
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/screen_history.cpp # the screen history across menu files and a mission (D-MNU-28)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_flow.cpp # SP selection, expansion requests and host rotation
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/options_screen.cpp # options remap and preview decisions
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/command_map_screen.cpp # the CMAP tables and ORDERS composer
@@ -395,6 +396,8 @@ add_library(opennova_runtime STATIC
     # inmatch — the in-match session (ex net/inmatch + net/npruntime, ADR 0043
     # d4): the fixed-tick session, the listen-host frame, the IDA-faithful
     # server/client state machines and frame loops, the transports
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/admin_console.cpp          # the remote-admin console's verbs (ADR 0051 PR5)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/admin_console_player.cpp   # its slot walks: PLAYER, PETERRABBIT, QUERY
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/character_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/charattr_challenge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_card.cpp
@@ -406,6 +409,12 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_squad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_weapon_replay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/end_round_protocol.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_file.cpp              # the retail /HOST host file (opennova-serve, ADR 0051)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_config.cpp            # game.cfg onto the host session (opennova-serve, ADR 0051 d2)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_boot.cpp              # the one host boot, both phases (ADR 0051 d4)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/mission_rotation.cpp       # the map rotation and its session words (D-NET-331)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/rotation_admin.cpp         # the admin MISSION verbs over the rotation (ADR 0051 PR5b)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/map_change.cpp             # the host's round-end map change (D-NET-331)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_settings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_challenge_profile.cpp
@@ -429,7 +438,11 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/minimap_overlays.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/napi_np_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_admin_command.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_ban_lists.cpp       # banlist.txt / banned.txt on the authority
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_chat.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_console.cpp # the client-less host's CHAT ring, its console chat, the /INOUT lines
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_log_recorder.cpp # the /PROFILE .sph recorder
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/punt_log.cpp # _PUNT.TXT, _CHEAT.TXT and punt.log
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_squad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_idle_timers.cpp          # the every-32 player breath samples (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_entity_routes.cpp       # the item events, crossings and guidance routes (split off server_tick.cpp)
