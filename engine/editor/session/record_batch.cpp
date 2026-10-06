@@ -64,12 +64,15 @@ constexpr BatchOp kOps[] = {
 	{ "write", F::Edits, "An optional field of the record id the file leaves out written again." },
 	{ "add", F::Edits,
 			"A record of kind added into parent (a record; a row's identity: straight into that row; none: "
-			"a new row) at position, the end by default; with field, its value set in the same step; as "
-			"labels it for later edits." },
+			"a new row) at position, the end by default; with field, its value set in the same step (a row "
+			"the type finds by that value already, a string table's section of the name, is named and none "
+			"made); as labels it for later edits." },
 	{ "duplicate", F::Edits,
 			"The record id copied, right after it or at position; as labels the copy." },
 	{ "remove", F::Edits, "The record id removed." },
-	{ "move", F::Edits, "The record id moved into parent at position." },
+	{ "move", F::Edits,
+			"The record id moved into parent at position; a parent in another row moves it there as its "
+			"type does (a string to another section of its table), or is refused." },
 	{ "set_file_value", F::Edits, "A file-wide field set to value (position: where in a file-wide list)." },
 	{ "replace_list", F::Edits,
 			"The records of list the record id holds replaced by records, each {field: value}, added at "
