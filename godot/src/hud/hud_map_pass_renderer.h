@@ -18,7 +18,8 @@ namespace godot {
 // mask, the texture-slot table the sprites index (kHudTexMapIcons + the
 // sprite's texture offset), per slot whether its texture's material word runs
 // MODULATE2X(TEXTURE, DIFFUSE) (colour family 0x600; null: none does), and the
-// font page table the map glyphs index.
+// font page table the map glyphs index with, per page, whether its material runs
+// MODULATE2X (hud::kFontPageMaterialWord; null: none does).
 struct HudMapPassTextures {
 	Ref<Texture2D> terrain;
 	Ref<Texture2D> water;
@@ -27,6 +28,7 @@ struct HudMapPassTextures {
 	const uint8_t *slot_modulate2x = nullptr;
 	const Ref<Texture2D> *pages = nullptr;
 	size_t page_count = 0;
+	const uint8_t *page_modulate2x = nullptr;
 };
 
 // The DEATH window's zone-walk segments (hud_map_view.h HudMapWindowPass::
@@ -46,9 +48,10 @@ struct HudMapSegmentsView {
 // water cutout, and the top item (grid rules, footprints, sprites, lines,
 // glyphs, then any over-lines). The top item draws under the owner's map
 // material, where a sprite whose slot runs MODULATE2X
-// (HudMapPassTextures::slot_modulate2x) carries a +8 flag on its UV.x that
-// selects the colour stage per command, so every sprite keeps its place in the
-// retail draw order. The corner spinmap, the M-cycle big map and the DEATH MAP
+// (HudMapPassTextures::slot_modulate2x), and a glyph run whose page does
+// (HudMapPassTextures::page_modulate2x: every font page), carries a +8 flag on
+// its UV.x that selects the colour stage per command, so every sprite and label
+// keeps its place in the retail draw order. The corner spinmap, the M-cycle big map and the DEATH MAP
 // window each own one; the materials stay their owner's.
 class HudMapPassRenderer {
 public:
@@ -80,8 +83,9 @@ public:
 	bool water_sampling_configured() const { return water_sampling_configured_; }
 	bool top_sampling_configured() const { return top_sampling_configured_; }
 	// While set, render also appends each sprite submission to `record` as
-	// {texture: slot (-1 untextured), size, uvs, colors}, exactly as the top item
-	// receives it (the owner's test seam).
+	// {texture: slot (-1 untextured), size, uvs, colors}, and each glyph run as
+	// {texture: -1, page, size, uvs, colors}, exactly as the top item receives
+	// it (the owner's test seam).
 	void set_record(Array *record) { record_ = record; }
 
 private:

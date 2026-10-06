@@ -23,6 +23,13 @@ using namespace opennova::menu;
 
 namespace {
 
+// A text colour as the menus' text sink submits it: the RGB halved on a
+// modulate-2x device, which the font page's MODULATE2X doubles back on the
+// device (D-HUD-51) [orig: CFontCache_DrawTextScaled @0x6531e7..0x6531eb].
+constexpr uint32_t text_rgb(uint32_t rgb) {
+	return (rgb >> 1) & 0x7F7F7Fu;
+}
+
 int failures = 0;
 
 #define CHECK(cond, msg)                                                       \
@@ -300,7 +307,7 @@ void test_text_alignment_color_and_hidden_rows(const fnt_font_t *font) {
 	bool colored = false;
 	bool second_band = false;
 	for (const auto &g : dl.glyphs) {
-		if ((g.color & 0xFFFFFFu) == 0x123456u) {
+		if ((g.color & 0xFFFFFFu) == text_rgb(0x123456u)) {
 			colored = true;
 			if (g.y_top >= 95.0f && g.y_top < 116.0f) second_band = true;
 		}

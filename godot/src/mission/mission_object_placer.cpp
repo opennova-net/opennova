@@ -17,6 +17,7 @@
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/object.hpp>
 
+#include <base/gameprofile/resource_missing.h>
 #include <runtime/anim/adm_fallback.h> // the default.adm substitution every spawn applies
 #include <runtime/renderer/object_lod.h>
 #include <base/io/fixed.h>
@@ -712,6 +713,11 @@ Ref<ObjectData> MissionObjectPlacer::_load_object_data(
 		d.instantiate();
 		if (d->open_from_resource_root(resource_root_, model_name) == OK) {
 			data = d;
+		} else if (!resource_root_->has_file(model_name)) {
+			// No file of the name (one there that does not read is no miss): the log line the editor's
+			// Play reads back into a Problems row on what names the graphic (ADR 0046 DI-27).
+			ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kModel, model_name, String(),
+					"what draws it is not drawn");
 		}
 	}
 	object_data_cache_[p_graphic] = data;

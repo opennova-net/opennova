@@ -1376,8 +1376,8 @@ private:
 	void element_breath_bar(const HudFrameState &state, float w, float h);
 	void element_waypoint(const HudFrameState &state, float w, float h);
 	void element_spinmap(const HudFrameState &state, float w, float h);
-	// A map pass's labels through the CPU half-bright drawer and the
-	// fixed-function MODULATE2X fold, bold or large slot per label.
+	// A map pass's labels through the CPU half-bright drawer, bold, large or
+	// regular slot per label; the page's MODULATE2X doubles them on the device.
 	void layout_map_labels(const HudMapPass &pass, std::vector<GameFontQuad> &out) const;
 	// The same over pass.labels[begin, end) (the DEATH zone walk's segments).
 	void layout_map_labels(const HudMapPass &pass, size_t begin, size_t end,

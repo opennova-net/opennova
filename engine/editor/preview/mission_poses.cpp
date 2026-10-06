@@ -232,58 +232,64 @@ void MissionPoses::pose_all_() {
 			poses_.push_back(std::move(pose));
 			continue;
 		}
-		pose.ai_function = definition->ai_function;
-		pose.ai_slot = (definition->attrib & world::kItemAttribAIData) != 0;
-		if (!person_class(definition->ai_function)) {
-			pose.status = "class";
-			poses_.push_back(std::move(pose));
-			continue;
-		}
-		// The definition's .adm, default.adm where the project lacks it; an item naming none binds no
-		// map [orig: AnimMap_LoadAdmFile @0x40cc40 — the empty name @0x40cca1, the miss's substitution
-		// @0x40cd00..0x40cd25].
-		if (definition->anim_def.empty()) {
-			pose.status = "no_adm";
-			poses_.push_back(std::move(pose));
-			continue;
-		}
-		std::string named = definition->anim_def;
-		if (!strutil::ends_with_icase(named, ".adm")) named += ".adm";
-		const std::string file = assets::asset_file_name(named, ".adm");
-		files_->stamp(file); // noted, so the file's coming or going poses again
-		pose.adm = anim::adm_name_or_default(named, !source_->path_of(file).empty());
-		const int adm_id = motion_->register_adm(&rig_files, pose.adm);
-		if (adm_id < 0) {
-			pose.status = "no_clips";
-			poses_.push_back(std::move(pose));
-			continue;
-		}
-		// What the init reads of the record: its route and its Guarding attribute reach it through the
-		// AI slot an `aidata` definition takes [orig: Entity_SpawnFromBMSRecord `test [eax+54h],100000h`
-		// @0x40ED4E; the fold 2 -> Flags 0x40 @0x40ED9F; slot+140/+148 from the record's waypoint_id].
-		// A placed record has no parent and no rotor's wash about it at the load: the mounts and the
-		// helicopters' wash zones come after.
-		world::OrganicSpawnFacts facts;
-		if (pose.ai_slot) {
-			facts.route = input.route != 0;
-			facts.route_channel = input.route;
-			if ((input.attributes & 0x2u) != 0) facts.flags |= 0x40u;
-		}
-		pose.status = "posed";
-		pose.state = world::organic_spawn_state(facts, motion_.get(), adm_id);
-		pose.because = because_of(facts, pose.state);
-		pose.updates = world::organic_warmup_updates(uint32_t(input.ssn)) + 1;
-		const world::OrganicSpawnBody spawned =
-				world::organic_spawn_pose(facts, uint32_t(input.ssn), motion_.get(), rings, adm_id);
-		pose.pose = spawned.pose;
-		pose.rise = double(spawned.rise) / io::kFp16OneD;
-		pose.capsule_bottom = spawned.capsule_bottom;
-		pose.lift = pose.rise; // stood on the terrain by stand()
-		pose.clip = motion_->clip_file(adm_id, pose.pose.state, pose.pose.variant);
-		if (pose.pose.blending)
-			pose.source_clip = motion_->clip_file(adm_id, pose.pose.source_state, pose.pose.source_variant);
+		PersonDefinition person;
+		person.ai_function = definition->ai_function;
+		person.anim_def = definition->anim_def;
+		person.attrib = definition->attrib;
+		pose_person(person, PersonRecord{ input.ssn, input.route, input.attributes }, *source_, *files_, rig_files,
+				*motion_, rings, pose);
 		poses_.push_back(std::move(pose));
 	}
+}
+
+void pose_person(const PersonDefinition &definition, const PersonRecord &record, const ProjectAssetSource &source,
+		StampedFiles &files, const anim::RigFiles &rig_files, anim::AdmRootMotion &motion, world::AnimVariantRings &rings,
+		MissionPose &pose) {
+	pose.ai_function = definition.ai_function;
+	pose.ai_slot = (definition.attrib & world::kItemAttribAIData) != 0;
+	if (!person_class(definition.ai_function)) {
+		pose.status = "class";
+		return;
+	}
+	// The definition's .adm, default.adm where the project lacks it; an item naming none binds no
+	// map [orig: AnimMap_LoadAdmFile @0x40cc40 — the empty name @0x40cca1, the miss's substitution
+	// @0x40cd00..0x40cd25].
+	if (definition.anim_def.empty()) {
+		pose.status = "no_adm";
+		return;
+	}
+	std::string named = definition.anim_def;
+	if (!strutil::ends_with_icase(named, ".adm")) named += ".adm";
+	const std::string file = assets::asset_file_name(named, ".adm");
+	files.stamp(file); // noted, so the file's coming or going poses again
+	pose.adm = anim::adm_name_or_default(named, !source.path_of(file).empty());
+	const int adm_id = motion.register_adm(&rig_files, pose.adm);
+	if (adm_id < 0) {
+		pose.status = "no_clips";
+		return;
+	}
+	// What the init reads of the record: its route and its Guarding attribute reach it through the
+	// AI slot an `aidata` definition takes [orig: Entity_SpawnFromBMSRecord `test [eax+54h],100000h`
+	// @0x40ED4E; the fold 2 -> Flags 0x40 @0x40ED9F; slot+140/+148 from the record's waypoint_id].
+	// A placed record has no parent and no rotor's wash about it at the load: the mounts and the
+	// helicopters' wash zones come after.
+	world::OrganicSpawnFacts facts;
+	if (pose.ai_slot) {
+		facts.route = record.route != 0;
+		facts.route_channel = record.route;
+		if ((record.attributes & 0x2u) != 0) facts.flags |= 0x40u;
+	}
+	pose.status = "posed";
+	pose.state = world::organic_spawn_state(facts, &motion, adm_id);
+	pose.because = because_of(facts, pose.state);
+	pose.updates = world::organic_warmup_updates(uint32_t(record.ssn)) + 1;
+	const world::OrganicSpawnBody spawned = world::organic_spawn_pose(facts, uint32_t(record.ssn), &motion, rings, adm_id);
+	pose.pose = spawned.pose;
+	pose.rise = double(spawned.rise) / io::kFp16OneD;
+	pose.capsule_bottom = spawned.capsule_bottom;
+	pose.lift = pose.rise; // stood on the terrain by MissionPoses::stand()
+	pose.clip = motion.clip_file(adm_id, pose.pose.state, pose.pose.variant);
+	if (pose.pose.blending) pose.source_clip = motion.clip_file(adm_id, pose.pose.source_state, pose.pose.source_variant);
 }
 
 io::JsonValue mission_pose_json(const MissionPose &pose) {
