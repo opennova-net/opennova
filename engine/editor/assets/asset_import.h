@@ -57,8 +57,31 @@ std::vector<std::string> list_retail_file_names(const std::string &retail_root, 
 std::vector<std::string> list_base_file_names(const std::string &retail_root, const ProjectDocument &document);
 // Where an import writes a file of `kind` (project-relative): over the project's file of
 // the name when it has one (a replace keeps its place), else in the kind's folder
-// (AssetKindRow::folder).
+// (AssetKindRow::folder); an import source in the folder of the kind its name gives (a PNG with
+// the textures), or, where its name gives none, its importer's (Importer::folder: a font set with
+// the fonts).
 std::string import_destination(const AssetScan &existing, const std::string &name, AssetKind kind);
+
+// A file an author's import source reads besides it, which an import of the source from the disk
+// brings with it (Importer::names_inputs: a font set's glyph sheet): its path as the source names it,
+// its logical name, where the import puts it (project-relative: the path taken from the folder the
+// source goes to, as the source's import reads it there, ImportContext's rule) and its bytes, read from
+// beside the source on the disk. `problem` says why it cannot come ("" it can): a path that leaves the
+// project or passes through a dot-folder, a file not beside the source, a project file of its name in
+// another place (the source's import would not read it).
+struct ImportSourceInput {
+	std::string path;
+	std::string name;
+	std::string destination;
+	std::vector<uint8_t> bytes;
+	std::string problem;
+};
+// The inputs the source `source_name` (its bytes `source`, on the disk at `source_path`) brings, going
+// to `source_destination` (project-relative) in the project at `root` whose files `existing` lists; none
+// for a file no importer converts, or whose importer names none ahead.
+std::vector<ImportSourceInput> import_source_inputs(const std::string &source_name, const std::vector<uint8_t> &source,
+                                                    const std::string &source_path, const std::string &source_destination,
+                                                    const std::string &root, const AssetScan &existing);
 // What `sources` make copied into the project (a converter's outputs, else the file
 // itself), the whole selection or none of it as far as the disk allows (ADR 0046 S11g).
 // Every file is read and checked first: its name, its kind, a clash with another selected

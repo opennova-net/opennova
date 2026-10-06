@@ -484,8 +484,10 @@ static int test_native_extractors() {
 			count_code(session.view().findings.diagnostics, "graph.unreadable") == 0);
 
 	// A native file the graph cannot read is a warning, its references unchecked, kept
-	// while the file is unchanged; a document type's file that does not load (a mission, a model,
-	// a menu) is its validator's error, not the graph's.
+	// while the file is unchanged: since it opens as a text (DI-06), the text type's (text.unreadable,
+	// the engine reader's words at the place it stops), the graph's own reading of it failing still; a
+	// document type's file that does not load (a mission, a model, a menu) is its validator's error,
+	// not the graph's.
 	TEST_EXPECT(editor_test::write_text(root + "/broken.ptl", "[effectdef]\n{\n\tid = OPEN;\n"));
 	TEST_EXPECT(editor_test::write_text(root + "/broken.bms", "not a mission"));
 	TEST_EXPECT(editor_test::write_text(root + "/broken.3di", "not a model"));
@@ -495,10 +497,10 @@ static int test_native_extractors() {
 	const auto unreadable = [&diagnostics](const std::string &asset) {
 		size_t n = 0;
 		for (const Diagnostic &d : diagnostics)
-			n += d.code() == "graph.unreadable" && d.asset == asset && d.severity == DiagnosticSeverity::Warning ? 1 : 0;
+			n += d.code() == "text.unreadable" && d.asset == asset && d.severity == DiagnosticSeverity::Warning ? 1 : 0;
 		return n;
 	};
-	TEST_EXPECT(unreadable("broken.ptl") == 1 && count_code(diagnostics, "graph.unreadable") == 1);
+	TEST_EXPECT(unreadable("broken.ptl") == 1 && count_code(diagnostics, "graph.unreadable") == 0);
 	TEST_EXPECT(graph.stats().files_failed == 4);
 	bool mission_error = false;
 	for (const Diagnostic &d : diagnostics)

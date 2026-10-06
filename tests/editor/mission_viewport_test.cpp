@@ -13,12 +13,18 @@
 // mark range dropping marks, a box's records); and its envelope (the body's counts, a page of items,
 // the notes). S14 V10: a drop's item facts and its one batch (on the plane, over a device's ground
 // with the model's anchor baked in), its refusals; the ground command. S14 V11, the retail leg
-// (--retail, OPENNOVA_JO_DIR): every shipped mission in a project, each opened in its viewport.
+// (--retail, OPENNOVA_JO_DIR): every shipped mission in a project, each opened in its viewport. DI-07:
+// the ground under a point in the game's words over a minted terrain with a char map (the class, its
+// footstep slots and effects row at known places, a placed tile, the water plane, the ocean), and the
+// hit and the canvas carrying it.
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -37,8 +43,14 @@
 #include <editor/preview/mission_viewport.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
+#include <formats/mission/bms.h>
 #include <formats/mission/mission.h>
+#include <formats/pcx/pcx_io.h>
 #include <formats/threedi/threedi_3di3.h>
+#include <formats/til/til_io.h>
+#include <formats/trn/charmap_legend.h>
+#include <runtime/audio/sound_profile.h>
+#include <runtime/world/ammo_table.h>
 #include <editor/preview/preview_clock.h>
 #include <editor/preview/viewport_json.h>
 #include <editor/preview/viewport_kinds.h>
@@ -1581,8 +1593,329 @@ static int test_fog_reach() {
 	return 0;
 }
 
+// --- DI-07: the ground under the pointer, in the game's words ---------------------------------------------
+
+// Files by name (any case), each write moving its stamp, as a project's files move theirs.
+struct GroundFiles final : opennova::FileSource {
+	std::map<std::string, std::vector<uint8_t>> files;
+	std::map<std::string, uint64_t> stamps;
+	uint64_t serial = 0;
+	static std::string key(const std::string &name) {
+		std::string out = name;
+		for (char &c : out) c = char(std::tolower(static_cast<unsigned char>(c)));
+		return out;
+	}
+	void put(const std::string &name, std::vector<uint8_t> bytes) {
+		files[key(name)] = std::move(bytes);
+		stamps[key(name)] = ++serial;
+	}
+	void put_text(const std::string &name, const std::string &text) { put(name, std::vector<uint8_t>(text.begin(), text.end())); }
+	void drop(const std::string &name) {
+		files.erase(key(name));
+		stamps.erase(key(name));
+	}
+	bool read(const std::string &name, std::vector<uint8_t> &out) const override {
+		const auto found = files.find(key(name));
+		if (found == files.end()) return false;
+		out = found->second;
+		return true;
+	}
+	uint64_t stamp(const std::string &name) const override {
+		const auto found = stamps.find(key(name));
+		return found == stamps.end() ? 0 : found->second;
+	}
+};
+
+// A char map of 256 over Tmap's island (fixtures/terrain/tmap: the four quadrants in the middle of its 8 x 8
+// grid from (-4, -4)): class c painted in a 32-texel block whose corner is texel (16 + 32 (c % 5),
+// 16 + 32 (c / 5)), dirt (1) elsewhere; the legend its palette.
+constexpr int kGroundMapSide = 256;
+std::vector<uint8_t> ground_charmap() {
+	opennova::IndexedImage8 map;
+	map.width = kGroundMapSide;
+	map.height = kGroundMapSide;
+	map.indices.assign(size_t(kGroundMapSide) * kGroundMapSide, 1);
+	for (int c = 0; c < opennova::kCharmapLegendCount; ++c)
+		for (int z = 0; z < 32; ++z)
+			for (int x = 0; x < 32; ++x)
+				map.indices[size_t(16 + 32 * (c / 5) + z) * kGroundMapSide + size_t(16 + 32 * (c % 5) + x)] = uint8_t(c);
+	for (int i = 0; i < opennova::kCharmapLegendCount; ++i) {
+		map.palette[i][0] = opennova::kCharmapLegend[i].r;
+		map.palette[i][1] = opennova::kCharmapLegend[i].g;
+		map.palette[i][2] = opennova::kCharmapLegend[i].b;
+	}
+	std::vector<uint8_t> bytes;
+	std::string error;
+	if (!opennova::encode_pcx_indexed(map, bytes, error)) std::fprintf(stderr, "the char map: %s\n", error.c_str());
+	return bytes;
+}
+
+// Where class c's block has its middle, mission metres: its texel (32 + 32 (c % 5), 32 + 32 (c / 5)), a
+// texel 4 units of the 1024-unit atlas whose texel (512 + x, 512 - y) mission (x, y) is on the island
+// (terrain-re.md, the island layout; Tmap's grid is the same), at the texel's middle.
+void block_middle(int c, double &x, double &y) {
+	const int tx = 32 + 32 * (c % 5), tz = 32 + 32 * (c / 5);
+	x = 4.0 * tx - 512.0 + 2.0;
+	y = 512.0 - 4.0 * tz - 2.0;
+}
+
+std::vector<uint8_t> tile_at(double x, double y, uint8_t index) {
+	opennova::TilFile til;
+	opennova::TilOverlayEntry entry;
+	// The tile's 16-unit square from (x, y), its z stored negated as the game reads it.
+	entry.x_fixed = opennova::bms::to_fixed_16_16(x);
+	entry.z_fixed = -opennova::bms::to_fixed_16_16(y);
+	entry.tile_index = index;
+	til.entries.push_back(entry);
+	std::vector<uint8_t> bytes;
+	std::string error;
+	if (!opennova::save_til(til, bytes, error)) std::fprintf(stderr, "the .til: %s\n", error.c_str());
+	return bytes;
+}
+
+// The ground's facts over a minted terrain (DI-07): Tmap's .trn and .cpt with a char map painting every
+// class at a known place, read through the runtime's own load; each class at its block's middle with its
+// footstep slots (snow's for 3) and its effects row (class + 4) and the snow block's line and wire form;
+// under the water plane (the .trn's 21 half units) the water's slot and row; off the island the ocean's 7;
+// the follow reading nothing again while no stamp moves; a placed tile deciding over the char map (TSD_NULL
+// with no .tsd, the tile set's .tsd class with one, the mission's tile set naming another .tsd); the water's
+// ladder (the terrain's over the environment's, the mission's override over both, the environment's where
+// the terrain has none); no char map (1 everywhere); no terrain; a body on an entity.
+static int test_ground_facts() {
+	using namespace opennova;
+	auto files = std::make_shared<GroundFiles>();
+	files->put("Tmap.trn", test_io::read_file(fixture("terrain/tmap/Tmap.trn")));
+	files->put("Tmap.cpt", test_io::read_file(fixture("terrain/tmap/Tmap.cpt")));
+	files->put("Tmap_m.pcx", ground_charmap());
+	MissionSceneHeader header;
+	header.terrain = "Tmap";
+	MissionGround ground;
+	ground.follow(files, 1, header, "pad");
+	TEST_EXPECT(ground.terrain() && ground.error().empty() && ground.surface_map() == "Tmap_m.pcx" && ground.reads() == 1);
+	// Tmap's water: its .trn's 21 half units (no environment, no override).
+	TEST_EXPECT(ground.water() && near(ground.water_height(), 10.5));
+	for (int c = 0; c < kCharmapLegendCount; ++c) {
+		double x = 0.0, y = 0.0;
+		block_middle(c, x, y);
+		const MissionGroundFacts f = ground.terrain_at(x, y, 20.0);
+		TEST_EXPECT(f.on == MissionGroundOn::Terrain && f.surface == c && f.from == MissionSurfaceFrom::Map);
+		TEST_EXPECT(!f.under_water && f.impact_row == c + 4);
+		TEST_EXPECT(f.footstep[0] == (c == 3 ? audio::kSlotFootLSnow : audio::kSlotFootLGround) &&
+				f.footstep[1] == (c == 3 ? audio::kSlotFootRSnow : audio::kSlotFootRGround));
+	}
+	double sx = 0.0, sy = 0.0;
+	block_middle(3, sx, sy);
+	const MissionGroundFacts snow = ground.terrain_at(sx, sy, 20.0);
+	TEST_EXPECT(mission_ground_line(snow) ==
+			"Snow (surface 3, TSD_SNOW): footsteps play SSLFootSnow and SSRFootSnow; a round plays its ammo's snow row (7).");
+	const JsonValue json = mission_ground_to_json(snow);
+	TEST_EXPECT(json.get_string("on", "") == "terrain" && json.get_number("surface", -1) == 3 &&
+			json.get_string("name", "") == "TSD_SNOW" && json.get_string("words", "") == "Snow" &&
+			json.get_string("colour", "") == "#CCEFF4" && json.get_string("from", "") == "map" &&
+			json.get_bool("water", false) && near(json.get_number("water_height", 0), 10.5) && !json.get_bool("under_water", true));
+	const JsonValue *footstep = json.get("footstep");
+	const JsonValue *names = footstep ? footstep->get("names") : nullptr;
+	TEST_EXPECT(names && names->array.size() == 2 && names->array[0].string == "SSLFootSnow" &&
+			names->array[1].string == "SSRFootSnow" && footstep->get_string("words", "") == "snow");
+	const JsonValue *row = json.get("impact_row");
+	TEST_EXPECT(row && row->get_number("row", 0) == 7 && row->get_string("tag", "") == "snow" && row->get_string("words", "") == "Snow");
+	// Under the water plane: the water's one slot, a round from above meeting the water first.
+	const MissionGroundFacts wet = ground.terrain_at(sx, sy, 4.0);
+	TEST_EXPECT(wet.under_water && wet.footstep[0] == audio::kSlotFootWater && wet.footstep[1] == audio::kSlotFootWater &&
+			wet.impact_row == world::kWaterImpactEffectTag && wet.surface == 3);
+	TEST_EXPECT(mission_ground_line(wet).find("6.5 m under the water: footsteps play SSFootWater;") == 0 &&
+			mission_ground_line(wet).find("water row (11)") != std::string::npos);
+	// Off the island: a sector the grid leaves empty reads the ocean, 7.
+	const MissionGroundFacts sea = ground.terrain_at(1500.0, 0.0, 20.0);
+	TEST_EXPECT(sea.surface == 7 && sea.from == MissionSurfaceFrom::Ocean && sea.impact_row == 11);
+	TEST_EXPECT(mission_ground_line(sea).find("Underwater (surface 7, TSD_UNDERWATER: a sector the terrain leaves empty") == 0);
+	// Nothing moved: nothing read again, the files' generation moving or not.
+	ground.follow(files, 1, header, "pad");
+	ground.follow(files, 2, header, "pad");
+	TEST_EXPECT(ground.reads() == 1);
+
+	// A placed tile over the snow block's middle: the tile set has no .tsd, so the game's memset table's
+	// TSD_NULL (D-SND-15), the char map's snow under it.
+	files->put("pad.til", tile_at(sx - 2.0, sy - 2.0, 5));
+	ground.follow(files, 3, header, "pad");
+	TEST_EXPECT(ground.reads() == 2 && ground.tiles() == 1);
+	MissionGroundFacts tiled = ground.terrain_at(sx, sy, 20.0);
+	TEST_EXPECT(tiled.surface == 0 && tiled.from == MissionSurfaceFrom::Tile && tiled.tile == 5 && tiled.map_surface == 3 &&
+			tiled.impact_row == 4 && tiled.footstep[0] == audio::kSlotFootLGround);
+	TEST_EXPECT(mission_ground_line(tiled).find("Null (surface 0, TSD_NULL) from placed tile 5, over the char map's Snow (3)") == 0);
+	// Past its square: the char map again.
+	const MissionGroundFacts beside = ground.terrain_at(sx + 15.0, sy, 20.0);
+	TEST_EXPECT(beside.surface == 3 && beside.from == MissionSurfaceFrom::Map);
+	// The tile set's .tsd, beside the strip Tmap's .trn names (mnml_t.tga): the tile's class.
+	files->put_text("mnml_t.tsd", "INDEX_5 TSD_WOOD\r\n");
+	ground.follow(files, 4, header, "pad");
+	tiled = ground.terrain_at(sx, sy, 20.0);
+	TEST_EXPECT(ground.reads() == 3 && tiled.surface == 13 && tiled.from == MissionSurfaceFrom::Tile && tiled.impact_row == 17);
+	// The mission's tile set names another strip, whose .tsd the project lacks: TSD_NULL again.
+	header.tile_set = "other_t";
+	ground.follow(files, 4, header, "pad");
+	TEST_EXPECT(ground.reads() == 4 && ground.terrain_at(sx, sy, 20.0).surface == 0);
+	header.tile_set.clear();
+	files->drop("pad.til");
+
+	// The water's ladder: the terrain's over the environment's, the mission's override over both (its half
+	// units), the environment's where the terrain has none.
+	files->put_text("pad.env", "water_height 30\r\n");
+	header.environment = "pad";
+	ground.follow(files, 5, header, "pad");
+	TEST_EXPECT(near(ground.water_height(), 10.5));
+	header.attrib_flags = 0x1;
+	header.water_override = 40;
+	ground.follow(files, 5, header, "pad");
+	TEST_EXPECT(near(ground.water_height(), 20.0));
+	header.attrib_flags = 0;
+	header.water_override = 0;
+	{
+		const std::vector<uint8_t> trn = test_io::read_file(fixture("terrain/tmap/Tmap.trn"));
+		std::string text(trn.begin(), trn.end());
+		const size_t at = text.find("water_height");
+		TEST_EXPECT(at != std::string::npos);
+		if (at == std::string::npos) return 1;
+		text.replace(at, text.find('\n', at) - at, "water_height 0");
+		files->put_text("Tmap.trn", text);
+	}
+	ground.follow(files, 6, header, "pad");
+	TEST_EXPECT(near(ground.water_height(), 15.0));
+	header.environment.clear();
+	ground.follow(files, 6, header, "pad");
+	TEST_EXPECT(!ground.water() && !ground.terrain_at(sx, sy, -5.0).under_water);
+
+	// No char map: the game reads 1 everywhere.
+	files->drop("Tmap_m.pcx");
+	ground.follow(files, 7, header, "pad");
+	const MissionGroundFacts plain = ground.terrain_at(sx, sy, 20.0);
+	TEST_EXPECT(ground.terrain() && ground.surface_map().empty() && plain.surface == 1 && plain.from == MissionSurfaceFrom::NoMap &&
+			plain.impact_row == 5);
+	TEST_EXPECT(mission_ground_line(plain).find("Dirt (surface 1, TSD_DIRT: the terrain has no char map, so 1 everywhere)") == 0);
+	// No terrain: no class to name.
+	header.terrain = "absent";
+	ground.follow(files, 7, header, "pad");
+	const MissionGroundFacts none = ground.terrain_at(sx, sy, 20.0);
+	TEST_EXPECT(!ground.terrain() && !ground.error().empty() && none.surface == -1 && none.from == MissionSurfaceFrom::NoTerrain &&
+			none.impact_row == -1 && mission_ground_line(none).find("The terrain was not read") == 0);
+	// A body standing on an entity: the object's slots; the material it strikes decides a round's row.
+	const MissionGroundFacts on = ground.record_at(7, "Wooden crate", 1.0, 2.0, 20.0);
+	TEST_EXPECT(on.on == MissionGroundOn::Record && on.footstep[0] == audio::kSlotFootLObject &&
+			on.footstep[1] == audio::kSlotFootRObject && on.impact_row == -1);
+	TEST_EXPECT(mission_ground_line(on) == "On Wooden crate: footsteps play SSLFootOBJ and SSRFootOBJ (a body standing on an "
+										   "entity); a round plays the row of the material it strikes.");
+	const JsonValue on_json = mission_ground_to_json(on);
+	TEST_EXPECT(on_json.get_string("on", "") == "record" && on_json.get_number("row", 0) == 7 &&
+			on_json.get_string("record", "") == "Wooden crate" && on_json.get("impact_row") && on_json.get("impact_row")->is_null());
+	TEST_EXPECT(mission_ground_to_json(MissionGroundFacts()).get_string("on", "") == "nothing");
+	std::printf("test_ground_facts passed\n");
+	return 0;
+}
+
+// The viewport's hit carries the ground (DI-07) over the project's own files: Tmap's .trn and .cpt and the
+// minted char map in the project, a device whose ray meets the terrain over the snow block (the class, the
+// slots and the row in the hit's `ground`), an entity's surface (a body on it), nothing (the sky), and no
+// device (nothing to say); the canvas's ground under a hovered pointer, asked of the device once while the
+// pointer stands, nothing while it is off the picture.
+static int test_ground_hit() {
+	Rig rig("opennova_editor_mission_viewport_ground_facts");
+	TEST_EXPECT(rig.open());
+	const std::string root = rig.session.view().project.root;
+	TEST_EXPECT(editor_test::write_bytes(root + "/Tmap.trn", test_io::read_file(fixture("terrain/tmap/Tmap.trn"))));
+	TEST_EXPECT(editor_test::write_bytes(root + "/Tmap.cpt", test_io::read_file(fixture("terrain/tmap/Tmap.cpt"))));
+	TEST_EXPECT(editor_test::write_bytes(root + "/Tmap_m.pcx", ground_charmap()));
+	rig.session.handle(request::rescan());
+	rig.session.run_operations();
+	rig.pump();
+	const MissionViewport *viewport = rig.viewport();
+	TEST_EXPECT(viewport->scene().header().terrain == "Tmap");
+	std::string error;
+	// No device to say: nothing under the point.
+	JsonValue hit = ask(rig, R"({"op": "hit", "x": 40, "y": 30})", error);
+	TEST_EXPECT(error.empty() && hit.get("ground") && hit.get("ground")->get_string("on", "") == "nothing");
+	rig.session.viewports().set_devices(&rig.devices.cache);
+	rig.pump();
+	FakeDevice *device = rig.device();
+	TEST_EXPECT(device != nullptr);
+	if (!device) return 1;
+	double sx = 0.0, sy = 0.0;
+	block_middle(3, sx, sy);
+	device->ground = [](double, double) { return 20.0; };
+	device->ray = [sx, sy](const double *, const double *) {
+		ViewportRayHit met;
+		met.met = ViewportRayHit::Met::Surface;
+		met.point[0] = sx;
+		met.point[1] = sy;
+		met.point[2] = 20.25;
+		return met;
+	};
+	hit = ask(rig, R"({"op": "hit", "x": 40, "y": 30})", error);
+	const JsonValue *ground = hit.get("ground");
+	TEST_EXPECT(error.empty() && ground && ground->get_string("on", "") == "terrain" && ground->get_number("surface", -1) == 3);
+	if (!ground) return 1;
+	const JsonValue *at = ground->get("at");
+	// The point's height the ground's there.
+	TEST_EXPECT(at && at->array.size() == 3 && near(at->array[0].number, sx) && near(at->array[2].number, 20.0));
+	const JsonValue *names = ground->get("footstep") ? ground->get("footstep")->get("names") : nullptr;
+	TEST_EXPECT(names && names->array.size() == 2 && names->array[0].string == "SSLFootSnow");
+	TEST_EXPECT(ground->get("impact_row") && ground->get("impact_row")->get_number("row", 0) == 7 &&
+			ground->get_string("line", "").find("Snow (surface 3") == 0);
+	// An entity's surface: a body standing on it.
+	const NodeAddress item = first_of(*rig.document(), MissionKind::Item);
+	device->ray = [item](const double *, const double *) {
+		ViewportRayHit met;
+		met.met = ViewportRayHit::Met::Record;
+		met.row = item.row;
+		met.point[2] = 25.0;
+		return met;
+	};
+	hit = ask(rig, R"({"op": "hit", "x": 40, "y": 30})", error);
+	ground = hit.get("ground");
+	TEST_EXPECT(ground && ground->get_string("on", "") == "record" && ground->get_number("row", 0) == double(item.row) &&
+			!ground->get_string("record", "").empty() && ground->get("impact_row") && ground->get("impact_row")->is_null());
+	// The sky.
+	device->ray = [](const double *, const double *) {
+		ViewportRayHit met;
+		met.met = ViewportRayHit::Met::Nothing;
+		return met;
+	};
+	hit = ask(rig, R"({"op": "hit", "x": 40, "y": 30})", error);
+	TEST_EXPECT(hit.get("ground") && hit.get("ground")->get_string("on", "") == "nothing");
+
+	// The canvas: the ground under a hovered pointer, asked once while the pointer stands still.
+	device->ray = [sx, sy](const double *, const double *) {
+		ViewportRayHit met;
+		met.met = ViewportRayHit::Met::Surface;
+		met.point[0] = sx;
+		met.point[1] = sy;
+		return met;
+	};
+	const ViewportContext context = rig.context();
+	std::unique_ptr<CanvasHalf> half = viewport->make_canvas();
+	auto *canvas = static_cast<MissionCanvas *>(half.get());
+	editor_test::Gathered gathered;
+	canvas->follow(*viewport, context, gathered);
+	CanvasInput in;
+	in.width = context.width;
+	in.height = context.height;
+	in.hovered = true;
+	in.mouse = CanvasPoint{ 40.0f, 30.0f };
+	TEST_EXPECT(canvas->ground(context, in).surface == 3);
+	const int rays = device->rays;
+	TEST_EXPECT(canvas->ground(context, in).surface == 3 && device->rays == rays);
+	in.mouse = CanvasPoint{ 41.0f, 30.0f };
+	TEST_EXPECT(canvas->ground(context, in).surface == 3 && device->rays == rays + 1);
+	in.hovered = false;
+	TEST_EXPECT(canvas->ground(context, in).on == MissionGroundOn::Nothing);
+	rig.session.viewports().set_devices(nullptr);
+	std::printf("test_ground_hit passed\n");
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
+	TEST_EXPECT(test_ground_facts() == 0);
+	TEST_EXPECT(test_ground_hit() == 0);
 	TEST_EXPECT(test_kind_row() == 0);
 	TEST_EXPECT(test_status_and_follow() == 0);
 	TEST_EXPECT(test_change_sets() == 0);
