@@ -27,6 +27,10 @@ enum class ViewportKind : uint8_t {
 	// the Shell's texture device), the Document tab's view of a texture, and the Preview window's of a
 	// texture Files selects
 	Texture,
+	// A particle effect as the game draws it (ADR 0046 DI-14: the effect a particle file defines,
+	// spawned by the engine's effect scene and played on the preview clock; the Shell's particle
+	// renderer), the Preview window's while a particle file is active
+	Effect,
 	kCount,
 };
 
@@ -40,7 +44,7 @@ inline constexpr size_t kViewportKindCount = static_cast<size_t>(ViewportKind::k
 // are one Main and one Preview.
 enum class ViewportRole : uint8_t { Preview, Main };
 
-// A kind's token on the wire ("menu", "model", "script", "mission", "texture"; "" past the last kind), and
+// A kind's token on the wire ("menu", "model", "script", "mission", "texture", "effect"; "" past the last kind), and
 // the kind a token names (false for none).
 const char *viewport_kind_token(ViewportKind kind);
 bool viewport_kind_from_token(const std::string &token, ViewportKind &out);
