@@ -933,6 +933,18 @@ int test_validation() {
 	TEST_EXPECT(one(edit_of(EditOperation::Set, mission, "attrib_flags",
 	                        int64_t(uint32_t(bms::AttribFlags::Coop) | uint32_t(bms::AttribFlags::Deathmatch))),
 	                "mission.game_mode", DiagnosticSeverity::Warning, mission, "attrib_flags"));
+	// No game mode bit: single player, whose player starts at a 6094 or 6001 marker, the minted mission
+	// placing neither (the player at the map's origin); a marker made a 6001 start clears it.
+	TEST_EXPECT(one(edit_of(EditOperation::Set, mission, "attrib_flags", int64_t(0)), "mission.no_start", DiagnosticSeverity::Warning,
+	                mission, "attrib_flags"));
+	{
+		const NodeAddress marker0 = row_at(*document, MissionKind::Marker, 0);
+		TEST_EXPECT(document->apply({edit_of(EditOperation::Set, mission, "attrib_flags", int64_t(0)),
+		                             edit_of(EditOperation::Set, marker0, "item", int64_t(106001))},
+		                            error));
+		TEST_EXPECT(type.validate_file(*document).empty());
+		document->undo();
+	}
 	TEST_EXPECT(one(edit_of(EditOperation::Set, trigger0, "main_type", int64_t(9)), "mission.trigger_type", DiagnosticSeverity::Warning,
 	                trigger0, "main_type"));
 	TEST_EXPECT(one(edit_of(EditOperation::Set, trigger0, "sub_type", int64_t(99)), "mission.trigger_type", DiagnosticSeverity::Warning,
@@ -1289,11 +1301,12 @@ int test_retail() {
 	// (CP13's SSN 2072), every mission with an entity on an empty path.
 	TEST_EXPECT(missions == 115 && differing == 5);
 	TEST_EXPECT(entity_refs == 4561 && entity_missing == 162 && zone_refs == 879 && zone_missing == 53);
-	TEST_EXPECT(event_refs == 841 && event_past == 0 && stops == 11235 && stops_past == 0 && text_refs == 1574);
-	// The text keys by key: no shipped action outputs a triggered text.
+	TEST_EXPECT(event_refs == 841 && event_past == 0 && stops == 11235 && stops_past == 0 && text_refs == 12824);
+	// The text keys by key: no shipped action outputs a triggered text; each of the 11,250 type-6005 waypoints
+	// forms its name's, 822 of them of id -1 ("STRWPNAME-01", the key the spawn forms of it).
 	const std::map<std::string, size_t> keys = {{"LOCATION", 581},     {"STRLOSEDIRECTIVE", 17}, {"STRLOSEMSG", 29},
 	                                            {"STRNAME", 544},      {"STRWINCOND", 130},      {"STRWINDIRECTIVE", 133},
-	                                            {"STRWINMSG", 140}};
+	                                            {"STRWINMSG", 140},      {"STRWPNAME", 10428},     {"STRWPNAME-", 822}};
 	TEST_EXPECT(text_by_key == keys);
 	const std::map<std::string, size_t> expected = {{"mission.path_count", 1},      {"mission.path_empty", 115},
 	                                                {"mission.path_one_shot", 72},   {"mission.path_start", 95},

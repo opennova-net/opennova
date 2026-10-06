@@ -146,6 +146,9 @@ public:
 	// Add's, a Duplicate's copy, a Paste's first); 0 for an edit that made nothing, or whose record
 	// a later edit of the batch removed.
 	const std::vector<NodeId> &last_made() const { return made_; }
+	// The rows the last batch's Adds found in place of making one (existing_row_for: a string table's
+	// section of the name asked), each in its Add's place; empty after a batch that found none.
+	const std::vector<NodeId> &last_found_rows() const { return found_; }
 	// The address of a row or nested record by identity (kind 0 / row 0 when unknown): its row
 	// from an index of every record's row (index_records), its place from that row's own index.
 	NodeAddress address_of(NodeId id) const;
@@ -304,6 +307,12 @@ public:
 	// Removes before it applies them (a Delete, a Cut).
 	virtual bool removal_edits(const std::vector<NodeAddress> &records, std::vector<Edit> &out,
 	                           std::string &error) const;
+	// The edits that move `move` (a Move whose destination, Edit::parent, is in another row than its
+	// record) as the type moves a record out of its row: added there with what it holds, removed here,
+	// one step (a string to another section of its table); a batch_made label in `out` names an edit
+	// of `out`. False, with `error`, where the type moves none out of its row: the default (a record
+	// moves within its own row). The session asks it of every such Move of a batch of Moves.
+	virtual bool move_out_edits(const Edit &move, std::vector<Edit> &out, std::string &error) const;
 
 	// --- derived from the declarations above ---------------------------------------
 	// The collections of the record (or row) `owner` names.
@@ -463,6 +472,16 @@ protected:
 	virtual std::shared_ptr<Node> make_node(NodeKind kind, NodeId id,
 	                                        const std::vector<std::shared_ptr<const Node>> &rows,
 	                                        std::string &error);
+	// The row an Add of a top-level row with its field set (Edit::field, Edit::value) stands for where
+	// a row of `rows` already holds that value as the game finds it, the type's lookup reading the
+	// first row of it (a string table's section by its name), so another would never be read: the Add
+	// then makes nothing and names that row (last_found_rows), which the batch's later edits fill. 0,
+	// the default: the Add makes its row.
+	virtual NodeId existing_row_for(const Edit &add, const std::vector<std::shared_ptr<const Node>> &rows) const {
+		(void)add;
+		(void)rows;
+		return 0;
+	}
 	// Where a row goes among the rows (ADR 0046 S14): the position an Add, a Paste at the top level,
 	// a Duplicate or a Move asks (SIZE_MAX: the end), over `rows` as the batch has left them (a Move's
 	// row still among them, which the type passes over), or the one the type's order keeps instead:
@@ -673,7 +692,7 @@ private:
 	std::vector<std::shared_ptr<const Node>> rows_;
 	std::shared_ptr<const FileState> file_state_;
 	NodeId next_id_ = 1, last_added_ = 0;
-	std::vector<NodeId> added_, made_;
+	std::vector<NodeId> added_, made_, found_;
 	mutable std::unordered_map<const Node *, RowIndex> indexes_;
 	// While a batch stages its edits (apply_edits): its rows, and the index of each row an edit of
 	// it changed the shape of, by the row's identity (a row's version the batch holds; forgotten by
