@@ -243,7 +243,14 @@ struct FakeDevices {
 // The requests a planner made, gathered.
 struct Gathered final : opennova::editor::CanvasRequests {
 	std::vector<opennova::editor::EditorRequest> requests;
+	// What the planner said its requests come to (DI-12): the status line's words and the item a drop placed.
+	std::string words;
+	int64_t item = 0;
 	void request(opennova::editor::EditorRequest request) override { requests.push_back(std::move(request)); }
+	void served(std::string said, int64_t placed) override {
+		words = std::move(said);
+		item = placed;
+	}
 };
 
 // The requests served in order through the session: true when there was one and each was done.
