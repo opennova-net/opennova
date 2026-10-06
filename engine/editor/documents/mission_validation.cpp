@@ -1,7 +1,8 @@
 // The mission type's findings (mission_validation.h): its table, and validate_file over a mission
 // document: the source findings its parse made (a rewrite that differs, the events' runs and their
 // order), then what the game makes of the records (ADR 0046 S14): an SSN or a zone id two records
-// carry, an SSN a lookup scanning fewer pools finds no row of, a degenerate zone, a zone id outside
+// carry (the one no lookup finds offered an id of its own, DI-11), an SSN a lookup scanning fewer
+// pools finds no row of, a degenerate zone, a zone id outside
 // the editor's range, an event index past the table, a
 // stop naming a marker the file lacks, a path counted past its slots or holding one stop, an entity on
 // an empty path or starting past its count, a group past the tables, a pool past the game's limits,
@@ -13,6 +14,7 @@
 #include <initializer_list>
 #include <iterator>
 #include <map>
+#include <set>
 #include <string>
 #include <utility>
 
@@ -36,9 +38,10 @@ constexpr FindingCodeEntry<MissionFinding> kFindingEntries[] = {
 	{ MissionFinding::RewriteDiffers, { "mission.rewrite_differs", FindingFix::Rewrite, kRewriteSections } },
 	{ MissionFinding::InvalidInput, { "mission.invalid_input", FindingFix::None, nullptr, true } },
 	{ MissionFinding::EventOrder, { "mission.event_order", FindingFix::Rewrite, kRewriteRuns } },
-	{ MissionFinding::SsnDuplicate, { "mission.ssn_duplicate" } },
+	// A record no lookup finds by its SSN or its zone id: an id of its own (DI-11, Diagnostic::planned).
+	{ MissionFinding::SsnDuplicate, { "mission.ssn_duplicate", FindingFix::EditRecord } },
 	{ MissionFinding::SsnUnscanned, { "mission.ssn_unscanned" } },
-	{ MissionFinding::ZoneDuplicate, { "mission.zone_duplicate" } },
+	{ MissionFinding::ZoneDuplicate, { "mission.zone_duplicate", FindingFix::EditRecord } },
 	{ MissionFinding::ZoneDegenerate, { "mission.zone_degenerate" } },
 	{ MissionFinding::ZoneId, { "mission.zone_id" } },
 	// Read with no bound, past the table, no refusal witnessed (the gate follows retail): listed.
@@ -81,6 +84,8 @@ constexpr int32_t kLastPathNumber = 122;
 // The trigger main types the evaluator has a case for [orig: EventTrigger_EvaluateCondition
 // @0x453620's jump table, 1..7].
 constexpr int32_t kFirstMainType = 1, kLastMainType = 7;
+// The player's SSN, which no record takes (next_free_ssn's rule; bms-event-runtime-re.md 7.3).
+constexpr int32_t kPlayerSsn = 10000;
 
 // The order the game's lookups scan the pools in: organics, items, buildings, markers [orig:
 // Entity_KillByNetId @0x43DBD0].
@@ -169,6 +174,9 @@ struct Checker {
 					   "wp_number");
 			}
 		}
+		// The SSNs the fixes give the rows no lookup finds, each its own: from one past the mission's
+		// largest on (the SSN a new entity takes, next_free_ssn), never the player's.
+		int32_t fresh = next_free_ssn(document.rows());
 		for (auto &[ssn, rows] : by_ssn) {
 			if (rows.size() < 2) continue;
 			const Node *found = rows[0];
@@ -177,17 +185,33 @@ struct Checker {
 			// The lookups by SSN take the first row in pool order [orig: Entity_KillByNetId @0x43DBD0]; an
 			// area check tests every organic and item carrying it, not stopping at the first [orig:
 			// Entity_IsBmsRefInTriggerBounds @0x43e510; docs/mission/bms-event-runtime-re.md 7.2a].
-			for (const Node *row : rows)
-				if (row != found)
-					on({row->id, row->kind, 0}, MissionFinding::SsnDuplicate, DiagnosticSeverity::Warning,
-					   "SSN " + std::to_string(ssn) + " is also " + document.record_title({found->id, found->kind, 0}) +
-					           "'s: the game's lookups by SSN find that one (organics, items, buildings, markers first) and "
-					           "never this" +
-					           (row->kind == k(K::Organic) || row->kind == k(K::Item)
-					                    ? std::string(", but an area check (SingleIsWithinArea) tests every organic and item "
-					                                  "carrying it, this one too.")
-					                    : std::string(".")),
-					   "id");
+			const std::string found_title = document.record_title({found->id, found->kind, 0});
+			for (const Node *row : rows) {
+				if (row == found) continue;
+				const bool area = row->kind == k(K::Organic) || row->kind == k(K::Item);
+				Diagnostic &d = on({row->id, row->kind, 0}, MissionFinding::SsnDuplicate, DiagnosticSeverity::Warning,
+				                   "SSN " + std::to_string(ssn) + " is also " + found_title +
+				                           "'s: the game's lookups by SSN find that one (organics, items, buildings, markers "
+				                           "first) and never this" +
+				                           (area ? std::string(", but an area check (SingleIsWithinArea) tests every organic "
+				                                               "and item carrying it, this one too.")
+				                                 : std::string(".")),
+				                   "id");
+				// Its fix (DI-11): an SSN of its own, which the lookups then find it by.
+				if (fresh == kPlayerSsn) ++fresh;
+				const int32_t own = fresh++;
+				Edit set;
+				set.address = {row->id, row->kind, 0};
+				set.field = "id";
+				set.value = int64_t(own);
+				d.planned.push_back({"Give it SSN " + std::to_string(own),
+				                     "Sets its SSN to " + std::to_string(own) +
+				                             ", one past the mission's largest (the SSN a new entity takes; never the "
+				                             "player's 10000): the game's lookups by SSN then find it. Whatever names SSN " +
+				                             std::to_string(ssn) + " still finds " + found_title +
+				                             (area ? ", and an area check no longer counts this one under it." : "."),
+				                     {set}});
+			}
 		}
 		const auto limit = [&](size_t count, size_t max, const char *pool) {
 			if (count > max)
@@ -226,18 +250,40 @@ struct Checker {
 	}
 
 	void areas() {
+		const std::vector<const Node *> rows = document.rows_of(K::Area);
+		// The zone ids the fixes give the areas no trigger names, each its own: the first ids of the 1 to 99
+		// the game's editor offers that no area has.
+		std::set<int32_t> taken;
+		for (const Node *row : rows) taken.insert(static_cast<const AreaRow &>(*row).native.id);
+		int32_t fresh = kFirstZoneId;
 		std::map<int32_t, const Node *> first;
-		for (const Node *row : document.rows_of(K::Area)) {
+		for (const Node *row : rows) {
 			const bms::AreaTrigger &area = static_cast<const AreaRow &>(*row).native;
 			const NodeAddress address{row->id, row->kind, 0};
-			if (first.count(area.id))
-				on(address, MissionFinding::ZoneDuplicate, DiagnosticSeverity::Warning,
-				   "An earlier area trigger has zone " + std::to_string(area.id) +
-				           ": the game's resolver takes the first area of an id, so no trigger or action names this "
-				           "one.",
-				   "id");
-			else
+			if (first.count(area.id)) {
+				Diagnostic &d = on(address, MissionFinding::ZoneDuplicate, DiagnosticSeverity::Warning,
+				                   "An earlier area trigger has zone " + std::to_string(area.id) +
+				                           ": the game's resolver takes the first area of an id, so no trigger or action "
+				                           "names this one.",
+				                   "id");
+				// Its fix (DI-11): a zone id of its own, which a trigger or an action can then name it by.
+				while (fresh <= kLastZoneId && taken.count(fresh)) ++fresh;
+				if (fresh <= kLastZoneId) {
+					Edit set;
+					set.address = address;
+					set.field = "id";
+					set.value = int64_t(fresh);
+					d.planned.push_back({"Give it zone " + std::to_string(fresh),
+					                     "Sets its zone id to " + std::to_string(fresh) +
+					                             ", the first of the 1 to 99 the game's editor offers that no area has: a "
+					                             "trigger or an action can then name it. Whatever names zone " +
+					                             std::to_string(area.id) + " still finds the earlier one.",
+					                     {set}});
+					taken.insert(fresh);
+				}
+			} else {
 				first.emplace(area.id, row);
+			}
 			if (area.x_min == area.x_max || area.y_min == area.y_max)
 				on(address, MissionFinding::ZoneDegenerate, DiagnosticSeverity::Warning,
 				   "The zone has no width on an axis: the game makes every trigger naming it read false and every "

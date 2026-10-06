@@ -7,6 +7,7 @@
 #include <variant>
 #include <vector>
 
+#include <editor/model/edit.h>
 #include <editor/model/finding_code_row.h>
 #include <editor/model/value.h>
 
@@ -58,6 +59,25 @@ inline bool operator==(const ReferenceSubject &a, const ReferenceSubject &b) {
 // reference.
 using FindingSubject = std::variant<std::monostate, RequirementSubject, ReferenceSubject>;
 
+// An edit of the finding's own file that sets it right, planned by whatever made the finding with
+// the file's records at hand (ADR 0046 DI-11: a validator, a use check, a project check): the offer
+// in plain words (`label`: "Give it SSN 2141"), what it does and the game's rule it follows
+// (`detail`), and the batch it makes of the file's document (`edits`, one undo step: the records by
+// the addresses the finding's own carry, which a later load or an open of the file gives the same
+// records). A finding carries its planned fixes only where its code's row says so
+// (FindingFix::EditRecord); Problems offers each as an edit_record of the finding's file, opened
+// first (session/problem_fixes.h), so the window, the editor MCP and a test apply it alike.
+struct PlannedFix {
+	std::string label;
+	std::string detail;
+	std::vector<Edit> edits;
+};
+
+inline bool operator==(const PlannedFix &a, const PlannedFix &b) {
+	return a.label == b.label && a.detail == b.detail && a.edits == b.edits;
+}
+inline bool operator!=(const PlannedFix &a, const PlannedFix &b) { return !(a == b); }
+
 struct Diagnostic;
 
 // A finding of a row's code, at a place (the file's project-relative path, the field). The row is
@@ -84,6 +104,9 @@ struct Diagnostic {
 	// says it.
 	std::string record_title;
 	FindingSubject subject;
+	// The edits of its own file that set it right, as its maker planned them (PlannedFix), in the
+	// order Problems offers them; none for a finding whose code's row offers no EditRecord fix.
+	std::vector<PlannedFix> planned;
 
 	// The row the finding was made from; null for a Diagnostic no finding was made into (an error
 	// left as it was because nothing failed).
@@ -145,7 +168,8 @@ inline bool operator==(const Diagnostic &a, const Diagnostic &b) {
 	return a.severity == b.severity && a.row() == b.row() && a.message == b.message &&
 			a.asset == b.asset && a.field == b.field && a.record == b.record && a.line == b.line &&
 			a.column == b.column && a.row_id == b.row_id && a.child_id == b.child_id && a.record_kind == b.record_kind &&
-			a.record_key == b.record_key && a.record_title == b.record_title && a.subject == b.subject;
+			a.record_key == b.record_key && a.record_title == b.record_title && a.subject == b.subject &&
+			a.planned == b.planned;
 }
 inline bool operator!=(const Diagnostic &a, const Diagnostic &b) { return !(a == b); }
 
