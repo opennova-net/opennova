@@ -56,10 +56,10 @@ std::vector<std::string> list_retail_file_names(const std::string &retail_root, 
 // (BaseNames); none for a standalone project, and when the install does not mount.
 std::vector<std::string> list_base_file_names(const std::string &retail_root, const ProjectDocument &document);
 // Where an import writes a file of `kind` (project-relative): over the project's file of
-// the name when it has one (a replace keeps its place), else in the kind's folder
-// (AssetKindRow::folder); an import source in the folder of the kind its name gives (a PNG with
-// the textures), or, where its name gives none, its importer's (Importer::folder: a font set with
-// the fonts).
+// the name when it has one (a replace keeps its place), else where the project keeps a file
+// of the kind (assets/project_layout.h's placement_path: the top level of a flat project); an
+// import source where its name's kind is placed (a PNG with the textures), or, where its name gives
+// none, in its importer's folder (Importer::folder: a font set with the fonts).
 std::string import_destination(const AssetScan &existing, const std::string &name, AssetKind kind);
 
 // A file an author's import source reads besides it, which an import of the source from the disk
