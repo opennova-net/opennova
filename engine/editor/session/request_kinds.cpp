@@ -858,14 +858,22 @@ constexpr RequestKindRow kRows[] = {
 	Request(K::NewTerrain, "new_terrain", serve_new_terrain,
 			"A terrain named path (its stem: letters, digits and underscores, at most 9) made from images "
 			"(import/terrain_import.h): values names them, heightmap (a PNG of 1024 x 1024, any depth, or a "
-			".raw) and colormap (1024 x 1024) required, detail and tiles optional, each a file on disk "
-			"(copied into art/terrain/ as <name>_<key>.<ext>) or a project file (named where it is), and "
-			"takes the importer's options top (world units of the heightmap's white, 127.5), water (the "
+			".raw) and colormap (1024 x 1024) required, detail, tiles and surface optional, each a file on "
+			"disk (copied into art/terrain/ as <name>_<key>.<ext>) or a project file (named where it is), "
+			"and takes the importer's options top (world units of the heightmap's white, 127.5), water (the "
 			"sea's height in world units, 0 none) and layout (island or tiled); art/terrain/<name>.tset and "
 			"its record written, then imported, a refresh (the outcome names the operation), which makes "
-			"<name>.trn, .cpt, .til and its textures. Refused, nothing written (import.terrain): a name "
-			"taken or that does not fit, a value of no key it takes, an image that does not read or does "
-			"not fit its role.")
+			"<name>.trn, .cpt, .til and its textures, and <name>_m.pcx, the surface map the .trn's "
+			"polytrn_charmap names, from a surface image (square, 256, 512 or 1024 a side, over the "
+			"heightmap: an 8-bit PCX's or a palette PNG's indices are the surface classes, 0 to 19; any "
+			"other image's colours each a class's legend colour exactly: 0 NULL #000000, 1 DIRT #99763D, 2 "
+			"GRASS #00D200, 3 SNOW #CCEFF4, 4 CEMENT #989898, 5 SAND #FFFF00, 6 PACKEDDIRT #FF8000, 7 "
+			"UNDERWATER #0000FF, 8 RAILROAD #FF0000, 9 MUD #724000, 10 ICE #A0BEDB, 11 QUICKSAND #A100A1, 12 "
+			"STONE #FF00BA, 13 WOOD #9E4E00, 14 METAL #00C9CB, 15 GLASS #C0FFFF, 16 CLOTH #8080FF, 17 "
+			"FOLIAGE #006400, 18 HMETAL #505050, 19 FLESH #FFC0A0). "
+			"Refused, nothing written (import.terrain): a name taken or that does not fit, a value of no "
+			"key it takes, an image that does not read or does not fit its role (a surface texel of no "
+			"class named by its column and row).")
 			.takes(request_params({ F::Path, F::Values }))
 			.holds(kFiles, kFiles | kSlot)
 			.ends_edit_groups()
