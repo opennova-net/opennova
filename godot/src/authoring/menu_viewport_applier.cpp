@@ -152,15 +152,42 @@ void MenuViewportApplier::apply(const opennova::editor::ViewportModel &, const o
 
 void MenuViewportApplier::tick(const opennova::editor::ViewportModel &model,
 		const opennova::editor::PreviewClock &clock) {
-	if (!frame_->is_configured()) return;
-	const auto &menu = static_cast<const opennova::editor::MenuViewport &>(model);
-	uint32_t time = 0;
-	if (opennova::editor::menu_frame_clock(menu, frame_->native_state().time_ms, clock, time))
-		frame_->set_time_ms(time);
+	if (frame_->is_configured()) {
+		const auto &menu = static_cast<const opennova::editor::MenuViewport &>(model);
+		uint32_t time = 0;
+		if (opennova::editor::menu_frame_clock(menu, frame_->native_state().time_ms, clock, time))
+			frame_->set_time_ms(time);
+		place_pointer_(model);
+	}
+	// The canvas's mouse is this frame's alone: a frame no canvas draws has none.
+	canvas_pointer_ = false;
 }
 
 void MenuViewportApplier::resize(int width, int height) {
 	frame_->set_size(Vector2(float(width), float(height)));
+}
+
+void MenuViewportApplier::pointer(bool over, float x, float y) {
+	canvas_pointer_ = over;
+	canvas_x_ = x;
+	canvas_y_ = y;
+}
+
+void MenuViewportApplier::place_pointer_(const opennova::editor::ViewportModel &model) {
+	const opennova::editor::MenuPointerShow &shown = static_cast<const opennova::editor::MenuViewport &>(model).pointer();
+	bool visible = false;
+	Vector2 at;
+	if (shown.shown && canvas_pointer_) {
+		visible = true;
+		at = Vector2(canvas_x_, canvas_y_);
+	} else if (shown.shown && shown.held) {
+		// The held point in design units, on the picture's pixels as the frame scales the design.
+		const Vector2 size = frame_->get_size();
+		visible = true;
+		at = Vector2(shown.x * size.x / float(opennova::menu::kMenuDesignWidth),
+				shown.y * size.y / float(opennova::menu::kMenuDesignHeight));
+	}
+	frame_->place_cursor(visible, at);
 }
 
 } // namespace godot
