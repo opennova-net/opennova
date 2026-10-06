@@ -34,7 +34,7 @@ the editor finds it anywhere in the project. Keep new files at the top level.
 | `Avatars.def` | The player's character: one combo of the head `onsoldh.3di`, the body `onsoldb.3di` and the first-person arms `on_arms.3di`. Hand-written in the game's form. |
 | `menu_style.mns`, `brand.mns` | The menu stylesheets: the `%NAME%` fonts and colours the screens use. From Create Missing. |
 | `on_ar15.3di` | A first-person AR-15-pattern carbine, 64 parts on one rig. Exported from `art/on_ar15/on_ar15.blend`, like every `on_ar15*` and `on_arms*` file below. |
-| `on_arms.3di` | The first-person arms skinned to `on_ar15`'s rig (its first 55 parts). |
+| `on_arms.3di` | The first-person arms skinned to `on_ar15`'s rig (its first 55 parts): `onsold1`'s woodland fatigue sleeves and dark gloves (`art/on_ar15/SOURCES.md`). |
 | `on_ar15.adm` | `on_ar15`'s animation table: the eight weapon slots and the clip each plays. |
 | `on_ar15_{rst,i,f,r,e,swt,swf,swr}.bad` | The clips: reset, idle, fire, reload, empty, switch to, switch from and switch rank. |
 | `on_ar15_{0,1,2,3}_c.tga`, `on_arms_{0,1}_c.tga` | The models' diffuse textures, 1024 a side (32-bit TGAs until the editor writes DXT5 DDS). |
