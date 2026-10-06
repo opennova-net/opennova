@@ -26,6 +26,7 @@
 #include <formats/rtxt/rtxt.h>
 #include <formats/tga/tga.h>
 #include <formats/tga/tga_read.h>
+#include <formats/til/til_io.h>
 #include <runtime/audio/sound_profile.h>
 #include <runtime/inmatch/charattr_challenge.h>
 #include <runtime/menu/menu_assets.h>
@@ -934,6 +935,18 @@ static int test_mission_blanks() {
 	TEST_EXPECT(opennova::rtxt::parse(table_bytes.data(), table_bytes.size(), table, why) && table.sections.size() == 1 &&
 	            table.sections[0].name == "Info" && table.entries.size() == 2 && table.entries[0].key == "TITLE" &&
 	            table.entries[0].text == "The first" && table.entries[1].key == "BRIEFING" && table.entries[1].text.empty());
+
+	// A tile placement (the mission's <mission>.til, which every shipped mission carries): Files' New
+	// lists it, and it places no tile, its header alone through the .til writer (read back).
+	const BlankFactory *tiles = find_blank_factory_for_kind(AssetKind::TileInfo);
+	TEST_EXPECT(tiles && tiles->free_form && tiles->role[0] == '\0' && tiles->param_count == 0 &&
+	            std::string(asset_kind_row(AssetKind::TileInfo).new_name) == "newmission.til");
+	BlankRequest til_request;
+	til_request.logical_name = "first.til";
+	std::vector<uint8_t> til_bytes;
+	TEST_EXPECT(make_blank(til_request, AssetKind::TileInfo, til_bytes, error) && til_bytes.size() == 16);
+	opennova::TilFile til;
+	TEST_EXPECT(opennova::load_til(til_bytes.data(), til_bytes.size(), til, why) && til.empty());
 
 	// A script: a comment naming it, CR LF, which the compiler takes with nothing to say.
 	BlankRequest script;
