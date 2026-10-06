@@ -50,6 +50,10 @@ protected:
 	// author can do about it: a model's rig chooser).
 	virtual void draw_ready(Workspace &workspace, const ViewportModel &model, ViewportContext &context) = 0;
 	virtual void draw_empty(Workspace &workspace, const ViewportModel *model, const std::string &path);
+	// Whether the picture draws a pointer of its own with the mouse where the canvas reads it (`in`), the
+	// canvas showing none of its own there (a menu's: the game's pointer, DI-08): the canvas hides the
+	// editor's pointer then. None by default.
+	virtual bool draws_pointer(const ViewportModel &model, const ViewportContext &context, const CanvasInput &in);
 
 	// The canvas `height` tall across the room: the device's picture of the viewport under the
 	// kind's shapes, the frame's pointer and keys to the kind's half of it (the canvas's gestures),
