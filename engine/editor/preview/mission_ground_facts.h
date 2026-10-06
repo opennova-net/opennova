@@ -83,6 +83,8 @@ public:
 			const std::string &mission);
 	// A terrain read, and why not ("" before the first follow).
 	bool terrain() const { return store_.valid(); }
+	// The terrain's heights as the game's collision reads them (null: none read).
+	const terrain::TerrainHeightField *height_field() const { return store_.valid() ? &store_.height_field() : nullptr; }
 	const std::string &error() const { return error_; }
 	// The char map read ("" none: class 1 everywhere), the placed tiles, the water plane.
 	const std::string &surface_map() const { return surface_map_; }
