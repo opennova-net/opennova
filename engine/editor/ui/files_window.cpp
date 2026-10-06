@@ -902,6 +902,32 @@ void FilesWindow::draw_card(const SessionView &view) {
 				ImGui::SameLine();
 				ImGui::TextDisabled("%s", said.c_str());
 			}
+			// What it is and how loud (the sound lane: import/wave_source.h), its picture a bar a bin, and
+			// whether the game's loader takes it.
+			if (!card.sound.format.empty()) {
+				char loud[96];
+				std::snprintf(loud, sizeof(loud), "peak %.0f%%, RMS %.0f%%", card.sound.peak * 100.0f, card.sound.rms * 100.0f);
+				ImGui::TextDisabled("%s; %s", card.sound.format.c_str(), loud);
+			}
+			if (!card.sound.envelope.empty()) {
+				const float width = ImGui::GetContentRegionAvail().x, height = 32.0f;
+				const ImVec2 at = ImGui::GetCursorScreenPos();
+				ImDrawList *draw = ImGui::GetWindowDrawList();
+				const float bin = width / float(card.sound.envelope.size());
+				const ImU32 colour = ImGui::GetColorU32(ImGuiCol_PlotHistogram);
+				for (size_t i = 0; i < card.sound.envelope.size(); ++i) {
+					const float half = card.sound.envelope[i] * height * 0.5f;
+					const float x = at.x + bin * float(i);
+					draw->AddRectFilled(ImVec2(x, at.y + height * 0.5f - half), ImVec2(x + std::max(1.0f, bin - 1.0f), at.y + height * 0.5f + half + 1.0f), colour);
+				}
+				ImGui::Dummy(ImVec2(width, height));
+			}
+			if (!card.sound.plays) {
+				ImGui::PushStyleColor(ImGuiCol_Text, kRefusalColor);
+				ImGui::TextWrapped("The game's loader refuses it: %s Import it again to write it as the game plays it.",
+				                   card.sound.refusal.c_str());
+				ImGui::PopStyleColor();
+			}
 		} else {
 			ImGui::PushStyleColor(ImGuiCol_Text, kRefusalColor);
 			ImGui::TextWrapped("The game cannot play it: %s", card.sound.error.c_str());
