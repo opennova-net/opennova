@@ -4911,6 +4911,14 @@ target_link_libraries(editor_model_damage_test PRIVATE opennova_editor)
 target_include_directories(editor_model_damage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_model_damage COMMAND editor_model_damage_test)
 
+# DI-21: a definition table's record drawn as the game draws the thing it defines (an item in its state with its
+# effects and its death's sound, a person posed as it spawns, a weapon's models, an ammo's round); the engine's
+# death banks lifted for it; the effects' playback over several closures.
+add_executable(editor_definition_viewport_test editor/definition_viewport_test.cpp)
+target_link_libraries(editor_definition_viewport_test PRIVATE opennova_editor)
+target_include_directories(editor_definition_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_definition_viewport COMMAND editor_definition_viewport_test)
+
 # What a drag of a menu window's handles writes (editor/preview/menu_layout_edit, S9k1):
 # the plan against the runtime's POSITION solve, the grid, the handles, the edits.
 add_executable(editor_menu_layout_edit_test editor/menu_layout_edit_test.cpp)
