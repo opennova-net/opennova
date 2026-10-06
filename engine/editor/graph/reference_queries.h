@@ -21,13 +21,23 @@ namespace opennova::editor {
 // from the same extraction the graph keeps.
 
 // Where "Go to" goes (reference_targets, usage_target): a project file, and the record there that
-// defines the name or makes the use (its locator and the field to show), or the file itself.
+// defines the name or makes the use (its locator and the field to show), or the file itself. A Go to
+// always lands (the deep-integration plan's DI-17): a file the editor opens as a document opened at the
+// record, one it has no editor for on its page with the record's line marked (session/file_page.h).
 struct ReferenceTarget {
-	std::string label;     // what a choice among several says ("style variable X in menu_style.mns")
-	std::string file;      // project-relative
-	std::string locator;   // the record there (Document::locator); "" = the file itself
+	std::string label;   // what a choice among several says ("style variable X in menu_style.mns")
+	std::string file;    // project-relative
+	// The record there: a document's (Document::locator), a text's span ("line:column"); of a file the
+	// graph reads through the engine's own parser, which keeps no places (a terrain, a face animation, an
+	// avatar table held as a text), the record as the graph names it (GraphEdge::record,
+	// GraphSymbol::record), which its page marks and a text is searched for. "" with no field = the file
+	// itself.
+	std::string locator;
 	std::string field;     // the field to show there
-	bool editable = false; // the editor opens the file's kind; else Files shows the file
+	bool editable = false; // the editor opens the file's kind as a document; else the Go to opens its page
+	// The name resolves to nothing: the file is where it belongs, opened at none of its records
+	// (session/problem_fixes.h's missing_target).
+	bool missing = false;
 };
 
 // A record of `document` found by the symbol another document names it with (a name, an id; a
@@ -74,11 +84,12 @@ std::string reference_target_file(
 // game reads, then the file its value names). None when nothing resolves.
 std::vector<ReferenceTarget> reference_targets(
 		const AssetGraph &graph, const AssetScan &scan, const FieldUse &field, const Value &value);
-// Where "Go to" on a use goes: the record of the edge's file that makes it (its locator, the
-// field shown), opened when the editor edits the file's kind, else the file shown in Files.
+// Where "Go to" on a use goes: the record of the edge's file that makes it (its locator, else the
+// record's path where the file keeps no places; the field shown), opened when the editor edits the
+// file's kind, else on the file's page.
 ReferenceTarget usage_target(const AssetScan &scan, const GraphEdge &edge);
 // Where "Go to" on a definition goes: the record that defines a symbol (at its defining field),
-// and a file itself; opened, or shown in Files, as usage_target.
+// and a file itself; opened, or on its page, as usage_target.
 ReferenceTarget symbol_target(const AssetScan &scan, const GraphSymbol &symbol);
 ReferenceTarget file_target(const AssetScan &scan, const std::string &file);
 
@@ -99,6 +110,17 @@ std::vector<FileUse> file_uses(const AssetGraph &graph, const std::string &file)
 // once, in the order the symbols are defined.
 std::vector<const GraphEdge *> record_users(const AssetGraph &graph, const std::string &file, const std::string &record,
                                             const NodeAddress &address);
+
+// What a file defines that other files name (DI-17: a file's page, "Defines (N)"): each symbol in the order
+// the file defines it, whether a lookup of the game finds it (AssetGraph::symbols_in), and its uses
+// (AssetGraph::users_of: the edges whose name reaches it; none for one no lookup finds). A record of its
+// record sets, named by its index in its own file alone, is no definition others name and is not listed.
+struct FileDefinition {
+	const GraphSymbol *symbol = nullptr;
+	bool read = false;
+	std::vector<const GraphEdge *> users;
+};
+std::vector<FileDefinition> file_definitions(const AssetGraph &graph, const std::string &file);
 
 // What a texture reference loads (ADR 0046 S18): whether the value names a texture (a model row's, a
 // role's, a menu's image or a mission's loading screen; a menu's through a stylesheet variable, by the
