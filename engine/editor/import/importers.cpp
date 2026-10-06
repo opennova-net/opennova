@@ -1,12 +1,15 @@
 // The importer table (ADR 0046 d10, S8). The image importer (import/texture_import, S18): a PNG made into
 // the texture file its uses read, by its record's options; a TGA or a PCX too, where a record makes it a
 // source (Replace, Edit externally). The terrain importer (import/terrain_import, S20): a terrain set made
-// into a terrain's files.
+// into a terrain's files. The font importer (import/font_import): a font set's glyph sheet made into the
+// .fnt the menus and the HUD write with.
 #include <editor/import/importer.h>
 
 #include <filesystem>
 
 #include <base/io/strutil.h>
+#include <editor/assets/asset_kinds.h>
+#include <editor/import/font_import.h>
 #include <editor/import/terrain_import.h>
 #include <editor/import/texture_import.h>
 #include <editor/project/project_files.h>
@@ -32,6 +35,17 @@ const std::vector<Importer> &importers() {
 		terrain.options = terrain_import_option_rows();
 		terrain.run = run_terrain_import;
 		rows.push_back(std::move(terrain));
+		// The font importer (import/font_import): a font set's glyph sheet made into a .fnt, the set imported
+		// into fonts/ with its sheet beside it.
+		Importer font;
+		font.id = "font";
+		font.version = kFontImporterVersion;
+		font.extensions = {kFontSetExtension};
+		font.options = font_import_option_rows();
+		font.names_inputs = font_set_inputs;
+		font.folder = asset_kind_row(AssetKind::Font).folder;
+		font.run = run_font_import;
+		rows.push_back(std::move(font));
 		return rows;
 	}();
 	return table;
