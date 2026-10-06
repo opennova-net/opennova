@@ -4707,6 +4707,14 @@ target_link_libraries(project_cli_test PRIVATE opennova_project_cli)
 target_include_directories(project_cli_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME project_cli COMMAND project_cli_test)
 
+# Where a file lands and how it moves (DI-03): one placement rule for Create missing, New file and an
+# import (a flat project stays flat), and a move between folders that rewrites no reference, in the
+# session, over the wire's request and the command line's mv.
+add_executable(editor_file_placement_test editor/file_placement_test.cpp)
+target_link_libraries(editor_file_placement_test PRIVATE opennova_project_cli)
+target_include_directories(editor_file_placement_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_file_placement COMMAND editor_file_placement_test)
+
 # opennova-project as the editor's session, headless (S13 A7): the verb table against the request
 # and query tables, each verb's --json the session's answer to the same requests, the request and
 # query verbs, --install; its retail leg a project imported from the game install whose Problems
