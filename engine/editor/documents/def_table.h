@@ -70,6 +70,11 @@ struct CatalogKindRow {
 // words, `name_2`, `name_3`, ... for a token, the name cut short to leave the suffix room.
 std::string copy_name(const std::string &name, CopyName how, size_t limit, const std::vector<std::string> &taken);
 const CatalogKindRow &catalog_kind_row(NodeKind kind);
+// The name a copy of a row of `kind` named `name` takes beside the names of its kind `taken` (upper
+// case): copy_name by its kind's rule, within the characters of a name the game keeps (its row's
+// name_chars, else its name field's width); "" for a kind a copy keeps the name of. A Duplicate's copy
+// and a repeated name's fix (catalog.name_duplicate, DI-11).
+std::string catalog_copy_name(NodeKind kind, const std::string &name, const std::vector<std::string> &taken);
 // The first items.def id from 100000 on that `used` does not hold and the engine keeps for no use
 // (def::reserved_item_by_id: a start, a waypoint, a flag, a model it draws; itemdef-re.md, "The ids
 // and rows the engine fixes"): a new item's, a copy's, a Use fix's. An item's id is its type_id, which

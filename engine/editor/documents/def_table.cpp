@@ -725,6 +725,16 @@ const CatalogFamily *catalog_family(AssetKind kind) {
 	return nullptr;
 }
 
+std::string catalog_copy_name(NodeKind kind, const std::string &name, const std::vector<std::string> &taken) {
+	const CatalogKindRow &rules = catalog_kind_row(kind);
+	const TableKind *own = catalog_table().kind(kind);
+	const size_t place = own ? own->find(catalog_name_field(kind)) : TableKind::npos;
+	if (place == TableKind::npos || rules.copy_name == CopyName::None) return std::string();
+	const FieldSchema &schema = own->fields()[place];
+	const size_t limit = rules.name_chars ? rules.name_chars : schema.width ? schema.width - 1 : 0;
+	return copy_name(name, rules.copy_name, limit, taken);
+}
+
 std::string copy_name(const std::string &name, CopyName how, size_t limit, const std::vector<std::string> &taken) {
 	if (how == CopyName::None || name.empty()) return name;
 	const auto free = [&taken](const std::string &candidate) {
