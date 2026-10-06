@@ -474,7 +474,8 @@ void DefinitionViewport::pose_(const SessionView &view, const std::string &model
 	definition.attrib = attrib_;
 	PersonRecord record;
 	record.ssn = options_.ssn;
-	pose_person(definition, record, *source, *stamped, rig_files, motion, rings, person_);
+	const auto has_file = [&source](const std::string &name) { return !source->path_of(name).empty(); };
+	pose_person(definition, record, has_file, *stamped, rig_files, motion, rings, person_);
 	// An item that is no person (no org0 or org1 class, not of the person type) has no spawn pose to speak of.
 	if (person_.status == "class" && type_ != def::DEF_ITEM_TYPE_PERSON) person_ = MissionPose();
 	if (person_.status == "posed") {
