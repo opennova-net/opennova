@@ -1,0 +1,8 @@
+// onjo_m1.wac
+// The rain and its overcast from the mission's start, written as the original's rainy missions
+// write theirs (TKP_C2A, ASB_G11A): the first execution, at the start, sets both targets and the
+// start's weather settle brings them in before play.
+if never() then
+	rain(100,1)
+	overcast(50,1)
+endif
