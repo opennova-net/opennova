@@ -76,6 +76,10 @@ public:
 	const MnuDocument *document(const std::string &path) const;
 	// Menus rendered by the last update (not reused), for the tests.
 	size_t rendered() const { return rendered_; }
+	// Whether the text of a menu the check holds names %NAME% (its variables, as the game's expansion
+	// finds them: a whole value or inside a longer text, which the graph's edges leave out), `name`
+	// compared without case.
+	bool names_variable(const std::string &name) const;
 
 private:
 	struct Screen {
