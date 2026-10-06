@@ -1,5 +1,6 @@
 #include "inspector_window.h"
 
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
@@ -282,10 +283,10 @@ void reference_status(Workspace &workspace, const FieldUse &field, const Value &
 	place(row, ui_kit::button_width("Play"));
 	if (ImGui::SmallButton("Play"))
 		workspace.request(named == ReferenceKind::Sound ? request::play_set(*text, field.scope.substr(0, field.scope.find('/')))
-		                                                : request::play_sound(basename_of(*text)));
+		                                                : request::play_sound(io::utf8_file_name(*text)));
 	ui_kit::tooltip(named == ReferenceKind::Sound
 	                        ? "Play " + *text + " as the game plays it: each layer's member picked, its pitch composed."
-	                        : "Play " + basename_of(*text) + " as recorded.");
+	                        : "Play " + io::utf8_file_name(*text) + " as recorded.");
 }
 
 // A field that names something: its badge and its Go to, a number (an item id) as much as a
