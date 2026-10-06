@@ -7,6 +7,7 @@
 
 #include <editor/project/project_files.h>
 #include <editor/session/build_operation.h>
+#include <editor/session/disk_watch.h>
 #include <editor/session/document_set.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/navigation_controller.h>
@@ -150,7 +151,7 @@ void serve_duplicate(SessionCore &core, const EditorRequest &request) {
 	core.documents().duplicate(request);
 }
 void serve_save(SessionCore &core, const EditorRequest &request) {
-	core.documents().save(request.path);
+	core.documents().save(request.path, request.force);
 }
 void serve_save_all(SessionCore &core, const EditorRequest &) {
 	core.documents().save_all();
@@ -201,8 +202,8 @@ void serve_split_texture(SessionCore &core, const EditorRequest &request) {
 void serve_edit_externally(SessionCore &core, const EditorRequest &request) {
 	core.imports().edit_externally(request);
 }
-void serve_refresh_changed_sources(SessionCore &core, const EditorRequest &) {
-	core.imports().refresh_changed_sources();
+void serve_refresh_changed_sources(SessionCore &core, const EditorRequest &request) {
+	core.disk().check(request.all);
 }
 void serve_show_use(SessionCore &core, const EditorRequest &request) {
 	show_texture_use(core, request);
@@ -674,8 +675,10 @@ constexpr RequestKindRow kRows[] = {
 			"The document at path written, with no unsaved edits too when its file holds other "
 			"bytes "
 			"than it would write (a canonical rewrite); a file that is not open is read, rewritten "
-			"that way when it must be, and left closed.")
-			.takes(request_params({}, { F::Path }))
+			"that way when it must be, and left closed. A file changed outside the editor refuses it "
+			"(document.conflict) unless force (DI-01: the conflict's Keep my edits), which writes the "
+			"document over what the other program saved.")
+			.takes(request_params({}, { F::Path, F::Force }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments)
 			.acts_on_saved()
 			.names_active()
@@ -844,13 +847,21 @@ constexpr RequestKindRow kRows[] = {
 			.ends_edit_groups()
 			.row,
 	Request(K::RefreshChangedSources, "refresh_changed_sources", serve_refresh_changed_sources,
-			"When a watched file's size or last write moved since the scan (a program saved it: an import "
-			"source, a file an import read, a PNG the game reads as it is), a refresh of what moved alone (the "
-			"outcome names the operation): the sources it touches imported again, the scan updated for them "
-			"and those files, the open documents of them read again. A file written within the last two "
-			"seconds waits for a later check, never read half-written. Nothing otherwise, no operation "
-			"started. The Shell sends it when its window gains the focus and once a second while it has it, "
-			"of its own: the status line a refused request left stays.")
+			"What another program changed of the project's files, read again (DI-01): a look at the files the "
+			"editor shows (each open document's file, every file a viewport's picture read), at the folders "
+			"(a file made, deleted or renamed in one moves its last write: a new file and a gone one are "
+			"found), and at the files a look found moved before; all: every file of the project besides, swept "
+			"over the polls (the project section's outside_sweeping). A file that moved is read once it holds "
+			"still (a later look finding it as a look 250 ms before did, or its last write two seconds back), "
+			"never half-written; until then it waits (outside_waiting). S18's watched files (an import source, "
+			"a file an import read, a PNG the game reads as it is) go by their own rule: two seconds after "
+			"their last write. What is ready is refreshed alone (the outcome names the operation): the sources "
+			"it touches imported again, the scan updated for those files, the open documents of them read "
+			"again keeping their selections (one with unsaved edits keeps them under document.conflict, "
+			"raised at once), Output naming each file that came back. Nothing otherwise, no operation started. "
+			"The Shell sends it once a second, focused or not (sooner while a file waits), and with all when "
+			"its window gains the focus, of its own: the status line a refused request left stays.")
+			.takes(request_params({}, { F::All }))
 			.holds(kFiles, kFiles | kSlot)
 			.background()
 			.row,

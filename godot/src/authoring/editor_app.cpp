@@ -32,6 +32,7 @@
 #include <editor/preview/viewports.h>
 #include <editor/project/project_files.h>
 #include <editor/run/launch_plan.h>
+#include <editor/session/disk_watch.h>
 #include <editor/session/file_preferences_store.h>
 #include <editor/session/navigation_controller.h>
 #include <editor/session/request_factories.h>
@@ -208,9 +209,6 @@ void EditorApp::_ready() {
 	// tab or a texture field, a Replace).
 	if (get_tree()->get_current_scene() == this && get_window() != nullptr)
 		get_window()->connect("files_dropped", Callable(this, "_on_files_dropped"));
-	// A window that starts with the focus gets no focus-in: the sources a program edits are checked from the
-	// first pump (S18).
-	focused_ = get_window() != nullptr && get_window()->has_focus();
 	const PackedStringArray args = OS::get_singleton()->get_cmdline_user_args();
 	for (int i = 0; i < args.size(); ++i) {
 		if (args[i] == kSmokeFlag) {
@@ -364,14 +362,14 @@ void EditorApp::pump() {
 	// budget steps the validation they left due first (S13 A3: no request runs it).
 	serve_queued_device_requests_();
 	drain_requests();
-	// A source a program edits comes back once a second while the window has the focus (S18).
-	if (focused_) {
-		const uint64_t now = Time::get_singleton()->get_ticks_msec();
-		if (now - last_source_check_ms_ >= 1000) {
-			last_source_check_ms_ = now;
-			refresh_changed_sources_();
-		}
-	}
+	// What another program saves comes back (S18, DI-01): a check once a second whether or not the window
+	// has the focus (an editor an MCP client launched never has it), sooner while a file waits to hold still
+	// or the focus-in's sweep runs.
+	const uint64_t now = Time::get_singleton()->get_ticks_msec();
+	const opennova::editor::ProjectView &project = session_->view().project;
+	const int64_t interval = project.outside_waiting || project.outside_sweeping ? opennova::editor::kDiskHoldStillMs
+	                                                                            : opennova::editor::kDiskCheckMs;
+	if (int64_t(now - last_disk_check_ms_) >= interval) refresh_changed_sources_(false);
 	session_->poll();
 	// A game started behind (play {behind}) kept behind while it starts.
 	platform_->tend();
@@ -384,13 +382,15 @@ void EditorApp::pump() {
 	if (session_->view().dialogs.quit_requested) get_tree()->quit(0);
 }
 
-// The import sources a program saved, imported again (S18: RefreshChangedSources), when the busy gate
-// takes it: an operation that holds the files runs, and the next check asks again.
-void EditorApp::refresh_changed_sources_() {
+// What another program saved, read again (S18, DI-01: RefreshChangedSources; `all`, every file of the
+// project swept), when the busy gate takes it: an operation that holds the files runs, and the next
+// check asks again.
+void EditorApp::refresh_changed_sources_(bool p_all) {
+	last_disk_check_ms_ = Time::get_singleton()->get_ticks_msec();
 	if (!session_ || !session_->view().project.open ||
 			!session_->view().allows(opennova::editor::EditorRequestKind::RefreshChangedSources))
 		return;
-	session_->handle(opennova::editor::request::refresh_changed_sources());
+	session_->handle(opennova::editor::request::refresh_changed_sources(p_all));
 }
 
 // Each OpenExternally view event the session posted since the last pump: its file opened in the program
@@ -783,12 +783,9 @@ void EditorApp::_notification(int p_what) {
 	if (p_what == NOTIFICATION_WM_CLOSE_REQUEST) {
 		ensure_session(); session_->handle(opennova::editor::request::quit());
 	} else if (p_what == NOTIFICATION_APPLICATION_FOCUS_IN) {
-		// Back from another program (S18): what it saved comes back now, then once a second (pump).
-		focused_ = true;
-		last_source_check_ms_ = Time::get_singleton()->get_ticks_msec();
-		refresh_changed_sources_();
-	} else if (p_what == NOTIFICATION_APPLICATION_FOCUS_OUT) {
-		focused_ = false;
+		// Back from another program (S18, DI-01): every file of the project looked at now, swept over the
+		// frames, and what it saved read as it holds still.
+		refresh_changed_sources_(true);
 	}
 }
 } // namespace godot
