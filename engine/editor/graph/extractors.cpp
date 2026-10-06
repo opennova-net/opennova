@@ -328,8 +328,16 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, "The particle file could not be read.", name);
 		return false;
 	}
-	for (const particle::EffectDef &effect : file.effects)
-		if (!effect.id.empty()) out.symbols.push_back(symbol_of(ReferenceKind::Particle, effect.id, name, effect.id));
+	// Each effect at the place its id is written (DI-14: the particle type is a text, so a Go to opens it
+	// there and its effect preview shows the effect).
+	for (const particle::EffectDef &effect : file.effects) {
+		if (effect.id.empty()) continue;
+		out.symbols.push_back(symbol_of(ReferenceKind::Particle, effect.id, name, effect.id));
+		if (effect.id_line > 0) {
+			out.symbols.back().locator = TextDocument::locator(size_t(effect.id_line), size_t(effect.id_column));
+			out.symbols.back().line = size_t(effect.id_line);
+		}
+	}
 	for (const particle::ParticleDef &definition : file.particles) {
 		for (size_t g = 0; g < definition.graphics.size(); ++g) {
 			const particle::GraphicLayer &layer = definition.graphics[g];
@@ -441,8 +449,9 @@ bool extract_native(NativeExtractor extract, const std::string &name, const std:
 }
 
 // Whether a type's documents are what the graph reads of their file: a record type's, or a text type's
-// whose text names references (DocumentType::references). A text type whose text names none (the text
-// type over a native kind, DI-06) leaves its file's reading to the kind's native extractor.
+// whose text names references (DocumentType::references). A text type whose text names none (a native
+// kind held as a text: DI-06's text type over its kinds, the particle type of DI-14) leaves its file's
+// reading to the kind's native extractor.
 bool read_through_document(const DocumentType &type) {
 	const DocumentContent content = document_content(type);
 	return content == DocumentContent::Records || (content == DocumentContent::Text && type.references);
@@ -485,9 +494,9 @@ bool reference_target(const FieldUse &field, const Value &value, ReferenceKind &
 void extract_from_text(const TextDocument &document, Extracted &out) {
 	const DocumentType *type = document_type_for(document.kind());
 	if (!type) return;
-	// A native kind held as a text (DI-06: a particle file, an environment, the HUD layout, the avatars):
-	// its text as it stands read by the engine's own parser, as its file is, so what it names follows its
-	// edits; a text the parser does not read names nothing (its own validation says why).
+	// A native kind held as a text (DI-06: an environment, the HUD layout, the avatars; the particle type,
+	// DI-14): its text as it stands read by the engine's own parser, as its file is, so what it names follows
+	// its edits; a text the parser does not read names nothing (its own validation says why).
 	if (!type->references) {
 		if (const NativeExtractor extract = native_extractor(document.kind())) {
 			Diagnostic error;
@@ -590,8 +599,8 @@ bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vect
 	if (!graph_reads_kind(kind))
 		return true;
 	// A record type's document, its records extracted; a text type's whose text names references, its
-	// text's; any other kind (a text type over a native kind among them, DI-06) falls through to a native
-	// extractor, or gives nothing.
+	// text's; any other kind (a text type over a native kind among them: DI-06's, the particle type of
+	// DI-14) falls through to a native extractor, or gives nothing.
 	if (const DocumentType *type = document_type_for(kind); type && read_through_document(*type)) {
 		const std::unique_ptr<DocumentBase> document = type->make();
 		if (!document->load_bytes(bytes, name, kind, game, error)) return false;

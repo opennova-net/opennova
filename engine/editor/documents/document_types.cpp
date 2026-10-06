@@ -15,6 +15,7 @@
 #include <editor/documents/model_document.h>
 #include <editor/documents/model_labels.h>
 #include <editor/documents/music_script_type.h>
+#include <editor/documents/particle_type.h>
 #include <editor/documents/script_type.h>
 #include <editor/documents/sound_bank_document.h>
 #include <editor/documents/sound_profile_document.h>
@@ -98,6 +99,10 @@ constexpr DocumentType kTypes[] = {
 			sound_bank_finding_codes, make_wave_check },
 	{ DocumentTypeId::SoundProfiles, "sound_profiles", make_sound_profiles, validate_sound_profiles_file,
 			SoundProfileDocument::schema, sound_profile_finding_codes },
+	// The particle file (DI-14): a text the effect system's reader reads, its findings that reader's;
+	// what it names the asset graph reads through the same reader (no references of the type's own).
+	{ DocumentTypeId::Particles, "particle", make_particle_document, validate_particle_file, text_fields,
+			particle_finding_codes },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its

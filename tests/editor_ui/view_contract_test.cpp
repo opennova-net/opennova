@@ -126,6 +126,8 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::SoundBank, "menu.lwf", file("lwf/menu.lwf")},
 	        {AssetKind::SoundProfileDefs, "SndProf.def",
 	         text_bytes("begin \"default\"\r\n\tSSLFootGND FSP_DIRT_L 0 0 0\r\nend\r\n")},
+	        // A particle file (DI-14): its text in the script view, its effect the Preview window's.
+	        {AssetKind::Particles, "minimal_effect.ptl", file("particle/synth_minimal_effect.ptl")},
 	};
 }
 
@@ -290,9 +292,9 @@ void test_every_view() {
 		types += drawn > 0 ? 1 : 0;
 	}
 	CHECK(types == kDocumentTypeCount, "every document type's view drawn");
-	CHECK(main_rows == 7 && scripts == 5,
-	      "every text type's row the Main role's, its view the script view, and the mission's and the texture's rows "
-	      "the Main role's too");
+	CHECK(main_rows == 8 && scripts == 6,
+	      "every text type's row the Main role's (a particle file's among them), its view the script view, and the "
+	      "mission's and the texture's rows the Main role's too");
 	std::printf("%zu document types, %zu views over their files, %zu frames drawn, %zu script views\n", types, views,
 	            frames, scripts);
 }
