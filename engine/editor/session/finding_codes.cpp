@@ -62,6 +62,7 @@ constexpr GroupRow kGroups[] = {
 	{ G::SoundProfiles, "sound_profiles", "Sound profiles" },
 	{ G::Particles, "particle", "Particle effects" },
 	{ G::Environments, "environment", "Environments" },
+	{ G::HudLayouts, "hud_layout", "HUD layouts" },
 };
 
 constexpr bool groups_well_formed() {

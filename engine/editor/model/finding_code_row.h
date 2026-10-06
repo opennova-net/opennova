@@ -94,6 +94,7 @@ enum class FindingGroup {
 	SoundProfiles,
 	Particles, // a particle file, through the effect system's reader (ADR 0046 DI-14)
 	Environments,
+	HudLayouts,
 	kCount
 };
 inline constexpr size_t kFindingGroupCount = static_cast<size_t>(FindingGroup::kCount);
