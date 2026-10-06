@@ -96,6 +96,10 @@ public:
 	// `seconds` of the Shell's frames pass (the clock's while it plays).
 	void advance(double seconds) { clock_.advance(seconds); }
 	const PreviewClock &clock() const { return clock_; }
+	// The order of every clip sound a model viewport fired (DI-04: ModelViewport::fire_sounds numbers
+	// each from it), the last one's.
+	uint64_t &clip_sound_seq() { return clip_sound_seq_; }
+	uint64_t clip_sound_seq() const { return clip_sound_seq_; }
 	// A SetViewport's clock alone, named by no document (S13 V7: the editor MCP's seek): the preview
 	// clock set as set_preview_clock says; false, nothing changed, with `error`.
 	bool set_clock(const io::JsonValue &json, std::string &error);
@@ -132,6 +136,7 @@ private:
 	std::function<void()> on_derived_change_;
 	const ViewportDeviceSource *devices_ = nullptr; // the Shell's (set_devices)
 	uint64_t next_event_ = 0; // the first event seq not handed out yet
+	uint64_t clip_sound_seq_ = 0;
 };
 
 } // namespace opennova::editor
