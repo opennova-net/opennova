@@ -193,6 +193,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_palette.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_place.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_poses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_viewport.cpp
