@@ -202,8 +202,11 @@ static int test_rows_as_before() {
 		// S19's reserved item ids add four on the fixture items.def: its first row a vehicle
 		// (catalog.first_row), its Helicopter and Static Vehicle on the Co-op and deathmatch fallback
 		// starts' ids 106001 and 106002 (catalog.reserved_kind), and what the engine keeps 105305 for
-		// (catalog.reserved_id; the 254 rows before them gave 8522d767).
-		{ "fixtures", fixture_files, false, 258, 0xd8ef2f1e1c1275e2ull },
+		// (catalog.reserved_id; the 254 rows before them gave 8522d767). A model material's shader names
+		// the tag a shader registers (ReferenceKind::Shader): the fixture models' 118 material shaders, which
+		// no shader of the project registers (it has no .fx), add a warning each (reference.missing; the 258
+		// rows before them gave d8ef2f1e).
+		{ "fixtures", fixture_files, false, 376, 0x28f4c1e16fb3d6d0ull },
 		{ "styles", style_files, false, 15, 0xe39ad4219139a453ull },
 		{ "items", item_files, false, 4, 0xc8ca7a0734b9eac6ull },
 		{ "open", style_and_item_files, true, 19, 0x80eb2caf43356608ull },
