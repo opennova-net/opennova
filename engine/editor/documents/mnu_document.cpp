@@ -37,8 +37,9 @@ constexpr FindingCodeEntry<MenuFinding> kFindingEntries[] = {
 	{ MenuFinding::InvalidInput, { "menu.invalid_input", FindingFix::None, nullptr, true } },
 	{ MenuFinding::IgnoredInput, { "menu.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput } },
 	{ MenuFinding::Unserializable, { "menu.unserializable", FindingFix::None, nullptr, true } },
-	{ MenuFinding::DuplicateScreen, { "menu.duplicate_screen" } },
-	{ MenuFinding::DuplicateWindow, { "menu.duplicate_window" } },
+	// A screen or a window no by-name lookup finds: a NAME of its own (DI-11, Diagnostic::planned).
+	{ MenuFinding::DuplicateScreen, { "menu.duplicate_screen", FindingFix::EditRecord } },
+	{ MenuFinding::DuplicateWindow, { "menu.duplicate_window", FindingFix::EditRecord } },
 	{ MenuFinding::ActionInert, { "menu.action_inert" } },
 	{ MenuFinding::RenderMapping, from_render_check("menu.render.mapping") },
 };
@@ -969,18 +970,48 @@ Diagnostic on_record(const MnuDocument &menu, const NodeAddress &address, Diagno
 // return one of them, so the other is never shown, targeted or bound by name
 // (MnuDocument::lookup_names).
 void name_findings(const MnuDocument &menu, std::vector<Diagnostic> &findings) {
+	// The names a fix's name of its own keeps clear of (upper case): the menu's screens, and each screen's
+	// windows by its row, each grown by the names the fixes before gave.
+	std::set<std::string> screens = menu_screen_names(menu.rows());
+	std::map<NodeId, std::set<std::string>> windows;
+	// Its fix (DI-11): a NAME of its own, the number a copy's name takes (unique_name), which an ACTION can
+	// then name it by; none for a NAME a stylesheet variable stands for (%NAME%), which is the variable's.
+	const auto own_name = [&](Diagnostic &d, const MenuLookupName &name, std::set<std::string> &taken, const char *what,
+	                          const std::string &still) {
+		if (name.name.find('%') != std::string::npos) return;
+		const std::string own = unique_name(taken, name.name);
+		taken.insert(strutil::to_upper(own));
+		Edit set;
+		set.address = name.address;
+		set.field = "name";
+		set.value = own;
+		d.planned.push_back({"Name it " + own,
+		                     std::string("Sets its NAME to ") + own + ", a name no other " + what +
+		                             " has: an ACTION can then name it. " + still,
+		                     {set}});
+	};
 	for (const MenuLookupName &name : menu.lookup_names()) {
-		if (name.found == MenuLookupName::Found::LaterScreen)
+		if (name.found == MenuLookupName::Found::LaterScreen) {
 			findings.push_back(on_record(menu, name.address, DiagnosticSeverity::Warning, MenuFinding::DuplicateScreen,
 			                             "A later screen of this menu is also named " + name.name +
 			                                     ": the game finds the last screen of a name, so no ACTION ever shows this one.",
 			                             "name"));
-		else if (name.found == MenuLookupName::Found::EarlierWindow)
+			own_name(findings.back(), name, screens, "screen of the menu",
+			         "An ACTION naming " + name.name + " still shows the later screen.");
+		} else if (name.found == MenuLookupName::Found::EarlierWindow) {
 			findings.push_back(on_record(menu, name.address, DiagnosticSeverity::Warning, MenuFinding::DuplicateWindow,
 			                             "An earlier window of this screen is also named " + name.name +
 			                                     ": the game finds the first window of a name, so no ACTION and no "
 			                                     "shell control ever reaches this one by name.",
 			                             "name"));
+			auto taken = windows.find(name.screen);
+			if (taken == windows.end())
+				for (const auto &row : menu.rows())
+					if (row->id == name.screen) taken = windows.emplace(name.screen, screen_names(screen_of(*row).screen)).first;
+			if (taken != windows.end())
+				own_name(findings.back(), name, taken->second, "window of the screen",
+				         "What names " + name.name + " still reaches the earlier window.");
+		}
 	}
 }
 
