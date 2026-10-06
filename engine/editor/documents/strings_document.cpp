@@ -400,6 +400,52 @@ const FindingCodeRow &finding_code(StringsFinding code) {
 
 FindingTable strings_finding_codes() { return { kFindingRows.data(), kFindingRows.size() }; }
 
+// A string id no table defines (DI-15): a key in the section the lookup reads, the first of its name in the
+// table the scope names [orig: TextResource_FindEntryBySectionAndKey @ 0x75D250, the first section of a name,
+// then the first key of it, both without case], a new section of that name at the table's end where it has none;
+// a key read in no section (a flat lookup [orig: TextResource_FindEntryByKey @ 0x75D450]) in the first section.
+// The string is the one a section's Add makes, its text empty.
+bool define_string_id(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out) {
+	const auto *strings = dynamic_cast<const StringsDocument *>(&document);
+	if (!strings || missing.kind != ReferenceKind::TextId || missing.target.empty()) return false;
+	const size_t slash = missing.scope.find('/');
+	const std::string table = missing.scope.substr(0, slash);
+	const std::string section = slash == std::string::npos ? std::string() : missing.scope.substr(slash + 1);
+	const std::string file = basename_of(document.path());
+	if (!table.empty() && !strutil::iequals(table, file)) return false;
+	const Node *held = nullptr;
+	for (const auto &row : strings->rows())
+		if (section.empty() || strutil::iequals(retail_text_to_utf8(row->name()), section)) {
+			held = row.get();
+			break;
+		}
+	if (!held && section.empty()) return false;
+	out = PlannedFix();
+	Edit add;
+	add.operation = EditOperation::Add;
+	add.address.kind = kString;
+	add.field = "key";
+	add.value = missing.target;
+	if (held) {
+		add.address.row = held->id;
+	} else {
+		Edit made;
+		made.operation = EditOperation::Add;
+		made.address.kind = kSection;
+		made.field = "name";
+		made.value = section;
+		out.edits.push_back(std::move(made));
+		add.address.row = batch_made(0);
+	}
+	out.edits.push_back(std::move(add));
+	const std::string where = held ? "section '" + retail_text_to_utf8(held->name()) + "' of " + file
+	                               : "a new section '" + section + "' at the end of " + file;
+	out.label = "Add " + missing.target + " to " + file;
+	out.detail = "Adds the string id " + missing.target + " to " + where + ", its text empty, and selects it to write its "
+	             "text: the game's lookup then finds it and shows that text in place of the id.";
+	return true;
+}
+
 std::vector<Diagnostic> validate_strings_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const auto *strings = dynamic_cast<const StringsDocument *>(&document);
