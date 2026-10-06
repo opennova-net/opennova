@@ -14,7 +14,7 @@
 //   - opennova-nw-lister's admin feed polls the live server beside it;
 //   - QUIT closes the connection.
 // Then the files: admin_log.txt's lines, banned.txt loaded at the session start and saved at
-// the exit when dirty.
+// the exit when dirty. Last, on a fresh server, GOTO MENUSTATE quits the session.
 // [orig: Game_InitSubsystems @0x4A72B8..0x4A72D9; CAdminServer_ProcessFrame @0x406F50;
 //  CAdminServer_HandleMissionCommand @0x4062E0; MissionList_InsertEntryAtIndex @0x501AD0;
 //  MissionList_GetCurrentEntry @0x4FC540; CAdminServer_HandleSetCommand @0x405A60;
@@ -220,28 +220,33 @@ int main() {
 	// A stale admin_log.txt: the launch truncates it.
 	CHECK(serve_test::write_text(work / "admin_log.txt", "a previous run's line\r\n"));
 
-	std::unique_ptr<serve::Server> holder;
+	// A server on free ports, game.cfg written with its admin port first.
 	std::string error;
-	uint16_t admin_port = 0;
-	for (int attempt = 0; attempt < 5 && !holder; ++attempt) {
-		gamecfg::GameCfg cfg = gamecfg::defaults(gamecfg::DefaultTexts{});
-		const uint16_t udp = serve_test::free_udp_port();
-		admin_port = serve_test::free_tcp_port();
-		cfg.mp_lan_server_port_min = udp;
-		cfg.mp_lan_server_port_max = udp;
-		cfg.remote_admin_port = admin_port;
-		CHECK(gamecfg::save_file(gamecfg::kFileName, cfg, {}, error));
-		serve::ServeOptions options;
-		CHECK(serve::parse_serve_options({"--resource-dir", dir.string(), "/HOST", (dir / "admin.host").string(),
-						  "--loose-root"},
-				options, error) == 0);
-		auto server = std::make_unique<serve::Server>(options);
-		if (server->start(error) && server->admin_port() == admin_port) {
-			holder = std::move(server);
-		} else if (error.find("bind scan") == std::string::npos && server->running()) {
-			std::printf("the admin listener took no port %u\n", admin_port);
+	const auto start_server = [&](uint16_t &admin_port) {
+		std::unique_ptr<serve::Server> started;
+		for (int attempt = 0; attempt < 5 && !started; ++attempt) {
+			gamecfg::GameCfg cfg = gamecfg::defaults(gamecfg::DefaultTexts{});
+			const uint16_t udp = serve_test::free_udp_port();
+			admin_port = serve_test::free_tcp_port();
+			cfg.mp_lan_server_port_min = udp;
+			cfg.mp_lan_server_port_max = udp;
+			cfg.remote_admin_port = admin_port;
+			CHECK(gamecfg::save_file(gamecfg::kFileName, cfg, {}, error));
+			serve::ServeOptions options;
+			CHECK(serve::parse_serve_options({"--resource-dir", dir.string(), "/HOST",
+							  (dir / "admin.host").string(), "--loose-root"},
+					options, error) == 0);
+			auto server = std::make_unique<serve::Server>(options);
+			if (server->start(error) && server->admin_port() == admin_port) {
+				started = std::move(server);
+			} else if (error.find("bind scan") == std::string::npos && server->running()) {
+				std::printf("the admin listener took no port %u\n", admin_port);
+			}
 		}
-	}
+		return started;
+	};
+	uint16_t admin_port = 0;
+	std::unique_ptr<serve::Server> holder = start_server(admin_port);
 	if (!holder) {
 		std::printf("start: %s\n", error.c_str());
 		return 1;
@@ -410,6 +415,40 @@ int main() {
 		CHECK(banned.find("4.3.2.1   \"Trent\"") != std::string::npos);
 	}
 	CHECK(server.admin_port() == 0);
+
+	// --- GOTO MENUSTATE on this Serve Only host, on a fresh server: input action 3 passes its
+	// binding gate (record 3 is the exit row, which carries no head-gate bit), so the cycle tail
+	// sends its one reply and the next frame's exit reason 1 takes the router's teardown: the
+	// session is destroyed and the joiner dropped, as a retail dedicated server leaves its match
+	// for its main menu (this one has no menu, so its run ends).
+	// [orig: CAdminServer_HandleGotoCommand @0x404A5D; Input_HandleActionBinding case 3
+	//  @0x49AF26; PostMenu_RouteMissionExit @0x5684AB -> CNapiGameSession_FullDestroy @0x568683]
+	{
+		uint16_t quit_port = 0;
+		std::unique_ptr<serve::Server> quitter = start_server(quit_port);
+		CHECK(quitter != nullptr);
+		if (quitter) {
+			Rig quit_rig(*quitter, 0);
+			CHECK(quit_rig.joiner_sock.is_valid());
+			quit_rig.start();
+			CHECK(quit_rig.wait([&] { return quit_rig.client.in_match(); }, 60));
+			AdminClient quit_admin;
+			CHECK(quit_admin.connect(quit_port));
+			CHECK(quit_admin.login("boss", "pw"));
+			check_eq(quit_admin.one("GOTO MENUSTATE"), "OK - Server is cycling...",
+					"GOTO MENUSTATE: the cycle tail's one reply");
+			CHECK(quit_rig.wait([&] { return quit_rig.ended; }, 30));
+			quit_rig.with([&] {
+				CHECK(quitter->quit() && !quitter->rotation_ended() && !quitter->running());
+				CHECK(quitter->end_message().find("GOTO MENUSTATE") != std::string::npos);
+				CHECK(quitter->missions_played() == 1);
+				return 0;
+			});
+			CHECK(quit_rig.wait([&] { return quit_rig.client.session_lost(); }, 30));
+			quit_rig.join();
+			CHECK(quitter->admin_port() == 0);
+		}
+	}
 
 	net::shutdown();
 	cwd.restore();

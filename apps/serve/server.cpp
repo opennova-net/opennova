@@ -651,9 +651,17 @@ bool Server::frame(double delta_seconds) {
 		return true;
 	}
 	end_message_ = outcome.error.message;
-	if (route_mission_exit(role_->state.host_owner.ctx.mission_exit_reason)) return true;
-	// The session ends here: the rotation's end takes StopServer's goodbye,
-	// as the router's miss arm does through CNapiGameSession_FullDestroy
+	const int32_t reason = role_->state.host_owner.ctx.mission_exit_reason;
+	if (route_mission_exit(reason)) return true;
+	// The admin's quit (exit reason 1, which only GOTO MENUSTATE stores on this host's
+	// context) goes straight to the router's teardown [orig: PostMenu_RouteMissionExit
+	// @0x5684A8..0x5684AB -> @0x568654].
+	if (reason == inmatch::kMissionExitQuit) {
+		quit_ = true;
+		end_message_ = "the remote admin quit the session (GOTO MENUSTATE)";
+	}
+	// The session ends here: the rotation's end and the quit take StopServer's
+	// goodbye, as the router's teardown does through CNapiGameSession_FullDestroy
 	// [orig: PostMenu_RouteMissionExit @0x568683].
 	stop();
 	return false;
@@ -671,10 +679,11 @@ void Server::stop() {
 	// @0x4A8009..0x4A800E DeleteFileA("activesrvr.txt")].
 	const bool exit_tail = exit_save_owed_;
 	exit_save_owed_ = false;
-	if (role_ && rotation_ended_) {
-		// The rotation's end left through CNapiGameSession_FullDestroy, whose round init
-		// frees banlist.txt's list (off a session it is not reloaded) and re-reads banned.txt
-		// with its dirty word cleared, so the exit below saves nothing an in-game ban added
+	if (role_ && (rotation_ended_ || quit_)) {
+		// The rotation's end and the quit left through CNapiGameSession_FullDestroy, whose
+		// round init frees banlist.txt's list (off a session it is not reloaded) and re-reads
+		// banned.txt with its dirty word cleared, so the exit below saves nothing an in-game ban
+		// added
 		// [orig: PostMenu_RouteMissionExit @0x568683 -> CNapiGameSession_FullDestroy
 		//  @0x4C96A0 -> Server_InitNewRoundState @0x4C9780 (@0x51C92F, @0x51CB25..0x51CB3B)].
 		inmatch::NapiNPServerCtx &ctx = role_->state.host_owner.ctx;
@@ -749,11 +758,9 @@ void Server::open_admin() {
 }
 
 // The console over the session's context, for the whole run: the cfg block SET writes and
-// Game_SaveConfig saves, the host's rotation, the mounted gametext and avatars. GOTO
-// MENUSTATE's quit is not wired: input action 3's binding gate drops it on a Serve Only host,
-// so a headless server never leaves its match for a menu (admin_console.cpp handle_goto); the
-// cycle tail still ends the round. The chat seams are a listen host's: this host's CHAT SEND
-// and CHAT GET run over the context's CHAT ring and flood table (server_console.h).
+// Game_SaveConfig saves, the host's rotation, the mounted gametext and avatars, and GOTO
+// MENUSTATE's quit. The chat seams are a listen host's: this host's CHAT SEND and CHAT GET run
+// over the context's CHAT ring and flood table (server_console.h).
 void Server::bind_admin_console() {
 	rotation_admin_ = std::make_unique<inmatch::HostRotationAdmin>(rotation_, catalog_);
 	inmatch::AdminConsole::Seams seams;
@@ -765,6 +772,16 @@ void Server::bind_admin_console() {
 							  : std::string();
 	};
 	seams.characters = &characters_;
+	// GOTO MENUSTATE's input action 3 on this host: exit reason 1; the active connection's
+	// disconnect drops nothing, as a Serve Only host has no client connection. The next frame's
+	// mission exit takes the router's reason-1 arm, which destroys the session; with no menu
+	// to land on, the session's end is the process's (frame, quit()).
+	// [orig: Input_HandleActionBinding case 3 @0x49AF26 (g_MissionExitReason = 1),
+	//  CNapiNetwork_DisconnectActiveConnection @0x4C918F (no connection, no record);
+	//  PostMenu_RouteMissionExit @0x5684AB -> CNapiGameSession_FullDestroy @0x568683]
+	seams.quit_to_menu = [this] {
+		role_->state.host_owner.ctx.mission_exit_reason = inmatch::kMissionExitQuit;
+	};
 	admin_console_ = std::make_unique<inmatch::AdminConsole>(role_->state.host_owner.ctx, std::move(seams));
 	admin_forward_.console = admin_console_.get();
 }

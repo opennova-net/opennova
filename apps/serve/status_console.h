@@ -8,10 +8,14 @@
 // screen, so this is that page's device: it fills the engine's feed
 // (inmatch/server_status_feed.h), lays the engine's lines
 // (hud/hud_server_status.h) out as text, and prints the page on stdout when
-// its rows change. The page's chat input line is the console's stdin: each
-// line is typed into it (inmatch/server_console.h server_console_submit).
-// Nothing on the page is the console's own; the colours and the ticker, which
-// text cannot carry, are left out.
+// its rows change. The page's chat input line is the console's stdin: a retail
+// operator opens it with the Global talk key on the server's window, types and
+// presses Enter, and each stdin line is typed into it the same way
+// (inmatch/server_console.h server_console_submit) [orig: Game_WindowProc
+// @0x76276A -> Input_ProcessKeyboardEvents @0x49D42F (the binding scan) /
+// @0x49D498 (Chat_HandleInputChar while capturing); the page draws the capture
+// @0x50B245..0x50B25A]. Nothing on the page is the console's own; the colours
+// and the ticker, which text cannot carry, are left out.
 
 #include <runtime/hud/hud_chat_entry.h>
 #include <runtime/hud/hud_server_status.h>

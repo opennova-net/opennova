@@ -582,13 +582,13 @@ void test_weapon_cmd_goto_chat() {
 	               gamestate[1] == "OK - Server is cycling...",
 	       "GOTO GAMESTATE in a match: two replies and a cycle");
 	const auto menu = a.command("GOTO MENUSTATE");
-	expect(menu.size() == 1 && menu[0] == "OK - Server is cycling..." && host.quits == 0,
-	       "GOTO MENUSTATE in a match on a Serve Only host: input action 3's binding gate drops the "
-	       "quit, and the cycle tail sends its one reply");
+	expect(menu.size() == 1 && menu[0] == "OK - Server is cycling..." && host.quits == 1,
+	       "GOTO MENUSTATE in a match on a Serve Only host: input action 3 (record 3, the exit row, "
+	       "no head-gate bit) quits, and the cycle tail sends its one reply");
 	host.ctx.is_mp_session_peer = 1;
 	const auto peer_menu = a.command("GOTO MENUSTATE");
-	expect(peer_menu.size() == 1 && peer_menu[0] == "OK - Server is cycling..." && host.quits == 1,
-	       "a listen host's GOTO MENUSTATE reaches its quit");
+	expect(peer_menu.size() == 1 && peer_menu[0] == "OK - Server is cycling..." && host.quits == 2,
+	       "a listen host's GOTO MENUSTATE quits the same way");
 	host.ctx.is_mp_session_peer = 0;
 	host.console->set_scene(inmatch::AdminScene::MainMenu);
 	const auto at_menu = a.command("GOTO MENUSTATE");

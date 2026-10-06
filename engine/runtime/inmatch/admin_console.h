@@ -57,11 +57,13 @@ public:
 		// working-directory game.cfg). [orig: CAdminServer_HandleSetCommand @0x406185..0x4061AE]
 		std::function<void()> save_config;
 		// GOTO MENUSTATE out of the main menu: Game_CloseInGameScreens and input action 3, the
-		// quit to the main menu (exit reason 1 and the active connection's disconnect). The
-		// action's binding gate drops it on a Serve Only host, so the console never calls this
-		// there (handle_goto); a listen host's embedder tests its own player's dead latch.
+		// quit to the main menu (exit reason 1 and the active connection's disconnect, which a
+		// Serve Only host does not have). No binding gate stops the action on any host
+		// (handle_goto); the router then destroys the session (PostMenu_RouteMissionExit's
+		// reason-1 arm).
 		// [orig: CAdminServer_HandleGotoCommand @0x404A4E (Game_CloseInGameScreens),
-		//  @0x404A5D (Input_HandleActionBinding(3))]
+		//  @0x404A5D (Input_HandleActionBinding(3)); PostMenu_RouteMissionExit @0x5684AB ->
+		//  CNapiGameSession_FullDestroy @0x568683]
 		std::function<void()> quit_to_menu;
 		// The map rotation and its catalog (ADR 0051 PR3; HostRotationAdmin over the host's
 		// own); null reads as no rotation and an empty catalog.
