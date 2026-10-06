@@ -358,6 +358,8 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::SoundProfileDefs, "SndProf.def",
 	         text_bytes("begin \"default\"\r\n\tSSLFootGND FSP_DIRT_L 0 0 0\r\n\tSSRFootGND FSP_DIRT_R 0 0 0\r\nend\r\n"
 	                    "begin \"SP_Truck\"\r\n\tsoundloop_1 V_TRUCK_ILP 0.8 1.2 2\r\n\tmedloopfadeinstart 20\r\nend\r\n")},
+	        // The particle type (DI-14): the minted effect file.
+	        {AssetKind::Particles, "minimal_effect.ptl", file("particle/synth_minimal_effect.ptl")},
 	};
 }
 
@@ -465,8 +467,12 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        {AssetKind::MusicScript, "handled.bin", music_with_a_handler(file("mus/synth_gamemus.bin"))},
 	        {AssetKind::Credits, "spaced.kda", file("cbin/synth_nlist.kda")},
 	        {AssetKind::Shader, "plain.fx", text_bytes("float4 main() : COLOR { return 0; }\r\n")},
-	        // A particle file the engine's reader stops in, which the text type holds (DI-06).
+	        // A particle file the effect system's reader stops in (DI-14: particle.unreadable).
 	        {AssetKind::Particles, "open.ptl", text_bytes("[effectdef]\n{\n\tid = OPEN;\n")},
+	        // An avatar table the avatar reader notes a duplicate nationality in, which the text type holds
+	        // (DI-06: text.reader).
+	        {AssetKind::AvatarDefs, "Avatars.def",
+	         text_bytes("nationality N00 FIRST\r\n{\r\n}\r\nnationality N00 DUP_NAT\r\n{\r\n}\r\n")},
 	        // A 2 x 2 true-colour TGA, its origin bit set (S18: texture.tga_upside_down).
 	        {AssetKind::Texture, "top_first.tga", top_first_tga()},
 	        // The sound lane: a bank naming a wave twice, a profile named twice.
