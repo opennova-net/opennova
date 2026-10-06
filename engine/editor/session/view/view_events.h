@@ -52,6 +52,10 @@ enum class ViewEventKind : uint8_t {
 	// inspector, problems, output; session/workspace_parts.h). That window comes forward, as a click on its
 	// tab brings it.
 	FocusWindow,
+	// A Back or a Forward that took the person to a document or a file's page (the navigation history):
+	// `path` the document, or with `flag` the file whose page it is. The Document window comes forward with
+	// that tab shown, whichever tab showed before (a page's About tab over the active document's).
+	ShowDocument,
 	kCount,
 };
 
@@ -74,6 +78,7 @@ inline constexpr ViewEventKindRow kViewEventKindRows[] = {
 	{ViewEventKind::OpenExternally, "open_externally"},
 	{ViewEventKind::RevealPreview, "reveal_preview"},
 	{ViewEventKind::FocusWindow, "focus_window"},
+	{ViewEventKind::ShowDocument, "show_document"},
 };
 
 static_assert(std::size(kViewEventKindRows) == kViewEventKindCount,
