@@ -87,6 +87,9 @@ constexpr WorkspaceMember kSettings[] = {
 	{ "game_install", J::String, "This computer's game install folder.", kPathLongest },
 	{ "runtime", J::String, "The OpenNova runtime Play runs (\"\" the one packaged beside the editor).", kPathLongest },
 	{ "play_in_install", J::Boolean, "Play in the game install." },
+	{ "play_in_install_strict", J::Boolean,
+			"Strict: Play in the game install stages the build and the install's program alone and launches "
+			"without /d, as a player who dropped the program into the build's folder." },
 };
 constexpr WorkspaceMember kNewFile[] = {
 	{ "kind", J::String,
@@ -334,14 +337,6 @@ bool stop_sound(WorkspaceView::Sound &sound) {
 	return true;
 }
 
-// The factory Files' New asks a name of for `kind` (a free-form one of no role); null for a kind it offers none.
-const BlankFactory *new_file_factory(AssetKind kind) {
-	for (size_t i = 0; i < blank_factory_count(); ++i) {
-		const BlankFactory &factory = *blank_factory_at(i);
-		if (factory.free_form && factory.role[0] == '\0' && factory.kind == kind) return &factory;
-	}
-	return nullptr;
-}
 
 // The menu the document is, and whether `screen` is a screen of it its Remove may ask of: the menu keeps a
 // second screen.
@@ -407,7 +402,8 @@ bool set_new_project(Change &change, const JsonValue &part) {
 bool same_settings(const WorkspaceView::Settings &a, const WorkspaceView::Settings &b) {
 	return a.open == b.open && a.title == b.title && a.mission == b.mission && a.multiplayer == b.multiplayer &&
 	       a.builds_on == b.builds_on && a.as_expansion == b.as_expansion && a.expansion == b.expansion &&
-	       a.game_install == b.game_install && a.runtime == b.runtime && a.play_in_install == b.play_in_install;
+	       a.game_install == b.game_install && a.runtime == b.runtime && a.play_in_install == b.play_in_install &&
+	       a.play_in_install_strict == b.play_in_install_strict;
 }
 
 // Project settings: opened over the settings in effect (the project's document, the install in effect, the
@@ -431,6 +427,7 @@ bool set_settings(Change &change, const JsonValue &part) {
 		settings.game_install = view.project.retail_directory;
 		settings.runtime = view.project.runtime_setting;
 		settings.play_in_install = view.project.play_retail;
+		settings.play_in_install_strict = view.project.play_in_install_strict;
 	} else if (open) {
 		settings.open = open->boolean;
 	}
@@ -445,6 +442,7 @@ bool set_settings(Change &change, const JsonValue &part) {
 	if (const JsonValue *install = part.get("game_install")) settings.game_install = install->string;
 	if (const JsonValue *runtime = part.get("runtime")) settings.runtime = runtime->string;
 	if (const JsonValue *play = part.get("play_in_install")) settings.play_in_install = play->boolean;
+	if (const JsonValue *strict = part.get("play_in_install_strict")) settings.play_in_install_strict = strict->boolean;
 	if (!settings.builds_on.empty()) settings.as_expansion = true;
 	if (!settings.open) settings = WorkspaceView::Settings();
 	if (same_settings(settings, view.workspace.settings)) return false;
@@ -471,12 +469,17 @@ bool set_new_file(Change &change, const JsonValue &part) {
 		AssetKind wanted = AssetKind::kCount;
 		if (!kind_named(kind->string, wanted)) return change.refuse("No kind of file is \"" + kind->string + "\".");
 		if (wanted != AssetKind::kCount && !change.view.project.open) return change.closed("The project", "open or make one first");
-		if (wanted != AssetKind::kCount && !new_file_factory(wanted)) {
+		size_t count = 0;
+		bool asks = false;
+		new_file_params(wanted, count, &asks);
+		if (wanted != AssetKind::kCount && !asks) {
 			std::string offered;
 			for (size_t i = 0; i < blank_factory_count(); ++i) {
 				const BlankFactory &factory = *blank_factory_at(i);
 				if (factory.free_form && factory.role[0] == '\0') offered += (offered.empty() ? "" : ", ") + std::string(asset_kind_token(factory.kind));
 			}
+			// A terrain made from images (S20) is asked too: its images and numbers.
+			offered += ", " + std::string(asset_kind_token(AssetKind::Terrain));
 			return change.refuse("Files' New asks no name of a " + kind->string + " (it does of " + offered + ").");
 		}
 		if (wanted != prompt.kind) prompt = WorkspaceView::NewFile{ wanted, std::string(), {} };
@@ -485,13 +488,14 @@ bool set_new_file(Change &change, const JsonValue &part) {
 		return change.closed("The New file prompt", "name its kind first (new_file.kind)");
 	if (const JsonValue *name = part.get("name")) prompt.name = name->string;
 	if (const JsonValue *values = part.get("values")) {
-		const BlankFactory *factory = new_file_factory(prompt.kind);
+		size_t count = 0;
+		const BlankParam *taken = new_file_params(prompt.kind, count);
 		std::string params;
-		for (size_t i = 0; factory && i < factory->param_count; ++i) params += (i ? ", " : "") + std::string(factory->params[i].token);
+		for (size_t i = 0; i < count; ++i) params += (i ? ", " : "") + std::string(taken[i].token);
 		prompt.values.clear();
 		for (const io::JsonMember &value : values->object) {
 			bool known = false;
-			for (size_t i = 0; factory && i < factory->param_count; ++i) known = known || value.key == factory->params[i].token;
+			for (size_t i = 0; i < count; ++i) known = known || value.key == taken[i].token;
 			if (!known)
 				return change.refuse("A new " + std::string(asset_kind_token(prompt.kind)) + " takes no value \"" + value.key + "\" (" +
 				                     (params.empty() ? std::string("it takes none") : "it takes " + params) + ").");
@@ -1268,6 +1272,7 @@ JsonValue workspace_to_json(const SessionView &view) {
 		dialog.set("game_install", text(settings.game_install));
 		dialog.set("runtime", text(settings.runtime));
 		dialog.set("play_in_install", flag(settings.play_in_install));
+		dialog.set("play_in_install_strict", flag(settings.play_in_install_strict));
 	}
 	out.set("settings", std::move(dialog));
 	JsonValue prompt = JsonValue::make_object();

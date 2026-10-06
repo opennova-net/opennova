@@ -13,9 +13,9 @@ namespace opennova::editor {
 
 // The editor's own preferences, per machine and per user, not per project (ADR 0046 d6, S13 A2):
 // the recent-projects list, the game runtime Play launches, the game install, whether Play runs
-// the build in the game install, and whether an import brings the files the chosen ones need. A
-// project's `.opennova/local.json` overrides the runtime for that project alone, and holds its own
-// game install. Schema 2 (S13 A4) renamed the game install's keys ("game_install",
+// the build in the game install (and whether strictly), and whether an import brings the files the
+// chosen ones need. A project's `.opennova/local.json` overrides the runtime for that project alone,
+// and holds its own game install. Schema 2 (S13 A4) renamed the game install's keys ("game_install",
 // "play_in_install"); pre-1.0 there is no reader for schema 1: such a file is set aside, read as
 // absent (the defaults) with a warning naming what it held, and the next save writes a new file. A key
 // added within a schema reads as its default where a file lacks it, and a key a file holds that the
@@ -30,6 +30,11 @@ struct Preferences {
 	std::string runtime_executable;           // "" = the runtime packaged beside the editor
 	std::string game_install;                 // the game install (Joint Operations), on this machine
 	bool play_in_install = false;             // Play runs the build in the game install
+	// Play in the game install runs strictly (Strict Play, CONTEXT.md): the build and the install's
+	// program alone in the run directory, launched without /d, as a player who dropped the program into
+	// the build's folder runs it (prepare_strict_install_launch_plan); off, the install's configuration
+	// and saves beside it, under /d. Read only while play_in_install is on.
+	bool play_in_install_strict = false;
 	// The import dialog's "Include the files these need" (ADR 0046 S11g): what a preview the
 	// windows raise plans with; a store that does not say reads as on.
 	bool import_dependencies = true;

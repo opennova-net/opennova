@@ -78,6 +78,7 @@ enum class EditorRequestKind {
 	CancelTextureSource,
 	OpenTextureSource,
 	PreviewInstallImport,
+	NewTerrain,
 	ClearOutput,
 	SetViewport,
 	EditInViewport,
@@ -122,7 +123,7 @@ enum class SelectMode { Replace, Add, Toggle };
 // The settings ApplyProjectSettings sets, each one left out staying as it is: the
 // project's (its name, its features and its expansion, written to project.opennova, which
 // needs a project open) and the editor's (the game install, the runtime Play runs, Play in
-// the game install, written to the editor's settings). Only what differs from the value in
+// the game install and whether it runs strictly, written to the editor's settings). Only what differs from the value in
 // effect is written. `serial` names the application: the SettingsApplied view event carries it
 // back (its tag), the view's settings_result what could not be written.
 struct ProjectSettingsChange {
@@ -137,6 +138,8 @@ struct ProjectSettingsChange {
 	std::optional<std::string> game_install;
 	std::optional<std::string> runtime_executable; // "" = the runtime packaged beside the editor
 	std::optional<bool> play_in_install;
+	// Play in the game install runs strictly (Strict Play: the build and the install's program alone, no /d).
+	std::optional<bool> play_in_install_strict;
 	// The folder Build to folder builds into, kept with the project's local settings ("" for none): the
 	// modder's pick (a build's out_dir keeps nothing).
 	std::optional<std::string> build_folder;
@@ -146,7 +149,8 @@ inline bool operator==(const ProjectSettingsChange &a, const ProjectSettingsChan
 	return a.serial == b.serial && a.title == b.title && a.mission == b.mission &&
 			a.multiplayer == b.multiplayer && a.expansion == b.expansion && a.builds_on == b.builds_on &&
 			a.game_install == b.game_install && a.runtime_executable == b.runtime_executable &&
-			a.play_in_install == b.play_in_install && a.build_folder == b.build_folder;
+			a.play_in_install == b.play_in_install && a.play_in_install_strict == b.play_in_install_strict &&
+			a.build_folder == b.build_folder;
 }
 
 // Where Paste puts the clipboard: into the owner `parent` (0 = the row `row` itself) at

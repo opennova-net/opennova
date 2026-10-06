@@ -139,6 +139,7 @@ const Route kRoutes[] = {
 	{AssetKind::Score, ArchiveSlot::Loose}, // a Config before S13 D5
 	{AssetKind::Text, ArchiveSlot::Loose},
 	{AssetKind::ImportSource, ArchiveSlot::None}, // ImageSource, a .png's, before S13 A8
+	{AssetKind::ImportInput, ArchiveSlot::None}, // a terrain set's images (S20)
 };
 
 static int test_routing() {
@@ -184,7 +185,7 @@ struct Project {
 	bool fill() {
 		const AssetScan scan = scan_project_assets(paths, doc);
 		const RequirementReport report = evaluate_requirements(doc, scan);
-		const CreateMissingResult result = create_missing_requirements(paths, doc, report, unmet_required_roles(report));
+		const CreateMissingResult result = create_missing_requirements(paths, doc, scan, report, unmet_required_roles(report));
 		return result.unavailable.empty() && result.diagnostics.empty();
 	}
 	std::string output_root() const { return paths.build_dir + "/play"; }
@@ -214,7 +215,9 @@ static int test_filled_project_builds_and_mounts() {
 	TEST_EXPECT(plan.archives.size() == 3);
 	TEST_EXPECT(plan.archives[0].file_name == "language.pff" && !plan.archives[0].entries.empty());
 	TEST_EXPECT(plan.archives[1].file_name == "localres.pff" && !plan.archives[1].entries.empty());
-	TEST_EXPECT(plan.archives[2].file_name == "resource.pff" && plan.archives[2].entries.empty());
+	// resource.pff holds the one texture the blanks make: the pointer the startup screen names.
+	TEST_EXPECT(plan.archives[2].file_name == "resource.pff" && plan.archives[2].entries.size() == 1 &&
+	            plan.archives[2].entries[0].logical_name == "newarow1.tga");
 	TEST_EXPECT(plan.loose.size() == 2); // menumus.sbf and nw_cdata.coo
 
 	const BuildReport report = run_build(plan, p.output_root());
@@ -227,7 +230,7 @@ static int test_filled_project_builds_and_mounts() {
 	TEST_EXPECT(fs::is_directory(report.build_dir));
 	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "language.pff"));
 	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "localres.pff"));
-	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "resource.pff")); // empty, still present
+	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "resource.pff"));
 	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / "menumus.sbf"));
 	TEST_EXPECT(fs::is_regular_file(fs::path(report.build_dir) / kBuildRecordFileName));
 	TEST_EXPECT(!fs::exists(fs::path(p.output_root()) / (report.build_id + ".tmp")));
@@ -272,6 +275,42 @@ static int test_filled_project_builds_and_mounts() {
 		if (file.archive) TEST_EXPECT(file.reused == (file.name != "language.pff"));
 	TEST_EXPECT(last_good_build_dir(p.output_root()) == changed.build_dir);
 	TEST_EXPECT(!fs::exists(report.build_dir)); // the older build is pruned
+	return 0;
+}
+
+// A project with missions on, filled by Create missing (every Required row, and the optional
+// mission-start rows a factory fills), validates without an error or a warning, builds, and its
+// build's own mount resolves every name a mission's start and its screens read.
+static int test_mission_project_builds_clean() {
+	Project p("opennova_editor_build_mission_test");
+	TEST_EXPECT(p.create());
+	p.doc.features.mission = true;
+	TEST_EXPECT(p.fill());
+	{
+		const AssetScan scan = scan_project_assets(p.paths, p.doc);
+		const CreateMissingResult extras = create_missing_requirements(
+		        p.paths, p.doc, scan, evaluate_requirements(p.doc, scan),
+		        {"font_arials18", "font_arial22", "font_couri20b", "game_wac", "server_wac", "loadscrn_pcx", "monogram_tga",
+		         "boxtile_tga", "border_tga"});
+		TEST_EXPECT(extras.diagnostics.empty() && extras.unavailable.empty() && extras.created.size() == 9);
+	}
+	const BuildPlan plan = p.plan();
+	for (const Diagnostic &d : plan.diagnostics)
+		if (d.severity != DiagnosticSeverity::Info)
+			std::fprintf(stderr, "  %s: %s (%s)\n", d.code().c_str(), d.message.c_str(), d.asset.c_str());
+	TEST_EXPECT(plan.ok);
+	for (const Diagnostic &d : plan.diagnostics) TEST_EXPECT(d.severity == DiagnosticSeverity::Info);
+	const BuildReport report = run_build(plan, p.output_root());
+	TEST_EXPECT(report.ok);
+	opennova::Vfs vfs;
+	TEST_EXPECT(vfs.mount_game(report.build_dir, std::string(), opennova::VfsMountMode::Packed,
+	                           opennova::VfsArchiveDiscovery::RetailTable));
+	for (const char *name : {"ammo.def", "powerup.def", "cmap.mnu", "game.mnu", "weapon.mnu", "vehicle.mnu", "stat.mnu",
+	                         "death.mnu", "mp.mnu", "Arials18.fnt", "Arial22.fnt", "couri20b.fnt", "game.wac", "server.wac",
+	                         "loadscrn.pcx", "monogram.tga", "boxtile.tga", "border.tga"}) {
+		if (!vfs.has_file(name)) std::fprintf(stderr, "  not in the build: %s\n", name);
+		TEST_EXPECT(vfs.has_file(name));
+	}
 	return 0;
 }
 
@@ -1625,7 +1664,7 @@ static int test_deep_output_root() {
 	{
 		const AssetScan scan = scan_project_assets(paths, doc);
 		const RequirementReport report = evaluate_requirements(doc, scan);
-		const CreateMissingResult made = create_missing_requirements(paths, doc, report, unmet_required_roles(report));
+		const CreateMissingResult made = create_missing_requirements(paths, doc, scan, report, unmet_required_roles(report));
 		TEST_EXPECT(made.unavailable.empty() && made.diagnostics.empty());
 	}
 	const std::string video = "a_long_intro_movie_name.bik";
@@ -1711,6 +1750,7 @@ int main() {
 	failures += test_new_kinds_land_where_their_rows_say();
 	failures += test_empty_project_is_blocked();
 	failures += test_filled_project_builds_and_mounts();
+	failures += test_mission_project_builds_clean();
 	failures += test_protected_build_survives_and_archives_are_refused();
 	failures += test_long_names_bind_packed_files_only();
 	failures += test_unknown_kinds_are_left_out();

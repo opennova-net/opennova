@@ -53,6 +53,7 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::AssetNameTooLong, about_the_file("asset.name.too_long", G::ProjectFiles, F::Rename) },
 	{ C::AssetUnreadable, code("asset.unreadable", G::ProjectFiles) },
 	{ C::BlankDef, code("blank.def", G::NewFiles) },
+	{ C::BlankEnvironment, code("blank.environment", G::NewFiles) },
 	{ C::BlankFont, code("blank.font", G::NewFiles) },
 	{ C::BlankMenu, code("blank.menu", G::NewFiles) },
 	{ C::BlankMission, code("blank.mission", G::NewFiles) },
@@ -185,6 +186,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::ImportScene, code("import.scene", G::Imports) },
 	{ C::ImportSceneNote, code("import.scene_note", G::Imports) },
 	{ C::ImportSidecar, code("import.sidecar", G::Imports) },
+	// A terrain made from images (S20): a set the importer cannot make into a terrain, a heightmap
+	// steeper than the game's compressed heights hold, a new_terrain request refused.
+	{ C::ImportTerrain, code("import.terrain", G::Imports) },
 	{ C::ImportNotFound, code("import.not_found", G::Imports) },
 	{ C::ImportTextureNotImported, code("import.texture_not_imported", G::Imports, F::UnimportedTexture) },
 	{ C::ImportUnreadable, code("import.unreadable", G::Imports) },
@@ -202,11 +206,13 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::PlayCrashed, code("play.crashed", G::Play) },
 	{ C::PlayInstallCopy, code("play.install_copy", G::Play) },
 	{ C::PlayInstallMissing, code("play.install_missing", G::Play) },
+	{ C::PlayInstallRunning, code("play.install_running", G::Play) },
 	{ C::PlayMissionFailed, code("play.mission.failed", G::Play) },
 	{ C::PlayMissionUnknown, code("play.mission.unknown", G::Play) },
 	{ C::PlayRunDirectory, code("play.run_directory", G::Play) },
 	{ C::PlayRuntimeMissing, code("play.runtime_missing", G::Play) },
 	{ C::PlaySpawn, code("play.spawn", G::Play) },
+	{ C::PlayStrictExpansion, code("play.strict_expansion", G::Play) },
 	{ C::PlayUnsupported, code("play.unsupported", G::Play) },
 	{ C::ProjectExists, code("project.exists", G::Project) },
 	// The project's expansion against its game install (ADR 0046 S16, expansion_name.h): a name the

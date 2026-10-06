@@ -185,9 +185,13 @@ int test_settings() {
 	            !v.project.document->features.multiplayer);
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"settings": {"title": "Harbor"}})")) && settings.title == "Harbor" &&
 	            v.project.document->title == "Armory");
+	TEST_EXPECT(!settings.play_in_install_strict &&
+	            session.handle(request::set_workspace(R"({"settings": {"play_in_install_strict": true}})")) &&
+	            settings.play_in_install_strict && !v.project.play_in_install_strict);
 	JsonValue shown = section(session);
 	TEST_EXPECT(shown.get("settings") && shown.get("settings")->get_string("title", "") == "Harbor" &&
-	            shown.get("settings")->get_bool("multiplayer", false));
+	            shown.get("settings")->get_bool("multiplayer", false) &&
+	            shown.get("settings")->get_bool("play_in_install_strict", false));
 	// A settings change with no serial (a menu's Play in the game install) leaves the dialog open.
 	ProjectSettingsChange play;
 	play.play_in_install = false;

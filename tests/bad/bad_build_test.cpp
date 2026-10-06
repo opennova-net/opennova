@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "common/file_io.h"
@@ -23,6 +24,16 @@
 using namespace opennova::bad;
 
 namespace {
+
+const BadTargetLimits kRetail = bad_retail_limits();
+
+// A slot table for the set checks: `anim_<name>` names a slot when the name is
+// one of a few (the runtime's 252 are anim::adm_slot_index's).
+int test_slots(std::string_view key) {
+    for (const char *slot : {"anim_reset", "anim_walk_forward", "anim_idle"})
+        if (key == slot) return 1;
+    return -1;
+}
 
 bool near(double a, double b, double tol = 1e-6) { return std::fabs(a - b) <= tol; }
 
@@ -99,7 +110,7 @@ int main(int argc, char **argv) {
         const BadBuildClip clip = two_bone_clip(BAD_FLAG_LOOP | BAD_FLAG_TRANSLATION);
         BadAssembled built;
         std::string error;
-        TEST_EXPECT(bad_build_assemble(clip, nullptr, built, &error));
+        TEST_EXPECT(bad_build_assemble(clip, nullptr, kRetail, built, &error));
         TEST_EXPECT(built.file.bone_count == 2 && built.file.frame_count == 3);
         // Channels, events and translation rows all carry frame_count + 1
         // entries, as the author gave them.
@@ -130,7 +141,7 @@ int main(int argc, char **argv) {
 
         // A mint reads back through the parser.
         std::vector<uint8_t> bytes;
-        TEST_EXPECT(bad_build_mint(clip, nullptr, bytes, &error));
+        TEST_EXPECT(bad_build_mint(clip, nullptr, kRetail, bytes, &error));
         BadFile parsed = {};
         TEST_EXPECT(bad_parse_buffer(bytes.data(), bytes.size(), &parsed) == 0);
         TEST_EXPECT(parsed.bone_count == 2 && parsed.frame_count == 3 && parsed.fps == 30);
@@ -155,7 +166,7 @@ int main(int argc, char **argv) {
         clip.events[2].top = 0.0;
         BadAssembled built;
         std::string error;
-        TEST_EXPECT(bad_build_assemble(clip, nullptr, built, &error));
+        TEST_EXPECT(bad_build_assemble(clip, nullptr, kRetail, built, &error));
         TEST_EXPECT(built.events.size() == 4);
         for (size_t f = 0; f < built.events.size(); ++f) {
             TEST_EXPECT(built.events[f].bottom == static_cast<float>(clip.events[f].bottom));
@@ -168,7 +179,7 @@ int main(int argc, char **argv) {
         for (BadBuildQuat &key : pitched.bones[0].keys) key = axis_quat(0.0, 1.0, 0.0, 90.0);
         BadBuildClip plain = two_bone_clip(0);
         plain.events = clip.events;
-        TEST_EXPECT(bad_build_assemble(plain, &pitched, built, &error));
+        TEST_EXPECT(bad_build_assemble(plain, &pitched, kRetail, built, &error));
         TEST_EXPECT(built.events[3].bottom == static_cast<float>(clip.events[3].bottom) &&
                     built.events[3].top == static_cast<float>(clip.events[3].top));
         std::printf("events: every bottom and top written as stated (tops %g..%g)\n",
@@ -198,77 +209,77 @@ int main(int argc, char **argv) {
         BadBuildClip clip = two_bone_clip(0);
 
         BadBuildClip empty;
-        TEST_EXPECT(!bad_build_assemble(empty, nullptr, built, &error) && !error.empty());
+        TEST_EXPECT(!bad_build_assemble(empty, nullptr, kRetail, built, &error) && !error.empty());
 
         BadBuildClip forward = clip;
         forward.bones[0].parent = 1;
-        TEST_EXPECT(!bad_build_assemble(forward, nullptr, built, &error));
+        TEST_EXPECT(!bad_build_assemble(forward, nullptr, kRetail, built, &error));
 
         BadBuildClip sibling = clip;
         sibling.bones[1].parent = 1;
-        TEST_EXPECT(!bad_build_assemble(sibling, nullptr, built, &error));
+        TEST_EXPECT(!bad_build_assemble(sibling, nullptr, kRetail, built, &error));
 
         BadBuildClip short_keys = clip;
         short_keys.bones[1].keys.pop_back();
-        TEST_EXPECT(!bad_build_assemble(short_keys, nullptr, built, &error));
+        TEST_EXPECT(!bad_build_assemble(short_keys, nullptr, kRetail, built, &error));
 
         BadBuildClip promised = clip;
         promised.flags = BAD_FLAG_TRANSLATION;
-        TEST_EXPECT(!bad_build_assemble(promised, nullptr, built, &error));
+        TEST_EXPECT(!bad_build_assemble(promised, nullptr, kRetail, built, &error));
 
         BadBuildClip long_name = clip;
         long_name.bones[1].name = std::string(32, 'x');
-        TEST_EXPECT(!bad_build_assemble(long_name, nullptr, built, &error));
+        TEST_EXPECT(!bad_build_assemble(long_name, nullptr, kRetail, built, &error));
 
         BadBuildClip unit = clip;
         unit.bones[1].keys[2] = BadBuildQuat{0.0, 0.0, 0.0, 0.0};
-        TEST_EXPECT(!bad_build_assemble(unit, nullptr, built, &error));
+        TEST_EXPECT(!bad_build_assemble(unit, nullptr, kRetail, built, &error));
 
         BadBuildClip zero_duration = clip;
         zero_duration.bones[1].durations.assign(4, 1);
         zero_duration.bones[1].durations[1] = 0;
-        TEST_EXPECT(!bad_build_assemble(zero_duration, nullptr, built, &error));
+        TEST_EXPECT(!bad_build_assemble(zero_duration, nullptr, kRetail, built, &error));
 
         BadBuildClip events = clip;
         events.events.pop_back();
-        TEST_EXPECT(!bad_build_assemble(events, nullptr, built, &error));
+        TEST_EXPECT(!bad_build_assemble(events, nullptr, kRetail, built, &error));
 
         // The loader knows event records of version 1 (with the trigger word)
         // and 0 (without): any other version is refused, and so is a trigger
         // on a version 0 event, which the writer would drop.
         BadBuildClip version2 = clip;
         version2.version = 2;
-        TEST_EXPECT(!bad_build_assemble(version2, nullptr, built, &error));
+        TEST_EXPECT(!bad_build_assemble(version2, nullptr, kRetail, built, &error));
         BadBuildClip version0 = clip;
         version0.version = 0;
-        TEST_EXPECT(!bad_build_assemble(version0, nullptr, built, &error));
+        TEST_EXPECT(!bad_build_assemble(version0, nullptr, kRetail, built, &error));
         for (BadBuildEvent &ev : version0.events) ev.trigger = 0;
-        TEST_EXPECT(bad_build_assemble(version0, nullptr, built, &error));
+        TEST_EXPECT(bad_build_assemble(version0, nullptr, kRetail, built, &error));
 
         // Translations the flags do not carry would be dropped: refused.
         BadBuildClip unflagged = two_bone_clip(BAD_FLAG_TRANSLATION);
         unflagged.flags = 0;
-        TEST_EXPECT(!bad_build_assemble(unflagged, nullptr, built, &error));
+        TEST_EXPECT(!bad_build_assemble(unflagged, nullptr, kRetail, built, &error));
 
         // The loader refuses a file over 500,000 bytes, so the mint does too.
         BadBuildClip huge = clip;
         huge.frame_count = 30000;
         huge.events.clear();
         for (BadBuildBone &bone : huge.bones) bone.keys.assign(30001, BadBuildQuat{});
-        TEST_EXPECT(bad_build_assemble(huge, nullptr, built, &error));
+        TEST_EXPECT(bad_build_assemble(huge, nullptr, kRetail, built, &error));
         std::vector<uint8_t> huge_bytes;
-        TEST_EXPECT(!bad_build_mint(huge, nullptr, huge_bytes, &error));
+        TEST_EXPECT(!bad_build_mint(huge, nullptr, kRetail, huge_bytes, &error));
 
         // The game's bone arrays hold 64 [orig: BoneSystem_Init @0x410170].
         BadBuildClip wide_rig = clip;
-        while (wide_rig.bones.size() < kBadMaxBones) {
+        while (wide_rig.bones.size() < kRetail.clip_bones) {
             BadBuildBone extra = clip.bones[1];
             extra.name = "BN" + std::to_string(wide_rig.bones.size() + 1);
             wide_rig.bones.push_back(extra);
         }
-        TEST_EXPECT(bad_build_assemble(wide_rig, nullptr, built, &error));
+        TEST_EXPECT(bad_build_assemble(wide_rig, nullptr, kRetail, built, &error));
         wide_rig.bones.push_back(clip.bones[1]);
-        TEST_EXPECT(!bad_build_assemble(wide_rig, nullptr, built, &error) &&
+        TEST_EXPECT(!bad_build_assemble(wide_rig, nullptr, kRetail, built, &error) &&
                     error.find("65 bones") != std::string::npos);
 
         // A loop stepping a whole cycle a tick (fps >= 62 * frames) never
@@ -277,12 +288,12 @@ int main(int argc, char **argv) {
         BadBuildClip fast = clip;
         fast.fps = 62 * fast.frame_count - 1;
         fast.flags = BAD_FLAG_LOOP;
-        TEST_EXPECT(bad_build_assemble(fast, nullptr, built, &error));
+        TEST_EXPECT(bad_build_assemble(fast, nullptr, kRetail, built, &error));
         fast.fps = 62 * fast.frame_count;
-        TEST_EXPECT(!bad_build_assemble(fast, nullptr, built, &error) &&
+        TEST_EXPECT(!bad_build_assemble(fast, nullptr, kRetail, built, &error) &&
                     error.find("whole cycle") != std::string::npos);
         fast.flags = 0;
-        TEST_EXPECT(bad_build_assemble(fast, nullptr, built, &error));
+        TEST_EXPECT(bad_build_assemble(fast, nullptr, kRetail, built, &error));
         std::printf("validation: every malformed clip is refused by name\n");
     }
 
@@ -291,8 +302,8 @@ int main(int argc, char **argv) {
     // reset clip [orig: PFF_FindEntry @0x7685D0; AnimChannel_ComputeBoneMatrices
     // @0x410DE7].
     {
-        TEST_EXPECT(bad_build_packable_name("avenger_025.bad") && !bad_build_packable_name("avenger_0255.bad"));
-        TEST_EXPECT(!bad_build_packable_name("") && !bad_build_packable_name("w\xC3\xA4lk.bad"));
+        TEST_EXPECT(bad_build_packable_name("avenger_025.bad", kRetail) && !bad_build_packable_name("avenger_0255.bad", kRetail));
+        TEST_EXPECT(!bad_build_packable_name("", kRetail) && !bad_build_packable_name("w\xC3\xA4lk.bad", kRetail));
         BadBuildSet set;
         set.rows.push_back(BadBuildRow{"anim_reset", {"rst"}});
         set.rows.push_back(BadBuildRow{"anim_walk_forward", {"walk"}});
@@ -301,26 +312,73 @@ int main(int argc, char **argv) {
         BadBuildClip walk = two_bone_clip(BAD_FLAG_TRANSLATION);
         walk.name = "walk";
         set.clips = {reset, walk};
-        std::vector<std::string> problems;
-        TEST_EXPECT(!bad_build_check_set(set, problems) && problems.size() == 1 &&
-                    problems[0].find("clip 'walk' carries translations") != std::string::npos);
+        std::vector<BadBuildProblem> problems;
+        TEST_EXPECT(!bad_build_check_set(set, kRetail, test_slots, problems) && problems.size() == 1 &&
+                    problems[0].what.find("clip 'walk' carries translations") != std::string::npos &&
+                    problems[0].clip == 1);
         // The other way round moves nothing either, and retail ships it (3 clips).
         problems.clear();
         set.clips[0] = two_bone_clip(BAD_FLAG_TRANSLATION);
         set.clips[0].name = "rst";
         set.clips[1] = two_bone_clip(0);
         set.clips[1].name = "walk";
-        TEST_EXPECT(bad_build_check_set(set, problems) && problems.empty());
+        TEST_EXPECT(bad_build_check_set(set, kRetail, test_slots, problems) && problems.empty());
         set.clips[1].name = "walk_forward1";
         set.rows[1].variants[0] = "walk_forward1";
-        TEST_EXPECT(!bad_build_check_set(set, problems) && problems.size() == 1 &&
-                    problems[0].find("17 bytes") != std::string::npos);
+        TEST_EXPECT(!bad_build_check_set(set, kRetail, test_slots, problems) && problems.size() == 1 &&
+                    problems[0].what.find("17 bytes") != std::string::npos);
         // A lone clip is named by its output.
         BadBuildSet lone;
         lone.clips = {set.clips[1]};
         problems.clear();
-        TEST_EXPECT(bad_build_check_set(lone, problems));
-        std::printf("set: long clip names and translations over an untranslated reset refused\n");
+        TEST_EXPECT(bad_build_check_set(lone, kRetail, test_slots, problems));
+
+        // Every problem at once, each naming its clip, bone or row: a key
+        // naming no slot, a row of nine clips, a bone name of 32 characters, a
+        // key held past the u16 duration word (the channel slerps across a
+        // key's whole duration, so no run of keys stands in for it), a clip of
+        // 65 bones.
+        BadBuildSet many;
+        BadBuildClip rst = two_bone_clip(0);
+        rst.name = "rst";
+        BadBuildClip held = two_bone_clip(0);
+        held.name = "held";
+        held.bones[1].name = std::string(32, 'b');
+        held.bones[1].durations = {1, 70000, 1, 1};
+        BadBuildClip wide = two_bone_clip(0);
+        wide.name = "wide";
+        while (wide.bones.size() <= kRetail.clip_bones) wide.bones.push_back(wide.bones[1]);
+        many.clips = {rst, held, wide};
+        many.rows.push_back(BadBuildRow{"anim_reset", {"rst"}});
+        many.rows.push_back(BadBuildRow{"anim_nowhere", {"held"}});
+        many.rows.push_back(BadBuildRow{"anim_idle", std::vector<std::string>(9, "wide")});
+        problems.clear();
+        TEST_EXPECT(!bad_build_check_set(many, kRetail, test_slots, problems) && problems.size() == 5);
+        const auto found = [&problems](const std::string &words, int clip, int bone, int row) {
+            for (const BadBuildProblem &p : problems)
+                if (p.what.find(words) != std::string::npos && p.clip == clip && p.bone == bone && p.row == row)
+                    return true;
+            return false;
+        };
+        TEST_EXPECT(found("row 'anim_nowhere' names no anim slot", -1, -1, 1));
+        TEST_EXPECT(found("names 9 clips; a table row holds 8", -1, -1, 2));
+        TEST_EXPECT(found("is 32 characters; a bone name holds 31", 1, 1, -1));
+        TEST_EXPECT(found("key 1 holds 70000 frames; a key's duration word holds 65535", 1, 1, -1));
+        TEST_EXPECT(found("holds 65 bones", 2, -1, -1));
+        // The mint checks first and stops there, every problem said.
+        std::vector<BadMintedFile> files;
+        problems.clear();
+        TEST_EXPECT(!bad_build_mint_set(many, "many.adm", kRetail, test_slots, files, problems) &&
+                    problems.size() == 5 && files.empty());
+        // The assembly refuses the long hold itself, naming bone and key.
+        BadAssembled built;
+        std::string error;
+        held.bones[1].name = "BN02";
+        TEST_EXPECT(!bad_build_assemble(held, nullptr, kRetail, built, &error) &&
+                    error.find("bone 1 key 1 holds 70000 frames") != std::string::npos);
+        held.bones[1].durations[1] = 65535;
+        TEST_EXPECT(bad_build_assemble(held, nullptr, kRetail, built, &error) && built.durations[1][1] == 65535);
+        std::printf("set: every problem the target finds, named by clip, bone and row\n");
     }
 
     // The table: the canonical row shape, and the rows the parser could not
@@ -332,7 +390,7 @@ int main(int argc, char **argv) {
         set.rows.push_back(BadBuildRow{"anim_walk_forward", {"walkf", "walkf2"}});
         std::string text;
         std::string error;
-        TEST_EXPECT(bad_build_mint_table(set, text, &error));
+        TEST_EXPECT(bad_build_mint_table(set, kRetail, text, &error));
         TEST_EXPECT(text.rfind("\r\n", 0) == 0);
         TEST_EXPECT(text.find("anim_reset\t\t\t\t\"authored\"") != std::string::npos);
         TEST_EXPECT(text.find("\"walkf\" \"walkf2\"") != std::string::npos);
@@ -350,31 +408,31 @@ int main(int argc, char **argv) {
         // prefix reads back as written.
         BadBuildSet outside = set;
         outside.rows[1].key = "walk";
-        TEST_EXPECT(!bad_build_mint_table(outside, text, &error));
+        TEST_EXPECT(!bad_build_mint_table(outside, kRetail, text, &error));
         BadBuildSet upper = set;
         upper.rows[0].key = "ANIM_RESET";
         upper.rows[1].key = "xxxx_walk_forward";
-        TEST_EXPECT(bad_build_mint_table(upper, text, &error));
+        TEST_EXPECT(bad_build_mint_table(upper, kRetail, text, &error));
         TEST_EXPECT(text.find("ANIM_RESET\t\t\t\t\"authored\"") != std::string::npos);
         BadBuildSet bare = set;
         bare.rows[1].variants.clear();
-        TEST_EXPECT(!bad_build_mint_table(bare, text, &error));
+        TEST_EXPECT(!bad_build_mint_table(bare, kRetail, text, &error));
         // A table with no reset row binds nothing: retail faults loading one
         // [orig: AnimMap_LoadAdmFile @0x40cc40, @0x40ce11..0x40ce16].
         BadBuildSet unbound = set;
         unbound.rows[0].key = "anim_idle";
-        TEST_EXPECT(!bad_build_mint_table(unbound, text, &error) &&
+        TEST_EXPECT(!bad_build_mint_table(unbound, kRetail, text, &error) &&
                     error.find("no reset row") != std::string::npos);
         BadBuildSet quoted = set;
         quoted.rows[1].variants[0] = "walk\"f";
-        TEST_EXPECT(!bad_build_mint_table(quoted, text, &error));
+        TEST_EXPECT(!bad_build_mint_table(quoted, kRetail, text, &error));
         BadBuildSet wide = set;
         wide.rows[1].variants.assign(9, "walkf");
-        TEST_EXPECT(!bad_build_mint_table(wide, text, &error));
+        TEST_EXPECT(!bad_build_mint_table(wide, kRetail, text, &error));
         // A variant names a clip beside the table, never a path.
         BadBuildSet escape = set;
         escape.rows[1].variants[0] = "../walkf";
-        TEST_EXPECT(!bad_build_mint_table(escape, text, &error));
+        TEST_EXPECT(!bad_build_mint_table(escape, kRetail, text, &error));
         TEST_EXPECT(bad_build_bare_stem("walkf") && bad_build_bare_stem("a..b"));
         TEST_EXPECT(!bad_build_bare_stem("") && !bad_build_bare_stem("..") && !bad_build_bare_stem("a/b") &&
                     !bad_build_bare_stem("a\\b") && !bad_build_bare_stem("C:walk") &&

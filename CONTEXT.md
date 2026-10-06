@@ -384,12 +384,24 @@ _Avoid_: numbered hurt volume, damage tier 16/17/18
 ## Model and animation tools (ADR 0047)
 
 **`.o3d` scene text**:
-The line-based text form of one `.3di` model (`docs/threedi/o3d-scene-format.md`).
-`opennova-3di build` mints a `.3di` from it through the engine's construction API and
-parity writer; `opennova-3di scene` writes any `.3di`, retail ones included, back out
-as it (build's exact inverse).
+The line-based text form of one `.3di` model (`docs/threedi/o3d-scene-format.md`),
+carrying no native limit: meshes of any size, influences of any number, names of any
+length (ADR 0052). `opennova-3di build` mints a `.3di` from it through the engine's
+reader, its lowering to the retail target, the construction API and parity writer;
+`opennova-3di scene` writes any `.3di`, retail ones included, back out as it (build's
+exact inverse).
 _Avoid_: scene file (a Godot `.tscn` is a scene), ASE/OED (the retired authoring
 formats)
+
+**Lowering** (of a `.o3d` model to a **target**):
+The step that holds a scene text model to what a target game holds
+(`engine/formats/threedi/threedi_o3d_lower.h`): it splits a mesh into the strips a
+3DI3 stores, keeps the influences the game blends, and checks every name, count and
+fixed-point extent against the target's limits (`ThreediTargetLimits`; the retail
+target, `threedi_retail_limits`, is the only one), refusing what the target cannot
+hold and noting what it loads all the same.
+_Avoid_: validation (the reader validates the text; the lowering is the target's),
+export (the add-on exports; the CLI lowers)
 
 **`.o3a` clip-set text**:
 The text form of one rig's clip set: its `.adm` table and every `.bad` clip the table
@@ -541,8 +553,8 @@ it into `fonts/`.
 _Avoid_: font project, atlas (the `.fnt`'s pages are the packer's layout, not the sheet's)
 
 **Import / sidecar**:
-Bringing a non-native source (an image; later a sound bank's manifest, a font, a terrain's
-images) into the project the Godot way: a committed `<file>.import` sidecar records the
+Bringing a non-native source (an image, a terrain set; later a sound bank's manifest, a font)
+into the project the Godot way: a committed `<file>.import` sidecar records the
 importer, its version, options, output logical names, the source's content hash and the
 **inputs**, every other file the importer read through its **import context**
 (`ImportContext`), by path (taken from the source's folder, never outside the project), and
@@ -556,10 +568,26 @@ seconds of the pass that read it is read again next time), and the record and th
 hashes each source's outputs were made from, so only a real change imports again and an
 untouched file is not read. A file is an **import source** (its own kind, whatever its name:
 `import_source`) only while its record is there: importing it writes the record, and a `.png`
-with none is a texture the build packs as it is. The build never packs an import source, only its
-outputs. The files the import dialog offers are **import choices** (`ImportChoice`).
+with none is a texture the build packs as it is. A file a record lists among its inputs is an
+**import input** (`import_input`, whatever its name: a terrain set's heightmap is no texture) while the
+record lists it. The build never packs an import source or an import input, only the outputs. The
+files the import dialog offers are **import choices** (`ImportChoice`).
 _Avoid_: convert (the runtime never converts), asset pipeline (the retired Python route),
 image source (the kind's name before S13 A8)
+
+**Terrain set**:
+A terrain made from ordinary images (ADR 0046 S20): `<name>.tset`, a short text in `art/terrain/`
+naming its heightmap (a 1024 x 1024 PNG at any depth, or TrnGen's own `.raw`), its colour map
+(1024 x 1024) and, if wanted, a detail, a tile set and a surface map, each an import input; its import
+record's options are the terrain's numbers in world units (the heightmap white's height, the water
+level, the layout). The terrain importer bakes it with TrnGen.exe's own bake (the port in
+`engine/editor/terrain`) into the files the game reads for a terrain, each named after the set:
+`<name>.trn`, `.cpt`, `.til`, the colour, detail, blend and tile-set textures, and `<name>_m.pcx`, the
+**surface map** (the `.trn`'s char map: each texel's index the surface class the game reads there,
+painted as indices or in the char map legend's colours, `formats/trn/charmap_legend.h`). Files' New >
+Terrain from images..., the `new_terrain` request and `opennova-project new-terrain` make one; a change
+to an image imports it again.
+_Avoid_: terrain project (TrnGen's `.tpj`), heightfield document
 
 **Import closure**:
 What an import "with the files these need" brings beside the files chosen (ADR 0046 S14): every
@@ -758,7 +786,7 @@ _Avoid_: request (a request changes the session), view (what the windows draw fr
 
 **Verb**:
 What `opennova-project` is run to do (`new`, `status`, `validate`, `create-missing`, `import`,
-`reimport`, `build`, `request`, `query`): a row of the command line's verb table
+`reimport`, `new-terrain`, `build`, `export`, `request`, `query`): a row of the command line's verb table
 (`apps/project/cli_verbs`) naming the requests it sends the editor's session, run headless for
 that one run, and the query whose answer it prints, as text or with `--json` as the Shell's
 `query_json` gives it. The command line orchestrates nothing of its own (ADR 0046 S13 A7).
@@ -1236,14 +1264,26 @@ _Avoid_: run (ONED's vocabulary), preview (an in-editor render, not a running ga
 
 **Run directory**:
 Where Play runs the game: `.opennova/run/<n>/` (n from 1), the game's working directory, the
-log Play tails (`session.log`; the game install's own, `_filelog.txt`) and the saves the game
-keeps beside itself (`weapon.sav`), so the build it runs from stays as the build wrote it. Play in
-the game install puts there what the install's game needs beside it: the build's files (linked;
-one the game may write, a `.cfg`, `.sav`, `.coo` or `.txt`, copied), the install's executable and
-Bink DLL, a `game.cfg` (the project's own, else the install's) and the install's `player.sav` and
-`weapon.sav` where the project has none. It records its game (pid and creation time) while the
-game may run; each Play takes the first free one, emptied, passing one whose game may still run.
+log Play tails (`session.log`; the game install's own, `_filelog.txt`, read once its game has
+exited, never while it runs) and the saves the game keeps beside itself (`weapon.sav`), so the
+build it runs from stays as the build wrote it. Play in the game install puts there what the
+install's game needs beside it: the build's files (linked; one the game may write, a `.cfg`,
+`.sav`, `.coo` or `.txt`, copied), the install's executable and Bink DLL, a `game.cfg` (the
+project's own, else the install's) and the install's `player.sav` and `weapon.sav` where the
+project has none; Strict Play, the build's files and the executable and Bink DLL alone. It
+records its game (pid and creation time) while the game may run; each Play takes the first free
+one, emptied, passing one whose game may still run.
 _Avoid_: build directory (what the build publishes, never written after), working copy, stage
+
+**Strict Play**:
+Play in the game install as a player's drop-in: the run directory holds the build's files and the
+game install's executable and Bink DLL, nothing else of the install (no configuration, save or
+score), and the game is launched without `/d`, so it reads its archives first and writes its own
+configuration (`play_in_install_strict`, an editor preference beside Play in the game install). A
+first run that wrote its own `game.cfg` and quit soon after it started is started once more; an
+expansion is refused until a project can name its base game's build. Play in the game install
+without it is the day-to-day run.
+_Avoid_: retail mode, clean run, vanilla run
 
 ## Runtime presentation
 
