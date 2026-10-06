@@ -592,7 +592,7 @@ int pick_model_collision(const std::vector<ModelCollisionShape> &shapes, const O
 		if (!s.pickable || !s.sphere || !s.triangles.empty()) continue;
 		float cx = 0.0f, cy = 0.0f, depth = 0.0f;
 		if (!camera.project(s.center, width, height, cx, cy, &depth) || !(depth > 0.0f)) continue;
-		const float reach = s.radius * OrbitCamera::focal_pixels(width) / depth;
+		const float reach = s.radius * camera.focal(width) / depth;
 		if (std::hypot(cx - x, cy - y) > reach) continue;
 		if (best < 0 || reach < best_radius) {
 			best = int(i);
