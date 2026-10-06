@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <editor/model/document.h>
+#include <editor/session/file_card.h>
 #include <editor/session/view/findings_index.h>
 #include <editor/session/view/view_revisions.h>
 #include <editor/ui/workspace.h>
@@ -75,12 +76,18 @@ public:
 	// How many times "Referenced by" made its lines: once per change of what it reads, never for
 	// a frame, a line of Output or a build's step.
 	size_t users_made() const { return users_made_; }
+	// How many times the file's Used by (nothing selected) was made: once per change of what it reads.
+	size_t used_by_made() const { return used_by_made_; }
+	// A list of more uses than this starts closed.
+	static constexpr size_t kUsedByOpen = 40;
 
 private:
 	void draw_together(const Document &document, const std::vector<NodeAddress> &records);
 	// `others_only`: its own document's uses are listed by its type's part (S15), so the other files'
 	// alone.
 	void referenced_by(const Document &document, const NodeAddress &record, bool others_only = false);
+	// With nothing selected: who names the active document's file (DI-05).
+	void used_by(const DocumentBase &document);
 
 	Workspace &workspace_;
 	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask
@@ -120,6 +127,21 @@ private:
 	std::vector<Use> users_;
 	UsersKey users_key_;
 	size_t users_made_ = 0;
+	// The file's Used by, and what it was made from.
+	struct UsedByKey {
+		std::string path;
+		const AssetGraph *graph = nullptr;
+		uint64_t generation = 0;
+		RevisionKey files;
+		bool reading = false;
+		bool operator==(const UsedByKey &other) const {
+			return path == other.path && graph == other.graph && generation == other.generation && files == other.files &&
+			       reading == other.reading;
+		}
+	};
+	FileUsers used_by_;
+	UsedByKey used_by_key_;
+	size_t used_by_made_ = 0;
 	FindingsIndex findings_; // the record's Problems rows, found without a scan of every finding
 	// The filter over the fields, one per open document (the UX round's project lane: a filter typed on
 	// a menu's window never hides an item's fields), by the document's path; a closed document's goes. It

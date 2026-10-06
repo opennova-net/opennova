@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <set>
 
 #include <base/io/strutil.h>
 #include <editor/documents/document_types.h>
@@ -46,6 +47,38 @@ ReferenceTarget usage_target(const AssetScan &scan, const GraphEdge &edge) {
 	target.field = edge.field;
 	target.editable = editable_file(scan, edge.source);
 	return target;
+}
+
+std::vector<const GraphEdge *> record_users(const AssetGraph &graph, const std::string &file, const std::string &record,
+                                            const NodeAddress &address) {
+	std::vector<const GraphEdge *> out;
+	std::set<const GraphEdge *> listed;
+	for (const GraphSymbol *symbol : graph.symbols_of(file, record)) {
+		// A record of a record set is named by its index in its own file alone: no use of the record as a
+		// definition the other files read.
+		if (reference_row(symbol->kind).resolution == ReferenceResolution::Record) continue;
+		if (address.row && symbol->address.row && symbol->address != address) continue; // another record of the path
+		for (const GraphEdge *edge : graph.users_of(*symbol))
+			if (listed.insert(edge).second) out.push_back(edge);
+	}
+	return out;
+}
+
+std::vector<FileUse> file_uses(const AssetGraph &graph, const std::string &file) {
+	std::vector<FileUse> out;
+	const std::vector<const GraphEdge *> usages = graph.usages_of(file);
+	const std::set<const GraphEdge *> first(usages.begin(), usages.end());
+	out.reserve(usages.size());
+	for (const GraphEdge *edge : usages) {
+		FileUse use;
+		use.edge = edge;
+		// The record making the use, where it defines something others name: one hop further.
+		if (!edge->record.empty() || edge->address.row)
+			for (const GraphEdge *further : record_users(graph, edge->source, edge->record, edge->address))
+				if (!first.count(further)) use.further.push_back(further);
+		out.push_back(std::move(use));
+	}
+	return out;
 }
 
 bool find_definition(const AssetGraph &graph, const Document &document, const std::string &symbol, NodeAddress &out,
