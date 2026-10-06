@@ -21,6 +21,7 @@
 #include <editor/run/launch_plan.h>
 #include <formats/pff/pff.h>
 #include <editor/run/play_session.h>
+#include <editor/run/run_directory.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -375,6 +376,227 @@ static int test_strict_first_run_decision() {
 	return 0;
 }
 
+// `names` sorted (a staging names its files in the build's directory order).
+static std::vector<std::string> sorted(std::vector<std::string> names) {
+	std::sort(names.begin(), names.end());
+	return names;
+}
+
+// The run directory keeps the game's state between Plays (run/run_directory.h). A Play of the same mode
+// takes it with what the game wrote there (its game.cfg, which names the adapter its device dialog chose,
+// its device log, its saves, its scores), what the Play before staged, the logs a run writes and the game's
+// record gone, and stages again: a file the build no longer holds is gone, the build's own cookie jar
+// staged again over the one the game rewrote, a build file staged by the name of a file the run kept in
+// place of it (removed by its name, never written through). Strict Play's rule holds in a kept directory:
+// nothing of the install but its program and Bink DLL. A fresh take, or one with no staging record, is
+// emptied; a staging record naming a path outside the directory removes nothing there. Lenient Play runs
+// in a directory of its own mode, strict's left as its game wrote it. Lenient Play seeds the install's game.cfg and saves only where the run directory holds none of its
+// own (an install copy written since included), names no seed among what it staged, and needs no install
+// game.cfg once the run holds its own.
+static int test_run_directory_keeps_game_state() {
+	namespace fs = std::filesystem;
+	editor_test::TempProjectDir dir("opennova_editor_run_keeps_state");
+	const std::string install = dir.file("install"), build = dir.file("build/0123456789abcdef"), runs = dir.file("runs");
+	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "exe") && editor_test::write_text(install + "/binkw32.dll", "bink") &&
+	            editor_test::write_text(install + "/game.cfg", "install settings") &&
+	            editor_test::write_text(install + "/player.sav", "install player") &&
+	            editor_test::write_text(install + "/score.ini", "install scores"));
+	for (const char *name : {"language.pff", "localres.pff", "resource.pff"})
+		TEST_EXPECT(write_empty_archive(build + "/" + name));
+	TEST_EXPECT(editor_test::write_text(build + "/nw_cdata.coo", "cookies") && editor_test::write_text(build + "/intro.bik", "video") &&
+	            editor_test::write_text(build + "/build.json", "{}"));
+	const LeaseLiveness gone = [](int64_t, const std::string &) { return ProcessLiveness::Dead; };
+	std::string run, run_error, text, io_error;
+	std::vector<std::string> kept;
+	LaunchPlan plan;
+	Diagnostic error;
+	std::error_code ec;
+	const RunTake strict{kRunModeStrict, false}, strict_fresh{kRunModeStrict, true}, lenient{kRunModeInstall, false};
+
+	// The first strict Play: strict/1, empty; what it staged named and recorded.
+	TEST_EXPECT(take_run_directory(runs, gone, strict, run, kept, run_error) && run == runs + "/strict/1" && kept.empty());
+	TEST_EXPECT(prepare_strict_install_launch_plan(install, build, run, "", plan, error));
+	TEST_EXPECT(sorted(plan.staged) == std::vector<std::string>({"Jointops.exe", "binkw32.dll", "intro.bik", "language.pff",
+	                                                             "localres.pff", "nw_cdata.coo", "resource.pff"}));
+	TEST_EXPECT(record_run_staging(run, RunStaging{kRunModeStrict, plan.staged}, run_error));
+	// The game writes its own files, rewrites the cookie jar, logs its file opens; a record of it is left.
+	TEST_EXPECT(editor_test::write_text(run + "/game.cfg", "names the adapter") && editor_test::write_text(run + "/ghw.txt", "device log") &&
+	            editor_test::write_text(run + "/player.sav", "the game's player") &&
+	            editor_test::write_text(run + "/weapon.sav", "the game's weapons") &&
+	            editor_test::write_text(run + "/hiscore.txt", "scores") &&
+	            editor_test::write_text(run + "/_filelog.txt", "LOADED FILE: language.pff\n") &&
+	            editor_test::write_text(run + "/nw_cdata.coo", "rewritten by the game") &&
+	            editor_test::write_text(run + "/run.json", "{}") && editor_test::write_text(run + "/session.log", "a log"));
+	// The build changes: its video gone, a file added.
+	fs::remove(build + "/intro.bik");
+	TEST_EXPECT(editor_test::write_text(build + "/filter.txt", "filter"));
+	const std::string install_tree = editor_test::tree_digest(install);
+
+	// The next strict Play keeps what the game wrote, and nothing else.
+	TEST_EXPECT(take_run_directory(runs, gone, strict, run, kept, run_error) && run == runs + "/strict/1");
+	const std::vector<std::string> game_state = {"game.cfg", "ghw.txt", "hiscore.txt", "player.sav", "weapon.sav"};
+	TEST_EXPECT(kept == game_state && files_in(run) == game_state);
+	TEST_EXPECT(prepare_strict_install_launch_plan(install, build, run, "", plan, error));
+	TEST_EXPECT(record_run_staging(run, RunStaging{kRunModeStrict, plan.staged}, run_error));
+	TEST_EXPECT(files_in(run) == std::vector<std::string>({"Jointops.exe", "binkw32.dll", "filter.txt", "game.cfg", "ghw.txt",
+	                                                       "hiscore.txt", "language.pff", "localres.pff", "nw_cdata.coo",
+	                                                       "player.sav", "resource.pff", "staging.json", "weapon.sav"}));
+	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "names the adapter");
+	TEST_EXPECT(read_file_text(run + "/player.sav", text, io_error) && text == "the game's player"); // never the install's
+	TEST_EXPECT(read_file_text(run + "/nw_cdata.coo", text, io_error) && text == "cookies" &&
+	            !fs::equivalent(run + "/nw_cdata.coo", build + "/nw_cdata.coo", ec));
+	TEST_EXPECT(fs::equivalent(run + "/language.pff", build + "/language.pff", ec));
+	TEST_EXPECT(!fs::exists(run + "/intro.bik") && !fs::exists(run + "/score.ini") && !fs::exists(run + "/_filelog.txt"));
+	// A file the build now holds under the name of one the run kept: the project's own staged in its place,
+	// the build's file as it was.
+	TEST_EXPECT(editor_test::write_text(build + "/player.sav", "project player"));
+	TEST_EXPECT(take_run_directory(runs, gone, strict, run, kept, run_error) && kept == game_state);
+	TEST_EXPECT(prepare_strict_install_launch_plan(install, build, run, "", plan, error));
+	TEST_EXPECT(record_run_staging(run, RunStaging{kRunModeStrict, plan.staged}, run_error));
+	TEST_EXPECT(read_file_text(run + "/player.sav", text, io_error) && text == "project player" &&
+	            !fs::equivalent(run + "/player.sav", build + "/player.sav", ec));
+	TEST_EXPECT(editor_test::write_text(run + "/player.sav", "rewritten") && read_file_text(build + "/player.sav", text, io_error) &&
+	            text == "project player");
+	fs::remove(build + "/player.sav");
+	TEST_EXPECT(editor_test::tree_digest(install) == install_tree);
+
+	// Fresh: emptied, whatever the game wrote.
+	TEST_EXPECT(take_run_directory(runs, gone, strict_fresh, run, kept, run_error) && run == runs + "/strict/1" && kept.empty() &&
+	            files_in(run).empty());
+	TEST_EXPECT(prepare_strict_install_launch_plan(install, build, run, "", plan, error));
+	TEST_EXPECT(record_run_staging(run, RunStaging{kRunModeStrict, plan.staged}, run_error));
+	TEST_EXPECT(editor_test::write_text(run + "/game.cfg", "names the adapter"));
+
+	// Lenient Play takes a directory of its own mode (strict's state is not lenient's), strict's left as its
+	// game wrote it; it seeds the install's game.cfg and saves there, and names none of them as staged.
+	TEST_EXPECT(take_run_directory(runs, gone, lenient, run, kept, run_error) && run == runs + "/install/1" &&
+	            kept.empty() && files_in(run).empty());
+	TEST_EXPECT(read_file_text(runs + "/strict/1/game.cfg", text, io_error) && text == "names the adapter");
+	TEST_EXPECT(prepare_retail_launch_plan(install, build, run, plan, error));
+	TEST_EXPECT(record_run_staging(run, RunStaging{kRunModeInstall, plan.staged}, run_error));
+	for (const char *seed : {"game.cfg", "player.sav", "score.ini"})
+		TEST_EXPECT(std::find(plan.staged.begin(), plan.staged.end(), seed) == plan.staged.end());
+	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "install settings");
+	// The game rewrites its game.cfg, and the install's is played since: the run's own is kept, newer or not.
+	TEST_EXPECT(editor_test::write_text(run + "/game.cfg", "adjusted in the run") &&
+	            editor_test::write_text(install + "/game.cfg", "install settings, played since"));
+	TEST_EXPECT(take_run_directory(runs, gone, lenient, run, kept, run_error) &&
+	            kept == std::vector<std::string>({"game.cfg", "player.sav", "score.ini"}));
+	TEST_EXPECT(prepare_retail_launch_plan(install, build, run, plan, error));
+	TEST_EXPECT(record_run_staging(run, RunStaging{kRunModeInstall, plan.staged}, run_error));
+	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "adjusted in the run");
+	// An install with no game.cfg: a run that holds its own plays all the same.
+	fs::remove(install + "/game.cfg");
+	TEST_EXPECT(take_run_directory(runs, gone, lenient, run, kept, run_error) &&
+	            kept == std::vector<std::string>({"game.cfg", "player.sav", "score.ini"}));
+	TEST_EXPECT(prepare_retail_launch_plan(install, build, run, plan, error));
+	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "adjusted in the run");
+
+	// A directory with no staging record (an older editor's, one whose record could not be written: none is
+	// written above) is emptied; a record naming a path outside the directory removes nothing there.
+	TEST_EXPECT(!fs::exists(run + "/" + kRunStagingFileName) && fs::is_regular_file(run + "/Jointops.exe"));
+	TEST_EXPECT(take_run_directory(runs, gone, lenient, run, kept, run_error) && kept.empty() && files_in(run).empty());
+	const std::string outside = dir.file("outside.txt");
+	TEST_EXPECT(editor_test::write_text(outside, "mine") && editor_test::write_text(run + "/game.cfg", "kept"));
+	TEST_EXPECT(record_run_staging(run, RunStaging{kRunModeInstall, {"../../outside.txt", outside, "sub/../../../outside.txt", ""}},
+	                               run_error));
+	TEST_EXPECT(take_run_directory(runs, gone, lenient, run, kept, run_error) &&
+	            kept == std::vector<std::string>({"game.cfg"}) && fs::is_regular_file(outside));
+	return 0;
+}
+
+// Each Play mode keeps its own run directories, `<runs>/<mode>/<n>` (run/run_directory.h): a Play of one
+// mode never takes, empties or removes another's. An OpenNova runtime Play between two strict Plays leaves
+// the game.cfg the first strict run wrote where the next strict Play keeps it (so no device dialog); the
+// modes' runs live side by side; a fresh strict take empties strict's alone; a take removes its own mode's
+// runs whose game is gone, never another mode's, nor a flat `<runs>/<n>` an older editor left (left
+// alone). A mode's directory holding another mode's staging record (one edited by hand) is emptied; a
+// mode none of kRunMode* takes nothing.
+static int test_run_directories_per_mode() {
+	namespace fs = std::filesystem;
+	editor_test::TempProjectDir dir("opennova_editor_run_per_mode");
+	const std::string runs = dir.file("runs");
+	std::map<int64_t, ProcessLiveness> games;
+	const LeaseLiveness liveness = [&games](int64_t pid, const std::string &) {
+		const auto found = games.find(pid);
+		return found == games.end() ? ProcessLiveness::Dead : found->second;
+	};
+	std::string run, run_error, text, io_error;
+	std::vector<std::string> kept;
+	const RunTake strict{kRunModeStrict, false}, strict_fresh{kRunModeStrict, true}, runtime{kRunModeRuntime, false},
+	        lenient{kRunModeInstall, false};
+	// What a Play of `mode` stages in `at` (one file), recorded as its staging.
+	const auto stage = [&](const std::string &at, const char *mode) {
+		return editor_test::write_text(at + "/staged.bin", mode) && record_run_staging(at, RunStaging{mode, {"staged.bin"}}, run_error);
+	};
+	TEST_EXPECT(editor_test::write_text(runs + "/1/game.cfg", "an older editor's"));
+
+	// The first strict Play: its game's device dialog answered, the game writes its game.cfg.
+	TEST_EXPECT(take_run_directory(runs, liveness, strict, run, kept, run_error) && run == runs + "/strict/1" && kept.empty());
+	TEST_EXPECT(stage(run, kRunModeStrict) && editor_test::write_text(run + "/game.cfg", "names the adapter"));
+	// An OpenNova runtime Play: a directory of its own, strict's as its game left it.
+	TEST_EXPECT(take_run_directory(runs, liveness, runtime, run, kept, run_error) && run == runs + "/runtime/1" &&
+	            kept.empty() && files_in(run).empty());
+	TEST_EXPECT(stage(run, kRunModeRuntime) && editor_test::write_text(run + "/session.log", "a log") &&
+	            editor_test::write_text(run + "/weapon.sav", "the runtime's weapons"));
+	TEST_EXPECT(files_in(runs + "/strict/1") == std::vector<std::string>({"game.cfg", "staged.bin", "staging.json"}));
+	// The next strict Play keeps the game.cfg the first wrote.
+	TEST_EXPECT(take_run_directory(runs, liveness, strict, run, kept, run_error) && run == runs + "/strict/1" &&
+	            kept == std::vector<std::string>({"game.cfg"}));
+	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "names the adapter");
+	TEST_EXPECT(stage(run, kRunModeStrict));
+	// Lenient Play's beside both: three modes' runs side by side, each its own.
+	TEST_EXPECT(take_run_directory(runs, liveness, lenient, run, kept, run_error) && run == runs + "/install/1" &&
+	            kept.empty() && files_in(run).empty());
+	TEST_EXPECT(stage(run, kRunModeInstall) && editor_test::write_text(run + "/game.cfg", "lenient's own"));
+	TEST_EXPECT(files_in(runs) == std::vector<std::string>({"1", "install", "runtime", "strict"}));
+	TEST_EXPECT(read_file_text(runs + "/strict/1/game.cfg", text, io_error) && text == "names the adapter");
+	TEST_EXPECT(read_file_text(runs + "/runtime/1/weapon.sav", text, io_error) && text == "the runtime's weapons");
+
+	// A runtime game may still run in runtime/1: the next runtime Play takes runtime/2. Every game gone, a
+	// strict Play leaves both runtime runs alone; the next runtime Play takes runtime/1 again and removes
+	// runtime/2, strict's and lenient's untouched.
+	TEST_EXPECT(claim_run_directory(runs + "/runtime/1", 700, ProcessIdentity{"opennova.exe", "created 700"}, run_error));
+	games[700] = ProcessLiveness::Alive;
+	TEST_EXPECT(take_run_directory(runs, liveness, runtime, run, kept, run_error) && run == runs + "/runtime/2");
+	TEST_EXPECT(stage(run, kRunModeRuntime));
+	games.clear();
+	TEST_EXPECT(take_run_directory(runs, liveness, strict, run, kept, run_error) && run == runs + "/strict/1" &&
+	            kept == std::vector<std::string>({"game.cfg"}));
+	TEST_EXPECT(stage(run, kRunModeStrict));
+	TEST_EXPECT(files_in(runs + "/runtime") == std::vector<std::string>({"1", "2"}));
+	const std::string strict_tree = editor_test::tree_digest(runs + "/strict"),
+	                  install_tree = editor_test::tree_digest(runs + "/install");
+	TEST_EXPECT(take_run_directory(runs, liveness, runtime, run, kept, run_error) && run == runs + "/runtime/1" &&
+	            kept == std::vector<std::string>({"weapon.sav"}));
+	TEST_EXPECT(stage(run, kRunModeRuntime));
+	TEST_EXPECT(files_in(runs + "/runtime") == std::vector<std::string>({"1"}));
+	TEST_EXPECT(editor_test::tree_digest(runs + "/strict") == strict_tree &&
+	            editor_test::tree_digest(runs + "/install") == install_tree);
+
+	// A fresh strict take empties strict's alone.
+	const std::string runtime_tree = editor_test::tree_digest(runs + "/runtime");
+	TEST_EXPECT(take_run_directory(runs, liveness, strict_fresh, run, kept, run_error) && run == runs + "/strict/1" &&
+	            kept.empty() && files_in(run).empty());
+	TEST_EXPECT(editor_test::tree_digest(runs + "/runtime") == runtime_tree &&
+	            editor_test::tree_digest(runs + "/install") == install_tree);
+	TEST_EXPECT(read_file_text(runs + "/install/1/game.cfg", text, io_error) && text == "lenient's own");
+
+	// Another mode's record in strict's directory (edited by hand): emptied all the same.
+	TEST_EXPECT(stage(run, kRunModeInstall) && editor_test::write_text(run + "/game.cfg", "names the adapter"));
+	TEST_EXPECT(take_run_directory(runs, liveness, strict, run, kept, run_error) && run == runs + "/strict/1" &&
+	            kept.empty() && files_in(run).empty());
+
+	// A mode none of kRunMode* takes nothing, makes nothing.
+	run_error.clear();
+	TEST_EXPECT(!take_run_directory(runs, liveness, RunTake{"../elsewhere", false}, run, kept, run_error) &&
+	            !run_error.empty() && !fs::exists(dir.file("elsewhere")));
+	TEST_EXPECT(!take_run_directory(runs, liveness, RunTake{"", false}, run, kept, run_error));
+	// The flat run an older editor left is left alone.
+	TEST_EXPECT(read_file_text(runs + "/1/game.cfg", text, io_error) && text == "an older editor's");
+	return 0;
+}
+
 // ADR 0046 S16: an expansion's build runs from its run directory with /exp: the runtime's
 // --resource-dir names the run directory (the install's base game and the build's expansion folder
 // prepare_expansion_run put there), not the build; a source run alike.
@@ -502,6 +724,26 @@ static int test_expansion_staging() {
 	TEST_EXPECT(editor_test::write_text(run + "/expansion/jxm/weapon.sav", "saved") &&
 	            editor_test::write_text(run + "/expansion/jxm/version.txt", "edited"));
 	TEST_EXPECT(editor_test::tree_digest(build) == build_tree && editor_test::tree_digest(install) == install_tree);
+	// Staged again into the same run directory (run/run_directory.h: the run keeps the game's files): each
+	// staged file put back by its name (the cookie jar the install's, the expansion's version.txt the
+	// build's), the files the game reads by name kept as the game rewrote them (seeded where the run had
+	// none, never staged), and its expansion's weapon.sav kept; what was staged named, each path under the
+	// run directory.
+	{
+		std::vector<std::string> staged;
+		TEST_EXPECT(prepare_expansion_run(install, build, "jxm", run, cache, error, link_file, &staged));
+		const auto named = [&staged](const char *path) { return std::find(staged.begin(), staged.end(), path) != staged.end(); };
+		TEST_EXPECT(named("language.pff") && named("intro.bik") && named("nw_cdata.coo") && named("cc.bin") &&
+		            named("expansion/jxm/jxm.pff") && named("expansion/jxm/version.txt"));
+		TEST_EXPECT(!named("SCORE.INI") && !named("earlyerr.txt") && !named("expansion/jxm/weapon.sav") && !named("nwmain.mnx"));
+		TEST_EXPECT(read_file_text(run + "/nw_cdata.coo", text, io_error) && text == "cookies");
+		TEST_EXPECT(read_file_text(run + "/expansion/jxm/version.txt", text, io_error) && text == "1.0");
+		TEST_EXPECT(read_file_text(run + "/SCORE.INI", text, io_error) && text == "written by the game");
+		TEST_EXPECT(read_file_text(run + "/earlyerr.txt", text, io_error) && text == "written by the game");
+		TEST_EXPECT(read_file_text(run + "/expansion/jxm/weapon.sav", text, io_error) && text == "saved");
+		TEST_EXPECT(fs::equivalent(run + "/expansion/jxm/jxm.pff", build + "/expansion/jxm/jxm.pff", ec));
+		TEST_EXPECT(editor_test::tree_digest(build) == build_tree && editor_test::tree_digest(install) == install_tree);
+	}
 
 	// The stock game: the same staging, the install's own binaries, configuration and saves beside it.
 	LaunchPlan plan;
@@ -599,6 +841,8 @@ int main() {
 	failures += test_strict_install_staging();
 	failures += test_file_access_log();
 	failures += test_strict_first_run_decision();
+	failures += test_run_directory_keeps_game_state();
+	failures += test_run_directories_per_mode();
 	failures += test_expansion_staging();
 	failures += test_lifecycle();
 	if (failures == 0) std::printf("editor_play_session: all tests passed\n");
