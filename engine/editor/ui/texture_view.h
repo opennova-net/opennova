@@ -15,6 +15,7 @@ namespace opennova::editor {
 
 class TextureViewportView;
 struct GraphEdge;
+struct TextureBudget;
 struct TextureImage;
 
 // A texture's Document tab (ADR 0046 S18; the texture type's row of ui/document_views, its MainViewport
@@ -26,7 +27,8 @@ struct TextureImage;
 // its alpha, its stored form, an upside-down TGA's rows, an 8-bit PCX's indices: texture_operation, one
 // undo step each), and what it is used as (the session's texture uses, S18: each use by its role and where, a model's
 // material with its shader and cut-out, a name the game opens itself with what for; a use whose loader
-// opens another file said so; a Go to on each referrer); beside it the texture viewport filling the rest
+// opens another file said so; a Go to on each referrer; under a model row's use what its texture costs
+// the game, documents/texture_budget); beside it the texture viewport filling the rest
 // (ui/texture_viewport_view).
 class TextureView final : public DocumentView {
 public:
@@ -42,6 +44,7 @@ private:
 	void draw_info(Workspace &workspace, const DocumentBase &document);
 	void draw_palette(const std::vector<uint8_t> &palette);
 	void draw_uses(Workspace &workspace, const DocumentBase &document);
+	static void draw_budget(const TextureBudget &budget);
 	void draw_import(Workspace &workspace, const DocumentBase &document);
 	void draw_edits(Workspace &workspace, const DocumentBase &document, const TextureImage &image);
 	static bool replaceable_image(const std::string &path);
