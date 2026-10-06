@@ -139,6 +139,7 @@ const Route kRoutes[] = {
 	{AssetKind::Score, ArchiveSlot::Loose}, // a Config before S13 D5
 	{AssetKind::Text, ArchiveSlot::Loose},
 	{AssetKind::ImportSource, ArchiveSlot::None}, // ImageSource, a .png's, before S13 A8
+	{AssetKind::ImportInput, ArchiveSlot::None}, // a terrain set's images (S20)
 };
 
 static int test_routing() {
