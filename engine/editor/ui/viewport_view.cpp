@@ -42,9 +42,11 @@ void ViewportView::draw(Workspace &workspace, const std::string &path) {
 		draw_empty(workspace, model, path);
 		return;
 	}
-	if (!canvas_) {
-		const ViewportLayout layout = model->layout();
+	// A design picture whose size moved (a HUD's screen, DI-20) is laid out on a canvas of the new size.
+	const ViewportLayout layout = model->layout();
+	if (!canvas_ || layout.design_width != layout_.design_width || layout.design_height != layout_.design_height) {
 		canvas_ = std::make_unique<ViewportCanvas>(layout.design_width, layout.design_height);
+		layout_ = layout;
 	}
 	if (!half_) half_ = model->make_canvas();
 	// The context carries the device from the first (a toolbar's planner, the canvas's frame: a
