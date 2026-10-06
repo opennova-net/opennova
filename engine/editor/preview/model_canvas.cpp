@@ -228,7 +228,8 @@ void ModelCanvas::input(
 		camera.dolly(std::pow(kModelWheelDolly, in.wheel));
 		camera_moved = true;
 	}
-	if (camera_moved)
+	// The first-person eye (DI-13) stands where the game's camera does: no gesture moves it.
+	if (camera_moved && !camera.posed)
 		set_camera(frame, camera, out);
 	if (in.double_clicked || (in.keyboard.focused && in.keyboard.frame))
 		frame_selected(frame, in.width, in.height, out);
@@ -247,7 +248,7 @@ void ModelCanvas::end_frame(CanvasRequests &out) {
 
 void ModelCanvas::frame_selected(
 		const ModelCanvasFrame &frame, int width, int height, CanvasRequests &out) const {
-	if (!frame.model)
+	if (!frame.model || frame.model->camera().posed)
 		return;
 	const ModelViewport &model = *frame.model;
 	for (const ModelOverlay &overlay : frame.overlays) {
@@ -298,7 +299,7 @@ OverlayList ModelCanvas::shapes(
 		}
 		float cx = 0.0f, cy = 0.0f, depth = 0.0f;
 		if (s.sphere && s.radius > 0.0f && camera.project(s.center, width, height, cx, cy, &depth) && depth > 0.0f) {
-			const float reach = s.radius * OrbitCamera::focal_pixels(width) / depth;
+			const float reach = s.radius * camera.focal(width) / depth;
 			if (reach > 1.0f && reach < 4.0f * float(width)) list.ring(CanvasPoint{cx, cy}, reach, role, thickness, s.rgb, alpha);
 		}
 	};
@@ -356,7 +357,7 @@ OverlayList ModelCanvas::shapes(
 			case ModelOverlayKind::Light: {
 				const uint32_t rgb = overlay.color & 0xFFFFFFu;
 				if (overlay.radius > 0.0f && depth > 0.0f) {
-					const float reach = overlay.radius * OrbitCamera::focal_pixels(width) / depth;
+					const float reach = overlay.radius * camera.focal(width) / depth;
 					if (reach > 2.0f && reach < 4.0f * float(width))
 						list.ring(at, reach, OverlayRole::Normal, 1.0f, rgb, 0x60);
 				}
