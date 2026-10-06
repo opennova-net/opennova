@@ -435,6 +435,70 @@ void test_edit_scrolled_out() {
 	CHECK(ended && GImGui->ActiveId != key, "Enter ends its edit");
 }
 
+// The mission authoring round: a string table's sections. The selected string's Move to section...
+// lists the other sections, and a pick raises a Move whose destination is that section (which the type
+// makes an add there and a remove here); the sections' Add asks the new section's name first, says
+// when the table has one of it (in any case: the one a lookup reads, which Add selects), and raises an
+// Add with that name.
+void test_strings_sections() {
+	opennova::rtxt::File table;
+	table.sections = {{"Menu", 2}, {"WepDes", 1}};
+	table.entries = {{"MM_Exit", "Exit", {}, 0}, {"MM_Cafe", "Cafe", {}, 0}, {"WPN_ONE", "The first weapon", {}, 1}};
+	std::vector<uint8_t> bytes;
+	std::string io_error;
+	CHECK(opennova::rtxt::write(table, bytes, io_error), "the table written");
+	auto loaded = std::make_shared<StringsDocument>();
+	Diagnostic error;
+	CHECK(loaded->load_bytes(bytes, "table.bin", AssetKind::Strings, "jo", error) && loaded->rows().size() == 2, "the table loads");
+	if (loaded->rows().size() != 2) return;
+	const std::shared_ptr<const DocumentBase> document = loaded;
+	std::unique_ptr<DocumentView> view = make_view(*document);
+	CHECK(view != nullptr, "its view");
+	if (!view) return;
+	const NodeId menu = loaded->rows()[0]->id, wepdes = loaded->rows()[1]->id;
+	const NodeAddress cafe{menu, node_kind(StringsKind::String), loaded->rows()[0]->collections[0][1]};
+	NullBackend backend;
+	TestWorkspace workspace;
+	seed(workspace.seeded, document);
+	workspace.seeded.documents.selection.select_only(document->path(), cafe);
+	draw_frames(workspace, *view, *document, 640.0f, 3);
+	CHECK(view_frame(workspace, *view, *document, 640.0f, true).find("Move to section...") != std::string::npos,
+	      "the selected string's Move to section...");
+	const ImGuiID tab = Ui::window_id("Tab");
+	ImGui::ActivateItemByID(item_id(tab, {"master", "details", "Move to section..."}));
+	draw_frames(workspace, *view, *document, 640.0f, 2);
+	const ImGuiID rows_popup = item_id(tab, {"master", "details", "move to row"});
+	char popup_name[32];
+	std::snprintf(popup_name, sizeof(popup_name), "##Popup_%08x", rows_popup);
+	ImGui::ActivateItemByID(ImHashStr("WepDes", 0, pushed(ImHashStr(popup_name), static_cast<int>(wepdes))));
+	draw_frames(workspace, *view, *document, 640.0f, 2);
+	bool moved = false;
+	for (const EditorRequest &request : workspace.requests)
+		moved = moved || (request.kind == EditorRequestKind::EditRecord && request.edits.size() == 1 &&
+		                  request.edits[0].operation == EditOperation::Move && request.edits[0].address == cafe &&
+		                  request.edits[0].parent == wepdes);
+	CHECK(moved, "a pick: a Move of the string whose destination is WepDes");
+	// The sections' Add: its name asked, the one the table has said, an Add with the name on Enter.
+	workspace.requests.clear();
+	ImGui::ActivateItemByID(item_id(tab, {"master", "masters", "Add"}));
+	draw_frames(workspace, *view, *document, 640.0f, 3);
+	ImGui::GetIO().AddInputCharactersUTF8("wepdes");
+	draw_frames(workspace, *view, *document, 640.0f, 2);
+	CHECK(view_frame(workspace, *view, *document, 640.0f, true).find("Section WepDes is already in the file: Add selects it.") !=
+	              std::string::npos,
+	      "the name the table has said");
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, true);
+	draw_frames(workspace, *view, *document, 640.0f, 1);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_Enter, false);
+	draw_frames(workspace, *view, *document, 640.0f, 1);
+	bool added = false;
+	for (const EditorRequest &request : workspace.requests)
+		added = added || (request.kind == EditorRequestKind::EditRecord && request.edits.size() == 1 &&
+		                  request.edits[0].operation == EditOperation::Add && request.edits[0].field == "name" &&
+		                  request.edits[0].value == Value(std::string("wepdes")));
+	CHECK(added, "Enter: an Add with the name typed");
+}
+
 // ADR 0046 S14: an outline that filters its rows by kind and leaves out the rows its type says hold
 // nothing (OutlineSpec::by_kind, row_listed), over the pool document (crates, barrels and a note; a
 // crate that weighs nothing is left out): a chip per kind, a click on one leaving its kind's rows out
@@ -1005,6 +1069,7 @@ int main() {
 	editor_ui_test::test_script_view_device();
 	editor_ui_test::test_a_view_per_document();
 	editor_ui_test::test_edit_scrolled_out();
+	editor_ui_test::test_strings_sections();
 	editor_ui_test::test_outline_kinds_and_clicks();
 	editor_ui_test::test_main_viewport_view();
 	editor_ui_test::test_main_viewport_held();
