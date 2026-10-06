@@ -61,6 +61,7 @@ enum class DocumentTypeId {
 	Texture,     // a .tga .mdt .pcx .dds .png: its texels as the game reads them (ADR 0046 S18)
 	SoundBank,     // a .lwf: its waves and its sets, their layers and members (the sound lane)
 	SoundProfiles, // SndProf.def: its profiles and each one's 51 slots (the sound lane)
+	Particles,   // a .ptl .ptu .ptg: the effect system's text, its reader's findings (ADR 0046 DI-14)
 	kCount, // the number of values, None among them
 };
 
