@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/audio_stream_player.hpp>
 #include <godot_cpp/classes/file_dialog.hpp>
+#include <godot_cpp/classes/input_event.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
@@ -53,6 +54,13 @@ public:
 	void _ready() override;
 	void _exit_tree() override;
 	void _process(double p_delta) override;
+	// The mouse's back and forward buttons (MOUSE_BUTTON_XBUTTON1, XBUTTON2) go Back and Forward (the
+	// navigation history: navigate_back, navigate_forward) wherever the pointer is over the editor's window.
+	// The root's input comes before the ImGui layer's and before any control's (the script device's text
+	// control, a text field, a viewport's picture), so the press is taken here, once, and consumed; an
+	// undocked window of the pass is an OS window of its own, whose input reaches Dear ImGui alone, and
+	// the windows' shortcuts take the buttons there (EditorWindows::shortcuts).
+	void _input(const Ref<InputEvent> &p_event) override;
 
 	// Where the editor keeps its own settings (recent projects, the runtime path): the file its
 	// preferences store keeps them in (opennova::editor::FilePreferencesStore), read when the

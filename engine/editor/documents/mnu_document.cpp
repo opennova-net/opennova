@@ -932,11 +932,11 @@ void MnuDocument::prepare_duplicate(Node &copy, const Node &,
 // An editor rule, as a screen keeps one root window: a menu with no screen has nothing
 // to show, so the last screen stays (the menu view's Remove waits for a second one).
 bool MnuDocument::accept_step(const EditStep &step, const StagedRows &rows,
-                              std::string &error) const {
+                              StepRefusal &refusal) const {
 	if (rows.size() != 0) return true;
 	for (const RowSwap &swap : step.swaps) {
 		if (!swap.before || swap.after) continue;
-		error = "A menu keeps at least one screen.";
+		refusal.message = "A menu keeps at least one screen.";
 		return false;
 	}
 	return true;

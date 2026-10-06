@@ -140,7 +140,16 @@ void ModelViewportView::draw_ready(Workspace &workspace, const ViewportModel &vi
 		                           : colon == std::string::npos
 		                                   ? "paired by " + rig.source
 		                                   : "paired by " + rig.source.substr(colon + 2) + " (" + rig.source.substr(0, colon) + ")";
-		if (!paired.empty()) {
+		if (!paired.empty() && !rig.pairing.file.empty()) {
+			// A link to the record that pairs them (DI-05): a Go to, so the history records it.
+			const float room = std::min(ui_kit::text_width(paired.c_str()), ImGui::GetFontSize() * 8.0f);
+			row.next(room);
+			ImGui::AlignTextToFramePadding();
+			if (ImGui::TextLink((ui_kit::fit(paired, ImGui::GetContentRegionAvail().x) + "###paired").c_str()))
+				window_requests::go_to(workspace, rig.pairing);
+			ui_kit::tooltip(paired + "\nThe record whose graphic and animation map pair this model with the map: a click " +
+			                (rig.pairing.editable ? "opens " : "shows ") + rig.pairing.file + " at it.");
+		} else if (!paired.empty()) {
 			row.next(std::min(ui_kit::text_width(paired.c_str()), ImGui::GetFontSize() * 8.0f));
 			ImGui::AlignTextToFramePadding();
 			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
@@ -242,8 +251,10 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 	const int32_t shown = model.clip_loops() ? ticks % length : std::min(ticks, length);
 	const uint32_t frames = model.clip_frame_count();
 	const double frame = model.clip_frame(clock);
-	// The keys, while the Preview has the keyboard and no text field takes it.
+	// The keys, while the Preview has the keyboard and no text field takes it; an arrow with Alt held is
+	// Back's or Forward's (the navigation history), never a frame's step.
 	const bool keys = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput;
+	const bool arrows = keys && !ImGui::GetIO().KeyAlt;
 	ui_kit::WrapRow row;
 	const char *run = clock.playing() ? "Pause##clip" : "Run##clip";
 	row.next(ui_kit::button_width(run));
@@ -253,11 +264,11 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 	if (ImGui::Button("|<") || (keys && ImGui::IsKeyPressed(ImGuiKey_Home, false))) seek_ticks(workspace, model, 0, true);
 	ui_kit::tooltip("The first frame (Home).");
 	row.next(ImGui::GetFrameHeight() * 2.0f + ImGui::GetStyle().ItemSpacing.x);
-	if (ImGui::ArrowButton("##back", ImGuiDir_Left) || (keys && ImGui::IsKeyPressed(ImGuiKey_LeftArrow)))
+	if (ImGui::ArrowButton("##back", ImGuiDir_Left) || (arrows && ImGui::IsKeyPressed(ImGuiKey_LeftArrow)))
 		seek_ticks(workspace, model, model.tick_of_step(shown, -1), true);
 	ui_kit::tooltip("A frame back (Left).");
 	ImGui::SameLine();
-	if (ImGui::ArrowButton("##forward", ImGuiDir_Right) || (keys && ImGui::IsKeyPressed(ImGuiKey_RightArrow)))
+	if (ImGui::ArrowButton("##forward", ImGuiDir_Right) || (arrows && ImGui::IsKeyPressed(ImGuiKey_RightArrow)))
 		seek_ticks(workspace, model, model.tick_of_step(shown, 1), true);
 	ui_kit::tooltip("A frame on (Right).");
 	char where[96];
