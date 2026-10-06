@@ -445,7 +445,17 @@ void TextureView::draw_uses(Workspace &workspace, const DocumentBase &document) 
 				tip += std::string("\nAnd makes it ") + texture_load_transform_words(use.load.transform);
 			if (use.known()) {
 				const TextureRoleRow &role = texture_role_row(use.role);
-				if (*role.alpha) tip += std::string("\nAlpha: ") + role.alpha;
+				// A model row's alpha by its material's technique (a Phong diffuse's the specular brightness), else
+				// the role's.
+				TextureBudgetLoader loader = TextureBudgetLoader::Stage;
+				if (use.context.material >= 0 && texture_role_budget_loader(use.role, loader))
+					tip += "\nAlpha: " + texture_alpha_meaning_words(texture_row_alpha_meaning(use.context.shader, use.context.material_flags,
+					                                                                           use.context.type, use.context.slot,
+					                                                                           use.name_written),
+					                                                 use.context.shader, use.context.alpha_ref,
+					                                                 use.context.alpha_test_inverted());
+				else if (*role.alpha)
+					tip += std::string("\nAlpha: ") + role.alpha;
 				if (role.size != TextureSizeRule::Any) tip += "\nSize: " + texture_size_words(role);
 				tip += std::string("\nWitness: ") + (use.fixed ? use.fixed_witness.c_str() : role.witness);
 			}
