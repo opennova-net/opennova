@@ -48,6 +48,9 @@ public:
 	}
 
 private:
+	// Play's own Save all, with the editor's save_before_play on (DI-26): the files written without asking;
+	// true when it wrote (what it could not stays unsaved, for the prompt).
+	bool saved_first(const EditorRequest &request, const std::vector<std::string> &unsaved);
 	// The prompt's answer (Save or Discard) refused against the running operation (true, said
 	// why, the prompt kept): what waits as the gate would answer it, then the answer itself.
 	bool answer_refused(UnsavedChoice choice);
