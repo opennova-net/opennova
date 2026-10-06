@@ -5,11 +5,13 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <system_error>
 #include <utility>
 #include <vector>
 
 #include <base/gameprofile/required_resources.h>
+#include <base/gameprofile/resource_missing.h>
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kind.h>
 #include <editor/assets/asset_registry.h>
@@ -178,9 +180,23 @@ bool PlayController::refused(const std::string &mission, const PlayStart &start)
 	return false;
 }
 
+std::vector<Diagnostic> PlayController::play_rows() const {
+	std::vector<Diagnostic> rows = findings_;
+	for (const char *mode : {kRunModeRuntime, kRunModeInstall, kRunModeStrict})
+		if (const auto found = log_findings_.find(mode); found != log_findings_.end())
+			rows.insert(rows.end(), found->second.begin(), found->second.end());
+	return rows;
+}
+
 void PlayController::publish_findings() {
-	core_.problems().set_play_findings(findings_);
+	core_.problems().set_play_findings(play_rows());
 	core_.problems().validate_later();
+}
+
+PlayGame PlayController::play_game() const {
+	if (mode_ == kRunModeStrict) return {"the game install (strict Play)"};
+	if (mode_ == kRunModeInstall) return {"the game install"};
+	return {"OpenNova"};
 }
 
 void PlayController::start(const std::string &mission, bool behind, bool fresh, const PlayStart &start) {
@@ -188,22 +204,36 @@ void PlayController::start(const std::string &mission, bool behind, bool fresh, 
 	LaunchPlan plan;
 	Diagnostic error;
 	std::error_code ec;
+	// The mode this Play runs in (its run directory's, run/run_directory.h): the game install's lenient or
+	// strict, else OpenNova.
+	const bool in_install = core_.preferences().values().play_in_install;
+	// Strict Play (Preferences::play_in_install_strict): the build and the install's program alone, no /d.
+	const bool strict = in_install && core_.preferences().values().play_in_install_strict;
+	const std::string mode = !in_install ? kRunModeRuntime : strict ? kRunModeStrict : kRunModeInstall;
 	// The last run's boot report, its mission's and its exit go, their rows with them (the next
-	// validation would make none); the game started now reports on this project.
+	// validation would make none), and so do the rows the logs of this mode's last Play made (DI-27: each
+	// mode's stay until the next Play of that mode); the game started now reports on this project.
 	view_.activity.boot_missing.clear();
 	view_.activity.play_mission.clear();
 	view_.activity.play_start = PlayStart();
 	view_.activity.play_start_placed = PlayStartPlaced();
 	start_again_pending_ = false;
 	findings_.clear();
-	core_.problems().set_play_findings({});
+	std::vector<Diagnostic> dropped;
+	if (const auto found = log_findings_.find(mode); found != log_findings_.end()) {
+		dropped = std::move(found->second);
+		log_findings_.erase(found);
+	}
+	mode_ = mode;
+	core_.problems().set_play_findings(play_rows());
 	const size_t rows = view_.findings.diagnostics.size();
 	view_.findings.diagnostics.erase(
 			std::remove_if(view_.findings.diagnostics.begin(), view_.findings.diagnostics.end(),
-					[](const Diagnostic &d) {
+					[&dropped](const Diagnostic &d) {
 						return d.row() == &finding_code(CoreFinding::PlayBootMissing) ||
 						       d.row() == &finding_code(CoreFinding::PlayMissionFailed) ||
-						       d.row() == &finding_code(CoreFinding::PlayCrashed);
+						       d.row() == &finding_code(CoreFinding::PlayCrashed) ||
+						       std::find(dropped.begin(), dropped.end(), d) != dropped.end();
 					}),
 			view_.findings.diagnostics.end());
 	core_.touch(ViewConcern::Run);
@@ -222,9 +252,6 @@ void PlayController::start(const std::string &mission, bool behind, bool fresh, 
 		core_.touch(ViewConcern::Output);
 		return;
 	}
-	const bool in_install = core_.preferences().values().play_in_install;
-	// Strict Play (Preferences::play_in_install_strict): the build and the install's program alone, no /d.
-	const bool strict = in_install && core_.preferences().values().play_in_install_strict;
 	// What Play launches, asked of its source now that the build has landed: one answer, which the
 	// plan takes whole (the executable, whether the run drives the source checkout, the Godot
 	// options) with the port of the game's MCP endpoint allocated now (none for the game install,
@@ -248,7 +275,6 @@ void PlayController::start(const std::string &mission, bool behind, bool fresh, 
 	// dialog, its saves), what the Play before staged and the logs gone; a fresh Play empties it. One whose
 	// game may still run (one an earlier editor left running) is passed over. It lives under the cache,
 	// which comes with its self-ignore file.
-	const std::string mode = !in_install ? kRunModeRuntime : strict ? kRunModeStrict : kRunModeInstall;
 	std::string run_dir, run_error, cache_error;
 	std::vector<std::string> kept;
 	ensure_project_cache_dir(core_.paths(), cache_error);
@@ -357,6 +383,18 @@ bool PlayController::launch(const LaunchPlan &plan, Diagnostic &error) {
 	file_log_ = FileAccessLog();
 	view_.activity.play_file_log_read = false;
 	view_.activity.play_file_log = FileAccessLog();
+	// The graphics log a run before left in the run directory (the game install's: made anew by the first
+	// line a run writes), as it stands: one the game leaves as it was is not this run's (DI-27).
+	graphics_log_size_ = -1;
+	graphics_log_time_ = 0;
+	{
+		std::error_code ec;
+		const fs::path graphics = system_path(join_path(plan.working_dir, kInstallGraphicsLogName));
+		if (fs::is_regular_file(graphics, ec)) {
+			graphics_log_size_ = static_cast<int64_t>(fs::file_size(graphics, ec));
+			graphics_log_time_ = static_cast<int64_t>(fs::last_write_time(graphics, ec).time_since_epoch().count());
+		}
+	}
 	if (!play_.start(plan, error)) return false;
 	plan_ = plan;
 	started_ms_ = core_.platform().now_ms();
@@ -431,7 +469,10 @@ void PlayController::poll() {
 		if (now == PlayState::Stopped) {
 			const bool log_read = tail_game_log();
 			absorb_exit();
-			if (install_run_) report_file_log(log_read);
+			if (install_run_) {
+				report_file_log(log_read);
+				absorb_install_logs(log_read);
+			}
 			if (strict_run_) start_again_if_first_run();
 		}
 		view_.activity.play_state = play_.state();
@@ -545,6 +586,7 @@ void PlayController::forget_project() {
 	view_.activity.boot_missing.clear();
 	boot_project_.clear();
 	findings_.clear();
+	log_findings_.clear();
 	core_.problems().set_play_findings({});
 }
 
@@ -612,6 +654,57 @@ std::string PlayController::game_words() const {
 void PlayController::absorb_report(const std::string &line) {
 	absorb_boot_report(line);
 	absorb_mission_report(line);
+	absorb_resource_miss(line);
+}
+
+bool PlayController::add_log_findings(std::vector<Diagnostic> rows) {
+	std::vector<Diagnostic> &kept = log_findings_[mode_];
+	bool added = false;
+	for (Diagnostic &d : rows)
+		if (std::find(kept.begin(), kept.end(), d) == kept.end()) {
+			kept.push_back(std::move(d));
+			added = true;
+		}
+	return added;
+}
+
+// The runtime names each file or name it looked up as it loaded and did not find, once, on a line of its
+// log (`ResourceRoot: <kResourceMissingMarker><kind> "<name>"[ named by "<file>"][: <words>]`,
+// ResourceRoot::report_missing): rows on the files of the project that name it (resource_miss_findings),
+// among this mode's until its next Play. Like the boot report it belongs to the project the game was
+// started in: a line read after that project closed, or while another is open, is ignored.
+void PlayController::absorb_resource_miss(const std::string &line) {
+	gameprofile::ResourceMiss miss;
+	if (!gameprofile::parse_resource_missing(line, miss)) return;
+	if (!view_.project.open || view_.project.root != boot_project_) return;
+	if (!add_log_findings(resource_miss_findings(miss, play_game(), view_))) return;
+	core_.touch(ViewConcern::Run);
+	publish_findings();
+}
+
+// The game install's game names nothing it did not find: its file log names each open that succeeded, its
+// graphics log the mission it began loading and whether it finished. Read once it exited (the file log
+// never while it runs, kInstallFileLogName), they make rows of what they show it lacked
+// (install_log_findings) among this mode's until its next Play; never for a project closed since.
+void PlayController::absorb_install_logs(bool read) {
+	if (!view_.project.open || view_.project.root != boot_project_) return;
+	InstallLogs logs;
+	logs.file_log = read ? &file_log_ : nullptr;
+	logs.exited_on_its_own = view_.activity.play_exited_on_its_own;
+	// The graphics log this run wrote: one there as the game was started, as it was, is a run before's.
+	std::error_code ec;
+	const fs::path graphics = system_path(join_path(plan_.working_dir, kInstallGraphicsLogName));
+	if (fs::is_regular_file(graphics, ec)) {
+		const int64_t size = static_cast<int64_t>(fs::file_size(graphics, ec));
+		const int64_t time = static_cast<int64_t>(fs::last_write_time(graphics, ec).time_since_epoch().count());
+		if (size != graphics_log_size_ || time != graphics_log_time_) {
+			std::ifstream in(graphics, std::ios::binary);
+			logs.graphics_log.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+		}
+	}
+	if (!add_log_findings(install_log_findings(logs, play_game(), view_))) return;
+	core_.touch(ViewConcern::Run);
+	publish_findings();
 }
 
 // The runtime names each boot-required file it could not find, one line per file
