@@ -29,13 +29,24 @@ float tan_half_fov() { return std::tan(OrbitCamera::fov_horizontal_degrees() * k
 
 float OrbitCamera::fov_horizontal_degrees() { return world::kPlayerCameraFovHDeg; }
 
+float OrbitCamera::fov_degrees() const {
+	return posed && pose.fov_degrees > 0.0f ? pose.fov_degrees : fov_horizontal_degrees();
+}
+
 PreviewVec3 OrbitCamera::eye() const {
+	if (posed) return pose.eye;
 	const float c = std::cos(pitch);
 	return PreviewVec3{target.x + distance * c * std::sin(yaw), target.y + distance * std::sin(pitch),
 	                   target.z + distance * c * std::cos(yaw)};
 }
 
 void OrbitCamera::axes(PreviewVec3 &right, PreviewVec3 &up, PreviewVec3 &back) const {
+	if (posed) {
+		right = pose.right;
+		up = pose.up;
+		back = pose.back;
+		return;
+	}
 	const float c = std::cos(pitch);
 	back = PreviewVec3{c * std::sin(yaw), std::sin(pitch), c * std::cos(yaw)};
 	// right = world up x back, normalized (the pitch stays short of the poles).
@@ -49,6 +60,11 @@ void OrbitCamera::axes(PreviewVec3 &right, PreviewVec3 &up, PreviewVec3 &back) c
 
 float OrbitCamera::focal_pixels(int width) { return 0.5f * static_cast<float>(width) / tan_half_fov(); }
 
+float OrbitCamera::focal(int width) const {
+	if (!posed || !(pose.fov_degrees > 0.0f)) return focal_pixels(width);
+	return 0.5f * static_cast<float>(width) / std::tan(pose.fov_degrees * kPi / 360.0f);
+}
+
 bool OrbitCamera::project(const PreviewVec3 &point, int width, int height, float &x, float &y, float *depth) const {
 	PreviewVec3 right, up, back;
 	axes(right, up, back);
@@ -56,7 +72,7 @@ bool OrbitCamera::project(const PreviewVec3 &point, int width, int height, float
 	const float ahead = -dot(relative, back);
 	if (depth) *depth = ahead;
 	if (ahead < near_plane) return false;
-	const float focal = focal_pixels(width);
+	const float focal = this->focal(width);
 	x = 0.5f * static_cast<float>(width) + dot(relative, right) * focal / ahead;
 	y = 0.5f * static_cast<float>(height) - dot(relative, up) * focal / ahead;
 	return true;
@@ -66,7 +82,7 @@ bool OrbitCamera::ray(float x, float y, int width, int height, PreviewVec3 &from
 	if (width <= 0 || height <= 0) return false;
 	PreviewVec3 right, up, back;
 	axes(right, up, back);
-	const float focal = focal_pixels(width);
+	const float focal = this->focal(width);
 	const float sx = (x - 0.5f * static_cast<float>(width)) / focal;
 	const float sy = (0.5f * static_cast<float>(height) - y) / focal;
 	from = eye();
@@ -101,12 +117,13 @@ void OrbitCamera::frame(const PreviewVec3 &center, float radius, int width, int 
 }
 
 void OrbitCamera::orbit(float dx, float dy) {
+	if (posed) return;
 	yaw = std::fmod(yaw - dx * kOrbitRadiansPerPixel, 2.0f * kPi);
 	pitch = std::clamp(pitch + dy * kOrbitRadiansPerPixel, -kOrbitPitchLimit, kOrbitPitchLimit);
 }
 
 void OrbitCamera::pan(float dx, float dy, int width) {
-	if (width <= 0) return;
+	if (width <= 0 || posed) return;
 	PreviewVec3 right, up, back;
 	axes(right, up, back);
 	const float units = distance / focal_pixels(width); // world units per pixel at the target
@@ -116,7 +133,7 @@ void OrbitCamera::pan(float dx, float dy, int width) {
 }
 
 void OrbitCamera::dolly(float factor) {
-	if (!(factor > 0.0f)) return;
+	if (!(factor > 0.0f) || posed) return;
 	distance = std::clamp(distance * factor, kMinDistance, kMaxDistance);
 	far_plane = std::max(far_plane, distance * 2.0f + 100.0f);
 }
