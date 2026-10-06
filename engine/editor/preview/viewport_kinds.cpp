@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <editor/model/document.h>
+#include <editor/preview/definition_viewport.h>
 #include <editor/preview/effect_viewport.h>
 #include <editor/preview/hud_viewport.h>
 #include <editor/preview/menu_viewport.h>
@@ -69,13 +70,22 @@ constexpr ViewportFeed kHudFeeds[] = {
 	{ T::HudLayout, true },
 };
 
+// The definition's (DI-21): a definition table's selected record, the Preview window's beside the table, the
+// record as it stands (the catalog's row is the record the game's parser makes) and what it names read from
+// the project's files as the game would read them were they saved now.
+constexpr ViewportFeed kDefinitionFeeds[] = {
+	{ T::Catalog, true },
+};
+
 // The model's scene waits for a gesture's end (built anew over frames: a drag shows its markers
 // over the scene that stands); the menu's screen is configured again as a drag goes (S13 V8); the
 // mission's waits too (a drag is Updates alone: its entities move in place), and the Shell keeps two
-// of its devices at most (each holds a terrain and the mission's models).
+// of its devices at most (each holds a terrain and the mission's models). A menu's screen and a
+// definition's record are each one row of the document, the selection's: a screen a page of the menu, a
+// record one of the table's records picked one after another.
 constexpr ViewportKindRow kRows[] = {
 	{ ViewportKind::Menu, ViewportRole::Preview, true, true, false, kMenuFeeds, std::size(kMenuFeeds),
-			MenuViewport::make },
+			MenuViewport::make, true, 0, false, true },
 	{ ViewportKind::Model, ViewportRole::Preview, true, false, true, kModelFeeds, std::size(kModelFeeds),
 			ModelViewport::make },
 	{ ViewportKind::Script, ViewportRole::Main, false, false, false, kScriptFeeds, std::size(kScriptFeeds),
@@ -87,6 +97,8 @@ constexpr ViewportKindRow kRows[] = {
 	{ ViewportKind::Effect, ViewportRole::Preview, true, false, false, kEffectFeeds, std::size(kEffectFeeds),
 			EffectViewport::make },
 	{ ViewportKind::Hud, ViewportRole::Preview, true, false, false, kHudFeeds, std::size(kHudFeeds), HudViewport::make },
+	{ ViewportKind::Definition, ViewportRole::Preview, false, true, false, kDefinitionFeeds, std::size(kDefinitionFeeds),
+			DefinitionViewport::make },
 };
 
 static_assert(std::size(kRows) == kViewportKindCount, "every ViewportKind has exactly one row");
@@ -212,6 +224,11 @@ ViewportKind preview_kind(const DocumentsView &documents, ViewportKind last) {
 	if (kind != ViewportKind::kCount && viewport_kind_row(kind).role != ViewportRole::Preview) kind = ViewportKind::kCount;
 	// What each has to show: the view keeps a kind's target until its document closes.
 	if (kind != ViewportKind::kCount && !documents.previews[kind].path.empty()) return kind;
+	// The active document's kind has nothing to show yet (a definition table with no record selected, DI-21):
+	// the one shown last, while it has something.
+	if (kind != last && last != ViewportKind::kCount && viewport_kind_row(last).role == ViewportRole::Preview &&
+	    !documents.previews[last].path.empty())
+		return last;
 	for (const ViewportKindRow &row : kRows)
 		if (row.role == ViewportRole::Preview && !documents.previews[row.kind].path.empty()) return row.kind;
 	return ViewportKind::kCount;
