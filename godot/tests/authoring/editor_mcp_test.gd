@@ -1309,22 +1309,22 @@ func test_png_import_through_the_endpoint() -> void:
 	var imported: Array = state.get("import", {}).get("imported", [])
 	assert_eq(imported.size(), 1, str(state.get("import", {})))
 	if imported.size() == 1:
-		# An author's PNG lands where the project keeps the textures its import makes (DI-03: beside
-		# art/plain.png, the project's one texture, not in a textures/ folder it never had).
-		assert_eq(String(imported[0].get("source", "")), "art/logo.png")
+		# An author's PNG lands where the project keeps the textures its import makes (DI-03): one in
+		# textures/ (the pointer Create missing made) and one in art/ (plain.png), so the kind's own folder.
+		assert_eq(String(imported[0].get("source", "")), "textures/logo.png")
 		assert_true(bool(imported[0].get("ok", false)))
 		assert_eq(imported[0].get("outputs", []).size(), 1)
 		assert_true(FileAccess.file_exists(root.path_join(String(imported[0]["outputs"][0]))))
 		assert_eq(imported[0].get("inputs", null), [], "the image importer reads its source alone")
-	assert_true(FileAccess.file_exists(root.path_join("art/logo.png.import")), "importing writes the record beside the source")
+	assert_true(FileAccess.file_exists(root.path_join("textures/logo.png.import")), "importing writes the record beside the source")
 	var problems := await _query("problems", {"severities": ["error"]})
 	assert_eq(int(problems.get("shown", -1)), 0, str(problems))
 	var symbols := await _query("referrers", {"path": "logo.tga"})
 	assert_eq(int(symbols.get("count", -1)), 0)
 	var options := await _query("import_options", {"path": "logo.tga"})
-	assert_eq(String(options.get("source", "")), "art/logo.png", str(options))
+	assert_eq(String(options.get("source", "")), "textures/logo.png", str(options))
 	assert_eq(String(options.get("effective", {}).get("format", "")), "tga", str(options))
-	var made_pcx := await _call("editor_request", {"kind": "set_import_options", "path": "art/logo.png", "values": {"format": "pcx"}})
+	var made_pcx := await _call("editor_request", {"kind": "set_import_options", "path": "textures/logo.png", "values": {"format": "pcx"}})
 	assert_true(_done(made_pcx), str(made_pcx))
 	var renamed := await _query("files", {"limit": 200})
 	var outputs: Array[String] = []
