@@ -223,6 +223,10 @@ public:
 	// opens for it, decoded by that loader's reader and prepared as the
 	// dispatcher does; the checkerboard when it does not load.
 	Ref<Texture> load_material_texture(const String &name, uint8_t type) const;
+	// C++ siblings only (not bound): whether that row's loader finds no file to open: the file it
+	// opens is not there, or it opens none and the name as written is not there either (a file of the
+	// name its loader cannot read is no miss). False for an empty name.
+	bool material_texture_missing(const String &name, uint8_t type) const;
 	Ref<Resource> load_font(const String &name) const;
 
 	// The witnessed boot-required manifest (ENG-6, engine/base/gameprofile
@@ -242,6 +246,13 @@ public:
 	// The text the launch mission's report puts before the mission's file name and the reason it
 	// did not load (gameprofile::kLaunchMissionFailedMarker), which the editor's Play reads back.
 	static String launch_mission_failed_marker();
+	// A name a load site looked up and did not find (ADR 0046 DI-27), said once a process on a line of
+	// the log under gameprofile::kResourceMissingMarker (gameprofile::resource_missing_text), which the
+	// editor's Play reads back into a Problems row on the file that names it: `kind` one of
+	// gameprofile::resource_kind's words, `by` the file that named it where the site knows it, `words`
+	// what the game does without it. Diagnostics only (push_warning): nothing the game does reads it.
+	static void report_missing(const String &kind, const String &name, const String &by = String(),
+			const String &words = String());
 
 	// C++ siblings only (not bound): direct access to the mounted index without
 	// Variant-boxing its rows through GDScript dictionaries.

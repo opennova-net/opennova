@@ -10,6 +10,7 @@
 
 #include <cmath>
 
+#include <base/gameprofile/resource_missing.h>
 #include <runtime/environment/environment_state.h>
 
 #include <godot_cpp/classes/engine.hpp>
@@ -409,6 +410,11 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 				avatar_db->character_join_profile_from_loadout(player_visuals_->spawn_loadout());
 	} else {
 		UtilityFunctions::push_warning("GameWorld: Avatars.def unavailable; players draw their item model");
+		if (!resource_root_->has_file("Avatars.def")) {
+			// The log line the editor's Play reads back into a Problems row (ADR 0046 DI-27).
+			ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kFile, "Avatars.def", String(),
+					"players draw their item model");
+		}
 		local_character_profile_.unref();
 	}
 	panm_clock_->sample(get_frame_clock_ms(),
@@ -554,6 +560,12 @@ void GameWorld::load_environment(const String &p_env_path) {
 	if (!env->load_mission_environment(resource_root_, p_env_path)) {
 		UtilityFunctions::push_warning(vformat(
 				"GameWorld: environment '%s' did not load; the engine defaults stand", p_env_path));
+		// One that is not there (one that does not parse is no miss): the log line the editor's Play reads
+		// back into a Problems row on the mission naming it (ADR 0046 DI-27).
+		if (!p_env_path.is_empty() && resource_root_.is_valid() && !resource_root_->has_file(p_env_path.get_file())) {
+			ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kEnvironment, p_env_path.get_file(), String(),
+					"the mission runs on the engine's default environment");
+		}
 	}
 	// MissionEnvironment's setter reloads + pushes shader globals on assignment.
 	env_->set_environment_data(env);
@@ -566,6 +578,10 @@ void GameWorld::load_environment(const String &p_env_path) {
 		env_->set_overcast_data(overcast);
 	} else {
 		env_->set_overcast_data(Ref<EnvFile>());
+		if (resource_root_.is_valid() && !resource_root_->has_file(opennova::env::kOvercastFile)) {
+			ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kFile, opennova::env::kOvercastFile, String(),
+					"the overcast weather has no table of its own to blend toward");
+		}
 	}
 	// GameWorld retains one Weather node across loads. A replacement ENV is
 	// a discrete state change: retail snaps every color block to the new mission

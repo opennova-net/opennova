@@ -213,11 +213,19 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::PlayAlreadyRunning, code("play.already_running", G::Play) },
 	{ C::PlayBootMissing, code("play.boot_missing", G::Play, F::Requirement) },
 	{ C::PlayCrashed, code("play.crashed", G::Play) },
+	// What the game's log said it looked for and did not find (ADR 0046 DI-27), each kept until the next
+	// Play of its mode: a file it opens by its own name (the requirement's fixes where the manifest has a
+	// row of it), a name a file of the project names (the reference's fixes, on that file's record), and
+	// the game install's mission that began loading and never finished. Like the boot report's, their rows
+	// sit before the gate a build reads (project_findings).
+	{ C::PlayFileMissing, code("play.file_missing", G::Play, F::Requirement) },
 	{ C::PlayInstallCopy, code("play.install_copy", G::Play) },
 	{ C::PlayInstallMissing, code("play.install_missing", G::Play) },
 	{ C::PlayInstallRunning, code("play.install_running", G::Play) },
 	{ C::PlayMissionFailed, code("play.mission.failed", G::Play) },
+	{ C::PlayMissionUnfinished, code("play.mission.unfinished", G::Play) },
 	{ C::PlayMissionUnknown, code("play.mission.unknown", G::Play) },
+	{ C::PlayReferenceMissing, code("play.reference_missing", G::Play, F::Reference) },
 	{ C::PlayRunDirectory, code("play.run_directory", G::Play) },
 	{ C::PlayRuntimeMissing, code("play.runtime_missing", G::Play) },
 	{ C::PlaySpawn, code("play.spawn", G::Play) },

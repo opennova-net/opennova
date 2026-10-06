@@ -10,6 +10,7 @@
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <base/gameprofile/resource_missing.h>
 #include <runtime/audio/ambient_mixer.h>
 
 #include <algorithm>
@@ -161,6 +162,7 @@ void SoundBank::configure_ambient_player(AudioStreamPlayer3D *p_player,
 Node3D *SoundBank::spawn_ambient(Node3D *p_parent, const Vector3 &p_world_pos, const String &p_name,
 		const StringName &p_bus) {
 	const opennova::audio::SetLocation loc = _find_set(p_name);
+	if (!loc.valid()) _note_missing_set(p_name);
 	if (!loc.valid() || p_parent == nullptr) {
 		return nullptr;
 	}
@@ -223,6 +225,7 @@ uint8_t SoundBank::listener_view_flags() const {
 bool SoundBank::play_oneshot_3d(Node3D *p_parent, const Vector3 &p_world_pos, const String &p_name,
 		const StringName &p_bus, const Vector3 &p_listener_pos, int p_source_bms_id, int p_sound_id) {
 	const opennova::audio::SetLocation loc = _find_set(p_name);
+	if (!loc.valid()) _note_missing_set(p_name);
 	if (!loc.valid() || p_parent == nullptr) {
 		return false;
 	}
@@ -247,6 +250,7 @@ bool SoundBank::play_oneshot_3d(Node3D *p_parent, const Vector3 &p_world_pos, co
 bool SoundBank::play_oneshot_at_distance(Node3D *p_parent, const Vector3 &p_pan_position,
         const String &p_name, const StringName &p_bus, int64_t p_dist_q16) {
     const opennova::audio::SetLocation loc = _find_set(p_name);
+    if (!loc.valid()) _note_missing_set(p_name);
     if (!loc.valid() || p_parent == nullptr) {
         return false;
     }
@@ -338,6 +342,7 @@ bool SoundBank::_play_oneshot_plan(Node *p_parent, const Vector3 &p_world_pos,
 
 bool SoundBank::play_interface_oneshot(Node *parent, const String &name, const StringName &bus) {
 	const auto loc = _find_set(name);
+	if (!loc.valid()) _note_missing_set(name);
 	if (!loc.valid() || !parent) return false;
 	const auto &bank = _bank_at(loc);
 	const auto plan = opennova::audio::plan_oneshot_at_distance(bank, loc, 0, selector_, listener_view_flags());
@@ -347,6 +352,7 @@ bool SoundBank::play_interface_oneshot(Node *parent, const String &name, const S
 AudioStreamPlayer *SoundBank::spawn_oneshot_2d(Node *p_parent, const String &p_name,
 		const StringName &p_bus) {
 	const opennova::audio::SetLocation loc = _find_set(p_name);
+	if (!loc.valid()) _note_missing_set(p_name);
 	if (!loc.valid() || p_parent == nullptr) {
 		return nullptr;
 	}
@@ -402,6 +408,14 @@ SoundBank::select_radio_set(const std::string &name, uint8_t listener_view_flags
 
 opennova::audio::SetLocation SoundBank::_find_set(const String &p_name) const {
 	return index_.find(opennova::to_std(p_name));
+}
+
+void SoundBank::_note_missing_set(const String &p_name) const {
+	if (p_name.is_empty() || banks_.empty()) {
+		return;
+	}
+	ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kSound, p_name, String(),
+			"no sound bank the game loaded holds it, so it plays nothing");
 }
 
 const opennova::lwf::File &SoundBank::_bank_at(const opennova::audio::SetLocation &p_loc) const {
@@ -508,6 +522,11 @@ Ref<AudioStreamWAV> SoundBank::_resolve_stream(const String &p_wav_path) {
 		const PackedByteArray bytes = resource_root_->read_file(p_wav_path.get_file());
 		if (!bytes.is_empty()) {
 			stream = WavLoader::from_bytes(bytes);
+		} else if (!resource_root_->has_file(p_wav_path.get_file())) {
+			// A wave a bank's member names that is not there: the log line the editor's Play reads back into
+			// a Problems row on the bank naming it (ADR 0046 DI-27).
+			ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kWave, p_wav_path.get_file(), String(),
+					"the member that names it plays nothing");
 		}
 	}
 	wav_cache_[name] = stream;

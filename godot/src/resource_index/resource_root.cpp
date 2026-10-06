@@ -9,6 +9,7 @@
 
 #include <base/gameprofile/gameprofile.h>
 #include <base/gameprofile/required_resources.h>
+#include <base/gameprofile/resource_missing.h>
 #include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
 
@@ -16,9 +17,13 @@
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 #include <algorithm>
 #include <cstring>
+#include <mutex>
+#include <set>
+#include <string>
 #include <vector>
 
 using namespace godot;
@@ -97,6 +102,8 @@ void ResourceRoot::_bind_methods() {
 			&ResourceRoot::boot_resource_missing_marker);
 	ClassDB::bind_static_method("ResourceRoot", D_METHOD("launch_mission_failed_marker"),
 			&ResourceRoot::launch_mission_failed_marker);
+	ClassDB::bind_static_method("ResourceRoot", D_METHOD("report_missing", "kind", "name", "by", "words"),
+			&ResourceRoot::report_missing, DEFVAL(String()), DEFVAL(String()));
 
 	BIND_ENUM_CONSTANT(LOOKUP_FORCE_LOOSE_FIRST);
 	BIND_ENUM_CONSTANT(LOOKUP_FORCE_ARCHIVE_ONLY);
@@ -148,6 +155,29 @@ String ResourceRoot::boot_resource_missing_marker() {
 
 String ResourceRoot::launch_mission_failed_marker() {
 	return String::utf8(kLaunchMissionFailedMarker);
+}
+
+void ResourceRoot::report_missing(const String &kind, const String &name, const String &by, const String &words) {
+	if (kind.is_empty() || name.is_empty()) {
+		return;
+	}
+	// Once a process for each (kind, name, file naming it), as the game's lookups compare names: a model
+	// every instance of an item draws, a set every footstep plays, is said once.
+	static std::mutex mutex;
+	static std::set<std::string> said;
+	const std::string key = opennova::to_std(kind + String("|") + name.to_lower() + String("|") + by.to_lower());
+	{
+		std::lock_guard<std::mutex> lock(mutex);
+		if (!said.insert(key).second) {
+			return;
+		}
+	}
+	ResourceMiss miss;
+	miss.kind = opennova::to_std(kind);
+	miss.name = opennova::to_std(name);
+	miss.by = opennova::to_std(by);
+	miss.words = opennova::to_std(words);
+	UtilityFunctions::push_warning(String("ResourceRoot: ") + String::utf8(resource_missing_text(miss).c_str()));
 }
 
 String ResourceRoot::boot_resource_failure_text(const String &name) const {
@@ -725,6 +755,16 @@ Ref<Texture> ResourceRoot::load_material_texture(const String &name, uint8_t typ
 		image = cached->second;
 	}
 	return opennova::prepare_material_texture(image, name, type);
+}
+
+bool ResourceRoot::material_texture_missing(const String &name, uint8_t type) const {
+	if (root_dir_.is_empty() || name.is_empty()) {
+		return false;
+	}
+	const opennova::renderer::MaterialTextureSource source = opennova::renderer::material_texture_source(
+			opennova::to_std(name), type, [this](const std::string &file) { return has_file(opennova::to_gd(file)); },
+			[this](const std::string &file) { return index_.prefers_loose_file(file); });
+	return source.file.empty() ? !has_file(name) : !has_file(opennova::to_gd(source.file));
 }
 
 Ref<Resource> ResourceRoot::load_font(const String &name) const {
