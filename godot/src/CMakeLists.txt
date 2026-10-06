@@ -195,6 +195,7 @@ add_library(opennova_bindings OBJECT
     simulation/weapon_kit_entry.cpp
     object/skeletal_anim.cpp
     hud/hud_draw_list_stats.cpp
+    hud/font_page_glyphs.cpp
     hud/hud_overlay.cpp
     hud/hud_overlay_combat.cpp
     hud/hud_overlay_flat.cpp
@@ -392,6 +393,7 @@ if(OPENNOVA_EDITOR)
         register_types.cpp
         devtools/imgui_pass_node.cpp
         authoring/child_process.cpp
+        authoring/definition_viewport_applier.cpp
         authoring/editor_app.cpp
         authoring/hud_viewport_applier.cpp
         authoring/menu_viewport_applier.cpp
@@ -404,6 +406,7 @@ if(OPENNOVA_EDITOR)
         authoring/texture_viewport_applier.cpp
         authoring/effect_viewport_applier.cpp
         authoring/preview_effects.cpp
+        authoring/preview_model.cpp
         authoring/thumbnail_images.cpp
         authoring/viewport_device.cpp
         authoring/viewport_devices.cpp

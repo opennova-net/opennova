@@ -1,4 +1,5 @@
 #include "hud/hud_map_pass_renderer.h"
+#include "hud/font_page_glyphs.h"
 #include "util/color_convert.h"
 
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -365,35 +366,40 @@ void HudMapPassRenderer::render(const opennova::hud::HudMapPass &p_map,
 
 	// Map text: the map passes compile per-pass GameFont glyph quads; they
 	// render LAST on this pass top item, above its grid rules and markers.
-	// Batched by consecutive font page.
+	// One triangle array per consecutive font page, through the page's material:
+	// its MODULATE2X stage rides the top material's UV.x flag, doubling the
+	// half-bright drawers' colours (hud::kFontPageMaterialWord).
 	const auto submit_glyphs = [&](const std::vector<opennova::hud::GameFontQuad> &glyphs,
 			size_t begin, size_t end) {
-		uint32_t run_page = 0xFFFFFFFFu;
-		Ref<Texture2D> run_page_texture;
-		for (size_t gi = begin; gi < end && gi < glyphs.size(); ++gi) {
-			const opennova::hud::GameFontQuad &glyph = glyphs[gi];
-			if (p_textures.pages == nullptr || glyph.page >= p_textures.page_count) continue;
-			if (glyph.page != run_page) {
-				flush_tris(top_item, run_page_texture);
-				run_page = glyph.page;
-				run_page_texture = p_textures.pages[glyph.page];
+		end = std::min(end, glyphs.size());
+		for (size_t first = begin; first < end;) {
+			const uint32_t page = glyphs[first].page;
+			size_t run_end = first + 1;
+			while (run_end < end && glyphs[run_end].page == page) ++run_end;
+			const Ref<Texture2D> page_texture =
+					p_textures.pages != nullptr && page < p_textures.page_count
+					? p_textures.pages[page]
+					: Ref<Texture2D>();
+			if (page_texture.is_valid()) {
+				const bool modulate2x =
+						p_textures.page_modulate2x != nullptr && p_textures.page_modulate2x[page] != 0;
+				GlyphRunArrays run;
+				append_glyph_quads(glyphs, first, run_end,
+						Vector2(modulate2x ? kModulate2xUvFlag : 0.0f, 0.0f), run);
+				rs->canvas_item_add_triangle_array(top_item, run.indices, run.points, run.colors,
+						run.uvs, PackedInt32Array(), PackedFloat32Array(), page_texture->get_rid());
+				if (record_ != nullptr) {
+					Dictionary row;
+					row["texture"] = -1;
+					row["page"] = static_cast<int64_t>(page);
+					row["size"] = Vector2i(page_texture->get_width(), page_texture->get_height());
+					row["uvs"] = run.uvs;
+					row["colors"] = run.colors;
+					record_->push_back(row);
+				}
 			}
-			if (run_page_texture.is_null()) continue;
-			const Vector2 corners[4] = {
-				Vector2(glyph.x_top_left, glyph.y_top),
-				Vector2(glyph.x_top_right, glyph.y_top),
-				Vector2(glyph.x_bottom_right, glyph.y_bottom),
-				Vector2(glyph.x_bottom_left, glyph.y_bottom),
-			};
-			const Vector2 quad_uvs[4] = {
-				Vector2(glyph.u0, glyph.v0),
-				Vector2(glyph.u1, glyph.v0),
-				Vector2(glyph.u1, glyph.v1),
-				Vector2(glyph.u0, glyph.v1),
-			};
-			push_quad(corners, quad_uvs, glyph.color);
+			first = run_end;
 		}
-		flush_tris(top_item, run_page_texture);
 	};
 	submit_glyphs(p_map_glyphs, 0, p_map_glyphs.size());
 

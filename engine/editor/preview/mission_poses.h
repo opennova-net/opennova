@@ -13,6 +13,7 @@
 
 namespace opennova::anim {
 class AdmRootMotion;
+class RigFiles;
 }
 namespace opennova::terrain {
 struct TerrainHeightField;
@@ -67,10 +68,17 @@ struct MissionPose {
 	uint32_t stamp = 0; // moves when anything above does
 };
 
-// What a person's spawn reads of its item: the first row of its id in the catalog that defines it.
-struct MissionPersonItem {
-	std::string ai_function, anim_def;
+// What a person's spawn reads of its definition (its item's first row: its class, its .adm, its
+// attributes) and of its record (its SSN, its route, its attributes).
+struct PersonDefinition {
+	std::string ai_function;
+	std::string anim_def;
 	uint32_t attrib = 0;
+};
+struct PersonRecord {
+	int ssn = 0;
+	int route = 0;
+	uint32_t attributes = 0;
 };
 
 // What a person's spawn reads of its record (its item, attributes, route and SSN).
@@ -91,7 +99,7 @@ struct MissionPoseInput {
 // name (the .adm the game loads in place of one it lacks), `files` serves the tables and clips through
 // `motion`, every .adm read once. What MissionPoses runs, and the ground check (DI-28).
 void mission_pose_people(const std::vector<MissionPoseInput> &inputs,
-		const std::function<const MissionPersonItem *(int64_t)> &item_of,
+		const std::function<const PersonDefinition *(int64_t)> &item_of,
 		const std::function<bool(const std::string &)> &has_file, const std::shared_ptr<const StampedFiles> &files,
 		anim::AdmRootMotion &motion, std::vector<MissionPose> &out);
 
@@ -134,7 +142,7 @@ public:
 private:
 	struct Catalog {
 		uint64_t stamp = 0;
-		std::unordered_map<int64_t, MissionPersonItem> items; // each id's first row
+		std::unordered_map<int64_t, PersonDefinition> items; // each id's first row
 	};
 	const Catalog &catalog_(const std::string &file);
 	void pose_all_();
@@ -154,6 +162,17 @@ private:
 	size_t runs_ = 0;
 	size_t files_read_ = 0;
 };
+
+// One person posed as the game spawns it (DI-38): `pose` from its status on (its row and item the
+// caller's), through `motion` over the project's files (`has_file` whether it has a file of the
+// name, `files` noting what the pose reads, `rig_files` over them), the .adm's ring heads `rings`
+// served in the order the game's spawn serves them. mission_pose_people runs it for every person
+// of a mission in the file's order; a definition's picture (DI-21) for its one person, as the
+// first of its .adm.
+void pose_person(const PersonDefinition &definition, const PersonRecord &record,
+		const std::function<bool(const std::string &)> &has_file, const StampedFiles &files,
+		const anim::RigFiles &rig_files, anim::AdmRootMotion &motion, world::AnimVariantRings &rings,
+		MissionPose &pose);
 
 // A pose on the wire (the mission viewport's items: an organic's `pose`): {status, ai_function,
 // adm, ai_slot, state, row (its .adm row, "anim_idle"), because, updates, rise, playing {state,

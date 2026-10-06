@@ -1296,7 +1296,7 @@ int main() {
         ai_route.waypoint_numbers = {2};
         // List 2: the blue player route. Slot-indexed like the .bms block.
         bms::WaypointRecord blue{};
-        blue.flags = bms::WaypointFlags::BlueTeam;
+        blue.flags = bms::WaypointFlags::PlayerRoute;
         blue.marker_count = 2;
         blue.waypoint_numbers = {0, 1};
         wm.waypoint_records.resize(3);
@@ -1317,7 +1317,7 @@ int main() {
         CHECK(ww.script.waypoints.entries[1].chain_back);
         // The raw route-flags word rides the nav channel (bit1 = the blue mark).
         CHECK((wai.nav.channel(2)->loopflag &
-               static_cast<int32_t>(bms::WaypointFlags::BlueTeam)) != 0);
+               static_cast<int32_t>(bms::WaypointFlags::PlayerRoute)) != 0);
     }
 
     // ---- command 125: BMS wp_number is a target entity serial, not a path node ----

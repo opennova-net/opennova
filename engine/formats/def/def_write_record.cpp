@@ -291,10 +291,12 @@ int64_t unscale(int64_t value, int64_t factor) {
 	return static_cast<int32_t>(static_cast<uint32_t>(answer));
 }
 
-const char *item_type(int value) {
+// A type's word: of the two the chain reads for 2 and 6, the first or the other by `word`
+// (DefItemDef::type_word) [orig: ItemDef_ParseProperty, the type chain @0x4A02E4..0x4A04B7].
+const char *item_type(int value, int64_t word = 0) {
 	switch (value) {
-	case 1: return "vehicle"; case 2: return "decoration"; case 3: return "person";
-	case 4: return "marker"; case 5: return "building"; case 6: return "powerup"; case 8: return "effect";
+	case 1: return "vehicle"; case 2: return word ? "foliage" : "decoration"; case 3: return "person";
+	case 4: return "marker"; case 5: return "building"; case 6: return word ? "object" : "powerup"; case 8: return "effect";
 	default: return "";
 	}
 }
@@ -614,7 +616,7 @@ bool DefRecordWriter::property_args(DefRecordKind kind, const DefProperty &prope
 	switch (property.encoding) {
 	case DefEncoding::ItemType:
 		if (!*item_type(int(n(0)))) fail(name, key, "Unknown item type.");
-		args.push_back(item_type(int(n(0)))); break;
+		args.push_back(item_type(int(n(0)), values.size() > 1 ? n(1) : 0)); break;
 	case DefEncoding::AmmoKillZone: {
 		const char *keyword = def_ammo_kz_keyword(size_t(n(0)));
 		if (!keyword) { fail(name, key, "Unknown kill-zone type."); return false; }

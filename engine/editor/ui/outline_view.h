@@ -94,6 +94,8 @@ private:
 	RecordReveal reveal_;
 	FindingsIndex findings_;
 	char filter_[kWorkspaceText]{};  // the filter box's text: the model's filter
+	char add_name_[128]{};           // master and detail: the name a new row is added by (row_name_field)
+	char move_filter_[64]{};         // master and detail: the filter of the rows a record moves to
 	ui_kit::Held<Shown> held_; // the workspace's, as last taken
 	NodeAddress editing_; // master and detail: the record whose cell had the keyboard last frame
 	struct Measured {

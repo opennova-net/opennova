@@ -394,6 +394,78 @@ func test_shaders_decode_the_submitted_modulate2x_flags() -> void:
 			"the flagged sprite's colour doubles, saturated")
 
 
+# Every glyph draws through its font page's material, 0x651: MODULATE2X(TEXTURE,
+# DIFFUSE), so the half-bright drawers' halved colour reads at full brightness
+# (D-HUD-51). The flat HUD's glyph runs carry the +16 UV.y flag and the map's its
+# +8 UV.x flag, each at the drawer's raw halved diffuse [orig: GameFont_LoadFromBlob
+# @0x674825 (0x651 per page); CGameFont_DrawText @0x6752c0 binds it per page run;
+# sub_580560 @0x59aeab halves the system ring's white].
+func test_glyph_runs_draw_through_the_font_pages_modulate2x() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"fonthud1_hi Gunpl22b.fnt",
+		"HUDSPINMAPX1 810",
+		"HUDSPINMAPX2 1020",
+		"HUDSPINMAPY1 552",
+		"HUDSPINMAPY2 762",
+	]), PackedStringArray(["TSDicon.tga", "compring.tga"]), {
+		"TSDicon.tga": Vector2i(64, 1920),
+	})
+	_copy_font_into(fixture.dir)
+	# A fresh root sees the font copied in after the fixture's scan.
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture.dir), OK)
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, root)
+	hud.set_player_state(50, 1.0, 0, 80.0)
+	hud.push_message("Move to the extraction point")
+	await get_tree().process_frame
+	var runs := 0
+	for row: Dictionary in hud.get_flat_submissions():
+		if row.kind != "glyphs":
+			continue
+		runs += 1
+		assert_eq(row.size, Vector2i(256, 256), "a glyph run samples its 256x256 font page")
+		for uv: Vector2 in row.uvs:
+			assert_gte(uv.y, FLAT_MODULATE2X_FLAG * 0.5, "every glyph vertex carries the flag")
+		for c: Color in row.colors:
+			assert_eq(c.to_argb32(), 0xFF7F7F7F,
+					"the white line's diffuse is the drawer's halved white, doubled on the device")
+	assert_gt(runs, 0, "the system ring's line submits its glyph run")
+
+	# The spinmap's distance and grid labels: the map pass's flag, the raw halved
+	# diffuse (the compile-side doubling is gone).
+	var terrain := TerrainData.new()
+	terrain.set_sector_count(16)
+	terrain.set_sector_rows(16)
+	var sectors := PackedInt32Array()
+	sectors.resize(256)
+	sectors.fill(1)
+	terrain.set_sector_grid(sectors)
+	hud.set_minimap_terrain(terrain)
+	hud.set_waypoint("Target", 1024, Vector2(100, 0), 20.0)
+	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false, PackedInt32Array([
+		7, 36, 1,
+		0, 0x1001, 64 << 16, 0, 0, 0, 10, -16711936, 0, 0, 1984, 1,
+		1, 0, 0, 6, 0,
+		0, 0, 0, 1, -1, 0, 64 << 16, 0, 64 << 16, 0, 0,
+		0, 0,
+		0, 0, 0, 0, 0, 0,
+	]))
+	assert_gt(hud.get_draw_list_stats().map_labels, 0, "the distance and grid labels compile")
+	await get_tree().process_frame
+	var map_runs := 0
+	for row: Dictionary in hud.get_map_submissions():
+		if not row.has("page"):
+			continue
+		map_runs += 1
+		for uv: Vector2 in row.uvs:
+			assert_gte(uv.x, MAP_MODULATE2X_FLAG * 0.5, "every map glyph vertex carries the flag")
+		for c: Color in row.colors:
+			assert_true(c.r8 <= 127 and c.g8 <= 127 and c.b8 <= 127,
+					"a map label's diffuse is the drawer's halved colour (%s)" % c)
+	assert_gt(map_runs, 0, "the map labels submit their glyph runs")
+
+
 # Every HUD texture draws through its maker's material word, not its loader's:
 # the file loader's capture-point icons and waypoint indicator (0x300631) double
 # like the HUD loader's colour mode (0x651) [orig: HUD_LoadAllTextures @0x59dda0 —

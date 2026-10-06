@@ -423,7 +423,7 @@ std::vector<MissionGroundVerdict> mission_ground_verdicts(const MissionScene &sc
 	std::vector<MissionPose> poses;
 	if (!inputs.empty()) {
 		anim::AdmRootMotion motion;
-		const auto item_of = [&](int64_t id) -> const MissionPersonItem * {
+		const auto item_of = [&](int64_t id) -> const PersonDefinition * {
 			const MissionGroundReads::Item *item = reads.item(source, id);
 			return item ? &item->person : nullptr;
 		};

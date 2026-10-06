@@ -28,31 +28,6 @@ uint32_t with_alpha(uint32_t argb, int alpha) {
 			(argb & 0xFFFFFFu);
 }
 
-uint32_t map_label_double_rgb(uint32_t half) {
-	const auto doubled = [](uint32_t channel) {
-		return std::min(channel * 2u, 255u);
-	};
-	return (half & 0xFF000000u) |
-			(doubled((half >> 16) & 0xFFu) << 16) |
-			(doubled((half >> 8) & 0xFFu) << 8) |
-			doubled(half & 0xFFu);
-}
-
-uint32_t map_label_output_argb(uint32_t argb) {
-	// Retail's map-label wrapper halves the diffuse RGB (and forces the alpha
-	// opaque) before the active fixed-function map/font stage doubles it.
-	// Fold both operations into the Canvas glyph color, retaining the one-bit
-	// loss on odd input channels. [orig: HUD_DrawTextCentered_HalfBright
-	// @0x580688; HUD_DrawTextLeft_HalfBright @0x5804c6]
-	return map_label_double_rgb(half_bright_argb(argb));
-}
-
-// The one map drawer that keeps the caller's alpha (the bit19 label).
-// [orig: HUD_DrawTextHalfBrightF @0x580726]
-uint32_t map_label_output_keep_alpha(uint32_t argb) {
-	return map_label_double_rgb(half_bright_keep_alpha(argb));
-}
-
 // Trims an axis-aligned glyph quad (and its UVs) to a rect; false when
 // nothing is left. Italic shear is carried by the top corners unchanged.
 bool clip_glyph_to_rect(GameFontQuad &q, float x1, float y1, float x2,
@@ -832,9 +807,9 @@ void HudFrameCompiler::element_spinmap(const HudFrameState &state, float w,
 	}
 	// Map text: the corner-map distance/MAPCOORDS labels ride the bold label
 	// font, the grid letters/numbers and the big map's player readout the
-	// LARGE slot — every one through the CPU half-bright drawer. The active
-	// fixed-function map/font stage then applies MODULATE2X, so the Canvas
-	// compiler folds that second operation into the final glyph diffuse.
+	// LARGE slot — every one through the CPU half-bright drawer, its halved
+	// colour the raw diffuse the font page's MODULATE2X doubles on the device
+	// (kFontPageMaterialWord; the map pass's top item runs it per page).
 	// [orig: HUD_DrawTextCentered_HalfBright((int)&g_HUDLabelFontBold, ...)
 	//  @0x5a7ab5; HUD_DrawTextRightAligned_HalfBright @0x59cc47;
 	//  HUD_DrawTextCentered_HalfBright(g_HUDLabelFontLarge, ...) in the
@@ -879,11 +854,15 @@ void HudFrameCompiler::layout_map_labels(const HudMapPass &pass, size_t begin, s
 		if (lf.font() == nullptr) continue;
 		const uint32_t flags = label.align == 1 ? kFontAlignRight
 				: (label.align == 2 ? 0u : kFontAlignCenter);
+		// The drawer's halved colour, the raw diffuse [orig:
+		// HUD_DrawTextCentered_HalfBright @0x580680 and its siblings, alpha
+		// forced opaque; HUD_DrawTextHalfBrightF @0x580720 keeps it (the bit19
+		// label)].
 		const GameFontRun run = lf.layout(label.text, label.x,
 				label.y, ls, ls, flags,
 				label.keep_alpha != 0
-						? map_label_output_keep_alpha(label.color)
-						: map_label_output_argb(label.color));
+						? half_bright_keep_alpha(label.color)
+						: half_bright_argb(label.color));
 		for (const GameFontQuad &quad : run.quads) {
 			if (label.clip == 0) {
 				out.push_back(quad);
@@ -1608,9 +1587,14 @@ void HudFrameCompiler::element_waypoint(const HudFrameState &state, float w,
 		wf.measure(text, ws, ws, &mw, &mh);
 		return static_cast<float>(mw) * kDesignW / std::max(w, 1.0f);
 	};
+	// The text through the half-bright drawers, alpha forced opaque; the box keeps
+	// the raw colour [orig: HUD_DrawTextLeft_HalfBright @0x5949fc / @0x594a69,
+	//  HUD_DrawTextRightAligned_HalfBright @0x594ab2 / @0x594b31; the wireframe
+	//  box Render_DrawWireframeRect @0x594b0c].
+	const uint32_t text_color = half_bright_argb(color);
 	auto draw = [&](const char *text, float design_x, uint32_t flags) {
-		emit_slot_text(label_font_bold_, label_scale_, text, sx(design_x, w), sy(ay, h), color,
-				flags);
+		emit_slot_text(label_font_bold_, label_scale_, text, sx(design_x, w), sy(ay, h),
+				text_color, flags);
 	};
 	const float dist_w = measure_design_w(dist);
 	const float text_h = wf.line_height(ws) * kDesignH / std::max(h, 1.0f);
@@ -1921,8 +1905,11 @@ void HudFrameCompiler::element_kill_announcement(const HudFrameState &state, flo
 	const GameFont &font = large ? label_font_large_ : font_;
 	if (font.font() == nullptr) return;
 	const float scale = large ? label_large_scale_ : hud_font_scale_;
+	// White through the mode-2 drawer, which halves it keeping the alpha
+	// [orig: Render_DrawTextScaled(.., -1, 2) @0x59dd33 -> sub_5D2FC0 mode 2 ->
+	//  HUD_DrawTextHalfBrightF @0x580720].
 	const auto run = font.layout(state.kill_announcement.text.c_str(), sx(512.0f, w),
-			sy(30.0f, h), scale, scale, kFontAlignCenter, 0xFFFFFFFFu);
+			sy(30.0f, h), scale, scale, kFontAlignCenter, half_bright_keep_alpha(0xFFFFFFFFu));
 	draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(), run.quads.end());
 	++draw_list_.elements_drawn;
 }
@@ -2019,8 +2006,11 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 			int alpha = 255 * remaining / kMessageExpiryStagger;
 			if (alpha <= 0) continue;
 			if (alpha > 255) alpha = 255;
+			// The drawer halves the RGB and keeps the alpha [orig: sub_580560
+			// @0x59ae0e — (c & 0xFF000000) + ((c >> 1) & 0x7F7F7F)].
 			emit_text(line.text.c_str(), cx, row_y, w, h,
-					(static_cast<uint32_t>(alpha) << 24) | (line.color & 0xFFFFFFu),
+					half_bright_keep_alpha((static_cast<uint32_t>(alpha) << 24) |
+							(line.color & 0xFFFFFFu)),
 					0u);
 			row_y += row_h;
 			drew = true;
@@ -2047,7 +2037,9 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 		float row_y = ay;
 		for (int i = first; i < static_cast<int>(live.size()); ++i) {
 			const HudMessageLine *line = live[static_cast<size_t>(i)];
-			emit_text(line->text.c_str(), ax, row_y, w, h, line->color, 0u);
+			// The same halving drawer [orig: sub_580560 @0x59aeab].
+			emit_text(line->text.c_str(), ax, row_y, w, h, half_bright_keep_alpha(line->color),
+					0u);
 			row_y += row_h;
 		}
 		drew = true;

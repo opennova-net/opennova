@@ -18,6 +18,7 @@
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
+#include <formats/mission/mission_params.h>
 #include <formats/rtxt/rtxt.h>
 
 #include <cstdint>
@@ -63,6 +64,9 @@ bool build_mission(std::vector<uint8_t> &bytes, std::string &err) {
 		err = "header authoring failed: " + edit_error;
 		return false;
 	}
+	// A co-op mission: one of no game mode bit is single player, whose player needs a start marker
+	// (mission.no_start), which the minted items.def has no row of.
+	bms::set_game_mode(doc.header.attrib_flags, uint32_t(bms::AttribFlags::Coop));
 	// The first win and lose conditions name directive 1; the others name none (255).
 	std::memset(doc.header.win_conditions, 0xFF, sizeof(doc.header.win_conditions));
 	std::memset(doc.header.lose_conditions, 0xFF, sizeof(doc.header.lose_conditions));
@@ -137,6 +141,19 @@ bool build_mission(std::vector<uint8_t> &bytes, std::string &err) {
 			err = "event 2 authoring failed: " + edit_error;
 			return false;
 		}
+	}
+
+	// Each parameter a record's type does not read holds -1, as every shipped record holds it
+	// (mission::kUnreadParam, the mission_logic ctest's retail leg).
+	for (bms::Trigger &trigger : doc.triggers) {
+		int32_t *params[4] = {&trigger.param1, &trigger.param2, &trigger.param3, &trigger.param4};
+		for (int slot = 0; slot < 4; ++slot)
+			if (mission::trigger_param_kind(trigger, slot) == mission::ParamKind::Unused) *params[slot] = mission::kUnreadParam;
+	}
+	for (bms::Action &action : doc.actions) {
+		int32_t *params[4] = {&action.param1, &action.param2, &action.param3, &action.param4};
+		for (int slot = 0; slot < 4; ++slot)
+			if (mission::action_param_kind(action, slot) == mission::ParamKind::Unused) *params[slot] = mission::kUnreadParam;
 	}
 
 	// The loadout: each record with its four strings.

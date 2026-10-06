@@ -141,7 +141,7 @@ public:
 		std::string name, graphic, move_function;
 		int type = 0;
 		int32_t scale_q16 = 0;
-		MissionPersonItem person;
+		PersonDefinition person;
 	};
 	struct Model {
 		bool read = false;

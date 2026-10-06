@@ -32,6 +32,9 @@
 namespace opennova::terrain {
 struct TerrainHeightField;
 }
+namespace opennova::threedi {
+struct Threedi3di3;
+}
 
 namespace opennova::world {
 
@@ -353,6 +356,25 @@ struct DestructionEffectEvent {
 };
 
 struct DestructionEvents;
+// The banks' points on the piece model (the loaded huskFinal, else the husk): the
+// user points the first-16 masks of Dead, Fire and Other set, in mission-local
+// axes [orig: Game_ResolveItemMaterialsAndSpawnBoneTrails @0x522EE0]. The mission
+// load's resolve and the editor's definition preview (ADR 0046 DI-21) read them.
+void death_effect_banks_of(const threedi::Threedi3di3 &piece, std::array<DeathEffectBank, 3> &banks);
+// One emitter the death tail spawns: its family (1 the Dead bank, the water
+// death's under water; 2 Fire; 3 Other), its slot among the bank's points, its
+// effect, the point (mission-local; zero for the death family's fallback at the
+// item's origin) and whether the descriptor carries the entity's tag (the
+// fallback's does not). In the order spawn_death_effect_banks spawns them; none
+// without a loaded husk model.
+struct DeathBankSpawn {
+	uint8_t family = 0;
+	uint8_t slot = 0;
+	std::string effect;
+	DeathEffectPoint point;
+	bool section_tagged = false;
+};
+std::vector<DeathBankSpawn> death_bank_spawns(const ItemDeathTraits &traits, bool underwater);
 void spawn_death_effect_banks(
 		Entity &entity, const ItemDeathTraits &traits, bool underwater, DestructionEvents &events);
 void update_dead_wreck_effects(World &world, Entity &entity, const ItemDeathTraits *traits,
