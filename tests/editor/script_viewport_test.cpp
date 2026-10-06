@@ -550,7 +550,8 @@ bool make_project(ScriptRig &rig) {
 	        editor_test::write_text(root + "/defs/ammo.def",
 	                                "ammo AT_CONTRACT\nmax_age 1.5\nend\nammo ammo_satchel\nmax_age 2\nend\n") &&
 	        editor_test::write_bytes(root + "/strings/text_document.bin", strings) &&
-	        editor_test::write_text(root + "/menus/nlist.kda", repo_file("cbin/synth_nlist.kda"));
+	        editor_test::write_text(root + "/menus/nlist.kda", repo_file("cbin/synth_nlist.kda")) &&
+	        editor_test::write_bytes(root + "/sounds/game.lwf", editor_test::sound_bank_of({"EXPLO_BASE"}));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	return written;
 }

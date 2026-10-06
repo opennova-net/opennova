@@ -16,8 +16,11 @@
 #include <editor/documents/model_labels.h>
 #include <editor/documents/music_script_type.h>
 #include <editor/documents/script_type.h>
+#include <editor/documents/sound_bank_document.h>
+#include <editor/documents/sound_profile_document.h>
 #include <editor/documents/strings_document.h>
 #include <editor/documents/text_types.h>
+#include <editor/documents/wave_check.h>
 #include <editor/documents/texture_document.h>
 // The menu type's project check, by its hook alone: the render check runs the preview's headless
 // screen compile (MenuScreenRender), so it sits with it in preview/ (ADR 0046 S13 V9).
@@ -40,6 +43,8 @@ std::unique_ptr<DocumentBase> make_animation() { return std::make_unique<Animati
 std::unique_ptr<DocumentBase> make_animation_map() {
 	return std::make_unique<AnimationMapDocument>();
 }
+std::unique_ptr<DocumentBase> make_sound_bank() { return std::make_unique<SoundBankDocument>(); }
+std::unique_ptr<DocumentBase> make_sound_profiles() { return std::make_unique<SoundProfileDocument>(); }
 
 constexpr DocumentType kTypes[] = {
 	// The catalogs: a weapon, an ammo, a mounted gun by the names the player sees (the plain-words lane).
@@ -86,6 +91,13 @@ constexpr DocumentType kTypes[] = {
 	{ DocumentTypeId::Texture, "texture", make_texture_document, validate_texture_file, texture_fields,
 			texture_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
 			texture_content_json },
+	// The sound lane: a bank's waves and sets (a set's name a sound, a member's wave one of the bank's), its
+	// project check the project's waves the game's loader refuses; and SndProf.def's profiles, each slot
+	// naming a set.
+	{ DocumentTypeId::SoundBank, "sound_bank", make_sound_bank, validate_sound_bank_file, SoundBankDocument::schema,
+			sound_bank_finding_codes, make_wave_check },
+	{ DocumentTypeId::SoundProfiles, "sound_profiles", make_sound_profiles, validate_sound_profiles_file,
+			SoundProfileDocument::schema, sound_profile_finding_codes },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its
