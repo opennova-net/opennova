@@ -253,7 +253,12 @@ int test_files_find_and_prompts() {
 	            refused_with(session, "workspace.refused") && w.files.kind == AssetKind::Menu);
 	JsonValue shown = section(session);
 	TEST_EXPECT(shown.get("files") && shown.get("files")->get_string("filter", "") == "def" &&
-	            shown.get("files")->get_string("kind", "") == "menu");
+	            shown.get("files")->get_string("kind", "") == "menu" && !shown.get("files")->get_bool("by_cost", true));
+	// Files by cost (S18, the texture budget), the filter and kind kept.
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"files": {"by_cost": true}})")) && session.outcome().done() &&
+	            w.files.by_cost && w.files.filter == "def" && w.files.kind == AssetKind::Menu);
+	shown = section(session);
+	TEST_EXPECT(shown.get("files") && shown.get("files")->get_bool("by_cost", false));
 	// The find bar and Find in project.
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"find": {"open": true, "text": "GUN", "match_case": true}})")) &&
 	            w.find.open && w.find.text == "GUN" && w.find.match_case);
