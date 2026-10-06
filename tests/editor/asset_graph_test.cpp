@@ -40,6 +40,7 @@
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_import.h>
 #include <editor/assets/install_view.h>
+#include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/mns_document.h>
@@ -173,12 +174,14 @@ static int test_blank_project() {
 	TEST_EXPECT(!font_file.empty() && !graph.referrers_of_file(font_file).empty());
 	TEST_EXPECT(graph.referrers_of_file("nothing.fnt").empty());
 	// The blank tables define nothing yet: the stylesheet's variables, the blank item
-	// table's null marker, the blank menus' screens and windows and the blank SndProf.def's
-	// "default" profile are the symbols.
+	// table's null marker, the blank menus' screens and windows, the blank SndProf.def's "default"
+	// profile and the blank _ffp.fx's fixed-function shader tags are the symbols.
 	for (const GraphSymbol &symbol : all_symbols(graph))
 		TEST_EXPECT(symbol.kind == ReferenceKind::StyleVar || symbol.kind == ReferenceKind::Item ||
 		            symbol.kind == ReferenceKind::MenuScreen || symbol.kind == ReferenceKind::MenuWindow ||
-		            symbol.kind == ReferenceKind::SoundProfile);
+		            symbol.kind == ReferenceKind::SoundProfile || symbol.kind == ReferenceKind::Shader);
+	TEST_EXPECT(graph.resolve(ReferenceKind::Shader, "FF_ST_OP") == ReferenceStatus::Present &&
+	            graph.resolve(ReferenceKind::Shader, "FF_MT_AD_LUM#UV") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.resolve(ReferenceKind::MenuScreen, "startup", "MAIN.MNU") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.resolve(ReferenceKind::MenuWindow, "exit", "MAIN.MNU/STARTUP") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.resolve(ReferenceKind::MenuWindow, "EXIT", "MAIN.MNU/ELSEWHERE") == ReferenceStatus::Missing);
@@ -1626,7 +1629,7 @@ static int test_reference_kind_rows() {
 		                       kind == ReferenceKind::MissionEntity || kind == ReferenceKind::MissionZone ||
 		                       kind == ReferenceKind::TilePlacement || kind == ReferenceKind::DialogBank ||
 		                       kind == ReferenceKind::MissionStrings || kind == ReferenceKind::Sound ||
-		                       kind == ReferenceKind::SoundProfile;
+		                       kind == ReferenceKind::SoundProfile || kind == ReferenceKind::Shader;
 		TEST_EXPECT(row.severity_when_missing == (tolerated ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error));
 	}
 	ReferenceKind kind = ReferenceKind::None;
@@ -1978,6 +1981,72 @@ static int test_model_texture_references() {
 		puff = edge_to(*view.findings.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
 		TEST_EXPECT(puff && view.findings.graph->resolve(*puff) == ReferenceStatus::Missing);
 	}
+	return 0;
+}
+
+// A model material's shader names the tag an effect registers (ReferenceKind::Shader), compared
+// without case [orig: HLSLEffect_FindByName @ 0x5ADE70]: with no effect it is a warning saying the game
+// draws nothing (no registry entry holds a pass) and refuses no build; _ffp.fx registers the
+// fixed-function tags, an object effect its tag and #UV twin, a skinned one no twin. A missing _ffp.fx
+// is a required file the project lacks, which Create Missing makes.
+static int test_model_shader_references() {
+	editor_test::TempProjectDir dir("opennova_asset_graph_model_shaders");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Shaders"));
+	const SessionView &view = session.view();
+	const std::string root = view.project.root;
+	const std::string scene = dir.file("scene");
+	TEST_EXPECT(editor_test::write_text(scene + "/lit.o3d",
+	                                    "o3d 2\nmodel LIT\nmaterial FF_ST_OP\ntexture wall.tga 1 0\nlod 0\npart 0 0 0 0\n"
+	                                    "mesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
+	const ImportResult imported = import_assets({{scene + "/lit.o3d", {}}}, ProjectPaths::for_root(root), *view.project.document, false);
+	TEST_EXPECT(imported.imported == std::vector<std::string>({"models/lit.3di"}));
+	editor_test::handle_to_end(session, request::rescan());
+	const std::string model = "models/lit.3di";
+	const auto missing = [&]() -> const Diagnostic * {
+		for (const Diagnostic &d : view.findings.diagnostics)
+			if (d.code() == "reference.missing" && d.asset == model && subject_target(d) == "FF_ST_OP") return &d;
+		return nullptr;
+	};
+	const auto required = [&]() {
+		for (const Diagnostic &d : view.findings.diagnostics)
+			if (d.code() == "requirement.missing" && d.message.find("_ffp.fx") != std::string::npos) return true;
+		return false;
+	};
+	const GraphEdge *edge = edge_to(*view.findings.graph, model, ReferenceKind::Shader, "FF_ST_OP");
+	TEST_EXPECT(edge && view.findings.graph->resolve(*edge) == ReferenceStatus::Missing);
+	const Diagnostic *none = missing();
+	TEST_EXPECT(none && none->severity == DiagnosticSeverity::Warning && !blocks_build(*none) &&
+	            none->message.find("draws nothing") != std::string::npos);
+	TEST_EXPECT(required());
+	// The editor's _ffp.fx: the fixed-function tags and their twins, any case.
+	const auto make = [&](const char *name, const char *tag) {
+		BlankRequest request;
+		request.logical_name = name;
+		if (tag) request.values = {{"tag", tag}};
+		std::vector<uint8_t> bytes;
+		Diagnostic error;
+		return make_blank(request, AssetKind::Shader, bytes, error) &&
+		       editor_test::write_bytes(root + "/shaders/" + name, bytes);
+	};
+	TEST_EXPECT(make("_ffp.fx", nullptr));
+	editor_test::handle_to_end(session, request::rescan());
+	edge = edge_to(*view.findings.graph, model, ReferenceKind::Shader, "FF_ST_OP");
+	std::string file;
+	TEST_EXPECT(edge && view.findings.graph->resolve(*edge, &file) == ReferenceStatus::Present && !missing() && !required());
+	const AssetGraph &graph = *view.findings.graph;
+	TEST_EXPECT(graph.resolve(ReferenceKind::Shader, "ff_mt_ab_lum#uv") == ReferenceStatus::Present &&
+	            graph.resolve(ReferenceKind::Shader, "VS_PHONGT") == ReferenceStatus::Missing);
+	// An object effect registers its tag and its #UV twin; a skinned one no twin.
+	TEST_EXPECT(make("onphongt.fx", "VS_PHONGT") && make("onskphgt.fx", "VS_SKBUMPPHONGT"));
+	editor_test::handle_to_end(session, request::rescan());
+	const AssetGraph &after = *view.findings.graph;
+	TEST_EXPECT(after.resolve(ReferenceKind::Shader, "VS_PHONGT") == ReferenceStatus::Present &&
+	            after.resolve(ReferenceKind::Shader, "vs_phongt#UV") == ReferenceStatus::Present &&
+	            after.resolve(ReferenceKind::Shader, "VS_SKBUMPPHONGT") == ReferenceStatus::Present &&
+	            after.resolve(ReferenceKind::Shader, "VS_SKBUMPPHONGT#UV") == ReferenceStatus::Missing);
 	return 0;
 }
 
@@ -3518,6 +3587,7 @@ int main(int argc, char **argv) {
 	failures += test_reference_file_candidates();
 	failures += test_terrain_and_bank_extractors();
 	failures += test_model_texture_references();
+	failures += test_model_shader_references();
 	failures += test_rename_keeps_loader_spelling();
 	failures += test_user_point_references();
 	failures += test_blank_project();
