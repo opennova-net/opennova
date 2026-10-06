@@ -36,10 +36,18 @@ namespace {
 
 // A new project with its required files and a menu of its own, extra.mnu, open with an unsaved
 // edit (its MAIN window's left edge moved).
+// The editor's save_before_play off (DI-26: on, Play saves first and asks nothing), so every row the prompt
+// guards asks.
+inline Preferences asking() {
+	Preferences preferences;
+	preferences.save_before_play = false;
+	return preferences;
+}
+
 struct Dirty {
 	editor_test::TempProjectDir dir;
 	editor_test::NoProcess platform;
-	MemoryPreferencesStore preferences;
+	MemoryPreferencesStore preferences{ asking() };
 	ProjectSession session;
 	std::string extra;
 	explicit Dirty(const char *name) : dir(name), session(platform, preferences) {

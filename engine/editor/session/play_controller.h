@@ -9,6 +9,7 @@
 #include <editor/run/launch_plan.h>
 #include <editor/run/play_lease.h>
 #include <editor/run/play_session.h>
+#include <editor/run/play_start.h>
 
 namespace opennova::editor {
 
@@ -22,6 +23,9 @@ struct SessionView;
 // its logical name as the project spells it, "" for any other document and for none. The one
 // rule the windows, the editor MCP and the tests ask.
 std::string play_mission_for(const SessionView &view);
+// The mission Play starts the game in for the file at `path`: its logical name when it is a .bms the
+// project holds (a mission view's, a Files row's), else "".
+std::string play_mission_at(const SessionView &view, const std::string &path);
 
 // Play in the project session (ADR 0046 d8, S13 A2): the one game the editor runs (PlaySession
 // over the embedder's process seam), what it launches, asked of the embedder's launcher source
@@ -53,9 +57,9 @@ public:
 	std::string resolve_runtime_executable() const;
 
 	// Play refused before any build (no spawn on this platform, a game running, a `mission` that is
-	// no .bms of the project, the game install's game running already when Play runs there, Strict
-	// Play of an expansion): true, said why.
-	bool refused(const std::string &mission = std::string());
+	// no .bms of the project, a `start` with no mission to start in, the game install's game running
+	// already when Play runs there, Strict Play of an expansion): true, said why.
+	bool refused(const std::string &mission = std::string(), const PlayStart &start = PlayStart());
 	// The game started on the last build (its lease written, the view's run block filled), in
 	// `mission` ("" its menu): the project's .bms of that name as the scan spells it, looked up
 	// again now the build landed (one gone since starts nothing, play.mission.unknown). The game
@@ -63,8 +67,12 @@ public:
 	// never taking the foreground (LaunchPlan::behind; the run section says so). The run directory keeps
 	// what the game wrote there in the runs of this mode before (run/run_directory.h: its game.cfg, its
 	// saves), Output and the run section's kept naming them; `fresh` empties it first (a first run: the
-	// game install's device dialog, a default profile).
-	void start(const std::string &mission = std::string(), bool behind = false, bool fresh = false);
+	// game install's device dialog, a default profile). `start` (Play from here, DI-26): the run
+	// directory's copy of the mission has its player's start markers at the point (run/play_start.h), the
+	// runtime mounting the run directory, where the build is staged for it; one that cannot be staged
+	// starts nothing (play.start).
+	void start(const std::string &mission = std::string(), bool behind = false, bool fresh = false,
+	           const PlayStart &start = PlayStart());
 	void stop();
 	// The poll's: the child's state, the game's log tail, how it ended once it has; the validation
 	// its report left due.
@@ -94,6 +102,13 @@ private:
 	// let go (step_start_again, from the polls).
 	void start_again_if_first_run();
 	void step_start_again();
+	// Play from here's start placed in the run directory's copy of `mission` (staged already in
+	// `run_dir`); false, reported, when it could not be.
+	bool stage_start(const std::string &run_dir, const std::string &expansion, const std::string &mission,
+	                 const PlayStart &start);
+	// What a line of the game's log reports, each marker's to its absorber (the boot report, the launch
+	// mission's): the one place a new report the game logs is read (DI-27's misses).
+	void absorb_report(const std::string &line);
 	void absorb_boot_report(const std::string &line);
 	// The launch mission's report (gameprofile::kLaunchMissionFailedMarker): the mission that did
 	// not load and why, a Problems row (play.mission.failed) of the project the game was started in.
