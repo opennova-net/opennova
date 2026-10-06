@@ -104,6 +104,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/emitter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/effect_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/effect_catalog_names.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/particle/effect_closure.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/script_effects.cpp
     # hud — the retail game-font text engine + element frame math
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/game_font.cpp
