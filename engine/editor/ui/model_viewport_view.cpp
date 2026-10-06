@@ -1,6 +1,7 @@
 #include <editor/ui/model_viewport_view.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
@@ -101,6 +102,7 @@ struct ModelViewportView::Tools {
 	void toolbar(Workspace &workspace, const ModelViewport &model, const ViewportContext &context);
 	void registers(Workspace &workspace, const ModelViewport &model);
 	void rig_chooser(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
+	void sound(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
 	void timeline(Workspace &workspace, const ModelViewport &model, const PreviewClock &clock);
 };
 
@@ -179,8 +181,10 @@ void ModelViewportView::draw_ready(Workspace &workspace, const ViewportModel &vi
 		ImGui::TextDisabled("LOD %d holds no part: there is nothing to draw at it.", lod);
 	snap = model.options().snap;
 	context.snap = snap;
-	const float timeline =
-			model.animating() ? ImGui::GetFrameHeightWithSpacing() * 2.0f + ImGui::GetFontSize() * 2.0f + 16.0f : 0.0f;
+	// The timeline's rows: the transport, the track, the legend and the last sound heard (DI-04).
+	const float timeline = model.animating() ? ImGui::GetFrameHeightWithSpacing() * 2.0f + ImGui::GetFontSize() * 2.0f +
+	                                                   ImGui::GetTextLineHeightWithSpacing() + 16.0f
+	                                         : 0.0f;
 	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y - timeline));
 	if (model.animating()) tools_->timeline(workspace, model, context.input.clock);
 }
@@ -230,6 +234,59 @@ void ModelViewportView::Tools::rig_chooser(Workspace &workspace, ui_kit::WrapRow
 	}
 	ui_kit::tooltip("The model the animation plays on. Auto takes the graphic of an item whose "
 	                "anim_def names the map. A clip's bones pair with the model's parts by their order.");
+	if (options != model.options()) set_options(workspace, model, options);
+}
+
+// How the clip's events are heard (DI-04, preview/preview_clip_sounds): Mute; the Surface under the feet a
+// footstep's slot follows; the body that reads the events (its tick half); a female player's profile; the
+// profile, the paired item's or one picked. Each a SetViewport of the options' `sound`.
+void ModelViewportView::Tools::sound(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model) {
+	ModelViewportOptions options = model.options();
+	ClipSoundOptions &sound = options.sound;
+	const ClipSoundBinding &binding = model.sound_binding();
+	const char *label = sound.mute ? "Sound (muted)###sound" : "Sound###sound";
+	row.next(ui_kit::button_width(label));
+	if (ImGui::Button(label)) ImGui::OpenPopup("sound");
+	ui_kit::tooltip("What the clip's events play as it runs, as the game plays them: " + binding.profile_words + "\n" +
+	                binding.body_words);
+	if (ImGui::BeginPopup("sound")) {
+		const float unit = ImGui::GetFontSize();
+		ImGui::Checkbox("Mute", &sound.mute);
+		ui_kit::tooltip("The events still fire and say what they play; nothing is heard.");
+		static const char *const kSurfaces[] = {"Ground", "Snow", "On an object", "In water"};
+		int surface = int(sound.surface);
+		ImGui::SetNextItemWidth(unit * 8.0f);
+		if (ImGui::Combo("Surface", &surface, kSurfaces, IM_ARRAYSIZE(kSurfaces))) sound.surface = FootSurface(surface);
+		ui_kit::tooltip("What is under the feet, as the game tests it for each footstep, in this order: feet under "
+		                "the water plane play SSFootWater (both feet); standing on an object, SSLFootOBJ or "
+		                "SSRFootOBJ; on snow (the terrain's surface class 3), SSLFootSnow or SSRFootSnow; else the "
+		                "ground, SSLFootGND or SSRFootGND (Entity_UpdateInfantryAI @ 0x4bf23e, the player body's "
+		                "@ 0x4b77c6). The sounds 1 to 6 play SSAudio1 to SSAudio6 whatever is underfoot.");
+		static const char *const kBodies[] = {"Auto", "NPC body", "Player body"};
+		int body = int(sound.body);
+		ImGui::SetNextItemWidth(unit * 8.0f);
+		if (ImGui::Combo("Body", &body, kBodies, IM_ARRAYSIZE(kBodies))) sound.body = ClipSoundBody(body);
+		ui_kit::tooltip(binding.body_words + "\nAn NPC's body reads a clip's events on odd game ticks, a player's on "
+		                "even ones (Entity_UpdateInfantryAI @ 0x4bf144, Entity_UpdateInfantryPlayerBody @ 0x4b76e6); "
+		                "Auto takes the body the paired item's move_function runs.");
+		ImGui::BeginDisabled(!binding.player);
+		ImGui::Checkbox("Female", &sound.female);
+		ImGui::EndDisabled();
+		ui_kit::tooltip("A female avatar: a player's body plays its item's sound_profileFemale (an NPC's never does).");
+		ImGui::SetNextItemWidth(unit * 10.0f);
+		if (ImGui::BeginCombo("Profile", sound.profile.empty() ? "Auto" : sound.profile.c_str())) {
+			if (ImGui::Selectable("Auto", sound.profile.empty())) sound.profile.clear();
+			ui_kit::tooltip("The paired item's sound_profile (default where it names none).");
+			for (const audio::SoundProfile &profile : model.sound_sources().profiles())
+				if (ImGui::Selectable(profile.name.c_str(), profile.name == sound.profile)) sound.profile = profile.name;
+			ImGui::EndCombo();
+		}
+		ui_kit::tooltip("The SndProf.def profile whose slots the events play: Auto is the paired item's.");
+		ImGui::PushTextWrapPos(unit * 24.0f);
+		ImGui::TextDisabled("%s", binding.profile_words.c_str());
+		ImGui::PopTextWrapPos();
+		ImGui::EndPopup();
+	}
 	if (options != model.options()) set_options(workspace, model, options);
 }
 
@@ -358,10 +415,20 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 	const float head = x_of(shown);
 	paint->AddLine(ImVec2(head, top), ImVec2(head, bottom), ImGui::GetColorU32(ImGuiCol_SliderGrabActive), 2.0f);
 	if (under) {
+		// What it plays (DI-04), a line a sound.
+		std::string plays;
+		for (const std::string &line : model.event_sound_words(under->trigger)) {
+			std::string said = line;
+			if (!said.empty()) said[0] = char(std::toupper(static_cast<unsigned char>(said[0])));
+			plays += "\n" + said;
+		}
 		ui_kit::tooltip("Frame " + std::to_string(under->frame) + " (" + seconds_text(under->tick / io::kTickHz) +
-		                "): " + animation_trigger_words(under->trigger) + ". Click to go there.");
+		                "): " + animation_trigger_words(under->trigger) + "." + plays +
+		                (plays.empty() ? "\nClick to go there." : "\nClick to go there and hear it."));
 		if (clicked) {
 			seek_ticks(workspace, model, under->tick, true);
+			// A press plays the event once, as the game plays it (play_sound {frame}).
+			if (!plays.empty()) workspace.request(request::play_clip_event(model.path(), under->frame));
 			// In the clip's own document the event is a record: select it.
 			const SessionView &view = workspace.view();
 			for (const auto &open : view.documents.open) {
@@ -384,6 +451,14 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 		ImGui::TextColored(ImVec4(240 / 255.0f, 90 / 255.0f, 80 / 255.0f, 1.0f), "F fires");
 		ImGui::SameLine();
 		ImGui::TextColored(ImVec4(1.0f, 220 / 255.0f, 90 / 255.0f, 1.0f), "S sound");
+	}
+	// The last sound the clip's events fired (DI-04), in words.
+	if (!model.sounds_fired().empty()) {
+		const ClipSoundFired &last = model.sounds_fired().back();
+		const std::string heard = (last.state == "played" ? "Heard: " : "Fired: ") + last.words;
+		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+		ui_kit::clipped_text(heard, heard);
+		ImGui::PopStyleColor();
 	}
 }
 
@@ -441,6 +516,7 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 		ui_kit::tooltip("Run or hold the preview clock: the model's part animations, flipbooks and colour "
 		                "generators.");
 	}
+	if (model.animating()) sound(workspace, row, model);
 	row.next(ui_kit::button_width("Show"));
 	if (ImGui::Button("Show")) ImGui::OpenPopup("marks");
 	ui_kit::tooltip("What the viewport marks over the model, and the collision it draws.");
