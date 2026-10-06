@@ -13,6 +13,7 @@
 
 #include <editor/preview/viewport_follow.h>
 
+#include "authoring/preview_model.h"
 #include "authoring/viewport_applier.h"
 #include "object/object_data.h"
 #include "object/object_model.h"
@@ -67,24 +68,11 @@ public:
 	ObjectModel *arms_model() const { return arms_; }
 
 private:
-	// One unit of a build, in the order they run.
-	struct Unit {
-		enum class Kind : uint8_t {
-			Texture, // a material's stage: its first texture of `slot` that decodes (slot 3 falls back to 4)
-			Frame, // a frame of a material's flipbook
-			Meshes, // a level's meshes
-			Scene, // the data swapped in, the rig bound: the scene built
-			Pose, // the registers, the level, the camera, the clip at the clock
-		};
-		Kind kind = Kind::Scene;
-		int material = -1; // Texture, Frame: the MTRL row
-		int slot = 0; // Texture
-		int frame = 0; // Frame
-		int lod = -1; // Meshes
-		bool arms = false; // Texture, Frame, Meshes: the first-person arms' data
-	};
 	// A build in flight: the data the scene will hold (and the first-person arms', null: none), the files
-	// its textures are read through, the rig it binds (null: none) and its serial, and its units.
+	// its textures are read through, the rig it binds (null: none) and its serial, and its units: each
+	// data's (authoring/preview_model's ModelDataBuild: its materials' stages and flipbook frames, its
+	// levels), the gun's then the arms', then the scene (the data swapped in, the rig bound) and the pose
+	// (the registers, the level, the camera, the clip at the clock).
 	struct Build {
 		Ref<ObjectData> data;
 		Ref<ObjectData> arms;
@@ -94,13 +82,10 @@ private:
 		Ref<SkeletalAnim> skeletal;
 		int bone_count = 0;
 		uint64_t skeleton_serial = UINT64_MAX;
-		std::vector<Unit> units;
-		size_t next = 0;
+		std::vector<ModelDataBuild> parts;
+		size_t part = 0; // the part building; parts.size(): the scene, then the pose
+		bool assembled = false;
 	};
-	// The units of `build`'s data (and its arms'): its materials' stages and flipbook frames, its levels,
-	// the scene, the pose.
-	static void plan_(Build &build);
-	static void plan_data_(Build &build, const Ref<ObjectData> &data, bool arms);
 	// The scene: the build's data swapped in with its rig.
 	void assemble_(Build &build);
 	// The viewport's state over the picture that stands, in one place: the pose unit as a build ends,
