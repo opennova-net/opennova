@@ -16,9 +16,9 @@ namespace opennova::editor {
 // (decode_image_source). The options:
 // - `format`, what it writes: `tga` (32-bit, its alpha kept: the form every TGA loader reads), `tga24`
 //   (24-bit, no alpha: a terrain colour map's form), `pcx` (8-bit indexed, 256 colours, no alpha: the
-//   loading screens', sky clouds' and foliage maps' reader), `dds` (the D3DX codec's DXT5 or DXT1 with
-//   its mip chain, or A8R8G8B8: the form of the game's model textures, which their loader reads before
-//   a `.tga` of the name), `mdt` (a 32-bit TGA under `.mdt`: a model's finished normal map) or `png`
+//   loading screens', sky clouds' and foliage maps' reader), `dds` (DXT5 or DXT1 with its mip chain, or
+//   A8R8G8B8: the form of the game's model textures, which their loader reads before a `.tga` of the
+//   name), `mdt` (a 32-bit TGA under `.mdt`: a model's finished normal map) or `png`
 //   (the menus' loader alone reads one);
 // - `name`, the output's file name (left out: the source's stem and the format's extension);
 // - `alpha`: `source`, `opaque`, `luminance` (the archive loader's (85 x (r + g + b)) >> 8 of each
@@ -33,15 +33,16 @@ namespace opennova::editor {
 //   (the source a height map: its brightness, (85 x (r + g + b)) >> 8, written into the alpha, from which
 //   a model's normal row naming a .tga makes the normal map, and its alpha into the blue, which becomes
 //   the map's alpha [orig: Texture_LoadAsNormalMap @0x58C985..0x58CAED]);
-// - `dds` (dds): `dxt5`, `dxt1` or `argb`; `mips` (a DXT dds): `full` (every level to 1 x 1, each the
-//   D3DX box filter of the level before, decoded from its own blocks, as the game's texture creator
-//   builds its levels) or `none`;
+// - `dds` (dds): `dxt5`, `dxt1` or `argb`; `mips` (a DXT dds): `full` (every level to 1 x 1, as every DXT
+//   DDS the game ships carries its chain, each the D3DX box filter of the level before over the source's
+//   texels, its blocks the authoring encoder's: import/dxt_encode.h) or `none`;
 // - `green`: `game` or `flip` (a normal map drawn with the other green: the game's tangent frame runs
 //   down the texture, ADR 0047).
 // A resize is editor tooling, not a port: halving by 2 x 2 boxes, any other size by the average of the
 // texels each output texel covers.
 
-inline constexpr int kImageImporterVersion = 2;
+// 3: a DDS's blocks the authoring encoder's, each level filtered from the source's (import/dxt_encode.h).
+inline constexpr int kImageImporterVersion = 3;
 
 const std::vector<ImportOptionRow> &image_import_option_rows();
 
@@ -85,6 +86,11 @@ bool image_target_size(const std::string &size, uint32_t width, uint32_t height,
 RgbaImage resize_image(const RgbaImage &image, uint32_t width, uint32_t height);
 bool apply_image_alpha(RgbaImage &image, const std::string &alpha, std::string &why);
 void flip_image_green(RgbaImage &image);
+// The texels an import of `settings` encodes from a decoded source (an 8-bit PCX's indices kept aside):
+// resized to the size it asks for, its green flipped, its height into its alpha (`normal height` of a TGA)
+// or its alpha made as asked; false, with `why` and the option at fault in `field`, for a value it cannot
+// use. What run_image_import writes, and what a texture's compare reads an import's output against.
+bool image_import_texels(RgbaImage &image, const ImageImportSettings &settings, std::string &why, std::string &field);
 // The image written as `settings` say (format, palette, dds, mips): its bytes, or false with `why`; a
 // warning (a PCX dropping a translucent source's alpha) in `note`.
 bool encode_image(const RgbaImage &image, const ImageImportSettings &settings, std::vector<uint8_t> &out,
