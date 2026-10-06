@@ -4,7 +4,9 @@
 #include <utility>
 
 #include <editor/model/diagnostic.h>
+#include <editor/model/field_text.h>
 #include <editor/session/document_set.h>
+#include <editor/session/editor_preferences.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/rename_controller.h>
 #include <editor/session/request_kinds.h>
@@ -42,6 +44,9 @@ bool UnsavedGuard::files(const EditorRequest &request, std::vector<std::string> 
 bool UnsavedGuard::holds(const EditorRequest &request) {
 	std::vector<std::string> unsaved;
 	if (!files(request, unsaved)) return false;
+	// Play saves first (DI-26), its Save all as the prompt's would write it; what it could not write, the
+	// prompt lists.
+	if (!unsaved.empty() && saved_first(request, unsaved)) files(request, unsaved);
 	if (unsaved.empty()) {
 		if (pending_) close_prompt();
 		return false;
@@ -62,6 +67,21 @@ bool UnsavedGuard::holds(const EditorRequest &request) {
 	view_.dialogs.unsaved_prompt = std::move(prompt);
 	core_.outcome().unsaved_prompt = true;
 	core_.touch(ViewConcern::Dialogs);
+	return true;
+}
+
+// Play with the editor's save_before_play on (the default; the Play loop, DI-26): the files with unsaved
+// edits written, as the prompt's Save would write them, the Play going ahead without asking. Not while an
+// operation runs whose gate the Play would meet (a build it would join packs the files: the prompt waits,
+// as its answer is weighed against the operation). True when it saved (every file, or some: what was not
+// written stays unsaved, its failure reported), and Output says how many.
+bool UnsavedGuard::saved_first(const EditorRequest &request, const std::vector<std::string> &unsaved) {
+	if (request.kind != EditorRequestKind::Play || !core_.preferences().values().save_before_play) return false;
+	if (gate_answer(request.kind, core_.operations().status()) != GateAnswer::Proceed) return false;
+	DocumentSet &documents = core_.documents();
+	documents.end_edit_groups();
+	const bool all = documents.save_documents(unsaved, false);
+	if (all) core_.note("Saved " + counted(unsaved.size(), "file") + " before Play (Build > Save all before Play).");
 	return true;
 }
 
