@@ -9,6 +9,7 @@
 #include <editor/documents/texture_load_rules.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/texture_uses.h>
+#include <editor/preview/texture_role_view.h>
 #include <editor/preview/viewport_model.h>
 
 namespace opennova::editor {
@@ -68,15 +69,18 @@ struct TextureShownUse {
 	bool model_row = false;
 	TextureAlphaMeaning alpha = TextureAlphaMeaning::Unused;
 	std::string alpha_words;
+	// A particle graphic's blend mode (formats/particle BlendMode), whose atlas page the picture shows it as; -1 none.
+	int blend_mode = -1;
 	bool operator==(const TextureShownUse &other) const {
 		return index == other.index && words == other.words && role == other.role && transform == other.transform &&
 		       cutout == other.cutout && inverted == other.inverted && cells == other.cells && model_row == other.model_row &&
-		       alpha == other.alpha && alpha_words == other.alpha_words;
+		       alpha == other.alpha && alpha_words == other.alpha_words && blend_mode == other.blend_mode;
 	}
 };
 // What a viewport shows of the use `use`, the texture's use at `index`.
 TextureShownUse texture_shown_use(const TextureUse &use, int index);
-// The texels a use shows of `image`: its loader's transform, then its cut-out (alpha 255 where the
+// The texels a use shows of `image`: its loader's transform, then what its role's consumer makes of them
+// (texture_role_texels: a blend map's weights, a particle graphic as its atlas page holds it), then its cut-out (alpha 255 where the
 // material's test keeps a texel, 0 where it discards it), or for a model row whose alpha the game draws as no
 // transparency (a specular brightness, unused) every texel opaque; `image` itself where the use changes nothing.
 std::shared_ptr<const TextureImage> texture_as_used(const std::shared_ptr<const TextureImage> &image,
@@ -160,6 +164,9 @@ public:
 	// The object texture detail shown (the options' where a model row's budget holds it): its level, -1 none, and
 	// the device texture that is.
 	int shown_detail() const { return detail_level_; }
+	// What the use shown's role reads of the texture (texture_role_view: a blend map's weights and the splat details
+	// they weigh, a foliage map's codes and what grows on them, a particle graphic's atlas page); empty for none.
+	const TextureRoleView &role_view() const { return role_view_; }
 	const renderer::DeviceTexture &shown_device() const { return detail_device_; }
 	uint64_t reads() const { return reads_; }
 	bool from_file() const { return from_file_; }
@@ -225,6 +232,13 @@ private:
 	// channels, light), which move the picture when they change.
 	int detail_level_ = -1;
 	renderer::DeviceTexture detail_device_;
+	TextureRoleView role_view_;
+	// The terrain a terrain map's use names it from (its .trn, read again when the scan says its size or last write
+	// moved): what its legend reads; null where it did not read.
+	std::string terrain_path_;
+	uint64_t terrain_size_ = 0;
+	int64_t terrain_modified_ = 0;
+	std::shared_ptr<const TrnConfig> terrain_;
 	TextureViewportOptions made_options_;
 	// The picture of the source and the use: the transforms the options ask for applied.
 	std::shared_ptr<const TextureImage> picture(const std::shared_ptr<const TextureImage> &used, const TextureBudget *budget);
