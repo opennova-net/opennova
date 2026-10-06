@@ -7,7 +7,10 @@
 // before anything is written (the dialog's preview: before and after, the stored form kept, what the uses
 // ask, a cube map refused), a folder per set-aside, a failed record write putting everything back; a
 // texture two files use split so one of them names a copy (a plain file copied; an import's output copied
-// as its source); the source a paint program edits for each kind of texture.
+// as its source); the source a paint program edits for each kind of texture. A source is named after the
+// texture's stem whatever the image is called, a stem cut to fit ending on no separator, and a TGA image is kept
+// as a PNG of its texels; a texture no use reads (a .tga beside the .dds its model row loads) set aside, the
+// Problems fix of texture.not_read.
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -22,9 +25,11 @@
 #include <editor/import/sidecar.h>
 #include <editor/import/texture_import.h>
 #include <editor/import/texture_source.h>
+#include <editor/assets/asset_import.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
+#include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/texture_import_state.h>
@@ -266,45 +271,84 @@ int test_replace() {
 	            editor_test::write_bytes(outside + "/skin2.png", png(solid(8, 8, 0, 0, 200), 8, 8)) &&
 	            editor_test::write_bytes(outside + "/paint.tga", tga32(solid(8, 8, 50, 60, 70), 8, 8)) &&
 	            editor_test::write_text(outside + "/notes.txt", "x"));
+	// An 8-bit PCX of one colour: a source of another form than a PNG.
+	{
+		IndexedImage8 flat;
+		flat.width = flat.height = 8;
+		flat.indices.assign(64, 1);
+		flat.palette[1][0] = 90;
+		flat.palette[1][1] = 80;
+		flat.palette[1][2] = 70;
+		std::vector<uint8_t> pcx;
+		std::string why;
+		TEST_EXPECT(encode_pcx_indexed(flat, pcx, why) && editor_test::write_bytes(outside + "/flat.pcx", pcx));
+	}
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();
 
-	// A plain texture replaced by a PNG: the PNG an import source in art/, the texture its output under its
-	// own name, the plain file set aside.
+	// A plain texture replaced by a PNG: the PNG an import source in art/ under the texture's stem (body.tga's
+	// art/body.png, whatever the image is called), the texture its output under its own name, the plain file set
+	// aside.
 	editor_test::handle_to_end(session, request::replace_texture("textures/body.tga", outside + "/skin.png"));
 	TEST_EXPECT(session.outcome().done());
 	session.run_operations();
 	const AssetEntry *body = view.project.scan->find("body.tga");
-	TEST_EXPECT(body && body->imported_from == "art/skin.png");
+	TEST_EXPECT(body && body->imported_from == "art/body.png");
 	TEST_EXPECT(!fs::exists(root + "/textures/body.tga") && set_aside(root, "textures/body.tga"));
-	TEST_EXPECT(record_of(root, "art/skin.png") == ImportOptions({{"format", "tga"}, {"name", "body.tga"}}));
+	TEST_EXPECT(record_of(root, "art/body.png") == ImportOptions({{"format", "tga"}}));
 	if (body) TEST_EXPECT(first_texel("body.tga", read_bytes(root + "/" + body->relative_path)) == std::vector<uint8_t>({0, 200, 0, 255}));
 
-	// An import's output replaced by an image of its source's kind: the source written over.
+	// An import's output replaced by an image of its source's form: the source written over.
 	editor_test::handle_to_end(session, request::replace_texture("body.tga", outside + "/skin2.png"));
 	TEST_EXPECT(session.outcome().done());
 	session.run_operations();
 	body = view.project.scan->find("body.tga");
-	TEST_EXPECT(body && body->imported_from == "art/skin.png" && set_aside(root, "art/skin.png"));
+	TEST_EXPECT(body && body->imported_from == "art/body.png" && set_aside(root, "art/body.png"));
 	if (body) TEST_EXPECT(first_texel("body.tga", read_bytes(root + "/" + body->relative_path)) == std::vector<uint8_t>({0, 0, 200, 255}));
-	// By one of another kind: a TGA source of a name of its own, the old source and its record set aside.
+	// By a TGA: kept as a PNG of its texels, so of the source's form, which it writes over.
 	editor_test::handle_to_end(session, request::replace_texture("body.tga", outside + "/paint.tga"));
 	TEST_EXPECT(session.outcome().done());
 	session.run_operations();
 	body = view.project.scan->find("body.tga");
-	TEST_EXPECT(body && body->imported_from == "art/paint.tga" && !fs::exists(root + "/art/skin.png") &&
-	            set_aside(root, "art/skin.png.import"));
-	TEST_EXPECT(record_of(root, "art/paint.tga") == ImportOptions({{"format", "tga"}, {"name", "body.tga"}}));
+	TEST_EXPECT(body && body->imported_from == "art/body.png" && !fs::exists(root + "/art/paint.tga"));
+	{
+		ImageSource kept;
+		std::string why;
+		const std::vector<uint8_t> bytes = read_bytes(root + "/art/body.png");
+		TEST_EXPECT(bytes.size() > 8 && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G' &&
+		            decode_image_source("body.png", bytes, kept, why) && kept.image.pixels == solid(8, 8, 50, 60, 70));
+	}
 	if (body) TEST_EXPECT(first_texel("body.tga", read_bytes(root + "/" + body->relative_path)) == std::vector<uint8_t>({50, 60, 70, 255}));
+	// By one of another form: a PCX source under the texture's stem, the old source and its record set aside.
+	editor_test::handle_to_end(session, request::replace_texture("body.tga", outside + "/flat.pcx"));
+	TEST_EXPECT(session.outcome().done());
+	session.run_operations();
+	body = view.project.scan->find("body.tga");
+	TEST_EXPECT(body && body->imported_from == "art/body.pcx" && !fs::exists(root + "/art/body.png") &&
+	            set_aside(root, "art/body.png.import"));
+	TEST_EXPECT(record_of(root, "art/body.pcx") == ImportOptions({{"format", "tga"}}));
+	if (body) TEST_EXPECT(first_texel("body.tga", read_bytes(root + "/" + body->relative_path)) == std::vector<uint8_t>({90, 80, 70, 255}));
 
-	// A name the project lacks (a field's missing texture): made under it (art/skin.png free again, its old
-	// source set aside).
+	// A name the project lacks (a field's missing texture): made under it, its source after its stem.
 	editor_test::handle_to_end(session, request::replace_texture("grass.tga", outside + "/skin.png"));
 	TEST_EXPECT(session.outcome().done());
 	session.run_operations();
 	const AssetEntry *grass = view.project.scan->find("grass.tga");
-	TEST_EXPECT(grass && grass->imported_from == "art/skin.png" &&
-	            record_of(root, "art/skin.png") == ImportOptions({{"format", "tga"}, {"name", "grass.tga"}}));
+	TEST_EXPECT(grass && grass->imported_from == "art/grass.png" && record_of(root, "art/grass.png") == ImportOptions({{"format", "tga"}}));
+	// A stem too long for a "_src" beside it, its own name taken: cut to fit, ending on no separator
+	// (onbarl1_0.dds's art/onbarl1_src.png, never onbarl1__src.png).
+	{
+		TEST_EXPECT(editor_test::write_bytes(root + "/art/onbarl1_0.png", png(solid(4, 4, 1, 1, 1), 4, 4)));
+		std::vector<uint8_t> dds;
+		std::string why;
+		const std::vector<uint8_t> grey = solid(4, 4, 5, 5, 5);
+		TEST_EXPECT(dds::dds_write_a8r8g8b8(grey.data(), 4, 4, dds, why) && editor_test::write_bytes(root + "/textures/onbarl1_0.dds", dds));
+		editor_test::handle_to_end(session, request::rescan());
+		session.run_operations();
+		const TextureSourcePlan cut = plan_texture_replace(ProjectPaths::for_root(root), *view.project.scan, "onbarl1_0.dds",
+		                                                   "barrel.png", read_bytes(outside + "/skin.png"), {});
+		TEST_EXPECT(cut.ok() && cut.source == "art/onbarl1_src.png");
+	}
 
 	// Refused, nothing written: an image the importer does not read, a file that is no texture, an option
 	// no row takes.
@@ -315,11 +359,11 @@ int test_replace() {
 	session.handle(request::replace_texture("grass.tga", outside + "/skin.png", {{"shine", "on"}}));
 	TEST_EXPECT(session.outcome().refused);
 
-	// The source a paint program edits: an output's own; a plain TGA's a copy beside in art/ under a name of
-	// its own; a DDS's a PNG of its first level.
+	// The source a paint program edits: an output's own; a plain TGA's a PNG of its texels in art/ under its
+	// stem; a DDS's a PNG of its first level.
 	{
 		TextureSourcePlan plan = plan_texture_source(ProjectPaths::for_root(root), *view.project.scan, "body.tga");
-		TEST_EXPECT(plan.ok() && plan.source == "art/paint.tga" && plan.bytes.empty());
+		TEST_EXPECT(plan.ok() && plan.source == "art/body.pcx" && plan.bytes.empty());
 		TEST_EXPECT(editor_test::write_bytes(root + "/textures/rock.tga", tga32(solid(4, 4, 1, 2, 3), 4, 4)));
 		std::vector<uint8_t> dds;
 		std::string why;
@@ -328,8 +372,10 @@ int test_replace() {
 		editor_test::handle_to_end(session, request::rescan());
 		session.run_operations();
 		plan = plan_texture_source(ProjectPaths::for_root(root), *view.project.scan, "textures/rock.tga");
-		TEST_EXPECT(plan.ok() && plan.source == "art/rock_src.tga" && plan.replaced == "textures/rock.tga" &&
-		            plan.options == ImportOptions({{"format", "tga"}, {"name", "rock.tga"}}));
+		TEST_EXPECT(plan.ok() && plan.source == "art/rock.png" && plan.replaced == "textures/rock.tga" &&
+		            plan.options == ImportOptions({{"format", "tga"}}));
+		ImageSource rock;
+		TEST_EXPECT(decode_image_source("rock.png", plan.bytes, rock, why) && rock.image.pixels == solid(4, 4, 1, 2, 3));
 		plan = plan_texture_source(ProjectPaths::for_root(root), *view.project.scan, "sky.dds");
 		TEST_EXPECT(plan.ok() && plan.source == "art/sky.png" && plan.options == ImportOptions({{"dds", "argb"}, {"format", "dds"}}));
 		ImageSource image;
@@ -337,6 +383,66 @@ int test_replace() {
 	}
 	std::printf("replace: a plain texture, an output by its source's kind and another, a missing name, the refusals, "
 	            "the sources to edit\n");
+	return 0;
+}
+
+// A texture no use reads: a .tga beside the .dds its model row loads, which the Blender add-on's export leaves.
+// texture.not_read's fix sets it aside under .replaced/, never deleted; refused for a texture a use reads, an
+// import's output, a texture no use names and a name the project lacks.
+int test_set_aside() {
+	editor_test::TempProjectDir dir{"opennova_editor_texture_set_aside"};
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Aside"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const std::string root = view.project.root;
+	std::vector<uint8_t> dds;
+	std::string why;
+	const std::vector<uint8_t> grey = solid(4, 4, 5, 5, 5);
+	TEST_EXPECT(dds::dds_write_a8r8g8b8(grey.data(), 4, 4, dds, why));
+	TEST_EXPECT(editor_test::write_bytes(root + "/textures/crate.tga", tga32(grey, 4, 4)) &&
+	            editor_test::write_bytes(root + "/textures/crate.dds", dds) &&
+	            editor_test::write_bytes(root + "/textures/lid.tga", tga32(grey, 4, 4)) &&
+	            editor_test::write_bytes(root + "/textures/loose.tga", tga32(grey, 4, 4)));
+	const std::string scene = dir.file("scene");
+	TEST_EXPECT(editor_test::write_text(scene + "/crate.o3d",
+	                                    "o3d 2\nmodel CRATE\nmaterial FF_ST_OP\ntexture crate.tga 1 0\nmaterial FF_ST_OP\n"
+	                                    "texture lid.tga 1 0\nlod 0\npart 0 0 0 0\nmesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\n"
+	                                    "v 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
+	ImportChoice model;
+	model.path = scene + "/crate.o3d";
+	TEST_EXPECT(import_assets({model}, ProjectPaths::for_root(root), *view.project.document, false).imported.size() == 1);
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	// The .tga its row's loader passes over for its .dds: texture.not_read, whose fix sets it aside.
+	const Diagnostic *unread = nullptr;
+	for (const Diagnostic &d : view.findings.diagnostics)
+		if (d.code() == "texture.not_read" && d.asset == "textures/crate.tga") unread = &d;
+	TEST_EXPECT(unread != nullptr);
+	if (!unread) return 1;
+	const std::vector<ProblemFix> fixes = fixes_for(*unread, view);
+	TEST_EXPECT(fixes.size() == 1 && fixes[0].label == "Set crate.tga aside" &&
+	            fixes[0].request.kind == EditorRequestKind::SetAsideTexture && fixes[0].bulk);
+	if (fixes.empty()) return 1;
+	editor_test::handle_to_end(session, fixes[0].request);
+	TEST_EXPECT(session.outcome().done());
+	session.run_operations();
+	TEST_EXPECT(!fs::exists(root + "/textures/crate.tga") && set_aside(root, "textures/crate.tga") &&
+	            !view.project.scan->find("crate.tga") && view.project.scan->find("crate.dds"));
+	for (const Diagnostic &d : view.findings.diagnostics)
+		TEST_EXPECT(d.code() != "texture.not_read" && !(d.code() == "reference.missing" && d.message.find("crate.tga") != std::string::npos));
+	// Refused, nothing moved: a texture a use reads, one no use names, a name the project lacks.
+	session.handle(request::set_aside_texture("textures/lid.tga"));
+	TEST_EXPECT(session.outcome().refused && session.outcome().findings.back().code() == "texture.set_aside" &&
+	            session.outcome().findings.back().message.find("is read by") != std::string::npos && fs::exists(root + "/textures/lid.tga"));
+	session.handle(request::set_aside_texture("textures/loose.tga"));
+	TEST_EXPECT(session.outcome().refused && session.outcome().findings.back().message.find("Nothing the editor knows names") != std::string::npos &&
+	            fs::exists(root + "/textures/loose.tga"));
+	session.handle(request::set_aside_texture("gone.tga"));
+	TEST_EXPECT(session.outcome().refused);
+	std::printf("set aside: a .tga beside the .dds its row loads, by texture.not_read's fix; the refusals\n");
 	return 0;
 }
 
@@ -426,6 +532,7 @@ int main() {
 	failures += test_replace();
 	failures += test_preview();
 	failures += test_split();
+	failures += test_set_aside();
 	if (failures == 0) std::printf("editor_texture_replace: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

@@ -301,12 +301,12 @@ that way: each diffuse and detail texture export writes or copies from a
 `.tga` (an image of the scene, or a `.tga` file an image was loaded from) is
 written as the `.dds` beside the `.3di`, DXT1 for an opaque image and DXT5
 for one with alpha, every level the 2 x 2 box filter of the source's level
-above it, through `opennova-3di texture` (the engine's image import, its
-blocks rgbcx's). The row keeps naming `<stem>.tga`:
+above it, through `opennova-3di texture` (the image import the editor runs
+too, its blocks rgbcx's). The row keeps naming `<stem>.tga`:
 
 - the `.3di` is the same whichever form its textures take, so switching
   forms writes only the textures;
-- under a loose-first search (the `/d` launch) a row naming
+- under a loose-first search (the `/d` launch, the editor's Play) a row naming
   `<stem>.dds` takes the plain path for the loose file, which reads `.tga`,
   `.mdt` and `.pcx` alone, and the texture would not load; a `<stem>.tga` row
   with no loose `.tga` reads the `.dds`;
@@ -619,7 +619,7 @@ writes an image as a model's texture file, as export does: a `.dds` (auto, the
 default: DXT1 for an opaque image, DXT5 otherwise; argb: uncompressed, one
 level; the full chain to 1 x 1 unless `--mips none`), or a 32-bit `.tga` or
 `.mdt`, halved while a side exceeds `--max-size`. `--alpha` makes the alpha as
-an image import does (`opaque`, `luminance`, `threshold:N`, `key:#RRGGBB`):
+the editor's import does (`opaque`, `luminance`, `threshold:N`, `key:#RRGGBB`):
 an image whose alpha no shader of its material reads (a bake's stray alpha
 under `FF_ST_OP`) written `--alpha opaque` is DXT1, half DXT5's size. A `.dds`
 whose sides are not powers of two is refused. Converting the textures of an existing model is this, once
