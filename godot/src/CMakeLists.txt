@@ -387,6 +387,7 @@ if(OPENNOVA_EDITOR)
         devtools/imgui_pass_node.cpp
         authoring/child_process.cpp
         authoring/editor_app.cpp
+        authoring/hud_viewport_applier.cpp
         authoring/menu_viewport_applier.cpp
         authoring/mission_viewport_applier.cpp
         authoring/model_viewport_applier.cpp
