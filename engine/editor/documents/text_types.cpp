@@ -7,7 +7,6 @@
 #include <base/io/strutil.h>
 #include <editor/project/project_files.h>
 #include <formats/avatars/avatars.h>
-#include <formats/def/def.h>
 #include <formats/scr/scr.h>
 #include <formats/score/score.h>
 #include <net/novacrypto/pubcrypto.h>
@@ -197,14 +196,6 @@ std::vector<Diagnostic> text_reader_findings(const TextDocument &document) {
 	const auto *bytes = reinterpret_cast<const uint8_t *>(text.data());
 	const char *unchecked = " The editor cannot check what the file names until it reads.";
 	switch (document.kind()) {
-	case AssetKind::HudPosDefs: {
-		def::DefHudPosFile file{};
-		if (def::def_parse_hudpos_memory(bytes, text.size(), &file) != 0)
-			findings.push_back(reader_finding(TextFinding::Unreadable, DiagnosticSeverity::Warning,
-					std::string("The game's HUD layout reader does not read it.") + unchecked, document, 0, 0));
-		def::def_free_hudpos(&file);
-		break;
-	}
 	case AssetKind::AvatarDefs: {
 		avatars::AvatarsFile file{};
 		const bool read = avatars::avatars_parse_memory(text.data(), text.size(), &file) == 0;

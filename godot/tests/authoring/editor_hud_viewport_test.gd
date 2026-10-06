@@ -1,0 +1,234 @@
+extends GutTest
+
+## The HUD viewport's device headless through the editor's wire seam (the editor deep-integration
+## plan's DI-20): hudpos.def opened shows its HUD through the runtime's own HudOverlay
+## (authoring/hud_viewport_applier) in an offscreen SubViewport, configured from the layout as the
+## project's files hold it; the device says where each element of the HUD's walk drew, which the
+## viewport's items and hit read (the frame and the health bar at their hudpos places); the screen the
+## options name lays the HUD out at that size (the health bar where the design space scales it to);
+## the weapon the options name installs its art (its clip graphic and silhouette draw); the game's own
+## view effects ride the overlay (the goggles' mask up for night vision, the damage vignette for a
+## hit); an edit of the layout's text configures the HUD again.
+
+const EDITOR_SCENE := "res://editor/editor_root.tscn"
+const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const LAYOUT := "defs/hudpos.def"
+
+var _dirs: Array[String] = []
+var _app: Node = null
+var _seam: RefCounted = null
+
+
+func before_each() -> void:
+	var packed := load(EDITOR_SCENE) as PackedScene
+	assert_not_null(packed, "the editor scene loads (the editor-enabled variant is loaded)")
+	if packed == null:
+		return
+	_app = packed.instantiate()
+	_seam = EditorSeam.new(_app)
+	var settings_dir := OS.get_cache_dir().path_join("opennova editor hud %d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
+	_dirs.append(settings_dir)
+	_app.set("settings_path", settings_dir.path_join("editor_settings.json"))
+	add_child_autofree(_app)
+
+
+func after_each() -> void:
+	_app = null
+	for dir in _dirs:
+		TestFs.remove_dir_recursive(dir)
+	_dirs.clear()
+	await get_tree().process_frame
+
+
+func _write(path: String, bytes: PackedByteArray) -> void:
+	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file, "wrote %s" % path)
+	if file != null:
+		file.store_buffer(bytes)
+		file.close()
+
+
+## A `side` x `side` uncompressed 32-bit TGA, every texel opaque white.
+func _tga(side: int) -> PackedByteArray:
+	var bytes := PackedByteArray()
+	bytes.resize(18)
+	bytes[2] = 2
+	bytes[12] = side
+	bytes[14] = side
+	bytes[16] = 32
+	for _k in side * side:
+		bytes.append_array(PackedByteArray([255, 255, 255, 255]))
+	return bytes
+
+
+## A project holding a soldier panel's layout, its art, a weapon and the damage vignette.
+func _project() -> String:
+	var dir := OS.get_cache_dir().path_join("opennova editor hud project %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	assert_true(_seam.new_project(dir, "HUD Viewport"))
+	_write(dir.path_join(LAYOUT), TestFs.crlf("""// The soldier panel
+StaticFrame frame.tga 6,586
+HUDHEALTH 25,741,177,751
+HUDSTANCEPOS 30,639
+HUDSTANCE 0 0 0 stance0.tga STAND
+HUDSTANCE 1 0 0 stance1.tga CROUCH
+HUDSTANCE 2 0 0 stance2.tga PRONE
+HUDSTANCE 3 0 0 stance3.tga SITTING
+HUDSTANCE 4 0 0 stance4.tga EMPLACED
+HUDSTANCE 5 0 0 stance5.tga PARACHUTE
+HUDCLIP 14,648
+HUDWPNICON 14,606
+alphafade 40 70 3
+""").to_utf8_buffer())
+	for name in ["frame.tga", "stance0.tga", "stance1.tga", "stance2.tga", "stance3.tga", "stance4.tga",
+			"stance5.tga", "h_clip.tga", "h_rnd.tga", "h_icon.tga", "vignette.tga", "NVG.tga"]:
+		_write(dir.path_join("textures").path_join(name), _tga(8))
+	_write(dir.path_join("defs/weapon.def"), TestFs.crlf("""weapon "W_TEST"
+	clipsize 30
+	hudicon h_icon.tga
+	hudclipgfx 0 0 h_clip.tga
+	hudrndgfx 6 0 4 0 1 h_rnd.tga
+end
+""").to_utf8_buffer())
+	_seam.request({"kind": "rescan"})
+	return dir
+
+
+func _viewport() -> Dictionary:
+	return _seam.query("viewport", {"op": "state", "path": LAYOUT, "kind": "hud"})
+
+
+## The viewport ready on its device, its elements reported: a frame at a time until they are.
+func _await_ready() -> Dictionary:
+	var state := _viewport()
+	for _frame in 600:
+		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
+				and not (state.get("items", []) as Array).is_empty():
+			break
+		_app.pump()
+		await get_tree().process_frame
+		state = _viewport()
+	return state
+
+
+func _overlay() -> HudOverlay:
+	var device: SubViewport = _app.get_viewport_device(LAYOUT, "hud")
+	if device == null:
+		return null
+	var found := device.find_children("*", "HudOverlay", true, false)
+	return found[0] as HudOverlay if not found.is_empty() else null
+
+
+func _item(state: Dictionary, element: String) -> Dictionary:
+	for item in state.get("items", []):
+		if String(item.get("element", "")) == element:
+			return item
+	return {}
+
+
+func _pump_frames(count: int) -> void:
+	for _frame in count:
+		_app.pump()
+		await get_tree().process_frame
+
+
+func test_the_layout_draws_through_the_games_hud() -> void:
+	if _app == null:
+		return
+	_project()
+	assert_true(_seam.open_document(LAYOUT), "hudpos.def opens")
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", "its HUD shows in the Preview window")
+	var overlay := _overlay()
+	assert_not_null(overlay, "its device draws it with the runtime's HudOverlay")
+	if overlay == null:
+		return
+	assert_true(overlay.is_configured(), "configured from the layout as the project holds it")
+	assert_eq(overlay.size, Vector2(1024, 768), "laid out at the design screen")
+	# The elements the HUD's walk drew, at their hudpos places.
+	var frame := _item(state, "frame")
+	assert_false(frame.is_empty(), "the static frame drew")
+	if not frame.is_empty():
+		assert_eq(int(frame["rect"][0]), 6)
+		assert_eq(int(frame["rect"][1]), 586)
+		assert_eq(String(frame["lines"][0]["key"]), "STATICFRAME")
+		assert_eq(String(frame["lines"][0]["locator"]), "2:1")
+	var health := _item(state, "health")
+	assert_false(health.is_empty(), "the health bar drew")
+	if not health.is_empty():
+		assert_eq(int(health["rect"][0]), 25)
+		assert_eq(int(health["rect"][3]), 751)
+	assert_false(_item(state, "stance").is_empty(), "the stance icon drew")
+	# The weapon weapon.def holds first: its clip graphic and its silhouette.
+	assert_false(_item(state, "clip_indicator").is_empty(), "the weapon's clip graphic drew")
+	assert_false(_item(state, "instruments").is_empty(), "the weapon's silhouette drew at HUDWPNICON")
+	var hit: Dictionary = _seam.query("viewport", {"op": "hit", "path": LAYOUT, "kind": "hud", "x": 100, "y": 745})
+	assert_eq(String(hit.get("kind", "")), "health", "a point of the bar names it")
+	# The view effects ride the overlay as the game mounts them.
+	var effects := overlay.find_children("PlayerViewEffects", "", true, false)
+	assert_eq(effects.size(), 1, "the game's view effects under the overlay")
+
+
+func test_the_options_reach_the_hud() -> void:
+	if _app == null:
+		return
+	_project()
+	assert_true(_seam.open_document(LAYOUT))
+	var state := await _await_ready()
+	var overlay := _overlay()
+	assert_not_null(overlay)
+	if overlay == null:
+		return
+	# A smaller screen: the HUD laid out at it, its elements where the design space scales them.
+	assert_true(_seam.done({"kind": "set_viewport", "path": LAYOUT,
+			"viewport": {"kind": "hud", "options": {"width": 640, "height": 480, "weapon": "NONE"}}}))
+	await _pump_frames(3)
+	assert_eq(overlay.size, Vector2(640, 480))
+	state = _viewport()
+	var health := _item(state, "health")
+	assert_false(health.is_empty())
+	if not health.is_empty():
+		assert_eq(int(health["rect"][0]), (25 * 640 + 512) / 1024, "the design space scaled to 640")
+	assert_true(_item(state, "clip_indicator").is_empty(), "no weapon: no clip graphic")
+	# Night vision and a hit: the game's goggle mask and its damage vignette.
+	assert_true(_seam.done({"kind": "set_viewport", "path": LAYOUT,
+			"viewport": {"kind": "hud", "options": {"view": "night_vision", "damage": 192}}}))
+	await _pump_frames(2)
+	var effects := overlay.find_children("PlayerViewEffects", "", true, false)
+	assert_eq(effects.size(), 1)
+	if effects.size() == 1:
+		assert_true(bool(effects[0].call("is_nvg_mask_visible")), "the goggles' mask is up")
+		var vignette := effects[0].find_children("ScreenFlashVignette", "", true, false)
+		assert_true(not vignette.is_empty() and (vignette[0] as CanvasItem).visible, "the damage vignette shows")
+	# The detail level that hides the HUD: nothing of the soldier panel draws.
+	assert_true(_seam.done({"kind": "set_viewport", "path": LAYOUT,
+			"viewport": {"kind": "hud", "options": {"detail": 3}}}))
+	await _pump_frames(2)
+	assert_true(_item(_viewport(), "frame").is_empty(), "level 3 hides the HUD")
+
+
+func test_an_edit_of_the_text_configures_it_again() -> void:
+	if _app == null:
+		return
+	_project()
+	assert_true(_seam.open_document(LAYOUT))
+	var state := await _await_ready()
+	var builds := int(state.get("builds", 0))
+	# The health bar moved by its line (line 3, "HUDHEALTH 25,741,177,751": its first corner).
+	assert_true(_seam.done({"kind": "edit_record", "path": LAYOUT, "edits": [
+			{"op": "apply", "payload": "text.span", "line": 3, "column": 11, "length": 6, "text": "45,701"}]}))
+	_seam.request({"kind": "end_edit", "path": LAYOUT})
+	for _frame in 600:
+		state = _viewport()
+		var health := _item(state, "health")
+		if int(state.get("builds", 0)) > builds and not health.is_empty() and int(health["rect"][0]) == 45:
+			break
+		_app.pump()
+		await get_tree().process_frame
+	var moved := _item(state, "health")
+	assert_false(moved.is_empty())
+	if not moved.is_empty():
+		assert_eq(int(moved["rect"][0]), 45, "the bar where the edited line puts it")
+		assert_eq(int(moved["rect"][1]), 701)

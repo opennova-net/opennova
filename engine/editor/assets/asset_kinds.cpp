@@ -347,7 +347,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::HudPosDefs, "hudpos_defs", "HUD layout", ArchiveSlot::Localres)
 	        .runtime("hudpos")
-	        .edited_by(DocumentTypeId::Text)
+	        .edited_by(DocumentTypeId::HudLayout)
 	        .names_files()
 	        .folder("defs")
 	        .about("Where the HUD draws its parts.")
