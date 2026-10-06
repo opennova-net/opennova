@@ -552,6 +552,15 @@ advance (the format has no advance table). An import of the set from the disk br
 it into `fonts/`.
 _Avoid_: font project, atlas (the `.fnt`'s pages are the packer's layout, not the sheet's)
 
+**Project layout / placement / move**:
+Where a project keeps its files: **flat** (most at the top level, as the base game does) or **by
+kind** (each in its kind's folder, `AssetKindRow::folder`). A file the editor makes (Create
+missing, New file, an import) is **placed** beside the project's files of its kind, else as the
+layout says (`assets/project_layout.h`, DI-03), so a flat project stays flat. A **move** puts a
+file in another folder under its own name and rewrites no reference, since the game finds it by
+its logical name.
+_Avoid_: default folder (a kind's folder holds new files only in a project laid out by kind)
+
 **Import / sidecar**:
 Bringing a non-native source (an image, a terrain set; later a sound bank's manifest, a font)
 into the project the Godot way: a committed `<file>.import` sidecar records the
