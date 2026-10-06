@@ -345,6 +345,13 @@ inline EditorRequest play_footstep(std::string profile, std::string surface, std
 	request.values = {{"profile", std::move(profile)}, {"surface", std::move(surface)}, {"foot", std::move(foot)}};
 	return request;
 }
+// What the clip the animation document `path` plays fires at `frame`, once (DI-04: a timeline mark pressed).
+inline EditorRequest play_clip_event(std::string path, int frame) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.path = std::move(path);
+	request.values = {{"frame", std::to_string(frame)}};
+	return request;
+}
 inline EditorRequest stop_sound() {
 	return of(EditorRequestKind::StopSound);
 }
