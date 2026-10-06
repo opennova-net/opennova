@@ -1600,7 +1600,7 @@ OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std:
 		note("Build failed.");
 		view_.activity.status = "Build failed; see Problems.";
 	}
-	if (result.ok && intent.wanted) play().start(intent.mission, intent.behind);
+	if (result.ok && intent.wanted) play().start(intent.mission, intent.behind, intent.fresh);
 	bool exported_ok = true;
 	if (result.ok && exported.wanted && shipped) {
 		for (const Diagnostic &d : shipped->diagnostics) {

@@ -99,8 +99,8 @@ func test_clearing_the_override_returns_to_the_process_command_line() -> void:
 # separated; without the flag it is the process's own working directory, here the
 # project GUT runs in (--path godot).
 func test_working_dir_is_the_flag_else_the_process_working_directory() -> void:
-	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", "C:\\p\\.opennova\\run\\1"]))
-	assert_eq(LaunchFlags.working_dir(), "C:/p/.opennova/run/1")
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", "C:\\p\\.opennova\\run\\runtime\\1"]))
+	assert_eq(LaunchFlags.working_dir(), "C:/p/.opennova/run/runtime/1")
 	LaunchFlags.set_args_override(PackedStringArray(["--", "--Working-Dir", " /tmp/run/2 "]))
 	assert_eq(LaunchFlags.working_dir(), "/tmp/run/2")
 	LaunchFlags.set_args_override(PackedStringArray([]))

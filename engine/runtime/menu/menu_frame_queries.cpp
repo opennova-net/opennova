@@ -352,6 +352,25 @@ int MenuFrameCompiler::hit_widget(const MenuFrameState &state, float mx,
 	return hit;
 }
 
+// The pump's claim at a point with no state written [orig: CWnd_ProcessMouseEvent
+// @ 0x647a00 — the claim walk, and the claimant's own-or-root cursor stamped
+// @ 0x647b09]: no scrollbar part takes the sample (nothing is pressed or
+// captured where nothing pumps).
+MenuFrameCompiler::MouseClaim MenuFrameCompiler::claim_at(const MenuFrameState &state,
+		float mouse_x, float mouse_y, float scale_x, float scale_y) const {
+	MouseClaim claim;
+	if (screen_ == nullptr || nodes_.empty()) {
+		return claim;
+	}
+	int hit = -1;
+	int part = 0;
+	hit_roots_(state, mouse_x, mouse_y, scale_x, scale_y, &hit, &part);
+	claim.hovered = hit;
+	claim.spin_part = part;
+	claim.cursor = claim_cursor_(hit, part);
+	return claim;
+}
+
 // Every root in draw order: a later root's hit replaces an earlier one's, so
 // the last root is front-most [orig: CUIScene_EndFrame @ 0x63e600 pumps the
 // roots in reverse].

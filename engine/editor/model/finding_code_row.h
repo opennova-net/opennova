@@ -90,6 +90,8 @@ enum class FindingGroup {
 	Missions,
 	Textures,
 	Texts, // a text the engine's own reader reads (DI-06: a particle file, an environment, the defs)
+	SoundBanks,
+	SoundProfiles,
 	kCount
 };
 inline constexpr size_t kFindingGroupCount = static_cast<size_t>(FindingGroup::kCount);
@@ -242,12 +244,14 @@ enum class CoreFinding {
 	AssetNameEmpty,
 	AssetNameTooLong,
 	AssetUnreadable,
+	AssetWaveUnplayable,
 	BlankDef,
 	BlankEnvironment,
 	BlankFont,
 	BlankMenu,
 	BlankMission,
 	BlankStrings,
+	BlankSound,
 	BlankStyle,
 	BlankTexture,
 	BlankUnavailable,
@@ -343,6 +347,7 @@ enum class CoreFinding {
 	ImportNotFound,
 	ImportTextureNotImported,
 	ImportUnreadable,
+	ImportWave,
 	ImportWrite,
 	LocalSettingsJson,
 	LocalSettingsSchemaVersionUnsupported,

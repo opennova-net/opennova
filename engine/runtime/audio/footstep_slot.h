@@ -60,7 +60,7 @@ inline const std::string *organic_slot_set(const SoundProfileTable &profiles,
 	const SoundProfile *p =
 			(index >= 0 && static_cast<size_t>(index) < profiles.entries().size())
 					? &profiles.entries()[static_cast<size_t>(index)]
-					: profiles.find("default");
+					: item_sound_profile(profiles.entries(), nullptr);
 	if (p == nullptr) return nullptr;
 	const std::string &set = p->set_names[static_cast<size_t>(slot)];
 	return set.empty() ? nullptr : &set;   // the resolved-id-0 no-op

@@ -253,11 +253,13 @@ inline EditorRequest build(std::string out_dir = std::string(), bool rehash = fa
 	return request;
 }
 // A build, then the game run on it: at its menu, or in `mission` (a .bms of the project by its
-// logical name; S14); `behind`, its window behind every other (the MCP gaps lane).
-inline EditorRequest play(std::string mission = std::string(), bool behind = false) {
+// logical name; S14); `behind`, its window behind every other (the MCP gaps lane); `fresh`, its run
+// directory emptied first of what the runs before wrote there (a first run).
+inline EditorRequest play(std::string mission = std::string(), bool behind = false, bool fresh = false) {
 	EditorRequest request = of(EditorRequestKind::Play);
 	request.mission = std::move(mission);
 	request.behind = behind;
+	request.fresh = fresh;
 	return request;
 }
 // A build, then the build copied into `export_dir` ("" the project's export folder) as what ships
@@ -327,6 +329,31 @@ inline EditorRequest about_file(std::string path) {
 inline EditorRequest play_sound(std::string path) {
 	EditorRequest request = of(EditorRequestKind::PlaySound);
 	request.path = std::move(path);
+	return request;
+}
+// A sound set played as the game plays it (session/sound_play.h): from `bank` ("" the game's search).
+inline EditorRequest play_set(std::string set, std::string bank = std::string()) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.path = std::move(bank);
+	request.values = {{"set", std::move(set)}};
+	return request;
+}
+// A SndProf.def profile's slot played (its keyword or number); the footstep a foot plays on a surface.
+inline EditorRequest play_profile_slot(std::string profile, std::string slot) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.values = {{"profile", std::move(profile)}, {"slot", std::move(slot)}};
+	return request;
+}
+inline EditorRequest play_footstep(std::string profile, std::string surface, std::string foot) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.values = {{"profile", std::move(profile)}, {"surface", std::move(surface)}, {"foot", std::move(foot)}};
+	return request;
+}
+// What the clip the animation document `path` plays fires at `frame`, once (DI-04: a timeline mark pressed).
+inline EditorRequest play_clip_event(std::string path, int frame) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.path = std::move(path);
+	request.values = {{"frame", std::to_string(frame)}};
 	return request;
 }
 inline EditorRequest stop_sound() {

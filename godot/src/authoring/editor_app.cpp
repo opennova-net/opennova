@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/audio_stream_wav.hpp>
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
@@ -25,6 +26,7 @@
 #include <runtime/devtools/imgui_pass.h>
 
 #include <editor/assets/asset_registry.h>
+#include <editor/assets/project_asset_source.h>
 #include <editor/preview/texture_thumbnails.h>
 #include <editor/preview/viewport_device_cache.h>
 #include <editor/preview/viewports.h>
@@ -88,6 +90,8 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_status_text"), &EditorApp::get_status_text);
 	ClassDB::bind_method(D_METHOD("get_sound_state"), &EditorApp::get_sound_state);
 	ClassDB::bind_method(D_METHOD("get_sound_path"), &EditorApp::get_sound_path);
+	ClassDB::bind_method(D_METHOD("get_clip_voices_started"), &EditorApp::get_clip_voices_started);
+	ClassDB::bind_method(D_METHOD("get_clip_sound_seq"), &EditorApp::get_clip_sound_seq);
 	ClassDB::bind_method(D_METHOD("set_open_externally", "open"), &EditorApp::set_open_externally);
 	ClassDB::bind_method(D_METHOD("get_open_externally"), &EditorApp::get_open_externally);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "open_externally"), "set_open_externally", "get_open_externally");
@@ -258,6 +262,7 @@ int EditorApp::start_mcp_endpoint(int p_port) {
 void EditorApp::_exit_tree() {
 	mcp_service_ = nullptr; // a child: it leaves with the tree and stops its server
 	mcp_port_ = 0;
+	show_system_pointer_(true);
 #if OPENNOVA_EDITOR_UI
 	windows_->set_devices(nullptr);
 	windows_->set_thumbnail_images(nullptr);
@@ -295,6 +300,8 @@ void EditorApp::_process(double p_delta) {
 	// a test's one unit a frame whatever.
 	if (devices_) {
 		session_->advance(p_delta);
+		// What the previewed clip's events fired as the clock ran, heard now (DI-04).
+		pump_clip_sounds_();
 		devices_->tick(session_->viewports());
 		// E13: of the devices drawn this frame, those of one scene state render (their frame legs
 		// run), the rest keep their last pictures until the next frame.
@@ -336,7 +343,16 @@ void EditorApp::before_layout(double) {
 void EditorApp::after_layout(uint64_t, bool, int64_t) {
 #if OPENNOVA_EDITOR_UI
 	windows_->end_frame();
+	// One pointer over a picture that draws the game's (a menu's, DI-08): the system one hidden while a
+	// window asks, shown again the frame none does.
+	show_system_pointer_(!windows_->pointer_hidden());
 #endif
+}
+
+void EditorApp::show_system_pointer_(bool p_shown) {
+	if (p_shown == !pointer_hidden_) return;
+	pointer_hidden_ = !p_shown;
+	Input::get_singleton()->set_mouse_mode(p_shown ? Input::MOUSE_MODE_VISIBLE : Input::MOUSE_MODE_HIDDEN);
 }
 
 void EditorApp::pump() {
@@ -471,84 +487,86 @@ void EditorApp::serve(const EditorRequest &p_request) {
 	}
 }
 
-// The project's wave of a play (Files' card, the UX round's project lane; the workspace's sound, the MCP gaps
-// lane) decoded as the game decodes it (lwf::wav_decode_pcm16, boxed by WavLoader) on a worker, in place of the
-// one playing. The session checked the file (a wave of the project, within the card's cap).
-void EditorApp::play_sound_(const std::string &p_path) {
-	stop_sound_();
-	const opennova::editor::SessionView &view = session_->view();
-	const std::string file = opennova::editor::join_path(view.project.root, p_path);
-	sound_path_ = p_path;
-	sound_job_ = std::async(std::launch::async, [file]() {
-		SoundDecode out;
-		std::vector<uint8_t> bytes;
-		if (!opennova::editor::read_file_bytes(file, bytes, out.error)) return out;
-		out.decoded = opennova::lwf::wav_decode_pcm16(bytes.data(), bytes.size(), out.pcm, out.error);
-		return out;
-	});
+// The workspace's sound (Files' card, the UX round's project lane; a set's or a slot's Play, the sound lane;
+// the MCP gaps lane) through the one preview player: each voice decoded as the game decodes it on a worker, in
+// place of the play under way. The session checked the files (waves of the project, within the card's cap)
+// and made the picks (session/sound_play.h).
+void EditorApp::play_sound_(const std::vector<opennova::editor::WorkspaceView::Voice> &p_voices) {
+	if (!sound_) sound_ = std::make_unique<PreviewSoundPlayer>(this);
+	sound_->play(session_->view().project.root, p_voices);
 }
 
 void EditorApp::stop_sound_() {
-	// A decode in flight is let finish (its future's end waits for it, the cap bounding it) and dropped.
-	if (sound_job_.valid()) sound_job_ = std::future<SoundDecode>();
-	if (sound_ != nullptr) sound_->stop();
-	sound_path_.clear();
-	sound_reported_playing_ = false;
+	if (sound_) sound_->stop();
 }
 
 // The workspace's sound followed (play_sound and stop_sound are the session's requests): a play of a serial
 // not taken yet decoded off the frame and played at the pump that finds it decoded, reported playing; played
-// through, reported ended; one that does not decode reported failed, and said on the status line; a sound the
-// session no longer plays (stop_sound, its card closing, its project closing) stopped.
+// through, reported ended; one none of whose voices decodes reported failed, and said on the status line; a
+// sound the session no longer plays (stop_sound, its card closing, its project closing) stopped.
 void EditorApp::pump_sound_() {
 	using State = opennova::editor::WorkspaceView::SoundState;
 	const opennova::editor::WorkspaceView::Sound &sound = session_->view().workspace.sound;
 	if (sound.serial != sound_serial_) {
 		sound_serial_ = sound.serial;
 		stop_sound_();
-		if (sound.state == State::Starting) play_sound_(sound.path);
+		if (sound.state == State::Starting) play_sound_(sound.voices);
 	}
 	if (sound.state != State::Starting && sound.state != State::Playing) {
-		if (!sound_path_.empty()) stop_sound_();
+		if (sound_ && sound_->state() != PreviewSoundPlayer::State::Idle) stop_sound_();
 		return;
 	}
-	if (sound_path_.empty()) return;
-	if (sound_reported_playing_) {
-		if (sound_ == nullptr || !sound_->is_playing()) {
-			sound_path_.clear();
-			sound_reported_playing_ = false;
-			session_->report_sound(sound_serial_, State::Ended);
-		}
+	if (!sound_) return;
+	const PreviewSoundPlayer::State was = sound_->state();
+	std::string error;
+	const PreviewSoundPlayer::State now = sound_->pump(error);
+	if (now == was) return;
+	switch (now) {
+	case PreviewSoundPlayer::State::Playing: session_->report_sound(sound_serial_, State::Playing); break;
+	case PreviewSoundPlayer::State::Ended:
+		sound_->stop();
+		session_->report_sound(sound_serial_, State::Ended);
+		break;
+	case PreviewSoundPlayer::State::Failed:
+		post_device_notice_(sound.path + " does not play: " + error);
+		sound_->stop();
+		session_->report_sound(sound_serial_, State::Failed, error);
+		break;
+	default: break;
+	}
+}
+
+// The clip sounds (DI-04): each the session fired since the last taken started beside those playing, its
+// waves decoded once while the project's files stand; none while no project is open.
+void EditorApp::pump_clip_sounds_() {
+	if (!session_) return;
+	const opennova::editor::SessionView &view = session_->view();
+	if (!view.project.open) {
+		if (clip_voices_) clip_voices_->stop();
 		return;
 	}
-	if (!sound_job_.valid() || sound_job_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
-	const SoundDecode decoded = sound_job_.get();
-	if (!decoded.decoded) {
-		post_device_notice_(sound_path_ + " does not play: " + decoded.error);
-		sound_path_.clear();
-		session_->report_sound(sound_serial_, State::Failed, decoded.error);
-		return;
+	const uint64_t generation = view.findings.assets ? view.findings.assets->generation() : 0;
+	if (clip_voices_ && generation != clip_wave_generation_) clip_voices_->forget();
+	clip_wave_generation_ = generation;
+	for (const opennova::editor::ClipSoundPlay &play : session_->clip_sounds_since(clip_sound_seq_)) {
+		clip_sound_seq_ = play.seq;
+		if (!clip_voices_) clip_voices_ = std::make_unique<PreviewSoundVoices>(this);
+		clip_voices_->add(view.project.root, play.voices);
 	}
-	const Ref<AudioStreamWAV> stream = WavLoader::from_pcm(decoded.pcm);
-	if (sound_ == nullptr) {
-		sound_ = memnew(AudioStreamPlayer);
-		sound_->set_name("EditorSound");
-		add_child(sound_);
-	}
-	sound_->stop();
-	sound_->set_stream(stream);
-	sound_->play();
-	sound_reported_playing_ = true;
-	session_->report_sound(sound_serial_, State::Playing);
+	if (clip_voices_) clip_voices_->pump();
 }
 
 String EditorApp::get_sound_state() const {
-	if (sound_job_.valid()) return "decoding";
-	return !sound_path_.empty() && sound_ != nullptr && sound_->is_playing() ? "playing" : "idle";
+	if (!sound_) return "idle";
+	switch (sound_->state()) {
+	case PreviewSoundPlayer::State::Decoding: return "decoding";
+	case PreviewSoundPlayer::State::Playing: return "playing";
+	default: return "idle";
+	}
 }
 
 String EditorApp::get_sound_path() const {
-	return get_sound_state() == "idle" ? String() : opennova::to_gd(sound_path_);
+	return get_sound_state() == "idle" ? String() : opennova::to_gd(sound_->path());
 }
 
 void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {

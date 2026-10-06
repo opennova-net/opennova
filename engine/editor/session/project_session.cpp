@@ -12,6 +12,7 @@
 #include <editor/preview/texture_thumbnails.h>
 #include <editor/preview/viewports.h>
 #include <editor/project/project_files.h>
+#include <editor/session/clip_sounds.h>
 #include <editor/session/disk_watch.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_queries.h>
@@ -266,6 +267,12 @@ Viewports &ProjectSession::viewports() {
 
 void ProjectSession::advance(double seconds) {
 	impl_->core.viewports().advance(seconds);
+	// The sounds the previewed clip's events fired over the ticks the clock ran through (DI-04).
+	fire_clip_sounds(impl_->core);
+}
+
+std::vector<ClipSoundPlay> ProjectSession::clip_sounds_since(uint64_t after) {
+	return ::opennova::editor::clip_sounds_since(impl_->core, after);
 }
 
 void ProjectSession::report_sound(uint64_t serial, WorkspaceView::SoundState state, const std::string &error) {

@@ -238,6 +238,17 @@ struct MenuFrameState {
 	bool cursor_visible = false;
 	float cursor_x = 0.0f;
 	float cursor_y = 0.0f;
+	// The claim the cursor pass draws the cursor of: the widget that claimed the
+	// mouse (pre-order index, -1 none) and the spin arrow it is over (1 up, 2
+	// down, 0 none). Retail's pump stamps the claimant's own-or-root cursor into
+	// a global whatever its visual state (a disabled claimant's too), and the
+	// cursor pass reads that stamp alone [orig: CWnd_ProcessMouseEvent @ 0x647a00
+	// stamps g_UIFrameCursorTexture @ 0x647b09 before the visual-state verdict;
+	// CUIScene_DrawScreensAndCursor @ 0x63bf60 reads it @ 0x63bfa2]. pump_mouse
+	// writes it; an embedder that never pumps (the editor's picture) sets it from
+	// claim_at.
+	int32_t cursor_claim = -1;
+	int32_t cursor_spin_part = 0;
 	// The custom-draw widget an embedder mounts its own Control over (a map
 	// window), -1 none: every op the walk emits after that widget's subtree
 	// joins the menu-top overlay, so the later siblings still paint over the
@@ -640,6 +651,25 @@ public:
 	};
 	MouseClaim pump_mouse(MenuFrameState &io_state, float mouse_x,
 			float mouse_y, bool button_down, float scale_x, float scale_y);
+	// The claim pump_mouse would make at a point, without its state writes (no
+	// scrollbar interaction, no hover or press): the widget the claim walk finds,
+	// the spin arrow under the point and the cursor the claim stamps. What an
+	// embedder that never pumps (the editor's picture) stamps the cursor pass with
+	// (MenuFrameState::cursor_claim).
+	MouseClaim claim_at(const MenuFrameState &state, float mouse_x, float mouse_y,
+			float scale_x, float scale_y) const;
+	// The cursor the cursor pass draws over `state` (emit_cursor): the widget
+	// whose CURSOR it is (-1: none, so nothing is drawn: a screen whose windows
+	// name no CURSOR that loads has no pointer), its texture slot and the native
+	// size it draws at, unscaled [orig: CWnd_ProcessMouseEvent @ 0x647ad0..0x647b09;
+	// CUIScene_EndFrame @ 0x63e600; CUIScene_DrawScreensAndCursor @ 0x63bf60].
+	struct FrameCursor {
+		int owner = -1;
+		int32_t texture = kMenuTexNone;
+		int width = 0;
+		int height = 0;
+	};
+	FrameCursor frame_cursor(const MenuFrameState &state) const;
 	// The open-dropdown sample: the popup's scrollbar interaction only,
 	// restricted to the open combo `index` (the popup-exclusive dispatch
 	// gate). scroll_index >= 0 in the result means the scrollbar owns the
@@ -874,13 +904,17 @@ private:
 	void measure_with_(const opennova::fnt::fnt_font_t *font,
 			const std::string &text, int *out_w, int *out_h) const;
 	// A widget's cursor by the handles that loaded: its own, else its root
-	// window's (kMenuTexNone: neither loaded).
+	// window's (kMenuTexNone: neither loaded); the widget whose CURSOR that is
+	// (-1: none).
 	int32_t inherited_cursor_(int index) const;
+	int inherited_cursor_owner_(int index) const;
 	// The cursor a claim shows: the hovered widget's (the arrow's when the
 	// claim is over a spin arrow), then the scroll capture's, then the first
-	// root's that loaded one.
+	// root's that loaded one; the widget whose CURSOR that is (-1: none).
 	int32_t claim_cursor_(int hovered, int spin_part) const;
+	int claim_cursor_owner_(int hovered, int spin_part) const;
 	int32_t first_root_cursor_() const;
+	int first_root_cursor_owner_() const;
 
 	// emitters
 	static float emit_x(int design, float scale);

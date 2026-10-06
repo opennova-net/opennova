@@ -234,6 +234,61 @@ func test_play_sound_plays_and_stops() -> void:
 	assert_eq(String(_app.get_sound_state()), "idle", "no wave of that name: nothing plays")
 
 
+## A sound set's play (the sound lane): game.lwf made by create_file, a set of two layers each naming a wave
+## added in one edit_record and saved; play_sound with the set picks a member for each layer, and the Shell's
+## one preview player plays both voices at once, at the pitch the pick composed; a profile slot with no
+## SndProf.def to name it refused, saying why.
+func test_play_set_plays_its_layers() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor set %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	var root := dir.path_join("Sets")
+	assert_true(_seam.new_project(root, "Sets"))
+	assert_eq(DirAccess.make_dir_recursive_absolute(root.path_join("sounds")), OK)
+	for name in ["low.wav", "high.wav"]:
+		var file := FileAccess.open(root.path_join("sounds").path_join(name), FileAccess.WRITE)
+		file.store_buffer(_wave_bytes(3.0))
+		file.close()
+	assert_true(_run_operation({"kind": "rescan"}))
+	assert_true(bool(_request({"kind": "create_file", "path": "game.lwf"}).get("ok", false)))
+	var edits := [
+		{"op": "add", "kind": "wave", "as": "a"}, {"op": "set", "id": "a", "field": "name", "value": "LOW"},
+		{"op": "set", "id": "a", "field": "file", "value": "low.wav"},
+		{"op": "add", "kind": "wave", "as": "b"}, {"op": "set", "id": "b", "field": "name", "value": "HIGH"},
+		{"op": "set", "id": "b", "field": "file", "value": "high.wav"},
+		{"op": "add", "kind": "set", "as": "s"}, {"op": "set", "id": "s", "field": "name", "value": "TWO_LAYERS"},
+		{"op": "set", "id": "s", "field": "pitch", "value": 1.5},
+		{"op": "add", "kind": "layer", "parent": "s", "as": "l1"},
+		{"op": "add", "kind": "member", "parent": "l1", "field": "wave", "value": "LOW"},
+		{"op": "add", "kind": "layer", "parent": "s", "as": "l2"},
+		{"op": "add", "kind": "member", "parent": "l2", "field": "wave", "value": "HIGH"},
+	]
+	var edited := _request({"kind": "edit_record", "path": "game.lwf", "edits": edits, "open_first": true})
+	assert_true(bool(edited.get("outcome", {}).get("done", false)), str(edited))
+	_request({"kind": "save_all"})
+	var answer := _request({"kind": "play_sound", "values": {"set": "TWO_LAYERS"}})
+	assert_true(bool(answer.get("outcome", {}).get("done", false)), str(answer))
+	var deadline := Time.get_ticks_msec() + 5000
+	while _sound().get("state", "") != "playing" and Time.get_ticks_msec() < deadline:
+		OS.delay_msec(20)
+		_app.pump()
+	var sound := _sound()
+	assert_eq(String(sound.get("state", "")), "playing", str(sound))
+	assert_eq(String(sound.get("set", "")), "TWO_LAYERS")
+	var voices: Array = sound.get("voices", [])
+	assert_eq(voices.size(), 2, str(sound))
+	if voices.size() == 2:
+		assert_eq(String(voices[0].get("path", "")), "sounds/low.wav")
+		assert_almost_eq(float(voices[0].get("pitch", 0.0)), 1.5, 0.001)
+	assert_eq(String(_app.get_sound_state()), "playing")
+	_request({"kind": "stop_sound"})
+	_app.pump()
+	assert_eq(String(_app.get_sound_state()), "idle", "stopped")
+	var slot := _request({"kind": "play_sound", "values": {"profile": "default", "slot": "SSLFootGND"}})
+	assert_false(bool(slot.get("outcome", {}).get("done", true)), "no SndProf.def names the slot's set: refused")
+
+
 # The workspace section's sound (the MCP gaps lane).
 func _sound() -> Dictionary:
 	var state: Variant = JSON.parse_string(_app.query_json("state", JSON.stringify({"sections": ["workspace"]})))
