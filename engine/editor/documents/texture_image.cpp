@@ -11,6 +11,7 @@
 #include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga.h>
 #include <formats/tga/tga_read.h>
+#include <runtime/renderer/device_texture.h>
 #include <runtime/renderer/material_texture.h>
 #include <runtime/renderer/texture_dxt.h>
 
@@ -496,7 +497,15 @@ TextureHeader texture_header_as(TextureReader reader, const std::vector<uint8_t>
 		out.width = image.header.width;
 		out.height = image.header.height;
 		out.dds_format = image.format.name;
+		out.dds_bits = image.format.bits;
+		out.dds_block_bytes = image.format.compressed ? image.format.block_bytes : 0;
 		out.dds_levels = uint32_t(image.levels.size());
+		if (out.dds_format == "DXT5" && !image.levels.empty() && image.levels[0].offset <= bytes.size()) {
+			const dds::DdsLevel &first = image.levels[0];
+			out.dds_dxt5_opaque = renderer::dxt5_first_level_opaque(bytes.data() + first.offset,
+			                                                        std::min(first.bytes, bytes.size() - first.offset),
+			                                                        first.width, first.height);
+		}
 		out.dds_faces = std::max<uint32_t>(1, uint32_t(image.faces));
 		out.dds_depth = std::max<uint32_t>(1, uint32_t(image.depth));
 		const std::string format = image.format.name;
