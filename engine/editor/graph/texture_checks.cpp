@@ -11,6 +11,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/documents/texture_budget.h>
 #include <editor/documents/texture_document.h>
 #include <editor/documents/texture_image.h>
 #include <editor/documents/texture_load_rules.h>
@@ -20,6 +21,7 @@
 #include <editor/graph/texture_uses.h>
 #include <editor/project/project_files.h>
 #include <formats/particle/particle.h>
+#include <runtime/renderer/material_texture.h>
 #include <runtime/renderer/particle_atlas.h>
 
 namespace opennova::editor {
@@ -73,10 +75,10 @@ struct Kept {
 std::mutex g_mutex;
 std::map<std::pair<std::string, TextureReader>, Kept> g_headers;
 
-const TextureHeader *header_of(const ValidationInput &input, const std::string &relative, TextureReader reader) {
-	const AssetEntry *entry = input.scan.at_path(relative);
+// The header of `entry` under `root` as `reader` reads it, kept (g_mutex held).
+const TextureHeader *kept_header(const std::string &root, const AssetEntry *entry, TextureReader reader) {
 	if (!entry || reader == TextureReader::None) return nullptr;
-	const auto key = std::make_pair(join_path(input.paths.root, relative), reader);
+	const auto key = std::make_pair(join_path(root, entry->relative_path), reader);
 	const auto found = g_headers.find(key);
 	if (found != g_headers.end() && found->second.size == entry->size_bytes && found->second.modified == entry->modified_ticks)
 		return &found->second.header;
@@ -88,6 +90,10 @@ const TextureHeader *header_of(const ValidationInput &input, const std::string &
 	if (read_file_bytes(key.first, bytes, error)) kept.header = texture_header_as(reader, bytes);
 	else kept.header.refusal = error;
 	return &(g_headers[key] = std::move(kept)).header;
+}
+
+const TextureHeader *header_of(const ValidationInput &input, const std::string &relative, TextureReader reader) {
+	return kept_header(input.paths.root, input.scan.at_path(relative), reader);
 }
 
 // Where a use is, in words: "the terrain colour map of isle.trn".
@@ -228,8 +234,54 @@ void check_sizes(R role, const std::string &file, const TextureHeader &header, c
 	}
 }
 
+// What a model row's texture costs the game, and the loader a normal-map slot is read by (ADR 0046 S18, the
+// texture budget): a texture past kTextureMemoryWarnBytes with its chain, said once a file, loader and slot
+// (`costed`) with what its .dds would cost; a row in a normal-map slot (3 or 4, which the material's normal
+// map samplers read) whose type the stage or plain loader reads, so the file is never capped at 512 as a
+// normal map is, nor halved for the object texture detail, nor made from a height [orig:
+// Material_LoadStageTexture @ 0x5B16F4..0x5B1790: the slot table @ 0x5B181C gives slots 3 to 7 no detail
+// word, and types 0 to 2 and 8 go to the stage and plain loaders, which never set the cap].
+void check_budget(R role, const std::string &served, const TextureHeader &header, const std::string &where,
+                  const TextureUseContext &context, std::set<std::string> &costed,
+                  const std::function<void(F, DiagnosticSeverity, const std::string &)> &add) {
+	TextureBudgetLoader loader = TextureBudgetLoader::Stage;
+	if (!texture_role_budget_loader(role, loader)) return;
+	const std::string file = basename_of(served);
+	const TextureBudget budget = texture_budget(header, file, loader, context.slot);
+	if (!budget.known) return;
+	const renderer::DeviceTexture &full = budget.full();
+	const bool normal_slot = (context.slot == 3 || context.slot == 4) && loader != TextureBudgetLoader::Normal;
+	if (normal_slot) {
+		const bool mdt = strutil::to_lower(utf8_of(path_of(file).extension())) == ".mdt";
+		const renderer::DeviceTexture capped = renderer::pixel_device_texture(header.width, header.height, renderer::kTextureFlagCap512);
+		add(F::TextureNormalSlotLoader, DiagnosticSeverity::Warning,
+		    file + ", " + where + ", sits in normal-map slot " + std::to_string(context.slot) + " with type " +
+		            std::to_string(context.type) + ", which the game loads as it loads a diffuse: " +
+		            device_texture_words(full) + ", never halved to fit 512 a side as a normal map is. " +
+		            (mdt ? "Give the row type 4 (a finished normal map), and it takes " + texture_bytes_words(capped.bytes) + "."
+		                 : "Store a finished normal map as an .mdt with type 4 (" + texture_bytes_words(capped.bytes) +
+		                           "); type 4 or 5 over a .tga makes the normal map from its alpha as a height."));
+	}
+	if (full.bytes <= kTextureMemoryWarnBytes || !costed.insert(served + "\x01" + texture_budget_loader_token(loader) + "\x01" +
+	                                                             std::to_string(context.slot)).second)
+		return;
+	std::string message = file + ", " + where + ", takes " + texture_bytes_words(full.bytes) + " of the game's memory: " +
+	                       device_texture_words(full) + ", every level of which the game keeps.";
+	if (budget.offers_dds)
+		message += " As a " + std::string(renderer::device_texture_format_name(budget.as_dds.format)) + " .dds beside it, which " +
+		           "its loader reads first, it would take " + texture_bytes_words(budget.as_dds.bytes) + ".";
+	else if (loader != TextureBudgetLoader::Normal && header.reader == TextureReader::Dds)
+		message += " Make it smaller.";
+	const renderer::DeviceTexture &lowest = budget.detail[0];
+	if (lowest.bytes < full.bytes)
+		message += " At the lowest object texture detail the game halves it to " + std::to_string(lowest.width) + " x " +
+		           std::to_string(lowest.height) + " (" + texture_bytes_words(lowest.bytes) + ").";
+	add(F::TextureMemory, DiagnosticSeverity::Warning, message);
+}
+
 void check_use(const AssetGraph &graph, const ValidationInput &input, const GraphEdge &edge,
-               std::set<std::pair<std::string, std::string>> &passed_over, std::vector<Diagnostic> &out) {
+               std::set<std::pair<std::string, std::string>> &passed_over, std::set<std::string> &costed,
+               std::vector<Diagnostic> &out) {
 	TextureUseContext context;
 	const R role = texture_role_of_edge(edge, nullptr, context);
 	if (role == R::kCount) return;
@@ -303,6 +355,7 @@ void check_use(const AssetGraph &graph, const ValidationInput &input, const Grap
 		return;
 	}
 	check_sizes(role, basename_of(served), *header, where, context, add);
+	check_budget(role, served, *header, where, context, costed, add);
 	// A material that cuts out by this texture's alpha (the row its technique tests, TextureRowContext) over a
 	// texture of none: a PCX the game loads with every texel opaque [orig: Texture_LoadPCXFromPFF32 @
 	// 0x56EC98..0x56ECF3], or a file of no alpha, read as 255. The test keeps a texel whose alpha is above the
@@ -323,6 +376,12 @@ void check_use(const AssetGraph &graph, const ValidationInput &input, const Grap
 
 } // namespace
 
+TextureHeader texture_file_header(const std::string &root, const AssetEntry &entry, TextureReader reader) {
+	const std::lock_guard<std::mutex> lock(g_mutex);
+	const TextureHeader *header = kept_header(root, &entry, reader);
+	return header ? *header : TextureHeader();
+}
+
 void check_texture_role(TextureRoleId role, const std::string &file, const TextureHeader &header, const std::string &where,
                         const TextureFindingSink &add, const TextureUseContext &context) {
 	check_sizes(role, file, header, where, context, add);
@@ -333,10 +392,11 @@ void check_texture_uses(const AssetGraph &graph, const ValidationCache &files, c
 	(void)files;
 	const std::lock_guard<std::mutex> lock(g_mutex);
 	std::set<std::pair<std::string, std::string>> passed_over;
+	std::set<std::string> costed;
 	graph.for_each_edge([&](const GraphEdge &edge) {
 		if (edge.kind == ReferenceKind::Texture || edge.kind == ReferenceKind::MenuTexture ||
 		    edge.kind == ReferenceKind::LoadingImage)
-			check_use(graph, input, edge, passed_over, out);
+			check_use(graph, input, edge, passed_over, costed, out);
 	});
 	// The names the game opens itself whose sizes it asks for: the MFD's, the default loading screen's.
 	for (const FixedTextureName &fixed : fixed_texture_names()) {
