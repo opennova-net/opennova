@@ -111,7 +111,9 @@ constexpr RequestField kFields[] = {
 			"it, else its Main view), device {width, height} the size its device draws at (1 to "
 			"8192), clock {playing, rate, time_ms, ticks} the preview clock every viewport reads, "
 			"options the kind's (a menu's show_hidden, force_id, force_state, checked, popup_open, "
-			"focus; a model's lod, ctrl, overlays, rig_model), camera a model's {yaw, pitch, "
+			"focus, zoom, scale, snap, pointer (the game's pointer drawn, true or false) and pointer_at "
+			"([x, y] in design units where the pointer stands, as the mouse would, or null); a model's "
+			"lod, ctrl, overlays, rig_model), camera a model's {yaw, pitch, "
 			"distance, target, frame}, each member optional. A change of the clock alone with no "
 			"path sets the clock whatever document is active (none, or one that shows in no "
 			"viewport)." },

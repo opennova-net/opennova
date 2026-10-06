@@ -228,6 +228,7 @@ bool EditorWindows::draw_frame(uint64_t frame_index) {
 
 void EditorWindows::begin_frame() {
 	in_frame_ = true;
+	pointer_hidden_ = false;
 	dispatch_events();
 }
 
