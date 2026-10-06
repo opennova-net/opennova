@@ -37,9 +37,11 @@ Vector3 to_godot(const opennova::editor::PreviewVec3 &v) {
 	return Vector3(v.x, v.y, v.z);
 }
 
+} // namespace
+
 // The grid: a line every metre across the ground the effect spawns on, the two through the spawn point
 // brighter.
-Ref<ArrayMesh> grid_mesh() {
+Ref<ArrayMesh> preview_grid_mesh() {
 	PackedVector3Array lines;
 	PackedColorArray colors;
 	const Color faint(0.45f, 0.45f, 0.45f, 0.35f), axis(0.7f, 0.7f, 0.7f, 0.6f);
@@ -67,8 +69,6 @@ Ref<ArrayMesh> grid_mesh() {
 	return mesh;
 }
 
-} // namespace
-
 EffectViewportApplier::EffectViewportApplier(SubViewport &viewport) {
 	// No multisampling, as the game's own view draws: the particle renderer's compositor passes draw over
 	// the view's single-sampled colour and depth (a multisampled view's resolved depth is no attachment
@@ -88,7 +88,7 @@ EffectViewportApplier::EffectViewportApplier(SubViewport &viewport) {
 	root->add_child(camera_);
 	grid_ = memnew(MeshInstance3D);
 	grid_->set_name("Grid");
-	grid_->set_mesh(grid_mesh());
+	grid_->set_mesh(preview_grid_mesh());
 	root->add_child(grid_);
 	effects_ = std::make_unique<PreviewEffects>(*root);
 	effects_->set_environment_source(environment_);
