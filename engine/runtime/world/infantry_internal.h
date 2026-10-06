@@ -80,6 +80,23 @@ int32_t arm_end_notify(const IRootMotionSource &source, int adm_id, int state, i
 bool advance_primary_channel(InfantryState &inf, IRootMotionSource &source,
                              AnimVariantRings &rings, RootMotionFrame &out);
 void advance_primary_channel_fallback(InfantryState &inf);
+// The SHARED secondary-channel advance — the part of the upper-body channel that runs for
+// EVERY organic body, player or AI: the clip-end deferred promotion and the playhead/blend
+// step, its re-inits and wraps serving `rings`. Both body updaters run it at their motor
+// head [orig: AnimMap_UpdateDualChannels @0x40b8c0, called from the org2 body @0x4b40e0 AND
+// the org1 body @0x4b9910; witness world-wac-ai-re.md §14.8.1]. Org1 mirrors primary
+// current/pending into the secondary at the motor head [orig: @0x4B9A14..0x4B9A48]; this
+// advance keeps the two channels' phases, blends and variant rings independent. Defined in
+// infantry_weapon_channel.cpp.
+void advance_weapon_channel(InfantryState &inf, IRootMotionSource *source, AnimVariantRings &rings);
+// One AnimMap dual update of a body: the secondary channel, then the primary, the primary's
+// root output in `frame` with its vertical delta taken from the capsule-bottom history (a
+// climb or grenade-death state restarts it). Returns whether the primary had a clip. The org1
+// and org2 motor heads and the organic spawn warmup each run it.
+// [orig: AnimMap_UpdateDualChannels @0x40B8C0 — the secondary @0x40B908, the primary
+//  @0x40B94E; the vertical delta in AnimMap_UpdateEntity @0x40b82f..0x40b8a3]
+bool infantry_dual_update(InfantryState &inf, IRootMotionSource *source, AnimVariantRings &rings,
+                          RootMotionFrame &frame);
 void begin_body_transition_with_insert(InfantryState &inf, int resolved,
                                        const IRootMotionSource *root_motion,
                                        AnimVariantRings *rings);

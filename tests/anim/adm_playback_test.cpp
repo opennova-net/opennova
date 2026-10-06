@@ -314,17 +314,17 @@ int main() {
 		e.inf.wpn_playing_state = anim_state::kIdle;
 		e.inf.wpn_clip_phase = wrap - 1;
 		e.inf.wpn_deferred = anim_state::kWalkForward;
-		ai.infantry_weapon_channel_advance(e);
+		opennova::world::advance_weapon_channel(e.inf, ai.root_motion, ai.anim_rings);
 		TEST_EXPECT(e.inf.wpn_deferred_boundary == wrap);
 		TEST_EXPECT(e.inf.wpn_clip_phase == wrap && e.inf.weapon_phase_parked());
 		e.inf.wpn_deferred = 0; // cleared while armed
 		for (int tick = 0; tick < 5; ++tick) {
-			ai.infantry_weapon_channel_advance(e);
+			opennova::world::advance_weapon_channel(e.inf, ai.root_motion, ai.anim_rings);
 			TEST_EXPECT(e.inf.wpn_clip_phase == wrap && e.inf.weapon_phase_parked());
 		}
 		TEST_EXPECT(e.inf.wpn_deferred_boundary == wrap);
 		e.inf.wpn_deferred = anim_state::kWalkForward; // set again: promotes at once
-		ai.infantry_weapon_channel_advance(e);
+		opennova::world::advance_weapon_channel(e.inf, ai.root_motion, ai.anim_rings);
 		TEST_EXPECT(e.inf.wpn_deferred == 0 && e.inf.wpn_state == anim_state::kWalkForward);
 		TEST_EXPECT(e.inf.wpn_deferred_boundary == -1);
 
@@ -335,7 +335,8 @@ int main() {
 		w.inf.wpn_playing_state = anim_state::kReset;
 		w.inf.wpn_clip_phase = once + 5; // stopped
 		w.inf.wpn_deferred = anim_state::kIdle;
-		for (int tick = 0; tick < 3 * once; ++tick) ai.infantry_weapon_channel_advance(w);
+		for (int tick = 0; tick < 3 * once; ++tick)
+			opennova::world::advance_weapon_channel(w.inf, ai.root_motion, ai.anim_rings);
 		TEST_EXPECT(w.inf.wpn_deferred == anim_state::kIdle);
 		TEST_EXPECT(w.inf.wpn_deferred_boundary == opennova::world::kEndNotifyNeverLatches);
 		w.inf.begin_weapon_transition(anim_state::kIdle);
