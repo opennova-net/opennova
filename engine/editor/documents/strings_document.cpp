@@ -345,6 +345,57 @@ std::shared_ptr<Node> StringsDocument::make_node(NodeKind kind, NodeId id,
 	return row;
 }
 
+NodeId StringsDocument::existing_row_for(const Edit &add, const std::vector<std::shared_ptr<const Node>> &rows) const {
+	if (add.address.kind != kSection || add.field != "name") return 0;
+	const auto *given = std::get_if<std::string>(&add.value);
+	std::string name;
+	if (!given || given->empty() || !utf8_to_cp1252(*given, name, nullptr)) return 0;
+	for (const auto &row : rows)
+		if (row->kind == kSection && strutil::iequals(section_of(*row).section_name, name)) return row->id;
+	return 0;
+}
+
+bool StringsDocument::move_out_edits(const Edit &move, std::vector<Edit> &out, std::string &error) const {
+	const NodeAddress to = address_of(move.parent);
+	const Node *section = row(move.address.row);
+	if (move.address.kind != kString || !section || !to.row || to.child || to.kind != kSection) {
+		error = "A string moves into a section of its table.";
+		return false;
+	}
+	const rtxt::Entry *entry = entry_of(const_cast<StringsSection &>(section_of(*section)), move.address,
+	                                    place_of(move.address));
+	if (!entry) {
+		error = "The string no longer exists.";
+		return false;
+	}
+	out.clear();
+	// Added there with its key, then its text and position on what the add made (batch_made(0)), then
+	// removed here.
+	Edit add;
+	add.operation = EditOperation::Add;
+	add.address = {to.row, kString, 0};
+	add.position = move.position;
+	add.field = "key";
+	add.value = retail_text_to_utf8(entry->key);
+	out.push_back(add);
+	const NodeAddress made{to.row, kString, batch_made(0)};
+	const auto set = [&](const char *field, Value value) {
+		Edit edit;
+		edit.address = made;
+		edit.field = field;
+		edit.value = std::move(value);
+		out.push_back(std::move(edit));
+	};
+	if (!entry->text.empty()) set("text", retail_text_to_utf8(entry->text));
+	if (entry->position.x) set("x", int64_t(entry->position.x));
+	if (entry->position.y) set("y", int64_t(entry->position.y));
+	Edit remove;
+	remove.operation = EditOperation::Remove;
+	remove.address = move.address;
+	out.push_back(remove);
+	return true;
+}
+
 bool StringsDocument::set_field(Node &node, const NodeAddress &address, const std::string &field, const Value &value,
                                 std::string &error) {
 	StringsSection &section = section_of(node);
@@ -384,6 +435,7 @@ constexpr FindingCodeEntry<StringsFinding> kFindingEntries[] = {
 	{ StringsFinding::KeyEmpty, listed_code("strings.key_empty") },
 	// A key the game reads the first of: a key of its own, or the string removed (DI-11, Diagnostic::planned).
 	{ StringsFinding::KeyDuplicate, { "strings.key_duplicate", FindingFix::EditRecord } },
+	{ StringsFinding::FlowKeyMissing, { "strings.flow_key_missing" } },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(StringsFinding::kCount),
 		"every StringsFinding has exactly one row");
