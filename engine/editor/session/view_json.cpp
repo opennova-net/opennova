@@ -221,6 +221,22 @@ JsonValue run_section(const SessionView &view) {
 	out.set("log_file", json_string(activity.play_log_file));
 	out.set("fresh", boolean(activity.play_fresh));
 	out.set("kept", strings_to_json(activity.play_kept));
+	// Play from here (DI-26): where the player starts and how the run directory's mission was given it; null
+	// for a Play at the mission's own starts.
+	if (activity.play_start.set) {
+		JsonValue start = JsonValue::make_object();
+		JsonValue at = JsonValue::make_array();
+		for (const double each : activity.play_start.at) at.push(json_number(each));
+		start.set("at", std::move(at));
+		start.set("yaw", json_number(activity.play_start.yaw));
+		start.set("marker_type", json_number(double(activity.play_start_placed.type)));
+		start.set("markers", json_number(double(activity.play_start_placed.moved)));
+		start.set("added", boolean(activity.play_start_placed.added));
+		start.set("archive", json_string(activity.play_start_placed.archive));
+		out.set("start", std::move(start));
+	} else {
+		out.set("start", JsonValue::make_null());
+	}
 	out.set("exited_on_its_own", boolean(activity.play_exited_on_its_own));
 	out.set("exit_code",
 			activity.play_exit_code >= 0 ? json_number(double(activity.play_exit_code))
@@ -436,6 +452,7 @@ JsonValue preferences_section(const SessionView &view) {
 	out.set("game_install", json_string(view.project.retail_directory));
 	out.set("play_in_install", boolean(view.project.play_retail));
 	out.set("play_in_install_strict", boolean(view.project.play_in_install_strict));
+	out.set("save_before_play", boolean(view.project.save_before_play));
 	out.set("runtime_setting", json_string(view.project.runtime_setting));
 	out.set("import_dependencies", boolean(view.project.import_dependencies));
 	out.set("build_folder", json_string(view.project.build_folder));

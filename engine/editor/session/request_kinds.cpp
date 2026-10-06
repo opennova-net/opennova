@@ -89,8 +89,8 @@ void serve_build(SessionCore &core, const EditorRequest &request) {
 }
 void serve_play(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
-		core.start_build(PlayIntent{ true, request.mission, request.behind, request.fresh }, std::string(), false,
-				ExportIntent());
+		core.start_build(PlayIntent{ true, request.mission, request.behind, request.fresh, request.start }, std::string(),
+				false, ExportIntent());
 }
 void serve_export(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
@@ -493,8 +493,11 @@ constexpr RequestKindRow kRows[] = {
 			"(play.mission.failed) until the next Play. behind: the game's window starts behind every other "
 			"and never takes the foreground (the run section says behind). The run directory keeps what the "
 			"game wrote there in the Plays of the same mode before (its game.cfg, its saves: the run section's "
-			"kept); fresh: it is emptied first, a first run (the run section says fresh).")
-			.takes(request_params({}, { F::Mission, F::Behind, F::Fresh }))
+			"kept); fresh: it is emptied first, a first run (the run section says fresh). start (Play from here, "
+			"DI-26): the player starts at a point of mission, as a start marker of the build's copy of it in the run "
+			"directory, OpenNova and the game install alike (play.start without a mission). With unsaved edits, Play "
+			"saves them first while the editor's save_before_play is on (the default), else it waits on the prompt.")
+			.takes(request_params({}, { F::Mission, F::Behind, F::Fresh, F::Start }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Play", "Save all and play")
 			.acts_on_saved()
@@ -1005,8 +1008,9 @@ constexpr RequestKindRow kRows[] = {
 			"viewport that does not show it as it is now, a record or a handle it does not show, a "
 			"command it has not, a gesture the document holds no open one of, a drag that writes "
 			"nothing the session takes, or a drop the viewport does not take (viewport.refused); a "
-			"planned edit the session refuses is not done.")
-			.takes(request_params({}, { F::Path, F::Drag, F::Command, F::Drop }))
+			"planned edit the session refuses is not done. behind and fresh: the Play a command plans (a "
+			"mission's play_from_here, DI-26) goes behind, or fresh, as play's do.")
+			.takes(request_params({}, { F::Path, F::Drag, F::Command, F::Drop, F::Behind, F::Fresh }))
 			.names_active()
 			.row,
 	// What the windows show of their own (the MCP gaps lane): no file and no document, so it runs beside any
@@ -1222,7 +1226,7 @@ static_assert(viewport_rows_hold(),
 // as it would be before any build: no spawn here, a game running, or a mission the project does
 // not hold). The outcome names the operation joined.
 void join_operation(SessionCore &core, const EditorRequest &request) {
-	if (request.kind == EditorRequestKind::Play && core.play().refused(request.mission))
+	if (request.kind == EditorRequestKind::Play && core.play().refused(request.mission, request.start))
 		return;
 	core.operations().running()->join(request);
 	core.outcome().operation = core.operations().status().id;

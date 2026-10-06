@@ -285,7 +285,7 @@ def request_of(args: argparse.Namespace) -> dict:
         request["edits"] = parse_list(args.edits, "--edits", "edit")
     if args.records:
         request["records"] = parse_list(args.records, "--records", "{row, kind, child}")
-    for field in ("address", "paste_at", "settings", "viewport", "drag", "command", "values", "workspace"):
+    for field in ("address", "paste_at", "settings", "viewport", "drag", "command", "values", "workspace", "start"):
         if getattr(args, field):
             request[field] = parse_json_arg(getattr(args, field), None)
     return request
@@ -518,6 +518,19 @@ def cmd_play(args: argparse.Namespace) -> int:
         # first run; by default it keeps them.
         if args.fresh:
             request["fresh"] = True
+        # Play from here (DI-26): --start X,Y,Z[,YAW] a point of the --mission; --from-here the mission view's
+        # (the --mission's, else the active document's), on the ground under its camera or under --at X,Y.
+        if args.start:
+            numbers = [float(part) for part in args.start.split(",")]
+            if len(numbers) not in (3, 4):
+                raise GameMcpError(EXIT_NOT_READ, "--start takes X,Y,Z or X,Y,Z,YAW")
+            request["start"] = {"at": numbers[:3], "yaw": numbers[3] if len(numbers) == 4 else 0.0}
+        if args.from_here:
+            command = {"name": "play_from_here", "kind": "mission"}
+            if args.at:
+                command["at"] = [float(part) for part in args.at.split(",")]
+            request = {"kind": "edit_in_viewport", "path": args.mission or "", "command": command,
+                       **{flag: True for flag in ("behind", "fresh") if request.get(flag)}}
         outcome, ended = raise_and_wait(client, request, args.timeout)
         if ended is None:
             return EXIT_NOT_DONE
@@ -736,7 +749,7 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--settings", default=None,
                          help="apply_project_settings: the settings to set as a JSON object (title, mission, "
                               "multiplayer, game_install, runtime_executable, play_in_install, "
-                              "play_in_install_strict; one left out stays)")
+                              "play_in_install_strict, save_before_play; one left out stays)")
     request.add_argument("--viewport", default=None,
                          help="set_viewport: the change as a JSON object {kind, device, clock, options, camera} "
                               "(without --path: the active document's viewport, or the clock alone whatever is "
@@ -746,6 +759,9 @@ def build_parser() -> argparse.ArgumentParser:
                               "kind}")
     request.add_argument("--command", default=None,
                          help="edit_in_viewport: a command as a JSON object {name, ids, kind}")
+    request.add_argument("--start", default=None,
+                         help="play: where the player starts (Play from here), a JSON object {at: [x, y, z], yaw?} "
+                              "of the --mission")
     request.add_argument("--values", default=None,
                          help="named values as a JSON object of strings: create_file's starting values, "
                               "set_import_options' options, texture_operation's params")
@@ -895,6 +911,15 @@ def build_parser() -> argparse.ArgumentParser:
     play.add_argument("--fresh", action="store_true",
                       help="start: the run directory emptied of what the runs before wrote there (the game's game.cfg, "
                            "its saves) before the game starts, a first run (play's fresh). Left out, it keeps them")
+    play.add_argument("--start", default=None,
+                      help="start: Play from here, the player at X,Y,Z[,YAW] of the --mission (mission metres, compass "
+                           "degrees; play's start)")
+    play.add_argument("--from-here", dest="from_here", action="store_true",
+                      help="start: Play from here in the mission's view (the --mission's, else the active document's): "
+                           "the player on the ground under its camera, facing the way it looks")
+    play.add_argument("--at", default=None,
+                      help="start --from-here: the picture point X,Y (the view's pixels) whose ground the player "
+                           "starts on")
     play.add_argument("--timeout", type=float, default=300.0)
     play.set_defaults(func=cmd_play)
 
