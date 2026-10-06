@@ -59,6 +59,7 @@ enum class DocumentTypeId {
 	Text,        // any other text, as the file stores it: a configuration, a text, and each text kind no
 	             // structured type edits yet, its engine reader's findings its own (DI-06)
 	Texture,     // a .tga .mdt .pcx .dds .png: its texels as the game reads them (ADR 0046 S18)
+	Particles,   // a .ptl .ptu .ptg: the effect system's text, its reader's findings (ADR 0046 DI-14)
 	kCount, // the number of values, None among them
 };
 

@@ -15,6 +15,7 @@
 #include <editor/documents/model_document.h>
 #include <editor/documents/model_labels.h>
 #include <editor/documents/music_script_type.h>
+#include <editor/documents/particle_type.h>
 #include <editor/documents/script_type.h>
 #include <editor/documents/strings_document.h>
 #include <editor/documents/text_types.h>
@@ -86,6 +87,10 @@ constexpr DocumentType kTypes[] = {
 	{ DocumentTypeId::Texture, "texture", make_texture_document, validate_texture_file, texture_fields,
 			texture_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
 			texture_content_json },
+	// The particle file (DI-14): a text the effect system's reader reads, its findings that reader's;
+	// what it names the asset graph reads through the same reader (no references of the type's own).
+	{ DocumentTypeId::Particles, "particle", make_particle_document, validate_particle_file, text_fields,
+			particle_finding_codes },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its

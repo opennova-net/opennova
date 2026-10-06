@@ -143,6 +143,8 @@ constexpr DocumentViewRow kViews[] = {
 	{DocumentTypeId::Text, DocumentViewRole::MainViewport, nullptr, make_script_view},
 	// A texture's picture fills the tab beside what it is and what uses it (S18, ui/texture_view).
 	{DocumentTypeId::Texture, DocumentViewRole::MainViewport, nullptr, make_texture_view},
+	// A particle file's text in the script device; the Preview window plays its effect (DI-14).
+	{DocumentTypeId::Particles, DocumentViewRole::MainViewport, nullptr, make_script_view},
 };
 
 // One view per DocumentTypeId past None, in its order, each an outline or a view its make makes.

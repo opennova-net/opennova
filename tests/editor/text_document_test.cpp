@@ -1108,19 +1108,21 @@ static int test_shader_and_text() {
 
 // Every text file opens in the editor (the deep-integration plan's DI-06): the text kinds no structured
 // type edits are the text type's, a text with undo and save; where the engine has a reader of the kind,
-// its findings are the file's (a particle file the reader stops in, at its place; the avatar reader's
-// notes at their lines; the score table's reader), listed; a kind with none makes none. SndProf.def is
-// left to its own type, the mission text to no type (the build leaves it out). An open particle file
-// stands in for its file in the graph, read by the engine's own reader: its names follow its edits.
+// its findings are the file's (the avatar reader's notes at their lines; the score table's reader),
+// listed; a kind with none makes none. SndProf.def is left to its own type, the particle file to its own
+// (DI-14: the specific type owns its kind), the mission text to no type (the build leaves it out). An open
+// environment stands in for its file in the graph, read by the engine's own reader: its names follow its
+// edits.
 static int test_text_readers() {
 	const DocumentType *text = document_type(DocumentTypeId::Text);
 	TEST_EXPECT(text != nullptr);
 	if (!text) return 1;
-	for (const AssetKind kind : {AssetKind::AiProfile, AssetKind::Particles, AssetKind::Environment, AssetKind::HudPosDefs,
+	for (const AssetKind kind : {AssetKind::AiProfile, AssetKind::Environment, AssetKind::HudPosDefs,
 	                             AssetKind::HudFxDefs, AssetKind::AvatarDefs, AssetKind::CharAttrDefs, AssetKind::OtherDefs,
 	                             AssetKind::Score, AssetKind::NovaWorldScreen})
 		TEST_EXPECT(document_type_for(kind) == text && is_editable_kind(kind));
-	TEST_EXPECT(document_type_for(AssetKind::SoundProfileDefs) != text && document_type_for(AssetKind::MissionText) == nullptr);
+	TEST_EXPECT(document_type_for(AssetKind::SoundProfileDefs) != text && document_type_for(AssetKind::MissionText) == nullptr &&
+	            document_type_for(AssetKind::Particles) == document_type(DocumentTypeId::Particles));
 	// The graph still reads a native kind through the engine's reader, not the text type.
 	TEST_EXPECT(graph_reads_kind(AssetKind::Particles) && graph_reads_kind(AssetKind::Environment) &&
 	            graph_reads_kind(AssetKind::HudPosDefs) && graph_reads_kind(AssetKind::AvatarDefs) &&
@@ -1133,13 +1135,6 @@ static int test_text_readers() {
 		texts_held = texts_held && loaded && document->serialize().text == source;
 		return loaded ? text->validate_file(*document) : std::vector<Diagnostic>();
 	};
-	// A particle file the reader stops in: a warning at the place it stops, its names unchecked.
-	const std::string good = "[particledef]\n{\n\tid = puff;\n\tgraphic1 = puff.tga, additive;\n}\n";
-	TEST_EXPECT(findings_of(good, "fx.ptl", AssetKind::Particles).empty());
-	const std::vector<Diagnostic> broken = findings_of("[effectdef]\n{\n\tid = OPEN;\n", "broken.ptl", AssetKind::Particles);
-	TEST_EXPECT(broken.size() == 1 && broken[0].code() == "text.unreadable" && broken[0].severity == DiagnosticSeverity::Warning &&
-	            broken[0].line >= 1 && broken[0].message.find("particle reader") != std::string::npos && broken[0].row() &&
-	            !broken[0].row()->gates_build);
 	// The avatar reader's notes, each at its line.
 	const std::vector<Diagnostic> avatars =
 			findings_of("nationality N00 FIRST\r\n{\r\n}\r\nnationality N00 DUP_NAT\r\n{\r\n}\r\n", "Avatars.def", AssetKind::AvatarDefs);
@@ -1155,8 +1150,8 @@ static int test_text_readers() {
 	            findings_of("sky_map1 sky.pcx\n", "day.env", AssetKind::Environment).empty());
 	TEST_EXPECT(texts_held);
 
-	// In a session: the particle file opens as a text; an edit of its graphic's name moves the graph's
-	// reference with it, unsaved; the broken file's warning is the text type's, at its line.
+	// In a session: the environment opens as a text; an edit of its cloud layer's name moves the graph's
+	// reference with it, unsaved; the avatar table's note is the text type's, at its line.
 	editor_test::TempProjectDir dir("opennova_editor_text_readers");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
@@ -1164,29 +1159,30 @@ static int test_text_readers() {
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Readers"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/fx.ptl", good) &&
-	            editor_test::write_text(root + "/broken.ptl", "[effectdef]\n{\n\tid = OPEN;\n"));
+	TEST_EXPECT(editor_test::write_text(root + "/day.env", "sky_map1 sky.pcx\r\n") &&
+	            editor_test::write_text(root + "/Avatars.def",
+	                                    "nationality N00 FIRST\r\n{\r\n}\r\nnationality N00 DUP_NAT\r\n{\r\n}\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	const auto names = [&session](const std::string &value) {
-		for (const GraphEdge *edge : session.view().findings.graph->references_of("fx.ptl"))
+		for (const GraphEdge *edge : session.view().findings.graph->references_of("day.env"))
 			if (edge->kind == ReferenceKind::Texture && edge->value == value) return true;
 		return false;
 	};
-	TEST_EXPECT(names("puff.tga"));
-	size_t warned = 0;
+	TEST_EXPECT(names("sky.pcx"));
+	size_t noted = 0;
 	for (const Diagnostic &d : session.view().findings.diagnostics)
-		warned += d.code() == "text.unreadable" && d.asset == "broken.ptl" && d.severity == DiagnosticSeverity::Warning && d.line >= 1;
-	TEST_EXPECT(warned == 1);
-	editor_test::handle_to_end(session, request::open_document("fx.ptl"));
-	TextDocument *open = text_of(*session.document_base_for("fx.ptl"));
+		noted += d.code() == "text.reader" && d.asset == "Avatars.def" && d.severity == DiagnosticSeverity::Warning && d.line == 4;
+	TEST_EXPECT(noted == 1);
+	editor_test::handle_to_end(session, request::open_document("day.env"));
+	TextDocument *open = text_of(*session.document_base_for("day.env"));
 	TEST_EXPECT(open != nullptr);
 	if (!open) return 1;
-	TEST_EXPECT(open->line(4) == "\tgraphic1 = puff.tga, additive;");
-	editor_test::handle_to_end(session, request::edit_record("fx.ptl", {TextDocument::replace(span(4, 13, 4), "smoke")}));
-	TEST_EXPECT(session.last_edit_ok() && open->line(4) == "\tgraphic1 = smoke.tga, additive;" && open->dirty());
-	TEST_EXPECT(names("smoke.tga") && !names("puff.tga"));
-	editor_test::handle_to_end(session, request::undo("fx.ptl"));
-	TEST_EXPECT(names("puff.tga") && !open->dirty());
+	TEST_EXPECT(open->line(1) == "sky_map1 sky.pcx");
+	editor_test::handle_to_end(session, request::edit_record("day.env", {TextDocument::replace(span(1, 10, 3), "dusk")}));
+	TEST_EXPECT(session.last_edit_ok() && open->line(1) == "sky_map1 dusk.pcx" && open->dirty());
+	TEST_EXPECT(names("dusk.pcx") && !names("sky.pcx"));
+	editor_test::handle_to_end(session, request::undo("day.env"));
+	TEST_EXPECT(names("sky.pcx") && !open->dirty());
 	return 0;
 }
 
