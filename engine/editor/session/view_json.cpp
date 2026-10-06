@@ -211,6 +211,8 @@ JsonValue run_section(const SessionView &view) {
 	out.set("command_line", json_string(activity.play_command_line));
 	out.set("run_dir", json_string(activity.play_run_dir));
 	out.set("log_file", json_string(activity.play_log_file));
+	out.set("fresh", boolean(activity.play_fresh));
+	out.set("kept", strings_to_json(activity.play_kept));
 	out.set("exited_on_its_own", boolean(activity.play_exited_on_its_own));
 	out.set("exit_code",
 			activity.play_exit_code >= 0 ? json_number(double(activity.play_exit_code))
@@ -485,7 +487,9 @@ constexpr ViewSectionRow kSections[] = {
 			"Play: the game's state, pid, mcp_port (0 when none with an endpoint runs), the mission "
 			"it was started in (\"\" at its menu), behind (its window started behind the others), exit_code, "
 			"the run directory it runs in and the log there Play tails (run_dir, log_file: never "
-			"the build directory), the files it reported missing at boot, and what Play runs (the "
+			"the build directory), whether that directory was emptied first (fresh) and what it kept of "
+			"what the runs before wrote there (kept: the game's game.cfg, its saves), the files it reported "
+			"missing at boot, and what Play runs (the "
 			"game install, in it or not, the runtime)." },
 	{ S::Import, "import", concern_set({ C::Dialogs, C::Preferences, C::Files }), import_section,
 			"The import dialog in short (open, plan: which plan it shows, with_dependencies, planning while its plan is made, its lists' counts; the "

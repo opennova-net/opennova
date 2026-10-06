@@ -515,6 +515,12 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	ui_kit::tooltip(mission.empty() ? std::string("Open a mission, or a file the game finds by its name (its script, its text), to "
 	                                              "start the game in it.")
 	                                : "Build, then start the game in " + mission + ".");
+	// A first run: the run directory emptied of what the runs before wrote there (run/run_directory.h), which
+	// Play keeps otherwise.
+	if (menu_item("Play fresh", nullptr, plays)) request(request::play(std::string(), false, true));
+	ui_kit::tooltip("Build, then start the game in an emptied run folder, as on its first run: without the game.cfg, "
+	                "saves and scores earlier runs wrote there (the game install asks for the display adapter again). "
+	                "Play keeps them.");
 	if (menu_item("Stop", "Shift+F5", v.activity.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)))
 		request(request::stop_play());
 	ImGui::Separator();
