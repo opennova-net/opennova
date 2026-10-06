@@ -806,7 +806,7 @@ def build_parser() -> argparse.ArgumentParser:
                           help="the document (a project-relative path or a logical name; the active one when left "
                                "out; seek takes none)")
     viewport.add_argument("--kind", default=None,
-                          help="the viewport's kind (menu, model, script, mission; the one the document shows in when "
+                          help="the viewport's kind (menu, model, script, mission, texture, effect; the one the document shows in when "
                                "left out; seek takes none)")
     viewport.add_argument("--x", type=float, default=None,
                           help="hit: the point across (design units or pixels); box: its first corner's")
