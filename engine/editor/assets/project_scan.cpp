@@ -7,6 +7,7 @@
 #include <base/io/file_time.h>
 #include <base/io/strutil.h>
 #include <editor/assets/asset_type_registry.h>
+#include <editor/import/import_context.h>
 #include <editor/import/import_run.h>
 #include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
@@ -91,6 +92,13 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 				out.findings.push_back(error);
 			}
 			return;
+		}
+		// Its inputs, from the source's folder to the project's (the files the scan types ImportInput).
+		const std::string source_folder = utf8_of(path_of(source_relative).parent_path());
+		for (const std::string &input : sidecar.inputs) {
+			std::string file, relative;
+			if (ImportContext::resolve(join_path(paths.root, source_folder), paths.root, input, file, relative))
+				out.inputs.push_back(relative);
 		}
 		const std::string output_dir = import_output_dir(paths, source_relative);
 		for (const std::string &output : sidecar.outputs) {
