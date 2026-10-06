@@ -2,6 +2,7 @@
 
 #include <iterator>
 
+#include <editor/ui/definition_viewport_view.h>
 #include <editor/ui/effect_viewport_view.h>
 #include <editor/ui/hud_viewport_view.h>
 #include <editor/ui/menu_viewport_view.h>
@@ -21,6 +22,7 @@ std::unique_ptr<ViewportView> make_mission_view() { return std::make_unique<Miss
 std::unique_ptr<ViewportView> make_texture_viewport_view() { return std::make_unique<TextureViewportView>(); }
 std::unique_ptr<ViewportView> make_effect_view() { return std::make_unique<EffectViewportView>(); }
 std::unique_ptr<ViewportView> make_hud_viewport_view() { return std::make_unique<HudViewportView>(); }
+std::unique_ptr<ViewportView> make_definition_view() { return std::make_unique<DefinitionViewportView>(); }
 
 constexpr ViewportViewRow kViews[] = {
 	{ ViewportKind::Menu, make_menu_view },
@@ -30,6 +32,7 @@ constexpr ViewportViewRow kViews[] = {
 	{ ViewportKind::Texture, make_texture_viewport_view },
 	{ ViewportKind::Effect, make_effect_view },
 	{ ViewportKind::Hud, make_hud_viewport_view },
+	{ ViewportKind::Definition, make_definition_view },
 };
 
 constexpr bool views_in_order() {
