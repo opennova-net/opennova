@@ -12,6 +12,9 @@ add_subdirectory(third_party/sqlite)
 add_subdirectory(third_party/bcrypt)
 # Vendored miniz: the BFC1 container decoder's inflate (engine/formats/bfc1).
 add_subdirectory(third_party/miniz)
+# rgbcx: the authoring DXT encoder the editor's image import and opennova-3di write with
+# (engine/editor/import/dxt_encode).
+add_subdirectory(third_party/rgbcx)
 
 # The game dev tools and Dear ImGui are optional (ADR 0039). The root ctest
 # build enables them by default; release GDExtensions compile them out. The
