@@ -251,6 +251,7 @@ enum class CoreFinding {
 	BlankFont,
 	BlankMenu,
 	BlankMission,
+	BlankShader,
 	BlankStrings,
 	BlankSound,
 	BlankStyle,
