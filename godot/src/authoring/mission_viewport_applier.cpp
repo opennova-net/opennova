@@ -25,6 +25,7 @@
 #include <editor/preview/viewport_device.h>
 #include <editor/session/view/session_view.h>
 #include <formats/env/env.h>
+#include <runtime/world/infantry.h>
 #include <runtime/environment/environment_state.h>
 #include <runtime/renderer/render_order.h>
 
@@ -878,7 +879,17 @@ void MissionViewportApplier::update(const opennova::editor::ViewportModel &viewp
 	apply_state_(viewport);
 }
 
-void MissionViewportApplier::move_entities_(const MissionScene &scene) {
+namespace {
+
+// How far a posed person stands over its record (where its spawn stands it, metres; 0 for anyone else).
+double lift_of(const opennova::editor::MissionPoses &poses, NodeId row) {
+	const opennova::editor::MissionPose *pose = poses.pose(row);
+	return pose != nullptr && pose->status == "posed" ? pose->lift : 0.0;
+}
+
+} // namespace
+
+void MissionViewportApplier::move_entities_(const MissionScene &scene, const opennova::editor::MissionPoses &poses) {
 	for (const MissionEntityMark &entity : scene.entities()) {
 		const auto found = entities_.find(entity.row);
 		// One of another item, group or attributes is the next build's to lift.
@@ -890,14 +901,45 @@ void MissionViewportApplier::move_entities_(const MissionScene &scene) {
 		if (placed.stamp == entity.stamp && !back) continue;
 		placed.stamp = entity.stamp;
 		const Transform3D xform = transform_of_(entity);
-		if (ObjectModel *model = model_of_(placed)) model->set_transform(xform);
-		else if (placed.key != 0 && placer_.is_valid()) placer_->move_static_instance(placed.key, xform);
+		if (ObjectModel *model = model_of_(placed)) {
+			// A person stands where its spawn stands it (its pose's lift; the mission's z up is the picture's y).
+			model->set_transform(xform.translated(Vector3(0.0f, float(lift_of(poses, entity.row)), 0.0f)));
+		} else if (placed.key != 0 && placer_.is_valid()) {
+			placer_->move_static_instance(placed.key, xform);
+		}
 		if (placed.key != 0 && std::find(shadow_pending_.begin(), shadow_pending_.end(), entity.row) == shadow_pending_.end())
 			shadow_pending_.push_back(entity.row);
 	}
 	// What the scene no longer has: hidden until it comes back or the next placement.
 	for (auto &entry : entities_)
 		if (!entry.second.hidden && !scene.entity(entry.first)) show_(entry.second, false);
+}
+
+void MissionViewportApplier::pose_people_(const MissionScene &scene, const opennova::editor::MissionPoses &poses) {
+	for (auto &entry : entities_) {
+		Placed &placed = entry.second;
+		const opennova::editor::MissionPose *pose = poses.pose(entry.first);
+		const MissionEntityMark *entity = scene.entity(entry.first);
+		if (pose == nullptr || entity == nullptr || pose->status != "posed" || placed.model == 0) continue;
+		if (placed.posed_model == placed.model && placed.pose_stamp == pose->stamp) continue;
+		ObjectModel *model = model_of_(placed);
+		if (model == nullptr) continue;
+		// Where the spawn stands it: its record lifted by the warmup and its ground solve.
+		model->set_transform(transform_of_(*entity).translated(Vector3(0.0f, float(pose->lift), 0.0f)));
+		// The body channel as the game's presenter dispatches a person's row: the playing clip at its
+		// playhead, or the outgoing clip blended under it at the target's weight while the blend runs
+		// (EntityPresenter's body leg over the PF_ANIM_* fields the present rows carry from the same
+		// world::InfantryBodyPose).
+		const opennova::world::InfantryBodyPose &body = pose->pose;
+		const String key = opennova::to_gd(opennova::world::infantry_anim_key(body.state));
+		if (body.blending && body.source_state >= 0 && body.weight < 1.0f)
+			model->play_body_blend_at(opennova::to_gd(opennova::world::infantry_anim_key(body.source_state)),
+					body.source_phase, key, body.phase, body.weight, body.source_variant, body.variant);
+		else
+			model->play_body_clip_at(key, body.phase, body.variant, body.parked);
+		placed.posed_model = placed.model;
+		placed.pose_stamp = pose->stamp;
+	}
 }
 
 void MissionViewportApplier::flush_shadows_(const MissionScene &scene) {
@@ -916,7 +958,8 @@ void MissionViewportApplier::flush_shadows_(const MissionScene &scene) {
 void MissionViewportApplier::apply_state_(const opennova::editor::ViewportModel &viewport) {
 	const MissionViewport &mission = mission_of(viewport);
 	const opennova::editor::MissionViewportOptions &options = mission.options();
-	move_entities_(mission.scene());
+	move_entities_(mission.scene(), mission.poses());
+	pose_people_(mission.scene(), mission.poses());
 	// The layers the options switch.
 	terrain_->set_visible(options.terrain);
 	sky_->set_visible(options.sky);
