@@ -140,7 +140,16 @@ void ModelViewportView::draw_ready(Workspace &workspace, const ViewportModel &vi
 		                           : colon == std::string::npos
 		                                   ? "paired by " + rig.source
 		                                   : "paired by " + rig.source.substr(colon + 2) + " (" + rig.source.substr(0, colon) + ")";
-		if (!paired.empty()) {
+		if (!paired.empty() && !rig.pairing.file.empty()) {
+			// A link to the record that pairs them (DI-05): a Go to, so the history records it.
+			const float room = std::min(ui_kit::text_width(paired.c_str()), ImGui::GetFontSize() * 8.0f);
+			row.next(room);
+			ImGui::AlignTextToFramePadding();
+			if (ImGui::TextLink((ui_kit::fit(paired, ImGui::GetContentRegionAvail().x) + "###paired").c_str()))
+				window_requests::go_to(workspace, rig.pairing);
+			ui_kit::tooltip(paired + "\nThe record whose graphic and animation map pair this model with the map: a click " +
+			                (rig.pairing.editable ? "opens " : "shows ") + rig.pairing.file + " at it.");
+		} else if (!paired.empty()) {
 			row.next(std::min(ui_kit::text_width(paired.c_str()), ImGui::GetFontSize() * 8.0f));
 			ImGui::AlignTextToFramePadding();
 			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
