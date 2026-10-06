@@ -47,6 +47,8 @@ enum class EditorRequestKind {
 	ReloadDocument,
 	CloseDocument,
 	SelectRecord,
+	NavigateBack,
+	NavigateForward,
 	EditRecord,
 	RevertToSaved,
 	SetStringText,
@@ -350,6 +352,9 @@ struct EditorRequest {
 	// A build's result panel opens as it ends (false: a build asked over the wire leaves the person's work as
 	// it is; the build section and the outcome say what it came to).
 	bool report = true;
+	// How many places of the navigation history a Back or a Forward goes (1: the nearest; Back's and
+	// Forward's lists pick one further).
+	uint32_t steps = 1;
 	// A folder of the project, from its top level ("" the top level): where a move puts a file (DI-03).
 	std::string folder;
 };
@@ -373,7 +378,7 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.replace == b.replace && a.force == b.force && a.ask_name == b.ask_name &&
 			a.open_first == b.open_first && a.import_pass == b.import_pass && a.rehash == b.rehash &&
 			a.all == b.all && a.planned == b.planned && a.behind == b.behind && a.plan == b.plan && a.report == b.report &&
-			a.folder == b.folder;
+			a.steps == b.steps && a.folder == b.folder;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);

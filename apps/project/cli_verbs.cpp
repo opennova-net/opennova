@@ -782,7 +782,7 @@ int run_reimport(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 // to its end, its outputs printed.
 int run_new_terrain(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	std::vector<std::pair<std::string, std::string>> values;
-	for (const char *image : {"heightmap", "colormap", "detail", "tiles"}) {
+	for (const char *image : {"heightmap", "colormap", "detail", "tiles", "surface"}) {
 		const std::string option = std::string("--") + image;
 		if (args.has(option.c_str())) values.emplace_back(image, from_here(args.value(option.c_str())));
 	}
@@ -1183,8 +1183,8 @@ constexpr CliOption kImportOptions[] = { { "--entry", "a file name", true },
 constexpr CliOption kReimportOptions[] = { { "--force" }, { "--source", "a source" } };
 constexpr CliOption kNewTerrainOptions[] = { { "--heightmap", "an image" }, { "--colormap", "an image" },
 	                                         { "--detail", "an image" },    { "--tiles", "an image" },
-	                                         { "--top", "world units" },    { "--water", "world units" },
-	                                         { "--layout", "island or tiled" } };
+	                                         { "--surface", "an image" },   { "--top", "world units" },
+	                                         { "--water", "world units" },  { "--layout", "island or tiled" } };
 constexpr CliOption kBuildOptions[] = { { "--out", "a directory" }, { "--rehash" } };
 
 using V = CliVerb;
@@ -1226,7 +1226,9 @@ constexpr VerbRow kRows[] = {
 	     kImportRequests, kImportArgs, run_import,
 	     "copy files in (a loose file, PFF members, or the game install's files by --entry\n"
 	     "names), the whole selection or none of it; an .o3d (a model) or an .o3a (a clip\n"
-	     "set) the Blender add-on wrote converts to the .3di or the .adm and .bad;\n"
+	     "set) the Blender add-on wrote converts to the .3di or the .adm and .bad; a .fntset\n"
+	     "(a font set) comes into fonts/ with the glyph sheet it names beside it and imports\n"
+	     "to its .fnt;\n"
 	     "--with-dependencies also copies the files they need, found beside them or in the\n"
 	     "game install (a mission's closure is most of a game install); an .o3d's textures come only with\n"
 	     "--with-dependencies; --all copies every file of the game install (its archives' and\n"
@@ -1247,14 +1249,15 @@ constexpr VerbRow kRows[] = {
 	        .answers(Q::State, "{\"sections\": [\"import\"]}")
 	        .row,
 	Verb(V::NewTerrain, "new-terrain",
-	     "<dir> <name> --heightmap <file> --colormap <file> [--detail <file>] [--tiles <file>] [--top <units>] "
-	     "[--water <units>] [--layout island|tiled]",
+	     "<dir> <name> --heightmap <file> --colormap <file> [--detail <file>] [--tiles <file>] "
+	     "[--surface <file>] [--top <units>] [--water <units>] [--layout island|tiled]",
 	     kNewTerrainRequests, kNewTerrainArgs, run_new_terrain,
 	     "make a terrain from images: a heightmap (a PNG of 1024 x 1024, any depth, or a .raw) and a\n"
-	     "colour map (1024 x 1024), a detail and a tile set optional; --top the heightmap's white in\n"
-	     "world units (127.5), --water the sea's height (0 none), --layout island or tiled; written as\n"
-	     "art/terrain/<name>.tset, then imported into <name>.trn, .cpt and their textures (--json: the\n"
-	     "state query's import)")
+	     "colour map (1024 x 1024), a detail, a tile set and a surface map optional (square, 256 to\n"
+	     "1024 a side: an 8-bit PCX's or palette PNG's indices the surface classes 0..19, any other\n"
+	     "image each class in its legend colour); --top the heightmap's white in world units (127.5),\n"
+	     "--water the sea's height (0 none), --layout island or tiled; written as art/terrain/<name>.tset,\n"
+	     "then imported into <name>.trn, .cpt and their textures (--json: the state query's import)")
 	        .takes(kNewTerrainOptions)
 	        .opens_without_import_pass()
 	        .answers(Q::State, "{\"sections\": [\"import\"]}")

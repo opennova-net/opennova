@@ -168,7 +168,7 @@ inline EditorRequest replace_texture(std::string path, std::string image,
 	return request;
 }
 // A terrain named `name` made from images (S20: import/terrain_import.h): `values` names them
-// (heightmap, colormap, detail, tiles) and the importer's options (top, water, layout).
+// (heightmap, colormap, detail, tiles, surface) and the importer's options (top, water, layout).
 inline EditorRequest new_terrain(std::string name, std::vector<std::pair<std::string, std::string>> values) {
 	EditorRequest request = of(EditorRequestKind::NewTerrain);
 	request.path = std::move(name);
@@ -355,6 +355,18 @@ inline EditorRequest save_all() {
 inline EditorRequest reveal_path(std::string path) {
 	EditorRequest request = of(EditorRequestKind::RevealPath);
 	request.path = std::move(path);
+	return request;
+}
+// Back (Forward) `steps` places of the navigation history: the nearest, or one further down Back's
+// (Forward's) list.
+inline EditorRequest navigate_back(uint32_t steps = 1) {
+	EditorRequest request = of(EditorRequestKind::NavigateBack);
+	request.steps = steps;
+	return request;
+}
+inline EditorRequest navigate_forward(uint32_t steps = 1) {
+	EditorRequest request = of(EditorRequestKind::NavigateForward);
+	request.steps = steps;
 	return request;
 }
 

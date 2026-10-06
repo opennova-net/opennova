@@ -14,6 +14,7 @@
 #include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
 #include <editor/session/document_set.h>
+#include <editor/session/navigation_controller.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/rename_operation.h>
 #include <editor/session/request_factories.h>
@@ -140,6 +141,8 @@ OperationOutcome RenameController::absorb_rename(RenameOperation &operation) {
 		for (const RenameOutput &companion : plan.companions) moved.emplace_back(companion.path, companion_path(companion));
 		// A card of a file it moved shows it where it went (the MCP gaps lane).
 		if (workspace_follows_moves(view_.workspace, moved)) core_.touch(ViewConcern::Workspace);
+		// So do the navigation history's places of them.
+		core_.navigation().follow_moves(moved);
 		std::vector<std::string> reopen;
 		std::string active_now;
 		for (const auto &[from, to] : moved) {

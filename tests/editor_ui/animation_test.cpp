@@ -82,6 +82,15 @@ void test_timeline() {
 	std::string text = lowered(logged_frame(ui));
 	CHECK(text.find("playing walk forward: walk") != std::string::npos, "what plays: the slot in words and its clip");
 	CHECK(text.find("paired by skinned thing (items.def)") != std::string::npos, "the item pairing the map with its model");
+	// The pairing is a link (DI-05): a Go to the item's record, its animation map field shown.
+	{
+		ui.activate(item_id(item_id(Ui::window_id("Preview"), {"model", path.c_str()}), {"###paired"}));
+		const std::vector<EditorRequest> went = ui.drain();
+		const EditorRequest *pairing = one(went, EditorRequestKind::OpenDocument);
+		CHECK(pairing && pairing->path == "defs/items.def" && !pairing->locator.empty() && pairing->field == "anim_def",
+		      "paired by: the item's record opened at its animation map");
+		ui.away();
+	}
 	CHECK(text.find("frame 0 of 4") != std::string::npos && text.find("0.00 s of ") != std::string::npos,
 	      "the frame and the time");
 	CHECK(text.find("l r footstep") != std::string::npos, "the events' legend");

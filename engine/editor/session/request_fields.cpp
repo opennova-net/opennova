@@ -65,8 +65,8 @@ constexpr RequestField kFields[] = {
 			"out); an import's options by their keys, as the import_options query lists them (\"\" an "
 			"option's default); a texture operation's params (resize: size; alpha: alpha; format: "
 			"format, dds, mips, palette; remap_palette: each index to move, \"<from>\": \"<to>\"); a new "
-			"terrain's images (heightmap, colormap, detail, tiles) and its importer's options (top, water, "
-			"layout)." },
+			"terrain's images (heightmap, colormap, detail, tiles, surface) and its importer's options (top, "
+			"water, layout)." },
 	{ F::Roles, "roles", J::Strings, "Requirements' roles." },
 	{ F::Names, "names", J::Strings, "Files of the game install, by logical name." },
 	{ F::Paths, "paths", J::Strings,
@@ -197,6 +197,10 @@ constexpr RequestField kFields[] = {
 	{ F::Report, "report", J::Boolean,
 			"A build's result panel opens over the editor as it ends (true when left out); false leaves the "
 			"person's work as it is (the build section and the operation say what it came to)." },
+	{ F::Steps, "steps", J::Integer,
+			"How many places of the navigation history a navigate_back or a navigate_forward goes (1 when left "
+			"out: the nearest; the navigation section lists them nearest first, as Back's and Forward's lists "
+			"do)." },
 	{ F::Folder, "folder", J::String,
 			"A folder of the project, from its top level, '/'-separated (\"defs\", \"art/terrain\"; \"\" or \"/\" the "
 			"top level): where a move puts a file. Made when it is not there; never one outside the project, a "
