@@ -13,6 +13,7 @@
 #include <runtime/hud/hud_combat.h>
 #include <runtime/hud/game_font.h>
 #include <runtime/hud/hud_declutter.h>
+#include <runtime/hud/hud_elements.h> // which element of the walk drew each run
 #include <runtime/hud/hud_math.h>
 #include <runtime/hud/hud_scoreboard.h>
 #include <runtime/hud/hud_minimap.h>
@@ -1098,6 +1099,10 @@ struct HudDrawList {
 	// kind cursors at the point it was marked.
 	std::vector<TopBegin> order_breaks;
 	int64_t elements_drawn = 0;
+	// Which element of the walk emitted each run of the flat lists (and drew a map pass), in the
+	// walk's order: hud_elements.h, a tool's record of the walk (what lies under a point of the HUD),
+	// never read by a draw.
+	std::vector<HudElementSpan> element_spans;
 };
 
 // Draw-list font-page namespaces: each compiler font emits glyph pages at
@@ -1447,6 +1452,17 @@ private:
 	// (emit_net_quality_indicators).
 	void element_net_quality_indicators(const HudFrameState &state, float w, float h);
 	void mark_order_break();
+	// One element of the walk, `draw` its call: what it emitted recorded as its span
+	// (HudDrawList::element_spans) when it drew anything.
+	template <typename Draw>
+	void element_(HudElement element, Draw &&draw) {
+		const HudDrawCursor from = draw_cursor_();
+		const bool map = draw_list_.map.visible, big_map = draw_list_.big_map.visible;
+		draw();
+		note_element_(element, from, !map && draw_list_.map.visible, !big_map && draw_list_.big_map.visible);
+	}
+	HudDrawCursor draw_cursor_() const;
+	void note_element_(HudElement element, const HudDrawCursor &from, bool map, bool big_map);
 	void element_targeting(const HudFrameState &state, float w, float h);
 	void element_instruments(const HudFrameState &state, float w, float h);
 	void element_crosshair(const HudFrameState &state, float w, float h);

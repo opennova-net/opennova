@@ -1562,6 +1562,13 @@ target_link_libraries(hud_frame_elements_test PRIVATE opennova_runtime)
 target_include_directories(hud_frame_elements_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_frame_elements COMMAND hud_frame_elements_test)
 
+# The HUD walk's record of its own draws (hud/hud_elements.h): each element's span and box, what the
+# editor's HUD preview names the element under a point by (ADR 0046 DI-20).
+add_executable(hud_element_spans_test hud/hud_element_spans_test.cpp)
+target_link_libraries(hud_element_spans_test PRIVATE opennova_runtime)
+target_include_directories(hud_element_spans_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_element_spans COMMAND hud_element_spans_test)
+
 # The spinmap's bit-10 legs: the dmgslice marks and the threat ring.
 add_executable(hud_minimap_radar_test hud/hud_minimap_radar_test.cpp)
 target_link_libraries(hud_minimap_radar_test PRIVATE opennova_runtime)
