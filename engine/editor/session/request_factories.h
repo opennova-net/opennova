@@ -327,6 +327,24 @@ inline EditorRequest play_sound(std::string path) {
 	request.path = std::move(path);
 	return request;
 }
+// A sound set played as the game plays it (session/sound_play.h): from `bank` ("" the game's search).
+inline EditorRequest play_set(std::string set, std::string bank = std::string()) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.path = std::move(bank);
+	request.values = {{"set", std::move(set)}};
+	return request;
+}
+// A SndProf.def profile's slot played (its keyword or number); the footstep a foot plays on a surface.
+inline EditorRequest play_profile_slot(std::string profile, std::string slot) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.values = {{"profile", std::move(profile)}, {"slot", std::move(slot)}};
+	return request;
+}
+inline EditorRequest play_footstep(std::string profile, std::string surface, std::string foot) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.values = {{"profile", std::move(profile)}, {"surface", std::move(surface)}, {"foot", std::move(foot)}};
+	return request;
+}
 inline EditorRequest stop_sound() {
 	return of(EditorRequestKind::StopSound);
 }
