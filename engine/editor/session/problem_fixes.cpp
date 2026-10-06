@@ -499,15 +499,21 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 		return;
 	case FindingFix::Reload: {
 		// An open document whose file changed outside the editor: read it again, its unsaved
-		// edits dropped (the Reload asks about them first, as any Reload does).
-		const bool open = !d.asset.empty() &&
-		                  std::any_of(view.documents.open.begin(), view.documents.open.end(),
-		                              [&d](const auto &document) { return document && document->path() == d.asset; });
-		if (open)
-			out.push_back({"Reload " + basename_of(d.asset),
-			               "Reads " + d.asset + " again from its file, which changed outside the editor: its unsaved "
-			               "edits are lost (it asks first) and its history starts again." + kNotUndoable,
-			               request::reload_document(d.asset), false});
+		// edits dropped (the Reload asks about them first, as any Reload does); or, while it has
+		// unsaved edits, they kept and written over what the other program saved (ADR 0046 DI-01:
+		// a Save that writes over, which Problems confirms first: fix_asks_first).
+		const auto open = std::find_if(view.documents.open.begin(), view.documents.open.end(),
+		                               [&d](const auto &document) { return document && document->path() == d.asset; });
+		if (d.asset.empty() || open == view.documents.open.end()) return;
+		out.push_back({"Reload " + basename_of(d.asset),
+		               "Reads " + d.asset + " again from its file, which changed outside the editor: its unsaved "
+		               "edits are lost (it asks first) and its history starts again." + kNotUndoable,
+		               request::reload_document(d.asset), false});
+		if ((*open)->dirty())
+			out.push_back({"Keep my edits and save over it",
+			               "Writes " + d.asset + " with your unsaved edits over its file: what the other program "
+			               "saved there is lost." + kNotUndoable,
+			               request::save_over(d.asset), false});
 		return;
 	}
 	case FindingFix::Reimport:
