@@ -61,6 +61,7 @@ bool FilePreferencesStore::load(Preferences &out, Diagnostic &finding) {
 	settings.game_install = json.get_string("game_install", "");
 	settings.play_in_install = json.get_bool("play_in_install", false);
 	settings.play_in_install_strict = json.get_bool("play_in_install_strict", false);
+	settings.save_before_play = json.get_bool("save_before_play", true);
 	settings.import_dependencies = json.get_bool("import_dependencies", true);
 	if (const io::JsonValue *recent = json.get("recent_projects"); recent && recent->is_array()) {
 		for (const io::JsonValue &item : recent->array) {
@@ -94,6 +95,7 @@ bool FilePreferencesStore::save(const Preferences &settings, Diagnostic &error) 
 	json.set("game_install", io::JsonValue::make_string(settings.game_install));
 	json.set("play_in_install", io::JsonValue::make_bool(settings.play_in_install));
 	json.set("play_in_install_strict", io::JsonValue::make_bool(settings.play_in_install_strict));
+	json.set("save_before_play", io::JsonValue::make_bool(settings.save_before_play));
 	json.set("import_dependencies", io::JsonValue::make_bool(settings.import_dependencies));
 	io::JsonValue recent = io::JsonValue::make_array();
 	for (const std::string &root : settings.recent_projects) recent.push(io::JsonValue::make_string(root));
