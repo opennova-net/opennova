@@ -119,6 +119,12 @@ begin "Jungle bush"
 	id 100016
 	type decoration
 end
+begin "Sandbag wall, 4.6 m"
+	graphic onsbag1
+	id 100017
+	type decoration
+end
+
 
 
 
