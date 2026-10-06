@@ -6,6 +6,7 @@
 
 #include <editor/documents/def_table.h>
 #include <editor/model/table_document.h>
+#include <formats/def/reserved_items.h>
 
 namespace opennova::editor {
 
@@ -68,7 +69,7 @@ public:
 
 protected:
 	// A step a Duplicate's name could not be set in is refused, saying why (prepare_duplicate).
-	bool accept_step(const EditStep &step, const StagedRows &rows, std::string &error) const override;
+	bool accept_step(const EditStep &step, const StagedRows &rows, StepRefusal &refusal) const override;
 	// An item's particle slot names a user point of the item's graphic model: the scope is
 	// that model's file, and a record with no graphic names none. An item's vehicle spawn
 	// slots offer the registry's ids (record_choices).
@@ -105,5 +106,23 @@ private:
 };
 
 bool is_catalog_kind(AssetKind kind);
+
+// The items.def ids the engine fixes (formats/def/reserved_items.h; itemdef-re.md, "The ids and rows the
+// engine fixes"), as the catalog keeps them. Whether an item's change from `before` (null: a row the
+// step adds) to `after` keeps them: a place or an objective the engine finds by its id
+// (ReservedItemRule::Refuse) stays on its id, and its id takes no item of another kind; a mismatch the
+// file already had is left as it was. False with why, and the field it is about ("id" or "type").
+bool reserved_change_allowed(const def::DefItemDef *before, const def::DefItemDef &after, std::string &why,
+                             std::string &field);
+// The place or objective an item's name names, by retail's own row name or the editor's words for it
+// (an item named "Insertion point" or "start, primary, player"; null for any other name).
+const def::ReservedItem *reserved_item_named(const std::string &name);
+// An item's type in words with its article ("a marker", "an effect", "an item of no type"), and a
+// reserved row as a message names it ("the Insertion point, a marker"; "the Parachute").
+std::string item_kind_words(int type);
+std::string reserved_item_words(const def::ReservedItem &row);
+// A batch adding the engine's row to an items.def, as the engine looks for it: an item named by the
+// row's words, on its id, of its kind (an Add and the Sets naming what it made: one undo step).
+std::vector<Edit> reserved_item_add_edits(const def::ReservedItem &row);
 
 } // namespace opennova::editor
