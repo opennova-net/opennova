@@ -899,6 +899,55 @@ func test_stylesheet_through_the_editor_mcp() -> void:
 	assert_true(bool(built.get("ok", false)), str(built))
 
 
+## The Problems rows naming `text`, once the validation an edit left due has made them (it steps a
+## frame at a time): the problems query's answer, its `shown` 0 when none came.
+func _problems_naming(text: String, want: bool) -> Dictionary:
+	var answer := {}
+	for _frame in 200:
+		answer = await _query("problems", {"text": text})
+		if (int(answer.get("shown", 0)) > 0) == want:
+			return answer
+		await get_tree().process_frame
+	return answer
+
+
+## DI-15: a missing name's first fix is Add it there, an edit_record of the file where the game looks it up,
+## passed back through the endpoint as it is: the sound profile an item names, added to SndProf.def and
+## selected there, the row gone; Undo of SndProf.def brings it back.
+func test_add_it_there_through_the_editor_mcp() -> void:
+	if _client == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova add there mcp %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Add there"})).get("ok", false)))
+	assert_true(bool((await _create_missing()).get("ok", false)))
+	var items := await _open("items.def")
+	var item := await _find("100000")
+	assert_gt(item, 0, str(items))
+	assert_true(_done(await _set_field(item, "sound_profile", "PROF_MCP")))
+	var problems := await _problems_naming("PROF_MCP", true)
+	assert_eq(int(problems.get("shown", 0)), 1, str(problems))
+	if int(problems.get("shown", 0)) != 1:
+		return
+	var fixes: Array = problems["problems"][0].get("fixes", [])
+	assert_gt(fixes.size(), 1, str(fixes))
+	var add: Dictionary = fixes[0]
+	assert_eq(String(add.get("label", "")), "Add PROF_MCP to SndProf.def", str(add))
+	assert_eq(String(add["request"].get("kind", "")), "edit_record")
+	assert_true(bool(add["request"].get("open_first", false)))
+	var profiles := String(add["request"].get("path", ""))
+	var applied := await _call("editor_request", add["request"])
+	assert_true(_done(applied), str(applied))
+	var documents: Dictionary = (await _state(["documents"])).get("documents", {})
+	assert_eq(String(documents.get("active", "")), profiles, str(documents))
+	var primary: Dictionary = (await _state(["selection"])).get("selection", {}).get("primary", {})
+	var selected := await _query("record", {"path": profiles, "id": int(primary.get("row", 0))})
+	assert_eq(String(selected.get("name", "")), "PROF_MCP", str(selected))
+	assert_eq(int((await _problems_naming("PROF_MCP", false)).get("shown", -1)), 0)
+	assert_true(_done(await _ask("undo", {"path": profiles})))
+	assert_eq(int((await _problems_naming("PROF_MCP", true)).get("shown", 0)), 1)
+
+
 ## The asset graph through the endpoint (S7): a blank project's references all resolve, a
 ## texture named by the menu is found from both ends, the rename rewrites the menu and
 ## moves the file, and a rename that would break a site the editor cannot rewrite is
