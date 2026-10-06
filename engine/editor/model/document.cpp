@@ -625,10 +625,18 @@ bool Document::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
 		return true;
 	}
 	// The step is the type's to refuse before it commits.
-	std::string message;
-	if (!accept_step(step, staged, message)) {
-		fail(error, path(), CoreFinding::DocumentStructure,
-		     message.empty() ? "This document refuses that change." : message);
+	StepRefusal refusal;
+	if (!accept_step(step, staged, refusal)) {
+		const std::string message = refusal.message.empty() ? "This document refuses that change." : refusal.message;
+		if (!refusal.code) {
+			fail(error, path(), CoreFinding::DocumentStructure, message);
+			return refused();
+		}
+		error = make_finding(*refusal.code, DiagnosticSeverity::Error, message, path(), refusal.field);
+		error.record = refusal.record_name;
+		error.row_id = refusal.record.row;
+		error.child_id = refusal.record.child;
+		error.record_kind = refusal.record.kind;
 		return refused();
 	}
 	history_.commit(std::move(step), key);
