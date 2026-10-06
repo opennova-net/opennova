@@ -395,6 +395,82 @@ int changes_since_save() {
 
 } // namespace
 
+// The mission authoring round's gaps: a section added under a name the table has (in any case) is that
+// section, the one a lookup reads first [orig: TextResource_FindEntryBySectionAndKey @ 0x75D250]: the Add
+// makes none, the session selects it and says so, and a batch's later edits fill it; and a string moved to
+// another section (a Move whose parent is that section) is added there with its key, its text and its
+// position and removed here, one undo step, its section the one its symbol's scope names.
+int section_names_and_moves() {
+	editor_test::TempProjectDir dir("opennova_strings_sections_test");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Sections"));
+	editor_test::create_missing_files(session);
+	const std::vector<uint8_t> bytes = minted_table();
+	std::string error;
+	TEST_EXPECT(write_file_atomic(session.view().project.root + "/strings/table.bin", bytes.data(), bytes.size(), error));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document("table.bin"));
+	auto *document = dynamic_cast<StringsDocument *>(session.document_for("table.bin"));
+	TEST_EXPECT(document != nullptr);
+	if (!document) return 1;
+	const NodeId menu = document->rows()[0]->id, wepdes = document->rows()[1]->id;
+	// "wepdes" added: the WepDes section selected, nothing added, the status saying so.
+	Edit add;
+	add.operation = EditOperation::Add;
+	add.address = {0, kSection, 0};
+	add.field = "name";
+	add.value = std::string("wepdes");
+	editor_test::handle_to_end(session, request::edit_record(document->path(), add));
+	TEST_EXPECT(session.last_edit_ok() && document->rows().size() == 2 && !document->dirty() &&
+	            document->last_found_rows() == std::vector<NodeId>{wepdes});
+	TEST_EXPECT(session.view().documents.selection.primary == NodeAddress({wepdes, kSection, 0}));
+	TEST_EXPECT(session.view().activity.status.find("Section WepDes is already in") != std::string::npos);
+	// The same Add with a string into what it named: the string lands in WepDes, one step.
+	Edit into;
+	into.operation = EditOperation::Add;
+	into.address = {0, kString, 0};
+	into.parent = batch_made(0);
+	into.field = "key";
+	into.value = std::string("WPN_TWO");
+	editor_test::handle_to_end(session, request::edit_record(document->path(), std::vector<Edit>{add, into}));
+	TEST_EXPECT(session.last_edit_ok() && document->rows().size() == 2 && document->rows()[1]->collections[0].size() == 2 &&
+	            text_of(*document, {wepdes, kString, document->rows()[1]->collections[0][1]}, "key") == "WPN_TWO");
+	document->undo();
+	// A new name makes a section as before.
+	add.value = std::string("Overlays");
+	editor_test::handle_to_end(session, request::edit_record(document->path(), add));
+	TEST_EXPECT(document->rows().size() == 3 && document->rows()[2]->name() == "Overlays" && document->last_found_rows().empty());
+	document->undo();
+	// MM_Cafe moved to WepDes: added there at its end with its key, text and position, removed from Menu.
+	const NodeAddress cafe{menu, kString, document->rows()[0]->collections[0][1]};
+	EditorRequest move = request::edit_record(document->path(), Edit());
+	move.edits[0].operation = EditOperation::Move;
+	move.edits[0].address = cafe;
+	move.edits[0].parent = wepdes;
+	editor_test::handle_to_end(session, move);
+	TEST_EXPECT(session.last_edit_ok() && document->rows()[0]->collections[0].size() == 1 &&
+	            document->rows()[1]->collections[0].size() == 2);
+	const rtxt::File moved = document->table();
+	TEST_EXPECT(moved.sections[0].string_count == 1 && moved.sections[1].string_count == 2 && moved.entries[2].key == "MM_Cafe" &&
+	            moved.entries[2].text == "Caf\xE9" && moved.entries[2].position.x == 12 && moved.entries[2].position.y == -3);
+	// The moved string selected where it now stands.
+	TEST_EXPECT(session.view().documents.selection.primary.row == wepdes);
+	document->undo();
+	TEST_EXPECT(document->table().entries[1].key == "MM_Cafe" && !document->dirty());
+	// A section's own move stays a move within it; a string moved into no section is refused.
+	Edit nowhere;
+	nowhere.operation = EditOperation::Move;
+	nowhere.address = cafe;
+	nowhere.parent = document->rows()[1]->collections[0][0];
+	std::vector<Edit> planned;
+	std::string why;
+	TEST_EXPECT(!document->move_out_edits(nowhere, planned, why) && !why.empty());
+	return 0;
+}
+
 int main() {
-	return load_edit_save() || validation_and_session() || changes_since_save() || moved_string_reads_itself();
+	return load_edit_save() || validation_and_session() || changes_since_save() || moved_string_reads_itself() ||
+	       section_names_and_moves();
 }
