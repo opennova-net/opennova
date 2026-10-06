@@ -58,6 +58,9 @@ bool make_blank_charattr_def(const BlankRequest &, std::vector<uint8_t> &out, Di
 // SndProf.def: the one "default" profile every item binds, every slot silent
 bool make_blank_sound_profiles(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
+// env (blank_environment.cpp): the environment writer's authoring template, named after the file
+bool make_blank_environment(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+
 // coo (blank_coo.cpp)
 bool make_blank_coo(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
