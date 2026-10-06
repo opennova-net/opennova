@@ -154,8 +154,12 @@ void terrain_field_store_resolve_tile_surfaces(TerrainFieldStore &store,
 	store.set_tile_surface_table(table);
 }
 
-bool terrain_field_store_load(TerrainFieldStore &store, const ResourceIndex &index,
-		const std::string &terrain_name, const std::string &tile_set, std::string &error) {
+namespace {
+
+// The one load body: `read` answers a file by its flat name (the resource index's, a file source's).
+template <typename Read>
+bool load_store(TerrainFieldStore &store, const Read &read, const std::string &terrain_name,
+		const std::string &tile_set, std::string &error, TrnConfig *trn_out) {
 	if (terrain_name.empty()) {
 		error = "the mission names no terrain";
 		return false;
@@ -207,19 +211,19 @@ bool terrain_field_store_load(TerrainFieldStore &store, const ResourceIndex &ind
 } // namespace
 
 bool terrain_field_store_load(TerrainFieldStore &store, const ResourceIndex &index,
-		const std::string &terrain_name, std::string &error) {
+		const std::string &terrain_name, const std::string &tile_set, std::string &error) {
 	const auto read = [&index](const std::string &name, std::vector<uint8_t> &out) {
 		return index.read_file(name, out);
 	};
-	return load_store(store, read, terrain_name, error, nullptr);
+	return load_store(store, read, terrain_name, tile_set, error, nullptr);
 }
 
 bool terrain_field_store_load(TerrainFieldStore &store, const FileSource &files,
-		const std::string &terrain_name, std::string &error, TrnConfig *trn) {
+		const std::string &terrain_name, const std::string &tile_set, std::string &error, TrnConfig *trn) {
 	const auto read = [&files](const std::string &name, std::vector<uint8_t> &out) {
 		return files.read(name, out);
 	};
-	return load_store(store, read, terrain_name, error, trn);
+	return load_store(store, read, terrain_name, tile_set, error, trn);
 }
 
 } // namespace opennova::terrain

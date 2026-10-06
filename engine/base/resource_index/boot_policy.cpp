@@ -42,7 +42,8 @@ std::string value_after(const std::vector<std::string> &args, const char *flag) 
 std::string expansion_after(const std::vector<std::string> &args) {
     std::string name;
     for (std::size_t i = 0; i < args.size(); ++i) {
-        if (!strutil::iequals(args[i], "/mod") && !strutil::iequals(args[i], "/exp")) continue;
+        if (!strutil::iequals(args[i], "/mod") && !strutil::iequals(args[i], kLaunchFlagExpansion))
+            continue;
         if (i + 1 >= args.size()) continue;
         ++i;
         name = launch_expansion_name(args[i]);
@@ -73,27 +74,28 @@ int int_after(const std::vector<std::string> &args, const char *flag, long lo, l
 
 LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     LaunchFlags f;
-    f.loose_override = has_flag(args, "/d");
+    f.loose_override = has_flag(args, kLaunchFlagLooseOverride);
     f.expansion = expansion_after(args);
-    f.game = strutil::to_lower(value_after(args, "/game"));
-    f.resource_dir = value_after(args, "--resource-dir");
-    f.resource_dir_given = has_flag(args, "--resource-dir");
-    f.loose_mission = value_after(args, "--loose-mission");
-    f.loose_root = has_flag(args, "--loose-root");
-    f.mission = value_after(args, "--mission");
-    f.lan_host = value_after(args, "--lan-host");
-    f.lan_join = value_after(args, "--lan-join");
-    f.lan_port = int_after(args, "--lan-port", 1, 65535, 0);
-    f.lan_gametype = int_after(args, "--lan-gametype", 0, 0x7fffffffL, -1);
-    f.lan_mode = int_after(args, "--lan-mode", 1, 4, 0);
-    f.lan_max_players = int_after(args, "--lan-max-players", 1, 64, 0);
-    f.spectator = has_flag(args, "--spectator");
-    f.spectator_password = value_after(args, "--spectator-password");
-    f.callsign = value_after(args, "--callsign");
-    f.integrity_profile = value_after(args, "--integrity-profile");
-    f.capture_pcap = value_after(args, "--capture-pcap");
-    f.mcp_port = int_after(args, "--mcp-port", 1, 65535, 0);
-    f.no_hud = has_flag(args, "/NOHUD"); // [orig: @0x4A79F6..0x4A7A09]
+    f.game = strutil::to_lower(value_after(args, kLaunchFlagGame));
+    f.resource_dir = value_after(args, kLaunchFlagResourceDir);
+    f.resource_dir_given = has_flag(args, kLaunchFlagResourceDir);
+    f.loose_mission = value_after(args, kLaunchFlagLooseMission);
+    f.loose_root = has_flag(args, kLaunchFlagLooseRoot);
+    f.mission = value_after(args, kLaunchFlagMission);
+    f.lan_host = value_after(args, kLaunchFlagLanHost);
+    f.lan_join = value_after(args, kLaunchFlagLanJoin);
+    f.lan_port = int_after(args, kLaunchFlagLanPort, 1, 65535, 0);
+    f.lan_gametype = int_after(args, kLaunchFlagLanGametype, 0, 0x7fffffffL, -1);
+    f.lan_mode = int_after(args, kLaunchFlagLanMode, 1, 4, 0);
+    f.lan_max_players = int_after(args, kLaunchFlagLanMaxPlayers, 1, 64, 0);
+    f.spectator = has_flag(args, kLaunchFlagSpectator);
+    f.spectator_password = value_after(args, kLaunchFlagSpectatorPassword);
+    f.callsign = value_after(args, kLaunchFlagCallsign);
+    f.integrity_profile = value_after(args, kLaunchFlagIntegrityProfile);
+    f.capture_pcap = value_after(args, kLaunchFlagCapturePcap);
+    f.mcp_port = int_after(args, kLaunchFlagMcpPort, 1, 65535, 0);
+    f.working_dir = value_after(args, kLaunchFlagWorkingDir);
+    f.no_hud = has_flag(args, kLaunchFlagNoHud); // [orig: @0x4A79F6..0x4A7A09]
     return f;
 }
 

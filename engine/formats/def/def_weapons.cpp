@@ -886,6 +886,8 @@ int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *o
                              DefTextNotes &notes) {
     memset(out, 0, sizeof(*out));
     notes = DefTextNotes();
+    // A zero-length file is an empty table, as the overload above reads one.
+    if (size == 0) return 0;
     if (!data) return -1;
     DefTextNoter noter((const char *)data, size, &notes);
     const int rc = parse_weapons_buf((const char *)data, size, out, report, nullptr, noter);

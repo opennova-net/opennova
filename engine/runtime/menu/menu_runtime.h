@@ -346,8 +346,9 @@ public:
 	//  @0x54e635]
 	void trim_screen_history() { history_.return_to_mark(false, nullptr); }
 
-	// ---- addressing (document-wide, doc-id keyed) ----
-	// Case-insensitive, first match in document order; -1 = absent.
+	// ---- addressing (doc-id keyed) ----
+	// The embedder's by-name seam: the current screen's control (find_control),
+	// else the first screen in document order holding one; -1 = absent.
 	int widget_id(const std::string &name) const;
 	// Retail's control lookup [orig: UI_FindScreenControl @ 0x63ae80]: the
 	// screen of that name (empty: the current screen; a duplicate name finds
@@ -627,7 +628,7 @@ private:
 	std::string current_screen_;
 	std::vector<std::string> nav_stack_;
 	ScreenHistory history_; // kept across open_document
-	std::unordered_map<std::string, int> screen_ids_; // upper name -> screen id
+	std::unordered_map<std::string, int> screen_ids_; // upper name -> the LAST screen id
 	std::vector<std::string> screen_order_;
 	std::unordered_map<int, WidgetInfo> id_info_;
 	std::vector<MenuHotkeyRow> hotkeys_;

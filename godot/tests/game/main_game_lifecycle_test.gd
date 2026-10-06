@@ -421,7 +421,7 @@ func test_mission_return_shows_the_screen_it_was_started_from() -> void:
 	assert_eq(driver.get_current_screen(), "LAN_MULTI_PLAYER",
 			"the menu returns to the screen the mission was started from")
 	assert_eq(menu_shell.get_menu_stack_depth(), 1, "STARTUP is still under it")
-	driver.quit_requested.emit()
+	driver.pop_screen()
 	assert_eq(menu_shell.get_current_menu_file().to_lower(), "main.mnu")
 	assert_eq(driver.get_current_screen(), "STARTUP")
 

@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include <formats/def/def.h>
+#include <formats/def/def_notes.h>
 
 #include <string>
 
@@ -81,6 +82,15 @@ int main(int argc, char **argv) {
             return 1;
         }
         def_free_weapons(&empty);
+        // The editor's noted read takes the same rule.
+        DefTextNotes notes;
+        DefWeaponsFile noted{};
+        if (def_parse_weapons_memory(nullptr, 0, &noted, nullptr, notes) != 0 || noted.count != 0) {
+            fprintf(stderr, "FAIL: a zero-length weapon.def read with notes is an empty table\n");
+            def_free_weapons(&noted);
+            return 1;
+        }
+        def_free_weapons(&noted);
         DefWeaponsFile refused{};
         if (def_parse_weapons_memory(nullptr, 4, &refused) == 0) {
             fprintf(stderr, "FAIL: a null buffer with a length is refused\n");

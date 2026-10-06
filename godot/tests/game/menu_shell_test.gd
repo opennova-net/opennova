@@ -254,11 +254,11 @@ func test_cross_mnu_jump_to_a_missing_screen_changes_nothing() -> void:
 # Leaving a mission returns to the screen it was started from, the history under
 # it kept (D-MNU-28, docs/mnu/menu-re.md; the engine half is ctest screen_history).
 # The start leaves the menu once: a restart's reload marks nothing more. In the
-# mission a back pops nothing past the mark, so it resumes.
+# mission a POP_SCREEN pops nothing past the mark, and the named back resumes.
 func test_mission_return_shows_the_screen_it_was_started_from() -> void:
 	var dir := _make_dir()
-	TestFs.write_bytes(self, dir.path_join("game.mnu"),
-			MenuDriverFixture.screen_xml("INGAME", "").to_utf8_buffer())
+	TestFs.write_bytes(self, dir.path_join("game.mnu"), MenuDriverFixture.screen_xml(
+			"INGAME", MenuDriverFixture.wnd("button", "HIDDEN_BACK", 20)).to_utf8_buffer())
 	var shell = _make_shell(dir)
 	if shell == null:
 		pending("temp resource root unavailable")
@@ -279,7 +279,11 @@ func test_mission_return_shows_the_screen_it_was_started_from() -> void:
 	# The in-game menu: its back never reaches the menu's screens.
 	assert_true(shell.open_ingame_menu(), "the in-game overlay loads")
 	watch_signals(shell)
-	driver.quit_requested.emit()
+	driver.pop_screen()
+	assert_signal_not_emitted(shell, "resume_requested", "a POP_SCREEN stops at the mark")
+	assert_eq(shell.get_current_menu_file(), "game.mnu", "the pop reached no menu screen")
+	assert_eq(shell.get_menu_stack_depth(), 3)
+	driver.widget_activated.emit(driver.widget_id("HIDDEN_BACK"), "HIDDEN_BACK")
 	assert_signal_emitted(shell, "resume_requested")
 	assert_eq(shell.get_current_menu_file(), "game.mnu", "the back popped no menu screen")
 	assert_eq(shell.get_menu_stack_depth(), 3)
@@ -289,7 +293,7 @@ func test_mission_return_shows_the_screen_it_was_started_from() -> void:
 	assert_eq(driver.get_current_screen(), "LOADOUT", "back on the screen the mission left")
 	assert_eq(shell.get_menu_stack_depth(), 1, "STARTUP is still under it")
 	# Its back is the menu's again.
-	driver.quit_requested.emit()
+	driver.pop_screen()
 	assert_eq(shell.get_current_menu_file(), "main.mnu")
 	assert_eq(driver.get_current_screen(), "STARTUP")
 	assert_eq(shell.get_menu_stack_depth(), 0)

@@ -1208,8 +1208,8 @@ mnu::Document flow_document(bool options = false) {
 		widget("OPTIONS_WRAPPER", mnu::WindowType::Window)};
 	// The host screen's rotation table authors three columns: the mission, its
 	// mode, its Switch cell.
-	screen.root_window.children[4].table_data.column.has_count = true;
-	screen.root_window.children[4].table_data.column.count = 3;
+	root.children[4].table_data.column.has_count = true;
+	root.children[4].table_data.column.count = 3;
 	auto filter = widget("GAME_TYPE", mnu::WindowType::SpinList);
 	filter.items.present = true;
 	filter.items.items = {item("All", "255"), item("Team", "1")};

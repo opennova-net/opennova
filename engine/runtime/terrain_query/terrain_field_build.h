@@ -63,6 +63,12 @@ void terrain_field_store_build(TerrainFieldStore &store, const CptFile &cpt,
 // terrain_field_store_build directly.
 bool terrain_field_store_load(TerrainFieldStore &store, const ResourceIndex &index,
 		const std::string &terrain_name, const std::string &tile_set, std::string &error);
+// The same load over any flat-name file source (the editor's project files, its open documents
+// standing in for theirs): the .trn it parsed handed back in `trn` where asked (its water height,
+// the mission's tile strip and its char map name).
+bool terrain_field_store_load(TerrainFieldStore &store, const FileSource &files,
+		const std::string &terrain_name, const std::string &tile_set, std::string &error,
+		TrnConfig *trn = nullptr);
 
 // The mission .til placements onto the store's placed-tile overlay: the S2C
 // 0x45 stream's til0 bytes folded to the surface walk's rows (unparseable or

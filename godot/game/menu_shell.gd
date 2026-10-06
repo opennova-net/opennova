@@ -719,6 +719,17 @@ func _current_expansion() -> String:
 
 func _on_menu_requested(file: String, target_screen: String) -> void:
 	# Cross-.mnu forward jump: remember where we are so the back stack can return.
+	# A file that does not load, or a target screen it does not hold, changes
+	# nothing: retail's select finds no such screen and keeps the current one,
+	# its history untouched (docs/mnu/menu-re.md, "Activation and the ACTION
+	# walk").
+	var doc := _load_doc(file)
+	if doc == null:
+		push_warning("MenuShell: could not load menu '%s'" % file)
+		return
+	if not target_screen.is_empty() and not _doc_has_screen(doc, target_screen):
+		push_warning("MenuShell: menu '%s' has no screen '%s'" % [file, target_screen])
+		return
 	var previous_file := _current_file
 	var previous_screen := _driver.get_current_screen()
 	if open_menu(file, target_screen):
@@ -736,10 +747,11 @@ func _doc_has_screen(doc: MnuDocument, screen_name: String) -> bool:
 # the one history retail keeps across every loaded file; with none, nothing
 # happens (retail pops only a non-empty history; docs/mnu/menu-re.md).
 func _on_pop_requested() -> void:
-	if _menu_stack.is_empty():
-		return
-	var prev: MenuStackEntry = _menu_stack.pop_back()
-	open_menu(prev.file if not prev.file.is_empty() else main_menu_file, prev.screen)
+	# In a mission the history's top is the mark on the screen the mission was
+	# started from, which pops nothing (D-MNU-28).
+	var prev := _driver.pop_screen_history()
+	if prev.size() == 2:
+		open_menu(prev[0] if not prev[0].is_empty() else main_menu_file, prev[1])
 
 
 # The named back/quit Command (HIDDEN_BACK, the retail per-control callback):

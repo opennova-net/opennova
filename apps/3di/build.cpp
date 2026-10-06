@@ -14,8 +14,6 @@
 
 #include "threedi_cli.h"
 
-using namespace opennova::threedi;
-
 namespace opennova::threedi_cli {
 
 int cmd_build(const char *scene_path, const char *out_path) {
