@@ -123,6 +123,12 @@ bool can_make_blank_texture(const std::string &logical_name, std::string &reason
 // load: TGA, PCX or DDS by the name's extension; None for a name the factory does not make.
 renderer::MaterialTextureReader blank_texture_reader(const std::string &logical_name);
 
+// The shaders the editor makes (blank_shader.cpp): the shader tags it writes an object effect for (a new
+// .fx's `tag`), and the text of the one for `tag` named `file` (_ffp.fx's whatever the tag; "" for a tag
+// it makes none for), as the file holds it decoded, its lines ending LF.
+const std::vector<std::string> &blank_shader_tags();
+std::string blank_shader_text(const std::string &tag, const std::string &file);
+
 // What the blank tables carry, for the tests: the sections the game reads from
 // gametext.bin by name, and the "Menu" keys the blank startup screen resolves its labels
 // through.
