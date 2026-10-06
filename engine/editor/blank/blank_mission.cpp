@@ -5,6 +5,7 @@
 #include <editor/project/project_files.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
+#include <formats/til/til_io.h>
 
 namespace opennova::editor {
 
@@ -41,6 +42,18 @@ bool make_blank_mission(const BlankRequest &request, std::vector<uint8_t> &out, 
 		return false;
 	}
 	return true;
+}
+
+// A mission's tile placement with no tile placed (an empty TilFile: the header and a count of none),
+// written through the .til writer. The game reads <mission>.til as the mission's terrain loads, the
+// terrain's own placement only where the mission has none [orig: Terrain_Init @ 0x60fbe0, the name @
+// 0x60fd0c; Terrain_LoadTileInfoFile @ 0x60a740], and every shipped mission carries its own beside it.
+bool make_blank_tile_info(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
+	std::string why;
+	if (save_til(TilFile(), out, why)) return true;
+	out.clear();
+	error = make_finding(CoreFinding::BlankMission, DiagnosticSeverity::Error, why, request.logical_name);
+	return false;
 }
 
 // A script that does nothing yet: a comment naming it (the compiler reads `//` to the line's end).

@@ -104,10 +104,19 @@ void EnvironmentState::update_tod() {
 		// lerps the .env colors toward the overcast table's
 		// [orig: Environment_ComputeTimeOfDayColors @ 0x57de40 ->
 		//  Environment_LerpKeyframeSet @ 0x57c3b0].
-		if (overcast_config_ != nullptr && !overcast_config_->keyframes.empty() &&
-				weather_live() && weather_->overcast_for_tod_q16 > 0) {
-			const TodState overcast = interpolate_tod(overcast_config_->keyframes,
-					static_cast<float>(time_of_day_), overcast_config_->envscale);
+		// With no overcast table (no overcast.def and a .trn without tod
+		// blocks) the lerp still runs, toward black: the empty table's search
+		// writes no index and the lerp reads the snapshot Environment_InitDefaults
+		// zeroed (env #41) [orig: Environment_FindKeyframeSegment @ 0x57ddbd,
+		// the count gate; the calls @ 0x57dffb / @ 0x57e029 have none;
+		// Environment_InitDefaults @ 0x57c01e, memset over g_EnvTrnSnapshotTable
+		// @ 0x26c7414].
+		if (weather_live() && weather_->overcast_for_tod_q16 > 0) {
+			const bool has_table = overcast_config_ != nullptr && !overcast_config_->keyframes.empty();
+			const TodState overcast = has_table
+					? interpolate_tod(overcast_config_->keyframes,
+							  static_cast<float>(time_of_day_), overcast_config_->envscale)
+					: TodState{};
 			tod_ = blend_tod_states(tod_, overcast, weather_->overcast_for_tod_q16);
 		}
 	}

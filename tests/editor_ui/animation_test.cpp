@@ -299,12 +299,81 @@ void test_animations_keep_options() {
 	ui.drain();
 }
 
+// A weapon's map in first person (DI-13): the First person popup says what draws, its Eye is the viewport's
+// first-person view, and the timeline's legend names the action's set and says the clip's events go unread.
+void test_first_person() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_first_person");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(preview_project(session, dir), "the preview project");
+	const SessionView &v = session.view();
+	// Where the project keeps a file of the name (a blank Create Missing made), else at its top.
+	const auto at = [&](const std::string &name) {
+		const AssetEntry *entry = v.project.scan ? v.project.scan->find(name) : nullptr;
+		return v.project.root + "/" + (entry ? entry->relative_path : name);
+	};
+	// The map is a weapon's (its animadm beside its gfx1), no item's; the walk is its FIRE's clip.
+	CHECK(editor_test::write_text(v.project.root + "/defs/items.def",
+	                              "begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\nend\n") &&
+	              editor_test::write_text(at("weapon.def"),
+	                                      editor_test::crlf("weapon \"WPN_SKIN\"\n\tclipsize 10\n\tanimadm skin\n\tgfx1 skinned\n"
+	                                                        "\taction \"fire\"\n\t\tanim anim_walk_forward\n\t\tsoundsetend GS_SKIN\n"
+	                                                        "\t\tfunction wpn_std_fire\n\tend\nend\n")) &&
+	              editor_test::write_text(at("Avatars.def"),
+	                                      editor_test::crlf("define head H1\n{\n\tgraphic skinned.3di\n}\n"
+	                                                        "define body B1\n{\n\tgraphic skinned.3di\n}\n"
+	                                                        "define arms A1\n{\n\tgraphic armory.3di\n}\n"
+	                                                        "nationality 0 AV_N\n{\n\talignment good\n\tdivision 0 AV_D\n"
+	                                                        "\t{\n\t\tcombo 1 H1 B1 A1\n\t}\n}\n")),
+	      "the weapon and the characters written");
+	session.handle(request::rescan());
+	session.run_operations();
+	while (v.activity.validation.running) session.poll();
+	DrawnDevices devices;
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	ClipRun run{session, devices, ui};
+	const std::string path = "anims/SKIN.adm";
+	session.handle(request::open_document(path));
+	Document *table = session.document_for(path);
+	NodeAddress walk;
+	CHECK(table && find_definition(AssetGraph(), *table, "anim_walk_forward", walk), "the walk row");
+	if (!table) return;
+	session.handle(request::select_record(path, walk));
+	session.handle(request::set_viewport(path, R"({"clock": {"playing": false, "ticks": 0}})"));
+	run.settle();
+	const ModelViewport *model = run.model(path);
+	CHECK(model && model->first_person().active() && model->first_person().arms_model(), "the gun with its arms");
+	if (!model) return;
+	ui.away();
+	std::string text = lowered(logged_frame(ui));
+	CHECK(text.find("first person###first_person") == std::string::npos && text.find("first person") != std::string::npos,
+	      "the First person button");
+	CHECK(text.find("e fire's set") != std::string::npos, "the legend names the action's set");
+	CHECK(text.find("events: not read in first person") != std::string::npos, "the clip's events go unread");
+	const ImGuiID scope = item_id(Ui::window_id("Preview"), {"model", path.c_str()});
+	ui.activate(item_id(scope, {"First person###first_person"}));
+	run.settle(1);
+	text = lowered(logged_frame(ui));
+	CHECK(text.find("wpn_skin draws skinned with armory.3di") != std::string::npos, "what draws, in words");
+	CHECK(text.find("gs_skin plays as fire finishes") != std::string::npos, "the action's leg in words");
+	ui.activate(popup_item(ImHashStr("first_person", 0, scope), "Eye"));
+	run.settle(1);
+	CHECK(model->options().first_person.eye && model->eye_view() && model->camera().posed, "Eye: the first-person eye");
+	ui.away();
+	CHECK(lowered(logged_frame(ui)).find("first person (eye)") != std::string::npos, "the button says the eye shows");
+	ui.drain();
+}
+
 } // namespace
 
 void run_animation_tests() {
 	test_timeline();
 	test_event_press();
 	test_animations_keep_options();
+	test_first_person();
 }
 
 } // namespace editor_ui_test
