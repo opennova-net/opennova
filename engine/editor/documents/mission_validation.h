@@ -48,6 +48,7 @@ enum class MissionFinding {
 	BoundingBox,
 	Pool, // an entity in another pool than its item's TYPE places it in (the mission's use check)
 	NoStart, // a mission of no game mode bit with no marker its player starts at (the player stays at the origin)
+	OffGround, // an entity the game leaves off the ground (the mission's project check, preview/mission_ground_check.h)
 	kCount
 };
 const FindingCodeRow &finding_code(MissionFinding code);
