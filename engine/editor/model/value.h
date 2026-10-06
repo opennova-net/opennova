@@ -48,8 +48,7 @@ enum class FieldType { Integer, Unsigned, Byte, Count, Real, Text };
 // of its own file by its index (a Record reference, S13 D8). A document type resolves each kind
 // against the project (reference_status, graph/reference_queries). What each kind is to the graph
 // (its token, words, where it resolves, how names compare, what a missing one means) is its row in
-// graph/reference_kinds: a new kind is one value here and one row there, UserPoint staying the
-// last.
+// graph/reference_kinds: a new kind is one value here and one row there, Shader staying the last.
 enum class ReferenceKind {
 	None, Model, AnimationMap, Ammo, Weapon, Item, Texture, Sound, Particle, AiProfile,
 	OtherText, // a text key the editor does not resolve yet
@@ -86,6 +85,7 @@ enum class ReferenceKind {
 	MissionStrings, // a mission's own string table, a .bin by its name (else medmssn.bin)
 	BankWave,       // a sound bank's wave by its name, in the bank the scope names (a member's)
 	SoundProfile,   // a SndProf.def profile by its name (an item's sound_profile)
+	Shader,         // a model material's shader, by the tag an effect (.fx) registers under
 };
 
 // Whether the game reads a field on a particular record (Document::field_on). Ignored is
