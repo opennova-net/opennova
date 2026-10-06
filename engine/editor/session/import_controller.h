@@ -79,10 +79,6 @@ public:
 	void preview_texture_source(const EditorRequest &request);
 	// The texture_source dialog closed (CancelTextureSource, and a Replace or an Edit externally done).
 	void close_texture_source();
-	// RefreshChangedSources (S18): what a program saved of the watched files (external_changes: the import
-	// sources, their inputs, the PNGs the game reads as they are) refreshed alone, once settled
-	// (SessionCore::start_changed_refresh); nothing otherwise.
-	void refresh_changed_sources();
 	// The game install's file names, for the Import fixes (problem_fixes.h), and for a project that
 	// builds as an expansion its base game's, for its build's gate (ADR 0046 S16).
 	void refresh_install_files();
