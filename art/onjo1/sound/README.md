@@ -1,8 +1,8 @@
 # `art/onjo1/sound/`: the base game's sounds
 
 The sources of the base game's sounds (`assets/`): the footsteps, deaths, falls
-and parachute the infantry sound profile plays and the impacts the carbine's
-round plays on each surface.
+and parachute the infantry sound profile plays, the impacts the carbine's
+round plays on each surface, and the cues the engine plays by names of its own.
 Every game file is our own: cut, layered and processed from CC0 recordings, or
 synthesised. The original game's sounds are reference only: extracted to a
 scratch folder outside the repo, measured and never committed or imported.
@@ -162,6 +162,34 @@ The original's sets in `game.lwf`:
 |---|---|---|---|---|---|
 | `LPNV_RAIN_L` / `_R` | 300, flags 0xF | 1 / 1 | 0xFFFF, 0 | 180 (255) | `RAINL.WAV` / `RAINR.WAV`: 13.65 s, 22050 Hz 16-bit, steady rain; RMS -24.7 / -23.7 dB, centroid 4.0 / 4.2 kHz, half the energy at 1 to 4 kHz |
 
+### The engine's own sets
+
+The engine plays a set of its own name for an objective shown, a refused
+weapon key, night vision, a water entry, a scripted lightning strike, drowning
+and more, whatever the game's profiles say: 84 names in a registry it resolves
+at mission load and a few literals beside it (all listed, each with the event
+that plays it, in `docs/audio/lwf-dbf-sound-re.md`, "The sets the engine plays
+by name"). A name the banks lack is silence. The original's sets for the ones
+our game can reach (`gamelocl.lwf` holds the `BM1_` voices, `game.lwf` the rest):
+
+| Set | Layer (falloff) | Members | Member pitch, jitter | Volume (clamp) | Waves |
+|---|---|---|---|---|---|
+| `NEW_GOAL` | 40 | 1 | 0xFFFF, 0 | 185 | 0.20 s, 22050 Hz 8-bit, a comms beep, centroid 2.8 kHz; loudest 50 ms -8.7 dB |
+| `START_MISSION` | 1000, flags 0x17 (in order) | 3 | 0xFFFF, 0 | 210 | 8.3 to 9.2 s, 22050 Hz 16-bit, a low sting, 90 % under 250 Hz; loudest -7.6 to -8.6 dB |
+| `DRY_CLAYSATCH` | 50 | 1 | 0x13332 (1.2), 0 | 215 | a dry-fire click (0.34 s, 8-bit); loudest -11.5 dB |
+| `NV_ON` / `NV_OFF` | 20 | 1 / 1 | 0xFFFF, 0 | 160 | 0.10 / 0.11 s, 8-bit, a whine above 4 kHz; loudest -16.6 / -18.1 dB |
+| `GF_SCOPE` | 40 | 1 | 0xCB326 (12.7), 0 | 210 | a 0.07 s rock impact played 12.7 times as fast, a tick; loudest -17.4 dB |
+| `SURFACE_WTR` | 40; 60 | 1; 1 | 0x1CCCA (1.8); 0x16664 (1.4) | 120; 120 | the lake-lapping loop (3.58 s, loudest -13.2 dB) and a swim stroke (1.45 s, -9.9 dB), played faster |
+| `BODYWATER1` | 50; 80 | 2; 1 | 0x1E664 (1.9), 0x19998 (1.6), jitter 0x3D70; 0xE665 (0.9) | 205; 100 | two debris plunges (2.86, 2.91 s, 4-bit ADPCM, 43 and 84 % under 250 Hz; -10.4, -6.6 dB) and a splash (1.90 s, centroid 2.9 kHz; -8.6 dB) |
+| `THUNDER` | 3000; 200, flags 0x20E | 4; 5 | 0xFFFF, 0 (one 0x1997); 0xFFFF, 0x1997 to 0x4CCC | 100 (100); 0 to 40 (0 to 40) | four distant rumbles (3.0 to 6.6 s, two at 11025 Hz, 71 to 84 % under 250 Hz; -3.8 to -5.9 dB) and, near, a silent member, a crack (3.6 s, -6.2 dB) and three sweeteners (1.9 to 2.7 s; -6.1, -17.3, -7.4 dB) |
+| `BM1_SURFACE_BREATH` | 35 | 2 | 0xFFFF, 0 | 110 | 1.64, 0.54 s, 8-bit, breaths; -6.1, -7.6 dB |
+| `BM1_SURFACE_GASP` | 45 | 2 | 0xFFFF, 0 | 110 | 2.34, 3.32 s, gasping; -6.5, -3.5 dB |
+| `BM1_WATER_GAG` | 35 | 3 | 0xFFFF, 0 | 230 | 1.72 to 3.65 s, gurgling under water, centroid 0.26 to 0.33 kHz; -4.3, -3.7, -4.0 dB |
+
+JO:CA ships none of `PU_EXIT_CONFIRM` (the Exit Mission key), `HEADSHOTTONE`
+(the score fanfare's tone, and each step of a win epilog's score counter) and
+`TEXT_END` (the counter reaching its value): the original plays silence there.
+
 ### What the engine does with an impact table
 
 In `AmmoDef_ParseProperty @ 0x40A2D0`, a `none` hit effect skips the effect intern (@ 0x40A51A) with no log; any other
@@ -211,11 +239,23 @@ Measured the same way (means per family; retail's in brackets):
 | Parachute flapping | 6 + 1 | 2.40 to 2.60 s, 0.71 s (2.40 to 2.61, 0.71) | 0.6 kHz (1.0) | -15.8 dB RMS (-16.9) |
 | Free fall | 8 | 2.35 to 4.54 s (2.35 to 4.54) | 0.6 kHz (0.7) | -12.2 dB RMS (-17.4) |
 | Rain, left and right | 1, 1 | 13.65 s (13.65) | 3.5 kHz (4.0, 4.2) | -24.0 dB RMS (-24.7, -23.7) |
+| Objective chirp | 1 | 0.18 s (0.20) | 2.8 kHz (2.8) | -4.4 dB (-8.7) |
+| Exit chirp | 1 | 0.18 s (none in retail) | 2.9 kHz | -4.3 dB |
+| Counter tick, counter stop | 1, 1 | 45 ms, 0.42 s (none in retail) | 2.5, 1.3 kHz | -11.6, -9.0 dB |
+| Night vision on, off | 1, 1 | 0.10, 0.11 s (0.10, 0.11) | 7.1, 6.7 kHz (7.3, 7.9) | -5.1, -5.5 dB (-16.6, -18.1) |
+| Mission-start sting | 3 | 8.33 to 9.24 s (8.33 to 9.24) | 0.13 to 0.16 kHz (0.29 to 0.32) | -5.2 to -6.8 dB (-7.6 to -8.6) |
+| Body plunges, splash | 2, 1 | 2.72, 2.80 s; 1.58 s (2.86, 2.91; 1.90) | 0.4; 1.6 kHz (0.6; 2.9) | -6.6, -9.3; -8.6 dB (-6.6, -10.4; -8.6) |
+| Distant thunder | 4 | 2.97 to 6.65 s (2.97 to 6.65) | 0.16 to 0.30 kHz (0.15 to 0.21) | -3.6 to -5.9 dB (-3.8 to -5.9) |
+| Near thunder | 1 + 3 | 3.60 s; 1.91 to 2.65 s (3.60; 1.91 to 2.65) | 0.47; 0.23 to 0.42 kHz (0.57; 0.68 to 1.37) | -6.2; -5.4 to -9.7 dB (-6.2; -6.1 to -17.3) |
+| Surfacing breaths | 2 | 1.64, 0.54 s (1.64, 0.54) | 0.7, 0.5 kHz (1.6, 1.0) | -5.0, -7.6 dB (-6.1, -7.6) |
+| Surfacing gasps | 2 | 2.34, 3.32 s (2.34, 3.32) | 0.8, 0.9 kHz (0.9, 0.5) | -6.5, -3.5 dB (-6.5, -3.5) |
+| Drowning | 3 | 2.70 to 3.55 s (1.72 to 3.65) | 0.26 to 0.64 kHz (0.26 to 0.33) | -3.3 to -4.3 dB (-3.7 to -4.3) |
 
 The member volumes below match each family's loudness to retail's: retail's
 volume times the ratio of the two families' loudest-50 ms RMS, at most 255;
 for the long winds and flaps (`ON_FREEFALL`, `ON_CHUTE_GLIDE`) the ratio of
-their whole-file RMS.
+their whole-file RMS. The interface cues the original lacks (the exit chirp,
+the counter tick and stop) are levelled with the objective chirp.
 
 ## The sets and the profile (`game.lwf`, `SndProf.def`)
 
@@ -283,6 +323,30 @@ member's base, "jitter" its random range, both Q16.
 | `ON_FREEFALL` | 50 | `onfrfall1` to `8` | 0x14CCB | 0x3333 | 104 |
 | `LPNV_RAIN_L` | 300 | `onrainl` | 0xFFFF | 0 | 180 |
 | `LPNV_RAIN_R` | 300 | `onrainr` | 0xFFFF | 0 | 180 |
+| `NEW_GOAL` | 40 | `onnewgol` | 0xFFFF | 0 | 113 |
+| `START_MISSION` | 1000, flags 0x17 | `onstmis3`, `onstmis1`, `onstmis2` | 0xFFFF | 0 | 142, 189, 187 |
+| `DRY_CLAYSATCH` | 50 | `onar15dry` | 0x13332 | 0 | 156 |
+| `NV_ON` | 20 | `onnvon` | 0xFFFF | 0 | 43 |
+| `NV_OFF` | 20 | `onnvoff` | 0xFFFF | 0 | 37 |
+| `GF_SCOPE` | 40 | `onimpcem1` | 0xCB326 | 0 | 66 |
+| `PU_EXIT_CONFIRM` | 40 | `onpuexit` | 0xFFFF | 0 | 112 |
+| `HEADSHOTTONE` | 40 | `onscrtck` | 0xFFFF | 0 | 150 |
+| `TEXT_END` | 40 | `ontxtend` | 0xFFFF | 0 | 185 |
+| `SURFACE_WTR` | 40 | `onfswat4` | 0x1CCCA | 0 | 62 |
+| | 60 | `onfsswm2` | 0x16664 | 0 | 101 |
+| `BODYWATER1` | 50 | `onbdwtr1` | 0x1E664 | 0x3D70 | 181 |
+| | | `onbdwtr2` | 0x19998 | 0x3D70 | 205 |
+| | 80 | `onsplsh1` | 0xE665 | 0 | 100 |
+| `THUNDER` | 3000 | `onthdst1`, `onthdst2` (clamp 100) | 0xFFFF | 0 | 100 |
+| | | `onthdst3` (clamp 100) | 0xFFFF | 0x1997 | 99 |
+| | | `onthdst4` (clamp 100) | 0xFFFF | 0 | 98 |
+| | 200, flags 0x20E | `onnull` (clamp 0) | 0xFFFF | 0 | 0 |
+| | | `onthcrk1` (clamp 40) | 0xFFFF | 0x1997 | 40 |
+| | | `onthswt1`, `onthswt2` (clamp 30) | 0xFFFF | 0x3333 | 28, 13 |
+| | | `onthswt3` (clamp 40) | 0xFFFF | 0x4CCC | 40 |
+| `BM1_SURFACE_BREATH` | 35 | `onsrfbr1`, `onsrfbr2` | 0xFFFF | 0 | 97, 110 |
+| `BM1_SURFACE_GASP` | 45 | `onsrfgp1`, `onsrfgp2` | 0xFFFF | 0 | 110 |
+| `BM1_WATER_GAG` | 35 | `ondrown1` to `3` | 0xFFFF | 0 | 230, 220, 222 |
 
 A layer plays one member, chosen at random, and every layer of a set plays at
 once, so a silent `onnull` member is the chance that the second layer adds
@@ -293,6 +357,25 @@ the ones its `weapon.def` row names (`GS_ONAR15` fire, `GF_ONAR15_RL` reload,
 The rain's two sets keep the engine's names, which it plays by name while a
 mission rains; their volume and falloff are the original's, the loops matched
 to its loudness.
+
+The engine's own sets after them keep its names too: the objective chirp as a
+mission shows an objective, the dry click (the carbine's, at 1.2) when a weapon
+key finds nothing to switch to, night vision's whine on and off, the scope's
+tick (a cement crack at 12.7, as the original plays a rock), the exit chirp on
+the Exit Mission key, the counter tick and stop on a won mission's score
+screen, the mission-start sting (in order, one per start) on the start splash,
+which runs only over a mission's own loading image (`<mission>.pcx`; Indigo
+Shore has none), thunder on a script's lightning, and the water entries and
+the drowning. Each copies the original's layers, falloff, member count, pitch
+and jitter; where the original plays a wave of another set faster, ours does
+the same with our counterpart (`SURFACE_WTR` a water step and a swim stroke,
+`DRY_CLAYSATCH` the carbine's dry fire, `GF_SCOPE` a cement hit), and the new
+waves are authored at the pitch the set restores (the plunges slowed 1.75 and
+1.6 times, the splash sped up 1.11). `BODYWATER1` is the entry from the air
+(a plunge and a splash), `SURFACE_WTR` wading in and a swimmer's dive. Every
+engine name the base game cannot reach stays out: the vehicles' and the
+ships', the multiplayer flag, zone, squad and medic cues, glass, powerups that
+heal, a carried goal, a missile lock and the rows the engine never reads.
 
 The infantry profile `on_soldier` in `SndProf.def`, which the player and enemy
 person items name with `sound_profile on_soldier`:

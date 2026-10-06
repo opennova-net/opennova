@@ -25,7 +25,6 @@ const FIRE_SAMPLES := 10
 const FIRE_SAMPLE_FRAMES := 10
 const RELOAD_PLAYS := 3
 const RELOAD_POLLS := 30
-const BANK_SETS := ["GS_M4", "GF_RL_AR15_2", "SHELLDROP", "DRY_TRIGGER"]
 const TEXT_FILES := ["menutxt.BIN", "Game.bin", "gametext.bin"]
 
 var _ctx: ProbeContext
@@ -287,7 +286,7 @@ func _fire_diag() -> void:
 		await _ctx.wait_frames(60)
 	var audio := world.get_mission_audio()
 	if audio != null:
-		for set_name in BANK_SETS:
+		for set_name in _equipped_weapon_sets():
 			_ctx.log("bank probe %-14s -> %s" % [set_name,
 					str(audio.fire_soundset(set_name, sim.get_local_player_position()))])
 	var t0 := world.local_player_weapon_view()
@@ -361,6 +360,29 @@ func _fire_diag() -> void:
 		var tb := Strings.get_table(table)
 		_ctx.log("strings %-9s -> %s  WepDes/WEAP_SHORT_M4=%s" % [table, str(tb != null),
 				Strings.lookup(table, "WepDes", "WEAP_SHORT_M4") if tb != null else "<no table>"])
+
+
+## The equipped weapon's own sound sets, each action's `soundset` and
+## `soundsetend` in its weapon.def row, which the fire diagnostic asks the
+## bank for: the sets of whatever weapon the loaded game equips, not one
+## game's names.
+func _equipped_weapon_sets() -> PackedStringArray:
+	var names := PackedStringArray()
+	var world := _ctx.world()
+	var root := _ctx.resource_root()
+	if world == null or root == null:
+		return names
+	var weapons := WeaponDatabase.new()
+	if weapons.load_from_resource_root(root, "weapon.def") != OK:
+		return names
+	var index := weapons.find_weapon(world.local_player_weapon_name())
+	if index < 0:
+		return names
+	for row: WeaponActionRow in weapons.get_weapon(index).get_actions():
+		for set_name: String in [row.soundset, row.soundsetend]:
+			if not set_name.is_empty() and not names.has(set_name):
+				names.append(set_name)
+	return names
 
 
 func _log_view(stage: String) -> void:
