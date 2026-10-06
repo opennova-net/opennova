@@ -12,7 +12,7 @@ length, loudness, spectrum and variation count only (`README.md`).
 
 ## Source files
 
-Every third-party file is CC0 1.0, downloaded 2026-10-05 (the death, fall, landing and parachute sources 2026-10-06), and kept as downloaded under `sources/`.
+Every third-party file is CC0 1.0, downloaded 2026-10-05 (the death, fall, landing, parachute and rain sources 2026-10-06), and kept as downloaded under `sources/`.
 
 | File under `sources/` | Title | Author | Page | Licence |
 |---|---|---|---|---|
@@ -54,6 +54,7 @@ Every third-party file is CC0 1.0, downloaded 2026-10-05 (the death, fall, landi
 | `freesound/fs138478_JustInvoke.ogg` | Bullet Blood 1 | JustInvoke | [freesound.org/s/138478](https://freesound.org/s/138478/) | CC0 1.0 |
 | `freesound/fs138479_JustInvoke.ogg` | Bullet Blood 2 | JustInvoke | [freesound.org/s/138479](https://freesound.org/s/138479/) | CC0 1.0 |
 | `freesound/fs138481_JustInvoke.ogg` | Bullet Blood 4 | JustInvoke | [freesound.org/s/138481](https://freesound.org/s/138481/) | CC0 1.0 |
+| `freesound/fs704395_jgxxx.ogg` | Rain at night medium.wav | jgxxx | [freesound.org/s/704395](https://freesound.org/s/704395/) | CC0 1.0 |
 | `freesound/fs481075_khenshom.ogg` | Foley - Cotton clothes rustling - Fabric movement sound.wav | khenshom | [freesound.org/s/481075](https://freesound.org/s/481075/) | CC0 1.0 |
 | `freesound/fs481081_khenshom.ogg` | Foley - Jeans - Rustling - Fabric movement sound.wav | khenshom | [freesound.org/s/481081](https://freesound.org/s/481081/) | CC0 1.0 |
 | `freesound/fs504626_leonelmail.ogg` | BODY FALL - V HVY - DIRT | leonelmail | [freesound.org/s/504626](https://freesound.org/s/504626/) | CC0 1.0 |
@@ -76,6 +77,7 @@ Every third-party file is CC0 1.0, downloaded 2026-10-05 (the death, fall, landi
 | `freesound/fs398040_swordofkings128.ogg` | water swimming 5 | swordofkings128 | [freesound.org/s/398040](https://freesound.org/s/398040/) | CC0 1.0 |
 | `freesound/fs398041_swordofkings128.ogg` | water swimming 4 | swordofkings128 | [freesound.org/s/398041](https://freesound.org/s/398041/) | CC0 1.0 |
 | `freesound/fs610998_unfa.ogg` | Medium Male Pain Grunts | unfa | [freesound.org/s/610998](https://freesound.org/s/610998/) | CC0 1.0 |
+| `freesound/fs671409_Victormaa.ogg` | forest heavy rain loop.wav | Victormaa | [freesound.org/s/671409](https://freesound.org/s/671409/) | CC0 1.0 |
 | `freesound/fs770112_Vrymaa.ogg` | Plants or ferns - Manipulation & Hit | Vrymaa | [freesound.org/s/770112](https://freesound.org/s/770112/) | CC0 1.0 |
 | `freesound/fs641380_WhiteFire43.ogg` | Clothing Ruffle 03-2.wav | WhiteFire43 | [freesound.org/s/641380](https://freesound.org/s/641380/) | CC0 1.0 |
 | `freesound/fs641383_WhiteFire43.ogg` | Clothing Ruffle 01.wav | WhiteFire43 | [freesound.org/s/641383](https://freesound.org/s/641383/) | CC0 1.0 |
@@ -266,3 +268,5 @@ Each file in `assets/`, what it was made from and how (PCM mono; the rate and bi
 | `onfrfall6.wav` | 22050 Hz 16-bit | 3.710 s | -12.4 dB | DangerLaef [#811077](https://freesound.org/s/811077/) @50.5s (free fall); cut 3.71 s, band 0.12-2.2 kHz, faded in and out |
 | `onfrfall7.wav` | 22050 Hz 16-bit | 4.180 s | -11.5 dB | DangerLaef [#811077](https://freesound.org/s/811077/) @60.5s (free fall); cut 4.18 s, band 0.12-2.2 kHz, faded in and out |
 | `onfrfall8.wav` | 22050 Hz 16-bit | 3.560 s | -11.8 dB | DangerLaef [#811077](https://freesound.org/s/811077/) @76.0s (free fall); cut 3.56 s, band 0.12-2.2 kHz, faded in and out |
+| `onrainl.wav` | 22050 Hz 16-bit | 13.650 s | -24.0 dB | jgxxx [#704395](https://freesound.org/s/704395/) @40.0s (forest rain at night) under Victormaa [#671409](https://freesound.org/s/671409/) @0.0s (jungle downpour) 3 dB down; 14.65 s each, high-pass 120 Hz, low-pass 8 kHz, a 15 % tilt toward 2.5 kHz and below, its last second crossfaded (equal power) into its start so it loops without a seam, levelled to -24 dB RMS under a tanh soft-clip (the rain sets loop it) |
+| `onrainr.wav` | 22050 Hz 16-bit | 13.650 s | -24.0 dB | jgxxx [#704395](https://freesound.org/s/704395/) @62.0s under Victormaa [#671409](https://freesound.org/s/671409/) @5.0s 3 dB down; made as `onrainl.wav`, other stretches of the same two so the two sides do not match |
