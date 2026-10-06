@@ -191,6 +191,20 @@ inline EditorRequest edit_externally(std::string path) {
 	request.path = std::move(path);
 	return request;
 }
+// The .tga `path` stored as the .dds of its name, which every use of it reads first (S18:
+// import/texture_source.h plan_texture_dds).
+inline EditorRequest store_as_dds(std::string path) {
+	EditorRequest request = of(EditorRequestKind::StoreAsDds);
+	request.path = std::move(path);
+	return request;
+}
+// The texture `path`, which no use of it reads (each use's loader opens another file of its name, a .tga's
+// .dds), set aside under .replaced/ (S18).
+inline EditorRequest set_aside_texture(std::string path) {
+	EditorRequest request = of(EditorRequestKind::SetAsideTexture);
+	request.path = std::move(path);
+	return request;
+}
 // What changed on disk among the import sources imported again (S18: the Shell's on its window's focus).
 inline EditorRequest refresh_changed_sources(bool all = false) {
 	EditorRequest request = of(EditorRequestKind::RefreshChangedSources);
