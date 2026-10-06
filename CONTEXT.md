@@ -1285,16 +1285,18 @@ _Avoid_: run (ONED's vocabulary), preview (an in-editor render, not a running ga
 "see in game"
 
 **Run directory**:
-Where Play runs the game: `.opennova/run/<n>/` (n from 1), the game's working directory, the
-log Play tails (`session.log`; the game install's own, `_filelog.txt`, read once its game has
-exited, never while it runs) and the saves the game keeps beside itself (`weapon.sav`), so the
-build it runs from stays as the build wrote it. Play in the game install puts there what the
-install's game needs beside it: the build's files (linked; one the game may write, a `.cfg`,
-`.sav`, `.coo` or `.txt`, copied), the install's executable and Bink DLL, a `game.cfg` (the
-project's own, else the install's) and the install's `player.sav` and `weapon.sav` where the
-project has none; Strict Play, the build's files and the executable and Bink DLL alone. It
-records its game (pid and creation time) while the game may run; each Play takes the first free
-one, emptied, passing one whose game may still run.
+Where Play runs the game: `.opennova/run/<mode>/<n>/` (the Play's mode, `runtime`, `install` or
+`strict`; n from 1), the game's working directory, the log Play tails (`session.log`; the game
+install's own, `_filelog.txt`, read once its game has exited, never while it runs) and the saves
+the game keeps beside itself (`weapon.sav`), so the build it runs from stays as the build wrote
+it. Play in the game install puts there what the install's game needs beside it: the build's
+files (linked; one the game may write, a `.cfg`, `.sav`, `.coo` or `.txt`, copied), the
+install's executable and Bink DLL, a `game.cfg` (the project's own, else the install's) and the
+install's `player.sav` and `weapon.sav` where the project has none; Strict Play, the build's
+files and the executable and Bink DLL alone. It records its game (pid and creation time) while
+the game may run; each Play takes the first free one of its mode, passing one whose game may
+still run, and keeps what the game wrote there in that mode's runs before (its `game.cfg`, its
+saves; Play fresh empties it). A Play never touches another mode's run directories.
 _Avoid_: build directory (what the build publishes, never written after), working copy, stage
 
 **Strict Play**:
