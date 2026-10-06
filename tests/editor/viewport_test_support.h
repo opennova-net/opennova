@@ -71,6 +71,9 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 	int ended_lod = -2;
 	std::function<double(double x, double y)> ground;
 	std::vector<std::string> missing;
+	// Where a test says its picture placed what it drew (a HUD's elements, one rect per HudElement):
+	// reported as given, a menu's widgets reported over it.
+	std::vector<opennova::editor::ViewportDeviceReport::Rect> placed;
 	// A script's help the person closed on the device (its report says it no longer shows).
 	bool assist_closed = false;
 	// E13: its scene state, whether its draw asked to render this frame (a test says), the frame it
@@ -158,6 +161,7 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 		report.height = drawn ? height : model.state().height;
 		report.canvas_sized = drawn && canvas_sized;
 		report.missing = missing;
+		report.rects = placed;
 		// A script's help: shown as asked, unless a test says the person closed it (assist_closed).
 		if (const auto *script = dynamic_cast<const opennova::editor::ScriptViewport *>(&model)) {
 			report.assist_serial = script->assist().serial;
