@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <iterator>
 #include <string>
 
 #include <imgui.h>
@@ -36,6 +37,24 @@ constexpr size_t kChannelCount = sizeof(kChannelNames) / sizeof(kChannelNames[0]
 
 // The object texture detail's choices in the toolbar: as stored, then each level, full first.
 constexpr const char *kDetailNames[] = {"As stored", "Detail 3 (full)", "Detail 2", "Detail 1", "Detail 0 (lowest)"};
+
+// The compare's views in the toolbar, in TextureCompareView's order, and what each shows.
+constexpr const char *kCompareNames[] = {"No compare", "Before | DXT", "The DXT texture", "Difference x8"};
+constexpr const char *kCompareTips[] = {
+	"The texture alone.",
+	"Left of the split the texture before compression, right of it the DXT texture its .dds would hold (DXT5 where it "
+	"holds an alpha, else DXT1, with its full chain), decoded as the game decodes it; a .dds against its import's source.",
+	"The DXT texture alone, as the game would draw it.",
+	"Each colour channel's difference, eight times over; an alpha difference shows the checkerboard through.",
+};
+
+// A file's size in words: "5.3 MB", "340 KB".
+std::string file_size_words(uint64_t bytes) {
+	char text[32];
+	if (bytes >= uint64_t(1024) * 1024) std::snprintf(text, sizeof(text), "%.1f MB", double(bytes) / (1024.0 * 1024.0));
+	else std::snprintf(text, sizeof(text), "%.0f KB", double(bytes) / 1024.0);
+	return text;
+}
 
 std::string percent(float scale) {
 	char text[32];
@@ -179,6 +198,29 @@ void TextureViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 		                "the lowest), for the use shown or the first model row: a diffuse or detail texture is halved once "
 		                "or twice below full detail, a normal map never.");
 	}
+	// The compare (S18, documents/texture_compare): the texture beside the DXT texture made of it, or a .dds
+	// beside its import's source; split at a fraction of its width, the compressed alone, or their difference.
+	float compare_widest = 0.0f;
+	for (const char *name : kCompareNames) compare_widest = std::max(compare_widest, ui_kit::text_width(name));
+	const float compare_width = combo_width(compare_widest);
+	row.next(ui_kit::field_width(compare_width, "##compare"));
+	ImGui::SetNextItemWidth(compare_width);
+	if (ImGui::BeginCombo("##compare", kCompareNames[size_t(options.compare)])) {
+		for (size_t i = 0; i < std::size(kCompareNames); ++i) {
+			if (ImGui::Selectable(kCompareNames[i], size_t(options.compare) == i)) options.compare = TextureCompareView(i);
+			ui_kit::tooltip(kCompareTips[i]);
+		}
+		ImGui::EndCombo();
+	}
+	ui_kit::tooltip(kCompareTips[size_t(options.compare)]);
+	if (options.compare == TextureCompareView::Split) {
+		const float split_width = ImGui::GetFontSize() * 7.0f;
+		row.next(ui_kit::field_width(split_width, "##split"));
+		ImGui::SetNextItemWidth(split_width);
+		float split = options.split * 100.0f;
+		if (ImGui::SliderFloat("##split", &split, 0.0f, 100.0f, "split %.0f%%")) options.split = std::clamp(split / 100.0f, 0.0f, 1.0f);
+		ui_kit::tooltip("Where the split falls: the texture before compression left of it, the DXT texture right of it.");
+	}
 	if (options != model.options()) workspace.request(request::set_viewport(model.path(), texture_options_change(options)));
 	// What the picture is, in words: the device texture at the detail shown; the alpha as the use shown reads it.
 	ImGui::PushTextWrapPos(0.0f);
@@ -187,6 +229,20 @@ void TextureViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 		                    device_texture_words(model.shown_device()).c_str());
 	const TextureShownUse &use_shown = model.shown_use();
 	if (use_shown.index >= 0 && !use_shown.alpha_words.empty()) ImGui::TextDisabled("Alpha: %s.", use_shown.alpha_words.c_str());
+	// What the compare finds at the level shown, or why there is none.
+	if (const TextureCompression *compression = model.compression().get(); compression && options.compare != TextureCompareView::Off) {
+		if (!compression->made) {
+			ImGui::TextDisabled("%s", compression->why.c_str());
+		} else if (const TextureLevelError *error = model.shown_error()) {
+			const bool alpha = compression->reference && compression->reference->alpha != TextureAlpha::None;
+			const std::string words = compression->format + " (" + file_size_words(compression->file_bytes) + " file) against " +
+			                          compression->against + ": " + texture_level_error_words(*error, alpha) + ", outlined.";
+			ImGui::TextUnformatted(words.c_str());
+			ui_kit::tooltip("The level shown, weighed texel by texel. PSNR is higher for less error: past 40 dB the "
+			                "difference is hard to see; the largest error is of a channel, 0 to 255. Hover a texel for "
+			                "its value before and after.");
+		}
+	}
 	ImGui::PopTextWrapPos();
 	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y));
 }

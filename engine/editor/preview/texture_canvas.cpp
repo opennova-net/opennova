@@ -13,6 +13,9 @@ namespace {
 constexpr float kRingFromScale = 6.0f;
 // A cell edge's colour: a mid yellow that reads over dark and light texels alike.
 constexpr uint32_t kCellRgb = 0xE0C040;
+// A compare's split, a cyan line; the worst block, a red outline.
+constexpr uint32_t kSplitRgb = 0x40D0E0;
+constexpr uint32_t kWorstRgb = 0xFF4040;
 
 void set_camera(const TextureViewport &viewport, const TextureCamera &camera, CanvasRequests &out) {
 	out.request(request::set_viewport(viewport.path(), texture_camera_change(camera)));
@@ -107,6 +110,26 @@ OverlayList TextureCanvas::shapes(const ViewportContext &, const CanvasInput &in
 			at.pixel_of(w, float(y), in.width, in.height, to.x, to.y);
 			list.line(from, to, kCellRgb, 1.0f);
 		}
+	}
+	// A compare's split, the reference left of it, and the worst block of the level shown, outlined.
+	const TextureViewportOptions &options = viewport.options();
+	const float tw = float(viewport.image()->width()), th = float(viewport.image()->height());
+	if (options.compare == TextureCompareView::Split && viewport.compression() && viewport.compression()->made) {
+		CanvasPoint from, to;
+		at.pixel_of(options.split * tw, 0.0f, in.width, in.height, from.x, from.y);
+		at.pixel_of(options.split * tw, th, in.width, in.height, to.x, to.y);
+		list.line(from, to, kSplitRgb, 2.0f);
+	}
+	if (const TextureLevelError *error = viewport.shown_error(); error && error->worst_rms > 0.0 && error->width > 0) {
+		const float span_x = tw / float(error->width), span_y = th / float(error->height);
+		CanvasPoint corner[4];
+		const float xs[2] = {float(error->worst_x) * span_x, float(std::min(error->worst_x + 4, error->width)) * span_x};
+		const float ys[2] = {float(error->worst_y) * span_y, float(std::min(error->worst_y + 4, error->height)) * span_y};
+		at.pixel_of(xs[0], ys[0], in.width, in.height, corner[0].x, corner[0].y);
+		at.pixel_of(xs[1], ys[0], in.width, in.height, corner[1].x, corner[1].y);
+		at.pixel_of(xs[1], ys[1], in.width, in.height, corner[2].x, corner[2].y);
+		at.pixel_of(xs[0], ys[1], in.width, in.height, corner[3].x, corner[3].y);
+		for (int i = 0; i < 4; ++i) list.line(corner[i], corner[(i + 1) % 4], kWorstRgb, 2.0f);
 	}
 	if (!in.hovered || gesture_.dragging()) return list;
 	const size_t level = viewport.shown_level();
