@@ -332,8 +332,9 @@ static std::string terrain_text(const std::string &stem) {
 	       "foliage\r\n  graphic palm\r\nend\r\n";
 }
 
-// What the walk does not follow: a def's sound (an unchecked kind), listed with where it was met
-// first; a menu's SCREEN target its own menu defines is followed to nothing (S14: neither not
+// What the walk does not follow, and what it follows to nothing: a def's sound, a set no bank of the
+// folder defines (the sound lane: a set is a bank's symbol), undefined with where it was met first; a
+// menu's SCREEN target its own menu defines is followed to nothing (S14: neither not
 // followed nor undefined); a terrain a mission names found, taken and read (S14): its height data
 // and its colour map found beside it, the detail map and the foliage model the folder lacks not
 // found; the mission's dialog bank, a kind the graph does not read, listed once by its kind; a
@@ -372,9 +373,9 @@ static int test_plan_not_followed() {
 	TEST_EXPECT(!not_followed(plan, ReferenceKind::None, AssetKind::Terrain));
 	const ImportNotFollowed *dialog = not_followed(plan, ReferenceKind::None, AssetKind::DialogBank);
 	TEST_EXPECT(dialog && dialog->count == 1 && dialog->first == "m.dbf");
-	TEST_EXPECT(!not_followed(plan, ReferenceKind::MenuScreen) && plan.undefined.empty());
-	const ImportNotFollowed *sound = not_followed(plan, ReferenceKind::Sound);
-	TEST_EXPECT(sound && sound->count == 1 && sound->first == "items.def");
+	TEST_EXPECT(!not_followed(plan, ReferenceKind::MenuScreen) && !not_followed(plan, ReferenceKind::Sound));
+	TEST_EXPECT(plan.undefined.size() == 1 && plan.undefined[0].reference == ReferenceKind::Sound &&
+	            plan.undefined[0].count == 1 && plan.undefined[0].first == "items.def");
 	{
 		opennova::bms::File mission;
 		opennova::mission::make_default(mission);
@@ -429,11 +430,11 @@ static int test_plan_not_followed() {
 // names) and, since S14, its RUN and its waves: it left the list. powerup.def left the list when
 // the catalog opened it (S13 D10): the graph reads it through the catalog's records. hudpos.def
 // left it with its extractor (S14): the HUD's fonts and textures are followed. A face left it with
-// its extractor (S18): its textures are followed.
+// its extractor (S18): its textures are followed. SndProf.def left it with its document (the sound lane):
+// each slot's set is followed.
 static int test_references_unread() {
 	const std::set<AssetKind> unread = {AssetKind::DialogBank, AssetKind::MissionText,
-	        AssetKind::HudFxDefs, AssetKind::SoundProfileDefs, AssetKind::CharAttrDefs,
-	        AssetKind::OtherDefs, AssetKind::MapProject};
+	        AssetKind::HudFxDefs, AssetKind::CharAttrDefs, AssetKind::OtherDefs, AssetKind::MapProject};
 	for (size_t i = 0; i < kAssetKindCount; ++i) {
 		const AssetKind kind = AssetKind(i);
 		const AssetKindRow &row = asset_kind_row(kind);
