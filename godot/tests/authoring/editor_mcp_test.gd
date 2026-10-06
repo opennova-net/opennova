@@ -974,7 +974,14 @@ func test_graph_references_and_rename() -> void:
 		assert_true(String(places[0].get("file", "")).ends_with("menu_style.mns"), str(places[0]))
 		assert_true(bool(places[0].get("editable", false)) and not String(places[0].get("locator", "")).is_empty())
 		assert_true(String(places[1].get("file", "")).to_lower().ends_with(".fnt"), str(places[1]))
-		assert_false(bool(places[1].get("editable", true)), "Files shows a font")
+		assert_false(bool(places[1].get("editable", true)), "the editor has no editor for a font")
+		# DI-17: a Go to always lands, an open_document of the place, a font on its page.
+		var font_file := String(places[1].get("file", ""))
+		assert_true(_done(await _call("editor_request", {"kind": "open_document", "path": font_file})))
+		assert_eq(String((await _state(["documents"])).get("documents", {}).get("page", "")), font_file)
+		var page := await _query("file_page")
+		assert_eq(String(page.get("path", "")), font_file, str(page))
+		assert_true(page.has("defines") and page.has("used_by"), str(page))
 	assert_eq(int((await _query("reference_choices", {"id": main_id, "field": "name"})).get("count", -1)), 0,
 			"a field that is no reference offers nothing")
 	assert_true((await _query("reference_targets", {"id": main_id, "field": "nope"})).has("_error"))

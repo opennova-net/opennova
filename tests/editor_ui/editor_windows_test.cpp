@@ -2446,8 +2446,27 @@ void test_go_to_ui() {
 	ui.drain();
 	ui.activate(popup_item(places, targets[1].label.c_str()));
 	requests = ui.drain();
-	const EditorRequest *file = one(requests, EditorRequestKind::ShowInFiles);
-	CHECK(file && file->path == targets[1].file, "the font file: shown in Files, which the editor does not open");
+	// DI-17: a Go to always lands, the font file on its page (the editor has no editor for its kind).
+	const EditorRequest *file = one(requests, EditorRequestKind::OpenDocument);
+	CHECK(file && file->path == targets[1].file, "the font file: an open alone, which lands on its page");
+	if (!file) return;
+	session.handle(*file);
+	CHECK(v.documents.page == targets[1].file && v.documents.page_locator.empty() && v.documents.page_field.empty(),
+	      "the font's page shows, the file itself marked nowhere");
+	// A variable nothing defines: its Go to lands where it belongs, a stylesheet (DI-17).
+	Edit missing;
+	missing.address = main;
+	missing.field = "font.name";
+	missing.value = std::string("%NO_SUCH_FONT%");
+	session.handle(request::edit_record(menu->path(), missing));
+	session.run_operations();
+	ui.frames(3);
+	ui.drain();
+	ui.activate(item_id(inspector, {key.c_str(), "fields", "font.name", "Go to"}));
+	requests = ui.drain();
+	const EditorRequest *home = one(requests, EditorRequestKind::OpenDocument);
+	CHECK(home && home->path.size() > 4 && home->path.substr(home->path.size() - 4) == ".mns" && home->locator.empty(),
+	      "a variable nothing defines: Go to opens a stylesheet, where it belongs");
 }
 
 // A number that names something navigates too (S12 D3 review): an item's emplacement
