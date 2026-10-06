@@ -43,3 +43,12 @@ weapon channel replaces the arms with them), the kneel, the prone pose, the
 crawls, the prone rolls, the dive to prone, the forward death, the reload and
 the rebel's firing loop (procedural), each loop's step, hip height and head
 height fitted to the original slot it answers.
+
+The clips' sounds are their Actions' event markers, which Export Animations writes
+as the events' trigger bits: `FOOT_LEFT` and `FOOT_RIGHT` where a foot plants
+(the footsteps), `FOLEY_4` on the swim strokes and `FOLEY_5` on the crawls (the
+sound profile's `SSAudio4` and `SSAudio5`). Every crawl marks the start of each
+knee's stroke, two to a cycle: frames 2 and 17 of the backward crawl, 2 and 18
+of the side crawls, as the original's crawls mark theirs, and frames 2 and 32 of
+the forward crawl `on_crawl_f`. The original's own forward crawl (`Dt1PrF`)
+carries no event and so crawls in silence; ours sounds like its other crawls.

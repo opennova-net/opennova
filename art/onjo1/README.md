@@ -48,7 +48,8 @@ uses for that kind of model, upgraded to the normal-mapped member where one exis
 static props `VS_PHONGT` (as the original's `Barl01`), buildings `FF_MT_OP` with a
 detail texture or `VS_DOT3DIFF2` (bump plus detail), skinned people
 `VS_SKBUMPPHONGT`, first-person arms `VS_SKBUMPPHONGT` (the extended skinned layout
-the original's arms need).
+the original's arms need), first-person weapons `VS_PHONGT` (as the original's `M4_1st`
+and `M16_1st`; a fixed-function `FF_ST_OP` gun has no highlight and reads flat).
 
 ## Workflow, per model
 
