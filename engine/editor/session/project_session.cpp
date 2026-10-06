@@ -13,6 +13,7 @@
 #include <editor/preview/viewports.h>
 #include <editor/project/project_files.h>
 #include <editor/session/clip_sounds.h>
+#include <editor/session/disk_watch.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_queries.h>
 #include <editor/session/editor_preferences.h>
@@ -52,8 +53,9 @@ struct ProjectSession::Impl {
 			imports(core),
 			renames(core),
 			guard(core),
+			disk(core),
 			navigation(core) {
-		core.bind({&documents, &problems, &play, &imports, &renames, &guard, &navigation});
+		core.bind({&documents, &problems, &play, &imports, &renames, &guard, &disk, &navigation});
 	}
 
 	EditorPreferences preferences;
@@ -64,6 +66,7 @@ struct ProjectSession::Impl {
 	ImportController imports;
 	RenameController renames;
 	UnsavedGuard guard;
+	DiskWatch disk;
 	NavigationController navigation;
 	uint64_t handle_entries = 0;
 };
@@ -224,6 +227,8 @@ void ProjectSession::poll() {
 	session.core.step_operation(rest);
 	session.play.poll();
 	if (session.core.operations().done()) session.core.finish_operation();
+	// The sweep a focus-in began over every file (ADR 0046 DI-01), while no operation runs.
+	session.disk.step(rest);
 	session.core.save_recent_items();
 	// The texture thumbnails the windows asked for and the cache lacks (ADR 0046 S18), at least one a
 	// poll, then within what is left of the poll's milliseconds and until kThumbnailPollBytes of files are
