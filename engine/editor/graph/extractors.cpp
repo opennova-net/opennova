@@ -1,12 +1,12 @@
 // The extractors: what one file references and defines, from its bytes through the
 // engine's own parser for its kind (extract_from_bytes). The record types (the def
-// catalogs, the string tables, the menus, the stylesheets, the models, the clips and the
-// animation tables) walk their schema: a field's reference, and the symbol a field
-// defines (a weapon's name, a string's key, a menu's screen or window by the NAME its
+// catalogs, the string tables, the menus, the stylesheets, the models, the clips, the
+// animation tables and the environments) walk their schema: a field's reference, and the symbol a
+// field defines (a weapon's name, a string's key, a menu's screen or window by the NAME its
 // ACTIONs find it by), and the record sets of the collections a Record reference names (a
 // model's CTRL registers and MTRX rows, by their index); a text type reads the names its text
 // makes, each at its span (a script's operands, S13 D9), and the names it defines (a shader's tags); the
-// native kinds (an environment, the
+// native kinds (the HUD layout, the
 // avatar table, a particle file, a face animation) read their parsed structs. The names a native text (a
 // terrain, an environment, a particle file, the HUD layout, a face animation) writes are rewritable: a
 // rename finds each in the text by reading it again (graph/native_text_sites.h).
@@ -31,7 +31,6 @@
 #include <editor/project/project_files.h>
 #include <formats/avatars/avatars.h>
 #include <formats/def/def.h>
-#include <formats/env/env.h>
 #include <formats/grm/grm.h>
 #include <formats/particle/parser.h>
 #include <formats/trn/trn_io.h>
@@ -169,33 +168,6 @@ void extract_record(const Document &document, const NodeAddress &address, Extrac
 			out.edges.push_back(std::move(var));
 		}
 	}
-}
-
-bool extract_environment(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
-	std::istringstream input(std::string(bytes.begin(), bytes.end()));
-	env::Config config;
-	std::string message;
-	if (!env::load_env(input, config, message)) {
-		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, message, name);
-		return false;
-	}
-	auto edge = [&](const char *field, ReferenceKind kind, const std::string &value, int32_t loader_arg = -1) {
-		if (value.empty()) return;
-		out.edges.push_back(edge_of(name, std::string(), field, kind, value, std::string(), true));
-		out.edges.back().loader_arg = loader_arg;
-	};
-	// The cloud layers, through ARCHIVE [orig: Terrain_InitRenderingResources @ 0x578A97], each name's
-	// extension made PCX as the parser stores it [orig: TimeOfDay_ParseProperty @ 0x57CC41..0x57CC4B,
-	// sky_map2's @ 0x57CC83..0x57CC8D] (kTextureArgPcx).
-	for (const auto &[field, map] : {std::pair<const char *, const std::string *>{"sky_map1", &config.sky_map1},
-	                                 {"sky_map2", &config.sky_map2}})
-		if (!map->empty())
-			out.edges.push_back(texture_edge(name, std::string(), field, *map, TextureRoleId::SkyCloud, kTextureArgPcx));
-	edge("sun_3di", ReferenceKind::Model, config.sun_3di);
-	edge("moon_3di", ReferenceKind::Model, config.moon_3di);
-	edge("glare_3di", ReferenceKind::Model, config.glare_3di);
-	edge("star_3di", ReferenceKind::Model, config.star_3di);
-	return true;
 }
 
 // The HUD layout (hudpos.def, ADR 0046 S14): the two fonts the HUD draws its text with, each
@@ -413,7 +385,6 @@ struct NativeKind {
 constexpr NativeKind kNativeKinds[] = {
 	{AssetKind::HudPosDefs, extract_hudpos},
 	{AssetKind::Terrain, extract_terrain},
-	{AssetKind::Environment, extract_environment},
 	{AssetKind::AvatarDefs, extract_avatars},
 	{AssetKind::Particles, extract_particles},
 	{AssetKind::FaceAnimation, extract_face_animation},
@@ -507,9 +478,9 @@ void extract_from_text(const TextDocument &document, Extracted &out) {
 			out.symbols.push_back(std::move(symbol));
 		}
 	}
-	// A native kind held as a text (DI-06: an environment, the HUD layout, the avatars; the particle type,
-	// DI-14): its text as it stands read by the engine's own parser, as its file is, so what it names follows
-	// its edits; a text the parser does not read names nothing (its own validation says why).
+	// A native kind held as a text (DI-06: the HUD layout, the avatars; the particle type, DI-14): its text
+	// as it stands read by the engine's own parser, as its file is, so what it names follows its edits; a
+	// text the parser does not read names nothing (its own validation says why).
 	if (!type->references) {
 		if (const NativeExtractor extract = native_extractor(document.kind())) {
 			Diagnostic error;
