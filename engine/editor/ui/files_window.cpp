@@ -10,6 +10,7 @@
 
 #include <base/gameprofile/required_resources.h>
 #include <editor/assets/asset_kinds.h>
+#include <editor/assets/project_layout.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
@@ -448,6 +449,7 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 				for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
 					draw_file(v, v.project.scan->entries[matches[size_t(i)]], false);
 		} else {
+			draw_top_level_drop(v);
 			draw_folder(v, folders_.front());
 		}
 		ImGui::EndTable();
@@ -599,6 +601,7 @@ void FilesWindow::draw_folder(const SessionView &view, const Folder &folder) {
 		const bool open = ImGui::TreeNodeEx(inner.path.c_str(), ImGuiTreeNodeFlags_SpanAllColumns | ImGuiTreeNodeFlags_DefaultOpen,
 		                                    "%s", label.c_str());
 		ui_kit::tooltip(inner.path);
+		accept_move(view, inner.path);
 		if (!open) continue;
 		draw_folder(view, inner);
 		ImGui::TreePop();
@@ -730,6 +733,7 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 		workspace_.request(request::open_document(entry.relative_path));
 	const bool renames = view.allows(EditorRequestKind::RenameAsset);
 	if (ImGui::MenuItem("Rename...", "F2", false, renames) && renames) start_rename(entry);
+	draw_move_menu(view, entry);
 	if (ImGui::MenuItem("About this file...")) workspace_.request(request::about_file(entry.relative_path));
 	ui_kit::tooltip("What it is, where a build puts it, what it names and who names it.");
 	const bool reveals = view.allows(EditorRequestKind::RevealPath);
@@ -740,6 +744,76 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 	if (source && ImGui::MenuItem("Import again", nullptr, false, reimports) && reimports)
 		workspace_.request(request::reimport(entry.relative_path, true));
 	ImGui::EndPopup();
+}
+
+// Move to folder (DI-03): the folders the project keeps files in, the top level first, then a new one by
+// name. The game finds a file by its name alone, so nothing naming it is rewritten; an import's output
+// moves with its source.
+void FilesWindow::draw_move_menu(const SessionView &view, const AssetEntry &entry) {
+	const bool output = !entry.imported_from.empty();
+	const bool moves = !output && view.allows(EditorRequestKind::MoveAsset);
+	if (!ImGui::BeginMenu("Move to folder", moves)) {
+		ui_kit::tooltip(output ? "Made by the import of " + entry.imported_from + ": move the source."
+		                       : "Put it in another folder. Nothing that names it changes: the game finds a file by "
+		                         "its name alone.");
+		return;
+	}
+	if (ImGui::IsWindowAppearing()) new_folder_[0] = '\0';
+	const std::string here = folder_of_path(entry.relative_path);
+	const auto move_to = [&](const std::string &folder) {
+		workspace_.request(request::move_asset(entry.relative_path, folder));
+		ImGui::CloseCurrentPopup();
+	};
+	if (ImGui::MenuItem("Top level", nullptr, false, !here.empty())) move_to(std::string());
+	std::vector<std::string> folders;
+	for (size_t i = 1; i < folders_.size(); ++i) folders.push_back(folders_[i].path);
+	std::sort(folders.begin(), folders.end(), [](const std::string &a, const std::string &b) {
+		return normalized_logical_name(a) < normalized_logical_name(b);
+	});
+	for (const std::string &folder : folders)
+		if (ImGui::MenuItem((folder + "/").c_str(), nullptr, false, folder != here)) move_to(folder);
+	ImGui::Separator();
+	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 12.0f);
+	const bool enter = ImGui::InputTextWithHint("##new_folder", "New folder", new_folder_, sizeof(new_folder_),
+	                                            ImGuiInputTextFlags_EnterReturnsTrue);
+	ImGui::SameLine();
+	std::string folder, why;
+	const bool named = new_folder_[0] != '\0' && normalize_project_folder(new_folder_, folder, why);
+	ImGui::BeginDisabled(!named || folder == here);
+	const bool move = ImGui::Button("Move");
+	ImGui::EndDisabled();
+	if (new_folder_[0] != '\0' && !named) ImGui::TextColored(kRefusalColor, "%s", why.c_str());
+	if ((move || enter) && named && folder != here) move_to(folder);
+	ImGui::EndMenu();
+}
+
+// A file of the project dropped on a folder's row (or the top level's, "" ): moved there under its own
+// name, as Move to folder moves it. Not one already there, an import's output, nor while the busy gate
+// holds the files.
+void FilesWindow::accept_move(const SessionView &view, const std::string &folder) {
+	if (!ImGui::BeginDragDropTarget()) return;
+	const ImGuiPayload *dragged = ImGui::GetDragDropPayload();
+	if (dragged && dragged->IsDataType(kFileDragPayload) && dragged->Data) {
+		const AssetEntry *entry = entry_at(view, static_cast<const char *>(dragged->Data));
+		const bool takes = entry && entry->imported_from.empty() && folder_of_path(entry->relative_path) != folder &&
+		                   view.allows(EditorRequestKind::MoveAsset);
+		if (takes && ImGui::AcceptDragDropPayload(kFileDragPayload))
+			workspace_.request(request::move_asset(entry->relative_path, folder));
+	}
+	ImGui::EndDragDropTarget();
+}
+
+// While a file in a folder is dragged, the top level of the project as a row above the tree to drop it on.
+void FilesWindow::draw_top_level_drop(const SessionView &view) {
+	const ImGuiPayload *dragged = ImGui::GetDragDropPayload();
+	if (!dragged || !dragged->IsDataType(kFileDragPayload) || !dragged->Data) return;
+	const AssetEntry *entry = entry_at(view, static_cast<const char *>(dragged->Data));
+	if (!entry || !entry->imported_from.empty() || folder_of_path(entry->relative_path).empty()) return;
+	ImGui::TableNextRow();
+	ImGui::TableNextColumn();
+	ImGui::Selectable("Top level of the project##top_level", false, ImGuiSelectableFlags_SpanAllColumns);
+	ui_kit::tooltip("Drop a file here to move it to the top level.");
+	accept_move(view, std::string());
 }
 
 void FilesWindow::start_rename(const AssetEntry &entry) {

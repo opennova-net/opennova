@@ -323,7 +323,9 @@ static int test_imports() {
 	TEST_EXPECT(editor_test::write_bytes(dir.file("splash.png"), editor_test::gradient_png(4, 4, 5)));
 	TEST_EXPECT(run_capture(capture, {"import", root, dir.file("splash.png")}, text) == 0);
 	TEST_EXPECT(text.find("-> 1 output") != std::string::npos);
-	TEST_EXPECT(text.find("imported textures/splash.png\n") != std::string::npos);
+	// It lands where the project keeps its textures (DI-03: beside art/plain.png and art/logo.png's, not in a
+	// textures/ folder the project never had).
+	TEST_EXPECT(text.find("imported art/splash.png\n") != std::string::npos);
 	TEST_EXPECT(run_capture(capture, {"status", root}, text) == 0);
 	TEST_EXPECT(text.find("imports: 2 sources, 0 imported now, 0 failed") != std::string::npos);
 	// reimport: nothing changed, nothing imports; --force with a source imports that one.
