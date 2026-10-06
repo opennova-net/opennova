@@ -50,7 +50,8 @@ struct LogicParam {
 // A trigger's or an action's form: the record and its event, its place in its event's list, its type
 // (null for a type no row names, `type_words` saying which), a trigger's negation and its join to the
 // next (`last`: none follows, so the join is read by nothing), the parameters its type reads, those it
-// does not read that hold a value (shown apart, never lost), its words and its event's sentence.
+// does not read that hold a value other than the -1 every shipped record holds there
+// (mission::kUnreadParam; shown apart, never lost), its words and its event's sentence.
 struct LogicForm {
 	bool action = false;
 	NodeAddress record;
@@ -91,15 +92,16 @@ bool logic_event_form(const MissionDocument &document, NodeId event, const Missi
 std::string logic_add_refusal(const MissionDocument &document, NodeId event, bool actions);
 
 // The edits that add a record of `type` to `event`'s list at `position` (SIZE_MAX: the end): an Add
-// with its type, then its sub-type and each parameter its type reads set to its kind's default, every
-// edit after the Add naming what it made (batch_made). False, with why, where the event takes no more
+// with its type (the new record holds -1 in each parameter, mission::kUnreadParam, as every shipped
+// record holds a parameter its type does not read), then its sub-type and each parameter its type reads
+// set to its kind's default, every edit after the Add naming what it made (batch_made). False, with why, where the event takes no more
 // or is no event of the document.
 bool logic_add_edits(const MissionDocument &document, NodeId event, const LogicType &type, size_t position,
                      std::vector<Edit> &out, std::string &error);
 // The edits that give a trigger or an action another type: its type and sub-type set, each parameter
 // whose kind the new type reads in the same slot kept, every other one the new type reads set to its
-// kind's default, and one the new type does not read cleared to 0 (the file then holds no stale
-// number). A trigger keeps its negation and its join. None where it is that type already.
+// kind's default, and one the new type does not read set to -1, as every shipped record holds one
+// (mission::kUnreadParam; the file then holds no stale number). A trigger keeps its negation and its join. None where it is that type already.
 bool logic_retype_edits(const MissionDocument &document, const NodeAddress &record, const LogicType &type,
                         std::vector<Edit> &out, std::string &error);
 // The edits that move a trigger or an action to `to_event`'s list at `position` (SIZE_MAX: the end):

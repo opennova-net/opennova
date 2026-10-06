@@ -80,6 +80,8 @@ constexpr RequirementWords kWords[] = {
 	{ "border_tga", "A mission's screens draw without this texture." },
 	{ "upl_3di", "The sky draws without this model." },
 	{ "font_couri20b", "Text in this font draws nothing." },
+	{ "jo_epil_tga", "The single-player win screen shows no backdrop: its lines stand over the mission's last view." },
+	{ "jo_epil2_tga", "The single-player lose screen (MISSION FAILED) shows no backdrop: its lines stand over the mission's last view." },
 };
 
 constexpr bool sentence(const char *text) {
