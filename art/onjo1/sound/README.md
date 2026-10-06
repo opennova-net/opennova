@@ -53,6 +53,15 @@ steps (0.37 to 0.46 s) are hollower: half the energy at 250 Hz to 1 kHz,
 centroid 1.5 kHz. Water steps are long sloshes, 0.67 to 1.15 s, the peak
 0.1 to 0.4 s in, centroid 1.5 kHz.
 
+The same profiles fill the six anim-driven foley slots (the clips' FOLEY_1 to
+FOLEY_6 bits): `SSAudio1` and `SSAudio2` `FSP_DIRT_R`, `SSAudio3` `FSP_OBJ_L`,
+`SSAudio4` `FS_SWIM` (4 strokes, 0.96 to 1.88 s, volume 90, jitter 0x3333),
+`SSAudio5` `FSP_PRONE` (8 crawl drags, 0.50 to 0.87 s, centroid 2.2 kHz, volume
+60, jitter 0x3FFF) and `SSAudio6` `FSP_PRONE_ROLL` (4 rolls, 1.05 to 1.21 s,
+volume 60, jitter 0x0CCC), all 22050 Hz 8-bit. The rebels' profiles put their
+reload in `SSAudio5`; the player's and the friendly soldiers' put the crawl
+there, which our person clips fire on the crawls.
+
 ### Bullet impacts
 
 `AMMO_CAR15_556MM` and `AMMO_M16_556MM` author the same 23 rows (tags 1 to 23,
@@ -141,13 +150,17 @@ Measured the same way (means per family; retail's in brackets):
 | Carbine reload | 1 | 2.24 s (2.24) | 3.5 kHz (3.4) | -5.1 dB (-8.7) |
 | Carbine dry fire | 1 | 0.15 s (0.14) | 4.2 kHz (4.8) | -8.0 dB (-9.0) |
 | Carbine switch to, from | 1, 1 | 0.79 s, 0.65 s (0.79, 0.65) | 1.3, 1.5 kHz (3.1, 5.4) | -7.1, -6.9 dB (-12.5, -12.4) |
+| Swim strokes | 4 | 1.3 to 1.8 s (0.96 to 1.88) | 1.5 kHz (1.2) | -8.6 dB (-7.8) |
+| Prone crawl | 8 | 0.58 to 0.73 s (0.50 to 0.87) | 2.4 kHz (2.2) | -12.7 dB (-12.8) |
+| Prone roll | 4 | 1.10 to 1.19 s (1.05 to 1.21) | 1.9 kHz (2.0) | -10.4 dB (-9.9) |
 
 The member volumes below match each family's loudness to retail's: retail's
 volume times the ratio of the two families' loudest-50 ms RMS, at most 255.
 
 ## The sets and the profile (`game.lwf`, `SndProf.def`)
 
-To be authored through the editor's sound documents. Every set: set pitch
+Authored in the editor (the sound bank and SndProf.def documents, through
+`edit_record`). Every set: set pitch
 0xFFFF, no set pitch jitter, cull range 10000, set flags 0; every layer flags
 0xF, min distance 0; every member clamp 255 unless noted. "pitch" is the
 member's base, "jitter" its random range, both Q16.
@@ -161,6 +174,9 @@ member's base, "jitter" its random range, both Q16.
 | `ON_FS_OBJ_L` | 50 | `onfsobj1` to `4` | 0xFFFF | 0 | 100 |
 | `ON_FS_OBJ_R` | 50 | `onfsobj5` to `9` | 0xFFFF | 0x0CCC | 100 |
 | `ON_FS_WATER` | 50 | `onfswat1` to `6` | 0xFFFF | 0x11EB | 68 |
+| `ON_FS_SWIM` | 50 | `onfsswm1` to `4` | 0xFFFF | 0x3333 | 99 |
+| `ON_FS_PRONE` | 50 | `onfsprn1` to `8` | 0xFFFF | 0x3FFF | 60 |
+| `ON_FS_PRONE_ROLL` | 50 | `onfsrol1` to `4` | 0xFFFF | 0x0CCC | 63 |
 | `ON_IMP_DIRT` | 60 | `onimpdrt1` to `3` | 0xFFFF | 0x2666 | 230 |
 | | 90 | `onnull` x5 | 0xFFFF | 0x3333 | 255 |
 | | | `onricodt1` to `3` | 0xFFFF | 0x3333 | 125 |
@@ -211,9 +227,16 @@ person items name with `sound_profile on_soldier`:
 | `SSLFootSnow` / `SSRFootSnow` | `ON_FS_SNOW_L` / `ON_FS_SNOW_R` |
 | `SSLFootOBJ` / `SSRFootOBJ` | `ON_FS_OBJ_L` / `ON_FS_OBJ_R` |
 | `SSFootWater` | `ON_FS_WATER` |
+| `SSAudio1`, `SSAudio2` | `ON_FS_GND_R` |
+| `SSAudio3` | `ON_FS_OBJ_L` |
+| `SSAudio4` | `ON_FS_SWIM` |
+| `SSAudio5` | `ON_FS_PRONE` |
+| `SSAudio6` | `ON_FS_PRONE_ROLL` |
 
 A step plays only where the body's clip authors a foot event (bit 0x1 left,
-0x2 right) on the frame the foot lands.
+0x2 right) on the frame the foot lands, a foley slot where it sets that slot's
+bit (0x20 to 0x400). The death, fall, landing and parachute slots stay empty
+for now, and `default` stays empty.
 
 `AMMO_ON_556`'s `effects_table` (`assets/ammo.def`) names the impact sets row by
 row: obj, dirt, snow and packeddirt `ON_IMP_DIRT`; grass `ON_IMP_GRASS`; cement
