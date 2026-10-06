@@ -1048,9 +1048,13 @@ constexpr RequestKindRow kRows[] = {
 			"surface (ground, snow, object, water) with that foot (left, right), the slot the game's test "
 			"picks. values {frame}: what the clip the animation document at path (the active one when left "
 			"out) fires at that frame, every sound of its event at once, under its model viewport's sound "
-			"options (a timeline mark pressed; DI-04). Refused (workspace.refused): a name no wave of the "
-			"project has, a frame the game never reads or that fires no sound, a set no bank searched "
-			"holds, an empty slot, waves the project lacks, a wave past what a card reads.")
+			"options (a timeline mark pressed; DI-04). values {leg}: begin or end, the set the weapon action "
+			"playing the row of a first-person map (the animation document at path, the active one when left "
+			"out) plays as it begins (its soundset) or finishes (its soundsetend), a leg's mark pressed "
+			"(DI-13). Refused (workspace.refused): a name no wave of the project has, a frame the game never "
+			"reads or that fires no sound, a first-person clip's frame (the game reads none), a leg no action "
+			"of the row plays, a set no bank searched holds, an empty slot, waves the project lacks, a wave "
+			"past what a card reads.")
 			.takes(request_params({}, { F::Path, F::Values }))
 			.row,
 	Request(K::StopSound, "stop_sound", serve_stop_sound,
