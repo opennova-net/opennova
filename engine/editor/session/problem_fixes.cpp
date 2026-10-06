@@ -542,6 +542,26 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 	case FindingFix::FallbackRow:
 		if (!d.asset.empty()) out.push_back(fallback_row_fix(d.asset));
 		return;
+	case FindingFix::NormalRowType: {
+		// A finished normal map a normal-map slot's row loads as a diffuse: its row given type 4, which the
+		// normal-map loader reads, an .mdt as it is, capped at 512 a side [orig: Material_LoadStageTexture
+		// @ 0x5B1778..0x5B1790]. Not a .tga's: type 4 makes a normal map of a .tga's alpha as its height.
+		const ReferenceSubject *subject = reference_subject(d);
+		if (!subject || d.asset.empty() || d.row_id == 0 ||
+		    strutil::to_lower(utf8_of(path_of(subject->target).extension())) != ".mdt")
+			return;
+		Edit edit;
+		edit.operation = EditOperation::Set;
+		edit.address = NodeAddress{d.row_id, d.record_kind, d.child_id};
+		edit.field = "type";
+		edit.value = int64_t(4);
+		out.push_back({"Give its row type 4 (normal map)",
+		               "Sets the type of the row of " + basename_of(d.asset) + " that names " + subject->target +
+		                       " to 4: the game then loads it as a normal map, halved until it fits 512 a side. Undo takes it "
+		                       "back, and Save writes it.",
+		               request::edit_record(d.asset, edit, true), false});
+		return;
+	}
 	}
 }
 
