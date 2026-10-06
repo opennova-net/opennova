@@ -15,7 +15,8 @@
 //                    [--all] [--dry-run [--rows]]
 //   opennova-project reimport <dir> [--force] [--source <path>]
 //   opennova-project new-terrain <dir> <name> --heightmap <file> --colormap <file> [--detail <file>]
-//                    [--tiles <file>] [--top <units>] [--water <units>] [--layout island|tiled]
+//                    [--tiles <file>] [--surface <file>] [--top <units>] [--water <units>]
+//                    [--layout island|tiled]
 //   opennova-project build <dir> [--out <dir>]
 //   opennova-project request <dir> <json>
 //   opennova-project query <dir> <name> [<json>]

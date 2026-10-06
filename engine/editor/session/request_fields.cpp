@@ -65,8 +65,8 @@ constexpr RequestField kFields[] = {
 			"out); an import's options by their keys, as the import_options query lists them (\"\" an "
 			"option's default); a texture operation's params (resize: size; alpha: alpha; format: "
 			"format, dds, mips, palette; remap_palette: each index to move, \"<from>\": \"<to>\"); a new "
-			"terrain's images (heightmap, colormap, detail, tiles) and its importer's options (top, water, "
-			"layout)." },
+			"terrain's images (heightmap, colormap, detail, tiles, surface) and its importer's options (top, "
+			"water, layout)." },
 	{ F::Roles, "roles", J::Strings, "Requirements' roles." },
 	{ F::Names, "names", J::Strings, "Files of the game install, by logical name." },
 	{ F::Paths, "paths", J::Strings,

@@ -213,7 +213,8 @@ uint16_t sample16_at(const uint8_t *row, size_t index) {
 
 } // namespace
 
-bool decode_png(const std::vector<uint8_t> &bytes, RgbaImage &out, std::string &error) {
+bool decode_png(const std::vector<uint8_t> &bytes, RgbaImage &out, std::string &error, IndexedImage8 *indexed) {
+	if (indexed) *indexed = IndexedImage8();
 	Scanlines image;
 	if (!read_scanlines(bytes, image, error)) return false;
 	const Header &header = image.header;
@@ -224,6 +225,14 @@ bool decode_png(const std::vector<uint8_t> &bytes, RgbaImage &out, std::string &
 	out.height = int(header.height);
 	out.pixels.assign(size_t(out.width) * size_t(out.height) * 4, 255);
 	const size_t palette_entries = palette.size() / 3;
+	// The indices beside the colours, where the caller asks them of a palette image.
+	if (indexed && header.color_type == 3) {
+		indexed->width = out.width;
+		indexed->height = out.height;
+		indexed->indices.assign(size_t(out.width) * size_t(out.height), 0);
+		for (size_t i = 0; i < palette_entries; ++i)
+			for (size_t c = 0; c < 3; ++c) indexed->palette[i][c] = palette[i * 3 + c];
+	}
 	for (size_t y = 0; y < header.height; ++y) {
 		const uint8_t *row = image.row(y);
 		for (size_t x = 0; x < header.width; ++x) {
@@ -241,11 +250,16 @@ bool decode_png(const std::vector<uint8_t> &bytes, RgbaImage &out, std::string &
 				break;
 			case 3: {
 				const size_t index = sample_at(row, x, header.bit_depth);
-				if (index >= palette_entries) { error = "Corrupt PNG: a pixel indexes past the palette."; return false; }
+				if (index >= palette_entries) {
+					if (indexed) *indexed = IndexedImage8();
+					error = "Corrupt PNG: a pixel indexes past the palette.";
+					return false;
+				}
 				pixel[0] = palette[index * 3];
 				pixel[1] = palette[index * 3 + 1];
 				pixel[2] = palette[index * 3 + 2];
 				if (index < palette_alpha.size()) pixel[3] = palette_alpha[index];
+				if (indexed) indexed->indices[y * header.width + x] = uint8_t(index);
 				break;
 			}
 			case 4: {
