@@ -221,6 +221,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::PlayRunDirectory, code("play.run_directory", G::Play) },
 	{ C::PlayRuntimeMissing, code("play.runtime_missing", G::Play) },
 	{ C::PlaySpawn, code("play.spawn", G::Play) },
+	// Play from here (DI-26): the start it was given refused (no mission named, a mission whose mode
+	// places its player at no marker) or not staged in the run directory (run/play_start.h).
+	{ C::PlayStart, code("play.start", G::Play) },
 	{ C::PlayStrictExpansion, code("play.strict_expansion", G::Play) },
 	{ C::PlayUnsupported, code("play.unsupported", G::Play) },
 	{ C::ProjectExists, code("project.exists", G::Project) },
