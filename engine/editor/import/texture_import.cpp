@@ -6,6 +6,7 @@
 #include <cstdlib>
 
 #include <base/io/strutil.h>
+#include <editor/import/dxt_encode.h>
 #include <editor/import/import_context.h>
 #include <editor/import/png_decode.h>
 #include <editor/import/png_encode.h>
@@ -16,7 +17,6 @@
 #include <formats/dds/dds.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga.h>
-#include <runtime/renderer/texture_dxt.h>
 
 namespace opennova::editor {
 
@@ -500,17 +500,29 @@ bool encode_image(const RgbaImage &image, const ImageImportSettings &settings, s
 			return false;
 		}
 		const bool dxt5 = settings.dds == "dxt5";
-		uint32_t levels = 1;
-		if (settings.mips == "full")
-			for (uint32_t side = std::max(w, h); side > 1; side >>= 1) ++levels;
-		const std::vector<renderer::DxtSurface> chain = renderer::build_dxt_texture_levels(
-		        image.pixels.data(), w, h, dxt5 ? renderer::TextureDxtFormat::Dxt5 : renderer::TextureDxtFormat::Dxt1, levels);
-		std::vector<std::vector<uint8_t>> blocks;
-		for (const renderer::DxtSurface &level : chain) blocks.push_back(level.blocks);
+		// The authoring encoder (import/dxt_encode.h): rgbcx's blocks, each level the box filter of the source's.
+		const std::vector<std::vector<uint8_t>> blocks = encode_dxt_levels(image.pixels.data(), w, h, dxt5, settings.mips == "full");
 		return dds::dds_write_dxt(dds::dds_fourcc('D', 'X', 'T', dxt5 ? '5' : '1'), w, h, blocks, out, why);
 	}
 	why = "the format '" + format + "' is none of tga, tga24, pcx, pcx24, dds, mdt or png";
 	return false;
+}
+
+bool image_import_texels(RgbaImage &image, const ImageImportSettings &settings, std::string &why, std::string &field) {
+	uint32_t width = 0, height = 0;
+	if (!image_target_size(settings.size, uint32_t(image.width), uint32_t(image.height), width, height, why)) {
+		field = "size";
+		return false;
+	}
+	image = resize_image(image, width, height);
+	if (settings.green == "flip") flip_image_green(image);
+	if (settings.format == "tga" && settings.normal == "height") height_into_alpha(image);
+	else if (settings.format != "tga24" && settings.format != "pcx" && settings.format != "pcx24" &&
+	         !apply_image_alpha(image, settings.alpha, why)) {
+		field = "alpha";
+		return false;
+	}
+	return true;
 }
 
 bool run_image_import(ImportContext &context, ImportProduct &out) {
@@ -559,12 +571,9 @@ bool run_image_import(ImportContext &context, ImportProduct &out) {
 		out.outputs.push_back(std::move(output));
 		return true;
 	}
-	image = resize_image(image, width, height);
-	if (settings.green == "flip") flip_image_green(image);
-	if (settings.format == "tga" && settings.normal == "height") height_into_alpha(image);
-	else if (settings.format != "tga24" && settings.format != "pcx" && settings.format != "pcx24" &&
-	         !apply_image_alpha(image, settings.alpha, error))
-		return refuse(CoreFinding::ImportOption, "The image importer cannot use " + error + ".", "alpha");
+	std::string field;
+	if (!image_import_texels(image, settings, error, field))
+		return refuse(CoreFinding::ImportOption, "The image importer cannot use " + error + ".", field);
 	std::string note;
 	if (!encode_image(image, settings, output.bytes, error, note))
 		return refuse(CoreFinding::ImportEncode, "Could not write " + name + ": " + error + ".");

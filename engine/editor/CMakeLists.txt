@@ -94,6 +94,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_image.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_budget.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_compare.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_load_rules.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_operations.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_roles.cpp
@@ -126,10 +127,11 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/texture_import_needs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/texture_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/use_checks.cpp
-    # import — the importers (a PNG to the texture file its uses read, S18; a font set's glyph sheet to a
-    # .fnt) and what they read (the import context), the sidecars, the import pass, and the plan of an
-    # import with the files it needs
+    # import — the importers (a PNG to the texture file its uses read, S18, a DDS's blocks and chain through
+    # the authoring DXT encoder; a font set's glyph sheet to a .fnt) and what they read (the import context),
+    # the sidecars, the import pass, and the plan of an import with the files it needs
     ${CMAKE_CURRENT_SOURCE_DIR}/import/converter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/import/dxt_encode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/font_import.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_context.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/importers.cpp
@@ -398,8 +400,9 @@ target_include_directories(opennova_editor
 target_link_libraries(opennova_editor PUBLIC opennova_runtime)
 # The image importer inflates PNG data, and the PNG writer (the thumbnails' wire
 # form) deflates it, through the vendored miniz (private: no consumer of the
-# editor sees miniz.h).
-target_link_libraries(opennova_editor PRIVATE opennova_miniz)
+# editor sees miniz.h); its DXT textures' blocks are rgbcx's (import/dxt_encode,
+# private alike).
+target_link_libraries(opennova_editor PRIVATE opennova_miniz opennova_rgbcx)
 
 target_compile_features(opennova_editor PUBLIC cxx_std_17)
 
