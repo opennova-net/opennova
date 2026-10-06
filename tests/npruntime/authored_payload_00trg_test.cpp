@@ -3,7 +3,7 @@
 // [info]/briefing2 (or briefing), each NUL-terminated cp1252
 // [orig: NetPacket_WriteBriefingText @0x506620] — and the 0x0F world-state's
 // deploy-map location labels (Locations/LOCATION001..) plus the blue player
-// route (exactly one blue path, DoesNotLoop|BlueTeam, marker [12] — retail's
+// route (exactly one blue path, DoesNotLoop|PlayerRoute, marker [12] — retail's
 // pool-3 slot 0x300c).
 // Gated on OPENNOVA_JO_DIR with the revx02 expansion mounted (the capture's
 // data set); an extracted OPENNOVA_JO_ASSETS tree carrying the same 00TRg pair
@@ -118,7 +118,7 @@ int main() {
 		return 1;
 	std::vector<const bms::WaypointRecord *> blue;
 	for (const bms::WaypointRecord &rec : mission.waypoint_records)
-		if ((static_cast<uint32_t>(rec.flags) & static_cast<uint32_t>(bms::WaypointFlags::BlueTeam)) != 0u)
+		if ((static_cast<uint32_t>(rec.flags) & static_cast<uint32_t>(bms::WaypointFlags::PlayerRoute)) != 0u)
 			blue.push_back(&rec);
 	std::printf("authored_payload: %zu waypoint paths, %zu blue\n", mission.waypoint_records.size(),
 			blue.size());
@@ -127,7 +127,7 @@ int main() {
 		std::printf("authored_payload: blue flags=%u markers=%zu first=%u\n",
 				static_cast<uint32_t>(b.flags), b.waypoint_numbers.size(),
 				b.waypoint_numbers.empty() ? 0u : b.waypoint_numbers[0]);
-		expect(static_cast<uint32_t>(b.flags) == 3u, "the blue path is DoesNotLoop|BlueTeam");
+		expect(static_cast<uint32_t>(b.flags) == 3u, "the blue path is DoesNotLoop|PlayerRoute");
 		expect(b.waypoint_numbers.size() == 1 && b.waypoint_numbers[0] == 12u,
 				"the blue path's marker list is [12] (retail's pool-3 slot 0x300c)");
 	}

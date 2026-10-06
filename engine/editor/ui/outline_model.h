@@ -131,6 +131,12 @@ struct OutlineSpec {
 	OutlineListMenuHook list_menu = nullptr;
 	const char *list_menu_label = "";
 	const char *list_menu_tip = "";
+	// Master and detail: the field a new row is named by, asked before its Add ("": an Add names
+	// none; a string table's section by its name, so one the table has is selected, not made again,
+	// Document::existing_row_for); and whether a detail record moves to another row (a string to another
+	// section, Document::move_out_edits).
+	const char *row_name_field = "";
+	bool details_move_between_rows = false;
 };
 
 // What a click on a record's line selects (OutlineModel::click): the record, how it joins the

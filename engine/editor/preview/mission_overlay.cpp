@@ -138,7 +138,7 @@ OverlayList mission_overlay_shapes(const MissionOverlayInput &in) {
 				selected = selected || selected_row(marker->row);
 			}
 			if (stops.size() < 2) continue;
-			const uint32_t rgb = (path.flags & uint32_t(bms::WaypointFlags::BlueTeam)) ? kMissionBlueRgb
+			const uint32_t rgb = (path.flags & uint32_t(bms::WaypointFlags::PlayerRoute)) ? kMissionBlueRgb
 					: (path.flags & uint32_t(bms::WaypointFlags::RedTeam))             ? kMissionRedRgb
 																						 : kMissionPathRgb;
 			const float thickness = selected ? 2.5f : 1.0f;

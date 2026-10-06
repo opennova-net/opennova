@@ -1720,6 +1720,15 @@ JsonValue reference_targets_to_json(const Document &document, const NodeAddress 
 	FieldUse field;
 	Value value;
 	if (!field_of(document, address, id, field, value)) return JsonValue::make_null();
+	// A number that forms a text key (a name index, a waypoint's name id): the key's string, as the
+	// Inspector's Go to beside its picker leads.
+	FieldUse keyed;
+	Value key;
+	if (field.reference == ReferenceKind::None && view.findings.graph &&
+	    keyed_text_reference(*view.findings.graph, field, value, keyed, key)) {
+		field = keyed;
+		value = key;
+	}
 	std::vector<ReferenceTarget> targets = view.findings.graph
 			? reference_targets(*view.findings.graph, *view.project.scan, field, value)
 			: std::vector<ReferenceTarget>();

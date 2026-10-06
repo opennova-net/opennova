@@ -175,11 +175,16 @@ inline BmsiAttributeFlags operator&(BmsiAttributeFlags a, BmsiAttributeFlags b) 
     return static_cast<BmsiAttributeFlags>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
 }
 
-// Waypoint flags
+// Waypoint flags. Bit 0: the patrol stops at its last stop [orig: AI_UpdateWaypointMovement @
+// 0x457caa, `test byte ptr Buffer[eax], 1`]. Bit 1: the player's route, the first path holding it
+// the waypoint list the player is sent [orig: NetPacket_WriteWorldStateLoad0x0F @ 0x502D10, the
+// scan `test byte ptr [eax], 2` @ 0x502e50, for a recipient of team byte 1 @ 0x502e3a]. No code
+// of Jointops.exe tests bit 2 (the flag word's readers: @ 0x457caa, @ 0x460efb, @ 0x4bacd1,
+// @ 0x4bad8f, @ 0x502e50); its name is the format's older guess.
 enum class WaypointFlags : uint32_t {
     None = 0,
     DoesNotLoop = 1 << 0,
-    BlueTeam = 1 << 1,
+    PlayerRoute = 1 << 1,
     RedTeam = 1 << 2,
 };
 

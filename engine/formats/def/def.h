@@ -813,6 +813,10 @@ typedef struct DefItemDef {
                   2=decoration/foliage, 3=person, 4=marker, 5=building,
                   6=powerup/object, 8=effect; 0=unset, 7 unused
                   [orig: ItemDef_ParseProperty @ 0x49eb00] */
+    uint8_t type_word; /* the type line's word where the chain reads two for one value: 0 the first
+                  (decoration, powerup), 1 the other (foliage, object). The game keeps the value alone
+                  [orig: the type chain @0x4A02E4..0x4A04B7]; the word is the file's (retail's trees
+                  and bushes say foliage, its crates and objects object), which the writer writes. */
     char graphic[128];
     char anim_def[128];
     char husk[128];

@@ -62,7 +62,7 @@ void test_single_node_lists_are_one_shot() {
     m.waypoint_records[2].flags = bms::WaypointFlags::None;
     m.waypoint_records[2].marker_count = 2;
     m.waypoint_records[2].waypoint_numbers = {0, 1};
-    m.waypoint_records[3].flags = bms::WaypointFlags::BlueTeam;
+    m.waypoint_records[3].flags = bms::WaypointFlags::PlayerRoute;
     m.waypoint_records[3].marker_count = 1;
     m.waypoint_records[3].waypoint_numbers = {1};
 

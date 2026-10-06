@@ -58,6 +58,10 @@ constexpr FindingCodeEntry<MissionFinding> kFindingEntries[] = {
 	{ MissionFinding::TriggerType, { "mission.trigger_type" } },
 	{ MissionFinding::BoundingBox, { "mission.bounding_box" } },
 	{ MissionFinding::Pool, { "mission.pool" } },
+	{ MissionFinding::NoStart, { "mission.no_start" } },
+	// An entity the game leaves off the ground (DI-28): its z set where the game's rule stands it, the fix the
+	// project check plans with its finding (Diagnostic::planned).
+	{ MissionFinding::OffGround, { "mission.off_ground", FindingFix::EditRecord } },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(MissionFinding::kCount),
               "every MissionFinding has exactly one row");
@@ -71,6 +75,10 @@ static_assert(finding_rows_well_formed(kFindingRows), "every row of the table ta
 DiagnosticSeverity source_severity(MissionFinding code) {
 	return code == MissionFinding::InvalidInput ? DiagnosticSeverity::Error : DiagnosticSeverity::Info;
 }
+
+// The single-player family's starts: the insertion point, then its fallback [orig:
+// Server_PositionPlayerForSpawn @0x50D202, @0x50D2DB; formats/def/reserved_items.cpp's 6094 and 6001].
+constexpr int32_t kPrimaryStartType = 6094, kFallbackStartType = 6001;
 
 // The pools' limits, past which the game warns (fatal if dismissed) and loads on [orig:
 // BMS_LoadAndValidateHeader @0x40e326].
@@ -415,6 +423,23 @@ struct Checker {
 				if (uint32_t(choice.value) == picked) name = choice.name;
 			on(address, MissionFinding::GameMode, DiagnosticSeverity::Warning,
 			   "More than one game mode bit is set: the game plays " + name + ", the first in its decode order.", "attrib_flags");
+		}
+		// A mission of no game mode bit plays as Co-op 0x10020, the single-player family [orig:
+		// Game_StartMission @0x524ce1..0x524d01; SinglePlayer_PopulateMissionList @0x5618b3]: its player
+		// starts at a marker of type 6094 (until the team's first death), else at one of type 6001, else
+		// stays at the map's origin [orig: Server_PositionPlayerForSpawn @0x50CF60, the lookups @0x50D202 and
+		// @0x50D2DB over pool 3, the origin @0x50D3A7..0x50D46F; runtime/world/spawn_select.cpp].
+		if (!modes) {
+			bool start = false;
+			for (const Node *row : document.rows_of(K::Marker)) {
+				const int32_t type = static_cast<const EntityRow &>(*row).native.type_id;
+				start = start || type == kPrimaryStartType || type == kFallbackStartType;
+			}
+			if (!start)
+				on(address, MissionFinding::NoStart, DiagnosticSeverity::Warning,
+				   "No marker is a start (item 106094, the insertion point, or 106001): the mission has no game mode, so the "
+				   "game plays it as single player, and its player starts at the map's origin.",
+				   "attrib_flags");
 		}
 		const RecordIds &ids = mission->ids;
 		const size_t boxes = mission_table().kind(k(K::Mission))->lists().size() - 1; // the last list: the bounding boxes
