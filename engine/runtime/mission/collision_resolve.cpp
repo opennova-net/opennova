@@ -656,23 +656,8 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 						final_husk_m3 != nullptr ? final_husk_m3 : first_husk_m3;
 				// The interned death masks and all three banks use final-husk first.
 				// [orig: Game_ResolveItemMaterialsAndSpawnBoneTrails @0x522EE0]
-				if (piece_m3 != nullptr) {
-					const char *names[3] = { "Dead", "Fire", "Other" };
-					for (int bank = 0; bank < 3; ++bank) {
-						auto &out = t->effect_banks[bank];
-						out.mask = threedi_3di3_user_point_mask(piece_m3, names[bank]);
-						out.points.clear();
-						for (size_t i = 0; i < piece_m3->user_point_count; ++i) {
-							if ((out.mask & (1u << (i & 31u))) == 0)
-								continue;
-							float pos[3], dir[3];
-							threedi_user_point_position(&piece_m3->user_points[i], pos);
-							threedi_user_point_direction(&piece_m3->user_points[i], dir);
-							out.points.push_back(
-									{ { pos[2], -pos[0], pos[1] }, { dir[2], -dir[0], dir[1] } });
-						}
-					}
-				}
+				if (piece_m3 != nullptr)
+					world::death_effect_banks_of(*piece_m3, t->effect_banks);
 			}
 			const std::string &husk_key = husk_name;
 			const Threedi3di3 *husk_m3 = first_husk_name.empty()
