@@ -118,6 +118,11 @@ struct TextureHeader {
 	uint16_t pcx_bytes_per_line = 0;
 	// DDS (reader Dds): its format, its levels, its faces (6 for a cube map) and its depth (a volume's slices)
 	std::string dds_format;
+	// The format's bits a texel (an uncompressed one's) and a DXT's block bytes (0 for none).
+	uint32_t dds_bits = 0, dds_block_bytes = 0;
+	// A DXT5 whose first level's blocks all have both alpha endpoints 255, which the game stores as DXT1
+	// (renderer::dxt5_first_level_opaque).
+	bool dds_dxt5_opaque = false;
 	uint32_t dds_levels = 0;
 	uint32_t dds_faces = 1;
 	uint32_t dds_depth = 1;
