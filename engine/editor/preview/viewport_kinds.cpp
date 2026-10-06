@@ -7,6 +7,7 @@
 
 #include <editor/model/document.h>
 #include <editor/preview/effect_viewport.h>
+#include <editor/preview/hud_viewport.h>
 #include <editor/preview/menu_viewport.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_viewport.h>
@@ -33,7 +34,7 @@ constexpr ViewportFeed kModelFeeds[] = {
 	{ T::AnimationMap, true },
 };
 // The script device's (S13 V10): every text type (S13 D9), its text as it stands, the Document tab's
-// main view.
+// main view; the HUD layout's text too (DI-20), its HUD the Preview window's.
 constexpr ViewportFeed kScriptFeeds[] = {
 	{ T::Script, true },
 	{ T::MusicScript, true },
@@ -41,6 +42,7 @@ constexpr ViewportFeed kScriptFeeds[] = {
 	{ T::Shader, true },
 	{ T::Text, true },
 	{ T::Particles, true },
+	{ T::HudLayout, true },
 };
 
 // The mission's (S14): a mission, the Document tab's main view; the rows as they stand (a mission
@@ -61,6 +63,12 @@ constexpr ViewportFeed kEffectFeeds[] = {
 	{ T::Particles, true },
 };
 
+// The HUD's (DI-20): a HUD layout, the Preview window's, read as Save would write it (the device reads it
+// through the project's files, the open document standing in for its file).
+constexpr ViewportFeed kHudFeeds[] = {
+	{ T::HudLayout, true },
+};
+
 // The model's scene waits for a gesture's end (built anew over frames: a drag shows its markers
 // over the scene that stands); the menu's screen is configured again as a drag goes (S13 V8); the
 // mission's waits too (a drag is Updates alone: its entities move in place), and the Shell keeps two
@@ -78,6 +86,7 @@ constexpr ViewportKindRow kRows[] = {
 			TextureViewport::make, true, 0, true },
 	{ ViewportKind::Effect, ViewportRole::Preview, true, false, false, kEffectFeeds, std::size(kEffectFeeds),
 			EffectViewport::make },
+	{ ViewportKind::Hud, ViewportRole::Preview, true, false, false, kHudFeeds, std::size(kHudFeeds), HudViewport::make },
 };
 
 static_assert(std::size(kRows) == kViewportKindCount, "every ViewportKind has exactly one row");

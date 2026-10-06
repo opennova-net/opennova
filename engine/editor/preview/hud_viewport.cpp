@@ -1,0 +1,655 @@
+#include <editor/preview/hud_viewport.h>
+
+#include <algorithm>
+#include <cmath>
+#include <iterator>
+#include <utility>
+
+#include <base/io/strutil.h>
+#include <editor/assets/project_asset_source.h>
+#include <editor/model/text_document.h>
+#include <editor/preview/hud_canvas.h>
+#include <editor/session/request_factories.h>
+#include <editor/session/view/session_view.h>
+#include <formats/def/def.h>
+#include <runtime/hud/hud_texture_names.h>
+
+namespace opennova::editor {
+
+namespace {
+
+using io::JsonValue;
+using io::json_number;
+using io::json_string;
+using opennova::hud::HudElement;
+
+// The size its device draws at where no canvas sizes it (a headless Shell's): the HUD's design size.
+constexpr ViewportState kHeadlessSize{ 1024, 768 };
+
+constexpr const char *kViewTokens[] = { "normal", "binoculars", "night_vision" };
+
+// What each element of the HUD's walk is in a modder's words, and the hudpos.def keys that place or
+// colour it, the first the line a Go to opens (the keys as HUD_ParseHudposToken compares them
+// [orig: HUD_ParseHudposToken @ 0x59F370]; formats/def/def_hudpos.cpp reads each).
+constexpr HudElementWords kWords[] = {
+	{ HudElement::SightsCard, "Weapon sights", {} },
+	{ HudElement::BreathBar, "Breath bar", { "BREATHTIME" } },
+	{ HudElement::ServicePrompt, "Service prompt", {} },
+	{ HudElement::InsetCues, "Inset scope cues", {} },
+	{ HudElement::GameInfo, "Game info", { "GAMEINFO", "ZONEINFO" } },
+	{ HudElement::Frame, "HUD frame", { "STATICFRAME" } },
+	{ HudElement::Health, "Health bar", { "HUDHEALTH", "HUDHEALTHBORDER" } },
+	{ HudElement::Instruments, "Weapon icon and instruments", { "HUDWPNICON", "HUDGEARTEXT", "CARGOPOS", "HUDAGLTLRX" } },
+	{ HudElement::OpticalCues, "Impact distance", { "SHOWIMPACTDISTPOS" } },
+	{ HudElement::Stance, "Stance icon", { "HUDSTANCEPOS", "HUDSTANCE", "STANCEICON_COLOR", "ALPHAFADE" } },
+	{ HudElement::AmmoCount, "Ammo count", { "AMMOCOUNTPOS", "WEAPON_TEXTCOLOR" } },
+	{ HudElement::WeaponName, "Weapon name", { "HUDWEAPONNAME", "WEAPON_TEXTCOLOR" } },
+	{ HudElement::ClipIndicator, "Clip and rounds", { "HUDCLIP", "ALPHAFADE" } },
+	{ HudElement::Targeting, "Target markers", {} },
+	{ HudElement::Crosshair, "Crosshair", {} },
+	{ HudElement::Heat, "Heat bar", { "HUDHEAT", "HUDHEATBORDER" } },
+	{ HudElement::Clock, "Clock and player count", { "HUDTIMECLOCK", "HUDPLAYERCOUNT" } },
+	{ HudElement::Power, "Throw power bar", { "HUDPOWERBAR" } },
+	{ HudElement::Waypoint, "Waypoint label", { "HUDWPDINFO" } },
+	{ HudElement::TeamIdLine, "Team line", { "HUDTEAMXY" } },
+	{ HudElement::WeaponSlotBar, "Weapon slot bar", { "HUDLS_SYSTEM", "HUDLS_SLOT", "HUDLS_BRACKET", "HUDLS_MOREAV" } },
+	{ HudElement::ScopeDetails, "Scope readouts", { "HUDSCOPERANGEXY", "HUDSCOPEZEROXY", "HUDSCOPEMAGXY" } },
+	{ HudElement::CapturePointLabels, "Capture point labels", {} },
+	{ HudElement::LfpPanel, "Zone status panel", { "LFP_FLAGS" } },
+	{ HudElement::VehicleBayLogos, "Vehicle bay logos", {} },
+	{ HudElement::Spinmap, "Map", { "HUDSPINMAPX1", "HUDSPINMAPY1", "HUDSPINMAPX2", "HUDSPINMAPY2", "MAPCOORDS" } },
+	{ HudElement::AttachLabels, "Seat and armory labels", {} },
+	{ HudElement::FriendlyTags, "Friendly tags", { "TAGCOLOR_GOOD", "TAGCOLOR_MIDDLE", "TAGCOLOR_BAD" } },
+	{ HudElement::VehiclePanel, "Vehicle panel", { "HUDVEHSTANCEPOS", "VEHICLE_HUD" } },
+	{ HudElement::Feed, "Messages", { "HUDSYSTEXT", "HUDCHATTEXT", "HUDCHLINE" } },
+	{ HudElement::SquadOrders, "Squad orders", { "HUDORDERS" } },
+	{ HudElement::Tip, "Tip panel", { "MRCLIPPYNORMAL" } },
+	{ HudElement::EndRoundStatistics, "Score panel", {} },
+	{ HudElement::MessageLog, "Recent messages", {} },
+	{ HudElement::Scoreboard, "Player list", {} },
+	{ HudElement::EndRoundOverlay, "End of round", {} },
+	{ HudElement::VoiceMenus, "Voice menus", {} },
+	{ HudElement::PausedText, "Paused", { "PAUSEDPOS" } },
+	{ HudElement::ChatInput, "Chat line", {} },
+	{ HudElement::KillAnnouncement, "Kill banner", {} },
+	{ HudElement::TipAlternate, "Tip panel (map open)", { "MRCLIPPYALTERNATE" } },
+	{ HudElement::Briefing, "Briefing", {} },
+	{ HudElement::Objectives, "Objectives", {} },
+	{ HudElement::HelpScreen, "Help", {} },
+	{ HudElement::QuitDialog, "Quit dialog", {} },
+	{ HudElement::NetQuality, "Connection indicators", { "NETWORKINDICATOR" } },
+};
+static_assert(std::size(kWords) == opennova::hud::kHudElementCount, "every HudElement has its words");
+
+constexpr bool words_in_order() {
+	for (size_t i = 0; i < std::size(kWords); ++i)
+		if (kWords[i].element != static_cast<HudElement>(i)) return false;
+	return true;
+}
+static_assert(words_in_order(), "the words follow HudElement's order");
+
+// The textures an element draws by a fixed name (runtime/hud/hud_texture_names.h).
+std::vector<std::string> fixed_textures(HudElement element) {
+	using namespace opennova::hud;
+	auto named = [](std::initializer_list<int32_t> slots) {
+		std::vector<std::string> out;
+		for (int32_t slot : slots)
+			if (const char *name = hud_fixed_texture_name(slot)) out.push_back(name);
+		return out;
+	};
+	switch (element) {
+	case HudElement::Spinmap:
+		return named({ kHudTexMapCompass, kHudTexMapIcons, kHudTexMapWpIndicator, kHudTexMapRadar, kHudTexMapRadarNarrow });
+	case HudElement::Tip:
+	case HudElement::TipAlternate: return named({ kHudTexTipBox, kHudTexTipKeyboard, kHudTexTipGameplay });
+	case HudElement::Scoreboard:
+	case HudElement::MessageLog:
+	case HudElement::EndRoundStatistics:
+	case HudElement::Briefing:
+	case HudElement::Objectives:
+	case HudElement::HelpScreen: return named({ kHudTexBoxBorder, kHudTexBoxTile });
+	case HudElement::NetQuality: return named({ kHudTexNetIcon, kHudTexNetLinkIcon, kHudTexNetNovaWorldIcon });
+	case HudElement::LfpPanel:
+		return named({ kHudTexLfpTeam1, kHudTexLfpTeam2, kHudTexLfpNeutral, kHudTexLfpTileOwn, kHudTexLfpTileOther });
+	case HudElement::Targeting: return named({ kHudTexTarget, kHudTexTargetFriendly });
+	case HudElement::VehicleBayLogos: return named({ kHudTexLogoHelo, kHudTexLogoHumm, kHudTexLogoBoat });
+	default: break;
+	}
+	return {};
+}
+
+JsonValue options_to_json(const HudViewportOptions &options) {
+	JsonValue out = JsonValue::make_object();
+	out.set("width", json_number(options.width));
+	out.set("height", json_number(options.height));
+	out.set("stance", json_number(options.stance));
+	out.set("weapon", json_string(options.weapon));
+	out.set("clip", json_number(options.clip));
+	out.set("reserve", json_number(options.reserve));
+	out.set("health", json_number(options.health));
+	out.set("view", json_string(hud_preview_view_token(options.view)));
+	out.set("damage", json_number(options.damage));
+	out.set("detail", json_number(options.detail));
+	out.set("crosshair", json_number(options.crosshair));
+	out.set("picked", json_string(options.picked));
+	return out;
+}
+
+bool whole(const JsonValue &value, int least, int most, int &out) {
+	if (!value.is_number() || std::floor(value.number) != value.number || value.number < least || value.number > most)
+		return false;
+	out = int(value.number);
+	return true;
+}
+
+// A SetViewport's options: each member optional.
+bool read_options(const JsonValue &json, HudViewportOptions &held, std::string &error) {
+	if (!json.is_object()) {
+		error = "options is an object {width, height, stance, weapon, clip, reserve, health, view, damage, detail, "
+		        "crosshair, picked}.";
+		return false;
+	}
+	HudViewportOptions options = held;
+	for (const io::JsonMember &member : json.object) {
+		const std::string &key = member.key;
+		const JsonValue &value = member.value;
+		if (key == "width" || key == "height") {
+			if (!whole(value, kHudScreenLeast, kHudScreenMost, key == "width" ? options.width : options.height)) {
+				error = "options." + key + " is a whole number of pixels from 240 to 4096.";
+				return false;
+			}
+		} else if (key == "stance") {
+			if (!whole(value, 0, 5, options.stance)) {
+				error = "options.stance is a HUDSTANCE id, 0 to 5.";
+				return false;
+			}
+		} else if (key == "weapon") {
+			if (!value.is_string()) {
+				error = "options.weapon is a weapon.def name, \"\" the first it holds, or \"NONE\" for no weapon.";
+				return false;
+			}
+			options.weapon = value.string;
+		} else if (key == "clip") {
+			if (!whole(value, -1, 9999, options.clip)) {
+				error = "options.clip is the rounds in the clip, 0 to 9999, or -1 for a full clip.";
+				return false;
+			}
+		} else if (key == "reserve") {
+			if (!whole(value, 0, 9999, options.reserve)) {
+				error = "options.reserve is the rounds carried, 0 to 9999.";
+				return false;
+			}
+		} else if (key == "health") {
+			if (!whole(value, 0, 100, options.health)) {
+				error = "options.health is a percent, 0 to 100.";
+				return false;
+			}
+		} else if (key == "view") {
+			if (!value.is_string() || !hud_preview_view_from_token(value.string, options.view)) {
+				error = "options.view is normal, binoculars or night_vision.";
+				return false;
+			}
+		} else if (key == "damage") {
+			if (!whole(value, 0, kHudDamageMost, options.damage)) {
+				error = "options.damage is the damage vignette's alpha, 0 (none) to 192 (its cap).";
+				return false;
+			}
+		} else if (key == "detail") {
+			if (!whole(value, 0, 3, options.detail)) {
+				error = "options.detail is the HUD detail level, 0 to 3 (3 hides the HUD).";
+				return false;
+			}
+		} else if (key == "crosshair") {
+			if (!whole(value, opennova::hud::kHudCrosshairStyleMin, opennova::hud::kHudCrosshairStyleMax,
+			            options.crosshair)) {
+				error = "options.crosshair is a crosshair style, 0 (cross01.tga) to 24 (cross25.tga).";
+				return false;
+			}
+		} else if (key == "picked") {
+			HudElement element = HudElement::kCount;
+			if (!value.is_string() || (!value.string.empty() && !opennova::hud::hud_element_from_token(value.string.c_str(), element))) {
+				error = "options.picked is an element's token (an item's element), or \"\" for none.";
+				return false;
+			}
+			options.picked = value.string;
+		} else {
+			error = "Unknown options member \"" + key +
+			        "\" (it takes width, height, stance, weapon, clip, reserve, health, view, damage, detail, "
+			        "crosshair, picked).";
+			return false;
+		}
+	}
+	held = options;
+	return true;
+}
+
+// The line (1-based) and column of an offset of `text`, as a text document counts them.
+void place_of(const std::string &text, size_t offset, size_t &line, size_t &column) {
+	line = 1;
+	size_t start = 0;
+	for (size_t i = 0; i < offset && i < text.size(); ++i)
+		if (text[i] == '\n') {
+			++line;
+			start = i + 1;
+		}
+	column = offset - start + 1;
+}
+
+bool is_none(const std::string &weapon) {
+	return strutil::iequals(weapon, "NONE");
+}
+
+} // namespace
+
+const char *hud_view_status_token(HudViewStatus status) {
+	switch (status) {
+	case HudViewStatus::NoProject: return "no_project";
+	case HudViewStatus::NoLayout: return "no_layout";
+	case HudViewStatus::Ready: return "ready";
+	}
+	return "no_layout";
+}
+
+const char *hud_preview_view_token(HudPreviewView view) {
+	const size_t index = static_cast<size_t>(view);
+	return index < std::size(kViewTokens) ? kViewTokens[index] : "normal";
+}
+
+bool hud_preview_view_from_token(const std::string &token, HudPreviewView &out) {
+	for (size_t i = 0; i < std::size(kViewTokens); ++i)
+		if (token == kViewTokens[i]) {
+			out = static_cast<HudPreviewView>(i);
+			return true;
+		}
+	return false;
+}
+
+bool HudViewportOptions::operator==(const HudViewportOptions &other) const {
+	return width == other.width && height == other.height && stance == other.stance && weapon == other.weapon &&
+	       clip == other.clip && reserve == other.reserve && health == other.health && view == other.view &&
+	       damage == other.damage && detail == other.detail && crosshair == other.crosshair && picked == other.picked;
+}
+
+io::JsonValue hud_options_json(const HudViewportOptions &options) {
+	return options_to_json(options);
+}
+
+std::string hud_options_change(const HudViewportOptions &options) {
+	return viewport_change(ViewportKind::Hud, "options", options_to_json(options));
+}
+
+const HudElementWords &hud_element_words(HudElement element) {
+	const size_t index = static_cast<size_t>(element);
+	return kWords[index < std::size(kWords) ? index : 0];
+}
+
+HudViewport::HudViewport(std::string path) : ViewportModel(ViewportKind::Hud, std::move(path), kHeadlessSize) {}
+
+std::unique_ptr<ViewportModel> HudViewport::make(const std::string &path) {
+	return std::make_unique<HudViewport>(path);
+}
+
+const HudPreviewWeapon *HudViewport::weapon_shown() const {
+	if (weapons_.empty() || is_none(options_.weapon)) return nullptr;
+	if (options_.weapon.empty()) return &weapons_.front();
+	for (const HudPreviewWeapon &weapon : weapons_)
+		if (strutil::iequals(weapon.name, options_.weapon)) return &weapon;
+	return nullptr;
+}
+
+const HudPreviewElement *HudViewport::element_at(float x, float y) const {
+	const HudPreviewElement *found = nullptr;
+	float area = 0.0f;
+	for (const HudPreviewElement &element : elements_) {
+		if (x < element.x0 || y < element.y0 || x > element.x1 || y > element.y1) continue;
+		const float a = (element.x1 - element.x0) * (element.y1 - element.y0);
+		if (!found || a < area) {
+			found = &element;
+			area = a;
+		}
+	}
+	return found;
+}
+
+const HudPreviewElement *HudViewport::picked() const {
+	HudElement element = HudElement::kCount;
+	if (options_.picked.empty() || !opennova::hud::hud_element_from_token(options_.picked.c_str(), element)) return nullptr;
+	for (const HudPreviewElement &shown : elements_)
+		if (shown.element == element) return &shown;
+	return nullptr;
+}
+
+std::string HudViewport::element_words(const HudPreviewElement &element) const {
+	std::string out = hud_element_words(element.element).words;
+	if (element.lines.empty()) {
+		const bool placed = hud_element_words(element.element).keys[0] != nullptr;
+		out += placed ? ": no line of hudpos.def places it" : ": the game places it";
+	}
+	for (size_t i = 0; i < element.lines.size(); ++i)
+		out += (i == 0 ? ": " : ", ") + element.lines[i].key + " (line " + std::to_string(element.lines[i].line) + ")";
+	for (size_t i = 0; i < element.textures.size(); ++i)
+		out += (i == 0 ? "; draws " : ", ") + element.textures[i].name +
+		       (element.textures[i].path.empty() ? std::string(" (the project lacks it)") : std::string());
+	return out;
+}
+
+ViewportStatus HudViewport::status() const {
+	return reason_ == HudViewStatus::Ready ? ViewportStatus::Ready : ViewportStatus::Empty;
+}
+
+std::string HudViewport::message() const {
+	switch (reason_) {
+	case HudViewStatus::NoProject: return "No project is open.";
+	case HudViewStatus::NoLayout: return "Open hudpos.def to see the HUD it lays out.";
+	case HudViewStatus::Ready: break;
+	}
+	return std::string();
+}
+
+std::string HudViewport::caption() const {
+	if (reason_ != HudViewStatus::Ready) return std::string();
+	return " - " + std::to_string(options_.width) + " x " + std::to_string(options_.height);
+}
+
+ViewportAction HudViewport::stop_(HudViewStatus reason) {
+	reason_ = reason;
+	detail_.clear();
+	boxes_.clear();
+	elements_.clear();
+	shown_none();
+	return picture_.stop();
+}
+
+void HudViewport::read_layout_(const TextDocument &text) {
+	text_ = text.text();
+	lines_ = hud_layout_lines(text_);
+	// The names the layout hands the HUD's loader, through the engine's own fill over the game's parse
+	// of the text as Save writes it (each line CR LF).
+	std::string written;
+	written.reserve(text_.size() + lines_.size());
+	for (size_t i = 0; i < text_.size(); ++i) {
+		if (text_[i] == '\n' && (i == 0 || text_[i - 1] != '\r')) written.push_back('\r');
+		written.push_back(text_[i]);
+	}
+	def::DefHudPosFile file{};
+	assets_ = opennova::hud::HudLayoutAssets();
+	stance_names_ = {};
+	if (def::def_parse_hudpos_memory(reinterpret_cast<const uint8_t *>(written.data()), written.size(), &file) == 0) {
+		opennova::hud::HudLayout layout;
+		opennova::hud::hud_layout_from_hudpos(file, layout, assets_);
+		for (size_t i = 0; i < file.hud.stances_count; ++i) {
+			const def::DefHudStance &stance = file.hud.stances[i];
+			if (stance.id >= 0 && stance.id < 6) stance_names_[size_t(stance.id)] = stance.name;
+		}
+	}
+	def::def_free_hudpos(&file);
+}
+
+void HudViewport::read_weapons_(const FileSource &files) {
+	const uint64_t stamp = files.stamp("weapon.def");
+	if (weapons_read_ && stamp == weapons_stamp_) return;
+	weapons_read_ = true;
+	weapons_stamp_ = stamp;
+	weapons_.clear();
+	std::vector<uint8_t> bytes;
+	if (!files.read("weapon.def", bytes)) return;
+	def::DefWeaponsFile file{};
+	if (def::def_parse_weapons_memory(bytes.data(), bytes.size(), &file) == 0) {
+		for (size_t i = 0; i < file.count; ++i) {
+			const def::DefWeaponDef &def = file.entries[i];
+			HudPreviewWeapon weapon;
+			weapon.name = def.weapon_name;
+			weapon.clipsize = def.clipsize;
+			weapon.hudicon = def.hudicon;
+			weapon.clip_art = def.hudclipgfx_texture;
+			weapon.round_art = def.hudrndgfx_texture;
+			if (!weapon.name.empty()) weapons_.push_back(std::move(weapon));
+		}
+	}
+	def::def_free_weapons(&file);
+}
+
+void HudViewport::make_elements_() {
+	elements_.clear();
+	const HudPreviewWeapon *weapon = weapon_shown();
+	for (size_t index = 0; index < boxes_.size() && index < opennova::hud::kHudElementCount; ++index) {
+		const ViewportDeviceReport::Rect &box = boxes_[index];
+		if (!box.placed) continue;
+		HudPreviewElement element;
+		element.element = static_cast<HudElement>(index);
+		element.x0 = float(box.left);
+		element.y0 = float(box.top);
+		element.x1 = float(box.right);
+		element.y1 = float(box.bottom);
+		// The lines that place it: each key's the game takes (a HUDSTANCE's of the stance shown).
+		const HudElementWords &words = hud_element_words(element.element);
+		for (const char *key : words.keys) {
+			if (!key) break;
+			const std::string stance = std::to_string(options_.stance);
+			const bool by_stance = strutil::iequals(key, "HUDSTANCE");
+			const HudLayoutLine *line = hud_layout_line(lines_, key, by_stance ? stance.c_str() : nullptr);
+			if (!line) continue;
+			HudPreviewElement::Line at;
+			at.key = key;
+			place_of(text_, line->offset, at.line, at.column);
+			at.text = text_.substr(line->offset, line->length);
+			element.lines.push_back(std::move(at));
+		}
+		// The textures it draws: the layout's names, the weapon's art, the fixed names.
+		std::vector<std::string> names;
+		switch (element.element) {
+		case HudElement::Frame: names.push_back(assets_.static_frame); break;
+		case HudElement::Stance: names.push_back(assets_.stance_textures[size_t(std::clamp(options_.stance, 0, 5))]); break;
+		case HudElement::Instruments:
+			if (weapon) names.push_back(weapon->hudicon);
+			break;
+		case HudElement::ClipIndicator:
+			if (weapon) {
+				names.push_back(weapon->clip_art);
+				names.push_back(weapon->round_art);
+			}
+			break;
+		case HudElement::Crosshair: names.push_back(opennova::hud::hud_crosshair_texture_name(options_.crosshair)); break;
+		case HudElement::WeaponSlotBar:
+			names.push_back(assets_.hudls_bracket);
+			names.push_back(assets_.hudls_moreav);
+			break;
+		default: names = fixed_textures(element.element); break;
+		}
+		for (const std::string &name : names) {
+			if (name.empty()) continue;
+			HudPreviewElement::Art art;
+			art.name = name;
+			if (assets_source_) art.path = assets_source_->path_of(name);
+			element.textures.push_back(std::move(art));
+		}
+		elements_.push_back(std::move(element));
+	}
+}
+
+ViewportAction HudViewport::follow_(const ViewportInput &input, PreviewClock &) {
+	const SessionView &view = input.view;
+	if (!view.project.open || !view.findings.assets) return stop_(HudViewStatus::NoProject);
+	const TextDocument *text = input.document ? text_of(*input.document) : nullptr;
+	if (!text || input.document->kind() != AssetKind::HudPosDefs) return stop_(HudViewStatus::NoLayout);
+	const FileSource &files = *view.findings.assets;
+	const uint64_t generation = view.findings.assets->generation();
+	assets_source_ = view.findings.assets;
+	read_weapons_(files);
+	// The text read again only when it changed.
+	if (input.document->identity() != read_identity_ || input.document->load_generation() != read_load_ ||
+	    input.document->revision() != read_revision_) {
+		read_identity_ = input.document->identity();
+		read_load_ = input.document->load_generation();
+		read_revision_ = input.document->revision();
+		read_layout_(*text);
+	}
+	reason_ = HudViewStatus::Ready;
+	detail_.clear();
+	make_elements_();
+	const bool moved = input.change != ChangeClass::None;
+	if (picture_.follow(PreviewFollow::Key{}, moved, files, generation) == PreviewFollow::Found::Same) {
+		shown(*input.document);
+		return ViewportAction::Keep;
+	}
+	picture_.show(PreviewFollow::Key{}, generation);
+	shown(*input.document);
+	// The device makes its picture anew over the layout as Save would write it; what it reads it reports.
+	return picture_.built(FileStamps());
+}
+
+bool HudViewport::takes_(const std::string &member) const {
+	return member == "options";
+}
+
+bool HudViewport::check_(const io::JsonValue &json, std::string &error) const {
+	HudViewportOptions options = options_;
+	const JsonValue *member = json.get("options");
+	return !member || read_options(*member, options, error);
+}
+
+void HudViewport::apply_(const io::JsonValue &json, PreviewClock &) {
+	std::string error;
+	if (const JsonValue *member = json.get("options")) read_options(*member, options_, error);
+	make_elements_();
+}
+
+bool HudViewport::report_(const ViewportDeviceReport &report) {
+	picture_.read(report.files);
+	const bool moved = report.rects.size() != boxes_.size() ||
+	                   !std::equal(report.rects.begin(), report.rects.end(), boxes_.begin(),
+	                               [](const ViewportDeviceReport::Rect &a, const ViewportDeviceReport::Rect &b) {
+		                               return a.placed == b.placed && a.left == b.left && a.top == b.top &&
+		                                      a.right == b.right && a.bottom == b.bottom;
+	                               });
+	if (moved) {
+		boxes_ = report.rects;
+		make_elements_();
+	}
+	return false;
+}
+
+std::unique_ptr<CanvasHalf> HudViewport::make_canvas() const {
+	return std::make_unique<HudCanvas>();
+}
+
+ViewportHit HudViewport::hit(const ViewportContext &context, float x, float y) const {
+	ViewportHit out;
+	out.current = current(context.input);
+	const HudPreviewElement *element = element_at(x, y);
+	if (!element) return out;
+	out.index = int(element->element);
+	out.name = element_words(*element);
+	out.kind = opennova::hud::hud_element_token(element->element);
+	return out;
+}
+
+bool HudViewport::handle_point(const ViewportContext &, NodeId, const std::string &, float &, float &,
+		std::string &error) const {
+	error = "The HUD's picture has no handles: its elements are placed by hudpos.def's lines.";
+	return false;
+}
+
+bool HudViewport::drag(const ViewportContext &, const ViewportDrag &, CanvasRequests &, std::string &error) const {
+	error = "Nothing is dragged in the HUD's picture: an element is moved by editing its hudpos.def line.";
+	return false;
+}
+
+bool HudViewport::command(const ViewportContext &, const std::string &name, const std::vector<NodeId> &,
+		CanvasRequests &, std::string &error) const {
+	error = "The HUD's picture has no command \"" + name + "\": its state is set with set_viewport's options.";
+	return false;
+}
+
+bool HudViewport::click_frame(const ViewportContext &context, SelectMode mode, int &width, int &height,
+		std::string &error) const {
+	if (reason_ != HudViewStatus::Ready || !current(context.input)) {
+		const std::string why = message();
+		error = "The viewport shows no picture of the HUD layout as it is now" + (why.empty() ? std::string(".") : ": " + why);
+		return false;
+	}
+	if (mode != SelectMode::Replace) {
+		error = "A click picks one element of the HUD: it takes no Shift or Ctrl.";
+		return false;
+	}
+	// The click's point in the screen's pixels: the canvas reads the picture at the screen's size.
+	width = options_.width;
+	height = options_.height;
+	return true;
+}
+
+io::JsonValue HudViewport::options_json() const {
+	return options_to_json(options_);
+}
+
+io::JsonValue HudViewport::body_json(const ViewportInput &) const {
+	JsonValue out = JsonValue::make_object();
+	JsonValue screen = JsonValue::make_object();
+	screen.set("width", json_number(options_.width));
+	screen.set("height", json_number(options_.height));
+	out.set("screen", std::move(screen));
+	// The HUD font the HUD slot loads at this width (the HI name above 640, the LO name at 640 and below).
+	out.set("hud_font", json_string(opennova::hud::hudpos_font_for_width(assets_, options_.width)));
+	out.set("static_frame", json_string(assets_.static_frame));
+	JsonValue stances = JsonValue::make_array();
+	for (size_t i = 0; i < stance_names_.size(); ++i) {
+		JsonValue stance = JsonValue::make_object();
+		stance.set("id", json_number(double(i)));
+		stance.set("name", json_string(stance_names_[i]));
+		stance.set("texture", json_string(assets_.stance_textures[i]));
+		stances.push(std::move(stance));
+	}
+	out.set("stances", std::move(stances));
+	const HudPreviewWeapon *weapon = weapon_shown();
+	out.set("weapon_shown", json_string(weapon ? weapon->name : std::string()));
+	JsonValue weapons = JsonValue::make_array();
+	for (const HudPreviewWeapon &each : weapons_) {
+		JsonValue row = JsonValue::make_object();
+		row.set("name", json_string(each.name));
+		row.set("clipsize", json_number(each.clipsize));
+		row.set("hudicon", json_string(each.hudicon));
+		row.set("clip_art", json_string(each.clip_art));
+		row.set("round_art", json_string(each.round_art));
+		weapons.push(std::move(row));
+	}
+	out.set("weapons", std::move(weapons));
+	out.set("elements", json_number(double(elements_.size())));
+	return out;
+}
+
+io::JsonValue HudViewport::items_json(const ViewportInput &) const {
+	JsonValue out = JsonValue::make_array();
+	const HudPreviewElement *chosen = picked();
+	for (const HudPreviewElement &element : elements_) {
+		JsonValue row = JsonValue::make_object();
+		row.set("element", json_string(opennova::hud::hud_element_token(element.element)));
+		row.set("words", json_string(hud_element_words(element.element).words));
+		JsonValue rect = JsonValue::make_array();
+		for (const float v : { element.x0, element.y0, element.x1, element.y1 }) rect.push(json_number(v));
+		row.set("rect", std::move(rect));
+		JsonValue lines = JsonValue::make_array();
+		for (const HudPreviewElement::Line &line : element.lines) {
+			JsonValue at = JsonValue::make_object();
+			at.set("key", json_string(line.key));
+			at.set("line", json_number(double(line.line)));
+			at.set("column", json_number(double(line.column)));
+			at.set("locator", json_string(TextDocument::locator(line.line, line.column)));
+			at.set("text", json_string(line.text));
+			lines.push(std::move(at));
+		}
+		row.set("lines", std::move(lines));
+		JsonValue textures = JsonValue::make_array();
+		for (const HudPreviewElement::Art &art : element.textures) {
+			JsonValue texture = JsonValue::make_object();
+			texture.set("name", json_string(art.name));
+			texture.set("path", json_string(art.path));
+			textures.push(std::move(texture));
+		}
+		row.set("textures", std::move(textures));
+		row.set("picked", JsonValue::make_bool(&element == chosen));
+		out.push(std::move(row));
+	}
+	return out;
+}
+
+} // namespace opennova::editor
