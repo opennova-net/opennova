@@ -106,8 +106,7 @@ const MissionPoses::Catalog &MissionPoses::catalog_(const std::string &file) {
 			const def::DefItemDef &row = items.entries[i];
 			// A type id resolves to its first row [docs/world/itemdef-re.md, 2026-09-23].
 			if (catalog.items.count(int64_t(row.id))) continue;
-			Definition definition;
-			definition.found = true;
+			PersonDefinition definition;
 			definition.ai_function = row.ai_function;
 			definition.anim_def = row.anim_def;
 			definition.attrib = row.attrib;
@@ -119,10 +118,10 @@ const MissionPoses::Catalog &MissionPoses::catalog_(const std::string &file) {
 }
 
 bool MissionPoses::refresh(const SessionView &view, const MissionScene &scene) {
-	std::vector<Input> inputs;
+	std::vector<MissionPoseInput> inputs;
 	for (const MissionEntityMark &entity : scene.entities()) {
 		if (entity.pool != MissionPool::Organic) continue;
-		inputs.push_back(Input{ entity.row, entity.item, entity.attributes, entity.route, entity.ssn });
+		inputs.push_back(MissionPoseInput{ entity.row, entity.item, entity.attributes, entity.route, entity.ssn });
 	}
 	const AssetGraph *graph = view.findings.graph.get();
 	const uint64_t graph_generation = graph ? graph->generation() : 0;
@@ -138,7 +137,7 @@ bool MissionPoses::refresh(const SessionView &view, const MissionScene &scene) {
 	graph_ = graph_generation;
 	std::unordered_map<int64_t, std::string> resolved;
 	if (!graph_moved) resolved = resolved_;
-	for (const Input &input : inputs) {
+	for (const MissionPoseInput &input : inputs) {
 		if (resolved.count(input.item)) continue;
 		const GraphSymbol *symbol =
 				graph ? graph->resolve_symbol(ReferenceKind::Item, std::to_string(input.item)) : nullptr;
@@ -176,6 +175,16 @@ bool MissionPoses::refresh(const SessionView &view, const MissionScene &scene) {
 	return changed;
 }
 
+int32_t mission_pose_clearance(const MissionPose &pose, double x, double y, double z,
+		const terrain::TerrainHeightField *terrain) {
+	if (terrain == nullptr) return INT32_MAX;
+	const auto fixed = [](double units) { return int32_t(std::lround(units * io::kFp16OneD)); };
+	// The warmup's ground solve: the body lifted by its rise, its feet's clearance over the terrain alone.
+	// [orig: Entity_WarmUpOrganicAnimation @0x4B8BD8..0x4B8BF5]
+	const int32_t at[3] = { fixed(x), fixed(y), io::bam_add(fixed(z), fixed(pose.rise)) };
+	return world::terrain_settle_clearance(terrain, at, pose.capsule_bottom, false);
+}
+
 bool MissionPoses::stand(const MissionScene &scene, const terrain::TerrainHeightField *terrain) {
 	const auto fixed = [](double units) { return int32_t(std::lround(units * io::kFp16OneD)); };
 	bool moved = false;
@@ -185,15 +194,11 @@ bool MissionPoses::stand(const MissionScene &scene, const terrain::TerrainHeight
 		const int32_t rise = fixed(pose.rise);
 		double lift = pose.rise;
 		bool settled = false;
-		if (terrain != nullptr) {
-			// The warmup's ground solve: the clearance below one unit taken off, a positive one
-			// included, over the terrain alone. [orig: Entity_WarmUpOrganicAnimation @0x4B8BD8..0x4B8BF5]
-			const int32_t at[3] = { fixed(entity->x), fixed(entity->y), io::bam_add(fixed(entity->z), rise) };
-			const int32_t clearance = world::terrain_settle_clearance(terrain, at, pose.capsule_bottom, false);
-			if (clearance < 65536) {
-				lift = double(io::bam_sub(rise, clearance)) / io::kFp16OneD;
-				settled = true;
-			}
+		// The clearance below one unit taken off, a positive one included.
+		const int32_t clearance = mission_pose_clearance(pose, entity->x, entity->y, entity->z, terrain);
+		if (clearance < kMissionPoseSettle) {
+			lift = double(io::bam_sub(rise, clearance)) / io::kFp16OneD;
+			settled = true;
 		}
 		if (lift == pose.lift && settled == pose.settled) continue;
 		pose.lift = lift;
@@ -209,41 +214,48 @@ void MissionPoses::pose_all_() {
 	poses_.clear();
 	rows_.clear();
 	if (!motion_) motion_ = std::make_unique<anim::AdmRootMotion>();
-	const PreviewRigFiles rig_files(files_);
+	// The catalog the project's graph resolves the item to, its first row of the id.
+	const auto item_of = [this](int64_t item) -> const PersonDefinition * {
+		const auto resolved = resolved_.find(item);
+		if (!files_ || resolved == resolved_.end() || resolved->second.empty()) return nullptr;
+		const Catalog &catalog = catalog_(resolved->second);
+		const auto found = catalog.items.find(item);
+		return found == catalog.items.end() ? nullptr : &found->second;
+	};
+	const auto has_file = [this](const std::string &file) { return source_ && !source_->path_of(file).empty(); };
+	mission_pose_people(inputs_, item_of, has_file, files_, *motion_, poses_);
+	for (size_t i = 0; i < poses_.size(); ++i) rows_[poses_[i].row] = i;
+}
+
+void mission_pose_people(const std::vector<MissionPoseInput> &inputs,
+		const std::function<const PersonDefinition *(int64_t)> &item_of,
+		const std::function<bool(const std::string &)> &has_file, const std::shared_ptr<const StampedFiles> &files,
+		anim::AdmRootMotion &motion, std::vector<MissionPose> &out) {
+	out.clear();
+	const PreviewRigFiles rig_files(files);
 	// One ring-head table per .adm, served by every person of it in the file's order (the init runs
 	// pool 0's rows in their order) [orig: AnimMap_LoadAdmFile @0x40CC40 reuses the entry by name;
 	// the organic inits Entity_SpawnFromBMSRecord @0x40E9F0 -> Entity_InitOrganicAI @0x4BFCC0].
 	world::AnimVariantRings rings;
-	for (const Input &input : inputs_) {
+	for (const MissionPoseInput &input : inputs) {
 		MissionPose pose;
 		pose.row = input.row;
 		pose.item = input.item;
-		rows_[input.row] = poses_.size();
-		// The catalog the project's graph resolves the item to, its first row of the id.
-		const auto resolved = resolved_.find(input.item);
-		const Definition *definition = nullptr;
-		if (files_ && resolved != resolved_.end() && !resolved->second.empty()) {
-			const Catalog &catalog = catalog_(resolved->second);
-			const auto found = catalog.items.find(input.item);
-			if (found != catalog.items.end()) definition = &found->second;
-		}
+		const PersonDefinition *definition = files ? item_of(input.item) : nullptr;
 		if (!definition) {
 			pose.status = "no_item";
-			poses_.push_back(std::move(pose));
+			out.push_back(std::move(pose));
 			continue;
 		}
-		PersonDefinition person;
-		person.ai_function = definition->ai_function;
-		person.anim_def = definition->anim_def;
-		person.attrib = definition->attrib;
-		pose_person(person, PersonRecord{ input.ssn, input.route, input.attributes }, *source_, *files_, rig_files,
-				*motion_, rings, pose);
-		poses_.push_back(std::move(pose));
+		pose_person(*definition, PersonRecord{ input.ssn, input.route, input.attributes }, has_file, *files,
+				rig_files, motion, rings, pose);
+		out.push_back(std::move(pose));
 	}
 }
 
-void pose_person(const PersonDefinition &definition, const PersonRecord &record, const ProjectAssetSource &source,
-		StampedFiles &files, const anim::RigFiles &rig_files, anim::AdmRootMotion &motion, world::AnimVariantRings &rings,
+void pose_person(const PersonDefinition &definition, const PersonRecord &record,
+		const std::function<bool(const std::string &)> &has_file, const StampedFiles &files,
+		const anim::RigFiles &rig_files, anim::AdmRootMotion &motion, world::AnimVariantRings &rings,
 		MissionPose &pose) {
 	pose.ai_function = definition.ai_function;
 	pose.ai_slot = (definition.attrib & world::kItemAttribAIData) != 0;
@@ -262,7 +274,7 @@ void pose_person(const PersonDefinition &definition, const PersonRecord &record,
 	if (!strutil::ends_with_icase(named, ".adm")) named += ".adm";
 	const std::string file = assets::asset_file_name(named, ".adm");
 	files.stamp(file); // noted, so the file's coming or going poses again
-	pose.adm = anim::adm_name_or_default(named, !source.path_of(file).empty());
+	pose.adm = anim::adm_name_or_default(named, has_file(file));
 	const int adm_id = motion.register_adm(&rig_files, pose.adm);
 	if (adm_id < 0) {
 		pose.status = "no_clips";
