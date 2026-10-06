@@ -917,8 +917,8 @@ void test_text_inline_colour_tags(const fnt_font_t *font) {
 	if (!dl.font_runs.empty() && dl.font_runs[0].count == 2) {
 		const size_t first = static_cast<size_t>(dl.font_runs[0].first);
 		CHECK((dl.glyphs[first].color & 0xFFFFFFu) == 0xFF0000u, "<cFF0000> draws red");
-		CHECK((dl.glyphs[first + 1].color & 0xFFFFFFu) == 0xAABBCCu,
-				"<co> restores the text colour");
+		CHECK((dl.glyphs[first + 1].color & 0xFFFFFFu) == text_rgb(0xAABBCCu),
+				"<co> restores the text colour (as the sink submits it, D-HUD-51)");
 		CHECK((dl.glyphs[first].color & 0xFF000000u) == (dl.glyphs[first + 1].color & 0xFF000000u),
 				"the tag keeps the text colour's alpha");
 	}
