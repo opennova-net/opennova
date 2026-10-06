@@ -4340,6 +4340,16 @@ target_link_libraries(editor_text_document_test PRIVATE opennova_editor)
 target_include_directories(editor_text_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_text_document COMMAND editor_text_document_test)
 
+# The environment document (the deep-integration plan's DI-19a): a .env through the engine's own
+# reader and writer, its fields in the file's units and the game's rules, its keyframes, its source
+# findings, its references through the graph, the missions that run on it (the environment_uses
+# query); the retail leg (OPENNOVA_JO_DIR) reads every .env of the install through the document and
+# writes it again, field for field.
+add_executable(editor_environment_document_test editor/environment_document_test.cpp)
+target_link_libraries(editor_environment_document_test PRIVATE opennova_editor)
+target_include_directories(editor_environment_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_environment_document COMMAND editor_environment_document_test)
+
 add_executable(editor_unsaved_guard_test editor/unsaved_guard_test.cpp)
 target_link_libraries(editor_unsaved_guard_test PRIVATE opennova_editor)
 target_include_directories(editor_unsaved_guard_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

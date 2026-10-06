@@ -1111,22 +1111,23 @@ static int test_shader_and_text() {
 // Every text file opens in the editor (the deep-integration plan's DI-06): the text kinds no structured
 // type edits are the text type's, a text with undo and save; where the engine has a reader of the kind,
 // its findings are the file's (the avatar reader's notes at their lines; the score table's reader),
-// listed; a kind with none makes none. SndProf.def is left to its own type, the particle file to its own
-// (DI-14: the specific type owns its kind), the mission text to no type (the build leaves it out). An open
-// environment stands in for its file in the graph, read by the engine's own reader: its names follow its
-// edits.
+// listed; a kind with none makes none. SndProf.def, the particle file (DI-14) and the environment
+// (DI-19a) are left to their own types (the specific type owns its kind), the mission text to no type (the
+// build leaves it out). An open avatar table stands in for its file in the graph, read by the engine's own
+// reader: its names follow its edits.
 static int test_text_readers() {
 	const DocumentType *text = document_type(DocumentTypeId::Text);
 	TEST_EXPECT(text != nullptr);
 	if (!text) return 1;
-	for (const AssetKind kind : {AssetKind::AiProfile, AssetKind::Environment, AssetKind::HudPosDefs,
+	for (const AssetKind kind : {AssetKind::AiProfile, AssetKind::HudPosDefs,
 	                             AssetKind::HudFxDefs, AssetKind::AvatarDefs, AssetKind::CharAttrDefs, AssetKind::OtherDefs,
 	                             AssetKind::Score, AssetKind::NovaWorldScreen})
 		TEST_EXPECT(document_type_for(kind) == text && is_editable_kind(kind));
 	TEST_EXPECT(document_type_for(AssetKind::SoundProfileDefs) != text && document_type_for(AssetKind::MissionText) == nullptr &&
 	            document_type_for(AssetKind::Particles) == document_type(DocumentTypeId::Particles));
+	TEST_EXPECT(document_type_for(AssetKind::Environment) == document_type(DocumentTypeId::Environment));
 	// The graph still reads a native kind through the engine's reader, not the text type.
-	TEST_EXPECT(graph_reads_kind(AssetKind::Particles) && graph_reads_kind(AssetKind::Environment) &&
+	TEST_EXPECT(graph_reads_kind(AssetKind::Particles) &&
 	            graph_reads_kind(AssetKind::HudPosDefs) && graph_reads_kind(AssetKind::AvatarDefs) &&
 	            !graph_reads_kind(AssetKind::CharAttrDefs) && !graph_reads_kind(AssetKind::Score));
 	Diagnostic error;
@@ -1148,12 +1149,11 @@ static int test_text_readers() {
 	            scores[0].message.find("score table") != std::string::npos);
 	// Kinds whose reader refuses nothing, or that the editor models no reader of.
 	TEST_EXPECT(findings_of("primary_ammo 5\n", "tank.aip", AssetKind::AiProfile).empty() &&
-	            findings_of("[CHARACTER1]\nNAME = x\n", "charattr.def", AssetKind::CharAttrDefs).empty() &&
-	            findings_of("sky_map1 sky.pcx\n", "day.env", AssetKind::Environment).empty());
+	            findings_of("[CHARACTER1]\nNAME = x\n", "charattr.def", AssetKind::CharAttrDefs).empty());
 	TEST_EXPECT(texts_held);
 
-	// In a session: the environment opens as a text; an edit of its cloud layer's name moves the graph's
-	// reference with it, unsaved; the avatar table's note is the text type's, at its line.
+	// In a session: the avatar table opens as a text; an edit of a head's model moves the graph's reference
+	// with it, unsaved; the table's note is the text type's, at its line.
 	editor_test::TempProjectDir dir("opennova_editor_text_readers");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
@@ -1161,30 +1161,31 @@ static int test_text_readers() {
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Readers"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/day.env", "sky_map1 sky.pcx\r\n") &&
-	            editor_test::write_text(root + "/Avatars.def",
-	                                    "nationality N00 FIRST\r\n{\r\n}\r\nnationality N00 DUP_NAT\r\n{\r\n}\r\n"));
+	TEST_EXPECT(editor_test::write_text(root + "/Avatars.def",
+	                                    "nationality N00 FIRST\r\n{\r\n}\r\nnationality N00 DUP_NAT\r\n{\r\n}\r\n\r\n"
+	                                    "define head HEAD_A\r\n{\r\n\tgraphic\t\thead_a.3di\r\n\tcamo\t\t0 0 0\r\n"
+	                                    "\tvoice\t\t1\r\n\tsex\t\tm\r\n}\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	const auto names = [&session](const std::string &value) {
-		for (const GraphEdge *edge : session.view().findings.graph->references_of("day.env"))
-			if (edge->kind == ReferenceKind::Texture && edge->value == value) return true;
+		for (const GraphEdge *edge : session.view().findings.graph->references_of("Avatars.def"))
+			if (edge->kind == ReferenceKind::Model && edge->value == value) return true;
 		return false;
 	};
-	TEST_EXPECT(names("sky.pcx"));
+	TEST_EXPECT(names("head_a.3di"));
 	size_t noted = 0;
 	for (const Diagnostic &d : session.view().findings.diagnostics)
 		noted += d.code() == "text.reader" && d.asset == "Avatars.def" && d.severity == DiagnosticSeverity::Warning && d.line == 4;
 	TEST_EXPECT(noted == 1);
-	editor_test::handle_to_end(session, request::open_document("day.env"));
-	TextDocument *open = text_of(*session.document_base_for("day.env"));
+	editor_test::handle_to_end(session, request::open_document("Avatars.def"));
+	TextDocument *open = text_of(*session.document_base_for("Avatars.def"));
 	TEST_EXPECT(open != nullptr);
 	if (!open) return 1;
-	TEST_EXPECT(open->line(1) == "sky_map1 sky.pcx");
-	editor_test::handle_to_end(session, request::edit_record("day.env", {TextDocument::replace(span(1, 10, 3), "dusk")}));
-	TEST_EXPECT(session.last_edit_ok() && open->line(1) == "sky_map1 dusk.pcx" && open->dirty());
-	TEST_EXPECT(names("dusk.pcx") && !names("sky.pcx"));
-	editor_test::handle_to_end(session, request::undo("day.env"));
-	TEST_EXPECT(names("sky.pcx") && !open->dirty());
+	TEST_EXPECT(open->line(10) == "\tgraphic\t\thead_a.3di");
+	editor_test::handle_to_end(session, request::edit_record("Avatars.def", {TextDocument::replace(span(10, 11, 6), "head_b")}));
+	TEST_EXPECT(session.last_edit_ok() && open->line(10) == "\tgraphic\t\thead_b.3di" && open->dirty());
+	TEST_EXPECT(names("head_b.3di") && !names("head_a.3di"));
+	editor_test::handle_to_end(session, request::undo("Avatars.def"));
+	TEST_EXPECT(names("head_a.3di") && !open->dirty());
 	return 0;
 }
 
