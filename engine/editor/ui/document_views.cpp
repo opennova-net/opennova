@@ -8,6 +8,7 @@
 #include <editor/model/document_base.h>
 #include <editor/session/request_factories.h>
 #include <editor/ui/animation_inspector.h>
+#include <editor/ui/environment_inspector.h>
 #include <editor/ui/main_viewport_view.h>
 #include <editor/ui/menu_view.h>
 #include <editor/ui/mission_logic_view.h>
@@ -150,6 +151,10 @@ constexpr DocumentViewRow kViews[] = {
 	{DocumentTypeId::SoundProfiles, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_sound_profile_inspector},
 	// A particle file's text in the script device; the Preview window plays its effect (DI-14).
 	{DocumentTypeId::Particles, DocumentViewRole::MainViewport, nullptr, make_script_view},
+	// An environment's row and its keyframes as a tree (DI-19a); the missions that run on it head the
+	// Inspector, each a Go to with its terrain and what its header sets over it (ui/environment_inspector).
+	// DI-19b's time-of-day viewport takes the Main role here.
+	{DocumentTypeId::Environment, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_environment_inspector},
 };
 
 // One view per DocumentTypeId past None, in its order, each an outline or a view its make makes.
