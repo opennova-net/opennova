@@ -28,6 +28,9 @@
 // The menu type's project check, by its hook alone: the render check runs the preview's headless
 // screen compile (MenuScreenRender), so it sits with it in preview/ (ADR 0046 S13 V9).
 #include <editor/preview/make_menu_render_check.h>
+// The mission type's, by its hook alone too: the ground check reads the preview's scene, terrain and
+// people's poses (preview/mission_ground_check.h, DI-28).
+#include <editor/preview/make_mission_ground_check.h>
 
 #include <array>
 #include <atomic>
@@ -78,10 +81,10 @@ constexpr DocumentType kTypes[] = {
 			animation_map_finding_codes },
 	// The mission (S14): its records' references no field's value is are its record_references (the
 	// text keys a record's number forms); its records and values in a modder's words, and briefly for a
-	// narrow column (S15).
+	// narrow column (S15); its project check, what the game grounds where (DI-28).
 	{ DocumentTypeId::Mission, "mission", make_mission, validate_mission_file, MissionDocument::schema,
-			mission_finding_codes, nullptr, nullptr, nullptr, mission_references, mission_record_label,
-			mission_value_label, mission_record_brief, mission_game_choices },
+			mission_finding_codes, make_mission_ground_check, nullptr, nullptr, mission_references,
+			mission_record_label, mission_value_label, mission_record_brief, mission_game_choices },
 	// The text types (S13 D9): one TextDocument class, a row per behaviour, none with records
 	// (text_fields) or a project check; the script's text names references, and its compiler's
 	// words are its highlights (S13 V10).
