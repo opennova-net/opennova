@@ -210,6 +210,9 @@ void serve_open_texture_source(SessionCore &core, const EditorRequest &request) 
 void serve_preview_install_import(SessionCore &core, const EditorRequest &request) {
 	core.imports().preview_install(request);
 }
+void serve_new_terrain(SessionCore &core, const EditorRequest &request) {
+	core.imports().new_terrain(request);
+}
 void serve_clear_output(SessionCore &core, const EditorRequest &) {
 	core.clear_output();
 }
@@ -848,6 +851,23 @@ constexpr RequestKindRow kRows[] = {
 			"walk: import_files with planned then takes them.")
 			.takes(request_params({}, { F::Names, F::WithDependencies, F::All }))
 			.holds(kFiles, kSlot, OnBusy::Supersede)
+			.ends_edit_groups()
+			.row,
+	// A terrain made from images is an import of them (S20): the set and its record written, then the
+	// refresh that imports it, which holds the slot as a reimport does.
+	Request(K::NewTerrain, "new_terrain", serve_new_terrain,
+			"A terrain named path (its stem: letters, digits and underscores, at most 9) made from images "
+			"(import/terrain_import.h): values names them, heightmap (a PNG of 1024 x 1024, any depth, or a "
+			".raw) and colormap (1024 x 1024) required, detail and tiles optional, each a file on disk "
+			"(copied into art/terrain/ as <name>_<key>.<ext>) or a project file (named where it is), and "
+			"takes the importer's options top (world units of the heightmap's white, 127.5), water (the "
+			"sea's height in world units, 0 none) and layout (island or tiled); art/terrain/<name>.tset and "
+			"its record written, then imported, a refresh (the outcome names the operation), which makes "
+			"<name>.trn, .cpt, .til and its textures. Refused, nothing written (import.terrain): a name "
+			"taken or that does not fit, a value of no key it takes, an image that does not read or does "
+			"not fit its role.")
+			.takes(request_params({ F::Path, F::Values }))
+			.holds(kFiles, kFiles | kSlot)
 			.ends_edit_groups()
 			.row,
 	Request(K::ClearOutput, "clear_output", serve_clear_output,
