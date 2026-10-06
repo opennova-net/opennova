@@ -239,7 +239,7 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	for (int32_t value : conn.reply.ammo_pools)
 		put_u32(b, static_cast<uint32_t>(value));
 	// The waypoint body is present only for the witnessed waypoint gametype and
-	// a blue/team-1 recipient. Promotion retains the first BlueTeam route in
+	// a blue/team-1 recipient. Promotion retains the first PlayerRoute route in
 	// World::waypoints; each entry's node is the corresponding pool-3 marker
 	// index, and the wire word IS that raw pool-3 index — NOT a 0x3000|node
 	// handle: the writer stores the same dword it passed to

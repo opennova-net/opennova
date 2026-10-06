@@ -20,6 +20,7 @@ const std::vector<DefField> kItemFields = {
 	FIELD(DefItemDef, id, Integer),
 	FIELD_CUT(DefItemDef, sid, 16), // strncpy(.., 15) [orig: @0x49EC69..0x49EC8D]
 	FIELD(DefItemDef, type, Integer),
+	FIELD(DefItemDef, type_word, Byte), // the type line's word of two for one value [orig: @0x4A02E4..0x4A04B7]
 	FIELD(DefItemDef, graphic, Text),
 	FIELD(DefItemDef, anim_def, Text),
 	FIELD(DefItemDef, husk, Text),

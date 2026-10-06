@@ -457,6 +457,7 @@ int test_text_key_picks() {
 	section("WinConditions", {{"STRWINDIRECTIVE001", "Reach the pump house"}, {"STRWINCOND000", "An empty slot"},
 	                          {"STRWINCOND001", "Pump house reached"}, {"STRWINCOND004", "Radio tower held"},
 	                          {"STRWINCOND255", "An empty slot too"}});
+	section("WPNames", {{"STRWPNAME001", "Marketplace"}, {"STRWPNAME002", "Extraction Point Bravo"}});
 	std::vector<uint8_t> bytes;
 	std::string error;
 	TEST_EXPECT(opennova::rtxt::write(table, bytes, error));
@@ -512,6 +513,54 @@ int test_text_key_picks() {
 		listed += choice.name + "=" + choice.label + ";";
 	// STRWINCOND000 and STRWINCOND255 not among them: 0 and 255 are empty slots, no row of the panel.
 	TEST_EXPECT(same(listed, "0=No objective (the panel's rows end here);1=\"Pump house reached\";4=\"Radio tower held\";"));
+	// A waypoint's name id (record +0x60): the first marker made a waypoint (item 106005) whose id is 1, so its
+	// spawn looks STRWPNAME001 up in WPNames [orig: Entity_SpawnFromBMSRecord @0x40f0aa..0x40f0e0]. Read by
+	// the game, picked by the section's keys of its form by their strings (0 forms one too), worded by its
+	// string, 15 characters of it kept; its key an edge of the mission's, which its Go to reaches.
+	const NodeAddress marker = row_at(*document, MissionKind::Marker, 0);
+	const NodeAddress other = row_at(*document, MissionKind::Marker, 1);
+	Edit waypoint;
+	waypoint.address = marker;
+	waypoint.field = "item";
+	waypoint.value = int64_t(106005);
+	Edit named = waypoint;
+	named.field = "ttool_index";
+	named.value = int64_t(1);
+	editor_test::handle_to_end(session, request::edit_record("missions/synth_logic.bms", std::vector<Edit>{waypoint, named}));
+	TEST_EXPECT(session.last_edit_ok());
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(view.findings.graph != nullptr);
+	if (!view.findings.graph) return 1;
+	const GraphNameSource waypoint_names(*view.findings.graph);
+	FieldUse route, unread;
+	for (const FieldSchema &schema : document->fields(marker.kind))
+		if (schema.id == "ttool_index") {
+			route = document->field_on(marker, schema);
+			unread = document->field_on(other, schema);
+		}
+	TEST_EXPECT(route.schema && same(route.schema->label, "Waypoint name") && route.applies == Applicability::Reads &&
+	            route.picks == ReferenceKind::TextId && same(route.scope, "SYNTH_LOGIC.BIN/WPNames") && route.key_prefix &&
+	            std::string(route.key_prefix) == "STRWPNAME");
+	TEST_EXPECT(unread.schema && unread.applies == Applicability::Unverified && unread.picks == ReferenceKind::None);
+	listed.clear();
+	for (const ReferenceChoice &choice : picker_choices(view.findings.graph.get(), *document, marker, route, &waypoint_names))
+		listed += choice.name + "=" + choice.label + ";";
+	TEST_EXPECT(same(listed, "1=\"Marketplace\";2=\"Extraction Poin\" (the game keeps 15 characters of \"Extraction Point "
+	                         "Bravo\");"));
+	TEST_EXPECT(same(shown(*document, marker, "ttool_index", &waypoint_names).text, "\"Marketplace\""));
+	bool edge = false;
+	for (const GraphEdge *each : view.findings.graph->references_of("missions/synth_logic.bms"))
+		edge = edge || (each->kind == ReferenceKind::TextId && each->field == "ttool_index" && each->value == "STRWPNAME001" &&
+		                view.findings.graph->resolve(*each) == ReferenceStatus::Present);
+	TEST_EXPECT(edge);
+	FieldUse keyed;
+	Value key;
+	TEST_EXPECT(keyed_text_reference(*view.findings.graph, route, Value(int64_t(1)), keyed, key) && key == Value(std::string("STRWPNAME001")) &&
+	            keyed.reference == ReferenceKind::TextId && same(keyed.scope, "SYNTH_LOGIC.BIN/WPNames"));
+	const opennova::io::JsonValue targets = reference_targets_to_json(*document, marker, "ttool_index", view, JsonPage());
+	const opennova::io::JsonValue *leads = targets.get("targets");
+	TEST_EXPECT(leads && leads->array.size() == 1 && same(leads->array[0].get_string("file", ""), "missions/synth_logic.bin") &&
+	            same(targets.get_string("reference", ""), "text_id"));
 	std::printf("text key picks: the section's keys of the field's form by their strings, a pick its number\n");
 	return 0;
 }
