@@ -45,8 +45,27 @@ std::string unreadable_banner(const std::vector<std::string> &unreadable) {
 
 // The viewport's options set (a SetViewport of them).
 void set_options(Workspace &workspace, const MenuViewport &menu, const MenuViewportOptions &options) {
-	workspace.request(request::set_viewport(
-			menu.path(), viewport_change(ViewportKind::Menu, "options", menu_options_to_json(options, menu.show()))));
+	workspace.request(request::set_viewport(menu.path(),
+			viewport_change(ViewportKind::Menu, "options", menu_options_to_json(options, menu.show(), menu.pointer()))));
+}
+
+// The game's pointer drawn or not (a SetViewport of that alone, DI-08: where a client holds it stands).
+void set_pointer(Workspace &workspace, const MenuViewport &menu, bool shown) {
+	io::JsonValue options = io::JsonValue::make_object();
+	options.set("pointer", io::JsonValue::make_bool(shown));
+	workspace.request(request::set_viewport(menu.path(), viewport_change(ViewportKind::Menu, "options", std::move(options))));
+}
+
+// Where the pointer comes from: the window whose CURSOR names it, at that field (window_requests::go_to, so
+// the history records it).
+void go_to_pointer(Workspace &workspace, const MnuDocument &document, const MenuPointer &pointer) {
+	ReferenceTarget target;
+	target.label = pointer.name + "'s pointer";
+	target.file = document.path();
+	target.locator = document.locator(pointer.window);
+	target.field = "cursor.file";
+	target.editable = true;
+	window_requests::go_to(workspace, target);
 }
 
 // The canvas's zoom as the viewport's options hold it, and back.
@@ -66,7 +85,7 @@ void zoom_canvas(ViewportCanvas &canvas, const MenuCanvasShow &show) {
 // The zoom and the snap set (a SetViewport of them alone: they change no picture).
 void set_show(Workspace &workspace, const MenuViewport &menu, const MenuCanvasShow &show) {
 	io::JsonValue options = io::JsonValue::make_object();
-	const io::JsonValue all = menu_options_to_json(MenuViewportOptions(), show);
+	const io::JsonValue all = menu_options_to_json(MenuViewportOptions(), show, MenuPointerShow());
 	for (const char *member : { "zoom", "scale", "snap" })
 		if (const io::JsonValue *value = all.get(member)) options.set(member, *value);
 	workspace.request(request::set_viewport(menu.path(), viewport_change(ViewportKind::Menu, "options", std::move(options))));
@@ -75,8 +94,9 @@ void set_show(Workspace &workspace, const MenuViewport &menu, const MenuCanvasSh
 } // namespace
 
 // What the view keeps of its own: where the mouse was on the picture in design units at the last canvas
-// pass (the toolbar's readout); the zoom and the snap are the viewport's options (the MCP gaps lane), the
-// canvas following them and its own changes (the Zoom list, Ctrl+wheel, Snap) sent to them.
+// pass and the game's pointer there (the toolbar's readouts); the zoom and the snap are the viewport's
+// options (the MCP gaps lane), the canvas following them and its own changes (the Zoom list, Ctrl+wheel,
+// Snap) sent to them.
 struct MenuViewportView::Tools {
 	bool snap = true;
 	ui_kit::Held<MenuCanvasShow> held;
@@ -84,6 +104,7 @@ struct MenuViewportView::Tools {
 	bool mouse_on_picture = false;
 	int mouse_x = 0;
 	int mouse_y = 0;
+	MenuPointer pointer; // the game's pointer at the mouse (DI-08), while it is on the picture
 
 	void toolbar(Workspace &workspace, ViewportView &view, ViewportCanvas &canvas, const MenuViewport &menu,
 			const MenuCanvasFrame &frame);
@@ -199,6 +220,29 @@ void MenuViewportView::Tools::toolbar(Workspace &workspace, ViewportView &, View
 	if (mouse_on_picture) ImGui::Text("x %d, y %d", mouse_x, mouse_y);
 	else ImGui::TextDisabled("x -, y -");
 	ui_kit::tooltip("Where the mouse is on the picture, in the menu's 800 x 600 units.");
+
+	// The game's pointer (DI-08): drawn at the mouse over the picture, and named here (the one at the mouse,
+	// else the screen's own), a click going to the window whose CURSOR it is.
+	row.next(ui_kit::checkbox_width("Pointer"));
+	bool pointer_shown = menu.pointer().shown;
+	if (ImGui::Checkbox("Pointer", &pointer_shown)) set_pointer(workspace, menu, pointer_shown);
+	ui_kit::tooltip("Draw the game's mouse pointer where the mouse is over the picture, as the game does: the "
+	                "CURSOR of the window under it, else of that window's root window, else of the first root "
+	                "window whose CURSOR loads, at the image's own size whatever the zoom.");
+	const MenuPointer now = mouse_on_picture ? pointer : menu_screen_pointer(frame);
+	if (now.drawn) {
+		const std::string label = now.file + "###pointer";
+		const std::string tip = (mouse_on_picture ? "The pointer here: " : "The screen's pointer: ") + now.file + ", " +
+		                        std::to_string(now.width) + " x " + std::to_string(now.height) + ", the CURSOR of " +
+		                        now.name + ". Click to go to it.";
+		if (ui_kit::tool(row, label.c_str(), now.window.child != 0, tip)) go_to_pointer(workspace, document, now);
+	} else {
+		row.next(ui_kit::text_width("No pointer"));
+		ImGui::AlignTextToFramePadding();
+		ImGui::TextDisabled("No pointer");
+		ui_kit::tooltip("No window of the screen names a CURSOR whose image loads, so the game shows no mouse "
+		                "pointer on it at all. Name one on its root window (Pointer image).");
+	}
 	if (options != before) set_options(workspace, menu, options);
 }
 
@@ -291,6 +335,8 @@ void MenuViewportView::draw_ready(Workspace &workspace, const ViewportModel &mod
 				if (tools_->mouse_on_picture) {
 					tools_->mouse_x = int(std::floor(in.mouse.x / sx));
 					tools_->mouse_y = int(std::floor(in.mouse.y / sy));
+					// The game's pointer there: the claim the pump makes at the point (DI-08).
+					tools_->pointer = menu_pointer_at(frame, in.mouse.x / sx, in.mouse.y / sy);
 				}
 				// The right button: the window under it selected unless it already is, and the menu
 				// of what the selection can do.
@@ -352,6 +398,12 @@ void MenuViewportView::draw_ready(Workspace &workspace, const ViewportModel &mod
 		}
 	}
 	ImGui::EndChild();
+}
+
+bool MenuViewportView::draws_pointer(const ViewportModel &model, const ViewportContext &, const CanvasInput &) {
+	// The pointer the canvas pass found at the mouse this frame, while Pointer is on.
+	return static_cast<const MenuViewport &>(model).pointer().shown && tools_->mouse_on_picture &&
+			tools_->pointer.drawn;
 }
 
 } // namespace opennova::editor
