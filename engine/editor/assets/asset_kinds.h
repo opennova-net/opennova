@@ -62,6 +62,7 @@ enum class DocumentTypeId {
 	SoundBank,     // a .lwf: its waves and its sets, their layers and members (the sound lane)
 	SoundProfiles, // SndProf.def: its profiles and each one's 51 slots (the sound lane)
 	Particles,   // a .ptl .ptu .ptg: the effect system's text, its reader's findings (ADR 0046 DI-14)
+	HudLayout,   // hudpos.def, held as its text and drawn by the HUD viewport (the plan's DI-20)
 	kCount, // the number of values, None among them
 };
 

@@ -375,6 +375,14 @@ public:
 	// Debug/test accessor: compile at the current surface size and report the
 	// draw list's element counts.
 	Ref<HudDrawListStats> get_draw_list_stats();
+	// The seams of an embedder with no world (the OpenNova Editor's HUD preview, the plan's DI-20),
+	// C++ only. The draw list compiled at the overlay's surface now, as the next draw compiles it (its
+	// element spans name what each element drew, runtime/hud/hud_elements.h); an empty list before
+	// configure(). And the held weapon's silhouette as the combat feed gives it with a world
+	// (world::fill_hud_combat_view: the weapon's identity and its weapon.def hudicon, loaded in alpha
+	// mode), which a configure() drops with the rest of the layout's art.
+	const opennova::hud::HudDrawList &compile_draw_list();
+	void set_weapon_icon(const String &p_weapon_name, const String &p_hudicon);
 	// Debug/test accessor: each textured quad's colour in draw order, the compiled
 	// vertex colour or (`p_drawn`) the colour the device draws a white texel with
 	// under the texture's material: doubled by the alpha material

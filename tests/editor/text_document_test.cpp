@@ -1110,20 +1110,22 @@ static int test_shader_and_text() {
 // Every text file opens in the editor (the deep-integration plan's DI-06): the text kinds no structured
 // type edits are the text type's, a text with undo and save; where the engine has a reader of the kind,
 // its findings are the file's (the avatar reader's notes at their lines; the score table's reader),
-// listed; a kind with none makes none. SndProf.def is left to its own type, the particle file to its own
-// (DI-14: the specific type owns its kind), the mission text to no type (the build leaves it out). An open
+// listed; a kind with none makes none. SndProf.def is left to its own type, the particle file and the HUD
+// layout to theirs (DI-14, DI-20: the specific type owns its kind), the mission text to no type (the build
+// leaves it out). An open
 // environment stands in for its file in the graph, read by the engine's own reader: its names follow its
 // edits.
 static int test_text_readers() {
 	const DocumentType *text = document_type(DocumentTypeId::Text);
 	TEST_EXPECT(text != nullptr);
 	if (!text) return 1;
-	for (const AssetKind kind : {AssetKind::AiProfile, AssetKind::Environment, AssetKind::HudPosDefs,
+	for (const AssetKind kind : {AssetKind::AiProfile, AssetKind::Environment,
 	                             AssetKind::HudFxDefs, AssetKind::AvatarDefs, AssetKind::CharAttrDefs, AssetKind::OtherDefs,
 	                             AssetKind::Score, AssetKind::NovaWorldScreen})
 		TEST_EXPECT(document_type_for(kind) == text && is_editable_kind(kind));
 	TEST_EXPECT(document_type_for(AssetKind::SoundProfileDefs) != text && document_type_for(AssetKind::MissionText) == nullptr &&
-	            document_type_for(AssetKind::Particles) == document_type(DocumentTypeId::Particles));
+	            document_type_for(AssetKind::Particles) == document_type(DocumentTypeId::Particles) &&
+	            document_type_for(AssetKind::HudPosDefs) == document_type(DocumentTypeId::HudLayout));
 	// The graph still reads a native kind through the engine's reader, not the text type.
 	TEST_EXPECT(graph_reads_kind(AssetKind::Particles) && graph_reads_kind(AssetKind::Environment) &&
 	            graph_reads_kind(AssetKind::HudPosDefs) && graph_reads_kind(AssetKind::AvatarDefs) &&

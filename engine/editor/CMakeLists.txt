@@ -88,6 +88,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_bank_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_profile_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/wave_check.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/hud_layout_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_image.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_budget.cpp
@@ -214,6 +215,8 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_role_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_thumbnails.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_viewport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/hud_canvas.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/hud_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_device_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_follow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_json.cpp
@@ -365,6 +368,8 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/effect_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/hud_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/catalog_inspector_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/ui_kit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_canvas.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_view.cpp

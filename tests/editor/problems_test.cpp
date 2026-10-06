@@ -428,7 +428,7 @@ static int test_fixes() {
 	for (const FindingCodeRow *row : rewrites) rewrite_tokens.push_back(row->token);
 	std::sort(rewrite_tokens.begin(), rewrite_tokens.end());
 	TEST_EXPECT(rewrite_tokens == std::vector<std::string>({"animation_map.ignored_input",
-	                                                        "credits.line_ending", "menu.ignored_input",
+	                                                        "credits.line_ending", "hud_layout.line_ending", "menu.ignored_input",
 	                                                        "mission.event_order", "mission.rewrite_differs",
 	                                                        "script.line_ending", "shader.form",
 	                                                        "sound_bank.ignored_input",

@@ -285,12 +285,13 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::NormalRowType) == Tokens({ "texture.normal_slot_loader" }));
 	// (A catalog's input the game ignores has none: a save keeps it as the file has it, the demo round's bug 3.)
 	TEST_EXPECT(fixed_by(FindingFix::Rewrite) ==
-	            Tokens({ "animation_map.ignored_input", "credits.line_ending",
+	            Tokens({ "animation_map.ignored_input", "credits.line_ending", "hud_layout.line_ending",
 	                     "menu.ignored_input", "mission.event_order", "mission.rewrite_differs", "script.line_ending",
 	                     "shader.form", "sound_bank.ignored_input", "strings.regrouped", "style.line_ending" }));
 	const std::map<std::string, std::string> rewrites = {
 		{ "animation_map.ignored_input", "without the input the game ignores" },
 		{ "credits.line_ending", "with every line ending CR LF" },
+		{ "hud_layout.line_ending", "with every line ending CR LF" },
 		{ "menu.ignored_input", "without the input the game ignores" },
 		{ "sound_bank.ignored_input", "without the input the game ignores" },
 		{ "mission.event_order", "with each event's triggers and actions where the event stands" },
