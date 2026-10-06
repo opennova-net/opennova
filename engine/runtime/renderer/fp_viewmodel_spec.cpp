@@ -29,6 +29,52 @@ FpViewmodelSpec fp_viewmodel_spec(bool has_def, const std::string &gfx1,
 	return spec;
 }
 
+namespace {
+
+// A 3x3 of rows.
+struct Rows3 {
+	float m[3][3];
+};
+
+Rows3 multiply(const Rows3 &a, const Rows3 &b) {
+	Rows3 out{};
+	for (int i = 0; i < 3; ++i)
+		for (int j = 0; j < 3; ++j)
+			out.m[i][j] = a.m[i][0] * b.m[0][j] + a.m[i][1] * b.m[1][j] + a.m[i][2] * b.m[2][j];
+	return out;
+}
+
+// The presentation's euler basis, YXZ: Ry * Rx * Rz, radians.
+Rows3 euler_yxz(float x, float y, float z) {
+	const float cx = std::cos(x), sx = std::sin(x);
+	const float cy = std::cos(y), sy = std::sin(y);
+	const float cz = std::cos(z), sz = std::sin(z);
+	const Rows3 rx{{{1.0f, 0.0f, 0.0f}, {0.0f, cx, -sx}, {0.0f, sx, cx}}};
+	const Rows3 ry{{{cy, 0.0f, sy}, {0.0f, 1.0f, 0.0f}, {-sy, 0.0f, cy}}};
+	const Rows3 rz{{{cz, -sz, 0.0f}, {sz, cz, 0.0f}, {0.0f, 0.0f, 1.0f}}};
+	return multiply(multiply(ry, rx), rz);
+}
+
+} // namespace
+
+FpViewmodelPose fp_viewmodel_pose(const float view_units[3], const float rot_bias_deg[3],
+		const float rig_rot_deg[3]) {
+	constexpr float kRad = 3.14159265358979323846f / 180.0f;
+	float bias_rad[3];
+	viewmodel_bias_euler_rad(rot_bias_deg, bias_rad);
+	const Rows3 bias = euler_yxz(bias_rad[0], bias_rad[1], bias_rad[2]);
+	const Rows3 rig = euler_yxz(rig_rot_deg[0] * kRad, rig_rot_deg[1] * kRad, rig_rot_deg[2] * kRad);
+	const Rows3 basis = multiply(bias, rig);
+	float offset[3];
+	viewmodel_camera_local_from_view(view_units, offset);
+	FpViewmodelPose pose{};
+	for (int i = 0; i < 3; ++i) {
+		for (int j = 0; j < 3; ++j) pose.basis[i * 3 + j] = basis.m[i][j];
+		pose.origin[i] = bias.m[i][0] * offset[0] + bias.m[i][1] * offset[1] + bias.m[i][2] * offset[2];
+	}
+	return pose;
+}
+
 int fp_arms_part_reach(const threedi::Threedi3di3 &arms) {
 	if (arms.lods == nullptr || arms.lod_count == 0) return 0;
 	const threedi::ThreediLod &lod = arms.lods[0];

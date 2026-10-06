@@ -44,7 +44,7 @@ class Simulation;
 // BAM (`* 0x0B60B60` = 2^32/360) [orig: weapon.def 'tpos' handler
 // @0x54471f]. The camera ftol's the stored float and adds it straight onto
 // g_view_pos (16.16), so the net WORLD offset is simply `file_value / 256`
-// -- see viewmodel_offset for the axis map and derivation. The Sighted/ADS
+// -- see place_viewmodel_at_camera for the axis map and derivation. The Sighted/ADS
 // path eases `pos` -> `tpos` (the scope interp runs from the hip copy at
 // WeaponDef+0x10C to the tpos at +0x124 and publishes the difference as the
 // view bias [orig: Player_StepFpViewBiasInterp @0x4ddf53..0x4ddfc3]),
@@ -199,8 +199,6 @@ private:
 	void apply_viewmodel_control_registers(bool p_submit_viewmodel,
 			const Ref<PlayerWeaponView> &p_weapon_view);
 	void apply_viewmodel_def();
-	Vector3 viewmodel_view_offset(const Vector3 &p_view_units) const;
-	Vector3 viewmodel_offset(const Vector3 &p_units) const;
 
 	Vector3 pos_units_;
 	Vector3 tpos_units_;
