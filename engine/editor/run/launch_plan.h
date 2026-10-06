@@ -45,12 +45,14 @@ struct LaunchPlan {
 // The packaged runtime (opennova.exe) on `build_dir`, in `run_dir`. `engine_args` are Godot's own
 // options for the child (`--headless`, `--windowed`, `--quit-after N`), placed before
 // the `--` that starts the game flags. A build of the expansion `expansion` (ADR 0046 S16) runs on
-// the run directory prepare_expansion_run staged, with `/exp <expansion>`.
+// the run directory prepare_expansion_run staged, with `/exp <expansion>`; so does a build
+// prepare_runtime_run staged there (`on_run_dir`: Play from here's, whose mission the run directory's
+// archive carries with its start, run/play_start.h).
 LaunchPlan make_play_launch_plan(const std::string &runtime_executable, const std::string &build_dir,
                                  const std::string &run_dir, const std::string &game_code, int mcp_port,
                                  const std::string &mission = std::string(),
                                  const std::vector<std::string> &engine_args = {},
-                                 const std::string &expansion = std::string());
+                                 const std::string &expansion = std::string(), bool on_run_dir = false);
 
 // The same run from source: `godot --path <project> res://game/game_runtime_root.tscn -- ...`, with
 // `--working-dir <run>` among the game flags, since Godot's `--path` moves the process's working
@@ -60,7 +62,7 @@ LaunchPlan make_source_launch_plan(const std::string &godot_executable, const st
                                    const std::string &game_code, int mcp_port,
                                    const std::string &mission = std::string(),
                                    const std::vector<std::string> &engine_args = {},
-                                   const std::string &expansion = std::string());
+                                   const std::string &expansion = std::string(), bool on_run_dir = false);
 
 // The run directory of a build of the expansion `expansion` (ADR 0046 S16), laid out as an install
 // the game runs `/exp <expansion>` in: at its root the install's boot archives, the loose files it
@@ -88,6 +90,14 @@ using FileLink = std::function<bool(const std::string &from, const std::string &
 bool prepare_expansion_run(const std::string &install, const std::string &build_dir, const std::string &expansion,
                            const std::string &run_dir, const std::string &copy_cache, Diagnostic &error,
                            const FileLink &link = link_file, std::vector<std::string> *staged = nullptr);
+
+// A standalone build staged in `run_dir` for the runtime to mount there (make_play_launch_plan's
+// `on_run_dir`): every file of the build but its record, one the game only reads linked (copied where
+// the file system will not link it), every other copied, each in place of what the run kept under its
+// name and added to `staged` (LaunchPlan::staged), as the game install's staging stages them. The
+// build is only read. False with `error` (play.install_copy).
+bool prepare_runtime_run(const std::string &build_dir, const std::string &run_dir, Diagnostic &error,
+                         std::vector<std::string> *staged, const FileLink &link = link_file);
 
 // The game install's own program, which Play in the game install starts (and the install check looks for).
 inline constexpr const char *kInstallExecutable = "Jointops.exe";
