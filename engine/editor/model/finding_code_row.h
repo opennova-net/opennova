@@ -38,6 +38,8 @@ enum class FindingFix {
 	                   // under another id: Use an id of its own, or the id the engine looks for
 	                   // (Rename everywhere, the missions placing it with it)
 	FallbackRow,       // an items.def whose first row is no Null marker: Add one first
+	NormalRowType,     // a finished normal map (.mdt) in a normal-map slot loaded as a diffuse: its row
+	                   // given the normal map's type (edit_record)
 };
 
 // Where Problems takes a finding of the code: what the file holds (its document opened on the
@@ -413,8 +415,10 @@ enum class CoreFinding {
 	TextureFoliageMapShape,
 	TextureHeightWrap,
 	TextureLoadingScreenSize,
+	TextureMemory,
 	TextureMfdNotPowerOfTwo,
 	TextureNormalMapHalved,
+	TextureNormalSlotLoader,
 	TextureOperation,
 	TextureParticleTooBig,
 	TextureReplace,
