@@ -25,7 +25,8 @@ ReferenceTarget symbol_target(const AssetScan &scan, const GraphSymbol &symbol) 
 	ReferenceTarget target;
 	target.label = std::string(reference_row(symbol.kind).label) + " " + symbol.display + " in " + symbol.file;
 	target.file = symbol.file;
-	target.locator = symbol.locator;
+	// A native file's record (no locator) by its path, which its page marks and its text is searched for.
+	target.locator = symbol.locator.empty() ? symbol.record : symbol.locator;
 	target.field = symbol.field;
 	target.editable = editable_file(scan, symbol.file);
 	return target;
@@ -43,7 +44,7 @@ ReferenceTarget usage_target(const AssetScan &scan, const GraphEdge &edge) {
 	ReferenceTarget target;
 	target.label = edge.record.empty() ? edge.source : edge.source + ": " + edge.record;
 	target.file = edge.source;
-	target.locator = edge.locator;
+	target.locator = edge.locator.empty() ? edge.record : edge.locator;
 	target.field = edge.field;
 	target.editable = editable_file(scan, edge.source);
 	return target;
@@ -60,6 +61,20 @@ std::vector<const GraphEdge *> record_users(const AssetGraph &graph, const std::
 		if (address.row && symbol->address.row && symbol->address != address) continue; // another record of the path
 		for (const GraphEdge *edge : graph.users_of(*symbol))
 			if (listed.insert(edge).second) out.push_back(edge);
+	}
+	return out;
+}
+
+std::vector<FileDefinition> file_definitions(const AssetGraph &graph, const std::string &file) {
+	std::vector<FileDefinition> out;
+	for (const AssetGraph::FileSymbol &defined : graph.symbols_in(file)) {
+		const GraphSymbol &symbol = *defined.symbol;
+		if (reference_row(symbol.kind).resolution == ReferenceResolution::Record) continue;
+		FileDefinition definition;
+		definition.symbol = &symbol;
+		definition.read = defined.read;
+		if (defined.read) definition.users = graph.users_of(symbol);
+		out.push_back(std::move(definition));
 	}
 	return out;
 }
