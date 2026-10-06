@@ -201,6 +201,13 @@ void TextureView::draw_edits(Workspace &workspace, const DocumentBase &document,
 		if (extension == ".tga") {
 			if (ui_kit::tool(form, "32-bit", allowed, "Colour and alpha.")) operate("format", {{"format", "tga"}});
 			if (ui_kit::tool(form, "24-bit", allowed, "Colour alone: a terrain colour map's form.")) operate("format", {{"format", "tga24"}});
+			// Its .dds, which a model row's loader opens before the .tga its row names (store_as_dds).
+			if (ui_kit::tool(form, "DDS", view.allows(EditorRequestKind::StoreAsDds) && image.loads && image.decoded && !document.dirty(),
+			                 "Stored as the .dds of its name, DXT1 (DXT5 with alpha) with its mip chain, the form of the game's "
+			                 "own model textures, a fraction of the TGA's size: a model's rows keep naming the .tga, whose .dds "
+			                 "the game reads first. The TGA becomes the source in art/ its import makes the .dds from. Refused "
+			                 "where a use reads the .tga itself (a terrain map, the HUD)."))
+				workspace.request(request::store_as_dds(path));
 		} else {
 			if (ui_kit::tool(form, "DXT5 with mips", allowed, "The form of the game's own model textures."))
 				operate("format", {{"dds", "dxt5"}, {"mips", "full"}});
@@ -468,6 +475,22 @@ void TextureView::draw_uses(Workspace &workspace, const DocumentBase &document) 
 		// in the warning colour past what the use check says of, and each detail level in its tooltip.
 		if (use.budget.known) draw_budget(use.budget);
 		ImGui::PopID();
+	}
+	// No use reads it (each one's loader opens another file of its name: the .tga the Blender add-on leaves
+	// beside the .dds its model row loads): set aside, never deleted (S18, set_aside_texture).
+	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(document.path()) : nullptr;
+	const bool unread = std::none_of(uses.begin(), uses.end(), [](const TextureUse &use) { return use.reads_file; });
+	if (unread && entry && entry->imported_from.empty()) {
+		ImGui::PushTextWrapPos(0.0f);
+		ImGui::TextColored(ui_kit::severity_color(DiagnosticSeverity::Warning), "The game never reads this file: %s.",
+		                   uses.front().served.empty() ? "no loader opens it"
+		                                               : ("its loader opens " + basename_of(uses.front().served) + " in its place").c_str());
+		ImGui::PopTextWrapPos();
+		ui_kit::WrapRow row;
+		if (ui_kit::tool(row, "Set it aside", view.allows(EditorRequestKind::SetAsideTexture) && !document.dirty(),
+		                 "Moves " + document.path() + " under " + std::string(kReplacedFolder) +
+		                         "/, never deleted, so the build no longer packs it. Undo does not take it back."))
+			workspace.request(request::set_aside_texture(document.path()));
 	}
 }
 
