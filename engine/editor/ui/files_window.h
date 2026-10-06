@@ -135,10 +135,10 @@ private:
 	void draw_rename(const SessionView &view);
 	// The kind filter beside the text: every kind, or one the project has files of (with how many).
 	void draw_kind_filter(const SessionView &view, float width);
-	// The filter and the kind, as the workspace holds them (files {filter, kind}): taken when the session's
-	// moved; one the person sets goes to the session.
+	// The filter, the kind and the order, as the workspace holds them (files {filter, kind, by_cost}): taken
+	// when the session's moved; one the person sets goes to the session.
 	void follow_filter(const SessionView &view);
-	void send_filter(bool filter, bool kind);
+	void send_filter(bool filter, bool kind, bool by_cost = false);
 	// A file's card (the UX round's project lane: session/file_card.h), a window of its own in the editor's:
 	// what the file is, where a build puts it, a wave's sound with Play and Stop (and how it goes), what it
 	// names and who names it, each a click away. The workspace's card (the MCP gaps lane): opened by an
@@ -168,6 +168,13 @@ private:
 	std::unordered_map<std::string, std::string> via_;
 	// The kind the list is narrowed to (kCount: every kind).
 	AssetKind kind_shown_ = AssetKind::kCount;
+	// Whether the files listed flat go by what the game's textures of each cost (the workspace's by_cost, S18):
+	// each matched file's cost at full detail (texture_budget_list's textures of it, summed) and the matches'
+	// total, made with the matches.
+	ui_kit::Held<bool> by_cost_held_;
+	bool by_cost_ = false;
+	std::unordered_map<std::string, uint64_t> costs_;
+	uint64_t matched_cost_ = 0;
 	// The width, in the font's ems, under which the Kind column gives way to the name, and whether the
 	// dock had it when last drawn.
 	static constexpr float kKindRoomEm = 19.0f;

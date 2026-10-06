@@ -1,10 +1,12 @@
 #include <editor/ui/model_viewport_view.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
 #include <iterator>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -15,11 +17,13 @@
 #include <base/io/tick_rate.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
+#include <editor/documents/model_ctrl_words.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/model_labels.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/preview/animation_uses.h>
 #include <editor/preview/model_canvas.h>
+#include <editor/preview/model_damage.h>
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_viewport.h>
 #include <editor/preview/viewports.h>
@@ -28,6 +32,7 @@
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/viewport_canvas.h>
+#include <formats/threedi/threedi_ctrl_catalog.h>
 #include <runtime/anim/anim_event_bits.h>
 #include <runtime/renderer/object_lod.h>
 
@@ -99,8 +104,10 @@ struct ModelViewportView::Tools {
 	std::vector<std::string> animated;
 
 	void toolbar(Workspace &workspace, const ModelViewport &model, const ViewportContext &context);
-	void registers(Workspace &workspace, const ModelViewport &model);
+	void registers(Workspace &workspace, const ModelViewport &model, const PreviewClock &clock);
+	void damage(Workspace &workspace, const ModelViewport &model, const PreviewClock &clock);
 	void rig_chooser(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
+	void sound(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
 	void timeline(Workspace &workspace, const ModelViewport &model, const PreviewClock &clock);
 };
 
@@ -179,8 +186,10 @@ void ModelViewportView::draw_ready(Workspace &workspace, const ViewportModel &vi
 		ImGui::TextDisabled("LOD %d holds no part: there is nothing to draw at it.", lod);
 	snap = model.options().snap;
 	context.snap = snap;
-	const float timeline =
-			model.animating() ? ImGui::GetFrameHeightWithSpacing() * 2.0f + ImGui::GetFontSize() * 2.0f + 16.0f : 0.0f;
+	// The timeline's rows: the transport, the track, the legend and the last sound heard (DI-04).
+	const float timeline = model.animating() ? ImGui::GetFrameHeightWithSpacing() * 2.0f + ImGui::GetFontSize() * 2.0f +
+	                                                   ImGui::GetTextLineHeightWithSpacing() + 16.0f
+	                                         : 0.0f;
 	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y - timeline));
 	if (model.animating()) tools_->timeline(workspace, model, context.input.clock);
 }
@@ -230,6 +239,59 @@ void ModelViewportView::Tools::rig_chooser(Workspace &workspace, ui_kit::WrapRow
 	}
 	ui_kit::tooltip("The model the animation plays on. Auto takes the graphic of an item whose "
 	                "anim_def names the map. A clip's bones pair with the model's parts by their order.");
+	if (options != model.options()) set_options(workspace, model, options);
+}
+
+// How the clip's events are heard (DI-04, preview/preview_clip_sounds): Mute; the Surface under the feet a
+// footstep's slot follows; the body that reads the events (its tick half); a female player's profile; the
+// profile, the paired item's or one picked. Each a SetViewport of the options' `sound`.
+void ModelViewportView::Tools::sound(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model) {
+	ModelViewportOptions options = model.options();
+	ClipSoundOptions &sound = options.sound;
+	const ClipSoundBinding &binding = model.sound_binding();
+	const char *label = sound.mute ? "Sound (muted)###sound" : "Sound###sound";
+	row.next(ui_kit::button_width(label));
+	if (ImGui::Button(label)) ImGui::OpenPopup("sound");
+	ui_kit::tooltip("What the clip's events play as it runs, as the game plays them: " + binding.profile_words + "\n" +
+	                binding.body_words);
+	if (ImGui::BeginPopup("sound")) {
+		const float unit = ImGui::GetFontSize();
+		ImGui::Checkbox("Mute", &sound.mute);
+		ui_kit::tooltip("The events still fire and say what they play; nothing is heard.");
+		static const char *const kSurfaces[] = {"Ground", "Snow", "On an object", "In water"};
+		int surface = int(sound.surface);
+		ImGui::SetNextItemWidth(unit * 8.0f);
+		if (ImGui::Combo("Surface", &surface, kSurfaces, IM_ARRAYSIZE(kSurfaces))) sound.surface = FootSurface(surface);
+		ui_kit::tooltip("What is under the feet, as the game tests it for each footstep, in this order: feet under "
+		                "the water plane play SSFootWater (both feet); standing on an object, SSLFootOBJ or "
+		                "SSRFootOBJ; on snow (the terrain's surface class 3), SSLFootSnow or SSRFootSnow; else the "
+		                "ground, SSLFootGND or SSRFootGND (Entity_UpdateInfantryAI @ 0x4bf23e, the player body's "
+		                "@ 0x4b77c6). The sounds 1 to 6 play SSAudio1 to SSAudio6 whatever is underfoot.");
+		static const char *const kBodies[] = {"Auto", "NPC body", "Player body"};
+		int body = int(sound.body);
+		ImGui::SetNextItemWidth(unit * 8.0f);
+		if (ImGui::Combo("Body", &body, kBodies, IM_ARRAYSIZE(kBodies))) sound.body = ClipSoundBody(body);
+		ui_kit::tooltip(binding.body_words + "\nAn NPC's body reads a clip's events on odd game ticks, a player's on "
+		                "even ones (Entity_UpdateInfantryAI @ 0x4bf144, Entity_UpdateInfantryPlayerBody @ 0x4b76e6); "
+		                "Auto takes the body the paired item's move_function runs.");
+		ImGui::BeginDisabled(!binding.player);
+		ImGui::Checkbox("Female", &sound.female);
+		ImGui::EndDisabled();
+		ui_kit::tooltip("A female avatar: a player's body plays its item's sound_profileFemale (an NPC's never does).");
+		ImGui::SetNextItemWidth(unit * 10.0f);
+		if (ImGui::BeginCombo("Profile", sound.profile.empty() ? "Auto" : sound.profile.c_str())) {
+			if (ImGui::Selectable("Auto", sound.profile.empty())) sound.profile.clear();
+			ui_kit::tooltip("The paired item's sound_profile (default where it names none).");
+			for (const audio::SoundProfile &profile : model.sound_sources().profiles())
+				if (ImGui::Selectable(profile.name.c_str(), profile.name == sound.profile)) sound.profile = profile.name;
+			ImGui::EndCombo();
+		}
+		ui_kit::tooltip("The SndProf.def profile whose slots the events play: Auto is the paired item's.");
+		ImGui::PushTextWrapPos(unit * 24.0f);
+		ImGui::TextDisabled("%s", binding.profile_words.c_str());
+		ImGui::PopTextWrapPos();
+		ImGui::EndPopup();
+	}
 	if (options != model.options()) set_options(workspace, model, options);
 }
 
@@ -358,10 +420,20 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 	const float head = x_of(shown);
 	paint->AddLine(ImVec2(head, top), ImVec2(head, bottom), ImGui::GetColorU32(ImGuiCol_SliderGrabActive), 2.0f);
 	if (under) {
+		// What it plays (DI-04), a line a sound.
+		std::string plays;
+		for (const std::string &line : model.event_sound_words(under->trigger)) {
+			std::string said = line;
+			if (!said.empty()) said[0] = char(std::toupper(static_cast<unsigned char>(said[0])));
+			plays += "\n" + said;
+		}
 		ui_kit::tooltip("Frame " + std::to_string(under->frame) + " (" + seconds_text(under->tick / io::kTickHz) +
-		                "): " + animation_trigger_words(under->trigger) + ". Click to go there.");
+		                "): " + animation_trigger_words(under->trigger) + "." + plays +
+		                (plays.empty() ? "\nClick to go there." : "\nClick to go there and hear it."));
 		if (clicked) {
 			seek_ticks(workspace, model, under->tick, true);
+			// A press plays the event once, as the game plays it (play_sound {frame}).
+			if (!plays.empty()) workspace.request(request::play_clip_event(model.path(), under->frame));
 			// In the clip's own document the event is a record: select it.
 			const SessionView &view = workspace.view();
 			for (const auto &open : view.documents.open) {
@@ -384,6 +456,14 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 		ImGui::TextColored(ImVec4(240 / 255.0f, 90 / 255.0f, 80 / 255.0f, 1.0f), "F fires");
 		ImGui::SameLine();
 		ImGui::TextColored(ImVec4(1.0f, 220 / 255.0f, 90 / 255.0f, 1.0f), "S sound");
+	}
+	// The last sound the clip's events fired (DI-04), in words.
+	if (!model.sounds_fired().empty()) {
+		const ClipSoundFired &last = model.sounds_fired().back();
+		const std::string heard = (last.state == "played" ? "Heard: " : "Fired: ") + last.words;
+		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+		ui_kit::clipped_text(heard, heard);
+		ImGui::PopStyleColor();
 	}
 }
 
@@ -441,6 +521,7 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 		ui_kit::tooltip("Run or hold the preview clock: the model's part animations, flipbooks and colour "
 		                "generators.");
 	}
+	if (model.animating()) sound(workspace, row, model);
 	row.next(ui_kit::button_width("Show"));
 	if (ImGui::Button("Show")) ImGui::OpenPopup("marks");
 	ui_kit::tooltip("What the viewport marks over the model, and the collision it draws.");
@@ -509,12 +590,25 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 	if (ImGui::Button("Registers")) ImGui::OpenPopup("registers");
 	ImGui::EndDisabled();
 	ui_kit::tooltip(shown.ctrl.count == 0 ? "The model declares no CTRL registers."
-	                                      : "Hold the model's CTRL registers at a value, as the game's "
-	                                        "entity would drive them.");
+	                                      : "The model's CTRL registers by what drives them in the game: hold one at "
+	                                        "a value, as the game's entity would drive it.");
 	if (options != model.options()) set_options(workspace, model, options);
 	if (ImGui::BeginPopup("registers")) {
-		registers(workspace, model);
+		registers(workspace, model, context.input.clock);
 		ImGui::EndPopup();
+	}
+	// The damage states (DI-10): shown where an item names the model as its graphic or its husk.
+	if (!model.animating() && !model.damage_uses().empty()) {
+		const bool destroyed = model.options().damage.state == DamageState::Destroyed;
+		const char *label = destroyed ? "Damage (destroyed)###damage" : "Damage###damage";
+		row.next(ui_kit::button_width(label));
+		if (ImGui::Button(label)) ImGui::OpenPopup("damage");
+		ui_kit::tooltip("The model intact or destroyed, as the game destroys the item naming it: the husk swapped "
+		                "in, the pieces, the destroy fade on the preview clock; Play destroy runs it from the death.");
+		if (ImGui::BeginPopup("damage")) {
+			damage(workspace, model, context.input.clock);
+			ImGui::EndPopup();
+		}
 	}
 	// From the model to its animations (S17): the maps the items pairing it play, each opened to play
 	// on it.
@@ -553,25 +647,163 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 	}
 }
 
-void ModelViewportView::Tools::registers(Workspace &workspace, const ModelViewport &model) {
+// The model's registers by their group (DI-10, documents/model_ctrl_words): each named in the game's words,
+// what writes it in the game in its tooltip, its slider over the values the game gives it (a share as a
+// percent too). While the damage state drives the destroy fade, its six registers show the fade's values
+// and hold none.
+void ModelViewportView::Tools::registers(Workspace &workspace, const ModelViewport &model, const PreviewClock &clock) {
 	const threedi::Threedi3di3 &shown = *model.model();
 	ModelViewportOptions options = model.options();
+	const std::map<std::string, int64_t> now = model.ctrl_at(clock);
 	const float unit = ImGui::GetFontSize();
-	for (uint32_t i = 0; i < shown.ctrl.count; ++i) {
-		const std::string name = strutil::fixed_string(shown.ctrl.registers[i].name, sizeof(shown.ctrl.registers[i].name));
-		if (name.empty()) continue;
-		const auto held = options.ctrl.find(name);
-		int64_t value = held == options.ctrl.end() ? 0 : held->second;
-		const int64_t low = -kRegisterRange, high = kRegisterRange;
-		ImGui::SetNextItemWidth(unit * 12.0f);
-		if (ImGui::SliderScalar(name.c_str(), ImGuiDataType_S64, &value, &low, &high)) {
-			if (value == 0) options.ctrl.erase(name);
-			else options.ctrl[name] = value;
+	for (const CtrlRegisterGroup &group : ctrl_register_groups()) {
+		bool titled = false;
+		for (uint32_t i = 0; i < shown.ctrl.count; ++i) {
+			const std::string name =
+					strutil::fixed_string(shown.ctrl.registers[i].name, sizeof(shown.ctrl.registers[i].name));
+			if (name.empty()) continue;
+			const int ordinal = threedi::threedi_ctrl_register_ordinal(name.c_str());
+			const CtrlRegisterWords &words = ctrl_register_words(ordinal);
+			// A name the catalog lacks reads LOD_FRAC's register: it is listed with the level of detail.
+			const char *token = ordinal < 0 ? "lod" : words.group;
+			if (std::string(token) != group.token) continue;
+			if (!titled) ImGui::SeparatorText(group.title);
+			titled = true;
+			const bool driven = model.damage_driven() && ctrl_register_is_destroy_phase(ordinal);
+			const std::map<std::string, int64_t> &source = driven ? now : options.ctrl;
+			const auto held = source.find(name);
+			int64_t value = held == source.end() ? 0 : held->second;
+			const int64_t low = ordinal < 0 ? -kRegisterRange : words.min;
+			const int64_t high = ordinal < 0 ? kRegisterRange : words.max;
+			char format[48];
+			if (words.share) std::snprintf(format, sizeof(format), "%%lld (%.0f%%%%)", double(value) * 100.0 / 65536.0);
+			else std::snprintf(format, sizeof(format), "%%lld");
+			const std::string label = (ordinal < 0 ? name : std::string(words.label) + " (" + name + ")") + "##" + name;
+			ImGui::SetNextItemWidth(unit * 12.0f);
+			ImGui::BeginDisabled(driven);
+			if (ImGui::SliderScalar(label.c_str(), ImGuiDataType_S64, &value, &low, &high, format) && !driven) {
+				if (value == 0) options.ctrl.erase(name);
+				else options.ctrl[name] = value;
+			}
+			ImGui::EndDisabled();
+			ui_kit::tooltip(ordinal < 0
+			                        ? name + " is no register of the game's: the loader reads it as LOD_FRAC's, which "
+			                                 "nothing in the game writes."
+			                        : std::string(words.driven) + "\n" + words.cite +
+			                                  (driven ? "\nThe damage state drives it now (Damage)." : ""));
 		}
 	}
 	if (ImGui::Button("Reset all")) options.ctrl.clear();
-	ui_kit::tooltip("Let every register go back to 0.");
+	ui_kit::tooltip("Let every register held go back to 0.");
 	if (options != model.options()) set_options(workspace, model, options);
+}
+
+// The model's damage states (DI-10, preview/model_damage): the items naming it and what it is to each (each
+// a Go to: the item's record, the husk and the pieces' models), the item the state plays, Intact or
+// Destroyed, Play destroy (the death from tick 0, the clock run), and the death in order as the game runs it.
+void ModelViewportView::Tools::damage(Workspace &workspace, const ModelViewport &model, const PreviewClock &clock) {
+	const SessionView &view = workspace.view();
+	ModelViewportOptions options = model.options();
+	const float unit = ImGui::GetFontSize();
+	ImGui::PushTextWrapPos(unit * 30.0f);
+	// Who names the model: the uses read from the graph as it stands now (their edges are what Go to opens).
+	const std::vector<DamageUse> uses =
+			view.findings.graph ? model_damage_uses(*view.findings.graph, model.path()) : std::vector<DamageUse>();
+	const DamageUse *chosen = model.damage_use();
+	ImGui::SeparatorText("Named by");
+	for (size_t i = 0; i < uses.size(); ++i) {
+		const DamageUse &use = uses[i];
+		const char *as = use.role == DamageRole::Graphic        ? "draws it intact"
+		                 : use.role == DamageRole::EnemyGraphic ? "draws it intact, to its enemies"
+		                 : use.role == DamageRole::Husk         ? "draws it once destroyed (its husk)"
+		                                                        : "flies its death pieces from it (its final husk)";
+		const bool is_chosen = chosen && strutil::iequals(chosen->item, use.item) && chosen->field == use.field;
+		ImGui::PushID(int(i));
+		if (ImGui::RadioButton("##play", is_chosen)) options.damage.item = use.item;
+		ui_kit::tooltip("Play this item's death.");
+		ImGui::SameLine();
+		const std::string line = use.item + " (" + use.file.substr(use.file.find_last_of('/') + 1) + ") " + as;
+		if (ImGui::Selectable((ui_kit::fit(line, ImGui::GetContentRegionAvail().x) + "###use").c_str()) && use.edge &&
+		    view.project.scan)
+			window_requests::go_to(workspace, usage_target(*view.project.scan, *use.edge));
+		ui_kit::tooltip("Go to " + use.item + "'s " + use.field + " in " + use.file + ".");
+		ImGui::PopID();
+	}
+	const DamageItem &item = model.damage_item();
+	const DamagePlan &plan = model.damage_plan();
+	// Destroyed as: the husk the game swaps in and the model the pieces come from, each a Go to.
+	if (item.found && view.project.scan) {
+		const auto model_link = [&](const char *words, const std::string &name, const char *id) {
+			if (name.empty()) return;
+			const AssetEntry *entry = view.project.scan->find(name);
+			if (!entry && !strutil::ends_with_icase(name, ".3di")) entry = view.project.scan->find(name + ".3di");
+			if (!entry) {
+				ImGui::TextDisabled("%s %s (the project has none)", words, name.c_str());
+				return;
+			}
+			ImGui::PushID(id);
+			if (ImGui::Selectable((std::string(words) + " " + entry->logical_name + "###model").c_str()))
+				window_requests::go_to(workspace, file_target(*view.project.scan, entry->relative_path));
+			ui_kit::tooltip("Go to " + entry->relative_path + ".");
+			ImGui::PopID();
+		};
+		ImGui::SeparatorText(("Destroyed, as " + item.name).c_str());
+		model_link("Its husk:", plan.husk, "husk");
+		model_link("Its pieces from:", plan.pieces_from, "pieces");
+	}
+	// The state.
+	ImGui::SeparatorText("State");
+	int state = int(options.damage.state);
+	ImGui::RadioButton("Intact", &state, int(DamageState::Intact));
+	ImGui::SameLine();
+	ImGui::RadioButton("Destroyed", &state, int(DamageState::Destroyed));
+	options.damage.state = DamageState(state);
+	ImGui::SameLine();
+	ImGui::BeginDisabled(!item.found || !plan.swaps);
+	const bool play = ImGui::Button("Play destroy");
+	ImGui::EndDisabled();
+	ui_kit::tooltip("Destroy the item from its death: the clock from tick 0, run.");
+	if (!model.damage_note().empty()) {
+		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.3f, 1.0f));
+		ImGui::TextWrapped("%s", model.damage_note().c_str());
+		ImGui::PopStyleColor();
+	}
+	if (item.found) {
+		ImGui::TextDisabled("%s", plan.class_words.c_str());
+		// Where the death stands on the clock.
+		if (model.damage_playing()) {
+			const DamageFrame frame = model.damage_frame_at(clock);
+			const int32_t end = damage_fade_end_tick(plan, item);
+			char where[160];
+			std::snprintf(where, sizeof(where), "%s of the death: %s; the fade %s.", seconds_text(clock.ticks() / io::kTickHz).c_str(),
+			              frame.husked ? "the husk drawn" : "intact still",
+			              frame.fade_elapsed < 0 ? "waits" : clock.ticks() >= end ? "done" : "runs");
+			ImGui::TextUnformatted(where);
+		}
+		ImGui::SeparatorText("The death, in order");
+		for (const DamageLeg &leg : plan.legs) {
+			const bool due = model.damage_playing() && clock.ticks() >= leg.tick;
+			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(due ? ImGuiCol_Text : ImGuiCol_TextDisabled));
+			std::string line = seconds_text(leg.tick / io::kTickHz) + "  " + leg.words;
+			if (leg.shown == "named") line += " (named: not drawn here)";
+			ImGui::TextWrapped("%s", line.c_str());
+			ImGui::PopStyleColor();
+			ui_kit::tooltip(leg.cite + (leg.kind == "effect"
+			                                    ? std::string("\nNo effect preview on this branch: the effect is named, "
+			                                                  "not drawn.")
+			                                    : std::string()));
+		}
+	}
+	ImGui::PopTextWrapPos();
+	if (play) options.damage.state = DamageState::Destroyed;
+	if (options != model.options()) set_options(workspace, model, options);
+	if (play) {
+		// The death from its tick: the clock at 0, run.
+		io::JsonValue from = io::JsonValue::make_object();
+		from.set("ticks", io::json_number(0));
+		from.set("playing", io::JsonValue::make_bool(true));
+		workspace.request(request::set_viewport(model.path(), viewport_change(ViewportKind::Model, "clock", std::move(from))));
+	}
 }
 
 } // namespace opennova::editor

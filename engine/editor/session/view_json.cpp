@@ -128,6 +128,9 @@ JsonValue project_section(const SessionView &view) {
 	expansion.set("builds_on", json_string(document.expansion.builds_on));
 	out.set("expansion", std::move(expansion));
 	out.set("file_count", json_number(double(view.project.scan->entries.size())));
+	// What another program changed that the editor has not read yet (DI-01).
+	out.set("outside_waiting", json_number(double(view.project.outside_waiting)));
+	out.set("outside_sweeping", boolean(view.project.outside_sweeping));
 	return out;
 }
 
@@ -211,6 +214,8 @@ JsonValue run_section(const SessionView &view) {
 	out.set("command_line", json_string(activity.play_command_line));
 	out.set("run_dir", json_string(activity.play_run_dir));
 	out.set("log_file", json_string(activity.play_log_file));
+	out.set("fresh", boolean(activity.play_fresh));
+	out.set("kept", strings_to_json(activity.play_kept));
 	out.set("exited_on_its_own", boolean(activity.play_exited_on_its_own));
 	out.set("exit_code",
 			activity.play_exit_code >= 0 ? json_number(double(activity.play_exit_code))
@@ -490,7 +495,9 @@ constexpr ViewSectionRow kSections[] = {
 	{ S::Project, "project", concern_set({ C::Project, C::Files, C::Preferences }), project_section,
 			"The open project: open, its root, title, id, target game, features and expansion {name, "
 			"builds_on} (S16: \"\" a standalone project, \"\" the base game), file_count (the files query "
-			"pages the files), and quit_requested; open or not, install_expansions, the game install's "
+			"pages the files), outside_waiting and outside_sweeping (DI-01: the files another program changed "
+			"that wait to be read, once they hold still, and whether the sweep a focus-in began over every file "
+			"runs), and quit_requested; open or not, install_expansions, the game install's "
 			"expansions [{name, title, description}] (its folder's name, the Mods list's name and "
 			"description), new_project_expansions, the same of the install a new project opens with "
 			"(the one last chosen), install_check, the last install checked (check_install, new_project's): its "
@@ -518,7 +525,9 @@ constexpr ViewSectionRow kSections[] = {
 			"Play: the game's state, pid, mcp_port (0 when none with an endpoint runs), the mission "
 			"it was started in (\"\" at its menu), behind (its window started behind the others), exit_code, "
 			"the run directory it runs in and the log there Play tails (run_dir, log_file: never "
-			"the build directory), the files it reported missing at boot, and what Play runs (the "
+			"the build directory), whether that directory was emptied first (fresh) and what it kept of "
+			"what the runs before wrote there (kept: the game's game.cfg, its saves), the files it reported "
+			"missing at boot, and what Play runs (the "
 			"game install, in it or not, the runtime)." },
 	{ S::Import, "import", concern_set({ C::Dialogs, C::Preferences, C::Files }), import_section,
 			"The import dialog in short (open, plan: which plan it shows, with_dependencies, planning while its plan is made, its lists' counts; the "

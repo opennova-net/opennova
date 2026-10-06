@@ -63,8 +63,9 @@ public:
 	const CanvasInput &input() const { return input_; }
 	// After begin(), when it shows: the kind's hover tip on the surface (`tip` made only while it
 	// shows), then the device's picture (`device` draws it where the picture lies, at its size, as the
-	// current item; the canvas's surface its clip) and its edge.
-	void picture(const Device &device, const Tip &tip);
+	// current item; the canvas's surface its clip) and its edge. With `pointer` the mouse's place on the
+	// picture goes with it (ViewportPicture::pointer: the canvas shows no pointer of its own there).
+	void picture(const Device &device, const Tip &tip, bool pointer);
 	// After picture(): a line over the picture's top left corner (S13 V6: how far its device's build
 	// is while the last picture shows, or why the build failed).
 	void badge(const std::string &text);

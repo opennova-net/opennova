@@ -265,7 +265,7 @@ static int test_lifecycle() {
 	TEST_EXPECT(v.activity.play_state == PlayState::Running && v.activity.play_pid == 500);
 	// S13 A8: the game works in a run directory of its own, its log there, the build read alone.
 	const std::string built = v.activity.last_build->build_dir;
-	const std::string run_dir = root + "/.opennova/run/1";
+	const std::string run_dir = root + "/.opennova/run/runtime/1";
 	TEST_EXPECT(platform.last_plan.working_dir == run_dir && platform.last_plan.build_dir == built);
 	TEST_EXPECT(platform.last_plan.log_file == run_dir + "/session.log");
 	TEST_EXPECT(platform.last_plan.args[0] == "--headless");
@@ -483,7 +483,7 @@ static int test_utf8_project_path() {
 	session.handle(request::play());
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 1 && v.activity.play_state == PlayState::Running);
-	const std::string run_dir = root + "/.opennova/run/1";
+	const std::string run_dir = root + "/.opennova/run/runtime/1";
 	const LaunchPlan &plan = platform.last_plan;
 	TEST_EXPECT(plan.executable == runtime && plan.working_dir == run_dir && plan.build_dir == built);
 	TEST_EXPECT(plan.log_file == run_dir + "/session.log");
@@ -685,7 +685,7 @@ static int test_retail_play() {
 			std::string::npos);
 	const std::string built = session.view().activity.last_build->build_dir;
 	const std::string project = session.view().project.root;
-	const std::string run = project + "/.opennova/run/1";
+	const std::string run = project + "/.opennova/run/install/1";
 	TEST_EXPECT(!fs::exists(fs::path(run) / "Jointops.exe")); // missing source: nothing staged
 	TEST_EXPECT(!fs::exists(fs::path(built) / "Jointops.exe"));
 	const std::string build_tree = editor_test::tree_digest(built);
@@ -760,11 +760,13 @@ static int test_retail_play() {
 
 	// Ordinary installs use the plain Bink DLL. A game.cfg the project holds is this machine's
 	// configuration, never the project's: the build leaves it out and says so (ADR 0046 S14,
-	// assets/player_files.h), and the game reads the install's. The run directory, its game gone, is
-	// taken again and emptied: what the last game wrote there goes. A missing source cannot launch
-	// the executable a run staged before.
+	// assets/player_files.h). The run directory, its game gone, is taken again: what the Play before
+	// staged goes and is staged again (the Bink DLL now the plain one), its file log goes, and what the
+	// game wrote there stays: the game.cfg it adjusted, which the install's seed never replaces, newer or
+	// not (run/run_directory.h). The run section and Output name what it kept.
 	fs::remove(fs::path(install) / "binkw32_.dll");
 	TEST_EXPECT(editor_test::write_text(project + "/game.cfg", "project video settings"));
+	TEST_EXPECT(editor_test::write_text(install + "/game.cfg", "video settings, played since"));
 	session.handle(request::play());
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 2 && platform.last_plan.working_dir == run);
@@ -774,40 +776,67 @@ static int test_retail_play() {
 		left_out = left_out || (d.code() == "build.player_file" && d.asset == "game.cfg");
 	TEST_EXPECT(left_out && !fs::exists(rebuilt + "/game.cfg"));
 	TEST_EXPECT(read_file_text(run + "/binkw32.dll", copied, io_error) && copied == "ordinary Bink");
-	TEST_EXPECT(read_file_text(run + "/game.cfg", copied, io_error) && copied == "video settings");
+	TEST_EXPECT(read_file_text(run + "/game.cfg", copied, io_error) && copied == "adjusted in the game");
 	TEST_EXPECT(!fs::exists(run + "/_filelog.txt"));
+	{
+		const opennova::io::JsonValue run_json = view_section_to_json(session.view(), ViewSection::Run);
+		const opennova::io::JsonValue *kept = run_json.get("kept");
+		TEST_EXPECT(!run_json.get_bool("fresh", true) && kept && kept->is_array() && kept->array.size() == 1 &&
+		            kept->array[0].string == "game.cfg" && session.view().activity.play_kept == std::vector<std::string>({"game.cfg"}));
+		TEST_EXPECT(output_has(session.view(), "The run directory kept 1 file the runs before wrote there"));
+	}
+	session.handle(request::stop_play());
+	session.poll();
+	// Play fresh: the run directory emptied first, so the install's game.cfg is seeded again.
+	session.handle(request::play(std::string(), false, true));
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 3 && platform.last_plan.working_dir == run && session.view().activity.play_fresh &&
+	            session.view().activity.play_kept.empty() &&
+	            view_section_to_json(session.view(), ViewSection::Run).get_bool("fresh", false));
+	TEST_EXPECT(read_file_text(run + "/game.cfg", copied, io_error) && copied == "video settings, played since");
+	TEST_EXPECT(output_has(session.view(), "A fresh run: the run directory was emptied"));
 	const std::string rebuilt_tree = editor_test::tree_digest(rebuilt);
 	session.handle(request::stop_play());
 	session.poll();
 	fs::remove(fs::path(install) / "Jointops.exe");
 	session.handle(request::play());
 	session.run_operations();
-	TEST_EXPECT(platform.spawns == 2 && session.view().activity.play_state == PlayState::Stopped);
+	TEST_EXPECT(platform.spawns == 3 && session.view().activity.play_state == PlayState::Stopped);
 	TEST_EXPECT(session.view().findings.diagnostics.back().code() == "play.install_missing");
 
-	// A run directory that cannot be made is reported before any child starts.
+	// The OpenNova runtime's Play runs in a run directory of its own mode, beside lenient Play's, which it
+	// leaves as it was: none of the game install's files is its, and lenient's game.cfg stays for its next
+	// Play.
 	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "retail executable"));
+	retail.play_in_install = false;
+	editor_test::apply_settings(session, retail);
+	const std::string lenient_tree = editor_test::tree_digest(run);
+	session.handle(request::play());
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 4 && platform.last_plan.executable == launcher.executable);
+	TEST_EXPECT(platform.last_plan.args[0] == "--path" && platform.last_plan.mcp_port == 8999);
+	const std::string runtime_run = project + "/.opennova/run/runtime/1";
+	TEST_EXPECT(platform.last_plan.working_dir == runtime_run && platform.last_plan.build_dir == rebuilt);
+	// The source run names its run directory: Godot's --path moves it to the checkout.
+	TEST_EXPECT(platform.last_plan.args.size() >= 2 && platform.last_plan.args.back() == runtime_run &&
+	            platform.last_plan.args[platform.last_plan.args.size() - 2] == "--working-dir");
+	TEST_EXPECT(!fs::exists(runtime_run + "/Jointops.exe") && !fs::exists(runtime_run + "/localres.pff") &&
+	            !fs::exists(runtime_run + "/game.cfg") && session.view().activity.play_kept.empty());
+	TEST_EXPECT(editor_test::tree_digest(run) == lenient_tree &&
+	            read_file_text(run + "/game.cfg", copied, io_error) && copied == "video settings, played since");
+	TEST_EXPECT(editor_test::tree_digest(rebuilt) == rebuilt_tree);
+	TEST_EXPECT(read_file_text(install + "/game.cfg", copied, io_error) && copied == "video settings, played since");
+	session.handle(request::stop_play());
+	session.poll();
+
+	// A run directory that cannot be made is reported before any child starts.
 	fs::remove_all(project + "/.opennova/run");
 	TEST_EXPECT(editor_test::write_text(project + "/.opennova/run", "a file where the runs go"));
 	session.handle(request::play());
 	session.run_operations();
-	TEST_EXPECT(platform.spawns == 2 && session.view().findings.diagnostics.back().code() == "play.run_directory");
+	TEST_EXPECT(platform.spawns == 4 && session.view().findings.diagnostics.back().code() == "play.run_directory");
 	fs::remove(project + "/.opennova/run");
 	TEST_EXPECT(editor_test::tree_digest(rebuilt) == rebuilt_tree);
-
-	retail.play_in_install = false;
-	editor_test::apply_settings(session, retail);
-	session.handle(request::play());
-	session.run_operations();
-	TEST_EXPECT(platform.spawns == 3 && platform.last_plan.executable == launcher.executable);
-	TEST_EXPECT(platform.last_plan.args[0] == "--path" && platform.last_plan.mcp_port == 8999);
-	TEST_EXPECT(platform.last_plan.working_dir == run && platform.last_plan.build_dir == rebuilt);
-	// The source run names its run directory: Godot's --path moves it to the checkout.
-	TEST_EXPECT(platform.last_plan.args.size() >= 2 && platform.last_plan.args.back() == run &&
-	            platform.last_plan.args[platform.last_plan.args.size() - 2] == "--working-dir");
-	TEST_EXPECT(!fs::exists(run + "/Jointops.exe") && !fs::exists(run + "/localres.pff"));
-	TEST_EXPECT(editor_test::tree_digest(rebuilt) == rebuilt_tree);
-	TEST_EXPECT(read_file_text(install + "/game.cfg", copied, io_error) && copied == "video settings");
 	return 0;
 }
 
@@ -860,7 +889,7 @@ static int test_strict_play() {
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 1 && v.activity.play_state == PlayState::Running && v.activity.play_strict);
 	const std::string project = v.project.root;
-	const std::string run = project + "/.opennova/run/1";
+	const std::string run = project + "/.opennova/run/strict/1";
 	const std::string built = v.activity.last_build->build_dir;
 	TEST_EXPECT(platform.last_plan.args == std::vector<std::string>({"/w", "/FRISK"}) &&
 	            platform.last_plan.executable == run + "/Jointops.exe" && platform.last_plan.working_dir == run &&
@@ -920,11 +949,75 @@ static int test_strict_play() {
 	}
 	TEST_EXPECT(editor_test::tree_digest(built) == build_tree && editor_test::tree_digest(install) == install_tree);
 
-	// A first run that wrote no game.cfg, or that ran past the window, or that was stopped, is not
-	// started again; one that quit with code 0 having opened nothing is said to (the gate: another runs).
+	// The next strict Play keeps what the game wrote in its run directory (its game.cfg, which names the
+	// adapter its device dialog chose, so no dialog and no first run; its saves; its device log), and never
+	// anything of the install: what the Play before staged is staged again (the cookie jar the build's own
+	// once more), the game's file log gone.
+	TEST_EXPECT(editor_test::write_text(run + "/player.sav", "the game's player") &&
+	            editor_test::write_text(run + "/ghw.txt", "device log") &&
+	            editor_test::write_text(run + "/nw_cdata.coo", "rewritten by the game"));
+	session.handle(request::play());
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 3 && v.activity.play_state == PlayState::Running && platform.last_plan.working_dir == run &&
+	            !v.activity.play_fresh && v.activity.play_strict);
+	TEST_EXPECT(v.activity.play_kept == std::vector<std::string>({"game.cfg", "ghw.txt", "player.sav"}));
+	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "written by the game");
+	TEST_EXPECT(read_file_text(run + "/player.sav", text, io_error) && text == "the game's player");
+	TEST_EXPECT(read_file_text(run + "/nw_cdata.coo", text, io_error) && text != "rewritten by the game");
+	TEST_EXPECT(fs::is_regular_file(run + "/Jointops.exe") && !fs::exists(run + "/_filelog.txt") &&
+	            !fs::exists(run + "/score.ini"));
+	// It quits on its own at once: it had a game.cfg, so it is no first run and is not started again.
+	platform.clock += 1000;
+	platform.codes[v.activity.play_pid] = 0;
+	platform.exit_child(v.activity.play_pid);
+	session.poll();
+	session.poll();
+	TEST_EXPECT(platform.spawns == 3 && v.activity.play_state == PlayState::Stopped && !v.activity.play_started_again);
+	TEST_EXPECT(editor_test::tree_digest(built) == build_tree && editor_test::tree_digest(install) == install_tree);
+
+	// An OpenNova runtime Play between two strict Plays (a modder switching back and forth) runs in a run
+	// directory of its own mode, beside strict's, which it never takes, empties or removes: the next strict
+	// Play keeps the game.cfg the first run wrote, so the game opens no device dialog and is no first run.
+	const std::string runtime = dir.file("runtime/opennova.exe");
+	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	PlayLauncher launcher;
+	launcher.executable = runtime;
+	session.set_launcher_source(editor_test::fixed_launcher(launcher));
+	ProjectSettingsChange on_runtime;
+	on_runtime.play_in_install = false;
+	editor_test::apply_settings(session, on_runtime);
+	session.handle(request::play());
+	session.run_operations();
+	const std::string runtime_run = project + "/.opennova/run/runtime/1";
+	TEST_EXPECT(platform.spawns == 4 && v.activity.play_state == PlayState::Running && !v.activity.play_strict &&
+	            platform.last_plan.executable == runtime && platform.last_plan.working_dir == runtime_run &&
+	            v.activity.play_kept.empty() && !fs::exists(runtime_run + "/game.cfg"));
+	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "written by the game");
+	TEST_EXPECT(editor_test::write_text(runtime_run + "/weapon.sav", "the runtime's weapons"));
+	session.handle(request::stop_play());
+	session.poll();
+	TEST_EXPECT(v.activity.play_state == PlayState::Stopped);
+	editor_test::apply_settings(session, strict);
+	session.handle(request::play());
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 5 && v.activity.play_state == PlayState::Running && v.activity.play_strict &&
+	            platform.last_plan.working_dir == run && !v.activity.play_fresh);
+	TEST_EXPECT(v.activity.play_kept == std::vector<std::string>({"game.cfg", "ghw.txt", "player.sav"}));
+	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "written by the game");
+	TEST_EXPECT(read_file_text(runtime_run + "/weapon.sav", text, io_error) && text == "the runtime's weapons");
+	platform.clock += 1000;
+	platform.codes[v.activity.play_pid] = 0;
+	platform.exit_child(v.activity.play_pid);
+	session.poll();
+	session.poll();
+	TEST_EXPECT(platform.spawns == 5 && v.activity.play_state == PlayState::Stopped && !v.activity.play_started_again);
+
+	// A first run (Play fresh: the run directory emptied first) that wrote no game.cfg, or that ran past
+	// the window, or that was stopped, is not started again; one that quit with code 0 having opened nothing
+	// is said to (the gate: another runs).
 	const auto first_run_ends = [&](bool writes_config, int64_t after_ms, bool stopped) {
 		const int spawns = platform.spawns;
-		session.handle(request::play());
+		session.handle(request::play(std::string(), false, true));
 		session.run_operations();
 		if (platform.spawns != spawns + 1) return false;
 		const std::string here = v.activity.play_run_dir;
@@ -2271,7 +2364,7 @@ static int test_prompt_belongs_to_its_project() {
 
 // S11a: each open document keeps its selection. The document made active again by
 // OpenDocument with no record takes back the selection it had (one it names still wins);
-// one read again or closed forgets it.
+// one read again keeps it by its records' places (DI-01), one closed forgets it.
 static int test_selection_memory() {
 	SaveProject project("opennova_editor_session_selection");
 	TEST_EXPECT(project.open());
@@ -2302,16 +2395,22 @@ static int test_selection_memory() {
 	session.handle(request::open_document(project.items_path));
 	session.handle(request::open_record(project.strings_path, section(4)));
 	TEST_EXPECT(v.documents.active == project.strings_path && v.documents.selection.primary == section(4));
-	// Read again: forgotten (its records have new identities).
+	// Read again: its records have new identities, and the selection it kept comes back by their
+	// places (DI-01).
 	session.handle(request::reload_document(project.items_path));
 	session.handle(request::open_document(project.strings_path));
 	session.handle(request::open_document(project.items_path));
-	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection.primary == NodeAddress() && v.documents.selection.records.empty());
+	const Document *again = session.document_for(project.items_path);
+	TEST_EXPECT(again && !again->rows().empty());
+	if (!again || again->rows().empty()) return 1;
+	const NodeAddress marker_again{again->rows()[0]->id, again->rows()[0]->kind, 0};
+	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection.primary == marker_again &&
+	            v.documents.selection.records == std::vector<NodeAddress>{marker_again});
 	// Closed: forgotten; the document that becomes active takes back its own.
 	session.handle(request::open_document(project.strings_path));
 	TEST_EXPECT(v.documents.selection.primary == section(4));
 	session.handle(request::close_document(project.strings_path));
-	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection.primary == NodeAddress());
+	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection.primary == marker_again);
 	session.handle(request::open_document("gametext.bin"));
 	TEST_EXPECT(v.documents.selection.primary == NodeAddress() && v.documents.selection.records.empty());
 	return 0;
@@ -3157,9 +3256,9 @@ static int test_project_settings() {
 }
 
 // A menu made the active document with nothing of it selected shows its first screen (the
-// menu view lists the selected screen's windows, the preview draws it): opened, taken back
-// with no selection kept, read again, and after a rescan; a selection it kept, or a record
-// named, wins.
+// menu view lists the selected screen's windows, the preview draws it): opened, and taken back
+// with no selection kept; a selection it kept, or a record named, wins, and one read again (a
+// Reload, a rescan after its file changed) keeps its record by its place (DI-01).
 static int test_menu_first_screen() {
 	SaveProject project("opennova_editor_session_first_screen");
 	TEST_EXPECT(project.open());
@@ -3199,13 +3298,14 @@ static int test_menu_first_screen() {
 	session.handle(request::open_document(project.items_path));
 	session.handle(request::open_record(menu_path, title));
 	TEST_EXPECT(v.documents.selection.primary == title);
-	// Read again (new records): its first screen, whatever was selected.
+	// Read again (new records): the record selected selected again by its place (DI-01).
 	session.handle(request::reload_document(menu_path));
 	menu = session.document_for(menu_path);
-	TEST_EXPECT(menu && v.documents.active == menu_path && v.documents.selection.primary.row && v.documents.selection.primary == first_row(menu));
+	TEST_EXPECT(menu && v.documents.active == menu_path);
 	if (!menu) return 1;
+	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title) && v.documents.selection.primary == title);
 	// A rescan keeps it while its file is as it was read (the selection with it), and reads it
-	// again once the file changed outside the editor.
+	// again once the file changed outside the editor, the record selected again by its place.
 	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title));
 	select(title);
 	session.handle(request::rescan());
@@ -3214,10 +3314,13 @@ static int test_menu_first_screen() {
 	std::string text, io_error;
 	TEST_EXPECT(read_file_text(project.root + "/" + menu_path, text, io_error) &&
 	            editor_test::write_text(project.root + "/" + menu_path, text + "\r\n"));
+	const uint64_t was = menu->identity();
 	session.handle(request::rescan());
 	session.run_operations();
 	menu = session.document_for(menu_path);
-	TEST_EXPECT(menu && v.documents.active == menu_path && v.documents.selection.primary.row && v.documents.selection.primary == first_row(menu));
+	TEST_EXPECT(menu && menu->identity() != was && v.documents.active == menu_path);
+	if (!menu) return 1;
+	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title) && v.documents.selection.primary == title);
 	return 0;
 }
 
@@ -3804,7 +3907,7 @@ static int test_play_leases() {
 		            record.get_string("image", "") == executable && record.get_string("created", "") == "created 500" &&
 		            record.get_string("build_id", "") == fs::path(played).filename().string());
 		// S13 A8: its run directory records it the same way.
-		TEST_EXPECT(platform.last_plan.working_dir == v.project.root + "/.opennova/run/1");
+		TEST_EXPECT(platform.last_plan.working_dir == v.project.root + "/.opennova/run/runtime/1");
 		TEST_EXPECT(read_file_text(platform.last_plan.working_dir + "/run.json", text, error) &&
 		            opennova::io::json_parse(text, record, error) && record.get_int("pid", -1) == 500 &&
 		            record.get_string("created", "") == "created 500");
@@ -3861,8 +3964,8 @@ static int test_play_leases() {
 	session.run_operations();
 	TEST_EXPECT(v.activity.play_state == PlayState::Running && v.activity.play_pid == 900 && v.activity.last_build->build_dir == second);
 	TEST_EXPECT(fs::exists(lease_of(second, 900)) && fs::exists(lease_of(second, 901)));
-	// The first game may still run in run/1, so this one takes run/2, run/1 as its game left it.
-	const std::string runs = v.project.root + "/.opennova/run";
+	// The first game may still run in runtime/1, so this one takes runtime/2, runtime/1 as its game left it.
+	const std::string runs = v.project.root + "/.opennova/run/runtime";
 	TEST_EXPECT(platform.last_plan.working_dir == runs + "/2" && fs::is_regular_file(runs + "/1/run.json"));
 	session.handle(request::stop_play());
 	session.poll();
@@ -3882,7 +3985,7 @@ static int test_play_leases() {
 	const std::string fourth = rebuild("40");
 	TEST_EXPECT(!fourth.empty() && !fs::exists(played) && !fs::exists(lease_of(played, 600)) && !fs::exists(third));
 	for (const std::string &decoy : decoys) TEST_EXPECT(fs::is_regular_file(decoy));
-	// Every game gone, a Play takes run/1 again and removes run/2; a directory under the run root
+	// Every game gone, a Play takes runtime/1 again and removes runtime/2; a directory under the mode's
 	// that no run's number names is left alone.
 	TEST_EXPECT(editor_test::write_text(runs + "/notes/keep.txt", "mine"));
 	session.handle(request::play());

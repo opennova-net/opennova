@@ -259,7 +259,7 @@ REQUEST_TEXTS = ("dir", "title", "game", "expansion", "builds_on", "game_install
                  "purpose", "folder")
 REQUEST_LISTS = ("roles", "names")
 REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass", "rehash", "all",
-                    "planned", "behind", "report")
+                    "planned", "behind", "fresh", "report")
 REQUEST_NUMBERS = ("plan", "steps")
 
 
@@ -514,6 +514,10 @@ def cmd_play(args: argparse.Namespace) -> int:
         # only); by default it starts as Play starts it, as the editor_play tool's does.
         if args.behind:
             request["behind"] = True
+        # --fresh: the run directory emptied of what the runs before wrote there (game.cfg, saves) first, a
+        # first run; by default it keeps them.
+        if args.fresh:
+            request["fresh"] = True
         outcome, ended = raise_and_wait(client, request, args.timeout)
         if ended is None:
             return EXIT_NOT_DONE
@@ -779,6 +783,9 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--behind", choices=switch, default=None,
                          help="play: the game's window starts behind every other, the editor keeping the foreground "
                               "(Windows only)")
+    request.add_argument("--fresh", choices=switch, default=None,
+                         help="play: the run directory emptied of what the runs before wrote there (game.cfg, saves) "
+                              "before the game starts")
     request.add_argument("--report", choices=switch, default=None,
                          help="build: false leaves the build result's panel closed as the build ends")
     request.add_argument("--wait", action="store_true",
@@ -885,6 +892,9 @@ def build_parser() -> argparse.ArgumentParser:
                       help="start: the game's window starts behind every other, the editor keeping the foreground "
                            "(play's behind; Windows only). Left out, it starts as Play starts it, as the editor_play "
                            "tool's does")
+    play.add_argument("--fresh", action="store_true",
+                      help="start: the run directory emptied of what the runs before wrote there (the game's game.cfg, "
+                           "its saves) before the game starts, a first run (play's fresh). Left out, it keeps them")
     play.add_argument("--timeout", type=float, default=300.0)
     play.set_defaults(func=cmd_play)
 

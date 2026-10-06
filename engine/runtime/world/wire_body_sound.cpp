@@ -6,6 +6,7 @@
 #include <runtime/anim/anim_event_bits.h>
 #include <runtime/audio/footstep_slot.h>
 #include <runtime/terrain_query/surface_type_map.h>
+#include <runtime/world/infantry_sound.h>
 #include <runtime/world/world.h>
 
 #include <cstdio>
@@ -37,30 +38,22 @@ void wire_body_slot_sounds(World &world, const uint32_t *words, int count,
         std::snprintf(sev.set_name, sizeof(sev.set_name), "%s", set->c_str());
         world.out.slot_sounds.push_back(sev);
     };
+    // FOLEY first, at the body origin — each body's foley block precedes its
+    // foot block — then the feet, dipped to FOOT level by the frame's capsule
+    // bottom, through the shared slot pick (anim_event_sounds, the order the
+    // authority body plays them in).
+    // [orig: org1 @0x4bf169-0x4bf2b0; org2 @0x4b76f1-0x4b78a8; the dip
+    //  @0x4b77d3]
+    const int32_t feet[3] = {body[0], body[1], body[2] - capsule_bottom};
     for (int i = 0; i < count; ++i) {
         const uint32_t ev = words[i];
         if (ev == 0u) continue;
-        // FOLEY first, at the body origin — each body's foley block precedes
-        // its foot block. Bit order 0x20..0x400 -> SSAudio1..6.
-        // [orig: org1 @0x4bf169-0x4bf23e; org2 @0x4b76f1-0x4b77c6]
-        for (int b = 0; b < anim::kAnimEventFoleyCount; ++b) {
-            if ((ev & (anim::kAnimEventFoley1 << b)) != 0u) emit(audio::kSlotAudio1 + b, body);
-        }
-        // Then the feet: bit 0x1 = LEFT, 0x2 = RIGHT, dipped to FOOT level by
-        // the frame's capsule bottom, through the shared slot pick.
-        // [orig: org1 @0x4bf23e-0x4bf2b0; org2 @0x4b77c6-0x4b78a8; the dip
-        //  @0x4b77d3]
-        for (int foot = 0; foot < 2; ++foot) {
-            if ((ev & (foot == 0 ? anim::kAnimEventFootLeft : anim::kAnimEventFootRight)) == 0u)
-                continue;
-            const int32_t pos[3] = {body[0], body[1], body[2] - capsule_bottom};
-            const int slot = audio::footstep_slot(
-                    pos[2], world.env.water_z, on_entity,
-                    terrain::surface_type_at_fixed(world.tables.surface_map, pos[0],
-                                                   pos[1]),
-                    foot);
-            emit(slot, pos);
-        }
+        const bool any_foot = (ev & (anim::kAnimEventFootLeft | anim::kAnimEventFootRight)) != 0u;
+        const int32_t surface = any_foot
+                ? terrain::surface_type_at_fixed(world.tables.surface_map, feet[0], feet[1]) : 0;
+        AnimEventSound sounds[kAnimEventSoundMax];
+        const int played = anim_event_sounds(ev, feet[2], world.env.water_z, on_entity, surface, sounds);
+        for (int s = 0; s < played; ++s) emit(sounds[s].slot, sounds[s].foot < 0 ? body : feet);
     }
 }
 

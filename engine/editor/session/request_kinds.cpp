@@ -7,6 +7,7 @@
 
 #include <editor/project/project_files.h>
 #include <editor/session/build_operation.h>
+#include <editor/session/disk_watch.h>
 #include <editor/session/document_set.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/navigation_controller.h>
@@ -15,6 +16,7 @@
 #include <editor/session/problems_service.h>
 #include <editor/session/rename_controller.h>
 #include <editor/session/session_core.h>
+#include <editor/session/sound_play.h>
 #include <editor/session/texture_show_use.h>
 #include <editor/session/unsaved_guard.h>
 #include <editor/session/workspace_parts.h>
@@ -87,7 +89,8 @@ void serve_build(SessionCore &core, const EditorRequest &request) {
 }
 void serve_play(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
-		core.start_build(PlayIntent{ true, request.mission, request.behind }, std::string(), false, ExportIntent());
+		core.start_build(PlayIntent{ true, request.mission, request.behind, request.fresh }, std::string(), false,
+				ExportIntent());
 }
 void serve_export(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
@@ -148,7 +151,7 @@ void serve_duplicate(SessionCore &core, const EditorRequest &request) {
 	core.documents().duplicate(request);
 }
 void serve_save(SessionCore &core, const EditorRequest &request) {
-	core.documents().save(request.path);
+	core.documents().save(request.path, request.force);
 }
 void serve_save_all(SessionCore &core, const EditorRequest &) {
 	core.documents().save_all();
@@ -199,8 +202,8 @@ void serve_split_texture(SessionCore &core, const EditorRequest &request) {
 void serve_edit_externally(SessionCore &core, const EditorRequest &request) {
 	core.imports().edit_externally(request);
 }
-void serve_refresh_changed_sources(SessionCore &core, const EditorRequest &) {
-	core.imports().refresh_changed_sources();
+void serve_refresh_changed_sources(SessionCore &core, const EditorRequest &request) {
+	core.disk().check(request.all);
 }
 void serve_show_use(SessionCore &core, const EditorRequest &request) {
 	show_texture_use(core, request);
@@ -233,7 +236,7 @@ void serve_set_workspace(SessionCore &core, const EditorRequest &request) {
 	set_workspace(core, request.workspace);
 }
 void serve_play_sound(SessionCore &core, const EditorRequest &request) {
-	play_sound(core, request.path);
+	serve_sound_play(core, request);
 }
 void serve_stop_sound(SessionCore &core, const EditorRequest &) {
 	stop_sound(core);
@@ -482,8 +485,10 @@ constexpr RequestKindRow kRows[] = {
 			"all the same); a build running already serves it and starts the game when it lands, in "
 			"the mission the last Play named. A mission that does not load is a Problems row "
 			"(play.mission.failed) until the next Play. behind: the game's window starts behind every other "
-			"and never takes the foreground (the run section says behind).")
-			.takes(request_params({}, { F::Mission, F::Behind }))
+			"and never takes the foreground (the run section says behind). The run directory keeps what the "
+			"game wrote there in the Plays of the same mode before (its game.cfg, its saves: the run section's "
+			"kept); fresh: it is emptied first, a first run (the run section says fresh).")
+			.takes(request_params({}, { F::Mission, F::Behind, F::Fresh }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Play", "Save all and play")
 			.acts_on_saved()
@@ -673,8 +678,10 @@ constexpr RequestKindRow kRows[] = {
 			"The document at path written, with no unsaved edits too when its file holds other "
 			"bytes "
 			"than it would write (a canonical rewrite); a file that is not open is read, rewritten "
-			"that way when it must be, and left closed.")
-			.takes(request_params({}, { F::Path }))
+			"that way when it must be, and left closed. A file changed outside the editor refuses it "
+			"(document.conflict) unless force (DI-01: the conflict's Keep my edits), which writes the "
+			"document over what the other program saved.")
+			.takes(request_params({}, { F::Path, F::Force }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments)
 			.acts_on_saved()
 			.names_active()
@@ -843,13 +850,21 @@ constexpr RequestKindRow kRows[] = {
 			.ends_edit_groups()
 			.row,
 	Request(K::RefreshChangedSources, "refresh_changed_sources", serve_refresh_changed_sources,
-			"When a watched file's size or last write moved since the scan (a program saved it: an import "
-			"source, a file an import read, a PNG the game reads as it is), a refresh of what moved alone (the "
-			"outcome names the operation): the sources it touches imported again, the scan updated for them "
-			"and those files, the open documents of them read again. A file written within the last two "
-			"seconds waits for a later check, never read half-written. Nothing otherwise, no operation "
-			"started. The Shell sends it when its window gains the focus and once a second while it has it, "
-			"of its own: the status line a refused request left stays.")
+			"What another program changed of the project's files, read again (DI-01): a look at the files the "
+			"editor shows (each open document's file, every file a viewport's picture read), at the folders "
+			"(a file made, deleted or renamed in one moves its last write: a new file and a gone one are "
+			"found), and at the files a look found moved before; all: every file of the project besides, swept "
+			"over the polls (the project section's outside_sweeping). A file that moved is read once it holds "
+			"still (a later look finding it as a look 250 ms before did, or its last write two seconds back), "
+			"never half-written; until then it waits (outside_waiting). S18's watched files (an import source, "
+			"a file an import read, a PNG the game reads as it is) go by their own rule: two seconds after "
+			"their last write. What is ready is refreshed alone (the outcome names the operation): the sources "
+			"it touches imported again, the scan updated for those files, the open documents of them read "
+			"again keeping their selections (one with unsaved edits keeps them under document.conflict, "
+			"raised at once), Output naming each file that came back. Nothing otherwise, no operation started. "
+			"The Shell sends it once a second, focused or not (sooner while a file waits), and with all when "
+			"its window gains the focus, of its own: the status line a refused request left stays.")
+			.takes(request_params({}, { F::All }))
 			.holds(kFiles, kFiles | kSlot)
 			.background()
 			.row,
@@ -988,12 +1003,23 @@ constexpr RequestKindRow kRows[] = {
 	// The sound is the session's state, the Shell playing what it says and reporting how it goes
 	// (ProjectSession::report_sound), so a play is seen in the workspace section.
 	Request(K::PlaySound, "play_sound", serve_play_sound,
-			"The project's wave at path (a project-relative path or a logical name) played by the editor as "
-			"the game decodes it, once, in place of any sound it plays: the workspace section's sound says how "
-			"it stands (starting until the Shell has decoded it, playing, ended, stopped, failed with why; a "
-			"headless editor plays nothing, its sound staying starting). Refused (workspace.refused): a name no "
-			"wave of the project has, a wave past what a card reads.")
-			.takes(request_params({ F::Path }))
+			"A sound played by the editor as the game plays it, once, in place of any sound it plays: the "
+			"workspace section's sound says how it stands (starting until the Shell has decoded it, playing, "
+			"ended, stopped, failed with why; a headless editor plays nothing, its sound staying starting), "
+			"and for a set its set, bank, words and voices (each a wave at the pitch and volume the game's pick "
+			"gave it). With no values: the project's wave at path (a project-relative path or a logical name) "
+			"as recorded. values {set}: the sound set of that name, from the bank path names, else from the "
+			"first bank of the game's search holding it (an expansion's <n>L.lwf and <n>.lwf, gamelocl.lwf, "
+			"game.lwf, game3.lwf, game2.lwf), each layer's member picked and its pitch composed as the game "
+			"does. values {profile?, slot}: the SndProf.def profile's slot (its keyword or 0 to 50; profile "
+			"left out: default). values {profile?, surface, foot?}: the footstep that profile plays on a "
+			"surface (ground, snow, object, water) with that foot (left, right), the slot the game's test "
+			"picks. values {frame}: what the clip the animation document at path (the active one when left "
+			"out) fires at that frame, every sound of its event at once, under its model viewport's sound "
+			"options (a timeline mark pressed; DI-04). Refused (workspace.refused): a name no wave of the "
+			"project has, a frame the game never reads or that fires no sound, a set no bank searched "
+			"holds, an empty slot, waves the project lacks, a wave past what a card reads.")
+			.takes(request_params({}, { F::Path, F::Values }))
 			.row,
 	Request(K::StopSound, "stop_sound", serve_stop_sound,
 			"The sound the editor plays stopped (the workspace section's sound: stopped).")

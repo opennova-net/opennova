@@ -1,7 +1,8 @@
 // ADR 0046 S18, the texture checks: a texture file's own findings (validate_texture_file, from its
 // header: a TGA form the game's reader leaves unset or zeroes, rows stored top first, a colour map read
-// as texels, an odd-width PCX's rows overrunning, a file the reader refuses) and its uses' (the texture use
-// check, graph/texture_checks: a terrain's colour map not 1024 x 1024, a foliage map overrun or of the
+// as texels, an odd-width PCX's rows overrunning, a file the reader refuses, a DDS the reader pads to
+// powers of two) and its uses' (the texture use check, graph/texture_checks: a terrain's colour map not
+// 1024 x 1024, a foliage map overrun or of the
 // wrong shape, a tile atlas not in 64-texel cells, a cut-out material over a PCX, a normal map halved, a
 // height map whose side is no power of two, a particle graphic too wide, a colour map of a format its
 // loader does not read, a .tga beside the .dds its loader opens, the default loading screen's size); which
@@ -30,6 +31,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/dds/dds.h>
 #include <formats/tga/tga.h>
 #include <formats/trn/trn_io.h>
 
@@ -121,6 +123,15 @@ int test_checks() {
 	std::vector<uint8_t> rgb = pcx(5, 4, 6);
 	rgb[65] = 3;
 	TEST_EXPECT(editor_test::write_bytes(t + "four.pcx", four) && editor_test::write_bytes(t + "rgb.pcx", rgb));
+	// A DDS of 100 x 64, which the DDS reader pads to 128 x 64; one of 64 x 32, which it takes as it is.
+	{
+		std::vector<uint8_t> odd_dds, even_dds;
+		std::string error;
+		const std::vector<uint8_t> texels(size_t(100) * 64 * 4, 128);
+		TEST_EXPECT(opennova::dds::dds_write_a8r8g8b8(texels.data(), 100, 64, odd_dds, error) &&
+		            opennova::dds::dds_write_a8r8g8b8(texels.data(), 64, 32, even_dds, error));
+		TEST_EXPECT(editor_test::write_bytes(t + "padded.dds", odd_dds) && editor_test::write_bytes(t + "even.dds", even_dds));
+	}
 	// A TGA whose file ends before its texels do, as raw true colour and as run-length packets; a PCX whose
 	// rows are shorter than its width.
 	std::vector<uint8_t> cut = tga(4, 4);
@@ -208,6 +219,13 @@ int test_checks() {
 	TEST_EXPECT(has("texture.tga_truncated", "textures/cutrle.tga", S::Error, true));
 	TEST_EXPECT(has("texture.unloadable", "textures/four.pcx", S::Warning, false));
 	for (const Found &f : found) TEST_EXPECT(f.asset != "textures/rgb.pcx");
+	TEST_EXPECT(has("texture.dds_not_pow2", "textures/padded.dds", S::Warning, false));
+	for (const Found &f : found) {
+		TEST_EXPECT(f.asset != "textures/even.dds");
+		if (f.code == "texture.dds_not_pow2")
+			TEST_EXPECT(f.message.find("Its sides, 100 x 64, are not powers of two: the game's DDS reader makes a texture of 128 x 64") !=
+			            std::string::npos);
+	}
 	// The odd width's words say how many bytes spill, not that the width is odd.
 	for (const Found &f : found)
 		if (f.code == "texture.pcx_overrun") TEST_EXPECT(f.message.find("each row's 1 extra byte") != std::string::npos);

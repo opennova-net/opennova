@@ -23,6 +23,7 @@
 #include <editor/session/file_card.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/texture_budget_list.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/workspace_parts.h>
 #include <editor/ui/editor_requests.h>
@@ -249,10 +250,12 @@ void FilesWindow::refresh(const SessionView &view) {
 void FilesWindow::follow_filter(const SessionView &view) {
 	filter_.follow(view.workspace.files.filter);
 	if (kind_held_.follow(view.workspace.files.kind)) kind_shown_ = view.workspace.files.kind;
+	if (by_cost_held_.follow(view.workspace.files.by_cost)) by_cost_ = view.workspace.files.by_cost;
 }
 
-void FilesWindow::send_filter(bool filter, bool kind) {
+void FilesWindow::send_filter(bool filter, bool kind, bool by_cost) {
 	io::JsonValue members = io::JsonValue::make_object();
+	if (by_cost) members.set("by_cost", io::JsonValue::make_bool(by_cost_));
 	if (filter) members.set("filter", io::JsonValue::make_string(filter_.sent()));
 	if (kind) members.set("kind", io::JsonValue::make_string(kind_shown_ == AssetKind::kCount ? "" : asset_kind_token(kind_shown_)));
 	window_requests::set_workspace(workspace_, "files", std::move(members));
@@ -266,7 +269,8 @@ const std::vector<size_t> &FilesWindow::matching(const SessionView &view) {
 		return matches_;
 	}
 	const uint64_t generation = view.findings.graph ? view.findings.graph->generation() : 0;
-	const std::string asked = std::string(filter) + '\n' + std::to_string(static_cast<int>(kind_shown_));
+	const std::string asked =
+			std::string(filter) + '\n' + std::to_string(static_cast<int>(kind_shown_)) + (by_cost_ ? "\ncost" : "");
 	if (matches_made_ && matched_ == asked && matched_generation_ == generation) return matches_;
 	matches_made_ = true;
 	matched_ = asked;
@@ -294,6 +298,18 @@ const std::vector<size_t> &FilesWindow::matching(const SessionView &view) {
 			matches_.push_back(found->second);
 			via_[hit.file] = hit.via;
 		}
+	}
+	// By cost: the costliest first, what the game makes no model texture of after them in their order.
+	costs_.clear();
+	matched_cost_ = 0;
+	if (by_cost_) {
+		for (const TextureBudgetRow &row : texture_budget_list(view).rows) costs_[row.file] += row.budget.full().bytes;
+		const auto cost = [&](size_t i) {
+			const auto found = costs_.find(view.project.scan->entries[i].relative_path);
+			return found == costs_.end() ? uint64_t(0) : found->second;
+		};
+		std::stable_sort(matches_.begin(), matches_.end(), [&](size_t a, size_t b) { return cost(a) > cost(b); });
+		for (const size_t i : matches_) matched_cost_ += cost(i);
 	}
 	return matches_;
 }
@@ -362,12 +378,17 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const bool narrowed = filter_.text[0] != '\0' || kind_shown_ != AssetKind::kCount;
 	const size_t count = narrowed ? matches.size() : v.project.scan->entries.size();
 	const std::string files = (narrowed ? grouped(count) + " of " + grouped(v.project.scan->entries.size()) : grouped(count)) +
-	                          (v.project.scan->entries.size() == 1 ? " file" : " files");
+	                          (v.project.scan->entries.size() == 1 ? " file" : " files") +
+	                          (narrowed && by_cost_ ? ", " + texture_bytes_words(matched_cost_) + " in the game" : "");
+	// By cost, offered while the list shows textures (and while it is on, to turn it off).
+	const bool offers_cost = kind_shown_ == AssetKind::Texture || by_cost_;
 	{
 		const float spacing = ImGui::GetStyle().ItemSpacing.x;
 		const float kind = ImGui::GetFontSize() * 8.0f;
-		const float field = std::max(ImGui::GetFontSize() * 8.0f,
-		                             ImGui::GetContentRegionAvail().x - kind - ui_kit::text_width(files.c_str()) - spacing * 2.0f);
+		const float cost = offers_cost ? ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + ui_kit::text_width("By cost") : 0.0f;
+		const float field = std::max(ImGui::GetFontSize() * 8.0f, ImGui::GetContentRegionAvail().x - kind - cost -
+		                                                                   ui_kit::text_width(files.c_str()) -
+		                                                                   spacing * (offers_cost ? 3.0f : 2.0f));
 		ui_kit::WrapRow row;
 		row.next(field);
 		if (ui_kit::filter_box("##filter", filter_.text, sizeof(filter_.text), "Filter files", field,
@@ -376,6 +397,12 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 			send_filter(true, false);
 		row.next(kind);
 		draw_kind_filter(v, kind);
+		if (offers_cost) {
+			row.next(cost);
+			if (ImGui::Checkbox("By cost", &by_cost_)) send_filter(false, false, true);
+			ui_kit::tooltip("The files by what the game's textures of them cost at full detail, the costliest first: "
+			                "what the game keeps in its memory for each, every level of its chain.");
+		}
 		row.next(ui_kit::text_width(files.c_str()));
 		ImGui::AlignTextToFramePadding();
 		ImGui::TextDisabled("%s", files.c_str());
@@ -403,7 +430,9 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		ImGui::TableSetupScrollFreeze(0, 1);
 		ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch | ImGuiTableColumnFlags_NoHide);
 		ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, ui_kit::text_width("Animation map"));
-		ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, ui_kit::text_width("999.9 KB"));
+		// By cost, the size the game's textures of the file take ("In game"), in the column's place.
+		ImGui::TableSetupColumn(narrowed && by_cost_ ? "In game###size" : "Size###size", ImGuiTableColumnFlags_WidthFixed,
+		                        ui_kit::text_width("999.9 KB"));
 		if (kind_fits != kind_fitted_) {
 			kind_fitted_ = kind_fits;
 			ImGui::TableSetColumnEnabled(1, kind_fits);
@@ -639,7 +668,11 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 	};
 	if (entry.kind != AssetKind::Texture) ui_kit::tooltip_lazy(tip);
 	else if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
-		texture_preview::tooltip(workspace_, entry.relative_path, TextureLoadTransform::None, tip());
+		texture_preview::tooltip(workspace_, entry.relative_path, TextureLoadTransform::None, [&] {
+			// What the game's texture of it costs (S18, the texture budget).
+			const std::string cost = texture_file_budget_words(view, entry.relative_path);
+			return cost.empty() ? tip() : tip() + "\n" + cost;
+		}());
 	ImGui::SameLine(0.0f, 0.0f);
 	if (in_tree) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetTreeNodeToLabelSpacing());
 	const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
@@ -672,9 +705,14 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 		ui_kit::severity_count(DiagnosticSeverity::Warning, counts.warnings);
 	}
 	if (ImGui::TableNextColumn()) ui_kit::clipped_text(asset_kind_label(entry.kind));
-	// The size, right-aligned.
+	// The size, right-aligned; listed by cost, what the game's textures of it take (none: blank).
 	ImGui::TableNextColumn();
-	const std::string size = ui_kit::fit(size_text(entry.size_bytes), ImGui::GetContentRegionAvail().x);
+	std::string shown_size = size_text(entry.size_bytes);
+	if (by_cost_ && !in_tree) {
+		const auto cost = costs_.find(entry.relative_path);
+		shown_size = cost == costs_.end() ? std::string() : texture_bytes_words(cost->second);
+	}
+	const std::string size = ui_kit::fit(shown_size, ImGui::GetContentRegionAvail().x);
 	ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - ui_kit::text_width(size.c_str()));
 	ImGui::TextUnformatted(size.c_str());
 	ImGui::PopID();
@@ -937,6 +975,32 @@ void FilesWindow::draw_card(const SessionView &view) {
 				                                                         : "Does not play: " + sound.error;
 				ImGui::SameLine();
 				ImGui::TextDisabled("%s", said.c_str());
+			}
+			// What it is and how loud (the sound lane: import/wave_source.h), its picture a bar a bin, and
+			// whether the game's loader takes it.
+			if (!card.sound.format.empty()) {
+				char loud[96];
+				std::snprintf(loud, sizeof(loud), "peak %.0f%%, RMS %.0f%%", card.sound.peak * 100.0f, card.sound.rms * 100.0f);
+				ImGui::TextDisabled("%s; %s", card.sound.format.c_str(), loud);
+			}
+			if (!card.sound.envelope.empty()) {
+				const float width = ImGui::GetContentRegionAvail().x, height = 32.0f;
+				const ImVec2 at = ImGui::GetCursorScreenPos();
+				ImDrawList *draw = ImGui::GetWindowDrawList();
+				const float bin = width / float(card.sound.envelope.size());
+				const ImU32 colour = ImGui::GetColorU32(ImGuiCol_PlotHistogram);
+				for (size_t i = 0; i < card.sound.envelope.size(); ++i) {
+					const float half = card.sound.envelope[i] * height * 0.5f;
+					const float x = at.x + bin * float(i);
+					draw->AddRectFilled(ImVec2(x, at.y + height * 0.5f - half), ImVec2(x + std::max(1.0f, bin - 1.0f), at.y + height * 0.5f + half + 1.0f), colour);
+				}
+				ImGui::Dummy(ImVec2(width, height));
+			}
+			if (!card.sound.plays) {
+				ImGui::PushStyleColor(ImGuiCol_Text, kRefusalColor);
+				ImGui::TextWrapped("The game's loader refuses it: %s Import it again to write it as the game plays it.",
+				                   card.sound.refusal.c_str());
+				ImGui::PopStyleColor();
 			}
 		} else {
 			ImGui::PushStyleColor(ImGuiCol_Text, kRefusalColor);

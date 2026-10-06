@@ -1,5 +1,6 @@
 #include <runtime/world/world.h>
 #include <runtime/world/destruction.h>
+#include <cmath>
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -527,6 +528,23 @@ int test_piece_spawn_clears_class_selectors() {
     return 0;
 }
 
+// The fade's math alone, as the editor's model preview reads it (DI-10): the authored duration and stagger
+// (0 takes 50 and 25), each phase clamped, the overall share unclamped.
+int test_destroy_fade_phases() {
+    const int32_t timing[3] = {10, 50, 25};
+    DestroyFade fade = destroy_fade_phases(50, timing);
+    CHECK(fade.phases_q16 == (std::array<int32_t,6>{21845,65536,32768,0,0,0}));
+    CHECK(std::fabs(fade.progress - 50.0/150.0) < 1e-12);
+    const int32_t defaults[3] = {0, 0, 0};
+    fade = destroy_fade_phases(100, defaults);
+    CHECK(fade.phases_q16 == (std::array<int32_t,6>{43690,65536,65536,65536,32768,0}));
+    fade = destroy_fade_phases(-5, defaults);
+    CHECK(fade.phases_q16 == (std::array<int32_t,6>{}) && fade.progress < 0);
+    fade = destroy_fade_phases(400, defaults);
+    CHECK(fade.phases_q16 == (std::array<int32_t,6>{65536,65536,65536,65536,65536,65536}) && fade.progress > 1);
+    return 0;
+}
+
 int test_destroy_phases_and_ambient() {
     auto heap = std::make_unique<World>();
     auto &w = *heap;
@@ -618,7 +636,8 @@ int test_class_scoring_and_explosion_draws() {
 }
 
 int main() {
-    if (test_destroy_phases_and_ambient() || test_class_scoring_and_explosion_draws()) return 1;
+    if (test_destroy_fade_phases() || test_destroy_phases_and_ambient() ||
+            test_class_scoring_and_explosion_draws()) return 1;
     if (test_tower_sections() != 0) return 1;
     if (test_piece_spawn_clears_class_selectors() != 0) return 1;
     if (test_palm_sections() != 0) return 1;
