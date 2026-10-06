@@ -550,6 +550,7 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 	while (pos <= buffer.size()) {
 		const std::size_t newline = buffer.find('\n', pos);
 		const std::size_t end = newline == std::string::npos ? buffer.size() : newline;
+		const std::size_t line_start = pos;
 		std::string_view raw = std::string_view(buffer).substr(pos, end - pos);
 		if (!raw.empty() && raw.back() == '\r') {
 			raw.remove_suffix(1);
@@ -579,6 +580,7 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 				switch (section) {
 					case Section::Effect:
 						current_effect = EffectDef();
+						current_effect.first_line = static_cast<int>(line_number);
 						break;
 					case Section::Particle:
 						current_particle = ParticleDef();
@@ -611,6 +613,7 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 				if (line.front() == '}') {
 					switch (section) {
 						case Section::Effect:
+							current_effect.last_line = static_cast<int>(line_number);
 							out.effects.push_back(std::move(current_effect));
 							break;
 						case Section::Particle: {
@@ -659,6 +662,15 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 				switch (section) {
 					case Section::Effect:
 						apply_effect_key(current_effect, key, raw_value, values, stray_unknown);
+						// Where the id's value is written (the last `id` read names the effect).
+						if (lowercase(key) == "id") {
+							std::size_t value_at = static_cast<std::size_t>(value_view.data() - buffer.data());
+							while (value_at < buffer.size() && is_space(buffer[value_at])) {
+								++value_at;
+							}
+							current_effect.id_line = static_cast<int>(line_number);
+							current_effect.id_column = static_cast<int>(value_at - line_start + 1);
+						}
 						break;
 					case Section::Particle:
 						pending_particle.push_back({key, raw_value, values});
