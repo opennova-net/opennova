@@ -261,12 +261,12 @@ static int test_type_tables() {
 static int test_columns() {
 	using Tokens = std::vector<std::string>;
 	TEST_EXPECT(fixed_by(FindingFix::Requirement) ==
-	            Tokens({ "play.boot_missing", "requirement.missing", "requirement.optional_missing" }));
+	            Tokens({ "play.boot_missing", "play.file_missing", "requirement.missing", "requirement.optional_missing" }));
 	TEST_EXPECT(fixed_by(FindingFix::WrongKind) == Tokens({ "requirement.wrong_kind" }));
 	TEST_EXPECT(fixed_by(FindingFix::Rename) ==
 	            Tokens({ "asset.name.duplicate", "asset.name.too_long", "build.name_unstorable", "expansion.file.unread" }));
 	TEST_EXPECT(fixed_by(FindingFix::ResetRow) == Tokens({ "animation_map.no_reset" }));
-	TEST_EXPECT(fixed_by(FindingFix::Reference) == Tokens({ "reference.missing" }));
+	TEST_EXPECT(fixed_by(FindingFix::Reference) == Tokens({ "play.reference_missing", "reference.missing" }));
 	TEST_EXPECT(fixed_by(FindingFix::UnimportedTexture) == Tokens({ "import.texture_not_imported" }));
 	TEST_EXPECT(fixed_by(FindingFix::Reload) == Tokens({ "document.conflict" }));
 	TEST_EXPECT(fixed_by(FindingFix::Reimport) == Tokens({ "import.output_missing" }));
