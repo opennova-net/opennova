@@ -4,21 +4,26 @@
 #include <algorithm>
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <set>
 #include <utility>
 
 #include <editor/assets/asset_type_registry.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/animation_map_document.h>
+#include <editor/documents/catalog_validation.h>
+#include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
 #include <base/io/strutil.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/graph_names.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/graph/texture_import_needs.h>
 #include <editor/graph/texture_uses.h>
 #include <editor/import/importer.h>
 #include <editor/import/texture_import.h>
+#include <editor/import/texture_source.h>
 #include <editor/session/texture_import_state.h>
 #include <editor/session/texture_use_index.h>
 #include <editor/model/field_text.h>
@@ -391,6 +396,72 @@ void import_fit_fix(const Diagnostic &d, const SessionView &view, std::vector<Pr
 	               request::set_import_options(state.source, std::move(changes)), false});
 }
 
+// An item on an id the engine keeps for another kind (catalog.reserved_kind), or named as a place the
+// engine finds by an id the project lacks (catalog.reserved_name): its id renamed everywhere
+// (graph/rename_transaction: items.def and every file that names it, a mission's entities among them),
+// to an id of its own the engine keeps for nothing (free_item_id over every item id the project has or
+// names), or to the engine's where an item of the engine's kind takes it. The item is the finding's
+// record among the graph's item definitions of its file, the one on that kind of id.
+void item_id_fix(const Diagnostic &d, const SessionView &view, bool plan, std::vector<ProblemFix> &out) {
+	if (!view.findings.graph || d.asset.empty() || d.record.empty()) return;
+	const AssetGraph &graph = *view.findings.graph;
+	const bool kind = d.row() == &finding_code(CatalogFinding::ReservedKind);
+	const GraphSymbol *item = nullptr;
+	const def::ReservedItem *wanted = nullptr;
+	for (const GraphSymbol *symbol : graph.symbols_of(d.asset, d.record)) {
+		if (symbol->kind != ReferenceKind::Item) continue;
+		const std::optional<int> id = strutil::parse_int(symbol->name);
+		const std::optional<int> type = strutil::parse_int(symbol->value);
+		if (!id || !type) continue;
+		const def::ReservedItem *held = def::reserved_item_by_id(*id);
+		if (kind && held && !def::reserved_item_kind_matches(*held, *type)) item = symbol;
+		if (!kind && !held && (wanted = reserved_item_named(d.record)) && def::reserved_item_kind_matches(*wanted, *type))
+			item = symbol;
+		if (item) break;
+	}
+	if (!item) return;
+	std::string to;
+	if (kind) {
+		std::set<int> used;
+		for (const GraphSymbol *symbol : graph.symbols_of_kind(ReferenceKind::Item))
+			if (const std::optional<int> id = strutil::parse_int(symbol->name)) used.insert(*id);
+		graph.for_each_edge([&](const GraphEdge &edge) {
+			if (edge.kind != ReferenceKind::Item) return;
+			if (const std::optional<int> id = strutil::parse_int(edge.value)) used.insert(*id);
+		});
+		to = std::to_string(free_item_id([&](int id) { return used.count(id) != 0; }));
+	} else {
+		to = std::to_string(def::DEF_ITEM_ID_BASE + wanted->type);
+		if (graph.resolve_symbol(ReferenceKind::Item, to)) return; // another item has it: no fix of this one
+	}
+	std::string detail = "Gives " + d.record + " id " + to +
+	                     (kind ? ", one the engine keeps for nothing," : ", the id the engine finds it by,") +
+	                     " in " + basename_of(d.asset) + " and in every file that names it.";
+	if (plan && view.project.scan) {
+		const SymbolRenamePlan rename = plan_symbol_rename_project(*view.project.scan, graph, *item, to);
+		if (!rename.ok()) detail = "Cannot give " + d.record + " id " + to + ": " + rename.refusals.front().message;
+		else detail += " It rewrites " + counted(rename.sites.size(), "use") + ".";
+	}
+	out.push_back({"Use id " + to, detail + kNotUndoable,
+	               request::rename_symbol(item->file, item->locator, item->field, to), false});
+}
+
+// An items.def whose first row is no Null marker (catalog.first_row): a Null marker added first, the
+// row every lookup that finds nothing resolves to (a marker of an id of its own, as a new item is), in
+// its document, opened first when it is not: one step Undo takes back, saved with the file.
+ProblemFix fallback_row_fix(const std::string &path) {
+	Edit add;
+	add.operation = EditOperation::Add;
+	add.address.kind = node_kind(def::DefRecordKind::Item);
+	add.position = 0;
+	add.field = "display_name";
+	add.value = std::string("Null");
+	return {"Add a Null marker first",
+	        "Adds a marker named Null as the first row of " + path + ", the row the engine gives every id it finds "
+	        "no item of, as retail's first row is. Undo takes it back, and Save writes it.",
+	        request::edit_record(path, std::move(add), true), false};
+}
+
 // The fixes of one finding, over the view's index (a Rewrite reads it): what its code's row offers
 // (FindingCodeRow::fixes), for what the finding is about.
 void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex &index, bool plan,
@@ -430,15 +501,21 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 		return;
 	case FindingFix::Reload: {
 		// An open document whose file changed outside the editor: read it again, its unsaved
-		// edits dropped (the Reload asks about them first, as any Reload does).
-		const bool open = !d.asset.empty() &&
-		                  std::any_of(view.documents.open.begin(), view.documents.open.end(),
-		                              [&d](const auto &document) { return document && document->path() == d.asset; });
-		if (open)
-			out.push_back({"Reload " + basename_of(d.asset),
-			               "Reads " + d.asset + " again from its file, which changed outside the editor: its unsaved "
-			               "edits are lost (it asks first) and its history starts again." + kNotUndoable,
-			               request::reload_document(d.asset), false});
+		// edits dropped (the Reload asks about them first, as any Reload does); or, while it has
+		// unsaved edits, they kept and written over what the other program saved (ADR 0046 DI-01:
+		// a Save that writes over, which Problems confirms first: fix_asks_first).
+		const auto open = std::find_if(view.documents.open.begin(), view.documents.open.end(),
+		                               [&d](const auto &document) { return document && document->path() == d.asset; });
+		if (d.asset.empty() || open == view.documents.open.end()) return;
+		out.push_back({"Reload " + basename_of(d.asset),
+		               "Reads " + d.asset + " again from its file, which changed outside the editor: its unsaved "
+		               "edits are lost (it asks first) and its history starts again." + kNotUndoable,
+		               request::reload_document(d.asset), false});
+		if ((*open)->dirty())
+			out.push_back({"Keep my edits and save over it",
+			               "Writes " + d.asset + " with your unsaved edits over its file: what the other program "
+			               "saved there is lost." + kNotUndoable,
+			               request::save_over(d.asset), false});
 		return;
 	}
 	case FindingFix::Reimport:
@@ -469,6 +546,45 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 			               request::texture_operation(d.asset, "reorder_rows", {}, true), false});
 		return;
 	case FindingFix::ImportFitsUse: import_fit_fix(d, view, out); return;
+	case FindingFix::ItemId: item_id_fix(d, view, plan, out); return;
+	case FindingFix::FallbackRow:
+		if (!d.asset.empty()) out.push_back(fallback_row_fix(d.asset));
+		return;
+	case FindingFix::NormalRowType: {
+		// A finished normal map a normal-map slot's row loads as a diffuse: its row given type 4, which the
+		// normal-map loader reads, an .mdt as it is, capped at 512 a side [orig: Material_LoadStageTexture
+		// @ 0x5B1778..0x5B1790]. Not a .tga's: type 4 makes a normal map of a .tga's alpha as its height.
+		const ReferenceSubject *subject = reference_subject(d);
+		if (!subject || d.asset.empty() || d.row_id == 0 ||
+		    strutil::to_lower(utf8_of(path_of(subject->target).extension())) != ".mdt")
+			return;
+		Edit edit;
+		edit.operation = EditOperation::Set;
+		edit.address = NodeAddress{d.row_id, d.record_kind, d.child_id};
+		edit.field = "type";
+		edit.value = int64_t(4);
+		out.push_back({"Give its row type 4 (normal map)",
+		               "Sets the type of the row of " + basename_of(d.asset) + " that names " + subject->target +
+		                       " to 4: the game then loads it as a normal map, halved until it fits 512 a side. Undo takes it "
+		                       "back, and Save writes it.",
+		               request::edit_record(d.asset, edit, true), false});
+		return;
+	}
+	case FindingFix::SetAsideUnread: {
+		// A texture no use reads (a .tga beside the .dds its model row loads, which the Blender add-on's export
+		// leaves): set aside under .replaced/, never deleted. Offered where it is no import's output and every
+		// use of it opens another file.
+		const AssetEntry *file = view.project.scan->at_path(d.asset);
+		if (!file || !file->imported_from.empty() || !view.documents.texture_uses) return;
+		const std::vector<TextureUse> &uses = view.documents.texture_uses->uses_of(view, file->relative_path);
+		if (uses.empty() || std::any_of(uses.begin(), uses.end(), [](const TextureUse &use) { return use.reads_file; })) return;
+		out.push_back({"Set " + file->logical_name + " aside",
+		               "Moves " + file->relative_path + " under " + std::string(kReplacedFolder) + "/, never deleted: no use of it "
+		               "reads it, each one's loader opening " + basename_of(uses.front().served) + " in its place, so the build "
+		               "packs it for nothing." + kNotUndoable,
+		               request::set_aside_texture(file->relative_path), true});
+		return;
+	}
 	}
 }
 
@@ -492,6 +608,42 @@ ProblemFixIndex::ProblemFixIndex(const SessionView &view) {
 
 std::vector<ProblemFix> fixes_for(const Diagnostic &diagnostic, const SessionView &view, const ProblemFixIndex *index) {
 	return fixes_over(diagnostic, view, index, true);
+}
+
+bool missing_target(const ReferenceSubject &missing, const SessionView &view, ReferenceTarget &out) {
+	// A record of a file by its index (a Record reference) is its own file's: no other place it belongs.
+	const ReferenceKindRow &row = reference_row(missing.kind);
+	if (!view.project.open || !view.project.scan || !row.names_symbol() || row.resolution == ReferenceResolution::Record)
+		return false;
+	const AssetEntry *file = defining_file(missing, view);
+	if (!file) return false;
+	out = ReferenceTarget();
+	out.label = "where " + std::string(reference_row(missing.kind).phrase) + " '" + missing.target + "' belongs: " +
+	            file->relative_path;
+	out.file = file->relative_path;
+	out.editable = is_editable_kind(file->kind);
+	out.missing = true;
+	return true;
+}
+
+bool missing_target(const FieldUse &field, const Value &value, const SessionView &view, ReferenceTarget &out) {
+	ReferenceKind kind;
+	std::string name, scope;
+	const AssetGraph *graph = view.findings.graph.get();
+	if (!graph || !reference_target(field, value, kind, name, scope)) return false;
+	if (graph->resolve(kind, name, scope, nullptr, field.loader_arg) != ReferenceStatus::Missing) return false;
+	// A %NAME% the stylesheets the game reads do not define stands for the file: the variable is what is
+	// missing (missing_finding's subject), and belongs in a stylesheet.
+	if (kind != ReferenceKind::StyleVar && graph_names::is_style_reference(name) && !graph->style_binding(name)) {
+		kind = ReferenceKind::StyleVar;
+		scope.clear();
+	}
+	ReferenceSubject missing;
+	missing.kind = kind;
+	missing.target = name;
+	missing.scope = scope;
+	missing.loader_arg = field.loader_arg;
+	return missing_target(missing, view, out);
 }
 
 bool has_fixes(const Diagnostic &diagnostic, const SessionView &view, const ProblemFixIndex *index) {

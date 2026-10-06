@@ -1,10 +1,14 @@
 #include <editor/session/sound_play.h>
 
+#include <optional>
+
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/sound_bank_document.h>
 #include <editor/documents/sound_profile_document.h>
 #include <editor/model/finding_code_row.h>
+#include <editor/preview/model_viewport.h>
+#include <editor/preview/viewports.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/file_card.h>
@@ -53,7 +57,10 @@ void start(SessionCore &core, std::vector<WorkspaceView::Voice> voices, const st
 	sound.error.clear();
 	core.touch(ViewConcern::Workspace);
 	if (!words.empty()) {
-		core.view().activity.status = "Playing " + words;
+		// A set's words name the set first ("Playing FSP_DIRT_L in game.lwf: ..."); a slot's are a sentence of
+		// their own ("default's SSLFootGND plays FSP_DIRT_L in game.lwf: ...").
+		const bool set_first = !set.empty() && words.compare(0, set.size(), set) == 0;
+		core.view().activity.status = set_first ? "Playing " + words : words;
 		core.touch(ViewConcern::Output);
 	}
 }
@@ -80,6 +87,33 @@ void start_play(SessionCore &core, const PreviewPlay &play) {
 		              play.bank_path);
 	start(core, std::move(voices), play.set, play.bank,
 	      missing.empty() ? play.words : play.words + " (the project lacks " + missing + ")");
+}
+
+// values {frame}: what the clip the animation document at `path` (the active one when left out) plays at
+// that frame, as a press of its mark on the timeline asks (DI-04: ModelViewport::press_event, under its
+// model viewport's sound options), every sound of the event at once.
+void play_clip_event(SessionCore &core, const EditorRequest &request) {
+	const SessionView &view = core.view();
+	const std::optional<int> frame = strutil::parse_int(value_of(request, "frame"));
+	if (!frame || *frame < 0) return refuse(core, "frame is a clip's frame, a whole number from 0.");
+	std::string error;
+	auto *clip = dynamic_cast<ModelViewport *>(
+			core.viewports().resolve(view, request.path, ViewportKind::Model, error));
+	if (!clip || !clip->animating())
+		return refuse(core, !error.empty() ? error : "No clip plays in the model preview of " + request.path + ".",
+		              request.path);
+	std::vector<ClipSoundFired> fired;
+	if (!clip->press_event(*frame, view.project.scan.get(), core.sound_selector(), fired, error))
+		return refuse(core, error, clip->path());
+	std::vector<WorkspaceView::Voice> voices;
+	std::string words;
+	for (const ClipSoundFired &one : fired) {
+		words += (words.empty() ? "" : " ") + one.words;
+		for (const ClipSoundFired::Voice &voice : one.voices)
+			if (!voice.path.empty()) voices.push_back({voice.path, voice.pitch_q16, voice.volume});
+	}
+	if (voices.empty()) return refuse(core, words, clip->path());
+	start(core, std::move(voices), fired.front().set, fired.front().bank, words);
 }
 
 // A slot by its keyword, without case, or its number; -1 for none.
@@ -137,6 +171,7 @@ std::string project_expansion(const SessionView &view) {
 void serve_sound_play(SessionCore &core, const EditorRequest &request) {
 	const SessionView &view = core.view();
 	if (!view.project.open || !view.project.scan) return refuse(core, "No project is open.");
+	if (has_value(request, "frame")) return play_clip_event(core, request);
 	const std::string &set = value_of(request, "set");
 	const bool slot_play = has_value(request, "slot") || has_value(request, "profile") || has_value(request, "surface");
 	if (!set.empty()) {

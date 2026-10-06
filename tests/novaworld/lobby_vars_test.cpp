@@ -163,7 +163,7 @@ int main() {
 		alt.country = "XX";
 		alt.allow_ping = false;
 		alt.time_of_day = 9;
-		alt.dedicated_server = true;
+		alt.met_ext = true;
 		alt.country_name = "United States";
 		alt.language = "English";
 		alt.tz_bias = 480;
@@ -177,7 +177,7 @@ int main() {
 		expect(value_of(host2, "TimeOfDay") == "Unknown", "out-of-range time of day -> Unknown");
 		expect(value_of(host2, "CountryName") == "United States" && value_of(host2, "Lang") == "English" &&
 		               value_of(host2, "TZB") == "480",
-		       "dedicated server appends CountryName/Lang/TZB before Ver1");
+		       "the gate's METEXT appends CountryName/Lang/TZB before Ver1");
 		std::size_t ver1 = 0, tzb = 0;
 		for (std::size_t i = 0; i < host2.size(); ++i) {
 			if (host2[i].name == "Ver1") ver1 = i;

@@ -13,11 +13,13 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_kinds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_kind_words.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_type_registry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/disk_changes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/import_choice.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/install_check.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/install_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/player_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_asset_source.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_layout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_scan.cpp
     # blank — the from-scratch files behind New, the required files' Create fixes and a
     # missing texture's placeholder
@@ -29,6 +31,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_menu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_mission.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_mission_menus.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_shader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_sound.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_strings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_style.cpp
@@ -77,21 +80,28 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_surfaces.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_collision_words.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_labels.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_ctrl_words.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_map_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_slots.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/text_types.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/environment_document.cpp
     # the sound lane: a bank's waves and sets, SndProf.def's profiles
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_bank_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_profile_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/wave_check.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/hud_layout_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_image.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_budget.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_compare.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_load_rules.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_operations.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_roles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/script_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/music_script_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/credits_type.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/particle_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/document_types.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/project_checks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/catalog_validation.cpp
@@ -117,10 +127,11 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/texture_import_needs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/texture_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/use_checks.cpp
-    # import — the importers (a PNG to the texture file its uses read, S18; a font set's glyph sheet to a
-    # .fnt) and what they read (the import context), the sidecars, the import pass, and the plan of an
-    # import with the files it needs
+    # import — the importers (a PNG to the texture file its uses read, S18, a DDS's blocks and chain through
+    # the authoring DXT encoder; a font set's glyph sheet to a .fnt) and what they read (the import context),
+    # the sidecars, the import pass, and the plan of an import with the files it needs
     ${CMAKE_CURRENT_SOURCE_DIR}/import/converter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/import/dxt_encode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/font_import.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_context.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/importers.cpp
@@ -135,6 +146,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/import/sidecar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/terrain_import.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/texture_import.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/import/wave_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/texture_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/tga_source.cpp
     # terrain — TrnGen.exe's terrain bake ported (a depth map to the .cpt's depth atlas and its
@@ -151,7 +163,8 @@ add_library(opennova_editor STATIC
     # the base every kind's viewport derives from, the Shell's devices (an LRU of four keyed by
     # document and kind) and the one envelope on the wire; the menu's viewport (its screen compiled
     # headless, the geometry its hit tests, handles and drags read) and the model's (its orbit camera
-    # and the level the game draws, its rig and the clip it plays); the headless render of a screen,
+    # and the level the game draws, its rig and the clip it plays, the sounds the clip's events fire);
+    # the headless render of a screen,
     # the render check over every menu (the menu type's project check: the compiler notes as
     # findings), and the texture header probe it measures with; what a drag of a window's handles
     # writes, and what arranging several windows (align, distribute, drawing order) writes; a menu's
@@ -163,6 +176,8 @@ add_library(opennova_editor STATIC
     # keystroke burst its edits fold in, the gutter marks and the highlights it colours)
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/animation_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/sound_preview.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/preview_clip_sounds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_damage.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/canvas_gesture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_arrange.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_canvas.cpp
@@ -173,6 +188,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_camera.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_canvas.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_ground_facts.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_handle_edit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_hint.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_items.cpp
@@ -181,9 +197,14 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_palette.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_place.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_poses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_viewport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_canvas.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_catalog.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_playback.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_collision.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_handle_edit.cpp
@@ -196,8 +217,11 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/text_burst.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_header.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_role_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_thumbnails.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_viewport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/hud_canvas.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/hud_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_device_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_follow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_json.cpp
@@ -233,17 +257,20 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/run/run_directory.cpp
     # session — the one open project and everything the editor does to it (ADR 0046 d10):
     # the facade and its parts (S13 A2: the core, the open documents, the Problems rows, Play,
-    # imports, renames, the unsaved guard, the preferences over their store), what Problems
-    # shows of its findings and offers to do about them, the request and query tables (S13 A4,
-    # A5) and their wire forms (session_json, view_json), the selection (S13 D7), and the
-    # finding codes' lookup over every table (S13 A6)
+    # imports, renames, the unsaved guard, the navigation history, the preferences over their
+    # store), what Problems shows of its findings and offers to do about them, the request and
+    # query tables (S13 A4, A5) and their wire forms (session_json, view_json), the selection
+    # (S13 D7), and the finding codes' lookup over every table (S13 A6)
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_result.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/catalog_json.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/disk_watch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_preferences.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_queries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_page.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/environment_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_card.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/finding_codes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_controller.cpp
@@ -251,6 +278,8 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_plan_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/mission_logic_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/model_json.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/navigation_controller.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/navigation_history.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/open_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/operation_progress.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/original_bytes.cpp
@@ -274,6 +303,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_core.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_operation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/texture_budget_list.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/texture_import_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/texture_show_use.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/texture_use_index.cpp
@@ -281,12 +311,14 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/workspace_parts.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/sound_play.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/clip_sounds.cpp
     # session/view — the view the windows draw, an aggregate of sub-views (S13 V4: the project,
-    # the documents, the findings, the activity, the dialogs, the workspace's own), the events a
-    # request posts, and the findings by file and record
+    # the documents, the findings, the activity, the dialogs, the workspace's own, the navigation
+    # history's places), the events a request posts, and the findings by file and record
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/activity_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/dialogs_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/findings_index.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/view/navigation_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/project_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/session_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/view_events.cpp
@@ -306,6 +338,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/file_page_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/editor_windows.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/environment_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/expansion_fields.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/field_widgets.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/files_window.cpp
@@ -342,6 +375,9 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_source_dialog.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/effect_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/hud_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/catalog_inspector_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/ui_kit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_canvas.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_view.cpp
@@ -364,8 +400,9 @@ target_include_directories(opennova_editor
 target_link_libraries(opennova_editor PUBLIC opennova_runtime)
 # The image importer inflates PNG data, and the PNG writer (the thumbnails' wire
 # form) deflates it, through the vendored miniz (private: no consumer of the
-# editor sees miniz.h).
-target_link_libraries(opennova_editor PRIVATE opennova_miniz)
+# editor sees miniz.h); its DXT textures' blocks are rgbcx's (import/dxt_encode,
+# private alike).
+target_link_libraries(opennova_editor PRIVATE opennova_miniz opennova_rgbcx)
 
 target_compile_features(opennova_editor PUBLIC cxx_std_17)
 

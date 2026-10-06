@@ -49,10 +49,13 @@ int main() {
 				"no resolved character arms submits no arms");
 		check(s.adm.empty(), "a resolved def's empty animadm sets no clip");
 	}
-	// A resolved def with no fpModel submits NO gun (empty, not a fallback).
+	// A resolved def with no fpModel submits NOTHING: no gun and no arms
+	// (def+0x16C null returns before both submits @0x4dedc7).
 	{
-		const FpViewmodelSpec s = fp_viewmodel_spec(true, "", "ArmsG", "", 0);
+		const FpViewmodelSpec s = fp_viewmodel_spec(true, "", "ArmsG", "m4_1st", 0);
 		check(s.gun.empty(), "resolved def without fpModel submits no gun");
+		check(!s.show_arms && s.arms.empty() && s.adm.empty(),
+				"resolved def without fpModel submits no arms either");
 	}
 	// Emplaced mounts render their own FP gun but omit the carried arms
 	// [orig: @ 0x4dedc7], even when the character has arms.
@@ -62,13 +65,15 @@ int main() {
 		check(!s.show_arms && s.gun == "50cal_1st",
 				"Flags 0x80 keeps the gun and drops the arms");
 	}
-	// The no-def bring-up path (ours, not retail) still draws the character's
-	// arms with the AK set.
+	// No equipped def submits nothing and names no model: no default gun, no
+	// arms, no clip set (no equipped slot @0x4dedb6 / no def @0x4dedc1).
 	{
 		const FpViewmodelSpec s = fp_viewmodel_spec(false, "", "ArmsG", "", 0);
-		check(s.gun == "ak47_1st" && s.arms == "ArmsG" && s.adm == "ak47_1st" &&
-						s.show_arms,
-				"the bring-up path submits the AK set with the character arms");
+		check(s.gun.empty() && s.arms.empty() && s.adm.empty() && !s.show_arms,
+				"no equipped def submits nothing");
+		const FpViewmodelSpec stale = fp_viewmodel_spec(false, "m4_1st", "ArmsG", "m4_1st", 0);
+		check(stale.gun.empty() && !stale.show_arms,
+				"no equipped def ignores any model name");
 	}
 
 	// How far the arms reach into the gun's bone array: one past the highest

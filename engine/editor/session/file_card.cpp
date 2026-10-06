@@ -6,11 +6,13 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/display_names.h>
 #include <editor/model/field_text.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/archive_routing.h>
 #include <editor/project_build/build_plan.h>
+#include <editor/import/wave_source.h>
 #include <editor/session/view/session_view.h>
 #include <formats/lwf/wav_pcm.h>
 
@@ -31,6 +33,16 @@ FileCard::Sound decode_sound(const std::string &file, const AssetEntry &entry) {
 	}
 	std::vector<uint8_t> bytes;
 	if (!read_file_bytes(file, bytes, sound.error)) return sound;
+	// What the game's loader makes of it, and what it holds (the sound lane: import/wave_source.h).
+	const WaveFacts facts = wave_facts(bytes, kWaveCardBins);
+	sound.plays = facts.retail.plays;
+	sound.refusal = facts.retail.why;
+	if (facts.read) {
+		sound.format = wave_format_words(facts.format);
+		sound.peak = facts.peak;
+		sound.rms = facts.rms;
+		sound.envelope = facts.envelope;
+	}
 	lwf::WavPcm pcm;
 	if (!lwf::wav_decode_pcm16(bytes.data(), bytes.size(), pcm, sound.error)) return sound;
 	sound.decoded = true;
@@ -60,6 +72,108 @@ std::string edge_field_words(const AssetScan &scan, const GraphEdge &edge) {
 	for (const FieldSchema &field : type->fields(edge.address.kind))
 		if (field.id == edge.field) return field_title(field);
 	return edge.field;
+}
+
+FileUsers file_users(const SessionView &view, const std::string &path) {
+	FileUsers users;
+	if (!view.project.open || !view.project.scan) return users;
+	const AssetScan &scan = *view.project.scan;
+	const AssetEntry *entry = scan.named(path);
+	if (!entry) return users;
+	users.found = true;
+	users.path = entry->relative_path;
+	users.name = entry->logical_name;
+	users.reading = !view.activity.validation.read || view.activity.validation.files_unread;
+	const AssetGraph *graph = view.findings.graph.get();
+	if (!graph) return users;
+	const auto line_of = [&scan](const GraphEdge &edge) {
+		const AssetEntry *source = scan.at_path(edge.source);
+		FileUsers::Line line;
+		line.file = edge.source;
+		line.words = edge_place_words(edge, source ? source->kind : AssetKind::Unknown);
+		// A name the file makes with no record or field to say (a text's whole name): the value it names.
+		if (line.words.empty()) line.words = edge.value;
+		line.field = edge.field;
+		line.target = usage_target(scan, edge);
+		return line;
+	};
+	const auto name_of = [&scan](const std::string &file) {
+		const AssetEntry *source = scan.at_path(file);
+		return source ? source->logical_name : file;
+	};
+	// Each group in the order its file's first line comes (the graph's).
+	const auto group_of = [](auto &groups, const std::string &file, const std::string &name) -> auto & {
+		for (auto &group : groups)
+			if (group.file == file) return group;
+		groups.emplace_back();
+		groups.back().file = file;
+		groups.back().name = name;
+		return groups.back();
+	};
+	for (const FileUse &use : file_uses(*graph, users.path)) {
+		FileUsers::Use made;
+		made.line = line_of(*use.edge);
+		for (const GraphEdge *edge : use.further) {
+			group_of(made.further, edge->source, name_of(edge->source)).lines.push_back(line_of(*edge));
+			++made.further_count;
+		}
+		users.further_count += made.further_count;
+		++users.count;
+		group_of(users.groups, use.edge->source, name_of(use.edge->source)).uses.push_back(std::move(made));
+	}
+	return users;
+}
+
+size_t file_use_count(const SessionView &view, const std::string &path) {
+	if (!view.project.open || !view.project.scan || !view.findings.graph) return 0;
+	const AssetEntry *entry = view.project.scan->named(path);
+	return entry ? view.findings.graph->usages_of(entry->relative_path).size() : 0;
+}
+
+JsonValue file_users_json(const FileUsers &users) {
+	JsonValue out = JsonValue::make_object();
+	out.set("found", JsonValue::make_bool(users.found));
+	if (!users.found) return out;
+	out.set("path", JsonValue::make_string(users.path));
+	out.set("name", JsonValue::make_string(users.name));
+	out.set("count", JsonValue::make_number(double(users.count)));
+	out.set("further_count", JsonValue::make_number(double(users.further_count)));
+	if (users.reading) out.set("reading", JsonValue::make_bool(true));
+	const auto line_json = [](const FileUsers::Line &line) {
+		JsonValue item = JsonValue::make_object();
+		item.set("words", JsonValue::make_string(line.words));
+		item.set("field", JsonValue::make_string(line.field));
+		item.set("file", JsonValue::make_string(line.target.file));
+		if (!line.target.locator.empty()) item.set("locator", JsonValue::make_string(line.target.locator));
+		item.set("editable", JsonValue::make_bool(line.target.editable));
+		return item;
+	};
+	JsonValue files = JsonValue::make_array();
+	for (const FileUsers::UseGroup &group : users.groups) {
+		JsonValue file = JsonValue::make_object();
+		file.set("file", JsonValue::make_string(group.file));
+		file.set("name", JsonValue::make_string(group.name));
+		JsonValue list = JsonValue::make_array();
+		for (const FileUsers::Use &use : group.uses) {
+			JsonValue item = line_json(use.line);
+			JsonValue further = JsonValue::make_array();
+			for (const FileUsers::Group &next : use.further) {
+				JsonValue hop = JsonValue::make_object();
+				hop.set("file", JsonValue::make_string(next.file));
+				hop.set("name", JsonValue::make_string(next.name));
+				JsonValue lines = JsonValue::make_array();
+				for (const FileUsers::Line &line : next.lines) lines.push(line_json(line));
+				hop.set("uses", std::move(lines));
+				further.push(std::move(hop));
+			}
+			item.set("further", std::move(further));
+			list.push(std::move(item));
+		}
+		file.set("uses", std::move(list));
+		files.push(std::move(file));
+	}
+	out.set("files", std::move(files));
+	return out;
 }
 
 FileCard file_card(const SessionView &view, const std::string &path, const FileCard::Sound *known) {
@@ -133,6 +247,14 @@ JsonValue file_card_json(const FileCard &card) {
 		sound.set("rate", JsonValue::make_number(card.sound.rate));
 		sound.set("channels", JsonValue::make_number(card.sound.channels));
 		sound.set("seconds", JsonValue::make_number(card.sound.seconds));
+		sound.set("plays", JsonValue::make_bool(card.sound.plays));
+		if (!card.sound.plays) sound.set("refusal", JsonValue::make_string(card.sound.refusal));
+		sound.set("format", JsonValue::make_string(card.sound.format));
+		sound.set("peak", JsonValue::make_number(card.sound.peak));
+		sound.set("rms", JsonValue::make_number(card.sound.rms));
+		JsonValue envelope = JsonValue::make_array();
+		for (const float bin : card.sound.envelope) envelope.push(JsonValue::make_number(bin));
+		sound.set("envelope", std::move(envelope));
 		out.set("sound", std::move(sound));
 	}
 	JsonValue names = JsonValue::make_array();

@@ -35,6 +35,7 @@ as usual.
     python scripts/mcp/editor_mcp.py request set_workspace --workspace '{"document": {"filter": "gun",
         "inspector_filter": "rate"}, "find": {"open": true, "text": "90"}}'   # the active document's views
     python scripts/mcp/editor_mcp.py state --sections workspace   # what the windows show of their own
+    python scripts/mcp/editor_mcp.py request navigate_back --steps 2   # two places back (state --sections navigation)
     python scripts/mcp/editor_mcp.py viewport --op state --path main.mnu        # a document's viewport: its envelope
     python scripts/mcp/editor_mcp.py viewport --op hit --x 400 --y 300          # what lies under a point
     python scripts/mcp/editor_mcp.py viewport --op drag --id 5 --handle move --by=-8,4 --snap 1   # one undo step
@@ -255,11 +256,11 @@ def parse_list(text: str, flag: str, shape: str) -> list:
 # takes; the editor refuses the rest, naming what the kind takes (`query catalog` lists them).
 REQUEST_TEXTS = ("dir", "title", "game", "expansion", "builds_on", "game_install", "path", "locator", "field",
                  "new_name", "role", "file_kind", "out_dir", "export_dir", "mission", "operation", "mode", "choice",
-                 "purpose")
+                 "purpose", "folder")
 REQUEST_LISTS = ("roles", "names")
 REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass", "rehash", "all",
                     "planned", "behind", "fresh", "report")
-REQUEST_NUMBERS = ("plan",)
+REQUEST_NUMBERS = ("plan", "steps")
 
 
 def request_of(args: argparse.Namespace) -> dict:
@@ -694,6 +695,8 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--locator", default=None, help="a record's locator (open_document, the renames)")
     request.add_argument("--field", default=None, help="a field of that record")
     request.add_argument("--new-name", dest="new_name", default=None, help="the name a rename gives")
+    request.add_argument("--folder", default=None,
+                         help="move_asset: the project folder the file goes to ('' the top level)")
     request.add_argument("--role", default=None, help="a requirement's role (assign_requirement)")
     request.add_argument("--file-kind", dest="file_kind", default=None,
                          help="create_file: an asset kind token, for a name that cannot say its kind")
@@ -774,6 +777,9 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--plan", type=int, default=None,
                          help="import_files --planned: the plan it imports (query import_preview's plan); a plan "
                               "made since is refused")
+    request.add_argument("--steps", type=int, default=None,
+                         help="navigate_back, navigate_forward: how many places of the navigation history (1 when "
+                              "left out; state --sections navigation lists them, nearest first)")
     request.add_argument("--behind", choices=switch, default=None,
                          help="play: the game's window starts behind every other, the editor keeping the foreground "
                               "(Windows only)")
@@ -800,7 +806,7 @@ def build_parser() -> argparse.ArgumentParser:
                           help="the document (a project-relative path or a logical name; the active one when left "
                                "out; seek takes none)")
     viewport.add_argument("--kind", default=None,
-                          help="the viewport's kind (menu, model, script, mission; the one the document shows in when "
+                          help="the viewport's kind (menu, model, script, mission, texture, effect; the one the document shows in when "
                                "left out; seek takes none)")
     viewport.add_argument("--x", type=float, default=None,
                           help="hit: the point across (design units or pixels); box: its first corner's")

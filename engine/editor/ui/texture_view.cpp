@@ -12,6 +12,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/texture_budget.h>
 #include <editor/documents/texture_document.h>
 #include <editor/documents/texture_image.h>
 #include <editor/documents/texture_roles.h>
@@ -200,6 +201,13 @@ void TextureView::draw_edits(Workspace &workspace, const DocumentBase &document,
 		if (extension == ".tga") {
 			if (ui_kit::tool(form, "32-bit", allowed, "Colour and alpha.")) operate("format", {{"format", "tga"}});
 			if (ui_kit::tool(form, "24-bit", allowed, "Colour alone: a terrain colour map's form.")) operate("format", {{"format", "tga24"}});
+			// Its .dds, which a model row's loader opens before the .tga its row names (store_as_dds).
+			if (ui_kit::tool(form, "DDS", view.allows(EditorRequestKind::StoreAsDds) && image.loads && image.decoded && !document.dirty(),
+			                 "Stored as the .dds of its name, DXT1 (DXT5 with alpha) with its mip chain, the form of the game's "
+			                 "own model textures, a fraction of the TGA's size: a model's rows keep naming the .tga, whose .dds "
+			                 "the game reads first. The TGA becomes the source in art/ its import makes the .dds from. Refused "
+			                 "where a use reads the .tga itself (a terrain map, the HUD)."))
+				workspace.request(request::store_as_dds(path));
 		} else {
 			if (ui_kit::tool(form, "DXT5 with mips", allowed, "The form of the game's own model textures."))
 				operate("format", {{"dds", "dxt5"}, {"mips", "full"}});
@@ -437,23 +445,79 @@ void TextureView::draw_uses(Workspace &workspace, const DocumentBase &document) 
 			                basename_of(use.referrer) + " names from then on; the other uses keep this file.");
 			ImGui::EndPopup();
 		}
-		ui_kit::tooltip_lazy([&] {
+		const auto use_tooltip = [&] {
 			std::string tip = line + "\nAs written: " + use.name_written;
 			if (!use.load.file.empty()) tip += "\nIts loader opens " + use.load.file;
 			if (use.load.transform != TextureLoadTransform::None)
 				tip += std::string("\nAnd makes it ") + texture_load_transform_words(use.load.transform);
 			if (use.known()) {
 				const TextureRoleRow &role = texture_role_row(use.role);
-				if (*role.alpha) tip += std::string("\nAlpha: ") + role.alpha;
+				// A model row's alpha by its material's technique (a Phong diffuse's the specular brightness), else
+				// the role's.
+				TextureBudgetLoader loader = TextureBudgetLoader::Stage;
+				if (use.context.material >= 0 && texture_role_budget_loader(use.role, loader))
+					tip += "\nAlpha: " + texture_alpha_meaning_words(texture_row_alpha_meaning(use.context.shader, use.context.material_flags,
+					                                                                           use.context.type, use.context.slot,
+					                                                                           use.name_written),
+					                                                 use.context.shader, use.context.alpha_ref,
+					                                                 use.context.alpha_test_inverted());
+				else if (*role.alpha)
+					tip += std::string("\nAlpha: ") + role.alpha;
 				if (role.size != TextureSizeRule::Any) tip += "\nSize: " + texture_size_words(role);
 				tip += std::string("\nWitness: ") + (use.fixed ? use.fixed_witness.c_str() : role.witness);
 			}
 			if (!use.fixed)
 				tip += target.editable ? "\nA click opens " + target.file + " at it." : "\nA click shows " + target.file + " in Files.";
 			return tip;
-		});
+		};
+		ui_kit::tooltip_lazy(use_tooltip);
+		// What it costs the game (S18, the texture budget): its device texture at full object texture detail,
+		// in the warning colour past what the use check says of, and each detail level in its tooltip.
+		if (use.budget.known) draw_budget(use.budget);
 		ImGui::PopID();
 	}
+	// No use reads it (each one's loader opens another file of its name: the .tga the Blender add-on leaves
+	// beside the .dds its model row loads): set aside, never deleted (S18, set_aside_texture).
+	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(document.path()) : nullptr;
+	const bool unread = std::none_of(uses.begin(), uses.end(), [](const TextureUse &use) { return use.reads_file; });
+	if (unread && entry && entry->imported_from.empty()) {
+		ImGui::PushTextWrapPos(0.0f);
+		ImGui::TextColored(ui_kit::severity_color(DiagnosticSeverity::Warning), "The game never reads this file: %s.",
+		                   uses.front().served.empty() ? "no loader opens it"
+		                                               : ("its loader opens " + basename_of(uses.front().served) + " in its place").c_str());
+		ImGui::PopTextWrapPos();
+		ui_kit::WrapRow row;
+		if (ui_kit::tool(row, "Set it aside", view.allows(EditorRequestKind::SetAsideTexture) && !document.dirty(),
+		                 "Moves " + document.path() + " under " + std::string(kReplacedFolder) +
+		                         "/, never deleted, so the build no longer packs it. Undo does not take it back."))
+			workspace.request(request::set_aside_texture(document.path()));
+	}
+}
+
+// A use's budget under its line: what the game makes of the file at full object texture detail and what
+// its .dds would take, the levels below in the tooltip.
+void TextureView::draw_budget(const TextureBudget &budget) {
+	const renderer::DeviceTexture &full = budget.full();
+	std::string line = "In the game: " + texture_bytes_words(full.bytes);
+	if (budget.offers_dds) line += ", " + texture_bytes_words(budget.as_dds.bytes) + " as its .dds";
+	ImGui::Indent();
+	ImGui::PushTextWrapPos(0.0f);
+	if (full.bytes > kTextureMemoryWarnBytes) ImGui::TextColored(ui_kit::severity_color(DiagnosticSeverity::Warning), "%s", line.c_str());
+	else ImGui::TextDisabled("%s", line.c_str());
+	ImGui::PopTextWrapPos();
+	ImGui::Unindent();
+	ui_kit::tooltip_lazy([&] {
+		std::string tip = "What the game makes of " + budget.file + " for this use, every level of which it keeps in its memory:";
+		for (int level = renderer::kObjectTexDetailFull; level >= 0; --level)
+			tip += "\nObject texture detail " + std::to_string(level) +
+			       (level == renderer::kObjectTexDetailFull ? " (full)" : level == 0 ? " (the lowest)" : "") + ": " +
+			       device_texture_words(budget.detail[level]);
+		if (budget.offers_dds)
+			tip += "\nAs a " + std::string(renderer::device_texture_format_name(budget.as_dds.format)) +
+			       " .dds beside it, which its loader reads first: " + device_texture_words(budget.as_dds);
+		tip += "\nThe detail is the options' object texture detail (game.cfg object_texdetail).";
+		return tip;
+	});
 }
 
 std::unique_ptr<DocumentView> make_texture_view() {

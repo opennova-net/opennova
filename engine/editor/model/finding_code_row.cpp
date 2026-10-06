@@ -52,11 +52,14 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::AssetNameEmpty, about_the_file("asset.name.empty", G::ProjectFiles, F::None) },
 	{ C::AssetNameTooLong, about_the_file("asset.name.too_long", G::ProjectFiles, F::Rename) },
 	{ C::AssetUnreadable, code("asset.unreadable", G::ProjectFiles) },
+	// A wave the game's loader refuses plays nothing; the game goes on (the sound lane, wave_source.h).
+	{ C::AssetWaveUnplayable, listed(code("asset.wave_unplayable", G::ProjectFiles)) },
 	{ C::BlankDef, code("blank.def", G::NewFiles) },
 	{ C::BlankEnvironment, code("blank.environment", G::NewFiles) },
 	{ C::BlankFont, code("blank.font", G::NewFiles) },
 	{ C::BlankMenu, code("blank.menu", G::NewFiles) },
 	{ C::BlankMission, code("blank.mission", G::NewFiles) },
+	{ C::BlankShader, code("blank.shader", G::NewFiles) },
 	{ C::BlankStrings, code("blank.strings", G::NewFiles) },
 	{ C::BlankSound, code("blank.sound", G::NewFiles) },
 	{ C::BlankStyle, code("blank.style", G::NewFiles) },
@@ -193,12 +196,17 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::ImportNotFound, code("import.not_found", G::Imports) },
 	{ C::ImportTextureNotImported, code("import.texture_not_imported", G::Imports, F::UnimportedTexture) },
 	{ C::ImportUnreadable, code("import.unreadable", G::Imports) },
+	// An author's wave converted as it came in, or one that reads as no wave (the sound lane).
+	{ C::ImportWave, code("import.wave", G::Imports) },
 	{ C::ImportWrite, code("import.write", G::Imports) },
 	{ C::LocalSettingsJson, code("local_settings.json", G::LocalSettings) },
 	{ C::LocalSettingsSchemaVersionUnsupported, code("local_settings.schema_version.unsupported", G::LocalSettings) },
 	{ C::LocalSettingsUnreadable, code("local_settings.unreadable", G::LocalSettings) },
 	{ C::LocalSettingsWrite, code("local_settings.write", G::LocalSettings) },
 	{ C::MissionSidecarUnused, code("mission.sidecar.unused", G::Missions) },
+	// A Back or a Forward with no place that way (the navigation history, session/navigation_controller.h):
+	// the request's outcome alone, as a set_workspace refused is.
+	{ C::NavigationNone, code("navigation.none", G::Navigation) },
 	{ C::OperationBusy, code("operation.busy", G::Operations) },
 	{ C::OperationNone, code("operation.none", G::Operations) },
 	{ C::OperationNotCancellable, code("operation.not_cancellable", G::Operations) },
@@ -294,13 +302,21 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::TextureFoliageMapShape, code("texture.foliage_map_shape", G::Textures, F::ImportFitsUse) },
 	{ C::TextureHeightWrap, code("texture.height_wrap", G::Textures, F::ImportFitsUse) },
 	{ C::TextureLoadingScreenSize, code("texture.loading_screen_size", G::Textures, F::ImportFitsUse) },
+	// What a model texture costs the game past kTextureMemoryWarnBytes (documents/texture_budget): where an
+	// import makes the file, the import made as its uses ask (a model row's DXT5 .dds).
+	{ C::TextureMemory, code("texture.memory", G::Textures, F::ImportFitsUse) },
 	{ C::TextureMfdNotPowerOfTwo, code("texture.mfd_not_pow2", G::Textures, F::ImportFitsUse) },
 	{ C::TextureNormalMapHalved, code("texture.normal_map_halved", G::Textures, F::ImportFitsUse) },
+	// A normal-map slot's row of a type the stage or plain loader reads: its row given type 4 where the file
+	// is a finished normal map (.mdt).
+	{ C::TextureNormalSlotLoader, code("texture.normal_slot_loader", G::Textures, F::NormalRowType) },
 	{ C::TextureOperation, code("texture.operation", G::Textures) },
 	{ C::TextureParticleTooBig, code("texture.particle_too_big", G::Textures, F::ImportFitsUse) },
 	{ C::TextureReplace, code("texture.replace", G::Textures) },
+	{ C::TextureSetAside, code("texture.set_aside", G::Textures) },
 	{ C::TextureShowUse, code("texture.show_use", G::Textures) },
 	{ C::TextureSplit, code("texture.split", G::Textures) },
+	{ C::TextureStoreDds, code("texture.store_dds", G::Textures) },
 	{ C::TextureTileAtlasCells, code("texture.tile_atlas_cells", G::Textures, F::ImportFitsUse) },
 	{ C::TextureWrongReader, code("texture.wrong_reader", G::Textures, F::ImportFitsUse) },
 	{ C::UnsavedDiscard, code("unsaved.discard", G::UnsavedChanges) },

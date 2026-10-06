@@ -8,6 +8,7 @@
 #include <base/io/log.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
+#include <formats/mission/bms_edit.h> // mission_info (the BMS tile set)
 #include <formats/mission/mission.h>
 #include <runtime/mission/item_traits.h>
 #include <runtime/mission/seat_spec_extract.h>
@@ -272,9 +273,34 @@ void MissionKernel::wire_terrain() {
 	world.ai.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
 	world.ai.ground_clearance = w::GroundClearance{};
 	collision.terrain = terrain_store.valid() ? &terrain_store.height_field() : nullptr;
-	// The footstep surface pick reads the charmap through this local.view; the
-	// shell's apply_terrain_to_ai calls this and then re-layers its
-	// device-fed extras (placed tiles, sound profiles).
+	// The footstep surface pick reads the charmap through this view, the
+	// store's placed-tile overlay (D-SND-15) riding it, so a re-wire keeps the
+	// tiles; the shell's apply_terrain_to_ai calls this and then re-layers its
+	// sound profiles.
+	world.tables.surface_map = terrain_store.surface_map();
+}
+
+bool MissionKernel::load_terrain_field() {
+	if (asset_index() == nullptr) return false;
+	std::string terrain_error;
+	if (!terrain::terrain_field_store_load(terrain_store, *asset_index(), mission.get_terrain(),
+				mission_info(mission).tile_set, terrain_error)) {
+		io::logf(io::LogLevel::kWarn,
+				"mission kernel: terrain not loaded (%s) - the ground solve will not run",
+				terrain_error.c_str());
+		return false;
+	}
+	return true;
+}
+
+void MissionKernel::set_placed_tiles(const std::vector<uint8_t> &til_bytes) {
+	terrain::terrain_field_store_set_placed_tiles(terrain_store, til_bytes);
+	world.tables.surface_map = terrain_store.surface_map();
+}
+
+void MissionKernel::resolve_tile_surface_table() {
+	terrain::terrain_field_store_resolve_tile_surfaces(terrain_store, files_.has_file,
+			files_.read_file);
 	world.tables.surface_map = terrain_store.surface_map();
 }
 
@@ -546,14 +572,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// parsed-document entry); an embedder that holds none (the ctests) has the
 	// kernel load through its own index here (the file entry) — one builder,
 	// two entries, both through height_field_apply_trn.
-	if (options.terrain && !terrain_store.valid() && asset_index() != nullptr) {
-		std::string terrain_error;
-		if (!terrain::terrain_field_store_load(terrain_store, *asset_index(),
-					mission.get_terrain(), terrain_error))
-			io::logf(io::LogLevel::kWarn,
-					"mission kernel: terrain not loaded (%s) - the ground solve will not run",
-					terrain_error.c_str());
-	}
+	if (options.terrain && !terrain_store.valid()) (void)load_terrain_field();
 
 	// The gates: a missing file source skips every file-fed step, a missing
 	// item db the trait/collision steps, a joiner never spawns its own player

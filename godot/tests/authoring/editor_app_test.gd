@@ -5,10 +5,13 @@ extends GutTest
 ## creates a project, fills its checklist, builds it, and Play starts the game on the
 ## build (the Godot binary at this checkout, headless and self-quitting) through the
 ## real process seam, whose exit the session notices. Build and Play are requests, as the
-## windows raise them, and the session's operation (S13 A1) runs across pumps.
+## windows raise them, and the session's operation (S13 A1) runs across pumps. What another
+## program saves comes back with no Rescan, the window focused or not (DI-01).
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const ARMORY := "res://../fixtures/threedi/synth/armory.3di"
+const ROCKING := "res://../fixtures/threedi/synth/house_lod0_sine_rotx.3di"
 
 var _dirs: Array[String] = []
 var _app: Node = null
@@ -231,6 +234,61 @@ func test_play_sound_plays_and_stops() -> void:
 	assert_eq(String(_app.get_sound_state()), "idle", "no wave of that name: nothing plays")
 
 
+## A sound set's play (the sound lane): game.lwf made by create_file, a set of two layers each naming a wave
+## added in one edit_record and saved; play_sound with the set picks a member for each layer, and the Shell's
+## one preview player plays both voices at once, at the pitch the pick composed; a profile slot with no
+## SndProf.def to name it refused, saying why.
+func test_play_set_plays_its_layers() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor set %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	var root := dir.path_join("Sets")
+	assert_true(_seam.new_project(root, "Sets"))
+	assert_eq(DirAccess.make_dir_recursive_absolute(root.path_join("sounds")), OK)
+	for name in ["low.wav", "high.wav"]:
+		var file := FileAccess.open(root.path_join("sounds").path_join(name), FileAccess.WRITE)
+		file.store_buffer(_wave_bytes(3.0))
+		file.close()
+	assert_true(_run_operation({"kind": "rescan"}))
+	assert_true(bool(_request({"kind": "create_file", "path": "game.lwf"}).get("ok", false)))
+	var edits := [
+		{"op": "add", "kind": "wave", "as": "a"}, {"op": "set", "id": "a", "field": "name", "value": "LOW"},
+		{"op": "set", "id": "a", "field": "file", "value": "low.wav"},
+		{"op": "add", "kind": "wave", "as": "b"}, {"op": "set", "id": "b", "field": "name", "value": "HIGH"},
+		{"op": "set", "id": "b", "field": "file", "value": "high.wav"},
+		{"op": "add", "kind": "set", "as": "s"}, {"op": "set", "id": "s", "field": "name", "value": "TWO_LAYERS"},
+		{"op": "set", "id": "s", "field": "pitch", "value": 1.5},
+		{"op": "add", "kind": "layer", "parent": "s", "as": "l1"},
+		{"op": "add", "kind": "member", "parent": "l1", "field": "wave", "value": "LOW"},
+		{"op": "add", "kind": "layer", "parent": "s", "as": "l2"},
+		{"op": "add", "kind": "member", "parent": "l2", "field": "wave", "value": "HIGH"},
+	]
+	var edited := _request({"kind": "edit_record", "path": "game.lwf", "edits": edits, "open_first": true})
+	assert_true(bool(edited.get("outcome", {}).get("done", false)), str(edited))
+	_request({"kind": "save_all"})
+	var answer := _request({"kind": "play_sound", "values": {"set": "TWO_LAYERS"}})
+	assert_true(bool(answer.get("outcome", {}).get("done", false)), str(answer))
+	var deadline := Time.get_ticks_msec() + 5000
+	while _sound().get("state", "") != "playing" and Time.get_ticks_msec() < deadline:
+		OS.delay_msec(20)
+		_app.pump()
+	var sound := _sound()
+	assert_eq(String(sound.get("state", "")), "playing", str(sound))
+	assert_eq(String(sound.get("set", "")), "TWO_LAYERS")
+	var voices: Array = sound.get("voices", [])
+	assert_eq(voices.size(), 2, str(sound))
+	if voices.size() == 2:
+		assert_eq(String(voices[0].get("path", "")), "sounds/low.wav")
+		assert_almost_eq(float(voices[0].get("pitch", 0.0)), 1.5, 0.001)
+	assert_eq(String(_app.get_sound_state()), "playing")
+	_request({"kind": "stop_sound"})
+	_app.pump()
+	assert_eq(String(_app.get_sound_state()), "idle", "stopped")
+	var slot := _request({"kind": "play_sound", "values": {"profile": "default", "slot": "SSLFootGND"}})
+	assert_false(bool(slot.get("outcome", {}).get("done", true)), "no SndProf.def names the slot's set: refused")
+
+
 # The workspace section's sound (the MCP gaps lane).
 func _sound() -> Dictionary:
 	var state: Variant = JSON.parse_string(_app.query_json("state", JSON.stringify({"sections": ["workspace"]})))
@@ -298,7 +356,9 @@ func test_strings_edit_round_trip() -> void:
 ## An edit leaves the validation due (S13 A3: no request runs it). Through the wire the view says
 ## so at once and the Problems rows stand until the pumps have run it, then move with the edit, and
 ## a pump after that leaves them as they are; the seam settles each request before it answers, so an
-## edit through it returns validated (ADR 0046 S9e's promise, kept by the seam).
+## edit through it returns validated (ADR 0046 S9e's promise, kept by the seam). The edit clears the
+## type of a marker of its own: the blank's first row, the Null marker, is the row the engine gives
+## every id it finds no item of, and clearing its type is a catalog.first_row finding as well (S19).
 func test_edits_validate_on_the_pumps() -> void:
 	if _app == null:
 		return
@@ -307,8 +367,10 @@ func test_edits_validate_on_the_pumps() -> void:
 	assert_true(_seam.new_project(dir, "Validated"))
 	assert_eq(_seam.create_missing_files(), 0)
 	assert_true(_seam.open_document("items.def"))
-	var marker: int = _seam.get_row_id(0)
+	var marker: int = _seam.add_record("item")
 	assert_gt(marker, 0)
+	assert_true(_seam.set_field(marker, "display_name", "Validated marker"))
+	assert_eq(_seam.get_row_id(1), marker, "a marker after the Null marker")
 	var before: int = _seam.get_problem_count()
 	var active := String(_seam.state(["documents"]).get("documents", {}).get("active", ""))
 	var answer: Variant = JSON.parse_string(_app.request_json(JSON.stringify({
@@ -317,7 +379,7 @@ func test_edits_validate_on_the_pumps() -> void:
 	})))
 	assert_true(answer is Dictionary and bool(answer.get("ok", false)), str(answer))
 	assert_true(bool(_seam.query("operation").get("validation", {}).get("running", false)),
-			"the Null marker's type cleared: the validation due")
+			"the marker's type cleared: the validation due")
 	assert_eq(_seam.get_problem_count(), before, "the rows stand until the pumps run it")
 	assert_true(_seam.settle())
 	assert_eq(_seam.get_problem_count(), before + 1, _seam.get_problems_json())
@@ -706,3 +768,100 @@ func test_catalog_edits_reach_the_play_child() -> void:
 	_seam.close_project()
 	_seam.resolve_unsaved(1) # Discard
 	assert_false(_seam.is_project_open())
+
+
+## A catalog of `count` items, as a program other than the editor writes it.
+func _items_text(count: int) -> String:
+	var text := ""
+	for i in count:
+		text += "begin \"Crate %d\"\nid %d\ntype building\nhp %d\nend\n" % [i, 100100 + i, 10 + i]
+	return text
+
+
+## How many rows the open document at `path` lists.
+func _rows(path: String) -> int:
+	return int(_seam.query("document", {"path": path, "limit": 1}).get("count", 0))
+
+
+## The model viewport over `path`, read as the wire reads it.
+func _model_viewport(path: String) -> Dictionary:
+	return _seam.query("viewport", {"op": "state", "path": path, "kind": "model", "limit": 1})
+
+
+## The model viewport over `path` ready on its device with more than `builds` builds: a frame at a time.
+func _model_ready(path: String, builds: int) -> Dictionary:
+	var state := _model_viewport(path)
+	for _frame in 600:
+		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
+				and int(state.get("builds", 0)) > builds:
+			break
+		await get_tree().process_frame
+		state = _model_viewport(path)
+	return state
+
+
+## ADR 0046 DI-01: what another program saves comes back with no Rescan whether or not the window has
+## the focus (an editor an MCP client launched never has it, and this one never gets a focus-in): the
+## Shell's once-a-second check reads an open catalog written from outside into its rows, the record
+## selected in it selected again by its place, and an open model written from outside into its picture
+## (its device builds again), each named in Output, within a few seconds. A file no document shows is
+## left to the window gaining the focus, whose sweep over every file reads it again.
+func test_outside_saves_come_back_unfocused() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova outside saves %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	assert_true(_seam.new_project(dir, "Outside saves"))
+	assert_eq(_seam.create_missing_files(), 0)
+	var root: String = _seam.get_project_root()
+	TestFs.write_text(self, root.path_join("defs/items.def"), _items_text(2))
+	assert_eq(DirAccess.make_dir_recursive_absolute(root.path_join("models")), OK)
+	TestFs.copy(self, ARMORY, root.path_join("models/armory.3di"))
+	_seam.request({"kind": "rescan"})
+	assert_true(_seam.settle())
+	assert_true(_seam.open_document("defs/items.def"))
+	assert_eq(_rows("defs/items.def"), 2)
+	assert_true(_seam.select_record(_seam.get_row_id(1)))
+	assert_true(_seam.open_document("models/armory.3di"))
+	var picture := await _model_ready("models/armory.3di", 0)
+	var builds := int(picture.get("builds", 0))
+	assert_gt(builds, 0, str(picture))
+
+	# Another program saves both files; nothing asks for a Rescan and the window never has the focus.
+	var saved_at := Time.get_ticks_msec()
+	TestFs.write_text(self, root.path_join("defs/items.def"), _items_text(3))
+	TestFs.copy(self, ROCKING, root.path_join("models/armory.3di"))
+	while Time.get_ticks_msec() - saved_at < 10000 and (_rows("defs/items.def") != 3 \
+			or int(_model_viewport("models/armory.3di").get("builds", 0)) == builds):
+		await get_tree().create_timer(0.05).timeout
+	var took := Time.get_ticks_msec() - saved_at
+	assert_eq(_rows("defs/items.def"), 3, "the catalog's rows read again")
+	picture = await _model_ready("models/armory.3di", builds)
+	assert_gt(int(picture.get("builds", 0)), builds, "the model's picture made again: %s" % str(picture))
+	# A check comes once a second and a file waits a quarter second to hold still: about 1.25 s at most,
+	# with room for a loaded machine.
+	assert_lt(took, 4000, "back within a check and a hold (%d ms)" % took)
+	var lines := "\n".join(_seam.get_output_lines())
+	assert_string_contains(lines, "Reloaded defs/items.def: it changed outside the editor.")
+	assert_string_contains(lines, "Reloaded models/armory.3di: it changed outside the editor.")
+	assert_true(_seam.open_document("defs/items.def"))
+	assert_eq(_seam.get_selected_records(), PackedInt64Array([_seam.get_row_id(1)]),
+			"the record selected in it selected again by its place")
+
+	# A file no document shows: the checks pass it by; the window gaining the focus sweeps it in.
+	var weapons := root.path_join("defs/weapon.def")
+	var bytes := FileAccess.get_file_as_bytes(weapons)
+	bytes.append_array("\r\n".to_utf8_buffer())
+	TestFs.write_bytes(self, weapons, bytes)
+	await get_tree().create_timer(1.5).timeout
+	assert_false("\n".join(_seam.get_output_lines()).contains("Read defs/weapon.def again"),
+			"a file no document shows waits for the focus")
+	_app.notification(NOTIFICATION_APPLICATION_FOCUS_IN)
+	var swept_at := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - swept_at < 10000 \
+			and not "\n".join(_seam.get_output_lines()).contains("Read defs/weapon.def again"):
+		await get_tree().create_timer(0.05).timeout
+	assert_string_contains("\n".join(_seam.get_output_lines()),
+			"Read defs/weapon.def again: it changed outside the editor.")
+	assert_true(_seam.settle())
+	_seam.close_project()

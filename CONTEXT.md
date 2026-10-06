@@ -430,7 +430,8 @@ _Avoid_: plugin, DCC pipeline (the Python/DCC authoring layer ADR 0038 retired)
 One of the two applications exported from the `godot/` project: the OpenNova game
 runtime (`opennova.exe`, ADR 0045 and ADR 0048; its Play export adds the runtime MCP
 for the editor) and the OpenNova Editor (`opennova-editor.exe`, ADR 0046). Backend
-services and development tools are outside this taxonomy (ADR 0015).
+services and development tools are outside this taxonomy (ADR 0015); so is
+`opennova-serve` (ADR 0051).
 _Avoid_: product (when the Godot boundary matters), app (ambiguous), the runtime
 (as a product name)
 
@@ -454,10 +455,25 @@ filesystem before boot (ADR 0049).
 _Avoid_: fixtures (test-only data), retail data
 
 **Serve mode**:
-`opennova.exe` hosting a match without being a player: the host screen's retail Serve Only
-server type (`SERVERTYPE` = 1); retail has no command-line auto-host to port. A mode of the game product, never a separate binary,
-riding the one in-match seam (ADR 0015).
-_Avoid_: dedicated server product, server exe, opennova-server
+Hosting a match without being a player: retail's Serve Only server type (`SERVERTYPE`
+= 1, saved as `game.cfg` `dedicated`), a host with no player of its own
+(`RoleKind::DedicatedHost`, HostOnly). The game runs it from the host screen;
+`opennova-serve` runs it with no shell (ADR 0051). One implementation below
+the config, riding the one in-match seam (ADR 0043).
+_Avoid_: dedicated server product, server exe, opennova-server (the binary is
+`opennova-serve`)
+
+**`opennova-serve`**:
+The headless game server (`apps/serve`, ADR 0051): the game's Serve Only host with no
+Godot, configured by a host file. A product, not a Godot product.
+_Avoid_: dedicated server (for the binary), server exe, opennova-server
+
+**Host file**:
+Retail's dedicated-server config, the file `/HOST <file>` names: `<Key> <value>` lines of
+`ServerConfig_ApplyHostSetting`'s keys (a text form of the host screen) and
+`Mission <file> <launch option>` lines that seed the map rotation. Retail never reaches
+its reader; `opennova-serve` reads it (`engine/runtime/inmatch/host_file.h`).
+_Avoid_: server config, server.cfg, dedicated.cfg
 
 **Title**:
 A NovaLogic game identity (JO, DFX2, BHD...) — near-identical engine skins over different
@@ -551,6 +567,15 @@ import makes `<name>.fnt` through the FNT writer, every glyph the cell's height 
 advance (the format has no advance table). An import of the set from the disk brings its sheet beside
 it into `fonts/`.
 _Avoid_: font project, atlas (the `.fnt`'s pages are the packer's layout, not the sheet's)
+
+**Project layout / placement / move**:
+Where a project keeps its files: **flat** (most at the top level, as the base game does) or **by
+kind** (each in its kind's folder, `AssetKindRow::folder`). A file the editor makes (Create
+missing, New file, an import) is **placed** beside the project's files of its kind, else as the
+layout says (`assets/project_layout.h`, DI-03), so a flat project stays flat. A **move** puts a
+file in another folder under its own name and rewrites no reference, since the game finds it by
+its logical name.
+_Avoid_: default folder (a kind's folder holds new files only in a project laid out by kind)
 
 **Import / sidecar**:
 Bringing a non-native source (an image, a terrain set; later a sound bank's manifest, a font)
@@ -830,7 +855,7 @@ generic form beside it)
 
 **Viewport**:
 One document's picture as the game would draw it, of one kind (a menu's screen, a model, a text in
-its script device, a mission's 3D view, a texture), kept by the session while the document is
+its script device, a mission's 3D view, a texture, a particle file's effect, a HUD layout's HUD), kept by the session while the document is
 open: one per document and kind (a texture's also while Files selects the file, open or not). Its role is Preview (shown by the Preview window while its document
 is the last of its kind made active) or Main (the Document tab's view: a text's script device, or a
 picture with the outline and the Inspector beside it: a mission's, for which the Preview window steps
@@ -891,7 +916,8 @@ its picked item and its picked path are its options, set by its toolbar and by t
 _Avoid_: item list, catalog (the items.def file), library, browser (NovaWorld's)
 
 **Script device**:
-A text document's Main view (a script, a music script, a credits file, a shader, a configuration):
+A text document's Main view (a script, a music script, a credits file, a shader, a configuration, a
+particle file):
 a Godot code editor placed over its Document tab, which owns the pointer and the keys there and
 shows the document's text as it stands (the text is the document's: an undo, a reload or another
 client's edit comes back into the control). What is typed goes to the document as spans replaced,
@@ -906,6 +932,18 @@ text while an operation holds the documents. Where no window draws it (headless)
 drawn over the tab (a menu, a dialog), the document's lines show instead, read only.
 _Avoid_: script editor (the whole editor), code view, text view (the lines shown read only where no
 device draws), CodeEdit (the Godot control behind it)
+
+**Environment document**:
+A mission's environment (a .env: its sky, light, fog and water) open in the editor (the deep-integration
+plan's DI-19a), read and written through the engine's own reader and writer: one record, the
+environment, whose fields are the keywords the game reads in the units the file writes them (a time as
+HHMM, a fog distance in whole metres, a water height in half metres, a colour as its three bytes), and
+its time-of-day keyframes, at most 16, each its time and its twelve colours. The cloud layers name
+textures and the sun, moon, glare and star models, each a Go to; the Inspector heads it with the missions
+that run on it, each with the terrain it pairs it with, what its header sets over it (fog, water) and
+where its water plane comes from. A line the game reads otherwise than written is a finding of its line;
+Save writes the file in the editor's layout, the game reading the same environment.
+_Avoid_: env file (the file alone), weather (the runtime's state), sky (one part of it)
 
 **Texture document**:
 A texture file of the project (a .tga, .mdt, .pcx, .dds or .png) open in the editor, read as the
@@ -958,20 +996,46 @@ Files selects, read from its file while it is not open): its texels at a zoom (f
 a middle texel, which the wheel steps about the pointer and a drag pans), through its colour, one
 channel or its alpha as grey, or its colour over a checkerboard by its alpha, at a mip level, as the
 file holds it or as the game draws it for one of its uses (the use's loader's texels, a cut-out's test,
-a tile atlas's cells); each a SetViewport. A point of it names the texel under it (its column and row in the level shown, its value,
+a tile atlas's cells, a model row's alpha drawn as the game reads it: opaque where it is a specular brightness),
+at the chain the game builds of it and at an object texture detail, or a normal map lit, or beside the DXT
+texture its `.dds` would hold (a **compare**: split, the DXT texture alone or their difference, with each
+level's error; a `.dds` an import makes beside its source); each a SetViewport. A point of it names the texel
+under it (its column and row in the level shown, its value,
 its palette entry), never a record. Its device draws the texels the portable decode made, texel for
 texel where a texel covers a pixel or more.
 _Avoid_: image viewer, preview (the Preview window, or the role)
+
+**Texture budget**:
+What a model texture costs the game (ADR 0046 S18): the device texture its row's loader makes of the file it
+opens (its sides after the game's halvings, its levels, its format, and every level's bytes, which the game keeps
+in its own memory) at each of the four **object texture detail** levels (game.cfg's `object_texdetail`, 0 the
+lowest to 3 full: one or two halvings of a diffuse or detail texture), and what the `.dds` its loader reads first
+would cost instead. Said under each use in the texture's tab and on the wire; past 16 MB it is a warning. The
+project's budget is every texture the game makes for the model rows (one a name written), costliest first, with
+its totals: the `texture_budget` query, Files' By cost.
+_Avoid_: footprint, VRAM (the game keeps every level in its own process too), file size (what the disk holds)
+
+**HUD viewport**:
+A HUD layout's picture (hudpos.def's Preview, beside its text): the game's own HUD drawn over the layout
+as Save would write it now (the runtime's HudOverlay through the engine's layout fill and frame
+compiler, and the game's view effects over it), at a screen size, for a player whose state its options
+choose (the stance, a weapon of weapon.def with its clip and reserve, the health, the binoculars' or the
+goggles' view, a hit's damage vignette, the HUD detail level, the crosshair style); each a SetViewport.
+A point of it names the HUD element under it (the HUD's walk records what each of its elements drew),
+the hudpos.def lines that place it and the textures it draws, never a record; a click picks the
+element, whose lines and textures are each a Go to.
+_Avoid_: HUD editor (nothing it does edits the layout), preview (the Preview window, or the role)
 
 **Preview clock**:
 The one clock every viewport reads: a model's part animations, flipbooks and colour generators by
 its milliseconds, a clip by its game ticks, and a menu's frame clock by its milliseconds, which a
 focused edit box's caret reads (it blinks as the clock plays, the frame drawn again as the caret's
-half of the blink changes and never configured again); a particle effect and an environment's time
-of day are to read it once they have viewports. It runs while it plays, at its rate, as the Shell's
+half of the blink changes and never configured again), and a particle effect by its game ticks (the
+effect preview's: its spawn stepped a tick at a time); an environment's time of day is to read it once
+it has a viewport. It runs while it plays, at its rate, as the Shell's
 frames pass; a SetViewport plays, pauses, sets its rate or seeks it, and a viewport seeks it as it
 follows (a clip newly chosen starts at tick 0, a clip event selected holds the clock on the tick the
-clip first samples it).
+clip first samples it; an effect newly shown starts at tick 0).
 _Avoid_: clip clock (the model preview's own, which it replaced), game clock (a running match's),
 tick (the game's 62 Hz step, which it counts)
 
@@ -986,6 +1050,19 @@ over an ask a newer one or the selection has overtaken since. The editor MCP pag
 place.
 _Avoid_: serial (the per-ask counters the events replaced), reveal state (the view keeps none),
 notification (the OS's), signal (Godot's)
+
+**Navigation history / place**:
+Where the person has been in the editor, which Back and Forward take them to again, as a browser's
+pages (`session/navigation_history.h`, the session's `NavigationController`). A place is the pane that
+shows it and the file: a document's tab with the record selected there (by its locator once the
+document is read again), a text's line a Go to showed, a file's page (with the record a Go to marked
+there: a Go to always lands, on its page where the editor has no editor for the file), or Files on a
+file. A step is a
+move the request table marks as one (`navigates`: a document switched to, a Go to, a Problems row, a
+find's hit, another of a menu's screens, Show in Files), whoever raised it; a record picked within what
+shows, an edit or a camera move is none, and a run of quick steps is one. The open project's alone.
+_Avoid_: undo (a document's own history of edits), breadcrumb (the outline's path to a record),
+selection history (a selection within what shows is no step)
 
 **Record / owner**:
 A row of a document or anything nested in one, at any depth; the record that holds a
@@ -1057,6 +1134,21 @@ the game puts them on the posed model; a click selects a marker's record and a d
 the selected one moves it or turns its axis (every selected marker moving as far). Headless, it
 answers as its viewport's envelope.
 _Avoid_: viewer (it edits), avatar preview (the game's player-info portrait)
+
+**Effect preview**:
+A particle file's viewport in the Preview window (ADR 0046 DI-14): the effect it defines that its
+options name played by the engine's own effect scene as the game spawns one alone (at the spawn point
+with no orientation, every EMITVECTOR member emitting around +Y), over the catalog the game would load
+were the project saved now (every particle file in the effect system's order, the open documents
+standing in), so it shows what the game spawns for the name: the first definition registered (another
+file's where that one comes first, said, with a Go to it), its members all or nothing, its tables. It
+plays on the preview clock's ticks, spawned again as it dies while it loops (the editor's aid) and
+pre-aged on a seek; an edit of any particle file shows at once, the effect at the age it had; a Go to of
+an effect's name opens the file at its id and the preview shows it. Its device draws through the game's
+particle renderer, single-sampled as the game's view is. Headless, it answers as its envelope: what
+the name resolves to and the playing cycle.
+_Avoid_: particle editor (ParticleEdit's: nothing here edits but the text), effect viewer, emitter
+preview (one effect spawns several emitters)
 
 **Rig**:
 What an animation plays on: an animation table (its reset clip the bind) or a lone clip
@@ -1263,16 +1355,18 @@ _Avoid_: run (ONED's vocabulary), preview (an in-editor render, not a running ga
 "see in game"
 
 **Run directory**:
-Where Play runs the game: `.opennova/run/<n>/` (n from 1), the game's working directory, the
-log Play tails (`session.log`; the game install's own, `_filelog.txt`, read once its game has
-exited, never while it runs) and the saves the game keeps beside itself (`weapon.sav`), so the
-build it runs from stays as the build wrote it. Play in the game install puts there what the
-install's game needs beside it: the build's files (linked; one the game may write, a `.cfg`,
-`.sav`, `.coo` or `.txt`, copied), the install's executable and Bink DLL, a `game.cfg` (the
-project's own, else the install's) and the install's `player.sav` and `weapon.sav` where the
-project has none; Strict Play, the build's files and the executable and Bink DLL alone. It
-records its game (pid and creation time) while the game may run; each Play takes the first free
-one, emptied, passing one whose game may still run.
+Where Play runs the game: `.opennova/run/<mode>/<n>/` (the Play's mode, `runtime`, `install` or
+`strict`; n from 1), the game's working directory, the log Play tails (`session.log`; the game
+install's own, `_filelog.txt`, read once its game has exited, never while it runs) and the saves
+the game keeps beside itself (`weapon.sav`), so the build it runs from stays as the build wrote
+it. Play in the game install puts there what the install's game needs beside it: the build's
+files (linked; one the game may write, a `.cfg`, `.sav`, `.coo` or `.txt`, copied), the
+install's executable and Bink DLL, a `game.cfg` (the project's own, else the install's) and the
+install's `player.sav` and `weapon.sav` where the project has none; Strict Play, the build's
+files and the executable and Bink DLL alone. It records its game (pid and creation time) while
+the game may run; each Play takes the first free one of its mode, passing one whose game may
+still run, and keeps what the game wrote there in that mode's runs before (its `game.cfg`, its
+saves; Play fresh empties it). A Play never touches another mode's run directories.
 _Avoid_: build directory (what the build publishes, never written after), working copy, stage
 
 **Strict Play**:

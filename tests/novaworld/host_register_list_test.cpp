@@ -152,8 +152,15 @@ int main() {
 		TEST_EXPECT(parsed.servers[0].player_names.size() == 2);
 	}
 
-	// A ClientHostUpdate with a rotated PCIDKey and a changed roster replaces both.
+	// A player leaves the retail way: ClientHostPlayerRemoved at the disconnect,
+	// then a ClientHostUpdate carrying only the changed vars (a rotated PCIDKey,
+	// the Players count, bob's slot). The left slot is gone and the rest kept.
 	{
+		NapiMessage removed;
+		removed.name = "ClientHostPlayerRemoved";
+		removed.fields.push_back({"PlayerNumber", std::vector<uint8_t>{'0'}});
+		auto rr = sess.dispatch(removed, a, "10.0.0.7", 40000);
+		TEST_EXPECT(rr.label == "ClientHostPlayerRemoved");
 		NapiMessage upd;
 		upd.name = "ClientHostUpdate";
 		upd.children.push_back(make_client_var_list("Host", {
@@ -163,7 +170,7 @@ int main() {
 			{"TimeLeft", "30"},
 		}));
 		std::vector<test_novaworld::IndexedVar> one;
-		for (const auto &v : player_slot_vars(1, "bob", "10.0.0.8:40000", "00000003", "2", "0")) one.push_back(v);
+		for (const auto &v : player_slot_vars(1, "bob", "10.0.0.8:40000", "00000003", "1", "0")) one.push_back(v);
 		upd.children.push_back(make_indexed_var_list("PlayerList", one));
 		auto ru = sess.dispatch(upd, a, "10.0.0.7", 40000);
 		TEST_EXPECT(ru.label == "ClientHostUpdate");
@@ -173,7 +180,8 @@ int main() {
 		TEST_EXPECT(row->player_count == 1);
 		TEST_EXPECT(row->time_left == "30");
 		auto r2 = opennova::hostdb::list_roster(db, a.rid);
-		TEST_EXPECT(r2.size() == 1 && r2[0].player_name == "bob");
+		TEST_EXPECT(r2.size() == 1 && r2[0].player_name == "bob" && r2[0].team == "1");
+		TEST_EXPECT(a.last_host_update["PlayerList"].size() == 5); // bob's five vars only
 	}
 
 	// The POST status blob refreshes the row owning its HostKey.

@@ -59,6 +59,35 @@ bool admin_challenge_valid(const std::vector<uint8_t> &payload) {
 	return payload.size() == ADMIN_CHALLENGE_BYTES && payload[0] == 0x01 && payload.back() == 0;
 }
 
+namespace {
+
+// The cipher's three LCG words, keyed by the challenge string.
+struct CipherWords {
+	uint32_t s1 = 0;
+	uint32_t s2 = 0;
+	uint32_t s3 = 0;
+};
+
+// The seed: Σ(int8(k)² + i) + len + 0x32, then three steps of the 16-bit LCG (the NWU
+// multiplier). [orig: Crypto_ComputeSeedFromBuffer @0x437250 (movsx @0x437280,
+//  lea eax,[esi+edx+32h] @0x437295); Crypto_EncryptBuffer @0x43753e..0x43755d]
+CipherWords cipher_words(const uint8_t *key, size_t key_len) {
+	uint32_t seed = 0;
+	for (size_t i = 0; i < key_len; ++i) {
+		const int32_t v = static_cast<int8_t>(key[i]);
+		seed += static_cast<uint32_t>(v * v) + static_cast<uint32_t>(i);
+	}
+	seed += static_cast<uint32_t>(key_len) + 0x32u;
+	const uint32_t m = NWU_LCG_MAGIC;
+	CipherWords w;
+	w.s1 = (seed * m + 1) & 0xFFFFu;
+	w.s2 = (m * w.s1 + 1) & 0xFFFFu;
+	w.s3 = (m * w.s2 + 1) & 0xFFFFu;
+	return w;
+}
+
+} // namespace
+
 // The challenge string keys the cipher; the server decrypts the whole payload with the inverse
 // (Crypto_DecryptBuffer @0x4375b0), so the zero byte after the fields is encrypted too.
 // [orig: Crypto_EncryptBuffer @0x437510; RAT.exe @0x4012d2..0x401361 (65 bytes, zero-filled)]
@@ -72,41 +101,45 @@ std::array<uint8_t, ADMIN_LOGIN_BYTES> admin_encode_login(const std::vector<uint
 			std::find(challenge.begin(), challenge.end(), uint8_t{0}) - challenge.begin());
 	if (key_len == 0) return buf;
 	const uint8_t *key = challenge.data();
-
-	// The seed: Σ(int8(k)² + i) + len + 0x32. [orig: Crypto_ComputeSeedFromBuffer @0x437250
-	//  (movsx @0x437280, lea eax,[esi+edx+32h] @0x437295)]
-	uint32_t seed = 0;
-	for (size_t i = 0; i < key_len; ++i) {
-		const int32_t v = static_cast<int8_t>(key[i]);
-		seed += static_cast<uint32_t>(v * v) + static_cast<uint32_t>(i);
-	}
-	seed += static_cast<uint32_t>(key_len) + 0x32u;
-
-	// Three steps of the 16-bit LCG (the NWU multiplier). [orig: Crypto_EncryptBuffer
-	//  @0x43753e..0x43755d]
+	const CipherWords w = cipher_words(key, key_len);
 	const uint32_t m = NWU_LCG_MAGIC;
-	const uint32_t s1 = (seed * m + 1) & 0xFFFFu;
-	const uint32_t s2 = (m * s1 + 1) & 0xFFFFu;
-	const uint32_t s3 = (m * s2 + 1) & 0xFFFFu;
 
 	// The key added cyclically. [orig: Crypto_AddKeyString @0x437170]
 	for (size_t i = 0; i < buf.size(); ++i) buf[i] = static_cast<uint8_t>(buf[i] + key[i % key_len]);
 	// Reversed when s3 is odd. [orig: Buffer_ReverseInPlace2 @0x437330]
-	if ((s3 & 1u) != 0) std::reverse(buf.begin(), buf.end());
+	if ((w.s3 & 1u) != 0) std::reverse(buf.begin(), buf.end());
 	// buf[i] += i + add, add stepping by (u8)s2 from (u8)s1. [orig: Crypto_AddProgressiveKey @0x4371c0]
-	uint8_t add = static_cast<uint8_t>(s1);
-	const uint8_t step = static_cast<uint8_t>(s2);
+	uint8_t add = static_cast<uint8_t>(w.s1);
+	const uint8_t step = static_cast<uint8_t>(w.s2);
 	for (size_t i = 0; i < buf.size(); ++i) {
 		buf[i] = static_cast<uint8_t>(buf[i] + i + add);
 		add = static_cast<uint8_t>(add + step);
 	}
 	// The LCG stream from s3. [orig: Crypto_PRNGEncrypt @0x437200]
-	uint32_t state = s3;
+	uint32_t state = w.s3;
 	for (uint8_t &b : buf) {
 		state = (m * state + 1) & 0xFFFFu;
 		b = static_cast<uint8_t>(b + (state & 0xFFu));
 	}
 	return buf;
+}
+
+void admin_decrypt_buffer(uint8_t *buf, size_t size, const uint8_t *key, size_t key_len) {
+	if (buf == nullptr || size < 1 || key_len == 0) return; // [orig: @0x4375b4 `length >= 1`]
+	const CipherWords w = cipher_words(key, key_len);
+	const uint32_t m = NWU_LCG_MAGIC;
+	uint32_t state = w.s3;
+	for (size_t i = 0; i < size; ++i) {
+		state = (m * state + 1) & 0xFFFFu;
+		buf[i] = static_cast<uint8_t>(buf[i] - (state & 0xFFu));
+	}
+	uint8_t add = static_cast<uint8_t>(w.s1);
+	for (size_t i = 0; i < size; ++i) {
+		buf[i] = static_cast<uint8_t>(buf[i] - i - add);
+		add = static_cast<uint8_t>(add + static_cast<uint8_t>(w.s2));
+	}
+	if ((w.s3 & 1u) != 0) std::reverse(buf, buf + size);
+	for (size_t i = 0; i < size; ++i) buf[i] = static_cast<uint8_t>(buf[i] - key[i % key_len]);
 }
 
 // [orig: RAT.exe @0x401492..0x4014f3 (strlen + 1 bytes after the header);

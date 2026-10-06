@@ -692,6 +692,22 @@ public:
 	}
 
 	Phase phase() const { return phase_; }
+	// The in-place reload into the host's next mission (net-re §5.70.7): the
+	// connection, its keys and its sequencing stay, the per-mission admission
+	// state starts over, and the reload's first legs go out as one packet:
+	// C2S 0x48 (the connection id), 0x47, and 0x33 [the last S2C 0x60
+	// transfer id, 0], which the host answers from offset 0 under its bumped
+	// token. The rest is the admission's own: the 0x60 transfer, 0x47 and
+	// 0x37 [the last 0x64 id, 0], the 0x64 block naming the next map, 0x09,
+	// the 0x11, the 0x0A, the 0x1A, the two 0x2F and the 0x0B, the 0x0F. No
+	// leg has a deadline. Empty when the connection is not in a session.
+	// [orig: Game_StartMission's non-authority legs -- 0x48 @0x524400..0x524470,
+	//  0x47 @0x524538..0x52456A, SaveFile_SendAndWaitForServerAck @0x5204B0
+	//  (the call @0x524801)]
+	std::vector<uint8_t> begin_mission_reload();
+	// The reload ran and its admission has not completed (the link-loss
+	// return of a reload wait stores mission exit 1, ClientRuntime).
+	bool reloading() const { return reloading_; }
 	// Admission-stage name for diagnostics (the shell's post-load join watchdog names the
 	// stage a stalled join is parked in). Not a wire surface.
 	const char *post_auth_stage_name() const;
@@ -964,6 +980,9 @@ private:
 	uint32_t session_max_players_ = 0; // S2C 0x64 fixed session block, offset 36
 	uint32_t mission_metadata_transfer_id_ = 0;
 	uint32_t mission_metadata_total_size_ = 0;
+	// The whole S2C 0x64 block, for the names its final chunk copies out.
+	std::vector<uint8_t> mission_metadata_bytes_;
+	bool reloading_ = false;
 	uint32_t server_info_transfer_id_ = 0;
 	std::vector<uint8_t> server_info_bytes_;
 	SessionVars session_vars_;

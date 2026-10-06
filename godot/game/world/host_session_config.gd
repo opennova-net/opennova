@@ -33,10 +33,6 @@ const DEFAULT_LAN_PORT := NetProtocol.DEFAULT_LAN_PORT
 ## (engine home: kNovaWorldGatePort in engine/net/npwire net_ports.h, beside
 ## GATE_DEFAULT_PORT in engine/net/novaworld/gate_probe.h).
 const DEFAULT_GATE_PORT := NetProtocol.DEFAULT_GATE_PORT
-## Default lobby player cap when no host UI supplied one (the NovaWorld panel has no
-## cap control). The mp.mnu host screen always sets its own read-back value; the
-## host-side clamp to the witnessed 1..65 applies either way.
-const DEFAULT_MAX_PLAYERS := 32
 ## Width of the retail host dialog's SPECTATOR_PW edit buffer (17 chars, read by
 ## HostDialog_ReadSettings @ 0x555940 into the buffer at 0x555ecc). Both password
 ## entry surfaces clamp to it so a typed password never exceeds what a retail
@@ -51,45 +47,26 @@ const CHANNEL_NOVAWORLD := "NovaWorld"
 # The native base owns session fields and host-dialog readback policy.
 # Rotation selection and the menu's mission filter belong to this shell.
 var mission := ""       ## the .bms to load (host screens put the rotation's first pick here)
-var missions: Array[String] = []
+var missions: Array[String] = []  ## the rotation: SELECTED_MISSIONS' files in table order
+var mission_launch_options: Array[int] = []  ## each row's Switch cell (its launch option)
 var game_type_attr := ""  ## the GAME_TYPE spin's raw value attr (HG_COOP=2, ...), for later
 
 
 func _init() -> void:
+	# Every session default not set here (the rule values, the lobby cap, the
+	# server type, g_GameType, the spectator and LAN-mode words, the custom
+	# text) is the native base's: the engine's host-screen baseline
+	# (inmatch::host_screen_default_config / HostScreenState), the one set the
+	# opennova-serve host file starts from too.
 	dir = ""           ## resource-dir override (dev/tests); empty = the CLI directory
-	server_name = "COOPGAME"
+	## The session name: the Menu/UNTITLED gametext the retail config defaults
+	## copy in (its "!Untitled" default when the table lacks it).
+	server_name = Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_MENU,
+			"UNTITLED", "!Untitled")
 	player_name = "Player"  ## the host's own callsign (rides ClientAuth like any player's)
 	expansion = ""     ## g_ExpansionName: what the process actually mounted; "" for base JO
-	integrity_profile = ""  ## explicit registered retail corpus; empty = no host-side CRC validation
-	max_players = DEFAULT_MAX_PLAYERS  ## session-list-advertised player cap
-	spectator_slots = 0
-	spectator_password = ""
-	game_type = GAME_TYPE_COOP  ## the numeric session g_GameType [orig: @ 0x24D2128]
-	class_allow_mask = WeaponDatabase.CLASS_ALLOW_ALL
-	game_type_auto = false  ## derive g_GameType from the loaded mission's attrib mode
 	channel = CHANNEL_LAN
-	lan_mode = 1
 	bind_port = DEFAULT_LAN_PORT
-	custom_text = NetProtocol.custom_text_default()
-	region_index = 0   ## the hosted Host row Region selector: 0/1/2 -> STRNOVA07/08/09
-	respawn_time = NetProtocol.DEFAULT_RESPAWN_TIME
-	time_limit_minutes = NetProtocol.DEFAULT_TIME_LIMIT_MINUTES
-	replay_enabled = NetProtocol.DEFAULT_REPLAY_ENABLED
-	max_team_lives = NetProtocol.DEFAULT_MAX_TEAM_LIVES
-	score_limit = NetProtocol.DEFAULT_SCORE_LIMIT
-	max_score = NetProtocol.DEFAULT_MAX_SCORE
-	koth_delta = NetProtocol.DEFAULT_KOTH_DELTA
-	flag_return_ticks = NetProtocol.DEFAULT_FLAG_RETURN_TICKS
-	capture_duration_seconds = NetProtocol.DEFAULT_CAPTURE_DURATION_SECONDS
-	capture_speed_setting = NetProtocol.DEFAULT_CAPTURE_SPEED_SETTING
-	spawn_wave_time_base = NetProtocol.DEFAULT_SPAWN_WAVE_TIME_BASE
-	spawn_wave_time_zone = NetProtocol.DEFAULT_SPAWN_WAVE_TIME_ZONE
-	default_spawn_requires_no_team_zone = NetProtocol.DEFAULT_SPAWN_REQUIRES_NO_TEAM_ZONE
-	num_teams = NetProtocol.DEFAULT_NUM_TEAMS
-	respawn_timeout = NetProtocol.DEFAULT_RESPAWN_TIMEOUT
-	start_delay = NetProtocol.DEFAULT_START_DELAY
-	destroy_buildings = NetProtocol.DEFAULT_DESTROY_BUILDINGS
-	death_messages = NetProtocol.DEFAULT_DEATH_MESSAGES
 
 
 ## The session slice for Simulation.configure_host_session as the typed record
@@ -101,4 +78,6 @@ func to_session_options() -> HostSessionOptions:
 	var options := duplicate_options()
 	options.mission_file = mission if not mission.is_empty() \
 			else (missions[0] if not missions.is_empty() else "")
+	options.rotation_missions = PackedStringArray(missions)
+	options.rotation_launch_options = PackedInt32Array(mission_launch_options)
 	return options

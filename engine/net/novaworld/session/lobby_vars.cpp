@@ -26,6 +26,28 @@ void set_or_create(std::vector<ClientVar> &list, const char *name, std::string v
 
 } // namespace
 
+HostLobbyText make_host_lobby_text(
+		const std::function<bool(const char *section, const char *key, std::string &out)> &lookup) {
+	HostLobbyText text;
+	if (!lookup) return text;
+	auto token = [&lookup](const char *section, const char *key, std::string &out) {
+		std::string value;
+		if (lookup(section, key, value)) out = value;
+	};
+	token("NovaWorld", "STRNOVA11", text.yes);
+	token("NovaWorld", "STRNOVA12", text.no);
+	token("NovaWorld", "STRNOVA10", text.no_time_limit);
+	token("NovaWorld", "STRNOVA07", text.region[0]);
+	token("NovaWorld", "STRNOVA08", text.region[1]);
+	token("NovaWorld", "STRNOVA09", text.region[2]);
+	token("TimeOfDay", "UNKNOWN", text.time_of_day[0]);
+	token("TimeOfDay", "DAWN", text.time_of_day[1]);
+	token("TimeOfDay", "DAY", text.time_of_day[2]);
+	token("TimeOfDay", "DUSK", text.time_of_day[3]);
+	token("TimeOfDay", "NIGHT", text.time_of_day[4]);
+	return text;
+}
+
 std::vector<ClientVar> make_host_setup_var_list(const HostRegistration &cfg) {
 	std::vector<ClientVar> setup;
 	set_or_create(setup, "LobbyName", cfg.lobby_name);
@@ -71,7 +93,9 @@ std::vector<ClientVar> make_host_var_list(const HostRegistration &cfg, const Hos
 		region = text.region[static_cast<size_t>(cfg.region_index)];
 	set_or_create(host, "Region", region);
 	set_or_create(host, "Players", std::to_string(cfg.player_count));
-	set_or_create(host, "MaxPlayers", std::to_string(cfg.max_players));
+	// The published cap, less the dedicated slot for a non-peer @0x4feb03..0x4feb0a.
+	const int cap = cfg.published_cap > 0 ? cfg.published_cap - (cfg.listen_host ? 0 : 1) : cfg.max_players;
+	set_or_create(host, "MaxPlayers", std::to_string(cap));
 	set_or_create(host, "MI1", std::to_string(cfg.mi1));
 	set_or_create(host, "MI2", std::to_string(cfg.mi2));
 	set_or_create(host, "MI3", std::to_string(cfg.mi3));
@@ -124,7 +148,8 @@ std::vector<ClientVar> make_host_var_list(const HostRegistration &cfg, const Hos
 	set_or_create(host, "GCC", cfg.gcc);
 	set_or_create(host, "GV", cfg.version);
 	set_or_create(host, "Version", cfg.version);
-	if (cfg.dedicated_server) {
+	// The gate's METEXT, not the dedicated mode, gates the trio (D-NET-347) @0x4ff2de..0x4ff2e5.
+	if (cfg.met_ext) {
 		set_or_create(host, "CountryName", cfg.country_name);
 		set_or_create(host, "Lang", cfg.language);
 		set_or_create(host, "TZB", std::to_string(cfg.tz_bias));

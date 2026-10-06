@@ -94,6 +94,7 @@
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/environment_document.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mns_document.h>
 #include <editor/documents/mnu_document.h>
@@ -180,7 +181,7 @@ const RowObject kRowObjects[] = {
         {&typeid(ClipRow), sizeof(ClipRow)},       {&typeid(AnimationMapRow), sizeof(AnimationMapRow)},
         {&typeid(MissionRow), sizeof(MissionRow)}, {&typeid(EntityRow), sizeof(EntityRow)},
         {&typeid(PathRow), sizeof(PathRow)},       {&typeid(AreaRow), sizeof(AreaRow)},
-        {&typeid(EventRow), sizeof(EventRow)},
+        {&typeid(EventRow), sizeof(EventRow)},     {&typeid(EnvironmentRow), sizeof(EnvironmentRow)},
         {&typeid(SoundBankRow), sizeof(SoundBankRow)}, {&typeid(SoundProfileRow), sizeof(SoundProfileRow)},
 };
 // The document types whose rows keep their text in fixed-length records (a model's 3DI records, a
@@ -207,7 +208,7 @@ struct PinnedPresence {
 	const char *type;
 	size_t optional, presences;
 };
-const PinnedPresence kPinnedPresence[] = {{"menu", 301, 301}, {"catalog", 27, 27}, {"mission", 4, 4}};
+const PinnedPresence kPinnedPresence[] = {{"menu", 301, 301}, {"catalog", 27, 27}, {"mission", 4, 4}, {"environment", 3, 3}};
 
 // One clause of the contract, named with where it failed (the file, the record, the field).
 void check(bool ok, const std::string &where, const char *clause) {
@@ -349,6 +350,8 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Credits, "nlist.kda", credits_in_cbin()},
 	        {AssetKind::Shader, "glass.fx", shader_in_scr("// glass\r\nfloat4 main() : COLOR { return 0; }\r\n")},
 	        {AssetKind::Config, "game.cfg", text_bytes("[Game]\r\nname = Contract\r\n")},
+	        // The HUD layout (DI-20): hudpos.def, its text.
+	        {AssetKind::HudPosDefs, "hudpos.def", text_bytes("StaticFrame frame.tga 6,586\r\nHUDHEALTH 25,741,177,751\r\n")},
 	        // The texture type (S18): a TGA, a PCX and a DDS, minted by our writers.
 	        {AssetKind::Texture, "brick.tga", minted_tga()},
 	        {AssetKind::Texture, "sky.pcx", minted_pcx()},
@@ -358,6 +361,10 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::SoundProfileDefs, "SndProf.def",
 	         text_bytes("begin \"default\"\r\n\tSSLFootGND FSP_DIRT_L 0 0 0\r\n\tSSRFootGND FSP_DIRT_R 0 0 0\r\nend\r\n"
 	                    "begin \"SP_Truck\"\r\n\tsoundloop_1 V_TRUCK_ILP 0.8 1.2 2\r\n\tmedloopfadeinstart 20\r\nend\r\n")},
+	        // The particle type (DI-14): the minted effect file.
+	        {AssetKind::Particles, "minimal_effect.ptl", file("particle/synth_minimal_effect.ptl")},
+	        // The environment (DI-19a): the minted environment, every keyword and ten keyframes.
+	        {AssetKind::Environment, "synth_full.env", file("env/synth_full.env")},
 	};
 }
 
@@ -465,12 +472,24 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        {AssetKind::MusicScript, "handled.bin", music_with_a_handler(file("mus/synth_gamemus.bin"))},
 	        {AssetKind::Credits, "spaced.kda", file("cbin/synth_nlist.kda")},
 	        {AssetKind::Shader, "plain.fx", text_bytes("float4 main() : COLOR { return 0; }\r\n")},
+	        // A particle file the effect system's reader stops in (DI-14: particle.unreadable).
+	        {AssetKind::Particles, "open.ptl", text_bytes("[effectdef]\n{\n\tid = OPEN;\n")},
+	        // An avatar table the avatar reader notes a duplicate nationality in, which the text type holds
+	        // (DI-06: text.reader).
+	        {AssetKind::AvatarDefs, "Avatars.def",
+	         text_bytes("nationality N00 FIRST\r\n{\r\n}\r\nnationality N00 DUP_NAT\r\n{\r\n}\r\n")},
+	        // A HUD layout with an LF alone, which the game's reader reads as part of the line before it
+	        // (DI-20: hud_layout.line_ending).
+	        {AssetKind::HudPosDefs, "hudpos.def", text_bytes("HUDHEALTH 25,741,177,751\nHUDCLIP 14,648\r\n")},
 	        // A 2 x 2 true-colour TGA, its origin bit set (S18: texture.tga_upside_down).
 	        {AssetKind::Texture, "top_first.tga", top_first_tga()},
 	        // The sound lane: a bank naming a wave twice, a profile named twice.
 	        {AssetKind::SoundBank, "twice.lwf", bank_with_a_wave_twice()},
 	        {AssetKind::SoundProfileDefs, "SndProf.def",
 	         text_bytes("begin \"default\"\r\nend\r\nbegin \"default\"\r\nend\r\n")},
+	        // An environment with a line the game skips and no sky height (DI-19a: environment.ignored_input,
+	        // environment.sky_height_default).
+	        {AssetKind::Environment, "flat_sky.env", text_bytes("fog_level 600\r\nspeling 3\r\n")},
 	};
 }
 
@@ -1083,14 +1102,25 @@ void check_validate_file(const DocumentType &type, const Fixture &fixture,
 // validated first (a check reads which files' own checks read their records): a second update
 // with nothing changed says nothing moved and keeps its findings, and clear() then an update makes
 // the same findings again.
+// A 16-bit stereo RIFF WAVE of a few silent frames, which the game's loader refuses for its channels.
+std::vector<uint8_t> stereo_wave() {
+	const char bytes[] = "RIFF\x2c\0\0\0WAVEfmt \x10\0\0\0\x01\0\x02\0\x44\xac\0\0\x10\xb1\x02\0\x04\0\x10\0"
+	                     "data\x08\0\0\0\0\0\0\0\0\0\0\0";
+	return std::vector<uint8_t>(bytes, bytes + sizeof(bytes) - 1);
+}
+
 void check_project_check(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
 	if (!type.project_check) return;
 	editor_test::TempProjectDir dir("opennova_editor_contract_project_check");
 	const std::string root = dir.file("project");
 	ProjectDocument project;
 	Diagnostic error;
+	// The sound bank type's check reads the project's waves (documents/wave_check.h): a stereo wave the
+	// game's loader refuses goes beside its bank.
+	const bool companion = type.id != DocumentTypeId::SoundBank ||
+	                       editor_test::write_bytes(root + "/files/stereo.wav", stereo_wave());
 	const bool made = create_project(root, "Contract", "jo", project, error) &&
-	                  editor_test::write_bytes(root + "/files/" + fixture.name, fixture.bytes);
+	                  editor_test::write_bytes(root + "/files/" + fixture.name, fixture.bytes) && companion;
 	check(made, fixture.name + " (" + error.message + ")", "a project holding the file is made");
 	if (!made) return;
 	const ProjectPaths paths = ProjectPaths::for_root(root);
@@ -1764,11 +1794,8 @@ int main() {
 			if (loaded) check_validate_file(*type, fixture, *document, counts);
 		}
 		// Per type: a validate_file that never took its own documents (its cast to another type)
-		// would make nothing over its files. The text type makes none (S13 D9: its files are read
-		// through readers the editor does not model), its table empty.
-		const bool silent_type = type->id == DocumentTypeId::Text;
-		check(counts.findings > 0 || (silent_type && type->findings().count == 0), type->name,
-		      "validate_file makes a finding over the type's files");
+		// would make nothing over its files. The text type's are the engine readers' (DI-06).
+		check(counts.findings > 0, type->name, "validate_file makes a finding over the type's files");
 		// Likewise a project check that never read its type's files would keep the clause above
 		// over no findings.
 		check(!type->project_check || counts.check_findings > 0, type->name,

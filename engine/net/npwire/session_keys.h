@@ -65,5 +65,10 @@ inline constexpr uint8_t SESSION_OPCODE_SERVER_GOODBYE = 0x86;
 //  @0x61F080 selects 0x85 when is_server @0x61F131, 0x45 for a client @0x61F145]
 inline constexpr uint8_t SESSION_OPCODE_CLIENT_PING = 0x45;
 inline constexpr uint8_t SESSION_OPCODE_SERVER_PING = 0x85;
+// The opcode table's last server-direction row: entries 7..13 are 0x81..0x87,
+// the client-side handlers (0x87 Nwu_HandleServerProbe @0x624340), so a
+// client-side protocol takes exactly 0x81..0x87.
+// [orig: g_NPOpcodeHandlers @0x849D90 entries 7..13]
+inline constexpr uint8_t kNwuServerOpcodeLast = 0x87;
 
 } // namespace opennova

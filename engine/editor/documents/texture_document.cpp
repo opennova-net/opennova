@@ -26,9 +26,10 @@ constexpr FindingCodeEntry<F> kFindingEntries[] = {
 	{F::TgaUpsideDown, code("texture.tga_upside_down", FindingFix::TextureRows)},
 	{F::TgaColourMapSkipped, code("texture.tga_colour_map_skipped")},
 	{F::PcxOverrun, code("texture.pcx_overrun")},
-	{F::NotRead, code("texture.not_read")},
+	{F::NotRead, code("texture.not_read", FindingFix::SetAsideUnread)},
 	{F::TgaTruncated, code("texture.tga_truncated")},
 	{F::PcxShortRows, code("texture.pcx_short_rows")},
+	{F::DdsNotPowerOfTwo, code("texture.dds_not_pow2")},
 };
 static_assert(std::size(kFindingEntries) == size_t(F::kCount), "a row per texture finding");
 static_assert(finding_entries_well_formed(kFindingEntries), "the texture findings in their enum's order, a token each");
@@ -220,7 +221,27 @@ std::vector<Diagnostic> validate_texture_file(const DocumentBase &document) {
 			            " of each as its buffer held them. Save it with rows of exactly its width.");
 		}
 		break;
-	case TextureReader::Dds:
+	case TextureReader::Dds: {
+		// The DDS reader asks D3DX for a texture of D3DX_DEFAULT sides [orig: GTexture_InitFromMemory @
+		// 0x68830E..0x688310], which rounds each of the image's up to a power of two
+		// [orig: D3DXCreateTextureFromFileInMemoryEx_Internal @ 0x6914D9..0x6914EE, @ 0x69150B..0x691520] and,
+		// under Filter NONE, copies the image to its top-left corner, transparent black past it [orig:
+		// CBlt::BltNone @ 0x6E0D57] (render-material-re D-RMAT-18).
+		const auto next = [](uint32_t side) {
+			uint32_t out = 1;
+			while (out < side && out < 0x80000000u) out <<= 1;
+			return out;
+		};
+		const uint32_t width = next(header.width), height = next(header.height);
+		if (width != header.width || height != header.height)
+			add(F::DdsNotPowerOfTwo, DiagnosticSeverity::Warning,
+			    "Its sides, " + std::to_string(header.width) + " x " + std::to_string(header.height) +
+			            ", are not powers of two: the game's DDS reader makes a texture of " + std::to_string(width) + " x " +
+			            std::to_string(height) +
+			            ", the image in its top-left corner and transparent black past it, which the texture's coordinates "
+			            "reach. Save it with sides that are powers of two.");
+		break;
+	}
 	case TextureReader::Png:
 	case TextureReader::None: break;
 	}

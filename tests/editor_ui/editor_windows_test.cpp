@@ -47,6 +47,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/view/session_view.h>
+#include <formats/rtxt/rtxt.h>
 #include "../editor/editor_test_support.h"
 #include "../editor/menu_test_support.h"
 #include "../editor/pool_document.h"
@@ -118,7 +119,7 @@ void test_frame_bracket_follows_the_table() {
 	const std::vector<K> saved = {K::NewProject, K::OpenProject, K::CloseProject, K::Rescan, K::ImportFiles,
 	                              K::Build, K::Play, K::Export, K::ReloadDocument, K::CloseDocument, K::Save, K::SaveAll,
 	                              K::ResolveUnsaved, K::RenameAsset, K::AssignRequirement, K::RenameSymbol, K::RenameBack,
-	                              K::SplitTexture, K::Quit};
+	                              K::SplitTexture, K::Quit, K::MoveAsset};
 	// S13 V7: a viewport's change and an edit in a viewport name the active document's, as every
 	// pathless request does.
 	// S18: a texture's whole-image edit names the active one, as an edit_record does.
@@ -2445,8 +2446,27 @@ void test_go_to_ui() {
 	ui.drain();
 	ui.activate(popup_item(places, targets[1].label.c_str()));
 	requests = ui.drain();
-	const EditorRequest *file = one(requests, EditorRequestKind::ShowInFiles);
-	CHECK(file && file->path == targets[1].file, "the font file: shown in Files, which the editor does not open");
+	// DI-17: a Go to always lands, the font file on its page (the editor has no editor for its kind).
+	const EditorRequest *file = one(requests, EditorRequestKind::OpenDocument);
+	CHECK(file && file->path == targets[1].file, "the font file: an open alone, which lands on its page");
+	if (!file) return;
+	session.handle(*file);
+	CHECK(v.documents.page == targets[1].file && v.documents.page_locator.empty() && v.documents.page_field.empty(),
+	      "the font's page shows, the file itself marked nowhere");
+	// A variable nothing defines: its Go to lands where it belongs, a stylesheet (DI-17).
+	Edit missing;
+	missing.address = main;
+	missing.field = "font.name";
+	missing.value = std::string("%NO_SUCH_FONT%");
+	session.handle(request::edit_record(menu->path(), missing));
+	session.run_operations();
+	ui.frames(3);
+	ui.drain();
+	ui.activate(item_id(inspector, {key.c_str(), "fields", "font.name", "Go to"}));
+	requests = ui.drain();
+	const EditorRequest *home = one(requests, EditorRequestKind::OpenDocument);
+	CHECK(home && home->path.size() > 4 && home->path.substr(home->path.size() - 4) == ".mns" && home->locator.empty(),
+	      "a variable nothing defines: Go to opens a stylesheet, where it belongs");
 }
 
 // A number that names something navigates too (S12 D3 review): an item's emplacement
@@ -2653,12 +2673,124 @@ void run_menu_tests() {
 	test_menu_tree_follows_changes();
 	test_actions_after_edits();
 }
+// Who names this file, in one look (the deep-integration plan's DI-05), over a real session: with
+// nothing selected the Inspector shows who names the active document's file, by the naming file, each
+// line a Go to (the item naming the model opened at its record, its field shown), made once for what it
+// reads and kept across frames; the document toolbar's Used by chip clears the selection and brings the
+// Inspector forward, the requests the editor MCP raises for it too.
+void test_used_by_ui() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_used_by");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(preview_project(session, dir), "the preview project");
+	const SessionView &v = session.view();
+	const AssetEntry *model = v.project.scan->find("skinned.3di");
+	const AssetEntry *items = v.project.scan->find("items.def");
+	CHECK(model && items, "the model and the item table");
+	if (!model || !items) return;
+	const std::string path = model->relative_path;
+	editor_test::handle_to_end(session, request::open_document(path));
+	editor_test::handle_to_end(session, request::select_record(path, NodeAddress()));
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.frames(6);
+	ui.focus("Inspector");
+	ui.away();
+	ui.drain();
+	const std::string text = logged_frame(ui);
+	CHECK(text.find("skinned.3di: used by 1 field") != std::string::npos, "the file's uses, counted");
+	CHECK(text.find(items->logical_name + " (1)") != std::string::npos, "grouped by the file naming it");
+	CHECK(text.find("Skinned Thing") != std::string::npos, "the item naming it, in its words");
+	CHECK(text.find("Used by (1)") != std::string::npos, "the toolbar's chip, counted");
+	InspectorWindow *inspector_window = nullptr;
+	for (int i = 0; i < ui.windows.pass().window_count() && !inspector_window; ++i)
+		inspector_window = dynamic_cast<InspectorWindow *>(&ui.windows.pass().window(i));
+	CHECK(inspector_window != nullptr, "the Inspector");
+	if (inspector_window) {
+		const size_t made = inspector_window->used_by_made();
+		ui.frames(4);
+		session.handle(request::clear_output());
+		ui.frames(2);
+		CHECK(made > 0 && inspector_window->used_by_made() == made, "Used by: made for the file, kept across frames");
+	}
+	const ImGuiID inspector = Ui::window_id("Inspector");
+	const ImGuiID group = item_id(pushed(item_id(inspector, {"used_by"}), 0), {"##file"});
+	ui.activate(item_id(pushed(group, 0), {"###use"}));
+	std::vector<EditorRequest> requests = ui.drain();
+	const EditorRequest *go = one(requests, EditorRequestKind::OpenDocument);
+	CHECK(go && go->path == items->relative_path && !go->locator.empty() && go->field == "graphic",
+	      "a use opens the item table at the item, its graphic shown");
+	// The chip on the model's toolbar: the selection cleared, the Inspector brought forward.
+	ui.serve_workspace = false;
+	ui.activate(item_id(document_tab_id(path), {"###used_by"}));
+	requests = ui.drain();
+	const EditorRequest *cleared = only(requests, EditorRequestKind::SelectRecord);
+	CHECK(cleared && cleared->path == path && !cleared->address.row, "Used by: the selection cleared");
+	bool focused = false;
+	for (const EditorRequest &request : requests)
+		focused = focused || (request.kind == EditorRequestKind::SetWorkspace &&
+		                      request.workspace.find("\"focus\"") != std::string::npos &&
+		                      request.workspace.find("inspector") != std::string::npos);
+	CHECK(focused, "Used by: the Inspector brought forward");
+}
+
+// A string table's Uses count opens its users (DI-05): a click on WPN_ONE's count selects the string and
+// brings the Inspector forward, whose Referenced by lists the weapon naming it, each a Go to.
+void test_uses_open_users_ui() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_uses");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Uses"));
+	editor_test::create_missing_files(session);
+	const SessionView &v = session.view();
+	const AssetEntry *weapons = v.project.scan->find("weapon.def");
+	const AssetEntry *gametext = v.project.scan->find("gametext.bin");
+	CHECK(weapons && gametext, "the weapon table and the string table");
+	if (!weapons || !gametext) return;
+	const std::string table_path = gametext->relative_path, weapons_path = weapons->relative_path;
+	opennova::rtxt::File table;
+	table.sections = {{"WepDes", 2}};
+	table.entries = {{"WPN_ONE", "The first weapon", {}, 0}, {"WPN_TWO", "The second weapon", {}, 0}};
+	std::vector<uint8_t> bytes;
+	std::string error;
+	CHECK(opennova::rtxt::write(table, bytes, error) && editor_test::write_bytes(v.project.root + "/" + table_path, bytes) &&
+	              editor_test::write_text(v.project.root + "/" + weapons_path, "weapon \"Gun\"\nloadout_menu_textid WPN_ONE\nend\n"),
+	      "the strings and the weapon naming one");
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document(table_path));
+	const Document *strings = session.document_for(table_path);
+	CHECK(strings != nullptr, "the string table open");
+	if (!strings) return;
+	NodeAddress one;
+	CHECK(find_definition(*v.findings.graph, *strings, "WPN_ONE", one), "WPN_ONE");
+	editor_test::handle_to_end(session, request::select_record(table_path, {strings->rows()[0]->id, strings->rows()[0]->kind, 0}));
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.serve_workspace = false;
+	ui.frames(6);
+	ui.away();
+	ui.drain();
+	const ImGuiID records = item_id(item_id(document_tab_id(table_path), {"master"}), {"records"});
+	ui.activate(item_id(pushed(records, static_cast<int>(one.child)), {"###uses"}));
+	const std::vector<EditorRequest> requests = ui.drain();
+	const EditorRequest *selected = only(requests, EditorRequestKind::SelectRecord);
+	CHECK(selected && selected->path == table_path && selected->address.child == one.child, "Uses: the string selected");
+	bool focused = false;
+	for (const EditorRequest &request : requests)
+		focused = focused || (request.kind == EditorRequestKind::SetWorkspace && request.workspace.find("inspector") != std::string::npos);
+	CHECK(focused, "Uses: the Inspector brought forward, its Referenced by the users");
+}
+
 void run_inspector_tests() {
 	test_inspector_plan();
 	test_inspector_ui();
 	test_inspector_kinds_alike();
 	test_go_to_ui();
 	test_numeric_go_to_ui();
+	test_used_by_ui();
+	test_uses_open_users_ui();
 }
 void run_preview_tests() {
 	test_preview_canvas_smoke();
@@ -2737,7 +2869,7 @@ constexpr Group kGroups[] = {
 	{"styles", run_styles_tests},         {"problems", run_problems_tests},
 	{"gate", run_gate_tests},             {"logic", run_logic_tests},
 	{"animation", run_animation_tests},   {"model", run_model_tests},
-	{"project", run_project_tests},
+	{"project", run_project_tests},       {"navigation", run_navigation_tests},
 };
 
 } // namespace

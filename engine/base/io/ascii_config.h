@@ -224,4 +224,60 @@ size_t for_each_config_line(const char *text, size_t size, Apply &&apply) {
 	return for_each_config_line(text, size, tokens, std::forward<Apply>(apply));
 }
 
+// The longest line one read of the stream walk below returns: fgets into a
+// 0x400-byte buffer keeps 1023 characters, so a longer line arrives as
+// several [orig: File_ParseASCIIFileWithCallback @0x53D9E2..0x53D9EF].
+inline constexpr size_t kConfigFileReadChars = 0x400 - 1;
+
+// The second retail walk, the one game.cfg and the host file take: the file
+// opened "r" with the CRT and read line by line with fgets, its first '\n'
+// cut, then the same tokenizer and the same gate (a line with a token whose
+// first token does not start with '/') before the callback; a callback that
+// returns true ends the walk. A text-mode read takes a CR LF pair as one '\n',
+// which the walk does explicitly so every host reads a file alike; a byte past
+// a NUL is not part of the line (the tokenizer reads a C string). Unlike
+// for_each_config_line, a lone CR LF is not the separator here and a tail line
+// keeps its last byte. Retail calls the callback once more at the end of the
+// file with no line; its two callbacks return 0 for it, so the walk omits it.
+// Returns the number of reads (lines, each over-long line counting once per
+// 1023-character piece).
+// [orig: File_ParseASCIIFileWithCallback @0x53D980 — fopen(path, "r")
+//  @0x53D9A3..0x53D9B7 (a file that does not open returns 1 @0x53D9C9),
+//  fgets(line, 0x400) @0x53D9E2..0x53D9EF, strchr(line, '\n') cut
+//  @0x53D9FB..0x53DA11, Terrain_TokenizeConfigLine @0x53DA24, the count and
+//  '/' gate @0x53DA39..0x53DA47, the callback @0x53DA53 and its stop
+//  @0x53DA61, the end-of-file callback @0x53DA6F..0x53DA7A]
+template <typename Apply>
+size_t for_each_config_file_line(const char *text, size_t size, ConfigTokens &tokens, Apply &&apply) {
+	if (text == nullptr) return 0;
+	std::string data;
+	data.reserve(size);
+	for (size_t i = 0; i < size; ++i) {
+		if (text[i] == '\r' && i + 1 < size && text[i + 1] == '\n') continue;
+		data.push_back(text[i]);
+	}
+	size_t reads = 0;
+	std::string line;
+	for (size_t at = 0; at < data.size();) {
+		size_t end = at;
+		while (end < data.size() && end - at < kConfigFileReadChars && data[end] != '\n') ++end;
+		if (end < data.size() && data[end] == '\n' && end - at < kConfigFileReadChars) ++end;
+		line.assign(data, at, end - at);
+		at = end;
+		++reads;
+		const size_t cut = line.find('\n');
+		if (cut != std::string::npos) line.resize(cut);
+		tokenize_config_line(line.c_str(), tokens);
+		if (tokens.count == 0 || tokens.tokens[0][0] == '/') continue;
+		if (detail::walk_apply(apply, tokens)) break;
+	}
+	return reads;
+}
+
+template <typename Apply>
+size_t for_each_config_file_line(const char *text, size_t size, Apply &&apply) {
+	ConfigTokens tokens;
+	return for_each_config_file_line(text, size, tokens, std::forward<Apply>(apply));
+}
+
 } // namespace opennova::io

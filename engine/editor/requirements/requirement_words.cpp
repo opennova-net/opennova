@@ -24,6 +24,7 @@ constexpr RequirementWords kWords[] = {
 	{ "items_def", "The game starts with no item definitions." },
 	{ "charattr_def", "The game logs \"Could not load charattr definitions\" and goes on without them." },
 	{ "loading_pcx", "The loading screen shows no picture." },
+	{ "ffp_shader", "Models whose shader is a fixed-function one (FF_ST_OP and the like) draw with whichever shader the game registered first; with no other shader either, no model draws at all (the terrain, the sky and the HUD still do)." },
 	// --- the main menu [orig: Menu_InitShellResources @ 0x552500] ---
 	{ "game_bin", "The menu texts this table holds are missing." },
 	{ "prolog_bik", "The prologue video does not play." },

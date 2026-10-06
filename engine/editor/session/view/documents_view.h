@@ -82,6 +82,11 @@ struct DocumentsView {
 	// it is, what reads it, who names it: session/file_page.h) and closed by a CloseDocument naming it;
 	// "" none. Never a document: the selection and the Inspector stay the active document's.
 	std::string page;
+	// What the OpenDocument that showed the page named on it (DI-17: a Go to lands on the page of a file the
+	// editor has no editor for, the line it names marked): a record of the file (a ReferenceTarget's
+	// locator: the record's path as the graph names it) and its field; both "" for the page alone.
+	std::string page_locator;
+	std::string page_field;
 	// The selection in the active document (S13 D7: its records over any of its rows, the primary
 	// among them; selection.document is `active`). Repaired after every edit, undo and redo: a
 	// record that is gone drops out, a removed primary gives way to its owner, what an edit made is

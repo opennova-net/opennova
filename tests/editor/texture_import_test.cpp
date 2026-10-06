@@ -20,6 +20,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/texture_image.h>
 #include <editor/graph/texture_import_needs.h>
+#include <editor/import/dxt_encode.h>
 #include <editor/import/importer.h>
 #include <editor/import/png_encode.h>
 #include <editor/import/sidecar.h>
@@ -35,7 +36,6 @@
 #include <formats/env/env.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga.h>
-#include <runtime/renderer/texture_dxt.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -190,18 +190,18 @@ int test_formats() {
 	TEST_EXPECT(read && read->loads && read->levels[0].rgba[0] == image.pixels[0] && read->levels[0].rgba[3] == 255);
 	TEST_EXPECT(!encode_image(graded(32, 32), settings_of({{"format", "pcx"}, {"palette", "exact"}}), bytes, why, note) &&
 	            why.find("256") != std::string::npos);
-	// A DXT5 DDS of every level to 1 x 1, each the ported codec's (the D3DX box filter of the level before,
-	// decoded from its own blocks): what D3DX reads of it, and the game's decode of the first level.
+	// A DXT5 DDS of every level to 1 x 1, each the authoring encoder's (import/dxt_encode.h: the D3DX box
+	// filter of the level before over the source's texels, rgbcx's blocks): what D3DX reads of it, and the
+	// game's decode of the first level.
 	TEST_EXPECT(encode_image(image, settings_of({{"format", "dds"}}), bytes, why, note));
 	dds::DdsImage dds;
 	TEST_EXPECT(dds::dds_read(bytes.data(), bytes.size(), dds, why) && dds.loads && std::string(dds.format.name) == "DXT5" &&
 	            dds.levels.size() == 4);
-	const std::vector<renderer::DxtSurface> chain =
-	        renderer::build_dxt_texture_levels(image.pixels.data(), 8, 8, renderer::TextureDxtFormat::Dxt5, 4);
-	TEST_EXPECT(chain.size() == 4);
+	const std::vector<std::vector<uint8_t>> chain = encode_dxt_levels(image.pixels.data(), 8, 8, true, true);
+	TEST_EXPECT(chain.size() == 4 && dxt_full_chain_levels(8, 8) == 4 && dxt_full_chain_levels(256, 32) == 9);
 	for (size_t i = 0; i < chain.size() && i < dds.levels.size(); ++i)
 		TEST_EXPECT(std::vector<uint8_t>(bytes.begin() + long(dds.levels[i].offset),
-		                                 bytes.begin() + long(dds.levels[i].offset + dds.levels[i].bytes)) == chain[i].blocks);
+		                                 bytes.begin() + long(dds.levels[i].offset + dds.levels[i].bytes)) == chain[i]);
 	read = read_back("a.dds", bytes);
 	TEST_EXPECT(read && read->loads && read->levels.size() == 4);
 	// DXT1, one level; A8R8G8B8.
@@ -483,9 +483,11 @@ int test_project() {
 	            sidecar.options == ImportOptions({{"format", "dds"}}) && sidecar.outputs == std::vector<std::string>({"body.dds"}));
 	const AssetEntry *body = output_of(view, body_source);
 	TEST_EXPECT(body && body->logical_name == "body.dds" && !view.project.scan->find("body.tga"));
-	// The model row now loads it (its loader reads body.dds for body.tga): nothing missing.
+	// The model row now loads it (its loader reads body.dds for body.tga): no texture missing (its
+	// material's shader, which no shader of this project registers, is another finding).
 	for (const Diagnostic &d : view.findings.diagnostics)
-		TEST_EXPECT(!(d.code() == "reference.missing" && d.asset == "models/thing.3di"));
+		TEST_EXPECT(!(d.code() == "reference.missing" && d.asset == "models/thing.3di" &&
+		              editor_test::reference_of(d).kind == ReferenceKind::Texture));
 	// An empty value goes back to the default; a key or a value no row takes is refused, nothing written.
 	editor_test::handle_to_end(session, request::set_import_options(body_source, {{"format", ""}}));
 	session.run_operations();

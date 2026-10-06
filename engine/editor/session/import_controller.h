@@ -63,6 +63,16 @@ public:
 	// Shell opens it by; the texture_source dialog closed. Refused (texture.external): what the plan
 	// refuses, a texture or a source edited in place open with unsaved edits.
 	void edit_externally(const EditorRequest &request);
+	// StoreAsDds (S18): the .tga texture the request names stored as the .dds of its name, which every use of
+	// it reads first (import/texture_source.h's plan_texture_dds over its uses: texture_use_opens), then the
+	// refresh that imports it; a plain file's clean open document closed. Refused, nothing written
+	// (texture.store_dds): what the plan refuses, a texture open with unsaved edits.
+	void store_as_dds(const EditorRequest &request);
+	// SetAsideTexture (S18): a texture no use of it reads (each use's loader opens another file of its name)
+	// set aside under .replaced/ (import/texture_source.h set_aside_project_file), its clean open document
+	// closed, then a rescan. Refused, nothing moved (texture.set_aside): no such texture, a file an import
+	// makes, a texture no use names, one a use reads, one open with unsaved edits.
+	void set_aside_texture(const EditorRequest &request);
 	// OpenTextureSource (S18): an existing source opened alike, nothing written. Refused (texture.external):
 	// a texture with none yet, a source edited in place open with unsaved edits.
 	void open_texture_source(const EditorRequest &request);
@@ -79,10 +89,6 @@ public:
 	void preview_texture_source(const EditorRequest &request);
 	// The texture_source dialog closed (CancelTextureSource, and a Replace or an Edit externally done).
 	void close_texture_source();
-	// RefreshChangedSources (S18): what a program saved of the watched files (external_changes: the import
-	// sources, their inputs, the PNGs the game reads as they are) refreshed alone, once settled
-	// (SessionCore::start_changed_refresh); nothing otherwise.
-	void refresh_changed_sources();
 	// The game install's file names, for the Import fixes (problem_fixes.h), and for a project that
 	// builds as an expansion its base game's, for its build's gate (ADR 0046 S16).
 	void refresh_install_files();

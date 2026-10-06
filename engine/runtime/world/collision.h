@@ -317,6 +317,17 @@ EntityHandle los_walker_parent(const Entity *e, bool parent_cleared = false);
 bool terrain_clip_segment(const terrain::TerrainHeightField &field, const int32_t a[3],
                           const int32_t b[3], int32_t out_hit[3]);
 
+// The movement resolver's ground-settle tail over the terrain alone (an empty candidate set): Z
+// raised to the 6144 grid, a 2.0 u column clipped by the heightfield (an indoors body, or none,
+// skips it: the column's foot is the ground), then clearance = feet (pos z less the capsule
+// bottom) - ground. The motor runs it with no collision world wired; the editor's mission view
+// stands a placed person's spawn on the terrain with it.
+// [orig: Entity_MovementCollisionResolver ground-settle tail @0x4B3D6E..0x4B3DA9 ->
+//  Entity_RaycastGroundHeightAndObject(e, 0, 0, 0, 0x20000) @0x4B3D95 -> Entity_RaycastCollision
+//  terrain leg @0x413760 (no candidates)]
+int32_t terrain_settle_clearance(const terrain::TerrainHeightField *field, const int32_t pos[3],
+                                 int32_t capsule_bottom, bool indoors);
+
 // ----------------------------------------------------------------------------
 // Per-query blink accumulation. [orig: g_BlinkFlagsAccum @ 0xB57C70,
 // g_BlinkHitSlot0..3 @ 0xB57C74, g_BlinkHitCount @ 0x82AE20 — cleared per query

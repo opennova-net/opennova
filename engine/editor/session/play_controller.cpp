@@ -227,11 +227,12 @@ void PlayController::start(const std::string &mission, bool behind, bool fresh) 
 		return;
 	}
 	// The run directory the game runs in (run/run_directory.h, S13 A8): its working directory and its
-	// log, never the build directory it runs from, which stays as the build wrote it. It keeps what the
-	// game wrote there in the runs of this mode before (its game.cfg, which spares it the device dialog, its
-	// saves), what the Play before staged and the logs gone; a fresh Play empties it. One whose game may
-	// still run (one an earlier editor left running) is passed over. It lives under the cache, which comes
-	// with its self-ignore file.
+	// log, never the build directory it runs from, which stays as the build wrote it. Each mode takes its
+	// own (`.opennova/run/<mode>/<n>`), so a Play of another mode between two never touches it. It keeps
+	// what the game wrote there in the runs of this mode before (its game.cfg, which spares it the device
+	// dialog, its saves), what the Play before staged and the logs gone; a fresh Play empties it. One whose
+	// game may still run (one an earlier editor left running) is passed over. It lives under the cache,
+	// which comes with its self-ignore file.
 	const std::string mode = !in_install ? kRunModeRuntime : strict ? kRunModeStrict : kRunModeInstall;
 	std::string run_dir, run_error, cache_error;
 	std::vector<std::string> kept;

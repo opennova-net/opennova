@@ -51,6 +51,20 @@ bool pool_row_hidden(const Entity &e) {
 	return e.hidden || ((e.flags | e.engine_flags) & kEntityFlagCarried) != 0;
 }
 
+// One authoritative body's primary channel, the pose its renderer draws.
+// [orig: AnimChannel_AdvancePlayback @0x40B19E..0x40B1B1 the park]
+void write_present_body(float *r, const InfantryBodyPose &pose) {
+	r[PF_ANIM_STATE] = static_cast<float>(pose.state);
+	r[PF_ANIM_PHASE_TICKS] = static_cast<float>(pose.phase);
+	r[PF_ANIM_VARIANT] = static_cast<float>(pose.variant);
+	r[PF_ANIM_PHASE_PARKED] = pose.parked ? 1.0f : 0.0f;
+	if (!pose.blending) return;
+	r[PF_ANIM_SOURCE_STATE] = static_cast<float>(pose.source_state);
+	r[PF_ANIM_SOURCE_PHASE_TICKS] = static_cast<float>(pose.source_phase);
+	r[PF_ANIM_BLEND_WEIGHT] = pose.weight;
+	r[PF_ANIM_SOURCE_VARIANT] = static_cast<float>(pose.source_variant);
+}
+
 // One authoritative person's item-overlay inputs: its Flags, the canopy
 // words, the pose triple and body heading the bone build reads, and the
 // carried child (entity+0x268) when it has an item def.
@@ -653,18 +667,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				}
 			}
 			if (ae && ae->inf.active) {
-				r[PF_ANIM_STATE] = static_cast<float>(ae->inf.body_clip_state());
-				r[PF_ANIM_PHASE_TICKS] = static_cast<float>(ae->inf.clip_phase);
-				r[PF_ANIM_VARIANT] = static_cast<float>(ae->inf.anim_variant);
-				// [orig: AnimChannel_AdvancePlayback @0x40B19E..0x40B1B1]
-				r[PF_ANIM_PHASE_PARKED] = ae->inf.body_phase_parked() ? 1.0f : 0.0f;
-				if (ae->inf.body_blend_active()) {
-					r[PF_ANIM_SOURCE_STATE] = static_cast<float>(ae->inf.anim_prev);
-					r[PF_ANIM_SOURCE_PHASE_TICKS] =
-							static_cast<float>(ae->inf.anim_prev_clip_phase);
-					r[PF_ANIM_BLEND_WEIGHT] = ae->inf.anim_blend_weight;
-					r[PF_ANIM_SOURCE_VARIANT] = static_cast<float>(ae->inf.anim_prev_variant);
-				}
+				write_present_body(r, infantry_body_pose(ae->inf));
 				// The upper-body weapon channel this body derived for itself —
 				// for the host's OWN player and for every wire peer alike, since
 				// remote_player_body_anim now runs the same selection. The gate is
@@ -963,18 +966,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 				: 0.0f;
 	}
 	if (!ae->inf.active) return;
-	r[PF_ANIM_STATE] = static_cast<float>(ae->inf.body_clip_state());
-	r[PF_ANIM_PHASE_TICKS] = static_cast<float>(ae->inf.clip_phase);
-	r[PF_ANIM_VARIANT] = static_cast<float>(ae->inf.anim_variant);
-	// [orig: AnimChannel_AdvancePlayback @0x40B19E..0x40B1B1]
-	r[PF_ANIM_PHASE_PARKED] = ae->inf.body_phase_parked() ? 1.0f : 0.0f;
-	if (ae->inf.body_blend_active()) {
-		r[PF_ANIM_SOURCE_STATE] = static_cast<float>(ae->inf.anim_prev);
-		r[PF_ANIM_SOURCE_PHASE_TICKS] =
-				static_cast<float>(ae->inf.anim_prev_clip_phase);
-		r[PF_ANIM_BLEND_WEIGHT] = ae->inf.anim_blend_weight;
-		r[PF_ANIM_SOURCE_VARIANT] = static_cast<float>(ae->inf.anim_prev_variant);
-	}
+	write_present_body(r, infantry_body_pose(ae->inf));
 	// The upper-body weapon channel this body derived for itself; the gate
 	// is the §14.8.6 consumer test and engine_flags bit 0x100 is the "is a
 	// player" mirror of entity+0x24 (NPCs carry no hold ladder).

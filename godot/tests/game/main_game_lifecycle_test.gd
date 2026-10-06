@@ -388,6 +388,44 @@ func test_mission_return_restores_menu_frame_and_supports_another_load() -> void
 	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
 
 
+# Leaving a mission returns to the screen it was started from, not to main.mnu's
+# first screen (D-MNU-28, docs/mnu/menu-re.md "The in-game exit confirmation"):
+# a mission started on mp.mnu's LAN_MULTI_PLAYER comes back there through the
+# pause menu's CONFIRM_YES, and its back still reaches STARTUP.
+func test_mission_return_shows_the_screen_it_was_started_from() -> void:
+	_shell = await _make_shell()
+	if _shell == null:
+		return
+	var world = _shell.get_node("World")
+	var terrain = world.get_node("Terrain")
+	var menu_shell: MenuShell = _shell.get_menu_shell()
+	var driver: MenuDriver = menu_shell.get_driver()
+	driver.menu_requested.emit("mp.mnu", "LAN_MULTI_PLAYER")
+	assert_eq(menu_shell.get_current_menu_file(), "mp.mnu")
+	assert_eq(menu_shell.get_menu_stack_depth(), 1)
+
+	menu_shell.start_requested.emit("mnml.bms")
+	await _wait_for_world_load(world)
+	await _wait_for_visible_terrain(terrain)
+	_assert_loaded(world, terrain, menu_shell)
+	assert_eq(_shell.mcp_open_ingame_menu(), OK, "the pause menu opens over the mission")
+	assert_eq(menu_shell.get_current_menu_file(), "game.mnu")
+
+	menu_shell.return_to_menu_requested.emit()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_false(world.is_loaded(), "the mission came down")
+	assert_true(menu_shell.visible, "the menu is back")
+	assert_eq(menu_shell.get_current_menu_file(), "mp.mnu",
+			"the menu returns to the file the mission was started from")
+	assert_eq(driver.get_current_screen(), "LAN_MULTI_PLAYER",
+			"the menu returns to the screen the mission was started from")
+	assert_eq(menu_shell.get_menu_stack_depth(), 1, "STARTUP is still under it")
+	driver.pop_screen()
+	assert_eq(menu_shell.get_current_menu_file().to_lower(), "main.mnu")
+	assert_eq(driver.get_current_screen(), "STARTUP")
+
+
 func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 	_shell = await _make_shell()
 	if _shell == null:

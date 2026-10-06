@@ -402,6 +402,16 @@ void MnuDocument::refine_field(const NodeAddress &address, FieldUse &out) const 
 	    at.record.kind != address.kind)
 		return;
 	const MenuContext context = menu_context(at.record, at.owners());
+	// A SOUND's trigger is a set of the bank its FILE names, looked up there alone (the sound lane): the
+	// window's sound plays from that bank's entry of the menu's bank collection [orig:
+	// sound_collection_play_trigger @ 0x652de0 -> SoundBank_FindTriggerAndPlay @ 0x75d010].
+	if (field.id == "trigger" && std::string(menu_table().kind(at.record.kind)->row().token) == "sound") {
+		const std::string &bank = at.record.as<mnu::Sound>().file;
+		if (!bank.empty()) {
+			out.reference = ReferenceKind::Sound;
+			out.scope = strutil::to_upper(basename_of(bank));
+		}
+	}
 	// A string id resolves in the "menu" section of the table the window reads: its own
 	// TEXT_RSRC, else the one it falls back to (the runtime's rule, menu_screen_inputs.h).
 	// With neither, the scope names no table: the game shows the id.
@@ -932,11 +942,11 @@ void MnuDocument::prepare_duplicate(Node &copy, const Node &,
 // An editor rule, as a screen keeps one root window: a menu with no screen has nothing
 // to show, so the last screen stays (the menu view's Remove waits for a second one).
 bool MnuDocument::accept_step(const EditStep &step, const StagedRows &rows,
-                              std::string &error) const {
+                              StepRefusal &refusal) const {
 	if (rows.size() != 0) return true;
 	for (const RowSwap &swap : step.swaps) {
 		if (!swap.before || swap.after) continue;
-		error = "A menu keeps at least one screen.";
+		refusal.message = "A menu keeps at least one screen.";
 		return false;
 	}
 	return true;

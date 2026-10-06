@@ -102,6 +102,10 @@ public:
 	Error load(const String &path);
 	// Load weapon.def by flat name through the mounted resource root (VFS / PFF).
 	Error load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
+	// The file was present and parsed, whatever it held: a weapon.def with no
+	// weapon rows is a loaded, empty table, as the game's loadout catalog is
+	// built whatever its walk finds (the weapon.def row of engine:
+	// base/gameprofile/required_resources.cpp carries the witness).
 	bool is_loaded() const;
 	String get_source_path() const;
 	String get_last_error() const;

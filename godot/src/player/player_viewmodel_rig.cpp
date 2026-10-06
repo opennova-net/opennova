@@ -375,8 +375,8 @@ void PlayerViewmodelRig::apply_viewmodel_control_registers(bool p_submit_viewmod
 }
 
 // Pull the resolved weapon.def view record from the world; null when no
-// weapon.def (or the weapon) resolves in the mounted root -- the witnessed
-// JOX WPN_AK47AUTO constants above stay in force. The def rows carry xyz raw
+// equipped weapon resolves in the mounted root -- nothing draws then, and the
+// placement values stay as they were. The def rows carry xyz raw
 // file units + yaw/pitch/roll degrees [orig: weapon.def 'pos'/'tpos' handlers
 // @0x54471f; 'renderfov' @0x54482a, default 80.0].
 void PlayerViewmodelRig::apply_viewmodel_def() {

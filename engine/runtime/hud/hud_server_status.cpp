@@ -3,6 +3,7 @@
 #include <runtime/hud/hud_server_status.h>
 
 #include <base/gameprofile/game_type.h> // host_abbreviation_key
+#include <runtime/hud/hud_game_text.h>    // hud_sprintf
 
 #include <cstdio>
 
@@ -171,6 +172,106 @@ ServerStatusRosterCell server_status_roster_cell(const ServerStatusPageState &pa
 	}
 	cell.color = color;
 	return cell;
+}
+
+ServerStatusTextLine server_status_server_line(const ServerStatusPageState &page) {
+	ServerStatusTextLine out;
+	out.x = 512;
+	out.y = 10;
+	out.align = 2;
+	char line[512];
+	const std::string abbreviation = hud_sprintf(page.text.game_type_abbreviation);
+	if (page.novaworld) {
+		std::snprintf(line, sizeof(line), "%s %s [%s] (%i)%s", page.text.server_novaworld.c_str(),
+				page.server_name.c_str(), abbreviation.c_str(),
+				static_cast<int>(page.session_key), "");
+	} else {
+		std::snprintf(line, sizeof(line), "%s %s [%s]", page.text.server_lan.c_str(),
+				page.server_name.c_str(), abbreviation.c_str());
+	}
+	out.text = line;
+	return out;
+}
+
+std::vector<ServerStatusTextLine> server_status_team_block(const ServerStatusPageState &page) {
+	std::vector<ServerStatusTextLine> out;
+	const uint32_t gt = page.game_type;
+	if (gt != 0x10000u && gt != 0x10004u && gt != 0x10001u) return out;
+	char line[512];
+	const auto add = [&](int y) { out.push_back(ServerStatusTextLine{800, y, 0, line}); };
+	// STRSRV05 labels team 2, STRSRV06 team 1 [orig: g_TeamRecords[2] / [1]].
+	std::snprintf(line, sizeof(line), "%s", hud_sprintf(page.text.team_wins).c_str());
+	add(100);
+	std::snprintf(line, sizeof(line), "  %2i %s", page.round_wins_team2, page.text.team2.c_str());
+	add(130);
+	std::snprintf(line, sizeof(line), "  %2i %s", page.round_wins_team1, page.text.team1.c_str());
+	add(160);
+	std::snprintf(line, sizeof(line), "  %2i %s",
+			page.rounds_played - page.round_wins_team1 - page.round_wins_team2,
+			page.text.ties.c_str());
+	add(190);
+	std::snprintf(line, sizeof(line), "%s", hud_sprintf(page.text.team_scores).c_str());
+	add(230);
+	if (gt == 0x10001u) {
+		// [orig: "  %2i:%02i %s" over unknown_040[272] @0x50ae3c..0x50aeec]
+		const int32_t t2 = page.team_hold_seconds[1];
+		const int32_t t1 = page.team_hold_seconds[0];
+		std::snprintf(line, sizeof(line), "  %2i:%02i %s", t2 / 60, t2 - 60 * (t2 / 60),
+				page.text.team2.c_str());
+		add(260);
+		std::snprintf(line, sizeof(line), "  %2i:%02i %s", t1 / 60, t1 - 60 * (t1 / 60),
+				page.text.team1.c_str());
+		add(290);
+	} else {
+		// Points for Team Deathmatch (field 0x1C), flag captures for CTF
+		// (field 0x0B) [orig: @0x50aa06 / @0x50ac16].
+		const bool ctf = gt == 0x10004u;
+		std::snprintf(line, sizeof(line), "  %2i %s",
+				ctf ? page.team_flag_captures[1] : page.team_points[1], page.text.team2.c_str());
+		add(260);
+		std::snprintf(line, sizeof(line), "  %2i %s",
+				ctf ? page.team_flag_captures[0] : page.team_points[0], page.text.team1.c_str());
+		add(290);
+	}
+	return out;
+}
+
+bool server_status_round_clock(const ServerStatusPageState &page, ServerStatusTextLine &out) {
+	if (page.round_time_remaining < 0) return false;
+	char line[64];
+	const int32_t s = page.round_time_remaining / 62;
+	std::snprintf(line, sizeof(line), "%i:%02i:%02i", s / 60 / 60, s / 60 % 60, s % 60);
+	out = ServerStatusTextLine{1000, 10, 1, line};
+	return true;
+}
+
+std::vector<ServerStatusTextLine> server_status_bottom_row(const ServerStatusPageState &page) {
+	std::vector<ServerStatusTextLine> out;
+	char line[512];
+	const auto add = [&](int x) { out.push_back(ServerStatusTextLine{x, 704, 0, line}); };
+	if (page.frames <= 60)
+		std::snprintf(line, sizeof(line), "%s %i", page.text.frames.c_str(), page.frames);
+	else
+		std::snprintf(line, sizeof(line), "%s 63+", page.text.frames.c_str());
+	add(16);
+	std::snprintf(line, sizeof(line), "%s %i%%", page.text.cpu.c_str(), page.cpu_percent);
+	add(200);
+	std::snprintf(line, sizeof(line), "%s %i:%02i ", page.text.start_timer.c_str(),
+			static_cast<int>(page.pre_round_delay / 60u), static_cast<int>(page.pre_round_delay % 60u));
+	add(320);
+	std::snprintf(line, sizeof(line), "%s %i", page.text.total_logins.c_str(),
+			static_cast<int>(page.total_logins));
+	add(512);
+	// The current logins: slots in use that are not the host's own
+	// [orig: the walk @0x50b12b..0x50b158 — `+4 && !+5`].
+	int current = 0;
+	for (int i = 0; i < page.capacity && static_cast<size_t>(i) < page.slots.size(); ++i) {
+		const ServerStatusSlot &slot = page.slots[static_cast<size_t>(i)];
+		if (slot.active && !slot.local) ++current;
+	}
+	std::snprintf(line, sizeof(line), "%s %i", page.text.current_logins.c_str(), current);
+	add(700);
+	return out;
 }
 
 ServerStatusScoreRow server_status_score_row(const ServerStatusPageState &page, int index) {

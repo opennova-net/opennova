@@ -21,18 +21,6 @@ extends Control
 
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 
-
-## One cross-.mnu back-stack rung: the document and screen a forward jump left.
-class MenuStackEntry extends RefCounted:
-	var file := ""
-	var screen := ""
-
-	static func make(p_file: String, p_screen: String) -> MenuStackEntry:
-		var entry := MenuStackEntry.new()
-		entry.file = p_file
-		entry.screen = p_screen
-		return entry
-
 # The director var the current screen's MUSICVAR lands in is
 # MusicDirector.MENU_MUSIC_VAR_SLOT — the witness lives at the engine home,
 # engine/runtime/audio audio/music_policy.h kMenuMusicVarSlot (the menumus MUS
@@ -167,10 +155,15 @@ var _player_options: PlayerOptions = null
 var _options_controller: OptionsMenuController = null
 
 var _menu_cache: Dictionary = {}            # filename -> MnuDocument
-var _menu_stack: Array[MenuStackEntry] = []  # cross-.mnu back stack
+# The screen history across .mnu files and a mission is the driver's
+# (MenuDriver.push_screen_history / pop_screen_history, engine
+# menu/screen_history.h): one back stack for every file, kept while a mission runs.
 var _current_file := ""
 var _selected_expansion := ""
 var _in_game := false
+# True from setup() until a mission's start leaves the menu (leave_menu_mode):
+# the next setup() on the same root is then the menu's re-entry.
+var _menu_mode := false
 # Named-control routing rebuilt per open_menu: NAME (upper) -> Callable.
 var _named_handlers: Dictionary = {}
 # Optional delegates that own game-specific menus the generic shell does not handle
@@ -262,13 +255,17 @@ func add_companion(companion: MenuCompanion) -> void:
 
 
 # Build the shell against a resource root and open the main menu. Idempotent on
-# the asset/driver wiring (only assembled once); show_menu() returns to
-# the main menu on later entries. A different root (the bundled placeholder
-# menu handing over to a picked retail install, ADR 0048) reloads everything
-# read from the root. Returns false when the main menu cannot be
-# resolved/loaded (an empty/incomplete resource dir).
+# the asset/driver wiring (only assembled once). The menu's re-entry after a
+# mission (leave_menu_mode at its start, the same root) shows again the screen
+# the mission was started from, the screen history under it kept (the driver's
+# return_to_menu_mode; D-MNU-28 in docs/mnu/menu-re.md); any other entry opens
+# the main menu's first screen with an empty history. A different root (the
+# bundled placeholder menu handing over to a picked retail install, ADR 0048)
+# reloads everything read from the root. Returns false when the main menu
+# cannot be resolved/loaded (an empty/incomplete resource dir).
 func setup(root: ResourceRoot) -> bool:
 	var root_changed := root != _root
+	var reentry := _driver != null and not root_changed and not _menu_mode
 	_root = root
 	if _driver == null:
 		_assemble_assets()
@@ -276,12 +273,28 @@ func setup(root: ResourceRoot) -> bool:
 		_load_root_assets()
 	_enter_menu_music()
 	_in_game = false
-	_menu_stack.clear()
+	_menu_mode = true
 	# Menu-mode enter (fresh boot AND return-from-game) recreates the
 	# backdrop slots [orig: Menu_InitShellResources @ 0x552500 calls
 	# UI_CreateMenuBinkVideos on both branches].
 	_refresh_underlay()
+	if not reentry:
+		_driver.clear_screen_history()
+		return open_menu(main_menu_file, "")
+	var row := _driver.return_to_menu_mode()
+	if row.size() == 2 and open_menu(row[0], row[1]):
+		return true
 	return open_menu(main_menu_file, "")
+
+
+## A mission's start leaves the menu: the screen it was started from is kept on
+## the screen history, under a mark, for the re-entry's setup() to show again.
+## Once per stay in the menu (a restart or a map change starts no new mark).
+func leave_menu_mode() -> void:
+	if not _menu_mode or _driver == null:
+		return
+	_menu_mode = false
+	_driver.leave_menu_mode()
 
 
 # --- Asset assembly -----------------------------------------------------------
@@ -463,7 +476,12 @@ func release_runtime_renderer_resources() -> void:
 # behind it), so the top-level back/quit resumes play instead of exiting.
 func open_ingame_menu() -> bool:
 	_in_game = true
-	_menu_stack.clear()
+	# The in-game screens' rows from an earlier visit go, as the original's close
+	# of an in-game screen drops them (engine MenuRuntime::trim_screen_history);
+	# the screen the mission was started from stays under its mark, which a back
+	# here never pops past.
+	if _driver != null:
+		_driver.trim_screen_history()
 	# Menu movies never tick in-game [orig: BinkVideo_UpdateAllSlots
 	# @ 0x5676f0 has exactly one caller, Menu_RenderFrame].
 	if _underlay != null:
@@ -712,9 +730,10 @@ func _on_menu_requested(file: String, target_screen: String) -> void:
 	if not target_screen.is_empty() and not _doc_has_screen(doc, target_screen):
 		push_warning("MenuShell: menu '%s' has no screen '%s'" % [file, target_screen])
 		return
-	var previous := MenuStackEntry.make(_current_file, _driver.get_current_screen())
+	var previous_file := _current_file
+	var previous_screen := _driver.get_current_screen()
 	if open_menu(file, target_screen):
-		_menu_stack.push_back(previous)
+		_driver.push_screen_history(previous_file, previous_screen)
 
 
 func _doc_has_screen(doc: MnuDocument, screen_name: String) -> bool:
@@ -728,20 +747,22 @@ func _doc_has_screen(doc: MnuDocument, screen_name: String) -> bool:
 # the one history retail keeps across every loaded file; with none, nothing
 # happens (retail pops only a non-empty history; docs/mnu/menu-re.md).
 func _on_pop_requested() -> void:
-	if _menu_stack.is_empty():
-		return
-	var prev: MenuStackEntry = _menu_stack.pop_back()
-	open_menu(prev.file if not prev.file.is_empty() else main_menu_file, prev.screen)
+	# In a mission the history's top is the mark on the screen the mission was
+	# started from, which pops nothing (D-MNU-28).
+	var prev := _driver.pop_screen_history()
+	if prev.size() == 2:
+		open_menu(prev[0] if not prev[0].is_empty() else main_menu_file, prev[1])
 
 
 # The named back/quit Command (HIDDEN_BACK, the retail per-control callback):
 # cross-.mnu back first, then resume (in-game) or exit to the desktop.
 func _on_quit_requested() -> void:
 	# Top-level back/quit. Cross-.mnu back first; then it means resume (in-game)
-	# or exit-to-desktop (main menu).
-	if not _menu_stack.is_empty():
-		var prev: MenuStackEntry = _menu_stack.pop_back()
-		open_menu(prev.file if not prev.file.is_empty() else main_menu_file, prev.screen)
+	# or exit-to-desktop (main menu). In a mission the history's top is the mark
+	# on the screen the mission was started from, which pops nothing.
+	var prev := _driver.pop_screen_history()
+	if prev.size() == 2:
+		open_menu(prev[0] if not prev[0].is_empty() else main_menu_file, prev[1])
 	elif _in_game:
 		resume_requested.emit()
 	else:
@@ -953,8 +974,9 @@ func get_selected_expansion() -> String:
 	return _selected_expansion
 
 
+## The screen history's rows, a mission's mark included.
 func get_menu_stack_depth() -> int:
-	return _menu_stack.size()
+	return _driver.get_screen_history_depth() if _driver != null else 0
 
 
 # --- MCP menu-driving seam (the game_menu tool) -------------------------------
@@ -973,7 +995,7 @@ func menu_snapshot(include_widgets: bool = true) -> Dictionary:
 		"screen": _driver.get_current_screen(),
 		"screens": _driver.get_screen_names(),
 		"in_game": _in_game,
-		"stack_depth": _menu_stack.size(),
+		"stack_depth": _driver.get_screen_history_depth(),
 		"underlay": {
 			"active_slots": _underlay.get_active_slot_count() if _underlay != null else 0,
 			"startup_layout": _underlay.is_startup_layout() if _underlay != null else false,

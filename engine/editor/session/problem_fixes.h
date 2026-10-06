@@ -8,6 +8,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include <editor/graph/reference_queries.h>
 #include <editor/model/diagnostic.h>
 #include <editor/session/editor_request.h>
 #include <editor/session/view/session_view.h>
@@ -50,11 +51,17 @@ namespace opennova::editor {
 // import did not bring (import.texture_not_imported): the same, while the project still
 // lacks it. An import whose output is missing: import its source again. An open document
 // whose file changed outside the editor (document.conflict: its Save is refused): Reload
-// it, which asks about its unsaved edits first (not in bulk). Input a
+// it, which asks about its unsaved edits first, or, while it has them, Keep my edits and save
+// over it, a Save that writes over the file once Problems confirmed it (ADR 0046 DI-01; neither
+// in bulk). Input a
 // rewrite drops or normalizes (a Rewrite row: style.line_ending, menu.ignored_input,
 // animation_map.ignored_input, strings.regrouped): Rewrite the file, the
 // row's rewrite_does saying what that does, unless a finding of the file says it does not
-// serialize (a blocks_save row: *.unserializable, *.invalid_input; its Save is refused).
+// serialize (a blocks_save row: *.unserializable, *.invalid_input; its Save is refused). An
+// item on an id the engine keeps for another kind (catalog.reserved_kind): Use an id of its own;
+// one named as a place the engine finds by an id the project lacks (catalog.reserved_name): Use
+// that id; each a Rename everywhere of the item's id (never in bulk). An items.def whose first row
+// is no Null marker (catalog.first_row): Add a Null marker first (an edit of its document).
 // Every other finding has none: Problems goes to its place.
 struct ProblemFix {
 	std::string label;
@@ -75,6 +82,16 @@ struct ProblemFixIndex {
 // The fixes for a finding over the view as it is, the first the one a click applies.
 std::vector<ProblemFix> fixes_for(const Diagnostic &diagnostic, const SessionView &view,
                                   const ProblemFixIndex *index = nullptr);
+
+// Where a Go to on a name nothing resolves lands (the deep-integration plan's DI-17: a Go to always lands
+// somewhere): a symbol's (a string id, a style variable, a menu screen or window, a weapon, ammo or item, a
+// particle effect, a user point) the file where it belongs, as its fix opens it (the file its scope names,
+// the one defining its kind's other names, the table of its kind the game reads), `missing` set; false for a
+// symbol of a kind no file of the project defines, and for a file, which has no place in the project
+// before it is made (its finding's fixes in Problems: Import, Create). `name` as the reference writes it.
+bool missing_target(const ReferenceSubject &missing, const SessionView &view, ReferenceTarget &out);
+// The same for a field's value where it resolves to nothing (graph/reference_queries' reference_status).
+bool missing_target(const FieldUse &field, const Value &value, const SessionView &view, ReferenceTarget &out);
 // Whether the finding has a fix, without planning a Use fix's rename (fixes_for plans it).
 bool has_fixes(const Diagnostic &diagnostic, const SessionView &view, const ProblemFixIndex *index = nullptr);
 // The finding's bulk fixes, in order, without planning a Use fix's rename (a Use fix is

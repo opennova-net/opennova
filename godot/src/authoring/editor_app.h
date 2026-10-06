@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/audio_stream_player.hpp>
 #include <godot_cpp/classes/file_dialog.hpp>
+#include <godot_cpp/classes/input_event.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
@@ -54,6 +55,13 @@ public:
 	void _ready() override;
 	void _exit_tree() override;
 	void _process(double p_delta) override;
+	// The mouse's back and forward buttons (MOUSE_BUTTON_XBUTTON1, XBUTTON2) go Back and Forward (the
+	// navigation history: navigate_back, navigate_forward) wherever the pointer is over the editor's window.
+	// The root's input comes before the ImGui layer's and before any control's (the script device's text
+	// control, a text field, a viewport's picture), so the press is taken here, once, and consumed; an
+	// undocked window of the pass is an OS window of its own, whose input reaches Dear ImGui alone, and
+	// the windows' shortcuts take the buttons there (EditorWindows::shortcuts).
+	void _input(const Ref<InputEvent> &p_event) override;
 
 	// Where the editor keeps its own settings (recent projects, the runtime path): the file its
 	// preferences store keeps them in (opennova::editor::FilePreferencesStore), read when the
@@ -137,6 +145,10 @@ public:
 	// or "playing", and the project file it is of ("" while idle). The wire reads the workspace section's sound.
 	String get_sound_state() const;
 	String get_sound_path() const;
+	// The clip sounds the Shell started in all (DI-04: a previewed clip's events, each sound's voices), and the
+	// order of the last one it took (ProjectSession::clip_sounds_since), for the tests.
+	int64_t get_clip_voices_started() const { return clip_voices_ ? int64_t(clip_voices_->started()) : 0; }
+	int64_t get_clip_sound_seq() const { return int64_t(clip_sound_seq_); }
 
 	// "editor": the variant this library is (the runtime variant has no EditorApp).
 	String get_loaded_variant() const { return "editor"; }
@@ -173,6 +185,9 @@ private:
 	// The pump's half: the session's sound followed (a play of a new serial started, one it no longer plays
 	// stopped), and how it goes reported back (ProjectSession::report_sound: playing, ended, failed).
 	void pump_sound_();
+	// The clip sounds the previewed clip's events fired since the last taken, each started beside those playing
+	// (DI-04, PreviewSoundVoices); every one stopped while no project is open.
+	void pump_clip_sounds_();
 	void show_picker(opennova::editor::PickPurpose p_purpose, bool p_directory);
 	void _on_dir_selected(const String &p_dir);
 	void _on_file_selected(const String &p_file);
@@ -202,11 +217,14 @@ private:
 	// The SubViewports of devices given up before this frame, freed (queued: they go at the frame's
 	// end, after the ImGui pass of this frame drew without them).
 	void free_retired_();
-	// A refresh_changed_sources sent of the Shell's own (S18), when the busy gate takes it: as the
-	// window gains the focus and once a second while it has it.
-	void refresh_changed_sources_();
+	// A refresh_changed_sources sent of the Shell's own (S18, DI-01), when the busy gate takes it: once a
+	// second whatever has the focus (sooner while a file waits), and with `p_all` as the window gains it.
+	void refresh_changed_sources_(bool p_all);
 	// The open_externally view events posted since the last pump, each file opened in its program.
 	void open_externally_events_();
+	// The system pointer shown, or hidden while a picture under the mouse draws the game's (DI-08); set
+	// only as it changes.
+	void show_system_pointer_(bool p_shown);
 
 	std::unique_ptr<ChildProcessPlatform> platform_;
 	// The preferences' store, owned here and outliving the session that reads and writes it.
@@ -238,17 +256,23 @@ private:
 	// with the EditorApp, its players children of it; the session's play it plays (its serial).
 	std::unique_ptr<PreviewSoundPlayer> sound_;
 	uint64_t sound_serial_ = 0;
+	// The clip sounds' player (DI-04), the order of the last clip sound it took, and the project files'
+	// generation its decoded waves are of.
+	std::unique_ptr<PreviewSoundVoices> clip_voices_;
+	uint64_t clip_sound_seq_ = 0;
+	uint64_t clip_wave_generation_ = 0;
 	Node *mcp_service_ = nullptr;
 	int mcp_port_ = 0;
 	String window_title_; // the title last set on the OS window
-	// The external round trip (S18): whether the window has the focus, when the sources were last
-	// checked, the last view event taken, and the file the last open_externally named.
-	bool focused_ = false;
-	uint64_t last_source_check_ms_ = 0;
+	// The external round trip (S18, DI-01): when the files were last checked, the last view event taken, and
+	// the file the last open_externally named.
+	uint64_t last_disk_check_ms_ = 0;
 	uint64_t external_seq_ = 0;
 	bool open_externally_ = true;
 	String last_external_open_;
 	Vector2 last_drop_at_;
+	// The system pointer hidden after the last frame (a picture under the mouse drew the game's, DI-08).
+	bool pointer_hidden_ = false;
 };
 
 } // namespace godot

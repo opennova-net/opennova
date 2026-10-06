@@ -38,6 +38,9 @@ add_subdirectory(../../third_party/godot-cpp godot-cpp)
 add_subdirectory(../../third_party/sqlite opennova_sqlite)
 # Vendored miniz: the BFC1 container decoder's inflate (engine/formats/bfc1).
 add_subdirectory(../../third_party/miniz opennova_miniz)
+# rgbcx: the authoring DXT encoder of the editor core's image import
+# (engine/editor/import/dxt_encode), which the editor variant links.
+add_subdirectory(../../third_party/rgbcx opennova_rgbcx)
 option(OPENNOVA_DEVTOOLS "Build the game's in-engine dev-tool windows (Dear ImGui)" ON)
 # The imgui-godot addon ships no web binaries, so the web build has no host
 # for the dev-tool windows either.
@@ -245,6 +248,7 @@ add_library(opennova_bindings OBJECT
     simulation/simulation_player_loadout.cpp
     simulation/simulation_deploy_screen.cpp
     simulation/simulation_end_round.cpp
+    simulation/simulation_rotation.cpp
     simulation/simulation_player_view.cpp
     simulation/simulation_player_weapon.cpp
     simulation/effect_section_source.cpp
@@ -389,6 +393,7 @@ if(OPENNOVA_EDITOR)
         devtools/imgui_pass_node.cpp
         authoring/child_process.cpp
         authoring/editor_app.cpp
+        authoring/hud_viewport_applier.cpp
         authoring/menu_viewport_applier.cpp
         authoring/mission_viewport_applier.cpp
         authoring/model_viewport_applier.cpp
@@ -397,6 +402,8 @@ if(OPENNOVA_EDITOR)
         authoring/script_edit.cpp
         authoring/script_highlighter.cpp
         authoring/texture_viewport_applier.cpp
+        authoring/effect_viewport_applier.cpp
+        authoring/preview_effects.cpp
         authoring/thumbnail_images.cpp
         authoring/viewport_device.cpp
         authoring/viewport_devices.cpp

@@ -264,17 +264,15 @@ void Weather::weather_render_tick(opennova::world::WeatherState &p_weather) {
 	// otherwise push per tick).
 }
 
-void Weather::run_mission_start_boundary(Object *p_sim, int p_start_time_q8_8,
-		int p_minutes_per_day) {
+void Weather::run_mission_start_boundary(Object *p_sim) {
 	Simulation *sim = Object::cast_to<Simulation>(p_sim);
 	MissionEnvironment *env = _env_node();
-	opennova::bms::Header header{};
-	header.start_time = p_start_time_q8_8;
-	header.minutes_per_day = p_minutes_per_day;
-	runtime_.run_mission_start_boundary(env != nullptr ? &env->state() : nullptr,
-			sim != nullptr ? sim->weather_state() : nullptr, header,
-			[&]() { bind_simulation(sim); },
-			[&]() { sim->complete_mission_start(); });
+	opennova::env::EnvironmentState *state = env != nullptr ? &env->state() : nullptr;
+	if (sim == nullptr || sim->weather_state() == nullptr) {
+		runtime_.prewarm_mission_start(state);
+	} else {
+		(void)sim->start_mission(&runtime_, state, [&]() { bind_simulation(sim); });
+	}
 	_post_runtime(env);
 }
 

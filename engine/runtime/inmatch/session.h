@@ -41,10 +41,6 @@ enum class SessionErrorCode : uint8_t {
 	LoadFailed,
 	SessionLost,
 	TickFailed,
-	// A dedicated host's round-end linger expired: retail stores the mission
-	// exit reason and leaves the mission; a headless host exits its loop.
-	// [orig: Server_TickUpdate @0x51DB57/@0x51DB63 g_MissionExitReason 4/3]
-	RoundEnded,
 };
 
 struct SessionError {

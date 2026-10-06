@@ -1952,6 +1952,8 @@ bool run_roundtrip() {
 	host_config.mission_name = "Cooperative Test Mission";
 	host_config.mission_file = "COOP_TEST.BMS";
 	host_config.expansion = "jox01";
+	// The host's own slot 0 and the joiner's: slot 0 is the authority's row, never a joiner's.
+	host_config.max_players = 2;
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 	                        0x0FE0E112u, nullptr, host_config);
 
@@ -2513,6 +2515,7 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	// With the dictated send boundary closed, framing the joiner's uplinks waits
 	// for the next twelve-tick boundary.
 	if (under_send_holdoff) host_config.send_holdoff_ticks = 12;
+	host_config.max_players = 2; // the host's own slot 0 and the joiner's
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 	                        0x0FE0E112u, nullptr, host_config);
 

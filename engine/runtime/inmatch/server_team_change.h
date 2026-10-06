@@ -18,12 +18,11 @@ namespace opennova::inmatch {
 //  @0x4FCAEC, the walk @0x4FCB07..0x4FCB36 over slot+4 (active) / slot+416]
 int32_t Server_CalcTeamImbalance(const NapiNPServerCtx &ctx);
 
-// Whether a team change would unbalance the teams: only on an in-session
-// authority in a team game that is not co-op; then always while the round
-// was set up under a non-team or co-op type (the round-init stamp is the live
-// type whenever a round runs here: every writer of g_GameType but the mission
-// rotation stamps both, and the round init re-stamps it), else only with
-// autobalance on and a difference above one that reaches both thresholds.
+// Whether the teams want balancing: only on an in-session authority in a team
+// game that is not co-op; then always while the previous mission was set up
+// under a non-team or co-op type (the rotation's previous-mode word; the live
+// type when the context has no rotation), else only with autobalance on and a
+// difference above one that reaches both thresholds.
 // [orig: Server_ShouldAutoBalance @0x4FCB40 — the session/type gates
 //  @0x4FCB40..0x4FCB66, dword_24D212C @0x4FCB68..0x4FCB79, g_AutoBalanceEnabled
 //  @0x4FCB81, the thresholds @0x4FCB8A..0x4FCBA4; dword_24D212C's writers
@@ -31,6 +30,19 @@ int32_t Server_CalcTeamImbalance(const NapiNPServerCtx &ctx);
 //  @0x516AD0, UI_HandleHostSessionStart @0x556E1F, HostDialog_StartSession
 //  @0x5588AE]
 bool Server_ShouldAutoBalance(const NapiNPServerCtx &ctx);
+
+// The round init's team balance: every active slot but the host's own, the
+// longest connected first, moves from the larger team to the smaller while
+// the difference is at least two and the minimum threshold; a moved slot
+// takes the new team (its side's avatar and kit follow the team at its next
+// spawn), and a live entity changes team and joins the team-change list.
+// [orig: Server_AutoBalanceTeams @0x4FCC30 -- the pair list of (time in the
+//  server, slot) over active non-local slots @0x4FCC72..0x4FCC95, the
+//  descending shell sort CPairList_ShellSort @0x526C00 (the call @0x4FCCAC),
+//  the walk @0x4FCCDC..0x4FCDD8: team 1 -> 2 @0x4FCD0E, team 2 -> 1
+//  @0x4FCD8F, the entity's team and avatar @0x4FCD4F..0x4FCD5B /
+//  @0x4FCD9F..0x4FCDAC, CBufferList_AddOrFind @0x4FCD67 / @0x4FCDB8]
+void Server_AutoBalanceTeams(NapiNPServerCtx &ctx, world::World *world);
 
 // A system line: S2C 0x14 [channel 7][sender 255][text], reliable (class 1,
 // 310-flush retention), to every in-match slot (mask 0x80, the listen host

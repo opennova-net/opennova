@@ -82,6 +82,10 @@ PreviewRig resolve_preview_rig(const AssetGraph &graph, const AssetScan &scan, c
 				if (model.empty()) continue;
 				rig.model = model;
 				rig.source = file_of(edge->source) + ": " + edge->record;
+				rig.pairing = usage_target(scan, *edge);
+				rig.record_file = edge->source;
+				rig.record = edge->record;
+				rig.record_field = edge->field;
 				return rig;
 			}
 	}

@@ -41,6 +41,17 @@ inline const char *const kImpactEffectTagWords[kImpactEffectTagCount] = {
     "Shallow water", "Water surface",
 };
 
+// The row a round plays where it strikes the terrain: the surface class the char map (or a placed
+// tile) gives there, shifted into the tag table, a class past it the dirt row (no char map reads 1 ->
+// 5 dirt; an unmapped sector 7 -> 11 water) [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510 result
+// + 4; the terrain leg of the @ 0x4ea6a7 hit switch in Projectile_UpdatePhysics @ 0x4e9d70].
+inline int terrain_impact_effect_tag(int32_t surface) {
+    return (surface >= 0 && surface + 4 < kImpactEffectTagCount) ? surface + 4 : 5;
+}
+// The row a round plays where it crosses the water plane first (the water handler's)
+// [orig: the water impact handler @ 0x4e9b80].
+inline constexpr int kWaterImpactEffectTag = 11;
+
 // Case-insensitive tag lookup, matching the original's scan from index 1
 // [orig: @ 0x40a46a..0x40a48e]; -1 = unknown tag.
 inline int impact_effect_tag_index(const char *name) {

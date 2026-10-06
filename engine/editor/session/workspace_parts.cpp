@@ -134,6 +134,10 @@ constexpr WorkspaceMember kFiles[] = {
 			"Files' filter: the files whose paths hold the text, then those of a kind it names (\"texture\"), "
 			"listed flat; the files query with text lists the same.", kTextLongest },
 	{ "kind", J::String, "The kind Files lists alone, an asset kind's token (\"\" every kind)." },
+	{ "by_cost", J::Boolean,
+			"Files lists what it lists flat (a filter or a kind) by what the game's textures of each file cost at "
+			"full detail, the costliest first, the files the game makes no model texture of after them (the "
+			"texture_budget query's textures)." },
 };
 constexpr WorkspaceMember kImport[] = {
 	{ "filter", J::String,
@@ -201,7 +205,7 @@ constexpr WorkspacePartRow kParts[] = {
 	{ "rename_back", kRenameBack, std::size(kRenameBack), "Rename back." },
 	{ "find", kFind, std::size(kFind), "The Document window's find bar." },
 	{ "project_find", kProjectFind, std::size(kProjectFind), "Find in project." },
-	{ "files", kFiles, std::size(kFiles), "Files' filter and kind." },
+	{ "files", kFiles, std::size(kFiles), "Files' filter, kind and order." },
 	{ "import", kImport, std::size(kImport), "The import dialog's filters, Replace existing files and its checks." },
 	{ "problems", kProblems, std::size(kProblems), "Problems' filters and its confirmation." },
 	{ "document", kDocument, std::size(kDocument), "What a document's views show of it: filters, kinds, order, a menu's and a texture's fields." },
@@ -611,8 +615,9 @@ bool set_files(Change &change, const JsonValue &part) {
 	if (const JsonValue *filter = part.get("filter")) files.filter = filter->string;
 	if (const JsonValue *kind = part.get("kind"); kind && !kind_named(kind->string, files.kind))
 		return change.refuse("No kind of file is \"" + kind->string + "\".");
+	if (const JsonValue *by_cost = part.get("by_cost")) files.by_cost = by_cost->boolean;
 	WorkspaceView::Files &held = change.workspace().files;
-	if (files.filter == held.filter && files.kind == held.kind) return false;
+	if (files.filter == held.filter && files.kind == held.kind && files.by_cost == held.by_cost) return false;
 	held = std::move(files);
 	return true;
 }
@@ -1327,6 +1332,7 @@ JsonValue workspace_to_json(const SessionView &view) {
 	JsonValue files = JsonValue::make_object();
 	files.set("filter", text(workspace.files.filter));
 	files.set("kind", kind_json(workspace.files.kind));
+	files.set("by_cost", flag(workspace.files.by_cost));
 	out.set("files", std::move(files));
 	// The import dialog's, with the checks counted (the import_preview query pages each row's) and the plan they
 	// index.

@@ -128,6 +128,9 @@ JsonValue project_section(const SessionView &view) {
 	expansion.set("builds_on", json_string(document.expansion.builds_on));
 	out.set("expansion", std::move(expansion));
 	out.set("file_count", json_number(double(view.project.scan->entries.size())));
+	// What another program changed that the editor has not read yet (DI-01).
+	out.set("outside_waiting", json_number(double(view.project.outside_waiting)));
+	out.set("outside_sweeping", boolean(view.project.outside_sweeping));
 	return out;
 }
 
@@ -164,8 +167,13 @@ JsonValue requirements_section(const SessionView &view) {
 JsonValue documents_section(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
 	out.set("active", json_string(view.documents.active));
-	// The file whose page shows beside the documents (the file_page query reads it), where one does.
-	if (!view.documents.page.empty()) out.set("page", json_string(view.documents.page));
+	// The file whose page shows beside the documents (the file_page query reads it), where one does, and
+	// what the Go to that showed it named on it (DI-17: the record's line it marks).
+	if (!view.documents.page.empty()) {
+		out.set("page", json_string(view.documents.page));
+		if (!view.documents.page_locator.empty()) out.set("page_locator", json_string(view.documents.page_locator));
+		if (!view.documents.page_field.empty()) out.set("page_field", json_string(view.documents.page_field));
+	}
 	JsonValue open = JsonValue::make_array();
 	for (const auto &document : view.documents.open) {
 		if (!document)
@@ -314,6 +322,11 @@ JsonValue dialogs_section(const SessionView &view) {
 			preview.set("field", json_string(rename.field));
 		preview.set("old_name", json_string(rename.old_name));
 		preview.set("new_name", json_string(rename.new_name));
+		// A move's way back (DI-03): the folder the file goes back to ("" the top level).
+		if (rename.move) {
+			preview.set("move", boolean(true));
+			preview.set("folder", json_string(rename.folder));
+		}
 		JsonValue sites = JsonValue::make_array();
 		for (const RenameSite &site : *rename.sites) {
 			JsonValue entry = JsonValue::make_object();
@@ -442,6 +455,36 @@ JsonValue output_section(const SessionView &view) {
 	return out;
 }
 
+// A place of the navigation history: its pane, its file, its words, and in a document the record it
+// names (its locator, and its address while the document read stands) or a text's line; on a page, the
+// record and field a Go to marked there.
+JsonValue navigation_place_to_json(const NavigationPlace &place) {
+	JsonValue out = JsonValue::make_object();
+	out.set("pane", json_string(navigation_pane_token(place.pane)));
+	out.set("path", json_string(place.path));
+	out.set("label", json_string(place.label));
+	if (!place.locator.empty()) out.set("locator", json_string(place.locator));
+	if (!place.field.empty()) out.set("field", json_string(place.field));
+	if (place.record.row) out.set("record", address_to_json(place.record));
+	return out;
+}
+
+JsonValue navigation_places_to_json(const std::vector<NavigationPlace> &places) {
+	JsonValue out = JsonValue::make_array();
+	for (const NavigationPlace &place : places) out.push(navigation_place_to_json(place));
+	return out;
+}
+
+// The navigation history: whether Back and Forward go anywhere, and their places, nearest first.
+JsonValue navigation_section(const SessionView &view) {
+	JsonValue out = JsonValue::make_object();
+	out.set("can_back", boolean(view.navigation.can_back()));
+	out.set("can_forward", boolean(view.navigation.can_forward()));
+	out.set("back", navigation_places_to_json(view.navigation.back));
+	out.set("forward", navigation_places_to_json(view.navigation.forward));
+	return out;
+}
+
 // The view events held, by seq (the events query pages them).
 JsonValue events_section(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
@@ -459,7 +502,9 @@ constexpr ViewSectionRow kSections[] = {
 	{ S::Project, "project", concern_set({ C::Project, C::Files, C::Preferences }), project_section,
 			"The open project: open, its root, title, id, target game, features and expansion {name, "
 			"builds_on} (S16: \"\" a standalone project, \"\" the base game), file_count (the files query "
-			"pages the files), and quit_requested; open or not, install_expansions, the game install's "
+			"pages the files), outside_waiting and outside_sweeping (DI-01: the files another program changed "
+			"that wait to be read, once they hold still, and whether the sweep a focus-in began over every file "
+			"runs), and quit_requested; open or not, install_expansions, the game install's "
 			"expansions [{name, title, description}] (its folder's name, the Mods list's name and "
 			"description), new_project_expansions, the same of the install a new project opens with "
 			"(the one last chosen), install_check, the last install checked (check_install, new_project's): its "
@@ -473,7 +518,9 @@ constexpr ViewSectionRow kSections[] = {
 	{ S::Documents, "documents", concern_set({ C::Documents, C::DocumentSet, C::ActiveDocument }),
 			documents_section,
 			"The open documents in short (path, kind, dirty, revision, can_undo, can_redo; the "
-			"documents query answers each whole) and the active one." },
+			"documents query answers each whole) and the active one; page, the file whose page shows "
+			"(file_page answers it), with page_locator and page_field, the record and field the Go to "
+			"that showed it marked there." },
 	{ S::Selection, "selection", concern_set({ C::Selection }), selection_section,
 			"The selection in the active document, over any of its rows: its primary record and "
 			"its records, every selected one ({row, kind, child}), and the clipboard's size." },
@@ -538,6 +585,12 @@ constexpr ViewSectionRow kSections[] = {
 			"apply_confirmation raises}, confirm_serial}) and each open document's views "
 			"(documents [{path, active, filter, kinds, all_rows, sort, every, inspector_filter, new_window_type, "
 			"remove_screen, remap_from, remap_to}])." },
+	{ S::Navigation, "navigation", concern_set({ C::Navigation }), navigation_section,
+			"The navigation history (Back and Forward: navigate_back, navigate_forward): can_back, can_forward, "
+			"and the places each goes to, nearest first (back, forward: [{pane: document, page or files, path, "
+			"label (its words, as Back's tooltip and list say it), locator? (a record's, or a text's "
+			"line:column; on a page the record a Go to marked), field? (on a page, that record's field), "
+			"record? {row, kind, child} while the document read stands}])." },
 };
 
 static_assert(std::size(kSections) == kViewSectionCount, "every view section has exactly one row");

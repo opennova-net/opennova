@@ -1,11 +1,12 @@
 // The extractors: what one file references and defines, from its bytes through the
 // engine's own parser for its kind (extract_from_bytes). The record types (the def
-// catalogs, the string tables, the menus, the stylesheets, the models, the clips and the
-// animation tables) walk their schema: a field's reference, and the symbol a field
-// defines (a weapon's name, a string's key, a menu's screen or window by the NAME its
+// catalogs, the string tables, the menus, the stylesheets, the models, the clips, the
+// animation tables and the environments) walk their schema: a field's reference, and the symbol a
+// field defines (a weapon's name, a string's key, a menu's screen or window by the NAME its
 // ACTIONs find it by), and the record sets of the collections a Record reference names (a
 // model's CTRL registers and MTRX rows, by their index); a text type reads the names its text
-// makes, each at its span (a script's operands, S13 D9); the native kinds (an environment, the
+// makes, each at its span (a script's operands, S13 D9), and the names it defines (a shader's tags); the
+// native kinds (the HUD layout, the
 // avatar table, a particle file, a face animation) read their parsed structs. The names a native text (a
 // terrain, an environment, a particle file, the HUD layout, a face animation) writes are rewritable: a
 // rename finds each in the text by reading it again (graph/native_text_sites.h).
@@ -30,7 +31,6 @@
 #include <editor/project/project_files.h>
 #include <formats/avatars/avatars.h>
 #include <formats/def/def.h>
-#include <formats/env/env.h>
 #include <formats/grm/grm.h>
 #include <formats/particle/parser.h>
 #include <formats/trn/trn_io.h>
@@ -170,33 +170,6 @@ void extract_record(const Document &document, const NodeAddress &address, Extrac
 	}
 }
 
-bool extract_environment(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
-	std::istringstream input(std::string(bytes.begin(), bytes.end()));
-	env::Config config;
-	std::string message;
-	if (!env::load_env(input, config, message)) {
-		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, message, name);
-		return false;
-	}
-	auto edge = [&](const char *field, ReferenceKind kind, const std::string &value, int32_t loader_arg = -1) {
-		if (value.empty()) return;
-		out.edges.push_back(edge_of(name, std::string(), field, kind, value, std::string(), true));
-		out.edges.back().loader_arg = loader_arg;
-	};
-	// The cloud layers, through ARCHIVE [orig: Terrain_InitRenderingResources @ 0x578A97], each name's
-	// extension made PCX as the parser stores it [orig: TimeOfDay_ParseProperty @ 0x57CC41..0x57CC4B,
-	// sky_map2's @ 0x57CC83..0x57CC8D] (kTextureArgPcx).
-	for (const auto &[field, map] : {std::pair<const char *, const std::string *>{"sky_map1", &config.sky_map1},
-	                                 {"sky_map2", &config.sky_map2}})
-		if (!map->empty())
-			out.edges.push_back(texture_edge(name, std::string(), field, *map, TextureRoleId::SkyCloud, kTextureArgPcx));
-	edge("sun_3di", ReferenceKind::Model, config.sun_3di);
-	edge("moon_3di", ReferenceKind::Model, config.moon_3di);
-	edge("glare_3di", ReferenceKind::Model, config.glare_3di);
-	edge("star_3di", ReferenceKind::Model, config.star_3di);
-	return true;
-}
-
 // The HUD layout (hudpos.def, ADR 0046 S14): the two fonts the HUD draws its text with, each
 // stance's icon, the static frames, the two status icons, the weapon bar's two textures and each
 // vehicle panel's three, by the names the HUD's loaders are handed [orig: HUD_ParseHudposToken
@@ -328,8 +301,16 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, "The particle file could not be read.", name);
 		return false;
 	}
-	for (const particle::EffectDef &effect : file.effects)
-		if (!effect.id.empty()) out.symbols.push_back(symbol_of(ReferenceKind::Particle, effect.id, name, effect.id));
+	// Each effect at the place its id is written (DI-14: the particle type is a text, so a Go to opens it
+	// there and its effect preview shows the effect).
+	for (const particle::EffectDef &effect : file.effects) {
+		if (effect.id.empty()) continue;
+		out.symbols.push_back(symbol_of(ReferenceKind::Particle, effect.id, name, effect.id));
+		if (effect.id_line > 0) {
+			out.symbols.back().locator = TextDocument::locator(size_t(effect.id_line), size_t(effect.id_column));
+			out.symbols.back().line = size_t(effect.id_line);
+		}
+	}
 	for (const particle::ParticleDef &definition : file.particles) {
 		for (size_t g = 0; g < definition.graphics.size(); ++g) {
 			const particle::GraphicLayer &layer = definition.graphics[g];
@@ -404,7 +385,6 @@ struct NativeKind {
 constexpr NativeKind kNativeKinds[] = {
 	{AssetKind::HudPosDefs, extract_hudpos},
 	{AssetKind::Terrain, extract_terrain},
-	{AssetKind::Environment, extract_environment},
 	{AssetKind::AvatarDefs, extract_avatars},
 	{AssetKind::Particles, extract_particles},
 	{AssetKind::FaceAnimation, extract_face_animation},
@@ -414,6 +394,41 @@ NativeExtractor native_extractor(AssetKind kind) {
 	for (const NativeKind &native : kNativeKinds)
 		if (native.kind == kind) return native.extract;
 	return nullptr;
+}
+
+// A native kind's file read through the engine's own parser, from its bytes decoded as the game's loader
+// decodes them (or a text document's text, which its load decoded): false when the parser does not read
+// it. A native file holds its names in the game's code page (Windows-1252), the project's file names and
+// every document's names are UTF-8: its names compared in one encoding, UTF-8 (the plain-words lane; a
+// rename of a native text's name writes it back in its code page, native_text_sites).
+bool extract_native(NativeExtractor extract, const std::string &name, const std::vector<uint8_t> &decoded, Extracted &out,
+                    Diagnostic &error) {
+	const size_t edges = out.edges.size(), symbols = out.symbols.size();
+	const bool read = extract(name, decoded, out, error);
+	for (size_t i = edges; i < out.edges.size(); ++i) {
+		GraphEdge &edge = out.edges[i];
+		edge.value = cp1252_to_utf8(edge.value);
+		edge.record = cp1252_to_utf8(edge.record);
+		edge.fallback = cp1252_to_utf8(edge.fallback);
+	}
+	for (size_t i = symbols; i < out.symbols.size(); ++i) {
+		GraphSymbol &symbol = out.symbols[i];
+		symbol.display = cp1252_to_utf8(symbol.display);
+		symbol.name = symbol_name(symbol.kind, symbol.display);
+		symbol.record = cp1252_to_utf8(symbol.record);
+	}
+	return read;
+}
+
+// Whether a type's documents are what the graph reads of their file: a record type's, or a text type's
+// whose text names references (DocumentType::references) or defines names (DocumentType::definitions,
+// a shader's tags). A text type whose text does neither (a native kind held as a text: DI-06's text
+// type over its kinds, the particle type of DI-14) leaves its file's reading to the kind's native
+// extractor.
+bool read_through_document(const DocumentType &type) {
+	const DocumentContent content = document_content(type);
+	return content == DocumentContent::Records ||
+	       (content == DocumentContent::Text && (type.references || type.definitions));
 }
 
 } // namespace
@@ -452,7 +467,28 @@ bool reference_target(const FieldUse &field, const Value &value, ReferenceKind &
 
 void extract_from_text(const TextDocument &document, Extracted &out) {
 	const DocumentType *type = document_type_for(document.kind());
-	if (!type || !type->references) return;
+	if (!type) return;
+	// The names the text defines (a shader's tags), each a symbol defined at its span.
+	if (type->definitions) {
+		std::vector<TextDefinition> definitions;
+		type->definitions(document, definitions);
+		for (const TextDefinition &definition : definitions) {
+			GraphSymbol symbol = symbol_of(definition.kind, cp1252_to_utf8(definition.name), document.path());
+			symbol.locator = TextDocument::locator(definition.span.line, definition.span.column);
+			out.symbols.push_back(std::move(symbol));
+		}
+	}
+	// A native kind held as a text (DI-06: the HUD layout, the avatars; the particle type, DI-14): its text
+	// as it stands read by the engine's own parser, as its file is, so what it names follows its edits; a
+	// text the parser does not read names nothing (its own validation says why).
+	if (!type->references) {
+		if (const NativeExtractor extract = native_extractor(document.kind())) {
+			Diagnostic error;
+			const std::string &text = document.text();
+			extract_native(extract, document.path(), std::vector<uint8_t>(text.begin(), text.end()), out, error);
+		}
+		return;
+	}
 	std::vector<TextReference> references;
 	type->references(document, references);
 	for (TextReference &reference : references) {
@@ -537,7 +573,7 @@ bool graph_reads_kind(AssetKind kind) {
 	if (type) {
 		const DocumentContent content = document_content(*type);
 		if (content == DocumentContent::Records) return true;
-		if (content == DocumentContent::Text && type->references) return true;
+		if (content == DocumentContent::Text && (type->references || type->definitions)) return true;
 	}
 	return native_extractor(kind) != nullptr;
 }
@@ -546,43 +582,24 @@ bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vect
                         const std::string &game, Extracted &out, Diagnostic &error) {
 	if (!graph_reads_kind(kind))
 		return true;
-	// A record type's document, its records extracted; a text type's, its text's references; a type
-	// of another kind falls through to a native extractor, or gives nothing.
-	if (const DocumentType *type = document_type_for(kind)) {
-		const DocumentContent content = document_content(*type);
-		if (content == DocumentContent::Records || content == DocumentContent::Text) {
-			const std::unique_ptr<DocumentBase> document = type->make();
-			if (!document->load_bytes(bytes, name, kind, game, error)) return false;
-			if (const Document *records = records_of(*document))
-				extract_from_document(*records, out);
-			else
-				extract_from_text(*text_of(*document), out);
-			return true;
-		}
+	// A record type's document, its records extracted; a text type's whose text names references, its
+	// text's; any other kind (a text type over a native kind among them: DI-06's, the particle type of
+	// DI-14) falls through to a native extractor, or gives nothing.
+	if (const DocumentType *type = document_type_for(kind); type && read_through_document(*type)) {
+		const std::unique_ptr<DocumentBase> document = type->make();
+		if (!document->load_bytes(bytes, name, kind, game, error)) return false;
+		if (const Document *records = records_of(*document))
+			extract_from_document(*records, out);
+		else
+			extract_from_text(*text_of(*document), out);
+		return true;
 	}
 	const NativeExtractor extract = native_extractor(kind);
 	if (!extract) return true;
 	// Decoded as the game's loader decodes a stored file (a document decodes its own).
 	std::vector<uint8_t> decoded = bytes;
 	vfs_decode_payload(decoded, gameprofile::gameprofile_scr_policy_for_code(game.c_str()));
-	const size_t edges = out.edges.size(), symbols = out.symbols.size();
-	const bool read = extract(name, decoded, out, error);
-	// A native file holds its names in the game's code page (Windows-1252), the project's file names and
-	// every document's names are UTF-8: its names compared in one encoding, UTF-8 (the plain-words lane;
-	// a rename of a native text's name writes it back in its code page, native_text_sites).
-	for (size_t i = edges; i < out.edges.size(); ++i) {
-		GraphEdge &edge = out.edges[i];
-		edge.value = cp1252_to_utf8(edge.value);
-		edge.record = cp1252_to_utf8(edge.record);
-		edge.fallback = cp1252_to_utf8(edge.fallback);
-	}
-	for (size_t i = symbols; i < out.symbols.size(); ++i) {
-		GraphSymbol &symbol = out.symbols[i];
-		symbol.display = cp1252_to_utf8(symbol.display);
-		symbol.name = symbol_name(symbol.kind, symbol.display);
-		symbol.record = cp1252_to_utf8(symbol.record);
-	}
-	return read;
+	return extract_native(extract, name, decoded, out, error);
 }
 
 bool extract_from_asset(const ProjectPaths &paths, const ProjectDocument &project, const AssetEntry &asset,

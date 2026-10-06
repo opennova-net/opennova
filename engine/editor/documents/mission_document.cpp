@@ -501,7 +501,7 @@ bool MissionDocument::accept_list_edit(const Node &row, const ListChange &change
 	return true;
 }
 
-bool MissionDocument::accept_step(const EditStep &step, const StagedRows &rows, std::string &error) const {
+bool MissionDocument::accept_step(const EditStep &step, const StagedRows &rows, StepRefusal &refusal) const {
 	for (const RowSwap &swap : step.swaps) {
 		// The weapon loadout as the writer would write it must read back as the same entries (Save
 		// writes it from scratch; the game's reader takes a fourth string as an entry's damage class
@@ -510,7 +510,7 @@ bool MissionDocument::accept_step(const EditStep &step, const StagedRows &rows, 
 		if (swap.after && swap.after->kind == k(K::Mission)) {
 			size_t first = 0;
 			if (!bms::loadout_reads_back(static_cast<const MissionRow &>(*swap.after).native.loadout, first)) {
-				error = "Weapon loadout entry " + std::to_string(first + 1) +
+				refusal.message = "Weapon loadout entry " + std::to_string(first + 1) +
 				        " would read back as another: the game reads an entry's fourth string as its damage class only "
 				        "when it is a nonzero number or holds no letter (else as the next entry's name, every later entry "
 				        "shifting), and a three-string entry before a name of that form as the same. Give the damage class "
@@ -525,14 +525,14 @@ bool MissionDocument::accept_step(const EditStep &step, const StagedRows &rows, 
 			for (const auto &other : rows.rows())
 				if (other.get() != swap.after.get() && other->kind == k(K::Area) &&
 				    static_cast<const AreaRow &>(*other).native.id == id) {
-					error = "Every zone id 1 to 99 is taken: the new area trigger has none of its own. Remove an "
+					refusal.message = "Every zone id 1 to 99 is taken: the new area trigger has none of its own. Remove an "
 					        "area trigger first.";
 					return false;
 				}
 		}
 		const NodeKind kind = swap.before ? swap.before->kind : swap.after ? swap.after->kind : -1;
 		if ((kind != k(K::Mission) && kind != k(K::WaypointPath)) || swap.in_place()) continue;
-		error = kind == k(K::Mission) ? "A mission keeps its mission row where it is."
+		refusal.message = kind == k(K::Mission) ? "A mission keeps its mission row where it is."
 		                              : "A mission keeps its 128 waypoint paths where they are: edit their stops.";
 		return false;
 	}

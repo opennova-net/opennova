@@ -111,7 +111,9 @@ constexpr RequestField kFields[] = {
 			"it, else its Main view), device {width, height} the size its device draws at (1 to "
 			"8192), clock {playing, rate, time_ms, ticks} the preview clock every viewport reads, "
 			"options the kind's (a menu's show_hidden, force_id, force_state, checked, popup_open, "
-			"focus; a model's lod, ctrl, overlays, rig_model), camera a model's {yaw, pitch, "
+			"focus, zoom, scale, snap, pointer (the game's pointer drawn, true or false) and pointer_at "
+			"([x, y] in design units where the pointer stands, as the mouse would, or null); a model's "
+			"lod, ctrl, overlays, rig_model), camera a model's {yaw, pitch, "
 			"distance, target, frame}, each member optional. A change of the clock alone with no "
 			"path sets the clock whatever document is active (none, or one that shows in no "
 			"viewport)." },
@@ -166,7 +168,9 @@ constexpr RequestField kFields[] = {
 			"An import brings the files the chosen ones need." },
 	{ F::Replace, "replace", J::Boolean,
 			"An import replaces the project's files of the same names." },
-	{ F::Force, "force", J::Boolean, "A source imports again even when it did not change." },
+	{ F::Force, "force", J::Boolean,
+			"A source imports again even when it did not change; a save writes over a file changed outside "
+			"the editor (DI-01: document.conflict's Keep my edits)." },
 	{ F::AskName, "ask_name", J::Boolean,
 			"And asks the new name (Files' Rename..., the Rename everywhere dialog)." },
 	{ F::OpenFirst, "open_first", J::Boolean,
@@ -180,7 +184,8 @@ constexpr RequestField kFields[] = {
 	{ F::All, "all", J::Boolean,
 			"Every file of the game install chosen (its archives' and the loose files the game ships "
 			"beside them: the music banks, the videos, the NovaWorld table), with no walk: the closure "
-			"of everything is everything." },
+			"of everything is everything; a refresh_changed_sources looks at every file of the project "
+			"(DI-01: the editor gaining the focus)." },
 	{ F::Planned, "planned", J::Boolean,
 			"An import takes the open import preview's checked rows as the dialog's Import takes them (the "
 			"workspace's import checks: a new plan's own, then what was checked and unchecked; each the project "
@@ -202,6 +207,14 @@ constexpr RequestField kFields[] = {
 	{ F::Report, "report", J::Boolean,
 			"A build's result panel opens over the editor as it ends (true when left out); false leaves the "
 			"person's work as it is (the build section and the operation say what it came to)." },
+	{ F::Steps, "steps", J::Integer,
+			"How many places of the navigation history a navigate_back or a navigate_forward goes (1 when left "
+			"out: the nearest; the navigation section lists them nearest first, as Back's and Forward's lists "
+			"do)." },
+	{ F::Folder, "folder", J::String,
+			"A folder of the project, from its top level, '/'-separated (\"defs\", \"art/terrain\"; \"\" or \"/\" the "
+			"top level): where a move puts a file. Made when it is not there; never one outside the project, a "
+			"dot-folder (the cache) or the export folder." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

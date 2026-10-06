@@ -74,6 +74,8 @@ Exit codes:
 | `password`, `locked`, `dedicated`, `tracers`, `skins` | booleans |
 | `country`, `region`, `time_of_day`, `time_left_minutes` | Country code, Jungle/Desert/Snow, Dawn/Day/Dusk/Night, whole minutes |
 
-The Players column is the number of listed players. A dedicated server's
-CountryName, Lang and TZB columns are the machine's own locale. Unknown keys are
-ignored. A file that fails to parse keeps the previous listing.
+The Players column is the number of listed players, plus the host's own slot
+for a listen host (`"dedicated": false`) that lists no slot 0. The CountryName,
+Lang and TZB columns are the machine's own locale, sent when the gate's reply
+sets METEXT, as retail does whatever the server type. Unknown keys are ignored.
+A file that fails to parse keeps the previous listing.

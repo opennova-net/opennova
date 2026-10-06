@@ -144,6 +144,7 @@ class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card
 #include <runtime/devtools/rays_snapshot.h>
 #include <runtime/anim/adm_root_motion.h> // the engine-side IRootMotionSource (ADR 0028)
 
+#include <runtime/inmatch/host_boot.h>                // the one host boot, its two phases (ADR 0051 d4)
 #include <runtime/inmatch/host_role.h>                // HostRole: the listen/dedicated host's state + frame (ADR 0043 d3)
 #include <runtime/inmatch/joiner_role.h>              // JoinerRole: the joiner's runtime, bridge and frame
 #include <runtime/inmatch/local_role.h>               // LocalRole: the bare no-net tick
@@ -564,6 +565,7 @@ private:
 	// root stamps from the mounted resource root. Empty = no override lookup.
 	std::string host_game_root_;
 	SimulationAssetState assets_;
+	opennova::inmatch::HostBoot host_boot_; // the load's two-phase boot (boot_mission -> start_mission)
 	opennova::world::ScriptVoiceChannel::SetResolver voice_set_resolver_;
 	SimulationPresentState present_;
 	SimulationPlayerState player_;
@@ -620,6 +622,7 @@ private:
 	// The ONE writer of the kind-derived world rules (rules.projectile_authority,
 	// rules.mp_session): the fresh kernel at reset_world and every role install.
 	void apply_session_rules();
+	bool prepare_session_load(); // close the previous session, configure the role
 	bool begin_session_load();
 	void complete_session_load();
 	void fail_session_load(const char *p_message);
@@ -855,11 +858,10 @@ private:
 	void install_app_id();
 	// Install the retained CD identity cookie (packed PUB* blob) on the runtime.
 	void install_join_cd_cookie();
-	// The per-load host bring-up record: mode 3 -> create_session(&host_loop) [connection-table
-	// reset + Server_InitNewRoundState] -> the faithful host-player auto-spawn, over the kernel's
-	// world/mission. The Godot-fed context installs (mission text, .til bytes, GameConfig from
-	// the UI host config) sit beside the shared core. Staged on the
-	// host role right before the kernel boots; the role's bring_up consumes it.
+	// The host's session record for a mission of `p_game_type` (the UI host config or the SP
+	// listen server's); host_bringup() adds the retained .til, text and Server strings for the
+	// in-memory loads, which stage it themselves (the file boot's engine phase A stages its own).
+	opennova::inmatch::HostConfig host_session_cfg(uint32_t p_game_type);
 	opennova::inmatch::HostBringup host_bringup();
 	// The per-frame host owner loop: the ONE inmatch::HostRole::run_tick over the kernel
 	// (drain -> pre-tick -> host_session_pump -> local pumps -> adm ground), with the
@@ -898,8 +900,12 @@ public:
 	// (null detaches); remembered so the World's death releases the owner's
 	// pointer before the environment can read a freed WeatherState.
 	void set_weather_render_owner(Weather *p_owner);
-	// Complete the native mission-start boundary after the weather seed.
-	bool complete_mission_start();
+	// Phase B of the one host boot (inmatch/host_boot.h): the water plane, the mission-start
+	// boundary over the shell's weather device (null = the boot's own) and the session's load end.
+	bool start_mission(opennova::env::WeatherRuntime *p_weather,
+			opennova::env::EnvironmentState *p_environment, const std::function<void()> &p_bind);
+	// An isolated mission root's start (no world load): the load ends, the mission start pending.
+	void finish_load_without_environment() { complete_session_load(); }
 	// The precipitation drop pool's per-render update + compile for a camera
 	// (renderer/precipitation_frame.h carries the cites): the compiled frame the
 	// Precipitation node streams (drops, five floats per vertex, color, snow);
@@ -947,8 +953,10 @@ private:
 	// The shared post-kernel-boot binding legs: session-header capture, HUD
 	// map zoom, score-row re-resolve, and the held-WacProgram re-apply.
 	void finish_kernel_boot();
-	// The kernel boot's bringup_net_session hook for this sim's role.
+	// The kernel boot's bringup_net_session hook: the role's bring_up(), then role_bringup_tail.
 	std::function<void()> role_bringup_hook();
+	std::function<void(bool)> role_bringup_tail();
+	void ensure_item_replication_catalog(const Ref<ItemDatabase> &p_item_db);
 	void apply_host_session_mission_header(const opennova::bms::File &file);
 
 protected:
@@ -1009,20 +1017,14 @@ public:
 	// shell owns the resource root, so it read_file()s the .til (named by the .trn tileinfo) and passes
 	// the bytes here BEFORE loading the mission. Empty / not-called => 0x45 is faithfully skipped.
 	void set_terrain_til_data(const PackedByteArray &p_til_bytes);
-	// Feed the raw RTXT mission string table before load. Native lookup avoids a
-	// UTF-8 round-trip and resolves briefing2's retail briefing fallback.
-	void set_mission_text_data(const PackedByteArray &p_rtxt_bytes);
-	// Overlay the active game-type scoring row from retail's loose VERSION 40
-	// score.ini. Returns false for absent, malformed, or unsupported data.
-	bool set_score_config_data(const PackedByteArray &p_score_ini_bytes);
 
 	// --- co-op LAN host (Increment C) ------------------------------------
-	// Turn the sim into a co-op LAN HOST: bind a UDP listen socket on `p_port`
-	// (0 = an OS-assigned ephemeral port) and accept joiners through the
-	// witnessed session handshake, spawning each into the live World on join.
-	// Implies enable_listen_server(true) — call BEFORE loading a mission.
-	// Returns false if the socket can't bind.
+	// Turn the sim into a co-op LAN HOST: bind a UDP listen socket on `p_port` (0 = OS-assigned) and
+	// accept joiners through the witnessed session handshake, spawning each into the live World on
+	// join. Implies enable_listen_server(true): call BEFORE loading a mission. False if the socket
+	// can't bind. _on hosts on a NovaWorld session's bound pump instead (one socket, D-NET-346).
 	bool enable_host_listen(int p_port);
+	bool enable_host_listen_on(const Ref<UdpPump> &p_pump);
 	bool is_host_listening() const {
 		const opennova::inmatch::RoleKind kind = session_.kind();
 		return kind == opennova::inmatch::RoleKind::ListenHost ||
@@ -1191,9 +1193,6 @@ public:
 	// matching Game_Run's continue-after-error behavior.
 	bool load_charattr_challenge(
 			const Ref<class ResourceRoot> &p_resource_root);
-	// Ship the 0x46 ClientGoodBye burst now (idempotent; joiner-only no-op otherwise). The
-	// destructor calls this too, so explicit calls are only needed when the socket must close
-	// before the sim is freed.
 	// Retail connects before constructing the wire-header world: drive only the socket/session
 	// legs until the terminal pre-world sync marker has been received and ACKed
 	// (S2C 0x7B identifies the mission earlier), then resume the same connection
@@ -1245,6 +1244,10 @@ public:
 	// g_MissionExitReason as stored (0 none): the NovaWorld exit, a mapped disconnect record,
 	// else the world's (the SP end screens' timeout, the round-over keys, the in-game RESTART).
 	int get_mission_exit_reason() const;
+	// The map rotation (D-NET-331, inmatch/map_change.h; simulation_rotation.cpp): the host's
+	// map change (the next map's file; empty when the rotation ended) and the joiner's reload.
+	String begin_host_map_change();
+	bool begin_joiner_reload();
 	// The round-over leg of the special-key chain (inmatch::round_over_key): the
 	// hud_round_over bits for a Windows VK and the RESTART key.
 	int round_over_key(int p_vk, int p_restart_vk);
@@ -1314,8 +1317,6 @@ public:
 	bool request_local_player_medic();
 	int local_medic_request_cooldown_ticks() const;
 	int local_medic_request_serial() const;
-	// The rtxt "Server" formats for the host's broadcasts (STRSRV_MEDREQ, C2Blue, C2Red).
-	void set_server_text(const String &p_medic, const String &p_to_blue, const String &p_to_red);
 	bool send_team_change_request(); // DEATH's SWAP_TEAMS (ClientRuntime::queue_team_change_request)
 	bool local_player_dead() const; // the one role-agnostic read of the local player's dead bit
 	void broadcast_dialog_line(const std::string &p_dialog, int p_line); // Server_BroadcastDialogLine
@@ -1760,8 +1761,7 @@ public:
 	// fp_viewmodel_spec (engine: runtime/inmatch/joiner_role.cpp)). `character_arms` is the local
 	// player's resolved combo arms graphic (retail's CharacterEntity arms model,
 	// the ONLY arms source — weapon.def gfx1a/gfx1b are discarded tokens);
-	// has_def=false is the bring-up path; an empty gun on a resolved def means
-	// submit no FP gun.
+	// has_def=false (no equipped def) or an empty gun submits nothing.
 	// The witnessed viewmodel placement units, re-exported from engine
 	// renderer/fp_viewmodel_spec.h.
 	static double weapon_def_pos_scale();
@@ -1769,7 +1769,6 @@ public:
 	static Vector3 viewmodel_fallback_tpos_units();
 	static Vector3 viewmodel_fallback_rot_bias_deg();
 	static double viewmodel_pass_near_z();
-	static String viewmodel_bringup_fallback_weapon();
 	// Player-view calibration re-exports (world/player_view.h).
 	static double player_eye_min_above_position();
 	static double player_non_person_eye_bump();
@@ -2338,7 +2337,8 @@ public:
 	// camera (Godot space), fog distance and g_EnvTerrainLightCombined
 	// (EnvFile.combine_terrain_light(sun, sky) — the sun+sky combine).
 	// { vertices (PackedVector3Array, Godot axes; world space for shared-ring
-	//   batches, SECTION-LOCAL for entity-ring batches), uvs, colors,
+	//   batches, SECTION-LOCAL for entity-ring batches, which world_vertices
+	//   from batch_world_first also hold in world space, -1 none), uvs, colors,
 	//   batch_owner/texture/section/flags(bit0 entity_local, bit1 building)/
 	//   first/count, batch_bms_id, batch_spawn_origin, strip_names,
 	//   slots_live, slots_culled, rings_leased }. Empty without a world.
@@ -2347,9 +2347,9 @@ public:
 	// The same list over the weapon Inset view's section masks (world/occlusion.h OcclusionView).
 	Ref<ScarDrawList> get_scar_draw_list_inset(const Vector3 &p_camera_godot, float p_fog_distance,
 			const Color &p_terrain_light) const;
-	// The Scar_RenderCache owner gate over OcclusionWorld's section masks and
-	// the entity's blink-box quad (see simulation_scars.cpp).
-	bool scar_owner_visible(uint16_t p_owner_packed) const;
+	// The Scar_RenderCache owner gate (the slot's building byte) over OcclusionWorld's
+	// section masks and the entity's blink-box quad (see simulation_scars.cpp).
+	bool scar_owner_visible(uint16_t p_owner_packed, bool p_building) const;
 
 	// The round hit-detection reality as a HitboxDebugReport
 	// (simulation/hitbox_debug_report.h) — the GUT collision oracle: the nearby entity

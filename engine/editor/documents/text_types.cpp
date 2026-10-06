@@ -1,11 +1,14 @@
 #include "text_types.h"
 
+#include <algorithm>
 #include <iterator>
 #include <utility>
 
 #include <base/io/strutil.h>
 #include <editor/project/project_files.h>
+#include <formats/avatars/avatars.h>
 #include <formats/scr/scr.h>
+#include <formats/score/score.h>
 #include <net/novacrypto/pubcrypto.h>
 
 namespace opennova::editor {
@@ -115,6 +118,30 @@ bool decode_config(const std::string &path, const std::vector<uint8_t> &stored, 
 	return true;
 }
 
+// The text type's findings (DI-06), listed: a reader's refusal is a warning, its file's names unchecked, as
+// graph.unreadable said of such a file before it opened as a text; what a reader made of a line is its
+// own severity's.
+constexpr FindingCodeEntry<TextFinding> kTextEntries[] = {
+	{ TextFinding::Unreadable, listed_code("text.unreadable") },
+	{ TextFinding::Reader, listed_code("text.reader") },
+};
+static_assert(std::size(kTextEntries) == static_cast<size_t>(TextFinding::kCount),
+		"every TextFinding has exactly one row");
+static_assert(finding_entries_well_formed(kTextEntries),
+		"the text type's rows follow TextFinding's order, each token its own");
+constexpr auto kTextRows = finding_rows(kTextEntries, FindingGroup::Texts);
+static_assert(finding_rows_well_formed(kTextRows), "every row of the table takes its group");
+
+// A finding of the text type's at a reader's place.
+Diagnostic reader_finding(TextFinding code, DiagnosticSeverity severity, std::string message,
+		const TextDocument &document, size_t line, size_t column) {
+	return text_finding_at(kTextRows[static_cast<size_t>(code)], severity, std::move(message), document, line, column);
+}
+
+std::string sentence(std::string message) {
+	return reader_sentence(std::move(message));
+}
+
 // A shader the loader rejects is one it does not load, as a missing one, and the game runs: listed
 // (the gate follows retail, ADR 0046 S14); Save writes the form.
 constexpr FindingCodeEntry<ShaderFinding> kShaderEntries[] = {
@@ -145,17 +172,79 @@ Diagnostic text_finding(const FindingCodeRow &row, DiagnosticSeverity severity, 
 	return finding;
 }
 
+Diagnostic text_finding_at(const FindingCodeRow &row, DiagnosticSeverity severity, std::string message,
+		const TextDocument &document, size_t line, size_t column) {
+	size_t offset = 0;
+	if (line == 0 || !document.offset_of(line, column ? column : 1, offset)) offset = 0;
+	return text_finding(row, severity, std::move(message), document, offset);
+}
+
+std::string reader_sentence(std::string message) {
+	while (!message.empty() && (message.back() == '.' || message.back() == ' ' || message.back() == '\n'))
+		message.pop_back();
+	if (!message.empty() && message[0] >= 'a' && message[0] <= 'z') message[0] = char(message[0] - 'a' + 'A');
+	return message.empty() ? message : message + ".";
+}
+
 std::unique_ptr<DocumentBase> make_text_document() {
 	return std::make_unique<TextDocument>(decode_config);
 }
 
+std::vector<Diagnostic> text_reader_findings(const TextDocument &document) {
+	std::vector<Diagnostic> findings;
+	const std::string &text = document.text();
+	const auto *bytes = reinterpret_cast<const uint8_t *>(text.data());
+	const char *unchecked = " The editor cannot check what the file names until it reads.";
+	switch (document.kind()) {
+	case AssetKind::AvatarDefs: {
+		avatars::AvatarsFile file{};
+		const bool read = avatars::avatars_parse_memory(text.data(), text.size(), &file) == 0;
+		bool refused = false;
+		for (size_t i = 0; i < file.diagnostics_count; ++i) {
+			const avatars::AvatarDiagnostic &note = file.diagnostics[i];
+			const bool error = note.severity == avatars::AVATAR_DIAG_ERROR;
+			// The reader's refusal at the first error it names; its other notes listed.
+			if (!read && error && !refused) {
+				refused = true;
+				findings.push_back(reader_finding(TextFinding::Unreadable, DiagnosticSeverity::Warning,
+						"The game's avatar reader does not read it: " + sentence(note.message) + unchecked, document,
+						note.line, 0));
+				continue;
+			}
+			findings.push_back(reader_finding(TextFinding::Reader,
+					error ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning,
+					"The game's avatar reader: " + sentence(note.message), document, note.line, 0));
+		}
+		if (!read && !refused)
+			findings.push_back(reader_finding(TextFinding::Unreadable, DiagnosticSeverity::Warning,
+					std::string("The game's avatar reader does not read it.") + unchecked, document, 0, 0));
+		avatars::avatars_free(&file);
+		break;
+	}
+	case AssetKind::Score: {
+		score::File file;
+		std::string error;
+		if (!score::parse(bytes, text.size(), file, error))
+			findings.push_back(reader_finding(TextFinding::Reader, DiagnosticSeverity::Warning,
+					"The score table's reader does not read it: " + sentence(error), document, 0, 0));
+		break;
+	}
+	default: break;
+	}
+	return findings;
+}
+
 std::vector<Diagnostic> validate_text_file(const DocumentBase &document) {
-	(void)document;
-	return {};
+	const TextDocument *text = text_of(document);
+	return text ? text_reader_findings(*text) : std::vector<Diagnostic>();
 }
 
 FindingTable text_finding_codes() {
-	return {};
+	return { kTextRows.data(), kTextRows.size() };
+}
+
+const FindingCodeRow &finding_code(TextFinding code) {
+	return kTextRows[static_cast<size_t>(code)];
 }
 
 std::unique_ptr<DocumentBase> make_shader_document() {
@@ -182,6 +271,125 @@ const FindingCodeRow &finding_code(ShaderFinding code) {
 
 FindingTable shader_finding_codes() {
 	return { kShaderRows.data(), kShaderRows.size() };
+}
+
+std::vector<uint8_t> shader_file_bytes(const std::string &text) {
+	std::string stored;
+	std::vector<SourceIssue> issues;
+	ShaderEncoding(true, false).encode(text, stored, issues);
+	return std::vector<uint8_t>(stored.begin(), stored.end());
+}
+
+const std::vector<std::string> &fixed_function_shader_tags() {
+	// In the order the renderer compiles them, texture by self-lit by blending [orig:
+	// HLSLEffect_InitFixedFunctionShaders @ 0x5AFA54..0x5AFCFC; the suffixes @ 0x5AF8D6..0x5AF91E].
+	static const std::vector<std::string> tags = [] {
+		std::vector<std::string> out;
+		for (const char *texture : {"_ST", "_MT"})
+			for (const char *lum : {"", "_LUM"})
+				for (const char *blend : {"_OP", "_AB", "_AD"})
+					out.push_back(std::string("FF") + texture + blend + lum);
+		return out;
+	}();
+	return tags;
+}
+
+namespace {
+
+// The text with its comments blanked to spaces (a line comment to its end, a block comment whole, its line
+// ends kept), so an offset into it is one into the text; a string's contents kept.
+std::string without_comments(const std::string &text) {
+	std::string out = text;
+	for (size_t i = 0; i < out.size();) {
+		if (out[i] == '"') {
+			for (++i; i < out.size() && out[i] != '"' && out[i] != '\n'; ++i)
+				if (out[i] == '\\') ++i;
+			++i;
+		} else if (out.compare(i, 2, "//") == 0) {
+			for (; i < out.size() && out[i] != '\n'; ++i) out[i] = ' ';
+		} else if (out.compare(i, 2, "/*") == 0) {
+			const size_t end = out.find("*/", i + 2);
+			const size_t stop = end == std::string::npos ? out.size() : end + 2;
+			for (; i < stop; ++i)
+				if (out[i] != '\n') out[i] = ' ';
+		} else {
+			++i;
+		}
+	}
+	return out;
+}
+
+bool word_char(char c) {
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+}
+
+// The first `word` of `text` in [from, to) standing alone, npos for none.
+size_t find_word(const std::string &text, const char *word, size_t from, size_t to) {
+	const size_t length = std::char_traits<char>::length(word);
+	for (size_t at = text.find(word, from); at != std::string::npos && at + length <= to; at = text.find(word, at + 1))
+		if ((at == 0 || !word_char(text[at - 1])) && (at + length >= text.size() || !word_char(text[at + length])))
+			return at;
+	return std::string::npos;
+}
+
+size_t skip_space(const std::string &text, size_t at, size_t to) {
+	while (at < to && (text[at] == ' ' || text[at] == '\t' || text[at] == '\r' || text[at] == '\n')) ++at;
+	return at;
+}
+
+} // namespace
+
+ShaderEffectInfo read_shader_effect_info(const std::string &text) {
+	ShaderEffectInfo info;
+	const std::string code = without_comments(text);
+	const size_t name = find_word(code, "EffectInfo", 0, code.size());
+	if (name == std::string::npos) return info;
+	// Its annotations, between the '<' after the name and the '>' closing them outside a string.
+	const size_t open = code.find('<', name);
+	if (open == std::string::npos) return info;
+	size_t close = open + 1;
+	for (bool quoted = false; close < code.size() && (quoted || code[close] != '>'); ++close)
+		if (code[close] == '"') quoted = !quoted;
+	info.found = true;
+	info.info_offset = name;
+	// `<name> = <value>` after the annotation's own name.
+	const auto value_at = [&](const char *annotation) -> size_t {
+		const size_t at = find_word(code, annotation, open, close);
+		if (at == std::string::npos) return at;
+		const size_t eq = skip_space(code, at + std::char_traits<char>::length(annotation), close);
+		return eq < close && code[eq] == '=' ? skip_space(code, eq + 1, close) : std::string::npos;
+	};
+	const size_t tag = value_at("EffectTag");
+	if (tag != std::string::npos && code[tag] == '"') {
+		const size_t end = code.find('"', tag + 1);
+		if (end != std::string::npos && end < close) {
+			info.tag = text.substr(tag + 1, end - tag - 1);
+			info.tag_offset = tag + 1;
+			info.tag_length = end - tag - 1;
+		}
+	}
+	const size_t uv = value_at("EffectAlt_UV");
+	if (uv != std::string::npos)
+		info.alt_uv = code.compare(uv, 4, "true") == 0 || (code[uv] >= '1' && code[uv] <= '9');
+	return info;
+}
+
+void shader_definitions(const TextDocument &document, std::vector<TextDefinition> &out) {
+	const std::string name = basename_of(document.path());
+	const ShaderEffectInfo info = read_shader_effect_info(document.text());
+	const auto define = [&](const std::string &tag, size_t offset, size_t length) {
+		out.push_back({ReferenceKind::Shader, tag, document.span_at(offset, length)});
+		// The twin the loader compiles with TEX_UVXFORM, registered as the tag and "#UV".
+		if (info.alt_uv) out.push_back({ReferenceKind::Shader, tag + "#UV", document.span_at(offset, length)});
+	};
+	if (strutil::iequals(name, kFixedFunctionShaderFile)) {
+		// The renderer names each compile itself, whatever EffectTag says [orig: @ 0x5AFC3A].
+		for (const std::string &tag : fixed_function_shader_tags())
+			define(tag, info.found ? info.info_offset : 0, info.found ? std::char_traits<char>::length("EffectInfo") : 0);
+		return;
+	}
+	if (name.empty() || name[0] == '_' || info.tag.empty()) return;
+	define(info.tag, info.tag_offset, info.tag_length);
 }
 
 } // namespace opennova::editor

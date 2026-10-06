@@ -262,6 +262,11 @@ public:
 	// raw mouse position, unscaled — CUIScene_DrawScreensAndCursor @ 0x63bf60].
 	void set_time_ms(int64_t p_ms);
 	void set_cursor_state(bool p_visible, const Vector2 &p_position);
+	// The cursor pass at a point with no pump (C++ only: the editor's picture,
+	// which never pumps, draws the game's pointer by it): the claim the pump would
+	// make there stamps the cursor (engine MenuFrameCompiler::claim_at), no hover
+	// or press written; drawn again only when it moved. Hidden: no claim.
+	void place_cursor(bool p_visible, const Vector2 &p_position);
 
 	// Feed one raw-mouse sample through the engine pump (menu_frame.h
 	// pump_mouse carries the witness): updates every row's hover/press, the

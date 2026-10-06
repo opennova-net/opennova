@@ -118,7 +118,7 @@ static int test_tokens_unique() {
 	for (const FindingFix fix : { FindingFix::None, FindingFix::Requirement, FindingFix::WrongKind, FindingFix::Rename,
 	                              FindingFix::ResetRow, FindingFix::Reference, FindingFix::UnimportedTexture,
 	                              FindingFix::Reload, FindingFix::Reimport, FindingFix::Rewrite, FindingFix::TextureRows,
-	                              FindingFix::ImportFitsUse })
+	                              FindingFix::ImportFitsUse, FindingFix::ItemId, FindingFix::FallbackRow })
 		TEST_EXPECT(fixes.insert(finding_fix_token(fix)).second && !std::string(finding_fix_token(fix)).empty());
 	TEST_EXPECT(std::string(finding_place_token(FindingPlace::Content)) == "content" &&
 	            std::string(finding_place_token(FindingPlace::File)) == "file");
@@ -272,19 +272,29 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::Reimport) == Tokens({ "import.output_missing" }));
 	// S18: an upside-down TGA's rows; every use's finding where an import makes the file it reads.
 	TEST_EXPECT(fixed_by(FindingFix::TextureRows) == Tokens({ "texture.tga_upside_down" }));
+	TEST_EXPECT(fixed_by(FindingFix::SetAsideUnread) == Tokens({ "texture.not_read" }));
 	TEST_EXPECT(fixed_by(FindingFix::ImportFitsUse) ==
 	            Tokens({ "texture.alpha_not_loaded", "texture.blend_map_size", "texture.colormap_size", "texture.foliage_map_overrun",
-	                     "texture.foliage_map_shape", "texture.height_wrap", "texture.loading_screen_size",
+	                     "texture.foliage_map_shape", "texture.height_wrap", "texture.loading_screen_size", "texture.memory",
 	                     "texture.mfd_not_pow2", "texture.normal_map_halved", "texture.particle_too_big",
 	                     "texture.tile_atlas_cells", "texture.wrong_reader" }));
+	// S19: an item on an id the engine keeps for another kind, or named as one under another id: Use an id;
+	// an items.def whose first row is no Null marker: Add one first.
+	TEST_EXPECT(fixed_by(FindingFix::ItemId) == Tokens({ "catalog.reserved_kind", "catalog.reserved_name" }));
+	TEST_EXPECT(fixed_by(FindingFix::FallbackRow) == Tokens({ "catalog.first_row" }));
+	// A finished normal map a normal-map slot's row loads as a diffuse: its row given type 4.
+	TEST_EXPECT(fixed_by(FindingFix::NormalRowType) == Tokens({ "texture.normal_slot_loader" }));
 	// (A catalog's input the game ignores has none: a save keeps it as the file has it, the demo round's bug 3.)
 	TEST_EXPECT(fixed_by(FindingFix::Rewrite) ==
-	            Tokens({ "animation_map.ignored_input", "credits.line_ending",
+	            Tokens({ "animation_map.ignored_input", "credits.line_ending", "environment.ignored_input",
+	                     "hud_layout.line_ending",
 	                     "menu.ignored_input", "mission.event_order", "mission.rewrite_differs", "script.line_ending",
 	                     "shader.form", "sound_bank.ignored_input", "strings.regrouped", "style.line_ending" }));
 	const std::map<std::string, std::string> rewrites = {
 		{ "animation_map.ignored_input", "without the input the game ignores" },
 		{ "credits.line_ending", "with every line ending CR LF" },
+		{ "environment.ignored_input", "with each line as the game reads it" },
+		{ "hud_layout.line_ending", "with every line ending CR LF" },
 		{ "menu.ignored_input", "without the input the game ignores" },
 		{ "sound_bank.ignored_input", "without the input the game ignores" },
 		{ "mission.event_order", "with each event's triggers and actions where the event stands" },
@@ -301,9 +311,9 @@ static int test_columns() {
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.blocks_save; }) ==
 	            Tokens({ "animation_map.invalid_input", "catalog.invalid_input", "catalog.unserializable",
 	                     "credits.invalid_input", "credits.unserializable", "document.unserializable",
-	                     "menu.invalid_input", "menu.unserializable", "mission.invalid_input", "music_script.invalid_input",
-	                     "music_script.unserializable", "sound_bank.invalid_input", "sound_bank.unserializable",
-	                     "sound_profiles.unserializable", "strings.invalid_input" }));
+	                     "environment.invalid_input", "menu.invalid_input", "menu.unserializable", "mission.invalid_input",
+	                     "music_script.invalid_input", "music_script.unserializable", "sound_bank.invalid_input",
+	                     "sound_bank.unserializable", "sound_profiles.unserializable", "strings.invalid_input" }));
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.place == FindingPlace::File; }) ==
 	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "build.archive_in_project",
 	                     "build.expansion.mission_twice", "build.expansion.mission_untitled", "build.expansion.root_only",
@@ -315,11 +325,15 @@ static int test_columns() {
 	// error of any other row blocks, as does an error made from no row. A row that says its file does
 	// not serialize always gates.
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return !row.gates_build; }) ==
-	            Tokens({ "animation_map.no_reset", "build.expansion.exp_desc", "build.expansion.mission_twice",
-	                     "build.expansion.mission_untitled", "build.expansion.root_only", "build.unread", "catalog.item_type",
-	                     "catalog.name_empty", "expansion.file.unread", "export.cancelled", "export.cleanup", "export.replaced",
+	            Tokens({ "animation_map.no_reset", "asset.wave_unplayable", "build.expansion.exp_desc", "build.expansion.mission_twice",
+	                     "build.expansion.mission_untitled", "build.expansion.root_only", "build.unread", "catalog.first_row",
+	                     "catalog.item_type", "catalog.name_empty", "catalog.reserved_id", "catalog.reserved_kind",
+	                     "catalog.reserved_name", "catalog.reserved_refused", "environment.sky_height_default",
+	                     "expansion.file.unread", "export.cancelled",
+	                     "export.cleanup", "export.replaced",
 	                     "mission.event_missing",
 	                     "mission.group_range", "model.frame_missing", "model.light_part", "model.register_missing",
+	                     "particle.duplicate_effect", "particle.unreadable",
 	                     "project.expansion.name_taken", "project.expansion.not_installed", "reference.missing", "reference.wrong_kind", "requirement.missing", "requirement.wrong_kind",
 	                     "shader.form", "sound_bank.layer_unheard", "sound_bank.set_name_repeated", "sound_bank.set_silent",
 	                     "sound_bank.wave_file_name", "sound_bank.wave_name_repeated", "sound_bank.wave_no_file",
@@ -327,7 +341,7 @@ static int test_columns() {
 	                     "strings.key_empty", "strings.section_empty", "style.continued_duplicate",
 	                     "style.directive_form", "style.directive_tail", "style.if_without_argument",
 	                     "style.invalid_name_char", "style.missing_value_delimiter", "style.nul_byte", "style.stops",
-	                     "style.value_is_directive" }));
+	                     "style.value_is_directive", "text.reader", "text.unreadable" }));
 	TEST_EXPECT(finding_row("model.light_no_registers") && finding_row("model.light_no_registers")->gates_build &&
 	            finding_row("style.hangs")->gates_build && finding_row("style.line_ending")->gates_build);
 	// A missing required file blocks where its manifest row is the boot's refusal (gametext.bin: the

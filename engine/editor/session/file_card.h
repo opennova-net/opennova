@@ -40,6 +40,15 @@ struct FileCard {
 		uint32_t rate = 0;
 		uint16_t channels = 0;
 		double seconds = 0.0;
+		// What the game's loader makes of it (the sound lane, import/wave_source.h wave_retail_check): whether
+		// it plays, and why not; its format in words ("16-bit PCM, mono, 22050 Hz"), its loudest sample and its
+		// RMS (each 0..1 of full scale) and its picture, each bin's loudest sample (kWaveCardBins of them).
+		bool plays = false;
+		std::string refusal;
+		std::string format;
+		float peak = 0.0f;
+		float rms = 0.0f;
+		std::vector<float> envelope;
 		uint64_t size = 0;     // the file's, as read
 		int64_t modified = 0;  // its last-write ticks, as read (0: unknown, read again)
 	};
@@ -71,16 +80,70 @@ struct FileCard {
 	bool reading = false;
 };
 
+// Who names a project file, in one look (the deep-integration plan's DI-05): the card's Named by, made
+// without a card (no wave read, nothing it names), for the Inspector's view of a file with nothing selected,
+// the document toolbars' Used by chip and the wire's used_by query. Its usages (graph/reference_queries'
+// file_uses: the records naming it, then those naming what it defines) grouped by the file they are in, in
+// the graph's order, each a place in words (edge_place_words: the record in its type's words, the field by
+// its label) with where Go to takes it (usage_target); and one hop further where the naming record is a
+// definition itself (oncrate1.3di named by the item Wooden supply crate in items.def, which onjo_m1.bms
+// places six times), those uses grouped by their file too.
+struct FileUsers {
+	bool found = false;
+	std::string path; // project-relative
+	std::string name; // logical
+	// A place that names it (or names what names it).
+	struct Line {
+		std::string file;  // the naming file, project-relative
+		std::string words; // the record and its field, in words ("Wooden supply crate - Graphic")
+		std::string field; // the field's id
+		ReferenceTarget target;
+	};
+	struct Group {
+		std::string file;
+		std::string name; // the file's logical name
+		std::vector<Line> lines;
+	};
+	struct Use {
+		Line line;
+		std::vector<Group> further; // one hop further, by file
+		size_t further_count = 0;
+	};
+	struct UseGroup {
+		std::string file;
+		std::string name;
+		std::vector<Use> uses;
+	};
+	std::vector<UseGroup> groups;
+	size_t count = 0;         // its uses (the first hop's lines)
+	size_t further_count = 0; // the lines one hop further
+	// The project's references are being read (FileCard::reading): the lists are the graph's as far as it has
+	// read, and may grow.
+	bool reading = false;
+};
+
+// Who names `path` (a project-relative path or a logical name); found false for a file the project lacks.
+FileUsers file_users(const SessionView &view, const std::string &path);
+// How many uses it has (FileUsers::count, AssetGraph::usages_of), nothing worded: the toolbars' chip.
+size_t file_use_count(const SessionView &view, const std::string &path);
+// Its wire form, the used_by query's: {found, path, name, count, further_count, reading?, files [{file, name,
+// uses [{words, field, file, locator?, editable, further [{file, name, uses [{words, field, file, locator?,
+// editable}]}]}]}]}; a use's file and locator are where Go to opens it (open_document's path and locator: the
+// file's page with the record marked where `editable` is false, DI-17).
+io::JsonValue file_users_json(const FileUsers &users);
+
 // The most of a wave a card reads to say what it is (the game's own are a few hundred KB): a larger file is
 // said to be too large, nothing read.
 inline constexpr uint64_t kWaveCardBytes = uint64_t(32) << 20;
+// The bins of a wave's picture on its card.
+inline constexpr size_t kWaveCardBins = 64;
 
 // The card of the project file `path` (a project-relative path or a logical name); found false for none.
 // `known`, a card's sound read before: taken as it is while the file's size and last write are those it was
 // read at, else read again.
 FileCard file_card(const SessionView &view, const std::string &path, const FileCard::Sound *known = nullptr);
 // Its wire form: {found, path, name, kind, kind_label, about, size, build, imported_from, opens, sound?
-// {decoded, error?, rate, channels, seconds}, names [{field, record, value, status, file, wave}], named_by
+// {decoded, error?, rate, channels, seconds, plays, refusal?, format, peak, rms, envelope}, names [{field, record, value, status, file, wave}], named_by
 // [{file, record, field}], reading? (true while the project's references are being read)}.
 io::JsonValue file_card_json(const FileCard &card);
 

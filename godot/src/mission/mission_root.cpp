@@ -257,22 +257,14 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 		if (options->get_resource_root().is_valid()) {
 			session_options->set_game_root(options->get_resource_root()->get_root_dir());
 		}
+		// The loose score.ini overlays the session's score table inside the
+		// boot, ahead of the bring-up (inmatch/host_boot.h).
 		sim_->configure_host_session(session_options);
-		// Retail builds the active game-type score table, then overlays the loose
-		// VERSION 40 score.ini before answering C2S 0x2D with S2C 0x58. This
-		// caller is explicitly loose-first even in a packed runtime: retail opens
-		// score.ini from the game directory rather than resolving it from a PFF
-		// [orig: the load is gated on File_IsSingleFile("score.ini") @0x436ED0, a
-		// FindFirstFileA check on disk].
-		if (options->get_resource_root().is_valid()) {
-			const PackedByteArray score_ini_bytes = options->get_resource_root()->read_file(
-					"score.ini", ResourceRoot::LOOKUP_FORCE_LOOSE_FIRST);
-			if (!score_ini_bytes.is_empty() && !sim_->set_score_config_data(score_ini_bytes)) {
-				UtilityFunctions::push_warning(
-						"MissionRoot: rejected score.ini; session status uses zero score values.");
-			}
-		}
-		if (!sim_->enable_host_listen(host_session->get_bind_port())) {
+		// A NovaWorld host's match rides its NovaWorld session's socket (D-NET-346).
+		const Ref<UdpPump> host_pump = options->get_host_pump();
+		const bool listening = host_pump.is_valid() ? sim_->enable_host_listen_on(host_pump)
+		                                            : sim_->enable_host_listen(host_session->get_bind_port());
+		if (!listening) {
 			// A requested LAN host that cannot own its UDP endpoint is not a host.
 			// Never degrade into the visually-identical socketless SP/listen path:
 			// the caller must surface the bind failure and keep the menu active.
@@ -281,9 +273,11 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 			has_trace_stats_sampling_ = false;
 			return 0;
 		}
-	} else {
+	} else if (!sim_->is_host_listening()) {
 		// Standalone SP (or an isolated tooling/test preview): the in-process listen server. Live
 		// play reaches this branch only through GameWorld. The host player auto-spawns at bring-up.
+		// A host's map change brings its live session (its role, its bound socket and its
+		// connections) in the simulation the drive kept, and boots the next map inside it.
 		sim_->enable_listen_server(true);
 	}
 	// S9 (ADR 0028): the ordered mission boot. The sequence, its gates, and the
@@ -310,6 +304,9 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 		has_trace_stats_sampling_ = false;
 		return 0;
 	}
+	// The world's load runs the boot's phase B after its device stages; an
+	// isolated root (tests, tools) ends the load here, the start pending.
+	if (!options->get_mission_start_deferred()) sim_->finish_load_without_environment();
 	// The shared render/PANM presentation DWORD — re-stamped after the boot
 	// because the load reset cleared it (an order-free scalar, not a boot step).
 	if (presentation_time_ms_ >= 0) {
@@ -963,6 +960,14 @@ void MissionRoot::for_each_present_node(const std::function<void(ObjectModel *)>
 // container is this root's child and unload() queue_free()s it FIRST, so the
 // teardown below finds the container's nodes already gone exactly as it did
 // when the container was the world's own child.
+Ref<Simulation> MissionRoot::release_simulation() {
+	Ref<Simulation> sim = sim_;
+	if (sim.is_valid()) sim->set_runtime_profiling_enabled(false);
+	sim_.unref();
+	has_trace_stats_sampling_ = false;
+	return sim;
+}
+
 void MissionRoot::_exit_tree() {
 	if (frame_stats_.is_valid()) {
 		const Callable capture_changed(this, kOnCaptureChanged);

@@ -6,9 +6,11 @@
 #include <vector>
 
 #include <editor/preview/mission_camera.h>
+#include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_items.h>
 #include <editor/preview/mission_options.h>
+#include <editor/preview/mission_poses.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
@@ -92,12 +94,25 @@ public:
 	// device defers to the gesture's end (a moved entity's terrain shadow).
 	bool gesture_open() const { return gesture_open_; }
 
+	// The ground under the picture's point (x, y) in the game's words (DI-07, mission_ground_facts.h): what
+	// the device's ray meets first (an entity's drawn surface: a body standing on it; the terrain: the class
+	// the game reads there, its footstep slots and the round's effects row; nothing, or no device to say:
+	// Nothing), the mission's terrain, tiles and water read through the game's own loads when first asked.
+	MissionGroundFacts ground_under(const ViewportContext &context, float x, float y) const;
+	// What that reads of the mission's files (its terrain, its char map, its tiles and its water plane), as
+	// last asked.
+	const MissionGround &ground_reader() const { return terrain_ground_; }
+
 	// The marks on a picture `width` x `height` (mission_scene.h), an area's anchor on the ground of
 	// `device` where it answers, each entity's with its item's bound (picked by it).
 	std::vector<MissionMark> marks(int width, int height, const ViewportDevice *device) const;
 	// What it reads of its entities' items (preview/mission_items: a drop's facts, the bound each item's
 	// entity is picked by), as last followed.
 	const MissionItemCache &items() const { return items_; }
+	// Its people's spawn poses (DI-38, preview/mission_poses: what the game's organic init and its
+	// warmup leave each placed person in), as last followed: the device poses each person's model by
+	// its row's.
+	const MissionPoses &poses() const { return poses_; }
 	// How far from its anchor the primary's handles stand, metres: a share of the camera's distance,
 	// so they keep their size on the picture.
 	float handle_reach() const { return camera_.distance * 0.08f; }
@@ -121,6 +136,7 @@ public:
 	const char *reason() const override { return mission_view_status_token(reason_); }
 	std::string message() const override { return mission_view_status_message(reason_); }
 	const std::string &detail() const override { return detail_; }
+	const FileStamps *picture_reads() const override { return &picture_.files(); }
 	const char *units() const override { return "pixels"; }
 	ViewportLayout layout() const override { return ViewportLayout(); }
 	std::unique_ptr<CanvasHalf> make_canvas() const override;
@@ -184,6 +200,11 @@ protected:
 
 private:
 	ViewportAction stop_(MissionViewStatus reason);
+	// The mission's ground followed over the project's files (its terrain, tiles and water, DI-07).
+	void follow_ground_(const SessionView &view) const;
+	// The posed people stood on that ground (MissionPoses::stand) where a record, a pose (`posed`) or
+	// the terrain moved; true when a person's lift moved.
+	bool stand_people_(const SessionView &view, bool posed);
 	// The scene's items' bounds asked of the project, where the scene, the graph or the asset source's
 	// generation moved.
 	void bound_items_(const SessionView &view);
@@ -217,8 +238,13 @@ private:
 	uint64_t bounds_serial_ = 0; // the scene's serial the bounds were last asked over
 	uint64_t bounds_graph_ = 0; // the graph's generation then
 	uint64_t bounds_files_ = 0; // and the asset source's
+	MissionPoses poses_;
+	uint64_t stood_serial_ = 0; // the scene's serial the people were last stood over
+	int stood_reads_ = -1; // the ground's reads then
 	std::vector<std::string> missing_;
 	bool ground_ = false;
+	// Mutable: the ground's facts read through it, its files read once while they stand (DI-07).
+	mutable MissionGround terrain_ground_;
 	bool gesture_open_ = false;
 };
 

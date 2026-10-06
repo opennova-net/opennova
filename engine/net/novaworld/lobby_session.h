@@ -97,7 +97,9 @@ struct LobbyState {
 	// The host's PlayerList, one entry per reported slot (VarFNum-keyed).
 	std::vector<HostRosterSlot> roster;
 
-	// Last full var-lists snapshot — useful for /api/lobbies introspection.
+	// The host's Host / HostSetup / PlayerList as its request set them and each
+	// ClientHostUpdate's changed vars merged in (by VarFNum and VarName): the
+	// current lists, for /api/lobbies introspection.
 	VarLists last_host_update;
 	VarLists play_state;
 };

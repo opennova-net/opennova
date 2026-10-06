@@ -16,7 +16,10 @@
 #include <runtime/terrain_query/surface_type_map.h>
 #include <formats/til/til.h>
 #include <formats/til/til_io.h>
+#include <runtime/anim/clip_timeline.h>
+#include <runtime/audio/sound_profile.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/infantry_sound.h>
 #include <runtime/world/world.h>
 
 using namespace opennova::world;
@@ -623,6 +626,53 @@ void test_surface_tile_resolvers() {
     CHECK(opennova::terrain::surface_tiles_from_til_bytes({}).empty());
 }
 
+// The rules the bodies and the editor's clip preview share (DI-04): the tick half each body reads its
+// events on, the sounds one word plays in the block's order, the profile an item binds, and the word a
+// channel reads at a tick.
+void test_shared_event_rules() {
+    // An NPC's body reads on odd ticks, a player's on even.
+    CHECK(anim_sound_tick(1, false) && !anim_sound_tick(2, false) && anim_sound_tick(3, false));
+    CHECK(!anim_sound_tick(1, true) && anim_sound_tick(2, true) && anim_sound_tick(0, true));
+    // Foley first (SSAudio5 for 0x200), then the left foot, then the right; the fire bits play nothing.
+    AnimEventSound sounds[kAnimEventSoundMax];
+    int n = anim_event_sounds(0x200u | 0x1u | 0x2u | 0x4u, 0, 0, false, 0, sounds);
+    CHECK(n == 3 && sounds[0].slot == slot::kSlotAudio1 + 4 && sounds[0].foot == -1 &&
+          sounds[1].slot == slot::kSlotFootLGround && sounds[1].foot == 0 &&
+          sounds[2].slot == slot::kSlotFootRGround && sounds[2].foot == 1);
+    // Every foley bit in order; the feet under each surface the pick tells apart.
+    n = anim_event_sounds(0x7E0u, 0, 0, false, 0, sounds);
+    CHECK(n == 6 && sounds[0].slot == slot::kSlotAudio1 && sounds[5].slot == slot::kSlotAudio6);
+    n = anim_event_sounds(0x3u, 0, 0, false, 3, sounds);
+    CHECK(n == 2 && sounds[0].slot == slot::kSlotFootLSnow && sounds[1].slot == slot::kSlotFootRSnow);
+    n = anim_event_sounds(0x3u, 0, 0, true, 3, sounds);
+    CHECK(n == 2 && sounds[0].slot == slot::kSlotFootLObject && sounds[1].slot == slot::kSlotFootRObject);
+    n = anim_event_sounds(0x3u, fx(-1), fx(1), true, 3, sounds);
+    CHECK(n == 2 && sounds[0].slot == slot::kSlotFootWater && sounds[1].slot == slot::kSlotFootWater);
+    CHECK(anim_event_sounds(0x1Cu, 0, 0, false, 0, sounds) == 0);
+    // An item binds its authored profile, "default" when it names none, the first on a miss.
+    std::vector<slot::SoundProfile> profiles(3);
+    profiles[0].name = "first";
+    profiles[1].name = "default";
+    profiles[2].name = "on_soldier";
+    CHECK(slot::item_sound_profile(profiles, "ON_SOLDIER") == &profiles[2]);
+    CHECK(slot::item_sound_profile(profiles, "") == &profiles[1]);
+    CHECK(slot::item_sound_profile(profiles, nullptr) == &profiles[1]);
+    CHECK(slot::item_sound_profile(profiles, "nobody") == &profiles[0]);
+    CHECK(slot::item_sound_profile({}, "default") == nullptr);
+    // The word below the playhead, unlerped; none once a one-shot stops. 30 fps over 4 frames at 62 a
+    // second: frame 1 from tick 3 (t = 3 * 30 / 62 / 4 = 0.36, frame 1.45).
+    const std::vector<uint32_t> words = {0x0u, 0x1u, 0x0u, 0x2u, 0x2u};
+    const opennova::anim::ClipTimeline once(30, 4, false);
+    CHECK(opennova::anim::clip_trigger_at(once, words, 1) == 0x0u);
+    CHECK(opennova::anim::clip_trigger_at(once, words, 3) == 0x1u);
+    CHECK(opennova::anim::clip_trigger_at(once, words, 7) == 0x2u);
+    CHECK(once.stopped_at(once.length_ticks()) &&
+          opennova::anim::clip_trigger_at(once, words, once.length_ticks()) == 0u);
+    const opennova::anim::ClipTimeline loop(30, 4, true);
+    CHECK(opennova::anim::clip_trigger_at(loop, words, loop.length_ticks() + 3) ==
+          words[static_cast<size_t>(loop.frame_index_at(loop.length_ticks() + 3))]);
+}
+
 } // namespace
 
 int main() {
@@ -641,6 +691,7 @@ int main() {
     test_surface_sampler_defaults();
     test_surface_sampler_placed_tile_override();
     test_surface_tile_resolvers();
+    test_shared_event_rules();
     if (failures == 0) std::printf("slot_sound_test OK\n");
     return failures == 0 ? 0 : 1;
 }

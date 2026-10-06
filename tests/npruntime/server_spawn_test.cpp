@@ -243,7 +243,10 @@ int main() {
 
 	// A roster slot is an identity, not the current player count. When a non-tail player leaves,
 	// the next player must reuse that first free slot rather than collide with the surviving tail.
-	// [orig: Server_PlayerAdd @0x51cbc0 writes the first free dword_A87048 player slot]
+	// Slot 0 is the authority's own row, connectionless on this Serve Only host, so the joiners
+	// start at slot 1 (D-NET-350).
+	// [orig: Server_PlayerAdd @0x51cbc0 writes a free dword_A87048 player slot; slot 0 stays
+	//  active and local from Server_InitNewRoundState @0x51c99a..0x51ca3c]
 	{
 		w::World slot_world;
 		w::AiSystem &slot_ai = slot_world.ai;
@@ -270,10 +273,10 @@ int main() {
 		}
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(slot_ctx, slot_world) == 3,
 		            "slot reuse fixture spawns three players")) return 1;
-		if (!expect(slot_ctx.np_protocol.connection_list[0].reply.player_slot == 0 &&
-		                    slot_ctx.np_protocol.connection_list[1].reply.player_slot == 1 &&
-		                    slot_ctx.np_protocol.connection_list[2].reply.player_slot == 2,
-		            "first three players occupy roster slots 0, 1, 2")) return 1;
+		if (!expect(slot_ctx.np_protocol.connection_list[0].reply.player_slot == 1 &&
+		                    slot_ctx.np_protocol.connection_list[1].reply.player_slot == 2 &&
+		                    slot_ctx.np_protocol.connection_list[2].reply.player_slot == 3,
+		            "first three joiners occupy roster slots 1, 2, 3 (slot 0 is the host's)")) return 1;
 
 		if (!expect(inmatch::destroy_connection(slot_ctx, peers[1], nullptr),
 		            "non-tail player disconnects")) return 1;
@@ -286,8 +289,8 @@ int main() {
 		slot_ctx.np_protocol.connection_list.push_back(std::move(replacement));
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(slot_ctx, slot_world) == 1,
 		            "replacement player spawns")) return 1;
-		if (!expect(slot_ctx.np_protocol.connection_list.back().reply.player_slot == 1,
-		            "replacement reuses the first free roster slot instead of colliding with slot 2"))
+		if (!expect(slot_ctx.np_protocol.connection_list.back().reply.player_slot == 2,
+		            "replacement reuses the first free roster slot instead of colliding with slot 3"))
 			return 1;
 	}
 

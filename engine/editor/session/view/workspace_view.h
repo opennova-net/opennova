@@ -168,10 +168,13 @@ struct WorkspaceView {
 	};
 	ProjectFind project_find;
 
-	// Files' filter: its text and the kind it lists alone (kCount: every kind), as the files query lists them.
+	// Files' filter: its text and the kind it lists alone (kCount: every kind), as the files query lists them;
+	// and whether the files it lists flat go by what the game's textures of each cost, the costliest first
+	// (S18, the texture budget: session/texture_budget_list).
 	struct Files {
 		std::string filter;
 		AssetKind kind = AssetKind::kCount;
+		bool by_cost = false;
 	};
 	Files files;
 

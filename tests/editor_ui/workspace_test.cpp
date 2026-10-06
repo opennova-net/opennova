@@ -41,6 +41,7 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/model/field_text.h>
 #include <editor/preview/mission_palette.h>
+#include <editor/preview/menu_viewport.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/model_overlay.h>
@@ -1207,13 +1208,15 @@ void test_menu_bar_status() {
 	CHECK(one(requests, EditorRequestKind::Play) != nullptr, "Play");
 
 	// A window too narrow for all of it: the parts on the left go first, what was said the
-	// first of them; the buttons stay.
-	ImGui::GetIO().DisplaySize = ImVec2(580.0f, 700.0f);
+	// first of them; the buttons stay. Back and Forward lead the bar, two arrows' room taken
+	// before the menus.
+	const float arrows = 2.0f * (ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x);
+	ImGui::GetIO().DisplaySize = ImVec2(580.0f + arrows, 700.0f);
 	ui.frames(3);
 	text = logged_frame(ui);
 	CHECK(text.find("menus/a") == std::string::npos && in_order(text, {"Windows", "2 unsaved", "Built", "Stop"}),
 	      "narrower: what was said left out first");
-	ImGui::GetIO().DisplaySize = ImVec2(360.0f, 700.0f);
+	ImGui::GetIO().DisplaySize = ImVec2(360.0f + arrows, 700.0f);
 	ui.frames(3);
 	text = logged_frame(ui);
 	CHECK(text.find("2 unsaved") == std::string::npos && in_order(text, {"Windows", "Stop"}), "narrow: the unsaved count left out");
@@ -1227,7 +1230,7 @@ void test_menu_bar_status() {
 	                                    item_id(bar_id, {"status", "Stop"})};
 	std::vector<ImGuiID> ids = menus;
 	ids.insert(ids.end(), parts.begin(), parts.end());
-	for (const float width : {1000.0f, 520.0f, 360.0f}) {
+	for (const float width : {1000.0f, 520.0f + arrows, 360.0f + arrows}) {
 		ImGui::GetIO().DisplaySize = ImVec2(width, 700.0f);
 		ui.frames(3);
 		const std::vector<std::pair<float, float>> spans = hover_spans(ui, ids);
@@ -2128,6 +2131,83 @@ void test_preview_follows() {
 	      "an unsaved menu: its line says so");
 }
 
+// DI-08: the menu's game pointer in the Preview over a real session (a new project's MAIN names the
+// blank pointer, which loads). The mouse over the picture where the canvas shows no pointer of its own:
+// its place on the picture goes to the device and the windows ask the Shell to hide the system pointer,
+// the toolbar naming the pointer there; over the selected window (a move there) neither; off the picture
+// neither; with Pointer off the system pointer stays. The toolbar's pointer goes to MAIN's CURSOR.
+void test_preview_menu_pointer() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_preview_menu_pointer");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(preview_project(session, dir), "the preview project");
+	const SessionView &v = session.view();
+	DrawnDevices devices;
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	PreviewRun run{ session, devices, ui, {} };
+	std::string text = run.open("main.mnu");
+	Document *menu = session.document_for("main.mnu");
+	NodeAddress main_window, title;
+	CHECK(menu && find_definition(AssetGraph(), *menu, "MAIN", main_window) &&
+	              find_definition(AssetGraph(), *menu, "TITLE", title),
+	      "the menu, its MAIN and TITLE");
+	if (!menu) return;
+	const std::string path = menu->path();
+	CHECK(text.find("newarow1.tga") != std::string::npos, "the toolbar names the screen's pointer");
+	const DrawnDevice *device = devices.held(path, ViewportKind::Menu);
+	CHECK(device && device->width > 0, "the screen drawn through its device");
+	if (!device) return;
+	// Over the picture's top left corner, above MAIN (no window there): MAIN's pointer, the first root's.
+	const ImVec2 corner(device->origin.x + 4.0f, device->origin.y + 4.0f);
+	ui.mouse(corner.x, corner.y);
+	ui.frames(1);
+	CHECK(device->last.pointer && std::fabs(device->last.pointer_x - 4.0f) < 0.5f &&
+	              std::fabs(device->last.pointer_y - 4.0f) < 0.5f,
+	      "the mouse's place on the picture goes to the device");
+	CHECK(ui.windows.pointer_hidden(), "the system pointer hidden: the game's draws there");
+	// Off the picture: neither.
+	ui.away();
+	CHECK(!device->last.pointer && !ui.windows.pointer_hidden(), "off the picture: the system pointer");
+	// TITLE selected: over it the canvas shows a move, its own pointer, and the game's is not drawn.
+	session.handle(request::select_record(path, title));
+	run.settle();
+	const auto *viewport = static_cast<const MenuViewport *>(session.viewports().find(path, ViewportKind::Menu));
+	const auto *mnu = dynamic_cast<const MnuDocument *>(menu);
+	opennova::mnu::RectEdges rect{};
+	const bool placed = viewport && mnu &&
+			viewport->render().compiler().widget_rect(mnu->window_index(title), viewport->render().state(), &rect);
+	CHECK(placed, "TITLE's rect");
+	if (placed) {
+		const float sx = float(device->width) / 800.0f, sy = float(device->height) / 600.0f;
+		const float x = float(rect.left + rect.right) * 0.5f * sx;
+		const float y = float(rect.top + rect.bottom) * 0.5f * sy;
+		ui.mouse(device->origin.x + x, device->origin.y + y);
+		ui.frames(1);
+		CHECK(!device->last.pointer && !ui.windows.pointer_hidden(), "over the selected window: the canvas's move");
+	}
+	// Pointer off: the system pointer stays over the picture.
+	session.handle(request::set_viewport(path, R"({"kind": "menu", "options": {"pointer": false}})"));
+	run.settle();
+	ui.mouse(corner.x, corner.y);
+	ui.frames(1);
+	CHECK(!ui.windows.pointer_hidden(), "Pointer off: the system pointer");
+	session.handle(request::set_viewport(path, R"({"kind": "menu", "options": {"pointer": true}})"));
+	run.settle();
+	run.take();
+	// The toolbar's pointer: MAIN's CURSOR, opened at that field.
+	ui.away();
+	const ImGuiID scope = item_id(Ui::window_id("Preview"), {"menu", path.c_str()});
+	ui.activate(item_id(scope, {"newarow1.tga###pointer"}));
+	const std::vector<EditorRequest> raised = ui.drain();
+	const EditorRequest *jump = only(raised, EditorRequestKind::OpenDocument);
+	CHECK(jump && jump->path == path && jump->field == "cursor.file" &&
+	              jump->locator == static_cast<const Document *>(menu)->locator(main_window),
+	      "the pointer goes to MAIN's CURSOR");
+}
+
 // The model pane's gestures over a real session: F frames the selected marker while the pane
 // shows and does nothing to its camera while the menu pane shows; a drag of the selected
 // marker ends once, for the model, when the menu becomes the active document mid-drag, and
@@ -2776,7 +2856,7 @@ void test_canvas_fill_input() {
 					[](const ViewportPicture &picture) {
 						ImGui::Dummy(ImVec2(float(picture.width), float(picture.height)));
 					},
-					nullptr);
+					nullptr, false);
 			in = canvas.input();
 			right_clicked = canvas.right_clicked();
 			OverlayList shapes;
@@ -3172,6 +3252,7 @@ void run_workspace_tests() {
 	test_import_dialog_problem_root();
 	test_import_dialog_held_rows();
 	test_preview_follows();
+	test_preview_menu_pointer();
 	test_preview_model_gestures();
 	test_preview_model_pane_input();
 	test_mission_view_input();

@@ -2,6 +2,8 @@
 
 #include <iterator>
 
+#include "authoring/effect_viewport_applier.h"
+#include "authoring/hud_viewport_applier.h"
 #include "authoring/menu_viewport_applier.h"
 #include "authoring/mission_viewport_applier.h"
 #include "authoring/model_viewport_applier.h"
@@ -30,6 +32,12 @@ std::unique_ptr<ViewportApplier> make_mission_applier(SubViewport &viewport) {
 std::unique_ptr<ViewportApplier> make_texture_applier(SubViewport &viewport) {
 	return std::make_unique<TextureViewportApplier>(viewport);
 }
+std::unique_ptr<ViewportApplier> make_effect_applier(SubViewport &viewport) {
+	return std::make_unique<EffectViewportApplier>(viewport);
+}
+std::unique_ptr<ViewportApplier> make_hud_applier(SubViewport &viewport) {
+	return std::make_unique<HudViewportApplier>(viewport);
+}
 
 constexpr ViewportDeviceRow kDevices[] = {
 	{ ViewportKind::Menu, make_menu_applier, nullptr },
@@ -37,6 +45,8 @@ constexpr ViewportDeviceRow kDevices[] = {
 	{ ViewportKind::Script, nullptr, make_script_device },
 	{ ViewportKind::Mission, make_mission_applier, nullptr },
 	{ ViewportKind::Texture, make_texture_applier, nullptr },
+	{ ViewportKind::Effect, make_effect_applier, nullptr },
+	{ ViewportKind::Hud, make_hud_applier, nullptr },
 };
 
 constexpr bool devices_in_order() {

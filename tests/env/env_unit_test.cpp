@@ -251,14 +251,17 @@ int main() {
 		if (!expect(near(scaled.sun.r, 187.0f / 255.0f), "envscale should truncate at the byte level (170*1.1 = 187)")) return 1;
 	}
 
-	// The engine caps TOD keyframes at 16; a 17th block's colors bleed into the
-	// 16th slot and its time is dropped. [orig: TimeOfDay_ParseProperty @ 0x57c65b]
-	{
+	// The engine caps TOD keyframes at 16. A 17th tod_begin takes no slot, stores no time and
+	// leaves the slot pointer where it is: after the 16th block's tod_end that is the scratch
+	// keyframe, so the 17th block's colors land there, packed; with the 16th block still open
+	// they bleed into its slot. [orig: TimeOfDay_ParseProperty @ 0x57c65b; tod_end's reset
+	// @ 0x57c6a3]
+	for (const bool closed : {true, false}) {
 		std::ostringstream many;
 		for (int i = 0; i < 17; ++i) {
 			many << "tod_begin " << (100 * (i % 24)) << "\r\n";
 			many << "    sun_rgb " << (i + 1) << "," << (i + 1) << "," << (i + 1) << "\r\n";
-			many << "tod_end\r\n";
+			if (closed || i < 15) many << "tod_end\r\n";
 		}
 		std::istringstream many_input(many.str());
 		opennova::env::Config many_cfg;
@@ -268,13 +271,78 @@ int main() {
 			return 1;
 		}
 		if (!expect(many_cfg.keyframes.size() == 16, "keyframes should cap at 16")) return 1;
-		bool bleed_found = false;
-		for (const opennova::env::Keyframe &kf : many_cfg.keyframes) {
-			if (kf.time == 1500 && near(kf.sun.r, 17.0f / 255.0f)) {
-				bleed_found = true;
-			}
+		const opennova::env::Keyframe *sixteenth = nullptr;
+		for (const opennova::env::Keyframe &kf : many_cfg.keyframes)
+			if (kf.time == 1500) sixteenth = &kf;
+		if (!expect(sixteenth != nullptr, "the 16th block keeps its time")) return 1;
+		if (closed) {
+			if (!expect(near(sixteenth->sun.r, 16.0f / 255.0f) && near(many_cfg.scratch.sun.r, 17.0f / 255.0f),
+			            "after the 16th block's tod_end, the 17th block's colors land on the scratch keyframe"))
+				return 1;
+		} else if (!expect(near(sixteenth->sun.r, 17.0f / 255.0f) &&
+		                           near(many_cfg.scratch.sun.r, opennova::env::scratch_keyframe_defaults().sun.r),
+		                   "with the 16th block open, the 17th block's colors bleed into its slot")) {
+			return 1;
 		}
-		if (!expect(bleed_found, "17th block colors should bleed into the 16th slot, keeping its time")) return 1;
+	}
+
+	// tod_rate, the day's length in minutes, is read and written back as written
+	// [orig: TimeOfDay_ParseProperty @ 0x57d0e4].
+	{
+		std::istringstream rate_input("tod_rate 45\r\n");
+		opennova::env::Config rate_cfg;
+		std::ostringstream rate_saved;
+		if (!expect(opennova::env::load_env(rate_input, rate_cfg, error) && rate_cfg.tod_rate_set &&
+		                    rate_cfg.tod_rate == 45 && opennova::env::save_env(rate_saved, rate_cfg, error) &&
+		                    rate_saved.str().find("tod_rate 45\r\n") != std::string::npos,
+		            "tod_rate reads and writes back"))
+			return 1;
+		std::ostringstream none;
+		if (!expect(opennova::env::save_env(none, opennova::env::Config(), error) &&
+		                    none.str().find("tod_rate") == std::string::npos,
+		            "a file that writes no tod_rate gets none"))
+			return 1;
+	}
+
+	// Each value is written in the form the parser reads back as held: a time before 01:00 as
+	// four digits (a short token reads 00:00), an atol keyword as a whole number however large,
+	// an atof keyword in as many digits as its float needs, a name holding a separator quoted;
+	// a name holding a '"' has no line form. [orig: Environment_ParseTimeString @ 0x57c500;
+	// TimeOfDay_ParseProperty @ 0x57c590]
+	{
+		opennova::env::Config forms;
+		forms.curtime = 30;
+		forms.fog_level = 1500000.0f;
+		forms.sky_speed = -7.0f;
+		forms.water_height = 2000000.0f;
+		forms.water_height_set = true;
+		forms.iris_center = 0.123456789f;
+		forms.envscale = 1.1f;
+		forms.sky_map1 = "my clouds.pcx";
+		forms.sun_3di = "sun;1.3di";
+		std::ostringstream written;
+		if (!expect(opennova::env::save_env(written, forms, error), "save the value forms")) return 1;
+		const std::string text = written.str();
+		std::istringstream back_in(text);
+		opennova::env::Config back;
+		if (!expect(opennova::env::load_env(back_in, back, error) && back.curtime == 30 &&
+		                    back.fog_level == 1500000.0f && back.sky_speed == -7.0f &&
+		                    back.water_height == 2000000.0f && back.iris_center == forms.iris_center &&
+		                    back.envscale == forms.envscale && back.sky_map1 == "my clouds.pcx" &&
+		                    back.sun_3di == "sun;1.3di",
+		            "every value form reads back as held"))
+			return 1;
+		if (!expect(text.find("curtime 0030\r\n") != std::string::npos &&
+		                    text.find("fog_level 1500000\r\n") != std::string::npos &&
+		                    text.find("envscale 1.1\r\n") != std::string::npos &&
+		                    text.find("sky_map1 \"my clouds.pcx\"\r\n") != std::string::npos,
+		            "the forms are the plain ones"))
+			return 1;
+		forms.moon_3di = "a\"b.3di";
+		std::ostringstream refused;
+		if (!expect(!opennova::env::save_env(refused, forms, error) && !error.empty(),
+		            "a name holding a '\"' is refused"))
+			return 1;
 	}
 
 	// curtime sanitizes digits positionally (hours <= 23, minutes <= 59).

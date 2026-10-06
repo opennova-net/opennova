@@ -1,10 +1,13 @@
 #include "inspector_window.h"
 
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/project/project_files.h>
+#include <editor/session/file_card.h>
+#include <editor/session/problem_fixes.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/findings_index.h>
 #include <editor/session/view/session_view.h>
@@ -73,10 +76,15 @@ struct Controls {
 	InspectorWindow::WordsBox &words;
 };
 
-const Document *active(const SessionView &view) {
+const DocumentBase *active_document(const SessionView &view) {
 	for (const auto &document : view.documents.open)
-		if (document->path() == view.documents.active) return records_of(*document);
+		if (document->path() == view.documents.active) return document.get();
 	return nullptr;
+}
+
+const Document *active(const SessionView &view) {
+	const DocumentBase *document = active_document(view);
+	return document ? records_of(*document) : nullptr;
 }
 
 // A Set on every target (`coalesce` folds a typing burst into one undo step).
@@ -192,12 +200,10 @@ void place(ui_kit::WrapRow *row, float width) {
 	else ImGui::SameLine();
 }
 
-// Where a Go to leads, in its tooltip: the file opened at the record, or shown in Files.
+// Where a Go to leads, in its tooltip: the file opened at the record, or its page (DI-17).
 std::string go_to_words(const std::vector<ReferenceTarget> &targets) {
 	if (targets.size() > 1) return "Go to one of the " + std::to_string(targets.size()) + " places it leads.";
-	const ReferenceTarget &target = targets.front();
-	return target.editable ? "Open " + target.label + "."
-	                       : "Show " + target.file + " in Files (the editor does not edit its kind).";
+	return window_requests::go_to_words(targets.front());
 }
 
 // A reference's Go to, to the places the game's lookup reaches (reference_targets,
@@ -224,6 +230,9 @@ void go_to_tool(Workspace &workspace, const FieldUse &field, const Value &value,
 		if (ImGui::MenuItem(target.label.c_str())) go_to(workspace, target);
 	ImGui::EndPopup();
 }
+
+// Whether a reference's Play sounds what it names: a sound set or a wave.
+bool plays_sound(ReferenceKind kind) { return kind == ReferenceKind::Sound || kind == ReferenceKind::Wave; }
 
 // Present / Missing / Unverified beside a reference, from the same tables the validator
 // uses (compact: a coloured dot, the words in its tooltip, a click on it the Go to); a
@@ -261,9 +270,32 @@ void reference_status(Workspace &workspace, const FieldUse &field, const Value &
 	tip = std::string(word) + ": " + tip;
 	if (present) go_to_tool(workspace, field, value, pressed, tip, "A click: ");
 	else ui_kit::tooltip(tip);
-	if (compact || !present) return;
+	if (compact) return;
+	if (!present) {
+		// A name nothing resolves: its Go to lands where it belongs (DI-17: a Go to always lands), the file a
+		// symbol's fix opens; a file the project lacks has no place before it is made (its fixes: Pick, Problems).
+		ReferenceTarget home;
+		if (status != ReferenceStatus::Missing || !missing_target(field, value, view, home)) return;
+		place(row, ui_kit::button_width("Go to"));
+		if (ImGui::SmallButton("Go to")) go_to(workspace, home);
+		ui_kit::tooltip("Go to " + home.label + ": add it there, or correct the name.");
+		return;
+	}
 	place(row, ui_kit::button_width("Go to"));
 	go_to_tool(workspace, field, value, ImGui::SmallButton("Go to"), std::string(), "");
+	// A sound it names plays from here, through the one preview player (the sound lane, DI-02): a set as the
+	// game finds it (in the bank the field's scope names, a menu's SOUND's own), a wave as recorded.
+	const ReferenceKind named = value_reference(field, value);
+	if (!plays_sound(named)) return;
+	const auto *text = std::get_if<std::string>(&value);
+	if (!text || text->empty()) return;
+	place(row, ui_kit::button_width("Play"));
+	if (ImGui::SmallButton("Play"))
+		workspace.request(named == ReferenceKind::Sound ? request::play_set(*text, field.scope.substr(0, field.scope.find('/')))
+		                                                : request::play_sound(io::utf8_file_name(*text)));
+	ui_kit::tooltip(named == ReferenceKind::Sound
+	                        ? "Play " + *text + " as the game plays it: each layer's member picked, its pitch composed."
+	                        : "Play " + io::utf8_file_name(*text) + " as recorded.");
 }
 
 // A field that names something: its badge and its Go to, a number (an item id) as much as a
@@ -334,7 +366,8 @@ Value picked_value(const FieldUse &field, const std::string &picked) {
 float reference_tools_width(const FieldUse &field) {
 	const float gap = ImGui::GetStyle().ItemSpacing.x;
 	return (picks_reference(field) ? ui_kit::button_width("Pick") + gap : 0.0f) + ImGui::GetFrameHeight() * 0.5f +
-	       ui_kit::button_width("Go to") + gap * 2.0f;
+	       ui_kit::button_width("Go to") + gap * 2.0f +
+	       (plays_sound(field.reference) ? ui_kit::button_width("Play") + gap : 0.0f);
 }
 
 // The picker's button (a text reference's, ReferencePicker: a pick set on every target) and the
@@ -1201,6 +1234,86 @@ void InspectorWindow::referenced_by(const Document &document, const NodeAddress 
 		}
 }
 
+// Who names the file (session/file_card's file_users, DI-05: "who names this file, in one look"), made
+// again only when what it reads moves (used_by_key: the file, the graph and its generation, the files, and
+// whether the project's references are still being read): its uses grouped by the naming file, each a line
+// a click takes to (window_requests::go_to, so the history records it), and under a use whose record defines
+// what others name, those uses one hop further, grouped by their file. A group of many starts closed.
+void InspectorWindow::used_by(const DocumentBase &document) {
+	const SessionView &view = workspace_.view();
+	UsedByKey key;
+	key.path = document.path();
+	key.graph = view.findings.graph.get();
+	key.generation = key.graph ? key.graph->generation() : 0;
+	key.files = revision_key(view.revisions, {ViewConcern::Files});
+	key.reading = !view.activity.validation.read || view.activity.validation.files_unread;
+	if (!(key == used_by_key_)) {
+		used_by_key_ = key;
+		++used_by_made_;
+		used_by_ = file_users(view, document.path());
+	}
+	const FileUsers &users = used_by_;
+	ImGui::Separator();
+	const std::string heading = basename_of(document.path()) + ": used by " + std::to_string(users.count) +
+	                            (users.count == 1 ? " field" : " fields") +
+	                            (users.further_count ? ", " + std::to_string(users.further_count) + " more through them" : "");
+	ImGui::TextWrapped("%s", heading.c_str());
+	ui_kit::tooltip("The records of the project that name this file or what it defines, by file; under a record "
+	                "that defines what others name (an item naming a model), those uses too. A click goes there.");
+	if (users.reading) ui_kit::empty_state("The project's references are still being read: the list may grow.");
+	if (users.groups.empty()) {
+		if (!users.reading) ui_kit::empty_state("No file of the project names it or what it defines.");
+		return;
+	}
+	const auto line = [&](const FileUsers::Line &shown) {
+		const bool pressed = ImGui::Selectable((ui_kit::fit(shown.words, ImGui::GetContentRegionAvail().x) + "###use").c_str());
+		if (pressed) go_to(workspace_, shown.target);
+		ui_kit::tooltip_lazy([&] { return shown.file + ": " + shown.words + "\n" + shown.field + "\n" + go_to_words({shown.target}); });
+	};
+	ImGui::PushID("used_by");
+	for (size_t g = 0; g < users.groups.size(); ++g) {
+		const FileUsers::UseGroup &group = users.groups[g];
+		ImGui::PushID(static_cast<int>(g));
+		const ImGuiTreeNodeFlags open = users.count <= kUsedByOpen ? ImGuiTreeNodeFlags_DefaultOpen : 0;
+		const bool shown = ImGui::TreeNodeEx("##file", open | ImGuiTreeNodeFlags_SpanAvailWidth, "%s (%zu)", group.name.c_str(),
+		                                     group.uses.size());
+		ui_kit::tooltip(group.file);
+		if (shown) {
+			for (size_t u = 0; u < group.uses.size(); ++u) {
+				const FileUsers::Use &use = group.uses[u];
+				ImGui::PushID(static_cast<int>(u));
+				line(use.line);
+				if (use.further_count) {
+					ImGui::Indent();
+					for (size_t f = 0; f < use.further.size(); ++f) {
+						const FileUsers::Group &next = use.further[f];
+						ImGui::PushID(static_cast<int>(f));
+						const ImGuiTreeNodeFlags shut = use.further_count <= kUsedByOpen ? ImGuiTreeNodeFlags_DefaultOpen : 0;
+						const std::string title = next.name + " names it " + std::to_string(next.lines.size()) +
+						                          (next.lines.size() == 1 ? " time" : " times");
+						const bool listed = ImGui::TreeNodeEx("##further", shut | ImGuiTreeNodeFlags_SpanAvailWidth, "%s", title.c_str());
+						ui_kit::tooltip(next.file);
+						if (listed) {
+							for (size_t k = 0; k < next.lines.size(); ++k) {
+								ImGui::PushID(static_cast<int>(k));
+								line(next.lines[k]);
+								ImGui::PopID();
+							}
+							ImGui::TreePop();
+						}
+						ImGui::PopID();
+					}
+					ImGui::Unindent();
+				}
+				ImGui::PopID();
+			}
+			ImGui::TreePop();
+		}
+		ImGui::PopID();
+	}
+	ImGui::PopID();
+}
+
 void InspectorWindow::receive(const ViewEvent &event) {
 	const SessionView &view = workspace_.view();
 	HeldReveal held;
@@ -1249,7 +1362,10 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const std::vector<HeldReveal> reveals = events_.take();
 	const Document *document = active(view);
 	if (!document || !view.documents.selection.primary.row) {
-		ui_kit::empty_state("Select a record.", "Its fields and lists show here.");
+		// Nothing selected in the active document: who names the file itself (DI-05), each a Go to.
+		const DocumentBase *shown = active_document(view);
+		if (!shown || document) ui_kit::empty_state("Select a record.", "Its fields and lists show here.");
+		if (shown) used_by(*shown);
 		return;
 	}
 	const Node *row = document->row(view.documents.selection.primary.row);

@@ -1,14 +1,16 @@
 # opennova-nw-lister: lists one server on a NovaWorld master without the game. The NWU session, the host
 # role, the lobby HTTP machines and the remote-admin codec are the engine's (net/novaworld,
-# net/admin); the app owns the sockets (apps/common), the listing file, the admin poll thread and
-# the log.
+# net/admin); the app owns the sockets (apps/common), the listing sources (the file and the admin
+# poll thread, or an embedder's live one: opennova-serve links this core) and the log.
 find_package(Threads REQUIRED)
 
 add_library(opennova_nw_lister_core STATIC
     admin_feed.cpp
     console_log.cpp
+    file_listing_source.cpp
     lister.cpp
     listing.cpp
+    policy.cpp
 )
 
 target_include_directories(opennova_nw_lister_core

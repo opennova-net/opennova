@@ -54,19 +54,7 @@ void Simulation::resolve_item_traits(const Ref<ItemDatabase> &p_item_db) {
 	// The kernel's item legs (the collision demand sweep, the adm resolve)
 	// read the same rows; the Ref above pins their lifetime.
 	kernel_->set_items_table(&p_item_db->native_items());
-	if (!assets_.item_replication_catalog ||
-			assets_.item_replication_catalog_db.ptr() != p_item_db.ptr() ||
-			assets_.item_replication_catalog_revision != p_item_db->get_revision()) {
-		// Built straight off the retained parse: the per-row walk sees every
-		// row, so the catalog resolves a duplicated id to its first row and
-		// lists the repeats.
-		assets_.item_replication_catalog =
-				std::make_shared<const opennova::replication::ItemReplicationCatalog>(
-						opennova::replication::ItemReplicationCatalog::from_items_def(
-								p_item_db->native_items()));
-		assets_.item_replication_catalog_db = p_item_db;
-		assets_.item_replication_catalog_revision = p_item_db->get_revision();
-	}
+	ensure_item_replication_catalog(p_item_db);
 	// The kernel runs the sweep over the table installed above and re-runs it
 	// inside every baseline restore (the baseline predates these traits).
 	kernel_->resolve_item_traits(
@@ -82,6 +70,25 @@ void Simulation::resolve_item_traits(const Ref<ItemDatabase> &p_item_db) {
 			});
 
 	install_item_catalog();
+}
+
+// The replication catalog over the database's retained parse, rebuilt when
+// the database or its revision changed.
+void Simulation::ensure_item_replication_catalog(const Ref<ItemDatabase> &p_item_db) {
+	if (p_item_db.is_null()) return;
+	if (assets_.item_replication_catalog &&
+			assets_.item_replication_catalog_db.ptr() == p_item_db.ptr() &&
+			assets_.item_replication_catalog_revision == p_item_db->get_revision())
+		return;
+	// Built straight off the retained parse: the per-row walk sees every row,
+	// so the catalog resolves a duplicated id to its first row and lists the
+	// repeats.
+	assets_.item_replication_catalog =
+			std::make_shared<const opennova::replication::ItemReplicationCatalog>(
+					opennova::replication::ItemReplicationCatalog::from_items_def(
+							p_item_db->native_items()));
+	assets_.item_replication_catalog_db = p_item_db;
+	assets_.item_replication_catalog_revision = p_item_db->get_revision();
 }
 
 void Simulation::install_item_catalog() {

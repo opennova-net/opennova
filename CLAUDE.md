@@ -27,8 +27,10 @@ easier to relay than to rediscover.
   (`opennova-lan-probe`), `novaworld_server/` (`opennova-novaworld-server`, the NovaWorld
   service), `nw_lister/` (`opennova-nw-lister`: lists one server on a NovaWorld master
   without the game), `project/` (`opennova-project`, the editor's session on the command
-  line, ADR 0046 S13 A7), `wire/` (`opennova-wire`, the capture decoder), and `common/`
-  (shared socket helpers, deliberately app-layer; pcap I/O lives in `engine/base/pcapio`).
+  line, ADR 0046 S13 A7), `serve/` (`opennova-serve`, the headless game server with
+  retail's remote admin, ADR 0051; its files live in its working directory), `wire/`
+  (`opennova-wire`, the capture decoder), and `common/` (shared socket helpers and the
+  remote-admin TCP pump, deliberately app-layer; pcap I/O lives in `engine/base/pcapio`).
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service
@@ -64,11 +66,13 @@ easier to relay than to rediscover.
   with `scripts/land_docs.sh` (Git, PRs, CI below).
 - `third_party/` — vendored submodules (godot-cpp and gut; never edit in
   place — bump submodules upstream) plus two vendored in-tree C sources (bcrypt,
-  and miniz — the BFC1 decoder's inflate, target `opennova_miniz`) and two
+  and miniz — the BFC1 decoder's inflate, target `opennova_miniz`) and three
   hash-pinned FetchContents: sqlite (bump by editing the URL/URL_HASH in
-  `third_party/sqlite/CMakeLists.txt`) and Dear ImGui (`third_party/imgui/`,
+  `third_party/sqlite/CMakeLists.txt`), Dear ImGui (`third_party/imgui/`,
   pinned to the commit the imgui-godot addon bundles — bump it and
-  `scripts/bootstrap_imgui_godot.sh` together, never one alone).
+  `scripts/bootstrap_imgui_godot.sh` together, never one alone) and rgbcx
+  (`third_party/rgbcx/`, the tools' authoring DXT encoder; bump the commit and
+  URL_HASH together).
 
 ## Build & test
 

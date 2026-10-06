@@ -125,8 +125,8 @@ Dictionary HostSessionOptions::to_json_value() const {
 	out["max_players"] = max_players_;
 	out["serve_and_play"] = serve_and_play_;
 	out["game_type_auto"] = game_type_auto_;
-	out["fat_bullets"] = config_.fat_bullets;
-	out["one_shot_kill"] = config_.one_shot_kill;
+	out["fat_bullets"] = config_.fat_bullets != 0;
+	out["one_shot_kill"] = config_.one_shot_kill != 0;
 	out["unlimited_vehicles"] = config_.unlimited_vehicles;
 	out["spawn_x"] = get_spawn_x();
 	out["spawn_y"] = get_spawn_y();
@@ -167,6 +167,8 @@ Ref<HostSessionOptions> HostSessionOptions::duplicate_options() const {
 	copy->game_root_ = game_root_;
 	copy->dir_ = dir_;
 	copy->region_index_ = region_index_;
+	copy->rotation_missions_ = rotation_missions_;
+	copy->rotation_launch_options_ = rotation_launch_options_;
 	copy->network_type_ = network_type_;
 	return copy;
 }
@@ -236,6 +238,8 @@ void HostSessionOptions::_bind_methods() {
 	HOST_SESSION_PROPERTY(Variant::STRING, game_root)
 	HOST_SESSION_PROPERTY(Variant::STRING, dir)
 	HOST_SESSION_PROPERTY(Variant::INT, region_index)
+	HOST_SESSION_PROPERTY(Variant::PACKED_STRING_ARRAY, rotation_missions)
+	HOST_SESSION_PROPERTY(Variant::PACKED_INT32_ARRAY, rotation_launch_options)
 #undef HOST_SESSION_PROPERTY
 	ClassDB::bind_method(D_METHOD("to_json_value"), &HostSessionOptions::to_json_value);
 	ClassDB::bind_static_method("HostSessionOptions", D_METHOD("dialog_controls"), &HostSessionOptions::dialog_controls);

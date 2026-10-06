@@ -52,9 +52,9 @@ class Simulation;
 // uses its scalar fraction (D-WPN-39). (The `Flags & 2` leg of the
 // camera is the DEAD/round-end camera, not ADS.) The view fields flow from
 // the mounted root's weapon.def (apply_viewmodel_def <-
-// LocalPlayerVisuals.local_player_viewmodel_def, the fixed default weapon
-// until equipped-weapon resolution lands); the fallback values are the
-// witnessed JOX WPN_AK47AUTO line, kept as the no-def fallback. (The pre-def
+// LocalPlayerVisuals.local_player_viewmodel_def, the equipped weapon's row);
+// the initial values are the witnessed JOX WPN_AK47AUTO line, which nothing
+// draws with until an equipped def replaces them. (The pre-def
 // constant (10, 0, -201) turned out to be the REVX-era WPN_AK47AUTO `pos` --
 // that SKU's def drives the AKM_1st viewmodel.) The witnessed scale +
 // fallback placement values live at engine renderer/fp_viewmodel_spec.h,

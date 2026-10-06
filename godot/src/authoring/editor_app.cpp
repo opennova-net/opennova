@@ -4,6 +4,8 @@
 #include <godot_cpp/classes/audio_stream_wav.hpp>
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/input.hpp>
+#include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
@@ -24,12 +26,15 @@
 #include <runtime/devtools/imgui_pass.h>
 
 #include <editor/assets/asset_registry.h>
+#include <editor/assets/project_asset_source.h>
 #include <editor/preview/texture_thumbnails.h>
 #include <editor/preview/viewport_device_cache.h>
 #include <editor/preview/viewports.h>
 #include <editor/project/project_files.h>
 #include <editor/run/launch_plan.h>
+#include <editor/session/disk_watch.h>
 #include <editor/session/file_preferences_store.h>
+#include <editor/session/navigation_controller.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/session_operation.h>
 #include <editor/session/view/session_view.h>
@@ -85,6 +90,8 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_status_text"), &EditorApp::get_status_text);
 	ClassDB::bind_method(D_METHOD("get_sound_state"), &EditorApp::get_sound_state);
 	ClassDB::bind_method(D_METHOD("get_sound_path"), &EditorApp::get_sound_path);
+	ClassDB::bind_method(D_METHOD("get_clip_voices_started"), &EditorApp::get_clip_voices_started);
+	ClassDB::bind_method(D_METHOD("get_clip_sound_seq"), &EditorApp::get_clip_sound_seq);
 	ClassDB::bind_method(D_METHOD("set_open_externally", "open"), &EditorApp::set_open_externally);
 	ClassDB::bind_method(D_METHOD("get_open_externally"), &EditorApp::get_open_externally);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "open_externally"), "set_open_externally", "get_open_externally");
@@ -163,8 +170,10 @@ void EditorApp::_ready() {
 	if (get_tree()->get_current_scene() == this) get_tree()->set_auto_accept_quit(false);
 	ensure_session();
 	ImGuiPassNode::_ready();
-	// The session pumps whether or not the workspace draws (headless tests, the smoke).
+	// The session pumps whether or not the workspace draws (headless tests, the smoke); the mouse's back and
+	// forward buttons are taken at the root's input (_input).
 	set_process(true);
+	set_process_input(true);
 	// The viewports' devices render offscreen through the runtime's MenuFrame and ObjectModel, or are a
 	// Control placed over the canvas's rect (the script device's CodeEdit, S13 V10)
 	// (authoring/viewport_devices), drawn only by a viewport's view; headless runs keep them too (the
@@ -200,9 +209,6 @@ void EditorApp::_ready() {
 	// tab or a texture field, a Replace).
 	if (get_tree()->get_current_scene() == this && get_window() != nullptr)
 		get_window()->connect("files_dropped", Callable(this, "_on_files_dropped"));
-	// A window that starts with the focus gets no focus-in: the sources a program edits are checked from the
-	// first pump (S18).
-	focused_ = get_window() != nullptr && get_window()->has_focus();
 	const PackedStringArray args = OS::get_singleton()->get_cmdline_user_args();
 	for (int i = 0; i < args.size(); ++i) {
 		if (args[i] == kSmokeFlag) {
@@ -256,6 +262,7 @@ int EditorApp::start_mcp_endpoint(int p_port) {
 void EditorApp::_exit_tree() {
 	mcp_service_ = nullptr; // a child: it leaves with the tree and stops its server
 	mcp_port_ = 0;
+	show_system_pointer_(true);
 #if OPENNOVA_EDITOR_UI
 	windows_->set_devices(nullptr);
 	windows_->set_thumbnail_images(nullptr);
@@ -293,6 +300,8 @@ void EditorApp::_process(double p_delta) {
 	// a test's one unit a frame whatever.
 	if (devices_) {
 		session_->advance(p_delta);
+		// What the previewed clip's events fired as the clock ran, heard now (DI-04).
+		pump_clip_sounds_();
 		devices_->tick(session_->viewports());
 		// E13: of the devices drawn this frame, those of one scene state render (their frame legs
 		// run), the rest keep their last pictures until the next frame.
@@ -308,6 +317,22 @@ void EditorApp::_process(double p_delta) {
 	}
 }
 
+void EditorApp::_input(const Ref<InputEvent> &p_event) {
+	const InputEventMouseButton *button = Object::cast_to<InputEventMouseButton>(p_event.ptr());
+	if (button == nullptr || !session_) return;
+	const MouseButton which = button->get_button_index();
+	if (which != MOUSE_BUTTON_XBUTTON1 && which != MOUSE_BUTTON_XBUTTON2) return;
+	// A picker waits on a person's answer: the buttons are its own while it shows.
+	if (picker_ != nullptr && picker_->is_visible()) return;
+	// Its release too: Dear ImGui never sees half a click of it.
+	get_viewport()->set_input_as_handled();
+	const bool back = which == MOUSE_BUTTON_XBUTTON1;
+	if (!button->is_pressed() || !opennova::editor::navigation_offered(session_->view(), back)) return;
+	const EditorRequest asked =
+			back ? opennova::editor::request::navigate_back() : opennova::editor::request::navigate_forward();
+	if (!session_->handle(asked)) serve(asked);
+}
+
 void EditorApp::before_layout(double) {
 	if (thumbnails_) thumbnails_->begin_frame();
 #if OPENNOVA_EDITOR_UI
@@ -318,7 +343,16 @@ void EditorApp::before_layout(double) {
 void EditorApp::after_layout(uint64_t, bool, int64_t) {
 #if OPENNOVA_EDITOR_UI
 	windows_->end_frame();
+	// One pointer over a picture that draws the game's (a menu's, DI-08): the system one hidden while a
+	// window asks, shown again the frame none does.
+	show_system_pointer_(!windows_->pointer_hidden());
 #endif
+}
+
+void EditorApp::show_system_pointer_(bool p_shown) {
+	if (p_shown == !pointer_hidden_) return;
+	pointer_hidden_ = !p_shown;
+	Input::get_singleton()->set_mouse_mode(p_shown ? Input::MOUSE_MODE_VISIBLE : Input::MOUSE_MODE_HIDDEN);
 }
 
 void EditorApp::pump() {
@@ -328,14 +362,14 @@ void EditorApp::pump() {
 	// budget steps the validation they left due first (S13 A3: no request runs it).
 	serve_queued_device_requests_();
 	drain_requests();
-	// A source a program edits comes back once a second while the window has the focus (S18).
-	if (focused_) {
-		const uint64_t now = Time::get_singleton()->get_ticks_msec();
-		if (now - last_source_check_ms_ >= 1000) {
-			last_source_check_ms_ = now;
-			refresh_changed_sources_();
-		}
-	}
+	// What another program saves comes back (S18, DI-01): a check once a second whether or not the window
+	// has the focus (an editor an MCP client launched never has it), sooner while a file waits to hold still
+	// or the focus-in's sweep runs.
+	const uint64_t now = Time::get_singleton()->get_ticks_msec();
+	const opennova::editor::ProjectView &project = session_->view().project;
+	const int64_t interval = project.outside_waiting || project.outside_sweeping ? opennova::editor::kDiskHoldStillMs
+	                                                                            : opennova::editor::kDiskCheckMs;
+	if (int64_t(now - last_disk_check_ms_) >= interval) refresh_changed_sources_(false);
 	session_->poll();
 	// A game started behind (play {behind}) kept behind while it starts.
 	platform_->tend();
@@ -348,13 +382,15 @@ void EditorApp::pump() {
 	if (session_->view().dialogs.quit_requested) get_tree()->quit(0);
 }
 
-// The import sources a program saved, imported again (S18: RefreshChangedSources), when the busy gate
-// takes it: an operation that holds the files runs, and the next check asks again.
-void EditorApp::refresh_changed_sources_() {
+// What another program saved, read again (S18, DI-01: RefreshChangedSources; `all`, every file of the
+// project swept), when the busy gate takes it: an operation that holds the files runs, and the next
+// check asks again.
+void EditorApp::refresh_changed_sources_(bool p_all) {
+	last_disk_check_ms_ = Time::get_singleton()->get_ticks_msec();
 	if (!session_ || !session_->view().project.open ||
 			!session_->view().allows(opennova::editor::EditorRequestKind::RefreshChangedSources))
 		return;
-	session_->handle(opennova::editor::request::refresh_changed_sources());
+	session_->handle(opennova::editor::request::refresh_changed_sources(p_all));
 }
 
 // Each OpenExternally view event the session posted since the last pump: its file opened in the program
@@ -498,6 +534,26 @@ void EditorApp::pump_sound_() {
 		break;
 	default: break;
 	}
+}
+
+// The clip sounds (DI-04): each the session fired since the last taken started beside those playing, its
+// waves decoded once while the project's files stand; none while no project is open.
+void EditorApp::pump_clip_sounds_() {
+	if (!session_) return;
+	const opennova::editor::SessionView &view = session_->view();
+	if (!view.project.open) {
+		if (clip_voices_) clip_voices_->stop();
+		return;
+	}
+	const uint64_t generation = view.findings.assets ? view.findings.assets->generation() : 0;
+	if (clip_voices_ && generation != clip_wave_generation_) clip_voices_->forget();
+	clip_wave_generation_ = generation;
+	for (const opennova::editor::ClipSoundPlay &play : session_->clip_sounds_since(clip_sound_seq_)) {
+		clip_sound_seq_ = play.seq;
+		if (!clip_voices_) clip_voices_ = std::make_unique<PreviewSoundVoices>(this);
+		clip_voices_->add(view.project.root, play.voices);
+	}
+	if (clip_voices_) clip_voices_->pump();
 }
 
 String EditorApp::get_sound_state() const {
@@ -727,12 +783,9 @@ void EditorApp::_notification(int p_what) {
 	if (p_what == NOTIFICATION_WM_CLOSE_REQUEST) {
 		ensure_session(); session_->handle(opennova::editor::request::quit());
 	} else if (p_what == NOTIFICATION_APPLICATION_FOCUS_IN) {
-		// Back from another program (S18): what it saved comes back now, then once a second (pump).
-		focused_ = true;
-		last_source_check_ms_ = Time::get_singleton()->get_ticks_msec();
-		refresh_changed_sources_();
-	} else if (p_what == NOTIFICATION_APPLICATION_FOCUS_OUT) {
-		focused_ = false;
+		// Back from another program (S18, DI-01): every file of the project looked at now, swept over the
+		// frames, and what it saved read as it holds still.
+		refresh_changed_sources_(true);
 	}
 }
 } // namespace godot

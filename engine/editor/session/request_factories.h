@@ -191,8 +191,26 @@ inline EditorRequest edit_externally(std::string path) {
 	request.path = std::move(path);
 	return request;
 }
+// The .tga `path` stored as the .dds of its name, which every use of it reads first (S18:
+// import/texture_source.h plan_texture_dds).
+inline EditorRequest store_as_dds(std::string path) {
+	EditorRequest request = of(EditorRequestKind::StoreAsDds);
+	request.path = std::move(path);
+	return request;
+}
+// The texture `path`, which no use of it reads (each use's loader opens another file of its name, a .tga's
+// .dds), set aside under .replaced/ (S18).
+inline EditorRequest set_aside_texture(std::string path) {
+	EditorRequest request = of(EditorRequestKind::SetAsideTexture);
+	request.path = std::move(path);
+	return request;
+}
 // What changed on disk among the import sources imported again (S18: the Shell's on its window's focus).
-inline EditorRequest refresh_changed_sources() { return of(EditorRequestKind::RefreshChangedSources); }
+inline EditorRequest refresh_changed_sources(bool all = false) {
+	EditorRequest request = of(EditorRequestKind::RefreshChangedSources);
+	request.all = all;
+	return request;
+}
 // What a Replace of the texture `path` by the image `image` (none: an Edit externally) would do, asked in
 // the dialog before it is done (S18), `values` the options asked over the ones reproducing its form.
 inline EditorRequest preview_texture_source(std::string path, std::string image = std::string(),
@@ -345,6 +363,13 @@ inline EditorRequest play_footstep(std::string profile, std::string surface, std
 	request.values = {{"profile", std::move(profile)}, {"surface", std::move(surface)}, {"foot", std::move(foot)}};
 	return request;
 }
+// What the clip the animation document `path` plays fires at `frame`, once (DI-04: a timeline mark pressed).
+inline EditorRequest play_clip_event(std::string path, int frame) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.path = std::move(path);
+	request.values = {{"frame", std::to_string(frame)}};
+	return request;
+}
 inline EditorRequest stop_sound() {
 	return of(EditorRequestKind::StopSound);
 }
@@ -369,12 +394,31 @@ inline EditorRequest save(std::string path = std::string()) {
 	request.path = std::move(path);
 	return request;
 }
+// The document at `path` written over its file that changed outside the editor (DI-01: a conflict's Keep
+// my edits).
+inline EditorRequest save_over(std::string path) {
+	EditorRequest request = save(std::move(path));
+	request.force = true;
+	return request;
+}
 inline EditorRequest save_all() {
 	return of(EditorRequestKind::SaveAll);
 }
 inline EditorRequest reveal_path(std::string path) {
 	EditorRequest request = of(EditorRequestKind::RevealPath);
 	request.path = std::move(path);
+	return request;
+}
+// Back (Forward) `steps` places of the navigation history: the nearest, or one further down Back's
+// (Forward's) list.
+inline EditorRequest navigate_back(uint32_t steps = 1) {
+	EditorRequest request = of(EditorRequestKind::NavigateBack);
+	request.steps = steps;
+	return request;
+}
+inline EditorRequest navigate_forward(uint32_t steps = 1) {
+	EditorRequest request = of(EditorRequestKind::NavigateForward);
+	request.steps = steps;
 	return request;
 }
 
@@ -555,6 +599,14 @@ inline EditorRequest preview_rename_back(bool ask_name = false) {
 }
 // The last rename taken back, on disk.
 inline EditorRequest rename_back() { return of(EditorRequestKind::RenameBack); }
+// The file `path` moved to the project's `folder` ("" the top level) under its own name, no reference
+// rewritten (DI-03: the game finds a file by its name alone).
+inline EditorRequest move_asset(std::string path, std::string folder) {
+	EditorRequest request = of(EditorRequestKind::MoveAsset);
+	request.path = std::move(path);
+	request.folder = std::move(folder);
+	return request;
+}
 
 // --- the shell's -------------------------------------------------------------------------------
 

@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,7 @@
 #include <runtime/inmatch/udp_session_transport.h> // replication::UdpSessionTransport
 
 #include <net/npwire/peer_addr.h> // opennova::PeerAddr
+#include <runtime/inmatch/server_files.h> // ServerLogs
 #include <net/npwire/protocol_message.h>
 
 #include <runtime/inmatch/napi_np_connection.h>
@@ -144,11 +146,44 @@ struct HostConfig {
 	// @0x551500]. Defaults to the stock fresh-profile seed; the shell replaces it
 	// from the mounted Avatars.def + weapon.sav.
 	CharacterJoinVars local_character_vars = retail_fresh_profile_character_vars();
+	// The host process's log devices (server_files.h) and its socket's bound
+	// address for the /INOUT lines; the session start installs both on the
+	// fresh context.
+	ServerLogs logs;
+	PeerAddr local_address{};
+	bool local_address_known = false;
+	// The directory banned.txt and banlist.txt live in (ServerBanLists::directory): retail's
+	// working directory, "" for the bare names there (opennova-serve's). Unset, the lists
+	// load empty and no file is read or written (the game's hosts, D-NET-295's residual).
+	// The session start installs it ahead of the round init that loads both files.
+	std::optional<std::string> ban_directory;
 };
 
 // Stand `owner` up through the shared in-match host bring-up the Godot host uses. `serve_and_play` selects HostClient and registers the type-2 loopback; otherwise it selects
 // HostOnly and creates no local player. When serve-and-play also has a World, spawn the host player
 // and queue its initial-state burst before the first per-frame 0x0A.
 void start_host_session(HostOwner &owner, const HostConfig &cfg);
+
+// The map change's bring-up (net-re §5.70.6): the next mission inside the SAME
+// session. The owner keeps its context, its connections, their keys and
+// sequencing, its clock and its staged sends; the session config takes the
+// next map's identity, the session-variable stream and the mission-data
+// block rebuild with bumped transfer tokens, the round-end state clears, and
+// the new World (`owner.ctx.world`, set by the caller) is configured as a
+// fresh session's is. No player spawns here: the kept slots spawn after the
+// mission load (inmatch/map_change.h). [orig: Game_StartMission's authority
+// arm @0x524492..0x52452B, the stream rebuild @0x5247EB / its token
+// @0x5247F3, CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0 (the call
+// @0x5248A7)]
+void continue_host_session(HostOwner &owner, const HostConfig &cfg);
+
+// The host's network pump while it loads a mission: the receive drain with
+// its handlers (a joiner's 0x33 / 0x37 / 0x47 / 0x48 are answered from the
+// kept slot) and the send flush, with no connection burst and no server
+// tick, and the owner's clock not advanced. [orig: Server_PumpNetworkTransport
+// @0x4FD960 -- CNapiNetwork_PumpManagerReceive, PumpServerProtocolRecv,
+// PumpServerProtocolSend; called through Game_StartMission's load, e.g.
+// @0x5245E8, @0x524A63, @0x524B36]
+void host_session_load_pump(HostOwner &owner, opennova::IDatagramSocket &sock);
 
 } // namespace opennova::inmatch

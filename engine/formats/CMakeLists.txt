@@ -9,6 +9,9 @@ add_library(opennova_formats STATIC
     # adm — .adm animation definition map (anim slots -> .bad clip variant rings)
     ${CMAKE_CURRENT_SOURCE_DIR}/adm/adm.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/adm/adm_write.cpp
+    # admincfg — admin.cfg, the remote-admin console's users and whitelist (read-only:
+    # retail never writes it)
+    ${CMAKE_CURRENT_SOURCE_DIR}/admincfg/admin_cfg.cpp
     # aip — AI profile text (PARTIAL PORT: the two witnessed speed keys; the
     # remainder is the ledgered D-AI-11(h) gap and lands here when witnessed)
     ${CMAKE_CURRENT_SOURCE_DIR}/aip/aip.cpp
@@ -20,6 +23,10 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/bad/bad_build.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/bad/bad_o3a_read.cpp    # the .o3a clip-set text -> the seam
     ${CMAKE_CURRENT_SOURCE_DIR}/bad/bad_write.cpp
+    # banlist — the two ban lists: banlist.txt (PCIDs, a NovaWorld host's) and
+    # banned.txt (addresses and names, every authority)
+    ${CMAKE_CURRENT_SOURCE_DIR}/banlist/address_ban_list.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/banlist/pcid_ban_list.cpp
     # bink — native BIKi menu-video decode
     ${CMAKE_CURRENT_SOURCE_DIR}/bink/bink.cpp
     # bfc1 — compressed container (inflates through the vendored miniz,
@@ -45,6 +52,7 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_layout.cpp   # the order and indentation a file was read with
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_notes.cpp    # what a save needs to put a file back as it was read
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_powerup.cpp  # POWERUP.DEF
+    ${CMAKE_CURRENT_SOURCE_DIR}/def/reserved_items.cpp # the ids and rows the engine fixes
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_scan.cpp     # the shared .def text scanner
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_weapons.cpp  # WEAPONS.DEF
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_schema.cpp
@@ -62,6 +70,9 @@ add_library(opennova_formats STATIC
     # foliage — foliage defs + placement map
     ${CMAKE_CURRENT_SOURCE_DIR}/foliage/foliage.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/foliage/runtime.cpp
+    # gamecfg — game.cfg, the persisted settings (the key model, reader, writer)
+    ${CMAKE_CURRENT_SOURCE_DIR}/gamecfg/game_cfg.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/gamecfg/game_cfg_write.cpp
     # grm — facial texture mesh and gesture offsets
     ${CMAKE_CURRENT_SOURCE_DIR}/grm/grm.cpp
     # lwf — sound profiles (+ the .wav payload decode the profiles reference)

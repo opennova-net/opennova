@@ -69,6 +69,13 @@ void DocumentWindow::receive(const ViewEvent &event) {
 		}
 }
 
+void DocumentWindow::show_document(const ViewEvent &event) {
+	tab_asked_ = event.flag ? std::string() : event.path;
+	page_asked_ = event.flag;
+	page_reveal_ = page_reveal_ || event.flag;
+	request_focus();
+}
+
 size_t DocumentWindow::held_events(const std::string &path) const {
 	const auto found = views_.find(path);
 	return found == views_.end() ? 0 : found->second.view->held_events();
@@ -154,7 +161,8 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 		// always closes.
 		ImGuiTabItemFlags flags = ImGuiTabItemFlags_NoTooltip;
 		if (document->dirty()) flags |= ImGuiTabItemFlags_UnsavedDocument;
-		if (follow && path == view.documents.active) flags |= ImGuiTabItemFlags_SetSelected;
+		if ((follow && path == view.documents.active) || path == tab_asked_)
+			flags |= ImGuiTabItemFlags_SetSelected;
 		const std::string name = basename_of(path);
 		const std::string label = (names[name] > 1 ? path : name) + "###" + path;
 		bool open = true;
@@ -185,12 +193,16 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 	// The page of a file the editor has no editor for (the plain-words lane), after the documents: shown
 	// when it is opened, closed with its tab.
 	if (!view.documents.page.empty()) {
-		const bool select = view.documents.page != page_followed_;
+		const bool select = view.documents.page != page_followed_ || page_asked_;
 		page_followed_ = view.documents.page;
 		bool open = true;
 		const std::string label = "About " + basename_of(view.documents.page) + "###page";
 		if (ImGui::BeginTabItem(label.c_str(), &open, select ? ImGuiTabItemFlags_SetSelected : 0)) {
-			draw_file_page(workspace_, view.documents.page, page_cache_);
+			// The tab asked shows from the next frame: the marked line is scrolled to once the page draws
+			// in it, not on the frame the ask selects it.
+			const bool reveal = page_reveal_ && !page_asked_;
+			draw_file_page(workspace_, view.documents.page, page_cache_, reveal);
+			if (reveal) page_reveal_ = false;
 			ImGui::EndTabItem();
 		}
 		ui_kit::tooltip("What " + view.documents.page + " is and who uses it: the editor has no editor for its kind yet.");
@@ -199,6 +211,8 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 		page_followed_.clear();
 	}
 	ImGui::EndTabBar();
+	tab_asked_.clear();
+	page_asked_ = false;
 	if (shown == view.documents.active) {
 		raised_.clear();
 	} else if (!follow && !shown.empty() && shown != raised_) {

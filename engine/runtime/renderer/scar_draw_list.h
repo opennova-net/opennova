@@ -18,12 +18,24 @@
 
 #include <runtime/world/impact_scar.h>
 
+namespace opennova::world {
+struct CollisionMatrix;
+}
+
 namespace opennova::renderer {
 
 // No occlusion instance is a host-side all-visible fallback, represented by
 // nullopt. Missing owners are rejected before any mask lookup.
+//
+// `building` is the SLOT's isBuilding byte (world::ScarSlot::building, the
+// struck def's type == 5 at the slot write), not the owner's pool: a
+// decoration placed in the BMS Building list sits in pool 2 but takes the
+// non-building leg, its four containing-building hits
+// [orig: Scar_RenderCache @0x5CD92C tests the slot byte +60 that Scar_AddEntry
+//  @0x5CCCC6..0x5CCCCE writes from `def+0x5C == 5`].
 using ScarSectionMaskLookup = std::function<std::optional<uint32_t>(world::EntityHandle)>;
-bool scar_owner_visible(const world::Entity *owner, const ScarSectionMaskLookup &section_mask);
+bool scar_owner_visible(const world::Entity *owner, bool building,
+		const ScarSectionMaskLookup &section_mask);
 
 
 // The witnessed vertex stride {x, y, z, argb, u, v} [orig: the six 24-byte
@@ -40,10 +52,17 @@ struct ScarVertex {
 // One run of quads sharing an owner ring, a section and a texture strip. Six
 // vertices per quad in the witnessed order. A shared-ring batch is in
 // mission-space world coordinates; an entity-ring batch is SECTION-LOCAL to
-// `section` of the owner's model and must be drawn under that section's node
+// `section` of the owner's model and draws under that section's node
 // [orig: Scar_RenderCache branches on the cache key — bone matrix
 //  `bones + bone << 6` for an entity ring, the position as-is for the shared
 //  ring]. (The retail Y-negation is the world->D3D fold the presenter replaces.)
+//
+// An entity-ring batch whose owner's live section matrix resolved also
+// carries the same quads in world space (`world_resolved`, the run at
+// `world_first_vertex` in ScarDrawList::world_vertices, `vertex_count` long,
+// sharing this batch's UVs and colours): the slots taken through the section
+// matrix as Scar_RenderCache takes them, for an embedder with no node to
+// mount the section-local run under (a statically batched prop).
 struct ScarDrawBatch {
 	std::uint16_t owner_packed = 0xFFFF; // EntityHandle::packed; 0xFFFF = the shared ring
 	std::uint8_t texture = 0;            // strip index (world::scar_texture_strip_name)
@@ -52,10 +71,15 @@ struct ScarDrawBatch {
 	bool building = false;
 	std::uint32_t first_vertex = 0;
 	std::uint32_t vertex_count = 0;
+	bool world_resolved = false;
+	std::uint32_t world_first_vertex = 0;
 };
 
 struct ScarDrawList {
 	std::vector<ScarVertex> vertices;
+	// The world-space form of the entity-ring batches whose section matrix
+	// resolved (ScarDrawBatch::world_first_vertex indexes it).
+	std::vector<ScarVertex> world_vertices;
 	std::vector<ScarDrawBatch> batches;
 	// Slots emitted / slots culled this compile (observability for tests + F3).
 	std::uint32_t slots_live = 0;
@@ -67,11 +91,16 @@ struct ScarDrawList {
 // [orig: `|p.x - camX| <= fog + r && |p.y - camY| <= fog + r` before the view
 // transform; entity-local slots are culled by the presenter with their
 // owner's node], the terrain light colour folded onto every vertex [orig:
-// g_EnvTerrainLightCombined | 0xFF000000], and the owner visibility predicate
-// [orig: a building owner draws when `g_BuildingSectionVisMask[idx] &
-// 0xFFFFFFF` is nonzero; another owner when any of its four containing
-// buildings (+464..+476) is visible, or outright when +464 == 0]. A null
-// predicate treats every owner as visible. The drawer's state is the
+// g_EnvTerrainLightCombined | 0xFF000000], and the owner visibility predicate,
+// asked per slot with the slot's own isBuilding byte [orig: a building slot
+// draws when its owner's `g_BuildingSectionVisMask[idx] & 0xFFFFFFF` is
+// nonzero; another slot when any of its owner's four containing buildings
+// (+464..+476) is visible, or outright when +464 == 0]. A null predicate
+// treats every owner as visible. `section_matrix` answers an entity-ring
+// owner's live section matrix (Q22 rotation, 16.16 translation: the bone
+// matrix `bones + bone << 6` the model callback returns), from which the
+// compile also emits each entity-ring batch in world space; null (or a false
+// answer) leaves the batch section-local only. The drawer's state is the
 // presenter's: blend mode 0 (CD3DDevice_SetFogAndBlendMode), alpha test ref
 // 128, the strip's one-texture mode effect with clamp wrap.
 struct ScarViewContext {
@@ -79,14 +108,16 @@ struct ScarViewContext {
 	float cam_y = 0.0f;
 	float fog_distance = 0.0f;
 	std::uint32_t terrain_light_argb = 0xFFFFFFFFu;
-	bool (*owner_visible)(std::uint16_t owner_packed, void *user) = nullptr;
+	bool (*owner_visible)(std::uint16_t owner_packed, bool building, void *user) = nullptr;
+	bool (*section_matrix)(std::uint16_t owner_packed, int section,
+			world::CollisionMatrix &out, void *user) = nullptr;
 	void *user = nullptr;
 };
 
 // Compile every live slot of every ring into `out` (cleared first): the shared
-// ring first (each slot gated on its own owner's visibility), then the entity
-// rings in cache order (gated once per ring), each grouped per section and
-// texture strip into one batch.
+// ring first, then the entity rings in cache order, every slot gated on its
+// own owner's visibility, each ring grouped per section and texture strip
+// into one batch.
 void compile_scar_draws(const opennova::world::ScarCache &cache,
 		const ScarViewContext &ctx, ScarDrawList &out);
 
