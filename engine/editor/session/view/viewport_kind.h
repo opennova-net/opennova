@@ -31,6 +31,10 @@ enum class ViewportKind : uint8_t {
 	// spawned by the engine's effect scene and played on the preview clock; the Shell's particle
 	// renderer), the Preview window's while a particle file is active
 	Effect,
+	// A HUD layout's HUD as the game draws it (the deep-integration plan's DI-20: hudpos.def through the
+	// runtime's HudOverlay at a screen size, for a player whose state its options choose; the Shell's HUD
+	// device), the Preview window's beside the layout's text
+	Hud,
 	kCount,
 };
 
@@ -44,7 +48,7 @@ inline constexpr size_t kViewportKindCount = static_cast<size_t>(ViewportKind::k
 // are one Main and one Preview.
 enum class ViewportRole : uint8_t { Preview, Main };
 
-// A kind's token on the wire ("menu", "model", "script", "mission", "texture", "effect"; "" past the last kind), and
+// A kind's token on the wire ("menu", "model", "script", "mission", "texture", "effect", "hud"; "" past the last kind), and
 // the kind a token names (false for none).
 const char *viewport_kind_token(ViewportKind kind);
 bool viewport_kind_from_token(const std::string &token, ViewportKind &out);

@@ -1564,6 +1564,13 @@ target_link_libraries(hud_frame_elements_test PRIVATE opennova_runtime)
 target_include_directories(hud_frame_elements_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_frame_elements COMMAND hud_frame_elements_test)
 
+# The HUD walk's record of its own draws (hud/hud_elements.h): each element's span and box, what the
+# editor's HUD preview names the element under a point by (ADR 0046 DI-20).
+add_executable(hud_element_spans_test hud/hud_element_spans_test.cpp)
+target_link_libraries(hud_element_spans_test PRIVATE opennova_runtime)
+target_include_directories(hud_element_spans_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_element_spans COMMAND hud_element_spans_test)
+
 # The spinmap's bit-10 legs: the dmgslice marks and the threat ring.
 add_executable(hud_minimap_radar_test hud/hud_minimap_radar_test.cpp)
 target_link_libraries(hud_minimap_radar_test PRIVATE opennova_runtime)
@@ -4510,6 +4517,13 @@ add_test(NAME editor_texture_import COMMAND editor_texture_import_test)
 # ADR 0046 S18, the texture document's edits (documents/texture_operations, texture_operation): each
 # whole-image operation one undo step written through the editor's writers, Undo, Redo and Save; an
 # import's output and an operation it cannot do refused; the Problems fix of an upside-down TGA's rows.
+# The HUD preview over hudpos.def (the deep-integration plan's DI-20): the HUD layout type and the HUD
+# viewport through a session, its canvas.
+add_executable(editor_hud_viewport_test editor/hud_viewport_test.cpp)
+target_link_libraries(editor_hud_viewport_test PRIVATE opennova_editor)
+target_include_directories(editor_hud_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_hud_viewport COMMAND editor_hud_viewport_test)
+
 add_executable(editor_texture_document_edit_test editor/texture_document_edit_test.cpp)
 target_link_libraries(editor_texture_document_edit_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_document_edit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
