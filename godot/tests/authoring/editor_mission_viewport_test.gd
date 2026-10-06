@@ -1258,3 +1258,115 @@ func test_a_hit_takes_the_face_the_ray_meets() -> void:
 	assert_true(point.x >= 0.0, "a face of the model on the picture, off its glyph")
 	hit = _viewport("hit", {"x": point.x, "y": point.y})
 	assert_eq(int(hit.get("id", 0)), int(person["id"]), "the model's face: its record: %s" % str(hit))
+
+
+## The minted project's rifleman (106102, the mission's two organics: one on path 1, one with none) made a
+## person the game poses: org1 with aidata, drawn by the synth person rig (19 bones), its soldier.adm and
+## clips beside it (fixtures/anim). Rescanned, the device built again over it.
+func _people_project() -> void:
+	var root: String = _seam.get_project_root()
+	var items_path := root.path_join("defs").path_join("items.def")
+	var items := FileAccess.get_file_as_string(items_path)
+	var rifleman := "  id 106102\r\n  type person\r\n  graphic shed\r\n  anim_def soldier\r\n"
+	assert_true(items.contains(rifleman), "the fixture's rifleman")
+	items = items.replace(rifleman,
+			"  id 106102\r\n  type person\r\n  graphic person\r\n  anim_def soldier\r\n  ai_function org1\r\n  attrib: aidata\r\n")
+	_write(items_path, items.to_utf8_buffer())
+	_copy_fixture("threedi/synth/person.3di", root.path_join("models").path_join("person.3di"))
+	for name in ["soldier.adm", "idle.bad", "walk.bad"]:
+		_copy_fixture("anim/" + name, root.path_join("anim").path_join(name))
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps")
+
+
+## The device's model of the organic mark `mark` (null: none).
+func _person_model(mark: Dictionary) -> ObjectModel:
+	var device := _mission_device()
+	var placer: MissionObjectPlacer = device.get("placer")
+	if placer == null:
+		return null
+	return _models_by_key(placer).get(int(device.get("keys", {}).get(int(mark.get("id", 0)), 0)))
+
+
+## The model holds the pose `pose` (the viewport's `pose` of its mark): the clip it names at its playhead, as
+## the game's presenter poses a body row (ObjectModel.play_body_clip_at, SkeletalAnim's tick clock).
+func _assert_posed(model: ObjectModel, pose: Dictionary, what: String) -> void:
+	var playing: Dictionary = pose.get("playing", {})
+	assert_eq(model.get_active_body_clip(), String(playing.get("row", "")), what + ": its clip")
+	assert_eq(model.get_active_body_variant(), int(playing.get("variant", -1)), what + ": its ring entry")
+	assert_false(model.has_body_blend(), what + ": the reset blended out")
+	var skeletal: SkeletalAnim = model.get_skeletal_anim()
+	assert_not_null(skeletal, what + ": the rig bound")
+	if skeletal != null:
+		var seconds := skeletal.get_clip_phase_seconds(String(playing.get("row", "")), int(playing.get("phase", 0)),
+				int(playing.get("variant", 0)), -1)
+		assert_almost_eq(model.get_animation_time(), seconds, 1e-4, what + ": its playhead")
+
+
+## DI-38: the people stand as the game spawns them. Each organic's mark carries the pose the game's organic
+## init and warmup leave it in (the one on path 1 walking, the other idle, at the playheads their SSNs'
+## warmups leave), and the device poses each person's model in it; a route taken away is an Update that
+## poses the person idle, the build generation standing.
+func test_people_posed_as_they_spawn() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	var before := int(state.get("builds", 0))
+	_people_project()
+	# The item table and the models moved: built again over them.
+	for _frame in 900:
+		state = _state()
+		if String(state.get("status", "")) == "ready" and int(state.get("builds", 0)) > before:
+			break
+		await get_tree().process_frame
+	_app.pump()
+	state = _state()
+	assert_gt(int(state.get("builds", 0)), before, "built again")
+	assert_eq(String(state.get("status", "")), "ready", str(state).left(300))
+	assert_eq(int(state.get("body", {}).get("posed", -1)), 2, "both people posed")
+	var walking := {}
+	var standing := {}
+	for row: Variant in state.get("items", []):
+		var mark: Dictionary = row
+		if String(mark.get("kind", "")) != "organic":
+			continue
+		var pose: Dictionary = mark.get("pose", {})
+		assert_eq(String(pose.get("status", "")), "posed", str(pose))
+		if String(pose.get("because", "")) == "route":
+			walking = mark
+		else:
+			standing = mark
+	assert_false(walking.is_empty(), "the organic on path 1 walks")
+	assert_false(standing.is_empty(), "the other stands")
+	if walking.is_empty() or standing.is_empty():
+		return
+	assert_eq(String(walking["pose"].get("row", "")), "anim_walk_forward")
+	assert_eq(String(standing["pose"].get("row", "")), "anim_idle")
+	assert_eq(String(walking["pose"]["playing"].get("clip", "")), "walk.bad")
+	var placer: MissionObjectPlacer = _mission_device().get("placer")
+	for mark: Dictionary in [walking, standing]:
+		var model := _person_model(mark)
+		assert_not_null(model, "the person's model: %s" % str(mark).left(200))
+		if model != null:
+			_assert_posed(model, mark["pose"], String(mark.get("name", "")))
+			# It stands where its spawn stands it: the record raised by the warmup, then stood on the terrain by
+			# the ground solve (the minted terrain is read: settled).
+			var lift := float(mark["pose"].get("lift", 0.0))
+			assert_gt(lift, 0.0, "the spawn lifts the person")
+			assert_true(bool(mark["pose"].get("settled", false)), "stood on the terrain")
+			assert_true(model.transform.is_equal_approx(
+					_placed_transform(placer, mark).translated(Vector3(0.0, lift, 0.0))), "lifted by its lift")
+	# Its route taken away: an Update, the person posed idle on the model the placement made.
+	var builds := int(state.get("builds", 0))
+	var model := _person_model(walking)
+	var edited: Dictionary = _ask({"kind": "edit_record", "path": MISSION_PATH,
+			"edits": [{"op": "set", "id": int(walking["id"]), "field": "waypoint_id", "value": 0}]})
+	assert_true(bool(edited.get("outcome", {}).get("done", false)), str(edited).left(300))
+	state = _state()
+	assert_eq(int(state.get("builds", 0)), builds, "a route's edit is an Update")
+	var now := _mark_of(state, int(walking["id"]))
+	assert_eq(String(now.get("pose", {}).get("row", "")), "anim_idle")
+	assert_eq(_person_model(walking), model, "the same model")
+	if model != null:
+		_assert_posed(model, now["pose"], "idle now")
