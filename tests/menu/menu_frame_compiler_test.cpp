@@ -898,6 +898,32 @@ void test_text_placement_and_truncation(const fnt_font_t *font) {
 			"overflowing text truncates to the fitting prefix");
 }
 
+// Menu text honours the inline tags: a colour tag draws its own RGB under the
+// text colour's alpha and <co> the text colour again (D-FNT-5)
+// [orig: font_cache_draw_text_scaled @0x653230 -> CGameFont_DrawText_Cdecl
+// @0x676290, a null state; GText_ParseFormatTag @0x674346..0x674357].
+void test_text_inline_colour_tags(const fnt_font_t *font) {
+	opennova::mnu::Document doc = parse_or_die(kScreenXml);
+	MenuFrameCompiler c;
+	configure_with(c, doc.first_screen(), font);
+	MenuWidgetState tagged;
+	tagged.index = 1;
+	tagged.has_text = true;
+	tagged.text = "<cFF0000>A<co>B";
+	MenuFrameState state;
+	state.widgets.push_back(tagged);
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	CHECK(!dl.font_runs.empty() && dl.font_runs[0].count == 2, "the tags draw no glyph");
+	if (!dl.font_runs.empty() && dl.font_runs[0].count == 2) {
+		const size_t first = static_cast<size_t>(dl.font_runs[0].first);
+		CHECK((dl.glyphs[first].color & 0xFFFFFFu) == 0xFF0000u, "<cFF0000> draws red");
+		CHECK((dl.glyphs[first + 1].color & 0xFFFFFFu) == 0xAABBCCu,
+				"<co> restores the text colour");
+		CHECK((dl.glyphs[first].color & 0xFF000000u) == (dl.glyphs[first + 1].color & 0xFF000000u),
+				"the tag keeps the text colour's alpha");
+	}
+}
+
 void test_scale_truncation(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kScreenXml);
 	MenuFrameCompiler c;
@@ -2682,6 +2708,7 @@ int main() {
 	test_table_visible_count_floors_to_one(&font);
 	test_table_rows_draw_row_state_not_widget_hover(&font);
 	test_text_placement_and_truncation(&font);
+	test_text_inline_colour_tags(&font);
 	test_scale_truncation(&font);
 	test_radio_checkbox_forcing(&font);
 	test_edit_caret(&font);

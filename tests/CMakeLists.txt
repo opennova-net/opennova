@@ -4253,6 +4253,14 @@ target_link_libraries(editor_play_session_test PRIVATE opennova_editor)
 target_include_directories(editor_play_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_play_session COMMAND editor_play_session_test)
 
+# Play's log as Problems rows (ADR 0046 DI-27): OpenNova's misses on the files and records naming
+# them, with their Go to and fixes; the game install's file and graphics logs read after exit; each
+# mode's rows kept until the next Play of that mode.
+add_executable(editor_play_log_test editor/play_log_test.cpp)
+target_link_libraries(editor_play_log_test PRIVATE opennova_editor)
+target_include_directories(editor_play_log_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_play_log COMMAND editor_play_log_test)
+
 # The neutral editing core at any depth (S9g): a fake document type's walk, placements,
 # locators, structural edits and refusals, batches, gestures, the clipboard seam and the
 # selection model.
@@ -4407,6 +4415,16 @@ add_executable(editor_problem_edit_fixes_test editor/problem_edit_fixes_test.cpp
 target_link_libraries(editor_problem_edit_fixes_test PRIVATE opennova_editor)
 target_include_directories(editor_problem_edit_fixes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_problem_edit_fixes COMMAND editor_problem_edit_fixes_test)
+
+# Missing names offer "Add it there" (ADR 0046 DI-15): a record of the name's kind added to the
+# file where the game looks it up, named as referenced, born as the type's own Add makes one
+# (a weapon, an ammo, a powerup, an item on its id by the reserved-id rule, a string id, a
+# screen, a window, a style variable, a sound set, a sound profile, an effect), one step Undo
+# takes back, over a real session.
+add_executable(editor_add_it_there_test editor/add_it_there_test.cpp)
+target_link_libraries(editor_add_it_there_test PRIVATE opennova_editor)
+target_include_directories(editor_add_it_there_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_add_it_there COMMAND editor_add_it_there_test)
 
 # The menu clipboard's one rule for the tree and the canvas (S13 V1, documents/mnu_clipboard):
 # a window a part holds is copyable from neither, a Paste after the primary's window.
@@ -4777,6 +4795,14 @@ add_executable(editor_model_damage_test editor/model_damage_test.cpp)
 target_link_libraries(editor_model_damage_test PRIVATE opennova_editor)
 target_include_directories(editor_model_damage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_model_damage COMMAND editor_model_damage_test)
+
+# DI-21: a definition table's record drawn as the game draws the thing it defines (an item in its state with its
+# effects and its death's sound, a person posed as it spawns, a weapon's models, an ammo's round); the engine's
+# death banks lifted for it; the effects' playback over several closures.
+add_executable(editor_definition_viewport_test editor/definition_viewport_test.cpp)
+target_link_libraries(editor_definition_viewport_test PRIVATE opennova_editor)
+target_include_directories(editor_definition_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_definition_viewport COMMAND editor_definition_viewport_test)
 
 # What a drag of a menu window's handles writes (editor/preview/menu_layout_edit, S9k1):
 # the plan against the runtime's POSITION solve, the grid, the handles, the edits.

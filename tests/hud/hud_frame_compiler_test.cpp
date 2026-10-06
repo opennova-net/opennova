@@ -123,10 +123,50 @@ void test_format_tags(const fnt_font_t *font) {
 			"an unterminated tag reports failure");
 	idx = 0;
 	GameFontState color_state;
+	color_state.color = 0x80FFFFFFu;
 	CHECK(GameFont::parse_format_tag("<C102030>", &idx, &color_state),
 			"hex color tag parses");
-	CHECK((color_state.color_xor & 0xFFFFFFu) == 0x102030u,
-			"the color XOR folds the tag color");
+	CHECK(color_state.color == 0x80102030u,
+			"the colour tag replaces the live colour's RGB, its alpha kept");
+
+	// The drawn colour IS the live colour: the tag's RGB, then <CO> the
+	// caller's colour again, <CH> the original's half-bright [orig:
+	// GText_ParseFormatTag @0x674346..0x674357 / @0x674315 / @0x674321;
+	// CGameFont_DrawText's vertex colour v146 @0x675837].
+	const auto colored = gf.layout("<cFC8932>a<-co>b<ch>c", 0.0f, 0.0f, 1.0f, 1.0f, 0u,
+			0xFF7F7F7Fu);
+	CHECK(colored.quads.size() == 3, "tags draw no glyph");
+	if (colored.quads.size() == 3) {
+		CHECK(colored.quads[0].color == 0xFFFC8932u, "<cFC8932> draws FC8932");
+		CHECK(colored.quads[1].color == 0xFF7F7F7Fu, "<-co> restores the caller's colour");
+		CHECK(colored.quads[2].color == (0xFF000000u |
+				((3u * (((0xFF7F7F7Fu >> 2) & 0x3F3F3Fu) + 0x156B40u)) & 0xFFFFFFu)),
+				"<ch> is the original colour's half-bright");
+	}
+	idx = 0;
+	GameFontState tab_state;
+	CHECK(GameFont::parse_format_tag("<T40>", &idx, &tab_state) && tab_state.tab_width == 40,
+			"<Tnnn> sets the tab width (textBuffer[4])");
+
+	// Inert tags (textBuffer[1]'s low byte, flag 0x200): each tag is consumed,
+	// the cursor lands on its '>', and nothing commits [orig: @0x6743b0].
+	GameFontState inert;
+	inert.tags_inert = true;
+	idx = 0;
+	CHECK(GameFont::parse_format_tag("<ucFF0000>", &idx, &inert) && idx == 9,
+			"an inert tag is consumed to its '>'");
+	CHECK(!inert.underline && inert.color == 0u, "an inert tag commits nothing");
+	idx = 0;
+	CHECK(!GameFont::parse_format_tag("<u ab", &idx, &inert) && idx == 5,
+			"an inert unterminated tag moves the cursor to the terminator");
+	const auto plain = gf.layout("<ucFF0000>Go<-uco> a<b", 0.0f, 0.0f, 1.0f, 1.0f,
+			opennova::hud::kFontTagsInert, 0xFF7F7F7Fu);
+	CHECK(plain.underlines.empty(), "inert tags underline nothing");
+	// G, o, the space, a and the '<'; the unterminated tag's "b" is swallowed.
+	CHECK(plain.quads.size() == 5, "the tags draw nothing; the unterminated '<' draws, its tail swallowed");
+	bool all_plain = true;
+	for (const auto &q : plain.quads) all_plain = all_plain && q.color == 0xFF7F7F7Fu;
+	CHECK(all_plain, "inert tags leave the caller's colour");
 	// Measurement skips tags entirely.
 	int w = 0;
 	int h = 0;

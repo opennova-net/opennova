@@ -37,21 +37,30 @@ enum GameFontFlags : uint32_t {
 	kFontStyleBold = 0x10,
 	kFontStyleItalic = 0x20,
 	kFontStyleUnderline = 0x40,
+	// A '<' is not parsed and draws as a glyph [orig: HIBYTE(textBuffer[0])
+	// @0x67538e; the '<' arm's test @0x675619].
 	kFontTagsDisabled = 0x100,
+	// Each tag is parsed and consumed but commits nothing: no colour, style
+	// or tab change [orig: LOBYTE(textBuffer[1]) @0x67539e; the parser's
+	// cursor-only write @0x6743b0].
+	kFontTagsInert = 0x200,
 };
 
 // The persistent inline-format state a draw call threads (retail's 5-dword
 // textBuffer block; the drawer persists it at this+4860.. and mirrors it back
-// through the optional state pointer) [orig: @ 0x6752c0 tail].
+// through the optional state pointer) [orig: @ 0x6752c0 tail]. The dwords:
+// [0] the bold / underline / italic / tags-disabled bytes, [1] the
+// tags-inert byte, [2] the live colour, [3] the original colour, [4] the tab
+// width [orig: GText_ParseFormatTag @0x674200 reads and commits all five].
 struct GameFontState {
 	bool bold = false;
 	bool underline = false;
 	bool italic = false;
-	bool tags_disabled = false;
-	uint32_t color_xor = 0;      // low 24 bits XORed into the draw color
-	uint32_t original_color = 0; // the <CO> restore target (RGB)
-	int tab_width = 0;           // 0 = the font's own tab stop
-	int timer = 0;               // <Tnnn> — carried, not consumed here
+	bool tags_disabled = false;  // [0] byte 3 (kFontTagsDisabled)
+	bool tags_inert = false;     // [1] byte 0 (kFontTagsInert)
+	uint32_t color = 0;          // [2] the live draw colour (ARGB)
+	uint32_t original_color = 0; // [3] the <CO> restore target and the <CH> source (ARGB)
+	int tab_width = 0;           // [4] 0 = the font's own tab stop; <Tnnn> sets it
 };
 
 // One glyph quad in output space. The four corners are explicit because the
@@ -118,14 +127,20 @@ public:
 	// underline emits doubled-color segments; every glyph advance is
 	// floor(w * scale + (spacing - 1) * scale + 0.5) from the same cursor walk
 	// the measurer uses. (x, y) is the anchor the alignment resolves against.
+	// The live and original colours start as `color`, as for retail's
+	// null-state callers; a passed state carries its styles, tag switches and
+	// tab width.
 	GameFontRun layout(const char *text, float x, float y, float scale_x,
 			float scale_y, uint32_t flags, uint32_t color,
 			GameFontState *state = nullptr) const;
 
 	// The shared inline-tag parser [orig: GText_ParseFormatTag @ 0x674200]:
-	// <B>/<I>/<U> (with '-' prefix off), <Cxxxxxx> hex color, <CO> restore
-	// original, <CH> half-bright (3/4 c + 0x40 per channel), <Tnnn> timer.
-	// Returns true when the tag was well-formed; advances *index past it.
+	// <B>/<I>/<U> (with '-' prefix off), <Cxxxxxx> hex colour into the live
+	// colour's low 24 bits, <CO> the original colour, <CH> the original's
+	// half-bright, <Tnnn> the tab width. Returns true when the tag was
+	// well-formed. *index lands on its '>' and the state commits only then;
+	// while tags_inert, *index lands where the scan stopped, '>' or the
+	// terminator, and nothing commits.
 	static bool parse_format_tag(const char *text, int *index,
 			GameFontState *state);
 

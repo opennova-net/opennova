@@ -388,6 +388,10 @@ func ensure_game_hud() -> void:
 		push_warning("GameHud: world exposed no resource root; the HUD layout cannot load.")
 	elif hudpos.load_from_resource_root(root, "hudpos.def") != OK:
 		push_warning("GameHud: hudpos.def did not load: %s" % hudpos.get_last_error())
+		# Not there (one that does not parse is no miss): the line the editor's Play reads back into a
+		# Problems row (ADR 0046 DI-27).
+		if not root.has_file("hudpos.def"):
+			ResourceRoot.report_missing("file", "hudpos.def")
 	_game_hud.set_crosshair_style(_crosshair_style)
 	_game_hud.set_crosshair_color(_crosshair_color)
 	_game_hud.set_crosshair_spread_enabled(_crosshair_spread)

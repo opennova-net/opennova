@@ -1273,13 +1273,20 @@ JsonValue diagnostics_to_json(const std::vector<Diagnostic> &diagnostics) {
 	return out;
 }
 
-JsonValue problem_fix_to_json(const ProblemFix &fix) {
+JsonValue problem_fix_to_json(const ProblemFix &fix, const Document *names) {
 	JsonValue out = JsonValue::make_object();
 	out.set("label", json_string(fix.label));
 	out.set("detail", json_string(fix.detail));
 	out.set("bulk", boolean(fix.bulk));
-	out.set("request", editor_request_to_json(fix.request));
+	out.set("request", editor_request_to_json(fix.request, names));
 	return out;
+}
+
+std::unique_ptr<Document> blank_names_for(const SessionView &view, const std::string &path) {
+	const AssetEntry *entry = view.project.scan && !path.empty() ? view.project.scan->at_path(path) : nullptr;
+	const DocumentType *type = entry ? document_type_for(entry->kind) : nullptr;
+	if (!type) return blank_names(path);
+	return type->make ? records_of(type->make()) : nullptr;
 }
 
 JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
@@ -1354,8 +1361,22 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 			if (const std::string witness = requirement_witness(requirement->role); !witness.empty())
 				row.set("witness", json_string(witness));
 		if (answer.grouped) row.set("group", json_string(answer.groups[group_of[i]].key));
+		// Its Go to: the request a click on the row raises (problem_location: its document opened at the
+		// record and field, a text at its line, or the file shown in Files), which editor_request passes back
+		// as it is; none for a row about no file of the project (DI-27).
+		const ProblemLocation location = problem_location(d, view);
+		if (!location.empty()) row.set("go_to", editor_request_to_json(location.request()));
 		JsonValue listed = JsonValue::make_array();
-		for (const ProblemFix &fix : fixes.fixes(view, answer.rows[i])) listed.push(problem_fix_to_json(fix));
+		for (const ProblemFix &fix : fixes.fixes(view, answer.rows[i])) {
+			// A fix's edits named in its document, open or as the scan read the file (a closed string table's
+			// Add it there names a string, a kind its name alone does not say).
+			const Document *open = nullptr;
+			for (const auto &document : view.documents.open)
+				if (document && document->path() == fix.request.path) open = records_of(*document);
+			const std::unique_ptr<Document> blank =
+			        open || fix.request.edits.empty() ? nullptr : blank_names_for(view, fix.request.path);
+			listed.push(problem_fix_to_json(fix, open ? open : blank.get()));
+		}
 		row.set("fixes", std::move(listed));
 		problems.push(std::move(row));
 	}

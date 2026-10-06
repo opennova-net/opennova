@@ -393,6 +393,7 @@ if(OPENNOVA_EDITOR)
         register_types.cpp
         devtools/imgui_pass_node.cpp
         authoring/child_process.cpp
+        authoring/definition_viewport_applier.cpp
         authoring/editor_app.cpp
         authoring/hud_viewport_applier.cpp
         authoring/menu_viewport_applier.cpp
@@ -405,6 +406,7 @@ if(OPENNOVA_EDITOR)
         authoring/texture_viewport_applier.cpp
         authoring/effect_viewport_applier.cpp
         authoring/preview_effects.cpp
+        authoring/preview_model.cpp
         authoring/thumbnail_images.cpp
         authoring/viewport_device.cpp
         authoring/viewport_devices.cpp
