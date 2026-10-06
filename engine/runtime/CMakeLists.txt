@@ -67,6 +67,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/loadout_screen.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/loadout_labels.cpp # the loadout screens' labels, row order and weight readout
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_runtime.cpp # the compiled-menu interaction runtime (id tree, nav, state, actions, input)
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/screen_history.cpp # the screen history across menu files and a mission (D-MNU-28)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_flow.cpp # SP selection, expansion requests and host rotation
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/options_screen.cpp # options remap and preview decisions
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/command_map_screen.cpp # the CMAP tables and ORDERS composer

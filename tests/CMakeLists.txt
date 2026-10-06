@@ -1527,6 +1527,14 @@ target_link_libraries(menu_runtime_test PRIVATE opennova_runtime)
 target_compile_features(menu_runtime_test PRIVATE cxx_std_17)
 add_test(NAME menu_runtime COMMAND menu_runtime_test)
 
+# The menu's screen history across files and a mission (menu/screen_history.h) and the
+# menu mode's leave and re-entry over it: leaving a mission returns to the screen it
+# was started from (D-MNU-28).
+add_executable(screen_history_test menu/screen_history_test.cpp)
+target_link_libraries(screen_history_test PRIVATE opennova_runtime)
+target_compile_features(screen_history_test PRIVATE cxx_std_17)
+add_test(NAME screen_history COMMAND screen_history_test)
+
 # The loadout screens' shared text compositions (menu/loadout_labels.h): the WepDes
 # weapon label, the ammo row, the armory row order and the weight readout.
 add_executable(loadout_labels_test menu/loadout_labels_test.cpp)

@@ -1036,6 +1036,9 @@ func _on_join_screen_cancelled() -> void:
 
 
 func _begin_world_load() -> void:
+	# A mission start from the menu leaves it: the menu keeps the screen it was
+	# started from, which the return after the mission shows again (D-MNU-28).
+	_menu_shell.leave_menu_mode()
 	_shell_presentation.begin_world_load(
 			_menu_shell, _world, _hud, _on_world_loaded, _on_world_load_failed)
 	_state = State.WORLD
