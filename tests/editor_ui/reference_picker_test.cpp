@@ -253,6 +253,45 @@ void test_missing_value_fixes() {
 	ui.frames(2);
 }
 
+// DI-15: a click on a missing value's red dot opens what Problems offers for it, its Add it there first: the
+// sound profile the item names added to SndProf.def. A value found has no such popup (its dot is its Go to).
+void test_missing_dot_fixes() {
+	PickerProject project;
+	CHECK(project.open(), "the item table's project");
+	if (!project.items) return;
+	Value profile;
+	CHECK(project.items->get(project.item, "sound_profile", profile), "the item's sound profile");
+	project.session.handle(request::edit_record(project.items->path(), [&] {
+		Edit set;
+		set.address = project.item;
+		set.field = "sound_profile";
+		set.value = std::string("PROF_GONE");
+		return set;
+	}()));
+	project.session.run_operations();
+	Ui ui;
+	ui.windows.set_view(&project.session.view());
+	ui.frames(6);
+	ui.focus("Inspector");
+	ui.away();
+	ui.drain();
+	ui.activate(field_item(project, "sound_profile", "go to dot"));
+	ui.frames(2);
+	CHECK(GImGui->OpenPopupStack.Size == 1, "a click on the missing value's dot opens its fixes");
+	const std::string shown = logged_frame(ui);
+	CHECK(shown.find("The value is missing:") != std::string::npos, "the popup says the value is missing");
+	const char *label = "Add PROF_GONE to SndProf.def";
+	CHECK(shown.find(label) != std::string::npos, "its Add it there is offered");
+	const ImGuiID popup = field_item(project, "sound_profile", "fixes");
+	ui.activate(ImHashStr(label, 0, popup_item(popup, label)));
+	const std::vector<EditorRequest> requests = ui.drain();
+	const EditorRequest *add = only(requests, EditorRequestKind::EditRecord);
+	CHECK(add && add->open_first && add->path.find("SndProf.def") != std::string::npos && !add->edits.empty() &&
+	              add->edits.front().operation == EditOperation::Add,
+	      "the fix raises the Add of SndProf.def");
+	CHECK(GImGui->OpenPopupStack.Size == 0, "a fix closes the popup");
+}
+
 // S13 D1: a popup's list (the graph's choices, a missing value's finding and its fixes) is made
 // when it opens and kept while what it reads stands: a line of Output and the status line leave
 // it; an edit of its document, an edit of another that changes what the graph holds (the files
@@ -940,6 +979,7 @@ void run_reference_picker_tests() {
 	test_filters_apart();
 	test_drop_on_value();
 	test_missing_value_fixes();
+	test_missing_dot_fixes();
 	test_list_kept();
 	test_lists_let_go();
 	test_pick_by_name();
