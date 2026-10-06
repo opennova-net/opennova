@@ -457,11 +457,13 @@ bool extract_native(NativeExtractor extract, const std::string &name, const std:
 }
 
 // Whether a type's documents are what the graph reads of their file: a record type's, or a text type's
-// whose text names references (DocumentType::references). A text type whose text names none (the text
-// type over a native kind, DI-06) leaves its file's reading to the kind's native extractor.
+// whose text names references (DocumentType::references) or defines names (DocumentType::definitions,
+// a shader's tags). A text type whose text does neither (the text type over a native kind, DI-06) leaves
+// its file's reading to the kind's native extractor.
 bool read_through_document(const DocumentType &type) {
 	const DocumentContent content = document_content(type);
-	return content == DocumentContent::Records || (content == DocumentContent::Text && type.references);
+	return content == DocumentContent::Records ||
+	       (content == DocumentContent::Text && (type.references || type.definitions));
 }
 
 } // namespace
