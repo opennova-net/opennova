@@ -41,11 +41,11 @@ float mission_settled_fog_level(float level) { return env::EnvScalarChannels::se
 
 float mission_fog_reach(const FileSource &files, const MissionSceneHeader &header) {
 	if (header.environment.empty()) return 0.0f;
-	std::vector<uint8_t> bytes;
-	if (!files.read(header.environment + ".env", bytes)) return 0.0f;
-	const std::string text(bytes.begin(), bytes.end());
-	env::Config config;
-	if (!env::load_mission_env(&text, config)) return 0.0f;
+	// The environment as the mission's load makes it: the terrain's .trn, overcast.def, then the .env over them
+	// (env::load_mission_env).
+	env::MissionEnv loaded;
+	if (!mission_environment(files, header, loaded)) return 0.0f;
+	env::Config &config = loaded.config;
 	env::apply_bms_overrides(config, env::bms_env_overrides_from_header(header.attrib_flags, header.water_override,
 	        header.fog_override, header.fog_color, header.water_color, header.water_murk));
 	const env::FogParams fog = env::compute_fog_params(config.fog_type, mission_settled_fog_level(config.fog_level), 0.0f);
