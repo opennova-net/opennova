@@ -413,8 +413,9 @@ int test_session() {
 			if (use.mission == "fogged.bms") {
 				TEST_EXPECT(overrides.size() == 1 && std::string(overrides[0].field) == "fog_override" &&
 				            overrides[0].words == "fog distance 800 m");
-				// The terrain's water height (25 half metres) comes before the environment's.
-				TEST_EXPECT(use.water_from == WaterFrom::Terrain && use.water_height == 12.5f);
+				// The environment's water height (4 half metres) writes after the terrain's (25), so it is the
+				// mission's (env #44).
+				TEST_EXPECT(use.water_from == WaterFrom::Environment && use.water_height == 2.0f);
 				TEST_EXPECT(mission_clock_words(use) == "starts at 06:00, a day of 60 min");
 			} else {
 				TEST_EXPECT(overrides.size() == 1 && std::string(overrides[0].field) == "water_override" &&
