@@ -90,9 +90,11 @@ PreviewPlay plan_set_play(const std::vector<PreviewBank> &banks, const std::stri
 	location.set = index;
 	location.cull_range = int32_t(bank->file.multis[size_t(index)].target_id);
 	const audio::OneshotPlan plan =
-			heard ? audio::plan_oneshot_3d(bank->file, location, heard->source, heard->listener, true, 0, 0, nullptr,
-			                               nullptr, selector, view_flags)
-			      : audio::plan_oneshot_at_distance(bank->file, location, 0, selector, view_flags, false);
+			heard && heard->at_distance
+					? audio::plan_oneshot_at_distance(bank->file, location, heard->distance_q16, selector, view_flags, true)
+			: heard ? audio::plan_oneshot_3d(bank->file, location, heard->source, heard->listener, true, 0, 0, nullptr,
+			                                 nullptr, selector, view_flags)
+			        : audio::plan_oneshot_at_distance(bank->file, location, 0, selector, view_flags, false);
 	if (!plan.in_range) {
 		play.in_range = false;
 		play.words = play.set + " in " + play.bank + " is past its range of " +
