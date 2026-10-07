@@ -5,8 +5,8 @@
 
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
+#include <editor/project/local_settings.h>
 #include <editor/session/document_set.h>
-#include <editor/session/editor_preferences.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/rename_controller.h>
 #include <editor/session/request_kinds.h>
@@ -70,13 +70,14 @@ bool UnsavedGuard::holds(const EditorRequest &request) {
 	return true;
 }
 
-// Play with the editor's save_before_play on (the default; the Play loop, DI-26): the files with unsaved
+// Play with save_before_play on (the Play's own, else the project's: on by default; the Play loop, DI-26): the files with unsaved
 // edits written, as the prompt's Save would write them, the Play going ahead without asking. Not while an
 // operation runs whose gate the Play would meet (a build it would join packs the files: the prompt waits,
 // as its answer is weighed against the operation). True when it saved (every file, or some: what was not
 // written stays unsaved, its failure reported), and Output says how many.
 bool UnsavedGuard::saved_first(const EditorRequest &request, const std::vector<std::string> &unsaved) {
-	if (request.kind != EditorRequestKind::Play || !core_.preferences().values().save_before_play) return false;
+	if (request.kind != EditorRequestKind::Play || !request.save_before_play.value_or(core_.local().save_before_play))
+		return false;
 	if (gate_answer(request.kind, core_.operations().status()) != GateAnswer::Proceed) return false;
 	DocumentSet &documents = core_.documents();
 	documents.end_edit_groups();

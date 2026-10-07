@@ -257,13 +257,21 @@ bool members_known(const JsonValue &object, std::initializer_list<const char *> 
 	return true;
 }
 
+// A play mode that is none (not a string, or a token no PlayMode has), refused naming `where` and the
+// tokens.
+std::string play_mode_error(const char *where, const JsonValue &value) {
+	std::string tokens;
+	for (const PlayMode mode : kPlayModes) tokens += std::string(tokens.empty() ? "" : ", ") + play_mode_token(mode);
+	return std::string("\"") + where + "\" must be a play mode (" + tokens + ")" +
+	       (value.is_string() ? ", not \"" + value.string + "\"" : std::string()) + ".";
+}
+
 // ApplyProjectSettings' settings: each member optional (one left out stays as it is), its
 // type checked.
 bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::string &error) {
 	if (!json.is_object()) { error = "\"settings\" must be an object."; return false; }
 	if (!members_known(json, {"serial", "title", "mission", "multiplayer", "expansion", "builds_on", "game_install",
-	                          "runtime_executable", "play_in_install", "play_in_install_strict", "save_before_play",
-	                          "build_folder"},
+	                          "runtime_executable", "play_mode", "save_before_play", "build_folder"},
 	                   "settings", error)) return false;
 	ProjectSettingsChange change;
 	if (const JsonValue *serial = json.get("serial"); serial && !read_id(*serial, change.serial)) {
@@ -287,10 +295,16 @@ bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::
 	if (!text("title", change.title) || !flag("mission", change.mission) || !flag("multiplayer", change.multiplayer) ||
 	    !text("expansion", change.expansion) || !text("builds_on", change.builds_on) ||
 	    !text("game_install", change.game_install) || !text("runtime_executable", change.runtime_executable) ||
-	    !flag("play_in_install", change.play_in_install) ||
-	    !flag("play_in_install_strict", change.play_in_install_strict) ||
 	    !flag("save_before_play", change.save_before_play) || !text("build_folder", change.build_folder))
 		return false;
+	if (const JsonValue *mode = json.get("play_mode")) {
+		PlayMode read = PlayMode::Runtime;
+		if (!mode->is_string() || !play_mode_from_token(mode->string, read)) {
+			error = play_mode_error("settings.play_mode", *mode);
+			return false;
+		}
+		change.play_mode = read;
+	}
 	out = std::move(change);
 	return true;
 }
@@ -306,8 +320,7 @@ JsonValue settings_to_json(const ProjectSettingsChange &change) {
 	if (change.game_install) out.set("game_install", json_string(*change.game_install));
 	if (change.runtime_executable)
 		out.set("runtime_executable", json_string(*change.runtime_executable));
-	if (change.play_in_install) out.set("play_in_install", boolean(*change.play_in_install));
-	if (change.play_in_install_strict) out.set("play_in_install_strict", boolean(*change.play_in_install_strict));
+	if (change.play_mode) out.set("play_mode", json_string(play_mode_token(*change.play_mode)));
 	if (change.save_before_play) out.set("save_before_play", boolean(*change.save_before_play));
 	if (change.build_folder) out.set("build_folder", json_string(*change.build_folder));
 	return out;
@@ -965,6 +978,21 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		error = std::string("\"") + token + "\" must be a whole number, 1 or more.";
 		return false;
 	case F::Folder: return text_of(json, token, request.folder, error);
+	case F::PlayMode: {
+		PlayMode mode = PlayMode::Runtime;
+		if (!json.is_string() || !play_mode_from_token(json.string, mode)) {
+			error = play_mode_error(token, json);
+			return false;
+		}
+		request.play_mode = mode;
+		return true;
+	}
+	case F::SaveBeforePlay: {
+		bool save = false;
+		if (!flag_of(json, token, save, error)) return false;
+		request.save_before_play = save;
+		return true;
+	}
 	case F::kCount: break;
 	}
 	error = std::string("Unknown request member \"") + token + "\".";
@@ -1073,6 +1101,12 @@ bool field_to_json(
 	case F::Start:
 		out = play_start_to_json(request.start);
 		return request.start.set;
+	case F::PlayMode:
+		out = json_string(play_mode_token(request.play_mode.value_or(PlayMode::Runtime)));
+		return request.play_mode.has_value();
+	case F::SaveBeforePlay:
+		out = boolean(request.save_before_play.value_or(true));
+		return request.save_before_play.has_value();
 	case F::kCount: break;
 	}
 	out = JsonValue::make_null();
