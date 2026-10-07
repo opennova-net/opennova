@@ -2321,7 +2321,7 @@ static int test_batch_table() {
 			const bool refused = error.find("unknown edit op") != std::string::npos ||
 			                     error.find("edits alone") != std::string::npos ||
 			                     error.find("an apply edit carries") != std::string::npos;
-			TEST_EXPECT((op.form == form) != refused);
+			TEST_EXPECT((op.form == form || op.every_form) != refused);
 			++ops;
 		}
 	// The catalog writes the table.

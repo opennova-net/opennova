@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <base/io/cp1252.h>
+#include <editor/model/document.h>
 #include <editor/model/text_document.h>
 #include <editor/session/session_json.h>
 
@@ -77,6 +78,12 @@ constexpr BatchOp kOps[] = {
 	{ "replace_list", F::Edits,
 			"The records of list the record id holds replaced by records, each {field: value}, added at "
 			"the end in order." },
+	{ kLineEndsRestoreToken, F::Edits,
+			"Every line an LF ends alone made to end CR LF, the line end the game's reader takes (the "
+			"line-ends fix, a batch of its own, its op alone): a text document's text so written; a record "
+			"document's file read again so written, every record and file-wide value giving way to that "
+			"reading.",
+			true },
 	{ "apply", F::Spans,
 			"A text document's span replaced (payload text.span): the length characters from line and "
 			"column replaced by text, against the text as the edits before it left it." },
@@ -282,6 +289,13 @@ bool read_edit(const JsonValue &json, Reader &reader, RecordBatch &out) {
 				"): the paste request pastes the clipboard.");
 	if (!row || row->form != RecordBatchForm::Edits)
 		return reader.refuse("unknown edit op \"" + op + "\" (" + ops + ").");
+	if (op == kLineEndsRestoreToken) {
+		// The source read again with CR LF line ends: no member but its op.
+		for (const io::JsonMember &member : json.object)
+			if (member.key != "op") return reader.refuse("a " + op + " takes no \"" + member.key + "\".");
+		out.edits.push_back(line_ends_restore());
+		return true;
+	}
 	const bool replaces_list = op == "replace_list";
 	Edit edit;
 	if (!replaces_list && !edit_operation_from_token(op, edit.operation))
@@ -403,9 +417,17 @@ bool read_span(const JsonValue &json, Reader &reader, RecordBatch &out) {
 	}
 	const JsonValue *op = json.get("op");
 	const BatchOp *row = op && op->is_string() ? op_row(op->string) : nullptr;
+	// A change every document takes (its line ends restored, the line-ends rule's fix): its op alone.
+	if (row && row->every_form && op->string == kLineEndsRestoreToken) {
+		for (const io::JsonMember &member : json.object)
+			if (member.key != "op") return reader.refuse("a " + op->string + " takes no \"" + member.key + "\".");
+		out.edits.push_back(line_ends_restore());
+		return true;
+	}
 	if (!row || row->form != RecordBatchForm::Spans)
 		return reader.refuse("a text document takes \"" + ops_of(RecordBatchForm::Spans) +
-				"\" edits alone: a span of its text replaced (payload \"text.span\").");
+				"\" edits alone: a span of its text replaced (payload \"text.span\"), or its line ends "
+				"restored (\"" + kLineEndsRestoreToken + "\").");
 	if (!members_known(json, RecordBatchForm::Spans, reader.place, reader.error))
 		return false;
 	const JsonValue *payload = json.get("payload");
@@ -585,6 +607,12 @@ io::JsonValue record_batch_to_json(
 			case EditOperation::SetFileValue:
 				break;
 			case EditOperation::Apply:
+				// A record document's source read again with CR LF line ends, by its op alone.
+				if (is_line_ends_restore(edit)) {
+					entry.set("op", io::json_string(kLineEndsRestoreToken));
+					out.push(std::move(entry));
+					continue;
+				}
 				// A text document's span replaced (S13 D9), as the Spans form reads it.
 				if (const auto *span = dynamic_cast<const TextSpanEdit *>(edit.payload.get())) {
 					entry.set("payload", io::json_string(span->token()));
