@@ -377,6 +377,10 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Terrain, "Tmap.trn", file("terrain/tmap/Tmap.trn")},
 	        // The dialog bank (DI-32): the minted bank, eleven dialogs of one to three lines.
 	        {AssetKind::DialogBank, "synth_bank.dbf", file("dbf/synth_bank.dbf")},
+	        // The character attributes (DI-09's charattr follow-up): one class, its camouflage items.
+	        {AssetKind::CharAttrDefs, "charattr.def",
+	         text_bytes("[CHARACTER1]\r\nSTEALTH = 25\r\nJUNGLE_CAMMO = 5310\r\nDESERT_CAMMO = 5310\r\n"
+	                    "ARCTIC_CAMMO = 5310\r\nATTRIBUTES = AutoScope\r\n")},
 	};
 }
 
@@ -527,6 +531,11 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	                    "polytrn_sectors 1\r\nspeling 3\r\nfoliage\r\n  match 9\r\nend\r\n")},
 	        // A dialog bank naming a dialog twice (DI-32: dialog_bank.name_repeated).
 	        {AssetKind::DialogBank, "twice.dbf", dialogs_named_twice()},
+	        // Character attributes with a word no attribute is and a class after a missing one
+	        // (charattr.attribute_word, charattr.unread_section).
+	        {AssetKind::CharAttrDefs, "charattr.def",
+	         text_bytes("[CHARACTER1]\r\nJUNGLE_CAMMO = 5310\r\nDESERT_CAMMO = 5310\r\nARCTIC_CAMMO = 5310\r\n"
+	                    "ATTRIBUTES = Medick\r\n[CHARACTER3]\r\nATTRIBUTES = Medic\r\n")},
 	};
 }
 
