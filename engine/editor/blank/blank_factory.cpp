@@ -32,6 +32,8 @@ const BlankParam k_terrain_params[] = {
 	{ "detail", "Detail (optional, power-of-two image)", ReferenceKind::None, false },
 	{ "tiles", "Tile set (optional, sides x64)", ReferenceKind::None, false },
 	{ "surface", "Surface map (optional, square 256..1024)", ReferenceKind::None, false },
+	{ "foliagemap", "Foliage map (optional, square, indexed or grey: its codes)", ReferenceKind::None, false },
+	{ "foliage", "Foliage (graphic <model> match <codes>, | between)", ReferenceKind::None, false },
 	{ "top", "Height of white (world units, 127.5)", ReferenceKind::None, false },
 	{ "water", "Water level (world units, 0 none)", ReferenceKind::None, false },
 	{ "layout", "Layout (island or tiled)", ReferenceKind::None, false },
