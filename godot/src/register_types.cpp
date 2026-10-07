@@ -191,6 +191,7 @@
 #include "player/local_player_presenter.h"
 #include "player/local_player_visuals.h"
 #include "player/player_move_intent.h"
+#include "player/player_profiles.h"
 #include "player/player_spawn_loadout.h"
 #include "player/player_viewmodel_def.h"
 #include "player/player_viewmodel_rig.h"
@@ -306,6 +307,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlayerInventory);
 	GDREGISTER_CLASS(WeaponProfileSide);
 	GDREGISTER_CLASS(WeaponProfileSummary);
+	GDREGISTER_CLASS(PlayerProfiles);
 	GDREGISTER_CLASS(ThrowableVisualRow);
 	GDREGISTER_CLASS(VehicleTrailVisualRow);
 	GDREGISTER_CLASS(FirePresentationEvent);
