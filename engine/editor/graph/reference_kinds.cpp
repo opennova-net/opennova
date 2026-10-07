@@ -5,6 +5,7 @@
 
 #include <base/gameprofile/required_resources.h>
 #include <base/io/strutil.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/animation_slots.h>
 #include <editor/documents/text_types.h>
@@ -217,11 +218,42 @@ std::string sound_missing(const AssetGraph &graph, const GraphEdge &edge) {
 	return ", which no sound bank the game searches has: the game plays nothing for it.";
 }
 
+// Whether a bank's wave is named by a dialog line (a dialog bank's line, whose wave its mission's dialog
+// bank's sounds hold), not by a member of the bank.
+bool named_by_dialog_line(const GraphEdge &edge) {
+	return asset_kind_for_name(basename_of(edge.source)) == AssetKind::DialogBank;
+}
+
 // A member names its wave by the wave's place in the bank, which the save finds by the name: a name
-// no wave of the bank has cannot be written.
-std::string bank_wave_missing(const AssetGraph &, const GraphEdge &edge) {
-	return ", which no wave of " + (edge.scope.empty() ? std::string("the bank") : edge.scope) +
-	       " is named: the bank cannot be saved until one is.";
+// no wave of the bank has cannot be written. A dialog line's wave the game looks up by its name and
+// finds none of: it shows "EX Cannot load audio" in the chat and plays nothing for the line, the dialog
+// going on after 12 ticks [orig: Dialog_LoadAudioClip @ 0x44dd46..0x44dd7c].
+std::string bank_wave_missing(const AssetGraph &graph, const GraphEdge &edge) {
+	const std::string bank = edge.scope.empty() ? std::string("the bank") : edge.scope;
+	if (named_by_dialog_line(edge)) {
+		const std::string read = graph.lookup_scope(edge);
+		if (!read.empty() && !graph.has_file(read))
+			return ", which the dialog bank's sounds hold, " + read +
+			       ", a bank the project does not have: the game says \"EX Cannot load audio\" and plays nothing for the line.";
+		return ", which no wave of " + (read.empty() ? bank : read) +
+		       " is named: the game says \"EX Cannot load audio\" and plays nothing for the line.";
+	}
+	return ", which no wave of " + bank + " is named: the bank cannot be saved until one is.";
+}
+
+DiagnosticSeverity bank_wave_severity(const GraphEdge &edge) {
+	return named_by_dialog_line(edge) ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error;
+}
+
+// A dialog no dialog bank of the mission's has plays nothing [orig: Dialog_PlayByName @ 0x44da70..0x44dab0
+// returns 0]: no line, no subtitle; a PLYRDIALOG trigger on it reads it as never playing [orig:
+// Dialog_ExistsByIndex @ 0x44e170].
+std::string dialog_name_missing(const AssetGraph &graph, const GraphEdge &edge) {
+	const std::string bank = edge.scope.substr(0, edge.scope.find('/'));
+	if (!bank.empty() && !graph.has_file(bank))
+		return ", from " + bank + ", a dialog bank the project does not have: the game plays no dialog of this mission.";
+	return ", which " + (bank.empty() ? std::string("the mission's dialog bank") : bank) +
+	       " has no dialog of (the game matches a dialog's name exactly): the game plays nothing for it.";
 }
 
 // A name no profile has binds the file's first profile [orig: SoundProfile_FindSlotByName @ 0x526e30
@@ -468,6 +500,12 @@ struct Row {
 		out.row.missing_message = message;
 		return out;
 	}
+	// The severity a missing name takes by the reference that makes it (ReferenceKindRow::severity_for).
+	constexpr Row severity_by(DiagnosticSeverity (*severity)(const GraphEdge &)) const {
+		Row out = *this;
+		out.row.severity_for = severity;
+		return out;
+	}
 	// What the message says depends on which files the project has.
 	constexpr Row message_reads_files() const {
 		Row out = *this;
@@ -676,10 +714,15 @@ constexpr ReferenceKindRow kRows[] = {
 	// A bank's wave by its name, in the bank its scope names: the bank's lookups find the first of the
 	// name, without case [orig: SoundBank_FindEntryByName @ 0x75bba0]. A name none has is an error the
 	// game never meets: the bank cannot be written with it (SoundBankDocument::serialize).
+	// A dialog line's wave is the same name, read by the dialog line player in the dialog bank's sounds alone
+	// [orig: Dialog_LoadAudioClip @ 0x44dcf7..0x44dd15 -> sub_75BDC0 @ 0x75bdc0], which the game tolerates
+	// missing (bank_wave_severity).
 	Row(ReferenceKind::BankWave, "bank_wave", "the wave", "wave")
 	        .symbol(NameCase::NoCase, AssetKind::SoundBank)
 	        .scoped(true)
 	        .says(bank_wave_missing)
+	        .severity_by(bank_wave_severity)
+	        .message_reads_files()
 	        .row,
 	// A profile by name, the first of the name without case [orig: SoundProfile_FindSlotByName @ 0x526e30].
 	Row(ReferenceKind::SoundProfile, "sound_profile", "the sound profile", "sound profile")
@@ -716,6 +759,15 @@ constexpr ReferenceKindRow kRows[] = {
 	        .symbol(NameCase::NoCase, AssetKind::AvatarDefs)
 	        .scoped(true)
 	        .tolerated(avatar_part_missing)
+	        .row,
+	// A dialog by its name in the dialog bank its scope names, matched exactly, the first of the name in the
+	// bank's order [orig: Dialog_PlayByName @ 0x44d9f0, strcmp @ 0x44da44 / @ 0x44da8b]; a mission names one
+	// by the number its name forms, dlg%03i [orig: Dialog_PlayByIndex @ 0x527ae0]. One none has plays nothing.
+	Row(ReferenceKind::Dialog, "dialog", "the dialog", "dialog")
+	        .symbol(NameCase::Exact, AssetKind::DialogBank)
+	        .scoped(true)
+	        .tolerated(dialog_name_missing)
+	        .message_reads_files()
 	        .row,
 };
 

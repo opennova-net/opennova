@@ -103,6 +103,7 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/project_check.h>
+#include <editor/documents/dialog_bank_document.h>
 #include <editor/documents/sound_bank_document.h>
 #include <editor/documents/sound_profile_document.h>
 #include <editor/documents/strings_document.h>
@@ -118,6 +119,7 @@
 #include <formats/bad/bad_write.h>
 #include <formats/cbin/binary_config.h>
 #include <formats/dds/dds.h>
+#include <formats/dbf/dbf.h>
 #include <formats/def/def_schema.h>
 #include <formats/lwf/lwf.h>
 #include <formats/mission/bms.h>
@@ -187,6 +189,7 @@ const RowObject kRowObjects[] = {
         {&typeid(EventRow), sizeof(EventRow)},     {&typeid(EnvironmentRow), sizeof(EnvironmentRow)},
         {&typeid(TerrainRow), sizeof(TerrainRow)},
         {&typeid(SoundBankRow), sizeof(SoundBankRow)}, {&typeid(SoundProfileRow), sizeof(SoundProfileRow)},
+        {&typeid(DialogBankRow), sizeof(DialogBankRow)},
 };
 // The document types whose rows keep their text in fixed-length records (a model's 3DI records, a
 // clip's bone table, a def catalog's records, a mission's header and entity slots): a longer text
@@ -372,7 +375,27 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Environment, "synth_full.env", file("env/synth_full.env")},
 	        // The terrain (DI-30): the minted map, its grid and its two foliage definitions.
 	        {AssetKind::Terrain, "Tmap.trn", file("terrain/tmap/Tmap.trn")},
+	        // The dialog bank (DI-32): the minted bank, eleven dialogs of one to three lines.
+	        {AssetKind::DialogBank, "synth_bank.dbf", file("dbf/synth_bank.dbf")},
 	};
+}
+
+// A dialog bank of two dialogs of one name (dialog_bank.name_repeated), minted by the engine's writer.
+std::vector<uint8_t> dialogs_named_twice() {
+	opennova::dbf::File bank;
+	for (int i = 0; i < 2; ++i) {
+		opennova::dbf::Group dialog;
+		dialog.group_name = "dlg001";
+		opennova::dbf::Line line;
+		line.def_id_name = i ? "SECOND" : "FIRST";
+		line.sequence = "##";
+		dialog.lines.push_back(line);
+		bank.groups.push_back(dialog);
+	}
+	std::vector<uint8_t> out;
+	std::string error;
+	opennova::dbf::encode_dbf(bank, out, error);
+	return out;
 }
 
 // A bank of two waves of one name (sound_bank.wave_name_repeated), minted by the engine's writer.
@@ -502,6 +525,8 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        {AssetKind::Terrain, "bare.trn",
 	         text_bytes("polytrn_colormap c.tga\r\npolytrn_detailmap d.tga\r\npolytrn_polydata h.cpt\r\npolytrn_sectorcount 1\r\n"
 	                    "polytrn_sectors 1\r\nspeling 3\r\nfoliage\r\n  match 9\r\nend\r\n")},
+	        // A dialog bank naming a dialog twice (DI-32: dialog_bank.name_repeated).
+	        {AssetKind::DialogBank, "twice.dbf", dialogs_named_twice()},
 	};
 }
 
