@@ -21,7 +21,9 @@ namespace godot {
 // theirs), the viewport's options held on its frame state after each configure (apply_menu_options).
 // The viewport's hit tests read its own headless compile; this one draws, and reports where it placed
 // each widget beside it. With the viewport's Pointer option on, its frame's cursor pass draws the game's
-// pointer where the canvas has the mouse over the picture, or where a client holds it (DI-08).
+// pointer where the canvas has the mouse over the picture, or where a client holds it (DI-08). In Try mode
+// (DI-35) it configures the screen Try shows (another menu's after a jump) and draws the state the game's
+// menu holds (MenuViewport::try_state) in place of the options'.
 //
 // It configures as it takes the Rebuild when the frame keeps every texture the screen names (a
 // configure again after an edit or an option, which the shipped menus measure well within the poll

@@ -108,7 +108,7 @@ constexpr RequestField kFields[] = {
 			"settings, kept in its .opennova/local.json on this checkout, never the editor's: a project that "
 			"never set them plays in the OpenNova runtime and saves first." },
 	{ F::Viewport, "viewport", J::Object,
-			"A viewport's change, {kind?, device?, clock?, options?, camera?}: kind its kind's token "
+			"A viewport's change, {kind?, device?, clock?, options?, camera?, try?, click?, key?}: kind its kind's token "
 			"(menu, model, script; left out, the kind the document shows in: the Preview's kind that shows "
 			"it, else its Main view), device {width, height} the size its device draws at (1 to "
 			"8192), clock {playing, rate, time_ms, ticks} the preview clock every viewport reads, "
@@ -118,7 +118,12 @@ constexpr RequestField kFields[] = {
 			"(the game's left button held there: a press and a release over one window are its click) and "
 			"sound {mute} (its windows' sounds heard or only listed, DI-34); a model's "
 			"lod, ctrl, overlays, rig_model), camera a model's {yaw, pitch, "
-			"distance, target, frame}, each member optional. A change of the clock alone with no "
+			"distance, target, frame}; a menu's Try mode (DI-35: the picture behaving as the game's menu, a "
+			"sandbox): try {on?, reset?} (on from the screen shown, or off; reset back to where it started), click "
+			"{at: [x, y]} (the game's click there, design units) and key {key, shift?} (one key by its name: "
+			"VK_RETURN, VK_ESCAPE, VK_SPACE, VK_TAB, VK_BACK, VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, VK_HOME, VK_END, "
+			"VK_DELETE or their plain names, or one character) or {text} (characters typed), a click or a key "
+			"while Try is on alone; each member optional. A change of the clock alone with no "
 			"path sets the clock whatever document is active (none, or one that shows in no "
 			"viewport)." },
 	{ F::Drag, "drag", J::Object,
