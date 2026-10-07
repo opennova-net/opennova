@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/font.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
@@ -20,6 +21,7 @@
 
 namespace godot {
 
+class FntResource;
 class ResourceRoot;
 class RtxtStringFile;
 class VehicleHudBlock;
@@ -189,13 +191,22 @@ public:
 	static Vector2i loading_bar_size();
 	static Color loading_bar_border_gray();
 	static Color loading_bar_fill_color();
-	// The SP start-mission splash strings and the phase-selected continue-line
-	// color, already through the witnessed half-bright fold.
+	// The SP start-mission splash strings.
 	static String loading_splash_arrow_image();
 	static String loading_splash_sound_set();
 	static String loading_splash_continue_key();
 	static String loading_splash_continue_font();
-	static Color loading_splash_continue_color(bool p_phase_on);
+	// The continue line through its font page's material (D-LOADSCR-10): the engine's run
+	// (hud::splash_continue_run) over a `p_size` display, a triangle array per page run into `p_item`
+	// (none for a null item) over `p_pages` (font_page_textures'), its UVs flagged for the item's glyph
+	// shader (glyph_shader_code), which runs the page's MODULATE2X stage over the halved colours. Returns
+	// each run as drawn ({page, uvs, colors}); none where the font holds no glyphs.
+	static Array draw_splash_continue(CanvasItem *p_item, const Ref<FntResource> &p_font, const Array &p_pages,
+			const String &p_text, const Vector2i &p_size, bool p_phase_on);
+	// A font's pages as the textures its glyph runs draw from (font_page_glyphs), by page.
+	static Array font_page_textures(const Ref<FntResource> &p_font);
+	// The canvas_item shader an item whose glyph runs draw through their page's material carries.
+	static String glyph_shader_code();
 
 	// The first-person view-effect spec (hud/view_effects.h carries the
 	// values and witnesses): binocular/NVG overlay rects in the 1024x768

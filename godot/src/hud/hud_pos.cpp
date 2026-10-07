@@ -1,6 +1,12 @@
 #include "hud/hud_pos.h"
+#include "fnt/fnt_resource.h"
+#include "hud/font_page_glyphs.h"
 #include "util/color_convert.h"
 #include "util/string_convert.h"
+#include <godot_cpp/classes/rendering_server.hpp>
+#include <godot_cpp/classes/texture2d.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
+#include <runtime/hud/game_font.h>
 #include "hud/vehicle_hud_block.h"
 
 #include <godot_cpp/classes/canvas_item.hpp>
@@ -123,7 +129,9 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_sound_set"), &HudPos::loading_splash_sound_set);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_continue_key"), &HudPos::loading_splash_continue_key);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_continue_font"), &HudPos::loading_splash_continue_font);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_continue_color", "phase_on"), &HudPos::loading_splash_continue_color);
+	ClassDB::bind_static_method("HudPos", D_METHOD("draw_splash_continue", "item", "font", "pages", "text", "size", "phase_on"), &HudPos::draw_splash_continue);
+	ClassDB::bind_static_method("HudPos", D_METHOD("font_page_textures", "font"), &HudPos::font_page_textures);
+	ClassDB::bind_static_method("HudPos", D_METHOD("glyph_shader_code"), &HudPos::glyph_shader_code);
 	ClassDB::bind_static_method("HudPos", D_METHOD("draw_wrapped_text", "item", "font", "font_size", "text", "x", "y", "width", "bottom", "align", "color", "skip_lines"), &HudPos::draw_wrapped_text, DEFVAL(0));
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_crosshair_rect"), &HudPos::binocular_crosshair_rect);
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_digit_pos"), &HudPos::binocular_digit_pos);
@@ -576,11 +584,57 @@ int HudPos::draw_wrapped_text(CanvasItem *p_item, const Ref<Font> &p_font, int p
 	return block.stopped_at;
 }
 
-Color HudPos::loading_splash_continue_color(bool p_phase_on) {
-	const uint32_t argb = opennova::hud::half_bright_argb(p_phase_on
-			? opennova::hud::kSplashContinueColorOn
-			: opennova::hud::kSplashContinueColorOff);
-	return opennova::color_from_argb(argb);
+Array HudPos::draw_splash_continue(CanvasItem *p_item, const Ref<FntResource> &p_font, const Array &p_pages,
+		const String &p_text, const Vector2i &p_size, bool p_phase_on) {
+	Array out;
+	const opennova::fnt::fnt_font_t *parsed = p_font.is_valid() ? p_font->parsed_font() : nullptr;
+	if (parsed == nullptr) return out;
+	// The line in the game's code page, a character it has no byte for drawn as '?'.
+	std::string text;
+	for (int64_t i = 0; i < p_text.length(); ++i) {
+		std::uint8_t byte = '?';
+		opennova::cp1252_encode_codepoint(static_cast<char32_t>(p_text[i]), byte);
+		text.push_back(static_cast<char>(byte));
+	}
+	opennova::hud::GameFont font;
+	font.set_font(parsed);
+	const opennova::hud::GameFontRun run =
+			opennova::hud::splash_continue_run(font, text.c_str(), p_size.x, p_size.y, p_phase_on);
+	// One triangle array per page run, through the page's material: its MODULATE2X stage rides the glyph
+	// shader's UV.y flag, doubling the drawer's halved colour (hud::kFontPageMaterialWord).
+	const Vector2 uv_flag(0.0f, font_page_runs_modulate2x() ? kGlyphCanvasUvFlag : 0.0f);
+	RenderingServer *rs = RenderingServer::get_singleton();
+	for (size_t first = 0; first < run.quads.size();) {
+		const uint32_t page = run.quads[first].page;
+		size_t end = first + 1;
+		while (end < run.quads.size() && run.quads[end].page == page) ++end;
+		GlyphRunArrays arrays;
+		append_glyph_quads(run.quads, first, end, uv_flag, arrays);
+		Ref<Texture2D> texture;
+		if (page < static_cast<uint32_t>(p_pages.size())) texture = p_pages[page];
+		if (p_item != nullptr && texture.is_valid())
+			rs->canvas_item_add_triangle_array(p_item->get_canvas_item(), arrays.indices, arrays.points, arrays.colors,
+					arrays.uvs, PackedInt32Array(), PackedFloat32Array(), texture->get_rid());
+		Dictionary row;
+		row["page"] = static_cast<int64_t>(page);
+		row["uvs"] = arrays.uvs;
+		row["colors"] = arrays.colors;
+		out.push_back(row);
+		first = end;
+	}
+	return out;
+}
+
+Array HudPos::font_page_textures(const Ref<FntResource> &p_font) {
+	Array out;
+	const opennova::fnt::fnt_font_t *parsed = p_font.is_valid() ? p_font->parsed_font() : nullptr;
+	if (parsed == nullptr) return out;
+	for (uint32_t page = 0; page < parsed->num_pages; ++page) out.push_back(font_page_texture(*parsed, page));
+	return out;
+}
+
+String HudPos::glyph_shader_code() {
+	return String(glyph_canvas_shader_code());
 }
 
 // --- first-person view effects (hud/view_effects.h) -------------------------

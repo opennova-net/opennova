@@ -137,6 +137,9 @@ public:
 
 	const std::vector<std::shared_ptr<const Node>> &rows() const { return rows_; }
 	const FileState *file_state() const { return file_state_.get(); }
+	// What the content was read from (SourceState: the load's, a save's read-back, or a
+	// LineEndsRestore step's); null before a load.
+	const SourceState *source_state() const { return source_.get(); }
 	// What the last batch that made records made and kept: its first, and every one in its edits'
 	// order (the rows and records added, the copies a Duplicate made, the rows and records a Paste
 	// made; not what they hold, and none a later edit of the batch removed).
@@ -425,10 +428,15 @@ protected:
 	// The record half of apply (above), undo and redo, which the base calls only for a document
 	// that is neither a snapshot nor blocked.
 	bool apply_edits(const std::vector<Edit> &edits, Diagnostic &error) override;
-	void undo_step() override { history_.undo(); }
-	void redo_step() override { history_.redo(); }
+	// A step that read the source again takes its source state back (or forward) with it.
+	void undo_step() override;
+	void redo_step() override;
+	// A LineEndsRestore batch, and its step's redo (DocumentBase::takes_while_blocked).
+	bool takes_while_blocked(const std::vector<Edit> &edits) const override;
+	bool redoes_while_blocked() const override;
 	// The record half of a load (DocumentBase::read_source): parse, and when adopting, the rows
-	// given their identities, the history started again and the baseline set.
+	// given their identities, the history started again and the baseline set; the source state the
+	// read made (a load's, or a save's read-back of what it wrote).
 	bool read_source(const std::vector<uint8_t> &decoded, bool adopt,
 	                 std::vector<SourceIssue> &issues, Diagnostic &error) override;
 	// After a save: the history's checkpoint and the saved baseline move to the rows written.
@@ -706,6 +714,19 @@ private:
 	mutable std::vector<TargetedCollection> targets_;
 	mutable std::unordered_map<NodeId, size_t> row_positions_; // row_index's
 	EditHistory history_{rows_, file_state_};
+	// What the content was read from (source_state), and what a LineEndsRestore of the batch staging
+	// read it from instead (null for none), which its step carries.
+	std::shared_ptr<const SourceState> source_, staged_source_;
+	// The source state a read of `decoded` with these findings makes: the bytes kept where the kind's
+	// game reader ends a line at CR LF alone and an LF in them ends one alone.
+	std::shared_ptr<const SourceState> source_of(const std::vector<uint8_t> &decoded,
+	                                             std::vector<SourceIssue> issues) const;
+	// A LineEndsRestore staged: every row and the file-wide state replaced by the parse of the
+	// source with its line ends written CR LF, staged_source_ that parse's; false, with `error`,
+	// where it fails or blocks.
+	bool stage_restore(StagedRows &staged, Diagnostic &error);
+	// The source state a step left (its document's findings with it).
+	void adopt_source(std::shared_ptr<const SourceState> source);
 	std::vector<std::shared_ptr<const Node>> saved_rows_;
 	std::shared_ptr<const FileState> saved_state_;
 	// A saved row's index by its identity (set_baseline).
