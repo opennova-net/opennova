@@ -4961,6 +4961,14 @@ target_link_libraries(editor_definition_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_definition_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_definition_viewport COMMAND editor_definition_viewport_test)
 
+# A weapon fired in the definition preview as the game fires it (DI-22, editor/preview/weapon_range and
+# definition_weapon): the game's local player in a range of its own, its legs, rounds, impacts and scars where the
+# game's presenter draws them, the shots in first and third person, the gestures, the wire.
+add_executable(editor_weapon_fire_test editor/weapon_fire_test.cpp)
+target_link_libraries(editor_weapon_fire_test PRIVATE opennova_editor)
+target_include_directories(editor_weapon_fire_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_weapon_fire COMMAND editor_weapon_fire_test)
+
 # What a drag of a menu window's handles writes (editor/preview/menu_layout_edit, S9k1):
 # the plan against the runtime's POSITION solve, the grid, the handles, the edits.
 add_executable(editor_menu_layout_edit_test editor/menu_layout_edit_test.cpp)
