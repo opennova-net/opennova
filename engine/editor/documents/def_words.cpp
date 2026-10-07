@@ -518,7 +518,39 @@ const KindWords *kind_words(DefRecordKind kind) {
 	return nullptr;
 }
 
+// The shadow bits (render-lighting-re.md "Static sector/model sun shadows", terrain-re.md): the
+// terrain's static pass admits a building placement unless either NoShadow, an item placement only
+// with StaticShadow too; the dynamic render slot is a person's or a DynamicShadow item's, which
+// NoShadow never reads. Both draw only while Shadow Quality is above 0 (PolyTrn_RenderTile's gate
+// @ 0x60DC1A, Entity_InitFromModel's @ 0x40E1BC).
+struct ChoiceWordsRow {
+	DefRecordKind kind;
+	DefChoiceWords words;
+};
+const ChoiceWordsRow kChoiceWords[] = {
+	{DefRecordKind::Item, {"attrib", "noshadow", "No shadow",
+	        "The game draws no sun shadow of this item on the terrain, wherever a mission places it: the "
+	        "terrain's static shadow pass skips it, as it skips a placement whose own NoShadow is set. A "
+	        "person's or a DynamicShadow item's moving shadow still draws, and the item's own lighting is "
+	        "unchanged. With Shadow Quality at 0 the game draws no shadow at all.",
+	        "[orig: Terrain_CollectAndRenderTileModels @ 0x60D43E]; render-lighting-re.md"}},
+	{DefRecordKind::Item, {"attrib2", "staticshadow", "Static shadow",
+	        "Placed among a mission's items, it casts the terrain's static sun shadow, which a placement "
+	        "among the buildings casts without it; either NoShadow still turns it off.",
+	        "[orig: Terrain_CollectAndRenderTileModels @ 0x60D44C]; render-lighting-re.md"}},
+	{DefRecordKind::Item, {"attrib2", "dynamicshadow", "Dynamic shadow",
+	        "It casts the moving shadow every person casts, its silhouette drawn on the terrain under it "
+	        "each frame; NoShadow does not turn this one off.",
+	        "[orig: Entity_InitFromModel @ 0x40E1DD]; render-lighting-re.md"}},
+};
+
 } // namespace
+
+const DefChoiceWords *def_choice_words_of(DefRecordKind kind, const std::string &id, const std::string &token) {
+	for (const ChoiceWordsRow &row : kChoiceWords)
+		if (row.kind == kind && id == row.words.id && token == row.words.token) return &row.words;
+	return nullptr;
+}
 
 const DefWords *def_words(DefRecordKind kind, size_t &count) {
 	const KindWords *row = kind_words(kind);
