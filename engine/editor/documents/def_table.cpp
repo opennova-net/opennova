@@ -17,6 +17,7 @@
 #include <editor/documents/def_words.h>
 #include <formats/def/reserved_items.h>
 #include <runtime/hud/game_text_lookup.h>
+#include <runtime/world/ammo_table.h>
 
 namespace opennova::editor {
 using namespace def;
@@ -160,6 +161,8 @@ ReferenceKind reference_kind(DefReference reference) {
 	case DefReference::UserPoint: return ReferenceKind::UserPoint;
 	case DefReference::Powerup: return ReferenceKind::Powerup;
 	case DefReference::SoundProfile: return ReferenceKind::SoundProfile;
+	case DefReference::ItemType: return ReferenceKind::Item; // by its id less 100000: resolve_field's offset
+	case DefReference::AnimationSlot: return ReferenceKind::AnimationKey;
 	default: return ReferenceKind::None;
 	}
 }
@@ -175,6 +178,8 @@ constexpr Defines kDefines[] = {
 	{R::Weapon, "weapon_name", ReferenceKind::Weapon},
 	{R::Ammo, "name", ReferenceKind::Ammo},
 	{R::Item, "id", ReferenceKind::Item},
+	// An item's alias, which hudpos.def's vehicle panels name it by (DI-09).
+	{R::Item, "sid", ReferenceKind::ItemAlias},
 	{R::Powerup, "name", ReferenceKind::Powerup},
 };
 
@@ -184,6 +189,9 @@ constexpr Defines kDefines[] = {
 // is not resolved yet.
 void resolve_field(const DefField &field, FieldSchema &entry) {
 	const std::string game_text = strutil::to_upper(hud::kGameTextTable) + "/";
+	// An item by its type id: the item whose id is it plus 100000 (the id arm stores the id less 100000
+	// [orig: ItemDef_ParseProperty @ 0x49EC54], which ItemList_FindIndexByTypeId @ 0x49E100 compares).
+	if (field.reference == DefReference::ItemType) entry.name_offset = DEF_ITEM_ID_BASE;
 	if (field.reference == DefReference::GameText) {
 		entry.scope = game_text + hud::kGameTextWepDes;
 	} else if (field.reference == DefReference::OtherText && field.id == "attach_text_id") {
@@ -279,6 +287,12 @@ LabelledField labelled(R kind, const DefField &field) {
 		}
 		entry.choices.push_back(std::move(offered));
 	}
+	// An effects row's surface tag: one of the 27 the parser matches without case, from the table's second
+	// ("null", its first, never matches) [orig: g_AmmoEffectTagTable @ 0x813420, the scan from 1 @
+	// 0x40A46A..0x40A48E], each in a modder's words.
+	if (kind == R::Effect && field.id == "surface_type")
+		for (int tag = 1; tag < world::kImpactEffectTagCount; ++tag)
+			entry.choices.push_back({world::kImpactEffectTagNames[tag], tag, world::kImpactEffectTagWords[tag], ""});
 	entry.flags = field.flags;
 	entry.open_choices = field.open;
 	const bool flag = is_present_flag(kind, field.id);

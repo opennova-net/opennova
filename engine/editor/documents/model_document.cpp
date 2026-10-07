@@ -8,6 +8,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/model_labels.h>
 #include <editor/documents/texture_roles.h>
+#include <editor/graph/reference_kinds.h>
 #include <editor/project/project_files.h>
 #include <formats/threedi/threedi_build.h>
 #include <runtime/renderer/material_descriptor.h>
@@ -170,9 +171,15 @@ void ModelDocument::refine_field(const NodeAddress &address, FieldUse &use) cons
 		}
 		use.use_context = pack_texture_row_context(context);
 	}
-	// A user point is looked up on the model an item names by its file (the item's graphic).
-	if (use.defines == ReferenceKind::UserPoint)
-		use.scope = strutil::to_upper(basename_of(path()));
+	// A user point is looked up on the model a record names by its file (an item's graphic, a weapon's gfx3):
+	// one of the first 16 in their section too, which an item's particle slot reads alone [orig:
+	// ItemDef_GetBoneMaskByName @ 0x49ea40, the scan end @ 0x49ea73]; every other lookup reads every point
+	// [orig: modelgpm_FindUserpointByName @ 0x5b2170].
+	if (use.defines == ReferenceKind::UserPoint) {
+		Placement point;
+		const bool first_16 = placement(address, point) && point.index < size_t(THREEDI_USER_POINT_SCAN_LIMIT);
+		use.scope = user_point_scope(basename_of(path()), first_16);
+	}
 }
 
 bool ModelDocument::record_choices(const NodeAddress &address, const FieldUse &use,
@@ -185,19 +192,6 @@ bool ModelDocument::record_choices(const NodeAddress &address, const FieldUse &u
 	if (place == TableKind::npos || index_reference(at.record, place) != IndexReference::Part) return false;
 	part_choices(static_cast<const ModelRow &>(*node), at.record.kind, *use.schema, out);
 	return true;
-}
-
-void ModelDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) const {
-	// An item's particle slot finds a user point among the model's first 16 without case: a
-	// later one no lookup reaches [orig: ItemDef_GetBoneMaskByName @ 0x49ea40, the scan end @
-	// 0x49ea73].
-	Placement at;
-	if (address.kind == node_kind(ModelKind::UserPoint) && placement(address, at) &&
-	    at.index >= size_t(THREEDI_USER_POINT_SCAN_LIMIT)) {
-		facts.inert = true;
-		facts.inert_reason = "an item's lookup scans the model's first " +
-				std::to_string(THREEDI_USER_POINT_SCAN_LIMIT) + " user points only";
-	}
 }
 
 std::string ModelDocument::record_title(const NodeAddress &address) const {
