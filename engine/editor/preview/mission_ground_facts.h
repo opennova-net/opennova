@@ -104,9 +104,11 @@ public:
 	// The terrain's heights as the game's collision reads them (null: none read).
 	const terrain::TerrainHeightField *height_field() const { return store_.valid() ? &store_.height_field() : nullptr; }
 	const std::string &error() const { return error_; }
-	// The char map read ("" none: class 1 everywhere), the placed tiles, the water plane.
+	// The char map read ("" none: class 1 everywhere), the placed tiles and the file they were read from (the
+	// mission's <mission>.til, else the terrain's own polytrn_tileinfo; "" none), the water plane.
 	const std::string &surface_map() const { return surface_map_; }
 	size_t tiles() const { return tiles_.size(); }
+	const std::string &tiles_file() const { return tiles_file_; }
 	bool water() const { return water_z_ != 0; }
 	double water_height() const;
 	// How often it read its files (a test's count).
@@ -154,6 +156,7 @@ private:
 	std::string error_;
 	std::string surface_map_;
 	std::vector<terrain::SurfaceTileEntry> tiles_;
+	std::string tiles_file_;
 	TilFile placed_; // the same placements as the foliage blocker reads them
 	std::array<uint8_t, 256> tile_surface_{};
 	int32_t water_z_ = 0; // 16.16, 0 none (the game's g_EnvWaterHeightFixed)
