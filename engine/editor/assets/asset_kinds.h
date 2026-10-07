@@ -66,6 +66,7 @@ enum class DocumentTypeId {
 	HudLayout,   // hudpos.def, held as its text and drawn by the HUD viewport (the plan's DI-20)
 	Terrain,     // a .trn: TrnConfig's keys, grid rows and foliage (the deep-integration plan's DI-30)
 	DialogBank,  // a .dbf: a mission's dialogs and their lines (the deep-integration plan's DI-32)
+	CharAttrs,   // charattr.def, held as its text: its classes' camouflage items as references (DI-09's follow-up)
 	kCount, // the number of values, None among them
 };
 
