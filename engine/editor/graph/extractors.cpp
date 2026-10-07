@@ -150,6 +150,7 @@ void extract_record(const Document &document, const NodeAddress &address, Extrac
 		edge.address = address;
 		edge.loader_arg = field.loader_arg;
 		edge.use_context = field.use_context;
+		edge.name_offset = field.reference != ReferenceKind::None ? field.name_offset : 0;
 		// A text that is one %NAME% stands for the variable's value: a use of the variable alone
 		// (FieldUse::variable_through), which Rename rewrites with it.
 		if (field.reference == ReferenceKind::None) edge.through = field.variable_through;
@@ -215,6 +216,10 @@ bool extract_hudpos(const std::string &name, const std::vector<uint8_t> &bytes, 
 	for (size_t i = 0; i < hud.vehicle_huds_count; ++i) {
 		const def::DefVehicleHudBlock &vehicle = hud.vehicle_huds[i];
 		const std::string record = std::string("VEHICLE_HUD ") + vehicle.sid;
+		// The items it is for, by their alias (DI-09) [orig: HUD_ParseHudposToken @ 0x59F3DA..0x59F40C]. The block's
+		// own name is its alias, so a rename of the alias renames the block, not one name of it: no site a rename
+		// rewrites (native_text_sites).
+		if (vehicle.sid[0]) out.edges.push_back(edge_of(name, record, "sid", ReferenceKind::ItemAlias, vehicle.sid));
 		edge(record, "icon", ReferenceKind::Texture, vehicle.icon);
 		texture(record, "interface", TextureRoleId::HudAlphaOnly, vehicle.interface_texture);
 		edge(record, "statictexture", ReferenceKind::Texture, vehicle.static_texture);
@@ -239,6 +244,46 @@ bool extract_avatars(const std::string &name, const std::vector<uint8_t> &bytes,
 		edge("graphic_j", ReferenceKind::Model, part.graphic_j);
 		edge("graphic_s", ReferenceKind::Model, part.graphic_s);
 		edge("name", ReferenceKind::TextId, part.display_name);
+	}
+	// Each part a name its combinations find it by, of its kind in this file; of two parts of a kind and a name
+	// the last is the one a combination after both takes (the lookup keeps the last match [orig:
+	// CAvatarDefs_ParseConfigLine @ 0x57a830..0x57a854]) (DI-09).
+	static const char *const kPartKinds[] = {"HEAD", "BODY", "ARMS"};
+	const std::string file_scope = strutil::to_upper(basename_of(name)) + "/";
+	const auto part_scope = [&](int kind) {
+		return kind >= 0 && kind < 3 ? file_scope + kPartKinds[kind] : std::string();
+	};
+	for (size_t i = 0; i < file.parts_count; ++i) {
+		const avatars::AvatarPart &part = file.parts[i];
+		const std::string scope = part_scope(part.kind);
+		if (scope.empty() || !part.name[0]) continue;
+		out.symbols.push_back(symbol_of(ReferenceKind::AvatarPart, part.name, name, part.name, scope));
+		for (size_t j = i + 1; j < file.parts_count; ++j)
+			if (file.parts[j].kind == part.kind && strutil::iequals(file.parts[j].name, part.name)) {
+				out.symbols.back().inert = true;
+				out.symbols.back().inert_reason = "a later part of the name replaces it for the combinations after both";
+				break;
+			}
+	}
+	// Each combination's head, body and arms, the parts it was read with (a combination the parser drops, its head
+	// or body missing, and arms it does not find are the parser's findings).
+	for (size_t n = 0; n < file.nationalities_count; ++n) {
+		const avatars::AvatarNationality &nationality = file.nationalities[n];
+		for (size_t d = 0; d < nationality.divisions_count; ++d) {
+			const avatars::AvatarDivision &division = nationality.divisions[d];
+			for (size_t c = 0; c < division.combos_count; ++c) {
+				const avatars::AvatarCombo &combo = division.combos[c];
+				const std::string record =
+				        std::string(nationality.raw_id) + "/" + division.raw_id + "/combo " + combo.raw_id;
+				const auto part_edge = [&](const char *field, int kind, const char *value) {
+					if (value && *value)
+						out.edges.push_back(edge_of(name, record, field, ReferenceKind::AvatarPart, value, part_scope(kind)));
+				};
+				part_edge("head", avatars::AVATAR_PART_HEAD, combo.head_name);
+				part_edge("body", avatars::AVATAR_PART_BODY, combo.body_name);
+				if (combo.has_arms) part_edge("arms", avatars::AVATAR_PART_ARMS, combo.arms_name);
+			}
+		}
 	}
 	avatars::avatars_free(&file);
 	return true;
@@ -404,6 +449,11 @@ bool reference_target(const FieldUse &field, const Value &value, ReferenceKind &
 		return true;
 	}
 	name = value_name(kind, value);
+	// A number naming its definition by itself plus an offset (an ammo's tracer id: the item's id less
+	// 100000, FieldUse::name_offset): the name it reaches; 0 names none as any number's does.
+	if (field.name_offset && field.reference != ReferenceKind::None)
+		if (const auto *number = std::get_if<int64_t>(&value))
+			name = *number ? std::to_string(*number + field.name_offset) : std::string();
 	// A text's whole %NAME% names the variable, which has no scope (the field's is what it defines).
 	if (field.reference == ReferenceKind::None) return true;
 	if (name.empty()) return false;
