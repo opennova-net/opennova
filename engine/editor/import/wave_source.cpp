@@ -146,6 +146,13 @@ bool decode_wave_source(const std::vector<uint8_t> &bytes, WaveSamples &out, std
 	const auto through_game = [&](WaveFormat format) {
 		lwf::WavPcm pcm;
 		if (!lwf::wav_decode_pcm16(data.data(), data.size(), pcm, error)) return false;
+		if (pcm.sample_rate == 0) {
+			// Refused as the PCM forms below are: no rate to keep and none to resample from.
+			format.rate = 0;
+			format.channels = pcm.channels;
+			error = "its samples are " + wave_format_words(format) + ", which the editor does not read";
+			return false;
+		}
 		out.format = format;
 		out.rate = pcm.sample_rate;
 		out.channels = pcm.channels;
