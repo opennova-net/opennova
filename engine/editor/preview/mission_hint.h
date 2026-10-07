@@ -15,6 +15,7 @@ struct MissionHintInput {
 	MissionTool tool = MissionTool::Select;
 	std::string item; // the item Place places, by its name ("" none picked)
 	int path = 0; // the path Path adds stops to (0 none picked)
+	std::string ammo; // the ammo Shoot fires ("" none picked)
 	bool editable = true; // edits are taken now
 	std::string not_editable; // why not
 	bool current = true; // the picture is the document as it is now

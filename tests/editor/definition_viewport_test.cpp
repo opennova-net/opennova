@@ -590,9 +590,14 @@ static int test_weapon_and_ammo() {
 	TEST_EXPECT(rig.set(R"({"options": {"enemy": true}})"));
 	viewport = rig.viewport();
 	TEST_EXPECT(viewport->drawn().field == "frndly_trcr_type_id" && !viewport->notes().empty());
+	// An ammo with no tracer item stands without a round model (DI-23): its impact rows and its range are its picture,
+	// and the note says why nothing of the round draws.
 	TEST_EXPECT(rig.select("defs/ammo.def", "AMMO_PLAIN"));
 	viewport = rig.viewport();
-	TEST_EXPECT(viewport->view_status() == DefinitionViewStatus::NoModel);
+	bool no_tracer = false;
+	for (const std::string &note : viewport->notes()) no_tracer = no_tracer || note.find("names no tracer item") != std::string::npos;
+	TEST_EXPECT(viewport->view_status() == DefinitionViewStatus::Ready && !viewport->model() && no_tracer &&
+	            viewport->ammo_record() && viewport->impacts().found);
 	// The refusals.
 	TEST_EXPECT(rig.refusal(R"({"options": {"state": "burning"}})").find("options.state") != std::string::npos);
 	TEST_EXPECT(rig.refusal(R"({"options": {"weapon": "side"}})").find("options.weapon") != std::string::npos);
