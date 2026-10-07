@@ -13,6 +13,21 @@ namespace opennova::editor {
 
 EditPayload::~EditPayload() = default;
 
+const char *LineEndsRestore::token() const { return kLineEndsRestoreToken; }
+
+Edit line_ends_restore() {
+	static const std::shared_ptr<const EditPayload> kPayload = std::make_shared<LineEndsRestore>();
+	Edit edit;
+	edit.operation = EditOperation::Apply;
+	edit.payload = kPayload;
+	return edit;
+}
+
+bool is_line_ends_restore(const Edit &edit) {
+	return edit.operation == EditOperation::Apply && !edit.address.row && !edit.address.child &&
+	       dynamic_cast<const LineEndsRestore *>(edit.payload.get()) != nullptr;
+}
+
 namespace {
 
 std::atomic<uint64_t> g_next_identity{0};
@@ -44,7 +59,7 @@ DocumentBase::DocumentBase(const DocumentBase &other)
 bool DocumentBase::apply(const std::vector<Edit> &edits, Diagnostic &error) {
 	if (snapshot_)
 		return fail(error, path(), CoreFinding::DocumentSnapshot, "A snapshot is read, never edited.");
-	if (blocked_)
+	if (blocked_ && !takes_while_blocked(edits))
 		return fail(error, path(), CoreFinding::DocumentParse,
 		            "Fix the reported source errors and reload this document before editing.");
 	const uint64_t before = revision();
@@ -82,7 +97,7 @@ void DocumentBase::undo() {
 }
 
 void DocumentBase::redo() {
-	if (snapshot_ || blocked_) return;
+	if (snapshot_ || (blocked_ && !redoes_while_blocked())) return;
 	const uint64_t before = revision();
 	redo_step();
 	run_gesture_ = 0;
@@ -208,6 +223,12 @@ bool DocumentBase::save(Diagnostic &error, bool over) {
 		for (const auto &issue : issues_) blocked_ = blocked_ || issue.blocks;
 	}
 	return true;
+}
+
+void DocumentBase::set_source_issues(std::vector<SourceIssue> issues) {
+	issues_ = std::move(issues);
+	blocked_ = false;
+	for (const auto &issue : issues_) blocked_ = blocked_ || issue.blocks;
 }
 
 const SourceIssue *DocumentBase::first_blocking() const {

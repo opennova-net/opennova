@@ -116,6 +116,10 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::DocumentDecode, code("document.decode", G::Documents) },
 	{ C::DocumentDuplicate, code("document.duplicate", G::Documents) },
 	{ C::DocumentKind, code("document.kind", G::Documents) },
+	// A file of a kind whose game reader ends a line at CR LF alone with a line an LF ends alone
+	// (documents/line_ends.h): what the game reads, a warning refusing nothing; its fix, Restore CR LF
+	// line ends, an edit of its document.
+	{ C::DocumentLineEnds, listed(code("document.line_ends", G::Documents, F::EditRecord)) },
 	{ C::DocumentMissing, code("document.missing", G::Documents) },
 	{ C::DocumentName, code("document.name", G::Documents) },
 	{ C::DocumentNoFile, code("document.no_file", G::Documents) },
