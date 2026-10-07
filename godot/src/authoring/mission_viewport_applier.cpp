@@ -28,18 +28,23 @@
 #include <formats/env/env.h>
 #include <runtime/world/infantry.h>
 #include <runtime/environment/environment_state.h>
+#include <runtime/environment/weather_runtime.h>
 #include <runtime/renderer/render_order.h>
 
 #include <runtime/mission/placement_traits.h>
 #include <godot_cpp/variant/packed_vector4_array.hpp>
 
 #include "env/mission_environment_overrides.h"
+#include "lights/effect_light_report.h"
 #include "mission/mission_data.h"
 #include "mission/static_source_convert.h"
 #include "object/entity_ref.h"
 #include "object/item_database.h"
+#include "particle/particle_renderer.h"
 #include "render/frame_fx.h"
 #include "render/object_lod_frame.h"
+#include "render/scene_overlay_compositor.h"
+#include "terrain/foliage_frame_stats.h"
 #include "terrain/terrain_tile_info.h"
 #include "util/string_convert.h"
 
@@ -138,7 +143,9 @@ int MissionViewportApplier::layer_of_(Unit::Kind kind) {
 }
 
 MissionViewportApplier::MissionViewportApplier(SubViewport &viewport) : scene_state_(next_scene_state()) {
-	viewport.set_msaa_3d(Viewport::MSAA_4X);
+	// Single-sampled, as the game's own view draws: the particle renderer's compositor passes bind the view's
+	// depth (DI-14's rule; at MSAA_4X every particle went undrawn).
+	viewport.set_msaa_3d(Viewport::MSAA_DISABLED);
 	root_ = memnew(Node3D);
 	root_->set_name("Mission");
 	viewport.add_child(root_);
@@ -170,12 +177,24 @@ MissionViewportApplier::MissionViewportApplier(SubViewport &viewport) : scene_st
 	water_->set_environment_path(NodePath("../Environment"));
 	water_->set_globals_held(true);
 	root_->add_child(water_);
+	// The weather whose oscillator the lights' FLICKER and the foliage's sway read (DI-31): no environment
+	// bound, its wave alone run (tick).
+	weather_ = memnew(Weather);
+	weather_->set_name("Weather");
+	root_->add_child(weather_);
 	terrain_ = memnew(Terrain);
 	terrain_->set_name("Terrain");
 	terrain_->set_environment_path(NodePath("../Environment"));
 	terrain_->set_water_path(NodePath("../Water"));
 	root_->add_child(terrain_);
 	terrain_id_ = terrain_->get_instance_id();
+	// The foliage beside the terrain, never under it (GameWorld's): the detail cells come off the terrain's
+	// frame, the sway off the weather's oscillator.
+	foliage_ = memnew(FoliageDispatcher);
+	foliage_->set_name("Foliage");
+	root_->add_child(foliage_);
+	foliage_->set_terrain(terrain_);
+	foliage_->set_weather(weather_);
 	// The picture shows the mission as a load composes it: an edit that changes a caster's static
 	// shadow (a NoShadow set or cleared, an entity moved, removed or brought back) composes again the
 	// pages that shadow touched and touches, which the game, keeping a composed page, never asks.
@@ -193,15 +212,61 @@ MissionViewportApplier::MissionViewportApplier(SubViewport &viewport) : scene_st
 	lifted_root_ = memnew(Node3D);
 	lifted_root_->set_name("Lifted");
 	root_->add_child(lifted_root_);
+	// The items' effects (DI-31): the game's particle renderer over the viewport's scene, under the
+	// environment's fog and tints; the overlay tail's coronas through it too.
+	effects_ = std::make_unique<PreviewEffects>(*root_);
+	effects_->set_environment_source(environment_);
+	// The game's light director over the picture's statics and its models (no world behind it).
+	lights_.instantiate();
+	lights_->setup_with_provider(nullptr, &sources_);
+	lights_->set_scene(TypedArray<ObjectModel>(), environment_, weather_);
 	root_files_.instantiate();
 	clock_.instantiate();
-	static_rows_.instantiate();
 }
 
 MissionViewportApplier::~MissionViewportApplier() {
-	// The terrain lets go of the placer while both stand (the device frees its SubViewport after).
-	if (Terrain *terrain = Object::cast_to<Terrain>(ObjectDB::get_instance(terrain_id_)))
+	// The lights let go of the models they followed; the terrain of the placer and the light pool while both
+	// stand (the device frees its SubViewport after).
+	lights_->reset();
+	if (Terrain *terrain = Object::cast_to<Terrain>(ObjectDB::get_instance(terrain_id_))) {
 		terrain->set_static_shadow_placer(Ref<MissionObjectPlacer>());
+		terrain->set_light_context(Ref<LightScene>(), 0);
+	}
+}
+
+// --- the picture's statics (DI-31) ---------------------------------------------------------------
+
+std::vector<opennova::mission::StaticEffectSource> MissionViewportApplier::PictureSources::static_item_effect_sources() {
+	if (placer_.is_null()) return {};
+	std::vector<opennova::mission::StaticEffectSource> sources = placer_->static_item_effect_sources();
+	for (opennova::mission::StaticEffectSource &source : sources) {
+		if (source.bms_id == 0) continue;
+		// A removed entity's static: no model, so nothing of it spawns.
+		if (placer_->is_static_instance_hidden(source.bms_id)) {
+			source.asset_id = 0;
+			continue;
+		}
+		// Where its rows draw it now (a move rewrites the rows alone).
+		const Variant at = placer_->get_static_instance_transform(source.bms_id);
+		if (at.get_type() == Variant::TRANSFORM3D) source.world_transform = to_static_source_transform(at);
+	}
+	return sources;
+}
+
+std::vector<opennova::mission::StaticLightDrawSource> MissionViewportApplier::PictureSources::static_light_draw_sources() {
+	return placer_.is_valid() ? placer_->static_light_draw_sources() : std::vector<opennova::mission::StaticLightDrawSource>();
+}
+
+uint64_t MissionViewportApplier::PictureSources::static_light_draw_source_revision() {
+	return placer_.is_valid() ? placer_->static_light_draw_source_revision() : 0;
+}
+
+Ref<ItemDatabase> MissionViewportApplier::PictureSources::static_source_item_db() {
+	return placer_.is_valid() ? placer_->get_item_db() : Ref<ItemDatabase>();
+}
+
+Ref<ObjectData> MissionViewportApplier::PictureSources::static_source_object_data(uint64_t asset_id) const {
+	return placer_.is_valid() && asset_id != 0 ? placer_->static_source_object_data(asset_id) : Ref<ObjectData>();
 }
 
 void MissionViewportApplier::touch_scene_state_() {
@@ -414,6 +479,9 @@ void MissionViewportApplier::rebuild(const opennova::editor::ViewportModel &view
 		clear();
 		return;
 	}
+	// The effects' graphics through the project's files (mounted again where one they read moved, DI-31).
+	effects_->mount(view.findings.assets);
+	effects_mounted_ = true;
 	const bool terrain_moved = mount_(view);
 	if (terrain_moved || !(terrain_key_of_(mission) == carried_key)) {
 		carried.clear();
@@ -551,6 +619,11 @@ void MissionViewportApplier::run_environment_(const MissionScene &scene) {
 
 void MissionViewportApplier::terrain_empty_(const TerrainKey &key) {
 	loading_.unref();
+	// No foliage with no terrain.
+	foliage_->reset();
+	foliage_->set_terrain_data(Ref<TerrainData>());
+	foliage_->set_tile_info(Ref<TerrainTileInfo>());
+	foliage_data_.unref();
 	terrain_->set_terrain_data(Ref<TerrainData>());
 	// The ground drawn before goes with it: the picture then has no ground (docs/mcp.md's mission view),
 	// never the last terrain under a note that the new one is missing.
@@ -626,6 +699,32 @@ void MissionViewportApplier::run_terrain_build_(Build &build) {
 	if (result == Terrain::BUILD_STEP_DONE) {
 		terrain_built_ = true;
 		terrain_key_ = build.terrain_key;
+		// Its foliage as the game's load configures it after the build (the reads its slots make are the
+		// terrain layer's: a foliage model or texture moved builds the terrain again).
+		configure_foliage_();
+	}
+}
+
+void MissionViewportApplier::configure_foliage_() {
+	foliage_data_ = terrain_data_;
+	foliage_->reset();
+	if (terrain_data_.is_null()) {
+		foliage_->set_terrain_data(Ref<TerrainData>());
+		return;
+	}
+	// GameWorld::configure_foliage: the terrain data (its height, its foliage map, its colour map), the
+	// mission's tiles (the candidate blocker), each definition's model and :fd texture through the root.
+	foliage_->set_terrain_data(terrain_data_);
+	foliage_->set_tile_info(terrain_->get_tile_info_override());
+	foliage_->configure_slots_from_defs(root_files_, terrain_data_->get_foliage_defs());
+	// A definition whose model the project lacks: a note, its slot drawing nothing.
+	const Array diagnostics = foliage_->get_slot_diagnostics();
+	for (int64_t i = 0; i < diagnostics.size(); ++i) {
+		const Dictionary diagnostic = diagnostics[i];
+		const String status = diagnostic.get("status", "");
+		const String graphic = diagnostic.get("graphic", "");
+		if ((status == "missing_mesh" || status == "invalid_mesh") && !graphic.is_empty())
+			note_missing_(kTerrain, graphic.get_extension().is_empty() ? graphic + String(".3di") : graphic);
 	}
 }
 
@@ -743,6 +842,8 @@ void MissionViewportApplier::run_place_step_(Build &build) {
 	last_place_us_ = now_us() - place_started_us_;
 	++placements_;
 	placed_ = true;
+	// The mission's start spawns the placed entities' lights (DI-31).
+	relight_pending_ = true;
 }
 
 ObjectModel *MissionViewportApplier::lift_(const MissionEntityMark &entity, int key) {
@@ -814,6 +915,8 @@ void MissionViewportApplier::run_lift_(const MissionScene &scene, Build &build, 
 		entities_[entity->row] = placed;
 		if (std::find(lifted_.begin(), lifted_.end(), entity->row) == lifted_.end()) lifted_.push_back(entity->row);
 	}
+	// What stands moved: the lights spawned again over it.
+	relight_pending_ = true;
 }
 
 void MissionViewportApplier::show_(Placed &placed, bool shown) {
@@ -829,6 +932,7 @@ void MissionViewportApplier::show_(Placed &placed, bool shown) {
 		else placer_->hide_static_instance(placed.key);
 	}
 	placed.hidden = !shown;
+	relight_pending_ = true;
 }
 
 void MissionViewportApplier::drop_entities_() {
@@ -855,7 +959,8 @@ void MissionViewportApplier::drop_entities_() {
 	placed_ = false;
 	drop_pending_ = false;
 	next_key_ = 0;
-	static_rows_revision_ = 0; // the next placer's rows built afresh
+	// The lights let go of the models and statics that went.
+	relight_pending_ = true;
 }
 
 opennova::editor::OperationProgress MissionViewportApplier::progress() const {
@@ -965,48 +1070,37 @@ void MissionViewportApplier::flush_shadows_(const MissionScene &scene) {
 				found->second.index, transform_of_(*entity));
 	}
 	shadow_pending_.clear();
+	// The moved entities' lights where they stand now (the game's are spawn-fixed: spawned again).
+	relight_pending_ = true;
 }
 
-void MissionViewportApplier::build_static_rows_() {
-	if (!placed_ || placer_.is_null()) return;
-	const uint64_t revision = placer_->static_light_draw_source_revision();
-	if (revision == static_rows_revision_) return;
-	// Each row as the game's light director builds it (EffectLightDirector::_rebuild_static_light_rows):
-	// its entity's origin and bound radius, live unless hidden, and its lane: a building's ROBJ 1+
-	// lerping by its own daylight, w the mirror's CLIP arming. Containment (a static inside a
-	// building's interior, which the game finds by its blink query) needs a world the picture does not
-	// run: every other static draws uncontained.
-	const std::vector<opennova::mission::StaticLightDrawSource> rows = placer_->static_light_draw_sources();
-	const std::vector<opennova::mission::StaticEffectSource> sources = placer_->static_item_effect_sources();
-	const Ref<ItemDatabase> items = placer_->get_item_db();
-	int count = 0;
-	for (const opennova::mission::StaticLightDrawSource &row : rows) count = std::max(count, row.atlas_row + 1);
-	PackedVector3Array positions;
-	PackedInt32Array radii;
-	PackedByteArray active;
-	PackedVector4Array lanes;
-	positions.resize(count);
-	radii.resize(count);
-	active.resize(count);
-	active.fill(0);
-	lanes.resize(count);
-	for (const opennova::mission::StaticLightDrawSource &row : rows) {
-		if (row.atlas_row < 0 || row.source_index < 0 || row.source_index >= int(sources.size())) continue;
-		const opennova::mission::StaticEffectSource &source = sources[size_t(row.source_index)];
-		const int item = row.item_id != 0 ? row.item_id : source.item_id;
-		const bool has_def = items.is_valid() && items->has_item(item);
-		const bool building = opennova::mission::placed_record_is_building(row.kind >= 0 ? row.kind : source.kind,
-				has_def, has_def ? items->get_item_type(item) : 0);
-		positions.set(row.atlas_row, from_static_source_transform(source.world_transform).origin);
-		radii.set(row.atlas_row, source.entity_bound_radius_q16);
-		active.set(row.atlas_row, row.active ? 1 : 0);
-		lanes.set(row.atlas_row, LightScene::static_row_entity_lane(building, row.robj_index, row.light_transfer, false,
-				source.model_floor_q16, source.entity_bound_radius_q16));
+void MissionViewportApplier::relight_() {
+	relight_pending_ = false;
+	sources_.bind(placed_ ? placer_ : Ref<MissionObjectPlacer>());
+	// The individual models shown: the placed ones and the lifted ones.
+	TypedArray<ObjectModel> models;
+	for (const auto &entry : entities_) {
+		if (entry.second.hidden) continue;
+		if (ObjectModel *model = model_of_(entry.second))
+			if (!model->is_queued_for_deletion() && model->is_inside_tree()) models.push_back(model);
 	}
-	static_rows_->render_static_frame(positions, radii, PackedInt64Array(), PackedInt32Array(), PackedInt64Array(),
-			PackedInt32Array(), active, Vector3(1.0f, 1.0f, 1.0f), 0, nullptr, int64_t(revision), lanes);
-	static_rows_->publish_static_rows();
-	static_rows_revision_ = revision;
+	lights_->set_scene(models, environment_, weather_);
+	lights_dirty_ = true;
+	// Each LGHT record spawned as the mission's start spawns it [orig: Game_StartMission @ 0x525d19 ->
+	// Game_SpawnAllEntityGlowEffects @ 0x5227b0 -> Entity_SpawnGlowEffects @ 0x56c7c0]; none with the layer
+	// off (the statics' atlas lanes are published either way).
+	if (shown_lights_ && placed_) lights_->reattach();
+	else lights_->reset();
+}
+
+void MissionViewportApplier::publish_overlay_() {
+	ParticleRenderer *renderer = effects_->renderer();
+	if (renderer == nullptr) return;
+	auto submission = std::make_shared<SceneOverlaySubmission>();
+	submission->frame_id = ++overlay_frame_id_;
+	// The coronas after particle pass B (GameWorld::render_scene_overlay_frame's light slot).
+	if (shown_lights_) lights_->append_overlay(*submission);
+	renderer->publish_scene_overlay(submission);
 }
 
 void MissionViewportApplier::apply_state_(const opennova::editor::ViewportModel &viewport) {
@@ -1022,6 +1116,15 @@ void MissionViewportApplier::apply_state_(const opennova::editor::ViewportModel 
 	shown_water_ = options.water;
 	objects_->set_visible(options.models);
 	lifted_root_->set_visible(options.models);
+	// DI-31's layers: the foliage hidden with its pools, the effects drawn or not (the viewport closes their
+	// scene), the lights spawned again or let go.
+	foliage_->set_visible(options.foliage);
+	shown_foliage_ = options.foliage;
+	shown_effects_ = options.effects;
+	if (options.lights != shown_lights_) {
+		shown_lights_ = options.lights;
+		relight_pending_ = true;
+	}
 	if (options.shadows != shown_shadows_) {
 		shown_shadows_ = options.shadows;
 		// The casters' geometry is resolved (the Model units): the snapshot walks the sources.
@@ -1075,6 +1178,13 @@ void MissionViewportApplier::clear() {
 	build_.reset();
 	loading_.unref();
 	drop_entities_();
+	relight_();
+	effects_->clear();
+	effects_->set_environment_source(environment_);
+	effects_mounted_ = false;
+	foliage_->reset();
+	foliage_->set_terrain_data(Ref<TerrainData>());
+	foliage_data_.unref();
 	terrain_->set_terrain_data(Ref<TerrainData>());
 	terrain_->clear_built(); // nothing it drew stands
 	water_->set_terrain_data(Ref<TerrainData>());
@@ -1096,20 +1206,95 @@ void MissionViewportApplier::apply(const opennova::editor::ViewportModel &viewpo
 		report.missing.insert(report.missing.end(), missing.begin(), missing.end());
 	report.surface = terrain_built_ && terrain_data_.is_valid();
 	if (stamped_) report.files = stamped_->stamps();
+	// The effects' graphics read (one that moves builds the picture again) and those the project lacks.
+	if (effects_mounted_) {
+		report.files.add(effects_->stamps());
+		for (const std::string &name : effects_->missing())
+			if (std::find(report.missing.begin(), report.missing.end(), name) == report.missing.end())
+				report.missing.push_back(name);
+	}
+	report.drawn = drawn_json_();
 	if (build_) return;
 	apply_state_(viewport);
 	// A moved entity's terrain shadow follows once its gesture ended (not each sample: the terrain
 	// casts its static shadows again when a source moves).
 	const MissionViewport &mission = mission_of(viewport);
 	if (!mission.gesture_open()) flush_shadows_(mission.scene());
+	// The lights spawned again where what stands moved (the state's, not a frame's: drawn or not).
+	if (relight_pending_) relight_();
 }
 
-void MissionViewportApplier::tick(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &clock) {
+opennova::io::JsonValue MissionViewportApplier::drawn_json_() const {
+	using opennova::io::json_number;
+	using opennova::io::JsonValue;
+	JsonValue out = JsonValue::make_object();
+	// How many frames it presented (a client's measure of the picture's rate) and what the last one's three
+	// legs cost on the main thread, microseconds.
+	out.set("frames", json_number(double(presented_)));
+	JsonValue legs = JsonValue::make_object();
+	legs.set("foliage", json_number(double(leg_us_[0])));
+	legs.set("lights", json_number(double(leg_us_[1])));
+	legs.set("effects", json_number(double(leg_us_[2])));
+	out.set("leg_us", std::move(legs));
+	// The foliage the last presented frame drew: its definitions' slots that draw, the detail cells about the
+	// eye, the instances and vertices, the batches.
+	JsonValue foliage = JsonValue::make_object();
+	foliage.set("shown", JsonValue::make_bool(shown_foliage_));
+	int slots = 0;
+	const Array diagnostics = foliage_->get_slot_diagnostics();
+	for (int64_t i = 0; i < diagnostics.size(); ++i)
+		slots += String(Dictionary(diagnostics[i]).get("status", "")) == "enabled" ? 1 : 0;
+	foliage.set("slots", json_number(slots));
+	const Ref<FoliageFrameStats> stats = foliage_->get_frame_stats();
+	foliage.set("cells", json_number(double(stats.is_valid() ? stats->get_detail_cells() : 0)));
+	foliage.set("instances", json_number(double(foliage_->get_total_instances())));
+	foliage.set("vertices", json_number(double(stats.is_valid() ? stats->get_detail_vertices() : 0)));
+	foliage.set("batches", json_number(double(stats.is_valid() ? stats->get_render_batches() : 0)));
+	out.set("foliage", std::move(foliage));
+	// The lights: the pool's live lights, the models and the statics' rows the last frame lit, its coronas.
+	JsonValue lights = JsonValue::make_object();
+	lights.set("shown", JsonValue::make_bool(shown_lights_));
+	const Ref<EffectLightReport> report = lights_->scene()->get_report();
+	lights.set("pool", json_number(double(report.is_valid() ? report->get_live() : 0)));
+	lights.set("models", json_number(double(report.is_valid() ? report->get_models() : 0)));
+	lights.set("lit_models", json_number(double(report.is_valid() ? report->get_lit_models() : 0)));
+	lights.set("static_draws", json_number(double(report.is_valid() ? report->get_static_draws() : 0)));
+	lights.set("lit_static_draws", json_number(double(report.is_valid() ? report->get_lit_static_draws() : 0)));
+	lights.set("coronas", json_number(double(lights_->scene()->last_corona_quads().size())));
+	out.set("lights", std::move(lights));
+	// The effects' quads the renderer drew.
+	JsonValue effects = JsonValue::make_object();
+	effects.set("shown", JsonValue::make_bool(shown_effects_));
+	const ParticleRenderer *renderer = effects_->renderer();
+	effects.set("quads", json_number(double(renderer ? renderer->get_rendered_quad_count() : 0)));
+	out.set("effects", std::move(effects));
+	return out;
+}
+
+void MissionViewportApplier::tick(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &clock) {
 	// The models' part animations on the preview clock.
 	clock_->sample(int64_t(clock.ms()), ++frame_);
+	clock_ms_ = int64_t(clock.ms());
 	// The frame's start (the Shell ticks before it arbitrates): no mirror pass unless this frame
 	// presents the picture.
 	water_->set_mirror_enabled(false);
+	// The weather's wave on the preview clock (DI-31): the oscillator alone, its PRNG from the mission
+	// start's seed through the start's 255-tick settle, then a tick per game tick (a seek back holds it)
+	// [orig: Environment_UpdateWeatherTick @ 0x57e9b0, the oscillator legs @ 0x57e9fc..0x57eaed].
+	opennova::env::WeatherOscillator &wave = weather_->runtime().core().oscillator;
+	if (wave_tick_ < 0) {
+		for (int i = 0; i < opennova::env::WeatherRuntime::kMissionStartPrewarmTicks; ++i) wave.tick();
+		wave_tick_ = clock.ticks();
+	} else if (clock.ticks() > wave_tick_) {
+		const int32_t run = std::min<int32_t>(clock.ticks() - wave_tick_, opennova::env::WeatherRuntime::kMaxCatchupTicks);
+		for (int32_t i = 0; i < run; ++i) wave.tick();
+		wave_tick_ = clock.ticks();
+	} else {
+		wave_tick_ = clock.ticks();
+	}
+	// The effects' scene the viewport stepped, shown where it opened another.
+	const std::shared_ptr<opennova::particle::EffectScene> &scene = mission_of(viewport).effects().scene();
+	if (effects_mounted_ && scene != effects_->scene()) effects_->show(scene);
 }
 
 // --- the frame -----------------------------------------------------------------------------------
@@ -1123,8 +1308,8 @@ void MissionViewportApplier::publish_scene_state() {
 	water_->set_globals_held(false);
 	water_->set_world_rendering_enabled(true);
 	water_->set_globals_held(true);
-	// The retained statics' light atlas (its rows' lighting lanes), when one is built.
-	static_rows_->publish_static_rows();
+	// The retained statics' light atlas (its rows' lights and lighting lanes), when one is built.
+	lights_->scene()->publish_static_rows();
 }
 
 void MissionViewportApplier::present(double dt) {
@@ -1150,6 +1335,17 @@ void MissionViewportApplier::present(double dt) {
 				terrain_->get_visible_terrain_max_height());
 	}
 	water_->advance_frame(dt);
+	// The foliage leg (DI-31; GameWorld::render_foliage_frame): the terrain's detail cells about the eye
+	// grown from the foliage map, the water's height splitting the passes. No crouched or prone person
+	// stands in a picture with no simulation, so the silhouette tier has no anchor.
+	const float water_height = water_active ? water_->get_water_height() : 0.0f;
+	++presented_;
+	const int64_t foliage_start = now_us();
+	if (shown_foliage_ && terrain_built_ && foliage_data_.is_valid()) {
+		foliage_->set_water_height(water_height);
+		foliage_->render_frame(camera_->get_global_transform(), clock_ms_);
+	}
+	leg_us_[0] = now_us() - foliage_start;
 	const Viewport *viewport = camera_->get_viewport();
 	const float width = viewport ? float(viewport->get_visible_rect().size.x) : 0.0f;
 	// The levels at the object detail a fresh game profile starts at (the game reads its options'
@@ -1158,12 +1354,33 @@ void MissionViewportApplier::present(double dt) {
 	if (placed_ && placer_.is_valid()) {
 		placer_->update_static_lods_for_views(camera_, width, nullptr, 0.0f, object_detail);
 	}
-	// The statics' rows of the light atlas, where the placer's moved (the game's light director leg).
-	build_static_rows_();
 	// The individual models' levels (the walk is the process's: the model preview's model draws its
 	// level as its options say and never joins it).
 	const ObjectLodFrame frames[1] = { ObjectLodFrame::from_camera(camera_, width, object_detail) };
 	ObjectModel::update_authored_lod_views(frames, 1);
+	// The light leg (GameWorld::render_light_frame): the pool spawned again where what stands moved, each
+	// model's and each static row's nearest lights selected (the atlas's lanes with them), the terrain's
+	// next frame drawn with the lights its patches overlap, the coronas walked.
+	const int64_t lights_start = now_us();
+	if (relight_pending_ && !build_) relight_();
+	// With the layer off the pool is empty: one pass after a relight or a change of the statics' rows writes
+	// every draw's lights away and the rows' lanes, and nothing moves until the next.
+	const uint64_t rows_revision = sources_.static_light_draw_source_revision();
+	if (shown_lights_ || lights_dirty_ || rows_revision != lit_rows_revision_) {
+		lights_->render_frame(camera_, clock_ms_, TypedArray<ObjectModel>(), false);
+		lights_dirty_ = false;
+		lit_rows_revision_ = rows_revision;
+	}
+	terrain_->set_light_context(shown_lights_ ? lights_->scene() : Ref<LightScene>(), int(clock_ms_));
+	leg_us_[1] = now_us() - lights_start;
+	// The particle leg: the effects' scene as the viewport stepped it, partitioned by the water's plane.
+	const int64_t effects_start = now_us();
+	if (ParticleRenderer *renderer = effects_->renderer())
+		renderer->set_water_plane(water_height, water_active ? water_->get_reflection_camera() : nullptr);
+	effects_->render(clock_ms_);
+	// The post-particle overlay tail: the coronas.
+	publish_overlay_();
+	leg_us_[2] = now_us() - effects_start;
 	environment_->set_globals_held(true);
 	water_->set_globals_held(true);
 }
