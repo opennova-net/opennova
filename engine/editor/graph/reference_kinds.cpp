@@ -374,12 +374,28 @@ std::string shader_missing(const AssetGraph &graph, const GraphEdge &) {
 // the number as written, and what the ammo's parse does then: it takes the item whose name is the ammo's, else
 // warns and keeps none [orig: AmmoDef_ParseProperty @ 0x40A5E2..0x40A60B, ItemList_FindIndexByPrimaryName over
 // the ammo's own name; "couldn't find ammodef frndlyTrcrID"].
+// A charattr class's camouflage item names it by its type id too, and what the game does then is the item
+// lookup's own: index 0, items.def's first row, for a type no item has, which a player of the class spawns as
+// [orig: Entity_SpawnFromAnimSlotProperty @ 0x43c3cf -> ItemList_FindIndexByTypeId @ 0x49e100, its 0 for no
+// match @ 0x49e12f].
+bool named_by_class_cammo(const GraphEdge &edge) {
+	return edge.name_offset && (edge.field == "JUNGLE_CAMMO" || edge.field == "DESERT_CAMMO" || edge.field == "ARCTIC_CAMMO");
+}
+
 std::string item_missing(const AssetGraph &graph, const GraphEdge &edge) {
 	if (!edge.name_offset) return project_lacks(graph, edge);
 	const std::optional<int> id = strutil::parse_int(edge.value);
 	const std::string written = id ? std::to_string(int64_t(*id) - edge.name_offset) : edge.value;
+	if (named_by_class_cammo(edge))
+		return " (type id " + written + "), which the project does not have: a player of the class spawns as items.def's "
+		       "first row instead.";
 	return " (type id " + written + "), which the project does not have: the game takes the item named as the record "
 	       "instead, else warns that it finds none.";
+}
+
+// The game spawns the class's player as another item: a warning, the game runs on.
+DiagnosticSeverity item_severity(const GraphEdge &edge) {
+	return named_by_class_cammo(edge) ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error;
 }
 
 std::string item_alias_missing(const AssetGraph &, const GraphEdge &) {
@@ -527,10 +543,12 @@ constexpr ReferenceKindRow kRows[] = {
 	        .row,
 	Row(ReferenceKind::Ammo, "ammo", "the ammo", "ammo").symbol(NameCase::FileName, AssetKind::AmmoDefs).row,
 	Row(ReferenceKind::Weapon, "weapon", "the weapon", "weapon").symbol(NameCase::FileName, AssetKind::WeaponDefs).row,
-	// An item by its id; a tracer's by its type id (item_missing).
+	// An item by its id; a tracer's and a charattr class's camouflage by its type id (item_missing), the
+	// latter a warning (item_severity).
 	Row(ReferenceKind::Item, "item", "the item id", "item id")
 	        .symbol(NameCase::Exact, AssetKind::ItemDefs)
 	        .says(item_missing)
+	        .severity_by(item_severity)
 	        .row,
 	// Each by its loader (ADR 0046 S18): the terrain's colour map and its blend map abort the mission when
 	// they load nothing (texture_gates).
