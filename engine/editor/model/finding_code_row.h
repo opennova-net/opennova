@@ -100,7 +100,6 @@ enum class FindingGroup {
 	SoundProfiles,
 	Particles, // a particle file, through the effect system's reader (ADR 0046 DI-14)
 	Environments,
-	HudLayouts,
 	FileChores, // Files' delete, duplicate, new here and folders, and their undo (DI-25)
 	kCount
 };
@@ -295,6 +294,7 @@ enum class CoreFinding {
 	DocumentDecode,
 	DocumentDuplicate,
 	DocumentKind,
+	DocumentLineEnds,
 	DocumentMissing,
 	DocumentName,
 	DocumentNoFile,
