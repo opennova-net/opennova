@@ -1485,12 +1485,17 @@ void test_compiler_label_fonts(const fnt_font_t *font) {
 void test_compiler_hud_font_falls_back_to_bold(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	HudLayout layout;
+	layout.ammo_count = {40, 700, 0, 0, true};
 	compiler.configure(layout, nullptr);
 	compiler.configure_label_fonts(font, font, font, 2.0f, 2.0f);
 
-	// A SYSTEM feed line draws through the HUD slot (emit_text).
+	// The ammo count draws through the HUD slot [orig: &dword_2723C74
+	// @0x593aab] ("1/2", three glyphs).
 	HudFrameState state;
-	compiler.push_feed_line("Sit", 0xFFFFFFFFu, 0);
+	state.weapon.active = true;
+	state.weapon.clip = 1;
+	state.weapon.reserve = 2;
+	state.weapon.capacity = 30;
 	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 	bool all_bold = list.glyphs.size() == 3;
 	for (const opennova::hud::GameFontQuad &g : list.glyphs) {
