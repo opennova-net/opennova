@@ -4315,6 +4315,13 @@ target_link_libraries(editor_blank_factory_test PRIVATE opennova_editor)
 target_include_directories(editor_blank_factory_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_blank_factory COMMAND editor_blank_factory_test)
 
+# DI-33: every kind a reference or the boot manifest names that the engine has a writer for gets a blank,
+# read back through the engine's reader of its format and opened by its document type.
+add_executable(editor_blank_writers_test editor/blank_writers_test.cpp)
+target_link_libraries(editor_blank_writers_test PRIVATE opennova_editor)
+target_include_directories(editor_blank_writers_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_blank_writers COMMAND editor_blank_writers_test)
+
 # TrnGen.exe's terrain bake ported (engine/editor/terrain): a depth map to the .cpt the game reads,
 # read back through the engine's reader; given the retired TrnGen corpus's directory as its
 # argument, the byte parity with TrnGen's own .cpt files (a run by hand).
