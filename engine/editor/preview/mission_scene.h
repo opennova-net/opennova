@@ -78,6 +78,9 @@ struct MissionSceneHeader {
 	int water_override = 0, fog_override = 0;
 	int fog_color[3] = { 0, 0, 0 }, water_color[3] = { 0, 0, 0 };
 	int water_murk = 0;
+	// The wind every GLOBALWIND particle drifts with (the header's wind_speed and wind_direction,
+	// particle::mission_wind_vector): what the effects read (DI-31).
+	int wind_speed = 0, wind_direction = 0;
 };
 bool operator==(const MissionSceneHeader &a, const MissionSceneHeader &b);
 inline bool operator!=(const MissionSceneHeader &a, const MissionSceneHeader &b) { return !(a == b); }

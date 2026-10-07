@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <editor/preview/mission_camera.h>
+#include <editor/preview/mission_effects.h>
 #include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/mission_ground_overlay.h>
 #include <editor/preview/mission_handle_edit.h>
@@ -119,6 +120,12 @@ public:
 	// warmup leave each placed person in), as last followed: the device poses each person's model by
 	// its row's.
 	const MissionPoses &poses() const { return poses_; }
+	// Its items' effects as the mission's start attaches them (DI-31, preview/mission_effects), followed and
+	// played to the preview clock while its options show them (closed otherwise): the device draws its scene.
+	const MissionEffects &effects() const { return effects_; }
+	// What its device says it drew of the layers it reports (DI-31: the foliage and the lights), as last
+	// reported (null before any): the body's `drawn`.
+	const io::JsonValue &drawn() const { return drawn_; }
 	// How far from its anchor the primary's handles stand, metres: a share of the camera's distance,
 	// so they keep their size on the picture.
 	float handle_reach() const { return camera_.distance * 0.08f; }
@@ -221,6 +228,9 @@ private:
 	// The scene's items' bounds asked of the project, where the scene, the graph or the asset source's
 	// generation moved.
 	void bound_items_(const SessionView &view);
+	// The items' effects followed over the scene and played to the clock while the options show them (DI-31),
+	// closed while they do not.
+	void follow_effects_(const SessionView &view, const PreviewClock &clock);
 	// The mission document a planner works over: the one at its path while the picture is current;
 	// null, with why, otherwise.
 	const Document *planned_(const ViewportContext &context, std::string &error) const;
@@ -260,6 +270,8 @@ private:
 	uint64_t bounds_graph_ = 0; // the graph's generation then
 	uint64_t bounds_files_ = 0; // and the asset source's
 	MissionPoses poses_;
+	MissionEffects effects_;
+	io::JsonValue drawn_;
 	uint64_t stood_serial_ = 0; // the scene's serial the people were last stood over
 	int stood_reads_ = -1; // the ground's reads then
 	std::vector<std::string> missing_;
