@@ -13,6 +13,7 @@
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_preview_camera.h>
 #include <editor/preview/model_preview_rig.h>
+#include <editor/preview/preview_clip_fire.h>
 #include <editor/preview/preview_clip_sounds.h>
 #include <editor/preview/preview_first_person.h>
 #include <editor/preview/viewport_follow.h>
@@ -69,10 +70,13 @@ struct ModelViewportOptions {
 	// A weapon's map seen in first person (DI-13, preview/preview_first_person): the eye or the orbit, the
 	// character whose arms draw, the action whose sets a row plays.
 	FirstPersonOptions first_person;
+	// How a clip's fire events show (DI-24, preview/preview_clip_fire): the range's target, the side seeing them.
+	ClipFireOptions fire;
 	bool operator==(const ModelViewportOptions &other) const {
 		return lod == other.lod && ctrl == other.ctrl && overlays == other.overlays &&
 				rig_model == other.rig_model && repeat == other.repeat && bones == other.bones && snap == other.snap &&
-				sound == other.sound && damage == other.damage && first_person == other.first_person;
+				sound == other.sound && damage == other.damage && first_person == other.first_person &&
+				fire == other.fire;
 	}
 	bool operator!=(const ModelViewportOptions &other) const { return !(*this == other); }
 };
@@ -83,7 +87,7 @@ std::string model_camera_change(const OrbitCamera &camera);
 // The options on the wire (the envelope's `options`, a SetViewport's): {lod ("auto" or a level),
 // ctrl {register: value}, overlays {user_points, lights, pivots}, rig_model, repeat, bones, snap,
 // sound {mute, surface, body, female, profile}, damage {state, item}, first_person {view, character,
-// action}}.
+// action}, fire {target, surface, range, enemy}}.
 io::JsonValue model_options_to_json(const ModelViewportOptions &options);
 
 // How long a repeated one-shot holds its last frame before it plays again, in game ticks (half a
@@ -227,6 +231,11 @@ public:
 	// What an event of the clip plays under the sound options, a line a sound, nothing picked (the
 	// timeline's hover).
 	std::vector<std::string> event_sound_words(uint32_t trigger) const;
+	// A clip's fire events (DI-24, preview/preview_clip_fire): what fires them and what they fire as the clock runs,
+	// the shots in the range and what the device draws of them; and what an event fires, a line a shot (the
+	// timeline's hover), none for a word with no fire bit.
+	const ClipFire &clip_fire() const { return clip_fire_; }
+	std::vector<std::string> event_fire_words(uint32_t trigger) const;
 	// The sounds the clip's events fired over the ticks the clock ran through since the last call
 	// (clip_events_due: never over a seek, a clip newly chosen, a pause; from the clip's tick of each, a
 	// repeated one-shot's taken again from 0), each planned through `selector` (plan_clip_event) and
@@ -235,7 +244,8 @@ public:
 	std::vector<ClipSoundFired> fire_sounds(const PreviewClock &clock, const AssetScan *scan,
 			audio::SoundSelector &selector, uint64_t &next_seq);
 	// The sounds the clip's event at `frame` plays, once, as a press of its mark on the timeline asks
-	// (play_sound {frame}); false, with why, for no clip playing, a frame the game never reads (the end
+	// (play_sound {frame}): its sounds, and a fire event's shots fired once (DI-24: each ammo's ai_launch heard
+	// from its launch point); false, with why, for no clip playing, a frame the game never reads (the end
 	// pose, a frame the clock steps over), a frame that fires no sound, and a weapon's first-person clip
 	// (DI-13: nothing reads its events).
 	bool press_event(int frame, const AssetScan *scan, audio::SoundSelector &selector,
@@ -400,6 +410,7 @@ private:
 	ClipSoundTrack clip_track_;
 	ClipSoundSources sound_sources_;
 	ClipSoundBinding sound_binding_;
+	ClipFire clip_fire_; // the clip's fire events (DI-24)
 	std::vector<ClipSoundFired> fired_;
 	int32_t sound_cursor_ = -1;
 	uint64_t sound_seeks_ = 0;
