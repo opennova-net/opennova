@@ -35,6 +35,7 @@
 #include <editor/run/play_lease.h>
 #include <editor/session/build_operation.h>
 #include <editor/session/build_result.h>
+#include <editor/session/clip_sounds.h>
 #include <editor/session/document_set.h>
 #include <editor/session/file_chores.h>
 #include <editor/session/editor_preferences.h>
@@ -1126,6 +1127,8 @@ void SessionCore::set_viewport(const std::string &path, const std::string &chang
 		if (viewports_->set_clock(*json.get("clock"), error)) touch(ViewConcern::Viewports);
 	} else if (viewports_->set(view_, at, json, error)) {
 		touch(ViewConcern::Viewports);
+		// A menu's game mouse moved, pressed or let go is heard at once (DI-34).
+		fire_menu_sounds(*this, at);
 	}
 	// The change's own fault: refused, no Problems row (the demo round's review).
 	if (!error.empty()) refuse_request(CoreFinding::ViewportRefused, error, at, DiagnosticSeverity::Error);
