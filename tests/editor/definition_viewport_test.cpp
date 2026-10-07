@@ -425,6 +425,27 @@ static int test_item_alive() {
 	// Alive draws no death: no registers, no hidden section.
 	TEST_EXPECT(viewport->ctrl_at(rig.session.viewports().clock()).empty() &&
 	            viewport->hidden_sections_at(rig.session.viewports().clock()) == 0);
+	// Its shadows, which fall only on a mission's terrain the picture has none of, said beside it: the sun
+	// shadow among the buildings; NoShadow set on the record (an edit the picture follows), none.
+	const auto said = [&](const char *words) {
+		for (const std::string &note : rig.viewport()->notes())
+			if (note.find(words) != std::string::npos) return true;
+		return false;
+	};
+	TEST_EXPECT(said("sun shadow on a mission's terrain where a mission places it among the buildings") &&
+	            !said("moving shadow") && !said("is NoShadow"));
+	{
+		Edit no_shadow;
+		no_shadow.address = NodeAddress{rig.session.view().documents.previews[ViewportKind::Definition].part, 0, 0};
+		no_shadow.field = "attrib";
+		no_shadow.value = int64_t(def::DEF_ITEM_ATTRIB_NOSHADOW);
+		rig.session.handle(request::edit_record(rig.path, no_shadow));
+		rig.devices.sync(rig.session);
+		TEST_EXPECT(rig.session.outcome().done() && said("Smoke pump is NoShadow: the game draws no sun shadow"));
+		rig.session.handle(request::undo(rig.path));
+		rig.devices.sync(rig.session);
+		TEST_EXPECT(!said("is NoShadow") && said("among the buildings"));
+	}
 	// A drivable item: its slot (no point of the name: once at the origin) only while a driver controls it.
 	TEST_EXPECT(rig.select("defs/items.def", "Smoke car"));
 	viewport = rig.viewport();
