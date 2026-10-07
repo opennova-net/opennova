@@ -1471,6 +1471,11 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		// Nothing selected in the active document: who names the file itself (DI-05), each a Go to.
 		const DocumentBase *shown = active_document(view);
 		if (!shown || document) ui_kit::empty_state("Select a record.", "Its fields and lists show here.");
+		// A document of no records: its type's own part first (the HUD layout's element picked, DI-37).
+		if (shown && !document)
+			if (const DocumentViewRow *own = document_view_row(asset_kind_row(shown->kind()).document);
+					own && own->inspector_text)
+				own->inspector_text(workspace_, *shown);
 		if (shown) used_by(*shown);
 		return;
 	}

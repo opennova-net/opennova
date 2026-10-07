@@ -136,7 +136,8 @@ constexpr RequestField kFields[] = {
 			"on the document, another gesture, or 10 s with no sample ends it; a token no gesture of "
 			"the document's holds is refused." },
 	{ F::Command, "command", J::Object,
-			"A command in a viewport, {name, ids?, kind?, by?, at?, mode?}: any canvas's click (at its point, "
+			"A command in a viewport, {name, ids?, kind?, by?, at?, mode?, item?, handle?, field?, value?}: any "
+			"canvas's click (at its point, "
 			"mode replace, add or toggle: a Shift or Ctrl click's), the selection its canvas's click makes there "
 			"(a menu's window, a mission's mark, a model's marker or collision shape; on nothing, a mission's "
 			"empties the selection), a menu's arrange of the windows ids, "
@@ -151,7 +152,11 @@ constexpr RequestField kFields[] = {
 			"or a mission's frame, top, ground, select_same (every entity of the "
 			"selected entities' items), duplicate (the ids, else the selection, copied and moved by "
 			"[east, north] metres, one batch) or paste (the clipboard's copied entities and areas, "
-			"their middle where the point at [x, y] meets the ground, one batch); by a way in the "
+			"their middle where the point at [x, y] meets the ground, one batch), "
+			"or a HUD element's move (by [dx, dy] design units, or at [x, y] its place), resize (handle "
+			"top_left, top_right, bottom_left or bottom_right, bottom_right when left out, by [dx, dy]) and set "
+			"(field, one of the element's fields by its id, to value), item the element's token (left out, the "
+			"one picked), each written to hudpos.def's lines, one batch; by a way in the "
 			"kind's units, at a point of the picture; kind the viewport's (left out, the one the "
 			"document shows in)." },
 	{ F::Drop, "drop", J::Object,
