@@ -152,6 +152,17 @@ std::string model_item_plan_words(const ModelItemPlan &plan) {
 	return words;
 }
 
+// The mission a Place in mission of `what` arms Place in exists (place_in_mission_target); false with why: no
+// mission open, or several and none last active.
+static bool mission_to_place_in(const SessionView &view, const std::string &what, std::string &error) {
+	if (!place_in_mission_target(view).empty()) return true;
+	error = std::none_of(view.documents.open.begin(), view.documents.open.end(),
+	                     [](const auto &document) { return document && document->kind() == AssetKind::Mission; })
+	                ? "No mission is open: open the mission to place " + what + " in, then Place in mission."
+	                : "Several missions are open: make the one to place " + what + " in active, then Place in mission.";
+	return false;
+}
+
 std::string place_in_mission_target(const SessionView &view) {
 	const auto mission_at = [&](const std::string &path) {
 		const DocumentBase *open = path.empty() ? nullptr : open_at(view, path);
@@ -176,17 +187,7 @@ bool plan_place_in_mission(const SessionView &view, const std::string &model, Ca
 		error = "Place in mission places a model: " + model + " is none.";
 		return false;
 	}
-	const std::string mission = place_in_mission_target(view);
-	if (mission.empty()) {
-		error = view.documents.open.empty() || std::none_of(view.documents.open.begin(), view.documents.open.end(),
-		                                                    [](const auto &document) {
-			                                                    return document && document->kind() == AssetKind::Mission;
-		                                                    })
-		                ? "No mission is open: open the mission to place " + entry->logical_name + " in, then Place in mission."
-		                : "Several missions are open: make the one to place " + entry->logical_name + " in active, then Place "
-		                  "in mission.";
-		return false;
-	}
+	if (!mission_to_place_in(view, entry->logical_name, error)) return false;
 	const std::vector<int64_t> drawers = mission_items_of_model(view, entry->relative_path);
 	if (drawers.size() > 1) {
 		error = "Several items draw " + entry->logical_name + ":";
@@ -216,6 +217,17 @@ bool plan_place_in_mission(const SessionView &view, const std::string &model, Ca
 		words = (facts.name.empty() ? std::string("Item ") : facts.name + " ") + "(" + std::to_string(item) + ") draws " +
 		        entry->logical_name + "; ";
 	}
+	return plan_place_item_in_mission(view, item, words, out, error);
+}
+
+bool plan_place_item_in_mission(const SessionView &view, int64_t item, const std::string &lead, CanvasRequests &out,
+                                std::string &error) {
+	MissionItemFacts facts;
+	std::string ignored;
+	mission_item_facts(view, item, facts, ignored);
+	const std::string named = facts.name.empty() ? "item " + std::to_string(item) : facts.name;
+	if (!mission_to_place_in(view, named, error)) return false;
+	const std::string mission = place_in_mission_target(view);
 	// The mission made active (a jump the history records), then its Place tool armed with the item.
 	out.request(request::open_document(mission));
 	io::JsonValue options = io::JsonValue::make_object();
@@ -223,6 +235,7 @@ bool plan_place_in_mission(const SessionView &view, const std::string &model, Ca
 	options.set("item", io::json_number(double(item)));
 	out.request(request::set_viewport(mission, viewport_change(ViewportKind::Mission, "options", std::move(options))));
 	const size_t slash = mission.find_last_of('/');
+	std::string words = lead.empty() ? named + " (" + std::to_string(item) + "): " : lead;
 	words += "Place is armed in " + (slash == std::string::npos ? mission : mission.substr(slash + 1)) +
 	         ": a click on its picture places one on the ground there.";
 	out.served(std::move(words), 0);

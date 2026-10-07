@@ -1042,7 +1042,7 @@ void test_weapon_shows_on_the_hud() {
 	              workspace.requests[1].viewport.find("\"hud\"") != std::string::npos &&
 	              workspace.requests[1].viewport.find("\"WPN_HUD\"") != std::string::npos,
 	      "Show on the HUD goes to hudpos.def and holds the weapon in its HUD");
-	// Another catalog's record: nothing drawn.
+	// An item table's record (DI-18): Place in mission, held back with no mission open.
 	const auto items = std::make_shared<DefCatalogDocument>();
 	const std::string item = "begin \"Crate\"\r\nid 100001\r\ntype building\r\nend\r\n";
 	CHECK(items->load_bytes(std::vector<uint8_t>(item.begin(), item.end()), "defs/items.def", AssetKind::ItemDefs, "jo",
@@ -1050,13 +1050,22 @@ void test_weapon_shows_on_the_hud() {
 	              !items->rows().empty(),
 	      "the item table loads");
 	if (items->rows().empty()) return;
-	InspectorTaken taken;
-	ImGui::NewFrame();
-	ImGui::Begin("Inspector part", nullptr, ImGuiWindowFlags_NoSavedSettings);
-	CHECK(!draw_catalog_inspector(workspace, *items, {items->rows()[0]->id, items->rows()[0]->kind, 0}, taken),
-	      "an item draws no part");
-	ImGui::End();
-	ImGui::Render();
+	const NodeAddress crate{items->rows()[0]->id, items->rows()[0]->kind, 0};
+	const auto draw_item = [&] {
+		InspectorTaken taken;
+		ImGui::NewFrame();
+		ImGui::Begin("Inspector part", nullptr, ImGuiWindowFlags_NoSavedSettings);
+		const bool drew = draw_catalog_inspector(workspace, *items, crate, taken);
+		ImGui::End();
+		ImGui::Render();
+		return drew;
+	};
+	workspace.requests.clear();
+	CHECK(draw_item() && places_in_mission(*items, crate), "an item's part: Place in mission");
+	ImGui::ActivateItemByID(item_id(Ui::window_id("Inspector part"), {"Place in mission"}));
+	draw_item();
+	draw_item();
+	CHECK(workspace.requests.empty(), "with no mission open it places nothing");
 }
 
 } // namespace
