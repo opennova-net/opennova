@@ -200,6 +200,13 @@ std::vector<ClipSoundFired> plan_clip_event(const ClipEventDue &due, const ClipS
 // which it lacks.
 void find_clip_sound_waves(ClipSoundFired &fired, const AssetScan &scan);
 
+// A set played once as `heard` says (from a place, or at a distance), found in the game's bank order with its
+// member picked through `selector` for the listener's view `view_flags`; on the clock's `tick`, its words led by the
+// tick and `what`; its state played, missing, out_of_range or silent. Its seq, path and waves are the caller's.
+ClipSoundFired plan_set_heard(const std::string &set, int32_t tick, const std::string &what,
+                              const ClipSoundSources &sources, const PreviewHearing &heard,
+                              audio::SoundSelector &selector, uint8_t view_flags);
+
 // A set an item plays at its own place, once (a death's sound: the model preview's damage state, DI-10, and
 // the definition preview's, DI-21): found in the game's bank order and played at the preview's origin as the
 // camera at `listener` hears it, its member picked through `selector`; on the clock's `tick`, its words led

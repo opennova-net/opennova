@@ -18,6 +18,15 @@ enum class MissionTool : uint8_t { Select, Place, Path, Area, Shoot };
 const char *mission_tool_token(MissionTool tool);
 bool mission_tool_from_token(const std::string &token, MissionTool &out);
 
+// The mission view's Listen (ADR 0046 DI-36), its options' `listen`: on or off, and the master volume (0..1) every
+// sound it plays is scaled by (the editor's, not the game's). Off by default: a mission opened is silent until asked.
+struct MissionListenOptions {
+	bool on = false;
+	float volume = 1.0f;
+	bool operator==(const MissionListenOptions &o) const { return on == o.on && volume == o.volume; }
+	bool operator!=(const MissionListenOptions &o) const { return !(*this == o); }
+};
+
 // The mission viewport's options (ADR 0046 S14): the layers its device draws (the terrain, the sky,
 // the water, the models, the static terrain shadows), the marks the canvas draws over them (each
 // pool's entities, the area triggers, the paths, the labels beside every shown mark rather than
@@ -33,7 +42,8 @@ bool mission_tool_from_token(const std::string &token, MissionTool &out);
 // the surface classes, or the foliage). DI-31: three more of the device's layers, the terrain's foliage as the
 // game grows it from its foliage map, each placed item's effects as the mission's start attaches them
 // (mission_effects.h), and the lights the game lights the scene with (the placed models' own).
-// DI-23: the ammo the Shoot tool fires (an ammo.def record; "" none picked).
+// DI-23: the ammo the Shoot tool fires (an ammo.def record; "" none picked). DI-36: the Listen
+// (preview/mission_listen.h), which the device plays rather than draws.
 // Set by a SetViewport's `options` member (its wire form below), every member optional.
 struct MissionViewportOptions {
 	bool terrain = true, sky = true, water = true, models = true, shadows = true;
@@ -51,6 +61,7 @@ struct MissionViewportOptions {
 	std::string palette;
 	MissionGroundOverlay overlay = MissionGroundOverlay::None;
 	std::string ammo;
+	MissionListenOptions listen;
 };
 
 // The toolbar's Snap steps (metres; 0 free) and Turn steps (degrees; 0 whole degrees), in its lists' order.
@@ -62,10 +73,15 @@ inline bool operator!=(const MissionViewportOptions &a, const MissionViewportOpt
 
 // The wire form: {show: {terrain, sky, water, models, shadows, foliage, effects, lights}, marks: {items,
 // buildings, markers, organics, areas, paths, labels}, mark_range, stick, time (null: the mission's start
-// time), tool (its token), item, path, snap, turn, palette, overlay (none, surfaces or foliage), ammo}.
+// time), tool (its token), item, path, snap, turn, palette, overlay (none, surfaces or foliage), ammo, listen
+// {on, volume}}.
 io::JsonValue mission_options_to_json(const MissionViewportOptions &options);
 // A SetViewport's options member set over `held`: every member checked before any applies; false,
 // nothing changed, with `error` naming the member and what it takes.
 bool mission_options_from_json(const io::JsonValue &json, MissionViewportOptions &held, std::string &error);
+// The Listen's own: {on, volume}; read over `held`, every member optional (false, nothing changed, with `error` naming
+// the member, for another member or a value out of its range).
+io::JsonValue mission_listen_options_to_json(const MissionListenOptions &options);
+bool mission_listen_options_from_json(const io::JsonValue &json, MissionListenOptions &held, std::string &error);
 
 } // namespace opennova::editor
