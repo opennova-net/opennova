@@ -1027,6 +1027,9 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                     imp.position = vec_from_fixed(hit.position_q16);
                     imp.direction = direction;
                     imp.ammo_index = params.ammo_index;
+                    // The leaf reads the ammo's own row at the tag's place
+                    // [orig: @0x4e88c3..0x4e88dc].
+                    imp.own_row = true;
                     if (hit.hit_class == ProjectileHitClass::Terrain) {
                         const int32_t surface = terrain::surface_type_at_fixed(
                             world.tables.surface_map, hit.position_q16.x,

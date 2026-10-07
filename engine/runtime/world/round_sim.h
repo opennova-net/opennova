@@ -56,6 +56,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <runtime/world/ammo_table.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/tracer_trails.h>
@@ -423,6 +424,10 @@ struct RoundImpact {
                             //  @ 0x813420; world/ammo_table.h kImpactEffectTagNames]
     bool present_effect = true; // submit the row's particle-effect leg
     bool present_sound = true;  // play the row's impact-sound leg
+    // The row is the ammo's own at the tag's place, never def 0's fallback: the knife's
+    // ray and the squib's travel read their table directly (impact_effect_own_row);
+    // every other producer presents through the impact presenter (impact_effect_row).
+    bool own_row = false;
     // The descriptor's owner tag is the struck entity (0 on terrain and water),
     // so an entity impact's group takes the building-section gate
     // [orig: AmmoDef_ProcessImpactEffect @ 0x40A240 passes the hit record's
@@ -432,6 +437,20 @@ struct RoundImpact {
     uint32_t tick = 0;      // authoritative presentation tick for catch-up aging
     uint64_t source_order = 0; // stable order across impacts resolved on the same tick
 };
+
+// The row a round impact plays: its ammo's own at the tag's place for a direct reader
+// (own_row), else the impact presenter's pick (impact_effect_row: the ammo's row of the
+// tag, else ammo def 0's bank at its place). A tag of no ammo plays nothing.
+inline ImpactRowPick round_impact_row(const AmmoTable &table, const RoundImpact &impact) {
+    const AmmoTableEntry *ammo = table.by_index(impact.ammo_index);
+    if (ammo == nullptr) {
+        ImpactRowPick none;
+        none.tag = impact.effect_tag;
+        return none;
+    }
+    return impact.own_row ? impact_effect_own_row(*ammo, impact.effect_tag)
+                          : impact_effect_row(table, *ammo, impact.effect_tag);
+}
 
 // A processed (non-zero) damage hit — drained by AiSystem::apply_round_hits to stamp the victim's
 // AI reaction state (wasHit / lastAttacker / the SM damage event). [orig: the damage

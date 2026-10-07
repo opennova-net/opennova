@@ -7054,7 +7054,7 @@ bool run_explosion_sound_reads_the_pool_twin_damage_ammo() {
 }
 
 // The explosion sound seeds from ammo def 0's static bank row 5 (the table's
-// baked default_explosion_sound) and is overwritten only by an AUTHORED tag-5
+// baked null_bank[5].sound) and is overwritten only by an AUTHORED tag-5
 // row of the credited ammo: an absent row plays the fallback, an authored
 // 'none' row plays nothing. [orig: AmmoDef_GetExplosionRadius @0x409770 —
 // `radius = dword_A2EB80` @0x40978c, the tag-5 overwrite @0x4097ab]
@@ -7073,7 +7073,7 @@ bool run_explosion_sound_falls_back_to_ammo_zero_bank_row_five() {
         row.type_id = 1291; row.cls = EntityClass::Vehicle;
         world.tables.ammo.entries.resize(3);
         world.tables.ammo.entries[0].valid = true;
-        world.tables.ammo.default_explosion_sound = "DEFAULT_BOOM";
+        world.tables.ammo.null_bank[5].sound = "DEFAULT_BOOM";
         world.tables.ammo.entries[2].valid = true;
         world.tables.ammo.entries[2].impact_effects[5].authored = authored_none;
         world.out.fire_sounds.set_listener({});

@@ -126,10 +126,10 @@ void drain_round_impact_rows(World &world, std::vector<RoundImpactPresentation> 
 	const uint32_t now = world.logic_tick;
 	for (const RoundImpact &imp : world.round_sim.impacts) {
 		const AmmoTableEntry *ammo = world.tables.ammo.by_index(imp.ammo_index);
-		if (ammo == nullptr) continue;
-		if (imp.effect_tag < 0 || imp.effect_tag >= kImpactEffectTagCount)
-			continue;
-		const AmmoImpactEffectRow &row = ammo->impact_effects[imp.effect_tag];
+		if (ammo == nullptr || imp.effect_tag < 0) continue;
+		// The ammo's row of the tag, else ammo def 0's bank at its place (a direct
+		// reader's own row) [orig: AmmoDef_ProcessImpactEffect @0x40a1b8..0x40a1fd].
+		const ImpactRowPick row = round_impact_row(world.tables.ammo, imp);
 		const bool has_effect = imp.present_effect && !row.effect.empty();
 		const bool has_sound = imp.present_sound && !row.sound.empty();
 		if (!has_effect && !has_sound) continue;

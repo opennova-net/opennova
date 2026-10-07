@@ -164,6 +164,9 @@ void tick_squib(World &world, Entity &entity) {
             RoundImpact impact;
             impact.position=floating(point); impact.direction=floating(direction);
             impact.ammo_index=state.ammo_index; impact.effect_tag=tag;
+            // The travel reads the ammo's own row at the tag's place
+            // [orig: @0x449562..0x449579].
+            impact.own_row=true;
             impact.tick=world.logic_tick; impact.source_order=world.round_sim.next_impact_order++;
             // The squib travel plays the row's sound at full volume, undelayed
             // [orig: @0x4495FF..0x44960F -> Entity_PlaySound3D_FullVolume].

@@ -469,6 +469,19 @@ void MissionCanvas::release_(CanvasRequests &out) {
 			out.request(request::edit_in_viewport(frame_.viewport->path(), std::move(drop)));
 		}
 	} else if (!gesture_.dragging() && grab_.what != MissionGrab::What::Pan && frame_.current &&
+			now == MissionTool::Shoot) {
+		// Shooting (DI-23): the picked ammo fired where the click meets the terrain or an object (the viewport plans
+		// the shot; shooting edits nothing, so a held mission takes it too).
+		if (frame_.viewport) {
+			ViewportCommand command;
+			command.name = "shoot";
+			command.kind = ViewportKind::Mission;
+			command.has_at = true;
+			command.at_x = grab_.from.x;
+			command.at_y = grab_.from.y;
+			out.request(request::edit_in_viewport(frame_.viewport->path(), std::move(command)));
+		}
+	} else if (!gesture_.dragging() && grab_.what != MissionGrab::What::Pan && frame_.current &&
 			(now == MissionTool::Place || now == MissionTool::Path)) {
 		// Placing: one of the item, or the path's next stop, where the click was (the viewport plans it);
 		// none picked yet, nothing (the hint says to pick one).
