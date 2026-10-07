@@ -210,11 +210,14 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_viewport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_viewport_shots.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_shots.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/orbit_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/definition_effects.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/definition_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/definition_weapon.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/weapon_range.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/ammo_impacts.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_catalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_playback.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_viewport.cpp

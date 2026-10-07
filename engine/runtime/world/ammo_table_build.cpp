@@ -69,20 +69,23 @@ world::AmmoTable build_ammo_table(const DefAmmoFile &ammo) {
 			if (!opennova::strutil::iequals(src.hit_effect, "none")) dst.effect = src.hit_effect;
 			if (!opennova::strutil::iequals(src.impact_sound, "none")) dst.sound = src.impact_sound;
 		}
-		// Ammo def 0's bank is the static word_A2EB28, and its row 5 (+8) is the
-		// dword_A2EB80 explosion-sound fallback: slot 0 is always copied, then the
-		// authored tags in ascending order, so bank row 5 is the fifth authored tag.
+		// Ammo def 0's bank is the static word_A2EB28: slot 0 is always copied, then
+		// the authored tags in ascending order, so bank row r is def 0's r-th authored
+		// tag; the impact presenter's fallback and the explosion sound's (row 5, the
+		// dword_A2EB80 seed) read it by place.
 		// [orig: AmmoDef_InitEffectsTable @0x409F20 — @0x409f62 / @0x409fe8;
+		//  AmmoDef_ProcessImpactEffect @0x40a1cb..0x40a1d0;
 		//  AmmoDef_GetExplosionRadius @0x409770 — @0x40978c]
 		if (i == 0) {
-			int bank_row = 0;
+			int bank_row = 1; // the null slot
 			for (int tag = 1; tag < world::kImpactEffectTagCount; ++tag) {
 				if (!tag_seen[tag]) continue;
-				if (++bank_row == 5) {
-					table.default_explosion_sound = e.impact_effects[tag].sound;
-					break;
-				}
+				world::AmmoBankRow &row = table.null_bank[static_cast<size_t>(bank_row++)];
+				row.tag = tag;
+				row.effect = e.impact_effects[tag].effect;
+				row.sound = e.impact_effects[tag].sound;
 			}
+			table.null_bank_rows = bank_row;
 		}
 		e.ai_launch_set = d.ai_launch;
 		e.ai_launch_effect = d.ai_launcheffect;
