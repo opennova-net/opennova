@@ -123,12 +123,14 @@ constexpr AssetKindRow kRows[] = {
 	        .edited_by(DocumentTypeId::Model)
 	        .names_files()
 	        .folder("models")
+	        .new_name("newmodel.3di")
 	        .about("A 3D model: the items, vehicles and buildings the game shows name it.")
 	        .row,
 	Kind(AssetKind::Animation, "animation", "Animation", ArchiveSlot::Resource)
 	        .extensions(kAnimation)
 	        .edited_by(DocumentTypeId::Animation)
 	        .folder("anims")
+	        .new_name("newclip.bad")
 	        .about("A clip of bone animation: animation maps name it.")
 	        .row,
 	Kind(AssetKind::AnimationMap, "animation_map", "Animation map", ArchiveSlot::Resource)
@@ -137,6 +139,7 @@ constexpr AssetKindRow kRows[] = {
 	        .edited_by(DocumentTypeId::AnimationMap)
 	        .names_files()
 	        .folder("anims")
+	        .new_name("newmap.adm")
 	        .about("An animation map: which clip a soldier or a vehicle plays for each move.")
 	        .row,
 	// Its base and eye textures by name (formats/grm).
@@ -151,6 +154,7 @@ constexpr AssetKindRow kRows[] = {
 	        .lines(LineReader::AsciiWalk) // [orig: AIProfile_LoadOrFind @ 0x45fe45 -> File_ParseASCIIFile]
 	        .edited_by(DocumentTypeId::Text)
 	        .folder("ai")
+	        .new_name("newprofile.aip")
 	        .about("An AI profile: how a unit the computer runs picks its targets and moves, loaded by the name a placed unit gives.")
 	        .row,
 	Kind(AssetKind::Texture, "texture", "Texture", ArchiveSlot::Resource)
@@ -209,6 +213,7 @@ constexpr AssetKindRow kRows[] = {
 	        .lines(LineReader::ConfigFile) // [orig: ConfigFile_LoadFromFile @ 0x760a10, its text form]
 	        .edited_by(DocumentTypeId::Credits)
 	        .folder("menus")
+	        .new_name("newcredits.kda")
 	        .about("The credits the menus scroll.")
 	        .row,
 	// A .bms in localres: retail's mission list walks only the localres/language volumes [orig:
@@ -312,12 +317,14 @@ constexpr AssetKindRow kRows[] = {
 	// slot places it and nothing more.
 	Kind(AssetKind::Wave, "wave", "Wave", ArchiveSlot::Localres).extensions(kWave)
 	        .folder("sounds")
+	        .new_name("newwave.wav")
 	        .about("A sound: sound banks, dialogs and scripts name it, and the game loads it from the archives by name.")
 	        .row,
 	Kind(AssetKind::DialogBank, "dialog_bank", "Dialog bank", ArchiveSlot::Localres)
 	        .extensions(kDialogBank)
 	        .names_files()
 	        .folder("missions")
+	        .new_name("newmission.dbf")
 	        .about("A mission's dialog lines and the sounds they play.")
 	        .row,
 	Kind(AssetKind::Particles, "particles", "Particle effects", ArchiveSlot::Resource)
@@ -326,6 +333,7 @@ constexpr AssetKindRow kRows[] = {
 	        .edited_by(DocumentTypeId::Particles)
 	        .names_files()
 	        .folder("particles")
+	        .new_name("neweffects.ptl")
 	        .about("Particle effects (smoke, fire, sparks) by name, which items, weapons and ammo name.")
 	        .row,
 	// Its operands' names (S13 D9), the script a RUN names [orig: Script_LoadAndCompileFile @

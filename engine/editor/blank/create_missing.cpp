@@ -23,7 +23,7 @@ CreateMissingResult create_missing_requirements(const ProjectPaths &paths, const
 	// this run, and its target is free; one that is not made leaves the blank made, and says why.
 	const auto make_companion = [&](const BlankFactory &made_by, const std::string &made) {
 		std::string name;
-		const BlankFactory *factory = blank_companion(made_by, doc, name);
+		const BlankFactory *factory = blank_companion(made_by, made, doc, name);
 		if (factory == nullptr || scan.find(name)) return;
 		const std::string relative = placement_path(scan, name, factory->kind);
 		if (std::find(result.created.begin(), result.created.end(), relative) != result.created.end()) return;
