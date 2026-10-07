@@ -846,7 +846,7 @@ void DocumentSet::set_string_text(const EditorRequest &request) {
 	edge.kind = kind;
 	edge.value = name;
 	edge.scope = scope;
-	if (use.scope_alternate) edge.scope_alternate = use.scope_alternate;
+	if (!use.scope_alternate.empty()) edge.scope_alternate = use.scope_alternate;
 	const GraphSymbol *symbol = graph ? graph->symbol_reached(edge) : nullptr;
 	if (!symbol)
 		return refuse("No string table of the project defines " + name + (scope.empty() ? "" : " in " + scope) +

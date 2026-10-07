@@ -37,6 +37,10 @@ std::string project_expansion(const SessionView &view);
 //   (DI-04, preview/preview_clip_sounds);
 // - `leg` (begin, end): the set the weapon action playing the row of a first-person map plays as it begins
 //   or finishes, as a press of the leg's mark asks (DI-13, preview/preview_first_person);
+// - `dialog` and `line?` (DI-32): the dialog of that name (or number, dlg%03i of it) in the dialog bank `path`
+//   names, or in the bank the mission `path` loads (its own <base>.dbf, or the one its header names), its lines
+//   one after another as the game plays them (preview/dialog_preview), each the wave of its name in the bank's
+//   sounds at its dialog volume, the subtitle each shows in the words; `line` (0 the first) that line alone;
 // - none: the project's wave `path`.
 // Refused, the status line saying why (workspace.refused): a name no file has, a set no bank the game
 // searches holds, an empty slot, waves the project lacks, a wave past what a card reads.

@@ -5271,6 +5271,14 @@ add_executable(editor_sound_documents_test editor/sound_documents_test.cpp)
 target_link_libraries(editor_sound_documents_test PRIVATE opennova_editor)
 target_include_directories(editor_sound_documents_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_sound_documents COMMAND editor_sound_documents_test)
+# Dialog banks followed (ADR 0046 DI-32): a .dbf as a document over the engine's reader and writer, its dialogs the
+# Dialog symbols a mission's Play dialog names by number (Go to, used by, a rename writing the number, Add it there),
+# a line's wave one of the bank's sounds, the session's play of a dialog line after line; a SKIP-LEG without
+# OPENNOVA_JO_ASSETS (every shipped dialog bank through the document byte for byte, each line's wave in its sounds).
+add_executable(editor_dialog_bank_test editor/dialog_bank_document_test.cpp)
+target_link_libraries(editor_dialog_bank_test PRIVATE opennova_editor)
+target_include_directories(editor_dialog_bank_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_dialog_bank COMMAND editor_dialog_bank_test)
 
 add_executable(editor_strings_test editor/strings_document_test.cpp)
 target_link_libraries(editor_strings_test PRIVATE opennova_editor)

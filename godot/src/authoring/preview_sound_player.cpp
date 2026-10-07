@@ -4,6 +4,7 @@
 #include <cstddef>
 
 #include <godot_cpp/classes/audio_stream_wav.hpp>
+#include <godot_cpp/classes/time.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -58,8 +59,9 @@ PreviewSoundPlayer::State PreviewSoundPlayer::pump(std::string &r_error) {
 	if (state_ == State::Decoding) {
 		for (const Voice &voice : voices_)
 			if (voice.job.valid() && voice.job.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return state_;
-		// Every decode done: each voice that decoded starts, together, as the game starts a set's layers.
-		size_t started = 0;
+		// Every decode done: each voice that decoded starts, together, as the game starts a set's layers (a voice
+		// with a start of its own, a dialog's later line, when its time comes, below).
+		size_t made = 0;
 		for (Voice &voice : voices_) {
 			if (!voice.job.valid()) continue;
 			const Decode decoded = voice.job.get();
@@ -70,22 +72,30 @@ PreviewSoundPlayer::State PreviewSoundPlayer::pump(std::string &r_error) {
 			const Ref<AudioStreamWAV> stream = WavLoader::from_pcm(decoded.pcm);
 			if (stream.is_null()) continue;
 			voice.player = memnew(AudioStreamPlayer);
-			voice.player->set_name("PreviewSound");
+			// Each its own name, in the voices' order (a dialog's lines, DI-32): PreviewSound, PreviewSound2, ...
+			voice.player->set_name(made ? String("PreviewSound") + String::num_int64(int64_t(made) + 1) : String("PreviewSound"));
 			voice.player->set_stream(stream);
 			const double pitch = double(voice.voice.pitch_q16) / 65536.0;
 			voice.player->set_pitch_scale(pitch > 0.01 ? pitch : 1.0);
 			voice.player->set_volume_db(opennova::audio::volume_db_from_byte(voice.voice.volume));
 			parent_->add_child(voice.player);
-			voice.player->play();
-			++started;
+			++made;
 		}
-		state_ = started ? State::Playing : State::Failed;
-		return state_;
+		state_ = made ? State::Playing : State::Failed;
+		playing_since_msec_ = Time::get_singleton()->get_ticks_msec();
 	}
 	if (state_ == State::Playing) {
-		for (const Voice &voice : voices_)
-			if (voice.player != nullptr && voice.player->is_playing()) return state_;
-		state_ = State::Ended;
+		const uint64_t elapsed = Time::get_singleton()->get_ticks_msec() - playing_since_msec_;
+		bool sounding = false;
+		for (Voice &voice : voices_) {
+			if (voice.player == nullptr) continue;
+			if (!voice.started && elapsed >= uint64_t(voice.voice.start_ms > 0 ? voice.voice.start_ms : 0)) {
+				voice.player->play();
+				voice.started = true;
+			}
+			sounding = sounding || !voice.started || voice.player->is_playing();
+		}
+		if (!sounding) state_ = State::Ended;
 	}
 	return state_;
 }

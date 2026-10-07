@@ -137,6 +137,8 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        // The terrain (DI-30): its row, its grid rows and its foliage definitions as a tree, the import that
 	        // makes it and the missions that run on it heading the Inspector.
 	        {AssetKind::Terrain, "Tmap.trn", file("terrain/tmap/Tmap.trn")},
+	        // The dialog bank (DI-32): its dialogs and their lines as a tree, a dialog's Play heading the Inspector.
+	        {AssetKind::DialogBank, "synth_bank.dbf", file("dbf/synth_bank.dbf")},
 	};
 }
 

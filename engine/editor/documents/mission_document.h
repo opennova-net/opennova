@@ -262,6 +262,11 @@ std::string mission_clip_moved(const std::string &payload, double east, double n
 // ("ASH_I5B.BMS").
 std::string mission_scope(const DocumentBase &document);
 
+// The dialog bank the mission loads, as the game names it: the name its header's second terrain slot (the
+// original editor's cnv_file) holds where it holds one, else the mission's own, with .dbf (runtime/mission/
+// mission_sidecars dialog_bank_name [orig: DialogSystem_Init @ 0x5275e0, @ 0x52760c..0x52763e]): "01TR.dbf".
+std::string mission_dialog_bank(const MissionDocument &document);
+
 // The mission's references that no field's value is (DocumentType::record_references): the text
 // keys its records' numbers form, each a TextId in the mission's own string table (its base name
 // plus .bin, the table the mission text loads [orig: TextResource_LoadMissionTextBin @0x51ed90]), or
@@ -278,7 +283,11 @@ std::string mission_scope(const DocumentBase &document);
 // STRWPNAMEDEFAULT [orig: HUD_GetWaypointName @0x594630, the mission text @0x59474c] (in a session of
 // a mode without the co-op bit the HUD keys the id + 1 after gametext's specials, @0x594678: the
 // edge is the single-player and co-op key). None is rewritable. Then the files the mission's name
-// finds and a dialog's bank.
+// finds (its dialog bank's the header's own where it names one), and the dialog each Play dialog action
+// and each Dialog trigger names, dlg%03i of its number in the mission's dialog bank (a Dialog reference,
+// rewritable: a rename of the dialog writes the number its new name forms, GraphEdge::key_prefix) [orig:
+// Dialog_PlayByIndex @ 0x527ae0, the action's dialog 0 none; Dialog_ExistsByIndex @ 0x44e170 for the
+// triggers, any number].
 void mission_references(const Document &document, Extracted &out);
 
 // The text keys one record's numbers form, the TextId edges mission_references makes of it, each with

@@ -83,6 +83,11 @@ struct GraphEdge {
 	// id, an item's type id, the items.def id less 100000): `value` is the name it reaches, the field
 	// holds it less this, which a rename writes back so. 0 for none.
 	int64_t name_offset = 0;
+	// A use whose field holds the number its name forms, "%s%03i" of the prefix and the number (a
+	// mission's Play dialog names dlg%03i by its number [orig: Dialog_PlayByIndex @ 0x527ae0]): the
+	// prefix, so a rename writes the number the new name forms, refusing a name no number forms; "" for
+	// a use that writes the name itself. A symbol kind's edge only.
+	std::string key_prefix;
 };
 
 // A name a file defines that other files may reference: a document's field whose field_on
