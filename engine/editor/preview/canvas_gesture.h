@@ -109,6 +109,14 @@ class CanvasRequests {
 public:
 	virtual ~CanvasRequests() = default;
 	virtual void request(EditorRequest request) = 0;
+	// What the requests planned come to once served (ADR 0046 DI-12): the status line's words in place of the
+	// last request's own ("" those), and the item a drop placed (0 none), kept among the recently placed as a
+	// drop by its item is. The session's planner keeps them (EditInViewport); a canvas raising its requests as
+	// the windows' has nothing to say them on.
+	virtual void served(std::string words, int64_t item) {
+		(void)words;
+		(void)item;
+	}
 };
 
 // The one gesture machine of a canvas (ADR 0046 S13 V2): a button pressed on the picture,
