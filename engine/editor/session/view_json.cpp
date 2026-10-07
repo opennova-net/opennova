@@ -131,6 +131,14 @@ JsonValue project_section(const SessionView &view) {
 	// What another program changed that the editor has not read yet (DI-01).
 	out.set("outside_waiting", json_number(double(view.project.outside_waiting)));
 	out.set("outside_sweeping", boolean(view.project.outside_sweeping));
+	// The file history (DI-25): what undo_file and redo_file would take back or do again, in words.
+	const ActivityView::FileHistory &history = view.activity.file_history;
+	JsonValue file_history = JsonValue::make_object();
+	file_history.set("undo", json_string(history.undo));
+	file_history.set("redo", json_string(history.redo));
+	file_history.set("undo_steps", json_number(double(history.undo_steps)));
+	file_history.set("redo_steps", json_number(double(history.redo_steps)));
+	out.set("file_history", std::move(file_history));
 	return out;
 }
 
@@ -523,7 +531,8 @@ constexpr ViewSectionRow kSections[] = {
 			"builds_on} (S16: \"\" a standalone project, \"\" the base game), file_count (the files query "
 			"pages the files), outside_waiting and outside_sweeping (DI-01: the files another program changed "
 			"that wait to be read, once they hold still, and whether the sweep a focus-in began over every file "
-			"runs), and quit_requested; open or not, install_expansions, the game install's "
+			"runs), file_history {undo, redo, undo_steps, redo_steps} (DI-25: what undo_file and redo_file would take "
+			"back or do again, in words, \"\" none), and quit_requested; open or not, install_expansions, the game install's "
 			"expansions [{name, title, description}] (its folder's name, the Mods list's name and "
 			"description), new_project_expansions, the same of the install a new project opens with "
 			"(the one last chosen), install_check, the last install checked (check_install, new_project's): its "
@@ -588,7 +597,7 @@ constexpr ViewSectionRow kSections[] = {
 			workspace_to_json,
 			"What the windows show of their own (set_workspace sets it; the catalog's workspace lists the parts): "
 			"the dialog of those that take the whole editor that shows (modal: unsaved, import, texture_source, "
-			"settings, new_project, new_file, file_rename, rename, rename_back, project_find, confirm, "
+			"settings, new_project, new_file, file_rename, file_delete, rename, rename_back, project_find, confirm, "
 			"remove_screen with modal_document, \"\" none; the others held wait until it closes), opened (moves "
 			"with each dialog opened), "
 			"the file whose card shows (card {path}, \"\" none), the sound the editor plays (sound {path, state: "
@@ -596,7 +605,8 @@ constexpr ViewSectionRow kSections[] = {
 			"(build_result {open}), the new-project form (new_project {open: File > New project...'s modal, title, "
 			"dir, game_install as the form shows it, install_named, builds_on, as_expansion, expansion}), Project "
 			"settings (settings {open, and while open its fields}), the New file prompt (new_file {kind, \"\" "
-			"closed, name, values}), Rename... (file_rename {path, name}), Rename everywhere (rename {open, path, "
+			"closed, name, values, folder}), Rename... (file_rename {path, name}), Delete... (file_delete {path, alone}, DI-25), "
+			"Rename everywhere (rename {open, path, "
 			"locator, field, old_name, kind, name}) and Rename back (rename_back {open}), the find bar (find {open, "
 			"text, match_case}), Find in project (project_find {open, text}), Files' filter (files {filter, kind}), "
 			"the import dialog's own (import {filter, choice_kind, rows_filter, kind_shown, replace_existing, "

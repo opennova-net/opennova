@@ -42,6 +42,7 @@ ProjectPaths ProjectPaths::for_root(const std::string &root) {
 	p.run_dir = join(p.cache_dir, "run");
 	p.staging_dir = join(p.cache_dir, "staging");
 	p.install_copy_dir = join(p.cache_dir, "install_copy");
+	p.trash_dir = join(p.cache_dir, "trash");
 	return p;
 }
 

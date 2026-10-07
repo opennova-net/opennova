@@ -157,6 +157,17 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::ExportReplaced, listed(code("export.replaced", G::Export)) },
 	{ C::ExportRuntime, code("export.runtime", G::Export) },
 	{ C::ExportWrite, code("export.write", G::Export) },
+	// Files' chores (DI-25): a refusal of a delete, a duplicate, a new folder or a folder's rename, of the
+	// history's undo and redo, or of what the trash could not take or give back.
+	{ C::FileExists, code("file.exists", G::FileChores) },
+	{ C::FileFolder, code("file.folder", G::FileChores) },
+	{ C::FileHistory, code("file.history", G::FileChores) },
+	{ C::FileImported, code("file.imported", G::FileChores) },
+	{ C::FileName, code("file.name", G::FileChores) },
+	{ C::FileNamed, code("file.named", G::FileChores) },
+	{ C::FileTrash, code("file.trash", G::FileChores) },
+	{ C::FileUnknown, code("file.unknown", G::FileChores) },
+	{ C::FileWrite, code("file.write", G::FileChores) },
 	{ C::GraphUnreadable, from_graph(code("graph.unreadable", G::FilesNotChecked)) },
 	{ C::ImportAlphaDropped, code("import.alpha_dropped", G::Imports) },
 	{ C::ImportArchive, code("import.archive", G::Imports) },
