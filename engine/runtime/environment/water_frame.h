@@ -12,20 +12,27 @@
 
 namespace opennova::env {
 
-// The witnessed water-height precedence (env #28): mission/BMS override
-// (explicit zero meaningful) > TRN flagged nonzero >
-// ENV <<15 half-world-units [orig: env parse @ 0x52073b, then Terrain_Init
-// @ 0x60fcba overrides when flagged, then the BMS override @ 0x525371;
-// TimeOfDay_ParseProperty @ 0x57cb4e stores the .env value in half world
-// units]. A loaded terrain or environment is authoritative even when its encoded height is
-// zero (clear stale state instead of drawing phantom water); standalone
-// owners with no source retain `current`.
+// The witnessed water-height precedence (env #28, corrected by env #44): the
+// mission header's override (attrib bit 0x1, explicit zero meaningful) > the
+// .env's water_height > the .trn's. The time-of-day parse writes the .trn's
+// line and then the .env's into the one global, half world units
+// [orig: TimeOfDay_ParseProperty @ 0x57cb4e; Environment_LoadTimeOfDayConfig
+// @ 0x57dbeb then @ 0x57dcbf], and the terrain's init after it stores only a
+// height its caller flags in bit 31, which is the header's override alone
+// [orig: Terrain_Init @ 0x60fcb1..0x60fcba; its one caller
+// Game_LoadTerrainDuringConnect @ 0x520757..0x52076f passes the header's
+// height | 0xFFFF0000 << 15, or 0]. An environment loaded through
+// env::load_mission_env already holds the .trn's line under the .env's; the
+// terrain rung stands for an owner whose environment did not read its .trn.
+// A loaded terrain or environment is authoritative even when its encoded
+// height is zero (clear stale state instead of drawing phantom water);
+// standalone owners with no source retain `current`.
 struct WaterHeightRungs {
 	bool has_mission_override = false;
 	float mission_override = 0.0f;
-	// The map's terrain water height in world units (raw * 0.5); nonzero
-	// proxies the bit-31 "has water" flag
-	// [orig: Terrain_Init @ 0x60fcb1..0x60fcba].
+	// The map's terrain water height in world units (raw * 0.5); 0 for a
+	// .trn with no water_height line or one of 0, either of which leaves
+	// the parse's 0 [orig: Environment_InitDefaults @ 0x57c01e].
 	float terrain_height = 0.0f;
 	bool has_loaded_terrain = false;
 };

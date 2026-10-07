@@ -107,7 +107,11 @@ func test_water_pass_follows_the_visible_terrain_height_range() -> void:
 			"losing the bounds (no terrain in view) falls back to live")
 
 
-func test_height_precedence_is_bms_then_signed_trn_then_env() -> void:
+# The time-of-day parse writes the .trn's water_height and then the .env's into
+# one global, and only the mission header's flagged override comes after it
+# (env #44: retail Environment_LoadTimeOfDayConfig @ 0x57dbeb then @ 0x57dcbf;
+# Terrain_Init @ 0x60fcb1..0x60fcba stores the header's height alone).
+func test_height_precedence_is_bms_then_env_then_trn() -> void:
 	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.set_root_dir(ProjectSettings.globalize_path(
 			RuntimeFixture.directory())), OK)
@@ -127,20 +131,24 @@ func test_height_precedence_is_bms_then_signed_trn_then_env() -> void:
 	water.environment_path = NodePath("../WaterPrecedenceEnv")
 	water.terrain_data = terrain
 	add_child_autofree(water)
-	assert_almost_eq(water.water_height, -10.0, 0.001,
-			"signed TRN water beats ENV")
+	assert_almost_eq(water.water_height, 6.0, 0.001,
+			"the .env's water_height writes after the .trn's")
 
 	water.set_mission_water_height_override(0.0)
 	assert_eq(water.water_height, 0.0,
-			"an explicit BMS zero disables water and still beats TRN")
+			"an explicit BMS zero disables water and still beats the .env")
 	water.set_mission_water_height_override(15.0)
 	assert_eq(water.water_height, 15.0)
 	water.set_mission_water_height_override(NAN)
-	assert_eq(water.water_height, -10.0)
+	assert_eq(water.water_height, 6.0)
 
-	terrain.set_water_height(0)
+	var bare := EnvFile.new()
+	bare.reset_to_default()
+	assert_false(bare.has_water_height())
+	env.environment_data = bare
 	water.terrain_data = terrain
-	assert_eq(water.water_height, 6.0, "ENV is the final fallback")
+	assert_almost_eq(water.water_height, -10.0, 0.001,
+			"the .trn's stands where the .env writes none")
 
 func test_reflection_rtt_is_the_512_square_at_the_main_field() -> void:
 	# Retail's 512 x 512 RTT renders with the main view's projection (the

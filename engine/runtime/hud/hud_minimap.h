@@ -137,7 +137,7 @@ struct HudMinimapMarker {
 	// draws the red-cross plate IN PLACE of its blip. The producer resolves it
 	// (enemies never carry it — retail forces the bit off for the other team)
 	// [orig: HUD_DrawEntityLabelsAndMarkers @0x5a49e0 — the team gate
-	//  @0x5a4ac6/@0x5a4acf, AnimMap_IsSlotActive(playerClass, 8) @0x5a4ab3,
+	//  @0x5a4ac6/@0x5a4acf, CharAttr_ClassHasAttribute(playerClass, 8) @0x5a4ab3,
 	//  the cross @0x5a4cd6..0x5a4d48 replacing the blip].
 	uint8_t medic = 0;
 	// --- v5: the slot's LIVE pool-entity facts the drawer and the later map
@@ -229,7 +229,7 @@ struct HudMinimapPlayerSlot {
 	bool medic_request = false; // slot+0x2C
 	bool radio_request = false; // entity+0x375 == 1
 	bool aboard_vehicle = false; // Entity_FindChildByDefType(entity, 1, 1)
-	bool medic = false;         // AnimMap_IsSlotActive(entity+0x294, 8)
+	bool medic = false;         // CharAttr_ClassHasAttribute(entity+0x294, 8)
 	uint8_t squad = 0;          // slot+0x33
 	bool name_slot = false;     // PlayerSlot_FindByEntityPtr found a slot
 	std::string name;           // slot+0x14 (or entity+0xF4 without a slot)

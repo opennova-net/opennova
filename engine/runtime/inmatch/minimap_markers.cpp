@@ -137,7 +137,7 @@ void append_bank(const Bank &bank, hud::HudMinimapBank bank_id, world::World *wo
             // carries the charattr Medic attribute; the other team's bit is
             // forced off at the producer [orig: HUD_DrawEntityLabelsAndMarkers
             // @0x5a49e0 -- the team gate @0x5a4ac6/@0x5a4acf,
-            // AnimMap_IsSlotActive(playerClass, 8) @0x5a4ab3].
+            // CharAttr_ClassHasAttribute(playerClass, 8) @0x5a4ab3].
             medic = local_player != nullptr && entity->team == local_player->team &&
                             world->tables.class_has_attribute(entity->player_class,
                                                        world::MissionTables::kCharAttrMedic)

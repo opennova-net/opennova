@@ -1358,10 +1358,16 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 				conn.link.transport->host_send(
 						s2c::CHARATTR_CRC_CHALLENGE, std::move(challenge));
 
-				// Input_PackStateFlags @0x412550 packs global input modes into bits
-				// 0..5/12/13. Those globals are not modeled; healthy-LAN captures are 0.
-				conn.link.transport->host_send(
-						s2c::INPUT_STATE_FLAGS, {0x00, 0x00}, /*reliable=*/false);
+				// The authority's charattr disable latches, eight packed into bits
+				// 0..5/12/13 (0 until a session's mp_No* word raised one, so every
+				// healthy-LAN capture carries 0; D-NET-374).
+				// [orig: Server_SendEntityHandleAndInputState @0x507BF2..0x507C29 ->
+				//  CharAttr_PackDisabledProperties @0x412550 (IDB
+				//  Input_PackStateFlags until 2026-10-07)]
+				const uint16_t latches = world.tables.charattr_disabled_word;
+				conn.link.transport->host_send(s2c::CHARATTR_DISABLED_PROPERTIES,
+						{static_cast<uint8_t>(latches), static_cast<uint8_t>(latches >> 8)},
+						/*reliable=*/false);
 
 				const uint32_t host_ms =
 						io::host_milliseconds_for_logic_tick(world.logic_tick);

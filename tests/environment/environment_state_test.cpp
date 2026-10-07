@@ -1267,6 +1267,45 @@ int main() {
 				"the weather snap starts the world on those targets");
 	}
 
+	// A terrain's water keywords through the mission's load (env #43, #44): every shipped .trn
+	// writes water_rgb and water_murk, no shipped .env a murk; the murk the load leaves is what
+	// the underwater fog, the murk overlay and the water strips read, and the water plane takes
+	// the header's override, then the .env's line, then the .trn's [orig:
+	// Environment_LoadTimeOfDayConfig @ 0x57db30; Terrain_Init @ 0x60fcb1..0x60fcba].
+	{
+		const std::string trn = "terrain_name \"Dvxi5\"\r\nwater_height 21\r\nwater_rgb 108,81,48\r\nwater_murk .3\r\n";
+		const std::string env_text = "water_rgb 56,59,39\r\nfog_level 640\r\n";
+		opennova::env::MissionEnvTexts texts;
+		texts.terrain = &trn;
+		texts.environment = &env_text;
+		opennova::env::MissionEnv loaded;
+		ok &= expect(opennova::env::load_mission_env(texts, loaded), "the .trn and the .env load");
+		EnvironmentState state;
+		state.set_config(&loaded.config, true);
+		state.set_time_of_day(1200.0f);
+		ok &= expect(near(state.water_murk(), 0.3f) &&
+						near(state.build_scene_fog(true).end, opennova::env::fog_end_underwater(0.3f)) &&
+						opennova::env::underwater_murk_overlay_alpha_byte(state.water_murk()) == 156,
+				"the terrain's murk is the underwater fog's and the overlay's (128 + trunc(96 * 0.3))");
+		const opennova::env::WaterFrameInputs inputs = opennova::env::build_water_frame_inputs(&state, 0.6f);
+		ok &= expect(near(inputs.murk, 0.3f), "the water strips read the terrain's murk");
+		opennova::env::WaterHeightRungs rungs;
+		rungs.terrain_height = 10.5f;
+		rungs.has_loaded_terrain = true;
+		ok &= expect(near(opennova::env::resolve_water_height(rungs, &state, 0.0f), 10.5f),
+				"the .trn's height stands where the .env writes none");
+		const std::string env_height = "water_height 30\r\n";
+		texts.environment = &env_height;
+		ok &= expect(opennova::env::load_mission_env(texts, loaded), "the .env with a height loads");
+		state.set_config(&loaded.config, true);
+		ok &= expect(near(opennova::env::resolve_water_height(rungs, &state, 0.0f), 15.0f),
+				"the .env's water_height writes after the .trn's: 30 half units over the terrain's");
+		rungs.has_mission_override = true;
+		rungs.mission_override = 0.0f;
+		ok &= expect(near(opennova::env::resolve_water_height(rungs, &state, 7.0f), 0.0f),
+				"the header's flagged override, zero included, over both");
+	}
+
 	if (!ok) {
 		return 1;
 	}

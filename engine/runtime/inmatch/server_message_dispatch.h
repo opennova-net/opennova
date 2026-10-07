@@ -131,7 +131,7 @@ struct ServerDispatchInputs {
 // dead medic stays a recipient.
 // [orig: NapiNPServer_SendFiltered @0x4C87E0 — bit 0x80 slot+0x20 in {6,7}
 //  @0x4c8948..0x4c8953, bit 0x100 slot+0x1A0 == filter @0x4c896a..0x4c8977,
-//  bit 0x400 AnimMap_IsSlotActive(class, Medic) @0x4c8990..0x4c89a8]
+//  bit 0x400 CharAttr_ClassHasAttribute(class, Medic) @0x4c8990..0x4c89a8]
 bool is_medic_recipient(const NapiNPConnection &candidate,
 		const world::World &world, uint8_t team);
 

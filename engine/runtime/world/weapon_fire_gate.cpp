@@ -55,7 +55,7 @@ int weapon_fire_owner_status(const World &world, const Entity &owner,
             world.registry.get(owner.mount_target) == nullptr)
         return (flags & 2u) != 0 ? -18 : -12;
     // The special-ammo global A2ECF0 is zero and has only this reader in the
-    // retail image. Its misleading AnimMap_IsSlotActive callee tests CHARATTR
+    // retail image. Its misleading CharAttr_ClassHasAttribute callee tests CHARATTR
     // Medic, not animation state. Preserve the actual zero-index gate.
     if (weapon->ammo_index == 0 &&
             !world.tables.class_has_attribute(owner.player_class, MissionTables::kCharAttrMedic))

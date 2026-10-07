@@ -100,30 +100,23 @@ void Simulation::install_item_catalog() {
 	if (runtime_) runtime_->view().set_item_catalog(assets_.item_replication_catalog);
 }
 
-void Simulation::install_charattr_challenge_table() {
-	if (runtime_) {
-		if (net_.charattr_challenge_loaded) {
-			runtime_->set_charattr_challenge_table(net_.charattr_challenge_table);
-		} else {
-			runtime_->clear_charattr_challenge_table();
-		}
-	}
+void Simulation::install_charattr_table() {
+	if (runtime_) runtime_->set_charattr_table(net_.charattr_table);
 	sync_class_attribute_flags();
 }
 
 void Simulation::sync_class_attribute_flags() {
 	if (!kernel_) return;
-	// The joiner's live copy carries every S2C 0x41 clear applied so far; a
-	// HostClient keeps the boot copy, and a failed/missing charattr.def leaves
-	// the all-zero table -- no class carries an attribute, retail's failed-load
-	// state [orig: CharAttr_LoadFromDef @0x412140 memsets 0x7C0 bytes first;
-	// AnimMap_IsSlotActive @0x4125e0; see docs/interface/hud-re.md].
-	const opennova::inmatch::CharAttrChallengeTable *live =
-			runtime_ ? runtime_->charattr_challenge_table() : nullptr;
-	const opennova::inmatch::CharAttrChallengeTable &table =
-			live != nullptr ? *live : net_.charattr_challenge_table;
-	kernel_->world.tables.class_attribute_flags =
-			opennova::inmatch::charattr_class_attribute_rows(table);
+	// The joiner's live copy carries every S2C 0x41 and 0x42 applied so far; a
+	// HostClient keeps the boot copy (its restrictions applied), and a
+	// failed/missing charattr.def leaves the all-zero table -- no class carries
+	// an attribute, retail's failed-load state [orig: CharAttr_LoadFromDef
+	// @0x412140 memsets 0x7C0 bytes first; CharAttr_ClassHasAttribute @0x4125e0;
+	// see docs/interface/hud-re.md].
+	const opennova::inmatch::CharAttrTable *live = runtime_ ? runtime_->charattr_table() : nullptr;
+	const opennova::inmatch::CharAttrTable &table = live != nullptr ? *live : net_.charattr_table;
+	kernel_->world.tables.class_attribute_flags = opennova::inmatch::charattr_class_attribute_rows(table);
+	kernel_->world.tables.charattr_disabled_word = opennova::inmatch::charattr_pack_disabled(table);
 }
 
 void Simulation::install_character_join_vars() {

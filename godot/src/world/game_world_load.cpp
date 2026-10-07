@@ -124,7 +124,7 @@ int GameWorld::load_world(const String &p_dir) {
 	set_mission_water_height_override(NAN);
 	clear_mission_tile_info();
 	resource_root_ = resource_root;
-	load_environment(env_file_);
+	load_environment(terrain_file_, env_file_);
 	if (!load_terrain(terrain_file_, String())) {
 		emit_signal(kSignalLoadFailed, vformat("failed to load %s", terrain_file_));
 		return ERR_CANT_OPEN;
@@ -270,7 +270,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	emit_signal(kSignalLoadProgress,
 			MissionData::load_progress_percent(MissionData::LOAD_STAGE_ENVIRONMENT));
 	timeline->span("environment");
-	load_environment(env_name);
+	load_environment(trn, env_name);
 	apply_mission_environment_overrides(p_mission);
 	// Initialize the exact mission clock and the reset weather owner before the
 	// runtime is constructed. The authority publishes this T0 sample after setup
@@ -552,15 +552,22 @@ void GameWorld::unload() {
 
 // --- environment ---------------------------------------------------------------------
 
-void GameWorld::load_environment(const String &p_env_path) {
+void GameWorld::load_environment(const String &p_trn_path, const String &p_env_path) {
 	if (env_ == nullptr) {
 		return;
 	}
 	Ref<EnvFile> env;
 	env.instantiate();
-	// A .env that is not there is skipped and the world runs on the engine's
-	// defaults (opennova::env::load_mission_env); the load goes on either way.
-	if (!env->load_mission_environment(resource_root_, p_env_path)) {
+	// The overcast table the overcast blend cross-fades against: the .trn's
+	// keyframes and overcast.def's after them, as the same load takes them
+	// (an empty one fades toward black, env #41).
+	Ref<EnvFile> overcast;
+	overcast.instantiate();
+	// The terrain's .trn, overcast.def, then the .env over them; a .env that is
+	// not there is skipped and the world runs on the earlier passes over the
+	// engine's defaults (opennova::env::load_mission_env); the load goes on
+	// either way.
+	if (!env->load_mission_environment(resource_root_, p_trn_path, p_env_path, overcast)) {
 		UtilityFunctions::push_warning(vformat(
 				"GameWorld: environment '%s' did not load; the engine defaults stand", p_env_path));
 		// One that is not there (one that does not parse is no miss): the log line the editor's Play reads
@@ -572,19 +579,11 @@ void GameWorld::load_environment(const String &p_env_path) {
 	}
 	// MissionEnvironment's setter reloads + pushes shader globals on assignment.
 	env_->set_environment_data(env);
-	// The overcast table the overcast blend cross-fades against, appended after
-	// the .trn pass (stock .trn files carry no TOD blocks); the engine's
-	// env::kOvercastFile carries the name and the witness.
-	Ref<EnvFile> overcast;
-	overcast.instantiate();
-	if (overcast->load_from_resource_root(resource_root_, opennova::env::kOvercastFile) == OK) {
-		env_->set_overcast_data(overcast);
-	} else {
-		env_->set_overcast_data(Ref<EnvFile>());
-		if (resource_root_.is_valid() && !resource_root_->has_file(opennova::env::kOvercastFile)) {
-			ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kFile, opennova::env::kOvercastFile, String(),
-					"the overcast weather has no table of its own to blend toward");
-		}
+	env_->set_overcast_data(overcast);
+	// The engine's env::kOvercastFile carries the name and the witness.
+	if (resource_root_.is_valid() && !resource_root_->has_file(opennova::env::kOvercastFile)) {
+		ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kFile, opennova::env::kOvercastFile, String(),
+				"the overcast weather has no table of its own to blend toward");
 	}
 	// GameWorld retains one Weather node across loads. A replacement ENV is
 	// a discrete state change: retail snaps every color block to the new mission

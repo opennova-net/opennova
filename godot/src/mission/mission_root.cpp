@@ -178,7 +178,7 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 		// reload charattr after ordered S2C 0x41 mutations have already landed.
 		const bool needs_join_connection = !sim_->is_joiner();
 		if (needs_join_connection && options->get_resource_root().is_valid()) {
-			sim_->load_charattr_challenge(options->get_resource_root());
+			sim_->load_charattr(options->get_resource_root());
 		}
 		if (needs_join_connection && options->get_join_character_profile().is_valid()) {
 			sim_->set_join_character_profile(options->get_join_character_profile());

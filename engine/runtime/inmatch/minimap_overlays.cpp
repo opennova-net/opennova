@@ -72,7 +72,7 @@ bool display_name(const world::Entity &e, uint8_t hud_team, uint32_t rules_word,
 // (the listen host's players, the local player) through the shared policy
 // and facts, a joiner's decoded Player row through its own fields.
 // [orig: HUD_DrawEntityLabelsAndMarkers @0x5a4a80..0x5a4ac6 — slot+0x24,
-//  AnimMap_IsSlotActive(entity+0x294, 8), the team compare; Minimap_DrawBlip
+//  CharAttr_ClassHasAttribute(entity+0x294, 8), the team compare; Minimap_DrawBlip
 //  @0x597890 over the entity]
 struct SlotEntityFacts {
     bool known = false;

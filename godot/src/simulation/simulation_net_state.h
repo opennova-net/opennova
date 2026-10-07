@@ -11,7 +11,7 @@
 
 #include <net/npwire/counting_datagram_socket.h>
 #include <net/npwire/idatagram_socket.h>
-#include <runtime/inmatch/charattr_challenge.h>  // CharAttrChallengeTable
+#include <runtime/inmatch/charattr_table.h>  // CharAttrTable
 #include <runtime/inmatch/game_config.h>          // GameConfig
 #include <runtime/inmatch/joiner_connection.h>    // JoinerConnection::DiscoveredSession
 #include <runtime/inmatch/mission_rotation.h>     // HostRotation (D-NET-331)
@@ -125,11 +125,11 @@ struct SimulationNetState {
 	// The browse row's 0x81 record a join from it connects with (no 0x41).
 	// Retained across direct-load runtime rebuilds.
 	opennova::inmatch::JoinerConnection::DiscoveredSession join_discovered_session;
-	// Retail loads this process-scoped table from charattr.def before joining.
-	// The byte image stays outside ClientRuntime so a direct mission load can
-	// reinstall it when a load rebuilds an as-yet-unstarted joiner.
-	opennova::inmatch::CharAttrChallengeTable charattr_challenge_table{};
-	bool charattr_challenge_loaded = false;
+	// Retail loads this process-scoped table from charattr.def before joining
+	// (a host's is its boot's, kept with its restriction latches). It stays
+	// outside ClientRuntime so a direct mission load can reinstall it when a
+	// load rebuilds an as-yet-unstarted joiner.
+	opennova::inmatch::CharAttrTable charattr_table{};
 
 	// --- per-session cursors ---------------------------------------------------
 	// The live environment owner consumes each decoded phase-2 edge once. The
