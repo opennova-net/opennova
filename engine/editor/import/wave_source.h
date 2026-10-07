@@ -72,6 +72,8 @@ struct WaveFacts {
 	WaveRetailCheck retail;
 };
 WaveFacts wave_facts(const std::vector<uint8_t> &bytes, size_t bins = 48);
+// How long a wave plays, in seconds, as it decodes (its frames at its rate); 0 for one that does not read.
+double wave_seconds(const std::vector<uint8_t> &bytes);
 
 // The form a wave is written in for the game: its channels mixed to one (`mono`) or one of them taken
 // (`left`, `right`); its samples 16-bit, or 8-bit, or (`keep`) 8-bit where the source is 8-bit PCM and 16-bit

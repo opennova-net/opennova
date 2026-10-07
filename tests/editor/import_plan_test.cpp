@@ -371,8 +371,8 @@ static int test_plan_not_followed() {
 	TEST_EXPECT(detail && detail->state == State::NotFound && palm && palm->state == State::NotFound &&
 	            palm->kind == AssetKind::Model && palm->needed_by.record == "Terrain/Foliage 1");
 	TEST_EXPECT(!not_followed(plan, ReferenceKind::None, AssetKind::Terrain));
-	const ImportNotFollowed *dialog = not_followed(plan, ReferenceKind::None, AssetKind::DialogBank);
-	TEST_EXPECT(dialog && dialog->count == 1 && dialog->first == "m.dbf");
+	// The dialog bank is a document the graph reads (DI-32): its lines' waves followed, nothing left unfollowed.
+	TEST_EXPECT(!not_followed(plan, ReferenceKind::None, AssetKind::DialogBank));
 	TEST_EXPECT(!not_followed(plan, ReferenceKind::MenuScreen) && !not_followed(plan, ReferenceKind::Sound));
 	TEST_EXPECT(plan.undefined.size() == 1 && plan.undefined[0].reference == ReferenceKind::Sound &&
 	            plan.undefined[0].count == 1 && plan.undefined[0].first == "items.def");
@@ -422,8 +422,8 @@ static int test_plan_not_followed() {
 
 // What an import does not follow is the kinds table's rule (S13 D5): a file's references go
 // unread when its kind names files (AssetKindRow::names_files) and the graph does not read the
-// kind (graph_reads_kind). Those are the kinds the hand-written list named (a dialog bank, the def
-// tables beyond the catalogs and the avatar table; S14 reads a terrain and a sound bank, and a
+// kind (graph_reads_kind). Those are the kinds the hand-written list named (the def tables beyond the
+// catalogs and the avatar table; S14 reads a terrain and a sound bank, DI-32 a dialog bank, and a
 // music bank holds its own audio and names no file) and the one S13 D5 added that names files (a map
 // project); a mission text, the original editor's .mis, a kind of its own since S14
 // (the graph reads the .bms the game loads). A script the graph reads since S13 D9 (its operands'
@@ -433,7 +433,7 @@ static int test_plan_not_followed() {
 // its extractor (S18): its textures are followed. SndProf.def left it with its document (the sound lane):
 // each slot's set is followed.
 static int test_references_unread() {
-	const std::set<AssetKind> unread = {AssetKind::DialogBank, AssetKind::MissionText,
+	const std::set<AssetKind> unread = {AssetKind::MissionText,
 	        AssetKind::HudFxDefs, AssetKind::CharAttrDefs, AssetKind::OtherDefs, AssetKind::MapProject};
 	for (size_t i = 0; i < kAssetKindCount; ++i) {
 		const AssetKind kind = AssetKind(i);
@@ -945,11 +945,11 @@ static int test_plan_mission_closure() {
 	// The ammo no place defines, counted; the weapon M4 defined by the planned weapon.def is not.
 	TEST_EXPECT(plan.undefined.size() == 1 && plan.undefined[0].reference == ReferenceKind::Ammo &&
 	            plan.undefined[0].count == 1 && plan.undefined[0].first == "weapon.def");
-	// Not followed: only the kinds whose references the graph does not read (the dialog bank, the
-	// script's RUN), never a symbol kind, the terrain or a sound bank.
+	// Not followed: only the kinds whose references the graph does not read (the script's RUN), never a
+	// symbol kind, the terrain, a sound bank or a dialog bank (DI-32: its lines' waves are followed).
 	for (const ImportNotFollowed &entry : plan.not_followed)
 		TEST_EXPECT(entry.reference == ReferenceKind::None || reference_row(entry.reference).resolution == ReferenceResolution::Unchecked);
-	TEST_EXPECT(not_followed(plan, ReferenceKind::None, AssetKind::DialogBank) &&
+	TEST_EXPECT(!not_followed(plan, ReferenceKind::None, AssetKind::DialogBank) &&
 	            !not_followed(plan, ReferenceKind::None, AssetKind::Terrain) &&
 	            !not_followed(plan, ReferenceKind::None, AssetKind::SoundBank) &&
 	            !not_followed(plan, ReferenceKind::None, AssetKind::MusicBank) && !not_followed(plan, ReferenceKind::Particle) &&

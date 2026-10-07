@@ -151,6 +151,9 @@ void extract_record(const Document &document, const NodeAddress &address, Extrac
 		edge.loader_arg = field.loader_arg;
 		edge.use_context = field.use_context;
 		edge.name_offset = field.reference != ReferenceKind::None ? field.name_offset : 0;
+		// The file the lookup reads where the project has none of the scope's (a dialog line's wave: the
+		// dialog bank's .pwf where it has no .lwf).
+		edge.scope_alternate = field.scope_alternate;
 		// A text that is one %NAME% stands for the variable's value: a use of the variable alone
 		// (FieldUse::variable_through), which Rename rewrites with it.
 		if (field.reference == ReferenceKind::None) edge.through = field.variable_through;
