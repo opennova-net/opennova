@@ -66,4 +66,16 @@ std::string sidecar_name(const std::string &mission_file, const Sidecar &sidecar
 // The same with the row's alternate extension; "" when the row has none.
 std::string sidecar_alternate_name(const std::string &mission_file, const Sidecar &sidecar);
 
+// The dialog bank a mission loads: the name in its header's second terrain slot (the original
+// editor's cnv_file) where it holds one, else the mission's own name, its extension swapped for
+// .dbf either way [orig: DialogSystem_Init @ 0x5275e0 -- the slot byte_A76224, g_BmsHeaderBlock +
+// 0x54, copied @ 0x52760c..0x52761f, the mission's name @ 0x527623..0x527632,
+// Path_ReplaceOrAppendExtension(path, "dbf") @ 0x52763e]. No shipped mission fills the slot, so
+// every shipped bank is <base>.dbf. `header_slot` the slot as read ("" for none).
+std::string dialog_bank_name(const std::string &mission_file, const std::string &header_slot);
+// The dialog bank's sounds: its own base name (strtok's first token) plus .lwf, else (`alternate`)
+// plus .pwf, which the game opens only where no .lwf of the name exists [orig:
+// DialogManager_LoadFromFile @ 0x44e7bb..0x44e807].
+std::string dialog_sounds_name(const std::string &dialog_bank, bool alternate = false);
+
 } // namespace opennova::mission

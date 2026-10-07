@@ -99,12 +99,13 @@ void test_chat_legs() {
 		group.lines.push_back(line);
 	}
 	bank.groups.push_back(group);
+	// The dialog bank's sounds: a wave (a single) of the line's name, which the
+	// line finds by name [orig: SoundBank_FindEntryByName @0x75BBA0].
 	lwf::File sounds;
-	lwf::Multi set;
-	set.name = "SynR100";
-	sounds.multis.push_back(set);
-	audio::SoundSetIndex sets;
-	sets.add_bank(0, sounds);
+	lwf::Single wave;
+	wave.name = "SynR100";
+	wave.path = "SynR100.wav";
+	sounds.singles.push_back(wave);
 	rtxt::File text;
 	text.sections.push_back(rtxt::Section{"Info", 2});
 	text.sections.push_back(rtxt::Section{"Mission Dialog", 1});
@@ -118,7 +119,7 @@ void test_chat_legs() {
 	line0.section_index = 1;
 	text.entries = {title, second, line0};
 	world->tables.dialog_bank = &bank;
-	world->tables.sound_sets = &sets;
+	world->tables.dialog_sounds = &sounds;
 	world->tables.mission_text = &text;
 
 	inmatch::ClientRuntime runtime("DialogText");
