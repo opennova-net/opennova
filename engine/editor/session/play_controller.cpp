@@ -178,8 +178,11 @@ bool PlayController::refused(const PlayIntent &intent) {
 		core_.touch(ViewConcern::Output);
 		return true;
 	}
-	// An expansion plays over the game install, with /exp (ADR 0046 S16): none set, nothing is built.
-	if (view_.project.open && !view_.project.document->expansion.standalone() && core_.game_install().empty()) {
+	// An expansion plays over the game install, with /exp (ADR 0046 S16): none set, nothing is built. One
+	// of a project's base game (T5) plays over that project's export, which the build's gate weighs
+	// (build.expansion.base_missing); the game install it needs only to Play in it.
+	if (view_.project.open && !view_.project.document->expansion.standalone() &&
+	    !view_.project.document->expansion.on_base_project() && core_.game_install().empty()) {
 		core_.report(make_finding(CoreFinding::PlayInstallMissing, DiagnosticSeverity::Error,
 		                          "The project builds as an expansion, which plays over the game install: choose its "
 		                          "folder in File > Project settings... first."));
@@ -188,9 +191,11 @@ bool PlayController::refused(const PlayIntent &intent) {
 		return true;
 	}
 	if (!plays_in_install(intent.mode)) return false;
-	// Strict Play stages the build alone, and an expansion's build plays over its base game, which the
-	// project cannot name yet: refused rather than played over the install's own archives.
-	if (intent.mode == PlayMode::Strict && view_.project.open && !view_.project.document->expansion.standalone()) {
+	// Strict Play stages the build alone, and an expansion's build plays over its base game: a project's
+	// base game's export (T5), never the install's own archives, which an expansion on the install's base
+	// game would play over: refused.
+	if (intent.mode == PlayMode::Strict && view_.project.open && !view_.project.document->expansion.standalone() &&
+	    !view_.project.document->expansion.on_base_project()) {
 		core_.report(strict_expansion_refusal(view_.project.document->expansion.name));
 		view_.activity.status = "Strict Play of an expansion is not supported yet; see Problems.";
 		core_.touch(ViewConcern::Output);
@@ -344,9 +349,10 @@ void PlayController::start(const PlayIntent &intent) {
 	};
 	if (in_install) {
 		const bool staged =
-		        strict ? prepare_strict_install_launch_plan(core_.game_install(), build_dir, run_dir, expansion, plan, error)
+		        strict ? prepare_strict_install_launch_plan(core_.game_install(), build_dir, run_dir, expansion, plan, error,
+		                                                    link_file, core_.base_game())
 		               : prepare_retail_launch_plan(core_.game_install(), build_dir, run_dir, plan, error, expansion,
-		                                            copy_cache);
+		                                            copy_cache, link_file, core_.base_game());
 		record_staging(plan.staged);
 		if (!staged) {
 			core_.report(error);
@@ -366,7 +372,7 @@ void PlayController::start(const PlayIntent &intent) {
 		std::vector<std::string> staged;
 		const bool prepared = expansion.empty()
 		        ? !on_run_dir || prepare_runtime_run(build_dir, run_dir, error, &staged)
-		        : prepare_expansion_run(core_.game_install(), build_dir, expansion, run_dir, copy_cache, error, link_file,
+		        : prepare_expansion_run(core_.base_game(), build_dir, expansion, run_dir, copy_cache, error, link_file,
 		                                &staged);
 		record_staging(staged);
 		if (!prepared) {
