@@ -3,6 +3,7 @@
 #include <utility>
 
 #include <editor/assets/asset_import.h>
+#include <editor/project/base_project.h>
 #include <editor/session/session_core.h>
 
 namespace opennova::editor {
@@ -19,10 +20,16 @@ OpenOperation::OpenOperation(ProjectPaths paths, LocalSettings local, ProjectDoc
 bool OpenOperation::step(const StepBudget &budget) {
 	if (!listed_) {
 		// The game install's names first, the project's own install (its local.json, else the one
-		// the editor last chose): the Import fixes read them.
-		install_files_ = list_retail_file_names(local_.game_install, document_);
+		// the editor last chose): the Import fixes read them. For an expansion of a project's base game
+		// (T5), that project's export in its place (SessionCore::base_game).
+		std::string base = local_.game_install;
+		if (document_.expansion.on_base_project()) {
+			Diagnostic why;
+			base_project_game_dir(paths_.root, document_.expansion, document_.target_game, base, why);
+		}
+		install_files_ = list_retail_file_names(base, document_);
 		// And an expansion's base game's, which its build's gate reads (ADR 0046 S16).
-		base_files_ = list_base_file_names(local_.game_install, document_);
+		base_files_ = list_base_file_names(base, document_);
 		listed_ = true;
 		return false;
 	}
