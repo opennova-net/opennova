@@ -1681,6 +1681,14 @@ target_link_libraries(menu_sound_test PRIVATE opennova_runtime)
 target_compile_features(menu_sound_test PRIVATE cxx_std_17)
 add_test(NAME menu_sound COMMAND menu_sound_test)
 
+# A menu run headless through the runtime's own driver (menu/menu_state_frame.h, ADR 0046 DI-35): the
+# frame seam over a compiler and its state, the runtime's Sound and ServiceRequested events, what the
+# game's code binds by name (menu/menu_commands.h) and the Options policy (OptionsScreen::apply_policy).
+add_executable(menu_state_frame_test menu/menu_state_frame_test.cpp)
+target_link_libraries(menu_state_frame_test PRIVATE opennova_runtime)
+target_compile_features(menu_state_frame_test PRIVATE cxx_std_17)
+add_test(NAME menu_state_frame COMMAND menu_state_frame_test)
+
 # The menu's screen history across files and a mission (menu/screen_history.h) and the
 # menu mode's leave and re-entry over it: leaving a mission returns to the screen it
 # was started from (D-MNU-28).
@@ -4996,6 +5004,13 @@ add_executable(editor_menu_sounds_test editor/menu_sounds_test.cpp)
 target_link_libraries(editor_menu_sounds_test PRIVATE opennova_editor)
 target_include_directories(editor_menu_sounds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_menu_sounds COMMAND editor_menu_sounds_test)
+
+# DI-35: a menu tried in its preview (Try mode): the picture behaving as the game's menu through the runtime's
+# own driver, its sandbox, what would leave the menu said instead of done.
+add_executable(editor_menu_try_test editor/menu_try_test.cpp)
+target_link_libraries(editor_menu_try_test PRIVATE opennova_editor)
+target_include_directories(editor_menu_try_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_menu_try COMMAND editor_menu_try_test)
 
 # DI-24: a clip's fire events fire the item's ammo in the model preview (preview/preview_clip_fire, the weapon
 # range's soldier shots), over minted fixtures alone.
