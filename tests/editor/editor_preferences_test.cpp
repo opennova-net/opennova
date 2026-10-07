@@ -5,7 +5,9 @@
 // (ignored, not set aside: an additive change keeps a user's settings), skips an item that is no
 // whole number a double holds, and sets aside a file of another schema, an older editor's among them
 // (no reader for it: pre-1.0), read as the defaults with a warning naming everything it held and
-// written again by the next save; EditorPreferences reads a store
+// written again by the next save; Play's settings an earlier editor kept for every project are named,
+// read by nothing and dropped by the next save (each project keeps its own now), a session saying so once
+// in Output; EditorPreferences reads a store
 // once, writes a change from a copy (a change the store refuses leaves the values in effect), and
 // keeps the recent-projects list and each game's recently placed items capped, most recent first;
 // and a session over each store shows them, a project's game's items alone.
@@ -40,9 +42,6 @@ Preferences every_preference() {
 	preferences.recent_projects = {"C:/games/Armory", "D:/mods/Harbor"};
 	preferences.runtime_executable = "C:/tools/opennova.exe";
 	preferences.game_install = "D:/Joint Operations";
-	preferences.play_in_install = true;
-	preferences.play_in_install_strict = true;
-	preferences.save_before_play = false;
 	preferences.import_dependencies = false;
 	preferences.recent_items = {{"jo", {106100, 2044}}, {"dfx", {7}}};
 	return preferences;
@@ -50,9 +49,8 @@ Preferences every_preference() {
 
 bool same(const Preferences &a, const Preferences &b) {
 	return a.recent_projects == b.recent_projects && a.runtime_executable == b.runtime_executable &&
-	       a.game_install == b.game_install && a.play_in_install == b.play_in_install &&
-	       a.play_in_install_strict == b.play_in_install_strict && a.save_before_play == b.save_before_play &&
-	       a.import_dependencies == b.import_dependencies && a.recent_items == b.recent_items;
+	       a.game_install == b.game_install && a.import_dependencies == b.import_dependencies &&
+	       a.recent_items == b.recent_items && a.retired_play == b.retired_play;
 }
 
 // The settings file every_preference() is: the keys sorted, two spaces an indent, a newline last;
@@ -61,8 +59,6 @@ bool same(const Preferences &a, const Preferences &b) {
 const char *const kSettingsFile = "{\n"
                                   "  \"game_install\": \"D:/Joint Operations\",\n"
                                   "  \"import_dependencies\": false,\n"
-                                  "  \"play_in_install\": true,\n"
-                                  "  \"play_in_install_strict\": true,\n"
                                   "  \"recent_items_by_game\": {\n"
                                   "    \"dfx\": [\n"
                                   "      7\n"
@@ -77,12 +73,11 @@ const char *const kSettingsFile = "{\n"
                                   "    \"D:/mods/Harbor\"\n"
                                   "  ],\n"
                                   "  \"runtime_executable\": \"C:/tools/opennova.exe\",\n"
-                                  "  \"save_before_play\": false,\n"
                                   "  \"schema_version\": 2\n"
                                   "}\n";
 
 // S15's file (schema 2 as well): every preference, the recently placed items one list whatever the
-// game.
+// game, and Play in the game install as the editor kept it then, for every project.
 const char *const kS15File = "{\n"
                              "  \"game_install\": \"D:/Joint Operations\",\n"
                              "  \"import_dependencies\": false,\n"
@@ -112,6 +107,31 @@ const char *const kSchemaOneFile = "{\n"
                                    "  \"runtime_executable\": \"C:/tools/opennova.exe\",\n"
                                    "  \"schema_version\": 1\n"
                                    "}\n";
+
+// Every preference, and the Play settings an editor kept for every project before they were each
+// project's: strict Play in the game install, saving first off.
+const char *const kRetiredPlayFile = "{\n"
+                                     "  \"game_install\": \"D:/Joint Operations\",\n"
+                                     "  \"import_dependencies\": false,\n"
+                                     "  \"play_in_install\": true,\n"
+                                     "  \"play_in_install_strict\": true,\n"
+                                     "  \"recent_items_by_game\": {\n"
+                                     "    \"dfx\": [\n"
+                                     "      7\n"
+                                     "    ],\n"
+                                     "    \"jo\": [\n"
+                                     "      106100,\n"
+                                     "      2044\n"
+                                     "    ]\n"
+                                     "  },\n"
+                                     "  \"recent_projects\": [\n"
+                                     "    \"C:/games/Armory\",\n"
+                                     "    \"D:/mods/Harbor\"\n"
+                                     "  ],\n"
+                                     "  \"runtime_executable\": \"C:/tools/opennova.exe\",\n"
+                                     "  \"save_before_play\": false,\n"
+                                     "  \"schema_version\": 2\n"
+                                     "}\n";
 
 // A store whose saves fail, as a settings file that cannot be written does.
 struct RefusingStore : PreferencesStore {
@@ -147,12 +167,6 @@ static int test_memory_store_round_trips() {
 	TEST_EXPECT(store.save(one, error) && store.load(loaded, error) && same(loaded, one));
 	one = Preferences();
 	one.game_install = "G:/JO";
-	TEST_EXPECT(store.save(one, error) && store.load(loaded, error) && same(loaded, one));
-	one = Preferences();
-	one.play_in_install = true;
-	TEST_EXPECT(store.save(one, error) && store.load(loaded, error) && same(loaded, one));
-	one = Preferences();
-	one.play_in_install_strict = true;
 	TEST_EXPECT(store.save(one, error) && store.load(loaded, error) && same(loaded, one));
 	one = Preferences();
 	one.import_dependencies = false;
@@ -210,14 +224,11 @@ static int test_file_store_writes_the_settings_file() {
 	TEST_EXPECT(editor_test::write_text(s15, kS15File));
 	Preferences kept = every_preference();
 	kept.recent_items.clear();
-	kept.play_in_install_strict = false; // a key added since S15 reads as its default where a file lacks it
-	kept.save_before_play = true;        // DI-26's, the same
+	kept.retired_play = {"play_in_install true"}; // Play's, each project's since: named, read by nothing
 	loaded = Preferences();
 	Diagnostic two;
 	TEST_EXPECT(FilePreferencesStore(s15).load(loaded, two) && same(loaded, kept) && two.code().empty());
 	loaded.recent_items = every_preference().recent_items;
-	loaded.play_in_install_strict = true;
-	loaded.save_before_play = false;
 	TEST_EXPECT(FilePreferencesStore(s15).save(loaded, error));
 	TEST_EXPECT(test_io::read_file_text(s15, written) && written == kSettingsFile);
 	// An item that is no whole number a double holds exactly is skipped, never cast: a fraction, one
@@ -235,8 +246,7 @@ static int test_file_store_writes_the_settings_file() {
 	TEST_EXPECT(FilePreferencesStore(dir.file("missing.json")).load(loaded, error) && same(loaded, Preferences()));
 	TEST_EXPECT(editor_test::write_text(dir.file("bare.json"), "{\"schema_version\": 2}"));
 	TEST_EXPECT(FilePreferencesStore(dir.file("bare.json")).load(loaded, error) && loaded.import_dependencies &&
-	            loaded.game_install.empty() && !loaded.play_in_install && !loaded.play_in_install_strict &&
-	            loaded.save_before_play);
+	            loaded.game_install.empty() && loaded.retired_play.empty());
 	TEST_EXPECT(editor_test::write_text(dir.file("newer.json"), "{\"schema_version\": 99}"));
 	Diagnostic newer;
 	TEST_EXPECT(FilePreferencesStore(dir.file("newer.json")).load(loaded, newer) &&
@@ -252,6 +262,33 @@ static int test_file_store_writes_the_settings_file() {
 	fs::create_directories(dir.file("taken.json"), ec);
 	TEST_EXPECT(!FilePreferencesStore(dir.file("taken.json")).save(every_preference(), error) &&
 	            error.code() == "editor_settings.write");
+	return 0;
+}
+
+// Play's settings are each project's (its .opennova/local.json): the keys an earlier editor kept in the
+// editor's settings for every project (Play in the game install, strictly, saving first) are no
+// preference of the editor's any more. A file holding them reads every other preference as it is, no
+// warning (nothing is set aside), each of them named with its value as written and read by nothing; the
+// next save writes the file without them, byte for byte this editor's.
+static int test_file_store_retires_the_shared_play_settings() {
+	editor_test::TempProjectDir dir("opennova_editor_preferences_retired_play");
+	const std::string path = dir.file("editor_settings.json");
+	TEST_EXPECT(editor_test::write_text(path, kRetiredPlayFile));
+	FilePreferencesStore store(path);
+	Preferences loaded;
+	Diagnostic finding;
+	Preferences kept = every_preference();
+	kept.retired_play = {"play_in_install true", "play_in_install_strict true", "save_before_play false"};
+	TEST_EXPECT(store.load(loaded, finding) && same(loaded, kept) && finding.code().empty());
+	Diagnostic error;
+	TEST_EXPECT(store.save(loaded, error));
+	std::string written;
+	TEST_EXPECT(test_io::read_file_text(path, written) && written == kSettingsFile);
+	TEST_EXPECT(store.load(loaded, finding) && same(loaded, every_preference()) && loaded.retired_play.empty());
+	// One alone is named alone, as the file wrote it.
+	TEST_EXPECT(editor_test::write_text(path, "{\"schema_version\": 2, \"play_in_install_strict\": false}"));
+	TEST_EXPECT(store.load(loaded, finding) &&
+	            loaded.retired_play == std::vector<std::string>({"play_in_install_strict false"}));
 	return 0;
 }
 
@@ -325,7 +362,8 @@ static int test_session_over_a_store() {
 		ProjectSession session(platform, store);
 		const SessionView &v = session.view();
 		TEST_EXPECT(v.project.recent_projects == every_preference().recent_projects && v.project.retail_directory == "D:/Joint Operations" &&
-		            v.project.play_retail && v.project.runtime_setting == "C:/tools/opennova.exe" && !v.project.import_dependencies);
+		            v.project.play_mode == PlayMode::Runtime && v.project.runtime_setting == "C:/tools/opennova.exe" &&
+		            !v.project.import_dependencies);
 		session.handle(request::set_import_dependencies(true));
 		session.run_operations();
 		TEST_EXPECT(v.project.import_dependencies && store.preferences().import_dependencies);
@@ -380,7 +418,7 @@ static int test_session_over_a_store() {
 					d.severity == DiagnosticSeverity::Warning &&
 					d.message.find("retail_directory \"D:/Joint Operations\"") != std::string::npos;
 		TEST_EXPECT(said == 1 && v.project.recent_projects.empty() &&
-				v.project.retail_directory.empty() && !v.project.play_retail);
+				v.project.retail_directory.empty() && v.project.play_mode == PlayMode::Runtime);
 		session.handle(request::new_project(dir.file("after"), "After"));
 		session.run_operations();
 		TEST_EXPECT(session.outcome().done());
@@ -389,6 +427,38 @@ static int test_session_over_a_store() {
 		            written.find("\"schema_version\": 2") != std::string::npos &&
 		            written.find("retail") == std::string::npos && written.find("\"game_install\": \"\"") != std::string::npos);
 	}
+	{
+		// The maintainer's settings file with strict Play in the game install kept for every project: said
+		// once in Output as the editor starts (the keys and their values, where Play's settings live now), the
+		// file written again without them at once, none of it in effect: a project opened then plays in the
+		// OpenNova runtime and saves first. An editor started on the file afterwards says nothing.
+		const std::string path = dir.file("shared/editor_settings.json");
+		TEST_EXPECT(editor_test::write_text(path, kRetiredPlayFile));
+		FilePreferencesStore store(path);
+		{
+			ProjectSession session(platform, store);
+			const SessionView &v = session.view();
+			const OutputLog &output = v.activity.output;
+			size_t said = 0;
+			for (uint64_t i = output.first_index(); i < output.next_index(); ++i) {
+				const std::string &line = output.at(i);
+				said += line.find("play_in_install true, play_in_install_strict true, save_before_play false") !=
+				                std::string::npos &&
+				        line.find(".opennova/local.json") != std::string::npos;
+			}
+			TEST_EXPECT(said == 1);
+			for (const Diagnostic &d : v.findings.diagnostics) TEST_EXPECT(d.code().rfind("editor_settings", 0) != 0);
+			std::string written;
+			TEST_EXPECT(test_io::read_file_text(path, written) && written == kSettingsFile);
+			session.handle(request::new_project(dir.file("shared_project"), "Shared"));
+			session.run_operations();
+			TEST_EXPECT(session.project_open() && v.project.play_mode == PlayMode::Runtime && v.project.save_before_play);
+		}
+		ProjectSession again(platform, store);
+		const OutputLog &output = again.view().activity.output;
+		for (uint64_t i = output.first_index(); i < output.next_index(); ++i)
+			TEST_EXPECT(output.at(i).find("play_in_install") == std::string::npos);
+	}
 	return 0;
 }
 
@@ -396,6 +466,7 @@ int main() {
 	int failures = 0;
 	failures += test_memory_store_round_trips();
 	failures += test_file_store_writes_the_settings_file();
+	failures += test_file_store_retires_the_shared_play_settings();
 	failures += test_editor_preferences();
 	failures += test_session_over_a_store();
 	if (failures == 0) std::printf("editor_preferences: all tests passed\n");
