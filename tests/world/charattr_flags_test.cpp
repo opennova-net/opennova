@@ -1,18 +1,20 @@
 // charattr.def ATTRIBUTES -> World::class_attribute_flags -> the friendly-tag
 // medic plate (and the map medic marker that reads the same bit): the whole
 // per-class word, the first-missing-section stop, the first-section-wins
-// duplicate rule, the 16-slot class wrap, and the S2C 0x41 clear.
+// duplicate rule, the 16-slot class wrap, the S2C 0x41 clear and the
+// ATTRIBUTES latch.
 // [orig: CharAttr_LoadFromDef @0x412140 (the per-class ATTRIBUTES word at
-//  g_CharAttr row +0x28, names @0x813F18); AnimMap_IsSlotActive @0x4125e0 (the
-//  reader); AnimMap_SetSlotProperty @0x412890 (the 0x41 clear)]
+//  g_CharAttr row +0x28, names @0x813F18); CharAttr_ClassHasAttribute @0x4125e0
+//  (the reader); CharAttr_SetProperty @0x412890 (the 0x41 clear)]
 #include <runtime/world/entity.h>
 #include <runtime/world/friendly_tags.h>
 #include <runtime/world/world.h>
 
-#include <runtime/inmatch/charattr_challenge.h>
+#include <runtime/inmatch/charattr_table.h>
 
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <vector>
 
 using namespace opennova::world;
@@ -73,13 +75,29 @@ EntityHandle spawn_organic(World &w, uint8_t team, uint8_t player_class,
     return w.registry.spawn(0, e);
 }
 
+// The fixture with CR LF line ends, as charattr.def is stored: the ConfigFile
+// reader ends a line at CR LF alone.
+std::string crlf_fixture() {
+    std::string out;
+    for (const char *c = kFixture; *c; ++c) {
+        if (*c == '\n') out += '\r';
+        out += *c;
+    }
+    return out;
+}
+
+opennova::inmatch::CharAttrTable load_fixture() {
+    const std::string text = crlf_fixture();
+    opennova::inmatch::CharAttrTable table;
+    opennova::inmatch::charattr_load(table, reinterpret_cast<const uint8_t *>(text.data()), text.size());
+    return table;
+}
+
 } // namespace
 
 int main() {
-    opennova::inmatch::CharAttrChallengeTable table;
-    CHECK(opennova::inmatch::parse_charattr_challenge_table(
-            reinterpret_cast<const uint8_t *>(kFixture), sizeof(kFixture) - 1,
-            table));
+    opennova::inmatch::CharAttrTable table = load_fixture();
+    CHECK(table.loaded);
     const auto rows = opennova::inmatch::charattr_class_attribute_rows(table);
     // The WHOLE word per class, index = class - 1.
     CHECK(rows[0] == 0x1u);  // CHARACTER1: AutoScope
@@ -122,7 +140,7 @@ int main() {
     CHECK(saw_medic && saw_rifle);
 
     // S2C 0x41 property 0 blanks every row's word: the plates go with it.
-    opennova::inmatch::clear_charattr_challenge_property(table, 0);
+    opennova::inmatch::charattr_disable_property(table, 0);
     w.tables.class_attribute_flags = opennova::inmatch::charattr_class_attribute_rows(table);
     CHECK(!w.tables.class_has_attribute(5, MissionTables::kCharAttrMedic));
     CHECK(!w.tables.class_has_attribute(1, 0x1u));
@@ -132,16 +150,18 @@ int main() {
     for (const FriendlyTagSource &t : tags) CHECK(!t.medic);
 
     // A property clear that is NOT id 0 leaves the words alone.
-    opennova::inmatch::CharAttrChallengeTable again;
-    CHECK(opennova::inmatch::parse_charattr_challenge_table(
-            reinterpret_cast<const uint8_t *>(kFixture), sizeof(kFixture) - 1,
-            again));
-    opennova::inmatch::clear_charattr_challenge_property(again, 3); // HPBONUS
+    opennova::inmatch::CharAttrTable again = load_fixture();
+    opennova::inmatch::charattr_disable_property(again, 3); // HPBONUS
     CHECK(opennova::inmatch::charattr_class_attribute_rows(again)[4] == 0x8u);
+
+    // The ATTRIBUTES latch alone (S2C 0x42 bit 1) hides every word, the rows kept.
+    opennova::inmatch::charattr_unpack_disabled(again, 0x0002u);
+    CHECK(opennova::inmatch::charattr_class_attribute_rows(again)[4] == 0u);
+    CHECK(again.table.rows[4].attributes == 0x8u);
 
     // An unloaded table (a missing charattr.def) reads as no attribute at all.
     w.tables.class_attribute_flags = opennova::inmatch::charattr_class_attribute_rows(
-            opennova::inmatch::CharAttrChallengeTable{});
+            opennova::inmatch::CharAttrTable{});
     for (uint8_t c = 0; c < 32; ++c) CHECK(!w.tables.class_has_attribute(c, 0xFFFFFFFFu));
 
     if (failures == 0) std::printf("charattr_flags_test: ok\n");

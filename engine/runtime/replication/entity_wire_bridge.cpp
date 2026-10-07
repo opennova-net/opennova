@@ -73,7 +73,7 @@ namespace {
 // renders as us01 — observed live against a retail host 2026-07-27. Tracked in
 // D-PLAYERINFO-1.
 // [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 ->
-// AnimMap_GetSlotPropertyInt(playerClass) @0x4127b0 -> ADM -> AnimMap_RegisterEntity @0x40bb60;
+// CharAttr_GetCammoTypeId(playerClass) @0x4127b0 -> ADM -> AnimMap_RegisterEntity @0x40bb60;
 // class 0 -> slot 15 -> empty ADM -> registration skipped -> Entity_UpdateInfantryPlayerBody
 // @0x4b40e0 bails @0x4b4135. re-grill 2026-06-28.] Carry the entity's loadout class; default a
 // player to 8 (golden) until per-player loadout class is wired. The [5,9]-else-8 clamp is the

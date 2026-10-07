@@ -207,7 +207,7 @@ int main() {
 		CHECK(ctx.server_text.change_to_blue_format == "%s joined blue");
 		CHECK(ctx.server_text.change_to_red_format == "%s joined red");
 		// D-NET-345: the authority's class attributes came from charattr.def.
-		CHECK(host.boot.charattr_loaded);
+		CHECK(host.boot.charattr.loaded);
 		CHECK(kernel.world.tables.class_has_attribute(2, world::MissionTables::kCharAttrMedic));
 		CHECK(!kernel.world.tables.class_has_attribute(1, world::MissionTables::kCharAttrMedic));
 		CHECK(kernel.world.tables.class_attribute_flags[0] == 0x1u); // CHARACTER1: AutoScope
@@ -241,13 +241,75 @@ int main() {
 		CHECK(kernel.world.out.terrain_scorches.pending_page_invalidations().empty());
 	}
 
-	// --- the water rungs: the .trn's height beats the .env's -----------------
+	// --- the water rungs (env #44): the .env's line writes after the .trn's,
+	// so the .env's height (40 half units) beats the terrain's (30); with no
+	// .env line the terrain's stands -----------------------------------------
 	{
 		Host host;
 		std::string error;
 		CHECK(inmatch::boot_host_mission(host.request(/*trn_water_raw=*/30), host.boot, error));
+		CHECK(host.boot.water_z_q16 == (20 << 16));
+		CHECK(host.water_at_bringup == (20 << 16));
+	}
+	{
+		Host host;
+		host.files["synth.env"] = "enviro_name \"Synth\"\r\nfog_level 900\r\n";
+		std::string error;
+		CHECK(inmatch::boot_host_mission(host.request(/*trn_water_raw=*/30), host.boot, error));
 		CHECK(host.boot.water_z_q16 == (15 << 16));
 		CHECK(host.water_at_bringup == (15 << 16));
+	}
+
+	// --- the terrain's pass (env #43): the mission's .trn reads ahead of its
+	// .env, so its murk and height stand where the .env writes neither --------
+	{
+		Host host;
+		host.files["synth.env"] = "enviro_name \"Synth\"\r\nfog_level 900\r\n";
+		host.files["synth.trn"] = "terrain_name \"synth\"\r\nwater_height 24\r\nwater_murk .3\r\n";
+		inmatch::HostBootRequest request = host.request(/*trn_water_raw=*/0);
+		std::snprintf(request.mission.header.terrain, sizeof(request.mission.header.terrain), "synth");
+		std::string error;
+		CHECK(inmatch::boot_host_mission(std::move(request), host.boot, error));
+		CHECK(host.boot.env_config.water_height_set && host.boot.env_config.water_height == 24.0f);
+		CHECK(host.boot.env_config.water_murk > 0.299f && host.boot.env_config.water_murk < 0.301f);
+		CHECK(host.boot.water_z_q16 == (12 << 16));
+	}
+
+	// --- D-NET-374: the session's mp_No* words restrict the class table ------
+	// Each mission start on the authority zeroes and disables the property each
+	// set word names; the table and its latches are the boot's, kept for the
+	// next mission, whose session without the word restores nothing.
+	// [orig: Server_ResetRoundCounters @0x4FCF10 (CharAttr_ApplyMpRestrictions
+	//  @0x4247D0's body), CharAttr_PackDisabledProperties @0x412550]
+	{
+		Host host;
+		std::string error;
+		inmatch::HostBootRequest r = host.request(0);
+		r.host_cfg.config.no_char_abilities = 1;
+		r.host_cfg.config.no_scope_drift = 1;
+		CHECK(inmatch::boot_host_mission(std::move(r), host.boot, error));
+		CHECK(host.kernel != nullptr);
+		if (host.kernel) {
+			const world::World &w = host.kernel->world;
+			CHECK(host.boot.charattr.loaded && host.boot.charattr_read);
+			CHECK(!w.tables.class_has_attribute(2, world::MissionTables::kCharAttrMedic));
+			CHECK(w.tables.class_attribute_flags[0] == 0u);
+			CHECK(w.tables.charattr_disabled_word == 0x0012u); // bit 1 ATTRIBUTES, bit 4 SCOPE_MUTE
+			CHECK(host.boot.charattr.table.rows[1].attributes == 0u);
+		}
+		// A boot over the kept table (an embedder reuses its HostBoot from mission to
+		// mission), its session without the words: the table is not read again and the
+		// latches stay.
+		Host next;
+		next.boot.charattr = host.boot.charattr;
+		next.boot.charattr_read = true;
+		next.files.erase("charattr.def");
+		CHECK(inmatch::boot_host_mission(next.request(0), next.boot, error));
+		if (next.kernel) {
+			CHECK(next.kernel->world.tables.charattr_disabled_word == 0x0012u);
+			CHECK(!next.kernel->world.tables.class_has_attribute(2, world::MissionTables::kCharAttrMedic));
+			CHECK(next.boot.charattr.loaded);
+		}
 	}
 
 	// --- a role with no HostRole (the game's joiner) skips the authority's legs
@@ -275,7 +337,7 @@ int main() {
 		CHECK(inmatch::boot_host_mission(std::move(r), boot, error));
 		CHECK(kernel != nullptr);
 		if (kernel) {
-			CHECK(!boot.charattr_loaded);
+			CHECK(!boot.charattr.loaded);
 			CHECK(kernel->world.tables.class_attribute_flags[1] == 0u);
 			CHECK(boot.server_text.medic_request_format.empty());
 			CHECK(kernel->terrain_store.placed_tiles().empty());

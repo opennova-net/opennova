@@ -38,7 +38,7 @@
 #include <formats/mission/bms.h>
 #include <runtime/environment/environment_state.h>
 #include <runtime/environment/weather_runtime.h>
-#include <runtime/inmatch/charattr_challenge.h>
+#include <runtime/inmatch/charattr_table.h>
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/session.h>
 #include <runtime/mission/mission_kernel.h>
@@ -142,8 +142,13 @@ struct HostBoot {
 	mission::MissionText mission_text;
 	std::vector<uint8_t> terrain_til;
 	ServerTextTable server_text;
-	CharAttrChallengeTable charattr;
-	bool charattr_loaded = false;
+	// The process's character-attribute table (charattr_table.h), kept from
+	// boot to boot as retail's g_CharAttr outlives every mission: the first
+	// authority boot loads charattr.def into it (`charattr_read`), and every
+	// authority boot applies the session's restrictions to it, whose zeroed
+	// properties and raised latches stay for the next.
+	CharAttrTable charattr;
+	bool charattr_read = false;
 	std::shared_ptr<const replication::ItemReplicationCatalog> item_catalog;
 	// The mission environment the authority reads: the .env with the BMS
 	// override layer (env::load_mission_env's skip rule: a missing file

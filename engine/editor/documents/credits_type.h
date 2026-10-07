@@ -17,7 +17,7 @@ namespace opennova::editor {
 // section line ("[TEXT]", the label upper case as the text reader takes it), each entry a line
 // "name = value, value" (an integer, a float written so it reads back to the same bits, a string),
 // CR LF after each, which the game's text reader reads back as the CBIN holds it
-// (runtime/menu/config_text.h); Save writes the text in the CBIN form again, under the file's own
+// (formats/configfile/config_file.h); Save writes the text in the CBIN form again, under the file's own
 // cipher key and with its string table first in its order, so a text left as it was writes the
 // bytes it was read from. A CBIN file whose text form would not read back as it holds it (a string
 // value with a space, a label of capitals, a float that is no number) is held read only: a

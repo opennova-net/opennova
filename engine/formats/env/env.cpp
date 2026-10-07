@@ -286,27 +286,39 @@ float clamp_water_murk_upper(float value) {
 	return std::min(value, 0.99f);
 }
 
-bool load_env(std::istream &input, Config &out, std::string &error) {
+namespace {
+
+// The parser's state across the passes of one load. The slot pointer: a keyframe of the pass's table by
+// index, or -1 for the scratch keyframe, where it sits as the load begins, as the .env's pass begins and
+// after every tod_end [orig: g_EnvTodCurrentSlotPtr, set to the scratch @ 0x57db88, @ 0x57dc56 and by
+// tod_end @ 0x57c6a3]; between the .trn's pass and overcast.def's nothing moves it. Each keyframe's fog
+// mirrors into its skyfog until a skyfog line sets it (divergence #9: a flag per keyframe for the 0xC0C0FF
+// sentinel test @ 0x57c9b8); the scratch's sentinel is seeded once a load [orig: @ 0x57db54..0x57db59].
+struct TodParse {
+	int slot = -1;
+	std::vector<bool> skyfog_set;
+	bool scratch_skyfog_set = false; // the scratch's skyfog no longer holds its 0xC0C0FF seed
+};
+
+// Stable, matching the engine's bubble sort (duplicate times keep file order)
+// [orig: Environment_SortAndSnapshotKeyframes @ 0x57c240].
+void sort_keyframes(std::vector<Keyframe> &keyframes) {
+	std::stable_sort(keyframes.begin(), keyframes.end(), [](const Keyframe &a, const Keyframe &b) {
+		return a.time < b.time;
+	});
+}
+
+// One file's pass of the keyword parser over `out`: the globals it writes stand over what an earlier pass
+// wrote, and its keyframes append to out.keyframes, the pass's slot table [orig: TimeOfDay_ParseProperty
+// @ 0x57c590].
+void parse_tod_pass(const std::string &text, Config &out, TodParse &parse) {
 	// Semantic port of the line callback [orig: TimeOfDay_ParseProperty @ 0x57c590],
-	// invoked per tokenized line of .trn/.env. We do not emulate the fixed
+	// invoked per tokenized line of .trn/overcast.def/.env. We do not emulate the fixed
 	// globals; Config is the typed equivalent. envscale stays a stored field and
 	// is applied at interpolation/engine-view time rather than baked into colors
 	// at parse — tracked divergence #8 in docs/env/env-tod-re.md (equivalent for
 	// files where envscale precedes all colors; the corpus sweep validates this).
 	//
-	// Load pipeline context (C6 grill, [orig: Environment_LoadTimeOfDayConfig
-	// @ 0x57db30]): the retail loader runs this parser over the .trn/.env FIRST,
-	// and overcast.def is NEVER a fallback — on .trn success it ALWAYS parses
-	// additively into the overcast keyframe table (the keyframe count is not
-	// reset between passes); a missing/failed .trn aborts the whole TOD load with
-	// no .env pass, and a NULL map name goes straight to overcast.def. At runtime
-	// the overcast blend cross-fades the .env-table colors against the overcast
-	// table. This reimpl carries the .env table only — overcast blend 0 (clear
-	// weather, pure .env) until weather scripting drives it; a future overcast
-	// cross-fade must parse overcast.def additively per the order above.
-	error.clear();
-	out = Config();
-
 	// The lines and tokens are the shared retail walk's (io::for_each_config_line:
 	// a CR LF pair ends a line and nothing else does, an unterminated last line
 	// loses its final byte, `;` or `//` outside quotes cuts a line, and space,
@@ -318,15 +330,9 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 	// @ 0x57c590, the stricmp of tokens[1] in every arm]. A color line is a
 	// color line inside a block or out of one, and every other key reads the
 	// same either way: the parser keeps no block state but the slot pointer.
-	const std::string text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-	// The slot pointer: a keyframe of out.keyframes by index, or -1 for the scratch keyframe,
-	// where it sits for the pass and after every tod_end [orig: g_EnvTodCurrentSlotPtr, set to
-	// the scratch @ 0x57dc56 and by tod_end @ 0x57c6a3]. Each keyframe's fog mirrors into its
-	// skyfog until a skyfog line sets it (divergence #9: a flag per keyframe for the 0xC0C0FF
-	// sentinel test @ 0x57c9b8).
-	int slot = -1;
-	std::vector<bool> skyfog_set;
-	bool scratch_skyfog_set = false; // the scratch's skyfog still holds its 0xC0C0FF seed
+	int &slot = parse.slot;
+	std::vector<bool> &skyfog_set = parse.skyfog_set;
+	bool &scratch_skyfog_set = parse.scratch_skyfog_set;
 
 	io::for_each_config_line(text.data(), text.size(), [&](const io::ConfigTokens &tokens) {
 		const std::string key = strutil::to_lower(tokens.tokens[0]);
@@ -436,12 +442,19 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 			out.tod_rate_set = true;
 		}
 	});
+}
 
-	// Stable, matching the engine's bubble sort (duplicate times keep file order)
-	// [orig: Environment_SortAndSnapshotKeyframes @ 0x57c240].
-	std::stable_sort(out.keyframes.begin(), out.keyframes.end(), [](const Keyframe &a, const Keyframe &b) {
-		return a.time < b.time;
-	});
+} // namespace
+
+bool load_env(std::istream &input, Config &out, std::string &error) {
+	// One file alone over the pre-parse defaults (a document's read, the authoring tools'): a
+	// mission's load runs the same parser over its three files (load_mission_env).
+	error.clear();
+	out = Config();
+	const std::string text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+	TodParse parse;
+	parse_tod_pass(text, out, parse);
+	sort_keyframes(out.keyframes);
 	return true;
 }
 
@@ -716,17 +729,44 @@ Vec3 compute_moon_direction(float tod_time) {
 	return dir;
 }
 
-bool load_mission_env(const std::string *text, Config &out) {
-	// The defaults the load reset first stand unless the file parses over them (env.h)
-	// [orig: Environment_InitDefaults @ 0x57c010; Environment_LoadTimeOfDayConfig @ 0x57dca3].
-	out = Config();
-	if (text == nullptr) return false;
-	std::istringstream input(*text);
-	std::string error;
-	Config parsed;
-	if (!load_env(input, parsed, error)) return false;
-	out = std::move(parsed);
+bool load_mission_env(const MissionEnvTexts &texts, MissionEnv &out) {
+	// The defaults the load reset first, and the parse state it seeds once [orig:
+	// Environment_InitDefaults @ 0x57c010; Environment_LoadTimeOfDayConfig @ 0x57db44..0x57db8e].
+	out = MissionEnv();
+	Config &config = out.config;
+	TodParse parse;
+	// The terrain's pass, then overcast.def's into the same table [orig: Environment_LoadTimeOfDayConfig
+	// @ 0x57dbeb, @ 0x57dc3b], that table the overcast table [orig: @ 0x57dc48].
+	if (texts.terrain != nullptr) parse_tod_pass(*texts.terrain, config, parse);
+	if (texts.overcast != nullptr) parse_tod_pass(*texts.overcast, config, parse);
+	sort_keyframes(config.keyframes);
+	out.overcast.keyframes = std::move(config.keyframes);
+	out.overcast.envscale = config.envscale;
+	// The pointer back on the scratch and the count at 0 for the .env [orig: @ 0x57dc56..0x57dc5c].
+	config.keyframes.clear();
+	parse.slot = -1;
+	parse.skyfog_set.clear();
+	if (texts.environment == nullptr) {
+		// Skipped before its seeding: the color blocks keep Environment_InitDefaults' targets
+		// [orig: @ 0x57dca3, the seeding @ 0x57dce0 not reached; Environment_InitDefaults
+		// @ 0x57c03a..0x57c17d], the scratch's seed.
+		config.scratch = scratch_keyframe_defaults();
+		return false;
+	}
+	parse_tod_pass(*texts.environment, config, parse);
+	sort_keyframes(config.keyframes);
+	out.environment = true;
 	return true;
+}
+
+bool read_mission_env(const EnvTextReader &read, const std::string &terrain_file,
+		const std::string &environment_file, MissionEnv &out) {
+	std::string terrain, overcast, environment;
+	MissionEnvTexts texts;
+	if (!terrain_file.empty() && read(terrain_file, terrain)) texts.terrain = &terrain;
+	if (read(kOvercastFile, overcast)) texts.overcast = &overcast;
+	if (!environment_file.empty() && read(environment_file, environment)) texts.environment = &environment;
+	return load_mission_env(texts, out);
 }
 
 } // namespace opennova::env

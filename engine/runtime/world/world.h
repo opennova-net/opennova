@@ -546,11 +546,20 @@ struct MissionTables {
     // soldier class as retail indexes g_CharAttr — row (class - 1) & 0xF, the
     // dword at row offset 40. The embedder stamps it from its parsed table
     // (inmatch::charattr_class_attribute_rows over the boot-soft charattr table,
-    // re-stamped after every S2C 0x41 clear); zero rows carry no attribute,
-    // which is retail's empty-table behaviour. [orig: CharAttr_LoadFromDef @0x412140;
-    //  the reader AnimMap_IsSlotActive @0x4125e0 — dword_A79568[31 *
-    //  ((slot - 1) & 0xF)] & mask, with dword_A79568 = g_CharAttr + 0x28]
+    // re-stamped after every S2C 0x41 and 0x42); zero rows carry no attribute,
+    // which is retail's empty-table behaviour, and a disabled ATTRIBUTES zeroes
+    // them all. [orig: CharAttr_LoadFromDef @0x412140; the reader
+    //  CharAttr_ClassHasAttribute @0x4125e0 — !g_CharAttrPropertyDisabled[0] &&
+    //  g_CharAttr row active && dword_A79568[31 * ((slot - 1) & 0xF)] & mask,
+    //  with dword_A79568 = g_CharAttr + 0x28]
     std::array<uint32_t, 16> class_attribute_flags{};
+    // The authority's charattr disable latches as S2C 0x42 carries them
+    // (inmatch::charattr_pack_disabled), stamped with the words above: the body
+    // of the join's 0x42 and of every periodic one.
+    // [orig: CharAttr_PackDisabledProperties @0x412550, from
+    //  NetPacket_WriteCharAttrDisabledProperties @0x505BA0 (Server_OnPlayerJoin
+    //  @0x51a802) and Server_SendEntityHandleAndInputState @0x507C02]
+    uint16_t charattr_disabled_word = 0;
     static constexpr uint32_t kCharAttrKnifeBonus = 0x4u;
     static constexpr uint32_t kCharAttrMedic = 0x8u;
     bool class_has_attribute(uint8_t player_class, uint32_t bit) const {

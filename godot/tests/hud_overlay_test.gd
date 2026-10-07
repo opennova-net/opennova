@@ -36,7 +36,10 @@ func _load_temp_layout(lines: PackedStringArray, textures: PackedStringArray,
 		var texture_size: Vector2i = texture_sizes.get(texture_name, Vector2i(2, 2))
 		TestFs.write_bytes(self, fixture.dir.path_join(texture_name),
 				TestFs.tga_bytes(texture_size))
-	TestFs.write_text(self, fixture.dir.path_join("hudpos.def"), "\n".join(lines))
+	# Every gated element shown first (an unauthored HUDDECLUT row hides its
+	# slot, D-HUD-54); a test's own row for a slot comes later and stands.
+	TestFs.write_text(self, fixture.dir.path_join("hudpos.def"),
+			"\n".join(PackedStringArray(HudFixture.DECLUTTER_ROWS) + lines))
 	fixture.layout = HudPos.new()
 	assert_eq(fixture.layout.load(fixture.dir.path_join("hudpos.def")), OK)
 	fixture.root = ResourceRoot.new()
@@ -342,6 +345,34 @@ func test_crosshair_requires_active_weapon() -> void:
 	hud.set_weapon_state(true, -1, -1, 0, 0, false, false, false, 0)
 	assert_eq(hud.get_draw_list_stats().tris, 14,
 		"An armed hip stance emits the five tapered regions (14 triangles).")
+
+
+# A hudpos.def with no key (no byte, a comment alone, or no file at all) runs the
+# HUD over the globals no arm wrote: the HUDDECLUT mask table stays zero and
+# every gated element hides, the armed crosshair among them, where the overlay
+# used to keep everything shown (D-HUD-54; the hud_layout ctest walks every
+# element). A file with the XHAIRS row alone shows it, and only it.
+func test_a_hudpos_with_no_key_hides_every_gated_element() -> void:
+	for text: String in ["", "// The HUD layout: nothing yet.\r\n", "<missing>", "HUDDECLUT_XHAIRS 1 1 1 1\r\n"]:
+		var dir := TestFs.cache_dir(self, "hud_overlay_no_key")
+		_temp_dirs.append(dir)
+		TestFs.write_bytes(self, dir.path_join("cross01.tga"), TestFs.tga_bytes(Vector2i(8, 8)))
+		if text != "<missing>":
+			TestFs.write_bytes(self, dir.path_join("hudpos.def"), text.to_utf8_buffer())
+		var root := ResourceRoot.new()
+		assert_eq(root.set_root_dir(dir), OK)
+		var layout := HudPos.new()
+		var loaded := layout.load_from_resource_root(root, "hudpos.def")
+		assert_eq(loaded, ERR_FILE_NOT_FOUND if text == "<missing>" else OK,
+				"%s: an empty file is a file of no line, not an error" % text)
+		var hud := _make_overlay()
+		hud.configure(layout, root)
+		assert_true(hud.is_configured(), "%s: the HUD runs without a layout" % text)
+		hud.set_player_state(100, 1.0, 0, 80.0)
+		hud.set_weapon_state(true, 30, 90, 0, 0, false, false, false, 0)
+		var shown := text.begins_with("HUDDECLUT_XHAIRS")
+		assert_eq(hud.get_draw_list_stats().tris, 14 if shown else 0,
+				"%s: the crosshair draws only when a row shows it" % text)
 
 
 # A texture whose material word is colour family 0x600 draws under
