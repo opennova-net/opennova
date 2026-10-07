@@ -753,6 +753,16 @@ from (the game's `.lwf` reader is its sound bank's). A music bank is a `.sbf`: t
 script streams by path, copied loose beside the archives.
 _Avoid_: wave bank (a `.lwf` holds no waves, it names them), sound bank for a `.sbf`
 
+**Dialog bank**:
+A mission's `.dbf` (the deep-integration plan's DI-32): its dialogs, each a list of lines a mission's Play
+dialog action plays by the number its name forms (`dlg012` is dialog 12; a name no number forms is never
+played), each line a wave of the dialog bank's sounds (the `.lwf` of the bank's own name) found by its name,
+its subtitle the mission text's [Mission Dialog] entry of that name. The game loads the mission's own
+`<mission>.dbf`, or the one its header names. It opens in the editor as a document, its dialogs Go to targets
+from the mission, and Play plays a dialog's lines one after another as the game does.
+_Avoid_: voice bank (the voice sets the go codes play are sets of the global banks), dialog file, DLG
+(the dialogs' sets the shipped sound banks carry, which no dialog lookup reads)
+
 **Wave**:
 A `.wav` the game loads from its archives by name, as a sound bank's sets name it (retail packs
 thousands, its localized voice lines in language.pff): a native file the build packs as it is.
