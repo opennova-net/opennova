@@ -315,16 +315,19 @@ void EditorWindows::dispatch_events() {
 		case ViewEventKind::ShowDocument:
 			if (document_window_) document_window_->show_document(event);
 			break;
-		// A set_workspace's focus (the MCP gaps lane): the window it names comes forward, opened when the person
-		// had closed it (the Windows menu's).
+		// A set_workspace's focus (the MCP gaps lane): the window it names comes forward, as the Windows menu's
+		// tick shows it: opened when the person had closed it, shown anyway where it stands aside (the Preview
+		// beside a mission, for the document active then).
 		case ViewEventKind::FocusWindow:
 			for (size_t i = 0; const char *token = workspace_window_token(i); ++i) {
 				if (event.path != token) continue;
-				for (int w = 0; w < pass_.window_count(); ++w)
-					if (std::strcmp(pass_.window(w).title(), workspace_window_title(i)) == 0) {
-						pass_.window(w).open = true;
-						pass_.window(w).request_focus();
-					}
+				for (int w = 0; w < pass_.window_count(); ++w) {
+					devtools::Window &window = pass_.window(w);
+					if (std::strcmp(window.title(), workspace_window_title(i)) != 0) continue;
+					window.open = true;
+					if (window.stands_aside()) window.show_anyway();
+					window.request_focus();
+				}
 			}
 			break;
 		case ViewEventKind::kCount: break;
