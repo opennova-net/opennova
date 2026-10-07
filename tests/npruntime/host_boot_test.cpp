@@ -241,13 +241,38 @@ int main() {
 		CHECK(kernel.world.out.terrain_scorches.pending_page_invalidations().empty());
 	}
 
-	// --- the water rungs: the .trn's height beats the .env's -----------------
+	// --- the water rungs (env #44): the .env's line writes after the .trn's,
+	// so the .env's height (40 half units) beats the terrain's (30); with no
+	// .env line the terrain's stands -----------------------------------------
 	{
 		Host host;
 		std::string error;
 		CHECK(inmatch::boot_host_mission(host.request(/*trn_water_raw=*/30), host.boot, error));
+		CHECK(host.boot.water_z_q16 == (20 << 16));
+		CHECK(host.water_at_bringup == (20 << 16));
+	}
+	{
+		Host host;
+		host.files["synth.env"] = "enviro_name \"Synth\"\r\nfog_level 900\r\n";
+		std::string error;
+		CHECK(inmatch::boot_host_mission(host.request(/*trn_water_raw=*/30), host.boot, error));
 		CHECK(host.boot.water_z_q16 == (15 << 16));
 		CHECK(host.water_at_bringup == (15 << 16));
+	}
+
+	// --- the terrain's pass (env #43): the mission's .trn reads ahead of its
+	// .env, so its murk and height stand where the .env writes neither --------
+	{
+		Host host;
+		host.files["synth.env"] = "enviro_name \"Synth\"\r\nfog_level 900\r\n";
+		host.files["synth.trn"] = "terrain_name \"synth\"\r\nwater_height 24\r\nwater_murk .3\r\n";
+		inmatch::HostBootRequest request = host.request(/*trn_water_raw=*/0);
+		std::snprintf(request.mission.header.terrain, sizeof(request.mission.header.terrain), "synth");
+		std::string error;
+		CHECK(inmatch::boot_host_mission(std::move(request), host.boot, error));
+		CHECK(host.boot.env_config.water_height_set && host.boot.env_config.water_height == 24.0f);
+		CHECK(host.boot.env_config.water_murk > 0.299f && host.boot.env_config.water_murk < 0.301f);
+		CHECK(host.boot.water_z_q16 == (12 << 16));
 	}
 
 	// --- D-NET-374: the session's mp_No* words restrict the class table ------
