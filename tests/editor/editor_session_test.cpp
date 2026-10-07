@@ -40,6 +40,7 @@
 #include <editor/session/view_json.h>
 #include <editor/project/local_settings.h>
 #include <editor/project/project_files.h>
+#include <formats/dbf/dbf.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
@@ -3176,8 +3177,15 @@ static int test_mission_notes() {
 	TEST_EXPECT(editor_test::write_bytes(root + "/missions/First.bms", mission_bytes));
 	for (const char *file : {"missions/First.wac", "missions/lost.wac", "game.wac"})
 		TEST_EXPECT(editor_test::write_text(root + "/" + file, "// a script\r\n"));
-	for (const char *file : {"missions/first.til", "missions/lost.til", "missions/lost.dbf"})
+	for (const char *file : {"missions/first.til", "missions/lost.til"})
 		TEST_EXPECT(editor_test::write_text(root + "/" + file, "x"));
+	// A dialog bank is a document the editor reads (DI-32): an empty one, as the engine's writer makes it.
+	{
+		std::vector<uint8_t> bank;
+		std::string error;
+		TEST_EXPECT(opennova::dbf::encode_dbf(opennova::dbf::File(), bank, error) &&
+		            editor_test::write_bytes(root + "/missions/lost.dbf", bank));
+	}
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(count_code(v.findings.diagnostics, "project.mission.feature_off") == 1);

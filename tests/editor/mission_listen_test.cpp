@@ -24,6 +24,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/dbf/dbf.h>
 #include <formats/lwf/lwf.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
@@ -122,7 +123,8 @@ std::vector<Placed> placed() {
 	return out;
 }
 
-std::vector<uint8_t> mission_bytes() {
+// With `dialogs`, two events: a pre-mission one playing dialog 1, another playing dialog 2 on the first event pass.
+std::vector<uint8_t> mission_bytes(bool dialogs = false) {
 	bms::File mission;
 	mission::make_default(mission);
 	for (const Placed &each : placed()) {
@@ -131,6 +133,17 @@ std::vector<uint8_t> mission_bytes() {
 		at.y = each.y;
 		mission::add_entity(mission, each.kind, each.item, at);
 	}
+	if (dialogs)
+		for (const auto &[dialog, flags] : std::vector<std::pair<int, uint32_t>>{{1, uint32_t(bms::EventFlags::PreMission)}, {2, 0u}}) {
+			mission::MissionEventRecord event;
+			event.flags = int(flags);
+			const size_t index = mission::add_event(mission, event);
+			mission::MissionActionRecord action;
+			action.action_type = int(bms::ActionType::PlayWavList);
+			action.param1 = dialog;
+			std::string error;
+			mission::insert_event_action(mission, index, 0, action, error);
+		}
 	mission::sync_counts(mission);
 	std::vector<uint8_t> bytes;
 	std::string error;
@@ -147,12 +160,12 @@ struct Rig {
 	std::string root;
 	std::string path;
 
-	bool open(bool waves = true) {
+	bool open(bool waves = true, bool dialogs = false) {
 		session.handle(request::new_project(dir.file("project"), "Listen"));
 		session.run_operations();
 		editor_test::create_missing_files(session);
 		root = session.view().project.root;
-		bool ok = editor_test::write_bytes(root + "/" + kMission, mission_bytes()) &&
+		bool ok = editor_test::write_bytes(root + "/" + kMission, mission_bytes(dialogs)) &&
 				editor_test::write_text(root + "/missions/listen.wac", kScript) &&
 				editor_test::write_text(root + "/defs/items.def", kItems) &&
 				editor_test::write_bytes(root + "/sounds/game.lwf", bank_bytes());
@@ -160,6 +173,37 @@ struct Rig {
 		for (const SetSpec &set : kSets)
 			if (waves || std::string(set.name) != "LP_NIGHT")
 				ok = ok && editor_test::write_bytes(root + "/sounds/" + strutil::to_lower(set.name) + ".wav", tone);
+		// The mission's dialog bank and its sounds (DI-32): dlg001 two lines, the second after half a second; dlg002 one.
+		if (dialogs) {
+			dbf::File bank;
+			const auto line = [](const char *wave, uint8_t delay) {
+				dbf::Line out;
+				out.def_id_name = wave;
+				out.sequence = "##";
+				out.delay = delay;
+				return out;
+			};
+			dbf::Group one, two;
+			one.group_name = "dlg001";
+			one.lines = { line("D1A", 0), line("D1B", 5) };
+			two.group_name = "dlg002";
+			two.lines = { line("D2A", 0) };
+			bank.groups = { one, two };
+			lwf::File sounds;
+			for (const char *wave : { "D1A", "D1B", "D2A" }) {
+				lwf::Single single;
+				single.name = wave;
+				single.path = strutil::to_lower(wave) + ".wav";
+				single.value_hi = 0xD200;
+				sounds.singles.push_back(single);
+				ok = ok && editor_test::write_bytes(root + "/sounds/" + strutil::to_lower(wave) + ".wav", tone);
+			}
+			std::vector<uint8_t> dbf_bytes, lwf_bytes;
+			std::string error;
+			ok = ok && dbf::encode_dbf(bank, dbf_bytes, error) && lwf::encode_lwf(sounds, lwf_bytes, error) &&
+					editor_test::write_bytes(root + "/missions/listen.dbf", dbf_bytes) &&
+					editor_test::write_bytes(root + "/missions/listen.lwf", lwf_bytes);
+		}
 		if (!ok) return false;
 		editor_test::handle_to_end(session, request::rescan());
 		while (session.view().activity.validation.running) session.poll();
@@ -438,12 +482,58 @@ static int test_the_wire_and_the_overlay() {
 	return 0;
 }
 
+// The mission's dialogs heard as the game plays them (DI-32): the pre-mission event's Play dialog 1 queues its two lines
+// at the start, the second once the first has ended and after its half second; the second event's dialog 2, fired on
+// the first event pass, waits behind dialog 1 on the one dialog channel [orig: Dialog_UpdatePlayback @ 0x44e470]; each
+// line reaches the Shell's clip voices on its tick at its wave's dialog volume (210, the Listen's half of it here), the
+// body's `dialog` says the bank and its sounds; a seek back empties the channel and the start queues dialog 1 again.
+static int test_the_dialogs() {
+	Rig rig;
+	TEST_EXPECT(rig.open(true, true));
+	TEST_EXPECT(rig.look_from(0.0, 0.0, 0.0));
+	TEST_EXPECT(rig.listen(true, 0.5));
+	rig.run_to(62 * 6);
+	const MissionListen &listen = rig.viewport()->listen();
+	int32_t d1a = -1, d1b = -1, d2a = -1;
+	for (const ClipSoundFired &fired : listen.sounds_fired()) {
+		if (fired.action != "dialog") continue;
+		TEST_EXPECT(fired.state == "played" && fired.bank == "listen.dbf" && fired.voices.size() == 1);
+		if (fired.voices.size() != 1) continue;
+		TEST_EXPECT(fired.voices[0].volume == 105);
+		if (fired.voices[0].wave == "D1A") d1a = fired.tick;
+		if (fired.voices[0].wave == "D1B") d1b = fired.tick;
+		if (fired.voices[0].wave == "D2A") d2a = fired.tick;
+	}
+	TEST_EXPECT(d1a == 0 && d1b >= d1a + 31 && d2a >= d1b);
+	bool handed = false;
+	for (const ClipSoundPlay &play : rig.session.clip_sounds_since(0))
+		for (const WorkspaceView::Voice &voice : play.voices) handed = handed || voice.path == "sounds/d1b.wav";
+	TEST_EXPECT(handed);
+	const JsonValue envelope = rig.json();
+	const JsonValue *body = envelope.get("body");
+	const JsonValue *heard = body ? body->get("listen") : nullptr;
+	const JsonValue *dialog = heard ? heard->get("dialog") : nullptr;
+	TEST_EXPECT(dialog && dialog->get_string("bank", "") == "listen.dbf" && dialog->get_bool("bank_found", false) &&
+			dialog->get_string("sounds", "") == "listen.lwf");
+	// Back to the start: the channel empties, and the start's dialog 1 is heard again.
+	TEST_EXPECT(rig.set(R"({"clock": {"ticks": 0, "playing": false}})"));
+	rig.viewport();
+	rig.run_to(10);
+	bool again = false;
+	for (const ClipSoundFired &fired : rig.viewport()->listen().sounds_fired())
+		again = again || (fired.action == "dialog" && fired.tick == 0 && fired.set == "dlg001" && !fired.voices.empty() &&
+				fired.voices[0].wave == "D1A" && fired.seq > 3);
+	TEST_EXPECT(again);
+	return 0;
+}
+
 int main() {
 	int failed = 0;
 	failed |= test_sources_by_the_hour_and_the_reach();
 	failed |= test_the_channels_take_the_loudest();
 	failed |= test_the_scripts_weather();
 	failed |= test_the_wire_and_the_overlay();
+	failed |= test_the_dialogs();
 	if (failed) return 1;
 	std::printf("editor_mission_listen_test: OK\n");
 	return 0;
