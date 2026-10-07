@@ -59,6 +59,18 @@ public:
 	// Below the rain gate the drawer never touches the device (retail
 	// returns @ 0x5dee48): neither view keeps streaks.
 	void hide_frame();
+	// One display frame over a drop pool no simulation owns (the editor's
+	// environment preview, ADR 0046 DI-19b): the drawer's update and compile
+	// for `camera` (renderer::update_and_compile_precipitation), the pool's
+	// slots re-floored by `sampler` over the water at `water_z_q16`, the drops
+	// in `light_rgb` (g_EnvTerrainLightCombined), the drawer's call-to-call
+	// memory this node's own. Not bound to Godot.
+	void render_pool_frame(opennova::env::PrecipitationField &r_field, int32_t p_rain_pct_q16,
+			uint32_t p_kind, int32_t p_water_z_q16,
+			const opennova::env::PrecipitationFloorSampler &p_sampler, Camera3D *p_camera,
+			int p_camera_mode, uint32_t p_light_rgb);
+	// The drops of this frame's main view (0 when none draws).
+	int get_frame_drops() const { return frame_.drops; }
 	// This frame's streaks into the post-particle overlay tail. Not bound to
 	// Godot.
 	void append_overlay(SceneOverlaySubmission &r_submission);
@@ -79,6 +91,8 @@ private:
 	opennova::renderer::PrecipitationDrawFrame frame_;
 	// The weapon Inset pass's call of the same frame.
 	opennova::renderer::PrecipitationDrawFrame inset_frame_;
+	// The drawer's call-to-call memory for a pool no simulation owns.
+	opennova::renderer::PrecipitationDrawState pool_draw_;
 	void compile_into_(Object *p_sim, Camera3D *p_camera, int p_camera_mode,
 			opennova::renderer::PrecipitationDrawFrame &r_frame);
 };

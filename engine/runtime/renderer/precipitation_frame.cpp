@@ -2,6 +2,8 @@
 
 #include <cmath>
 
+#include <base/io/fixed.h>
+
 namespace opennova::renderer {
 
 namespace {
@@ -121,6 +123,33 @@ void compile_precipitation_frame(env::PrecipitationField &field,
 		push_vertex(out.vertices, rgt, 1.0f, 1.0f);
 		++out.drops;
 	}
+}
+
+PrecipitationCamera precipitation_camera_from_render(const float position[3],
+		const float right[3], const float up[3], int32_t mode) {
+	PrecipitationCamera camera;
+	// Render (x, y, z) -> mission 16.16 (x, -z, y).
+	camera.position_q16[0] = io::float_to_fp16_16_round_sat(position[0]);
+	camera.position_q16[1] = io::float_to_fp16_16_round_sat(-position[2]);
+	camera.position_q16[2] = io::float_to_fp16_16_round_sat(position[1]);
+	for (int i = 0; i < 3; ++i) {
+		camera.right[i] = right[i];
+		camera.up[i] = up[i];
+	}
+	camera.mode = mode;
+	return camera;
+}
+
+void update_and_compile_precipitation(env::PrecipitationField &field,
+		int32_t rain_pct_q16, uint32_t precipitation_kind, int32_t water_z_q16,
+		const env::PrecipitationFloorSampler &sampler,
+		uint32_t terrain_light_combined_rgb, const PrecipitationCamera &camera,
+		PrecipitationDrawState &state, PrecipitationDrawFrame &out) {
+	if (rain_pct_q16 > env::PrecipitationField::kRainGateQ16)
+		field.update(camera.position_q16[0], camera.position_q16[1], camera.position_q16[2],
+				rain_pct_q16, water_z_q16, sampler);
+	compile_precipitation_frame(field, rain_pct_q16, precipitation_kind,
+			terrain_light_combined_rgb, camera, state, out);
 }
 
 } // namespace opennova::renderer

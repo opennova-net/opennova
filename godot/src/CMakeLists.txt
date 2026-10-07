@@ -97,6 +97,7 @@ add_library(${TARGET_NAME} SHARED
     mission/static_population_instance.cpp
     mission/mission_object_placer_static_sources.cpp
     env/celestial.cpp
+    env/celestial_overlay.cpp
     env/environment_cube_capture.cpp
     env/sky_dome.cpp
     env/slot_shadow.cpp
