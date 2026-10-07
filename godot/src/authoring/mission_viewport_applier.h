@@ -18,6 +18,7 @@
 #include <editor/preview/viewport_follow.h>
 
 #include "authoring/preview_effects.h"
+#include "authoring/preview_sound_player.h"
 #include "authoring/viewport_applier.h"
 #include "env/env_file.h"
 #include "env/mission_environment.h"
@@ -99,6 +100,10 @@ namespace godot {
 // coronas drawn in the overlay tail; spawned again when the placement, a lift, a hide or a move's gesture
 // end moves what stands. The FLICKER ring and the detail tier's sway read the weather's oscillator, whose
 // wave alone the device runs on the preview clock (the mission's start settle first); no other weather runs.
+//
+// DI-36: the Listen. While the options listen, each channel the viewport's MissionListen binds plays its wave looping
+// at its place (PreviewSoundLoops, DI-02's player), the SubViewport's camera the 3D listener, as the game's ambient
+// channels play; heard while the picture is drawn (held paused once it has not been for kListenHeldFrames frames).
 class MissionViewportApplier final : public ViewportApplier {
 public:
 	explicit MissionViewportApplier(SubViewport &viewport);
@@ -138,6 +143,8 @@ public:
 	Ref<MissionObjectPlacer> placer() const { return placer_; }
 	// DI-31's: the foliage dispatcher, the effects drawn, the light director.
 	FoliageDispatcher *foliage() const { return foliage_; }
+	// DI-36's: the Listen's channels' player.
+	const PreviewSoundLoops &listen() const { return *listen_; }
 	PreviewEffects &effects() { return *effects_; }
 	Ref<EffectLightDirector> lights() const { return lights_; }
 	// How the entities stand: placed by the last whole placement and shown, lifted since and shown,
@@ -387,6 +394,15 @@ private:
 	bool shown_foliage_ = true, shown_effects_ = true, shown_lights_ = true;
 	int64_t clock_ms_ = 0;
 	uint64_t overlay_frame_id_ = 0;
+	// DI-36: the Listen's channels, the project's root its waves are read under, and how many frames passed since the
+	// picture was last presented (heard while under kListenHeldFrames). apply_listen_ binds the channels as the
+	// viewport's mix holds them now.
+	void apply_listen_(const opennova::editor::MissionViewport &mission);
+	static constexpr int kListenHeldFrames = 30;
+	std::unique_ptr<PreviewSoundLoops> listen_;
+	std::string project_root_;
+	uint64_t listen_presented_ = 0;
+	int listen_idle_frames_ = kListenHeldFrames;
 	// The frames presented, and the last one's foliage, light and effect legs (microseconds).
 	uint64_t presented_ = 0;
 	int64_t leg_us_[3] = { 0, 0, 0 };
