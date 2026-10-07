@@ -146,9 +146,12 @@ MissionViewportApplier::MissionViewportApplier(SubViewport &viewport) : scene_st
 	// Single-sampled, as the game's own view draws: the particle renderer's compositor passes bind the view's
 	// depth (DI-14's rule; at MSAA_4X every particle went undrawn).
 	viewport.set_msaa_3d(Viewport::MSAA_DISABLED);
+	// Its camera is the 3D listener of its own world (DI-36: the Listen's channels pan about it, as the game's camera).
+	viewport.set_as_audio_listener_3d(true);
 	root_ = memnew(Node3D);
 	root_->set_name("Mission");
 	viewport.add_child(root_);
+	listen_ = std::make_unique<PreviewSoundLoops>(root_);
 	// Retail shaders write gamma-domain values and rely on one terminal display decode per 3D
 	// view; the clear colour is the environment's frame clear (BG_COLOR, no ambient: the game's
 	// ClearColor node, game_world_frame.cpp's clear colour leg).
@@ -297,6 +300,8 @@ bool MissionViewportApplier::mount_(const opennova::editor::SessionView &view) {
 	mounted_ = source;
 	stamped_ = std::make_shared<opennova::editor::StampedFiles>(source);
 	root_files_->mount_files(stamped_);
+	// A wave the Listen decoded may be one that moved: decoded again as it is next played.
+	listen_->forget();
 	for (int layer = 0; layer < kLayers; ++layer) {
 		if (stale[layer]) {
 			layer_files_[layer].clear();
@@ -477,6 +482,7 @@ void MissionViewportApplier::rebuild(const opennova::editor::ViewportModel &view
 		if (loading_.is_null() && !terrain_->is_building()) carried.clear();
 	}
 	build_.reset();
+	project_root_ = view.project.root;
 	const MissionViewport &mission = mission_of(viewport);
 	if (mission.view_status() != opennova::editor::MissionViewStatus::Ready || !view.findings.assets) {
 		loading_.unref();
@@ -1181,6 +1187,7 @@ void MissionViewportApplier::place_camera_(const opennova::editor::ViewportModel
 void MissionViewportApplier::clear() {
 	build_.reset();
 	loading_.unref();
+	listen_->stop();
 	drop_entities_();
 	relight_();
 	effects_->clear();
@@ -1274,6 +1281,16 @@ opennova::io::JsonValue MissionViewportApplier::drawn_json_() const {
 	const ParticleRenderer *renderer = effects_->renderer();
 	effects.set("quads", json_number(double(renderer ? renderer->get_rendered_quad_count() : 0)));
 	out.set("effects", std::move(effects));
+	// The Listen's voices (DI-36): those it holds, those sounding, those whose wave still decodes or did not decode,
+	// how many it started in all, and whether it is heard (the picture drawn).
+	JsonValue listen = JsonValue::make_object();
+	listen.set("voices", json_number(listen_->voices()));
+	listen.set("playing", json_number(listen_->playing()));
+	listen.set("decoding", json_number(listen_->decoding()));
+	listen.set("failed", json_number(listen_->failed()));
+	listen.set("started", json_number(double(listen_->started())));
+	listen.set("audible", JsonValue::make_bool(listen_idle_frames_ < kListenHeldFrames));
+	out.set("listen", std::move(listen));
 	return out;
 }
 
@@ -1302,6 +1319,7 @@ void MissionViewportApplier::tick(const opennova::editor::ViewportModel &viewpor
 	const std::shared_ptr<opennova::particle::EffectScene> &scene = mission_of(viewport).effects().scene();
 	if (effects_mounted_ && scene != effects_->scene()) effects_->show(scene);
 	apply_shots_(mission_of(viewport));
+	apply_listen_(mission_of(viewport));
 }
 
 void MissionViewportApplier::apply_shots_(const opennova::editor::MissionViewport &mission) {
@@ -1316,6 +1334,32 @@ void MissionViewportApplier::apply_shots_(const opennova::editor::MissionViewpor
 	shot_scars_->set_resource_root(effects_->root());
 	if (mission.shots().scar_count() > 0) shot_scars_->present(preview_scar_record(mission.shot_scars()), Dictionary());
 	else shot_scars_->clear();
+}
+
+void MissionViewportApplier::apply_listen_(const opennova::editor::MissionViewport &mission) {
+	// The Listen's channels (DI-36) as the viewport's mix binds them now, heard while the picture is drawn.
+	const opennova::editor::MissionListen &listen = mission.listen();
+	if (!mission.options().listen.on || !listen.open() || project_root_.empty()) {
+		listen_->stop();
+		listen_idle_frames_ = kListenHeldFrames;
+		return;
+	}
+	listen_idle_frames_ = presented_ != listen_presented_ ? 0 : std::min(listen_idle_frames_ + 1, kListenHeldFrames);
+	listen_presented_ = presented_;
+	std::vector<PreviewSoundLoops::Channel> channels;
+	channels.reserve(listen.channels().size());
+	for (const opennova::editor::MissionSoundChannel &each : listen.channels()) {
+		PreviewSoundLoops::Channel channel;
+		channel.started = each.started;
+		channel.path = each.candidate >= 0 ? each.path : std::string();
+		channel.volume = each.volume;
+		channel.pitch_q16 = each.pitch_q16;
+		channel.at[0] = each.at.x;
+		channel.at[1] = each.at.y;
+		channel.at[2] = each.at.z;
+		channels.push_back(std::move(channel));
+	}
+	listen_->follow(project_root_, channels, mission.options().listen.volume, listen_idle_frames_ < kListenHeldFrames);
 }
 
 // --- the frame -----------------------------------------------------------------------------------
