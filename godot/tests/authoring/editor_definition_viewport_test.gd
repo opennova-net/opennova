@@ -385,3 +385,74 @@ func test_a_weapon_fires_in_first_person() -> void:
 		sources[String(effect.get("source", ""))] = true
 	assert_true(sources.has("begin") and sources.has("direct") and sources.has("impact"), str(sources.keys()))
 	assert_true(_weapon_change({"clock": {"playing": false}, "gestures": []}))
+
+
+func _ammo_state() -> Dictionary:
+	return _seam.query("viewport", {"op": "state", "path": "ammo.def", "kind": "definition", "limit": 50})
+
+
+## DI-23: an ammo record whose rounds draw no model of their own stands all the same: its impact rows as a board in
+## the body, and a row played (`impact`) fires one round alone at a face of it, the device drawing the range's
+## target, the impact's effect through the game's particle renderer and the scar through its ScarPresenter.
+func test_an_ammo_plays_its_impact_rows() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor definition ammo %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	assert_true(_seam.new_project(dir, "Ammo Board"))
+	_write(dir.path_join("ammo.def"), TestFs.crlf("ammo AT_NULL\n\teffects_table\n\t\tmove none none 0\n"
+			+ "\t\tplayer none none 0\n\t\tzip none none 0\n\t\tobj Puff none 15\n\t\tdirt Puff none 15\n\tend\nend\n"
+			+ "ammo AMMO_T\n\tvelocity 600\n\tmax_age 3\n\tweight_in_grains 62\n\tscar_type 1\n\teffects_table\n"
+			+ "\t\tmetal Puff none 15\n\tend\nend\n").to_utf8_buffer())
+	_write(dir.path_join("particles/puff.ptl"), _ptl().to_utf8_buffer())
+	_write(dir.path_join("particles/particle_dot.tga"),
+			FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/cbin/particle_dot.tga")))
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	assert_true(_seam.open_document("ammo.def"), "the ammo table opens")
+	assert_true(_seam.select_record(_seam.get_row_id(1)), "AMMO_T selected")
+	var state := _ammo_state()
+	for _frame in 600:
+		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
+				and int(state.get("builds", 0)) > 0:
+			break
+		_app.pump()
+		await get_tree().process_frame
+		state = _ammo_state()
+	assert_eq(String(state.get("status", "")), "ready", str(state.get("message", "")))
+	var impacts: Dictionary = state.get("body", {}).get("impacts", {})
+	assert_eq(String(impacts.get("ammo", "")), "AMMO_T", str(impacts).left(300))
+	var surfaces: Array = impacts.get("surfaces", [])
+	assert_eq(surfaces.size(), 20)
+	if surfaces.size() != 20:
+		return
+	# Dirt (class 1): AMMO_T authors none, so the game plays AT_NULL's bank at place 5, its dirt row.
+	assert_eq(String(surfaces[1].get("from", "")), "bank")
+	assert_eq(int(surfaces[1].get("bank_tag", -1)), 5)
+	assert_eq(String(surfaces[1].get("effect", "")), "Puff")
+	assert_eq(String(surfaces[14].get("from", "")), "own")
+	# The metal row played: one round alone at a metal face.
+	var request := {"kind": "set_viewport", "path": "ammo.def", "viewport": {"kind": "definition", "impact": "metal"}}
+	assert_true(bool(_seam.request(request).get("outcome", {}).get("done", false)))
+	var device: SubViewport = _app.get_viewport_device("ammo.def", "definition")
+	assert_not_null(device)
+	if device == null:
+		return
+	var target := device.find_children("Target", "MeshInstance3D", true, false)[0] as MeshInstance3D
+	var scars := device.find_children("Scars", "ScarPresenter", true, false)[0] as ScarPresenter
+	var weapon := {}
+	for _frame in 600:
+		weapon = _ammo_state().get("body", {}).get("weapon", {})
+		if int(weapon.get("scars", 0)) > 0 and scars.get_stats_record().world_surfaces > 0:
+			break
+		_app.pump()
+		await get_tree().process_frame
+	assert_true(target.visible, "the target stands")
+	assert_eq(String(weapon.get("range", {}).get("target", {}).get("surface", "")), "metal")
+	assert_gt(int(weapon.get("scars", 0)), 0, "the round scars the face: %s" % str(weapon.get("events", [])).left(400))
+	assert_gt(scars.get_stats_record().world_surfaces, 0, "the game's ScarPresenter draws it")
+	var impact_spawns := 0
+	for effect: Variant in _ammo_state().get("body", {}).get("effects", []):
+		if String(effect.get("source", "")) == "impact":
+			impact_spawns += 1
+	assert_gt(impact_spawns, 0, "the impact's effect spawned")

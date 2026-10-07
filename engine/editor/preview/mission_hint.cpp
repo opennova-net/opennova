@@ -40,6 +40,11 @@ std::string mission_handle_step(MissionHandle handle, float snap, float turn) {
 
 std::string mission_canvas_hint(const MissionHintInput &in) {
 	if (!in.current) return "The picture is catching up with the mission; edits wait for it.";
+	// Shooting edits nothing: it takes a mission that is held too.
+	if (in.tool == MissionTool::Shoot)
+		return in.ammo.empty() ? "Shoot: pick an ammo, then click the terrain or an object to fire it there (Esc stops)."
+		                       : "Shoot " + in.ammo + ": click the terrain or an object to fire one there; the impact "
+		                                              "plays as the game plays it (Esc stops).";
 	if (!in.editable && in.tool != MissionTool::Select)
 		return "Nothing can be placed now: " + (in.not_editable.empty() ? std::string("the mission is held.") : in.not_editable);
 	switch (in.tool) {
@@ -56,7 +61,8 @@ std::string mission_canvas_hint(const MissionHintInput &in) {
 		// The box takes the toolbar's grid whatever is held.
 		return "Area: drag a box on the ground to make an area trigger (snaps to " + mission_snap_words(in.grid) +
 				"; Esc stops).";
-	case MissionTool::Select: break;
+	case MissionTool::Select:
+	case MissionTool::Shoot: break;
 	}
 	if (in.dragging) {
 		if (!in.handle) return "Let go to select what the box holds (Shift adds, Ctrl toggles).";
