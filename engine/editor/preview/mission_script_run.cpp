@@ -30,6 +30,26 @@ std::string key_of(const MissionSceneHeader &header, const std::string &basename
 	return key;
 }
 
+// The dialogs and the script voices the tick's effects raised (the Listen's, DI-32): a Play dialog's queue
+// [orig: EventAction_Dispatch @ 0x454461, "dialog"] and a voice channel's wave [orig: Wac_PlayScriptedVoiceWave
+// @ 0x4ed610, WacCmd_SsnWave @ 0x4f78d0, WacCmd_SsnRadio @ 0x4f79b0: ScriptVoiceChannel::start's "dialog_wav"].
+void take_voices(const world::WorldOutbox &out, int32_t tick, std::vector<MissionScriptSound> &sounds) {
+	for (const world::Effect &effect : out.effects.entries()) {
+		MissionScriptSound heard;
+		heard.tick = tick;
+		if (effect.kind == "dialog") {
+			heard.kind = MissionScriptSound::Kind::Dialog;
+			heard.dialog = effect.a;
+		} else if (effect.kind == "dialog_wav" && !effect.str.empty()) {
+			heard.kind = MissionScriptSound::Kind::Voice;
+			heard.wave = effect.str;
+		} else {
+			continue;
+		}
+		sounds.push_back(std::move(heard));
+	}
+}
+
 // The presentation the script's world raised that no one here takes, let go as a host with no presenter lets it go
 // (WorldOutbox::discard_presentation), with the wire's queues a host's tick would send.
 void let_go(world::WorldOutbox &out) {
@@ -47,6 +67,8 @@ const char *mission_script_sound_kind_token(MissionScriptSound::Kind kind) {
 	switch (kind) {
 	case MissionScriptSound::Kind::Relative: return "relative";
 	case MissionScriptSound::Kind::Positional: return "positional";
+	case MissionScriptSound::Kind::Dialog: return "dialog";
+	case MissionScriptSound::Kind::Voice: return "voice";
 	case MissionScriptSound::Kind::Thunder: break;
 	}
 	return "thunder";
@@ -75,6 +97,7 @@ void MissionScriptRun::close() {
 	key_.clear();
 	error_.clear();
 	sounds_.clear();
+	start_sounds_.clear();
 	tick_ = 0;
 	failed_ = false;
 	scripted_ = false;
@@ -104,6 +127,7 @@ void MissionScriptRun::boot_(const std::shared_ptr<const ProjectAssetSource> &fi
 	const auto start = std::chrono::steady_clock::now();
 	kernel_.reset();
 	sounds_.clear();
+	start_sounds_.clear();
 	tick_ = 0;
 	error_.clear();
 	failed_ = false;
@@ -166,7 +190,11 @@ void MissionScriptRun::boot_(const std::shared_ptr<const ProjectAssetSource> &fi
 	// @ 0x525cb8 -> Environment_MissionStartInit @ 0x57f878].
 	kernel->world.weather.seed(env::weather_seed_from_config(config, kernel->mission.header));
 	kernel->complete_mission_start();
-	// What the settle raised is the start's own, never heard: the mission has not begun.
+	// What the settle raised is the start's own, never heard: the mission has not begun. The dialogs the pre-mission
+	// pass queued play once it has [docs/audio/lwf-dbf-sound-re.md: a PreMission PlayWavList is registered at the
+	// start and plays back serially]: heard at tick 0.
+	take_voices(kernel->world.out, 0, start_sounds_);
+	sounds_ = start_sounds_;
 	kernel->world.out.weather_sounds.clear();
 	kernel->world.out.slot_sounds.clear();
 	let_go(kernel->world.out);
@@ -187,6 +215,9 @@ void MissionScriptRun::step_() {
 	context.phase = world::TickPhase::Gameplay;
 	context.script_admitted = true;
 	kernel.wac.tick(kernel.world, context);
+	// The mission's events after it, in the script pass's order (the WAC, then the events): a Play dialog queues its
+	// dialog [orig: EventAction_Dispatch @ 0x4542e0, case 7 @ 0x454461].
+	kernel.events.tick(kernel.world, context);
 	// The entity update's cohort walks of the statics and the markers alone: each item's class think, the env-sound
 	// class's time-of-day shots among them [orig: Entity_UpdateAllEntities @ 0x4c2244..0x4c2398].
 	kernel.world.weather.tod_fixed24 = clock_fixed24_;
@@ -228,6 +259,7 @@ void MissionScriptRun::step_() {
 		sounds_.push_back(std::move(heard));
 	}
 	out.slot_sounds.clear();
+	take_voices(out, tick, sounds_);
 	let_go(out);
 	tick_ = tick;
 }
@@ -246,7 +278,7 @@ bool MissionScriptRun::run_to(int32_t tick) {
 		let_go(kernel_->world.out);
 		kernel_->world.out.weather_sounds.clear();
 		kernel_->world.out.slot_sounds.clear();
-		sounds_.clear();
+		sounds_ = start_sounds_;
 		tick_ = 0;
 	}
 	const int32_t run = std::min(tick - tick_, kMissionScriptCatchUpTicks);

@@ -22,8 +22,10 @@ namespace godot {
 // (WorkspaceView::Sound, the session's play_sound). Each voice is a project wave decoded as the game decodes
 // it (lwf::wav_decode_pcm16, boxed by WavLoader) on a worker, then played at once with the others at the
 // pitch and volume the session's pick gave it (preview/sound_preview.h: the set's and the member's pitch
-// composed, the member's volume): the picks are the session's, the player only sounds them. A play in
-// place of one playing stops it. Every later preview (a clip's footsteps, a menu's sounds) plays through it.
+// composed, the member's volume): the picks are the session's, the player only sounds them. A voice that
+// starts later (a dialog's next line, DI-32: WorkspaceView::Voice::start_ms) starts that long after the
+// others. A play in place of one playing stops it. Every later preview (a clip's footsteps, a menu's sounds)
+// plays through it.
 class PreviewSoundPlayer {
 public:
 	enum class State { Idle, Decoding, Playing, Ended, Failed };
@@ -53,11 +55,13 @@ private:
 		opennova::editor::WorkspaceView::Voice voice;
 		std::future<Decode> job;
 		AudioStreamPlayer *player = nullptr;
+		bool started = false;
 	};
 	Node *parent_ = nullptr;
 	std::vector<Voice> voices_;
 	State state_ = State::Idle;
 	std::string path_;
+	uint64_t playing_since_msec_ = 0; // when the decodes were done and the first voices started
 };
 
 // The project's waves as the preview decodes them, each once: decoded as the game decodes it (lwf::wav_decode_pcm16,
