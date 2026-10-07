@@ -69,10 +69,16 @@ static func project_game_dir(project_dir: String) -> String:
 ## archives and loose files) mounted as an install is, else, with no archive,
 ## the folder as a plain loose root (a source run's unexported project, the web
 ## build's staged files). It is OpenNova's own data, which the Build's gate
-## vouched for, so the retail boot manifest is not reported against it.
+## vouched for, so the retail boot manifest is not reported against it. The
+## expansion it mounts over the base is chosen as for any game folder (mount):
+## `/exp` (or `/mod`) on the command line, else the Mods list's pick, so an
+## expansion shipped beside the base game in `expansion/<name>/` plays as it
+## does in the original game run in that folder; one the folder lacks falls
+## back to the base game, as the engine's mount does (ADR 0048 d8).
 static func mount_bundled(dir: String) -> ResourceRoot:
 	var root := ResourceRoot.new()
-	if root.mount_runtime(dir, "", false, BUNDLED_GAME) == OK:
+	var expansion := LaunchFlags.expansion(ResourceDirSettings.get_expansion())
+	if root.mount_runtime(dir, expansion, false, BUNDLED_GAME) == OK:
 		return root
 	if root.set_root_dir(dir) != OK:
 		push_warning("BootRootMount: bundled assets not found at %s" % dir)
