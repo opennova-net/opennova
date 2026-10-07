@@ -1175,6 +1175,17 @@ the death in order, the effects it spawned, the sounds it fired.
 _Avoid_: item viewer, def preview (a powerup row or a carry limit draws nothing), model preview (the
 model's own document's picture)
 
+**Weapon range**:
+Where a weapon record fires in the Definition preview (ADR 0046 DI-22): a world of the editor's own
+holding the game's local player with the weapon in hand, before a target wall whose face is the surface
+picked, run tick by tick through the game's own legs (the weapon pump, the rounds' flight, the impacts,
+the fire-sound queue) from the gestures (Fire, Hold fire and its Release, Reload, Scope, Switch) the
+editor stamps on the preview clock. The run is a function of its gestures: the clock stepped back runs it
+again. What it hands the game's presenter is drawn where the presenter draws it: in first person the
+action legs at the gun's points, in third person a shot as another sees it (a soldier's, through the
+ammo; another player's, through the weapon's FIRE and RECOIL rows).
+_Avoid_: shooting range (the game has none), firing test, gun sim
+
 **Rig**:
 What an animation plays on: an animation table (its reset clip the bind) or a lone clip
 (its own bind) over a model's bone table (its parts' pivots and parents), loaded through
