@@ -61,4 +61,36 @@ and `M16_1st`; a fixed-function `FF_ST_OP` gun has no highlight and reads flat).
 3. Bake diffuse (with ambient occlusion), normal and the specular mask onto the
    game LODs; keep UV islands unmirrored on normal-mapped meshes.
 4. Export Model into `assets/`; check it in the editor (Problems, the model
-   preview), then in a mission in OpenNova and in the original game.
+   preview, every LOD in its LOD list), then in a mission in OpenNova and in
+   the original game.
+
+## LODs
+
+The game picks a model's LOD by its size on screen, not its distance: the
+radius of its collision box's sphere projected in pixels, scaled to a 640-wide
+picture and doubled at the highest object detail. LOD *i* draws while that
+radius is above its threshold (`Model_SelectRlodLevel @ 0x5C3B20`,
+`docs/render/render-order-re.md` "Object RLOD selection"), so a model of
+radius *r* metres leaves LOD *i* at about 640 *r* / (*T<sub>i</sub>* tan(fov/2))
+metres. At the game's view (about 84 degrees across a 16:9 window) the
+original's rifle thresholds 160, 64 and 12 put `onar15_3` (*r* 0.44) on LOD 1
+from 2 m, LOD 2 from 5 m and LOD 3 from about 33 m: every level but the last is
+seen up close.
+
+- Keep the original's thresholds for that kind of model, and make each LOD hold
+  up at the size its threshold draws it.
+- A LOD is LOD 0 from further away: the same silhouette, materials and UV maps,
+  no holes, no other texture layout. Cut it from LOD 0 (or the LOD before) so its
+  corners keep LOD 0's UVs, and keep a skinned LOD's vertex groups.
+- A collapse decimation tears a mesh of loose pieces (the first `onar15_3`
+  LOD 2 kept 17% of LOD 0's surface) and can fold a skinned mesh into a shard
+  (the first `onsold1`, `onsoldb` and `onsoldh` LOD 2s). Merge coplanar faces and
+  drop the small pieces instead, decimate a skinned LOD gently, or remesh a
+  closed shell for a far LOD and take its UVs and materials from LOD 0.
+- Check each level in the editor's model preview, and in the game at the
+  distances the walk picks it: the `object_lod_sweep` probe stands the player at
+  each distance and reports the level (`docs/mcp.md`).
+- The original's options can lower the object detail (game.cfg
+  `object_polydetail` 0 to 2), which brings every
+  switch in to 0.17, 0.34 or 0.5 of that distance; OpenNova draws at the
+  highest detail (D-RORD-13).
