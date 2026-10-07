@@ -73,6 +73,17 @@ public:
 	// is open only when what it reads moves (lists_made counts it, as a list).
 	void draw_fixes(Workspace &workspace, const Document &document, const NodeAddress &record, const FieldUse &field,
 	                const Value &value, bool open);
+	// A text reference completing as it is typed (ADR 0046 DI-09), drawn just after its box (the item before):
+	// while the box has the keyboard and holds a text, a list under it of the names that text begins first
+	// (complete_reference, the game's comparison), each by its words with where it is defined, a name longer than
+	// the field holds said; Down and Up mark one, Enter takes the marked one, Tab the marked or the first, a click
+	// one; Escape hides the list until the text changes. True when a name was taken this frame, `picked` holding
+	// it (the caller sets it). The names are made again only when the graph, the files or the field's scope move,
+	// not on each key (the field's value is the text typed).
+	bool draw_completions(Workspace &workspace, const Document &document, const NodeAddress &record, const FieldUse &field,
+	                      const Value &value, std::string &picked);
+	// How many times the completion's names were made (a test's measure).
+	size_t completions_made() const { return completions_made_; }
 	// How many times a popup's list was made (the graph's choices, the missing value's finding and
 	// its fixes): once per opening, and again while it is open only when what it reads moves
 	// (ListKey), never for a change of anything else (a line of Output, a build's step).
@@ -138,6 +149,20 @@ private:
 
 	std::map<Key, Popup> popups_;
 	std::vector<Key> held_; // the popups holding a list (at most the open one, once swept)
+	// The one box completing (one has the keyboard at a time): its names, kept while what they read stands.
+	struct Completing {
+		Key key;
+		RevisionKey view;
+		std::string scope;
+		std::vector<ReferenceChoice> choices;
+		size_t cursor = SIZE_MAX; // the marked row, none
+		std::string hidden;       // the text Escape hid the list at
+		std::string typed;        // the text the list was last drawn for
+		int drawn = -1;           // the frame the list was last drawn
+		bool hovered = false;     // the pointer was over the list then
+	};
+	Completing completing_;
+	size_t completions_made_ = 0;
 	const SessionView *pruned_view_ = nullptr;
 	RevisionKey pruned_key_;
 	size_t lists_made_ = 0;

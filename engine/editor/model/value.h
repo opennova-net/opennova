@@ -86,6 +86,9 @@ enum class ReferenceKind {
 	BankWave,       // a sound bank's wave by its name, in the bank the scope names (a member's)
 	SoundProfile,   // a SndProf.def profile by its name (an item's sound_profile)
 	Shader,         // a model material's shader, by the tag an effect (.fx) registers under
+	AnimationKey,   // an animation map's row by its slot's key, in the map file the scope names (a weapon action's anim)
+	ItemAlias,      // an item by its alias, items.def's sid (a hudpos.def VEHICLE_HUD block's)
+	AvatarPart,     // an avatar part by its name, of the kind and file the scope names (an Avatars.def combo's head)
 };
 
 // Whether the game reads a field on a particular record (Document::field_on). Ignored is
@@ -122,6 +125,11 @@ struct FieldSchema {
 	// reader narrows); else it counts the value's own bytes (a def's, a stylesheet's).
 	bool code_page = false;
 	ReferenceKind reference = ReferenceKind::None;
+	// A number whose reference names its definition by itself plus this (an ammo's tracer id, the items.def
+	// id less 100000, which the game compares with the item's own id less 100000 [orig: ItemDef_ParseProperty,
+	// the id arm's sub 186A0h @ 0x49EC54; ItemList_FindIndexByTypeId @ 0x49E100]): the reference reaches the
+	// name its value plus this makes, and a pick writes the name less it. 0 for none.
+	int64_t name_offset = 0;
 	std::vector<FieldChoice> choices;
 	bool flags = false;        // the choices are bits of one integer
 	bool open_choices = false; // the choices are the values known; the file takes any other typed

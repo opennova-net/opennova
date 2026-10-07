@@ -177,6 +177,18 @@ io::JsonValue reference_choices_to_json(const Document &document, const NodeAddr
 		const std::string &field, const SessionView &view, const JsonPage &page = {});
 io::JsonValue reference_targets_to_json(const Document &document, const NodeAddress &address,
 		const std::string &field, const SessionView &view, const JsonPage &page = {});
+// A reference field's completion of what is typed (ADR 0046 DI-09, the complete query): {field, reference, scope,
+// limit (the characters the field holds: a longer name the game's reader cuts), value (what it holds now),
+// prefix, typed (where something is typed: {status, the game's lookup of it as the field would hold it; fits;
+// targets, its Go to as reference_targets lists them, a missing name's where it belongs; fixes, as the problems
+// query writes them, Add it there first}), count, choices: [{name, label, kind, file, record, status, prefix
+// (its name starts with what is typed, as the lookup compares names), exact, fits, inert, reason, preview
+// ({play: the request playing a sound set or a wave}, {thumbnail: a texture's file, the texture_thumbnail
+// query's path}, or {open: the request opening what it names, its picture or preview there})}]}, those whose
+// name the typed text begins first (complete_reference). Null for a record the document does not hold or a
+// field it does not have.
+io::JsonValue reference_completion_to_json(const Document &document, const NodeAddress &address,
+		const std::string &field, const std::string &typed, const SessionView &view, const JsonPage &page = {});
 // Find in a document (the document_search query): {count, hits}, each hit its record's id (the
 // nested record's identity, else the row's), address, record path and locator, the field's id
 // and name, the value as shown and where the text is found in it.
