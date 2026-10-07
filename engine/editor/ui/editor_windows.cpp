@@ -228,9 +228,14 @@ bool EditorWindows::draw_frame(uint64_t frame_index) {
 	return drew;
 }
 
+void EditorWindows::canvas_mouse(const ViewportMouse &mouse) {
+	canvas_mice_.push_back(mouse);
+}
+
 void EditorWindows::begin_frame() {
 	in_frame_ = true;
 	pointer_hidden_ = false;
+	canvas_mice_.clear();
 	// What the windows offered F12 and Shift+F12 last frame is what the keys act on this one (the menu bar's
 	// shortcuts read it before the windows draw).
 	subject_ = std::move(offered_);

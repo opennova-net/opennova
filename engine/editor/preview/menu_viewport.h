@@ -8,12 +8,15 @@
 
 #include <editor/model/node.h>
 #include <editor/preview/menu_screen_render.h>
+#include <editor/preview/menu_sounds.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
 #include <formats/mnu/mnu.h>
 #include <runtime/menu/menu_frame.h>
 #include <runtime/menu/menu_screen_inputs.h>
+#include <runtime/menu/menu_sound.h>
+#include <runtime/audio/sound_selector.h>
 
 namespace opennova::editor {
 
@@ -57,25 +60,30 @@ struct MenuCanvasShow {
 	bool operator!=(const MenuCanvasShow &other) const { return !(*this == other); }
 };
 // The game's pointer over the menu's picture (DI-08), drawn while `shown`: at the mouse while it is over
-// the picture and the canvas shows no pointer of its own (ViewportPicture::pointer), else where a client
-// holds it (`held`, at `x`, `y` in design units: the wire's hover, the MCP gaps lane). The cursor drawn
-// is the one the game draws with the mouse there (menu_pointer_at). Neither option configures the screen
-// again: the device draws its cursor pass again alone.
+// the picture and the canvas shows no pointer of its own (ViewportPicture::pointer), else, while no canvas has
+// the mouse over the picture, where it is held (`held`, at `x`, `y` in design units: the wire's hover, the
+// MCP gaps lane). The cursor drawn is the one the game draws with the mouse there (menu_pointer_at). Neither
+// option configures the screen again: the device draws its cursor pass again alone. The held point with its
+// left button (`down`) is the game's mouse the menu's sounds hear (DI-34, MenuViewport::fire_sounds): a
+// client's, or the canvas's, which sets it as the mouse moves onto, over and off the windows, presses and
+// lets go.
 struct MenuPointerShow {
 	bool shown = true;
 	bool held = false;
 	float x = 0.0f;
 	float y = 0.0f;
+	bool down = false;
 	bool operator==(const MenuPointerShow &other) const {
-		return shown == other.shown && held == other.held && (!held || (x == other.x && y == other.y));
+		return shown == other.shown && held == other.held && down == other.down &&
+				(!held || (x == other.x && y == other.y));
 	}
 	bool operator!=(const MenuPointerShow &other) const { return !(*this == other); }
 };
 // The options on the wire (the envelope's `options`, a SetViewport's): {show_hidden, force_id,
 // force_state, checked, popup_open, focus, zoom: fit, scale or device, scale, snap, pointer, pointer_at:
-// [x, y] or null}.
-io::JsonValue menu_options_to_json(
-		const MenuViewportOptions &options, const MenuCanvasShow &show, const MenuPointerShow &pointer);
+// [x, y] or null, pointer_down, sound: {mute}}.
+io::JsonValue menu_options_to_json(const MenuViewportOptions &options, const MenuCanvasShow &show,
+		const MenuPointerShow &pointer, const MenuSoundOptions &sound);
 
 // "normal", "mouseover", "selected", "disabled": a forced state's token (-1 = normal), and back;
 // false for another token.
@@ -166,6 +174,27 @@ public:
 	const MenuCanvasShow &show() const { return show_; }
 	// The game's pointer over the picture (DI-08): drawn or not, and where a client holds it.
 	const MenuPointerShow &pointer() const { return pointer_; }
+	// Its sounds (DI-34): muted or not, and the last kSoundsFiredKept its windows fired, oldest first.
+	const MenuSoundOptions &sound() const { return sound_; }
+	const std::vector<MenuSoundFired> &sounds_fired() const { return sounds_fired_; }
+	static constexpr size_t kSoundsFiredKept = 16;
+	// One sample of the game's mouse over the picture (the canvas's while it has it over the picture, else the
+	// pointer held, at its point with its button), the
+	// game's pump of the windows' sounds run over it against the viewport's compile (menu_sounds.h): the claim
+	// there (MenuFrameCompiler::claim_at), live while enabled up its chain; a click as the game's frame takes
+	// one (menu::MenuClickLatch), its SELECTED a spin arrow's own row where the click is on one (a button of
+	// its own, as the runtime's arrow click plays it), else the window's; then MOUSEIN and MOUSEOUT
+	// (menu::MenuSoundPump over the windows' records, so an edit keeps what each holds). Each edge of a window
+	// with a row for its state plays it (plan_menu_sound, the member picked through `selector`, numbered from
+	// `next_seq`), kept and returned. Nothing while the picture is not the menu as it is now (the next sample
+	// after it follows takes the mouse there).
+	std::vector<MenuSoundFired> fire_sounds(const ViewportInput &input, const ProjectAssetSource &files,
+			const AssetScan *scan, audio::SoundSelector &selector, uint64_t &next_seq);
+	// What the window at the pre-order index `index` of the compile plays and when (null: no window there).
+	std::vector<MenuWindowSound> window_sounds(int index) const;
+	// The canvas's mouse over the picture (DI-34): the game's mouse while it is over the picture, else the held
+	// pointer is.
+	void take_mouse(const ViewportMouse *mouse) override;
 	// The screen row it shows (0 none).
 	NodeId screen_row() const { return part_; }
 	// What the device configures (null unless ready): the menu image, which the device holds while
@@ -252,6 +281,13 @@ private:
 	MenuViewportOptions options_;
 	MenuCanvasShow show_;
 	MenuPointerShow pointer_;
+	MenuSoundOptions sound_;
+	// The game's pump over the windows, by their records (DI-34): their sound states, the press and click.
+	menu::MenuSoundPump sound_pump_;
+	menu::MenuClickLatch click_;
+	ViewportMouse canvas_mouse_; // over false: no canvas has the mouse over the picture
+	MenuSoundBanks sound_banks_;
+	std::vector<MenuSoundFired> sounds_fired_;
 	uint64_t options_serial_ = 0;
 	MenuScreenStatus reason_ = MenuScreenStatus::NoProject;
 	std::string detail_;
