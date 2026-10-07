@@ -1,4 +1,4 @@
-"""`stop` asks only the process it was given to quit (game_mcp.py, docs/mcp.md).
+"""`stop` asks only the process it was given to quit (editor_mcp.py and game_mcp.py, docs/mcp.md).
 
     python -B -m unittest discover -s scripts/mcp -p "test_*.py"
 
@@ -7,7 +7,7 @@ Over a stand-in endpoint on an ephemeral port that names its process in its init
 plain-integer one still reads; `stop --pid-file` reaches the recorded port with no --port; an
 endpoint that is another process's, or names none, is refused with nothing sent; a stop given no
 process and no --port sends nothing (each client's default port is the stand-in's here, so a
-mistake shows as a call recorded, never as a person's game quit); --port alone stops as before;
+mistake shows as a call recorded, never as a person's editor quit); --port alone stops as before;
 a launch that reaches another process's endpoint fails; the console wrapper is never launched.
 """
 import contextlib
@@ -23,6 +23,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import editor_mcp  # noqa: E402
 import game_mcp  # noqa: E402
 from game_mcp import GameMcpError  # noqa: E402
 
@@ -84,6 +85,8 @@ class StopCase(unittest.TestCase):
     """Two stand-in endpoints, A and B (pids 1111 and 2222); the client's default port is A's, and
     a process counts as alive until its endpoint is asked to quit."""
 
+    client = editor_mcp
+
     def setUp(self):
         self.a, self.b = Endpoint(1111), Endpoint(2222)
         self.addCleanup(self.a.close)
@@ -113,6 +116,57 @@ class StopCase(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
             code = self.client.main(["stop", "--timeout", "2", *argv])
         return code, err.getvalue()
+
+
+class EditorStopTest(StopCase):
+    def test_the_pid_file_names_the_port_and_stops_that_editor_alone(self):
+        pid_file = self.pid_file(self.b)
+        code, _ = self.stop("--pid-file", pid_file)
+        self.assertEqual(code, 0)
+        self.assertEqual([name for name, _ in self.b.calls], ["editor_play", "editor_request"])
+        self.assertEqual(self.b.calls[1][1], {"kind": "quit"})
+        self.assertEqual(self.a.calls, [])
+        self.assertFalse(Path(pid_file).exists())
+
+    def test_another_editors_port_is_refused_with_nothing_sent(self):
+        code, err = self.stop("--pid-file", self.pid_file(self.b), "--port", str(self.a.port))
+        self.assertEqual(code, editor_mcp.EXIT_NOT_READ)
+        self.assertIn("pid 1111's, not pid 2222's", err)
+        self.assertEqual(self.a.calls + self.b.calls, [])
+
+    def test_a_pid_given_alone_is_checked_on_the_default_port(self):
+        code, err = self.stop("--pid", str(self.b.pid))
+        self.assertEqual(code, editor_mcp.EXIT_NOT_READ)
+        self.assertIn("not pid 2222's", err)
+        self.assertEqual(self.a.calls, [])
+
+    def test_a_plain_integer_pid_file_still_reads(self):
+        code, _ = self.stop("--pid-file", self.pid_file(self.b, "2222\n"), "--port", str(self.b.port))
+        self.assertEqual(code, 0)
+        self.assertTrue(self.b.quit_asked())
+        code, _ = self.stop("--pid-file", self.pid_file(self.b, "2222"))  # its port: the default, A's
+        self.assertEqual(code, editor_mcp.EXIT_NOT_READ)
+        self.assertEqual(self.a.calls, [])
+
+    def test_an_endpoint_that_names_no_process_is_refused(self):
+        self.b.pid = None
+        code, err = self.stop("--pid", "2222", "--port", str(self.b.port))
+        self.assertEqual(code, editor_mcp.EXIT_NOT_READ)
+        self.assertIn("does not name its process", err)
+        self.assertEqual(self.b.calls, [])
+
+    def test_no_process_and_no_port_sends_nothing(self):
+        for argv in ((), ("--pid-file", str(self.dir / "gone.pid")), ("--pid-file", self.pid_file(self.b, ""))):
+            code, err = self.stop(*argv)
+            self.assertEqual(code, editor_mcp.EXIT_NOT_READ, argv)
+            self.assertIn("nothing was sent", err)
+        self.assertEqual(self.a.calls + self.b.calls, [])
+
+    def test_a_port_alone_stops_as_before(self):
+        code, _ = self.stop("--port", str(self.b.port))
+        self.assertEqual(code, 0)
+        self.assertTrue(self.b.quit_asked())
+        self.assertEqual(self.a.calls, [])
 
 
 class GameStopTest(StopCase):
