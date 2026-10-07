@@ -27,6 +27,7 @@
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
+#include <editor/graph/jump_queries.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/model/document_search.h>
@@ -186,6 +187,23 @@ constexpr QueryParam kReferrersParams[] = {
 	{ "limit", J::Integer, false, "100", kLimitDoc },
 };
 
+// Find usages' (DI-18): the referrers' params, and a record of the file by its locator.
+constexpr QueryParam kUsagesParams[] = {
+	{ "path", J::String, false, nullptr, "A project file, as references takes it." },
+	{ "locator", J::String, false, nullptr,
+			"With path: a record of that file, by its locator (a native file's record by its path, as a Go to "
+			"names it): the uses of each name it defines that a lookup of the game finds (Find usages)." },
+	{ "kind", J::String, false, nullptr,
+			"Or a symbol's reference kind token (weapon, text_id, style_var, menu_screen, "
+			"menu_window, user_point, ...) with its name." },
+	{ "name", J::String, false, nullptr,
+			"The symbol's name, as the symbols query gives it (a style variable's NAME, not "
+			"%NAME%)." },
+	{ "scope", J::String, false, nullptr, "The scope the symbol is defined in; left out, any." },
+	{ "offset", J::Integer, false, "0", kOffsetDoc },
+	{ "limit", J::Integer, false, "100", kLimitDoc },
+};
+
 constexpr QueryParam kSymbolsParams[] = {
 	{ "kind", J::String, false, nullptr,
 			"Only the symbols of this reference kind token; every kind when left out." },
@@ -196,6 +214,10 @@ constexpr QueryParam kSymbolsParams[] = {
 constexpr QueryParam kProjectSearchParams[] = {
 	{ "text", J::String, true, nullptr,
 			"What to find, without case, in the files' names and the symbols' names." },
+	{ "scope", J::String, false, "all",
+			"all (every file and name, Find in project), files (the files alone, Go to file) or names (the names "
+			"the files define alone, Go to name); files and names ranked: the name itself, then a name it starts, "
+			"then one holding it, then one found by its words or a record naming it." },
 	{ "offset", J::Integer, false, "0", kOffsetDoc },
 	{ "limit", J::Integer, false, "100", kLimitDoc },
 };
@@ -644,8 +666,13 @@ JsonValue answer_users(
 	const std::string path = args.text("path"), kind_token = args.text("kind");
 	std::vector<const GraphEdge *> edges;
 	if (!path.empty()) {
+		// Find usages of a record of the file (DI-18): the uses of what it defines.
+		const std::string locator = usages ? args.text("locator") : std::string();
 		if (graph)
-			edges = usages ? graph->usages_of(path) : graph->referrers_of_file(path);
+			edges = usages ? usages_at(*graph, path, locator) : graph->referrers_of_file(path);
+	} else if (usages && args.has("locator")) {
+		error = "a locator names a record of the file \"path\" names.";
+		return JsonValue::make_null();
 	} else if (!kind_token.empty() && args.has("name")) {
 		ReferenceKind kind = ReferenceKind::None;
 		if (!reference_kind_from_token(kind_token, kind)) {
@@ -716,8 +743,13 @@ JsonValue answer_project_search(
 		error = "the text to find is empty.";
 		return JsonValue::make_null();
 	}
+	SearchScope scope = SearchScope::All;
+	if (args.has("scope") && !search_scope_from_token(args.text("scope"), scope)) {
+		error = "no scope \"" + args.text("scope") + "\" (all, files, names).";
+		return JsonValue::make_null();
+	}
 	return graph_search_to_json(
-			graph ? graph->search(text) : std::vector<GraphSearchHit>(), page_of(args));
+			graph ? search_project(*graph, text, scope) : std::vector<GraphSearchHit>(), page_of(args));
 }
 
 // Why no menu answers: the path names none, or, left out, no document is active or the active one
@@ -1657,9 +1689,10 @@ constexpr EditorQueryRow kRows[] = {
 			"A page of the edges that name a file, or a symbol of a kind and name in a scope.")
 			.pages("edges")
 			.row,
-	Query(K::Usages, "usages", answer_usages, kReferrersParams, kGraphReads,
+	Query(K::Usages, "usages", answer_usages, kUsagesParams, kGraphReads,
 			"A page of who uses a file: the edges that name it, then those naming each symbol it "
-			"defines; for a symbol, as referrers.")
+			"defines; with a locator, a record of it: the edges naming each symbol the record defines "
+			"(Find usages); for a symbol, as referrers.")
 			.pages("edges")
 			.row,
 	Query(K::Missing, "missing", answer_missing, kPageParams, kGraphReads,

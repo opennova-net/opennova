@@ -705,5 +705,9 @@ void run_model_tests();
 void run_project_tests();
 // Back and Forward: the menu bar's arrows, their keys and the mouse's buttons (navigation_test.cpp).
 void run_navigation_tests();
+// The jumps' keys and menus (shortcuts_test.cpp, DI-18): Go to file, Go to name, Go to definition, Find
+// usages, the Go menu, and the right-click menus of the mission view, the Inspector, Files, Problems and the
+// outline.
+void run_shortcuts_tests();
 
 } // namespace editor_ui_test
