@@ -1,9 +1,10 @@
 extends GutTest
 
 # The runtime HudOverlay (native, over the engine HudFrameCompiler): configure
-# from the shipped hudpos.def (the reference fixture set; those legs pend
-# without it), feed typed per-frame state, and assert on the
-# compiled draw list (get_draw_list_stats) plus the visible canvas geometry.
+# from the reference fixture's hudpos.def (an earlier build's layout, not
+# JO:CA's; those legs pend without the fixture set), feed typed per-frame
+# state, and assert on the compiled draw list (get_draw_list_stats) plus the
+# visible canvas geometry.
 # The shell-side HudSightsCard child stack is covered here too.
 
 const HudSightsCardScript := preload("res://game/world/hud_sights_card.gd")
