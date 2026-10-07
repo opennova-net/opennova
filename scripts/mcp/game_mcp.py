@@ -10,12 +10,14 @@ scripts/mcp/game_mcp.ps1 instead; both talk to the same endpoint.
     python scripts/mcp/game_mcp.py tools
     python scripts/mcp/game_mcp.py call game_state
     python scripts/mcp/game_mcp.py probe run perf_sample '{"sample_ms": 5000}' --wait
-    python scripts/mcp/game_mcp.py stop --pid-file build/game.pid
+    python scripts/mcp/game_mcp.py stop --pid-file build/game.pid    # that launch's game alone, on its port
     python scripts/mcp/game_mcp.py run -- "$GODOT_BIN" --path godot ...       # a windowed run with no endpoint, behind
 
-Exit codes: 0 ok; 1 usage or transport failure; 2 the tool reported
-isError; 3 a JSON-RPC error; 4 the probe was cancelled; 5 the probe
-errored; 6 stop: the process outlived the quit; 7 launch failed.
+Exit codes: 0 ok; 1 usage or transport failure (a stop refused among them:
+its endpoint not the process --pid or --pid-file names, or no process nor
+--port given); 2 the tool reported isError; 3 a JSON-RPC error; 4 the probe
+was cancelled; 5 the probe errored; 6 stop: the process outlived the quit;
+7 launch failed.
 """
 
 from __future__ import annotations
@@ -216,6 +218,92 @@ def pid_alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True
+    return True
+
+
+def write_pid_file(path: str | Path, pid: int, port: int) -> None:
+    """A launch's --pid-file: the process and the port its endpoint listens on, as JSON, so `stop
+    --pid-file` reaches that endpoint with no --port."""
+    Path(path).write_text(json.dumps({"pid": pid, "port": port}), encoding="utf-8")
+
+
+def read_pid_file(path: str | Path) -> tuple[int, int | None]:
+    """(pid, port) from a --pid-file: a launch's JSON, or a plain integer (a pid alone, its port
+    None); (0, None) when it cannot be read."""
+    try:
+        text = Path(path).read_text(encoding="utf-8").strip()
+        value = json.loads(text) if text else 0
+    except (OSError, ValueError):
+        return 0, None
+    if isinstance(value, dict):
+        pid, port = value.get("pid"), value.get("port")
+    else:
+        pid, port = value, None
+    pid = pid if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0 else 0
+    port = port if isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536 else None
+    return pid, port
+
+
+def reported_pid(initialize_result) -> int | None:
+    """The process an endpoint says serves it, its initialize result's `_meta.pid`
+    (godot/game/mcp/mcp_server.gd); None when it names none (a build older than the field)."""
+    meta = initialize_result.get("_meta") if isinstance(initialize_result, dict) else None
+    pid = meta.get("pid") if isinstance(meta, dict) else None
+    if isinstance(pid, float) and pid.is_integer():
+        pid = int(pid)
+    return pid if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0 else None
+
+
+def check_launched_endpoint(port: int, serving: int | None, pid: int, what: str) -> None:
+    """The endpoint a launch reached is the process it started (another one took the port first: the
+    launch failed). One that names no process is taken as it is."""
+    if serving is not None and serving != pid:
+        raise GameMcpError(
+            EXIT_LAUNCH_FAILED,
+            f"the endpoint on port {port} is pid {serving}'s, not the {what} this launch started (pid {pid}, "
+            f"still running with no endpoint of its own); pass another --port")
+
+
+def stop_target(args: argparse.Namespace, default_port: int, what: str) -> tuple[int, int, GameMcp]:
+    """`stop`'s process and endpoint: (pid, port, client). The pid is --pid's, else the --pid-file's;
+    the port --port's, else the one the --pid-file's launch recorded, else `default_port`. A stop
+    given no process and no --port or --url is refused (a usage error), since it would quit
+    whatever `what` listens on the default port; a missing or emptied --pid-file names none."""
+    pid, recorded = args.pid or 0, None
+    if args.pid_file:
+        file_pid, recorded = read_pid_file(args.pid_file)
+        pid = pid or file_pid
+    url = getattr(args, "url", None)
+    if not pid and args.port is None and not url:
+        named = f"the pid file {args.pid_file} names no process" if args.pid_file else "no process was named"
+        raise GameMcpError(
+            EXIT_USAGE,
+            f"stop: {named} and no --port was given; nothing was sent (it would quit whatever {what} "
+            f"listens on {default_port}): pass --pid, --pid-file or --port")
+    port = args.port if args.port is not None else (recorded or default_port)
+    return pid, port, GameMcp(url) if url else GameMcp.for_port(port)
+
+
+def serves_pid(client: GameMcp, pid: int, what: str) -> bool:
+    """Whether `client`'s endpoint answers, checked to be process `pid`'s before anything asks it to
+    quit: False when none answers. One that answers for another process, or names none, is refused
+    (a usage error, nothing sent), since its quit would end a `what` this stop was not given."""
+    try:
+        result = client.initialize(timeout=10)
+    except GameMcpError:
+        return False
+    serving = reported_pid(result)
+    if serving is None:
+        raise GameMcpError(
+            EXIT_USAGE,
+            f"stop: the endpoint at {client.url} does not name its process, so it cannot be told to be pid "
+            f"{pid}'s; nothing was sent (--port alone, with no --pid or --pid-file, stops whatever {what} "
+            f"listens there)")
+    if serving != pid:
+        raise GameMcpError(
+            EXIT_USAGE,
+            f"stop: the endpoint at {client.url} is pid {serving}'s, not pid {pid}'s; nothing was sent (pass "
+            f"the --port that {what}'s launch was given, or the --pid-file it wrote)")
     return True
 
 
@@ -440,11 +528,13 @@ def find_godot(explicit: str | None) -> Path:
 
 
 def runtime_sibling(path: Path) -> Path:
-    """The console wrapper starts the real exe as a child; launch the real one so the PID is the game's."""
-    if path.name.endswith("_console.exe"):
-        sibling = path.with_name(path.name.replace("_console.exe", ".exe"))
-        if sibling.is_file():
-            return sibling
+    """The console wrapper (Godot's `_console.exe`, an export's `.console.exe`) starts the real exe as
+    a child; launch the real one so the PID is the game's (the one its endpoint names)."""
+    for wrapper in ("_console.exe", ".console.exe"):
+        if path.name.endswith(wrapper):
+            sibling = path.with_name(path.name[:-len(wrapper)] + ".exe")
+            if sibling.is_file():
+                return sibling
     return path
 
 
@@ -522,7 +612,7 @@ def cmd_launch(args: argparse.Namespace) -> int:
             child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT,
                                      cwd=str(project), **popen_kwargs)
         if args.pid_file:
-            Path(args.pid_file).write_text(str(child.pid), encoding="utf-8")
+            write_pid_file(args.pid_file, child.pid, port)
 
         deadline = time.monotonic() + args.timeout
         client = GameMcp.for_port(port)
@@ -537,10 +627,12 @@ def cmd_launch(args: argparse.Namespace) -> int:
                     + (f"\n--- {log_file} ---\n{tail(log_file)}" if log_file else ""))
             if port_open(port):
                 try:
-                    client.initialize(timeout=5)
-                    break
+                    serving = reported_pid(client.initialize(timeout=5))
                 except GameMcpError:
                     pass
+                else:
+                    check_launched_endpoint(port, serving, child.pid, "game")
+                    break
             time.sleep(0.25 if not behind.active else 0.05)
         else:
             raise GameMcpError(
@@ -819,15 +911,11 @@ def cmd_probe(args: argparse.Namespace) -> int:
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
-    port = port_of(args)
-    pid = args.pid or 0
-    if args.pid_file and not pid:
-        try:
-            pid = int(Path(args.pid_file).read_text(encoding="utf-8").strip() or "0")
-        except (OSError, ValueError):
-            pid = 0
-    client = client_of(args)
-    if port_open(port):
+    # Given a process (--pid, --pid-file), only that process's endpoint is asked to quit: the port is
+    # the one its launch recorded unless --port says otherwise, and an endpoint there that is not the
+    # process's is refused before anything is sent (stop_target, serves_pid).
+    pid, port, client = stop_target(args, DEFAULT_PORT, "game")
+    if (args.url or port_open(port)) and (not pid or serves_pid(client, pid, "game")):
         try:
             client.call("game_probe", {"op": "cancel"}, timeout=10)
         except GameMcpError:
@@ -837,7 +925,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
         except GameMcpError:
             pass  # the game may drop the connection while quitting
     else:
-        print(f"no endpoint on port {port}; waiting for the process only")
+        print(f"no endpoint answered at {client.url}; waiting for the process only")
     deadline = time.monotonic() + args.timeout
     while time.monotonic() < deadline:
         alive = pid_alive(pid) if pid else port_open(port)
@@ -860,7 +948,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
 
 
 def port_of(args: argparse.Namespace) -> int:
-    return int(args.port)
+    return DEFAULT_PORT if args.port is None else int(args.port)
 
 
 def client_of(args: argparse.Namespace) -> GameMcp:
@@ -870,8 +958,9 @@ def client_of(args: argparse.Namespace) -> GameMcp:
 
 
 def add_endpoint_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT,
-                        help=f"the game's --mcp-port (default {DEFAULT_PORT})")
+    # None when left out (port_of reads it as DEFAULT_PORT), so `stop` can tell a --port given from none.
+    parser.add_argument("--port", type=int, default=None,
+                        help=f"the game's --mcp-port (default {DEFAULT_PORT}; stop: the --pid-file's)")
     parser.add_argument("--url", default=None, help="the full endpoint URL instead of --port")
 
 
@@ -894,7 +983,8 @@ def build_parser() -> argparse.ArgumentParser:
     launch.add_argument("--rendering-method", default=None, help="Godot rendering method (gl_compatibility, forward_plus)")
     launch.add_argument("--log-file", default=None, help="Godot --log-file; game_logs follows it")
     launch.add_argument("--stdout-log", default=None, help="where the child's stdout/stderr go (default: the temp dir)")
-    launch.add_argument("--pid-file", default=None, help="write the game's PID here (stop --pid-file reads it)")
+    launch.add_argument("--pid-file", default=None,
+                        help="write the game's PID and port here, as JSON (stop --pid-file reads both)")
     launch.add_argument("--timeout", type=float, default=240.0, help="seconds to wait for the endpoint")
     launch.add_argument("--loose", action="store_true", help="/d: loose files beside the archives override them")
     launch.add_argument("--loose-root", action="store_true", help="--loose-root: mount an archive-less directory as loose files")
@@ -996,10 +1086,13 @@ def build_parser() -> argparse.ArgumentParser:
     probe_cancel.add_argument("run_id", nargs="?", default=None)
     probe.set_defaults(func=cmd_probe)
 
-    stop = commands.add_parser("stop", help="game_control quit, then wait for the process to exit (never kills)")
+    stop = commands.add_parser("stop", help="game_control quit, then wait for the process to exit (never kills; "
+                                            "only the process --pid or --pid-file names, when given)")
     add_endpoint_options(stop)
-    stop.add_argument("--pid", type=int, default=None)
-    stop.add_argument("--pid-file", default=None)
+    stop.add_argument("--pid", type=int, default=None,
+                      help="the game's process: its endpoint must name this pid, or nothing is sent")
+    stop.add_argument("--pid-file", default=None,
+                      help="a launch's --pid-file: its pid, as --pid, and its port when --port is left out")
     stop.add_argument("--timeout", type=float, default=20.0)
     stop.set_defaults(func=cmd_stop)
     return parser
