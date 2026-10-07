@@ -130,6 +130,16 @@ void test_timeline() {
 	ui.away();
 	CHECK(lowered(logged_frame(ui)).find("sound (muted)") != std::string::npos, "the button says the clip is muted");
 
+	// The clip's fire events (DI-24): a clip of no fire bit fires nothing, which the Fire button says; its popup's
+	// Target is the viewport's fire option.
+	CHECK(lowered(logged_frame(ui)).find("fire (none)") != std::string::npos, "the button says nothing fires");
+	ui.activate(item_id(scope, {"Fire (none)###fire"}));
+	run.settle(1);
+	ui.activate(popup_item(ImHashStr("fire", 0, scope), "Target"));
+	run.settle(1);
+	CHECK(!model->options().fire.target.shown, "Target, the viewport's fire option");
+	ui.away();
+
 	// The track scrubbed with the mouse to its right end and past it: a loop's last tick (its wrap tick
 	// shows the first frame again), its last frame shown, held (S17 review).
 	ui.mouse(5000.0f, 10.0f);
