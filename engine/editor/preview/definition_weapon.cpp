@@ -252,6 +252,47 @@ bool DefinitionWeapon::refresh(const SessionView &view, const std::string &catal
 	return moved;
 }
 
+bool DefinitionWeapon::refresh_ammo(const SessionView &view, const std::string &ammo, bool enemy,
+		const DefinitionFireOptions &options) {
+	bool moved = !active_ || first_ || gun_ || !record_.empty();
+	if (gun_ || first_person_.active()) moved = true;
+	active_ = true;
+	first_ = false;
+	record_.clear();
+	gun_.reset();
+	gun_file_.clear();
+	notes_.clear();
+	eye_ = false;
+	if (rig_) ++rig_serial_;
+	rig_.reset();
+	rig_files_ = PreviewRig();
+	rig_read_.clear();
+	first_person_.clear();
+	// The range's frame: the picture's origin along +Z, up the picture's (the round stands for its soldier).
+	const PreviewVec3 origin = origin_, forward = forward_;
+	origin_ = PreviewVec3{0.0f, 0.0f, 0.0f};
+	forward_ = PreviewVec3{0.0f, 0.0f, 1.0f};
+	up_ = PreviewVec3{0.0f, 1.0f, 0.0f};
+	left_ = unit(cross(up_, forward_));
+	frame_words_ = "Fired alone, as the game fires an ammo for a soldier: the round leaves the picture's origin along "
+	               "+Z here (a soldier's leaves its eye along its aim).";
+	if (origin.x != origin_.x || origin.y != origin_.y || origin.z != origin_.z || forward.x != forward_.x ||
+	    forward.y != forward_.y || forward.z != forward_.z || moved)
+		planned_runs_ = UINT64_MAX;
+	WeaponRangeSetup setup;
+	setup.files = view.findings.assets;
+	// A soldier's shots (DI-24's range): weapon.def and ammo.def as the load reads them, each by its name.
+	setup.catalog = "weapon.def";
+	setup.ammo = ammo;
+	setup.view = WeaponShotView::Soldier;
+	setup.enemy = enemy;
+	setup.target = options.target;
+	range_.configure(setup);
+	if (!range_.ready()) notes_.push_back(range_.why() + " Nothing fires.");
+	notes_.push_back(frame_words_);
+	return moved;
+}
+
 void DefinitionWeapon::frame_(const def::DefWeaponDef &row, const OrbitCamera &orbit, int width, int height) {
 	frame_words_.clear();
 	eye_ = false;
