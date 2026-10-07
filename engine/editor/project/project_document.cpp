@@ -87,6 +87,9 @@ io::JsonValue project_document_to_json(const ProjectDocument &doc) {
 		io::JsonValue expansion = io::JsonValue::make_object();
 		expansion.set("name", io::JsonValue::make_string(doc.expansion.name));
 		expansion.set("builds_on", io::JsonValue::make_string(doc.expansion.builds_on));
+		// Written only when it names one (T5): a project on the install's base game keeps S16's form.
+		if (doc.expansion.on_base_project())
+			expansion.set("base_project", io::JsonValue::make_string(doc.expansion.base_project));
 		json.set("expansion", std::move(expansion));
 	}
 	return json;
@@ -136,7 +139,7 @@ bool project_document_from_json(const io::JsonValue &json, ProjectDocument &out,
 	if (const io::JsonValue *expansion = json.get("expansion")) {
 		if (!expansion->is_object())
 			return fail(error, CoreFinding::ProjectFieldInvalid, "\"expansion\" must be an object.");
-		for (const char *key : { "name", "builds_on" }) {
+		for (const char *key : { "name", "builds_on", "base_project" }) {
 			const io::JsonValue *value = expansion->get(key);
 			if (value && !value->is_string())
 				return fail(error, CoreFinding::ProjectFieldInvalid,
@@ -144,8 +147,9 @@ bool project_document_from_json(const io::JsonValue &json, ProjectDocument &out,
 		}
 		doc.expansion.name = expansion->get_string("name", "");
 		doc.expansion.builds_on = expansion->get_string("builds_on", "");
+		doc.expansion.base_project = expansion->get_string("base_project", "");
 		// An object naming nothing is no expansion's: the object's absence says standalone.
-		if (doc.expansion.standalone() && doc.expansion.builds_on.empty())
+		if (doc.expansion.standalone() && doc.expansion.builds_on.empty() && !doc.expansion.on_base_project())
 			return fail(error, CoreFinding::ProjectFieldInvalid,
 			            "\"expansion\" names no expansion: give it a \"name\", or leave the object out for a "
 			            "standalone project.");

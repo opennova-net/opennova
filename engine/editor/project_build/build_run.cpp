@@ -697,7 +697,10 @@ void BuildRun::compare_base(uint64_t budget) {
 			base_.reset();
 			return fail(make_finding(CoreFinding::BuildExpansionBaseMissing, DiagnosticSeverity::Error,
 			                         "The expansion " + plan_.target.expansion + " plays over the base game, and " + error +
-			                                 ": choose the game install in File > Project settings..."));
+			                                 (plan_.target.base_project.empty()
+			                                          ? std::string(": choose the game install in File > Project settings...")
+			                                          : ": export the base game's project " + plan_.target.base_project +
+			                                                    " first, then Refresh.")));
 		}
 		base_->load(base_cache_);
 		same_.assign(stamps_.size(), false);
