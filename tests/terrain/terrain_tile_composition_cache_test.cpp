@@ -17,6 +17,7 @@ using opennova::TerrainTileCompositionJob;
 using opennova::TerrainTileCompositionRequest;
 using opennova::TerrainTilePageKey;
 using opennova::TerrainTileResidentPoint;
+using opennova::TerrainTileSectorPatchPoint;
 
 bool expect(bool condition, const char *message) {
 	if (condition) {
@@ -254,6 +255,57 @@ bool test_lookup_granularity_walk() {
 			"the flat page answers only in its canonical (0,0) sector");
 }
 
+// Terrain_FindSectorPatchRT compares the patch key's ten low bits a half,
+// its source-atlas minimum, against each record's source-atlas origin, so the
+// flat page (packed zero) answers a detail patch only where the patch is
+// routed to the atlas's first quadrant; the world-point lookup's nine bits let
+// it answer anywhere in its canonical sector. The base game routes world
+// sector (0,0) to the atlas's (1,1) quadrant, where the field's foliage drew
+// the flat page's single colormap texel.
+// [orig: Terrain_FindSectorPatchRT @ 0x6042A0..0x60430B, mask @ 0x6042B0..0x6042C3;
+//  TerrainTile_CacheLookup @ 0x6041A4..0x6041B6 (nine bits)]
+bool test_sector_patch_lookup_masks_ten_bits() {
+	TerrainTileCompositionCache cache;
+	cache.begin_frame(0);
+	cache.begin_frame(0);
+	uint16_t flat_layer = 0;
+	uint16_t real_layer = 0;
+	// The flat page claims the first record; the 64u page of world sector
+	// (0,0) at local (0,0) is routed to atlas (512,512).
+	TerrainTileCompositionRequest real = page_request(0, 0, 0, 4);
+	real.source_origin_x = 512;
+	real.source_origin_z = 512;
+	if (!compose(cache, page_request(0, 0, 0, 0), &flat_layer) ||
+			!compose(cache, real, &real_layer) || flat_layer >= real_layer) {
+		return expect(false, "the flat page precedes the real page in record order");
+	}
+	// A cell at world (40, 40): the world-point lookup borrows the flat page
+	// at granularity 64 (it comes first in record order) ...
+	const auto world = cache.lookup(TerrainTileResidentPoint{40.0f, 40.0f});
+	if (!expect(world.has_value() && world->layer == flat_layer,
+			"the nine-bit world lookup borrows the flat page")) return false;
+	// ... while the patch lookup, keyed by the cell's atlas minimum (552, 552)
+	// with its quadrant bits set, never matches the flat page's zero key.
+	TerrainTileSectorPatchPoint patch;
+	patch.atlas_x = 512 + 32;
+	patch.atlas_z = 512 + 32;
+	const auto found = cache.find_sector_patch(patch);
+	if (!expect(found.has_value() && found->layer == real_layer,
+			"the ten-bit patch lookup takes the routed page, not the flat one")) return false;
+	// A patch routed to the first quadrant may still borrow the flat page.
+	TerrainTileSectorPatchPoint first_quadrant;
+	first_quadrant.atlas_x = 32;
+	first_quadrant.atlas_z = 32;
+	const auto borrowed = cache.find_sector_patch(first_quadrant);
+	if (!expect(borrowed.has_value() && borrowed->layer == flat_layer,
+			"a first-quadrant patch borrows the flat page in its sector")) return false;
+	// The routed world sector must match.
+	TerrainTileSectorPatchPoint elsewhere = patch;
+	elsewhere.sector_origin_x = 512;
+	return expect(!cache.find_sector_patch(elsewhere).has_value(),
+			"another world sector never matches");
+}
+
 bool test_publication_and_invalidation() {
 	TerrainTileCompositionCache cache;
 	cache.begin_frame(0);
@@ -300,6 +352,7 @@ int main() {
 	if (!test_eviction_waits_one_frame()) return 1;
 	if (!test_bind()) return 1;
 	if (!test_lookup_granularity_walk()) return 1;
+	if (!test_sector_patch_lookup_masks_ten_bits()) return 1;
 	if (!test_publication_and_invalidation()) return 1;
 	std::printf("OK: terrain tile composition cache\n");
 	return 0;

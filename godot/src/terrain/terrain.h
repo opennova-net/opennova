@@ -290,6 +290,11 @@ public:
 	std::optional<opennova::TerrainTilePageBinding>
 	get_tile_cache_binding_for_world_point_native(
 			float p_world_x, float p_world_z);
+	// A detail foliage patch's page: its cell's source-atlas minimum and its
+	// routed world sector (TerrainTileCompositionCache::find_sector_patch).
+	std::optional<opennova::TerrainTilePageBinding>
+	get_tile_cache_binding_for_sector_patch_native(
+			const opennova::TerrainTileSectorPatchPoint &p_point);
 
 	void set_lod_quality(float p_quality);
 	float get_lod_quality() const;

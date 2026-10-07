@@ -97,6 +97,8 @@ public:
 			const Vector3 &p_light_direction);
 	std::optional<opennova::TerrainTilePageBinding> lookup(
 			const opennova::TerrainTileResidentPoint &p_point);
+	std::optional<opennova::TerrainTilePageBinding> find_sector_patch(
+			const opennova::TerrainTileSectorPatchPoint &p_point);
 
 	Ref<Texture2DArray> get_texture() const { return texture_; }
 	Dictionary get_diagnostics() const;

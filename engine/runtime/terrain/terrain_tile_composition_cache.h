@@ -131,6 +131,20 @@ struct TerrainTileResidentPoint {
 	float world_z = 0.0f;
 };
 
+// A detail foliage patch as Terrain_FindSectorPatchRT reads it: its packed
+// key's two halves, whose low ten bits are the patch cell's minimum in the
+// 1024 source atlas (bit 9 the routed quadrant), and the routed world sector
+// origin the collector stored beside the key.
+// [orig: Terrain_CollectNearFoliagePatches @0x603F69..0x603FC7 (key and
+// sector stores); Foliage_RenderDetailPatches @0x60A1D2..0x60A1DE (the
+// three pushes)]
+struct TerrainTileSectorPatchPoint {
+	int32_t atlas_x = 0;
+	int32_t atlas_z = 0;
+	int32_t sector_origin_x = 0;
+	int32_t sector_origin_z = 0;
+};
+
 class TerrainTileCompositionCache {
 public:
 	// The active-quality retail cache layout. Low-quality 128x128 pages are a
@@ -194,14 +208,24 @@ public:
 	// (refreshing its last use), or null when the page is not composed.
 	std::optional<TerrainTilePageBinding> bind(
 			const TerrainTileCompositionRequest &request) noexcept;
-	// TerrainTile_CacheLookup (MATCHTERRAIN) / Terrain_FindSectorPatchRT
-	// (detail foliage): the first resident record, in record order, whose
-	// packed coordinate matches the point's at granularity 32, then 64 ... 512
-	// units within the point's sector. The record may be coarser or finer than
-	// the point's own page, and a coarse-granularity match can return a page
-	// that does not contain the point.
+	// TerrainTile_CacheLookup (MATCHTERRAIN, objects): the first resident
+	// record, in record order, whose packed coordinate matches the world
+	// point's at granularity 32, then 64 ... 512 units within the point's
+	// sector, on the NINE low bits of each half. The record may be coarser or
+	// finer than the point's own page, and a coarse-granularity match can
+	// return a page that does not contain the point.
 	std::optional<TerrainTilePageBinding> lookup(
 			const TerrainTileResidentPoint &point) noexcept;
+	// Terrain_FindSectorPatchRT (detail foliage): the same walk over the
+	// records, but on the TEN low bits of each half of the patch's packed
+	// key, its source-atlas minimum, against each record's packed key, its
+	// source-atlas origin: bit 9 is the routed quadrant, so the shared flat
+	// page (packed coordinate zero) answers only a patch routed to the atlas's
+	// first quadrant. A hit stamps its last use, as the caller does.
+	// [orig: Terrain_FindSectorPatchRT @0x6042A0..0x60430B; the caller's
+	// last-use store @0x60A217..0x60A21D]
+	std::optional<TerrainTilePageBinding> find_sector_patch(
+			const TerrainTileSectorPatchPoint &point) noexcept;
 	// The composed page a layer holds, if any (diagnostics; no last-use stamp).
 	std::optional<TerrainTilePageBinding> resident_layer(uint16_t layer) const noexcept;
 
