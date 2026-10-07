@@ -132,6 +132,14 @@ ProblemFix edit_fix(const std::string &path, const PlannedFix &planned);
 bool missing_target(const ReferenceSubject &missing, const SessionView &view, ReferenceTarget &out);
 // The same for a field's value where it resolves to nothing (graph/reference_queries' reference_status).
 bool missing_target(const FieldUse &field, const Value &value, const SessionView &view, ReferenceTarget &out);
+// The project file where a missing symbol belongs: the one its scope names (its row's scope_names_file: a
+// string id's table, the menu an ACTION's screen or window is looked up in, the model whose user points an
+// item's particle slot names), a sound set's bank (a menu SOUND's own, else one on the chain the game
+// searches), else the file that defines the other symbols of its kind that a lookup finds, else the table its
+// kind goes in (a catalog or a stylesheet that defines nothing yet: the one the game reads by name, else the
+// project's first of its kind); null when the project has none. Where an item a model makes goes too (ADR
+// 0046 DI-12, preview/model_placement.h).
+const AssetEntry *defining_file(const ReferenceSubject &missing, const SessionView &view);
 // Whether the finding has a fix, without planning a Use fix's rename (fixes_for plans it).
 bool has_fixes(const Diagnostic &diagnostic, const SessionView &view, const ProblemFixIndex *index = nullptr);
 // The finding's bulk fixes, in order, without planning a Use fix's rename (a Use fix is

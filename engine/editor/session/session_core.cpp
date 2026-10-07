@@ -1093,7 +1093,13 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 	// What the viewport plans, as its canvas would raise it.
 	struct Planned final : CanvasRequests {
 		std::vector<EditorRequest> requests;
+		std::string words;
+		int64_t item = 0;
 		void request(EditorRequest each) override { requests.push_back(std::move(each)); }
+		void served(std::string said, int64_t placed) override {
+			words = std::move(said);
+			item = placed;
+		}
 	} planned;
 	const ViewportDrag &asked = request.drag;
 	const bool drag = asked != ViewportDrag(), command = request.command != ViewportCommand(),
@@ -1173,18 +1179,30 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 	}
 	// Served in order, as the parts serve what they compose (never through handle()): each meets its
 	// own row's gate, and its findings are this request's outcome. A Play a command plans (DI-26's Play
-	// from here) goes behind, or fresh, as the request asks.
+	// from here) goes behind, or fresh, as the request asks. Once one is refused, what comes after it is
+	// not served (DI-12: an entity is placed only once the item it names is made) but for a gesture's
+	// end, which ends the gesture all the same.
 	for (EditorRequest &each : planned.requests) {
+		if (outcome_.refused && each.kind != EditorRequestKind::EndEdit) continue;
 		if (each.kind == EditorRequestKind::Play) {
 			each.behind = request.behind;
 			each.fresh = request.fresh;
 		}
 		serve_request(*this, each);
 	}
+	// What the requests came to, in the planner's words (DI-12: an item made and placed, in two files).
+	if (!outcome_.refused && !planned.words.empty()) {
+		view_.activity.status = planned.words;
+		note(planned.words);
+		touch(ViewConcern::Output);
+	}
 	// An item placed is among the recently placed (ADR 0046 S15: the Place tool's palette lists them
-	// first), kept with the editor's preferences.
-	if (drop && !outcome_.refused && request.drop.reference == "item" && !request.drop.box)
+	// first), kept with the editor's preferences: one dropped by its id, or the one a model's drop placed.
+	if (drop && !outcome_.refused && request.drop.reference == "item" && !request.drop.box) {
 		if (const std::optional<int> item = strutil::parse_int(request.drop.name)) remember_recent_item(*item);
+	} else if (drop && !outcome_.refused && planned.item) {
+		remember_recent_item(planned.item);
+	}
 	if (!drag) return;
 	// The gesture ends with this sample (its EndEdit served), or stays open for the next: the
 	// document's open one, its last sample's time kept, and the point this sample took the handle to
