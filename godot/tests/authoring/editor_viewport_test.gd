@@ -809,6 +809,86 @@ func test_the_pointer_draws_where_it_is_held() -> void:
 	assert_eq(int(_state().get("builds", -1)), builds, "the screen never configured again for the pointer")
 
 
+## DI-34: a window's sounds reach the Shell through the game's pump. EXIT made to play OVER (game.lwf) as the mouse
+## comes onto it and CLICK on its click; the game's mouse held over it by a client (pointer_at) plays OVER, its
+## press and its release there (pointer_down) CLICK, and the next frame with the mouse still there OVER again: the
+## envelope's sounds_fired says each, the hit what EXIT plays and when, and the Shell starts a wave for each.
+func test_a_window_s_sounds_reach_the_shell() -> void:
+	if _app == null:
+		return
+	_new_project("Menu Sounds Game")
+	assert_eq(_seam.create_missing_files(), 0)
+	var root: String = _seam.get_project_root()
+	for name in ["over.wav", "click.wav"]:
+		_write(root.path_join("sounds").path_join(name), _wave_bytes(0.2))
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	assert_true(_seam.done({"kind": "create_file", "path": "game.lwf"}))
+	var edits := []
+	for each: String in ["OVER", "CLICK"]:
+		var wave: String = "w" + each
+		var named: String = "s" + each
+		edits.append_array([
+			{"op": "add", "kind": "wave", "as": wave}, {"op": "set", "id": wave, "field": "name", "value": each},
+			{"op": "set", "id": wave, "field": "file", "value": each.to_lower() + ".wav"},
+			{"op": "add", "kind": "set", "as": named}, {"op": "set", "id": named, "field": "name", "value": each},
+			{"op": "add", "kind": "layer", "parent": named, "as": named + "l"},
+			{"op": "add", "kind": "member", "parent": named + "l", "field": "wave", "value": each},
+		])
+	assert_true(_seam.done({"kind": "edit_record", "path": "game.lwf", "edits": edits, "open_first": true}))
+	assert_true(_seam.open_document("main.mnu"))
+	var exit: int = _seam.find_record("EXIT")
+	assert_gt(exit, 0)
+	assert_true(_seam.done({"kind": "edit_record", "path": "main.mnu", "edits": [
+		{"op": "add", "kind": "sound", "parent": exit, "as": "in"},
+		{"op": "set", "id": "in", "field": "state", "value": "MOUSEIN"},
+		{"op": "set", "id": "in", "field": "trigger", "value": "OVER"},
+		{"op": "set", "id": "in", "field": "file", "value": "game.lwf"},
+		{"op": "add", "kind": "sound", "parent": exit, "as": "click"},
+		{"op": "set", "id": "click", "field": "state", "value": "SELECTED"},
+		{"op": "set", "id": "click", "field": "trigger", "value": "CLICK"},
+		{"op": "set", "id": "click", "field": "file", "value": "game.lwf"},
+	]}))
+	assert_true(_seam.done({"kind": "save_all"}))
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var item := _item(state, "EXIT")
+	var rect: Array = item.get("rect", [])
+	assert_eq(rect.size(), 4, str(item))
+	if rect.size() != 4:
+		return
+	var at := [(float(rect[0]) + float(rect[2])) / 2.0, (float(rect[1]) + float(rect[3])) / 2.0]
+	# What EXIT plays and when, as the hit says it.
+	var hit := _viewport("hit", {"x": at[0], "y": at[1]})
+	var sounds: Array = hit.get("sounds", [])
+	assert_eq(sounds.size(), 2, str(hit))
+	if sounds.size() == 2:
+		assert_eq(String(sounds[0].get("sound", "")), "MOUSEIN")
+		assert_eq(String(sounds[0].get("when", "")), "on hover")
+		assert_eq(String(sounds[1].get("set", "")), "CLICK")
+	var started_before: int = _app.get_clip_voices_started()
+	assert_true(_change({"options": {"pointer_at": at}}))
+	assert_true(_change({"options": {"pointer_down": true}}))
+	assert_true(_change({"options": {"pointer_down": false}}))
+	for _frame in 120:
+		if _app.get_clip_voices_started() >= started_before + 3:
+			break
+		await get_tree().process_frame
+	assert_gte(_app.get_clip_voices_started(), started_before + 3, "the Shell started a wave a sound")
+	var fired: Array = _state().get("body", {}).get("sounds_fired", [])
+	var heard := []
+	for sound: Variant in fired:
+		heard.append("%s:%s:%s" % [sound.get("name", ""), sound.get("sound", ""), sound.get("set", "")])
+		assert_eq(String(sound.get("state", "")), "played", str(sound))
+		assert_eq(String(sound.get("bank", "")), "game.lwf", str(sound))
+	assert_eq(heard, ["EXIT:MOUSEIN:OVER", "EXIT:SELECTED:CLICK", "EXIT:MOUSEIN:OVER"], str(fired))
+	# Muted: fired and said, nothing handed to the Shell.
+	assert_true(_change({"options": {"sound": {"mute": true}, "pointer_at": null}}))
+	assert_true(_change({"options": {"pointer_at": at}}))
+	var muted: Array = _state().get("body", {}).get("sounds_fired", [])
+	assert_eq(String((muted.back() as Dictionary).get("state", "")), "muted", str(muted.back()))
+
+
 # --- the model -------------------------------------------------------------------------------------
 
 func test_model_draws_through_the_device() -> void:
