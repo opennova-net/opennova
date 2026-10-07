@@ -141,7 +141,9 @@ constexpr RequestField kFields[] = {
 			"align_horizontal_centers, align_vertical_centers; distribute_horizontally and "
 			"distribute_vertically, three or more; bring_to_front, bring_forward, send_backward, "
 			"send_to_back), a model's frame (its camera on the marker of the first id, else on the "
-			"whole model), or a mission's frame, top, ground, select_same (every entity of the "
+			"whole model) or place_in_mission (the Place tool of the mission last active armed with the "
+			"model's item, the item made in the item catalog first where none draws it; no ids), "
+			"or a mission's frame, top, ground, select_same (every entity of the "
 			"selected entities' items), duplicate (the ids, else the selection, copied and moved by "
 			"[east, north] metres, one batch) or paste (the clipboard's copied entities and areas, "
 			"their middle where the point at [x, y] meets the ground, one batch); by a way in the "
@@ -155,7 +157,9 @@ constexpr RequestField kFields[] = {
 			"of the picture in the viewport's units, or a box from at to to (a mission's area: "
 			"reference area, no name); snap a mission's grid in metres; kind the viewport's (left out, "
 			"the one the document shows in). The viewport plans what it makes, one batch, one undo "
-			"step; one that takes no drop refuses it (a menu's, a model's)." },
+			"step; one that takes no drop refuses it (a menu's, a model's). A mission's model no item "
+			"draws: its item made in the item catalog first (a decoration or a building as its parts "
+			"say), then placed, an undo step in each file." },
 	{ F::Workspace, "workspace", J::Object,
 			"What the windows show of their own, changed (the workspace section shows it): {<part>: {<member>: "
 			"value, ...}, focus?}, each part and member left out as it is; the parts and their members are "
