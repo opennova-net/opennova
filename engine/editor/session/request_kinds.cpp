@@ -559,8 +559,10 @@ constexpr RequestKindRow kRows[] = {
 			"editor edits its kind, a step of the navigation history. folder (DI-25, Files' New here): the "
 			"folder it is made in (\"/\" the top level; left out, where the placement rule puts a file of its "
 			"kind), refused (document.path) outside the project, in a dot-folder or the export folder; the files "
-			"it makes are one step of the file history (undo_file).")
-			.takes(request_params({ F::Path }, { F::FileKind, F::Values, F::Folder }))
+			"it makes are one step of the file history (undo_file). define (DI-33, a missing name's Create ... "
+			"with it): the name the made file then defines, added to its document as its type's Add makes one "
+			"and selected, one step its Undo takes back.")
+			.takes(request_params({ F::Path }, { F::FileKind, F::Values, F::Folder, F::Define }))
 			.holds(kFiles, kFilesAndDocuments)
 			.navigates()
 			.row,
