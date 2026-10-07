@@ -43,13 +43,23 @@ struct ProjectExportSettings {
 // game reads an expansion's own files (its table, banks and music) only under `/exp`, so a project
 // builds on an installed expansion only as an expansion of its own [orig: Expansion_LoadAssets
 // @ 0x4a4906..0x4a49de]. Each name keeps expansion_name.h's rule.
+//
+// `base_project` (ADR 0046 T5) names the base game as a project of its own rather than the game
+// install's: the folder of a standalone project of the same game, taken from this project's folder
+// when relative ('/'-separated, so a clone finds it where the repository keeps it). The base game is
+// then that project's export (its project.opennova's export.output: the base game as it ships), which
+// the expansion imports from, compares its files with, and plays over, where a project on the install's
+// base game uses the install's archives (project/base_project.h). It needs a name, and an expansion of
+// a project's base builds on no installed expansion.
 struct ProjectExpansion {
-	std::string name;      // builds as expansion\<name>\ ("" = standalone)
-	std::string builds_on; // an installed expansion ("" = the base game); requires `name`
+	std::string name;         // builds as expansion\<name>\ ("" = standalone)
+	std::string builds_on;    // an installed expansion ("" = the base game); requires `name`
+	std::string base_project; // the base game's project ("" = the game install's); requires `name`
 
 	bool standalone() const { return name.empty(); }
+	bool on_base_project() const { return !base_project.empty(); }
 	bool operator==(const ProjectExpansion &other) const {
-		return name == other.name && builds_on == other.builds_on;
+		return name == other.name && builds_on == other.builds_on && base_project == other.base_project;
 	}
 	bool operator!=(const ProjectExpansion &other) const { return !(*this == other); }
 };
@@ -61,7 +71,7 @@ struct ProjectDocument {
 	std::string target_game = kDefaultTargetGame; // a gameprofile code: jo, jodemo, dfx, dfx2, bhd
 	ProjectFeatures features;
 	ProjectExportSettings export_settings;
-	ProjectExpansion expansion; // `"expansion": {"name", "builds_on"}`, absent when standalone
+	ProjectExpansion expansion; // `"expansion": {"name", "builds_on", "base_project"?}`, absent when standalone
 };
 
 // Where a project keeps things, derived from its root. `cache_dir` and everything
