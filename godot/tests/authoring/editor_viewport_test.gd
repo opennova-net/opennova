@@ -1011,6 +1011,22 @@ func test_a_table_plays_on_its_rig() -> void:
 	assert_gt(at_rest.angle_to(turned), 0.05, "the clip poses the skeleton at the clip clock")
 	assert_eq(int(_state().get("body", {}).get("animation", {}).get("ticks", -1)), 8)
 	assert_eq(int(_state().get("clock", {}).get("ticks", -1)), 8, "the preview clock's ticks")
+	# The rig's model draws its mesh, not its bones alone: each skinned surface hangs under the skeleton with its
+	# mesh, shown, its posed bounds (a palette strip's culling box, else the mesh's) before the device's camera.
+	var camera: Camera3D = _device_node(preview, "Camera3D")
+	assert_not_null(camera)
+	var drawn := 0
+	for found: Variant in skeleton.find_children("*", "MeshInstance3D", true, false):
+		var surface := found as MeshInstance3D
+		if surface.mesh == null or not surface.is_visible_in_tree():
+			continue
+		drawn += 1
+		var box: AABB = surface.custom_aabb if surface.custom_aabb.has_volume() else surface.get_aabb()
+		assert_true(box.has_volume(), "a surface with bounds: %s" % surface.name)
+		if camera != null:
+			var center: Vector3 = (surface.global_transform * box).get_center()
+			assert_true(camera.is_position_in_frustum(center), "the surface stands before the camera: %s" % center)
+	assert_gt(drawn, 0, "the skinned mesh draws on its rig")
 
 
 ## DI-04: a clip's footstep events heard as it runs. The session fires each on the body's ticks through
