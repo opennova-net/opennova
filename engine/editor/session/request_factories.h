@@ -393,6 +393,16 @@ inline EditorRequest play_action_leg(std::string path, bool end) {
 	request.values = {{"leg", end ? "end" : "begin"}};
 	return request;
 }
+// A dialog played as the game plays it (DI-32, session/sound_play.h): `dialog` (its name, or a number: dlg%03i of
+// it) of the dialog bank `path` names, or of the bank the mission `path` loads; its line `line` alone where it is
+// 0 or more.
+inline EditorRequest play_dialog(std::string dialog, std::string path, int line = -1) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.path = std::move(path);
+	request.values = {{"dialog", std::move(dialog)}};
+	if (line >= 0) request.values.push_back({"line", std::to_string(line)});
+	return request;
+}
 inline EditorRequest stop_sound() {
 	return of(EditorRequestKind::StopSound);
 }

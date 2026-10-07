@@ -70,9 +70,10 @@ FieldUse picked_as(const FieldUse &field);
 // Every name a picker offers for the field, worded (the Inspector's and the wire's reference_choices
 // alike): the graph's (reference_choices over picked_as), the values the game resolves itself first
 // (DocumentType::game_choices: the player, SSN 10000), each worded (word_choices). A field whose
-// number forms a text key (FieldUse::key_prefix: a mission's name index, an objectives row) lists the
-// keys of that form its section holds, in the table the game reads (its own, else the alternate), each
-// by the number that forms it (text_key_number) and worded by its string, so a pick writes the number.
+// number forms a name (FieldUse::key_prefix: a mission's name index, an objectives row, a Play dialog)
+// lists the names of that form its scope holds (a text key in the table the game reads, its own, else
+// the alternate; a dialog in the mission's dialog bank), each by the number that forms it (key_number)
+// and worded by what it names, so a pick writes the number.
 std::vector<ReferenceChoice> picker_choices(const AssetGraph *graph, const Document &document, const NodeAddress &address,
                                             const FieldUse &field, const NameSource *names);
 
@@ -98,16 +99,21 @@ struct ReferenceCompletion {
 std::vector<ReferenceCompletion> complete_reference(const std::vector<ReferenceChoice> &choices, const FieldUse &field,
                                                     const std::string &typed);
 
-// The number that forms the text key `key` as the game forms it from `prefix` (`prefix` and the number
-// in three digits at least, sprintf's "%s%03i": STRNAME005 is 5, STRNAME1234 is 1234); false for a key of
-// another prefix or one no number forms (STRNAME5, STRNAME0005), which no lookup of the game reads.
+// The number that forms the name `key` of `kind` as the game forms it from `prefix` (`prefix` and the
+// number in three digits at least, sprintf's "%s%03i": STRNAME005 is 5, STRNAME1234 is 1234; dlg012 is
+// 12), the prefix compared as the kind's names compare (a text key's without case, a dialog's exactly:
+// DLG012 is no dialog the game forms); false for a name of another prefix or one no number forms
+// (STRNAME5, STRNAME0005), which no lookup of the game reads.
+bool key_number(ReferenceKind kind, const std::string &key, const char *prefix, int64_t &out);
+// A text key's (key_number of a TextId).
 bool text_key_number(const std::string &key, const char *prefix, int64_t &out);
-// The text key a field's number forms (FieldUse::key_prefix: a mission's name index, a waypoint's name
-// id, an objectives row) as a reference the badge and the Go to read: `out` the field as a TextId
-// reference in the table the game reads (its own where the project has it, else the alternate:
-// AssetGraph::lookup_scope), `key` the key ("STRWPNAME001"); false for a field that forms none, or a
-// number no lookup of the game reads (outside key_first..key_last).
-bool keyed_text_reference(const AssetGraph &graph, const FieldUse &field, const Value &value, FieldUse &out, Value &key);
+// The name a field's number forms (FieldUse::key_prefix: a mission's name index, a waypoint's name id,
+// an objectives row, a Play dialog's number) as a reference the badge and the Go to read: `out` the
+// field as a reference of the kind it picks (FieldUse::picks) where the game reads it (a text key's
+// table, its own where the project has it, else the alternate: AssetGraph::lookup_scope; a dialog's
+// bank), `key` the name ("STRWPNAME001", "dlg012"); false for a field that forms none, or a number no
+// lookup of the game reads (outside key_first..key_last).
+bool keyed_reference(const AssetGraph &graph, const FieldUse &field, const Value &value, FieldUse &out, Value &key);
 
 // A place an edge names, in words, its file not opened (the plain-words lane: a find's uses, a file's
 // page, a string's uses, the import plan): the record by its path, its last step in its type's own words
