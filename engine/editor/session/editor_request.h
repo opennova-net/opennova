@@ -9,6 +9,7 @@
 #include <editor/assets/import_choice.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/edit.h>
+#include <editor/project/play_mode.h>
 #include <editor/run/play_start.h>
 #include <editor/session/view/viewport_kind.h>
 
@@ -128,9 +129,10 @@ enum class SelectMode { Replace, Add, Toggle };
 
 // The settings ApplyProjectSettings sets, each one left out staying as it is: the
 // project's (its name, its features and its expansion, written to project.opennova, which
-// needs a project open) and the editor's (the game install, the runtime Play runs, Play in
-// the game install and whether it runs strictly, written to the editor's settings). Only what differs from the value in
-// effect is written. `serial` names the application: the SettingsApplied view event carries it
+// needs a project open), the project's local ones (its game install, how it plays and whether Play
+// saves first, its build folder, written to its .opennova/local.json) and the editor's (the game
+// install last chosen, the runtime Play runs, written to the editor's settings). Only what differs
+// from the value in effect is written. `serial` names the application: the SettingsApplied view event carries it
 // back (its tag), the view's settings_result what could not be written.
 struct ProjectSettingsChange {
 	uint64_t serial = 0;
@@ -143,10 +145,10 @@ struct ProjectSettingsChange {
 	std::optional<std::string> builds_on;
 	std::optional<std::string> game_install;
 	std::optional<std::string> runtime_executable; // "" = the runtime packaged beside the editor
-	std::optional<bool> play_in_install;
-	// Play in the game install runs strictly (Strict Play: the build and the install's program alone, no /d).
-	std::optional<bool> play_in_install_strict;
-	// Play saves every unsaved file first instead of asking (DI-26, Preferences::save_before_play).
+	// How the project plays (LocalSettings::play_mode: the OpenNova runtime, the game install, or Strict Play
+	// in it: the build and the install's program alone, no /d), and whether Play saves every unsaved file
+	// first instead of asking (DI-26, LocalSettings::save_before_play): the open project's, on this checkout.
+	std::optional<PlayMode> play_mode;
 	std::optional<bool> save_before_play;
 	// The folder Build to folder builds into, kept with the project's local settings ("" for none): the
 	// modder's pick (a build's out_dir keeps nothing).
@@ -157,8 +159,7 @@ inline bool operator==(const ProjectSettingsChange &a, const ProjectSettingsChan
 	return a.serial == b.serial && a.title == b.title && a.mission == b.mission &&
 			a.multiplayer == b.multiplayer && a.expansion == b.expansion && a.builds_on == b.builds_on &&
 			a.game_install == b.game_install && a.runtime_executable == b.runtime_executable &&
-			a.play_in_install == b.play_in_install && a.play_in_install_strict == b.play_in_install_strict &&
-			a.save_before_play == b.save_before_play && a.build_folder == b.build_folder;
+			a.play_mode == b.play_mode && a.save_before_play == b.save_before_play && a.build_folder == b.build_folder;
 }
 
 // Where Paste puts the clipboard: into the owner `parent` (0 = the row `row` itself) at
@@ -368,6 +369,11 @@ struct EditorRequest {
 	// Where Play starts the game's player (DI-26, Play from here: a point of `mission` and a heading), as a
 	// start marker the game honours in the staged build's copy of the mission (run/play_start.h).
 	PlayStart start;
+	// How this Play runs, and whether it saves the unsaved files first instead of asking, for this Play
+	// alone (left out, the project's own: LocalSettings::play_mode, save_before_play, which stay as they
+	// are): a client names the mode it means, whatever the project was last set to.
+	std::optional<PlayMode> play_mode;
+	std::optional<bool> save_before_play;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -389,7 +395,8 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.replace == b.replace && a.force == b.force && a.ask_name == b.ask_name &&
 			a.open_first == b.open_first && a.import_pass == b.import_pass && a.rehash == b.rehash &&
 			a.all == b.all && a.planned == b.planned && a.behind == b.behind && a.fresh == b.fresh && a.plan == b.plan &&
-			a.report == b.report && a.steps == b.steps && a.folder == b.folder && a.start == b.start;
+			a.report == b.report && a.steps == b.steps && a.folder == b.folder && a.start == b.start &&
+			a.play_mode == b.play_mode && a.save_before_play == b.save_before_play;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);
