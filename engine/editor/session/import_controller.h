@@ -80,7 +80,7 @@ public:
 	// images (each copied in from disk, or a project file named where it is), its record the importer's
 	// options, then the refresh that imports it. Refused, nothing written (import.terrain): a name that
 	// does not fit or that the project has a file of, a value of no key it takes, an image that does not
-	// read or fit its role (import/terrain_import.h).
+	// read or fit its role, foliage definitions the game would not read as given (import/terrain_import.h).
 	void new_terrain(const EditorRequest &request);
 	// PreviewTextureSource (S18): what a Replace (an image in paths) or an Edit externally (none) would do,
 	// into the view's texture_source dialog, nothing written: the plan's changes, its before and after in

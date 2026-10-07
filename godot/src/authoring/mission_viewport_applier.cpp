@@ -1,6 +1,7 @@
 #include "authoring/mission_viewport_applier.h"
 
 #include <godot_cpp/classes/environment.hpp>
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/core/math.hpp>
@@ -972,6 +973,30 @@ void MissionViewportApplier::apply_state_(const opennova::editor::ViewportModel 
 		shown_shadows_ = options.shadows;
 		// The casters' geometry is resolved (the Model units): the snapshot walks the sources.
 		if (placed_) terrain_->set_static_shadow_placer(shown_shadows_ ? placer_ : Ref<MissionObjectPlacer>());
+	}
+	// The ground overlay (DI-29): the picture the viewport made of what the game reads at each point, laid
+	// over the terrain from above (presentation x east, z the negated mission y), past it the one value the
+	// game reads all round where there is one.
+	if (mission.overlay_serial() != overlay_serial_) {
+		overlay_serial_ = mission.overlay_serial();
+		const opennova::editor::MissionOverlayImage &overlay = mission.overlay();
+		if (overlay.kind == opennova::editor::MissionGroundOverlay::None) {
+			terrain_->clear_ground_overlay();
+		} else {
+			Ref<Image> picture;
+			if (!overlay.empty()) {
+				PackedByteArray bytes;
+				bytes.resize(int64_t(overlay.rgba.size()));
+				std::copy(overlay.rgba.begin(), overlay.rgba.end(), bytes.ptrw());
+				picture = Image::create_from_data(overlay.width, overlay.height, false, Image::FORMAT_RGBA8, bytes);
+			}
+			const Rect2 rect(float(overlay.west), float(-overlay.north), float(overlay.width * overlay.texel),
+					float(overlay.height * overlay.texel));
+			const uint8_t *outside = overlay.outside_rgba;
+			terrain_->set_ground_overlay(picture, rect,
+					Color(outside[0] / 255.0f, outside[1] / 255.0f, outside[2] / 255.0f, outside[3] / 255.0f),
+					overlay.outside);
+		}
 	}
 	// The time of day: the mission's start time, or the option's hour.
 	if (options.time != applied_time_ && environment_built_) {
