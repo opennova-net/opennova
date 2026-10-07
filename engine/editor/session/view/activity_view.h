@@ -86,9 +86,11 @@ struct ActivityView {
 	// (run/play_start.h: the start marker type, how many stand there, whether one was added, the archive).
 	PlayStart play_start;
 	PlayStartPlaced play_start_placed;
-	// The running (or last) game is the game install's under Strict Play (the build and the install's
-	// program alone, no /d), and its first run, which wrote its game.cfg and quit, was started again.
-	bool play_strict = false;
+	// The mode the running (or last) game was started in, its run directory's (kRunMode*: runtime, install,
+	// or strict, Strict Play's: the build and the install's program alone, no /d; "" before a Play): the
+	// project's play_mode, or the one its Play request named for that Play alone. And whether its first run,
+	// which wrote its game.cfg and quit, was started again.
+	std::string play_run_mode;
 	bool play_started_again = false;
 	// What the last game install's game loaded, read from its file log (_filelog.txt) once it had exited
 	// (never while it runs: the game's exclusive appends would cut a log a reader holds open): whether the

@@ -59,10 +59,11 @@ bool FilePreferencesStore::load(Preferences &out, Diagnostic &finding) {
 	Preferences settings;
 	settings.runtime_executable = json.get_string("runtime_executable", "");
 	settings.game_install = json.get_string("game_install", "");
-	settings.play_in_install = json.get_bool("play_in_install", false);
-	settings.play_in_install_strict = json.get_bool("play_in_install_strict", false);
-	settings.save_before_play = json.get_bool("save_before_play", true);
 	settings.import_dependencies = json.get_bool("import_dependencies", true);
+	// Play's settings are each project's now: the ones an earlier editor kept here for every project are
+	// named, read by nothing, and dropped by the next save (no reader carries them into a project, pre-1.0).
+	for (const char *key : kRetiredPlayKeys)
+		if (const io::JsonValue *held = json.get(key)) settings.retired_play.push_back(held_setting(key, *held));
 	if (const io::JsonValue *recent = json.get("recent_projects"); recent && recent->is_array()) {
 		for (const io::JsonValue &item : recent->array) {
 			if (item.is_string() && !item.string.empty()) settings.recent_projects.push_back(item.string);
@@ -93,9 +94,6 @@ bool FilePreferencesStore::save(const Preferences &settings, Diagnostic &error) 
 	json.set("schema_version", io::JsonValue::make_number(kPreferencesSchemaVersion));
 	json.set("runtime_executable", io::JsonValue::make_string(settings.runtime_executable));
 	json.set("game_install", io::JsonValue::make_string(settings.game_install));
-	json.set("play_in_install", io::JsonValue::make_bool(settings.play_in_install));
-	json.set("play_in_install_strict", io::JsonValue::make_bool(settings.play_in_install_strict));
-	json.set("save_before_play", io::JsonValue::make_bool(settings.save_before_play));
 	json.set("import_dependencies", io::JsonValue::make_bool(settings.import_dependencies));
 	io::JsonValue recent = io::JsonValue::make_array();
 	for (const std::string &root : settings.recent_projects) recent.push(io::JsonValue::make_string(root));
