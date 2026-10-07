@@ -89,8 +89,7 @@ void serve_build(SessionCore &core, const EditorRequest &request) {
 }
 void serve_play(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
-		core.start_build(PlayIntent{ true, request.mission, request.behind, request.fresh, request.start }, std::string(),
-				false, ExportIntent());
+		core.start_build(core.play().intent_of(request), std::string(), false, ExportIntent());
 }
 void serve_export(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
@@ -403,10 +402,11 @@ constexpr RequestKindRow kRows[] = {
 	Request(K::ApplyProjectSettings, "apply_project_settings", serve_apply_project_settings,
 			"The settings set, each one left out as it is: the project's name and features "
 			"(project.opennova), the game install (the project's .opennova/local.json, and the "
-			"editor's, where a project naming none starts), the runtime and Play in the game "
-			"install (the editor's); its settings_applied view event carries the serial back, "
-			"flagged when a setting could not be written, and the view's settings_result lists "
-			"what could not be.")
+			"editor's, where a project naming none starts), how the project plays and whether Play "
+			"saves first (play_mode, save_before_play: the project's .opennova/local.json alone, a "
+			"project open), the runtime (the editor's); its settings_applied view event carries the "
+			"serial back, flagged when a setting could not be written, and the view's settings_result "
+			"lists what could not be.")
 			.takes(request_params({ F::Settings }))
 			.row,
 	// An import's plan is an operation (S13 A3, ImportPlan): these rows (and PreviewInstallImport's)
@@ -495,9 +495,12 @@ constexpr RequestKindRow kRows[] = {
 			"game wrote there in the Plays of the same mode before (its game.cfg, its saves: the run section's "
 			"kept); fresh: it is emptied first, a first run (the run section says fresh). start (Play from here, "
 			"DI-26): the player starts at a point of mission, as a start marker of the build's copy of it in the run "
-			"directory, OpenNova and the game install alike (play.start without a mission). With unsaved edits, Play "
-			"saves them first while the editor's save_before_play is on (the default), else it waits on the prompt.")
-			.takes(request_params({}, { F::Mission, F::Behind, F::Fresh, F::Start }))
+			"directory, OpenNova and the game install alike (play.start without a mission). play_mode: how this "
+			"Play runs (runtime, install, strict), left out the project's own (the OpenNova runtime for a project "
+			"never set to another), which it leaves as it is; the run section says the mode it ran in (ran_mode). "
+			"With unsaved edits, Play saves them first while save_before_play is on (this Play's, else the "
+			"project's; on for a project never set), else it waits on the prompt.")
+			.takes(request_params({}, { F::Mission, F::Behind, F::Fresh, F::Start, F::PlayMode, F::SaveBeforePlay }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Play", "Save all and play")
 			.acts_on_saved()
@@ -1017,9 +1020,11 @@ constexpr RequestKindRow kRows[] = {
 			"viewport that does not show it as it is now, a record or a handle it does not show, a "
 			"command it has not, a gesture the document holds no open one of, a drag that writes "
 			"nothing the session takes, or a drop the viewport does not take (viewport.refused); a "
-			"planned edit the session refuses is not done. behind and fresh: the Play a command plans (a "
-			"mission's play_from_here, DI-26) goes behind, or fresh, as play's do.")
-			.takes(request_params({}, { F::Path, F::Drag, F::Command, F::Drop, F::Behind, F::Fresh }))
+			"planned edit the session refuses is not done. behind, fresh, play_mode and save_before_play: the "
+			"Play a command plans (a mission's play_from_here, DI-26) goes behind, fresh, in that mode or saving "
+			"first, as play's do.")
+			.takes(request_params({}, { F::Path, F::Drag, F::Command, F::Drop, F::Behind, F::Fresh, F::PlayMode,
+					F::SaveBeforePlay }))
 			.names_active()
 			.row,
 	// What the windows show of their own (the MCP gaps lane): no file and no document, so it runs beside any
@@ -1239,9 +1244,13 @@ static_assert(viewport_rows_hold(),
 // as it would be before any build: no spawn here, a game running, or a mission the project does
 // not hold). The outcome names the operation joined.
 void join_operation(SessionCore &core, const EditorRequest &request) {
-	if (request.kind == EditorRequestKind::Play && core.play().refused(request.mission, request.start))
+	if (request.kind == EditorRequestKind::Play && core.play().refused(core.play().intent_of(request)))
 		return;
-	core.operations().running()->join(request);
+	// The Play's mode resolved as it joins (the request's, else the project's as it is now), as a Play
+	// served alone resolves it.
+	EditorRequest joined = request;
+	if (request.kind == EditorRequestKind::Play) joined.play_mode = core.play().intent_of(request).mode;
+	core.operations().running()->join(joined);
 	core.outcome().operation = core.operations().status().id;
 	if (request.kind != EditorRequestKind::Build || request.report) core.report_build();
 	if (request.kind == EditorRequestKind::Play) {

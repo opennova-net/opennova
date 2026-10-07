@@ -61,6 +61,8 @@ enum class RequestFieldId : uint8_t {
 	Steps,
 	Folder,
 	Start,
+	PlayMode,
+	SaveBeforePlay,
 	kCount,
 };
 
