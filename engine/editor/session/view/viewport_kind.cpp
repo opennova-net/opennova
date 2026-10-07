@@ -7,7 +7,8 @@ namespace opennova::editor {
 namespace {
 
 // One token per kind, in ViewportKind's order.
-constexpr const char *kTokens[] = { "menu", "model", "script", "mission", "texture", "effect", "hud", "definition", "environment" };
+constexpr const char *kTokens[] = { "menu", "model", "script", "mission", "texture", "effect", "hud", "definition", "environment",
+                                      "terrain" };
 
 static_assert(std::size(kTokens) == kViewportKindCount, "every ViewportKind has exactly one token");
 

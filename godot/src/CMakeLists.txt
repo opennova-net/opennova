@@ -404,6 +404,7 @@ if(OPENNOVA_EDITOR)
         authoring/model_viewport_applier.cpp
         authoring/preview_sound_player.cpp
         authoring/script_device.cpp
+        authoring/terrain_viewport_applier.cpp
         authoring/script_edit.cpp
         authoring/script_highlighter.cpp
         authoring/texture_viewport_applier.cpp
