@@ -170,7 +170,7 @@ int model_preview_auto_lod(const threedi::Threedi3di3 &model, const OrbitCamera 
 	for (size_t i = 0; i < model.lod_count; ++i)
 		thresholds.push_back(renderer::rlod_threshold_q16_from_rmdl(model.lods[i].lod_threshold));
 	const renderer::ObjectLodSelection selection = renderer::select_object_lod(
-	    thresholds, radius, renderer::object_lod_frame_scale(renderer::kObjectLodDetailLevelMax, static_cast<float>(width)));
+	    thresholds, radius, renderer::object_lod_frame_scale(renderer::kObjectLodDetailFreshProfile, static_cast<float>(width)));
 	if (selection.lod_index < 0) return static_cast<int>(model.lod_count) - 1;
 	return std::min(selection.lod_index, static_cast<int>(model.lod_count) - 1);
 }
