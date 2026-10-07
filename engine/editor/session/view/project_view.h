@@ -8,6 +8,7 @@
 
 #include <editor/assets/install_check.h>
 #include <editor/model/diagnostic.h>
+#include <editor/project/play_mode.h>
 
 namespace opennova::editor {
 
@@ -70,9 +71,9 @@ struct ProjectView {
 
 	// The editor's settings (Preferences, editor_preferences.h): the recent projects, the game
 	// install the editor imports from and plays in (the open project's, else the last chosen),
-	// Play in the game install, the runtime the settings name ("" = the one packaged beside the
-	// editor), whether a preview the windows raise plans the files the chosen ones need, and the items
-	// most recently placed in a mission (ADR 0046 S15), most recent first.
+	// the runtime the settings name ("" = the one packaged beside the editor), whether a preview the
+	// windows raise plans the files the chosen ones need, and the items most recently placed in a
+	// mission (ADR 0046 S15), most recent first; and the open project's Play settings (its local.json's).
 	std::vector<std::string> recent_projects;
 	// Each recent project as the welcome page shows it (the UX round's project lane), in the list's
 	// order: its title, its game's name and its expansion, read from its project file when the list
@@ -97,10 +98,10 @@ struct ProjectView {
 	// the editor's) and the editor's own (the one a new project starts with, its preference).
 	std::string retail_directory;
 	std::string editor_install;
-	bool play_retail = false;
-	// Play in the game install runs strictly (the editor's play_in_install_strict, Strict Play).
-	bool play_in_install_strict = false;
-	// Play saves every unsaved file first instead of asking (the editor's save_before_play, DI-26).
+	// How the open project plays (its local.json's play_mode: the OpenNova runtime, the game install, or
+	// Strict Play in it), and whether Play saves every unsaved file first instead of asking (its
+	// save_before_play, DI-26); with no project open, the defaults a project that never said has.
+	PlayMode play_mode = PlayMode::Runtime;
 	bool save_before_play = true;
 	std::string runtime_setting;
 	bool import_dependencies = true;
