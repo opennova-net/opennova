@@ -127,7 +127,7 @@ int test_kind_table() {
 	// HUD the Preview window shows (DI-20).
 	const DocumentTypeId texts[] = {DocumentTypeId::Script, DocumentTypeId::MusicScript, DocumentTypeId::Credits,
 	                                DocumentTypeId::Shader, DocumentTypeId::Text, DocumentTypeId::Particles,
-	                                DocumentTypeId::HudLayout};
+	                                DocumentTypeId::HudLayout, DocumentTypeId::CharAttrs};
 	size_t shown = 0, mains = 0;
 	for (const DocumentTypeId type : texts) {
 		shown += viewport_kind_shows(ViewportKind::Script, type) ? 1 : 0;
@@ -143,9 +143,9 @@ int test_kind_table() {
 		TEST_EXPECT((viewport_kind_row(static_cast<ViewportKind>(i)).role == ViewportRole::Main) ==
 		            (i == size_t(ViewportKind::Script) || i == size_t(ViewportKind::Mission) || i == size_t(ViewportKind::Texture) ||
 		             i == size_t(ViewportKind::Environment) || i == size_t(ViewportKind::Terrain)));
-	// The seven text types, the mission (S14), the texture (S18), the environment (DI-19b) and the terrain (DI-30b)
+	// The eight text types (the character attributes among them), the mission (S14), the texture (S18), the environment (DI-19b) and the terrain (DI-30b)
 	// have a Main-role kind.
-	TEST_EXPECT(shown == 7 && mains == 11);
+	TEST_EXPECT(shown == 8 && mains == 12);
 	// Its viewport: one option, assist (the MCP gaps lane: none asked), no camera, no canvas; the empty one's
 	// reason.
 	std::unique_ptr<ViewportModel> made = row.make("t.wac");
