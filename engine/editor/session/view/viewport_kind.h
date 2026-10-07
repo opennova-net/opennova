@@ -39,6 +39,11 @@ enum class ViewportKind : uint8_t {
 	// plan's DI-21: an item's model in its state, its effects and its death's sounds, a person posed as it
 	// spawns, a weapon's model, an ammo's round), the Preview window's beside the table
 	Definition,
+	// An environment's sky as the game draws it (the deep-integration plan's DI-19b: its time of day on the
+	// game's mission clock, its weather as a script sets it, over the terrain of a mission that runs on it;
+	// the Shell's MissionEnvironment, Weather, SkyDome, Celestial, Water, Terrain and drops), the Document
+	// tab's main view
+	Environment,
 	kCount,
 };
 
@@ -52,7 +57,8 @@ inline constexpr size_t kViewportKindCount = static_cast<size_t>(ViewportKind::k
 // are one Main and one Preview.
 enum class ViewportRole : uint8_t { Preview, Main };
 
-// A kind's token on the wire ("menu", "model", "script", "mission", "texture", "effect", "hud", "definition"; "" past
+// A kind's token on the wire ("menu", "model", "script", "mission", "texture", "effect", "hud", "definition",
+// "environment"; "" past
 // the last kind), and
 // the kind a token names (false for none).
 const char *viewport_kind_token(ViewportKind kind);
