@@ -51,7 +51,8 @@ void MenuViewportApplier::rebuild(const opennova::editor::ViewportModel &model, 
 	// screen, over the same files, interned the same names.
 	const opennova::FileSource &files = *view.findings.assets;
 	const opennova::menu::MenuFrameAssets &kept = frame_->native_assets();
-	const opennova::menu::MenuFrameCompiler &compiled = menu.render().compiler();
+	// The viewport's compile of the screen it shows (Try's while trying, DI-35).
+	const opennova::menu::MenuFrameCompiler &compiled = menu.picture_compiler();
 	auto build = std::make_unique<Build>();
 	for (const std::string &name : compiled.texture_names())
 		if (!kept.texture_kept(name, files)) build->textures.push_back(name);
@@ -111,8 +112,11 @@ void MenuViewportApplier::configure_(const opennova::editor::ViewportModel &mode
 	frame_->set_time_ms(opennova::editor::menu_frame_time(clock));
 }
 
-void MenuViewportApplier::update(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &) {
+void MenuViewportApplier::update(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) {
 	apply_options_(model);
+	// Try's state carries no clock of the preview's: the caret's blink follows the preview clock.
+	if (static_cast<const opennova::editor::MenuViewport &>(model).trying())
+		frame_->set_time_ms(opennova::editor::menu_frame_time(clock));
 }
 
 void MenuViewportApplier::clear() {
@@ -124,6 +128,11 @@ void MenuViewportApplier::clear() {
 
 void MenuViewportApplier::apply_options_(const opennova::editor::ViewportModel &model) {
 	const auto &menu = static_cast<const opennova::editor::MenuViewport &>(model);
+	if (const opennova::menu::MenuFrameState *tried = menu.try_state()) {
+		// Trying (DI-35): the state the game's menu holds, its pointer then placed where the mouse is.
+		frame_->set_native_state(*tried);
+		return;
+	}
 	opennova::menu::MenuFrameState state = frame_->native_state();
 	opennova::editor::apply_menu_options(menu.options(), menu.forced_index(), frame_->native_compiler(), state);
 	frame_->set_native_state(state);

@@ -399,9 +399,10 @@ func test_request_table_on_the_wire() -> void:
 	assert_eq(reads, ["state", "items", "hit", "box", "notes", "render", "palette"], "the catalog lists the query's ops")
 	assert_true(viewport_kinds.has("menu") and viewport_kinds.has("model"), str(viewport_kinds))
 	var properties: Dictionary = viewport.get("inputSchema", {}).get("properties", {})
-	assert_eq(properties.get("op", {}).get("enum", []), reads + ["options", "camera", "seek", "drag", "command", "drop"])
+	assert_eq(properties.get("op", {}).get("enum", []),
+			reads + ["options", "camera", "try", "click", "key", "seek", "drag", "command", "drop"])
 	for key in ["path", "kind", "x", "y", "x2", "y2", "row", "text", "offset", "limit", "options", "camera", "clock",
-			"device", "drag", "command", "drop"]:
+			"device", "try", "click", "key", "drag", "command", "drop"]:
 		assert_true(properties.has(key), "editor_viewport takes %s" % key)
 	assert_eq(properties.get("kind", {}).get("enum", []), viewport_kinds, "the viewport kinds' tokens, the catalog's")
 	assert_eq(String(properties.get("x", {}).get("type", "")), "number", "a point is a number")
@@ -1690,6 +1691,49 @@ func test_clipboard_across_screens_and_arrange() -> void:
 			"command": {"name": "sideways", "ids": [title, exit]}})))
 	assert_true((await _call("editor_viewport", {"op": "command", "command": {"ids": [title]}})).get("_error", "").contains(
 			"name"), "a command names itself")
+
+
+## DI-35: a menu's Try mode through editor_viewport: op try turns it on from the screen shown, op click is the
+## game's click (a new project's EXIT: the quit said, not done, the screen staying), op key a key by its name, each
+## answering with the viewport, its body's try saying where the menu is and what the game would have done; Reset;
+## the refusals (a click with Try off, a key no name gives); off again.
+func test_try_mode_through_the_editor_mcp() -> void:
+	if _client == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova try mcp %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Try"})).get("ok", false)))
+	assert_true(bool((await _create_missing()).get("ok", false)))
+	assert_eq(String((await _open("main.mnu")).get("kind", "")), "menu")
+	var items := await _call("editor_viewport", {"op": "items", "limit": 200})
+	var rect := _rect_of(items, "EXIT")
+	assert_eq(rect.size(), 4, str(items))
+	if rect.size() != 4:
+		return
+	var at := [(float(rect[0]) + float(rect[2])) / 2.0, (float(rect[1]) + float(rect[3])) / 2.0]
+	assert_false(_done(await _call("editor_viewport", {"op": "click", "click": {"at": at}})), "Try is off: no click")
+	var on := await _call("editor_viewport", {"op": "try", "try": {"on": true}})
+	assert_true(_done(on), str(on))
+	var tried: Dictionary = on.get("viewport", {}).get("body", {}).get("try", {})
+	assert_true(bool(tried.get("on", false)), str(tried))
+	assert_eq(String(tried.get("screen", "")), "STARTUP", str(tried))
+	var clicked := await _call("editor_viewport", {"op": "click", "click": {"at": at}})
+	assert_true(_done(clicked), str(clicked))
+	tried = clicked.get("viewport", {}).get("body", {}).get("try", {})
+	var last: Dictionary = tried.get("last", {}) if tried.get("last") is Dictionary else {}
+	assert_eq(String(last.get("kind", "")), "exit", str(tried))
+	assert_eq(String(last.get("control", "")), "EXIT", str(last))
+	assert_eq(String(tried.get("screen", "")), "STARTUP", "the quit said, not done")
+	var keyed := await _call("editor_viewport", {"op": "key", "key": {"key": "VK_RETURN"}})
+	assert_true(_done(keyed), str(keyed))
+	assert_false(_done(await _call("editor_viewport", {"op": "key", "key": {"key": "NO_SUCH_KEY"}})))
+	assert_true((await _call("editor_viewport", {"op": "key"})).get("_error", "").contains("needs \"key\""))
+	var reset := await _call("editor_viewport", {"op": "try", "try": {"reset": true}})
+	assert_true(_done(reset), str(reset))
+	assert_eq((reset.get("viewport", {}).get("body", {}).get("try", {}).get("outcomes", [1]) as Array).size(), 0)
+	var off := await _call("editor_viewport", {"op": "try", "try": {"on": false}})
+	assert_true(_done(off), str(off))
+	assert_false(bool(off.get("viewport", {}).get("body", {}).get("try", {}).get("on", true)))
 
 
 ## A window of a menu_tree answer by name (an empty Dictionary when it is not there).
