@@ -23,13 +23,19 @@
 #include <runtime/world/weather_state.h>
 
 #include <cstdint>
+#include <string>
+
+namespace opennova {
+class FileSource;
+}
 
 namespace opennova::env {
 
-// The overcast keyframes' file, parsed after the terrain's on every time-of-day load where it
-// exists [orig: Environment_LoadTimeOfDayConfig @ 0x57db30, the name @ 0x57dc0c, the exists check
-// @ 0x57dc23].
-inline constexpr const char *kOvercastFile = "overcast.def";
+// A mission's time-of-day load (env::read_mission_env) over a file set by name: `terrain_file`
+// (empty: no map name), overcast.def and `environment_file` (empty: none), each as `files` reads it.
+// False when the .env was skipped.
+bool read_mission_env(const FileSource &files, const std::string &terrain_file,
+		const std::string &environment_file, MissionEnv &out);
 
 // The world lighting/fog record stamped onto lit materials — the engine
 // mirror of the shell's EnvLightValues (ADR 0017 typed record)

@@ -217,7 +217,7 @@ private:
 	};
 	static TerrainKey terrain_key_of_(const opennova::editor::MissionViewport &mission);
 	struct EnvironmentKey {
-		std::string environment;
+		std::string environment, terrain; // the .env, and the .trn the load reads ahead of it
 		int start_time = 0, minutes_per_day = 0;
 		uint32_t attrib_flags = 0;
 		int water_override = 0, fog_override = 0, water_murk = 0;
