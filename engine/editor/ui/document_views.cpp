@@ -156,10 +156,10 @@ constexpr DocumentViewRow kViews[] = {
 	{DocumentTypeId::SoundProfiles, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_sound_profile_inspector},
 	// A particle file's text in the script device; the Preview window plays its effect (DI-14).
 	{DocumentTypeId::Particles, DocumentViewRole::MainViewport, nullptr, make_script_view},
-	// An environment's row and its keyframes as a tree (DI-19a); the missions that run on it head the
-	// Inspector, each a Go to with its terrain and what its header sets over it (ui/environment_inspector).
-	// DI-19b's time-of-day viewport takes the Main role here.
-	{DocumentTypeId::Environment, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_environment_inspector},
+	// An environment's row and its keyframes as a tree (DI-19a) beside its time-of-day viewport (DI-19b: the
+	// Main role, ui/main_viewport_view over the Environment viewport kind); the missions that run on it head
+	// the Inspector, each a Go to with its terrain and what its header sets over it (ui/environment_inspector).
+	{DocumentTypeId::Environment, DocumentViewRole::MainViewport, &kTreeOutline, nullptr, draw_environment_inspector},
 	// The HUD layout's text in its script device (DI-20), its HUD the Preview window's.
 	{DocumentTypeId::HudLayout, DocumentViewRole::MainViewport, nullptr, make_script_view},
 };
