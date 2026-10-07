@@ -643,6 +643,16 @@ void MissionViewportView::Tools::show_popup(MissionViewportOptions &options) {
 	ImGui::Checkbox("Water", &options.water);
 	ImGui::Checkbox("Models", &options.models);
 	ImGui::Checkbox("Static shadows", &options.shadows);
+	// DI-31: the game's own foliage, effects and lights.
+	ImGui::Checkbox("Foliage", &options.foliage);
+	ui_kit::tooltip("The terrain's foliage as the game grows it from its foliage map around the camera (its .trn's "
+					"foliage definitions, the detail tier's cells near the eye).");
+	ImGui::Checkbox("Effects", &options.effects);
+	ui_kit::tooltip("Each placed item's particle effects as the mission's start attaches them (items.def's "
+					"particlefx at its model's points), played on the preview clock.");
+	ImGui::Checkbox("Lights", &options.lights);
+	ui_kit::tooltip("The lights the game lights the scene with: each placed model's own light records, on the "
+					"models, the terrain and their coronas.");
 	ImGui::Separator();
 	// DI-29: what the game reads at each point of the ground, tinted over the terrain with its legend.
 	ImGui::TextDisabled("Over the terrain");
