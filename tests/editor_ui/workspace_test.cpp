@@ -2826,6 +2826,15 @@ void test_preview_steps_aside() {
 	run.settle();
 	ui.frames(3);
 	CHECK(preview_item->stands_aside() && !preview->Active, "the menu closed: aside again");
+	// set_workspace's focus (the MCP gaps lane) shows it as the Windows menu's tick does, for that mission.
+	session.handle(request::set_workspace(R"({"focus": "preview"})"));
+	run.settle();
+	ui.frames(3);
+	CHECK(!preview_item->stands_aside() && preview->Active, "focus preview: shown beside the mission");
+	run.open("items.def");
+	run.open("missions/synth_logic.bms");
+	ui.frames(3);
+	CHECK(preview_item->stands_aside() && !preview->Active, "focus preview: aside again once another was active");
 	preview_item->show_anyway();
 	ui.frames(3);
 	CHECK(!preview_item->stands_aside() && preview->Active, "asked for: shown beside the mission");
