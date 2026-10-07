@@ -8,7 +8,8 @@
 // string id in its section (a new section, then the one now there); a menu's screen and window; a style
 // variable in menu_style.mns; a sound set in a bank the game searches (not a bank it never searches) and in a
 // menu SOUND's own bank; a sound profile; an effect block in a particle file, revealed where it went. None for
-// a set name the bank cannot hold, whose Open fix stays.
+// a set name the bank cannot hold, whose Open fix stays. And DI-33's: a name whose file the project lacks offers
+// Create that file with it (a sound bank, a menu, a particle file, a string table).
 #include <algorithm>
 #include <cstdio>
 #include <functional>
@@ -393,11 +394,113 @@ static int test_sound_and_effect() {
 	return 0;
 }
 
+// The fix of a missing name whose file the project lacks (ADR 0046 DI-33): Create that file with it, the file made by
+// the engine's writer (its requirement's blank, else its kind's) and the name added to it as its type's Add makes one,
+// one create_file with its define; the file then made, opened and active, the name selected there, the finding gone,
+// Undo of the file taking the name back. A sound set with no bank (the first bank the game searches), an effect with
+// no particle file (a new particle file: the game reads every one), a string id whose table the project lacks
+// (through the wire as the problems query writes it); and a menu an ACTION loads, which the menu's own Create makes.
+static int test_create_with_it() {
+	Fixture f("opennova_editor_add_there_create");
+	TEST_EXPECT(editor_test::write_text(
+	        f.root + "/menus/di33.mnu",
+	        "<SCREEN>\r\n<NAME>HOME</NAME>\r\n<WINDOW type=\"window\" name=\"MAIN\">\r\n"
+	        "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
+	        "<WINDOW type=\"button\" name=\"GO\">\r\n"
+	        "<POSITION><LEFT>10</LEFT><TOP>10</TOP><RIGHT>90</RIGHT><BOTTOM>30</BOTTOM></POSITION>\r\n"
+	        "<ACTION TYPE=\"SCREEN\" FILE=\"away.mnu\">AWAY</ACTION>\r\n"
+	        "</WINDOW>\r\n</WINDOW>\r\n</SCREEN>\r\n"));
+	TEST_EXPECT(f.edit_file("items.def", row_with(node_kind(CatalogKind::Item), "display_name", "Door",
+	                                              {{"door_open_sound", "DI33_OPEN"}, {"particledeath", "FX_DI33"}})));
+	editor_test::handle_to_end(f.session, request::rescan());
+	TEST_EXPECT(f.path_of("gamelocl.lwf").empty() && f.path_of("away.mnu").empty());
+
+	// The case shared by each: the finding's first fix creates `file` with the name, and applied makes it, opens it
+	// and selects the name there; Undo of the file takes the name back, the file staying.
+	const auto created = [&](ReferenceKind kind, const std::string &target, const std::string &file) {
+		const Diagnostic *d = f.missing(kind, target);
+		const std::vector<ProblemFix> fixes = d ? fixes_for(*d, f.view()) : std::vector<ProblemFix>();
+		if (fixes.empty()) {
+			std::fprintf(stderr, "no fix for %s\n", target.c_str());
+			return false;
+		}
+		const ProblemFix &fix = fixes.front();
+		const bool shaped = fix.label == "Create " + file + " with " + target && !fix.bulk &&
+		                    fix.request.kind == EditorRequestKind::CreateFile && fix.request.path == file &&
+		                    fix.request.define.kind == kind && fix.request.define.target == target &&
+		                    fix.detail.find("It cannot be undone with Undo.") != std::string::npos && has_fixes(*d, f.view());
+		if (!shaped) {
+			std::fprintf(stderr, "first fix of %s: '%s'\n", target.c_str(), fix.label.c_str());
+			return false;
+		}
+		editor_test::handle_to_end(f.session, fix.request);
+		const std::string path = f.path_of(file.c_str());
+		const DocumentBase *document = path.empty() ? nullptr : f.session.document_base_for(path);
+		const bool made = f.session.outcome().done() && document && document->dirty() && f.view().documents.active == path &&
+		                  !f.missing(kind, target);
+		if (!made) std::fprintf(stderr, "%s not made with %s\n", file.c_str(), target.c_str());
+		return made && f.undo(path, kind, target) && !f.path_of(file.c_str()).empty();
+	};
+	TEST_EXPECT(created(ReferenceKind::Sound, "DI33_OPEN", "gamelocl.lwf"));
+	// A screen an ACTION looks up in a menu the project lacks: the menu file's own reference is the one missing (the
+	// screen's lookup unverified until the file is there), and its Create makes the menu, its one screen named after
+	// the file (AWAY), which the lookup then finds.
+	const Diagnostic *menu = f.missing(ReferenceKind::Menu, "away.mnu");
+	const std::vector<ProblemFix> menu_fixes = menu ? fixes_for(*menu, f.view()) : std::vector<ProblemFix>();
+	TEST_EXPECT(!f.missing(ReferenceKind::MenuScreen, "AWAY") && !menu_fixes.empty() && menu_fixes.back().label == "Create away.mnu");
+	if (menu_fixes.empty()) return 1;
+	editor_test::handle_to_end(f.session, menu_fixes.back().request);
+	TEST_EXPECT(!f.path_of("away.mnu").empty() && !f.missing(ReferenceKind::Menu, "away.mnu") &&
+	            !f.missing(ReferenceKind::MenuScreen, "AWAY"));
+
+	// The effect: a new particle file, the effect writer's block in it, revealed where it went.
+	const Diagnostic *effect = f.missing(ReferenceKind::Particle, "FX_DI33");
+	const std::vector<ProblemFix> effect_fixes = effect ? fixes_for(*effect, f.view()) : std::vector<ProblemFix>();
+	TEST_EXPECT(!effect_fixes.empty() && effect_fixes.front().request.kind == EditorRequestKind::CreateFile &&
+	            effect_fixes.front().label == "Create " + effect_fixes.front().request.path + " with FX_DI33");
+	if (effect_fixes.empty()) return 1;
+	editor_test::handle_to_end(f.session, effect_fixes.front().request);
+	const std::string particles = f.path_of(effect_fixes.front().request.path.c_str());
+	const DocumentBase *document = particles.empty() ? nullptr : f.session.document_base_for(particles);
+	const TextDocument *text = document ? text_of(*document) : nullptr;
+	TEST_EXPECT(text && text->text().find("id = FX_DI33;") != std::string::npos && !f.missing(ReferenceKind::Particle, "FX_DI33"));
+
+	// A string id a weapon's loadout name reads in GAMETEXT.BIN, which the project lacks: through the wire, as the
+	// editor MCP passes a fix back.
+	const NodeKind weapon = node_kind(CatalogKind::Weapon);
+	TEST_EXPECT(f.edit_file("weapon.def", row_with(weapon, "weapon_name", "WPN_DI33", {{"loadout_menu_textid", "WEP_DI33"}})));
+	const std::string gametext = f.path_of("gametext.bin");
+	TEST_EXPECT(!gametext.empty() && std::remove((f.root + "/" + gametext).c_str()) == 0);
+	editor_test::handle_to_end(f.session, request::rescan());
+	opennova::io::JsonValue args = opennova::io::JsonValue::make_object();
+	args.set("text", opennova::io::json_string("WEP_DI33"));
+	std::string query_error;
+	const opennova::io::JsonValue rows = f.session.query("problems", args, query_error);
+	const opennova::io::JsonValue *problems = rows.get("problems");
+	TEST_EXPECT(problems && problems->is_array() && problems->array.size() == 1);
+	if (!problems || problems->array.size() != 1) return 1;
+	const opennova::io::JsonValue *wire_fixes = problems->array[0].get("fixes");
+	TEST_EXPECT(wire_fixes && wire_fixes->is_array() && !wire_fixes->array.empty());
+	if (!wire_fixes || wire_fixes->array.empty()) return 1;
+	const opennova::io::JsonValue *wire = wire_fixes->array[0].get("request");
+	TEST_EXPECT(wire_fixes->array[0].get_string("label", "").rfind("Create gametext.bin with WEP_DI33", 0) == 0 && wire &&
+	            wire->get("define") && wire->get("define")->get_string("kind", "") == "text_id");
+	if (!wire) return 1;
+	const opennova::io::JsonValue answer = f.session.handle_json(*wire);
+	if (!answer.get_bool("ok", false)) std::fprintf(stderr, "wire: %s\n", answer.get_string("error", "").c_str());
+	TEST_EXPECT(answer.get_bool("ok", false) && f.session.outcome().done());
+	f.session.run_operations();
+	TEST_EXPECT(!f.path_of("gametext.bin").empty() && !f.missing(ReferenceKind::TextId, "WEP_DI33") &&
+	            f.selected_name() == "WEP_DI33");
+	return 0;
+}
+
 int main() {
 	if (test_catalog_rows() != 0) return 1;
 	if (test_item_ids() != 0) return 1;
 	if (test_string_ids() != 0) return 1;
 	if (test_menu_names() != 0) return 1;
 	if (test_sound_and_effect() != 0) return 1;
+	if (test_create_with_it() != 0) return 1;
 	return 0;
 }

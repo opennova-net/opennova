@@ -331,9 +331,9 @@ static int test_fixes() {
 	TEST_EXPECT(labels_of(fixes_for(*brand, v)) ==
 	            std::vector<std::string>({"Import brand.mns from the game data...", "Create a placeholder brand.mns"}));
 	// S11e: an optional file is made or imported, never taken from another file: no Use for
-	// loading.pcx though the project has a splash.pcx (and no factory or game data has one).
+	// loading.pcx though the project has a splash.pcx; its Create (DI-33: the boot screen's checkerboard).
 	const Diagnostic *loading = requirement_finding(v, "requirement.optional_missing", "loading_pcx");
-	TEST_EXPECT(loading && fixes_for(*loading, v).empty() && !has_fixes(*loading, v));
+	TEST_EXPECT(loading && labels_of(fixes_for(*loading, v)) == std::vector<std::string>({"Create loading.pcx"}));
 	// The game's boot report of a required file: the fixes of its requirement; none once the
 	// project has the file (the row is then only a place to look).
 	Diagnostic boot = editor_test::finding_of(DiagnosticSeverity::Error, "play.boot_missing", "The game could not find gameerr.bin.");
@@ -386,12 +386,21 @@ static int test_fixes() {
 	            std::vector<std::string>({"Import logo.dds from the game data...", "Create a placeholder logo.tga"}));
 	editor_test::own_reference(skin).loader_arg = -1;
 	TEST_EXPECT(labels_of(fixes_for(skin, v)) == std::vector<std::string>({"Create a placeholder logo.tga"}));
-	// A name the game data lacks with no factory, and a symbol: nothing to do but look.
+	// A model the game data lacks: Create it (DI-33: the model blank, one triangle); a string id of no table:
+	// nothing to do but look.
 	Diagnostic model = font;
 	model.subject = ReferenceSubject{ReferenceKind::Model, "tank"};
 	Diagnostic text_id = font;
 	text_id.subject = ReferenceSubject{ReferenceKind::TextId, "NO_SUCH_ID"};
-	TEST_EXPECT(fixes_for(model, v).empty() && fixes_for(text_id, v).empty() && !has_fixes(text_id, v));
+	TEST_EXPECT(labels_of(fixes_for(model, v)) == std::vector<std::string>({"Create tank.3di"}) && fixes_for(text_id, v).empty() &&
+	            !has_fixes(text_id, v));
+	// A shader tag the editor writes an effect for (DI-33): Create its effect.
+	Diagnostic shader = font;
+	shader.subject = ReferenceSubject{ReferenceKind::Shader, "VS_PHONGT"};
+	const std::vector<ProblemFix> shader_fixes = fixes_for(shader, v);
+	const std::vector<std::pair<std::string, std::string>> tag = {{"tag", "VS_PHONGT"}};
+	TEST_EXPECT(!shader_fixes.empty() && shader_fixes.front().label == "Create vs_phongt.fx" &&
+	            shader_fixes.front().request.values == tag);
 	// No Create for a name another kind of file holds (it would only open, the reference still
 	// missing), nor for one the project's name rules refuse (past the archive's 16 bytes).
 	Diagnostic table_ref = font;
