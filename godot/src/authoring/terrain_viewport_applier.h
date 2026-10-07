@@ -106,7 +106,7 @@ private:
 		}
 	};
 	struct EnvironmentKey {
-		std::string environment;
+		std::string environment, terrain; // the .env, and the .trn the load reads ahead of it
 		uint32_t attrib_flags = 0;
 		int water_override = 0, fog_override = 0, water_murk = 0;
 		int fog_color[3] = { 0, 0, 0 }, water_color[3] = { 0, 0, 0 };

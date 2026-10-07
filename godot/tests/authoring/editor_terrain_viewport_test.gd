@@ -160,11 +160,26 @@ func test_a_terrain_draws_on_its_own_under_its_missions_environment() -> void:
 		enabled += 1 if String((diagnostic as Dictionary).get("status", "")) == "enabled" else 0
 	assert_eq(enabled, 2, "both definitions draw: " + str(foliage.get_slot_diagnostics()))
 
-	# The engine's own environment: no mission, the picture built again with no environment file.
+	# The terrain's water keywords under the mission's .env (env-tod-re.md #43): the game's load reads the .trn
+	# first, so the terrain's murk is the picture's until a .env line of it; synth_full.env writes one (0.8).
+	var row: int = _seam.get_row_id(0)
+	assert_gt(row, 0, "the terrain's row")
+	var murk_edit := {"kind": "edit_record", "path": TERRAIN, "edits": [{"op": "set", "id": row, "field": "water_murk", "value": 0.3}]}
+	var murk_answer: Dictionary = _seam.request(murk_edit)
+	assert_true(bool(murk_answer.get("outcome", {}).get("done", false)), str(murk_answer))
+	state = await _await_built(int(state.get("builds", 0)))
+	assert_almost_eq(float(environment.get_environment_data().get_water_murk()), 0.8, 0.0001,
+			"the mission's .env writes the murk after the terrain's")
+
+	# The engine's own environment: no mission, the picture built again with no environment file, under the
+	# terrain's own lines (the game's load reads the .trn ahead of a .env it lacks): its murk is the water's.
 	assert_true(_change({"options": {"mission": "none"}}))
 	state = await _await_built(int(state.get("builds", 0)))
 	assert_eq(state.get("body", {}).get("mission"), null, str(state.get("body", {}).get("mission")))
-	assert_false(environment.is_loaded(), "no .env read: the engine's own environment")
+	assert_true(environment.is_loaded(), "the engine's own environment, loaded as the game loads it")
+	assert_eq(String(environment.get_environment_data().get_source_path()), "", "no .env read")
+	assert_almost_eq(float(environment.get_environment_data().get_water_murk()), 0.3, 0.0001,
+			"the terrain's murk with no .env over it")
 
 	# The ground overlay: an Update tinting the terrain, asked away gone.
 	var builds := int(state.get("builds", 0))
@@ -181,8 +196,6 @@ func test_a_terrain_draws_on_its_own_under_its_missions_environment() -> void:
 
 	# An edit of the terrain: its picture made again over the document as Save would write it (the water, with no
 	# mission's header over it, the terrain's).
-	var row: int = _seam.get_row_id(0)
-	assert_gt(row, 0, "the terrain's row")
 	var edit := {"kind": "edit_record", "path": TERRAIN, "edits": [{"op": "set", "id": row, "field": "water_height", "value": 80}]}
 	var answer: Dictionary = _seam.request(edit)
 	assert_true(bool(answer.get("outcome", {}).get("done", false)), str(answer))
