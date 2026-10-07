@@ -39,6 +39,7 @@
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <runtime/anim/anim_event_bits.h>
 #include <runtime/renderer/object_lod.h>
+#include <runtime/world/ammo_table.h>
 
 namespace opennova::editor {
 
@@ -114,6 +115,7 @@ struct ModelViewportView::Tools {
 	void damage(Workspace &workspace, const ModelViewport &model, const PreviewClock &clock);
 	void rig_chooser(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
 	void sound(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
+	void fire(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
 	void first_person(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
 	void timeline(Workspace &workspace, const ModelViewport &model, const PreviewClock &clock);
 	void place_in_mission(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
@@ -351,6 +353,56 @@ void ModelViewportView::Tools::sound(Workspace &workspace, ui_kit::WrapRow &row,
 	if (options != model.options()) set_options(workspace, model, options);
 }
 
+// A clip's fire events (DI-24, preview/preview_clip_fire): why they fire or not, the item's ammo by slot, and the
+// range they fly in (its target, its surface and distance, the side seeing them). Each a SetViewport of the options'
+// `fire`.
+void ModelViewportView::Tools::fire(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model) {
+	ModelViewportOptions options = model.options();
+	ClipFireOptions &fire = options.fire;
+	const ClipFire &clip_fire = model.clip_fire();
+	const char *label = clip_fire.armed() ? "Fire###fire" : "Fire (none)###fire";
+	row.next(ui_kit::button_width(label));
+	if (ImGui::Button(label)) ImGui::OpenPopup("fire");
+	ui_kit::tooltip("What the clip's fire events fire as it runs, as the game's NPC body fires them: " + clip_fire.words());
+	if (ImGui::BeginPopup("fire")) {
+		const float unit = ImGui::GetFontSize();
+		ImGui::PushTextWrapPos(unit * 26.0f);
+		ImGui::TextUnformatted(clip_fire.words().c_str());
+		// The item's ammo by slot, as its organic init resolves them.
+		const world::OrganicWeapons &weapons = clip_fire.weapons();
+		for (int slot = 0; slot < world::kOrganicAmmoSlots; ++slot) {
+			const uint8_t byte = weapons.ammo[size_t(slot)];
+			const world::AmmoTable *table = clip_fire.range().ammo_table();
+			const world::AmmoTableEntry *ammo = table && byte != 0 ? table->by_index(byte) : nullptr;
+			ImGui::TextDisabled("%s: %s", world::kOrganicAmmoFields[slot], ammo ? ammo->name.c_str() : "none");
+		}
+		ImGui::PopTextWrapPos();
+		ImGui::Checkbox("Target", &fire.target.shown);
+		ui_kit::tooltip("A wall down the body's line of fire, whose face plays the ammo's impact row for its surface; "
+		                "off, the rounds fly on until they age out.");
+		if (fire.target.shown) {
+			ImGui::SetNextItemWidth(unit * 7.0f);
+			const int tag = std::clamp(fire.target.tag, kWeaponRangeFirstTag, world::kImpactEffectTagCount - 1);
+			if (ImGui::BeginCombo("Surface", world::kImpactEffectTagWords[tag])) {
+				for (int i = kWeaponRangeFirstTag; i < world::kImpactEffectTagCount; ++i)
+					if (ImGui::Selectable(world::kImpactEffectTagWords[i], i == tag)) fire.target.tag = i;
+				ImGui::EndCombo();
+			}
+			ui_kit::tooltip("The target's surface: a round striking a face of material b plays the ammo's row b + 4.");
+			ImGui::SetNextItemWidth(unit * 6.0f);
+			float range = fire.target.range;
+			if (ImGui::InputFloat("Range", &range, 5.0f, 25.0f, "%.0f m"))
+				fire.target.range = std::clamp(range, kWeaponRangeNearest, kWeaponRangeFarthest);
+			ui_kit::tooltip("The target's distance down the body's line of fire, metres.");
+		}
+		ImGui::Checkbox("Seen by the enemy", &fire.enemy);
+		ui_kit::tooltip("The shots as the other side sees them: the ammo's enemy tracer style (RoundData_SpawnRound "
+		                "@ 0x4EC740 selects it against the seeing client's team).");
+		ImGui::EndPopup();
+	}
+	if (options != model.options()) set_options(workspace, model, options);
+}
+
 // A weapon's map in first person (DI-13, preview/preview_first_person): the view (the orbit, or the eye the
 // game draws the view model before), the character whose arms draw, the action whose sets the row plays,
 // what draws and why, and each of the action's legs in words with a Play of it. Each a SetViewport of the
@@ -572,15 +624,27 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 			if (!said.empty()) said[0] = char(std::toupper(static_cast<unsigned char>(said[0])));
 			plays += "\n" + said;
 		}
+		// What it fires (DI-24), a line a shot.
+		std::string fires;
+		for (const std::string &line : model.event_fire_words(under->trigger)) {
+			std::string said = line;
+			if (!said.empty()) said[0] = char(std::toupper(static_cast<unsigned char>(said[0])));
+			fires += "\n" + said;
+		}
 		// A weapon's first-person clip (DI-13): nothing reads its events, so a press plays nothing.
 		const bool audible = !plays.empty() && !model.first_person().active();
+		const bool shoots = model.clip_fire().armed() && !model.first_person().active() &&
+		                    (under->trigger & (anim::kAnimEventFirePrimary | anim::kAnimEventFireSecondary |
+		                                       anim::kAnimEventFireMarker3)) != 0;
 		ui_kit::tooltip("Frame " + std::to_string(under->frame) + " (" + seconds_text(under->tick / io::kTickHz) +
-		                "): " + animation_trigger_words(under->trigger) + "." + plays +
-		                (audible ? "\nClick to go there and hear it." : "\nClick to go there."));
+		                "): " + animation_trigger_words(under->trigger) + "." + plays + fires +
+		                (shoots    ? "\nClick to go there and fire it once."
+		                 : audible ? "\nClick to go there and hear it."
+		                           : "\nClick to go there."));
 		if (clicked) {
 			seek_ticks(workspace, model, under->tick, true);
-			// A press plays the event once, as the game plays it (play_sound {frame}).
-			if (audible) workspace.request(request::play_clip_event(model.path(), under->frame));
+			// A press plays the event once, as the game plays it, and fires its shots once (play_sound {frame}).
+			if (audible || shoots) workspace.request(request::play_clip_event(model.path(), under->frame));
 			// In the clip's own document the event is a record: select it.
 			const SessionView &view = workspace.view();
 			for (const auto &open : view.documents.open) {
@@ -624,6 +688,20 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 		ImGui::TextColored(ImVec4(240 / 255.0f, 90 / 255.0f, 80 / 255.0f, 1.0f), "F fires");
 		ImGui::SameLine();
 		ImGui::TextColored(ImVec4(1.0f, 220 / 255.0f, 90 / 255.0f, 1.0f), "S sound");
+	}
+	// The clip's fire events (DI-24): how many shots the run fired to the clock, or why none fires.
+	bool fire_marks = false;
+	for (const PreviewClipEvent &event : model.clip_events())
+		fire_marks = fire_marks || (event.trigger & (anim::kAnimEventFirePrimary | anim::kAnimEventFireSecondary |
+		                                             anim::kAnimEventFireMarker3)) != 0;
+	if (fire_marks && !model.first_person().active()) {
+		const ClipFire &clip_fire = model.clip_fire();
+		const std::string shots = clip_fire.armed()
+		                                  ? "Shots: " + std::to_string(clip_fire.range().shots()) + " fired to this tick."
+		                                  : "Shots: none. " + clip_fire.words();
+		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+		ui_kit::clipped_text(shots, clip_fire.words());
+		ImGui::PopStyleColor();
 	}
 	// The last sound the clip's events fired (DI-04), in words.
 	if (!model.sounds_fired().empty()) {
@@ -690,6 +768,7 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 		                "generators.");
 	}
 	if (model.animating()) sound(workspace, row, model);
+	if (model.animating() && !model.first_person().active()) fire(workspace, row, model);
 	if (model.animating() && model.first_person().active()) first_person(workspace, row, model);
 	row.next(ui_kit::button_width("Show"));
 	if (ImGui::Button("Show")) ImGui::OpenPopup("marks");

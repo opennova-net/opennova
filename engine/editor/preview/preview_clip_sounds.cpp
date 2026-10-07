@@ -164,6 +164,12 @@ bool ClipSoundSources::refresh(const ProjectAssetSource &files, const std::strin
 					item_.sound_profile = def.sound_profile;
 					item_.sound_profile_female = def.sound_profile_female;
 					item_.move_function = def.move_function;
+					item_.ai_function = def.ai_function;
+					const char *ammo[] = {def.ammo_closeattack, def.ammo_easyrocket, def.ammo_advancedrocket,
+					                      def.ammo_marker3};
+					const char *launch[] = {def.launchups_closeattack, def.launchups_rocket, def.launchups_marker3};
+					for (size_t slot = 0; slot < 4; ++slot) item_.ammo[slot] = ammo[slot];
+					for (size_t slot = 0; slot < 3; ++slot) item_.launch[slot] = launch[slot];
 					break;
 				}
 			def::def_free_items(&items);
@@ -237,10 +243,10 @@ ClipSoundBinding clip_sound_binding(const std::vector<audio::SoundProfile> &prof
 // --- the schedule --------------------------------------------------------------------------------------
 
 std::vector<ClipEventDue> clip_events_due(const anim::ClipTimeline &clock, const ClipSoundTrack &track, int32_t period,
-                                          int32_t from, int32_t to, bool player_body) {
+                                          int32_t from, int32_t to, bool player_body, bool catch_up) {
 	std::vector<ClipEventDue> out;
 	if (track.triggers.empty() || to <= from) return out;
-	if (to - from > kClipSoundCatchUpTicks) from = to - kClipSoundCatchUpTicks;
+	if (catch_up && to - from > kClipSoundCatchUpTicks) from = to - kClipSoundCatchUpTicks;
 	for (int32_t tick = from + 1; tick <= to; ++tick) {
 		if (!world::anim_sound_tick(uint32_t(tick), player_body)) continue;
 		const int32_t clip_tick = period > 0 ? tick % period : tick;

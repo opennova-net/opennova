@@ -1198,6 +1198,16 @@ action legs at the gun's points, in third person a shot as another sees it (a so
 ammo; another player's, through the weapon's FIRE and RECOIL rows).
 _Avoid_: shooting range (the game has none), firing test, gun sim
 
+**Clip fire**:
+What a clip's fire events fire in the model preview (ADR 0046 DI-24): on an NPC's body (the item's
+`move_function` org1, or the body chosen) each fire bit the body reads on its odd ticks fires the item's
+ammo (`ammo_closeattack`, `ammo_easyrocket` and a different `ammo_advancedrocket`, `ammo_marker3`, as the
+organic init resolves them) from its `launchups_*` point as the clip poses it there, through the game's NPC
+fire entry in a weapon range of its own: the ammo's `ai_launch` heard, its `ai_launcheffect` at the point, the
+round's flight, tracer and stop on the target. A player's body fires nothing; no magazine or weapon state gates
+it. Not the weapon range's gestures (those fire a weapon.def record in the player's hands).
+_Avoid_: clip shots, anim fire, NPC weapon (an NPC's clip fires ammo, not a weapon.def row)
+
 **Rig**:
 What an animation plays on: an animation table (its reset clip the bind) or a lone clip
 (its own bind) over a model's bone table (its parts' pivots and parents), loaded through
