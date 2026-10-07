@@ -700,6 +700,14 @@ const std::vector<opennova::TerrainTilePageBinding> &Terrain::_compose_pages(
 	if (p_display_frame_start) {
 		static_shadow_rasterizer.begin_frame(page_light_direction,
 				light_time_ms < 0 ? 0u : static_cast<uint32_t>(light_time_ms));
+		// The pages a changed caster's shadow touched or touches, composed
+		// again below (only while the casters are followed: the editor's
+		// mission device). Mission (x, y) is Godot (x, -z).
+		for (const opennova::terrain::TerrainStaticShadowReach &reach :
+				static_shadow_rasterizer.take_changed_reaches()) {
+			tile_cache_device.invalidate_region(reach.min_x, -reach.max_y,
+					reach.max_x, -reach.min_y);
+		}
 	}
 	// The page claims stamp the weather clock's TOD epoch (g_EnvTodEpoch,
 	// one step per 311 logic ticks); a page whose stamp falls behind is

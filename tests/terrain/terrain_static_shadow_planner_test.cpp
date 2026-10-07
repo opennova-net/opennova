@@ -2,8 +2,10 @@
 // under the state epoch, suppression canonicalization/config stamping, team
 // participation in page identity, the sub-quantum light reuse rule, and the
 // per-job material tick (time never moves the state revision or page
-// identity; a raster samples the tick it was given).
+// identity; a raster samples the tick it was given), and the caster-change
+// reports the editor's mission view follows.
 #include <runtime/terrain/terrain_static_shadow_planner.h>
+#include <runtime/mission/placement_traits.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -529,6 +531,92 @@ int main() {
 			!expect(phase_zero != half_period,
 					"a raster samples the UV scroll phase of its own tick")) {
 		return 1;
+	}
+
+	// Caster-change reports: off (the game, which keeps a composed page) the
+	// planner names nothing; on (the editor's mission view) a snapshot names
+	// the reach of each admitted caster it adds, drops or draws otherwise.
+	{
+		TerrainStaticShadowPlanner follow;
+		follow.set_light({0.3f, 0.9f, 0.3f}, {127, 200, 200});
+		follow.replace_casters({caster_at(8.0f, 1, 10), caster_at(40.0f, 2, 20)}, false);
+		if (!expect(follow.take_changed_reaches().empty(),
+				"a planner that does not follow its casters names no reach")) {
+			return 1;
+		}
+		follow.set_reports_caster_changes(true);
+		// The reach of the box (sphere 2 u) at Godot (x, 8): mission y = -8.
+		const auto reach_at = [](float x) {
+			TerrainStaticShadowReach reach;
+			const int32_t cx = static_cast<int32_t>(x * 65536.0f), cy = -8 * 65536;
+			const int32_t r = 3 * (2 << 16) + 1;
+			reach.min_x = cx - r;
+			reach.max_x = cx + r;
+			reach.min_y = cy - r;
+			reach.max_y = cy + r;
+			return reach;
+		};
+		// NoShadow set on the second placement: only where its shadow was.
+		auto no_shadow = caster_at(40.0f, 2, 20);
+		no_shadow.entity_attrib = mission::kEntityAttribNoShadow;
+		follow.replace_casters({caster_at(8.0f, 1, 10), no_shadow}, false);
+		std::vector<TerrainStaticShadowReach> reaches = follow.take_changed_reaches();
+		if (!expect(reaches.size() == 1 && reaches[0] == reach_at(40.0f),
+				"a NoShadow set names the reach the caster's shadow had")) {
+			return 1;
+		}
+		if (!expect(follow.take_changed_reaches().empty(),
+				"a take empties the reports")) {
+			return 1;
+		}
+		// The item's own NoShadow refuses it the same way; cleared, it is back.
+		auto item_no_shadow = caster_at(40.0f, 2, 20);
+		item_no_shadow.item_attrib = mission::kItemAttribNoShadow;
+		follow.replace_casters({caster_at(8.0f, 1, 10), item_no_shadow}, false);
+		if (!expect(follow.take_changed_reaches().empty(),
+				"a caster refused either way stays refused: nothing changes")) {
+			return 1;
+		}
+		follow.replace_casters({caster_at(8.0f, 1, 10), caster_at(40.0f, 2, 20)}, false);
+		reaches = follow.take_changed_reaches();
+		if (!expect(reaches.size() == 1 && reaches[0] == reach_at(40.0f),
+				"a NoShadow cleared names the reach the shadow comes back to")) {
+			return 1;
+		}
+		// Moved: where it was and where it is.
+		follow.replace_casters({caster_at(8.0f, 1, 10), caster_at(56.0f, 2, 20)}, false);
+		reaches = follow.take_changed_reaches();
+		if (!expect(reaches.size() == 2 && reaches[0] == reach_at(40.0f) &&
+						reaches[1] == reach_at(56.0f),
+				"a moved caster names its reach before and after")) {
+			return 1;
+		}
+		// Hidden (a removed entity's source made inactive): where it was.
+		auto hidden = caster_at(8.0f, 1, 10);
+		hidden.active = false;
+		follow.replace_casters({hidden, caster_at(56.0f, 2, 20)}, false);
+		reaches = follow.take_changed_reaches();
+		if (!expect(reaches.size() == 1 && reaches[0] == reach_at(8.0f),
+				"a hidden caster names the reach it had")) {
+			return 1;
+		}
+		// An item placement without StaticShadow is never admitted: adding one
+		// changes no page.
+		auto plain_item = caster_at(24.0f, 3, 30);
+		plain_item.entity_kind = mission::kEntityKindItem;
+		follow.replace_casters({hidden, caster_at(56.0f, 2, 20), plain_item}, false);
+		if (!expect(follow.take_changed_reaches().empty(),
+				"a caster the admission refuses names no reach")) {
+			return 1;
+		}
+		// Off again: pending reports are dropped and none are made.
+		follow.replace_casters({caster_at(56.0f, 2, 20)}, false);
+		follow.set_reports_caster_changes(false);
+		follow.replace_casters({caster_at(60.0f, 2, 20)}, false);
+		if (!expect(follow.take_changed_reaches().empty(),
+				"turned off, the planner names nothing")) {
+			return 1;
+		}
 	}
 
 	std::puts("terrain_static_shadow_planner_test: OK");

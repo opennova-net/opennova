@@ -15,7 +15,10 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include <runtime/terrain/terrain_static_shadow.h>
+
 #include <memory>
+#include <vector>
 
 namespace godot {
 
@@ -39,6 +42,11 @@ public:
 	bool prepare_caster_geometry(const String &p_graphic, const Ref<ObjectData> &p_data);
 	void set_enabled(bool p_enabled);
 	bool is_enabled() const noexcept;
+	// The planner's caster-change reports (TerrainStaticShadowPlanner::
+	// set_reports_caster_changes): the reaches a snapshot's changes make stale,
+	// taken after each begin_frame by a terrain that composes them again.
+	void set_reports_caster_changes(bool p_on);
+	std::vector<opennova::terrain::TerrainStaticShadowReach> take_changed_reaches();
 	void set_suppressed_bms_ids(const PackedInt32Array &p_bms_ids);
 	PackedInt32Array get_suppressed_bms_ids() const;
 	Dictionary get_diagnostics() const;
