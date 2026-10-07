@@ -22,6 +22,7 @@
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <runtime/anim/adm_root_motion.h>
+#include <runtime/mission/placement_traits.h>
 #include <runtime/world/destruction.h>
 #include <runtime/world/item_effects.h>
 #include <runtime/world/present_passes.h>
@@ -55,6 +56,27 @@ std::string model_file_named(const AssetScan *scan, const std::string &name) {
 	const AssetEntry *entry = scan->find(name);
 	if (!entry && !strutil::ends_with_icase(name, ".3di")) entry = scan->find(name + ".3di");
 	return entry && entry->kind == AssetKind::Model ? entry->logical_name : std::string();
+}
+
+// What the game draws of an item's shadows, said beside its picture: both fall only on a mission's
+// terrain, which the picture has none of. The static sun shadow is the terrain pass's, admitted for a
+// placement among the buildings, among the items only with StaticShadow, and never with NoShadow (the
+// item's or the placement's); the moving one is a person's or a DynamicShadow item's render slot,
+// which NoShadow never reads [orig: Terrain_CollectAndRenderTileModels @ 0x60D42F..0x60D450;
+// Entity_InitFromModel @ 0x40E1BC..0x40E1F7; render-lighting-re.md "NoShadow"].
+std::string shadow_words(const std::string &name, int type, uint32_t attrib, uint32_t attrib2) {
+	const bool moving = mission::item_casts_dynamic_shadow(type, attrib2);
+	std::string words;
+	if ((attrib & mission::kItemAttribNoShadow) != 0) {
+		words = name + " is NoShadow: the game draws no sun shadow of it on a mission's terrain.";
+		if (moving) words += " Its moving shadow, drawn on the terrain under it, is unchanged.";
+		return words;
+	}
+	words = (attrib2 & mission::kItemAttrib2StaticShadow) != 0
+	                ? "The game draws its sun shadow on a mission's terrain wherever a mission places it (StaticShadow)"
+	                : "The game draws its sun shadow on a mission's terrain where a mission places it among the buildings";
+	words += moving ? ", and its moving shadow under it" : "";
+	return words + "; neither shows here, with no terrain under it.";
 }
 
 JsonValue vec3(const particle::Vec3 &v) {
@@ -336,7 +358,7 @@ bool DefinitionViewport::subject_(const ViewportInput &input, const DefCatalogDo
 		intact_ = name;
 		const DamageFrame frame = frame_at(clock);
 		switch (options_.state) {
-		case DefinitionState::Alive: break;
+		case DefinitionState::Alive: notes_.push_back(shadow_words(item_.name, def.type, def.attrib, def.attrib2)); break;
 		case DefinitionState::Destroying:
 			if (!plan_.swaps) notes_.push_back(plan_.class_words);
 			else if (plan_.husk.empty())
