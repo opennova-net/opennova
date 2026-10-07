@@ -92,8 +92,8 @@ uint64_t next_scene_state() {
 } // namespace
 
 bool MissionViewportApplier::EnvironmentKey::operator==(const EnvironmentKey &o) const {
-	return environment == o.environment && start_time == o.start_time && minutes_per_day == o.minutes_per_day &&
-			attrib_flags == o.attrib_flags && water_override == o.water_override && fog_override == o.fog_override &&
+	return environment == o.environment && terrain == o.terrain && start_time == o.start_time &&
+			minutes_per_day == o.minutes_per_day && attrib_flags == o.attrib_flags && water_override == o.water_override && fog_override == o.fog_override &&
 			water_murk == o.water_murk && std::equal(std::begin(fog_color), std::end(fog_color), std::begin(o.fog_color)) &&
 			std::equal(std::begin(water_color), std::end(water_color), std::begin(o.water_color));
 }
@@ -101,6 +101,7 @@ bool MissionViewportApplier::EnvironmentKey::operator==(const EnvironmentKey &o)
 MissionViewportApplier::EnvironmentKey MissionViewportApplier::environment_key_of_(const MissionSceneHeader &header) {
 	EnvironmentKey key;
 	key.environment = header.environment;
+	key.terrain = header.terrain;
 	key.start_time = header.start_time;
 	key.minutes_per_day = header.minutes_per_day;
 	key.attrib_flags = header.attrib_flags;
@@ -588,38 +589,38 @@ ApplierStep MissionViewportApplier::step(const opennova::editor::ViewportModel &
 
 void MissionViewportApplier::run_environment_(const MissionScene &scene) {
 	const MissionSceneHeader &header = scene.header();
-	const String name = opennova::to_gd(header.environment) + ".env";
+	const String name = header.environment.empty() ? String() : opennova::to_gd(header.environment) + ".env";
+	const String trn = header.terrain.empty() ? String() : opennova::to_gd(header.terrain) + ".trn";
+	// As the game's load reads it (GameWorld::load_environment): the terrain's .trn, overcast.def (the overcast
+	// table, by the runtime's own name, env::kOvercastFile, which the import's fixed names list too), then the .env
+	// over them; a .env the project lacks is a note, the mission showing on the earlier passes over the engine's
+	// own environment, as the game starts it (env-tod-re.md #38, #43).
 	Ref<EnvFile> env;
 	env.instantiate();
-	if (header.environment.empty() || !root_files_->has_file(name) || env->load_from_resource_root(root_files_, name) != OK) {
-		if (!header.environment.empty()) note_missing_(kEnvironment, name);
-		// The retail noon the environment has with no file: the mission still shows.
-		environment_->set_environment_data(Ref<EnvFile>());
-		env_file_.unref();
-		water_->set_mission_water_height_override(NAN);
-	} else {
-		// The header's overrides over the file (the game's apply_mission_environment_overrides).
-		Ref<MissionEnvironmentOverrides> overrides;
-		overrides.instantiate();
-		overrides->assign(opennova::env::bms_env_overrides_from_header(header.attrib_flags, header.water_override,
-				header.fog_override, header.fog_color, header.water_color, header.water_murk));
-		if (overrides->is_empty()) env->clear_mission_overrides();
-		else env->apply_mission_overrides(overrides);
-		// The fog as the mission's start settles it, which no weather tick here does (the editor's helper).
-		env->set_fog_level(opennova::editor::mission_settled_fog_level(env->get_fog_level()));
-		environment_->set_environment_data(env);
-		env_file_ = env;
-		water_->set_mission_water_height_override(
-				overrides->get_has_water_height() ? overrides->get_water_height_world() : NAN);
-	}
-	// The overcast table beside it where the project has one (the game's, read the same way: by the
-	// runtime's own name, env::kOvercastFile, which the import's fixed names list too).
 	Ref<EnvFile> overcast;
 	overcast.instantiate();
-	const String overcast_name = opennova::to_gd(opennova::env::kOvercastFile);
-	const bool has_overcast = root_files_->has_file(overcast_name) &&
-			overcast->load_from_resource_root(root_files_, overcast_name) == OK;
-	environment_->set_overcast_data(has_overcast ? overcast : Ref<EnvFile>());
+	if (!env->load_mission_environment(root_files_, trn, name, overcast) && !header.environment.empty()) {
+		note_missing_(kEnvironment, name);
+	}
+	// The header's overrides over the file (the game's apply_mission_environment_overrides).
+	Ref<MissionEnvironmentOverrides> overrides;
+	overrides.instantiate();
+	overrides->assign(opennova::env::bms_env_overrides_from_header(header.attrib_flags, header.water_override,
+			header.fog_override, header.fog_color, header.water_color, header.water_murk));
+	if (overrides->is_empty()) env->clear_mission_overrides();
+	else env->apply_mission_overrides(overrides);
+	// The fog as the mission's start settles it, which no weather tick here does (the editor's helper).
+	env->set_fog_level(opennova::editor::mission_settled_fog_level(env->get_fog_level()));
+	environment_->set_environment_data(env);
+	env_file_ = env;
+	water_->set_mission_water_height_override(
+			overrides->get_has_water_height() ? overrides->get_water_height_world() : NAN);
+	environment_->set_overcast_data(overcast);
+	// The texts the load read are the environment's whatever unit read one first (the .trn its terrain's units
+	// stamped already): an edit of one builds the environment again.
+	for (const String &text : { trn, name, opennova::to_gd(opennova::env::kOvercastFile) }) {
+		if (!text.is_empty()) layer_files_[kEnvironment].note(opennova::to_std(text), stamped_->stamp(opennova::to_std(text)));
+	}
 	environment_->configure_mission_clock(header.start_time, header.minutes_per_day);
 	applied_time_ = -2.0;
 	environment_key_ = environment_key_of_(header);
