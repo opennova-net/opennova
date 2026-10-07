@@ -223,8 +223,7 @@ static int test_rows_by_mode() {
 	// from the build; gameerr.bin not opened, so earlyerr.txt's line 4 and on; vmacros.bin not opened, the
 	// boot stopped there), and its graphics log (the mission begun, never finished).
 	ProjectSettingsChange strict;
-	strict.play_in_install = true;
-	strict.play_in_install_strict = true;
+	strict.play_mode = PlayMode::Strict;
 	editor_test::apply_settings(project.session, strict);
 	TEST_EXPECT(project.play());
 	const std::string run = project.platform.last_plan.working_dir;
@@ -261,7 +260,7 @@ static int test_rows_by_mode() {
 	TEST_EXPECT(none != nullptr);
 	// OpenNova again: its own rows go, the strict Play's stay.
 	ProjectSettingsChange on_runtime;
-	on_runtime.play_in_install = false;
+	on_runtime.play_mode = PlayMode::Runtime;
 	editor_test::apply_settings(project.session, on_runtime);
 	TEST_EXPECT(project.play());
 	TEST_EXPECT(!row_about(v, "play.reference_missing", "onbarrel") && none && rows_of(v, "play.file_missing").size() == 1);
