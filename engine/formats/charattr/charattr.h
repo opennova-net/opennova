@@ -166,10 +166,13 @@ bool read_table(const uint8_t *data, size_t size, Table &out, Reading *reading =
 
 // charattr.def's text holding `table` (ADR 0003: from the table, not from any file's bytes), which
 // read_table reads back to the same table: each active class's section (CR LF line ends, the ConfigFile's)
-// with every key the loader reads, a float always with a point and the digits that read back to its bits,
-// ATTRIBUTES the words of its flags (left out at 0). False with the reason for a table no file loads as:
-// an active class after an inactive one, a class id other than its row's, a row the loader leaves zero
-// holding a value, a flag no word has, a float that is no number.
+// with every key the loader reads that holds other than 0 (a key the section lacks reads 0: the loader
+// clears the table first; a float of all-zero bits is that 0, a -0.0 is written), a float always with a
+// point and the digits that read back to its bits, ATTRIBUTES the words of its flags (left out at 0).
+// False with the reason for a table no file loads as: an active class after an inactive one, a class id
+// other than its row's, a row the loader leaves zero holding a value, a flag no word has, a float that
+// is no number; or for a text whose values the ConfigFile reader's pool of its words cannot take, which
+// would overrun the game's heap (configfile::data_strings_pool, ConfigFile_ParseText @ 0x7609e8).
 bool write_table(const Table &table, std::string &text, std::string &error);
 
 } // namespace opennova::charattr

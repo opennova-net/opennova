@@ -106,12 +106,19 @@ bool write_table(const Table &table, std::string &text, std::string &error) {
 		for (const KeySpec &spec : kScalarKeys) {
 			std::string value;
 			if (spec.real) {
-				if (!spell_float(real_value(row, spec.property), value)) {
+				const float real = real_value(row, spec.property);
+				// A key the section lacks reads 0: the table is cleared first [orig: CharAttr_LoadFromDef @
+				// 0x412168] and the accessor zeroes its output [orig: effect_get_param_value_0 @ 0x75fa00]. Only a
+				// float of all-zero bits is that 0 (a -0.0 is written).
+				if (same_bits(real, 0.0f)) continue;
+				if (!spell_float(real, value)) {
 					error = label + "'s " + spec.key + " is no number a file can hold.";
 					return false;
 				}
 			} else {
-				value = std::to_string(integer_value(row, spec.property));
+				const int32_t integer = integer_value(row, spec.property);
+				if (integer == 0) continue;
+				value = std::to_string(integer);
 			}
 			text += std::string(spec.key) + " = " + value + "\r\n";
 		}
@@ -122,6 +129,19 @@ bool write_table(const Table &table, std::string &text, std::string &error) {
 			text += std::string(kAttributesKey) + " = " + words + "\r\n";
 		}
 		text += "\r\n";
+	}
+	// The ConfigFile reader clears a pool of the words' bytes one byte per value: a file of more values than that
+	// pool overruns the game's heap [orig: ConfigFile_ParseText @ 0x7609e8], so it is refused, never written.
+	const configfile::DataStringsPool pool =
+			configfile::data_strings_pool(reinterpret_cast<const uint8_t *>(text.data()), text.size());
+	if (pool.overrun() != 0) {
+		error = "The file would hold " + std::to_string(pool.values) + " values against " +
+		        std::to_string(pool.string_bytes) + " bytes of words (a " + std::to_string(pool.pool_bytes) +
+		        "-byte buffer): the game's ConfigFile reader would clear " + std::to_string(pool.overrun()) +
+		        " bytes past that buffer into the game's heap (ConfigFile_ParseText @ 0x7609e8). Fewer keys away "
+		        "from 0 would fit it.";
+		text.clear();
+		return false;
 	}
 	return true;
 }
