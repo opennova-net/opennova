@@ -101,11 +101,12 @@ constexpr RequestField kFields[] = {
 			"The unsaved-changes prompt's answer: save, discard or cancel." },
 	{ F::Settings, "settings", J::Object,
 			"The settings to set, {serial?, title?, mission?, multiplayer?, expansion?, builds_on?, "
-			"game_install?, runtime_executable?, play_in_install?, play_in_install_strict?, save_before_play?, "
-			"build_folder?}, each "
-			"left out as it is (expansion \"\" a standalone project, builds_on \"\" the base game; "
-			"play_in_install_strict: Play in the game install stages the build and the install's program alone "
-			"and launches without /d, as a player's drop-in)." },
+			"game_install?, runtime_executable?, play_mode?, save_before_play?, build_folder?}, each "
+			"left out as it is (expansion \"\" a standalone project, builds_on \"\" the base game). play_mode "
+			"(runtime, install or strict: Strict Play stages the build and the install's program alone and "
+			"launches without /d, as a player's drop-in) and save_before_play are the open project's Play "
+			"settings, kept in its .opennova/local.json on this checkout, never the editor's: a project that "
+			"never set them plays in the OpenNova runtime and saves first." },
 	{ F::Viewport, "viewport", J::Object,
 			"A viewport's change, {kind?, device?, clock?, options?, camera?}: kind its kind's token "
 			"(menu, model, script; left out, the kind the document shows in: the Preview's kind that shows "
@@ -230,6 +231,17 @@ constexpr RequestField kFields[] = {
 			"start markers its single player deploys at moved there (one added where it has none), never the "
 			"project's file nor the build's, so the game install and OpenNova alike place the player there. Needs "
 			"mission (play.start); the game install starts at its menu, where the mission is chosen." },
+	{ F::PlayMode, "play_mode", J::String,
+			"How this Play runs: runtime (the OpenNova runtime), install (the game install's program, its "
+			"configuration and saves beside the build, /d) or strict (Strict Play: the build and the install's "
+			"program alone, no /d, as a player's drop-in). For this Play alone: left out, the project's own "
+			"(apply_project_settings' play_mode, kept in its .opennova/local.json; runtime for a project never set), "
+			"which a Play naming one leaves as it is. On edit_in_viewport, the Play its command plans "
+			"(play_from_here)." },
+	{ F::SaveBeforePlay, "save_before_play", J::Boolean,
+			"Whether this Play writes the files with unsaved edits first, as Save all does (true), or waits on the "
+			"unsaved-changes prompt (false). For this Play alone: left out, the project's own (apply_project_settings' "
+			"save_before_play; on for a project never set). On edit_in_viewport, the Play its command plans." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

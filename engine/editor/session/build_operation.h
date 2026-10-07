@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <editor/model/diagnostic.h>
+#include <editor/project/play_mode.h>
 #include <editor/project_build/build_run.h>
 #include <editor/project_build/export_build.h>
 #include <editor/run/play_start.h>
@@ -25,6 +26,9 @@ struct PlayIntent {
 	bool fresh = false;
 	// Where the game's player starts (play's start, DI-26: Play from here).
 	PlayStart start;
+	// How it runs, resolved as the Play was asked (play's play_mode, else the project's own then:
+	// PlayController::intent_of), so a setting changed while the build packs does not change the Play.
+	PlayMode mode = PlayMode::Runtime;
 };
 
 // The Export that waits on a build (ADR 0046 S16): whether one does, and the folder it lands in (""
