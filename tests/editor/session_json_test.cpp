@@ -769,7 +769,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 			out.settings.serial = 3;
 			out.settings.title = "Harbor";
 			out.settings.game_install = "C:/games/JO";
-			out.settings.play_in_install = true;
+			out.settings.play_mode = PlayMode::Strict;
 			break;
 		case F::Viewport: {
 			// The text the wire reader keeps of the object (json_write's), so it reads back equal.
@@ -834,6 +834,8 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 			out.start.at[2] = 8.0;
 			out.start.yaw = 90.0;
 			break;
+		case F::PlayMode: out.play_mode = PlayMode::Install; break;
+		case F::SaveBeforePlay: out.save_before_play = false; break;
 		case F::kCount: break;
 		}
 	}
@@ -945,8 +947,10 @@ static int test_request_table_samples() {
 }
 
 // apply_project_settings (S11d): the one request the project settings take, its settings
-// each optional (one left out is not set), read strictly; the five requests it replaced are
-// no tokens. Over a session, the dialogs section says what the last one could not write and its
+// each optional (one left out is not set), read strictly (a play_mode is runtime, install or strict; the
+// editor-wide play_in_install and play_in_install_strict name nothing since Play's settings are each
+// project's); the five requests it replaced are no tokens. play takes its own play_mode and
+// save_before_play, for itself alone, read as strictly. Over a session, the dialogs section says what the last one could not write and its
 // settings_applied event carries the serial back, and the run section names the runtime the
 // settings name apart from the one Play resolves.
 static int test_settings_json() {
@@ -961,8 +965,8 @@ static int test_settings_json() {
 	every.multiplayer = false;
 	every.game_install = "C:/games/Joint Operations";
 	every.runtime_executable = "";
-	every.play_in_install = true;
-	every.play_in_install_strict = true;
+	every.play_mode = PlayMode::Strict;
+	every.save_before_play = false;
 	const EditorRequest all = request::apply_project_settings(every);
 	JsonValue parsed;
 	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(all)).c_str(), parsed));
@@ -973,10 +977,11 @@ static int test_settings_json() {
 	TEST_EXPECT(read.serial == 12 && read.title == std::optional<std::string>("Harbor") && read.mission == std::optional<bool>(true) &&
 	            read.multiplayer == std::optional<bool>(false) &&
 	            read.game_install == std::optional<std::string>("C:/games/Joint Operations") &&
-	            read.runtime_executable == std::optional<std::string>("") && read.play_in_install == std::optional<bool>(true) &&
-	            read.play_in_install_strict == std::optional<bool>(true));
+	            read.runtime_executable == std::optional<std::string>("") && read.play_mode == std::optional<PlayMode>(PlayMode::Strict) &&
+	            read.save_before_play == std::optional<bool>(false));
 	const JsonValue *written = parsed.get("settings");
-	TEST_EXPECT(written && written->get("game_install") && written->get("play_in_install") &&
+	TEST_EXPECT(written && written->get("game_install") && written->get_string("play_mode", "") == "strict" &&
+	            !written->get("play_in_install") && !written->get("play_in_install_strict") &&
 	            !written->get("retail_directory") && !written->get("play_retail") && !written->get("expansion") &&
 	            !written->get("builds_on") && !read.expansion && !read.builds_on);
 	// The project's expansion (S16): an empty name makes the project standalone, so it is set, not unset.
@@ -990,15 +995,20 @@ static int test_settings_json() {
 	            expansion_back.settings.expansion == std::optional<std::string>("jxm") &&
 	            expansion_back.settings.builds_on == std::optional<std::string>("") && !expansion_back.settings.title);
 	// One setting named: the others are not set.
-	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"play_in_install\":false}}", back).empty());
-	TEST_EXPECT(back.settings.play_in_install == std::optional<bool>(false) && back.settings.serial == 0 && !back.settings.title &&
-	            !back.settings.mission && !back.settings.multiplayer && !back.settings.game_install &&
-	            !back.settings.runtime_executable && !back.settings.play_in_install_strict);
+	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"play_mode\":\"install\"}}", back).empty());
+	TEST_EXPECT(back.settings.play_mode == std::optional<PlayMode>(PlayMode::Install) && back.settings.serial == 0 &&
+	            !back.settings.title && !back.settings.mission && !back.settings.multiplayer && !back.settings.game_install &&
+	            !back.settings.runtime_executable && !back.settings.save_before_play);
+	// A play mode no mode has, or one that is no string, is refused naming the modes.
+	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"play_mode\":\"retail\"}}", back)
+	                    .find("must be a play mode (runtime, install, strict), not \"retail\"") != std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"play_mode\":true}}", back)
+	                    .find("settings.play_mode") != std::string::npos);
 	// The settings must be named (an empty object sets nothing); the keys before S13 A4 name nothing.
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\"}", back).find("needs \"settings\"") != std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{}}", back).empty() && !back.settings.title &&
-	            !back.settings.play_in_install);
-	for (const char *retired : {"retail_directory", "play_retail"}) {
+	            !back.settings.play_mode);
+	for (const char *retired : {"retail_directory", "play_retail", "play_in_install", "play_in_install_strict"}) {
 		const std::string json = std::string("{\"kind\":\"apply_project_settings\",\"settings\":{\"") + retired + "\":true}}";
 		TEST_EXPECT(request_error(json.c_str(), back).find(retired) != std::string::npos);
 	}
@@ -1008,6 +1018,18 @@ static int test_settings_json() {
 	            std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"serial\":-1}}", back).find("serial") !=
 	            std::string::npos);
+	// play's own: a mode and saving first for that Play alone, left out the project's (no member written).
+	TEST_EXPECT(request_error("{\"kind\":\"play\",\"play_mode\":\"strict\",\"save_before_play\":false}", back).empty() &&
+	            back.play_mode == std::optional<PlayMode>(PlayMode::Strict) && back.save_before_play == std::optional<bool>(false));
+	TEST_EXPECT(request_error("{\"kind\":\"play\"}", back).empty() && !back.play_mode && !back.save_before_play);
+	const JsonValue plain = editor_request_to_json(request::play());
+	TEST_EXPECT(!plain.get("play_mode") && !plain.get("save_before_play"));
+	TEST_EXPECT(request_error("{\"kind\":\"play\",\"play_mode\":\"jointops\"}", back)
+	                    .find("\"play_mode\" must be a play mode (runtime, install, strict), not \"jointops\"") !=
+	            std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"play\",\"save_before_play\":\"yes\"}", back).find("save_before_play") !=
+	            std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"build\",\"play_mode\":\"runtime\"}", back).find("play_mode") != std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":[]}", back).find("settings") != std::string::npos);
 
 	// Over a session: the last one's result, its event with its serial, and the runtime setting.
@@ -1976,24 +1998,31 @@ static int test_import_plan_json() {
 	return 0;
 }
 
-// The game install on the wire (S13 A4): the run section names it game_install and Play in it
-// in_install, the import section counts its files as install_files, the preferences section
-// names both; the retail keys are gone.
+// The game install on the wire (S13 A4): the run section names it game_install and how the project plays
+// play_mode (its own, with save_before_play) beside the mode the last game ran in (ran_mode), the import
+// section counts its files as install_files, the preferences section names both; the retail keys are gone,
+// and so are the editor-wide in_install, strict and ran_strict.
 static int test_game_install_keys() {
 	SessionView view;
 	view.project.retail_directory = "C:/games/JO";
-	view.project.play_retail = true;
+	view.project.play_mode = PlayMode::Install;
+	view.project.save_before_play = false;
+	view.activity.play_run_mode = "strict";
 	view.project.retail_files = {"items.def", "main.mnu"};
 	view.activity.play_mission = "04TR.bms"; // S14: the mission the game was started in
 	const JsonValue run = view_section_to_json(view, ViewSection::Run);
 	TEST_EXPECT(run.get_string("mission", "") == "04TR.bms");
 	const JsonValue import = view_section_to_json(view, ViewSection::Import);
 	const JsonValue preferences = view_section_to_json(view, ViewSection::Preferences);
-	TEST_EXPECT(run.get_bool("in_install", false) && run.get_string("game_install", "") == "C:/games/JO" &&
-	            !run.get("retail") && !run.get("retail_directory"));
+	TEST_EXPECT(run.get_string("play_mode", "") == "install" && !run.get_bool("save_before_play", true) &&
+	            run.get_string("ran_mode", "") == "strict" && run.get_string("game_install", "") == "C:/games/JO" &&
+	            !run.get("retail") && !run.get("retail_directory") && !run.get("in_install") && !run.get("strict") &&
+	            !run.get("ran_strict"));
+	TEST_EXPECT(view_section_to_json(SessionView(), ViewSection::Run).get_string("ran_mode", "x").empty());
 	TEST_EXPECT(import.get_int("install_files", 0) == 2 && !import.get("retail_files"));
 	TEST_EXPECT(preferences.get_string("game_install", "") == "C:/games/JO" &&
-	            preferences.get_bool("play_in_install", false) && !preferences.get("retail_directory"));
+	            preferences.get_string("play_mode", "") == "install" && !preferences.get_bool("save_before_play", true) &&
+	            !preferences.get("play_in_install") && !preferences.get("retail_directory"));
 	return 0;
 }
 

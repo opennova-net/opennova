@@ -86,10 +86,10 @@ constexpr WorkspaceMember kSettings[] = {
 	{ "expansion", J::String, "The expansion's name.", kExpansionLongest },
 	{ "game_install", J::String, "This computer's game install folder.", kPathLongest },
 	{ "runtime", J::String, "The OpenNova runtime Play runs (\"\" the one packaged beside the editor).", kPathLongest },
-	{ "play_in_install", J::Boolean, "Play in the game install." },
-	{ "play_in_install_strict", J::Boolean,
-			"Strict: Play in the game install stages the build and the install's program alone and launches "
-			"without /d, as a player who dropped the program into the build's folder." },
+	{ "play_mode", J::String,
+			"How the project plays here (its own, kept in its .opennova/local.json): runtime (the OpenNova runtime), "
+			"install (Play in the game install) or strict (Play in the game install as a player's drop-in: the build "
+			"and the install's program alone, launched without /d)." },
 };
 constexpr WorkspaceMember kNewFile[] = {
 	{ "kind", J::String,
@@ -406,13 +406,12 @@ bool set_new_project(Change &change, const JsonValue &part) {
 bool same_settings(const WorkspaceView::Settings &a, const WorkspaceView::Settings &b) {
 	return a.open == b.open && a.title == b.title && a.mission == b.mission && a.multiplayer == b.multiplayer &&
 	       a.builds_on == b.builds_on && a.as_expansion == b.as_expansion && a.expansion == b.expansion &&
-	       a.game_install == b.game_install && a.runtime == b.runtime && a.play_in_install == b.play_in_install &&
-	       a.play_in_install_strict == b.play_in_install_strict;
+	       a.game_install == b.game_install && a.runtime == b.runtime && a.play_mode == b.play_mode;
 }
 
 // Project settings: opened over the settings in effect (the project's document, the install in effect, the
-// editor's runtime and Play in the game install), then the members the change names; a field set while it
-// is closed is refused, nothing changed.
+// editor's runtime and how the project plays), then the members the change names; a field set while it
+// is closed is refused, nothing changed, and so is a play_mode no mode has.
 bool set_settings(Change &change, const JsonValue &part) {
 	const SessionView &view = change.view;
 	WorkspaceView::Settings settings = view.workspace.settings;
@@ -430,8 +429,7 @@ bool set_settings(Change &change, const JsonValue &part) {
 		settings.expansion = doc.expansion.name;
 		settings.game_install = view.project.retail_directory;
 		settings.runtime = view.project.runtime_setting;
-		settings.play_in_install = view.project.play_retail;
-		settings.play_in_install_strict = view.project.play_in_install_strict;
+		settings.play_mode = view.project.play_mode;
 	} else if (open) {
 		settings.open = open->boolean;
 	}
@@ -445,8 +443,8 @@ bool set_settings(Change &change, const JsonValue &part) {
 	if (const JsonValue *expansion = part.get("expansion")) settings.expansion = expansion->string;
 	if (const JsonValue *install = part.get("game_install")) settings.game_install = install->string;
 	if (const JsonValue *runtime = part.get("runtime")) settings.runtime = runtime->string;
-	if (const JsonValue *play = part.get("play_in_install")) settings.play_in_install = play->boolean;
-	if (const JsonValue *strict = part.get("play_in_install_strict")) settings.play_in_install_strict = strict->boolean;
+	if (const JsonValue *mode = part.get("play_mode"); mode && !play_mode_from_token(mode->string, settings.play_mode))
+		return change.refuse("\"settings.play_mode\" is runtime, install or strict, not \"" + mode->string + "\".");
 	if (!settings.builds_on.empty()) settings.as_expansion = true;
 	if (!settings.open) settings = WorkspaceView::Settings();
 	if (same_settings(settings, view.workspace.settings)) return false;
@@ -1289,8 +1287,7 @@ JsonValue workspace_to_json(const SessionView &view) {
 		dialog.set("expansion", text(settings.expansion));
 		dialog.set("game_install", text(settings.game_install));
 		dialog.set("runtime", text(settings.runtime));
-		dialog.set("play_in_install", flag(settings.play_in_install));
-		dialog.set("play_in_install_strict", flag(settings.play_in_install_strict));
+		dialog.set("play_mode", text(play_mode_token(settings.play_mode)));
 	}
 	out.set("settings", std::move(dialog));
 	JsonValue prompt = JsonValue::make_object();
