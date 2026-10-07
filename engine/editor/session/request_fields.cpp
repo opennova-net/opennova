@@ -24,6 +24,11 @@ constexpr RequestField kFields[] = {
 	{ F::BuildsOn, "builds_on", J::String,
 			"The installed expansion a new project builds on, by its folder's name (left out, the base "
 			"game); it needs an expansion." },
+	{ F::BaseProject, "base_project", J::String,
+			"The base game's project a new expansion project builds on (ADR 0046 T5): a standalone project's "
+			"folder, taken from the new project's when relative, whose export is the base game the expansion "
+			"imports from, builds over and plays over (left out, the game install's base game); it needs an "
+			"expansion and no builds_on." },
 	{ F::GameInstall, "game_install", J::String,
 			"A game install the project opens with for the session alone, in place of the one its "
 			".opennova/local.json names, which stays as it is (a dry run's install); left out, its "
@@ -101,8 +106,9 @@ constexpr RequestField kFields[] = {
 			"The unsaved-changes prompt's answer: save, discard or cancel." },
 	{ F::Settings, "settings", J::Object,
 			"The settings to set, {serial?, title?, mission?, multiplayer?, expansion?, builds_on?, "
-			"game_install?, runtime_executable?, play_mode?, save_before_play?, build_folder?}, each "
-			"left out as it is (expansion \"\" a standalone project, builds_on \"\" the base game). play_mode "
+			"base_project?, game_install?, runtime_executable?, play_mode?, save_before_play?, build_folder?}, "
+			"each left out as it is (expansion \"\" a standalone project, builds_on \"\" the base game, "
+			"base_project \"\" the game install's base game, else the base game's project, T5). play_mode "
 			"(runtime, install or strict: Strict Play stages the build and the install's program alone and "
 			"launches without /d, as a player's drop-in) and save_before_play are the open project's Play "
 			"settings, kept in its .opennova/local.json on this checkout, never the editor's: a project that "
