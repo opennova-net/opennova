@@ -8,6 +8,8 @@
 #include <editor/preview/mission_scene.h>
 #include <formats/env/env.h>
 #include <formats/mission/bms.h>
+#include <formats/pcx/pcx_io.h>
+#include <formats/til/til_io.h>
 #include <formats/til/til_tsd.h>
 #include <formats/trn/charmap_legend.h>
 #include <formats/trn/trn.h>
@@ -72,6 +74,25 @@ const char *slot_kind(int slot) {
 	case audio::kSlotFootWater: return "water";
 	default: return "";
 	}
+}
+
+// What grows there, after the rest of the line (DI-29): " Foliage code 253: grows onfern1.3di (foliage 1)."; ""
+// where the terrain names no foliage map.
+std::string foliage_words(const MissionGroundFacts &facts) {
+	if (facts.foliage_code < 0) return std::string();
+	const auto named = [](const std::vector<MissionFoliageAt> &slots) {
+		std::string out;
+		for (const MissionFoliageAt &at : slots)
+			out += (out.empty() ? "" : ", ") + at.graphic + " (foliage " + std::to_string(at.slot + 1) + ")";
+		return out;
+	};
+	if (facts.foliage_code == 0 && facts.grows.empty() && facts.kept_off.empty()) return " No foliage (code 0).";
+	std::string out = " Foliage code " + std::to_string(facts.foliage_code) + ": ";
+	if (!facts.grows.empty()) out += "grows " + named(facts.grows);
+	if (!facts.kept_off.empty())
+		out += std::string(facts.grows.empty() ? "" : "; ") + named(facts.kept_off) + " kept off by a placed tile";
+	if (facts.grows.empty() && facts.kept_off.empty()) out += "no definition matches it, nothing grows";
+	return out + ".";
 }
 
 std::string row_words(int row) {
@@ -171,9 +192,14 @@ void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const 
 	error_.clear();
 	surface_map_.clear();
 	tiles_.clear();
+	placed_ = TilFile();
 	// Retail's memset table: every placed tile TSD_NULL with no .tsd [orig: PolyTrn_InitTextures @ 0x60c5c9].
 	tile_surface_.fill(0);
 	water_z_ = 0;
+	foliage_map_.clear();
+	foliage_codes_ = IndexedImage8();
+	foliage_masks_.clear();
+	foliage_defs_.clear();
 	stamps_.clear();
 	if (!files) {
 		error_ = "The project's files are not read yet.";
@@ -189,8 +215,28 @@ void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const 
 		// The mission's placed tiles, read as the game reads <mission>.til [orig: Terrain_LoadTileInfoFile @
 		// 0x60a740], and the table their tile set's .tsd fills.
 		std::vector<uint8_t> til;
-		if (!key_.mission.empty() && stamped->read(key_.mission + ".til", til))
+		if (!key_.mission.empty() && stamped->read(key_.mission + ".til", til)) {
 			tiles_ = terrain::surface_tiles_from_til_bytes(til);
+			std::string til_error;
+			if (!load_til(til.data(), til.size(), placed_, til_error)) placed_ = TilFile();
+		}
+		// The foliage map through the game's 8-bit PCX reader, its indices kept, and each texel remapped to
+		// the definition slots it selects [orig: Foliage_LoadFoliageMapPCX @ 0x605AD0, the remap @
+		// 0x605B73..0x605B8A; Foliage_RemapPixelToDefMask @ 0x5FF4E0]; a map that does not read grows nothing.
+		foliage_defs_ = trn.foliage_defs;
+		std::vector<uint8_t> foliage_bytes;
+		std::string foliage_error;
+		if (!trn.foliagemap.empty() && stamped->read(trn.foliagemap, foliage_bytes) &&
+				decode_pcx_indexed(foliage_bytes.data(), foliage_bytes.size(), foliage_codes_, foliage_error) &&
+				!foliage_codes_.empty()) {
+			foliage_map_ = trn.foliagemap;
+			uint8_t remap[256];
+			for (int code = 0; code < 256; ++code) remap[code] = uint8_t(foliage_remap_pixel_to_def_mask(foliage_defs_, code));
+			foliage_masks_.resize(foliage_codes_.indices.size());
+			for (size_t i = 0; i < foliage_masks_.size(); ++i) foliage_masks_[i] = remap[foliage_codes_.indices[i]];
+		} else {
+			foliage_codes_ = IndexedImage8();
+		}
 		terrain::SurfaceTileFileSource tile_files;
 		tile_files.has_file = [stamped](const std::string &name) { return stamped->stamp(name) != 0; };
 		tile_files.read_file = [stamped](const std::string &name, std::vector<uint8_t> &out) {
@@ -223,6 +269,42 @@ void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const 
 }
 
 double MissionGround::water_height() const { return double(water_z_) / 65536.0; }
+
+terrain::SurfaceTypeMap MissionGround::surface_sampler() const {
+	if (!terrain()) return terrain::SurfaceTypeMap();
+	terrain::SurfaceTypeMap map = store_.surface_map();
+	map.tiles = tiles_.empty() ? nullptr : tiles_.data();
+	map.tile_count = int32_t(tiles_.size());
+	map.tile_surface = tile_surface_.data();
+	return map;
+}
+
+terrain::FoliageMaskMap MissionGround::foliage_sampler(bool codes) const {
+	terrain::FoliageMaskMap map;
+	if (!terrain() || foliage_codes_.empty()) return map;
+	const terrain::TerrainHeightField &field = store_.height_field();
+	map.data = codes ? foliage_codes_.indices.data() : foliage_masks_.data();
+	map.width = foliage_codes_.width;
+	map.height = foliage_codes_.height;
+	map.sector_grid = field.layout.sector_grid;
+	map.origin_x = field.layout.origin_x;
+	map.origin_y = field.layout.origin_y;
+	map.wrap_x = field.wrap_x;
+	map.wrap_z = field.wrap_z;
+	return map;
+}
+
+int MissionGround::foliage_kept_off(double x, double y, int mask) const {
+	if (mask == 0 || placed_.entries.empty()) return 0;
+	// The candidate's square, radius 2, against each tile's inclusive 16-unit square, the tile's z the mission
+	// y it starts at (til_world_z_from_fixed) [orig: Foliage_PathBlockedByPlacedTile @ 0x606490]; a definition
+	// with forceon skips the test [orig: Foliage_GenerateInstances_0 @ 0x5FFFB6].
+	if (!til_blocks_foliage(placed_, float(x), float(y), 2.0f)) return 0;
+	int kept = 0;
+	for (size_t slot = 0; slot < foliage_defs_.size() && slot < size_t(FOLIAGE_MAX_DEFS); ++slot)
+		if ((mask & (1 << slot)) && !(foliage_defs_[slot].attrib_flags & FOLIAGE_ATTRIB_FORCE_ON)) kept |= 1 << slot;
+	return kept;
+}
 
 void MissionGround::foot_(MissionGroundFacts &facts, bool on_record) const {
 	facts.water = water();
@@ -279,6 +361,17 @@ MissionGroundFacts MissionGround::terrain_at(double x, double y, double z) const
 				}
 			}
 		}
+		// The foliage there (DI-29): the map's code and the definitions it selects, by the game's own sampler.
+		if (!foliage_codes_.empty()) {
+			facts.foliage_code = terrain::foliage_mask_at_fixed(foliage_sampler(true), fx, fy);
+			const int mask = terrain::foliage_mask_at_fixed(foliage_sampler(false), fx, fy);
+			const int kept = foliage_kept_off(x, y, mask);
+			for (size_t slot = 0; slot < foliage_defs_.size() && slot < size_t(FOLIAGE_MAX_DEFS); ++slot) {
+				if (!(mask & (1 << slot))) continue;
+				MissionFoliageAt at{ int(slot), foliage_defs_[slot].graphic };
+				(kept & (1 << slot) ? facts.kept_off : facts.grows).push_back(std::move(at));
+			}
+		}
 	}
 	foot_(facts, false);
 	return facts;
@@ -303,7 +396,7 @@ std::string mission_ground_line(const MissionGroundFacts &facts) {
 		std::string line = metres(facts.water_height - facts.at[2]) + " under the water: footsteps play " + slots +
 				"; a round from above meets the water first, " + row_words(facts.impact_row) + ".";
 		if (facts.on == MissionGroundOn::Record) line += " On " + facts.record + ".";
-		else if (facts.surface >= 0) line += " Below it: " + class_words(facts.surface) + ").";
+		else if (facts.surface >= 0) line += " Below it: " + class_words(facts.surface) + ")." + foliage_words(facts);
 		return line;
 	}
 	if (facts.on == MissionGroundOn::Record)
@@ -320,7 +413,7 @@ std::string mission_ground_line(const MissionGroundFacts &facts) {
 		break;
 	default: line += ")"; break;
 	}
-	return line + ": footsteps play " + slots + "; a round plays " + row_words(facts.impact_row) + ".";
+	return line + ": footsteps play " + slots + "; a round plays " + row_words(facts.impact_row) + "." + foliage_words(facts);
 }
 
 io::JsonValue mission_ground_to_json(const MissionGroundFacts &facts) {
@@ -370,6 +463,25 @@ io::JsonValue mission_ground_to_json(const MissionGroundFacts &facts) {
 		out.set("impact_row", std::move(row));
 	} else {
 		out.set("impact_row", JsonValue::make_null());
+	}
+	if (facts.on == MissionGroundOn::Terrain && facts.foliage_code >= 0) {
+		const auto slots = [](const std::vector<MissionFoliageAt> &from) {
+			JsonValue list = JsonValue::make_array();
+			for (const MissionFoliageAt &at : from) {
+				JsonValue one = JsonValue::make_object();
+				one.set("slot", json_number(at.slot));
+				one.set("graphic", json_string(at.graphic));
+				list.push(std::move(one));
+			}
+			return list;
+		};
+		JsonValue foliage = JsonValue::make_object();
+		foliage.set("code", json_number(facts.foliage_code));
+		foliage.set("grows", slots(facts.grows));
+		foliage.set("kept_off", slots(facts.kept_off));
+		out.set("foliage", std::move(foliage));
+	} else {
+		out.set("foliage", JsonValue::make_null());
 	}
 	out.set("line", json_string(mission_ground_line(facts)));
 	return out;
