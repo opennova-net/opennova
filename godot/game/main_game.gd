@@ -801,6 +801,7 @@ func _wire_shell() -> void:
 	_menu_shell.restart_requested.connect(_on_restart_requested)
 	_menu_shell.resume_requested.connect(resume)
 	_menu_shell.novaworld_requested.connect(_net.open_novaworld_panel)
+	_menu_shell.game_reloaded.connect(_on_game_reloaded)
 	_bundled_companion = BundledMenuCompanion.new()
 	_bundled_companion.play_retail_requested.connect(play_retail)
 	_bundled_companion.change_folder_requested.connect(request_retail_dir)
@@ -818,6 +819,14 @@ func _wire_shell() -> void:
 	_net.wire_menu_companions(_mp_companion)
 	_player_info_companion.set_persisted_profile(_chosen_avatar)
 	_player_info_companion.avatar_chosen.connect(_on_avatar_chosen)
+
+
+# The Mods list switched the game: its profile (the expansion's weapon.sav) is
+# the one the menu shows and the next spawn uses.
+func _on_game_reloaded() -> void:
+	refresh_local_profile_for_mount()
+	if _player_info_companion != null:
+		_player_info_companion.set_persisted_profile(_chosen_avatar)
 
 
 # PLAYER_INFO ACCEPT persists both side records and the shared callsign, while

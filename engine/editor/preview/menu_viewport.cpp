@@ -755,6 +755,35 @@ MenuTrySource MenuViewport::try_source_(const SessionView &view, const MnuDocume
 					game_type::for_mission_mode(row.game_mode) });
 		return choices;
 	};
+	// The game's Mods list: the records of the folder the project plays over (the session's
+	// vfs_expansion_records), a project that builds as an expansion standing in for its folder's by its own
+	// <name>.bin (the file the game reads under expansion\<name>\), listed in the game's order where the
+	// folder lacks it; the expansion running is the project's own, which its Play runs with /exp.
+	const std::string own_expansion = view.project.document ? view.project.document->expansion.name : std::string();
+	source.expansion = own_expansion;
+	std::vector<ExpansionRecord> folder;
+	for (const ProjectView::InstallExpansion &record : view.project.mods_list)
+		folder.push_back({ record.name, { record.title, record.description } });
+	source.expansions = [folder, own_expansion, &files]() {
+		std::vector<ExpansionRecord> records = folder;
+		if (own_expansion.empty()) return records;
+		std::vector<uint8_t> bytes;
+		if (!files.read(own_expansion + ".bin", bytes)) bytes.clear();
+		const ExpansionRecord mine{ own_expansion, expansion_info_from_bin(bytes) };
+		const auto same = std::find_if(records.begin(), records.end(), [&](const ExpansionRecord &record) {
+			return strutil::iequals(record.directory, own_expansion);
+		});
+		if (same != records.end()) {
+			*same = mine;
+			return records;
+		}
+		const auto at = std::find_if(records.begin(), records.end(), [&](const ExpansionRecord &record) {
+			return vfs_expansion_folder_before(own_expansion, record.directory);
+		});
+		records.insert(at, mine);
+		if (records.size() > kExpansionRecordsMax) records.resize(kExpansionRecordsMax);
+		return records;
+	};
 	return source;
 }
 
