@@ -89,7 +89,7 @@ class PlayerWeaponView;     // the local weapon FSM view (simulation/player_weap
 class PlayerWeaponEvent;    // one ordered weapon presentation event (simulation/player_weapon_event.h)
 class ScarDrawList;         // one frame's impact-scar draw list (world/scar_draw_list.h)
 class WeaponKitEntry;       // one loadout tuple (simulation/weapon_kit_entry.h)
-class WeaponProfileSummary; // the weapon.sav slot-0 summary (simulation/weapon_profile_summary.h)
+class PlayerProfiles; // the player profile's records (player/player_profiles.h)
 class EnvironmentSnapshot;  // the F3 Environment record as a typed read (simulation/environment_snapshot.h)
 class PlayerInventory;      // the local inventory snapshot (simulation/player_inventory.h)
 class EndRoundState;  // the typed end-of-round session facts (simulation_end_round.cpp)
@@ -1693,6 +1693,9 @@ public:
 	// (queue_chat_message), the menu picks (C2S 0x14 / 0x13) and the crew key's denied tone.
 	opennova::hud::ChatEntryFacts chat_entry_facts(uint32_t p_frame) const;
 	bool is_round_over() const; // the world's round-over latch (MatchOutcome::ended)
+	// The charattr property latches the session's restriction step raised, one
+	// bit a property (inmatch charattr_pack_disabled, the S2C 0x42 body).
+	int get_charattr_disabled_word() const;
 	opennova::hud::ChatSendResult send_chat_line(int p_dispatch, std::string &r_text, uint32_t p_frame);
 	bool send_voice_menu_pick(bool p_radio, int p_value);
 	void raise_chat_denied_sound();
@@ -1731,33 +1734,13 @@ public:
 	bool apply_local_player_loadout(const TypedArray<WeaponKitEntry> &p_kit, int p_player_class);
 	// Commit the profile class without replacing a mission-authored weapon kit.
 	bool set_local_player_class(int p_player_class);
-	// Load the player's weapon profile (weapon.sav) from an ABSOLUTE filesystem path.
-	// This is a save file, not a mounted PFF/loose resource, so it is read through
-	// FileAccess rather than the resource root. Header gate: magic "FPBC" + version
-	// "0211", then five 0x1080C profile-slot records; slot 0 becomes the active
-	// record and its class bytes are clamped to [5,9]. A missing or malformed file is
-	// NOT fatal — the shipped defaults stay installed and an Error is returned so the
-	// caller can warn. (engine: base/gameprofile/required_resources.c)
-	Error load_weapon_profile(const String &p_path);
-	// Read slot 0's two character headers (raw bytes, no session clamp) without
-	// requiring a live Simulation: a WeaponProfileSummary (error, loaded, the
-	// blue and red WeaponProfileSide with player_class, avatar_a (nationality
-	// id), avatar_b (division id) and avatar_packed). This is the menu boot
-	// seam over the same five-record file as load_weapon_profile().
-	static Ref<WeaponProfileSummary> read_weapon_profile_summary(const String &p_path);
-	// Persist PLAYER_INFO's ACCEPT snapshot into active profile slot 0:
-	// `profile.player_class` (5..9) is written to BOTH side blocks and each
-	// non-empty `profile.side_profiles[side]` {avatar_a, avatar_b, avatar_packed}
-	// to its own block — playersav::update_avatar_selection carries the
-	// PlayerInfo_SaveFromDialog witness. The other four slots and every kit
-	// page survive; the file is replaced atomically.
-	// ERR_INVALID_PARAMETER when the snapshot carries no committable side.
-	static Error save_weapon_profile_selection(const String &p_path,
-			const Dictionary &p_profile);
-	// The profile file's path RULE relative to the mount root (playersav
-	// weapon_sav_relpath): with an active expansion retail looks ONLY under
-	// "expansion/<name>/", never the root (engine: formats/playersav/weapon_sav.cpp). Static so shell path assembly stays a join.
-	static String weapon_profile_relpath(const String &p_expansion_name);
+	// Take the player profile's current records (the shell's in-memory
+	// PlayerProfiles, loaded at the menu's start): the weapon.sav record, its
+	// class bytes clamped to [5,9] as a session start does, becomes the active
+	// one, and the player.sav record supplies single player's session words
+	// (runtime/profile/player_profiles.h, inmatch singleplayer_game_config).
+	// ERR_INVALID_PARAMETER with no profile; the defaults then stand.
+	Error use_player_profile(const Ref<PlayerProfiles> &p_profiles);
 	// The FP viewmodel submit spec {gun, arms, adm, show_arms} (renderer
 	// fp_viewmodel_spec (engine: runtime/inmatch/joiner_role.cpp)). `character_arms` is the local
 	// player's resolved combo arms graphic (retail's CharacterEntity arms model,

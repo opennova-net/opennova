@@ -31,14 +31,6 @@ const RED_CLASS := 6
 const BLUE_PAGE := ["WPN_KNIFE", "WPN_M4AUTO", "WPN_colt45"]
 const RED_PAGE := ["WPN_KNIFE2", "WPN_DRAGUNOV", "WPN_357"]
 
-var _sav_path := ""
-
-
-func after_each() -> void:
-	if not _sav_path.is_empty() and FileAccess.file_exists(_sav_path):
-		DirAccess.remove_absolute(_sav_path)
-	_sav_path = ""
-
 
 func _page_blob(names: Array) -> PackedByteArray:
 	var blob := PackedByteArray()
@@ -74,33 +66,28 @@ func _make_weapon_sav() -> PackedByteArray:
 	return buf
 
 
-func _write_weapon_sav() -> String:
-	var path := ProjectSettings.globalize_path("user://weapon_profile_kit_test.sav")
-	var f := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(f, "could not open %s for writing" % path)
-	f.store_buffer(_make_weapon_sav())
-	f.close()
-	_sav_path = path
-	return path
+# The profile over the bytes of one synthetic weapon.sav (no player.sav).
+func _profiles(weapon_sav: PackedByteArray) -> PlayerProfiles:
+	var profiles := PlayerProfiles.new()
+	profiles.load_bytes(PackedByteArray(), false, weapon_sav, true, "")
+	return profiles
 
 
-func test_a_malformed_profile_is_reported() -> void:
-	# Retail's miss leaves PlayerProfile_InitDefaults' values installed [orig: @0x54bb40]:
-	# both sides class 8, one weapon name per page (the playersav ctest pins the
-	# shipped defaults and the page pick). A bad header must not be fatal.
-	var path := ProjectSettings.globalize_path("user://weapon_profile_kit_test.sav")
-	var f := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(f)
-	f.store_buffer("NOTAPROFILE00000".to_ascii_buffer())
-	f.close()
-	_sav_path = path
-
+func test_a_malformed_profile_leaves_the_defaults() -> void:
+	# The load's header gate reads past a file that is not a profile and leaves
+	# PlayerProfile_InitDefaults' records in place [orig: @0x54f6fd]: both sides
+	# class 8, the default class pages (the playersav ctest pins them).
+	var profiles := _profiles("NOTAPROFILE00000".to_ascii_buffer())
+	var summary := profiles.character_summary()
+	assert_true(summary.loaded)
+	assert_eq(summary.blue.player_class, 8)
+	assert_eq(summary.red.player_class, 8)
+	assert_eq(String(summary.blue.kit[0]), "WPN_M4AUTO", "the rifleman's default page")
 	var sim := Simulation.new()
-	assert_ne(sim.load_weapon_profile(path), OK, "a bad header must be reported")
+	assert_eq(sim.use_player_profile(profiles), OK, "the defaults are a usable profile")
 
 
 func test_player_info_character_save_is_per_side_and_preserves_other_slots() -> void:
-	var path := ProjectSettings.globalize_path("user://weapon_profile_kit_test.sav")
 	var bytes := _make_weapon_sav()
 	# Sentinel fields in slot 1: active slot-0 ACCEPT must not touch them.
 	var slot1 := HEADER_BYTES + SLOT_BYTES
@@ -109,11 +96,7 @@ func test_player_info_character_save_is_per_side_and_preserves_other_slots() -> 
 	bytes[slot1 + 2] = 0x66
 	bytes.encode_u16(slot1 + 4, 0x9234)
 	bytes[slot1 + SIDE_BYTES] = 0x33
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file)
-	file.store_buffer(bytes)
-	file.close()
-	_sav_path = path
+	var profiles := _profiles(bytes)
 
 	var profile := {
 		"team": 0,
@@ -123,20 +106,18 @@ func test_player_info_character_save_is_per_side_and_preserves_other_slots() -> 
 			{"avatar_a": 7, "avatar_b": 0, "avatar_packed": 0x8407},
 		],
 	}
-	assert_eq(Simulation.save_weapon_profile_selection(path, profile), OK,
-			"PLAYER_INFO ACCEPT atomically rewrites the active profile")
-	var summary := Simulation.read_weapon_profile_summary(path)
+	assert_eq(profiles.apply_character_selection(profile), OK,
+			"PLAYER_INFO ACCEPT writes the current record in memory")
+	var summary := profiles.character_summary()
 	assert_true(summary.loaded)
-	var blue := summary.blue
-	var red := summary.red
-	assert_eq(blue.player_class, 9)
-	assert_eq(red.player_class, 9,
+	assert_eq(summary.blue.player_class, 9)
+	assert_eq(summary.red.player_class, 9,
 			"retail ACCEPT writes the class to both 0x8006 side blocks")
-	assert_eq(blue.avatar_packed, 0x0400)
-	assert_eq(red.avatar_packed, 0x8407,
+	assert_eq(summary.blue.avatar_packed, 0x0400)
+	assert_eq(summary.red.avatar_packed, 0x8407,
 			"the two side-specific packed character ids survive together")
 
-	var rewritten := FileAccess.get_file_as_bytes(path)
+	var rewritten := profiles.weapon_sav_bytes()
 	assert_eq(int(rewritten[slot1]), 0x44)
 	assert_eq(int(rewritten[slot1 + 1]), 0x55)
 	assert_eq(int(rewritten[slot1 + 2]), 0x66)
@@ -144,20 +125,15 @@ func test_player_info_character_save_is_per_side_and_preserves_other_slots() -> 
 			"the other four profile slots are preserved")
 	assert_eq(int(rewritten[slot1 + SIDE_BYTES]), 0x33,
 			"saving slot 0 does not normalize another slot's class bytes")
-	assert_false(FileAccess.file_exists("%s.tmp.%d" % [path, OS.get_process_id()]),
-			"the atomic temp sibling is renamed away")
 	# [orig: PlayerInfo_SaveFromDialog @0x55EE3F-0x55EE6D class loop,
 	#  @0x55EE93-0x55EF38 selected-side avatar fields]
 
 
-func test_character_save_refuses_to_replace_a_corrupt_existing_profile() -> void:
-	var path := ProjectSettings.globalize_path("user://weapon_profile_kit_test.sav")
-	var original := "NOTAPROFILE".to_ascii_buffer()
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file)
-	file.store_buffer(original)
-	file.close()
-	_sav_path = path
+func test_a_corrupt_profile_is_replaced_at_the_save() -> void:
+	# The save writes the image the load left, which for a file that was not a
+	# profile is the defaults with the screen's edits [orig: PlayerProfile_SaveToFiles
+	# @0x54be00 writes its records whatever the load read].
+	var profiles := _profiles("NOTAPROFILE".to_ascii_buffer())
 	var profile := {
 		"team": 0,
 		"player_class": 8,
@@ -166,13 +142,15 @@ func test_character_save_refuses_to_replace_a_corrupt_existing_profile() -> void
 			{},
 		],
 	}
-	assert_eq(Simulation.save_weapon_profile_selection(path, profile), ERR_FILE_CORRUPT)
-	assert_eq(FileAccess.get_file_as_bytes(path), original,
-			"a rejected profile remains recoverable and byte-identical")
+	assert_eq(profiles.apply_character_selection(profile), OK)
+	var saved := profiles.weapon_sav_bytes()
+	assert_eq(saved.size(), HEADER_BYTES + 5 * SLOT_BYTES)
+	assert_eq(saved.slice(0, 8).get_string_from_ascii(), "FPBC0211")
+	assert_eq(int(saved.decode_u16(HEADER_BYTES + 4)), 0x0200)
 
 
 func test_player_info_accept_writes_the_edited_sides_class_page() -> void:
-	var path := _write_weapon_sav()
+	var profiles := _profiles(_make_weapon_sav())
 	var kit := [
 		{"name": "WPN_KNIFE2", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1},
 		{"name": "WPN_DRAGUNOV", "ammo_primary": 5, "ammo_secondary": -1, "flags": 0},
@@ -188,7 +166,7 @@ func test_player_info_accept_writes_the_edited_sides_class_page() -> void:
 		],
 		"kit": kit,
 	}
-	assert_eq(Simulation.save_weapon_profile_selection(path, profile), OK)
+	assert_eq(profiles.apply_character_selection(profile), OK)
 
 	var expected := PackedByteArray()
 	for entry in kit:
@@ -197,7 +175,7 @@ func test_player_info_accept_writes_the_edited_sides_class_page() -> void:
 			expected.append_array(token.to_ascii_buffer())
 			expected.append(0)
 	expected.append(0)
-	var bytes := FileAccess.get_file_as_bytes(path)
+	var bytes := profiles.weapon_sav_bytes()
 	var page_at := HEADER_BYTES + SIDE_BYTES + FIRST_PAGE_OFFSET \
 			+ PAGE_BYTES * (RED_CLASS - 5)
 	assert_eq(bytes.slice(page_at, page_at + expected.size()), expected,
@@ -210,5 +188,7 @@ func test_player_info_accept_writes_the_edited_sides_class_page() -> void:
 
 	var bad := profile.duplicate(true)
 	bad["kit"] = [{"name": "", "ammo_primary": -1, "ammo_secondary": -1, "flags": -1}]
-	assert_eq(Simulation.save_weapon_profile_selection(path, bad), ERR_INVALID_PARAMETER,
-			"an entry without a weapon name is refused before the file is touched")
+	var before := profiles.weapon_sav_bytes()
+	assert_eq(profiles.apply_character_selection(bad), ERR_INVALID_PARAMETER,
+			"an entry without a weapon name is refused before the record is touched")
+	assert_eq(profiles.weapon_sav_bytes(), before)

@@ -205,6 +205,11 @@ func _start_lan_join(target: JoinTarget) -> void:
 	if target.expansion_known and _world != null:
 		var switch_error := _world.mount_join_expansion(target.expansion)
 		if switch_error.is_empty():
+			# The switch saves the player profile under the expansion it leaves
+			# before the profile loads again under the one it takes (engine:
+			# runtime/profile/player_profiles.h; PlayerProfile keeps the loaded
+			# expansion until the reload).
+			PlayerProfile.save()
 			if _shell != null:
 				_shell.refresh_local_profile_for_mount()
 		else:

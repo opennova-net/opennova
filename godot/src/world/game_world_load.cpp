@@ -1013,6 +1013,7 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	// not the shared default. [D-INF-6]
 	opts->set_item_db(placer_.is_valid() ? placer_->get_item_db() : Ref<ItemDatabase>());
 	opts->set_local_character_profile(local_character_profile_);
+	opts->set_player_profiles(player_profiles_);
 	// Serve-and-play hosts run the listen server AND spawn their own player
 	// (ADR 0011/0012, net-re §5.2b/§5.38). A DEDICATED host (config
 	// "dedicated") serves WITHOUT a local player — same listen server, just no
@@ -1093,57 +1094,18 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	return OK;
 }
 
-// The on-disk path of the player profile's weapon file. Retail builds it from
-// the ACTIVE expansion name — with an expansion loaded it looks ONLY under
-// that expansion's directory (there is no base-game fallback leg), otherwise
-// it reads the game root's copy [orig: PlayerProfile_LoadAllFromDisk @ 0x54f4d0,
-// path build @ 0x54f68c-@ 0x54f6b7: g_ExpansionName[0] ?
-// "expansion\<name>\weapon.sav" : "weapon.sav"]. The mount is the authority
-// on both halves — for a joiner it has already been reconciled to the HOST's
-// expansion (D-NET-178), which is what makes the profile's ADM index space
-// agree with the host's.
-// Load weapon.sav onto the sim: five profile-slot records, each carrying a
-// per-side class byte and the five 2048-byte class kit pages the MP loadout
-// submit indexes BY that class byte [orig: PlayerProfile_LoadAllFromDisk
-// @ 0x54f4d0 — header check @ 0x54f586 ("FPBC"/"0211"), the 5 x 0x1080C
-// record reads]. This is a plain disk file, not archive content, so it is
-// read through the mount's directory rather than the VFS. A file that is
-// absent or not a profile is NOT a load failure: retail's own miss leaves
-// PlayerProfile_InitDefaults' shipped defaults in place (BLUE/RED class 8,
-// one weapon name per class page) [orig: @ 0x54bb40].
+// The player profile's current weapon.sav record onto the sim, again after the
+// boot now that the session and the catalog exist: five profile-slot records
+// the shell loaded at the menu's start, each carrying a per-side class byte and
+// the five 2048-byte class kit pages the MP loadout submit indexes BY that
+// class byte (engine: runtime/profile/player_profiles.h). With no profile the
+// shipped defaults stay installed, as a missing weapon.sav leaves them.
 void GameWorld::load_player_weapon_profile() {
 	Ref<Simulation> sim = get_sim();
-	if (sim.is_null()) {
+	if (sim.is_null() || player_profiles_.is_null()) {
 		return;
 	}
-	// The working directory joined with the engine's expansion-scoped relpath, as
-	// retail builds it [orig: PlayerProfile_LoadAllFromDisk @ 0x54f4d0, path build
-	// @0x54f68c-0x54f6b7]: never the mount root, a build the editor's Play runs from
-	// (ADR 0046 S13 A8). The shell's PlayerProfile.weapon_profile_path computes the
-	// same path.
-	if (resource_root_.is_null()) {
-		return;
-	}
-	const String dir = LaunchFlags::working_dir();
-	if (dir.is_empty()) {
-		return;
-	}
-	const String path = dir.path_join(
-			Simulation::weapon_profile_relpath(resource_root_->get_expansion()));
-	if (path.is_empty()) {
-		return;
-	}
-	if (!FileAccess::file_exists(path)) {
-		UtilityFunctions::print_verbose(
-				vformat("GameWorld: no weapon.sav at %s — keeping the shipped profile defaults", path));
-		return;
-	}
-	const int err = sim->load_weapon_profile(path);
-	if (err != OK) {
-		UtilityFunctions::push_warning(vformat(
-				"GameWorld: weapon.sav at %s not accepted (error %d) — keeping the shipped profile defaults",
-				path, err));
-	}
+	sim->use_player_profile(player_profiles_);
 }
 
 // Place real ambient sounds at the mission's sound markers: load the co-named

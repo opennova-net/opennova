@@ -30,6 +30,7 @@ void MissionSetupOptions::_bind_methods() {
 	SETUP_OBJECT(HostSessionOptions, host_session)
 	SETUP_OBJECT(JoinTarget, join_target)
 	SETUP_OBJECT(CharacterJoinProfile, local_character_profile)
+	SETUP_OBJECT(PlayerProfiles, player_profiles)
 	SETUP_OBJECT(CharacterJoinProfile, join_character_profile)
 	SETUP_OPTION(Variant::PACKED_STRING_ARRAY, spawn_names)
 	SETUP_OBJECT(ResourceRoot, resource_root)

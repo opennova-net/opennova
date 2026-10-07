@@ -158,6 +158,16 @@ inline std::string weapon_sav() {
     return file_exists(base) ? base : std::string();
 }
 
+// <install>/player.sav, which the original keeps beside itself and never under
+// an expansion; empty when the install carries none. Read only: no test writes
+// into the install.
+inline std::string player_sav() {
+    const std::string root = install();
+    if (root.empty()) return std::string();
+    const std::string path = join(root, "player.sav");
+    return file_exists(path) ? path : std::string();
+}
+
 // The whole test is gated: report what it needs and exit Skipped.
 inline int skip(const char *needs) {
     std::printf("SKIP: needs %s\n", needs);

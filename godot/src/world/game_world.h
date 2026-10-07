@@ -374,6 +374,9 @@ public:
 	// MissionRoot it creates and feeds its own tick legs.
 	void set_music_director(MusicDirector *director);
 	MusicDirector *get_music_director() const;
+	// The shell's player profile, whose current records every mission's sim
+	// takes (Simulation.use_player_profile). Null = a fresh profile's defaults.
+	void set_player_profiles(const Ref<PlayerProfiles> &p_profiles) { player_profiles_ = p_profiles; }
 	void set_frame_stats(const Ref<FrameStats> &p_board);
 	bool is_water_render_stats_measured() const;
 	// Enables the manual frame-span/A-B probe. Disabling restores every skip
@@ -813,6 +816,7 @@ private:
 	// projected for the sim (the listen host's own type-2 connection / a
 	// joiner's ClientAuth).
 	Ref<CharacterJoinProfile> local_character_profile_;
+	Ref<PlayerProfiles> player_profiles_;
 	// The last frame's world-tick leg counters (RuntimePerfCounters).
 	int64_t perf_tick_us_ = 0;
 	int64_t perf_foliage_us_ = 0;

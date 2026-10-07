@@ -89,6 +89,10 @@ struct ActionDef {
   uint16_t default_mouse_mod = 0;
   uint8_t default_joy_mod = 0;
   uint32_t modes = 3; // +8: alive bit 1, death-screen bit 2 [orig: @0x497ea0]
+  // Static row +16: the row's help text id, which rides the player profile's
+  // binding table (entry +20) [orig: KeyBinding_BuildFilteredTable @0x54c2b0
+  // @0x54c307].
+  uint32_t help = 0;
 };
 
 // The full static catalog (pointer + element count).

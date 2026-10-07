@@ -178,6 +178,8 @@ func get_mcp_game_state() -> Variant:
 					if root != null and not String(root.get_expansion()).is_empty() else ""),
 		},
 		"session": _session_facts(sim),
+		# The player profile's current record (player.sav): its slot, name and words.
+		"profile": _profile_state(),
 		"runtime": runtime_state,
 		"player": player,
 		"mission": (world.get_mission_stats().to_json_value()
@@ -186,6 +188,23 @@ func get_mcp_game_state() -> Variant:
 				if world != null else {}),
 		"audio_buses": _audio_bus_state(),
 	}
+
+
+## The player profile's current record (PlayerProfile.store()): its slot, name,
+## flags, every named word, the macros, the voice pair and the binding count.
+func _profile_state() -> Dictionary:
+	var profiles := PlayerProfile.store()
+	var state := {
+		"slot": profiles.get_current_slot(),
+		"name": profiles.get_player_name(),
+		"flags": profiles.get_flags(),
+		"macros": profiles.get_macros(),
+		"voice": [profiles.get_voice(0), profiles.get_voice(1)],
+		"binding_count": profiles.get_binding_count(),
+	}
+	for word in PlayerProfiles.word_names():
+		state[word] = profiles.get_word(word)
+	return state
 
 
 ## The in-match session facts (ADR 0042: Simulation.session_state()/
@@ -197,6 +216,9 @@ func _session_facts(sim: Simulation) -> Dictionary:
 	return {
 		"state": _session_state_name(int(sim.session_state())),
 		"role": _session_role_name(int(sim.session_role())),
+		# The charattr properties the restriction step disabled, in the S2C 0x42
+		# packing (0x02 ATTRIBUTES, 0x04 XHAIR_MUTE, 0x08 RECOIL_MUTE, 0x10 SCOPE_MUTE).
+		"charattr_disabled": int(sim.get_charattr_disabled_word()),
 	}
 
 
