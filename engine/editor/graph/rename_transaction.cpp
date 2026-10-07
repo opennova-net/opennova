@@ -246,10 +246,6 @@ std::string folder_of_path(const std::string &relative) {
 	return slash == std::string::npos ? std::string() : relative.substr(0, slash);
 }
 
-namespace {
-
-// Whether the folder `dir` (on disk) is the project's export folder, one an export keeps beside it, or a
-// folder under either: no file of the project's sits there (the scan passes them by).
 bool in_export_folder(const fs::path &dir, const fs::path &export_dir) {
 	std::error_code ec;
 	const fs::path at = fs::weakly_canonical(dir, ec);
@@ -264,8 +260,6 @@ bool in_export_folder(const fs::path &dir, const fs::path &export_dir) {
 	}
 	return false;
 }
-
-} // namespace
 
 RenamePlan plan_move(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
                      const std::string &file, const std::string &folder, const std::vector<ImportedSource> *imports) {
