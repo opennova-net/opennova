@@ -99,6 +99,8 @@ struct FieldChoice {
 	std::string name; // the value as the file writes it (a token, or the number's name)
 	int64_t value = 0;
 	std::string label; // what the editor shows ("" = the name)
+	// What the game does with it, cited, where a table says: its tooltip ("" = nothing said).
+	std::string description;
 };
 
 // How a field holds a colour, when it does: a text the menu parse reads as a hex AARRGGBB
