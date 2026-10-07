@@ -5049,6 +5049,14 @@ target_link_libraries(def_write_test PRIVATE opennova_base opennova_formats)
 target_include_directories(def_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(def_write COMMAND def_write_test)
 
+# hudpos.def's writer (formats/def/def_hudpos_write.h, ADR 0003; the editor deep-integration plan's DI-37):
+# read, written and read again the same model, its bytes canonical; the retail legs JO:CA's own hudpos.def
+# off the packed install (base and each expansion) and the extracted tree.
+add_executable(def_write_hudpos_test def/def_write_hudpos_test.cpp)
+target_link_libraries(def_write_hudpos_test PRIVATE opennova_base opennova_formats)
+target_include_directories(def_write_hudpos_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(def_write_hudpos COMMAND def_write_hudpos_test)
+
 add_executable(def_noted_write_test def/def_noted_write_test.cpp)
 target_link_libraries(def_noted_write_test PRIVATE opennova_base opennova_formats)
 target_include_directories(def_noted_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
