@@ -155,8 +155,10 @@ public:
     // SoundEmitter_ClearByEntityAndSlot @ 0x527a50]. `volume_q8_8` is the original
     // registration word; its high byte feeds the member-volume curve.
     // `lifetime_ticks` lands as the retail 16-bit word (emitter_lifetime_word).
-    // A source pose belongs to the entity rather than to one lane. Updating it
-    // moves every still-live lane without extending any lane's keep-alive.
+    // A registration places its own lane (retail copies the position into its
+    // slots, D-SND-38); update_emitter_source, and a lane's clear, move every
+    // still-live lane of the source without extending any lane's keep-alive
+    // (the port's source anchor).
     void update_emitter_source(uint64_t source_spawn_id, const float pos[3],
                                int64_t source_bms_id);
     void register_emitter(uint64_t source_spawn_id, int32_t lane,
@@ -192,6 +194,11 @@ public:
 
     int64_t clock_tick() const { return clock_tick_; }
     int live_slot_count() const;
+    // The time-of-day region a marker's eval reads now: the clock plus the
+    // marker's stagger nibble [orig: @ 0x408158 (poolHandle & 0xF) << 11 Q16
+    // hours] through time_of_day_region; region 0 at full blend for an index
+    // out of range.
+    TimeOfDayRegion marker_region(int32_t marker_index) const;
 
 private:
     struct Marker {

@@ -77,6 +77,27 @@ std::vector<uint32_t> layer_members(const lwf::File &bank, const lwf::Playlist &
 	return out;
 }
 
+std::vector<EmitterLayer> emitter_layers(const lwf::File &bank, const lwf::Multi &set) {
+	std::vector<EmitterLayer> out;
+	for (const uint32_t playlist : set_layers(bank, set)) {
+		const lwf::Playlist &layer = bank.playlists[playlist];
+		const std::vector<uint32_t> members = layer_members(bank, layer);
+		if (members.empty()) continue;
+		// Member 0 alone [orig: SoundEmitter_UpdateAndMixTop8 @ 0x528649].
+		const lwf::Sndparm &member = bank.sndparms[members[0]];
+		EmitterLayer row;
+		row.playlist = playlist;
+		row.sndparm = members[0];
+		row.falloff_u = static_cast<int32_t>(layer.falloff_radius);
+		row.min_u = static_cast<int32_t>(layer.min_distance);
+		row.volume = static_cast<int32_t>(member.volume);
+		row.clamp = static_cast<int32_t>(member.clamp_volume);
+		row.pitch_q16 = member.pitch_scaled;
+		out.push_back(row);
+	}
+	return out;
+}
+
 int32_t pick_layer_member(const lwf::File &bank, const SetLocation &loc,
 		int32_t layer_index, uint32_t playlist_index, SoundSelector &selector) {
 	if (playlist_index >= bank.playlists.size()) {

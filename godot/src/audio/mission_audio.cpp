@@ -81,6 +81,7 @@ void MissionAudio::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("active_ambient_candidate_ids"), &MissionAudio::active_ambient_candidate_ids);
 	ClassDB::bind_method(D_METHOD("ambient_player_for_candidate", "candidate_id"),
 			&MissionAudio::ambient_player_for_candidate);
+	ClassDB::bind_method(D_METHOD("ambient_candidate_wave", "candidate_id"), &MissionAudio::ambient_candidate_wave);
 	ClassDB::bind_method(D_METHOD("set_markers", "markers", "container"), &MissionAudio::set_markers,
 			DEFVAL(nullptr));
 	ClassDB::bind_method(D_METHOD("set_ambient_markers_enabled", "enabled"),
@@ -337,7 +338,7 @@ void MissionAudio::_add_envs_markers(const std::vector<opennova::audio::EnvsMark
 		marker->set_pos(pos);
 		marker->set_source_bms_id(row.bms_id);
 		marker->set_slot_sets(slot_sets);
-		marker->set_stagger_slot(static_cast<int>(markers_.size() & 0xF));
+		marker->set_stagger_slot(opennova::audio::envs_stagger_slot(static_cast<size_t>(markers_.size())));
 		markers_.push_back(marker);
 		stats_->set_markers_resolved(stats_->get_markers_resolved() + 1);
 		stats_->set_ambient_candidates(stats_->get_ambient_candidates() + candidate_count);
@@ -368,6 +369,12 @@ AudioStreamPlayer3D *MissionAudio::ambient_player_for_candidate(int p_candidate_
 		}
 	}
 	return nullptr;
+}
+
+String MissionAudio::ambient_candidate_wave(int p_candidate_id) const {
+	const Ref<MissionAudioCandidateBinding> *binding = candidate_lookup_.getptr(p_candidate_id);
+	if (binding == nullptr || binding->is_null() || (*binding)->get_descriptor().is_null()) return String();
+	return (*binding)->get_descriptor()->get_wav_path();
 }
 
 void MissionAudio::set_markers(const Array &p_markers, Node3D *p_container) {

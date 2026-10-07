@@ -42,6 +42,24 @@ struct EnvsMarker {
 // applies it to every placed entity whose def it finds.
 bool item_is_envs(const opennova::def::DefItemDef &def);
 
+// One entity's envs registration as every walk reads it off its def: false for
+// a def that is no envs-class item, else `out` takes its four authored
+// time-of-day slot sets, soundloop_1..4 = morning/day/evening/night (slots
+// 5..7 have no region consumer in this updater; an empty slot is silent)
+// [orig: Entity_UpdateEnvSoundEmitter @ 0x4a8080 indexes soundLoopId[region]].
+// The walks below and the editor's Listen (ADR 0046 DI-36) share it.
+bool envs_slot_sets(const opennova::def::DefItemDef &def, std::array<std::string, 4> &out);
+
+// The cohort and clock stagger a resolved marker registers with: its place
+// among the markers the embedder resolved, its low nibble. Retail seeds both
+// from the entity's pool slot (`(handle & 0xF) << 11` on the clock @ 0x408158,
+// the pool-2 cohort `tick & 7` @ 0x4c225a); the port's markers carry no pool
+// slot, so the walk order stands in for it. MissionAudio and the editor's
+// Listen register through it alike.
+inline int32_t envs_stagger_slot(size_t resolved_index) {
+	return static_cast<int32_t>(resolved_index & 0xFu);
+}
+
 // Every envs-class placed entity across all pools, in the canonical entity
 // walk order (markers, items, buildings, organics), with its four authored
 // time-of-day slot set names.

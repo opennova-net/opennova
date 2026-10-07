@@ -10,6 +10,7 @@
 #include <runtime/audio/envs_markers.h>
 #include <runtime/world/world.h>
 
+#include <array>
 #include <memory>
 
 #include <cstdio>
@@ -146,6 +147,18 @@ int main() {
 				"streamed: the marker pool walks first, at the registry position");
 		ok &= expect(streamed[1].bms_id == 7 && streamed[1].slot_sets[3] == "NIGHT_AMB",
 				"streamed: the building row follows with its slots");
+	}
+	// The per-entity read every walk and the editor's Listen share (envs_slot_sets): an envs def's four slots, none
+	// for another; and the stagger a resolved marker registers with (its place's low nibble).
+	{
+		std::array<std::string, 4> slots;
+		ok &= expect(audio::envs_slot_sets(items.entries[0], slots) && slots[0] == "BUILD_AMB" &&
+						slots[1] == "DAY_AMB" && slots[2].empty() && slots[3] == "NIGHT_AMB",
+				"slots: the envs building's four slots");
+		ok &= expect(!audio::envs_slot_sets(items.entries[2], slots), "slots: no envs, no slots");
+		ok &= expect(audio::envs_stagger_slot(0) == 0 && audio::envs_stagger_slot(5) == 5 &&
+						audio::envs_stagger_slot(17) == 1,
+				"stagger: the place's low nibble");
 	}
 	def_free_items(&items);
 	if (!ok) return 1;

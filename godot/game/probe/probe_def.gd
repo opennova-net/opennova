@@ -440,6 +440,17 @@ static func _build_definitions() -> Array[ProbeDef]:
 				RUNTIME + "mission_audio_probe.gd", {
 					"missions": { "type": "array", "items": { "type": "string" }, "default": [] },
 				}, [], false, false, 300_000),
+		ProbeDef.make("ambient_channels",
+				"What the mission's ambience plays where the listener stands: for each point "
+				+ "the local player is teleported to (mission frame, yaw), after `settle_ms` the "
+				+ "live mission audio's ambient channels, each its wave, volume (dB and the "
+				+ "0..255 byte) and place (mission frame), loudest first, and the camera's place; "
+				+ "with no points, where the player stands. The editor's Listen (ADR 0046 DI-36) "
+				+ "is compared against it.",
+				RUNTIME + "ambient_channels_probe.gd", {
+					"points": { "type": "array", "items": { "type": "object" }, "default": [] },
+					"settle_ms": { "type": "integer", "minimum": 0, "default": 1500 },
+				}, [], false, true, 300_000),
 		ProbeDef.make("slot_sounds",
 				"The sounds the local player's body and rounds play where (footsteps, foley, "
 				+ "stance, impacts): `weapon` equipped first when given, then for each point a "

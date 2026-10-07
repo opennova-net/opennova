@@ -18,7 +18,9 @@
 
 #include <formats/env/env_weather_core.h>
 #include <runtime/environment/precipitation.h>
+#include <runtime/world/sound_emitter_mailbox.h>
 
+#include <cstddef>
 #include <cstdint>
 
 namespace opennova::world {
@@ -108,6 +110,41 @@ struct WeatherTickEvents {
     bool quake_shake_local = false; // the local player (or its carrier) was displaced
 };
 
+// The thunder one-shots a tick's lightning sequencers raise: A at 1 m centred,
+// B at 10 m from behind (bearing 128) [orig: Environment_UpdateWeatherTick,
+// the THUNDER plays @ 0x57ecfb / @ 0x57edc4 through Sound_PlayTriggerSetScaled
+// @ 0x527b90]. The kernel's weather tick and the editor's Listen (ADR 0046
+// DI-36) queue them alike; returns how many it wrote to `out`.
+size_t weather_thunder_sounds(const WeatherTickEvents &events, WeatherSoundEvent out[2]);
+
+// The body the rain beside it registers for: the local player's, whose body
+// update runs the rain leg [orig: Entity_UpdateInfantryPlayerBody
+// @ 0x4b4747..0x4b490e], or the editor's listener standing in for it (the
+// camera's eye, its eye offset 0). `lit` with the first blink hit's building
+// light transfer when that hit names one (entity+0x1D0, ItemDef+0x218).
+struct RainAmbientBody {
+    Vec3 pos{};                 // mission frame
+    int32_t eye_offset_z = 0;   // entity+0x74, 16.16
+    bool lit = false;
+    float light_transfer = 0.0f;
+    uint64_t source_spawn_id = 0;
+    uint16_t source_handle = 0xFFFF;
+    int32_t bms_id = 0;
+    uint32_t emitted_tick = 0;
+};
+// The rain's two loops beside that body, while it rains [orig:
+// Entity_UpdateInfantryPlayerBody @ 0x4b4747..0x4b490e: while
+// g_EnvRainPctCurrent != 0 and the kind is rain, the volume the rain current
+// (<= 0xFFFF by its max clamp), scaled by (lightTransfer x 0.5 + 0.5) when the
+// first blink hit names a building (@ 0x4b4770..0x4b47a8, no indoor-flag
+// test), its low 16 bits the 8.8 volume word (@ 0x4b4845); LPNV_RAIN_L at
+// (x + 2 m, y, z + eyeOffsetZ) on slot type 1 and LPNV_RAIN_R at (x - 2 m, y,
+// z + eyeOffsetZ) on slot type 2 (@ 0x4b47b0 / @ 0x4b4865), lifetime 20, pitch
+// 0x10000, through SoundEmitter_RegisterSetLayers @ 0x528340]. Returns how
+// many it wrote to `out` (0 or 2).
+size_t rain_ambient_emitters(const WeatherState &weather, const RainAmbientBody &body,
+                             SoundEmitterEvent out[2]);
+
 struct WeatherState {
     env::WeatherCore core;
 
@@ -174,6 +211,10 @@ struct WeatherState {
     bool raining() const { return core.scalar_channels.rain_pct_fp > env::PrecipitationField::kRainGateQ16; }
     // The clock as HHMM (the TOD compute's parameter space).
     double tod_hhmm() const;
+    // The clock as 16.16 hours, what an entity's time-of-day region reads
+    // (with its stagger nibble) [orig: Env_GetTimeOfDayHoursQ16 @ 0x57d5b0 =
+    // g_EnvCurTimeFixed24 >> 8, from Entity_CalcTimeOfDayRegion @ 0x408110].
+    int32_t tod_hours_q16() const { return static_cast<int32_t>(tod_fixed24 >> 8); }
     // g_EnvIsNightPhase — the 06:00/18:45 sun-vs-moon select over the clock
     // [orig: Environment_ComputeTimeOfDayColors @ 0x57de40 ->
     //  Environment_GetLightDirectionFloat @ 0x57d870]; the `night` WAC value.
