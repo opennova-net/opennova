@@ -3,7 +3,8 @@
 // suite (ADR 0040 ladder E3b): the corner rects against the one x,y,w,h rect,
 // the 4-field positioned records, the packed colours, the spinmap extent gate,
 // the stance slots by id (later wins), the last-authored static frame and the
-// font fallback — on a synthetic file, then on the shipped hudpos.def; and the
+// font fallback — on a synthetic file, then on the reference fixture's hudpos.def
+// (an earlier build's layout, not JO:CA's: hud-re.md "Render pipeline"); and the
 // HUD an empty, a key-less and a partial file make (D-HUD-54).
 // [orig: HUD_ParseHudposToken @0x59f370; HUD_DrawHealthBar @0x5a2e50;
 //  HUD_DrawPowerThrowChargeBar @0x599830]
@@ -412,7 +413,7 @@ static void unauthored_hud() {
 static void retail_leg() {
 	const std::string fixture = retail::reference_fixture("def/hudpos.def");
 	if (fixture.empty()) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/hudpos.def (the shipped HUD layout table)");
+		retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/hudpos.def (an earlier build's HUD layout, not JO:CA's)");
 		return;
 	}
 	DefHudPosFile file;
@@ -441,12 +442,13 @@ static void retail_leg() {
 	CHECK(layout.chat_lines == 8);
 	CHECK(layout.veh_stance_pos.x == 0 && layout.veh_stance_pos.y == 272);
 	CHECK(layout.lfp_anchor_x == 1020 && layout.lfp_anchor_y == 27);
-	// The shipped file authors no NETWORKINDICATOR: the reset corners stand.
+	// The fixture authors no NETWORKINDICATOR: the reset corners stand.
 	CHECK(layout.net_indicator_pos == kNetIndicatorResetPos);
 	// Its HUDDECLUT rows decide the soldier's panel level by level: each gated
 	// element draws exactly at the levels its row shows, and each draws at one
-	// level at least (D-HUD-54 leaves a shipped layout as it drew; this file
-	// shows the ammo count and the health bar at levels 1 and 2, `0 1 1 0`).
+	// level at least (D-HUD-54 leaves an authored layout as it drew; this file
+	// shows the ammo count and the health bar at levels 1 and 2, `0 1 1 0`,
+	// where JO:CA's two hudpos.def files author `1 1 1 0`).
 	{
 		fnt_font_t font = test_font::uniform_test_font();
 		Compiled hud;

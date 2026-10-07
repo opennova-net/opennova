@@ -233,12 +233,13 @@ int main(int argc, char **argv) {
     if (atof_legs() != 0) return 1;
     if (sidless_block_legs() != 0) return 1;
     if (value_cap_legs() != 0) return 1;
-    /* Every remaining leg reads the shipped hudpos.def (the memory legs compare
-       against its path parse), so they gate on the reference fixture set
-       (OPENNOVA_JO_ASSETS). */
+    /* Every remaining leg reads the reference fixture's hudpos.def (the memory
+       legs compare against its path parse), so they gate on the reference
+       fixture set (OPENNOVA_JO_ASSETS). It is an earlier build's layout, not
+       either of JO:CA's (docs/interface/hud-re.md "Render pipeline"). */
     const std::string fixture = retail::reference_fixture("def/hudpos.def");
     if (fixture.empty())
-        return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/hudpos.def (the shipped HUD layout table)");
+        return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/hudpos.def (an earlier build's HUD layout, not JO:CA's)");
     const char *path = fixture.c_str();
 
     DefHudPosFile hudpos;
@@ -250,7 +251,8 @@ int main(int argc, char **argv) {
 
     const DefHudPosDef *hud = &hudpos.hud;
 
-    /* Fonts: this reference hudpos.def (the JOX one) names its face on a bare
+    /* Fonts: this reference hudpos.def (not JO:CA's, whose two files author
+       fonthud1_hi / fonthud1_lo) names its face on a bare
        `fonthud1` line, which is no key: HUD_ParseHudposToken @0x59F370 compares
        whole tokens with _stricmp against fonthud1_hi / fonthud1_lo, so both
        names stay empty and retail's HUD slot takes the bold label font

@@ -258,11 +258,17 @@ int main(void) {
 
     /* The frame ignores the embedder's streaming state: a stopped VM with a
        loaded script still takes it [orig: sub_672E50 tests only ctx+32 and the
-       chunk pointer; AudioVM_StopMusicContext @0x671e00 keeps chunk_04]. */
+       chunk pointer; MusicCtx_SelectEndTrack @0x672fd0 tests chunk_04 alone].
+       Retail's context stop is not this state: AudioVM_StopMusicContext
+       @0x671e00 frees the instance and zeroes chunk_04 (AudioVM_FreeSoundBuffer
+       @0x672e25), which the port does by unloading the script (MusicService
+       stop_context; the unload leg below). */
     mus_vm_stop(vm7);
     CHECK(mus_vm_signal(vm7, 1) == 0, "signal on a stopped VM still runs");
     CHECK(strcmp(mus_vm_current_section(vm7), "Missionwin") == 0, "the stopped VM lands in Missionwin");
     CHECK(mus_vm_state(vm7) == MUS_VM_STOPPED, "the frame does not restart the embedder state");
+    mus_vm_unload_script(vm7);
+    CHECK(mus_vm_signal(vm7, 1) == -1, "after the context stop (script unloaded) the signal runs nothing");
     CHECK(mus_vm_signal(NULL, 1) == -1, "signal without a VM is refused");
     mus_vm_destroy(vm7);
 

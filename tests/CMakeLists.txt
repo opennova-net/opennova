@@ -1545,7 +1545,8 @@ add_test(NAME hud_item_flash COMMAND hud_item_flash_test)
 
 # The hudpos.def parse applied to the HUD layout globals (hud/hud_layout_from_hudpos.h):
 # the corner rects, the positioned records, the packed colours, the stance slots and
-# the last-authored static frame; the retail leg reads the shipped hudpos.def.
+# the last-authored static frame; the retail leg reads the reference fixture's hudpos.def
+# (an earlier build's layout, not JO:CA's).
 add_executable(hud_layout_test hud/hud_layout_test.cpp)
 target_link_libraries(hud_layout_test PRIVATE opennova_runtime)
 target_include_directories(hud_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
