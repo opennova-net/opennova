@@ -34,20 +34,25 @@ struct ObjectLodFrame {
 	float projection_scale = 0.0f;
 	bool valid = false;
 
+	// Every frame's scale reads `p_object_detail`, the object detail the view
+	// draws at: the game's session copy of its options' setting
+	// (renderer::object_lod_frame_scale; renderer/object_lod.h carries the
+	// witness).
 	// A vertical fov over a viewport of that size (the scripted seam's form):
 	// the horizontal tangent follows the aspect and the viewport is the
 	// focal's width.
 	static ObjectLodFrame make(const Transform3D &p_camera_transform,
 			float p_vertical_fov_degrees, float p_viewport_width,
-			float p_viewport_height);
+			float p_viewport_height, int p_object_detail);
 	// The frame a view draws: the frustum from its camera's own tangents
 	// (camera_tangents), the focal and frame scale from the viewport width
 	// the image reaches the surface at (retail's viewport is the whole
 	// surface, and its focal is half that width over tan(fov_h / 2)).
-	static ObjectLodFrame from_camera(const Camera3D *p_camera, float p_viewport_width);
+	static ObjectLodFrame from_camera(const Camera3D *p_camera, float p_viewport_width,
+			int p_object_detail);
 	static ObjectLodFrame from_tangents(const Transform3D &p_camera_transform,
 			float p_tan_half_horizontal, float p_tan_half_vertical,
-			float p_viewport_width);
+			float p_viewport_width, int p_object_detail);
 
 	// The half-angle tangents of the frustum a camera draws over its own
 	// viewport: Godot's fov is horizontal under KEEP_WIDTH and vertical

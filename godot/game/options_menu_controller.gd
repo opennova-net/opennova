@@ -72,6 +72,12 @@ func _seed_player_options() -> void:
 	var aspect_id := _driver.widget_id("16x9DISPLAY")
 	if aspect_id >= 0 and _driver.widget_kind_of(aspect_id) == MnuDocument.TYPE_SPINLIST:
 		_driver.select_row_by_value(aspect_id, str(state.aspect_mode), false)
+	# The object-detail row (OBJECTPOLY front, OBJECTDETAIL in game) seeds by
+	# value from the persisted word (the engine's table, MenuFrame).
+	for control_name: String in MenuFrame.object_detail_controls():
+		var detail_id := _driver.widget_id(control_name)
+		if detail_id >= 0:
+			_driver.select_row_by_value(detail_id, str(state.object_polydetail), false)
 
 
 func _seed_scroll(control_name: String, value: int) -> void:
@@ -141,7 +147,12 @@ func _on_widget_value_changed(widget_name: String, kind: String,
 			if color_id < 0: return
 			state.crosshair_color = int(_driver.item_value(color_id, index))
 		_:
-			return
+			# The object-detail rows write the selected row's value back.
+			if not MenuFrame.object_detail_controls().has(widget_name.to_upper()):
+				return
+			var detail_id := _driver.widget_id(widget_name)
+			if detail_id < 0 or index < 0: return
+			state.object_polydetail = int(_driver.item_value(detail_id, index))
 	_options.update(state)
 
 

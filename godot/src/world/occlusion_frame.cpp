@@ -132,7 +132,7 @@ opennova::renderer::ScenePassGateEdges OcclusionFrame::apply_blink_gates(bool p_
 }
 
 void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
-		const Transform3D &p_camera_xform, bool p_forces_indoors) {
+		const Transform3D &p_camera_xform, bool p_forces_indoors, int p_object_detail) {
 	Simulation *s = sim();
 	if (s == nullptr) {
 		return;
@@ -167,7 +167,7 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 	const bool timing = probe_timing_ || stats_on;
 	const int64_t native_start = timing ? ticks_usec() : 0;
 	s->run_occlusion_frame(p_camera_xform, fov_y, aspect, p_viewport_width, fog, water_z,
-			p_forces_indoors);
+			p_forces_indoors, p_object_detail);
 	const int64_t native_end = timing ? ticks_usec() : 0;
 	int64_t building_query_us = 0;
 	int64_t building_apply_us = 0;
@@ -346,7 +346,7 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 }
 
 void OcclusionFrame::apply_inset_frame(Camera3D *p_camera, float p_viewport_width,
-		bool p_forces_indoors) {
+		bool p_forces_indoors, int p_object_detail) {
 	Simulation *s = sim();
 	EntityIndex *registry = entity_index();
 	if (s == nullptr || registry == nullptr || p_camera == nullptr) {
@@ -370,6 +370,7 @@ void OcclusionFrame::apply_inset_frame(Camera3D *p_camera, float p_viewport_widt
 		request.water_z_units = w->get_water_height();
 	}
 	request.force_indoors = p_forces_indoors;
+	request.object_detail = p_object_detail;
 	const InsetOcclusionView &inset = s->run_inset_occlusion(request);
 	inset_active_ = true;
 	inset_foliage_mask_anchors_ = inset.foliage_mask_anchors;

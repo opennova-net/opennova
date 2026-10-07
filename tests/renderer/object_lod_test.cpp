@@ -204,6 +204,59 @@ int main() {
   CHECK(std::fabs(object_lod_frame_scale(0, 640.0f) - 0.34f) < 1.0e-6f);
   CHECK(std::fabs(object_lod_frame_scale(2, 1280.0f) - 0.5f) < 1.0e-6f);
 
+  // The detail is game.cfg's object_polydetail, the config load clamping it
+  // into 0..3 [orig: Settings_ClampGraphicsOptions @ 0x54d4e4..0x54d4f2]; a
+  // fresh profile starts at the video test's capable-device rung 2
+  // [orig: Renderer_ComputeQualityLevels @ 0x586196..0x5861c4].
+  using opennova::renderer::clamp_object_lod_detail;
+  using opennova::renderer::kObjectLodDetailFreshProfile;
+  using opennova::renderer::kObjectLodDetailLevelMin;
+  CHECK(kObjectLodDetailLevelMin == 0);
+  CHECK(kObjectLodDetailFreshProfile == 2);
+  CHECK(clamp_object_lod_detail(-1) == 0);
+  CHECK(clamp_object_lod_detail(0) == 0);
+  CHECK(clamp_object_lod_detail(2) == 2);
+  CHECK(clamp_object_lod_detail(3) == 3);
+  CHECK(clamp_object_lod_detail(9) == 3);
+
+  // The walk at each detail level (Armry01's 200/60/20/0 at 1920 px wide):
+  // one projected radius, four levels' scales. 400 px is LOD0 only at
+  // detail 3 (scaled ~267); 2 (~133) and 1 (~89) draw LOD1, 0 (~45) LOD2.
+  const int armry_400[4] = {2, 1, 1, 0};
+  for (int detail = 0; detail <= kObjectLodDetailLevelMax; ++detail) {
+    CHECK(select_object_lod(armry01, 400 << 16,
+                            object_lod_frame_scale(detail, 1920.0f))
+              .lod_index == armry_400[detail]);
+  }
+  // Every level switches at a projected radius in inverse proportion to the
+  // scale, and the projected radius falls as 1/distance: at detail 0, 1 and
+  // 2 a model takes each coarser level at 0.17, 0.335 and 0.5 of its
+  // detail-3 distance. The largest projected radius that still draws level
+  // >= n, per detail, found by bisection over Q16 radii.
+  const auto switch_radius = [&](int detail, int level) {
+    const float scale = object_lod_frame_scale(detail, 1920.0f);
+    int32_t lo = 1 << 16;       // draws level >= `level`
+    int32_t hi = 4000 << 16;    // draws a finer level
+    while (hi - lo > 1) {
+      const int32_t mid = lo + (hi - lo) / 2;
+      if (select_object_lod(armry01, mid, scale).lod_index >= level) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    return static_cast<double>(lo);
+  };
+  const double distance_ratio[3] = {0.17, 0.335, 0.5};
+  for (int level = 1; level <= 2; ++level) {
+    const double at_3 = switch_radius(kObjectLodDetailLevelMax, level);
+    for (int detail = 0; detail < kObjectLodDetailLevelMax; ++detail) {
+      // switch distance ratio = detail-3 radius / detail-d radius
+      const double ratio = at_3 / switch_radius(detail, level);
+      CHECK(std::fabs(ratio - distance_ratio[detail]) < 0.001);
+    }
+  }
+
   // The projected radius [orig: Viewport_TransformAndClipPoint
   // @ 0x41177a..0x4117ec]: radius * focal / depth with the witnessed
   // truncating 2^32/depth and the two +0x8000 roundings.

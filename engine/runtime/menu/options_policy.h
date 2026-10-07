@@ -52,12 +52,6 @@ struct VideoQualityControl {
 inline constexpr VideoQualityControl kVideoQualityControls[] = {
     {"TERRAINPOLY", "3"},
     {"TERRAINTEX", "3"},
-    {"OBJECTPOLY", "3"},
-    // game.mnu's older alias for the same highest object-detail rung; the
-    // in-game options Accept reads the control by this name
-    // [orig: UI_IngameOptionsDialogEventHandler @0x554e40 — "OBJECTDETAIL"
-    //  read @0x554efb].
-    {"OBJECTDETAIL", "3"},
     {"OBJECTTEX", "3"},
     // The authored 3..16 rows are placeholders; mode 2 is the highest
     // multisample mode supported by the retail device contract.
@@ -71,6 +65,24 @@ inline constexpr VideoQualityControl kVideoQualityControls[] = {
     // "Minimal" means minimal compression and therefore maximum fidelity.
     {"TEXCOMPRESSION", "2"},
 };
+
+// The object-detail rows are served, not pinned: game.cfg's
+// `object_polydetail` (renderer/object_lod.h kObjectLodDetailLevelMax's note).
+// Each surface selects the row whose item value is the persisted word and
+// writes the selected row's value back. The front-end OPTIONS screen authors
+// OBJECTPOLY [orig: UI_PopulateRenderAndAudioSettings @0x55ce79..0x55cec1
+// locks only the rows above the device's own maximum (dword_2550800, 3 on a
+// shader-model-2 device past 120 MiB: RenderSettings_ComputeFromGPUCaps
+// @0x587986..0x58798d / @0x5879c2..0x5879d0), so every row is open on the
+// device OpenNova ports;
+// UI_SyncRenderSettingsToWidgets @0x55a1da..0x55a1f3 (the select by value);
+// sub_55A710 @0x55a820..0x55a83b (the ACCEPT's read)]; game.mnu's in-game
+// options author the older alias OBJECTDETAIL [orig: UI_OptionsScreenInit
+// @0x554997..0x5549b6 (the select by value);
+// UI_IngameOptionsDialogEventHandler @0x554e40 — "OBJECTDETAIL" read
+// @0x554efb..0x554f0f]. Neither Accept touches the session copy the draw
+// reads, so the word reaches the draw at the next mission start.
+inline constexpr const char *kObjectDetailControls[] = {"OBJECTPOLY", "OBJECTDETAIL"};
 
 // The registered retail comparison profile's gamma reference. Gamma is
 // calibration, not a quality rung, so pushing it to the numeric maximum would

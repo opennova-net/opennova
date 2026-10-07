@@ -229,6 +229,9 @@ int GameWorld::load_mission_data(const Ref<MissionData> &p_mission, const String
 int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const String &p_bms_name,
 		const Ref<ResourceRoot> &p_resource_root) {
 	const bool wire_header_join = p_mission->is_wire_header_only();
+	// The mission start's copy of the options' object detail: the frames draw
+	// at it until the next mission start (engine: renderer/object_lod.h).
+	object_detail_ = object_polydetail_;
 	join_wire_assets_pending_ = wire_header_join;
 	join_wire_til_applied_ = false;
 	join_wire_assets_failed_ = false;

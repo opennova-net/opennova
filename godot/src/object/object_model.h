@@ -990,10 +990,13 @@ public:
 	// water heights of the frame the foliage compile used.
 	static void refresh_foliage_mask_frame(float p_camera_y, float p_water_height);
 	float get_foliage_mask_side() const { return foliage_mask_side_; }
+	// The scripted seams below take the object detail the frames draw at
+	// (ObjectLodFrame), the highest when a caller names none.
 	static int update_authored_lods(const Transform3D &p_camera_transform,
 			float p_vertical_fov_degrees,
 			float p_viewport_width,
-			float p_viewport_height);
+			float p_viewport_height,
+			int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);
 	// The same walk per view drawing the world this frame: view 0 the frame's
 	// image, view 1 (present while it renders) the weapon Inset pass, which
 	// retail runs as its own scene pass with its own frame scale, sub-pixel
@@ -1004,7 +1007,8 @@ public:
 	static int update_authored_lod_views(const ObjectLodFrame *p_frames, int p_frame_count);
 	// The two-camera form (view 1 null = no Inset view), for tools and tests.
 	static int update_authored_lods_for_views(Camera3D *p_main, float p_main_width,
-			Camera3D *p_inset, float p_inset_width);
+			Camera3D *p_inset, float p_inset_width,
+			int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);
 	// The frame driver's leg after the awake advance: every twin follows its
 	// model's final transform, part pose, instance uniforms and strip rung.
 	static void sync_view_twins();
@@ -1052,7 +1056,8 @@ public:
 	// One camera's view (ObjectLodFrame::from_camera): its own drawn frustum
 	// (the keep-aspect mode decides which axis its fov names) and the focal
 	// over `viewport_width`, the width the image reaches the surface at.
-	static int update_authored_lods_for_camera(Camera3D *p_camera, float p_viewport_width);
+	static int update_authored_lods_for_camera(Camera3D *p_camera, float p_viewport_width,
+			int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);
 	Dictionary get_render_part_nodes() const;
 	// A model-space attachment through the rendered subobject's live pose.
 	// Skeletal bones need their inverse rest pose; rigid PANM parts already

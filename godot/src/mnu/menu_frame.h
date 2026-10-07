@@ -315,10 +315,12 @@ protected:
 public:
 	// The retail Options policy tables (engine/runtime/menu/options_policy.h),
 	// re-exported for the shell's appliers: [{control, minimum, maximum, page}],
-	// [{control, value}], the gamma reference, the preset-button names, the
-	// not-yet-serviced control names and [{control, checked}] their rows show.
+	// [{control, value}], the object-detail rows' names, the gamma reference, the
+	// preset-button names, the not-yet-serviced control names and
+	// [{control, checked}] their rows show.
 	static Array options_scroll_ranges();
 	static Array video_quality_controls();
+	static PackedStringArray object_detail_controls();
 	static int video_gamma_reference();
 	static PackedStringArray video_preset_buttons();
 	static PackedStringArray options_unsupported_controls();

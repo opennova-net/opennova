@@ -29,7 +29,7 @@ namespace {
 opennova::world::OcclusionFrameCamera occlusion_frame_camera(const Transform3D &p_camera,
 		double p_fov_y_deg, double p_aspect, double p_viewport_width,
 		double p_fog_dist_units, double p_water_z_units, bool p_force_indoors,
-		uint32_t p_local_blink_flags) {
+		uint32_t p_local_blink_flags, int p_object_detail) {
 	opennova::world::OcclusionViewSpec view;
 	const Vector3 eye = p_camera.origin;
 	const Vector3 fwd_g = -p_camera.basis.get_column(2).normalized();
@@ -51,6 +51,7 @@ opennova::world::OcclusionFrameCamera occlusion_frame_camera(const Transform3D &
 	view.water_z_units = static_cast<float>(p_water_z_units);
 	view.local_blink_flags = p_local_blink_flags;
 	view.force_indoors = p_force_indoors;
+	view.object_detail = p_object_detail;
 	opennova::world::OcclusionFrameCamera cam;
 	opennova::world::occlusion_camera_from_view(view, cam);
 	return cam;
@@ -327,11 +328,13 @@ void Simulation::occlusion_init_mission() {
 void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y_deg,
                                          double p_aspect, double p_viewport_width,
                                          double p_fog_dist_units,
-                                         double p_water_z_units, bool p_force_indoors) {
+                                         double p_water_z_units, bool p_force_indoors,
+                                         int p_object_detail) {
 	if (!kernel_) return;
 	const opennova::world::OcclusionFrameCamera cam = occlusion_frame_camera(p_camera,
 			p_fov_y_deg, p_aspect, p_viewport_width, p_fog_dist_units,
-			p_water_z_units, p_force_indoors, kernel_->collision.local_player_blink_flags);
+			p_water_z_units, p_force_indoors, kernel_->collision.local_player_blink_flags,
+			p_object_detail);
 	// The main scene's collect runs over the main view's frame words.
 	kernel_->occlusion.select_view(opennova::world::OcclusionView::kMain);
 	const uint64_t occl_build_start =
@@ -370,7 +373,7 @@ const InsetOcclusionView &Simulation::run_inset_occlusion(const InsetOcclusionRe
 	const opennova::world::OcclusionFrameCamera cam = occlusion_frame_camera(p_request.camera,
 			p_request.fov_y_deg, p_request.aspect, p_request.viewport_width,
 			p_request.fog_dist_units, p_request.water_z_units, p_request.force_indoors,
-			kernel_->collision.local_player_blink_flags);
+			kernel_->collision.local_player_blink_flags, p_request.object_detail);
 	kernel_->occlusion.select_view(opennova::world::OcclusionView::kInset);
 	kernel_->occlusion.build_frame(kernel_->world, kernel_->collision, cam);
 	kernel_->occlusion.collect_death_piece_draws(kernel_->world, cam, inset.death_piece_draws);
