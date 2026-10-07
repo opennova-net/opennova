@@ -208,6 +208,11 @@ std::string ViewportModel::picture_message() const {
 
 bool ViewportModel::command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
 		std::string &error) const {
+	if (!command.item.empty() || !command.handle.empty() || !command.field.empty() || !command.value.empty()) {
+		error = std::string("A ") + viewport_kind_token(kind_) + " viewport's command \"" + command.name +
+				"\" takes no item, handle, field or value.";
+		return false;
+	}
 	if (command.name == "click") {
 		if (!command.has_at || !command.ids.empty() || !command.by.empty()) {
 			error = "A click takes the point of the picture it is at, \"at\": [x, y], and no ids or by.";

@@ -226,7 +226,8 @@ void HudViewportView::draw_ready(Workspace &workspace, const ViewportModel &view
 				go_to_texture(workspace, view, art.path);
 		}
 	} else {
-		ImGui::TextDisabled("Point at an element to name it; click to pick it; double click to go to its line.");
+		ImGui::TextDisabled("Point at an element to name it; click to pick it; drag it to move it; double click to go "
+		                    "to its line.");
 	}
 
 	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y), [&](const CanvasInput &in) {
