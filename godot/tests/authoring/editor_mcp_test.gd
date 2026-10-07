@@ -1016,6 +1016,54 @@ func test_add_it_there_through_the_editor_mcp() -> void:
 	assert_eq(int((await _problems_naming("PROF_MCP", true)).get("shown", 0)), 1)
 
 
+## DI-33: a file the project lacks is made by the engine's own writer from its row: a model and an animation map
+## an item names, each Created through the endpoint (the map with the reset clip it names), each row gone; and a
+## sound set an item names with no bank to put it in, Created with it (the bank the game searches first, the set
+## added there and selected).
+func test_create_missing_files_through_the_editor_mcp() -> void:
+	if _client == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova create writers mcp %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Writers"})).get("ok", false)))
+	assert_true(bool((await _create_missing()).get("ok", false)))
+	await _open("items.def")
+	var added := await _edit([{"op": "add", "kind": "item", "field": "display_name", "value": "Door", "as": "door"},
+			{"op": "set", "id": "door", "field": "graphic", "value": "di33box"},
+			{"op": "set", "id": "door", "field": "anim_def", "value": "di33map"},
+			{"op": "set", "id": "door", "field": "door_open_sound", "value": "DI33_OPEN"}])
+	assert_true(_done(added), str(added))
+	for pair: Array in [["di33box", "Create di33box.3di"], ["di33map", "Create di33map.adm"],
+			["DI33_OPEN", "Create gamelocl.lwf with DI33_OPEN"]]:
+		var problems := await _problems_naming(String(pair[0]), true)
+		assert_eq(int(problems.get("shown", 0)), 1, str(problems))
+		if int(problems.get("shown", 0)) != 1:
+			return
+		var fixes: Array = problems["problems"][0].get("fixes", [])
+		assert_gt(fixes.size(), 0, str(fixes))
+		if fixes.is_empty():
+			return
+		var create: Dictionary = fixes[0]
+		assert_eq(String(create.get("label", "")), String(pair[1]), str(create))
+		assert_eq(String(create["request"].get("kind", "")), "create_file")
+		var applied := await _call("editor_request", create["request"])
+		assert_true(_done(applied), str(applied))
+		# The reference resolves (a new set with no layer has a finding of its own, which names it too).
+		var codes: Array[String] = []
+		for row: Variant in (await _query("problems", {"text": String(pair[0])})).get("problems", []):
+			codes.append(String((row as Dictionary).get("code", "")))
+		assert_does_not_have(codes, "reference.missing", String(pair[0]))
+	var names: Array[String] = []
+	for file: Variant in (await _query("files", {"limit": 200})).get("files", []):
+		names.append(String((file as Dictionary).get("name", "")))
+	assert_has(names, "di33map_rst.bad", str(names))
+	var bank := String((await _state(["documents"])).get("documents", {}).get("active", ""))
+	assert_true(bank.ends_with("gamelocl.lwf"), bank)
+	var primary: Dictionary = (await _state(["selection"])).get("selection", {}).get("primary", {})
+	var selected := await _query("record", {"path": bank, "id": int(primary.get("row", 0))})
+	assert_eq(String(selected.get("name", "")), "DI33_OPEN", str(selected))
+
+
 ## The asset graph through the endpoint (S7): a blank project's references all resolve, a
 ## texture named by the menu is found from both ends, the rename rewrites the menu and
 ## moves the file, and a rename that would break a site the editor cannot rewrite is
