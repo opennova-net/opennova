@@ -5299,3 +5299,8 @@ add_executable(hud_capture_labels_test hud/hud_capture_labels_test.cpp)
 target_link_libraries(hud_capture_labels_test PRIVATE opennova_runtime)
 target_compile_features(hud_capture_labels_test PRIVATE cxx_std_17)
 add_test(NAME hud_capture_labels COMMAND hud_capture_labels_test)
+
+add_executable(editor_environment_viewport_test editor/environment_viewport_test.cpp)
+target_link_libraries(editor_environment_viewport_test PRIVATE opennova_editor)
+target_include_directories(editor_environment_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_environment_viewport COMMAND editor_environment_viewport_test)
