@@ -141,6 +141,29 @@ static int test_blocked_reading() {
 	return 0;
 }
 
+// A document of one row (an environment; a terrain's the same, editor_terrain_document): the restore reads the
+// file again in the row's place, which its one-row rule takes; Undo gives the one-line reading back.
+static int test_one_row() {
+	const std::string text = "fog_level 600\r\nsky_height 300\r\n";
+	std::unique_ptr<DocumentBase> document = loaded(lf_only(text), "day.env", AssetKind::Environment);
+	TEST_EXPECT(document && rows_of(*document) == 1);
+	if (!document) return 1;
+	TEST_EXPECT(document->serialize().text.find("sky_height") == std::string::npos);
+	const std::vector<Diagnostic> findings = line_end_findings(*document, "jo");
+	const Diagnostic *d = the_finding(findings);
+	TEST_EXPECT(d != nullptr);
+	if (!d) return 1;
+	Diagnostic error;
+	TEST_EXPECT(document->apply(d->planned[0].edits, error));
+	TEST_EXPECT(rows_of(*document) == 1 && document->serialize().text.find("sky_height 300") != std::string::npos &&
+	            line_end_findings(*document, "jo").empty());
+	document->undo();
+	TEST_EXPECT(rows_of(*document) == 1 && document->serialize().text.find("sky_height") == std::string::npos &&
+	            the_finding(line_end_findings(*document, "jo")));
+	std::printf("one row: an environment's restore replaces its row, undone\n");
+	return 0;
+}
+
 // The sound profiles' writer ends every line CR LF itself, so the rule reads the source the document was
 // read from: the finding stands though a Save would write CR LF (and the one profile the game reads).
 static int test_canonical_writer() {
@@ -268,6 +291,7 @@ int main() {
 	int failures = 0;
 	failures += test_weapons_whole_file();
 	failures += test_blocked_reading();
+	failures += test_one_row();
 	failures += test_canonical_writer();
 	failures += test_mixed_and_none();
 	failures += test_texts();
