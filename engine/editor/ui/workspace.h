@@ -11,6 +11,7 @@ namespace opennova::editor {
 class TextureThumbnailImages;
 class ViewportDeviceSource;
 struct SessionView;
+struct ViewportMouse;
 
 // What Go to definition (F12) and Find usages (Shift+F12) act on where the pointer or the keyboard is (ADR 0046
 // DI-18), offered by the window drawing it each frame it is there: a reference field what it names and whose
@@ -50,6 +51,10 @@ public:
 	virtual void hide_pointer() {}
 	// What F12 and Shift+F12 act on here this frame (DI-18): taken by the next frame's shortcuts.
 	virtual void offer_jump(const JumpSubject &subject) { (void)subject; }
+	// The mouse a canvas has over its picture this frame (DI-34: a menu's, whose sounds hear it as the game's
+	// mouse): the Shell hands the frame's to the session (ProjectSession::canvas_mice). No request: it is the
+	// frame's input, as the clock's time is.
+	virtual void canvas_mouse(const ViewportMouse &mouse) { (void)mouse; }
 };
 
 } // namespace opennova::editor
