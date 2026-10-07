@@ -169,12 +169,14 @@ func test_a_mission_and_a_model_render_in_turn() -> void:
 		return
 	assert_true(_app.is_available(), "a window: the editor's ImGui pass attached, its canvases drawing")
 	_open_mission()
-	# The model first (the Preview shows it), then the mission (the Document's main view): the Preview
-	# keeps the model's pane while the mission is the active document.
+	# The model first (the Preview shows it), then the mission (the Document's main view). The Preview steps
+	# aside for a mission (S19); asked for (set_workspace's focus, as the Windows menu's tick), it shows the
+	# model's pane beside it while the mission is the active document.
 	assert_true(_seam.open_document(MODEL_PATH))
 	assert_eq(String((await _await_ready(MODEL_PATH)).get("status", "")), "ready")
 	assert_true(_seam.open_document(MISSION_PATH))
 	assert_eq(String((await _await_ready(MISSION_PATH)).get("status", "")), "ready")
+	assert_true(_seam.done({"kind": "set_workspace", "workspace": {"focus": "preview"}}))
 	var mission: SubViewport = _app.get_viewport_device(MISSION_PATH, "mission")
 	var model: SubViewport = _app.get_viewport_device(MODEL_PATH, "model")
 	assert_not_null(mission)

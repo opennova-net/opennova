@@ -847,8 +847,9 @@ bool set_document(Change &change, const JsonValue &part) {
 	return moved;
 }
 
-// `focus`: the window it names opened and brought forward (a focus_window view event the workspace takes). The
-// workspace holds nothing of it: the events concern moves with the post.
+// `focus`: the window it names opened, shown where it stands aside, and brought forward (a focus_window view event
+// the workspace takes, as the Windows menu's tick). The workspace holds nothing of it: the events concern moves with
+// the post.
 bool focus_window(Change &change, const std::string &token) {
 	ViewEvent focus;
 	focus.kind = ViewEventKind::FocusWindow;

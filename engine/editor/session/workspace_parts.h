@@ -20,7 +20,8 @@ struct SessionView;
 // workspace_view.h): one row per part of the workspace a person's controls change (a card, a panel, a
 // form), each with the members a set_workspace may name, their JSON types and what they mean. The
 // request carries {<part>: {<member>: value, ...}, ...}: a part or a member left out stays as it is;
-// `focus` is no part but an ask, the window it names brought forward (a focus_window view event).
+// `focus` is no part but an ask, the window it names brought forward (a focus_window view event; shown where it
+// stands aside, as the Windows menu's tick shows it).
 // The catalog query lists the table, from which the editor MCP makes the request's schema.
 enum class WorkspaceJson : uint8_t { String, Boolean, Integer, Strings, Integers, Object };
 
