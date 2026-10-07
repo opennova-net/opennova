@@ -4350,6 +4350,14 @@ target_link_libraries(editor_navigation_test PRIVATE opennova_editor)
 target_include_directories(editor_navigation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_navigation COMMAND editor_navigation_test)
 
+# The jumps a keystroke or a right-click makes (DI-18, editor/graph/jump_queries): a search in one scope, ranked;
+# Find usages of a file or a record; Go to definition from a record; the project_search query's scope, the usages
+# query's locator and the finder's workspace part on the wire; an item record's Place in mission.
+add_executable(editor_jumps_test editor/jumps_test.cpp)
+target_link_libraries(editor_jumps_test PRIVATE opennova_editor)
+target_include_directories(editor_jumps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_jumps COMMAND editor_jumps_test)
+
 add_executable(editor_document_set_test editor/document_set_test.cpp)
 target_link_libraries(editor_document_set_test PRIVATE opennova_editor)
 target_include_directories(editor_document_set_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -4929,7 +4937,8 @@ add_test(NAME editor_font_import COMMAND editor_font_import_test)
 # a clip's timeline and the animation types' Inspector (S17) animation_test.cpp's; the project, the
 # import, Files and the layout as a modder meets them (the UX round's project lane) project_test.cpp's;
 # Back and Forward (the navigation history: the arrows, Alt+Left and Alt+Right, the mouse's buttons)
-# navigation_test.cpp's; all share editor_ui/editor_ui_test_support.h. One ctest row per group (S13 V1: a failure names its
+# navigation_test.cpp's; the jumps' keys and menus (DI-18: Go to file and name, Go to definition, Find usages, the Go
+# menu, the right-click menus) shortcuts_test.cpp's; all share editor_ui/editor_ui_test_support.h. One ctest row per group (S13 V1: a failure names its
 # group, the rows run in parallel), each running `editor_ui_test <group>`; editor_ui_groups holds
 # this list and the program's table of groups to one list.
 if(OPENNOVA_IMGUI)
@@ -4939,12 +4948,12 @@ if(OPENNOVA_IMGUI)
                                   editor_ui/find_test.cpp editor_ui/rename_test.cpp editor_ui/gate_test.cpp
                                   editor_ui/logic_test.cpp editor_ui/animation_test.cpp
                                   editor_ui/model_test.cpp editor_ui/project_test.cpp
-                                  editor_ui/navigation_test.cpp)
+                                  editor_ui/navigation_test.cpp editor_ui/shortcuts_test.cpp)
     target_link_libraries(editor_ui_test PRIVATE opennova_editor opennova_imgui)
     target_include_directories(editor_ui_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     set(OPENNOVA_EDITOR_UI_GROUPS workspace markers bounds field_widgets reference_picker find rename
                                   menu inspector preview styles problems gate logic animation model
-                                  project navigation)
+                                  project navigation shortcuts)
     foreach(group IN LISTS OPENNOVA_EDITOR_UI_GROUPS)
         add_test(NAME editor_ui_${group} COMMAND editor_ui_test ${group})
     endforeach()
@@ -4971,6 +4980,14 @@ add_executable(editor_file_placement_test editor/file_placement_test.cpp)
 target_link_libraries(editor_file_placement_test PRIVATE opennova_project_cli)
 target_include_directories(editor_file_placement_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_file_placement COMMAND editor_file_placement_test)
+
+# Files' chores (DI-25): a delete to the project's trash (who names the file asked first), a duplicate under the
+# name the project's rules give, a new file in a folder, folders made, renamed and deleted, and the file
+# history's undo and redo of each.
+add_executable(editor_file_chores_test editor/file_chores_test.cpp)
+target_link_libraries(editor_file_chores_test PRIVATE opennova_editor)
+target_include_directories(editor_file_chores_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_file_chores COMMAND editor_file_chores_test)
 
 # opennova-project as the editor's session, headless (S13 A7): the verb table against the request
 # and query tables, each verb's --json the session's answer to the same requests, the request and

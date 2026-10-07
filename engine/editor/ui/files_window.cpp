@@ -29,6 +29,7 @@
 #include <editor/session/workspace_parts.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/inspector_layout.h>
+#include <editor/ui/project_find.h>
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/texture_preview.h>
 #include <editor/ui/ui_kit.h>
@@ -48,9 +49,6 @@ const ImVec4 kRefusalColor(0.95f, 0.55f, 0.45f, 1.0f);
 
 using ui_kit::size_text;
 
-// What a blank factory makes, as its menu entry's tooltip.
-std::string makes(const BlankFactory &factory) { return std::string("Makes ") + factory.summary + "."; }
-
 const AssetEntry *entry_at(const SessionView &view, const std::string &path) {
 	for (const AssetEntry &entry : view.project.scan->entries)
 		if (entry.relative_path == path) return &entry;
@@ -69,10 +67,23 @@ RevisionKey tree_key(const SessionView &view) {
 	return revision_key(view.revisions, {ViewConcern::Files, ViewConcern::Findings, ViewConcern::DocumentSet});
 }
 
+// A file's jumps (DI-18): F12 opens it (its page where the editor has no editor for it), Shift+F12 lists who
+// names it.
+JumpSubject file_subject(const SessionView &view, const std::string &path, bool pointer) {
+	JumpSubject subject;
+	subject.definition.push_back(file_target(*view.project.scan, path));
+	subject.usages_file = path;
+	subject.pointer = pointer;
+	return subject;
+}
+
 } // namespace
 
-void NewFilePrompt::ask(Workspace &workspace, AssetKind kind) {
-	window_requests::set_workspace(workspace, "new_file", "kind", io::JsonValue::make_string(asset_kind_token(kind)));
+void NewFilePrompt::ask(Workspace &workspace, AssetKind kind, const std::string &folder) {
+	io::JsonValue members = io::JsonValue::make_object();
+	members.set("kind", io::JsonValue::make_string(asset_kind_token(kind)));
+	if (!folder.empty()) members.set("folder", io::JsonValue::make_string(folder));
+	window_requests::set_workspace(workspace, "new_file", std::move(members));
 }
 
 namespace {
@@ -115,6 +126,9 @@ void NewFilePrompt::draw(Workspace &workspace) {
 	}
 	if (terrain) ImGui::TextUnformatted("New terrain from images");
 	else ImGui::Text("New file: %s", asset_kind_label(kind));
+	// A folder's New here (DI-25): the folder it is made in.
+	if (!terrain && !held.folder.empty())
+		ImGui::TextDisabled("In %s", held.folder == "/" ? "the top level of the project" : (held.folder + "/").c_str());
 	if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
 	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 21.0f);
 	// The name a new file of the kind is offered: its row's (AssetKindRow::new_name); a terrain's, its stem.
@@ -189,6 +203,7 @@ void NewFilePrompt::draw(Workspace &workspace) {
 		// The session closes the prompt as it takes the file it names (create_file alone, over the wire); the
 		// prompt's Create closes it too, as Cancel does.
 		if (terrain) workspace.request(request::new_terrain(name, std::move(values)));
+		else if (!held.folder.empty()) workspace.request(request::create_file_in(held.folder, name, asset_kind_token(kind), std::move(values)));
 		else workspace.request(request::create_file(name, asset_kind_token(kind), std::move(values)));
 		window_requests::set_workspace(workspace, "new_file", "kind", io::JsonValue::make_string(""));
 		popup_.close();
@@ -228,6 +243,23 @@ void FilesWindow::refresh(const SessionView &view) {
 			at = found->second;
 		}
 		folders_[at].files.push_back(i);
+	}
+	// The project's folders that hold no file of its own (DI-25: a New folder's, or one whose files went), each
+	// in the tree too; the walk enters no dot-folder, so the cache is never one.
+	for (const auto &[held, stamp] : view.project.scan->folders()) {
+		if (held.empty()) continue;
+		size_t at = 0;
+		std::string path;
+		for (const fs::path &part : path_of(held)) {
+			path += (path.empty() ? "" : "/") + utf8_of(part);
+			auto found = index.find(path);
+			if (found == index.end()) {
+				folders_.push_back(Folder{utf8_of(part), path, {}, {}});
+				found = index.emplace(path, folders_.size() - 1).first;
+				folders_[at].folders.push_back(found->second);
+			}
+			at = found->second;
+		}
 	}
 	for (Folder &folder : folders_)
 		std::sort(folder.folders.begin(), folder.folders.end(), [this](size_t a, size_t b) {
@@ -412,6 +444,9 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	// rename).
 	if (!selected_.empty() && v.allows(EditorRequestKind::RenameAsset) && ImGui::Shortcut(ImGuiKey_F2))
 		if (const AssetEntry *entry = entry_at(v, selected_)) start_rename(*entry);
+	// With the keyboard here, the selected file is what F12 (open it) and Shift+F12 (who names it) act on (DI-18).
+	if (!selected_.empty() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && entry_at(v, selected_))
+		workspace_.offer_jump(file_subject(v, selected_, false));
 	// A filter or a kind lists the files it matches flat.
 	if (v.project.scan->entries.empty()) {
 		ui_kit::empty_state("The project has no files yet.", "Import files, or make one with New.");
@@ -455,7 +490,17 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		}
 		ImGui::EndTable();
 	}
+	// The list's empty room: the top level's menu (New here, a new folder). The Delete key deletes the selected
+	// file (Delete... asks first).
+	if (ImGui::BeginPopupContextWindow("top_level_menu", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
+		draw_folder_menu(v, std::string());
+		ImGui::EndPopup();
+	}
+	if (!selected_.empty() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
+	    ImGui::IsKeyPressed(ImGuiKey_Delete, false) && v.allows(EditorRequestKind::DeleteAsset))
+		if (const AssetEntry *entry = entry_at(v, selected_); entry && entry->imported_from.empty()) start_delete(*entry);
 	draw_rename(v);
+	draw_delete(v);
 }
 
 void FilesWindow::draw_card_window() {
@@ -550,19 +595,7 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 		ui_kit::tooltip("Make a new file: a string table, a menu, a font, a placeholder texture, or a file the game reads "
 		                "by name.");
 	if (making) {
-		const bool creates = view.allows(EditorRequestKind::CreateFile);
-		// A new file of a kind with a free-form factory: its name is asked first.
-		for (size_t i = 0; i < blank_factory_count(); ++i) {
-			const BlankFactory &factory = *blank_factory_at(i);
-			if (!factory.free_form || factory.role[0] != '\0') continue;
-			ImGui::PushID(static_cast<int>(i));
-			ImGui::BeginDisabled(!creates);
-			if (ImGui::Selectable((std::string(asset_kind_label(factory.kind)) + "...").c_str()) && creates)
-				NewFilePrompt::ask(workspace_, factory.kind);
-			ImGui::EndDisabled();
-			ui_kit::tooltip(makes(factory));
-			ImGui::PopID();
-		}
+		draw_new_entries(view, std::string());
 		// A terrain made from images (S20): its name, its images and numbers asked by the same prompt.
 		ImGui::BeginDisabled(!view.allows(EditorRequestKind::NewTerrain));
 		if (ImGui::Selectable("Terrain from images...") && view.allows(EditorRequestKind::NewTerrain))
@@ -570,25 +603,15 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 		ImGui::EndDisabled();
 		ui_kit::tooltip("A terrain made from a heightmap and a colour map (and a detail, a tile set and a surface map): "
 		                "imported into the files the game reads for a terrain, and imported again when an image changes.");
-		// The files the game reads by name, each made at once from its role's factory.
-		ImGui::SeparatorText("Files the game reads");
-		for (size_t i = 0; i < blank_factory_count(); ++i) {
-			const BlankFactory &factory = *blank_factory_at(i);
-			const gameprofile::RequiredResource *resource = gameprofile::gameprofile_required_resource_by_role(factory.role);
-			if (!resource) continue;
-			const bool present = view.project.scan->find(resource->name) != nullptr;
-			ImGui::PushID(static_cast<int>(i));
-			ImGui::BeginDisabled(present || !creates);
-			if (ImGui::Selectable(resource->name) && !present && creates)
-				workspace_.request(request::create_file(resource->name, asset_kind_token(factory.kind)));
-			ImGui::EndDisabled();
-			ui_kit::tooltip(present ? std::string("The project has it.") : makes(factory));
-			ImGui::PopID();
-		}
 		ImGui::EndCombo();
 	}
 	if (ui_kit::tool(row, "Refresh", view.allows(EditorRequestKind::Rescan), "Read the project's folder again."))
 		workspace_.request(request::rescan());
+	// The file history (DI-25): the last file chore taken back, as Edit > Undo file does.
+	const ActivityView::FileHistory &history = view.activity.file_history;
+	if (ui_kit::tool(row, "Undo", !history.undo.empty() && view.allows(EditorRequestKind::UndoFile),
+	                 history.undo.empty() ? std::string("No file chore to take back.") : "Take back: " + history.undo + "."))
+		workspace_.request(request::undo_file());
 }
 
 // A folder's folders, each a node open until folded, then its files.
@@ -603,6 +626,10 @@ void FilesWindow::draw_folder(const SessionView &view, const Folder &folder) {
 		                                    "%s", label.c_str());
 		ui_kit::tooltip(inner.path);
 		accept_move(view, inner.path);
+		if (ImGui::BeginPopupContextItem("folder_menu")) {
+			draw_folder_menu(view, inner.path);
+			ImGui::EndPopup();
+		}
 		if (!open) continue;
 		draw_folder(view, inner);
 		ImGui::TreePop();
@@ -635,9 +662,11 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 		// round's project lane).
 		if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
 			if (!is_editable_kind(entry.kind)) workspace_.request(request::about_file(entry.relative_path));
-			else if (view.allows(EditorRequestKind::OpenDocument)) workspace_.request(request::open_document(entry.relative_path));
+			else if (view.allows(EditorRequestKind::OpenDocument)) window_requests::go_to_file(workspace_, entry.relative_path);
 		}
 	}
+	// Under the pointer, what F12 (open it) and Shift+F12 (who names it) act on (DI-18).
+	if (ImGui::IsItemHovered()) workspace_.offer_jump(file_subject(view, entry.relative_path, true));
 	// Dragged onto a reference field whose kind loads it, the file becomes its value
 	// (ReferencePicker::accept_file).
 	if (ImGui::BeginDragDropSource()) {
@@ -731,7 +760,7 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 	}
 	const bool opens = is_editable_kind(entry.kind) && view.allows(EditorRequestKind::OpenDocument);
 	if (ImGui::MenuItem("Open", nullptr, false, opens) && opens)
-		workspace_.request(request::open_document(entry.relative_path));
+		window_requests::go_to_file(workspace_, entry.relative_path);
 	// A mission's row (DI-26): the game started in it, as Build > Play mission starts the active one.
 	const std::string mission = play_mission_at(view, entry.relative_path);
 	if (!mission.empty()) {
@@ -743,8 +772,13 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 	const bool renames = view.allows(EditorRequestKind::RenameAsset);
 	if (ImGui::MenuItem("Rename...", "F2", false, renames) && renames) start_rename(entry);
 	draw_move_menu(view, entry);
+	draw_chore_entries(view, entry);
 	if (ImGui::MenuItem("About this file...")) workspace_.request(request::about_file(entry.relative_path));
 	ui_kit::tooltip("What it is, where a build puts it, what it names and who names it.");
+	// Who names it (DI-18): the project's finder on its uses, each a Go to.
+	const bool finds = view.project.open && view.findings.graph;
+	if (ImGui::MenuItem("Find usages", "Shift+F12", false, finds) && finds) ProjectFind::open_usages(workspace_, entry.relative_path);
+	ui_kit::tooltip("Who names this file or what it defines, each a Go to.");
 	const bool reveals = view.allows(EditorRequestKind::RevealPath);
 	if (ImGui::MenuItem("Show in folder", nullptr, false, reveals) && reveals)
 		workspace_.request(request::reveal_path(join_path(view.project.root, entry.relative_path)));
@@ -1020,7 +1054,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 	ImGui::Spacing();
 	if (card.opens) {
 		ImGui::BeginDisabled(!view.allows(EditorRequestKind::OpenDocument));
-		if (ImGui::Button("Open##card")) workspace_.request(request::open_document(card.path));
+		if (ImGui::Button("Open##card")) window_requests::go_to_file(workspace_, card.path);
 		ImGui::EndDisabled();
 		ImGui::SameLine();
 	}

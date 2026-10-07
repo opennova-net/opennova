@@ -144,6 +144,8 @@ constexpr RequestField kFields[] = {
 			"send_to_back), a model's frame (its camera on the marker of the first id, else on the "
 			"whole model) or place_in_mission (the Place tool of the mission last active armed with the "
 			"model's item, the item made in the item catalog first where none draws it; no ids), "
+			"a definition's place_in_mission (an item record, the one row of ids or the record shown, armed in "
+			"the Place tool of the mission last active), "
 			"or a mission's frame, top, ground, select_same (every entity of the "
 			"selected entities' items), duplicate (the ids, else the selection, copied and moved by "
 			"[east, north] metres, one batch) or paste (the clipboard's copied entities and areas, "
@@ -176,7 +178,8 @@ constexpr RequestField kFields[] = {
 			"An import replaces the project's files of the same names." },
 	{ F::Force, "force", J::Boolean,
 			"A source imports again even when it did not change; a save writes over a file changed outside "
-			"the editor (DI-01: document.conflict's Keep my edits)." },
+			"the editor (DI-01: document.conflict's Keep my edits); a delete goes ahead over the uses naming "
+			"what it deletes, which then name nothing (Problems rows, DI-25)." },
 	{ F::AskName, "ask_name", J::Boolean,
 			"And asks the new name (Files' Rename..., the Rename everywhere dialog)." },
 	{ F::OpenFirst, "open_first", J::Boolean,
@@ -221,8 +224,10 @@ constexpr RequestField kFields[] = {
 			"do)." },
 	{ F::Folder, "folder", J::String,
 			"A folder of the project, from its top level, '/'-separated (\"defs\", \"art/terrain\"; \"\" or \"/\" the "
-			"top level): where a move puts a file. Made when it is not there; never one outside the project, a "
-			"dot-folder (the cache) or the export folder." },
+			"top level): where a move puts a file, made when it is not there; the folder create_file makes a new file "
+			"in (\"/\" the top level; \"\" where the placement rule puts it); a folder new_folder makes, "
+			"rename_folder renames, delete_folder deletes (DI-25). Never one outside the project, a dot-folder (the "
+			"cache) or the export folder." },
 	{ F::Start, "start", J::Object,
 			"Where Play starts the game's player (Play from here, DI-26): {at: [x, y, z], yaw?}, a point of the "
 			"mission Play names (mission metres: x east, y north, z up, the ground's height there) and the compass "
@@ -242,6 +247,10 @@ constexpr RequestField kFields[] = {
 			"Whether this Play writes the files with unsaved edits first, as Save all does (true), or waits on the "
 			"unsaved-changes prompt (false). For this Play alone: left out, the project's own (apply_project_settings' "
 			"save_before_play; on for a project never set). On edit_in_viewport, the Play its command plans." },
+	{ F::Alone, "alone", J::Boolean,
+			"An import source alone (DI-25): delete_asset deletes it and its record and keeps its outputs as files "
+			"of the project, where the placement rule puts their kinds; duplicate_asset copies it without its "
+			"record (left out: its outputs go with it, a copy's import makes the copy's own)." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

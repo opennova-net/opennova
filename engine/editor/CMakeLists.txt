@@ -110,7 +110,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/validation_cache.cpp
     # graph — the asset graph: the extractors, the reference kinds' table, the per-file slots and
     # their indexes, the one resolver, a base layer's names, the reference queries a document's
-    # fields ask, the rename transaction; what other files make of what one defines (the use
+    # fields ask, the jumps (DI-18: Go to file and name, Find usages, Go to definition), the rename transaction; what other files make of what one defines (the use
     # checks, and what a stylesheet line's value is used as) and the one validation pass over the
     # project's files; the display names (a value as a modder reads it, the graph as the names)
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/asset_graph.cpp
@@ -118,11 +118,13 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/extractors.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/graph_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/graph_layer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graph/jump_queries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/native_text_sites.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/project_validation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/reference_kinds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/reference_queries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/rename_transaction.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graph/file_plans.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/style_value_use.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/texture_checks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/texture_import_needs.cpp
@@ -249,6 +251,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/project/local_settings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_files.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/project/project_trash.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_findings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_refresh.cpp
     # project_build — routing into the boot-table archives (or an expansion's pair), the plan, the
@@ -311,6 +314,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/script_assist.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/refresh_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/rename_controller.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/file_chores.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/rename_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/request_fields.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/request_kinds.cpp
@@ -357,6 +361,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/expansion_fields.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/field_widgets.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/files_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/files_window_chores.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/find_cursor.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/import_dialog.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/inspector_layout.cpp

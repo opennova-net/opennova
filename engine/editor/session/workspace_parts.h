@@ -84,11 +84,12 @@ void workspace_follows(SessionCore &core, const EditorRequest &request);
 // new_project the New project form's modal.
 void workspace_closes_for(SessionCore &core, const EditorRequest &request);
 // What the workspace holds kept true to the project after anything moved it (each request served, each
-// operation's end): a card or Rename... whose file the files no longer have closes; a menu's Remove prompt
+// operation's end): a card, Rename... or Find usages whose file the files no longer have closes; a menu's Remove prompt
 // whose screen is gone (or is its menu's last) closes; Rename everywhere whose plan is no longer its name's
 // (another rename planned in its place) closes, and so does Rename back once the plan is no longer a way back.
 void workspace_tidies(SessionCore &core);
-// The files a rename moved (each from, to): a card of one shows it at its new path. True when the card moved.
+// The files a rename moved (each from, to): a card of one shows it at its new path, Find usages of one lists its
+// uses under it. True when either moved.
 bool workspace_follows_moves(WorkspaceView &workspace, const std::vector<std::pair<std::string, std::string>> &moved);
 
 // The dialogs that take the whole editor while they show (ADR 0046, the MCP gaps lane): one shows at a time,
@@ -96,7 +97,8 @@ bool workspace_follows_moves(WorkspaceView &workspace, const std::vector<std::pa
 // held dialog never opens itself over another). The unsaved-changes prompt (a request waits on its answer),
 // the import dialog, the texture source dialog, Project settings, File > New project..., Files' New file
 // prompt and Rename..., Rename everywhere, Rename back, Find in project, Problems' confirmation, a menu's
-// Remove screen prompt (the first menu holding one, by path).
+// Remove screen prompt (the first menu holding one, by path). Find in project is the project's finder in any of
+// its scopes (Go to file, Go to name, Find usages too).
 enum class HeldModal : uint8_t {
 	None,
 	Unsaved,
@@ -106,6 +108,7 @@ enum class HeldModal : uint8_t {
 	NewProject,
 	NewFile,
 	FileRename,
+	FileDelete,
 	Rename,
 	RenameBack,
 	ProjectFind,
@@ -121,7 +124,7 @@ ShownModal shown_modal(const SessionView &view);
 // Whether `modal` (of the document at `path`, a Remove screen prompt's) is the one that shows, or none does
 // (a window's own ask, shown at once, the frame it is made).
 bool modal_may_show(const SessionView &view, HeldModal modal, const std::string &path = std::string());
-// "" none; unsaved, import, texture_source, settings, new_project, new_file, file_rename, rename,
+// "" none; unsaved, import, texture_source, settings, new_project, new_file, file_rename, file_delete, rename,
 // rename_back, project_find, confirm, remove_screen.
 const char *held_modal_token(HeldModal modal);
 
@@ -152,8 +155,8 @@ bool forget_document_workspace(WorkspaceView &workspace, const std::string &path
 void take_import_checks(WorkspaceView &workspace, const ImportPlan &plan, const ImportPlan *before);
 void forget_import_workspace(WorkspaceView &workspace);
 // The project closing: what its windows showed of it goes with it (its card, its build's panel, its dialogs
-// and prompts, a confirmation, its documents' views, Files' filter, the sound it played); the find bars close,
-// keeping their text.
+// and prompts, a confirmation, its documents' views, Files' filter, the sound it played, Find usages' subject); the
+// find bars close, keeping their text.
 void forget_project_workspace(WorkspaceView &workspace);
 
 } // namespace opennova::editor
