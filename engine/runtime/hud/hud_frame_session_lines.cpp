@@ -46,18 +46,22 @@ std::string format_team_timer(int32_t remaining, const std::string &label, int32
 } // namespace
 
 void HudFrameCompiler::element_squad_orders(const HudFrameState &state, float w, float h) {
-	// THE SQUAD ORDER LINES (a misnamed sub_59AEE0): off under the /NOTEXT
-	// declutter bit and above detail level 1; the HUDORDERS anchor and the
-	// 18-px pitch each through Viewport_ScaleToVirtualCoords; both 128-byte
-	// lines right-aligned in the bold slot in palette[4] less one alpha step,
-	// which the half-bright drawer halves and forces opaque; an empty line
-	// still takes its rung. They hold until overwritten, cancelled with an
-	// empty line or cleared at the mission start.
-	// [orig: sub_59AEE0 @0x59aee0 — the gates @0x59aee5..0x59aefb, the anchor
-	//  @0x59af06..0x59af2a, the loop @0x59af30..0x59af68 over byte_2721DB8 up
+	// THE SQUAD ORDER LINES (a misnamed sub_59AEE0): off while the server
+	// status view is toggled and above detail level 1, and NO declutter slot
+	// of its own (no HUDDECLUT row hides them: the CHAT slot gates only the
+	// console rings); the HUDORDERS anchor and the 18-px pitch each through
+	// Viewport_ScaleToVirtualCoords; both 128-byte lines right-aligned in the
+	// bold slot in palette[4] less one alpha step, which the half-bright
+	// drawer halves and forces opaque; an empty line still takes its rung.
+	// They hold until overwritten, cancelled with an empty line or cleared at
+	// the mission start. The status view's gate is the overlay's: its page
+	// replaces the scene frame's HUD whole.
+	// [orig: sub_59AEE0 @0x59aee0 — `test dword_24C1930, 0x2000000`
+	//  @0x59aee3 and the level `jge` @0x59aefb, nothing else before the anchor
+	//  @0x59af0a..0x59af2a; the loop @0x59af30..0x59af68 over byte_2721DB8 up
 	//  to g_HUDTrackedTarget, HUD_DrawTextRightAligned_HalfBright
 	//  (g_HUDLabelFont[1], x, y, line, palette[4] - 0x1000000, 0x101)]
-	if (!state.declutter_visible[kDeclutterChat] || state.hud_detail_level > 1) return;
+	if (state.hud_detail_level > 1) return;
 	const HudPosRecord &anchor = layout_.squad_orders;
 	const int x = virtual_scale(anchor.x, static_cast<int>(w), 1024);
 	int y = virtual_scale(anchor.y, static_cast<int>(h), 768);

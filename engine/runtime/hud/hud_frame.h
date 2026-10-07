@@ -341,9 +341,10 @@ struct HudLayout {
 	// HUDSYSTEXT — the SYSTEM feed anchor (kills, joins, system lines). The
 	// def parser already produces it (def_hudpos.cpp HUDSYSTEXT -> sys_text).
 	HudPosRecord sys_text;
-	// HUDORDERS — the right edge of the two squad order lines; -1 / -1 when
-	// unauthored [orig: dword_2723D84 / dword_2723D88].
-	HudPosRecord squad_orders{-1, -1};
+	// HUDORDERS — the right edge of the two squad order lines; (0, 0) when
+	// unauthored, the BSS pair only the arm writes (D-HUD-54)
+	// [orig: dword_2723D84 / dword_2723D88].
+	HudPosRecord squad_orders;
 	// BREATHTIME — the breath bar's anchor: x, y and the alignment word, three
 	// fields with no hidden dword. Unauthored it keeps the BSS zero (0, 0,
 	// left): the bar has no presence gate [orig: HUD_ParseHudposToken
