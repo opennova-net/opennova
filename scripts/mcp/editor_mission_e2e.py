@@ -46,7 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import editor_mcp  # noqa: E402
 from editor_mcp import EXIT_NOT_DONE, EXIT_NOT_READ, raise_and_wait  # noqa: E402
-from game_mcp import EXIT_OK, GameMcp, GameMcpError, pid_alive, port_open, text_of  # noqa: E402
+from game_mcp import EXIT_OK, GameMcp, GameMcpError, pid_alive, port_open, read_pid_file, text_of  # noqa: E402
 
 
 class StepFailed(Exception):
@@ -177,10 +177,7 @@ def nearest(rows: list, point: tuple[float, float, float]) -> float:
 
 
 def read_pid(pid_file: Path) -> int:
-    try:
-        return int(pid_file.read_text(encoding="utf-8").strip() or "0")
-    except (OSError, ValueError):
-        return 0
+    return read_pid_file(pid_file)[0]  # the launch's {"pid", "port"}
 
 
 def terminate(pid: int, what: str) -> None:
