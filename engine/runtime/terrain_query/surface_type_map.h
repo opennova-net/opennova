@@ -7,8 +7,9 @@
 // cell -> the 16x16 sector grid picks the charmap quadrant (the same 2x2
 // 1024-atlas routing as coords.h; slot bit0 = +512 fine Z, bit1 = +512 fine X)
 // -> one point sample of the palette-indexed raster. Off-grid cells clamp to
-// the edge cell; an UNMAPPED cell returns surface 7, the off-island ocean
-// default. After the charmap sample, the placed-tile override pass walks the
+// the edge cell on an axis the .trn does not wrap, and wrap the grid's 16 on
+// one it does (the cell masks, D-TERRAIN-16); an UNMAPPED cell returns surface
+// 7, the off-island ocean default. After the charmap sample, the placed-tile override pass walks the
 // mission .til array in order and the FIRST tile whose inclusive 16x16-unit
 // square contains the position replaces the class with the tileset .TSD
 // table's entry for its tile index — even a 0 (TSD_NULL) entry: retail never
@@ -49,6 +50,12 @@ struct SurfaceTypeMap {
 	const int *sector_grid = nullptr;
 	int32_t origin_x = 0;
 	int32_t origin_y = 0;
+	// The .trn's polytrn_wrapx / polytrn_wrapy: an axis that wraps takes the
+	// cell's low four bits as they are, one that does not clamps an off-grid
+	// cell to the edge [orig: Terrain_CellOOBMaskX/Y, 0 under a wrap and -16
+	// otherwise, set by PolyTrn_LoadTerrainConfig @ 0x60E4B1..0x60E4CB].
+	bool wrap_x = false;
+	bool wrap_z = false;
 	// The placed-tile override (D-SND-15): the mission .til array plus the
 	// tileset's .TSD-fed 256-entry tile-index -> surface table. tiles == null
 	// or tile_count == 0 skips the pass; tile_surface == null models retail's
@@ -60,16 +67,27 @@ struct SurfaceTypeMap {
 };
 
 namespace detail {
-inline int32_t surface_clamp_grid(int32_t v) {
-	// Off-grid sector clamp: negative -> cell 0, past-the-end -> cell 15
-	// [orig: the ~(v >> 31) byte trick behind the OOB mask test @ 0x606547].
-	if ((v & ~0xF) != 0) return v < 0 ? 0 : 15;
+inline int32_t surface_clamp_grid(int32_t v, bool wrap) {
+	// Off-grid sector clamp on an axis that does not wrap (its mask -16):
+	// negative -> cell 0, past-the-end -> cell 15 [orig: the ~(v >> 31) byte
+	// trick behind the OOB mask test @ 0x606547]; under a wrap the mask is 0
+	// and the cell's low four bits are taken as they are.
+	if (!wrap && (v & ~0xF) != 0) return v < 0 ? 0 : 15;
 	return v;
 }
+// The width's log2 as the loader counts it (halved while above 1: the floor)
+// [orig: sub_605A10 @ 0x605A82..0x605AA0; Foliage_LoadFoliageMapPCX @
+// 0x605B44..0x605B60].
 inline int32_t surface_shift(int32_t width) {
 	int32_t s = 0;
-	while ((1 << s) < width && s < 10) ++s;
+	for (uint32_t w = static_cast<uint32_t>(width); w > 1; w >>= 1) ++s;
 	return s;
+}
+// The sample's shift, 10 less that log2: past 1024 it is negative, which the
+// processor's shift takes modulo 32 (a map that wide reads its first texel
+// alone).
+inline int32_t surface_sample_shift(int32_t width) {
+	return (10 - surface_shift(width)) & 31;
 }
 } // namespace detail
 
@@ -79,15 +97,15 @@ inline int32_t surface_shift(int32_t width) {
 inline int32_t surface_type_at_fixed(const SurfaceTypeMap &m, int32_t x_fixed, int32_t y_fixed) {
 	if (m.data == nullptr || m.width <= 0 || m.height <= 0) return 1;
 	if (m.sector_grid == nullptr) return 7;
-	const int32_t col = detail::surface_clamp_grid((x_fixed >> 25) - m.origin_x);
-	const int32_t row = detail::surface_clamp_grid(((-y_fixed) >> 25) - m.origin_y);
+	const int32_t col = detail::surface_clamp_grid((x_fixed >> 25) - m.origin_x, m.wrap_x);
+	const int32_t row = detail::surface_clamp_grid(((-y_fixed) >> 25) - m.origin_y, m.wrap_z);
 	const int32_t slot = m.sector_grid[16 * (row & 0xF) + (col & 0xF)] - 1;
 	if (slot < 0) return 7;
 	int32_t fine_x = (x_fixed >> 16) & 0x1FF;
 	int32_t fine_z = ((-y_fixed) >> 16) & 0x1FF;
 	if ((slot & 1) != 0) fine_z += 512;
 	if ((slot & 2) != 0) fine_x += 512;
-	const int32_t shift = 10 - detail::surface_shift(m.width);
+	const int32_t shift = detail::surface_sample_shift(m.width);
 	const int32_t sx = fine_x >> shift;
 	const int32_t sz = fine_z >> shift;
 	if (sx < 0 || sx >= m.width || sz < 0 || sz >= m.height) return 1;

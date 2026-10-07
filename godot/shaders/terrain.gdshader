@@ -18,6 +18,15 @@ stencil_mode write, compare_always, 1;
 // Debug: 0=off, 1=LOD colors, 2=sector colors, 3=normals, 4=heightmap
 uniform int u_debug_mode = 0;
 
+// The editor's ground overlay (ADR 0046 DI-29; editor-only, off in the game): a picture laid over the terrain
+// from above, each texel what the game's own sampler reads there (the surface classes, the foliage), tinting
+// by its alpha after the fog as the debug overlays do. u_overlay_rect: its north-west corner on the world
+// plane (x, z) and the inverse of its span; past it u_overlay_outside.
+uniform bool u_overlay_on = false;
+uniform sampler2D u_overlay : filter_nearest, repeat_disable;
+uniform vec4 u_overlay_rect = vec4(0.0);
+uniform vec4 u_overlay_outside = vec4(0.0);
+
 // Runtime tile-composition cache: one shared 128-layer, single-level array.
 // Page identity/LRU/pixels come from engine/runtime/terrain, which composes
 // every visible page before the frame draws; this shader only selects the
@@ -152,6 +161,13 @@ void fragment() {
 		// Heightmap grayscale from world Y
 		float h = clamp(v_world_pos.y / 16.0, 0.0, 1.0);
 		result = vec3(h);
+	}
+
+	if (u_overlay_on) {
+		vec2 overlay_uv = (v_world_pos.xz - u_overlay_rect.xy) * u_overlay_rect.zw;
+		bool inside = all(greaterThanEqual(overlay_uv, vec2(0.0))) && all(lessThan(overlay_uv, vec2(1.0)));
+		vec4 tint = inside ? texture(u_overlay, overlay_uv) : u_overlay_outside;
+		result = mix(result, tint.rgb, tint.a);
 	}
 
 	// The witnessed math above ran in gamma space; encode once so the display
