@@ -246,6 +246,15 @@ ViewportModel *Viewports::resolve(
 	return follow_one(view, at, kind);
 }
 
+void Viewports::take_mice(const std::vector<ViewportMouse> &mice) {
+	for (Slot &slot : slots_) {
+		const ViewportMouse *taken = nullptr;
+		for (const ViewportMouse &mouse : mice)
+			if (mouse.kind == slot.model->kind() && mouse.path == slot.model->path()) taken = &mouse;
+		slot.model->take_mouse(taken);
+	}
+}
+
 bool Viewports::set_clock(const io::JsonValue &json, std::string &error) {
 	return set_preview_clock(json, clock_, error);
 }

@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <base/io/json.h>
 #include <editor/run/process_platform.h>
@@ -22,6 +23,7 @@ class Viewports;
 struct PollBudget;
 struct SessionView;
 struct ValidationStats;
+struct ViewportMouse;
 
 // The one open project and everything the editor does to it (ADR 0046 d10): open and
 // create, scan and evaluate, create-missing, build, play. Portable: the embedder hands it
@@ -140,6 +142,10 @@ public:
 	// `seconds` of the Shell's frames pass: the preview clock runs while it plays, and the clip the model
 	// preview plays fires the sounds of the ticks it ran through (DI-04, session/clip_sounds.h).
 	void advance(double seconds);
+	// The mice the canvases have over their pictures this frame (preview/viewport_model.h's ViewportMouse, the
+	// windows' Workspace::canvas_mouse), each viewport's own, before the frame's advance: a menu's sounds hear
+	// it as the game's mouse (DI-34).
+	void canvas_mice(const std::vector<ViewportMouse> &mice);
 	// The clip sounds fired after `after` that the Shell plays (played, a wave of the project to play),
 	// oldest first, each numbered (session/clip_sounds.h).
 	std::vector<ClipSoundPlay> clip_sounds_since(uint64_t after);
