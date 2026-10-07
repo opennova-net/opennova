@@ -320,12 +320,15 @@ constexpr AssetKindRow kRows[] = {
 	        .new_name("newwave.wav")
 	        .about("A sound: sound banks, dialogs and scripts name it, and the game loads it from the archives by name.")
 	        .row,
+	// A mission's dialogs, read by DialogManager_LoadFromFile (formats/dbf; documents/dialog_bank_document: a
+	// dialog's name a symbol, a line's wave one of the bank's sounds).
 	Kind(AssetKind::DialogBank, "dialog_bank", "Dialog bank", ArchiveSlot::Localres)
 	        .extensions(kDialogBank)
+	        .edited_by(DocumentTypeId::DialogBank)
 	        .names_files()
 	        .folder("missions")
 	        .new_name("newmission.dbf")
-	        .about("A mission's dialog lines and the sounds they play.")
+	        .about("A mission's dialogs: each a list of lines, each line a wave of the dialog bank's sounds.")
 	        .row,
 	Kind(AssetKind::Particles, "particles", "Particle effects", ArchiveSlot::Resource)
 	        .runtime("particle")

@@ -94,6 +94,7 @@ add_library(opennova_editor STATIC
     # the sound lane: a bank's waves and sets, SndProf.def's profiles
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_bank_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_profile_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/dialog_bank_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/wave_check.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/hud_layout_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/line_ends.cpp
@@ -184,6 +185,7 @@ add_library(opennova_editor STATIC
     # keystroke burst its edits fold in, the gutter marks and the highlights it colours)
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/animation_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/sound_preview.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/dialog_preview.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/preview_clip_sounds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/preview_clip_fire.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/preview_first_person.cpp
