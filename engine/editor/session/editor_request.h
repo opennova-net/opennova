@@ -151,6 +151,8 @@ struct ProjectSettingsChange {
 	// installed one it builds on ("" the base game; it needs a name).
 	std::optional<std::string> expansion;
 	std::optional<std::string> builds_on;
+	// The base game's project (T5: ProjectExpansion::base_project; "" the game install's base game).
+	std::optional<std::string> base_project;
 	std::optional<std::string> game_install;
 	std::optional<std::string> runtime_executable; // "" = the runtime packaged beside the editor
 	// How the project plays (LocalSettings::play_mode: the OpenNova runtime, the game install, or Strict Play
@@ -166,6 +168,7 @@ struct ProjectSettingsChange {
 inline bool operator==(const ProjectSettingsChange &a, const ProjectSettingsChange &b) {
 	return a.serial == b.serial && a.title == b.title && a.mission == b.mission &&
 			a.multiplayer == b.multiplayer && a.expansion == b.expansion && a.builds_on == b.builds_on &&
+			a.base_project == b.base_project &&
 			a.game_install == b.game_install && a.runtime_executable == b.runtime_executable &&
 			a.play_mode == b.play_mode && a.save_before_play == b.save_before_play && a.build_folder == b.build_folder;
 }
@@ -297,6 +300,7 @@ struct EditorRequest {
 	std::string game;
 	std::string expansion;
 	std::string builds_on;
+	std::string base_project; // the base game's project a new expansion builds on (T5; "" the install's)
 	std::string game_install;
 	// A file: a project file or open document ("" the active one where the kind names it), a
 	// source to import again, a path to reveal.
@@ -403,7 +407,7 @@ struct EditorRequest {
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 	return a.kind == b.kind && a.dir == b.dir && a.title == b.title && a.game == b.game &&
-			a.expansion == b.expansion && a.builds_on == b.builds_on &&
+			a.expansion == b.expansion && a.builds_on == b.builds_on && a.base_project == b.base_project &&
 			a.game_install == b.game_install && a.path == b.path && a.locator == b.locator &&
 			a.field == b.field &&
 			a.new_name == b.new_name && a.role == b.role && a.file_kind == b.file_kind &&
