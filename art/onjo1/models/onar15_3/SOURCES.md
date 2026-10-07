@@ -12,8 +12,14 @@ ejection port as the original places it), `bcasing` (the ejection port) and
 The geometry is the first-person carbine's own (`art/on_ar15/on_ar15.blend`,
 its rig in its rest pose, the spare magazine of the reload left out), moved so
 the pistol grip is the model origin and the bore runs 0.09 m above it along the
-model's forward, the original's convention, then decimated: 3,999, 1,500 and
-533 triangles. LOD 3 is a silhouette of six boxes (72 triangles), every corner
+model's forward, the original's convention, then decimated to LOD 0's 3,999
+triangles. LOD 1 (2,687 triangles) is LOD 0 with its coplanar faces merged and
+its pieces under 3 cm dropped, keeping LOD 0's corners. LOD 2 (498 triangles, a
+closed mesh, the bullet faces too) is a 4 mm voxel shell of LOD 0 collapsed to
+500 triangles, each face on the material and each corner on the UV of LOD 0's
+nearest face. (The first LOD 1 and LOD 2, LOD 0 decimated to 1,500 and 533
+triangles, tore its loose pieces apart: LOD 2 kept 17% of LOD 0's surface,
+drawn from 5 m.) LOD 3 is a silhouette of six boxes (72 triangles), every corner
 on one texel of `on_ar15_0_c.tga` nearest that texture's mean colour. The four
 materials are `on_ar15`'s, and so are their textures
 (`art/on_ar15/textures/on_ar15_{0,1,2,3}_c.tga`), which the game loads once for
