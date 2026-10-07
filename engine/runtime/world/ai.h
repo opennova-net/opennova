@@ -32,6 +32,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/infantry.h>
+#include <runtime/world/organic_fire.h>
 #include <runtime/world/system.h>
 
 namespace opennova::terrain {
@@ -325,11 +326,9 @@ struct AiProfile {
     // resolved per field from its def name [orig: Entity_InitOrganicAI
     // @0x4BFCC0 -> AmmoDef_LookupByName @0x409870, calls @0x4BFE27..0x4BFE81].
     // The three one-based launch points are +0x365/+0x366/+0x367; both
-    // rocket ammo slots use the middle point. Runtime storage is per body.
-    struct OrganicWeapons {
-        std::array<uint8_t, 4> ammo{};
-        std::array<uint8_t, 3> launch{};
-    } organic;
+    // rocket ammo slots use the middle point. Runtime storage is per body
+    // (world/organic_fire.h: the resolve and the fire block's shots).
+    OrganicWeapons organic;
     int32_t clip_size = 0;        // items.def clipsize (magazine reseed)
     // Indices into world.sound_profiles (the def's sound_profile pair, resolved
     // at the host's item-traits sweep; -1 = unresolved -> the table's
