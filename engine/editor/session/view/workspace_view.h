@@ -10,6 +10,7 @@
 
 #include <editor/assets/asset_kind.h>
 #include <editor/model/value.h>
+#include <editor/project/play_mode.h>
 
 namespace opennova::editor {
 
@@ -98,10 +99,10 @@ struct WorkspaceView {
 	NewProject new_project;
 
 	// File > Project settings... (ADR 0046 S11d): whether it is open, and what its fields hold until Apply
-	// (one apply_project_settings naming every one): the project's name and features, its expansion (S16), and
-	// this computer's game install, the runtime Play runs ("" the one packaged beside the editor) and Play in
-	// the game install, strictly or not. Opening it fills the fields with the settings in effect; its project
-	// closing closes it.
+	// (one apply_project_settings naming every one): the project's name and features, its expansion (S16), how
+	// it plays here (its play_mode: the OpenNova runtime, the game install, strictly or not), and this
+	// computer's game install and the runtime Play runs ("" the one packaged beside the editor). Opening it
+	// fills the fields with the settings in effect; its project closing closes it.
 	struct Settings {
 		bool open = false;
 		std::string title;
@@ -112,8 +113,7 @@ struct WorkspaceView {
 		std::string expansion;
 		std::string game_install;
 		std::string runtime;
-		bool play_in_install = false;
-		bool play_in_install_strict = false;
+		PlayMode play_mode = PlayMode::Runtime;
 	};
 	Settings settings;
 

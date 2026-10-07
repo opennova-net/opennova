@@ -192,19 +192,23 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 		ImGui::TextDisabled("opennova.exe; left empty, the one packaged beside the editor.");
 		ui_kit::tooltip(v.activity.runtime_executable.empty() ? "No runtime is found now." : "Play runs " + v.activity.runtime_executable + ".");
 	}
-	bool in_install = held.play_in_install;
-	if (ImGui::Checkbox("Play in the game install", &in_install)) set("play_in_install", io::JsonValue::make_bool(in_install));
+	// How the project plays: its own, kept in its local settings on this computer (never the editor's, so it
+	// never reaches another project, nor another editor on the machine).
+	ImGui::SeparatorText("Play");
+	const auto set_mode = [&set](PlayMode mode) { set("play_mode", io::JsonValue::make_string(play_mode_token(mode))); };
+	bool in_install = plays_in_install(held.play_mode);
+	if (ImGui::Checkbox("Play in the game install", &in_install)) set_mode(in_install ? PlayMode::Install : PlayMode::Runtime);
 	ui_kit::tooltip("Play starts the game install on the build instead of the OpenNova runtime.");
 	ImGui::Indent();
-	ImGui::BeginDisabled(!held.play_in_install);
-	bool strict = held.play_in_install_strict;
-	if (ImGui::Checkbox("Strict: as a player's install", &strict))
-		set("play_in_install_strict", io::JsonValue::make_bool(strict));
+	ImGui::BeginDisabled(!in_install);
+	bool strict = held.play_mode == PlayMode::Strict;
+	if (ImGui::Checkbox("Strict: as a player's install", &strict)) set_mode(strict ? PlayMode::Strict : PlayMode::Install);
 	ImGui::EndDisabled();
 	ImGui::Unindent();
 	ui_kit::tooltip("The game runs on the build alone, as a player who dropped Jointops.exe into the build's folder "
 	                "runs it: nothing of the install but its program and Bink DLL, no /d. Off, the install's "
 	                "configuration and saves are beside it and loose files win (/d).");
+	ImGui::TextDisabled("This project's, on this computer (.opennova/local.json): other projects play as each is set.");
 
 	if (!error_.empty()) {
 		ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + field_width() * 1.5f);
@@ -238,8 +242,7 @@ void ProjectSettingsDialog::apply(Workspace &workspace) {
 	settings.builds_on = expansion.builds_on;
 	settings.game_install = held.game_install;
 	if (!v.activity.source_run) settings.runtime_executable = held.runtime;
-	settings.play_in_install = held.play_in_install;
-	settings.play_in_install_strict = held.play_in_install_strict;
+	settings.play_mode = held.play_mode;
 	waiting_ = true;
 	error_.clear();
 	workspace.request(std::move(request));
