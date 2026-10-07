@@ -83,6 +83,8 @@ public:
 		out.water_override = info.water_override;
 		out.fog_override = info.fog_override;
 		out.water_murk = info.water_murk;
+		out.wind_speed = info.wind_speed;
+		out.wind_direction = info.wind_direction;
 		for (int i = 0; i < 3; ++i) {
 			out.fog_color[i] = info.fog_color[i];
 			out.water_color[i] = info.water_color[i];
