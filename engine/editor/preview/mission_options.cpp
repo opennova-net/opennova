@@ -88,7 +88,8 @@ bool operator==(const MissionViewportOptions &a, const MissionViewportOptions &b
 	for (const Flag &flag : kMarks)
 		if (a.*flag.member != b.*flag.member) return false;
 	return a.mark_range == b.mark_range && a.stick == b.stick && a.time == b.time && a.tool == b.tool &&
-			a.item == b.item && a.path == b.path && a.snap == b.snap && a.turn == b.turn && a.palette == b.palette;
+			a.item == b.item && a.path == b.path && a.snap == b.snap && a.turn == b.turn && a.palette == b.palette &&
+			a.overlay == b.overlay;
 }
 
 io::JsonValue mission_options_to_json(const MissionViewportOptions &options) {
@@ -104,12 +105,13 @@ io::JsonValue mission_options_to_json(const MissionViewportOptions &options) {
 	out.set("snap", io::json_number(double(options.snap)));
 	out.set("turn", io::json_number(double(options.turn)));
 	out.set("palette", io::json_string(options.palette));
+	out.set("overlay", io::json_string(mission_ground_overlay_token(options.overlay)));
 	return out;
 }
 
 bool mission_options_from_json(const JsonValue &json, MissionViewportOptions &held, std::string &error) {
 	if (!json.is_object()) {
-		error = "\"options\" is an object, {show, marks, mark_range, stick, time}.";
+		error = "\"options\" is an object, {show, marks, mark_range, stick, time, overlay}.";
 		return false;
 	}
 	MissionViewportOptions read = held;
@@ -179,9 +181,15 @@ bool mission_options_from_json(const JsonValue &json, MissionViewportOptions &he
 				return false;
 			}
 			read.palette = value.string;
+		} else if (member.key == "overlay") {
+			if (!value.is_string() || !mission_ground_overlay_from_token(value.string, read.overlay)) {
+				error = "options.overlay is none, surfaces (the surface classes the game reads) or foliage (what the "
+						"terrain's foliage map grows).";
+				return false;
+			}
 		} else {
 			error = "Unknown options member \"" + member.key +
-					"\" (it takes show, marks, mark_range, stick, time, tool, item, path, snap, turn, palette).";
+					"\" (it takes show, marks, mark_range, stick, time, tool, item, path, snap, turn, palette, overlay).";
 			return false;
 		}
 	}
