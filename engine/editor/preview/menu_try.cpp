@@ -98,6 +98,7 @@ MenuTry::MenuTry() {
 	flow_.set_mission_controls(menu::menu_name_set(menu::MenuNameSet::SinglePlayerLists),
 			menu::menu_name_set(menu::MenuNameSet::Briefings),
 			menu::menu_name_set(menu::MenuNameSet::SinglePlayerAccepts));
+	mods_.set_descriptions(menu::menu_name_set(menu::MenuNameSet::ModDescriptions));
 }
 
 MenuTry::~MenuTry() {
@@ -187,6 +188,12 @@ void MenuTry::prepare_() {
 	if (!commands_.mission_lists().empty() && source_ && source_->missions) {
 		const std::vector<menu::MissionChoice> rows = source_->missions();
 		for (const int id : commands_.mission_lists()) flow_.seed_missions(runtime_, id, rows);
+	}
+	// The Mods lists: the base game's row, then the game folder's expansions, the one running highlighted.
+	if (!commands_.mod_lists().empty() && source_) {
+		expansion_ = source_->expansion;
+		mods_.set_records(source_->expansions ? source_->expansions() : std::vector<ExpansionRecord>());
+		for (const int id : commands_.mod_lists()) mods_.populate(runtime_, id, expansion_);
 	}
 }
 
@@ -306,6 +313,23 @@ void MenuTry::on_command_(menu::MenuCommand command, const std::string &control)
 		outcome_(menu::menu_command_token(command), control, "the game would start " + mission);
 		return;
 	}
+	case menu::MenuCommand::ApplyExpansion: {
+		// ACCEPT's pick of the Mods list: the game running takes nothing; another switches the game for the
+		// run, the menu booted anew at its main menu (menu_flow.h request_expansion, D-MNU-31).
+		if (commands_.mod_lists().empty()) return;
+		const int list = commands_.mod_lists().front();
+		const std::string pick = mods_.pick(runtime_, list);
+		const int row = runtime_.selected_row(list);
+		const std::string title = row >= 0 ? runtime_.item_text(list, row) : pick;
+		if (strutil::iequals(pick, expansion_)) {
+			outcome_("nothing", control, "the game would take nothing: " + title + " is the game running");
+			return;
+		}
+		const std::string where = pick.empty() ? std::string("the base game") : "expansion\\" + pick;
+		outcome_(menu::menu_command_token(command), control, "the game would switch to " + title + " (" + where +
+				") for this run, reloading everything and showing its main menu");
+		return;
+	}
 	case menu::MenuCommand::Back:
 		// The history across files first; then in a mission the resume, else the quit.
 		if (pop_history_()) return;
@@ -384,12 +408,16 @@ void MenuTry::on_event_(const menu::MenuEvent &event) {
 		else if (event.text2 == "scroll")
 			value = std::to_string(event.value);
 		setting_(event.text, event.text2, value);
-		// A pick of a mission list selects its mission (menu_shell.gd _on_widget_value_changed).
+		// A pick of a mission list selects its mission, of a Mods list describes its game (menu_shell.gd
+		// _on_widget_value_changed).
 		const int id = runtime_.widget_id(event.text);
 		if (event.text2 == "list" &&
 				std::find(commands_.mission_lists().begin(), commands_.mission_lists().end(), id) !=
 						commands_.mission_lists().end())
 			flow_.select_mission(runtime_, id, event.value, event.text3);
+		else if (event.text2 == "list" &&
+				std::find(commands_.mod_lists().begin(), commands_.mod_lists().end(), id) != commands_.mod_lists().end())
+			mods_.select(runtime_, id, event.value);
 		return;
 	}
 	case Kind::EditCommitted:
