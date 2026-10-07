@@ -253,6 +253,47 @@ void test_missing_value_fixes() {
 	ui.frames(2);
 }
 
+// DI-09: a text reference completes as it is typed: while its box has the keyboard, the names its text begins
+// show under it (the models "ga" begins: gamma.3di), Down marks the first and Enter takes it, a Set of the field;
+// Escape hides the list until the text changes; a name the box holds whole and alone shows none. The names are
+// made once for the box, not again on a key.
+void test_completes_as_typed() {
+	PickerProject project;
+	CHECK(project.open(), "the item table's project");
+	if (!project.items) return;
+	Edit typed;
+	typed.address = project.item;
+	typed.field = "husk";
+	typed.value = std::string("ga");
+	project.session.handle(request::edit_record(project.items->path(), typed));
+	project.session.run_operations();
+	Ui ui;
+	ui.windows.set_view(&project.session.view());
+	ui.frames(6);
+	ui.focus("Inspector");
+	ui.away();
+	ui.drain();
+	const auto shown = [] {
+		const ImGuiWindow *list = ImGui::FindWindowByName("##completions");
+		return list && list->Active;
+	};
+	CHECK(!shown(), "no list while the box does not have the keyboard");
+	ui.activate(field_item(project, "husk", "##value"));
+	CHECK(shown(), "with the keyboard, the names its text begins under the box");
+	CHECK(logged_frame(ui).find("gamma.3di") != std::string::npos, "gamma.3di among them");
+	press(ui, ImGuiKey_DownArrow);
+	press(ui, ImGuiKey_Enter);
+	CHECK(set_value(ui.drain(), "husk") == "gamma.3di", "Down and Enter take the first, a Set of the field");
+	// Escape hides it while the text stands.
+	ui.activate(field_item(project, "husk", "##value"));
+	CHECK(shown(), "the list again with the keyboard again");
+	press(ui, ImGuiKey_Escape);
+	CHECK(!shown(), "Escape hides the list");
+	ImGui::ClearActiveID();
+	ui.frames(2);
+	ui.drain();
+}
+
 // DI-15: a click on a missing value's red dot opens what Problems offers for it, its Add it there first: the
 // sound profile the item names added to SndProf.def. A value found has no such popup (its dot is its Go to).
 void test_missing_dot_fixes() {
@@ -979,6 +1020,7 @@ void run_reference_picker_tests() {
 	test_filters_apart();
 	test_drop_on_value();
 	test_missing_value_fixes();
+	test_completes_as_typed();
 	test_missing_dot_fixes();
 	test_list_kept();
 	test_lists_let_go();
