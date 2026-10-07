@@ -1398,9 +1398,9 @@ runtime MCP answers, then drives it there. Play starts the game at its menu; **P
 (Ctrl+F5) starts it in the active document's mission, a `.bms` of the project (the document
 itself, or the mission whose sidecar it is). A mission the project does not hold is refused
 before anything is built; one that does not load is a Problems row until the next Play. Play in
-the game install starts at its menu whatever is asked (the stock game takes no mission). Play
-saves every file with unsaved edits first (the editor's `save_before_play`, on by default; off,
-it asks as Build does).
+the game install starts at its menu whatever is asked (the stock game takes no mission). Play runs
+in the project's **Play mode** and saves every file with unsaved edits first (the project's
+`save_before_play`, on by default; off, it asks as Build does).
 _Avoid_: run (ONED's vocabulary), preview (an in-editor render, not a running game),
 "see in game"
 
@@ -1444,11 +1444,21 @@ _Avoid_: build directory (what the build publishes, never written after), workin
 Play in the game install as a player's drop-in: the run directory holds the build's files and the
 game install's executable and Bink DLL, nothing else of the install (no configuration, save or
 score), and the game is launched without `/d`, so it reads its archives first and writes its own
-configuration (`play_in_install_strict`, an editor preference beside Play in the game install). A
+configuration (the **Play mode** `strict`). A
 first run that wrote its own `game.cfg` and quit soon after it started is started once more; an
 expansion is refused until a project can name its base game's build. Play in the game install
 without it is the day-to-day run.
 _Avoid_: retail mode, clean run, vanilla run
+
+**Play mode**:
+How Play runs a project's build: `runtime` (the OpenNova runtime), `install` (Play in the game
+install) or `strict` (Strict Play), each also the name of its run directories. A project's own, kept
+in its `.opennova/local.json` on that checkout with whether Play saves first (`play_mode`,
+`save_before_play`), never the editor's: the editor's settings are shared by every editor on the
+machine, so a project's Strict Play never starts the game install for another project or another
+editor. A project that never chose plays in the OpenNova runtime. A Play request may name a mode for
+itself alone (`play`'s `play_mode`), the project's own left as it is.
+_Avoid_: play setting (it is a project's, not the editor's), retail toggle
 
 ## Runtime presentation
 
