@@ -9,6 +9,7 @@
 #include <editor/model/node.h>
 #include <editor/preview/menu_screen_render.h>
 #include <editor/preview/menu_sounds.h>
+#include <editor/preview/menu_try.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
@@ -22,6 +23,7 @@ namespace opennova::editor {
 
 class MenuViewport;
 class MnuDocument;
+struct SessionView;
 struct MenuCanvasFrame;
 
 // How a menu viewport holds its screen (ADR 0046 S9j, S13 V5): every window shown, and one window
@@ -79,6 +81,22 @@ struct MenuPointerShow {
 	}
 	bool operator!=(const MenuPointerShow &other) const { return !(*this == other); }
 };
+// One input Try takes (DI-35), queued by a SetViewport's `try`, `click` or `key` and run where the
+// viewport reads its files (its follow, its frame's sample): Try back to where it started, the game's click
+// at a point (design units), one key.
+struct MenuTryInput {
+	enum class Kind : uint8_t { Reset, Click, Key };
+	Kind kind = Kind::Reset;
+	float x = 0.0f;
+	float y = 0.0f;
+	menu::MenuKeyInput key;
+};
+// A SetViewport's Try members over the queue: `try` {on?, reset?}, `click` {at: [x, y]}, `key` {key: a name
+// menu_try_key_from_name takes, shift?} or {text: characters typed in turn}. `on` is whether Try is on as
+// the change finds it; it says whether Try is on after it. False, nothing queued, with why: a member of
+// another type, a point off the picture, a key no name gives, a click or a key while Try is off.
+bool read_menu_try(const io::JsonValue &json, bool &on, std::vector<MenuTryInput> &queue, std::string &error);
+
 // The options on the wire (the envelope's `options`, a SetViewport's): {show_hidden, force_id,
 // force_state, checked, popup_open, focus, zoom: fit, scale or device, scale, snap, pointer, pointer_at:
 // [x, y] or null, pointer_down, sound: {mute}}.
@@ -195,15 +213,36 @@ public:
 	// The canvas's mouse over the picture (DI-34): the game's mouse while it is over the picture, else the held
 	// pointer is.
 	void take_mouse(const ViewportMouse *mouse) override;
+	// Try mode (DI-35; menu_try.h): the picture behaving as the game's menu, its windows' clicks and the keys
+	// the game's, not the editor's selection; started from the screen the viewport shows. Null while Try is
+	// off, or before the first follow or sample after it went on. `trying`: on and started.
+	bool try_on() const { return try_on_; }
+	const MenuTry *try_session() const { return try_.get(); }
+	bool trying() const { return try_on_ && try_ && try_->started(); }
+	// Why Try could not start ("" none).
+	const std::string &try_error() const { return try_error_; }
+	// The frame state the device draws while trying (null: not trying; the options' otherwise).
+	const menu::MenuFrameState *try_state() const { return trying() ? &try_->state() : nullptr; }
+	// The pointer the game draws with the mouse at (x, y) in design units of the picture: the edited screen's
+	// (menu_pointer_at), or while trying the screen Try shows, over the state it holds.
+	MenuPointer pointer_at(const ViewportContext &context, float x, float y) const;
+	// The pointer with the mouse over no window of the screen (the screen's own, menu_screen_pointer), the
+	// screen Try shows while trying.
+	MenuPointer screen_pointer(const ViewportContext &context) const;
 	// The screen row it shows (0 none).
 	NodeId screen_row() const { return part_; }
 	// What the device configures (null unless ready): the menu image, which the device holds while
 	// its frame borrows the screen (the viewport's next configure lets go of its own), and its screen;
-	// the Shell's %VAR% list; the pre-order index of the window the options hold (-1 none).
-	const std::shared_ptr<const mnu::Document> &image() const { return render_.image(); }
-	const mnu::Screen *screen() const { return render_.screen(); }
+	// the Shell's %VAR% list; the pre-order index of the window the options hold (-1 none). While trying,
+	// the menu and the screen Try shows (another menu after a jump), held none.
+	const std::shared_ptr<const mnu::Document> &image() const { return trying() ? try_->image() : render_.image(); }
+	const mnu::Screen *screen() const { return trying() ? try_->screen() : render_.screen(); }
 	const std::map<std::string, std::string> &style_vars() const { return style_vars_; }
-	int forced_index() const { return forced_index_; }
+	int forced_index() const { return trying() ? -1 : forced_index_; }
+	// The compile of what the device configures: the viewport's own, or Try's.
+	const menu::MenuFrameCompiler &picture_compiler() const {
+		return trying() ? try_->compiler() : render_.compiler();
+	}
 	// Its headless compile (the game's rects and hit test, its options held), and the compiler's
 	// notes on the screen, made once per configure.
 	const MenuScreenRender &render() const { return render_; }
@@ -271,6 +310,17 @@ private:
 	// the screens before it, their order) or leaves the menu with no image the game would read (none
 	// of its screens).
 	bool moves_(const ViewportInput &input, const MnuDocument &document, NodeId row) const;
+	// Try's follow (DI-35): started from the screen shown, its queued inputs run, read again as the menu or
+	// a file it read changes; Rebuild as it shows another screen, Update as its state moves.
+	ViewportAction follow_try_(const ViewportInput &input, const MnuDocument &document, const FileSource &files);
+	// What Try reads through the session's files: the menus by name (this one as it would be saved now),
+	// the stylesheets' variables and the project's missions.
+	MenuTrySource try_source_(const SessionView &view, const MnuDocument &document, const FileSource &files) const;
+	// Started where it is not (from the screen the viewport shows), else read again with `reload` (the menu
+	// changed), then its queued inputs run in order.
+	void run_try_(const SessionView &view, const MnuDocument &document, const FileSource &files, bool reload);
+	// The window record of Try's widget `id` while Try shows a screen of this menu (0 otherwise).
+	NodeId try_record_(const MnuDocument &document, int id) const;
 	// Whether what moved of the files the picture read is the shell's stylesheets alone, with no
 	// variable the screens up to the shown one name come, gone or of another value (S13 V8): the
 	// picture stands, the variables read again kept for the device's next configure.
@@ -309,6 +359,12 @@ private:
 	int forced_index_ = -1;
 	std::vector<ViewportDeviceReport::Rect> device_rects_;
 	uint64_t configures_ = 0;
+	// Try mode (DI-35).
+	bool try_on_ = false;
+	std::unique_ptr<MenuTry> try_;
+	std::vector<MenuTryInput> try_queue_;
+	std::string try_error_;
+	uint64_t try_state_seen_ = 0; // Try's state serial as the device last took it
 };
 
 } // namespace opennova::editor
