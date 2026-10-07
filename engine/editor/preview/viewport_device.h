@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include <base/io/json.h>
 #include <editor/model/node.h>
 #include <editor/preview/viewport_build_report.h>
 #include <editor/preview/viewport_follow.h>
@@ -60,6 +61,9 @@ struct ViewportDeviceReport {
 	// Escape, a click, a key, the pointer moving on, or the control made again closed it.
 	uint64_t assist_serial = 0;
 	bool assist_shown = false;
+	// What the device drew this frame of the layers its kind reports (a mission's foliage and lights, DI-31),
+	// the kind's wire form as the device makes it; null for none.
+	io::JsonValue drawn;
 };
 
 // Where a canvas draws a device's picture this frame (ADR 0046 S13 V5), in the pixels the canvas

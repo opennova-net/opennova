@@ -43,6 +43,7 @@ bool operator==(const MissionSceneHeader &a, const MissionSceneHeader &b) {
 	return a.terrain == b.terrain && a.tile_set == b.tile_set && a.environment == b.environment &&
 			a.start_time == b.start_time && a.minutes_per_day == b.minutes_per_day && a.attrib_flags == b.attrib_flags &&
 			a.water_override == b.water_override && a.fog_override == b.fog_override && a.water_murk == b.water_murk &&
+			a.wind_speed == b.wind_speed && a.wind_direction == b.wind_direction &&
 			std::equal(std::begin(a.fog_color), std::end(a.fog_color), std::begin(b.fog_color)) &&
 			std::equal(std::begin(a.water_color), std::end(a.water_color), std::begin(b.water_color));
 }

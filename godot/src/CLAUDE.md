@@ -94,7 +94,9 @@ Gotchas:
   the game's process-wide render state (the environment's shader globals, the water plane: last
   writer wins, and a conflict is sticky), so a device says the scene state its picture renders
   with and the frame's arbitration renders one state at a time; such a global is written again in
-  `publish_scene_state` each turn, never once at build. Its bytes are the project's alone
+  `publish_scene_state` each turn, never once at build (DI-31: the statics' light atlas is its light
+  director's scene's, published there too). It draws single-sampled, as the game's view does: the particle
+  renderer's passes bind the view's depth and draw nothing under MSAA. Its bytes are the project's alone
   (`ResourceRoot::mount_files` over the session's file source); a container it drops is renamed
   and `queue_free`d, never `remove_child`ed mid-frame.
 - Bind native C++ engine APIs directly. Do not introduce a parallel flat FFI surface.
