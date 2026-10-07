@@ -384,8 +384,39 @@ int test_retail_overlays() {
 
 } // namespace
 
+// A terrain whose height data is another's (D-TERRAIN-17: 15 of JO:CA's 38, dvxg8a.trn naming dvxg8.cpt): the store
+// reads the .cpt the .trn names [orig: PolyTrn_LoadTerrainConfig @ 0x60E62F -> sub_603CC0 @ 0x603D0A]; and the
+// terrain's own tile placement where the mission has none (polytrn_tileinfo, its extension forced to TIL [orig:
+// Terrain_Init @ 0x60FCFD; PolyTrn_LoadTerrainConfig @ 0x60E6DC..0x60E6E5]).
+int test_named_files() {
+	auto files = tmap_files();
+	const std::vector<uint8_t> tmap = test_io::read_file(fixture("terrain/tmap/Tmap.trn"));
+	std::string other(tmap.begin(), tmap.end());
+	other += "\r\npolytrn_tileinfo own.lit\r\n";
+	files->put("Tother.trn", std::vector<uint8_t>(other.begin(), other.end()));
+	files->put("own.til", tile_at(0.0, 0.0, 3));
+	MissionSceneHeader header;
+	header.terrain = "Tother";
+	MissionGround ground;
+	ground.follow(files, 1, header, "");
+	TEST_EXPECT(ground.terrain() && ground.error().empty() && ground.tiles_file() == "own.til" && ground.tiles() == 1);
+	// A mission's own tiles come first.
+	files->put("pad.til", tile_at(40.0, 0.0, 4));
+	MissionGround mission;
+	mission.follow(files, 2, header, "pad");
+	TEST_EXPECT(mission.terrain() && mission.tiles_file() == "pad.til" && mission.tiles() == 1);
+	// The height data the .trn names missing: no terrain, saying so.
+	files->drop("Tmap.cpt");
+	MissionGround none;
+	none.follow(files, 3, header, "");
+	TEST_EXPECT(!none.terrain() && none.error().find("Tmap.cpt (Tother.trn's height data)") != std::string::npos);
+	std::printf("named files: the height data the .trn names, the terrain's own tiles after the mission's\n");
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
+	TEST_EXPECT(test_named_files() == 0);
 	TEST_EXPECT(test_retail_overlays() == 0);
 	TEST_EXPECT(test_foliage_facts() == 0);
 	TEST_EXPECT(test_surface_overlay() == 0);

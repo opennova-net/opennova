@@ -1,15 +1,18 @@
 #include "document_views.h"
 
 #include <editor/assets/asset_kinds.h>
+#include <editor/assets/asset_registry.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mission_labels.h>
 #include <editor/documents/mission_table.h>
 #include <editor/model/document_base.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/animation_inspector.h>
 #include <editor/ui/catalog_inspector_view.h>
 #include <editor/ui/environment_inspector.h>
+#include <editor/ui/terrain_inspector.h>
 #include <editor/ui/main_viewport_view.h>
 #include <editor/ui/menu_inspector.h>
 #include <editor/ui/menu_view.h>
@@ -167,6 +170,10 @@ constexpr DocumentViewRow kViews[] = {
 	{DocumentTypeId::Environment, DocumentViewRole::MainViewport, &kTreeOutline, nullptr, draw_environment_inspector},
 	// The HUD layout's text in its script device (DI-20), its HUD the Preview window's.
 	{DocumentTypeId::HudLayout, DocumentViewRole::MainViewport, nullptr, make_script_view},
+	// A terrain's row, its grid rows and its foliage definitions as a tree (DI-30a) beside its picture (DI-30b: the
+	// Main role, ui/main_viewport_view over the Terrain viewport kind); the import that makes it and the missions
+	// that run on it head the Inspector (ui/terrain_inspector).
+	{DocumentTypeId::Terrain, DocumentViewRole::MainViewport, &kTreeOutline, nullptr, draw_terrain_inspector},
 };
 
 // One view per DocumentTypeId past None, in its order, each an outline or a view its make makes.
@@ -186,6 +193,11 @@ static_assert(views_in_order(), "the views follow DocumentTypeId's order, each a
 const DocumentViewRow *document_view_row(DocumentTypeId type) {
 	const size_t index = static_cast<size_t>(type);
 	return index >= 1 && index <= kDocumentTypeCount ? &kViews[index - 1] : nullptr;
+}
+
+bool made_by_import(const SessionView &view, const DocumentBase &document) {
+	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(document.path()) : nullptr;
+	return entry && !entry->imported_from.empty();
 }
 
 std::unique_ptr<DocumentView> make_view(const DocumentBase &document) {
