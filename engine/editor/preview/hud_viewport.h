@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <editor/documents/hud_layout_type.h>
+#include <editor/preview/hud_layout_edit.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
@@ -102,10 +103,13 @@ const HudElementWords &hud_element_words(opennova::hud::HudElement element);
 
 // One element the picture drew: its box on the screen (the resolution's pixels), the hudpos.def lines
 // that place it (each key's line the game takes, a HUDSTANCE's of the stance shown), and the textures
-// it draws, each with the project file the game's lookup finds it in ("" none).
+// it draws, each with the project file the game's lookup finds it in ("" none); whether a drag moves it
+// (a line places it) and a corner resizes it (the game reads a size for it: preview/hud_layout_edit.h).
 struct HudPreviewElement {
 	opennova::hud::HudElement element = opennova::hud::HudElement::kCount;
 	float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
+	bool movable = false;
+	bool resizable = false;
 	struct Line {
 		std::string key;
 		size_t line = 0;
@@ -120,6 +124,18 @@ struct HudPreviewElement {
 	std::vector<Art> textures;
 };
 
+// A HUD layout's model as the game's parser reads a text the editor holds (its lines CR LF, as Save
+// writes them): what the picture is laid out from and what an edit of an element starts from.
+struct HudLayoutModel {
+	def::DefHudPosFile file{};
+	HudLayoutModel() = default;
+	HudLayoutModel(const HudLayoutModel &) = delete;
+	HudLayoutModel &operator=(const HudLayoutModel &) = delete;
+	~HudLayoutModel();
+	// Read from `text` (false: the parser read nothing, the model left empty).
+	bool read(const std::string &text);
+};
+
 // A HUD layout's viewport (the plan's DI-20; ViewportKind::Hud, the Preview role of the HUD layout
 // type): the game's own HUD drawn over hudpos.def as Save would write it now, at a screen size, for a
 // player whose state its options choose, by the Shell's device (godot/src/authoring/
@@ -130,7 +146,10 @@ struct HudPreviewElement {
 // picture names the element under it (the smallest box holding it: an element inside the frame
 // before the frame), its words, the hudpos.def lines that place it and the textures it draws; a
 // click picks it (its options' `picked`), and the Go to of its line or its texture is the window's
-// (window_requests::go_to). It changes nothing in the document: a drag and a command are refused.
+// (window_requests::go_to). The plan's DI-37 edits it there: the canvas's drag of an element moves it
+// and of a corner resizes it, the arrows nudge it, and the commands move, resize and set do the same
+// over the wire, each written to the element's lines of the text (preview/hud_layout_edit), one undo
+// step a drag or a command.
 class HudViewport final : public ViewportModel {
 public:
 	explicit HudViewport(std::string path);
@@ -154,6 +173,19 @@ public:
 	const HudPreviewElement *picked() const;
 	// An element's words with its lines ("Ammo count: AMMOCOUNTPOS, line 15"), what a hover says.
 	std::string element_words(const HudPreviewElement &element) const;
+	// The layout's model as the game reads the text the viewport last followed (null: none read).
+	const def::DefHudPosDef *layout_model() const { return model_ ? &model_->file.hud : nullptr; }
+	// The layout's model as the game reads the document open at the viewport's path now (a drag's start, a
+	// command's), and that document's text: false with why where no HUD layout is open there.
+	bool read_now(const ViewportContext &context, HudLayoutModel &out, const TextDocument *&text,
+			std::string &error) const;
+	// The element a command names: its token, or the one picked where it names none (false with why).
+	bool element_named(const std::string &item, opennova::hud::HudElement &out, std::string &error) const;
+	// The changes written to the document at the viewport's path as it is now (its text read again by the
+	// game's parser first), each edit carrying `gesture`: one EditRecord, none where nothing changes. False
+	// with why where the document takes no edit.
+	bool plan_changes(const ViewportContext &context, const std::vector<HudValueChange> &changes, uint64_t gesture,
+			CanvasRequests &out, std::string &error) const;
 
 	ViewportStatus status() const override;
 	const char *reason() const override { return hud_view_status_token(reason_); }
@@ -172,6 +204,11 @@ public:
 			std::string &error) const override;
 	bool command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
 			CanvasRequests &out, std::string &error) const override;
+	// move (by [dx, dy] design units, or at [x, y] its lead place), resize (`handle` a corner, bottom_right
+	// when left out, by [dx, dy]) and set (`field` to `value`) of the element `item` names (else the one
+	// picked), each one batch; any other the base's (a click).
+	bool command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+			std::string &error) const override;
 	bool click_frame(const ViewportContext &context, SelectMode mode, int &width, int &height,
 			std::string &error) const override;
 	io::JsonValue options_json() const override;
@@ -179,7 +216,8 @@ public:
 	// project's weapon.def holds, the stances' names.
 	io::JsonValue body_json(const ViewportInput &input) const override;
 	// The elements the picture drew: each `element`, `words`, `rect` [x0, y0, x1, y1], `lines` [{key,
-	// line, column, locator, text}], `textures` [{name, path}] and `picked`.
+	// line, column, locator, text}], `textures` [{name, path}], `picked`, `movable`, `resizable` and its
+	// `fields` [{id, words, kind, value, least, most, range, cite}].
 	io::JsonValue items_json(const ViewportInput &input) const override;
 
 protected:
@@ -206,6 +244,7 @@ private:
 	uint64_t read_identity_ = 0, read_load_ = 0, read_revision_ = UINT64_MAX;
 	std::vector<HudLayoutLine> lines_;
 	std::string text_;
+	std::shared_ptr<const HudLayoutModel> model_;
 	opennova::hud::HudLayoutAssets assets_;
 	std::array<std::string, 6> stance_names_{};
 	// weapon.def as last read, by its stamp.
