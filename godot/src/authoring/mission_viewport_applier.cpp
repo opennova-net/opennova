@@ -222,6 +222,10 @@ MissionViewportApplier::MissionViewportApplier(SubViewport &viewport) : scene_st
 	lights_->set_scene(TypedArray<ObjectModel>(), environment_, weather_);
 	root_files_.instantiate();
 	clock_.instantiate();
+	// The Shoot tool's scars (DI-23), drawn by the game's ScarPresenter (its effects are the items' scene's).
+	shot_scars_ = memnew(ScarPresenter);
+	shot_scars_->set_name("ShotScars");
+	root_->add_child(shot_scars_);
 }
 
 MissionViewportApplier::~MissionViewportApplier() {
@@ -1182,6 +1186,8 @@ void MissionViewportApplier::clear() {
 	effects_->clear();
 	effects_->set_environment_source(environment_);
 	effects_mounted_ = false;
+	shot_scars_->clear();
+	shot_scars_shown_ = UINT64_MAX;
 	foliage_->reset();
 	foliage_->set_terrain_data(Ref<TerrainData>());
 	foliage_data_.unref();
@@ -1295,6 +1301,21 @@ void MissionViewportApplier::tick(const opennova::editor::ViewportModel &viewpor
 	// The effects' scene the viewport stepped, shown where it opened another.
 	const std::shared_ptr<opennova::particle::EffectScene> &scene = mission_of(viewport).effects().scene();
 	if (effects_mounted_ && scene != effects_->scene()) effects_->show(scene);
+	apply_shots_(mission_of(viewport));
+}
+
+void MissionViewportApplier::apply_shots_(const opennova::editor::MissionViewport &mission) {
+	if (mission.shots().shots().empty() || !effects_mounted_) {
+		if (shot_scars_shown_ != UINT64_MAX) shot_scars_->clear();
+		shot_scars_shown_ = UINT64_MAX;
+		return;
+	}
+	// The scars where the run moved, their textures through the project's files as the effects read theirs.
+	if (mission.shots().serial() == shot_scars_shown_) return;
+	shot_scars_shown_ = mission.shots().serial();
+	shot_scars_->set_resource_root(effects_->root());
+	if (mission.shots().scar_count() > 0) shot_scars_->present(preview_scar_record(mission.shot_scars()), Dictionary());
+	else shot_scars_->clear();
 }
 
 // --- the frame -----------------------------------------------------------------------------------
