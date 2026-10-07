@@ -403,6 +403,7 @@ enum class CoreFinding {
 	PlayStart,
 	PlayStrictExpansion,
 	PlayUnsupported,
+	ProjectBaseProject,
 	ProjectExists,
 	ProjectExpansionNameTaken,
 	ProjectExpansionNotInstalled,
