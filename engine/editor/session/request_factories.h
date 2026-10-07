@@ -313,6 +313,14 @@ inline EditorRequest create_file(std::string path, std::string file_kind = std::
 	request.values = std::move(values);
 	return request;
 }
+// A blank file `path` of `file_kind` that defines `define` as it is made (DI-33: a missing name whose file the
+// project lacks), the name added to it as its type's Add makes one.
+inline EditorRequest create_file_defining(std::string path, std::string file_kind, ReferenceSubject define,
+		std::vector<std::pair<std::string, std::string>> values = {}) {
+	EditorRequest request = create_file(std::move(path), std::move(file_kind), std::move(values));
+	request.define = std::move(define);
+	return request;
+}
 // The document at `path` opened (made active when it is open), the record at `locator` selected
 // (a Go to) and its `field` shown.
 inline EditorRequest open_document(

@@ -16,6 +16,7 @@
 #include <editor/graph/asset_graph.h>
 #include <base/io/cp1252.h>
 #include <editor/graph/display_names.h>
+#include <editor/graph/reference_kinds.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/model/text_document.h>
 #include <editor/preview/texture_thumbnails.h>
@@ -580,6 +581,42 @@ bool play_start_from_json(const JsonValue &json, PlayStart &out, std::string &er
 	return true;
 }
 
+// A name a new file defines as it is made (create_file's define, DI-33): {kind, name, scope?}, the
+// reference's kind by its token.
+JsonValue define_to_json(const ReferenceSubject &define) {
+	JsonValue out = JsonValue::make_object();
+	out.set("kind", json_string(reference_row(define.kind).token));
+	out.set("name", json_string(define.target));
+	if (!define.scope.empty()) out.set("scope", json_string(define.scope));
+	return out;
+}
+
+bool define_from_json(const JsonValue &json, ReferenceSubject &out, std::string &error) {
+	const char *shape = "\"define\" must be an object {kind, name, scope?}: a reference kind's token and the name.";
+	if (!json.is_object()) {
+		error = shape;
+		return false;
+	}
+	if (!members_known(json, {"kind", "name", "scope"}, "define", error)) return false;
+	const JsonValue *kind = json.get("kind");
+	const JsonValue *name = json.get("name");
+	const JsonValue *scope = json.get("scope");
+	ReferenceSubject define;
+	if (!kind || !kind->is_string() || !name || !name->is_string() || name->string.empty() ||
+	    (scope && !scope->is_string())) {
+		error = shape;
+		return false;
+	}
+	if (!reference_kind_from_token(kind->string, define.kind) || define.kind == ReferenceKind::None) {
+		error = "\"define\"'s kind \"" + kind->string + "\" is no reference kind.";
+		return false;
+	}
+	define.target = name->string;
+	if (scope) define.scope = scope->string;
+	out = std::move(define);
+	return true;
+}
+
 // A viewport's kind as a drag or a command names it ("kind": its token), left out its default
 // (kCount: the kind the document shows in).
 bool viewport_kind_member(const JsonValue &json, const char *owner, ViewportKind &out, std::string &error) {
@@ -952,6 +989,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	}
 	case F::PasteAt: return paste_at_from_json(json, request.paste_at, error);
 	case F::Start: return play_start_from_json(json, request.start, error);
+	case F::Define: return define_from_json(json, request.define, error);
 	case F::Mode:
 		if (json.is_string() && select_mode_from_token(json.string, request.mode)) return true;
 		error = "Unknown selection mode \"" + shown + "\".";
@@ -1140,6 +1178,9 @@ bool field_to_json(
 		out = boolean(request.save_before_play.value_or(true));
 		return request.save_before_play.has_value();
 	case F::Alone: out = boolean(request.alone); return request.alone;
+	case F::Define:
+		out = define_to_json(request.define);
+		return request.define.kind != ReferenceKind::None;
 	case F::kCount: break;
 	}
 	out = JsonValue::make_null();
