@@ -119,7 +119,9 @@ void test_frame_bracket_follows_the_table() {
 	const std::vector<K> saved = {K::NewProject, K::OpenProject, K::CloseProject, K::Rescan, K::ImportFiles,
 	                              K::Build, K::Play, K::Export, K::ReloadDocument, K::CloseDocument, K::Save, K::SaveAll,
 	                              K::ResolveUnsaved, K::RenameAsset, K::AssignRequirement, K::RenameSymbol, K::RenameBack,
-	                              K::SplitTexture, K::Quit, K::MoveAsset};
+	                              K::SplitTexture, K::Quit, K::MoveAsset,
+	                              // DI-25: Files' chores act on the files as saved.
+	                              K::DeleteAsset, K::DuplicateAsset, K::RenameFolder, K::UndoFile, K::RedoFile};
 	// S13 V7: a viewport's change and an edit in a viewport name the active document's, as every
 	// pathless request does.
 	// S18: a texture's whole-image edit names the active one, as an edit_record does.
@@ -2870,6 +2872,7 @@ constexpr Group kGroups[] = {
 	{"gate", run_gate_tests},             {"logic", run_logic_tests},
 	{"animation", run_animation_tests},   {"model", run_model_tests},
 	{"project", run_project_tests},       {"navigation", run_navigation_tests},
+	{"shortcuts", run_shortcuts_tests},
 };
 
 } // namespace
