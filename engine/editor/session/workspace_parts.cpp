@@ -72,6 +72,9 @@ constexpr WorkspaceMember kNewProject[] = {
 			"builds as an expansion." },
 	{ "as_expansion", J::Boolean, "Build as an expansion: the project builds as expansion\\<expansion>\\." },
 	{ "expansion", J::String, "The expansion's name, which the form checks as the game's rule takes it.", kExpansionLongest },
+	{ "base_project", J::String,
+			"The base game's project the expansion builds on (T5; \"\" the game install's base game): a standalone "
+			"project's folder, from the new project's when relative, whose export is the base game.", kPathLongest },
 };
 constexpr WorkspaceMember kSettings[] = {
 	{ "open", J::Boolean,
@@ -84,6 +87,9 @@ constexpr WorkspaceMember kSettings[] = {
 	{ "builds_on", J::String, "The installed expansion it builds on (\"\" the base game); building on one builds as one." },
 	{ "as_expansion", J::Boolean, "Build as an expansion." },
 	{ "expansion", J::String, "The expansion's name.", kExpansionLongest },
+	{ "base_project", J::String,
+			"The base game's project it builds on (T5; \"\" the game install's base game), from the project's folder "
+			"when relative.", kPathLongest },
 	{ "game_install", J::String, "This computer's game install folder.", kPathLongest },
 	{ "runtime", J::String, "The OpenNova runtime Play runs (\"\" the one packaged beside the editor).", kPathLongest },
 	{ "play_mode", J::String,
@@ -417,13 +423,15 @@ bool set_new_project(Change &change, const JsonValue &part) {
 	if (const JsonValue *builds_on = part.get("builds_on")) form.builds_on = builds_on->string;
 	if (const JsonValue *as_expansion = part.get("as_expansion")) form.as_expansion = as_expansion->boolean;
 	if (const JsonValue *expansion = part.get("expansion")) form.expansion = expansion->string;
-	// The game reads an expansion's own files only under /exp: a project on an installed expansion builds as one.
-	if (!form.builds_on.empty()) form.as_expansion = true;
+	if (const JsonValue *base = part.get("base_project")) form.base_project = base->string;
+	// The game reads an expansion's own files only under /exp: a project on an installed expansion builds as one,
+	// and so does one on a base game's project (T5).
+	if (!form.builds_on.empty() || !form.base_project.empty()) form.as_expansion = true;
 	WorkspaceView::NewProject &held = change.workspace().new_project;
 	const bool moved = form.open != held.open || form.title != held.title || form.dir != held.dir ||
 	                   form.game_install != held.game_install || form.install_named != held.install_named ||
 	                   form.builds_on != held.builds_on || form.as_expansion != held.as_expansion ||
-	                   form.expansion != held.expansion;
+	                   form.expansion != held.expansion || form.base_project != held.base_project;
 	held = std::move(form);
 	return moved;
 }
@@ -431,7 +439,7 @@ bool set_new_project(Change &change, const JsonValue &part) {
 bool same_settings(const WorkspaceView::Settings &a, const WorkspaceView::Settings &b) {
 	return a.open == b.open && a.title == b.title && a.mission == b.mission && a.multiplayer == b.multiplayer &&
 	       a.builds_on == b.builds_on && a.as_expansion == b.as_expansion && a.expansion == b.expansion &&
-	       a.game_install == b.game_install && a.runtime == b.runtime && a.play_mode == b.play_mode;
+	       a.base_project == b.base_project && a.game_install == b.game_install && a.runtime == b.runtime && a.play_mode == b.play_mode;
 }
 
 // Project settings: opened over the settings in effect (the project's document, the install in effect, the
@@ -452,6 +460,7 @@ bool set_settings(Change &change, const JsonValue &part) {
 		settings.builds_on = doc.expansion.builds_on;
 		settings.as_expansion = !doc.expansion.standalone();
 		settings.expansion = doc.expansion.name;
+		settings.base_project = doc.expansion.base_project;
 		settings.game_install = view.project.retail_directory;
 		settings.runtime = view.project.runtime_setting;
 		settings.play_mode = view.project.play_mode;
@@ -466,11 +475,12 @@ bool set_settings(Change &change, const JsonValue &part) {
 	if (const JsonValue *builds_on = part.get("builds_on")) settings.builds_on = builds_on->string;
 	if (const JsonValue *as_expansion = part.get("as_expansion")) settings.as_expansion = as_expansion->boolean;
 	if (const JsonValue *expansion = part.get("expansion")) settings.expansion = expansion->string;
+	if (const JsonValue *base = part.get("base_project")) settings.base_project = base->string;
 	if (const JsonValue *install = part.get("game_install")) settings.game_install = install->string;
 	if (const JsonValue *runtime = part.get("runtime")) settings.runtime = runtime->string;
 	if (const JsonValue *mode = part.get("play_mode"); mode && !play_mode_from_token(mode->string, settings.play_mode))
 		return change.refuse("\"settings.play_mode\" is runtime, install or strict, not \"" + mode->string + "\".");
-	if (!settings.builds_on.empty()) settings.as_expansion = true;
+	if (!settings.builds_on.empty() || !settings.base_project.empty()) settings.as_expansion = true;
 	if (!settings.open) settings = WorkspaceView::Settings();
 	if (same_settings(settings, view.workspace.settings)) return false;
 	change.workspace().settings = std::move(settings);
@@ -1379,6 +1389,7 @@ JsonValue workspace_to_json(const SessionView &view) {
 	made.set("builds_on", text(form.builds_on));
 	made.set("as_expansion", flag(form.as_expansion));
 	made.set("expansion", text(form.expansion));
+	made.set("base_project", text(form.base_project));
 	out.set("new_project", std::move(made));
 	const WorkspaceView::Settings &settings = workspace.settings;
 	JsonValue dialog = JsonValue::make_object();
@@ -1390,6 +1401,7 @@ JsonValue workspace_to_json(const SessionView &view) {
 		dialog.set("builds_on", text(settings.builds_on));
 		dialog.set("as_expansion", flag(settings.as_expansion));
 		dialog.set("expansion", text(settings.expansion));
+		dialog.set("base_project", text(settings.base_project));
 		dialog.set("game_install", text(settings.game_install));
 		dialog.set("runtime", text(settings.runtime));
 		dialog.set("play_mode", text(play_mode_token(settings.play_mode)));

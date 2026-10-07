@@ -326,12 +326,82 @@ static int test_strict_install_staging() {
 	fs::create_directories(run3);
 	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run3, "jxm", plan, error) &&
 	            error.code() == "play.strict_expansion" &&
-	            error.message.find("Strict Play of an expansion needs its base game's build; not yet supported") == 0 &&
+	            error.message.find("Strict Play of an expansion needs its base game's build: the project builds as the "
+	                               "expansion jxm") == 0 &&
 	            files_in(run3).empty());
+	// An expansion whose base game is the install itself: refused the same.
+	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run3, "jxm", plan, error, link_file, install) &&
+	            error.code() == "play.strict_expansion" && files_in(run3).empty());
 	TEST_EXPECT(!prepare_strict_install_launch_plan("", build, run3, "", plan, error) && error.code() == "play.install_missing");
 	fs::remove(install + "/Jointops.exe");
 	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run3, "", plan, error) &&
 	            error.code() == "play.install_missing" && files_in(run3).empty());
+	return 0;
+}
+
+// Strict Play of an expansion over its base game's build (ADR 0046 T5): the run directory holds the base
+// game's export as a player's folder holds it (every file but the export's and the build's records), the
+// build's expansion/<b>/ beside it and the install's executable and Bink DLL, nothing else of the install;
+// launched /w /exp <b> /FRISK, no /d. The game writing what it may write (its weapon.sav in the expansion's
+// folder among them) leaves the base, the build and the install as they were. Refused, nothing staged: a base
+// game's folder that is not there or holds none of the game's archives (play.install_missing), a build
+// without the expansion's folder (play.install_copy).
+static int test_strict_expansion_staging() {
+	namespace fs = std::filesystem;
+	editor_test::TempProjectDir dir("opennova_editor_strict_expansion");
+	const std::string install = dir.file("install"), base = dir.file("base/build/export"),
+	                  build = dir.file("mod/build/0123456789abcdef");
+	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "exe") && editor_test::write_text(install + "/binkw32.dll", "bink") &&
+	            editor_test::write_text(install + "/game.cfg", "install settings") &&
+	            editor_test::write_text(install + "/player.sav", "install player") &&
+	            editor_test::write_text(install + "/language.pff", "the install's own archive"));
+	for (const char *name : {"language.pff", "localres.pff", "resource.pff"})
+		TEST_EXPECT(write_empty_archive(base + "/" + name));
+	TEST_EXPECT(editor_test::write_text(base + "/nw_cdata.coo", "base cookies") &&
+	            editor_test::write_text(base + "/export.json", "{}") && editor_test::write_text(base + "/build.json", "{}") &&
+	            editor_test::write_text(base + "/menumus.sbf", "base music"));
+	TEST_EXPECT(write_empty_archive(build + "/expansion/onx/onx.pff") && write_empty_archive(build + "/expansion/onx/onxL.pff") &&
+	            editor_test::write_text(build + "/expansion/onx/onx.bin", "table") &&
+	            editor_test::write_text(build + "/expansion/onx/version.txt", "onx") &&
+	            editor_test::write_text(build + "/build.json", "{}"));
+	const std::string base_tree = editor_test::tree_digest(base), build_tree = editor_test::tree_digest(build),
+	                  install_tree = editor_test::tree_digest(install);
+	const std::string run = dir.file("run/1");
+	fs::create_directories(run);
+	LaunchPlan plan;
+	Diagnostic error;
+	TEST_EXPECT(prepare_strict_install_launch_plan(install, build, run, "onx", plan, error, link_file, base));
+	TEST_EXPECT(plan.args == std::vector<std::string>({"/w", "/exp", "onx", "/FRISK"}));
+	TEST_EXPECT(plan.executable == run + "/Jointops.exe" && plan.working_dir == run && plan.resource_dir == run &&
+	            plan.expansion == "onx" && plan.log_file == run + "/_filelog.txt");
+	TEST_EXPECT(files_in(run) == std::vector<std::string>({"Jointops.exe", "binkw32.dll", "expansion", "language.pff", "localres.pff",
+	                                                       "menumus.sbf", "nw_cdata.coo", "resource.pff"}));
+	TEST_EXPECT(files_in(run + "/expansion/onx") == std::vector<std::string>({"onx.bin", "onx.pff", "onxL.pff", "version.txt"}));
+	std::error_code ec;
+	for (const char *name : {"language.pff", "localres.pff", "resource.pff", "menumus.sbf"})
+		TEST_EXPECT(fs::equivalent(run + "/" + name, base + "/" + name, ec)); // linked: the game only reads them
+	TEST_EXPECT(!fs::equivalent(run + "/nw_cdata.coo", base + "/nw_cdata.coo", ec));
+	TEST_EXPECT(fs::equivalent(run + "/expansion/onx/onx.pff", build + "/expansion/onx/onx.pff", ec));
+	TEST_EXPECT(std::find(plan.staged.begin(), plan.staged.end(), "expansion/onx/onx.pff") != plan.staged.end() &&
+	            std::find(plan.staged.begin(), plan.staged.end(), "language.pff") != plan.staged.end());
+	for (const char *name : {"nw_cdata.coo", "game.cfg", "player.sav", "expansion/onx/weapon.sav", "_filelog.txt"})
+		TEST_EXPECT(editor_test::write_text(run + "/" + name, "written by the game"));
+	TEST_EXPECT(editor_test::tree_digest(base) == base_tree && editor_test::tree_digest(build) == build_tree &&
+	            editor_test::tree_digest(install) == install_tree);
+
+	// Refused, nothing staged.
+	const std::string run2 = dir.file("run/2");
+	fs::create_directories(run2);
+	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run2, "onx", plan, error, link_file,
+	                                                dir.file("nobase/build/export")) &&
+	            error.code() == "play.install_missing" && error.message.find("export the base game's project") != std::string::npos &&
+	            files_in(run2).empty());
+	const std::string empty_base = dir.file("empty/build/export");
+	TEST_EXPECT(editor_test::write_text(empty_base + "/export.json", "{}"));
+	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run2, "onx", plan, error, link_file, empty_base) &&
+	            error.code() == "play.install_missing" && files_in(run2).empty());
+	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run2, "other", plan, error, link_file, base) &&
+	            error.code() == "play.install_copy" && files_in(run2).empty());
 	return 0;
 }
 
@@ -1022,6 +1092,7 @@ int main() {
 	failures += test_expansion_launch_plans();
 	failures += test_install_staging();
 	failures += test_strict_install_staging();
+	failures += test_strict_expansion_staging();
 	failures += test_file_access_log();
 	failures += test_strict_first_run_decision();
 	failures += test_run_directory_keeps_game_state();
