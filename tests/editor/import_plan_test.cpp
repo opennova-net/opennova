@@ -369,7 +369,7 @@ static int test_plan_not_followed() {
 	            colour->needed_by.reference == ReferenceKind::Texture);
 	const ImportPlanRow *detail = row_named(plan, "det.tga"), *palm = row_named(plan, "palm");
 	TEST_EXPECT(detail && detail->state == State::NotFound && palm && palm->state == State::NotFound &&
-	            palm->kind == AssetKind::Model && palm->needed_by.record == "foliage 1");
+	            palm->kind == AssetKind::Model && palm->needed_by.record == "Terrain/Foliage 1");
 	TEST_EXPECT(!not_followed(plan, ReferenceKind::None, AssetKind::Terrain));
 	const ImportNotFollowed *dialog = not_followed(plan, ReferenceKind::None, AssetKind::DialogBank);
 	TEST_EXPECT(dialog && dialog->count == 1 && dialog->first == "m.dbf");

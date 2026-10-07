@@ -169,21 +169,28 @@ bool load_store(TerrainFieldStore &store, const Read &read, const std::string &t
 		return false;
 	}
 	std::vector<uint8_t> cpt_bytes, trn_bytes;
-	if (!read(terrain_name + ".cpt", cpt_bytes) || !read(terrain_name + ".trn", trn_bytes)) {
-		error = terrain_name + ".cpt/.trn are not under the mount";
+	if (!read(terrain_name + ".trn", trn_bytes)) {
+		error = terrain_name + ".trn is not under the mount";
 		return false;
 	}
 	std::string doc_error;
-	CptFile cpt;
-	if (!load_cpt(cpt_bytes.data(), cpt_bytes.size(), cpt, doc_error)) {
-		error = terrain_name + ".cpt: " + doc_error;
-		return false;
-	}
 	TrnConfig trn;
 	std::string raw(reinterpret_cast<const char *>(trn_bytes.data()), trn_bytes.size());
 	std::istringstream ts(raw);
-	if (!load_trn(ts, trn, doc_error) || cpt.depth_buffer.empty()) {
+	if (!load_trn(ts, trn, doc_error)) {
 		error = terrain_name + ".trn: " + doc_error;
+		return false;
+	}
+	// The height data by the name the .trn writes (D-TERRAIN-17), never the terrain's own: terrains share one (15 of
+	// JO:CA's 38 name another's, dvxg8a.trn dvxg8.cpt) [orig: PolyTrn_LoadTerrainConfig @ 0x60E62F -> sub_603CC0 @
+	// 0x603D0A].
+	if (!read(trn.polydata, cpt_bytes)) {
+		error = trn.polydata + " (" + terrain_name + ".trn's height data) is not under the mount";
+		return false;
+	}
+	CptFile cpt;
+	if (!load_cpt(cpt_bytes.data(), cpt_bytes.size(), cpt, doc_error) || cpt.depth_buffer.empty()) {
+		error = trn.polydata + ": " + (doc_error.empty() ? std::string("no heights") : doc_error);
 		return false;
 	}
 	// One name drives the atlas and the .TSD: the mission's tile set over the

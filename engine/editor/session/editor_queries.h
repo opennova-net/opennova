@@ -56,6 +56,7 @@ enum class EditorQueryKind : uint8_t {
 	FileCard,
 	UsedBy,
 	EnvironmentUses,
+	TerrainUses,
 	kCount,
 };
 
