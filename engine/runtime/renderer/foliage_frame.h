@@ -196,6 +196,10 @@ struct FoliageDrawCommand {
 	float wind_phase = 0.0f;        // per-tier retail clock, resolved here
 	// Detail only: foliage_detail_wind_sector_origin_z of the cell.
 	float wind_sector_origin_z = 0.0f;
+	// Detail only: the cell's minimum in the 1024 source atlas, the patch
+	// key the draw's page lookup compares (TerrainTileSectorPatchPoint).
+	int32_t atlas_x = 0;
+	int32_t atlas_z = 0;
 	// The water side the draw belongs to: detail pass formatType 0 / the
 	// far-side BySide wave's masks (true), else the camera side.
 	bool far_side = false;

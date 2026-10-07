@@ -144,6 +144,11 @@ struct DetailInstance {
 	// Foliage_SetupDetailSlotDraw @ 0x6008fc..0x600912]
 	bool near_secondary = false;
 	DetailWaterPass water_pass = DetailWaterPass::CameraSide;
+	// The cell's minimum in the 1024 source atlas (DetailCell::atlas_x/z):
+	// the low ten bits of the patch key's halves, which the detail draw's
+	// page lookup compares [orig: Terrain_FindSectorPatchRT @0x6042A0].
+	int32_t atlas_x = 0;
+	int32_t atlas_z = 0;
 };
 
 struct SilhouetteInstance {
