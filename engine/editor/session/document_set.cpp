@@ -16,12 +16,14 @@
 #include <editor/documents/texture_operations.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
+#include <editor/graph/file_plans.h>
 #include <editor/graph/native_text_sites.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
 #include <editor/model/text_document.h>
 #include <editor/preview/viewport_kinds.h>
 #include <editor/project/project_files.h>
+#include <editor/session/file_chores.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/session_core.h>
@@ -344,7 +346,12 @@ void DocumentSet::create_file(const EditorRequest &request) {
 	// files of the kind, else the top level of a flat project or the kind's folder).
 	FileNameProblem problem = FileNameProblem::None;
 	std::string message;
-	const std::string folder = placement_folder(*view_.project.scan, kind);
+	// The folder Files' New here names (DI-25: "/" the top level), a folder of the project's walk and no export's.
+	std::string folder = placement_folder(*view_.project.scan, kind);
+	if (!request.folder.empty() && !project_folder_of(paths_, *view_.project.document, request.folder, folder, message)) {
+		refuse(make_finding(CoreFinding::DocumentPath, DiagnosticSeverity::Error, message, request.path));
+		return;
+	}
 	if (!check_project_file_name(paths_.root, folder, request.path, kind, problem, message)) {
 		const CoreFinding code = problem == FileNameProblem::Kind   ? CoreFinding::DocumentKind
 		                         : problem == FileNameProblem::Path ? CoreFinding::DocumentPath
@@ -363,6 +370,12 @@ void DocumentSet::create_file(const EditorRequest &request) {
 		}
 		std::vector<uint8_t> bytes; Diagnostic error;
 		if (!make_blank(blank, kind, bytes, error)) { refuse(error); return; }
+		// The folders it makes on the way (New here's, DI-25), the outermost first: its file history's step takes
+		// them back with it.
+		std::vector<std::string> folders_made;
+		for (std::string dir = folder; !dir.empty() && !fs::exists(system_path(join_path(paths_.root, dir)), ec);
+		     dir = utf8_of(path_of(dir).parent_path()))
+			folders_made.insert(folders_made.begin(), dir);
 		if (!ensure_directory(utf8_of(target.parent_path()), message) ||
 			!write_file_atomic(utf8_of(target), bytes.data(), bytes.size(), message)) {
 			refuse(make_finding(CoreFinding::DocumentWrite, DiagnosticSeverity::Error, message, request.path));
@@ -432,6 +445,8 @@ void DocumentSet::create_file(const EditorRequest &request) {
 			}
 		}
 		core_.update_files(made); // the files made, read into the scan alone
+		// One step of the file history (DI-25): Undo file takes what it made to the trash.
+		core_.chores().made("New file " + relative, made, folders_made);
 	}
 	// The status line says what came of it (a kind the editor edits opened as well), never the line
 	// an earlier request left.
