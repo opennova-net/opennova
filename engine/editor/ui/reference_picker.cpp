@@ -4,6 +4,7 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/session/problem_confirmation.h>
 #include <editor/session/problem_fixes.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/texture_preview.h>
@@ -332,6 +333,7 @@ bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string
 	const float thumb = textures ? ImGui::GetTextLineHeight() * 2.0f : 0.0f;
 	const float line = textures ? thumb + ImGui::GetStyle().ItemSpacing.y : ImGui::GetTextLineHeightWithSpacing();
 	const size_t rows = std::clamp<size_t>(shown.size(), 3, textures ? 8 : 14);
+	const size_t limit = field_name_limit(popup.field);
 	ImGui::BeginChild("names", ImVec2(width, line * float(rows) + ImGui::GetTextLineHeightWithSpacing() * 0.5f),
 	                  ImGuiChildFlags_Borders);
 	int hovered = -1;
@@ -366,11 +368,15 @@ bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string
 				ImGui::SetCursorPosY(top + (thumb - ImGui::GetTextLineHeight()) * 0.5f);
 			}
 			// The words, the name muted where it is not them, then where it is defined in what is left,
-			// then what it would be when not found.
+			// then what it would be when not found, or that the field cannot hold it whole (DI-09: the game's
+			// reader cuts it, and no lookup finds the cut name); a sound's Play (DI-02's player).
 			const bool found = choice.status == ReferenceStatus::Present || choice.status == ReferenceStatus::Unverified;
-			const char *word = found ? "" : ui_kit::reference_word(choice.status);
+			const bool fits = !limit || name_characters(choice.name) <= limit;
+			const char *word = !fits ? "too long" : found ? "" : ui_kit::reference_word(choice.status);
+			const bool plays = choice.kind == ReferenceKind::Sound;
 			const float room = ImGui::GetContentRegionAvail().x -
-			                   (found ? 0.0f : ui_kit::text_width(word) + ImGui::GetStyle().ItemSpacing.x);
+			                   (*word ? ui_kit::text_width(word) + ImGui::GetStyle().ItemSpacing.x : 0.0f) -
+			                   (plays ? ui_kit::button_width("Play") + ImGui::GetStyle().ItemSpacing.x : 0.0f);
 			const std::string name = ui_kit::fit(words_of(choice), room * 0.6f);
 			if (choice.inert) ImGui::TextDisabled("%s", name.c_str());
 			else ImGui::TextUnformatted(name.c_str());
@@ -387,9 +393,18 @@ bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string
 				ImGui::SameLine();
 				ImGui::TextDisabled("%s", where.c_str());
 			}
-			if (!found) {
+			if (*word) {
 				ImGui::SameLine();
-				ImGui::TextColored(ui_kit::reference_color(choice.status), "%s", word);
+				ImGui::TextColored(ui_kit::reference_color(fits ? choice.status : ReferenceStatus::Missing), "%s", word);
+				if (!fits)
+					ui_kit::tooltip("The field holds " + std::to_string(limit) +
+					                " characters: the game reads this name cut, which no lookup finds.");
+			}
+			if (plays) {
+				ImGui::SameLine();
+				if (ImGui::SmallButton("Play"))
+					workspace.request(request::play_set(choice.name, popup.field.scope.substr(0, popup.field.scope.find('/'))));
+				ui_kit::tooltip("Play " + choice.name + " as the game plays it, before picking it.");
 			}
 			ImGui::PopID();
 		}
@@ -434,6 +449,107 @@ bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string
 	}
 	if (chosen) ImGui::CloseCurrentPopup();
 	return chosen;
+}
+
+bool ReferencePicker::draw_completions(Workspace &workspace, const Document &document, const NodeAddress &record,
+                                       const FieldUse &field, const Value &value, std::string &picked) {
+	// The box's frame: the keys reach it while it has the keyboard, and on the frame Enter lets it go.
+	const bool keyed = ImGui::IsItemActive() || ImGui::IsItemDeactivated();
+	const ImVec2 under(ImGui::GetItemRectMin().x, ImGui::GetItemRectMax().y);
+	const float width = ImGui::GetItemRectSize().x;
+	const Key key{document.identity(), record.row, record.kind, record.child, ImGui::GetItemID()};
+	const int frame = ImGui::GetFrameCount();
+	const bool ours = !(completing_.key < key) && !(key < completing_.key) && completing_.drawn >= 0;
+	// Shown while the box has the keyboard, and while the list itself is under the pointer (a click on it takes
+	// the keyboard from the box before it lands).
+	if (!keyed && !(ours && completing_.hovered && completing_.drawn + 1 >= frame)) return false;
+	if (!ours) {
+		completing_ = Completing();
+		completing_.key = key;
+	}
+	const SessionView &view = workspace.view();
+	const auto *text = std::get_if<std::string>(&value);
+	const std::string typed = text ? *text : std::string();
+	if (typed != completing_.typed) completing_.cursor = SIZE_MAX;
+	completing_.typed = typed;
+	completing_.drawn = frame;
+	if (keyed && ImGui::IsKeyPressed(ImGuiKey_Escape, false)) completing_.hidden = typed;
+	if (typed.empty() || (!completing_.hidden.empty() && completing_.hidden == typed)) {
+		completing_.hovered = false;
+		return false;
+	}
+	// The names, made again only when what they read moves (the graph, the files, the project, the field's
+	// scope): a key typed changes the document, not them.
+	const RevisionKey reads = revision_key(view.revisions, {ViewConcern::Graph, ViewConcern::Files, ViewConcern::Project});
+	if (!(completing_.view == reads) || completing_.scope != field.scope || completing_.choices.empty()) {
+		std::optional<GraphNameSource> names;
+		if (view.findings.graph) names.emplace(*view.findings.graph);
+		completing_.choices = picker_choices(view.findings.graph.get(), document, record, field, names ? &*names : nullptr);
+		completing_.view = reads;
+		completing_.scope = field.scope;
+		++completions_made_;
+	}
+	std::vector<ReferenceCompletion> completions = complete_reference(completing_.choices, field, typed);
+	// The whole name typed, and nothing else beginning it: nothing to complete.
+	if (completions.empty() || (completions.front().exact && (completions.size() == 1 || !completions[1].prefix))) {
+		completing_.hovered = false;
+		return false;
+	}
+	constexpr size_t kShown = 8;
+	if (completions.size() > kShown) completions.resize(kShown);
+	size_t take = SIZE_MAX;
+	if (keyed) {
+		if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))
+			completing_.cursor = completing_.cursor == SIZE_MAX ? 0 : std::min(completing_.cursor + 1, completions.size() - 1);
+		if (ImGui::IsKeyPressed(ImGuiKey_UpArrow))
+			completing_.cursor = completing_.cursor == SIZE_MAX || completing_.cursor == 0 ? SIZE_MAX : completing_.cursor - 1;
+		const bool enter = ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
+		if (enter && completing_.cursor != SIZE_MAX) take = completing_.cursor;
+		if (ImGui::IsKeyPressed(ImGuiKey_Tab, false)) take = completing_.cursor == SIZE_MAX ? 0 : completing_.cursor;
+	}
+	const size_t limit = field_name_limit(field);
+	ImGui::SetNextWindowPos(under);
+	ImGui::SetNextWindowSizeConstraints(ImVec2(std::max(width, ImGui::GetFontSize() * 16.0f), 0.0f), ImVec2(FLT_MAX, FLT_MAX));
+	const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+	                               ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+	                               ImGuiWindowFlags_NoNav | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDocking;
+	if (ImGui::Begin("##completions", nullptr, flags)) {
+		ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());
+		for (size_t i = 0; i < completions.size(); ++i) {
+			const ReferenceCompletion &completion = completions[i];
+			const ReferenceChoice &choice = completion.choice;
+			ImGui::PushID(int(i));
+			if (ImGui::Selectable("##completion", i == completing_.cursor, ImGuiSelectableFlags_AllowOverlap)) take = i;
+			ui_kit::tooltip_lazy([&] {
+				std::string tip = choice_tip(choice, view.findings.graph.get(), field.scope);
+				if (!completion.fits)
+					tip += "\nThe field holds " + std::to_string(limit) +
+					       " characters: the game reads this name cut, which no lookup finds.";
+				return tip + "\nEnter or a click takes it; Tab the first.";
+			});
+			ImGui::SameLine(0.0f, 0.0f);
+			ImGui::SetCursorPosX(ImGui::GetStyle().WindowPadding.x);
+			if (choice.inert) ImGui::TextDisabled("%s", words_of(choice).c_str());
+			else ImGui::TextUnformatted(words_of(choice).c_str());
+			if (!choice.label.empty()) {
+				ImGui::SameLine();
+				ImGui::TextDisabled("%s", choice.name.c_str());
+			}
+			if (!completion.fits) {
+				ImGui::SameLine();
+				ImGui::TextColored(ui_kit::reference_color(ReferenceStatus::Missing), "too long");
+			}
+			ImGui::SameLine();
+			ImGui::TextDisabled("%s", where_of(choice).c_str());
+			ImGui::PopID();
+		}
+		completing_.hovered = ImGui::IsWindowHovered();
+	}
+	ImGui::End();
+	if (take >= completions.size()) return false;
+	picked = completions[take].choice.name;
+	completing_.hidden = picked; // taken: no list for the name it now holds
+	return true;
 }
 
 bool ReferencePicker::accept_file(const SessionView &view, const FieldUse &field, std::string &picked) {

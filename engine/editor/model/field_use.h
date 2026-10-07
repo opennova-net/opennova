@@ -20,6 +20,9 @@ struct FieldUse {
 	// The reference it makes given the record's other fields, and the symbol it defines.
 	ReferenceKind reference = ReferenceKind::None;
 	ReferenceKind defines = ReferenceKind::None;
+	// The schema's name_offset: the field's number names its reference's definition by itself plus this
+	// (an ammo's tracer id, an item's type id); 0 for none.
+	int64_t name_offset = 0;
 	// What the field is picked by name as where its value names no record because the game resolves
 	// it itself (a mission's SSN that is the player's: no reference, so no badge, yet the picker lists
 	// the entities by name, ADR 0046 S15), in `scope`; None: `reference`.
@@ -78,6 +81,7 @@ inline FieldUse field_use(const FieldSchema &schema) {
 	use.applies = schema.applies;
 	use.reference = schema.reference;
 	use.defines = schema.defines;
+	use.name_offset = schema.name_offset;
 	use.scope = schema.scope;
 	use.color = schema.color;
 	use.read_only = schema.read_only;

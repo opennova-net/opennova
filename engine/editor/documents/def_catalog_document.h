@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <editor/documents/def_table.h>
+#include <editor/graph/graph_edge.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/table_document.h>
 #include <formats/def/reserved_items.h>
@@ -131,5 +132,10 @@ std::vector<Edit> reserved_item_add_edits(const def::ReservedItem &row);
 // the game's reader gives a new row of its kind. False for another kind, a family without it, or an item id
 // that is none.
 bool define_catalog_symbol(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out);
+
+// The catalog's references no field's own reference is (DocumentType::record_references, DI-09): a weapon
+// action's effect point on the weapon's first-person model, which the game looks up beside the third-person
+// one the field names (refine_field) [orig: WeaponDef_ResolveAllReferences @ 0x540270].
+void catalog_references(const Document &document, Extracted &out);
 
 } // namespace opennova::editor

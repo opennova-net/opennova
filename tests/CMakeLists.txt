@@ -4468,6 +4468,14 @@ target_link_libraries(editor_add_it_there_test PRIVATE opennova_editor)
 target_include_directories(editor_add_it_there_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_add_it_there COMMAND editor_add_it_there_test)
 
+# Definition fields complete their references (ADR 0046 DI-09): every def field the game resolves by name a
+# reference of its kind in the scope its reader reads (user points by the lookup that scans them, an action's
+# slot in its weapon's map, an ammo's tracer items by type id), and the complete query over them.
+add_executable(editor_def_references_test editor/def_references_test.cpp)
+target_link_libraries(editor_def_references_test PRIVATE opennova_editor)
+target_include_directories(editor_def_references_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_def_references COMMAND editor_def_references_test)
+
 # The menu clipboard's one rule for the tree and the canvas (S13 V1, documents/mnu_clipboard):
 # a window a part holds is copyable from neither, a Paste after the primary's window.
 add_executable(editor_mnu_clipboard_test editor/mnu_clipboard_test.cpp)
