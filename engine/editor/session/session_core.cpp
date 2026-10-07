@@ -476,6 +476,7 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	read_recent_details(view_.project.document.get(), paths_.root); // its entry as it is now, whatever was there
 	view_.activity.runtime_executable = play().resolve_runtime_executable();
 	imports().set_install_files(std::move(open.install_files()), std::move(open.base_files()));
+	problems().set_base_layer(open.take_base_layer()); // an expansion's base game under the graph
 	read_install_expansions(); // the project's install's, before its requirements weigh them
 	absorb_refresh(open.refresh());
 	restore_workspace(); // the documents it was left with (the UX round's project lane)
