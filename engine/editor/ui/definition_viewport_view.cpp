@@ -16,6 +16,7 @@
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/workspace.h>
+#include <runtime/world/ammo_table.h>
 
 namespace opennova::editor {
 
@@ -44,6 +45,138 @@ const char *state_label(DefinitionState state) {
 	return "Alive";
 }
 
+// A weapon's firing options (DI-22): the first person's Eye and character, the third person's shooter, the
+// range's surface, distance and target.
+void weapon_options(const DefinitionViewport &model, DefinitionViewportOptions &options, ui_kit::WrapRow &row) {
+	DefinitionFireOptions &fire = options.fire;
+	if (options.weapon == DefinitionWeaponView::First) {
+		row.next(ui_kit::checkbox_width("Eye"));
+		ImGui::Checkbox("Eye", &fire.eye);
+		ui_kit::tooltip("Seen from the first-person eye, where the game's camera stands the view model, through the "
+		                "weapon's renderfov; off, the camera orbits the gun and the arms.");
+		const std::vector<FirstPersonCharacter> &characters = model.weapon().first_person().characters();
+		if (!characters.empty()) {
+			const FirstPersonCharacter *who = model.weapon().first_person().character();
+			const float width = ImGui::GetFontSize() * 9.0f;
+			row.next(ui_kit::field_width(width, "##character"));
+			ImGui::SetNextItemWidth(width);
+			if (ImGui::BeginCombo("##character", who ? who->words.c_str() : "No character")) {
+				for (const FirstPersonCharacter &character : characters)
+					if (ImGui::Selectable(character.words.c_str(), who == &character)) fire.character = character.id;
+				ImGui::EndCombo();
+			}
+			ui_kit::tooltip("The character whose arms draw (Avatars.def): a fresh profile's is the good side's first.");
+		}
+	} else {
+		const char *shooters[] = {"As a soldier's", "As a player's"};
+		const float width = ImGui::GetFontSize() * 8.0f;
+		row.next(ui_kit::field_width(width, "##shooter"));
+		ImGui::SetNextItemWidth(width);
+		int shooter = fire.shooter == WeaponShotView::Player ? 1 : 0;
+		if (ImGui::Combo("##shooter", &shooter, shooters, 2))
+			fire.shooter = shooter == 1 ? WeaponShotView::Player : WeaponShotView::Soldier;
+		ui_kit::tooltip("How another sees the shot: a soldier's as the ammo's ai_launch and ai_launcheffect; another "
+		                "player's as the weapon's FIRE and RECOIL rows at the gun.");
+	}
+	row.next(ui_kit::checkbox_width("Target"));
+	ImGui::Checkbox("Target", &fire.target.shown);
+	ui_kit::tooltip("A wall down the line of fire, whose face plays the ammo's impact row for its surface; off, the "
+	                "rounds fly on until they age out.");
+	if (fire.target.shown) {
+		const float width = ImGui::GetFontSize() * 7.0f;
+		row.next(ui_kit::field_width(width, "##surface"));
+		ImGui::SetNextItemWidth(width);
+		const int tag = std::clamp(fire.target.tag, kWeaponRangeFirstTag, world::kImpactEffectTagCount - 1);
+		if (ImGui::BeginCombo("##surface", world::kImpactEffectTagWords[tag])) {
+			for (int i = kWeaponRangeFirstTag; i < world::kImpactEffectTagCount; ++i)
+				if (ImGui::Selectable(world::kImpactEffectTagWords[i], i == tag)) fire.target.tag = i;
+			ImGui::EndCombo();
+		}
+		ui_kit::tooltip("The target's surface: a round striking a face of material b plays the ammo's row b + 4.");
+		const float range_width = ImGui::GetFontSize() * 6.0f;
+		row.next(ui_kit::field_width(range_width, "##range"));
+		ImGui::SetNextItemWidth(range_width);
+		float range = fire.target.range;
+		if (ImGui::InputFloat("##range", &range, 5.0f, 25.0f, "%.0f m"))
+			fire.target.range = std::clamp(range, kWeaponRangeNearest, kWeaponRangeFarthest);
+		ui_kit::tooltip("The target's distance down the line of fire, metres.");
+	}
+}
+
+// A weapon's gesture (DI-22): one on the clock's tick, the clock run; "clear" none.
+void gesture(Workspace &workspace, const DefinitionViewport &model, const char *name) {
+	io::JsonValue change = io::JsonValue::make_object();
+	change.set("kind", io::json_string(viewport_kind_token(ViewportKind::Definition)));
+	if (std::string(name) == "clear") {
+		change.set("gestures", io::JsonValue::make_array());
+	} else {
+		change.set("gesture", io::json_string(name));
+		io::JsonValue clock = io::JsonValue::make_object();
+		clock.set("playing", io::JsonValue::make_bool(true));
+		change.set("clock", std::move(clock));
+	}
+	workspace.request(request::set_viewport(model.path(), io::json_write(change)));
+}
+
+// The fire key held at the clock's tick: the last hold or release at or before it.
+bool holding_at(const DefinitionViewport &model, int32_t tick) {
+	bool held = false;
+	for (const WeaponGestureAt &at : model.weapon().range().gestures()) {
+		if (at.tick > tick) break;
+		if (at.gesture == WeaponGesture::Hold) held = true;
+		if (at.gesture == WeaponGesture::Release) held = false;
+	}
+	return held;
+}
+
+// The weapon's gestures and what it does (DI-22): Fire, Hold fire, Reload, Scope, Switch, Clear; the weapon as the
+// game holds it; the last things the run did, newest first.
+void weapon_row(Workspace &workspace, const DefinitionViewport &model, const PreviewClock &clock) {
+	const DefinitionWeapon &weapon = model.weapon();
+	const WeaponRange &range = weapon.range();
+	{
+		ui_kit::WrapRow row;
+		const bool ready = range.ready();
+		if (ui_kit::tool(row, "Fire", ready, "The fire key pressed and let go on the clock's tick, the clock run."))
+			gesture(workspace, model, "fire");
+		const bool held = holding_at(model, clock.ticks());
+		if (ui_kit::tool(row, held ? "Release" : "Hold fire", ready,
+		                 held ? "Let the fire key go." : "The fire key held from the clock's tick: an auto weapon fires on."))
+			gesture(workspace, model, held ? "release" : "hold");
+		if (ui_kit::tool(row, "Reload", ready, "The reload key: the game refuses it on a full clip or an empty reserve."))
+			gesture(workspace, model, "reload");
+		if (ui_kit::tool(row, "Scope", ready, "The scope toggle: a scoped or sighted weapon raises or lowers its sight."))
+			gesture(workspace, model, "scope");
+		if (ui_kit::tool(row, "Switch", ready, "The weapon put away and drawn again (SWITCHFROM, then SWITCHTO)."))
+			gesture(workspace, model, "switch");
+		if (ui_kit::tool(row, "Clear", ready && !range.gestures().empty(),
+		                 "Forget the gestures: the weapon as it was drawn, from the clock's start."))
+			gesture(workspace, model, "clear");
+	}
+	if (!range.ready()) return;
+	const world::LocalPlayerWeaponView &held = range.weapon_view();
+	const auto action = [](int32_t id) {
+		return id >= 0 && id < world::weapon_action::kCount ? world::kWeaponActionSuffixes[id] : "";
+	};
+	char line[160];
+	std::snprintf(line, sizeof(line), "%s, then %s; clip %d, reserve %d; %d shot%s%s", action(held.current_action),
+	              action(held.next_action), held.clip, held.reserve, range.shots(), range.shots() == 1 ? "" : "s",
+	              range.scoped() ? "; scoped" : "");
+	ui_kit::clipped_text(std::string(line) + (range.ammo().empty() ? std::string() : " of " + range.ammo()));
+	if (weapon.card_up())
+		ui_kit::clipped_text("The sights card is up: the game draws the scope's card in the gun's place (the HUD "
+		                     "preview draws cards).");
+	const std::vector<WeaponRangeEvent> &events = range.events();
+	if (!events.empty() && ImGui::TreeNode("fired", "What it did (%d)", int(events.size()))) {
+		const size_t shown = std::min<size_t>(events.size(), 48);
+		for (size_t i = 0; i < shown; ++i) {
+			const WeaponRangeEvent &event = events[events.size() - 1 - i];
+			ImGui::TextWrapped("%s", (seconds(event.tick) + "  " + event.words).c_str());
+		}
+		ImGui::TreePop();
+	}
+}
+
 // The options the record's kind takes: an item's State, Enemy, Occupied and a person's SSN; a weapon's view; an
 // ammo's Enemy.
 void options_row(Workspace &workspace, const DefinitionViewport &model, ui_kit::WrapRow &row) {
@@ -63,11 +196,12 @@ void options_row(Workspace &workspace, const DefinitionViewport &model, ui_kit::
 		                "runs it from the clock's start; its husk, the wreck after the death; its final husk, the model "
 		                "its death pieces are cut from.");
 	}
-	if (kind == "item" || kind == "ammo") {
+	if (kind == "item" || kind == "ammo" || (kind == "weapon" && options.weapon == DefinitionWeaponView::Third)) {
 		row.next(ui_kit::checkbox_width("Enemy"));
 		ImGui::Checkbox("Enemy", &options.enemy);
-		ui_kit::tooltip(kind == "item" ? "As its enemies see it: its graphic_enemy."
-		                               : "As the other side sees the round: the enemy tracer item (foe_trcr_type_id).");
+		ui_kit::tooltip(kind == "item"   ? "As its enemies see it: its graphic_enemy."
+		                : kind == "ammo" ? "As the other side sees the round: the enemy tracer item (foe_trcr_type_id)."
+		                                 : "The shots as the other side sees them: the enemy's tracer style.");
 	}
 	if (kind == "item" && model.particle_slot().controller) {
 		row.next(ui_kit::checkbox_width("Occupied"));
@@ -91,6 +225,7 @@ void options_row(Workspace &workspace, const DefinitionViewport &model, ui_kit::
 		int view = int(options.weapon);
 		if (ImGui::Combo("##view", &view, labels, 2)) options.weapon = DefinitionWeaponView(view);
 		ui_kit::tooltip("The gun in a soldier's hands (gfx3) or in the player's own view (gfx1).");
+		weapon_options(model, options, row);
 	}
 	if (options != model.options()) workspace.request(request::set_viewport(model.path(), definition_options_change(options)));
 }
@@ -144,7 +279,15 @@ void DefinitionViewportView::draw_ready(Workspace &workspace, const ViewportMode
 		ImGui::Checkbox("Mute", &options.mute);
 		ui_kit::tooltip("The death's sound fires and says what it plays, and nothing is heard.");
 	}
-	if (ui_kit::tool(row, "Frame", true, "The camera on the model (F, or a double click on the picture)."))
+	if (model.weapon_record()) {
+		row.next(ui_kit::checkbox_width("Mute"));
+		ImGui::Checkbox("Mute", &options.mute);
+		ui_kit::tooltip("The weapon's sounds fire and say what they play, and nothing is heard.");
+	}
+	const bool eye = model.camera().posed;
+	if (ui_kit::tool(row, "Frame", !eye,
+	                 eye ? "The first-person eye stands where the game's camera does: Eye off to frame the model."
+	                     : "The camera on the model (F, or a double click on the picture)."))
 		workspace.request(
 				request::set_viewport(model.path(), definition_camera_change(model.framed(context.width, context.height))));
 	if (options != model.options()) workspace.request(request::set_viewport(model.path(), definition_options_change(options)));
@@ -173,6 +316,7 @@ void DefinitionViewportView::draw_ready(Workspace &workspace, const ViewportMode
 		                     std::to_string(model.person().updates) + " warm-up updates.");
 	for (const std::string &note : model.notes())
 		if (!note.empty()) ui_kit::clipped_text(note, note);
+	if (model.weapon_record()) weapon_row(workspace, model, clock);
 	if (!model.particle_slot().effect.empty() && !model.particle_slot().words.empty())
 		ui_kit::clipped_text("Particle slot " + model.particle_slot().effect + ": " + model.particle_slot().words);
 	// The effects it spawns, each a Go to of the definition the game spawns for its name.
