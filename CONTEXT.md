@@ -955,6 +955,18 @@ where its water plane comes from. A line the game reads otherwise than written i
 Save writes the file in the editor's layout, the game reading the same environment.
 _Avoid_: env file (the file alone), weather (the runtime's state), sky (one part of it)
 
+**Environment viewport**:
+An environment document's Main view (the deep-integration plan's DI-19b): its sky as the game draws it
+(the dome and its clouds, the sun and the moon with the glare and the glint, the fog, the light, the
+water and the rain's drops) over the terrain of a mission that runs on it, through the runtime's own
+environment, weather and sky nodes. Its clock is the game's mission clock on the preview clock's game
+ticks: from the mission header's start at its day length (a day length of 0 stands the clock, as in the
+game; with no mission the file's curtime and tod_rate), or from an hour a scrub picks, or a day in a
+chosen number of seconds (the editor's aid). Its weather is the game's weather home stepped by the
+game's own tick, with the rain and the overcast a script sets (a percent over seconds). Every edit of the
+environment shows as it is made.
+_Avoid_: sky preview (it is more than the sky), time-of-day player
+
 **Texture document**:
 A texture file of the project (a .tga, .mdt, .pcx, .dds or .png) open in the editor, read as the
 game reads it: by the reader its name picks (a .tga or an .mdt the game's TGA reader, which takes every
