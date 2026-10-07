@@ -29,12 +29,15 @@ class ViewportDeviceSource;
 // The OpenNova Editor's workspace (ADR 0046 d10, S11d): the ImGui pass with the editor's
 // six windows on it (Files on the left, Document in the centre with Preview beside it,
 // the Inspector on the right, Problems and Output along the bottom) and on its menu bar Back and
-// Forward (the navigation history) then the File / Edit / Build menus, the bar ending with the
+// Forward (the navigation history) then the File / Edit / Go / Build menus, the bar ending with the
 // unsaved files, the problem counts, the build and game state and Build / Play / Stop. The modals (the unsaved prompt, the import
 // dialog, the project settings, a new project, a new file's name) are drawn here every
-// frame, never by a window a hidden tab would skip; so are Find in project (Edit menu,
-// Ctrl+Shift+F), beside the Document window's own find bar (Edit > Find..., Ctrl+F), and
-// Rename everywhere (the Inspector's Rename... on a field defining a name, F2 there). Records in through set_view(), typed
+// frame, never by a window a hidden tab would skip; so are the project's finder (Find in project,
+// Ctrl+Shift+F; Go to file, Ctrl+P; Go to name, Ctrl+T; Find usages, Shift+F12: the Go menu's, DI-18),
+// beside the Document window's own find bar (Edit > Find..., Ctrl+F), and
+// Rename everywhere (the Inspector's Rename... on a field defining a name, F2 there). Go to definition (F12)
+// and Find usages act on what the window under the pointer or with the keyboard offers (offer_jump: a
+// reference field, a Files row), else on the selection (jump_subject). Records in through set_view(), typed
 // requests out through take_request(); the shell owns the frame bracket and the OS-only
 // requests, a test drives it over a null backend.
 class EditorWindows : public Workspace, public devtools::MenuBarContributor {
@@ -105,6 +108,14 @@ public:
 	TextureThumbnailImages *thumbnail_images() const override { return thumbnail_images_; }
 	bool take_dropped_files(float min_x, float min_y, float max_x, float max_y, std::vector<std::string> &paths) override;
 	void hide_pointer() override { pointer_hidden_ = true; }
+	// A window's offer of what F12 and Shift+F12 act on this frame (DI-18): one under the pointer wins over one
+	// with the keyboard, the later of two alike.
+	void offer_jump(const JumpSubject &subject) override;
+	// What Go to definition (F12) and Find usages (Shift+F12) act on now: what a window offered the frame before
+	// (a reference field under the pointer or with the keyboard, a Files row, a Problems row's uses), else the
+	// selection: the active document's selected record (its definition record_definition's, its uses those of what
+	// it defines), else the active document's file; each key taking the offer's part where it has one.
+	JumpSubject jump_subject() const;
 	// A window asked this frame for the system pointer hidden (a picture under the mouse draws the game's,
 	// DI-08): the Shell hides it after the frame and shows it again after one that does not ask.
 	bool pointer_hidden() const { return pointer_hidden_; }
@@ -118,7 +129,12 @@ private:
 	void draw_navigation(const SessionView &v);
 	void draw_file_menu(const SessionView &v);
 	void draw_edit_menu(const SessionView &v, const DocumentBase *document);
+	// Go (DI-18): Back and Forward, Go to file, Go to name, Find in project, Go to definition, Find usages.
+	void draw_go_menu(const SessionView &v);
 	void draw_build_menu(const SessionView &v);
+	// Go to definition and Find usages of `subject`: true when it went (a request raised).
+	bool go_to_definition(const JumpSubject &subject);
+	bool find_usages(const SessionView &v, const JumpSubject &subject);
 	void draw_new_project();
 	void draw_build_panel(const SessionView &v);
 	void shortcuts(const SessionView &v, const DocumentBase *document);
@@ -139,6 +155,9 @@ private:
 	std::vector<EditorRequest> deferred_; // this frame's requests that act on the files as saved
 	bool in_frame_ = false;
 	bool pointer_hidden_ = false; // hide_pointer asked this frame (begin_frame clears it)
+	// What the windows offered F12 and Shift+F12 this frame, and the frame before (begin_frame moves it).
+	JumpSubject offered_;
+	JumpSubject subject_;
 	// The texture a Replace with image... pick is for (S18), and the files the OS dropped, held for the
 	// item they land on (drop_files) for `frames` more end_frames.
 	std::string replace_target_;

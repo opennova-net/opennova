@@ -59,4 +59,12 @@ std::string place_in_mission_target(const SessionView &view);
 // several items, an item the editor cannot make.
 bool plan_place_in_mission(const SessionView &view, const std::string &model, CanvasRequests &out, std::string &error);
 
+// An item's Place in mission (DI-18: an item record's, the definition viewport's place_in_mission command; the
+// model's above after its item is found or made): the mission (place_in_mission_target) made active, a jump the
+// navigation history records, and its Place tool armed with the item `item` (a SetViewport of its options: tool
+// place, item), said on the status line after `lead` (what was done before it: "Made item ... ; "). False, with
+// why, with no mission open or several open and none last active.
+bool plan_place_item_in_mission(const SessionView &view, int64_t item, const std::string &lead, CanvasRequests &out,
+                                std::string &error);
+
 } // namespace opennova::editor
