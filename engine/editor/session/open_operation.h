@@ -6,12 +6,14 @@
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_refresh.h>
+#include <editor/session/base_layer_build.h>
 #include <editor/session/session_operation.h>
 
 namespace opennova::editor {
 
 // Opening a project as the session's operation (ADR 0046 S13 A3): the game install's file names the
-// Import fixes read (one step: the install's archives listed), then the project's files read as
+// Import fixes read (one step: the install's archives listed), for an expansion its base game's layer
+// under the graph (BaseLayerBuild, stepped by bytes), then the project's files read as
 // every refresh reads them (ProjectRefresh: the import pass unless `import_pass` is false, S13 A7's
 // Open on the files as they are; the scan, the requirements), each walk stepped by bytes within
 // the poll's budget. The project it opens is not the open one until it finishes: nothing of it
@@ -40,6 +42,8 @@ public:
 	const ProjectDocument &document() const { return document_; }
 	std::vector<std::string> &install_files() { return install_files_; }
 	std::vector<std::string> &base_files() { return base_files_; }
+	// The base layer the Open built (null for a standalone project or a base that does not mount).
+	std::shared_ptr<const GraphLayer> take_base_layer() { return layer_ ? layer_->take() : nullptr; }
 	ProjectRefresh &refresh() { return refresh_; }
 
 private:
@@ -51,6 +55,7 @@ private:
 	std::vector<std::string> install_files_;
 	std::vector<std::string> base_files_;
 	bool listed_ = false; // the game install's names read
+	std::unique_ptr<BaseLayerBuild> layer_;
 	ProjectRefresh refresh_;
 };
 
