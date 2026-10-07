@@ -18,7 +18,9 @@ enum class DefRecordKind {
 };
 inline constexpr size_t kDefRecordKindCount = size_t(DefRecordKind::PowerupAction) + 1;
 enum class DefFieldType { Integer, Unsigned, Byte, Count, Real, Text };
-enum class DefReference { None, Model, AnimationMap, Ammo, Weapon, Item, Texture, Sound, Particle, AiProfile, GameText, OtherText, UserPoint, Powerup, SoundProfile };
+// What a member names. ItemType: an item by its type id, the items.def id less 100000; AnimationSlot: a
+// row of the record's animation map by its slot's key.
+enum class DefReference { None, Model, AnimationMap, Ammo, Weapon, Item, Texture, Sound, Particle, AiProfile, GameText, OtherText, UserPoint, Powerup, SoundProfile, ItemType, AnimationSlot };
 using DefValue = std::variant<int64_t, double, std::string>;
 
 // A value a field takes by name: the token the file writes (or the number's name) and what

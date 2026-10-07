@@ -1079,6 +1079,16 @@ func test_graph_references_and_rename() -> void:
 			assert_eq(String(choice.get("status", "")), "present", str(choice))
 	assert_true(offered.has("font") and offered.has("style_var"), str(choices))
 	assert_eq(int(choices.get("count", 0)), choices.get("choices", []).size(), "one page holds them")
+	# DI-09: the field completing what is typed: the names "%def_font" begins first, without case, each with
+	# whether the field holds it whole; the typed name's status as the field would hold it.
+	var completed := await _query("complete", {"id": main_id, "field": "font.name", "prefix": "%def_font"})
+	var completions: Array = completed.get("choices", [])
+	assert_eq(String(completed.get("reference", "")), "font", str(completed))
+	assert_true(not completions.is_empty() and bool(completions[0].get("prefix", false)), str(completed))
+	assert_true(String(completions[0].get("name", "")).to_upper().begins_with("%DEF_FONT"), str(completions[0]))
+	assert_true(completions[0].has("fits"), str(completions[0]))
+	assert_eq(String(completed.get("typed", {}).get("status", "")), "missing", str(completed))
+	assert_true((await _query("complete", {"field": "font.name"})).has("_error"), "complete names its record")
 	var second := await _query("reference_choices", {"id": main_id, "field": "font.name", "offset": 1, "limit": 1})
 	assert_eq(second.get("choices", []).size(), 1, str(second))
 	assert_eq(int(second.get("count", -1)), int(choices.get("count", 0)))

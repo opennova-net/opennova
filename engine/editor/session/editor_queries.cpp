@@ -138,6 +138,16 @@ constexpr QueryParam kFieldParams[] = {
 	{ "limit", J::Integer, false, "100", kLimitDoc },
 };
 
+constexpr QueryParam kCompleteParams[] = {
+	{ "path", J::String, false, nullptr, kDocumentDoc },
+	{ "id", J::Integer, false, nullptr, "The record by its identity." },
+	{ "locator", J::String, false, nullptr, "Or by its place (a record's locator, as a Go to names it)." },
+	{ "field", J::String, true, nullptr, "The reference field, by its id." },
+	{ "prefix", J::String, false, "", "What is typed so far: the names it begins first, then those holding it." },
+	{ "offset", J::Integer, false, "0", kOffsetDoc },
+	{ "limit", J::Integer, false, "100", kLimitDoc },
+};
+
 constexpr QueryParam kDocumentSearchParams[] = {
 	{ "path", J::String, false, nullptr, kDocumentDoc },
 	{ "text", J::String, true, nullptr,
@@ -543,6 +553,26 @@ JsonValue answer_reference_choices(
 JsonValue answer_reference_targets(
 		const QueryContext &context, const QueryArgs &args, std::string &error) {
 	return answer_reference(context, args, error, false);
+}
+
+// A reference field's completion (DI-09), its record by identity or by locator.
+JsonValue answer_complete(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const Document *document = document_of(context, args, error);
+	if (!document) return JsonValue::make_null();
+	if (args.has("id") == args.has("locator")) {
+		error = "it names its record by \"id\" or by \"locator\", one of them.";
+		return JsonValue::make_null();
+	}
+	NodeAddress address = args.has("locator") ? document->address_at(args.text("locator")) : NodeAddress();
+	if (args.has("id") ? !record_of(*document, args, address, error) : !address.row) {
+		if (error.empty()) error = "no record at " + args.text("locator") + " in " + document->path() + ".";
+		return JsonValue::make_null();
+	}
+	JsonValue out = reference_completion_to_json(*document, address, args.text("field"), args.text("prefix"),
+	                                             context.core.view(), page_of(args));
+	if (out.is_null()) error = "that record of " + document->path() + " has no field '" + args.text("field") + "'.";
+	else out.set("id", json_number(double(identity_of(address))));
+	return out;
 }
 
 JsonValue answer_document_search(
@@ -2049,6 +2079,17 @@ constexpr EditorQueryRow kRows[] = {
 			"voices, action); and listening, each mission view whose Listen is on: path and listen (what each of the "
 			"game's channels plays: source, set, bank, wave, path, volume, pitch, at, distance; the sources by what "
 			"they do; rain, overcast, script, sounds_fired), as the mission viewport's body carries it.")
+			.row,
+	Query(K::Complete, "complete", answer_complete, kCompleteParams,
+			concern_set({ C::Documents, C::DocumentSet, C::ActiveDocument, C::Graph, C::Files, C::Project,
+					C::Preferences }),
+			"A record's reference field completing what is typed (the deep-integration plan's DI-09): the names its "
+			"picker offers, those the typed text begins first as the game's lookup compares them, each with its "
+			"words, where it is defined, whether the field holds it whole (limit: the characters the game's reader "
+			"keeps) and its preview (a set's or a wave's play request, a texture's thumbnail path, else the "
+			"open_document showing it); and what is typed as the field would hold it: its status, its Go to "
+			"targets and its fixes (Add it there first).")
+			.pages("choices")
 			.row,
 };
 
