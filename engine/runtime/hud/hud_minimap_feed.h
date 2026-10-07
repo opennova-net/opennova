@@ -9,7 +9,7 @@
 // bit1 footprint), half_x_q16, half_y_q16, floor_px}; v4 appends {medic} —
 // the local-team charattr Medic bit the map marker pass draws the red-cross
 // plate for [orig: HUD_DrawEntityLabelsAndMarkers @0x5a49e0 —
-// AnimMap_IsSlotActive(playerClass, 8) @0x5a4ab3 under the local-team gate
+// CharAttr_ClassHasAttribute(playerClass, 8) @0x5a4ab3 under the local-team gate
 // @0x5a4ac6/@0x5a4acf, see docs/interface/hud-re.md]; v5 appends the live
 // pool-entity facts {team, zone_number, def_type, entity_bits, zone_index,
 // zone_radius, entity_x, entity_y, anchor_x, anchor_y, bound_radius_q16} the

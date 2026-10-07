@@ -207,7 +207,7 @@ int main() {
 		CHECK(ctx.server_text.change_to_blue_format == "%s joined blue");
 		CHECK(ctx.server_text.change_to_red_format == "%s joined red");
 		// D-NET-345: the authority's class attributes came from charattr.def.
-		CHECK(host.boot.charattr_loaded);
+		CHECK(host.boot.charattr.loaded);
 		CHECK(kernel.world.tables.class_has_attribute(2, world::MissionTables::kCharAttrMedic));
 		CHECK(!kernel.world.tables.class_has_attribute(1, world::MissionTables::kCharAttrMedic));
 		CHECK(kernel.world.tables.class_attribute_flags[0] == 0x1u); // CHARACTER1: AutoScope
@@ -250,6 +250,43 @@ int main() {
 		CHECK(host.water_at_bringup == (15 << 16));
 	}
 
+	// --- D-NET-374: the session's mp_No* words restrict the class table ------
+	// Each mission start on the authority zeroes and disables the property each
+	// set word names; the table and its latches are the boot's, kept for the
+	// next mission, whose session without the word restores nothing.
+	// [orig: Server_ResetRoundCounters @0x4FCF10 (CharAttr_ApplyMpRestrictions
+	//  @0x4247D0's body), CharAttr_PackDisabledProperties @0x412550]
+	{
+		Host host;
+		std::string error;
+		inmatch::HostBootRequest r = host.request(0);
+		r.host_cfg.config.no_char_abilities = 1;
+		r.host_cfg.config.no_scope_drift = 1;
+		CHECK(inmatch::boot_host_mission(std::move(r), host.boot, error));
+		CHECK(host.kernel != nullptr);
+		if (host.kernel) {
+			const world::World &w = host.kernel->world;
+			CHECK(host.boot.charattr.loaded && host.boot.charattr_read);
+			CHECK(!w.tables.class_has_attribute(2, world::MissionTables::kCharAttrMedic));
+			CHECK(w.tables.class_attribute_flags[0] == 0u);
+			CHECK(w.tables.charattr_disabled_word == 0x0012u); // bit 1 ATTRIBUTES, bit 4 SCOPE_MUTE
+			CHECK(host.boot.charattr.table.rows[1].attributes == 0u);
+		}
+		// A boot over the kept table (an embedder reuses its HostBoot from mission to
+		// mission), its session without the words: the table is not read again and the
+		// latches stay.
+		Host next;
+		next.boot.charattr = host.boot.charattr;
+		next.boot.charattr_read = true;
+		next.files.erase("charattr.def");
+		CHECK(inmatch::boot_host_mission(next.request(0), next.boot, error));
+		if (next.kernel) {
+			CHECK(next.kernel->world.tables.charattr_disabled_word == 0x0012u);
+			CHECK(!next.kernel->world.tables.class_has_attribute(2, world::MissionTables::kCharAttrMedic));
+			CHECK(next.boot.charattr.loaded);
+		}
+	}
+
 	// --- a role with no HostRole (the game's joiner) skips the authority's legs
 	{
 		std::map<std::string, std::string> files = mount();
@@ -275,7 +312,7 @@ int main() {
 		CHECK(inmatch::boot_host_mission(std::move(r), boot, error));
 		CHECK(kernel != nullptr);
 		if (kernel) {
-			CHECK(!boot.charattr_loaded);
+			CHECK(!boot.charattr.loaded);
 			CHECK(kernel->world.tables.class_attribute_flags[1] == 0u);
 			CHECK(boot.server_text.medic_request_format.empty());
 			CHECK(kernel->terrain_store.placed_tiles().empty());

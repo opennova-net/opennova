@@ -1,6 +1,6 @@
 #pragma once
 
-#include <runtime/inmatch/charattr_challenge.h>
+#include <runtime/inmatch/charattr_table.h>
 #include <runtime/inmatch/disconnect_reason.h>
 #include <runtime/inmatch/pre_game_menu.h>
 #include <runtime/inmatch/integrity_challenge_profile.h>
@@ -481,19 +481,16 @@ public:
 	}
 	const std::vector<uint8_t> &cd_cookie() const { return cd_cookie_; }
 
-	// Anti-cheat character-attribute challenge source. This is the exact
-	// sixteen-row table loaded from charattr.def at boot, not AnimMap/.adm data.
-	// S2C 0x41 mutates the retained table in receive order.
-	void set_charattr_challenge_table(CharAttrChallengeTable table) {
-		charattr_challenge_table_ = std::move(table);
-	}
-	void clear_charattr_challenge_table() { charattr_challenge_table_ = {}; }
-	// The LIVE table (post every S2C 0x41 applied so far) -- the HUD's
+	// The process's character-attribute table (inmatch/charattr_table.h): the
+	// sixteen rows loaded from charattr.def at boot and their disable latches.
+	// S2C 0x41 zeroes and disables a property and S2C 0x42 sets the latches,
+	// each in receive order; S2C 0x39 hashes a row.
+	void set_charattr_table(CharAttrTable table) { charattr_table_ = std::move(table); }
+	void clear_charattr_table() { charattr_table_ = {}; }
+	// The LIVE table (every S2C 0x41 and 0x42 applied so far) -- the HUD's
 	// per-class ATTRIBUTES words read from here, the same g_CharAttr the
-	// checksum hashes [orig: AnimMap_IsSlotActive @0x4125e0].
-	const CharAttrChallengeTable &charattr_challenge_table() const {
-		return charattr_challenge_table_;
-	}
+	// checksum hashes [orig: CharAttr_ClassHasAttribute @0x4125e0].
+	const CharAttrTable &charattr_table() const { return charattr_table_; }
 
 	// Install one exact retail-corpus anti-cheat source profile. Unknown ids
 	// clear any previous profile and return false. With no profile—or when a
@@ -930,9 +927,9 @@ private:
 	bool loadout_kit_set_ = false;
 	CharacterJoinVars character_join_vars_{};
 	uint8_t current_player_class_ = 0; // authoritative S2C 0x5A avatarClass
-	// Boot-loaded g_CharAttr[16] bytes. Ordered S2C 0x41 property clears
-	// mutate this retained table before every later 0x39 challenge.
-	CharAttrChallengeTable charattr_challenge_table_{};
+	// The boot-loaded g_CharAttr[16] and its latches. Ordered S2C 0x41 and
+	// 0x42 mutate this retained table before every later 0x39 challenge.
+	CharAttrTable charattr_table_{};
 	const IntegrityChallengeProfile *integrity_challenge_profile_ = nullptr;
 	// Frozen renderer-definition snapshot for S2C 0x68 -> C2S 0x3D. Configuration
 	// survives start(): bindings may finish loading models before the first net pump.

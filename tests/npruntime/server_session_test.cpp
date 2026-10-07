@@ -2561,6 +2561,8 @@ bool check_listen_host_receives_targeted_maintenance() {
 	ctx.world = &world;
 	ctx.loaded_model_viewport_height = 100;
 	ctx.scoreboard_broadcast_timer = 0x136u;
+	// The authority's latches ride the quartet's 0x42 (D-NET-374).
+	world.tables.charattr_disabled_word = 0x0012u;
 	auto &self = ctx.np_protocol.connection_list.front();
 	self.phase = opennova::inmatch::ConnectionPhase::InMatch;
 	self.burst.spawned = true;
@@ -2572,8 +2574,14 @@ bool check_listen_host_receives_targeted_maintenance() {
 
 	opennova::inmatch::Server_TickUpdate(ctx);
 	std::vector<uint8_t> tags;
+	std::vector<uint8_t> latches;
 	opennova::replication::Datagram datagram;
-	while (loopback.client_recv(datagram)) tags.push_back(datagram.tag);
+	while (loopback.client_recv(datagram)) {
+		tags.push_back(datagram.tag);
+		if (datagram.tag == opennova::s2c::CHARATTR_DISABLED_PROPERTIES) latches = datagram.body;
+	}
+	if (!expect(latches == std::vector<uint8_t>({0x12, 0x00}), "the quartet's 0x42 carries the authority's latches"))
+		return false;
 	auto index_of = [&](uint8_t tag) {
 		const auto it = std::find(tags.begin(), tags.end(), tag);
 		return it == tags.end()
@@ -2585,7 +2593,7 @@ bool check_listen_host_receives_targeted_maintenance() {
 	const std::size_t quality_i = index_of(opennova::s2c::NETWORK_QUALITY);
 	const std::size_t charattr_i =
 			index_of(opennova::s2c::CHARATTR_CRC_CHALLENGE);
-	const std::size_t input_i = index_of(opennova::s2c::INPUT_STATE_FLAGS);
+	const std::size_t input_i = index_of(opennova::s2c::CHARATTR_DISABLED_PROPERTIES);
 	const std::size_t time_i = index_of(opennova::s2c::TIME_SYNC_PING);
 	const std::size_t model_i =
 			index_of(opennova::s2c::LOADED_MODEL_PAGE_REQUEST);
@@ -2785,7 +2793,7 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	const std::vector<Emitted> premature_control = drain();
 	if (!expect(find(premature_control,
 	                    opennova::s2c::CHARATTR_CRC_CHALLENGE) == nullptr &&
-	                    find(premature_control, opennova::s2c::INPUT_STATE_FLAGS) == nullptr &&
+	                    find(premature_control, opennova::s2c::CHARATTR_DISABLED_PROPERTIES) == nullptr &&
 	                    find(premature_control, opennova::s2c::TIME_SYNC_PING) == nullptr &&
 	                    find(premature_control,
 	                            opennova::s2c::LOADED_MODEL_PAGE_REQUEST) == nullptr,
@@ -2801,7 +2809,7 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 		const std::vector<Emitted> messages = drain();
 		early_quartet = early_quartet ||
 				find(messages, opennova::s2c::CHARATTR_CRC_CHALLENGE) != nullptr ||
-				find(messages, opennova::s2c::INPUT_STATE_FLAGS) != nullptr ||
+				find(messages, opennova::s2c::CHARATTR_DISABLED_PROPERTIES) != nullptr ||
 				find(messages, opennova::s2c::TIME_SYNC_PING) != nullptr ||
 				find(messages, opennova::s2c::LOADED_MODEL_PAGE_REQUEST) != nullptr;
 	}
@@ -2815,7 +2823,7 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	const Emitted *charattr = find(
 			first_control, opennova::s2c::CHARATTR_CRC_CHALLENGE);
 	const Emitted *input_state = find(
-			first_control, opennova::s2c::INPUT_STATE_FLAGS);
+			first_control, opennova::s2c::CHARATTR_DISABLED_PROPERTIES);
 	const Emitted *time_sync = find(
 			first_control, opennova::s2c::TIME_SYNC_PING);
 	const Emitted *model_page = find(
@@ -3017,7 +3025,7 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	                    find(deploy_pending, opennova::s2c::PLAYER_LIST) != nullptr &&
 	                    find(deploy_pending,
 	                            opennova::s2c::CHARATTR_CRC_CHALLENGE) != nullptr &&
-	                    find(deploy_pending, opennova::s2c::INPUT_STATE_FLAGS) != nullptr &&
+	                    find(deploy_pending, opennova::s2c::CHARATTR_DISABLED_PROPERTIES) != nullptr &&
 	                    find(deploy_pending, opennova::s2c::TIME_SYNC_PING) != nullptr &&
 	                    find(deploy_pending,
 	                            opennova::s2c::LOADED_MODEL_PAGE_REQUEST) != nullptr &&
