@@ -21,20 +21,16 @@ std::string written_value(const io::JsonValue &value) {
 	return text;
 }
 
-// A member of a file set aside as its warning names it: a list or an object by its size, any
-// other value as written.
-std::string held_member(const io::JsonMember &member) {
-	const io::JsonValue &value = member.value;
-	if (value.is_array())
-		return member.key + " (" + std::to_string(value.array.size()) +
-				(value.array.size() == 1 ? " entry)" : " entries)");
-	if (value.is_object())
-		return member.key + " (" + std::to_string(value.object.size()) +
-				(value.object.size() == 1 ? " member)" : " members)");
-	return member.key + " " + written_value(value);
-}
-
 } // namespace
+
+// A list or an object by its size, any other value as written.
+std::string held_setting(const std::string &key, const io::JsonValue &value) {
+	if (value.is_array())
+		return key + " (" + std::to_string(value.array.size()) + (value.array.size() == 1 ? " entry)" : " entries)");
+	if (value.is_object())
+		return key + " (" + std::to_string(value.object.size()) + (value.object.size() == 1 ? " member)" : " members)");
+	return key + " " + written_value(value);
+}
 
 Diagnostic settings_set_aside(const std::string &path, const io::JsonValue &json,
 		int schema_version, CoreFinding code, const char *afterwards) {
@@ -48,7 +44,7 @@ Diagnostic settings_set_aside(const std::string &path, const io::JsonValue &json
 	for (const io::JsonMember &member : json.object) {
 		if (member.key == "schema_version")
 			continue;
-		held += (held.empty() ? "" : ", ") + held_member(member);
+		held += (held.empty() ? "" : ", ") + held_setting(member.key, member.value);
 	}
 	return make_finding(code, DiagnosticSeverity::Warning,
 			path + " is set aside: " + origin +
@@ -90,6 +86,9 @@ bool load_local_settings(const ProjectPaths &paths, LocalSettings &out, Diagnost
 	settings.runtime_executable = json.get_string("runtime_executable", "");
 	settings.game_install = json.get_string("game_install", "");
 	settings.build_folder = json.get_string("build_folder", "");
+	// A mode no PlayMode has (one edited by hand) leaves the default: the OpenNova runtime.
+	play_mode_from_token(json.get_string("play_mode", ""), settings.play_mode);
+	settings.save_before_play = json.get_bool("save_before_play", true);
 	if (const io::JsonValue *workspace = json.get("workspace"); workspace && workspace->is_object()) {
 		if (const io::JsonValue *open = workspace->get("open"); open && open->is_array())
 			for (const io::JsonValue &item : open->array)
@@ -107,6 +106,8 @@ bool save_local_settings(const ProjectPaths &paths, const LocalSettings &setting
 	json.set("runtime_executable", io::JsonValue::make_string(settings.runtime_executable));
 	json.set("game_install", io::JsonValue::make_string(settings.game_install));
 	if (!settings.build_folder.empty()) json.set("build_folder", io::JsonValue::make_string(settings.build_folder));
+	json.set("play_mode", io::JsonValue::make_string(play_mode_token(settings.play_mode)));
+	json.set("save_before_play", io::JsonValue::make_bool(settings.save_before_play));
 	if (!settings.open_documents.empty()) {
 		io::JsonValue workspace = io::JsonValue::make_object();
 		io::JsonValue open = io::JsonValue::make_array();
