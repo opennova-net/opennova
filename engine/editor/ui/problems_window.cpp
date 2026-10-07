@@ -18,6 +18,7 @@
 #include <editor/session/view/session_view.h>
 #include <editor/session/workspace_parts.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/project_find.h>
 #include <editor/ui/texture_preview.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/welcome_view.h>
@@ -412,6 +413,19 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 		const ProblemLocation location = folding ? ProblemLocation() : problem_location(d, view);
 		if (!location.empty()) workspace_.request(location.request());
 	}
+	// Its menu (a right click, DI-18): where it is, its file in Files, who names what it is about, its fixes.
+	if (ImGui::BeginPopupContextItem("problem")) {
+		finding_menu(view, line.finding);
+		ImGui::EndPopup();
+	}
+	// Under the pointer, Shift+F12 lists who names what it is about.
+	if (ImGui::IsItemHovered() && view.project.scan && !d.asset.empty() && view.project.scan->at_path(d.asset)) {
+		JumpSubject subject;
+		subject.usages_file = d.asset;
+		subject.usages_locator = d.record;
+		subject.pointer = true;
+		workspace_.offer_jump(subject);
+	}
 	ImGui::SameLine(0.0f, 0.0f);
 	ui_kit::severity_marker(d.severity);
 	const std::vector<ProblemFix> &fixes = list_.fixes(view, line.finding);
@@ -477,6 +491,38 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 	ImGui::TableNextColumn();
 	if (!expanded && !fixes.empty()) draw_fixes(view, line.finding, fixes, note);
 	ImGui::PopID();
+}
+
+// A finding's menu (DI-18): Go to (its place, as a click on its row goes), Show in Files (its file), Find usages
+// (who names the record it is about, else its file: the project's finder), then each of its fixes.
+void ProblemsWindow::finding_menu(const SessionView &view, size_t finding) {
+	const Diagnostic &d = view.findings.diagnostics[finding];
+	const ProblemLocation location = problem_location(d, view);
+	const bool goes = !location.empty() && view.allows(location.request().kind);
+	if (ImGui::MenuItem("Go to", nullptr, false, goes) && goes) workspace_.request(location.request());
+	ui_kit::tooltip(location.empty()   ? std::string("It names no place.")
+	                : location.in_files ? "Show " + location.path + " in Files."
+	                                    : "Open " + location.path + " at what it is about (a click on its row goes too).");
+	const AssetEntry *asset = view.project.scan && !d.asset.empty() ? view.project.scan->at_path(d.asset) : nullptr;
+	const bool reveals = asset && view.allows(EditorRequestKind::ShowInFiles);
+	if (ImGui::MenuItem("Show in Files", nullptr, false, reveals) && reveals)
+		workspace_.request(request::show_in_files(asset->relative_path));
+	const bool finds = asset && view.findings.graph;
+	if (ImGui::MenuItem("Find usages", "Shift+F12", false, finds) && finds)
+		ProjectFind::open_usages(workspace_, asset->relative_path, d.record);
+	ui_kit::tooltip(d.record.empty() ? "Who names " + d.asset + ", each a Go to."
+	                                 : "Who names " + d.record + " (else " + d.asset + "), each a Go to.");
+	const std::vector<ProblemFix> &fixes = list_.fixes(view, finding);
+	if (fixes.empty()) return;
+	ImGui::Separator();
+	const std::string note = shipped_note(finding, view);
+	for (const ProblemFix &fix : fixes) {
+		ImGui::PushID(fix.label.c_str());
+		const bool allowed = view.allows(fix.request.kind);
+		if (ImGui::MenuItem(fix.label.c_str(), nullptr, false, allowed) && allowed) apply(view, finding, fix);
+		ui_kit::tooltip_lazy([&] { return fix_tip(fix, note, allowed); });
+		ImGui::PopID();
+	}
 }
 
 // The Fix column: the first fix and More (every fix) when both fit with the fix's words

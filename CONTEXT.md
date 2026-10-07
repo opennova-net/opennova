@@ -1095,6 +1095,18 @@ shows, an edit or a camera move is none, and a run of quick steps is one. The op
 _Avoid_: undo (a document's own history of edits), breadcrumb (the outline's path to a record),
 selection history (a selection within what shows is no step)
 
+**Finder / jump subject**:
+The project's finder is one modal over four scopes (ADR 0046 DI-18, `ui/project_find`): Find in project
+(Ctrl+Shift+F, every file and name), Go to file (Ctrl+P, the files alone), Go to name (Ctrl+T, the names
+the files define alone) and Find usages (Shift+F12, who names a file or what a record defines); its scope,
+text and subject are the workspace's (`project_find`), its lists the queries' (`project_search`, `usages`).
+The jump subject is what Go to definition (F12) and Find usages act on: what the window under the pointer
+or with the keyboard offers (a reference field: what it names; a Files row: its file), else the selection
+(a record: what its first reference names, and who names what it defines; else the active file). Every
+jump is a Go to (`window_requests::go_to`), a step of the navigation history.
+_Avoid_: quick open, command palette, peek (none of them is the editor's), go to symbol (a name the files
+define is a name, not a symbol, in the windows' words)
+
 **Record / owner**:
 A row of a document or anything nested in one, at any depth; the record that holds a
 record is its owner (a menu window's owner is its parent window, a root window's is
