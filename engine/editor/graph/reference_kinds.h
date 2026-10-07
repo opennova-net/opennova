@@ -108,6 +108,10 @@ struct ReferenceKindRow {
 	NameSpelling spell = NameSpelling::Name;
 	// A Warning where the game tolerates the name missing, an Error where it does not.
 	DiagnosticSeverity severity_when_missing = DiagnosticSeverity::Error;
+	// Where the same name is read by two readers that make different things of none (a bank's wave: a
+	// member's index the bank's writer needs, a dialog line's lookup the game shrugs off), the severity of
+	// the reference `edge` makes; null for severity_when_missing alone.
+	DiagnosticSeverity (*severity_for)(const GraphEdge &edge) = nullptr;
 	// Null for a kind the graph never finds missing: one it cannot check, and a Record reference,
 	// whose index past its collection its file's own validation reports with what the game makes
 	// of it (a model's register_missing, frame_missing), the graph answering Missing for its badge
@@ -171,8 +175,8 @@ std::string user_point_scope(const std::string &model, bool first_16);
 // ".adm" then) upper case. "" for no map.
 std::string animation_map_scope(const std::string &map);
 
-// The number of reference kinds: AvatarPart is the last.
-inline constexpr size_t kReferenceKindCount = static_cast<size_t>(ReferenceKind::AvatarPart) + 1;
+// The number of reference kinds: Dialog is the last.
+inline constexpr size_t kReferenceKindCount = static_cast<size_t>(ReferenceKind::Dialog) + 1;
 
 // The record a Record reference's value names, by its index in the kind's collection: a whole
 // number from 0 that the kind's none does not take (a negative one names none: an index from 0 is

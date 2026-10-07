@@ -49,7 +49,8 @@ bool same_reading(const GraphEdge &a, const GraphEdge &b) {
 			a.span.line == b.span.line && a.span.column == b.span.column &&
 			a.span.length == b.span.length && a.fallback == b.fallback &&
 			a.scopes_after == b.scopes_after && a.optional == b.optional && a.scope_alternate == b.scope_alternate &&
-			a.scope_owner == b.scope_owner && a.needs == b.needs && a.name_offset == b.name_offset;
+			a.scope_owner == b.scope_owner && a.needs == b.needs && a.name_offset == b.name_offset &&
+			a.key_prefix == b.key_prefix;
 }
 
 // A symbol as its file's reading makes it, the first one's inert and why given apart (a slot's own
@@ -1328,7 +1329,9 @@ Diagnostic AssetGraph::missing_finding(const GraphEdge &edge) const {
 	         : row.missing_message ? row.missing_message(*this, edge)
 	                               : std::string(", which the project does not have."));
 	Diagnostic d = other ? make_finding(CoreFinding::ReferenceWrongKind, DiagnosticSeverity::Error, message, edge.source, edge.field)
-	                     : make_finding(CoreFinding::ReferenceMissing, row.severity_when_missing, message, edge.source, edge.field);
+	                     : make_finding(CoreFinding::ReferenceMissing,
+	                                    row.severity_for ? row.severity_for(edge) : row.severity_when_missing, message,
+	                                    edge.source, edge.field);
 	d.record = edge.record;
 	d.record_key = edge.record_key;
 	d.record_title = edge.record_title;
