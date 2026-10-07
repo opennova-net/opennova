@@ -233,6 +233,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::Terrain, "terrain", "Terrain", ArchiveSlot::Resource)
 	        .runtime("terrain")
+	        .edited_by(DocumentTypeId::Terrain)
 	        .names_files()
 	        .folder("terrain")
 	        .about("A terrain: the ground a mission is played on.")

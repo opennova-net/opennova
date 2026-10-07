@@ -20,7 +20,10 @@ struct TerrainLockCoord {
 using TerrainQuadrantLocks = std::array<TerrainLockCoord, 4>;
 
 struct TrnConfig {
+	// `terrain_name` and `terrain_creator`: read by no arm of either reader (neither word is in the
+	// binary but inside "TexHorizon"), kept for whoever edits the file (every shipped .trn opens on them).
 	std::string name;
+	std::string creator;
 	std::string colormap;
 	std::string detailmap_c1;
 	std::string detailmap_c2;
@@ -42,6 +45,17 @@ struct TrnConfig {
 	int origin_x = 0;
 	int origin_y = 0;
 	int water_height = 0;
+	// The environment's keywords a terrain carries, which its reader reads in the terrain's pass (the
+	// .trn is parsed by the time-of-day parser too, before the mission's .env [orig:
+	// Environment_LoadTimeOfDayConfig @ 0x57db30, the .trn pass @ 0x57dbcc..0x57dbde]): the water's colour
+	// (three bytes [orig: TimeOfDay_ParseProperty @ 0x57caf6]) and its murk (atof, held at 0.99 from above
+	// as the parser stores it [orig: @ 0x57cb7c..0x57cba9]); a .env's line comes after and wins. Every
+	// shipped .trn writes both; no shipped .env writes a murk, so the terrain's is the mission's. As
+	// written, each with whether the file writes it.
+	bool water_rgb_set = false;
+	std::array<int, 3> water_rgb = {0, 0, 0};
+	bool water_murk_set = false;
+	float water_murk = 0.0f;
 	int wrap_x = 0;
 	int wrap_y = 0;
 	TerrainLockCoord lock_topleft;

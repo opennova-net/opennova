@@ -96,6 +96,7 @@
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/environment_document.h>
+#include <editor/documents/terrain_document.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mns_document.h>
 #include <editor/documents/mnu_document.h>
@@ -183,6 +184,7 @@ const RowObject kRowObjects[] = {
         {&typeid(MissionRow), sizeof(MissionRow)}, {&typeid(EntityRow), sizeof(EntityRow)},
         {&typeid(PathRow), sizeof(PathRow)},       {&typeid(AreaRow), sizeof(AreaRow)},
         {&typeid(EventRow), sizeof(EventRow)},     {&typeid(EnvironmentRow), sizeof(EnvironmentRow)},
+        {&typeid(TerrainRow), sizeof(TerrainRow)},
         {&typeid(SoundBankRow), sizeof(SoundBankRow)}, {&typeid(SoundProfileRow), sizeof(SoundProfileRow)},
 };
 // The document types whose rows keep their text in fixed-length records (a model's 3DI records, a
@@ -209,7 +211,8 @@ struct PinnedPresence {
 	const char *type;
 	size_t optional, presences;
 };
-const PinnedPresence kPinnedPresence[] = {{"menu", 301, 301}, {"catalog", 27, 27}, {"mission", 4, 4}, {"environment", 3, 3}};
+const PinnedPresence kPinnedPresence[] = {{"menu", 301, 301}, {"catalog", 27, 27}, {"mission", 4, 4}, {"environment", 3, 3},
+                                          {"terrain", 4, 4}};
 
 // One clause of the contract, named with where it failed (the file, the record, the field).
 void check(bool ok, const std::string &where, const char *clause) {
@@ -366,6 +369,8 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Particles, "minimal_effect.ptl", file("particle/synth_minimal_effect.ptl")},
 	        // The environment (DI-19a): the minted environment, every keyword and ten keyframes.
 	        {AssetKind::Environment, "synth_full.env", file("env/synth_full.env")},
+	        // The terrain (DI-30): the minted map, its grid and its two foliage definitions.
+	        {AssetKind::Terrain, "Tmap.trn", file("terrain/tmap/Tmap.trn")},
 	};
 }
 
@@ -491,6 +496,11 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        // An environment with a line the game skips and no sky height (DI-19a: environment.ignored_input,
 	        // environment.sky_height_default).
 	        {AssetKind::Environment, "flat_sky.env", text_bytes("fog_level 600\r\nspeling 3\r\n")},
+	        // A terrain with a line the game skips and a definition that grows nothing (DI-30: terrain.ignored_input,
+	        // terrain.foliage_inert).
+	        {AssetKind::Terrain, "bare.trn",
+	         text_bytes("polytrn_colormap c.tga\r\npolytrn_detailmap d.tga\r\npolytrn_polydata h.cpt\r\npolytrn_sectorcount 1\r\n"
+	                    "polytrn_sectors 1\r\nspeling 3\r\nfoliage\r\n  match 9\r\nend\r\n")},
 	};
 }
 

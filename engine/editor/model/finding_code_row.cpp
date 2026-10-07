@@ -115,6 +115,8 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::DocumentCopy, code("document.copy", G::Documents) },
 	{ C::DocumentDecode, code("document.decode", G::Documents) },
 	{ C::DocumentDuplicate, code("document.duplicate", G::Documents) },
+	// A file an import makes is the import's, never edited in place (DI-30): its source and options change it.
+	{ C::DocumentImported, code("document.imported", G::Documents) },
 	{ C::DocumentKind, code("document.kind", G::Documents) },
 	{ C::DocumentMissing, code("document.missing", G::Documents) },
 	{ C::DocumentName, code("document.name", G::Documents) },

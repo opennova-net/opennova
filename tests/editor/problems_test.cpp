@@ -423,7 +423,7 @@ static int test_fixes() {
 			if (row.fixes == FindingFix::Rewrite) rewrites.push_back(&row);
 			if (row.blocks_save) blockers.push_back(&row);
 		}
-	TEST_EXPECT(blockers.size() == 16);
+	TEST_EXPECT(blockers.size() == 17);
 	std::vector<std::string> rewrite_tokens;
 	for (const FindingCodeRow *row : rewrites) rewrite_tokens.push_back(row->token);
 	std::sort(rewrite_tokens.begin(), rewrite_tokens.end());
@@ -433,7 +433,8 @@ static int test_fixes() {
 	                                                        "mission.event_order", "mission.rewrite_differs",
 	                                                        "script.line_ending", "shader.form",
 	                                                        "sound_bank.ignored_input",
-	                                                        "strings.regrouped", "style.line_ending"}));
+	                                                        "strings.regrouped", "style.line_ending",
+	                                                        "terrain.ignored_input"}));
 	for (const FindingCodeRow *row : rewrites) {
 		const Diagnostic rewrite = make_finding(*row, DiagnosticSeverity::Warning, "A rewrite fixes this.", "menus/a.mnu");
 		fixes = fixes_for(rewrite, v);

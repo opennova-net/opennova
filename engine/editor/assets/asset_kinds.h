@@ -64,6 +64,7 @@ enum class DocumentTypeId {
 	Particles,   // a .ptl .ptu .ptg: the effect system's text, its reader's findings (ADR 0046 DI-14)
 	Environment, // a .env: env::Config's keywords and keyframes (the deep-integration plan's DI-19a)
 	HudLayout,   // hudpos.def, held as its text and drawn by the HUD viewport (the plan's DI-20)
+	Terrain,     // a .trn: TrnConfig's keys, grid rows and foliage (the deep-integration plan's DI-30)
 	kCount, // the number of values, None among them
 };
 

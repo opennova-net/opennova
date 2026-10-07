@@ -976,6 +976,19 @@ game's own tick, with the rain and the overcast a script sets (a percent over se
 environment shows as it is made.
 _Avoid_: sky preview (it is more than the sky), time-of-day player
 
+**Terrain document**:
+A terrain (a .trn: the settings a mission's ground is loaded by) open in the editor (the deep-integration
+plan's DI-30), read and written through the engine's own reader and writer: one record, the terrain,
+whose fields are the keys the game reads in the units the file writes them (the colour map, the detail
+and its densities, the height data, the surface and foliage maps, the tile set, the sector grid's width,
+wraps, origin and quadrant locks, the water's height in half metres, colour and murk); its grid rows, at
+most 16, each the sector each of its cells places; and its foliage definitions, at most four, each a
+model and the foliage map's codes it grows on. Each map and model is a Go to; the gate's refusal and a
+definition that grows nothing are findings with their fixes. A terrain an import makes from a terrain
+set opens to be read, its edits refused: its set's images and options make it, and Reimport makes it
+again. The Inspector heads it with that import and the missions that run on it.
+_Avoid_: terrain set (the import's source of images), trn file (the file alone), heightmap (one input)
+
 **Texture document**:
 A texture file of the project (a .tga, .mdt, .pcx, .dds or .png) open in the editor, read as the
 game reads it: by the reader its name picks (a .tga or an .mdt the game's TGA reader, which takes every
