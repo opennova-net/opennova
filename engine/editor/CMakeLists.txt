@@ -192,6 +192,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_ground_check.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_ground_facts.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_ground_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_ground_rules.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_handle_edit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_hint.cpp

@@ -69,6 +69,13 @@ public:
 	// After picture(): a line over the picture's top left corner (S13 V6: how far its device's build
 	// is while the last picture shows, or why the build failed).
 	void badge(const std::string &text);
+	// After picture(): a legend over the picture's bottom left corner (DI-29, a ground overlay's): its title,
+	// then a row a swatch and its line.
+	struct LegendRow {
+		uint8_t rgb[3] = {};
+		std::string text;
+	};
+	void legend(const std::string &title, const std::vector<LegendRow> &rows);
 	// The right button clicked on the canvas this frame (not while it pans). On a picture that fills
 	// the canvas, whose right button is its kind's (a look), a click is the button let go having
 	// travelled less than a drag does.
