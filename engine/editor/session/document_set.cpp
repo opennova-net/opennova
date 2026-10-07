@@ -17,6 +17,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/graph/file_plans.h>
+#include <editor/graph/reference_kinds.h>
 #include <editor/graph/native_text_sites.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
@@ -413,12 +414,13 @@ void DocumentSet::create_file(const EditorRequest &request) {
 				}
 			}
 		}
-		// A new menu comes with the pointer its windows name (blank_companion: the original game shows
-		// no system pointer), where the project has no file of that name: made where it keeps its textures
-		// (placement_path). One on disk since the scan is left as it is; one that cannot be made leaves
-		// the menu made, and says so.
+		// A new file comes with the file its blank names or the game reads with it (blank_companion: a menu's
+		// pointer, the original game showing no system pointer; an animation map's reset clip; a music bank's
+		// script, DI-33), where the project has no file of that name: made where it keeps files of its kind
+		// (placement_path). One on disk since the scan is left as it is; one that cannot be made leaves the
+		// new file made, and says so.
 		std::string companion;
-		const BlankFactory *beside = blank_companion(*factory, *view_.project.document, companion);
+		const BlankFactory *beside = blank_companion(*factory, request.path, *view_.project.document, companion);
 		if (beside && !view_.project.scan->find(companion)) {
 			const std::string beside_relative = placement_path(*view_.project.scan, companion, beside->kind);
 			const auto beside_target = path_of(paths_.root) / path_of(beside_relative);
@@ -438,7 +440,7 @@ void DocumentSet::create_file(const EditorRequest &request) {
 				} else {
 					if (reason.empty()) reason = beside_error.message;
 					core_.report(make_finding(CoreFinding::DocumentWrite, DiagnosticSeverity::Warning,
-					                          "The pointer " + companion + " the menu names was not made" +
+					                          companion + ", made with " + request.path + ", was not made" +
 					                                  (reason.empty() ? std::string(".") : ": " + reason),
 					                          request.path));
 				}
@@ -454,9 +456,31 @@ void DocumentSet::create_file(const EditorRequest &request) {
 	if (is_editable_kind(kind)) {
 		open_document(request::open_document(request.path));
 		if (!document_for(request.path)) return; // the open said why
+		// The name the made file defines (DI-33: a missing name whose file the project lacked), added to its
+		// document as its type's Add makes one, selected, one step its Undo takes back (Add it there's edit,
+		// DI-15). One the type cannot define there leaves the file made, and says so.
+		if (!existing && request.define.kind != ReferenceKind::None && !define_in_made(request.path, request.define))
+			return;
 	}
 	view_.activity.status = made;
 	core_.touch(ViewConcern::Output);
+}
+
+bool DocumentSet::define_in_made(const std::string &name, const ReferenceSubject &define) {
+	const DocumentBase *document = document_for(name);
+	const DocumentType *type = document ? document_type_for(document->kind()) : nullptr;
+	PlannedFix planned;
+	if (!type || !type->define_symbol || !type->define_symbol(*document, define, planned) || planned.edits.empty()) {
+		core_.report(make_finding(CoreFinding::DocumentValues, DiagnosticSeverity::Warning,
+		                          name + " was made, but it cannot define " + reference_row(define.kind).phrase + " '" +
+		                                  define.target + "': add it there yourself.",
+		                          document ? document->path() : name));
+		view_.activity.status = name + " was made without " + define.target + ": see Problems.";
+		core_.touch(ViewConcern::Output);
+		return false;
+	}
+	edit_record(request::edit_record(document->path(), std::move(planned.edits), true));
+	return true;
 }
 
 void DocumentSet::open_document(const EditorRequest &request) {

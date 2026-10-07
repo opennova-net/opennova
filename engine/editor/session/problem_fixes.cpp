@@ -31,6 +31,7 @@
 #include <editor/preview/menu_render_check.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
+#include <runtime/audio/bank_chain.h>
 #include <runtime/renderer/material_texture.h>
 
 namespace fs = std::filesystem;
@@ -230,6 +231,32 @@ namespace {
 // record document through its schema, extract_from_document; a text as its Save writes it, extract_from_bytes);
 // the copy's Undo then takes the plan back. An edit of that file alone: the file naming the name keeps it as
 // written.
+// Whether `copy` (of the file `name`, of `kind`), `planned` applied, defines the name where the game's lookup
+// finds it (no inert definition, in the reference's scope), read as the graph reads it (a record document through
+// its schema, extract_from_document; a text as its Save writes it, extract_from_bytes); the copy's Undo then takes
+// the plan back, so it stands as it was.
+bool defines_after(DocumentBase &copy, const PlannedFix &planned, const std::string &name, AssetKind kind,
+                   const ReferenceSubject &missing, const SessionView &view) {
+	Diagnostic error;
+	if (!copy.apply(planned.edits, error)) return false;
+	Extracted extracted;
+	if (const Document *records = records_of(copy)) {
+		extract_from_document(*records, extracted);
+	} else {
+		const SerializeResult saved = copy.serialize();
+		if (saved.ok())
+			extract_from_bytes(name, kind, std::vector<uint8_t>(saved.text.begin(), saved.text.end()),
+			                   view.project.document->target_game, extracted, error);
+	}
+	copy.undo();
+	const ReferenceKindRow &row = reference_row(missing.kind);
+	const std::string wanted = graph_names::symbol_name(
+	        missing.kind, row.spell == NameSpelling::StyleVariable ? mns::variable_name(missing.target) : missing.target);
+	return std::any_of(extracted.symbols.begin(), extracted.symbols.end(), [&](const GraphSymbol &symbol) {
+		return symbol.kind == missing.kind && !symbol.inert && symbol.name == wanted && scope_matches(symbol.scope, missing.scope);
+	});
+}
+
 void add_there_fix(const ReferenceSubject &missing, const SessionView &view, const AssetEntry &file,
                    const ProblemFixIndex &index, std::vector<ProblemFix> &out) {
 	const DocumentType *type = document_type_for(file.kind);
@@ -241,25 +268,119 @@ void add_there_fix(const ReferenceSubject &missing, const SessionView &view, con
 	// A closed file's copy is the document planned over: the same plan.
 	if (copy == document) tried = planned;
 	else if (!type->define_symbol(*copy, missing, tried)) return;
-	Diagnostic error;
-	if (!copy->apply(tried.edits, error)) return;
-	Extracted extracted;
-	if (const Document *records = records_of(*copy)) {
-		extract_from_document(*records, extracted);
-	} else {
-		const SerializeResult saved = copy->serialize();
-		if (saved.ok())
-			extract_from_bytes(file.relative_path, file.kind, std::vector<uint8_t>(saved.text.begin(), saved.text.end()),
-			                   view.project.document->target_game, extracted, error);
-	}
-	copy->undo();
+	if (defines_after(*copy, tried, file.relative_path, file.kind, missing, view)) out.push_back(edit_fix(file.relative_path, planned));
+}
+
+// The file a missing name belongs in that the project lacks (ADR 0046 DI-33), where the game would look the name
+// up once it is there: the file its scope names (a string id's table), a sound set's bank (a menu SOUND's own,
+// else the first bank of the chain the game searches, audio::global_bank_chain
+// [orig: Game_StartMission @ 0x525443 over the slot table @ 0x82A5B0]), else the table its kind goes in (its row's
+// defined_in): the one the game reads
+// by name (the requirement row of that kind: weapon.def, SndProf.def, menu_style.mns; else the kind's own file
+// name), else, for a kind the game reads every file of (the particle files
+// [orig: CEffectSystem_Init @ 0x5F6070]), the name a new file of the kind takes. False for a kind no table defines.
+bool missing_definer(const ReferenceSubject &missing, const SessionView &view, std::string &name, AssetKind &kind) {
 	const ReferenceKindRow &row = reference_row(missing.kind);
-	const std::string wanted = graph_names::symbol_name(
-	        missing.kind, row.spell == NameSpelling::StyleVariable ? mns::variable_name(missing.target) : missing.target);
-	const bool defined = std::any_of(extracted.symbols.begin(), extracted.symbols.end(), [&](const GraphSymbol &symbol) {
-		return symbol.kind == missing.kind && !symbol.inert && symbol.name == wanted && scope_matches(symbol.scope, missing.scope);
-	});
-	if (defined) out.push_back(edit_fix(file.relative_path, planned));
+	name.clear();
+	kind = AssetKind::Unknown;
+	if (row.scope_names_file) {
+		// A string id's table. A menu's screen or window is looked up in a menu file whose own reference says it
+		// is missing (its Create makes it), and a user point is a place on a model.
+		if (missing.kind != ReferenceKind::TextId) return false;
+		name = missing.scope.substr(0, missing.scope.find('/'));
+		kind = AssetKind::Strings;
+		return !name.empty();
+	}
+	if (missing.kind == ReferenceKind::Sound) {
+		kind = AssetKind::SoundBank;
+		if (!missing.scope.empty()) {
+			name = missing.scope;
+			return true;
+		}
+		const std::string expansion = view.project.document ? view.project.document->expansion.name : std::string();
+		const std::vector<std::string> chain = audio::global_bank_chain(expansion);
+		if (chain.empty()) return false;
+		name = chain.front();
+		return true;
+	}
+	kind = row.defined_in;
+	if (kind == AssetKind::Unknown) return false;
+	for (const RequirementRow &required : view.project.requirements->rows)
+		if (required.expected_kind == kind) {
+			name = required.name;
+			return true;
+		}
+	const AssetKindRow &kind_row = asset_kind_row(kind);
+	if (kind_row.file_name && *kind_row.file_name) name = kind_row.file_name;
+	else name = kind_row.new_name;
+	return !name.empty();
+}
+
+// A missing name whose file the project lacks (ADR 0046 DI-33): Create that file with it, the file made by the
+// engine's own writer as create_file makes it (its requirement's blank, else its kind's), the name then added to it
+// as its type's Add makes one (DI-15's define_symbol), one request: create_file's define. Offered where the name is
+// free and one the project's name rules take, the blank takes no value it must be given, and the blank, read
+// through its type with the name added, defines the name where the game's lookup finds it (planned with `plan`
+// alone: has_fixes reads none of it). Never in bulk.
+void create_there_fix(const ReferenceSubject &missing, const SessionView &view, bool plan, std::vector<ProblemFix> &out) {
+	if (!view.project.document || !view.project.scan || !view.project.requirements) return;
+	std::string name;
+	AssetKind kind = AssetKind::Unknown;
+	if (!missing_definer(missing, view, name, kind)) return;
+	const DocumentType *type = document_type_for(kind);
+	FileNameProblem problem = FileNameProblem::None;
+	std::string message;
+	if (!type || !type->define_symbol || view.project.scan->find(name) || !check_file_name(name, kind, problem, message)) return;
+	BlankRequest blank;
+	blank.logical_name = name;
+	blank.project_title = view.project.document->title;
+	// A file the game reads by name is made from its requirement's blank, named as the manifest spells it (a string
+	// id's scope names its table upper-case: GAMETEXT.BIN, gametext.bin).
+	for (const RequirementRow &row : view.project.requirements->rows)
+		if (row.expected_kind == kind && normalized_logical_name(row.name) == normalized_logical_name(name)) {
+			blank.role = row.role;
+			name = blank.logical_name = row.name;
+		}
+	const BlankFactory *factory = find_blank_factory(blank.role, name, kind);
+	std::string why;
+	if (!factory || !blank_values_fit(*factory, blank, why)) return;
+	const std::string what = std::string(reference_row(missing.kind).phrase) + " '" + missing.target + "'";
+	ProblemFix fix{"Create " + name + " with " + missing.target,
+	               "Creates " + name + ", " + factory->summary + ", where the game looks " + what +
+	                       " up, with it added as its Add makes one; Undo of " + name + " takes the name back." + kNotUndoable,
+	               request::create_file_defining(name, asset_kind_token(kind), missing), false};
+	if (!plan) {
+		out.push_back(std::move(fix));
+		return;
+	}
+	std::vector<uint8_t> bytes;
+	Diagnostic error;
+	const std::unique_ptr<DocumentBase> copy = type->make ? type->make() : nullptr;
+	PlannedFix planned;
+	if (!copy || !factory->make(blank, bytes, error) ||
+	    !copy->load_bytes(bytes, name, kind, view.project.document->target_game, error) ||
+	    !type->define_symbol(*copy, missing, planned) || planned.edits.empty() ||
+	    !defines_after(*copy, planned, name, kind, missing, view))
+		return;
+	out.push_back(std::move(fix));
+}
+
+// A missing shader tag the editor writes an effect for (blank_shader_tags, ADR 0046 DI-33): Create <tag>.fx, the
+// object effect registering it, which the renderer loads with every effect of the archives [orig:
+// HLSLEffect_LoadAllFromPFFArchive @ 0x5AFF6E]. Offered where the name is free and one the name rules take.
+void shader_create_fix(const ReferenceSubject &missing, const SessionView &view, std::vector<ProblemFix> &out) {
+	if (missing.kind != ReferenceKind::Shader || !view.project.scan) return;
+	const std::vector<std::string> &tags = blank_shader_tags();
+	const auto tag = std::find_if(tags.begin(), tags.end(), [&](const std::string &each) { return strutil::iequals(each, missing.target); });
+	if (tag == tags.end()) return;
+	const std::string name = strutil::to_lower(*tag) + ".fx";
+	FileNameProblem problem = FileNameProblem::None;
+	std::string message;
+	if (view.project.scan->find(name) || !check_file_name(name, AssetKind::Shader, problem, message)) return;
+	out.push_back({"Create " + name,
+	               "Creates " + name + ", OpenNova's effect for the shader tag " + *tag +
+	                       ", which the renderer loads with every effect of the archives." + kNotUndoable,
+	               request::create_file(name, asset_kind_token(AssetKind::Shader), {{"tag", *tag}}), false});
 }
 
 // A missing symbol: the file where it belongs (defining_file), its Add it there where its type
@@ -269,7 +390,8 @@ void add_there_fix(const ReferenceSubject &missing, const SessionView &view, con
 void symbol_fixes(const ReferenceSubject &missing, const SessionView &view, const ProblemFixIndex &index, bool plan,
                   std::vector<ProblemFix> &out) {
 	const AssetEntry *file = defining_file(missing, view);
-	if (!file) return;
+	shader_create_fix(missing, view, out);
+	if (!file) return create_there_fix(missing, view, plan, out);
 	if (plan) add_there_fix(missing, view, *file, index, out);
 	const std::string what = std::string(reference_row(missing.kind).phrase) + " '" + missing.target + "'";
 	if (is_editable_kind(file->kind))
