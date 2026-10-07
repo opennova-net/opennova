@@ -118,16 +118,16 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	ctx.log("pre-dialog peaks: ambient=%.1f dB master=%.1f dB" % [ambient_floor, master_floor])
 	data["pre_dialog_peaks"] = {"ambient_db": ambient_floor, "master_db": master_floor}
 
-	# The first N dialog ids that resolve to a loaded set.
+	# The first N dialog ids whose first line resolves to a wave of the dialog bank.
 	var dialog_count := int(stats.dialogs)
 	var ids: Array[int] = []
 	for i in range(1, dialog_count + 1):
 		if ids.size() >= lines:
 			break
-		if not String(audio.resolve_dialog_set(i)).is_empty():
+		if not String(audio.resolve_dialog_wave(i)).is_empty():
 			ids.append(i)
 	if ids.is_empty():
-		_fail("no dialog id resolves to a loaded set (dbf dialogs=%d)" % dialog_count)
+		_fail("no dialog id resolves to a wave of the dialog bank (dbf dialogs=%d)" % dialog_count)
 
 	for id in ids:
 		if ctx.cancelled:
@@ -202,7 +202,7 @@ func _log_nearest_voice_states(marker_players: Array, listen_pos: Vector3) -> vo
 
 func _play_line(audio: MissionAudio, id: int, ambient: bool, voice_bus: int,
 		ambient_bus: int, master_bus: int) -> Dictionary:
-	var set_name := String(audio.resolve_dialog_set(id))
+	var set_name := String(audio.resolve_dialog_wave(id))
 	var line := {"id": id, "set": set_name, "spawned": false, "audible": false, "advanced": false}
 	if not audio.play_dialog(id):
 		_fail("dlg%03d (%s): play_dialog returned false" % [id, set_name])

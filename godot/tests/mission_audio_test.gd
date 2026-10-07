@@ -540,10 +540,15 @@ func test_repeated_setup_clears_dialog_dbf_queue_and_wac_voice() -> void:
 	TestFs.write_bytes(self, fixture_dir.path_join("tone.wav"),
 		FileAccess.get_file_as_bytes(
 			ProjectSettings.globalize_path("res://../fixtures/lwf/tone.wav")))
+	# The dialog bank's sounds, first.LWF beside first.DBF: a wave named as the line names it
+	# (a dialog line plays the bank's wave of its name, never a set: Dialog_LoadAudioClip ->
+	# SoundBank_FindEntryByName), at the dialog volume byte 210.
 	var lwf := LwfData.new()
 	lwf.create_empty()
-	_add_lwf_set(lwf, "SynR100", "tone.wav", 200)
-	assert_eq(lwf.save_file(fixture_dir.path_join("game.LWF")), OK)
+	_add_lwf_set(lwf, "DLG001", "tone.wav", 200)
+	lwf.set_member_field(0, 0, 0, "name", "SynR100")
+	lwf.set_member_field(0, 0, 0, "value_hi", 0xD200)
+	assert_eq(lwf.save_file(fixture_dir.path_join("first.LWF")), OK)
 
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(fixture_dir), OK)
@@ -553,7 +558,7 @@ func test_repeated_setup_clears_dialog_dbf_queue_and_wac_voice() -> void:
 	add_child_autofree(container)
 	var audio = MissionAudio.create(root, null)
 	audio.setup(mission, "first.bms", container)
-	assert_eq(audio.resolve_dialog_set(1), "SynR100")
+	assert_eq(audio.resolve_dialog_wave(1), "tone.wav")
 	assert_true(audio.play_dialog(1))
 	var old_dialog: AudioStreamPlayer = audio.dialog_voice()
 	assert_not_null(old_dialog)
@@ -569,7 +574,7 @@ func test_repeated_setup_clears_dialog_dbf_queue_and_wac_voice() -> void:
 
 	audio.setup(mission, "second.bms", container)
 	assert_null(audio.dialog_voice(), "the old mission's active dialog is released")
-	assert_eq(audio.resolve_dialog_set(1), "",
+	assert_eq(audio.resolve_dialog_wave(1), "",
 		"a mission without a DBF cannot retain the previous mission's dialog mapping")
 	if old_dialog != null:
 		assert_false(old_dialog.playing)

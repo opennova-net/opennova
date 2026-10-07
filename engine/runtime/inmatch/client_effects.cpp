@@ -278,14 +278,14 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             //  (Chat_AddMessageChannel2(msg, -56798, 930)), the subtitle
             //  @0x44E144..0x44E150 -> Chat_AddSystemMessageIfValid @0x5275B0 ->
             //  Chat_AddMessageChannel1(msg, -1, 930) @0x5275D5]
-            if (world.tables.dialog_bank != nullptr && world.tables.sound_sets != nullptr) {
+            if (world.tables.dialog_bank != nullptr) {
                 const audio::DialogLinePlayback resolved = audio::resolve_dialog_line(
-                        world.tables.dialog_bank, *world.tables.sound_sets,
+                        world.tables.dialog_bank, world.tables.dialog_sounds,
                         world.tables.mission_text, dialog->dialog_name, dialog->line,
                         player_class);
-                if (resolved.line_found && resolved.set_name.empty())
+                if (resolved.line_found && resolved.file.empty())
                     pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::System,
-                            0xFFFF2222u, "EX Cannot load audio: " + resolved.def_id_name, false});
+                            0xFFFF2222u, "EX Cannot load audio: " + resolved.wave, false});
                 if (resolved.line_found && !resolved.text.empty())
                     pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::Chat,
                             0xFFFFFFFFu, resolved.text, false});

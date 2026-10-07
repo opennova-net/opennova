@@ -29,7 +29,10 @@
 #include <runtime/audio/envs_markers.h>
 #include <runtime/audio/bank_chain.h>
 #include <runtime/audio/oneshot_play.h>
+#include <runtime/audio/volume_law.h>
 #include <runtime/environment/environment_state.h>
+#include <runtime/mission/mission_sidecars.h>
+#include <base/io/strutil.h>
 #include <runtime/mission/placement_traits.h>
 
 #include <algorithm>
@@ -96,7 +99,7 @@ void MissionAudio::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("slot_soundset", "name", "world_pos", "source_bms_id", "sound_id"),
 			&MissionAudio::slot_soundset, DEFVAL(0), DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("play_dialog", "wav_id"), &MissionAudio::play_dialog);
-	ClassDB::bind_method(D_METHOD("resolve_dialog_set", "wav_id"), &MissionAudio::resolve_dialog_set);
+	ClassDB::bind_method(D_METHOD("resolve_dialog_wave", "wav_id"), &MissionAudio::resolve_dialog_wave);
 	ClassDB::bind_method(D_METHOD("play_wac_wave", "filename"), &MissionAudio::play_wac_wave);
 	ClassDB::bind_method(D_METHOD("sync_script_voice"), &MissionAudio::sync_script_voice);
 	ClassDB::bind_method(D_METHOD("_on_script_voice_finished", "serial", "player_id"),
@@ -227,15 +230,29 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 		_load_bank(opennova::to_gd(global_name));
 	}
 
-	// The mission's co-named .DBF maps a PlayWavList dialog id (dlg001) to the LWF
-	// set name(s) it plays; loaded only if present.
-	const String dbf_name = mission_base + String(".DBF");
+	// The mission's dialog bank (runtime/mission/mission_sidecars dialog_bank_name: its
+	// own <base>.dbf, or the one its header names) maps a PlayWavList dialog id
+	// (dlg001) to its lines, each naming a wave of the bank's sounds (<bank>.lwf,
+	// else .pwf), both loaded only if the bank is present.
+	const opennova::bms::File &mission_file = p_mission->native_file();
+	const std::string bank_name = opennova::mission::dialog_bank_name(opennova::to_std(mission_base),
+			opennova::strutil::fixed_string(mission_file.header.terrain + 16, 16));
+	const String dbf_name = opennova::to_gd(bank_name);
 	if (resource_root_->has_file(dbf_name)) {
 		Ref<DbfData> dbf;
 		dbf.instantiate();
 		if (dbf->open_from_resource_root(resource_root_, dbf_name) == OK) {
 			dbf_ = dbf;
 			stats_->set_dialogs(dbf->get_dialog_count());
+			for (const bool alternate : { false, true }) {
+				const String sounds = opennova::to_gd(opennova::mission::dialog_sounds_name(bank_name, alternate));
+				if (!resource_root_->has_file(sounds)) continue;
+				const PackedByteArray bytes = resource_root_->read_file(sounds);
+				std::string error;
+				dialog_sounds_loaded_ = !bytes.is_empty() &&
+						opennova::lwf::parse_lwf_buffer(bytes.ptr(), static_cast<size_t>(bytes.size()), dialog_sounds_, error);
+				break;
+			}
 		}
 	}
 
@@ -575,13 +592,12 @@ bool MissionAudio::play_dialog_line(const String &p_dialog_name, int p_line,
 	const opennova::dbf::File *dialog_bank =
 			(dbf_.is_valid() && dbf_->is_loaded()) ? &dbf_->engine_file() : nullptr;
 	const opennova::audio::DialogLinePlayback line = opennova::audio::resolve_dialog_line(
-			dialog_bank, bank_->set_index(), nullptr, opennova::to_std(p_dialog_name), p_line,
-			p_player_class);
-	if (line.set_name.empty()) {
+			dialog_bank, dialog_sounds_loaded_ ? &dialog_sounds_ : nullptr, nullptr,
+			opennova::to_std(p_dialog_name), p_line, p_player_class);
+	if (line.file.empty()) {
 		return false;
 	}
-	AudioStreamPlayer *voice = bank_->spawn_oneshot_2d(this, opennova::to_gd(line.set_name),
-			StringName(kVoiceBus));
+	AudioStreamPlayer *voice = _spawn_dialog_voice(line.file, line.volume);
 	if (voice == nullptr) {
 		return false;
 	}
@@ -589,10 +605,10 @@ bool MissionAudio::play_dialog_line(const String &p_dialog_name, int p_line,
 	return true;
 }
 
-String MissionAudio::resolve_dialog_set(int p_wav_id) {
+String MissionAudio::resolve_dialog_wave(int p_wav_id) {
 	for (const opennova::audio::DialogLineRef &line : _resolve_dialog_lines(p_wav_id)) {
-		if (!line.set_name.empty()) {
-			return opennova::to_gd(line.set_name);
+		if (!line.file.empty()) {
+			return opennova::to_gd(line.file);
 		}
 	}
 	return String();
@@ -600,12 +616,27 @@ String MissionAudio::resolve_dialog_set(int p_wav_id) {
 
 std::vector<opennova::audio::DialogLineRef> MissionAudio::_resolve_dialog_lines(
 		int p_wav_id) const {
-	if (bank_.is_null()) {
-		return {};
-	}
 	const opennova::dbf::File *dialog_bank =
 			(dbf_.is_valid() && dbf_->is_loaded()) ? &dbf_->engine_file() : nullptr;
-	return opennova::audio::resolve_dialog_lines(dialog_bank, bank_->set_index(), p_wav_id);
+	return opennova::audio::resolve_dialog_lines(dialog_bank,
+			dialog_sounds_loaded_ ? &dialog_sounds_ : nullptr, p_wav_id);
+}
+
+AudioStreamPlayer *MissionAudio::_spawn_dialog_voice(const std::string &p_file, int p_volume) {
+	const Ref<AudioStreamWAV> stream = _resolve_wav(opennova::to_gd(p_file).get_file());
+	if (stream.is_null()) {
+		return nullptr;
+	}
+	AudioStreamPlayer *voice = memnew(AudioStreamPlayer);
+	voice->set_name("DialogVoice");
+	if (AudioServer::get_singleton()->get_bus_index(StringName(kVoiceBus)) >= 0) {
+		voice->set_bus(StringName(kVoiceBus));
+	}
+	voice->set_stream(stream);
+	voice->set_volume_db(opennova::audio::volume_db_from_byte(p_volume));
+	add_child(voice);
+	voice->play();
+	return voice;
 }
 
 // Start the next queued dialog line if nothing is currently playing. Every line
@@ -630,11 +661,10 @@ void MissionAudio::_pump_dialog_queue() {
 				sim->broadcast_dialog_line(line.dialog_name, line.line);
 			}
 		}
-		if (line.set_name.empty()) {
+		if (line.file.empty()) {
 			continue;
 		}
-		AudioStreamPlayer *voice = bank_->spawn_oneshot_2d(this, opennova::to_gd(line.set_name),
-				StringName(kVoiceBus));
+		AudioStreamPlayer *voice = _spawn_dialog_voice(line.file, line.volume);
 		if (voice != nullptr) {
 			dialog_voice_id_ = ObjectID(voice->get_instance_id());
 			dialog_queue_.line_started();
@@ -951,6 +981,8 @@ void MissionAudio::_reset_mission_playback_state() {
 	wac_voice_id_ = ObjectID();
 	wac_wav_cache_.clear();
 	dbf_.unref();
+	dialog_sounds_ = opennova::lwf::File();
+	dialog_sounds_loaded_ = false;
 }
 
 void MissionAudio::teardown() {

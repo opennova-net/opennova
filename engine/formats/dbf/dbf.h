@@ -8,10 +8,10 @@
 // co-named .dbf from DialogSystem_Init @ 0x5275e0 (mission base name + ".dbf"),
 // then co-loads "<base>.lwf" (falling back to "<base>.pwf") as the dialog sound
 // bank @ 0x44e7d4. A mission's .DBF maps a dialog id (group_name, e.g. "dlg001")
-// to one or more lines, each naming a sound definition (def_id_name, e.g.
-// "Z00gR100") that resolves to a set in that bank. Mission PlayWavList actions
-// reference a dialog id; this bank turns it into the LWF set name(s) to play.
-// See docs/audio/lwf-dbf-sound-re.md.
+// to one or more lines, each naming a wave of that bank (def_id_name, e.g.
+// "Z00gR100": a single, found by name [orig: Dialog_LoadAudioClip @ 0x44dcf7 ->
+// SoundBank_FindEntryByName @ 0x75bba0], never a set). Mission PlayWavList actions
+// reference a dialog id by its number. See docs/audio/lwf-dbf-sound-re.md.
 #pragma once
 
 #include <cstdint>
@@ -52,8 +52,8 @@ static_assert(sizeof(RawGroupRecord) == 52, "RawGroupRecord must be 52 bytes");
 // 68-byte line record (raw on-disk).
 struct RawLineRecord {
 	uint32_t line_flags;   // 0x00
-	char def_id_name[24];  // 0x04: sound definition name (null-terminated)
-	char sequence[24];     // 0x1C: auto-generated sequence (e.g. "_00000")
+	char def_id_name[24];  // 0x04: the wave of the dialog bank's sounds it plays, by name (null-terminated)
+	char sequence[24];     // 0x1C: the subtitle entry: digits after the last '_' index the mission text ("_00003"; "##" none)
 	uint8_t def_id_index;  // 0x34
 	uint8_t delay;         // 0x35: DELAY (low byte)
 	uint16_t padding;      // 0x36

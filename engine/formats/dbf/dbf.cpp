@@ -125,7 +125,6 @@ bool encode_dbf(const File &file, std::vector<uint8_t> &out, std::string &error)
 	std::memcpy(out.data() + offset, &header, sizeof(Header));
 	offset += sizeof(Header);
 
-	uint32_t seq_counter = 0;
 	for (const auto &group : file.groups) {
 		RawGroupRecord raw_group{};
 		raw_group.record_size = 52;
@@ -143,14 +142,11 @@ bool encode_dbf(const File &file, std::vector<uint8_t> &out, std::string &error)
 			raw_line.line_flags = line.line_flags;
 			size_t def_len = std::min(line.def_id_name.size(), sizeof(raw_line.def_id_name) - 1);
 			std::memcpy(raw_line.def_id_name, line.def_id_name.c_str(), def_len);
-			if (!line.sequence.empty()) {
-				size_t seq_len = std::min(line.sequence.size(), sizeof(raw_line.sequence) - 1);
-				std::memcpy(raw_line.sequence, line.sequence.c_str(), seq_len);
-			} else {
-				char seq_buf[8];
-				std::snprintf(seq_buf, sizeof(seq_buf), "_%05u", seq_counter++);
-				std::memcpy(raw_line.sequence, seq_buf, std::strlen(seq_buf));
-			}
+			// The sequence as the line holds it: its digits after the last '_' are the line's subtitle's
+			// entry in the mission text [orig: Dialog_LoadAudioClip @ 0x44ddec..0x44de3c], so the writer
+			// invents none (an empty one names no entry).
+			size_t seq_len = std::min(line.sequence.size(), sizeof(raw_line.sequence) - 1);
+			std::memcpy(raw_line.sequence, line.sequence.c_str(), seq_len);
 			raw_line.def_id_index = line.def_id_index;
 			raw_line.delay = line.delay;
 			raw_line.padding = 0;
