@@ -242,6 +242,10 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::Terrain, "terrain", "Terrain", ArchiveSlot::Resource)
 	        .runtime("terrain")
+	        // The time-of-day load's .trn pass, whose hook reads the terrain's keys [orig:
+	        // Environment_LoadTimeOfDayConfig @ 0x57dbeb -> File_ParseASCIIFile; Terrain_ParseConfigCallback @ 0x60F330].
+	        .lines(LineReader::AsciiWalk)
+	        .edited_by(DocumentTypeId::Terrain)
 	        .names_files()
 	        .folder("terrain")
 	        .about("A terrain: the ground a mission is played on.")
