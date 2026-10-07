@@ -11,6 +11,7 @@
 
 #include <formats/threedi/threedi_3di3.h>
 
+#include "object/avatar_database.h"
 #include "util/string_convert.h"
 #include "util/texture_files.h"
 
@@ -154,6 +155,10 @@ void PreviewModel::assemble_(Build &build) {
 	object_->set_object_data(build.data->data());
 	data_ = build.data->data();
 	files_ = build.files;
+	if (arms_) {
+		object_->set_graphic_name(data_->get_source_path());
+		AvatarDatabase::apply_part_camo(object_, Vector3i(arms_camo_[0], arms_camo_[1], arms_camo_[2]), "first_person:arms_camo");
+	}
 	applied_ctrl_.clear();
 	applied_lod_ = -1;
 }
@@ -201,6 +206,30 @@ void PreviewModel::pose_body(const opennova::world::InfantryBodyPose &body) {
 				body.source_phase, key, body.phase, body.weight, body.source_variant, body.variant);
 	else
 		object_->play_body_clip_at(key, body.phase, body.variant, body.parked);
+}
+
+void PreviewModel::play_clip(const std::string &key, int variant, int ticks) {
+	if (data_.is_null() || object_->get_skeletal_anim().is_null() || key.empty()) return;
+	object_->play_body_clip_variant_at_tick(opennova::to_gd(key), variant, ticks);
+}
+
+void PreviewModel::play_blend(const std::string &key, int ticks, const std::string &blend_key, int blend_ticks,
+		float weight, int variant, int blend_variant) {
+	if (data_.is_null() || object_->get_skeletal_anim().is_null() || key.empty()) return;
+	object_->play_body_blend_at(opennova::to_gd(key), ticks, opennova::to_gd(blend_key), blend_ticks, weight, variant,
+			blend_variant);
+}
+
+void PreviewModel::set_arms(int camo0, int camo1, int camo2) {
+	if (!arms_) {
+		arms_ = true;
+		object_->set_authored_lod_enabled(false);
+		object_->set_presenter_driven_lod(false);
+		object_->set_avatar_part(ObjectModel::AVATAR_PART_ARMS);
+	}
+	arms_camo_[0] = camo0;
+	arms_camo_[1] = camo1;
+	arms_camo_[2] = camo2;
 }
 
 void PreviewModel::set_lift(float metres) {
