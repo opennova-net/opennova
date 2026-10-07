@@ -9,6 +9,7 @@
 #include <optional>
 
 #include <base/io/strutil.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/staged_rows.h>
 
@@ -23,7 +24,7 @@ Document::Document(const Document &other)
 		: DocumentBase(other), rows_(other.rows_), file_state_(other.file_state_),
 		  next_id_(other.next_id_), last_added_(other.last_added_), added_(other.added_),
 		  made_(other.made_), found_(other.found_),
-		  history_(other.history_, rows_, file_state_), saved_rows_(other.saved_rows_),
+		  history_(other.history_, rows_, file_state_), source_(other.source_), saved_rows_(other.saved_rows_),
 		  saved_state_(other.saved_state_), saved_positions_(other.saved_positions_) {}
 
 namespace {
@@ -575,6 +576,7 @@ bool Document::read_source(const std::vector<uint8_t> &decoded, bool adopt,
 	// The C parsers permit an empty file, but require a non-null input pointer.
 	const std::vector<uint8_t> one_byte(decoded.empty() ? 1 : 0, 0);
 	if (!parse(decoded.empty() ? one_byte : decoded, rows, state, issues, error)) return false;
+	source_ = source_of(decoded, issues);
 	if (!adopt) return true;
 	rows_.clear(); file_state_.reset();
 	indexes_.clear();
@@ -594,6 +596,80 @@ void Document::on_saved() {
 	history_.mark_saved();
 	history_.end_edit_group();
 	set_baseline();
+}
+
+std::shared_ptr<const SourceState> Document::source_of(const std::vector<uint8_t> &decoded,
+                                                       std::vector<SourceIssue> issues) const {
+	auto source = std::make_shared<SourceState>();
+	source->issues = std::move(issues);
+	const std::string_view text(reinterpret_cast<const char *>(decoded.data()), decoded.size());
+	if (asset_kind_row(kind()).line_reader != LineReader::None && first_lone_lf(text) != std::string_view::npos)
+		source->odd_lines = std::make_shared<const std::string>(text);
+	return source;
+}
+
+void Document::adopt_source(std::shared_ptr<const SourceState> source) {
+	source_ = std::move(source);
+	set_source_issues(source_ ? source_->issues : std::vector<SourceIssue>());
+}
+
+void Document::undo_step() {
+	const EditStep *step = history_.next_undo();
+	std::shared_ptr<const SourceState> source =
+	        step && step->before_source != step->after_source ? step->before_source : nullptr;
+	const uint64_t before = history_.revision();
+	history_.undo();
+	if (source && history_.revision() != before) adopt_source(std::move(source));
+}
+
+void Document::redo_step() {
+	const EditStep *step = history_.next_redo();
+	std::shared_ptr<const SourceState> source =
+	        step && step->before_source != step->after_source ? step->after_source : nullptr;
+	const uint64_t before = history_.revision();
+	history_.redo();
+	if (source && history_.revision() != before) adopt_source(std::move(source));
+}
+
+bool Document::takes_while_blocked(const std::vector<Edit> &edits) const {
+	return edits.size() == 1 && is_line_ends_restore(edits.front());
+}
+
+bool Document::redoes_while_blocked() const {
+	const EditStep *step = history_.next_redo();
+	return step && step->before_source != step->after_source;
+}
+
+bool Document::stage_restore(StagedRows &staged, Diagnostic &error) {
+	if (!source_ || !source_->odd_lines) return true; // its lines end CR LF already: nothing changes
+	const std::string restored = with_crlf_line_ends(*source_->odd_lines);
+	std::vector<uint8_t> bytes(restored.begin(), restored.end());
+	if (bytes.empty()) bytes.push_back(0); // the parsers' empty file, as a load reads one
+	std::vector<std::shared_ptr<Node>> rows;
+	std::shared_ptr<const FileState> state;
+	std::vector<SourceIssue> issues;
+	Diagnostic unread;
+	if (!parse(bytes, rows, state, issues, unread))
+		return fail(error, path(), CoreFinding::DocumentPayload,
+		            "The file with every line ending CR LF does not read: " + unread.message);
+	for (const SourceIssue &issue : issues)
+		if (issue.blocks)
+			return fail(error, path(), CoreFinding::DocumentPayload,
+			            "The file with every line ending CR LF does not read as the game reads it: " + issue.message);
+	std::vector<NodeId> old;
+	old.reserve(staged.rows().size());
+	for (const auto &row : staged.rows()) old.push_back(row->id);
+	for (NodeId id : old) staged.remove(id);
+	for (auto &row : rows) {
+		row->id = allocate_id();
+		assign_ids(*row);
+		staged.insert(row, staged.size());
+	}
+	staged.state() = state;
+	auto source = std::make_shared<SourceState>();
+	source->issues = std::move(issues);
+	staged_source_ = std::move(source);
+	return true;
 }
 
 bool Document::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
@@ -620,14 +696,23 @@ bool Document::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
 		}
 	} staging{*this};
 	staged_ = &staged;
+	staged_source_.reset();
 	std::vector<NodeId> made, added;
 	found_.clear();
 	if (!stage_edits(edits, staged, made, added, error)) {
 		found_.clear();
+		staged_source_.reset();
 		return refused();
 	}
 	staged.for_each_changed([this](Node &row) { after_edit(row); });
 	EditStep step = staged.step();
+	// A batch that read the source again carries what the content was read from on both sides.
+	std::shared_ptr<const SourceState> read_again = std::move(staged_source_);
+	staged_source_.reset();
+	if (read_again) {
+		step.before_source = source_;
+		step.after_source = read_again;
+	}
 	if (step.empty()) {
 		// Nothing changes. A reopened group typed back to the values it found is no step at all:
 		// the document stays as the group found it (clean again when that was saved).
@@ -650,6 +735,7 @@ bool Document::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
 		return refused();
 	}
 	history_.commit(std::move(step), key);
+	if (read_again) adopt_source(std::move(read_again));
 	if (!added.empty()) {
 		// What the batch made and kept: a row or a record a later edit of it removed is gone (so is
 		// what a removed record held), and the edit that made it names nothing.
@@ -764,6 +850,13 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 		if (edit.operation == EditOperation::Apply && !edit.address.row && !edit.address.child) {
 			if (!edit.payload)
 				return refuse(C::DocumentPayload, "This change carries nothing to apply.");
+			// The source read again with every line ending CR LF: the rows, the state and the source
+			// findings that read makes, alone in its batch (it replaces whatever the edits before it made).
+			if (is_line_ends_restore(edit)) {
+				if (edits.size() != 1)
+					return refuse(C::DocumentBatch, "Restoring the line ends is a batch of its own.");
+				return stage_restore(staged, error);
+			}
 			// The type's change to the state as the batch left it, kept only when it changes
 			// something: a copy handed back unchanged is no step.
 			std::shared_ptr<const FileState> state = staged.state();
