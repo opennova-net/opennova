@@ -55,6 +55,8 @@ void BuildOperation::join(const EditorRequest &request) {
 	play_.behind = request.behind;
 	play_.fresh = request.fresh;
 	play_.start = request.start;
+	// Resolved by the session as it joined (join_operation: the request's, else the project's).
+	play_.mode = request.play_mode.value_or(PlayMode::Runtime);
 }
 
 OperationOutcome BuildOperation::finish(SessionCore &core) {

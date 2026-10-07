@@ -149,6 +149,12 @@ func _tool_editor_play(args: Dictionary, ctx: McpToolContext) -> Variant:
 				play["behind"] = true
 			if bool(args.get("fresh", false)):
 				play["fresh"] = true
+			# How this Play runs and whether it saves first, for itself alone (left out, the project's own).
+			var own := {}
+			for key in ["play_mode", "save_before_play"]:
+				if args.has(key):
+					own[key] = args[key]
+			play.merge(own)
 			# Play from here (DI-26): a start of the caller's (start {at, yaw}), or the mission view's own
 			# (from_here: the ground under its camera, or under the picture point `at`), which the view plans
 			# as the Play it raises.
@@ -163,6 +169,7 @@ func _tool_editor_play(args: Dictionary, ctx: McpToolContext) -> Variant:
 					play["behind"] = true
 				if bool(args.get("fresh", false)):
 					play["fresh"] = true
+				play.merge(own)
 			var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify(play))))
 			var failed := _outcome_error(answer, "editor_play op=start")
 			if failed != null:
