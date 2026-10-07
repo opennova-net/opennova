@@ -113,11 +113,13 @@ inline constexpr int32_t kWeaponRangeMostTicks = 62 * 600;
 // tracer style is the enemy's then, the spawn's select against the presenting client's team [orig:
 // RoundData_SpawnRound @ 0x4EC740]), the target. No record (`weapon` ""): no player holds a weapon, and the range
 // fires a soldier's shots alone (WeaponRangeShot, DI-24), its tables read all the same (weapon.def where the project
-// has it, then ammo.def).
+// has it, then ammo.def). An ammo fired alone (DI-23: no record, `ammo` an ammo.def record by name): each Fire
+// gesture is a soldier's shot of it from the eye along the line of fire, the others having no weapon to work.
 struct WeaponRangeSetup {
 	std::shared_ptr<const FileSource> files;
 	std::string catalog;
 	std::string weapon;
+	std::string ammo;
 	WeaponShotView view = WeaponShotView::Own;
 	bool enemy = false;
 	WeaponRangeTarget target;
@@ -245,8 +247,9 @@ public:
 	// Render_ProcessMainSceneFrame @0x5CA299..0x5CA304]).
 	bool scoped() const;
 	bool card() const { return card_; }
-	// The weapon's ammo ("" none) and its tracer rate.
+	// The weapon's ammo ("" none) and its tracer rate; whether the range fires an ammo alone (no weapon).
 	const std::string &ammo() const { return ammo_; }
+	bool ammo_alone() const { return setup_.weapon.empty() && !setup_.ammo.empty(); }
 	int shots() const { return shots_; }
 	// The tracers' trails, the rounds in flight and the scars as they stand.
 	std::vector<WeaponRangeTrail> trails() const;
@@ -264,6 +267,10 @@ private:
 	void reset_();
 	void step_();
 	void drain_();
+	// One soldier's shot through the game's NPC entry; an ammo fired alone (DI-23): the Fire gestures on `tick` are
+	// such shots of it, the others refused.
+	void fire_shot_(const WeaponRangeShot &shot);
+	void fire_alone_(int32_t tick);
 	void apply_gestures_(int32_t tick);
 	void fire_shots_(int32_t tick);
 
@@ -276,6 +283,7 @@ private:
 	struct Tables;
 	std::unique_ptr<Tables> tables_;
 	int weapon_index_ = -1;
+	int ammo_index_ = -1; // an ammo fired alone: its index in the ammo table
 	world::WeaponInstallData install_;
 	std::string ammo_;
 

@@ -33,6 +33,7 @@
 #include "terrain/foliage_dispatcher.h"
 #include "terrain/terrain.h"
 #include "terrain/terrain_data.h"
+#include "world/scar_presenter.h"
 
 namespace opennova::editor {
 class MissionViewport;
@@ -129,6 +130,9 @@ public:
 
 	// Its nodes and its placer, for the parity tests.
 	Camera3D *camera() const { return camera_; }
+	// The Shoot tool's (DI-23): the scars its shots left, drawn by the game's ScarPresenter (their effects play in
+	// the items' effect scene, effects()).
+	ScarPresenter *shot_scars() const { return shot_scars_; }
 	Terrain *terrain() const { return terrain_; }
 	MissionEnvironment *environment() const { return environment_; }
 	Ref<MissionObjectPlacer> placer() const { return placer_; }
@@ -315,6 +319,11 @@ private:
 	// What a pick casts against for the placed entity of row `row`, and its transform in the picture's
 	// space now; null for none (hidden, a static not warm, a model with no meshes).
 	const PickShape *pick_shape_(opennova::editor::NodeId row, const Placed &placed, Transform3D &xform) const;
+
+	// The Shoot tool's scars (DI-23), presented where the shots' run moved, cleared with no shot.
+	void apply_shots_(const opennova::editor::MissionViewport &mission);
+	ScarPresenter *shot_scars_ = nullptr;
+	uint64_t shot_scars_shown_ = UINT64_MAX;
 
 	Node3D *root_ = nullptr;
 	WorldEnvironment *clear_ = nullptr;
