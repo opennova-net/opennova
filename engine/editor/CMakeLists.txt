@@ -246,6 +246,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_thumbnails.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/hud_canvas.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/hud_layout_edit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/hud_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_device_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_follow.cpp
@@ -413,6 +414,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/effect_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/environment_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/hud_layout_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/hud_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/catalog_inspector_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/ui_kit.cpp
