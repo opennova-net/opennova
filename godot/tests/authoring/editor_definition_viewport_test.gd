@@ -176,3 +176,212 @@ func test_a_record_draws_its_item_its_effects_and_its_death() -> void:
 	var grid := grids[0] as MeshInstance3D
 	assert_true(_change({"options": {"grid": false}}))
 	assert_false(grid.visible, "the grid hidden")
+
+
+## DI-22: a weapon fires in the definition preview as the game fires it. The gun (the skinned fixture with a muzzle
+## and a shell point) and the character's arms draw on the gun's rig in the device, seen from the eye through the
+## weapon's renderfov; a held trigger runs the game's local player in the range: the gun posed by the fire clip,
+## the rounds' tracers drawn as the game's ribbons, their stops on the target leaving scars the game's ScarPresenter
+## draws, the shot heard by the Shell.
+const SKINNED := "res://../fixtures/threedi/o3d/skinned.o3d"
+const GUN_CLIPS := """o3a 1
+adm GUN.adm
+row anim_reset "rest"
+row anim_wpn_idle "rest"
+row anim_wpn_fire "fire"
+clip rest
+fps 30
+flags 0x1
+frames 1
+bone -1 0 0 0 0.5 "BN01 Pelvis"
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 1 0.5 "BN02 Spine"
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 -1 0.5 "BN03 Leg"
+ k 0 0 0 1
+ k 0 0 0 1
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x0 0.9 1.7
+clip fire
+fps 30
+flags 0x0
+frames 2
+bone -1 0 0 0 0.5 "BN01 Pelvis"
+ k 0 0 0 1
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 1 0.5 "BN02 Spine"
+ k 0 0 0 1
+ k 0 0 0.3826834 0.9238795
+ k 0 0 0 1
+bone 0 0 0 -1 0.5 "BN03 Leg"
+ k 0 0 0 1
+ k 0 0 0 1
+ k 0 0 0 1
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x0 0.9 1.7
+"""
+
+
+func _wave_bytes(seconds: float) -> PackedByteArray:
+	var samples := int(22050 * seconds)
+	var data := PackedByteArray()
+	data.resize(samples * 2)
+	for i in samples:
+		data.encode_s16(i * 2, int(sin(i * 0.1) * 8000.0))
+	var head := PackedByteArray()
+	head.resize(44)
+	head.encode_u32(0, 0x46464952) # RIFF
+	head.encode_u32(4, 36 + data.size())
+	head.encode_u32(8, 0x45564157) # WAVE
+	head.encode_u32(12, 0x20746d66) # "fmt "
+	head.encode_u32(16, 16)
+	head.encode_u16(20, 1) # PCM
+	head.encode_u16(22, 1) # mono
+	head.encode_u32(24, 22050)
+	head.encode_u32(28, 44100)
+	head.encode_u16(32, 2)
+	head.encode_u16(34, 16)
+	head.encode_u32(36, 0x61746164) # data
+	head.encode_u32(40, data.size())
+	head.append_array(data)
+	return head
+
+
+func _weapon_state() -> Dictionary:
+	return _seam.query("viewport", {"op": "state", "path": "weapon.def", "kind": "definition", "limit": 50})
+
+
+func _weapon_change(change: Dictionary) -> bool:
+	var request := {"kind": "set_viewport", "path": "weapon.def", "viewport": change.merged({"kind": "definition"})}
+	var answer: Dictionary = _seam.request(request)
+	_app.pump()
+	return bool(answer.get("outcome", {}).get("done", false))
+
+
+func test_a_weapon_fires_in_first_person() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor definition weapon %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	var root := dir.path_join("project")
+	assert_true(_seam.new_project(root, "Weapon Fire"))
+	var source := dir.path_join("source")
+	var gun := FileAccess.get_file_as_string(ProjectSettings.globalize_path(SKINNED))
+	gun += "userpoint \"muzzle\" 0 1 0.5 0 1 0 1 83\nuserpoint \"shell\" 0.25 0 0 1 0 0 0 83\n"
+	_write(source.path_join("gun.o3d"), gun.to_utf8_buffer())
+	_write(source.path_join("arms.o3d"), gun.to_utf8_buffer())
+	_write(source.path_join("gun.o3a"), GUN_CLIPS.to_utf8_buffer())
+	_app.request_json(JSON.stringify({"kind": "import_files", "imports": [
+		{"path": source.path_join("gun.o3d")}, {"path": source.path_join("arms.o3d")},
+		{"path": source.path_join("gun.o3a")}]}))
+	assert_true(_seam.settle(), "the import steps across pumps")
+	_write(root.path_join("weapon.def"), TestFs.crlf("weapon \"WPN_TEST\"\n\tclipsize 30\n\tstartrounds 90\n"
+			+ "\tanimadm gun\n\tgfx1 gun\n\tgfx3 gun\n\tround_type AMMO_TEST\n\tflags auto\n"
+			+ "\tpos 25 -5 -145 0 0 0\n\taction \"fire\"\n\t\tanim anim_wpn_fire\n\t\tsoundsetend GS_TEST\n"
+			+ "\t\tdelayend 4\n\t\tparticle Puff\n\t\tparticleuserpoint muzzle\n\t\tfunction wpn_std_fire\n\tend\n"
+			+ "\taction \"recoil\"\n\t\tparticle Puff\n\t\tparticleuserpoint shell\n\t\tfunction wpn_std_recoil\n"
+			+ "\tend\nend\n").to_utf8_buffer())
+	_write(root.path_join("ammo.def"), TestFs.crlf("ammo AT_NULL\nend\nammo AMMO_TEST\n\tvelocity 600\n\tmax_age 3\n"
+			+ "\tweight_in_grains 62\n\ttracerrate 1\n\ttracer_type 1 2\n\tscar_type 1\n\teffects_table\n"
+			+ "\t\tobj Puff GS_TEST 15\n\t\tdirt Puff GS_TEST 15\n\tend\nend\n").to_utf8_buffer())
+	_write(root.path_join("Avatars.def"), TestFs.crlf("define head H1\n{\n\tname AV_H\n\tgraphic gun.3di\n}\n"
+			+ "define body B1\n{\n\tname AV_B\n\tgraphic gun.3di\n}\n"
+			+ "define arms A1\n{\n\tname AV_A\n\tgraphic arms.3di\n\tcamo 1 2 3\n}\n"
+			+ "nationality 0 AV_GOOD\n{\n\talignment good\n\tdivision 0 AV_DIV\n\t{\n\t\tcombo 1 H1 B1 A1\n\t}\n}\n")
+			.to_utf8_buffer())
+	_write(root.path_join("particles/puff.ptl"), _ptl().to_utf8_buffer())
+	_write(root.path_join("particles/particle_dot.tga"),
+			FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/cbin/particle_dot.tga")))
+	_write(root.path_join("sounds/gs_test.wav"), _wave_bytes(0.2))
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	# The bank made in the editor: the shot, one layer playing its wave.
+	assert_true(_seam.done({"kind": "create_file", "path": "game.lwf"}))
+	assert_true(_seam.done({"kind": "edit_record", "path": "game.lwf", "open_first": true, "edits": [
+		{"op": "add", "kind": "wave", "as": "w"}, {"op": "set", "id": "w", "field": "name", "value": "GS_TEST"},
+		{"op": "set", "id": "w", "field": "file", "value": "gs_test.wav"},
+		{"op": "add", "kind": "set", "as": "s"}, {"op": "set", "id": "s", "field": "name", "value": "GS_TEST"},
+		{"op": "add", "kind": "layer", "parent": "s", "as": "l"},
+		{"op": "add", "kind": "member", "parent": "l", "field": "wave", "value": "GS_TEST"}]}))
+	assert_true(_seam.done({"kind": "save_all"}))
+	assert_true(_seam.open_document("weapon.def"), "the weapon table opens")
+	assert_true(_seam.select_record(_seam.get_row_id(0)), "its record selected")
+	assert_true(_weapon_change({"options": {"weapon": "first"}, "clock": {"playing": false, "ticks": 0}}))
+	var state := _weapon_state()
+	for _frame in 600:
+		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
+				and int(state.get("builds", 0)) > 0:
+			break
+		_app.pump()
+		await get_tree().process_frame
+		state = _weapon_state()
+	assert_eq(String(state.get("status", "")), "ready", str(state.get("message", "")))
+	var weapon: Dictionary = state.get("body", {}).get("weapon", {})
+	assert_eq(String(weapon.get("view", "")), "first", str(weapon))
+	assert_eq(String(weapon.get("ammo", "")), "AMMO_TEST", str(weapon))
+	var device: SubViewport = _app.get_viewport_device("weapon.def", "definition")
+	assert_not_null(device)
+	if device == null:
+		return
+	# The gun and the arms on the gun's rig, built over the frames.
+	var gun_model: ObjectModel = null
+	var arms: ObjectModel = null
+	for _frame in 600:
+		gun_model = null
+		arms = null
+		for found: Variant in device.find_children("*", "ObjectModel", true, false):
+			var model := found as ObjectModel
+			if model.get_object_data() == null:
+				continue
+			if model.get_avatar_part() == ObjectModel.AVATAR_PART_ARMS:
+				arms = model
+			else:
+				gun_model = model
+		if gun_model != null and arms != null:
+			break
+		_app.pump()
+		await get_tree().process_frame
+	assert_not_null(gun_model, "the gun draws")
+	assert_not_null(arms, "the arms draw beside it")
+	if gun_model == null or arms == null:
+		return
+	assert_true(gun_model.has_skeleton() and arms.has_skeleton(), "both ride the gun's rig")
+	assert_eq(int(arms.get_ctrl_values().get("TEX_CAMO1", -1)), 1, str(arms.get_ctrl_values()))
+	assert_eq(int(gun_model.get_ctrl_values().get("TEX_TEAM", -1)), 1, str(gun_model.get_ctrl_values()))
+	# The eye: the device's camera through the weapon's renderfov.
+	var camera := device.find_children("*", "Camera3D", true, false)[0] as Camera3D
+	assert_almost_eq(camera.fov, 80.0, 1e-4)
+	# The trigger held: the rounds fly, their tracers drawn, their stops scarring the target.
+	var tracers := device.find_children("Tracers", "MeshInstance3D", true, false)[0] as MeshInstance3D
+	var target := device.find_children("Target", "MeshInstance3D", true, false)[0] as MeshInstance3D
+	var scars := device.find_children("Scars", "ScarPresenter", true, false)[0] as ScarPresenter
+	var started_before: int = _app.get_clip_voices_started()
+	assert_true(_weapon_change({"gestures": [{"tick": 0, "gesture": "hold"}],
+			"clock": {"playing": true, "ticks": 0}}))
+	var ribbons := 0
+	var fire_clip := false
+	for _frame in 900:
+		ribbons = max(ribbons, (tracers.mesh as ArrayMesh).get_surface_count())
+		fire_clip = fire_clip or gun_model.get_active_body_clip() == "anim_wpn_fire"
+		weapon = _weapon_state().get("body", {}).get("weapon", {})
+		if int(weapon.get("scars", 0)) >= 2 and ribbons > 0 and fire_clip \
+				and _app.get_clip_voices_started() > started_before:
+			break
+		_app.pump()
+		await get_tree().process_frame
+	assert_gt(int(weapon.get("shots", 0)), 1, "the held trigger fires on: %s" % str(weapon.get("state", {})))
+	assert_gt(ribbons, 0, "the tracers drawn as the game's ribbons")
+	assert_true(fire_clip, "the gun posed by the fire clip")
+	assert_true(target.visible, "the target stands")
+	assert_gt(int(weapon.get("scars", 0)), 0, "the stops scar the target")
+	assert_gt(scars.get_stats_record().world_surfaces, 0, "the game's ScarPresenter draws them")
+	assert_gt(_app.get_clip_voices_started(), started_before, "the Shell started the shot's wave")
+	var sources := {}
+	for effect: Variant in _weapon_state().get("body", {}).get("effects", []):
+		sources[String(effect.get("source", ""))] = true
+	assert_true(sources.has("begin") and sources.has("direct") and sources.has("impact"), str(sources.keys()))
+	assert_true(_weapon_change({"clock": {"playing": false}, "gestures": []}))
