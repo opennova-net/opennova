@@ -1,8 +1,11 @@
 #include <editor/blank/blank_factory.h>
 
+#include <base/gameprofile/required_resources.h>
 #include <base/io/strutil.h>
 
 #include "blank_makers.h"
+
+#include <editor/project/project_files.h>
 
 namespace opennova::editor {
 
@@ -115,6 +118,45 @@ const BlankFactory k_factories[] = {
 	{ "expansion_lwf", AssetKind::SoundBank, make_blank_sound_bank, "the expansion's sound bank, no set yet", false },
 	{ "expansion_locl_lwf", AssetKind::SoundBank, make_blank_sound_bank,
 	  "the expansion's localized sound bank, no set yet", false },
+	// DI-33: the rest of the files the game reads by name that the engine has a writer for, each the smallest file
+	// its loader takes (the makers cite it). The shell's sound bank; the music pairs, each bank made with its script
+	// (the game opens the bank first, and a bank of no stream must never be played from); the clips the shell and
+	// the player preview plays; the boot's loading screen, the end screens' backdrops, the player preview's
+	// environment cube; the celestial model the environment draws; the mission text a mission without its own
+	// reads; the HUD layout and the avatars table, each as the game has it with none. Not failsafe.bad, which
+	// retail ships none of: with it, a clip that does not load plays it in place of the slot's reset clip.
+	{ "menu_lwf", AssetKind::SoundBank, make_blank_sound_bank,
+	  "the shell's sound bank (the player profile's voice previews), no set yet", false },
+	{ "menumus_sbf", AssetKind::MusicBank, make_blank_music_bank,
+	  "the shell's music bank, no stream yet, made with its script (MENUMUS.BIN), which plays none", false, nullptr, 0,
+	  "menumus_bin" },
+	{ "menumus_bin", AssetKind::MusicScript, make_blank_menu_music_script,
+	  "the shell's music script: one section that plays no stream", false },
+	{ "gamemus_sbf", AssetKind::MusicBank, make_blank_music_bank,
+	  "a mission's music bank, no stream yet, made with its script (GAMEMUS.BIN), which plays none", false, nullptr, 0,
+	  "gamemus_bin" },
+	{ "gamemus_bin", AssetKind::MusicScript, make_blank_game_music_script,
+	  "a mission's music script: one section that plays no stream, and the handler the round's end runs", false },
+	{ "pi_idle_bad", AssetKind::Animation, make_blank_animation,
+	  "the player preview's idle clip: one bone at rest", false },
+	{ "dt1rst_bad", AssetKind::Animation, make_blank_animation,
+	  "the player preview's rest pose: one bone at rest", false },
+	{ "loading_pcx", AssetKind::Texture, make_blank_loading_screen,
+	  "the checkerboard the game draws for a missing texture, 800 by 600: the boot's loading screen", false },
+	{ "jo_epil_tga", AssetKind::Texture, make_blank_texture,
+	  "the checkerboard the game draws for a missing texture: the single-player win screen's backdrop", false },
+	{ "jo_epil2_tga", AssetKind::Texture, make_blank_texture,
+	  "the checkerboard the game draws for a missing texture: the single-player lose screen's backdrop", false },
+	{ "upl_3di", AssetKind::Model, make_blank_model,
+	  "a model of one triangle, the celestial model a mission's environment may draw", false },
+	{ "medmssn_bin", AssetKind::Strings, make_blank_empty_strings,
+	  "an empty mission text table, which a mission without its own reads", false },
+	{ "hwmcube_dds", AssetKind::Texture, make_blank_cube,
+	  "the player preview's environment cube: six faces of the checkerboard the game draws for a missing texture", false },
+	{ "hudpos_def", AssetKind::HudPosDefs, make_blank_hud_layout,
+	  "the HUD layout with nothing moved: every element where the game puts it with no layout", false },
+	{ "avatars_def", AssetKind::AvatarDefs, make_blank_avatars,
+	  "an avatars table with no part, nationality or combo yet", false },
 	// An expansion's own (ADR 0046 S16): its text table, naming it in the Mods list, and its version text.
 	{ "expansion_table", AssetKind::Strings, make_blank_expansion_table,
 	  "the expansion's text table: its name in the Mods list (the project's title) and an empty description", false },
@@ -149,6 +191,19 @@ const BlankFactory k_factories[] = {
 	{ "", AssetKind::Environment, make_blank_environment,
 	  "a daytime environment: noon light, sky and fog colours through the day, the stock cloud maps", true },
 	{ "", AssetKind::SoundBank, make_blank_sound_bank, "a sound bank with no set yet", true },
+	// DI-33: a new file of every other kind a reference names and the engine has a writer for.
+	{ "", AssetKind::Model, make_blank_model,
+	  "a model of one untextured triangle, a metre wide and a metre tall, standing on its origin, seen from both sides",
+	  true },
+	{ "", AssetKind::Animation, make_blank_animation, "a clip of one bone at rest, one looping frame", true },
+	{ "", AssetKind::AnimationMap, make_blank_animation_map,
+	  "an animation map of its anim_reset row alone, made with the clip it names (one bone at rest)", true },
+	{ "", AssetKind::Wave, make_blank_wave, "a wave of one sample of silence, 16-bit mono at 22050 a second", true },
+	{ "", AssetKind::DialogBank, make_blank_dialog_bank,
+	  "a mission's dialog bank with no dialog yet, made with the sound bank of its name", true },
+	{ "", AssetKind::Particles, make_blank_particles, "a particle file with no effect yet", true },
+	{ "", AssetKind::Credits, make_blank_credits, "a credits roll of one line, the project's title", true },
+	{ "", AssetKind::AiProfile, make_blank_ai_profile, "an AI profile of no type yet, its grammar in a comment", true },
 };
 
 const size_t k_factory_count = sizeof(k_factories) / sizeof(k_factories[0]);
@@ -230,7 +285,25 @@ const BlankFactory *find_blank_factory(std::string_view role, const std::string 
 	return find_blank_factory_for_kind(kind);
 }
 
-const BlankFactory *blank_companion(const BlankFactory &factory, const ProjectDocument &doc, std::string &name) {
+const BlankFactory *blank_companion(const BlankFactory &factory, const std::string &made, const ProjectDocument &doc,
+                                    std::string &name) {
+	if (factory.companion && *factory.companion) {
+		const gameprofile::RequiredResource *row = gameprofile::gameprofile_required_resource_by_role(factory.companion);
+		const BlankFactory *companion = find_blank_factory_for_role(factory.companion);
+		if (!row || !companion) return nullptr;
+		name = row->name;
+		return companion;
+	}
+	if (factory.kind == AssetKind::AnimationMap) {
+		name = blank_reset_clip_name(made);
+		return find_blank_factory_for_kind(AssetKind::Animation);
+	}
+	// A dialog bank's sounds are the sound bank of its name, which the game opens as it loads the dialog bank
+	// [orig: DialogManager_LoadFromFile @ 0x44e650, <base>.lwf @ 0x44e7d4..0x44e807]: made with it, empty.
+	if (factory.kind == AssetKind::DialogBank) {
+		name = utf8_of(path_of(made).stem()) + ".lwf";
+		return find_blank_factory_for_kind(AssetKind::SoundBank);
+	}
 	if (factory.kind != AssetKind::Menu || !doc.expansion.standalone()) return nullptr;
 	name = blank_pointer_name();
 	return find_blank_factory_for_role(kBlankPointerRole);

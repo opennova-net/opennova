@@ -32,6 +32,13 @@ inline constexpr uint32_t DDSCAPS_TEXTURE = 0x1000;
 bool dds_write_a8r8g8b8(const uint8_t *rgba, uint32_t width, uint32_t height, std::vector<uint8_t> &out,
                         std::string &error);
 
+// A cube map of six square faces, each `side` x `side` pixels of A8R8G8B8, one level, in DirectDraw's face order
+// (+X, -X, +Y, -Y, +Z, -Z), each `faces[i]` holding R, G, B, A, the top row first: the header's caps COMPLEX and
+// TEXTURE, its caps 2 the cube map flag (0x200) and all six faces (DDSCAPS2_CUBEMAP_ALL), as the game's own
+// HwmCube.dds states them. What D3DX's cube load takes [orig: sub_58A690 -> D3DXCreateCubeTextureFromFileInMemory
+// @ 0x68464e]. False, with `error`, for a face missing or a side of 0 or past what a pitch holds.
+bool dds_write_cube_a8r8g8b8(const uint8_t *const faces[6], uint32_t side, std::vector<uint8_t> &out, std::string &error);
+
 // The size a DDS header states: DirectDraw's layout, the "DDS " magic and then the
 // DDS_HEADER, whose height and width are the dwords at file offsets 12 and 16. False when
 // `size` is shorter than those fields or the magic is not there. A side may be 0.

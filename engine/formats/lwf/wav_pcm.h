@@ -30,5 +30,15 @@ struct WavPcm {
 bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 		std::string &r_error);
 
+// The plain RIFF/WAVE the game's wave loader reads (docs/audio/lwf-dbf-sound-re.md, "The wave
+// loader's rules" [orig: Audio_LoadWavFileFromArchive @ 0x766480]): RIFF..WAVE, one 16-byte `fmt `
+// chunk (PCM, mono: the loader refuses a second channel @ 0x7665e3) before one `data` chunk, nothing
+// else, the data padded to an even size. `data` is the samples as stored, `bits` 8 (unsigned) or 16
+// (signed little-endian), at `rate` per second. False with `error` for no sample (the loader steps over
+// an empty data chunk and walks past the file's end, @ 0x76659b..0x7665a5), a 16-bit data of an odd size,
+// other bits, or a rate of 0.
+bool wav_write_pcm_mono(const uint8_t *data, size_t size, uint32_t rate, uint16_t bits,
+		std::vector<uint8_t> &out, std::string &error);
+
 }  // namespace lwf
 }  // namespace opennova

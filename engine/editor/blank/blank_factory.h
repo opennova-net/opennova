@@ -58,6 +58,9 @@ struct BlankFactory {
 	bool free_form;      // the kind's file for a request with no role: exactly one per kind
 	const BlankParam *params = nullptr; // the values it takes (null: none), `param_count` of them
 	size_t param_count = 0;
+	// The role of the file the game reads with this one that is made with it where the project has none
+	// (blank_companion: a music bank's script, DI-33); null for none.
+	const char *companion = nullptr;
 };
 
 // The role of the text table New > Mission... makes beside its mission (its title and an empty
@@ -79,12 +82,18 @@ inline constexpr const char *kBlankPointerRole = "pointer";
 // The pointer's file name: hud::kSplashArrowImage.
 const char *blank_pointer_name();
 
-// The file a blank names that the editor makes with it in `doc`'s project, where the project has
-// none of that name: a menu's blank names the pointer (its root window's CURSOR), made by the
-// pointer's factory; no other blank names a file it does not make. Null for none, else `name` is
-// the file's name. A project that builds as an expansion takes none: its base game serves the
-// pointer, which a file of the expansion's would replace.
-const BlankFactory *blank_companion(const BlankFactory &factory, const ProjectDocument &doc, std::string &name);
+// The file a blank names, or the game reads with it, that the editor makes with it in `doc`'s project, where
+// the project has none of that name; `made` the made file's name. A menu's blank names the pointer (its root
+// window's CURSOR), made by the pointer's factory; a project that builds as an expansion takes none: its base
+// game serves the pointer, which a file of the expansion's would replace. An animation map's names its reset
+// clip (blank_reset_clip_name), made by the clip's factory (DI-33); a dialog bank's, the sound bank of its name the
+// game opens beside it, empty. A factory with a `companion` role: that
+// role's file (a music bank's script, opened after it). Null for none, else `name` is the file's name.
+const BlankFactory *blank_companion(const BlankFactory &factory, const std::string &made, const ProjectDocument &doc,
+                                    std::string &name);
+// The reset clip an animation map's blank names (blank_model.cpp, DI-33): <table>_rst.bad, the exporter's
+// name, its stem cut to fit a packed name.
+std::string blank_reset_clip_name(const std::string &map_name);
 
 // Whether `request`'s values fit the factory's params: each a param of it, every required one
 // given. False with `why` in plain words. (A reference param's value is checked against the

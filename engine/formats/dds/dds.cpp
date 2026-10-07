@@ -59,6 +59,36 @@ bool dds_write_a8r8g8b8(const uint8_t *rgba, uint32_t width, uint32_t height, st
 	return true;
 }
 
+bool dds_write_cube_a8r8g8b8(const uint8_t *const faces[6], uint32_t side, std::vector<uint8_t> &out, std::string &error) {
+	out.clear();
+	for (int f = 0; f < 6; ++f)
+		if (faces == nullptr || faces[f] == nullptr) {
+			error = "A cube map needs its six faces.";
+			return false;
+		}
+	if (side == 0 || side > 0xFFFFFFFFu / 4) {
+		error = "A cube map's side is a pixel or more, and its row fits the pitch field.";
+		return false;
+	}
+	std::vector<uint8_t> face;
+	if (!dds_write_a8r8g8b8(faces[0], side, side, face, error)) return false;
+	// The 2D writer's header with the cube's caps: caps at offset 108, caps 2 at 112.
+	out.assign(face.begin(), face.begin() + DDS_HEADER_SIZE);
+	const auto put = [&out](size_t at, uint32_t value) {
+		for (int b = 0; b < 4; ++b) out[at + b] = uint8_t(value >> (8 * b));
+	};
+	put(108, DDSCAPS_COMPLEX | DDSCAPS_TEXTURE);
+	put(112, 0x200u | DDSCAPS2_CUBEMAP_ALL);
+	const size_t pixels = size_t(side) * side;
+	out.reserve(DDS_HEADER_SIZE + 6 * pixels * 4);
+	for (int f = 0; f < 6; ++f)
+		for (size_t i = 0; i < pixels; ++i) {
+			const uint8_t *p = faces[f] + i * 4;
+			out.insert(out.end(), {p[2], p[1], p[0], p[3]});
+		}
+	return true;
+}
+
 bool dds_header_size(const uint8_t *bytes, size_t size, uint32_t &width, uint32_t &height) {
 	if (bytes == nullptr || size < 20 || std::memcmp(bytes, "DDS ", 4) != 0) return false;
 	height = io::read_u32_le(bytes + 12);
