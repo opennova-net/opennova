@@ -3,6 +3,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <optional>
 
 #include <base/io/strutil.h>
@@ -207,10 +208,63 @@ std::vector<ReferenceChoice> picker_choices(const AssetGraph *graph, const Docum
 		std::vector<ReferenceChoice> listed = picking.reference == ReferenceKind::TextId && picking.key_prefix
 		                                              ? text_key_choices(*graph, picking)
 		                                              : reference_choices(*graph, picking);
+		// A number naming its definition by itself plus an offset (an ammo's tracer id, FieldUse::name_offset):
+		// each definition by the number that names it (an item's id less 100000), one no such number names
+		// (none above 0) left out; its own name kept as the symbol it stands for.
+		if (picking.name_offset) {
+			std::vector<ReferenceChoice> offset;
+			for (ReferenceChoice &choice : listed) {
+				const std::optional<int> id = strutil::parse_int(choice.name);
+				if (!id || int64_t(*id) - picking.name_offset <= 0) continue;
+				choice.symbol = std::move(choice.name);
+				choice.symbol_scope = picking.scope;
+				choice.name = std::to_string(int64_t(*id) - picking.name_offset);
+				offset.push_back(std::move(choice));
+			}
+			listed = std::move(offset);
+		}
 		choices.insert(choices.end(), listed.begin(), listed.end());
 	}
 	word_choices(document, address, picking, names, choices);
 	return choices;
+}
+
+size_t name_characters(const std::string &name) {
+	size_t count = 0;
+	for (const char c : name) count += (static_cast<unsigned char>(c) & 0xC0) != 0x80 ? 1 : 0;
+	return count;
+}
+
+size_t field_name_limit(const FieldUse &field) {
+	if (!field.schema || field.schema->type != FieldType::Text || field.schema->width < 2) return 0;
+	return field.schema->width - 1;
+}
+
+std::vector<ReferenceCompletion> complete_reference(const std::vector<ReferenceChoice> &choices, const FieldUse &field,
+                                                    const std::string &typed) {
+	const FieldUse picking = picked_as(field);
+	// As the kind's lookup compares names: an item id's digits as written, any other without case (graph_names'
+	// symbol_name keys; a file name's case and its slashes alike).
+	const bool exact_case = reference_row(picking.reference).name_case == NameCase::Exact;
+	const auto spelled = [exact_case](const std::string &text) { return exact_case ? text : strutil::to_upper(text); };
+	const std::string wanted = spelled(typed);
+	const size_t limit = field_name_limit(field);
+	std::vector<ReferenceCompletion> first, then, unreached;
+	for (const ReferenceChoice &choice : choices) {
+		ReferenceCompletion completion;
+		completion.choice = choice;
+		const std::string name = spelled(choice.name);
+		completion.prefix = name.compare(0, wanted.size(), wanted) == 0;
+		completion.exact = completion.prefix && name.size() == wanted.size();
+		completion.fits = !limit || name_characters(choice.name) <= limit;
+		const bool holds = completion.prefix || name.find(wanted) != std::string::npos ||
+		                   (!choice.label.empty() && strutil::to_upper(choice.label).find(strutil::to_upper(typed)) != std::string::npos);
+		if (!holds) continue;
+		(choice.inert ? unreached : completion.prefix ? first : then).push_back(std::move(completion));
+	}
+	first.insert(first.end(), std::make_move_iterator(then.begin()), std::make_move_iterator(then.end()));
+	first.insert(first.end(), std::make_move_iterator(unreached.begin()), std::make_move_iterator(unreached.end()));
+	return first;
 }
 
 std::string edge_record_words(const GraphEdge &edge) {

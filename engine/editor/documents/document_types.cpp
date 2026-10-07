@@ -60,7 +60,7 @@ constexpr DocumentType kTypes[] = {
 	// Each defines a name another file names and nothing defines (DI-15, define_symbol): a weapon, an ammo, an
 	// item or a powerup row; a string id; a screen or a window; a style variable.
 	{ DocumentTypeId::Catalog, "catalog", make_catalog, validate_catalog_file,
-			DefCatalogDocument::schema, catalog_finding_codes, nullptr, nullptr, nullptr, nullptr,
+			DefCatalogDocument::schema, catalog_finding_codes, nullptr, nullptr, nullptr, catalog_references,
 			catalog_record_label, nullptr, nullptr, nullptr, nullptr, nullptr, define_catalog_symbol },
 	{ DocumentTypeId::Strings, "strings", make_strings, validate_strings_file,
 			StringsDocument::schema, strings_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
