@@ -144,6 +144,8 @@ constexpr RequestField kFields[] = {
 			"send_to_back), a model's frame (its camera on the marker of the first id, else on the "
 			"whole model) or place_in_mission (the Place tool of the mission last active armed with the "
 			"model's item, the item made in the item catalog first where none draws it; no ids), "
+			"a definition's place_in_mission (an item record, the one row of ids or the record shown, armed in "
+			"the Place tool of the mission last active), "
 			"or a mission's frame, top, ground, select_same (every entity of the "
 			"selected entities' items), duplicate (the ids, else the selection, copied and moved by "
 			"[east, north] metres, one batch) or paste (the clipboard's copied entities and areas, "

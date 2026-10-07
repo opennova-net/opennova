@@ -200,7 +200,8 @@ public:
 			std::string &error) const override;
 	// "frame" (the camera on the drawn model), "replay" (the clock sought to tick 0: the state played anew); a
 	// weapon's gestures "fire", "hold", "release", "reload", "scope", "switch" (one on the clock's tick, the clock
-	// run) and "clear" (none).
+	// run) and "clear" (none); "place_in_mission" (DI-18: an item record, the row `ids` names or the record shown,
+	// armed in the Place tool of the mission last active, preview/model_placement's plan_place_item_in_mission).
 	bool command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
 			CanvasRequests &out, std::string &error) const override;
 	io::JsonValue options_json() const override;

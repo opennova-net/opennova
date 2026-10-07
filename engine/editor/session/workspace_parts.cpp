@@ -126,8 +126,21 @@ constexpr WorkspaceMember kFind[] = {
 	{ "match_case", J::Boolean, "Aa: case counts." },
 };
 constexpr WorkspaceMember kProjectFind[] = {
-	{ "open", J::Boolean, "Find in project is open (Ctrl+Shift+F; a project open)." },
-	{ "text", J::String, "What it finds: the project_search query's hits.", kTextLongest },
+	{ "open", J::Boolean,
+			"The project's finder is open (a project open): Find in project (Ctrl+Shift+F), Go to file (Ctrl+P), Go to "
+			"name (Ctrl+T) or Find usages (Shift+F12), as its scope says." },
+	{ "text", J::String,
+			"What it finds: the project_search query's hits of its scope; Find usages' uses whose line holds it. Opened "
+			"on another scope or another subject, it starts empty unless the change names it.", kTextLongest },
+	{ "scope", J::String,
+			"What it lists: all (every file and name, Find in project), files (the files alone, Go to file), names (the "
+			"names the files define alone, Go to name), or usages (the uses of path, or of its record at locator: the "
+			"usages query's, Find usages)." },
+	{ "path", J::String,
+			"Find usages' file, a project file by its path or logical name (scope usages needs it).", kPathLongest },
+	{ "locator", J::String,
+			"Find usages' record in that file, by its locator (a native file's record by its path, as a Go to names "
+			"it); \"\" the file itself.", kPathLongest },
 };
 constexpr WorkspaceMember kFiles[] = {
 	{ "filter", J::String,
@@ -204,7 +217,8 @@ constexpr WorkspacePartRow kParts[] = {
 	{ "rename", kRename, std::size(kRename), "Rename everywhere." },
 	{ "rename_back", kRenameBack, std::size(kRenameBack), "Rename back." },
 	{ "find", kFind, std::size(kFind), "The Document window's find bar." },
-	{ "project_find", kProjectFind, std::size(kProjectFind), "Find in project." },
+	{ "project_find", kProjectFind, std::size(kProjectFind),
+	  "The project's finder: Find in project, Go to file, Go to name, Find usages." },
 	{ "files", kFiles, std::size(kFiles), "Files' filter, kind and order." },
 	{ "import", kImport, std::size(kImport), "The import dialog's filters, Replace existing files and its checks." },
 	{ "problems", kProblems, std::size(kProblems), "Problems' filters and its confirmation." },
@@ -595,15 +609,33 @@ bool set_find(Change &change, const JsonValue &part) {
 	return true;
 }
 
+// The project's finder (DI-18: four scopes over one modal). Find usages names a project file, its record by a
+// locator; another scope keeps no subject. Opened on another scope or subject, the text starts empty unless the
+// change names one.
 bool set_project_find(Change &change, const JsonValue &part) {
 	WorkspaceView::ProjectFind find = change.workspace().project_find;
 	if (const JsonValue *open = part.get("open")) {
 		if (open->boolean && !change.view.project.open) return change.closed("The project", "open or make one first");
 		find.open = open->boolean;
 	}
-	if (const JsonValue *text = part.get("text")) find.text = text->string;
+	if (const JsonValue *scope = part.get("scope"); scope && !find_scope_from_token(scope->string, find.scope))
+		return change.refuse("The finder has no scope \"" + scope->string + "\" (all, files, names, usages).");
+	if (const JsonValue *path = part.get("path")) find.path = path->string;
+	if (const JsonValue *locator = part.get("locator")) find.locator = locator->string;
+	if (find.scope != WorkspaceView::FindScope::Usages) {
+		find.path.clear();
+		find.locator.clear();
+	} else if (const AssetEntry *file = project_file(change.view, find.path)) {
+		find.path = file->relative_path;
+	} else if (find.open) {
+		return change.refuse(find.path.empty() ? std::string("Find usages names a project file (path).")
+		                                        : "No project file is " + find.path + ".", find.path);
+	}
 	WorkspaceView::ProjectFind &held = change.workspace().project_find;
-	if (find.open == held.open && find.text == held.text) return false;
+	const bool elsewhere = find.scope != held.scope || find.path != held.path || find.locator != held.locator;
+	if (const JsonValue *text = part.get("text")) find.text = text->string;
+	else if (elsewhere) find.text.clear();
+	if (find.open == held.open && find.text == held.text && !elsewhere) return false;
 	held = std::move(find);
 	return true;
 }
@@ -859,7 +891,8 @@ bool focus_window(Change &change, const std::string &token) {
 
 // What the workspace holds open, for telling a dialog opened (or opened on another target) since.
 struct Openings {
-	bool new_project = false, settings = false, project_find = false, rename_back = false;
+	bool new_project = false, settings = false, rename_back = false;
+	std::string project_find; // its scope and subject while open
 	AssetKind new_file = AssetKind::kCount;
 	std::string file_rename, rename;
 	uint64_t confirm = 0;
@@ -869,7 +902,9 @@ Openings openings_of(const WorkspaceView &w) {
 	Openings out;
 	out.new_project = w.new_project.open;
 	out.settings = w.settings.open;
-	out.project_find = w.project_find.open;
+	if (w.project_find.open)
+		out.project_find = std::string(find_scope_token(w.project_find.scope)) + '\n' + w.project_find.path + '\n' +
+		                   w.project_find.locator;
 	out.rename_back = w.rename_back.open;
 	out.new_file = w.new_file.kind;
 	out.file_rename = w.file_rename.path;
@@ -881,8 +916,9 @@ Openings openings_of(const WorkspaceView &w) {
 }
 bool opened_since(const Openings &before, const Openings &after) {
 	if ((after.new_project && !before.new_project) || (after.settings && !before.settings) ||
-	    (after.project_find && !before.project_find) || (after.rename_back && !before.rename_back))
+	    (after.rename_back && !before.rename_back))
 		return true;
+	if (!after.project_find.empty() && after.project_find != before.project_find) return true;
 	if (after.new_file != AssetKind::kCount && after.new_file != before.new_file) return true;
 	if (!after.file_rename.empty() && after.file_rename != before.file_rename) return true;
 	if (!after.rename.empty() && after.rename != before.rename) return true;
@@ -1176,6 +1212,12 @@ void workspace_tidies(SessionCore &core) {
 		workspace.file_rename = WorkspaceView::FileRename();
 		moved = true;
 	}
+	// Find usages of a file the files no longer have closes.
+	WorkspaceView::ProjectFind &find = workspace.project_find;
+	if (find.open && find.scope == WorkspaceView::FindScope::Usages && !project_file(view, find.path)) {
+		find.open = false;
+		moved = true;
+	}
 	for (auto &[path, shown] : workspace.documents) {
 		if (!shown.remove_screen) continue;
 		const DocumentBase *document = open_document(view, path);
@@ -1196,12 +1238,19 @@ void workspace_tidies(SessionCore &core) {
 }
 
 bool workspace_follows_moves(WorkspaceView &workspace, const std::vector<std::pair<std::string, std::string>> &moved) {
-	for (const auto &[from, to] : moved)
+	bool followed = false;
+	for (const auto &[from, to] : moved) {
 		if (!workspace.card.path.empty() && workspace.card.path == from) {
 			workspace.card.path = to;
-			return true;
+			followed = true;
 		}
-	return false;
+		// Find usages of a file renamed lists the uses of it under its new name.
+		if (!workspace.project_find.path.empty() && workspace.project_find.path == from) {
+			workspace.project_find.path = to;
+			followed = true;
+		}
+	}
+	return followed;
 }
 
 ShownModal shown_modal(const SessionView &view) {
@@ -1325,6 +1374,11 @@ JsonValue workspace_to_json(const SessionView &view) {
 	JsonValue project_find = JsonValue::make_object();
 	project_find.set("open", flag(workspace.project_find.open));
 	project_find.set("text", text(workspace.project_find.text));
+	project_find.set("scope", text(find_scope_token(workspace.project_find.scope)));
+	if (workspace.project_find.scope == WorkspaceView::FindScope::Usages) {
+		project_find.set("path", text(workspace.project_find.path));
+		project_find.set("locator", text(workspace.project_find.locator));
+	}
 	out.set("project_find", std::move(project_find));
 	JsonValue files = JsonValue::make_object();
 	files.set("filter", text(workspace.files.filter));
@@ -1477,6 +1531,12 @@ void forget_project_workspace(WorkspaceView &workspace) {
 	workspace.rename_back = WorkspaceView::RenameBack();
 	workspace.find.open = false;
 	workspace.project_find.open = false;
+	// Find usages' subject is the project's: the finder opens again on another project's files in Find in project.
+	if (workspace.project_find.scope == WorkspaceView::FindScope::Usages) {
+		workspace.project_find.scope = WorkspaceView::FindScope::All;
+		workspace.project_find.path.clear();
+		workspace.project_find.locator.clear();
+	}
 	// Another project lists its own files: the filter and the kind start afresh.
 	workspace.files = WorkspaceView::Files();
 	workspace.problems.confirm = WorkspaceView::Problems::Confirm();
