@@ -29,10 +29,13 @@ bool mission_tool_from_token(const std::string &token, MissionTool &out);
 // axes; 0 free; the toolbar's Snap), the steps a turned entity's heading snaps to (degrees; 0 whole
 // degrees; its Turn), and the Place palette's search text; like the tool, the canvas's alone (no
 // picture changes). DI-29: the ground overlay the device tints the terrain with (mission_ground_overlay.h:
-// the surface classes, or the foliage).
+// the surface classes, or the foliage). DI-31: three more of the device's layers, the terrain's foliage as the
+// game grows it from its foliage map, each placed item's effects as the mission's start attaches them
+// (mission_effects.h), and the lights the game lights the scene with (the placed models' own).
 // Set by a SetViewport's `options` member (its wire form below), every member optional.
 struct MissionViewportOptions {
 	bool terrain = true, sky = true, water = true, models = true, shadows = true;
+	bool foliage = true, effects = true, lights = true;
 	bool items = true, buildings = true, markers = true, organics = true;
 	bool areas = true, paths = true, labels = false;
 	float mark_range = 600.0f;
@@ -54,9 +57,9 @@ inline constexpr float kMissionTurns[] = { 0.0f, 5.0f, 15.0f, 45.0f, 90.0f };
 bool operator==(const MissionViewportOptions &a, const MissionViewportOptions &b);
 inline bool operator!=(const MissionViewportOptions &a, const MissionViewportOptions &b) { return !(a == b); }
 
-// The wire form: {show: {terrain, sky, water, models, shadows}, marks: {items, buildings, markers,
-// organics, areas, paths, labels}, mark_range, stick, time (null: the mission's start time), tool
-// (its token), item, path, snap, turn, palette, overlay (none, surfaces or foliage)}.
+// The wire form: {show: {terrain, sky, water, models, shadows, foliage, effects, lights}, marks: {items,
+// buildings, markers, organics, areas, paths, labels}, mark_range, stick, time (null: the mission's start
+// time), tool (its token), item, path, snap, turn, palette, overlay (none, surfaces or foliage)}.
 io::JsonValue mission_options_to_json(const MissionViewportOptions &options);
 // A SetViewport's options member set over `held`: every member checked before any applies; false,
 // nothing changed, with `error` naming the member and what it takes.
