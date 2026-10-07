@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <string>
@@ -130,6 +131,9 @@ RenamePlan plan_move(const ProjectPaths &paths, const ProjectDocument &project, 
                      const std::vector<ImportedSource> *imports = nullptr);
 // A project-relative path's folder ("" the top level).
 std::string folder_of_path(const std::string &relative);
+// Whether the folder `dir` (on disk) is the project's export folder `export_dir`, one an export keeps beside
+// it, or a folder under either: no file of the project's sits there (the scan passes them by).
+bool in_export_folder(const std::filesystem::path &dir, const std::filesystem::path &export_dir);
 
 // A split (ADR 0046 S18): the file `file` (a texture two uses ask different things of) copied as
 // `new_name`, and the fields of the files `referrers` lists that name it rewritten to the copy, every
