@@ -17,7 +17,6 @@
 #include "util/color_convert.h"
 #include "simulation/simulation.h"
 
-#include <runtime/environment/water_mirror.h>
 #include <runtime/mission/placement_traits.h>
 
 #include <godot_cpp/classes/camera3d.hpp>
@@ -495,21 +494,11 @@ void EffectLightDirector::_rebuild_static_light_rows() {
 		}
 		// The row's per-entry lighting state (the u_entity_light lane a
 		// MultiMesh instance cannot carry): a building's ROBJ 1+ lerps by its
-		// own daylight, a contained static lerps with t = 0.
-		const opennova::renderer::EntityLightingState lane =
-				opennova::renderer::static_row_entity_lighting(inputs.is_building,
-						descriptor.robj_index, descriptor.light_transfer, inputs.blink_hit);
-		// w: the water mirror's CLIP arming as an offset from the instance
-		// origin (a static row is never a person; the building pass tests a
-		// building's floor, the first entity wave the bound radius).
-		const opennova::env::MirrorClipWave clip_wave = inputs.is_building ?
-				opennova::env::MirrorClipWave::kSectorModel :
-				opennova::env::MirrorClipWave::kEntity;
-		entity_lights[atlas_row] = Vector4(lane.effect_scale, lane.interior_lerp ? 1.0f : 0.0f,
-				lane.interior_daylight,
-				opennova::env::water_mirror_clip_origin_offset(clip_wave,
-						inputs.is_building ? source.model_floor_q16 :
-											 source.entity_bound_radius_q16));
+		// own daylight, a contained static lerps with t = 0; w the water
+		// mirror's CLIP arming.
+		entity_lights[atlas_row] = LightScene::static_row_entity_lane(inputs.is_building,
+				descriptor.robj_index, descriptor.light_transfer, inputs.blink_hit,
+				source.model_floor_q16, source.entity_bound_radius_q16);
 		const opennova::renderer::LightActiveGroups groups =
 				opennova::renderer::static_light_row_groups(inputs);
 		owner_entities[atlas_row] = static_cast<int64_t>(groups.owner_group_entity);

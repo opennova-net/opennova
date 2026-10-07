@@ -146,6 +146,19 @@ public:
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
 			int64_t p_rows_revision = -1,
 			const PackedVector4Array &p_entity_lights = PackedVector4Array());
+	// One static row's p_entity_lights lane: renderer::static_row_entity_lighting
+	// (effectScale, interior lerp, daylight) and, in w, the water mirror's CLIP
+	// arming as an offset from the instance origin (a building's floor in the
+	// sector-model pass, the bound radius in the first entity wave; a static
+	// row is never a person). `p_contained` is the row's placement blink hit.
+	static Vector4 static_row_entity_lane(bool p_is_building, int32_t p_robj_index,
+			float p_light_transfer, bool p_contained, int32_t p_model_floor_q16,
+			int32_t p_entity_bound_radius_q16);
+	// The atlas render_static_frame built, published again as
+	// opennova_static_point_light_rows (a picture that shares the global with
+	// another: the editor's mission device, ViewportApplier::publish_scene_state).
+	// Nothing while no atlas is built.
+	void publish_static_rows() const;
 
 	// The procedural corona texture "texlightcrn" as RGBA8 bytes,
 	// corona_texture_size() square — opennova::renderer::corona_texture_argb carries

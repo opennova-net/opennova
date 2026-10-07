@@ -136,6 +136,19 @@ public:
 	// same admission verdict) is a no-op that preserves cached plans.
 	void replace_casters(std::vector<TerrainStaticShadowPlannerCaster> casters,
 			bool admitted_geometry_missing);
+	// Whether a new caster snapshot names the pages its changes make stale.
+	// Off (the game): a page keeps what it was composed with when a caster
+	// changes, as retail keeps a page until it is claimed again, its TOD epoch
+	// retires it or an invalidation names its region (a destroyed entity's,
+	// Terrain_InvalidateTileCacheRegion @0x605C10). On (the editor's mission
+	// view, which shows the mission as a load composes it): each admitted caster
+	// added, removed, moved, given another model, or admitted or refused (a
+	// NoShadow set or cleared, a source hidden) names its reach before and
+	// after (terrain_static_shadow_caster_reach).
+	void set_reports_caster_changes(bool on);
+	bool reports_caster_changes() const { return reports_caster_changes_; }
+	// The reaches named since the last take, in the order the changes came.
+	std::vector<TerrainStaticShadowReach> take_changed_reaches();
 
 	bool snapshot_exact() const { return casters_->exact; }
 	std::size_t candidate_count() const {
@@ -222,6 +235,8 @@ private:
 			plan_cache_;
 	TerrainStaticShadowPlannerDiagnostics diagnostics_;
 	uint64_t state_revision_ = 1;
+	bool reports_caster_changes_ = false;
+	std::vector<TerrainStaticShadowReach> changed_reaches_;
 };
 
 // The stable caster key the collector draws carry.
