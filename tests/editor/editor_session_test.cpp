@@ -38,6 +38,7 @@
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/view_json.h>
+#include <editor/project/local_settings.h>
 #include <editor/project/project_files.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
@@ -663,13 +664,12 @@ static int test_retail_play() {
 	FakePlatform platform;
 	FilePreferencesStore preferences(dir.file("settings.json"));
 	ProjectSession session(platform, preferences);
-	TEST_EXPECT(
-			!session.view().project.play_retail && session.view().project.retail_directory.empty());
+	TEST_EXPECT(session.view().project.play_mode == PlayMode::Runtime && session.view().project.retail_directory.empty());
 	session.handle(request::new_project(dir.file("project"), "Retail test"));
 	session.run_operations();
 	editor_test::create_missing_files(session);
 	ProjectSettingsChange retail;
-	retail.play_in_install = true;
+	retail.play_mode = PlayMode::Install;
 	editor_test::apply_settings(session, retail);
 	session.handle(request::play());
 	session.run_operations();
@@ -735,11 +735,18 @@ static int test_retail_play() {
 	TEST_EXPECT(!output_has(session.view(), "PFF LOADED FILE: gametext.bin") && !session.view().activity.play_file_log_read &&
 	            view_section_to_json(session.view(), ViewSection::Run).get("file_log")->is_null());
 	{
+		// Another editor on the same settings file: the install it last chose is the editor's, how this project
+		// plays is the project's alone (its local.json), never the editor's.
 		FakePlatform other;
 		FilePreferencesStore reopened_preferences(dir.file("settings.json"));
 		ProjectSession reopened(other, reopened_preferences);
-		TEST_EXPECT(reopened.view().project.play_retail &&
+		TEST_EXPECT(reopened.view().project.play_mode == PlayMode::Runtime &&
 				reopened.view().project.retail_directory == install);
+		LocalSettings local;
+		Diagnostic finding;
+		std::string settings;
+		TEST_EXPECT(load_local_settings(ProjectPaths::for_root(project), local, finding) && local.play_mode == PlayMode::Install);
+		TEST_EXPECT(read_file_text(dir.file("settings.json"), settings, io_error) && settings.find("play_in_install") == std::string::npos && settings.find("play_mode") == std::string::npos);
 	}
 	session.handle(request::build());
 	session.run_operations();
@@ -754,7 +761,7 @@ static int test_retail_play() {
 	{
 		const opennova::io::JsonValue run_json = view_section_to_json(session.view(), ViewSection::Run);
 		const opennova::io::JsonValue *log = run_json.get("file_log");
-		TEST_EXPECT(log && log->is_object() && log->get_int("lines", 0) == 2 && !run_json.get_bool("ran_strict", true) &&
+		TEST_EXPECT(log && log->is_object() && log->get_int("lines", 0) == 2 && run_json.get_string("ran_mode", "") == "install" &&
 		            log->get("archives")->array.size() == 1 && log->get("archives")->array[0].string == "resource.pff" &&
 		            log->get("from_archives")->array.size() == 1 && log->get("from_disk")->array.empty());
 	}
@@ -809,7 +816,7 @@ static int test_retail_play() {
 	// leaves as it was: none of the game install's files is its, and lenient's game.cfg stays for its next
 	// Play.
 	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "retail executable"));
-	retail.play_in_install = false;
+	retail.play_mode = PlayMode::Runtime;
 	editor_test::apply_settings(session, retail);
 	const std::string lenient_tree = editor_test::tree_digest(run);
 	session.handle(request::play());
@@ -841,8 +848,8 @@ static int test_retail_play() {
 	return 0;
 }
 
-// Strict Play in the game install (the editor's play_in_install_strict, set by apply_project_settings and
-// kept): the run directory holds the build's files and the install's program and Bink DLL alone, the game
+// Strict Play in the game install (the project's play_mode strict, set by apply_project_settings and kept in
+// its local.json, never the editor's): the run directory holds the build's files and the install's program and Bink DLL alone, the game
 // launched /w /FRISK with no /d. Its file log is read once the game exits, never while it runs. The first
 // run, which found no game.cfg, writing one and quitting on its own with code 0 soon after it started, is
 // started once more in the same run directory, said in Output (and on the run section), once the game's
@@ -866,17 +873,22 @@ static int test_strict_play() {
 	            editor_test::write_text(install + "/score.ini", "install scores"));
 	editor_test::set_game_install(session, install);
 	ProjectSettingsChange strict;
-	strict.play_in_install = true;
-	strict.play_in_install_strict = true;
+	strict.play_mode = PlayMode::Strict;
 	editor_test::apply_settings(session, strict);
-	TEST_EXPECT(v.project.play_retail && v.project.play_in_install_strict &&
-	            view_section_to_json(v, ViewSection::Run).get_bool("strict", false) &&
-	            view_section_to_json(v, ViewSection::Preferences).get_bool("play_in_install_strict", false));
+	TEST_EXPECT(v.project.play_mode == PlayMode::Strict &&
+	            view_section_to_json(v, ViewSection::Run).get_string("play_mode", "") == "strict" &&
+	            view_section_to_json(v, ViewSection::Preferences).get_string("play_mode", "") == "strict");
 	{
+		// Kept with the project (its local.json), never the editor's: another editor on the same settings
+		// file, no project open, plays in the OpenNova runtime.
 		FakePlatform other;
 		FilePreferencesStore reopened_preferences(dir.file("settings.json"));
 		ProjectSession reopened(other, reopened_preferences);
-		TEST_EXPECT(reopened.view().project.play_in_install_strict); // the editor's setting, kept
+		TEST_EXPECT(reopened.view().project.play_mode == PlayMode::Runtime);
+		LocalSettings local;
+		Diagnostic finding;
+		TEST_EXPECT(load_local_settings(ProjectPaths::for_root(v.project.root), local, finding) &&
+		            local.play_mode == PlayMode::Strict);
 	}
 
 	// Another game of the install runs (its gate held): refused before anything is built.
@@ -888,7 +900,7 @@ static int test_strict_play() {
 
 	session.handle(request::play());
 	session.run_operations();
-	TEST_EXPECT(platform.spawns == 1 && v.activity.play_state == PlayState::Running && v.activity.play_strict);
+	TEST_EXPECT(platform.spawns == 1 && v.activity.play_state == PlayState::Running && v.activity.play_run_mode == "strict");
 	const std::string project = v.project.root;
 	const std::string run = project + "/.opennova/run/strict/1";
 	const std::string built = v.activity.last_build->build_dir;
@@ -944,7 +956,7 @@ static int test_strict_play() {
 	{
 		const opennova::io::JsonValue run_json = view_section_to_json(v, ViewSection::Run);
 		const opennova::io::JsonValue *log = run_json.get("file_log");
-		TEST_EXPECT(run_json.get_bool("ran_strict", false) && log && log->is_object() && log->get_int("lines", 0) == 6 &&
+		TEST_EXPECT(run_json.get_string("ran_mode", "") == "strict" && log && log->is_object() && log->get_int("lines", 0) == 6 &&
 		            log->get("archives")->array.size() == 3 && log->get("from_archives")->array.size() == 2 &&
 		            log->get("from_archives")->array[1].string == "main.mnu" && log->get("from_disk")->array.empty());
 	}
@@ -960,7 +972,7 @@ static int test_strict_play() {
 	session.handle(request::play());
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 3 && v.activity.play_state == PlayState::Running && platform.last_plan.working_dir == run &&
-	            !v.activity.play_fresh && v.activity.play_strict);
+	            !v.activity.play_fresh && v.activity.play_run_mode == "strict");
 	TEST_EXPECT(v.activity.play_kept == std::vector<std::string>({"game.cfg", "ghw.txt", "player.sav"}));
 	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "written by the game");
 	TEST_EXPECT(read_file_text(run + "/player.sav", text, io_error) && text == "the game's player");
@@ -985,12 +997,12 @@ static int test_strict_play() {
 	launcher.executable = runtime;
 	session.set_launcher_source(editor_test::fixed_launcher(launcher));
 	ProjectSettingsChange on_runtime;
-	on_runtime.play_in_install = false;
+	on_runtime.play_mode = PlayMode::Runtime;
 	editor_test::apply_settings(session, on_runtime);
 	session.handle(request::play());
 	session.run_operations();
 	const std::string runtime_run = project + "/.opennova/run/runtime/1";
-	TEST_EXPECT(platform.spawns == 4 && v.activity.play_state == PlayState::Running && !v.activity.play_strict &&
+	TEST_EXPECT(platform.spawns == 4 && v.activity.play_state == PlayState::Running && v.activity.play_run_mode == "runtime" &&
 	            platform.last_plan.executable == runtime && platform.last_plan.working_dir == runtime_run &&
 	            v.activity.play_kept.empty() && !fs::exists(runtime_run + "/game.cfg"));
 	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "written by the game");
@@ -1001,7 +1013,7 @@ static int test_strict_play() {
 	editor_test::apply_settings(session, strict);
 	session.handle(request::play());
 	session.run_operations();
-	TEST_EXPECT(platform.spawns == 5 && v.activity.play_state == PlayState::Running && v.activity.play_strict &&
+	TEST_EXPECT(platform.spawns == 5 && v.activity.play_state == PlayState::Running && v.activity.play_run_mode == "strict" &&
 	            platform.last_plan.working_dir == run && !v.activity.play_fresh);
 	TEST_EXPECT(v.activity.play_kept == std::vector<std::string>({"game.cfg", "ghw.txt", "player.sav"}));
 	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "written by the game");
@@ -1054,6 +1066,123 @@ static int test_strict_play() {
 	            v.findings.diagnostics.back().code() == "play.strict_expansion" &&
 	            v.findings.diagnostics.back().message.find("Strict Play of an expansion needs its base game's build; "
 	                                                       "not yet supported") == 0);
+	return 0;
+}
+
+// Play's settings are each project's (its .opennova/local.json), never the editor's, which every editor on
+// the machine shares: two projects opened one after another in one editor keep their own modes, a project
+// that never chose playing in the OpenNova runtime and saving first whatever the project before chose; an
+// editor on the same settings file sees neither project's choice, and the settings file names none. A Play
+// naming its own mode (play_mode) or save_before_play runs so for itself alone, the project's own as it was,
+// and a Play joining a running build runs in the mode it named. With no project open, Play's settings are
+// refused (project.none), nothing written.
+static int test_play_settings_per_project() {
+	editor_test::TempProjectDir dir("opennova_editor_play_settings_per_project");
+	FakePlatform platform;
+	FilePreferencesStore preferences(dir.file("settings.json"));
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	const std::string runtime = dir.file("runtime/opennova.exe");
+	const std::string install = dir.file("install");
+	TEST_EXPECT(editor_test::write_text(runtime, "MZ") && editor_test::write_text(install + "/Jointops.exe", "exe") &&
+	            editor_test::write_text(install + "/binkw32.dll", "bink") &&
+	            editor_test::write_text(install + "/game.cfg", "settings"));
+	PlayLauncher launcher;
+	launcher.executable = runtime;
+	session.set_launcher_source(editor_test::fixed_launcher(launcher));
+	ProjectSettingsChange strict;
+	strict.play_mode = PlayMode::Strict;
+	session.handle(request::apply_project_settings(strict));
+	TEST_EXPECT(has_code(session.outcome().findings, "project.none") && v.project.play_mode == PlayMode::Runtime);
+	const auto plays_in = [&](const char *mode) {
+		const int spawns = platform.spawns;
+		session.run_operations();
+		const bool ran = platform.spawns == spawns + 1 && v.activity.play_state == PlayState::Running &&
+		                 v.activity.play_run_mode == mode &&
+		                 view_section_to_json(v, ViewSection::Run).get_string("ran_mode", "") == mode &&
+		                 (std::string(mode) == "runtime" ? platform.last_plan.executable == runtime
+		                                                 : platform.last_plan.executable.find("Jointops.exe") != std::string::npos);
+		session.handle(request::stop_play());
+		session.poll();
+		return ran && v.activity.play_state == PlayState::Stopped;
+	};
+
+	// The first project, set to Strict Play in the game install.
+	const std::string first = dir.file("strict project");
+	session.handle(request::new_project(first, "Strict one"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	editor_test::set_game_install(session, install);
+	TEST_EXPECT(v.project.play_mode == PlayMode::Runtime && v.project.save_before_play); // never chosen
+	ProjectSettingsChange strict_no_save;
+	strict_no_save.play_mode = PlayMode::Strict;
+	strict_no_save.save_before_play = false;
+	editor_test::apply_settings(session, strict_no_save);
+	TEST_EXPECT(v.project.play_mode == PlayMode::Strict && !v.project.save_before_play &&
+	            v.project.settings_result.failures.empty());
+	session.handle(request::play());
+	TEST_EXPECT(plays_in("strict"));
+
+	// The second, made after it in the same editor, never chose: the OpenNova runtime, saving first.
+	const std::string second = dir.file("default project");
+	session.handle(request::new_project(second, "Default one"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	TEST_EXPECT(v.project.play_mode == PlayMode::Runtime && v.project.save_before_play &&
+	            view_section_to_json(v, ViewSection::Run).get_string("play_mode", "") == "runtime");
+	session.handle(request::play());
+	TEST_EXPECT(plays_in("runtime"));
+
+	// Each opened again keeps its own.
+	session.handle(request::open_project(first));
+	session.run_operations();
+	TEST_EXPECT(v.project.play_mode == PlayMode::Strict && !v.project.save_before_play);
+	session.handle(request::play());
+	TEST_EXPECT(plays_in("strict"));
+	session.handle(request::open_project(second));
+	session.run_operations();
+	TEST_EXPECT(v.project.play_mode == PlayMode::Runtime && v.project.save_before_play);
+	session.handle(request::play());
+	TEST_EXPECT(plays_in("runtime"));
+
+	// A Play naming its mode runs in it for itself alone; the project's own stays as it was, and so does its
+	// local.json.
+	EditorRequest in_install = request::play();
+	in_install.play_mode = PlayMode::Install;
+	session.handle(in_install);
+	TEST_EXPECT(plays_in("install") && v.project.play_mode == PlayMode::Runtime);
+	session.handle(request::open_project(first));
+	session.run_operations();
+	EditorRequest on_runtime = request::play();
+	on_runtime.play_mode = PlayMode::Runtime;
+	session.handle(on_runtime);
+	TEST_EXPECT(plays_in("runtime") && v.project.play_mode == PlayMode::Strict);
+	// One joining a running build runs in the mode it named, whatever the project says.
+	session.handle(request::build());
+	TEST_EXPECT(v.activity.operation.running());
+	session.handle(on_runtime);
+	TEST_EXPECT(session.outcome().done() && plays_in("runtime") && v.project.play_mode == PlayMode::Strict);
+	LocalSettings local;
+	Diagnostic finding;
+	TEST_EXPECT(load_local_settings(ProjectPaths::for_root(first), local, finding) && local.play_mode == PlayMode::Strict &&
+	            !local.save_before_play);
+	TEST_EXPECT(load_local_settings(ProjectPaths::for_root(second), local, finding) && local.play_mode == PlayMode::Runtime &&
+	            local.save_before_play);
+
+	// Another editor on the same settings file: neither project's choice is the editor's.
+	{
+		FakePlatform other;
+		FilePreferencesStore shared(dir.file("settings.json"));
+		ProjectSession another(other, shared);
+		TEST_EXPECT(another.view().project.play_mode == PlayMode::Runtime && another.view().project.save_before_play);
+		another.handle(request::open_project(second));
+		another.run_operations();
+		TEST_EXPECT(another.project_open() && another.view().project.play_mode == PlayMode::Runtime);
+	}
+	std::string settings, io_error;
+	TEST_EXPECT(read_file_text(dir.file("settings.json"), settings, io_error) &&
+	            settings.find("play_in_install") == std::string::npos && settings.find("play_mode") == std::string::npos &&
+	            settings.find("save_before_play") == std::string::npos);
 	return 0;
 }
 
@@ -2214,7 +2343,7 @@ static int test_unsaved_prompt() {
 	            !v.dialogs.quit_requested);
 	answer(UnsavedChoice::Cancel);
 
-	// Play asks as Build does with the editor's save_before_play off (DI-26: on, it saves first).
+	// Play asks as Build does with the project's save_before_play off (DI-26: on, it saves first).
 	ProjectSettingsChange asks;
 	asks.save_before_play = false;
 	session.handle(request::apply_project_settings(asks));
@@ -2244,10 +2373,11 @@ static int test_unsaved_prompt() {
 	return 0;
 }
 
-// DI-26, the Play loop: with the editor's save_before_play on (the default, kept with the preferences), Play
+// DI-26, the Play loop: with the project's save_before_play on (the default, kept in its local.json), Play
 // writes every file with unsaved edits first, as Save all does, and builds without asking; Output says how
 // many. A file it could not write stays unsaved and the prompt lists it alone. While a build runs, which the
-// Play would join, it asks (the Save weighed against the build, as the prompt's answer is).
+// Play would join, it asks (the Save weighed against the build, as the prompt's answer is). A Play naming
+// save_before_play saves first, or asks, for itself alone, the project's setting as it was.
 static int test_play_saves_first() {
 	SaveProject project("opennova_editor_session_play_saves");
 	TEST_EXPECT(project.open());
@@ -2255,8 +2385,9 @@ static int test_play_saves_first() {
 	ProjectSession &session = project.session;
 	const SessionView &v = session.view();
 	const DialogsView::UnsavedPrompt &prompt = v.dialogs.unsaved_prompt;
-	TEST_EXPECT(v.project.save_before_play && project.preferences.preferences().save_before_play);
-	TEST_EXPECT(view_section_to_json(v, ViewSection::Preferences).get_bool("save_before_play", false));
+	TEST_EXPECT(v.project.save_before_play && LocalSettings().save_before_play);
+	TEST_EXPECT(view_section_to_json(v, ViewSection::Preferences).get_bool("save_before_play", false) &&
+	            view_section_to_json(v, ViewSection::Run).get_bool("save_before_play", false));
 	const std::string runtime = project.dir.file("runtime/opennova.exe");
 	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
@@ -2296,15 +2427,29 @@ static int test_play_saves_first() {
 	session.handle(request::resolve_unsaved(UnsavedChoice::Cancel));
 	session.run_operations();
 
-	// The setting kept with the preferences, and read back as on where a store does not say.
+	// The setting kept with the project's local settings (none in the editor's), and read back as on where a
+	// local.json does not say.
 	ProjectSettingsChange asks;
 	asks.save_before_play = false;
 	editor_test::apply_settings(session, asks);
-	TEST_EXPECT(!v.project.save_before_play && !project.preferences.preferences().save_before_play);
+	LocalSettings local;
+	Diagnostic finding;
+	TEST_EXPECT(!v.project.save_before_play && load_local_settings(ProjectPaths::for_root(project.root), local, finding) &&
+	            !local.save_before_play);
 	session.handle(request::play());
 	TEST_EXPECT(prompt.open && prompt.action == EditorRequestKind::Play);
 	session.handle(request::resolve_unsaved(UnsavedChoice::Cancel));
-	TEST_EXPECT(Preferences().save_before_play);
+	// A Play saying it saves first does, for itself alone: the project's setting stays off.
+	EditorRequest saving = request::play();
+	saving.save_before_play = true;
+	session.handle(saving);
+	TEST_EXPECT(session.outcome().done() && !prompt.open && !project.items->dirty() && output_has(v, "Saved 1 file before Play"));
+	TEST_EXPECT(!v.project.save_before_play && load_local_settings(ProjectPaths::for_root(project.root), local, finding) &&
+	            !local.save_before_play);
+	session.run_operations();
+	session.handle(request::stop_play());
+	session.poll();
+	TEST_EXPECT(LocalSettings().save_before_play);
 	return 0;
 }
 
@@ -2752,7 +2897,7 @@ static int test_play_mission() {
 	            editor_test::write_text(install + "/game.cfg", "settings"));
 	editor_test::set_game_install(session, install);
 	ProjectSettingsChange in_install;
-	in_install.play_in_install = true;
+	in_install.play_mode = PlayMode::Install;
 	editor_test::apply_settings(session, in_install);
 	session.handle(request::play("First.bms"));
 	session.run_operations();
@@ -2908,8 +3053,7 @@ static int test_play_from_here() {
 	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "exe") && editor_test::write_text(install + "/binkw32.dll", "bink"));
 	editor_test::set_game_install(session, install);
 	ProjectSettingsChange strict;
-	strict.play_in_install = true;
-	strict.play_in_install_strict = true;
+	strict.play_mode = PlayMode::Strict;
 	editor_test::apply_settings(session, strict);
 	session.handle(request::play_from("First.bms", start));
 	session.run_operations();
@@ -4892,6 +5036,7 @@ int main() {
 	failures += test_import_dependencies_setting();
 	failures += test_retail_play();
 	failures += test_strict_play();
+	failures += test_play_settings_per_project();
 	failures += test_import();
 	failures += test_lifecycle();
 	failures += test_utf8_project_path();

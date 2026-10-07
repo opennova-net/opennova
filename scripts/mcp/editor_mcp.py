@@ -25,6 +25,7 @@ as usual.
     python scripts/mcp/editor_mcp.py request edit_record --path main.mnu --edits '[{"op": "add", "kind": "window",
         "parent": 3, "as": "w"}, {"op": "set", "id": "w", "field": "name", "value": "HELLO"}]'   # one undo step
     python scripts/mcp/editor_mcp.py request apply_project_settings --settings '{"game_install": "C:/Games/JO"}'
+    python scripts/mcp/editor_mcp.py request apply_project_settings --settings '{"play_mode": "strict"}'  # this project's
     python scripts/mcp/editor_mcp.py request set_viewport --path models/tank.3di --viewport '{"kind": "model",
         "camera": {"yaw": 1.2}}'                     # that model's viewport (left out: the active document's)
     python scripts/mcp/editor_mcp.py request set_workspace --workspace '{"card": {"path": ""}}'   # the card closed
@@ -47,6 +48,7 @@ as usual.
     python scripts/mcp/editor_mcp.py play start           # the run section: state, pid, mcp_port
     python scripts/mcp/game_mcp.py call game_menu '{"op": "state"}' --port <that port>
     python scripts/mcp/editor_mcp.py play start --mission 04TR.bms   # the game started in that mission
+    python scripts/mcp/editor_mcp.py play start --play-mode runtime  # OpenNova whatever the project is set to
     python scripts/mcp/editor_mcp.py call editor_viewport '{"op": "items", "limit": 20}'
     python scripts/mcp/editor_mcp.py stop --pid-file build/editor.pid   # that launch's editor alone, on its port
 
@@ -261,11 +263,13 @@ def parse_list(text: str, flag: str, shape: str) -> list:
 # takes; the editor refuses the rest, naming what the kind takes (`query catalog` lists them).
 REQUEST_TEXTS = ("dir", "title", "game", "expansion", "builds_on", "game_install", "path", "locator", "field",
                  "new_name", "role", "file_kind", "out_dir", "export_dir", "mission", "operation", "mode", "choice",
-                 "purpose", "folder")
+                 "purpose", "folder", "play_mode")
 REQUEST_LISTS = ("roles", "names")
 REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass", "rehash", "all",
-                    "planned", "behind", "fresh", "report")
+                    "planned", "behind", "fresh", "report", "save_before_play")
 REQUEST_NUMBERS = ("plan", "steps")
+# How a Play runs (the session's play modes): the project's own (apply_project_settings' play_mode), or one Play's.
+PLAY_MODES = ("runtime", "install", "strict")
 
 
 def request_of(args: argparse.Namespace) -> dict:
@@ -523,6 +527,12 @@ def cmd_play(args: argparse.Namespace) -> int:
         # first run; by default it keeps them.
         if args.fresh:
             request["fresh"] = True
+        # --play-mode: how this Play runs, for itself alone (the project's own left as it is); left out, the
+        # project's own (the OpenNova runtime unless the project was set otherwise). --save-before-play the same.
+        if args.play_mode:
+            request["play_mode"] = args.play_mode
+        if args.save_before_play is not None:
+            request["save_before_play"] = args.save_before_play == "true"
         # Play from here (DI-26): --start X,Y,Z[,YAW] a point of the --mission; --from-here the mission view's
         # (the --mission's, else the active document's), on the ground under its camera or under --at X,Y.
         if args.start:
@@ -535,7 +545,8 @@ def cmd_play(args: argparse.Namespace) -> int:
             if args.at:
                 command["at"] = [float(part) for part in args.at.split(",")]
             request = {"kind": "edit_in_viewport", "path": args.mission or "", "command": command,
-                       **{flag: True for flag in ("behind", "fresh") if request.get(flag)}}
+                       **{flag: True for flag in ("behind", "fresh") if request.get(flag)},
+                       **{key: request[key] for key in ("play_mode", "save_before_play") if key in request}}
         outcome, ended = raise_and_wait(client, request, args.timeout)
         if ended is None:
             return EXIT_NOT_DONE
@@ -752,8 +763,8 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--purpose", default=None, help="the pickers' purpose (refused over MCP: pass paths)")
     request.add_argument("--settings", default=None,
                          help="apply_project_settings: the settings to set as a JSON object (title, mission, "
-                              "multiplayer, game_install, runtime_executable, play_in_install, "
-                              "play_in_install_strict, save_before_play; one left out stays)")
+                              "multiplayer, game_install, runtime_executable, play_mode (runtime, install or "
+                              "strict) and save_before_play, the open project's own; one left out stays)")
     request.add_argument("--viewport", default=None,
                          help="set_viewport: the change as a JSON object {kind, device, clock, options, camera} "
                               "(without --path: the active document's viewport, or the clock alone whatever is "
@@ -808,6 +819,12 @@ def build_parser() -> argparse.ArgumentParser:
                               "before the game starts")
     request.add_argument("--report", choices=switch, default=None,
                          help="build: false leaves the build result's panel closed as the build ends")
+    request.add_argument("--play-mode", dest="play_mode", choices=PLAY_MODES, default=None,
+                         help="play, edit_in_viewport: how this Play runs, for itself alone (left out: the project's "
+                              "own, runtime unless it was set otherwise)")
+    request.add_argument("--save-before-play", dest="save_before_play", choices=switch, default=None,
+                         help="play, edit_in_viewport: this Play writes the unsaved files first (true) or asks "
+                              "(false), for itself alone (left out: the project's own)")
     request.add_argument("--wait", action="store_true",
                          help="await the operation the request starts or joins (open_project, new_project, rescan, "
                               "reimport, the import previews and import_files, the renames, build, play) and the "
@@ -924,6 +941,14 @@ def build_parser() -> argparse.ArgumentParser:
     play.add_argument("--at", default=None,
                       help="start --from-here: the picture point X,Y (the view's pixels) whose ground the player "
                            "starts on")
+    play.add_argument("--play-mode", dest="play_mode", choices=PLAY_MODES, default=None,
+                      help="start: how this Play runs (runtime: the OpenNova runtime; install: the game install; "
+                           "strict: Strict Play in it), for this Play alone. Left out, the project's own (its "
+                           ".opennova/local.json: runtime unless the project was set otherwise). A Play that may "
+                           "start the game install needs the retail lock first")
+    play.add_argument("--save-before-play", dest="save_before_play", choices=("true", "false"), default=None,
+                      help="start: this Play writes the unsaved files first (true) or waits on the unsaved-changes "
+                           "prompt (false), for itself alone. Left out, the project's own")
     play.add_argument("--timeout", type=float, default=300.0)
     play.set_defaults(func=cmd_play)
 
