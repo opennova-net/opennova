@@ -116,7 +116,8 @@
     (`viewport_device_cache`; a kind's row may hold fewer of its own, the mission's two, and the
     devices drawn in a frame arbitrate the scene state they render with, S14 E13); the Shell's
     devices are `godot/src/authoring`'s over the runtime's `MenuFrame` and `ObjectModel` and, for a
-    mission, the game's own environment, sky, water, terrain and placer. The menu's viewport (`menu_viewport`): its screen compiled
+    mission, the game's own environment, sky, water, terrain, placer, foliage, particle renderer and light
+    director (DI-31; the items' effects the viewport's `mission_effects` steps). The menu's viewport (`menu_viewport`): its screen compiled
     headless, the options it holds, what a drag of a window's handles or of several windows
     writes, and what arranging several windows (align, distribute, drawing order) writes; the
     model's (`model_viewport`): its orbit camera and the level the game draws, what it shows and
@@ -190,8 +191,9 @@
   which only the editor variant links) into a wasm32 side module whose templates
   abort on any throw, so nothing uses exceptions as control flow
   (`strutil::parse_int` / `parse_ulong` / `parse_float`, never `try { std::stoi }`);
-  thread counts are the embedder's (the terrain composer's `Threads` budget,
-  `Threads::for_hardware()` being the desktop sizing); layout guards hold on ILP32.
+  thread counts are the embedder's (the terrain composer's `Threads` budget and the
+  TrnGen bake's `TerrainBakeInput::threads`, each `for_hardware()` being the desktop
+  sizing); layout guards hold on ILP32.
 - Group targets (ADR 0029): FIVE STATIC targets, no per-lib ones (single ratified
   exception: the `opennova_crt` STATIC leaf under `base/crt` — the one mutable
   thread-local CRT rand stream; formats cannot link `opennova_base`, which sits
@@ -223,7 +225,9 @@
   streaming encoder wants), `io/fixed.h` (16.16 / 2.14), `io/log.h` (the diagnostic
   sink), `io/strutil.h` ASCII case-insensitive helpers, `io/os_path.h` (a UTF-8 path
   string at an OS file call: `os_path`, `fopen_utf8`, `utf8_path`; Windows reads a
-  narrow path in the ANSI code page and fails one past MAX_PATH without `\\?\`). Do not hand-roll a new byte
+  narrow path in the ANSI code page and fails one past MAX_PATH without `\\?\`),
+  `io/file_io.h` (whole-file reads and the atomic `.tmp`-then-rename write over
+  `os_path`, the rename's bounded retry). Do not hand-roll a new byte
   reader; migrate existing per-lib copies on-touch (delegate the
   body, keep the local signature, gated on that lib's byte-exact roundtrip tests).
   The 16.16 / 2.14 scales are `io/fixed.h`'s `kFp16One` (float), `kFp16OneD`
@@ -243,14 +247,16 @@
   their own clamp semantics. `engine/formats/cpt` reads through the shared
   `io::BitReader` but keeps its own bit WRITER (a normalizing `set_position` and a
   `write_to_file`); `io/bit_stream.h` carries no writer, and replacing cpt's is a real
-  migration needing a CPT-corpus byte diff, not a swap. That byte diff is
-  NOT in ctest today: `tests/cpt/cpt_roundtrip_test` (ctest `cpt_roundtrip`) pins the
-  bit codec and the DPTH/CDEP/POLY round-trips on synthetic buffers only, so run a
-  retail-corpus byte diff by hand whenever you touch the CPT encoder:
-  `editor_terrain_bake_test --reencode <the extracted retail tree>` reads and writes every
-  `.cpt` again (all 23 of JO:CA's byte-identical since S20), and `editor_terrain_bake_test
-  <dir>` bakes the retired TrnGen corpus (`git show d57608b3d^:fixtures/terrain`) against
-  TrnGen's own `.cpt` files. Three more stay
+  migration needing a CPT-corpus byte diff, not a swap. That byte diff is the
+  re-encode leg of the gated `tests/terrain/cpt_jo_assets_sweep_test` (ctest
+  `cpt_jo_assets_sweep`, `--suite retail`: every retail .cpt read by `load_cpt` and
+  written again by `save_cpt`, the writer behind `CptFile::write_bytes` and the TrnGen
+  bake in `formats/cpt/trngen`, byte for byte); `tests/cpt/cpt_roundtrip_test`
+  (ctest `cpt_roundtrip`) pins the bit codec and the DPTH/CDEP/POLY round-trips on
+  synthetic buffers in core and `tests/cpt/trngen_bake_test` (ctest `cpt_trngen_bake`)
+  the bake's output, so run the retail suite whenever you touch the CPT
+  encoder; `cpt_trngen_bake_test <dir>` bakes the retired TrnGen corpus (`git show
+  d57608b3d^:fixtures/terrain`) against TrnGen's own `.cpt` files. Three more stay
   by design: `formats/bink`'s
   `BitReader` is a fail-latching decoder contract (`peek`, `align32`, the first short
   read poisons it), the `wire_cursor` posture rather than `io::BitReader`'s lenient
