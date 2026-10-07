@@ -22,6 +22,7 @@
 #include <editor/graph/rename_transaction.h>
 #include <editor/model/edit.h>
 #include <editor/model/field_text.h>
+#include <editor/project/base_project.h>
 #include <editor/project/expansion_files.h>
 #include <editor/project/expansion_name.h>
 #include <editor/project/project_files.h>
@@ -336,8 +337,15 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 	}
 	// The expansion against the game install the new project opens with (the one named, else the editor's,
 	// whatever install an open project names): a name it has already, one to build on it lacks, a name whose
-	// files are those of one of its missions (ADR 0046 S16). With no install, nothing to weigh.
-	const std::string install_root = chosen.empty() ? absolute_install_path(preferences_.values().game_install) : chosen;
+	// files are those of one of its missions (ADR 0046 S16). With no install, nothing to weigh. An expansion of
+	// a project's base game (T5) is weighed against that game's export instead, its project refused where it
+	// cannot be one (project.base_project); an export not made yet weighs nothing (Problems says to make it).
+	std::string install_root = chosen.empty() ? absolute_install_path(preferences_.values().game_install) : chosen;
+	if (expansion.on_base_project()) {
+		Diagnostic why;
+		if (!base_project_game_dir(dir, expansion, target_game, install_root, why)) return refused(why);
+		if (!base_game_exported(install_root)) install_root.clear();
+	}
 	if (!install_root.empty() && !expansion.standalone()) {
 		std::vector<Diagnostic> install;
 		expansion_install_findings(expansion, vfs_list_expansions(install_root), DiagnosticSeverity::Error, install);
@@ -468,6 +476,7 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	read_recent_details(view_.project.document.get(), paths_.root); // its entry as it is now, whatever was there
 	view_.activity.runtime_executable = play().resolve_runtime_executable();
 	imports().set_install_files(std::move(open.install_files()), std::move(open.base_files()));
+	problems().set_base_layer(open.take_base_layer()); // an expansion's base game under the graph
 	read_install_expansions(); // the project's install's, before its requirements weigh them
 	absorb_refresh(open.refresh());
 	restore_workspace(); // the documents it was left with (the UX round's project lane)
@@ -749,19 +758,34 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 	ProjectExpansion expansion = project.expansion;
 	if (change.expansion) expansion.name = *change.expansion;
 	if (change.builds_on) expansion.builds_on = *change.builds_on;
+	if (change.base_project) expansion.base_project = *change.base_project;
 	bool expansion_changed = false;
 	const std::string expansion_was = project.expansion.name;
 	if (expansion != project.expansion) {
 		Diagnostic why;
 		std::vector<Diagnostic> install;
-		const std::string install_after =
+		std::string install_after =
 				change.game_install ? absolute_install_path(*change.game_install) : game_install();
+		// An expansion of a project's base game (T5) is weighed against that game's export, its project
+		// refused where it cannot be one (project.base_project); an export not made yet weighs nothing.
+		Diagnostic base_refusal;
+		const bool on_base = expansion.on_base_project();
+		if (on_base) {
+			if (!base_project_game_dir(paths_.root, expansion, project.target_game, install_after, base_refusal))
+				install_after.clear();
+			else if (!base_game_exported(install_after))
+				install_after.clear();
+		}
 		if (!install_after.empty())
 			expansion_install_findings(expansion,
-			                           change.game_install ? vfs_list_expansions(install_after) : install_expansion_names_,
+			                           change.game_install || on_base ? vfs_list_expansions(install_after)
+			                                                          : install_expansion_names_,
 			                           DiagnosticSeverity::Error, install);
+		if (!base_refusal.code().empty() && expansion.base_project != project.expansion.base_project)
+			install.insert(install.begin(), base_refusal);
 		const bool name_moved = expansion.name != project.expansion.name;
-		const bool base_moved = !strutil::iequals(expansion.builds_on, project.expansion.builds_on);
+		const bool base_moved = !strutil::iequals(expansion.builds_on, project.expansion.builds_on) ||
+		                        expansion.base_project != project.expansion.base_project;
 		install.erase(std::remove_if(install.begin(), install.end(),
 		                             [&](const Diagnostic &d) {
 			                             return (d.code() == "project.expansion.name_taken" && !name_moved) ||
@@ -816,8 +840,10 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 				// The install as the project imports it moved (install_view.h): its names are found again
 				// (the base's first, which the requirements' words read), and what it makes of its own data
 				// once the validation below asks for it (OriginalFiles::want, which validates the install
-				// again for another expansion).
+				// again for another expansion). The base game's expansions too, which a base game's project
+				// moves (T5: its export's).
 				imports().refresh_install_files();
+				read_install_expansions();
 			}
 			if (features_changed || expansion_changed) {
 				// The requirements follow the features and the expansion, over the files as the scan
@@ -1367,6 +1393,16 @@ std::string SessionCore::game_install() const {
 	return run_install_.empty() ? local_.game_install : run_install_;
 }
 
+std::string SessionCore::base_game() const {
+	if (!view_.project.open || !view_.project.document->expansion.on_base_project()) return game_install();
+	// The base project's export folder, where its project reads (one that does not says so in Problems:
+	// requirements_of); its absence is the build's gate's to say (build.expansion.base_missing).
+	std::string dir;
+	Diagnostic why;
+	base_project_game_dir(paths_.root, view_.project.document->expansion, view_.project.document->target_game, dir, why);
+	return dir;
+}
+
 void SessionCore::read_install_expansions() {
 	const auto read = [](const std::string &install, std::vector<std::string> &names) {
 		names = install.empty() ? std::vector<std::string>() : vfs_list_expansions(install);
@@ -1377,7 +1413,7 @@ void SessionCore::read_install_expansions() {
 		}
 		return expansions;
 	};
-	const std::string install = game_install();
+	const std::string install = base_game();
 	view_.project.install_expansions = read(install, install_expansion_names_);
 	const std::string chosen = absolute_install_path(preferences_.values().game_install);
 	std::vector<std::string> chosen_names;
@@ -1387,8 +1423,30 @@ void SessionCore::read_install_expansions() {
 }
 
 RequirementReport SessionCore::requirements_of(const ProjectDocument &doc, const AssetScan &scan) const {
-	return evaluate_requirements(doc, scan, game_install().empty() ? nullptr : &install_expansion_names_,
-	                             &view_.project.base_files);
+	if (!doc.expansion.on_base_project())
+		return evaluate_requirements(doc, scan, game_install().empty() ? nullptr : &install_expansion_names_,
+		                             &view_.project.base_files);
+	// An expansion of a project's base game (T5): weighed against the base game's export (its expansions,
+	// its names), and a base project that does not serve as one, or has no export yet, said (listed: the
+	// build's gate refuses the build while the base does not mount, build.expansion.base_missing).
+	std::string dir;
+	Diagnostic why;
+	const bool resolved = base_project_game_dir(paths_.root, doc.expansion, doc.target_game, dir, why);
+	const bool exported = resolved && base_game_exported(dir);
+	RequirementReport report =
+	        evaluate_requirements(doc, scan, exported ? &install_expansion_names_ : nullptr, &view_.project.base_files);
+	if (!resolved) {
+		why.severity = DiagnosticSeverity::Warning;
+		report.diagnostics.push_back(why);
+	} else if (!exported) {
+		report.diagnostics.push_back(make_finding(
+		        CoreFinding::ProjectBaseProject, DiagnosticSeverity::Warning,
+		        "The base game's project " + doc.expansion.base_project + " has no export at " + dir +
+		                ": the expansion plays over the base game as it ships. Export the base game's project "
+		                "(its File > Export, or opennova-project export " + base_project_root(paths_.root, doc.expansion) +
+		                "), then Refresh."));
+	}
+	return report;
 }
 
 bool SessionCore::rename_expansion_files(const std::string &from, const std::string &to, const ProjectDocument &project,
@@ -1513,7 +1571,8 @@ BuildTarget SessionCore::build_target() const {
 	BuildTarget target;
 	if (!view_.project.open) return target;
 	target.expansion = view_.project.document->expansion.name;
-	target.install = game_install();
+	target.install = base_game();
+	target.base_project = view_.project.document->expansion.base_project;
 	target.game = view_.project.document->target_game;
 	return target;
 }
@@ -1534,7 +1593,7 @@ ShippedFiles SessionCore::shipped_files(const std::vector<Diagnostic> &gate) {
 			asked.push_back(d.asset);
 	std::sort(asked.begin(), asked.end());
 	asked.erase(std::unique(asked.begin(), asked.end()), asked.end());
-	shipped.original = original_bytes_.identical(game_install(), *view_.project.document, paths_.root, asked);
+	shipped.original = original_bytes_.identical(base_game(), *view_.project.document, paths_.root, asked);
 	return shipped;
 }
 

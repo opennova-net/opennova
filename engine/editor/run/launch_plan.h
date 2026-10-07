@@ -169,11 +169,14 @@ FileAccessLog parse_file_access_log(const std::string &text);
 // so a missing one launches nothing. The game install and the build directory are only read. A build of
 // the expansion `expansion` (ADR 0046 S16) is staged as prepare_expansion_run stages it, the install's
 // own game.cfg and saves beside it, and the game launched `/w /d /exp <expansion> /FRISK`. `link` gives a
-// file a second name, as prepare_expansion_run's.
+// file a second name, as prepare_expansion_run's. `base_game` is the folder the expansion's base game is
+// staged from where it is not the install's (an expansion of a project's base game, ADR 0046 T5: that
+// project's export); "" the install's.
 bool prepare_retail_launch_plan(const std::string &retail_directory, const std::string &build_dir,
                                 const std::string &run_dir, LaunchPlan &out, Diagnostic &error,
                                 const std::string &expansion = std::string(),
-                                const std::string &copy_cache = std::string(), const FileLink &link = link_file);
+                                const std::string &copy_cache = std::string(), const FileLink &link = link_file,
+                                const std::string &base_game = std::string());
 
 // Strict Play in the game install: the game as a player who dropped the install's Jointops.exe into
 // the build's folder runs it. The run directory gets the build's files (one the game only reads linked,
@@ -188,15 +191,22 @@ bool prepare_retail_launch_plan(const std::string &retail_directory, const std::
 // [orig: Game_ParseCommandLineAndInit @ 0x4a7667 sets the /d flag;
 // Game_InitSubsystems turns on loose-first resolution after the archives mount, @ 0x4a6fa3 ->
 // FileSystem_SetSearchLooseFirst @ 0x75a5a0; docs/vfs/vfs-pff-mount-re.md]. The executable and the
-// Bink DLL are checked before anything is staged. An expansion (`expansion` not "") is refused
-// (play.strict_expansion, strict_expansion_refusal): it would play over the install's archives, not
-// over its base game's build, which a project cannot name yet.
+// Bink DLL are checked before anything is staged. An expansion (`expansion` not "") plays over its base
+// game's build (ADR 0046 T5): `base_game`, the export of the base game's project the expansion names, as a
+// player's folder holds it, every file of it but the export's and the build's records (staged as the build's
+// are), and the build's `expansion/<expansion>/` beside it as prepare_expansion_run stages it; the game
+// launched `/w /exp <expansion> /FRISK`, so the game mounts the expansion's two archives over the base's three
+// [orig: Game_ParseCommandLineAndInit @ 0x4a76ac (/exp, /mod), Expansion_LoadAssets @ 0x4a4730]. With no
+// base game's build (`base_game` "" or the install itself) it is refused (play.strict_expansion,
+// strict_expansion_refusal): it would play over the install's archives; a base game's export with none of
+// the game's archives is play.install_missing.
 bool prepare_strict_install_launch_plan(const std::string &install, const std::string &build_dir,
                                         const std::string &run_dir, const std::string &expansion, LaunchPlan &out,
-                                        Diagnostic &error, const FileLink &link = link_file);
+                                        Diagnostic &error, const FileLink &link = link_file,
+                                        const std::string &base_game = std::string());
 
-// Why strict Play of the expansion `expansion` is refused (play.strict_expansion): the one finding
-// Play's refusal before a build and the staging both give.
+// Why strict Play of the expansion `expansion` on the install's base game is refused (play.strict_expansion):
+// the one finding Play's refusal before a build and the staging both give.
 Diagnostic strict_expansion_refusal(const std::string &expansion);
 
 // Strict Play's first run. With no game.cfg beside it, the game's adapter name and GUID are empty, so it
