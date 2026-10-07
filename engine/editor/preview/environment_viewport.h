@@ -107,8 +107,9 @@ public:
 	EnvironmentViewStatus view_status() const { return reason_; }
 	const EnvironmentViewportOptions &options() const { return options_; }
 	const OrbitCamera &camera() const { return camera_; }
-	// The environment as the game reads it (its file's bytes, the open document standing in), the
-	// logical name it is read by, and the overcast table beside it (overcast.def; none: has_overcast false).
+	// The environment as the game reads it (its file's bytes, the open document standing in, over the drawn
+	// mission's terrain's .trn: env::load_mission_env), the logical name it is read by, and whether the load
+	// has an overcast table (overcast.def, the .trn's keyframes; none: has_overcast false).
 	const env::Config &config() const { return config_; }
 	const std::string &file_name() const { return file_name_; }
 	bool has_overcast() const { return has_overcast_; }
@@ -214,14 +215,15 @@ private:
 	bool rain_pending_ = false, overcast_pending_ = false;
 	PreviewFollow picture_;
 	uint64_t layout_serial_ = 1; // moves with the terrain, the tiles, the overrides
-	// The file as last read.
+	// The file as last read, over the drawn mission's terrain's .trn and overcast.def.
 	env::Config config_;
 	env::Config overcast_;
 	bool has_overcast_ = false;
 	std::string file_name_;
 	uint64_t read_identity_ = 0, read_load_ = 0, read_revision_ = 0;
 	uint64_t read_generation_ = UINT64_MAX;
-	FileStamps read_stamps_; // the environment and overcast.def as read
+	std::string read_terrain_; // the terrain whose .trn read ahead of it
+	FileStamps read_stamps_; // the .trn, overcast.def and the environment as read
 	std::string unwritable_; // why the document cannot be written ("" it can)
 	// The uses, again when the project, its files, its graph or its documents move.
 	EnvironmentUses uses_;
