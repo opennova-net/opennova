@@ -274,7 +274,8 @@ std::string play_mode_error(const char *where, const JsonValue &value) {
 // type checked.
 bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::string &error) {
 	if (!json.is_object()) { error = "\"settings\" must be an object."; return false; }
-	if (!members_known(json, {"serial", "title", "mission", "multiplayer", "expansion", "builds_on", "game_install",
+	if (!members_known(json, {"serial", "title", "mission", "multiplayer", "expansion", "builds_on", "base_project",
+	                          "game_install",
 	                          "runtime_executable", "play_mode", "save_before_play", "build_folder"},
 	                   "settings", error)) return false;
 	ProjectSettingsChange change;
@@ -298,6 +299,7 @@ bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::
 	};
 	if (!text("title", change.title) || !flag("mission", change.mission) || !flag("multiplayer", change.multiplayer) ||
 	    !text("expansion", change.expansion) || !text("builds_on", change.builds_on) ||
+	    !text("base_project", change.base_project) ||
 	    !text("game_install", change.game_install) || !text("runtime_executable", change.runtime_executable) ||
 	    !flag("save_before_play", change.save_before_play) || !text("build_folder", change.build_folder))
 		return false;
@@ -321,6 +323,7 @@ JsonValue settings_to_json(const ProjectSettingsChange &change) {
 	if (change.multiplayer) out.set("multiplayer", boolean(*change.multiplayer));
 	if (change.expansion) out.set("expansion", json_string(*change.expansion));
 	if (change.builds_on) out.set("builds_on", json_string(*change.builds_on));
+	if (change.base_project) out.set("base_project", json_string(*change.base_project));
 	if (change.game_install) out.set("game_install", json_string(*change.game_install));
 	if (change.runtime_executable)
 		out.set("runtime_executable", json_string(*change.runtime_executable));
@@ -915,6 +918,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::Game: return text_of(json, token, request.game, error);
 	case F::Expansion: return text_of(json, token, request.expansion, error);
 	case F::BuildsOn: return text_of(json, token, request.builds_on, error);
+	case F::BaseProject: return text_of(json, token, request.base_project, error);
 	case F::GameInstall: return text_of(json, token, request.game_install, error);
 	case F::Path: return text_of(json, token, request.path, error);
 	case F::Locator: return text_of(json, token, request.locator, error);
@@ -1080,6 +1084,7 @@ bool field_to_json(
 	case F::Game: out = json_string(request.game); return !request.game.empty();
 	case F::Expansion: out = json_string(request.expansion); return !request.expansion.empty();
 	case F::BuildsOn: out = json_string(request.builds_on); return !request.builds_on.empty();
+	case F::BaseProject: out = json_string(request.base_project); return !request.base_project.empty();
 	case F::GameInstall: out = json_string(request.game_install); return !request.game_install.empty();
 	case F::Path: out = json_string(request.path); return !request.path.empty();
 	case F::Locator: out = json_string(request.locator); return !request.locator.empty();

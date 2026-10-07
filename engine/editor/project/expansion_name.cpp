@@ -118,11 +118,28 @@ bool check_expansion_name(const std::string &name, ExpansionNameUse use, Diagnos
 
 bool check_project_expansion(const std::string &target_game, const ProjectExpansion &expansion,
                              Diagnostic &error) {
-	if (expansion.name.empty() && expansion.builds_on.empty()) return true;
+	if (expansion.name.empty() && expansion.builds_on.empty() && !expansion.on_base_project()) return true;
 	if (!strutil::iequals(target_game, kDefaultTargetGame)) {
 		error = make_finding(CoreFinding::ProjectExpansionUnsupported, DiagnosticSeverity::Error,
 		                     "Expansions are witnessed for Joint Operations only: a project for \"" + target_game +
 		                             "\" builds as the game itself.");
+		return false;
+	}
+	if (expansion.name.empty() && expansion.on_base_project()) {
+		error = make_finding(CoreFinding::ProjectFieldInvalid, DiagnosticSeverity::Error,
+		                     "A project builds on the base game's project " + quoted(expansion.base_project) +
+		                             " only as an expansion: a standalone project is a base game of its own. Give the "
+		                             "project's expansion a name.");
+		return false;
+	}
+	// An expansion of a project's base game builds on that game alone: the game mounts one expansion at a
+	// time (`/exp` and `/mod` are one name, the last one wins [orig: Game_ParseCommandLineAndInit @
+	// 0x4a76ac]), so it cannot stand over an installed expansion and a project's base too.
+	if (expansion.on_base_project() && !expansion.builds_on.empty()) {
+		error = make_finding(CoreFinding::ProjectFieldInvalid, DiagnosticSeverity::Error,
+		                     "A project builds on the base game's project " + quoted(expansion.base_project) +
+		                             " or on the installed expansion " + quoted(expansion.builds_on) +
+		                             ", never both: the game mounts one expansion over one base game.");
 		return false;
 	}
 	if (expansion.name.empty()) {
