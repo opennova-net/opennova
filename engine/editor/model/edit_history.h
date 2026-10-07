@@ -9,6 +9,7 @@
 
 #include <editor/model/change_set.h>
 #include <editor/model/node.h>
+#include <editor/model/source_state.h>
 
 namespace opennova::editor {
 
@@ -28,13 +29,18 @@ struct RowSwap {
 
 // One undo step: a swap per row it changes (sorted by the rows' identities) and the file-wide state
 // on both sides. What a batch commits (Document::apply), which the document's type may veto first
-// (Document::accept_step).
+// (Document::accept_step). A step that reads the document's source again (the line-ends rule's fix,
+// Document's LineEndsRestore) also has what the content was read from on both sides (SourceState),
+// which its document takes back with it; null both on any other step.
 struct EditStep {
 	std::vector<RowSwap> swaps;
 	std::shared_ptr<const FileState> before_state, after_state;
+	std::shared_ptr<const SourceState> before_source, after_source;
 	// It adds, removes or moves a row: such a step never folds and ends its edit group.
 	bool changes_rows() const;
-	bool empty() const { return swaps.empty() && before_state == after_state; }
+	bool empty() const {
+		return swaps.empty() && before_state == after_state && before_source == after_source;
+	}
 };
 
 // A step's swaps done to a row list, forward (its before to its after) or back: the rows it takes
@@ -96,6 +102,9 @@ public:
 	void drop();
 	void undo();
 	void redo();
+	// The step undo() would take back, and the one redo() would make again; null for none.
+	const EditStep *next_undo() const { return cursor_ ? &steps_[cursor_ - 1].step : nullptr; }
+	const EditStep *next_redo() const { return cursor_ < steps_.size() ? &steps_[cursor_].step : nullptr; }
 	void end_edit_group() { key_.clear(); }
 	void mark_saved() { saved_revision_ = revision_; }
 

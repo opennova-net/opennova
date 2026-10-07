@@ -14,6 +14,15 @@ size_t footprint(const std::shared_ptr<const Node> &row) {
 size_t footprint(const std::shared_ptr<const FileState> &state) {
 	return state ? state->footprint() : 0;
 }
+// What a source state keeps: the bytes it holds and its findings' text.
+size_t footprint(const std::shared_ptr<const SourceState> &source) {
+	if (!source) return 0;
+	size_t bytes = sizeof(SourceState) + (source->odd_lines ? source->odd_lines->size() : 0);
+	for (const SourceIssue &issue : source->issues)
+		bytes += sizeof(SourceIssue) + issue.message.size() + issue.record.size() + issue.field.size() +
+		         issue.locator.size();
+	return bytes;
+}
 size_t swap_bytes(const RowSwap &swap) {
 	return footprint(swap.before) + footprint(swap.after);
 }
@@ -102,6 +111,8 @@ size_t EditHistory::bytes_of(const Entry &entry) {
 		bytes += swap_bytes(swap);
 	if (entry.step.before_state != entry.step.after_state)
 		bytes += footprint(entry.step.before_state) + footprint(entry.step.after_state);
+	if (entry.step.before_source != entry.step.after_source)
+		bytes += footprint(entry.step.before_source) + footprint(entry.step.after_source);
 	for (const Mark &mark : entry.marks)
 		bytes += mark_bytes(mark.rows.size());
 	return bytes;
