@@ -99,6 +99,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/wave_check.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/hud_layout_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/line_ends.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/config_overrun.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_image.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_budget.cpp

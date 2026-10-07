@@ -5,7 +5,9 @@
 
 #include "blank_makers.h"
 
+#include <editor/assets/asset_kinds.h>
 #include <editor/project/project_files.h>
+#include <formats/configfile/config_file.h>
 
 namespace opennova::editor {
 
@@ -319,7 +321,25 @@ bool make_blank(const BlankRequest &request, AssetKind kind, std::vector<uint8_t
 		                     request.logical_name);
 		return false;
 	}
-	return factory->make(request, out, error);
+	return make_from(*factory, request, out, error);
+}
+
+bool make_from(const BlankFactory &factory, const BlankRequest &request, std::vector<uint8_t> &out,
+               Diagnostic &error) {
+	if (!factory.make(request, out, error)) return false;
+	if (asset_kind_row(factory.kind).line_reader != LineReader::ConfigFile) return true;
+	const configfile::DataStringsPool pool = configfile::data_strings_pool(out.data(), out.size());
+	if (pool.overrun() == 0) return true;
+	error = make_finding(CoreFinding::DocumentConfigOverrun, DiagnosticSeverity::Error,
+	                     request.logical_name + " is not made: it would hold " + std::to_string(pool.values) +
+	                             " values against a " + std::to_string(pool.pool_bytes) +
+	                             "-byte buffer of its text values, which the game's ConfigFile reader clears one "
+	                             "byte per value, " +
+	                             std::to_string(pool.overrun()) +
+	                             " bytes past it into the game's memory (ConfigFile_ParseText @ 0x7609e8).",
+	                     request.logical_name);
+	out.clear();
+	return false;
 }
 
 std::string blank_crlf(const std::string &text) {
