@@ -298,9 +298,9 @@ void test_every_view() {
 		types += drawn > 0 ? 1 : 0;
 	}
 	CHECK(types == kDocumentTypeCount, "every document type's view drawn");
-	CHECK(main_rows == 9 && scripts == 7,
+	CHECK(main_rows == 10 && scripts == 7,
 	      "every text type's row the Main role's (a particle file's and the HUD layout's among them), its view the "
-	      "script view, and the mission's and the texture's rows the Main role's too");
+	      "script view, and the mission's, the texture's and the environment's rows the Main role's too");
 	std::printf("%zu document types, %zu views over their files, %zu frames drawn, %zu script views\n", types, views,
 	            frames, scripts);
 }
