@@ -1,5 +1,6 @@
 // Pins the project file (ADR 0046 d6): creation, the deterministic on-disk form, the
-// round trip, and the refusals (unknown schema version, unknown game, missing file).
+// round trip, and the refusals (unknown schema version, unknown game, missing file); and the project's
+// local settings (local.json), how it plays among them.
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -8,6 +9,7 @@
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
+#include <editor/run/run_directory.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -262,6 +264,48 @@ static int test_export_dir_and_local_settings() {
 	return 0;
 }
 
+// Play's settings are the project's own, in its local.json (never the editor's): a project that never said
+// plays in the OpenNova runtime and saves first; each mode written by its token and read back, saving first
+// off too; a file without them (one an earlier editor wrote) reads as the defaults; a mode no PlayMode has
+// reads as the runtime, never the game install; the tokens are the run directory's mode names.
+static int test_local_play_settings() {
+	editor_test::TempProjectDir dir("opennova_editor_local_play_settings");
+	const std::string root = dir.file("P");
+	ProjectDocument doc;
+	Diagnostic error;
+	TEST_EXPECT(create_project(root, "P", "jo", doc, error));
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	LocalSettings local;
+	TEST_EXPECT(load_local_settings(paths, local, error) && local.play_mode == PlayMode::Runtime && local.save_before_play);
+	for (const PlayMode mode : kPlayModes) {
+		local.play_mode = mode;
+		local.save_before_play = mode != PlayMode::Strict;
+		TEST_EXPECT(save_local_settings(paths, local, error));
+		std::string text, io_error;
+		TEST_EXPECT(read_file_text(paths.local_settings_file, text, io_error) &&
+		            text.find(std::string("\"play_mode\": \"") + play_mode_token(mode) + "\"") != std::string::npos &&
+		            text.find(std::string("\"save_before_play\": ") + (mode != PlayMode::Strict ? "true" : "false")) !=
+		                    std::string::npos);
+		LocalSettings back;
+		TEST_EXPECT(load_local_settings(paths, back, error) && back.play_mode == mode &&
+		            back.save_before_play == (mode != PlayMode::Strict));
+	}
+	TEST_EXPECT(editor_test::write_text(paths.local_settings_file, "{\"schema_version\": 2, \"game_install\": \"\"}\n"));
+	TEST_EXPECT(load_local_settings(paths, local, error) && local.play_mode == PlayMode::Runtime && local.save_before_play);
+	TEST_EXPECT(editor_test::write_text(paths.local_settings_file, "{\"schema_version\": 2, \"play_mode\": \"retail\"}\n"));
+	TEST_EXPECT(load_local_settings(paths, local, error) && local.play_mode == PlayMode::Runtime);
+	TEST_EXPECT(editor_test::write_text(paths.local_settings_file, "{\"schema_version\": 2, \"play_mode\": true}\n"));
+	TEST_EXPECT(load_local_settings(paths, local, error) && local.play_mode == PlayMode::Runtime);
+	PlayMode read = PlayMode::Strict;
+	TEST_EXPECT(!play_mode_from_token("Strict", read) && read == PlayMode::Strict && play_mode_from_token("install", read) &&
+	            read == PlayMode::Install);
+	TEST_EXPECT(std::string(play_mode_token(PlayMode::Runtime)) == kRunModeRuntime &&
+	            std::string(play_mode_token(PlayMode::Install)) == kRunModeInstall &&
+	            std::string(play_mode_token(PlayMode::Strict)) == kRunModeStrict);
+	TEST_EXPECT(!plays_in_install(PlayMode::Runtime) && plays_in_install(PlayMode::Install) && plays_in_install(PlayMode::Strict));
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_create_then_open();
@@ -269,6 +313,7 @@ int main() {
 	failures += test_refusals();
 	failures += test_expansion_object();
 	failures += test_export_dir_and_local_settings();
+	failures += test_local_play_settings();
 	if (failures == 0) std::printf("editor_project_document: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }
