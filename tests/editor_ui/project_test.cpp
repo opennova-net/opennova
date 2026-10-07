@@ -12,6 +12,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/project/local_settings.h>
+#include <editor/session/file_card.h>
 #include <editor/ui/preview_window.h>
 
 namespace editor_ui_test {
@@ -519,7 +520,55 @@ void test_modals_one_at_a_time() {
 	CHECK(!v.workspace.new_project.open && !shows("New project"), "its Cancel: none shows");
 }
 
+// Files' chores (DI-25): Delete... of a texture a menu names lists who names it before anything goes; its Delete
+// anyway takes it to the trash (the dialog closing as the session takes it), and Edit > Undo file brings it back.
+void test_files_delete_and_undo() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_chores");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(session.handle(request::new_project(dir.file("project"), "Chores")), "a project");
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const SessionView &v = session.view();
+	DrawnDevices devices;
+	session.viewports().set_devices(&devices.cache);
+	Ui ui;
+	ui.session = &session;
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	Run run{ session, devices, ui };
+	run.settle();
+	std::string texture;
+	for (const AssetEntry &entry : v.project.scan->entries)
+		if (texture.empty() && entry.kind == AssetKind::Texture && file_use_count(v, entry.relative_path) > 0) texture = entry.relative_path;
+	CHECK(!texture.empty(), "a texture a menu names");
+	if (texture.empty()) return;
+	const std::string name = basename_of(texture);
+	session.handle(request::set_workspace("{\"file_delete\": {\"path\": \"" + texture + "\"}}"));
+	run.settle();
+	ui.frames(2);
+	const std::string shown = logged_frame(ui);
+	CHECK(shown_modal(v).modal == HeldModal::FileDelete && shown.find("Delete " + name + "?") != std::string::npos &&
+	              shown.find("Named by") != std::string::npos && shown.find("Delete anyway") != std::string::npos,
+	      "Delete... lists who names it first");
+	const ImGuiWindow *popup = GImGui->OpenPopupStack.Size ? GImGui->OpenPopupStack.back().Window : nullptr;
+	CHECK(popup != nullptr, "its dialog");
+	if (!popup) return;
+	ui.activate(ImHashStr("Delete anyway", 0, popup->ID));
+	run.settle();
+	CHECK(!v.project.scan->at_path(texture) && v.workspace.file_delete.path.empty() &&
+	              v.activity.file_history.undo == "Delete " + name,
+	      "Delete anyway: the file in the trash, the dialog closed, a step of the file history");
+	for (const EditorRequest &request : choose(ui, "Edit", {"Undo file"})) session.handle(request);
+	run.settle();
+	CHECK(v.project.scan->at_path(texture) && v.activity.file_history.undo.empty() &&
+	              v.activity.file_history.redo == "Delete " + name,
+	      "Edit > Undo file brings it back");
+}
+
 void run_project_tests() {
+	test_files_delete_and_undo();
 	test_preview_room();
 	test_inspector_filter_per_document();
 	test_files_kind_and_card();
