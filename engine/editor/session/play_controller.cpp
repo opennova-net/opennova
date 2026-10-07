@@ -21,6 +21,7 @@
 #include <editor/project/project_files.h>
 #include <editor/run/run_directory.h>
 #include <editor/session/editor_preferences.h>
+#include <editor/session/editor_request.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/session_core.h>
 #include <editor/session/view/session_view.h>
@@ -29,6 +30,20 @@
 namespace fs = std::filesystem;
 
 namespace opennova::editor {
+
+namespace {
+
+// The run directory mode a Play of `mode` takes (run/run_directory.h): the play mode's own name.
+std::string run_mode_of(PlayMode mode) {
+	switch (mode) {
+	case PlayMode::Runtime: return kRunModeRuntime;
+	case PlayMode::Install: return kRunModeInstall;
+	case PlayMode::Strict: return kRunModeStrict;
+	}
+	return kRunModeRuntime;
+}
+
+} // namespace
 
 std::string play_mission_at(const SessionView &view, const std::string &path) {
 	if (!view.project.open || !view.project.scan) return std::string();
@@ -117,7 +132,22 @@ std::string PlayController::mission_file(const std::string &mission) const {
 // one would fight it for its files), and for a mission the project does not hold (the game
 // would start, find no such mission in what it mounts and fall back to its menu). True when
 // refused, said why.
-bool PlayController::refused(const std::string &mission, const PlayStart &start) {
+PlayIntent PlayController::intent_of(const EditorRequest &request) const {
+	PlayIntent intent;
+	intent.wanted = true;
+	intent.mission = request.mission;
+	intent.behind = request.behind;
+	intent.fresh = request.fresh;
+	intent.start = request.start;
+	// The request's mode for this Play alone, else the project's own (a project never set plays in the
+	// OpenNova runtime; with none open, the defaults).
+	intent.mode = request.play_mode.value_or(core_.local().play_mode);
+	return intent;
+}
+
+bool PlayController::refused(const PlayIntent &intent) {
+	const std::string &mission = intent.mission;
+	const PlayStart &start = intent.start;
 	if (!core_.platform().can_spawn()) {
 		// The platform says why (an OS the editor cannot spawn on yet, a session with no process seam).
 		core_.report(make_finding(CoreFinding::PlayUnsupported, DiagnosticSeverity::Error,
@@ -157,11 +187,10 @@ bool PlayController::refused(const std::string &mission, const PlayStart &start)
 		core_.touch(ViewConcern::Output);
 		return true;
 	}
-	const Preferences &settings = core_.preferences().values();
-	if (!settings.play_in_install) return false;
+	if (!plays_in_install(intent.mode)) return false;
 	// Strict Play stages the build alone, and an expansion's build plays over its base game, which the
 	// project cannot name yet: refused rather than played over the install's own archives.
-	if (settings.play_in_install_strict && view_.project.open && !view_.project.document->expansion.standalone()) {
+	if (intent.mode == PlayMode::Strict && view_.project.open && !view_.project.document->expansion.standalone()) {
 		core_.report(strict_expansion_refusal(view_.project.document->expansion.name));
 		view_.activity.status = "Strict Play of an expansion is not supported yet; see Problems.";
 		core_.touch(ViewConcern::Output);
@@ -199,17 +228,20 @@ PlayGame PlayController::play_game() const {
 	return {"OpenNova"};
 }
 
-void PlayController::start(const std::string &mission, bool behind, bool fresh, const PlayStart &start) {
+void PlayController::start(const PlayIntent &intent) {
+	const std::string &mission = intent.mission;
+	const bool behind = intent.behind, fresh = intent.fresh;
+	const PlayStart &start = intent.start;
 	const std::string &build_dir = view_.activity.last_build->build_dir;
 	LaunchPlan plan;
 	Diagnostic error;
 	std::error_code ec;
-	// The mode this Play runs in (its run directory's, run/run_directory.h): the game install's lenient or
-	// strict, else OpenNova.
-	const bool in_install = core_.preferences().values().play_in_install;
-	// Strict Play (Preferences::play_in_install_strict): the build and the install's program alone, no /d.
-	const bool strict = in_install && core_.preferences().values().play_in_install_strict;
-	const std::string mode = !in_install ? kRunModeRuntime : strict ? kRunModeStrict : kRunModeInstall;
+	// The mode this Play runs in, as it was asked (intent_of: the request's, else the project's own), its
+	// run directory's too (run/run_directory.h): the game install's lenient or strict, else OpenNova.
+	const bool in_install = plays_in_install(intent.mode);
+	// Strict Play: the build and the install's program alone, no /d.
+	const bool strict = intent.mode == PlayMode::Strict;
+	const std::string mode = run_mode_of(intent.mode);
 	// The last run's boot report, its mission's and its exit go, their rows with them (the next
 	// validation would make none), and so do the rows the logs of this mode's last Play made (DI-27: each
 	// mode's stay until the next Play of that mode); the game started now reports on this project.
@@ -362,7 +394,7 @@ void PlayController::start(const std::string &mission, bool behind, bool fresh, 
 	// one a run before wrote.
 	had_config_ = strict && fs::is_regular_file(system_path(join_path(plan.working_dir, "game.cfg")), ec);
 	started_again_ = false;
-	view_.activity.play_strict = strict;
+	view_.activity.play_run_mode = mode;
 	view_.activity.play_started_again = false;
 	view_.activity.play_mission = in_install ? std::string() : in_mission;
 	if (!launch(plan, error)) {

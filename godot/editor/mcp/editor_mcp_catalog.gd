@@ -15,6 +15,9 @@ const BUILD_TIMEOUT_MS := 300_000
 const PAGE_MAX := McpJson.MAX_ENTRIES
 
 const PLAY_OPS: Array[String] = ["start", "stop", "state"]
+## How a Play runs (the session's PlayMode tokens): the OpenNova runtime, the game install, or Strict Play
+## in it. A project's own (apply_project_settings' play_mode, its .opennova/local.json), or one Play's.
+const PLAY_MODES: Array[String] = ["runtime", "install", "strict"]
 
 ## editor_viewport's writes (S13 V7): each a request, the members it takes flat beside op and the one
 ## it needs, and where the tool's `kind` goes (the request's member that names the viewport's kind):
@@ -109,6 +112,7 @@ const FIELD_SCHEMAS := {
 	"new_name": {"type": ["string", "integer"]},
 	"mode": {"type": "string", "enum": ["replace", "add", "toggle"]},
 	"choice": {"type": "string", "enum": ["save", "discard", "cancel"]},
+	"play_mode": {"type": "string", "enum": PLAY_MODES},
 }
 
 
@@ -148,9 +152,12 @@ static func definitions(app: Node) -> Array[McpToolDef]:
 			+ "active document's) start it on the ground under its camera, or under the picture point at [x, y], "
 			+ "facing the way the camera looks. Neither game takes a place on its command line: the build's copy of "
 			+ "the mission in the run directory gets the start markers its player deploys at moved there (the run "
-			+ "section's start), never the project's file. With unsaved documents Play saves them first while the "
-			+ "editor's save_before_play is on (the default). op=stop ends the game and waits; op=state reads the "
-			+ "run section.",
+			+ "section's start), never the project's file. How it runs is the project's own play_mode (runtime, "
+			+ "install or strict: kept in its .opennova/local.json, set by apply_project_settings; runtime for a "
+			+ "project never set), or play_mode (op=start) for this Play alone, the project's left as it is; the run "
+			+ "section says play_mode (the project's) and ran_mode (the game's). With unsaved documents Play saves "
+			+ "them first while save_before_play is on (this Play's, else the project's; on by default). op=stop "
+			+ "ends the game and waits; op=state reads the run section.",
 			{
 				"op": {"type": "string", "enum": PLAY_OPS},
 				"mission": {"type": "string", "description": "op=start: the mission the game starts in (04TR.bms)"},
@@ -164,6 +171,11 @@ static func definitions(app: Node) -> Array[McpToolDef]:
 						+ "(mission's, else the active document's): the player on the ground under its camera"},
 				"at": {"type": "array", "items": {"type": "number"}, "description": "op=start with from_here: the "
 						+ "picture point [x, y] (the view's pixels) whose ground the player starts on"},
+				"play_mode": {"type": "string", "enum": PLAY_MODES, "description": "op=start: how this Play runs "
+						+ "(runtime: the OpenNova runtime; install: the game install; strict: Strict Play in it), for "
+						+ "this Play alone; left out, the project's own (runtime unless the project was set otherwise)"},
+				"save_before_play": {"type": "boolean", "description": "op=start: this Play writes the unsaved "
+						+ "files first (true) or waits on the unsaved-changes prompt (false); left out, the project's own"},
 			}, ["op"], true, BUILD_TIMEOUT_MS),
 		_viewport_tool(catalog),
 		McpToolDef.make("editor_screenshot",
