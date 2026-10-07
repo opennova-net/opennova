@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <editor/preview/definition_effects.h>
+#include <editor/preview/definition_weapon.h>
 #include <editor/preview/effect_catalog.h>
 #include <editor/preview/mission_poses.h>
 #include <editor/preview/model_damage.h>
@@ -51,7 +52,7 @@ enum class DefinitionWeaponView : uint8_t { Third, First };
 // graphic_enemy, an ammo's enemy tracer item); a weapon's view; whether a drivable item is occupied (its
 // particle slot attaches only then [orig: Entity_UpdateHeloRotorSpin @ 0x48fa70]); the record SSN a person's
 // spawn warms up by (world::organic_warmup_updates: a definition has no record, the preview picks one); the
-// death's sound muted; the ground grid (the editor's aid).
+// death's and a weapon's sounds muted; the ground grid (the editor's aid); how a weapon fires (DI-22).
 struct DefinitionViewportOptions {
 	DefinitionState state = DefinitionState::Alive;
 	bool enemy = false;
@@ -60,14 +61,15 @@ struct DefinitionViewportOptions {
 	int ssn = 1;
 	bool mute = false;
 	bool grid = true;
+	DefinitionFireOptions fire;
 	bool operator==(const DefinitionViewportOptions &other) const {
 		return state == other.state && enemy == other.enemy && weapon == other.weapon && occupied == other.occupied &&
-		       ssn == other.ssn && mute == other.mute && grid == other.grid;
+		       ssn == other.ssn && mute == other.mute && grid == other.grid && fire == other.fire;
 	}
 	bool operator!=(const DefinitionViewportOptions &other) const { return !(*this == other); }
 };
 // On the wire (the envelope's `options`, a SetViewport's): {state, enemy, weapon ("third", "first"), occupied,
-// ssn, mute, grid}.
+// ssn, mute, grid, fire (definition_fire_options_to_json)}.
 io::JsonValue definition_options_to_json(const DefinitionViewportOptions &options);
 // The change a SetViewport makes to set a definition viewport's options to `options`, and its camera.
 std::string definition_options_change(const DefinitionViewportOptions &options);
@@ -115,6 +117,11 @@ struct DefinitionParticleSlot {
 // graphic's rig). A weapon: its third-person model (gfx3), or its first-person (gfx1). An ammo: the round as the
 // item its tracer id names draws it (frndly_trcr_type_id, foe_trcr_type_id seen as the enemy, falling back to
 // the friendly one as the game does). A powerup row and a carry limit draw nothing of their own, which it says.
+// A weapon fires (DI-22, preview/definition_weapon): in first person its gfx1 with the character's arms on the
+// gun's rig, posed by the first-person channel the game's weapon pump steps, seen from the eye; in third person
+// its gfx3; the gestures (Fire, Hold, Release, Reload, Scope, Switch) run through the game's local player in a
+// range of its own, its effects spawned where the game's presenter spawns them, its sounds heard as the clock
+// runs, its tracers, its target and the scars on it drawn by the device.
 // The record is read as it stands (the catalog's row is the record the game's parser makes); the models, the
 // .adm and the particle files are the project's, as the game would read them were they saved now (the open
 // documents standing in). Its camera orbits the drawn model, framed as another model first shows; a point of
@@ -131,7 +138,9 @@ public:
 
 	DefinitionViewStatus view_status() const { return reason_; }
 	const DefinitionViewportOptions &options() const { return options_; }
-	const OrbitCamera &camera() const { return camera_; }
+	// The camera the picture is seen through: the first-person eye where a weapon shows it (DI-22), else the orbit.
+	const OrbitCamera &camera() const { return eye_ ? weapon_.eye_camera() : camera_; }
+	const OrbitCamera &orbit() const { return camera_; }
 	// The record shown (its row; 0 none) and what it draws.
 	NodeId record_row() const { return row_; }
 	const DefinitionDrawn &drawn() const { return drawn_; }
@@ -159,11 +168,15 @@ public:
 	// only while occupied).
 	const DefinitionParticleSlot &particle_slot() const { return slot_; }
 	const DefinitionEffects &effects() const { return effects_; }
+	// A weapon record's firing (DI-22): the gun, its rig and arms, its range (inactive for another kind).
+	const DefinitionWeapon &weapon() const { return weapon_; }
+	bool weapon_record() const { return drawn_.kind == "weapon" && weapon_.active(); }
 	const std::vector<std::string> &notes() const { return notes_; }
 	// The death's sounds over the ticks the clock ran through since the last call (Destroying alone: each leg's
 	// set played at the item as the camera hears it, never over a seek; a leg on the tick a seek lands on fires
-	// as the clock runs from it, as the model preview's damage state fires them), kept as the clip sounds are
-	// (sounds_fired, the last kSoundsFiredKept) and returned.
+	// as the clock runs from it, as the model preview's damage state fires them), or a weapon's (DI-22: its
+	// actions' legs and what its rounds and shots sound, DefinitionWeapon::sounds_between), kept as the clip
+	// sounds are (sounds_fired, the last kSoundsFiredKept) and returned.
 	static constexpr size_t kSoundsFiredKept = 16;
 	const std::vector<ClipSoundFired> &sounds_fired() const { return fired_; }
 	std::vector<ClipSoundFired> fire_sounds(const PreviewClock &clock, const AssetScan *scan, audio::SoundSelector &selector,
@@ -185,7 +198,9 @@ public:
 			std::string &error) const override;
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 			std::string &error) const override;
-	// "frame" (the camera on the drawn model), "replay" (the clock sought to tick 0: the state played anew).
+	// "frame" (the camera on the drawn model), "replay" (the clock sought to tick 0: the state played anew); a
+	// weapon's gestures "fire", "hold", "release", "reload", "scope", "switch" (one on the clock's tick, the clock
+	// run) and "clear" (none).
 	bool command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
 			CanvasRequests &out, std::string &error) const override;
 	io::JsonValue options_json() const override;
@@ -224,6 +239,9 @@ private:
 	// The effects the picture spawns in its state.
 	std::vector<DefinitionSpawn> spawns_() const;
 	void frame_();
+	// A weapon's gesture (a token) and gestures ({tick, gesture} rows), read off a SetViewport.
+	static bool read_gesture_(const io::JsonValue &json, std::vector<WeaponGestureAt> &out, std::string &error);
+	static bool read_gestures_(const io::JsonValue &json, std::vector<WeaponGestureAt> &out, std::string &error);
 
 	DefinitionViewStatus reason_ = DefinitionViewStatus::NoProject;
 	std::string detail_;
@@ -263,6 +281,9 @@ private:
 	PreviewEffectCatalog catalog_;
 	DefinitionEffects effects_;
 	std::vector<std::string> missing_; // the graphics the device found no file for (each once)
+	// A weapon's firing (DI-22), and whether its eye is the camera.
+	DefinitionWeapon weapon_;
+	bool eye_ = false;
 	// The death's sounds: their sources, what fired, and the clock's tick they were last fired to (-1 none).
 	ClipSoundSources sound_sources_;
 	std::vector<ClipSoundFired> fired_;
