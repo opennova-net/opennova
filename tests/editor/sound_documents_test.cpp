@@ -611,6 +611,21 @@ int test_waves() {
 	halved.bits = "8";
 	TEST_EXPECT(convert_wave(source, halved, converted, error) && decode_wave_source(converted, back, error) &&
 	            back.frames() == 2400 && back.format.bits == 8 && back.rate == 24000);
+	// No sample: refused before the writer, which holds at least one (the loader steps over an empty data
+	// chunk and walks past the file's end [orig: Audio_LoadWavFileFromArchive @ 0x76659b..0x7665a5]).
+	TEST_EXPECT(!convert_wave(wave_of(1, 16, 22050, 0), WaveConversion(), converted, error) &&
+	            error == "it holds no sample");
+	TEST_EXPECT(!convert_wave(wave_of(2, 8, 22050, 0), halved, converted, error) && error == "it holds no sample");
+	// An IMA ADPCM source of rate 0 is refused as a PCM one is, kept or resampled (no division by its rate).
+	std::vector<uint8_t> rateless = wave_of(1, 16, 22050, 100);
+	rateless[20] = 0x11;
+	rateless[34] = 4;
+	rateless[32] = 36;
+	rateless[33] = 0;
+	for (size_t i = 24; i < 32; ++i) rateless[i] = 0;
+	TEST_EXPECT(!decode_wave_source(rateless, back, error) && error.find("IMA ADPCM, mono, 0 Hz") != std::string::npos);
+	TEST_EXPECT(!convert_wave(rateless, WaveConversion(), converted, error));
+	TEST_EXPECT(!convert_wave(rateless, halved, converted, error));
 	// The card's facts.
 	const WaveFacts facts = wave_facts(source, 16);
 	TEST_EXPECT(facts.read && !facts.retail.plays && facts.format.channels == 2 && facts.format.bits == 24 &&
