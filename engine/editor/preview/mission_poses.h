@@ -143,6 +143,8 @@ public:
 	size_t posed() const;
 	size_t runs() const { return runs_; }
 	size_t files_read() const { return files_read_; }
+	// Moves whenever a pose's stamp does (a pose or a lift changed).
+	uint32_t serial() const { return serial_; }
 
 private:
 	struct Catalog {
