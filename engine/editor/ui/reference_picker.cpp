@@ -242,6 +242,9 @@ bool ReferencePicker::draw_field(Workspace &workspace, const Document &document,
 		const auto kept = popups_.find(key);
 		if (kept != popups_.end() && kept->second.view) drop_list(kept->second);
 	}
+	// The frame stays the item just drawn once its preview is (EndComboPreview leaves the preview's text the last
+	// item): its tooltip, and what a caller asks of it after (DI-18: a Ctrl+click's button over it, its menu).
+	const ImGuiLastItemData frame_item = GImGui->LastItemData;
 	if (ImGui::BeginComboPreview()) {
 		const float room = ImGui::GetContentRegionAvail().x;
 		const float tail = muted.empty() ? 0.0f : ui_kit::text_width(muted.c_str()) + ImGui::GetStyle().ItemSpacing.x;
@@ -253,6 +256,7 @@ bool ReferencePicker::draw_field(Workspace &workspace, const Document &document,
 			ImGui::TextDisabled("%s", ui_kit::fit(muted, ImGui::GetContentRegionAvail().x).c_str());
 		}
 		ImGui::EndComboPreview();
+		GImGui->LastItemData = frame_item;
 	}
 	ui_kit::tooltip_lazy([&] {
 		std::string tip = shown;
