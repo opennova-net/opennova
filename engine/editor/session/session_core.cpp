@@ -3,11 +3,14 @@
 #include <algorithm>
 #include <cassert>
 #include <filesystem>
+#include <iterator>
+#include <map>
 #include <optional>
 #include <set>
 #include <utility>
 
 #include <base/gameprofile/gameprofile.h>
+#include <base/io/file_time.h>
 #include <base/io/json.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
@@ -33,6 +36,7 @@
 #include <editor/session/build_operation.h>
 #include <editor/session/build_result.h>
 #include <editor/session/document_set.h>
+#include <editor/session/file_chores.h>
 #include <editor/session/editor_preferences.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/navigation_controller.h>
@@ -513,6 +517,7 @@ bool SessionCore::close_project() {
 	view_.findings.marks.reset();
 	view_.activity.last_rename = ActivityView::LastRename(); // its way back is this project's
 	renames().forget();
+	chores().forget(); // its file history is this project's (DI-25); the trash keeps what it holds
 	forget_project_workspace(view_.workspace); // its card, its build's panel, the sound it played
 	view_.activity.has_build = false;
 	view_.activity.last_build = std::make_shared<const BuildReport>();
@@ -673,6 +678,22 @@ void SessionCore::update_files(const std::vector<std::string> &paths) {
 	touch(ViewConcern::Files);
 	problems().show_requirements(); // the rows they lead with, at once
 	problems().validate_later();
+}
+
+void SessionCore::update_folders(const std::vector<std::string> &made, const std::vector<std::string> &gone) {
+	if (!view_.project.scan) return;
+	AssetScan scan = *view_.project.scan;
+	std::map<std::string, int64_t> folders = scan.folders();
+	for (const std::string &folder : gone)
+		for (auto it = folders.begin(); it != folders.end();)
+			it = it->first == folder || it->first.compare(0, folder.size() + 1, folder + "/") == 0 ? folders.erase(it)
+			                                                                                       : std::next(it);
+	for (const std::string &folder : made)
+		if (!folder.empty()) folders[folder] = io::file_modified_ticks(system_path(join_path(paths_.root, folder)));
+	scan.set_folders(std::move(folders));
+	view_.project.scan = std::make_shared<const AssetScan>(std::move(scan));
+	problems().set_scan(paths_.root, *view_.project.scan, view_.project.document->target_game);
+	touch(ViewConcern::Files);
 }
 
 // The settings a request names that differ from those in effect, written: the project's
