@@ -15,6 +15,7 @@
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/rename_transaction.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -98,6 +99,26 @@ EditorRequest touching(EditorRequestKind kind, Dirty &dirty) {
 	}
 	case EditorRequestKind::RenameAsset: request.new_name = "renamed.mnu"; break;
 	case EditorRequestKind::MoveAsset: request.folder = "moved"; break; // DI-03: its document reopens there
+	// DI-25: the folder holding extra.mnu renamed (its document reopens there); the file history's last step
+	// (extra.mnu's New file) taken back takes it to the trash, and a delete of it taken back and done again too.
+	case EditorRequestKind::RenameFolder:
+		request.folder = folder_of_path(dirty.extra);
+		request.new_name = "renamed_folder";
+		break;
+	case EditorRequestKind::RedoFile: {
+		dirty.session.handle(request::save(dirty.extra));
+		editor_test::handle_to_end(dirty.session, request::delete_asset(dirty.extra, true));
+		editor_test::handle_to_end(dirty.session, request::undo_file());
+		dirty.session.handle(request::open_document(dirty.extra));
+		if (Document *document = dirty.session.document_for(dirty.extra)) {
+			Edit set;
+			set.address = document->address_at("0/window:0");
+			set.field = "position.left";
+			set.value = int64_t(9);
+			dirty.session.handle(request::edit_record(dirty.extra, set));
+		}
+		break;
+	}
 	case EditorRequestKind::SplitTexture: {
 		// A texture extra.mnu's window shows (that edit unsaved too, validated into the graph): a split of it for
 		// extra.mnu rewrites extra.mnu.
@@ -198,7 +219,8 @@ static int test_guard_column_is_the_prompt() {
 		TEST_EXPECT(prompt.target == (row.guard == GuardScope::Document ? dirty.extra : named));
 	}
 	// Export (S16) guards as Build does; a texture's split (S18) and a move (DI-03) as a rename does.
-	TEST_EXPECT(prompted == 16 && went_ahead == kEditorRequestKindCount - 16);
+	// DI-25: a delete, a duplicate, a folder's rename and the file history's undo and redo too.
+	TEST_EXPECT(prompted == 21 && went_ahead == kEditorRequestKindCount - 21);
 	return 0;
 }
 

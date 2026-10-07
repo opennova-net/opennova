@@ -1212,6 +1212,41 @@ func test_graph_references_and_rename() -> void:
 	assert_true(_done(await _call("editor_request", {"kind": "rename_back"})))
 	assert_true(FileAccess.file_exists(root.path_join("logo2.tga")))
 	assert_false(DirAccess.dir_exists_absolute(root.path_join("art")))
+	# DI-25: a file the menu names is deleted only when asked to leave that use (refused first, file.named, its
+	# uses said), to the project's trash: the use is a missing reference then, and undo_file brings it back. A
+	# duplicate takes the name the project's rules give (the stem's number counted on); a folder is made,
+	# renamed with the file in it, and the file history takes each step back.
+	var named := await _call("editor_request", {"kind": "delete_asset", "path": "logo2.tga"})
+	assert_true(not _done(named) and _found(named, "file.named"), str(named))
+	assert_true(FileAccess.file_exists(root.path_join("logo2.tga")))
+	var deleted := await _call("editor_request", {"kind": "delete_asset", "path": "logo2.tga", "force": true})
+	assert_true(_done(deleted), str(deleted))
+	assert_false(FileAccess.file_exists(root.path_join("logo2.tga")))
+	assert_gt(int((await _query("missing")).get("count", -1)), 0)
+	var history: Dictionary = (await _state(["project"])).get("project", {}).get("file_history", {})
+	assert_eq(String(history.get("undo", "")), "Delete logo2.tga")
+	assert_true(_done(await _call("editor_request", {"kind": "undo_file"})))
+	assert_true(FileAccess.file_exists(root.path_join("logo2.tga")))
+	assert_eq(int((await _query("missing")).get("count", -1)), 0)
+	var copied := await _call("editor_request", {"kind": "duplicate_asset", "path": "logo2.tga"})
+	assert_true(_done(copied), str(copied))
+	assert_true(FileAccess.file_exists(root.path_join("logo3.tga")))
+	assert_true(_done(await _call("editor_request", {"kind": "new_folder", "folder": "art"})))
+	assert_true(DirAccess.dir_exists_absolute(root.path_join("art")))
+	assert_true(_done(await _call("editor_request", {"kind": "move_asset", "path": "logo3.tga", "folder": "art"})))
+	assert_true(_done(await _call("editor_request", {"kind": "rename_folder", "folder": "art", "new_name": "pics"})))
+	assert_true(FileAccess.file_exists(root.path_join("pics/logo3.tga")))
+	assert_false(DirAccess.dir_exists_absolute(root.path_join("art")))
+	assert_true(_done(await _call("editor_request", {"kind": "undo_file"})))
+	assert_true(FileAccess.file_exists(root.path_join("art/logo3.tga")))
+	var outside_folder := await _call("editor_request", {"kind": "new_folder", "folder": "../out"})
+	assert_true(not _done(outside_folder) and _found(outside_folder, "file.folder"), str(outside_folder))
+	# The move is a rename's way back's, not the file history's: moved back, the folder, then the copy, taken back.
+	assert_true(_done(await _call("editor_request", {"kind": "move_asset", "path": "art/logo3.tga", "folder": ""})))
+	assert_true(_done(await _call("editor_request", {"kind": "undo_file"})))
+	assert_false(DirAccess.dir_exists_absolute(root.path_join("art")))
+	assert_true(_done(await _call("editor_request", {"kind": "undo_file"})))
+	assert_false(FileAccess.file_exists(root.path_join("logo3.tga")))
 	# S12 D9: a style variable the blank menu names renamed everywhere: planned first
 	# (preview_rename, the dialogs section's rename_preview: the definition and its uses, each
 	# before and after), then committed on disk; every use still resolves, under the new name.
