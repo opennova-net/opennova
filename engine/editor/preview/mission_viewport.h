@@ -7,6 +7,7 @@
 
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_ground_facts.h>
+#include <editor/preview/mission_ground_overlay.h>
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_items.h>
 #include <editor/preview/mission_options.h>
@@ -102,6 +103,11 @@ public:
 	// What that reads of the mission's files (its terrain, its char map, its tiles and its water plane), as
 	// last asked.
 	const MissionGround &ground_reader() const { return terrain_ground_; }
+	// The ground overlay its options ask (DI-29, mission_ground_overlay.h: the surface classes or the foliage the
+	// game reads at each point), made over the ground as last followed; its kind None with the option's. Its
+	// serial moves each time it is made again (what the device takes it again by).
+	const MissionOverlayImage &overlay() const { return overlay_; }
+	uint64_t overlay_serial() const { return overlay_serial_; }
 
 	// The marks on a picture `width` x `height` (mission_scene.h), an area's anchor on the ground of
 	// `device` where it answers, each entity's with its item's bound (picked by it).
@@ -207,6 +213,8 @@ private:
 	ViewportAction stop_(MissionViewStatus reason);
 	// The mission's ground followed over the project's files (its terrain, tiles and water, DI-07).
 	void follow_ground_(const SessionView &view) const;
+	// The overlay made again where the option's kind or the ground's reads moved (DI-29); true when it was.
+	bool follow_overlay_(const SessionView &view);
 	// The posed people stood on that ground (MissionPoses::stand) where a record, a pose (`posed`) or
 	// the terrain moved; true when a person's lift moved.
 	bool stand_people_(const SessionView &view, bool posed);
@@ -258,6 +266,9 @@ private:
 	bool ground_ = false;
 	// Mutable: the ground's facts read through it, its files read once while they stand (DI-07).
 	mutable MissionGround terrain_ground_;
+	MissionOverlayImage overlay_;
+	uint64_t overlay_serial_ = 0;
+	int overlay_reads_ = -1; // the ground's reads it was made over
 	bool gesture_open_ = false;
 };
 
