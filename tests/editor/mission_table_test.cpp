@@ -440,6 +440,17 @@ int test_fields() {
 	            error == "Mission entity AI flags include unsupported bits");
 	TEST_EXPECT(set(item, "ai_flags", int64_t(uint32_t(bms::BmsiAttributeFlags::Blind)), error) &&
 	            entity.bmsi_attributes == uint32_t(bms::BmsiAttributeFlags::Blind));
+	// NoShadow shows as "No shadow", its tooltip what the game does with it (cited); the file keeps
+	// writing its token, and the other attributes show as their names.
+	for (const FieldChoice &choice : schema(MissionKind::Item, "ai_flags").choices) {
+		if (choice.name == "NoShadow")
+			TEST_EXPECT(choice.value == int64_t(uint32_t(bms::BmsiAttributeFlags::NoShadow)) &&
+			            choice.label == "No shadow" && choice.description.find("no sun shadow") != std::string::npos &&
+			            choice.description.find("Terrain_CollectAndRenderTileModels @ 0x60D42F") !=
+			                    std::string::npos);
+		else
+			TEST_EXPECT(choice.label.empty() && choice.description.empty());
+	}
 	// A name that fills its 8-byte slot keeps every byte; a ninth is past it.
 	TEST_EXPECT(set(item, "name1", std::string("ABCDEFGH"), error) && std::memcmp(entity.name1, "ABCDEFGH", 8) == 0 &&
 	            get(item, "name1", value) && std::get<std::string>(value) == "ABCDEFGH");
