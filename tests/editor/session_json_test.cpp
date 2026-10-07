@@ -558,7 +558,7 @@ static int test_request_round_trip() {
 	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"unsaved_choice\":\"save\"}", back) ==
 			"Unknown request member \"unsaved_choice\" (resolve_unsaved takes choice).");
 	TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"text\":\"T\"}", back) ==
-			"Unknown request member \"text\" (new_project takes dir, title, game, expansion, builds_on, game_install, import_pass).");
+			"Unknown request member \"text\" (new_project takes dir, title, game, expansion, builds_on, base_project, game_install, import_pass).");
 	TEST_EXPECT(request_error("{\"kind\":\"build\",\"flagg\":true}", back) ==
 			"Unknown request member \"flagg\" (build takes out_dir, rehash, report).");
 	TEST_EXPECT(request_error("{\"kind\":\"build\",\"path\":\"x\"}", back) == "build takes no \"path\" (it takes out_dir, rehash, report).");
@@ -693,6 +693,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Game: out.game = "dfx"; break;
 		case F::Expansion: out.expansion = "jxm"; break;
 		case F::BuildsOn: out.builds_on = "jox01"; break;
+		case F::BaseProject: out.base_project = "../../assets"; break;
 		case F::GameInstall: out.game_install = "C:/games/JO2"; break;
 		case F::Path: out.path = "menus/main.mnu"; break;
 		case F::Locator: out.locator = "0/window:1"; break;
