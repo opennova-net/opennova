@@ -168,7 +168,8 @@ constexpr RequestField kFields[] = {
 			"value, ...}, focus?}, each part and member left out as it is; the parts and their members are "
 			"editor_query catalog's workspace (card {path}, build_result {open}, new_project {open, title, dir, "
 			"game_install, builds_on, as_expansion, expansion}); focus a window brought forward (files, document, "
-			"preview, inspector, problems, output)." },
+			"preview, inspector, problems, output), as the Windows menu's tick shows it: opened where it was closed, "
+			"shown where it stands aside (the Preview beside a mission)." },
 	{ F::Purpose, "purpose", J::String,
 			"What a picked path is for: new_project_location, open_project, runtime_executable, "
 			"game_install or import_files." },
