@@ -75,9 +75,6 @@ void ResourceRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("mount_runtime", "path", "expansion", "allow_loose_override", "game_code"),
 			&ResourceRoot::mount_runtime, DEFVAL(String()), DEFVAL(false), DEFVAL("jo"));
 	ClassDB::bind_method(D_METHOD("list_expansions", "path"), &ResourceRoot::list_expansions);
-	ClassDB::bind_method(D_METHOD("expansion_name", "path", "expansion"), &ResourceRoot::expansion_name);
-	ClassDB::bind_method(D_METHOD("expansion_description", "path", "expansion"),
-			&ResourceRoot::expansion_description);
 	ClassDB::bind_method(D_METHOD("get_expansion"), &ResourceRoot::get_expansion);
 	ClassDB::bind_method(D_METHOD("is_runtime_mount"), &ResourceRoot::is_runtime_mount);
 	ClassDB::bind_method(D_METHOD("get_expansion_override_table"),
@@ -296,8 +293,9 @@ Error ResourceRoot::set_root_dir(const String &path) {
 Error ResourceRoot::mount_runtime(const String &path, const String &expansion, bool allow_loose_override,
 		const String &game_code) {
 	// A root already runtime-mounted switches in place with its old archives still open
-	// (the menu's and the join's expansion switch); any other mount is the boot's, with
-	// none open. The engine's vfs_expansion_override_table says what each one reaches.
+	// (the join's expansion switch); any other mount is the boot's, with none open (the
+	// Mods list's reload clears the root first). The engine's vfs_expansion_override_table
+	// says what each one reaches.
 	const opennova::ExpansionLoadPoint load_point = mount_kind_ == MountKind::Runtime
 			? opennova::ExpansionLoadPoint::ArchivesOpen
 			: opennova::ExpansionLoadPoint::ArchivesClosed;
@@ -414,24 +412,6 @@ PackedStringArray ResourceRoot::list_expansions(const String &path) const {
 		out.push_back(String(name.c_str()));
 	}
 	return out;
-}
-
-String ResourceRoot::expansion_name(const String &path, const String &expansion) const {
-	const String clean = normalize_dir(path);
-	if (clean.is_empty()) {
-		return String();
-	}
-	return opennova::to_gd(opennova::vfs_expansion_info(
-			opennova::to_std(clean), opennova::to_std(expansion)).name);
-}
-
-String ResourceRoot::expansion_description(const String &path, const String &expansion) const {
-	const String clean = normalize_dir(path);
-	if (clean.is_empty()) {
-		return String();
-	}
-	return opennova::to_gd(opennova::vfs_expansion_info(
-			opennova::to_std(clean), opennova::to_std(expansion)).description);
 }
 
 String ResourceRoot::get_root_dir() const {

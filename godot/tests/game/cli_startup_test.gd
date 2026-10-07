@@ -8,7 +8,6 @@ var _config: TestFs.Snapshot
 
 func before_each() -> void:
 	_config = TestFs.snapshot(ResourceDirSettings.CONFIG_PATH)
-	ResourceDirSettings.set_expansion("")
 	ResourceDirSettings.set_game("jo")
 
 

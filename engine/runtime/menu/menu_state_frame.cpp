@@ -382,6 +382,10 @@ std::string MenuStateFrame::widget_mnemonic(int index) const {
 	return configured_ ? compiler_.widget_mnemonic(index) : std::string();
 }
 
+std::string MenuStateFrame::widget_string(int index, const std::string &key) const {
+	return configured_ ? compiler_.widget_string(index, key) : key;
+}
+
 void MenuStateFrame::set_open_popup(int index) {
 	if (state_.popup_root == index) return;
 	state_.popup_root = index;

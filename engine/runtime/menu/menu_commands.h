@@ -30,7 +30,7 @@ class MenuRuntime;
 enum class MenuCommand : uint8_t {
 	None,
 	StartMission, // the selected mission starts (the game leaves the menu)
-	ApplyExpansion, // the highlighted expansion mounts over the base game
+	ApplyExpansion, // the game picked in the Mods list (an expansion, or the base game) loads for the run
 	Exit, // the game quits to the desktop
 	Back, // the screen history across files pops; with none, the mission resumes (in one), else Exit
 	ReturnToMenu, // the mission ends, back to the menu screen it was started from
@@ -89,7 +89,7 @@ bool is_mission_menu_file(const std::string &file);
 // control NAME: on a screen a mission opens (in a mission) or the SINGLE_PLAYER screen, the
 // controls the code registers on that screen; then the shell's: a delegate that owns the document
 // (the LAN screens, PLAYER_INFO) binds its own controls and nothing else, else the launch controls
-// start the mission on a document holding a mission list (apply the highlighted expansion on one
+// start the mission on a document holding a mission list (switch to the Mods list's pick on one
 // holding a mod list instead, else they are the menu's own), then exit, return and restart (in a
 // mission), NovaWorld and back; a name keeps its first binding (menu_shell.gd _wire_named_controls).
 class MenuCommands {

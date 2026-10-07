@@ -14,7 +14,6 @@ extends GameProbe
 
 # The Stats window reads a ~0.5 s window in-game (StatsWindow::kRefreshSeconds).
 const OVERLAY_RENDER_FRAMES := 30
-const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 
 const PRESENT_SLOTS := [
 	FrameStats.PRESENT_SNAPSHOT,
@@ -225,7 +224,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		"mission": {
 			"file": bms,
 			"resource_dir": LaunchFlags.resource_dir(),
-			"expansion": ResourceDirSettings.get_expansion(),
+			"expansion": String(_ctx.resource_root().get_expansion()) if _ctx.resource_root() != null else "",
 		},
 		"configuration": {
 			"warmup_seconds": warmup_seconds,

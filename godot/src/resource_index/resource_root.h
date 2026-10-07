@@ -138,7 +138,7 @@ public:
 	// Safe to call on an already-mounted root: the mount is replaced, not layered (the index
 	// rebuilds, the resolver caches drop, and the epoch bump self-clears every epoch-keyed
 	// holder), so holders of this object move with it — the in-place expansion switch the
-	// Mods screen and the LAN joiner both perform.
+	// LAN joiner performs (the Mods list's reload clears the root first, then mounts here).
 	Error mount_runtime(const String &path, const String &expansion = String(),
 	                    bool allow_loose_override = false, const String &game_code = "jo");
 	// C++ siblings only (not bound; the OpenNova Editor's devices): an embedder's own file set mounted
@@ -177,19 +177,15 @@ public:
 	// expansion/<n>/<n>.bin's bytes, or empty (no expansion, no loose file, a loose
 	// mount, a failed mount). The rule is the engine's vfs_expansion_override_table: a
 	// mount over a root that is not runtime-mounted is the boot's load (no archive
-	// open), a mount over a runtime-mounted one the in-place switch's (the old archives
-	// open: the loose file only under `/d`). Every mount_runtime() and set_root_dir()
+	// open; the Mods list's reload clears the root first), a mount over a runtime-mounted
+	// one the join's in-place switch's (the old archives open: the loose file only under
+	// `/d`). Every mount_runtime() and set_root_dir()
 	// emits `mounted` once it is done, so a holder re-reads this.
 	PackedByteArray get_expansion_override_table() const;
 
 	// Expansion names discoverable under `<path>/expansion/` (each subdir with a matching
 	// <name>.pff). Independent of the currently mounted root, so the UI can list before mounting.
 	PackedStringArray list_expansions(const String &path) const;
-	// The expansion's own EXP_NAME / EXP_DESC (with the scan's fallbacks) out of
-	// <name>.bin under <path>/expansion/<name>/ — engine vfs_expansion_info, which
-	// resolves the .bin independently of the mounted stack.
-	String expansion_name(const String &path, const String &expansion) const;
-	String expansion_description(const String &path, const String &expansion) const;
 	String get_root_dir() const;
 	String get_last_error() const;
 	void clear();

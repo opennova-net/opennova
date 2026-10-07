@@ -22,7 +22,7 @@ class LaunchFlags : public RefCounted {
 public:
 	// True when `/d` (dev / loose-override) was passed.
 	static bool loose_override_enabled();
-	// `/exp <name>`, else the persisted fallback.
+	// `/exp <name>` (or `/mod`, the last one), else `fallback` ("" the base game).
 	static String expansion(const String &fallback);
 	// `/game <code>` lowercased, else the persisted fallback, else "jo".
 	static String game(const String &fallback);

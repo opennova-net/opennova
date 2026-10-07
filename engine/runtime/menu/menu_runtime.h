@@ -163,6 +163,12 @@ public:
 	// The parse-time {hot} mnemonic of a widget (MenuFrameCompiler::
 	// widget_mnemonic), empty when none.
 	virtual std::string widget_mnemonic(int index) const = 0;
+	// The text the widget's string table gives a key the game's code names, the key itself on
+	// a miss (MenuFrameCompiler::widget_string); a frame that loads no table answers the key.
+	virtual std::string widget_string(int index, const std::string &key) const {
+		(void)index;
+		return key;
+	}
 	// The open popup (a shown MODAL window) as a pre-order index, -1 none: the
 	// frame's pump then serves its subtree alone.
 	virtual void set_open_popup(int index) = 0;
@@ -413,6 +419,9 @@ public:
 	// The row's displayed text (an authored `type="id"` row resolved through
 	// the screen's string table); "" off-screen or out of range.
 	std::string item_display_text(int id, int row) const;
+	// The text the widget's string table gives a key the game's code names, the key itself on
+	// a miss or off-screen (MenuFrameSeam::widget_string).
+	std::string widget_string(int id, const std::string &key) const;
 	// The authored item `value=` attribute of a row.
 	std::string item_value(int id, int row) const;
 	// Retail's select-by-value seed [orig: SpinList_SelectItemByValue
