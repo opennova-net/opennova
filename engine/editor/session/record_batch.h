@@ -51,6 +51,9 @@ struct BatchOp {
 	const char *token;
 	RecordBatchForm form;
 	const char *doc;
+	// Read in the Spans form too, by its op alone (a change every document takes: the line-ends fix,
+	// restore_line_ends); `form` is where the catalog lists it.
+	bool every_form = false;
 };
 
 struct BatchMember {
