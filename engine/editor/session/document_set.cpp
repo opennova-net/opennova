@@ -400,7 +400,7 @@ void DocumentSet::create_file(const EditorRequest &request) {
 				const std::string text_relative = placement_path(*view_.project.scan, table, AssetKind::Strings);
 				const auto text_target = path_of(paths_.root) / path_of(text_relative);
 				std::vector<uint8_t> text_bytes;
-				if (!fs::exists(system_path(utf8_of(text_target)), ec) && text_factory->make(text_blank, text_bytes, error) &&
+				if (!fs::exists(system_path(utf8_of(text_target)), ec) && make_from(*text_factory, text_blank, text_bytes, error) &&
 				    ensure_directory(utf8_of(text_target.parent_path()), message) &&
 				    write_file_atomic(utf8_of(text_target), text_bytes.data(), text_bytes.size(), message)) {
 					made.push_back(text_relative);

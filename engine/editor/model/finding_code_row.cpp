@@ -115,6 +115,12 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::CreateMissingWrongKind, code("create_missing.wrong_kind", G::CreateMissing) },
 	{ C::DocumentBatch, code("document.batch", G::Documents) },
 	{ C::DocumentCollection, code("document.collection", G::Documents) },
+	// A file of a kind the ConfigFile text reader reads holding more values than that reader's pool of its
+	// text values takes (documents/config_overrun.h): an error, the reader clearing past the pool into the
+	// game's heap [orig: ConfigFile_ParseText @ 0x7609e8]. Listed: the load goes on and the crash comes later,
+	// as the heap's next block is used (8 bytes past ran in the witness, 41 crashed a mission start). Its fix,
+	// the lines the kind's loader reads the same without commented out, an edit of its document.
+	{ C::DocumentConfigOverrun, listed(code("document.config_overrun", G::Documents, F::EditRecord)) },
 	{ C::DocumentConflict, code("document.conflict", G::Documents, F::Reload) },
 	{ C::DocumentCopy, code("document.copy", G::Documents) },
 	{ C::DocumentDecode, code("document.decode", G::Documents) },
