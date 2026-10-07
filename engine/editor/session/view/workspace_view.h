@@ -97,6 +97,7 @@ struct WorkspaceView {
 		std::string builds_on;
 		bool as_expansion = false;
 		std::string expansion;
+		std::string base_project; // the base game's project it builds on (T5; "" the game install's base game)
 	};
 	NewProject new_project;
 
@@ -113,6 +114,7 @@ struct WorkspaceView {
 		std::string builds_on;
 		bool as_expansion = false;
 		std::string expansion;
+		std::string base_project; // T5: the base game's project ("" the game install's base game)
 		std::string game_install;
 		std::string runtime;
 		PlayMode play_mode = PlayMode::Runtime;

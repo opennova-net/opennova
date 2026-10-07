@@ -1065,8 +1065,8 @@ static int test_strict_play() {
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == spawns && v.activity.last_build->build_id == last_build &&
 	            v.findings.diagnostics.back().code() == "play.strict_expansion" &&
-	            v.findings.diagnostics.back().message.find("Strict Play of an expansion needs its base game's build; "
-	                                                       "not yet supported") == 0);
+	            v.findings.diagnostics.back().message.find("Strict Play of an expansion needs its base game's build: "
+	                                                       "the project builds as the expansion") == 0);
 	return 0;
 }
 

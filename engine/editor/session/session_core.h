@@ -314,8 +314,14 @@ public:
 	// The game install the editor imports from and plays in: the open project's (its local.json),
 	// else the one the editor last chose.
 	std::string game_install() const;
+	// The folder the open project's base game is served from (ADR 0046 T5, project/base_project.h): the base
+	// game's project's export for an expansion that names one, else the game install (game_install()). What
+	// every read of the base game reads: the import's listing, the base's names, lean packing, the build's
+	// gate and the Play run's base; the game install stays the program Play in the game install starts.
+	std::string base_game() const;
 	// The game install's expansions read again into the view (ADR 0046 S16: the ones it mounts, with
-	// the Mods list's name and description of each), when the install may have moved.
+	// the Mods list's name and description of each), when the install may have moved; for an expansion of a
+	// project's base game, the base game's (base_game()).
 	void read_install_expansions();
 	// The requirements of `doc` over `scan`, with the game install's expansions weighed
 	// (evaluate_requirements: the project's expansion against them, listed).
