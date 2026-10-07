@@ -1,8 +1,9 @@
 // engine/formats/playersav — player.sav parse/serialize tests.
 //
-// Every fixture is built in code: no retail file is committed. The optional
-// last leg reads the install's own player.sav (OPENNOVA_JO_DIR) read only and
-// notes SKIP-LEG otherwise (docs/asset-gated-tests.md).
+// Every fixture is built in code: no retail file is committed. The retail leg
+// checks the format against the installed program's own save (Jointops.exe
+// under OPENNOVA_JO_DIR, read only) and notes SKIP-LEG without it
+// (docs/asset-gated-tests.md).
 
 #include <cstdint>
 #include <cstdio>
@@ -11,6 +12,7 @@
 #include <vector>
 
 #include "common/file_io.h"
+#include "common/pe_image.h"
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include <formats/playersav/player_sav.h>
@@ -211,30 +213,34 @@ int test_header_gate() {
     return 0;
 }
 
-// --- 4. optional: the install's own player.sav (SKIP-LEG without it) ---------
+// --- 4. retail: the format the installed program's save writes -----------------
 
-int test_retail_file() {
-    const std::string sav = retail::player_sav();
-    if (sav.empty()) return retail::skip_leg("OPENNOVA_JO_DIR carrying a retail player.sav (corpus leg)");
-    std::vector<uint8_t> bytes;
-    if (!test_io::read_file(sav.c_str(), bytes)) {
-        std::fprintf(stderr, "retail player.sav found but unreadable: %s\n", sav.c_str());
+int test_retail_program() {
+    const std::string exe = retail::jointops_exe();
+    if (exe.empty()) return retail::skip_leg("OPENNOVA_JO_DIR carrying Jointops.exe");
+    pe::Image image;
+    if (!image.open(exe)) {
+        std::fprintf(stderr, "Jointops.exe found but not a readable PE32 image: %s\n", exe.c_str());
         return 1;
     }
-    TEST_EXPECT(bytes.size() == kPlayerSavBytes);
     PlayerSav f;
-    TEST_EXPECT(read(bytes.data(), bytes.size(), f));
-    for (const ProfileRecord &r : f.slots) {
-        TEST_EXPECT(r.tag == kRecordTag);
-        TEST_EXPECT(!r.bindings.empty());
-        TEST_EXPECT(r.mouse_sensitivity >= 0);
-    }
-    // Writer parity: the install's file re-serializes byte for byte (every region
-    // the writer emits as zero is zero in it).
-    const std::vector<uint8_t> rewritten = write(f);
-    TEST_EXPECT(rewritten == bytes);
-    std::printf("retail player.sav: %zu bytes re-serialized byte-identically; slot 0 \"%s\", %zu bindings\n",
-                bytes.size(), f.slots[0].name.c_str(), f.slots[0].bindings.size());
+    const std::vector<uint8_t> written = write(f);
+    std::vector<uint8_t> b;
+    // The header's two immediates [orig: PlayerProfile_SaveToFiles @0x54be2e
+    // mov [esp], 'FPBC'; @0x54be35 mov [esp+4], '0211'].
+    TEST_EXPECT(image.read(0x54be31, 4, b) && std::memcmp(b.data(), written.data(), 4) == 0);
+    TEST_EXPECT(image.read(0x54be39, 4, b) && std::memcmp(b.data(), written.data() + 4, 4) == 0);
+    // Each record's size [orig: push 3C80h @0x54be70].
+    uint32_t record = 0;
+    TEST_EXPECT(image.u32(0x54be71, record) && record == kPlayerRecordBytes);
+    // The trailer: 8 bytes [orig: push 8 @0x54be92] from off_829F3C's string.
+    TEST_EXPECT(image.read(0x54be93, 1, b) && b[0] == kTrailerBytes);
+    uint32_t trailer_va = 0;
+    TEST_EXPECT(image.u32(0x829F3C, trailer_va));
+    TEST_EXPECT(image.read(trailer_va, kTrailerBytes, b) &&
+                std::memcmp(b.data(), written.data() + written.size() - kTrailerBytes, kTrailerBytes) == 0);
+    std::printf("Jointops.exe: header, record size and trailer \"%s\" match the writer\n",
+                image.c_string(trailer_va).c_str());
     return 0;
 }
 
@@ -250,7 +256,7 @@ int main(int argc, char **argv) {
         {"layout", test_layout},
         {"round_trip", test_round_trip},
         {"header_gate", test_header_gate},
-        {"retail_file", test_retail_file},
+        {"retail_program", test_retail_program},
     };
     int failures = 0;
     for (const Case &c : cases) {

@@ -4132,9 +4132,9 @@ target_include_directories(playersav_weapon_sav_test PRIVATE ${CMAKE_CURRENT_SOU
 target_compile_features(playersav_weapon_sav_test PRIVATE cxx_std_17)
 opennova_add_mixed_test(playersav_weapon_sav COMMAND playersav_weapon_sav_test)
 
-# player.sav parse/serialize tests (engine/formats/playersav). The retail-corpus
-# leg reads the install's player.sav (OPENNOVA_JO_DIR), read only, and notes
-# SKIP-LEG without it.
+# player.sav parse/serialize tests (engine/formats/playersav). The retail leg
+# checks the format against the installed program's save (Jointops.exe under
+# OPENNOVA_JO_DIR, read only).
 add_executable(playersav_player_sav_test playersav/player_sav_test.cpp)
 target_link_libraries(playersav_player_sav_test PRIVATE opennova_formats)
 target_include_directories(playersav_player_sav_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -4142,7 +4142,8 @@ target_compile_features(playersav_player_sav_test PRIVATE cxx_std_17)
 opennova_add_mixed_test(playersav_player_sav COMMAND playersav_player_sav_test)
 
 # The player profile's in-memory image, its load and save (engine/runtime/profile).
-# The retail-corpus leg loads and saves the install's own player.sav in memory.
+# The retail legs check the default binding table and kit pages against the
+# installed program's static data and load and save the install's weapon.sav.
 add_executable(profile_player_profiles_test profile/player_profiles_test.cpp)
 target_link_libraries(profile_player_profiles_test PRIVATE opennova_runtime)
 target_include_directories(profile_player_profiles_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

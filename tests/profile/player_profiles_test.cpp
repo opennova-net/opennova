@@ -1,16 +1,20 @@
 // engine/runtime/profile — the player profile's in-memory image: the fresh
 // record's seeds, the binding merge, the load and the save, the screens' name
-// rules and the session steps. Fixtures are built in code; the optional last
-// leg loads the install's own player.sav (read only) and saves it in memory
-// (docs/asset-gated-tests.md).
+// rules and the session steps. Fixtures are built in code; the retail legs
+// check the fresh record's tables against the installed program's own static
+// data (Jointops.exe, read only) and load and save the install's weapon.sav in
+// memory (docs/asset-gated-tests.md).
 
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 
 #include "common/file_io.h"
+#include "common/pe_image.h"
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include <formats/playersav/player_sav.h>
@@ -311,45 +315,172 @@ int test_session_steps() {
     return 0;
 }
 
-// --- 7. optional: the install's own player.sav, loaded and saved in memory -----------
+// --- 7. retail: the fresh record against the installed program's static data -------
 
-int test_retail_file() {
-    const std::string sav = retail::player_sav();
-    if (sav.empty()) return retail::skip_leg("OPENNOVA_JO_DIR carrying a retail player.sav (corpus leg)");
-    std::vector<uint8_t> bytes;
-    if (!test_io::read_file(sav.c_str(), bytes)) {
-        std::fprintf(stderr, "retail player.sav found but unreadable: %s\n", sav.c_str());
-        return 1;
-    }
-    playersav::PlayerSav file;
-    TEST_EXPECT(playersav::read(bytes.data(), bytes.size(), file));
-    // The shipped binding table is the default table this catalog builds: the
-    // same rows, codes, flags, help ids, defaults and tokens.
-    const std::vector<playersav::BindingEntry> table = profile::default_binding_table();
-    size_t remapped = 0;
-    for (const playersav::ProfileRecord &r : file.slots) {
-        TEST_EXPECT(r.bindings.size() == table.size());
-        for (size_t i = 0; i < table.size(); ++i) {
-            const playersav::BindingEntry &a = r.bindings[i];
-            const playersav::BindingEntry &b = table[i];
-            TEST_EXPECT(a.id == b.id && a.index == b.index && a.token == b.token);
-            TEST_EXPECT(a.flags == b.flags && a.modes == b.modes && a.action_class == b.action_class);
-            TEST_EXPECT(a.help == b.help);
-            if (a.primary != b.primary || a.secondary != b.secondary || a.primary_mod != b.primary_mod ||
-                a.mouse_mask != b.mouse_mask || a.mouse_mod != b.mouse_mod ||
-                a.joy_button != b.joy_button || a.joy_mod != b.joy_mod)
-                ++remapped;
+uint32_t le(const std::vector<uint8_t> &b, size_t at, size_t n) {
+    uint32_t v = 0;
+    for (size_t i = 0; i < n; ++i) v |= static_cast<uint32_t>(b[at + i]) << (8 * i);
+    return v;
+}
+
+// The default binding table as the program builds it from its static catalog:
+// the boot's sort puts the row whose id is i at place i [orig:
+// KeyBinding_SortBySequentialId @0x498260, rows from 0x8159A8 to the bound
+// @0x4982a4], then the walk over 768 places keeps each row flagged 0x4000000,
+// at most 190 [orig: KeyBinding_BuildFilteredTable @0x54c2b0..0x54c3a5].
+bool program_binding_table(const pe::Image &image, std::vector<playersav::BindingEntry> &out) {
+    constexpr uint32_t kCatalog = 0x8159A8;
+    constexpr size_t kStride = 108;
+    uint32_t bound = 0;
+    std::vector<uint8_t> t;
+    if (!image.u32(0x4982a5, bound) || bound <= kCatalog || (bound - kCatalog) % kStride != 0 ||
+        !image.read(kCatalog, bound - kCatalog, t))
+        return false;
+    const size_t rows = t.size() / kStride;
+    const auto id_of = [&](size_t r) { return static_cast<int>(static_cast<int16_t>(le(t, r * kStride, 2))); };
+    for (size_t i = 0; i < rows; ++i) {
+        const int id = id_of(i);
+        if (id >= 768 || id == static_cast<int>(i)) continue;
+        for (size_t j = 0; j < rows; ++j) {
+            if (id_of(j) != static_cast<int>(i)) continue;
+            std::swap_ranges(t.begin() + static_cast<std::ptrdiff_t>(i * kStride),
+                             t.begin() + static_cast<std::ptrdiff_t>((i + 1) * kStride),
+                             t.begin() + static_cast<std::ptrdiff_t>(j * kStride));
+            break;
         }
     }
-    // The load and the save in memory: with an unremapped table the profile
-    // writes the file it read, byte for byte.
+    out.clear();
+    for (size_t place = 0; place < 768 && place < rows && out.size() < playersav::kBindingCapacity; ++place) {
+        const size_t r = place * kStride;
+        const uint32_t flags = le(t, r + 4, 4);
+        if ((flags & 0x4000000u) == 0) continue;
+        playersav::BindingEntry e;
+        e.id = static_cast<uint16_t>(le(t, r, 2));
+        e.index = static_cast<int32_t>(place);
+        e.flags = flags;
+        e.modes = le(t, r + 8, 4);
+        e.action_class = t[r + 12];
+        e.help = le(t, r + 16, 4);
+        e.primary = static_cast<uint16_t>(le(t, r + 20, 2));
+        e.secondary = static_cast<uint16_t>(le(t, r + 22, 2));
+        e.mouse_mask = static_cast<uint16_t>(le(t, r + 24, 2));
+        e.joy_button = t[r + 26];
+        e.primary_mod = static_cast<uint16_t>(le(t, r + 28, 2));
+        e.secondary_mod = static_cast<uint16_t>(le(t, r + 30, 2));
+        e.mouse_mod = static_cast<uint16_t>(le(t, r + 32, 2));
+        e.joy_mod = t[r + 34];
+        // The row's token, NUL-terminated inside the row [orig: @0x54c37a..0x54c38d].
+        for (size_t c = r + 75; c < r + kStride && t[c] != 0; ++c) e.token.push_back(static_cast<char>(t[c]));
+        out.push_back(std::move(e));
+    }
+    return true;
+}
+
+// A static default kit page: NUL-separated (name, ammo, ammo, flags) quads that
+// end at an empty string [orig: Buffer_CopyUntilDoubleNull's source blobs].
+bool program_kit_page(const pe::Image &image, uint32_t va, playersav::KitPage &out) {
+    out.entries.clear();
+    std::vector<std::string> fields;
+    for (uint32_t at = va;;) {
+        std::string field = image.c_string(at);
+        if (field.empty()) break;
+        at += static_cast<uint32_t>(field.size()) + 1;
+        fields.push_back(std::move(field));
+        if (fields.size() > 64) return false;
+    }
+    if (fields.size() % 4 != 0) return false;
+    for (size_t i = 0; i < fields.size(); i += 4) {
+        playersav::KitEntry e;
+        e.name = fields[i];
+        e.ammo_primary = std::atoi(fields[i + 1].c_str());
+        e.ammo_secondary = std::atoi(fields[i + 2].c_str());
+        e.flags = std::atoi(fields[i + 3].c_str());
+        out.entries.push_back(std::move(e));
+    }
+    return true;
+}
+
+bool same_page(const playersav::KitPage &a, const playersav::KitPage &b) {
+    if (a.entries.size() != b.entries.size()) return false;
+    for (size_t i = 0; i < a.entries.size(); ++i) {
+        const playersav::KitEntry &x = a.entries[i];
+        const playersav::KitEntry &y = b.entries[i];
+        if (x.name != y.name || x.ammo_primary != y.ammo_primary || x.ammo_secondary != y.ammo_secondary ||
+            x.flags != y.flags)
+            return false;
+    }
+    return true;
+}
+
+int test_retail_program() {
+    const std::string exe = retail::jointops_exe();
+    if (exe.empty()) return retail::skip_leg("OPENNOVA_JO_DIR carrying Jointops.exe");
+    pe::Image image;
+    if (!image.open(exe)) {
+        std::fprintf(stderr, "Jointops.exe found but not a readable PE32 image: %s\n", exe.c_str());
+        return 1;
+    }
+    // The default binding table, entry for entry.
+    std::vector<playersav::BindingEntry> program;
+    TEST_EXPECT(program_binding_table(image, program));
+    const std::vector<playersav::BindingEntry> table = profile::default_binding_table();
+    TEST_EXPECT(program.size() == table.size());
+    for (size_t i = 0; i < std::min(program.size(), table.size()); ++i) {
+        const playersav::BindingEntry &a = program[i];
+        const playersav::BindingEntry &b = table[i];
+        TEST_EXPECT(a.id == b.id && a.index == b.index && a.token == b.token);
+        TEST_EXPECT(a.flags == b.flags && a.modes == b.modes && a.action_class == b.action_class);
+        TEST_EXPECT(a.help == b.help);
+        TEST_EXPECT(a.primary == b.primary && a.secondary == b.secondary);
+        TEST_EXPECT(a.primary_mod == b.primary_mod && a.secondary_mod == b.secondary_mod);
+        TEST_EXPECT(a.mouse_mask == b.mouse_mask && a.mouse_mod == b.mouse_mod);
+        TEST_EXPECT(a.joy_button == b.joy_button && a.joy_mod == b.joy_mod);
+    }
+    // The eleven default kit pages the fresh weapon record copies [orig:
+    // PlayerProfile_InitDefaults @0x54bb40]; the profile-less spawn kit copies
+    // the single-player one whole [orig: push 0x833BF8 @0x5246be and @0x5519da].
+    playersav::KitPage page;
+    TEST_EXPECT(program_kit_page(image, 0x833BF8, page) &&
+                same_page(page, playersav::default_single_player_page()));
+    const uint8_t push_sp[] = {0x68, 0xF8, 0x3B, 0x83, 0x00};
+    std::vector<uint8_t> b;
+    TEST_EXPECT(image.read(0x5246be, 5, b) && std::memcmp(b.data(), push_sp, 5) == 0);
+    TEST_EXPECT(image.read(0x5519da, 5, b) && std::memcmp(b.data(), push_sp, 5) == 0);
+    const uint32_t blue[5] = {0x8353F8, 0x8363F8, 0x8373F8, 0x8393F8, 0x83A3F8};
+    const uint32_t red[5] = {0x835BF8, 0x836BF8, 0x837BF8, 0x839BF8, 0x83ABF8};
+    for (uint8_t i = 0; i < 5; ++i) {
+        const uint8_t klass = static_cast<uint8_t>(playersav::kMinPlayerClass + i);
+        TEST_EXPECT(program_kit_page(image, blue[i], page) &&
+                    same_page(page, playersav::default_kit_page(playersav::SideId::Blue, klass)));
+        TEST_EXPECT(program_kit_page(image, red[i], page) &&
+                    same_page(page, playersav::default_kit_page(playersav::SideId::Red, klass)));
+    }
+    std::printf("Jointops.exe: the %zu-entry default binding table and the 11 default kit pages match\n",
+                program.size());
+    return 0;
+}
+
+// --- 8. retail: the install's weapon.sav, loaded and saved in memory ---------------
+
+int test_retail_weapon_sav() {
+    const std::string sav = retail::weapon_sav();
+    if (sav.empty()) return retail::skip_leg("OPENNOVA_JO_DIR carrying a retail weapon.sav");
+    std::vector<uint8_t> bytes;
+    if (!test_io::read_file(sav.c_str(), bytes)) {
+        std::fprintf(stderr, "retail weapon.sav found but unreadable: %s\n", sav.c_str());
+        return 1;
+    }
     PlayerProfiles p;
     PlayerProfiles::LoadInput in;
-    in.player_sav = &bytes;
+    in.weapon_sav = &bytes;
     p.load(in, defaults());
-    if (remapped == 0) TEST_EXPECT(p.player_sav_bytes() == bytes);
-    std::printf("retail player.sav: %zu bindings a record, %zu remapped; load+save %s\n", table.size(),
-                remapped, p.player_sav_bytes() == bytes ? "byte-identical" : "differs");
+    // The records the file holds come back out as they went in; the header's
+    // extra byte is the profile's own (player.sav's accumulated count).
+    const std::vector<uint8_t> saved = p.weapon_sav_bytes();
+    TEST_EXPECT(saved.size() == bytes.size());
+    TEST_EXPECT(saved.size() > 16 && std::equal(saved.begin(), saved.begin() + 8, bytes.begin()));
+    TEST_EXPECT(saved.size() == bytes.size() && std::equal(saved.begin() + 16, saved.end(), bytes.begin() + 16));
+    std::printf("retail weapon.sav: %zu bytes; the profile's load and save keep every record\n", bytes.size());
     return 0;
 }
 
@@ -370,7 +501,8 @@ int main(int argc, char **argv) {
         {"load_with_files", test_load_with_files},
         {"name_rules", test_name_rules},
         {"session_steps", test_session_steps},
-        {"retail_file", test_retail_file},
+        {"retail_program", test_retail_program},
+        {"retail_weapon_sav", test_retail_weapon_sav},
     };
     int failures = 0;
     for (const Case &c : cases) {
