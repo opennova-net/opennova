@@ -7,6 +7,7 @@
 #include <editor/documents/menu_labels.h>
 #include <editor/documents/credits_type.h>
 #include <editor/documents/def_catalog_document.h>
+#include <editor/documents/dialog_bank_document.h>
 #include <editor/documents/environment_document.h>
 #include <editor/documents/hud_layout_type.h>
 #include <editor/documents/mission_document.h>
@@ -54,6 +55,7 @@ std::unique_ptr<DocumentBase> make_sound_bank() { return std::make_unique<SoundB
 std::unique_ptr<DocumentBase> make_sound_profiles() { return std::make_unique<SoundProfileDocument>(); }
 std::unique_ptr<DocumentBase> make_environment() { return std::make_unique<EnvironmentDocument>(); }
 std::unique_ptr<DocumentBase> make_terrain() { return std::make_unique<TerrainDocument>(); }
+std::unique_ptr<DocumentBase> make_dialog_bank() { return std::make_unique<DialogBankDocument>(); }
 
 constexpr DocumentType kTypes[] = {
 	// The catalogs: a weapon, an ammo, a mounted gun by the names the player sees (the plain-words lane).
@@ -135,6 +137,12 @@ constexpr DocumentType kTypes[] = {
 	// fields' (each map by its role's loader, the height data, the tile placement, the definitions' models).
 	{ DocumentTypeId::Terrain, "terrain", make_terrain, validate_terrain_file, TerrainDocument::schema,
 			terrain_finding_codes },
+	// The dialog bank (DI-32): a .dbf's dialogs and their lines, a dialog's name what a mission's Play dialog
+	// plays, a line's wave one of the bank's sounds; a dialog a mission names and the bank lacks added there
+	// (DI-15).
+	{ DocumentTypeId::DialogBank, "dialog_bank", make_dialog_bank, validate_dialog_bank_file, DialogBankDocument::schema,
+			dialog_bank_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			nullptr, define_dialog },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its
