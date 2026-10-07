@@ -1045,10 +1045,10 @@ std::vector<std::vector<uint8_t>> build_water_cross_messages(
         const world::World &world) {
 	// One positioned message per crossing recorded this tick. Which of the two
 	// sounds rides the message is the crossing entity's own airborne bit, not
-	// its family — see world::WaterCrossEvent::airborne for the witness. The
-	// name-to-slot binding itself is capture-derived (npwire's kWaterCross*
-	// constants). Coordinates are world UNITS (the wire's i16), so the 16.16
-	// fixed positions shift down 16 - the same convention the decode documents.
+	// its family — see world::WaterCrossEvent::airborne for the witness and
+	// npwire's kWaterCross* constants for the sets. Coordinates are world UNITS
+	// (the wire's i16), so the 16.16 fixed positions shift down 16 - the same
+	// convention the decode documents.
 	// [orig: NetPacket_WriteOverlayAction @0x505d50 via
 	//  Server_SendOverlayActionToAlive @0x50a1b0]
 	std::vector<std::vector<uint8_t>> out;

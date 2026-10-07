@@ -481,25 +481,25 @@ std::vector<uint8_t> encode_tracked_player_voice(const TrackedPlayerVoice &voice
 //  the count byte @0x5117cf; Server_SendDesignationsToPlayer @0x517F70]
 std::vector<uint8_t> encode_minimap_overlay_batch(const MinimapOverlayBatch &batch);
 
-// The two water-crossing effect names retail fans through 0x34, both witnessed
-// in the Base Assault baseline capture (BODYWATER1 x24, SURFACE_WTR x15, all at
-// the water plane z=12/13).
+// The two water-crossing sets retail fans through 0x34, both witnessed in the
+// Base Assault baseline capture (BODYWATER1 x24, SURFACE_WTR x15, all at the
+// water plane z=12/13).
 //
-// WHICH sound a crossing takes is witnessed and is not a family split: every
-// caller passes the same two sound globals and chooses on the crossing entity's
-// Flags & 0x2000 (airborne). Only the name-to-global binding is capture-derived,
-// by PROXIMITY: correlating every 0x34 against the absolute entity positions in
-// the surrounding frames gives BODYWATER1 a nearest-infantry median of 1.2u
-// (nearest vehicle 9.1u) and SURFACE_WTR a nearest-vehicle median of 3.4u
-// (nearest infantry 163u). That is consistent with the witnessed selector rather
-// than in tension with it: a soldier WALKS into a river (never airborne, so the
-// non-airborne sound) while a vehicle almost always leaves the bank with air
-// under it (airborne, so the other one). Naming them for the selector, not for
-// the population that happens to dominate each one in one capture.
-// [orig: the fan is Server_SendOverlayActionToAlive @0x50a1b0 (send_mask 128);
-//  the selector and both callers are quoted at world::WaterCrossEvent::airborne]
-inline constexpr char kWaterCrossWadeEffect[] = "BODYWATER1";      // entered grounded
-inline constexpr char kWaterCrossAirborneEffect[] = "SURFACE_WTR"; // entered from the air
+// WHICH set a crossing takes is not a family split: every caller passes the
+// same two registry slots and chooses on the crossing entity's Flags & 0x2000
+// (airborne). The 0x2000 arm reads g_SndBodyWater1 (@0x24E09B0), the slot the
+// registry @0x82F590 binds to BODYWATER1 (row 33 @0x82FA34); the other arm
+// reads g_SndSurfaceWtr (@0x24E09B4), SURFACE_WTR (row 32 @0x82FA10). JO:CA's
+// sets agree: BODYWATER1 is a plunge and a splash, SURFACE_WTR a lap and a
+// stroke. A swimmer's dive below the surface takes SURFACE_WTR outright.
+// (D-SND-37: these were once named the other way round, from the capture's
+// proximity: BODYWATER1 lay beside infantry, SURFACE_WTR beside vehicles.)
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b82e3..0x4b82f6, the dive
+//  @0x4b8260; Entity_UpdateInfantryAI @0x4bfc24..0x4bfc39;
+//  Entity_ProcessVehicleSuspension @0x464b16..0x464b2f; the fan is
+//  Server_SendOverlayActionToAlive @0x50a1b0 (send_mask 128)]
+inline constexpr char kWaterCrossAirborneEffect[] = "BODYWATER1"; // entered from the air
+inline constexpr char kWaterCrossWadeEffect[] = "SURFACE_WTR";    // entered grounded
 
 
 std::vector<uint8_t> encode_explosion_effect(const ExplosionEffectRecord &event);

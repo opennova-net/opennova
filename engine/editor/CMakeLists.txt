@@ -81,6 +81,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_collision_words.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_labels.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_ctrl_words.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_item.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_map_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_slots.cpp
@@ -191,6 +192,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_ground_check.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_ground_facts.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_ground_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_ground_rules.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_handle_edit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_hint.cpp
@@ -214,6 +216,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_collision.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_handle_edit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_overlay.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_placement.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_preview_camera.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_preview_rig.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_viewport.cpp

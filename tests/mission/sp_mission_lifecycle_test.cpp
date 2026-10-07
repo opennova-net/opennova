@@ -128,6 +128,63 @@ const w::CineEvent *find_event(const w::EpilogCine &cine, w::CineEventKind kind,
 	return nullptr;
 }
 
+int count_sounds(const w::World &world, const char *name) {
+	int n = 0;
+	for (const w::ScriptSoundEvent &s : world.out.script_sounds)
+		if (s.name == name) ++n;
+	return n;
+}
+
+// D-SND-35: a counter's count-up column steps once every five dispatches and
+// plays TEXT_END on the step that lands on its target; the live epilog's -1
+// target and rate step it away from the target, so it never sounds.
+// [orig: CineNode_CounterStep @0x573390 — the wait @0x5733ab, the step
+//  @0x5733c0..0x5733fa, TEXT_END @0x573408, the re-arm @0x573416; the start
+//  @0x573370]
+void test_counter_step_plays_text_end_on_arrival() {
+	struct Case {
+		int32_t target, rate;
+		int arrival_frame; // -1: never
+		int32_t final_points;
+	};
+	// Steps land on frames 4, 9, 14, ... (the start's wait of four, then the
+	// re-arm after each step).
+	const Case cases[] = {
+			{3, 1, 14, 3},     // up by one: 1, 2, 3
+			{5, 2, 14, 5},     // up by two, clamped: 2, 4, 5
+			{-3, 1, 14, -3},   // a negative target subtracts the rate
+			{0, 1, -1, 0},     // a zero target never steps
+			{-1, -1, -1, 20},  // the live epilog's: 0, 1, 2 .. away from -1
+	};
+	for (const Case &c : cases) {
+		auto world = std::make_unique<w::World>();
+		w::EpilogCine cine;
+		cine.active = true;
+		cine.frame = -1;
+		w::CineEvent line;
+		line.kind = w::CineEventKind::EpilogCounter;
+		line.start = 0;
+		line.duration = 200;
+		line.points_target = c.target;
+		line.points_rate = c.rate;
+		cine.events.push_back(line);
+		int arrival = -1;
+		for (int f = 0; f <= 100; ++f) {
+			const int before = count_sounds(*world, w::kEpilogCounterEndSoundset);
+			cine.update(*world);
+			if (count_sounds(*world, w::kEpilogCounterEndSoundset) != before) {
+				CHECK(arrival < 0); // once
+				arrival = f;
+			}
+		}
+		CHECK(arrival == c.arrival_frame);
+		CHECK(cine.events[0].points == c.final_points);
+		for (const w::ScriptSoundEvent &s : world->out.script_sounds)
+			CHECK(s.kind == w::ScriptSoundEvent::Kind::Interface);
+	}
+	CHECK(std::string(w::kEpilogCounterEndSoundset) == "TEXT_END");
+}
+
 } // namespace
 
 int main() {
@@ -258,6 +315,15 @@ int main() {
 		const w::CineEvent *help_now = find_event(cine, w::CineEventKind::TextFade);
 		while (cine.frame < 686) (void)m.frame();
 		CHECK(help_now != nullptr && near(help_now->alpha, 70.0f / 140.0f));
+		// D-SND-35: the live counters' count-up columns step away from their
+		// -1 target, so neither TEXT_END nor HEADSHOTTONE plays (the counter
+		// class whose step plays HEADSHOTTONE, CineEventEpilogCounterFont, is
+		// never constructed) [orig: @0x5765F6..0x5765F8; the dead constructor
+		// @0x5735d0, its step cinematic_node_color_fade_update @0x5736fe].
+		const w::CineEvent *first_line = find_event(cine, w::CineEventKind::EpilogCounter, 0);
+		CHECK(first_line != nullptr && first_line->points > 0);
+		CHECK(count_sounds(world, "TEXT_END") == 0);
+		CHECK(count_sounds(world, "HEADSHOTTONE") == 0);
 		// The timeout: 18600 frames into the fade state the mission exits to
 		// the Post Menu [orig: @0x576822 / @0x576824].
 		im::FrameOutcome last;
@@ -442,6 +508,7 @@ int main() {
 		CHECK(rw.script_may_advance());
 	}
 
+	test_counter_step_plays_text_end_on_arrival();
 	if (failures == 0) std::printf("sp_mission_lifecycle: OK\n");
 	return failures == 0 ? 0 : 1;
 }

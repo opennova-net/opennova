@@ -968,10 +968,17 @@ constexpr RequestKindRow kRows[] = {
 			"GRASS #00D200, 3 SNOW #CCEFF4, 4 CEMENT #989898, 5 SAND #FFFF00, 6 PACKEDDIRT #FF8000, 7 "
 			"UNDERWATER #0000FF, 8 RAILROAD #FF0000, 9 MUD #724000, 10 ICE #A0BEDB, 11 QUICKSAND #A100A1, 12 "
 			"STONE #FF00BA, 13 WOOD #9E4E00, 14 METAL #00C9CB, 15 GLASS #C0FFFF, 16 CLOTH #8080FF, 17 "
-			"FOLIAGE #006400, 18 HMETAL #505050, 19 FLESH #FFC0A0). "
+			"FOLIAGE #006400, 18 HMETAL #505050, 19 FLESH #FFC0A0); and <name>_f.pcx, the foliage map the "
+			".trn's polytrn_foliagemap names, from a foliagemap image (square, a power of two at most 1024 "
+			"a side, over the heightmap: an indexed image's indices or a grey image's levels are the foliage "
+			"codes, 0 none) with foliage, the definitions the .trn's foliage blocks hold (up to four, split "
+			"by |, each the block's keys and values in a row: graphic <model> match <1 to 4 codes, 1..255> "
+			"[color_lower 0..2] [color_upper 0..2] [attrib forceon|shadow]): a definition grows where the "
+			"map holds one of its codes. "
 			"Refused, nothing written (import.terrain): a name taken or that does not fit, a value of no "
 			"key it takes, an image that does not read or does not fit its role (a surface texel of no "
-			"class named by its column and row).")
+			"class named by its column and row, a foliage texel of colour), a foliage definition the game "
+			"would not read as given.")
 			.takes(request_params({ F::Path, F::Values }))
 			.holds(kFiles, kFiles | kSlot)
 			.ends_edit_groups()
@@ -1004,7 +1011,9 @@ constexpr RequestKindRow kRows[] = {
 			"on its document, one undo step, which end ends; the outcome's gesture names it); "
 			"command, one request (a menu's arrange of windows, a model's frame of its camera, which "
 			"runs beside any operation); drop, one batch of what the thing dropped makes at the "
-			"point, one undo step. Refused, nothing changed, naming a document not open, a "
+			"point, one undo step (a model no item draws dropped on a mission: its item made in the "
+			"item catalog first, an undo step there too). Served in order, a request after one refused "
+			"is not served (but a gesture's end). Refused, nothing changed, naming a document not open, a "
 			"viewport that does not show it as it is now, a record or a handle it does not show, a "
 			"command it has not, a gesture the document holds no open one of, a drag that writes "
 			"nothing the session takes, or a drop the viewport does not take (viewport.refused); a "

@@ -1967,6 +1967,30 @@ static int test_ground_hit() {
 	TEST_EXPECT(canvas->ground(context, in).surface == 3 && device->rays == rays + 1);
 	in.hovered = false;
 	TEST_EXPECT(canvas->ground(context, in).on == MissionGroundOn::Nothing);
+
+	// DI-29: the surface overlay asked by the options, made over the ground the viewport read (an Update gives
+	// the device it), its legend and extent in the body; asked away, gone.
+	TEST_EXPECT(viewport->overlay().kind == MissionGroundOverlay::None);
+	const uint64_t serial = viewport->overlay_serial();
+	rig.session.handle(request::set_viewport(kMission, R"({"kind": "mission", "options": {"overlay": "surfaces"}})"));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	TEST_EXPECT(rig.last() == ViewportAction::Update && viewport->overlay().kind == MissionGroundOverlay::Surfaces &&
+			viewport->overlay().width == 256 && viewport->overlay_serial() > serial);
+	JsonValue state = ask(rig, R"({"op": "state", "limit": 1})", error);
+	const JsonValue *overlay = state.get("body") ? state.get("body")->get("overlay") : nullptr;
+	TEST_EXPECT(overlay && overlay->get_string("kind", "") == "surfaces" && overlay->get("legend") &&
+			overlay->get("legend")->array.size() == 20 && state.get("options") &&
+			state.get("options")->get_string("overlay", "") == "surfaces");
+	// Nothing moved: nothing made again.
+	const uint64_t made = viewport->overlay_serial();
+	rig.pump();
+	TEST_EXPECT(viewport->overlay_serial() == made);
+	rig.session.handle(request::set_viewport(kMission, R"({"kind": "mission", "options": {"overlay": "none"}})"));
+	rig.pump();
+	state = ask(rig, R"({"op": "state", "limit": 1})", error);
+	TEST_EXPECT(viewport->overlay().kind == MissionGroundOverlay::None && viewport->overlay_serial() > made &&
+			state.get("body") && state.get("body")->get("overlay") && state.get("body")->get("overlay")->is_null());
 	rig.session.viewports().set_devices(nullptr);
 	std::printf("test_ground_hit passed\n");
 	return 0;

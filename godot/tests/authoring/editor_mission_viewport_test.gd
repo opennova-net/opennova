@@ -384,6 +384,47 @@ func test_the_mission_builds_over_frames() -> void:
 	assert_eq(String(state.get("status", "")), "ready")
 
 
+## DI-29: the ground overlay the options ask reaches the device's terrain as an Update: the surface classes'
+## picture (its size the body's), then the foliage's, then none; the build generation stands.
+func test_the_ground_overlay_tints_the_terrain() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var terrain: Terrain = _device_node(state, "Terrain")
+	assert_not_null(terrain)
+	if terrain == null:
+		return
+	assert_false(terrain.has_ground_overlay(), "no overlay asked")
+	assert_true(_change({"kind": "mission", "options": {"overlay": "surfaces"}}))
+	_app.pump()
+	state = _state()
+	var overlay: Dictionary = state.get("body", {}).get("overlay", {})
+	assert_eq(String(overlay.get("kind", "")), "surfaces", str(overlay))
+	assert_true(terrain.has_ground_overlay(), "the terrain tinted")
+	var picture: Texture2D = terrain.get_terrain_material().get_shader_parameter("u_overlay")
+	assert_not_null(picture)
+	if picture:
+		assert_eq(Vector2i(picture.get_width(), picture.get_height()),
+				Vector2i(int(overlay.get("width", 0)), int(overlay.get("height", 0))), "the viewport's picture")
+	var rect: Vector4 = terrain.get_terrain_material().get_shader_parameter("u_overlay_rect")
+	assert_almost_eq(rect.x, float(overlay.get("west", 0.0)), 0.001, "its west edge on the world's x")
+	assert_almost_eq(rect.y, -float(overlay.get("north", 0.0)), 0.001, "its north edge on the world's z (the negated y)")
+	assert_true(_change({"kind": "mission", "options": {"overlay": "foliage"}}))
+	_app.pump()
+	state = _state()
+	overlay = state.get("body", {}).get("overlay", {})
+	assert_eq(String(overlay.get("kind", "")), "foliage", str(overlay))
+	assert_true(terrain.has_ground_overlay())
+	assert_true(_change({"kind": "mission", "options": {"overlay": "none"}}))
+	_app.pump()
+	state = _state()
+	assert_eq(state.get("body", {}).get("overlay"), null)
+	assert_false(terrain.has_ground_overlay(), "asked away, gone")
+	assert_eq(int(state.get("builds", 0)), 1, "an overlay is an Update, never a build")
+
+
 ## S14 V8, V10: the ground is the terrain's. A move of the first item with `stick` (the default) keeps
 ## its height over TerrainData.get_height_world_bilinear at the new place; the build generation
 ## stands; a vertical ray through the moved item meets the terrain where the height says; an item

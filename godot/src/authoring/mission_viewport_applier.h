@@ -343,6 +343,7 @@ private:
 	// The time applied (-2: none yet; -1 the mission's own; else the option's hour); the layers shown.
 	double applied_time_ = -2.0;
 	bool shown_water_ = true, shown_shadows_ = true;
+	uint64_t overlay_serial_ = 0; // the mission's ground overlay given the terrain (DI-29)
 };
 
 } // namespace godot
