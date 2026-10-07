@@ -1174,6 +1174,41 @@ void test_list_rows_and_item_cell(const fnt_font_t *font) {
 	CHECK(swatch, "the spinlist color item draws the opaque swatch");
 }
 
+// A list row wider than the row (with the edges and a shown scrollbar) draws
+// its widest prefix narrower than the span; one that fits draws whole [orig:
+// CListWnd_DrawItems @ 0x643f30, @ 0x644101..0x644170] (the Mods list's base
+// row, D-MNU-31).
+void test_list_row_truncation(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>T</NAME>
+  <WINDOW type="window" name="ROOT">
+    <FONT><NAME>f.fnt</NAME></FONT>
+    <WINDOW type="list" name="L1">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>64</BOTTOM></POSITION>
+      <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	opennova::mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	configure_with(c, doc.first_screen(), font);
+	MenuWidgetState list;
+	list.index = 1;
+	list.has_items = true;
+	list.items = { "ABCDEFGHIJKLMNOP", "AB" }; // 143px and 17px wide, the row 100
+	MenuFrameState st;
+	st.widgets.push_back(list);
+	const MenuDrawList &dl = c.compile(st, 1.0f, 1.0f);
+	CHECK(dl.font_runs.size() == 2, "a run per row");
+	if (dl.font_runs.size() == 2) {
+		// width(n) = 9n-1 reaches 100 first at n=12: the 11 before it drawn.
+		CHECK(dl.font_runs[0].count == 11, "an overflowing row draws its fitting prefix");
+		CHECK(dl.font_runs[1].count == 2, "a row that fits draws whole");
+	}
+}
+
 // The mouse pump [orig: CUIScene_EndFrame @ 0x63e600 ->
 // CWnd_ProcessMouseEvent @ 0x647a00]: front-most claim, disabled keeps
 // state 1, hit+down -> pressed, hit+up -> hovered, misses clear.
@@ -2713,6 +2748,7 @@ int main() {
 	test_radio_checkbox_forcing(&font);
 	test_edit_caret(&font);
 	test_list_rows_and_item_cell(&font);
+	test_list_row_truncation(&font);
 	test_mouse_pump(&font);
 	test_table_interior(&font);
 	test_marquee_roll(&font);

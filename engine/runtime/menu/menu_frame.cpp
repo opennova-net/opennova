@@ -1297,10 +1297,14 @@ void MenuFrameCompiler::emit_item_cell(const WidgetNode &node,
 // draws the ITEMS per-state appearance for its style index (selection/hover
 // highlight) into the row rect, then the row text with the SAME style index
 // selecting the FONT color pair. Height = font "W" else MIN_ITEM_HEIGHT;
-// rows run from the scroll row and clip to the widget rect.
+// rows run from the scroll row and clip to the widget rect. A row whose text
+// with its edges and the shown scrollbar is wider than the row draws its
+// widest prefix narrower than the span left [orig: @ 0x644101..0x644170 —
+// the whole measured, then each prefix until one reaches the span; the count
+// before it drawn, @ 0x644345].
 void MenuFrameCompiler::emit_list_rows(const WidgetNode &node,
 		const mnu::RectEdges &rect, const WalkScale &s,
-		const MenuWidgetState *ws) {
+		const MenuWidgetState *ws, int scrollbar_width) {
 	const mnu::Window &w = *node.window;
 	const int row_h = row_height_(node);
 	const bool runtime_rows = ws != nullptr && ws->has_items;
@@ -1313,6 +1317,23 @@ void MenuFrameCompiler::emit_list_rows(const WidgetNode &node,
 	const int hovered = ws != nullptr ? ws->hover_item : -1;
 	const int first = ws != nullptr ? std::max(ws->scroll_row, 0) : 0;
 	const int edge = w.string_data.has_edge ? w.string_data.edge : 0;
+	const int row_w = rect.right - rect.left;
+	const auto fitted = [&](const std::string &text) {
+		int full_w = 0;
+		int h = 0;
+		measure_text(node, text, &full_w, &h);
+		if (scrollbar_width + full_w + 2 * edge <= row_w) {
+			return text;
+		}
+		const int span = row_w - 2 * edge - scrollbar_width;
+		size_t count = 0;
+		int prefix_w = 0;
+		do {
+			++count;
+			measure_text(node, text.substr(0, count), &prefix_w, &h);
+		} while (prefix_w < span && count < text.size());
+		return text.substr(0, count - 1);
+	};
 	int y = rect.top;
 	for (int i = first; i < row_count; ++i) {
 		if (y + row_h > rect.bottom) {
@@ -1348,7 +1369,7 @@ void MenuFrameCompiler::emit_list_rows(const WidgetNode &node,
 			const std::string &text = ws->items[static_cast<size_t>(i)];
 			if (!text.empty()) {
 				const int color_state = style >= 0 ? style : kStateDefault;
-				emit_glyph_run(node, text, row.left + edge, row.top, s,
+				emit_glyph_run(node, fitted(text), row.left + edge, row.top, s,
 						node.colors[color_state], -1);
 			}
 		} else {
@@ -1357,7 +1378,7 @@ void MenuFrameCompiler::emit_list_rows(const WidgetNode &node,
 			if (item.kind == WidgetNode::ItemVisual::kText &&
 					!item.text.empty()) {
 				const int color_state = style >= 0 ? style : kStateDefault;
-				emit_glyph_run(node, item.text, row.left + edge, row.top, s,
+				emit_glyph_run(node, fitted(item.text), row.left + edge, row.top, s,
 						node.colors[color_state], -1);
 			}
 		}
@@ -1746,7 +1767,7 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 				emit_frame(node, rect, s);
 			}
 			emit_appearance(node, rect, s, visual);
-			emit_list_rows(node, rect, s, ws);
+			emit_list_rows(node, rect, s, ws, row_scrollbar_width_(index, node, rect, state));
 			emit_row_scrollbar_(index, node, rect, s, state, ws);
 			break;
 		}

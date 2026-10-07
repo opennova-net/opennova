@@ -588,7 +588,6 @@ func _make_packed_shell(game_code: String):
 	WorldFixture.write_pff(self, _temp_dir.path_join("resource.pff"), entries)
 
 	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", _temp_dir]))
-	ResourceDirSettings.set_expansion("")
 	ResourceDirSettings.set_game(game_code)
 	var shell = MainGameScene.instantiate()
 	assert_not_null(shell)

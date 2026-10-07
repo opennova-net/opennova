@@ -129,6 +129,7 @@ public:
 	int spin_arrow_at(int index, float x, float y) const override;
 	bool table_hit(int index, float x, float y, int *row, int *column) const override;
 	std::string widget_mnemonic(int index) const override;
+	std::string widget_string(int index, const std::string &key) const override;
 	void set_open_popup(int index) override;
 	bool edit_char(int index, int unicode) override;
 	int edit_key(int index, int key, bool shift) override;

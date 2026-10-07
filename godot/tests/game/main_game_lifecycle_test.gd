@@ -135,12 +135,6 @@ func before_each() -> void:
 	# A shell booted here sees only the launch flags a case sets through the
 	# override (the GUT process carries none; no sibling leftovers).
 	LaunchFlags.set_args_override(PackedStringArray([]))
-	# The persisted expansion is process-wide state an earlier suite file can leave set, and
-	# these cases join a fixture host that has no expansion archives at all. A stale name makes
-	# the host advertise an expansion this install cannot mount, which the joiner's preload
-	# correctly refuses (D-NET-178) — a failure about suite order, not about what is under test.
-	# after_each restores the whole config file, so pinning it here leaks nothing.
-	ResourceDirSettings.set_expansion("")
 
 
 func after_each() -> void:

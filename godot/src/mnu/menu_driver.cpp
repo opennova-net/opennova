@@ -283,6 +283,10 @@ public:
 		MenuFrame *f = frame();
 		return f != nullptr ? f->widget_mnemonic(index) : std::string();
 	}
+	std::string widget_string(int index, const std::string &key) const override {
+		MenuFrame *f = frame();
+		return f != nullptr ? f->widget_string(index, key) : key;
+	}
 	void set_open_popup(int index) override {
 		if (MenuFrame *f = frame()) f->set_open_popup(index);
 	}
@@ -805,6 +809,23 @@ void MenuDriver::select_mission(int p_id, int p_row, const String &p_fallback) {
 
 String MenuDriver::get_selected_mission() const { return to_gd(flow_.selected_mission()); }
 
+void MenuDriver::set_mod_descriptions(const PackedStringArray &p_names) {
+	mods_.set_descriptions(to_std_strings(p_names));
+}
+
+void MenuDriver::seed_mod_list(int p_id) {
+	const String dir = root_.is_valid() ? root_->get_root_dir() : String();
+	if (dir != mods_root_) {
+		mods_root_ = dir;
+		std::vector<opennova::ExpansionRecord> records;
+		if (!dir.is_empty()) records = opennova::vfs_expansion_records(to_std(dir));
+		mods_.set_records(std::move(records));
+	}
+	mods_.populate(runtime_, p_id, root_.is_valid() ? to_std(root_->get_expansion()) : std::string());
+}
+
+String MenuDriver::mod_list_pick(int p_id) const { return to_gd(mods_.pick(runtime_, p_id)); }
+
 bool MenuDriver::request_expansion(const String &p_name, const String &p_current, bool p_packed) {
 	return flow_.request_expansion(to_std(p_name), to_std(p_current), p_packed) !=
 			opennova::menu::MenuFlow::ExpansionPick::NeedsPackedRoot;
@@ -995,6 +1016,10 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("activate_mission", "id", "row"), &MenuDriver::activate_mission);
 	ClassDB::bind_method(D_METHOD("get_selected_mission"), &MenuDriver::get_selected_mission);
 	ClassDB::bind_method(D_METHOD("clear_selected_mission"), &MenuDriver::clear_selected_mission);
+	ClassDB::bind_method(D_METHOD("set_mod_descriptions", "names"), &MenuDriver::set_mod_descriptions);
+	ClassDB::bind_method(D_METHOD("seed_mod_list", "id"), &MenuDriver::seed_mod_list);
+	ClassDB::bind_method(D_METHOD("select_mod", "id", "row"), &MenuDriver::select_mod);
+	ClassDB::bind_method(D_METHOD("mod_list_pick", "id"), &MenuDriver::mod_list_pick);
 	ClassDB::bind_method(D_METHOD("request_expansion", "name", "current", "packed"), &MenuDriver::request_expansion);
 	ClassDB::bind_method(D_METHOD("has_pending_expansion_reload"), &MenuDriver::has_pending_expansion_reload);
 	ClassDB::bind_method(D_METHOD("take_expansion_reload"), &MenuDriver::take_expansion_reload);

@@ -486,6 +486,22 @@ void MenuFrameCompiler::emit_row_scrollbar_(int index, const WidgetNode &node,
 			ws != nullptr ? std::max(ws->scroll_row, 0) : 0, kStateDefault);
 }
 
+// [orig: CListWnd_DrawItems @ 0x643ffe — the scrollbar child shown, its width (+0xFF8), else 0]
+int MenuFrameCompiler::row_scrollbar_width_(int index, const WidgetNode &node,
+		const mnu::RectEdges &rect, const MenuFrameState &state) const {
+	int rows = 0;
+	int visible = 0;
+	if (!scroll_row_span_(index, state, &rows, &visible) || rows <= visible) {
+		return 0;
+	}
+	mnu::RectEdges scrollbar_rect;
+	if (!resolve_scrollbar_rect(node, ScrollbarKind::Embedded, rect, 0,
+				rect.bottom - rect.top, 22, &scrollbar_rect)) {
+		return 0;
+	}
+	return scrollbar_rect.right - scrollbar_rect.left;
+}
+
 // The witnessed CScrollWnd interaction, run ahead of the claim walk [orig:
 // CScrollWnd_HandleEvent @ 0x64d050 — SCROLLWND_UP/DOWN click = value -/+
 // step (ctor default 1 @ 0x64c4cf); a track press pages toward the click
