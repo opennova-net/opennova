@@ -329,7 +329,7 @@ static func stage_shell_archives(test: GutTest, dir: String,
 
 ## The packed runtime shell booted into its main menu under the test (one
 ## process frame), or null when the scene did not instantiate. The explicit CLI
-## resource dir and selected expansion / game are pointed at the staged archives (the
+## resource dir and selected game are pointed at the staged archives (the
 ## caller saves and restores the settings file around the test). The shell is
 ## a plain child: pair with release_shell() in after_each.
 static func boot_shell(test: GutTest) -> MainGame:
@@ -342,7 +342,6 @@ static func boot_shell(test: GutTest) -> MainGame:
 	stage_shell_archives(test, _last_shell_dir, true)
 
 	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", _last_shell_dir]))
-	ResourceDirSettings.set_expansion("")
 	ResourceDirSettings.set_game("jo")
 	var packed := load(MAIN_GAME_SCENE_PATH) as PackedScene
 	var shell := packed.instantiate() as MainGame

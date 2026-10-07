@@ -17,7 +17,6 @@ var _shell: MainGame = null
 func before_each() -> void:
 	_config = TestFs.snapshot(STATE_CONFIG_PATH)
 	LaunchFlags.set_args_override(PackedStringArray([]))
-	ResourceDirSettings.set_expansion("")
 
 
 func after_each() -> void:

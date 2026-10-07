@@ -104,6 +104,14 @@ std::string MenuFrameCompiler::widget_authored_text(int index) const {
 	return widget_text(nodes_[static_cast<size_t>(index)], nullptr);
 }
 
+std::string MenuFrameCompiler::widget_string(int index, const std::string &key) const {
+	if (index < 0 || index >= document_nodes_ || text_tables_ == nullptr) {
+		return key;
+	}
+	const std::string *text = text_tables_->lookup(nodes_[static_cast<size_t>(index)].text_table, key);
+	return text != nullptr ? *text : key;
+}
+
 bool MenuFrameCompiler::widget_disabled(int index,
 		const MenuFrameState &state) const {
 	if (index < 0 || index >= static_cast<int>(nodes_.size())) {

@@ -27,7 +27,6 @@ func before_each() -> void:
 	# A shell booted here sees only the launch flags a case sets through the
 	# override (the GUT process carries none; no sibling leftovers).
 	LaunchFlags.set_args_override(PackedStringArray([]))
-	ResourceDirSettings.set_expansion("")
 
 
 func after_each() -> void:

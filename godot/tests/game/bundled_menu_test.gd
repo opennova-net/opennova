@@ -16,7 +16,6 @@ func before_each() -> void:
 	_config = TestFs.snapshot(STATE_CONFIG_PATH)
 	# No launch flags: the shell boots the bundled menu.
 	LaunchFlags.set_args_override(PackedStringArray([]))
-	ResourceDirSettings.set_expansion("")
 	ResourceDirSettings.set_game("jo")
 	ResourceDirSettings.set_retail_dir("")
 	Strings.clear()
@@ -116,9 +115,10 @@ func test_the_bundled_game_mounts_a_build_packed_and_a_folder_loose() -> void:
 
 
 # An expansion shipped beside the bundled game (expansion/<name>/, as the game
-# zip ships one) mounts over it with /exp or /mod, or with the Mods list's
-# pick, its archive's files standing over the base's; one the folder lacks
-# falls back to the base game, as the original's mount does.
+# zip ships one) mounts over it with /exp or /mod, its archive's files standing
+# over the base's; one the folder lacks falls back to the base game, as the
+# original's mount does. A Mods list's pick never reaches a launch: nothing
+# keeps it past its run (D-MNU-31), not even a key an earlier build wrote.
 func test_the_bundled_game_mounts_an_expansion_beside_it() -> void:
 	var build := _temp_dir("expansion")
 	WorldFixture.stage_shell_archives(self, build, false)
@@ -138,9 +138,10 @@ func test_the_bundled_game_mounts_an_expansion_beside_it() -> void:
 		if mounted != null:
 			assert_true(mounted.has_file("onxonly.txt"), "its archive's files are served")
 	LaunchFlags.set_args_override(PackedStringArray([]))
-	ResourceDirSettings.set_expansion("onx")
-	var picked := BootRootMount.mount_bundled(build)
-	assert_true(picked != null and picked.get_expansion() == "onx", "the Mods list's pick mounts it too")
+	ConfigStore.write(ResourceDirSettings.CONFIG_PATH, ResourceDirSettings.SECTION, "expansion", "onx")
+	var stale := BootRootMount.mount_bundled(build)
+	assert_true(stale != null and stale.get_expansion().is_empty(),
+			"a remembered pick mounts nothing: no /exp, the base game")
 	LaunchFlags.set_args_override(PackedStringArray(["/exp", "absent"]))
 	var fallback := BootRootMount.mount_bundled(build)
 	assert_true(fallback != null and fallback.is_runtime_mount() and fallback.get_expansion().is_empty(),

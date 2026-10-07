@@ -520,6 +520,11 @@ public:
 	// The authored STRING content after %VAR% + string-table resolution (the
 	// text the widget draws when no runtime override is set).
 	std::string widget_authored_text(int index) const;
+	// The text the widget's string table gives a key the game's code names (no %VAR%: the key
+	// is the code's own), the key itself on a miss [orig: UIStringTable_LookupAndDup @ 0x63b290
+	// -> CUIStringTable_LookupString @ 0x6527c0 over CWnd_GetInheritedTextRsrc @ 0x646AB0;
+	// the Mods list's base row, Options_PopulateModList @ 0x559fe2].
+	std::string widget_string(int index, const std::string &key) const;
 	// Authored-or-runtime effective disabled (the pump's state-1 test).
 	bool widget_disabled(int index, const MenuFrameState &state) const;
 	// The parsed window a document widget compiles (null for a part or out of range): what an
@@ -1005,7 +1010,7 @@ private:
 	void emit_item_cell(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s, int color_state, const MenuWidgetState *ws);
 	void emit_list_rows(const WidgetNode &node, const mnu::RectEdges &rect,
-			const WalkScale &s, const MenuWidgetState *ws);
+			const WalkScale &s, const MenuWidgetState *ws, int scrollbar_width);
 	void emit_combo_popup(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s, const MenuWidgetState *ws);
 	// Combos with an open dropdown collected during the walk; their popups
@@ -1047,6 +1052,10 @@ private:
 	void emit_row_scrollbar_(int index, const WidgetNode &node,
 			const mnu::RectEdges &rect, const WalkScale &s,
 			const MenuFrameState &state, const MenuWidgetState *ws);
+	// The width a list's rows leave its scrollbar: the bar's own while it shows (the rows
+	// overflow), else 0.
+	int row_scrollbar_width_(int index, const WidgetNode &node, const mnu::RectEdges &rect,
+			const MenuFrameState &state) const;
 	// The CScrollWnd interaction pump ahead of the claim walk (compiler
 	// runtime state, like edit_scroll_): the shuttle drag capture and the
 	// pressed-part latch until release

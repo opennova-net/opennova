@@ -499,18 +499,20 @@ func test_pause_options_share_state_apply_accept_and_retain_cancel_changes() -> 
 			"the reverted edit never reaches the config")
 	_cleanup(dir)
 
-# Options -> Mods: the shell lists discoverable expansions in AVAIL_LIST by name, and
-# activating one mounts it over the base game, fills MOD_DESC, persists the choice
-# (read back by main_game at the next launch), and announces it. Uses a runtime
-# (packed PFF) mount so list_expansions/mount_runtime have real archives to work on.
-func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
-	var saved := ResourceDirSettings.get_expansion()
-	ResourceDirSettings.set_expansion("")  # clean slate so the activate is not a no-op
+# Options -> Mods (D-MNU-31): AVAIL_LIST lists the base game's row first (the
+# key "Joint Operations: Typhoon Rising" through the list's string table, which
+# this folder lacks, so the key shows), then each expansion folder by its own
+# EXP_NAME; the game running is highlighted. A pick shows its EXP_DESC alone
+# (the base row: nothing); a double click does nothing; ACCEPT raises the reload
+# request, and the next menu tick switches the live root, boots the menu anew
+# over it and persists nothing [orig: Options_PopulateModList @ 0x559fb0;
+# Options_OnModListSelect @ 0x55a530; Options_HandleAcceptOrBack @ 0x55ad05].
+# Uses a runtime (packed PFF) mount so mount_runtime has real archives.
+func test_mods_tab_lists_the_base_game_and_switches_for_the_run() -> void:
 	var dir := _make_runtime_dir()
 	var shell = _make_runtime_shell(dir)
 	if shell == null:
 		pending("runtime resource root unavailable in this environment")
-		ResourceDirSettings.set_expansion(saved)
 		TestFs.remove_dir_recursive(dir)
 		return
 	assert_eq(MusicService.current_context(), "menu", "base MENU music starts with the shell")
@@ -521,70 +523,84 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 	var driver: MenuDriver = shell.get_driver()
 	var avail: int = driver.widget_id("AVAIL_LIST")
 	assert_gte(avail, 0, "AVAIL_LIST authored")
-	assert_eq(driver.item_count(avail), 1, "one expansion discovered under expansion/")
-	assert_eq(driver.item_text(avail, 0), "jox01")
-	# Activation (list double-click) only RAISES the reload request; the remount,
-	# the persist and the describe all run at the next menu update tick, the way
-	# Menu_UpdateFrame consumes retail's request flag (docs/mnu/menu-re.md,
-	# "Deferred expansion reload").
-	driver.list_activated.emit(avail, 0)
+	assert_eq(driver.item_count(avail), 2, "the base game's row, then the one expansion")
+	assert_eq(driver.item_text(avail, 0), "Joint Operations: Typhoon Rising",
+		"the base row's key shows where no string table names it")
+	assert_eq(driver.item_text(avail, 1), "Kendari", "an expansion's row is its EXP_NAME")
+	assert_eq(driver.selected_row(avail), 0, "the base game running is highlighted")
+	var desc: int = driver.widget_id("MOD_DESC")
+	assert_gte(desc, 0, "MOD_DESC authored")
+	driver.select_row(avail, 1, true)
+	assert_eq(driver.get_widget_text(desc), "Kendari island: the JO expansion.",
+		"a pick shows its EXP_DESC alone")
+	driver.select_row(avail, 0, true)
+	assert_eq(driver.get_widget_text(desc), "", "the base row describes nothing")
+	driver.list_activated.emit(avail, 1)
+	assert_false(shell.has_pending_expansion_reload(), "a double click switches nothing")
+	driver.select_row(avail, 1, true)
+	var accept: int = driver.widget_id("ACCEPT")
+	assert_gte(accept, 0, "options ACCEPT control authored")
+	driver.widget_activated.emit(accept, "ACCEPT")
 	assert_true(shell.has_pending_expansion_reload(),
-		"the click raises the request instead of remounting inline")
-	assert_eq(ResourceDirSettings.get_expansion(), "",
-		"nothing is persisted before the update tick runs")
+		"ACCEPT raises the request instead of remounting inline")
+	assert_eq(String(shell.get_resource_root().get_expansion()), "", "nothing switches before the tick")
+	watch_signals(shell)
 	shell.update_menu_frame()
-	assert_false(shell.has_pending_expansion_reload(),
-		"the update tick lowers the request flag")
-	assert_eq(shell.get_selected_expansion(), "jox01")
-	assert_eq(ResourceDirSettings.get_expansion(), "jox01", "choice persisted to config")
+	assert_false(shell.has_pending_expansion_reload(), "the update tick lowers the request flag")
+	assert_eq(String(shell.get_resource_root().get_expansion()), "jox01", "the live root switched")
+	assert_signal_emitted(shell, "game_reloaded", "the shell says the game reloaded")
+	assert_false(_persisted_expansion_key(), "the pick is not persisted: it lasts the run")
 	assert_not_null(MusicService.current_script(), "expansion menu context reopens")
 	if MusicService.current_script() != null:
 		assert_eq(MusicService.current_script().get_source_path(), "Mjox01.bin",
 			"live expansion selection swaps to the M<exp> script")
-	assert_eq(MusicService.get_var(2), 9,
-		"full expansion reload re-drives the active screen MUSICVAR")
-	var desc: int = driver.widget_id("MOD_DESC")
-	assert_gte(desc, 0, "MOD_DESC authored")
-	assert_string_contains(driver.get_widget_text(desc), "Kendari",
-		"the expansion's own EXP_NAME shows")
-	assert_string_contains(driver.get_widget_text(desc), "Kendari island: the JO expansion.",
-		"the expansion's own EXP_DESC shows")
-	# The expansion's packed asset is now reachable through the live root.
+	assert_eq(MusicService.get_var(2), 9, "the menu booted anew drives its screen's MUSICVAR")
+	# The menu booted anew over the switched root: its list highlights the game running.
+	avail = driver.widget_id("AVAIL_LIST")
+	desc = driver.widget_id("MOD_DESC")
+	assert_eq(driver.selected_row(avail), 1, "the expansion running is highlighted")
+	assert_eq(driver.get_widget_text(desc), "Kendari island: the JO expansion.")
 	assert_eq(shell.get_resource_root().read_file("expmodel.3di").get_string_from_utf8(),
 		"exp model", "expansion archive mounted over the base game")
+	# The base game's row switches back.
+	driver.select_row(avail, 0, true)
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	shell.update_menu_frame()
+	assert_eq(String(shell.get_resource_root().get_expansion()), "",
+		"the base row switches to the base game")
+	assert_eq(driver.selected_row(driver.widget_id("AVAIL_LIST")), 0)
 	shell.get_resource_root().clear()  # release PFF handles before deleting the temp archives
-	ResourceDirSettings.set_expansion(saved)
 	TestFs.remove_dir_recursive(dir)
 
 
-# Options -> Mods OK (the ACCEPT button) must APPLY the highlighted expansion, not
+# Options -> Mods OK (the ACCEPT button) must APPLY the highlighted row, not
 # launch a mission. ACCEPT is overloaded across JO screens (launch on Single Player,
 # plain OK on Options); the shell scopes it by screen role, so on a Mods screen (mod
 # list, no mission list) ACCEPT applies. Regression for the "OK loads a mission" bug.
+# ACCEPT on the game running takes nothing.
 func test_mods_ok_applies_expansion_without_launching() -> void:
-	var saved := ResourceDirSettings.get_expansion()
-	ResourceDirSettings.set_expansion("")  # so the apply is not a no-op
 	var dir := _make_runtime_dir()
 	var shell = _make_runtime_shell(dir)
 	if shell == null:
 		pending("runtime resource root unavailable in this environment")
-		ResourceDirSettings.set_expansion(saved)
 		TestFs.remove_dir_recursive(dir)
 		return
 	var driver: MenuDriver = shell.get_driver()
 	var avail: int = driver.widget_id("AVAIL_LIST")
 	assert_gte(avail, 0, "AVAIL_LIST authored")
-	driver.select_row(avail, 0, false)  # highlight jox01 (no double-click / activation)
 	var accept: int = driver.widget_id("ACCEPT")
 	assert_gte(accept, 0, "options ACCEPT control authored")
+	driver.widget_activated.emit(accept, "ACCEPT")  # the base game running, its row highlighted
+	assert_false(shell.has_pending_expansion_reload(), "ACCEPT on the game running takes nothing")
+	driver.select_row(avail, 1, false)  # highlight jox01 (no double-click / activation)
 	watch_signals(shell)
 	driver.widget_activated.emit(accept, "ACCEPT")  # press OK
 	assert_signal_not_emitted(shell, "start_requested", "OK on the Mods screen must not launch")
 	shell.update_menu_frame()  # the deferred remount runs on the next menu tick
-	assert_eq(shell.get_selected_expansion(), "jox01", "OK applied the highlighted mod")
-	assert_eq(ResourceDirSettings.get_expansion(), "jox01", "applied choice persisted")
+	assert_eq(String(shell.get_resource_root().get_expansion()), "jox01",
+		"OK applied the highlighted mod")
+	assert_false(_persisted_expansion_key(), "nothing persisted")
 	shell.get_resource_root().clear()
-	ResourceDirSettings.set_expansion(saved)
 	TestFs.remove_dir_recursive(dir)
 
 
@@ -593,8 +609,6 @@ func test_mods_ok_applies_expansion_without_launching() -> void:
 # leave the live loose mount untouched, not remount it through mount_runtime into
 # a cleared root (the zero-archives fatal would kill the running play-test).
 func test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount() -> void:
-	var saved := ResourceDirSettings.get_expansion()
-	ResourceDirSettings.set_expansion("")
 	var dir := OS.get_temp_dir().path_join("menu_shell_loose_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01"))
 	var file := FileAccess.open(dir.path_join("options.mnu"), FileAccess.WRITE)
@@ -606,7 +620,7 @@ func test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount() -> void:
 	file.store_buffer(_fixture_bytes(MUS_FIXTURE))
 	file.close()
 	_copy(SBF_FIXTURE, dir.path_join("menumus.sbf"))
-	# The expansion pair exists ON DISK (list_expansions scans the path), but the
+	# The expansion pair exists ON DISK (the scan lists its folder), but the
 	# mounted root is a loose-only mount, which cannot layer it.
 	WorldFixture.write_pff(self, dir.path_join("expansion/jox01/jox01.pff"), [
 		{"name": "expmodel.3di", "bytes": "exp model"},
@@ -621,24 +635,32 @@ func test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount() -> void:
 	var driver: MenuDriver = shell.get_driver()
 	var avail: int = driver.widget_id("AVAIL_LIST")
 	assert_gte(avail, 0)
-	assert_eq(driver.item_count(avail), 1, "the packed expansion is still discoverable on disk")
-	driver.select_row(avail, 0, false)
+	assert_eq(driver.item_count(avail), 2, "the base row and the expansion folder on disk")
+	assert_eq(driver.item_text(avail, 1), "Unnamed Expansion", "a folder with no <n>.bin is unnamed")
+	driver.select_row(avail, 1, false)
 	var accept: int = driver.widget_id("ACCEPT")
 	assert_gte(accept, 0)
 	driver.widget_activated.emit(accept, "ACCEPT")
 	assert_false(shell.has_pending_expansion_reload(),
 			"an unusable pick never raises the reload request")
 	shell.update_menu_frame()
-	assert_eq(shell.get_selected_expansion(), "", "the loose mount refuses the switch")
-	assert_eq(ResourceDirSettings.get_expansion(), "", "nothing persisted")
+	assert_eq(String(root.get_expansion()), "", "the loose mount refuses the switch")
+	assert_false(_persisted_expansion_key(), "nothing persisted")
 	assert_false(root.read_file("options.mnu").is_empty(),
 			"the live loose mount survives untouched (no clear())")
 	root.clear()
-	ResourceDirSettings.set_expansion(saved)
 	for sub in ["options.mnu", "menumus.bin", "menumus.sbf",
 			"expansion/jox01/jox01.pff", "expansion/jox01", "expansion"]:
 		DirAccess.remove_absolute(dir.path_join(sub))
 	DirAccess.remove_absolute(dir)
+
+
+# Whether opennova.cfg holds an expansion key (the pick a build before D-MNU-31
+# remembered).
+func _persisted_expansion_key() -> bool:
+	var config := ConfigFile.new()
+	return config.load(STATE_CONFIG_PATH) == OK \
+			and config.has_section_key(ResourceDirSettings.SECTION, "expansion")
 
 
 # D-MNU-14: the SP mission list rides the catalog — Co-op-family rows only,

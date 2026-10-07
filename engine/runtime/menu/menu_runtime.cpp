@@ -700,6 +700,11 @@ std::string MenuRuntime::item_display_text(int id, int row) const {
 	return index >= 0 && frame_ != nullptr ? frame_->item_display_text(index, row) : std::string();
 }
 
+std::string MenuRuntime::widget_string(int id, const std::string &key) const {
+	const int index = frame_index(id);
+	return index >= 0 && frame_ != nullptr ? frame_->widget_string(index, key) : key;
+}
+
 std::string MenuRuntime::item_value(int id, int row) const {
 	const mnu::Items *items = menu_items_container(index_.window(id));
 	if (items == nullptr || row < 0 || row >= static_cast<int>(items->items.size()))

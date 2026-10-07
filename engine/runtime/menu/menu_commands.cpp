@@ -16,7 +16,7 @@ struct CommandRow {
 constexpr CommandRow kCommands[] = {
 	{ MenuCommand::None, "", "" },
 	{ MenuCommand::StartMission, "start_mission", "start the selected mission" },
-	{ MenuCommand::ApplyExpansion, "apply_expansion", "mount the highlighted expansion over the base game" },
+	{ MenuCommand::ApplyExpansion, "apply_expansion", "switch to the game picked in the Mods list for this run, reloading everything" },
 	{ MenuCommand::Exit, "exit", "quit to the desktop" },
 	{ MenuCommand::Back, "back", "go back to the screen before, else resume the mission or quit" },
 	{ MenuCommand::ReturnToMenu, "return_to_menu", "leave the mission for the menu screen it was started from" },
@@ -198,8 +198,8 @@ void MenuCommands::wire(const MenuRuntime &menu, bool in_mission) {
 		if (id >= 0 && is_list_kind(menu.widget_kind_of(id))) mod_lists_.push_back(id);
 	}
 	// The launch controls are a play screen's: a document holding a mission list starts its mission, one
-	// holding a mod list mounts its expansion, any other leaves them to the menu's own rows (an OK on the
-	// options screen is no launch).
+	// holding a mod list switches to the game picked in it (mod_list.h), any other leaves them to the
+	// menu's own rows (an OK on the options screen is no launch).
 	if (!mission_lists_.empty()) bind_set(MenuNameSet::Start, MenuCommand::StartMission);
 	else if (!mod_lists_.empty()) bind_set(MenuNameSet::Start, MenuCommand::ApplyExpansion);
 	bind_set(MenuNameSet::Exit, MenuCommand::Exit);

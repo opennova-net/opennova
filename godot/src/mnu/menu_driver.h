@@ -14,6 +14,7 @@
 
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/menu_flow.h>
+#include <runtime/menu/mod_list.h>
 #include <runtime/menu/options_screen.h>
 #include <runtime/menu/player_info_avatars.h>
 
@@ -78,6 +79,8 @@ class MenuDriver : public RefCounted {
 
 	opennova::menu::MenuRuntime runtime_;
 	opennova::menu::MenuFlow flow_;
+	opennova::menu::ModList mods_;
+	String mods_root_; // the game folder the Mods list's records were scanned in
 	opennova::menu::HostDialog host_dialog_;
 	opennova::menu::OptionsScreen options_;
 	opennova::menu::PlayerInfoAvatars avatars_;
@@ -129,6 +132,14 @@ public:
 	void activate_mission(int p_id, int p_row) { flow_.activate_mission(p_id, p_row); }
 	String get_selected_mission() const;
 	void clear_selected_mission() { flow_.clear_selected_mission(); }
+	// The Mods list (engine menu::ModList): the descriptions a pick fills (the shell's
+	// ModDescriptions names); the list filled with the base game's row and the expansion records of
+	// the bound root's folder (scanned once per folder, as the game scans once at boot), the one
+	// running highlighted; a row picked; and ACCEPT's pick ("" the base game).
+	void set_mod_descriptions(const PackedStringArray &p_names);
+	void seed_mod_list(int p_id);
+	void select_mod(int p_id, int p_row) { mods_.select(runtime_, p_id, p_row); }
+	String mod_list_pick(int p_id) const;
 	bool request_expansion(const String &p_name, const String &p_current, bool p_packed);
 	bool has_pending_expansion_reload() const { return flow_.has_pending_expansion(); }
 	String take_expansion_reload();

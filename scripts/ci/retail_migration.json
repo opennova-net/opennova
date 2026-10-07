@@ -139,7 +139,7 @@
       "test_ingame_abort_raises_confirm_and_only_yes_returns",
       "test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount",
       "test_mods_ok_applies_expansion_without_launching",
-      "test_mods_tab_lists_mounts_and_persists_expansion",
+      "test_mods_tab_lists_the_base_game_and_switches_for_the_run",
       "test_music_contexts_load_pff_archived_by_hardcoded_names",
       "test_music_incomplete_expansion_bank_only_stays_expansion",
       "test_music_resolution_keeps_incomplete_expansion_pair",

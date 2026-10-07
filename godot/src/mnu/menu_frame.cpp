@@ -747,6 +747,10 @@ std::string MenuFrame::widget_mnemonic(int p_index) const {
 	return configured_ ? compiler_.widget_mnemonic(p_index) : std::string();
 }
 
+std::string MenuFrame::widget_string(int p_index, const std::string &p_key) const {
+	return configured_ ? compiler_.widget_string(p_index, p_key) : p_key;
+}
+
 void MenuFrame::set_open_popup(int p_index) {
 	state_.popup_root = p_index;
 }

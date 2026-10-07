@@ -582,6 +582,38 @@ static int test_expansion_info() {
     return 1;
 }
 
+// The Mods list's records [orig: Expansion_ScanAndRegister @ 0x4a43d0]: every directory under
+// expansion/ not starting with '.', whether or not its <n>.pff opens, in FindFirstFile's order over
+// an NTFS directory (the names upper-cased), the first 16, each named by its <n>.bin.
+static int test_expansion_records() {
+    using opennova::ExpansionRecord;
+    using opennova::vfs_expansion_records;
+    fs::path root = fresh_dir("exp_records_game");
+    CHECK(vfs_expansion_records(root.string()).empty(), "no expansion folder: no record");
+    fs::path exp = root / "expansion";
+    fs::create_directories(exp / "onx");
+    write_pff1(exp / "onx" / "onxL.pff", "onx.bin", exp_info_bin("Storm", "A storm."));
+    fs::create_directories(exp / "jox_a");
+    fs::create_directories(exp / "joxb");
+    fs::create_directories(exp / ".hidden");
+    write_loose(exp / "afile.txt", "not a folder");
+    std::vector<ExpansionRecord> records = vfs_expansion_records(root.string());
+    CHECK(records.size() == 3, "the three folders, not the '.' one nor the file [orig: @ 0x4a445d]");
+    CHECK(records[0].directory == "joxb" && records[1].directory == "jox_a" && records[2].directory == "onx",
+          "upper-cased order: JOXB before JOX_A ('B' 0x42 < '_' 0x5F), which a lower-cased sort reverses");
+    CHECK(records[2].info.name == "Storm" && records[2].info.description == "A storm.",
+          "each record is named by its <n>.bin");
+    CHECK(records[0].info.name == "Unnamed Expansion",
+          "a folder with no <n>.pff is registered all the same, unnamed");
+    for (int i = 0; i < 20; ++i) fs::create_directories(exp / ("z" + std::to_string(10 + i)));
+    records = vfs_expansion_records(root.string());
+    CHECK(records.size() == 16 && records.back().directory == "z22",
+          "the scan registers 16 at most, in its order [orig: the count's compare @ 0x4a445d]");
+    CHECK(opennova::expansion_info_from_bin({}).name == "Unnamed Expansion",
+          "bytes that do not parse: both fallbacks");
+    return 1;
+}
+
 // The expansion's text-override table [orig: Expansion_LoadAssets @ 0x4a49d4 ->
 // TextResource_LoadOverrideTable @ 0x75d5c0 -> File_LoadResource @ 0x75b540]: only a
 // loose expansion/<n>/<n>.bin serves it, never the archived copy; a load with the old
@@ -654,6 +686,7 @@ int main() {
     RUN_TEST(test_list_files);
     RUN_TEST(test_expansion_version_checksum);
     RUN_TEST(test_expansion_info);
+    RUN_TEST(test_expansion_records);
     RUN_TEST(test_expansion_override_table);
 
     fs::remove_all(g_root, ec);

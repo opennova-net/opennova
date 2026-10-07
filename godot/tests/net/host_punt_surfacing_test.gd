@@ -221,7 +221,6 @@ func _make_menu_shell():
 	WorldFixture.write_pff(self, _temp_dir.path_join("language.pff"), _fixture_entries(LANGUAGE_FILES))
 	WorldFixture.write_pff(self, _temp_dir.path_join("localres.pff"), _fixture_entries(LOCALRES_FILES))
 	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", _temp_dir]))
-	ResourceDirSettings.set_expansion("")
 	ResourceDirSettings.set_game("jo")
 	var shell = MAIN_GAME_SCENE.instantiate()
 	assert_not_null(shell)
