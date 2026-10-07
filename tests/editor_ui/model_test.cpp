@@ -13,6 +13,7 @@
 #include <editor/documents/model_document.h>
 #include <editor/documents/model_labels.h>
 #include <editor/documents/model_surfaces.h>
+#include <editor/preview/definition_viewport.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_viewport.h>
 
@@ -324,6 +325,73 @@ void test_definition_view() {
 	CHECK(opened && v.documents.active == "models/crate.3di", "Go to opens the model's file");
 }
 
+// A weapon record fired from the Preview (DI-22, preview/definition_weapon): Fire is one gesture on the clock's
+// tick with the clock run, the shot in the run's words; Hold fire turns into Release while the key is held; Clear
+// forgets the gestures.
+void test_weapon_fire_view() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_weapon_fire");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(session.handle(request::new_project(dir.file("project"), "Weapon")), "a project");
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const SessionView &v = session.view();
+	const std::string repo = test_paths_repo_root(__FILE__);
+	CHECK(editor_test::write_bytes(v.project.root + "/models/crate.3di",
+	                               test_io::read_file(repo + "/fixtures/threedi/synth/crate.3di")) &&
+	              editor_test::write_text(v.project.root + "/defs/weapon.def",
+	                                      "weapon \"W_UI\"\n\tclipsize 5\n\tstartrounds 10\n\tgfx3 crate\n"
+	                                      "\tround_type AMMO_UI\n\tflags auto\n"
+	                                      "\taction \"fire\"\n\t\tdelayend 4\n\t\tfunction wpn_std_fire\n\tend\nend\n") &&
+	              editor_test::write_text(v.project.root + "/defs/ammo.def",
+	                                      "ammo AT_NULL\nend\nammo AMMO_UI\n\tvelocity 600\n\tmax_age 2\nend\n"),
+	      "the model, the weapon and its ammo");
+	editor_test::handle_to_end(session, request::rescan());
+	while (v.activity.validation.running) session.poll();
+	DrawnDevices devices;
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	const auto serve = [&]() {
+		EditorRequest request;
+		while (ui.windows.take_request(request)) session.handle(request);
+		devices.sync(session.viewports(), v);
+	};
+	const auto settle = [&](int frames) {
+		for (int i = 0; i < frames; ++i) {
+			serve();
+			ui.frames(1);
+		}
+		serve();
+	};
+	const std::string path = "defs/weapon.def";
+	session.handle(request::open_document(path));
+	const Document *table = session.document_for(path);
+	CHECK(table && !table->rows().empty(), "the table open");
+	if (!table || table->rows().empty()) return;
+	session.handle(request::select_record(path, NodeAddress{table->rows()[0]->id, table->rows()[0]->kind, 0}));
+	session.handle(request::set_viewport(path, R"({"kind": "definition", "clock": {"playing": false, "ticks": 5}})"));
+	settle(3);
+	const auto *model = dynamic_cast<const DefinitionViewport *>(session.viewports().find(path, ViewportKind::Definition));
+	CHECK(model && model->weapon_record(), "the record is a weapon's picture");
+	if (!model) return;
+	const ImGuiID scope = item_id(Ui::window_id("Preview"), {"definition", path.c_str()});
+	ui.activate(item_id(scope, {"Fire"}));
+	settle(1);
+	CHECK(model->weapon().range().gestures().size() == 1 &&
+	              model->weapon().range().gestures()[0].gesture == WeaponGesture::Fire,
+	      "Fire: one press on the clock's tick");
+	CHECK(session.viewports().clock().playing(), "the clock run");
+	ui.activate(item_id(scope, {"Hold fire"}));
+	settle(2);
+	std::string text = logged_frame(ui);
+	CHECK(text.find("Release") != std::string::npos, "the held key offers its Release");
+	ui.activate(item_id(scope, {"Clear"}));
+	settle(1);
+	CHECK(model->weapon().range().gestures().empty(), "Clear forgets the gestures");
+}
+
 // Place in mission on the model preview (DI-12, preview/model_placement) over a real session: with the mission
 // open before the model, the toolbar's button raises one EditInViewport of the model's place_in_mission, which
 // makes the crate's item in items.def and arms the mission's Place tool with it, the mission made active; for a
@@ -426,6 +494,7 @@ void run_model_tests() {
 	test_material_surface();
 	test_damage_popup();
 	test_definition_view();
+	test_weapon_fire_view();
 	test_place_in_mission();
 }
 

@@ -56,6 +56,9 @@ public:
 	// The graphics read for the picture, each with its stamp, and the names that loaded nothing.
 	opennova::editor::FileStamps stamps() const;
 	std::vector<std::string> missing() const;
+	// The root the graphics are read through (null before a mount): a device's other readers of the project's
+	// files share it (DI-22: the scars' textures, the tracers' smoke).
+	const Ref<ResourceRoot> &root() const { return root_; }
 	// Its nodes and values, for the device tests: the renderer, and the scene it draws.
 	ParticleRenderer *renderer() const;
 	const std::shared_ptr<opennova::particle::EffectScene> &scene() const { return shown_; }
