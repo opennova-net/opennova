@@ -699,29 +699,15 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items,
         const DefItemDef *def = find_item(by_id, def_id);
         if (def == nullptr) continue;
         auto &weapons = ae->profile.organic;
+        // The definition callback's four ammo names and three launch points
+        // on the person's own model (world/organic_fire.h).
+        // [orig: Entity_InitOrganicAI @0x4BFCC0]
         const char *ammo_names[] = {def->ammo_closeattack, def->ammo_easyrocket,
                                     def->ammo_advancedrocket, def->ammo_marker3};
-        for (size_t slot = 0; slot < weapons.ammo.size(); ++slot) {
-            if (ammo_names[slot][0] == '\0') continue;
-            const int id = world.tables.ammo.index_of(ammo_names[slot]);
-            weapons.ammo[slot] = static_cast<uint8_t>(id >= 0 ? id : 0);
-        }
-        // ModelGPM_FindUserpointByName returns the FIRST case-insensitive
-        // match. The index-plus-one stores wrap to a byte, as in retail.
-        // [orig: Entity_InitOrganicAI @0x4BFE8F..0x4BFF82]
-        const auto *model = models != nullptr ? models->model(def->graphic).get() : nullptr;
         const char *point_names[] = {def->launchups_closeattack,
                                      def->launchups_rocket, def->launchups_marker3};
-        for (size_t slot = 0; slot < weapons.launch.size(); ++slot) {
-            weapons.launch[slot] = 0;
-            if (!model || !model->user_points || point_names[slot][0] == '\0') continue;
-            for (size_t point = 0; point < model->user_point_count; ++point) {
-                if (strutil::iequals(model->user_points[point].name, point_names[slot])) {
-                    weapons.launch[slot] = static_cast<uint8_t>(point + 1);
-                    break;
-                }
-            }
-        }
+        const auto *model = models != nullptr ? models->model(def->graphic).get() : nullptr;
+        world::resolve_organic_weapons(ammo_names, point_names, world.tables.ammo, model, weapons);
         ae->profile.clip_size = def->clipsize;
         ae->inf.magazine = static_cast<int16_t>(def->clipsize);
         if (std::any_of(weapons.ammo.begin(), weapons.ammo.end(),
