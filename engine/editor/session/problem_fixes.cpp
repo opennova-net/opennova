@@ -203,13 +203,10 @@ const AssetEntry *sound_bank_for(const ReferenceSubject &missing, const SessionV
 	return first;
 }
 
-// The project file where a missing symbol belongs: the one its scope names (its row's
-// scope_names_file: a string id's table, the menu an ACTION's screen or window is looked up in,
-// the model whose user points an item's particle slot names), a sound set's bank (sound_bank_for),
-// else the file that defines the other symbols of its kind that a lookup finds, else the table its
-// kind goes in (usual_table: a catalog or a stylesheet that defines nothing yet); null when the
-// project has none (a string id of no table, or of any table).
+} // namespace
+
 const AssetEntry *defining_file(const ReferenceSubject &missing, const SessionView &view) {
+	if (!view.project.scan) return nullptr;
 	if (reference_row(missing.kind).scope_names_file) {
 		const std::string scoped = missing.scope.substr(0, missing.scope.find('/'));
 		return scoped.empty() ? nullptr : view.project.scan->find(scoped);
@@ -220,8 +217,10 @@ const AssetEntry *defining_file(const ReferenceSubject &missing, const SessionVi
 			if (!symbol->inert)
 				if (const AssetEntry *entry = view.project.scan->at_path(symbol->file))
 					return entry;
-	return usual_table(missing.kind, view);
+	return view.project.requirements ? usual_table(missing.kind, view) : nullptr;
 }
+
+namespace {
 
 // A missing name's Add it there (ADR 0046 DI-15): the record of its kind the file where it belongs gains, named
 // as referenced, planned by the file's type (DocumentType::define_symbol) over its document as it stands (an open

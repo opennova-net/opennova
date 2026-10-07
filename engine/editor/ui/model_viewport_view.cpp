@@ -22,11 +22,15 @@
 #include <editor/documents/model_labels.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/preview/animation_uses.h>
+#include <editor/preview/mission_items.h>
+#include <editor/preview/mission_options.h>
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/model_damage.h>
 #include <editor/preview/model_overlay.h>
+#include <editor/preview/model_placement.h>
 #include <editor/preview/model_viewport.h>
 #include <editor/preview/viewports.h>
+#include <editor/project/project_files.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
@@ -112,7 +116,56 @@ struct ModelViewportView::Tools {
 	void sound(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
 	void first_person(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
 	void timeline(Workspace &workspace, const ModelViewport &model, const PreviewClock &clock);
+	void place_in_mission(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
 };
+
+// Place in mission (ADR 0046 DI-12): the mission last active's Place tool armed with the model's item, made
+// first where none draws it (the viewport's place_in_mission command, which says what it did); where several
+// items draw it, a choice of them, the one picked armed.
+void ModelViewportView::Tools::place_in_mission(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model) {
+	const SessionView &view = workspace.view();
+	const std::string mission = place_in_mission_target(view);
+	const std::vector<int64_t> drawers = mission_items_of_model(view, model.path());
+	row.next(ui_kit::button_width("Place in mission"));
+	ImGui::BeginDisabled(mission.empty() || !view.allows(EditorRequestKind::EditInViewport));
+	if (ImGui::Button("Place in mission")) {
+		if (drawers.size() > 1) {
+			ImGui::OpenPopup("place_in_mission");
+		} else {
+			ViewportCommand command;
+			command.name = "place_in_mission";
+			command.kind = ViewportKind::Model;
+			workspace.request(request::edit_in_viewport(model.path(), std::move(command)));
+		}
+	}
+	ImGui::EndDisabled();
+	const std::string name = basename_of(mission);
+	ui_kit::tooltip(mission.empty()
+	                        ? std::string("Open the mission to place this model in: Place in mission arms its Place tool with "
+	                                      "the model's item.")
+	                        : "Arms Place in " + name + " with the model's item: each click on its picture places one on the "
+	                          "ground there. " +
+	                                  (drawers.empty() ? std::string("No item draws the model yet: its item is made in the item "
+	                                                                 "catalog first, a decoration or a building as its parts say.")
+	                                   : drawers.size() > 1 ? std::string("Several items draw it: pick one.")
+	                                                        : std::string("")));
+	if (ImGui::BeginPopup("place_in_mission")) {
+		for (const int64_t item : drawers) {
+			MissionItemFacts facts;
+			std::string ignored;
+			mission_item_facts(view, item, facts, ignored);
+			const std::string label = (facts.name.empty() ? std::string("Item") : facts.name) + " (" + std::to_string(item) + ")";
+			if (ImGui::Selectable(label.c_str())) {
+				workspace.request(request::open_document(mission));
+				io::JsonValue options = io::JsonValue::make_object();
+				options.set("tool", io::json_string(mission_tool_token(MissionTool::Place)));
+				options.set("item", io::json_number(double(item)));
+				workspace.request(request::set_viewport(mission, viewport_change(ViewportKind::Mission, "options", std::move(options))));
+			}
+		}
+		ImGui::EndPopup();
+	}
+}
 
 ModelViewportView::ModelViewportView() : ViewportView(ViewportKind::Model), tools_(std::make_unique<Tools>()) {}
 
@@ -701,6 +754,7 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 		model.command(context, "frame", model.frame_ids(context), requests, error);
 	}
 	ui_kit::tooltip("Look at the selected marker or collision record, or at the whole model (F).");
+	if (!model.animating()) place_in_mission(workspace, row, model);
 	row.next(ui_kit::button_width("Registers"));
 	ImGui::BeginDisabled(shown.ctrl.count == 0);
 	if (ImGui::Button("Registers")) ImGui::OpenPopup("registers");
