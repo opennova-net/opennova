@@ -105,6 +105,12 @@ struct DocumentType {
 	// False for a name the type does not define, or has no place for in this file. Null for a type defining
 	// nothing another file names.
 	bool (*define_symbol)(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out) = nullptr;
+	// A type of a kind the ConfigFile text reader reads: the entry lines of its document's text (each line's first
+	// offset) that change nothing its game loader reads, so that the line gone, the game loads the same (a line
+	// of no key it asks for, a later section of a label it reads the first of, a key at the value a missing one
+	// reads), which the ConfigFile pool rule's fix comments out (documents/config_overrun.h). Null for a type
+	// with no port of its loader's reads, whose overrun finding has no fix.
+	void (*config_idle_lines)(const TextDocument &document, std::vector<size_t> &line_starts) = nullptr;
 };
 
 // A record in its type's own words with no project names (its record_label with none, else the
