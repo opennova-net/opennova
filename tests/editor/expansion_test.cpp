@@ -28,6 +28,7 @@
 #include <editor/session/original_files.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/base_layer_build.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/view_json.h>
@@ -707,12 +708,82 @@ static int test_session_on_base_project() {
 	return 0;
 }
 
+// The base game under an expansion's graph (the base layer, base_layer_build.h): the names its files
+// define resolve the project's references as the game resolves them through the archives below the
+// expansion's pair, so a menu naming the base's style variable, the font it names and a texture it ships
+// leaves no reference.missing row; a required file the base serves is a note, never an error. Built a
+// step at a time within a budget, the layer is the one a single call builds; a standalone project, or a
+// base that does not mount, builds none.
+static int test_base_layer_session() {
+	editor_test::TempProjectDir dir("opennova_editor_expansion_base_layer");
+	const std::string exported = dir.file("game/assets/build/export");
+	std::error_code made_dir;
+	std::filesystem::create_directories(opennova::io::os_path(exported), made_dir);
+	TEST_EXPECT(write_archive(exported + "/localres.pff",
+	                          { { "menu_style.mns", "DEF_FONTNAME_LG basefont.fnt\r\n" },
+	                            { "basefont.fnt", "font" },
+	                            { "onlybase.tga", "tga" },
+	                            { "main.mnu", "<SCREEN>\r\n<NAME>STARTUP</NAME>\r\n</SCREEN>\r\n" } }) &&
+	            write_archive(exported + "/resource.pff", { { "baseonly.txt", "base" } }));
+	ProjectDocument base;
+	Diagnostic error;
+	TEST_EXPECT(create_project(dir.file("game/assets"), "Base", "jo", base, error));
+	// Stepped, the layer the one call builds.
+	ProjectDocument mod;
+	mod.target_game = "jo";
+	mod.expansion = ProjectExpansion{ "onx", "", "../../assets" };
+	BaseLayerBuild stepped(exported, mod);
+	size_t steps = 0;
+	while (!stepped.step(4)) ++steps;
+	const std::shared_ptr<const GraphLayer> layer = stepped.take();
+	const std::shared_ptr<const GraphLayer> whole = build_base_layer(exported, mod);
+	TEST_EXPECT(steps > 2 && layer && whole && layer->file_count() == whole->file_count() &&
+	            layer->symbol_count() == whole->symbol_count() && layer->file_named("onlybase.tga") &&
+	            layer->symbol_count() > 0);
+	TEST_EXPECT(!build_base_layer(exported, ProjectDocument()) &&
+	            !build_base_layer(dir.file("nowhere"), mod)); // standalone; a base that does not mount
+
+	Preferences chosen;
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences(chosen);
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	const std::string root = dir.file("game/expansions/onx");
+	ActionOutcome outcome =
+	        editor_test::handle_to_end(session, request::new_expansion_project(root, "Night", "onx", "", true, "../../assets"));
+	TEST_EXPECT(!outcome.refused && view.project.open);
+	TEST_EXPECT(editor_test::write_text(root + "/menus/night.mnu",
+	                                    "<SCREEN>\r\n<NAME>NIGHT</NAME>\r\n"
+	                                    "<WINDOW TYPE=\"STATIC\" NAME=\"W1\">\r\n"
+	                                    "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>\r\n"
+	                                    "<FONT><NAME>%DEF_FONTNAME_LG%</NAME></FONT>\r\n"
+	                                    "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"IMAGE\">onlybase.tga</APPEARANCE>\r\n"
+	                                    "<APPEARANCE STATE=\"MOUSEOVER\" TYPE=\"IMAGE\">nowhere.tga</APPEARANCE>\r\n"
+	                                    "</WINDOW>\r\n</SCREEN>\r\n"));
+	editor_test::handle_to_end(session, request::open_project(root));
+	TEST_EXPECT(view.project.open && view.project.scan->find("night.mnu"));
+	const std::vector<Diagnostic> &rows = view.findings.diagnostics;
+	// The base's names resolve; the one name neither has is the only one missing.
+	TEST_EXPECT(count_code(rows, "reference.missing") == 1 && count_code(rows, "reference.missing", "nowhere.tga") == 1);
+	// main.mnu, which the base serves: a note.
+	size_t served = 0;
+	for (const Diagnostic &d : rows)
+		if (d.code() == "requirement.missing" && d.message.find("main.mnu") == 0) {
+			++served;
+			TEST_EXPECT(d.severity == DiagnosticSeverity::Info &&
+			            d.message.find("The game reads the base game's") != std::string::npos);
+		}
+	TEST_EXPECT(served == 1);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_name_rule();
 	failures += test_project_expansion();
 	failures += test_base_project_dir();
 	failures += test_session_on_base_project();
+	failures += test_base_layer_session();
 	failures += test_install_findings();
 	failures += test_files_table();
 	failures += test_name_forms_no_game_file();
