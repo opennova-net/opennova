@@ -1366,6 +1366,7 @@ add_test(NAME hud_overlay_windows COMMAND hud_overlay_windows_test)
 # present-due rule and the composited resource names.
 add_executable(hud_loading_screen_test hud/loading_screen_test.cpp)
 target_link_libraries(hud_loading_screen_test PRIVATE opennova_runtime)
+target_include_directories(hud_loading_screen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_loading_screen COMMAND hud_loading_screen_test)
 
 add_executable(jo_env_sweep_test env/jo_env_sweep_test.cpp)
@@ -4790,6 +4791,11 @@ add_executable(editor_hud_viewport_test editor/hud_viewport_test.cpp)
 target_link_libraries(editor_hud_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_hud_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_hud_viewport COMMAND editor_hud_viewport_test)
+
+add_executable(editor_line_ends_test editor/line_ends_test.cpp)
+target_link_libraries(editor_line_ends_test PRIVATE opennova_editor)
+target_include_directories(editor_line_ends_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_line_ends COMMAND editor_line_ends_test)
 
 add_executable(editor_texture_document_edit_test editor/texture_document_edit_test.cpp)
 target_link_libraries(editor_texture_document_edit_test PRIVATE opennova_editor)
