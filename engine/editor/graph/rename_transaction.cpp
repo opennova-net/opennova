@@ -780,6 +780,7 @@ bool stage_text_sites(TextDocument &document, const std::vector<const RenameSite
 		size_t offset;
 		std::string after;   // in the document's code page
 		size_t length = 0;   // the old name's bytes there
+		std::string reads;   // the name the new text reads there: `after`, plus the edge's offset where it has one
 	};
 	std::vector<Found> found;
 	std::vector<bool> taken(extracted.edges.size(), false);
@@ -796,7 +797,17 @@ bool stage_text_sites(TextDocument &document, const std::vector<const RenameSite
 		    !document.offset_of(extracted.edges[match].span.line, extracted.edges[match].span.column, offset))
 			continue;
 		taken[match] = true;
-		found.push_back({site, offset, std::move(after), before.size()});
+		// A number naming its definition by itself plus an offset (a charattr class's camouflage item) writes
+		// the number, its span's length, and reads back as the number plus the offset.
+		const GraphEdge &edge = extracted.edges[match];
+		std::string reads = site->after;
+		size_t length = before.size();
+		if (edge.name_offset) {
+			length = edge.span.length;
+			if (const std::optional<int> number = strutil::parse_int(site->after))
+				reads = std::to_string(int64_t(*number) + edge.name_offset);
+		}
+		found.push_back({site, offset, std::move(after), length, std::move(reads)});
 	}
 	std::sort(found.begin(), found.end(), [](const Found &a, const Found &b) { return a.offset > b.offset; });
 	std::vector<Edit> edits;
@@ -819,7 +830,7 @@ bool stage_text_sites(TextDocument &document, const std::vector<const RenameSite
 		const TextSpan at = document.span_at(size_t(std::ptrdiff_t(place.offset) + moved), place.after.size());
 		const std::string locator = TextDocument::locator(at.line, at.column);
 		const bool read = std::any_of(again.edges.begin(), again.edges.end(), [&](const GraphEdge &edge) {
-			return edge.locator == locator && edge.value == place.site->after;
+			return edge.locator == locator && edge.value == place.reads;
 		});
 		if (!read) {
 			findings.push_back(refusal(CoreFinding::RenameName,
