@@ -1398,7 +1398,11 @@ void HudFrameCompiler::element_heat(const HudFrameState &state, float w,
 void HudFrameCompiler::element_power(const HudFrameState &state, float w,
 		float h) {
 	// [orig: HUD_DrawPowerThrowChargeBar @ 0x599830 — outline + inset fill +
-	// "%d%" 15 output pixels above, all in the flat 0xFF800000 half-red]
+	// "%d%" 15 output pixels above, all in the per-frame HUD colour
+	// g_HUDFrameOverlayColor @0x840B1C (the outline's push @0x599955, the fill's
+	// @0x599982, the text's @0x5999f4), which HUD_RenderAllOverlays stamps
+	// = g_HUDColors[index] every frame @0x5A8112..0x5A8125 before it calls
+	// HUD_RenderOverlays @0x5A84EB; 0xFF800F00 is only its static seed]
 	// The PWRBAR declutter gate [orig: the slot-20 cmp @ 0x5A7DD2].
 	if (!state.declutter_visible[kDeclutterPwrBar]) {
 		return;
@@ -1410,12 +1414,15 @@ void HudFrameCompiler::element_power(const HudFrameState &state, float w,
 	if (!r.present || r.w <= 0.0f || r.h <= 0.0f) {
 		return;
 	}
-	const uint32_t color = 0xFF800000u; // [orig: the constant @ 0x840b1c]
+	const uint32_t color = active_color(state);
 	const int32_t progress = power_throw_progress_fp16(state.windup_held_ticks);
+	// The corner and the extent scale apart and add on the surface
+	// [orig: Viewport_ScaleToVirtualCoords of (x, y) @0x599925, of (w, h)
+	//  @0x599939; the corner sums @0x59996C..0x599973].
 	const float x0 = sx(r.x, w);
 	const float y0 = sy(r.y, h);
-	const float x1 = sx(r.x + r.w, w);
-	const float y1 = sy(r.y + r.h, h);
+	const float x1 = x0 + sx(r.w, w);
+	const float y1 = y0 + sy(r.h, h);
 	emit_wire_rect(x0, y0, x1, y1, color);
 	const int span = power_fill_span(progress, static_cast<int>(x1 - x0));
 	if (span > 1) {
@@ -1427,11 +1434,14 @@ void HudFrameCompiler::element_power(const HudFrameState &state, float w,
 	char label[16];
 	std::snprintf(label, sizeof(label), "%d%%",
 			static_cast<int>((static_cast<int64_t>(progress) * 100) >> 16));
-	// 15 OUTPUT pixels above the bar: convert back to design so the offset
-	// commutes with the rounding [orig: y-15 @ 0x5999ef].
-	const float dy = static_cast<float>(
-			pixel_delta_to_design(-15.0, h, kDesignH));
-	emit_text(label, r.x, r.y + dy, w, h, half_bright_argb(color), 0u);
+	// The "%d%%" label [orig: sprintf @0x5999ef], 15 OUTPUT pixels above the
+	// bar's scaled corner [orig: sub 0Fh @0x5999da],
+	// in the BOLD label slot at its own scale, not the hudpos HUD slot
+	// [orig: HUD_DrawTextLeft_HalfBright(&g_HUDLabelFontBold, ..) @0x599a0f..0x599a14];
+	// layout-only embedders fall back to the HUD slot.
+	const bool have_bold = label_font_bold_.font() != nullptr;
+	emit_slot_text(have_bold ? label_font_bold_ : font_, have_bold ? label_scale_ : hud_font_scale_,
+			label, x0, sy(r.y, h) - 15.0f, half_bright_argb(color), 0u);
 	++draw_list_.elements_drawn;
 }
 
@@ -1978,10 +1988,24 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 			state.hud_detail_level >= 2) {
 		return;
 	}
-	if (font_.font() == nullptr) {
+	// Both loops draw in the BOLD label slot at its own scale, not the hudpos
+	// HUD slot [orig: push offset g_HUDLabelFontBold @0x59ae09 / @0x59aea6 into
+	// sub_580560 @0x580560, which hands the slot's scale pair to
+	// CGameFont_DrawText @0x5805b3..0x5805c0]; layout-only embedders fall back
+	// to the HUD slot.
+	const bool have_bold = label_font_bold_.font() != nullptr;
+	const GameFont &bf = have_bold ? label_font_bold_ : font_;
+	const float bscale = have_bold ? label_scale_ : hud_font_scale_;
+	if (bf.font() == nullptr) {
 		return;
 	}
-	const float row_h = static_cast<float>(kFeedLineStepDesign);
+	// The anchors and the 18-unit step scale to the surface ONCE, in integers,
+	// and the rows add up in surface pixels [orig: Viewport_ScaleToVirtualCoords
+	// of the anchor @0x59ad9f / @0x59ae52 and of the step alone, x null,
+	// @0x59adb0; the add @0x59ae1a / @0x59aeb7].
+	const int surface_w = static_cast<int>(w);
+	const int surface_h = static_cast<int>(h);
+	const int row_h = design_to_screen_y(kFeedLineStepDesign, surface_h);
 	bool drew = false;
 
 	// THE CHAT RING — the FIRST loop [orig: HUD_DrawConsoleMessages
@@ -1989,17 +2013,15 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 	// (dword_27237A8/AC), slots 3..1 walked top-down, each line's alpha the
 	// fold `255 * timer / 186` clamped to 255 and SKIPPED (no rung consumed)
 	// at <= 0 [orig: @0x59add9..0x59adf4], folded over the stored RGB
-	// `(alpha << 24) + (color & 0xFFFFFF)` @0x59ae04, drawn with the bold
-	// label font. The timer is the slot's remaining life, so the alpha ramps
-	// down through the line's last 186 ticks.
+	// `(alpha << 24) + (color & 0xFFFFFF)` @0x59ae04. The timer is the slot's
+	// remaining life, so the alpha ramps down through the line's last 186 ticks.
 	{
-		const float cx = static_cast<float>(
-				layout_.chat_text.present ? layout_.chat_text.x : 5);
-		const float cy = static_cast<float>(
-				layout_.chat_text.present ? layout_.chat_text.y : 5);
+		const int cx = design_to_screen_x(layout_.chat_text.present ? layout_.chat_text.x : 5,
+				surface_w);
+		int row_y = design_to_screen_y(layout_.chat_text.present ? layout_.chat_text.y : 5,
+				surface_h);
 		const int n = static_cast<int>(chat_lines_.size());
 		const int first = std::max(0, n - kFeedVisibleRows);
-		float row_y = cy;
 		for (int i = first; i < n; ++i) {
 			const HudMessageLine &line = chat_lines_[static_cast<size_t>(i)];
 			const int remaining = line.expire_tick - state.ticks;
@@ -2008,7 +2030,8 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 			if (alpha > 255) alpha = 255;
 			// The drawer halves the RGB and keeps the alpha [orig: sub_580560
 			// @0x59ae0e — (c & 0xFF000000) + ((c >> 1) & 0x7F7F7F)].
-			emit_text(line.text.c_str(), cx, row_y, w, h,
+			emit_slot_text(bf, bscale, line.text.c_str(), static_cast<float>(cx),
+					static_cast<float>(row_y),
 					half_bright_keep_alpha((static_cast<uint32_t>(alpha) << 24) |
 							(line.color & 0xFFFFFFu)),
 					0u);
@@ -2019,10 +2042,9 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 
 	// THE SYSTEM RING — the second loop. Fallback = the JO-authored HUDSYSTEXT
 	// anchor (hudpos.def "5 , 22").
-	const float ax = static_cast<float>(
-			layout_.sys_text.present ? layout_.sys_text.x : 5);
-	const float ay = static_cast<float>(
-			layout_.sys_text.present ? layout_.sys_text.y : 22);
+	const int ax = design_to_screen_x(layout_.sys_text.present ? layout_.sys_text.x : 5, surface_w);
+	const int ay = design_to_screen_y(layout_.sys_text.present ? layout_.sys_text.y : 22,
+			surface_h);
 	std::vector<const HudMessageLine *> live;
 	for (const HudMessageLine &line : feed_lines_) {
 		if (line.expire_tick > state.ticks) {
@@ -2034,12 +2056,12 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 		// anchor and newer lines step downward.
 		const int visible = std::min(static_cast<int>(live.size()), kFeedVisibleRows);
 		const int first = static_cast<int>(live.size()) - visible;
-		float row_y = ay;
+		int row_y = ay;
 		for (int i = first; i < static_cast<int>(live.size()); ++i) {
 			const HudMessageLine *line = live[static_cast<size_t>(i)];
 			// The same halving drawer [orig: sub_580560 @0x59aeab].
-			emit_text(line->text.c_str(), ax, row_y, w, h, half_bright_keep_alpha(line->color),
-					0u);
+			emit_slot_text(bf, bscale, line->text.c_str(), static_cast<float>(ax),
+					static_cast<float>(row_y), half_bright_keep_alpha(line->color), 0u);
 			row_y += row_h;
 		}
 		drew = true;

@@ -348,6 +348,8 @@ const FoliageDrawList &FoliageFrameCompiler::compile(
 			command.wind_phase = detail_wind_phase;
 			command.wind_sector_origin_z =
 					foliage_detail_wind_sector_origin_z(first.cell_key);
+			command.atlas_x = first.atlas_x;
+			command.atlas_z = first.atlas_z;
 			command.far_side =
 					first.water_pass == opennova::foliage::DetailWaterPass::FarSide;
 			command.render_rung =
