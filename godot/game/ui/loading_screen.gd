@@ -65,7 +65,8 @@ const DEFAULT_TEXT_SIZE := 16
 
 var _splash_state := SplashState.NONE
 var _splash_arrow: Texture2D = null      # newarow1.tga, the menu cursor art
-var _splash_font: FontFile = null        # Impac22b.fnt (the large HUD label slot)
+var _splash_font: FntResource = null     # Impac22b.fnt (the large HUD label slot)
+var _splash_pages: Array = []            # its pages as textures (HudPos.font_page_textures)
 var _splash_text := ""                   # LoadingText/LT_Continue ("" -> no line)
 var _splash_arrow_anchor := Vector2.ZERO # live cursor pos, viewport px
 var _splash_blink_on := true
@@ -413,7 +414,17 @@ func begin_start_mission_splash(root: ResourceRoot) -> bool:
 	if root != null:
 		_splash_arrow = root.load_texture(HudPos.loading_splash_arrow_image(),
 				ResourceRoot.TEXTURE_LOADER_TGA)
-		_splash_font = _load_font(root, HudPos.loading_splash_continue_font())
+		_splash_font = root.load_font(HudPos.loading_splash_continue_font()) as FntResource
+		_splash_pages = HudPos.font_page_textures(_splash_font)
+	# The continue line draws through its font page's material, MODULATE2X on
+	# the glyph shader's flagged runs; every other draw keeps texel x colour
+	# (docs/interface/loading-screen-re.md D-LOADSCR-10).
+	if material == null:
+		var glyph_shader := Shader.new()
+		glyph_shader.code = HudPos.glyph_shader_code()
+		var glyph_material := ShaderMaterial.new()
+		glyph_material.shader = glyph_shader
+		material = glyph_material
 	_splash_text = _lookup_loading_text(HudPos.loading_splash_continue_key(), "")
 	_splash_state = SplashState.ACTIVE
 	_sync_bar_fill()
@@ -526,29 +537,16 @@ func _draw() -> void:
 # [orig: Game_ShowStartMissionSplash @ 0x520820].
 func _draw_splash_overlay() -> void:
 	if _splash_font != null and not _splash_text.is_empty():
-		# Centered at virtual (512, 730) of the 1024x768 overlay space, in
-		# the large HUD label font at its width/800 slot scale, half-bright,
-		# color pulsing on the 512 ms tick bit. Top-anchored like the block
-		# draws; glyph metrics ride the FontFile view (D-LOADSCR-2)
-		# [orig: HUD_DrawTextAtVirtualPos(ctx, 512, 730, 0, text,
-		# g_HUDLabelFontLarge, color, mode=2 centered) @ 0x5209da; centered
-		# dispatch HUD_DrawTextCentered_HalfBright @ 0x580680; slot scale
-		# (w << 16) / 800 @ 0x51ef62].
-		var s := size / Vector2(HudPos.DESIGN_WIDTH, HudPos.DESIGN_HEIGHT)
-		var pos := Vector2(HudPos.SPLASH_CONTINUE_X * s.x,
-				HudPos.SPLASH_CONTINUE_Y * s.y)
-		var fscale := size.x / float(HudPos.SPLASH_FONT_SCALE_BASE_W)
-		var fs := _splash_font.get_fixed_size()
-		if fs <= 0:
-			fs = 16
-		var color := HudPos.loading_splash_continue_color(_splash_blink_on)
-		var text_w := _splash_font.get_string_size(_splash_text,
-				HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		draw_set_transform(pos, 0.0, Vector2(fscale, fscale))
-		draw_string(_splash_font,
-				Vector2(-text_w * 0.5, _splash_font.get_ascent(fs)),
-				_splash_text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, color)
-		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		# Centered at virtual (512, 730) of the 1024x768 overlay space in the
+		# large HUD label font at its width/800 slot scale, the colour pulsing
+		# on the 512 ms tick bit and halved by the centred drawer, then doubled
+		# by the font page's MODULATE2X: laid out and drawn by the engine's run
+		# through the shared glyph leg [orig: HUD_DrawTextAtVirtualPos(ctx, 512,
+		# 730, 0, text, g_HUDLabelFontLarge, color, mode=2 centered) @ 0x5209da;
+		# HUD_DrawTextCentered_HalfBright @ 0x580680 -> CGameFont_DrawText
+		# @ 0x6752c0] (hud/loading_screen.h splash_continue_run).
+		HudPos.draw_splash_continue(self, _splash_font, _splash_pages, _splash_text,
+				Vector2i(roundi(size.x), roundi(size.y)), _splash_blink_on)
 	if _splash_arrow != null:
 		# The arrow is the cursor art, top-left at the live cursor position
 		# (identity in viewport px — the original keeps the cursor in 640x480

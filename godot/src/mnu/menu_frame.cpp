@@ -45,37 +45,9 @@ static_assert(MenuFrame::EDIT_RESULT_COMMIT == 2);
 
 namespace {
 
-// The menu items' shader: the font page's material on a glyph run. A command
-// whose UV.y carries a -16 flag is a glyph run on a font page, whose material is
-// colour family 0x600 (hud::kFontPageMaterialWord): vertex() strips the flag and
-// fragment() runs MODULATE2X(TEXTURE, DIFFUSE) over COLOR (the texel times the
-// vertex colour), saturated per channel, the alpha MODULATE as COLOR has it,
-// under the SRCALPHA/INVSRCALPHA blend. The flag is negative because a menu's
-// tiled rects carry UVs far above 1 and none below 0; every other command keeps
-// the default texel x vertex colour.
-constexpr const char *kMenuGlyphShader = R"(
-shader_type canvas_item;
-render_mode unshaded, blend_mix;
-
-varying flat float modulate2x_on;
-
-void vertex() {
-	modulate2x_on = 0.0;
-	if (UV.y <= -8.0) {
-		UV.y += 16.0;
-		modulate2x_on = 1.0;
-	}
-}
-
-void fragment() {
-	if (modulate2x_on > 0.5) {
-		COLOR.rgb = min(COLOR.rgb * 2.0, vec3(1.0));
-	}
-}
-)";
-
-// The -16 UV.y flag a glyph run's vertices carry into kMenuGlyphShader.
-constexpr float kMenuModulate2xUvFlag = -16.0f;
+// The menu items' shader is the shared canvas glyph shader (hud/font_page_glyphs:
+// glyph_canvas_shader_code): a glyph run flagged -16 on UV.y draws through its
+// font page's material, every other command at texel x vertex colour.
 
 int positive_mod(int value, int divisor) {
 	const int result = value % divisor;
@@ -141,7 +113,7 @@ void MenuFrame::ensure_overlay_canvas_item_() {
 	// Every item the draw list paints on runs the font pages' material on its
 	// glyph runs (the slot item is its companion's, which binds its own).
 	glyph_shader_.instantiate();
-	glyph_shader_->set_code(kMenuGlyphShader);
+	glyph_shader_->set_code(glyph_canvas_shader_code());
 	glyph_material_.instantiate();
 	glyph_material_->set_shader(glyph_shader_);
 	for (const RID &item : { get_canvas_item(), overlay_canvas_item_, overlay_upper_canvas_item_ }) {
@@ -150,7 +122,7 @@ void MenuFrame::ensure_overlay_canvas_item_() {
 }
 
 String MenuFrame::glyph_shader_code() {
-	return String(kMenuGlyphShader);
+	return String(glyph_canvas_shader_code());
 }
 
 Array MenuFrame::get_glyph_submissions() {
@@ -1126,10 +1098,10 @@ void MenuFrame::_draw() {
 					return;
 				}
 				// One triangle array per consecutive font page, through the page's
-				// material: its MODULATE2X stage rides kMenuGlyphShader's UV.y flag,
+				// material: its MODULATE2X stage rides the glyph shader's UV.y flag,
 				// doubling the text sink's halved colour (hud::kFontPageMaterialWord).
 				const Vector2 uv_flag(0.0f,
-						font_page_runs_modulate2x() ? kMenuModulate2xUvFlag : 0.0f);
+						font_page_runs_modulate2x() ? kGlyphCanvasUvFlag : 0.0f);
 				const size_t end = std::min(list.glyphs.size(),
 						static_cast<size_t>(std::max(run.first + run.count, 0)));
 				for (size_t first = static_cast<size_t>(std::max(run.first, 0)); first < end;) {

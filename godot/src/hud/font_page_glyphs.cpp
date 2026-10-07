@@ -38,6 +38,29 @@ bool font_page_runs_modulate2x() {
 			opennova::renderer::MaterialColorStage::Modulate2x;
 }
 
+const char *glyph_canvas_shader_code() {
+	return R"(
+shader_type canvas_item;
+render_mode unshaded, blend_mix;
+
+varying flat float modulate2x_on;
+
+void vertex() {
+	modulate2x_on = 0.0;
+	if (UV.y <= -8.0) {
+		UV.y += 16.0;
+		modulate2x_on = 1.0;
+	}
+}
+
+void fragment() {
+	if (modulate2x_on > 0.5) {
+		COLOR.rgb = min(COLOR.rgb * 2.0, vec3(1.0));
+	}
+}
+)";
+}
+
 void append_glyph_quads(const std::vector<opennova::hud::GameFontQuad> &p_glyphs, size_t p_begin,
 		size_t p_end, const Vector2 &p_uv_flag, GlyphRunArrays &r_out) {
 	p_end = std::min(p_end, p_glyphs.size());
