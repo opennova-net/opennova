@@ -395,6 +395,10 @@ struct EditorRequest {
 	// An import source alone (DI-25): deleted with its outputs kept as files of the project, duplicated without
 	// its import record.
 	bool alone = false;
+	// A name the new file defines as it is made (CreateFile, DI-33: a missing name whose file the project
+	// lacks): the reference's kind, the name as it writes it and its scope, added to the made file's document
+	// as its type's Add makes one (DocumentType::define_symbol), one step its Undo takes back. Kind None: none.
+	ReferenceSubject define;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -417,7 +421,8 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.open_first == b.open_first && a.import_pass == b.import_pass && a.rehash == b.rehash &&
 			a.all == b.all && a.planned == b.planned && a.behind == b.behind && a.fresh == b.fresh && a.plan == b.plan &&
 			a.report == b.report && a.steps == b.steps && a.folder == b.folder && a.start == b.start &&
-			a.play_mode == b.play_mode && a.save_before_play == b.save_before_play && a.alone == b.alone;
+			a.play_mode == b.play_mode && a.save_before_play == b.save_before_play && a.alone == b.alone &&
+			a.define == b.define;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);
