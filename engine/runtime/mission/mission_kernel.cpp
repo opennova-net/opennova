@@ -842,8 +842,9 @@ void MissionKernel::carry_across_load_from(MissionKernel &previous) {
 void MissionKernel::tick_weather() {
 	w::WeatherTickEvents events;
 	world.weather.tick_sim(&world, events);
-	if (events.thunder_a) world.out.weather_sounds.push_back(w::WeatherSoundEvent{0x10000, 0});
-	if (events.thunder_b) world.out.weather_sounds.push_back(w::WeatherSoundEvent{0xA0000, 128});
+	w::WeatherSoundEvent thunder[2];
+	const size_t thunders = w::weather_thunder_sounds(events, thunder);
+	for (size_t i = 0; i < thunders; ++i) world.out.weather_sounds.push_back(thunder[i]);
 	// A host without an audio presenter (the dedicated host) never drains
 	// the queue: keep it bounded, dropping the oldest.
 	constexpr size_t kWeatherSoundQueueCap = 32;

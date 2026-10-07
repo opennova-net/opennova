@@ -104,13 +104,9 @@ TypedArray<AmbientLayer> SoundBank::describe_ambient(const String &p_name) {
 	}
 	const opennova::lwf::File &bank = _bank_at(loc);
 	const opennova::lwf::Multi &set = bank.multis[static_cast<size_t>(loc.set)];
-	for (uint32_t playlist_index : opennova::audio::set_layers(bank, set)) {
-		const opennova::lwf::Playlist &layer = bank.playlists[playlist_index];
-		const std::vector<uint32_t> members = opennova::audio::layer_members(bank, layer);
-		if (members.empty()) {
-			continue;
-		}
-		const opennova::lwf::Sndparm &member = bank.sndparms[members[0]];
+	// Each layer as the emitter mix reads it: its member 0 (the engine's emitter_layers).
+	for (const opennova::audio::EmitterLayer &layer : opennova::audio::emitter_layers(bank, set)) {
+		const opennova::lwf::Sndparm &member = bank.sndparms[layer.sndparm];
 		const String wav_path = _member_wav_path(bank, member);
 		if (wav_path.is_empty()) {
 			continue;
@@ -124,11 +120,11 @@ TypedArray<AmbientLayer> SoundBank::describe_ambient(const String &p_name) {
 		Ref<AmbientLayer> row;
 		row.instantiate();
 		row->set_wav_path(wav_path);
-		row->set_falloff_radius(static_cast<int>(layer.falloff_radius));
-		row->set_min_distance(static_cast<int>(layer.min_distance));
-		row->set_volume(static_cast<int>(member.volume));
-		row->set_clamp_volume(static_cast<int>(member.clamp_volume));
-		row->set_base_pitch(_member_base_pitch(member));
+		row->set_falloff_radius(static_cast<int>(layer.falloff_u));
+		row->set_min_distance(static_cast<int>(layer.min_u));
+		row->set_volume(static_cast<int>(layer.volume));
+		row->set_clamp_volume(static_cast<int>(layer.clamp));
+		row->set_base_pitch(opennova::lwf::pitch_from_q16(layer.pitch_q16));
 		out.push_back(row);
 	}
 	return out;

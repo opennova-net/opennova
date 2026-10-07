@@ -412,6 +412,30 @@ int main() {
         TEST_EXPECT(mx.mix(kOrigin).empty());
     }
 
+    // --- A registration places its own lane: two lanes of one source at two
+    //     places keep theirs (the rain's loops two metres either side of the
+    //     player), as retail's slots copy each registration's position
+    //     [orig: SoundEmitter_RegisterSetLayers @ 0x5283fe..0x528414;
+    //      SoundEmitter_UpdateAndMixTop8 reads the slot's copy @ 0x52858c] (D-SND-38).
+    {
+        AmbientMixer mx;
+        const float left[3] = {12.0f, 0.0f, 0.0f};
+        const float right[3] = {8.0f, 0.0f, 0.0f};
+        AmbientMixer::LayerDesc rain_l;
+        rain_l.candidate_id = 30;
+        rain_l.falloff_u = 100;
+        AmbientMixer::LayerDesc rain_r = rain_l;
+        rain_r.candidate_id = 31;
+        mx.register_emitter(7, 1, left, 0, 20, 0x10000, 0xFFFF, {rain_l});
+        mx.register_emitter(7, 2, right, 0, 20, 0x10000, 0xFFFF, {rain_r});
+        const std::vector<AmbientCandidate> heard = mx.mix(kOrigin);
+        TEST_EXPECT(heard.size() == 2);
+        for (const AmbientCandidate &row : heard) {
+            if (row.candidate_id == 30) TEST_EXPECT(row.pos[0] == 12.0f);
+            if (row.candidate_id == 31) TEST_EXPECT(row.pos[0] == 8.0f);
+        }
+    }
+
     // --- The source key retains the complete registry-lifetime serial. A
     //     generation beyond 32 bits must not alias an older entity in the same
     //     lane.
@@ -503,6 +527,24 @@ int main() {
         TEST_EXPECT(box.size() == 1);
         box.prune(65536);
         TEST_EXPECT(box.empty());
+    }
+
+    // --- A marker's region is the clock's plus its stagger nibble (the Listen reads it) ---
+    // [orig: Entity_CalcTimeOfDayRegion @ 0x408110, the stagger @ 0x408158]
+    {
+        AmbientMixer mx;
+        const float pos[3] = {0.0f, 0.0f, 0.0f};
+        const int32_t keys[4] = {0, 0, 0, 0};
+        std::vector<std::vector<AmbientMixer::LayerDesc>> sets(1);
+        sets[0].push_back(AmbientMixer::LayerDesc{1, 100, 0, 255, 255});
+        const int plain = mx.add_marker(pos, 0, 0, 0, keys, sets);
+        const int late = mx.add_marker(pos, 0, 15, 0, keys, sets);
+        // 9:50: the plain marker still reads morning; the staggered one (15 << 11 Q16 hours, about 28 minutes) day.
+        mx.set_time_of_day_hours(9.0f + 50.0f / 60.0f);
+        TEST_EXPECT(mx.marker_region(plain).region == time_of_day_region(9.0f + 50.0f / 60.0f).region);
+        TEST_EXPECT(mx.marker_region(plain).region == 0);
+        TEST_EXPECT(mx.marker_region(late).region == 1);
+        TEST_EXPECT(mx.marker_region(99).region == 0 && mx.marker_region(99).blend == 1.0f);
     }
 
     return 0;

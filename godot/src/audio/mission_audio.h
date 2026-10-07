@@ -98,6 +98,10 @@ public:
 	// The physical channel playing `candidate_id`, or null when the mixer holds
 	// none for it.
 	AudioStreamPlayer3D *ambient_player_for_candidate(int p_candidate_id) const;
+	// The wave a candidate's layer plays (its member 0's file as the bank names
+	// it), "" for a candidate it does not describe: the ambient_channels probe's
+	// read, which the editor's Listen (ADR 0046 DI-36) is compared against.
+	String ambient_candidate_wave(int p_candidate_id) const;
 	// Read/drive seams (ADR 0018): tests and diagnostics go through these, never
 	// the private fields. set_markers injects fully-described Marker records so
 	// the mix tick can be driven without a mission. `container` supplies a
