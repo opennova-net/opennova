@@ -194,6 +194,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_report.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_screen_render.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_sounds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_try.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_camera.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_canvas.cpp
