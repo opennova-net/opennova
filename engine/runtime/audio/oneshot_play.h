@@ -69,6 +69,27 @@ int64_t oneshot_cull_range_q16(const lwf::Multi &set);
 std::vector<uint32_t> set_layers(const lwf::File &bank, const lwf::Multi &set);
 std::vector<uint32_t> layer_members(const lwf::File &bank, const lwf::Playlist &layer);
 
+// One layer of a set as the looping-emitter mix reads it: a registered set
+// takes a slot per layer [orig: SoundEmitter_RegisterSetLayers @ 0x528340],
+// and the mix reads the layer's member 0, never running the member-selection
+// machine [orig: SoundEmitter_UpdateAndMixTop8 @ 0x528649], its falloff radius
+// as the slot's cull range [orig: @ 0x52856a] and its proximity radius in the
+// two-radius curve [orig: @ 0x528667..0x5286df]: the layer's playlist and its
+// member 0's sndparm, both radii in whole units, the member's volume, ceiling
+// and pitch (Q16). A layer the file gives no member is left out (the port's:
+// retail's mix would read a null member). MissionAudio's candidates and the
+// editor's Listen (ADR 0046 DI-36) read a set through it alike.
+struct EmitterLayer {
+	uint32_t playlist = 0;
+	uint32_t sndparm = 0;
+	int32_t falloff_u = 0;
+	int32_t min_u = 0;
+	int32_t volume = 255;
+	int32_t clamp = 255;
+	uint32_t pitch_q16 = 0x10000u;
+};
+std::vector<EmitterLayer> emitter_layers(const lwf::File &bank, const lwf::Multi &set);
+
 // Pick the member to play for one layer. The selection STATE MACHINE (mode +
 // per-layer cursor/bag) is the SoundSelector's; the mode comes from the
 // playlist flags (selection_mode_for_flags) and the state lives under the

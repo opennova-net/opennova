@@ -25,6 +25,16 @@ bool item_is_envs(const DefItemDef &def) {
 	return tag_is_envs(def.ai_function) || tag_is_envs(def.move_function);
 }
 
+bool envs_slot_sets(const DefItemDef &def, std::array<std::string, 4> &out) {
+	if (!item_is_envs(def)) return false;
+	// soundloop_1..4 select by time-of-day region morning/day/evening/night;
+	// slots 5..7 have no region consumer in this updater.
+	// [orig: Entity_UpdateEnvSoundEmitter @ 0x4a8080]
+	for (int slot = 0; slot < 4; ++slot)
+		out[static_cast<size_t>(slot)] = def.soundloops[slot];
+	return true;
+}
+
 std::vector<EnvsMarker> resolve_envs_markers(
 		const bms::File &mission, const DefItemsFile &items) {
 	std::vector<EnvsMarker> out;
@@ -43,19 +53,12 @@ std::vector<EnvsMarker> resolve_envs_markers(
 			const auto found =
 					by_id.find(entity.type_id + mission::kItemIdOffset);
 			if (found == by_id.end()) continue;
-			const DefItemDef &def = *found->second;
-			if (!item_is_envs(def)) continue;
 			EnvsMarker marker;
+			if (!envs_slot_sets(*found->second, marker.slot_sets)) continue;
 			marker.x = entity.get_x();
 			marker.y = entity.get_y();
 			marker.z = entity.get_z();
 			marker.bms_id = entity.id;
-			// soundloop_1..4 select by time-of-day region morning/day/evening/
-			// night; slots 5..7 have no region consumer in this updater.
-			// [orig: Entity_UpdateEnvSoundEmitter @ 0x4a8080]
-			for (int slot = 0; slot < 4; ++slot)
-				marker.slot_sets[static_cast<size_t>(slot)] =
-						def.soundloops[slot];
 			out.push_back(std::move(marker));
 		}
 	}
@@ -75,16 +78,12 @@ std::vector<EnvsMarker> resolve_envs_markers(
 		world.registry.for_each_in_pool(pool, [&](const world::Entity &entity) {
 			const auto found = by_id.find(entity.item_id + mission::kItemIdOffset);
 			if (found == by_id.end()) return;
-			const DefItemDef &def = *found->second;
-			if (!item_is_envs(def)) return;
 			EnvsMarker marker;
+			if (!envs_slot_sets(*found->second, marker.slot_sets)) return;
 			marker.x = entity.position.x;
 			marker.y = entity.position.y;
 			marker.z = entity.position.z;
 			marker.bms_id = entity.bms_id;
-			// [orig: Entity_UpdateEnvSoundEmitter @ 0x4a8080 — the region slots]
-			for (int slot = 0; slot < 4; ++slot)
-				marker.slot_sets[static_cast<size_t>(slot)] = def.soundloops[slot];
 			out.push_back(std::move(marker));
 		});
 	}

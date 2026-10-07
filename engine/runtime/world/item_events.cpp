@@ -24,7 +24,9 @@ void regional_sound_event(World &world, Entity &entity, int phase) {
     bool has_sound = false;
     for (const auto &shot : traits->regional_sounds) has_sound |= !shot.name.empty();
     if (!has_sound) return;
-    const int32_t time = io::bam_add(world.env.time_of_day, (entity.handle.packed & 15) << 11);
+    // The mission clock, the weather's (D-SND-39) [orig: Entity_CalcTimeOfDayRegion @0x408110 ->
+    // Env_GetTimeOfDayHoursQ16 @0x57d5b0].
+    const int32_t time = io::bam_add(world.weather.tod_hours_q16(), (entity.handle.packed & 15) << 11);
     const int region = time > 4 * 65536 && time < 10 * 65536 ? 0 :
             time > 10 * 65536 && time < 17 * 65536 ? 1 :
             time > 17 * 65536 && time < 21 * 65536 ? 2 : 3;
@@ -660,7 +662,8 @@ void update_item_destroy_fade(World &world, Entity &entity) {
 void update_item_ambient_sound(World &world, const Entity &entity) {
     const auto *traits=world.tables.item_death_traits.get(entity.item_id);
     if (!traits) return;
-    const int32_t hours=io::bam_add(world.env.time_of_day,(entity.handle.packed&15)<<11);
+    // The mission clock, the weather's (D-SND-39) [orig: Env_GetTimeOfDayHoursQ16 @0x57d5b0].
+    const int32_t hours=io::bam_add(world.weather.tod_hours_q16(),(entity.handle.packed&15)<<11);
     const auto region=audio::time_of_day_region(hours/65536.0f);
     const auto &set=traits->regional_loops[region.region];
     if (set.empty()) return;

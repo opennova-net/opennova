@@ -13,6 +13,7 @@
 #include <editor/preview/mission_ground_overlay.h>
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_items.h>
+#include <editor/preview/mission_listen.h>
 #include <editor/preview/mission_options.h>
 #include <editor/preview/mission_poses.h>
 #include <editor/preview/mission_scene.h>
@@ -141,6 +142,16 @@ public:
 	// What its device says it drew of the layers it reports (DI-31: the foliage and the lights), as last
 	// reported (null before any): the body's `drawn`.
 	const io::JsonValue &drawn() const { return drawn_; }
+	// What the mission sounds like at its camera while its options listen (DI-36, preview/mission_listen): the sources,
+	// the channels the device plays, the script's weather; closed while they do not.
+	const MissionListen &listen() const { return listen_; }
+	// The one-shots its Listen heard since the last call (the weather's thunder, the script's sounds), each planned as
+	// the game plays it with its member picked through `selector`, numbered from `seq`: what the session's clip sounds
+	// hand the Shell (session/clip_sounds). None while it does not listen.
+	std::vector<ClipSoundFired> fire_listen_sounds(const AssetScan *scan, audio::SoundSelector &selector, uint64_t &seq);
+	// The hour the picture shows: the options' time, else the mission's start time [orig: Game_StartMission @ 0x525371
+	// widens the header's Q8.8 start hour into the clock].
+	double hours() const;
 	// How far from its anchor the primary's handles stand, metres: a share of the camera's distance,
 	// so they keep their size on the picture.
 	float handle_reach() const { return camera_.distance * 0.08f; }
@@ -246,6 +257,9 @@ private:
 	// The items' effects followed over the scene and played to the clock while the options show them (DI-31),
 	// closed while they do not.
 	void follow_effects_(const SessionView &view, const PreviewClock &clock);
+	// The Listen followed over the scene and the document and played to the clock at the camera's eye while the
+	// options listen (DI-36), closed while they do not.
+	void follow_listen_(const SessionView &view, const Document *document, const PreviewClock &clock);
 	// The mission document a planner works over: the one at its path while the picture is current;
 	// null, with why, otherwise.
 	const Document *planned_(const ViewportContext &context, std::string &error) const;
@@ -295,6 +309,7 @@ private:
 	uint64_t bounds_files_ = 0; // and the asset source's
 	MissionPoses poses_;
 	MissionEffects effects_;
+	MissionListen listen_;
 	io::JsonValue drawn_;
 	uint64_t stood_serial_ = 0; // the scene's serial the people were last stood over
 	int stood_reads_ = -1; // the ground's reads then

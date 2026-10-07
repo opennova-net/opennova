@@ -452,6 +452,51 @@ void test_debug_scrub_is_exact_while_the_wac_tod_truncates() {
 	CHECK(ws.tod_hhmm() > 2206.9999 && ws.tod_hhmm() < 2207.0001);
 }
 
+// The rain's two loops beside a body (the local player's, the editor's listener, DI-36): none while the rain
+// stands at 0 or falls as snow; LPNV_RAIN_L 2 m east and LPNV_RAIN_R 2 m west at the eye's height on lanes 1 and 2,
+// lifetime 20, the rain current the volume word, scaled by a building's light transfer when the first blink hit names
+// one [orig: Entity_UpdateInfantryPlayerBody @ 0x4b4747..0x4b490e].
+void test_rain_ambient_emitters_beside_the_body() {
+	w::WeatherState ws;
+	w::RainAmbientBody body;
+	body.pos = w::Vec3{100.0f, -20.0f, 3.0f};
+	body.eye_offset_z = 0x18000; // 1.5 m
+	body.source_spawn_id = 9;
+	body.bms_id = 33;
+	body.emitted_tick = 77;
+	w::SoundEmitterEvent out[2];
+	CHECK(w::rain_ambient_emitters(ws, body, out) == 0); // no rain
+	ws.core.scalar_channels.rain_pct_fp = 0x8000;
+	ws.precipitation_kind = static_cast<uint32_t>(w::PrecipitationKind::Snow);
+	CHECK(w::rain_ambient_emitters(ws, body, out) == 0); // snow plays no rain
+	ws.precipitation_kind = static_cast<uint32_t>(w::PrecipitationKind::Rain);
+	CHECK(w::rain_ambient_emitters(ws, body, out) == 2);
+	CHECK(out[0].set_name == "LPNV_RAIN_L" && out[0].lane == 1 && out[0].pos.x == 102.0f);
+	CHECK(out[1].set_name == "LPNV_RAIN_R" && out[1].lane == 2 && out[1].pos.x == 98.0f);
+	for (const w::SoundEmitterEvent &ev : out) {
+		CHECK(ev.pos.y == -20.0f && ev.pos.z == 4.5f);
+		CHECK(ev.lifetime_ticks == 20 && ev.pitch_q16 == 0x10000 && ev.volume_q8_8 == 0x8000);
+		CHECK(ev.source_spawn_id == 9 && ev.source_bms_id == 33 && ev.emitted_tick == 77);
+	}
+	body.lit = true;
+	body.light_transfer = 0.0f; // a dark building halves it
+	CHECK(w::rain_ambient_emitters(ws, body, out) == 2 && out[0].volume_q8_8 == 0x4000);
+}
+
+// The thunder each sequencer's epoch raises: A at 1 m centred, B at 10 m from behind [orig: @ 0x57ecfb / @ 0x57edc4].
+void test_weather_thunder_sounds() {
+	w::WeatherTickEvents events;
+	w::WeatherSoundEvent out[2];
+	CHECK(w::weather_thunder_sounds(events, out) == 0);
+	events.thunder_a = true;
+	events.thunder_b = true;
+	CHECK(w::weather_thunder_sounds(events, out) == 2);
+	CHECK(out[0].distance_q16 == 0x10000 && out[0].bearing == 0);
+	CHECK(out[1].distance_q16 == 0xA0000 && out[1].bearing == 128);
+	events.thunder_a = false;
+	CHECK(w::weather_thunder_sounds(events, out) == 1 && out[0].distance_q16 == 0xA0000);
+}
+
 } // namespace
 
 int main() {
@@ -472,6 +517,8 @@ int main() {
 	test_wire_sample_writes_targets_only();
 	test_night_phase_follows_the_clock();
 	test_debug_scrub_is_exact_while_the_wac_tod_truncates();
+	test_rain_ambient_emitters_beside_the_body();
+	test_weather_thunder_sounds();
 	std::printf(failures ? "WEATHER STATE TEST FAILED (%d)\n" : "weather state test passed\n",
 	            failures);
 	return failures ? 1 : 0;

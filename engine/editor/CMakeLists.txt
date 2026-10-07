@@ -204,6 +204,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_handle_edit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_hint.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_items.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_listen.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_label_picks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_options.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_overlay.cpp
@@ -211,6 +212,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_place.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_poses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_scene.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_script_run.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_viewport_shots.cpp
@@ -337,6 +339,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/workspace_parts.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/sound_play.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/clip_sounds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/sounds_playing.cpp
     # session/view — the view the windows draw, an aggregate of sub-views (S13 V4: the project,
     # the documents, the findings, the activity, the dialogs, the workspace's own, the navigation
     # history's places), the events a request posts, and the findings by file and record

@@ -31,6 +31,7 @@
 #include <editor/session/view/session_view.h>
 #include <formats/env/env.h>
 #include <formats/env/env_weather.h>
+#include <formats/env/tod_clock.h>
 #include <formats/mission/bms.h>
 #include <runtime/terrain_query/height_field.h>
 
@@ -358,6 +359,7 @@ ViewportAction MissionViewport::stop_(MissionViewStatus reason) {
 	scene_.clear();
 	poses_.clear();
 	effects_.close();
+	listen_.close();
 	drawn_ = JsonValue();
 	missing_.clear();
 	ground_ = false;
@@ -374,6 +376,35 @@ void MissionViewport::follow_effects_(const SessionView &view, const PreviewCloc
 	// The Shoot tool's impacts in the same scene (DI-23).
 	effects_.set_shot_spawns(shot_spawns_());
 	effects_.play_to(clock.ticks());
+}
+
+double MissionViewport::hours() const {
+	if (options_.time >= 0.0) return options_.time;
+	return double(env::tod_start_fixed24(scene_.header().start_time)) / double(env::kTodFixed24OneHour);
+}
+
+void MissionViewport::follow_listen_(const SessionView &view, const Document *document, const PreviewClock &clock) {
+	const auto *mission = dynamic_cast<const MissionDocument *>(document);
+	if (!options_.listen.on || !mission) {
+		listen_.close();
+		return;
+	}
+	// The mission's script is its file's stem's (<stem>.wac, as Play's game compiles it).
+	std::string stem = path();
+	const size_t slash = stem.find_last_of("/\\");
+	if (slash != std::string::npos) stem = stem.substr(slash + 1);
+	const size_t dot = stem.find_last_of('.');
+	if (dot != std::string::npos) stem = stem.substr(0, dot);
+	listen_.refresh(view, scene_, *mission, stem);
+	listen_.play_to(clock.ticks(), camera_.eye(), hours());
+}
+
+std::vector<ClipSoundFired> MissionViewport::fire_listen_sounds(const AssetScan *scan, audio::SoundSelector &selector,
+		uint64_t &seq) {
+	if (!options_.listen.on || !listen_.open()) return {};
+	std::vector<ClipSoundFired> fired = listen_.fire_sounds(scan, selector, seq, options_.listen.volume);
+	for (ClipSoundFired &sound : fired) sound.path = path();
+	return fired;
 }
 
 ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock &clock) {
@@ -404,6 +435,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		shown(*document);
 		follow_shots_(input, *document, clock);
 		follow_effects_(view, clock);
+		follow_listen_(view, document, clock);
 		if (!framed_) {
 			// The one change its follow derives: the camera on the entities, looking north and down.
 			framed_ = true;
@@ -435,6 +467,8 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	// The items' effects where the scene, a catalog or a model moved, played to the clock (DI-31): the device
 	// draws the scene each frame as it stands, no Update asked.
 	follow_effects_(view, clock);
+	// What the mission sounds like at the camera (DI-36): the device plays the channels as they stand each frame.
+	follow_listen_(view, document, clock);
 	// A file the device read moved: the picture made again from the files, over the scene as it is.
 	if (picture_.follow(key, false, files, generation) == PreviewFollow::Found::Files) {
 		fog_reach_ = mission_fog_reach(files, scene_.header());
@@ -491,6 +525,8 @@ void MissionViewport::apply_(const io::JsonValue &json, PreviewClock &clock) {
 		drawn.turn = options_.turn;
 		drawn.palette = options_.palette;
 		drawn.ammo = options_.ammo;
+		// The Listen is played, not drawn: the device reads it each frame.
+		drawn.listen = options_.listen;
 		if (drawn != options_) options_moved_ = true;
 		options_ = options;
 	}
@@ -1278,6 +1314,8 @@ io::JsonValue MissionViewport::body_json(const ViewportInput &input) const {
 	// The items' effects as the start attaches them (DI-31; null while the layer is off), and what the device
 	// last said it drew of the foliage and the lights.
 	body.set("effects", options_.effects ? effects_.to_json() : JsonValue::make_null());
+	// What the mission sounds like at the camera (DI-36; null while the options do not listen).
+	body.set("listen", options_.listen.on && listen_.open() ? listen_.to_json(options_.listen) : JsonValue::make_null());
 	body.set("drawn", drawn_);
 	// The Shoot tool's run (DI-23): its shots and what they did, the effects it spawned, what was heard.
 	JsonValue shots = shots_.to_json();
@@ -1343,6 +1381,8 @@ io::JsonValue MissionViewport::items_json(const ViewportInput &input) const {
 				effect.set("alive", json_number(double(effects_.alive(entity.row))));
 				item.set("effect", std::move(effect));
 			}
+			// What it sounds like at the camera, an ambient source's (DI-36, while the options listen).
+			if (options_.listen.on && listen_.source(entity.row)) item.set("sound", listen_.source_json(entity.row));
 			// What the game grounds it on, as the mission's ground check last found it (DI-28).
 			if (ground_check)
 				if (const MissionGroundVerdict *verdict = ground_check->verdict(document->path(), entity.row))

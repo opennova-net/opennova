@@ -231,13 +231,23 @@ void AmbientMixer::advance_seconds(float dt) {
 
 // [orig: Entity_UpdateEnvSoundEmitter @ 0x4a8080] — no internal rate gate; the
 // caller (the staggered walk) defines the cadence.
-void AmbientMixer::eval_marker_tick(int32_t marker_index) {
-    Marker &m = markers_[static_cast<size_t>(marker_index)];
+TimeOfDayRegion AmbientMixer::marker_region(int32_t marker_index) const {
+    if (marker_index < 0 || static_cast<size_t>(marker_index) >= markers_.size()) {
+        TimeOfDayRegion none;
+        none.blend = 1.0f;
+        return none;
+    }
+    const Marker &m = markers_[static_cast<size_t>(marker_index)];
     // Per-marker clock stagger nibble de-syncs region flips
     // [orig: @ 0x408158 (poolHandle & 0xF) << 11 Q16 hours].
     const float stagger_h =
             static_cast<float>((m.stagger_slot & 0xF) << 11) / 65536.0f;
-    const TimeOfDayRegion tod = time_of_day_region(tod_hours_ + stagger_h);
+    return time_of_day_region(tod_hours_ + stagger_h);
+}
+
+void AmbientMixer::eval_marker_tick(int32_t marker_index) {
+    Marker &m = markers_[static_cast<size_t>(marker_index)];
+    const TimeOfDayRegion tod = marker_region(marker_index);
     float blend = tod.blend;
     // Neighbouring regions resolving the SAME set keep full volume through the
     // crossfade (null == null included) [orig: @ 0x4a819d resolved-pointer compare].
@@ -388,17 +398,22 @@ void AmbientMixer::register_emitter(uint64_t source_spawn_id, int32_t lane,
                                     int32_t lifetime_ticks, int32_t pitch_q16,
                                     int32_t volume_q8_8,
                                     std::vector<LayerDesc> layers) {
-    // Position is entity-owned, not lane-owned. An unrefreshed lane remains
-    // spatially attached while its keep-alive naturally expires; this update
-    // deliberately leaves lifetime/refreshed_tick untouched.
-    update_emitter_source(source_spawn_id, pos, source_bms_id);
-
     // [orig: SoundEmitter_RegisterSetLayers @ 0x528340] — either zero field
     // routes to SoundEmitter_ClearByEntityAndSlot for this source/lane only.
+    // The clear carries the source's pose to its other live lanes (the port's
+    // source anchor, which the source-only rows also drive: an unrefreshed
+    // lane stays with its entity while its keep-alive expires; this update
+    // deliberately leaves lifetime/refreshed_tick untouched).
     if (pitch_q16 == 0 || volume_q8_8 == 0) {
+        update_emitter_source(source_spawn_id, pos, source_bms_id);
         clear_dynamic_emitter(source_spawn_id, lane);
         return;
     }
+    // A registration places its own lane alone: retail copies the position
+    // into the slots of this (entity, slot type) [orig: @ 0x5283fe..0x528414]
+    // and the mix reads each slot's own copy [orig: SoundEmitter_UpdateAndMixTop8
+    // @ 0x52858c..0x5285c6], so two lanes of one entity at two places (the
+    // rain's loops, two metres either side of the player) keep theirs (D-SND-38).
 
     const int32_t emitter_index =
             find_or_alloc_dynamic_emitter(source_spawn_id, lane);

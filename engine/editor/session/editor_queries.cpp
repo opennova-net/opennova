@@ -52,6 +52,7 @@
 #include <editor/session/script_assist.h>
 #include <editor/session/session_core.h>
 #include <editor/session/session_json.h>
+#include <editor/session/sounds_playing.h>
 #include <editor/session/texture_budget_list.h>
 #include <editor/session/texture_import_state.h>
 #include <editor/session/texture_use_index.h>
@@ -1532,6 +1533,11 @@ JsonValue answer_environment_uses(const QueryContext &context, const QueryArgs &
 	return environment_uses_json(environment_uses(view, path));
 }
 
+// What the editor plays now (DI-36): the preview play, the previews' last sounds, each listening mission view.
+JsonValue answer_sounds_playing(const QueryContext &context, const QueryArgs &, std::string &) {
+	return sounds_playing_json(context.core);
+}
+
 // --- the table -----------------------------------------------------------------------------------
 
 // A row built up column by column, as the request table's are.
@@ -1999,6 +2005,15 @@ constexpr EditorQueryRow kRows[] = {
 			"the terrain reads), the overrides its header sets over the environment (field: the header's field, "
 			"words), start_time (8.8 hours) and minutes_per_day with the clock in words, and water: from (mission, "
 			"terrain, environment, none: the game's ladder), height in metres and words.")
+			.row,
+	Query(K::SoundsPlaying, "sounds_playing", answer_sounds_playing, concern_set({ C::Viewports, C::Workspace }),
+			"What the editor plays now, in one answer (the deep-integration plan's DI-36): sound, the workspace's one "
+			"preview play (play_sound's: path, state, set, bank, words, voices); clip_sounds, the last 32 sounds the "
+			"previews fired for the Shell's clip voices, oldest first (a clip's events, a death, a weapon's actions, a "
+			"listening mission's thunder and its script's and items' sounds: seq, path, tick, set, bank, state, words, "
+			"voices, action); and listening, each mission view whose Listen is on: path and listen (what each of the "
+			"game's channels plays: source, set, bank, wave, path, volume, pitch, at, distance; the sources by what "
+			"they do; rain, overcast, script, sounds_fired), as the mission viewport's body carries it.")
 			.row,
 };
 
