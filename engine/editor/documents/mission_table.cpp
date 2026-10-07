@@ -215,6 +215,31 @@ const FieldLabel *label_of(MissionRecord record, const char *key) {
 	return nullptr;
 }
 
+// A choice of a field in a modder's words, where a row gives them: its label and what the game does
+// with it, cited (the tooltip of its box). The others show as their name.
+struct ChoiceWords {
+	MissionRecord record;
+	const char *key;
+	const char *name;
+	const char *label;
+	const char *meaning;
+};
+constexpr ChoiceWords kChoiceWords[] = {
+	// The spawn sets the entity's flag 0x1000000, which the terrain's static shadow pass reads
+	// (render-lighting-re.md "Static sector/model sun shadows"); the render slot never does.
+	{MissionRecord::Entity, "ai_flags", "NoShadow", "No shadow",
+	 "The game draws no sun shadow of this placement on the terrain: the terrain's static shadow pass "
+	 "skips it, whatever its item (the item's own NoShadow skips every placement of it). A person's or "
+	 "a DynamicShadow item's moving shadow still draws, and its own lighting is unchanged. "
+	 "[orig: Entity_SpawnFromBMSRecord @ 0x40ED2E; Terrain_CollectAndRenderTileModels @ 0x60D42F]"},
+};
+
+const ChoiceWords *choice_words_of(MissionRecord record, const char *key, const char *name) {
+	for (const ChoiceWords &row : kChoiceWords)
+		if (row.record == record && same_text(row.key, key) && same_text(row.name, name)) return &row;
+	return nullptr;
+}
+
 // A key in words: "win_conditions[2]" is "Win conditions 3", "lfp_group" "Lfp group".
 std::string worded(const char *key) {
 	std::string out;
@@ -468,8 +493,14 @@ LabelledField labelled(const KindRow &kind, const MissionField &field) {
 		break;
 	default: break;
 	}
-	for (size_t i = 0; i < field.choice_count; ++i)
-		entry.choices.push_back({field.choices[i].name, field.choices[i].value, ""});
+	for (size_t i = 0; i < field.choice_count; ++i) {
+		FieldChoice choice{field.choices[i].name, field.choices[i].value, ""};
+		if (const ChoiceWords *words = choice_words_of(field.record, field.key, field.choices[i].name)) {
+			choice.label = words->label;
+			choice.description = words->meaning;
+		}
+		entry.choices.push_back(std::move(choice));
+	}
 	entry.flags = field.flags;
 	entry.open_choices = field.open;
 	entry.read_only = !field.set;
