@@ -3,6 +3,7 @@
 #include <iterator>
 #include <utility>
 
+#include <editor/documents/config_overrun.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/line_ends.h>
 #include <editor/model/diagnostic.h>
@@ -82,6 +83,9 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 			entry.findings = type->validate_file(document);
 		// The line-ends rule, one for every kind whose game reader ends a line at CR LF alone.
 		for (Diagnostic &d : line_end_findings(document, input.project.target_game))
+			entry.findings.push_back(std::move(d));
+		// The ConfigFile pool rule, one for every kind the ConfigFile text reader reads.
+		for (Diagnostic &d : config_overrun_findings(document))
 			entry.findings.push_back(std::move(d));
 		// Each finding on a record keyed on the record as itself (the game's own data's fold), and named in
 		// its type's own words, which a closed file's row reads (the plain-words lane).
