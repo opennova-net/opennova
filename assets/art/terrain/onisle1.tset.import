@@ -4,7 +4,8 @@
     "onisle1_heightmap.png",
     "onisle1_colormap.png",
     "onisle1_detail.png",
-    "onisle1_surface.png"
+    "onisle1_surface.png",
+    "onisle1_foliage.png"
   ],
   "options": {
     "layout": "island",
@@ -19,9 +20,10 @@
     "onisle1_d1.tga",
     "onisle1.til",
     "onisle1_m.pcx",
+    "onisle1_f.pcx",
     "onisle1.trn"
   ],
   "schema_version": 1,
-  "source_hash": "a8f8d3d2ffaf867f",
+  "source_hash": "5015552bbba7fab5",
   "version": 1
 }
