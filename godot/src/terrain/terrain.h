@@ -261,6 +261,15 @@ public:
 	}
 	void set_static_terrain_shadow_enabled(bool p_enabled);
 	bool is_static_terrain_shadow_enabled() const;
+	// Whether a caster's change composes again the pages its static shadow
+	// touched and touches: on in the editor's mission device, whose picture
+	// shows the mission as a load composes it (a NoShadow set, an entity moved,
+	// removed or brought back); off in the game, which keeps a composed page as
+	// retail does (TerrainStaticShadowPlanner::set_reports_caster_changes).
+	// C++ only.
+	void set_static_shadow_follows_casters(bool p_on) {
+		static_shadow_rasterizer.set_reports_caster_changes(p_on);
+	}
 	void set_tile_cache_capture_diagnostics(bool p_enabled);
 	void set_suppressed_static_shadow_bms_ids(
 			const PackedInt32Array &p_bms_ids);

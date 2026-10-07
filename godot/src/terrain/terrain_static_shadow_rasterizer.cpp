@@ -354,6 +354,15 @@ bool TerrainStaticShadowRasterizer::is_enabled() const noexcept {
 	return impl_->enabled;
 }
 
+void TerrainStaticShadowRasterizer::set_reports_caster_changes(bool p_on) {
+	impl_->planner.set_reports_caster_changes(p_on);
+}
+
+std::vector<opennova::terrain::TerrainStaticShadowReach>
+TerrainStaticShadowRasterizer::take_changed_reaches() {
+	return impl_->planner.take_changed_reaches();
+}
+
 void TerrainStaticShadowRasterizer::set_suppressed_bms_ids(
 		const PackedInt32Array &p_bms_ids) {
 	// The planner canonicalizes (sorts + dedups); compare canonically so an

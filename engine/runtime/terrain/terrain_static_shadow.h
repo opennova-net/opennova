@@ -80,6 +80,30 @@ struct TerrainStaticShadowCandidate {
 	uint64_t transform_revision = 0;
 };
 
+// A mission-plane rectangle of terrain in 16.16 (x east, y north = Godot -z),
+// inclusive: the pages that overlap it.
+struct TerrainStaticShadowReach {
+	int32_t min_x = 0;
+	int32_t min_y = 0;
+	int32_t max_x = 0;
+	int32_t max_y = 0;
+
+	bool operator==(const TerrainStaticShadowReach &other) const noexcept {
+		return min_x == other.min_x && min_y == other.min_y &&
+				max_x == other.max_x && max_y == other.max_y;
+	}
+};
+
+// Every page a caster's static shadow can land in, whatever the sun. The tile
+// test admits a caster whose sphere overlaps the tile grown toward the light by
+// t * r, t = l * 0.5 / l_vertical with the vertical clamped to 0x4000, so for a
+// unit light |t| <= 2 and no page farther than 3r from the caster's position
+// on either axis takes its silhouette [orig: Terrain_CollectAndRenderTileModels
+// @0x60D250: vertical clamp @0x60d315..0x60d32c, slope @0x60d35d..0x60d386,
+// extension @0x60d47c..0x60d490, compares @0x60d500..0x60d54f].
+TerrainStaticShadowReach terrain_static_shadow_caster_reach(
+		const TerrainStaticShadowCandidate &candidate) noexcept;
+
 struct TerrainStaticShadowLightDirection {
 	float x = 0.0f;
 	float y = 1.0f;
@@ -139,6 +163,10 @@ public:
 
 	std::size_t candidate_count() const noexcept { return candidate_count_; }
 	std::size_t admitted_count() const noexcept { return admitted_.size(); }
+	// The casters the admission keeps, in collector order.
+	const std::vector<TerrainStaticShadowCandidate> &admitted() const noexcept {
+		return admitted_;
+	}
 
 	// Invalid page levels return an empty job. A valid result is device-neutral:
 	// one ordered reference per selected-LOD ROBJ, with no assumed RT format,
