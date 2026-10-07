@@ -1187,6 +1187,15 @@ gesture), writing the fewest POSITION edges that make the game's own layout land
 it was dropped; a drag of any selected window moves every selected one.
 _Avoid_: play (a running game), render check (the headless validator's notes)
 
+**Try mode**:
+The menu preview behaving as the game's menu (ADR 0046 DI-35), against Edit, where a click selects the
+window under it: its windows' clicks and the keys run the menu's runtime (its Actions, the game's
+Commands by name, the screen history across menus), from the screen the preview shows. What it
+changes is a **sandbox** (in memory until a Reset; never the player's settings nor a project file),
+and what would leave the menu (a mission started, a quit, a game joined) is an **outcome**, said
+and not done.
+_Avoid_: play mode (Play runs the game), simulate, run (the editor's Play)
+
 **Model preview**:
 The model's viewport in the Preview window: the editor's render of the previewed model (the last
 model, clip or animation table document made active) through the runtime's own object
