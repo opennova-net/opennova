@@ -889,6 +889,83 @@ func test_a_window_s_sounds_reach_the_shell() -> void:
 	assert_eq(String((muted.back() as Dictionary).get("state", "")), "muted", str(muted.back()))
 
 
+## DI-35: Try mode through the device. A menu whose GO jumps to another menu's NEXT (whose BACK, on Esc, comes
+## back) and whose CHECK is a check box: Try on draws its screen through the runtime's own driver; a click of GO
+## (set_viewport click) configures the other menu's screen on the device (a build), Esc brings STARTUP back; a
+## click of CHECK checks it in the sandbox, the device taking the state again with no build; Try off is the
+## editor's picture again.
+func test_try_mode_runs_the_game_s_menu_on_the_device() -> void:
+	if _app == null:
+		return
+	_new_project("Try Game")
+	assert_eq(_seam.create_missing_files(), 0)
+	var root: String = _seam.get_project_root()
+	var position := "<POSITION><LEFT>%d</LEFT><TOP>%d</TOP><RIGHT>%d</RIGHT><BOTTOM>%d</BOTTOM></POSITION>"
+	var main_window := "<WINDOW type=\"window\" name=\"MAIN\">" + position % [0, 0, 800, 600]
+	var first := ("<SCREEN><NAME>STARTUP</NAME>" + main_window
+			+ "<WINDOW type=\"button\" name=\"GO\"><ACTION type=\"screen\" file=\"trynext.mnu\">NEXT</ACTION>"
+			+ position % [100, 100, 300, 140] + "</WINDOW>"
+			+ "<WINDOW type=\"checkbox\" name=\"CHECK\">" + position % [100, 200, 300, 240] + "</WINDOW>"
+			+ "</WINDOW></SCREEN>")
+	var second := ("<SCREEN><NAME>NEXT</NAME>" + main_window
+			+ "<WINDOW type=\"button\" name=\"BACK\"><HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY><ACTION type=\"pop_screen\"></ACTION>"
+			+ position % [100, 500, 300, 540] + "</WINDOW>"
+			+ "<WINDOW type=\"button\" name=\"MORE\">" + position % [400, 500, 600, 540] + "</WINDOW>"
+			+ "</WINDOW></SCREEN>")
+	_write(root.path_join("trymain.mnu"), first.to_utf8_buffer())
+	_write(root.path_join("trynext.mnu"), second.to_utf8_buffer())
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	assert_true(_seam.open_document("trymain.mnu"))
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	assert_false(bool(state.get("body", {}).get("try", {}).get("on", true)), "Try is off at first")
+	assert_true(_refusal({"click": {"at": [200, 120]}}).contains("Try is off"), "a click is the editor's while it is off")
+	assert_true(_change({"try": {"on": true}}))
+	state = await _await_ready()
+	var tried: Dictionary = state.get("body", {}).get("try", {})
+	assert_eq(String(tried.get("screen", "")), "STARTUP", str(tried))
+	var frame: Object = _device_node(state, "MenuFrame")
+	assert_not_null(frame, "the device's frame")
+	if frame == null:
+		return
+	var builds := int(state.get("builds", 0))
+	# GO: the other menu's screen, configured on the device.
+	assert_true(_change({"click": {"at": [200, 120]}}))
+	for _frame in 60:
+		if int(_state().get("builds", 0)) > builds:
+			break
+		await get_tree().process_frame
+	state = _state()
+	tried = state.get("body", {}).get("try", {})
+	assert_eq("%s:%s" % [tried.get("file", ""), tried.get("screen", "")], "trynext.mnu:NEXT", str(tried))
+	assert_gt(int(state.get("builds", 0)), builds, "another screen: the device configures it")
+	await get_tree().process_frame
+	frame = _device_node(state, "MenuFrame")
+	assert_eq(frame.widget_count(), 3, "the device draws NEXT: MAIN, BACK, MORE")
+	assert_eq(String(frame.widget_name(2)), "MORE")
+	# Esc: BACK's hotkey, back through the history.
+	assert_true(_change({"key": {"key": "VK_ESCAPE"}}))
+	for _frame in 60:
+		if String(_state().get("body", {}).get("try", {}).get("screen", "")) == "STARTUP" and frame.widget_count() == 3 \
+				and String(frame.widget_name(2)) == "CHECK":
+			break
+		await get_tree().process_frame
+	assert_eq(String(_state().get("body", {}).get("try", {}).get("screen", "")), "STARTUP")
+	assert_eq(String(frame.widget_name(2)), "CHECK", "the device draws STARTUP again")
+	# CHECK: checked in the sandbox, the state taken again on the device with no build.
+	builds = int(_state().get("builds", 0))
+	assert_true(_change({"click": {"at": [200, 220]}}))
+	await get_tree().process_frame
+	assert_true(bool(_item(_state(), "CHECK").get("checked", false)), str(_item(_state(), "CHECK")))
+	assert_eq(int(_state().get("builds", -1)), builds, "a state change: no build")
+	# Off: the editor's picture.
+	assert_true(_change({"try": {"on": false}}))
+	state = await _await_ready()
+	assert_false(bool(state.get("body", {}).get("try", {}).get("on", true)))
+	assert_false(bool(_item(state, "CHECK").get("checked", false)), "the edited screen holds no Try state")
+
+
 # --- the model -------------------------------------------------------------------------------------
 
 func test_model_draws_through_the_device() -> void:
