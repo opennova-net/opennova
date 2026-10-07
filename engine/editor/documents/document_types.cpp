@@ -24,6 +24,7 @@
 #include <editor/documents/strings_document.h>
 #include <editor/documents/text_types.h>
 #include <editor/documents/wave_check.h>
+#include <editor/documents/terrain_document.h>
 #include <editor/documents/texture_document.h>
 // The menu type's project check, by its hook alone: the render check runs the preview's headless
 // screen compile (MenuScreenRender), so it sits with it in preview/ (ADR 0046 S13 V9).
@@ -52,6 +53,7 @@ std::unique_ptr<DocumentBase> make_animation_map() {
 std::unique_ptr<DocumentBase> make_sound_bank() { return std::make_unique<SoundBankDocument>(); }
 std::unique_ptr<DocumentBase> make_sound_profiles() { return std::make_unique<SoundProfileDocument>(); }
 std::unique_ptr<DocumentBase> make_environment() { return std::make_unique<EnvironmentDocument>(); }
+std::unique_ptr<DocumentBase> make_terrain() { return std::make_unique<TerrainDocument>(); }
 
 constexpr DocumentType kTypes[] = {
 	// The catalogs: a weapon, an ammo, a mounted gun by the names the player sees (the plain-words lane).
@@ -129,6 +131,10 @@ constexpr DocumentType kTypes[] = {
 	// its picture the HUD viewport's, its names the graph's through the engine's own parser.
 	{ DocumentTypeId::HudLayout, "hud_layout", make_hud_layout_document, validate_hud_layout_file, text_fields,
 			hud_layout_finding_codes },
+	// The terrain (DI-30): a .trn's keys, grid rows and foliage definitions over TrnConfig, its references its
+	// fields' (each map by its role's loader, the height data, the tile placement, the definitions' models).
+	{ DocumentTypeId::Terrain, "terrain", make_terrain, validate_terrain_file, TerrainDocument::schema,
+			terrain_finding_codes },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its
