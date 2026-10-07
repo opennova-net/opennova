@@ -4879,6 +4879,16 @@ target_link_libraries(editor_mission_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_mission_viewport COMMAND editor_mission_viewport_test)
 
+# Place a model no item draws yet (DI-12, editor/preview/model_placement, editor/documents/model_item) over
+# a real session and the synth models: the item a model is drawn as from its parts; a model no item draws
+# dropped on a mission making its item in items.def (the next free id, its TYPE, its graphic), then placed,
+# an undo step in each file; the refusals; a model's Place in mission arming the mission's Place tool. Mixed:
+# the retail row holds the rule to every model the shipped ITEMS.DEF draws (OPENNOVA_JO_DIR).
+add_executable(editor_place_model_test editor/place_model_test.cpp)
+target_link_libraries(editor_place_model_test PRIVATE opennova_editor)
+target_include_directories(editor_place_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_place_model COMMAND editor_place_model_test)
+
 # A mission's people posed as the game spawns them (DI-38, editor/preview/mission_poses) over a real
 # session: each organic's spawn pose held to the world's own organic init over the same clips (pool
 # order, the shared ring heads), why one is not posed, the route and Guarding read through an aidata
