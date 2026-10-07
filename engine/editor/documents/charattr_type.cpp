@@ -1,10 +1,12 @@
 #include <editor/documents/charattr_type.h>
 
+#include <algorithm>
 #include <iterator>
 #include <string>
 #include <utility>
 
 #include <base/io/strutil.h>
+#include <editor/documents/config_overrun.h>
 #include <editor/documents/text_types.h>
 #include <formats/configfile/config_file.h>
 #include <formats/def/reserved_items.h>
@@ -136,6 +138,56 @@ std::vector<Diagnostic> validate_charattr_file(const DocumentBase &document) {
 		}
 	}
 	return findings;
+}
+
+void charattr_idle_lines(const TextDocument &document, std::vector<size_t> &line_starts) {
+	line_starts.clear();
+	charattr::Table table;
+	charattr::Reading reading;
+	if (!read_charattr_text(document, table, reading)) return;
+	const std::string &text = document.text();
+	// The values the loader read, by where each is written.
+	std::vector<size_t> read_at;
+	for (size_t index = 0; index < reading.classes; ++index) {
+		const charattr::ClassSource &source = reading.sources[index];
+		for (const charattr::ValueSource &value : source.values)
+			if (value.read) read_at.push_back(value.offset);
+		for (const charattr::ValueSource &word : source.attribute_words) read_at.push_back(word.offset);
+	}
+	std::sort(read_at.begin(), read_at.end());
+	// The same table, byte for byte, with those lines commented out.
+	const auto same_without = [&](const std::vector<size_t> &lines) {
+		const std::string commented = config_commented(text, lines);
+		charattr::Table again;
+		charattr::read_table(reinterpret_cast<const uint8_t *>(commented.data()), commented.size(), again);
+		return charattr::same_rows(table, again);
+	};
+	// A class after the first the file lacks is meant to be read (charattr.unread_section says why it is not):
+	// its lines are kept for the author, not offered as idle.
+	std::vector<size_t> meant;
+	for (const charattr::UnreadSection &unread : reading.unread)
+		if (unread.why == charattr::UnreadSection::Why::AfterMissing) meant.push_back(unread.offset);
+	std::vector<size_t> unread, read;
+	const std::vector<configfile::ConfigSection> sections =
+			configfile::parse_config_text(reinterpret_cast<const uint8_t *>(text.data()), text.size());
+	for (const configfile::ConfigSection &section : sections) {
+		if (std::find(meant.begin(), meant.end(), section.offset) != meant.end()) continue;
+		for (const configfile::ConfigEntry &entry : section.entries) {
+			// An entry of no value stops a lookup's walk [orig: effect_get_param_value_0 @ 0x75faa3]: kept.
+			if (entry.values.empty()) continue;
+			const bool any = std::any_of(entry.values.begin(), entry.values.end(), [&](const configfile::ConfigValue &v) {
+				return std::binary_search(read_at.begin(), read_at.end(), v.offset);
+			});
+			(any ? read : unread).push_back(entry.offset);
+		}
+	}
+	if (!same_without(unread)) return;
+	std::vector<size_t> chosen = unread;
+	for (const size_t line : read)
+		if (same_without({ line })) chosen.push_back(line);
+	if (chosen.size() > unread.size() && !same_without(chosen)) chosen = unread;
+	std::sort(chosen.begin(), chosen.end());
+	line_starts = std::move(chosen);
 }
 
 void charattr_references(const TextDocument &document, std::vector<TextReference> &out) {

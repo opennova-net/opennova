@@ -296,6 +296,7 @@ enum class CoreFinding {
 	CreateMissingWrongKind,
 	DocumentBatch,
 	DocumentCollection,
+	DocumentConfigOverrun,
 	DocumentConflict,
 	DocumentCopy,
 	DocumentDecode,

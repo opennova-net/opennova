@@ -87,7 +87,8 @@ enum class ScrForm { Optional, Shader };
 // line's first 1000 characters and skips a line with no word or whose first word starts with '/'
 // [orig: @ 0x53D908..0x53D91E; Terrain_TokenizeConfigLine @ 0x53CB60, the clamp @ 0x53CBBB].
 // ConfigFile: the ConfigFile text reader, where CR LF ends a line and a lone CR or LF does not [orig:
-// ConfigFile_LoadFromFile @ 0x760a10 -> ConfigFile_ParseText @ 0x7608a0]. None: any other kind, among
+// ConfigFile_LoadFromFile @ 0x760a10 -> ConfigFile_ParseText @ 0x7608a0], whose pool of text values the
+// ConfigFile pool rule reads such a kind's files against (documents/config_overrun.h). None: any other kind, among
 // them two whose readers end lines otherwise and whose types say so themselves: a stylesheet's
 // reader, which stops at a line end other than CR LF (style.line_ending), and a script's, which ends
 // a line at a CR (script.line_ending).
