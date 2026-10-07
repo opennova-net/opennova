@@ -181,6 +181,8 @@ constexpr DocumentViewRow kViews[] = {
 	// A dialog bank's dialogs as a tree, each holding its lines; a dialog or a line heads the Inspector with a Play
 	// of it as the game plays it and what the last play said (DI-32, ui/sound_inspector).
 	{DocumentTypeId::DialogBank, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_dialog_bank_inspector},
+	// The character attributes' text in the script device (DI-09's charattr follow-up).
+	{DocumentTypeId::CharAttrs, DocumentViewRole::MainViewport, nullptr, make_script_view},
 };
 
 // One view per DocumentTypeId past None, in its order, each an outline or a view its make makes.

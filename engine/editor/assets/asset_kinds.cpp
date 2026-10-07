@@ -410,7 +410,7 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::CharAttrDefs, "charattr_defs", "Character attributes", ArchiveSlot::Localres)
 	        .file("charattr.def")
 	        .lines(LineReader::ConfigFile) // [orig: CharAttr_LoadFromDef @ 0x412177 -> ConfigFile_LoadFromFile]
-	        .edited_by(DocumentTypeId::Text)
+	        .edited_by(DocumentTypeId::CharAttrs)
 	        .names_files()
 	        .folder("defs")
 	        .about("The characters' attributes.")
