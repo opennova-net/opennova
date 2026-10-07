@@ -1415,6 +1415,11 @@ void SessionCore::read_install_expansions() {
 	};
 	const std::string install = base_game();
 	view_.project.install_expansions = read(install, install_expansion_names_);
+	// The Mods list's records of that folder, which a menu's Try mode lists (D-MNU-31).
+	view_.project.mods_list.clear();
+	if (!install.empty())
+		for (const ExpansionRecord &record : vfs_expansion_records(install))
+			view_.project.mods_list.push_back({ record.directory, record.info.name, record.info.description });
 	const std::string chosen = absolute_install_path(preferences_.values().game_install);
 	std::vector<std::string> chosen_names;
 	view_.project.new_project_expansions =
