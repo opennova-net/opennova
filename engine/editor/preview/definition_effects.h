@@ -39,7 +39,9 @@ bool same_spawns(const std::vector<DefinitionSpawn> &a, const std::vector<Defini
 class DefinitionEffects {
 public:
 	// The spawns `spawns` over `catalog`: the scene opened anew where the spawns or the catalog moved (a jump
-	// at the next play), else kept as it plays. True when it opened anew.
+	// at the next play), else kept as it plays; kept too where `spawns` adds spawns of effects the scene holds
+	// after the same ones (a weapon's shots, DI-22), each new one made at its tick, or at the next play pre-aged
+	// where the clock passed it. True when it opened anew.
 	bool plan(const PreviewEffectCatalog &catalog, uint64_t catalog_serial, std::vector<DefinitionSpawn> spawns);
 	// No scene: nothing plays.
 	void close();
@@ -70,6 +72,7 @@ private:
 	std::vector<particle::EffectClosure> closures_;
 	std::vector<particle::EffectGroupId> groups_;
 	std::vector<particle::EffectSpawnStatus> statuses_;
+	std::vector<bool> made_; // each spawn made since the scene last emptied
 	uint64_t catalog_serial_ = UINT64_MAX;
 	bool played_ = false;
 	int32_t tick_ = 0;
