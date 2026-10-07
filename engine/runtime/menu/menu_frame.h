@@ -382,6 +382,31 @@ MenuFrameNoteBasis menu_frame_note_basis(MenuFrameNoteCode code);
 // "witnessed", "port_policy", "deferred".
 const char *menu_frame_note_basis_token(MenuFrameNoteBasis basis);
 
+// OpenNova's click over the pump's claims: the release edge over the widget the press edge
+// claimed; moving off it before the release cancels, and a press a scrollbar part took never arms
+// one (the part keeps the mouse until the release, like retail's child-BUTTON capture). The game's
+// frame (godot/src/mnu/menu_frame.cpp) and the editor's menu preview (DI-34) take their clicks from
+// it. Retail clicks the widget the pump held down the sample before wherever the press began
+// [orig: CWnd_ProcessMouseEvent @ 0x647b14: the verdict 3 at +0xE8 and the button up], so a press
+// begun on another widget and released over this one clicks it there (D-MNU-30).
+struct MenuClickLatch {
+	int pressed = -1; // the widget the press edge claimed, -1 none
+	bool down = false; // the button as the last sample had it
+	// One sample: the claim (-1 none), the button, and whether a press edge here may arm (false: a
+	// scrollbar part took it). The widget the sample clicks, -1 none.
+	int sample(int claim, bool button_down, bool armable = true) {
+		int clicked = -1;
+		if (button_down && !down && claim >= 0 && armable) {
+			pressed = claim;
+		} else if (!button_down && down) {
+			if (pressed >= 0 && pressed == claim) clicked = pressed;
+			pressed = -1;
+		}
+		down = button_down;
+		return clicked;
+	}
+};
+
 // Deep in-process module: configure() walks the screen once (interning every
 // texture and font name it will reference); compile() emits one frame's draw
 // list in the witnessed walk order. Scale is the 800x600 anamorphic pair
@@ -497,6 +522,16 @@ public:
 	std::string widget_authored_text(int index) const;
 	// Authored-or-runtime effective disabled (the pump's state-1 test).
 	bool widget_disabled(int index, const MenuFrameState &state) const;
+	// The parsed window a document widget compiles (null for a part or out of range): what an
+	// embedder that plays its SOUND rows reads (menu_sound.h).
+	const mnu::Window *widget_window(int index) const;
+	// Whether the pump reaches the widget this sample: shown up its chain, and inside the open popup
+	// while one is open [orig: CWnd_ProcessMouseEvent @ 0x647a21 returns at once on a hidden widget,
+	// its children unpumped; CUIScene_EndFrame @ 0x63e600 pumps the popup alone]; and whether it is
+	// live under the mouse besides: enabled up its chain too [orig: CWnd_IsVisibleInHierarchy
+	// @ 0x646290, the pump's gate @ 0x647a27].
+	bool widget_reached(int index, const MenuFrameState &state) const;
+	bool widget_live(int index, const MenuFrameState &state) const;
 	// The widget's authored edit constraints as menu_edit.h limits (READONLY,
 	// NUMBER + MINVAL/MAXVAL, MAXCHAR). False when the index is out of range.
 	bool widget_edit_limits(int index, EditLimits *out) const;

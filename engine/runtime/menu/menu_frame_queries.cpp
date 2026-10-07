@@ -113,6 +113,36 @@ bool MenuFrameCompiler::widget_disabled(int index,
 	return disabled_(*node.window, state_for(state, index));
 }
 
+const mnu::Window *MenuFrameCompiler::widget_window(int index) const {
+	if (index < 0 || index >= document_nodes_) {
+		return nullptr;
+	}
+	return nodes_[static_cast<size_t>(index)].window;
+}
+
+bool MenuFrameCompiler::widget_reached(int index, const MenuFrameState &state) const {
+	if (index < 0 || index >= document_nodes_ || !widget_shown_(index, state)) {
+		return false;
+	}
+	// While a popup is open the pump serves its subtree alone.
+	const int popup = state.popup_root;
+	return popup < 0 || popup >= document_nodes_ || in_subtree_(index, popup);
+}
+
+bool MenuFrameCompiler::widget_live(int index, const MenuFrameState &state) const {
+	if (!widget_reached(index, state)) {
+		return false;
+	}
+	// Enabled at every level up the chain [orig: CWnd_IsVisibleInHierarchy @ 0x6462a0 tests +0xE4 at
+	// each one].
+	for (int i = index; i >= 0; i = nodes_[static_cast<size_t>(i)].parent) {
+		if (disabled_(*nodes_[static_cast<size_t>(i)].window, state_for(state, i))) {
+			return false;
+		}
+	}
+	return true;
+}
+
 bool MenuFrameCompiler::disabled_(const mnu::Window &w, const MenuWidgetState *ws) {
 	return ws != nullptr && ws->has_disabled ? ws->disabled : w.disabled;
 }

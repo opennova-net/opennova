@@ -298,7 +298,7 @@ bool MenuFrame::configure_screen(const opennova::mnu::Document *p_document,
 	configured_ = false;
 	state_ = opennova::menu::MenuFrameState{};
 	cursor_slot_ = -1;
-	press_claim_ = -1;
+	click_.pressed = -1;
 	++configure_count_;
 	if (p_document == nullptr) {
 		clear_screen();
@@ -316,7 +316,7 @@ void MenuFrame::clear_screen() {
 	configured_ = false;
 	state_ = opennova::menu::MenuFrameState{};
 	cursor_slot_ = -1;
-	press_claim_ = -1;
+	click_.pressed = -1;
 	++configure_count_;
 	assets_.clear(compiler_, texture_store_);
 	files_ = nullptr;
@@ -905,22 +905,12 @@ int MenuFrame::process_mouse(const Vector2 &p_position, bool p_button_down) {
 	state_.cursor_x = p_position.x;
 	state_.cursor_y = p_position.y;
 	cursor_slot_ = claim.cursor;
-	// Activation edges: press lands on the button-down edge over the claim;
-	// a click is the release edge while the SAME widget still owns the claim
-	// (moving off the widget before release cancels — the standard control
-	// contract the Control-tree buttons implemented). A press a scrollbar
-	// part consumed never arms a click — the part keeps the mouse until
-	// release, like retail's child-BUTTON capture.
-	if (p_button_down && !mouse_button_down_ && claim.hovered >= 0 &&
-			claim.scroll_index < 0) {
-		press_claim_ = claim.hovered;
-	} else if (!p_button_down && mouse_button_down_) {
-		if (press_claim_ >= 0 && press_claim_ == claim.hovered) {
-			emit_signal("widget_clicked", press_claim_);
-		}
-		press_claim_ = -1;
+	// The click: the release edge over the widget the press edge claimed
+	// (engine MenuClickLatch; a press a scrollbar part took never arms one).
+	const int clicked = click_.sample(claim.hovered, p_button_down, claim.scroll_index < 0);
+	if (clicked >= 0) {
+		emit_signal("widget_clicked", clicked);
 	}
-	mouse_button_down_ = p_button_down;
 	last_sample_scrolled_ = claim.scroll_index >= 0;
 	if (claim.scroll_value_changed) {
 		emit_signal("scroll_value_changed", claim.scroll_index,
