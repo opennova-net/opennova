@@ -1834,7 +1834,7 @@ JsonValue reference_targets_to_json(const Document &document, const NodeAddress 
 	FieldUse keyed;
 	Value key;
 	if (field.reference == ReferenceKind::None && view.findings.graph &&
-	    keyed_text_reference(*view.findings.graph, field, value, keyed, key)) {
+	    keyed_reference(*view.findings.graph, field, value, keyed, key)) {
 		field = keyed;
 		value = key;
 	}

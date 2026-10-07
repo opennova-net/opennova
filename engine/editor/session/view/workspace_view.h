@@ -60,6 +60,8 @@ struct WorkspaceView {
 		std::string path;
 		uint32_t pitch_q16 = 0x10000;
 		int32_t volume = 255;
+		// When it starts after the play does, milliseconds (a dialog's later lines, DI-32); 0 at once.
+		int32_t start_ms = 0;
 	};
 	struct Sound {
 		std::string path;

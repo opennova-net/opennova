@@ -264,21 +264,36 @@ int test_references() {
 	for (const GraphEdge &e : extracted.edges)
 		TEST_EXPECT(e.needs == (e.field == "dialog_sounds" && e.record.empty() ? "synth_logic.dbf" : ""));
 	TEST_EXPECT(count_edges(extracted, ReferenceKind::DialogBank) == 1);
-	// A record that plays a dialog names the bank itself, which the game needs for it.
+	// A record that plays a dialog names the dialog its number forms, dlg%03i, in the mission's dialog bank (DI-32),
+	// rewritable as that number [orig: Dialog_PlayByIndex @ 0x527ae0]; a dialog of 0 names none.
 	{
 		Diagnostic error;
 		const NodeAddress action = first_child(*document, row_at(*document, MissionKind::Event, 1), MissionKind::Action);
-		TEST_EXPECT(document->apply(edit_of(EditOperation::Set, action, "action_type", int64_t(bms::ActionType::PlayWavList)), error));
+		TEST_EXPECT(document->apply({edit_of(EditOperation::Set, action, "action_type", int64_t(bms::ActionType::PlayWavList)),
+		                             edit_of(EditOperation::Set, action, "param1", int64_t(12))},
+		                            error));
 		Extracted plays;
 		extract_from_document(*document, plays);
-		size_t banks = 0;
+		size_t dialogs = 0;
 		for (const GraphEdge &e : plays.edges)
-			if (e.kind == ReferenceKind::DialogBank && e.address == action) {
-				++banks;
-				TEST_EXPECT(e.value == "synth_logic.dbf" && !e.optional && e.field == "param1" && !e.rewritable);
+			if (e.kind == ReferenceKind::Dialog && e.address == action) {
+				++dialogs;
+				TEST_EXPECT(e.value == "dlg012" && e.scope == "SYNTH_LOGIC.DBF" && e.field == "param1" && e.rewritable &&
+				            e.key_prefix == "dlg" && !e.optional);
 			}
-		TEST_EXPECT(banks == 1 && count_edges(plays, ReferenceKind::DialogBank) == 2);
-		document->undo();
+		TEST_EXPECT(dialogs == 1 && count_edges(plays, ReferenceKind::DialogBank) == 1);
+		// The parameter is picked by the bank's dialogs, its number written.
+		for (const FieldSchema &schema : document->fields(action.kind))
+			if (schema.id == "param1") {
+				const FieldUse use = document->field_on(action, schema);
+				TEST_EXPECT(use.picks == ReferenceKind::Dialog && use.key_prefix && std::string(use.key_prefix) == "dlg" &&
+				            use.scope == "SYNTH_LOGIC.DBF" && use.key_first == 1);
+			}
+		TEST_EXPECT(document->apply(edit_of(EditOperation::Set, action, "param1", int64_t(0)), error));
+		Extracted none;
+		extract_from_document(*document, none);
+		TEST_EXPECT(count_edges(none, ReferenceKind::Dialog) == 0);
+		while (document->can_undo()) document->undo();
 	}
 	// What a parameter is called and whether the game reads it, by its record's type; its own choices.
 	const NodeAddress trigger = first_child(*document, row_at(*document, MissionKind::Event, 0), MissionKind::Trigger);

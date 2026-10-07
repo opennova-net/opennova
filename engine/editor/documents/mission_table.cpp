@@ -106,7 +106,8 @@ constexpr FieldLabel kLabels[] = {
 	{MissionRecord::Header, "designer", "Designer", "", ""},
 	{MissionRecord::Header, "briefing", "Briefing", "", ""},
 	{MissionRecord::Header, "terrain", "Terrain", "terrain", ""},
-	{MissionRecord::Header, "cnv_file", "CNV file", "terrain", ""},
+	// The original editor's cnv_file: the dialog bank's name where it holds one [orig: DialogSystem_Init @0x52760c].
+	{MissionRecord::Header, "cnv_file", "Dialog bank", "terrain", ""},
 	{MissionRecord::Header, "tt_file", "TT file", "terrain", ""},
 	{MissionRecord::Header, "terrain_tile", "Terrain tile set", "", ""},
 	{MissionRecord::Header, "default_str", "Default string", "", ""},
@@ -309,7 +310,6 @@ struct AppliesRow {
 };
 constexpr AppliesRow kApplies[] = {
 	{MissionRecord::Header, "default_str", Applicability::Unverified},
-	{MissionRecord::Header, "cnv_file", Applicability::Unverified},
 	{MissionRecord::Header, "tt_file", Applicability::Unverified},
 	{MissionRecord::Header, "music", Applicability::Unverified},
 	{MissionRecord::Header, "reverb", Applicability::Unverified},

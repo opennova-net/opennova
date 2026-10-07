@@ -658,6 +658,20 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 			if (const std::optional<int> number = strutil::parse_int(new_name))
 				site.after = std::to_string(*number - edge->name_offset);
 		site.target = symbol.file;
+		// A use holding the number its name forms (GraphEdge::key_prefix: a Play dialog's dlg%03i): it takes the
+		// number the new name forms, and a name no number forms is refused there.
+		if (!edge->key_prefix.empty()) {
+			int64_t number = 0;
+			if (!key_number(edge->kind, new_name, edge->key_prefix.c_str(), number)) {
+				plan.refusals.push_back(refusal(CoreFinding::RenameName,
+				                                where + " names " + what + " by the number its name forms (" + edge->key_prefix +
+				                                        " and the number in three digits at least): '" + new_name +
+				                                        "' is no name a number forms.",
+				                                edge->source, edge->field));
+				continue;
+			}
+			site.after = std::to_string(number);
+		}
 		// A use whose lookup takes a second name (its fallback: a script's AMMO_X, then "ammo_X"):
 		// where the new name begins with the prefix that second name puts before the value, the span
 		// takes the rest, the prefix kept once ("ammo_satchel" renamed "ammo_charge" reads
