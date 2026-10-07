@@ -27,6 +27,13 @@ public:
 	};
 	void prepare(MenuRuntime &menu, const controls::BindingSet &bindings);
 	bool is_surface() const { return is_surface_; }
+	// The retail Options policy (options_policy.h) on the surface prepare() found, before any
+	// settings owner seeds its values: every witnessed slider's range, its value at the minimum;
+	// the VIDEO rows pinned to the one renderer path OpenNova ports and locked, GAMMA at its
+	// reference and locked, RESOLUTION's last row locked, the preset buttons disabled; the
+	// controls not serviced yet locked, showing their forced checks (D-MNU-21). Nothing off the
+	// surface.
+	void apply_policy(MenuRuntime &menu) const;
 	int activate(MenuRuntime &menu, controls::BindingSet &bindings, const std::string &name);
 	void arm(MenuRuntime &menu, const controls::BindingSet &bindings, int id, int row);
 	int consume(MenuRuntime &menu, controls::BindingSet &bindings, const RemapInput &event);

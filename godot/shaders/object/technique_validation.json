@@ -8,7 +8,7 @@
     "shader_usage_level": 2,
     "retail_pass_class": "TECHNIQUE_NORMAL",
     "retail_effect_inventory": "godot/shaders/object/retail_effect_inventory.json",
-    "locked_menu_policy": "godot/game/retail_video_quality_policy.gd",
+    "locked_menu_policy": "engine/runtime/menu/options_screen.cpp",
     "excluded": [
       "retail shader-usage levels 0 and 1",
       "the two untyped fixed-function fallbacks selected only when pixel shaders are disabled"
