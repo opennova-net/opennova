@@ -3,6 +3,7 @@
 
 #include <cstring>
 #include <limits>
+#include <vector>
 
 namespace opennova {
 namespace lwf {
@@ -255,6 +256,35 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 
 	r_out.sample_rate = sample_rate;
 	r_out.channels = channels;
+	return true;
+}
+
+bool wav_write_pcm_mono(const uint8_t *data, size_t size, uint32_t rate, uint16_t bits,
+		std::vector<uint8_t> &out, std::string &error) {
+	out.clear();
+	if (bits != 8 && bits != 16) { error = "a wave is written 8 or 16 bits a sample"; return false; }
+	if (size == 0 || (bits == 16 && (size & 1) != 0)) { error = "a wave holds at least one whole sample"; return false; }
+	if (rate == 0) { error = "a wave's rate is above 0"; return false; }
+	if (size > 0xFFFFFFFFu - 64) { error = "the wave is too long for its RIFF size"; return false; }
+	const uint32_t data_size = static_cast<uint32_t>(size);
+	const uint16_t block = static_cast<uint16_t>(bits / 8);
+	const auto tag = [&out](const char *t) { out.insert(out.end(), t, t + 4); };
+	out.reserve(44 + size + (size & 1));
+	tag("RIFF");
+	io::append_u32_le(out, 4 + 24 + 8 + data_size + (data_size & 1));
+	tag("WAVE");
+	tag("fmt ");
+	io::append_u32_le(out, 16);
+	io::append_u16_le(out, 1); // PCM: the tag the loader leaves unread for 8 and 16 bits
+	io::append_u16_le(out, 1); // mono
+	io::append_u32_le(out, rate);
+	io::append_u32_le(out, rate * block);
+	io::append_u16_le(out, block);
+	io::append_u16_le(out, bits);
+	tag("data");
+	io::append_u32_le(out, data_size);
+	out.insert(out.end(), data, data + size);
+	if (data_size & 1) out.push_back(0);
 	return true;
 }
 
