@@ -88,6 +88,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_slots.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/text_types.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/environment_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/terrain_document.cpp
     # the sound lane: a bank's waves and sets, SndProf.def's profiles
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_bank_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_profile_document.cpp
@@ -227,6 +228,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_playback.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/environment_viewport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_collision.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_handle_edit.cpp
@@ -296,6 +298,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_page.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/environment_uses.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_card.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/finding_codes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_controller.cpp
@@ -367,6 +370,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/file_page_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/editor_windows.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/environment_inspector.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/expansion_fields.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/field_widgets.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/files_window.cpp
@@ -408,6 +412,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/definition_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/effect_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/environment_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/hud_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/catalog_inspector_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/ui_kit.cpp

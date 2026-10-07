@@ -40,6 +40,7 @@
 #include <editor/session/catalog_json.h>
 #include <editor/session/document_set.h>
 #include <editor/session/environment_uses.h>
+#include <editor/session/terrain_uses.h>
 #include <editor/session/file_card.h>
 #include <editor/session/file_page.h>
 #include <editor/session/finding_codes.h>
@@ -1518,6 +1519,27 @@ constexpr QueryParam kEnvironmentUsesParams[] = {
 	{ "path", J::String, false, nullptr, "An environment (.env); left out, the active document's file." },
 };
 
+// The missions that run on a terrain and the import it comes from (DI-30): a .trn by its path, else the active
+// document.
+constexpr QueryParam kTerrainUsesParams[] = {
+	{ "path", J::String, false, nullptr, "A terrain (.trn); left out, the active document's file." },
+};
+
+JsonValue answer_terrain_uses(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const SessionView &view = context.core.view();
+	const std::string path = args.text("path").empty() ? view.documents.active : args.text("path");
+	if (path.empty()) {
+		error = "name the terrain with \"path\" (no document is active).";
+		return JsonValue::make_null();
+	}
+	const AssetEntry *entry = view.project.scan ? view.project.scan->named(path) : nullptr;
+	if (entry && entry->kind != AssetKind::Terrain) {
+		error = path + " is not a terrain (.trn).";
+		return JsonValue::make_null();
+	}
+	return terrain_uses_json(terrain_uses(view, path));
+}
+
 JsonValue answer_environment_uses(const QueryContext &context, const QueryArgs &args, std::string &error) {
 	const SessionView &view = context.core.view();
 	const std::string path = args.text("path").empty() ? view.documents.active : args.text("path");
@@ -2005,6 +2027,19 @@ constexpr EditorQueryRow kRows[] = {
 			"the terrain reads), the overrides its header sets over the environment (field: the header's field, "
 			"words), start_time (8.8 hours) and minutes_per_day with the clock in words, and water: from (mission, "
 			"terrain, environment, none: the game's ladder), height in metres and words.")
+			.row,
+	Query(K::TerrainUses, "terrain_uses", answer_terrain_uses, kTerrainUsesParams,
+			concern_set({ C::Files, C::Graph, C::Project, C::Documents, C::ActiveDocument }),
+			"The missions that run on a terrain and the import that makes it (the deep-integration plan's DI-30), "
+			"as its Inspector and its viewport read them: path, found, reading (the project's references not read "
+			"yet), missions, each its file (mission), its logical name without the extension (name, what its "
+			".til is named by), its header's name (title), read, the locator and field Go to opens it at (its "
+			"terrain field), the environment it pairs it with (name, file where the project has it), its tile set "
+			"(\"\" the terrain's own), tiles (the project has <name>.til), start_time (8.8 hours) and "
+			"minutes_per_day; and import, null for a terrain no import makes, else source (the terrain set), "
+			"record, error (why the set or its record does not read), images (key, name as the set writes it, "
+			"file where the project has it), foliage (the set's foliage blocks), options (key, label, value, "
+			"set: the record holds it, words), outputs and reimport (the request that imports it again).")
 			.row,
 	Query(K::SoundsPlaying, "sounds_playing", answer_sounds_playing, concern_set({ C::Viewports, C::Workspace }),
 			"What the editor plays now, in one answer (the deep-integration plan's DI-36): sound, the workspace's one "

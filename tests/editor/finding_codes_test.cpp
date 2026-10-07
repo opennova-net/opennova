@@ -289,7 +289,7 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::EditRecord) ==
 	            Tokens({ "animation.end_pose_trigger", "catalog.name_duplicate", "document.line_ends", "menu.duplicate_screen",
 	                     "menu.duplicate_window", "mission.off_ground", "mission.ssn_duplicate", "mission.zone_duplicate",
-	                     "strings.key_duplicate" }));
+	                     "strings.key_duplicate", "terrain.foliage_inert", "terrain.no_width", "terrain.refused" }));
 	TEST_EXPECT(fixed_by(FindingFix::UnusedVariable) == Tokens({ "style.unused" }));
 	TEST_EXPECT(fixed_by(FindingFix::FallbackRow) == Tokens({ "catalog.first_row" }));
 	// A finished normal map a normal-map slot's row loads as a diffuse: its row given type 4.
@@ -298,7 +298,8 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::Rewrite) ==
 	            Tokens({ "animation_map.ignored_input", "environment.ignored_input",
 	                     "menu.ignored_input", "mission.event_order", "mission.rewrite_differs", "script.line_ending",
-	                     "shader.form", "sound_bank.ignored_input", "strings.regrouped", "style.line_ending" }));
+	                     "shader.form", "sound_bank.ignored_input", "strings.regrouped", "style.line_ending",
+	                     "terrain.ignored_input" }));
 	const std::map<std::string, std::string> rewrites = {
 		{ "animation_map.ignored_input", "without the input the game ignores" },
 		{ "environment.ignored_input", "with each line as the game reads it" },
@@ -310,6 +311,7 @@ static int test_columns() {
 		{ "shader.form", "in the SCR form the game's shader loader takes" },
 		{ "strings.regrouped", "with its strings grouped by section the way the game reads them" },
 		{ "style.line_ending", "with every line ending CR LF" },
+		{ "terrain.ignored_input", "with each line as the game reads it" },
 	};
 	for (const auto &[token, does] : rewrites) {
 		const FindingCodeRow *row = finding_row(token);
@@ -320,7 +322,8 @@ static int test_columns() {
 	                     "credits.invalid_input", "credits.unserializable", "document.unserializable",
 	                     "environment.invalid_input", "menu.invalid_input", "menu.unserializable", "mission.invalid_input",
 	                     "music_script.invalid_input", "music_script.unserializable", "sound_bank.invalid_input",
-	                     "sound_bank.unserializable", "sound_profiles.unserializable", "strings.invalid_input" }));
+	                     "sound_bank.unserializable", "sound_profiles.unserializable", "strings.invalid_input",
+	                     "terrain.invalid_input" }));
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.place == FindingPlace::File; }) ==
 	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "build.archive_in_project",
 	                     "build.expansion.mission_twice", "build.expansion.mission_untitled", "build.expansion.root_only",
@@ -349,7 +352,8 @@ static int test_columns() {
 	                     "strings.key_empty", "strings.section_empty", "style.continued_duplicate",
 	                     "style.directive_form", "style.directive_tail", "style.if_without_argument",
 	                     "style.invalid_name_char", "style.missing_value_delimiter", "style.nul_byte", "style.stops",
-	                     "style.value_is_directive", "text.reader", "text.unreadable" }));
+	                     "style.value_is_directive", "terrain.foliage_inert", "terrain.no_width", "text.reader",
+	                     "text.unreadable" }));
 	TEST_EXPECT(finding_row("model.light_no_registers") && finding_row("model.light_no_registers")->gates_build &&
 	            finding_row("style.hangs")->gates_build && finding_row("style.line_ending")->gates_build);
 	// A missing required file blocks where its manifest row is the boot's refusal (gametext.bin: the

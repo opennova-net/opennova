@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <iomanip>
 #include <iterator>
 #include <sstream>
 
@@ -81,6 +82,8 @@ bool load_trn(std::istream &f, TrnConfig &out, std::string &error) {
 			def = FoliageDef();
 		} else if (key == "terrain_name") {
 			out.name = value;
+		} else if (key == "terrain_creator") {
+			out.creator = value;
 		} else if (key == "polytrn_colormap") {
 			out.colormap = value;
 		} else if (key == "polytrn_detailmap_c1") {
@@ -143,6 +146,17 @@ bool load_trn(std::istream &f, TrnConfig &out, std::string &error) {
 			}
 		} else if (key == "water_height") {
 			out.water_height = io::retail_atol(value);
+		} else if (key == "water_rgb") {
+			// The environment reader's arms over the terrain's lines (trn.h): a colour's three bytes as
+			// atol of tokens 2..4 packed at the load's envscale of 1, held to a byte [orig:
+			// TimeOfDay_ParseProperty @ 0x57caf6; Color_ScaleRGBAndPack @ 0x57f890], the murk's atof held at
+			// 0.99 [orig: TimeOfDay_ParseProperty @ 0x57cb7c..0x57cba9].
+			out.water_rgb_set = true;
+			for (int c = 0; c < 3; ++c)
+				out.water_rgb[static_cast<size_t>(c)] = std::clamp(io::retail_atol(tokens.token(1 + c)), 0, 255);
+		} else if (key == "water_murk") {
+			out.water_murk_set = true;
+			out.water_murk = std::min(static_cast<float>(io::retail_atof(value)), 0.99f);
 		} else if (key == "polytrn_charmap") {
 			out.charmap = value;
 		} else if (key == "polytrn_foliagemap") {
@@ -217,8 +231,22 @@ bool save_trn(std::ostream &f, const TrnConfig &cfg, std::string &error) {
 	const char *nl = "\r\n";
 
 	f << "terrain_name     \"" << cfg.name << "\"" << nl;
+	if (!cfg.creator.empty()) f << "terrain_creator  \"" << cfg.creator << "\"" << nl;
 	f << nl;
 	f << "water_height     " << cfg.water_height << nl;
+	if (cfg.water_rgb_set)
+		f << "water_rgb        " << cfg.water_rgb[0] << "," << cfg.water_rgb[1] << "," << cfg.water_rgb[2] << nl;
+	if (cfg.water_murk_set) {
+		// The fewest digits from six that the parser's atof reads back as the same float.
+		std::string murk;
+		for (int digits = 6; digits <= 9; ++digits) {
+			std::ostringstream out;
+			out << std::setprecision(digits) << std::defaultfloat << cfg.water_murk;
+			murk = out.str();
+			if (static_cast<float>(io::retail_atof(murk.c_str())) == cfg.water_murk) break;
+		}
+		f << "water_murk       " << murk << nl;
+	}
 	f << "horizon          " << cfg.horizon << nl;
 	f << nl;
 

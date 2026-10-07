@@ -1,7 +1,7 @@
 // The extractors: what one file references and defines, from its bytes through the
 // engine's own parser for its kind (extract_from_bytes). The record types (the def
 // catalogs, the string tables, the menus, the stylesheets, the models, the clips, the
-// animation tables and the environments) walk their schema: a field's reference, and the symbol a
+// animation tables, the environments and the terrains) walk their schema: a field's reference, and the symbol a
 // field defines (a weapon's name, a string's key, a menu's screen or window by the NAME its
 // ACTIONs find it by), and the record sets of the collections a Record reference names (a
 // model's CTRL registers and MTRX rows, by their index); a text type reads the names its text
@@ -33,7 +33,6 @@
 #include <formats/def/def.h>
 #include <formats/grm/grm.h>
 #include <formats/particle/parser.h>
-#include <formats/trn/trn_io.h>
 #include <runtime/renderer/particle_atlas.h>
 #include <runtime/renderer/texture_load_rules.h>
 
@@ -224,55 +223,6 @@ bool extract_hudpos(const std::string &name, const std::vector<uint8_t> &bytes, 
 	return true;
 }
 
-// A terrain (.trn, ADR 0046 S14): its height data, the maps and detail textures its keys name, its
-// tile atlas and each foliage block's model [orig: Terrain_ParseConfigCallback @0x60f330]. A config
-// the game refuses (load_trn's admission gate) is one the graph does not read. Two files a terrain
-// has no edge to: the atlas's .TSD twin, optional and in no shipped game (formats/til/til_tsd.h),
-// and its tile placement, which the game finds by the mission's name (mission::sidecars).
-bool extract_terrain(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
-	std::istringstream input(std::string(bytes.begin(), bytes.end()));
-	TrnConfig config;
-	std::string message;
-	if (!load_trn(input, config, message)) {
-		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, message, name);
-		return false;
-	}
-	auto edge = [&](const std::string &record, const char *field, ReferenceKind kind, const std::string &value,
-	                int32_t loader_arg = -1) {
-		if (value.empty()) return;
-		out.edges.push_back(edge_of(name, record, field, kind, value, std::string(), true));
-		out.edges.back().loader_arg = loader_arg;
-	};
-	edge(std::string(), "polytrn_polydata", ReferenceKind::TerrainData, config.polydata);
-	// Each map by its role's loader (ADR 0046 S18, the terrain's keys [orig: PolyTrn_InitTextures @
-	// 0x60AAA0]). Without its colour map the game logs "colormap" @ 0x60B389; without its blend map, once
-	// the key names one at all (the key alone sets the blend on [orig: Terrain_ParseConfigCallback @
-	// 0x60F7D0], and every card with pixel shaders takes it, PolyTrn_InitTextures @ 0x60B15D..0x60B176),
-	// "blendermap" @ 0x60B19A. Either error aborts the mission [orig: sub_520AA0 @ 0x520B4E], so either
-	// missing refuses a build.
-	auto texture = [&](const char *field, TextureRoleId role, const std::string &value, int32_t flags = 0) {
-		if (!value.empty()) out.edges.push_back(texture_edge(name, std::string(), field, value, role, flags));
-	};
-	texture("polytrn_colormap", TextureRoleId::TerrainColourMap, config.colormap, kTextureArgGates);
-	texture("polytrn_detailmap", TextureRoleId::TerrainDetailCoefficient, config.detailmap);
-	texture("polytrn_detailmap_c1", TextureRoleId::TerrainSplatDetail, config.detailmap_c1);
-	texture("polytrn_detailmap_c2", TextureRoleId::TerrainSplatDetail, config.detailmap_c2);
-	texture("polytrn_detailmap_c3", TextureRoleId::TerrainSplatDetail, config.detailmap_c3);
-	texture("polytrn_detailmap2", TextureRoleId::TerrainSecondDetail, config.detailmap2);
-	texture("polytrn_detailmapdist", TextureRoleId::TerrainFarDetail, config.detailmapdist);
-	texture("polytrn_detailmapdist2", TextureRoleId::TerrainFarDetail, config.detailmapdist2);
-	texture("polytrn_detailblendmap", TextureRoleId::TerrainBlendMap, config.detailblendmap, kTextureArgGates);
-	texture("polytrn_tilestrip", TextureRoleId::TerrainTileAtlas, config.tilestrip);
-	texture("polytrn_charmap", TextureRoleId::TerrainCharMap, config.charmap);
-	texture("polytrn_foliagemap", TextureRoleId::TerrainFoliageMap, config.foliagemap);
-	for (size_t i = 0; i < config.foliage_defs.size(); ++i)
-		edge("foliage " + std::to_string(i + 1), "graphic", ReferenceKind::Model, config.foliage_defs[i].graphic);
-	// The terrain's own tile placement, read when a mission has none of its name (S20) [orig: Terrain_Init
-	// @ 0x60FCFD; PolyTrn_LoadTerrainConfig @ 0x60E6DC..0x60E6E5, its extension forced to TIL].
-	edge(std::string(), "polytrn_tileinfo", ReferenceKind::TilePlacement, config.tileinfo);
-	return true;
-}
-
 bool extract_avatars(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
 	avatars::AvatarsFile file{};
 	if (avatars::avatars_parse_memory(bytes.data(), bytes.size(), &file) != 0) {
@@ -384,7 +334,6 @@ struct NativeKind {
 };
 constexpr NativeKind kNativeKinds[] = {
 	{AssetKind::HudPosDefs, extract_hudpos},
-	{AssetKind::Terrain, extract_terrain},
 	{AssetKind::AvatarDefs, extract_avatars},
 	{AssetKind::Particles, extract_particles},
 	{AssetKind::FaceAnimation, extract_face_animation},
