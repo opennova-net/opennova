@@ -117,12 +117,15 @@ struct WorkspaceView {
 	};
 	Settings settings;
 
-	// Files' New file prompt (New > a kind...): the kind it makes (kCount: closed), the name typed, and the
-	// values its blank takes (ADR 0046 S14), by their params' tokens. Create raises create_file with them.
+	// Files' New file prompt (New > a kind..., a folder's New here, DI-25): the kind it makes (kCount: closed),
+	// the name typed, the values its blank takes (ADR 0046 S14), by their params' tokens, and the folder New here
+	// makes it in ("" where the placement rule puts a file of its kind, "/" the top level). Create raises
+	// create_file with them.
 	struct NewFile {
 		AssetKind kind = AssetKind::kCount;
 		std::string name;
 		std::vector<std::pair<std::string, std::string>> values;
+		std::string folder;
 	};
 	NewFile new_file;
 
@@ -133,6 +136,15 @@ struct WorkspaceView {
 		std::string name;
 	};
 	FileRename file_rename;
+
+	// Files' Delete... of a file (DI-25): the file ("" closed), what names it listed before anything goes, and
+	// whether an import source goes alone (its outputs kept as files of the project); its Delete raises
+	// delete_asset, with force where something names it.
+	struct FileDelete {
+		std::string path;
+		bool alone = false;
+	};
+	FileDelete file_delete;
 
 	// Rename everywhere (the Inspector's Rename... on a field defining a name: a preview_rename that asks the
 	// name opens it): the name it renames (the field of the record at the locator in the file defining it,
