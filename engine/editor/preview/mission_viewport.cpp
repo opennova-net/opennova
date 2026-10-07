@@ -23,7 +23,9 @@
 #include <editor/preview/mission_palette.h>
 #include <editor/preview/mission_place.h>
 #include <editor/preview/mission_source.h>
+#include <editor/preview/model_placement.h>
 #include <editor/preview/viewport_device.h>
+#include <editor/project/project_files.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
@@ -768,10 +770,11 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 		out.request(request::edit_record(document->path(), std::move(edits)));
 		return true;
 	}
-	// The item: named, else the one item whose graphic the dropped model is; a path's stop the marker
-	// item its stops use.
+	// The item: named, else the one item whose graphic the dropped model is, else the item the model makes
+	// (DI-12: its catalog's row planned, then placed); a path's stop the marker item its stops use.
 	int64_t item = 0;
 	int path = 0;
+	std::optional<ModelItemPlan> made;
 	if (!drop.reference.empty()) {
 		const std::optional<int> id = strutil::parse_int(drop.name);
 		if ((drop.reference != "item" && drop.reference != "path") || !id) {
@@ -810,10 +813,11 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 		}
 		const std::vector<int64_t> items = mission_items_of_model(view, entry->relative_path);
 		if (items.empty()) {
-			error = "No item of the project draws " + entry->logical_name + ": add one to an item catalog, or drop an item.";
-			return false;
-		}
-		if (items.size() > 1) {
+			// No item draws it: the item the model makes, in the catalog the project's items are in (DI-12).
+			made.emplace();
+			if (!plan_model_item(view, *entry, *made, error)) return false;
+			item = made->id;
+		} else if (items.size() > 1) {
 			error = "Several items draw " + entry->logical_name + ":";
 			for (size_t i = 0; i < items.size(); ++i) {
 				MissionItemFacts facts;
@@ -824,11 +828,20 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 			}
 			error += ". Drop one of them by its item.";
 			return false;
+		} else {
+			item = items.front();
 		}
-		item = items.front();
 	}
 	MissionItemFacts facts;
-	if (!items_.facts(view, item, facts, error)) return false;
+	if (made) {
+		// The item made: its pool by the TYPE its model gives it, its graphic the model dropped.
+		if (!items_.model_facts(view, item, made->facts.type, made->model, facts)) {
+			error = drop.file + " does not read as a model.";
+			return false;
+		}
+	} else if (!items_.facts(view, item, facts, error)) {
+		return false;
+	}
 	// Where the point meets the ground (the device's terrain, else the plane through the camera's
 	// target); on the terrain, the model's ground anchor baked in (the stored position is the ground
 	// point less the anchor: docs/world/world-wac-ai-re.md section 12).
@@ -857,7 +870,9 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 		out.request(request::edit_record(document->path(), std::move(edits)));
 		return true;
 	}
-	// One batch: the entity of the item added to the pool its TYPE puts it in, then placed.
+	// One batch: the entity of the item added to the pool its TYPE puts it in, then placed. An item the
+	// model makes is the catalog's batch first (its file opened first where it is not), served before the
+	// mission's: two documents, an undo step each, the entity placed only once its item is made.
 	const NodeKind kind = node_kind(facts.pool);
 	Edit add;
 	add.operation = EditOperation::Add;
@@ -865,12 +880,19 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 	add.field = "item";
 	add.value = item;
 	edits.push_back(std::move(add));
-	const NodeAddress made{ batch_made(0), kind, 0 };
-	edits.push_back(set_of(made, "x", at[0]));
-	edits.push_back(set_of(made, "y", at[1]));
-	edits.push_back(set_of(made, "z", at[2]));
-	edits.push_back(set_of(made, "yaw", int64_t(yaw)));
+	const NodeAddress placed{ batch_made(0), kind, 0 };
+	edits.push_back(set_of(placed, "x", at[0]));
+	edits.push_back(set_of(placed, "y", at[1]));
+	edits.push_back(set_of(placed, "z", at[2]));
+	edits.push_back(set_of(placed, "yaw", int64_t(yaw)));
+	if (made) out.request(request::edit_record(made->catalog, made->edits, true));
 	out.request(request::edit_record(document->path(), std::move(edits)));
+	if (made)
+		out.served("Made " + model_item_plan_words(*made) + " for " + drop.file + ", and placed it in " +
+		                   basename_of(document->path()) + ": Undo in each file takes its step back.",
+		           item);
+	else
+		out.served(std::string(), item);
 	return true;
 }
 

@@ -631,14 +631,14 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             // (slot 1..8 -> bits 1..8); the shift count is masked to 5 bits
             // like the x86 shl. Then the "New Objective" notification (win,
             // relay flag 1) and, for a shown objective, the NEW_GOAL sound at
-            // the local player through the misnamed full-volume play wrapper.
+            // the local player through the full-volume positional play wrapper.
             // [orig: EventAction_Dispatch case 35 @0x4546af — shl
             //  @0x4546bd/@0x4546cc, bit @0x4546bf/@0x4546d0; the
             //  HUD_ShowObjectiveNotification call @0x4546e2; the local-player
-            //  and param2 gates @0x4546e7..0x4546fb, the HUD_DrawDefaultProgressBar
-            //  call @0x45470c with dword_24E0990 (the NEW_GOAL set) and the
-            //  player position; HUD_DrawDefaultProgressBar @0x527e60 wraps
-            //  Sound_Play3DPositional(set, pos, 0, 255)]
+            //  and param2 gates @0x4546e7..0x4546fb, the Sound_PlayAtPosition
+            //  call @0x45470c with g_SndNewGoal (the NEW_GOAL set) and the
+            //  player position; Sound_PlayAtPosition @ 0x527E60 is a
+            //  Sound_Play3DPositional wrapper, null entity, volume 255]
             if (a.param2 != 0) w.script.subgoals.show_win |= (1u << (a.param1 & 31));
             else w.script.subgoals.show_win &= ~(1u << (a.param1 & 31));
             w.show_objective_notification(a.param1, 1, a.param2, 1);

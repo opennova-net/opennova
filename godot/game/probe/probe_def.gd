@@ -338,6 +338,18 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"move": { "type": "boolean", "default": true },
 					"interval_ms": { "type": "integer", "minimum": 0, "maximum": 4000, "default": 0 },
 				}, [], true, true, 120_000),
+		ProbeDef.make("object_lod_sweep",
+				"The authored RLOD level the live process draws for one placed entity of "
+				+ "each named graphic (every graphic when none is named), the local player "
+				+ "stood at each distance (metres, on the entity's mission +x side) facing "
+				+ "it: an individual model's active level, a static row's population level; "
+				+ "optionally captures each frame.",
+				RENDER + "object_lod_sweep_probe.gd", {
+					"graphics": { "type": "array", "default": [] },
+					"distances": { "type": "array",
+							"default": [2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96] },
+					"capture": { "type": "boolean", "default": false },
+				}, [], true, true, 600_000),
 		ProbeDef.make("environment_cube_capture",
 				"The highest-quality environment-cube proof on Forward+ D3D12: six rendered "
 				+ "faces, the X/Z axis map, Cubemap sampling orientation and the 0x60 "
