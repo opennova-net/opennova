@@ -5211,6 +5211,14 @@ target_link_libraries(hud_capture_labels_test PRIVATE opennova_runtime)
 target_compile_features(hud_capture_labels_test PRIVATE cxx_std_17)
 add_test(NAME hud_capture_labels COMMAND hud_capture_labels_test)
 
+# The terrain viewport (the deep-integration plan's DI-30b): a terrain drawn on its own under a mission's
+# environment or the engine's own, its tiles the mission's or the terrain's own, framed within the fog, DI-29's
+# overlays, the ground under a point, an edit rebuilding it, a refused terrain, the wire.
+add_executable(editor_terrain_viewport_test editor/terrain_viewport_test.cpp)
+target_link_libraries(editor_terrain_viewport_test PRIVATE opennova_editor)
+target_include_directories(editor_terrain_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_terrain_viewport COMMAND editor_terrain_viewport_test)
+
 add_executable(editor_environment_viewport_test editor/environment_viewport_test.cpp)
 target_link_libraries(editor_environment_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_environment_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

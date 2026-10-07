@@ -989,6 +989,15 @@ set opens to be read, its edits refused: its set's images and options make it, a
 again. The Inspector heads it with that import and the missions that run on it.
 _Avoid_: terrain set (the import's source of images), trn file (the file alone), heightmap (one input)
 
+**Terrain viewport**:
+A terrain document's Main view (the deep-integration plan's DI-30): the terrain drawn on its own, without a
+mission's objects, through the runtime's own terrain, water, foliage and sky, under the environment of a
+mission that runs on it (its tile set and its placed tiles, its fog and its clock) or the engine's own
+environment and the terrain's own tiles. It can tint what the game reads at each point (the surface class
+or the foliage map's code) over the terrain, and hovering reads the ground under the pointer as the mission
+view does. Every edit of the terrain shows as it is made.
+_Avoid_: terrain preview, heightmap view (it draws what the game draws)
+
 **Texture document**:
 A texture file of the project (a .tga, .mdt, .pcx, .dds or .png) open in the editor, read as the
 game reads it: by the reader its name picks (a .tga or an .mdt the game's TGA reader, which takes every
