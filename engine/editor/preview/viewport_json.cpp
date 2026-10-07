@@ -160,6 +160,7 @@ io::JsonValue viewport_hit_to_json(const ViewportModel &model, const ViewportHit
 	out.set("current", JsonValue::make_bool(hit.current));
 	if (!hit.ground.is_null()) out.set("ground", hit.ground);
 	if (!hit.pointer.is_null()) out.set("pointer", hit.pointer);
+	if (!hit.sounds.is_null()) out.set("sounds", hit.sounds);
 	return out;
 }
 
