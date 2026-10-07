@@ -154,14 +154,20 @@ void MissionScriptRun::boot_(const std::shared_ptr<const ProjectAssetSource> &fi
 		failed_ = true;
 		return;
 	}
-	// The mission's .env under the header's overrides, as the game loads it with the terrain [orig:
-	// Game_LoadTerrainDuringConnect @ 0x520710 -> Terrain_LoadEnvironmentConfig @ 0x52073b]; a mission naming none, or
-	// one the project lacks, starts on the engine's defaults (env::load_mission_env).
-	env::Config config;
-	std::vector<uint8_t> env_bytes;
-	const bool env_read = !header.environment.empty() && source.read_file(header.environment + ".env", env_bytes);
-	const std::string env_text(env_bytes.begin(), env_bytes.end());
-	env::load_mission_env(env_read ? &env_text : nullptr, config);
+	// The mission's environment under the header's overrides, as the game loads it with the terrain [orig:
+	// Game_LoadTerrainDuringConnect @ 0x520710 -> Terrain_LoadEnvironmentConfig @ 0x52073b]: its .trn, overcast.def,
+	// then its .env over them; a mission naming none, or one the project lacks, starts on the earlier passes over the
+	// engine's defaults (env::load_mission_env).
+	const env::EnvTextReader read_env = [&source](const std::string &name, std::string &text) {
+		std::vector<uint8_t> bytes;
+		if (!source.read_file(name, bytes)) return false;
+		text.assign(bytes.begin(), bytes.end());
+		return true;
+	};
+	env::MissionEnv mission_env;
+	env::read_mission_env(read_env, header.terrain.empty() ? std::string() : header.terrain + ".trn",
+	                      header.environment.empty() ? std::string() : header.environment + ".env", mission_env);
+	env::Config config = std::move(mission_env.config);
 	env::apply_bms_overrides(config, env::bms_env_overrides_from_header(header.attrib_flags, header.water_override,
 			header.fog_override, header.fog_color, header.water_color, header.water_murk));
 	auto kernel = std::make_unique<mission::MissionKernel>();
