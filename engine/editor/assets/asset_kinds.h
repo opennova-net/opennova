@@ -77,6 +77,19 @@ inline constexpr size_t kDocumentTypeCount = static_cast<size_t>(DocumentTypeId:
 // from the bytes as stored (a file not in the form is one the loader rejects).
 enum class ScrForm { Optional, Shader };
 
+// How the game's reader of a kind cuts its text into lines where it ends a line at CR LF and nowhere
+// else, an LF alone or a CR alone a byte of the line: the kinds the line-ends rule reads
+// (documents/line_ends.h). AsciiWalk: the shared ASCII walk, which ends a line only where a CR is
+// followed by an LF [orig: File_ParseASCIIFile @ 0x53D810, the test @ 0x53D8DE], tokenizes the
+// line's first 1000 characters and skips a line with no word or whose first word starts with '/'
+// [orig: @ 0x53D908..0x53D91E; Terrain_TokenizeConfigLine @ 0x53CB60, the clamp @ 0x53CBBB].
+// ConfigFile: the ConfigFile text reader, where CR LF ends a line and a lone CR or LF does not [orig:
+// ConfigFile_LoadFromFile @ 0x760a10 -> ConfigFile_ParseText @ 0x7608a0]. None: any other kind, among
+// them two whose readers end lines otherwise and whose types say so themselves: a stylesheet's
+// reader, which stops at a line end other than CR LF (style.line_ending), and a script's, which ends
+// a line at a CR (script.line_ending).
+enum class LineReader { None, AsciiWalk, ConfigFile };
+
 struct AssetKindRow {
 	AssetKind kind = AssetKind::Unknown;
 	const char *token = ""; // the wire form (session JSON, the editor MCP, opennova-project)
@@ -108,6 +121,9 @@ struct AssetKindRow {
 	const char *new_name = "";
 	// How its loader takes the SCR form (ScrForm).
 	ScrForm scr = ScrForm::Optional;
+	// How the game's reader of it ends a line, where at CR LF alone (LineReader): each such row cites
+	// its reader.
+	LineReader line_reader = LineReader::None;
 	// What a file of the kind is to the game, in a modder's words, a sentence (Files' card for a file,
 	// the UX round's project lane): what reads it and how it is found, as the row's own witnesses say.
 	const char *about = "";
