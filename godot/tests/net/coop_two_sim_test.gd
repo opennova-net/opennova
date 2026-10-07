@@ -269,6 +269,20 @@ func _fixture_emplaced_50() -> WeaponDef:
 	return weapons.get_weapon(index) if index >= 0 else null
 
 
+# A player profile whose blue class-8 page is the one WPN_M4AUTO row.
+func _m4_only_profile() -> PlayerProfiles:
+	var profiles := PlayerProfiles.new()
+	profiles.load_bytes(PackedByteArray(), false, PackedByteArray(), false, "")
+	var selection := {
+		"team": 0,
+		"player_class": 8,
+		"side_profiles": [{"avatar_a": 0, "avatar_b": 0, "avatar_packed": 0x0200}, {}],
+		"kit": [{"name": "WPN_M4AUTO"}],
+	}
+	assert_eq(profiles.apply_character_selection(selection), OK)
+	return profiles
+
+
 func _inventory_clip(sim: Simulation, weapon_name: String) -> int:
 	for value in sim.get_local_player_inventory().slots:
 		var slot: PlayerInventorySlot = value
@@ -2124,6 +2138,10 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 	_install_combat_tables(host)
 
 	var joiner := Simulation.new()
+	# The joiner's deploy release re-seeds its kit from the profile page (the
+	# pending follow-up above), so the M4-only kit this regression needs is its
+	# profile's blue rifleman page, not the stock default page's full kit.
+	assert_eq(joiner.use_player_profile(_m4_only_profile()), OK)
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "DoneEchoJoiner"))
 	assert_true(joiner.load_from_mission_data(mission))

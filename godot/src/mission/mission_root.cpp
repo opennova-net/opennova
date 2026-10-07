@@ -160,6 +160,11 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	if (options->get_local_character_profile().is_valid()) {
 		sim_->set_local_character_profile(options->get_local_character_profile());
 	}
+	// The player profile's current records ahead of the boot: single player's
+	// session words are the record's (the session config the boot builds).
+	if (options->get_player_profiles().is_valid()) {
+		sim_->use_player_profile(options->get_player_profiles());
+	}
 	// P7 / ADR 0011: every authoritative live mission is an in-process listen server, stood up BEFORE
 	// load; the host player auto-spawns at bring-up (faithful §5.0 mode-3). MainGame/GameWorld is the
 	// sole live runtime owner (ADR 0025). Isolated tests may instantiate this same

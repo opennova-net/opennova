@@ -577,7 +577,9 @@ func test_mods_tab_lists_the_base_game_and_switches_for_the_run() -> void:
 # launch a mission. ACCEPT is overloaded across JO screens (launch on Single Player,
 # plain OK on Options); the shell scopes it by screen role, so on a Mods screen (mod
 # list, no mission list) ACCEPT applies. Regression for the "OK loads a mission" bug.
-# ACCEPT on the game running takes nothing.
+# ACCEPT on the game running takes nothing. A switch saves the player profile
+# first, under the expansion it leaves [orig: Options_HandleAcceptOrBack
+# @ 0x55ad35 -> PlayerProfile_SaveToFiles; playerinfo/player-sav-re.md].
 func test_mods_ok_applies_expansion_without_launching() -> void:
 	var dir := _make_runtime_dir()
 	var shell = _make_runtime_shell(dir)
@@ -585,6 +587,10 @@ func test_mods_ok_applies_expansion_without_launching() -> void:
 		pending("runtime resource root unavailable in this environment")
 		TestFs.remove_dir_recursive(dir)
 		return
+	var run_dir := OS.get_cache_dir().path_join("menu_shell_mods_profile_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(run_dir), OK)
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", run_dir]))
+	PlayerProfile.load_for(shell.get_resource_root())
 	var driver: MenuDriver = shell.get_driver()
 	var avail: int = driver.widget_id("AVAIL_LIST")
 	assert_gte(avail, 0, "AVAIL_LIST authored")
@@ -592,14 +598,22 @@ func test_mods_ok_applies_expansion_without_launching() -> void:
 	assert_gte(accept, 0, "options ACCEPT control authored")
 	driver.widget_activated.emit(accept, "ACCEPT")  # the base game running, its row highlighted
 	assert_false(shell.has_pending_expansion_reload(), "ACCEPT on the game running takes nothing")
+	assert_false(FileAccess.file_exists(run_dir.path_join("player.sav")), "and saves nothing")
 	driver.select_row(avail, 1, false)  # highlight jox01 (no double-click / activation)
 	watch_signals(shell)
 	driver.widget_activated.emit(accept, "ACCEPT")  # press OK
 	assert_signal_not_emitted(shell, "start_requested", "OK on the Mods screen must not launch")
+	assert_true(FileAccess.file_exists(run_dir.path_join("player.sav")),
+			"the switch saves the player profile before it takes place")
+	assert_true(FileAccess.file_exists(run_dir.path_join("weapon.sav")),
+			"weapon.sav under the expansion it leaves, the base game's")
+	assert_false(FileAccess.file_exists(run_dir.path_join("expansion/jox01/weapon.sav")))
 	shell.update_menu_frame()  # the deferred remount runs on the next menu tick
 	assert_eq(String(shell.get_resource_root().get_expansion()), "jox01",
 		"OK applied the highlighted mod")
 	assert_false(_persisted_expansion_key(), "nothing persisted")
+	LaunchFlags.clear_args_override()
+	TestFs.remove_dir_recursive(run_dir)
 	shell.get_resource_root().clear()
 	TestFs.remove_dir_recursive(dir)
 

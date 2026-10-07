@@ -79,8 +79,9 @@ struct WeaponKitEntry {
     int32_t flags = -1;
 };
 
-// The engine defaults: the profile-less spawn kit and the everything-filtered
-// fallback [orig: literal "WPN_M4AUTO" @ 0x5246be/@ 0x5519e4; the {"WPN_KNIFE",
+// The engine defaults: the profile-less spawn kit (the static single-player page
+// blob, playersav::default_single_player_page) and the everything-filtered
+// fallback [orig: the page at 0x833BF8 @ 0x5246be/@ 0x5519e4; the {"WPN_KNIFE",
 // "-1","-1","-1"} synthesis @ 0x40f899].
 std::vector<WeaponKitEntry> weapon_kit_default();
 std::vector<WeaponKitEntry> weapon_kit_knife_fallback();

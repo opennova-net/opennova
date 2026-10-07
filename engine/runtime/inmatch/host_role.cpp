@@ -4,6 +4,7 @@
 #include <base/io/log.h>
 #include <base/io/perf_clock.h>
 #include <formats/mission/bms.h>
+#include <formats/playersav/player_sav.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
@@ -124,12 +125,28 @@ void HostRole::make_client_runtime(uint32_t game_type) {
 		state.client_runtime->view().set_item_catalog(item_catalog_);
 }
 
-GameConfig singleplayer_game_config(uint32_t game_type) {
+GameConfig singleplayer_game_config(uint32_t game_type,
+		const playersav::ProfileRecord *profile) {
 	inmatch::GameConfig config;
 	config.server_name = "SINGLEPLAYERGAME";
 	config.mp_attributes = 0x3A06u;
 	config.max_players = 1;
 	config.game_type = game_type;
+	if (profile != nullptr) {
+		// Outside a session the restriction words come from the current
+		// profile record: +0x548 -> g_SessionNoCharAbilities, +0x54C ->
+		// g_SessionNoWeaponRecoil, +0x554 -> g_SessionNoCrossHairSpread,
+		// +0x550 -> g_SessionNoScopeDrift [orig:
+		// Game_ApplySessionSettingsToGlobals @0x551F15..0x551F3F], and the
+		// difficulty word, the S2C 0x08 block's seventh byte, from +0x564
+		// (dword_24D2110 @0x551F6F..0x551F75; a session's from game.cfg's
+		// mp_difficulty, host_config.cpp).
+		config.no_char_abilities = profile->sp_no_char_abilities;
+		config.no_weapon_recoil = profile->sp_no_weapon_recoil;
+		config.no_crosshair_spread = profile->sp_no_crosshair_spread;
+		config.no_scope_drift = profile->sp_no_scope_drift;
+		config.config_bytes[6] = static_cast<uint8_t>(profile->sp_difficulty);
+	}
 	return config;
 }
 

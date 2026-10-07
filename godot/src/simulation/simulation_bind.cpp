@@ -8,7 +8,7 @@
 #include "simulation/end_round_state.h" // the typed end-of-round record
 #include "simulation/hud_view_records.h" // the small per-frame HUD view records
 #include "simulation/epilog_cine_record.h" // the SP end-of-round cine record
-#include "simulation/weapon_profile_summary.h" // the weapon.sav slot-0 summary records
+#include "player/player_profiles.h" // the player profile the sim takes its records from
 #include "simulation/environment_snapshot.h" // the F3 Environment record as a typed read
 #include "simulation/present_event_records.h" // the per-tick present drain records
 #include "simulation/debug_pick_card.h" // the entity picker card
@@ -176,6 +176,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_end_round_state"), &Simulation::get_end_round_state);
 	ClassDB::bind_method(D_METHOD("is_mp_session"), &Simulation::is_mp_session);
 	ClassDB::bind_method(D_METHOD("is_round_over"), &Simulation::is_round_over);
+	ClassDB::bind_method(D_METHOD("get_charattr_disabled_word"), &Simulation::get_charattr_disabled_word);
 	ClassDB::bind_method(D_METHOD("get_end_round_overlay", "gametext"),
 	                     &Simulation::get_end_round_overlay);
 	ClassDB::bind_method(D_METHOD("get_end_round_columns", "table_width", "gametext"),
@@ -455,17 +456,8 @@ void Simulation::_bind_methods() {
 	                     &Simulation::respawn_local_player_loadout);
 	ClassDB::bind_method(D_METHOD("set_local_player_class", "player_class"),
 	                     &Simulation::set_local_player_class);
-	ClassDB::bind_method(D_METHOD("load_weapon_profile", "path"),
-	                     &Simulation::load_weapon_profile);
-	ClassDB::bind_static_method("Simulation",
-			D_METHOD("read_weapon_profile_summary", "path"),
-			&Simulation::read_weapon_profile_summary);
-	ClassDB::bind_static_method("Simulation",
-			D_METHOD("save_weapon_profile_selection", "path", "profile"),
-			&Simulation::save_weapon_profile_selection);
-	ClassDB::bind_static_method("Simulation",
-			D_METHOD("weapon_profile_relpath", "expansion_name"),
-			&Simulation::weapon_profile_relpath);
+	ClassDB::bind_method(D_METHOD("use_player_profile", "profiles"),
+	                     &Simulation::use_player_profile);
 	ClassDB::bind_static_method("Simulation",
 			D_METHOD("player_eye_min_above_position"),
 			&Simulation::player_eye_min_above_position);

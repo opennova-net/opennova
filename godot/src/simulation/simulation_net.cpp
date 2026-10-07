@@ -66,8 +66,10 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type)
 		if (cfg.config.server_name.empty()) cfg.config.server_name = "OpenNova LAN Host";
 		cfg.config.max_players = net_.host_max_players; // the UI cap as configure_host_session published it (host_player_slot_limit)
 	} else {
-		// The SP listen server's config (docs/net/novaworld-net-re.md §5.0).
-		cfg.config = inmatch::singleplayer_game_config(p_game_type);
+		// The SP listen server's config (docs/net/novaworld-net-re.md §5.0), its
+		// session words the current player profile record's.
+		cfg.config = inmatch::singleplayer_game_config(p_game_type,
+				player_.profile_record_set ? &player_.profile_record : nullptr);
 	}
 	cfg.socket_mode = is_host_listening() ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless;
 	cfg.serve_and_play = is_host_listening() ? net_.host_serve_and_play : true;

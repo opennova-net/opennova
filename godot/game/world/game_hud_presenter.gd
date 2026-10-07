@@ -198,6 +198,13 @@ func setup(world: GameWorld, player_presenter_in: LocalPlayerPresenter, ui_paren
 ## tap (the built menu-era teardown main_game carried). `restart` is the SP
 ## restart's teardown: the toggles take the restart's reset (the tip's
 ## once-counters survive it).
+## The chat presets F1..F10 insert: the player profile's ten macros, which each
+## mission start's session apply copies (engine: hud/hud_chat_entry.h).
+func set_chat_presets(macros: PackedStringArray) -> void:
+	for i in macros.size():
+		_chat.set_preset(i, macros[i])
+
+
 func teardown(restart := false) -> void:
 	finish_hud_hidden_capture()
 	if _game_hud != null:

@@ -99,31 +99,56 @@ std::string token_at(const std::vector<uint8_t> &buf, size_t offset)
 
 // --- 1. make_defaults matches PlayerProfile_InitDefaults @0x54bb40 ----------
 
+// A default page's names, each with the three -1 values.
+bool is_default_page(const KitPage &page, const std::vector<std::string> &names)
+{
+    if (page.entries.size() != names.size())
+        return false;
+    for (size_t i = 0; i < names.size(); ++i)
+        if (!is_single_default(KitPage{{page.entries[i]}}, names[i].c_str()))
+            return false;
+    return true;
+}
+
 int test_make_defaults()
 {
     const File f = make_defaults();
 
+    // The static page blobs InitDefaults copies [orig: @0x54bced, the blue set
+    // @0x54bd7f..0x54bdd1, the red set @0x54bd1a..0x54bd6c]: the first name of
+    // each page and its length.
     const char *blue[kKitPagesPerSide] = {"WPN_M4AUTO", "WPN_SR25", "WPN_M60",
                                           "WPN_M4AUTO", "WPN_M16BURST"};
     const char *red[kKitPagesPerSide] = {"WPN_AK47AUTO", "WPN_DRAGUNOV", "WPN_PKM",
                                          "WPN_AK47AUTO", "WPN_AK74AUTO"};
+    const size_t lengths[kKitPagesPerSide] = {8, 7, 7, 7, 7};
 
     for (size_t s = 0; s < kProfileSlots; ++s) {
         const Record &rec = f.slots[s];
         TEST_EXPECT(rec.blue.player_class == 8);
         TEST_EXPECT(rec.red.player_class == 8);
         for (size_t i = 0; i < kKitPagesPerSide; ++i) {
-            TEST_EXPECT(is_single_default(rec.blue.pages[i], blue[i]));
-            TEST_EXPECT(is_single_default(rec.red.pages[i], red[i]));
+            TEST_EXPECT(rec.blue.pages[i].entries.size() == lengths[i]);
+            TEST_EXPECT(rec.red.pages[i].entries.size() == lengths[i]);
+            TEST_EXPECT(rec.blue.pages[i].entries[0].name == blue[i]);
+            TEST_EXPECT(rec.red.pages[i].entries[0].name == red[i]);
         }
-        TEST_EXPECT(is_single_default(rec.single_player, "WPN_M4AUTO"));
+        TEST_EXPECT(is_default_page(rec.single_player,
+                {"WPN_M4AUTO", "WPN_M4", "WPN_colt45", "WPN_AT4", "WPN_GRENADEFB",
+                 "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE"}));
+        TEST_EXPECT(is_default_page(rec.blue.pages[0],
+                {"WPN_M4AUTO", "WPN_colt45", "WPN_DESIGNATOR", "WPN_GRENADEFB",
+                 "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE", "WPN_MEDPACK"}));
+        TEST_EXPECT(is_default_page(rec.red.pages[4],
+                {"WPN_AK74AUTO", "WPN_357", "WPN_RPG", "WPN_GRENADEFB",
+                 "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE2"}));
 
         // The class byte selects the page: rifleman (8) -> index 3.
         const KitPage *sel = rec.blue.selected_page();
         TEST_EXPECT(sel != nullptr);
-        TEST_EXPECT(is_single_default(*sel, "WPN_M4AUTO"));
+        TEST_EXPECT(sel->entries[2].name == "WPN_SATCHEL_CHARGE");
         TEST_EXPECT(rec.blue.page_for_class(6) != nullptr);
-        TEST_EXPECT(is_single_default(*rec.blue.page_for_class(6), "WPN_SR25"));
+        TEST_EXPECT(rec.blue.page_for_class(6)->entries[0].name == "WPN_SR25");
         TEST_EXPECT(rec.blue.page_for_class(4) == nullptr);
         TEST_EXPECT(rec.blue.page_for_class(10) == nullptr);
         TEST_EXPECT(&rec.side(SideId::Blue) == &rec.blue);
@@ -475,6 +500,22 @@ int test_retail_file()
             TEST_EXPECT(side.player_class <= kMaxPlayerClass);
             TEST_EXPECT(side.selected_page() != nullptr);
             TEST_EXPECT(!side.selected_page()->entries.empty());
+        }
+    }
+
+    // A record the original's defaults made carries the default pages: where a
+    // retail slot's single-player page has the default's first name, every page
+    // of it is the default's.
+    const File defaults = make_defaults();
+    for (size_t s = 0; s < kProfileSlots; ++s) {
+        const Record &rec = f.slots[s];
+        if (rec.single_player.entries.size() != 8 ||
+            rec.single_player.entries[1].name != "WPN_M4")
+            continue;
+        TEST_EXPECT(pages_equal(rec.single_player, defaults.slots[s].single_player));
+        for (size_t i = 0; i < kKitPagesPerSide; ++i) {
+            TEST_EXPECT(pages_equal(rec.blue.pages[i], defaults.slots[s].blue.pages[i]));
+            TEST_EXPECT(pages_equal(rec.red.pages[i], defaults.slots[s].red.pages[i]));
         }
     }
 

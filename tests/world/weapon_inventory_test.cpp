@@ -555,8 +555,12 @@ void test_cycle() {
 }
 
 void test_defaults() {
+    // The static single-player page blob the double-NUL copy takes whole
+    // [orig: 0x833BF8 @ 0x5246be].
     auto def = weapon_kit_default();
-    CHECK(def.size() == 1 && def[0].name == "WPN_M4AUTO");
+    CHECK(def.size() == 8 && def[0].name == "WPN_M4AUTO" && def[1].name == "WPN_M4" &&
+          def[7].name == "WPN_KNIFE");
+    CHECK(def[3].name == "WPN_AT4" && def[3].ammo_primary == -1 && def[3].flags == -1);
     auto knife = weapon_kit_knife_fallback();
     CHECK(knife.size() == 1 && knife[0].name == "WPN_KNIFE");
     CHECK(weapon_combo::kDefaultSpawnCombo == 195);

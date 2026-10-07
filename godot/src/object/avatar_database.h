@@ -45,7 +45,13 @@ private:
 	// its witnessed walk.
 	mutable opennova::inmatch::CharacterRegistry registry_;
 	mutable bool registry_dirty_ = true;
+
+public:
+	// The registry the per-side default and every packed-id decode walk, for
+	// native callers (the player profile's fresh-record seed).
 	const opennova::inmatch::CharacterRegistry &character_registry() const;
+
+private:
 	String source_path;
 	String last_error;
 
