@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <memory>
 #include <string>
@@ -10,6 +11,7 @@
 
 #include <base/io/json.h>
 #include <editor/model/node.h>
+#include <editor/preview/dialog_preview.h>
 #include <editor/preview/mission_options.h>
 #include <editor/preview/mission_script_run.h>
 #include <editor/preview/model_preview_camera.h>
@@ -23,6 +25,7 @@ namespace opennova::editor {
 
 class MissionDocument;
 class MissionScene;
+class ProjectAssetSource;
 struct AssetScan;
 struct SessionView;
 
@@ -100,6 +103,13 @@ struct MissionSoundChannel {
 // - The thunder and the script's sounds are one-shots (fire_sounds): the set found in the game's bank order and
 //   planned at its distance (the thunder, a script's `sound`) or at its point (a script's sound at an entity),
 //   through the session's sound selector, played by the Shell's clip voices (DI-02's player).
+// - The mission's dialogs (DI-32): each Play dialog its events fire queues its dialog on the one dialog channel, as
+//   the game's does [orig: Dialog_Register @ 0x44d980 behind Dialog_UpdatePlayback @ 0x44e470's channel gate]: a
+//   dialog's lines, each the wave of its name in the mission's dialog bank's sounds at its dialog volume
+//   (preview/dialog_preview, the runtime's dialog_queue lookups), come due one after another, the next once the one
+//   before has ended and after its wait, a dialog queued while another plays after that one; each line handed to the
+//   Shell's clip voices on its tick, its subtitle in its words. A script's voice wave (SSNwave, SSNradio) plays at
+//   the scripted voice's volume [orig: Wac_PlayScriptedVoiceWave @ 0x4ed688, 210 of 255].
 // The listener is the camera's eye, standing in for the player's ears (the rain's body has the eye's height, no
 // building over it); the hour the picture's (the options' time, else the mission's start time). Not heard: the
 // occlusion the game inflates a distance by (no world stands between them in the picture: DI-04's rule), the music
@@ -144,6 +154,17 @@ public:
 	// What the last play cost (microseconds).
 	int64_t step_us() const { return step_us_; }
 
+	// The dialog lines queued on the dialog channel and not yet due, and the tick the channel frees.
+	struct DialogLineDue {
+		int32_t tick = 0;
+		int32_t number = 0;
+		std::string dialog;
+		DialogPlayLine line;
+	};
+	const std::deque<DialogLineDue> &dialog_due() const { return dialog_due_; }
+	int32_t dialog_free() const { return dialog_free_; }
+	const std::string &dialog_bank() const { return dialog_bank_; }
+
 	// What a source does in words, a line each (the hover's): what it is, its sets for the hours, what plays now.
 	std::vector<std::string> source_words(NodeId row) const;
 	// The body's `listen` (its options' with it): {on, volume, hours, tick, budget, sources {count, playing, ...},
@@ -180,6 +201,12 @@ private:
 	// The mixer made again over the sources (each resolved one a marker), its clock at the start.
 	void remix_();
 	void apply_plan_(const audio::AmbientChannelPlan &plan);
+	// The dialog `number` (dlg%03i) a Play dialog queued on `tick`: its lines due one after another from where the
+	// channel frees (DI-32).
+	void queue_dialog_(int32_t number, int32_t tick);
+	// The mission's dialog bank, its sounds and its text, read again where a stamp moved.
+	const DialogSources &dialog_sources_now_();
+	double wave_seconds_(const std::string &file);
 
 	bool opened_ = false;
 	// The music pair the game opens at a mission's start, and whether the project holds each half.
@@ -211,6 +238,15 @@ private:
 	uint64_t serial_ = 0;
 	uint64_t started_ = 0;
 	int64_t step_us_ = 0;
+	// The dialog channel (DI-32): the project's files as the game reads them, the mission's dialog bank and its text,
+	// what was read of them and at which stamps, the waves' lengths, the lines due and when the channel frees.
+	std::shared_ptr<const ProjectAssetSource> files_;
+	std::string dialog_bank_, dialog_text_;
+	DialogSources dialog_sources_;
+	std::string dialog_stamps_;
+	std::map<std::string, std::pair<uint64_t, double>> wave_seconds_cache_;
+	std::deque<DialogLineDue> dialog_due_;
+	int32_t dialog_free_ = 0;
 };
 
 // The Listen's marks over the picture (the overlay, while Listen is on): each source's set ringed on the ground at its

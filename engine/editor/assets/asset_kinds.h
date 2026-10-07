@@ -65,6 +65,7 @@ enum class DocumentTypeId {
 	Environment, // a .env: env::Config's keywords and keyframes (the deep-integration plan's DI-19a)
 	HudLayout,   // hudpos.def, held as its text and drawn by the HUD viewport (the plan's DI-20)
 	Terrain,     // a .trn: TrnConfig's keys, grid rows and foliage (the deep-integration plan's DI-30)
+	DialogBank,  // a .dbf: a mission's dialogs and their lines (the deep-integration plan's DI-32)
 	kCount, // the number of values, None among them
 };
 

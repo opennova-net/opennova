@@ -125,10 +125,12 @@ FieldUse picked_as(const FieldUse &field) {
 	return picking;
 }
 
-bool text_key_number(const std::string &key, const char *prefix, int64_t &out) {
+bool key_number(ReferenceKind kind, const std::string &key, const char *prefix, int64_t &out) {
 	if (!prefix) return false;
 	const size_t length = std::strlen(prefix);
-	if (key.size() <= length || !strutil::iequals(key.substr(0, length), prefix)) return false;
+	if (key.size() <= length) return false;
+	const bool exact = reference_row(kind).name_case == NameCase::Exact;
+	if (exact ? key.compare(0, length, prefix) != 0 : !strutil::iequals(key.substr(0, length), prefix)) return false;
 	const std::string digits = key.substr(length);
 	if (!strutil::all_digits(digits)) return false;
 	const std::optional<int> number = strutil::parse_int(digits);
@@ -141,17 +143,23 @@ bool text_key_number(const std::string &key, const char *prefix, int64_t &out) {
 	return true;
 }
 
-bool keyed_text_reference(const AssetGraph &graph, const FieldUse &field, const Value &value, FieldUse &out, Value &key) {
+bool text_key_number(const std::string &key, const char *prefix, int64_t &out) {
+	return key_number(ReferenceKind::TextId, key, prefix, out);
+}
+
+bool keyed_reference(const AssetGraph &graph, const FieldUse &field, const Value &value, FieldUse &out, Value &key) {
 	const int64_t *number = std::get_if<int64_t>(&value);
-	if (!field.key_prefix || !number || *number < field.key_first || *number > field.key_last) return false;
+	if (!field.key_prefix || field.picks == ReferenceKind::None || !number || *number < field.key_first ||
+	    *number > field.key_last)
+		return false;
 	char formed[64];
 	std::snprintf(formed, sizeof(formed), "%s%03i", field.key_prefix, int(*number));
 	GraphEdge edge;
-	edge.kind = ReferenceKind::TextId;
+	edge.kind = field.picks;
 	edge.scope = field.scope;
-	if (field.scope_alternate) edge.scope_alternate = field.scope_alternate;
+	if (!field.scope_alternate.empty()) edge.scope_alternate = field.scope_alternate;
 	out = field;
-	out.reference = ReferenceKind::TextId;
+	out.reference = field.picks;
 	out.picks = ReferenceKind::None;
 	out.key_prefix = nullptr;
 	out.scope = graph.lookup_scope(edge);
@@ -161,20 +169,20 @@ bool keyed_text_reference(const AssetGraph &graph, const FieldUse &field, const 
 
 namespace {
 
-// The keys of a field whose number forms one (FieldUse::key_prefix), in its section of the table the
-// game reads (its own where the project has it, else the alternate: AssetGraph::lookup_scope), each
-// named by the number that forms it, only one the game looks a key up by (key_first..key_last) and
-// the field can hold, the key kept for its preview.
-std::vector<ReferenceChoice> text_key_choices(const AssetGraph &graph, const FieldUse &field) {
+// The names of a field whose number forms one (FieldUse::key_prefix) of the kind it picks, in its scope
+// as the game reads it (a text key's section of its own table where the project has it, else the
+// alternate: AssetGraph::lookup_scope; a dialog's bank), each named by the number that forms it, only one
+// the game looks a name up by (key_first..key_last) and the field can hold, the name kept for its preview.
+std::vector<ReferenceChoice> keyed_choices(const AssetGraph &graph, const FieldUse &field) {
 	GraphEdge edge;
-	edge.kind = ReferenceKind::TextId;
+	edge.kind = field.picks;
 	edge.scope = field.scope;
-	if (field.scope_alternate) edge.scope_alternate = field.scope_alternate;
+	if (!field.scope_alternate.empty()) edge.scope_alternate = field.scope_alternate;
 	const std::string scope = graph.lookup_scope(edge);
 	std::vector<ReferenceChoice> out;
-	for (ReferenceChoice &choice : graph.choices(ReferenceKind::TextId, scope)) {
+	for (ReferenceChoice &choice : graph.choices(field.picks, scope)) {
 		int64_t number = 0;
-		if (!text_key_number(choice.name, field.key_prefix, number)) continue;
+		if (!key_number(field.picks, choice.name, field.key_prefix, number)) continue;
 		if (number < field.key_first || number > field.key_last) continue;
 		if (field.schema && field.schema->ranged && (double(number) < field.schema->min || double(number) > field.schema->max))
 			continue;
@@ -205,8 +213,8 @@ std::vector<ReferenceChoice> picker_choices(const AssetGraph *graph, const Docum
 		}
 	}
 	if (graph) {
-		std::vector<ReferenceChoice> listed = picking.reference == ReferenceKind::TextId && picking.key_prefix
-		                                              ? text_key_choices(*graph, picking)
+		std::vector<ReferenceChoice> listed = field.picks != ReferenceKind::None && picking.key_prefix
+		                                              ? keyed_choices(*graph, field)
 		                                              : reference_choices(*graph, picking);
 		// A number naming its definition by itself plus an offset (an ammo's tracer id, FieldUse::name_offset):
 		// each definition by the number that names it (an item's id less 100000), one no such number names
