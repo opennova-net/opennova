@@ -577,6 +577,15 @@ file in another folder under its own name and rewrites no reference, since the g
 its logical name.
 _Avoid_: default folder (a kind's folder holds new files only in a project laid out by kind)
 
+**File chore / file history / trash**:
+What Files does to a file or a folder beside editing it (DI-25): a **delete**, a **duplicate**, a new file
+**here** (in a folder the modder picks), a folder made, renamed or deleted. Each is one step of the
+project's **file history**, which Edit > Undo file and Redo file walk (a document's Undo is its records'; a
+rename's way back is Rename back). A delete moves the file to the project's **trash**
+(`.opennova/trash/<n>/`, never emptied by the editor), so no delete is a permanent one, and asks who names the
+file first.
+_Avoid_: recycle bin (the OS's; the trash is the project's own), remove (a delete keeps the file in the trash)
+
 **Import / sidecar**:
 Bringing a non-native source (an image, a terrain set; later a sound bank's manifest, a font)
 into the project the Godot way: a committed `<file>.import` sidecar records the

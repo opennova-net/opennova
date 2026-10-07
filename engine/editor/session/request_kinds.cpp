@@ -9,6 +9,7 @@
 #include <editor/session/build_operation.h>
 #include <editor/session/disk_watch.h>
 #include <editor/session/document_set.h>
+#include <editor/session/file_chores.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/navigation_controller.h>
 #include <editor/session/play_controller.h>
@@ -254,6 +255,26 @@ void serve_quit(SessionCore &core, const EditorRequest &) {
 }
 void serve_move_asset(SessionCore &core, const EditorRequest &request) {
 	core.renames().move_asset(request.path, request.folder);
+}
+void serve_delete_asset(SessionCore &core, const EditorRequest &request) {
+	core.chores().delete_asset(request);
+}
+void serve_duplicate_asset(SessionCore &core, const EditorRequest &request) {
+	core.chores().duplicate_asset(request);
+}
+void serve_new_folder(SessionCore &core, const EditorRequest &request) {
+	core.chores().new_folder(request.folder);
+}
+void serve_rename_folder(SessionCore &core, const EditorRequest &request) {
+	core.chores().rename_folder(request.folder, request.new_name);
+}
+void serve_delete_folder(SessionCore &core, const EditorRequest &request) {
+	core.chores().delete_folder(request.folder);
+}
+// UndoFile and RedoFile.
+void serve_file_history(SessionCore &core, const EditorRequest &request) {
+	if (request.kind == EditorRequestKind::UndoFile) core.chores().undo();
+	else core.chores().redo();
 }
 
 // --- the table ----------------------------------------------------------------------------------
@@ -535,8 +556,11 @@ constexpr RequestKindRow kRows[] = {
 			"does not take, a required one left out or a file the project lacks is refused, "
 			"document.values, nothing made); a new mission comes with its text table (<mission>.bin: "
 			"its title, an empty briefing) where the project has none of that name; opened when the "
-			"editor edits its kind, a step of the navigation history.")
-			.takes(request_params({ F::Path }, { F::FileKind, F::Values }))
+			"editor edits its kind, a step of the navigation history. folder (DI-25, Files' New here): the "
+			"folder it is made in (\"/\" the top level; left out, where the placement rule puts a file of its "
+			"kind), refused (document.path) outside the project, in a dot-folder or the export folder; the files "
+			"it makes are one step of the file history (undo_file).")
+			.takes(request_params({ F::Path }, { F::FileKind, F::Values, F::Folder }))
 			.holds(kFiles, kFilesAndDocuments)
 			.navigates()
 			.row,
@@ -1111,6 +1135,88 @@ constexpr RequestKindRow kRows[] = {
 			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
 			.ends_edit_groups()
 			.guarded(GuardScope::PlannedWrites, "Move %s", "Save all and move")
+			.acts_on_saved()
+			.row,
+	// DI-25: Files' chores, each done at once (no operation) and one step of the file history.
+	Request(K::DeleteAsset, "delete_asset", serve_delete_asset,
+			"The project file path deleted to the project's trash (.opennova/trash/<n>/, never emptied by the "
+			"editor: no delete is a permanent one), its open documents closed: a mission with the files the game "
+			"finds by its name, an import source with its record and its outputs, or, alone, its outputs kept as "
+			"files of the project where the placement rule puts their kinds. Refused (file.named) while anything "
+			"names what it deletes (the used_by query's uses, and an import reading it), the uses listed in words, "
+			"unless force: the uses then name nothing, Problems rows until undo_file brings it back. Refused too: "
+			"file.unknown, file.imported (an import's output: delete its source), file.exists (where a kept output "
+			"would land), file.trash. One step of the file history.")
+			.takes(request_params({ F::Path }, { F::Force, F::Alone }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments)
+			.ends_edit_groups()
+			.guarded(GuardScope::PlannedWrites, "Delete %s", "Save all and delete")
+			.acts_on_saved()
+			.row,
+	Request(K::DuplicateAsset, "duplicate_asset", serve_duplicate_asset,
+			"The project file path copied in its own folder under new_name, or, left out, the name the project's "
+			"rules give a copy: the stem's number counted on (oncrate1.3di makes oncrate2.3di), a name of at most "
+			"15 characters where the build packs the kind (an archive entry's name), a model's stem of at most 8 "
+			"(its add-on texture names <model>_<i>n.mdt fit 15), no name the project has in any case (as the "
+			"game's archives compare names), the base game serves, or a file of its set would take. A mission comes "
+			"with its companions under the copy's name, an import source with its record (its import makes the "
+			"copy's own outputs, a refresh started) unless alone. Selected in Files. Refused: file.unknown, "
+			"file.imported (an import's output: duplicate its source), file.name (the name rules, another "
+			"extension, no free name), file.exists, file.write. One step of the file history.")
+			.takes(request_params({ F::Path }, { F::NewName, F::Alone }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
+			.guarded(GuardScope::Document, "Duplicate %s", "Save")
+			.acts_on_saved()
+			.row,
+	Request(K::NewFolder, "new_folder", serve_new_folder,
+			"The folder made in the project (its folders on the way too), listed in Files though it is empty. "
+			"Refused: file.folder (the top level, outside the project, a dot-folder, the export folder), "
+			"file.exists. One step of the file history.")
+			.takes(request_params({ F::Folder }))
+			.holds(kFiles, kFiles)
+			.row,
+	Request(K::RenameFolder, "rename_folder", serve_rename_folder,
+			"The folder renamed new_name (one name, beside it): every file of the project in it moved under the new "
+			"name through the rename transaction as move_asset moves one (no reference rewritten: the game finds a "
+			"file by its name alone; an import source with its record, its outputs made again by a refresh), its "
+			"folders made there, empty ones too, its open documents, its card and the navigation's places "
+			"following. Refused: file.folder (the top level, a name with folders, its own name, outside the project), "
+			"file.unknown, file.exists, file.imported (an import outside it reading a file in it), and each file's "
+			"move as move_asset refuses it (an import source whose import reads files beside it moves when they are "
+			"all in the folder too); nothing moved. One step of the file history (its undo the rename back).")
+			.takes(request_params({ F::Folder, F::NewName }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
+			.guarded(GuardScope::PlannedWrites, "Rename the folder", "Save all and rename")
+			.acts_on_saved()
+			.row,
+	Request(K::DeleteFolder, "delete_folder", serve_delete_folder,
+			"The empty folder removed from the project. Refused: file.folder (the top level, one that holds "
+			"anything: delete or move it first), file.unknown. One step of the file history.")
+			.takes(request_params({ F::Folder }))
+			.holds(kFiles, kFiles)
+			.row,
+	Request(K::UndoFile, "undo_file", serve_file_history,
+			"The file history's last step taken back (Edit > Undo file): a delete's files back from the trash, a "
+			"duplicate's or a new file's files to the trash, a folder made removed and one deleted made again, a "
+			"folder's rename renamed back; the open documents of what leaves closed. Refused (file.history), the "
+			"step kept, with none, or when the files are not as it left them (something at a place it restores, a "
+			"file it takes gone); a folder it removes that holds files now stays. The project section's "
+			"file_history says what it takes back.")
+			.takes(request_params({}))
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
+			.guarded(GuardScope::PlannedWrites, "Undo file", "Save all and undo")
+			.acts_on_saved()
+			.row,
+	Request(K::RedoFile, "redo_file", serve_file_history,
+			"The step undo_file last took back done again (Edit > Redo file), as undo_file takes one back; a new "
+			"step drops what was taken back.")
+			.takes(request_params({}))
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
+			.guarded(GuardScope::PlannedWrites, "Redo file", "Save all and redo")
 			.acts_on_saved()
 			.row,
 	Request(K::PickDirectory, "pick_directory", nullptr,
