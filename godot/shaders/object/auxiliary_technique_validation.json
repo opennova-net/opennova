@@ -4,7 +4,7 @@
   "quality_scope": {
     "profile": "highest-quality-retail-path",
     "shader_usage_level": 2,
-    "locked_menu_policy": "godot/game/retail_video_quality_policy.gd",
+    "locked_menu_policy": "engine/runtime/menu/options_screen.cpp",
     "retail_effect_inventory": "godot/shaders/object/retail_effect_inventory.json",
     "normal_technique_validation": "godot/shaders/object/technique_validation.json",
     "pipeline_manifest": "godot/shaders/object/pipeline_manifest.json",
@@ -159,7 +159,7 @@
       ],
       "runtime_evidence": [
         {"path": "engine/runtime/menu/options_policy.h", "tokens": ["{\"SHADERUSAGE\", \"2\"}"]},
-        {"path": "godot/game/retail_video_quality_policy.gd", "tokens": ["driver.set_widget_disabled(id, true)"]}
+        {"path": "engine/runtime/menu/options_screen.cpp", "tokens": ["menu.set_widget_disabled(id, true)"]}
       ],
       "raster_probes": [],
       "bounded_residuals": []

@@ -1656,6 +1656,14 @@ target_link_libraries(menu_sound_test PRIVATE opennova_runtime)
 target_compile_features(menu_sound_test PRIVATE cxx_std_17)
 add_test(NAME menu_sound COMMAND menu_sound_test)
 
+# A menu run headless through the runtime's own driver (menu/menu_state_frame.h, ADR 0046 DI-35): the
+# frame seam over a compiler and its state, the runtime's Sound and ServiceRequested events, what the
+# game's code binds by name (menu/menu_commands.h) and the Options policy (OptionsScreen::apply_policy).
+add_executable(menu_state_frame_test menu/menu_state_frame_test.cpp)
+target_link_libraries(menu_state_frame_test PRIVATE opennova_runtime)
+target_compile_features(menu_state_frame_test PRIVATE cxx_std_17)
+add_test(NAME menu_state_frame COMMAND menu_state_frame_test)
+
 # The menu's screen history across files and a mission (menu/screen_history.h) and the
 # menu mode's leave and re-entry over it: leaving a mission returns to the screen it
 # was started from (D-MNU-28).

@@ -58,14 +58,14 @@ var _expansion_descriptions: Dictionary = {}  # folder name -> MOD_DESC text
 @export var menu_sound_profile_file := ""
 @export var menu_music_file := ""        # "" -> MENUMUS.BIN (M<n>.bin under an expansion)
 
-# Well-known control names (the JO "wired by convention" launch/quit controls).
-# An activated control matching one of these routes to the shell handler.
-@export var start_control_names := PackedStringArray([
-	"START_GAME", "ACCEPT", "LAUNCH", "GO", "HOST_GAME", "LAN_HOSTGAME",
-])
-@export var exit_control_names := PackedStringArray([
-	"EXIT", "QUIT", "QUIT_GAME", "QUIT_TO_DESKTOP",
-])
+# The well-known control names the shell binds Commands to (ADR 0001): the engine's table
+# (engine/runtime/menu/menu_commands.h, MenuDriver.command_names), which the editor's Try mode
+# reads too. A game whose menus name these controls otherwise points the sets at its own.
+# An activated control matching one routes to the shell handler; a document a companion owns
+# is the companion's.
+# The launch controls: a play screen's (a document holding a mission list) start its mission.
+@export var start_control_names := MenuDriver.command_names("start")
+@export var exit_control_names := MenuDriver.command_names("exit")
 # The mission-exit Command seam. Retail's in-game ABORT button does NOT leave
 # the mission: its authored actions raise the CONFIRM_EXIT "Are you sure?"
 # panel (SHOW CONFIRM_EXIT + HIDE MAIN_WRAPPER in the shipped game.mnu), and
@@ -79,14 +79,10 @@ var _expansion_descriptions: Dictionary = {}  # folder name -> MOD_DESC text
 # binding: its authored actions restore MAIN_WRAPPER. Binding ABORT here was
 # the bug that skipped the confirmation (the teardown swapped the document
 # under the emit, so the authored SHOW never dispatched).
-@export var return_control_names := PackedStringArray([
-	"CONFIRM_YES",
-])
+@export var return_control_names := MenuDriver.command_names("return")
 # The in-game RESTART command (game.mnu INGAME), the engine's
 # World::ingame_restart_command behind the shell's restart_requested.
-@export var restart_control_names := PackedStringArray([
-	"RESTART",
-])
+@export var restart_control_names := MenuDriver.command_names("restart")
 # The generic BACK command seam: the actionless named button the original
 # engine's shell binds by name (game.mnu's ESC-hotkeyed HIDDEN_BACK is the ONLY
 # resume affordance the shipped in-game menu has — there is no visible RESUME
@@ -94,41 +90,24 @@ var _expansion_descriptions: Dictionary = {}  # folder name -> MOD_DESC text
 # against a shipped or modded button of the same name that carries a real
 # action. Routed through the top-level back/quit logic: cross-.mnu back first,
 # then resume (in-game) or exit-to-desktop (main menu).
-@export var back_control_names := PackedStringArray([
-	"HIDDEN_BACK",
-])
+@export var back_control_names := MenuDriver.command_names("back")
 # List widgets the shell fills with the resource dir's missions (.bms).
-@export var mission_list_names := PackedStringArray([
-	"MISSION_LIST", "MISSIONLIST", "MISSIONS", "IA_LIST", "CA_MISSION_LIST",
-	"MAP_LIST",
-])
+@export var mission_list_names := MenuDriver.command_names("mission_lists")
 # The engine menu flow recognizes these SP lists and owns their selection gate.
-@export var sp_mission_list_names := PackedStringArray([
-	"IA_LIST", "CA_MISSION_LIST",
-])
+@export var sp_mission_list_names := MenuDriver.command_names("sp_lists")
 # The SP briefing pane a selection fills (cleared on every populate).
-@export var briefing_pane_names := PackedStringArray([
-	"BRIEFING",
-])
+@export var briefing_pane_names := MenuDriver.command_names("briefings")
 # The SP confirm controls receive the engine selection gate.
-@export var sp_accept_control_names := PackedStringArray([
-	"ACCEPT",
-])
+@export var sp_accept_control_names := MenuDriver.command_names("sp_accepts")
 # List widgets the shell fills with the expansions discoverable under the resource
 # dir (Options -> Mods). Activating one mounts it over the base game.
-@export var mod_list_names := PackedStringArray([
-	"AVAIL_LIST", "MOD_LIST", "MODLIST", "EXPANSION_LIST",
-])
+@export var mod_list_names := MenuDriver.command_names("mod_lists")
 # Readonly text widgets that show the selected expansion's description/name.
-@export var mod_desc_names := PackedStringArray([
-	"MOD_DESC", "MOD_DESCRIPTION",
-])
+@export var mod_desc_names := MenuDriver.command_names("mod_descriptions")
 
 # Controls that open NovaWorld (online multiplayer). The shipped JO main menu
 # carries an NW_MULTI_PLAYER button and jo_mp.mnu a NOVAWORLD window/screen.
-@export var novaworld_control_names := PackedStringArray([
-	"NW_MULTI_PLAYER", "NOVAWORLD", "NOVAWORLD_LOGIN", "INTERNET_GAME",
-])
+@export var novaworld_control_names := MenuDriver.command_names("novaworld")
 
 # Shell -> main_game intents. The shell never loads a world or quits the app
 # itself; it translates menu activity into these and lets main_game decide.

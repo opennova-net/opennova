@@ -185,7 +185,10 @@ struct MenuEvent {
 		// control, value = atol(FIELD) (the column), text = the edit's text,
 		// flag = numeric (GLB_FILTER_NUM), text2 = TEST.
 		FilterRequested,
-		Sound,           // text = bank file, text2 = trigger
+		// text = bank file, text2 = trigger; id = the widget whose row it is (a spin arrow's: its spin
+		// list's), value = its sound state (menu_sound.h MenuSoundState), text3 = the NAME of the window
+		// the row is on (the arrow's own).
+		Sound,
 		ValueChanged,    // text = widget name, text2 = kind, value = row, text3 = value text
 		WidgetActivated, // id, text = widget name
 		ListActivated,   // id, value = row
@@ -197,6 +200,13 @@ struct MenuEvent {
 		// column (-1 none), state = the row's state after the write,
 		// cell_value = that column's cell value, flag = the double-click form.
 		TableCellClicked,
+		// A row of the embedder's service verbs ran (FORM_POST, GLB_LOAD, GLB_LOADANDPING, GLB_PING,
+		// GLB_JOIN, APPMSG, LAN_SEARCH, LAN_JOIN, MNX): id = the acting widget (-1 a row run on its
+		// own), text = the TYPE as the parse spells it, text2 = the row's text, text3 = its FILE, value
+		// = its code. Raised as the row runs, in walk order; the runtime does nothing more with it
+		// [orig: CUIWidget_HandleScriptedAction @ 0x6497f0 — the jump table's service arms, which
+		// call into the NovaWorld, LAN and application layers].
+		ServiceRequested,
 	};
 	Kind kind = Kind::ScreenChanged;
 	int id = -1;
@@ -328,6 +338,9 @@ public:
 	// The shell pushes the screen a cross-file jump leaves and pops a row when a
 	// back passes this file's own stack.
 	ScreenHistory &screen_history() { return history_; }
+	// The screens this file's own back stack holds (a SCREEN row's pushes within the file), oldest first:
+	// what an embedder that opens the file anew carries into the history across files.
+	const std::vector<std::string> &own_history() const { return nav_stack_; }
 	const ScreenHistory &screen_history() const { return history_; }
 	// The menu mode's leave, at a mission's start: the screens this file's own back
 	// stack holds join the history in order (retail keeps one history for every
@@ -586,7 +599,9 @@ private:
 	bool window_row_(int owner_id, const mnu::Action &action);
 	void set_interactive_recursive_(int id, bool enabled);
 	void url_row_(const mnu::Action &action);
-	void play_sound_(const mnu::Window &w, const std::string &state_token);
+	// The row of `w` for the state (`id` the widget whose row it is), raised as a Sound.
+	void play_sound_(int id, const mnu::Window &w, const std::string &state_token);
+	void service_row_(int owner_id, const mnu::Action &action, int code);
 	// The pump's sound edges of one mouse sample (menu_sound.h's MenuSoundPump over
 	// the widget ids): the claim, live when visible in the hierarchy; a widget the
 	// pump reaches is one of the current screen shown up its chain, the open

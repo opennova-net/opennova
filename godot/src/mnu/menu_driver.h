@@ -145,6 +145,14 @@ public:
 	void select_host_location(int p_id, const String &p_country);
 	void prepare_options(const Ref<ControlsModel> &p_controls);
 	bool is_options_surface() const { return options_.is_surface(); }
+	// The retail Options policy on the surface prepare_options found (engine
+	// OptionsScreen::apply_policy), before the settings owner seeds its values.
+	void apply_options_policy() { options_.apply_policy(runtime_); }
+	// The shell's name set by its token (engine menu_commands.h: "start", "exit", "return",
+	// "restart", "back", "novaworld", "mission_lists", "sp_lists", "briefings", "sp_accepts",
+	// "mod_lists", "mod_descriptions"): MenuShell's defaults, one table the editor's Try mode
+	// reads too. Empty for another token.
+	static PackedStringArray command_names(const String &p_set);
 	int activate_options(const Ref<ControlsModel> &p_controls, const String &p_name);
 	void arm_options_remap(const Ref<ControlsModel> &p_controls, int p_id, int p_row);
 	int consume_options_input(const Ref<ControlsModel> &p_controls, const Ref<InputEvent> &p_event);

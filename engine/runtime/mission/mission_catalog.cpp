@@ -161,19 +161,13 @@ std::vector<Row> build(const ResourceIndex &index) {
 	for (const ResourceFileEntry &entry : index.resource_files("*")) {
 		if (entry.source_type != "file" || !strutil::ends_with_icase(entry.logical_name, ".bms"))
 			continue;
-		Row row;
-		row.file = entry.logical_name;
-		row.loose = true;
 		std::vector<uint8_t> bytes;
-		bms::Header header{};
-		const bool header_ok = index.read_file(row.file, bytes, VfsLookupPolicy::ForceLooseFirst) &&
-				read_header(bytes, header);
-		const std::string bin = bin_sibling_name(row.file);
+		if (!index.read_file(entry.logical_name, bytes, VfsLookupPolicy::ForceLooseFirst)) bytes.clear();
+		const std::string bin = bin_sibling_name(entry.logical_name);
 		if (!root_names) root_names = root_file_names(index.root_dir());
 		rtxt::File text;
 		const bool text_ok = root_names->count(strutil::to_lower(bin)) != 0 && load_text(index, bin, text);
-		fill_row(row, header, header_ok, text_ok ? &text : nullptr);
-		rows.push_back(std::move(row));
+		rows.push_back(loose_row(entry.logical_name, bytes, text_ok ? &text : nullptr));
 	}
 	// Then the two archive pairs: the expansion's <n>.pff with <n>L.pff, then
 	// localres.pff with language.pff. Slot 4 (resource.pff) is never walked, a `.bms` in
@@ -188,6 +182,20 @@ std::vector<Row> build(const ResourceIndex &index) {
 	// name in both pairs) come out in its order in retail, in walk order here.
 	std::stable_sort(rows.begin(), rows.end(), file_less);
 	return rows;
+}
+
+Row loose_row(const std::string &file, const std::vector<uint8_t> &bms, const rtxt::File *text) {
+	Row row;
+	row.file = file;
+	row.loose = true;
+	bms::Header header{};
+	const bool header_ok = read_header(bms, header);
+	fill_row(row, header, header_ok, text);
+	return row;
+}
+
+std::string text_table_name(const std::string &file) {
+	return bin_sibling_name(file);
 }
 
 std::string display_text(const Row &row) {
