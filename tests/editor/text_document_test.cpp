@@ -46,6 +46,7 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/credits_type.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/line_ends.h>
 #include <editor/documents/music_script_type.h>
 #include <editor/documents/script_type.h>
 #include <editor/documents/text_types.h>
@@ -586,12 +587,12 @@ static int test_line_ends() {
 	TEST_EXPECT(lone->load_bytes(bytes_of("a\rb\r\n"), "lone.wac", AssetKind::Script, "jo", error));
 	const std::vector<Diagnostic> crs = type->validate_file(*lone);
 	TEST_EXPECT(has_code(crs, "script.line_ending") && lone->serialize().text == "a\r\nb\r\n");
-	// A credits text's LF alone: the ConfigFile reader ends a line at CR LF.
+	// A credits text's LF alone: the ConfigFile reader ends a line at CR LF (the line-ends rule's).
 	const DocumentType *credits = document_type_for(AssetKind::Credits);
 	std::unique_ptr<DocumentBase> listed = credits->make();
 	TEST_EXPECT(listed->load_bytes(bytes_of("[ENV]\nscroll_rate = 0.5\n"), "lf.kda", AssetKind::Credits, "jo", error));
-	const std::vector<Diagnostic> lfs = credits->validate_file(*listed);
-	TEST_EXPECT(has_code(lfs, "credits.line_ending") && lfs[0].line == 1 && lfs[0].column == 6 &&
+	const std::vector<Diagnostic> lfs = line_end_findings(*listed, "jo");
+	TEST_EXPECT(has_code(lfs, "document.line_ends") && lfs[0].line == 1 && lfs[0].column == 6 &&
 	            listed->serialize().text == "[ENV]\r\nscroll_rate = 0.5\r\n");
 	// A text's file is written as it holds it.
 	std::unique_ptr<DocumentBase> plain = document_type_for(AssetKind::Text)->make();
@@ -1000,7 +1001,8 @@ static int test_credits_unread() {
 	std::unique_ptr<DocumentBase> extra = loaded();
 	TEST_EXPECT(apply(*extra, {TextDocument::replace(span(text_line, 1, 0), "text = Extra\n")}));
 	const std::vector<Diagnostic> ended = type->validate_file(*extra);
-	TEST_EXPECT(has_code(ended, "credits.line_ending") && !has_code(ended, "credits.unserializable"));
+	TEST_EXPECT(has_code(line_end_findings(*extra, "jo"), "document.line_ends") &&
+	            !has_code(ended, "credits.unserializable"));
 	const SerializeResult written = extra->serialize();
 	std::unique_ptr<DocumentBase> back = type->make();
 	TEST_EXPECT(written.ok() && back->load_bytes(bytes_of(written.text), "nlist.kda", AssetKind::Credits, "jo", error));

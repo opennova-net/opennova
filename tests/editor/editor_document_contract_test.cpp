@@ -96,6 +96,7 @@
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/environment_document.h>
+#include <editor/documents/line_ends.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mns_document.h>
 #include <editor/documents/mnu_document.h>
@@ -480,7 +481,7 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        {AssetKind::AvatarDefs, "Avatars.def",
 	         text_bytes("nationality N00 FIRST\r\n{\r\n}\r\nnationality N00 DUP_NAT\r\n{\r\n}\r\n")},
 	        // A HUD layout with an LF alone, which the game's reader reads as part of the line before it
-	        // (DI-20: hud_layout.line_ending).
+	        // (the line-ends rule's document.line_ends).
 	        {AssetKind::HudPosDefs, "hudpos.def", text_bytes("HUDHEALTH 25,741,177,751\nHUDCLIP 14,648\r\n")},
 	        // A 2 x 2 true-colour TGA, its origin bit set (S18: texture.tga_upside_down).
 	        {AssetKind::Texture, "top_first.tga", top_first_tga()},
@@ -1078,9 +1079,17 @@ void check_snapshot(const DocumentType &type, const Fixture &fixture, Document &
 // The type's validate_file (S13 D4): the file's own findings from its document alone, each on the
 // file and, where it names a record, on one the document holds; a second load of the file, which
 // gives its records the same identities, validates to the same findings.
+// A file's own findings as a validation makes them (documents/validation_cache): its type's
+// validate_file, then the line-ends rule's (documents/line_ends.h).
+std::vector<Diagnostic> own_findings(const DocumentType &type, const DocumentBase &document) {
+	std::vector<Diagnostic> findings = type.validate_file(document);
+	for (Diagnostic &d : line_end_findings(document, "jo")) findings.push_back(std::move(d));
+	return findings;
+}
+
 void check_validate_file(const DocumentType &type, const Fixture &fixture,
 		const DocumentBase &document, TypeCounts &counts) {
-	const std::vector<Diagnostic> findings = type.validate_file(document);
+	const std::vector<Diagnostic> findings = own_findings(type, document);
 	const Document *records = records_of(document);
 	for (const Diagnostic &d : findings) {
 		const std::string where = fixture.name + " " + d.code();
@@ -1093,7 +1102,7 @@ void check_validate_file(const DocumentType &type, const Fixture &fixture,
 	std::unique_ptr<DocumentBase> twin = type.make();
 	Diagnostic error;
 	check(twin->load_bytes(fixture.bytes, fixture.name, fixture.kind, "jo", error) &&
-					type.validate_file(*twin) == findings,
+					own_findings(type, *twin) == findings,
 			fixture.name, "a second load of the file validates to the same findings");
 	g_findings += findings.size();
 	counts.findings += findings.size();
