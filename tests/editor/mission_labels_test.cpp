@@ -555,7 +555,7 @@ int test_text_key_picks() {
 	TEST_EXPECT(edge);
 	FieldUse keyed;
 	Value key;
-	TEST_EXPECT(keyed_text_reference(*view.findings.graph, route, Value(int64_t(1)), keyed, key) && key == Value(std::string("STRWPNAME001")) &&
+	TEST_EXPECT(keyed_reference(*view.findings.graph, route, Value(int64_t(1)), keyed, key) && key == Value(std::string("STRWPNAME001")) &&
 	            keyed.reference == ReferenceKind::TextId && same(keyed.scope, "SYNTH_LOGIC.BIN/WPNames"));
 	const opennova::io::JsonValue targets = reference_targets_to_json(*document, marker, "ttool_index", view, JsonPage());
 	const opennova::io::JsonValue *leads = targets.get("targets");
