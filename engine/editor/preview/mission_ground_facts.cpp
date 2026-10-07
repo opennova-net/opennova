@@ -251,15 +251,12 @@ void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const 
 		};
 		terrain::resolve_tileset_surface_table(tile_files, trn_mission_tilestrip(trn, header.tile_set), tile_surface_.data());
 	}
-	// The water plane by the game's ladder: the mission's override, the terrain's, the environment's
-	// (water_frame.h; the device's Water resolves the same).
-	env::Config config;
-	bool env_loaded = false;
-	std::vector<uint8_t> bytes;
-	if (!header.environment.empty() && stamped->read(header.environment + ".env", bytes)) {
-		const std::string text(bytes.begin(), bytes.end());
-		env_loaded = env::load_mission_env(&text, config);
-	}
+	// The water plane by the game's ladder: the mission's override, the environment's, the terrain's
+	// (water_frame.h; the device's Water resolves the same), the environment as the mission's load makes it
+	// (the terrain's .trn, overcast.def, then the .env over them).
+	env::MissionEnv mission_env;
+	const bool env_loaded = mission_environment(*stamped, header, mission_env);
+	const env::Config &config = mission_env.config;
 	env::EnvironmentState state;
 	if (env_loaded) state.set_config(&config, true);
 	const env::BmsEnvOverrides overrides = env::bms_env_overrides_from_header(header.attrib_flags, header.water_override,
