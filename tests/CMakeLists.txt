@@ -4955,6 +4955,14 @@ target_link_libraries(editor_file_placement_test PRIVATE opennova_project_cli)
 target_include_directories(editor_file_placement_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_file_placement COMMAND editor_file_placement_test)
 
+# Files' chores (DI-25): a delete to the project's trash (who names the file asked first), a duplicate under the
+# name the project's rules give, a new file in a folder, folders made, renamed and deleted, and the file
+# history's undo and redo of each.
+add_executable(editor_file_chores_test editor/file_chores_test.cpp)
+target_link_libraries(editor_file_chores_test PRIVATE opennova_editor)
+target_include_directories(editor_file_chores_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_file_chores COMMAND editor_file_chores_test)
+
 # opennova-project as the editor's session, headless (S13 A7): the verb table against the request
 # and query tables, each verb's --json the session's answer to the same requests, the request and
 # query verbs, --install; its retail leg a project imported from the game install whose Problems
