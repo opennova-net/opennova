@@ -19,7 +19,8 @@ struct Flag {
 constexpr Flag kShow[] = {
 	{ "terrain", &MissionViewportOptions::terrain }, { "sky", &MissionViewportOptions::sky },
 	{ "water", &MissionViewportOptions::water }, { "models", &MissionViewportOptions::models },
-	{ "shadows", &MissionViewportOptions::shadows },
+	{ "shadows", &MissionViewportOptions::shadows }, { "foliage", &MissionViewportOptions::foliage },
+	{ "effects", &MissionViewportOptions::effects }, { "lights", &MissionViewportOptions::lights },
 };
 constexpr Flag kMarks[] = {
 	{ "items", &MissionViewportOptions::items }, { "buildings", &MissionViewportOptions::buildings },
