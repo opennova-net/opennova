@@ -23,12 +23,16 @@ const PLAY_MODES: Array[String] = ["runtime", "install", "strict"]
 ## it needs, and where the tool's `kind` goes (the request's member that names the viewport's kind):
 ## options and camera a set_viewport of the viewport's state (`device`, its device's size, beside the
 ## options or the camera; kind the change's), seek a set_viewport of the clock alone, which names no
-## document and no kind (the one preview clock every viewport reads), drag, command and drop (S14) an
-## edit_in_viewport (kind the drag's, the command's or the drop's). Its reads are the viewport query's
-## own op, the tokens the catalog lists for it (viewport_reads).
+## document and no kind (the one preview clock every viewport reads), try, click and key a menu's Try
+## mode (DI-35: try {on, reset}, the game's click at a point, one key or a text typed), drag, command and
+## drop (S14) an edit_in_viewport (kind the drag's, the command's or the drop's). Its reads are the
+## viewport query's own op, the tokens the catalog lists for it (viewport_reads).
 const VIEWPORT_WRITES := {
 	"options": {"kind": "set_viewport", "takes": ["options", "device"], "needs": "options", "kind_in": "viewport"},
 	"camera": {"kind": "set_viewport", "takes": ["camera", "device"], "needs": "camera", "kind_in": "viewport"},
+	"try": {"kind": "set_viewport", "takes": ["try"], "needs": "try", "kind_in": "viewport"},
+	"click": {"kind": "set_viewport", "takes": ["click"], "needs": "click", "kind_in": "viewport"},
+	"key": {"kind": "set_viewport", "takes": ["key"], "needs": "key", "kind_in": "viewport"},
 	"seek": {"kind": "set_viewport", "takes": ["clock"], "needs": "clock", "pathless": true},
 	"drag": {"kind": "edit_in_viewport", "takes": ["drag"], "needs": "drag", "kind_in": "drag"},
 	"command": {"kind": "edit_in_viewport", "takes": ["command"], "needs": "command", "kind_in": "command"},
@@ -44,7 +48,13 @@ const VIEWPORT_PROSE := (
 		+ "below) are followed first so they answer the document as it is now (a first read of a document "
 		+ "makes its viewport, which can move view_revision); a refusal is a tool error naming the query. op "
 		+ "options and camera change its state (a set_viewport: options {...} the kind's options, camera {...} "
-		+ "its camera, each with device {width, height}, its device's size, beside it); op seek sets the "
+		+ "its camera, each with device {width, height}, its device's size, beside it); op try, click and key "
+		+ "are a menu's Try mode (DI-35: the picture behaving as the game's menu through the runtime's own driver, "
+		+ "a sandbox; try {on, reset?} turns it on from the screen shown or off, reset back to where it started; "
+		+ "click {at: [x, y]} the game's click there in design units; key {key, shift?} one key by its name "
+		+ "(VK_RETURN, VK_ESCAPE, VK_TAB, ... or one character) or {text} characters typed; the answer's "
+		+ "viewport.body.try is where the game's menu is, the screens it went through, what the game would "
+		+ "have done (a mission started, a quit) and what the sandbox holds, its items the screen's windows); op seek sets the "
 		+ "preview clock every viewport reads (clock {playing, rate, time_ms, ticks}; it names no document and "
 		+ "no kind, and takes no path); op drag, command and drop edit through it (an edit_in_viewport: drag {...}, "
 		+ "command {...}, drop {...}, a file or a reference released on the picture at a point; a gesture's "
@@ -452,7 +462,7 @@ static func _viewport_tool(catalog: Dictionary) -> McpToolDef:
 	for field: Variant in catalog.get("fields", []):
 		docs[String(field.get("field", ""))] = String(field.get("doc", ""))
 	var change := String(docs.get("viewport", ""))
-	for member: String in ["options", "camera", "clock", "device"]:
+	for member: String in ["options", "camera", "clock", "device", "try", "click", "key"]:
 		properties[member] = {"type": "object", "description": "op %s: set_viewport's %s, as its viewport field takes it: %s"
 				% ["seek" if member == "clock" else ("options or camera" if member == "device" else member), member, change]}
 	for member: String in ["drag", "command", "drop"]:

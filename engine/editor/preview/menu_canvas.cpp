@@ -342,6 +342,11 @@ void MenuCanvas::follow(const MenuCanvasFrame &frame, CanvasRequests &out) {
 }
 
 void MenuCanvas::input(const MenuCanvasFrame &frame, const CanvasInput &in, CanvasRequests &out) {
+	// Trying, the game's menu takes the pointer and the keys: a gesture open ends.
+	if (frame.trying) {
+		if (gesture_.pressed() || gesture_.nudging()) end(out);
+		return;
+	}
 	// A nudge lasts while an arrow is held on the canvas that has the keyboard.
 	if (gesture_.nudging() && (!in.keyboard.arrow_held || !in.keyboard.focused))
 		end(out);
