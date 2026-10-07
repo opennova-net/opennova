@@ -16,6 +16,7 @@ enum class RequestFieldId : uint8_t {
 	Game,
 	Expansion,
 	BuildsOn,
+	BaseProject,
 	GameInstall,
 	Path,
 	Locator,
