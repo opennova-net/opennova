@@ -3,3 +3,18 @@ heightmap onisle1_heightmap.png
 colormap onisle1_colormap.png
 detail onisle1_detail.png
 surface onisle1_surface.png
+foliagemap onisle1_foliage.png
+foliage
+  graphic onundr1.3di
+  match 254
+  color_lower 0
+  color_upper 2
+  attrib shadow
+end
+foliage
+  graphic ongrass1.3di
+  match 253
+  color_lower 0
+  color_upper 2
+  attrib shadow
+end
