@@ -4917,6 +4917,13 @@ target_link_libraries(editor_mission_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_mission_viewport COMMAND editor_mission_viewport_test)
 
+# The surface classes and the foliage over a mission's terrain (ADR 0046 DI-29, editor/preview/
+# mission_ground_overlay): the ground's foliage at a point and the two overlays over a minted Tmap.
+add_executable(editor_mission_ground_overlay_test editor/mission_ground_overlay_test.cpp)
+target_link_libraries(editor_mission_ground_overlay_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_ground_overlay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_mission_ground_overlay COMMAND editor_mission_ground_overlay_test)
+
 # Place a model no item draws yet (DI-12, editor/preview/model_placement, editor/documents/model_item) over
 # a real session and the synth models: the item a model is drawn as from its parts; a model no item draws
 # dropped on a mission making its item in items.def (the next free id, its TYPE, its graphic), then placed,
