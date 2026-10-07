@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <exception>
 #include <optional>
 #include <sstream>
@@ -34,7 +35,104 @@ constexpr int kSurfaceSideMin = 256;      // a surface map's least side (JO ship
 constexpr uint8_t kNeutralGrey = 128;     // the detail's modulate x2 leaves a colour as it is at 128
 constexpr double kTrnGenTop = 127.5;      // an 8-bit map's white after TrnGen's smoothing: 32 x 4 x 255 / 256
 
-const char *const kSetKeys[] = {"heightmap", "colormap", "detail", "tiles", "surface"};
+const char *const kSetKeys[] = {"heightmap", "colormap", "detail", "tiles", "surface", "foliagemap"};
+constexpr size_t kSetKeyCount = sizeof(kSetKeys) / sizeof(kSetKeys[0]);
+// A foliage block's keys, the .trn's own [orig: Terrain_ParseConfigCallback @ 0x60F330].
+const char *const kFoliageKeys[] = {"graphic", "match", "color_lower", "color_upper", "attrib"};
+
+bool foliage_key(const std::string &key) {
+	for (const char *k : kFoliageKeys)
+		if (key == k) return true;
+	return false;
+}
+
+// The words a value splits into: spaces, tabs and commas apart, as the .trn's walk splits a line.
+std::vector<std::string> words_of(const std::string &text) {
+	std::vector<std::string> out;
+	std::string word;
+	for (const char c : text) {
+		if (c == ' ' || c == '\t' || c == ',') {
+			if (!word.empty()) out.push_back(std::move(word));
+			word.clear();
+		} else {
+			word += c;
+		}
+	}
+	if (!word.empty()) out.push_back(std::move(word));
+	return out;
+}
+
+// One key of a foliage definition and its values set on `def`; false, with `why`, for values the game would
+// not read as given.
+bool set_foliage_key(const std::string &key, const std::vector<std::string> &values, FoliageDef &def, std::string &why) {
+	if (key == "graphic") {
+		if (values.size() != 1) {
+			why = "graphic names one model";
+			return false;
+		}
+		def.graphic = values.front();
+		return true;
+	}
+	if (key == "match") {
+		// The remap compares four codes [orig: Foliage_RemapPixelToDefMask @ 0x5FF4E0, +0x108..+0x10B]; code 0
+		// matches nothing (pixel 0 returns before the walk) and the parser narrows a code to its byte.
+		if (values.empty() || values.size() > size_t(FOLIAGE_MATCH_CODES)) {
+			why = "match takes one to four codes (the game compares four)";
+			return false;
+		}
+		def.match.fill(FOLIAGE_MATCH_UNSET);
+		for (size_t i = 0; i < values.size(); ++i) {
+			const std::optional<int> code = strutil::parse_int(values[i]);
+			if (!code || *code < 1 || *code > 255) {
+				why = "match's code '" + values[i] + "' is no code from 1 to 255 (0 grows nothing)";
+				return false;
+			}
+			def.match[i] = *code;
+		}
+		return true;
+	}
+	if (key == "color_lower" || key == "color_upper") {
+		const std::optional<int> mode = values.size() == 1 ? strutil::parse_int(values.front()) : std::nullopt;
+		if (!mode || *mode < 0 || *mode > 2) {
+			why = key + " is 0, 1 or 2";
+			return false;
+		}
+		(key == "color_lower" ? def.color_lower : def.color_upper) = *mode;
+		return true;
+	}
+	if (key == "attrib") {
+		// Each word ORs its flag [orig: Terrain_ParseConfigCallback @ 0x60F58B, forceon 1, shadow 2].
+		if (values.empty()) {
+			why = "attrib takes forceon, shadow or both";
+			return false;
+		}
+		for (const std::string &value : values) {
+			if (strutil::iequals(value, "forceon")) def.attrib_flags = uint8_t(def.attrib_flags | FOLIAGE_ATTRIB_FORCE_ON);
+			else if (strutil::iequals(value, "shadow")) def.attrib_flags = uint8_t(def.attrib_flags | FOLIAGE_ATTRIB_SHADOW);
+			else {
+				why = "attrib's '" + value + "' is neither forceon nor shadow";
+				return false;
+			}
+		}
+		return true;
+	}
+	why = "'" + key + "' is no key of a foliage definition (it takes graphic, match, color_lower, color_upper and attrib)";
+	return false;
+}
+
+// A definition the game would place something by: a graphic (a slot without one is skipped [orig:
+// Foliage_RemapPixelToDefMask @ 0x5FF4F2]) and a code.
+bool foliage_whole(const FoliageDef &def, std::string &why) {
+	if (def.graphic.empty()) {
+		why = "names no graphic (the game skips a definition whose graphic is empty)";
+		return false;
+	}
+	if (foliage_def_match_count(def) == 0) {
+		why = "matches no code (it would grow nowhere)";
+		return false;
+	}
+	return true;
+}
 
 bool number_in(const std::string &value, double low, double high, double &out) {
 	const std::optional<double> parsed = strutil::parse_double(value);
@@ -73,7 +171,8 @@ RgbaImage flat_image(int side, uint8_t r, uint8_t g, uint8_t b) {
 }
 
 // The .trn the outputs make: the names, the sector grid of the layout, the water.
-TrnConfig make_trn(const std::string &stem, const TerrainImportSettings &settings, bool tiles, bool surface) {
+TrnConfig make_trn(const std::string &stem, const TerrainImportSettings &settings, bool tiles, bool surface,
+                   bool foliage) {
 	TrnConfig trn;
 	trn.name = stem;
 	trn.colormap = stem + "_c.tga";
@@ -84,6 +183,7 @@ TrnConfig make_trn(const std::string &stem, const TerrainImportSettings &setting
 	trn.tileinfo = stem + ".til";
 	if (tiles) trn.tilestrip = stem + "_t.tga";
 	if (surface) trn.charmap = stem + "_m.pcx";
+	if (foliage) trn.foliagemap = stem + "_f.pcx";
 	// The .trn's water_height is half world units [orig: TimeOfDay_ParseProperty @ 0x57CB48..0x57CB6A,
 	// atol << 15 into 16.16]; 0 draws no water [orig: render_water_surface @ 0x5C32E0..0x5C32E7].
 	trn.water_height = static_cast<int>(std::lround(settings.water * 2.0));
@@ -117,6 +217,9 @@ bool parse_terrain_set(const std::vector<uint8_t> &bytes, TerrainSet &out, std::
 	std::istringstream lines(std::string(bytes.begin(), bytes.end()));
 	std::string line;
 	int number = 0;
+	// The foliage block open, and the line that opened it (0: none).
+	FoliageDef def;
+	int block = 0;
 	while (std::getline(lines, line)) {
 		++number;
 		const size_t comment = line.find(';');
@@ -126,22 +229,65 @@ bool parse_terrain_set(const std::vector<uint8_t> &bytes, TerrainSet &out, std::
 		const size_t gap = text.find_first_of(" \t");
 		const std::string key = strutil::to_lower(text.substr(0, gap));
 		const std::string value = gap == std::string::npos ? std::string() : strutil::trim(text.substr(gap));
-		std::string *slot = key == "heightmap" ? &out.heightmap
-		                    : key == "colormap" ? &out.colormap
-		                    : key == "detail" ? &out.detail
-		                    : key == "tiles" ? &out.tiles
-		                    : key == "surface" ? &out.surface
-		                                       : nullptr;
+		const std::string at = "line " + std::to_string(number);
+		if (block) {
+			if (key == "end") {
+				if (!foliage_whole(def, why)) {
+					why = "the foliage block of line " + std::to_string(block) + " " + why;
+					return false;
+				}
+				out.foliage.push_back(def);
+				block = 0;
+			} else if (key == "foliage") {
+				why = at + " opens a foliage block inside the one of line " + std::to_string(block) + ", which has no end";
+				return false;
+			} else if (!set_foliage_key(key, words_of(value), def, why)) {
+				why = at + ": " + why;
+				return false;
+			}
+			continue;
+		}
+		if (key == "foliage") {
+			// The game reads four blocks; a fifth reads the rest of its file into nothing [orig:
+			// Terrain_ParseConfigCallback @ 0x60F330, `dword_31BC900 < 4`].
+			if (out.foliage.size() >= kTerrainFoliageDefs) {
+				why = at + " opens a fifth foliage block: a terrain holds four foliage definitions";
+				return false;
+			}
+			if (!value.empty()) {
+				why = at + "'s foliage opens a definition's block, its keys on the lines below it to its end, and takes no "
+				           "file (the foliage map is foliagemap)";
+				return false;
+			}
+			def = FoliageDef();
+			block = number;
+			continue;
+		}
+		if (key == "end" || foliage_key(key)) {
+			why = at + "'s " + key + " stands outside a foliage block";
+			return false;
+		}
+		std::string *slot = key == "heightmap"    ? &out.heightmap
+		                    : key == "colormap"   ? &out.colormap
+		                    : key == "detail"     ? &out.detail
+		                    : key == "tiles"      ? &out.tiles
+		                    : key == "surface"    ? &out.surface
+		                    : key == "foliagemap" ? &out.foliagemap
+		                                          : nullptr;
 		if (!slot) {
-			why = "line " + std::to_string(number) + " names '" + key + "', which a terrain set does not take (it takes " +
-			      "heightmap, colormap, detail, tiles and surface)";
+			why = at + " names '" + key + "', which a terrain set does not take (it takes heightmap, colormap, detail, " +
+			      "tiles, surface, foliagemap and foliage blocks)";
 			return false;
 		}
 		if (value.empty()) {
-			why = "line " + std::to_string(number) + "'s " + key + " names no file";
+			why = at + "'s " + key + " names no file";
 			return false;
 		}
 		*slot = value;
+	}
+	if (block) {
+		why = "the foliage block of line " + std::to_string(block) + " has no end";
+		return false;
 	}
 	if (out.heightmap.empty() || out.colormap.empty()) {
 		why = "a terrain set names its heightmap and its colormap";
@@ -152,10 +298,65 @@ bool parse_terrain_set(const std::vector<uint8_t> &bytes, TerrainSet &out, std::
 
 std::vector<uint8_t> write_terrain_set(const TerrainSet &set) {
 	std::string text = "; A terrain set: the images the editor's terrain importer makes a terrain from (ADR 0046 S20).\r\n";
-	const std::string *values[] = {&set.heightmap, &set.colormap, &set.detail, &set.tiles, &set.surface};
-	for (size_t i = 0; i < 5; ++i)
+	const std::string *values[] = {&set.heightmap, &set.colormap, &set.detail, &set.tiles, &set.surface, &set.foliagemap};
+	static_assert(sizeof(values) / sizeof(values[0]) == kSetKeyCount, "a value per set key");
+	for (size_t i = 0; i < kSetKeyCount; ++i)
 		if (!values[i]->empty()) text += std::string(kSetKeys[i]) + " " + *values[i] + "\r\n";
+	// Each definition as the .trn writes its block.
+	for (const FoliageDef &def : set.foliage) {
+		text += "foliage\r\n  graphic " + def.graphic + "\r\n  match";
+		for (const int code : def.match)
+			if (code >= 0) text += " " + std::to_string(code);
+		text += "\r\n  color_lower " + std::to_string(def.color_lower) + "\r\n  color_upper " +
+		        std::to_string(def.color_upper) + "\r\n";
+		if (def.attrib_flags & FOLIAGE_ATTRIB_KNOWN_MASK) {
+			text += "  attrib";
+			if (def.attrib_flags & FOLIAGE_ATTRIB_FORCE_ON) text += " forceon";
+			if (def.attrib_flags & FOLIAGE_ATTRIB_SHADOW) text += " shadow";
+			text += "\r\n";
+		}
+		text += "end\r\n";
+	}
 	return text_bytes(text);
+}
+
+bool parse_foliage_definitions(const std::string &text, std::vector<FoliageDef> &out, std::string &why) {
+	out.clear();
+	size_t start = 0;
+	while (start <= text.size()) {
+		const size_t bar = text.find('|', start);
+		const std::string one = strutil::trim(text.substr(start, bar == std::string::npos ? std::string::npos : bar - start));
+		start = bar == std::string::npos ? text.size() + 1 : bar + 1;
+		if (one.empty()) continue;
+		if (out.size() >= kTerrainFoliageDefs) {
+			why = "a terrain holds four foliage definitions";
+			return false;
+		}
+		const std::string number = "definition " + std::to_string(out.size() + 1);
+		// A key, then its values up to the next key.
+		const std::vector<std::string> words = words_of(one);
+		FoliageDef def;
+		for (size_t i = 0; i < words.size();) {
+			const std::string key = strutil::to_lower(words[i]);
+			if (!foliage_key(key)) {
+				why = number + ": '" + words[i] + "' is no key of a foliage definition (it takes graphic, match, " +
+				      "color_lower, color_upper and attrib)";
+				return false;
+			}
+			std::vector<std::string> values;
+			for (++i; i < words.size() && !foliage_key(strutil::to_lower(words[i])); ++i) values.push_back(words[i]);
+			if (!set_foliage_key(key, values, def, why)) {
+				why = number + ": " + why;
+				return false;
+			}
+		}
+		if (!foliage_whole(def, why)) {
+			why = number + " " + why;
+			return false;
+		}
+		out.push_back(def);
+	}
+	return true;
 }
 
 const std::vector<ImportOptionRow> &terrain_import_option_rows() {
@@ -236,12 +437,13 @@ bool terrain_stem_fits(const std::string &stem, std::string &why) {
 	return true;
 }
 
-std::vector<std::string> terrain_output_names(const std::string &stem, bool tiles, bool surface) {
+std::vector<std::string> terrain_output_names(const std::string &stem, bool tiles, bool surface, bool foliage) {
 	std::vector<std::string> names = {stem + ".cpt", stem + "_c.tga", stem + "_dt.tga", stem + "_dm.tga",
 	                                  stem + "_d1.tga"};
 	if (tiles) names.push_back(stem + "_t.tga");
 	names.push_back(stem + ".til");
 	if (surface) names.push_back(stem + "_m.pcx");
+	if (foliage) names.push_back(stem + "_f.pcx");
 	names.push_back(stem + ".trn");
 	return names;
 }
@@ -393,6 +595,85 @@ bool decode_terrain_surface(const std::string &name, const std::vector<uint8_t> 
 	return false;
 }
 
+bool decode_terrain_foliage(const std::string &name, const std::vector<uint8_t> &bytes, IndexedImage8 &out,
+                            std::string &why) {
+	out = IndexedImage8();
+	RgbaImage colours;
+	IndexedImage8 indices;
+	if (strutil::ends_with_icase(name, ".png")) {
+		if (!decode_png(bytes, colours, why, &indices)) {
+			why = name + ": " + why;
+			return false;
+		}
+	} else {
+		ImageSource source;
+		if (!decode_image_source(name, bytes, source, why)) {
+			why = name + ": " + why;
+			return false;
+		}
+		colours = std::move(source.image);
+		if (source.indexed) indices = std::move(source.indices);
+	}
+	// The game keeps the width alone, the rows' length and the power of two it shifts the atlas position by
+	// [orig: Foliage_LoadFoliageMapPCX @ 0x605B44..0x605B60; Foliage_SampleFoliageMapMask @ 0x60662D]: a
+	// map shorter than that is read past its last row, one wider than 1024 at its first texel alone.
+	const int w = colours.width, h = colours.height;
+	if (w != h || !power_of_two(w) || w > kSide) {
+		why = name + " is " + std::to_string(w) + " x " + std::to_string(h) +
+		      ": a foliage map is square, a power of two at most 1024 texels a side, laid over the heightmap";
+		return false;
+	}
+	const size_t texels = size_t(w) * size_t(h);
+	out.width = w;
+	out.height = h;
+	if (!indices.empty()) {
+		out.indices = std::move(indices.indices);
+		std::memcpy(out.palette, indices.palette, sizeof(out.palette));
+		return true;
+	}
+	// A grey image: its levels the codes, a grey ramp the palette.
+	out.indices.assign(texels, 0);
+	for (size_t i = 0; i < texels; ++i) {
+		const uint8_t *p = &colours.pixels[i * 4];
+		if (p[0] != p[1] || p[1] != p[2]) {
+			char colour[8];
+			std::snprintf(colour, sizeof(colour), "#%02X%02X%02X", p[0], p[1], p[2]);
+			why = name + "'s texel (" + std::to_string(i % size_t(w)) + ", " + std::to_string(i / size_t(w)) + ") is " +
+			      colour + ": a foliage map's texels are codes, an indexed image's indices or a grey image's levels";
+			out = IndexedImage8();
+			return false;
+		}
+		out.indices[i] = p[0];
+	}
+	for (int i = 0; i < 256; ++i) out.palette[i][0] = out.palette[i][1] = out.palette[i][2] = uint8_t(i);
+	return true;
+}
+
+std::vector<std::string> terrain_foliage_notes(const IndexedImage8 &map, const std::vector<FoliageDef> &defs) {
+	std::vector<std::string> notes;
+	size_t counts[256] = {};
+	for (const uint8_t code : map.indices) ++counts[code];
+	std::string loose;
+	size_t loose_texels = 0;
+	for (int code = 1; code < 256; ++code) {
+		if (!counts[code] || foliage_remap_pixel_to_def_mask(defs, code) != 0) continue;
+		loose += (loose.empty() ? "" : ", ") + std::to_string(code);
+		loose_texels += counts[code];
+	}
+	if (!loose.empty())
+		notes.push_back("codes " + loose + " (" + std::to_string(loose_texels) + " texels) match no foliage definition: " +
+		                "nothing grows there");
+	for (size_t slot = 0; slot < defs.size() && slot < kTerrainFoliageDefs; ++slot) {
+		bool held = false;
+		for (const int code : defs[slot].match)
+			if (code > 0 && code < 256 && counts[code]) held = true;
+		if (!held)
+			notes.push_back("foliage " + std::to_string(slot + 1) + " (" + defs[slot].graphic +
+			                ") matches no code the foliage map holds: it grows nowhere");
+	}
+	return notes;
+}
+
 int terrain_steep_blocks(const std::vector<uint16_t> &raw16) {
 	int steep = 0;
 	for (size_t start = 0; start + 256 <= raw16.size(); start += 256) {
@@ -446,6 +727,24 @@ bool run_terrain_import(ImportContext &context, ImportProduct &out) {
 		if (!context.read(set.surface, bytes)) return false;
 		if (!decode_terrain_surface(set.surface, bytes, surface, why)) return refuse(why + ".");
 	}
+
+	IndexedImage8 foliage;
+	if (!set.foliagemap.empty()) {
+		if (!context.read(set.foliagemap, bytes)) return false;
+		if (!decode_terrain_foliage(set.foliagemap, bytes, foliage, why)) return refuse(why + ".");
+	}
+	// What the foliage map grows by the definitions, as the game remaps it at load [orig:
+	// Foliage_LoadFoliageMapPCX @ 0x605B73..0x605B8A; Foliage_RemapPixelToDefMask @ 0x5FF4E0].
+	std::vector<std::string> foliage_notes;
+	if (foliage.empty() && !set.foliage.empty())
+		foliage_notes.push_back("the set's foliage definitions grow nothing: it names no foliagemap");
+	else if (!foliage.empty() && set.foliage.empty())
+		foliage_notes.push_back(set.foliagemap + " grows nothing: the set holds no foliage definition");
+	else if (!foliage.empty())
+		for (std::string &note : terrain_foliage_notes(foliage, set.foliage)) foliage_notes.push_back(set.foliagemap + ": " + note);
+	for (const std::string &note : foliage_notes)
+		out.diagnostics.push_back(
+		        make_finding(CoreFinding::ImportTerrain, DiagnosticSeverity::Warning, note + ".", source_name, "foliagemap"));
 
 	// The bake: the heights and the ground mesh.
 	trngen::TerrainBakeInput bake;
@@ -506,10 +805,23 @@ bool run_terrain_import(ImportContext &context, ImportProduct &out) {
 		out.outputs.push_back(std::move(charmap));
 	}
 
+	if (!foliage.empty()) {
+		// The game's 8-bit PCX reader takes the indices alone [orig: Foliage_LoadFoliageMapPCX @ 0x605AF1 ->
+		// Texture_LoadPCXFromPFF8Bit @ 0x56E0A0]; retail names it `_f` (Dvxi5_f.pcx).
+		ImportOutput foliage_map;
+		foliage_map.name = stem + "_f.pcx";
+		if (!encode_pcx_indexed(foliage, foliage_map.bytes, why))
+			return refuse(foliage_map.name + " cannot be written: " + why + ".", CoreFinding::ImportEncode);
+		out.outputs.push_back(std::move(foliage_map));
+	}
+
 	ImportOutput trn_out;
 	trn_out.name = stem + ".trn";
 	std::ostringstream trn_text;
-	if (!save_trn(trn_text, make_trn(stem, settings, !tiles.empty(), !surface.empty()), why))
+	TrnConfig trn = make_trn(stem, settings, !tiles.empty(), !surface.empty(), !foliage.empty());
+	// The definitions as the .trn's foliage blocks, in their slots' order.
+	trn.foliage_defs = set.foliage;
+	if (!save_trn(trn_text, trn, why))
 		return refuse(trn_out.name + " cannot be written: " + why + ".", CoreFinding::ImportEncode);
 	trn_out.bytes = text_bytes(trn_text.str());
 	out.outputs.push_back(std::move(trn_out));

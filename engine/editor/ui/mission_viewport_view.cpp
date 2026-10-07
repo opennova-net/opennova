@@ -131,6 +131,7 @@ struct MissionViewportView::Tools {
 	void events_using(Workspace &workspace, const MissionViewport &mission, const SessionView &view);
 	void notes(const MissionViewport &mission);
 	void ground_line();
+	void legend(ViewportCanvas &ui, const MissionViewport &mission);
 	float snap_metres() const { return snap; }
 };
 
@@ -192,6 +193,8 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 			[&](const CanvasInput &in) {
 				tools.mouse = in.mouse;
 				tools.mouse_on_picture = in.hovered;
+				// The ground overlay's legend over the picture's corner (DI-29).
+				if (mission.options().overlay != MissionGroundOverlay::None) tools.legend(canvas_ui(), mission);
 				if (canvas) {
 					tools.hint = canvas->hint(context, in);
 					const MissionGroundFacts &ground = canvas->ground(context, in);
@@ -641,6 +644,20 @@ void MissionViewportView::Tools::show_popup(MissionViewportOptions &options) {
 	ImGui::Checkbox("Models", &options.models);
 	ImGui::Checkbox("Static shadows", &options.shadows);
 	ImGui::Separator();
+	// DI-29: what the game reads at each point of the ground, tinted over the terrain with its legend.
+	ImGui::TextDisabled("Over the terrain");
+	const auto overlay = [&](const char *label, MissionGroundOverlay kind, const char *tip) {
+		if (ImGui::RadioButton(label, options.overlay == kind)) options.overlay = kind;
+		ui_kit::tooltip(tip);
+	};
+	overlay("Nothing", MissionGroundOverlay::None, "The terrain as the game draws it.");
+	overlay("Surface classes", MissionGroundOverlay::Surfaces,
+			"Each point's surface class as the game reads it (its char map, the placed tiles outlined over it): what "
+			"footsteps play and what a round's impact plays there. The legend names each class.");
+	overlay("Foliage", MissionGroundOverlay::Foliage,
+			"Where the terrain's foliage map grows each foliage definition (its codes to the .trn's foliage blocks), "
+			"and what the placed tiles keep off. The legend names each definition's model.");
+	ImGui::Separator();
 	ImGui::TextDisabled("The marks");
 	ImGui::Checkbox("Items", &options.items);
 	ImGui::Checkbox("Buildings", &options.buildings);
@@ -687,12 +704,29 @@ void MissionViewportView::Tools::ground_line() {
 	if (ground_surface >= 0 && ground_surface < kCharmapLegendCount) {
 		const CharmapLegendColour &c = kCharmapLegend[ground_surface];
 		const float side = ImGui::GetTextLineHeight();
-		ImGui::ColorButton("##surface", ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f),
+		// Its own id: the canvas's surface is "##surface" in the same window (ImGui's conflicting-id warning).
+		ImGui::ColorButton("##ground_class", ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f),
 				ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker | ImGuiColorEditFlags_NoDragDrop,
 				ImVec2(side, side));
 		ImGui::SameLine();
 	}
 	ui_kit::clipped_text("Ground: " + ground);
+}
+
+void MissionViewportView::Tools::legend(ViewportCanvas &ui, const MissionViewport &mission) {
+	const MissionOverlayImage &overlay = mission.overlay();
+	std::vector<ViewportCanvas::LegendRow> rows;
+	for (const MissionOverlayRow &row : overlay.legend) {
+		ViewportCanvas::LegendRow line;
+		std::copy(std::begin(row.rgb), std::end(row.rgb), line.rgb);
+		char share[16] = "";
+		if (row.share > 0.0) std::snprintf(share, sizeof(share), " (%.1f%%)", row.share * 100.0);
+		line.text = row.key + ": " + ui_kit::fit(row.words, ImGui::GetFontSize() * 30.0f) + share;
+		rows.push_back(std::move(line));
+	}
+	std::string title = overlay.title;
+	if (!overlay.words.empty()) title += (title.empty() ? "" : "\n") + overlay.words;
+	ui.legend(title, rows);
 }
 
 void MissionViewportView::Tools::notes(const MissionViewport &mission) {
