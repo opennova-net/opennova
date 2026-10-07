@@ -1215,8 +1215,9 @@ void test_menu_bar_status() {
 
 	// A window too narrow for all of it: the parts on the left go first, what was said the
 	// first of them; the buttons stay. Back and Forward lead the bar, two arrows' room taken
-	// before the menus.
-	const float arrows = 2.0f * (ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x);
+	// before the menus, and the Go menu's (DI-18) among them.
+	const float arrows = 2.0f * (ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x) +
+	                     ImGui::CalcTextSize("Go").x + ImGui::GetStyle().ItemSpacing.x * 2.0f;
 	ImGui::GetIO().DisplaySize = ImVec2(580.0f + arrows, 700.0f);
 	ui.frames(3);
 	text = logged_frame(ui);
@@ -1229,8 +1230,8 @@ void test_menu_bar_status() {
 
 	// At every width the right end starts after the last menu and Stop ends inside the bar.
 	const ImGuiID bar_id = menu_bar_id();
-	const std::vector<ImGuiID> menus = {item_id(bar_id, {"File"}), item_id(bar_id, {"Edit"}), item_id(bar_id, {"Build"}),
-	                                    item_id(bar_id, {"Windows"})};
+	const std::vector<ImGuiID> menus = {item_id(bar_id, {"File"}), item_id(bar_id, {"Edit"}), item_id(bar_id, {"Go"}),
+	                                    item_id(bar_id, {"Build"}), item_id(bar_id, {"Windows"})};
 	const std::vector<ImGuiID> parts = {item_id(bar_id, {"status", "##unsaved"}), item_id(bar_id, {"status", "##problems"}),
 	                                    item_id(bar_id, {"status", "Build"}), item_id(bar_id, {"status", "Play"}),
 	                                    item_id(bar_id, {"status", "Stop"})};
@@ -2714,14 +2715,15 @@ void test_mission_view_placing() {
 	run.settle();
 	CHECK(v.documents.selection.primary == marks[size_t(pump)].record, "the right button selects the mark under it");
 	text = logged_frame(ui);
-	CHECK(in_order(text, { "Paste here", "Frame", "Drop to ground", "Duplicate", "Delete", "Select same item", "Go to in outline",
+	CHECK(in_order(text, { "Paste here", "Frame", "Drop to ground", "Duplicate", "Delete", "Go to item", "Go to model",
+	                         "Show model in Files", "Place another", "Select all like this", "Go to in outline", "Find usages",
 	                         "Show events using this" }),
-	      "the menu of what applies");
+	      "the menu of what applies, the entity's jumps among it (DI-18)");
 	column = column_window();
 	if (!column) return;
-	ui.activate(popup_item(item_id(column->ID, { "mission_canvas_menu" }), "Select same item"));
+	ui.activate(popup_item(item_id(column->ID, { "mission_canvas_menu" }), "Select all like this"));
 	run.settle();
-	CHECK(v.documents.selection.records.size() == 3, "Select same item: the three pumps");
+	CHECK(v.documents.selection.records.size() == 3, "Select all like this: the three pumps");
 	// Ctrl+V over the picture with an event on the clipboard (nothing with a place to paste at): the
 	// session's own paste, never Paste here's refusal (S15 review).
 	const auto *placed_in = static_cast<const MissionDocument *>(session.document_for(path));

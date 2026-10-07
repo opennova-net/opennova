@@ -110,7 +110,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/validation_cache.cpp
     # graph — the asset graph: the extractors, the reference kinds' table, the per-file slots and
     # their indexes, the one resolver, a base layer's names, the reference queries a document's
-    # fields ask, the rename transaction; what other files make of what one defines (the use
+    # fields ask, the jumps (DI-18: Go to file and name, Find usages, Go to definition), the rename transaction; what other files make of what one defines (the use
     # checks, and what a stylesheet line's value is used as) and the one validation pass over the
     # project's files; the display names (a value as a modder reads it, the graph as the names)
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/asset_graph.cpp
@@ -118,6 +118,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/extractors.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/graph_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/graph_layer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graph/jump_queries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/native_text_sites.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/project_validation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/reference_kinds.cpp
