@@ -993,6 +993,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		request.save_before_play = save;
 		return true;
 	}
+	case F::Alone: return flag_of(json, token, request.alone, error);
 	case F::kCount: break;
 	}
 	error = std::string("Unknown request member \"") + token + "\".";
@@ -1107,6 +1108,7 @@ bool field_to_json(
 	case F::SaveBeforePlay:
 		out = boolean(request.save_before_play.value_or(true));
 		return request.save_before_play.has_value();
+	case F::Alone: out = boolean(request.alone); return request.alone;
 	case F::kCount: break;
 	}
 	out = JsonValue::make_null();
