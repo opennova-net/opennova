@@ -28,7 +28,7 @@
 #include <formats/tga/tga_read.h>
 #include <formats/til/til_io.h>
 #include <runtime/audio/sound_profile.h>
-#include <runtime/inmatch/charattr_challenge.h>
+#include <formats/charattr/charattr.h>
 #include <runtime/menu/menu_assets.h>
 #include <runtime/menu/menu_frame.h>
 #include <runtime/menu/menu_runtime.h>
@@ -782,9 +782,9 @@ static int test_defs_and_coo() {
 
 	const std::vector<uint8_t> charattr = make("charattr_def", "charattr.def");
 	TEST_EXPECT(is_crlf_text(text_of(charattr)));
-	opennova::inmatch::CharAttrChallengeTable table;
-	TEST_EXPECT(opennova::inmatch::parse_charattr_challenge_table(charattr.data(), charattr.size(), table));
-	TEST_EXPECT(opennova::inmatch::find_charattr_challenge_row(table, 1) == nullptr); // no classes yet
+	opennova::charattr::Table table;
+	TEST_EXPECT(opennova::charattr::read_table(charattr.data(), charattr.size(), table));
+	TEST_EXPECT(!table.rows[0].active); // no classes yet
 
 	// SndProf.def: one "default" profile with every slot silent, the profile every item binds
 	// (ItemDef_AllocateWithDefaults @ 0x49E3EA asks for "default"; a miss takes the first). The
