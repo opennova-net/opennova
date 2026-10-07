@@ -29,8 +29,9 @@ struct SessionView;
 // kind, name and values): open while it names a kind, its fields the session's.
 class NewFilePrompt {
 public:
-	// Asks for a new file of `kind` (the workspace's prompt opened on it).
-	static void ask(Workspace &workspace, AssetKind kind);
+	// Asks for a new file of `kind` (the workspace's prompt opened on it), in `folder` (a folder's New here,
+	// DI-25: "/" the top level; "" where the placement rule puts a file of its kind).
+	static void ask(Workspace &workspace, AssetKind kind, const std::string &folder = std::string());
 	void draw(Workspace &workspace);
 
 private:
@@ -81,6 +82,8 @@ public:
 	void draw_card_window();
 	// Rename... shows (drawn the frame before).
 	bool rename_shown() const { return rename_popup_.shown(); }
+	// Delete... shows (drawn the frame before).
+	bool delete_shown() const { return delete_popup_.shown(); }
 
 	// The file a click selected (project-relative; "" = none).
 	const std::string &selected() const { return selected_; }
@@ -130,6 +133,20 @@ private:
 	void draw_move_menu(const SessionView &view, const AssetEntry &entry);
 	void accept_move(const SessionView &view, const std::string &folder);
 	void draw_top_level_drop(const SessionView &view);
+	// Files' chores (DI-25, files_window_chores.cpp). The New entries, every blank factory's (a free-form kind
+	// asks a name; a file the game reads by name is made at once), in `folder` ("" where the placement rule
+	// puts a file of its kind: the toolbar's New; a folder's New here names it, "/" the top level).
+	void draw_new_entries(const SessionView &view, const std::string &folder);
+	// A folder's menu (a right click on its row; on the list's empty room, the top level's, ""): New here, a new
+	// folder in it, its rename and, while it is empty, its delete, each typed in the menu.
+	void draw_folder_menu(const SessionView &view, const std::string &folder);
+	// A file's Duplicate (an import source's with its record, or alone) and Delete... entries.
+	void draw_chore_entries(const SessionView &view, const AssetEntry &entry);
+	// Delete... (the workspace's file_delete): who names the file, what goes with it (a mission's companions,
+	// an import source's outputs or, alone, what it keeps), then Delete (anyway, where something names it) or
+	// Cancel.
+	void start_delete(const AssetEntry &entry);
+	void draw_delete(const SessionView &view);
 	// Rename... (the file's menu, F2, the card's): the workspace's Rename... opened on the file.
 	void start_rename(const AssetEntry &entry);
 	void draw_rename(const SessionView &view);
@@ -197,6 +214,21 @@ private:
 	std::string previewed_;
 	// Move to folder's new folder, as typed.
 	char new_folder_[kWorkspaceFileName] = {};
+	// A folder menu's new folder and new name, as typed (DI-25), and the folder whose menu shows them.
+	char folder_new_[kWorkspaceFileName] = {};
+	char folder_rename_[kWorkspaceFileName] = {};
+	std::string folder_menu_;
+	// Delete... (the workspace's file_delete), and what it lists, made again when the file, whether it goes
+	// alone, or the files and the graph move: who names what goes (in words, a few), how many, and what goes
+	// with it or is kept.
+	ui_kit::HeldPopup delete_popup_;
+	std::string delete_for_;
+	RevisionKey delete_key_;
+	std::vector<std::string> delete_uses_;
+	size_t delete_use_count_ = 0;
+	std::vector<std::string> delete_with_;
+	std::vector<std::string> delete_kept_;
+	std::vector<std::string> delete_refusals_;
 	// The RevealFile events held until Files draws, and then the file to scroll to and the place
 	// whose folders open on the way.
 	ViewEventMailbox<> events_;

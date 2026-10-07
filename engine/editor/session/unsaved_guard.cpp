@@ -7,6 +7,7 @@
 #include <editor/model/field_text.h>
 #include <editor/project/local_settings.h>
 #include <editor/session/document_set.h>
+#include <editor/session/file_chores.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/rename_controller.h>
 #include <editor/session/request_kinds.h>
@@ -29,6 +30,9 @@ bool UnsavedGuard::files(const EditorRequest &request, std::vector<std::string> 
 	case GuardScope::PlannedWrites:
 		// What the request's own plan writes over or rewrites, its planner asked.
 		if (request.kind == EditorRequestKind::ImportFiles) core_.imports().unsaved_files(request, out);
+		else if (request.kind == EditorRequestKind::DeleteAsset || request.kind == EditorRequestKind::RenameFolder ||
+		         request.kind == EditorRequestKind::UndoFile || request.kind == EditorRequestKind::RedoFile)
+			core_.chores().unsaved_files(request, out);
 		else core_.renames().unsaved_files(request, out);
 		return true;
 	}

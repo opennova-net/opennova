@@ -528,6 +528,15 @@ void EditorWindows::draw_edit_menu(const SessionView &v, const DocumentBase *doc
 		ui_kit::tooltip("Undo does not take a rename back: it rewrote files. This shows what renaming it back rewrites "
 		                "(only what the rename wrote), then does it.");
 	}
+	// Files' chores (DI-25): a delete, a duplicate, a new file, a folder made, renamed or deleted, each a step of the
+	// file history, taken back and done again here; its words under each.
+	const ActivityView::FileHistory &chores = v.activity.file_history;
+	if (menu_item("Undo file", nullptr, v.project.open && !chores.undo.empty() && v.allows(EditorRequestKind::UndoFile)))
+		request(request::undo_file());
+	step_words(chores.undo);
+	if (menu_item("Redo file", nullptr, v.project.open && !chores.redo.empty() && v.allows(EditorRequestKind::RedoFile)))
+		request(request::redo_file());
+	step_words(chores.redo);
 	ImGui::Separator();
 	if (menu_item("Find...", "Ctrl+F", document != nullptr) && document_window_) document_window_->open_find();
 	if (menu_item("Find in project...", "Ctrl+Shift+F", v.project.open && v.findings.graph))
@@ -718,6 +727,7 @@ void EditorWindows::bring_modal_forward(const SessionView &v) {
 	// would close it.
 	devtools::Window *owner = nullptr;
 	if (shown == HeldModal::FileRename && files_window_ && !files_window_->rename_shown()) owner = files_window_;
+	if (shown == HeldModal::FileDelete && files_window_ && !files_window_->delete_shown()) owner = files_window_;
 	if (shown == HeldModal::Confirm && problems_window_ && !problems_window_->confirm_shown()) owner = problems_window_;
 	if (!owner) return;
 	owner->open = true;
