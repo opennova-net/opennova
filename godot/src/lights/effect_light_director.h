@@ -78,6 +78,14 @@ public:
 	// The C++ world's wiring (ADR 0043 slice G10): the same three seams as
 	// typed reads off the world's StaticSourceProvider, no Callables lent.
 	void setup_with_provider(Node *p_world, StaticSourceProvider *p_provider);
+	// An embedder with no GameWorld (the editor's mission picture, ADR 0046
+	// DI-31): the entities' individual models it draws, in place of the
+	// world's MissionObjects walk (what reattach spawns their lights for and
+	// what each frame's per-model pass selects for), and the environment and
+	// weather the lights read (the gain, the corona fog, the FLICKER ring).
+	// Its statics stay the provider's. No simulation stands behind it: no
+	// blink query contains a light or a draw (every one outdoors).
+	void set_scene(const TypedArray<ObjectModel> &p_models, MissionEnvironment *p_environment, Weather *p_weather);
 	// Mission teardown: disconnect live node retirement hooks, retire every
 	// pool lease, and synchronously clear the shader-global output.
 	void reset();
@@ -236,7 +244,10 @@ private:
 	void _render_static_light_rows(const Vector3 &p_gain, Weather *p_weather, int p_time_ms);
 	void _rebuild_static_light_rows();
 	void _ensure_model_registry(Node *p_container);
-	void _rebuild_model_registry(Node *p_container);
+	void _rebuild_model_registry(const TypedArray<Node> &p_models);
+	// The models the per-model pass walks: the world's MissionObjects
+	// children, or the embedder's scene (set_scene); the registry kept in step.
+	bool _walk_models();
 	BlinkOwner _local_player_interior_group();
 	// One registry row's draw context into the frame arrays (the entity
 	// query, the owner, the ROBJ scope and the interior group).
@@ -253,6 +264,11 @@ private:
 	ObjectID world_id_;
 	// Native provider; bound setup retains its real placer for the same seam.
 	StaticSourceProvider *provider_ = nullptr;
+	// The embedder's scene (set_scene): its models, environment and weather.
+	bool scene_set_ = false;
+	TypedArray<Node> scene_models_;
+	ObjectID scene_environment_;
+	ObjectID scene_weather_;
 	Ref<MissionObjectPlacer> placer_provider_;
 	// The packed static atlas rows, rebuilt only when the placer's
 	// draw-source revision (rows appended, table reset, carve state) or the
