@@ -14,7 +14,7 @@
 #include <editor/model/text_document.h>
 #include <formats/cbin/binary_config.h>
 #include <formats/cbin/cbin.h>
-#include <runtime/menu/config_text.h>
+#include <formats/configfile/config_file.h>
 
 namespace opennova::editor {
 
@@ -46,7 +46,7 @@ float bits_float(uint32_t bits) {
 }
 
 // A float written in the fewest decimals the text reader reads back to its very bits (its atof,
-// the value a float: runtime/menu/config_text.cpp), with a point so it reads as a float; false for
+// the value a float: formats/configfile/config_file.cpp), with a point so it reads as a float; false for
 // one no decimals reach (not a number, an infinity).
 bool float_text(uint32_t bits, std::string &out) {
 	const float value = bits_float(bits);
@@ -54,7 +54,7 @@ bool float_text(uint32_t bits, std::string &out) {
 	char buffer[128];
 	for (int decimals = 1; decimals <= 60; ++decimals) {
 		std::snprintf(buffer, sizeof buffer, "%.*f", decimals, double(value));
-		if (float_bits(float(std::atof(buffer))) == bits && menu::classify_numeric(buffer) == 2) {
+		if (float_bits(float(std::atof(buffer))) == bits && configfile::classify_numeric(buffer) == 2) {
 			out = buffer;
 			return true;
 		}
@@ -114,7 +114,7 @@ bool render(const BinaryConfig &config, std::string &text, std::string &why) {
 					}
 				} else if (value.flags == BinaryConfig::kString) {
 					written = *config.string_at(value.raw);
-					if (!one_token(written) || menu::classify_numeric(written) != 0) {
+					if (!one_token(written) || configfile::classify_numeric(written) != 0) {
 						why = "the entry \"" + key + "\" holds the text \"" + written +
 								"\", which its text form would read otherwise";
 						return false;
@@ -138,7 +138,7 @@ bool blank(const std::string &text) {
 
 // What the reader reads of an entry line (in a section): its name up to the first ';', CR, LF or
 // '=', which must be the '='; its value up to the first ';', CR or LF; its values the runs between
-// ',' and ' ' [orig: ConfigFile_ParseText @ 0x7608a0; runtime/menu/config_text.cpp]. "" when it
+// ',' and ' ' [orig: ConfigFile_ParseText @ 0x7608a0; formats/configfile/config_file.cpp]. "" when it
 // reads the line whole, else why not.
 std::string entry_unread(const std::string &line) {
 	const size_t key_end = line.find_first_of(";\r\n=");
@@ -185,15 +185,15 @@ public:
 		BinaryConfig config;
 		config.strings = strings_;
 		config.xor_key = key_;
-		const std::vector<menu::ConfigSection> sections =
-				menu::parse_config_text(reinterpret_cast<const uint8_t *>(text.data()), text.size());
-		for (const menu::ConfigSection &section : sections) {
+		const std::vector<configfile::ConfigSection> sections =
+				configfile::parse_config_text(reinterpret_cast<const uint8_t *>(text.data()), text.size());
+		for (const configfile::ConfigSection &section : sections) {
 			BinaryConfig::Label label;
 			label.name = string_index(config.strings, section.label);
-			for (const menu::ConfigEntry &read : section.entries) {
+			for (const configfile::ConfigEntry &read : section.entries) {
 				BinaryConfig::Entry entry;
 				entry.name = string_index(config.strings, read.key);
-				for (const menu::ConfigValue &value : read.values) {
+				for (const configfile::ConfigValue &value : read.values) {
 					BinaryConfig::Value written;
 					if (value.type == 1) {
 						written = { uint32_t(value.integer), BinaryConfig::kInteger };
@@ -301,8 +301,8 @@ bool credits_text_readable(const std::string &text, std::vector<SourceIssue> &is
 		const std::string unread = entry_unread(read);
 		if (!unread.empty()) return refuse(number, unread);
 		// Its values, as the reader splits them: one or two go in the form.
-		const std::vector<menu::ConfigSection> parsed =
-				menu::parse_config_text(reinterpret_cast<const uint8_t *>(("[X]\r\n" + read).data()), read.size() + 5);
+		const std::vector<configfile::ConfigSection> parsed =
+				configfile::parse_config_text(reinterpret_cast<const uint8_t *>(("[X]\r\n" + read).data()), read.size() + 5);
 		const size_t values = parsed.empty() || parsed[0].entries.empty() ? 0 : parsed[0].entries[0].values.size();
 		if (values > 2)
 			return refuse(number, "holds " + std::to_string(values) +
