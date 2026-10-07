@@ -202,11 +202,12 @@ void HudPos::clear_() {
 
 Error HudPos::parse_bytes_(const PackedByteArray &bytes, const String &src) {
 	clear_();
-	if (bytes.is_empty()) {
-		last_error_ = String("hudpos.def is empty: ") + src;
-		return ERR_FILE_CANT_READ;
-	}
-	if (def_parse_hudpos_memory(bytes.ptr(), static_cast<size_t>(bytes.size()), &file_) != 0) {
+	// An empty file is a file of no line, not an error: the game's line walk
+	// runs no callback for it and the HUD keeps every unauthored global
+	// (docs/interface/hud-re.md D-HUD-54).
+	static const uint8_t no_line = 0;
+	const uint8_t *data = bytes.is_empty() ? &no_line : bytes.ptr();
+	if (def_parse_hudpos_memory(data, static_cast<size_t>(bytes.size()), &file_) != 0) {
 		file_ = {};
 		last_error_ = String("def_parse_hudpos_memory failed for ") + src;
 		return ERR_PARSE_ERROR;
@@ -240,7 +241,7 @@ Error HudPos::load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, 
 		return ERR_INVALID_PARAMETER;
 	}
 	const PackedByteArray bytes = p_resource_root->read_file(file_name);
-	if (bytes.is_empty()) {
+	if (bytes.is_empty() && !p_resource_root->has_file(file_name)) {
 		clear_();
 		last_error_ = String("hudpos.def not found in resource root: ") + file_name;
 		return ERR_FILE_NOT_FOUND;

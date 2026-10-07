@@ -29,7 +29,7 @@ func _configured_overlay() -> HudOverlay:
 		"HUDSPINMAPX2 1020",
 		"HUDSPINMAPY1 552",
 		"HUDSPINMAPY2 762",
-	])))
+	] + HudFixture.DECLUTTER_ROWS)))
 	var layout := HudPos.new()
 	assert_eq(layout.load(dir.path_join("hudpos.def")), OK)
 	var root := ResourceRoot.new()
