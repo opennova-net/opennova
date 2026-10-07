@@ -1,6 +1,8 @@
 #include <editor/session/clip_sounds.h>
 
 #include <algorithm>
+#include <string>
+#include <vector>
 
 #include <editor/assets/project_asset_source.h>
 #include <editor/preview/definition_viewport.h>
@@ -27,17 +29,18 @@ ViewportModel *previewed(SessionCore &core, ViewportKind kind) {
 	return model;
 }
 
-// The sounds a viewport keeps of those it fired (a model's, a definition's, a mission's, a menu's), none for a kind
-// that fires none.
+// The sounds a viewport keeps of those it fired (a model's, a definition's, a mission's Shoot tool's and its Listen's,
+// a menu's), none for a kind that fires none.
 std::vector<const ClipSoundFired *> fired_by(const ViewportModel &model) {
 	std::vector<const ClipSoundFired *> out;
 	if (const auto *clip = dynamic_cast<const ModelViewport *>(&model))
 		for (const ClipSoundFired &fired : clip->sounds_fired()) out.push_back(&fired);
 	else if (const auto *definition = dynamic_cast<const DefinitionViewport *>(&model))
 		for (const ClipSoundFired &fired : definition->sounds_fired()) out.push_back(&fired);
-	else if (const auto *mission = dynamic_cast<const MissionViewport *>(&model))
+	else if (const auto *mission = dynamic_cast<const MissionViewport *>(&model)) {
 		for (const ClipSoundFired &fired : mission->sounds_fired()) out.push_back(&fired);
-	else if (const auto *menu = dynamic_cast<const MenuViewport *>(&model))
+		for (const ClipSoundFired &fired : mission->listen().sounds_fired()) out.push_back(&fired);
+	} else if (const auto *menu = dynamic_cast<const MenuViewport *>(&model))
 		for (const MenuSoundFired &fired : menu->sounds_fired()) out.push_back(&fired.sound);
 	return out;
 }
@@ -70,16 +73,22 @@ void fire_clip_sounds(SessionCore &core) {
 		                                 viewports.clip_sound_seq())
 		                 .empty() ||
 		        fired;
-	// A mission's Shoot tool's shots (DI-23), each mission viewport's.
+	// A mission's Shoot tool's shots (DI-23), and what a listening mission heard of its weather and its script
+	// (DI-36: its device's channels play the rest), each mission viewport's.
 	std::vector<std::string> missions;
 	for (size_t i = 0; i < viewports.size(); ++i)
 		if (viewports.at(i).kind() == ViewportKind::Mission) missions.push_back(viewports.at(i).path());
 	for (const std::string &mission_path : missions)
-		if (auto *mission = dynamic_cast<MissionViewport *>(viewports.find(mission_path, ViewportKind::Mission)))
+		if (auto *mission = dynamic_cast<MissionViewport *>(viewports.find(mission_path, ViewportKind::Mission))) {
 			fired = !mission->fire_sounds(viewports.clock(), view.project.scan.get(), core.sound_selector(),
 			                              viewports.clip_sound_seq())
 			                 .empty() ||
 			        fired;
+			fired = !mission->fire_listen_sounds(view.project.scan.get(), core.sound_selector(),
+			                                     viewports.clip_sound_seq())
+			                 .empty() ||
+			        fired;
+		}
 	if (fired) core.touch(ViewConcern::Viewports);
 }
 
@@ -127,6 +136,16 @@ std::vector<ClipSoundPlay> clip_sounds_since(SessionCore &core, uint64_t after) 
 		}
 	}
 	std::sort(out.begin(), out.end(), [](const ClipSoundPlay &a, const ClipSoundPlay &b) { return a.seq < b.seq; });
+	return out;
+}
+
+std::vector<const ClipSoundFired *> clip_sounds_recent(SessionCore &core, size_t most) {
+	std::vector<const ClipSoundFired *> out;
+	Viewports &viewports = core.viewports();
+	for (size_t i = 0; i < viewports.size(); ++i)
+		for (const ClipSoundFired *fired : fired_by(viewports.at(i))) out.push_back(fired);
+	std::sort(out.begin(), out.end(), [](const ClipSoundFired *a, const ClipSoundFired *b) { return a->seq < b->seq; });
+	if (out.size() > most) out.erase(out.begin(), out.end() - std::ptrdiff_t(most));
 	return out;
 }
 
