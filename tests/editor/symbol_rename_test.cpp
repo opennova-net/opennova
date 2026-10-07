@@ -447,7 +447,7 @@ static int test_user_point() {
 	                                 "particlefx Effect_x ARMORY\nend\n"));
 	project.rescan();
 	const GraphSymbol *point = project.defined(ReferenceKind::UserPoint, "Armory", "models/armory.3di");
-	TEST_EXPECT(point && point->scope == "ARMORY.3DI");
+	TEST_EXPECT(point && point->scope == "ARMORY.3DI/FIRST16");
 	if (!point) return 1;
 	const DialogsView::RenamePreview &plan = project.preview(*point, "Muzzle");
 	TEST_EXPECT(plan.refusals.empty() && plan.sites->size() == 2 && sites_in(plan, items) == 1 &&
@@ -459,8 +459,8 @@ static int test_user_point() {
 	            project.defined(ReferenceKind::UserPoint, "Armory", "models/other.3di"));
 	const GraphEdge *renamed = edge_to(graph, items, ReferenceKind::UserPoint, "Muzzle");
 	const GraphEdge *kept = edge_to(graph, items, ReferenceKind::UserPoint, "ARMORY");
-	TEST_EXPECT(renamed && renamed->scope == "ARMORY.3DI" && graph.resolve(*renamed) == ReferenceStatus::Present);
-	TEST_EXPECT(kept && kept->scope == "OTHER.3DI" && graph.resolve(*kept) == ReferenceStatus::Present);
+	TEST_EXPECT(renamed && renamed->scope == "ARMORY.3DI/FIRST16" && graph.resolve(*renamed) == ReferenceStatus::Present);
+	TEST_EXPECT(kept && kept->scope == "OTHER.3DI/FIRST16" && graph.resolve(*kept) == ReferenceStatus::Present);
 	return 0;
 }
 

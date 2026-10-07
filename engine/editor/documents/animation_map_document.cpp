@@ -9,6 +9,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/animation_slots.h>
 #include <editor/documents/source_issue_findings.h>
+#include <editor/graph/reference_kinds.h>
 #include <editor/model/id_list.h>
 #include <runtime/anim/adm_clip_index.h>
 #include <runtime/anim/anim_slot_names.h>
@@ -174,6 +175,9 @@ const std::vector<FieldSchema> &AnimationMapDocument::schema(NodeKind kind) {
 		// Any key is written as typed: the game looks the slot up by it [orig: AnimMap_FindSlotByName
 		// @ 0x40CFA0], and the validator names one that finds none.
 		key.open_choices = true;
+		// The slot it plays in this map, which a weapon action names by the same key [orig: Anim_InitActions @
+		// 0x54219E]: scoped to the map's file (refine_field).
+		key.defines = ReferenceKind::AnimationKey;
 		return std::vector<FieldSchema>{key};
 	}();
 	static const std::vector<FieldSchema> clip_fields = [] {
@@ -187,6 +191,20 @@ const std::vector<FieldSchema> &AnimationMapDocument::schema(NodeKind kind) {
 	}();
 	static const std::vector<FieldSchema> none;
 	return kind == kRow ? row_fields : kind == kClip ? clip_fields : none;
+}
+
+void AnimationMapDocument::refine_field(const NodeAddress &, FieldUse &use) const {
+	if (use.defines == ReferenceKind::AnimationKey) use.scope = animation_map_scope(path());
+}
+
+void AnimationMapDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) const {
+	// A key naming none of the 252 slots registers nothing: the game skips the row [orig: AnimMap_ParseConfigLine
+	// @ 0x40CB60, the test @ 0x40CBA4].
+	Value key;
+	if (address.child != 0 || !get(address, "key", key) || !std::holds_alternative<std::string>(key)) return;
+	if (animation_key_slot(std::get<std::string>(key)) >= 0) return;
+	facts.inert = true;
+	facts.inert_reason = "its key names none of the engine's 252 slots, so the game skips the row";
 }
 
 bool AnimationMapDocument::read(const Node &node, const NodeAddress &address, const std::string &field, Value &out) const {
