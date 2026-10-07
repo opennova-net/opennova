@@ -20,16 +20,11 @@ namespace opennova::editor {
 // text as Save would write it; its names (the fonts and textures it names) are the graph's through
 // the engine's own parser (graph/extractors, extract_hudpos), read from its text as it stands. The
 // game's reader cuts its lines at CR LF alone [orig: File_ParseASCIIFile @ 0x53D8C7..0x53D8F5]
-// (TextLineEnds::CrLf): Save writes an LF alone as CR LF, and a text holding one is a finding a
-// Rewrite fixes.
+// (TextLineEnds::CrLf): Save writes an LF alone as CR LF, and a text holding one is the line-ends
+// rule's finding (documents/line_ends.h), which its fix sets right in the text. It has no finding of
+// its own: its table is empty.
 std::unique_ptr<DocumentBase> make_hud_layout_document();
 std::vector<Diagnostic> validate_hud_layout_file(const DocumentBase &document);
-
-enum class HudLayoutFinding {
-	LineEnding, // an LF alone, which the reader does not end a line at: a Rewrite writes CR LF
-	kCount
-};
-const FindingCodeRow &finding_code(HudLayoutFinding code);
 FindingTable hud_layout_finding_codes();
 
 // One line of a HUD layout's text that the game's parser is handed: its key and its first value as

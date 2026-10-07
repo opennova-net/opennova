@@ -18,6 +18,24 @@ namespace opennova::editor {
 class Document;
 class TextDocument;
 
+// The line-ends rule's fix (documents/line_ends.h) as an edit: an Apply naming no record whose
+// payload is this, alone in its batch, which the batch form names by its op alone ({op:
+// "restore_line_ends"}), made by line_ends_restore(). Each line an LF ends alone made to end CR LF,
+// one step Undo takes back: a text document's span from the first such LF to the last replaced by
+// that span so written (TextDocument); a record document's source read again so written, every row
+// and the file-wide state giving way to what its type's parse makes of it and the source findings to
+// that parse's, its undo giving the rows, the state and the source back, which a blocked document
+// takes too (it keeps nothing of the reading it replaces), refused where that parse fails or blocks
+// (Document, SourceState). Nothing changes where no LF ends a line alone.
+struct LineEndsRestore : EditPayload {
+	const char *token() const override;
+};
+inline constexpr const char *kLineEndsRestoreToken = "restore_line_ends";
+// The edit, over one payload every such edit shares (it carries nothing), so two of them are equal.
+Edit line_ends_restore();
+// Whether `edit` is that edit.
+bool is_line_ends_restore(const Edit &edit);
+
 // An editable file (ADR 0046 d9, S13 D6): the lifecycle every document shares, whatever its
 // content. It is read from the project's file (or from a file's bytes, which an import reads
 // before anything is written), decoded as the game's loader decodes a stored file and
@@ -183,10 +201,21 @@ protected:
 	DocumentBase &operator=(const DocumentBase &) = delete;
 
 	// The kind's part of apply, undo and redo, which the base calls only for a document that is
-	// neither a snapshot nor blocked.
+	// neither a snapshot nor blocked, but for what the kind takes while blocked (below).
 	virtual bool apply_edits(const std::vector<Edit> &edits, Diagnostic &error) = 0;
 	virtual void undo_step() = 0;
 	virtual void redo_step() = 0;
+	// What a blocked document takes all the same: a batch that reads its source again, whose content
+	// keeps nothing of the one it replaces (a record document's LineEndsRestore), and the redo of
+	// such a step. None by default.
+	virtual bool takes_while_blocked(const std::vector<Edit> &edits) const {
+		(void)edits;
+		return false;
+	}
+	virtual bool redoes_while_blocked() const { return false; }
+	// The source findings of a content its kind read again from other bytes (that step, its undo
+	// and its redo): the document blocked as they say.
+	void set_source_issues(std::vector<SourceIssue> issues);
 	// The kind's part of a load and of a save: the source, decoded as the game's loader decodes
 	// a stored file (the base decodes it and keeps the fingerprint of the bytes as stored; a kind
 	// whose loader takes the SCR form under its own key, a shader, the bytes as stored, which its
