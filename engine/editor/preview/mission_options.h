@@ -4,6 +4,7 @@
 #include <string>
 
 #include <base/io/json.h>
+#include <editor/preview/mission_ground_overlay.h>
 
 namespace opennova::editor {
 
@@ -27,7 +28,8 @@ bool mission_tool_from_token(const std::string &token, MissionTool &out);
 // MCP gaps lane: the grid a canvas's move, placed record and area edge snap to (metres on the file's
 // axes; 0 free; the toolbar's Snap), the steps a turned entity's heading snaps to (degrees; 0 whole
 // degrees; its Turn), and the Place palette's search text; like the tool, the canvas's alone (no
-// picture changes).
+// picture changes). DI-29: the ground overlay the device tints the terrain with (mission_ground_overlay.h:
+// the surface classes, or the foliage).
 // Set by a SetViewport's `options` member (its wire form below), every member optional.
 struct MissionViewportOptions {
 	bool terrain = true, sky = true, water = true, models = true, shadows = true;
@@ -42,6 +44,7 @@ struct MissionViewportOptions {
 	float snap = 1.0f;
 	float turn = 15.0f;
 	std::string palette;
+	MissionGroundOverlay overlay = MissionGroundOverlay::None;
 };
 
 // The toolbar's Snap steps (metres; 0 free) and Turn steps (degrees; 0 whole degrees), in its lists' order.
@@ -53,7 +56,7 @@ inline bool operator!=(const MissionViewportOptions &a, const MissionViewportOpt
 
 // The wire form: {show: {terrain, sky, water, models, shadows}, marks: {items, buildings, markers,
 // organics, areas, paths, labels}, mark_range, stick, time (null: the mission's start time), tool
-// (its token), item, path, snap, turn, palette}.
+// (its token), item, path, snap, turn, palette, overlay (none, surfaces or foliage)}.
 io::JsonValue mission_options_to_json(const MissionViewportOptions &options);
 // A SetViewport's options member set over `held`: every member checked before any applies; false,
 // nothing changed, with `error` naming the member and what it takes.
