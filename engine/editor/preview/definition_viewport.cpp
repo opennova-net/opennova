@@ -10,6 +10,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/graph_edge.h>
 #include <editor/preview/effect_playback.h>
+#include <editor/preview/model_placement.h>
 #include <editor/preview/model_preview_rig.h>
 #include <editor/preview/orbit_canvas.h>
 #include <editor/preview/viewport_device.h>
@@ -873,8 +874,34 @@ bool DefinitionViewport::drag(const ViewportContext &, const ViewportDrag &, Can
 	return false;
 }
 
-bool DefinitionViewport::command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &,
+bool DefinitionViewport::command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
 		CanvasRequests &out, std::string &error) const {
+	// An item record's Place in mission (DI-18): the record `ids` names (one row of the table), else the record
+	// shown, armed in the mission's Place tool by the id the item's parse gives it.
+	if (name == "place_in_mission") {
+		if (ids.size() > 1) {
+			error = "place_in_mission places one item record: name one row of the table in ids, or none for the record "
+			        "shown.";
+			return false;
+		}
+		const DocumentBase *base = context.input.document;
+		const auto *document = dynamic_cast<const DefCatalogDocument *>(base ? records_of(*base) : nullptr);
+		const NodeId row = ids.empty() ? row_ : ids.front();
+		const Node *node = document && row ? document->row(row) : nullptr;
+		if (!node) {
+			error = ids.empty() ? "place_in_mission places the item record shown: select one in " + path() + " first."
+			                    : path() + " has no record " + std::to_string(row) + ".";
+			return false;
+		}
+		const auto &record = static_cast<const CatalogRow &>(*node);
+		if (record.record_kind() != def::DefRecordKind::Item) {
+			error = "place_in_mission places an item: " + record.name() + " is no item record (a mission places "
+			        "items).";
+			return false;
+		}
+		return plan_place_item_in_mission(context.input.view, record.native.as<def::DefItemDef>().id, std::string(), out,
+		                                  error);
+	}
 	// A weapon's gestures (DI-22): one on the clock's tick, the clock run; "clear" forgets them all.
 	WeaponGesture gesture = WeaponGesture::Fire;
 	if (weapon_gesture_of(name, gesture) || name == "clear") {
@@ -912,7 +939,7 @@ bool DefinitionViewport::command(const ViewportContext &context, const std::stri
 		return true;
 	}
 	error = "A definition's picture has no command \"" + name +
-	        "\" (frame, replay; a weapon's fire, hold, release, reload, scope, switch, clear).";
+	        "\" (frame, replay, place_in_mission; a weapon's fire, hold, release, reload, scope, switch, clear).";
 	return false;
 }
 
