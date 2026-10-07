@@ -782,6 +782,61 @@ void click(MenuRuntime &rt, FakeFrame &frame, int index, uint32_t now) {
 	rt.on_widget_clicked(index);
 }
 
+// The pump's sound edges through the runtime (menu/menu_sound.h), per window as the game's
+// pump plays them: MOUSEIN under the mouse, nothing while the button is held, SELECTED on the
+// click and MOUSEIN again on the next sample over it; a window left with the button held plays
+// no MOUSEOUT, nor MOUSEIN when the mouse comes back up [orig: CWnd_ProcessMouseEvent @0x647a00].
+void test_sound_edges() {
+	mnu::Document doc;
+	mnu::Screen screen;
+	screen.name = "S";
+	mnu::Window root = widget("ROOT", mnu::WindowType::Window);
+	mnu::Window b = widget("B", mnu::WindowType::Button);
+	b.sounds = { mnu::Sound{ "mousein", "OVER_B", "menu.lwf" }, mnu::Sound{ "selected", "CLICK_B", "menu.lwf" },
+		mnu::Sound{ "mouseout", "OUT_B", "menu.lwf" } };
+	root.children = { b, widget("C", mnu::WindowType::Button) };
+	screen.roots.push_back(root);
+	doc.screens = { screen };
+	FakeFrame frame;
+	MenuRuntime rt;
+	Recorder rec;
+	rt.set_frame(&frame);
+	rt.set_sink([&rec](const MenuEvent &e) { rec.events.push_back(e); });
+	rt.open_document(&doc, "s.mnu", "");
+	const auto sounds = [&rec] {
+		std::string out;
+		for (const MenuEvent &e : rec.events)
+			if (e.kind == MenuEvent::Kind::Sound) out += (out.empty() ? "" : " ") + e.text2;
+		return out;
+	};
+	frame.claim = 1; // B
+	rt.process_mouse(5, 5, false, 0);
+	CHECK(sounds() == "OVER_B");
+	rt.process_mouse(5, 5, true, 0);
+	CHECK(sounds() == "OVER_B");
+	// The frame's click fires inside its release pump, ahead of the sample.
+	rt.on_widget_clicked(1);
+	rt.process_mouse(5, 5, false, 0);
+	CHECK(sounds() == "OVER_B CLICK_B");
+	rt.process_mouse(6, 5, false, 0);
+	CHECK(sounds() == "OVER_B CLICK_B OVER_B");
+	// Left and come back with the button held, then up: nothing.
+	rt.process_mouse(6, 5, true, 0);
+	frame.claim = 2; // C
+	rt.process_mouse(30, 5, true, 0);
+	frame.claim = 1;
+	rt.process_mouse(6, 5, false, 0);
+	CHECK(sounds() == "OVER_B CLICK_B OVER_B");
+	frame.claim = 2;
+	rt.process_mouse(30, 5, false, 0);
+	CHECK(sounds() == "OVER_B CLICK_B OVER_B OUT_B");
+	// Disabled under the mouse: no hover.
+	rt.set_widget_disabled(3, true);
+	frame.claim = 1;
+	rt.process_mouse(6, 5, false, 0);
+	CHECK(sounds() == "OVER_B CLICK_B OVER_B OUT_B");
+}
+
 void test_mouse() {
 	const mnu::Document doc = make_document();
 	FakeFrame frame;
@@ -1725,6 +1780,7 @@ int main() {
 	test_table_runtime_columns();
 	test_table_column_records();
 	test_mouse();
+	test_sound_edges();
 	test_keys();
 	test_two_root_keys();
 	test_duplicate_screens();

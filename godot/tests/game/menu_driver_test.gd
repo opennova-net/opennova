@@ -875,6 +875,42 @@ func test_selected_sound_emits_sound_requested_on_activation() -> void:
 			["bank.lwf", "CLICK_SET"])
 
 
+const SOUND_XML := """
+<SCREEN>
+  <NAME>SND</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="button" name="BTN">
+      <POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>300</RIGHT><BOTTOM>140</BOTTOM></POSITION>
+      <SOUND state="mousein" trigger="OVER">bank.lwf</SOUND>
+      <SOUND state="selected" trigger="CLICK">bank.lwf</SOUND>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+"""
+
+
+# DI-34: the pump's sound edges through the frame and the runtime, per window as
+# the game's pump plays them (engine menu_sound.h's MenuSoundPump): OVER as the
+# mouse comes onto BTN, nothing more while it stays or while the button is down,
+# CLICK on the click, and OVER again on the next sample with the mouse still there.
+func test_hover_sounds_follow_the_game_s_pump() -> void:
+	var driver := _framed_driver(SOUND_XML)
+	var heard: Array[String] = []
+	driver.sound_requested.connect(func(_file: String, trigger: String) -> void: heard.append(trigger))
+	var at := driver.widget_frame_rect(driver.widget_id("BTN")).get_center()
+	driver.process_mouse(at, false)
+	driver.process_mouse(at + Vector2(2, 0), false)
+	assert_eq(heard, ["OVER"] as Array[String], "onto BTN: its MOUSEIN once")
+	driver.process_mouse(at, true)
+	driver.process_mouse(at, false)
+	assert_eq(heard, ["OVER", "CLICK"] as Array[String], "held: nothing; let go over it: its SELECTED")
+	driver.process_mouse(at + Vector2(1, 0), false)
+	assert_eq(heard, ["OVER", "CLICK", "OVER"] as Array[String], "the next sample there: MOUSEIN again")
+	driver.process_mouse(Vector2(700, 500), false)
+	assert_eq(heard.size(), 3, "BTN has no MOUSEOUT row: leaving it plays nothing")
+
+
 # --- (h) the end-of-round stat table --------------------------------------------
 
 const STAT_XML := """

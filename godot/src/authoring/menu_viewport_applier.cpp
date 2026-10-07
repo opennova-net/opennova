@@ -160,6 +160,7 @@ void MenuViewportApplier::tick(const opennova::editor::ViewportModel &model,
 		place_pointer_(model);
 	}
 	// The canvas's mouse is this frame's alone: a frame no canvas draws has none.
+	canvas_hovered_ = false;
 	canvas_pointer_ = false;
 }
 
@@ -167,7 +168,8 @@ void MenuViewportApplier::resize(int width, int height) {
 	frame_->set_size(Vector2(float(width), float(height)));
 }
 
-void MenuViewportApplier::pointer(bool over, float x, float y) {
+void MenuViewportApplier::pointer(bool hovered, bool over, float x, float y) {
+	canvas_hovered_ = hovered;
 	canvas_pointer_ = over;
 	canvas_x_ = x;
 	canvas_y_ = y;
@@ -180,8 +182,10 @@ void MenuViewportApplier::place_pointer_(const opennova::editor::ViewportModel &
 	if (shown.shown && canvas_pointer_) {
 		visible = true;
 		at = Vector2(canvas_x_, canvas_y_);
-	} else if (shown.shown && shown.held) {
-		// The held point in design units, on the picture's pixels as the frame scales the design.
+	} else if (shown.shown && shown.held && !canvas_hovered_) {
+		// The held point in design units, on the picture's pixels as the frame scales the design, while no
+		// canvas has the mouse over the picture (the canvas holds its own mouse there as the game's, DI-34,
+		// and shows its own pointer where it draws none of the game's).
 		const Vector2 size = frame_->get_size();
 		visible = true;
 		at = Vector2(shown.x * size.x / float(opennova::menu::kMenuDesignWidth),
