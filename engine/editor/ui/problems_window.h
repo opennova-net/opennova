@@ -68,6 +68,8 @@ private:
 	// `note`: what each fix says first (a finding about the game's own data: a file the game ships).
 	void draw_fixes(const SessionView &view, size_t finding, const std::vector<ProblemFix> &fixes, const std::string &note);
 	void draw_more(const SessionView &view);
+	// A finding's right-click menu (DI-18): Go to, Show in Files, Find usages, its fixes.
+	void finding_menu(const SessionView &view, size_t finding);
 	void draw_confirm(const SessionView &view);
 	// A fix's button (or More's row): true when its click counts (PressLatch).
 	bool fix_pressed(const SessionView &view, size_t finding, const ProblemFix &fix, bool clicked);

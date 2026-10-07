@@ -97,7 +97,10 @@ constexpr OutlineSpec kCatalogOutline{OutlineMode::List,
                                       draw_catalog_engine_items,
                                       "Add engine item...",
                                       "Adds an item the engine looks for by its id (an insertion point, a "
-                                      "waypoint, a flag), on that id and of its kind."};
+                                      "waypoint, a flag), on that id and of its kind.",
+                                      "",
+                                      false,
+                                      draw_catalog_row_menu};
 // A mission's rows as a tree (an event holding its triggers and its actions), a chip per kind of
 // row (the four pools, the paths, the areas, the events), the empty paths left out; an event's
 // triggers and actions added by type (S15: the "+" offers the types by name); under headings that

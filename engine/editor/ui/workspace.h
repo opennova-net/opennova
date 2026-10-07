@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/graph/reference_queries.h>
 #include <editor/session/editor_request.h>
 
 namespace opennova::editor {
@@ -10,6 +11,18 @@ namespace opennova::editor {
 class TextureThumbnailImages;
 class ViewportDeviceSource;
 struct SessionView;
+
+// What Go to definition (F12) and Find usages (Shift+F12) act on where the pointer or the keyboard is (ADR 0046
+// DI-18), offered by the window drawing it each frame it is there: a reference field what it names and whose
+// uses are those of what it names, a Files row its file, a Problems row its uses. One under the pointer wins over
+// one with the keyboard; the workspace's selection gives each key what the offer lacks (EditorWindows::jump_subject).
+struct JumpSubject {
+	std::vector<ReferenceTarget> definition; // where Go to definition leads (several: the first)
+	std::string usages_file;                 // whose uses Find usages lists ("" none)
+	std::string usages_locator;              // its record there ("" the file itself)
+	bool pointer = false;                    // under the pointer, not only with the keyboard
+	bool any() const { return !definition.empty() || !usages_file.empty(); }
+};
 
 // The editor's windows and their seam to the session (ADR 0046 d10, S13 A2; CONTEXT.md
 // "Workspace"): what every window sees of the world, the session's view to read, a sink for the
@@ -35,6 +48,8 @@ public:
 	// The system pointer hidden for this frame: a picture under the mouse draws the game's own there (a
 	// menu's, DI-08), so one pointer shows. The Shell shows it again on a frame none asks.
 	virtual void hide_pointer() {}
+	// What F12 and Shift+F12 act on here this frame (DI-18): taken by the next frame's shortcuts.
+	virtual void offer_jump(const JumpSubject &subject) { (void)subject; }
 };
 
 } // namespace opennova::editor
