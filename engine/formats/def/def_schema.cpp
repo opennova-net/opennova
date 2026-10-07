@@ -207,6 +207,45 @@ const ReferenceRule kReferences[] = {
 	// An item's `powerupdef` names the powerup row it binds as the mission starts [orig:
 	// PowerupEntity_InitFromDef @0x442D00 over PowerUpDef_FindByName @0x442660].
 	{{kItem, "powerup_def"}, DefReference::Powerup},
+	// An item's one-shot sounds by the hour (dawnshot, dayshot, duskshot, nightshot), sets by name across
+	// the banks [orig: ItemDef_ResolveAllResources @ 0x49E8BE..0x49E930 over SoundBank_FindSetByNameAnyBank
+	// @ 0x5274F0].
+	{{kItem, "", "", "", "shot", true}, DefReference::Sound},
+	// The cockpit model a tank draws for its first-person driver [orig: EntityDef_LoadModelsAndCallbacks @
+	// 0x43A3F0..0x43A412].
+	{{kItem, "virtual_display"}, DefReference::Model},
+	// The points an item's entity finds by name on a model, every point scanned without case: on its
+	// graphic its twelve weapon points [orig: Entity_InitBoneReferences @ 0x441470 over
+	// Entity_FindUserpointIndexByName @ 0x545540], a person's three launch points [orig: Entity_InitOrganicAI
+	// @ 0x4BFE8F..0x4BFF82] and each mounted gun's point [orig: Entity_InitFromModel @ 0x40DE30..0x40DE8D];
+	// on its cockpit model the driver's eye [orig: EntityDef_LoadModelsAndCallbacks @ 0x43A5DD..0x43A632].
+	// Which model each reads is the catalog's (its refine_field).
+	{{kItem, "", "weapon_userpoints["}, DefReference::UserPoint},
+	{{kItem, "", "launchups_"}, DefReference::UserPoint},
+	{{kAttachment, "userpoint"}, DefReference::UserPoint},
+	{{kItem, "virtual_display_userpoint"}, DefReference::UserPoint},
+	// A weapon's launch point on its third-person model and an action's effect point on each of its two
+	// models, every point scanned without case [orig: WeaponDef_ResolveAllReferences @ 0x540270: @ 0x5402EF,
+	// @ 0x540377, @ 0x5403E7, over modelgpm_FindUserpointByName @ 0x5B2170].
+	{{kWeapon, "launch_user_point"}, DefReference::UserPoint},
+	{{kAction, "particleuserpoint"}, DefReference::UserPoint},
+	// An action's slot, whose clip in its weapon's map it plays and times by [orig: Anim_InitActions @
+	// 0x54219E -> AnimMap_FindSlotByName @ 0x40CFA0; Anim_GetDurationTicks @ 0x5421BD].
+	{{kAction, "anim"}, DefReference::AnimationSlot},
+	// The weapon a weapon stands in for, found by name without case [orig: WeaponSlot_InitFromAvatarDef @
+	// 0x542783 over the weapon table's lookup by name].
+	{{kWeapon, "sameas"}, DefReference::Weapon},
+	// A scoped view's commander reticle and the slot bar's icon, HUD art [orig: WeaponDefs_ParseLineCallback
+	// @ 0x544A0B, @ 0x544A52; interface/hud-re.md, the HUD loader's alpha mode].
+	{{kWeapon, "commanders_x"}, DefReference::Texture},
+	{{kWeapon, "hud_loadout_select"}, DefReference::Texture},
+	// An ammo's blast-victim effect, interned by name at parse [orig: AmmoDef_ParseProperty @
+	// 0x40AA15..0x40AA36 over CEffectWorld_InternEffectHandle @ 0x5F7310].
+	{{kAmmo, "secondary_effect"}, DefReference::Particle},
+	// A round's tracer items by their type id, the items.def id less 100000 [orig: AmmoDef_ParseProperty @
+	// 0x40A5D4..0x40A5DA, @ 0x40A640..0x40A646 -> ItemList_FindIndexByTypeId @ 0x49E100].
+	{{kAmmo, "frndly_trcr_type_id"}, DefReference::ItemType},
+	{{kAmmo, "foe_trcr_type_id"}, DefReference::ItemType},
 };
 
 // The values a member takes by name.
