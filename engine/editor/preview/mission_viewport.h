@@ -176,8 +176,11 @@ public:
 	// pool its TYPE puts it in where the point meets the ground (the device's terrain, its model's
 	// ground anchor baked in; else the plane through the camera's target), facing the way the camera
 	// looks (S15: its yaw the camera's heading), one batch (an Add, then its x, y, z and yaw through
-	// batch_made). Refused: a file that is no model, a model no item draws or several do (naming
-	// them), an item no catalog of the project defines, a point over no ground. S15: a path's next
+	// batch_made). A model no item draws (DI-12, preview/model_placement): its item made first, the
+	// catalog's batch served before the mission's (two documents, an undo step each), its pool by the TYPE
+	// its parts give it; said on the status line. Refused: a file that is no model, a model several
+	// items draw (naming them) or whose item the editor cannot make from it (a person, a vehicle, a
+	// mounted gun), an item no catalog of the project defines, a point over no ground. S15: a path's next
 	// stop (`reference` "path", `name` its number: a marker of the item its stops use added at the
 	// point and a stop naming it, preview/mission_place) and an area (`reference` "area", a box: an
 	// area trigger over the ground the box's corners meet).
