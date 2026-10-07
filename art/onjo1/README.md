@@ -40,6 +40,7 @@ under their own rules (`sound/README.md`).
 | LODs | at most 8 | The loader's eight-slot tables |
 | Strips and materials | near the original's count (materials have no hard limit) | Each is a draw call |
 | Names | model names at most 8 characters, starting `on` (`oncrate1`), so the add-on's texture names `<model>_<i>.tga` and `<model>_<i>n.mdt` fit the 15 characters a game archive holds | Longer names are cut to a shared stem (`on_crate1` gave `on_crate_0.tga`) |
+| Terrain foliage (a `.trn` foliage block's graphic, `ongrass1`) | one LOD, one part, one strip of upright cards on one alpha-tested `FF_ST_OP` texture; at most 40 vertices, about 18 triangles; author it twice as tall as it stands | The game copies the LOD 0 strip of every candidate (36 a 16 m cell, every cell within 42 m) and keeps a definition's cells in a pool of `min(128, 65534 / (36 x vertices))`, so a heavier model thrashes the pool; it halves the height (`Foliage_GenerateInstances_0 @ 0x600121`, foliage-re.md). Every shipped one (`mveg5`, `mveg5b`, `mveg_a`...) is 14 to 22 triangles and 18 to 40 vertices, and the shipped `.trn` comment says "must be <=20 verts" |
 
 ## Shaders
 
