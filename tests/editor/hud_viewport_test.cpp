@@ -6,7 +6,7 @@
 // holds, the stances' names); a SetViewport of its options and a refused one; the elements the device
 // said it drew named by a point (the smallest box first), each with the hudpos.def lines that place it
 // and the textures it draws, a click picking one; the graph's names of the layout following its text
-// as it stands; an LF alone a finding a Rewrite fixes. The canvas: what a hover rings and says, what a
+// as it stands; an LF alone the line-ends rule's finding. The canvas: what a hover rings and says, what a
 // click and Esc raise.
 #include <cstdio>
 #include <memory>
@@ -16,6 +16,7 @@
 #include <base/io/json.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/hud_layout_type.h>
+#include <editor/documents/line_ends.h>
 #include <editor/model/text_document.h>
 #include <editor/preview/hud_canvas.h>
 #include <editor/preview/hud_viewport.h>
@@ -78,7 +79,7 @@ int test_layout_type() {
 	TEST_EXPECT(crouch && text.compare(crouch->offset, crouch->length, "HUDSTANCE 1\t0 0 onhstnc1.tga CROUCH") == 0);
 	TEST_EXPECT(hud_layout_line(lines, "HUDSTANCE", "4") == nullptr && hud_layout_line(lines, "HUDHEAT") == nullptr);
 
-	// The document: its text as the file holds it, no finding; an LF alone a warning a Rewrite fixes.
+	// The document: its text as the file holds it, no finding; an LF alone the line-ends rule's warning.
 	std::unique_ptr<DocumentBase> document = type->make();
 	Diagnostic error;
 	TEST_EXPECT(document->load_bytes(std::vector<uint8_t>(text.begin(), text.end()), "hudpos.def", AssetKind::HudPosDefs, "jo",
@@ -88,8 +89,10 @@ int test_layout_type() {
 	std::unique_ptr<DocumentBase> lf = type->make();
 	TEST_EXPECT(lf->load_bytes(std::vector<uint8_t>(loose.begin(), loose.end()), "hudpos.def", AssetKind::HudPosDefs, "jo",
 	                           error));
-	const std::vector<Diagnostic> findings = type->validate_file(*lf);
-	TEST_EXPECT(findings.size() == 1 && findings[0].code() == "hud_layout.line_ending" && findings[0].line == 1);
+	// The line-ends rule's (documents/line_ends.h): the type's own validator makes none.
+	TEST_EXPECT(type->validate_file(*lf).empty());
+	const std::vector<Diagnostic> findings = line_end_findings(*lf, "jo");
+	TEST_EXPECT(findings.size() == 1 && findings[0].code() == "document.line_ends" && findings[0].line == 1);
 	// Save writes it CR LF.
 	const SerializeResult written = lf->serialize();
 	TEST_EXPECT(written.ok() && written.text == "HUDHEALTH 25,741,177,751\r\nHUDCLIP 14,648\r\n");
