@@ -594,6 +594,15 @@ TerrainTileCacheDevice::lookup(
 	return cache_.lookup(p_point);
 }
 
+std::optional<opennova::TerrainTilePageBinding>
+TerrainTileCacheDevice::find_sector_patch(
+		const opennova::TerrainTileSectorPatchPoint &p_point) {
+	if (!is_ready()) {
+		return std::nullopt;
+	}
+	return cache_.find_sector_patch(p_point);
+}
+
 Dictionary TerrainTileCacheDevice::get_diagnostics() const {
 	Dictionary diagnostics;
 	int ready_pages = 0;

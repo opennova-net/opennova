@@ -319,6 +319,12 @@ Terrain::get_tile_cache_binding_for_world_point_native(
 			opennova::TerrainTileResidentPoint{p_world_x, p_world_z});
 }
 
+std::optional<opennova::TerrainTilePageBinding>
+Terrain::get_tile_cache_binding_for_sector_patch_native(
+		const opennova::TerrainTileSectorPatchPoint &p_point) {
+	return tile_cache_device.find_sector_patch(p_point);
+}
+
 void Terrain::set_lod_quality(float p_quality) {
 	lod_quality = p_quality;
 }
