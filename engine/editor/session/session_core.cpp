@@ -104,9 +104,23 @@ void SessionCore::start() {
 	view_.project.recent_projects = settings.recent_projects;
 	read_recent_details();
 	show_installs();
-	view_.project.play_retail = settings.play_in_install;
-	view_.project.play_in_install_strict = settings.play_in_install_strict;
-	view_.project.save_before_play = settings.save_before_play;
+	// Play's settings are each project's (its local.json): the ones an earlier editor kept in the editor's
+	// settings for every project are said once and dropped, the file written again without them, read by
+	// nothing (pre-1.0: no reader carries them into a project). A project with none of its own plays in the
+	// OpenNova runtime.
+	if (!settings.retired_play.empty()) {
+		std::string held;
+		for (const std::string &each : settings.retired_play) held += (held.empty() ? "" : ", ") + each;
+		note("note: Play's settings are each project's now, kept in its .opennova/local.json. The editor's settings "
+		     "held Play settings an earlier editor kept for every project (" + held + "), which nothing reads: "
+		     "a project plays in the OpenNova runtime until it is set to play in the game install (File > Project "
+		     "settings..., or the Build menu), and saves first before Play unless set not to. The editor's settings "
+		     "are written again without them.");
+		Preferences kept = settings;
+		kept.retired_play.clear();
+		Diagnostic unwritten;
+		if (!preferences_.write(kept, unwritten)) report(unwritten);
+	}
 	view_.project.runtime_setting = settings.runtime_executable;
 	view_.project.import_dependencies = settings.import_dependencies;
 	show_recent_items();
@@ -434,6 +448,9 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	run_install_ = open.run_install().empty() ? std::string() : absolute_install_path(open.run_install());
 	view_.project.refused.clear();
 	view_.project.build_folder = local_.build_folder;
+	// How it plays here, its own (a project that never said plays in the OpenNova runtime and saves first).
+	view_.project.play_mode = local_.play_mode;
+	view_.project.save_before_play = local_.save_before_play;
 	view_.project.open = true;
 	view_.project.root = paths_.root;
 	view_.project.document = std::make_shared<const ProjectDocument>(open.document());
@@ -507,6 +524,9 @@ bool SessionCore::close_project() {
 	local_ = LocalSettings();
 	run_install_.clear();
 	view_.project.build_folder.clear();
+	// Its Play settings go with it: the next project plays as it says.
+	view_.project.play_mode = local_.play_mode;
+	view_.project.save_before_play = local_.save_before_play;
 	view_.activity.runtime_executable = play().resolve_runtime_executable();
 	show_installs();
 	// The welcome page's, with the project as it closed (renamed in its settings), from its document.
@@ -656,8 +676,9 @@ void SessionCore::update_files(const std::vector<std::string> &paths) {
 }
 
 // The settings a request names that differ from those in effect, written: the project's
-// (its name and features) to project.opennova and the editor's (the game install, the
-// runtime, Play in the game install) to its preferences. Each is written from a copy and
+// (its name and features) to project.opennova, the project's local ones (its game install, how it plays,
+// whether Play saves first, its build folder) to its .opennova/local.json, and the editor's (the game
+// install last chosen, the runtime) to its preferences. Each is written from a copy and
 // its values take effect once it is written, so a setting that failed is still the one in
 // effect and a retry writes it again, while one that was written is compared with from then
 // on. The result (the view's settings_result) lists what could not be written, each also a
@@ -842,24 +863,38 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 			failures.push_back(error);
 		}
 	}
+	// How the project plays and whether Play saves first: the project's own, kept with its local settings on
+	// this checkout, never the editor's (a project's Strict Play never reaches another project, nor another
+	// editor on the machine). The next Play reads them.
+	bool play_changed = false;
+	if ((change.play_mode || change.save_before_play) && !view_.project.open) {
+		failures.push_back(make_finding(CoreFinding::ProjectNone, DiagnosticSeverity::Error,
+		                                "Open a project to choose how it plays: Play's settings are each project's."));
+	} else if ((change.play_mode && *change.play_mode != local_.play_mode) ||
+	           (change.save_before_play && *change.save_before_play != local_.save_before_play)) {
+		LocalSettings local = local_;
+		if (change.play_mode) local.play_mode = *change.play_mode;
+		if (change.save_before_play) local.save_before_play = *change.save_before_play;
+		Diagnostic error;
+		if (save_local_settings(paths_, local, error)) {
+			local_ = std::move(local);
+			view_.project.play_mode = local_.play_mode;
+			view_.project.save_before_play = local_.save_before_play;
+			play_changed = true;
+			touch(ViewConcern::Preferences);
+		} else {
+			failures.push_back(error);
+		}
+	}
 	const Preferences &settings = preferences_.values();
 	Preferences editor = settings;
 	if (install) editor.game_install = *install;
 	if (change.runtime_executable) editor.runtime_executable = *change.runtime_executable;
-	if (change.play_in_install) editor.play_in_install = *change.play_in_install;
-	if (change.play_in_install_strict) editor.play_in_install_strict = *change.play_in_install_strict;
-	if (change.save_before_play) editor.save_before_play = *change.save_before_play;
 	bool editor_changed = editor.game_install != settings.game_install ||
-	                      editor.runtime_executable != settings.runtime_executable ||
-	                      editor.play_in_install != settings.play_in_install ||
-	                      editor.play_in_install_strict != settings.play_in_install_strict ||
-	                      editor.save_before_play != settings.save_before_play;
+	                      editor.runtime_executable != settings.runtime_executable;
 	if (editor_changed) {
 		Diagnostic error;
 		if (preferences_.write(editor, error)) {
-			view_.project.play_retail = preferences_.values().play_in_install;
-			view_.project.play_in_install_strict = preferences_.values().play_in_install_strict;
-			view_.project.save_before_play = preferences_.values().save_before_play;
 			view_.project.runtime_setting = preferences_.values().runtime_executable;
 			view_.activity.runtime_executable = play().resolve_runtime_executable();
 		} else {
@@ -897,7 +932,7 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 		touch(ViewConcern::Workspace);
 	}
 	view_.activity.status = !failures.empty() ? "A setting could not be saved: see Problems."
-			: project_changed || install_changed || editor_changed ? "Saved the settings."
+			: project_changed || install_changed || editor_changed || play_changed ? "Saved the settings."
 																   : "No setting changed.";
 	if (project_changed) touch(ViewConcern::Project);
 	if (install_changed || editor_changed) touch(ViewConcern::Preferences);
@@ -1179,7 +1214,7 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 	}
 	// Served in order, as the parts serve what they compose (never through handle()): each meets its
 	// own row's gate, and its findings are this request's outcome. A Play a command plans (DI-26's Play
-	// from here) goes behind, or fresh, as the request asks. Once one is refused, what comes after it is
+	// from here) goes behind, fresh, in a mode or saving first, as the request asks. Once one is refused, what comes after it is
 	// not served (DI-12: an entity is placed only once the item it names is made) but for a gesture's
 	// end, which ends the gesture all the same.
 	for (EditorRequest &each : planned.requests) {
@@ -1187,6 +1222,8 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 		if (each.kind == EditorRequestKind::Play) {
 			each.behind = request.behind;
 			each.fresh = request.fresh;
+			each.play_mode = request.play_mode;
+			each.save_before_play = request.save_before_play;
 		}
 		serve_request(*this, each);
 	}
@@ -1270,9 +1307,6 @@ void SessionCore::save_preferences() {
 	view_.project.recent_projects = settings.recent_projects;
 	read_recent_details(); // a root new to the list read, the others kept
 	show_installs();
-	view_.project.play_retail = settings.play_in_install;
-	view_.project.play_in_install_strict = settings.play_in_install_strict;
-	view_.project.save_before_play = settings.save_before_play;
 	view_.project.import_dependencies = settings.import_dependencies;
 	show_recent_items();
 	touch(ViewConcern::Preferences);
@@ -1482,7 +1516,7 @@ ShippedFiles SessionCore::shipped_files(const std::vector<Diagnostic> &gate) {
 
 void SessionCore::start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash,
                               const ExportIntent &exported, bool panel) {
-	if (intent.wanted && play().refused(intent.mission, intent.start)) return;
+	if (intent.wanted && play().refused(intent)) return;
 	if (exported.wanted && export_folder(exported.to).empty()) return;
 	// Where it lands: out_dir taken from the project's folder when relative. One inside the project
 	// but in its cache or its export folder (which the scan passes over) would be files of the
@@ -1630,7 +1664,7 @@ OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std:
 		note("Build failed.");
 		view_.activity.status = "Build failed; see Problems.";
 	}
-	if (result.ok && intent.wanted) play().start(intent.mission, intent.behind, intent.fresh, intent.start);
+	if (result.ok && intent.wanted) play().start(intent);
 	bool exported_ok = true;
 	if (result.ok && exported.wanted && shipped) {
 		for (const Diagnostic &d : shipped->diagnostics) {

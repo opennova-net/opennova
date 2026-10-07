@@ -586,31 +586,35 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	              v.activity.has_export && v.activity.last_export->ok && v.allows(EditorRequestKind::RevealPath)))
 		request(request::reveal_path(v.activity.last_export->export_dir));
 	ImGui::Separator();
-	// An editor setting, never refused (the busy gate takes it, as it takes the settings'
-	// Apply); the next Play reads it, so it waits while a game runs.
-	bool in_install = v.project.play_retail;
-	const bool settable = v.activity.play_state == PlayState::Stopped && v.allows(EditorRequestKind::ApplyProjectSettings);
+	// How this project plays (its own, kept in its .opennova/local.json: never another project's, nor another
+	// editor's), never refused (the busy gate takes it, as it takes the settings' Apply); the next Play reads
+	// it, so it waits while a game runs.
+	const PlayMode mode = v.project.play_mode;
+	bool in_install = plays_in_install(mode);
+	const bool settable = v.project.open && v.activity.play_state == PlayState::Stopped &&
+	                      v.allows(EditorRequestKind::ApplyProjectSettings);
 	if (ImGui::MenuItem("Play in the game install", nullptr, &in_install, settable) && settable) {
 		ProjectSettingsChange change;
-		change.play_in_install = in_install;
+		change.play_mode = in_install ? PlayMode::Install : PlayMode::Runtime;
 		request(request::apply_project_settings(change));
 	}
-	ui_kit::tooltip("Play starts the game install on the build instead of the OpenNova runtime.");
+	ui_kit::tooltip("This project's Play starts the game install on the build instead of the OpenNova runtime. Kept "
+	                "with the project on this computer; another project plays as it is set.");
 	// Strict Play, under it: what Play in the game install stages and how it launches the game.
-	bool strict = v.project.play_in_install_strict;
+	bool strict = mode == PlayMode::Strict;
 	ImGui::Indent();
-	const bool strict_settable = settable && v.project.play_retail;
+	const bool strict_settable = settable && in_install;
 	if (ImGui::MenuItem("Strict: as a player's install", nullptr, &strict, strict_settable) && strict_settable) {
 		ProjectSettingsChange change;
-		change.play_in_install_strict = strict;
+		change.play_mode = strict ? PlayMode::Strict : PlayMode::Install;
 		request(request::apply_project_settings(change));
 	}
 	ImGui::Unindent();
 	ui_kit::tooltip("The game runs on the build alone, as a player who dropped Jointops.exe into the build's folder "
 	                "runs it: nothing of the install but its program and Bink DLL, no /d.");
-	// DI-26: Play saves first instead of asking; an editor setting, as the two above.
+	// DI-26: Play saves first instead of asking; the project's own, as the two above.
 	bool save_first = v.project.save_before_play;
-	const bool save_settable = v.allows(EditorRequestKind::ApplyProjectSettings);
+	const bool save_settable = v.project.open && v.allows(EditorRequestKind::ApplyProjectSettings);
 	if (ImGui::MenuItem("Save all before Play", nullptr, &save_first, save_settable) && save_settable) {
 		ProjectSettingsChange change;
 		change.save_before_play = save_first;
@@ -835,7 +839,10 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 				std::to_string(validation.total) : std::string());
 		state_tip = "Problems lists what was found before until it ends.";
 	} else if (v.activity.play_state == PlayState::Running) {
-		state = v.project.play_retail ? "Game install running" : "Game running";
+		// What runs is the running game's mode, the one its Play was started in.
+		PlayMode ran = PlayMode::Runtime;
+		play_mode_from_token(v.activity.play_run_mode, ran);
+		state = plays_in_install(ran) ? "Game install running" : "Game running";
 		state_tip = "Process " + std::to_string(v.activity.play_pid) + ". Stop ends it.";
 	} else if (v.activity.play_state != PlayState::Stopped) {
 		state = "Stopping the game";

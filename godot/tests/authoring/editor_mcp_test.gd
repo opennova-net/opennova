@@ -351,8 +351,9 @@ func test_catalog_state_and_refusals_without_a_project() -> void:
 ## takes, and one it must carry left out is refused. The edits' schema is the session's batch table
 ## (S13 D9: the catalog's batch): its op enum the table's ops, apply among them, one property per
 ## member, an apply's payload the one token it takes and a span's line from 1. The game install's words: the settings take
-## game_install, play_in_install and play_in_install_strict (the retail keys refused), the run section
-## says in_install, strict and game_install (file_log null before a game install's game ran), the import section install_files, and an import from an install that holds
+## game_install and the project's play_mode (the retail keys and the editor-wide play_in_install and
+## play_in_install_strict refused), the run section says play_mode, ran_mode and game_install (file_log null
+## before a game install's game ran), the import section install_files, and an import from an install that holds
 ## no archives is import.install.
 func test_request_table_on_the_wire() -> void:
 	if _client == null:
@@ -454,15 +455,18 @@ func test_request_table_on_the_wire() -> void:
 	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Words"})).get("ok", false)))
 	var install := dir.path_join("no install here")
 	var applied := await _call("editor_request", {"kind": "apply_project_settings",
-			"settings": {"serial": 1, "game_install": install, "play_in_install": true,
-				"play_in_install_strict": true}})
+			"settings": {"serial": 1, "game_install": install, "play_mode": "strict"}})
 	assert_true(bool(applied.get("ok", false)) and bool(applied.get("outcome", {}).get("done", false)), str(applied))
 	var state := await _state(["run", "import"])
 	var play: Dictionary = state.get("run", {})
-	assert_true(bool(play.get("in_install", false)), str(play))
-	assert_true(bool(play.get("strict", false)) and play.has("file_log") and play["file_log"] == null, str(play))
+	assert_eq(String(play.get("play_mode", "")), "strict", str(play))
+	assert_eq(String(play.get("ran_mode", "x")), "", "no game ran yet")
+	assert_true(play.has("file_log") and play["file_log"] == null, str(play))
 	assert_true(String(play.get("game_install", "")).ends_with("no install here"), str(play))
-	assert_false(play.has("retail") or play.has("retail_directory"), str(play))
+	assert_false(play.has("retail") or play.has("retail_directory") or play.has("in_install") or play.has("strict"), str(play))
+	for retired in ["play_in_install", "play_in_install_strict"]:
+		assert_true(String((await _call("editor_request", {"kind": "apply_project_settings",
+				"settings": {retired: true}})).get("_error", "")).contains(retired), "%s names nothing" % retired)
 	var import: Dictionary = state.get("import", {})
 	assert_true(import.has("install_files") and not import.has("retail_files"), str(import))
 	assert_true(String((await _call("editor_request", {"kind": "apply_project_settings",
@@ -470,6 +474,69 @@ func test_request_table_on_the_wire() -> void:
 	var listing := await _call("editor_request", {"kind": "preview_install_import", "with_dependencies": true})
 	var findings: Array = listing.get("outcome", {}).get("findings", [])
 	assert_true(not findings.is_empty() and String(findings[0].get("code", "")) == "import.install", str(listing))
+
+
+## Play's settings are each project's (its .opennova/local.json), never the editor's settings file, which
+## every editor on the machine shares: apply_project_settings sets the open project's play_mode and
+## save_before_play, the run and preferences sections say them; a second project made after it plays in the
+## OpenNova runtime and saves first; each opened again keeps its own; the editor's settings file names none
+## of them, and a project's local.json names its own. With no project open they are refused (project.none).
+## editor_play and play take a play_mode for one Play alone (the catalog's modes), a mode no Play has refused.
+func test_play_settings_are_each_projects() -> void:
+	if _client == null:
+		return
+	var nothing := await _call("editor_request", {"kind": "apply_project_settings", "settings": {"play_mode": "strict"}})
+	assert_true(str(nothing.get("outcome", {}).get("findings", [])).contains("project.none"), str(nothing))
+	var root := OS.get_cache_dir().path_join("opennova play settings %d" % Time.get_ticks_usec())
+	_dirs.append(root)
+	var strict_dir := root.path_join("strict one")
+	var default_dir := root.path_join("default one")
+	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": strict_dir, "title": "Strict one"})).get("ok", false)))
+	var fresh: Dictionary = (await _state(["run", "preferences"]))
+	assert_eq(String(fresh.get("run", {}).get("play_mode", "")), "runtime", "a project never set plays in OpenNova")
+	assert_true(bool(fresh.get("preferences", {}).get("save_before_play", false)), str(fresh))
+	var applied := await _call("editor_request", {"kind": "apply_project_settings",
+			"settings": {"play_mode": "strict", "save_before_play": false}})
+	assert_true(bool(applied.get("outcome", {}).get("done", false)), str(applied))
+	var set_state: Dictionary = (await _state(["run", "preferences"]))
+	assert_eq(String(set_state.get("run", {}).get("play_mode", "")), "strict", str(set_state))
+	assert_eq(String(set_state.get("preferences", {}).get("play_mode", "")), "strict", str(set_state))
+	assert_false(bool(set_state.get("run", {}).get("save_before_play", true)), str(set_state))
+	assert_false(set_state.get("preferences", {}).has("play_in_install"), str(set_state))
+	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": default_dir, "title": "Default one"})).get("ok", false)))
+	var second: Dictionary = (await _state(["run"])).get("run", {})
+	assert_eq(String(second.get("play_mode", "")), "runtime", "the project made after it keeps the default")
+	assert_true(bool(second.get("save_before_play", false)), str(second))
+	assert_true(bool((await _call("editor_request", {"kind": "open_project", "dir": strict_dir})).get("ok", false)))
+	var again: Dictionary = (await _state(["run"])).get("run", {})
+	assert_eq(String(again.get("play_mode", "")), "strict", "reopened, it keeps its own")
+	assert_false(bool(again.get("save_before_play", true)), str(again))
+	assert_true(bool((await _call("editor_request", {"kind": "open_project", "dir": default_dir})).get("ok", false)))
+	assert_eq(String((await _state(["run"])).get("run", {}).get("play_mode", "")), "runtime")
+	# Kept with each project, never in the editor's settings file.
+	var settings_text := FileAccess.get_file_as_string(String(_app.get("settings_path")))
+	assert_false(settings_text.contains("play_in_install") or settings_text.contains("play_mode") or
+			settings_text.contains("save_before_play"), settings_text)
+	var strict_local := FileAccess.get_file_as_string(strict_dir.path_join(".opennova/local.json"))
+	assert_true(strict_local.contains("\"play_mode\": \"strict\"") and strict_local.contains("\"save_before_play\": false"),
+			strict_local)
+	# One Play's own mode: the catalog's modes on editor_play and on the play request; a mode no Play has
+	# refused before anything is built.
+	var listed: Variant = await _client.rpc(get_tree(), "tools/list")
+	var play_tool := {}
+	var request_tool := {}
+	for tool in (listed as Dictionary).get("result", {}).get("tools", []):
+		if String(tool["name"]) == "editor_play":
+			play_tool = tool
+		elif String(tool["name"]) == "editor_request":
+			request_tool = tool
+	var modes := ["runtime", "install", "strict"]
+	assert_eq(play_tool.get("inputSchema", {}).get("properties", {}).get("play_mode", {}).get("enum", []), modes)
+	assert_eq(request_tool.get("inputSchema", {}).get("properties", {}).get("play_mode", {}).get("enum", []), modes)
+	assert_true(play_tool.get("inputSchema", {}).get("properties", {}).has("save_before_play"), str(play_tool))
+	var refused := await _call("editor_request", {"kind": "play", "play_mode": "retail"})
+	assert_true(String(refused.get("_error", "")).contains("play_mode"), str(refused))
+	assert_eq(String((await _state(["run"])).get("run", {}).get("state", "")), "stopped")
 
 
 func test_john_smith_through_the_editor_mcp() -> void:
