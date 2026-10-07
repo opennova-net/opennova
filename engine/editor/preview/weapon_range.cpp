@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include <base/io/bam.h>
 #include <base/io/fixed.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_index.h>
@@ -181,13 +182,21 @@ bool WeaponRange::configure(const WeaponRangeSetup &setup) {
 				                                 return static_cast<const ResourceIndex *>(ctx)->has_file(name);
 			                                 },
 			                                 &index};
+			// A soldier's shots alone (no weapon in hand, DI-24): the tables read as the load reads them all the same,
+			// whatever weapon.def is (an NPC's round spawn looks its byte up in the weapon table [orig:
+			// RoundData_SpawnRound @ 0x4EC0D0]).
+			const bool soldier = setup.weapon.empty();
+			bool weapons_read = false;
 			if (!stamped->read(setup.catalog, bytes) || bytes.empty()) {
-				why_ = "The project has no " + setup.catalog + ".";
+				if (!soldier) why_ = "The project has no " + setup.catalog + ".";
 			} else if (def::def_parse_weapons_memory(bytes.data(), bytes.size(), &weapons, nullptr, &probe) != 0) {
-				why_ = setup.catalog + " does not read as the game's weapon table.";
+				if (!soldier) why_ = setup.catalog + " does not read as the game's weapon table.";
 			} else {
+				weapons_read = true;
+			}
+			if (why_.empty()) {
 				tables_ = std::make_unique<Tables>();
-				tables_->weapons = world::build_weapon_table(weapons, &store);
+				if (weapons_read) tables_->weapons = world::build_weapon_table(weapons, &store);
 				std::vector<uint8_t> ammo_bytes;
 				def::DefAmmoFile ammo{};
 				if (stamped->read("ammo.def", ammo_bytes) && !ammo_bytes.empty() &&
@@ -196,24 +205,29 @@ bool WeaponRange::configure(const WeaponRangeSetup &setup) {
 					def::def_free_ammo(&ammo);
 				}
 				world::resolve_weapon_round_types(tables_->weapons, tables_->ammo);
-				weapon_index_ = tables_->weapons.index_of(setup.weapon.c_str());
-				// The weapon's row as the game's mount reads it: the last block of the name [orig:
-				// WeaponDefs_ParseLineCallback @0x5436e1].
-				const def::DefWeaponDef *row = nullptr;
-				for (size_t i = 0; i < weapons.count; ++i)
-					if (strutil::iequals(weapons.entries[i].weapon_name, setup.weapon)) row = &weapons.entries[i];
-				if (weapon_index_ < 0 || !row) {
-					why_ = setup.weapon + " is not in " + setup.catalog + ".";
+				if (soldier) {
+					ready_ = !tables_->ammo.entries.empty();
+					if (!ready_) why_ = "The project has no ammo.def the game reads: no ammo fires.";
 				} else {
-					install_ = world::weapon_install_data_from_def(*row);
-					// A mount by name runs the descriptors the table's load baked [orig: Player_MountWeaponSlot
-					// @ 0x4DFA40 binds the table Anim_InitActions baked].
-					install_.table_baked = true;
-					const world::WeaponTableEntry *entry = tables_->weapons.by_index(uint8_t(weapon_index_));
-					const world::AmmoTableEntry *round =
-							entry ? tables_->ammo.by_index(entry->ammo_index) : nullptr;
-					ammo_ = round ? round->name : std::string();
-					ready_ = true;
+					weapon_index_ = tables_->weapons.index_of(setup.weapon.c_str());
+					// The weapon's row as the game's mount reads it: the last block of the name [orig:
+					// WeaponDefs_ParseLineCallback @0x5436e1].
+					const def::DefWeaponDef *row = nullptr;
+					for (size_t i = 0; i < weapons.count; ++i)
+						if (strutil::iequals(weapons.entries[i].weapon_name, setup.weapon)) row = &weapons.entries[i];
+					if (weapon_index_ < 0 || !row) {
+						why_ = setup.weapon + " is not in " + setup.catalog + ".";
+					} else {
+						install_ = world::weapon_install_data_from_def(*row);
+						// A mount by name runs the descriptors the table's load baked [orig: Player_MountWeaponSlot
+						// @ 0x4DFA40 binds the table Anim_InitActions baked].
+						install_.table_baked = true;
+						const world::WeaponTableEntry *entry = tables_->weapons.by_index(uint8_t(weapon_index_));
+						const world::AmmoTableEntry *round =
+								entry ? tables_->ammo.by_index(entry->ammo_index) : nullptr;
+						ammo_ = round ? round->name : std::string();
+						ready_ = true;
+					}
 				}
 			}
 			def::def_free_weapons(&weapons);
@@ -240,6 +254,25 @@ void WeaponRange::set_gestures(std::vector<WeaponGestureAt> gestures) {
 	if (tick_ > first) reset_();
 }
 
+void WeaponRange::set_shots(std::vector<WeaponRangeShot> shots) {
+	std::stable_sort(shots.begin(), shots.end(),
+	                 [](const WeaponRangeShot &a, const WeaponRangeShot &b) { return a.tick < b.tick; });
+	if (shots == shots_list_) return;
+	int32_t first = INT32_MAX;
+	const size_t common = std::min(shots.size(), shots_list_.size());
+	size_t i = 0;
+	while (i < common && shots[i] == shots_list_[i]) ++i;
+	if (i < shots.size()) first = std::min(first, shots[i].tick);
+	if (i < shots_list_.size()) first = std::min(first, shots_list_[i].tick);
+	shots_list_ = std::move(shots);
+	// A step fires the shots of its own tick: a run past the first that changed runs again.
+	if (tick_ > first) reset_();
+}
+
+const world::AmmoTable *WeaponRange::ammo_table() const {
+	return tables_ ? &tables_->ammo : nullptr;
+}
+
 bool WeaponRange::scoped() const {
 	return local_ && world::player_view_scope_settled(local_->view);
 }
@@ -255,6 +288,7 @@ void WeaponRange::reset_() {
 	shots_ = 0;
 	events_.clear();
 	view_ = world::LocalPlayerWeaponView();
+	soldier_ = world::EntityHandle();
 	local_.reset();
 	world_.reset();
 	collision_.reset();
@@ -266,6 +300,25 @@ void WeaponRange::reset_() {
 	world.registry.configure_pool(0, kPoolCapacity);
 	world.registry.configure_pool(1, kPoolCapacity);
 	world.registry.configure_pool(2, kPoolCapacity);
+	if (setup_.weapon.empty()) {
+		// A soldier's shots (DI-24): the soldier, a person of no player standing at the range's origin (the eye's place)
+		// facing +x, its body the game's NPC body; no local player. Its shots leave it from where it says.
+		world::Entity soldier;
+		soldier.kind = world::EntityKind::Organic;
+		soldier.item_type = 3;
+		soldier.has_item_def = true;
+		soldier.alive = true;
+		soldier.health = 100;
+		soldier.health_max = 100;
+		soldier.team = 1;
+		soldier.position = kEye;
+		soldier_ = world.registry.spawn(0, soldier);
+		world.ai.attach(soldier_);
+		if (world::AiEntity *body = world.ai.for_handle(soldier_)) {
+			body->inf.active = true;
+			body->pos[2] = q16(kEyeHeight);
+		}
+	}
 	// The shooter: the local player, a person of the player class standing at the range's eye, its eye there (no
 	// CameraOffset), facing +x, the weapon in hand.
 	world::Entity seed;
@@ -279,15 +332,17 @@ void WeaponRange::reset_() {
 	seed.team = 1;
 	seed.equipped_adm_index = uint8_t(weapon_index_);
 	seed.position = kEye;
-	const world::EntityHandle shooter = world.registry.spawn(0, seed);
-	local_ = std::make_unique<world::LocalPlayer>(world);
-	world.cached.local_player = shooter;
-	world.local_player_state = local_.get();
-	world.ai.attach(shooter);
-	if (world::AiEntity *body = world.ai.for_handle(shooter)) {
-		body->inf.active = true;
-		body->inf.is_local_player = true;
-		body->pos[2] = q16(kEyeHeight);
+	if (!setup_.weapon.empty()) {
+		const world::EntityHandle shooter = world.registry.spawn(0, seed);
+		local_ = std::make_unique<world::LocalPlayer>(world);
+		world.cached.local_player = shooter;
+		world.local_player_state = local_.get();
+		world.ai.attach(shooter);
+		if (world::AiEntity *body = world.ai.for_handle(shooter)) {
+			body->inf.active = true;
+			body->inf.is_local_player = true;
+			body->pos[2] = q16(kEyeHeight);
+		}
 	}
 	// The target: a building standing `range` metres down the line of fire, its face the surface picked.
 	collision_ = std::make_unique<world::CollisionWorld>();
@@ -313,6 +368,7 @@ void WeaponRange::reset_() {
 	// The listener at the shooter: the distance gate counts from it (the editor hears at its camera besides).
 	world.out.fire_sounds.set_listener(kEye);
 	// The weapon mounted as the game mounts one by name: a fresh slot, a full clip and the def's reserve.
+	if (!local_) return;
 	world::local_weapon_install(world, local_->weapon, install_, false, false, nullptr, local_->view);
 	view_ = world::local_player_weapon_view(world, local_->weapon, local_->inventory);
 }
@@ -328,7 +384,49 @@ void WeaponRange::run_to(int32_t tick) {
 	while (tick_ < tick) step_();
 	if (tick_ != from) ++serial_;
 	// The frame the run stands at, observed (nothing advances): whether the card replaces the view model.
-	card_ = local_->view_frame().scope_card_active;
+	card_ = local_ && local_->view_frame().scope_card_active;
+}
+
+void WeaponRange::fire_shots_(int32_t tick) {
+	world::World &world = *world_;
+	world::Entity *soldier = world.registry.get(soldier_);
+	if (!soldier) return;
+	for (const WeaponRangeShot &shot : shots_list_) {
+		if (shot.tick != tick) continue;
+		// The fire block's shoot: the firing byte rides the soldier while its ammo fires, then returns to zero, and a
+		// shot fired marks the soldier a priority target; a zero byte fires nothing [orig: Entity_UpdateInfantryAI
+		// @0x4BF345..0x4BF4AD]. The game's NPC entry spawns the round and presents its launch (the ammo's ai_launch
+		// through the distance gate, its fire record) [orig: WeaponSlot_FireAndSpawnEffects @0x53F440].
+		soldier->equipped_adm_index = shot.ammo;
+		WeaponRangeEvent fired;
+		fired.tick = tick;
+		fired.kind = WeaponRangeEvent::Kind::Fired;
+		fired.at = shot.at;
+		fired.round = shot.shot;
+		fired.words = shot.words;
+		if (shot.ammo != 0 && world.tables.ammo.by_index(shot.ammo)) {
+			const world::Vec3 at{shot.at.x + kEye.x, shot.at.y + kEye.y, shot.at.z + kEye.z};
+			const size_t before = world.round_sim.fired.size();
+			world.round_sim.fire_npc_ammo(world, soldier_, world::FixedVec3{q16(at.x), q16(at.y), q16(at.z)},
+			                              shot.yaw_bam, shot.pitch_bam, shot.ammo);
+			soldier->flags |= world::kEntityFlagPriorityTarget;
+			soldier->engine_flags |= world::kEntityFlagPriorityTarget;
+			++shots_;
+			const double bearing = double(shot.yaw_bam) * io::kRadiansPerBam;
+			const double pitch = double(shot.pitch_bam) * io::kRadiansPerBam;
+			fired.direction = world::Vec3{float(std::cos(bearing) * std::cos(pitch)),
+			                              float(std::sin(bearing) * std::cos(pitch)), float(std::sin(pitch))};
+			for (const world::LiveRound &round : world.round_sim.rounds)
+				if (round.active && round.age_ticks == 0 && round.owner == soldier_) fired.tracer = fired.tracer || round.tracer;
+			if (world.round_sim.fired.size() > before) soldier_fires_.push_back(shot.shot);
+		} else {
+			fired.kind = WeaponRangeEvent::Kind::Refused;
+			fired.words = shot.words + (shot.ammo == 0 ? " Its ammo byte is zero: nothing fires."
+			                                           : " Its ammo byte names no row of ammo.def: nothing fires.");
+		}
+		soldier->equipped_adm_index = 0;
+		events_.push_back(fired);
+	}
 }
 
 void WeaponRange::apply_gestures_(int32_t tick) {
@@ -401,12 +499,20 @@ void WeaponRange::step_() {
 	const bool other_side = setup_.enemy && setup_.view != WeaponShotView::Own;
 	world.round_sim.local_player = other_side ? world::EntityHandle() : world.cached.local_player;
 	world.round_sim.local_team = other_side ? uint8_t(2) : uint8_t(1);
-	// The entity update: the rounds in flight [orig: Entity_UpdateAllEntities -> Weapon_UpdateAllProjectiles
-	// @ 0x4EC020, the call @ 0x4C223A]. The kill-zone queue the impacts push is not processed: nothing in the
-	// range takes the blast.
+	// The entity update: a soldier's shots in its walk (DI-24), then the rounds in flight [orig:
+	// Entity_UpdateAllEntities -> Weapon_UpdateAllProjectiles @ 0x4EC020, the call @ 0x4C223A]. The kill-zone queue
+	// the impacts push is not processed: nothing in the range takes the blast.
+	soldier_fires_.clear();
+	fire_shots_(tick);
 	world.round_sim.tick(world, nullptr, collision_.get());
 	// Its tail steps the tick the weapon walk reads [orig: current_tick @ 0x24C1968].
 	world.logic_tick = uint32_t(tick + 1);
+	if (!local_) {
+		// No weapon in hand: what the soldier's shots handed the presenter.
+		drain_();
+		++tick_;
+		return;
+	}
 	// The holster that finished on the last tick draws the weapon again.
 	world::LocalPlayerWeapon &weapon = local_->weapon;
 	if (draw_again_) {
@@ -452,7 +558,8 @@ void WeaponRange::step_() {
 void WeaponRange::drain_() {
 	world::World &world = *world_;
 	const int32_t tick = tick_;
-	world::LocalPlayerWeapon &weapon = local_->weapon;
+	static const std::vector<world::WeaponPresentationEvent> kNoRecords;
+	const std::vector<world::WeaponPresentationEvent> &records = local_ ? local_->weapon.events : kNoRecords;
 	const auto channel = [&](WeaponRangeEvent &event) {
 		event.clip = view_.anim_key;
 		event.clip_variant = view_.anim_variant;
@@ -486,7 +593,7 @@ void WeaponRange::drain_() {
 	}
 	// The weapon's presentation records, in the order the game's presenter takes them: a clip, the begin leg, the
 	// direct effect, the end leg [orig: the batch order, world::weapon_batch_plan].
-	for (const world::WeaponPresentationEvent &record : weapon.events) {
+	for (const world::WeaponPresentationEvent &record : records) {
 		if (!record.anim_key.empty()) {
 			WeaponRangeEvent event;
 			event.tick = tick;
@@ -543,11 +650,31 @@ void WeaponRange::drain_() {
 			events_.push_back(event);
 		}
 	}
-	weapon.events.clear();
+	if (local_) local_->weapon.events.clear();
 	// The rounds the pump spawned: the fire record, as the presenting host drains it.
 	std::vector<world::FirePresentationRow> fires;
 	world::drain_fire_presentation_rows(world, fires);
+	size_t soldier_row = 0;
 	for (world::FirePresentationRow &row : fires) {
+		if (!row.is_local_player) {
+			// A soldier's shot (DI-24): its sound played as it spawned (the ammo's ai_launch through the distance gate,
+			// the NPC entry's own leg), its effect leg by the presenter's plan, the ammo arm's (zero wire flags):
+			// the ai_launcheffect at the fire origin along the aim [orig: WeaponSlot_FireAndSpawnEffects @ 0x53F440].
+			const int shot = soldier_row < soldier_fires_.size() ? soldier_fires_[soldier_row] : 0;
+			++soldier_row;
+			const world::FireEffectPlan plan = world::fire_effect_plan(row);
+			if (!plan.spawn) continue;
+			WeaponRangeEvent launch;
+			launch.tick = tick;
+			launch.kind = Kind::Launch;
+			launch.effect = plan.effect;
+			launch.at = from_eye(row.origin);
+			launch.direction = row.forward;
+			launch.round = shot;
+			launch.words = "A soldier's shot: the ammo's ai_launcheffect " + plan.effect + " at its launch point.";
+			events_.push_back(launch);
+			continue;
+		}
 		WeaponRangeEvent fired;
 		fired.tick = tick;
 		fired.kind = Kind::Fired;
