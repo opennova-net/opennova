@@ -116,6 +116,10 @@ struct MissionViewportView::Tools {
 	// its surface class (the char map legend's swatch; -1 none).
 	std::string ground;
 	int ground_surface = -1;
+	// A model several items draw, let go over the picture (DI-12): the items, where it was let go, its file.
+	std::vector<int64_t> choices;
+	CanvasPoint choice_at;
+	std::string choice_model;
 
 	void toolbar(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context);
 	void show_popup(MissionViewportOptions &options);
@@ -209,15 +213,23 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 							for (const AssetEntry &candidate : view.project.scan->entries)
 								if (candidate.relative_path == file) entry = &candidate;
 						}
-						// Only a model is taken: another file is never accepted.
+						// Only a model is taken: another file is never accepted. Its item placed (made first where none
+						// draws it, DI-12); where several draw it, a choice of them, placed where it was let go.
 						if (entry && entry->kind == AssetKind::Model && ImGui::AcceptDragDropPayload(kFileDragPayload)) {
-							ViewportDrop drop;
-							drop.file = entry->logical_name;
-							drop.x = in.mouse.x;
-							drop.y = in.mouse.y;
-							drop.snap = tools.snap_metres();
-							drop.kind = ViewportKind::Mission;
-							workspace.request(request::edit_in_viewport(path, std::move(drop)));
+							tools.choices = mission_items_of_model(view, entry->relative_path);
+							if (tools.choices.size() > 1) {
+								tools.choice_at = in.mouse;
+								tools.choice_model = entry->logical_name;
+								ImGui::OpenPopup("mission_drop_choice");
+							} else {
+								ViewportDrop drop;
+								drop.file = entry->logical_name;
+								drop.x = in.mouse.x;
+								drop.y = in.mouse.y;
+								drop.snap = tools.snap_metres();
+								drop.kind = ViewportKind::Mission;
+								workspace.request(request::edit_in_viewport(path, std::move(drop)));
+							}
 						}
 					}
 					ImGui::EndDragDropTarget();
@@ -237,6 +249,19 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 				}
 				if (ImGui::BeginPopup("mission_canvas_menu")) {
 					if (canvas) tools.canvas_menu(workspace, mission, context, *canvas);
+					ImGui::EndPopup();
+				}
+				// A model several items draw, let go over the picture: the item to place there.
+				if (ImGui::BeginPopup("mission_drop_choice")) {
+					ImGui::TextDisabled("Several items draw %s: place", tools.choice_model.c_str());
+					for (const int64_t item : tools.choices) {
+						MissionItemFacts facts;
+						std::string ignored;
+						mission_item_facts(view, item, facts, ignored);
+						const std::string label = (facts.name.empty() ? std::string("Item") : facts.name) + " (" +
+						                          std::to_string(item) + ")";
+						if (ImGui::Selectable(label.c_str())) drop_item(workspace, mission, item, tools.choice_at, tools.snap_metres());
+					}
 					ImGui::EndPopup();
 				}
 			});
