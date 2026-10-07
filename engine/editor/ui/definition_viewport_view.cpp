@@ -11,6 +11,9 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/preview/definition_viewport.h>
+#include <editor/preview/mission_ground_facts.h>
+#include <editor/preview/mission_options.h>
+#include <editor/preview/model_placement.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
@@ -45,6 +48,8 @@ const char *state_label(DefinitionState state) {
 	return "Alive";
 }
 
+void target_options(DefinitionFireOptions &fire, ui_kit::WrapRow &row);
+
 // A weapon's firing options (DI-22): the first person's Eye and character, the third person's shooter, the
 // range's surface, distance and target.
 void weapon_options(const DefinitionViewport &model, DefinitionViewportOptions &options, ui_kit::WrapRow &row) {
@@ -78,6 +83,11 @@ void weapon_options(const DefinitionViewport &model, DefinitionViewportOptions &
 		ui_kit::tooltip("How another sees the shot: a soldier's as the ammo's ai_launch and ai_launcheffect; another "
 		                "player's as the weapon's FIRE and RECOIL rows at the gun.");
 	}
+	target_options(fire, row);
+}
+
+// The range's target (DI-22; an ammo's too, DI-23): shown, its surface and its distance.
+void target_options(DefinitionFireOptions &fire, ui_kit::WrapRow &row) {
 	row.next(ui_kit::checkbox_width("Target"));
 	ImGui::Checkbox("Target", &fire.target.shown);
 	ui_kit::tooltip("A wall down the line of fire, whose face plays the ammo's impact row for its surface; off, the "
@@ -134,7 +144,15 @@ bool holding_at(const DefinitionViewport &model, int32_t tick) {
 void weapon_row(Workspace &workspace, const DefinitionViewport &model, const PreviewClock &clock) {
 	const DefinitionWeapon &weapon = model.weapon();
 	const WeaponRange &range = weapon.range();
-	{
+	if (range.ammo_alone()) {
+		// An ammo fired alone (DI-23): a soldier's shot of it at the target, its impact row played on the face.
+		ui_kit::WrapRow row;
+		const bool ready = range.ready();
+		if (ui_kit::tool(row, "Fire", ready, "One round fired on the clock's tick at the target, the clock run."))
+			gesture(workspace, model, "fire");
+		if (ui_kit::tool(row, "Clear", ready && !range.gestures().empty(), "Forget the shots: the range from the clock's start."))
+			gesture(workspace, model, "clear");
+	} else {
 		ui_kit::WrapRow row;
 		const bool ready = range.ready();
 		if (ui_kit::tool(row, "Fire", ready, "The fire key pressed and let go on the clock's tick, the clock run."))
@@ -154,6 +172,10 @@ void weapon_row(Workspace &workspace, const DefinitionViewport &model, const Pre
 			gesture(workspace, model, "clear");
 	}
 	if (!range.ready()) return;
+	if (range.ammo_alone()) {
+		ui_kit::clipped_text(std::to_string(range.shots()) + " shot" + (range.shots() == 1 ? "" : "s") + " of " + range.ammo() +
+		                     ", fired as the game fires an ammo for a soldier.");
+	}
 	const world::LocalPlayerWeaponView &held = range.weapon_view();
 	const auto action = [](int32_t id) {
 		return id >= 0 && id < world::weapon_action::kCount ? world::kWeaponActionSuffixes[id] : "";
@@ -162,7 +184,8 @@ void weapon_row(Workspace &workspace, const DefinitionViewport &model, const Pre
 	std::snprintf(line, sizeof(line), "%s, then %s; clip %d, reserve %d; %d shot%s%s", action(held.current_action),
 	              action(held.next_action), held.clip, held.reserve, range.shots(), range.shots() == 1 ? "" : "s",
 	              range.scoped() ? "; scoped" : "");
-	ui_kit::clipped_text(std::string(line) + (range.ammo().empty() ? std::string() : " of " + range.ammo()));
+	if (!range.ammo_alone())
+		ui_kit::clipped_text(std::string(line) + (range.ammo().empty() ? std::string() : " of " + range.ammo()));
 	if (weapon.card_up())
 		ui_kit::clipped_text("The sights card is up: the game draws the scope's card in the gun's place (the HUD "
 		                     "preview draws cards).");
@@ -227,6 +250,7 @@ void options_row(Workspace &workspace, const DefinitionViewport &model, ui_kit::
 		ui_kit::tooltip("The gun in a soldier's hands (gfx3) or in the player's own view (gfx1).");
 		weapon_options(model, options, row);
 	}
+	if (kind == "ammo") target_options(options.fire, row);
 	if (options != model.options()) workspace.request(request::set_viewport(model.path(), definition_options_change(options)));
 }
 
@@ -235,6 +259,149 @@ void file_link(Workspace &workspace, ui_kit::WrapRow &row, const std::string &fi
 	const SessionView &view = workspace.view();
 	if (file.empty() || !view.project.scan) return;
 	if (ui_kit::tool(row, "Go to", true, tip)) window_requests::go_to(workspace, file_target(*view.project.scan, file));
+}
+
+// A board row played (DI-23): one round fired at a face of the row from the clock's start.
+void play_row(Workspace &workspace, const DefinitionViewport &model, int tag) {
+	io::JsonValue change = io::JsonValue::make_object();
+	change.set("kind", io::json_string(viewport_kind_token(ViewportKind::Definition)));
+	change.set("impact", io::json_string(world::kImpactEffectTagNames[tag]));
+	workspace.request(request::set_viewport(model.path(), io::json_write(change)));
+}
+
+// A name the board shows, its Go to the definition the game finds for it (an effect in its particle file, a sound
+// set in its bank, a texture's file): "none" where the row names nothing.
+void board_name(Workspace &workspace, const std::string &name, ReferenceKind kind, const std::string &id) {
+	const SessionView &view = workspace.view();
+	if (name.empty()) {
+		ImGui::TextDisabled("none");
+		return;
+	}
+	ReferenceTarget target;
+	bool found = false;
+	if (kind == ReferenceKind::Texture) {
+		const AssetEntry *entry = view.project.scan ? view.project.scan->find(name) : nullptr;
+		if (entry) {
+			target = file_target(*view.project.scan, entry->relative_path);
+			found = true;
+		}
+	} else if (const GraphSymbol *symbol = view.findings.graph ? view.findings.graph->resolve_symbol(kind, name) : nullptr) {
+		if (view.project.scan) {
+			target = symbol_target(*view.project.scan, *symbol);
+			found = true;
+		}
+	}
+	if (ImGui::Selectable((name + "##" + id).c_str()) && found) window_requests::go_to(workspace, target);
+	ui_kit::tooltip(found ? "Go to " + name + "." : name + ": nothing of the project defines it (the game plays nothing for it).");
+}
+
+// An ammo's impact rows as a board (DI-23): each surface class's row as the game picks it (the class + 4; a row the
+// ammo lacks played from ammo def 0's bank at the tag's place), its effect and sound (Play fires a round at a face of
+// it; the sound's play plays the set), the scar it leaves, each name a Go to; then the rows no surface reaches.
+void impact_board(Workspace &workspace, const DefinitionViewport &model) {
+	const AmmoImpactBoard &board = model.impacts();
+	const SessionView &view = workspace.view();
+	if (!board.found) {
+		ui_kit::clipped_text("ammo.def, as the game reads it, has no " + model.drawn().record + ": no impact rows.");
+		return;
+	}
+	if (!ImGui::TreeNodeEx("impacts", ImGuiTreeNodeFlags_DefaultOpen, "Impact rows by surface (%d)",
+	                       int(board.surfaces.size())))
+		return;
+	ui_kit::clipped_text("A round plays its row for the class it strikes (the class + 4); a row " + board.ammo +
+	                             " lacks plays " + (board.null_ammo.empty() ? std::string("ammo def 0") : board.null_ammo) +
+	                             "'s bank at the tag's place (" + std::to_string(board.null_rows) + " rows authored there).",
+	                     "AmmoDef_ProcessImpactEffect @0x40a1b8..0x40a1fd: the ammo's rows searched for the tag, else "
+	                     "word_A2EB28 + 16 x tag, ammo def 0's packed bank.");
+	{
+		ui_kit::WrapRow row;
+		const std::string mission = place_in_mission_target(view);
+		if (ui_kit::tool(row, "Shoot in mission", !mission.empty(),
+		                 mission.empty() ? std::string("Open the mission to shoot this ammo in: Shoot in mission arms its "
+		                                               "Shoot tool with it.")
+		                                 : "Arms Shoot in " + mission + " with " + board.ammo +
+		                                           ": each click on its picture fires one where it meets the ground or "
+		                                           "an object.")) {
+			workspace.request(request::open_document(mission));
+			io::JsonValue options = io::JsonValue::make_object();
+			options.set("tool", io::json_string(mission_tool_token(MissionTool::Shoot)));
+			options.set("ammo", io::json_string(board.ammo));
+			workspace.request(request::set_viewport(mission, viewport_change(ViewportKind::Mission, "options", std::move(options))));
+		}
+	}
+	// Its own scrolling region, so the picture under it keeps its room.
+	const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_BordersInnerV |
+	                              ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY;
+	const float height = std::min(ImGui::GetTextLineHeightWithSpacing() * 26.0f,
+	                              std::max(ImGui::GetTextLineHeightWithSpacing() * 6.0f, ImGui::GetContentRegionAvail().y * 0.45f));
+	if (ImGui::BeginTable("impact_rows", 6, flags, ImVec2(0.0f, height))) {
+		ImGui::TableSetupScrollFreeze(1, 1);
+		ImGui::TableSetupColumn("Surface");
+		ImGui::TableSetupColumn("Row");
+		ImGui::TableSetupColumn("Effect");
+		ImGui::TableSetupColumn("Sound");
+		ImGui::TableSetupColumn("Scar");
+		ImGui::TableSetupColumn("Played from");
+		ImGui::TableHeadersRow();
+		const auto row_of = [&](const AmmoImpactRow &row, size_t index) {
+			ImGui::PushID(int(index));
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+			const bool face = row.tag >= kWeaponRangeFirstTag;
+			ImGui::BeginDisabled(!face);
+			if (ImGui::SmallButton("Play")) play_row(workspace, model, row.tag);
+			ImGui::EndDisabled();
+			ui_kit::tooltip(face ? "Fire one round at a face of this surface from the clock's start: its effect, its sound "
+			                       "and its scar as the game plays them."
+			                     : "No face plays this row.");
+			ImGui::SameLine();
+			ImGui::TextUnformatted(row.surface >= 0
+			                               ? (mission_surface_words(row.surface) + " (" + std::to_string(row.surface) + ")").c_str()
+			                               : "-");
+			ui_kit::tooltip(row.where);
+			ImGui::TableNextColumn();
+			ImGui::Text("%s (%d)", world::kImpactEffectTagNames[row.tag], row.tag);
+			ImGui::TableNextColumn();
+			board_name(workspace, row.pick.effect, ReferenceKind::Particle, "effect");
+			ImGui::TableNextColumn();
+			if (!row.pick.sound.empty()) {
+				if (ImGui::SmallButton(">")) workspace.request(request::play_set(row.pick.sound));
+				ui_kit::tooltip("Play " + row.pick.sound + " as the game plays the set.");
+				ImGui::SameLine();
+			}
+			board_name(workspace, row.pick.sound, ReferenceKind::Sound, "sound");
+			ImGui::TableNextColumn();
+			if (row.scar_textures.empty()) {
+				ImGui::TextDisabled("none");
+				if (!row.scar_words.empty()) ui_kit::tooltip(row.scar_words);
+			} else {
+				// The first of the textures it draws one of (a Go to), the rest counted; the radius.
+				board_name(workspace, row.scar_textures.front(), ReferenceKind::Texture, "scar");
+				ImGui::SameLine();
+				if (row.scar_textures.size() > 1) {
+					ImGui::Text("+%d, %.3g m", int(row.scar_textures.size() - 1), double(row.scar_radius));
+				} else {
+					ImGui::Text("%.3g m", double(row.scar_radius));
+				}
+				ui_kit::tooltip(row.scar_words);
+			}
+			ImGui::TableNextColumn();
+			const std::string from = ammo_impact_from_words(board, row);
+			if (row.pick.from == world::ImpactRowFrom::Own) ImGui::TextUnformatted("own row");
+			else ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_PlotHistogram), "%s",
+			                        (std::string("bank place ") + std::to_string(row.pick.tag) +
+			                         (row.pick.bank_tag ? std::string(" (") + world::kImpactEffectTagNames[row.pick.bank_tag] + ")"
+			                                            : std::string(" (empty)")))
+			                                .c_str());
+			ui_kit::tooltip(from);
+			ImGui::PopID();
+		};
+		size_t index = 0;
+		for (const AmmoImpactRow &row : board.surfaces) row_of(row, index++);
+		for (const AmmoImpactRow &row : board.others) row_of(row, index++);
+		ImGui::EndTable();
+	}
+	ImGui::TreePop();
 }
 
 } // namespace
@@ -279,10 +446,10 @@ void DefinitionViewportView::draw_ready(Workspace &workspace, const ViewportMode
 		ImGui::Checkbox("Mute", &options.mute);
 		ui_kit::tooltip("The death's sound fires and says what it plays, and nothing is heard.");
 	}
-	if (model.weapon_record()) {
+	if (model.range_shown()) {
 		row.next(ui_kit::checkbox_width("Mute"));
 		ImGui::Checkbox("Mute", &options.mute);
-		ui_kit::tooltip("The weapon's sounds fire and say what they play, and nothing is heard.");
+		ui_kit::tooltip("The shots' sounds fire and say what they play, and nothing is heard.");
 	}
 	const bool eye = model.camera().posed;
 	if (ui_kit::tool(row, "Frame", !eye,
@@ -316,7 +483,8 @@ void DefinitionViewportView::draw_ready(Workspace &workspace, const ViewportMode
 		                     std::to_string(model.person().updates) + " warm-up updates.");
 	for (const std::string &note : model.notes())
 		if (!note.empty()) ui_kit::clipped_text(note, note);
-	if (model.weapon_record()) weapon_row(workspace, model, clock);
+	if (model.range_shown()) weapon_row(workspace, model, clock);
+	if (model.ammo_record()) impact_board(workspace, model);
 	if (!model.particle_slot().effect.empty() && !model.particle_slot().words.empty())
 		ui_kit::clipped_text("Particle slot " + model.particle_slot().effect + ": " + model.particle_slot().words);
 	// The effects it spawns, each a Go to of the definition the game spawns for its name.
