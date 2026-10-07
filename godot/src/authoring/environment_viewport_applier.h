@@ -122,7 +122,7 @@ private:
 		}
 	};
 	struct EnvironmentKey {
-		std::string file;
+		std::string file, terrain; // the .env, and the drawn mission's .trn the load reads ahead of it
 		uint32_t attrib_flags = 0;
 		int water_override = 0, fog_override = 0, water_murk = 0;
 		int fog_color[3] = { 0, 0, 0 }, water_color[3] = { 0, 0, 0 };
@@ -149,7 +149,8 @@ private:
 		bool terrain = true, water = true;
 	};
 
-	bool mount_(const opennova::editor::SessionView &view, const std::string &environment);
+	// `environment`, `terrain`: the texts the environment reads (the .env, the drawn mission's .trn).
+	bool mount_(const opennova::editor::SessionView &view, const std::string &environment, const std::string &terrain);
 	void note_reads_(int layer, size_t from);
 	size_t reads_() const;
 	void note_missing_(int layer, const String &name);
