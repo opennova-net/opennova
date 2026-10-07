@@ -795,8 +795,7 @@ void test_project_settings() {
 	              apply->settings.multiplayer == std::optional<bool>(false) &&
 	              apply->settings.game_install == std::optional<std::string>("") &&
 	              apply->settings.runtime_executable == std::optional<std::string>("") &&
-	              apply->settings.play_in_install == std::optional<bool>(false) &&
-	              apply->settings.play_in_install_strict == std::optional<bool>(false),
+	              apply->settings.play_mode == std::optional<PlayMode>(PlayMode::Runtime),
 	      "Apply: one request naming every setting as the dialog holds it");
 	CHECK(!modal_open("Project settings") && v.activity.status == "No setting changed.", "nothing changed: written nothing, closed");
 
@@ -1052,19 +1051,26 @@ void test_menus() {
 	}
 	CHECK(choose(ui, "Build", {"Stop"}).empty(), "Build > Stop: nothing runs");
 	r = raised("Build", {"Play in the game install"}, EditorRequestKind::ApplyProjectSettings);
-	CHECK(r.kind == EditorRequestKind::ApplyProjectSettings && r.settings.play_in_install == std::optional<bool>(true) &&
+	CHECK(r.kind == EditorRequestKind::ApplyProjectSettings && r.settings.play_mode == std::optional<PlayMode>(PlayMode::Install) &&
 	              !r.settings.title && !r.settings.mission && !r.settings.game_install && !r.settings.runtime_executable,
-	      "Build > Play in the game install: that setting alone");
+	      "Build > Play in the game install: the project's play mode alone");
 	CHECK(choose(ui, "Build", {"Strict: as a player's install"}).empty(), "Build > Strict: only under Play in the game install");
-	v.project.play_retail = true;
+	v.project.play_mode = PlayMode::Install;
 	v.revisions.touch(ViewConcern::Preferences);
 	ui.frames(2);
 	ui.drain();
 	r = raised("Build", {"Strict: as a player's install"}, EditorRequestKind::ApplyProjectSettings);
-	CHECK(r.kind == EditorRequestKind::ApplyProjectSettings && r.settings.play_in_install_strict == std::optional<bool>(true) &&
-	              !r.settings.play_in_install && !r.settings.title,
-	      "Build > Strict: that setting alone");
-	v.project.play_retail = false;
+	CHECK(r.kind == EditorRequestKind::ApplyProjectSettings && r.settings.play_mode == std::optional<PlayMode>(PlayMode::Strict) &&
+	              !r.settings.title,
+	      "Build > Strict: the project's play mode alone");
+	v.project.play_mode = PlayMode::Strict;
+	v.revisions.touch(ViewConcern::Preferences);
+	ui.frames(2);
+	ui.drain();
+	r = raised("Build", {"Play in the game install"}, EditorRequestKind::ApplyProjectSettings);
+	CHECK(r.kind == EditorRequestKind::ApplyProjectSettings && r.settings.play_mode == std::optional<PlayMode>(PlayMode::Runtime),
+	      "Build > Play in the game install, unchecked: the OpenNova runtime, strict or not");
+	v.project.play_mode = PlayMode::Runtime;
 	v.revisions.touch(ViewConcern::Preferences);
 	ui.frames(2);
 	ui.drain();
