@@ -4522,6 +4522,17 @@ target_link_libraries(editor_environment_document_test PRIVATE opennova_editor)
 target_include_directories(editor_environment_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_environment_document COMMAND editor_environment_document_test)
 
+# The terrain document (the deep-integration plan's DI-30): a .trn through the engine's own reader and
+# writer, its keys in the file's units and the game's rules, its grid rows and foliage definitions, its
+# source findings, the gate's refusal and the inert definitions with their fixes, its references through
+# the graph, the missions that run on it and the import that makes it (the terrain_uses query), an import's
+# terrain refused every edit (document.imported); the retail leg (OPENNOVA_JO_DIR) reads every .trn of the
+# install through the document and writes it again, field for field.
+add_executable(editor_terrain_document_test editor/terrain_document_test.cpp)
+target_link_libraries(editor_terrain_document_test PRIVATE opennova_editor)
+target_include_directories(editor_terrain_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_terrain_document COMMAND editor_terrain_document_test)
+
 add_executable(editor_unsaved_guard_test editor/unsaved_guard_test.cpp)
 target_link_libraries(editor_unsaved_guard_test PRIVATE opennova_editor)
 target_include_directories(editor_unsaved_guard_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -5322,6 +5333,14 @@ add_executable(hud_capture_labels_test hud/hud_capture_labels_test.cpp)
 target_link_libraries(hud_capture_labels_test PRIVATE opennova_runtime)
 target_compile_features(hud_capture_labels_test PRIVATE cxx_std_17)
 add_test(NAME hud_capture_labels COMMAND hud_capture_labels_test)
+
+# The terrain viewport (the deep-integration plan's DI-30b): a terrain drawn on its own under a mission's
+# environment or the engine's own, its tiles the mission's or the terrain's own, framed within the fog, DI-29's
+# overlays, the ground under a point, an edit rebuilding it, a refused terrain, the wire.
+add_executable(editor_terrain_viewport_test editor/terrain_viewport_test.cpp)
+target_link_libraries(editor_terrain_viewport_test PRIVATE opennova_editor)
+target_include_directories(editor_terrain_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_terrain_viewport COMMAND editor_terrain_viewport_test)
 
 add_executable(editor_environment_viewport_test editor/environment_viewport_test.cpp)
 target_link_libraries(editor_environment_viewport_test PRIVATE opennova_editor)
