@@ -46,6 +46,10 @@ enum class NameCase {
 	FileName, // as the scan keys a file name (normalized_logical_name)
 	NoCase,   // without case (stricmp)
 	Exact,    // as written (an item id's number)
+	// An animation slot's key: past its first five characters (the `anim_` every retail key and action
+	// writes, whatever they are), without case [orig: AnimMap_FindSlotByName @ 0x40cfa0, the stricmp on
+	// the name + 5 @ 0x40cfc3; formats/adm adm_slot_key].
+	SlotKey,
 };
 
 // How a site writes a name of the kind (the graph keys a name by its NameCase alone; a query
@@ -155,8 +159,20 @@ bool texture_loader_of(int32_t loader_arg, renderer::TextureLoader &loader);
 // -> Path_ReplaceOrAppendExtension @ 0x53C780]. Below every texture_loader_arg.
 inline constexpr int32_t kTileSetTextureArg = -100;
 
-// The number of reference kinds: Shader is the last.
-inline constexpr size_t kReferenceKindCount = static_cast<size_t>(ReferenceKind::Shader) + 1;
+// A model's user point among its first 16 is defined in this section of its model's scope ("GUN.3DI/FIRST16"),
+// which an item's particle slot's lookup reads alone [orig: ItemDef_GetBoneMaskByName @ 0x49ea40, the scan end @
+// 0x49ea73]; the game's every other lookup of a point by name scans them all [orig: modelgpm_FindUserpointByName
+// @ 0x5b2170], a reference naming the model alone, which reaches every section (scope_matches).
+inline constexpr const char *kFirstUserPointsSection = "FIRST16";
+// The scope a user point of `model` (a model as a field names it, its extension optional: ".3di" then) is
+// looked up in: its file name upper case, and the first-16 section where `first_16`. "" for no model.
+std::string user_point_scope(const std::string &model, bool first_16);
+// The scope an animation map's row is looked up in: `map` (as a field names it, its extension optional:
+// ".adm" then) upper case. "" for no map.
+std::string animation_map_scope(const std::string &map);
+
+// The number of reference kinds: AvatarPart is the last.
+inline constexpr size_t kReferenceKindCount = static_cast<size_t>(ReferenceKind::AvatarPart) + 1;
 
 // The record a Record reference's value names, by its index in the kind's collection: a whole
 // number from 0 that the kind's none does not take (a negative one names none: an index from 0 is

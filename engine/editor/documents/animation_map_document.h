@@ -63,6 +63,10 @@ protected:
 	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
 	           Diagnostic &error) override;
 	bool read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const override;
+	// A row's key defines its slot in this map (ReferenceKind::AnimationKey, scoped to the map's file),
+	// which a weapon action names (DI-09); a key naming no slot defines one no lookup finds.
+	void refine_field(const NodeAddress &address, FieldUse &use) const override;
+	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	// A new row: anim_reset when the table (`rows`, as its batch has left them) has none, else
 	// anim_idle, with no clip yet.
 	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id,

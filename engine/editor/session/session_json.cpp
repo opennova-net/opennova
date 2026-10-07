@@ -25,8 +25,10 @@
 #include <editor/session/problem_fixes.h>
 #include <editor/session/record_batch.h>
 #include <editor/session/request_fields.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/workspace_parts.h>
+#include <base/io/strutil.h>
 
 namespace opennova::editor {
 
@@ -1819,6 +1821,133 @@ JsonValue reference_targets_to_json(const Document &document, const NodeAddress 
 	out.set("value", value_to_json(value));
 	set_page(out, page, targets.size());
 	out.set("targets", std::move(list));
+	return out;
+}
+
+namespace {
+
+JsonValue reference_target_json(const ReferenceTarget &target) {
+	JsonValue entry = JsonValue::make_object();
+	entry.set("label", json_string(target.label));
+	entry.set("file", json_string(target.file));
+	if (!target.locator.empty()) entry.set("locator", json_string(target.locator));
+	if (!target.field.empty()) entry.set("field", json_string(target.field));
+	entry.set("editable", boolean(target.editable));
+	if (target.missing) entry.set("missing", boolean(true));
+	return entry;
+}
+
+// How a completion's name is seen or heard before it is picked (DI-09): a sound set or a wave played through the
+// one player (as the Inspector's Play: a menu SOUND's set from its own bank), a texture's thumbnail (the
+// texture_thumbnail query of the file its loader opens), else its document opened at what it names (the model's
+// picture, the effect's preview, the record's definition picture). Null for a name of nothing the project has.
+JsonValue completion_preview(const AssetGraph *graph, const FieldUse &field, const ReferenceChoice &choice) {
+	JsonValue preview = JsonValue::make_object();
+	if (choice.kind == ReferenceKind::Sound) {
+		preview.set("play", editor_request_to_json(request::play_set(choice.name, field.scope.substr(0, field.scope.find('/')))));
+		return preview;
+	}
+	if (choice.kind == ReferenceKind::Wave && !choice.file.empty()) {
+		preview.set("play", editor_request_to_json(request::play_sound(choice.file)));
+		return preview;
+	}
+	if (is_texture_reference(choice.kind)) {
+		if (choice.served.empty()) return JsonValue::make_null();
+		preview.set("thumbnail", json_string(choice.served));
+		return preview;
+	}
+	// A definition at its record (the symbol a choice named otherwise stands for), a file as itself.
+	std::string locator;
+	if (graph && reference_row(choice.kind).names_symbol())
+		if (const GraphSymbol *symbol = graph->resolve_symbol(choice.kind, choice.symbol.empty() ? choice.name : choice.symbol,
+		                                                      choice.symbol.empty() ? field.scope : choice.symbol_scope))
+			locator = symbol->locator;
+	if (choice.file.empty()) return JsonValue::make_null();
+	preview.set("open", editor_request_to_json(request::open_document(choice.file, locator)));
+	return preview;
+}
+
+} // namespace
+
+JsonValue reference_completion_to_json(const Document &document, const NodeAddress &address, const std::string &id,
+		const std::string &typed, const SessionView &view, const JsonPage &page) {
+	FieldUse field;
+	Value value;
+	if (!field_of(document, address, id, field, value)) return JsonValue::make_null();
+	const AssetGraph *graph = view.findings.graph.get();
+	std::optional<GraphNameSource> names;
+	if (graph) names.emplace(*graph);
+	const FieldUse picking = picked_as(field);
+	// The picker's names (picker_choices: each by what it names), those completing what is typed first.
+	const std::vector<ReferenceCompletion> completions =
+	        complete_reference(picker_choices(graph, document, address, picking, names ? &*names : nullptr), picking, typed);
+	JsonValue out = JsonValue::make_object();
+	out.set("field", json_string(field.schema->id));
+	out.set("reference", json_string(reference_row(picking.reference).token));
+	if (!picking.scope.empty()) out.set("scope", json_string(picking.scope));
+	if (const size_t limit = field_name_limit(picking)) out.set("limit", json_number(double(limit)));
+	out.set("value", value_to_json(value));
+	out.set("prefix", json_string(typed));
+	// What is typed, as the field would hold it set to it: whether the game's lookup finds it, where its Go to
+	// leads (DI-17: a name nothing resolves where it belongs) and what fixes it (DI-15: Add it there first).
+	Value as_typed = typed;
+	if (picking.schema->type != FieldType::Text) {
+		const std::optional<int> number = strutil::parse_int(typed);
+		as_typed = number ? Value(int64_t(*number)) : Value(typed);
+	}
+	if (!typed.empty() && picking.reference != ReferenceKind::None) {
+		const ReferenceStatus status =
+		        graph ? reference_status(*graph, picking, as_typed) : ReferenceStatus::Unverified;
+		JsonValue typed_json = JsonValue::make_object();
+		typed_json.set("status", json_string(reference_status_token(status)));
+		const size_t limit = field_name_limit(picking);
+		typed_json.set("fits", boolean(!limit || name_characters(typed) <= limit));
+		std::vector<ReferenceTarget> targets =
+		        graph && view.project.scan ? reference_targets(*graph, *view.project.scan, picking, as_typed)
+		                                   : std::vector<ReferenceTarget>();
+		ReferenceTarget home;
+		if (targets.empty() && missing_target(picking, as_typed, view, home)) targets.push_back(std::move(home));
+		JsonValue listed = JsonValue::make_array();
+		for (const ReferenceTarget &target : targets) listed.push(reference_target_json(target));
+		typed_json.set("targets", std::move(listed));
+		JsonValue fixes = JsonValue::make_array();
+		Diagnostic finding;
+		if (graph && missing_finding(*graph, document, address, picking, as_typed, finding))
+			for (const ProblemFix &fix : fixes_for(finding, view)) {
+				const Document *open = nullptr;
+				for (const auto &held : view.documents.open)
+					if (held && held->path() == fix.request.path) open = records_of(*held);
+				const std::unique_ptr<Document> blank =
+				        open || fix.request.edits.empty() ? nullptr : blank_names_for(view, fix.request.path);
+				fixes.push(problem_fix_to_json(fix, open ? open : blank.get()));
+			}
+		typed_json.set("fixes", std::move(fixes));
+		out.set("typed", std::move(typed_json));
+	}
+	JsonValue list = JsonValue::make_array();
+	for (size_t i = page.first(completions.size()); i < page.last(completions.size()); ++i) {
+		const ReferenceCompletion &completion = completions[i];
+		const ReferenceChoice &choice = completion.choice;
+		JsonValue entry = JsonValue::make_object();
+		entry.set("name", json_string(choice.name));
+		if (!choice.label.empty()) entry.set("label", json_string(choice.label));
+		entry.set("kind", json_string(reference_row(choice.kind).token));
+		entry.set("file", json_string(choice.file));
+		if (!choice.record.empty()) entry.set("record", json_string(choice.record));
+		entry.set("status", json_string(reference_status_token(choice.status)));
+		entry.set("prefix", boolean(completion.prefix));
+		if (completion.exact) entry.set("exact", boolean(true));
+		entry.set("fits", boolean(completion.fits));
+		if (choice.inert) {
+			entry.set("inert", boolean(true));
+			entry.set("reason", json_string(choice.reason));
+		}
+		JsonValue preview = completion_preview(graph, picking, choice);
+		if (!preview.is_null()) entry.set("preview", std::move(preview));
+		list.push(std::move(entry));
+	}
+	set_page(out, page, completions.size());
+	out.set("choices", std::move(list));
 	return out;
 }
 
