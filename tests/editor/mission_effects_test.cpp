@@ -394,10 +394,55 @@ static int test_options_wire() {
 	return 0;
 }
 
+// DI-23: the Shoot tool's impacts in the same scene: each made on its tick, bound to the world; more after the same
+// ones made as the clock reaches them, one the clock passed made at once pre-aged; another effect opens the scene
+// again; another list (a clear) plays the scene again from the clock's tick with none of them.
+static int test_shot_spawns_join_the_scene() {
+	Rig rig;
+	TEST_EXPECT(rig.open());
+	MissionScene scene;
+	MissionPoses poses;
+	MissionEffects effects;
+	effects.refresh(rig.session.view(), scene, poses);
+	TEST_EXPECT(effects.slots().empty() && !effects.scene());
+	const uint64_t opened = effects.opens();
+	particle::EffectPose at;
+	at.position = particle::Vec3{ 1.0f, 2.0f, 3.0f };
+	TEST_EXPECT(effects.set_shot_spawns({ { "Effect_Smoke", at, 3, "impact", "" } }));
+	TEST_EXPECT(effects.scene() && effects.opens() == opened + 1);
+	effects.play_to(2);
+	TEST_EXPECT(!effects.shot_alive(0));
+	effects.play_to(4);
+	TEST_EXPECT(effects.shot_alive(0) && effects.scene()->live_counts().group_count == 1);
+	// The run reaching another impact: the scene plays on (no reopen), the new one made on its tick.
+	TEST_EXPECT(effects.set_shot_spawns({ { "Effect_Smoke", at, 3, "impact", "" }, { "Effect_Smoke", at, 6, "impact", "" } }));
+	TEST_EXPECT(effects.opens() == opened + 1 && !effects.shot_alive(1));
+	effects.play_to(7);
+	TEST_EXPECT(effects.shot_alive(0) && effects.shot_alive(1) && effects.scene()->live_counts().group_count == 2);
+	// One the clock passed: made at once at the next play.
+	TEST_EXPECT(effects.set_shot_spawns({ { "Effect_Smoke", at, 3, "impact", "" }, { "Effect_Smoke", at, 6, "impact", "" },
+			{ "Effect_Smoke", at, 5, "impact", "" } }));
+	effects.play_to(7);
+	TEST_EXPECT(effects.shot_alive(2) && effects.scene()->live_counts().group_count == 3);
+	// An effect the scene was not opened over: opened again, every spawn due made again at its age.
+	TEST_EXPECT(effects.set_shot_spawns({ { "Effect_Smoke", at, 3, "impact", "" }, { "Effect_Smoke", at, 6, "impact", "" },
+			{ "Effect_Smoke", at, 5, "impact", "" }, { "Effect_Fire", at, 7, "impact", "" } }));
+	TEST_EXPECT(effects.opens() == opened + 2);
+	effects.play_to(8);
+	TEST_EXPECT(effects.shot_alive(0) && effects.shot_alive(3));
+	TEST_EXPECT(effects.closure_of("Effect_Fire") != nullptr);
+	// Cleared: the scene played again from the clock's tick with none of them.
+	TEST_EXPECT(effects.set_shot_spawns({}));
+	effects.play_to(8);
+	TEST_EXPECT(effects.shot_spawns().empty() && effects.scene()->live_counts().group_count == 0);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_options_wire();
 	failures += test_slots_as_the_start_attaches_them();
 	failures += test_slots_follow_the_mission_live();
+	failures += test_shot_spawns_join_the_scene();
 	return failures == 0 ? 0 : 1;
 }
