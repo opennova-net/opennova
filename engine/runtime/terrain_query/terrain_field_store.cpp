@@ -89,6 +89,10 @@ void TerrainFieldStore::build(const uint16_t *heightmap, size_t heightmap_count,
 		surface_map_.sector_grid = sector_grid_.data();
 		surface_map_.origin_x = origin_x;
 		surface_map_.origin_y = origin_y;
+		// The cell masks the sampler clamps or wraps by (D-TERRAIN-16) [orig:
+		// PolyTrn_LoadTerrainConfig @ 0x60E4B1..0x60E4CB].
+		surface_map_.wrap_x = wrap_x;
+		surface_map_.wrap_z = wrap_z;
 	}
 	attach_placed_tiles();
 }

@@ -2,6 +2,9 @@
 
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/variant/vector4.hpp>
+#include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/shader.hpp>
@@ -258,6 +261,15 @@ public:
 	}
 	void set_static_terrain_shadow_enabled(bool p_enabled);
 	bool is_static_terrain_shadow_enabled() const;
+	// Whether a caster's change composes again the pages its static shadow
+	// touched and touches: on in the editor's mission device, whose picture
+	// shows the mission as a load composes it (a NoShadow set, an entity moved,
+	// removed or brought back); off in the game, which keeps a composed page as
+	// retail does (TerrainStaticShadowPlanner::set_reports_caster_changes).
+	// C++ only.
+	void set_static_shadow_follows_casters(bool p_on) {
+		static_shadow_rasterizer.set_reports_caster_changes(p_on);
+	}
 	void set_tile_cache_capture_diagnostics(bool p_enabled);
 	void set_suppressed_static_shadow_bms_ids(
 			const PackedInt32Array &p_bms_ids);
@@ -386,6 +398,24 @@ public:
 
 	void set_debug_mode(DebugMode mode);
 	DebugMode get_debug_mode() const;
+
+	// The editor's ground overlay (ADR 0046 DI-29, the mission view's Show > Surface classes and Foliage):
+	// `p_image` (RGBA8; null for none) laid over the terrain from above, its north-west corner at
+	// `p_rect.position` on the world's x/z plane and `p_rect.size` its span; past it `p_outside` where
+	// `p_outside_on`. Each texel tints the terrain by its alpha after the fog (the shader's u_overlay); the
+	// game never sets one.
+	void set_ground_overlay(const Ref<Image> &p_image, const Rect2 &p_rect, const Color &p_outside,
+			bool p_outside_on);
+	void clear_ground_overlay();
+	bool has_ground_overlay() const { return ground_overlay_on_; }
+
+private:
+	// The overlay as last set, pushed to the material as it is set and as a build makes the material.
+	void _apply_ground_overlay();
+	Ref<ImageTexture> ground_overlay_texture_;
+	Vector4 ground_overlay_rect_;
+	Color ground_overlay_outside_;
+	bool ground_overlay_on_ = false;
 };
 
 } // namespace godot

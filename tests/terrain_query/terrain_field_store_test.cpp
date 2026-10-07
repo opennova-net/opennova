@@ -170,6 +170,39 @@ int main() {
 	check(terrain::surface_type_at_fixed(store.surface_map(), 300 << 16, -(200 << 16)) == 3,
 			"surface sample survives the source charmap being freed");
 
+	// --- the cell masks (D-TERRAIN-16): a wrapped axis takes a cell's low four
+	// bits, one that does not wrap clamps an off-grid cell to the edge [orig:
+	// PolyTrn_LoadTerrainConfig @ 0x60E4B1..0x60E4CB; Terrain_GetSurfaceTypeAtPosition
+	// @ 0x606547..0x60656D] ----------------------------------------------------
+	{
+		CptFile masked_cpt = make_cpt();
+		TrnConfig masked = make_trn();
+		for (int r = 0; r < 16; ++r)
+			for (int c = 0; c < 16; ++c) masked.sector_grid[r][c] = 0;
+		masked.sector_grid[0][0] = 1; // the one mapped cell: x in [-2048, -1536), y in (1536, 2048]
+		masked.wrap_x = 1;
+		masked.wrap_y = 0;
+		std::vector<uint8_t> classes(16, 2);
+		terrain::TerrainFieldStore wrapped;
+		terrain::terrain_field_store_build(wrapped, masked_cpt, masked, classes.data(), 4, 4);
+		const terrain::SurfaceTypeMap &map = wrapped.surface_map();
+		check(map.wrap_x && !map.wrap_z, "the surface view carries the TRN wrap flags");
+		check(terrain::surface_type_at_fixed(map, -(2045 << 16), 1800 << 16) == 2, "the mapped cell reads its class");
+		// Sixteen sectors east: column 16 wraps to 0 (a clamp would take column 15, empty: 7).
+		check(terrain::surface_type_at_fixed(map, 6147 << 16, 1800 << 16) == 2,
+				"a wrapped axis takes the cell's low four bits");
+		// Sixteen sectors south: row 16 clamps to 15 (empty), where a wrap would take row 0.
+		check(terrain::surface_type_at_fixed(map, -(2045 << 16), -(6392 << 16)) == 7,
+				"an axis that does not wrap clamps to the edge cell");
+		// North of the grid: row -1 clamps to 0, the mapped cell.
+		check(terrain::surface_type_at_fixed(map, -(2045 << 16), 2348 << 16) == 2, "a negative row clamps to row 0");
+		masked.wrap_x = 0;
+		terrain::TerrainFieldStore clamped;
+		terrain::terrain_field_store_build(clamped, masked_cpt, masked, classes.data(), 4, 4);
+		check(terrain::surface_type_at_fixed(clamped.surface_map(), 6147 << 16, 1800 << 16) == 7,
+				"without the wrap the column clamps to the empty edge cell");
+	}
+
 	// --- the format-free build path, no charmap ------------------------------
 	{
 		std::vector<uint16_t> hm(static_cast<size_t>(kDim) * kDim, 7 * 256);

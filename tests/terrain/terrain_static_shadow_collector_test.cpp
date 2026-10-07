@@ -250,6 +250,46 @@ int main() {
 	if (!expect(collector.compile(coarse).draws.size() == 0x400,
 			"the tile collector stops at 0x400 casters")) return 1;
 
+	// A caster's reach holds every page it draws into whatever the sun: at a
+	// grazing sun (the vertical clamped to 0.25) from eight sides, each page
+	// around a radius-20 caster that compiles a draw overlaps the reach (3r and
+	// one 16.16 unit on either side).
+	{
+		TerrainStaticShadowCollector lone;
+		const TerrainStaticShadowCandidate caster = candidate(70, kEntityKindBuilding, 0,
+				230.0f, 230.0f, 20.0f, 700, 1, 1);
+		lone.replace({caster});
+		const TerrainStaticShadowReach reach = terrain_static_shadow_caster_reach(caster);
+		if (!expect(reach.min_x == caster.position_fixed[0] - 60 * 65536 - 1 &&
+						reach.max_x == caster.position_fixed[0] + 60 * 65536 + 1 &&
+						reach.min_y == caster.position_fixed[1] - 60 * 65536 - 1 &&
+						reach.max_y == caster.position_fixed[1] + 60 * 65536 + 1,
+				"the reach is the position +- 3r and a unit")) return 1;
+		const int span = TerrainTileCompositionCache::page_world_span(4);
+		int drawn = 0;
+		for (int side = 0; side < 8; ++side) {
+			const float angle = static_cast<float>(side) * 0.785398163f;
+			TerrainStaticShadowPageInput grazing;
+			grazing.surface_to_light = {std::cos(angle), 0.0f, std::sin(angle)};
+			for (int px = 0; px < 512; px += span) {
+				for (int pz = 0; pz < 512; pz += span) {
+					grazing.page.page_local_x = px;
+					grazing.page.page_local_z = pz;
+					grazing.page.page_lod_level = 4;
+					if (lone.compile(grazing).draws.empty()) continue;
+					++drawn;
+					// The page in mission 16.16: x [px, px + span], y [-pz - span, -pz].
+					const int64_t x0 = int64_t(px) * 65536, x1 = int64_t(px + span) * 65536;
+					const int64_t y1 = -int64_t(pz) * 65536, y0 = y1 - int64_t(span) * 65536;
+					if (!expect(x1 >= reach.min_x && x0 <= reach.max_x && y1 >= reach.min_y &&
+									y0 <= reach.max_y,
+							"every page the caster draws into overlaps its reach")) return 1;
+				}
+			}
+		}
+		if (!expect(drawn > 16, "the grazing suns put the caster in several pages")) return 1;
+	}
+
 	std::puts("OK: terrain static-shadow collector admission/order/tile test/stamp");
 	return 0;
 }
