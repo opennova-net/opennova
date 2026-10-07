@@ -20,6 +20,7 @@
 #include <editor/assets/install_view.h>
 #include <editor/import/import_plan.h>
 #include <editor/model/document.h>
+#include <editor/project/base_project.h>
 #include <editor/project/expansion_files.h>
 #include <editor/project/expansion_name.h>
 #include <editor/project/project_document.h>
@@ -150,6 +151,65 @@ static int test_project_expansion() {
 	TEST_EXPECT(check_project_expansion("jo", ProjectExpansion{ "jxm", "a b" }, error));
 	TEST_EXPECT(!check_project_expansion("jo", ProjectExpansion{ "jxm", "a/b" }, error) &&
 	            error.code() == "project.field.invalid");
+	// T5: a base game's project, for an expansion alone and never beside an installed one.
+	TEST_EXPECT(check_project_expansion("jo", ProjectExpansion{ "onx", "", "../base" }, error));
+	TEST_EXPECT(!check_project_expansion("jo", ProjectExpansion{ "", "", "../base" }, error) &&
+	            error.code() == "project.field.invalid" && error.message.find("only as an expansion") != std::string::npos);
+	TEST_EXPECT(!check_project_expansion("jo", ProjectExpansion{ "onx", "jox01", "../base" }, error) &&
+	            error.code() == "project.field.invalid" && error.message.find("never both") != std::string::npos);
+	TEST_EXPECT(!check_project_expansion("dfx", ProjectExpansion{ "onx", "", "../base" }, error) &&
+	            error.code() == "project.expansion.unsupported");
+	// The project file keeps it, and a project on the install's base game writes no key for it (S16's form).
+	ProjectDocument doc;
+	doc.project_id = "id";
+	doc.title = "Mod";
+	doc.expansion = ProjectExpansion{ "onx", "", "../../assets" };
+	ProjectDocument read;
+	TEST_EXPECT(project_document_from_json(project_document_to_json(doc), read, error) &&
+	            read.expansion == doc.expansion && read.expansion.on_base_project());
+	const opennova::io::JsonValue on_base = project_document_to_json(doc);
+	const opennova::io::JsonValue *written = on_base.get("expansion");
+	TEST_EXPECT(written && written->get_string("base_project", "") == "../../assets");
+	doc.expansion.base_project.clear();
+	const opennova::io::JsonValue on_install = project_document_to_json(doc);
+	written = on_install.get("expansion");
+	TEST_EXPECT(written && !written->get("base_project"));
+	// An object naming only a base game's project is refused as an expansion without a name.
+	opennova::io::JsonValue json = project_document_to_json(doc);
+	opennova::io::JsonValue unnamed = opennova::io::JsonValue::make_object();
+	unnamed.set("base_project", opennova::io::JsonValue::make_string("../base"));
+	json.set("expansion", std::move(unnamed));
+	TEST_EXPECT(!project_document_from_json(json, read, error) && error.code() == "project.field.invalid");
+	return 0;
+}
+
+// The base game's project an expansion names (T5, base_project.h): found from the project's folder when
+// relative, its export folder the base game; refused (project.base_project) where no project is, where it
+// builds as an expansion itself, or where it is another game's.
+static int test_base_project_dir() {
+	editor_test::TempProjectDir dir("opennova_editor_base_project_dir");
+	const std::string mod = dir.file("game/expansions/onx");
+	ProjectDocument made;
+	Diagnostic error;
+	TEST_EXPECT(create_project(dir.file("game/assets"), "Base", "jo", made, error));
+	TEST_EXPECT(base_project_root(mod, ProjectExpansion{ "onx", "", "../../assets" }) == dir.file("game/assets"));
+	TEST_EXPECT(base_project_root(mod, ProjectExpansion{ "onx", "", "../../assets/" }) == dir.file("game/assets"));
+	TEST_EXPECT(base_project_root(mod, ProjectExpansion{ "onx" }).empty());
+	std::string out;
+	TEST_EXPECT(base_project_game_dir(mod, ProjectExpansion{ "onx", "", "../../assets" }, "jo", out, error) &&
+	            out == dir.file("game/assets/build/export") && !base_game_exported(out));
+	std::error_code made_dir;
+	std::filesystem::create_directories(opennova::io::os_path(out), made_dir);
+	TEST_EXPECT(write_archive(out + "/resource.pff", { { "baseonly.txt", "base" } }) && base_game_exported(out));
+	TEST_EXPECT(!base_project_game_dir(mod, ProjectExpansion{ "onx", "", "../../nowhere" }, "jo", out, error) &&
+	            error.code() == "project.base_project" && error.message.find("does not open") != std::string::npos &&
+	            out.empty());
+	TEST_EXPECT(create_project(dir.file("game/other"), "Other", "jo", made, error, ProjectExpansion{ "oth" }));
+	TEST_EXPECT(!base_project_game_dir(mod, ProjectExpansion{ "onx", "", "../../other" }, "jo", out, error) &&
+	            error.code() == "project.base_project" && error.message.find("builds as the expansion oth") != std::string::npos);
+	TEST_EXPECT(create_project(dir.file("game/dfx"), "Dfx", "dfx", made, error));
+	TEST_EXPECT(!base_project_game_dir(mod, ProjectExpansion{ "onx", "", "../../dfx" }, "jo", out, error) &&
+	            error.code() == "project.base_project" && error.message.find("\"dfx\"") != std::string::npos);
 	return 0;
 }
 
@@ -577,10 +637,82 @@ static int test_session() {
 	return 0;
 }
 
+// An expansion of a project's base game (T5) in a session, over a game install that has an expansion of its
+// own: new_project makes it on the base project's folder (refused, nothing made, where no project is there);
+// while the base has no export the expansion says so and its build is refused, saying to export it; once it
+// has one, the base game it reads is that export (its names, its expansions: none), never the install's.
+static int test_session_on_base_project() {
+	editor_test::TempProjectDir dir("opennova_editor_expansion_base_project");
+	const std::string install = dir.file("install");
+	TEST_EXPECT(make_install(install));
+	Preferences chosen;
+	chosen.game_install = install;
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences(chosen);
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	ProjectDocument base;
+	Diagnostic error;
+	TEST_EXPECT(create_project(dir.file("game/assets"), "Base", "jo", base, error));
+	const std::string mod = dir.file("game/expansions/onx");
+	ActionOutcome outcome =
+	        editor_test::handle_to_end(session, request::new_expansion_project(dir.file("game/expansions/bad"), "Bad", "onx",
+	                                                                           "", true, "../../nowhere"));
+	TEST_EXPECT(outcome.refused && count_code(outcome.findings, "project.base_project") == 1 &&
+	            !std::filesystem::exists(opennova::io::os_path(dir.file("game/expansions/bad"))) && !view.project.open);
+	outcome = editor_test::handle_to_end(session,
+	                                     request::new_expansion_project(mod, "Night", "onx", "", true, "../../assets"));
+	TEST_EXPECT(!outcome.refused && view.project.open &&
+	            view.project.document->expansion == (ProjectExpansion{ "onx", "", "../../assets" }));
+	TEST_EXPECT(file_text(mod + "/project.opennova").find("\"base_project\": \"../../assets\"") != std::string::npos);
+	TEST_EXPECT(view.project.scan->find("onx.bin") && view.project.scan->find("version.txt"));
+	{
+		const opennova::io::JsonValue project = view_section_to_json(view, ViewSection::Project);
+		const opennova::io::JsonValue *expansion = project.get("expansion");
+		TEST_EXPECT(expansion && expansion->get_string("base_project", "") == "../../assets");
+	}
+	// No export yet: said, and the build refused with what to do.
+	TEST_EXPECT(count_code(view.project.requirements->diagnostics, "project.base_project", "has no export") == 1);
+	TEST_EXPECT(view.project.base_files.empty() && view.project.install_expansions.empty());
+	editor_test::handle_to_end(session, request::build());
+	TEST_EXPECT(count_code(view.findings.diagnostics, "build.expansion.base_missing", "export the base game's project") == 1);
+	// Its export: the base game the expansion reads, the install's expansion x1 none of it.
+	const std::string exported = dir.file("game/assets/build/export");
+	std::error_code made_dir;
+	std::filesystem::create_directories(opennova::io::os_path(exported), made_dir);
+	TEST_EXPECT(write_archive(exported + "/resource.pff", { { "baseonly.txt", "base" }, { "shared.txt", "base" } }) &&
+	            write_archive(exported + "/language.pff", {}) && editor_test::write_text(exported + "/export.json", "{}"));
+	outcome = editor_test::handle_to_end(session, request::open_project(mod));
+	TEST_EXPECT(!outcome.refused && view.project.open);
+	TEST_EXPECT(count_code(view.project.requirements->diagnostics, "project.base_project") == 0);
+	const auto has = [&view](const char *name) {
+		return std::any_of(view.project.base_files.begin(), view.project.base_files.end(),
+		                   [name](const std::string &held) { return opennova::strutil::iequals(held, name); });
+	};
+	TEST_EXPECT(has("baseonly.txt") && has("shared.txt") && !has("x1only.txt") && !has("01TR.bms"));
+	TEST_EXPECT(view.project.install_expansions.empty());
+	// Settings: the base game's project and an installed expansion together refused, nothing written.
+	ProjectSettingsChange both;
+	both.builds_on = std::string("x1");
+	editor_test::apply_settings(session, both);
+	TEST_EXPECT(count_code(view.project.settings_result.failures, "project.field.invalid", "never both") == 1 &&
+	            view.project.document->expansion.base_project == "../../assets");
+	// Moved back to the install's base game: the install's names again.
+	ProjectSettingsChange install_base;
+	install_base.base_project = std::string();
+	editor_test::apply_settings(session, install_base);
+	TEST_EXPECT(view.project.document->expansion == (ProjectExpansion{ "onx", "" }) && has("01TR.bms") &&
+	            !has("x1only.txt"));
+	TEST_EXPECT(file_text(mod + "/project.opennova").find("base_project") == std::string::npos);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_name_rule();
 	failures += test_project_expansion();
+	failures += test_base_project_dir();
+	failures += test_session_on_base_project();
 	failures += test_install_findings();
 	failures += test_files_table();
 	failures += test_name_forms_no_game_file();

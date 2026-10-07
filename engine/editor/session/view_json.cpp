@@ -122,10 +122,12 @@ JsonValue project_section(const SessionView &view) {
 	features.set("mission", boolean(document.features.mission));
 	features.set("multiplayer", boolean(document.features.multiplayer));
 	out.set("features", std::move(features));
-	// Its expansion (S16): the one it builds as ("" standalone) and the installed one it builds on.
+	// Its expansion (S16): the one it builds as ("" standalone) and the installed one it builds on; the base
+	// game's project it builds on (T5: "" the game install's base game).
 	JsonValue expansion = JsonValue::make_object();
 	expansion.set("name", json_string(document.expansion.name));
 	expansion.set("builds_on", json_string(document.expansion.builds_on));
+	expansion.set("base_project", json_string(document.expansion.base_project));
 	out.set("expansion", std::move(expansion));
 	out.set("file_count", json_number(double(view.project.scan->entries.size())));
 	// What another program changed that the editor has not read yet (DI-01).
@@ -528,7 +530,8 @@ constexpr ViewSectionRow kSections[] = {
 			"The status line: the last thing that happened, in a line." },
 	{ S::Project, "project", concern_set({ C::Project, C::Files, C::Preferences }), project_section,
 			"The open project: open, its root, title, id, target game, features and expansion {name, "
-			"builds_on} (S16: \"\" a standalone project, \"\" the base game), file_count (the files query "
+			"builds_on, base_project} (S16: \"\" a standalone project, \"\" the base game; T5: the base game's "
+			"project, \"\" the game install's), file_count (the files query "
 			"pages the files), outside_waiting and outside_sweeping (DI-01: the files another program changed "
 			"that wait to be read, once they hold still, and whether the sweep a focus-in began over every file "
 			"runs), file_history {undo, redo, undo_steps, redo_steps} (DI-25: what undo_file and redo_file would take "
