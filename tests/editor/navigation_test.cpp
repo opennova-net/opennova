@@ -407,7 +407,7 @@ std::vector<std::string> marked_lines(const FilePage &page) {
 }
 
 // DI-17, a Go to always lands: a file the editor has no editor for lands on its page, the record it names
-// marked (a terrain's colour map, from the texture it names), a place of its own with its mark (another line
+// marked (a face animation's base texture, from the texture it names), a place of its own with its mark (another line
 // of the same page a step, Back and Forward marking each again); a wave's page, whose user is a sound bank,
 // a document of its own (S22: the specific document wins), there opened at the single; a native text held as
 // a text (DI-06: an avatar table, whose parser keeps no places) at the line that writes the record's name (of
@@ -428,44 +428,43 @@ int test_go_to_lands() {
 	            editor_test::write_bytes(root + "/" + avatars, test_io::read_file(fixtures + "avatars/synth_avatars.def")) &&
 	            editor_test::write_text(root + "/textures/map.tga", "not a picture") &&
 	            editor_test::write_text(root + "/textures/grain.tga", "not a picture") &&
-	            editor_test::write_text(root + "/terrains/isle.trn",
-	                                    "polytrn_colormap map.tga\npolytrn_detailmap grain.tga\npolytrn_polydata isle.cpt\n"));
+	            editor_test::write_text(root + "/faces/head.grm", "basetexture map.tga\r\neyetexture grain.tga grain.tga\r\n"));
 	editor_test::handle_to_end(n.session, request::rescan());
-	const std::string bank = "sounds/menu.lwf", wave = "sounds/tone.wav", terrain = "terrains/isle.trn";
+	const std::string bank = "sounds/menu.lwf", wave = "sounds/tone.wav", face = "faces/head.grm";
 
-	// The terrain's page, from the texture its colour map names: that line marked, the page's tab forward.
-	ReferenceTarget colormap;
+	// The face animation's page, from the texture it names as its base: that line marked, the page's tab forward.
+	ReferenceTarget base;
 	for (const FilePageLine &line : file_page(v, "textures/map.tga").used_by)
-		if (line.target.file == terrain) colormap = line.target;
-	TEST_EXPECT(colormap.locator.empty() && colormap.field == "polytrn_colormap" && !colormap.editable);
+		if (line.target.file == face) base = line.target;
+	TEST_EXPECT(base.locator.empty() && base.field == "basetexture" && !base.editable);
 	uint64_t seq = v.events.next_seq() - 1;
-	TEST_EXPECT(n.go(request::open_document(colormap.file, colormap.locator, colormap.field)) && v.documents.page == terrain &&
-	            v.documents.page_locator.empty() && v.documents.page_field == "polytrn_colormap");
+	TEST_EXPECT(n.go(request::open_document(base.file, base.locator, base.field)) && v.documents.page == face &&
+	            v.documents.page_locator.empty() && v.documents.page_field == "basetexture");
 	std::vector<ViewEvent> shown = editor_test::events_after(v, seq, ViewEventKind::ShowDocument);
-	TEST_EXPECT(shown.size() == 1 && shown[0].path == terrain && shown[0].flag);
-	TEST_EXPECT(v.activity.status.find("at polytrn_colormap") != std::string::npos);
-	const FilePage terrain_page = shown_file_page(v, terrain);
-	const std::vector<std::string> marked = marked_lines(terrain_page);
-	TEST_EXPECT(marked.size() == 1 && marked[0].rfind("polytrn_colormap: ", 0) == 0 &&
+	TEST_EXPECT(shown.size() == 1 && shown[0].path == face && shown[0].flag);
+	TEST_EXPECT(v.activity.status.find("at basetexture") != std::string::npos);
+	const FilePage face_page = shown_file_page(v, face);
+	const std::vector<std::string> marked = marked_lines(face_page);
+	TEST_EXPECT(marked.size() == 1 && marked[0].rfind("basetexture: ", 0) == 0 &&
 	            marked[0].find("map.tga") != std::string::npos);
 	TEST_EXPECT(v.navigation.back.front().pane == Pane::Document && v.navigation.back.front().path == n.extra);
-	// Its missing height data: no file to go to (its finding in Problems holds the fixes); the page alone marks
-	// nothing.
+	// Its missing normal-map twin (map.MDT, a name its loader makes): no file to go to (its finding in Problems
+	// holds the fixes); the page alone marks nothing.
 	size_t missing = 0;
-	for (const FilePageLine &line : terrain_page.names)
-		if (line.missing) missing += line.target.file.empty() && line.name == "isle.cpt" ? 1 : 100;
+	for (const FilePageLine &line : face_page.names)
+		if (line.missing) missing += line.target.file.empty() && line.name == "map.MDT" ? 1 : 100;
 	TEST_EXPECT(missing == 1);
-	TEST_EXPECT(marked_lines(file_page(v, terrain)).empty());
+	TEST_EXPECT(marked_lines(file_page(v, face)).empty());
 
-	// Another line of the same page: a step of its own, the place left the page at the colour map.
-	TEST_EXPECT(n.go(request::open_document(terrain, "", "polytrn_detailmap")) && v.documents.page_field == "polytrn_detailmap");
-	TEST_EXPECT(v.navigation.back.front().pane == Pane::Page && v.navigation.back.front().path == terrain &&
-	            v.navigation.back.front().locator.empty() && v.navigation.back.front().field == "polytrn_colormap" &&
-	            v.navigation.back.front().label == "About isle.trn: polytrn_colormap");
-	TEST_EXPECT(n.back() && v.documents.page == terrain && v.documents.page_field == "polytrn_colormap" &&
-	            marked_lines(shown_file_page(v, terrain)) == marked);
+	// Another line of the same page: a step of its own, the place left the page at the base texture.
+	TEST_EXPECT(n.go(request::open_document(face, "", "eyetexture")) && v.documents.page_field == "eyetexture");
+	TEST_EXPECT(v.navigation.back.front().pane == Pane::Page && v.navigation.back.front().path == face &&
+	            v.navigation.back.front().locator.empty() && v.navigation.back.front().field == "basetexture" &&
+	            v.navigation.back.front().label == "About head.grm: basetexture");
+	TEST_EXPECT(n.back() && v.documents.page == face && v.documents.page_field == "basetexture" &&
+	            marked_lines(shown_file_page(v, face)) == marked);
 	TEST_EXPECT(n.back() && v.documents.active == n.extra);
-	TEST_EXPECT(n.forward(2) && v.documents.page == terrain && v.documents.page_field == "polytrn_detailmap");
+	TEST_EXPECT(n.forward(2) && v.documents.page == face && v.documents.page_field == "eyetexture");
 
 	// A wave's page, its Play; its user, the bank, is a document of its own: opened at the single.
 	TEST_EXPECT(n.go(request::open_document(wave)) && v.documents.page == wave && v.documents.page_locator.empty());
@@ -525,11 +524,11 @@ int test_go_to_lands() {
 	            v.navigation.back.front().path == avatars);
 
 	// The wire: the page showing with its mark, what it names going where, the wave's Play.
-	TEST_EXPECT(n.go(request::open_document(terrain, "", "polytrn_colormap")));
+	TEST_EXPECT(n.go(request::open_document(face, "", "basetexture")));
 	std::string error;
 	JsonValue page = n.session.query("file_page", JsonValue(), error);
-	TEST_EXPECT(page.get_string("path", "") == terrain && !page.get("at_locator") &&
-	            page.get_string("at_field", "") == "polytrn_colormap" && page.get("defines") && !page.get("wave"));
+	TEST_EXPECT(page.get_string("path", "") == face && !page.get("at_locator") &&
+	            page.get_string("at_field", "") == "basetexture" && page.get("defines") && !page.get("wave"));
 	bool at_map = false;
 	if (const JsonValue *names = page.get("names"))
 		for (const JsonValue &line : names->array)
@@ -543,8 +542,8 @@ int test_go_to_lands() {
 	TEST_EXPECT(page.get_bool("wave", false) && to_bank && !page.get("at_field"));
 	const JsonValue state = n.session.query("state", parsed(R"({"sections": ["documents", "navigation"]})"), error);
 	const JsonValue *documents = state.get("documents");
-	TEST_EXPECT(documents && documents->get_string("page", "") == terrain && !documents->get("page_locator") &&
-	            documents->get_string("page_field", "") == "polytrn_colormap");
+	TEST_EXPECT(documents && documents->get_string("page", "") == face && !documents->get("page_locator") &&
+	            documents->get_string("page_field", "") == "basetexture");
 	return 0;
 }
 

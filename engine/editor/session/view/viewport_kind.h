@@ -44,6 +44,10 @@ enum class ViewportKind : uint8_t {
 	// the Shell's MissionEnvironment, Weather, SkyDome, Celestial, Water, Terrain and drops), the Document
 	// tab's main view
 	Environment,
+	// A terrain drawn on its own (the deep-integration plan's DI-30b: the runtime's terrain, water, foliage and
+	// environment under a mission that runs on it, or the engine's own; DI-29's overlays; DI-07's ground under the
+	// pointer), the Document tab's main view
+	Terrain,
 	kCount,
 };
 

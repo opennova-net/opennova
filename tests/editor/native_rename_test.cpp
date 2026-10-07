@@ -57,7 +57,7 @@ int test_rewrite_text() {
 	// A terrain: the comment and the line the game reads over keep the name; the last line is the one read.
 	std::string trn = "; polytrn_colormap map.tga, the old map\r\npolytrn_colormap \"map.tga\"\r\npolytrn_detailmap grain.tga\r\n"
 	                  "polytrn_polydata isle.cpt\r\npolytrn_colormap map.tga ; the one read\r\n";
-	TEST_EXPECT(rewrite_native_text("isle.trn", AssetKind::Terrain, "jo", trn, {{"", "polytrn_colormap", "map.tga", "land.tga"}},
+	TEST_EXPECT(rewrite_native_text("isle.trn", AssetKind::Terrain, "jo", trn, {{"Terrain", "polytrn_colormap", "map.tga", "land.tga"}},
 	                                missed) == 1 &&
 	            missed.empty());
 	TEST_EXPECT(trn == "; polytrn_colormap map.tga, the old map\r\npolytrn_colormap \"map.tga\"\r\npolytrn_detailmap grain.tga\r\n"
@@ -96,9 +96,9 @@ int test_native_text_place() {
 	using editor_test::crlf;
 	const std::string trn = "; polytrn_colormap map.tga, the old map\r\npolytrn_colormap \"map.tga\"\r\npolytrn_detailmap grain.tga\r\n"
 	                        "polytrn_polydata isle.cpt\r\npolytrn_colormap MAP.tga ; the one read\r\n";
-	TEST_EXPECT(native_text_place("isle.trn", AssetKind::Terrain, "jo", trn, "", "polytrn_colormap", line, column) &&
+	TEST_EXPECT(native_text_place("isle.trn", AssetKind::Terrain, "jo", trn, "Terrain", "polytrn_colormap", line, column) &&
 	            line == 5 && column == 18);
-	TEST_EXPECT(native_text_place("isle.trn", AssetKind::Terrain, "jo", trn, "", "polytrn_detailmap", line, column) &&
+	TEST_EXPECT(native_text_place("isle.trn", AssetKind::Terrain, "jo", trn, "Terrain", "polytrn_detailmap", line, column) &&
 	            line == 3 && column == 19);
 	// Two heads name one model: each record's own line.
 	const std::string avatars =
@@ -132,7 +132,7 @@ int test_native_text_place() {
 	TEST_EXPECT(native_text_place("fx.ptl", AssetKind::Particles, "jo", ptl, "Hit", "", line, column) && line == 8 && column == 7);
 	// Nowhere: a record or field the text has not, the file alone.
 	TEST_EXPECT(!native_text_place("Avatars.def", AssetKind::AvatarDefs, "jo", avatars, "C", "graphic", line, column));
-	TEST_EXPECT(!native_text_place("isle.trn", AssetKind::Terrain, "jo", trn, "", "polytrn_charmap", line, column));
+	TEST_EXPECT(!native_text_place("isle.trn", AssetKind::Terrain, "jo", trn, "Terrain", "polytrn_charmap", line, column));
 	TEST_EXPECT(!native_text_place("isle.trn", AssetKind::Terrain, "jo", trn, "", "", line, column));
 	return 0;
 }
