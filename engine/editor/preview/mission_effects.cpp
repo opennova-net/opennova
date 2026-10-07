@@ -195,6 +195,7 @@ void MissionEffects::open_(const std::vector<std::string> &names) {
 	++serial_;
 	++opens_;
 	for (Held &held : held_) held.groups.clear();
+	std::fill(spawn_groups_.begin(), spawn_groups_.end(), particle::EffectGroupId());
 	if (names_.empty()) return;
 	const particle::EffectSceneConfig config =
 			catalog_files_.closures(names_, particle::EffectSceneConfig(), closures_);
@@ -232,6 +233,72 @@ void MissionEffects::spawn_(Held &held, int32_t age) {
 	}
 	const auto found = slot_index_.find(held.slot.row);
 	if (found != slot_index_.end()) slots_[found->second].spawned = held.slot.spawned;
+}
+
+std::vector<std::string> MissionEffects::names_of_(const std::vector<Held> &held) const {
+	std::vector<std::string> names;
+	const auto add = [&](const std::string &effect) {
+		bool known = false;
+		for (const std::string &name : names) known = known || strutil::iequals(name, effect);
+		if (!known) names.push_back(effect);
+	};
+	for (const Held &each : held) add(each.slot.effect);
+	for (const DefinitionSpawn &spawn : spawns_) add(spawn.effect);
+	return names;
+}
+
+void MissionEffects::spawn_shot_(size_t spawn, int32_t age) {
+	const DefinitionSpawn &planned = spawns_[spawn];
+	spawn_made_[spawn] = true;
+	spawn_groups_[spawn] = particle::EffectGroupId();
+	if (!scene_) return;
+	// Bound to the world where the round stopped, as the game's impact presenter spawns it.
+	particle::EffectSpawnRequest request;
+	request.effect = scene_->intern(planned.effect);
+	request.pose = planned.pose;
+	request.initial_age_ticks = uint32_t(std::max(age, 0));
+	const particle::EffectSpawnReceipt receipt = scene_->spawn(request);
+	++spawns_made_;
+	// A spawn whose catch-up outlived every emitter is gone already (EffectScene::spawn releases it).
+	if (receipt.spawned() && scene_->contains_group(receipt.group)) spawn_groups_[spawn] = receipt.group;
+}
+
+bool MissionEffects::shot_alive(size_t spawn) const {
+	return scene_ && spawn < spawn_groups_.size() && spawn_groups_[spawn] && scene_->contains_group(spawn_groups_[spawn]);
+}
+
+bool MissionEffects::set_shot_spawns(std::vector<DefinitionSpawn> spawns) {
+	if (same_spawns(spawns, spawns_)) return false;
+	// More spawns after the same ones (the shots' run reaching another impact): the scene plays on, each new one
+	// made as the clock reaches it, or at the next play pre-aged where it passed it.
+	bool extends = spawns.size() > spawns_.size();
+	if (extends) {
+		const std::vector<DefinitionSpawn> head(spawns.begin(), spawns.begin() + std::ptrdiff_t(spawns_.size()));
+		extends = same_spawns(head, spawns_);
+	}
+	spawns_ = std::move(spawns);
+	if (extends) {
+		spawn_groups_.resize(spawns_.size(), particle::EffectGroupId());
+		spawn_made_.resize(spawns_.size(), false);
+	} else {
+		// Another list (a shot cleared, the run made again): the scene played again from the clock's tick.
+		spawn_groups_.assign(spawns_.size(), particle::EffectGroupId());
+		spawn_made_.assign(spawns_.size(), false);
+		played_ = false;
+	}
+	// An effect the scene was not opened over: opened again over the new closures (every slot at its age).
+	bool held_names = true;
+	for (const DefinitionSpawn &spawn : spawns_) {
+		bool known = false;
+		for (const std::string &opened : names_) known = known || strutil::iequals(opened, spawn.effect);
+		held_names = held_names && known;
+	}
+	if (!held_names) {
+		open_(names_of_(held_));
+		std::fill(spawn_made_.begin(), spawn_made_.end(), false);
+	}
+	++serial_;
+	return true;
 }
 
 void MissionEffects::let_go_(Held &held) {
@@ -333,13 +400,8 @@ bool MissionEffects::refresh(const SessionView &view, const MissionScene &scene,
 	slot_index_.clear();
 	for (size_t i = 0; i < slots_.size(); ++i) slot_index_[slots_[i].row] = i;
 
-	// The effects the slots name, each once in the order first named.
-	std::vector<std::string> names;
-	for (const Held &held : wanted) {
-		bool known = false;
-		for (const std::string &name : names) known = known || strutil::iequals(name, held.slot.effect);
-		if (!known) names.push_back(held.slot.effect);
-	}
+	// The effects the slots name, then the Shoot tool's spawns (DI-23), each once in the order first named.
+	const std::vector<std::string> names = names_of_(wanted);
 	bool held_names = true;
 	for (const std::string &name : names) {
 		bool known = false;
@@ -438,24 +500,37 @@ void MissionEffects::play_to(int32_t tick) {
 		scene_->reset_runtime_state();
 		tick_ = tick;
 		for (Held &held : held_) spawn_(held, tick - held.born);
+		std::fill(spawn_made_.begin(), spawn_made_.end(), false);
+		for (size_t i = 0; i < spawns_.size(); ++i)
+			if (spawns_[i].tick <= tick) spawn_shot_(i, tick - spawns_[i].tick);
 		played_ = true;
 		++serial_;
 		return;
 	}
-	// A game tick at a time (the scene's own fixed step).
+	// A spawn added after the clock passed its tick: made at once, pre-aged by its age.
+	for (size_t i = 0; i < spawns_.size(); ++i)
+		if (!spawn_made_[i] && spawns_[i].tick <= tick_) spawn_shot_(i, tick_ - spawns_[i].tick);
+	// A game tick at a time (the scene's own fixed step), each spawn made on its tick.
 	particle::EffectAdvanceRequest step;
 	step.delta_seconds = 1.0f / static_cast<float>(io::kTickHz);
-	for (int32_t at = tick_ + 1; at <= tick; ++at) scene_->advance_simulation(step);
+	for (int32_t at = tick_ + 1; at <= tick; ++at) {
+		scene_->advance_simulation(step);
+		for (size_t i = 0; i < spawns_.size(); ++i)
+			if (spawns_[i].tick == at && !spawn_made_[i]) spawn_shot_(i, 0);
+	}
 	if (tick != tick_) ++serial_;
 	tick_ = tick;
 }
 
 void MissionEffects::close() {
-	if (scene_ || !held_.empty() || !slots_.empty()) ++serial_;
+	if (scene_ || !held_.empty() || !slots_.empty() || !spawns_.empty()) ++serial_;
 	scene_.reset();
 	names_.clear();
 	closures_.clear();
 	held_.clear();
+	spawns_.clear();
+	spawn_groups_.clear();
+	spawn_made_.clear();
 	slots_.clear();
 	slot_index_.clear();
 	resolved_.clear();

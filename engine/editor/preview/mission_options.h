@@ -11,9 +11,10 @@ namespace opennova::editor {
 // The mission canvas's tools (ADR 0046 S15, Placing and tweaking): Select (a click selects, a drag
 // moves or draws a box), Place (each click places the picked item), Path (each click adds a stop to
 // the picked path: a marker and the stop naming it), Area (a box dragged on the ground makes an area
-// trigger). Esc goes back to Select.
-enum class MissionTool : uint8_t { Select, Place, Path, Area };
-// "select", "place", "path", "area".
+// trigger). Esc goes back to Select. DI-23: Shoot (each click fires the picked ammo where it meets the ground or an
+// object, preview/mission_shots).
+enum class MissionTool : uint8_t { Select, Place, Path, Area, Shoot };
+// "select", "place", "path", "area", "shoot".
 const char *mission_tool_token(MissionTool tool);
 bool mission_tool_from_token(const std::string &token, MissionTool &out);
 
@@ -32,6 +33,7 @@ bool mission_tool_from_token(const std::string &token, MissionTool &out);
 // the surface classes, or the foliage). DI-31: three more of the device's layers, the terrain's foliage as the
 // game grows it from its foliage map, each placed item's effects as the mission's start attaches them
 // (mission_effects.h), and the lights the game lights the scene with (the placed models' own).
+// DI-23: the ammo the Shoot tool fires (an ammo.def record; "" none picked).
 // Set by a SetViewport's `options` member (its wire form below), every member optional.
 struct MissionViewportOptions {
 	bool terrain = true, sky = true, water = true, models = true, shadows = true;
@@ -48,6 +50,7 @@ struct MissionViewportOptions {
 	float turn = 15.0f;
 	std::string palette;
 	MissionGroundOverlay overlay = MissionGroundOverlay::None;
+	std::string ammo;
 };
 
 // The toolbar's Snap steps (metres; 0 free) and Turn steps (degrees; 0 whole degrees), in its lists' order.
@@ -59,7 +62,7 @@ inline bool operator!=(const MissionViewportOptions &a, const MissionViewportOpt
 
 // The wire form: {show: {terrain, sky, water, models, shadows, foliage, effects, lights}, marks: {items,
 // buildings, markers, organics, areas, paths, labels}, mark_range, stick, time (null: the mission's start
-// time), tool (its token), item, path, snap, turn, palette, overlay (none, surfaces or foliage)}.
+// time), tool (its token), item, path, snap, turn, palette, overlay (none, surfaces or foliage), ammo}.
 io::JsonValue mission_options_to_json(const MissionViewportOptions &options);
 // A SetViewport's options member set over `held`: every member checked before any applies; false,
 // nothing changed, with `error` naming the member and what it takes.

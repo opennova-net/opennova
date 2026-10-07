@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include <editor/preview/definition_effects.h>
+#include <editor/preview/effect_catalog.h>
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_effects.h>
 #include <editor/preview/mission_ground_facts.h>
@@ -14,6 +16,8 @@
 #include <editor/preview/mission_options.h>
 #include <editor/preview/mission_poses.h>
 #include <editor/preview/mission_scene.h>
+#include <editor/preview/mission_shots.h>
+#include <editor/preview/preview_clip_sounds.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
 
@@ -109,6 +113,17 @@ public:
 	// serial moves each time it is made again (what the device takes it again by).
 	const MissionOverlayImage &overlay() const { return overlay_; }
 	uint64_t overlay_serial() const { return overlay_serial_; }
+
+	// The Shoot tool's shots (DI-23, preview/mission_shots): the run on the preview clock (its effects spawned in the
+	// items' effect scene, effects(), while that layer shows), its scars in the presentation frame (the device's),
+	// and its sounds as the clock runs (each heard at the camera, kept as the clip sounds are, the last
+	// kSoundsFiredKept).
+	const MissionShots &shots() const { return shots_; }
+	renderer::ScarDrawList shot_scars() const;
+	static constexpr size_t kSoundsFiredKept = 16;
+	const std::vector<ClipSoundFired> &sounds_fired() const { return shot_fired_; }
+	std::vector<ClipSoundFired> fire_sounds(const PreviewClock &clock, const AssetScan *scan, audio::SoundSelector &selector,
+			uint64_t &next_seq);
 
 	// The marks on a picture `width` x `height` (mission_scene.h), an area's anchor on the ground of
 	// `device` where it answers, each entity's with its item's bound (picked by it).
@@ -244,6 +259,15 @@ private:
 	// The ground's height at mission (x, y): the mission's terrain as the game reads it, else the device's,
 	// else `otherwise`.
 	double ground_height_(const ViewportContext &context, double x, double y, double otherwise) const;
+	// `shoot {at}` (DI-23): a shot of the Shoot tool's ammo where the picture's point meets the ground or an object,
+	// seen from the camera's eye (a SetViewport of the shot on the clock's tick, the clock run).
+	bool shoot_(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+			std::string &error) const;
+	// The shots run to the clock over the mission as it stands (the world built again where the scene, the ground
+	// or a file it read moved), their effects planned and played; true when what the device draws of them moved.
+	bool follow_shots_(const ViewportInput &input, const Document &document, PreviewClock &clock);
+	// The shots' impact effects, each where the game's presenter poses it (the effect scene's spawns).
+	std::vector<DefinitionSpawn> shot_spawns_() const;
 	// `play_from_here {at?}` (DI-26): a Play of this mission with its player's start (play's start) on the
 	// ground under the camera's eye, or where the picture's point `at` meets the ground, facing the way the
 	// camera looks.
@@ -280,6 +304,13 @@ private:
 	mutable MissionGround terrain_ground_;
 	MissionOverlayImage overlay_;
 	uint64_t overlay_serial_ = 0;
+	// The Shoot tool's (DI-23).
+	MissionShots shots_;
+	uint64_t shots_key_ = 0;
+	ClipSoundSources shot_sources_;
+	std::vector<ClipSoundFired> shot_fired_;
+	int32_t shot_cursor_ = -1;
+	uint64_t shot_seeks_ = 0;
 	int overlay_reads_ = -1; // the ground's reads it was made over
 	bool gesture_open_ = false;
 };
