@@ -1,96 +1,78 @@
-// Character attributes of OpenNova. Classes go in [CHARACTER1] .. [CHARACTER16].
-// Each class's *_CAMMO is the items.def person (its id less 100000) a player of the class spawns as,
-// by the mission's camo setting: 5310 "Player #1, Single player", 5305 "Player #1, Multiplayer",
-// both the onsold1 soldier. Class 1 is the single-player player's; 5 to 9 the multiplayer classes.
-// Attributes: AutoScope KnifeBonus Medic.
+// Character attributes of OpenNova: the classes a player plays, [CHARACTER1] .. [CHARACTER16].
+// The game reads the classes in order from CHARACTER1 and stops at the first one the file has no
+// section of, so every class up to the last one played is written here, the unplayed 2 to 4 too.
+// What the game takes from a class: its three *_CAMMO items, the items.def person (its id less
+// 100000) a player of the class spawns as on a jungle, desert (any other) or arctic mission, and
+// its ATTRIBUTES Medic (a medpack heals and revives in his hands alone, and the soldiers' labels
+// and the map mark him) and KnifeBonus (his knife reaches one unit further). AutoScope and
+// SpreadBonus do nothing in the game; they name the sniper's and the gunner's roles. The form's
+// other keys (STEALTH, HPBONUS, MANABONUS, the *_MUTE scales, RUN_MODIFIER) do nothing either and
+// are left out.
+// Keep the values fewer than the words' letters, each word counting its length plus one: the
+// original game's text reader clears one byte per value in a buffer only as long as the words,
+// so more values than that overwrite its memory and crash it as a mission loads. Here 33 values
+// against 60.
+// The game has one soldier body, onsold1, as two persons: 5310 "Player #1, Single player" and 5305
+// "Player #1, Multiplayer". Each stands for all three camouflages until there is a desert and an
+// arctic soldier.
 
-// Single player
+// Single player: the player of a single-player mission.
 [CHARACTER1]
-STEALTH		= 25
-HPBONUS		= 2
-RECOIL_MUTE	= 0.75
-XHAIR_MUTE	= 2.5
-XHAIRDX_MUTE	= 2.5
-SCOPE_MUTE	= 0.0
-RELOAD_MUTE	= 0.5
 JUNGLE_CAMMO	= 5310
 DESERT_CAMMO	= 5310
 ARCTIC_CAMMO	= 5310
-RUN_MODIFIER	= 0
 ATTRIBUTES	= AutoScope
 
-// Multiplayer medic
-[CHARACTER5]
-STEALTH		= 25
-HPBONUS		= 2
-RECOIL_MUTE	= 0.75
-XHAIR_MUTE	= 2.5
-XHAIRDX_MUTE	= 2.5
-SCOPE_MUTE	= 0.0
-RELOAD_MUTE	= 0.5
+// Classes 2 to 4 are played by no one (single player is class 1, the multiplayer screens offer
+// 5 to 9) but hold the places before class 5: the multiplayer soldier, no attribute.
+[CHARACTER2]
 JUNGLE_CAMMO	= 5305
 DESERT_CAMMO	= 5305
 ARCTIC_CAMMO	= 5305
-RUN_MODIFIER	= 1
+
+// Unplayed: holds the place before class 5.
+[CHARACTER3]
+JUNGLE_CAMMO	= 5305
+DESERT_CAMMO	= 5305
+ARCTIC_CAMMO	= 5305
+
+// Unplayed: holds the place before class 5.
+[CHARACTER4]
+JUNGLE_CAMMO	= 5305
+DESERT_CAMMO	= 5305
+ARCTIC_CAMMO	= 5305
+
+// Multiplayer medic.
+[CHARACTER5]
+JUNGLE_CAMMO	= 5305
+DESERT_CAMMO	= 5305
+ARCTIC_CAMMO	= 5305
 ATTRIBUTES	= Medic
 
-// Multiplayer sniper
+// Multiplayer sniper.
 [CHARACTER6]
-STEALTH		= 25
-HPBONUS		= 2
-RECOIL_MUTE	= 0.75
-XHAIR_MUTE	= 2.5
-XHAIRDX_MUTE	= 2.5
-SCOPE_MUTE	= 0.0
-RELOAD_MUTE	= 0.5
 JUNGLE_CAMMO	= 5305
 DESERT_CAMMO	= 5305
 ARCTIC_CAMMO	= 5305
-RUN_MODIFIER	= 0
 ATTRIBUTES	= AutoScope
 
-// Multiplayer gunner
+// Multiplayer gunner.
 [CHARACTER7]
-STEALTH		= 25
-HPBONUS		= 2
-RECOIL_MUTE	= 0.75
-XHAIR_MUTE	= 2.5
-XHAIRDX_MUTE	= 2.5
-SCOPE_MUTE	= 0.0
-RELOAD_MUTE	= 0.5
 JUNGLE_CAMMO	= 5305
 DESERT_CAMMO	= 5305
 ARCTIC_CAMMO	= 5305
-RUN_MODIFIER	= -1
-ATTRIBUTES	= AutoScope
+ATTRIBUTES	= SpreadBonus
 
-// Multiplayer rifleman
+// Multiplayer rifleman, the class a new profile plays: the knife reaches further.
 [CHARACTER8]
-STEALTH		= 25
-HPBONUS		= 2
-RECOIL_MUTE	= 0.75
-XHAIR_MUTE	= 2.5
-XHAIRDX_MUTE	= 2.5
-SCOPE_MUTE	= 0.0
-RELOAD_MUTE	= 0.5
 JUNGLE_CAMMO	= 5305
 DESERT_CAMMO	= 5305
 ARCTIC_CAMMO	= 5305
-RUN_MODIFIER	= 0
 ATTRIBUTES	= KnifeBonus
 
-// Multiplayer engineer
+// Multiplayer engineer: the knife reaches further.
 [CHARACTER9]
-STEALTH		= 25
-HPBONUS		= 2
-RECOIL_MUTE	= 0.75
-XHAIR_MUTE	= 2.5
-XHAIRDX_MUTE	= 2.5
-SCOPE_MUTE	= 0.0
-RELOAD_MUTE	= 0.5
 JUNGLE_CAMMO	= 5305
 DESERT_CAMMO	= 5305
 ARCTIC_CAMMO	= 5305
-RUN_MODIFIER	= 0
 ATTRIBUTES	= KnifeBonus
-
