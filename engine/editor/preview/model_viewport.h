@@ -308,7 +308,9 @@ public:
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 			std::string &error) const override;
 	// The frame command: the camera on the marker or the collision shape of the first record named (one
-	// that is neither refused), else on the whole model.
+	// that is neither refused), else on the whole model. place_in_mission (DI-12, preview/model_placement):
+	// the Place tool of the mission last active armed with the model's item, made first where none draws it;
+	// a model's own document alone, no ids.
 	bool command(const ViewportContext &context, const std::string &name,
 			const std::vector<NodeId> &ids, CanvasRequests &out, std::string &error) const override;
 	io::JsonValue options_json() const override;
