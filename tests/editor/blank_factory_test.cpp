@@ -97,7 +97,7 @@ static int test_registry_shape() {
 	TEST_EXPECT(find_blank_factory_for_role("main_menu")->kind == AssetKind::Menu);
 	TEST_EXPECT(find_blank_factory_for_role("nope") == nullptr);
 	TEST_EXPECT(find_blank_factory_for_kind(AssetKind::Font) != nullptr);
-	TEST_EXPECT(find_blank_factory_for_kind(AssetKind::Animation) == nullptr);
+	TEST_EXPECT(find_blank_factory_for_kind(AssetKind::Video) == nullptr);
 	TEST_EXPECT(find_blank_factory_for_role("") == nullptr);
 	// A role names one factory; a factory without one is a kind's free-form file.
 	for (size_t i = 0; i < blank_factory_count(); ++i) {
@@ -124,10 +124,10 @@ static int test_registry_shape() {
 	TEST_EXPECT(find_blank_factory_for_kind(AssetKind::Menu) != find_blank_factory_for_role("main_menu"));
 	TEST_EXPECT(find_blank_factory_for_kind(AssetKind::Strings) != find_blank_factory_for_role("gametext"));
 	BlankRequest request;
-	request.logical_name = "walk.bad";
+	request.logical_name = "intro.bik";
 	std::vector<uint8_t> out;
 	Diagnostic error;
-	TEST_EXPECT(!make_blank(request, AssetKind::Animation, out, error));
+	TEST_EXPECT(!make_blank(request, AssetKind::Video, out, error));
 	TEST_EXPECT(error.code() == "blank.unavailable");
 	// Where a made file goes and the name New offers are the kind's row's (S13 V3): a kind Files'
 	// New lists (its free-form factory has no role) offers a new file's name, and no other kind
@@ -670,15 +670,15 @@ static int test_pointer() {
 	// A menu's blank names it and has it made with it, unless the project builds as an expansion.
 	ProjectDocument standalone;
 	std::string companion;
-	TEST_EXPECT(blank_companion(*find_blank_factory_for_role("main_menu"), standalone, companion) == factory &&
+	TEST_EXPECT(blank_companion(*find_blank_factory_for_role("main_menu"), "main.mnu", standalone, companion) == factory &&
 	            companion == blank_pointer_name());
 	companion.clear();
-	TEST_EXPECT(blank_companion(*find_blank_factory_for_kind(AssetKind::Menu), standalone, companion) == factory &&
+	TEST_EXPECT(blank_companion(*find_blank_factory_for_kind(AssetKind::Menu), "extra.mnu", standalone, companion) == factory &&
 	            companion == blank_pointer_name());
-	TEST_EXPECT(blank_companion(*find_blank_factory_for_role("gametext"), standalone, companion) == nullptr);
+	TEST_EXPECT(blank_companion(*find_blank_factory_for_role("gametext"), "gametext.bin", standalone, companion) == nullptr);
 	ProjectDocument expansion;
 	expansion.expansion.name = "ptr";
-	TEST_EXPECT(blank_companion(*find_blank_factory_for_role("main_menu"), expansion, companion) == nullptr);
+	TEST_EXPECT(blank_companion(*find_blank_factory_for_role("main_menu"), "main.mnu", expansion, companion) == nullptr);
 	return 0;
 }
 

@@ -221,10 +221,17 @@ static int test_mission_rows_are_all_filled() {
 		for (const std::string &made : extras.created) created = created || made == path;
 		TEST_EXPECT(created);
 	}
+	// DI-33: the rows the engine has a writer for are made, the mission's music bank with its script (the game opens
+	// the bank first); failsafe.bad, which retail ships none of, and hudfx.def, which no reader or writer of the
+	// engine's reads, keep none.
 	const CreateMissingResult content = create_missing_requirements(
 	        paths, doc, after.scan, after.report,
 	        {"failsafe_bad", "gamemus_sbf", "medmssn_bin", "hudpos_def", "hudfx_def", "upl_3di"});
-	TEST_EXPECT(content.created.empty() && content.diagnostics.empty() && content.unavailable.size() == 6);
+	TEST_EXPECT(content.diagnostics.empty() && content.created.size() == 5 &&
+	            content.unavailable == std::vector<std::string>({"failsafe.bad", "hudfx.def"}));
+	bool script_made = false;
+	for (const std::string &made : content.created) script_made = script_made || made.find("GAMEMUS.BIN") != std::string::npos;
+	TEST_EXPECT(script_made);
 	// The sound banks are made empty (the sound lane: the bank document fills them).
 	const CreateMissingResult bank = create_missing_requirements(paths, doc, after.scan, after.report, {"game_lwf"});
 	TEST_EXPECT(bank.diagnostics.empty() && bank.unavailable.empty() && bank.created.size() == 1);
