@@ -96,6 +96,7 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     f.mcp_port = int_after(args, kLaunchFlagMcpPort, 1, 65535, 0);
     f.working_dir = value_after(args, kLaunchFlagWorkingDir);
     f.no_hud = has_flag(args, kLaunchFlagNoHud); // [orig: @0x4A79F6..0x4A7A09]
+    f.no_reload = has_flag(args, kLaunchFlagNoReload); // [orig: @0x4A76D7..0x4A76E9]
     return f;
 }
 

@@ -1123,7 +1123,8 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					make_protocol_message(c2s::GAME_START_ACK, std::vector<uint8_t>(4, 0)),
 					make_protocol_message(
 							c2s::AUTO_MEDIC_PREFERENCE,
-							encode_auto_medic_preference(AutoMedicPreference{})),
+							encode_auto_medic_preference(
+									AutoMedicPreference{auto_medic_disabled_})),
 					make_protocol_message(c2s::CLIENT_ACK, le32_value(conn_.connection_id)),
 					make_protocol_message(c2s::PING, {}),
 					// [the last 0x60 id, 0]: eight zero bytes on a first join

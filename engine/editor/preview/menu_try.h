@@ -12,7 +12,7 @@
 #include <editor/preview/texture_header.h>
 #include <editor/preview/viewport_follow.h>
 #include <formats/mnu/mnu.h>
-#include <runtime/controls/binding_set.h>
+#include <formats/playersav/player_sav.h>
 #include <runtime/menu/menu_commands.h>
 #include <runtime/menu/menu_flow.h>
 #include <runtime/menu/menu_frame_assets.h>
@@ -181,7 +181,9 @@ private:
 	menu::ModList mods_;
 	std::string expansion_; // the game running, as the last open's source said ("" the base game)
 	menu::OptionsScreen options_;
-	controls::BindingSet bindings_; // the sandbox's: the game's defaults
+	// The sandbox's player profile record (a fresh one's words and binding
+	// table), which the Options screens seed from and their Accepts write.
+	playersav::ProfileRecord profile_;
 	std::map<std::string, Held> menus_; // by file name, lower case
 	std::shared_ptr<const mnu::Document> image_;
 	const mnu::Screen *screen_ = nullptr;

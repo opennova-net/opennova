@@ -79,6 +79,10 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type)
 	// keeps the 120000 ms / 1200-record template.
 	cfg.game_root = host_game_root_;
 	if (net_.local_character_vars_set) cfg.local_character_vars = net_.local_character_vars;
+	// The host's own inverse OPTIONS_AUTOMEDIC word, its record's +1660 (engine
+	// HostConfig::local_auto_medic_disabled carries the witness).
+	if (player_.profile_record_set)
+		cfg.local_auto_medic_disabled = static_cast<uint32_t>(player_.profile_record.auto_medic_off);
 	return cfg;
 }
 
@@ -584,6 +588,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 			opennova::to_std(p_join_password));
 	install_charattr_table();
 	install_character_join_vars();
+	install_auto_medic_preference();
 	install_join_integrity_profile();
 	install_expansion_version_root();
 	install_app_id();

@@ -648,6 +648,9 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	for (NapiNPConnection &connection : owner.ctx.np_protocol.connection_list) {
 		if (connection.type == NapiNPConnection::kTypeClientSide) {
 			connection.char_vars = cfg.local_character_vars;
+			// The round init's copy of the host's own profile word into its
+			// slot +372 [orig: Server_InitNewRoundState @0x51ca55..0x51ca61].
+			connection.link.auto_medic_enabled = cfg.local_auto_medic_disabled == 0;
 		}
 	}
 	configure_session_world(owner, cfg);

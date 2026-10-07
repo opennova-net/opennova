@@ -55,6 +55,8 @@ public:
 	static int mcp_port();
 	// `/NOHUD` — the HUD overlay master word's clear (boot_policy.h no_hud).
 	static bool no_hud();
+	// `/noreload` — the auto-reload global forced off (boot_policy.h no_reload).
+	static bool no_reload();
 
 	// The directory the game was started in, '/'-separated, where retail keeps the files it
 	// writes beside itself, its saves among them (weapon.sav: PlayerProfile_LoadAllFromDisk @

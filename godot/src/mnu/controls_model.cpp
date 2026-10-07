@@ -1,4 +1,5 @@
 #include "mnu/controls_model.h"
+#include "player/player_profiles.h"
 #include "util/string_convert.h"
 
 #include <godot_cpp/classes/global_constants.hpp>
@@ -6,6 +7,7 @@
 #include <godot_cpp/classes/input_event_key.hpp>
 
 #include <runtime/controls/controls.h>
+#include <runtime/profile/profile_controls.h>
 
 #include <algorithm>
 #include <cmath>
@@ -253,7 +255,8 @@ bool ControlsModel::is_token_pressed(const String &p_token) const {
     if (input->is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE)) held |= opennova::controls::kMouseMiddle;
     const auto key_down = [this](int vk) { return vk_down_(vk); };
     if (bindings_.pressed_mouse(index, held, key_down)) return true;
-    if (r->joy_button != 0) {
+    // A disabled joystick is never polled (engine BindingSet::set_joystick_enabled).
+    if (r->joy_button != 0 && bindings_.joystick_enabled()) {
         const auto devices = input->get_connected_joypads();
         for (int i = 0; i < devices.size(); ++i) {
             const int device = devices[i];
@@ -334,16 +337,18 @@ int ControlsModel::godot_key_from_vk(int p_vk) {
 	return 0;
 }
 
+void ControlsModel::apply_profile(const Ref<PlayerProfiles> &p_profiles) {
+	if (p_profiles.is_null()) return;
+	opennova::profile::apply_controls(p_profiles->native().current(), bindings_);
+}
+
 Dictionary ControlsModel::save_blob() const {
 	Dictionary blob;
 	std::size_t n = 0;
 	const opennova::controls::ActionDef *cat = opennova::controls::catalog(&n);
 	for (std::size_t i = 0; i < n; ++i) {
-		const opennova::controls::BindingRecord *r =
-				bindings_.record(static_cast<int>(i));
-		if (r == nullptr || cat[i].token == nullptr) {
-			continue;
-		}
+		const opennova::controls::BindingRecord *r = bindings_.record(static_cast<int>(i));
+		if (r == nullptr || cat[i].token == nullptr) continue;
 		PackedInt32Array values;
 		values.push_back(r->primary);
 		values.push_back(r->secondary);
@@ -363,13 +368,9 @@ void ControlsModel::load_blob(const Dictionary &p_blob) {
 	for (int i = 0; i < tokens.size(); ++i) {
 		const String token = tokens[i];
 		const PackedInt32Array values = p_blob[token];
-		if (values.size() != 8) {
-			continue;
-		}
+		if (values.size() != 8) continue;
 		const int index = bindings_.index_of_token(token.utf8().get_data());
-		if (index < 0) {
-			continue;
-		}
+		if (index < 0) continue;
 		opennova::controls::BindingRecord rec;
 		rec.primary = static_cast<uint16_t>(values[0]);
 		rec.secondary = static_cast<uint16_t>(values[1]);
@@ -377,8 +378,8 @@ void ControlsModel::load_blob(const Dictionary &p_blob) {
 		rec.secondary_mod = static_cast<uint16_t>(values[3]);
 		rec.mouse_mask = static_cast<uint16_t>(values[4]);
 		rec.joy_button = static_cast<uint8_t>(values[5]);
-        rec.mouse_mod = static_cast<uint16_t>(values[6]);
-        rec.joy_mod = static_cast<uint8_t>(values[7]);
+		rec.mouse_mod = static_cast<uint16_t>(values[6]);
+		rec.joy_mod = static_cast<uint8_t>(values[7]);
 		bindings_.set_record(index, rec);
 	}
 }
@@ -436,6 +437,8 @@ void ControlsModel::_bind_methods() {
 	ClassDB::bind_static_method("ControlsModel",
 			D_METHOD("godot_key_from_vk", "vk"),
 			&ControlsModel::godot_key_from_vk);
+	ClassDB::bind_method(D_METHOD("apply_profile", "profiles"), &ControlsModel::apply_profile);
+	ClassDB::bind_method(D_METHOD("is_joystick_enabled"), &ControlsModel::is_joystick_enabled);
 	ClassDB::bind_method(D_METHOD("save_blob"), &ControlsModel::save_blob);
 	ClassDB::bind_method(D_METHOD("load_blob", "blob"), &ControlsModel::load_blob);
 

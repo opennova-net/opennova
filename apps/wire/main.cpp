@@ -1770,7 +1770,7 @@ void print_tag_03_c2s(const std::vector<uint8_t> &body) {
 		return;
 	}
 	std::printf("        [0x03 C2S] auto-medic=%s\n",
-	            preference.enabled ? "enabled" : "manual");
+	            preference.enabled() ? "enabled" : "manual");
 }
 
 void print_tag_2e_c2s(const std::vector<uint8_t> &body) {

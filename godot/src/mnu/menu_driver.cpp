@@ -10,6 +10,7 @@
 #include "object/weapon_database.h"
 #include "object/avatar_database.h"
 #include "object/avatar_records.h"
+#include "player/player_profiles.h"
 #include "mnu/mns_stylesheet.h"
 #include "mnu/mnu_document.h"
 #include "resource_index/resource_root.h"
@@ -861,22 +862,35 @@ PackedStringArray MenuDriver::command_names(const String &p_set) {
 	return to_gd_strings(opennova::menu::menu_name_set(set));
 }
 
-void MenuDriver::prepare_options(const Ref<ControlsModel> &p_controls) {
-	if (p_controls.is_valid()) options_.prepare(runtime_, p_controls->native_bindings());
+namespace {
+
+// The profile's current record, or null with no profile.
+opennova::playersav::ProfileRecord *current_record(const Ref<PlayerProfiles> &p_profiles) {
+	return p_profiles.is_valid() ? &p_profiles->native().current() : nullptr;
 }
 
-int MenuDriver::activate_options(const Ref<ControlsModel> &p_controls, const String &p_name) {
-	return p_controls.is_valid() ? options_.activate(runtime_, p_controls->native_bindings(),
-			to_std(p_name)) : 0;
+} // namespace
+
+void MenuDriver::prepare_options(const Ref<PlayerProfiles> &p_profiles) {
+	options_.prepare(runtime_, current_record(p_profiles));
 }
 
-void MenuDriver::arm_options_remap(const Ref<ControlsModel> &p_controls, int p_id, int p_row) {
-	if (p_controls.is_valid()) options_.arm(runtime_, p_controls->native_bindings(), p_id, p_row);
+void MenuDriver::apply_options_policy(const Ref<PlayerProfiles> &p_profiles) {
+	options_.apply_policy(runtime_);
+	options_.seed_profile(runtime_, current_record(p_profiles));
 }
 
-int MenuDriver::consume_options_input(const Ref<ControlsModel> &p_controls,
-		const Ref<InputEvent> &p_event) {
-	if (p_controls.is_null() || p_event.is_null()) return 0;
+int MenuDriver::activate_options(const Ref<PlayerProfiles> &p_profiles, const String &p_name) {
+	return options_.activate(runtime_, current_record(p_profiles), to_std(p_name));
+}
+
+String MenuDriver::options_control_text(int p_action, int p_device) const {
+	return String::utf8(options_.bindings().control_text(p_action,
+			static_cast<opennova::controls::Device>(p_device)).c_str());
+}
+
+int MenuDriver::consume_options_input(const Ref<InputEvent> &p_event) {
+	if (p_event.is_null()) return 0;
 	opennova::menu::RemapInput input;
 	const Ref<InputEventKey> key = p_event;
 	const Ref<InputEventMouseButton> mouse = p_event;
@@ -894,11 +908,7 @@ int MenuDriver::consume_options_input(const Ref<ControlsModel> &p_controls,
 		input.mouse_mask = static_cast<uint16_t>(ControlsModel::mouse_mask_from_godot_button(
 				static_cast<int>(mouse->get_button_index())));
 	}
-	return options_.consume(runtime_, p_controls->native_bindings(), input);
-}
-
-void MenuDriver::end_options_remap(const Ref<ControlsModel> &p_controls, bool p_refill) {
-	if (p_controls.is_valid()) options_.end_remap(runtime_, p_controls->native_bindings(), p_refill);
+	return options_.consume(runtime_, input);
 }
 
 // ---- loadout screen adapters --------------------------------------------------------
@@ -1034,19 +1044,21 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("selected_host_launch_options"),
 			&MenuDriver::selected_host_launch_options);
 	ClassDB::bind_method(D_METHOD("select_host_location", "id", "country"), &MenuDriver::select_host_location);
-	ClassDB::bind_method(D_METHOD("prepare_options", "controls"), &MenuDriver::prepare_options);
+	ClassDB::bind_method(D_METHOD("prepare_options", "profiles"), &MenuDriver::prepare_options);
 	ClassDB::bind_method(D_METHOD("is_options_surface"), &MenuDriver::is_options_surface);
-	ClassDB::bind_method(D_METHOD("apply_options_policy"), &MenuDriver::apply_options_policy);
+	ClassDB::bind_method(D_METHOD("apply_options_policy", "profiles"), &MenuDriver::apply_options_policy);
 	ClassDB::bind_static_method("MenuDriver", D_METHOD("command_names", "set"), &MenuDriver::command_names);
-	ClassDB::bind_method(D_METHOD("activate_options", "controls", "name"), &MenuDriver::activate_options);
-	ClassDB::bind_method(D_METHOD("arm_options_remap", "controls", "id", "row"), &MenuDriver::arm_options_remap);
-	ClassDB::bind_method(D_METHOD("consume_options_input", "controls", "event"), &MenuDriver::consume_options_input);
-	ClassDB::bind_method(D_METHOD("end_options_remap", "controls", "refill"), &MenuDriver::end_options_remap);
+	ClassDB::bind_method(D_METHOD("activate_options", "profiles", "name"), &MenuDriver::activate_options);
+	ClassDB::bind_method(D_METHOD("arm_options_remap", "id", "row"), &MenuDriver::arm_options_remap);
+	ClassDB::bind_method(D_METHOD("consume_options_input", "event"), &MenuDriver::consume_options_input);
+	ClassDB::bind_method(D_METHOD("end_options_remap", "refill"), &MenuDriver::end_options_remap);
+	ClassDB::bind_method(D_METHOD("options_control_text", "action", "device"),
+			&MenuDriver::options_control_text);
 	ClassDB::bind_method(D_METHOD("show_ingame_main"), &MenuDriver::show_ingame_main);
 	BIND_ENUM_CONSTANT(OPTIONS_CONSUMED);
-	BIND_ENUM_CONSTANT(OPTIONS_PERSIST_BINDINGS);
 	BIND_ENUM_CONSTANT(OPTIONS_COMMIT_PREVIEW);
 	BIND_ENUM_CONSTANT(OPTIONS_RESTORE_PREVIEW);
+	BIND_ENUM_CONSTANT(OPTIONS_APPLY_CONTROLS);
 	ClassDB::bind_method(D_METHOD("attach", "frame", "audio"), &MenuDriver::attach);
 	ClassDB::bind_method(D_METHOD("set_music_director", "director"),
 			&MenuDriver::set_music_director);
