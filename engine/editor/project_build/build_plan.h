@@ -138,12 +138,13 @@ std::vector<Diagnostic> build_blockers(const BuildPlan &plan);
 std::string blocker_words(const Diagnostic &d);
 // Why a build is refused for it, citing the refusal it follows (ADR 0046 S14, the gate follows retail): a
 // required file the boot exits or dead-ends without, as its manifest row witnessed it; a reference whose
-// loader the game refuses to start without, as its kind's row cites it; else the editor's own integrity
-// (a file it cannot read, write or store as it is: it does not pack what it cannot vouch for).
+// loader the game refuses to start without, as its kind's row cites it; a finding whose code's row says
+// what the game does there (FindingCodeRow::game_refusal: a ConfigFile's pool overrun); else the editor's
+// own integrity (a file it cannot read, write or store as it is: it does not pack what it cannot vouch for).
 std::string blocker_reason(const Diagnostic &d);
 // Whether a refusal follows the game's own (a required file the boot cannot go on without, a reference whose
-// loader the game refuses to start without), as against the editor's integrity (a file it cannot read, write
-// or store as it is).
+// loader the game refuses to start without, a row saying what the game does), as against the editor's
+// integrity (a file it cannot read, write or store as it is).
 bool blocker_is_the_games(const Diagnostic &d);
 // A refused build's line: how many problems refuse it and the first few in words.
 std::string refusal_words(const std::vector<Diagnostic> &blockers);
