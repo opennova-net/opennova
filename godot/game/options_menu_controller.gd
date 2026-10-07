@@ -6,9 +6,6 @@ extends RefCounted
 ## owns the one keyboard/mouse remap interaction, keeping MenuShell focused on
 ## cross-document navigation and game launch policy.
 
-const MenuOptionScrollPolicy := preload("res://game/menu_option_scroll_policy.gd")
-const RetailVideoQualityPolicy := preload("res://game/retail_video_quality_policy.gd")
-
 const CROSSHAIR_STYLE_CONTROL := "XHAIR_APPEARANCE"
 
 var _driver: MenuDriver
@@ -33,12 +30,12 @@ func prepare_document() -> void:
 	_driver.prepare_options(ControlsBindings.model())
 	if not _driver.is_options_surface():
 		return
-	MenuOptionScrollPolicy.apply(_driver)
-	RetailVideoQualityPolicy.apply(_driver)
+	# The engine's Options policy (OptionsScreen::apply_policy): the slider ranges, the pinned
+	# VIDEO rows and the controls not serviced yet, locked; then the player's values.
+	_driver.apply_options_policy()
 	if _options != null:
 		_entry_state = _options.current()
 	_seed_player_options()
-	_lock_unsupported_controls()
 
 
 ## The native capture returns input ownership and persistence requests.
@@ -88,17 +85,6 @@ func _seed_scroll(control_name: String, value: int) -> void:
 	if scroll != null:
 		_driver.set_widget_scroll_range(id, scroll.minimum, scroll.maximum,
 				scroll.page, value)
-
-
-# The not-yet-serviced controls and the checked state their rows show are the
-# engine's tables (options_policy.h, re-exported by MenuFrame; D-MNU-21).
-func _lock_unsupported_controls() -> void:
-	for forced: Dictionary in MenuFrame.options_forced_checks():
-		_set_checked(String(forced["control"]), bool(forced["checked"]))
-	for control_name: String in MenuFrame.options_unsupported_controls():
-		var id := _driver.widget_id(control_name)
-		if id >= 0:
-			_driver.set_widget_disabled(id, true)
 
 
 func _set_checked(control_name: String, checked: bool) -> void:

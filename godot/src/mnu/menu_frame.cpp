@@ -5,6 +5,7 @@
 #include "util/string_convert.h"
 
 #include <runtime/menu/menu_assets.h>
+#include <runtime/menu/menu_state_frame.h>
 #include <runtime/menu/options_policy.h>
 #include <runtime/renderer/texture_load_rules.h>
 
@@ -454,21 +455,13 @@ Ref<Texture2D> MenuFrame::texture_for_quad_(
 }
 
 opennova::menu::MenuWidgetState &MenuFrame::widget_(int p_index) {
-	for (opennova::menu::MenuWidgetState &ws : state_.widgets) {
-		if (ws.index == p_index) {
-			return ws;
-		}
-	}
-	opennova::menu::MenuWidgetState ws;
-	ws.index = p_index;
-	state_.widgets.push_back(ws);
-	return state_.widgets.back();
+	return opennova::menu::frame_widget(state_, p_index);
 }
 
+// The state writes are the engine's (menu_state_frame.h, the headless frame's too): this device
+// queues the redraw of what they left.
 void MenuFrame::set_widget_shown_override(int p_index, bool p_shown) {
-	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	ws.hide = !p_shown;
-	ws.show = p_shown;
+	opennova::menu::frame_set_shown(state_, p_index, p_shown);
 	queue_redraw();
 }
 
@@ -478,121 +471,90 @@ void MenuFrame::set_native_state(const opennova::menu::MenuFrameState &p_state) 
 }
 
 void MenuFrame::set_widget_disabled(int p_index, bool p_disabled) {
-	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	ws.has_disabled = true;
-	ws.disabled = p_disabled;
+	opennova::menu::frame_set_disabled(state_, p_index, p_disabled);
 	queue_redraw();
 }
 
 void MenuFrame::set_widget_checked(int p_index, bool p_checked) {
-	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	ws.has_checked = true;
-	ws.checked = p_checked;
+	opennova::menu::frame_set_checked(state_, p_index, p_checked);
 	queue_redraw();
 }
 
 void MenuFrame::set_widget_focused(int p_index, bool p_focused) {
-	widget_(p_index).focused = p_focused;
+	opennova::menu::frame_set_focused(state_, p_index, p_focused);
 	queue_redraw();
 }
 
 void MenuFrame::set_widget_caret(int p_index, int p_caret) {
-	widget_(p_index).caret = p_caret;
+	opennova::menu::frame_set_caret(state_, p_index, p_caret);
 	queue_redraw();
 }
 
 void MenuFrame::set_widget_text(int p_index, const String &p_text) {
-	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	ws.has_text = true;
-	ws.text = opennova::to_std(p_text);
+	opennova::menu::frame_set_text(state_, p_index, opennova::to_std(p_text));
 	queue_redraw();
 }
 
 void MenuFrame::set_widget_rect(int p_index, const Rect2i &p_rect) {
-	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	ws.has_rect = true;
-	ws.rect.left = p_rect.position.x;
-	ws.rect.top = p_rect.position.y;
-	ws.rect.right = p_rect.position.x + p_rect.size.x;
-	ws.rect.bottom = p_rect.position.y + p_rect.size.y;
+	opennova::menu::frame_set_rect(state_, p_index, p_rect.position.x, p_rect.position.y,
+			p_rect.position.x + p_rect.size.x, p_rect.position.y + p_rect.size.y);
 	queue_redraw();
 }
 
 void MenuFrame::set_widget_hover_item(int p_index, int p_row) {
-	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	if (ws.hover_item == p_row) {
-		return;
+	if (opennova::menu::frame_set_hover_item(state_, p_index, p_row)) {
+		queue_redraw();
 	}
-	ws.hover_item = p_row;
-	queue_redraw();
 }
 
 int MenuFrame::get_widget_hover_item(int p_index) const {
-	for (const opennova::menu::MenuWidgetState &ws : state_.widgets) {
-		if (ws.index == p_index) {
-			return ws.hover_item;
-		}
-	}
-	return -1;
+	const opennova::menu::MenuWidgetState *ws = opennova::menu::find_frame_widget(state_, p_index);
+	return ws != nullptr ? ws->hover_item : -1;
 }
 
 void MenuFrame::set_widget_selection(int p_index, int p_selected_item,
 		int p_hover_item, int p_scroll_row) {
-	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	ws.selected_item = p_selected_item;
-	ws.hover_item = p_hover_item;
-	ws.scroll_row = p_scroll_row;
+	opennova::menu::frame_set_selection(state_, p_index, p_selected_item, p_hover_item, p_scroll_row);
 	queue_redraw();
 }
 
 void MenuFrame::set_widget_scroll_range(int p_index, int p_minimum,
 		int p_maximum, int p_page,
 		int p_value) {
-	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	if (p_minimum > p_maximum) {
-		p_minimum = 0;
-		p_maximum = 0;
-	}
-	ws.has_scroll_range = true;
-	ws.scroll_min = p_minimum;
-	ws.scroll_max = p_maximum;
-	ws.scroll_page = p_page;
-	ws.scroll_value = std::clamp(p_value, p_minimum, p_maximum);
+	opennova::menu::frame_set_scroll_range(state_, p_index, p_minimum, p_maximum, p_page, p_value);
 	queue_redraw();
 }
 
 void MenuFrame::set_widget_popup_open(int p_index, bool p_open) {
-	widget_(p_index).popup_open = p_open;
+	opennova::menu::frame_set_popup_open(state_, p_index, p_open);
 	queue_redraw();
 }
 
 void MenuFrame::set_widget_items(int p_index,
 		const PackedStringArray &p_items) {
-	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	ws.has_items = true;
-	ws.items.clear();
-	ws.items.reserve(static_cast<size_t>(p_items.size()));
+	std::vector<std::string> items;
+	items.reserve(static_cast<size_t>(p_items.size()));
 	for (int64_t i = 0; i < p_items.size(); ++i) {
-		ws.items.push_back(opennova::to_std(p_items[i]));
+		items.push_back(opennova::to_std(p_items[i]));
 	}
+	opennova::menu::frame_set_items(state_, p_index, items);
 	queue_redraw();
 }
 
 void MenuFrame::set_widget_selected_set(int p_index,
 		const PackedInt32Array &p_rows) {
-	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	ws.selected_items.clear();
-	ws.selected_items.reserve(static_cast<size_t>(p_rows.size()));
+	std::vector<int> rows;
+	rows.reserve(static_cast<size_t>(p_rows.size()));
 	for (int64_t i = 0; i < p_rows.size(); ++i) {
-		ws.selected_items.push_back(p_rows[i]);
+		rows.push_back(p_rows[i]);
 	}
+	opennova::menu::frame_set_selected_set(state_, p_index, rows);
 	queue_redraw();
 }
 
 void MenuFrame::set_widget_table_rows(int p_index,
 		const std::vector<opennova::menu::MenuTableRow> &p_rows) {
-	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	ws.table_rows = p_rows;
+	opennova::menu::frame_set_table_rows(state_, p_index, p_rows);
 	queue_redraw();
 }
 
@@ -618,19 +580,14 @@ void MenuFrame::set_table_cell_painter(int p_index,
 }
 
 void MenuFrame::set_widget_clip_rect(int p_index, bool p_enabled, const Rect2i &p_rect) {
-	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	ws.has_clip = p_enabled;
-	ws.clip = { p_rect.position.x, p_rect.position.y, p_rect.position.x + p_rect.size.x,
-		p_rect.position.y + p_rect.size.y };
+	opennova::menu::frame_set_clip_rect(state_, p_index, p_enabled, p_rect.position.x, p_rect.position.y,
+			p_rect.position.x + p_rect.size.x, p_rect.position.y + p_rect.size.y);
 	queue_redraw();
 }
 
 void MenuFrame::set_widget_table_columns(int p_index, bool p_installed,
 		const std::vector<opennova::menu::MenuTableColumn> &p_columns, int p_sort_column) {
-	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	ws.has_table_columns = p_installed;
-	ws.table_columns = p_columns;
-	ws.table_sort_column = p_sort_column;
+	opennova::menu::frame_set_table_columns(state_, p_index, p_installed, p_columns, p_sort_column);
 	queue_redraw();
 }
 
@@ -700,21 +657,15 @@ int MenuFrame::item_count(int p_index) const {
 }
 
 String MenuFrame::get_widget_text(int p_index) const {
-	for (const opennova::menu::MenuWidgetState &ws : state_.widgets) {
-		if (ws.index == p_index && ws.has_text) {
-			return opennova::cp1252_to_gd(ws.text);
-		}
+	const opennova::menu::MenuWidgetState *ws = opennova::menu::find_frame_widget(state_, p_index);
+	if (ws != nullptr && ws->has_text) {
+		return opennova::cp1252_to_gd(ws->text);
 	}
 	return widget_authored_text(p_index);
 }
 
 int MenuFrame::get_widget_caret(int p_index) const {
-	for (const opennova::menu::MenuWidgetState &ws : state_.widgets) {
-		if (ws.index == p_index) {
-			return ws.caret;
-		}
-	}
-	return -1;
+	return opennova::menu::frame_widget_caret(state_, p_index);
 }
 
 int MenuFrame::hit_test(const Vector2 &p_position) const {
@@ -804,25 +755,9 @@ bool MenuFrame::edit_char(int p_index, int p_unicode) {
 	if (!configured_) {
 		return false;
 	}
-	// The router's printable filter and the ops both live in engine
-	// menu/menu_edit.h (the witnesses ride the engine header).
-	if (!opennova::menu::edit_char_insertable(p_unicode)) {
-		return false;
-	}
-	opennova::menu::EditLimits limits;
-	if (!compiler_.widget_edit_limits(p_index, &limits)) {
-		return false;
-	}
-	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	opennova::menu::EditField field;
-	field.text = ws.has_text ? ws.text : compiler_.widget_authored_text(p_index);
-	field.caret = ws.caret >= 0 ? ws.caret : static_cast<int>(field.text.size());
-	field.caret = std::min(field.caret, static_cast<int>(field.text.size()));
-	const bool changed = opennova::menu::edit_insert_char(field, limits,
-			static_cast<char>(p_unicode));
-	ws.has_text = true;
-	ws.text = field.text;
-	ws.caret = field.caret;
+	// The router's printable filter and the ops both live in engine menu/menu_edit.h (the
+	// witnesses ride the engine header), the field's state in menu_state_frame.h.
+	const bool changed = opennova::menu::frame_edit_char(compiler_, state_, p_index, p_unicode);
 	queue_redraw();
 	return changed;
 }
@@ -831,16 +766,8 @@ int MenuFrame::edit_key(int p_index, int p_key, bool p_shift) {
 	if (!configured_) {
 		return 0;
 	}
-	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	opennova::menu::EditField field;
-	field.text = ws.has_text ? ws.text : compiler_.widget_authored_text(p_index);
-	field.caret = ws.caret >= 0 ? ws.caret : static_cast<int>(field.text.size());
-	field.caret = std::min(field.caret, static_cast<int>(field.text.size()));
 	const opennova::menu::EditKeyResult result =
-			opennova::menu::edit_apply_key(field, p_key, 1, p_shift);
-	ws.has_text = true;
-	ws.text = field.text;
-	ws.caret = field.caret;
+			opennova::menu::frame_edit_key(compiler_, state_, p_index, p_key, p_shift);
 	queue_redraw();
 	return static_cast<int>(result); // the pinned EDIT_RESULT_* contract
 }

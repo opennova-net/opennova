@@ -15,6 +15,7 @@
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/viewport_canvas.h>
+#include <base/io/strutil.h>
 #include <runtime/menu/menu_frame.h>
 
 #include <imgui.h>
@@ -84,6 +85,38 @@ void go_to_pointer(Workspace &workspace, const MnuDocument &document, const Menu
 	window_requests::go_to(workspace, target);
 }
 
+// Try mode on or off, or Try back to where it started (a SetViewport of `try`, DI-35).
+void set_try(Workspace &workspace, const MenuViewport &menu, bool on, bool reset = false) {
+	io::JsonValue member = io::JsonValue::make_object();
+	member.set("on", io::JsonValue::make_bool(on));
+	if (reset) member.set("reset", io::JsonValue::make_bool(true));
+	workspace.request(request::set_viewport(menu.path(), viewport_change(ViewportKind::Menu, "try", std::move(member))));
+}
+
+// One key for the game's menu (a SetViewport of `key`, DI-35): by its name, Shift held or not.
+void send_key(Workspace &workspace, const MenuViewport &menu, const std::string &name, bool shift) {
+	io::JsonValue member = io::JsonValue::make_object();
+	member.set("key", io::json_string(name));
+	if (shift) member.set("shift", io::JsonValue::make_bool(true));
+	workspace.request(request::set_viewport(menu.path(), viewport_change(ViewportKind::Menu, "key", std::move(member))));
+}
+
+// "STARTUP > SINGLE_PLAYER (sp.mnu)": the screens Try showed, the menu named where it changes, the last
+// `count` of them.
+std::string breadcrumb_line(const MenuTry &tried, size_t count) {
+	const std::vector<MenuTryVisit> &visits = tried.breadcrumb();
+	const size_t first = visits.size() > count ? visits.size() - count : 0;
+	std::string line = first > 0 ? "... > " : "";
+	std::string file = first > 0 ? visits[first - 1].file : tried.start_file();
+	for (size_t i = first; i < visits.size(); ++i) {
+		if (i > first) line += " > ";
+		line += visits[i].screen;
+		if (!strutil::iequals(visits[i].file, file)) line += " (" + visits[i].file + ")";
+		file = visits[i].file;
+	}
+	return line;
+}
+
 // The canvas's zoom as the viewport's options hold it, and back.
 MenuCanvasShow show_of(const ViewportCanvas &canvas, bool snap) {
 	using Zoom = ViewportCanvas::Zoom;
@@ -124,9 +157,20 @@ struct MenuViewportView::Tools {
 	float design_y = 0.0f;
 	MenuPointer pointer; // the game's pointer at the mouse (DI-08), while it is on the picture
 	bool panning = false; // the canvas pans its picture this frame
+	bool try_down = false; // Try: the left button held from a press begun on the picture (DI-35)
 
 	void toolbar(Workspace &workspace, ViewportView &view, ViewportCanvas &canvas, const MenuViewport &menu,
-			const MenuCanvasFrame &frame);
+			const MenuCanvasFrame &frame, const ViewportContext &context);
+	// The Edit and Try toggle (DI-35), leading the toolbar.
+	void mode(Workspace &workspace, ui_kit::WrapRow &row, const MenuViewport &menu);
+	// Try's tools: Reset, then under the toolbar the screens it went through and what the game would have
+	// done last.
+	void try_tools(Workspace &workspace, ui_kit::WrapRow &row, const MenuViewport &menu);
+	// Try's keys while the viewport has the keyboard: the game's (VK_RETURN, VK_ESCAPE, VK_TAB, the edit
+	// field's), and the characters typed.
+	void try_keys(Workspace &workspace, const MenuViewport &menu);
+	void pointer_and_sound(Workspace &workspace, ui_kit::WrapRow &row, const MenuViewport &menu,
+			const MenuCanvasFrame &frame, const ViewportContext &context);
 	void arrange_items(Workspace &workspace, const MenuCanvasFrame &frame);
 	void keys(Workspace &workspace, const MenuCanvasFrame &frame, const MenuClipboard &board, bool pressed);
 	void clipboard(Workspace &workspace, const MenuCanvasFrame &frame, const MenuClipboard &board,
@@ -139,13 +183,13 @@ MenuViewportView::~MenuViewportView() = default;
 
 // The toolbar, on a row that wraps whole controls in a narrow window.
 void MenuViewportView::Tools::toolbar(Workspace &workspace, ViewportView &, ViewportCanvas &canvas,
-		const MenuViewport &menu, const MenuCanvasFrame &frame) {
-	const MnuDocument &document = *frame.document;
+		const MenuViewport &menu, const MenuCanvasFrame &frame, const ViewportContext &context) {
 	const NodeAddress &selected = frame.primary;
 	MenuViewportOptions options = menu.options();
 	const MenuViewportOptions before = options;
 	const float unit = ImGui::GetFontSize();
 	ui_kit::WrapRow row;
+	mode(workspace, row, menu);
 
 	using Zoom = ViewportCanvas::Zoom;
 	const Zoom zoom = canvas.zoom();
@@ -184,6 +228,11 @@ void MenuViewportView::Tools::toolbar(Workspace &workspace, ViewportView &, View
 		ui_kit::tooltip("The screen size in pixels to draw at; each axis scales on its own, as in "
 		                "the game.");
 	}
+	if (menu.try_on()) {
+		try_tools(workspace, row, menu);
+		pointer_and_sound(workspace, row, menu, frame, context);
+		return;
+	}
 	row.next(ui_kit::checkbox_width("Snap"));
 	ImGui::Checkbox("Snap", &snap);
 	ui_kit::tooltip("Drags snap to a grid of 8 units. Hold Alt to place freely.");
@@ -209,7 +258,7 @@ void MenuViewportView::Tools::toolbar(Workspace &workspace, ViewportView &, View
 		ImGui::EndCombo();
 	}
 	ui_kit::tooltip("Show the selected window under the mouse, pressed or disabled.");
-	const mnu::WindowType type = menu_window_type(document, selected);
+	const mnu::WindowType type = menu_window_type(*frame.document, selected);
 	auto hold = [&](const char *label, bool &flag, const char *tip) {
 		row.next(ui_kit::checkbox_width(label));
 		if (ImGui::Checkbox(label, &flag)) options.force_window = selected.child;
@@ -233,6 +282,74 @@ void MenuViewportView::Tools::toolbar(Workspace &workspace, ViewportView &, View
 		ImGui::EndPopup();
 	}
 
+	pointer_and_sound(workspace, row, menu, frame, context);
+	if (options != before) set_options(workspace, menu, options);
+}
+
+void MenuViewportView::Tools::mode(Workspace &workspace, ui_kit::WrapRow &row, const MenuViewport &menu) {
+	row.next(ui_kit::checkbox_width("Edit") + ui_kit::checkbox_width("Try"));
+	if (ImGui::RadioButton("Edit", !menu.try_on()) && menu.try_on()) set_try(workspace, menu, false);
+	ui_kit::tooltip("Edit the menu: a click selects the window under it, a drag moves or resizes it.");
+	ImGui::SameLine();
+	if (ImGui::RadioButton("Try", menu.try_on()) && !menu.try_on()) set_try(workspace, menu, true);
+	ui_kit::tooltip("Try the menu as the game runs it, from the screen shown: its buttons run their actions, "
+	                "the keys and the pointer are the game's, its sounds play. What it changes is a sandbox: nothing "
+	                "of your settings or the project's files. What would leave the menu (a mission started, a quit, "
+	                "a game joined) is said instead of done.");
+}
+
+void MenuViewportView::Tools::try_tools(Workspace &workspace, ui_kit::WrapRow &row, const MenuViewport &menu) {
+	const MenuTry *tried = menu.try_session();
+	if (ui_kit::tool(row, "Reset", tried && tried->started(),
+				"Back to the screen Try started from, everything the sandbox holds dropped."))
+		set_try(workspace, menu, true, true);
+	if (!menu.try_error().empty()) {
+		row.next(ui_kit::text_width(menu.try_error().c_str()));
+		ImGui::AlignTextToFramePadding();
+		ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s", menu.try_error().c_str());
+	}
+	if (!tried || !tried->started()) return;
+	// The screens it went through, the last few; whole in the tooltip.
+	const std::string crumbs = breadcrumb_line(*tried, 5);
+	row.next(ui_kit::text_width(crumbs.c_str()));
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextUnformatted(crumbs.c_str());
+	ui_kit::tooltip("The screens Try went through: " + breadcrumb_line(*tried, MenuTry::kBreadcrumbKept));
+	// What the game would have done last, where it would leave the menu.
+	if (!tried->outcomes().empty()) {
+		const MenuTryOutcome &last = tried->outcomes().back();
+		const std::string line = (last.control.empty() ? std::string() : last.control + ": ") + last.words;
+		row.next(ui_kit::text_width(line.c_str()));
+		ImGui::AlignTextToFramePadding();
+		ImGui::TextColored(ImVec4(0.55f, 0.85f, 1.0f, 1.0f), "%s", line.c_str());
+		ui_kit::tooltip("Not done: Try says what the game would do here (" + last.screen + " of " + last.file + ").");
+	}
+}
+
+void MenuViewportView::Tools::try_keys(Workspace &workspace, const MenuViewport &menu) {
+	const ImGuiIO &io = ImGui::GetIO();
+	const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput;
+	if (!focused || io.KeyCtrl || io.KeyAlt) return;
+	static const struct {
+		ImGuiKey key;
+		const char *name;
+	} kKeys[] = { { ImGuiKey_Enter, "VK_RETURN" }, { ImGuiKey_KeypadEnter, "VK_RETURN" }, { ImGuiKey_Escape, "VK_ESCAPE" },
+		{ ImGuiKey_Tab, "VK_TAB" }, { ImGuiKey_Backspace, "VK_BACK" }, { ImGuiKey_Delete, "VK_DELETE" },
+		{ ImGuiKey_LeftArrow, "VK_LEFT" }, { ImGuiKey_RightArrow, "VK_RIGHT" }, { ImGuiKey_UpArrow, "VK_UP" },
+		{ ImGuiKey_DownArrow, "VK_DOWN" }, { ImGuiKey_Home, "VK_HOME" }, { ImGuiKey_End, "VK_END" } };
+	for (const auto &key : kKeys)
+		if (ImGui::IsKeyPressed(key.key)) send_key(workspace, menu, key.name, io.KeyShift);
+	// The characters typed this frame, each a key of its own (Space its VK_SPACE).
+	for (int i = 0; i < io.InputQueueCharacters.Size; ++i) {
+		const ImWchar c = io.InputQueueCharacters[i];
+		if (c < 0x20 || c > 0x7E) continue;
+		send_key(workspace, menu, c == ' ' ? std::string("VK_SPACE") : std::string(1, char(c)), io.KeyShift);
+	}
+}
+
+void MenuViewportView::Tools::pointer_and_sound(Workspace &workspace, ui_kit::WrapRow &row, const MenuViewport &menu,
+		const MenuCanvasFrame &frame, const ViewportContext &context) {
+	const MnuDocument &document = *frame.document;
 	// Where the mouse is on the picture, in design units: as wide as the widest it reads.
 	row.next(ui_kit::text_width("x 0000, y 0000"));
 	ImGui::AlignTextToFramePadding();
@@ -248,7 +365,10 @@ void MenuViewportView::Tools::toolbar(Workspace &workspace, ViewportView &, View
 	ui_kit::tooltip("Draw the game's mouse pointer where the mouse is over the picture, as the game does: the "
 	                "CURSOR of the window under it, else of that window's root window, else of the first root "
 	                "window whose CURSOR loads, at the image's own size whatever the zoom.");
-	const MenuPointer now = mouse_on_picture ? pointer : menu_screen_pointer(frame);
+	// Off the picture: where a client holds it, else the screen's own (the screen Try shows while trying).
+	const MenuPointer now = mouse_on_picture ? pointer
+	                        : menu.pointer().held ? menu.pointer_at(context, menu.pointer().x, menu.pointer().y)
+	                                              : menu.screen_pointer(context);
 	if (now.drawn) {
 		const std::string label = now.file + "###pointer";
 		const std::string tip = (mouse_on_picture ? "The pointer here: " : "The screen's pointer: ") + now.file + ", " +
@@ -278,7 +398,6 @@ void MenuViewportView::Tools::toolbar(Workspace &workspace, ViewportView &, View
 		ImGui::TextDisabled("%s", line.c_str());
 		ui_kit::tooltip(last.sound.words);
 	}
-	if (options != before) set_options(workspace, menu, options);
 }
 
 void MenuViewportView::Tools::arrange_items(Workspace &workspace, const MenuCanvasFrame &frame) {
@@ -348,11 +467,13 @@ void MenuViewportView::draw_ready(Workspace &workspace, const ViewportModel &mod
 		tools_->snap = menu.show().snap;
 		tools_->sent = menu.show();
 	}
-	tools_->toolbar(workspace, *this, canvas_ui(), menu, frame);
+	tools_->toolbar(workspace, *this, canvas_ui(), menu, frame, context);
 	snap = tools_->snap ? 1.0f : 0.0f;
 	context.snap = snap;
 	const bool pressed = half() && half()->gesture().pressed();
-	tools_->keys(workspace, frame, board, pressed);
+	const bool trying = menu.try_on();
+	if (trying) tools_->try_keys(workspace, menu);
+	else tools_->keys(workspace, frame, board, pressed);
 	// Room below the picture for the notes list: its heading and up to six notes.
 	const std::vector<menu::MenuFrameNote> &notes = menu.notes();
 	const size_t note_lines = notes.empty() ? 0 : 1 + std::min<size_t>(notes.size(), 6);
@@ -373,9 +494,13 @@ void MenuViewportView::draw_ready(Workspace &workspace, const ViewportModel &mod
 					tools_->design_y = in.mouse.y / sy;
 					tools_->mouse_x = int(std::floor(tools_->design_x));
 					tools_->mouse_y = int(std::floor(tools_->design_y));
-					// The game's pointer there: the claim the pump makes at the point (DI-08).
-					tools_->pointer = menu_pointer_at(frame, tools_->design_x, tools_->design_y);
+					// The game's pointer there: the claim the pump makes at the point (DI-08), over the screen
+					// Try shows while trying.
+					tools_->pointer = menu.pointer_at(context, tools_->design_x, tools_->design_y);
 				}
+				// Try's button: held from a press begun on the picture until it comes up (DI-35).
+				tools_->try_down = in.pressed ? tools_->mouse_on_picture : in.down && tools_->try_down;
+				if (trying) return; // the right button's menu is the editor's
 				// The right button: the window under it selected unless it already is, and the menu
 				// of what the selection can do.
 				if (canvas_ui().right_clicked() && !(half() && half()->gesture().pressed())) {
@@ -415,7 +540,8 @@ void MenuViewportView::draw_ready(Workspace &workspace, const ViewportModel &mod
 	mouse.over = tools_->mouse_on_picture && !tools_->panning && !(half() && half()->gesture().dragging());
 	mouse.x = tools_->design_x;
 	mouse.y = tools_->design_y;
-	mouse.down = mouse.over && half() && half()->gesture().pressed();
+	// Trying, a press is the game's (DI-35); editing, the canvas's press begun on the picture.
+	mouse.down = mouse.over && (trying ? tools_->try_down : half() && half()->gesture().pressed());
 	workspace.canvas_mouse(mouse);
 	// The zoom (the Zoom list's, Ctrl+wheel's) and the snap as the canvas has them now: the viewport's, sent
 	// where they moved from what it holds, once.
@@ -426,8 +552,8 @@ void MenuViewportView::draw_ready(Workspace &workspace, const ViewportModel &mod
 	}
 
 	// The notes as a list, each cut to the window (whole in its tooltip); a click selects the
-	// record a note is on.
-	if (notes.empty()) return;
+	// record a note is on. Trying, the notes are the edited screen's: none listed.
+	if (notes.empty() || trying) return;
 	const Node &screen = *frame.screen;
 	ImGui::TextDisabled("Notes (%d)", int(notes.size()));
 	if (ImGui::BeginChild("notes", ImVec2(0.0f, 0.0f), false)) {
@@ -453,6 +579,10 @@ bool MenuViewportView::draws_pointer(const ViewportModel &model, const ViewportC
 	// The pointer the canvas pass found at the mouse this frame, while Pointer is on.
 	return static_cast<const MenuViewport &>(model).pointer().shown && tools_->mouse_on_picture &&
 			tools_->pointer.drawn;
+}
+
+bool MenuViewportView::game_input(const ViewportModel &model) const {
+	return static_cast<const MenuViewport &>(model).try_on();
 }
 
 } // namespace opennova::editor

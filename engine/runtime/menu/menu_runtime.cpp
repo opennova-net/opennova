@@ -1177,6 +1177,7 @@ void MenuRuntime::run_row_(int owner_id, const mnu::Action &action, bool &handle
 			// [orig: @ 0x649a5c — the focus drops before UI_BuildURLAndSubmitRequest,
 			// the embedder's]
 			drop_focus_();
+			service_row_(owner_id, action, kActionFormPost);
 			return;
 		case kActionPopScreen:
 			// [orig: UIScene_PopScreenHistory(scene, 1) @ 0x63c410] The file's own
@@ -1190,11 +1191,16 @@ void MenuRuntime::run_row_(int owner_id, const mnu::Action &action, bool &handle
 			}
 			handled = true;
 			return;
-		default:
+		default: {
 			// Code 0 (an unknown or missing TYPE), GLB_FILTER, GLB_FILTER_NUM and
 			// TAB fall to the jump table's default on activation; the rest are the
-			// embedder's service verbs.
+			// embedder's service verbs, raised for it as they run.
+			const int code = action_code(action.type);
+			if (code != kActionNone && code != kActionGlbFilter && code != kActionGlbFilterNum &&
+					code != kActionTab)
+				service_row_(owner_id, action, code);
 			return;
+		}
 	}
 }
 
@@ -1310,17 +1316,32 @@ void MenuRuntime::spin_cycle(int id, int delta) {
 }
 
 void MenuRuntime::play_widget_state_sound(int id, const std::string &state_token) {
-	if (const mnu::Window *w = index_.window(id)) play_sound_(*w, state_token);
+	if (const mnu::Window *w = index_.window(id)) play_sound_(id, *w, state_token);
 }
 
-void MenuRuntime::play_sound_(const mnu::Window &w, const std::string &state_token) {
+void MenuRuntime::play_sound_(int id, const mnu::Window &w, const std::string &state_token) {
 	// The state's slot: the last row of it with a TRIGGER (menu_window_sound).
-	const mnu::Sound *sound = menu_window_sound(w, menu_sound_state_of(state_token));
+	const int state = menu_sound_state_of(state_token);
+	const mnu::Sound *sound = menu_window_sound(w, state);
 	if (sound == nullptr) return;
 	MenuEvent e;
 	e.kind = MenuEvent::Kind::Sound;
+	e.id = id;
+	e.value = state;
 	e.text = sound->file;
 	e.text2 = sound->trigger;
+	e.text3 = w.name;
+	emit_(e);
+}
+
+void MenuRuntime::service_row_(int owner_id, const mnu::Action &action, int code) {
+	MenuEvent e;
+	e.kind = MenuEvent::Kind::ServiceRequested;
+	e.id = owner_id;
+	e.value = code;
+	e.text = mnu::kActionTypes[code - 1];
+	e.text2 = action.target;
+	e.text3 = action.file;
 	emit_(e);
 }
 
@@ -1610,7 +1631,7 @@ void MenuRuntime::arrow_click_(int id, int arrow) {
 	// The arrow's own pump and rows (its NAME is SPINLISTWND_UP / _DOWN [orig:
 	// CSpinListWnd_CreateUpDownChildren @ 0x64b8b0]), then the spin list's step,
 	// then the cross-file requests its rows made.
-	play_sound_(*part, "SELECTED");
+	play_sound_(id, *part, "SELECTED");
 	if (!walk_rows_(*part, id, true, generation)) return;
 	spin_cycle(id, arrow == 1 ? 1 : -1);
 	if (open_generation_ != generation) return;

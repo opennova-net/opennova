@@ -19,6 +19,7 @@
 
 #include <runtime/inmatch/stat_screen_feed.h>
 #include <runtime/menu/loadout_screen.h>
+#include <runtime/menu/menu_commands.h>
 #include <runtime/menu/menu_credits.h>
 
 #include <godot_cpp/classes/input.hpp>
@@ -458,6 +459,10 @@ void MenuDriver::on_runtime_event_(const opennova::menu::MenuEvent &p_event) {
 			emit_signal("table_cell_clicked", p_event.id, to_gd(p_event.text), p_event.value,
 					p_event.column, p_event.state, p_event.cell_value, p_event.flag);
 			break;
+		case Kind::ServiceRequested:
+			// The service verbs' rows: the game serves its LAN and NovaWorld screens through the
+			// companions' controls by name, none through these rows yet.
+			break;
 	}
 }
 
@@ -829,6 +834,12 @@ void MenuDriver::select_host_location(int p_id, const String &p_country) {
 	opennova::menu::HostDialog::select_location(runtime_, p_id, to_std(p_country));
 }
 
+PackedStringArray MenuDriver::command_names(const String &p_set) {
+	opennova::menu::MenuNameSet set = opennova::menu::MenuNameSet::kCount;
+	if (!opennova::menu::menu_name_set_from_token(to_std(p_set), set)) return PackedStringArray();
+	return to_gd_strings(opennova::menu::menu_name_set(set));
+}
+
 void MenuDriver::prepare_options(const Ref<ControlsModel> &p_controls) {
 	if (p_controls.is_valid()) options_.prepare(runtime_, p_controls->native_bindings());
 }
@@ -1000,6 +1011,8 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("select_host_location", "id", "country"), &MenuDriver::select_host_location);
 	ClassDB::bind_method(D_METHOD("prepare_options", "controls"), &MenuDriver::prepare_options);
 	ClassDB::bind_method(D_METHOD("is_options_surface"), &MenuDriver::is_options_surface);
+	ClassDB::bind_method(D_METHOD("apply_options_policy"), &MenuDriver::apply_options_policy);
+	ClassDB::bind_static_method("MenuDriver", D_METHOD("command_names", "set"), &MenuDriver::command_names);
 	ClassDB::bind_method(D_METHOD("activate_options", "controls", "name"), &MenuDriver::activate_options);
 	ClassDB::bind_method(D_METHOD("arm_options_remap", "controls", "id", "row"), &MenuDriver::arm_options_remap);
 	ClassDB::bind_method(D_METHOD("consume_options_input", "controls", "event"), &MenuDriver::consume_options_input);

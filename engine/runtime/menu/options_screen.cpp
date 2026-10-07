@@ -30,6 +30,57 @@ void OptionsScreen::prepare(MenuRuntime &menu, const controls::BindingSet &bindi
 	}
 }
 
+// [orig: the slider ranges UI_OptionsScreenInit @0x554800 / UI_PopulateRenderAndAudioSettings
+// @0x55c830 install; the VIDEO rows UI_SyncRenderSettingsToWidgets @0x55a140 selects by value; the
+// rest options_policy.h's pins, each with its witness there]
+void OptionsScreen::apply_policy(MenuRuntime &menu) const {
+	if (!is_surface_) return;
+	constexpr int kScroll = static_cast<int>(mnu::WindowType::Scroll);
+	for (const OptionsScrollRange &range : kOptionsScrollRanges) {
+		const int id = menu.widget_id(range.control);
+		if (id >= 0 && menu.widget_kind_of(id) == kScroll)
+			menu.set_widget_scroll_range(id, range.minimum, range.maximum, range.page, range.minimum);
+	}
+	for (const VideoQualityControl &control : kVideoQualityControls) {
+		const int id = menu.widget_id(control.control);
+		if (id < 0) continue;
+		const int count = menu.item_count(id);
+		for (int row = 0; row < count; ++row) {
+			if (menu.item_value(id, row) != control.semantic_value) continue;
+			menu.select_row(id, row, false);
+			break;
+		}
+		menu.set_widget_disabled(id, true);
+	}
+	// Gamma is calibration, not a quality rung: the reference profile's, then locked.
+	const int gamma = menu.widget_id("GAMMA");
+	MenuScrollRangeState range;
+	if (gamma >= 0 && menu.widget_kind_of(gamma) == kScroll) {
+		if (menu.get_widget_scroll_range(gamma, range))
+			menu.set_widget_scroll_range(gamma, range.minimum, range.maximum, range.page, kVideoGammaReference);
+		menu.set_widget_disabled(gamma, true);
+	}
+	// A revision that authors RESOLUTION shows its last (highest) mode, locked.
+	const int resolution = menu.widget_id("RESOLUTION");
+	if (resolution >= 0) {
+		const int count = menu.item_count(resolution);
+		if (count > 0) menu.select_row(resolution, count - 1, false);
+		menu.set_widget_disabled(resolution, true);
+	}
+	for (const char *name : kVideoPresetButtons) {
+		const int id = menu.widget_id(name);
+		if (id >= 0) menu.set_widget_disabled(id, true);
+	}
+	for (const OptionsForcedCheck &forced : kOptionsForcedChecks) {
+		const int id = menu.widget_id(forced.control);
+		if (id >= 0) menu.set_widget_checked(id, forced.checked);
+	}
+	for (const char *name : kOptionsUnsupportedControls) {
+		const int id = menu.widget_id(name);
+		if (id >= 0) menu.set_widget_disabled(id, true);
+	}
+}
+
 // The table mirrors the live catalog's class/action/control rows. Capture
 // blanks only the armed cell, preserving the action's row identity.
 // [orig: UI_PopulateControlMappingList @0x55c0c0;
