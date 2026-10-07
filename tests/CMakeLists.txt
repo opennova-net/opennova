@@ -5032,6 +5032,12 @@ target_link_libraries(editor_weapon_fire_test PRIVATE opennova_editor)
 target_include_directories(editor_weapon_fire_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_weapon_fire COMMAND editor_weapon_fire_test)
 
+# DI-23: the mission view's Shoot tool and an ammo's impact board, over minted fixtures.
+add_executable(editor_mission_shots_test editor/mission_shots_test.cpp)
+target_link_libraries(editor_mission_shots_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_shots_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_mission_shots COMMAND editor_mission_shots_test)
+
 # What a drag of a menu window's handles writes (editor/preview/menu_layout_edit, S9k1):
 # the plan against the runtime's POSITION solve, the grid, the handles, the edits.
 add_executable(editor_menu_layout_edit_test editor/menu_layout_edit_test.cpp)

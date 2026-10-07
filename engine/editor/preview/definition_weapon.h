@@ -99,7 +99,14 @@ public:
 	bool refresh(const SessionView &view, const std::string &catalog, const def::DefWeaponDef &row, bool first,
 			bool enemy, const DefinitionFireOptions &options, const assets::Model &gun, const std::string &gun_file,
 			const OrbitCamera &orbit, int width, int height);
+	// An ammo.def record fired alone (DI-23, WeaponRangeSetup's ammo): a soldier's shot of it from the picture's
+	// origin along +Z at the range's target, its impact row played on the face. True when what the device draws
+	// moved.
+	bool refresh_ammo(const SessionView &view, const std::string &ammo, bool enemy,
+			const DefinitionFireOptions &options);
 	void clear();
+	// Whether the range fires an ammo alone (no gun).
+	bool ammo_alone() const { return active_ && range_.ammo_alone(); }
 
 	// The gestures (a change runs the range again from where they differ) and the run to the clock's tick.
 	void set_gestures(std::vector<WeaponGestureAt> gestures) { range_.set_gestures(std::move(gestures)); }
