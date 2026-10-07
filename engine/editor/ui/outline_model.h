@@ -87,6 +87,9 @@ using OutlineAddMenuHook = void (*)(Workspace &workspace, const Document &docume
 // add.
 using OutlineListMenuOffersHook = bool (*)(const Document &document);
 using OutlineListMenuHook = void (*)(Workspace &workspace, const Document &document);
+// A record's own items in its line's right-click menu, after the jumps every line offers (DI-18: an item
+// record's Place in mission): the body drawn into the open menu.
+using OutlineRowMenuHook = void (*)(Workspace &workspace, const Document &document, const NodeAddress &record);
 
 // A heading a tree groups rows under (OutlineSpec::groups): its key among its siblings, which orders
 // them (a mission's pools by their band, its teams and groups by number: "03", "t001"), and its words
@@ -137,6 +140,8 @@ struct OutlineSpec {
 	// section, Document::move_out_edits).
 	const char *row_name_field = "";
 	bool details_move_between_rows = false;
+	// A record's own items in its line's right-click menu (null: the jumps alone; DI-18).
+	OutlineRowMenuHook row_menu = nullptr;
 };
 
 // What a click on a record's line selects (OutlineModel::click): the record, how it joins the

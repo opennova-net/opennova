@@ -158,7 +158,7 @@ void ModelViewportView::Tools::place_in_mission(Workspace &workspace, ui_kit::Wr
 			mission_item_facts(view, item, facts, ignored);
 			const std::string label = (facts.name.empty() ? std::string("Item") : facts.name) + " (" + std::to_string(item) + ")";
 			if (ImGui::Selectable(label.c_str())) {
-				workspace.request(request::open_document(mission));
+				window_requests::go_to_file(workspace, mission);
 				io::JsonValue options = io::JsonValue::make_object();
 				options.set("tool", io::json_string(mission_tool_token(MissionTool::Place)));
 				options.set("item", io::json_number(double(item)));
@@ -874,7 +874,7 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 					const std::string name = played.map.substr(played.map.find_last_of('/') + 1);
 					const std::string line = name + "  (" + played.record + (played.via.empty() ? "" : ", " + played.via) + ")";
 					if (ImGui::Selectable(line.c_str())) {
-						workspace.request(request::open_document(played.map));
+						window_requests::go_to_file(workspace, played.map);
 						// On this model: chosen where the map's own pairing takes another item's model.
 						const std::string here = model.path().substr(model.path().find_last_of('/') + 1);
 						const PreviewRig paired = resolve_preview_rig(*view.findings.graph, *view.project.scan, name,
