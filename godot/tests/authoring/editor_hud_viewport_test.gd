@@ -232,3 +232,59 @@ func test_an_edit_of_the_text_configures_it_again() -> void:
 	if not moved.is_empty():
 		assert_eq(int(moved["rect"][0]), 45, "the bar where the edited line puts it")
 		assert_eq(int(moved["rect"][1]), 701)
+
+
+## The viewport's state once the element's box has its left edge at `left` (a frame at a time, up to 600).
+func _await_left(element: String, left: int) -> Dictionary:
+	var state := _viewport()
+	for _frame in 600:
+		var item := _item(state, element)
+		if not item.is_empty() and int(item["rect"][0]) == left:
+			break
+		_app.pump()
+		await get_tree().process_frame
+		state = _viewport()
+	return state
+
+
+func test_the_handles_write_its_lines_and_the_picture_follows() -> void:
+	if _app == null:
+		return
+	_project()
+	assert_true(_seam.open_document(LAYOUT))
+	var state := await _await_ready()
+	# At 1600 x 1200: the health bar moved 20 design units right and 40 up, one undo step, drawn there.
+	assert_true(_seam.done({"kind": "set_viewport", "path": LAYOUT,
+			"viewport": {"kind": "hud", "options": {"width": 1600, "height": 1200}}}))
+	state = await _await_left("health", (25 * 1600 + 512) / 1024)
+	var health := _item(state, "health")
+	assert_true(bool(health.get("movable", false)) and bool(health.get("resizable", false)),
+			"the bar moves and its corners size it")
+	var right_before := int(health["rect"][2]) if not health.is_empty() else 0
+	assert_true(_seam.done({"kind": "edit_in_viewport", "path": LAYOUT,
+			"command": {"name": "move", "item": "health", "by": [20, -40]}}), "move by its item")
+	state = await _await_left("health", (45 * 1600 + 512) / 1024)
+	health = _item(state, "health")
+	assert_false(health.is_empty())
+	if not health.is_empty():
+		assert_eq(int(health["rect"][0]), (45 * 1600 + 512) / 1024, "drawn where its line now puts it")
+		assert_eq(String(health["lines"][0]["text"]), "HUDHEALTH 45,701,197,711", "its line rewritten in place")
+	# Its bottom right corner 30 units further right: the bar wider, its left edge where it was.
+	assert_true(_seam.done({"kind": "edit_in_viewport", "path": LAYOUT,
+			"command": {"name": "resize", "item": "health", "handle": "bottom_right", "by": [30, 0]}}))
+	for _frame in 600:
+		health = _item(_viewport(), "health")
+		if not health.is_empty() and int(health["rect"][2]) > right_before + 40:
+			break
+		await _pump_frames(1)
+	assert_gt(int(health.get("rect", [0, 0, 0])[2]), right_before + 40, "the far edge moved")
+	# At 640 x 480 the same lines draw where the design space scales them to.
+	assert_true(_seam.done({"kind": "set_viewport", "path": LAYOUT,
+			"viewport": {"kind": "hud", "options": {"width": 640, "height": 480}}}))
+	state = await _await_left("health", (45 * 640 + 512) / 1024)
+	assert_eq(int(_item(state, "health").get("rect", [0])[0]), (45 * 640 + 512) / 1024, "laid out at 640")
+	# Each command one undo step: two undone, the bar back where the file had it.
+	_seam.request({"kind": "undo", "path": LAYOUT})
+	_seam.request({"kind": "undo", "path": LAYOUT})
+	state = await _await_left("health", (25 * 640 + 512) / 1024)
+	assert_eq(int(_item(state, "health").get("rect", [0])[0]), (25 * 640 + 512) / 1024, "undone")
