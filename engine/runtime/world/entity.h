@@ -545,7 +545,7 @@ struct Entity {
     // state: slot-less organic fire passes weaponSlot 0 [orig:
     // WeaponSlot_FireAndSpawnEffects @0x53F477 -> Entity_FireWeaponAndSendPacket
     // @0x42bd80], so one entity byte serves all four organic ammo ids
-    // (AiProfile::OrganicWeapons) — the D-AI-8 (a) residual. The
+    // (world::OrganicWeapons) — the D-AI-8 (a) residual. The
     // local player's fire passes its ACTIVE slot's WeaponSlotState byte instead
     // (RoundSpawnParams::tracer_counter), so each weapon keeps its own phase
     // across switches. [orig: RoundData_SpawnRound @0x4ec199-0x4ec1bb]
@@ -1400,7 +1400,7 @@ inline void stamp_item_attrib(Entity &e, uint32_t attrib, uint32_t attrib2) {
 // field (0 b/fire, 1 m/flash, 2 c/casing); 0 unless the def has weapon slots
 // (ItemDefAttrib 0x20) — the person layout (attrib 0x40, entity+0x4D8) is not
 // carried: person fire origins ride the organic launch bytes +0x365..+0x367
-// (AiProfile::OrganicWeapons::launch).
+// (world::OrganicWeapons::launch).
 // [orig: Entity_GetWeaponSlotByte @0x5459c0 (attrib test @0x5459d3, the
 //  +0x327 cluster read @0x5459ef..0x5459f9)]
 inline uint8_t weapon_userpoint_byte(const Entity &e, int slot, int field) {

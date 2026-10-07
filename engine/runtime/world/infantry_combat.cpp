@@ -15,6 +15,7 @@
 #include <runtime/world/collision_detail.h>
 #include <runtime/world/collision_force.h>
 #include <runtime/world/infantry_internal.h>
+#include <runtime/world/infantry_sound.h>
 #include <runtime/world/world.h>
 
 namespace opennova::world {
@@ -859,42 +860,34 @@ void AiSystem::infantry_fire_pass(AiEntity &e, World &world, uint32_t logic_tick
             entity->engine_flags |= kEntityFlagPriorityTarget;
         }
     };
-    // Only animation event bits have the odd-tick gate. The walking-fire
-    // latch below is consumed every tick. [orig: @0x4BF15C..0x4BF406;
-    // primary ammo load @0x4BF326, secondary call @0x4BF425]
-    if ((logic_tick & 1u) != 0) {
-        if ((inf.last_events & anim::kAnimEventFirePrimary) != 0) {
-            int32_t pose[6];
-            organic_fire_pose(world, e, 0, pose);
-            shoot(ammo[0], pose);
-            inf.aim_ref0 = inf.combat_target;
+    // The block's shots in its order (world/organic_fire.h, which the editor's
+    // clip preview shares): only animation event bits have the odd-tick gate;
+    // the walking-fire latch below is consumed every tick. [orig:
+    // @0x4BF15C..0x4BF406; primary ammo load @0x4BF326, secondary call
+    // @0x4BF425] Each launch point is posed once, before its first shot
+    // (the latch's pose serves both rocket ammos). The advanced store lands
+    // before its shot (entity+0x26C, @0x4BF481); the easyrocket shot spends
+    // a magazine round with no empty-magazine or accepted-round test (the
+    // selection handles reload later; the original word wraps on decrement)
+    // [orig: @0x4BF42A..0x4BF45A].
+    const OrganicFirePass pass = organic_fire_pass(
+            inf.last_events, anim_sound_tick(logic_tick, false), inf.fire_secondary_latch, ammo);
+    inf.fire_secondary_latch = false;
+    int32_t poses[kOrganicLaunchSlots][6] = {};
+    bool posed[kOrganicLaunchSlots] = {};
+    for (int i = 0; i < pass.count; ++i) {
+        const OrganicFireShot &shot = pass.shots[i];
+        if (!posed[shot.launch_slot]) {
+            organic_fire_pose(world, e, shot.launch_slot, poses[shot.launch_slot]);
+            posed[shot.launch_slot] = true;
         }
-        if ((inf.last_events & anim::kAnimEventFireSecondary) != 0)
-            inf.fire_secondary_latch = true;
-        if ((inf.last_events & anim::kAnimEventFireMarker3) != 0) {
-            int32_t pose[6];
-            organic_fire_pose(world, e, 2, pose);
-            shoot(ammo[3], pose);
-            inf.aim_ref0 = inf.combat_target;
-        }
-    }
-    if (inf.fire_secondary_latch) {
-        inf.fire_secondary_latch = false;
-        int32_t pose[6];
-        organic_fire_pose(world, e, 1, pose);
-        if (ammo[1] != 0) {
-            shoot(ammo[1], pose);
-            // No empty-magazine or accepted-round test here: selection
-            // handles reload later. The original word wraps on decrement.
-            // [orig: @0x4BF42A..0x4BF45A]
+        const uint8_t id = ammo[shot.ammo_slot];
+        if (shot.ammo_slot == 2) inf.last_advanced_ammo = id;
+        shoot(id, poses[shot.launch_slot]);
+        if (shot.magazine)
             inf.magazine = retail_signed_i16(int32_t(uint16_t(inf.magazine)) - 1);
-        }
-        if (ammo[2] != 0 && ammo[2] != ammo[1]) {
-            inf.last_advanced_ammo = ammo[2]; // entity+0x26C, @0x4BF481
-            shoot(ammo[2], pose);
-        }
-        inf.aim_ref0 = inf.combat_target;
     }
+    if (pass.aimed) inf.aim_ref0 = inf.combat_target;
 }
 
 void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
