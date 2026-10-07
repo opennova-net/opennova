@@ -365,24 +365,35 @@ void HudViewport::read_layout_(const TextDocument &text) {
 	lines_ = hud_layout_lines(text_);
 	// The names the layout hands the HUD's loader, through the engine's own fill over the game's parse
 	// of the text as Save writes it (each line CR LF).
-	std::string written;
-	written.reserve(text_.size() + lines_.size());
-	for (size_t i = 0; i < text_.size(); ++i) {
-		if (text_[i] == '\n' && (i == 0 || text_[i - 1] != '\r')) written.push_back('\r');
-		written.push_back(text_[i]);
-	}
-	def::DefHudPosFile file{};
+	auto model = std::make_shared<HudLayoutModel>();
 	assets_ = opennova::hud::HudLayoutAssets();
 	stance_names_ = {};
-	if (def::def_parse_hudpos_memory(reinterpret_cast<const uint8_t *>(written.data()), written.size(), &file) == 0) {
+	model_.reset();
+	if (model->read(text_)) {
+		const def::DefHudPosFile &file = model->file;
 		opennova::hud::HudLayout layout;
 		opennova::hud::hud_layout_from_hudpos(file, layout, assets_);
 		for (size_t i = 0; i < file.hud.stances_count; ++i) {
 			const def::DefHudStance &stance = file.hud.stances[i];
 			if (stance.id >= 0 && stance.id < 6) stance_names_[size_t(stance.id)] = stance.name;
 		}
+		model_ = std::move(model);
 	}
+}
+
+HudLayoutModel::~HudLayoutModel() {
 	def::def_free_hudpos(&file);
+}
+
+bool HudLayoutModel::read(const std::string &text) {
+	def::def_free_hudpos(&file);
+	std::string written;
+	written.reserve(text.size() + text.size() / 16);
+	for (size_t i = 0; i < text.size(); ++i) {
+		if (text[i] == '\n' && (i == 0 || text[i - 1] != '\r')) written.push_back('\r');
+		written.push_back(text[i]);
+	}
+	return def::def_parse_hudpos_memory(reinterpret_cast<const uint8_t *>(written.data()), written.size(), &file) == 0;
 }
 
 void HudViewport::read_weapons_(const FileSource &files) {
@@ -421,6 +432,9 @@ void HudViewport::make_elements_() {
 		element.y0 = float(box.top);
 		element.x1 = float(box.right);
 		element.y1 = float(box.bottom);
+		HudDragStart start;
+		element.movable = model_ && hud_drag_start(element.element, model_->file.hud, start);
+		element.resizable = element.movable && hud_element_resizable(element.element);
 		// The lines that place it: each key's the game takes (a HUDSTANCE's of the stance shown).
 		const HudElementWords &words = hud_element_words(element.element);
 		for (const char *key : words.keys) {
@@ -546,19 +560,152 @@ ViewportHit HudViewport::hit(const ViewportContext &context, float x, float y) c
 
 bool HudViewport::handle_point(const ViewportContext &, NodeId, const std::string &, float &, float &,
 		std::string &error) const {
-	error = "The HUD's picture has no handles: its elements are placed by hudpos.def's lines.";
+	error = "A HUD element is no record: its handles are the canvas's, and a command moves or resizes it "
+	        "(move, resize, by its item).";
 	return false;
 }
 
 bool HudViewport::drag(const ViewportContext &, const ViewportDrag &, CanvasRequests &, std::string &error) const {
-	error = "Nothing is dragged in the HUD's picture: an element is moved by editing its hudpos.def line.";
+	error = "A HUD element is no record to drag by its id: the commands move and resize take it by its item "
+	        "(its element's token).";
 	return false;
 }
 
 bool HudViewport::command(const ViewportContext &, const std::string &name, const std::vector<NodeId> &,
 		CanvasRequests &, std::string &error) const {
-	error = "The HUD's picture has no command \"" + name + "\": its state is set with set_viewport's options.";
+	error = "The HUD's picture has no command \"" + name + "\" (it takes move, resize, set and click; its state is "
+	        "set with set_viewport's options).";
 	return false;
+}
+
+bool HudViewport::element_named(const std::string &item, HudElement &out, std::string &error) const {
+	const std::string &token = item.empty() ? options_.picked : item;
+	if (token.empty()) {
+		error = "No element is picked: name one by its item (its element's token, \"ammo_count\").";
+		return false;
+	}
+	if (!opennova::hud::hud_element_from_token(token.c_str(), out)) {
+		error = "\"" + token + "\" is no HUD element's token.";
+		return false;
+	}
+	return true;
+}
+
+bool HudViewport::read_now(const ViewportContext &context, HudLayoutModel &out, const TextDocument *&text,
+		std::string &error) const {
+	text = context.input.document ? text_of(*context.input.document) : nullptr;
+	if (!text || context.input.document->kind() != AssetKind::HudPosDefs) {
+		error = "No HUD layout is open at " + path() + ".";
+		return false;
+	}
+	if (!out.read(text->text())) {
+		error = "The HUD layout's text does not read.";
+		return false;
+	}
+	return true;
+}
+
+bool HudViewport::plan_changes(const ViewportContext &context, const std::vector<HudValueChange> &changes,
+		uint64_t gesture, CanvasRequests &out, std::string &error) const {
+	// The text as it is now, read as the game reads it (its lines as Save writes them).
+	HudLayoutModel now;
+	const TextDocument *text = nullptr;
+	if (!read_now(context, now, text, error)) return false;
+	if (!context.editable()) {
+		error = context.not_editable();
+		return false;
+	}
+	std::vector<Edit> edits;
+	if (!hud_layout_edits(*text, now.file.hud, changes, gesture, edits, error)) return false;
+	if (!edits.empty()) out.request(request::edit_record(path(), std::move(edits)));
+	return true;
+}
+
+bool HudViewport::command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+		std::string &error) const {
+	const std::string &name = command.name;
+	if (name != "move" && name != "resize" && name != "set") {
+		if (!command.item.empty() || !command.handle.empty() || !command.field.empty() || !command.value.empty()) {
+			error = "The HUD's command \"" + name + "\" takes no item, handle, field or value.";
+			return false;
+		}
+		return ViewportModel::command_of(context, command, out, error);
+	}
+	if (!command.ids.empty() || command.mode != SelectMode::Replace) {
+		error = "A HUD element's " + name + " takes its item, never record ids or a mode.";
+		return false;
+	}
+	if (reason_ != HudViewStatus::Ready || !current(context.input)) {
+		error = "The viewport shows no picture of the HUD layout as it is now.";
+		return false;
+	}
+	HudElement element = HudElement::kCount;
+	if (!element_named(command.item, element, error)) return false;
+	HudLayoutModel now;
+	const TextDocument *text = nullptr;
+	if (!read_now(context, now, text, error)) return false;
+	const def::DefHudPosDef *model = &now.file.hud;
+	std::vector<HudValueChange> changes;
+	if (name == "set") {
+		if (command.field.empty() || !command.by.empty() || command.has_at || !command.handle.empty()) {
+			error = "set takes a field (one of the element's fields by its id) and its value, nothing else.";
+			return false;
+		}
+		HudValueChange change;
+		if (!hud_field_change(element, *model, command.field, command.value, change, error)) return false;
+		changes.push_back(std::move(change));
+		return plan_changes(context, changes, 0, out, error);
+	}
+	if (!command.field.empty() || !command.value.empty()) {
+		error = name + " takes no field or value (set does).";
+		return false;
+	}
+	HudDragStart start;
+	if (!hud_drag_start(element, *model, start)) {
+		error = std::string("No line of hudpos.def places the ") + opennova::hud::hud_element_token(element) +
+		        ": the game places it.";
+		return false;
+	}
+	HudHandle handle = HudHandle::Move;
+	float dx = 0.0f, dy = 0.0f;
+	if (name == "move") {
+		if (!command.handle.empty() && command.handle != "move") {
+			error = "move takes no handle (resize does).";
+			return false;
+		}
+		if (command.has_at == (command.by.size() == 2)) {
+			error = "move goes by [dx, dy] design units or at [x, y], its place there, one of them.";
+			return false;
+		}
+		if (command.has_at) {
+			// Its lead place on each axis (its first point or near edge) to the point.
+			bool led[2] = { false, false };
+			for (size_t i = 0; i < start.coordinates.size(); ++i) {
+				const HudCoordinate &coordinate = start.coordinates[i];
+				const int axis = coordinate.axis == HudAxis::X ? 0 : 1;
+				if (led[axis] || coordinate.edge == HudEdge::Extent) continue;
+				led[axis] = true;
+				(axis == 0 ? dx : dy) = (axis == 0 ? command.at_x : command.at_y) - float(start.values[i]);
+			}
+		} else {
+			dx = float(command.by[0]);
+			dy = float(command.by[1]);
+		}
+	} else {
+		if (command.has_at || command.by.size() != 2) {
+			error = "resize goes by [dx, dy] design units.";
+			return false;
+		}
+		handle = HudHandle::BottomRight;
+		if (!command.handle.empty() && (!hud_handle_from_token(command.handle, handle) || handle == HudHandle::Move)) {
+			error = "resize takes a corner's handle: top_left, top_right, bottom_left or bottom_right.";
+			return false;
+		}
+		dx = float(command.by[0]);
+		dy = float(command.by[1]);
+	}
+	if (!hud_drag_changes(start, handle, dx, dy, 1, changes, error)) return false;
+	return plan_changes(context, changes, 0, out, error);
 }
 
 bool HudViewport::click_frame(const ViewportContext &context, SelectMode mode, int &width, int &height,
@@ -647,6 +794,27 @@ io::JsonValue HudViewport::items_json(const ViewportInput &) const {
 		}
 		row.set("textures", std::move(textures));
 		row.set("picked", JsonValue::make_bool(&element == chosen));
+		row.set("movable", JsonValue::make_bool(element.movable));
+		row.set("resizable", JsonValue::make_bool(element.resizable));
+		JsonValue fields = JsonValue::make_array();
+		if (model_)
+			for (const HudField &field : hud_element_fields(element.element, model_->file.hud)) {
+				JsonValue each = JsonValue::make_object();
+				each.set("id", json_string(field.id));
+				each.set("words", json_string(field.words));
+				each.set("kind", json_string(field.kind == HudFieldKind::Number  ? "number"
+				                             : field.kind == HudFieldKind::Align ? "align"
+				                                                                 : "name"));
+				each.set("value", json_string(field.value));
+				if (field.kind == HudFieldKind::Number) {
+					each.set("least", json_number(field.least));
+					each.set("most", json_number(field.most));
+				}
+				each.set("range", json_string(field.range));
+				each.set("cite", json_string(field.cite));
+				fields.push(std::move(each));
+			}
+		row.set("fields", std::move(fields));
 		out.push(std::move(row));
 	}
 	return out;
