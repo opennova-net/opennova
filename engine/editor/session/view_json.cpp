@@ -241,16 +241,18 @@ JsonValue run_section(const SessionView &view) {
 	out.set("exit_code",
 			activity.play_exit_code >= 0 ? json_number(double(activity.play_exit_code))
 										 : JsonValue::make_null());
-	out.set("in_install", boolean(view.project.play_retail));
-	out.set("strict", boolean(view.project.play_in_install_strict));
+	// How the open project plays and whether Play saves first (its local.json's: a Play request naming its own
+	// mode leaves them as they are), then the mode the running or last game ran in (ran_mode, "" before one).
+	out.set("play_mode", json_string(play_mode_token(view.project.play_mode)));
+	out.set("save_before_play", boolean(view.project.save_before_play));
 	out.set("game_install", json_string(view.project.retail_directory));
 	out.set("source_run", boolean(activity.source_run));
 	out.set("runtime_executable", json_string(activity.runtime_executable));
 	out.set("runtime_setting", json_string(view.project.runtime_setting));
 	out.set("boot_missing", strings_to_json(activity.boot_missing));
-	// The game install's game: whether it ran strictly, whether its first run was started again, and what its
-	// file log said it loaded once it exited (null before one was read).
-	out.set("ran_strict", boolean(activity.play_strict));
+	// The mode the game ran in (runtime, install or strict), whether the game install's first run was started
+	// again, and what its file log said it loaded once it exited (null before one was read).
+	out.set("ran_mode", json_string(activity.play_run_mode));
 	out.set("started_again", boolean(activity.play_started_again));
 	if (activity.play_file_log_read) {
 		JsonValue log = JsonValue::make_object();
@@ -450,8 +452,8 @@ JsonValue preferences_section(const SessionView &view) {
 	}
 	out.set("recent_projects", std::move(recent));
 	out.set("game_install", json_string(view.project.retail_directory));
-	out.set("play_in_install", boolean(view.project.play_retail));
-	out.set("play_in_install_strict", boolean(view.project.play_in_install_strict));
+	// The open project's Play settings (its local.json's; the defaults with none open).
+	out.set("play_mode", json_string(play_mode_token(view.project.play_mode)));
 	out.set("save_before_play", boolean(view.project.save_before_play));
 	out.set("runtime_setting", json_string(view.project.runtime_setting));
 	out.set("import_dependencies", boolean(view.project.import_dependencies));
@@ -553,8 +555,9 @@ constexpr ViewSectionRow kSections[] = {
 			"the run directory it runs in and the log there Play tails (run_dir, log_file: never "
 			"the build directory), whether that directory was emptied first (fresh) and what it kept of "
 			"what the runs before wrote there (kept: the game's game.cfg, its saves), the files it reported "
-			"missing at boot, and what Play runs (the "
-			"game install, in it or not, the runtime)." },
+			"missing at boot, how the open project plays (play_mode: runtime, install or strict; "
+			"save_before_play: its local.json's) and the mode the running or last game ran in (ran_mode), "
+			"and what Play runs (the game install, the runtime)." },
 	{ S::Import, "import", concern_set({ C::Dialogs, C::Preferences, C::Files }), import_section,
 			"The import dialog in short (open, plan: which plan it shows, with_dependencies, planning while its plan is made, its lists' counts; the "
 			"import_preview query pages its plan), the editor's import setting, the project's "
@@ -573,7 +576,8 @@ constexpr ViewSectionRow kSections[] = {
 			"resolve to nothing)." },
 	{ S::Preferences, "preferences", concern_set({ C::Preferences }), preferences_section,
 			"The editor's settings: the recent projects [{root, found, title, game, expansion, builds_on}], "
-			"the game install, Play in it, the runtime, the import setting." },
+			"the game install, the runtime, the import setting; and the open project's own: how it plays "
+			"(play_mode) and whether Play saves first (save_before_play), its build folder." },
 	{ S::Output, "output", concern_set({ C::Output }), output_section,
 			"The output lines held, first and next by absolute index (the output query pages "
 			"them)." },

@@ -12,11 +12,13 @@
 namespace opennova::editor {
 
 // The editor's own preferences, per machine and per user, not per project (ADR 0046 d6, S13 A2):
-// the recent-projects list, the game runtime Play launches, the game install, whether Play runs
-// the build in the game install (and whether strictly), and whether an import brings the files the
-// chosen ones need. A project's `.opennova/local.json` overrides the runtime for that project alone,
-// and holds its own game install. Schema 2 (S13 A4) renamed the game install's keys ("game_install",
-// "play_in_install"); pre-1.0 there is no reader for schema 1: such a file is set aside, read as
+// the recent-projects list, the game runtime Play launches, the game install last chosen (where this
+// machine's game is installed: a project naming none starts there), and whether an import brings the
+// files the chosen ones need. A project's `.opennova/local.json` overrides the runtime for that project
+// alone, and holds its own game install and its Play settings (how it plays, whether Play saves first):
+// a project's choice never reaches another project, nor another editor on the machine, all of which
+// read and write this one file. Schema 2 (S13 A4) renamed the game install's keys ("game_install",
+// "play_in_install", the latter since retired); pre-1.0 there is no reader for schema 1: such a file is set aside, read as
 // absent (the defaults) with a warning naming what it held, and the next save writes a new file. A key
 // added within a schema reads as its default where a file lacks it, and a key a file holds that the
 // schema no longer reads is ignored (S15's `recent_items` list, since the polish), so an additive
@@ -29,15 +31,6 @@ struct Preferences {
 	std::vector<std::string> recent_projects; // project roots, most recent first
 	std::string runtime_executable;           // "" = the runtime packaged beside the editor
 	std::string game_install;                 // the game install (Joint Operations), on this machine
-	bool play_in_install = false;             // Play runs the build in the game install
-	// Play in the game install runs strictly (Strict Play, CONTEXT.md): the build and the install's
-	// program alone in the run directory, launched without /d, as a player who dropped the program into
-	// the build's folder runs it (prepare_strict_install_launch_plan); off, the install's configuration
-	// and saves beside it, under /d. Read only while play_in_install is on.
-	bool play_in_install_strict = false;
-	// Play saves every file with unsaved edits first, as Save all does, instead of waiting on the unsaved-changes
-	// prompt (DI-26: the Play loop); a store that does not say reads as on. Off, Play asks, as Build does.
-	bool save_before_play = true;
 	// The import dialog's "Include the files these need" (ADR 0046 S11g): what a preview the
 	// windows raise plans with; a store that does not say reads as on.
 	bool import_dependencies = true;
@@ -47,7 +40,18 @@ struct Preferences {
 	// (recent_items_game; the settings file's `recent_items_by_game`); a store that does not say reads
 	// as none.
 	std::map<std::string, std::vector<int64_t>> recent_items;
+	// The Play settings an earlier editor kept here for every project (play_in_install,
+	// play_in_install_strict, save_before_play), each as the file held it (held_setting: `play_in_install
+	// true`), in kRetiredPlayKeys' order: read by nothing, never written, so the next save drops them. Play's
+	// settings are each project's (LocalSettings::play_mode, save_before_play); pre-1.0 there is no reader
+	// carrying the editor's old ones into a project. The session says once that they were seen and
+	// ignored (SessionCore::start).
+	std::vector<std::string> retired_play;
 };
+
+// The keys of retired_play: what the editor's settings file kept of Play before Play's settings were
+// each project's.
+inline constexpr const char *kRetiredPlayKeys[] = {"play_in_install", "play_in_install_strict", "save_before_play"};
 
 // Where the preferences are kept (S13 A2). The embedder owns the store and hands the session a
 // reference: the shell a file in the editor's user directory (FilePreferencesStore), a test or
