@@ -55,7 +55,7 @@ uint64_t next_scene_state() {
 } // namespace
 
 bool EnvironmentViewportApplier::EnvironmentKey::operator==(const EnvironmentKey &o) const {
-	return file == o.file && attrib_flags == o.attrib_flags && water_override == o.water_override &&
+	return file == o.file && terrain == o.terrain && attrib_flags == o.attrib_flags && water_override == o.water_override &&
 			fog_override == o.fog_override && water_murk == o.water_murk &&
 			std::equal(std::begin(fog_color), std::end(fog_color), std::begin(o.fog_color)) &&
 			std::equal(std::begin(water_color), std::end(water_color), std::begin(o.water_color));
@@ -74,6 +74,7 @@ EnvironmentViewportApplier::EnvironmentKey EnvironmentViewportApplier::environme
 	const opennova::editor::MissionSceneHeader &header = model.header();
 	EnvironmentKey key;
 	key.file = model.file_name();
+	key.terrain = header.terrain;
 	key.attrib_flags = header.attrib_flags;
 	key.water_override = header.water_override;
 	key.fog_override = header.fog_override;
@@ -172,7 +173,8 @@ void EnvironmentViewportApplier::touch_scene_state_() {
 
 // --- the files -----------------------------------------------------------------------------------
 
-bool EnvironmentViewportApplier::mount_(const opennova::editor::SessionView &view, const std::string &environment) {
+bool EnvironmentViewportApplier::mount_(const opennova::editor::SessionView &view, const std::string &environment,
+		const std::string &terrain) {
 	const std::shared_ptr<const opennova::editor::ProjectAssetSource> source = view.findings.assets;
 	const bool another = source != mounted_ || !stamped_;
 	bool stale[kLayers] = { another, another };
@@ -185,7 +187,7 @@ bool EnvironmentViewportApplier::mount_(const opennova::editor::SessionView &vie
 		// A file the bodies read moved (a model, its textures; not the environment's own text, whose edits
 		// rebuild the environment as they are made): the bodies loaded again with the layer.
 		bodies_moved_ = bodies_moved_ ||
-				layer_files_[kEnvironment].moved_but(*source, { environment, opennova::env::kOvercastFile });
+				layer_files_[kEnvironment].moved_but(*source, { environment, terrain, opennova::env::kOvercastFile });
 	} else {
 		bodies_moved_ = true;
 	}
@@ -270,7 +272,7 @@ void EnvironmentViewportApplier::rebuild(const opennova::editor::ViewportModel &
 		clear();
 		return;
 	}
-	mount_(view, model.file_name());
+	mount_(view, model.file_name(), model.header().terrain.empty() ? std::string() : model.header().terrain + ".trn");
 	auto build = std::make_unique<Build>();
 	plan_(*build, model);
 	// The pose alone: made whole as it is taken.
@@ -318,9 +320,14 @@ ApplierStep EnvironmentViewportApplier::step(const opennova::editor::ViewportMod
 void EnvironmentViewportApplier::run_environment_(const EnvironmentViewport &model) {
 	const opennova::editor::MissionSceneHeader &header = model.header();
 	const String name = opennova::to_gd(model.file_name());
+	const String trn = header.terrain.empty() ? String() : opennova::to_gd(header.terrain) + ".trn";
+	// As the drawn mission's load reads it (GameWorld::load_environment): its terrain's .trn, overcast.def (the
+	// overcast table, by the runtime's own name), then the file over them (env-tod-re.md #43).
 	Ref<EnvFile> env;
 	env.instantiate();
-	if (name.is_empty() || !root_files_->has_file(name) || env->load_from_resource_root(root_files_, name) != OK) {
+	Ref<EnvFile> overcast;
+	overcast.instantiate();
+	if (!env->load_mission_environment(root_files_, trn, name, overcast)) {
 		if (!name.is_empty()) note_missing_(kEnvironment, name);
 		environment_->set_environment_data(Ref<EnvFile>());
 		water_->set_mission_water_height_override(NAN);
@@ -337,13 +344,12 @@ void EnvironmentViewportApplier::run_environment_(const EnvironmentViewport &mod
 		water_->set_mission_water_height_override(
 				overrides->get_has_water_height() ? overrides->get_water_height_world() : NAN);
 	}
-	// The overcast table beside it, by the runtime's own name.
-	Ref<EnvFile> overcast;
-	overcast.instantiate();
-	const String overcast_name = opennova::to_gd(opennova::env::kOvercastFile);
-	const bool has_overcast = root_files_->has_file(overcast_name) &&
-			overcast->load_from_resource_root(root_files_, overcast_name) == OK;
-	environment_->set_overcast_data(has_overcast ? overcast : Ref<EnvFile>());
+	environment_->set_overcast_data(overcast);
+	// The texts the load read are the environment's whatever unit read one first (the .trn its terrain's units
+	// stamped already): an edit of one builds the environment again.
+	for (const String &text : { trn, name, opennova::to_gd(opennova::env::kOvercastFile) }) {
+		if (!text.is_empty()) layer_files_[kEnvironment].note(opennova::to_std(text), stamped_->stamp(opennova::to_std(text)));
+	}
 	environment_->configure_mission_clock(header.start_time, header.minutes_per_day);
 	// The weather started as a mission's start starts it (its home seeded, the drop pool reset from the
 	// mission start's stream, the settle), at the next frame's tick.

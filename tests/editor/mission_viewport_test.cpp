@@ -1739,8 +1739,8 @@ std::vector<uint8_t> tile_at(double x, double y, uint8_t index) {
 // under the water plane (the .trn's 21 half units) the water's slot and row; off the island the ocean's 7;
 // the follow reading nothing again while no stamp moves; a placed tile deciding over the char map (TSD_NULL
 // with no .tsd, the tile set's .tsd class with one, the mission's tile set naming another .tsd); the water's
-// ladder (the terrain's over the environment's, the mission's override over both, the environment's where
-// the terrain has none); no char map (1 everywhere); no terrain; a body on an entity.
+// ladder (the environment's over the terrain's, the mission's override over both, the terrain's where the
+// environment writes none: env #44); no char map (1 everywhere); no terrain; a body on an entity.
 static int test_ground_facts() {
 	using namespace opennova;
 	auto files = std::make_shared<GroundFiles>();
@@ -1818,18 +1818,23 @@ static int test_ground_facts() {
 	header.tile_set.clear();
 	files->drop("pad.til");
 
-	// The water's ladder: the terrain's over the environment's, the mission's override over both (its half
-	// units), the environment's where the terrain has none.
+	// The water's ladder (env #44): the environment's line over the terrain's (the time-of-day parse writes the
+	// .trn's and then the .env's), the mission's override over both (its half units), the terrain's where the
+	// environment writes none.
 	files->put_text("pad.env", "water_height 30\r\n");
 	header.environment = "pad";
 	ground.follow(files, 5, header, "pad");
-	TEST_EXPECT(near(ground.water_height(), 10.5));
+	TEST_EXPECT(near(ground.water_height(), 15.0));
 	header.attrib_flags = 0x1;
 	header.water_override = 40;
 	ground.follow(files, 5, header, "pad");
 	TEST_EXPECT(near(ground.water_height(), 20.0));
 	header.attrib_flags = 0;
 	header.water_override = 0;
+	files->put_text("pad.env", "fog_level 900\r\n");
+	ground.follow(files, 5, header, "pad");
+	TEST_EXPECT(near(ground.water_height(), 10.5));
+	files->put_text("pad.env", "water_height 30\r\n");
 	{
 		const std::vector<uint8_t> trn = test_io::read_file(fixture("terrain/tmap/Tmap.trn"));
 		std::string text(trn.begin(), trn.end());
