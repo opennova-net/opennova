@@ -1,0 +1,162 @@
+<!-- OpenNova's Mods screen, authored from scratch: the main menu's MODS button
+     opens it. The original game fills a screen named OPTIONS as it opens:
+     AVAIL_LIST lists the base game first, then every expansion under
+     expansion\ by its Mods-list name (its <name>.bin's [exp_info] EXP_NAME),
+     MOD_DESC shows a picked one's EXP_DESC, and ACCEPT switches the game to
+     the picked one, reloading everything (docs/vfs/vfs-pff-mount-re.md,
+     Expansions 3). OpenNova's menu fills and applies the same names
+     (docs/mnu/menu-wiring.md). BACK returns to the main menu.
+
+     TEXFILTER and SHADERUSAGE are here, hidden, for the original game's
+     ACCEPT alone: it reads every option control of the screen by name and,
+     when the texture filter or the shader detail it reads differs from the
+     game's, restarts the renderer at that setting; with neither control on
+     the screen it compares an uninitialised value [orig:
+     Options_HandleAcceptOrBack @ 0x55a97d..0x55a9c9, the compare @ 0x55ad65].
+     As the screen opens the game sets each list to its setting [orig:
+     UI_SyncRenderSettingsToWidgets @ 0x55a300, @ 0x55a32a], so ACCEPT reads
+     the game's own and leaves the renderer alone. Their items are the values
+     the original's options give them (0..3, 0..2).
+
+     Literal strings, hex colors and opennova.fnt, as main.mnu. MAIN's CURSOR
+     names the mouse pointer (docs/mnu/menu-re.md). -->
+<SCREEN>
+	<NAME>OPTIONS</NAME>
+	<WINDOW type="window" name="MAIN">
+		<APPEARANCE type="color" state="default">FF0B1015</APPEARANCE>
+		<POSITION>
+			<LEFT>0</LEFT>
+			<TOP>0</TOP>
+			<RIGHT>800</RIGHT>
+			<BOTTOM>600</BOTTOM>
+		</POSITION>
+		<FONT>
+			<NAME>opennova.fnt</NAME>
+			<DEFAULT_FG>FFD8DEE4</DEFAULT_FG>
+			<MOUSEOVER_FG>FFFFC040</MOUSEOVER_FG>
+			<SELECTED_FG>FFFF8000</SELECTED_FG>
+			<DISABLED_FG>FF545252</DISABLED_FG>
+		</FONT>
+		<CURSOR>
+			<FILE>newarow1.tga</FILE>
+			<FLAGS>STANDARD_TRANSPARENT</FLAGS>
+		</CURSOR>
+		<WINDOW type="static" name="TITLE">
+			<FONT>
+				<NAME>opennova.fnt</NAME>
+				<DEFAULT_FG>FFFFC040</DEFAULT_FG>
+			</FONT>
+			<POSITION>
+				<LEFT>0</LEFT>
+				<TOP>100</TOP>
+				<RIGHT>800</RIGHT>
+				<BOTTOM>120</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">MODS</STRING>
+		</WINDOW>
+		<WINDOW type="static" name="MODS_NOTE">
+			<POSITION>
+				<LEFT>0</LEFT>
+				<TOP>125</TOP>
+				<RIGHT>800</RIGHT>
+				<BOTTOM>145</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">PICK THE GAME TO PLAY. ACCEPT LOADS IT.</STRING>
+		</WINDOW>
+		<WINDOW type="list" name="AVAIL_LIST">
+			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+			<POSITION>
+				<LEFT>100</LEFT>
+				<TOP>160</TOP>
+				<RIGHT>390</RIGHT>
+				<BOTTOM>420</BOTTOM>
+			</POSITION>
+			<ITEMS justify="LEFT" vjustify="CENTER">
+				<APPEARANCE type="color" state="selected">FF3A4550</APPEARANCE>
+			</ITEMS>
+			<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+		</WINDOW>
+		<WINDOW type="multiline_edit" name="MOD_DESC" READONLY>
+			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+			<POSITION>
+				<LEFT>410</LEFT>
+				<TOP>160</TOP>
+				<RIGHT>700</RIGHT>
+				<BOTTOM>420</BOTTOM>
+			</POSITION>
+			<STRING justify="LEFT" vjustify="TOP"></STRING>
+		</WINDOW>
+		<WINDOW type="combobox" name="TEXFILTER" HIDDEN>
+			<POSITION>
+				<LEFT>0</LEFT>
+				<TOP>0</TOP>
+				<RIGHT>150</RIGHT>
+				<BOTTOM>20</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER"></STRING>
+			<LIST_BOX>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>150</RIGHT>
+					<TOP>20</TOP>
+					<BOTTOM>100</BOTTOM>
+				</POSITION>
+				<ITEMS justify="LEFT" vjustify="CENTER">
+					<ITEM value="0">BILINEAR</ITEM>
+					<ITEM value="1">TRILINEAR</ITEM>
+					<ITEM value="2">ANISOTROPIC</ITEM>
+					<ITEM value="3">ANISOTROPIC HIGH</ITEM>
+				</ITEMS>
+				<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+			</LIST_BOX>
+		</WINDOW>
+		<WINDOW type="combobox" name="SHADERUSAGE" HIDDEN>
+			<POSITION>
+				<LEFT>0</LEFT>
+				<TOP>0</TOP>
+				<RIGHT>150</RIGHT>
+				<BOTTOM>20</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER"></STRING>
+			<LIST_BOX>
+				<POSITION>
+					<LEFT>0</LEFT>
+					<RIGHT>150</RIGHT>
+					<TOP>20</TOP>
+					<BOTTOM>100</BOTTOM>
+				</POSITION>
+				<ITEMS justify="LEFT" vjustify="CENTER">
+					<ITEM value="0">OFF</ITEM>
+					<ITEM value="1">NORMAL</ITEM>
+					<ITEM value="2">HIGH</ITEM>
+				</ITEMS>
+				<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+			</LIST_BOX>
+		</WINDOW>
+		<WINDOW type="button" name="ACCEPT">
+			<HOTKEY VIRTUAL>VK_RETURN</HOTKEY>
+			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+			<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+			<POSITION>
+				<LEFT>510</LEFT>
+				<TOP>440</TOP>
+				<RIGHT>700</RIGHT>
+				<BOTTOM>468</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">ACCEPT</STRING>
+		</WINDOW>
+		<WINDOW type="button" name="BACK">
+			<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+			<ACTION type="POP_SCREEN"></ACTION>
+			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+			<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+			<POSITION>
+				<LEFT>100</LEFT>
+				<TOP>440</TOP>
+				<RIGHT>290</RIGHT>
+				<BOTTOM>468</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">BACK</STRING>
+		</WINDOW>
+	</WINDOW>
+</SCREEN>
