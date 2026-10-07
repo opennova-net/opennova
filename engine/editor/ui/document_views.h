@@ -125,6 +125,10 @@ struct DocumentViewRow {
 
 // A type's row; null for None and past the last.
 const DocumentViewRow *document_view_row(DocumentTypeId type);
+
+// Whether the document's file is one an import makes (DI-30a): the session refuses its edits
+// (document.imported), so the windows draw its values read only.
+bool made_by_import(const SessionView &view, const DocumentBase &document);
 // A new view of `document` by its type (the row of the document column of its kind's row); null
 // for a document no type opens.
 std::unique_ptr<DocumentView> make_view(const DocumentBase &document);
