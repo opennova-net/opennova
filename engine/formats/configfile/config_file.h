@@ -77,4 +77,39 @@ bool read_config_value(ConfigSection &section, const char *key, int index, std::
 bool read_current_config_value(ConfigSection &section, const char *key, int index, std::string *text,
 		float *real, int32_t *integer);
 
+// The text reader's "data strings" pool and the clear that runs past it (docs/mnu/menu-re.md, the ConfigFile
+// text reader). The parse counts, allocates, then fills [orig: ConfigFile_ParseText @ 0x7608a0]:
+// ConfigFile_CountValuesAndStringLengths @ 0x7605d0 totals the values of every section's entries (+0x30) and,
+// for each value it reads back as text, its length plus one (+0x3C); ParseText allocates the pool at +0x3C
+// bytes [orig: @ 0x7609d7, AudioMem_AllocWithLabel @ 0x759da0 -> FastMem_Alloc @ 0x7697b0, which takes a size
+// under 1 as 1 and rounds it up to 64, a 36-byte block header before each block] and clears it with
+// memset(pool, 0, +0x30) [orig: @ 0x7609e8]: one byte per value, so a text with more values than the
+// rounded pool zeroes the bytes past it, the next heap block's header first (a crash later, at a
+// mission start in the witness). The count reads each value back from its entry's own line as the
+// accessors' line walk does [orig: ConfigFile_CountCommaSeparatedValues @ 0x75de30 sets the walk's cursor to
+// the line; ConfigFile_ReadKeyValue @ 0x75fc90 for the first value, ini_read_key_value_from_current_line @
+// 0x75f780 after it]: the line's first 255 bytes [orig: String_CopyN @ 0x75eca0], the key matched as written
+// (its first character exactly, the rest without case [orig: @ 0x75fdfd]; a key written with leading spaces
+// does not match its own line, and the walk goes on through the lines after it to a '[' line), a value
+// split on ',' and ' ' from the line's '=' to ';' or the line's end. A value the walk cannot read (past
+// those 255 bytes, or of a key that matched no line) leaves the buffer holding the last one read, which is
+// counted again (the buffer's first contents, uninitialised in retail, taken as empty). A file in the
+// CBIN form goes to ConfigFile_ParseBinary instead [orig: ConfigFile_LoadFromFile @ 0x760aa3], whose pools
+// are each cleared at their own size, and a file of no byte is not parsed [orig: @ 0x760a74].
+struct DataStringsPool {
+	bool binary = false;       // a CBIN file: no text parse, no such pool
+	uint32_t values = 0;       // +0x30: the clear's length
+	uint32_t string_bytes = 0; // +0x3C: the pool's size asked
+	uint32_t pool_bytes = 0;   // the block FastMem_Alloc gives for it (0 for a file not parsed as text)
+	// The bytes the clear writes past the pool; 0 for none.
+	uint32_t overrun() const { return values > pool_bytes ? values - pool_bytes : 0; }
+};
+inline constexpr uint32_t kFastMemStep = 64;        // [orig: FastMem_Alloc @ 0x7697d7]
+inline constexpr uint32_t kFastMemHeaderBytes = 36; // [orig: FastMem_Alloc @ 0x769840, block + 9 dwords]
+// The bytes FastMem_Alloc gives a request of `size` [orig: FastMem_Alloc @ 0x7697c4..0x7697d7].
+uint32_t fastmem_block_bytes(uint32_t size);
+// The pool and its clear for a file of these bytes, as ConfigFile_LoadFromFile -> ConfigFile_ParseText sizes
+// and clears it.
+DataStringsPool data_strings_pool(const uint8_t *data, size_t size);
+
 } // namespace opennova::configfile

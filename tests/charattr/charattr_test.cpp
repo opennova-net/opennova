@@ -2,11 +2,12 @@
 // file (a class after a missing one, a second section of a label, the legacy block JO:CA ships below its live
 // classes, a word no attribute is, a value the ConfigFile reads as text, an LF alone) as CharAttr_LoadFromDef
 // fills the table, with where each value was read and which sections are never read; write the table and read
-// it back to the same rows byte for byte (a float by its bits); refuse a table no file loads as. The retail legs
-// read JO:CA's own charattr.def (the packed install, base and each expansion, and the extracted tree): classes
-// 1 to 9 read, the class-8 row hashing to the capture-derived 0x22A25E01, and the file written and read again
-// the same table.
-// [orig: CharAttr_LoadFromDef @0x412140; CharAttr_GetClassChecksum @0x412aa0]
+// it back to the same rows byte for byte (a float by its bits), a key at 0 left out; refuse a table no file loads
+// as, and one whose text would hold more values than the ConfigFile reader's pool of its text values takes. The
+// retail legs read JO:CA's own charattr.def (the packed install, base and each expansion, and the extracted
+// tree): classes 1 to 9 read, the class-8 row hashing to the capture-derived 0x22A25E01, the file written and
+// read again the same table, and the shipped and the written text each under the pool.
+// [orig: CharAttr_LoadFromDef @0x412140; CharAttr_GetClassChecksum @0x412aa0; ConfigFile_ParseText @0x7609e8]
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -18,6 +19,7 @@
 #include <base/io/crc32_mpeg2.h>
 #include <base/vfs/vfs.h>
 #include <formats/charattr/charattr.h>
+#include <formats/configfile/config_file.h>
 
 #include "common/retail_paths.h"
 
@@ -204,7 +206,43 @@ void synthetic_writer() {
 	CHECK(!charattr::write_table(stray, text, error));
 	// No class: an empty text, which loads as no class.
 	CHECK(charattr::write_table(charattr::Table{}, text, error) && text.empty());
-	std::printf("writer: every key, CR LF, the floats by their bits; a table no file loads as refused\n");
+	// A key at 0 is left out: the loader clears the table first, so a key the section lacks reads 0. Only a float
+	// of all-zero bits is that 0: a -0.0 is written.
+	charattr::Table zeros;
+	zeros.rows[0].active = true;
+	zeros.rows[0].class_id = 1;
+	zeros.rows[0].stealth = 25.0f;
+	zeros.rows[0].hp_bonus = -0.0f;
+	zeros.rows[0].jungle_cammo = 5305;
+	zeros.rows[1].active = true;
+	zeros.rows[1].class_id = 2;
+	CHECK(charattr::write_table(zeros, text, error) &&
+	      text == "[CHARACTER1]\r\nSTEALTH = 25.0\r\nHPBONUS = -0.0\r\nJUNGLE_CAMMO = 5305\r\n\r\n[CHARACTER2]\r\n\r\n");
+	round_trip(zeros, "the zeros");
+	// The ConfigFile reader clears its pool of the text values' bytes (at least 64) one byte per value [orig:
+	// ConfigFile_ParseText @ 0x7609e8]: five classes of twelve keys away from 0 and no word (60 values) fit it,
+	// six (72) would overrun the game's heap and are refused, nothing written.
+	charattr::Table full;
+	for (size_t i = 0; i < charattr::kClassCount; ++i) {
+		charattr::ClassRow &row = full.rows[i];
+		row.active = i < 5;
+		row.class_id = row.active ? static_cast<uint8_t>(i + 1) : 0;
+		if (!row.active) continue;
+		row.stealth = row.hp_bonus = row.mana_bonus = row.recoil_mute = row.reload_mute = 1.5f;
+		row.xhair_mute = row.xhairdx_mute = row.scope_mute = 2.5f;
+		row.jungle_cammo = row.desert_cammo = row.arctic_cammo = 5305;
+		row.run_modifier = 1;
+	}
+	CHECK(charattr::write_table(full, text, error));
+	const configfile::DataStringsPool five =
+			configfile::data_strings_pool(reinterpret_cast<const uint8_t *>(text.data()), text.size());
+	CHECK(five.values == 60 && five.string_bytes == 0 && five.overrun() == 0);
+	full.rows[5] = full.rows[4];
+	full.rows[5].class_id = 6;
+	CHECK(!charattr::write_table(full, text, error) && text.empty() && error.find("72 values") != std::string::npos &&
+	      error.find("8 bytes past") != std::string::npos && error.find("0x7609e8") != std::string::npos);
+	std::printf("writer: every key away from 0, CR LF, the floats by their bits; a table no file loads as, or whose "
+	            "text would overrun the reader's pool, refused\n");
 }
 
 int retail_legs() {
@@ -224,7 +262,17 @@ int retail_legs() {
 			repeated += unread.why == charattr::UnreadSection::Why::Repeated ? 1 : 0;
 		CHECK(repeated == 2);
 		round_trip(table, what.c_str());
-		std::printf("%s: classes 1..9, CHARACTER8's row CRC 0x22A25E01, written and read the same\n", what.c_str());
+		// The file as shipped and the file written from its table, each under the ConfigFile reader's pool.
+		const configfile::DataStringsPool shipped = configfile::data_strings_pool(bytes.data(), bytes.size());
+		CHECK(shipped.values == 278 && shipped.string_bytes == 288 && shipped.overrun() == 0);
+		std::string written, error;
+		CHECK(charattr::write_table(table, written, error));
+		const configfile::DataStringsPool pool =
+				configfile::data_strings_pool(reinterpret_cast<const uint8_t *>(written.data()), written.size());
+		CHECK(pool.overrun() == 0);
+		std::printf("%s: classes 1..9, CHARACTER8's row CRC 0x22A25E01, written and read the same; 278 values "
+		            "over 288 bytes as shipped, %u over %u written\n",
+		            what.c_str(), pool.values, pool.string_bytes);
 		++ran;
 	};
 	const std::string install = retail::install();
