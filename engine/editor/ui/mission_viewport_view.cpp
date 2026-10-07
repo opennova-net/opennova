@@ -128,6 +128,7 @@ struct MissionViewportView::Tools {
 	void time_popup(MissionViewportOptions &options, const MissionViewport &mission);
 	void numbers(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context);
 	void path_list(Workspace &workspace, const MissionViewport &mission);
+	void shoot_list(Workspace &workspace, const MissionViewport &mission);
 	void canvas_menu(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context,
 			const MissionCanvas &canvas);
 	void entity_jumps(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context,
@@ -188,7 +189,7 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 	const float under = line + (terrain ? line : 0.0f) + (mission.missing().empty() ? 0.0f : line);
 	const float height = std::max(48.0f, ImGui::GetContentRegionAvail().y - under);
 	// Beside the picture while a tool picks from a list: the palette (Place) or the paths (Path).
-	const bool side = tool == MissionTool::Place || tool == MissionTool::Path;
+	const bool side = tool == MissionTool::Place || tool == MissionTool::Path || tool == MissionTool::Shoot;
 	const float avail = ImGui::GetContentRegionAvail().x;
 	const float panel = side ? std::min(ImGui::GetFontSize() * 17.0f, avail * 0.45f) : 0.0f;
 	if (side) ImGui::BeginChild("##picture", ImVec2(avail - panel - ImGui::GetStyle().ItemSpacing.x, height));
@@ -296,6 +297,8 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 					                                                                        std::move(palette))));
 				}
 				if (picked != 0) set_tool(workspace, mission, MissionTool::Place, picked);
+			} else if (tool == MissionTool::Shoot) {
+				tools.shoot_list(workspace, mission);
 			} else {
 				tools.path_list(workspace, mission);
 			}
@@ -341,6 +344,11 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 	if (tool_button(row, "Area", tool == MissionTool::Area, edits,
 				edits ? "Drag a box on the ground to make an area trigger over it. Esc stops." : held))
 		pick(MissionTool::Area);
+	// Shoot (DI-23) edits nothing: a held mission takes it too.
+	if (tool_button(row, "Shoot", tool == MissionTool::Shoot, true,
+				"Pick an ammo, then click the terrain or an object to fire it there: the impact plays as the game "
+				"plays it (its effect, its sound and its scar, the object's damage). Esc stops."))
+		pick(MissionTool::Shoot);
 	// A step of the options (the snap, the turn) picked from its list; one the wire set off the list shown as
 	// its value.
 	const auto combo = [&](const char *label, float &value, const float *steps, const char *const *names, int count,
@@ -507,6 +515,55 @@ void MissionViewportView::Tools::numbers(Workspace &workspace, const MissionView
 }
 
 // The Path tool's list: the mission's waypoint paths by number with their stops, the picked one shown.
+// The Shoot tool's list (DI-23): the ammo it fires (ammo.def's records, as the graph finds them), Clear, and what
+// the shots did, newest first, each impact's record a jump to it.
+void MissionViewportView::Tools::shoot_list(Workspace &workspace, const MissionViewport &mission) {
+	const SessionView &view = workspace.view();
+	const std::string &picked = mission.options().ammo;
+	ImGui::TextDisabled("Ammo");
+	if (const AssetGraph *graph = view.findings.graph.get()) {
+		std::vector<const GraphSymbol *> ammo = graph->symbols_of_kind(ReferenceKind::Ammo);
+		const float height = std::min(ImGui::GetContentRegionAvail().y * 0.4f, ImGui::GetTextLineHeightWithSpacing() * 10.0f);
+		if (ImGui::BeginChild("##ammo", ImVec2(0.0f, height), ImGuiChildFlags_Borders)) {
+			for (const GraphSymbol *symbol : ammo) {
+				const std::string &name = symbol->display.empty() ? symbol->name : symbol->display;
+				if (ImGui::Selectable(name.c_str(), strutil::iequals(name, picked))) {
+					io::JsonValue options = io::JsonValue::make_object();
+					options.set("tool", io::json_string(mission_tool_token(MissionTool::Shoot)));
+					options.set("ammo", io::json_string(name));
+					workspace.request(request::set_viewport(mission.path(), viewport_change(ViewportKind::Mission, "options",
+					                                                                        std::move(options))));
+				}
+				ui_kit::tooltip(name + " (" + symbol->file + "): its impact rows are its board in the Preview.");
+			}
+		}
+		ImGui::EndChild();
+	}
+	const MissionShots &shots = mission.shots();
+	ui_kit::WrapRow row;
+	if (ui_kit::tool(row, "Clear shots", !shots.shots().empty(), "Forget the shots: nothing of them runs or is drawn."))
+		viewport_command(workspace, mission, "clear_shots");
+	if (!shots.why().empty()) ui_kit::clipped_text(shots.why(), shots.why());
+	const std::vector<MissionShotEvent> &events = shots.events();
+	const DocumentBase *base = nullptr;
+	for (const auto &open : view.documents.open)
+		if (open && open->path() == mission.path()) base = open.get();
+	const Document *document = base ? records_of(*base) : nullptr;
+	if (!events.empty()) {
+		ImGui::TextDisabled("What the shots did (%d)", int(events.size()));
+		const size_t shown = std::min<size_t>(events.size(), 48);
+		for (size_t i = 0; i < shown; ++i) {
+			const MissionShotEvent &event = events[events.size() - 1 - i];
+			ImGui::PushID(int(i));
+			const std::string line = std::to_string(event.tick) + "  " + event.words;
+			if (ImGui::Selectable(ui_kit::fit(line, ImGui::GetContentRegionAvail().x).c_str()) && event.row && document)
+				workspace.request(request::select_record(mission.path(), document->address_of(event.row)));
+			ui_kit::tooltip(line);
+			ImGui::PopID();
+		}
+	}
+}
+
 void MissionViewportView::Tools::path_list(Workspace &workspace, const MissionViewport &mission) {
 	const int path = mission.options().path;
 	const auto choose = [&](int number) { set_tool(workspace, mission, MissionTool::Path, -1, number); };
