@@ -178,6 +178,14 @@ Ref<ObjectData> GameWorld::static_source_object_data(uint64_t asset_id) const {
 
 // --- the injection seams ---------------------------------------------------
 
+int GameWorld::object_detail_fresh_profile() {
+	return opennova::renderer::kObjectLodDetailFreshProfile;
+}
+
+int GameWorld::clamp_object_detail(int p_level) {
+	return opennova::renderer::clamp_object_lod_detail(p_level);
+}
+
 void GameWorld::set_local_player_spawn_loadout(const Ref<PlayerSpawnLoadout> &p_loadout) {
 	player_visuals_->set_spawn_loadout(p_loadout);
 }
@@ -689,6 +697,14 @@ void GameWorld::_bind_methods() {
 			&GameWorld::set_local_player_spawn_loadout);
 	ClassDB::bind_method(D_METHOD("set_playable", "enabled"), &GameWorld::set_playable);
 	ClassDB::bind_method(D_METHOD("is_playable"), &GameWorld::is_playable);
+	ClassDB::bind_method(D_METHOD("set_object_polydetail", "level"),
+			&GameWorld::set_object_polydetail);
+	ClassDB::bind_method(D_METHOD("get_object_polydetail"), &GameWorld::get_object_polydetail);
+	ClassDB::bind_method(D_METHOD("get_object_detail"), &GameWorld::get_object_detail);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("object_detail_fresh_profile"),
+			&GameWorld::object_detail_fresh_profile);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("clamp_object_detail", "level"),
+			&GameWorld::clamp_object_detail);
 
 	ClassDB::bind_method(D_METHOD("load_world", "dir"), &GameWorld::load_world, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("load_mission", "bms_name", "dir"), &GameWorld::load_mission,

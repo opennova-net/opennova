@@ -37,6 +37,10 @@ void test_lod_scale() {
 	CHECK(r::death_piece_lod_scale(3) ==
 			static_cast<float>(3.0 * double(0.33f) + double(0.34f)));
 	CHECK(r::death_piece_lod_scale(0) == 0.34f);
+	CHECK(r::death_piece_lod_scale(1) ==
+			static_cast<float>(1.0 * double(0.33f) + double(0.34f)));
+	CHECK(r::death_piece_lod_scale(2) ==
+			static_cast<float>(2.0 * double(0.33f) + double(0.34f)));
 }
 
 // The level chain [orig: @ 0x57b86f..0x57b8ca].
@@ -207,6 +211,47 @@ void test_collect_gates() {
 	CHECK(draws.size() == 1 && draws[0].slot == 4);
 }
 
+// The level walk reads the frame's object detail, the session copy of
+// game.cfg's object_polydetail [orig: DeathPiece_RenderVisible @ 0x57b831
+// fild dword_24D2048]: one piece 22 u ahead projects to ~170 px, which the
+// detail-3 scale (1.33) lifts past the 200 px threshold to level 0, detail 2
+// (1.0) leaves at level 1, and detail 0 (0.34) drops under 60 px to level 2.
+void test_collect_object_detail() {
+	auto w_heap = std::make_unique<World>();
+	World &w = *w_heap;
+	ItemDeathTraits traits;
+	traits.piece_model = three_section_model();
+	w.tables.item_death_traits.set(900, traits);
+	DeathPiece &p = w.death_pieces.alloc();
+	p = section_piece(1);
+	p.pos = Vec3{22.0f, 0.0f, 2.0f};
+	OcclusionFrameCamera cam = camera_at(0.0f, 0.0f, 2.0f, 100.0f);
+	CHECK(cam.object_detail == r::kObjectLodDetailLevelMax);
+	OcclusionWorld occlusion;
+	std::vector<DeathPieceDraw> draws;
+	occlusion.collect_death_piece_draws(w, cam, draws);
+	CHECK(draws.size() == 1);
+	if (draws.size() != 1) return;
+	const int32_t projected = draws[0].projected_radius_q16;
+	CHECK(projected > (150 << 16) && projected < (200 << 16));
+	CHECK(draws[0].lod_level == 0);
+	const int expected[4] = {2, 1, 1, 0};
+	for (int detail = 0; detail <= r::kObjectLodDetailLevelMax; ++detail) {
+		cam.object_detail = detail;
+		occlusion.collect_death_piece_draws(w, cam, draws);
+		CHECK(draws.size() == 1 && draws[0].lod_level == expected[detail]);
+		CHECK(draws.size() == 1 && draws[0].lod_level ==
+				r::death_piece_lod_level(projected, r::death_piece_lod_scale(detail),
+						traits.piece_model.lod_threshold_q16));
+	}
+	// The view spec carries it into the frame camera.
+	OcclusionViewSpec view;
+	view.object_detail = 1;
+	OcclusionFrameCamera from_view;
+	occlusion_camera_from_view(view, from_view);
+	CHECK(from_view.object_detail == 1);
+}
+
 } // namespace
 
 int main() {
@@ -215,6 +260,7 @@ int main() {
 	test_render_section();
 	test_piece_draw_row();
 	test_collect_gates();
+	test_collect_object_detail();
 	if (failures == 0) std::printf("death_piece_draw_test: all checks passed\n");
 	return failures == 0 ? 0 : 1;
 }

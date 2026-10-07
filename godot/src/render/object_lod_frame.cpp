@@ -15,7 +15,7 @@ namespace godot {
 
 ObjectLodFrame ObjectLodFrame::make(const Transform3D &p_camera_transform,
 		float p_vertical_fov_degrees, float p_viewport_width,
-		float p_viewport_height) {
+		float p_viewport_height, int p_object_detail) {
 	if (p_viewport_width <= 0.0f || p_viewport_height <= 0.0f) {
 		return ObjectLodFrame();
 	}
@@ -23,20 +23,23 @@ ObjectLodFrame ObjectLodFrame::make(const Transform3D &p_camera_transform,
 			Math::deg_to_rad(CLAMP(p_vertical_fov_degrees, 1.0f, 179.0f)) * 0.5f);
 	return from_tangents(p_camera_transform,
 			tan_half_vertical * (p_viewport_width / p_viewport_height), tan_half_vertical,
-			p_viewport_width);
+			p_viewport_width, p_object_detail);
 }
 
-ObjectLodFrame ObjectLodFrame::from_camera(const Camera3D *p_camera, float p_viewport_width) {
+ObjectLodFrame ObjectLodFrame::from_camera(const Camera3D *p_camera, float p_viewport_width,
+		int p_object_detail) {
 	float tan_h = 0.0f;
 	float tan_v = 0.0f;
 	if (!camera_tangents(p_camera, tan_h, tan_v)) {
 		return ObjectLodFrame();
 	}
-	return from_tangents(p_camera->get_global_transform(), tan_h, tan_v, p_viewport_width);
+	return from_tangents(p_camera->get_global_transform(), tan_h, tan_v, p_viewport_width,
+			p_object_detail);
 }
 
 ObjectLodFrame ObjectLodFrame::from_tangents(const Transform3D &p_camera_transform,
-		float p_tan_half_horizontal, float p_tan_half_vertical, float p_viewport_width) {
+		float p_tan_half_horizontal, float p_tan_half_vertical, float p_viewport_width,
+		int p_object_detail) {
 	ObjectLodFrame frame;
 	if (p_viewport_width <= 0.0f || !(p_tan_half_horizontal > 0.0f) ||
 			!(p_tan_half_vertical > 0.0f)) {
@@ -54,7 +57,7 @@ ObjectLodFrame ObjectLodFrame::from_tangents(const Transform3D &p_camera_transfo
 	frame.focal_pixels = opennova::renderer::object_lod_focal_pixels(
 			p_viewport_width, static_cast<double>(frame.tan_half_horizontal));
 	frame.projection_scale = opennova::renderer::object_lod_frame_scale(
-			opennova::renderer::kObjectLodDetailLevelMax, p_viewport_width);
+			p_object_detail, p_viewport_width);
 	frame.origin = p_camera_transform.origin;
 	frame.forward = -p_camera_transform.basis.get_column(2).normalized();
 	frame.right = p_camera_transform.basis.get_column(0).normalized();

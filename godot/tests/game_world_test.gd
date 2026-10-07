@@ -51,6 +51,24 @@ func test_mission_load_reports_only_real_stage_checkpoints() -> void:
 		"the real load pipeline reports exact stage starts through world ready")
 
 
+# The object detail (game.cfg's object_polydetail; engine renderer/object_lod.h):
+# the shell's options word reaches the frames only through the copy each
+# mission start takes, so a change made mid-mission waits for the next one.
+func test_object_detail_reaches_the_frames_at_the_next_mission_start() -> void:
+	var world := WorldFixture.make_world(self)
+	assert_eq(world.get_object_detail(), GameWorld.object_detail_fresh_profile())
+	world.set_object_polydetail(1)
+	assert_eq(world.get_object_polydetail(), 1)
+	assert_eq(world.get_object_detail(), GameWorld.object_detail_fresh_profile(),
+			"the options word waits for a mission start")
+	assert_eq(WorldFixture.load_mission(
+			world, _minimal_assets_dir(), WorldFixture.MINIMAL_MISSION), OK)
+	assert_eq(world.get_object_detail(), 1, "the mission start copies the word")
+	world.set_object_polydetail(3)
+	assert_eq(world.get_object_detail(), 1,
+			"a change made mid-mission waits for the next mission start")
+
+
 func _append_to_file(path: String, text: String) -> void:
 	var file := FileAccess.open(path, FileAccess.READ_WRITE)
 	assert_not_null(file, "the staged root carries %s to append to" % path.get_file())

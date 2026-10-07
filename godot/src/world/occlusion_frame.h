@@ -135,9 +135,10 @@ public:
 	// the 70 deg / 0.05 / 16:9 defaults. `viewport_width` is the surface width
 	// in pixels, the projector's focal source. (The marched iris-exposure
 	// weather feed that renders alongside stays on GameWorld's frozen-pose
-	// iris stamp.)
+	// iris stamp.) `object_detail` is the session's object detail the frame's
+	// death pieces draw at (GameWorld's session copy).
 	void apply_frame(Camera3D *p_camera, float p_viewport_width,
-			const Transform3D &p_camera_xform, bool p_forces_indoors);
+			const Transform3D &p_camera_xform, bool p_forces_indoors, int p_object_detail);
 	// The weapon Inset pass's own collect, after this frame's main one
 	// (engine: world/occlusion.h OcclusionView carries the witness): the sim
 	// runs it over `camera` on the Inset view's frame words, and its verdicts
@@ -146,7 +147,8 @@ public:
 	// set_static_instance_inset_occlusion_hidden); an entity the Inset collect
 	// gives no verdict follows the main view's. `viewport_width` is the Inset
 	// target's width, the projector's focal source for that view.
-	void apply_inset_frame(Camera3D *p_camera, float p_viewport_width, bool p_forces_indoors);
+	void apply_inset_frame(Camera3D *p_camera, float p_viewport_width, bool p_forces_indoors,
+			int p_object_detail);
 	// The Inset stopped rendering (or the world unloads): every Inset verdict
 	// releases onto the main view's and the sim forgets the Inset baselines.
 	void release_inset();
