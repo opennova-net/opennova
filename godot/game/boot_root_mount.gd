@@ -8,7 +8,7 @@ const WEB_BUNDLED_ASSETS_DIR := "/opennova/assets"
 
 static func mount(dir: String, allow_loose_root: bool) -> ResourceRoot:
 	var root := ResourceRoot.new()
-	var expansion := LaunchFlags.expansion(ResourceDirSettings.get_expansion())
+	var expansion := LaunchFlags.expansion()
 	var game := LaunchFlags.game(ResourceDirSettings.get_game())
 	var err: int = root.mount_runtime(
 			dir, expansion, LaunchFlags.loose_override_enabled(), game)
@@ -71,13 +71,14 @@ static func project_game_dir(project_dir: String) -> String:
 ## build's staged files). It is OpenNova's own data, which the Build's gate
 ## vouched for, so the retail boot manifest is not reported against it. The
 ## expansion it mounts over the base is chosen as for any game folder (mount):
-## `/exp` (or `/mod`) on the command line, else the Mods list's pick, so an
-## expansion shipped beside the base game in `expansion/<name>/` plays as it
-## does in the original game run in that folder; one the folder lacks falls
-## back to the base game, as the engine's mount does (ADR 0048 d8).
+## `/exp` (or `/mod`) on the command line, so an expansion shipped beside the
+## base game in `expansion/<name>/` plays as it does in the original game run in
+## that folder; one the folder lacks falls back to the base game, as the
+## engine's mount does (ADR 0048 d8). The Mods list's pick lasts its run
+## (D-MNU-31).
 static func mount_bundled(dir: String) -> ResourceRoot:
 	var root := ResourceRoot.new()
-	var expansion := LaunchFlags.expansion(ResourceDirSettings.get_expansion())
+	var expansion := LaunchFlags.expansion()
 	if root.mount_runtime(dir, expansion, false, BUNDLED_GAME) == OK:
 		return root
 	if root.set_root_dir(dir) != OK:

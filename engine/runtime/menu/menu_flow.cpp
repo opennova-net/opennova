@@ -83,16 +83,29 @@ void MenuFlow::activate_mission(int id, int row) {
 }
 
 // Choosing only raises the request; remounting inside the callback would
-// replace the resources while the menu pump is still using them. A loose
-// authoring mount cannot layer expansion PFFs (ADR 0025).
-// [orig: expansion-select handler request flag dword_252DD90 @0x252DD90,
-// set @0x55ad4f / clear @0x55ad5b; Menu_UpdateFrame @0x5528a0 calls
-// Game_ReloadExpansionAndMods @0x552710 on the following update]
+// replace the resources while the menu pump is still using them. The pick is
+// compared without case with the name running: the same takes nothing and
+// lowers the flag; another, the base game's "" included, is copied into the
+// name and raises it. Nothing keeps the pick past the run: no configuration
+// key, no restart (D-MNU-31). A loose authoring mount cannot layer expansion
+// PFFs (ADR 0025). The reload this request leads to tears the menu down and
+// boots it anew, where the join's switch reloads under the menu it keeps.
+// [orig: Options_HandleAcceptOrBack @0x55a710 — _stricmp(pick, g_ExpansionName)
+// @0x55ad29; the profile saved @0x55ad35, the pick copied @0x55ad43, the flag
+// dword_252DD90 @0x252DD90 raised @0x55ad4f / lowered @0x55ad5b; Menu_UpdateFrame
+// @0x5528a0 calls Game_ReloadExpansionAndMods @0x552710 on the following update;
+// the join's Expansion_ReloadAllAssets @0x568370 keeps g_GameMenu, restyling it
+// @0x5683c5..0x5683eb]
 MenuFlow::ExpansionPick MenuFlow::request_expansion(const std::string &name,
 		const std::string &current, bool packed_root) {
-	if (name.empty() || name == current) return ExpansionPick::Ignored;
+	if (strutil::iequals(name, current)) {
+		expansion_request_.clear();
+		expansion_pending_ = false;
+		return ExpansionPick::Ignored;
+	}
 	if (!packed_root) return ExpansionPick::NeedsPackedRoot;
 	expansion_request_ = name;
+	expansion_pending_ = true;
 	return ExpansionPick::Queued;
 }
 
@@ -102,6 +115,7 @@ MenuFlow::ExpansionPick MenuFlow::request_expansion(const std::string &name,
 // repeating it. [orig: @0x552906..0x55291d; UI_ApplyVideoModeChange @0x55a590;
 // sub_555710 seeds the video-mode state to zero @0x555734]
 std::string MenuFlow::take_expansion_reload() {
+	expansion_pending_ = false;
 	return std::exchange(expansion_request_, {});
 }
 

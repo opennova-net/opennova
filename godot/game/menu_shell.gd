@@ -19,8 +19,6 @@ extends Control
 # driver's activation signal. The control-name sets are exported so a
 # different game's menu set can be pointed at the same shell.
 
-const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
-
 # The director var the current screen's MUSICVAR lands in is
 # MusicDirector.MENU_MUSIC_VAR_SLOT — the witness lives at the engine home,
 # engine/runtime/audio audio/music_policy.h kMenuMusicVarSlot (the menumus MUS
@@ -29,10 +27,6 @@ const ResourceDirSettings := preload("res://game/resource_index/resource_dir_set
 # test tests/mus/mus_vm_test.cpp). setup() pushes it synchronously (open_menu
 # rebuilds in place) before the director's first _process tick, so the VM
 # starts in the right section.
-
-# The list item and the persisted key stay the raw folder name (e.g. "jox01");
-# the description text is cached per name once read.
-var _expansion_descriptions: Dictionary = {}  # folder name -> MOD_DESC text
 
 # Asset names resolved from the resource dir. JO defaults; override per game. A
 # blank discovery name falls back to the first file of that kind in the dir.
@@ -99,10 +93,11 @@ var _expansion_descriptions: Dictionary = {}  # folder name -> MOD_DESC text
 @export var briefing_pane_names := MenuDriver.command_names("briefings")
 # The SP confirm controls receive the engine selection gate.
 @export var sp_accept_control_names := MenuDriver.command_names("sp_accepts")
-# List widgets the shell fills with the expansions discoverable under the resource
-# dir (Options -> Mods). Activating one mounts it over the base game.
+# The Mods list (Options -> Mods): the base game's row, then the expansions under
+# the game folder's expansion/; ACCEPT switches the game to the pick for the run
+# (engine menu::ModList, D-MNU-31).
 @export var mod_list_names := MenuDriver.command_names("mod_lists")
-# Readonly text widgets that show the selected expansion's description/name.
+# Readonly text widgets that show the picked expansion's description.
 @export var mod_desc_names := MenuDriver.command_names("mod_descriptions")
 
 # Controls that open NovaWorld (online multiplayer). The shipped JO main menu
@@ -119,6 +114,11 @@ signal resume_requested()
 # The player chose NovaWorld (online multiplayer) from the menu. main_game
 # opens the NovaWorld panel; the shell stays out of the networking itself.
 signal novaworld_requested()
+# The Mods list's pick switched the game (the root remounted in place and the
+# menu opened anew): main_game reads the player's profile again, as the
+# original's menu boot does after the switch (docs/mnu/menu-re.md "The Mods
+# list").
+signal game_reloaded()
 
 
 var _driver: MenuDriver
@@ -142,7 +142,6 @@ var _menu_cache: Dictionary = {}            # filename -> MnuDocument
 # (MenuDriver.push_screen_history / pop_screen_history, engine
 # menu/screen_history.h): one back stack for every file, kept while a mission runs.
 var _current_file := ""
-var _selected_expansion := ""
 var _in_game := false
 # True from setup() until a mission's start leaves the menu (leave_menu_mode):
 # the next setup() on the same root is then the menu's re-entry.
@@ -338,12 +337,10 @@ func _assemble_assets() -> void:
 	set_process(true)
 
 
-# Everything the shell reads from its resource root: the cached documents and
-# expansion descriptions, the text tables, the stylesheet and the menu SFX
-# profile.
+# Everything the shell reads from its resource root: the cached documents, the
+# text tables, the stylesheet and the menu SFX profile.
 func _load_root_assets() -> void:
 	_menu_cache.clear()
-	_expansion_descriptions.clear()
 	_text = _load_text(menu_text_file)
 	# Register the engine text tables into the shared Strings registry, the way the
 	# original loads its TextResource globals: menutxt (UI/voice labels), gametext =
@@ -507,6 +504,7 @@ func _wire_named_controls() -> void:
 	_driver.clear_mission_rows()
 	_driver.set_mission_controls(sp_mission_list_names, briefing_pane_names,
 			sp_accept_control_names)
+	_driver.set_mod_descriptions(mod_desc_names)
 
 	# A companion (e.g. the multiplayer menu driver, or the PLAYER_INFO character screen)
 	# can own a whole menu: when one claims this one, hand it the named-control wiring and
@@ -579,49 +577,35 @@ func _on_sound_requested(file: String, trigger: String) -> void:
 
 
 func _on_list_activated(id: int, row: int) -> void:
-	# Double-click activation: launch on the mission list, mount on the mod
-	# list (the ItemList item_activated flows).
+	# Double-click activation launches on the mission list. The Mods list's
+	# double click does nothing: the game takes its select alone (engine
+	# menu::ModList::select).
 	var widget_name := _driver.widget_name_of(id)
 	if _is_mission_list(widget_name):
 		_driver.activate_mission(id, row)
 		_on_start_control()
-	elif _is_mod_list(widget_name):
-		if row >= 0 and row < _driver.item_count(id):
-			_apply_expansion(_driver.item_text(id, row))
 
 
 # --- Expansion / mod selection (Options -> Mods) ------------------------------
 
-# Fill a mod list with the expansions discoverable under the resource root, mirror
-# the persisted current selection, and wire activation. list_expansions scans
-# <root>/expansion/<name>/<name>.pff and is independent of the mounted root.
+# Fill a mod list: the base game's row, then a row per expansion folder under
+# the game folder's expansion/ by its own name, the game running highlighted and
+# described (engine menu::ModList over vfs_expansion_records).
 func _seed_mod_list(id: int) -> void:
-	if _root == null:
-		return
-	var expansions := _root.list_expansions(_root.get_root_dir())
-	_driver.set_widget_items(id, expansions)
-	var current := _current_expansion()
-	var sel := expansions.find(current)
-	if sel >= 0:
-		_driver.select_row(id, sel, false)
-	_update_mod_desc(current if sel >= 0 else "")
+	_driver.seed_mod_list(id)
 
 
-# OK/ACCEPT on a Mods screen: mount + persist the highlighted expansion rather than
-# launching a mission. Wired (instead of the launch handler) by _wire_named_controls
-# when the screen has a mod list but no mission list. Reads the driver's live
-# selection, so it also covers the entry _seed_mod_list pre-selected. A no-op
-# when nothing is highlighted or it is already the current mod.
+# OK/ACCEPT on a Mods screen: switch the game to the highlighted row's game
+# rather than launching a mission. Wired (instead of the launch handler) by
+# _wire_named_controls when the screen has a mod list but no mission list.
 func _on_apply_selected_mod() -> void:
 	var id := _find_mod_list()
-	if id < 0:
-		return
-	var idx := _driver.selected_row(id)
-	if idx >= 0 and idx < _driver.item_count(id):
-		_apply_expansion(_driver.item_text(id, idx))
+	if id >= 0:
+		_apply_expansion(_driver.mod_list_pick(id))
 
 
-# The engine queues the pick; the shell applies its resource request at the frame tail.
+# The engine queues the pick ("" the base game); the shell applies its resource
+# request at the frame tail. The pick of the game running takes nothing.
 func _apply_expansion(name: String) -> void:
 	if _root == null:
 		return
@@ -634,76 +618,47 @@ func has_pending_expansion_reload() -> bool:
 
 
 func _consume_expansion_reload_request() -> void:
-	if _driver == null:
+	if _driver == null or not _driver.has_pending_expansion_reload():
 		return
-	var pending := _driver.take_expansion_reload()
-	if not pending.is_empty():
-		_mount_expansion(pending)
+	_mount_expansion(_driver.take_expansion_reload())
 
 
-# Mount the chosen expansion onto the live root, refresh the content that depends on
-# it, and persist the choice. The persisted key is read at the next launch/world load
-# by main_game.gd, so the selection affects gameplay too. A failed mount clears the
-# root, so the previous expansion is re-mounted to recover.
+# Switch the live root to the picked game ("" the base game) and boot the menu
+# anew over it: the menus and their text read again from the new mount, the
+# screen history dropped, the main menu's first screen shown, the music and the
+# backdrop movies the new game's. The pick lasts the run: nothing persists it,
+# the next launch boots `/exp` or the base game (D-MNU-31). A failed mount
+# clears the root, so the previous game is mounted again to recover.
+# [orig: Game_ReloadExpansionAndMods @ 0x552710 — the archives closed and
+#  reopened @ 0x552770..0x552798; Menu_TeardownShellAndCloseBinkVideos
+#  @ 0x54e430 destroys the menu scene (dword_2551104 @ 0x54e4a3) and
+#  Menu_InitShellResources @ 0x552500 makes it anew: main.mnu @ 0x552656, its
+#  start screen @ 0x552668]
 func _mount_expansion(name: String) -> void:
 	if _root == null:
 		return
 	var dir := _root.get_root_dir()
 	var prev := _current_expansion()
-	# A full context reload clears the AudioVM globals. Preserve the active
-	# screen selector so the expansion's newly selected M<n> script enters the
-	# same menu section [orig: Expansion_ReloadAllAssets @ 0x568370 followed by
-	# UI_DispatchScreenEvent @ 0x54e6a0 -> AudioVM_SetVariable(slot, MUSICVAR);
-	# the slot witness lives at the engine home, audio/music_policy.h
-	# kMenuMusicVarSlot].
-	var active_music_var := MusicService.get_var(MusicDirector.MENU_MUSIC_VAR_SLOT)
+	# The reload closes every archive before it mounts the pick, so the pick's
+	# text-override table loads as at boot (docs/vfs/vfs-pff-mount-re.md,
+	# "Expansions" item 1): the root mounts from cleared, not as the join's
+	# switch does over its open archives.
+	_root.clear()
 	if _root.mount_runtime(dir, name, LaunchFlags.loose_override_enabled()) != OK:
 		push_warning("MenuShell: could not mount expansion '%s': %s" % [name, _root.get_last_error()])
 		_root.mount_runtime(dir, prev, LaunchFlags.loose_override_enabled())  # rollback
 		return
-	ResourceDirSettings.set_expansion(name)
-	_selected_expansion = name
+	_load_root_assets()
 	_enter_menu_music()
-	MusicService.set_var(MusicDirector.MENU_MUSIC_VAR_SLOT, active_music_var)
-	_refresh_dependent_content()
-	_update_mod_desc(name)
-	# The expansion's movie overrides take effect with the remount [orig:
-	# UI_CreateMenuBinkVideos @ 0x54b590 expansion preference].
 	_refresh_underlay()
+	_driver.clear_screen_history()
+	open_menu(main_menu_file, "")
+	game_reloaded.emit()
 
 
-# After a mount change, re-fill anything seeded from the resource dir so the
-# expansion's maps/missions appear; the prior mission pick is now stale.
-func _refresh_dependent_content() -> void:
-	_driver.clear_selected_mission()
-	for list_name in mission_list_names:
-		var id := _driver.widget_id(list_name)
-		if id >= 0 and _driver.widget_kind_of(id) in _LIST_KINDS:
-			_seed_mission_list(id)
-
-
-func _update_mod_desc(name: String) -> void:
-	var desc := _find_mod_desc()
-	if desc >= 0:
-		_driver.set_widget_text(desc, _describe(name))
-
-
-# The expansion's own name and description, read by the engine the way the
-# retail scan reads them (ResourceRoot.expansion_name / expansion_description:
-# <n>.bin's EXP_NAME / EXP_DESC with their fallbacks, resolved independently
-# of the mounted stack, so a not-yet-mounted expansion previews the same way).
-func _describe(name: String) -> String:
-	if name.is_empty() or _root == null:
-		return ""
-	if not _expansion_descriptions.has(name):
-		var dir := _root.get_root_dir()
-		_expansion_descriptions[name] = "%s\n\n%s" % [
-				_root.expansion_name(dir, name), _root.expansion_description(dir, name)]
-	return _expansion_descriptions[name]
-
-
+# The game running: the expansion the live root mounted, "" the base game.
 func _current_expansion() -> String:
-	return ResourceDirSettings.get_expansion()
+	return String(_root.get_expansion()) if _root != null else ""
 
 
 # --- Driver signal handlers ---------------------------------------------------
@@ -764,8 +719,7 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int, val
 	if kind == "list" and _is_mission_list(widget_name):
 		_driver.select_mission(_driver.widget_id(widget_name), index, value)
 	elif kind == "list" and _is_mod_list(widget_name):
-		# Single click previews the description; activation (double-click) mounts it.
-		_update_mod_desc(value)
+		_driver.select_mod(_driver.widget_id(widget_name), index)
 
 
 func _on_url_requested(url: String, external: bool) -> void:
@@ -927,15 +881,6 @@ func _find_mod_list() -> int:
 	return -1
 
 
-# MOD_DESC is authored MULTI_EDIT (readonly); the compiled path wraps its text.
-func _find_mod_desc() -> int:
-	for n in mod_desc_names:
-		var id := _driver.widget_id(n)
-		if id >= 0:
-			return id
-	return -1
-
-
 # Accessors for owners / tests.
 func get_driver() -> MenuDriver:
 	return _driver
@@ -959,10 +904,6 @@ func get_current_menu_file() -> String:
 
 func get_selected_mission() -> String:
 	return _driver.get_selected_mission() if _driver != null else ""
-
-
-func get_selected_expansion() -> String:
-	return _selected_expansion
 
 
 ## The screen history's rows, a mission's mark included.
@@ -998,15 +939,25 @@ func menu_snapshot(include_widgets: bool = true) -> Dictionary:
 		var rows: Array[Dictionary] = []
 		for i in _frame.widget_count():
 			var rect := _frame.widget_rect(i)
-			rows.append({
+			var widget_name := _frame.widget_name(i)
+			var item_count := _frame.item_count(i)
+			var row := {
 				"index": i,
-				"name": _frame.widget_name(i),
+				"name": widget_name,
 				"kind": _frame.widget_kind(i),
 				"disabled": _frame.is_widget_disabled(i),
 				"rect": [rect.position.x, rect.position.y, rect.size.x, rect.size.y],
 				"text": _frame.get_widget_text(i),
-				"items": _frame.item_count(i),
-			})
+				"items": item_count,
+			}
+			# A list's rows and its selected row (-1 none), by its NAME.
+			var id := _driver.widget_id(widget_name)
+			if item_count > 0 and id >= 0:
+				var texts := PackedStringArray()
+				for item in _driver.item_count(id):
+					texts.append(_driver.item_text(id, item))
+				row.merge({"rows": texts, "selected": _driver.selected_row(id)})
+			rows.append(row)
 		snapshot["widgets"] = rows
 	return snapshot
 

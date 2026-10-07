@@ -1312,16 +1312,21 @@ void test_shell_flow() {
 	flow.seed_missions(menu, menu.widget_id("MISSION_LIST"), choices);
 	CHECK(menu.item_count(menu.widget_id("MISSION_LIST")) == 2);
 
+	// ACCEPT's compare with the game running (D-MNU-31): the same name, without case, takes nothing
+	// and lowers a flag raised before; the base game's "" is a pick like another.
 	using Pick = MenuFlow::ExpansionPick;
-	CHECK(flow.request_expansion("", "old", true) == Pick::Ignored);
-	CHECK(flow.request_expansion("old", "old", true) == Pick::Ignored);
+	CHECK(flow.request_expansion("OLD", "old", true) == Pick::Ignored);
 	CHECK(flow.request_expansion("new", "old", false) == Pick::NeedsPackedRoot);
 	CHECK(!flow.has_pending_expansion());
 	CHECK(flow.request_expansion("new", "old", true) == Pick::Queued);
 	CHECK(flow.has_pending_expansion());
-	CHECK(flow.request_expansion("old", "old", true) == Pick::Ignored);
 	CHECK(flow.take_expansion_reload() == "new");
 	CHECK(!flow.has_pending_expansion() && flow.take_expansion_reload().empty());
+	CHECK(flow.request_expansion("", "old", true) == Pick::Queued);
+	CHECK(flow.has_pending_expansion() && flow.take_expansion_reload().empty());
+	flow.request_expansion("new", "old", true);
+	CHECK(flow.request_expansion("old", "old", true) == Pick::Ignored);
+	CHECK(!flow.has_pending_expansion());
 	flow.request_expansion("first", "", true);
 	flow.request_expansion("last", "", true);
 	CHECK(flow.take_expansion_reload() == "last");
