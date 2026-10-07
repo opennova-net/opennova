@@ -2,9 +2,15 @@
 
 #include <optional>
 
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/documents/mission_document.h>
 #include <editor/documents/sound_bank_document.h>
+#include <editor/import/wave_source.h>
+#include <editor/preview/dialog_preview.h>
+#include <editor/assets/project_asset_source.h>
+#include <runtime/mission/mission_sidecars.h>
 #include <editor/documents/sound_profile_document.h>
 #include <editor/model/finding_code_row.h>
 #include <editor/preview/model_viewport.h>
@@ -140,6 +146,72 @@ void play_action_leg(SessionCore &core, const EditorRequest &request) {
 	start(core, std::move(voices), fired.front().set, fired.front().bank, fired.front().words);
 }
 
+// values {dialog, line?}: a dialog of the dialog bank `path` names, or of the bank the mission `path` loads, its
+// lines one after another as the game plays them (DI-32, preview/dialog_preview), every line a voice starting where
+// the one before it has ended, after its wait.
+void play_dialog(SessionCore &core, const EditorRequest &request) {
+	const SessionView &view = core.view();
+	const std::shared_ptr<const ProjectAssetSource> files = view.findings.assets;
+	if (!files) return refuse(core, "No project is open.");
+	int line = -1;
+	if (has_value(request, "line")) {
+		const std::optional<int> number = strutil::parse_int(value_of(request, "line"));
+		if (!number || *number < 0) return refuse(core, "line is a dialog's line by its index, a whole number from 0.");
+		line = *number;
+	}
+	const AssetEntry *entry = request.path.empty() ? nullptr : view.project.scan->named(request.path);
+	if (!entry) return refuse(core, "A dialog plays from the dialog bank or the mission path names: " +
+	                                        (request.path.empty() ? std::string("none is named.") : "the project has no " + request.path + "."));
+	// The bank and the mission text the subtitles read: a dialog bank's own name's, or the mission's.
+	std::string bank, text;
+	if (entry->kind == AssetKind::DialogBank) {
+		bank = entry->logical_name;
+		text = mission::mission_base_name(bank) + ".bin";
+	} else if (entry->kind == AssetKind::Mission) {
+		std::unique_ptr<MissionDocument> loaded;
+		const auto *mission = dynamic_cast<const MissionDocument *>(open_at(view, entry->relative_path));
+		if (!mission && view.project.document) {
+			loaded = std::make_unique<MissionDocument>();
+			Diagnostic error;
+			if (loaded->load(join_path(view.project.root, entry->relative_path), entry->relative_path, entry->kind,
+			                 view.project.document->target_game, error))
+				mission = loaded.get();
+		}
+		if (!mission) return refuse(core, entry->logical_name + " could not be read.", entry->relative_path);
+		bank = mission_dialog_bank(*mission);
+		text = mission::mission_base_name(entry->logical_name) + ".bin";
+	} else {
+		return refuse(core, entry->logical_name + " is no dialog bank or mission: a dialog plays from one.", entry->relative_path);
+	}
+	DialogSources sources;
+	std::string error;
+	if (!read_dialog_sources(*files, bank, text, sources, error)) return refuse(core, error, entry->relative_path);
+	// A wave's length as the game decodes it, its file the project's.
+	const auto seconds_of = [&](const std::string &file) {
+		std::vector<uint8_t> bytes;
+		return files->read(file, bytes) ? wave_seconds(bytes) : 0.0;
+	};
+	const DialogPlay play = plan_dialog_play(sources, value_of(request, "dialog"), line, seconds_of);
+	if (!play.found) return refuse(core, play.words, entry->relative_path);
+	std::vector<WorkspaceView::Voice> voices;
+	std::string missing;
+	for (const DialogPlayLine &played : play.lines) {
+		if (played.file.empty()) continue;
+		const AssetEntry *wave = view.project.scan->find(io::utf8_file_name(played.file));
+		if (!wave || wave->kind != AssetKind::Wave || wave->size_bytes > kWaveCardBytes) {
+			missing += (missing.empty() ? "" : ", ") + io::utf8_file_name(played.file);
+			continue;
+		}
+		voices.push_back({wave->relative_path, 0x10000u, played.volume, int32_t(played.start_s * 1000.0 + 0.5)});
+	}
+	if (voices.empty())
+		return refuse(core, play.words + (missing.empty() ? std::string(" No line plays a wave.")
+		                                                  : " The project has no wave it plays (" + missing + ")."),
+		              entry->relative_path);
+	start(core, std::move(voices), play.dialog, play.bank,
+	      missing.empty() ? play.words : play.words + " (the project lacks " + missing + ")");
+}
+
 // A slot by its keyword, without case, or its number; -1 for none.
 int slot_named(const std::string &text) {
 	if (const int slot = sound_profile_slot_of(text); slot >= 0) return slot;
@@ -197,6 +269,7 @@ void serve_sound_play(SessionCore &core, const EditorRequest &request) {
 	if (!view.project.open || !view.project.scan) return refuse(core, "No project is open.");
 	if (has_value(request, "frame")) return play_clip_event(core, request);
 	if (has_value(request, "leg")) return play_action_leg(core, request);
+	if (has_value(request, "dialog")) return play_dialog(core, request);
 	const std::string &set = value_of(request, "set");
 	const bool slot_play = has_value(request, "slot") || has_value(request, "profile") || has_value(request, "surface");
 	if (!set.empty()) {
