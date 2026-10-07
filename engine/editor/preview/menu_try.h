@@ -18,6 +18,7 @@
 #include <runtime/menu/menu_frame_assets.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/menu_state_frame.h>
+#include <runtime/menu/mod_list.h>
 #include <runtime/menu/options_screen.h>
 
 namespace opennova::editor {
@@ -28,7 +29,8 @@ namespace opennova::editor {
 // their combos, the edit fields, the focus and the keys, the windows' sounds) over the frame's own pump
 // (menu::MenuStateFrame, headless at design scale), and what the game's code does with the controls it
 // binds by name (menu::MenuCommands; the shell's per-open wiring: the mission lists filled with the
-// project's missions, the Options policy and its controls table at the game's defaults).
+// project's missions, the Mods lists with the base game and its expansions (menu::ModList), the Options
+// policy and its controls table at the game's defaults).
 //
 // A sandbox: every value it changes (a check, a pick, a slider, a typed text, a key binding) lives in
 // the runtime's own store and its sandbox bindings until a Reset, never in the user's configuration or
@@ -46,6 +48,10 @@ struct MenuTrySource {
 	std::function<std::shared_ptr<const mnu::Document>(const std::string &file)> menu;
 	// The rows of the game's mission catalog (the lists it fills with its missions).
 	std::function<std::vector<menu::MissionChoice>()> missions;
+	// The records the game's Mods list lists after the base game's row (vfs_expansion_records of the folder
+	// the game runs in), and the expansion running ("" the base game).
+	std::function<std::vector<ExpansionRecord>()> expansions;
+	std::string expansion;
 };
 
 // What the game would have done, which Try says instead: a command the code binds by name (its
@@ -172,6 +178,8 @@ private:
 	TextureHeaderProbe decoder_;
 	menu::MenuCommands commands_;
 	menu::MenuFlow flow_;
+	menu::ModList mods_;
+	std::string expansion_; // the game running, as the last open's source said ("" the base game)
 	menu::OptionsScreen options_;
 	controls::BindingSet bindings_; // the sandbox's: the game's defaults
 	std::map<std::string, Held> menus_; // by file name, lower case
