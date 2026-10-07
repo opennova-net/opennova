@@ -1078,6 +1078,109 @@ func test_a_clip_s_footsteps_reach_the_shell() -> void:
 	assert_true(_change({"clock": {"playing": false}}))
 
 
+## DI-24: a clip's fire events fire the item's ammo. The soldier's attack clip carries a fire bit on frame 1 (the walk's left foot made a shot); as
+## the clock runs, its NPC body fires the item's ammo_closeattack from its launchups_closeattack point as the clip
+## poses it, through the game's NPC fire entry: the ammo's ai_launch heard (the Shell starts its wave), the round's
+## tracer drawn as the game's ribbons, its stop on the target scarring it; the view single-sampled while it fires.
+func test_a_clip_s_fire_events_fire_the_item_s_ammo() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor viewport clip fire %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	var root := dir.path_join("project")
+	assert_true(_seam.new_project(root, "Clip Fire Game"))
+	var source := dir.path_join("source")
+	var soldier := FileAccess.get_file_as_string(ProjectSettings.globalize_path(SKINNED))
+	soldier += "userpoint \"MFlash01\" 0 1 0.5 0 1 0 1 83\n"
+	_write(source.path_join("skinned.o3d"), soldier.to_utf8_buffer())
+	var clips := SKIN_CLIPS.replace("SKIN.adm", "SOLD.adm").replace("anim_walk_forward", "anim_attack") \
+			.replace("event 0 0 0 0x1 0.9 1.7", "event 0 0 0 0x4 0.9 1.7")
+	_write(source.path_join("sold.o3a"), clips.to_utf8_buffer())
+	_app.request_json(JSON.stringify({"kind": "import_files", "imports": [
+		{"path": source.path_join("skinned.o3d")}, {"path": source.path_join("sold.o3a")}]}))
+	assert_true(_seam.settle(), "the import steps across pumps")
+	_write(root.path_join("defs/items.def"), TestFs.crlf("begin \"Rifleman\"\nid 100300\ntype person\n"
+			+ "graphic skinned\nanim_def sold\nai_function org1\nmove_function org1\n"
+			+ "ammo_closeattack AMMO_TEST\nlaunchups_closeattack MFlash01\nend\n").to_utf8_buffer())
+	_write(root.path_join("ammo.def"), TestFs.crlf("ammo AT_NULL\nend\nammo AMMO_TEST\n\tvelocity 600\n\tmax_age 3\n"
+			+ "\tweight_in_grains 62\n\ttracerrate 1\n\ttracer_type 1 2\n\tscar_type 1\n\teffects_table\n"
+			+ "\t\tobj Puff GS_AI 15\n\t\tdirt Puff GS_AI 15\n\tend\n\tai_launch GS_AI\n\tai_launcheffect Puff\nend\n")
+			.to_utf8_buffer())
+	_write(root.path_join("particles/puff.ptl"), ("[effectdef]\n{\n\tid = Puff;\n\tpdefs = PuffDot;\n}\n\n"
+			+ "[particledef]\n{\n\tid = PuffDot;\n\temit_dur = 30;\n\temit_rate = 40;\n\temit_burst = 1;\n"
+			+ "\tage = 1.0;\n\tscale = 1.0;\n\tspeed = 1.5;\n\tspread = 40;\n\tgraphic1 = particle_dot.tga, blend;\n"
+			+ "\tg1_alpha = 1;\n\tg1_scale = 1;\n}\n\n").to_utf8_buffer())
+	_write(root.path_join("particles/particle_dot.tga"),
+			FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/cbin/particle_dot.tga")))
+	_write(root.path_join("sounds/gs_ai.wav"), _wave_bytes(0.2))
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	# The bank made in the editor: the soldier's shot, one layer playing its wave.
+	assert_true(_seam.done({"kind": "create_file", "path": "game.lwf"}))
+	assert_true(_seam.done({"kind": "edit_record", "path": "game.lwf", "open_first": true, "edits": [
+		{"op": "add", "kind": "wave", "as": "w"}, {"op": "set", "id": "w", "field": "name", "value": "GS_AI"},
+		{"op": "set", "id": "w", "field": "file", "value": "gs_ai.wav"},
+		{"op": "add", "kind": "set", "as": "s"}, {"op": "set", "id": "s", "field": "name", "value": "GS_AI"},
+		{"op": "add", "kind": "layer", "parent": "s", "as": "l"},
+		{"op": "add", "kind": "member", "parent": "l", "field": "wave", "value": "GS_AI"}]}))
+	assert_true(_seam.done({"kind": "save_all"}))
+	assert_true(_seam.open_document("anims/SOLD.adm"))
+	var attack: int = _seam.find_record("anim_attack")
+	assert_gt(attack, 0)
+	assert_true(_seam.select_record(attack))
+	assert_true(_change({"clock": {"playing": false, "ticks": 0}}))
+	var preview := await _await_ready()
+	assert_eq(String(preview.get("status", "")), "ready", str(preview))
+	var fire: Dictionary = preview.get("body", {}).get("animation", {}).get("fire", {})
+	assert_true(bool(fire.get("armed", false)), str(fire.get("words", "")))
+	assert_eq(String(fire.get("body", "")), "npc")
+	var events: Array = preview.get("body", {}).get("animation", {}).get("events", [])
+	assert_false(events.is_empty())
+	if not events.is_empty():
+		assert_eq(events[0].get("fires", []).size(), 1, str(events[0]))
+	await get_tree().process_frame
+	var device := _device(preview)
+	assert_not_null(device)
+	if device == null:
+		return
+	var tracers := device.find_children("Tracers", "MeshInstance3D", true, false)[0] as MeshInstance3D
+	var target := device.find_children("Target", "MeshInstance3D", true, false)[0] as MeshInstance3D
+	var scars := device.find_children("Scars", "ScarPresenter", true, false)[0] as ScarPresenter
+	# Run: the clip loops, its fire event firing on the NPC body's odd ticks.
+	var started_before: int = _app.get_clip_voices_started()
+	assert_true(_change({"clock": {"playing": true, "ticks": 0}}))
+	var ribbons := 0
+	for _frame in 900:
+		ribbons = max(ribbons, (tracers.mesh as ArrayMesh).get_surface_count())
+		fire = _state().get("body", {}).get("animation", {}).get("fire", {})
+		if int(fire.get("scars", 0)) >= 1 and ribbons > 0 and _app.get_clip_voices_started() > started_before:
+			break
+		_app.pump()
+		await get_tree().process_frame
+	assert_gt(int(fire.get("shots_fired", 0)), 0, "the clip's fire event fires: %s" % str(fire.get("words", "")))
+	assert_gt(ribbons, 0, "the tracers drawn as the game's ribbons")
+	assert_true(target.visible, "the target stands")
+	assert_gt(int(fire.get("scars", 0)), 0, "the stops scar the target")
+	assert_gt(scars.get_stats_record().world_surfaces, 0, "the game's ScarPresenter draws them")
+	assert_gt(_app.get_clip_voices_started(), started_before, "the Shell started the ai_launch's wave")
+	assert_eq(device.msaa_3d, Viewport.MSAA_DISABLED, "single-sampled while it fires, as the particle passes need")
+	for shot: Variant in fire.get("shots", []):
+		assert_eq(int(shot.get("tick", 0)) % 2, 1, "an NPC's body fires on odd ticks: %s" % str(shot))
+		assert_eq(String(shot.get("point", "")), "MFlash01", str(shot))
+	var sources := {}
+	for effect: Variant in fire.get("effects", []):
+		sources[String(effect.get("source", ""))] = true
+	assert_true(sources.has("launch") and sources.has("impact"), str(sources.keys()))
+	# A player's body fires nothing: the range let go, the view multisampled again.
+	assert_true(_change({"clock": {"playing": false}, "options": {"sound": {"body": "player"}}}))
+	await get_tree().process_frame
+	_app.pump()
+	await get_tree().process_frame
+	assert_false(bool(_state().get("body", {}).get("animation", {}).get("fire", {}).get("armed", true)))
+	assert_false(target.visible, "no range while nothing fires")
+	assert_eq(device.msaa_3d, Viewport.MSAA_4X)
+	assert_true(_change({"options": {"sound": {"body": "auto"}}}))
+
 ## DI-13: a weapon's map in first person. The device draws the gun the weapon names with the character's
 ## arms beside it, both on the gun's rig and posed by the row's clip, the arms' camo the character's and
 ## TEX_TEAM the player's team on both; the eye stands the camera where the game's presenter stands the view

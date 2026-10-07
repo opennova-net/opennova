@@ -194,9 +194,11 @@ bool read_options(const JsonValue &json, ModelViewportOptions &held, std::string
 			if (!read_damage_options(value, options.damage, error)) return false;
 		} else if (key == "first_person") {
 			if (!read_first_person_options(value, options.first_person, error)) return false;
+		} else if (key == "fire") {
+			if (!read_clip_fire_options(value, options.fire, error)) return false;
 		} else {
 			error = "Unknown model option \"" + key +
-			        "\" (it takes lod, ctrl, overlays, rig_model, repeat, bones, snap, sound, damage, first_person).";
+			        "\" (it takes lod, ctrl, overlays, rig_model, repeat, bones, snap, sound, damage, first_person, fire).";
 			return false;
 		}
 	}
@@ -317,6 +319,7 @@ io::JsonValue model_options_to_json(const ModelViewportOptions &held) {
 	options.set("sound", clip_sound_options_to_json(held.sound));
 	options.set("damage", damage_options_to_json(held.damage));
 	options.set("first_person", first_person_options_to_json(held.first_person));
+	options.set("fire", clip_fire_options_to_json(held.fire));
 	return options;
 }
 
@@ -609,6 +612,12 @@ std::vector<std::string> ModelViewport::event_sound_words(uint32_t trigger) cons
 	return clip_event_sound_words(trigger, options_.sound, sound_binding_, sound_sources_);
 }
 
+std::vector<std::string> ModelViewport::event_fire_words(uint32_t trigger) const {
+	// A weapon's first-person clip: nothing reads its events (DI-13).
+	if (first_person_.active()) return {};
+	return clip_fire_.event_words(trigger);
+}
+
 const WeaponActionRun *ModelViewport::first_person_action() const {
 	if (!animating_ || !first_person_.active() || clip_key_.empty()) return nullptr;
 	const std::vector<const WeaponActionRun *> playing = first_person_.actions_playing(clip_key_);
@@ -716,6 +725,17 @@ std::vector<ClipSoundFired> ModelViewport::fire_sounds(const PreviewClock &clock
 			fired_.push_back(fired);
 			out.push_back(std::move(fired));
 		}
+	// What the clip's shots sounded on those ticks (DI-24): each ammo's ai_launch, each stop's row, where it plays;
+	// the run taken to the clock first (a device follows after the clock ran).
+	clip_fire_.run_to(now);
+	for (ClipSoundFired &fired : clip_fire_.sounds_between(from, now, sound_sources_, camera().eye(), selector)) {
+		fired.seq = ++next_seq;
+		fired.path = path();
+		if (options_.sound.mute && fired.state == "played") fired.state = "muted";
+		if (scan) find_clip_sound_waves(fired, *scan);
+		fired_.push_back(fired);
+		out.push_back(std::move(fired));
+	}
 	if (fired_.size() > kSoundsFiredKept) fired_.erase(fired_.begin(), fired_.end() - kSoundsFiredKept);
 	return out;
 }
@@ -750,9 +770,17 @@ bool ModelViewport::press_event(int frame, const AssetScan *scan, audio::SoundSe
 	due.word = clip_track_.triggers[size_t(frame)];
 	due.bottom = size_t(frame) < clip_track_.bottoms.size() ? clip_track_.bottoms[size_t(frame)] : 0.0f;
 	out = plan_clip_event(due, options_.sound, sound_binding_, sound_sources_, camera().eye(), selector);
+	// A fire event's shots, fired once: each ammo's ai_launch from its launch point (DI-24).
+	for (ClipSoundFired &fired : clip_fire_.press(due.word, tick, frame, sound_sources_, camera().eye(), selector)) {
+		if (options_.sound.mute && fired.state == "played") fired.state = "muted";
+		out.push_back(std::move(fired));
+	}
 	if (out.empty()) {
+		const std::vector<std::string> fires = clip_fire_.event_words(due.word);
 		error = "Frame " + std::to_string(frame) + " fires no sound: " +
-		        (due.word ? animation_trigger_words(due.word) + " plays none." : std::string("it carries no event."));
+		        (!fires.empty() ? fires.front() + "."
+		         : due.word     ? animation_trigger_words(due.word) + " plays none."
+		                        : std::string("it carries no event."));
 		return false;
 	}
 	for (ClipSoundFired &fired : out) {
@@ -791,6 +819,7 @@ void ModelViewport::reset_animation_() {
 	clip_note_.clear();
 	clip_track_ = ClipSoundTrack();
 	sound_cursor_ = -1;
+	clip_fire_.clear();
 	first_person_.clear();
 	eye_ = false;
 }
@@ -1258,6 +1287,14 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		sound_cursor_ = -1;
 	}
 	if (rig_moved) rig_read_ = stamped->stamps();
+	// The clip's fire events (DI-24): what fires them (the item, the body the sounds bind, the rig's model and rig,
+	// the clip playing; none in first person, whose events nothing reads) and the run to the clock.
+	const anim::SkeletalClips::LoadedClip *playing =
+			skeleton_ && !clip_key_.empty() && !first_person_.active() ? skeleton_->find_clip_variant(clip_key_, clip_variant_)
+			                                                           : nullptr;
+	clip_fire_.refresh(view, sound_sources_.item(), sound_binding_, model_, skeleton_, clip_key_, clip_variant_,
+	                   playing ? &playing->clip.playback() : nullptr, clip_track_, repeat_period_(), options_.fire);
+	clip_fire_.run_to(clock.ticks());
 	// An event selected in the clip seeks the clock to the tick the clip first samples it, and
 	// holds it there (as a scrub does).
 	const auto *clip_document = dynamic_cast<const AnimationDocument *>(&document);
@@ -1820,6 +1857,10 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 		JsonValue plays = JsonValue::make_array();
 		for (const std::string &line : event_sound_words(event.trigger)) plays.push(json_string(line));
 		row.set("plays", std::move(plays));
+		// What it fires (DI-24), a line a shot.
+		JsonValue fires = JsonValue::make_array();
+		for (const std::string &line : event_fire_words(event.trigger)) fires.push(json_string(line));
+		row.set("fires", std::move(fires));
 		events.push(std::move(row));
 	}
 	animation.set("events", std::move(events));
@@ -1837,6 +1878,8 @@ io::JsonValue ModelViewport::body_json(const ViewportInput &input) const {
 	JsonValue fired = JsonValue::make_array();
 	for (const ClipSoundFired &one : fired_) fired.push(clip_sound_fired_to_json(one));
 	animation.set("sounds_fired", std::move(fired));
+	// The clip's fire events (DI-24): the body and the item's ammo, the range and the shots as the clock ran them.
+	animation.set("fire", clip_fire_.to_json(options_.fire));
 	// A weapon's first person (DI-13): the gun and the arms, the eye, the actions and the one playing the row.
 	animation.set("first_person", first_person_json(first_person_, options_.first_person, clip_key_,
 	                                                first_person_action()));
