@@ -105,6 +105,9 @@ using InspectorBottom = void (*)(Workspace &workspace, const Document &document,
 // Whether the Inspector's breadcrumb names a record by its name rather than its title: a record whose
 // title the type's top part shows whole (a mission's event, its sentence).
 using InspectorNamesInBreadcrumb = bool (*)(const Document &document, const NodeAddress &record);
+// A type's part of the Inspector over a document that holds no records (a text's: the HUD layout's
+// element picked in its preview, DI-37), drawn above the file's Used by.
+using InspectorText = void (*)(Workspace &workspace, const DocumentBase &document);
 
 // A document type's view (ADR 0046 S13 V3): one row per DocumentTypeId past None, in its order,
 // in ui/document_views.cpp, which does not build without it (static_asserts): its role, and the
@@ -121,6 +124,7 @@ struct DocumentViewRow {
 	InspectorTop inspector_top = nullptr;
 	InspectorBottom inspector_bottom = nullptr;
 	InspectorNamesInBreadcrumb breadcrumb_names = nullptr;
+	InspectorText inspector_text = nullptr;
 };
 
 // A type's row; null for None and past the last.
