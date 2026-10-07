@@ -119,6 +119,38 @@ func test_the_bundled_game_mounts_a_build_packed_and_a_folder_loose() -> void:
 		assert_true(loose.has_file("main.mnu"), "its files are found by name")
 
 
+# An expansion shipped beside the bundled game (expansion/<name>/, as the game
+# zip ships one) mounts over it with /exp or /mod, or with the Mods list's
+# pick, its archive's files standing over the base's; one the folder lacks
+# falls back to the base game, as the original's mount does.
+func test_the_bundled_game_mounts_an_expansion_beside_it() -> void:
+	var build := _temp_dir("expansion")
+	WorldFixture.stage_shell_archives(self, build, false)
+	var folder := build.path_join("expansion/onx")
+	assert_eq(DirAccess.make_dir_recursive_absolute(folder), OK)
+	WorldFixture.write_pff(self, folder.path_join("onx.pff"),
+			[{"name": "onxonly.txt", "bytes": "the expansion's".to_utf8_buffer()}])
+	WorldFixture.write_pff(self, folder.path_join("onxL.pff"), [])
+	var base := BootRootMount.mount_bundled(build)
+	assert_true(base != null and base.get_expansion().is_empty(), "no /exp: the base game")
+	if base != null:
+		assert_false(base.has_file("onxonly.txt"))
+	for flag in ["/exp", "/mod"]:
+		LaunchFlags.set_args_override(PackedStringArray([flag, "onx"]))
+		var mounted := BootRootMount.mount_bundled(build)
+		assert_true(mounted != null and mounted.get_expansion() == "onx", "%s onx mounts the expansion" % flag)
+		if mounted != null:
+			assert_true(mounted.has_file("onxonly.txt"), "its archive's files are served")
+	LaunchFlags.set_args_override(PackedStringArray([]))
+	ResourceDirSettings.set_expansion("onx")
+	var picked := BootRootMount.mount_bundled(build)
+	assert_true(picked != null and picked.get_expansion() == "onx", "the Mods list's pick mounts it too")
+	LaunchFlags.set_args_override(PackedStringArray(["/exp", "absent"]))
+	var fallback := BootRootMount.mount_bundled(build)
+	assert_true(fallback != null and fallback.is_runtime_mount() and fallback.get_expansion().is_empty(),
+			"an expansion the folder lacks: the base game")
+
+
 # EXIT is a named control, as retail's is (retail's ACTION has no quit verb): the
 # companion that owns the bundled menu relays it for the shell to quit.
 func test_exit_is_relayed_by_name() -> void:
