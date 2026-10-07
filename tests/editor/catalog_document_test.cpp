@@ -189,14 +189,15 @@ static int nested_rows_follow_the_record() {
 static int session_gate() {
 	editor_test::TempProjectDir dir("opennova_catalog_session_test");
 	NoProcess platform;
-	// Play asks first, as with the editor's save_before_play off (DI-26: on, Play saves without asking).
-	Preferences asks;
-	asks.save_before_play = false;
-	MemoryPreferencesStore preferences(asks);
+	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Catalog"));
 	session.run_operations();
 	editor_test::create_missing_files(session);
+	// Play asks first, as with the project's save_before_play off (DI-26: on, Play saves without asking).
+	ProjectSettingsChange asks;
+	asks.save_before_play = false;
+	editor_test::apply_settings(session, asks);
     session.handle(request::create_file("ammo.def"));
     TEST_EXPECT(session.document_for("ammo.def"));
     session.handle(request::create_file("ammo.def"));
