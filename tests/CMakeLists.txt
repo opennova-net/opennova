@@ -1647,6 +1647,14 @@ target_link_libraries(menu_runtime_test PRIVATE opennova_runtime)
 target_compile_features(menu_runtime_test PRIVATE cxx_std_17)
 add_test(NAME menu_runtime COMMAND menu_runtime_test)
 
+# The menu's sound edges (menu/menu_sound.h): which SOUND row a window plays for a state,
+# and when the mouse pump plays it, per window (MOUSEIN, MOUSEOUT, SELECTED and the click's
+# let-go), which the runtime and the editor's menu preview (DI-34) share.
+add_executable(menu_sound_test menu/menu_sound_test.cpp)
+target_link_libraries(menu_sound_test PRIVATE opennova_runtime)
+target_compile_features(menu_sound_test PRIVATE cxx_std_17)
+add_test(NAME menu_sound COMMAND menu_sound_test)
+
 # The menu's screen history across files and a mission (menu/screen_history.h) and the
 # menu mode's leave and re-entry over it: leaving a mission returns to the screen it
 # was started from (D-MNU-28).

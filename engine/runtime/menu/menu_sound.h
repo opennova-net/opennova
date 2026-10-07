@@ -1,13 +1,26 @@
 #pragma once
 
-// The witnessed menu UI sound math — the per-play channel volume and pitch
-// decisions of the LWF set player, pure over ints/doubles so the embedder
-// only routes the selected members into its audio device
-// [orig: the <SOUND> element play path CWnd_ProcessMouseEvent @ 0x647a00
-//  -> collection play @ 0x652de0 -> SoundBank_FindTriggerByName @ 0x75be90
-//  -> SoundBank_PlayTriggerEntries @ 0x75ccd0]. Member selection per layer
-// rides audio/sound_selector.h; the per-play jitter draws stay an accepted
-// divergence (docs/audio/lwf-dbf-sound-re.md).
+// The witnessed menu UI sounds: when a window plays its <SOUND> rows (the pump's
+// sound edges, MenuSoundPump), which row a state plays (menu_window_sound), and
+// the per-play channel volume and pitch decisions of the LWF set player, pure
+// over ints/doubles so the embedder only routes the selected members into its
+// audio device [orig: the <SOUND> element play path CWnd_ProcessMouseEvent
+// @ 0x647a00 -> collection play @ 0x652de0 -> SoundBank_FindTriggerByName
+// @ 0x75be90 -> SoundBank_PlayTriggerEntries @ 0x75ccd0]. Member selection per
+// layer rides audio/sound_selector.h; the per-play jitter draws stay an
+// accepted divergence (docs/audio/lwf-dbf-sound-re.md). The game's runtime
+// (MenuRuntime) and the editor's menu preview (DI-34) play through these alone.
+
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <string>
+#include <vector>
+
+namespace opennova::mnu {
+struct Sound;
+struct Window;
+} // namespace opennova::mnu
 
 namespace opennova::menu {
 
@@ -43,4 +56,82 @@ inline double menu_effective_pitch(double member_pitch, double set_pitch) {
 	return pitch <= 0.01 ? 1.0 : pitch;
 }
 
-}  // namespace opennova::menu
+// The pump's sound states, a <SOUND> row's STATE by number, and the per-state
+// slot the parse stores it in [orig: CUIElement_ParseXMLDefinition @ 0x648120,
+// the SOUND arm: MOUSEIN 1, MOUSEOUT 2, SELECTED 3 without case; the slot
+// written @ 0x648ac0, the mask bit 1 << state @ 0x648a7d]. 0: none.
+enum MenuSoundState : int32_t {
+	kSoundNone = 0,
+	kSoundMouseIn = 1,
+	kSoundMouseOut = 2,
+	kSoundSelected = 3,
+};
+// The state a STATE token names (MOUSEIN, MOUSEOUT, SELECTED, without case);
+// kSoundNone for any other, which the parse refuses.
+int menu_sound_state_of(const std::string &token);
+// "MOUSEIN", "MOUSEOUT", "SELECTED"; "" for another.
+const char *menu_sound_state_token(int state);
+
+// The row a window plays for `state`: each SOUND row of a state the parse knows,
+// with a TRIGGER, writes that state's one slot, so the last of them is the one
+// played [orig: @ 0x648a68..0x648ac0]; null when none fills it.
+const mnu::Sound *menu_window_sound(const mnu::Window &window, int state);
+
+// The sound edges of the menu's mouse pump, per window [orig: CWnd_ProcessMouseEvent
+// @ 0x647a00]. Each window keeps its sound state (+240, 0 or 1 between samples) and
+// the pump's verdict of the sample before (+232: 2 under the mouse with the button
+// up, 3 held down). Every sample, each window the pump reaches (shown up its chain,
+// the open popup's alone while one is open):
+// - under the mouse (it took the claim and is live: shown and enabled up its chain,
+//   CWnd_IsVisibleInHierarchy @ 0x646290): clicked this sample (released over it, or
+//   a hotkey's mark @ 0x647b20), it plays SELECTED (3); the button down, it is held
+//   (verdict 3) and plays nothing; else MOUSEIN (1) unless it already holds it
+//   [orig: @ 0x647b14..0x647b51];
+// - else, under the mouse with the button up the sample before (verdict 2), it plays
+//   MOUSEOUT (2) [orig: @ 0x647b8e..0x647b97];
+// - a state it does not hold already plays its row, if it has one (the mask
+//   @ 0x647bb4..0x647bd7), and is held; MOUSEOUT and SELECTED let go at once (0)
+//   [orig: @ 0x647c5e..0x647c6e].
+// So a click plays SELECTED and the next sample with the mouse still there MOUSEIN
+// again; a window left with the button held plays no MOUSEOUT, nor MOUSEIN when the
+// mouse comes back to it; a disabled window under the mouse plays nothing. A window
+// is named by a key of the embedder's (the runtime's widget id, the editor's window
+// record): one the pump has not met holds nothing.
+class MenuSoundPump {
+public:
+	struct Edge {
+		uint64_t key = 0;
+		int state = kSoundNone;
+	};
+
+	// The window `key` clicked this sample (released over it as the embedder's click
+	// rule has it, or its hotkey): SELECTED, its sound state let go and its verdict
+	// "under the mouse, button up", so the sample that follows the click finds it
+	// done; the sample of the same mouse sample plays nothing more of it.
+	Edge click(uint64_t key);
+	// One sample of the mouse: `claimed` whether a window took the claim, `claim` its
+	// key, `live` whether it is enabled up its chain, `button_down` the left button;
+	// `reached` whether the pump reaches a window it holds a state for this sample
+	// (one it does not keeps its state, as a hidden window's pump returns at once
+	// @ 0x647a21). The edges played, in order (the windows leaving first), appended
+	// to `out`.
+	void sample(bool claimed, uint64_t claim, bool live, bool button_down,
+			const std::function<bool(uint64_t)> &reached, std::vector<Edge> &out);
+	// Every window forgotten (a menu opened anew: its windows are new).
+	void reset();
+	// The sound state `key` holds (0 or 1), and the pump's verdict of its last sample
+	// (0 none, 2 under the mouse, 3 held down).
+	int sound_state(uint64_t key) const;
+	int verdict(uint64_t key) const;
+
+private:
+	struct Latch {
+		int32_t sound = kSoundNone;
+		int32_t verdict = 0;
+		bool clicked = false; // clicked since the last sample
+	};
+	static Edge step_(uint64_t key, Latch &latch, int to);
+	std::map<uint64_t, Latch> latches_;
+};
+
+} // namespace opennova::menu

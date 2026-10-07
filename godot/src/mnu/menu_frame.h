@@ -343,8 +343,8 @@ private:
 	Vector2 design_scale_() const;
 
 	Ref<MnuDocument> document_;
-	int press_claim_ = -1;      // widget owning the current press, -1 = none
-	bool mouse_button_down_ = false;
+	// The press and the click over the claims (engine MenuClickLatch).
+	opennova::menu::MenuClickLatch click_;
 	bool last_sample_scrolled_ = false;
 	int32_t cursor_slot_ = -1;  // last claim's cursor texture slot
 	bool configured_ = false;

@@ -419,11 +419,14 @@ func mcp_game_menu(args: Dictionary) -> Variant:
 			if not shell.menu_press(target):
 				return {"error": "no widget named '%s'" % target}
 			return shell.menu_snapshot(false)
-		"press_at":
+		"press_at", "move_at", "hold_at":
+			# press_at: a press and its release there; move_at / hold_at: one
+			# sample there with the button up / held, as a motion is.
 			if not args.has("x") or not args.has("y"):
-				return {"error": "press_at requires x and y (design coords)"}
-			var hit := shell.menu_press_at(
-					Vector2(float(args["x"]), float(args["y"])))
+				return {"error": "%s requires x and y (design coords)" % op}
+			var at := Vector2(float(args["x"]), float(args["y"]))
+			var hit := shell.menu_press_at(at) if op == "press_at" \
+					else shell.menu_move_at(at, op == "hold_at")
 			var out := shell.menu_snapshot(false)
 			out["hit_index"] = hit
 			return out

@@ -26,6 +26,7 @@
 //  UI_DispatchKeyboardEventToChildren @0x63ad10]
 
 #include <formats/mnu/mnu.h>
+#include <runtime/menu/menu_sound.h>
 #include <runtime/menu/menu_table.h>
 #include <runtime/menu/menu_table_row.h>
 #include <runtime/menu/screen_history.h>
@@ -586,6 +587,13 @@ private:
 	void set_interactive_recursive_(int id, bool enabled);
 	void url_row_(const mnu::Action &action);
 	void play_sound_(const mnu::Window &w, const std::string &state_token);
+	// The pump's sound edges of one mouse sample (menu_sound.h's MenuSoundPump over
+	// the widget ids): the claim, live when visible in the hierarchy; a widget the
+	// pump reaches is one of the current screen shown up its chain, the open
+	// popup's alone while one is open [orig: CWnd_ProcessMouseEvent @ 0x647a00;
+	// CUIScene_EndFrame @ 0x63e600 pumps the popup alone].
+	void sample_sounds_(int claim, bool button_down);
+	bool sound_reached_(int id) const;
 	// The press (WM_LBUTTONDOWN) of the widget at `index`.
 	void press_(int index, float x, float y, uint32_t now_ms);
 	void list_press_(int id, int row, uint32_t now_ms);
@@ -648,6 +656,8 @@ private:
 	int open_popup_id_ = -1;
 	int frame_popup_index_ = -1;
 	int last_claim_ = -1;
+	// The windows' sound states and verdicts (menu_sound.h), by widget id.
+	MenuSoundPump sound_pump_;
 	float last_mouse_x_ = 0.0f, last_mouse_y_ = 0.0f;
 	bool mouse_down_ = false;
 	int last_click_id_ = -1;
