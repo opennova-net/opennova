@@ -178,6 +178,9 @@ constexpr DocumentViewRow kViews[] = {
 	// Main role, ui/main_viewport_view over the Terrain viewport kind); the import that makes it and the missions
 	// that run on it head the Inspector (ui/terrain_inspector).
 	{DocumentTypeId::Terrain, DocumentViewRole::MainViewport, &kTreeOutline, nullptr, draw_terrain_inspector},
+	// A dialog bank's dialogs as a tree, each holding its lines; a dialog or a line heads the Inspector with a Play
+	// of it as the game plays it and what the last play said (DI-32, ui/sound_inspector).
+	{DocumentTypeId::DialogBank, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_dialog_bank_inspector},
 };
 
 // One view per DocumentTypeId past None, in its order, each an outline or a view its make makes.

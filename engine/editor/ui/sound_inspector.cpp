@@ -6,6 +6,7 @@
 
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
+#include <editor/documents/dialog_bank_document.h>
 #include <editor/documents/sound_bank_document.h>
 #include <editor/documents/sound_profile_document.h>
 #include <editor/preview/sound_preview.h>
@@ -83,6 +84,36 @@ bool draw_sound_bank_inspector(Workspace &workspace, const Document &document, c
 		workspace.request(request::play_set(set, document.path()));
 	if (ui_kit::tool(tools, "Stop", true, "Stops the sound the editor plays.", true)) workspace.request(request::stop_sound());
 	last_play(workspace, set);
+	return true;
+}
+
+bool draw_dialog_bank_inspector(Workspace &workspace, const Document &document, const NodeAddress &record,
+                                InspectorTaken &) {
+	const auto *bank = dynamic_cast<const DialogBankDocument *>(&document);
+	const Node *node = bank ? bank->row(record.row) : nullptr;
+	if (!node) return false;
+	const auto &row = static_cast<const DialogBankRow &>(*node);
+	const std::string &name = row.dialog.name;
+	const int64_t number = dialog_number(name);
+	note(number >= 1 ? "A mission plays this dialog as dialog " + std::to_string(number) + " (its Play dialog action, its "
+	                   "Dialog triggers): each line the wave of its name in " + dialog_sounds_scope(document.path()) +
+	                   ", one after another, its subtitle in the chat."
+	                 : "No Play dialog plays this dialog: a mission names one by the number that forms dlg%03i.");
+	// A line: its index in the dialog, by its identity.
+	int line = -1;
+	if (record.child && !row.ids.lists.empty())
+		for (size_t i = 0; i < row.ids.lists[0].size(); ++i)
+			if (row.ids.lists[0][i].id == record.child) line = int(i);
+	ui_kit::WrapRow tools;
+	if (ui_kit::tool(tools, "Play", !name.empty(),
+	                 "Plays " + name + " as the game plays it: its lines one after another, each once the one before has "
+	                 "ended and after its wait.",
+	                 true))
+		workspace.request(request::play_dialog(name, document.path()));
+	if (line >= 0 && ui_kit::tool(tools, "Play line", true, "Plays this line alone: its wave at its dialog volume.", true))
+		workspace.request(request::play_dialog(name, document.path(), line));
+	if (ui_kit::tool(tools, "Stop", true, "Stops the sound the editor plays.", true)) workspace.request(request::stop_sound());
+	last_play(workspace, name);
 	return true;
 }
 

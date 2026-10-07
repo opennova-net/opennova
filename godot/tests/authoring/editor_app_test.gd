@@ -289,6 +289,84 @@ func test_play_set_plays_its_layers() -> void:
 	assert_false(bool(slot.get("outcome", {}).get("done", true)), "no SndProf.def names the slot's set: refused")
 
 
+## A dialog's play (DI-32): a dialog bank and its sounds made by create_file, the sounds' two waves and the bank's
+## dialog of two lines (the second waiting a fifth of a second) added by edit_record and saved; play_sound with the
+## dialog plays its lines one after another as the game does: the Shell's one preview player starts the first line's
+## wave at once and the second once the first has ended and its wait passed (its voice's `at`), not before.
+func test_play_dialog_plays_its_lines_in_turn() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor dialog %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	var root := dir.path_join("Talk")
+	assert_true(_seam.new_project(root, "Talk"))
+	assert_eq(DirAccess.make_dir_recursive_absolute(root.path_join("sounds")), OK)
+	for name in ["first.wav", "second.wav"]:
+		var file := FileAccess.open(root.path_join("sounds").path_join(name), FileAccess.WRITE)
+		file.store_buffer(_wave_bytes(0.5))
+		file.close()
+	assert_true(_run_operation({"kind": "rescan"}))
+	assert_true(bool(_request({"kind": "create_file", "path": "talk.lwf"}).get("ok", false)))
+	assert_true(bool(_request({"kind": "create_file", "path": "talk.dbf"}).get("ok", false)))
+	var waves := [
+		{"op": "add", "kind": "wave", "as": "a"}, {"op": "set", "id": "a", "field": "name", "value": "FIRST"},
+		{"op": "set", "id": "a", "field": "file", "value": "first.wav"},
+		{"op": "add", "kind": "wave", "as": "b"}, {"op": "set", "id": "b", "field": "name", "value": "SECOND"},
+		{"op": "set", "id": "b", "field": "file", "value": "second.wav"},
+	]
+	var edited := _request({"kind": "edit_record", "path": "talk.lwf", "edits": waves, "open_first": true})
+	assert_true(bool(edited.get("outcome", {}).get("done", false)), str(edited))
+	var lines := [
+		{"op": "add", "kind": "dialog", "as": "d"},
+		{"op": "add", "kind": "line", "parent": "d", "field": "wave", "value": "FIRST"},
+		{"op": "add", "kind": "line", "parent": "d", "as": "l2"},
+		{"op": "set", "id": "l2", "field": "wave", "value": "SECOND"},
+		{"op": "set", "id": "l2", "field": "delay", "value": 2},
+	]
+	edited = _request({"kind": "edit_record", "path": "talk.dbf", "edits": lines, "open_first": true})
+	assert_true(bool(edited.get("outcome", {}).get("done", false)), str(edited))
+	_request({"kind": "save_all"})
+	var answer := _request({"kind": "play_sound", "path": "talk.dbf", "values": {"dialog": "dlg001"}})
+	assert_true(bool(answer.get("outcome", {}).get("done", false)), str(answer))
+	var sound := _sound()
+	assert_eq(String(sound.get("set", "")), "dlg001", str(sound))
+	var voices: Array = sound.get("voices", [])
+	assert_eq(voices.size(), 2, str(sound))
+	if voices.size() != 2:
+		return
+	assert_eq(String(voices[0].get("path", "")), "sounds/first.wav")
+	assert_false(voices[0].has("at"), "the first line at once")
+	var at := float(voices[1].get("at", 0.0))
+	assert_almost_eq(at, 0.7, 0.02, "the second after the first's half second and its fifth of a second")
+	var deadline := Time.get_ticks_msec() + 5000
+	while _sound().get("state", "") != "playing" and Time.get_ticks_msec() < deadline:
+		OS.delay_msec(20)
+		_app.pump()
+	var started := Time.get_ticks_msec()
+	assert_eq(String(_app.get_sound_state()), "playing")
+	var players := _preview_players()
+	assert_eq(players.size(), 2, "a player for each line")
+	if players.size() != 2:
+		return
+	assert_true(players[0].playing and not players[1].playing, "the first line plays, the second waits")
+	while not players[1].playing and Time.get_ticks_msec() - started < 3000:
+		OS.delay_msec(10)
+		_app.pump()
+	assert_true(players[1].playing, "the second line starts")
+	assert_gte(Time.get_ticks_msec() - started, int(at * 1000.0) - 100, "the second line starts at its time, not before")
+	_request({"kind": "stop_sound"})
+	_app.pump()
+	assert_eq(String(_app.get_sound_state()), "idle", "stopped")
+
+
+# The preview player's voices, in the order it made them.
+func _preview_players() -> Array[AudioStreamPlayer]:
+	var out: Array[AudioStreamPlayer] = []
+	for node: Node in _app.find_children("PreviewSound*", "AudioStreamPlayer", true, false):
+		out.append(node as AudioStreamPlayer)
+	return out
+
+
 # The workspace section's sound (the MCP gaps lane).
 func _sound() -> Dictionary:
 	var state: Variant = JSON.parse_string(_app.query_json("state", JSON.stringify({"sections": ["workspace"]})))
