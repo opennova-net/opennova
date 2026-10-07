@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <istream>
 #include <ostream>
 #include <string>
@@ -178,15 +179,59 @@ bool is_env_key(const std::string &key);
 bool is_envscaled_key(const std::string &key);
 bool env_name_writable(const std::string &name);
 
-// A mission's environment as the mission load makes it. The load resets every field to the
-// pre-parse defaults first [orig: Terrain_LoadEnvironmentConfig @ 0x610947 ->
-// Environment_InitDefaults @ 0x57c010], then parses the .env over them; a file that does not
-// exist, or does not parse, is skipped before it seeds a color or snapshots a keyframe [orig:
-// Environment_LoadTimeOfDayConfig @ 0x57db30, the FileExists check @ 0x57dca3, the parse's
-// @ 0x57dcbf], and the mission starts all the same [orig: Game_LoadTerrainDuringConnect
-// @ 0x520710 reads no outcome of it]: on Config, with no keyframe. `text` null means no such
-// file. False when the file was skipped.
-bool load_mission_env(const std::string *text, Config &out);
+// The overcast keyframes' file, parsed after the terrain's on every time-of-day load where it
+// exists [orig: Environment_LoadTimeOfDayConfig @ 0x57db30, the name @ 0x57dc0c, the exists check
+// @ 0x57dc23].
+inline constexpr const char *kOvercastFile = "overcast.def";
+
+// The texts a mission's time-of-day load reads, in its order; each null where its file is not
+// there. `terrain` null is the load with no map name, which goes straight to overcast.def [orig:
+// Environment_LoadTimeOfDayConfig @ 0x57db98]; a map whose .trn is missing returns before every
+// pass [orig: @ 0x57dbca..0x57dbcf], and with it the terrain's load and the mission's [orig:
+// Terrain_LoadEnvironmentConfig @ 0x610a24..0x610a40, its colour map, detail map and polydata
+// unnamed; Game_LoadTerrainDuringConnect @ 0x520745], which a caller refuses before it reads an
+// environment.
+struct MissionEnvTexts {
+	const std::string *terrain = nullptr;     // the mission's <terrain>.trn
+	const std::string *overcast = nullptr;    // kOvercastFile
+	const std::string *environment = nullptr; // the mission's <environment>.env
+};
+
+// What the load makes: the mission's environment, and the overcast table its overcast cross-fades
+// toward (its keyframes, and the envscale they are read under: divergence #8).
+struct MissionEnv {
+	Config config;
+	Config overcast;
+	bool environment = false; // the .env parsed
+};
+
+// A mission's environment as the mission load makes it [orig: Environment_LoadTimeOfDayConfig
+// @ 0x57db30]. The load resets every field to the pre-parse defaults first [orig:
+// Terrain_LoadEnvironmentConfig @ 0x610947 -> Environment_InitDefaults @ 0x57c010], then runs the
+// keyword parser over three files in turn, one set of globals under all three: the terrain's .trn
+// [orig: @ 0x57dbeb], overcast.def after it into the same keyframe table, its slot count not reset
+// [orig: @ 0x57dc3b], that table the overcast table [orig: Environment_SortAndSnapshotKeyframes into
+// g_EnvTrnSnapshotTable @ 0x57dc48], then the slot pointer back on the scratch keyframe and the count
+// at 0 [orig: @ 0x57dc56..0x57dc5c] for the .env [orig: @ 0x57dcbf], whose keyframes are the
+// mission's [orig: @ 0x57dd5c]. So a keyword a file writes is the mission's until a later file writes
+// it: the .env's over the terrain's (a .trn's water_rgb and water_murk, which every shipped terrain
+// writes, stand where its .env writes none), the envscale read last scaling what follows it [orig:
+// g_EnvParseEnvScale set once @ 0x57db49]. The parser reads every line of the three: the hook the
+// terrain's load installs ahead of it returns 0 on each [orig: TimeOfDay_ParseProperty @ 0x57c5ac;
+// Terrain_LoadEnvironmentConfig @ 0x6109ad pushes Terrain_ParseConfigCallback @ 0x60f330, whose every
+// exit is 0]. A .env that does not exist, or does not parse, is skipped before it seeds a color or
+// snapshots a keyframe [orig: the FileExists check @ 0x57dca3, the parse's @ 0x57dcbf], and the
+// mission starts all the same [orig: Game_LoadTerrainDuringConnect @ 0x520710 reads no outcome of
+// it]: on the earlier passes' globals, with no keyframe and the scratch keyframe unseeded. False
+// when the .env was skipped.
+bool load_mission_env(const MissionEnvTexts &texts, MissionEnv &out);
+
+// The same load over a reader of the files by name (`read` false: no such file): `terrain_file`
+// (empty: no map name) and `environment_file` (empty: none) as the caller names them, overcast.def by
+// kOvercastFile.
+using EnvTextReader = std::function<bool(const std::string &name, std::string &text)>;
+bool read_mission_env(const EnvTextReader &read, const std::string &terrain_file,
+		const std::string &environment_file, MissionEnv &out);
 
 // HHMM (digits clamped positionally: hours <= 23, minutes <= 59) to 16.16
 // fixed-point hours [orig: Environment_ParseTimeString @ 0x57c500].

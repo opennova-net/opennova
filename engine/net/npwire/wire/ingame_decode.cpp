@@ -1562,8 +1562,8 @@ bool decode_loadout_crc_request(const uint8_t *body, size_t len,
 	return consumed == 3;
 }
 
-// S2C 0x42 input/state-flags — [u16] (2 B). [orig: NapiNPClientMsg_0x042 @ 0x4281A0]
-bool decode_input_state_flags(const uint8_t *body, size_t len,
+// S2C 0x42 the charattr disable latches — [u16] (2 B). [orig: NapiNPClientMsg_CharAttrDisabledProperties @ 0x4281A0]
+bool decode_charattr_disabled_properties(const uint8_t *body, size_t len,
                               uint16_t &out_flags, size_t &consumed) {
 	consumed = 0;
 	Cursor c{body, body + len, true};

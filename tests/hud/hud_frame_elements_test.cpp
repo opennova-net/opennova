@@ -554,7 +554,8 @@ void test_overlay_panel_menus(const fnt_font_t *font) {
 // THE SQUAD ORDER LINES: the two S2C 0x72 lines right-aligned at the
 // HUDORDERS anchor in the bold slot, 18 design px apart (an empty line keeps
 // its rung), palette[4] less one alpha step through the half-bright drawer;
-// the /NOTEXT declutter bit and a detail level above 1 hide them.
+// a detail level above 1 hides them, and no HUDDECLUT slot does (D-HUD-54:
+// the CHAT slot is the console rings' alone).
 // [orig: sub_59AEE0 @0x59aee0]
 void test_squad_orders(const fnt_font_t *font) {
 	HudLayout layout;
@@ -585,8 +586,8 @@ void test_squad_orders(const fnt_font_t *font) {
 	state.hud_detail_level = 2;
 	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty());
 	state.hud_detail_level = 1;
-	state.declutter_visible[kDeclutterChat] = false;
-	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty());
+	state.declutter_visible.fill(false);
+	CHECK(glyphs_on(compiler.compile(state, 1024.0f, 768.0f), kHudFontSlotLabelBold).size() == 6);
 }
 
 // THE MESSAGE FEEDS AND THE POWER-THROW LABEL ride the BOLD label slot at its

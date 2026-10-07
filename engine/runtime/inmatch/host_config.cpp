@@ -94,6 +94,13 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	config.max_friendly_kills = cfg.numallowablefriendlykills; // dword_24D2244 @0x551CA4
 	// [orig: dword_24D5A00 = timeOfDayContinuity_334 on the authority @0x551E1F]
 	config.time_of_day_continuity = cfg.mp_tod_continuity;
+	// The charattr restriction words [orig: g_SessionNoCharAbilities @0x551E2B,
+	//  g_SessionNoWeaponRecoil @0x551E37, g_SessionNoCrossHairSpread @0x551E41,
+	//  g_SessionNoScopeDrift @0x551E4D, on the authority].
+	config.no_char_abilities = cfg.mp_no_char_abilities;
+	config.no_weapon_recoil = cfg.mp_no_weapon_recoil;
+	config.no_crosshair_spread = cfg.mp_no_crosshair_spread;
+	config.no_scope_drift = cfg.mp_no_scope_drift;
 
 	// The published cap: the dedicated slot added [orig: @0x551B2B..0x551B48];
 	// in session the cap is already 1..65, so the apply's 65 ceiling never cuts.

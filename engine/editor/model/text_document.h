@@ -50,6 +50,14 @@ struct TextReference {
 	// Whether Rename everywhere rewrites it (GraphEdge::rewritable): false for a use whose lookup the
 	// graph does not model as the game makes it (game.wac's text keys).
 	bool rewritable = true;
+	// What the written number names its definition by less (GraphEdge::name_offset: a charattr class's
+	// camouflage, an item by its id less 100000): `value` is the name it reaches, the span holds it less
+	// this, which a rename writes back so. 0 for none.
+	int64_t name_offset = 0;
+	// The record and the key the text writes it under, where its reader has them (a charattr class and its
+	// *_CAMMO key; GraphEdge::record and field); "" for none.
+	std::string record;
+	std::string field;
 };
 
 // A name a text defines at a span, which other files name it by (a shader's tag, the effect it registers

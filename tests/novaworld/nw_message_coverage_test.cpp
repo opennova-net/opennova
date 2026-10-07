@@ -1181,7 +1181,7 @@ int check_S_42_input_flags() {
 	w.u16(0x1234);
 	uint16_t flags = 0;
 	size_t consumed = 0;
-	EXPECT(decode_input_state_flags(w.b.data(), w.b.size(), flags, consumed));
+	EXPECT(decode_charattr_disabled_properties(w.b.data(), w.b.size(), flags, consumed));
 	EXPECT(consumed == 2);
 	EXPECT(flags == 0x1234);
 	cover('S', 0x42);

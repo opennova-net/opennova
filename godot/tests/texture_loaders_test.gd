@@ -99,7 +99,8 @@ func test_hud_loader_suffixes_override_the_mode() -> void:
 # Six HUDSTANCE frames all naming `stance_name` (the stance widget sizes its
 # quads off frame 0).
 func _stance_layout(dir: String, stance_name: String, extra := PackedStringArray()) -> HudPos:
-	var lines := PackedStringArray(["HUDSTANCEPOS 21 630", "ALPHAFADE 30 50 3"])
+	# The stance rides WPNGRP on foot; the rows show it (D-HUD-54).
+	var lines := PackedStringArray(HudFixture.DECLUTTER_ROWS + ["HUDSTANCEPOS 21 630", "ALPHAFADE 30 50 3"])
 	lines.append_array(extra)
 	for i in range(6):
 		lines.append("HUDSTANCE %d 10 11 %s S%d" % [i, stance_name, i])

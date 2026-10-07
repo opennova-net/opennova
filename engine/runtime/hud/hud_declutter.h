@@ -66,21 +66,28 @@ std::array<bool, kDeclutterSlotCount> declutter_all_visible();
 
 class HudDeclutter;
 
-// The HUDDECLUT mask table from a parsed hudpos file [orig:
-// HUD_ParseHudposToken @0x59F370 -> byte_2723CE0]: a file that authors ANY
-// known row is applied faithfully from the zeroed table (an unauthored slot
-// then stays hidden at every level, like retail's). Returns false and leaves
-// `out` untouched when the file authors no known row at all (the test
-// harness's minimal layouts; retail never ships one), so the embedder keeps
-// the all-visible default instead of blanking the whole HUD.
-bool declutter_from_hudpos(const opennova::def::DefHudPosFile &file, HudDeclutter &out);
+// The HUDDECLUT mask table a parsed hudpos file authors, at level 0 (the
+// caller sets its level). Retail's table is BSS-zero and only a parse arm
+// stores into it, so the table starts zeroed whatever the file holds: a file
+// with no HUDDECLUT row, an empty file and a missing one (which parses no
+// line) all leave every slot hidden at every level, and with them every
+// gated element (the ammo count and the rest of WPNGRP, the health bar, the
+// crosshair, the corner map, the chat rings...). Each row stores its slot's
+// mask in file order, so a later row for a slot replaces an earlier one; a
+// row without an arm (JOX's HUDDECLUT_CTAPE) authors nothing.
+// [orig: HUD_ParseHudposToken @0x59F370 -> byte_2723CE0 (the MSNTITLE arm's
+//  `mov byte_2723CE0, bl` @0x5A1683 stores the mask built in ebx);
+//  File_ParseASCIIFile @0x53D810 returns 1 for a missing file before any
+//  callback, and HUD_InitOverlaySystem @0x5A4931 ignores the result]
+HudDeclutter declutter_from_hudpos(const opennova::def::DefHudPosFile &file);
 
 // The mask table + level + rebuild rule. Construction leaves every mask
-// all-bits (0xF = visible at every level) — the embedder/test-harness default
-// for a HUD with no hudpos declutter rows; a real hudpos feed starts from
-// begin_authoring(), where retail's zeroed table makes an UNAUTHORED slot
-// hidden at every level. [orig: byte_2723CE0 is BSS-zero; only an authored
-// HUDDECLUT_* arm stores a nonzero mask @ 0x59F370]
+// all-bits (0xF = visible at every level) — the default of an embedder that
+// feeds no hudpos at all (the layout-only harnesses); every hudpos feed, an
+// empty or missing file included, starts from begin_authoring()
+// (declutter_from_hudpos), where retail's zeroed table makes an UNAUTHORED
+// slot hidden at every level. [orig: byte_2723CE0 is BSS-zero; only an
+// authored HUDDECLUT_* arm stores a nonzero mask @ 0x59F370]
 class HudDeclutter {
 public:
 	HudDeclutter();

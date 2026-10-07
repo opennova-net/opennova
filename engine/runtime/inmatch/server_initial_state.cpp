@@ -12,8 +12,10 @@
 #include <cstring>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
+#include <formats/charattr/charattr.h>            // the restriction properties (the join's 0x41s)
 #include <formats/mission/bms.h>                  // bms::File, bms::encode_loaded_header_blob (0x0B body)
 #include <runtime/replication/entity_wire_bridge.h>    // build_pool0_organic_batch / build_pool3_spawn_marker_batch
 #include <base/gameprofile/game_type.h>          // is_waypoint_family (the §5.32 selector)
@@ -536,14 +538,31 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		case InitialStateBurst::kStreamWaitForGameStartAck: tag = s2c::WAIT_FOR_GAME_START_ACK; action = Action::EmitBody; break; // NetPacket_WriteTimestamp @0x5046c0
 		case InitialStateBurst::kStreamGameStartBundle: { // GAME-START BUNDLE [orig: Server_OnPlayerJoin @0x51a680 tail] — the deploy unsticker.
 			// Without it a retail joiner world-loads but stays undeployed (floods C2S 0x0f, "stuck at 7%").
-			// 0x42 input-flags, 0x0F world-state-load (clears the client's dword_81474C load-gate + queues
-			// its deploy burst), 0x4D player-index, 0x61 session-key/seed, 0x3E terminator. The per-frame
-			// 0x0A the original interleaves here is covered by Server_TickUpdate's 0x0A fan (starts once
-			// spawned), so it is not re-emitted in the bundle. [§5.29 / §5.43 / D-NET-114]
+			// 0x41 per charattr restriction, 0x42 the charattr latches, 0x0F world-state-load (clears the
+			// client's dword_81474C load-gate + queues its deploy burst), 0x4D player-index, 0x61
+			// session-key/seed, 0x3E terminator. The per-frame 0x0A the original interleaves here is
+			// covered by Server_TickUpdate's 0x0A fan (starts once spawned), so it is not re-emitted in the
+			// bundle. [§5.29 / §5.43 / D-NET-114]
 			std::vector<uint8_t> wsl = serialize_world_state_load(ctx, conn, now_tick);
 			const std::size_t wsl_sz = wsl.size();
-			step.messages.push_back(InitialStateMessage{
-					0x42, {0x00, 0x00}, /*reliable=*/false}); // [Server_OnPlayerJoin send @0x51A81F userParam=1]
+			// Each set restriction word, one 0x41 of the property it disables, to this slot alone
+			// (D-NET-374). [orig: Server_OnPlayerJoin @0x51a7e2 -> Server_SendCharAttrRestrictionsToPlayer
+			//  @0x509950: g_SessionNoCharAbilities -> 0 @0x5099b4, g_SessionNoWeaponRecoil -> 5 @0x5099eb,
+			//  g_SessionNoCrossHairSpread -> 6 @0x509a22, g_SessionNoScopeDrift -> 7 @0x509a59; mask 0x20,
+			//  msgClass 1, one byte each]
+			const std::pair<int32_t, uint8_t> restrictions[] = {
+					{ctx.config.no_char_abilities, charattr::kAttributes},
+					{ctx.config.no_weapon_recoil, charattr::kRecoilMute},
+					{ctx.config.no_crosshair_spread, charattr::kXhairMute},
+					{ctx.config.no_scope_drift, charattr::kScopeMute},
+			};
+			for (const auto &[word, property] : restrictions)
+				if (word != 0) step.messages.push_back(InitialStateMessage{s2c::CHARATTR_PROPERTY_CLEAR, {property}});
+			// The latches as the authority holds them [orig: NetPacket_WriteCharAttrDisabledProperties
+			//  @0x505BA0 -> CharAttr_PackDisabledProperties @0x412550, sent @0x51A81F userParam=1].
+			const uint16_t latches = ctx.world != nullptr ? ctx.world->tables.charattr_disabled_word : uint16_t{0};
+			step.messages.push_back(InitialStateMessage{s2c::CHARATTR_DISABLED_PROPERTIES,
+					{static_cast<uint8_t>(latches), static_cast<uint8_t>(latches >> 8)}, /*reliable=*/false});
 			step.messages.push_back(InitialStateMessage{0x0F, std::move(wsl)}); // world-state-load (§5.29)
 			// The join notice: this slot's copy rides the bundle, every other
 			// in-game client gets the same byte now and re-requests its

@@ -30,20 +30,26 @@ ServerTextTable read_host_server_text(const mission::BootFileSource &files) {
 
 namespace {
 
-// The mission's .env with the BMS override layer, and the water plane by its
-// witnessed precedence (the BMS override, the .trn, the .env), resolved onto
-// the world before the boot's PreMission pass.
+// The mission's environment (its .trn, overcast.def and its .env) with the BMS
+// override layer, and the water plane by its witnessed precedence (the BMS
+// override, the .env, the .trn), resolved onto the world before the boot's
+// PreMission pass.
 void load_environment_and_water(const mission::BootFileSource &files,
 		mission::MissionKernel &kernel, HostBoot &boot) {
 	const mission::MissionInfo info = mission::mission_info(kernel.mission);
-	// A .env that is not there is skipped and the mission starts on the
-	// engine's defaults (env::load_mission_env carries the witness).
-	std::vector<uint8_t> env_bytes;
-	const bool exists = !info.environment.empty() && files.valid() &&
-			files.read_file(info.environment + ".env", env_bytes);
-	const std::string env_text(env_bytes.begin(), env_bytes.end());
-	boot.env_config = env::Config{};
-	const bool env_loaded = env::load_mission_env(exists ? &env_text : nullptr, boot.env_config);
+	// The time-of-day load's three files; a .env that is not there is skipped
+	// and the mission starts on the earlier passes' globals (env::load_mission_env
+	// carries the witness).
+	const env::EnvTextReader read = [&files](const std::string &name, std::string &text) {
+		std::vector<uint8_t> bytes;
+		if (!files.valid() || !files.read_file(name, bytes)) return false;
+		text.assign(bytes.begin(), bytes.end());
+		return true;
+	};
+	env::MissionEnv loaded;
+	const bool env_loaded = env::read_mission_env(read, info.terrain.empty() ? std::string() : info.terrain + ".trn",
+			info.environment.empty() ? std::string() : info.environment + ".env", loaded);
+	boot.env_config = std::move(loaded.config);
 	// [orig: Game_LoadTerrainDuringConnect @0x520710 -- the attrib-gated
 	//  water / fog / fog-colour overrides over the loaded .env]
 	const env::BmsEnvOverrides overrides = env::bms_env_overrides_from_header(
@@ -74,8 +80,6 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	boot.mission_text = mission::MissionText{};
 	boot.terrain_til.clear();
 	boot.server_text = ServerTextTable{};
-	boot.charattr = CharAttrChallengeTable{};
-	boot.charattr_loaded = false;
 	boot.item_catalog.reset();
 	if (request.session == nullptr || request.role == nullptr || !request.fresh_kernel) {
 		error = "the host boot needs a session, a role and a fresh kernel";
@@ -84,6 +88,14 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	const mission::BootFileSource &files = request.files;
 	const std::string &basename = request.mission_basename;
 	HostConfig host_cfg = std::move(request.host_cfg);
+	// The session's charattr restriction words, as the apply copies them from
+	// the session config [orig: Game_ApplySessionSettingsToGlobals
+	// @0x551E2B..0x551E4D -> g_SessionNoCharAbilities .. g_SessionNoScopeDrift].
+	CharAttrRestrictions charattr_restrictions;
+	charattr_restrictions.no_char_abilities = host_cfg.config.no_char_abilities != 0;
+	charattr_restrictions.no_weapon_recoil = host_cfg.config.no_weapon_recoil != 0;
+	charattr_restrictions.no_crosshair_spread = host_cfg.config.no_crosshair_spread != 0;
+	charattr_restrictions.no_scope_drift = host_cfg.config.no_scope_drift != 0;
 
 	// The /PROFILE log opens a fresh file for this mission, ahead of its load,
 	// headed by the map file name [orig: Game_StartMission @0x524475..0x524487
@@ -219,20 +231,29 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 		});
 	}
 
-	// The per-class ATTRIBUTES words (Medic, KnifeBonus, ...) the authority's
-	// medic heal, knife reach and medic-filtered sends read. Retail loads
-	// charattr.def at boot on every peer; a missing or empty file leaves the
-	// cleared all-zero table (D-NET-345). A joiner's copy is its own, taken
-	// before it connects and carried by its runtime.
+	// The per-class ATTRIBUTES words (Medic, KnifeBonus) the authority's medic
+	// heal, knife reach and medic-filtered sends read. Retail loads charattr.def
+	// once, at boot on every peer; a missing or empty file leaves the cleared
+	// all-zero table (D-NET-345). A joiner's copy is its own, taken before it
+	// connects and carried by its runtime.
 	// [orig: Game_Run @0x4A7FE3 -> CharAttr_LoadFromDef @0x412140, which
 	//  memsets the 0x7C0-byte table first]
 	if (request.host != nullptr) {
-		std::vector<uint8_t> charattr_bytes;
-		if (files.valid() && files.read_file("charattr.def", charattr_bytes) &&
-				!charattr_bytes.empty())
-			boot.charattr_loaded = parse_charattr_challenge_table(charattr_bytes.data(),
-					charattr_bytes.size(), boot.charattr);
+		if (!boot.charattr_read) {
+			std::vector<uint8_t> charattr_bytes;
+			if (!files.valid() || !files.read_file("charattr.def", charattr_bytes)) charattr_bytes.clear();
+			charattr_load(boot.charattr, charattr_bytes.data(), charattr_bytes.size());
+			boot.charattr_read = true;
+		}
+		// Each mission start on the authority zeroes and disables the
+		// properties the session's mp_No* words name (D-NET-374).
+		// [orig: Game_StartMission @0x525b90 -> Server_ResetRoundCounters
+		//  @0x516C50, its tail @0x516DBD -> @0x4FCF10, the body of
+		//  CharAttr_ApplyMpRestrictions @0x4247D0; single player's
+		//  SinglePlayer_StartMission @0x561e7b runs the same step]
+		charattr_apply_restrictions(boot.charattr, charattr_restrictions);
 		kernel.world.tables.class_attribute_flags = charattr_class_attribute_rows(boot.charattr);
+		kernel.world.tables.charattr_disabled_word = charattr_pack_disabled(boot.charattr);
 	}
 	return true;
 }

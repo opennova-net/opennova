@@ -305,6 +305,14 @@ _Avoid_: player class, replication class, character identity
 The packed `Avatars.def` nat|div|combo|side word the wire and world/FP composition key on (`npwire/character_id.h`).
 _Avoid_: avatar id, skin id, character index
 
+**Character attributes**:
+`charattr.def`'s table (`formats/charattr`, `inmatch/charattr_table`): a row per Soldier Class (CHARACTER1..16,
+read in order to the first the file lacks), its ATTRIBUTES words (Medic and KnifeBonus are the ones the game
+reads) and its three camouflage items (the item a player of the class spawns as by the mission's camouflage),
+with per-property disable latches a session's mp_No* words raise. The other fields (STEALTH, HPBONUS, the
+`*_MUTE` scales, RUN_MODIFIER) reach only the anti-cheat row's CRC.
+_Avoid_: anim slot, AnimMap slot (the IDB's misnomer), input state flags (S2C 0x42 carries the latches)
+
 **Placed device**:
 A thrown or emplaced explosive converted to its own pool-1 Entity (satchel, claymore, AV mine), replicated via S2C `0x59`/`0x12`.
 _Avoid_: deployable, planted explosive

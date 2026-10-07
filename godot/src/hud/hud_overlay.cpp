@@ -17,6 +17,7 @@
 #include "util/string_convert.h"
 
 #include <formats/def/def.h> // DefVehicleHudBlock (the VEHICLE_HUD block the panel feed reads)
+#include <formats/def/def_hudpos_write.h> // hudpos_unauthored (the layout of a file with no key)
 #include <runtime/hud/feed_format.h> // kGameTextLineColor (the 0x32 join/leave lines)
 #include <base/gameprofile/game_type.h> // the conquest arm of the zone panel
 
@@ -521,9 +522,11 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// ensure_label_fonts_ reloads it for the fresh root.
 	compiler_.configure_label_fonts(nullptr, nullptr, nullptr, 1.0f, 1.0f);
 	configured_ = false;
-	if (p_hudpos.is_null() || !p_hudpos->is_loaded()) {
-		// No hudpos -> the declutter module's all-visible default (the level
-		// itself persists across rebuilds like retail's global).
+	if (p_hudpos.is_null()) {
+		// No layout handed over (the editor's viewport between documents): the
+		// overlay is cleared and draws nothing; the declutter module's
+		// all-visible default stands (the level itself persists across
+		// rebuilds like retail's global).
 		const int level = declutter_.level();
 		declutter_ = opennova::hud::HudDeclutter();
 		declutter_.set_level(level);
@@ -531,22 +534,28 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		queue_redraw();
 		return;
 	}
+	// A hudpos.def that did not load (missing, or nothing in it) is a parse of
+	// no line: retail's HUD carries on over the globals no arm wrote, every
+	// position, colour and HUDDECLUT mask zero, so every gated element stays
+	// hidden while the rest of the walk runs (hud_declutter.h
+	// declutter_from_hudpos carries the witness; docs/interface/hud-re.md
+	// D-HUD-54).
+	opennova::def::DefHudPosFile unauthored{};
+	unauthored.hud = opennova::def::hudpos_unauthored();
+	const opennova::def::DefHudPosFile &file = p_hudpos->is_loaded() ? p_hudpos->native_file() : unauthored;
 
 	// The layout globals the parse authors are the engine's fill; this leg
 	// resolves the names it hands back and stamps the texture-derived fields.
 	opennova::hud::HudLayoutAssets assets;
-	opennova::hud::hud_layout_from_hudpos(p_hudpos->native_file(), layout_, assets);
+	opennova::hud::hud_layout_from_hudpos(file, layout_, assets);
 	configure_combat_(assets);
 
-	// The HUDDECLUT mask table from the parsed rows: the engine's
-	// declutter_from_hudpos (see docs/interface/hud-re.md); a file with no
-	// declutter rows keeps the module's all-visible default.
+	// The HUDDECLUT mask table the file authors: the engine's
+	// declutter_from_hudpos, from retail's zeroed table whatever the file
+	// holds (docs/interface/hud-re.md D-HUD-54).
 	{
 		const int level = declutter_.level();
-		opennova::hud::HudDeclutter authored;
-		declutter_ = opennova::hud::declutter_from_hudpos(p_hudpos->native_file(), authored)
-				? authored
-				: opennova::hud::HudDeclutter();
+		declutter_ = opennova::hud::declutter_from_hudpos(file);
 		declutter_.set_level(level);
 		apply_declutter_();
 	}

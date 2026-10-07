@@ -1,4 +1,5 @@
 #include <runtime/environment/environment_state.h>
+#include <base/vfs/file_source.h>
 #include <base/io/rotating_prng.h>
 #include <base/io/fixed.h>
 
@@ -856,6 +857,17 @@ Rgb EnvironmentState::derive_skyfog_render_color(const Rgb &fog_raw,
 	const Rgb blended = horizon_blend_skyfog(fog_raw, skyfog_raw,
 			io::float_to_fp16_16_nonneg(fog_distance), io::float_to_fp16_16_nonneg(1024.0f));
 	return double_rgb(blended);
+}
+
+bool read_mission_env(const FileSource &files, const std::string &terrain_file,
+		const std::string &environment_file, MissionEnv &out) {
+	const EnvTextReader read = [&files](const std::string &name, std::string &text) {
+		std::vector<uint8_t> bytes;
+		if (!files.read(name, bytes)) return false;
+		text.assign(bytes.begin(), bytes.end());
+		return true;
+	};
+	return read_mission_env(read, terrain_file, environment_file, out);
 }
 
 } // namespace opennova::env

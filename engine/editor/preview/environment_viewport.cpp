@@ -322,7 +322,8 @@ bool EnvironmentViewport::read_(const SessionView &view, const DocumentBase &doc
 	const bool document_moved = document.identity() != read_identity_ || document.load_generation() != read_load_ ||
 	                            document.revision() != read_revision_;
 	const bool files_moved = generation != read_generation_ && read_stamps_.moved(files);
-	if (!document_moved && !files_moved && read_generation_ != UINT64_MAX) {
+	const bool terrain_moved = header_.terrain != read_terrain_;
+	if (!document_moved && !files_moved && !terrain_moved && read_generation_ != UINT64_MAX) {
 		why = unwritable_;
 		return unwritable_.empty();
 	}
@@ -330,6 +331,7 @@ bool EnvironmentViewport::read_(const SessionView &view, const DocumentBase &doc
 	read_load_ = document.load_generation();
 	read_revision_ = document.revision();
 	read_generation_ = generation;
+	read_terrain_ = header_.terrain;
 	read_stamps_.clear();
 	// The game reads the file Save would write: a document that cannot be written leaves none to read.
 	const SerializeResult written = document.serialize();
@@ -341,22 +343,25 @@ bool EnvironmentViewport::read_(const SessionView &view, const DocumentBase &doc
 	}
 	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(path()) : nullptr;
 	file_name_ = entry ? entry->logical_name : base_of(path());
-	std::vector<uint8_t> bytes;
-	const bool found = files.read(file_name_, bytes);
-	read_stamps_.note(file_name_, files.stamp(file_name_));
-	const std::string text(bytes.begin(), bytes.end());
-	config_ = env::Config();
-	env::load_mission_env(found ? &text : nullptr, config_);
-	// The overcast table beside it, read by the runtime's own name (env::kOvercastFile).
-	overcast_ = env::Config();
-	has_overcast_ = false;
-	bytes.clear();
-	if (files.read(env::kOvercastFile, bytes)) {
-		std::istringstream input(std::string(bytes.begin(), bytes.end()));
-		std::string error;
-		has_overcast_ = env::load_env(input, overcast_, error);
-	}
-	read_stamps_.note(env::kOvercastFile, files.stamp(env::kOvercastFile));
+	// As the drawn mission's load reads it (env::load_mission_env): its terrain's .trn, then overcast.def (the
+	// overcast table, by the runtime's own name), then this file over them.
+	const auto read_text = [&](const std::string &name, std::string &text) {
+		std::vector<uint8_t> bytes;
+		const bool found = files.read(name, bytes);
+		read_stamps_.note(name, files.stamp(name));
+		text.assign(bytes.begin(), bytes.end());
+		return found;
+	};
+	std::string terrain_text, overcast_text, text;
+	env::MissionEnvTexts texts;
+	if (!header_.terrain.empty() && read_text(header_.terrain + ".trn", terrain_text)) texts.terrain = &terrain_text;
+	if (read_text(env::kOvercastFile, overcast_text)) texts.overcast = &overcast_text;
+	if (read_text(file_name_, text)) texts.environment = &text;
+	env::MissionEnv loaded;
+	env::load_mission_env(texts, loaded);
+	config_ = std::move(loaded.config);
+	overcast_ = std::move(loaded.overcast);
+	has_overcast_ = texts.overcast != nullptr || !overcast_.keyframes.empty();
 	// What the home was seeded from moved: seeded again at the next step.
 	seeded_ = false;
 	return true;
@@ -541,6 +546,8 @@ ViewportAction EnvironmentViewport::follow_(const ViewportInput &input, PreviewC
 	const DocumentBase *document = input.document;
 	if (!document || !dynamic_cast<const EnvironmentDocument *>(document))
 		return stop_(EnvironmentViewStatus::NoEnvironment, std::string());
+	// The mission drawn first: its terrain's .trn reads ahead of the file (read_).
+	place_(view);
 	std::string why;
 	if (!read_(view, *document, why)) {
 		const ViewportAction action = stop_(EnvironmentViewStatus::Unwritable, why);
@@ -551,7 +558,6 @@ ViewportAction EnvironmentViewport::follow_(const ViewportInput &input, PreviewC
 	}
 	reason_ = EnvironmentViewStatus::Ready;
 	detail_.clear();
-	place_(view);
 	// The mission header's overrides toggled: the home seeded again over them.
 	if (layout_moved_) seeded_ = false;
 	layout_moved_ = false;

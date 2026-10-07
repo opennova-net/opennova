@@ -79,6 +79,21 @@ struct GameConfig {
 	int32_t max_friendly_kills = 3;
 	bool allow_ai = true;
 	int32_t time_of_day_continuity = 0;
+	// The session's four charattr restriction words, game.cfg's mp_No* (no host
+	// screen control sets them): each set one makes the authority zero and
+	// disable a charattr property at every mission start (inmatch/charattr_table.h
+	// charattr_apply_restrictions) and send each joiner its S2C 0x41 at the join
+	// [orig: g_SessionNoCharAbilities / g_SessionNoWeaponRecoil /
+	//  g_SessionNoCrossHairSpread / g_SessionNoScopeDrift @0x24D20E8..0x24D20F4,
+	//  from mp_NoCharAbilities +0x48C / mp_NoWeaponRecoil +0x490 /
+	//  mp_NoCrossHairSpread +0x498 / mp_NoScopeDrift +0x494 by
+	//  Game_ApplySessionSettingsToGlobals @0x551E2B..0x551E4D; read by
+	//  Server_ResetRoundCounters @0x4FCF10 and
+	//  Server_SendCharAttrRestrictionsToPlayer @0x509950]
+	int32_t no_char_abilities = 0;
+	int32_t no_weapon_recoil = 0;
+	int32_t no_crosshair_spread = 0;
+	int32_t no_scope_drift = 0;
 	// (retail game_settings +0x80 internet_address, +0xC4 use_lineup_queue and
 	//  +0xC8 lineup_queue_size have no reader here and are not modelled.)
 	uint32_t max_players = 1;                   // [orig game_settings +0xC0] host_player_slot_limit's published cap (0..66)

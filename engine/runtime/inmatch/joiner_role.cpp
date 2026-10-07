@@ -9,7 +9,7 @@
 #include <runtime/inmatch/game_config.h>
 
 #include <runtime/devtools/tick_profile.h>
-#include <runtime/inmatch/charattr_challenge.h>
+#include <runtime/inmatch/charattr_table.h>
 #include <runtime/mission/mission_kernel.h>
 
 #include <runtime/replication/client_replica_pipeline.h>
@@ -596,16 +596,17 @@ void JoinerRole::tick_local_weapon() {
 	}
 }
 
-// An S2C 0x41 applied inside the frame mutated the live charattr table; the
-// World's per-class ATTRIBUTES words follow it the same frame [orig: the
-// HUD reads g_CharAttr directly, AnimMap_IsSlotActive @0x4125e0, so the
-// clear is visible on the next draw; see docs/interface/hud-re.md]. A
-// failed/missing charattr.def leaves the all-zero table -- no class carries
-// an attribute, retail's failed-load state [orig: CharAttr_LoadFromDef
-// @0x412140 memsets 0x7C0 bytes first].
+// An S2C 0x41 or 0x42 applied inside the frame mutated the live charattr
+// table; the World's per-class ATTRIBUTES words follow it the same frame
+// [orig: the HUD reads g_CharAttr directly, CharAttr_ClassHasAttribute
+// @0x4125e0, its ATTRIBUTES latch among its gates, so the change is visible
+// on the next draw; see docs/interface/hud-re.md]. A failed/missing
+// charattr.def leaves the all-zero table -- no class carries an attribute,
+// retail's failed-load state [orig: CharAttr_LoadFromDef @0x412140 memsets
+// 0x7C0 bytes first].
 void JoinerRole::sync_class_attribute_flags() {
-	const CharAttrChallengeTable *live = runtime ? runtime->charattr_challenge_table() : nullptr;
-	static const CharAttrChallengeTable kNoTable{};
+	const CharAttrTable *live = runtime ? runtime->charattr_table() : nullptr;
+	static const CharAttrTable kNoTable{};
 	kernel_->world.tables.class_attribute_flags =
 			charattr_class_attribute_rows(live != nullptr ? *live : kNoTable);
 }

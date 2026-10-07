@@ -9,14 +9,14 @@ float resolve_water_height(const WaterHeightRungs &rungs,
 	if (rungs.has_mission_override) {
 		return rungs.mission_override;
 	}
-	if (rungs.terrain_height != 0.0f) {
-		return rungs.terrain_height;
-	}
 	if (env != nullptr && env->has_water_height()) {
 		// .env water_height is stored <<15 by the engine — half world units,
-		// same convention as the terrain value
-		// [orig: TimeOfDay_ParseProperty @ 0x57cb4e].
+		// same convention as the terrain value; the .env's line writes after
+		// the .trn's [orig: TimeOfDay_ParseProperty @ 0x57cb4e].
 		return env->water_height() * 0.5f;
+	}
+	if (rungs.terrain_height != 0.0f) {
+		return rungs.terrain_height;
 	}
 	const bool has_loaded_env = env != nullptr && env->is_loaded();
 	if (rungs.has_loaded_terrain || has_loaded_env) {

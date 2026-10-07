@@ -398,17 +398,22 @@ Error EnvFile::load_from_resource_root(const Ref<ResourceRoot> &p_resource_root,
 	return OK;
 }
 
-// The skip itself, and what stands after it, is the engine's
-// (opennova::env::load_mission_env); this reads the file and binds the result.
-bool EnvFile::load_mission_environment(const Ref<ResourceRoot> &p_resource_root, const String &p_name) {
-	const String file = p_name.get_file();
-	const bool exists = p_resource_root.is_valid() && !file.is_empty() && p_resource_root->has_file(file);
-	std::string text;
-	if (exists) {
+// The passes, the skip and what stands after it are the engine's
+// (opennova::env::load_mission_env); this reads the files and binds the result.
+bool EnvFile::load_mission_environment(const Ref<ResourceRoot> &p_resource_root, const String &p_terrain,
+		const String &p_name, const Ref<EnvFile> &p_overcast) {
+	const opennova::env::EnvTextReader read = [&p_resource_root](const std::string &name, std::string &text) {
+		const String file = opennova::to_gd(name);
+		if (p_resource_root.is_null() || !p_resource_root->has_file(file)) return false;
 		const PackedByteArray bytes = p_resource_root->read_file(file);
 		text.assign(reinterpret_cast<const char *>(bytes.ptr()), static_cast<size_t>(bytes.size()));
-	}
-	const bool parsed = opennova::env::load_mission_env(exists ? &text : nullptr, env);
+		return true;
+	};
+	const String file = p_name.get_file();
+	opennova::env::MissionEnv mission;
+	const bool parsed = opennova::env::read_mission_env(
+			read, opennova::to_std(p_terrain.get_file()), opennova::to_std(file), mission);
+	env = std::move(mission.config);
 	mission_overrides_active = false;
 	source_path = parsed ? file : String();
 	resource_root = p_resource_root;
@@ -416,6 +421,15 @@ bool EnvFile::load_mission_environment(const Ref<ResourceRoot> &p_resource_root,
 	_load_sky_textures();
 	loaded = true;
 	_notify_environment_changed();
+	if (p_overcast.is_valid()) {
+		p_overcast->env = std::move(mission.overcast);
+		p_overcast->mission_overrides_active = false;
+		p_overcast->source_path = opennova::to_gd(opennova::env::kOvercastFile);
+		p_overcast->resource_root = p_resource_root;
+		p_overcast->_sync_properties_from_env();
+		p_overcast->loaded = true;
+		p_overcast->_notify_environment_changed();
+	}
 	return parsed;
 }
 
