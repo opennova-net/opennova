@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include <base/gameprofile/required_resources.h>
+#include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/animation_slots.h>
 #include <editor/documents/text_types.h>
@@ -249,9 +250,39 @@ std::string clip_missing(const AssetGraph &graph, const GraphEdge &edge) {
 	       "leaves out." + missing;
 }
 
+// A point no lookup finds: an item's particle slot reads the model's first 16 alone (its scope's section,
+// kFirstUserPointsSection) and attaches its effect to none; every other lookup scans every point and keeps
+// none (its index 0) [orig: ItemDef_GetBoneMaskByName @ 0x49ea40; modelgpm_FindUserpointByName @ 0x5b2170].
 std::string user_point_missing(const AssetGraph &, const GraphEdge &edge) {
-	return ", which " + (edge.scope.empty() ? std::string("the model") : edge.scope) +
-	       " does not have among its first 16 user points: the effect attaches to none.";
+	const size_t slash = edge.scope.find('/');
+	const std::string model = edge.scope.empty() ? std::string("the model") : edge.scope.substr(0, slash);
+	if (slash != std::string::npos)
+		return ", which " + model + " does not have among its first 16 user points: the effect attaches to none.";
+	return ", which " + model + " does not have: the game's lookup finds no point of that name there and keeps none.";
+}
+
+// An effect no particle file defines: the game's lookup by name copies the effects' stockeffect under the
+// name, or finds none without one [orig: CEffectWorld_InternEffectHandle @ 0x5f7310, the stockeffect copy
+// @ 0x5f739f..0x5f73c5].
+std::string particle_missing(const AssetGraph &graph, const GraphEdge &) {
+	return graph.resolve(ReferenceKind::Particle, "stockeffect") == ReferenceStatus::Present
+	               ? ", which no particle file of the project defines: the game plays a copy of stockeffect under that "
+	                 "name."
+	               : ", which no particle file of the project defines, nor stockeffect, which the game copies for a name "
+	                 "it lacks: it plays nothing.";
+}
+
+// A weapon action's slot that its weapon's map has no row for plays the map's reset clip, a loaded map's
+// every unauthored slot serving it [orig: AnimMap_RegisterBoneNode @ 0x40C2D0, slot 0's backfill @
+// 0x40C39A..0x40C3E2]; a key naming no slot of the 252 the action looks up warns and plays none, an auto
+// delay of it 0 [orig: Anim_InitActions @ 0x54219E -> AnimMap_FindSlotByName @ 0x40cfa0, "could not find
+// anim" @ 0x5421FF..0x542225].
+std::string animation_key_missing(const AssetGraph &, const GraphEdge &edge) {
+	if (animation_key_slot(edge.value) < 0)
+		return ", which names none of the engine's 252 animation slots: the game warns \"could not find anim\" and the "
+		       "action plays no clip, an auto delay of it 0.";
+	return ", which " + (edge.scope.empty() ? std::string("the weapon's animation map") : edge.scope) +
+	       " has no row for: the action plays the map's reset clip in its place.";
 }
 
 // The lookups find no record of the SSN: a condition on it reads as its type does for no entity (a
@@ -305,6 +336,29 @@ std::string shader_missing(const AssetGraph &graph, const GraphEdge &) {
 	               : ", which no shader of the project registers, nor does the project have _ffp.fx, the renderer's "
 	                 "own: the game draws the material with the first shader it registered, and with none registered "
 	                 "draws nothing.";
+}
+
+// An item id nothing defines; one a number names by its type id (an ammo's tracer id, the id less 100000) says
+// the number as written, and what the ammo's parse does then: it takes the item whose name is the ammo's, else
+// warns and keeps none [orig: AmmoDef_ParseProperty @ 0x40A5E2..0x40A60B, ItemList_FindIndexByPrimaryName over
+// the ammo's own name; "couldn't find ammodef frndlyTrcrID"].
+std::string item_missing(const AssetGraph &graph, const GraphEdge &edge) {
+	if (!edge.name_offset) return project_lacks(graph, edge);
+	const std::optional<int> id = strutil::parse_int(edge.value);
+	const std::string written = id ? std::to_string(int64_t(*id) - edge.name_offset) : edge.value;
+	return " (type id " + written + "), which the project does not have: the game takes the item named as the record "
+	       "instead, else warns that it finds none.";
+}
+
+std::string item_alias_missing(const AssetGraph &, const GraphEdge &) {
+	return ", which no item of items.def has as its alias: the block's panel applies to no item.";
+}
+
+std::string avatar_part_missing(const AssetGraph &, const GraphEdge &edge) {
+	const size_t slash = edge.scope.find('/');
+	const std::string kind = slash == std::string::npos ? std::string("part") : strutil::to_lower(edge.scope.substr(slash + 1)) + " part";
+	return ", which no " + kind + " of the file defines: the game drops a combination missing its head or body, and keeps "
+	       "one missing its arms without them.";
 }
 
 // --- the values a Record reference names none by (ReferenceKindRow::none) ----------------------
@@ -435,7 +489,11 @@ constexpr ReferenceKindRow kRows[] = {
 	        .row,
 	Row(ReferenceKind::Ammo, "ammo", "the ammo", "ammo").symbol(NameCase::FileName, AssetKind::AmmoDefs).row,
 	Row(ReferenceKind::Weapon, "weapon", "the weapon", "weapon").symbol(NameCase::FileName, AssetKind::WeaponDefs).row,
-	Row(ReferenceKind::Item, "item", "the item id", "item id").symbol(NameCase::Exact, AssetKind::ItemDefs).row,
+	// An item by its id; a tracer's by its type id (item_missing).
+	Row(ReferenceKind::Item, "item", "the item id", "item id")
+	        .symbol(NameCase::Exact, AssetKind::ItemDefs)
+	        .says(item_missing)
+	        .row,
 	// Each by its loader (ADR 0046 S18): the terrain's colour map and its blend map abort the mission when
 	// they load nothing (texture_gates).
 	Row(ReferenceKind::Texture, "texture", "the texture", "texture")
@@ -448,8 +506,11 @@ constexpr ReferenceKindRow kRows[] = {
 	        .symbol(NameCase::NoCase, AssetKind::SoundBank)
 	        .tolerated(sound_missing)
 	        .row,
+	// An effect no file defines plays the stockeffect's copy (particle_missing).
 	Row(ReferenceKind::Particle, "particle", "the particle effect", "particle effect")
 	        .symbol(NameCase::FileName, AssetKind::Particles)
+	        .tolerated(particle_missing)
+	        .message_reads_files()
 	        .row,
 	Row(ReferenceKind::AiProfile, "ai_profile", "the AI profile", "AI profile").loads(AssetKind::AiProfile, kAiProfile).row,
 	Row(ReferenceKind::OtherText, "other_text", "the string id", "string id").offers(ReferenceKind::TextId).row,
@@ -534,7 +595,8 @@ constexpr ReferenceKindRow kRows[] = {
 	Row(ReferenceKind::ModelFrame, "model_frame", "the rotation frame", "rotation frame")
 	        .record("frame", frame_none)
 	        .row,
-	// An item's particle slot naming no user point attaches its effect to none.
+	// A user point of the model the scope names: an item's particle slot naming none attaches its effect to
+	// none, any other lookup keeps none (user_point_missing).
 	Row(ReferenceKind::UserPoint, "user_point", "the user point", "user point")
 	        .symbol(NameCase::NoCase)
 	        .scoped(true)
@@ -631,6 +693,30 @@ constexpr ReferenceKindRow kRows[] = {
 	        .tolerated(shader_missing)
 	        .message_reads_files()
 	        .row,
+	// A weapon action's slot, by its key past its first five characters without case, in its weapon's map
+	// (the scope): the slot's clip there is what the action plays and times [orig: Anim_InitActions @
+	// 0x54219E -> AnimMap_FindSlotByName @ 0x40cfa0; Anim_GetDurationTicks over the weapon's map @ 0x5421BD].
+	Row(ReferenceKind::AnimationKey, "animation_key", "the animation slot", "animation slot")
+	        .symbol(NameCase::SlotKey, AssetKind::AnimationMap)
+	        .scoped(true)
+	        .tolerated(animation_key_missing)
+	        .row,
+	// A VEHICLE_HUD block's item, by the alias items.def gives it (its sid, else "S%06i" of its id): the block's
+	// VEHICLE_END copies it into every item of the alias, compared without case [orig: HUD_ParseHudposToken @
+	// 0x59F3DA..0x59F40C, the _stricmp @ 0x59F402]; one no item has applies to none.
+	Row(ReferenceKind::ItemAlias, "item_alias", "the item alias", "item alias")
+	        .symbol(NameCase::NoCase, AssetKind::ItemDefs)
+	        .tolerated(item_alias_missing)
+	        .row,
+	// A combination's head, body or arms, by the name of a part of that kind its file defines before it, the last
+	// of the name, without case [orig: CAvatarDefs_ParseConfigLine @ 0x57a7e7, the stricmp over the parts @
+	// 0x57a830..0x57a854]: a combination missing its head or body is dropped, one missing its arms kept without
+	// them (the parser's own findings; formats/avatars).
+	Row(ReferenceKind::AvatarPart, "avatar_part", "the avatar part", "avatar part")
+	        .symbol(NameCase::NoCase, AssetKind::AvatarDefs)
+	        .scoped(true)
+	        .tolerated(avatar_part_missing)
+	        .row,
 };
 
 constexpr bool same_token(const char *a, const char *b) {
@@ -683,6 +769,25 @@ static_assert(records_well_formed(),
 		"and only a Record row names a collection, the values naming none or an index space");
 
 } // namespace
+
+namespace {
+
+// A file a field names by its stem or its name: its file name, `extension` added where it has none, upper case.
+std::string named_file_scope(const std::string &name, const char *extension) {
+	if (name.empty()) return std::string();
+	std::string file = basename_of(name);
+	if (path_of(file).extension().empty()) file += extension;
+	return strutil::to_upper(file);
+}
+
+} // namespace
+
+std::string user_point_scope(const std::string &model, bool first_16) {
+	const std::string scope = named_file_scope(model, ".3di");
+	return scope.empty() || !first_16 ? scope : scope + "/" + kFirstUserPointsSection;
+}
+
+std::string animation_map_scope(const std::string &map) { return named_file_scope(map, ".adm"); }
 
 const ReferenceKindRow &reference_row(ReferenceKind kind) {
 	const size_t index = static_cast<size_t>(kind);
