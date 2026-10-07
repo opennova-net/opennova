@@ -59,6 +59,10 @@ struct ProjectView {
 		std::string description;
 	};
 	std::vector<InstallExpansion> install_expansions;
+	// The records the game's Mods list lists in that same folder (vfs_expansion_records: every folder
+	// under expansion/ in the game's order, its first 16, each by its folder's name with its name and
+	// description), which a menu tried in Try mode lists after the base game's row (D-MNU-31).
+	std::vector<InstallExpansion> mods_list;
 	// The same of the install a new project opens with (the editor's last chosen, whatever install an
 	// open project names), which the New project form offers and New project weighs against.
 	std::vector<InstallExpansion> new_project_expansions;
