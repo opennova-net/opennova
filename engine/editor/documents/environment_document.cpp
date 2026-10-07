@@ -19,6 +19,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
 #include <editor/documents/texture_roles.h>
+#include <editor/model/staged_rows.h>
 
 namespace opennova::editor {
 
@@ -861,13 +862,12 @@ std::shared_ptr<Node> EnvironmentDocument::make_node(NodeKind, NodeId, const std
 	return nullptr;
 }
 
-bool EnvironmentDocument::accept_step(const EditStep &step, const StagedRows &, StepRefusal &refusal) const {
-	for (const RowSwap &swap : step.swaps) {
-		if (swap.before && swap.after) continue;
-		refusal.message = "An environment keeps its one row.";
-		return false;
-	}
-	return true;
+bool EnvironmentDocument::accept_step(const EditStep &, const StagedRows &staged, StepRefusal &refusal) const {
+	// One row after any step: an edit inside it, or the file read again in its place (Restore CR LF line ends, which
+	// replaces the row).
+	if (staged.rows().size() == 1) return true;
+	refusal.message = "An environment keeps its one row.";
+	return false;
 }
 
 // --- the findings ---------------------------------------------------------------------------------
