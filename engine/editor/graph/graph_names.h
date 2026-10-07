@@ -6,6 +6,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/value.h>
+#include <formats/adm/adm.h>
 #include <formats/mns/mns.h>
 
 // The spellings the asset graph compares names in: one home for the resolver, the
@@ -25,13 +26,19 @@ inline std::string style_variable(const std::string &value) { return upper(mns::
 // name without case for the names the game's lookups compare that way (a string id, a style
 // variable, a menu screen or window, a model's user point: stricmp over the whole string, no
 // space trimmed [orig: CUIScene_SelectNodeByName @ 0x63b6b0; CWnd_FindChildByName @ 0x646850;
-// ItemDef_GetBoneMaskByName @ 0x49ea40, the stricmp @ 0x49ea7b]), an item id as written, any
-// other name as a file name. A name is keyed as given: a style variable's %NAME% spelling is
+// ItemDef_GetBoneMaskByName @ 0x49ea40, the stricmp @ 0x49ea7b]), an item id as written, an
+// animation slot's key past its first five characters, any other name as a file name. A name is keyed as given: a style variable's %NAME% spelling is
 // read at the boundary that takes one (style_variable, find_definition).
 inline std::string symbol_name(ReferenceKind kind, const std::string &name) {
 	switch (reference_row(kind).name_case) {
 	case NameCase::NoCase: return upper(name);
 	case NameCase::Exact: return name;
+	// An animation slot's key as the slot lookup compares it, past its first five characters
+	// (adm_slot_key's "anim_" spelling); a key of five characters or fewer, as written (it names no slot).
+	case NameCase::SlotKey: {
+		const std::string slot = adm::adm_slot_key(name);
+		return upper(slot.empty() ? name : slot);
+	}
 	case NameCase::FileName: break;
 	}
 	return key(name);
