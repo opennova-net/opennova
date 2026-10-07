@@ -348,7 +348,7 @@ static int test_columns() {
 	                     "mission.event_missing",
 	                     "mission.group_range", "model.frame_missing", "model.light_part", "model.register_missing",
 	                     "particle.duplicate_effect", "particle.unreadable",
-	                     "project.expansion.name_taken", "project.expansion.not_installed", "reference.missing", "reference.wrong_kind", "requirement.missing", "requirement.wrong_kind",
+	                     "project.base_project", "project.expansion.name_taken", "project.expansion.not_installed", "reference.missing", "reference.wrong_kind", "requirement.missing", "requirement.wrong_kind",
 	                     "shader.form", "sound_bank.layer_unheard", "sound_bank.set_name_repeated", "sound_bank.set_silent",
 	                     "sound_bank.wave_file_name", "sound_bank.wave_name_repeated", "sound_bank.wave_no_file",
 	                     "sound_profiles.name_repeated", "sound_profiles.no_default",

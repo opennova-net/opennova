@@ -143,7 +143,7 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	ui_kit::tooltip("Kept with the project; no check reads it yet. A multiplayer game reads the menus' files and a "
 	                "mission's: Missions brings the files a mission needs into Problems.");
 	ImGui::SeparatorText("Expansion");
-	ExpansionChoice choice{ held.builds_on, held.as_expansion, held.expansion };
+	ExpansionChoice choice{ held.builds_on, held.as_expansion, held.expansion, held.base_project };
 	bool changed = false;
 	const bool expansion_ok = expansion_.draw(choice, v.project.install_expansions, v.project.document->expansion, changed);
 	if (changed) {
@@ -151,6 +151,7 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 		members.set("builds_on", io::JsonValue::make_string(choice.builds_on));
 		members.set("as_expansion", io::JsonValue::make_bool(choice.as_expansion));
 		members.set("expansion", io::JsonValue::make_string(choice.name));
+		members.set("base_project", io::JsonValue::make_string(choice.base_project));
 		window_requests::set_workspace(workspace, "settings", std::move(members));
 	}
 	if (choice.value().name != v.project.document->expansion.name && !v.project.document->expansion.name.empty() &&
@@ -237,9 +238,11 @@ void ProjectSettingsDialog::apply(Workspace &workspace) {
 	settings.title = held.title;
 	settings.mission = held.mission;
 	settings.multiplayer = held.multiplayer;
-	const ProjectExpansion expansion = ExpansionChoice{ held.builds_on, held.as_expansion, held.expansion }.value();
+	const ProjectExpansion expansion =
+	        ExpansionChoice{ held.builds_on, held.as_expansion, held.expansion, held.base_project }.value();
 	settings.expansion = expansion.name;
 	settings.builds_on = expansion.builds_on;
+	settings.base_project = expansion.base_project;
 	settings.game_install = held.game_install;
 	if (!v.activity.source_run) settings.runtime_executable = held.runtime;
 	settings.play_mode = held.play_mode;

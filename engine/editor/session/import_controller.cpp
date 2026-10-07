@@ -105,7 +105,7 @@ void ImportController::preview_install(const EditorRequest &request) {
 	std::vector<Diagnostic> diagnostics;
 	std::vector<ImportChoiceFacts> facts;
 	std::vector<ImportChoice> sources =
-	        list_retail_import_choices(core_.game_install(), *view_.project.document, diagnostics, &facts);
+	        list_retail_import_choices(core_.base_game(), *view_.project.document, diagnostics, &facts);
 	// Everything: every file chosen, none to choose from, no walk (the closure of everything is
 	// everything: nothing a walk could find is not chosen already).
 	if (request.all) {
@@ -625,7 +625,7 @@ void ImportController::start_plan() {
 	preview.planning = false;
 	const uint64_t id = core_.start_operation(std::make_unique<ImportPlanOperation>(core_.problems(), paths_,
 			*view_.project.document, core_.problems().graph(), view_.documents.open, preview.roots,
-			preview.with_dependencies, core_.game_install()));
+			preview.with_dependencies, core_.base_game()));
 	if (id == 0) return core_.refuse_busy(std::string()); // the gate let no operation run beside it
 	preview.planning = true; // until its plan is shown (show_plan) or the operation ends without one
 	core_.outcome().operation = id;
@@ -732,7 +732,7 @@ void ImportController::import_files(const EditorRequest &request) {
 		shown = preview.plan;
 		replan = std::make_unique<ImportPlanOperation>(core_.problems(), paths_, *view_.project.document,
 				core_.problems().graph(), view_.documents.open, preview.roots, preview.with_dependencies,
-				core_.game_install());
+				core_.base_game());
 	} else if (imports.empty()) {
 		view_.activity.status = "Nothing to import.";
 		core_.touch(ViewConcern::Output);
@@ -853,9 +853,9 @@ OperationOutcome ImportController::absorb_import(ImportOperation &operation) {
 }
 
 void ImportController::refresh_install_files() {
-	view_.project.retail_files = view_.project.open ? list_retail_file_names(core_.game_install(), *view_.project.document)
+	view_.project.retail_files = view_.project.open ? list_retail_file_names(core_.base_game(), *view_.project.document)
 	                                        : std::vector<std::string>();
-	view_.project.base_files = view_.project.open ? list_base_file_names(core_.game_install(), *view_.project.document)
+	view_.project.base_files = view_.project.open ? list_base_file_names(core_.base_game(), *view_.project.document)
 	                                      : std::vector<std::string>();
 	core_.problems().set_base_names(view_.project.base_files); // the missing references' words read them
 	core_.touch(ViewConcern::Files);
@@ -883,7 +883,7 @@ void ImportController::unsaved_files(const EditorRequest &request, std::vector<s
 	if (!plan) {
 		if (request.planned || !request.replace) return; // refused once it is served: no preview is open
 		plan = std::make_shared<const ImportPlan>(plan_import(request.imports, false, paths_, *view_.project.document,
-				*view_.project.scan, core_.problems().graph(), core_.game_install(), SIZE_MAX));
+				*view_.project.scan, core_.problems().graph(), core_.base_game(), SIZE_MAX));
 	}
 	// What it takes and whether it replaces: with planned, the rows the dialog's checks take (sources_of's rule).
 	std::set<ImportChoice> asked(request.imports.begin(), request.imports.end());
