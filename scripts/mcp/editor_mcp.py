@@ -48,14 +48,15 @@ as usual.
     python scripts/mcp/game_mcp.py call game_menu '{"op": "state"}' --port <that port>
     python scripts/mcp/editor_mcp.py play start --mission 04TR.bms   # the game started in that mission
     python scripts/mcp/editor_mcp.py call editor_viewport '{"op": "items", "limit": 20}'
-    python scripts/mcp/editor_mcp.py stop --pid-file build/editor.pid
+    python scripts/mcp/editor_mcp.py stop --pid-file build/editor.pid   # that launch's editor alone, on its port
 
 Exit codes, as opennova-project's (1 not done, 2 not read): 0 ok; 1 a `request`
 (or a `viewport` write) was not done (its outcome: refused, did not finish, or waits on the
 unsaved-changes prompt), or a build or play did not land or did not end in
 time; 2 not read: a usage error, no endpoint answered, or the tool reported
-isError (a request or query the editor did not read); 3 a JSON-RPC error; 6
-stop: the process outlived the quit; 7 launch failed.
+isError (a request or query the editor did not read), or a stop refused (its
+endpoint not the process --pid or --pid-file names, or no process nor --port
+given); 3 a JSON-RPC error; 6 stop: the process outlived the quit; 7 launch failed.
 """
 
 from __future__ import annotations
@@ -75,7 +76,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import game_mcp  # noqa: E402  (the shared transport and process helpers)
 from game_mcp import (  # noqa: E402
     EXIT_LAUNCH_FAILED, EXIT_OK, EXIT_STOP_SURVIVED, EXIT_TOOL_ERROR, EXIT_USAGE, BehindLaunch, GameMcp,
-    GameMcpError, emit_payload, find_godot, images_of, parse_json_arg, pid_alive, port_open, tail, text_of,
+    GameMcpError, check_launched_endpoint, emit_payload, find_godot, images_of, parse_json_arg, pid_alive,
+    port_open, reported_pid, runtime_sibling, serves_pid, stop_target, tail, text_of, write_pid_file,
 )
 
 # 8975 is the game, 8976 a LAN joiner (docs/mcp.md); the editor takes the next one.
@@ -102,6 +104,7 @@ def cmd_launch(args: argparse.Namespace) -> int:
         executable = Path(args.editor).resolve()
         if not executable.is_file():
             raise GameMcpError(EXIT_LAUNCH_FAILED, f"editor executable not found: {executable}")
+        executable = runtime_sibling(executable)  # the editor's own process, never its console wrapper's
         argv = [str(executable)]
         cwd = executable.parent
     else:
@@ -146,7 +149,7 @@ def cmd_launch(args: argparse.Namespace) -> int:
             child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT,
                                      cwd=str(cwd), **popen_kwargs)
         if args.pid_file:
-            Path(args.pid_file).write_text(str(child.pid), encoding="utf-8")
+            write_pid_file(args.pid_file, child.pid, port)  # stop --pid-file reaches this port with no --port
 
         deadline = time.monotonic() + args.timeout
         client = GameMcp.for_port(port)
@@ -161,10 +164,12 @@ def cmd_launch(args: argparse.Namespace) -> int:
                     + (f"\n--- {log_file} ---\n{tail(log_file)}" if log_file else ""))
             if port_open(port):
                 try:
-                    client.initialize(timeout=5)
-                    break
+                    serving = reported_pid(client.initialize(timeout=5))
                 except GameMcpError:
                     pass
+                else:
+                    check_launched_endpoint(port, serving, child.pid, "editor")
+                    break
             time.sleep(0.25 if not behind.active else 0.05)
         else:
             raise GameMcpError(
@@ -575,15 +580,12 @@ def cmd_logs(args: argparse.Namespace) -> int:
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
-    port = int(args.port)
-    pid = args.pid or 0
-    if args.pid_file and not pid:
-        try:
-            pid = int(Path(args.pid_file).read_text(encoding="utf-8").strip() or "0")
-        except (OSError, ValueError):
-            pid = 0
-    client = client_of(args)
-    if port_open(port):
+    # Given a process (--pid, --pid-file), only that process's endpoint is asked to stop its game and
+    # quit: the port is the one its launch recorded unless --port says otherwise, and an endpoint there
+    # that is not the process's is refused before anything is sent (game_mcp.stop_target, serves_pid).
+    # Given neither a process nor --port, nothing is sent (8977 may be a person's own editor).
+    pid, port, client = stop_target(args, DEFAULT_PORT, "editor")
+    if (args.url or port_open(port)) and (not pid or serves_pid(client, pid, "editor")):
         try:
             client.call("editor_play", {"op": "stop"}, timeout=30)
         except GameMcpError:
@@ -593,7 +595,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
         except GameMcpError:
             pass  # the editor may drop the connection while quitting
     else:
-        print(f"no endpoint on port {port}; waiting for the process only")
+        print(f"no endpoint answered at {client.url}; waiting for the process only")
     deadline = time.monotonic() + args.timeout
     while time.monotonic() < deadline:
         alive = pid_alive(pid) if pid else port_open(port)
@@ -618,12 +620,13 @@ def cmd_stop(args: argparse.Namespace) -> int:
 def client_of(args: argparse.Namespace) -> GameMcp:
     if getattr(args, "url", None):
         return GameMcp(args.url)
-    return GameMcp.for_port(int(args.port))
+    return GameMcp.for_port(DEFAULT_PORT if args.port is None else int(args.port))
 
 
 def add_endpoint_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT,
-                        help=f"the editor's --mcp-port (default {DEFAULT_PORT})")
+    # None when left out (client_of reads it as DEFAULT_PORT), so `stop` can tell a --port given from none.
+    parser.add_argument("--port", type=int, default=None,
+                        help=f"the editor's --mcp-port (default {DEFAULT_PORT}; stop: the --pid-file's)")
     parser.add_argument("--url", default=None, help="the full endpoint URL instead of --port")
 
 
@@ -647,7 +650,8 @@ def build_parser() -> argparse.ArgumentParser:
                              "it is shown without activation and kept behind every other window)")
     launch.add_argument("--log-file", default=None, help="Godot --log-file for the editor process")
     launch.add_argument("--stdout-log", default=None, help="where the child's stdout/stderr go (default: the temp dir)")
-    launch.add_argument("--pid-file", default=None, help="write the editor's PID here (stop --pid-file reads it)")
+    launch.add_argument("--pid-file", default=None,
+                        help="write the editor's PID and port here, as JSON (stop --pid-file reads both)")
     launch.add_argument("--timeout", type=float, default=240.0, help="seconds to wait for the endpoint")
     launch.set_defaults(func=cmd_launch)
 
@@ -937,10 +941,13 @@ def build_parser() -> argparse.ArgumentParser:
     logs.add_argument("--limit", type=int, default=200)
     logs.set_defaults(func=cmd_logs)
 
-    stop = commands.add_parser("stop", help="stop the game, quit the editor, wait for the process")
+    stop = commands.add_parser("stop", help="stop the game, quit the editor, wait for the process (only the "
+                                            "process --pid or --pid-file names, when given)")
     add_endpoint_options(stop)
-    stop.add_argument("--pid", type=int, default=None)
-    stop.add_argument("--pid-file", default=None)
+    stop.add_argument("--pid", type=int, default=None,
+                      help="the editor's process: its endpoint must name this pid, or nothing is sent")
+    stop.add_argument("--pid-file", default=None,
+                      help="a launch's --pid-file: its pid, as --pid, and its port when --port is left out")
     stop.add_argument("--timeout", type=float, default=30.0)
     stop.set_defaults(func=cmd_stop)
     return parser
