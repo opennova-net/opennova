@@ -86,6 +86,9 @@ struct ProjectPaths {
 	// The game install's files an expansion's Play copied where they could not be linked into its run
 	// directory (another volume), a folder per install, kept for the next (prepare_expansion_run).
 	std::string install_copy_dir;
+	// Where a file the editor deletes goes (DI-25, project/project_trash.h): a numbered folder per delete,
+	// the files under it at their project-relative paths, never emptied by the editor.
+	std::string trash_dir;
 
 	static ProjectPaths for_root(const std::string &root);
 	// The project-relative export output resolved against the root, with no trailing separator (an
