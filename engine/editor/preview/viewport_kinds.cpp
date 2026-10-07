@@ -8,6 +8,7 @@
 #include <editor/model/document.h>
 #include <editor/preview/definition_viewport.h>
 #include <editor/preview/effect_viewport.h>
+#include <editor/preview/environment_viewport.h>
 #include <editor/preview/hud_viewport.h>
 #include <editor/preview/menu_viewport.h>
 #include <editor/preview/mission_viewport.h>
@@ -77,6 +78,13 @@ constexpr ViewportFeed kDefinitionFeeds[] = {
 	{ T::Catalog, true },
 };
 
+// The environment's (DI-19b): an environment, the Document tab's main view beside its records, read as Save
+// would write it (the device reads it through the project's files, the open document standing in for its
+// file); the Shell keeps two of its devices at most (each holds a terrain).
+constexpr ViewportFeed kEnvironmentFeeds[] = {
+	{ T::Environment, true },
+};
+
 // The model's scene waits for a gesture's end (built anew over frames: a drag shows its markers
 // over the scene that stands); the menu's screen is configured again as a drag goes (S13 V8); the
 // mission's waits too (a drag is Updates alone: its entities move in place), and the Shell keeps two
@@ -99,6 +107,8 @@ constexpr ViewportKindRow kRows[] = {
 	{ ViewportKind::Hud, ViewportRole::Preview, true, false, false, kHudFeeds, std::size(kHudFeeds), HudViewport::make },
 	{ ViewportKind::Definition, ViewportRole::Preview, false, true, false, kDefinitionFeeds, std::size(kDefinitionFeeds),
 			DefinitionViewport::make },
+	{ ViewportKind::Environment, ViewportRole::Main, true, false, false, kEnvironmentFeeds, std::size(kEnvironmentFeeds),
+			EnvironmentViewport::make, true, 2 },
 };
 
 static_assert(std::size(kRows) == kViewportKindCount, "every ViewportKind has exactly one row");

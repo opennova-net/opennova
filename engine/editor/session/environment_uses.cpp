@@ -130,6 +130,15 @@ EnvironmentUses environment_uses(const SessionView &view, const std::string &pat
 			                                                   info.water_murk);
 			use.start_time = info.start_time;
 			use.minutes_per_day = info.minutes_per_day;
+			use.tile_set = info.tile_set;
+			use.attrib_flags = static_cast<uint32_t>(info.attrib_flags);
+			use.water_override = info.water_override;
+			use.fog_override = info.fog_override;
+			use.water_murk = info.water_murk;
+			for (int i = 0; i < 3; ++i) {
+				use.fog_color[i] = info.fog_color[i];
+				use.water_color[i] = info.water_color[i];
+			}
 		}
 		if (!use.terrain_file.empty()) {
 			std::vector<uint8_t> bytes;
