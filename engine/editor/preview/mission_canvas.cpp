@@ -1,6 +1,7 @@
 #include <editor/preview/mission_canvas.h>
 
 #include <algorithm>
+#include <iterator>
 #include <cmath>
 #include <cstdio>
 
@@ -655,7 +656,20 @@ OverlayList MissionCanvas::shapes(const ViewportContext &context, const CanvasIn
 			overlay.box = true;
 		overlay.box_snap = frame_.snap;
 	}
-	return mission_overlay_shapes(overlay);
+	OverlayList shapes = mission_overlay_shapes(overlay);
+	// The Listen's sources ringed at their reach (DI-36), under the marks drawn after them.
+	if (viewport.options().listen.on && viewport.listen().open()) {
+		OverlayList heard;
+		const NodeId hovered = overlay.hover >= 0 && size_t(overlay.hover) < frame_.marks.size()
+				? frame_.marks[size_t(overlay.hover)].record.row
+				: 0;
+		mission_listen_shapes(viewport.listen(), viewport.camera(), in.width, in.height, hovered,
+				viewport.options().mark_range, heard);
+		heard.shapes.insert(heard.shapes.end(), std::make_move_iterator(shapes.shapes.begin()),
+				std::make_move_iterator(shapes.shapes.end()));
+		return heard;
+	}
+	return shapes;
 }
 
 CanvasCursor MissionCanvas::cursor(const ViewportContext &, const CanvasInput &in) const {
@@ -667,9 +681,17 @@ CanvasCursor MissionCanvas::cursor(const ViewportContext &, const CanvasInput &i
 }
 
 std::string MissionCanvas::hover_tip(const ViewportContext &, const CanvasInput &in) const {
-	// The label beside the hovered mark says it (mission_overlay): no tip beside it.
-	(void)in;
-	return std::string();
+	// The label beside the hovered mark says it (mission_overlay): no tip beside it, but for what an ambient source
+	// plays while the view listens (DI-36).
+	if (!frame_.viewport || looking_ || gesture_.dragging() || tool() != MissionTool::Select) return std::string();
+	const MissionViewport &viewport = *frame_.viewport;
+	if (!viewport.options().listen.on || !viewport.listen().open()) return std::string();
+	const int hovered = mission_canvas_under(frame_, in, MissionPick::Click);
+	if (hovered < 0 || size_t(hovered) >= frame_.marks.size()) return std::string();
+	std::string tip;
+	for (const std::string &line : viewport.listen().source_words(frame_.marks[size_t(hovered)].record.row))
+		tip += (tip.empty() ? "" : "\n") + line;
+	return tip;
 }
 
 const MissionGroundFacts &MissionCanvas::ground(const ViewportContext &context, const CanvasInput &in) const {
