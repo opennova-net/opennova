@@ -164,7 +164,7 @@ int synthetic_every_key() {
 	CHECK(text.find("VEHICLE_HUD\r\nsid\tDapche1\r\ninterface\th_apche.tga\r\ndriver\t51,103\r\nemplace\t1,51,78\r\n"
 	                "VEHICLE_END\r\n") != std::string::npos);
 	CHECK(text.find("//") == std::string::npos && text.find("NOSUCHKEY") == std::string::npos);
-	// HUDORDERS is unauthored here at its static -1 / -1: left out, it reads -1 / -1 again.
+	// HUDORDERS is unauthored here at its BSS 0 / 0: left out, it reads 0 / 0 again.
 	Parsed bare("HUDCLIP 5,6\r\n");
 	const std::string bare_text = def_write_hudpos(bare.file).text;
 	CHECK(bare_text == "HUDCLIP\t5,6\r\n");
@@ -181,7 +181,7 @@ int synthetic_key_values() {
 	      values == std::vector<std::string>({ "168", "616", "0", "right" }));
 	Parsed empty("");
 	CHECK(hudpos_key_values(empty.file.hud, "HUDORDERS", "", values) &&
-	      values == std::vector<std::string>({ "-1", "-1" }));
+	      values == std::vector<std::string>({ "0", "0" }));
 	CHECK(hudpos_key_values(read.file.hud, "HUDSTANCE", "1", values) && values[1] == "2" && values[3] == "onhstnc1.tga");
 	CHECK(!hudpos_key_values(read.file.hud, "HUDSTANCE", "4", values));
 	CHECK(hudpos_key_values(read.file.hud, "HUDLS_SLOT", "6", values) &&
@@ -195,7 +195,6 @@ int synthetic_key_values() {
 	// A name the tokenizer cannot carry is refused: the model would not read back.
 	DefHudPosFile odd{};
 	std::strcpy(odd.hud.font_hi, "a\"b.fnt");
-	odd.hud.orders[0] = odd.hud.orders[1] = -1;
 	CHECK(!def_write_hudpos(odd).ok());
 	std::printf("key values: each key's as the writer writes it; a name it cannot carry refused\n");
 	return 0;

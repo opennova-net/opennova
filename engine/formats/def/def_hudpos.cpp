@@ -473,10 +473,13 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
 }
 
 int def_parse_hudpos(const char *path, DefHudPosFile *out) {
+    /* Every global a key leaves alone stays zero, HUDORDERS's pair included:
+       the pair is BSS (no file bytes) and its arm is the only writer -- the
+       -1 / -1 an earlier reading took for its static value was IDA's read of
+       unloaded bytes (D-HUD-54) [orig: dword_2723D84 / dword_2723D88, written
+       only by the HUDORDERS arm @0x5A04DB / @0x5A04F3, read by sub_59AEE0
+       @0x59AF0A] */
     memset(out, 0, sizeof(*out));
-    /* HUDORDERS defaults to -1 / -1, the globals' static value
-       [orig: dword_2723D84 / dword_2723D88] */
-    out->hud.orders[0] = out->hud.orders[1] = -1;
     size_t file_len;
     char *buf = read_file(path, &file_len);
     if (!buf) return -1;
@@ -486,10 +489,7 @@ int def_parse_hudpos(const char *path, DefHudPosFile *out) {
 }
 
 int def_parse_hudpos_memory(const uint8_t *data, size_t size, DefHudPosFile *out) {
-    memset(out, 0, sizeof(*out));
-    /* HUDORDERS defaults to -1 / -1, the globals' static value
-       [orig: dword_2723D84 / dword_2723D88] */
-    out->hud.orders[0] = out->hud.orders[1] = -1;
+    memset(out, 0, sizeof(*out)); /* unauthored is zero (def_parse_hudpos) */
     if (!data) return -1;
     return parse_hudpos_buf((const char *)data, size, out);
 }
