@@ -9,7 +9,10 @@
 // the sandbox alone (the settings list; the document untouched); EXIT, a URL and a jump to a menu the project
 // lacks are said, not done; the single-player screen's list holds the project's missions, a pick enables its
 // ACCEPT and ACCEPT says the mission it would start; Reset; the canvas's click refused while trying; Try off
-// is the editor's picture again; refused changes (a click or a key with Try off, a key no name gives).
+// is the editor's picture again; refused changes (a click or a key with Try off, a key no name gives). A Mods
+// screen (D-MNU-31) lists the base game's row, then the expansion folders of the game install the project plays
+// over by their names in the game's order, the base game highlighted; a pick shows its description, ACCEPT on the
+// game running takes nothing and on another says the switch.
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -328,6 +331,64 @@ int test_try_navigates() {
 	return 0;
 }
 
+std::vector<uint8_t> exp_info(const char *name, const char *description) {
+	rtxt::File text;
+	text.sections.push_back({ "exp_info", 2 });
+	text.entries.push_back({ "EXP_NAME", name, {}, 0 });
+	text.entries.push_back({ "EXP_DESC", description, {}, 0 });
+	std::vector<uint8_t> out;
+	std::string error;
+	rtxt::write(text, out, error);
+	return out;
+}
+
+int test_try_lists_the_mods() {
+	TryProject project;
+	TEST_EXPECT(project.made);
+	if (!project.made) return 1;
+	// The game install the project plays over: two expansion folders, one named by its loose <n>.bin.
+	const std::string install = project.dir.file("install");
+	bool ok = editor_test::write_bytes(install + "/expansion/onjo1/onjo1.bin", exp_info("OpenNova: Indigo Storm", "A storm."));
+	ok = ok && editor_test::write_bytes(install + "/expansion/jox01/version.txt", { '1' });
+	const std::string mods = screen("OPTIONS",
+			button("list", "AVAIL_LIST", 100, 100, 390, 300,
+					"<FONT><NAME>Arial12b.fnt</NAME></FONT><MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>") +
+					button("multiline_edit", "MOD_DESC", 410, 100, 700, 300, "") +
+					button("button", "ACCEPT", 510, 400, 700, 440, ""));
+	ok = ok && editor_test::write_text(project.root + "/mods.mnu", mods);
+	TEST_EXPECT(ok);
+	editor_test::handle_to_end(project.session, request::open_project(project.root, false, install));
+	while (project.session.view().activity.validation.running) project.session.poll();
+	TEST_EXPECT(project.session.view().project.mods_list.size() == 2);
+	const AssetEntry *menu = project.session.view().project.scan->named("mods.mnu");
+	TEST_EXPECT(menu != nullptr);
+	if (!menu) return 1;
+	project.path = menu->relative_path;
+	project.session.handle(request::open_document(project.path));
+	TEST_EXPECT(project.change("try", R"({"on": true})"));
+	TEST_EXPECT(project.at() == "mods.mnu:OPTIONS");
+	const JsonValue list = project.item("AVAIL_LIST");
+	const JsonValue *items = list.get("items");
+	TEST_EXPECT(items && items->array.size() == 3);
+	if (!items || items->array.size() != 3) return 1;
+	TEST_EXPECT(items->array[0].string == "Joint Operations: Typhoon Rising");
+	TEST_EXPECT(items->array[1].string == "Unnamed Expansion" && items->array[2].string == "OpenNova: Indigo Storm");
+	TEST_EXPECT(list.get_number("selected", -1) == 0);
+	// ACCEPT on the game running takes nothing.
+	TEST_EXPECT(project.click(600, 420));
+	TEST_EXPECT(project.last_outcome() ==
+	            "nothing: the game would take nothing: Joint Operations: Typhoon Rising is the game running");
+	// A pick of the third row: its description; ACCEPT says the switch.
+	TEST_EXPECT(project.click(200, 150));
+	TEST_EXPECT(project.item("AVAIL_LIST").get_number("selected", -1) == 2);
+	TEST_EXPECT(project.item("MOD_DESC").get_string("text", "") == "A storm.");
+	TEST_EXPECT(project.click(600, 420));
+	TEST_EXPECT(project.last_outcome() ==
+	            "apply_expansion: the game would switch to OpenNova: Indigo Storm (expansion\\onjo1) for this run, "
+	            "reloading everything and showing its main menu");
+	return 0;
+}
+
 int test_key_names() {
 	menu::MenuKeyInput key;
 	TEST_EXPECT(menu_try_key_from_name("vk_return", false, key) && key.vk == 13 && key.unicode == 0);
@@ -344,6 +405,7 @@ int test_key_names() {
 
 int main() {
 	TEST_EXPECT(test_try_navigates() == 0);
+	TEST_EXPECT(test_try_lists_the_mods() == 0);
 	TEST_EXPECT(test_key_names() == 0);
 	std::printf("editor_menu_try OK\n");
 	return 0;
