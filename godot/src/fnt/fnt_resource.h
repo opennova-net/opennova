@@ -56,6 +56,9 @@ public:
 
 	Ref<FontFile> to_font_file() const;
 
+	// The parsed font a binding lays glyph runs out over (hud::GameFont); null while none is held.
+	const opennova::fnt::fnt_font_t *parsed_font() const { return _has_valid_font() ? &font_ : nullptr; }
+
 private:
 	opennova::fnt::fnt_font_t font_;
 	bool valid_ = false;

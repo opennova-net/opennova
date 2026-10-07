@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include <runtime/hud/game_font.h>
+
 // The mission loading screen's witnessed spec: the GAMETYPE -> LoadingText
 // key policy and the layout/appearance block the shell's LoadingScreen draws
 // from (the ENG-4/FNT pattern: policy + constants native, the CanvasItem
@@ -165,6 +167,23 @@ inline constexpr int kSplashContinueY = 730;
 inline constexpr uint32_t kSplashContinueColorOn = 0xFFFFFFFFu;
 inline constexpr uint32_t kSplashContinueColorOff = 0xFFFF8080u;
 inline constexpr int kSplashBlinkMaskMs = 0x200;
+
+// The continue line laid out as the splash draws it over a `surface_w` x `surface_h` display, `text` in
+// the game's code page: the design point through HUD_DrawTextAtVirtualPos's integer rounding, ((512 * W
+// + 512) / 1024, (730 * H + 384) / 768) [orig: HUD_DrawTextAtVirtualPos @ 0x5d3ec0], its mode 2 the
+// centred half-bright drawer, which halves the phase's colour, its alpha forced opaque, and lays the run
+// out centred at the large slot's scale, W / 800 [orig: sub_5D2EA0 @ 0x5d2ece ->
+// HUD_DrawTextCentered_HalfBright @ 0x580680 -> CGameFont_DrawText @ 0x6752c0, flags 1 @ 0x58069d;
+// the slot @ HUD_InitAllFonts 0x51ef62 (hud_label_font_choice)]. The quads carry the halved colour, the
+// raw diffuse the font page's material doubles on the device (kFontPageMaterialWord, MODULATE2X), so
+// the line reads at the phase's colour, less the fold's low bit: white at 254, the red phase at (254,
+// 128, 128) (docs/interface/loading-screen-re.md D-LOADSCR-10). Not the session block's text: the
+// loading screen blends that into the background's pixels on the CPU, texel times colour over the
+// pixel by the texel's alpha, no material [orig: Render_LoadingScreen, its two fonts aimed at the
+// background's pixels @ 0x521f1a..0x521f42 / 0x521f86..0x521fa8 -> render_draw_wrapped_text_block_ex @
+// 0x580eb0 -> CGameFont_RenderText @ 0x675e40 -> CGameFont_DrawBlendedGlyph @ 0x6744a0].
+GameFontRun splash_continue_run(const GameFont &font, const char *text, int surface_w, int surface_h,
+		bool phase_on);
 
 // --- the wrapped text block (loading_screen.cpp) --------------------------------
 // The original composites its text blocks with Render_DrawWrappedTextBlockEx

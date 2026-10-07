@@ -31,6 +31,18 @@ Ref<Texture2D> font_page_texture(const opennova::fnt::fnt_font_t &p_font, uint32
 // (renderer::material_color_stage of hud::kFontPageMaterialWord).
 bool font_page_runs_modulate2x();
 
+// The canvas_item shader of an item whose glyph runs flag nothing else on it
+// (the menus' items, the loading screen): a command whose UV.y carries
+// kGlyphCanvasUvFlag is a glyph run on a font page, whose material is colour
+// family 0x600 (hud::kFontPageMaterialWord): vertex() strips the flag and
+// fragment() runs MODULATE2X(TEXTURE, DIFFUSE) over COLOR (the texel times the
+// vertex colour), saturated per channel, the alpha MODULATE as COLOR has it,
+// under the SRCALPHA/INVSRCALPHA blend. The flag is negative because a menu's
+// tiled rects carry UVs far above 1 and none below 0; every other command keeps
+// the default texel x vertex colour.
+const char *glyph_canvas_shader_code();
+inline constexpr float kGlyphCanvasUvFlag = -16.0f;
+
 // One page run's triangle array.
 struct GlyphRunArrays {
 	PackedVector2Array points;
