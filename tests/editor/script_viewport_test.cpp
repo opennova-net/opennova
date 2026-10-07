@@ -109,8 +109,8 @@ std::unique_ptr<DocumentBase> document_of(AssetKind kind, const std::string &tex
 
 int test_kind_table() {
 	// The menu's, the model's, the script's, the mission's (S14), the texture's (S18), the effect's (DI-14),
-	// the HUD's (DI-20), the definition's (DI-21).
-	TEST_EXPECT(kViewportKindCount == 8);
+	// the HUD's (DI-20), the definition's (DI-21), the environment's (DI-19b).
+	TEST_EXPECT(kViewportKindCount == 9);
 	TEST_EXPECT(std::string(viewport_kind_token(ViewportKind::Script)) == "script");
 	ViewportKind named = ViewportKind::kCount;
 	TEST_EXPECT(viewport_kind_from_token("script", named) && named == ViewportKind::Script);
@@ -138,11 +138,12 @@ int test_kind_table() {
 	}
 	for (size_t i = 1; i <= kDocumentTypeCount; ++i) mains += main_viewport_kind(static_cast<DocumentTypeId>(i)) != ViewportKind::kCount;
 	for (size_t i = 0; i < kViewportKindCount; ++i)
-		// The Main-role kinds: the script's, the mission's (S14) and the texture's (S18).
+		// The Main-role kinds: the script's, the mission's (S14), the texture's (S18) and the environment's (DI-19b).
 		TEST_EXPECT((viewport_kind_row(static_cast<ViewportKind>(i)).role == ViewportRole::Main) ==
-		            (i == size_t(ViewportKind::Script) || i == size_t(ViewportKind::Mission) || i == size_t(ViewportKind::Texture)));
-	// The seven text types, the mission (S14) and the texture (S18) have a Main-role kind.
-	TEST_EXPECT(shown == 7 && mains == 9);
+		            (i == size_t(ViewportKind::Script) || i == size_t(ViewportKind::Mission) || i == size_t(ViewportKind::Texture) ||
+		             i == size_t(ViewportKind::Environment)));
+	// The seven text types, the mission (S14), the texture (S18) and the environment (DI-19b) have a Main-role kind.
+	TEST_EXPECT(shown == 7 && mains == 10);
 	// Its viewport: one option, assist (the MCP gaps lane: none asked), no camera, no canvas; the empty one's
 	// reason.
 	std::unique_ptr<ViewportModel> made = row.make("t.wac");
