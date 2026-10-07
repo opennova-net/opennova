@@ -149,7 +149,7 @@ int test_uses() {
 	// A terrain's colour map; a sky's two cloud layers (ARCHIVE: a PCX's alpha from its palette).
 	const std::vector<TextureUse> &map = index.uses_of(view, "textures/map.tga");
 	TEST_EXPECT(map.size() == 1 && map[0].role == TextureRoleId::TerrainColourMap && map[0].field == "polytrn_colormap" &&
-	            map[0].words == "Terrain colour map: isle.trn (polytrn_colormap)");
+	            map[0].words == "Terrain colour map: Terrain in isle.trn (polytrn_colormap)");
 	const std::vector<TextureUse> &cloud = index.uses_of(view, "textures/cloud.pcx");
 	TEST_EXPECT(cloud.size() == 2 && cloud[0].role == TextureRoleId::SkyCloud &&
 	            cloud[0].load.transform == TextureLoadTransform::LuminanceAlpha);
