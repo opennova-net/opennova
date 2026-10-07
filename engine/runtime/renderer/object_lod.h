@@ -28,9 +28,36 @@ inline constexpr bool object_subpixel_culled(int32_t projected_radius_q16) {
 // [orig: Viewport_TransformAndClipPoint @ 0x411782..0x411788]
 inline constexpr int32_t kObjectLodBehindEyeRadiusQ16 = 0x10000000;
 
-// The highest shipped object-detail profile (the frame scale's fixed-quality
-// leg). [orig: Terrain_RenderWorldScene @ 0x5c944c]
+// The object detail the frame scale and the death-piece scale read: game.cfg's
+// `object_polydetail`, which the config load clamps into 0..3
+// [orig: Settings_ClampGraphicsOptions @ 0x54d4e4..0x54d4f2], and which each
+// mission start copies with the session's settings, so a change made in the
+// options takes effect at the next mission
+// [orig: apply_session_settings_to_globals @ 0x551565..0x551574 — the 13
+//  dwords from 0x25507C4 (game.cfg +0x10C) into 0x24D2040, so the word at
+//  +0x114 lands in dword_24D2048; called by Game_StartMission @ 0x524662].
+// Level 3, the highest shipped profile, is the frame scale's fixed-quality
+// leg [orig: Terrain_RenderWorldScene @ 0x5c944c].
+inline constexpr int kObjectLodDetailLevelMin = 0;
 inline constexpr int kObjectLodDetailLevelMax = 3;
+
+// The config load's clamp of a persisted object detail.
+inline constexpr int clamp_object_lod_detail(int32_t level) {
+  return level < kObjectLodDetailLevelMin   ? kObjectLodDetailLevelMin
+         : level > kObjectLodDetailLevelMax ? kObjectLodDetailLevelMax
+                                            : static_cast<int>(level);
+}
+
+// The object detail a fresh profile starts at: the rung the first-launch video
+// test and the VIDEODEFAULT preset write on a device past the test's fast-CPU
+// (above 2980 MHz) and video-memory (above 120 MiB) marks — level 1, raised to
+// 2 when both hold, with the default preset's zero offset. The slower devices'
+// rungs (1, or 0 on a CPU under 1980 MHz without the memory) are not probed.
+// [orig: Renderer_ComputeQualityLevels @ 0x586196..0x5861c4 (the object-detail
+//  word, quality_levels[2]), fed by sub_587790 @ 0x5877dc..0x587834 (the CPU
+//  and memory marks); Game_RunVideoTestDialog @ 0x53ed1b and the VIDEODEFAULT
+//  preset sub_55A430 @ 0x55a43a both pass offset 0]
+inline constexpr int kObjectLodDetailFreshProfile = 2;
 
 // Entity-local sphere consumed by the visibility projector, in the source
 // model's fixed-point axes. It is distinct from GHDR's origin-centered radius.
@@ -145,14 +172,18 @@ inline bool held_weapon_projection_culled(int32_t projected_radius_q16) {
 // The per-frame multiplier applied to every projected radius before the
 // threshold walk: the detail profile's quality term (detail * 0.33 + 0.34,
 // or the fixed 2.0 on detail 3, the highest shipped profile) divided by the
-// viewport width in pixels, times the 640-wide reference.
-// [orig: Terrain_RenderWorldScene @ 0x5c940c..0x5c9468;
-//  Terrain_CollectVisibleEntitiesForReflection @ 0x5c90c3..0x5c90f1]
+// viewport width in pixels, times the 640-wide reference. `detail_level` is
+// the session's object detail (kObjectLodDetailLevelMax's note): at 0, 1 or 2
+// a model switches to each coarser level at 0.17, 0.34 or 0.5 of the distance
+// it does at 3.
+// [orig: Terrain_RenderWorldScene @ 0x5c940c..0x5c9468 (fild dword_24D2048
+//  @ 0x5c940c, the level-3 test @ 0x5c9427);
+//  Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0..0x5c90f1]
 float object_lod_frame_scale(int detail_level, float viewport_width);
 
 // The death-piece draw's own radius multiplier: the detail profile's quality
 // term alone (detail * 0.33 + 0.34, no width normalization and no detail-3
-// substitution), stored as a float.
+// substitution) over the same session object detail, stored as a float.
 // [orig: DeathPiece_RenderVisible @ 0x57b831..0x57b84a — fild dword_24D2048,
 //  fmul flt_7C59B4, fadd flt_7D76CC, fstp]
 float death_piece_lod_scale(int detail_level);

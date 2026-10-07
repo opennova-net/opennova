@@ -28,8 +28,8 @@ namespace opennova::world {
 
 // The shell's view, presentation frame: a unit forward/right/up triad, the
 // eye, the vertical field of view, the aspect (tan_h / tan_v of the drawn
-// frustum) and the viewport width in pixels, plus the environment words the
-// occlusion frame carries. No near distance: retail's occlusion planes pass
+// frustum) and the viewport width in pixels, plus the environment words and
+// the session's object detail the occlusion frame carries. No near distance: retail's occlusion planes pass
 // through the eye and its projector carries its own near word
 // (kViewportNearQ16, world/occlusion.h).
 struct OcclusionViewSpec {
@@ -44,6 +44,7 @@ struct OcclusionViewSpec {
 	float water_z_units = 0.0f;
 	uint32_t local_blink_flags = 0;
 	bool force_indoors = false;
+	int32_t object_detail = renderer::kObjectLodDetailLevelMax;
 };
 
 // Render float world from a presentation direction: the presentation frame
@@ -142,6 +143,7 @@ inline void occlusion_camera_from_view(const OcclusionViewSpec &view,
 	// the frame's accum view.
 	cam.local_blink_flags = view.local_blink_flags |
 			(view.force_indoors ? kBlinkIndoorsBit : 0u);
+	cam.object_detail = view.object_detail;
 }
 
 } // namespace opennova::world

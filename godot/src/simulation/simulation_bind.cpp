@@ -403,8 +403,9 @@ void Simulation::_bind_methods() {
 	                     &Simulation::occlusion_init_mission);
 	ClassDB::bind_method(D_METHOD("run_occlusion_frame", "camera", "fov_y_deg", "aspect",
 	                              "viewport_width", "fog_dist_units", "water_z_units",
-	                              "force_indoors"),
-	                     &Simulation::run_occlusion_frame);
+	                              "force_indoors", "object_detail"),
+	                     &Simulation::run_occlusion_frame,
+	                     DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));
 	ClassDB::bind_method(D_METHOD("get_building_visibility_changes"),
 	                     &Simulation::get_building_visibility_changes);
 	ClassDB::bind_static_method("Simulation", D_METHOD("building_visibility_mask", "packed"),

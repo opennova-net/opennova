@@ -116,6 +116,10 @@ struct MissionViewportView::Tools {
 	// its surface class (the char map legend's swatch; -1 none).
 	std::string ground;
 	int ground_surface = -1;
+	// A model several items draw, let go over the picture (DI-12): the items, where it was let go, its file.
+	std::vector<int64_t> choices;
+	CanvasPoint choice_at;
+	std::string choice_model;
 
 	void toolbar(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context);
 	void show_popup(MissionViewportOptions &options);
@@ -127,6 +131,7 @@ struct MissionViewportView::Tools {
 	void events_using(Workspace &workspace, const MissionViewport &mission, const SessionView &view);
 	void notes(const MissionViewport &mission);
 	void ground_line();
+	void legend(ViewportCanvas &ui, const MissionViewport &mission);
 	float snap_metres() const { return snap; }
 };
 
@@ -188,6 +193,8 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 			[&](const CanvasInput &in) {
 				tools.mouse = in.mouse;
 				tools.mouse_on_picture = in.hovered;
+				// The ground overlay's legend over the picture's corner (DI-29).
+				if (mission.options().overlay != MissionGroundOverlay::None) tools.legend(canvas_ui(), mission);
 				if (canvas) {
 					tools.hint = canvas->hint(context, in);
 					const MissionGroundFacts &ground = canvas->ground(context, in);
@@ -209,15 +216,23 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 							for (const AssetEntry &candidate : view.project.scan->entries)
 								if (candidate.relative_path == file) entry = &candidate;
 						}
-						// Only a model is taken: another file is never accepted.
+						// Only a model is taken: another file is never accepted. Its item placed (made first where none
+						// draws it, DI-12); where several draw it, a choice of them, placed where it was let go.
 						if (entry && entry->kind == AssetKind::Model && ImGui::AcceptDragDropPayload(kFileDragPayload)) {
-							ViewportDrop drop;
-							drop.file = entry->logical_name;
-							drop.x = in.mouse.x;
-							drop.y = in.mouse.y;
-							drop.snap = tools.snap_metres();
-							drop.kind = ViewportKind::Mission;
-							workspace.request(request::edit_in_viewport(path, std::move(drop)));
+							tools.choices = mission_items_of_model(view, entry->relative_path);
+							if (tools.choices.size() > 1) {
+								tools.choice_at = in.mouse;
+								tools.choice_model = entry->logical_name;
+								ImGui::OpenPopup("mission_drop_choice");
+							} else {
+								ViewportDrop drop;
+								drop.file = entry->logical_name;
+								drop.x = in.mouse.x;
+								drop.y = in.mouse.y;
+								drop.snap = tools.snap_metres();
+								drop.kind = ViewportKind::Mission;
+								workspace.request(request::edit_in_viewport(path, std::move(drop)));
+							}
 						}
 					}
 					ImGui::EndDragDropTarget();
@@ -237,6 +252,19 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 				}
 				if (ImGui::BeginPopup("mission_canvas_menu")) {
 					if (canvas) tools.canvas_menu(workspace, mission, context, *canvas);
+					ImGui::EndPopup();
+				}
+				// A model several items draw, let go over the picture: the item to place there.
+				if (ImGui::BeginPopup("mission_drop_choice")) {
+					ImGui::TextDisabled("Several items draw %s: place", tools.choice_model.c_str());
+					for (const int64_t item : tools.choices) {
+						MissionItemFacts facts;
+						std::string ignored;
+						mission_item_facts(view, item, facts, ignored);
+						const std::string label = (facts.name.empty() ? std::string("Item") : facts.name) + " (" +
+						                          std::to_string(item) + ")";
+						if (ImGui::Selectable(label.c_str())) drop_item(workspace, mission, item, tools.choice_at, tools.snap_metres());
+					}
 					ImGui::EndPopup();
 				}
 			});
@@ -616,6 +644,20 @@ void MissionViewportView::Tools::show_popup(MissionViewportOptions &options) {
 	ImGui::Checkbox("Models", &options.models);
 	ImGui::Checkbox("Static shadows", &options.shadows);
 	ImGui::Separator();
+	// DI-29: what the game reads at each point of the ground, tinted over the terrain with its legend.
+	ImGui::TextDisabled("Over the terrain");
+	const auto overlay = [&](const char *label, MissionGroundOverlay kind, const char *tip) {
+		if (ImGui::RadioButton(label, options.overlay == kind)) options.overlay = kind;
+		ui_kit::tooltip(tip);
+	};
+	overlay("Nothing", MissionGroundOverlay::None, "The terrain as the game draws it.");
+	overlay("Surface classes", MissionGroundOverlay::Surfaces,
+			"Each point's surface class as the game reads it (its char map, the placed tiles outlined over it): what "
+			"footsteps play and what a round's impact plays there. The legend names each class.");
+	overlay("Foliage", MissionGroundOverlay::Foliage,
+			"Where the terrain's foliage map grows each foliage definition (its codes to the .trn's foliage blocks), "
+			"and what the placed tiles keep off. The legend names each definition's model.");
+	ImGui::Separator();
 	ImGui::TextDisabled("The marks");
 	ImGui::Checkbox("Items", &options.items);
 	ImGui::Checkbox("Buildings", &options.buildings);
@@ -662,12 +704,29 @@ void MissionViewportView::Tools::ground_line() {
 	if (ground_surface >= 0 && ground_surface < kCharmapLegendCount) {
 		const CharmapLegendColour &c = kCharmapLegend[ground_surface];
 		const float side = ImGui::GetTextLineHeight();
-		ImGui::ColorButton("##surface", ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f),
+		// Its own id: the canvas's surface is "##surface" in the same window (ImGui's conflicting-id warning).
+		ImGui::ColorButton("##ground_class", ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f),
 				ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker | ImGuiColorEditFlags_NoDragDrop,
 				ImVec2(side, side));
 		ImGui::SameLine();
 	}
 	ui_kit::clipped_text("Ground: " + ground);
+}
+
+void MissionViewportView::Tools::legend(ViewportCanvas &ui, const MissionViewport &mission) {
+	const MissionOverlayImage &overlay = mission.overlay();
+	std::vector<ViewportCanvas::LegendRow> rows;
+	for (const MissionOverlayRow &row : overlay.legend) {
+		ViewportCanvas::LegendRow line;
+		std::copy(std::begin(row.rgb), std::end(row.rgb), line.rgb);
+		char share[16] = "";
+		if (row.share > 0.0) std::snprintf(share, sizeof(share), " (%.1f%%)", row.share * 100.0);
+		line.text = row.key + ": " + ui_kit::fit(row.words, ImGui::GetFontSize() * 30.0f) + share;
+		rows.push_back(std::move(line));
+	}
+	std::string title = overlay.title;
+	if (!overlay.words.empty()) title += (title.empty() ? "" : "\n") + overlay.words;
+	ui.legend(title, rows);
 }
 
 void MissionViewportView::Tools::notes(const MissionViewport &mission) {

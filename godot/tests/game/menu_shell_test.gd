@@ -445,6 +445,45 @@ func test_companion_released_when_document_changes_hands() -> void:
 
 
 
+# The object-detail row is game.cfg's object_polydetail, served rather than
+# pinned (engine runtime/menu/options_policy.h kObjectDetailControls): the
+# options surface selects the row whose value is the persisted word, leaves
+# it editable, and a pick writes the row's value back at once.
+func test_object_detail_row_seeds_by_value_and_writes_the_word_back() -> void:
+	var options := PlayerOptions.new()
+	var seeded := options.current()
+	seeded.object_polydetail = 1
+	options.update(seeded)
+	var dir := _make_dir()
+	var list_box := ('<LIST_BOX><POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>200</RIGHT>'
+			+ '<BOTTOM>100</BOTTOM></POSITION><ITEMS>%s</ITEMS></LIST_BOX>')
+	var rows := ""
+	for level in 4:
+		rows += '<ITEM value="%d">Level %d</ITEM>' % [level, level]
+	var body := MenuDriverFixture.wnd("scroll", "MUSICVOLUME", 20)
+	body += MenuDriverFixture.wnd("combobox", "OBJECTPOLY", 60, list_box % rows)
+	TestFs.write_bytes(self, dir.path_join("options.mnu"),
+			MenuDriverFixture.screen_xml("OPTIONS", body).to_utf8_buffer())
+	var shell = _make_shell(dir, options)
+	if shell == null:
+		pending("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	assert_true(shell.open_menu("options.mnu", ""), "the options document opens")
+	var driver: MenuDriver = shell.get_driver()
+	assert_true(driver.is_options_surface())
+	var detail := driver.widget_id("OBJECTPOLY")
+	assert_gte(detail, 0)
+	assert_eq(driver.item_value(detail, driver.selected_row(detail)), "1",
+			"the row whose value is the persisted word is selected")
+	assert_false(driver.is_widget_disabled(detail), "the object-detail row is editable")
+	driver.select_row(detail, 3)  # emits the combo's value change
+	assert_eq(options.current().object_polydetail, 3,
+			"the pick writes the row's value to the shared owner")
+	assert_eq(PlayerOptions.new().current().object_polydetail, 3, "and persists")
+	_cleanup(dir)
+
+
 # A root switch reloads every text table: a root without menutxt.BIN clears
 # the previous root's registration instead of keeping its strings alive.
 func test_root_switch_drops_the_previous_roots_text_table() -> void:

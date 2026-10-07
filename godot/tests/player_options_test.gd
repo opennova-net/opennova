@@ -180,6 +180,31 @@ func test_fresh_profile_seeds_the_aspect_word_from_the_desktop_once() -> void:
 			"a saved word wins over the desktop")
 
 
+func test_object_detail_seeds_persists_and_clamps_as_the_cfg_word() -> void:
+	# game.cfg's object_polydetail: a fresh profile starts at the video test's
+	# capable-device rung 2 and writes it at once; the load clamps a persisted
+	# word into 0..3 (the engine's renderer/object_lod.h through GameWorld).
+	assert_eq(GameWorld.object_detail_fresh_profile(), 2)
+	assert_eq(GameWorld.clamp_object_detail(-4), 0)
+	assert_eq(GameWorld.clamp_object_detail(7), 3)
+	var options := PlayerOptions.new()
+	assert_eq(options.current().object_polydetail, 2)
+	var config := ConfigFile.new()
+	assert_eq(config.load(PlayerOptions.CONFIG_PATH), OK)
+	assert_eq(int(config.get_value("display", "object_polydetail", -1)), 2,
+			"the fresh word persists at once")
+	var state := options.current()
+	state.object_polydetail = 3
+	options.update(state)
+	assert_eq(PlayerOptions.new().current().object_polydetail, 3)
+	assert_eq(state.copy().object_polydetail, 3, "the snapshot copy carries the word")
+	ConfigStore.write(PlayerOptions.CONFIG_PATH, "display", "object_polydetail", 12)
+	assert_eq(PlayerOptions.new().current().object_polydetail, 3,
+			"a persisted word past the top rung loads as 3")
+	ConfigStore.write(PlayerOptions.CONFIG_PATH, "display", "object_polydetail", 0)
+	assert_eq(PlayerOptions.new().current().object_polydetail, 0)
+
+
 func test_update_maps_each_audio_option_to_its_runtime_buses() -> void:
 	var options := PlayerOptions.new()
 	var state := options.current()

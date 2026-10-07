@@ -19,6 +19,7 @@
 #include <runtime/renderer/tracer_frame.h>
 #include <runtime/world/nvg_laser.h>
 
+#include "render/tracer_ribbon_surfaces.h"
 #include "resource_index/resource_root.h"
 #include "simulation/present_event_records.h"
 #include "simulation/present_stats.h"
@@ -179,11 +180,6 @@ private:
 	EffectLightDirector *lights() const;
 	MissionEnvironment *environment() const;
 	void free_mesh_instance();
-	Ref<ShaderMaterial> ribbon_material(opennova::renderer::TracerShader p_shader,
-			bool p_fog_black);
-	Ref<Texture2D> smoke_texture();
-	void emit_surface(const opennova::renderer::TracerRibbonFrame &p_frame,
-			std::size_t p_first_draw, std::size_t p_end_draw, int p_rung);
 
 	EntityPresenter *owner_ = nullptr;
 	ObjectID sim_id_;    // drain + trail source (null in data-driven tests)
@@ -191,15 +187,10 @@ private:
 	ObjectID fx_id_;     // EffectWorld (or null)
 	ObjectID lights_id_; // EffectLightDirector: the MF_Light muzzle glow route (or null)
 	ObjectID environment_id_; // MissionEnvironment: the eye's water side (or null)
-	Ref<ResourceRoot> resource_root_;
 	Ref<ArrayMesh> mesh_;
 	ObjectID mesh_instance_id_;
-	// One material per (normal-pass shader, fog-black) pair, created on first use.
-	std::array<Ref<ShaderMaterial>, 6> materials_;
-	// smoktest.pcx, the pool+0x3000 texture
-	// [orig: CEffectEmitterPool_CreateShaders @ 0x5DC8F0 (the store @ 0x5dc926)].
-	Ref<Texture2D> smoke_texture_;
-	bool smoke_texture_loaded_ = false;
+	// The ribbons' materials, the pool's texture and the surface upload (render/tracer_ribbon_surfaces).
+	TracerRibbonSurfaces ribbons_;
 	opennova::renderer::TracerRibbonFrame frame_;
 	opennova::renderer::TracerRibbonFrame distortion_frame_;
 	opennova::renderer::TracerRibbonFrame laser_frame_; // one beam's ribbon, reused

@@ -16,6 +16,7 @@
 #include <godot_cpp/variant/transform3d.hpp>
 
 #include <runtime/inmatch/present_rows.h> // PoolPresentLifecycleMap (the host present path's respawn mirror)
+#include <runtime/renderer/object_lod.h> // kObjectLodDetailLevelMax
 #include <runtime/world/death_piece_draw.h> // DeathPieceDraw
 #include <runtime/world/entity.h>         // EntityHandle
 
@@ -36,7 +37,8 @@ struct SimulationPresentSnapshot {
 // retail's Inset scene core re-runs Terrain_CollectVisibleEntities over the
 // Inset camera after the main scene's (engine: world/occlusion.h
 // OcclusionView). The request is the Inset camera plus the frame's shared
-// fog, water and forced-indoors terms, in run_occlusion_frame's units.
+// fog, water, forced-indoors and object-detail terms, in run_occlusion_frame's
+// units.
 struct InsetOcclusionRequest {
 	Transform3D camera;
 	double fov_y_deg = 70.0;
@@ -45,6 +47,7 @@ struct InsetOcclusionRequest {
 	double fog_dist_units = 1000.0;
 	double water_z_units = -100000.0;
 	bool force_indoors = false;
+	int object_detail = opennova::renderer::kObjectLodDetailLevelMax;
 };
 
 // One Inset collect's verdicts: the same walk as the main view's (placed

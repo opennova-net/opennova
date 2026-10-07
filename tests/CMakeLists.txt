@@ -4756,6 +4756,23 @@ target_link_libraries(editor_mission_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_mission_viewport COMMAND editor_mission_viewport_test)
 
+# The surface classes and the foliage over a mission's terrain (ADR 0046 DI-29, editor/preview/
+# mission_ground_overlay): the ground's foliage at a point and the two overlays over a minted Tmap.
+add_executable(editor_mission_ground_overlay_test editor/mission_ground_overlay_test.cpp)
+target_link_libraries(editor_mission_ground_overlay_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_ground_overlay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_mission_ground_overlay COMMAND editor_mission_ground_overlay_test)
+
+# Place a model no item draws yet (DI-12, editor/preview/model_placement, editor/documents/model_item) over
+# a real session and the synth models: the item a model is drawn as from its parts; a model no item draws
+# dropped on a mission making its item in items.def (the next free id, its TYPE, its graphic), then placed,
+# an undo step in each file; the refusals; a model's Place in mission arming the mission's Place tool. Mixed:
+# the retail row holds the rule to every model the shipped ITEMS.DEF draws (OPENNOVA_JO_DIR).
+add_executable(editor_place_model_test editor/place_model_test.cpp)
+target_link_libraries(editor_place_model_test PRIVATE opennova_editor)
+target_include_directories(editor_place_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_place_model COMMAND editor_place_model_test)
+
 # A mission's people posed as the game spawns them (DI-38, editor/preview/mission_poses) over a real
 # session: each organic's spawn pose held to the world's own organic init over the same clips (pool
 # order, the shared ring heads), why one is not posed, the route and Guarding read through an aidata
@@ -4820,6 +4837,14 @@ add_executable(editor_definition_viewport_test editor/definition_viewport_test.c
 target_link_libraries(editor_definition_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_definition_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_definition_viewport COMMAND editor_definition_viewport_test)
+
+# A weapon fired in the definition preview as the game fires it (DI-22, editor/preview/weapon_range and
+# definition_weapon): the game's local player in a range of its own, its legs, rounds, impacts and scars where the
+# game's presenter draws them, the shots in first and third person, the gestures, the wire.
+add_executable(editor_weapon_fire_test editor/weapon_fire_test.cpp)
+target_link_libraries(editor_weapon_fire_test PRIVATE opennova_editor)
+target_include_directories(editor_weapon_fire_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_weapon_fire COMMAND editor_weapon_fire_test)
 
 # What a drag of a menu window's handles writes (editor/preview/menu_layout_edit, S9k1):
 # the plan against the runtime's POSITION solve, the grid, the handles, the edits.

@@ -23,7 +23,9 @@
 #include <editor/preview/mission_palette.h>
 #include <editor/preview/mission_place.h>
 #include <editor/preview/mission_source.h>
+#include <editor/preview/model_placement.h>
 #include <editor/preview/viewport_device.h>
+#include <editor/project/project_files.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
@@ -323,6 +325,22 @@ void MissionViewport::follow_ground_(const SessionView &view) const {
 			scene_.header(), mission);
 }
 
+bool MissionViewport::follow_overlay_(const SessionView &view) {
+	const MissionGroundOverlay kind = options_.overlay;
+	if (kind == MissionGroundOverlay::None) {
+		if (overlay_.kind == MissionGroundOverlay::None) return false;
+		overlay_ = MissionOverlayImage();
+		++overlay_serial_;
+		return true;
+	}
+	follow_ground_(view);
+	if (overlay_.kind == kind && overlay_reads_ == terrain_ground_.reads()) return false;
+	overlay_ = mission_ground_overlay(terrain_ground_, kind);
+	overlay_reads_ = terrain_ground_.reads();
+	++overlay_serial_;
+	return true;
+}
+
 bool MissionViewport::stand_people_(const SessionView &view, bool posed) {
 	if (poses_.posed() == 0) return false;
 	// The people stand on the mission's terrain as the game reads it (DI-38): again where a record, a pose
@@ -368,6 +386,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		fog_reach_ = mission_fog_reach(files, scene_.header());
 		bound_items_(view);
 		stand_people_(view, poses_.refresh(view, scene_));
+		follow_overlay_(view);
 		picture_.show(key, generation);
 		shown(*document);
 		if (!framed_) {
@@ -393,6 +412,8 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	// Update poses them, the picture standing.
 	bool posed = poses_.refresh(view, scene_);
 	posed = stand_people_(view, posed) || posed;
+	// The overlay made again where the option or the ground moved (DI-29): an Update gives it the device.
+	const bool overlaid = follow_overlay_(view);
 	// A file the device read moved: the picture made again from the files, over the scene as it is.
 	if (picture_.follow(key, false, files, generation) == PreviewFollow::Found::Files) {
 		fog_reach_ = mission_fog_reach(files, scene_.header());
@@ -404,7 +425,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		options_moved_ = false;
 		return ViewportAction::Rebuild;
 	}
-	if (!delta.moved && !options_moved_ && !posed) return ViewportAction::Keep;
+	if (!delta.moved && !options_moved_ && !posed && !overlaid) return ViewportAction::Keep;
 	options_moved_ = false;
 	return ViewportAction::Update;
 }
@@ -749,10 +770,11 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 		out.request(request::edit_record(document->path(), std::move(edits)));
 		return true;
 	}
-	// The item: named, else the one item whose graphic the dropped model is; a path's stop the marker
-	// item its stops use.
+	// The item: named, else the one item whose graphic the dropped model is, else the item the model makes
+	// (DI-12: its catalog's row planned, then placed); a path's stop the marker item its stops use.
 	int64_t item = 0;
 	int path = 0;
+	std::optional<ModelItemPlan> made;
 	if (!drop.reference.empty()) {
 		const std::optional<int> id = strutil::parse_int(drop.name);
 		if ((drop.reference != "item" && drop.reference != "path") || !id) {
@@ -791,10 +813,11 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 		}
 		const std::vector<int64_t> items = mission_items_of_model(view, entry->relative_path);
 		if (items.empty()) {
-			error = "No item of the project draws " + entry->logical_name + ": add one to an item catalog, or drop an item.";
-			return false;
-		}
-		if (items.size() > 1) {
+			// No item draws it: the item the model makes, in the catalog the project's items are in (DI-12).
+			made.emplace();
+			if (!plan_model_item(view, *entry, *made, error)) return false;
+			item = made->id;
+		} else if (items.size() > 1) {
 			error = "Several items draw " + entry->logical_name + ":";
 			for (size_t i = 0; i < items.size(); ++i) {
 				MissionItemFacts facts;
@@ -805,11 +828,20 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 			}
 			error += ". Drop one of them by its item.";
 			return false;
+		} else {
+			item = items.front();
 		}
-		item = items.front();
 	}
 	MissionItemFacts facts;
-	if (!items_.facts(view, item, facts, error)) return false;
+	if (made) {
+		// The item made: its pool by the TYPE its model gives it, its graphic the model dropped.
+		if (!items_.model_facts(view, item, made->facts.type, made->model, facts)) {
+			error = drop.file + " does not read as a model.";
+			return false;
+		}
+	} else if (!items_.facts(view, item, facts, error)) {
+		return false;
+	}
 	// Where the point meets the ground (the device's terrain, else the plane through the camera's
 	// target); on the terrain, the model's ground anchor baked in (the stored position is the ground
 	// point less the anchor: docs/world/world-wac-ai-re.md section 12).
@@ -838,7 +870,9 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 		out.request(request::edit_record(document->path(), std::move(edits)));
 		return true;
 	}
-	// One batch: the entity of the item added to the pool its TYPE puts it in, then placed.
+	// One batch: the entity of the item added to the pool its TYPE puts it in, then placed. An item the
+	// model makes is the catalog's batch first (its file opened first where it is not), served before the
+	// mission's: two documents, an undo step each, the entity placed only once its item is made.
 	const NodeKind kind = node_kind(facts.pool);
 	Edit add;
 	add.operation = EditOperation::Add;
@@ -846,12 +880,19 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 	add.field = "item";
 	add.value = item;
 	edits.push_back(std::move(add));
-	const NodeAddress made{ batch_made(0), kind, 0 };
-	edits.push_back(set_of(made, "x", at[0]));
-	edits.push_back(set_of(made, "y", at[1]));
-	edits.push_back(set_of(made, "z", at[2]));
-	edits.push_back(set_of(made, "yaw", int64_t(yaw)));
+	const NodeAddress placed{ batch_made(0), kind, 0 };
+	edits.push_back(set_of(placed, "x", at[0]));
+	edits.push_back(set_of(placed, "y", at[1]));
+	edits.push_back(set_of(placed, "z", at[2]));
+	edits.push_back(set_of(placed, "yaw", int64_t(yaw)));
+	if (made) out.request(request::edit_record(made->catalog, made->edits, true));
 	out.request(request::edit_record(document->path(), std::move(edits)));
+	if (made)
+		out.served("Made " + model_item_plan_words(*made) + " for " + drop.file + ", and placed it in " +
+		                   basename_of(document->path()) + ": Undo in each file takes its step back.",
+		           item);
+	else
+		out.served(std::string(), item);
 	return true;
 }
 
@@ -1165,6 +1206,9 @@ io::JsonValue MissionViewport::body_json(const ViewportInput &input) const {
 	body.set("posed", json_number(double(poses_.posed())));
 	body.set("ground", JsonValue::make_bool(ground_));
 	body.set("missing", json_number(double(missing_.size())));
+	// The ground overlay the options ask (DI-29): its legend and extent, null with none asked.
+	body.set("overlay", options_.overlay == MissionGroundOverlay::None ? JsonValue::make_null()
+	                                                                    : mission_overlay_to_json(overlay_));
 	return body;
 }
 

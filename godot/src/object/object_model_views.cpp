@@ -66,26 +66,30 @@ const StringName *twin_uniform_names() {
 int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
 		float p_vertical_fov_degrees,
 		float p_viewport_width,
-		float p_viewport_height) {
+		float p_viewport_height,
+		int p_object_detail) {
 	// The frame scale, the projected radius and the selector are engine facts
 	// (runtime/renderer/object_lod.h); the frame struct converts the camera.
 	const ObjectLodFrame frame = ObjectLodFrame::make(p_camera_transform,
-			p_vertical_fov_degrees, p_viewport_width, p_viewport_height);
+			p_vertical_fov_degrees, p_viewport_width, p_viewport_height, p_object_detail);
 	return update_authored_lod_views(&frame, 1);
 }
 
-int ObjectModel::update_authored_lods_for_camera(Camera3D *p_camera, float p_viewport_width) {
-	const ObjectLodFrame frame = ObjectLodFrame::from_camera(p_camera, p_viewport_width);
+int ObjectModel::update_authored_lods_for_camera(Camera3D *p_camera, float p_viewport_width,
+		int p_object_detail) {
+	const ObjectLodFrame frame = ObjectLodFrame::from_camera(p_camera, p_viewport_width,
+			p_object_detail);
 	return update_authored_lod_views(&frame, 1);
 }
 
 int ObjectModel::update_authored_lods_for_views(Camera3D *p_main, float p_main_width,
-		Camera3D *p_inset, float p_inset_width) {
+		Camera3D *p_inset, float p_inset_width, int p_object_detail) {
 	ObjectLodFrame frames[kViewCount];
-	frames[kMainView] = ObjectLodFrame::from_camera(p_main, p_main_width);
+	frames[kMainView] = ObjectLodFrame::from_camera(p_main, p_main_width, p_object_detail);
 	int count = 1;
 	if (p_inset != nullptr) {
-		frames[kInsetView] = ObjectLodFrame::from_camera(p_inset, p_inset_width);
+		frames[kInsetView] = ObjectLodFrame::from_camera(p_inset, p_inset_width,
+				p_object_detail);
 		count = kViewCount;
 	}
 	const int applied = update_authored_lod_views(frames, count);

@@ -19,6 +19,8 @@
 
 #include <cstdint>
 
+#include <runtime/renderer/object_lod.h> // the object detail rungs
+
 #include "audio/mission_audio.h"
 #include "devtools/frame_stats.h"
 #include "env/celestial.h"
@@ -178,6 +180,17 @@ public:
 	void set_local_player_spawn_loadout(const Ref<PlayerSpawnLoadout> &p_loadout);
 	void set_playable(bool p_enabled) { playable_ = p_enabled; }
 	bool is_playable() const { return playable_; }
+	// The object detail (engine: renderer/object_lod.h, game.cfg's
+	// object_polydetail): the shell hands over its persisted options word
+	// whenever it changes, and each mission start copies it into the session
+	// detail the frames draw at, so a change made mid-mission reaches the draw
+	// at the next mission. The fresh profile's word and the config load's
+	// clamp are the engine's, re-exported for the shell's options owner.
+	void set_object_polydetail(int p_level) { object_polydetail_ = p_level; }
+	int get_object_polydetail() const { return object_polydetail_; }
+	int get_object_detail() const { return object_detail_; }
+	static int object_detail_fresh_profile();
+	static int clamp_object_detail(int p_level);
 
 	// --- the load entries ------------------------------------------------------
 	// Load the world from `dir`, or from the persisted resource directory when
@@ -773,6 +786,11 @@ private:
 	// Stays on the world (mission state); handed to the occlusion frame's
 	// entries as an argument. [orig: g_BmsAttribFlags & 0x10 @ 0x5ca1c8-0x5ca1cd]
 	bool mission_forces_indoors_ = false;
+	// The options' object detail (set_object_polydetail) and the session's
+	// copy of it taken at each mission start (load_mission_internal), which
+	// the LOD frames and the occlusion frame's death pieces read.
+	int object_polydetail_ = opennova::renderer::kObjectLodDetailFreshProfile;
+	int object_detail_ = opennova::renderer::kObjectLodDetailFreshProfile;
 	Color idle_frame_clear_color_ = Color(0, 0, 0);
 	// A shell-injected resource root (main_game hands its boot mount over;
 	// tests hand fixture roots). When set, the load_* entries skip the

@@ -87,9 +87,10 @@ void model_preview_sphere(const threedi::Threedi3di3 &model, PreviewVec3 &center
 
 // The level the game draws `model` at through `camera` on a device `width` wide: its
 // projection sphere projected the way the sector draw projects it, and the level walk over
-// the model's thresholds at the highest detail profile [orig: Model_SelectRlodLevel @
-// 0x5c3b20 via renderer::select_object_lod; Terrain_RenderWorldScene @ 0x5c944c for the
-// frame scale]. `projected_q16` (optional): the projected radius in Q16.16 pixels. -1 for
+// the model's thresholds at the object detail a fresh game profile starts at
+// (renderer::kObjectLodDetailFreshProfile; the game reads its options' setting)
+// [orig: Model_SelectRlodLevel @ 0x5c3b20 via renderer::select_object_lod;
+// Terrain_RenderWorldScene @ 0x5c944c for the frame scale]. `projected_q16` (optional): the projected radius in Q16.16 pixels. -1 for
 // a model with no level; the last level when the walk selects none.
 int model_preview_auto_lod(const threedi::Threedi3di3 &model, const OrbitCamera &camera, int width,
                            int32_t *projected_q16 = nullptr);

@@ -609,10 +609,20 @@ level, the layout). The terrain importer bakes it with TrnGen.exe's own bake (th
 `engine/editor/terrain`) into the files the game reads for a terrain, each named after the set:
 `<name>.trn`, `.cpt`, `.til`, the colour, detail, blend and tile-set textures, and `<name>_m.pcx`, the
 **surface map** (the `.trn`'s char map: each texel's index the surface class the game reads there,
-painted as indices or in the char map legend's colours, `formats/trn/charmap_legend.h`). Files' New >
-Terrain from images..., the `new_terrain` request and `opennova-project new-terrain` make one; a change
-to an image imports it again.
+painted as indices or in the char map legend's colours, `formats/trn/charmap_legend.h`), and
+`<name>_f.pcx`, the **foliage map** (the `.trn`'s `polytrn_foliagemap`: each texel's index a foliage code,
+which the set's `foliage` blocks, the `.trn`'s own, turn into the models that grow there; ADR 0046 DI-29).
+Files' New > Terrain from images..., the `new_terrain` request and `opennova-project new-terrain` make one;
+a change to an image imports it again.
 _Avoid_: terrain project (TrnGen's `.tpj`), heightfield document
+
+**Ground overlay**:
+What the mission view tints its terrain with (ADR 0046 DI-29, Show > Over the terrain): a picture laid
+over the terrain from above, each texel what the game's own sampler reads at its middle, the surface
+class (in the char map legend's colours) or the foliage definitions the foliage map grows there, with
+its legend over the picture's corner.
+_Avoid_: overlay alone (one shape a canvas draws over the picture), debug mode (the terrain shader's
+diagnostic colourings)
 
 **Import closure**:
 What an import "with the files these need" brings beside the files chosen (ADR 0046 S14): every
@@ -1176,6 +1186,17 @@ step of the navigation history (a menu's screen is). Headless, it answers as its
 the death in order, the effects it spawned, the sounds it fired.
 _Avoid_: item viewer, def preview (a powerup row or a carry limit draws nothing), model preview (the
 model's own document's picture)
+
+**Weapon range**:
+Where a weapon record fires in the Definition preview (ADR 0046 DI-22): a world of the editor's own
+holding the game's local player with the weapon in hand, before a target wall whose face is the surface
+picked, run tick by tick through the game's own legs (the weapon pump, the rounds' flight, the impacts,
+the fire-sound queue) from the gestures (Fire, Hold fire and its Release, Reload, Scope, Switch) the
+editor stamps on the preview clock. The run is a function of its gestures: the clock stepped back runs it
+again. What it hands the game's presenter is drawn where the presenter draws it: in first person the
+action legs at the gun's points, in third person a shot as another sees it (a soldier's, through the
+ammo; another player's, through the weapon's FIRE and RECOIL rows).
+_Avoid_: shooting range (the game has none), firing test, gun sim
 
 **Rig**:
 What an animation plays on: an animation table (its reset clip the bind) or a lone clip

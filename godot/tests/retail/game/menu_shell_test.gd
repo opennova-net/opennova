@@ -206,7 +206,6 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 	var expected := {
 		"TERRAINPOLY": "3",
 		"TERRAINTEX": "3",
-		"OBJECTPOLY": "3",
 		"OBJECTTEX": "3",
 		"ANTIALIAS": "2",
 		"SHADERUSAGE": "2",
@@ -226,6 +225,14 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 	for preset_name in ["VIDEODEFAULT", "VIDEOPERFORMANCE", "VIDEOQUALITY"]:
 		assert_true(driver.is_widget_disabled(driver.widget_id(preset_name)),
 				"obsolete retail preset %s is disabled" % preset_name)
+	# Object detail is served: game.cfg's object_polydetail, seeded by value
+	# from the shared options and editable (options_policy.h kObjectDetailControls).
+	var object_poly := driver.widget_id("OBJECTPOLY")
+	assert_gte(object_poly, 0, "OBJECTPOLY exists")
+	assert_eq(driver.item_value(object_poly, driver.selected_row(object_poly)),
+			str(PlayerOptions.new().current().object_polydetail),
+			"OBJECTPOLY shows the persisted object detail")
+	assert_false(driver.is_widget_disabled(object_poly), "OBJECTPOLY is editable")
 	_cleanup(dir)
 
 
@@ -421,6 +428,7 @@ func test_pause_options_share_state_apply_accept_and_retain_cancel_changes() -> 
 	initial.mouse_sensitivity = 301
 	initial.invert_mouse = true
 	initial.crosshair_style = 7
+	initial.object_polydetail = 1
 	options.update(initial)
 
 	var dir := _make_dir()
@@ -448,9 +456,10 @@ func test_pause_options_share_state_apply_accept_and_retain_cancel_changes() -> 
 
 	var object_detail := driver.widget_id("OBJECTDETAIL")
 	assert_gte(object_detail, 0)
-	assert_eq(driver.item_value(object_detail, driver.selected_row(object_detail)), "3")
-	assert_true(driver.is_widget_disabled(object_detail),
-			"the in-game object-detail alias is pinned to the supported renderer")
+	assert_eq(driver.item_value(object_detail, driver.selected_row(object_detail)), "1",
+			"the in-game object-detail alias seeds by value from the shared options")
+	assert_false(driver.is_widget_disabled(object_detail),
+			"the in-game object-detail alias is editable")
 	for unsupported_name: String in MenuFrame.options_unsupported_controls():
 		var id := driver.widget_id(unsupported_name)
 		if id >= 0:

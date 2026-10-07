@@ -1,6 +1,7 @@
 #include "authoring/mission_viewport_applier.h"
 
 #include <godot_cpp/classes/environment.hpp>
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/core/math.hpp>
@@ -29,9 +30,14 @@
 #include <runtime/environment/environment_state.h>
 #include <runtime/renderer/render_order.h>
 
+#include <runtime/mission/placement_traits.h>
+#include <godot_cpp/variant/packed_vector4_array.hpp>
+
 #include "env/mission_environment_overrides.h"
 #include "mission/mission_data.h"
+#include "mission/static_source_convert.h"
 #include "object/entity_ref.h"
+#include "object/item_database.h"
 #include "render/frame_fx.h"
 #include "render/object_lod_frame.h"
 #include "terrain/terrain_tile_info.h"
@@ -170,6 +176,10 @@ MissionViewportApplier::MissionViewportApplier(SubViewport &viewport) : scene_st
 	terrain_->set_water_path(NodePath("../Water"));
 	root_->add_child(terrain_);
 	terrain_id_ = terrain_->get_instance_id();
+	// The picture shows the mission as a load composes it: an edit that changes a caster's static
+	// shadow (a NoShadow set or cleared, an entity moved, removed or brought back) composes again the
+	// pages that shadow touched and touches, which the game, keeping a composed page, never asks.
+	terrain_->set_static_shadow_follows_casters(true);
 	camera_ = memnew(Camera3D);
 	camera_->set_name("Camera"); // the device's own: the water's mirror has a camera of its own
 	camera_->set_keep_aspect_mode(Camera3D::KEEP_WIDTH);
@@ -185,6 +195,7 @@ MissionViewportApplier::MissionViewportApplier(SubViewport &viewport) : scene_st
 	root_->add_child(lifted_root_);
 	root_files_.instantiate();
 	clock_.instantiate();
+	static_rows_.instantiate();
 }
 
 MissionViewportApplier::~MissionViewportApplier() {
@@ -844,6 +855,7 @@ void MissionViewportApplier::drop_entities_() {
 	placed_ = false;
 	drop_pending_ = false;
 	next_key_ = 0;
+	static_rows_revision_ = 0; // the next placer's rows built afresh
 }
 
 opennova::editor::OperationProgress MissionViewportApplier::progress() const {
@@ -955,6 +967,48 @@ void MissionViewportApplier::flush_shadows_(const MissionScene &scene) {
 	shadow_pending_.clear();
 }
 
+void MissionViewportApplier::build_static_rows_() {
+	if (!placed_ || placer_.is_null()) return;
+	const uint64_t revision = placer_->static_light_draw_source_revision();
+	if (revision == static_rows_revision_) return;
+	// Each row as the game's light director builds it (EffectLightDirector::_rebuild_static_light_rows):
+	// its entity's origin and bound radius, live unless hidden, and its lane: a building's ROBJ 1+
+	// lerping by its own daylight, w the mirror's CLIP arming. Containment (a static inside a
+	// building's interior, which the game finds by its blink query) needs a world the picture does not
+	// run: every other static draws uncontained.
+	const std::vector<opennova::mission::StaticLightDrawSource> rows = placer_->static_light_draw_sources();
+	const std::vector<opennova::mission::StaticEffectSource> sources = placer_->static_item_effect_sources();
+	const Ref<ItemDatabase> items = placer_->get_item_db();
+	int count = 0;
+	for (const opennova::mission::StaticLightDrawSource &row : rows) count = std::max(count, row.atlas_row + 1);
+	PackedVector3Array positions;
+	PackedInt32Array radii;
+	PackedByteArray active;
+	PackedVector4Array lanes;
+	positions.resize(count);
+	radii.resize(count);
+	active.resize(count);
+	active.fill(0);
+	lanes.resize(count);
+	for (const opennova::mission::StaticLightDrawSource &row : rows) {
+		if (row.atlas_row < 0 || row.source_index < 0 || row.source_index >= int(sources.size())) continue;
+		const opennova::mission::StaticEffectSource &source = sources[size_t(row.source_index)];
+		const int item = row.item_id != 0 ? row.item_id : source.item_id;
+		const bool has_def = items.is_valid() && items->has_item(item);
+		const bool building = opennova::mission::placed_record_is_building(row.kind >= 0 ? row.kind : source.kind,
+				has_def, has_def ? items->get_item_type(item) : 0);
+		positions.set(row.atlas_row, from_static_source_transform(source.world_transform).origin);
+		radii.set(row.atlas_row, source.entity_bound_radius_q16);
+		active.set(row.atlas_row, row.active ? 1 : 0);
+		lanes.set(row.atlas_row, LightScene::static_row_entity_lane(building, row.robj_index, row.light_transfer, false,
+				source.model_floor_q16, source.entity_bound_radius_q16));
+	}
+	static_rows_->render_static_frame(positions, radii, PackedInt64Array(), PackedInt32Array(), PackedInt64Array(),
+			PackedInt32Array(), active, Vector3(1.0f, 1.0f, 1.0f), 0, nullptr, int64_t(revision), lanes);
+	static_rows_->publish_static_rows();
+	static_rows_revision_ = revision;
+}
+
 void MissionViewportApplier::apply_state_(const opennova::editor::ViewportModel &viewport) {
 	const MissionViewport &mission = mission_of(viewport);
 	const opennova::editor::MissionViewportOptions &options = mission.options();
@@ -972,6 +1026,30 @@ void MissionViewportApplier::apply_state_(const opennova::editor::ViewportModel 
 		shown_shadows_ = options.shadows;
 		// The casters' geometry is resolved (the Model units): the snapshot walks the sources.
 		if (placed_) terrain_->set_static_shadow_placer(shown_shadows_ ? placer_ : Ref<MissionObjectPlacer>());
+	}
+	// The ground overlay (DI-29): the picture the viewport made of what the game reads at each point, laid
+	// over the terrain from above (presentation x east, z the negated mission y), past it the one value the
+	// game reads all round where there is one.
+	if (mission.overlay_serial() != overlay_serial_) {
+		overlay_serial_ = mission.overlay_serial();
+		const opennova::editor::MissionOverlayImage &overlay = mission.overlay();
+		if (overlay.kind == opennova::editor::MissionGroundOverlay::None) {
+			terrain_->clear_ground_overlay();
+		} else {
+			Ref<Image> picture;
+			if (!overlay.empty()) {
+				PackedByteArray bytes;
+				bytes.resize(int64_t(overlay.rgba.size()));
+				std::copy(overlay.rgba.begin(), overlay.rgba.end(), bytes.ptrw());
+				picture = Image::create_from_data(overlay.width, overlay.height, false, Image::FORMAT_RGBA8, bytes);
+			}
+			const Rect2 rect(float(overlay.west), float(-overlay.north), float(overlay.width * overlay.texel),
+					float(overlay.height * overlay.texel));
+			const uint8_t *outside = overlay.outside_rgba;
+			terrain_->set_ground_overlay(picture, rect,
+					Color(outside[0] / 255.0f, outside[1] / 255.0f, outside[2] / 255.0f, outside[3] / 255.0f),
+					overlay.outside);
+		}
 	}
 	// The time of day: the mission's start time, or the option's hour.
 	if (options.time != applied_time_ && environment_built_) {
@@ -1045,6 +1123,8 @@ void MissionViewportApplier::publish_scene_state() {
 	water_->set_globals_held(false);
 	water_->set_world_rendering_enabled(true);
 	water_->set_globals_held(true);
+	// The retained statics' light atlas (its rows' lighting lanes), when one is built.
+	static_rows_->publish_static_rows();
 }
 
 void MissionViewportApplier::present(double dt) {
@@ -1072,10 +1152,17 @@ void MissionViewportApplier::present(double dt) {
 	water_->advance_frame(dt);
 	const Viewport *viewport = camera_->get_viewport();
 	const float width = viewport ? float(viewport->get_visible_rect().size.x) : 0.0f;
-	if (placed_ && placer_.is_valid()) placer_->update_static_lods_for_views(camera_, width, nullptr, 0.0f);
+	// The levels at the object detail a fresh game profile starts at (the game reads its options'
+	// setting; renderer::kObjectLodDetailFreshProfile), as the model viewport's auto level does.
+	constexpr int object_detail = opennova::renderer::kObjectLodDetailFreshProfile;
+	if (placed_ && placer_.is_valid()) {
+		placer_->update_static_lods_for_views(camera_, width, nullptr, 0.0f, object_detail);
+	}
+	// The statics' rows of the light atlas, where the placer's moved (the game's light director leg).
+	build_static_rows_();
 	// The individual models' levels (the walk is the process's: the model preview's model draws its
 	// level as its options say and never joins it).
-	const ObjectLodFrame frames[1] = { ObjectLodFrame::from_camera(camera_, width) };
+	const ObjectLodFrame frames[1] = { ObjectLodFrame::from_camera(camera_, width, object_detail) };
 	ObjectModel::update_authored_lod_views(frames, 1);
 	environment_->set_globals_held(true);
 	water_->set_globals_held(true);

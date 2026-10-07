@@ -22,6 +22,7 @@
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <runtime/anim/adm_root_motion.h>
+#include <runtime/mission/placement_traits.h>
 #include <runtime/world/destruction.h>
 #include <runtime/world/item_effects.h>
 #include <runtime/world/present_passes.h>
@@ -55,6 +56,27 @@ std::string model_file_named(const AssetScan *scan, const std::string &name) {
 	const AssetEntry *entry = scan->find(name);
 	if (!entry && !strutil::ends_with_icase(name, ".3di")) entry = scan->find(name + ".3di");
 	return entry && entry->kind == AssetKind::Model ? entry->logical_name : std::string();
+}
+
+// What the game draws of an item's shadows, said beside its picture: both fall only on a mission's
+// terrain, which the picture has none of. The static sun shadow is the terrain pass's, admitted for a
+// placement among the buildings, among the items only with StaticShadow, and never with NoShadow (the
+// item's or the placement's); the moving one is a person's or a DynamicShadow item's render slot,
+// which NoShadow never reads [orig: Terrain_CollectAndRenderTileModels @ 0x60D42F..0x60D450;
+// Entity_InitFromModel @ 0x40E1BC..0x40E1F7; render-lighting-re.md "NoShadow"].
+std::string shadow_words(const std::string &name, int type, uint32_t attrib, uint32_t attrib2) {
+	const bool moving = mission::item_casts_dynamic_shadow(type, attrib2);
+	std::string words;
+	if ((attrib & mission::kItemAttribNoShadow) != 0) {
+		words = name + " is NoShadow: the game draws no sun shadow of it on a mission's terrain.";
+		if (moving) words += " Its moving shadow, drawn on the terrain under it, is unchanged.";
+		return words;
+	}
+	words = (attrib2 & mission::kItemAttrib2StaticShadow) != 0
+	                ? "The game draws its sun shadow on a mission's terrain wherever a mission places it (StaticShadow)"
+	                : "The game draws its sun shadow on a mission's terrain where a mission places it among the buildings";
+	words += moving ? ", and its moving shadow under it" : "";
+	return words + "; neither shows here, with no terrain under it.";
 }
 
 JsonValue vec3(const particle::Vec3 &v) {
@@ -106,7 +128,7 @@ bool state_from_token(const std::string &token, DefinitionState &out) {
 // A SetViewport's options over `held`: {state, enemy, weapon, occupied, ssn, mute, grid}, each optional.
 bool read_options(const JsonValue &json, DefinitionViewportOptions &held, std::string &error) {
 	if (!json.is_object()) {
-		error = "options is an object {state, enemy, weapon, occupied, ssn, mute, grid}.";
+		error = "options is an object {state, enemy, weapon, occupied, ssn, mute, grid, fire}.";
 		return false;
 	}
 	DefinitionViewportOptions options = held;
@@ -140,8 +162,11 @@ bool read_options(const JsonValue &json, DefinitionViewportOptions &held, std::s
 				return false;
 			}
 			options.ssn = int(whole);
+		} else if (key == "fire") {
+			if (!read_definition_fire_options(value, options.fire, error)) return false;
 		} else {
-			error = "Unknown definition option \"" + key + "\" (it takes state, enemy, weapon, occupied, ssn, mute, grid).";
+			error = "Unknown definition option \"" + key + "\" (it takes state, enemy, weapon, occupied, ssn, mute, grid, "
+			        "fire).";
 			return false;
 		}
 	}
@@ -183,6 +208,7 @@ io::JsonValue definition_options_to_json(const DefinitionViewportOptions &option
 	out.set("ssn", json_number(options.ssn));
 	out.set("mute", JsonValue::make_bool(options.mute));
 	out.set("grid", JsonValue::make_bool(options.grid));
+	out.set("fire", definition_fire_options_to_json(options.fire));
 	return out;
 }
 
@@ -246,6 +272,8 @@ ViewportAction DefinitionViewport::stop_(DefinitionViewStatus reason, const std:
 	effects_.close();
 	if (skeleton_) ++skeleton_serial_;
 	skeleton_.reset();
+	if (weapon_.active()) weapon_.clear();
+	eye_ = false;
 	shown_none();
 	const ViewportAction action = picture_.stop();
 	return held ? action : ViewportAction::Keep;
@@ -336,7 +364,7 @@ bool DefinitionViewport::subject_(const ViewportInput &input, const DefCatalogDo
 		intact_ = name;
 		const DamageFrame frame = frame_at(clock);
 		switch (options_.state) {
-		case DefinitionState::Alive: break;
+		case DefinitionState::Alive: notes_.push_back(shadow_words(item_.name, def.type, def.attrib, def.attrib2)); break;
 		case DefinitionState::Destroying:
 			if (!plan_.swaps) notes_.push_back(plan_.class_words);
 			else if (plan_.husk.empty())
@@ -545,6 +573,8 @@ void DefinitionViewport::particle_slot_(const assets::Model &intact) {
 }
 
 std::vector<DefinitionSpawn> DefinitionViewport::spawns_() const {
+	// A weapon's: what its range's run spawned where the game's presenter spawns it (DI-22).
+	if (weapon_record()) return weapon_.spawns();
 	std::vector<DefinitionSpawn> out;
 	if (!item_record_ || !model_ || options_.state == DefinitionState::HuskFinal) return out;
 	// The particle slot from the mission's start (the clock's tick 0): the wreck keeps the item's emitters.
@@ -641,9 +671,10 @@ ViewportAction DefinitionViewport::follow_(const ViewportInput &input, PreviewCl
 	if (target.path == path() && target.part && target.part != row_) {
 		row_ = target.part;
 		clock.seek_ticks(0);
-		// What another record's death fired is not this one's.
+		// What another record's death fired is not this one's, nor its gestures.
 		fired_.clear();
 		sound_cursor_ = -1;
+		weapon_.set_gestures({});
 	}
 	const Node *node = document->row(row_);
 	if (!node) {
@@ -682,7 +713,30 @@ ViewportAction DefinitionViewport::follow_(const ViewportInput &input, PreviewCl
 	std::string intact_file;
 	const assets::Model &intact = item_record_ ? held_(view, intact_, intact_file) : model_;
 	particle_slot_(intact);
-	pose_(view, file);
+	eye_ = false;
+	if (drawn_.kind == "weapon") {
+		// A weapon fires (DI-22): its first person's rig is the gun's map, its arms the character's, its range the
+		// project's tables; a person's pose is no weapon's.
+		person_ = MissionPose();
+		person_key_.clear();
+		rig_key_.clear();
+		const bool first = options_.weapon == DefinitionWeaponView::First;
+		weapon_.refresh(view, document->path(), static_cast<const CatalogRow &>(*node).native.as<def::DefWeaponDef>(),
+				first, options_.enemy, options_.fire, model_, file, camera_, size().width, size().height);
+		if (skeleton_ != weapon_.rig()) {
+			skeleton_ = weapon_.rig();
+			++skeleton_serial_;
+		}
+		rig_read_ = weapon_.rig_reads();
+		eye_ = first && options_.fire.eye && weapon_.eye();
+		for (const std::string &note : weapon_.notes()) notes_.push_back(note);
+		weapon_.run_to(clock.ticks());
+		sound_sources_.refresh(*view.findings.assets,
+		                       view.project.document ? view.project.document->expansion.name : std::string(), PreviewRig());
+	} else {
+		if (weapon_.active()) weapon_.clear();
+		pose_(view, file);
+	}
 	if (!rig_note_.empty()) notes_.push_back(rig_note_);
 	if (!person_.status.empty() && person_.status != "posed" && type_ == def::DEF_ITEM_TYPE_PERSON)
 		notes_.push_back(person_.status == "no_adm"     ? item_.name + " names no animation map (anim_def): the person stands unposed."
@@ -709,7 +763,8 @@ ViewportAction DefinitionViewport::follow_(const ViewportInput &input, PreviewCl
 	// The picture: the model drawn (by its file and stamp) and the rig over it; anew where either moved.
 	PreviewFollow::Key key;
 	key.part = row_;
-	const std::string picture = file + '\n' + std::to_string(files.stamp(file)) + '\n' + std::to_string(skeleton_serial_);
+	const std::string picture = file + '\n' + std::to_string(files.stamp(file)) + '\n' + std::to_string(skeleton_serial_) +
+	                            '\n' + std::to_string(weapon_.first_person().arms_serial());
 	key.state = io::fnv1a64_bytes(io::kFnv1a64Offset, picture.data(), picture.size());
 	FileStamps read;
 	read.note(file, files.stamp(file));
@@ -740,9 +795,24 @@ std::vector<ClipSoundFired> DefinitionViewport::fire_sounds(const PreviewClock &
 	sound_seeks_ = clock.tick_seeks();
 	const int32_t from = sound_cursor_;
 	sound_cursor_ = now;
-	if (reason_ != DefinitionViewStatus::Ready || options_.state != DefinitionState::Destroying || !plan_.swaps ||
-	    from < 0 || sought || now <= from || now - from > kClipSoundCatchUpTicks)
+	if (reason_ != DefinitionViewStatus::Ready || from < 0 || sought || now <= from || now - from > kClipSoundCatchUpTicks)
 		return out;
+	if (weapon_record()) {
+		// A weapon's (DI-22): what its run sounded on the ticks [from, now), heard at the camera; the run taken to the
+		// clock first (a device follows after the clock ran).
+		weapon_.run_to(now);
+		for (ClipSoundFired &fired : weapon_.sounds_between(from, now, sound_sources_, camera().eye(), selector)) {
+			fired.seq = ++next_seq;
+			fired.path = path();
+			if (options_.mute && fired.state == "played") fired.state = "muted";
+			if (scan) find_clip_sound_waves(fired, *scan);
+			fired_.push_back(fired);
+			out.push_back(std::move(fired));
+		}
+		if (fired_.size() > kSoundsFiredKept) fired_.erase(fired_.begin(), fired_.end() - kSoundsFiredKept);
+		return out;
+	}
+	if (options_.state != DefinitionState::Destroying || !plan_.swaps) return out;
 	// The legs on the ticks [from, now): the death on tick 0 heard as the clock leaves it.
 	for (const DamageLeg &leg : plan_.legs) {
 		if (leg.kind != "sound" || leg.tick < from || leg.tick >= now) continue;
@@ -805,7 +875,32 @@ bool DefinitionViewport::drag(const ViewportContext &, const ViewportDrag &, Can
 
 bool DefinitionViewport::command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &,
 		CanvasRequests &out, std::string &error) const {
+	// A weapon's gestures (DI-22): one on the clock's tick, the clock run; "clear" forgets them all.
+	WeaponGesture gesture = WeaponGesture::Fire;
+	if (weapon_gesture_of(name, gesture) || name == "clear") {
+		if (!weapon_record()) {
+			error = "Only a weapon record fires: " + name + " needs a weapon.def record shown.";
+			return false;
+		}
+		JsonValue change = JsonValue::make_object();
+		change.set("kind", json_string(viewport_kind_token(ViewportKind::Definition)));
+		if (name == "clear") {
+			change.set("gestures", JsonValue::make_array());
+		} else {
+			change.set("gesture", json_string(weapon_gesture_token(gesture)));
+			JsonValue clock = JsonValue::make_object();
+			clock.set("playing", JsonValue::make_bool(true));
+			change.set("clock", std::move(clock));
+		}
+		out.request(request::set_viewport(path(), io::json_write(change)));
+		return true;
+	}
 	if (name == "frame") {
+		if (eye_) {
+			error = "frame: the first-person eye stands where the game's camera does; set options.fire.view to orbit "
+			        "to frame the model.";
+			return false;
+		}
 		out.request(request::set_viewport(path(), definition_camera_change(framed(context.width, context.height))));
 		return true;
 	}
@@ -816,12 +911,13 @@ bool DefinitionViewport::command(const ViewportContext &context, const std::stri
 		out.request(request::set_viewport(path(), viewport_change(ViewportKind::Definition, "clock", std::move(clock))));
 		return true;
 	}
-	error = "A definition's picture has no command \"" + name + "\" (frame, replay).";
+	error = "A definition's picture has no command \"" + name +
+	        "\" (frame, replay; a weapon's fire, hold, release, reload, scope, switch, clear).";
 	return false;
 }
 
 bool DefinitionViewport::takes_(const std::string &member) const {
-	return member == "options" || member == "camera";
+	return member == "options" || member == "camera" || member == "gesture" || member == "gestures";
 }
 
 bool DefinitionViewport::check_(const io::JsonValue &json, std::string &error) const {
@@ -831,6 +927,16 @@ bool DefinitionViewport::check_(const io::JsonValue &json, std::string &error) c
 	bool frame = false;
 	if (const JsonValue *member = json.get("camera"); member && !read_orbit_camera(*member, camera, frame, error))
 		return false;
+	// The first-person eye (DI-22, DI-13's) stands where the game's camera does: the orbit moves only once the view
+	// is the orbit again.
+	if (json.get("camera") && eye_ && options.fire.eye && options.weapon == DefinitionWeaponView::First) {
+		error = "camera: the first-person eye stands where the game's camera does; set options.fire.view to orbit to "
+		        "move the camera.";
+		return false;
+	}
+	std::vector<WeaponGestureAt> gestures;
+	if (const JsonValue *member = json.get("gesture"); member && !read_gesture_(*member, gestures, error)) return false;
+	if (const JsonValue *member = json.get("gestures"); member && !read_gestures_(*member, gestures, error)) return false;
 	return true;
 }
 
@@ -850,6 +956,57 @@ void DefinitionViewport::apply_(const io::JsonValue &json, PreviewClock &clock) 
 		read_orbit_camera(*member, camera_, frame, error);
 		if (frame) frame_();
 	}
+	// A weapon's gestures (DI-22): the whole list, or one on the clock's tick (those after it gone: the run is played
+	// anew from there).
+	if (const JsonValue *member = json.get("gestures")) {
+		std::vector<WeaponGestureAt> gestures;
+		if (read_gestures_(*member, gestures, error)) weapon_.set_gestures(std::move(gestures));
+		options_moved_ = true;
+	}
+	if (const JsonValue *member = json.get("gesture")) {
+		std::vector<WeaponGestureAt> one;
+		if (read_gesture_(*member, one, error) && !one.empty()) {
+			const int32_t now = clock.ticks();
+			std::vector<WeaponGestureAt> gestures;
+			for (const WeaponGestureAt &held : weapon_.range().gestures())
+				if (held.tick <= now) gestures.push_back(held);
+			gestures.push_back({now, one.front().gesture});
+			weapon_.set_gestures(std::move(gestures));
+			options_moved_ = true;
+		}
+	}
+}
+
+bool DefinitionViewport::read_gesture_(const io::JsonValue &json, std::vector<WeaponGestureAt> &out, std::string &error) {
+	WeaponGesture gesture = WeaponGesture::Fire;
+	if (!json.is_string() || !weapon_gesture_of(json.string, gesture)) {
+		error = "gesture is fire, hold, release, reload, scope or switch.";
+		return false;
+	}
+	out.push_back({0, gesture});
+	return true;
+}
+
+bool DefinitionViewport::read_gestures_(const io::JsonValue &json, std::vector<WeaponGestureAt> &out, std::string &error) {
+	if (!json.is_array()) {
+		error = "gestures is an array of {tick, gesture}.";
+		return false;
+	}
+	out.clear();
+	for (const JsonValue &row : json.array) {
+		const JsonValue *tick = row.is_object() ? row.get("tick") : nullptr;
+		const JsonValue *gesture = row.is_object() ? row.get("gesture") : nullptr;
+		int64_t at = 0;
+		WeaponGesture kind = WeaponGesture::Fire;
+		if (!tick || !io::json_whole_in(*tick, 0, kWeaponRangeMostTicks, at) || !gesture || !gesture->is_string() ||
+		    !weapon_gesture_of(gesture->string, kind)) {
+			error = "gestures is an array of {tick (0 to " + std::to_string(kWeaponRangeMostTicks) +
+			        "), gesture (fire, hold, release, reload, scope, switch)}.";
+			return false;
+		}
+		out.push_back({int32_t(at), kind});
+	}
+	return true;
 }
 
 bool DefinitionViewport::report_(const ViewportDeviceReport &report) {
@@ -868,7 +1025,22 @@ io::JsonValue DefinitionViewport::options_json() const {
 }
 
 io::JsonValue DefinitionViewport::camera_json() const {
-	return orbit_camera_to_json(camera_);
+	JsonValue view = orbit_camera_to_json(camera_);
+	view.set("fov", json_number(camera().fov_degrees()));
+	// A weapon's first-person eye (DI-22, DI-13's): where it stands and looks, in the preview's space (the orbit's
+	// members above stand for when the view is the orbit again).
+	view.set("view", json_string(eye_ ? "eye" : "orbit"));
+	if (eye_) {
+		const OrbitCamera &camera = weapon_.eye_camera();
+		JsonValue pose = JsonValue::make_object();
+		pose.set("eye", vec3(particle::Vec3{camera.pose.eye.x, camera.pose.eye.y, camera.pose.eye.z}));
+		pose.set("right", vec3(particle::Vec3{camera.pose.right.x, camera.pose.right.y, camera.pose.right.z}));
+		pose.set("up", vec3(particle::Vec3{camera.pose.up.x, camera.pose.up.y, camera.pose.up.z}));
+		pose.set("back", vec3(particle::Vec3{camera.pose.back.x, camera.pose.back.y, camera.pose.back.z}));
+		pose.set("near", json_number(camera.near_plane));
+		view.set("pose", std::move(pose));
+	}
+	return view;
 }
 
 io::JsonValue DefinitionViewport::body_json(const ViewportInput &input) const {
@@ -959,6 +1131,7 @@ io::JsonValue DefinitionViewport::body_json(const ViewportInput &input) const {
 		effects.array.push_back(std::move(row));
 	}
 	out.set("effects", std::move(effects));
+	if (weapon_record()) out.set("weapon", weapon_.to_json(options_.fire));
 	JsonValue play = JsonValue::make_object();
 	play.set("tick", json_number(effects_.tick()));
 	if (const std::shared_ptr<particle::EffectScene> &scene = effects_.scene()) {
