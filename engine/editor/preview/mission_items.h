@@ -54,6 +54,11 @@ public:
 	// does. A graphic that loads no model of the project leaves `model` empty, the anchor at the origin
 	// and no bound.
 	bool facts(const SessionView &view, int64_t item, MissionItemFacts &out, std::string &error);
+	// The facts an item of `type` drawing the model `file` (a project path) would have, the item `item` not
+	// in any catalog yet (ADR 0046 DI-12: the item a model's drop makes, then places): its pool by its TYPE,
+	// the model and its ground anchor, read as facts() reads an item's graphic. False where the file does
+	// not read as a model.
+	bool model_facts(const SessionView &view, int64_t item, int type, const std::string &file, MissionItemFacts &out);
 	// The radii of `items` as the project defines them now: every item asked again where the graph is
 	// another; where the asset source's generation moved, the items whose files moved (a SCALE edited in
 	// an open catalog, a model written again); an item not yet asked, asked.
