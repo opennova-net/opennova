@@ -15,5 +15,9 @@ bool draw_sound_bank_inspector(Workspace &workspace, const Document &document, c
                                InspectorTaken &taken);
 bool draw_sound_profile_inspector(Workspace &workspace, const Document &document, const NodeAddress &record,
                                   InspectorTaken &taken);
+// A dialog bank's dialog or line (DI-32): the number a mission plays it by, a Play of the dialog as the game plays
+// it (its lines one after another), a line's Play alone, and what the last play of it said.
+bool draw_dialog_bank_inspector(Workspace &workspace, const Document &document, const NodeAddress &record,
+                                InspectorTaken &taken);
 
 } // namespace opennova::editor
