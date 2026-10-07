@@ -63,7 +63,7 @@ bool read_flags(const JsonValue &json, const char *group, const Flag (&flags)[N]
 	return true;
 }
 
-constexpr const char *kTools[] = { "select", "place", "path", "area" };
+constexpr const char *kTools[] = { "select", "place", "path", "area", "shoot" };
 
 // The path numbers a stop is added to: 1 to 122 (0 and 123 to 127 name no route).
 constexpr int64_t kLastRoutePath = 122;
@@ -90,7 +90,7 @@ bool operator==(const MissionViewportOptions &a, const MissionViewportOptions &b
 		if (a.*flag.member != b.*flag.member) return false;
 	return a.mark_range == b.mark_range && a.stick == b.stick && a.time == b.time && a.tool == b.tool &&
 			a.item == b.item && a.path == b.path && a.snap == b.snap && a.turn == b.turn && a.palette == b.palette &&
-			a.overlay == b.overlay;
+			a.overlay == b.overlay && a.ammo == b.ammo;
 }
 
 io::JsonValue mission_options_to_json(const MissionViewportOptions &options) {
@@ -107,6 +107,7 @@ io::JsonValue mission_options_to_json(const MissionViewportOptions &options) {
 	out.set("turn", io::json_number(double(options.turn)));
 	out.set("palette", io::json_string(options.palette));
 	out.set("overlay", io::json_string(mission_ground_overlay_token(options.overlay)));
+	out.set("ammo", io::json_string(options.ammo));
 	return out;
 }
 
@@ -146,7 +147,7 @@ bool mission_options_from_json(const JsonValue &json, MissionViewportOptions &he
 			}
 		} else if (member.key == "tool") {
 			if (!value.is_string() || !mission_tool_from_token(value.string, read.tool)) {
-				error = "options.tool is select, place, path or area.";
+				error = "options.tool is select, place, path, area or shoot.";
 				return false;
 			}
 		} else if (member.key == "item") {
@@ -188,9 +189,16 @@ bool mission_options_from_json(const JsonValue &json, MissionViewportOptions &he
 						"terrain's foliage map grows).";
 				return false;
 			}
+		} else if (member.key == "ammo") {
+			if (!value.is_string() || value.string.size() >= kWorkspaceText) {
+				error = "options.ammo is the ammo the Shoot tool fires, an ammo.def record by name (\"\" none picked).";
+				return false;
+			}
+			read.ammo = value.string;
 		} else {
 			error = "Unknown options member \"" + member.key +
-					"\" (it takes show, marks, mark_range, stick, time, tool, item, path, snap, turn, palette, overlay).";
+					"\" (it takes show, marks, mark_range, stick, time, tool, item, path, snap, turn, palette, overlay, "
+					"ammo).";
 			return false;
 		}
 	}
