@@ -5,6 +5,7 @@
 #include <editor/documents/catalog_labels.h>
 #include <editor/documents/catalog_validation.h>
 #include <editor/documents/menu_labels.h>
+#include <editor/documents/charattr_type.h>
 #include <editor/documents/credits_type.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/dialog_bank_document.h>
@@ -143,6 +144,10 @@ constexpr DocumentType kTypes[] = {
 	{ DocumentTypeId::DialogBank, "dialog_bank", make_dialog_bank, validate_dialog_bank_file, DialogBankDocument::schema,
 			dialog_bank_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
 			nullptr, define_dialog },
+	// The character attributes (DI-09's charattr follow-up): charattr.def held as its text, its line ends the
+	// ConfigFile reader's; its references each class's camouflage items, as the game's loader reads them.
+	{ DocumentTypeId::CharAttrs, "charattr", make_charattr_document, validate_charattr_file, text_fields,
+			charattr_finding_codes, nullptr, charattr_references },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its

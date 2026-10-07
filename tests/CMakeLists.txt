@@ -2094,7 +2094,7 @@ add_test(NAME lfp_feed COMMAND lfp_feed_test)
 # charattr.def ATTRIBUTES -> World::class_attribute_flags -> the friendly-tag
 # medic plate: the whole per-class word, the first-missing-section stop, the
 # first-section-wins duplicate rule, the 16-slot wrap and the S2C 0x41 clear
-# [orig: CharAttr_LoadFromDef @0x412140; AnimMap_IsSlotActive @0x4125e0].
+# [orig: CharAttr_LoadFromDef @0x412140; CharAttr_ClassHasAttribute @0x4125e0].
 add_executable(charattr_flags_test world/charattr_flags_test.cpp)
 target_link_libraries(charattr_flags_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(charattr_flags_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -4550,6 +4550,14 @@ add_test(NAME editor_add_it_there COMMAND editor_add_it_there_test)
 # Definition fields complete their references (ADR 0046 DI-09): every def field the game resolves by name a
 # reference of its kind in the scope its reader reads (user points by the lookup that scans them, an action's
 # slot in its weapon's map, an ammo's tracer items by type id), and the complete query over them.
+# The character attributes type (ADR 0046 DI-09's charattr follow-up): charattr.def's read classes'
+# camouflage items as references at their numbers, the game's words for a missing one, a rename writing
+# the type id back, the unread sections and the type's other findings.
+add_executable(editor_charattr_type_test editor/charattr_type_test.cpp)
+target_link_libraries(editor_charattr_type_test PRIVATE opennova_editor)
+target_include_directories(editor_charattr_type_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_charattr_type COMMAND editor_charattr_type_test)
+
 add_executable(editor_def_references_test editor/def_references_test.cpp)
 target_link_libraries(editor_def_references_test PRIVATE opennova_editor)
 target_include_directories(editor_def_references_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -5154,6 +5162,14 @@ opennova_add_mixed_test(def_write COMMAND def_write_test)
 # hudpos.def's writer (formats/def/def_hudpos_write.h, ADR 0003; the editor deep-integration plan's DI-37):
 # read, written and read again the same model, its bytes canonical; the retail legs JO:CA's own hudpos.def
 # off the packed install (base and each expansion) and the extracted tree.
+# charattr.def's loader and writer (formats/charattr, ADR 0003): the classes in order to the first
+# missing, the first section of a label, each value's source and the unread sections; written and read
+# again the same rows; the retail legs JO:CA's own file (classes 1..9, CHARACTER8's CRC 0x22A25E01).
+add_executable(charattr_test charattr/charattr_test.cpp)
+target_link_libraries(charattr_test PRIVATE opennova_base opennova_formats)
+target_include_directories(charattr_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(charattr COMMAND charattr_test)
+
 add_executable(def_write_hudpos_test def/def_write_hudpos_test.cpp)
 target_link_libraries(def_write_hudpos_test PRIVATE opennova_base opennova_formats)
 target_include_directories(def_write_hudpos_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
