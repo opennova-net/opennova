@@ -68,6 +68,11 @@ struct MissionPose {
 	uint32_t stamp = 0; // moves when anything above does
 };
 
+// Whether an item's ai_function names a person class whose definition callback is the organic init
+// (org0, org1): the init that poses its spawn and resolves its ammo bytes and launch points
+// (world::resolve_organic_weapons).
+bool person_class(const std::string &ai_function);
+
 // What a person's spawn reads of its definition (its item's first row: its class, its .adm, its
 // attributes) and of its record (its SSN, its route, its attributes).
 struct PersonDefinition {
