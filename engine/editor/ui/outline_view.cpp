@@ -15,12 +15,14 @@
 #include <editor/documents/mission_table.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
+#include <editor/graph/jump_queries.h>
 #include <editor/model/field_text.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/document_toolbar.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/field_widgets.h>
 #include <editor/ui/inspector_layout.h>
+#include <editor/ui/project_find.h>
 #include <editor/ui/text_edit.h>
 #include <editor/ui/texture_preview.h>
 #include <editor/ui/ui_kit.h>
@@ -58,12 +60,40 @@ std::string record_tip(const OutlineLine &line, Document::RecordChange change) {
 	return tip;
 }
 
+// A record line's right-click menu (DI-18), over the line just drawn (inside its own id): the record selected
+// as it opens, as a click selects it; Go to definition (what the record names first, record_definition: F12 with
+// it selected); Find usages (who names what it defines: Shift+F12); then the type's own items (`own`,
+// OutlineSpec::row_menu: an item record's Place in mission).
+void record_menu(Workspace &workspace, const Document &document, const NodeAddress &record, OutlineRowMenuHook own) {
+	if (!ImGui::BeginPopupContextItem("record menu")) return;
+	const SessionView &view = workspace.view();
+	if (ImGui::IsWindowAppearing() && !view.documents.selection.holds(record)) select(workspace, document, record);
+	std::vector<ReferenceTarget> targets;
+	if (view.findings.graph && view.project.scan)
+		record_definition(*view.findings.graph, *view.project.scan, document, record, targets);
+	if (ImGui::MenuItem("Go to definition", "F12", false, !targets.empty()) && !targets.empty())
+		window_requests::go_to(workspace, targets.front());
+	ui_kit::tooltip(targets.empty() ? std::string("It names nothing the project defines or holds.")
+	                                : window_requests::go_to_words(targets.front()) + " (what it names first)");
+	const std::string locator = document.locator(record);
+	const bool finds = view.findings.graph && !locator.empty();
+	if (ImGui::MenuItem("Find usages", "Shift+F12", false, finds) && finds)
+		ProjectFind::open_usages(workspace, document.path(), locator);
+	ui_kit::tooltip("Who names what it defines, each a Go to.");
+	if (own) {
+		ImGui::Separator();
+		own(workspace, document, record);
+	}
+	ImGui::EndPopup();
+}
+
 // A row's line in a list or a master column, cut to what shows of it (whole in its tooltip),
 // marked when it was added or changed since the last save, highlighted while the selection is in
-// it (the primary's row, or a row selected with others); `id` its item's id after its text. True
-// when it was clicked: its caller selects.
+// it (the primary's row, or a row selected with others); `id` its item's id after its text; its
+// right-click menu (record_menu, the type's `own` items after the jumps). True when it was clicked: its
+// caller selects.
 bool row_line(Workspace &workspace, const Document &document, const RecordReveal &reveal, const OutlineLine &line,
-              const char *id, bool middle = false) {
+              const char *id, OutlineRowMenuHook own, bool middle = false) {
 	const SessionView &view = workspace.view();
 	ImGui::PushID(static_cast<int>(line.address.row));
 	const float x = ImGui::GetCursorScreenPos().x;
@@ -83,6 +113,7 @@ bool row_line(Workspace &workspace, const Document &document, const RecordReveal
 		const std::string words = ui_kit::change_words(change);
 		return shown != label ? line.text + (words.empty() ? "" : "\n" + words) : words;
 	});
+	record_menu(workspace, document, line.address, own);
 	ImGui::PopID();
 	return clicked;
 }
@@ -333,7 +364,7 @@ void OutlineView::draw_list(Workspace &workspace, const Document &document) {
 	if (revealed != SIZE_MAX) clipper.IncludeItemByIndex(static_cast<int>(revealed));
 	while (clipper.Step())
 		for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
-			if (row_line(workspace, document, reveal_, lines[size_t(i)], "###record"))
+			if (row_line(workspace, document, reveal_, lines[size_t(i)], "###record", spec_.row_menu))
 				select_line(workspace, document, model_, size_t(i));
 	ImGui::EndDisabled();
 	draw_file_values(workspace, document);
@@ -501,6 +532,10 @@ void OutlineView::draw_tree_line(Workspace &workspace, const Document &document,
 			workspace.request(request::edit_in_viewport(document.path(), std::move(frame)));
 		}
 		finding_mark(view, document, line.address);
+		// Its right-click menu (DI-18), over its line (finding_mark draws no item), in its own id.
+		ImGui::PushID(static_cast<int>(id));
+		record_menu(workspace, document, line.address, spec_.row_menu);
+		ImGui::PopID();
 	}
 	if (indent > 0.0f) ImGui::Unindent(indent);
 }
@@ -662,7 +697,7 @@ void OutlineView::draw_masters(Workspace &workspace, const Document &document) {
 	row_tool(workspace, document, tool, address, index);
 	if (rows.empty()) ui_kit::empty_state(("No " + lower(spec_.rows) + " yet.").c_str());
 	for (const OutlineLine &line : model_.masters())
-		if (row_line(workspace, document, reveal_, line, "###row", true)) select(workspace, document, line.address);
+		if (row_line(workspace, document, reveal_, line, "###row", spec_.row_menu, true)) select(workspace, document, line.address);
 	ImGui::PopID();
 }
 
@@ -794,6 +829,7 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 		const Document::RecordChange change = document.record_change(line.address);
 		ui_kit::change_dot(change, x);
 		ui_kit::tooltip(*ui_kit::change_words(change) ? ui_kit::change_words(change) : "Select this one.");
+		record_menu(workspace, document, line.address, spec_.row_menu);
 		if (every) {
 			ImGui::TableNextColumn();
 			ImGui::AlignTextToFramePadding();
