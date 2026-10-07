@@ -782,11 +782,11 @@ int run_reimport(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 // to its end, its outputs printed.
 int run_new_terrain(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	std::vector<std::pair<std::string, std::string>> values;
-	for (const char *image : {"heightmap", "colormap", "detail", "tiles", "surface"}) {
+	for (const char *image : {"heightmap", "colormap", "detail", "tiles", "surface", "foliagemap"}) {
 		const std::string option = std::string("--") + image;
 		if (args.has(option.c_str())) values.emplace_back(image, from_here(args.value(option.c_str())));
 	}
-	for (const char *number : {"top", "water", "layout"}) {
+	for (const char *number : {"foliage", "top", "water", "layout"}) {
 		const std::string option = std::string("--") + number;
 		if (args.has(option.c_str())) values.emplace_back(number, args.value(option.c_str()));
 	}
@@ -1183,7 +1183,8 @@ constexpr CliOption kImportOptions[] = { { "--entry", "a file name", true },
 constexpr CliOption kReimportOptions[] = { { "--force" }, { "--source", "a source" } };
 constexpr CliOption kNewTerrainOptions[] = { { "--heightmap", "an image" }, { "--colormap", "an image" },
 	                                         { "--detail", "an image" },    { "--tiles", "an image" },
-	                                         { "--surface", "an image" },   { "--top", "world units" },
+	                                         { "--surface", "an image" },   { "--foliagemap", "an image" },
+	                                         { "--foliage", "definitions" }, { "--top", "world units" },
 	                                         { "--water", "world units" },  { "--layout", "island or tiled" } };
 constexpr CliOption kBuildOptions[] = { { "--out", "a directory" }, { "--rehash" } };
 
@@ -1250,12 +1251,16 @@ constexpr VerbRow kRows[] = {
 	        .row,
 	Verb(V::NewTerrain, "new-terrain",
 	     "<dir> <name> --heightmap <file> --colormap <file> [--detail <file>] [--tiles <file>] "
-	     "[--surface <file>] [--top <units>] [--water <units>] [--layout island|tiled]",
+	     "[--surface <file>] [--foliagemap <file> --foliage <definitions>] [--top <units>] [--water <units>] "
+	     "[--layout island|tiled]",
 	     kNewTerrainRequests, kNewTerrainArgs, run_new_terrain,
 	     "make a terrain from images: a heightmap (a PNG of 1024 x 1024, any depth, or a .raw) and a\n"
 	     "colour map (1024 x 1024), a detail, a tile set and a surface map optional (square, 256 to\n"
 	     "1024 a side: an 8-bit PCX's or palette PNG's indices the surface classes 0..19, any other\n"
-	     "image each class in its legend colour); --top the heightmap's white in world units (127.5),\n"
+	     "image each class in its legend colour) and a foliage map optional (square, a power of two at\n"
+	     "most 1024: an indexed image's indices or a grey image's levels the foliage codes), with --foliage\n"
+	     "its definitions (\"graphic <model> match <codes> [color_lower n] [color_upper n] [attrib\n"
+	     "forceon|shadow]\", up to four split by |); --top the heightmap's white in world units (127.5),\n"
 	     "--water the sea's height (0 none), --layout island or tiled; written as art/terrain/<name>.tset,\n"
 	     "then imported into <name>.trn, .cpt and their textures (--json: the state query's import)")
 	        .takes(kNewTerrainOptions)

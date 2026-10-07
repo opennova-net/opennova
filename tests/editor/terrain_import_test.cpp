@@ -52,6 +52,7 @@
 #include <formats/trn/charmap_legend.h>
 #include <formats/trn/trn_io.h>
 #include <runtime/terrain/terrain_frame.h>
+#include <runtime/terrain_query/foliage_mask_map.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/terrain_query/surface_type_map.h>
 #include <runtime/terrain_query/terrain_field_build.h>
@@ -64,6 +65,10 @@
 
 using namespace opennova::editor;
 namespace fs = std::filesystem;
+using opennova::FOLIAGE_ATTRIB_FORCE_ON;
+using opennova::FOLIAGE_ATTRIB_SHADOW;
+using opennova::FOLIAGE_MATCH_UNSET;
+using opennova::FoliageDef;
 using opennova::IndexedImage8;
 using opennova::RgbaImage;
 using editor_test::NoProcess;
@@ -261,15 +266,16 @@ int test_set_text() {
 	const std::string text = "; a comment\r\nheightmap h.png ; the heights\r\ncolormap  c.png\r\nSurface m.pcx\r\n";
 	TEST_EXPECT(parse_terrain_set(std::vector<uint8_t>(text.begin(), text.end()), back, why) && back.heightmap == "h.png" &&
 	            back.colormap == "c.png" && back.surface == "m.pcx");
-	TEST_EXPECT(terrain_output_names("isle", false, false) ==
+	TEST_EXPECT(terrain_output_names("isle", false, false, false) ==
 	            (std::vector<std::string>{"isle.cpt", "isle_c.tga", "isle_dt.tga", "isle_dm.tga", "isle_d1.tga", "isle.til",
 	                                      "isle.trn"}));
-	TEST_EXPECT(terrain_output_names("isle", true, true) ==
+	TEST_EXPECT(terrain_output_names("isle", true, true, false) ==
 	            (std::vector<std::string>{"isle.cpt", "isle_c.tga", "isle_dt.tga", "isle_dm.tga", "isle_d1.tga", "isle_t.tga",
 	                                      "isle.til", "isle_m.pcx", "isle.trn"}));
-	const std::string wrong = "heightmap h.png\r\nfoliage f.pcx\r\n";
+	const std::string wrong = "heightmap h.png\r\ncharmap m.pcx\r\n";
 	TEST_EXPECT(!parse_terrain_set(std::vector<uint8_t>(wrong.begin(), wrong.end()), back, why) &&
-	            why.find("foliage") != std::string::npos && why.find("surface") != std::string::npos);
+	            why.find("charmap") != std::string::npos && why.find("surface") != std::string::npos &&
+	            why.find("foliagemap") != std::string::npos);
 	const std::string half = "heightmap h.png\r\n";
 	TEST_EXPECT(!parse_terrain_set(std::vector<uint8_t>(half.begin(), half.end()), back, why) &&
 	            why.find("colormap") != std::string::npos);
@@ -505,7 +511,7 @@ int test_new_terrain() {
 	TEST_EXPECT(load_import_sidecar(project.at("art/terrain/isle.tset.import"), record, error));
 	TEST_EXPECT(record.importer == "terrain" && record.options.at("water") == "12" && record.options.at("top") == "100");
 	TEST_EXPECT((record.inputs == std::vector<std::string>{"isle_heightmap.png", "isle_colormap.png"}));
-	TEST_EXPECT(record.outputs == terrain_output_names("isle", false, false));
+	TEST_EXPECT(record.outputs == terrain_output_names("isle", false, false, false));
 
 	// The scan: the outputs project files of their kinds, the set an import source, the images inputs.
 	const SessionView &view = session.view();
@@ -632,7 +638,7 @@ int test_new_terrain() {
 
 	// Rerun-stable: imported again with nothing changed, the same bytes.
 	std::map<std::string, std::vector<uint8_t>> before;
-	for (const std::string &name : terrain_output_names("isle", false, false)) before[name] = read(project.output(name));
+	for (const std::string &name : terrain_output_names("isle", false, false, false)) before[name] = read(project.output(name));
 	outcome = editor_test::handle_to_end(project.session, request::reimport("art/terrain/isle.tset", true));
 	TEST_EXPECT(!outcome.refused && (*session.view().project.imports)[0].reimported);
 	for (const auto &[name, bytes] : before) TEST_EXPECT(!bytes.empty() && read(project.output(name)) == bytes);
@@ -698,7 +704,7 @@ int test_new_terrain_surface() {
 	Diagnostic error;
 	TEST_EXPECT(load_import_sidecar(project.at("art/terrain/reef.tset.import"), record, error));
 	TEST_EXPECT((record.inputs == std::vector<std::string>{"reef_heightmap.png", "reef_colormap.png", "reef_surface.png"}));
-	TEST_EXPECT(record.outputs == terrain_output_names("reef", false, true));
+	TEST_EXPECT(record.outputs == terrain_output_names("reef", false, true, false));
 	const SessionView &view = session.view();
 	TEST_EXPECT(view.project.imports && (*view.project.imports)[0].ok);
 	TEST_EXPECT(project.find("reef_m.pcx") && project.find("reef_m.pcx")->kind == AssetKind::Texture);
@@ -773,6 +779,314 @@ int test_new_terrain_surface() {
 	return 0;
 }
 
+// --- DI-29: the terrain's foliage map ----------------------------------------------------------------------
+
+// A foliage map's codes, `side` a side: 0 (nothing) everywhere, a block of 253 and one of 254 side by side in
+// the north-west, and a block of 77 (a code no definition matches) under the 253s; each block a quarter side.
+std::vector<uint8_t> foliage_codes(int side) {
+	std::vector<uint8_t> codes(size_t(side) * side, 0);
+	const int q = side / 4;
+	for (int row = q; row < 2 * q; ++row)
+		for (int col = q; col < 2 * q; ++col) {
+			codes[size_t(row) * side + col] = 253;
+			codes[size_t(row) * side + col + q] = 254;
+			codes[size_t(row + q) * side + col] = 77;
+		}
+	return codes;
+}
+
+// The codes as a palette PNG, its palette a colour ramp the import keeps.
+std::vector<uint8_t> foliage_palette_png(int side, const std::vector<uint8_t> &codes) {
+	PngSpec spec;
+	spec.width = uint32_t(side);
+	spec.height = uint32_t(side);
+	spec.depth = 8;
+	spec.color_type = 3;
+	for (int i = 0; i < 256; ++i) {
+		spec.palette.push_back(uint8_t(i));
+		spec.palette.push_back(uint8_t(255 - i));
+		spec.palette.push_back(uint8_t(i / 2));
+	}
+	for (int y = 0; y < side; ++y) {
+		spec.rows.push_back(0);
+		spec.rows.insert(spec.rows.end(), codes.begin() + long(y) * side, codes.begin() + long(y + 1) * side);
+	}
+	return make_png(spec);
+}
+
+// The codes as an 8-bit grey PNG, each level a code.
+std::vector<uint8_t> foliage_grey_png(int side, const std::vector<uint8_t> &codes) {
+	PngSpec spec;
+	spec.width = uint32_t(side);
+	spec.height = uint32_t(side);
+	spec.depth = 8;
+	spec.color_type = 0;
+	for (int y = 0; y < side; ++y) {
+		spec.rows.push_back(0);
+		spec.rows.insert(spec.rows.end(), codes.begin() + long(y) * side, codes.begin() + long(y + 1) * side);
+	}
+	return make_png(spec);
+}
+
+// The set's foliage keys: the map and up to four definitions in the .trn's own block form, written and read
+// back; the refusals of a block the game would not read as given; the one-line definitions new_terrain takes.
+int test_foliage_set_text() {
+	TerrainSet set;
+	set.heightmap = "h.png";
+	set.colormap = "c.png";
+	set.foliagemap = "isle_foliage.png";
+	FoliageDef grass;
+	grass.graphic = "grass.3di";
+	grass.match = {253, FOLIAGE_MATCH_UNSET, FOLIAGE_MATCH_UNSET, FOLIAGE_MATCH_UNSET};
+	grass.color_upper = 2;
+	FoliageDef shrub;
+	shrub.graphic = "shrub.3di";
+	shrub.match = {254, 253, FOLIAGE_MATCH_UNSET, FOLIAGE_MATCH_UNSET};
+	shrub.attrib_flags = FOLIAGE_ATTRIB_FORCE_ON | FOLIAGE_ATTRIB_SHADOW;
+	set.foliage = {grass, shrub};
+	const std::vector<uint8_t> written = write_terrain_set(set);
+	const std::string text(written.begin(), written.end());
+	TEST_EXPECT(text.find("\r\nfoliagemap isle_foliage.png\r\n") != std::string::npos);
+	TEST_EXPECT(text.find("foliage\r\n  graphic shrub.3di\r\n  match 254 253\r\n  color_lower 0\r\n  color_upper 0\r\n"
+	                      "  attrib forceon shadow\r\nend\r\n") != std::string::npos);
+	TerrainSet back;
+	std::string why;
+	TEST_EXPECT(parse_terrain_set(written, back, why) && back.foliagemap == "isle_foliage.png" && back.foliage.size() == 2);
+	if (back.foliage.size() != 2) return 1;
+	TEST_EXPECT(back.foliage[0].graphic == "grass.3di" && back.foliage[0].match == grass.match &&
+	            back.foliage[0].color_upper == 2 && back.foliage[0].attrib_flags == 0);
+	TEST_EXPECT(back.foliage[1].match == shrub.match && back.foliage[1].attrib_flags == shrub.attrib_flags);
+	TEST_EXPECT(terrain_output_names("isle", false, true, true) ==
+	            (std::vector<std::string>{"isle.cpt", "isle_c.tga", "isle_dt.tga", "isle_dm.tga", "isle_d1.tga", "isle.til",
+	                                      "isle_m.pcx", "isle_f.pcx", "isle.trn"}));
+	// A block as the shipped .trn writes one (tabs, commas, a comment), read the same.
+	const std::string shipped = "heightmap h.png\r\ncolormap c.png\r\nfoliagemap f.pcx\r\nfoliage\r\n  graphic\tmveg5b.3di ; <= 20 verts\r\n"
+	                            "  color_lower 0\r\n  match 254,252\r\n  ATTRIB\tshadow\r\nEND\r\n";
+	TEST_EXPECT(parse_terrain_set(std::vector<uint8_t>(shipped.begin(), shipped.end()), back, why) && back.foliage.size() == 1 &&
+	            back.foliage[0].graphic == "mveg5b.3di" && back.foliage[0].match[1] == 252 &&
+	            back.foliage[0].attrib_flags == FOLIAGE_ATTRIB_SHADOW);
+	// Refused, each naming its line or block.
+	const std::string head = "heightmap h.png\r\ncolormap c.png\r\n";
+	const std::string block = "foliage\r\n graphic g.3di\r\n match 1\r\nend\r\n";
+	const std::vector<std::pair<std::string, const char *>> refused = {
+	        {"foliage\r\n graphic g.3di\r\n match 1\r\n", "has no end"},
+	        {block + block + block + block + block, "fifth foliage block"},
+	        {"foliage\r\n graphic g.3di\r\n match 1\r\n scale 2\r\nend\r\n", "'scale' is no key"},
+	        {"end\r\n", "outside a foliage block"},
+	        {"match 253\r\n", "outside a foliage block"},
+	        {"foliage\r\n graphic g.3di\r\n match 0\r\nend\r\n", "no code from 1 to 255"},
+	        {"foliage\r\n graphic g.3di\r\n match 256\r\nend\r\n", "no code from 1 to 255"},
+	        {"foliage\r\n graphic g.3di\r\n match 1 2 3 4 5\r\nend\r\n", "one to four codes"},
+	        {"foliage\r\n graphic g.3di\r\n match 1\r\n color_upper 3\r\nend\r\n", "0, 1 or 2"},
+	        {"foliage\r\n graphic g.3di\r\n match 1\r\n attrib glow\r\nend\r\n", "neither forceon nor shadow"},
+	        {"foliage\r\n match 1\r\nend\r\n", "names no graphic"},
+	        {"foliage\r\n graphic g.3di\r\nend\r\n", "matches no code"},
+	        {"foliage f.pcx\r\n", "foliagemap"},
+	        {"foliage\r\n graphic g.3di\r\n foliage\r\n", "inside the one of line 3"},
+	};
+	for (const auto &[body, words] : refused) {
+		const std::string all = head + body;
+		const bool parsed = parse_terrain_set(std::vector<uint8_t>(all.begin(), all.end()), back, why);
+		if (parsed || why.find(words) == std::string::npos) std::fprintf(stderr, "  refused? '%s': %s\n", words, why.c_str());
+		TEST_EXPECT(!parsed && why.find(words) != std::string::npos);
+	}
+	// The one-line form new_terrain takes, several split by |.
+	std::vector<FoliageDef> defs;
+	TEST_EXPECT(parse_foliage_definitions("graphic grass.3di match 253 color_upper 2 | Graphic shrub.3di match 254 253 attrib "
+	                                      "forceon shadow |",
+	                                      defs, why) &&
+	            defs.size() == 2);
+	if (defs.size() == 2)
+		TEST_EXPECT(defs[0].graphic == "grass.3di" && defs[0].match == grass.match && defs[0].color_upper == 2 &&
+		            defs[1].match == shrub.match && defs[1].attrib_flags == shrub.attrib_flags);
+	TEST_EXPECT(parse_foliage_definitions("", defs, why) && defs.empty());
+	TEST_EXPECT(!parse_foliage_definitions("grass.3di match 253", defs, why) && why.find("definition 1") != std::string::npos);
+	TEST_EXPECT(!parse_foliage_definitions("graphic a.3di match 1 | graphic b.3di", defs, why) &&
+	            why.find("definition 2 matches no code") != std::string::npos);
+	TEST_EXPECT(!parse_foliage_definitions("graphic a match 1|graphic b match 1|graphic c match 1|graphic d match 1|graphic e match 1",
+	                                       defs, why) &&
+	            why.find("four") != std::string::npos);
+	return 0;
+}
+
+// A foliage map read as the import reads it: an indexed image by its indices (its palette kept), a grey one by
+// its levels; refused holding colour (the texel named) or at a side the game does not sample whole; what it
+// grows by the definitions (codes no definition matches, definitions whose codes it lacks).
+int test_foliage_reads() {
+	const std::vector<uint8_t> c256 = foliage_codes(256);
+	IndexedImage8 out;
+	std::string why;
+	TEST_EXPECT(decode_terrain_foliage("f.png", foliage_palette_png(256, c256), out, why) && out.width == 256 &&
+	            out.height == 256 && out.indices == c256);
+	TEST_EXPECT(out.palette[253][0] == 253 && out.palette[253][1] == 2 && out.palette[253][2] == 126);
+	TEST_EXPECT(decode_terrain_foliage("f.png", foliage_grey_png(256, c256), out, why) && out.indices == c256 &&
+	            out.palette[77][0] == 77 && out.palette[77][2] == 77);
+	{
+		IndexedImage8 pcx;
+		pcx.width = pcx.height = 256;
+		pcx.indices = c256;
+		pcx.palette[254][0] = 150, pcx.palette[254][1] = 120, pcx.palette[254][2] = 60;
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(opennova::encode_pcx_indexed(pcx, bytes, why));
+		TEST_EXPECT(decode_terrain_foliage("f.pcx", bytes, out, why) && out.indices == c256 && out.palette[254][0] == 150);
+	}
+	// The sides the game samples whole: square, a power of two, at most 1024.
+	for (const int side : {64, 1024}) {
+		const std::vector<uint8_t> codes = foliage_codes(side);
+		TEST_EXPECT(decode_terrain_foliage("f.png", foliage_grey_png(side, codes), out, why) && out.width == side);
+	}
+	for (const auto &[w, h] : std::vector<std::pair<int, int>>{{384, 384}, {2048, 2048}, {512, 256}}) {
+		const std::vector<uint8_t> codes(size_t(w) * h, 1);
+		PngSpec spec;
+		spec.width = uint32_t(w);
+		spec.height = uint32_t(h);
+		spec.depth = 8;
+		spec.color_type = 0;
+		for (int y = 0; y < h; ++y) {
+			spec.rows.push_back(0);
+			spec.rows.insert(spec.rows.end(), codes.begin() + long(y) * w, codes.begin() + long(y + 1) * w);
+		}
+		TEST_EXPECT(!decode_terrain_foliage("f.png", make_png(spec), out, why) &&
+		            why.find("power of two at most 1024") != std::string::npos && out.empty());
+	}
+	// Colour: refused, by its place.
+	{
+		std::vector<uint8_t> rgba(size_t(64) * 64 * 4, 200);
+		rgba[(size_t(3) * 64 + 9) * 4] = 10;
+		TEST_EXPECT(!decode_terrain_foliage("f.png", encode_png_rgba(rgba.data(), 64, 64), out, why) &&
+		            why.find("texel (9, 3) is #0AC8C8") != std::string::npos);
+	}
+	// What it grows: 77 matched by none; a definition of codes the map lacks; 0 never listed.
+	FoliageDef grass, ghost;
+	grass.graphic = "grass.3di";
+	grass.match[0] = 253;
+	ghost.graphic = "ghost.3di";
+	ghost.match[0] = 9;
+	TEST_EXPECT(decode_terrain_foliage("f.png", foliage_grey_png(256, c256), out, why));
+	const std::vector<std::string> notes = terrain_foliage_notes(out, {grass, ghost});
+	TEST_EXPECT(notes.size() == 2 && notes[0].find("codes 77, 254 (8192 texels) match no foliage definition") == 0 &&
+	            notes[1].find("foliage 2 (ghost.3di) matches no code") == 0);
+	return 0;
+}
+
+// A terrain with a foliage map and its definitions (the foliagemap and foliage values): refused for a definition
+// the game would not read and for a map of colour, nothing written; made, the map an input, written as
+// isle_f.pcx (8-bit, its codes the indices) and named by the .trn with the definitions as its foliage blocks, a
+// code no definition matches a warning; the game's foliage sampler over the runtime's load growing each
+// definition where the map holds its codes.
+int test_new_terrain_foliage() {
+	Project project("opennova_editor_terrain_foliage");
+	const std::string images = project.dir.file("images");
+	const std::vector<uint8_t> c256 = foliage_codes(256);
+	TEST_EXPECT(editor_test::write_bytes(images + "/height.png", island_png16()));
+	TEST_EXPECT(editor_test::write_bytes(images + "/colour.png", colour_png(kSide)));
+	TEST_EXPECT(editor_test::write_bytes(images + "/foliage.png", foliage_palette_png(256, c256)));
+	TEST_EXPECT(editor_test::write_bytes(images + "/coloured.png", colour_png(256)));
+	const std::string defs = "graphic grass.3di match 253 color_upper 2 | graphic shrub.3di match 254 253 attrib forceon";
+
+	ActionOutcome outcome = editor_test::handle_to_end(project.session, request::new_terrain("isle",
+	        {{"heightmap", images + "/height.png"}, {"colormap", images + "/colour.png"}, {"foliagemap", images + "/foliage.png"},
+	         {"foliage", "graphic grass.3di match 0"}}));
+	TEST_EXPECT(outcome.refused && outcome.findings.back().code() == "import.terrain" &&
+	            outcome.findings.back().message.find("no code from 1 to 255") != std::string::npos);
+	outcome = editor_test::handle_to_end(project.session, request::new_terrain("isle",
+	        {{"heightmap", images + "/height.png"}, {"colormap", images + "/colour.png"}, {"foliagemap", images + "/coloured.png"},
+	         {"foliage", defs}}));
+	TEST_EXPECT(outcome.refused && outcome.findings.back().message.find("texels are codes") != std::string::npos);
+	TEST_EXPECT(!fs::exists(system_path(project.at("art/terrain"))));
+
+	outcome = editor_test::handle_to_end(project.session, request::new_terrain("isle",
+	        {{"heightmap", images + "/height.png"}, {"colormap", images + "/colour.png"}, {"foliagemap", images + "/foliage.png"},
+	         {"foliage", defs}}));
+	for (const Diagnostic &d : outcome.findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(!outcome.refused);
+	TerrainSet set;
+	std::string why;
+	TEST_EXPECT(parse_terrain_set(read(project.at("art/terrain/isle.tset")), set, why) && set.foliagemap == "isle_foliagemap.png" &&
+	            set.foliage.size() == 2);
+	ImportSidecar record;
+	Diagnostic error;
+	TEST_EXPECT(load_import_sidecar(project.at("art/terrain/isle.tset.import"), record, error));
+	TEST_EXPECT((record.inputs == std::vector<std::string>{"isle_heightmap.png", "isle_colormap.png", "isle_foliagemap.png"}));
+	TEST_EXPECT(record.outputs == terrain_output_names("isle", false, false, true));
+	const SessionView &view = project.session.view();
+	TEST_EXPECT(view.project.imports && (*view.project.imports)[0].ok);
+	TEST_EXPECT(project.find("isle_f.pcx") && project.find("isle_f.pcx")->kind == AssetKind::Texture);
+	TEST_EXPECT(project.find("isle_foliagemap.png") && project.find("isle_foliagemap.png")->kind == AssetKind::ImportInput);
+	// The code no definition matches: a warning of the import, on the set.
+	bool loose = false;
+	for (const Diagnostic &d : view.findings.diagnostics)
+		loose = loose || (d.code() == "import.terrain" && d.severity == DiagnosticSeverity::Warning &&
+		                  d.message.find("codes 77 (4096 texels) match no foliage definition") != std::string::npos);
+	TEST_EXPECT(loose);
+
+	// The .trn names the map and holds the definitions as its blocks; the map is the game's 8-bit PCX.
+	opennova::TrnConfig trn;
+	{
+		const std::vector<uint8_t> text = read(project.output("isle.trn"));
+		std::istringstream in(std::string(text.begin(), text.end()));
+		TEST_EXPECT(opennova::load_trn(in, trn, why) && trn.foliagemap == "isle_f.pcx" && trn.foliage_defs.size() == 2);
+	}
+	if (trn.foliage_defs.size() != 2) return 1;
+	TEST_EXPECT(trn.foliage_defs[0].graphic == "grass.3di" && trn.foliage_defs[0].match[0] == 253 &&
+	            trn.foliage_defs[0].color_upper == 2 && trn.foliage_defs[1].match[1] == 253 &&
+	            trn.foliage_defs[1].attrib_flags == FOLIAGE_ATTRIB_FORCE_ON);
+	IndexedImage8 map;
+	{
+		const std::vector<uint8_t> pcx = read(project.output("isle_f.pcx"));
+		TEST_EXPECT(pcx.size() > 897 && pcx[3] == 8 && pcx[65] == 1);
+		TEST_EXPECT(opennova::decode_pcx_indexed(pcx.data(), pcx.size(), map, why) && map.width == 256 && map.indices == c256);
+	}
+
+	// The game's sampler over the runtime's load, the map remapped by the definitions as the game does at load:
+	// the 253s grow both, the 254s the shrub, the 77s and the 0s nothing, off the island nothing.
+	const std::string dir = utf8_of(path_of(project.output("isle.trn")).parent_path());
+	opennova::ResourceIndex index;
+	TEST_EXPECT(index.scan(dir));
+	opennova::terrain::TerrainFieldStore store;
+	TEST_EXPECT(opennova::terrain::terrain_field_store_load(store, index, "isle", "", why) && store.valid());
+	std::vector<uint8_t> masks(map.indices.size());
+	for (size_t i = 0; i < masks.size(); ++i)
+		masks[i] = uint8_t(opennova::foliage_remap_pixel_to_def_mask(trn.foliage_defs, map.indices[i]));
+	opennova::terrain::FoliageMaskMap sampler;
+	sampler.data = masks.data();
+	sampler.width = sampler.height = 256;
+	sampler.sector_grid = store.height_field().layout.sector_grid;
+	sampler.origin_x = store.height_field().layout.origin_x;
+	sampler.origin_y = store.height_field().layout.origin_y;
+	const auto grows = [&](int col, int row) {
+		int32_t x = 0, y = 0;
+		mission_at(256, col, row, x, y);
+		return opennova::terrain::foliage_mask_at_fixed(sampler, x, y);
+	};
+	TEST_EXPECT(grows(100, 100) == 3 && grows(160, 100) == 2 && grows(100, 160) == 0 && grows(10, 10) == 0);
+	TEST_EXPECT(opennova::terrain::foliage_mask_at_fixed(sampler, 700 << 16, 0) == 0);
+	return 0;
+}
+
+// With --retail: a shipped foliage map read as the importer reads one. JO:CA's are 256 x 256, 8-bit, their codes
+// 252 to 255 kept as they are, their palette kept; Dvxi5's definitions match 254 and 253, so its 255s grow
+// nothing.
+int test_retail_foliage_map() {
+	const std::string install = retail::install();
+	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (a shipped foliage map, Dvxi5_f.pcx)");
+	opennova::ResourceIndex index;
+	std::vector<uint8_t> bytes, text;
+	TEST_EXPECT(index.scan(install) && index.read_file("Dvxi5_f.pcx", bytes) && index.read_file("Dvxi5.trn", text));
+	std::string why;
+	IndexedImage8 shipped, out;
+	TEST_EXPECT(opennova::decode_pcx_indexed(bytes.data(), bytes.size(), shipped, why) && shipped.width == 256 &&
+	            shipped.height == 256);
+	TEST_EXPECT(decode_terrain_foliage("Dvxi5_f.pcx", bytes, out, why) && out.indices == shipped.indices &&
+	            std::equal(&out.palette[0][0], &out.palette[0][0] + 768, &shipped.palette[0][0]));
+	opennova::TrnConfig trn;
+	std::istringstream in(std::string(text.begin(), text.end()));
+	TEST_EXPECT(opennova::load_trn(in, trn, why) && trn.foliagemap == "Dvxi5_f.pcx" && trn.foliage_defs.size() == 2);
+	const std::vector<std::string> notes = terrain_foliage_notes(out, trn.foliage_defs);
+	TEST_EXPECT(notes.size() == 1 && notes[0].find("codes 255 (") == 0);
+	return 0;
+}
+
 // The blank environment: the writer's template, named after its file, CRLF lines the game parses.
 int test_blank_environment() {
 	BlankRequest blank;
@@ -798,6 +1112,10 @@ int main(int argc, char **argv) {
 	failures += test_blank_environment();
 	failures += test_new_terrain();
 	failures += test_new_terrain_surface();
+	failures += test_foliage_set_text();
+	failures += test_foliage_reads();
+	failures += test_new_terrain_foliage();
+	failures += test_retail_foliage_map();
 	if (failures == 0) std::printf("editor_terrain_import: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }
