@@ -127,6 +127,10 @@ void Terrain::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_debug_mode", "mode"), &Terrain::set_debug_mode);
 	ClassDB::bind_method(D_METHOD("get_debug_mode"), &Terrain::get_debug_mode);
+	ClassDB::bind_method(D_METHOD("set_ground_overlay", "image", "rect", "outside", "outside_on"),
+			&Terrain::set_ground_overlay);
+	ClassDB::bind_method(D_METHOD("clear_ground_overlay"), &Terrain::clear_ground_overlay);
+	ClassDB::bind_method(D_METHOD("has_ground_overlay"), &Terrain::has_ground_overlay);
 	BIND_ENUM_CONSTANT(DEBUG_MODE_NORMAL);
 	BIND_ENUM_CONSTANT(DEBUG_MODE_LOD_COLORS);
 	BIND_ENUM_CONSTANT(DEBUG_MODE_SECTOR_COLORS);
@@ -1337,6 +1341,7 @@ bool Terrain::_build_terrain_begin() {
 	terrain_shader = _load_terrain_shader();
 	terrain_material.instantiate();
 	terrain_material->set_shader(terrain_shader);
+	_apply_ground_overlay();
 
 	tile_infos.resize(cpt.tiles.size());
 	build_total_verts_ = 0;
@@ -1475,3 +1480,32 @@ bool Terrain::get_debug_force_lod0() const { return traversal_config.force_lod0;
 
 void Terrain::set_debug_mode(DebugMode mode) { debug_mode = mode; }
 Terrain::DebugMode Terrain::get_debug_mode() const { return debug_mode; }
+
+void Terrain::set_ground_overlay(const Ref<Image> &p_image, const Rect2 &p_rect, const Color &p_outside,
+		bool p_outside_on) {
+	ground_overlay_texture_.unref();
+	if (p_image.is_valid() && !p_image->is_empty()) ground_overlay_texture_ = ImageTexture::create_from_image(p_image);
+	const float span_x = p_rect.size.x > 0.0f ? p_rect.size.x : 1.0f;
+	const float span_z = p_rect.size.y > 0.0f ? p_rect.size.y : 1.0f;
+	// No picture: every point is past it.
+	ground_overlay_rect_ = ground_overlay_texture_.is_valid()
+			? Vector4(p_rect.position.x, p_rect.position.y, 1.0f / span_x, 1.0f / span_z)
+			: Vector4(0.0f, 0.0f, 0.0f, 0.0f);
+	ground_overlay_outside_ = p_outside_on ? p_outside : Color(0.0f, 0.0f, 0.0f, 0.0f);
+	ground_overlay_on_ = true;
+	_apply_ground_overlay();
+}
+
+void Terrain::clear_ground_overlay() {
+	ground_overlay_texture_.unref();
+	ground_overlay_on_ = false;
+	_apply_ground_overlay();
+}
+
+void Terrain::_apply_ground_overlay() {
+	if (terrain_material.is_null()) return;
+	terrain_material->set_shader_parameter("u_overlay_on", ground_overlay_on_);
+	terrain_material->set_shader_parameter("u_overlay", ground_overlay_texture_);
+	terrain_material->set_shader_parameter("u_overlay_rect", ground_overlay_rect_);
+	terrain_material->set_shader_parameter("u_overlay_outside", ground_overlay_outside_);
+}
