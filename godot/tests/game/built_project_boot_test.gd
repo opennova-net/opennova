@@ -23,7 +23,6 @@ func before_each() -> void:
 	_had_config = FileAccess.file_exists(ResourceDirSettings.CONFIG_PATH)
 	if _had_config:
 		_saved_config = FileAccess.get_file_as_bytes(ResourceDirSettings.CONFIG_PATH)
-	ResourceDirSettings.set_expansion("")
 	ResourceDirSettings.set_game("jo")
 
 
