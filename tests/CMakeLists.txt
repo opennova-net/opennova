@@ -4960,6 +4960,14 @@ target_link_libraries(editor_mission_effects_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_effects_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_mission_effects COMMAND editor_mission_effects_test)
 
+# DI-36: the mission view's Listen (editor/preview/mission_listen, mission_script_run): the sources by the hour and
+# their reach through the runtime's AmbientMixer, the eight channels, the rain beside the camera and the thunder of the
+# script's weather run by the engine's kernel, the wire and the overlay.
+add_executable(editor_mission_listen_test editor/mission_listen_test.cpp)
+target_link_libraries(editor_mission_listen_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_listen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_mission_listen COMMAND editor_mission_listen_test)
+
 # The surface classes and the foliage over a mission's terrain (ADR 0046 DI-29, editor/preview/
 # mission_ground_overlay): the ground's foliage at a point and the two overlays over a minted Tmap.
 add_executable(editor_mission_ground_overlay_test editor/mission_ground_overlay_test.cpp)

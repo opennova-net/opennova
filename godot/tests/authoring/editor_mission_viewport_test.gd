@@ -159,8 +159,11 @@ func _copy_fixture(source: String, target: String) -> void:
 ## its heights, its two maps and the textures it names, its two foliage definitions' models), the
 ## environment (synth_full.env and its clouds), the item table the mission's items are in, and the models
 ## their graphics name. `effects` (DI-31): the pumps author a particle slot at their model's ground point,
-## its effect in a particle file of the project.
-func _mint_project(root: String, skip: PackedStringArray = PackedStringArray(), effects := false) -> void:
+## its effect in a particle file of the project. `listen` (DI-36): the four Marker Alpha markers made the
+## game's env-sound emitters of V_TRUCK_ILP at every hour, the fixture bank that holds it (heard to 2 km, its
+## member tone.wav) as the project's game.lwf.
+func _mint_project(root: String, skip: PackedStringArray = PackedStringArray(), effects := false,
+		listen := false) -> void:
 	for name in ["Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"]:
 		if skip.has(name):
 			continue
@@ -176,7 +179,17 @@ func _mint_project(root: String, skip: PackedStringArray = PackedStringArray(), 
 	# The fixture ends its lines in CR LF, the one break the retail def walk splits at.
 	assert_true(items.contains("graphic pump\r\n"))
 	var crate_line := "graphic crate\r\n" + ("particlefx Puff ground\r\n" if effects else "")
-	_write(root.path_join("defs").path_join("items.def"), items.replace("graphic pump\r\n", crate_line).to_utf8_buffer())
+	items = items.replace("graphic pump\r\n", crate_line)
+	if listen:
+		const MARKER := "begin \"Marker Alpha\"\r\n  id 100001\r\n  type marker\r\n"
+		assert_true(items.contains(MARKER))
+		var loops := "  move_function envs\r\n"
+		for slot in 4:
+			loops += "  soundloop_%d V_TRUCK_ILP\r\n" % (slot + 1)
+		items = items.replace(MARKER, MARKER + loops)
+		_copy_fixture("lwf/menu.lwf", root.path_join("sounds").path_join("game.lwf"))
+		_copy_fixture("lwf/tone.wav", root.path_join("sounds").path_join("tone.wav"))
+	_write(root.path_join("defs").path_join("items.def"), items.to_utf8_buffer())
 	for name in ["crate.3di", "armory.3di", "shed.3di"]:
 		_copy_fixture("threedi/synth/" + name, root.path_join("models").path_join(name))
 	# The terrain's foliage definitions grow bush1 and bush2 (the synth crate under both names, as the foliage
@@ -201,7 +214,7 @@ func _ptl() -> String:
 ## A new project holding the minted mission as missions/synth_logic.bms (and, `whole`, the files its
 ## picture reads), scanned, the mission open.
 func _open_mission(whole := true, also: PackedStringArray = PackedStringArray(),
-		skip: PackedStringArray = PackedStringArray(), effects := false) -> bool:
+		skip: PackedStringArray = PackedStringArray(), effects := false, listen := false) -> bool:
 	var dir := OS.get_cache_dir().path_join("opennova editor mission project %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
 	assert_true(_seam.new_project(dir, "Mission Viewport Game"))
@@ -212,7 +225,7 @@ func _open_mission(whole := true, also: PackedStringArray = PackedStringArray(),
 	for name in also:
 		_write(root.path_join("missions").path_join(name), mission)
 	if whole:
-		_mint_project(root, skip, effects)
+		_mint_project(root, skip, effects, listen)
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 	return _seam.open_document("missions/synth_logic.bms")
@@ -1632,3 +1645,72 @@ func test_the_shoot_tool_plays_its_impacts() -> void:
 		if again:
 			break
 	assert_true(again, "a shot after the clear stops: %s" % str(_state().get("body", {}).get("shots", {})).left(400))
+
+
+## DI-36: the Listen. The fixture's four Marker Alpha markers made the game's env-sound emitters of a set the
+## project's bank holds: listening near one, the viewport's mix binds each marker's layer to one of the game's
+## channels, and the device plays each looping at its marker (an AudioStreamPlayer3D under its world, no
+## attenuation: the mix's volume; the device's camera the listener), held paused while its picture is not drawn
+## (a headless run draws none); off, the device lets its voices go.
+func test_the_listen_plays_the_mixs_channels() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission(true, PackedStringArray(), PackedStringArray(), false, true))
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	assert_eq(state.get("body", {}).get("listen"), null, "off by default")
+	var device := _device(state)
+	assert_not_null(device)
+	if device == null:
+		return
+	assert_true(device.is_audio_listener_3d(), "the device's camera is its world's listener")
+	assert_true(_change({"kind": "mission", "camera": {"target": [-190, -200, 0], "pitch": 60, "distance": 10},
+			"options": {"time": 12, "listen": {"on": true, "volume": 0.5}}}))
+	var listen := {}
+	for _frame in 60:
+		_app.pump()
+		await get_tree().process_frame
+		var body: Variant = _state().get("body", {}).get("listen")
+		listen = body if body is Dictionary else {}
+		if listen.get("channels", []).size() >= 4:
+			break
+	var channels: Array = listen.get("channels", [])
+	assert_eq(channels.size(), 4, "a channel a marker: %s" % str(listen))
+	for channel: Variant in channels:
+		assert_eq(String((channel as Dictionary).get("set", "")), "V_TRUCK_ILP")
+		assert_eq(String((channel as Dictionary).get("source", "")), "marker")
+		assert_eq(String((channel as Dictionary).get("path", "")), "sounds/tone.wav")
+	assert_eq(int(listen.get("sources", {}).get("playing", 0)), 4, str(listen.get("sources", {})))
+	# The device plays them: a looping, unattenuated voice a channel, at the channel's place.
+	var voices: Array[Node] = []
+	for _frame in 120:
+		_app.pump()
+		await get_tree().process_frame
+		voices = device.find_children("ListenChannel*", "AudioStreamPlayer3D", true, false)
+		if voices.size() >= 4:
+			break
+	assert_eq(voices.size(), 4, "a voice a channel")
+	# What the device reports reaches the viewport at the next pump.
+	_app.pump()
+	var drawn: Dictionary = _state().get("body", {}).get("drawn", {}).get("listen", {})
+	assert_eq(int(drawn.get("voices", 0)), 4, str(drawn))
+	# Sounding while its picture is drawn, held while not (a headless run draws none).
+	var audible := bool(drawn.get("audible", false))
+	assert_eq(int(drawn.get("playing", -1)), 4 if audible else 0, str(drawn))
+	var at := MissionObjectPlacer.bms_to_godot_position(Vector3(-200, -200, 0))
+	for voice: Node in voices:
+		var player := voice as AudioStreamPlayer3D
+		assert_eq(player.attenuation_model, AudioStreamPlayer3D.ATTENUATION_DISABLED)
+		assert_eq((player.stream as AudioStreamWAV).loop_mode, AudioStreamWAV.LOOP_FORWARD)
+		assert_lt(player.volume_db, 0.0, "the mix's volume, the master's half")
+	var near := 0
+	for voice: Node in voices:
+		near += 1 if (voice as AudioStreamPlayer3D).position.distance_to(at) < 0.01 else 0
+	assert_eq(near, 1, "one voice at the marker the camera looks at")
+	# Off: the voices go.
+	assert_true(_change({"kind": "mission", "options": {"listen": {"on": false}}}))
+	for _frame in 4:
+		_app.pump()
+		await get_tree().process_frame
+	assert_eq(_state().get("body", {}).get("listen"), null, "off: no listen")
+	assert_eq(device.find_children("ListenChannel", "AudioStreamPlayer3D", true, false).size(), 0, "off: no voice")
