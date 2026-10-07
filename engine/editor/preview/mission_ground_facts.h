@@ -92,7 +92,7 @@ io::JsonValue mission_ground_to_json(const MissionGroundFacts &facts);
 // (terrain_field_store_load: the .trn, the .cpt and the char map the .trn names), the mission's placed
 // tiles (<mission>.til, the game's surface_tiles_from_til_bytes) and its tile set's table (the .tsd beside
 // the tile strip the mission's tile set names, resolve_tileset_surface_table), and the water plane the
-// game resolves (env::resolve_water_height: the mission's override, the terrain's, the environment's).
+// game resolves (env::resolve_water_height: the mission's override, the environment's, the terrain's).
 // Read when first asked, and again where the header's terrain, tile set, environment or water override or
 // the mission's name moved, or (the files' generation having moved) a file it read moved its stamp.
 class MissionGround {
