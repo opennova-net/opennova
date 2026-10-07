@@ -80,7 +80,7 @@ void ViewportView::canvas(Workspace &workspace, const ViewportModel &model, View
 		// The mouse's place on the picture goes to its device while the canvas shows no pointer of its own
 		// there (no handle or selected window under it, no press, drag or pan): a picture that draws the
 		// game's pointer draws it there (a menu's, DI-08).
-		const bool on_picture = in.hovered && !in.panning && !in.down && in.mouse.x >= 0.0f &&
+		const bool on_picture = in.hovered && !in.panning && (!in.down || game_input(model)) && in.mouse.x >= 0.0f &&
 				in.mouse.y >= 0.0f && in.mouse.x < float(in.width) && in.mouse.y < float(in.height);
 		const bool pointer = on_picture && !half_->gesture().pressed() &&
 				half_->cursor(context, in) == CanvasCursor::Default;
@@ -117,6 +117,10 @@ void ViewportView::canvas(Workspace &workspace, const ViewportModel &model, View
 }
 
 bool ViewportView::draws_pointer(const ViewportModel &, const ViewportContext &, const CanvasInput &) {
+	return false;
+}
+
+bool ViewportView::game_input(const ViewportModel &) const {
 	return false;
 }
 
