@@ -262,7 +262,7 @@ void ImportController::new_terrain(const EditorRequest &request) {
 	const std::string folder = "art/terrain";
 	const std::string set_path = folder + "/" + stem + kTerrainSetExtension;
 	// Its files' names are the project's to give: none may be taken (the game's names are flat).
-	std::vector<std::string> names = terrain_output_names(stem, true, true);
+	std::vector<std::string> names = terrain_output_names(stem, true, true, true);
 	names.push_back(stem + kTerrainSetExtension);
 	for (const std::string &name : names)
 		if (const AssetEntry *taken = scan.find(name))
@@ -271,21 +271,26 @@ void ImportController::new_terrain(const EditorRequest &request) {
 			                                taken->relative_path + " of that name already. Choose another name.",
 			                        taken->relative_path);
 
-	// The values: the images by their set keys, the importer's options by theirs.
-	static const char *const kImageKeys[] = {"heightmap", "colormap", "detail", "tiles", "surface"};
+	// The values: the images by their set keys, the foliage definitions (`foliage`, on one line), the
+	// importer's options by theirs.
+	static const char *const kImageKeys[] = {"heightmap", "colormap", "detail", "tiles", "surface", "foliagemap"};
 	std::map<std::string, std::string> images;
 	ImportOptions options;
+	TerrainSet set;
 	for (const auto &[key, value] : request.values) {
 		const bool image = std::find_if(std::begin(kImageKeys), std::end(kImageKeys),
 		                                [&](const char *k) { return key == k; }) != std::end(kImageKeys);
 		if (image) {
 			if (!value.empty()) images[key] = value;
+		} else if (key == "foliage") {
+			if (!parse_foliage_definitions(value, set.foliage, why))
+				return core_.refuse_now(CoreFinding::ImportTerrain, "No terrain made: the foliage's " + why + ".");
 		} else if (import_option_row(terrain_import_option_rows(), key)) {
 			if (!value.empty()) options[key] = value;
 		} else {
 			return core_.refuse_now(CoreFinding::ImportTerrain,
-			                        "No terrain made: a new terrain takes heightmap, colormap, detail, tiles, surface, top, "
-			                        "water and layout; '" + key + "' is none of them.");
+			                        "No terrain made: a new terrain takes heightmap, colormap, detail, tiles, surface, "
+			                        "foliagemap, foliage, top, water and layout; '" + key + "' is none of them.");
 		}
 	}
 	if (!images.count("heightmap") || !images.count("colormap"))
@@ -302,7 +307,6 @@ void ImportController::new_terrain(const EditorRequest &request) {
 		std::vector<uint8_t> bytes;
 	};
 	std::vector<Copy> copies;
-	TerrainSet set;
 	const fs::path root = path_of(view_.project.root).lexically_normal();
 	for (const char *key : kImageKeys) {
 		const auto given = images.find(key);
@@ -321,6 +325,9 @@ void ImportController::new_terrain(const EditorRequest &request) {
 		} else if (std::string(key) == "surface") {
 			IndexedImage8 surface;
 			fits = decode_terrain_surface(name, bytes, surface, why);
+		} else if (std::string(key) == "foliagemap") {
+			IndexedImage8 foliage;
+			fits = decode_terrain_foliage(name, bytes, foliage, why);
 		} else {
 			RgbaImage image;
 			fits = decode_terrain_image(key, name, bytes, image, why);
@@ -344,7 +351,8 @@ void ImportController::new_terrain(const EditorRequest &request) {
 		else if (std::string(key) == "colormap") set.colormap = named;
 		else if (std::string(key) == "detail") set.detail = named;
 		else if (std::string(key) == "tiles") set.tiles = named;
-		else set.surface = named;
+		else if (std::string(key) == "surface") set.surface = named;
+		else set.foliagemap = named;
 	}
 
 	// Written: the copies, the set, its record; what was written taken away again should one fail.
