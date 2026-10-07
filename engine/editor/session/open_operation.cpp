@@ -28,9 +28,15 @@ bool OpenOperation::step(const StepBudget &budget) {
 			base_project_game_dir(paths_.root, document_.expansion, document_.target_game, base, why);
 		}
 		install_files_ = list_retail_file_names(base, document_);
-		// And an expansion's base game's, which its build's gate reads (ADR 0046 S16).
+		// And an expansion's base game's, which its build's gate reads (ADR 0046 S16), and its layer under the
+		// graph, built in the steps that follow.
 		base_files_ = list_base_file_names(base, document_);
+		if (!document_.expansion.standalone()) layer_ = std::make_unique<BaseLayerBuild>(base, document_);
 		listed_ = true;
+		return false;
+	}
+	if (layer_ && !layer_->done()) {
+		layer_->step(budget.bytes);
 		return false;
 	}
 	return refresh_.step(budget.bytes);
@@ -38,6 +44,8 @@ bool OpenOperation::step(const StepBudget &budget) {
 
 OperationProgress OpenOperation::progress() const {
 	if (!listed_) return {0, 0, OperationUnit::Files, "Reading the game install's file names"};
+	if (layer_ && !layer_->done())
+		return {layer_->files_done(), layer_->files_total(), OperationUnit::Files, "Reading the base game's names"};
 	return {refresh_.files_done(), refresh_.files_total(), OperationUnit::Files, refresh_.label()};
 }
 
