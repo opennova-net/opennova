@@ -28,6 +28,14 @@ inline void go_to(Workspace &workspace, const ReferenceTarget &target) {
 	workspace.request(request::open_document(target.file, target.locator, target.field));
 }
 
+// A project file itself gone to (DI-18: every jump a Go to, a step of the history): its document, or its page.
+inline void go_to_file(Workspace &workspace, const std::string &path) {
+	ReferenceTarget target;
+	target.label = path;
+	target.file = path;
+	go_to(workspace, target);
+}
+
 // Where a Go to leads, in words for its tooltip: the file opened at it, or its page.
 inline std::string go_to_words(const ReferenceTarget &target) {
 	if (target.editable) return "Open " + target.label + ".";
