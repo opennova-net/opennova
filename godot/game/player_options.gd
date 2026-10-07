@@ -27,6 +27,13 @@ const ASPECT_MODE_KEY := "display_16x9"
 const KEYBOARD_TIPS_KEY := "enable_keyboardtips"
 const GAMEPLAY_TIPS_KEY := "enable_gameplaytips"
 
+# The object detail persists as retail's game.cfg word `object_polydetail`
+# (0..3), which the Options rows OBJECTPOLY / OBJECTDETAIL edit and the world
+# copies at each mission start (engine renderer/object_lod.h carries the
+# witness; GameWorld re-exports the fresh profile's word and the load clamp).
+const DISPLAY_SECTION := "display"
+const OBJECT_POLYDETAIL_KEY := "object_polydetail"
+
 # The slider ranges are the engine's witnessed Options ranges
 # (options_policy.h kOptionsScrollRanges through MenuFrame), read by control
 # name so the clamp can never drift from what the sliders seed.
@@ -72,6 +79,7 @@ class State extends RefCounted:
 	var aspect_mode: int
 	var keyboard_tips: bool
 	var gameplay_tips: bool
+	var object_polydetail: int
 
 	func _init(p_sound_fx_volume := DEFAULT_VOLUME,
 			p_dialog_volume := DEFAULT_VOLUME,
@@ -83,7 +91,8 @@ class State extends RefCounted:
 			p_crosshair_spread := DEFAULT_CROSSHAIR_SPREAD,
 			p_aspect_mode := DEFAULT_ASPECT_MODE,
 			p_keyboard_tips := true,
-			p_gameplay_tips := true) -> void:
+			p_gameplay_tips := true,
+			p_object_polydetail := GameWorld.object_detail_fresh_profile()) -> void:
 		sound_fx_volume = p_sound_fx_volume
 		dialog_volume = p_dialog_volume
 		music_volume = p_music_volume
@@ -95,12 +104,13 @@ class State extends RefCounted:
 		aspect_mode = p_aspect_mode
 		keyboard_tips = p_keyboard_tips
 		gameplay_tips = p_gameplay_tips
+		object_polydetail = p_object_polydetail
 
 	func copy() -> State:
 		return State.new(sound_fx_volume, dialog_volume, music_volume,
 				mouse_sensitivity, invert_mouse, crosshair_style,
 				crosshair_color, crosshair_spread, aspect_mode,
-				keyboard_tips, gameplay_tips)
+				keyboard_tips, gameplay_tips, object_polydetail)
 
 
 signal changed(state: State)
@@ -146,6 +156,7 @@ func update(state: State) -> void:
 		config.set_value(PLAYER_SECTION, ASPECT_MODE_KEY, _state.aspect_mode)
 		config.set_value(PLAYER_SECTION, KEYBOARD_TIPS_KEY, 1 if _state.keyboard_tips else 0)
 		config.set_value(PLAYER_SECTION, GAMEPLAY_TIPS_KEY, 1 if _state.gameplay_tips else 0)
+		config.set_value(DISPLAY_SECTION, OBJECT_POLYDETAIL_KEY, _state.object_polydetail)
 	)
 	apply()
 	changed.emit(current())
@@ -204,7 +215,20 @@ func _load_state() -> State:
 					CROSSHAIR_SPREAD_KEY, DEFAULT_CROSSHAIR_SPREAD)),
 			_load_aspect_mode(),
 			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION, KEYBOARD_TIPS_KEY, 1)) != 0,
-			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION, GAMEPLAY_TIPS_KEY, 1)) != 0))
+			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION, GAMEPLAY_TIPS_KEY, 1)) != 0,
+			_load_object_polydetail()))
+
+
+# The persisted object detail, clamped as the config load clamps it, or the
+# fresh profile's word, written at once as the aspect seed is.
+static func _load_object_polydetail() -> int:
+	if ConfigStore.has_key(CONFIG_PATH, DISPLAY_SECTION, OBJECT_POLYDETAIL_KEY):
+		return GameWorld.clamp_object_detail(int(ConfigStore.read(CONFIG_PATH,
+				DISPLAY_SECTION, OBJECT_POLYDETAIL_KEY,
+				GameWorld.object_detail_fresh_profile())))
+	var seeded := GameWorld.object_detail_fresh_profile()
+	ConfigStore.write(CONFIG_PATH, DISPLAY_SECTION, OBJECT_POLYDETAIL_KEY, seeded)
+	return seeded
 
 
 # The persisted cfg word, or the one-time desktop seed a fresh profile writes
@@ -231,7 +255,8 @@ static func _normalized(state: State) -> State:
 					MIN_CROSSHAIR_STYLE, MAX_CROSSHAIR_STYLE),
 			state.crosshair_color & CROSSHAIR_COLOR_MASK,
 			state.crosshair_spread, state.aspect_mode,
-			state.keyboard_tips, state.gameplay_tips)
+			state.keyboard_tips, state.gameplay_tips,
+			GameWorld.clamp_object_detail(state.object_polydetail))
 
 
 # Clamp to the engine's witnessed range for an Options slider, by control

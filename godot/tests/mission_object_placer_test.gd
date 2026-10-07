@@ -1029,6 +1029,20 @@ func test_multi_lod_static_selects_its_rlod_per_instance_inside_the_bin() -> voi
 			"the next frame re-evaluates the restored instance")
 	assert_eq(_live_populations(placer, first_bms), ["Batch_StaticCrate1_1"])
 
+	# The frame scale reads the object detail the view draws at (game.cfg's
+	# object_polydetail, the session copy; engine renderer/object_lod.h): 50 u
+	# off, the entity projects to ~13.7 px, which detail 3 (x2.0) lifts past the
+	# 20 px row to level 0 and detail 2 (x1.0) leaves at level 1.
+	var detail_camera := Transform3D(Basis.IDENTITY, Vector3(10, 0, 60))
+	placer.update_static_lods(detail_camera, 70.0, 640.0, 480.0, 3)
+	assert_eq(placer.get_static_instance_lod(first_bms), 0)
+	placer.update_static_lods(detail_camera, 70.0, 640.0, 480.0, 2)
+	assert_eq(placer.get_static_instance_lod(first_bms), 1,
+			"detail 2 draws the coarser level from half the distance")
+	placer.update_static_lods(detail_camera, 70.0, 640.0, 480.0)
+	assert_eq(placer.get_static_instance_lod(first_bms), 0,
+			"the scripted seam's default is detail 3")
+
 
 func test_multi_lod_document_harvests_every_level_into_the_bins() -> void:
 	# The real harvest: an inert-PANM document with more than one authored

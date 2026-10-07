@@ -76,9 +76,8 @@ bool death_piece_draw(const DeathPiece &piece, const DeathPieceModel &model,
 void OcclusionWorld::collect_death_piece_draws(const World &world,
 		const OcclusionFrameCamera &cam, std::vector<DeathPieceDraw> &out) const {
 	out.clear();
-	// The locked profile runs the highest shipped detail level (the frame
-	// scale's precedent, renderer/object_lod.h).
-	const float lod_scale = renderer::death_piece_lod_scale(renderer::kObjectLodDetailLevelMax);
+	// The scale reads the session's object detail, which the frame carries.
+	const float lod_scale = renderer::death_piece_lod_scale(cam.object_detail);
 	const auto &pieces = world.death_pieces.pieces;
 	for (size_t slot = 0; slot < pieces.size(); ++slot) {
 		const DeathPiece &piece = pieces[slot];

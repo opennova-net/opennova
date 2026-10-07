@@ -1960,15 +1960,19 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("update_authored_lods",
 					"camera_transform", "vertical_fov",
-					"viewport_width", "viewport_height"),
-			&ObjectModel::update_authored_lods);
+					"viewport_width", "viewport_height", "object_detail"),
+			&ObjectModel::update_authored_lods,
+			DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));
 	ClassDB::bind_static_method("ObjectModel",
-			D_METHOD("update_authored_lods_for_camera", "camera", "viewport_width"),
-			&ObjectModel::update_authored_lods_for_camera);
+			D_METHOD("update_authored_lods_for_camera", "camera", "viewport_width",
+					"object_detail"),
+			&ObjectModel::update_authored_lods_for_camera,
+			DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));
 	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("update_authored_lods_for_views", "main_camera", "main_width",
-					"inset_camera", "inset_width"),
-			&ObjectModel::update_authored_lods_for_views);
+					"inset_camera", "inset_width", "object_detail"),
+			&ObjectModel::update_authored_lods_for_views,
+			DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));
 	ClassDB::bind_static_method("ObjectModel", D_METHOD("sync_view_twins"),
 			&ObjectModel::sync_view_twins);
 	ClassDB::bind_method(D_METHOD("set_inset_occlusion_hidden", "hidden"),

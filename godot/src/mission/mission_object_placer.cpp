@@ -100,8 +100,10 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::begin_place, DEFVAL(Dictionary()));
 	ClassDB::bind_method(
 			D_METHOD("update_static_lods", "camera_transform",
-					"vertical_fov_degrees", "viewport_width", "viewport_height"),
-			&MissionObjectPlacer::update_static_lods);
+					"vertical_fov_degrees", "viewport_width", "viewport_height",
+					"object_detail"),
+			&MissionObjectPlacer::update_static_lods,
+			DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));
 	ClassDB::bind_method(D_METHOD("set_static_instance_occlusion_hidden", "bms_id", "hidden"),
 			&MissionObjectPlacer::set_static_instance_occlusion_hidden);
 	ClassDB::bind_method(D_METHOD("clear_static_instance_occlusion"),
@@ -109,8 +111,9 @@ void MissionObjectPlacer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_static_instance_lod", "bms_id"),
 			&MissionObjectPlacer::get_static_instance_lod);
 	ClassDB::bind_method(D_METHOD("update_static_lods_for_views", "main_camera", "main_width",
-								 "inset_camera", "inset_width"),
-			&MissionObjectPlacer::update_static_lods_for_views);
+								 "inset_camera", "inset_width", "object_detail"),
+			&MissionObjectPlacer::update_static_lods_for_views,
+			DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));
 	ClassDB::bind_method(D_METHOD("get_static_instance_inset_lod", "bms_id"),
 			&MissionObjectPlacer::get_static_instance_inset_lod);
 	ClassDB::bind_method(
@@ -1056,9 +1059,9 @@ void MissionObjectPlacer::_complete_static_lod_profile(
 //  each retained instance and rewrites the slots of the ones that crossed]
 int MissionObjectPlacer::update_static_lods(
 		const Transform3D &p_camera_transform, float p_vertical_fov_degrees,
-		float p_viewport_width, float p_viewport_height) {
+		float p_viewport_width, float p_viewport_height, int p_object_detail) {
 	const ObjectLodFrame frame = ObjectLodFrame::make(p_camera_transform,
-			p_vertical_fov_degrees, p_viewport_width, p_viewport_height);
+			p_vertical_fov_degrees, p_viewport_width, p_viewport_height, p_object_detail);
 	return update_static_lod_views(&frame, 1);
 }
 
@@ -1164,12 +1167,12 @@ int MissionObjectPlacer::update_static_lod_views(const ObjectLodFrame *p_frames,
 }
 
 int MissionObjectPlacer::update_static_lods_for_views(Camera3D *p_main, float p_main_width,
-		Camera3D *p_inset, float p_inset_width) {
+		Camera3D *p_inset, float p_inset_width, int p_object_detail) {
 	ObjectLodFrame frames[2];
-	frames[0] = ObjectLodFrame::from_camera(p_main, p_main_width);
+	frames[0] = ObjectLodFrame::from_camera(p_main, p_main_width, p_object_detail);
 	int count = 1;
 	if (p_inset != nullptr) {
-		frames[1] = ObjectLodFrame::from_camera(p_inset, p_inset_width);
+		frames[1] = ObjectLodFrame::from_camera(p_inset, p_inset_width, p_object_detail);
 		count = 2;
 	}
 	return update_static_lod_views(frames, count);

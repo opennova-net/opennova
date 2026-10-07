@@ -1160,7 +1160,7 @@ void GameWorld::apply_occlusion_frame() {
 	// Terrain_RenderWorldScene @ 0x5c94f0]
 	if (world_ready_ && !frame_skip_occlusion_) {
 		occlusion_->apply_frame(image_camera(), surface_width(), render_camera_xform(),
-				mission_forces_indoors_);
+				mission_forces_indoors_, object_detail_);
 	}
 }
 
@@ -1266,9 +1266,10 @@ void GameWorld::render_material_frame() {
 	// scale derive from; view 1 the weapon Inset pass over its own target
 	// while it renders. The Inset pass collects its own verdicts first (after
 	// the main collect of the occlusion leg), then both views select levels.
+	// Both views draw at the session's object detail (object_detail_).
 	ObjectLodFrame frames[2];
 	if (Camera3D *image = image_camera()) {
-		frames[0] = ObjectLodFrame::from_camera(image, surface_width());
+		frames[0] = ObjectLodFrame::from_camera(image, surface_width(), object_detail_);
 	}
 	// The Inset camera carries this frame's pose: the local-view leg handed it
 	// over (present_local_view_frame).
@@ -1276,10 +1277,11 @@ void GameWorld::render_material_frame() {
 	int frame_count = 1;
 	if (inset != nullptr) {
 		const float inset_width = inset->get_viewport()->get_visible_rect().size.x;
-		frames[1] = ObjectLodFrame::from_camera(inset, inset_width);
+		frames[1] = ObjectLodFrame::from_camera(inset, inset_width, object_detail_);
 		frame_count = frames[1].valid ? 2 : 1;
 		if (frame_count == 2 && world_ready_ && !frame_skip_occlusion_) {
-			occlusion_->apply_inset_frame(inset, inset_width, mission_forces_indoors_);
+			occlusion_->apply_inset_frame(inset, inset_width, mission_forces_indoors_,
+					object_detail_);
 			// The Inset pass's own terrain frame, then its foliage frame, after
 			// its own collect and after the main view's
 			// (Terrain::render_inset_frame, FoliageDispatcher::render_inset_frame).

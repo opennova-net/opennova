@@ -159,9 +159,12 @@ public:
 	// old level's populations, appended to the new level's, shadow twins
 	// following) with the touched populations' visibility, shadow row map
 	// and Q3 instance rows refreshed. Returns the switch count.
+	// The scripted seams take the object detail the frames draw at
+	// (ObjectLodFrame), the highest when a caller names none.
 	int update_static_lods(const Transform3D &p_camera_transform,
 			float p_vertical_fov_degrees, float p_viewport_width,
-			float p_viewport_height);
+			float p_viewport_height,
+			int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);
 	// The same walk per view drawing the world this frame: view 0 the frame's
 	// image, view 1 (present while it renders) the weapon Inset pass, which
 	// retail runs as its own scene pass (ObjectModel::update_authored_lod_views).
@@ -175,7 +178,8 @@ public:
 	// The two-camera form (a null Inset camera = no Inset view), for tools
 	// and tests.
 	int update_static_lods_for_views(Camera3D *p_main, float p_main_width,
-			Camera3D *p_inset, float p_inset_width);
+			Camera3D *p_inset, float p_inset_width,
+			int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);
 	// The Inset collect's verdict for a batched static (OcclusionFrame::
 	// apply_inset_frame) and its release; an instance without one follows
 	// the main view's. The next static LOD walk applies them.

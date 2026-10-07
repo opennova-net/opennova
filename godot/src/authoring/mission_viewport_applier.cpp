@@ -1097,10 +1097,15 @@ void MissionViewportApplier::present(double dt) {
 	water_->advance_frame(dt);
 	const Viewport *viewport = camera_->get_viewport();
 	const float width = viewport ? float(viewport->get_visible_rect().size.x) : 0.0f;
-	if (placed_ && placer_.is_valid()) placer_->update_static_lods_for_views(camera_, width, nullptr, 0.0f);
+	// The levels at the object detail a fresh game profile starts at (the game reads its options'
+	// setting; renderer::kObjectLodDetailFreshProfile), as the model viewport's auto level does.
+	constexpr int object_detail = opennova::renderer::kObjectLodDetailFreshProfile;
+	if (placed_ && placer_.is_valid()) {
+		placer_->update_static_lods_for_views(camera_, width, nullptr, 0.0f, object_detail);
+	}
 	// The individual models' levels (the walk is the process's: the model preview's model draws its
 	// level as its options say and never joins it).
-	const ObjectLodFrame frames[1] = { ObjectLodFrame::from_camera(camera_, width) };
+	const ObjectLodFrame frames[1] = { ObjectLodFrame::from_camera(camera_, width, object_detail) };
 	ObjectModel::update_authored_lod_views(frames, 1);
 	environment_->set_globals_held(true);
 	water_->set_globals_held(true);

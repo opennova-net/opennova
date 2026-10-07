@@ -166,6 +166,10 @@ struct OcclusionFrameCamera {
     int32_t fog_dist = 0;         // 16.16 [orig: g_EnvFogDistCurrent @ 0x26C681C]
     int32_t water_z = 0;          // 16.16 [orig: g_EnvWaterHeightFixed @ 0x26C6454]
     uint32_t local_blink_flags = 0; // [orig: g_LocalPlayerBlinkFlags @ 0x24C1934]
+    // The session's object detail the death-piece draw scales its radius by
+    // (renderer::kObjectLodDetailLevelMax's note). [orig: dword_24D2048, read by
+    // DeathPiece_RenderVisible @ 0x57b831]
+    int32_t object_detail = renderer::kObjectLodDetailLevelMax;
 };
 
 // The viewport projector's near word (1/32 u): a bound sphere whose view depth

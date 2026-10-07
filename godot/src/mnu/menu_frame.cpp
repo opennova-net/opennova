@@ -1228,6 +1228,12 @@ int MenuFrame::video_gamma_reference() {
 	return opennova::menu::kVideoGammaReference;
 }
 
+PackedStringArray MenuFrame::object_detail_controls() {
+	PackedStringArray out;
+	for (const char *name : opennova::menu::kObjectDetailControls) out.push_back(String(name));
+	return out;
+}
+
 PackedStringArray MenuFrame::video_preset_buttons() {
 	PackedStringArray out;
 	for (const char *name : opennova::menu::kVideoPresetButtons) out.push_back(String(name));
@@ -1256,6 +1262,8 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::options_scroll_ranges);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("video_quality_controls"),
 			&MenuFrame::video_quality_controls);
+	ClassDB::bind_static_method("MenuFrame", D_METHOD("object_detail_controls"),
+			&MenuFrame::object_detail_controls);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("video_gamma_reference"),
 			&MenuFrame::video_gamma_reference);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("options_unsupported_controls"),
