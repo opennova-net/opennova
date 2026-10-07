@@ -28,6 +28,19 @@ struct DefWords {
 const DefWords *def_words(def::DefRecordKind kind, size_t &count);
 // One member's words (null for a member of no row).
 const DefWords *def_words_of(def::DefRecordKind kind, const std::string &id);
+// One choice of a member (a flag word's bit, by the token the file writes) in a modder's words: its
+// label and what the game does with it, cited. Only the choices a row names have words; the others
+// show as their token.
+struct DefChoiceWords {
+	const char *id;      // the member ("attrib")
+	const char *token;   // the choice's token as the file writes it ("noshadow")
+	const char *label;   // "No shadow"
+	const char *meaning; // what the game does with it
+	const char *cite;    // its witness
+};
+// A choice's words (null for a choice of no row).
+const DefChoiceWords *def_choice_words_of(def::DefRecordKind kind, const std::string &id, const std::string &token);
+
 // A kind's sections in the order the Inspector shows them (its members are put in that order,
 // each section's in def_fields' order), null-ended; a section's place in it (SIZE_MAX for none).
 const char *const *def_sections(def::DefRecordKind kind);
