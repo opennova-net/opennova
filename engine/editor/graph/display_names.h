@@ -76,6 +76,28 @@ FieldUse picked_as(const FieldUse &field);
 std::vector<ReferenceChoice> picker_choices(const AssetGraph *graph, const Document &document, const NodeAddress &address,
                                             const FieldUse &field, const NameSource *names);
 
+// The characters a reference field's text holds, which the game's reader keeps of a longer name (its width less
+// the terminator: a sound loop's 24 [orig: ItemDef_ParseProperty's strncpy of 0x18 @ 0x49FF08]); 0 for a field
+// with no such limit (a number, a text of no width).
+size_t field_name_limit(const FieldUse &field);
+// How many characters the game's code page spells a UTF-8 name in (one byte a character).
+size_t name_characters(const std::string &name);
+
+// A picker's name as completing what is typed (ADR 0046 DI-09).
+struct ReferenceCompletion {
+	ReferenceChoice choice;
+	bool prefix = false; // its name starts with what is typed, as the kind's lookup compares names
+	bool exact = false;  // its name is what is typed, as the lookup compares them
+	bool fits = true;    // the field holds the whole name (field_name_limit): a longer one is cut, and no lookup finds that
+};
+// The names `choices` (picker_choices) offers that complete `typed`: those whose name the typed text begins, in
+// the kind's lookup's own comparison (without case, the way the game's stricmp and file lookups read names; an
+// item id's digits as written), first; then those holding it in their name or their words (an item's catalog
+// name); each with whether the field holds it whole. Typed empty: every name. The names a lookup never finds
+// (inert) last.
+std::vector<ReferenceCompletion> complete_reference(const std::vector<ReferenceChoice> &choices, const FieldUse &field,
+                                                    const std::string &typed);
+
 // The number that forms the text key `key` as the game forms it from `prefix` (`prefix` and the number
 // in three digits at least, sprintf's "%s%03i": STRNAME005 is 5, STRNAME1234 is 1234); false for a key of
 // another prefix or one no number forms (STRNAME5, STRNAME0005), which no lookup of the game reads.

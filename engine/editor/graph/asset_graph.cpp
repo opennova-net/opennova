@@ -49,7 +49,7 @@ bool same_reading(const GraphEdge &a, const GraphEdge &b) {
 			a.span.line == b.span.line && a.span.column == b.span.column &&
 			a.span.length == b.span.length && a.fallback == b.fallback &&
 			a.scopes_after == b.scopes_after && a.optional == b.optional && a.scope_alternate == b.scope_alternate &&
-			a.scope_owner == b.scope_owner && a.needs == b.needs;
+			a.scope_owner == b.scope_owner && a.needs == b.needs && a.name_offset == b.name_offset;
 }
 
 // A symbol as its file's reading makes it, the first one's inert and why given apart (a slot's own

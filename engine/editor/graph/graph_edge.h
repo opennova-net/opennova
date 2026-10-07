@@ -79,6 +79,10 @@ struct GraphEdge {
 	// lacks it the edge is no reference (NotAReference: no finding, no user, no rename companion,
 	// nothing the import follows). "" for none. A file kind's edge only.
 	std::string needs;
+	// What the field's number names its definition by less (FieldUse::name_offset: an ammo's tracer
+	// id, an item's type id, the items.def id less 100000): `value` is the name it reaches, the field
+	// holds it less this, which a rename writes back so. 0 for none.
+	int64_t name_offset = 0;
 };
 
 // A name a file defines that other files may reference: a document's field whose field_on
@@ -98,7 +102,8 @@ struct GraphSymbol {
 	std::string field;   // the field that defines it ("" for a native file's)
 	// Where a lookup finds it: a string id's "TABLE.BIN/Section"; a menu screen's menu file
 	// ("MAIN.MNU"); a menu window's menu file and screen ("MAIN.MNU/STARTUP"); a user point's
-	// model file ("GUN.3DI").
+	// model file ("GUN.3DI"), one of its first 16 in that file's first-16 section
+	// ("GUN.3DI/FIRST16", kFirstUserPointsSection); an animation map row's map file ("M4_1ST.ADM").
 	std::string scope;
 	// Defined, but not what the game reads: a style variable of a stylesheet the game does
 	// not load, one defined again later in its file (the game reads the last), one menu_style.mns
@@ -107,7 +112,7 @@ struct GraphSymbol {
 	// the first [orig: TextResource_FindEntryBySectionAndKey @ 0x75d250]); a menu screen or
 	// window no by-name lookup returns (MnuDocument::lookup_names: an earlier screen of a name,
 	// a later window of a name, one under a window with no NAME or on a screen a later one
-	// shadows); a model's user point past the first 16 an item's lookup scans.
+	// shadows); an animation map's row whose key names no slot.
 	bool inert = false;
 	// Why no lookup finds it, in a few words (the picker's, the find's), when it is inert.
 	std::string inert_reason;
