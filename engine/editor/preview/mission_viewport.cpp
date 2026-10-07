@@ -371,6 +371,8 @@ void MissionViewport::follow_effects_(const SessionView &view, const PreviewCloc
 		return;
 	}
 	effects_.refresh(view, scene_, poses_);
+	// The Shoot tool's impacts in the same scene (DI-23).
+	effects_.set_shot_spawns(shot_spawns_());
 	effects_.play_to(clock.ticks());
 }
 
@@ -398,9 +400,10 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		bound_items_(view);
 		stand_people_(view, poses_.refresh(view, scene_));
 		follow_overlay_(view);
-		follow_effects_(view, clock);
 		picture_.show(key, generation);
 		shown(*document);
+		follow_shots_(input, *document, clock);
+		follow_effects_(view, clock);
 		if (!framed_) {
 			// The one change its follow derives: the camera on the entities, looking north and down.
 			framed_ = true;
@@ -426,6 +429,9 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	posed = stand_people_(view, posed) || posed;
 	// The overlay made again where the option or the ground moved (DI-29): an Update gives it the device.
 	const bool overlaid = follow_overlay_(view);
+	// The Shoot tool's shots run to the clock (DI-23): the device draws their scars each frame, their effects
+	// in the items' effect scene below.
+	follow_shots_(input, *document, clock);
 	// The items' effects where the scene, a catalog or a model moved, played to the clock (DI-31): the device
 	// draws the scene each frame as it stands, no Update asked.
 	follow_effects_(view, clock);
@@ -446,7 +452,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 }
 
 bool MissionViewport::takes_(const std::string &member) const {
-	return member == "options" || member == "camera";
+	return member == "options" || member == "camera" || member == "shot" || member == "shots";
 }
 
 bool MissionViewport::check_(const io::JsonValue &json, std::string &error) const {
@@ -456,10 +462,21 @@ bool MissionViewport::check_(const io::JsonValue &json, std::string &error) cons
 	OrbitCamera camera = camera_;
 	if (const JsonValue *member = json.get("camera"); member && !mission_camera_from_json(*member, camera, error))
 		return false;
+	// The Shoot tool's shots (DI-23): one fired on the clock's tick, or the whole list.
+	MissionShot shot;
+	if (const JsonValue *member = json.get("shot"); member && !read_mission_shot(*member, shot, error)) return false;
+	if (const JsonValue *member = json.get("shots")) {
+		if (!member->is_array()) {
+			error = "shots is an array of shots, each {tick, ammo, at, eye}.";
+			return false;
+		}
+		for (const JsonValue &row : member->array)
+			if (!read_mission_shot(row, shot, error)) return false;
+	}
 	return true;
 }
 
-void MissionViewport::apply_(const io::JsonValue &json, PreviewClock &) {
+void MissionViewport::apply_(const io::JsonValue &json, PreviewClock &clock) {
 	std::string error;
 	MissionViewportOptions options = options_;
 	if (const JsonValue *member = json.get("options");
@@ -473,10 +490,35 @@ void MissionViewport::apply_(const io::JsonValue &json, PreviewClock &) {
 		drawn.snap = options_.snap;
 		drawn.turn = options_.turn;
 		drawn.palette = options_.palette;
+		drawn.ammo = options_.ammo;
 		if (drawn != options_) options_moved_ = true;
 		options_ = options;
 	}
 	if (const JsonValue *member = json.get("camera")) mission_camera_from_json(*member, camera_, error);
+	// The Shoot tool's shots (DI-23): the whole list, or one on the clock's tick (those after it gone: the run is
+	// played anew from there).
+	if (const JsonValue *member = json.get("shots")) {
+		std::vector<MissionShot> shots;
+		for (const JsonValue &row : member->array) {
+			MissionShot shot;
+			if (read_mission_shot(row, shot, error)) shots.push_back(std::move(shot));
+		}
+		shots_.set_shots(std::move(shots));
+		options_moved_ = true;
+	}
+	if (const JsonValue *member = json.get("shot")) {
+		MissionShot shot;
+		if (read_mission_shot(*member, shot, error)) {
+			const int32_t now = clock.ticks();
+			std::vector<MissionShot> shots;
+			for (const MissionShot &held : shots_.shots())
+				if (held.tick <= now) shots.push_back(held);
+			shot.tick = now;
+			shots.push_back(std::move(shot));
+			shots_.set_shots(std::move(shots));
+			options_moved_ = true;
+		}
+	}
 }
 
 bool MissionViewport::report_(const ViewportDeviceReport &report) {
@@ -992,6 +1034,7 @@ bool MissionViewport::play_from_here_(const ViewportContext &context, const View
 bool MissionViewport::command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
 		std::string &error) const {
 	if (command.name == "play_from_here") return play_from_here_(context, command, out, error);
+	if (command.name == "shoot") return shoot_(context, command, out, error);
 	if (command.name != "duplicate" && command.name != "paste") return ViewportModel::command_of(context, command, out, error);
 	const Document *document = planned_(context, error);
 	if (!document) return false;
@@ -1066,14 +1109,19 @@ bool MissionViewport::command_of(const ViewportContext &context, const ViewportC
 bool MissionViewport::command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
 		CanvasRequests &out, std::string &error) const {
 	if (name != "frame" && name != "top" && name != "ground" && name != "select_same" && name != "duplicate" &&
-			name != "paste" && name != "play_from_here") {
+			name != "paste" && name != "play_from_here" && name != "clear_shots") {
 		error = "Unknown mission command \"" + name +
-				"\" (frame, top, ground, select_same, duplicate, paste, play_from_here).";
+				"\" (frame, top, ground, select_same, duplicate, paste, play_from_here, clear_shots; shoot takes at).";
 		return false;
 	}
 	if (reason_ != MissionViewStatus::Ready) {
 		error = "The viewport shows no mission.";
 		return false;
+	}
+	if (name == "clear_shots") {
+		// The Shoot tool's shots forgotten (DI-23): nothing runs, nothing of them is drawn.
+		out.request(request::set_viewport(path(), viewport_change(ViewportKind::Mission, "shots", JsonValue::make_array())));
+		return true;
 	}
 	if (name == "duplicate" || name == "paste" || name == "play_from_here") {
 		ViewportCommand whole;
@@ -1198,6 +1246,7 @@ io::JsonValue MissionViewport::body_json(const ViewportInput &input) const {
 			hint.item = symbol ? symbol->record : "item " + std::to_string(options_.item);
 		}
 		hint.path = options_.path;
+		hint.ammo = options_.ammo;
 		hint.editable = context.editable();
 		if (!hint.editable) hint.not_editable = context.not_editable();
 		hint.current = current(input);
@@ -1230,6 +1279,27 @@ io::JsonValue MissionViewport::body_json(const ViewportInput &input) const {
 	// last said it drew of the foliage and the lights.
 	body.set("effects", options_.effects ? effects_.to_json() : JsonValue::make_null());
 	body.set("drawn", drawn_);
+	// The Shoot tool's run (DI-23): its shots and what they did, the effects it spawned, what was heard.
+	JsonValue shots = shots_.to_json();
+	JsonValue effects = JsonValue::make_array();
+	for (size_t i = 0; i < effects_.shot_spawns().size(); ++i) {
+		const DefinitionSpawn &spawn = effects_.shot_spawns()[i];
+		JsonValue row = JsonValue::make_object();
+		row.set("effect", json_string(spawn.effect));
+		row.set("source", json_string(spawn.source));
+		row.set("tick", json_number(spawn.tick));
+		row.set("alive", JsonValue::make_bool(effects_.shot_alive(i)));
+		if (const particle::EffectClosure *closure = effects_.closure_of(spawn.effect)) {
+			row.set("spawns", JsonValue::make_bool(closure->spawns()));
+			row.set("defined_in", json_string(closure->source));
+		}
+		effects.push(std::move(row));
+	}
+	shots.set("effects", std::move(effects));
+	JsonValue heard = JsonValue::make_array();
+	for (const ClipSoundFired &fired : shot_fired_) heard.push(clip_sound_fired_to_json(fired));
+	shots.set("sounds_fired", std::move(heard));
+	body.set("shots", std::move(shots));
 	return body;
 }
 
