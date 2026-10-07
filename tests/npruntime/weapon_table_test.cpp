@@ -14,6 +14,7 @@
 
 #include <runtime/world/weapon_table_build.h>
 #include <runtime/world/ammo_table_build.h>
+#include <runtime/world/round_sim.h>
 #include <runtime/inmatch/loadout_submit.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/mission/runtime_boot.h>
@@ -454,13 +455,42 @@ int main(int argc, char **argv) {
 		defs[2].effects_table_count = 1;
 		DefAmmoFile af{defs, 3};
 		const world::AmmoTable t = world::build_ammo_table(af);
-		CHECK(t.default_explosion_sound == "DEF0_DIRT");
+		CHECK(t.null_bank[5].sound == "DEF0_DIRT" && t.null_bank[5].tag == 5);
 		CHECK(t.by_index(0) != nullptr && t.by_index(0)->impact_effects[5].authored &&
 		      t.by_index(0)->impact_effects[5].sound == "DEF0_DIRT");
 		CHECK(t.by_index(1) != nullptr && !t.by_index(1)->impact_effects[5].authored &&
 		      t.by_index(1)->impact_effects[5].sound.empty());
 		CHECK(t.by_index(2) != nullptr && t.by_index(2)->impact_effects[5].authored &&
 		      t.by_index(2)->impact_effects[5].sound.empty());
+		// The bank holds def 0's rows in place: the null slot, then tags 1..6.
+		CHECK(t.null_bank_rows == 7 && t.null_bank[0].tag == 0 && t.null_bank[4].tag == 4 &&
+		      t.null_bank[4].sound == "S_OBJ" && t.null_bank[7].tag == 0);
+
+		// The impact presenter's row [orig: AmmoDef_ProcessImpactEffect @0x40a1b8..0x40a1fd]: the
+		// ammo's own row of the tag; none, def 0's bank at the tag's place; a tag past the table, obj.
+		const world::AmmoTableEntry &no_dirt = *t.by_index(1);
+		const world::ImpactRowPick grass = world::impact_effect_row(t, no_dirt, 6);
+		CHECK(grass.from == world::ImpactRowFrom::Own && grass.sound == "S_GRASS");
+		const world::ImpactRowPick dirt = world::impact_effect_row(t, no_dirt, 5);
+		CHECK(dirt.from == world::ImpactRowFrom::NullBank && dirt.bank_tag == 5 && dirt.sound == "DEF0_DIRT");
+		const world::ImpactRowPick glass = world::impact_effect_row(t, no_dirt, 19);
+		CHECK(glass.from == world::ImpactRowFrom::NullBank && glass.bank_tag == 0 && glass.sound.empty() &&
+		      glass.effect.empty());
+		const world::ImpactRowPick past = world::impact_effect_row(t, no_dirt, 30);
+		CHECK(past.tag == 4 && past.from == world::ImpactRowFrom::NullBank && past.sound == "S_OBJ");
+		// An authored 'none' row is the ammo's own and plays nothing: no fallback.
+		const world::ImpactRowPick none = world::impact_effect_row(t, *t.by_index(2), 5);
+		CHECK(none.from == world::ImpactRowFrom::Own && none.sound.empty());
+		// A direct reader (the knife, the squib) takes its own row alone.
+		CHECK(world::impact_effect_own_row(no_dirt, 5).sound.empty() &&
+		      world::impact_effect_own_row(no_dirt, 6).sound == "S_GRASS");
+		// The drain and the impact sound present through the same pick.
+		world::RoundImpact impact;
+		impact.ammo_index = 1;
+		impact.effect_tag = 5;
+		CHECK(world::round_impact_row(t, impact).sound == "DEF0_DIRT");
+		impact.own_row = true;
+		CHECK(world::round_impact_row(t, impact).sound.empty());
 
 		// A sparse def 0 (tags 1, 4, 5, 6, 7, 8): bank row 5 is the fifth authored
 		// tag = snow (7), not dirt — the bank is compacted, not tag-positional.
@@ -476,11 +506,25 @@ int main(int argc, char **argv) {
 		sparse_def.effects_table = sparse;
 		sparse_def.effects_table_count = 6;
 		DefAmmoFile sparse_file{&sparse_def, 1};
-		CHECK(world::build_ammo_table(sparse_file).default_explosion_sound == "S_SNOW");
+		CHECK(world::build_ammo_table(sparse_file).null_bank[5].sound == "S_SNOW");
+		// The presenter's fallback reads the same place: an ammo with no dirt row plays def 0's
+		// fifth authored row there, snow's, not a dirt row def 0 has at another place.
+		{
+			DefEffectTableEntry only_grass[1] = {};
+			row(only_grass[0], "grass", "S_OWN_GRASS");
+			DefAmmoDef two[2] = {sparse_def, DefAmmoDef{}};
+			std::strcpy(two[1].name, "AMMO_GRASS");
+			two[1].effects_table = only_grass;
+			two[1].effects_table_count = 1;
+			DefAmmoFile two_file{two, 2};
+			const world::AmmoTable sparse_table = world::build_ammo_table(two_file);
+			const world::ImpactRowPick pick = world::impact_effect_row(sparse_table, *sparse_table.by_index(1), 5);
+			CHECK(pick.from == world::ImpactRowFrom::NullBank && pick.bank_tag == 7 && pick.sound == "S_SNOW");
+		}
 
 		// Fewer than five authored tags: the static bank's row 5 stays zero.
 		sparse_def.effects_table_count = 4;
-		CHECK(world::build_ammo_table(sparse_file).default_explosion_sound.empty());
+		CHECK(world::build_ammo_table(sparse_file).null_bank[5].sound.empty());
 	}
 
 	// --- by-name reuse: a re-parsed name keeps its index and takes the new fields

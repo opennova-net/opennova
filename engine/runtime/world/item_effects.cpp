@@ -234,7 +234,7 @@ void spawn_item_explosion(World &world, const Entity *source, const FixedVec3 &p
     }
     // AmmoDef_GetExplosionRadius is a misleading IDB name: the tag-5 row's
     // sound, not a radius. It seeds the result from dword_A2EB80 — ammo def
-    // 0's static effect bank, row 5 dword +8 (AmmoTable::default_explosion_sound,
+    // 0's static effect bank, row 5 dword +8 (AmmoTable::null_bank[5].sound,
     // baked at table build) — then overwrites it with every tag-5 row of the
     // requested ammo, so an authored-but-'none' row yields silence while an
     // absent row yields def 0's fallback.
@@ -251,7 +251,7 @@ void spawn_item_explosion(World &world, const Entity *source, const FixedVec3 &p
     }
     if (const auto *ammo=world.tables.ammo.by_index(sound_ammo)) {
         const AmmoImpactEffectRow &row = ammo->impact_effects[5];
-        const std::string &sound = row.authored ? row.sound : world.tables.ammo.default_explosion_sound;
+        const std::string &sound = row.authored ? row.sound : world.tables.ammo.null_bank[5].sound;
         world.out.fire_sounds.play_with_distance_delay(sound.c_str(),
                 pos, source ? source->bms_id : 0, source ? source->handle.packed : uint16_t(0xFFFF));
     }
