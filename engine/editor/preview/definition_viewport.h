@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/preview/ammo_impacts.h>
 #include <editor/preview/definition_effects.h>
 #include <editor/preview/definition_weapon.h>
 #include <editor/preview/effect_catalog.h>
@@ -171,6 +172,12 @@ public:
 	// A weapon record's firing (DI-22): the gun, its rig and arms, its range (inactive for another kind).
 	const DefinitionWeapon &weapon() const { return weapon_; }
 	bool weapon_record() const { return drawn_.kind == "weapon" && weapon_.active(); }
+	// An ammo record (DI-23): its impact rows as a board (preview/ammo_impacts: each surface class's row as the
+	// game picks it, the mark it leaves), fired alone at the range's target (DefinitionWeapon::refresh_ammo).
+	bool ammo_record() const { return drawn_.kind == "ammo"; }
+	const AmmoImpactBoard &impacts() const { return impacts_; }
+	// The range fires (a weapon record's, or an ammo record's alone): its gestures, its target, tracers and scars.
+	bool range_shown() const { return (drawn_.kind == "weapon" || drawn_.kind == "ammo") && weapon_.active(); }
 	const std::vector<std::string> &notes() const { return notes_; }
 	// The death's sounds over the ticks the clock ran through since the last call (Destroying alone: each leg's
 	// set played at the item as the camera hears it, never over a seek; a leg on the tick a seek lands on fires
@@ -200,8 +207,9 @@ public:
 			std::string &error) const override;
 	// "frame" (the camera on the drawn model), "replay" (the clock sought to tick 0: the state played anew); a
 	// weapon's gestures "fire", "hold", "release", "reload", "scope", "switch" (one on the clock's tick, the clock
-	// run) and "clear" (none); "place_in_mission" (DI-18: an item record, the row `ids` names or the record shown,
-	// armed in the Place tool of the mission last active, preview/model_placement's plan_place_item_in_mission).
+	// run) and "clear" (none); an ammo's "fire" and "clear" (DI-23: fired alone); "place_in_mission" (DI-18: an
+	// item record, the row `ids` names or the record shown, armed in the Place tool of the mission last active,
+	// preview/model_placement's plan_place_item_in_mission).
 	bool command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
 			CanvasRequests &out, std::string &error) const override;
 	io::JsonValue options_json() const override;
@@ -284,6 +292,9 @@ private:
 	std::vector<std::string> missing_; // the graphics the device found no file for (each once)
 	// A weapon's firing (DI-22), and whether its eye is the camera.
 	DefinitionWeapon weapon_;
+	// An ammo's impact board (DI-23), over ammo.def as the game reads it.
+	AmmoTableSource ammo_source_;
+	AmmoImpactBoard impacts_;
 	bool eye_ = false;
 	// The death's sounds: their sources, what fired, and the clock's tick they were last fired to (-1 none).
 	ClipSoundSources sound_sources_;

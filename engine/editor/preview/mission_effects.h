@@ -10,6 +10,7 @@
 
 #include <base/io/json.h>
 #include <editor/model/value.h>
+#include <editor/preview/definition_effects.h>
 #include <editor/preview/effect_catalog.h>
 #include <runtime/assets/asset_store.h>
 #include <runtime/particle/effect_closure.h>
@@ -68,6 +69,15 @@ public:
 	// resolves each item to, the models their graphics load, each read once while its stamp stands): true
 	// when what it holds moved (a slot spawned, let go or moved; the scene opened again).
 	bool refresh(const SessionView &view, const MissionScene &scene, const MissionPoses &poses);
+	// The Shoot tool's spawns (DI-23, mission_shots.h: each impact's effect where the round stopped), in the same
+	// scene: each made on its tick, bound to the world, as DefinitionEffects makes a definition's (more spawns after
+	// the same ones are made as the clock reaches them, or at once pre-aged where it passed them; any other list
+	// plays the scene again from the clock's tick, every slot at its age); an effect the scene lacks opens it again
+	// over the new closures. True when what it holds moved.
+	bool set_shot_spawns(std::vector<DefinitionSpawn> spawns);
+	const std::vector<DefinitionSpawn> &shot_spawns() const { return spawns_; }
+	// Whether the group spawn `spawn` made lives now.
+	bool shot_alive(size_t spawn) const;
 	// The scene played to the clock's tick `tick`.
 	void play_to(int32_t tick);
 	// Nothing held, nothing played (the layer off, no mission).
@@ -134,6 +144,10 @@ private:
 	void spawn_(Held &held, int32_t age);
 	// One held slot's groups let go (they drain).
 	void let_go_(Held &held);
+	// The Shoot tool's spawn `spawn` made, pre-aged by `age` ticks.
+	void spawn_shot_(size_t spawn, int32_t age);
+	// The effects the slots `held` and the spawns name, each once in the order first named.
+	std::vector<std::string> names_of_(const std::vector<Held> &held) const;
 
 	// What the slots were last followed over: the scene's serial, the poses', the graph's generation and the
 	// asset source's (none moved and the catalog standing: nothing to follow).
@@ -157,6 +171,9 @@ private:
 	std::vector<std::string> names_; // the effects the scene was opened over, each once
 	std::vector<particle::EffectClosure> closures_;
 	std::vector<Held> held_; // the attached slots, in the start's order
+	std::vector<DefinitionSpawn> spawns_; // the Shoot tool's (DI-23)
+	std::vector<particle::EffectGroupId> spawn_groups_;
+	std::vector<bool> spawn_made_; // each spawn made since the scene last emptied
 	std::vector<MissionEffectSlot> slots_;
 	std::unordered_map<NodeId, size_t> slot_index_;
 	int wind_speed_ = 0, wind_direction_ = 0;
