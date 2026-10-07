@@ -164,8 +164,8 @@ int test_build_result_card_and_focus() {
 }
 
 // The project settings: refused with no project open; opened over the settings in effect; a field set while
-// closed refused; the fields set; its Apply (a serial) that wrote everything closes it, one that failed keeps
-// it; the project closing closes it.
+// closed refused; the fields set (a play_mode no mode has refused); its Apply (a serial) that wrote everything
+// closes it, one that failed keeps it; the project closing closes it.
 int test_settings() {
 	editor_test::TempProjectDir dir("opennova_editor_workspace_settings");
 	editor_test::FakePlatform platform;
@@ -185,26 +185,30 @@ int test_settings() {
 	            !v.project.document->features.multiplayer);
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"settings": {"title": "Harbor"}})")) && settings.title == "Harbor" &&
 	            v.project.document->title == "Armory");
-	TEST_EXPECT(!settings.play_in_install_strict &&
-	            session.handle(request::set_workspace(R"({"settings": {"play_in_install_strict": true}})")) &&
-	            settings.play_in_install_strict && !v.project.play_in_install_strict);
+	TEST_EXPECT(settings.play_mode == PlayMode::Runtime &&
+	            session.handle(request::set_workspace(R"({"settings": {"play_mode": "strict"}})")) &&
+	            settings.play_mode == PlayMode::Strict && v.project.play_mode == PlayMode::Runtime);
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"settings": {"play_mode": "retail"}})")) &&
+	            refused_with(session, "workspace.refused") && settings.play_mode == PlayMode::Strict);
 	JsonValue shown = section(session);
 	TEST_EXPECT(shown.get("settings") && shown.get("settings")->get_string("title", "") == "Harbor" &&
 	            shown.get("settings")->get_bool("multiplayer", false) &&
-	            shown.get("settings")->get_bool("play_in_install_strict", false));
+	            shown.get("settings")->get_string("play_mode", "") == "strict");
 	// A settings change with no serial (a menu's Play in the game install) leaves the dialog open.
 	ProjectSettingsChange play;
-	play.play_in_install = false;
+	play.play_mode = PlayMode::Runtime;
 	TEST_EXPECT(session.handle(request::apply_project_settings(play)) && settings.open);
-	// The dialog's Apply, its serial: written, it closes.
+	// The dialog's Apply, its serial: written, it closes; the project then plays as it chose.
 	ProjectSettingsChange apply;
 	apply.serial = 4;
 	apply.title = settings.title;
 	apply.multiplayer = settings.multiplayer;
+	apply.play_mode = settings.play_mode;
 	TEST_EXPECT(session.handle(request::apply_project_settings(apply)));
-	TEST_EXPECT(!settings.open && v.project.document->title == "Harbor" && v.project.document->features.multiplayer);
+	TEST_EXPECT(!settings.open && v.project.document->title == "Harbor" && v.project.document->features.multiplayer &&
+	            v.project.play_mode == PlayMode::Strict);
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"settings": {"open": true}})")) && settings.open &&
-	            settings.title == "Harbor");
+	            settings.title == "Harbor" && settings.play_mode == PlayMode::Strict);
 	TEST_EXPECT(session.handle(request::close_project()) && !settings.open);
 	return 0;
 }
