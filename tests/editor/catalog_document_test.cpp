@@ -15,6 +15,7 @@
 #include "editor/test_platform.h"
 #include "common/file_io.h"
 #include "common/test_expect.h"
+#include <algorithm>
 #include <cstring>
 
 using namespace opennova::editor;
@@ -723,6 +724,28 @@ static int plain_words() {
 		if (field.id == "hp") hp = &field;
 	TEST_EXPECT(hp && hp->label == "Health" && hp->section == "Health and armour" &&
 	            hp->description.find(def_words_of(DefRecordKind::Item, "hp")->meaning) == 0);
+	// A choice a row gives words keeps its token (what the file writes) and shows its label, its
+	// tooltip what the game does with it, cited: the shadow bits; the others show as their token.
+	const auto choice_in = [&](const char *id, const char *token) -> const FieldChoice * {
+		for (const FieldSchema &field : item)
+			if (field.id == id)
+				for (const FieldChoice &choice : field.choices)
+					if (choice.name == token) return &choice;
+		return nullptr;
+	};
+	const FieldChoice *no_shadow = choice_in("attrib", "noshadow");
+	TEST_EXPECT(no_shadow && no_shadow->value == int64_t(DEF_ITEM_ATTRIB_NOSHADOW) && no_shadow->label == "No shadow" &&
+	            no_shadow->description.find("no sun shadow") != std::string::npos &&
+	            no_shadow->description.find("[orig: Terrain_CollectAndRenderTileModels @ 0x60D43E]") != std::string::npos);
+	const FieldChoice *static_shadow = choice_in("attrib2", "staticshadow");
+	const FieldChoice *dynamic_shadow = choice_in("attrib2", "dynamicshadow");
+	TEST_EXPECT(static_shadow && static_shadow->label == "Static shadow" && !static_shadow->description.empty() &&
+	            dynamic_shadow && dynamic_shadow->label == "Dynamic shadow" &&
+	            dynamic_shadow->description.find("NoShadow does not") != std::string::npos);
+	const FieldChoice *door = choice_in("attrib", "door");
+	TEST_EXPECT(door && door->label.empty() && door->description.empty());
+	TEST_EXPECT(field_text(*std::find_if(item.begin(), item.end(), [](const FieldSchema &f) { return f.id == "attrib"; }),
+	                       int64_t(DEF_ITEM_ATTRIB_DOOR | DEF_ITEM_ATTRIB_NOSHADOW)) == "door, No shadow");
 	// The sections in their kind's order, each once.
 	size_t rank = 0;
 	for (const FieldSchema &field : item) {
