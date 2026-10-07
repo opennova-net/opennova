@@ -35,14 +35,16 @@ const opennova::editor::ModelViewport &model_of(const opennova::editor::Viewport
 
 } // namespace
 
-ModelViewportApplier::ModelViewportApplier(SubViewport &viewport) {
+ModelViewportApplier::ModelViewportApplier(SubViewport &viewport) : viewport_(&viewport) {
 	viewport.set_msaa_3d(Viewport::MSAA_4X);
 	Node3D *root = memnew(Node3D);
 	viewport.add_child(root);
+	root_ = root;
 	// Retail shaders write gamma-domain values and rely on one terminal display decode per
 	// 3D view; the environment with no .env lights like the retail noon.
 	root->add_child(memnew(DisplayDecode));
-	root->add_child(memnew(MissionEnvironment));
+	environment_ = memnew(MissionEnvironment);
+	root->add_child(environment_);
 	camera_ = memnew(Camera3D);
 	camera_->set_keep_aspect_mode(Camera3D::KEEP_WIDTH);
 	camera_->set_fov(opennova::editor::OrbitCamera::fov_horizontal_degrees());
@@ -62,6 +64,16 @@ ModelViewportApplier::ModelViewportApplier(SubViewport &viewport) {
 	arms_->set_panm_clock(clock_);
 	arms_->set_avatar_part(ObjectModel::AVATAR_PART_ARMS);
 	root->add_child(arms_);
+}
+
+void ModelViewportApplier::make_fire_() {
+	if (effects_) return;
+	// A clip's fire (DI-24), made the first time a clip fires here: its effects (the particle renderer composes its
+	// passes around the camera, so a picture that never fires keeps its chain), under the environment the particle
+	// tints read, and its range.
+	effects_ = std::make_unique<PreviewEffects>(*root_);
+	effects_->set_environment_source(environment_);
+	range_ = std::make_unique<PreviewRangeDraw>(*root_);
 }
 
 void ModelViewportApplier::rebuild(const opennova::editor::ViewportModel &viewport, const opennova::editor::SessionView &view,
@@ -103,6 +115,26 @@ void ModelViewportApplier::rebuild(const opennova::editor::ViewportModel &viewpo
 	build->parts.emplace_back(build->data, build->skeletal.is_valid(), build->bone_count);
 	if (build->arms.is_valid()) build->parts.emplace_back(build->arms, build->skeletal.is_valid(), build->bone_count);
 	build_ = std::move(build);
+	// A clip's fire (DI-24): the project's files its effects' graphics, the scars' textures and the tracers' smoke are
+	// read through (mounted again where one read moved) as a clip fires; a model's picture fires nothing.
+	fire_files_ = model.animating() ? view.findings.assets : nullptr;
+	if (mounted_) {
+		if (fire_files_) {
+			effects_->mount(fire_files_);
+			range_->set_resource_root(effects_->root());
+		} else {
+			release_fire_();
+		}
+	}
+}
+
+void ModelViewportApplier::release_fire_() {
+	if (!effects_) return;
+	effects_->clear();
+	effects_->set_environment_source(environment_);
+	range_->clear();
+	range_->set_resource_root(Ref<ResourceRoot>());
+	mounted_ = false;
 }
 
 ApplierStep ModelViewportApplier::step(const opennova::editor::ViewportModel &viewport,
@@ -220,6 +252,12 @@ void ModelViewportApplier::clear() {
 	applied_ctrl_.clear();
 	applied_lod_ = -1;
 	applied_team_ = INT32_MIN + 1;
+	release_fire_();
+	fire_files_.reset();
+	if (single_sampled_) {
+		viewport_->set_msaa_3d(Viewport::MSAA_4X);
+		single_sampled_ = false;
+	}
 }
 
 // The CTRL registers the picture reads at the clock (a register let go reads 0 again), and the sections
@@ -297,6 +335,38 @@ void ModelViewportApplier::play_clip_(const opennova::editor::ViewportModel &vie
 	}
 }
 
+void ModelViewportApplier::apply_fire_(const opennova::editor::ViewportModel &viewport,
+		const opennova::editor::PreviewClock &clock) {
+	const opennova::editor::ClipFire &fire = model_of(viewport).clip_fire();
+	const bool firing = fire_files_ && fire.armed();
+	if (firing && !mounted_) {
+		make_fire_();
+		effects_->mount(fire_files_);
+		range_->set_resource_root(effects_->root());
+		mounted_ = true;
+	}
+	if (firing != single_sampled_) {
+		viewport_->set_msaa_3d(firing ? Viewport::MSAA_DISABLED : Viewport::MSAA_4X);
+		single_sampled_ = firing;
+	}
+	if (!firing) {
+		if (!effects_) return;
+		range_->clear();
+		if (effects_->scene()) {
+			// The last scene's particles let go: drawn once with none.
+			effects_->show(nullptr);
+			effects_->render(int64_t(clock.ms()));
+		}
+		return;
+	}
+	opennova::editor::PreviewVec3 corners[4];
+	range_->show_target(fire.target_corners(corners) ? corners : nullptr);
+	range_->show_scars(fire.range().serial(), fire.range().scar_count(), [&fire]() { return fire.scars(); });
+	range_->show_tracers(fire.trails(), *camera_, int64_t(clock.ms()));
+	const std::shared_ptr<opennova::particle::EffectScene> &scene = fire.effects().scene();
+	if (scene != effects_->scene()) effects_->show(scene);
+}
+
 void ModelViewportApplier::apply(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &clock,
 		opennova::editor::ViewportDeviceReport &report) {
 	if (build_) {
@@ -306,16 +376,24 @@ void ModelViewportApplier::apply(const opennova::editor::ViewportModel &viewport
 		return;
 	}
 	apply_state_(viewport, clock);
+	apply_fire_(viewport, clock);
 	if (files_) report.files = files_->stamps();
+	if (mounted_) {
+		report.files.add(effects_->stamps());
+		report.missing = effects_->missing();
+	}
 }
 
 void ModelViewportApplier::tick(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &clock) {
 	if (!build_) {
 		apply_registers_(viewport, clock);
 		play_clip_(viewport, clock);
+		apply_fire_(viewport, clock);
 	}
 	// A model with live part animations or a dynamic material stays awake and reads it.
 	clock_->sample(int64_t(clock.ms()), ++frame_);
+	// The clip fire's effects as the viewport stepped them (DI-24).
+	if (mounted_ && effects_->scene()) effects_->render(int64_t(clock.ms()));
 }
 
 } // namespace godot
