@@ -92,6 +92,16 @@ public:
 	void set_level(int lod);
 	void pose_body(const opennova::world::InfantryBodyPose &pose);
 	void set_lift(float metres);
+	// A first-person channel's clip on the rig (DI-22, the game's view model posed as the weapon pump steps it): the
+	// clip at its gated ticks, or the primary slerped toward the ring's next entry by the weight while a loop wrap
+	// fades it in [orig: AnimChannel_BlendTwoChannels @ 0x410DBD].
+	void play_clip(const std::string &key, int variant, int ticks);
+	void play_blend(const std::string &key, int ticks, const std::string &blend_key, int blend_ticks, float weight,
+			int variant, int blend_variant);
+	// The first-person arms (DI-22, as the model device's DI-13 arms): the avatar's arms part, no authored levels of
+	// their own, their camo triplet written over each scene built, as the game's per-submit writer stores it before
+	// each arms submit [orig: Avatar_SetArmsCamoCtrl @0x57a3b0].
+	void set_arms(int camo0, int camo1, int camo2);
 	// Every frame: its part animations and generators at the clock's milliseconds.
 	void tick(int64_t ms);
 
@@ -115,6 +125,8 @@ private:
 	std::shared_ptr<const opennova::editor::StampedFiles> files_;
 	std::map<std::string, int64_t> applied_ctrl_;
 	uint32_t applied_hidden_ = 0;
+	bool arms_ = false;
+	int arms_camo_[3] = {0, 0, 0};
 	int applied_lod_ = -1;
 	std::unique_ptr<Build> build_;
 };
