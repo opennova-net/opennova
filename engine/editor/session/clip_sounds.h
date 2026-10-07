@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include <editor/session/view/workspace_view.h>
@@ -30,8 +31,17 @@ struct ClipSoundPlay {
 // nothing while the clock holds. Moves the Viewports concern when one fired.
 void fire_clip_sounds(SessionCore &core);
 
-// The clip sounds fired after `after` that sound (played: not muted, a wave of the project to play),
-// oldest first: what the Shell plays.
+// A menu's sounds (DI-34; preview/menu_sounds.h): the game's mouse over a menu viewport's picture (where a canvas
+// or a client holds it) sampled by the game's pump of the windows' sounds (MenuViewport::fire_sounds), each sound
+// numbered in the same order as a clip's, kept for its envelope (sounds_fired) and played by the Shell alongside
+// the clip sounds (clip_sounds_since). With `path`, the menu viewport over that document, followed now where no
+// device follows it (a SetViewport's sample: what it moved is heard at once); without, each menu viewport whose
+// picture is the menu as it is now, once per frame (ProjectSession::advance: the sample after a click plays
+// MOUSEIN again where the mouse stays). Moves the Viewports concern when one fired.
+void fire_menu_sounds(SessionCore &core, const std::string &path = std::string());
+
+// The clip sounds and menu sounds fired after `after` that sound (played: not muted, a wave of the project to
+// play), oldest first: what the Shell plays.
 std::vector<ClipSoundPlay> clip_sounds_since(SessionCore &core, uint64_t after);
 
 } // namespace opennova::editor

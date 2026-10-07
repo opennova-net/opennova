@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/preview/viewport_model.h>
 #include <editor/session/editor_request.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/workspace.h>
@@ -108,6 +109,9 @@ public:
 	TextureThumbnailImages *thumbnail_images() const override { return thumbnail_images_; }
 	bool take_dropped_files(float min_x, float min_y, float max_x, float max_y, std::vector<std::string> &paths) override;
 	void hide_pointer() override { pointer_hidden_ = true; }
+	// The canvases' mice this frame (DI-34), which the Shell hands the session after the frame's layout.
+	void canvas_mouse(const ViewportMouse &mouse) override;
+	const std::vector<ViewportMouse> &canvas_mice() const { return canvas_mice_; }
 	// A window's offer of what F12 and Shift+F12 act on this frame (DI-18): one under the pointer wins over one
 	// with the keyboard, the later of two alike.
 	void offer_jump(const JumpSubject &subject) override;
@@ -155,6 +159,7 @@ private:
 	std::vector<EditorRequest> deferred_; // this frame's requests that act on the files as saved
 	bool in_frame_ = false;
 	bool pointer_hidden_ = false; // hide_pointer asked this frame (begin_frame clears it)
+	std::vector<ViewportMouse> canvas_mice_; // canvas_mouse this frame (begin_frame clears it)
 	// What the windows offered F12 and Shift+F12 this frame, and the frame before (begin_frame moves it).
 	JumpSubject offered_;
 	JumpSubject subject_;

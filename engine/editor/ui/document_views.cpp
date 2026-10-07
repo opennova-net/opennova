@@ -11,6 +11,7 @@
 #include <editor/ui/catalog_inspector_view.h>
 #include <editor/ui/environment_inspector.h>
 #include <editor/ui/main_viewport_view.h>
+#include <editor/ui/menu_inspector.h>
 #include <editor/ui/menu_view.h>
 #include <editor/ui/mission_logic_view.h>
 #include <editor/ui/model_inspector_view.h>
@@ -131,7 +132,8 @@ constexpr DocumentViewRow kViews[] = {
 	// A weapon's Show on the HUD heads the Inspector (DI-20, ui/catalog_inspector_view).
 	{DocumentTypeId::Catalog, DocumentViewRole::Records, &kCatalogOutline, nullptr, draw_catalog_inspector},
 	{DocumentTypeId::Strings, DocumentViewRole::Records, &kStringsOutline, nullptr},
-	{DocumentTypeId::Menu, DocumentViewRole::Records, nullptr, make_menu_view},
+	// What a window plays and when heads its Inspector (DI-34, ui/menu_inspector).
+	{DocumentTypeId::Menu, DocumentViewRole::Records, nullptr, make_menu_view, draw_menu_inspector},
 	{DocumentTypeId::Styles, DocumentViewRole::Records, nullptr, make_styles_view},
 	// A model's material heads the Inspector with its bullet faces' surface and flags, set on every face
 	// made from it (S17, ui/model_inspector_view).
