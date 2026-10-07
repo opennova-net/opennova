@@ -174,7 +174,7 @@ void ProblemsService::want_originals() {
 	if (!view_.project.open || !view_.project.scan) return;
 	// Another install or game forgets what was found (the view says so at once); a new scan looks at the
 	// install's folder again.
-	originals_->want(core_.game_install(), view_.project.document, view_.project.scan.get());
+	originals_->want(core_.base_game(), view_.project.document, view_.project.scan.get());
 	// The install is validated once a row may be about its data: a finding on a file of a name it serves.
 	originals_needed_ = false;
 	const std::vector<std::string> &served = view_.project.retail_files;
