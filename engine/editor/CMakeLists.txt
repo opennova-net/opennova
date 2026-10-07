@@ -46,6 +46,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/model/edit_history.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/field_text.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/finding_code_row.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/model/source_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/staged_rows.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/table_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/text_document.cpp
@@ -92,6 +93,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_profile_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/wave_check.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/hud_layout_type.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/line_ends.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_image.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_budget.cpp
