@@ -387,6 +387,13 @@ std::vector<Diagnostic> ProblemsService::gate_findings() {
 	return std::vector<Diagnostic>(end - static_cast<std::ptrdiff_t>(gate_size_), end);
 }
 
+void ProblemsService::set_base_layer(std::shared_ptr<const GraphLayer> layer) {
+	if (!graph_->set_base(std::move(layer)).changed) return;
+	pass_.reset();
+	moved_since_composed_ = true;
+	validate_later();
+}
+
 void ProblemsService::clear() {
 	graph_->clear();
 	assets_->clear();

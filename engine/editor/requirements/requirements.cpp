@@ -135,7 +135,10 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 			++report.required_total;
 			if (row.state == RequirementState::Missing) {
 				++report.required_missing;
-				report.diagnostics.push_back(finding(DiagnosticSeverity::Error, CoreFinding::RequirementMissing,
+				// One the base game serves is no file the game goes without: a note, never an error (the
+				// game reads the base's, and the build's gate lets it through).
+				report.diagnostics.push_back(finding(served ? DiagnosticSeverity::Info : DiagnosticSeverity::Error,
+				                                     CoreFinding::RequirementMissing,
 				                                     row.name + " is missing (" + requirement_phase_label(row.phase) + ")." +
 				                                             then,
 				                                     std::string()));

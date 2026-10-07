@@ -24,6 +24,7 @@
 #include <editor/model/field_text.h>
 #include <editor/preview/texture_thumbnails.h>
 #include <editor/project/project_files.h>
+#include <editor/session/base_layer_build.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_preferences.h>
 #include <editor/session/import_operation.h>
@@ -858,6 +859,10 @@ void ImportController::refresh_install_files() {
 	view_.project.base_files = view_.project.open ? list_base_file_names(core_.base_game(), *view_.project.document)
 	                                      : std::vector<std::string>();
 	core_.problems().set_base_names(view_.project.base_files); // the missing references' words read them
+	// An expansion's base game under the graph, built again over the base as it now stands (one call: a
+	// settings change that moves the base, the Open builds it stepped).
+	core_.problems().set_base_layer(view_.project.open ? build_base_layer(core_.base_game(), *view_.project.document)
+	                                                   : nullptr);
 	core_.touch(ViewConcern::Files);
 }
 
