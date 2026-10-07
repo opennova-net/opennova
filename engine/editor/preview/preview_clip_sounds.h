@@ -57,13 +57,17 @@ bool read_clip_sound_options(const io::JsonValue &json, ClipSoundOptions &held, 
 // What a clip's sounds read of the record pairing its animation with its model (PreviewRig's record):
 // an item's sound profile names and the move function its body runs, as the game's item parser reads
 // them (def::def_parse_items_memory: an item that authors no sound_profileFemale has its sound_profile
-// there too).
+// there too); and what its fire events read (DI-24, preview/preview_clip_fire): its class (ai_function),
+// its four organic ammo names and three launch point names in the slots' order (world/organic_fire.h).
 struct ClipSoundItem {
 	bool found = false;
 	std::string name;
 	std::string sound_profile;
 	std::string sound_profile_female;
 	std::string move_function;
+	std::string ai_function;
+	std::string ammo[4];
+	std::string launch[3];
 };
 
 // The project's files a clip's sounds play from, read as the game reads them by name (the project's
@@ -137,9 +141,10 @@ inline constexpr int32_t kClipSoundCatchUpTicks = 62;
 // The words read on each tick in (`from`, `to`] of the clock, in order: each tick the body's sound block
 // reads (world::anim_sound_tick), the clip's channel at its own tick there (the clock's tick; a repeated
 // one-shot's taken again from 0 every `period` ticks, 0 none, whose start reads nothing, as a channel
-// started reads nothing before its first step) reading a word (anim::clip_trigger_at).
+// started reads nothing before its first step) reading a word (anim::clip_trigger_at). `catch_up` false reads
+// every tick of a longer run (a clip's fire schedule, DI-24, which the range runs from tick 0).
 std::vector<ClipEventDue> clip_events_due(const anim::ClipTimeline &clock, const ClipSoundTrack &track, int32_t period,
-                                          int32_t from, int32_t to, bool player_body);
+                                          int32_t from, int32_t to, bool player_body, bool catch_up = true);
 
 // One sound an event fired: what the editor's wire and the Shell read of it. `seq` the session's order of
 // every clip sound fired (moves with each), the animation document's path, the clock's tick and the

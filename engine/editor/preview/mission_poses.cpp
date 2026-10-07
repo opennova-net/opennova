@@ -33,14 +33,6 @@ std::string served_name(const std::string &file) {
 	return slash == std::string::npos ? file : file.substr(slash + 1);
 }
 
-// The person classes whose definition callback is the organic init: the event-callback table's
-// org0 and org1 rows, found by a whole-tag stricmp [orig: g_EntityClassEventCallbackTable
-// @0x813018 / @0x813030, second function Entity_InitOrganicAI @0x4BFCC0; the lookup
-// Entity_LookupRenderCallbacks @0x407dc0, stricmp @0x407de2].
-bool person_class(const std::string &ai_function) {
-	return strutil::iequals(ai_function, "org0") || strutil::iequals(ai_function, "org1");
-}
-
 // The record's field that chose the init's request.
 const char *because_of(const world::OrganicSpawnFacts &facts, int state) {
 	if (facts.route_channel == 126) return "route_126";
@@ -61,6 +53,14 @@ bool same_pose(const MissionPose &a, const MissionPose &b) {
 }
 
 } // namespace
+
+// The person classes whose definition callback is the organic init: the event-callback table's
+// org0 and org1 rows, found by a whole-tag stricmp [orig: g_EntityClassEventCallbackTable
+// @0x813018 / @0x813030, second function Entity_InitOrganicAI @0x4BFCC0; the lookup
+// Entity_LookupRenderCallbacks @0x407dc0, stricmp @0x407de2].
+bool person_class(const std::string &ai_function) {
+	return strutil::iequals(ai_function, "org0") || strutil::iequals(ai_function, "org1");
+}
 
 MissionPoses::MissionPoses() = default;
 MissionPoses::~MissionPoses() = default;
