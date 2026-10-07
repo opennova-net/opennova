@@ -6,10 +6,19 @@
 #include <base/io/json.h>
 #include <formats/env/env.h>
 
+namespace opennova::mission {
+struct MissionInfo;
+}
+
 namespace opennova::editor {
 
 struct GraphEdge;
 struct SessionView;
+
+// A mission's header facts as the game reads them now: from its open document's record, else from the 616
+// bytes its file starts with (the header the game reads first [orig: Mission_LoadBMSFile, bms.h Header]).
+// False where neither reads.
+bool read_mission_header(const SessionView &view, const std::string &path, mission::MissionInfo &out);
 
 // Which of the game's rungs gives a mission its water plane (runtime/environment/water_frame.h's
 // ladder): the mission header's override, the terrain's water height, the environment's, or none.
