@@ -29,6 +29,7 @@
 #include <editor/session/workspace_parts.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/inspector_layout.h>
+#include <editor/ui/project_find.h>
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/texture_preview.h>
 #include <editor/ui/ui_kit.h>
@@ -64,6 +65,16 @@ const DocumentBase *open_document(const SessionView &view, const std::string &pa
 // documents are open).
 RevisionKey tree_key(const SessionView &view) {
 	return revision_key(view.revisions, {ViewConcern::Files, ViewConcern::Findings, ViewConcern::DocumentSet});
+}
+
+// A file's jumps (DI-18): F12 opens it (its page where the editor has no editor for it), Shift+F12 lists who
+// names it.
+JumpSubject file_subject(const SessionView &view, const std::string &path, bool pointer) {
+	JumpSubject subject;
+	subject.definition.push_back(file_target(*view.project.scan, path));
+	subject.usages_file = path;
+	subject.pointer = pointer;
+	return subject;
 }
 
 } // namespace
@@ -433,6 +444,9 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	// rename).
 	if (!selected_.empty() && v.allows(EditorRequestKind::RenameAsset) && ImGui::Shortcut(ImGuiKey_F2))
 		if (const AssetEntry *entry = entry_at(v, selected_)) start_rename(*entry);
+	// With the keyboard here, the selected file is what F12 (open it) and Shift+F12 (who names it) act on (DI-18).
+	if (!selected_.empty() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && entry_at(v, selected_))
+		workspace_.offer_jump(file_subject(v, selected_, false));
 	// A filter or a kind lists the files it matches flat.
 	if (v.project.scan->entries.empty()) {
 		ui_kit::empty_state("The project has no files yet.", "Import files, or make one with New.");
@@ -648,9 +662,11 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 		// round's project lane).
 		if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
 			if (!is_editable_kind(entry.kind)) workspace_.request(request::about_file(entry.relative_path));
-			else if (view.allows(EditorRequestKind::OpenDocument)) workspace_.request(request::open_document(entry.relative_path));
+			else if (view.allows(EditorRequestKind::OpenDocument)) window_requests::go_to_file(workspace_, entry.relative_path);
 		}
 	}
+	// Under the pointer, what F12 (open it) and Shift+F12 (who names it) act on (DI-18).
+	if (ImGui::IsItemHovered()) workspace_.offer_jump(file_subject(view, entry.relative_path, true));
 	// Dragged onto a reference field whose kind loads it, the file becomes its value
 	// (ReferencePicker::accept_file).
 	if (ImGui::BeginDragDropSource()) {
@@ -744,7 +760,7 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 	}
 	const bool opens = is_editable_kind(entry.kind) && view.allows(EditorRequestKind::OpenDocument);
 	if (ImGui::MenuItem("Open", nullptr, false, opens) && opens)
-		workspace_.request(request::open_document(entry.relative_path));
+		window_requests::go_to_file(workspace_, entry.relative_path);
 	// A mission's row (DI-26): the game started in it, as Build > Play mission starts the active one.
 	const std::string mission = play_mission_at(view, entry.relative_path);
 	if (!mission.empty()) {
@@ -759,6 +775,10 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 	draw_chore_entries(view, entry);
 	if (ImGui::MenuItem("About this file...")) workspace_.request(request::about_file(entry.relative_path));
 	ui_kit::tooltip("What it is, where a build puts it, what it names and who names it.");
+	// Who names it (DI-18): the project's finder on its uses, each a Go to.
+	const bool finds = view.project.open && view.findings.graph;
+	if (ImGui::MenuItem("Find usages", "Shift+F12", false, finds) && finds) ProjectFind::open_usages(workspace_, entry.relative_path);
+	ui_kit::tooltip("Who names this file or what it defines, each a Go to.");
 	const bool reveals = view.allows(EditorRequestKind::RevealPath);
 	if (ImGui::MenuItem("Show in folder", nullptr, false, reveals) && reveals)
 		workspace_.request(request::reveal_path(join_path(view.project.root, entry.relative_path)));
@@ -1034,7 +1054,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 	ImGui::Spacing();
 	if (card.opens) {
 		ImGui::BeginDisabled(!view.allows(EditorRequestKind::OpenDocument));
-		if (ImGui::Button("Open##card")) workspace_.request(request::open_document(card.path));
+		if (ImGui::Button("Open##card")) window_requests::go_to_file(workspace_, card.path);
 		ImGui::EndDisabled();
 		ImGui::SameLine();
 	}
