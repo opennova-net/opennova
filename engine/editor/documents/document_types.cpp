@@ -145,9 +145,11 @@ constexpr DocumentType kTypes[] = {
 			dialog_bank_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
 			nullptr, define_dialog },
 	// The character attributes (DI-09's charattr follow-up): charattr.def held as its text, its line ends the
-	// ConfigFile reader's; its references each class's camouflage items, as the game's loader reads them.
+	// ConfigFile reader's; its references each class's camouflage items, as the game's loader reads them; the
+	// lines that loader reads the same without, which the ConfigFile pool rule's fix comments out.
 	{ DocumentTypeId::CharAttrs, "charattr", make_charattr_document, validate_charattr_file, text_fields,
-			charattr_finding_codes, nullptr, charattr_references },
+			charattr_finding_codes, nullptr, charattr_references, nullptr, nullptr, nullptr, nullptr, nullptr,
+			nullptr, nullptr, nullptr, nullptr, charattr_idle_lines },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its
