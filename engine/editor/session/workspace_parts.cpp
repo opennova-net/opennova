@@ -99,6 +99,9 @@ constexpr WorkspaceMember kNewFile[] = {
 	{ "values", J::Object,
 			"What the kind's blank takes beside the name, by its params' tokens (a mission's title, terrain, "
 			"environment), each a string.", kFileNameLongest },
+	{ "folder", J::String,
+			"The folder a folder's New here makes it in (DI-25: \"\" where the placement rule puts a file of its kind, "
+			"\"/\" the top level); opening another kind empties it.", kPathLongest },
 };
 constexpr WorkspaceMember kFileRename[] = {
 	{ "path", J::String,
@@ -106,6 +109,13 @@ constexpr WorkspaceMember kFileRename[] = {
 			"show_in_files with ask_name opens it too; the session closes it as the file goes." },
 	{ "name", J::String, "The new name typed; the window previews the rename as it changes (preview_rename).",
 			kFileNameLongest },
+};
+constexpr WorkspaceMember kFileDelete[] = {
+	{ "path", J::String,
+			"The project file Files' Delete... deletes (\"\" closes it): who names it listed first (the used_by query's "
+			"uses), its Delete a delete_asset, with force where something names it. The session closes it as the file "
+			"goes.", kPathLongest },
+	{ "alone", J::Boolean, "An import source deleted alone: its outputs kept as files of the project." },
 };
 constexpr WorkspaceMember kRename[] = {
 	{ "open", J::Boolean,
@@ -201,6 +211,7 @@ constexpr WorkspacePartRow kParts[] = {
 	{ "settings", kSettings, std::size(kSettings), "File > Project settings...: its fields until Apply." },
 	{ "new_file", kNewFile, std::size(kNewFile), "Files' New file prompt." },
 	{ "file_rename", kFileRename, std::size(kFileRename), "Files' Rename... of a file." },
+	{ "file_delete", kFileDelete, std::size(kFileDelete), "Files' Delete... of a file (DI-25)." },
 	{ "rename", kRename, std::size(kRename), "Rename everywhere." },
 	{ "rename_back", kRenameBack, std::size(kRenameBack), "Rename back." },
 	{ "find", kFind, std::size(kFind), "The Document window's find bar." },
@@ -486,9 +497,10 @@ bool set_new_file(Change &change, const JsonValue &part) {
 		}
 		if (wanted != prompt.kind) prompt = WorkspaceView::NewFile{ wanted, std::string(), {} };
 	}
-	if ((part.get("name") || part.get("values")) && prompt.kind == AssetKind::kCount)
+	if ((part.get("name") || part.get("values") || part.get("folder")) && prompt.kind == AssetKind::kCount)
 		return change.closed("The New file prompt", "name its kind first (new_file.kind)");
 	if (const JsonValue *name = part.get("name")) prompt.name = name->string;
+	if (const JsonValue *folder = part.get("folder")) prompt.folder = folder->string;
 	if (const JsonValue *values = part.get("values")) {
 		size_t count = 0;
 		const BlankParam *taken = new_file_params(prompt.kind, count);
@@ -506,7 +518,8 @@ bool set_new_file(Change &change, const JsonValue &part) {
 		}
 	}
 	WorkspaceView::NewFile &held = change.workspace().new_file;
-	if (prompt.kind == held.kind && prompt.name == held.name && prompt.values == held.values) return false;
+	if (prompt.kind == held.kind && prompt.name == held.name && prompt.values == held.values && prompt.folder == held.folder)
+		return false;
 	held = std::move(prompt);
 	return true;
 }
@@ -530,6 +543,28 @@ bool set_file_rename(Change &change, const JsonValue &part) {
 	WorkspaceView::FileRename &held = change.workspace().file_rename;
 	if (rename.path == held.path && rename.name == held.name) return false;
 	held = std::move(rename);
+	return true;
+}
+
+// Files' Delete... of a file (DI-25): opened on the file, whether an import source goes alone.
+bool set_file_delete(Change &change, const JsonValue &part) {
+	WorkspaceView::FileDelete asked = change.workspace().file_delete;
+	if (const JsonValue *path = part.get("path")) {
+		if (path->string.empty()) {
+			asked = WorkspaceView::FileDelete();
+		} else {
+			const AssetEntry *file = project_file(change.view, path->string);
+			if (!file) return change.refuse("The project has no file " + path->string + " to delete.", path->string);
+			if (file->relative_path != asked.path) asked = WorkspaceView::FileDelete{ file->relative_path, false };
+		}
+	}
+	if (const JsonValue *alone = part.get("alone")) {
+		if (asked.path.empty()) return change.closed("Delete...", "name the file first (file_delete.path)");
+		asked.alone = alone->boolean;
+	}
+	WorkspaceView::FileDelete &held = change.workspace().file_delete;
+	if (asked.path == held.path && asked.alone == held.alone) return false;
+	held = std::move(asked);
 	return true;
 }
 
@@ -861,7 +896,7 @@ bool focus_window(Change &change, const std::string &token) {
 struct Openings {
 	bool new_project = false, settings = false, project_find = false, rename_back = false;
 	AssetKind new_file = AssetKind::kCount;
-	std::string file_rename, rename;
+	std::string file_rename, file_delete, rename;
 	uint64_t confirm = 0;
 	std::map<std::string, uint64_t> remove;
 };
@@ -873,6 +908,7 @@ Openings openings_of(const WorkspaceView &w) {
 	out.rename_back = w.rename_back.open;
 	out.new_file = w.new_file.kind;
 	out.file_rename = w.file_rename.path;
+	out.file_delete = w.file_delete.path;
 	if (w.rename.open) out.rename = w.rename.path + '\n' + w.rename.locator + '\n' + w.rename.field;
 	out.confirm = w.problems.confirm.open() ? w.problems.confirm_serial : 0;
 	for (const auto &[path, shown] : w.documents)
@@ -885,6 +921,7 @@ bool opened_since(const Openings &before, const Openings &after) {
 		return true;
 	if (after.new_file != AssetKind::kCount && after.new_file != before.new_file) return true;
 	if (!after.file_rename.empty() && after.file_rename != before.file_rename) return true;
+	if (!after.file_delete.empty() && after.file_delete != before.file_delete) return true;
 	if (!after.rename.empty() && after.rename != before.rename) return true;
 	if (after.confirm && after.confirm != before.confirm) return true;
 	for (const auto &[path, screen] : after.remove) {
@@ -1048,6 +1085,7 @@ bool apply_workspace_change(SessionView &view, const std::string &json, std::vec
 		{ "settings", set_settings },
 		{ "new_file", set_new_file },
 		{ "file_rename", set_file_rename },
+		{ "file_delete", set_file_delete },
 		{ "rename", set_rename },
 		{ "rename_back", set_rename_back },
 		{ "find", set_find },
@@ -1144,6 +1182,15 @@ void workspace_closes_for(SessionCore &core, const EditorRequest &request) {
 			}
 			break;
 		}
+		case EditorRequestKind::DeleteAsset: {
+			// Delete...'s Delete: the file it names deleted (or refused, the reasons in the outcome).
+			const AssetEntry *file = project_file(view, request.path);
+			if (!workspace.file_delete.path.empty() && workspace.file_delete.path == (file ? file->relative_path : request.path)) {
+				workspace.file_delete = WorkspaceView::FileDelete();
+				moved = true;
+			}
+			break;
+		}
 		case EditorRequestKind::CreateFile:
 			// The prompt's Create: the file it names made (or refused, the reasons in Problems).
 			if (workspace.new_file.kind != AssetKind::kCount && request.path == workspace.new_file.name) {
@@ -1174,6 +1221,10 @@ void workspace_tidies(SessionCore &core) {
 	}
 	if (!workspace.file_rename.path.empty() && !project_file(view, workspace.file_rename.path)) {
 		workspace.file_rename = WorkspaceView::FileRename();
+		moved = true;
+	}
+	if (!workspace.file_delete.path.empty() && !project_file(view, workspace.file_delete.path)) {
+		workspace.file_delete = WorkspaceView::FileDelete();
 		moved = true;
 	}
 	for (auto &[path, shown] : workspace.documents) {
@@ -1215,6 +1266,7 @@ ShownModal shown_modal(const SessionView &view) {
 	if (w.new_project.open) return { M::NewProject, {} };
 	if (w.new_file.kind != AssetKind::kCount && project) return { M::NewFile, {} };
 	if (!w.file_rename.path.empty() && project) return { M::FileRename, {} };
+	if (!w.file_delete.path.empty() && project) return { M::FileDelete, {} };
 	if (w.rename.open && project) return { M::Rename, {} };
 	if (w.rename_back.open && project && view.dialogs.rename_preview.back) return { M::RenameBack, {} };
 	if (w.project_find.open && project) return { M::ProjectFind, {} };
@@ -1239,6 +1291,7 @@ const char *held_modal_token(HeldModal modal) {
 		case HeldModal::NewProject: return "new_project";
 		case HeldModal::NewFile: return "new_file";
 		case HeldModal::FileRename: return "file_rename";
+		case HeldModal::FileDelete: return "file_delete";
 		case HeldModal::Rename: return "rename";
 		case HeldModal::RenameBack: return "rename_back";
 		case HeldModal::ProjectFind: return "project_find";
@@ -1297,12 +1350,17 @@ JsonValue workspace_to_json(const SessionView &view) {
 		JsonValue values = JsonValue::make_object();
 		for (const auto &[token, value] : workspace.new_file.values) values.set(token, text(value));
 		prompt.set("values", std::move(values));
+		prompt.set("folder", text(workspace.new_file.folder));
 	}
 	out.set("new_file", std::move(prompt));
 	JsonValue file_rename = JsonValue::make_object();
 	file_rename.set("path", text(workspace.file_rename.path));
 	if (!workspace.file_rename.path.empty()) file_rename.set("name", text(workspace.file_rename.name));
 	out.set("file_rename", std::move(file_rename));
+	JsonValue file_delete = JsonValue::make_object();
+	file_delete.set("path", text(workspace.file_delete.path));
+	if (!workspace.file_delete.path.empty()) file_delete.set("alone", flag(workspace.file_delete.alone));
+	out.set("file_delete", std::move(file_delete));
 	JsonValue rename = JsonValue::make_object();
 	rename.set("open", flag(workspace.rename.open));
 	if (workspace.rename.open) {
@@ -1473,6 +1531,7 @@ void forget_project_workspace(WorkspaceView &workspace) {
 	workspace.settings = WorkspaceView::Settings();
 	workspace.new_file = WorkspaceView::NewFile();
 	workspace.file_rename = WorkspaceView::FileRename();
+	workspace.file_delete = WorkspaceView::FileDelete();
 	workspace.rename = WorkspaceView::Rename();
 	workspace.rename_back = WorkspaceView::RenameBack();
 	workspace.find.open = false;

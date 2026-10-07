@@ -123,6 +123,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/reference_kinds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/reference_queries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/rename_transaction.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graph/file_plans.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/style_value_use.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/texture_checks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/texture_import_needs.cpp
@@ -248,6 +249,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/project/local_settings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_files.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/project/project_trash.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_findings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_refresh.cpp
     # project_build — routing into the boot-table archives (or an expansion's pair), the plan, the
@@ -310,6 +312,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/script_assist.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/refresh_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/rename_controller.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/file_chores.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/rename_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/request_fields.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/request_kinds.cpp
@@ -356,6 +359,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/expansion_fields.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/field_widgets.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/files_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/files_window_chores.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/find_cursor.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/import_dialog.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/inspector_layout.cpp
