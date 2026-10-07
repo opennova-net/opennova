@@ -1,0 +1,20 @@
+{
+  "expansion": {
+    "base_project": "../../assets",
+    "builds_on": "",
+    "name": "onjo1"
+  },
+  "export": {
+    "include_runtime": false,
+    "output": "build/export"
+  },
+  "features": {
+    "menu": true,
+    "mission": true,
+    "multiplayer": false
+  },
+  "project_id": "6005389a-e567-433c-a67a-fd391db575a3",
+  "schema_version": 2,
+  "target_game": "jo",
+  "title": "Indigo Storm"
+}
