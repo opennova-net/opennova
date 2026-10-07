@@ -94,6 +94,14 @@ enum class EditorRequestKind {
 	ApplyConfirmation,
 	Quit,
 	MoveAsset,
+	// Files' chores (DI-25): a delete, a duplicate, folders, and the file history's undo and redo.
+	DeleteAsset,
+	DuplicateAsset,
+	NewFolder,
+	RenameFolder,
+	DeleteFolder,
+	UndoFile,
+	RedoFile,
 	// The shell's: the portable session cannot serve these.
 	PickDirectory,
 	PickFile,
@@ -364,7 +372,8 @@ struct EditorRequest {
 	// How many places of the navigation history a Back or a Forward goes (1: the nearest; Back's and
 	// Forward's lists pick one further).
 	uint32_t steps = 1;
-	// A folder of the project, from its top level ("" the top level): where a move puts a file (DI-03).
+	// A folder of the project, from its top level ("" the top level): where a move puts a file (DI-03); the
+	// folder a new file is made in, a folder made, renamed or deleted (DI-25).
 	std::string folder;
 	// Where Play starts the game's player (DI-26, Play from here: a point of `mission` and a heading), as a
 	// start marker the game honours in the staged build's copy of the mission (run/play_start.h).
@@ -374,6 +383,9 @@ struct EditorRequest {
 	// are): a client names the mode it means, whatever the project was last set to.
 	std::optional<PlayMode> play_mode;
 	std::optional<bool> save_before_play;
+	// An import source alone (DI-25): deleted with its outputs kept as files of the project, duplicated without
+	// its import record.
+	bool alone = false;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -396,7 +408,7 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.open_first == b.open_first && a.import_pass == b.import_pass && a.rehash == b.rehash &&
 			a.all == b.all && a.planned == b.planned && a.behind == b.behind && a.fresh == b.fresh && a.plan == b.plan &&
 			a.report == b.report && a.steps == b.steps && a.folder == b.folder && a.start == b.start &&
-			a.play_mode == b.play_mode && a.save_before_play == b.save_before_play;
+			a.play_mode == b.play_mode && a.save_before_play == b.save_before_play && a.alone == b.alone;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);

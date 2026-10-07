@@ -117,12 +117,15 @@ struct WorkspaceView {
 	};
 	Settings settings;
 
-	// Files' New file prompt (New > a kind...): the kind it makes (kCount: closed), the name typed, and the
-	// values its blank takes (ADR 0046 S14), by their params' tokens. Create raises create_file with them.
+	// Files' New file prompt (New > a kind..., a folder's New here, DI-25): the kind it makes (kCount: closed),
+	// the name typed, the values its blank takes (ADR 0046 S14), by their params' tokens, and the folder New here
+	// makes it in ("" where the placement rule puts a file of its kind, "/" the top level). Create raises
+	// create_file with them.
 	struct NewFile {
 		AssetKind kind = AssetKind::kCount;
 		std::string name;
 		std::vector<std::pair<std::string, std::string>> values;
+		std::string folder;
 	};
 	NewFile new_file;
 
@@ -133,6 +136,15 @@ struct WorkspaceView {
 		std::string name;
 	};
 	FileRename file_rename;
+
+	// Files' Delete... of a file (DI-25): the file ("" closed), what names it listed before anything goes, and
+	// whether an import source goes alone (its outputs kept as files of the project); its Delete raises
+	// delete_asset, with force where something names it.
+	struct FileDelete {
+		std::string path;
+		bool alone = false;
+	};
+	FileDelete file_delete;
 
 	// Rename everywhere (the Inspector's Rename... on a field defining a name: a preview_rename that asks the
 	// name opens it): the name it renames (the field of the record at the locator in the file defining it,
@@ -161,10 +173,18 @@ struct WorkspaceView {
 	};
 	Find find;
 
-	// Edit > Find in project... (Ctrl+Shift+F): open, its text. Its results are the project_search query's.
+	// The project's finder, one modal over four scopes (ADR 0046 S12; DI-18): Find in project (Ctrl+Shift+F,
+	// every file and name), Go to file (Ctrl+P, the files alone), Go to name (Ctrl+T, the names the files
+	// define alone), whose results are the project_search query's of that scope, and Find usages (Shift+F12),
+	// the uses of the file `path` or of its record at `locator` (the usages query's), which the text filters.
+	// Open, its scope, its text (opened on another scope or another subject, the text starts empty unless the
+	// change names one) and Find usages' subject.
+	enum class FindScope : uint8_t { All, Files, Names, Usages };
 	struct ProjectFind {
 		bool open = false;
 		std::string text;
+		FindScope scope = FindScope::All;
+		std::string path, locator;
 	};
 	ProjectFind project_find;
 
@@ -260,5 +280,8 @@ struct WorkspaceView {
 
 // A sound state's token: idle, starting, playing, ended, stopped, failed.
 const char *sound_state_token(WorkspaceView::SoundState state);
+// A finder scope's token: all, files, names, usages.
+const char *find_scope_token(WorkspaceView::FindScope scope);
+bool find_scope_from_token(const std::string &token, WorkspaceView::FindScope &out);
 
 } // namespace opennova::editor

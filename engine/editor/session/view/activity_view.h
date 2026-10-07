@@ -130,6 +130,15 @@ struct ActivityView {
 		bool move = false;
 	};
 	LastRename last_rename;
+
+	// The file history (DI-25, session/file_chores.h): Files' chores (a delete, a duplicate, a new file, a
+	// folder made, renamed or deleted), each one step that Edit's Undo file and Redo file take back or do
+	// again, its words ("Delete logo.tga"); "" for none, with how many steps each way holds.
+	struct FileHistory {
+		std::string undo, redo;
+		size_t undo_steps = 0, redo_steps = 0;
+	};
+	FileHistory file_history;
 };
 
 } // namespace opennova::editor

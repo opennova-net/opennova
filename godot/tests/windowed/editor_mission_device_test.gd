@@ -15,6 +15,9 @@ extends GutTest
 ##   pass is on only in the frames the mission presents.
 ## - A mission building beside a model never lights it (review M1): every frame of its build the
 ##   globals hold the model's shipped values.
+## - DI-31: the game's foliage, effects and lights drawn: the terrain's foliage grown at its foliage map's
+##   routed witness (and gone with its option), the pumps' particle slots drawn by the particle renderer, the
+##   armories' LGHT records selected for the frame's draws.
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
@@ -100,8 +103,9 @@ func _tga(size: int) -> PackedByteArray:
 
 
 ## A project holding the mission and what its picture reads, the mission open and ready, drawn by the
-## Document window's canvas.
-func _open_mission() -> SubViewport:
+## Document window's canvas. `layers` (DI-31): the terrain's two foliage models (the synth crate under both
+## names), and a particle slot on the pumps (Puff at their origin) with its particle file.
+func _open_mission(layers := false) -> SubViewport:
 	var dir := OS.get_cache_dir().path_join("opennova editor mission device project %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
 	assert_true(_seam.new_project(dir, "Mission Device Game"))
@@ -116,7 +120,19 @@ func _open_mission() -> SubViewport:
 		_write(root.path_join("terrain").path_join(name + ".tga"), large if name == "mnml_c" or name == "mnml_d1" else small)
 	for name in ["synth_full.env", "cloud01.pcx", "cloud01b.pcx"]:
 		_copy_fixture("env/" + name, root.path_join("env").path_join(name))
-	_copy_fixture("def/items.def", root.path_join("defs").path_join("items.def"))
+	if layers:
+		var items := FileAccess.get_file_as_string(ProjectSettings.globalize_path(FIXTURES + "def/items.def"))
+		_write(root.path_join("defs").path_join("items.def"),
+				items.replace("graphic pump\r\n", "graphic pump\r\nparticlefx Puff\r\n").to_utf8_buffer())
+		for name in ["bush1.3di", "bush2.3di"]:
+			_copy_fixture("threedi/synth/crate.3di", root.path_join("models").path_join(name))
+		var ptl := "[effectdef]\n{\n\tid = Puff;\n\tpdefs = PuffDot;\n}\n\n[particledef]\n{\n\tid = PuffDot;\n"
+		ptl += "\temit_dur = 60;\n\temit_rate = 40;\n\temit_burst = 1;\n\tage = 1.0;\n\tscale = 1.0;\n\tspeed = 1.5;\n"
+		ptl += "\tspread = 40;\n\tgraphic1 = particle_dot.tga, blend;\n\tg1_alpha = 1;\n\tg1_scale = 1;\n}\n\n"
+		_write(root.path_join("particles").path_join("fx.ptl"), ptl.to_utf8_buffer())
+		_copy_fixture("cbin/particle_dot.tga", root.path_join("particles").path_join("particle_dot.tga"))
+	else:
+		_copy_fixture("def/items.def", root.path_join("defs").path_join("items.def"))
 	for name in ["pump.3di", "armory.3di", "shed.3di"]:
 		_copy_fixture("threedi/synth/" + name, root.path_join("models").path_join(name))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
@@ -169,12 +185,14 @@ func test_a_mission_and_a_model_render_in_turn() -> void:
 		return
 	assert_true(_app.is_available(), "a window: the editor's ImGui pass attached, its canvases drawing")
 	_open_mission()
-	# The model first (the Preview shows it), then the mission (the Document's main view): the Preview
-	# keeps the model's pane while the mission is the active document.
+	# The model first (the Preview shows it), then the mission (the Document's main view). The Preview steps
+	# aside for a mission (S19); asked for (set_workspace's focus, as the Windows menu's tick), it shows the
+	# model's pane beside it while the mission is the active document.
 	assert_true(_seam.open_document(MODEL_PATH))
 	assert_eq(String((await _await_ready(MODEL_PATH)).get("status", "")), "ready")
 	assert_true(_seam.open_document(MISSION_PATH))
 	assert_eq(String((await _await_ready(MISSION_PATH)).get("status", "")), "ready")
+	assert_true(_seam.done({"kind": "set_workspace", "workspace": {"focus": "preview"}}))
 	var mission: SubViewport = _app.get_viewport_device(MISSION_PATH, "mission")
 	var model: SubViewport = _app.get_viewport_device(MODEL_PATH, "model")
 	assert_not_null(mission)
@@ -250,3 +268,78 @@ func test_a_mission_building_never_lights_the_model() -> void:
 				"frame %d of the mission's build: no environment global written" % frame)
 		assert_eq(Water.get_global_writes(), water_writes, "frame %d of the mission's build: no water global written" % frame)
 	assert_gt(loading, 10, "the mission built over frames beside the model")
+
+
+## DI-31: the game's foliage, effects and lights in the drawn picture. The camera down at Tmap's foliage map
+## routed witness (foliage_game_world_integration_test.gd's): the terrain's detail cells there grow the two
+## definitions' instances, and the option off hides them, an Update. The camera on a pump: its particle slot drawn
+## by the particle renderer. The armories' LGHT records in the pool, selected for the frame's draws.
+func test_the_mission_draws_its_foliage_effects_and_lights() -> void:
+	if _app == null:
+		return
+	assert_true(_app.is_available(), "a window: the editor's ImGui pass attached, its canvases drawing")
+	_open_mission(true)
+	assert_true(_seam.open_document(MISSION_PATH))
+	var state := await _await_ready(MISSION_PATH)
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var device: SubViewport = _app.get_viewport_device(MISSION_PATH, "mission")
+	assert_not_null(device)
+	if device == null:
+		return
+	assert_eq(device.msaa_3d, Viewport.MSAA_DISABLED, "single-sampled")
+	var terrains := device.find_children("*", "Terrain", true, false)
+	var foliages := device.find_children("*", "FoliageDispatcher", true, false)
+	var renderers := device.find_children("*", "ParticleRenderer", true, false)
+	assert_false(terrains.is_empty() or foliages.is_empty() or renderers.is_empty())
+	if terrains.is_empty() or foliages.is_empty() or renderers.is_empty():
+		return
+	var terrain := terrains[0] as Terrain
+	var foliage := foliages[0] as FoliageDispatcher
+	var renderer := renderers[0] as ParticleRenderer
+	# The lights: the armories' records spawned and the frame's draws selected.
+	for _frame in 20:
+		await get_tree().process_frame
+	var lights: Dictionary = _state(MISSION_PATH).get("body", {}).get("drawn", {}).get("lights", {})
+	assert_gte(int(lights.get("pool", 0)), 4, "two lights an armory, two armories: %s" % str(lights))
+	assert_gt(int(lights.get("models", 0)) + int(lights.get("static_draws", 0)), 0, "the frame's draws: %s" % str(lights))
+	# The foliage at the routed witness, two metres up.
+	var witness := Vector3(-120.0, 0.0, -24.0)
+	witness.y = terrain.get_terrain_data().get_height_world_bilinear(witness)
+	var target := MissionObjectPlacer.godot_to_bms_position(witness + Vector3(0.0, 0.5, -10.0))
+	assert_true(_seam.done({"kind": "set_viewport", "path": MISSION_PATH, "viewport": {"kind": "mission",
+			"camera": {"target": [target.x, target.y, target.z], "yaw": 0, "pitch": 8, "distance": 10}}}))
+	var grown := {}
+	for _frame in 60:
+		await get_tree().process_frame
+		grown = _state(MISSION_PATH).get("body", {}).get("drawn", {}).get("foliage", {})
+		if int(grown.get("instances", 0)) > 0:
+			break
+	assert_gt(int(grown.get("cells", 0)), 0, "the terrain's detail cells about the eye: %s" % str(grown))
+	assert_gt(int(grown.get("instances", 0)), 0, "the foliage map's grass grown there: %s" % str(grown))
+	assert_gt(foliage.get_total_instances(), 0)
+	var builds := int(_state(MISSION_PATH).get("builds", 0))
+	assert_true(_seam.done({"kind": "set_viewport", "path": MISSION_PATH,
+			"viewport": {"kind": "mission", "options": {"show": {"foliage": false}}}}))
+	for _frame in 4:
+		await get_tree().process_frame
+	assert_false(foliage.visible, "the foliage off")
+	assert_eq(int(_state(MISSION_PATH).get("builds", 0)), builds, "an Update, never a build")
+	# The effects: the camera on the first item with an attached slot, the renderer drawing its particles.
+	var pump := {}
+	for row: Variant in _seam.query("viewport", {"op": "items", "path": MISSION_PATH, "limit": 200}).get("items", []):
+		if String((row as Dictionary).get("effect", {}).get("status", "")) == "attached":
+			pump = row
+			break
+	assert_false(pump.is_empty(), "a pump's slot attached")
+	if pump.is_empty():
+		return
+	var at: Array = pump.get("at", [0, 0, 0])
+	assert_true(_seam.done({"kind": "set_viewport", "path": MISSION_PATH, "viewport": {"kind": "mission",
+			"camera": {"target": [at[0], at[1], float(at[2]) + 1.0], "yaw": 0, "pitch": 20, "distance": 8}}}))
+	var quads := 0
+	for _frame in 60:
+		await get_tree().process_frame
+		quads = renderer.get_rendered_quad_count()
+		if quads > 0:
+			break
+	assert_gt(quads, 0, "the particle renderer drew the pump's slot")

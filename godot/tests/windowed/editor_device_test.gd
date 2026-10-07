@@ -13,10 +13,51 @@ extends GutTest
 ##   Preview showing another one) keeps the size the canvas drew it at while it builds, never its
 ##   viewport's state's, and takes the state's once the build ends. The state takes a size only
 ##   where no canvas sizes the picture (S13 V5), so it is set once the canvas stops drawing it.
+## And the picture an animation map's row makes: its rig's model drawn skinned and posed, the mesh in the
+## rendered image as the model's own document draws it from the same camera (not the rig's bones alone).
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
 const ARMORY := "res://../fixtures/threedi/synth/armory.3di"
+const SKINNED := "res://../fixtures/threedi/o3d/skinned.o3d"
+## The skinned fixture's map: its rest row and an idle holding the rest pose (three bones, one frame each).
+const SKIN_MAP := """o3a 1
+adm SKIN.adm
+row anim_reset "rest"
+row anim_idle "hold"
+clip rest
+fps 30
+flags 0x1
+frames 1
+bone -1 0 0 0 0.5 "BN01 Pelvis"
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 1 0.5 "BN02 Spine"
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 -1 0.5 "BN03 Leg"
+ k 0 0 0 1
+ k 0 0 0 1
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x0 0.9 1.7
+clip hold
+fps 30
+flags 0x1
+frames 1
+bone -1 0 0 0 0.5 "BN01 Pelvis"
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 1 0.5 "BN02 Spine"
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 -1 0.5 "BN03 Leg"
+ k 0 0 0 1
+ k 0 0 0 1
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x0 0.9 1.7
+"""
+## The camera both pictures of the skinned fixture are drawn from.
+const SKIN_CAMERA := {"yaw": 0.6, "pitch": 0.35, "distance": 6.0, "target": [0.0, 0.0, 0.0]}
 
 var _dirs: Array[String] = []
 var _app: Node = null
@@ -216,3 +257,74 @@ func test_a_take_sizes_nothing_while_the_last_picture_is_kept() -> void:
 	# The build over, the next take sizes the undrawn device to its state's size.
 	await get_tree().process_frame
 	assert_eq(device.size, Vector2i(123, 77), "no picture kept: the state's size")
+
+
+## The pixels of the last picture the device over `path` rendered that differ from its background (its
+## corner's colour); -1 for no picture.
+func _drawn_pixels(path: String) -> int:
+	var device := _device(path)
+	if device == null:
+		return -1
+	var image := device.get_texture().get_image()
+	if image == null or image.is_empty():
+		return -1
+	var background := image.get_pixel(0, 0)
+	var count := 0
+	for y in image.get_height():
+		for x in image.get_width():
+			var pixel := image.get_pixel(x, y)
+			if absf(pixel.r - background.r) + absf(pixel.g - background.g) + absf(pixel.b - background.b) > 0.06:
+				count += 1
+	return count
+
+
+## The picture of `path` from SKIN_CAMERA: the viewport ready, the camera placed, rendered by the canvas.
+func _skin_picture(path: String) -> int:
+	assert_eq(String((await _await_ready(path)).get("status", "")), "ready", path)
+	assert_true(_seam.done({"kind": "set_viewport", "path": path, "viewport": {"camera": SKIN_CAMERA}}))
+	for _frame in 6:
+		await get_tree().process_frame
+	return _drawn_pixels(path)
+
+
+func _write_text(path: String, text: String) -> void:
+	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file, "wrote %s" % path)
+	if file != null:
+		file.store_string(text)
+		file.close()
+
+
+func test_a_map_row_draws_the_mesh_its_model_draws() -> void:
+	if _app == null:
+		return
+	assert_true(_app.is_available(), "a window: the editor's ImGui pass attached, its canvases drawing")
+	var dir := OS.get_cache_dir().path_join("opennova editor device rig %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	var root := dir.path_join("project")
+	assert_true(_seam.new_project(root, "Rig Game"))
+	var source := dir.path_join("source")
+	_write_text(source.path_join("skinned.o3d"), FileAccess.get_file_as_string(ProjectSettings.globalize_path(SKINNED)))
+	_write_text(source.path_join("skin.o3a"), SKIN_MAP)
+	_app.request_json(JSON.stringify({"kind": "import_files", "imports": [
+		{"path": source.path_join("skinned.o3d")}, {"path": source.path_join("skin.o3a")}]}))
+	assert_true(_seam.settle(), "the import steps across pumps")
+	_write_text(root.path_join("defs/items.def"),
+			TestFs.crlf("begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\nanim_def skin\nend\n"))
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	# The model on its own: its picture's pixels.
+	assert_true(_seam.open_document("models/skinned.3di"))
+	var model := await _skin_picture("models/skinned.3di")
+	assert_gt(model, 200, "the model's own document draws its mesh")
+	# The map's row on the same model, the rig bound and the row's clip posing it at the rest pose: the mesh
+	# drawn as the model's document draws it (both pictures as wide, so at one scale).
+	assert_true(_seam.open_document("anims/SKIN.adm"))
+	assert_true(_seam.select_record(_seam.find_record("anim_idle")))
+	var animation := await _skin_picture("anims/SKIN.adm")
+	var shown: Dictionary = _state("anims/SKIN.adm").get("body", {}).get("animation", {})
+	assert_eq(String(shown.get("key", "")), "anim_idle", str(shown))
+	assert_true(bool(shown.get("rig", false)), "the rig loads")
+	assert_gt(animation, int(model * 0.8),
+			"the map's row draws its model's mesh: %d pixels of the document's %d" % [animation, model])
