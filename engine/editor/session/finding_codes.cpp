@@ -64,6 +64,7 @@ constexpr GroupRow kGroups[] = {
 	{ G::Environments, "environment", "Environments" },
 	{ G::Terrains, "terrain", "Terrains" },
 	{ G::DialogBanks, "dialog_bank", "Dialog banks" },
+	{ G::CharAttrs, "charattr", "Character attributes" },
 	{ G::FileChores, "file", "File chores" },
 };
 
