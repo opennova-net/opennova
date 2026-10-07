@@ -1,11 +1,13 @@
 #include <editor/preview/menu_viewport.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <map>
 #include <variant>
 
+#include <editor/assets/asset_registry.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/edit.h>
@@ -16,6 +18,11 @@
 #include <editor/preview/menu_report.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <base/gameprofile/game_type.h>
+#include <base/io/strutil.h>
+#include <formats/rtxt/rtxt.h>
+#include <runtime/menu/menu_state_frame.h>
+#include <runtime/mission/mission_catalog.h>
 
 namespace opennova::editor {
 
@@ -30,12 +37,25 @@ constexpr NodeKind kWindowKind = node_kind(MenuKind::Window);
 
 // The frame state's row for a widget, made on first use (the runtime's per-widget state).
 menu::MenuWidgetState &widget_state(menu::MenuFrameState &state, int index) {
-	for (menu::MenuWidgetState &row : state.widgets)
-		if (row.index == index) return row;
-	menu::MenuWidgetState row;
-	row.index = index;
-	state.widgets.push_back(row);
-	return state.widgets.back();
+	return menu::frame_widget(state, index);
+}
+
+// The game's clock in milliseconds (GetTickCount's): what a double click is measured on.
+uint32_t try_now_ms() {
+	using namespace std::chrono;
+	return uint32_t(duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
+}
+
+// A point of the picture [x, y] in design units, as pointer_at takes one.
+bool design_point(const JsonValue &value, float &x, float &y) {
+	const bool point = value.is_array() && value.array.size() == 2 && value.array[0].is_number() &&
+			value.array[1].is_number() && value.array[0].number >= 0.0 &&
+			value.array[0].number < double(menu::kMenuDesignWidth) && value.array[1].number >= 0.0 &&
+			value.array[1].number < double(menu::kMenuDesignHeight);
+	if (!point) return false;
+	x = float(value.array[0].number);
+	y = float(value.array[1].number);
+	return true;
 }
 
 // The options an `options` member sets over `held`: {show_hidden, force_id (a window record, 0
@@ -94,18 +114,15 @@ bool read_options(const JsonValue &json, MenuViewportOptions &held, MenuCanvasSh
 				pointed.held = false;
 				continue;
 			}
-			const bool point = value.is_array() && value.array.size() == 2 && value.array[0].is_number() &&
-					value.array[1].is_number() && value.array[0].number >= 0.0 &&
-					value.array[0].number < double(menu::kMenuDesignWidth) && value.array[1].number >= 0.0 &&
-					value.array[1].number < double(menu::kMenuDesignHeight);
-			if (!point) {
+			float x = 0.0f, y = 0.0f;
+			if (!design_point(value, x, y)) {
 				error = "options.pointer_at is a point of the picture [x, y] in design units (x from 0 to under 800, "
 				        "y from 0 to under 600), or null to let it go.";
 				return false;
 			}
 			pointed.held = true;
-			pointed.x = float(value.array[0].number);
-			pointed.y = float(value.array[1].number);
+			pointed.x = x;
+			pointed.y = y;
 		} else if (key == "zoom") {
 			if (!value.is_string() || !menu_zoom_from_token(value.string, shown.zoom)) {
 				error = "options.zoom is fit, scale (with scale) or device.";
@@ -274,6 +291,97 @@ io::JsonValue menu_options_to_json(const MenuViewportOptions &held, const MenuCa
 	return options;
 }
 
+bool read_menu_try(const io::JsonValue &json, bool &on, std::vector<MenuTryInput> &queue, std::string &error) {
+	if (!json.is_object()) {
+		error = "A viewport's change is a JSON object.";
+		return false;
+	}
+	bool trying = on;
+	std::vector<MenuTryInput> queued;
+	if (const JsonValue *member = json.get("try")) {
+		if (!member->is_object()) {
+			error = "try is an object, {on?, reset?}.";
+			return false;
+		}
+		for (const io::JsonMember &field : member->object) {
+			if ((field.key != "on" && field.key != "reset") || !field.value.is_bool()) {
+				error = field.key == "on" || field.key == "reset"
+						? "try." + field.key + " is true or false."
+						: "Unknown try member \"" + field.key + "\" (it takes on and reset).";
+				return false;
+			}
+		}
+		// On, Try starts at the next follow or sample (from the screen shown); off, it goes.
+		trying = member->get_bool("on", trying);
+		if (member->get_bool("reset", false)) {
+			if (!trying) {
+				error = "try.reset: Try is off (try {on: true} first).";
+				return false;
+			}
+			MenuTryInput reset;
+			reset.kind = MenuTryInput::Kind::Reset;
+			queued.push_back(reset);
+		}
+	}
+	if (const JsonValue *member = json.get("click")) {
+		const JsonValue *at = member->is_object() ? member->get("at") : nullptr;
+		MenuTryInput click;
+		click.kind = MenuTryInput::Kind::Click;
+		if (!at || !design_point(*at, click.x, click.y) || member->object.size() != 1) {
+			error = "click is {at: [x, y]}, a point of the picture in design units (x from 0 to under 800, y from 0 to "
+			        "under 600).";
+			return false;
+		}
+		if (!trying) {
+			error = "click: Try is off, so a click is the editor's (try {on: true} first; op command's click selects).";
+			return false;
+		}
+		queued.push_back(click);
+	}
+	if (const JsonValue *member = json.get("key")) {
+		const JsonValue *name = member->is_object() ? member->get("key") : nullptr;
+		const JsonValue *text = member->is_object() ? member->get("text") : nullptr;
+		const JsonValue *shift = member->is_object() ? member->get("shift") : nullptr;
+		size_t known = (name ? 1 : 0) + (text ? 1 : 0) + (shift ? 1 : 0);
+		if (!member->is_object() || (name != nullptr) == (text != nullptr) || known != member->object.size() ||
+				(name && !name->is_string()) || (text && (!text->is_string() || text->string.empty())) ||
+				(shift && !shift->is_bool())) {
+			error = "key is {key, shift?}: one key by its name (VK_RETURN, VK_ESCAPE, VK_SPACE, VK_TAB, VK_BACK, "
+			        "VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, VK_HOME, VK_END, VK_DELETE, or Enter, Escape, Space, Tab, "
+			        "Backspace, Left, Right, Up, Down, Home, End, Delete, or one character), or {text}: characters "
+			        "typed in turn.";
+			return false;
+		}
+		if (!trying) {
+			error = "key: Try is off (try {on: true} first).";
+			return false;
+		}
+		const bool held = shift && shift->boolean;
+		if (name) {
+			MenuTryInput key;
+			key.kind = MenuTryInput::Kind::Key;
+			if (!menu_try_key_from_name(name->string, held, key.key)) {
+				error = "key: no key is named \"" + name->string + "\".";
+				return false;
+			}
+			queued.push_back(key);
+		} else {
+			for (const char c : text->string) {
+				MenuTryInput key;
+				key.kind = MenuTryInput::Kind::Key;
+				if (!menu_try_key_from_name(std::string(1, c), held, key.key)) {
+					error = "key.text: the game's keys type printable characters alone.";
+					return false;
+				}
+				queued.push_back(key);
+			}
+		}
+	}
+	on = trying;
+	queue.insert(queue.end(), queued.begin(), queued.end());
+	return true;
+}
+
 namespace {
 
 // The pointer the cursor pass draws for the claim `claim` (-1 none) over the state the picture holds (its
@@ -375,6 +483,19 @@ uint32_t menu_frame_time(const PreviewClock &clock) {
 
 bool menu_frame_clock(const MenuViewport &menu, uint32_t frame_ms, const PreviewClock &clock,
 		uint32_t &time) {
+	if (const menu::MenuFrameState *state = menu.try_state()) {
+		// Trying (DI-35): the edit box the keyboard focus is on, if any.
+		const menu::MenuFrameCompiler &compiler = menu.picture_compiler();
+		bool caret = false;
+		for (const menu::MenuWidgetState &row : state->widgets) {
+			if (!row.focused) continue;
+			const int type = compiler.widget_kind(row.index);
+			caret = caret || type == int(mnu::WindowType::Edit) || type == int(mnu::WindowType::MultilineEdit);
+		}
+		if (!caret) return false;
+		time = menu_frame_time(clock);
+		return menu::menu_caret_shown(time) != menu::menu_caret_shown(frame_ms);
+	}
 	const int index = menu.forced_index();
 	const menu::MenuFrameCompiler &compiler = menu.render().compiler();
 	if (!menu.options().focused || index < 0 || index >= compiler.widget_count()) return false;
@@ -420,6 +541,12 @@ ViewportStatus MenuViewport::status() const {
 }
 
 std::string MenuViewport::caption() const {
+	if (trying()) {
+		// Trying: the screen the game's menu shows now, of another menu after a jump.
+		const std::string own = path().substr(path().find_last_of('/') + 1);
+		return " - " + try_->screen_name() + (strutil::iequals(try_->file(), own) ? "" : " of " + try_->file()) +
+				" (Try)";
+	}
 	return screen_name_.empty() ? std::string() : " - " + screen_name_;
 }
 
@@ -496,6 +623,14 @@ ViewportAction MenuViewport::follow_(const ViewportInput &input, PreviewClock &)
 	follow_selection_(input, *document);
 	const FileSource &files = *view.findings.assets;
 	const uint64_t generation = view.findings.assets->generation();
+	if (try_on_) {
+		// Try (DI-35): read again as the menu changes, its queued inputs run; the picture Try's while it runs.
+		const bool changed = input.change != ChangeClass::None;
+		// The shell's %VAR% list Try's screens compile with, read again as its stylesheets move.
+		style_vars_ = style_.vars(files);
+		run_try_(view, *document, files, changed);
+		if (trying()) return follow_try_(input, *document, files);
+	}
 	const PreviewFollow::Key key{ row->id, options_serial_ };
 	switch (picture_.follow(key, moves_(input, *document, row->id), files, generation)) {
 	case PreviewFollow::Found::Same: return kept_(*document);
@@ -574,8 +709,135 @@ ViewportAction MenuViewport::kept_(const MnuDocument &document) {
 	return ViewportAction::Keep;
 }
 
+MenuTrySource MenuViewport::try_source_(const SessionView &view, const MnuDocument &document,
+		const FileSource &files) const {
+	MenuTrySource source;
+	source.files = &files;
+	source.vars = &style_vars_;
+	const std::string own = path().substr(path().find_last_of('/') + 1);
+	// A menu by its file name as the game reads it: this one as it would be saved now, another the
+	// project's file of the name (an open document standing in).
+	source.menu = [&document, &files, own](const std::string &file) -> std::shared_ptr<const mnu::Document> {
+		if (strutil::iequals(file, own)) return document.saved_image();
+		std::vector<uint8_t> bytes;
+		if (!files.read(file, bytes)) return nullptr;
+		auto parsed = std::make_shared<mnu::Document>();
+		std::string error;
+		if (!mnu::parse(bytes.data(), bytes.size(), *parsed, error)) return nullptr;
+		return parsed;
+	};
+	// The mission catalog as the game builds it from the project's loose files: each `.bms`, titled by
+	// the text table beside it [orig: MissionList_ScanAndBuildFromFiles @ 0x563170, the loose walk],
+	// in file order (Mission_CompareMapNames @ 0x5628e0), each row's session word stamped
+	// (game_type::for_mission_mode, as the game's catalog binding stamps it).
+	const std::shared_ptr<const AssetScan> scan = view.project.scan;
+	source.missions = [scan, &files]() {
+		std::vector<mission_catalog::Row> rows;
+		if (!scan) return std::vector<menu::MissionChoice>();
+		for (const AssetEntry &entry : scan->entries) {
+			if (!strutil::ends_with_icase(entry.logical_name, ".bms")) continue;
+			std::vector<uint8_t> bms;
+			if (!files.read(entry.logical_name, bms)) bms.clear();
+			const std::string bin = mission_catalog::text_table_name(entry.logical_name);
+			rtxt::File text;
+			std::vector<uint8_t> bytes;
+			std::string error;
+			const bool has_text = scan->find(bin) && files.read(bin, bytes) &&
+					rtxt::parse(bytes.data(), bytes.size(), text, error);
+			rows.push_back(mission_catalog::loose_row(entry.logical_name, bms, has_text ? &text : nullptr));
+		}
+		std::stable_sort(rows.begin(), rows.end(), [](const mission_catalog::Row &a, const mission_catalog::Row &b) {
+			return strutil::iless(a.file, b.file);
+		});
+		std::vector<menu::MissionChoice> choices;
+		for (const mission_catalog::Row &row : rows)
+			choices.push_back({ row.file, mission_catalog::display_text(row), row.briefing,
+					game_type::for_mission_mode(row.game_mode) });
+		return choices;
+	};
+	return source;
+}
+
+void MenuViewport::run_try_(const SessionView &view, const MnuDocument &document, const FileSource &files,
+		bool reload) {
+	const MenuTrySource source = try_source_(view, document, files);
+	if (!try_) {
+		// From the screen the viewport shows, of this menu.
+		try_ = std::make_unique<MenuTry>();
+		try_error_.clear();
+		const std::string own = path().substr(path().find_last_of('/') + 1);
+		try_->start(source, own, screen_name_, try_error_);
+		try_state_seen_ = 0;
+		reload = false;
+	}
+	if (!try_->started()) {
+		try_queue_.clear();
+		return;
+	}
+	if (reload) try_->reload(source);
+	std::vector<MenuTryInput> queue;
+	queue.swap(try_queue_);
+	for (const MenuTryInput &input : queue) {
+		switch (input.kind) {
+		case MenuTryInput::Kind::Reset: try_->reset(source, try_error_); break;
+		case MenuTryInput::Kind::Click: try_->click(source, input.x, input.y, try_now_ms()); break;
+		case MenuTryInput::Kind::Key: try_->key(source, input.key); break;
+		}
+	}
+}
+
+NodeId MenuViewport::try_record_(const MnuDocument &document, int id) const {
+	if (!trying() || id < 0) return 0;
+	const std::string own = path().substr(path().find_last_of('/') + 1);
+	const mnu::Screen *screen = try_->screen();
+	const std::shared_ptr<const mnu::Document> &image = try_->image();
+	if (!strutil::iequals(try_->file(), own) || !screen || !image) return 0;
+	// The screen's row by its place in the menu the game reads, the window by its pre-order index.
+	const size_t position = size_t(screen - image->screens.data());
+	const int index = try_->runtime().frame_index(id);
+	for (const auto &row : document.rows())
+		if (row && document.screen_position(row->id) == position && index >= 0)
+			return document.window_at(*row, size_t(index));
+	return 0;
+}
+
+ViewportAction MenuViewport::follow_try_(const ViewportInput &input, const MnuDocument &document,
+		const FileSource &files) {
+	const uint64_t generation = input.view.findings.assets->generation();
+	// The screen Try configured, a part apart from the rows'.
+	const auto key_of = [this] { return PreviewFollow::Key{ (uint64_t(1) << 63) | try_->configures(), options_serial_ }; };
+	switch (picture_.follow(key_of(), false, files, generation)) {
+	case PreviewFollow::Found::Same:
+		shown(document);
+		// The state moved (a window under the mouse, a check, a text): the device takes it again.
+		if (try_->state_serial() == try_state_seen_) return ViewportAction::Keep;
+		try_state_seen_ = try_->state_serial();
+		return ViewportAction::Update;
+	case PreviewFollow::Found::Files:
+		// A file it read moved: the menus read again, the screen configured again.
+		try_->reload(try_source_(input.view, document, files));
+		break;
+	case PreviewFollow::Found::Anew: break;
+	}
+	picture_.show(key_of(), generation);
+	try_state_seen_ = try_->state_serial();
+	reason_ = MenuScreenStatus::Ready;
+	detail_.clear();
+	notes_.clear();
+	split_unloaded(try_->assets(), missing_, unreadable_);
+	forced_index_ = -1;
+	device_rects_.clear();
+	shown(document);
+	// What the picture read: the menus, the screen's tables, fonts and textures, and the stylesheets.
+	FileStamps read = try_->reads(files);
+	std::vector<menu::MenuDependency> sheets;
+	style_.dependencies(sheets);
+	for (const menu::MenuDependency &sheet : sheets) read.note(sheet.name, sheet.stamp);
+	return picture_.built(std::move(read));
+}
+
 bool MenuViewport::takes_(const std::string &member) const {
-	return member == "options";
+	return member == "options" || member == "try" || member == "click" || member == "key";
 }
 
 bool MenuViewport::check_(const io::JsonValue &json, std::string &error) const {
@@ -584,7 +846,10 @@ bool MenuViewport::check_(const io::JsonValue &json, std::string &error) const {
 	MenuCanvasShow show = show_;
 	MenuPointerShow pointer = pointer_;
 	MenuSoundOptions sound = sound_;
-	return !options || read_options(*options, held, show, pointer, sound, error);
+	if (options && !read_options(*options, held, show, pointer, sound, error)) return false;
+	bool on = try_on_;
+	std::vector<MenuTryInput> queue;
+	return read_menu_try(json, on, queue, error);
 }
 
 void MenuViewport::apply_(const io::JsonValue &json, PreviewClock &) {
@@ -594,15 +859,38 @@ void MenuViewport::apply_(const io::JsonValue &json, PreviewClock &) {
 	MenuPointerShow pointer = pointer_;
 	MenuSoundOptions sound = sound_;
 	std::string error;
-	if (!options || !read_options(*options, held, show, pointer, sound, error)) return;
-	// The zoom and the snap change no picture, the pointer only the cursor pass the device draws again
-	// (DI-08), and the sounds none (DI-34): the screen is configured again for the held window alone.
-	show_ = show;
-	pointer_ = pointer;
-	sound_ = sound;
-	if (held == options_) return;
-	options_ = held;
-	++options_serial_;
+	if (options && read_options(*options, held, show, pointer, sound, error)) {
+		// The zoom and the snap change no picture, the pointer only the cursor pass the device draws again
+		// (DI-08), and the sounds none (DI-34): the screen is configured again for the held window alone.
+		show_ = show;
+		pointer_ = pointer;
+		sound_ = sound;
+		if (held != options_) {
+			options_ = held;
+			++options_serial_;
+		}
+	}
+	// Try (DI-35): on or off (the picture made again either way), and its inputs queued for the next follow
+	// or sample, which read the files. A click leaves the game's mouse at its point, up.
+	bool on = try_on_;
+	std::vector<MenuTryInput> queued;
+	if (!read_menu_try(json, on, queued, error)) return;
+	if (on != try_on_) {
+		try_on_ = on;
+		++options_serial_;
+		try_queue_.clear();
+		try_error_.clear();
+		if (!on) try_.reset();
+	}
+	for (const MenuTryInput &input : queued) {
+		if (input.kind == MenuTryInput::Kind::Click) {
+			pointer_.held = true;
+			pointer_.x = input.x;
+			pointer_.y = input.y;
+			pointer_.down = false;
+		}
+		try_queue_.push_back(input);
+	}
 }
 
 bool MenuViewport::report_(const ViewportDeviceReport &report) {
@@ -622,8 +910,10 @@ MenuCanvasFrame MenuViewport::canvas_frame(const ViewportContext &context) const
 		frame.state = &render_.state();
 		frame.notes = &notes_;
 	}
-	// A picture of another revision (an edit lands on the next pump) maps no index.
-	frame.current = frame.compiler && current(context.input);
+	// A picture of another revision (an edit lands on the next pump) maps no index; nor does Try's, whose
+	// clicks are the game's (DI-35).
+	frame.trying = try_on_;
+	frame.current = frame.compiler && current(context.input) && !try_on_;
 	frame.snap = context.snap != 0.0f;
 	frame.editable = context.editable();
 	// The selection on this screen while the menu is the active document.
@@ -637,6 +927,23 @@ MenuCanvasFrame MenuViewport::canvas_frame(const ViewportContext &context) const
 
 ViewportHit MenuViewport::hit(const ViewportContext &context, float x, float y) const {
 	ViewportHit out;
+	if (trying()) {
+		// Trying (DI-35): the game's menu as Try holds it, the window under the point its hit test finds.
+		const menu::MenuFrameCompiler &compiler = try_->compiler();
+		const menu::MenuFrameState &state = try_->state();
+		const auto *document = dynamic_cast<const MnuDocument *>(context.input.document);
+		out.current = true;
+		out.pointer = menu_pointer_to_json(pointer_at(context, x, y));
+		out.index = compiler.hit_widget(state, x, y, 1.0f, 1.0f);
+		if (out.index < 0) return out;
+		out.id = document ? try_record_(*document, try_->runtime().id_at_index(out.index)) : 0;
+		out.name = compiler.widget_name(out.index);
+		const mnu::Window *window = compiler.widget_window(out.index);
+		out.sounds = menu_window_sounds_to_json(window ? menu_window_sounds(*window) : std::vector<MenuWindowSound>());
+		const int type = compiler.widget_kind(out.index);
+		out.kind = type >= 0 ? mnu::window_type_name(static_cast<mnu::WindowType>(type)) : "";
+		return out;
+	}
 	const MenuCanvasFrame frame = canvas_frame(context);
 	out.current = frame.current;
 	if (!frame.current) return out;
@@ -653,6 +960,37 @@ ViewportHit MenuViewport::hit(const ViewportContext &context, float x, float y) 
 	return out;
 }
 
+MenuPointer MenuViewport::screen_pointer(const ViewportContext &context) const {
+	if (!trying()) return menu_screen_pointer(canvas_frame(context));
+	return pointer_at(context, -1.0f, -1.0f);
+}
+
+MenuPointer MenuViewport::pointer_at(const ViewportContext &context, float x, float y) const {
+	if (!trying()) return menu_pointer_at(canvas_frame(context), x, y);
+	// Trying: the claim the game's pump makes there over the state Try holds (none off the picture), and the
+	// CURSOR it stamps.
+	const menu::MenuFrameCompiler &compiler = try_->compiler();
+	menu::MenuFrameState stamped = try_->state();
+	const menu::MenuFrameCompiler::MouseClaim claim =
+			x < 0.0f ? menu::MenuFrameCompiler::MouseClaim() : compiler.claim_at(stamped, x, y, 1.0f, 1.0f);
+	stamped.cursor_claim = claim.hovered;
+	stamped.cursor_spin_part = claim.spin_part;
+	const menu::MenuFrameCompiler::FrameCursor cursor = compiler.frame_cursor(stamped);
+	MenuPointer pointer;
+	if (cursor.owner < 0) return pointer;
+	pointer.drawn = true;
+	pointer.owner = cursor.owner;
+	pointer.width = cursor.width;
+	pointer.height = cursor.height;
+	const std::vector<std::string> &names = compiler.texture_names();
+	if (cursor.texture >= 0 && size_t(cursor.texture) < names.size()) pointer.file = names[size_t(cursor.texture)];
+	pointer.name = compiler.widget_name(cursor.owner);
+	const auto *document = dynamic_cast<const MnuDocument *>(context.input.document);
+	const NodeId record = document ? try_record_(*document, try_->runtime().id_at_index(cursor.owner)) : 0;
+	if (record) pointer.window = document->address_of(record);
+	return pointer;
+}
+
 void MenuViewport::take_mouse(const ViewportMouse *mouse) {
 	canvas_mouse_ = mouse ? *mouse : ViewportMouse();
 }
@@ -666,6 +1004,37 @@ std::vector<MenuSoundFired> MenuViewport::fire_sounds(const ViewportInput &input
 		const AssetScan *scan, audio::SoundSelector &selector, uint64_t &next_seq) {
 	std::vector<MenuSoundFired> out;
 	const auto *document = dynamic_cast<const MnuDocument *>(input.document);
+	if (try_on_) {
+		// Trying (DI-35): the queued inputs run, then the frame's sample of the game's mouse (the canvas's
+		// while it has it over the picture, else where a client holds it; none: the mouse is off the game's
+		// window, and the pump hears nothing); the sounds are the runtime's own pump's.
+		if (!document || !input.view.findings.assets) return out;
+		run_try_(input.view, *document, *input.view.findings.assets, false);
+		if (!trying()) return out;
+		const MenuTrySource source = try_source_(input.view, *document, *input.view.findings.assets);
+		if (canvas_mouse_.over)
+			try_->mouse(source, canvas_mouse_.x, canvas_mouse_.y, canvas_mouse_.down, try_now_ms());
+		else if (pointer_.held)
+			try_->mouse(source, pointer_.x, pointer_.y, pointer_.down, try_now_ms());
+		for (const MenuTrySound &played : try_->take_sounds()) {
+			mnu::Sound row;
+			row.state = menu::menu_sound_state_token(played.state);
+			row.trigger = played.trigger;
+			row.file = played.bank;
+			MenuSoundFired fired = plan_menu_sound(row, sound_banks_, files, scan, selector, sound_.mute);
+			fired.sound.seq = ++next_seq;
+			fired.sound.path = path();
+			fired.screen = played.screen;
+			fired.window = try_record_(*document, played.id);
+			fired.name = played.window;
+			fired.state = played.state;
+			out.push_back(fired);
+			sounds_fired_.push_back(std::move(fired));
+		}
+		if (sounds_fired_.size() > kSoundsFiredKept)
+			sounds_fired_.erase(sounds_fired_.begin(), sounds_fired_.end() - kSoundsFiredKept);
+		return out;
+	}
 	const Node *screen = document ? document->row(part_) : nullptr;
 	if (!screen || !current(input)) return out;
 	const menu::MenuFrameCompiler &compiler = render_.compiler();
@@ -731,6 +1100,11 @@ std::vector<MenuSoundFired> MenuViewport::fire_sounds(const ViewportInput &input
 
 bool MenuViewport::click_frame(const ViewportContext &context, SelectMode, int &width, int &height,
 		std::string &error) const {
+	if (try_on_) {
+		error = "The menu is in Try mode: a click of the picture is the game's menu's (op click, set_viewport click "
+		        "{at}), not the editor's selection; try {on: false} to edit.";
+		return false;
+	}
 	if (!canvas_frame(context).current) {
 		const std::string why = message();
 		error = "The viewport shows no picture of the menu as it is now" + (why.empty() ? std::string(".") : ": " + why);
@@ -889,11 +1263,27 @@ io::JsonValue MenuViewport::body_json(const ViewportInput &input) const {
 	JsonValue fired = JsonValue::make_array();
 	for (const MenuSoundFired &sound : sounds_fired_) fired.push(menu_sound_fired_to_json(sound));
 	body.set("sounds_fired", std::move(fired));
+	// Try (DI-35): where the game's menu is and what it did.
+	JsonValue tried = try_ && try_on_ ? menu_try_to_json(*try_) : JsonValue::make_object();
+	if (!try_on_) tried.set("on", JsonValue::make_bool(false));
+	if (try_on_ && !try_) tried.set("on", JsonValue::make_bool(true));
+	if (!try_error_.empty()) tried.set("error", json_string(try_error_));
+	body.set("try", std::move(tried));
 	return body;
 }
 
 io::JsonValue MenuViewport::items_json(const ViewportInput &input) const {
 	const auto *document = dynamic_cast<const MnuDocument *>(input.document);
+	if (trying()) {
+		// Trying: the screen's windows as the game's menu holds them, each its record where it is this menu's.
+		JsonValue widgets = menu_try_widgets_json(*try_);
+		for (JsonValue &widget : widgets.array) {
+			const int index = int(widget.get_number("index", -1));
+			const NodeId record = document ? try_record_(*document, try_->runtime().id_at_index(index)) : 0;
+			widget.set("id", json_number(double(record)));
+		}
+		return widgets;
+	}
 	const Node *screen = document ? document->row(part_) : nullptr;
 	if (!screen || !current(input)) return JsonValue::make_array();
 	JsonValue widgets = menu_widgets_to_json(*document, *screen, render_.compiler(), render_.state());
@@ -910,6 +1300,7 @@ io::JsonValue MenuViewport::items_json(const ViewportInput &input) const {
 }
 
 io::JsonValue MenuViewport::notes_json(const ViewportInput &input) const {
+	if (trying()) return JsonValue::make_array(); // the compiler's notes are the edited screen's
 	const auto *document = dynamic_cast<const MnuDocument *>(input.document);
 	const Node *screen = document ? document->row(part_) : nullptr;
 	if (!screen || !current(input)) return JsonValue::make_array();

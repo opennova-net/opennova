@@ -55,6 +55,10 @@ protected:
 	// canvas showing none of its own there (a menu's: the game's pointer, DI-08): the canvas hides the
 	// editor's pointer then. None by default.
 	virtual bool draws_pointer(const ViewportModel &model, const ViewportContext &context, const CanvasInput &in);
+	// Whether the picture takes the pointer as the game's own, its press included (a menu in Try mode,
+	// DI-35): the mouse's place goes to the device with the button down too, the canvas showing nothing of
+	// its own. None by default.
+	virtual bool game_input(const ViewportModel &model) const;
 
 	// The canvas `height` tall across the room: the device's picture of the viewport under the
 	// kind's shapes, the frame's pointer and keys to the kind's half of it (the canvas's gestures),
