@@ -21,6 +21,7 @@
 #include "env/mission_environment.h"
 #include "env/sky_dome.h"
 #include "env/water.h"
+#include "lights/light_scene.h"
 #include "mission/mission_object_placer.h"
 #include "mission/mission_placement_run.h"
 #include "object/object_model.h"
@@ -71,7 +72,8 @@ namespace godot {
 // (StampedFiles), each layer the names its units read: a file the picture read that moved (the
 // viewport's Rebuild) mounts the root afresh, and only the layers that read what moved are built
 // again. Its scene state is its own (E13): the environment and the water hold their process-wide
-// shader globals (set_globals_held) but while it publishes them (publish_scene_state, whenever
+// shader globals (set_globals_held), as does the retained statics' light atlas (each row's lighting
+// lane, no lights), but while it publishes them (publish_scene_state, whenever
 // another state was published last or its own moved: a new scene state each time its environment,
 // its water or its time changes) and while it presents its frame; its frame's legs run only in a
 // frame it renders (present), and the water's mirror pass is on only in such a frame (off from each
@@ -255,6 +257,10 @@ private:
 	void pose_people_(const opennova::editor::MissionScene &scene, const opennova::editor::MissionPoses &poses);
 	// The moved entities' terrain shadow sources moved too, once no gesture is open.
 	void flush_shadows_(const opennova::editor::MissionScene &scene);
+	// The retained statics' rows of the light atlas built again when the placer's rows moved (a
+	// placement, a static hidden or shown): each row's lighting lane as the game's light director
+	// gives it (LightScene::static_row_entity_lane), and no lights, the picture drawing none.
+	void build_static_rows_();
 	void place_camera_(const opennova::editor::ViewportModel &model);
 	String graphic_of_(int64_t item);
 	Transform3D transform_of_(const opennova::editor::MissionEntityMark &entity) const;
@@ -304,6 +310,12 @@ private:
 	int place_units_planned_ = 0;
 	std::unique_ptr<Build> build_;
 	uint64_t scene_state_ = 0;
+	// The retained statics' light atlas (opennova_static_point_light_rows, a scene-state global): a
+	// static row reads its lighting lane there, as no MultiMesh instance carries one, so a picture
+	// without it draws every static as if the sun were blocked. Built from the placer's rows at its
+	// light-draw revision (0: none built since the entities were dropped).
+	Ref<LightScene> static_rows_;
+	uint64_t static_rows_revision_ = 0;
 	// The pick shapes kept: a static's by its graphic, an individual model's by its node (dropped with
 	// the entities), and the last ray's answer while the picture stands (a frame's hover and hint ask
 	// alike).
