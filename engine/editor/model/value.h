@@ -48,7 +48,7 @@ enum class FieldType { Integer, Unsigned, Byte, Count, Real, Text };
 // of its own file by its index (a Record reference, S13 D8). A document type resolves each kind
 // against the project (reference_status, graph/reference_queries). What each kind is to the graph
 // (its token, words, where it resolves, how names compare, what a missing one means) is its row in
-// graph/reference_kinds: a new kind is one value here and one row there, Shader staying the last.
+// graph/reference_kinds: a new kind is one value here and one row there, at the end of each.
 enum class ReferenceKind {
 	None, Model, AnimationMap, Ammo, Weapon, Item, Texture, Sound, Particle, AiProfile,
 	OtherText, // a text key the editor does not resolve yet
@@ -81,7 +81,7 @@ enum class ReferenceKind {
 	Script,         // a .wac by the name as written (a mission's own script, a RUN's)
 	LoadingImage,   // a mission's loading image, a .pcx by its name (else loadscrn.pcx)
 	TilePlacement,  // a mission's tile placement, a .til by its name
-	DialogBank,     // a mission's dialog bank, a .dbf by its name (a dialog a record plays)
+	DialogBank,     // a mission's dialog bank, a .dbf by its name
 	MissionStrings, // a mission's own string table, a .bin by its name (else medmssn.bin)
 	BankWave,       // a sound bank's wave by its name, in the bank the scope names (a member's)
 	SoundProfile,   // a SndProf.def profile by its name (an item's sound_profile)
@@ -89,6 +89,7 @@ enum class ReferenceKind {
 	AnimationKey,   // an animation map's row by its slot's key, in the map file the scope names (a weapon action's anim)
 	ItemAlias,      // an item by its alias, items.def's sid (a hudpos.def VEHICLE_HUD block's)
 	AvatarPart,     // an avatar part by its name, of the kind and file the scope names (an Avatars.def combo's head)
+	Dialog,         // a dialog bank's dialog by its name, in the bank the scope names (a mission's Play dialog: dlg%03i)
 };
 
 // Whether the game reads a field on a particular record (Document::field_on). Ignored is

@@ -241,8 +241,11 @@ void go_to_tool(Workspace &workspace, const FieldUse &field, const Value &value,
 	ImGui::EndPopup();
 }
 
-// Whether a reference's Play sounds what it names: a sound set or a wave.
-bool plays_sound(ReferenceKind kind) { return kind == ReferenceKind::Sound || kind == ReferenceKind::Wave; }
+// Whether a reference's Play sounds what it names: a sound set, a wave, or a dialog (DI-32: its lines as the game
+// plays them).
+bool plays_sound(ReferenceKind kind) {
+	return kind == ReferenceKind::Sound || kind == ReferenceKind::Wave || kind == ReferenceKind::Dialog;
+}
 
 // Present / Missing / Unverified beside a reference, from the same tables the validator
 // uses (compact: a coloured dot, the words in its tooltip, a click on it the Go to, or, on a
@@ -308,11 +311,16 @@ void reference_status(Workspace &workspace, ReferencePicker &picker, const Docum
 	const auto *text = std::get_if<std::string>(&value);
 	if (!text || text->empty()) return;
 	place(row, ui_kit::button_width("Play"));
+	const std::string scoped = field.scope.substr(0, field.scope.find('/'));
 	if (ImGui::SmallButton("Play"))
-		workspace.request(named == ReferenceKind::Sound ? request::play_set(*text, field.scope.substr(0, field.scope.find('/')))
-		                                                : request::play_sound(io::utf8_file_name(*text)));
+		workspace.request(named == ReferenceKind::Sound    ? request::play_set(*text, scoped)
+		                  : named == ReferenceKind::Dialog ? request::play_dialog(*text, scoped)
+		                                                   : request::play_sound(io::utf8_file_name(*text)));
 	ui_kit::tooltip(named == ReferenceKind::Sound
 	                        ? "Play " + *text + " as the game plays it: each layer's member picked, its pitch composed."
+	                : named == ReferenceKind::Dialog
+	                        ? "Play " + *text + " of " + scoped + " as the game plays it: each line the wave of its name in "
+	                          "the bank's sounds, one after another, its subtitle said."
 	                        : "Play " + io::utf8_file_name(*text) + " as recorded.");
 }
 
@@ -689,7 +697,7 @@ const GraphSymbol *string_reached(const SessionView &view, const FieldUse &field
 	if (!view.findings.graph) return nullptr;
 	GraphEdge edge;
 	if (!reference_target(field, value, edge.kind, edge.value, edge.scope) || edge.kind != ReferenceKind::TextId) return nullptr;
-	if (field.scope_alternate) edge.scope_alternate = field.scope_alternate;
+	if (!field.scope_alternate.empty()) edge.scope_alternate = field.scope_alternate;
 	return view.findings.graph->symbol_reached(edge);
 }
 
@@ -798,7 +806,7 @@ void field_row(Workspace &workspace, Controls &controls, const Document &documen
 	FieldUse keyed;
 	Value key;
 	const bool keys_text = present && !mixed && workspace.view().findings.graph &&
-	                       keyed_text_reference(*workspace.view().findings.graph, field, value, keyed, key);
+	                       keyed_reference(*workspace.view().findings.graph, field, value, keyed, key);
 	const float tools = (is_reference(field, value) ? reference_tools_width(field)
 	                     : keys_text                ? reference_tools_width(keyed)
 	                                                : 0.0f) +
