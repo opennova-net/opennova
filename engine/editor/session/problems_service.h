@@ -9,6 +9,7 @@
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/graph_layer.h>
 #include <editor/model/diagnostic.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problem_query.h>
@@ -105,6 +106,10 @@ public:
 			validate_later();
 		}
 	}
+	// The base layer under the graph (an expansion's base game, session/base_layer_build.h; null for none):
+	// the references into the names it defines resolve through it (AssetGraph::set_base), the validation
+	// under way started again over the graph it moved.
+	void set_base_layer(std::shared_ptr<const GraphLayer> layer);
 	// The scan's and the requirements' findings as the view holds them now, in place of the rows' first
 	// (those the last composition led with) at once, as files land; the other rows wait for the
 	// validation the change left due.
