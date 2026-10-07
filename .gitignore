@@ -87,6 +87,11 @@ godot/exports/
 .godot-bin/
 godot/addons/gut/
 godot/addons/imgui-godot/
+# The player profile a source run without --working-dir saves into the project
+# (a direct GUT run; scripts/test_godot.sh names its own working directory).
+godot/player.sav
+godot/weapon.sav
+godot/expansion/*/weapon.sav
 
 CLAUDE.local.md
 .superpowers/

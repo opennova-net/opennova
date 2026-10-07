@@ -611,6 +611,12 @@ func _apply_expansion(name: String) -> void:
 		return
 	if not _driver.request_expansion(name, _current_expansion(), _root.is_runtime_mount()):
 		push_warning("MenuShell: expansions need a packed game install; the loose mount stands")
+		return
+	# A pick that switches the game saves the player profile first, under the
+	# expansion it leaves; the reload loads it again under the pick
+	# (engine: runtime/profile/player_profiles.h, the save points).
+	if _driver.has_pending_expansion_reload():
+		PlayerProfile.save()
 
 
 func has_pending_expansion_reload() -> bool:

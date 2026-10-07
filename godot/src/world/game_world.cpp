@@ -782,6 +782,7 @@ void GameWorld::_bind_methods() {
 			&GameWorld::get_current_frame_clear_color);
 
 	ClassDB::bind_method(D_METHOD("set_music_director", "director"), &GameWorld::set_music_director);
+	ClassDB::bind_method(D_METHOD("set_player_profiles", "profiles"), &GameWorld::set_player_profiles);
 	ClassDB::bind_method(D_METHOD("set_frame_stats", "board"), &GameWorld::set_frame_stats);
 	ClassDB::bind_method(D_METHOD("is_water_render_stats_measured"),
 			&GameWorld::is_water_render_stats_measured);

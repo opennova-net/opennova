@@ -761,8 +761,10 @@ func test_armory_reads_and_clears_authoritative_local_loadout() -> void:
 		"weapon-table load exposes the entity's stamped default instead of the FP fallback")
 	assert_false(sim.has_explicit_spawn_loadout(),
 		"the engine's WPN_M4AUTO fallback is not an authored spawn kit")
+	# The profile-less kit is the program's whole single-player page, M4AUTO first
+	# (D-PLAYERINFO-13, docs/playerinfo/player-sav-re.md).
 	var fallback_loadout := sim.get_local_player_loadout()
-	assert_eq(fallback_loadout.size(), 1,
+	assert_eq(fallback_loadout.size(), 8,
 		"the canonical transport exposes the effective default kit")
 	assert_eq((fallback_loadout[0] as WeaponKitEntry).name, "WPN_M4AUTO")
 	assert_true(sim.set_local_player_class(7),

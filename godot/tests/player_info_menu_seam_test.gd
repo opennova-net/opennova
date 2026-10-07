@@ -462,11 +462,12 @@ func test_accept_emits_avatar_chosen() -> void:
 	assert_eq(int(profile.get("nationality", -1)), 0, "the committed profile carries the selection")
 
 
-## ADR 0046 S13 A8: an ACCEPT saves the profile where retail keeps it, weapon.sav in the directory
-## the game was started in [orig: PlayerProfile_LoadAllFromDisk @ 0x54f4d0, the path built
-## relative to it @0x54f68c-0x54f6b7] (LaunchFlags.working_dir, the run directory under the
-## editor's Play), never under the mounted resource root, which for the editor's Play is a build
-## no game may write: the root's tree is the same before and after, and the profile reads back.
+## ADR 0046 S13 A8: an ACCEPT writes the profile record in memory and the next save point saves
+## it where retail keeps it, player.sav and weapon.sav in the directory the game was started in
+## [orig: PlayerProfile_SaveToFiles @ 0x54be00; the weapon.sav path built relative to it
+## @0x54f68c-0x54f6b7] (LaunchFlags.working_dir, the run directory under the editor's Play),
+## never under the mounted resource root, which for the editor's Play is a build no game may
+## write: the root's tree is the same before and after, and the profile reads back.
 func test_accept_saves_beside_the_game_never_in_the_root() -> void:
 	var root := _staged_avatars_root()
 	assert_not_null(root, "the minted avatar table stages")
@@ -484,10 +485,16 @@ func test_accept_saves_beside_the_game_never_in_the_root() -> void:
 	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	assert_signal_emitted(companion, "avatar_chosen")
 	var profile: Dictionary = get_signal_parameters(companion, "avatar_chosen")[0]
-	# What MainGame does with an ACCEPT (main_game.gd _on_avatar_chosen).
-	assert_eq(PlayerProfile.save_character_profile(root, profile), OK)
+	# What MainGame does with an ACCEPT (main_game.gd _on_avatar_chosen), then a save point.
+	PlayerProfile.load_for(root)
+	assert_eq(PlayerProfile.accept_player_info(profile), OK)
+	assert_false(FileAccess.file_exists(run_dir.path_join("weapon.sav")),
+			"the ACCEPT writes the record in memory, as the original's dialog does")
+	assert_eq(PlayerProfile.save(), OK)
 	assert_true(FileAccess.file_exists(run_dir.path_join("weapon.sav")), "the profile is saved beside the game")
+	assert_true(FileAccess.file_exists(run_dir.path_join("player.sav")), "player.sav beside it")
 	assert_eq(_tree_digest(String(root.get_root_dir())), before, "the resource root is not written")
+	PlayerProfile.load_for(root)
 	var loaded := PlayerProfile.load_character_profile(root)
 	var saved_sides: Array = profile.get("side_profiles", [])
 	var loaded_sides: Array = loaded.get("side_profiles", [])

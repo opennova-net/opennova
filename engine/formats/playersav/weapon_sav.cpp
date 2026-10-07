@@ -5,6 +5,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 
 #include <base/io/byte_reader.h>
 #include <base/io/byte_writer.h>
@@ -44,13 +45,61 @@ std::string format_value(int32_t v)
     return std::to_string(v);
 }
 
-KitPage single_name_page(const char *name)
+// A default page: its names, each with the three -1 values the static blobs
+// carry ("<name>\0-1\0-1\0-1\0" per entry).
+KitPage names_page(std::initializer_list<const char *> names)
 {
     KitPage page;
-    KitEntry entry;
-    entry.name = name;
-    page.entries.push_back(entry);
+    for (const char *name : names) {
+        KitEntry entry;
+        entry.name = name;
+        page.entries.push_back(entry);
+    }
     return page;
+}
+
+// The eleven static default pages, by the data address InitDefaults copies
+// from [orig: PlayerProfile_InitDefaults @0x54bb40].
+KitPage blue_default_page(size_t class_index)
+{
+    switch (class_index) {
+    case 0:  // class 5, 0x8353F8 @0x54bd7f
+        return names_page({"WPN_M4AUTO", "WPN_colt45", "WPN_DESIGNATOR", "WPN_GRENADEFB",
+                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE", "WPN_MEDPACK"});
+    case 1:  // class 6, 0x8363F8 @0x54bd8f
+        return names_page({"WPN_SR25", "WPN_M9Beretta", "WPN_CLAYMORE", "WPN_GRENADEFB",
+                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE"});
+    case 2:  // class 7, 0x8373F8 @0x54bda5
+        return names_page({"WPN_M60", "WPN_RemmingtonSG", "WPN_DESIGNATOR", "WPN_GRENADEFB",
+                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE"});
+    case 3:  // class 8, 0x8393F8 @0x54bdbb
+        return names_page({"WPN_M4AUTO", "WPN_colt45", "WPN_SATCHEL_CHARGE", "WPN_GRENADEFB",
+                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE"});
+    default:  // class 9, 0x83A3F8 @0x54bdd1
+        return names_page({"WPN_M16BURST", "WPN_colt45", "WPN_AT4", "WPN_GRENADEFB",
+                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE"});
+    }
+}
+
+KitPage red_default_page(size_t class_index)
+{
+    switch (class_index) {
+    case 0:  // class 5, 0x835BF8 @0x54bd1a
+        return names_page({"WPN_AK47AUTO", "WPN_colt45", "WPN_DESIGNATOR", "WPN_GRENADEFB",
+                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE2", "WPN_MEDPACK"});
+    case 1:  // class 6, 0x836BF8 @0x54bd2a
+        return names_page({"WPN_DRAGUNOV", "WPN_357", "WPN_CLAYMORE", "WPN_GRENADEFB",
+                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE2"});
+    case 2:  // class 7, 0x837BF8 @0x54bd40
+        return names_page({"WPN_PKM", "WPN_RemmingtonSG", "WPN_DESIGNATOR", "WPN_GRENADEFB",
+                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE2"});
+    case 3:  // class 8, 0x839BF8 @0x54bd56
+        return names_page({"WPN_AK47AUTO", "WPN_colt45", "WPN_SATCHEL_CHARGE", "WPN_GRENADEFB",
+                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE2"});
+    default:  // class 9, 0x83ABF8 @0x54bd6c
+        return names_page({"WPN_AK74AUTO", "WPN_357", "WPN_RPG", "WPN_GRENADEFB",
+                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE2"});
+    }
 }
 
 void read_side(io::ByteReader &r, Side &side)
@@ -256,29 +305,37 @@ std::vector<uint8_t> write(const File &in)
     return w.take();
 }
 
+KitPage default_single_player_page()
+{
+    // [orig: Buffer_CopyUntilDoubleNull(+65548, 0x833BF8, 2048) @0x54bced]
+    return names_page({"WPN_M4AUTO", "WPN_M4", "WPN_colt45", "WPN_AT4", "WPN_GRENADEFB",
+            "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE"});
+}
+
+KitPage default_kit_page(SideId side, uint8_t klass)
+{
+    if (klass < kMinPlayerClass || klass > kMaxPlayerClass)
+        return KitPage{};
+    const size_t index = static_cast<size_t>(klass) - kMinPlayerClass;
+    return side == SideId::Blue ? blue_default_page(index) : red_default_page(index);
+}
+
 File make_defaults()
 {
-    // [orig: PlayerProfile_InitDefaults @0x54bb40] — both side class bytes 8,
-    // the single-player page "WPN_M4AUTO", and one weapon name per class page
-    // written at base-2048 (class 5) .. base+6144 (class 9).
+    // [orig: PlayerProfile_InitDefaults @0x54bb40] — both side class bytes 8
+    // (@0x54bbe0/@0x54bbe3), the single-player page (@0x54bced), and a page
+    // per class written at base-2048 (class 5) .. base+6144 (class 9), team 0
+    // the blue set and team 1 the red (@0x54bcf7..@0x54bde4).
     File f;
     for (Record &rec : f.slots) {
         rec.blue.player_class = 8;
         rec.red.player_class = 8;
-
-        rec.blue.pages[0] = single_name_page("WPN_M4AUTO");    // class 5 medic
-        rec.blue.pages[1] = single_name_page("WPN_SR25");      // class 6 sniper
-        rec.blue.pages[2] = single_name_page("WPN_M60");       // class 7 gunner
-        rec.blue.pages[3] = single_name_page("WPN_M4AUTO");    // class 8 rifleman
-        rec.blue.pages[4] = single_name_page("WPN_M16BURST");  // class 9 engineer
-
-        rec.red.pages[0] = single_name_page("WPN_AK47AUTO");
-        rec.red.pages[1] = single_name_page("WPN_DRAGUNOV");
-        rec.red.pages[2] = single_name_page("WPN_PKM");
-        rec.red.pages[3] = single_name_page("WPN_AK47AUTO");
-        rec.red.pages[4] = single_name_page("WPN_AK74AUTO");
-
-        rec.single_player = single_name_page("WPN_M4AUTO");
+        for (size_t i = 0; i < kKitPagesPerSide; ++i) {
+            const uint8_t klass = static_cast<uint8_t>(kMinPlayerClass + i);
+            rec.blue.pages[i] = default_kit_page(SideId::Blue, klass);
+            rec.red.pages[i] = default_kit_page(SideId::Red, klass);
+        }
+        rec.single_player = default_single_player_page();
     }
     return f;
 }

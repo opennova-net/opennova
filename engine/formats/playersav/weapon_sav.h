@@ -62,13 +62,12 @@ std::string weapon_sav_relpath(const std::string &expansion_name);
 // as 0xFF [orig: NetPacket_SendLoadoutSubmit @0x42CDC0 @0x42cf7c/@0x42cfbc/
 // @0x42cff7].
 //
-// Modeling note: a page that stores only a bare weapon name (what
-// PlayerProfile_InitDefaults writes) and a page that stores an explicit
-// "<name> -1 -1 -1" group decode to the SAME KitEntry, because a missing value
-// defaults to -1. The writer re-emits the explicit form. Both feed the
-// original's four-at-a-time consumer identically and produce the same submit
-// bytes; a real SAVED retail profile always carries the explicit values, so
-// write() reproduces retail-written files byte for byte.
+// Modeling note: a page that stores only a bare weapon name and a page that
+// stores an explicit "<name> -1 -1 -1" group decode to the SAME KitEntry,
+// because a missing value defaults to -1. The writer re-emits the explicit
+// form. Every page the original writes carries the explicit values (its
+// defaults are whole "<name> -1 -1 -1" pages, below), so write() reproduces
+// retail-written files byte for byte.
 struct KitEntry {
     std::string name;
     int32_t ammo_primary = -1;
@@ -99,7 +98,7 @@ struct Record {
     Side blue;
     Side red;
     // +65548, the single-player kit page [orig: byte_256113C, read at @0x5246a8
-    // and @0x5519c3 with the literal "WPN_M4AUTO" fallback].
+    // and @0x5519c3 with default_single_player_page() as the fallback].
     KitPage single_player;
 
     const Side &side(SideId s) const;
@@ -107,8 +106,13 @@ struct Record {
 };
 
 struct File {
-    // Header dwords 3 and 4. Zero across the retail corpus; meaning
-    // unwitnessed, carried so a rewrite preserves them.
+    // Header dwords 2 and 3, the header player.sav carries too: the save
+    // writes the same 16 bytes at the head of both files, the flags word's
+    // bit 0 the latch the player.sav load raises and the extra word's high
+    // byte the byte it accumulates (formats/playersav/player_sav.h); the
+    // weapon.sav load reads them and keeps neither [orig:
+    // PlayerProfile_SaveToFiles @0x54beec; PlayerProfile_LoadAllFromDisk
+    // @0x54f6e7]. Carried so a rewrite preserves them.
     uint32_t flags = 0;
     uint32_t extra = 0;
     std::array<Record, kProfileSlots> slots;
@@ -126,9 +130,23 @@ bool read(const uint8_t *data, size_t size, File &out);
 // input. Always kHeaderBytes + kProfileSlots * kRecordBytes bytes.
 std::vector<uint8_t> write(const File &in);
 
-// The shipped defaults used when weapon.sav is absent
-// [orig: PlayerProfile_InitDefaults @0x54bb40]: both sides class 8, one
-// weapon name per class page, "WPN_M4AUTO" in the single-player page.
+// The default kit pages: the program's eleven static double-NUL page blobs,
+// each a whole "<name> -1 -1 -1" kit, which PlayerProfile_InitDefaults copies
+// into every record [orig: @0x54bced (single player, 0x833BF8), the blue set
+// @0x54bd7f..0x54bdd1 (0x8353F8, 0x8363F8, 0x8373F8, 0x8393F8, 0x83A3F8), the
+// red set @0x54bd1a..0x54bd6c (0x835BF8, 0x836BF8, 0x837BF8, 0x839BF8,
+// 0x83ABF8)]. The single-player page is also the session start's fallback
+// when neither the mission nor the profile carries one [orig:
+// Game_StartMission @0x5246be; Game_ApplySessionSettingsToGlobals @0x5519e4].
+KitPage default_single_player_page();
+// nullptr-free: a class outside [5,9] returns an empty page.
+KitPage default_kit_page(SideId side, uint8_t player_class);
+
+// The defaults when weapon.sav is absent, the record half of
+// [orig: PlayerProfile_InitDefaults @0x54bb40]: both sides class 8, the
+// default kit pages above, the avatar bytes zero (the original seeds them from
+// the character table, EntitySlot_LookupAndPackEntry @0x54bbea; the embedder
+// that holds that table fills them).
 File make_defaults();
 
 // Apply the PLAYER_INFO ACCEPT header edits to one profile slot. Retail writes

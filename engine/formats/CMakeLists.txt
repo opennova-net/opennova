@@ -119,7 +119,8 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/pff/pff.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pff/pff_stream_writer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pff/pff_writer.cpp
-    # playersav — weapon.sav player profile
+    # playersav — the player profile: player.sav and weapon.sav
+    ${CMAKE_CURRENT_SOURCE_DIR}/playersav/player_sav.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/playersav/weapon_sav.cpp
     # ptl — particle effects (.ptl): model + parser + writer + enum/field tables;
     # historical include prefix particle/ (the emitter/effect-scene sim stays in

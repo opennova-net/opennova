@@ -112,11 +112,22 @@ behind=()
 if [[ "$windowed" == "1" ]]; then
   behind=(python "$root/scripts/mcp/game_mcp.py" run --)
 fi
+# The game's own files (the player profile's player.sav and weapon.sav) live in
+# the directory it runs in (LaunchFlags.working_dir), for a GUT run the project
+# (Godot's --path makes it the process's working directory; GUT refuses a
+# --working-dir after its own options). A run starts without them and leaves
+# none behind (git ignores them for a direct single-file run).
+profile_files=("$root/godot/player.sav" "$root/godot/weapon.sav")
+rm -f "${profile_files[@]}"
+rm -f "$root"/godot/expansion/*/weapon.sav 2>/dev/null || true
 set +e
 ${behind[@]+"${behind[@]}"} "$GODOT_BIN" "${display[@]}" --path "$root/godot" \
   -s addons/gut/gut_cmdln.gd -gconfig="$config" -gexit 2>&1 | tee "$log"
 status=${PIPESTATUS[0]}
 set -e
+rm -f "${profile_files[@]}"
+rm -f "$root"/godot/expansion/*/weapon.sav 2>/dev/null || true
+rmdir "$root"/godot/expansion/* "$root/godot/expansion" 2>/dev/null || true
 
 cp "$log" "$reports/gut-$label.log"
 

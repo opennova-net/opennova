@@ -5,6 +5,7 @@
 // F3 Weapon window's held-trigger latch. Plain data with no behavior.
 #pragma once
 
+#include <formats/playersav/player_sav.h> // player.sav: the profile record's session words
 #include <formats/playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
 
 namespace godot {
@@ -19,6 +20,10 @@ struct SimulationPlayerState {
 	opennova::playersav::Record weapon_profile =
 			opennova::playersav::make_defaults().slots[0];
 	bool weapon_profile_loaded = false;
+	// The current player.sav record, whose session words single player's
+	// session takes (unset: a fresh profile's).
+	opennova::playersav::ProfileRecord profile_record;
+	bool profile_record_set = false;
 	// Which side the resident kit buffer was last copied from (-1 = never seeded).
 	int weapon_profile_seeded_side = -1;
 	// Re-entry latch: rebuild_local_player_loadout re-pushes the 0x2F seam once

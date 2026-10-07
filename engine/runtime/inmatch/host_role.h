@@ -21,6 +21,10 @@
 #include <unordered_map>
 #include <vector>
 
+namespace opennova::playersav {
+struct ProfileRecord;
+}
+
 namespace opennova::inmatch {
 
 struct ListenHostState {
@@ -59,7 +63,13 @@ struct HostBringup {
 // [orig: SinglePlayer_StartMission — `multiplayerAttributeFlags_34C = 14854`
 //  @0x561bb7 -> game_settings.mp_attributes @0x561cdb; maxPlayers_3F4 = 1
 //  @0x561c1d -> game_settings.max_players = 1 @0x561cec].
-GameConfig singleplayer_game_config(uint32_t game_type);
+// Outside a session the session words a host takes from game.cfg come from
+// the current player profile record instead: the four charattr restriction
+// words and the difficulty (the record's +1352..+1380; null = a fresh
+// profile's, every one 0) [orig: Game_ApplySessionSettingsToGlobals
+// @0x551F15..0x551F75].
+GameConfig singleplayer_game_config(uint32_t game_type,
+		const playersav::ProfileRecord *profile = nullptr);
 
 class HostRole final : public Role {
 public:

@@ -754,11 +754,26 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int, val
 	# name matches must not dispatch against the new document.
 	if _driver == null or _driver.get_menu_file() != _wired_file:
 		return
+	if kind == "edit" and widget_name.to_upper() == "PLAYERNAME":
+		_on_player_name_changed(value)
+		return
 	if kind != "combo":
 		return
 	var handler: Callable = _combo_handlers.get(widget_name.to_upper(), Callable())
 	if handler.is_valid():
 		handler.call(index, value)
+
+
+# The PLAYERNAME edit's change names the current profile record as the player
+# types: text whose last character the edit keeps (or no text) renames it and
+# clears its no-name flag, a refused last character is cut from the edit
+# (engine: PlayerProfiles::rename).
+func _on_player_name_changed(text: String) -> void:
+	if PlayerProfile.store().rename(text):
+		return
+	var id := _id("PLAYERNAME")
+	if id >= 0:
+		_driver.set_widget_text(id, text.left(text.length() - 1))
 
 
 func _radio_checked(name: String) -> bool:
