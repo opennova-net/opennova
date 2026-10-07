@@ -356,7 +356,7 @@ def viewport_of(args: argparse.Namespace) -> dict:
     # --at a command's (a mission's duplicate goes by [east, north], its paste lands at a point).
     drag: dict = {}
     for name in ("id", "handle", "gesture"):
-        if getattr(args, name) is not None:
+        if getattr(args, name) is not None and not (name == "handle" and args.op == "command"):
             drag[name] = getattr(args, name)
     if args.op == "drag":
         if args.snap is not None:
@@ -391,6 +391,10 @@ def viewport_of(args: argparse.Namespace) -> dict:
             command["ids"] = [int(item) for item in args.ids.split(",") if item.strip()]
         except ValueError as error:
             raise GameMcpError(EXIT_NOT_READ, f"--ids takes record ids, comma-separated, not {args.ids!r}") from error
+    # What a command acts on that is no record (a HUD element's move, resize and set, DI-37).
+    for name in ("item", "field", "value"):
+        if getattr(args, name) is not None:
+            command[name] = getattr(args, name)
     if args.op == "command":
         if args.by is not None:
             command["by"] = parse_pair(args.by, "--by")
@@ -398,9 +402,12 @@ def viewport_of(args: argparse.Namespace) -> dict:
             command["at"] = parse_pair(args.at, "--at")
         if args.mode is not None:
             command["mode"] = args.mode
+        if args.handle is not None:
+            command["handle"] = args.handle
         request["command"] = command
     elif command or args.mode is not None:
-        raise GameMcpError(EXIT_NOT_READ, "--name, --ids and --mode are op command's (--name also op drop's)")
+        raise GameMcpError(EXIT_NOT_READ, "--name, --ids, --mode, --item, --field and --value are op command's (--name "
+                                          "also op drop's)")
     if args.op == "drag":
         request["drag"] = drag
     elif drag:
@@ -875,10 +882,12 @@ def build_parser() -> argparse.ArgumentParser:
     viewport.add_argument("--handle", default=None,
                           help="drag: a menu window's move, left, right, top, bottom, top_left, top_right, bottom_left "
                                "or bottom_right; a model marker's place or axis; a mission entity's move, height or "
-                               "yaw, an area's move, x_min, x_max, y_min or y_max")
+                               "yaw, an area's move, x_min, x_max, y_min or y_max; command resize: a HUD element's "
+                               "corner, top_left, top_right, bottom_left or bottom_right")
     viewport.add_argument("--by", default=None, help="drag: DX,DY from where the picture shows the handle "
                                                      "(--by=-8,4 for a negative one); command: a mission's "
-                                                     "duplicate's way, EAST,NORTH in metres")
+                                                     "duplicate's way, EAST,NORTH in metres; a HUD element's move or "
+                                                     "resize, DX,DY design units")
     viewport.add_argument("--to", default=None, help="drag: X,Y, the point of the picture the handle goes to; drop: "
                                                      "a box's other corner (a mission's area, --reference area)")
     viewport.add_argument("--snap", type=float, default=None,
@@ -891,7 +900,9 @@ def build_parser() -> argparse.ArgumentParser:
                           help="drag: false keeps the gesture open for the next sample (10 s with none ends it)")
     viewport.add_argument("--name", default=None, help="command: an arrange op (align_left, ..., send_to_back) or frame; "
                                                        "a mission's frame, top, ground (the entities set down on the "
-                                                       "ground under them), select_same, duplicate or paste; any "
+                                                       "ground under them), select_same, duplicate or paste; a HUD "
+                                                       "element's move (--by or --at), resize (--handle, --by) or "
+                                                       "set (--field, --value), by its --item; any "
                                                        "canvas's click (--at X,Y, --mode): the selection its canvas's "
                                                        "click makes there; drop: the name --reference names (an item's "
                                                        "id, a path's number)")
@@ -906,6 +917,13 @@ def build_parser() -> argparse.ArgumentParser:
                                                      "a mission's paste's point, a click's")
     viewport.add_argument("--ids", default=None, help="command: the records, comma-separated (the first the one the "
                                                       "others follow)")
+    viewport.add_argument("--item", default=None,
+                          help="command move, resize, set: the HUD element by its token (ammo_count, health, ...; the "
+                               "picked one when left out)")
+    viewport.add_argument("--field", default=None,
+                          help="command set: the HUD element's field by its id (ammocountpos.x, weapon_textcolor.r, "
+                               "huddeclut_wpngrp.level0, fonthud1_hi; an item's fields list them)")
+    viewport.add_argument("--value", default=None, help="command set: the field's value, as text")
     viewport.add_argument("--timeout", type=float, default=120.0)
     viewport.set_defaults(func=cmd_viewport)
 
