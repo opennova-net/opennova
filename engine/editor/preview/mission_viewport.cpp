@@ -357,13 +357,24 @@ ViewportAction MissionViewport::stop_(MissionViewStatus reason) {
 	detail_.clear();
 	scene_.clear();
 	poses_.clear();
+	effects_.close();
+	drawn_ = JsonValue();
 	missing_.clear();
 	ground_ = false;
 	shown_none();
 	return picture_.stop();
 }
 
-ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock &) {
+void MissionViewport::follow_effects_(const SessionView &view, const PreviewClock &clock) {
+	if (!options_.effects) {
+		effects_.close();
+		return;
+	}
+	effects_.refresh(view, scene_, poses_);
+	effects_.play_to(clock.ticks());
+}
+
+ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock &clock) {
 	const SessionView &view = input.view;
 	gesture_open_ = view.documents.gesture_in(path()).open();
 	if (!view.project.open || !view.findings.assets) return stop_(MissionViewStatus::NoProject);
@@ -387,6 +398,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		bound_items_(view);
 		stand_people_(view, poses_.refresh(view, scene_));
 		follow_overlay_(view);
+		follow_effects_(view, clock);
 		picture_.show(key, generation);
 		shown(*document);
 		if (!framed_) {
@@ -414,6 +426,9 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	posed = stand_people_(view, posed) || posed;
 	// The overlay made again where the option or the ground moved (DI-29): an Update gives it the device.
 	const bool overlaid = follow_overlay_(view);
+	// The items' effects where the scene, a catalog or a model moved, played to the clock (DI-31): the device
+	// draws the scene each frame as it stands, no Update asked.
+	follow_effects_(view, clock);
 	// A file the device read moved: the picture made again from the files, over the scene as it is.
 	if (picture_.follow(key, false, files, generation) == PreviewFollow::Found::Files) {
 		fog_reach_ = mission_fog_reach(files, scene_.header());
@@ -468,6 +483,8 @@ bool MissionViewport::report_(const ViewportDeviceReport &report) {
 	picture_.read(report.files);
 	missing_ = report.missing;
 	ground_ = report.surface;
+	// What it drew this frame (the foliage, the lights): read on the wire, moving nothing.
+	drawn_ = report.drawn;
 	return false;
 }
 
@@ -1209,6 +1226,10 @@ io::JsonValue MissionViewport::body_json(const ViewportInput &input) const {
 	// The ground overlay the options ask (DI-29): its legend and extent, null with none asked.
 	body.set("overlay", options_.overlay == MissionGroundOverlay::None ? JsonValue::make_null()
 	                                                                    : mission_overlay_to_json(overlay_));
+	// The items' effects as the start attaches them (DI-31; null while the layer is off), and what the device
+	// last said it drew of the foliage and the lights.
+	body.set("effects", options_.effects ? effects_.to_json() : JsonValue::make_null());
+	body.set("drawn", drawn_);
 	return body;
 }
 
@@ -1239,6 +1260,19 @@ io::JsonValue MissionViewport::items_json(const ViewportInput &input) const {
 			item.set("team", json_number(entity.team));
 			// A person's spawn pose (DI-38).
 			if (const MissionPose *pose = poses_.pose(entity.row)) item.set("pose", mission_pose_json(*pose));
+			// Its item's particle slot as the start attaches it (DI-31).
+			if (const MissionEffectSlot *slot = effects_.slot(entity.row)) {
+				JsonValue effect = JsonValue::make_object();
+				effect.set("effect", json_string(slot->effect));
+				effect.set("point", json_string(slot->point));
+				effect.set("status", json_string(slot->status));
+				JsonValue points = JsonValue::make_array();
+				for (const std::string &point : slot->points) points.push(json_string(point));
+				effect.set("points", std::move(points));
+				effect.set("spawned", json_number(double(slot->spawned)));
+				effect.set("alive", json_number(double(effects_.alive(entity.row))));
+				item.set("effect", std::move(effect));
+			}
 			// What the game grounds it on, as the mission's ground check last found it (DI-28).
 			if (ground_check)
 				if (const MissionGroundVerdict *verdict = ground_check->verdict(document->path(), entity.row))
