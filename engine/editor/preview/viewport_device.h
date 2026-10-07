@@ -90,6 +90,10 @@ struct ViewportPicture {
 	bool pointer = false;
 	float pointer_x = 0.0f;
 	float pointer_y = 0.0f;
+	// The mouse over the picture this frame, whatever the canvas shows there (its own pointer over a handle or
+	// a selection, the game's elsewhere): a pointer held where no canvas has the mouse is not drawn (DI-34: the
+	// menu's canvas holds the game's mouse as its own as it moves).
+	bool hovered = false;
 };
 
 // A device (ADR 0046 S13 V5): what draws one viewport's picture, the Shell's (an offscreen
