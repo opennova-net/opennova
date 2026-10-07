@@ -90,6 +90,12 @@ struct Kind {
 		out.row.scr = form;
 		return out;
 	}
+	// The game's reader of it ends a line at CR LF alone (LineReader), cited where the row is.
+	constexpr Kind lines(LineReader reader) const {
+		Kind out = *this;
+		out.row.line_reader = reader;
+		return out;
+	}
 	// A loose kind's place in an expansion build (ExpansionLoose), cited where the row is.
 	constexpr Kind expansion(ExpansionLoose place) const {
 		Kind out = *this;
@@ -127,6 +133,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::AnimationMap, "animation_map", "Animation map", ArchiveSlot::Resource)
 	        .extensions(kAnimationMap)
+	        .lines(LineReader::AsciiWalk) // [orig: AnimMap_LoadAdmFile @ 0x40ceb4 -> File_ParseASCIIFile]
 	        .edited_by(DocumentTypeId::AnimationMap)
 	        .names_files()
 	        .folder("anims")
@@ -141,6 +148,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::AiProfile, "ai_profile", "AI profile", ArchiveSlot::Resource)
 	        .extensions(kAiProfile)
+	        .lines(LineReader::AsciiWalk) // [orig: AIProfile_LoadOrFind @ 0x45fe45 -> File_ParseASCIIFile]
 	        .edited_by(DocumentTypeId::Text)
 	        .folder("ai")
 	        .about("An AI profile: how a unit the computer runs picks its targets and moves, loaded by the name a placed unit gives.")
@@ -198,6 +206,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::Credits, "credits", "Credits", ArchiveSlot::Localres)
 	        .runtime("credits")
+	        .lines(LineReader::ConfigFile) // [orig: ConfigFile_LoadFromFile @ 0x760a10, its text form]
 	        .edited_by(DocumentTypeId::Credits)
 	        .folder("menus")
 	        .about("The credits the menus scroll.")
@@ -252,6 +261,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::Environment, "environment", "Environment", ArchiveSlot::Resource)
 	        .runtime("environment")
+	        .lines(LineReader::AsciiWalk) // [orig: Environment_LoadTimeOfDayConfig @ 0x57dbeb -> File_ParseASCIIFile]
 	        .edited_by(DocumentTypeId::Environment)
 	        .names_files()
 	        .new_name("newenviro.env")
@@ -308,6 +318,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::Particles, "particles", "Particle effects", ArchiveSlot::Resource)
 	        .runtime("particle")
+	        .lines(LineReader::AsciiWalk) // [orig: CEffectSystem_Init @ 0x5f62f0 / 0x5f6545 -> File_ParseASCIIFile]
 	        .edited_by(DocumentTypeId::Particles)
 	        .names_files()
 	        .folder("particles")
@@ -327,6 +338,7 @@ constexpr AssetKindRow kRows[] = {
 	// Avatars.def and hudpos.def.
 	Kind(AssetKind::ItemDefs, "item_defs", "Item definitions", ArchiveSlot::Localres)
 	        .file("items.def")
+	        .lines(LineReader::AsciiWalk) // [orig: ItemDefs_LoadAndValidate @ 0x4a1e12 -> File_ParseASCIIFile]
 	        .edited_by(DocumentTypeId::Catalog)
 	        .names_files()
 	        .folder("defs")
@@ -334,6 +346,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::WeaponDefs, "weapon_defs", "Weapon definitions", ArchiveSlot::Localres)
 	        .file("weapon.def")
+	        .lines(LineReader::AsciiWalk) // [orig: WeaponDef_LoadAll @ 0x54dd50 -> File_ParseASCIIFile]
 	        .edited_by(DocumentTypeId::Catalog)
 	        .names_files()
 	        .folder("defs")
@@ -341,6 +354,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::AmmoDefs, "ammo_defs", "Ammo definitions", ArchiveSlot::Localres)
 	        .file("ammo.def")
+	        .lines(LineReader::AsciiWalk) // [orig: AmmoDef_LoadAll @ 0x40b0de / 0x40b116 -> File_ParseASCIIFile]
 	        .edited_by(DocumentTypeId::Catalog)
 	        .names_files()
 	        .folder("defs")
@@ -348,6 +362,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::HudPosDefs, "hudpos_defs", "HUD layout", ArchiveSlot::Localres)
 	        .runtime("hudpos")
+	        .lines(LineReader::AsciiWalk) // [orig: HUD_InitOverlaySystem @ 0x5a4931 -> File_ParseASCIIFile]
 	        .edited_by(DocumentTypeId::HudLayout)
 	        .names_files()
 	        .folder("defs")
@@ -355,6 +370,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::HudFxDefs, "hudfx_defs", "HUD effects", ArchiveSlot::Localres)
 	        .file("hudfx.def")
+	        .lines(LineReader::AsciiWalk) // [orig: HUD_InitOverlaySystem @ 0x5a4633 -> File_ParseASCIIFile]
 	        .edited_by(DocumentTypeId::Text)
 	        .names_files()
 	        .folder("defs")
@@ -362,6 +378,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::AvatarDefs, "avatar_defs", "Avatars", ArchiveSlot::Localres)
 	        .runtime("avatar")
+	        .lines(LineReader::AsciiWalk) // [orig: CAvatarDefs_Init @ 0x57b1d5 -> File_ParseASCIIFile]
 	        .edited_by(DocumentTypeId::Text)
 	        .names_files()
 	        .folder("defs")
@@ -369,6 +386,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::SoundProfileDefs, "sound_profile_defs", "Sound profiles", ArchiveSlot::Localres)
 	        .file("sndprof.def")
+	        .lines(LineReader::AsciiWalk) // [orig: SoundProfile_LoadAll @ 0x5274dd -> File_ParseASCIIFile]
 	        .edited_by(DocumentTypeId::SoundProfiles)
 	        .names_files()
 	        .folder("defs")
@@ -376,6 +394,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::CharAttrDefs, "charattr_defs", "Character attributes", ArchiveSlot::Localres)
 	        .file("charattr.def")
+	        .lines(LineReader::ConfigFile) // [orig: CharAttr_LoadFromDef @ 0x412177 -> ConfigFile_LoadFromFile]
 	        .edited_by(DocumentTypeId::Text)
 	        .names_files()
 	        .folder("defs")
@@ -383,6 +402,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::PowerupDefs, "powerup_defs", "Powerup definitions", ArchiveSlot::Localres)
 	        .file("powerup.def")
+	        .lines(LineReader::AsciiWalk) // [orig: PowerUpDef_LoadFromFile @ 0x44338e / 0x4433cc -> File_ParseASCIIFile]
 	        .edited_by(DocumentTypeId::Catalog)
 	        .names_files()
 	        .folder("defs")
