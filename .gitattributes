@@ -56,6 +56,21 @@ assets/**/*.md text eol=lf
 # Blender export: main.mnu names it, so the bundled-menu GUT test reads it.
 assets/newarow1.tga -text -eol filter= diff= merge=
 
+# expansions/ holds the game's expansions, each an editor expansion project on
+# the base game's project assets/ (ADR 0046 T5), stored as assets/ is: small
+# hand-written or edited files are plain git blobs, models, textures, images
+# and sounds ride LFS, the README is ordinary LF text.
+expansions/** -text -eol
+expansions/**/*.3di filter=lfs diff=lfs merge=lfs -text -eol
+expansions/**/*.bad filter=lfs diff=lfs merge=lfs -text -eol
+expansions/**/*.dds filter=lfs diff=lfs merge=lfs -text -eol
+expansions/**/*.mdt filter=lfs diff=lfs merge=lfs -text -eol
+expansions/**/*.pcx filter=lfs diff=lfs merge=lfs -text -eol
+expansions/**/*.png filter=lfs diff=lfs merge=lfs -text -eol
+expansions/**/*.tga filter=lfs diff=lfs merge=lfs -text -eol
+expansions/**/*.wav filter=lfs diff=lfs merge=lfs -text -eol
+expansions/**/*.md text eol=lf
+
 # art/ holds the authoring sources (Blender scenes and their textures, the
 # sounds' recordings) whose exports land in assets/. Every file rides LFS but
 # Markdown.
