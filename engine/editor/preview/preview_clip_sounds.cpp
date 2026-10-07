@@ -368,26 +368,32 @@ void find_clip_sound_waves(ClipSoundFired &fired, const AssetScan &scan) {
 	if (found == 0 && (fired.state == "played" || fired.state == "muted")) fired.state = "no_wave";
 }
 
-ClipSoundFired plan_set_at_origin(const std::string &set, int32_t tick, const std::string &what,
-                                  const ClipSoundSources &sources, const PreviewVec3 &listener,
-                                  audio::SoundSelector &selector) {
+ClipSoundFired plan_set_heard(const std::string &set, int32_t tick, const std::string &what,
+                              const ClipSoundSources &sources, const PreviewHearing &heard,
+                              audio::SoundSelector &selector, uint8_t view_flags) {
 	ClipSoundFired fired;
 	fired.tick = tick;
 	fired.slot = -1;
 	fired.set = set;
-	// Played at the item, the preview's origin, as the camera hears it.
-	PreviewHearing heard;
-	heard.listener[0] = listener.x;
-	heard.listener[1] = listener.y;
-	heard.listener[2] = listener.z;
 	const PreviewPlay play =
-			plan_set_play(sources.banks(), sources.expansion(), set, std::string(), selector, kClipSoundListenerView, &heard);
+			plan_set_play(sources.banks(), sources.expansion(), set, std::string(), selector, view_flags, &heard);
 	fired.bank = play.bank;
 	fired.words = "Tick " + std::to_string(tick) + " (" + what + "): " + play.words;
 	fired.state = !play.found ? "missing" : !play.in_range ? "out_of_range" : play.voices.empty() ? "silent" : "played";
 	for (const PreviewVoice &voice : play.voices)
 		fired.voices.push_back({voice.wave, voice.file, std::string(), voice.pitch_q16, voice.volume});
 	return fired;
+}
+
+ClipSoundFired plan_set_at_origin(const std::string &set, int32_t tick, const std::string &what,
+                                  const ClipSoundSources &sources, const PreviewVec3 &listener,
+                                  audio::SoundSelector &selector) {
+	// Played at the item, the preview's origin, as the camera hears it.
+	PreviewHearing heard;
+	heard.listener[0] = listener.x;
+	heard.listener[1] = listener.y;
+	heard.listener[2] = listener.z;
+	return plan_set_heard(set, tick, what, sources, heard, selector, kClipSoundListenerView);
 }
 
 std::vector<std::string> clip_event_sound_words(uint32_t word, const ClipSoundOptions &options,
