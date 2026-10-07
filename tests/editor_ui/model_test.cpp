@@ -392,6 +392,62 @@ void test_weapon_fire_view() {
 	CHECK(model->weapon().range().gestures().empty(), "Clear forgets the gestures");
 }
 
+// An ammo record's Preview (DI-23, preview/ammo_impacts): its impact rows drawn as a board (each surface's row, the
+// bank's place where the ammo authors none, the scar), and Fire firing the ammo alone at the range's target.
+void test_ammo_board_view() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_ammo_board");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(session.handle(request::new_project(dir.file("project"), "Ammo")), "a project");
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const SessionView &v = session.view();
+	CHECK(editor_test::write_text(v.project.root + "/defs/ammo.def",
+	                              editor_test::crlf("ammo AT_NULL\nend\nammo AMMO_UI\n\tvelocity 600\n\tmax_age 2\n"
+	                                                "\tscar_type 1\n\teffects_table\n\t\tmetal Spark IMP_METAL 15\n\tend\nend\n")),
+	      "the ammo");
+	editor_test::handle_to_end(session, request::rescan());
+	while (v.activity.validation.running) session.poll();
+	DrawnDevices devices;
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	const auto serve = [&]() {
+		EditorRequest request;
+		while (ui.windows.take_request(request)) session.handle(request);
+		devices.sync(session.viewports(), v);
+	};
+	const auto settle = [&](int frames) {
+		for (int i = 0; i < frames; ++i) {
+			serve();
+			ui.frames(1);
+		}
+		serve();
+	};
+	const std::string path = "defs/ammo.def";
+	session.handle(request::open_document(path));
+	const Document *table = session.document_for(path);
+	CHECK(table && table->rows().size() == 2, "the table open");
+	if (!table || table->rows().size() != 2) return;
+	session.handle(request::select_record(path, NodeAddress{table->rows()[1]->id, table->rows()[1]->kind, 0}));
+	session.handle(request::set_viewport(path, R"({"kind": "definition", "clock": {"playing": false, "ticks": 5}})"));
+	settle(3);
+	const auto *model = dynamic_cast<const DefinitionViewport *>(session.viewports().find(path, ViewportKind::Definition));
+	CHECK(model && model->ammo_record() && model->impacts().found, "the record is an ammo's board");
+	if (!model) return;
+	const std::string text = logged_frame(ui);
+	CHECK(text.find("Impact rows by surface (20)") != std::string::npos, "the board's twenty surfaces");
+	CHECK(text.find("Spark") != std::string::npos && text.find("IMP_METAL") != std::string::npos, "the metal row");
+	CHECK(text.find("bank place 6") != std::string::npos, "a row it lacks: the bank's place");
+	CHECK(text.find("scorch1.tga") != std::string::npos && text.find("bhole1.tga") != std::string::npos, "the scars");
+	const ImGuiID scope = item_id(Ui::window_id("Preview"), {"definition", path.c_str()});
+	ui.activate(item_id(scope, {"Fire"}));
+	settle(1);
+	CHECK(model->weapon().range().ammo_alone() && model->weapon().range().gestures().size() == 1,
+	      "Fire: the ammo fired alone on the clock's tick");
+}
+
 // Place in mission on the model preview (DI-12, preview/model_placement) over a real session: with the mission
 // open before the model, the toolbar's button raises one EditInViewport of the model's place_in_mission, which
 // makes the crate's item in items.def and arms the mission's Place tool with it, the mission made active; for a
@@ -495,6 +551,7 @@ void run_model_tests() {
 	test_damage_popup();
 	test_definition_view();
 	test_weapon_fire_view();
+	test_ammo_board_view();
 	test_place_in_mission();
 }
 

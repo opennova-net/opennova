@@ -1524,3 +1524,111 @@ func test_the_placed_models_light_the_scene() -> void:
 	lights = _state().get("body", {}).get("drawn", {}).get("lights", {})
 	assert_eq(int(lights.get("pool", -1)), 0, "the layer off: no light: %s" % str(lights))
 	assert_eq(int(_state().get("builds", 0)), builds, "an Update, never a build")
+
+
+## DI-23: the Shoot tool. A click's `shoot` at the picture's middle (where the device's ray meets the ground) fires
+## the picked ammo there, the impact as the game plays it in the body's shots (the row for the class the game reads
+## there), its effect spawned in the items' effect scene (DI-31's, the device's one particle renderer drawing it);
+## a shot at an item's place from above stops on its faces and scars it, the device's ScarPresenter drawing the
+## scar; Clear shots drops them, their effects with them.
+func test_the_shoot_tool_plays_its_impacts() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state).left(300))
+	var root: String = _seam.get_project_root()
+	var rows := ""
+	for tag in ["obj", "dirt", "grass", "snow", "cement", "sand", "packeddirt", "water", "railroad", "mud", "ice",
+			"quicksand", "stone", "wood", "metal", "glass", "cloth", "foliage", "hmetal", "flesh"]:
+		rows += "\t\t%s Puff S_HIT 15\n" % tag
+	_write(root.path_join("defs/ammo.def"), TestFs.crlf("ammo AT_NULL\nend\nammo AMMO_T\n\tvelocity 800\n\tmax_age 2\n"
+			+ "\tweight_in_grains 62\n\tscar_type 1\n\teffects_table\n" + rows + "\tend\nend\n").to_utf8_buffer())
+	var ptl := "[effectdef]\n{\n\tid = Puff;\n\tpdefs = PuffDot;\n}\n\n[particledef]\n{\n\tid = PuffDot;\n\temit_dur = 30;\n"
+	ptl += "\temit_rate = 40;\n\temit_burst = 1;\n\tage = 1.0;\n\tscale = 1.0;\n\tspeed = 1.5;\n\tspread = 40;\n"
+	ptl += "\tgraphic1 = particle_dot.tga, blend;\n\tg1_alpha = 1;\n\tg1_scale = 1;\n}\n\n"
+	_write(root.path_join("particles/puff.ptl"), ptl.to_utf8_buffer())
+	_copy_fixture("cbin/particle_dot.tga", root.path_join("particles/particle_dot.tga"))
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps")
+	assert_true(_change({"kind": "mission", "options": {"tool": "shoot", "ammo": "AMMO_T"}}))
+	state = _state()
+	assert_eq(String(state.get("options", {}).get("tool", "")), "shoot")
+	assert_true(String(state.get("body", {}).get("hint", "")).begins_with("Shoot AMMO_T"), str(state.get("body", {}).get("hint")))
+	var device := _device(state)
+	assert_not_null(device)
+	if device == null:
+		return
+	# A click's shot at the picture's middle: the ground there.
+	var size: Dictionary = state.get("device", {})
+	var shot: Dictionary = _ask({"kind": "edit_in_viewport", "command": {"name": "shoot", "kind": "mission",
+			"at": [float(size.get("width", 1024)) * 0.5, float(size.get("height", 768)) * 0.5]}})
+	assert_true(bool(shot.get("outcome", {}).get("done", false)), str(shot).left(300))
+	var impact := {}
+	for _frame in 300:
+		_app.pump()
+		await get_tree().process_frame
+		for event: Variant in _state().get("body", {}).get("shots", {}).get("events", []):
+			if String((event as Dictionary).get("kind", "")) == "impact":
+				impact = event
+		if not impact.is_empty():
+			break
+	assert_false(impact.is_empty(), "the shot stops: %s" % str(_state().get("body", {}).get("shots", {})).left(400))
+	if impact.is_empty():
+		return
+	assert_eq(int(impact.get("tag", -1)), int(impact.get("surface", -9)) + 4, "the row for the class struck")
+	assert_eq(String(impact.get("effect", "")), "Puff")
+	assert_eq(device.msaa_3d, Viewport.MSAA_DISABLED, "single-sampled, as the game's view draws (DI-31)")
+	var renderers := device.find_children("*", "ParticleRenderer", true, false)
+	assert_eq(renderers.size(), 1, "one particle renderer: the shots' effects are the items' scene's")
+	var spawned: Array = _state().get("body", {}).get("shots", {}).get("effects", [])
+	assert_false(spawned.is_empty(), "the impact's effect in the scene")
+	if not spawned.is_empty():
+		assert_eq(String((spawned[0] as Dictionary).get("effect", "")), "Puff")
+		assert_eq(String((spawned[0] as Dictionary).get("defined_in", "")), "particles/puff.ptl")
+	# A shot at an item from above: its faces stop the round, a scar drawn on it.
+	var item := _first_item(state)
+	assert_false(item.is_empty())
+	if item.is_empty():
+		return
+	# The fixture's item stands buried: set down on the ground first (a scar is written above the water alone).
+	assert_true(bool(_ask({"kind": "edit_in_viewport", "command": {"name": "ground", "kind": "mission",
+			"ids": [int(item["id"])]}}).get("outcome", {}).get("done", false)))
+	item = _mark_of(_state(), int(item["id"]))
+	var at := _vector(item.get("at"))
+	assert_true(_change({"kind": "mission", "shot": {"ammo": "AMMO_T", "at": [at.x, at.y, at.z],
+			"eye": [at.x, at.y, at.z + 60.0]}, "clock": {"playing": true}}))
+	var scars := device.find_children("ShotScars", "ScarPresenter", true, false)
+	assert_false(scars.is_empty(), "the shots' ScarPresenter")
+	if scars.is_empty():
+		return
+	var presenter := scars[0] as ScarPresenter
+	var shots := {}
+	for _frame in 300:
+		_app.pump()
+		await get_tree().process_frame
+		shots = _state().get("body", {}).get("shots", {})
+		if int(shots.get("scars", 0)) > 0 and presenter.get_stats_record().world_surfaces > 0:
+			break
+	assert_gt(int(shots.get("scars", 0)), 0, "the item scarred: %s" % str(shots.get("events", [])).left(600))
+	assert_gt(presenter.get_stats_record().world_surfaces, 0, "the game's ScarPresenter draws it")
+	# Clear shots: nothing of them stands.
+	assert_true(bool(_ask({"kind": "edit_in_viewport", "command": {"name": "clear_shots", "kind": "mission"}})
+			.get("outcome", {}).get("done", false)))
+	for _frame in 5:
+		_app.pump()
+		await get_tree().process_frame
+	assert_eq(_state().get("body", {}).get("shots", {}).get("shots", [1]).size(), 0)
+	assert_eq(_state().get("body", {}).get("shots", {}).get("effects", [1]).size(), 0, "their effects gone")
+	# A shot after the clear runs again over the mission (what it fires in configured afresh).
+	assert_true(_change({"kind": "mission", "shot": {"ammo": "AMMO_T", "at": [at.x, at.y, at.z],
+			"eye": [at.x, at.y, at.z + 60.0]}, "clock": {"playing": true}}))
+	var again := false
+	for _frame in 300:
+		_app.pump()
+		await get_tree().process_frame
+		for event: Variant in _state().get("body", {}).get("shots", {}).get("events", []):
+			again = again or String((event as Dictionary).get("kind", "")) == "impact"
+		if again:
+			break
+	assert_true(again, "a shot after the clear stops: %s" % str(_state().get("body", {}).get("shots", {})).left(400))

@@ -27,6 +27,7 @@
 #include <base/io/strutil.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/preview/canvas_half.h>
+#include <editor/preview/ammo_impacts.h>
 #include <editor/preview/definition_viewport.h>
 #include <editor/preview/viewport_json.h>
 #include <editor/preview/viewports.h>
@@ -207,8 +208,8 @@ struct WeaponProject {
 		const AssetEntry *entry = scan ? scan->find(name) : nullptr;
 		return entry ? entry->relative_path : "defs/" + name;
 	}
-	bool select(const std::string &name) {
-		const std::string file = at("weapon.def");
+	bool select(const std::string &name) { return select_in(at("weapon.def"), name); }
+	bool select_in(const std::string &file, const std::string &name) {
 		session.handle(request::open_document(file));
 		const DocumentBase *opened = session.document_for(file);
 		const Document *table = opened ? records_of(*opened) : nullptr;
@@ -622,6 +623,79 @@ int test_wire() {
 	return 0;
 }
 
+// An ammo record (DI-23): its impact rows as a board, each surface's row as the game picks it (the ammo's own, else
+// ammo def 0's bank at the tag's place, here AT_NULL's, which holds none), the scar each leaves on an object's face;
+// the envelope's impacts; a row played (`impact`): one round fired alone at a face of it, as the game fires an ammo
+// for a soldier (its ai_launcheffect, the round, the face's row, its scar); the gestures an ammo alone refuses.
+int test_an_ammo_record() {
+	WeaponProject project;
+	TEST_EXPECT(project.made);
+	if (!project.made) return 1;
+	TEST_EXPECT(project.select_in(project.at("ammo.def"), "AMMO_TEST"));
+	const DefinitionViewport *viewport = project.viewport();
+	TEST_EXPECT(viewport && viewport->view_status() == DefinitionViewStatus::Ready && viewport->ammo_record() &&
+	            viewport->range_shown());
+	if (!viewport || !viewport->ammo_record()) return 1;
+	const AmmoImpactBoard &board = viewport->impacts();
+	TEST_EXPECT(board.found && board.ammo == "AMMO_TEST" && board.surfaces.size() == 20 && board.others.size() == 4 &&
+	            board.null_ammo == "AT_NULL" && board.null_rows == 0 && board.scar_type == 1);
+	if (board.surfaces.size() != 20) return 1;
+	// Dirt (class 1, tag 5): its own row. Grass (class 2, tag 6): it authors none, so the game plays AT_NULL's bank
+	// at place 6, which holds nothing. Metal (class 14, tag 18): its own. Null (class 0, tag 4): its obj row.
+	TEST_EXPECT(board.surfaces[1].tag == 5 && board.surfaces[1].pick.from == world::ImpactRowFrom::Own &&
+	            board.surfaces[1].pick.effect == "Hit" && board.surfaces[1].pick.sound == "IMP_DIRT");
+	TEST_EXPECT(board.surfaces[2].tag == 6 && board.surfaces[2].pick.from == world::ImpactRowFrom::NullBank &&
+	            board.surfaces[2].pick.bank_tag == 0 && board.surfaces[2].pick.effect.empty() &&
+	            board.surfaces[2].pick.sound.empty());
+	TEST_EXPECT(ammo_impact_from_words(board, board.surfaces[2]).find("AT_NULL's bank at place 6") != std::string::npos);
+	TEST_EXPECT(board.surfaces[14].tag == 18 && board.surfaces[14].pick.effect == "Spark" &&
+	            board.surfaces[14].pick.sound == "IMP_METAL");
+	TEST_EXPECT(board.surfaces[0].tag == 4 && board.surfaces[0].pick.effect == "Hit");
+	// The scars: the ring scar's scorch1..4 at 0.125 m on any face, the glass hole at 0.0625 m on glass (15).
+	TEST_EXPECT(board.surfaces[1].scar == 1 && board.surfaces[1].scar_textures.size() == 4 &&
+	            board.surfaces[1].scar_textures[0] == "scorch1.tga" && std::fabs(board.surfaces[1].scar_radius - 0.125f) < 1e-6f);
+	TEST_EXPECT(board.surfaces[15].scar == 18 && board.surfaces[15].scar_textures.size() == 1 &&
+	            board.surfaces[15].scar_textures[0] == "bhole1.tga" && std::fabs(board.surfaces[15].scar_radius - 0.0625f) < 1e-6f);
+	// The envelope.
+	JsonValue shown = project.json();
+	const JsonValue *body = shown.get("body");
+	const JsonValue *impacts = body ? body->get("impacts") : nullptr;
+	TEST_EXPECT(impacts && impacts->get_string("null_ammo", "") == "AT_NULL" && impacts->get("surfaces") &&
+	            impacts->get("surfaces")->array.size() == 20);
+	if (impacts && impacts->get("surfaces") && impacts->get("surfaces")->array.size() == 20) {
+		const JsonValue &metal = impacts->get("surfaces")->array[14];
+		const JsonValue &grass = impacts->get("surfaces")->array[2];
+		TEST_EXPECT(metal.get_string("effect", "") == "Spark" && metal.get_string("from", "") == "own" &&
+		            metal.get_string("row", "") == "metal" && metal.get_string("words", "") == "Metal");
+		TEST_EXPECT(grass.get_string("from", "") == "bank" && grass.get_number("bank_tag", -1) == 0 &&
+		            !grass.get_bool("played", true));
+	}
+	// A row played: one round fired alone at a metal face, the face's row played there.
+	TEST_EXPECT(project.set(R"({"impact": "metal"})"));
+	TEST_EXPECT(project.hold(20));
+	viewport = project.viewport();
+	const WeaponRange &range = viewport->weapon().range();
+	TEST_EXPECT(range.ammo_alone() && range.ready() && range.shots() == 1 && range.target().tag == 18);
+	const std::vector<WeaponRangeEvent> impacted = events_of(range, Kind::Impact);
+	TEST_EXPECT(impacted.size() == 1 && impacted[0].tag == 18 && impacted[0].effect == "Spark" && impacted[0].set == "IMP_METAL");
+	const std::vector<WeaponRangeEvent> launched = events_of(range, Kind::Launch);
+	TEST_EXPECT(launched.size() == 1 && launched[0].effect == "Flash");
+	TEST_EXPECT(range.scar_count() == 1);
+	TEST_EXPECT(!spawns_of(*viewport, "impact").empty());
+	// A row the ammo lacks plays the bank's: nothing here.
+	TEST_EXPECT(project.set(R"({"impact": "grass"})"));
+	TEST_EXPECT(project.hold(20));
+	const std::vector<WeaponRangeEvent> on_grass = events_of(project.viewport()->weapon().range(), Kind::Impact);
+	TEST_EXPECT(on_grass.size() == 1 && on_grass[0].tag == 6 && on_grass[0].effect.empty() && on_grass[0].set.empty());
+	// An ammo alone has no weapon to reload, scope or switch.
+	TEST_EXPECT(project.set(R"({"gesture": "reload"})"));
+	TEST_EXPECT(project.hold(25));
+	TEST_EXPECT(!events_of(project.viewport()->weapon().range(), Kind::Refused).empty());
+	TEST_EXPECT(project.refusal(R"({"impact": "move"})").find("impact is") != std::string::npos);
+	std::printf("test_an_ammo_record passed\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -634,6 +708,7 @@ int main() {
 	TEST_EXPECT(test_the_sounds() == 0);
 	TEST_EXPECT(test_third_person() == 0);
 	TEST_EXPECT(test_wire() == 0);
+	TEST_EXPECT(test_an_ammo_record() == 0);
 	std::printf("editor_weapon_fire OK\n");
 	return 0;
 }
