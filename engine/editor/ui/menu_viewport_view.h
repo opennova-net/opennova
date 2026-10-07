@@ -22,7 +22,10 @@ namespace opennova::editor {
 // from the right-click menu; the middle button or Space pans, Ctrl+wheel zooms about the mouse. With
 // Pointer on (DI-08) the picture draws the game's pointer at the mouse where the canvas shows none of its
 // own, the system pointer hidden over it, and the toolbar names it with a jump to the window whose CURSOR
-// it is (no pointer: the system one stays and the toolbar says the game shows none).
+// it is (no pointer: the system one stays and the toolbar says the game shows none). Edit and Try lead the
+// toolbar (DI-35): in Try the picture is the game's menu, its clicks and keys the game's (the menu's
+// runtime, menu_try.h), the toolbar's Reset taking it back to where it started, beside the screens it went
+// through and what the game would have done last.
 class MenuViewportView final : public ViewportView {
 public:
 	MenuViewportView();
@@ -31,6 +34,8 @@ public:
 protected:
 	void draw_ready(Workspace &workspace, const ViewportModel &model, ViewportContext &context) override;
 	bool draws_pointer(const ViewportModel &model, const ViewportContext &context, const CanvasInput &in) override;
+	// In Try mode the picture's press is the game's (DI-35).
+	bool game_input(const ViewportModel &model) const override;
 
 private:
 	struct Tools;
