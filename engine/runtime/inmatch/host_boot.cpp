@@ -30,20 +30,26 @@ ServerTextTable read_host_server_text(const mission::BootFileSource &files) {
 
 namespace {
 
-// The mission's .env with the BMS override layer, and the water plane by its
-// witnessed precedence (the BMS override, the .trn, the .env), resolved onto
-// the world before the boot's PreMission pass.
+// The mission's environment (its .trn, overcast.def and its .env) with the BMS
+// override layer, and the water plane by its witnessed precedence (the BMS
+// override, the .env, the .trn), resolved onto the world before the boot's
+// PreMission pass.
 void load_environment_and_water(const mission::BootFileSource &files,
 		mission::MissionKernel &kernel, HostBoot &boot) {
 	const mission::MissionInfo info = mission::mission_info(kernel.mission);
-	// A .env that is not there is skipped and the mission starts on the
-	// engine's defaults (env::load_mission_env carries the witness).
-	std::vector<uint8_t> env_bytes;
-	const bool exists = !info.environment.empty() && files.valid() &&
-			files.read_file(info.environment + ".env", env_bytes);
-	const std::string env_text(env_bytes.begin(), env_bytes.end());
-	boot.env_config = env::Config{};
-	const bool env_loaded = env::load_mission_env(exists ? &env_text : nullptr, boot.env_config);
+	// The time-of-day load's three files; a .env that is not there is skipped
+	// and the mission starts on the earlier passes' globals (env::load_mission_env
+	// carries the witness).
+	const env::EnvTextReader read = [&files](const std::string &name, std::string &text) {
+		std::vector<uint8_t> bytes;
+		if (!files.valid() || !files.read_file(name, bytes)) return false;
+		text.assign(bytes.begin(), bytes.end());
+		return true;
+	};
+	env::MissionEnv loaded;
+	const bool env_loaded = env::read_mission_env(read, info.terrain.empty() ? std::string() : info.terrain + ".trn",
+			info.environment.empty() ? std::string() : info.environment + ".env", loaded);
+	boot.env_config = std::move(loaded.config);
 	// [orig: Game_LoadTerrainDuringConnect @0x520710 -- the attrib-gated
 	//  water / fog / fog-colour overrides over the loaded .env]
 	const env::BmsEnvOverrides overrides = env::bms_env_overrides_from_header(

@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -74,26 +75,129 @@ int main() {
 	// pre-parse defaults with no keyframe [orig: Environment_LoadTimeOfDayConfig @ 0x57dca3;
 	// Environment_InitDefaults @ 0x57c010]; one that is there parses over them.
 	{
-		opennova::env::Config mission;
-		mission.fog_level = 1.0f;
-		mission.keyframes.resize(3);
-		const bool skipped = !opennova::env::load_mission_env(nullptr, mission);
+		using opennova::env::MissionEnv;
+		using opennova::env::MissionEnvTexts;
+		MissionEnv loaded;
+		loaded.config.fog_level = 1.0f;
+		loaded.config.keyframes.resize(3);
+		const bool skipped = !opennova::env::load_mission_env(MissionEnvTexts{}, loaded);
+		const opennova::env::Config &mission = loaded.config;
 		const opennova::env::Config defaults;
-		if (!expect(skipped && mission.keyframes.empty() && near(mission.fog_level, 1024.0f) &&
+		if (!expect(skipped && !loaded.environment && mission.keyframes.empty() && near(mission.fog_level, 1024.0f) &&
 		                    mission.fog_type == 1 && mission.sky_map1 == "cld_day1.pcx" &&
 		                    mission.sun_3di == "msun.3di" && mission.curtime == defaults.curtime &&
-		                    near(mission.water_murk, 0.8f) && near(mission.iris_percent, 50.0f),
+		                    near(mission.water_murk, 0.8f) && near(mission.iris_percent, 50.0f) &&
+		                    loaded.overcast.keyframes.empty(),
 		            "a missing mission .env leaves the engine defaults and no keyframe"))
 			return 1;
 		const std::string empty;
-		if (!expect(opennova::env::load_mission_env(&empty, mission) && mission.keyframes.empty() &&
-		                    near(mission.fog_level, 1024.0f),
+		MissionEnvTexts texts;
+		texts.environment = &empty;
+		if (!expect(opennova::env::load_mission_env(texts, loaded) && loaded.environment &&
+		                    loaded.config.keyframes.empty() && near(loaded.config.fog_level, 1024.0f),
 		            "an empty mission .env parses to the same defaults"))
 			return 1;
 		const std::string authored = "fog_level 640\r\nfog_type 2\r\n";
-		if (!expect(opennova::env::load_mission_env(&authored, mission) && near(mission.fog_level, 640.0f) &&
-		                    mission.fog_type == 2 && mission.sky_map1 == "cld_day1.pcx",
+		texts.environment = &authored;
+		if (!expect(opennova::env::load_mission_env(texts, loaded) && near(loaded.config.fog_level, 640.0f) &&
+		                    loaded.config.fog_type == 2 && loaded.config.sky_map1 == "cld_day1.pcx",
 		            "a mission .env parses over the defaults"))
+			return 1;
+	}
+
+	// The terrain's pass (env #43): the parser reads the .trn first, then overcast.def into the
+	// same table, then the .env, one set of globals under all three [orig:
+	// Environment_LoadTimeOfDayConfig @ 0x57db30, @ 0x57dbeb, @ 0x57dc3b, @ 0x57dcbf]. A shipped
+	// terrain's water_rgb and water_murk stand where its .env writes neither; the .env's win where
+	// it writes them; the envscale read last scales what follows it; the .trn's keyframes and
+	// overcast.def's are the overcast table, the .env's the mission's; the terrain's own keys
+	// (polytrn_*, terrain_creator, its foliage blocks) are no keyword of the parser.
+	{
+		using opennova::env::MissionEnv;
+		using opennova::env::MissionEnvTexts;
+		const std::string trn = "terrain_name     \"Dvxi5\"\r\nterrain_creator  \"Brophy\"\r\n"
+		                        "water_height     21         ;default, if zero will take from mission\r\n"
+		                        "polytrn_colormap         Dvxi5_c.tga\r\n"
+		                        "water_rgb \t\t 108,81,48\r\nwater_murk  \t\t .3\r\n"
+		                        "foliage\r\n  graphic mveg5.3di\r\n  match 254\r\nend\r\n";
+		const std::string env = "fog_level 640\r\nwater_rgb 56,59,39\r\n"
+		                        "tod_begin 1200\r\n  sun_rgb 10,20,30\r\ntod_end\r\n";
+		MissionEnv loaded;
+		MissionEnvTexts texts;
+		texts.terrain = &trn;
+		texts.environment = &env;
+		if (!expect(opennova::env::load_mission_env(texts, loaded) && near(loaded.config.water_murk, 0.3f) &&
+		                    near(loaded.config.water_rgb.r, 56.0f / 255.0f) &&
+		                    near(loaded.config.water_rgb.b, 39.0f / 255.0f) && loaded.config.water_height_set &&
+		                    near(loaded.config.water_height, 21.0f) && near(loaded.config.fog_level, 640.0f) &&
+		                    loaded.config.keyframes.size() == 1 && loaded.config.name == "Untitled",
+		            "the .trn's murk and height stand under a .env that writes neither; its water_rgb is the .env's"))
+			return 1;
+		const std::string env_writes = "water_murk 0.6\r\nwater_height 30\r\n";
+		texts.environment = &env_writes;
+		if (!expect(opennova::env::load_mission_env(texts, loaded) && near(loaded.config.water_murk, 0.6f) &&
+		                    near(loaded.config.water_height, 30.0f) && near(loaded.config.water_rgb.r, 108.0f / 255.0f),
+		            "the .env's murk and height are over the .trn's; the .trn's water_rgb stands"))
+			return 1;
+		const std::string pinned_murk = "water_murk 1.0\r\n";
+		texts.terrain = &pinned_murk;
+		texts.environment = nullptr;
+		if (!expect(!opennova::env::load_mission_env(texts, loaded) && !loaded.environment &&
+		                    near(loaded.config.water_murk, 0.99f) && loaded.config.keyframes.empty(),
+		            "a missing .env leaves the .trn's murk (clamped at 0.99) over the defaults"))
+			return 1;
+		// The overcast table: the .trn's blocks then overcast.def's, one table, sorted; the .env's
+		// own table starts empty; the .trn's envscale scales the .env's colours where the .env
+		// writes none.
+		const std::string trn_blocks = "envscale 2\r\ntod_begin 1800\r\n sun_rgb 1,1,1\r\ntod_end\r\n";
+		const std::string overcast = "tod_begin 0600\r\n sun_rgb 2,2,2\r\ntod_end\r\n";
+		const std::string env_table = "tod_begin 1200\r\n sun_rgb 100,100,100\r\ntod_end\r\n";
+		texts.terrain = &trn_blocks;
+		texts.overcast = &overcast;
+		texts.environment = &env_table;
+		if (!expect(opennova::env::load_mission_env(texts, loaded) && loaded.overcast.keyframes.size() == 2 &&
+		                    loaded.overcast.keyframes[0].time == 600 && loaded.overcast.keyframes[1].time == 1800 &&
+		                    near(loaded.overcast.envscale, 2.0f) && loaded.config.keyframes.size() == 1 &&
+		                    loaded.config.keyframes[0].time == 1200 && near(loaded.config.envscale, 2.0f),
+		            "the overcast table is the .trn's and overcast.def's blocks; the .env's own"))
+			return 1;
+		// A naked colour line in the .trn lands on the scratch keyframe the .env's pass goes on
+		// over, seeded once a load; with the .env skipped the blocks keep their defaults.
+		const std::string trn_naked = "sky_rgb 1,2,3\r\n";
+		texts.terrain = &trn_naked;
+		texts.overcast = nullptr;
+		const std::string env_naked = "sun_rgb 4,5,6\r\n";
+		texts.environment = &env_naked;
+		if (!expect(opennova::env::load_mission_env(texts, loaded) &&
+		                    near(loaded.config.scratch.sky.b, 3.0f / 255.0f) &&
+		                    near(loaded.config.scratch.sun.b, 6.0f / 255.0f),
+		            "the scratch keyframe carries the .trn's naked colour into the .env's pass"))
+			return 1;
+		texts.environment = nullptr;
+		const opennova::env::Keyframe seed = opennova::env::scratch_keyframe_defaults();
+		if (!expect(!opennova::env::load_mission_env(texts, loaded) &&
+		                    near(loaded.config.scratch.sky.b, seed.sky.b),
+		            "a skipped .env leaves the scratch's seed"))
+			return 1;
+		// The reader's names: the .trn and the .env as named, overcast.def by kOvercastFile.
+		std::vector<std::string> asked;
+		const opennova::env::EnvTextReader read = [&](const std::string &name, std::string &text) {
+			asked.push_back(name);
+			if (name == "Dvxi5.trn") text = trn;
+			else if (name == "full_00.env") text = env;
+			else return false;
+			return true;
+		};
+		if (!expect(opennova::env::read_mission_env(read, "Dvxi5.trn", "full_00.env", loaded) &&
+		                    asked.size() == 3 && asked[0] == "Dvxi5.trn" &&
+		                    asked[1] == opennova::env::kOvercastFile && asked[2] == "full_00.env" &&
+		                    near(loaded.config.water_murk, 0.3f),
+		            "the reader reads the .trn, overcast.def and the .env in the load's order"))
+			return 1;
+		asked.clear();
+		if (!expect(!opennova::env::read_mission_env(read, "", "", loaded) && asked.size() == 1 &&
+		                    near(loaded.config.water_murk, 0.8f),
+		            "no names: overcast.def alone, the defaults standing"))
 			return 1;
 	}
 

@@ -11,6 +11,13 @@
 #include <editor/preview/canvas_gesture.h>
 #include <editor/preview/model_preview_camera.h>
 
+namespace opennova {
+class FileSource;
+namespace env {
+struct MissionEnv;
+}
+} // namespace opennova
+
 namespace opennova::editor {
 
 class ViewportDevice;
@@ -84,6 +91,11 @@ struct MissionSceneHeader {
 };
 bool operator==(const MissionSceneHeader &a, const MissionSceneHeader &b);
 inline bool operator!=(const MissionSceneHeader &a, const MissionSceneHeader &b) { return !(a == b); }
+
+// The environment a mission's load makes from `files` (env::read_mission_env): the header's terrain's .trn,
+// overcast.def, then its .env over them, each as the project holds it (an open document standing in). False
+// when the .env was skipped (the header names none, or the project lacks it).
+bool mission_environment(const FileSource &files, const MissionSceneHeader &header, env::MissionEnv &out);
 
 // What a patch found changed, in the picture's terms: a header field the device reads; an entity
 // added, removed or with another item, group or attributes (the device places again what differs); an entity's
