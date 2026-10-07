@@ -389,6 +389,39 @@ void ViewportCanvas::badge(const std::string &text) {
 	paint.PopClipRect();
 }
 
+void ViewportCanvas::legend(const std::string &title, const std::vector<LegendRow> &rows) {
+	if (title.empty() && rows.empty())
+		return;
+	ImDrawList &paint = *ImGui::GetWindowDrawList();
+	const float line = ImGui::GetTextLineHeight();
+	const float swatch = line * 0.8f;
+	const float gap = kBadgePad * 2.0f;
+	// The title may run to several lines.
+	const ImVec2 heading = title.empty() ? ImVec2(0.0f, 0.0f) : ImGui::CalcTextSize(title.c_str());
+	float width = heading.x;
+	for (const LegendRow &row : rows)
+		width = std::max(width, swatch + gap + ImGui::CalcTextSize(row.text.c_str()).x);
+	const float height = heading.y + line * float(rows.size());
+	const ImVec2 at(origin_.x + kBadgeInset, surface_max_.y - kBadgeInset - height);
+	paint.PushClipRect(
+			ImVec2(surface_min_.x, surface_min_.y), ImVec2(surface_max_.x, surface_max_.y), true);
+	paint.AddRectFilled(ImVec2(at.x - kBadgePad, at.y - kBadgePad),
+			ImVec2(at.x + width + kBadgePad, at.y + height + kBadgePad), kBadgeFill);
+	float y = at.y;
+	if (!title.empty()) {
+		paint.AddText(ImVec2(at.x, y), kBadgeText, title.c_str());
+		y += heading.y;
+	}
+	for (const LegendRow &row : rows) {
+		const float top = y + (line - swatch) * 0.5f;
+		paint.AddRectFilled(ImVec2(at.x, top), ImVec2(at.x + swatch, top + swatch),
+				IM_COL32(row.rgb[0], row.rgb[1], row.rgb[2], 255));
+		paint.AddText(ImVec2(at.x + swatch + gap, y), kBadgeText, row.text.c_str());
+		y += line;
+	}
+	paint.PopClipRect();
+}
+
 void ViewportCanvas::draw(const OverlayList &shapes, CanvasCursor cursor) {
 	ImDrawList &paint = *ImGui::GetWindowDrawList();
 	paint.PushClipRect(
