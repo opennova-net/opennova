@@ -45,65 +45,6 @@ Vector3 to_godot(const opennova::editor::PreviewVec3 &v) {
 	return Vector3(v.x, v.y, v.z);
 }
 
-// The scar draw list the editor's range compiled (in the preview's space, the device's) as the record the game's
-// ScarPresenter uploads: the shared ring's quads as they stand, the strip table (the TGA name and the mode word
-// each strip's effect is built from [orig: Scar_LoadTextures @0x5CC2E0]).
-Ref<ScarDrawList> scar_record(const opennova::renderer::ScarDrawList &list) {
-	Ref<ScarDrawList> out;
-	out.instantiate();
-	PackedVector3Array vertices;
-	PackedVector2Array uvs;
-	PackedColorArray colors;
-	vertices.resize(int64_t(list.vertices.size()));
-	uvs.resize(int64_t(list.vertices.size()));
-	colors.resize(int64_t(list.vertices.size()));
-	for (size_t i = 0; i < list.vertices.size(); ++i) {
-		const opennova::renderer::ScarVertex &v = list.vertices[i];
-		vertices[int64_t(i)] = Vector3(v.x, v.y, v.z);
-		uvs[int64_t(i)] = Vector2(v.u, v.v);
-		colors[int64_t(i)] = opennova::color_from_argb(v.argb);
-	}
-	PackedInt32Array owner, texture, section, flags, first, count, bms, world_first;
-	PackedInt64Array spawn_origin;
-	for (const opennova::renderer::ScarDrawBatch &batch : list.batches) {
-		if (batch.entity_local) continue; // the range's target writes the shared ring
-		owner.push_back(batch.owner_packed);
-		texture.push_back(batch.texture);
-		section.push_back(batch.section);
-		flags.push_back(batch.building ? ScarDrawList::FLAG_BUILDING : 0);
-		first.push_back(int32_t(batch.first_vertex));
-		count.push_back(int32_t(batch.vertex_count));
-		bms.push_back(0);
-		spawn_origin.push_back(0);
-		world_first.push_back(-1);
-	}
-	PackedStringArray strip_names;
-	PackedInt32Array strip_mode_words;
-	strip_names.resize(opennova::world::kScarTextureStripCount);
-	strip_mode_words.resize(opennova::world::kScarTextureStripCount);
-	for (int strip = 0; strip < opennova::world::kScarTextureStripCount; ++strip) {
-		strip_names[strip] = String(opennova::world::scar_texture_strip_name(strip));
-		strip_mode_words[strip] = int32_t(opennova::world::scar_texture_strip_mode_word(strip));
-	}
-	out->set_vertices(vertices);
-	out->set_uvs(uvs);
-	out->set_colors(colors);
-	out->set_batch_owner(owner);
-	out->set_batch_texture(texture);
-	out->set_batch_section(section);
-	out->set_batch_flags(flags);
-	out->set_batch_first(first);
-	out->set_batch_count(count);
-	out->set_batch_bms_id(bms);
-	out->set_batch_spawn_origin(spawn_origin);
-	out->set_batch_world_first(world_first);
-	out->set_strip_names(strip_names);
-	out->set_strip_mode_words(strip_mode_words);
-	out->set_slots_live(int(list.slots_live));
-	out->set_slots_culled(int(list.slots_culled));
-	return out;
-}
-
 } // namespace
 
 DefinitionViewportApplier::DefinitionViewportApplier(SubViewport &viewport) {
@@ -155,14 +96,16 @@ DefinitionViewportApplier::~DefinitionViewportApplier() = default;
 void DefinitionViewportApplier::rebuild(const opennova::editor::ViewportModel &viewport,
 		const opennova::editor::SessionView &view, const opennova::editor::PreviewClock &clock) {
 	const opennova::editor::DefinitionViewport &model = definition_of(viewport);
-	if (!model.model() || !view.findings.assets) {
+	// An ammo with no round model still shows its range (DI-23): the target, its impacts and their scars.
+	if ((!model.model() && !model.range_shown()) || !view.findings.assets) {
 		clear();
 		return;
 	}
 	// The model built again over the project's files, each texture read noted (one that moves builds it again), a
 	// person's or a first-person gun's meshes skinned for its rig.
 	auto files = std::make_shared<opennova::editor::StampedFiles>(view.findings.assets);
-	model_->begin(model.model(), model.drawn().file, files, model.skeleton());
+	if (model.model()) model_->begin(model.model(), model.drawn().file, files, model.skeleton());
+	else model_->clear();
 	// A weapon's first-person arms on the gun's rig, their camo the character's (DI-22, DI-13's recipe).
 	const opennova::editor::DefinitionWeapon &weapon = model.weapon();
 	const opennova::editor::FirstPersonSources &first_person = weapon.first_person();
@@ -251,22 +194,26 @@ void DefinitionViewportApplier::apply_state_(const opennova::editor::ViewportMod
 		const opennova::editor::PreviewClock &clock) {
 	const opennova::editor::DefinitionViewport &model = definition_of(viewport);
 	place_(viewport);
-	if (!model_->built()) return;
-	model_->set_registers(model.ctrl_at(clock));
-	model_->set_hidden_sections(model.hidden_sections_at(clock));
-	model_->set_level(model.lod());
-	// A person stands where its spawn stands it, posed as its warmup leaves it.
-	const opennova::editor::MissionPose &person = model.person();
-	const bool posed = person.status == "posed" && model.skeleton();
-	model_->set_lift(posed ? float(person.lift) : 0.0f);
-	if (posed) model_->pose_body(person.pose);
+	if (model_->built()) {
+		model_->set_registers(model.ctrl_at(clock));
+		model_->set_hidden_sections(model.hidden_sections_at(clock));
+		model_->set_level(model.lod());
+		// A person stands where its spawn stands it, posed as its warmup leaves it.
+		const opennova::editor::MissionPose &person = model.person();
+		const bool posed = person.status == "posed" && model.skeleton();
+		model_->set_lift(posed ? float(person.lift) : 0.0f);
+		if (posed) model_->pose_body(person.pose);
+	} else if (!model.range_shown()) {
+		return;
+	}
 	apply_weapon_(viewport, clock);
 }
 
 void DefinitionViewportApplier::apply_weapon_(const opennova::editor::ViewportModel &viewport,
 		const opennova::editor::PreviewClock &clock) {
 	const opennova::editor::DefinitionViewport &model = definition_of(viewport);
-	const bool weapon = model.weapon_record();
+	// A weapon's range, or an ammo's fired alone (DI-23).
+	const bool weapon = model.range_shown();
 	const opennova::editor::DefinitionWeapon &fire = model.weapon();
 	// The SIGHTS card replaces the view model while it is up: the frame draws one or the other.
 	const bool card = weapon && fire.card_up();
@@ -335,7 +282,7 @@ void DefinitionViewportApplier::apply_weapon_(const opennova::editor::ViewportMo
 		scars_shown_ = UINT64_MAX;
 	} else if (mounted_ && fire.range().serial() != scars_shown_) {
 		scars_shown_ = fire.range().serial();
-		if (fire.range().scar_count() > 0) scars_->present(scar_record(fire.scars()), Dictionary());
+		if (fire.range().scar_count() > 0) scars_->present(preview_scar_record(fire.scars()), Dictionary());
 		else scars_->clear();
 	}
 	// The tracers, built as the game's ribbon pass builds them against this camera.
@@ -394,7 +341,11 @@ void DefinitionViewportApplier::apply(const opennova::editor::ViewportModel &vie
 
 void DefinitionViewportApplier::tick(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &clock) {
 	const opennova::editor::DefinitionViewport &model = definition_of(viewport);
-	if (!building() && model_->built()) {
+	if (!building() && !model_->built() && model.range_shown()) {
+		// An ammo with no round model (DI-23): its range moves with the clock all the same.
+		place_(viewport);
+		apply_weapon_(viewport, clock);
+	} else if (!building() && model_->built()) {
 		// The destroy fade and the pieces' sections move with the clock; a weapon's channel, tracers and scars too.
 		model_->set_registers(model.ctrl_at(clock));
 		model_->set_hidden_sections(model.hidden_sections_at(clock));
