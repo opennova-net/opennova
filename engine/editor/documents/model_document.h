@@ -144,8 +144,6 @@ public:
 	// whose picker offers the model's registers and MTRX rows (S13 D8).
 	bool record_choices(const NodeAddress &address, const FieldUse &use,
 			std::vector<FieldChoice> &out) const override;
-	// A user point past the first 16 is inert.
-	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	// A record in the model's words (documents/model_labels.h, S17): every window that shows a record's
 	// title reads them, with no graph at hand.
 	std::string record_title(const NodeAddress &address) const override;
