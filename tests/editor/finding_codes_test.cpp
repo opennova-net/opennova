@@ -285,9 +285,11 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::ItemId) == Tokens({ "catalog.item_identity", "catalog.reserved_kind", "catalog.reserved_name" }));
 	// DI-11: what a finding's maker planned with its file at hand (Diagnostic::planned): an id, a name or a key
 	// of its own for a record no lookup finds, an end pose's trigger moved, an entity set where the game grounds it
-	// (DI-28); a variable no menu names, removed; a file's line ends restored to CR LF (the line-ends rule).
+	// (DI-28); a variable no menu names, removed; a file's line ends restored to CR LF (the line-ends rule); a
+	// ConfigFile's lines its loader reads the same without, commented out under the reader's pool (the pool rule).
 	TEST_EXPECT(fixed_by(FindingFix::EditRecord) ==
-	            Tokens({ "animation.end_pose_trigger", "catalog.name_duplicate", "document.line_ends", "menu.duplicate_screen",
+	            Tokens({ "animation.end_pose_trigger", "catalog.name_duplicate", "document.config_overrun", "document.line_ends",
+	                     "menu.duplicate_screen",
 	                     "menu.duplicate_window", "mission.off_ground", "mission.ssn_duplicate", "mission.zone_duplicate",
 	                     "strings.key_duplicate", "terrain.foliage_inert", "terrain.no_width", "terrain.refused" }));
 	TEST_EXPECT(fixed_by(FindingFix::UnusedVariable) == Tokens({ "style.unused" }));
@@ -341,7 +343,8 @@ static int test_columns() {
 	                     "catalog.item_type", "catalog.name_empty", "catalog.reserved_id", "catalog.reserved_kind",
 	                     "catalog.reserved_name", "catalog.reserved_refused", "charattr.attribute_word",
 	                     "charattr.no_cammo", "charattr.not_a_number", "charattr.unread_section", "dialog_bank.line_no_wave",
-	                     "dialog_bank.name_repeated", "dialog_bank.name_unplayed", "dialog_bank.silent", "document.line_ends",
+	                     "dialog_bank.name_repeated", "dialog_bank.name_unplayed", "dialog_bank.silent", "document.config_overrun",
+	                     "document.line_ends",
 	                     "environment.sky_height_default",
 	                     "expansion.file.unread", "export.cancelled",
 	                     "export.cleanup", "export.replaced",
