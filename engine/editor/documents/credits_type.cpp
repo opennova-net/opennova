@@ -25,7 +25,6 @@ using cbin::BinaryConfig;
 constexpr FindingCodeEntry<CreditsFinding> kFindingEntries[] = {
 	{ CreditsFinding::InvalidInput, { "credits.invalid_input", FindingFix::None, nullptr, true } },
 	{ CreditsFinding::Unserializable, { "credits.unserializable", FindingFix::None, nullptr, true } },
-	{ CreditsFinding::LineEnding, { "credits.line_ending", FindingFix::Rewrite, "with every line ending CR LF" } },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(CreditsFinding::kCount),
 		"every CreditsFinding has exactly one row");
@@ -324,17 +323,7 @@ std::vector<Diagnostic> validate_credits_file(const DocumentBase &document) {
 		findings.push_back(make_finding(CreditsFinding::InvalidInput, DiagnosticSeverity::Warning,
 				issue.message, document.path()));
 	if (document.blocked()) return findings;
-	// An LF alone, which the reader does not end a line at: Save writes it CR LF.
-	size_t odd_count = 0;
-	const size_t odd = text->odd_line_end(&odd_count);
-	if (odd != std::string::npos)
-		findings.push_back(text_finding(finding_code(CreditsFinding::LineEnding), DiagnosticSeverity::Warning,
-				"This line ends with an LF alone" +
-						(odd_count > 1 ? " (" + std::to_string(odd_count) + " line ends in the file are so)"
-						               : std::string()) +
-						": the game's ConfigFile reader ends a line at CR LF, so it reads the next line as "
-						"part of this one. Save ends every line CR LF.",
-				*text, odd));
+	// An LF alone, which the reader does not end a line at, is the line-ends rule's (documents/line_ends.h).
 	const SerializeResult written = document.serialize();
 	for (const SourceIssue &issue : written.issues) {
 		size_t offset = 0;

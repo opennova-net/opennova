@@ -4,6 +4,7 @@
 #include <utility>
 
 #include <editor/documents/document_types.h>
+#include <editor/documents/line_ends.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 
@@ -76,9 +77,12 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 	// An image's type with no finding codes (S18: a texture's, until its roles' findings) makes no
 	// finding: its file is left unread, as a file no type opens is (validates_files).
 	const bool silent = type && !validates_files(*type);
-	const auto validate = [&entry, type](const DocumentBase &document) {
+	const auto validate = [&entry, &input, type](const DocumentBase &document) {
 		if (type->validate_file)
 			entry.findings = type->validate_file(document);
+		// The line-ends rule, one for every kind whose game reader ends a line at CR LF alone.
+		for (Diagnostic &d : line_end_findings(document, input.project.target_game))
+			entry.findings.push_back(std::move(d));
 		// Each finding on a record keyed on the record as itself (the game's own data's fold), and named in
 		// its type's own words, which a closed file's row reads (the plain-words lane).
 		key_findings(document, entry.findings);
