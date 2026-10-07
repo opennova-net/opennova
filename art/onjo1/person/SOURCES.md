@@ -19,6 +19,11 @@ clip key is measured from), with the skinned mesh on a part of its own after
 the bones, so the engine's person code and the original's clips drive it. No
 geometry, texture or clip of the original is in this file.
 
+Each model has three LODs (thresholds 100, 30 and 0). LOD 2 of `onsold1`,
+`onsoldb` and `onsoldh` is its LOD 1 collapse-decimated at rest to 2,000, 1,000
+and 1,000 triangles, keeping LOD 1's vertex groups, UVs and materials; their
+first LOD 2s had folded into shards, drawn from about 30 m.
+
 ## Third-party material (CC0 only)
 
 | Asset | Source | Author | Licence | Used for |

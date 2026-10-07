@@ -2,9 +2,12 @@
 
 `onhut1.blend` is the source of truth. Its scene `onhut1` is the game model: a
 single-storey plastered mud-brick hut with a small room on the roof, four LODs
-(4,289 / 3,017 / 518 / 226 triangles), one part, 32 collision volumes in LOD 0
+(4,289 / 2,593 / 518 / 226 triangles), one part, 32 collision volumes in LOD 0
 and LOD 2's bullet faces. Its scene `onhut1 bake` holds the same LOD 0 with the
-procedural materials the textures are baked from.
+procedural materials the textures are baked from. LOD 1 is LOD 0 with its
+coplanar faces merged and the rubble under 25 cm dropped, keeping LOD 0's
+corners (the first LOD 1 carried its two UV maps' coordinates swapped, so the
+base texture drew scrambled from 55 m).
 
 The model and its layout are our own, made from scratch in the look of the
 original game's adobe huts (`DHut01`/`DHut02`, looked at for size, palette and
