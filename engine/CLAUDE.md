@@ -116,7 +116,8 @@
     (`viewport_device_cache`; a kind's row may hold fewer of its own, the mission's two, and the
     devices drawn in a frame arbitrate the scene state they render with, S14 E13); the Shell's
     devices are `godot/src/authoring`'s over the runtime's `MenuFrame` and `ObjectModel` and, for a
-    mission, the game's own environment, sky, water, terrain and placer. The menu's viewport (`menu_viewport`): its screen compiled
+    mission, the game's own environment, sky, water, terrain, placer, foliage, particle renderer and light
+    director (DI-31; the items' effects the viewport's `mission_effects` steps). The menu's viewport (`menu_viewport`): its screen compiled
     headless, the options it holds, what a drag of a window's handles or of several windows
     writes, and what arranging several windows (align, distribute, drawing order) writes; the
     model's (`model_viewport`): its orbit camera and the level the game draws, what it shows and

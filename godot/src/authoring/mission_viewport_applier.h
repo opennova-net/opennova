@@ -12,20 +12,25 @@
 #include <unordered_map>
 #include <vector>
 
+#include <base/io/json.h>
 #include <editor/preview/mission_poses.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_follow.h>
 
+#include "authoring/preview_effects.h"
 #include "authoring/viewport_applier.h"
 #include "env/env_file.h"
 #include "env/mission_environment.h"
 #include "env/sky_dome.h"
 #include "env/water.h"
-#include "lights/light_scene.h"
+#include "env/weather.h"
+#include "lights/effect_light_director.h"
 #include "mission/mission_object_placer.h"
 #include "mission/mission_placement_run.h"
+#include "mission/static_source_provider.h"
 #include "object/object_model.h"
 #include "resource_index/resource_root.h"
+#include "terrain/foliage_dispatcher.h"
 #include "terrain/terrain.h"
 #include "terrain/terrain_data.h"
 
@@ -78,6 +83,21 @@ namespace godot {
 // its water or its time changes) and while it presents its frame; its frame's legs run only in a
 // frame it renders (present), and the water's mirror pass is on only in such a frame (off from each
 // frame's tick until its present).
+//
+// DI-31: the game's foliage, effects and lights over it, each a layer its options switch. The foliage is the
+// game's FoliageDispatcher beside the terrain, configured from the terrain's foliage definitions as its build
+// ends (their models and :fd textures read through the root, noted as the terrain layer's) and drawn each
+// presented frame from the terrain's detail cells around the camera, as the game's foliage leg draws them.
+// The effects are the scene the viewport's MissionEffects steps (each placed item's particle slot as the
+// mission's start attaches it), drawn by the game's particle renderer (PreviewEffects, DI-14's helper) under
+// the environment; the device draws single-sampled, as the game's view does and the renderer's passes need
+// (DI-14's rule). The lights are the game's EffectLightDirector over the placer's statics, as the picture
+// stands them (moved where their rows stand, a removed one's dropped: PictureSources), and the entities'
+// individual models: every LGHT record spawned as the mission's start spawns it, each frame's selection
+// written to the models and the statics' light atlas, the terrain's projected pass fed the same pool, the
+// coronas drawn in the overlay tail; spawned again when the placement, a lift, a hide or a move's gesture
+// end moves what stands. The FLICKER ring and the detail tier's sway read the weather's oscillator, whose
+// wave alone the device runs on the preview clock (the mission's start settle first); no other weather runs.
 class MissionViewportApplier final : public ViewportApplier {
 public:
 	explicit MissionViewportApplier(SubViewport &viewport);
@@ -112,6 +132,10 @@ public:
 	Terrain *terrain() const { return terrain_; }
 	MissionEnvironment *environment() const { return environment_; }
 	Ref<MissionObjectPlacer> placer() const { return placer_; }
+	// DI-31's: the foliage dispatcher, the effects drawn, the light director.
+	FoliageDispatcher *foliage() const { return foliage_; }
+	PreviewEffects &effects() { return *effects_; }
+	Ref<EffectLightDirector> lights() const { return lights_; }
 	// How the entities stand: placed by the last whole placement and shown, lifted since and shown,
 	// hidden; how many whole placements ran and what the last one cost (microseconds).
 	int placed_count() const;
@@ -131,6 +155,22 @@ public:
 	};
 
 private:
+	// The placer's statics as the picture stands them (DI-31), the light director's provider: each static's
+	// effect source where its rows are drawn now (a move rewrites the rows alone), a removed (hidden) one's
+	// source without its model, so no light of it spawns; the rest the placer's own.
+	class PictureSources final : public StaticSourceProvider {
+	public:
+		void bind(const Ref<MissionObjectPlacer> &placer) { placer_ = placer; }
+		std::vector<opennova::mission::StaticEffectSource> static_item_effect_sources() override;
+		std::vector<opennova::mission::StaticLightDrawSource> static_light_draw_sources() override;
+		uint64_t static_light_draw_source_revision() override;
+		Ref<ItemDatabase> static_source_item_db() override;
+		Ref<ObjectData> static_source_object_data(uint64_t asset_id) const override;
+
+	private:
+		Ref<MissionObjectPlacer> placer_;
+	};
+
 	// One unit of a build, in the order they run.
 	struct Unit {
 		enum class Kind : uint8_t {
@@ -257,10 +297,17 @@ private:
 	void pose_people_(const opennova::editor::MissionScene &scene, const opennova::editor::MissionPoses &poses);
 	// The moved entities' terrain shadow sources moved too, once no gesture is open.
 	void flush_shadows_(const opennova::editor::MissionScene &scene);
-	// The retained statics' rows of the light atlas built again when the placer's rows moved (a
-	// placement, a static hidden or shown): each row's lighting lane as the game's light director
-	// gives it (LightScene::static_row_entity_lane), and no lights, the picture drawing none.
-	void build_static_rows_();
+	// The terrain's foliage definitions configured as the game's load configures them (DI-31,
+	// GameWorld::configure_foliage): the slots' models and :fd textures through the root.
+	void configure_foliage_();
+	// The lights spawned again over the entities as they stand (DI-31): the director's scene the shown
+	// individual models, its statics the placer's as the picture stands them; none while the layer is off
+	// (the statics' atlas lanes still published).
+	void relight_();
+	// The overlay tail's coronas published through the effects' renderer.
+	void publish_overlay_();
+	// What the last presented frame drew of the foliage, the lights and the effects (the report's `drawn`).
+	opennova::io::JsonValue drawn_json_() const;
 	void place_camera_(const opennova::editor::ViewportModel &model);
 	String graphic_of_(int64_t item);
 	Transform3D transform_of_(const opennova::editor::MissionEntityMark &entity) const;
@@ -310,12 +357,30 @@ private:
 	int place_units_planned_ = 0;
 	std::unique_ptr<Build> build_;
 	uint64_t scene_state_ = 0;
-	// The retained statics' light atlas (opennova_static_point_light_rows, a scene-state global): a
-	// static row reads its lighting lane there, as no MultiMesh instance carries one, so a picture
-	// without it draws every static as if the sun were blocked. Built from the placer's rows at its
-	// light-draw revision (0: none built since the entities were dropped).
-	Ref<LightScene> static_rows_;
-	uint64_t static_rows_revision_ = 0;
+	// DI-31: the foliage beside the terrain, the TerrainData it was configured over; the effects (the
+	// project's files mounted for their graphics since the last Rebuild); the weather whose oscillator the
+	// lights and the foliage read, the clock's tick it was run to (-1: not settled yet); the light director
+	// and its statics; the layers shown; the clock's milliseconds the frame draws at.
+	FoliageDispatcher *foliage_ = nullptr;
+	Ref<TerrainData> foliage_data_;
+	std::unique_ptr<PreviewEffects> effects_;
+	bool effects_mounted_ = false;
+	Weather *weather_ = nullptr;
+	int32_t wave_tick_ = -1;
+	// The retained statics' light atlas (opennova_static_point_light_rows, a scene-state global) is the
+	// director's scene's: a static row reads its lighting lane there, as no MultiMesh instance carries one,
+	// so a picture without it draws every static as if the sun were blocked.
+	Ref<EffectLightDirector> lights_;
+	PictureSources sources_;
+	bool relight_pending_ = false;
+	bool lights_dirty_ = true; // the pool or its scene moved since the last light pass
+	uint64_t lit_rows_revision_ = UINT64_MAX; // the statics' rows the last light pass read
+	bool shown_foliage_ = true, shown_effects_ = true, shown_lights_ = true;
+	int64_t clock_ms_ = 0;
+	uint64_t overlay_frame_id_ = 0;
+	// The frames presented, and the last one's foliage, light and effect legs (microseconds).
+	uint64_t presented_ = 0;
+	int64_t leg_us_[3] = { 0, 0, 0 };
 	// The pick shapes kept: a static's by its graphic, an individual model's by its node (dropped with
 	// the entities), and the last ray's answer while the picture stands (a frame's hover and hint ask
 	// alike).

@@ -4764,6 +4764,16 @@ target_link_libraries(editor_mission_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_mission_viewport COMMAND editor_mission_viewport_test)
 
+# A mission's items' effects as its start attaches them (ADR 0046 DI-31, editor/preview/mission_effects) over
+# a real session: each placed entity's particle slot by the start's pool gates and its model's points, the
+# emitters under the entity's transform and the item's scale, played on the preview clock and spawned again
+# pre-aged on a jump; a move carrying a slot's groups, an item swapped, a removal, a particle file edited, the
+# layer switched off; the options' new layers and the wire.
+add_executable(editor_mission_effects_test editor/mission_effects_test.cpp)
+target_link_libraries(editor_mission_effects_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_effects_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_mission_effects COMMAND editor_mission_effects_test)
+
 # The surface classes and the foliage over a mission's terrain (ADR 0046 DI-29, editor/preview/
 # mission_ground_overlay): the ground's foliage at a point and the two overlays over a minted Tmap.
 add_executable(editor_mission_ground_overlay_test editor/mission_ground_overlay_test.cpp)
