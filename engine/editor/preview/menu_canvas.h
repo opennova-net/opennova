@@ -42,6 +42,9 @@ struct MenuCanvasFrame {
 	const menu::MenuFrameCompiler *compiler = nullptr;
 	const menu::MenuFrameState *state = nullptr;
 	bool current = false; // the picture shows the document's revision: only then does it map
+	// The viewport is in Try mode (DI-35): the picture's clicks and keys are the game's menu's, so the
+	// canvas takes no press, draws nothing over the picture and shows no pointer of its own.
+	bool trying = false;
 	bool snap = true; // a drag snaps its moved edges to kLayoutGrid (Alt: free)
 	// Edits may be raised (S13 A3: false while an operation holds the documents, as
 	// SessionView::allows(EditRecord) says; ViewportContext::editable): else a press selects (a click,
