@@ -2,7 +2,9 @@
 
 #include <algorithm>
 
+#include <editor/assets/project_asset_source.h>
 #include <editor/preview/definition_viewport.h>
+#include <editor/preview/menu_viewport.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_viewport.h>
 #include <editor/preview/viewports.h>
@@ -25,11 +27,25 @@ ViewportModel *previewed(SessionCore &core, ViewportKind kind) {
 	return model;
 }
 
-// The sounds a viewport keeps of those it fired (a model's, a definition's), null for a kind that fires none.
-const std::vector<ClipSoundFired> *fired_by(const ViewportModel &model) {
-	if (const auto *clip = dynamic_cast<const ModelViewport *>(&model)) return &clip->sounds_fired();
-	if (const auto *definition = dynamic_cast<const DefinitionViewport *>(&model)) return &definition->sounds_fired();
-	if (const auto *mission = dynamic_cast<const MissionViewport *>(&model)) return &mission->sounds_fired();
+// The sounds a viewport keeps of those it fired (a model's, a definition's, a mission's, a menu's), none for a kind
+// that fires none.
+std::vector<const ClipSoundFired *> fired_by(const ViewportModel &model) {
+	std::vector<const ClipSoundFired *> out;
+	if (const auto *clip = dynamic_cast<const ModelViewport *>(&model))
+		for (const ClipSoundFired &fired : clip->sounds_fired()) out.push_back(&fired);
+	else if (const auto *definition = dynamic_cast<const DefinitionViewport *>(&model))
+		for (const ClipSoundFired &fired : definition->sounds_fired()) out.push_back(&fired);
+	else if (const auto *mission = dynamic_cast<const MissionViewport *>(&model))
+		for (const ClipSoundFired &fired : mission->sounds_fired()) out.push_back(&fired);
+	else if (const auto *menu = dynamic_cast<const MenuViewport *>(&model))
+		for (const MenuSoundFired &fired : menu->sounds_fired()) out.push_back(&fired.sound);
+	return out;
+}
+
+// The document open at `path`, null for none.
+const DocumentBase *open_document(const SessionView &view, const std::string &path) {
+	for (const auto &open : view.documents.open)
+		if (open && open->path() == path) return open.get();
 	return nullptr;
 }
 
@@ -67,13 +83,41 @@ void fire_clip_sounds(SessionCore &core) {
 	if (fired) core.touch(ViewConcern::Viewports);
 }
 
+void fire_menu_sounds(SessionCore &core, const std::string &path) {
+	const SessionView &view = core.view();
+	Viewports &viewports = core.viewports();
+	if (!view.project.open || !view.findings.assets) return;
+	// The menu viewports sampled: the one a SetViewport named, else each kept.
+	std::vector<std::string> paths;
+	if (!path.empty()) {
+		paths.push_back(path);
+	} else {
+		for (size_t i = 0; i < viewports.size(); ++i)
+			if (viewports.at(i).kind() == ViewportKind::Menu) paths.push_back(viewports.at(i).path());
+	}
+	bool fired = false;
+	for (const std::string &each : paths) {
+		ViewportModel *model = viewports.find(each, ViewportKind::Menu);
+		// A SetViewport's viewport followed now where no device follows it (a headless editor's, a test's), so
+		// what it moved is heard against the picture as it is.
+		if (model && !path.empty() && !model->attached()) model = viewports.follow_one(view, each, ViewportKind::Menu);
+		auto *menu = dynamic_cast<MenuViewport *>(model);
+		if (!menu) continue;
+		const ViewportInput input{view, viewports.clock(), open_document(view, each)};
+		fired = !menu->fire_sounds(input, *view.findings.assets, view.project.scan.get(), core.sound_selector(),
+		                           viewports.clip_sound_seq())
+		                 .empty() ||
+		        fired;
+	}
+	if (fired) core.touch(ViewConcern::Viewports);
+}
+
 std::vector<ClipSoundPlay> clip_sounds_since(SessionCore &core, uint64_t after) {
 	std::vector<ClipSoundPlay> out;
 	Viewports &viewports = core.viewports();
 	for (size_t i = 0; i < viewports.size(); ++i) {
-		const std::vector<ClipSoundFired> *sounds = fired_by(viewports.at(i));
-		if (!sounds) continue;
-		for (const ClipSoundFired &fired : *sounds) {
+		for (const ClipSoundFired *each : fired_by(viewports.at(i))) {
+			const ClipSoundFired &fired = *each;
 			if (fired.seq <= after || fired.state != "played") continue;
 			ClipSoundPlay play;
 			play.seq = fired.seq;

@@ -346,6 +346,9 @@ void EditorApp::after_layout(uint64_t, bool, int64_t) {
 	// One pointer over a picture that draws the game's (a menu's, DI-08): the system one hidden while a
 	// window asks, shown again the frame none does.
 	show_system_pointer_(!windows_->pointer_hidden());
+	// The mice the canvases had over their pictures this frame, the game's mouse a menu's sounds hear
+	// (DI-34), handed to the session ahead of the frame's advance.
+	if (session_) session_->canvas_mice(windows_->canvas_mice());
 #endif
 }
 
