@@ -42,6 +42,12 @@ using window_requests::go_to;
 using window_requests::select;
 using RecordChange = Document::RecordChange;
 
+// Whether the document's values are drawn read only: its source does not read back (a blocking issue), or an
+// import makes its file (DI-30a), the session taking no edit of either.
+bool held(Workspace &workspace, const DocumentBase &document) {
+	return document.blocked() || made_by_import(workspace.view(), document);
+}
+
 // The records one control edits: the record shown, or every selected record of one kind
 // (the first the primary, whose value the control shows). A change to several is one batch,
 // one undo step.
@@ -475,7 +481,7 @@ void reference_jumps(Workspace &workspace, const FieldUse &field, const Value &v
 void drop_target(Workspace &workspace, const Document &document, const Targets &targets, const FieldUse &field,
                  const Value &value) {
 	std::string dropped;
-	if (picks_reference(field) && !field.read_only && !document.blocked() &&
+	if (picks_reference(field) && !field.read_only && !held(workspace, document) &&
 	    ReferencePicker::accept_file(workspace.view(), field, dropped))
 		set(workspace, document, targets, field.schema->id, dropped, false);
 	const std::string *name = std::get_if<std::string>(&value);
@@ -768,7 +774,7 @@ void field_row(Workspace &workspace, Controls &controls, const Document &documen
 	const RowFields fields{&field};
 	const float left = begin_row(reveal, address, fields);
 	ImGui::PushID(schema.id.c_str());
-	ImGui::BeginDisabled(field.read_only || document.blocked());
+	ImGui::BeginDisabled(field.read_only || held(workspace, document));
 	if (schema.optional) {
 		written_tick(workspace, document, targets, field, present);
 		ImGui::SameLine();
@@ -873,7 +879,7 @@ void group_row(Workspace &workspace, std::string &typed, const Document &documen
 	const float left = begin_row(reveal, address, fields);
 	const std::string &title = fields.front()->schema->group;
 	ImGui::PushID(title.c_str());
-	ImGui::BeginDisabled(document.blocked());
+	ImGui::BeginDisabled(held(workspace, document));
 	ImGui::AlignTextToFramePadding();
 	field_name(workspace, document, targets, fields, title, nullptr, std::find(mixed.begin(), mixed.end(), true) != mixed.end(),
 	           field_change(document, targets, fields), left);
@@ -940,7 +946,7 @@ void field_cell(Workspace &workspace, Controls &controls, const Document &docume
 		return;
 	}
 	ImGui::PushID(schema.id.c_str());
-	ImGui::BeginDisabled(field.read_only || document.blocked());
+	ImGui::BeginDisabled(field.read_only || held(workspace, document));
 	if (schema.optional) {
 		written_tick(workspace, document, {address}, field, present);
 		ImGui::SameLine(0.0f, 2.0f);
@@ -1005,7 +1011,7 @@ float column_width(const FieldSchema &field) {
 // A row's context menu: the collection's structural edits without selecting the row.
 void row_menu(Workspace &workspace, const Document &document, const Document::CollectionSpec &spec,
               const NodeAddress &address, size_t index, size_t count) {
-	if (spec.fixed || document.blocked() || !ImGui::BeginPopupContextItem("row")) return;
+	if (spec.fixed || held(workspace, document) || !ImGui::BeginPopupContextItem("row")) return;
 	if (ImGui::MenuItem("Duplicate", nullptr, false, !spec.max || count < spec.max))
 		edit(workspace, document, EditOperation::Duplicate, address, index + 1);
 	if (ImGui::MenuItem("Remove")) edit(workspace, document, EditOperation::Remove, address);
@@ -1127,7 +1133,7 @@ void collection_block(Workspace &workspace, Controls &controls, const Document &
 	for (size_t i = 0; i < ids.size(); ++i)
 		if (workspace.view().documents.selection.primary.kind == spec.kind && workspace.view().documents.selection.primary.child == ids[i]) selected = i;
 	if (!spec.fixed) {
-		ImGui::BeginDisabled(document.blocked());
+		ImGui::BeginDisabled(held(workspace, document));
 		ui_kit::WrapRow row;
 		ui_kit::RowTools tools;
 		tools.count = ids.size();
