@@ -367,6 +367,8 @@ void ViewportCanvas::picture(const Device &device, const Tip &tip, bool pointer)
 	shown.pointer = pointer;
 	shown.pointer_x = input_.mouse.x;
 	shown.pointer_y = input_.mouse.y;
+	shown.hovered = input_.hovered && input_.mouse.x >= 0.0f && input_.mouse.y >= 0.0f &&
+			input_.mouse.x < float(input_.width) && input_.mouse.y < float(input_.height);
 	device(shown);
 	// The picture's edge: a design picture's just outside it, on its margin.
 	const float edge = zoom_ != Zoom::Fill ? 1.0f : 0.0f;
