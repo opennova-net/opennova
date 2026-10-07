@@ -7,6 +7,7 @@
 #include <utility>
 
 #include <base/io/json.h>
+#include <editor/graph/jump_queries.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_run.h>
 #include <editor/session/build_result.h>
@@ -230,7 +231,54 @@ bool EditorWindows::draw_frame(uint64_t frame_index) {
 void EditorWindows::begin_frame() {
 	in_frame_ = true;
 	pointer_hidden_ = false;
+	// What the windows offered F12 and Shift+F12 last frame is what the keys act on this one (the menu bar's
+	// shortcuts read it before the windows draw).
+	subject_ = std::move(offered_);
+	offered_ = JumpSubject();
 	dispatch_events();
+}
+
+void EditorWindows::offer_jump(const JumpSubject &subject) {
+	if (!subject.any() || (offered_.pointer && !subject.pointer)) return;
+	offered_ = subject;
+}
+
+JumpSubject EditorWindows::jump_subject() const {
+	// Each key takes what was offered where the offer has it (a Problems row offers its uses alone), else the
+	// selection's.
+	if (!subject_.definition.empty() && !subject_.usages_file.empty()) return subject_;
+	const SessionView &v = view();
+	JumpSubject out;
+	const DocumentBase *base = active_document(v);
+	if (base) {
+		out.usages_file = base->path();
+		const Document *document = records_of(*base);
+		const NodeAddress &record = v.documents.selection.primary;
+		if (document && record.row && v.documents.selection.document == base->path()) {
+			out.usages_locator = document->locator(record);
+			if (v.findings.graph && v.project.scan)
+				record_definition(*v.findings.graph, *v.project.scan, *document, record, out.definition);
+		}
+	}
+	if (!subject_.definition.empty()) out.definition = subject_.definition;
+	if (!subject_.usages_file.empty()) {
+		out.usages_file = subject_.usages_file;
+		out.usages_locator = subject_.usages_locator;
+	}
+	out.pointer = subject_.pointer;
+	return out;
+}
+
+bool EditorWindows::go_to_definition(const JumpSubject &subject) {
+	if (subject.definition.empty() || !view().allows(EditorRequestKind::OpenDocument)) return false;
+	window_requests::go_to(*this, subject.definition.front());
+	return true;
+}
+
+bool EditorWindows::find_usages(const SessionView &v, const JumpSubject &subject) {
+	if (subject.usages_file.empty() || !v.project.open || !v.findings.graph) return false;
+	ProjectFind::open_usages(*this, subject.usages_file, subject.usages_locator);
+	return true;
 }
 
 // Each view event posted since the last frame to the window it is for, oldest first: the
@@ -379,6 +427,7 @@ void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
 	draw_navigation(v);
 	draw_file_menu(v);
 	draw_edit_menu(v, document);
+	draw_go_menu(v);
 	draw_build_menu(v);
 	// The modals, every frame, whichever window or menu opened them: the one the session's order shows
 	// (shown_modal) opens, the others held wait closed.
@@ -541,6 +590,44 @@ void EditorWindows::draw_edit_menu(const SessionView &v, const DocumentBase *doc
 	if (menu_item("Find...", "Ctrl+F", document != nullptr) && document_window_) document_window_->open_find();
 	if (menu_item("Find in project...", "Ctrl+Shift+F", v.project.open && v.findings.graph))
 		ProjectFind::open(*this);
+	ImGui::EndMenu();
+}
+
+// Go (DI-18): the jumps, each with its keys. Back and Forward as the arrows go; Go to file, Go to name and Find in
+// project open the project's finder in that scope; Go to definition and Find usages act on what jump_subject says
+// (from the menu, the selection: the pointer is on the menu), each naming it in its tooltip.
+void EditorWindows::draw_go_menu(const SessionView &v) {
+	if (!ImGui::BeginMenu("Go")) return;
+	if (menu_item("Back", "Alt+Left", navigation_offered(v, true))) request(request::navigate_back());
+	ui_kit::tooltip(v.navigation.back.empty() ? std::string("Nowhere yet.") : "Back to " + v.navigation.back.front().label + ".");
+	if (menu_item("Forward", "Alt+Right", navigation_offered(v, false))) request(request::navigate_forward());
+	ui_kit::tooltip(v.navigation.forward.empty() ? std::string("Nowhere yet.")
+	                                             : "Forward to " + v.navigation.forward.front().label + ".");
+	ImGui::Separator();
+	const bool finds = v.project.open && v.findings.graph;
+	if (menu_item("Go to file...", "Ctrl+P", finds)) ProjectFind::open(*this, ProjectFind::Scope::Files);
+	ui_kit::tooltip("Open a file of the project by its name: type part of it, Enter opens the first.");
+	if (menu_item("Go to name...", "Ctrl+T", finds)) ProjectFind::open(*this, ProjectFind::Scope::Names);
+	ui_kit::tooltip("Go to a record of any file by the name it defines: an item, a weapon, a string, a screen, a "
+	                "style variable.");
+	if (menu_item("Find in project...", "Ctrl+Shift+F", finds)) ProjectFind::open(*this);
+	ui_kit::tooltip("Every file and name the project's files define whose name holds the text, each with its uses.");
+	ImGui::Separator();
+	const JumpSubject subject = jump_subject();
+	if (menu_item("Go to definition", "F12", !subject.definition.empty() && v.allows(EditorRequestKind::OpenDocument)))
+		go_to_definition(subject);
+	ui_kit::tooltip(subject.definition.empty()
+	                        ? std::string("What a reference names: F12 with the pointer on a reference field (or Ctrl+click "
+	                                      "its value), or with a record selected that names something (a mission's "
+	                                      "entity: its item).")
+	                        : "Go to " + subject.definition.front().label + " (F12; Ctrl+click a reference's value).");
+	const bool usages = finds && !subject.usages_file.empty();
+	if (menu_item("Find usages", "Shift+F12", usages)) find_usages(v, subject);
+	ui_kit::tooltip_lazy([&] {
+		return usages ? "Who names " + usages_subject_words(*v.findings.graph, subject.usages_file, subject.usages_locator) +
+		                        ", each a Go to (Shift+F12)."
+		              : std::string("Who names a file or what a record defines: open a file or select a record.");
+	});
 	ImGui::EndMenu();
 }
 
@@ -761,11 +848,14 @@ void EditorWindows::draw_new_project() {
 }
 
 // The shortcuts the menu labels promise (Ctrl+F is the Document window's own, before its views'
-// filters), and Back's and Forward's. Saving, closing a file, finding in the project, building and
+// filters), and Back's and Forward's. Saving, closing a file, finding in the project, going to a file or a
+// name, going to a definition, finding usages, building and
 // playing work while a text field has the keyboard (what it typed this frame is raised first:
 // request()); Undo and Redo, and Alt+Left and Alt+Right, are the field's own then. Ctrl+Shift+Z is
 // Redo, as Ctrl+Y is. None of them while the unsaved prompt is open: an Undo behind it would make a
-// file it does not list unsaved.
+// file it does not list unsaved. No two share keys: Ctrl+S, Ctrl+Shift+S, Ctrl+W, Ctrl+B, Ctrl+P, Ctrl+T,
+// Ctrl+Shift+F, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, F5, Ctrl+F5, Alt+F5, Shift+F5, F12, Shift+F12, Alt+Left and
+// Alt+Right here; Ctrl+F, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+D, F2, Delete, F and the arrows the windows' own.
 void EditorWindows::shortcuts(const SessionView &v, const DocumentBase *document) {
 	if (v.dialogs.unsaved_prompt.open) return;
 	const ImGuiIO &io = ImGui::GetIO();
@@ -780,6 +870,18 @@ void EditorWindows::shortcuts(const SessionView &v, const DocumentBase *document
 		request(request::close_document());
 	if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_F, false) && v.project.open && v.findings.graph)
 		ProjectFind::open(*this);
+	// The jumps (DI-18): Go to file and Go to name, wherever the keyboard is (another of the finder's scopes while it
+	// shows), and Go to definition and Find usages over what jump_subject says, while no dialog that takes the whole
+	// editor shows.
+	const HeldModal modal = shown_modal(v).modal;
+	const bool finds = v.project.open && v.findings.graph && (modal == HeldModal::None || modal == HeldModal::ProjectFind);
+	const bool plain_ctrl = io.KeyCtrl && !io.KeyShift && !io.KeyAlt;
+	if (plain_ctrl && ImGui::IsKeyPressed(ImGuiKey_P, false) && finds) ProjectFind::open(*this, ProjectFind::Scope::Files);
+	if (plain_ctrl && ImGui::IsKeyPressed(ImGuiKey_T, false) && finds) ProjectFind::open(*this, ProjectFind::Scope::Names);
+	if (ImGui::IsKeyPressed(ImGuiKey_F12, false) && !io.KeyCtrl && !io.KeyAlt && modal == HeldModal::None) {
+		if (io.KeyShift) find_usages(v, jump_subject());
+		else go_to_definition(jump_subject());
+	}
 	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_B, false) && v.project.open && v.allows(EditorRequestKind::Build)) {
 		request(request::build());
 	}
