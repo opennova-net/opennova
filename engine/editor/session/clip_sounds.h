@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -9,6 +10,7 @@
 namespace opennova::editor {
 
 class SessionCore;
+struct ClipSoundFired;
 
 // A clip's events heard in the model preview (DI-04; preview/preview_clip_sounds): the session runs what
 // the clock runs. Each time the Shell's frames pass the preview clock (ProjectSession::advance), the clip
@@ -27,8 +29,9 @@ struct ClipSoundPlay {
 // The sounds the clip the Preview's model viewport plays fired over the ticks the clock ran through since
 // the last call (ModelViewport::fire_sounds), or, for a model, the sounds of the death its damage state
 // plays (DI-10: ModelViewport::fire_damage_sounds), and those of the death the Preview's definition viewport
-// plays (DI-21: DefinitionViewport::fire_sounds), each viewport followed first where no device follows it;
-// nothing while the clock holds. Moves the Viewports concern when one fired.
+// plays (DI-21: DefinitionViewport::fire_sounds), each viewport followed first where no device follows it; and
+// what each listening mission view heard of its weather's thunder and its script's sounds (DI-36:
+// MissionViewport::fire_listen_sounds); nothing while the clock holds. Moves the Viewports concern when one fired.
 void fire_clip_sounds(SessionCore &core);
 
 // A menu's sounds (DI-34; preview/menu_sounds.h): the game's mouse over a menu viewport's picture (where a canvas
@@ -43,5 +46,9 @@ void fire_menu_sounds(SessionCore &core, const std::string &path = std::string()
 // The clip sounds and menu sounds fired after `after` that sound (played: not muted, a wave of the project to
 // play), oldest first: what the Shell plays.
 std::vector<ClipSoundPlay> clip_sounds_since(SessionCore &core, uint64_t after);
+
+// The last `most` sounds every viewport keeps of those it fired, played or not, oldest first (the
+// sounds_playing query's).
+std::vector<const ClipSoundFired *> clip_sounds_recent(SessionCore &core, size_t most);
 
 } // namespace opennova::editor

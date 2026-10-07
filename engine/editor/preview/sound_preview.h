@@ -65,6 +65,11 @@ struct PreviewPlay {
 struct PreviewHearing {
 	float source[3] = {0.0f, 0.0f, 0.0f};
 	float listener[3] = {0.0f, 0.0f, 0.0f};
+	// Heard instead at a distance from the listener (DI-36: the weather's thunder, a script's `sound`), a direct play
+	// of the set: no range cull, each layer attenuated at `distance_q16` [orig: Sound_PlayTriggerSetScaled @ 0x527b90
+	// -> SoundBank_PlayTriggerEntries @ 0x75ccd0; audio::plan_oneshot_at_distance].
+	bool at_distance = false;
+	int64_t distance_q16 = 0;
 };
 
 // The set named `set`, in the bank named `only` when it is given (a menu's SOUND plays from its own
