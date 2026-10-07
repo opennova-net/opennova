@@ -15,6 +15,7 @@ namespace opennova::world {
 class World;
 class LocalPlayer;
 class CollisionWorld;
+struct AmmoTable;
 } // namespace opennova::world
 
 namespace opennova::editor {
@@ -50,6 +51,11 @@ namespace opennova::editor {
 //
 // The editor's own choices beside the game's: the target (the game's world holds the walls), the gestures (the
 // keys), the view the shots are presented in (WeaponShotView), and the shooter standing still at the origin.
+//
+// With no weapon in hand the range fires a soldier's shots instead (ADR 0046 DI-24, preview/preview_clip_fire): each
+// on its tick through the game's NPC fire entry from a soldier of no player standing at the origin (the round, its
+// launch's ai_launch through the distance gate, its fire record), drained as the presenter takes another's shot (the
+// ammo arm's ai_launcheffect at the fire origin), then the flight and the impacts as above.
 
 // What a gesture asks of the weapon: the keys the game's input dispatcher reads.
 enum class WeaponGesture : uint8_t {
@@ -105,7 +111,9 @@ inline constexpr int32_t kWeaponRangeMostTicks = 62 * 600;
 // What the range fires with: the project's files (the open documents standing in for theirs), the weapon table's
 // file and the record fired, the view the shots show in, whether another's view is the other side's (the round's
 // tracer style is the enemy's then, the spawn's select against the presenting client's team [orig:
-// RoundData_SpawnRound @ 0x4EC740]), the target.
+// RoundData_SpawnRound @ 0x4EC740]), the target. No record (`weapon` ""): no player holds a weapon, and the range
+// fires a soldier's shots alone (WeaponRangeShot, DI-24), its tables read all the same (weapon.def where the project
+// has it, then ammo.def).
 struct WeaponRangeSetup {
 	std::shared_ptr<const FileSource> files;
 	std::string catalog;
@@ -113,6 +121,25 @@ struct WeaponRangeSetup {
 	WeaponShotView view = WeaponShotView::Own;
 	bool enemy = false;
 	WeaponRangeTarget target;
+};
+
+// A soldier's shot (ADR 0046 DI-24): what an NPC body's fire block hands the game's NPC fire entry on a tick of the
+// clock, an ammo byte (the ammo table's row; zero fires nothing) from a place along a heading and a pitch (BAM),
+// the range's frame [orig: Entity_UpdateInfantryAI @0x4BF345..0x4BF4AD -> WeaponSlot_FireAndSpawnEffects
+// @0x53F440, world::RoundSim::fire_npc_ammo]. `shot` numbers it for the caller, `words` says what fired it.
+struct WeaponRangeShot {
+	int32_t tick = 0;
+	uint8_t ammo = 0;
+	world::Vec3 at;
+	int32_t yaw_bam = 0;
+	int32_t pitch_bam = 0;
+	int shot = 0;
+	std::string words;
+	bool operator==(const WeaponRangeShot &other) const {
+		return tick == other.tick && ammo == other.ammo && at.x == other.at.x && at.y == other.at.y &&
+		       at.z == other.at.z && yaw_bam == other.yaw_bam && pitch_bam == other.pitch_bam && shot == other.shot;
+	}
+	bool operator!=(const WeaponRangeShot &other) const { return !(*this == other); }
 };
 
 // One thing the run did, on the clock's tick it did it. Positions and directions are the range's (the shooter's
@@ -184,6 +211,16 @@ public:
 	// the first that changed.
 	void set_gestures(std::vector<WeaponGestureAt> gestures);
 	const std::vector<WeaponGestureAt> &gestures() const { return gestures_; }
+	// A soldier's shots (DI-24), in tick order, each fired on its tick by the game's NPC entry ahead of the rounds'
+	// step, as an NPC's think fires in the entity update's walk before the projectiles [orig:
+	// Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53 ahead of the Weapon_UpdateAllProjectiles call @0x4C223A]: a change
+	// starts the run again from tick 0 where it reached a tick at or past the first that changed (shots added after
+	// the run's tick do not).
+	void set_shots(std::vector<WeaponRangeShot> shots);
+	const std::vector<WeaponRangeShot> &soldier_shots() const { return shots_list_; }
+	// The ammo table as the game's load built it (null before the tables are read): what a soldier's ammo bytes
+	// index (world::resolve_organic_weapons).
+	const world::AmmoTable *ammo_table() const;
 	// The run to the clock's tick `tick` (bounded by kWeaponRangeMostTicks): stepped on from where it stands, or
 	// run again from tick 0 when the clock is behind it.
 	void run_to(int32_t tick);
@@ -228,6 +265,7 @@ private:
 	void step_();
 	void drain_();
 	void apply_gestures_(int32_t tick);
+	void fire_shots_(int32_t tick);
 
 	WeaponRangeSetup setup_;
 	bool ready_ = false;
@@ -242,6 +280,9 @@ private:
 	std::string ammo_;
 
 	std::vector<WeaponGestureAt> gestures_;
+	std::vector<WeaponRangeShot> shots_list_;
+	world::EntityHandle soldier_; // the soldier the shots leave (a person of no player)
+	std::vector<int> soldier_fires_; // the shots the step's fire records came from, in order
 	std::unique_ptr<world::World> world_;
 	std::unique_ptr<world::LocalPlayer> local_;
 	std::unique_ptr<world::CollisionWorld> collision_;

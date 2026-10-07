@@ -13,13 +13,17 @@
 
 #include <editor/preview/viewport_follow.h>
 
+#include "authoring/preview_effects.h"
 #include "authoring/preview_model.h"
+#include "authoring/preview_range_draw.h"
 #include "authoring/viewport_applier.h"
 #include "object/object_data.h"
 #include "object/object_model.h"
 #include "object/skeletal_anim.h"
 
 namespace godot {
+
+class MissionEnvironment;
 
 // A model viewport's device work (ADR 0046 S10p3, S13 V5): the runtime's own ObjectModel (its
 // meshes, materials, CTRL registers, part animations) under the retail noon light and one display
@@ -45,6 +49,13 @@ namespace godot {
 // the game's first-person view model builds its arms, without their authored levels), bound to its own
 // instance of the gun's rig and posed by the same clip, its camo the character's; the camera stands where
 // the viewport's eye does and sees with its field of view.
+//
+// A clip's fire events (DI-24, editor/preview/preview_clip_fire) draw the range the shots fly in: the effects the run
+// spawned (the ammo's ai_launcheffect, each impact's row) by the game's particle renderer (authoring/preview_effects,
+// the project's files mounted for their graphics), the tracers, the target's face and the scars on it
+// (authoring/preview_range_draw), all made the first time a clip fires in the device. While anything fires the view
+// is single-sampled, as the game's view draws and the particle renderer's passes need (DI-14's rule); else it keeps
+// its 4x.
 class ModelViewportApplier final : public ViewportApplier {
 public:
 	explicit ModelViewportApplier(SubViewport &viewport);
@@ -66,6 +77,11 @@ public:
 	Camera3D *camera() const { return camera_; }
 	ObjectModel *object_model() const { return object_; }
 	ObjectModel *arms_model() const { return arms_; }
+	// A clip's fire (DI-24): the effects drawn and the range's target, tracers and scars (null until a clip fires
+	// here), the view's multisampling.
+	PreviewEffects *effects() const { return effects_.get(); }
+	PreviewRangeDraw *range() const { return range_.get(); }
+	bool single_sampled() const { return single_sampled_; }
 
 private:
 	// A build in flight: the data the scene will hold (and the first-person arms', null: none), the files
@@ -105,7 +121,17 @@ private:
 	// The rig the viewport loaded, bound to the model (again when it is loaded again).
 	void bind_rig_(const opennova::editor::ViewportModel &model);
 	void play_clip_(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock);
+	// A clip's fire (DI-24): the effects' scene the viewport's run stepped, the range drawn against the camera, the
+	// view single-sampled while anything fires.
+	void apply_fire_(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock);
+	// The clip fire's effects and range made (the first time a clip fires), and let go of (nothing drawn, nothing
+	// mounted).
+	void make_fire_();
+	void release_fire_();
 
+	SubViewport *viewport_ = nullptr;
+	Node3D *root_ = nullptr;
+	MissionEnvironment *environment_ = nullptr;
 	Camera3D *camera_ = nullptr;
 	ObjectModel *object_ = nullptr;
 	ObjectModel *arms_ = nullptr; // the first-person arms on the gun's rig (no data: none)
@@ -121,6 +147,11 @@ private:
 	int applied_team_ = INT32_MIN + 1; // the TEX_TEAM written (INT32_MIN: none, cleared)
 	uint64_t applied_skeleton_ = UINT64_MAX; // the rig serial the model holds
 	std::unique_ptr<Build> build_; // the build in flight (null: none)
+	std::unique_ptr<PreviewEffects> effects_;
+	std::unique_ptr<PreviewRangeDraw> range_;
+	std::shared_ptr<const opennova::editor::ProjectAssetSource> fire_files_; // an animation's project files
+	bool mounted_ = false; // the project's files are mounted for the clip fire's effects
+	bool single_sampled_ = false;
 };
 
 } // namespace godot
