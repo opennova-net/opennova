@@ -652,6 +652,11 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 		site.span = edge->span;
 		site.before = edge->value;
 		site.after = spelled;
+		// A number naming its definition by itself plus an offset (an ammo's tracer id) takes the new name
+		// less it.
+		if (edge->name_offset)
+			if (const std::optional<int> number = strutil::parse_int(new_name))
+				site.after = std::to_string(*number - edge->name_offset);
 		site.target = symbol.file;
 		// A use whose lookup takes a second name (its fallback: a script's AMMO_X, then "ammo_X"):
 		// where the new name begins with the prefix that second name puts before the value, the span
