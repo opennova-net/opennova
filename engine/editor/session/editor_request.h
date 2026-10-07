@@ -223,7 +223,11 @@ inline bool operator!=(const ViewportDrag &a, const ViewportDrag &b) {
 // go; empty none), and `at`, a point of the picture in the viewport's units (a mission's paste: where
 // the copied records' middle lands; `has_at` false none). The MCP gaps lane's "click" (every kind with a
 // canvas): a click of the picture at `at`, the selection it makes as the canvas's click makes it, joined
-// as `mode` says (a Shift or Ctrl click's: Add, Toggle); `mode` is the click's alone.
+// as `mode` says (a Shift or Ctrl click's: Add, Toggle); `mode` is the click's alone. What a command acts
+// on that is no record (ADR 0046 DI-37): `item`, an item of the picture by the kind's token for it (a HUD
+// element's, "ammo_count"; "" the kind's own choice: the element picked), `handle` one of its handles by
+// its token ("move", "bottom_right"), and `field` and `value` one of its fields by its id and the value it
+// takes, as text (a HUD element's set: "ammocountpos.align", "center").
 struct ViewportCommand {
 	std::string name;
 	std::vector<NodeId> ids;
@@ -233,11 +237,16 @@ struct ViewportCommand {
 	float at_x = 0.0f;
 	float at_y = 0.0f;
 	SelectMode mode = SelectMode::Replace;
+	std::string item;
+	std::string handle;
+	std::string field;
+	std::string value;
 };
 
 inline bool operator==(const ViewportCommand &a, const ViewportCommand &b) {
 	return a.name == b.name && a.ids == b.ids && a.kind == b.kind && a.by == b.by && a.has_at == b.has_at &&
-			a.at_x == b.at_x && a.at_y == b.at_y && a.mode == b.mode;
+			a.at_x == b.at_x && a.at_y == b.at_y && a.mode == b.mode && a.item == b.item && a.handle == b.handle &&
+			a.field == b.field && a.value == b.value;
 }
 inline bool operator!=(const ViewportCommand &a, const ViewportCommand &b) {
 	return !(a == b);

@@ -6,6 +6,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <variant>
 
 #include <editor/assets/asset_kind.h>
@@ -674,15 +675,21 @@ JsonValue command_to_json(const ViewportCommand &command) {
 		out.set("at", std::move(at));
 	}
 	if (command.mode != SelectMode::Replace) out.set("mode", json_string(select_mode_token(command.mode)));
+	if (!command.item.empty()) out.set("item", json_string(command.item));
+	if (!command.handle.empty()) out.set("handle", json_string(command.handle));
+	if (!command.field.empty()) out.set("field", json_string(command.field));
+	if (!command.value.empty()) out.set("value", json_string(command.value));
 	return out;
 }
 
 bool command_from_json(const JsonValue &json, ViewportCommand &out, std::string &error) {
 	if (!json.is_object()) {
-		error = "\"command\" must be an object {name, ids, kind, by, at, mode}.";
+		error = "\"command\" must be an object {name, ids, kind, by, at, mode, item, handle, field, value}.";
 		return false;
 	}
-	if (!members_known(json, {"name", "ids", "kind", "by", "at", "mode"}, "command", error)) return false;
+	if (!members_known(json, {"name", "ids", "kind", "by", "at", "mode", "item", "handle", "field", "value"}, "command",
+			error))
+		return false;
 	ViewportCommand command;
 	const JsonValue *name = json.get("name");
 	if (!name || !name->is_string() || name->string.empty()) {
@@ -727,6 +734,28 @@ bool command_from_json(const JsonValue &json, ViewportCommand &out, std::string 
 	if (const JsonValue *mode = json.get("mode")) {
 		if (!mode->is_string() || !select_mode_from_token(mode->string, command.mode)) {
 			error = "\"command.mode\" is replace, add or toggle (a click's).";
+			return false;
+		}
+	}
+	// The item, its handle and its field by the kind's tokens; a value as text (a number given as one).
+	for (const auto &[member, slot] : {std::pair<const char *, std::string *>{"item", &command.item},
+	                                   {"handle", &command.handle}, {"field", &command.field}}) {
+		if (const JsonValue *text = json.get(member)) {
+			if (!text->is_string() || text->string.empty()) {
+				error = std::string("\"command.") + member + "\" must be a token, a non-empty text.";
+				return false;
+			}
+			*slot = text->string;
+		}
+	}
+	if (const JsonValue *value = json.get("value")) {
+		if (value->is_string()) {
+			command.value = value->string;
+		} else if (value->is_number() && std::isfinite(value->number) && value->number == std::floor(value->number) &&
+				std::fabs(value->number) < 1e9) {
+			command.value = std::to_string(static_cast<long long>(value->number));
+		} else {
+			error = "\"command.value\" must be a text or a whole number.";
 			return false;
 		}
 	}
