@@ -197,6 +197,20 @@ bool lists_as_mission(const std::string &name) {
 	       strutil::ends_with_icase(name, ".npz");
 }
 
+std::string base_missing_words(const BuildTarget &target) {
+	if (!target.base_project.empty())
+		return "The project builds as the expansion " + target.expansion + ", which plays over the base game's project " +
+		       target.base_project + " as it ships, and " +
+		       (target.install.empty() ? std::string("that project does not open")
+		                               : "its export " + target.install + " does not mount as the game") +
+		       ": export the base game's project first (its File > Export, or opennova-project export), then Refresh.";
+	return target.install.empty()
+	               ? "The project builds as the expansion " + target.expansion +
+	                         ", which plays over the game install: choose its folder in File > Project settings..."
+	               : "The project builds as the expansion " + target.expansion + ", which plays over the game install, and " +
+	                         target.install + " does not mount as the game: choose its folder in File > Project settings...";
+}
+
 BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const RequirementReport &requirements,
                      const std::vector<Diagnostic> &document_findings, const BuildTarget &target,
                      const BaseNames *base, const ShippedFiles *shipped) {
@@ -207,15 +221,8 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 	if (target.is_expansion() && !base_mounts) {
 		// The expansion plays over the base game, which its build compares its files with and its gate
 		// reads (lean packing, BaseNames): no base, no build the editor can vouch for.
-		plan.diagnostics.push_back(make_finding(
-		        CoreFinding::BuildExpansionBaseMissing, DiagnosticSeverity::Error,
-		        target.install.empty()
-		                ? "The project builds as the expansion " + target.expansion +
-		                          ", which plays over the game install: choose its folder in File > Project settings..."
-		                : "The project builds as the expansion " + target.expansion + ", which plays over the game "
-		                                                                               "install, and " +
-		                          target.install + " does not mount as the game: choose its folder in File > Project "
-		                                           "settings..."));
+		plan.diagnostics.push_back(
+		        make_finding(CoreFinding::BuildExpansionBaseMissing, DiagnosticSeverity::Error, base_missing_words(target)));
 	}
 	if (target.is_expansion()) {
 		// An expansion's two archives always exist in its build, even empty: the game opens the pair by

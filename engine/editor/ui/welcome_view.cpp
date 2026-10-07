@@ -192,7 +192,7 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	std::vector<ProjectView::InstallExpansion> installed;
 	if (const InstallCheck *check = found ? check_.answer(install_.text) : nullptr)
 		for (const InstallCheck::Expansion &each : check->expansions) installed.push_back({ each.name, each.title, std::string() });
-	ExpansionChoice choice{ form.builds_on, form.as_expansion, form.expansion };
+	ExpansionChoice choice{ form.builds_on, form.as_expansion, form.expansion, form.base_project };
 	bool changed = false;
 	const bool expansion_ok =
 			expansion_.draw(choice, install_.text[0] ? installed : v.project.new_project_expansions, ProjectExpansion(), changed);
@@ -201,6 +201,7 @@ bool NewProjectForm::draw(Workspace &workspace) {
 		members.set("builds_on", io::JsonValue::make_string(choice.builds_on));
 		members.set("as_expansion", io::JsonValue::make_bool(choice.as_expansion));
 		members.set("expansion", io::JsonValue::make_string(choice.name));
+		members.set("base_project", io::JsonValue::make_string(choice.base_project));
 		window_requests::set_workspace(workspace, "new_project", std::move(members));
 	}
 	// A folder named that holds no install refuses the project (the session says why, as it checks the
@@ -218,7 +219,8 @@ bool NewProjectForm::draw(Workspace &workspace) {
 		const ProjectExpansion expansion = choice.value();
 		EditorRequest made = expansion.standalone() ? request::new_project(form.dir, form.title)
 		                                            : request::new_expansion_project(form.dir, form.title, expansion.name,
-		                                                                             expansion.builds_on);
+		                                                                             expansion.builds_on, true,
+		                                                                             expansion.base_project);
 		made.game_install = install;
 		workspace.request(std::move(made));
 	}
