@@ -227,6 +227,8 @@ bool MenuRuntime::open_document(const mnu::Document *doc, const std::string &men
 	open_popup_id_ = -1;
 	frame_popup_index_ = -1;
 	last_claim_ = -1;
+	// Its windows are new: none holds a sound state.
+	sound_pump_.reset();
 	if (doc == nullptr) return false;
 	index_.build(*doc);
 	index_document_();
@@ -1312,15 +1314,36 @@ void MenuRuntime::play_widget_state_sound(int id, const std::string &state_token
 }
 
 void MenuRuntime::play_sound_(const mnu::Window &w, const std::string &state_token) {
-	for (const mnu::Sound &sound : w.sounds) {
-		if (!strutil::iequals(sound.state, state_token)) continue;
-		MenuEvent e;
-		e.kind = MenuEvent::Kind::Sound;
-		e.text = sound.file;
-		e.text2 = sound.trigger;
-		emit_(e);
-		return;
-	}
+	// The state's slot: the last row of it with a TRIGGER (menu_window_sound).
+	const mnu::Sound *sound = menu_window_sound(w, menu_sound_state_of(state_token));
+	if (sound == nullptr) return;
+	MenuEvent e;
+	e.kind = MenuEvent::Kind::Sound;
+	e.text = sound->file;
+	e.text2 = sound->trigger;
+	emit_(e);
+}
+
+bool MenuRuntime::sound_reached_(int id) const {
+	// A widget of the current screen shown up its chain; while a popup is open, one of its subtree
+	// alone [orig: CWnd_ProcessMouseEvent @ 0x647a21 returns at once on a hidden widget, and its
+	// children go unpumped; CUIScene_EndFrame @ 0x63e600 pumps the open popup alone].
+	if (frame_index(id) < 0 || !drawn_(id)) return false;
+	if (open_popup_id_ < 0) return true;
+	for (int w = id; w >= 0; w = parent_window_(w))
+		if (w == open_popup_id_) return true;
+	return false;
+}
+
+void MenuRuntime::sample_sounds_(int claim, bool button_down) {
+	const int id = id_at_index(claim);
+	std::vector<MenuSoundPump::Edge> edges;
+	// The claim is under the mouse only while visible in the hierarchy (shown and enabled up its
+	// chain) [orig: CWnd_ProcessMouseEvent @ 0x647a27 -> CWnd_IsVisibleInHierarchy @ 0x646290].
+	sound_pump_.sample(id >= 0, uint64_t(id >= 0 ? id : 0), id >= 0 && visible_in_hierarchy_(id), button_down,
+			[this](uint64_t key) { return sound_reached_(int(key)); }, edges);
+	for (const MenuSoundPump::Edge &edge : edges)
+		play_widget_state_sound(int(edge.key), menu_sound_state_token(edge.state));
 }
 
 void MenuRuntime::emit_value_changed_for_(int id, int row) {
@@ -1452,9 +1475,14 @@ void MenuRuntime::process_mouse(float x, float y, bool button_down, uint32_t now
 	// The CScrollWnd interaction (arrows/track/shuttle drag) lives in the
 	// engine pump; its value changes arrive through on_frame_scroll_value.
 	bool scroll_owned = false;
+	// A click inside the frame's pump (on_widget_clicked) may show another screen or open another
+	// document: the claim then indexes the screen it left, and the next sample plays its sounds.
+	const uint32_t generation = open_generation_;
+	const std::string screen = current_screen_;
 	const int claim = frame_->process_mouse(x, y, button_down, scroll_owned);
 	if (frame_ == nullptr) return;
 	frame_->set_cursor_state(false, x, y);
+	if (open_generation_ == generation && current_screen_ == screen) sample_sounds_(claim, button_down);
 	if (claim != last_claim_) {
 		on_claim_changed_(last_claim_, claim);
 		last_claim_ = claim;
@@ -1479,13 +1507,11 @@ bool MenuRuntime::process_wheel(float x, float y, int steps) {
 }
 
 void MenuRuntime::on_claim_changed_(int previous, int current) {
-	// The hover sound edges ride the visual-state transitions
-	// [orig: CWnd_ProcessMouseEvent @0x647a00 — MOUSEIN on entering state
-	// 2/3, MOUSEOUT on leaving the widget].
+	// The claim's edges for the embedder's observers; the sounds are the pump's
+	// (sample_sounds_).
 	if (previous >= 0) {
 		const int prev_id = id_at_index(previous);
 		if (prev_id >= 0) {
-			play_widget_state_sound(prev_id, "MOUSEOUT");
 			MenuEvent e;
 			e.kind = MenuEvent::Kind::HoverChanged;
 			e.id = prev_id;
@@ -1496,7 +1522,6 @@ void MenuRuntime::on_claim_changed_(int previous, int current) {
 	if (current >= 0 && frame_ != nullptr && !frame_->is_widget_disabled(current)) {
 		const int id = id_at_index(current);
 		if (id >= 0) {
-			play_widget_state_sound(id, "MOUSEIN");
 			MenuEvent e;
 			e.kind = MenuEvent::Kind::HoverChanged;
 			e.id = id;
@@ -1568,7 +1593,9 @@ void MenuRuntime::on_widget_clicked(int index) {
 	}
 	// The pump's click plays the SELECTED sound, then the click event [orig:
 	// CWnd_ProcessMouseEvent @ 0x647a00 — the state-3 sound, then vtable+28
-	// with 0x3000001].
+	// with 0x3000001]: its sound state let go, so the next sample with the
+	// mouse still there plays MOUSEIN again (menu_sound.h).
+	sound_pump_.click(uint64_t(id));
 	play_widget_state_sound(id, "SELECTED");
 	activate(id);
 }
@@ -1923,6 +1950,7 @@ bool MenuRuntime::scan_hotkeys_(bool virtual_key, int key) {
 		break;
 	}
 	if (winner < 0) return false;
+	sound_pump_.click(uint64_t(winner));
 	play_widget_state_sound(winner, "SELECTED");
 	activate(winner);
 	return true;

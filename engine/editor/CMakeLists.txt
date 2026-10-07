@@ -192,6 +192,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_render_check.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_report.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_screen_render.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_sounds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_camera.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_canvas.cpp
@@ -372,6 +373,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/inspector_layout.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/inspector_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/main_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_logic_view.cpp

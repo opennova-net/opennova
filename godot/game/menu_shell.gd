@@ -153,6 +153,10 @@ var _sound_profile: LwfData
 var _frame_stats: FrameStats = null
 var _player_options: PlayerOptions = null
 var _options_controller: OptionsMenuController = null
+# The window sounds the menu played, the last 16 oldest first, each numbered: what the game MCP's game_menu reads
+# of them (DI-34: the editor's menu preview plays the same pump).
+var _sounds_played: Array[Dictionary] = []
+var _sound_count := 0
 
 var _menu_cache: Dictionary = {}            # filename -> MnuDocument
 # The screen history across .mnu files and a mission is the driver's
@@ -347,6 +351,7 @@ func _assemble_assets() -> void:
 	_driver.url_requested.connect(_on_url_requested)
 	_driver.widget_activated.connect(_on_widget_activated)
 	_driver.list_activated.connect(_on_list_activated)
+	_driver.sound_requested.connect(_on_sound_requested)
 	if _player_options == null:
 		_player_options = PlayerOptions.new()
 	_options_controller = OptionsMenuController.new()
@@ -585,6 +590,13 @@ func _on_widget_activated(_id: int, widget_name: String) -> void:
 # The catalog is the resource seam; filtering, selection and ACCEPT live in the engine.
 func _seed_mission_list(id: int) -> void:
 	_driver.seed_mission_list(id, MissionCatalog.rows(_root))
+
+
+func _on_sound_requested(file: String, trigger: String) -> void:
+	_sound_count += 1
+	_sounds_played.append({"seq": _sound_count, "file": file, "trigger": trigger})
+	if _sounds_played.size() > 16:
+		_sounds_played.pop_front()
 
 
 func _on_list_activated(id: int, row: int) -> void:
@@ -996,6 +1008,7 @@ func menu_snapshot(include_widgets: bool = true) -> Dictionary:
 		"screens": _driver.get_screen_names(),
 		"in_game": _in_game,
 		"stack_depth": _driver.get_screen_history_depth(),
+		"sounds": _sounds_played.duplicate(true),
 		"underlay": {
 			"active_slots": _underlay.get_active_slot_count() if _underlay != null else 0,
 			"startup_layout": _underlay.is_startup_layout() if _underlay != null else false,
@@ -1040,6 +1053,18 @@ func menu_press(widget_name: String) -> bool:
 		_driver.process_mouse(local, false)
 		return true
 	return false
+
+
+# One raw pump sample at design coords with the button held or not, as a
+# motion is: the claim's hover and the window sounds it plays. Returns the hit
+# widget index (-1 for none).
+func menu_move_at(design_pos: Vector2, down: bool) -> int:
+	if _driver == null or _frame == null or not is_visible_in_tree():
+		return -1
+	var local := _design_to_local(design_pos)
+	var hit := _frame.hit_test(local)
+	_driver.process_mouse(local, down)
+	return hit
 
 
 # Raw pump press+release at design coords (list rows, combo popups, spin

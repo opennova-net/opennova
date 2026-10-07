@@ -1657,6 +1657,14 @@ target_link_libraries(menu_runtime_test PRIVATE opennova_runtime)
 target_compile_features(menu_runtime_test PRIVATE cxx_std_17)
 add_test(NAME menu_runtime COMMAND menu_runtime_test)
 
+# The menu's sound edges (menu/menu_sound.h): which SOUND row a window plays for a state,
+# and when the mouse pump plays it, per window (MOUSEIN, MOUSEOUT, SELECTED and the click's
+# let-go), which the runtime and the editor's menu preview (DI-34) share.
+add_executable(menu_sound_test menu/menu_sound_test.cpp)
+target_link_libraries(menu_sound_test PRIVATE opennova_runtime)
+target_compile_features(menu_sound_test PRIVATE cxx_std_17)
+add_test(NAME menu_sound COMMAND menu_sound_test)
+
 # The menu's screen history across files and a mission (menu/screen_history.h) and the
 # menu mode's leave and re-entry over it: leaving a mission returns to the screen it
 # was started from (D-MNU-28).
@@ -4839,6 +4847,13 @@ add_executable(editor_clip_sounds_test editor/clip_sounds_test.cpp)
 target_link_libraries(editor_clip_sounds_test PRIVATE opennova_editor)
 target_include_directories(editor_clip_sounds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_clip_sounds COMMAND editor_clip_sounds_test)
+
+# DI-34: a menu's sounds heard in its preview: the game's mouse over the picture runs the game's pump of the
+# windows' sounds (the runtime's MenuSoundPump), each row's set from its own bank at the menu's volume.
+add_executable(editor_menu_sounds_test editor/menu_sounds_test.cpp)
+target_link_libraries(editor_menu_sounds_test PRIVATE opennova_editor)
+target_include_directories(editor_menu_sounds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_menu_sounds COMMAND editor_menu_sounds_test)
 
 # DI-24: a clip's fire events fire the item's ammo in the model preview (preview/preview_clip_fire, the weapon
 # range's soldier shots), over minted fixtures alone.
