@@ -830,6 +830,11 @@ void field_row(Workspace &workspace, Controls &controls, const Document &documen
 			set(workspace, document, targets, schema.id, picked_value(picking, picked), false);
 	} else {
 		value_control(workspace, controls.typed, document, targets, field, value, false, mixed);
+		// A text reference completes as it is typed (DI-09): the names its text begins, under its box.
+		std::string picked;
+		if (picks_reference(field) && present && !mixed &&
+		    controls.picker.draw_completions(workspace, document, address, field, value, picked))
+			set(workspace, document, targets, schema.id, picked_value(field, picked), false);
 	}
 	if (about) ui_kit::tooltip(about);
 	if (present) drop_target(workspace, document, targets, field, value);

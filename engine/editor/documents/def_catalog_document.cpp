@@ -27,15 +27,17 @@ std::vector<SourceIssue> source_issues(const DefParseReport &report) {
 const ItemsFileState *items_state(const FileState *state) { return dynamic_cast<const ItemsFileState *>(state); }
 
 // A def's texture field's role (ADR 0046 S18, documents/texture_roles.h), by the field: HUD art alpha
-// only for a weapon's HUD icon, its clip and round graphics, its crosshair and an item's HUD image
-// [orig: HUD_LoadAllTextures @ 0x59E248..0x59E26A, the ItemDef's +0xA74 in mode 1]; a menu image for a
-// weapon's loadout icon [orig: CTextureManager_LoadOrFindTexture @ 0x654980]; a sight card for a
-// sight's texture (render-material-re.md "The game's texture loaders", the role table). None (-1) for a
-// field whose loader the game is not witnessed using (a weapon's crosshair_secondary): the name as
-// written. (An item's shadow_texture the game never loads: refine_field marks it ignored.)
+// only for a weapon's HUD icon, its clip and round graphics, its two crosshairs, its commander reticle,
+// its slot bar icon and an item's HUD image [orig: HUD_LoadAllTextures @ 0x59E248..0x59E26A, the ItemDef's
+// +0xA74 in mode 1; WeaponDefs_ParseLineCallback @ 0x544966, @ 0x5449A6, @ 0x544A0B, @ 0x544A52;
+// interface/hud-re.md, the alpha mode's loads]; a menu image for a weapon's loadout icon [orig:
+// CTextureManager_LoadOrFindTexture @ 0x654980]; a sight card for a sight's texture (render-material-re.md
+// "The game's texture loaders", the role table). None (-1) for a field whose loader the game is not
+// witnessed using: the name as written. (An item's shadow_texture the game never loads: refine_field marks
+// it ignored.)
 int32_t def_texture_role_arg(const std::string &field) {
 	if (field == "hudicon" || field == "hudclipgfx_texture" || field == "hudrndgfx_texture" || field == "crosshair" ||
-	    field == "hud_image")
+	    field == "crosshair_secondary" || field == "commanders_x" || field == "hud_loadout_select" || field == "hud_image")
 		return texture_role_arg(TextureRoleId::HudAlphaOnly);
 	if (field == "loadout_menu_icon") return texture_role_arg(TextureRoleId::MenuImage);
 	if (field == "texture") return texture_role_arg(TextureRoleId::SightCard);
@@ -376,19 +378,89 @@ void DefCatalogDocument::refine_field(const NodeAddress &address, FieldUse &use)
 		use.own_choices = true;
 		return;
 	}
-	if (use.reference != ReferenceKind::UserPoint) return;
-	// The user point is looked up on the item's graphic model [orig:
-	// Game_ResolveItemMaterialsAndSpawnBoneTrails @ 0x522ee0]; with no graphic nothing is.
+	if (use.reference != ReferenceKind::UserPoint && use.reference != ReferenceKind::AnimationKey) return;
+	// What the record's row names (an item's graphic, a weapon's models and map: a nested record's lookups read
+	// its owner's).
 	const Node *record = row(address.row);
-	Value graphic;
-	if (!record || !get({address.row, record->kind, 0}, "graphic", graphic) || !std::holds_alternative<std::string>(graphic) ||
-	    std::get<std::string>(graphic).empty()) {
-		use.reference = ReferenceKind::None;
+	const auto owner_names = [&](const char *field) {
+		Value value;
+		if (!record || !get({address.row, record->kind, 0}, field, value) || !std::holds_alternative<std::string>(value))
+			return std::string();
+		return std::get<std::string>(value);
+	};
+	const DefRecordKind kind = def_kind(address.kind);
+	const std::string &id = use.schema->id;
+	if (use.reference == ReferenceKind::AnimationKey) {
+		// An action's slot is found in its weapon's map [orig: Anim_InitActions @ 0x5421BD, the weapon's map at
+		// +0x174]; a weapon naming none has none ("Error, need to define a anim adm" @ 0x54218D).
+		use.scope = animation_map_scope(owner_names("animadm"));
+		if (use.scope.empty()) use.reference = ReferenceKind::None;
 		return;
 	}
-	std::string model = basename_of(std::get<std::string>(graphic));
-	if (path_of(model).extension().empty()) model += ".3di";
-	use.scope = strutil::to_upper(model);
+	// The model whose user points the lookup reads; with none nothing is looked up.
+	std::string model;
+	bool first_16 = false;
+	if (kind == DefRecordKind::Item && id.rfind("particlefx", 0) == 0) {
+		// An item's particle slot: the graphic's first 16 [orig: Game_ResolveItemMaterialsAndSpawnBoneTrails @
+		// 0x522ee0 over ItemDef_GetBoneMaskByName @ 0x49ea40].
+		model = owner_names("graphic");
+		first_16 = true;
+	} else if (kind == DefRecordKind::Item && id == "virtual_display_userpoint") {
+		// The driver's eye in the cockpit model [orig: EntityDef_LoadModelsAndCallbacks @ 0x43A5DD..0x43A632].
+		model = owner_names("virtual_display");
+	} else if (kind == DefRecordKind::Item || kind == DefRecordKind::Attachment) {
+		// The weapon points, the launch points, a mounted gun's point: the item's graphic [orig:
+		// Entity_InitBoneReferences @ 0x441470; Entity_InitOrganicAI @ 0x4BFE8F; Entity_InitFromModel @ 0x40DE30].
+		model = owner_names("graphic");
+	} else if (kind == DefRecordKind::Weapon || kind == DefRecordKind::Action) {
+		// A weapon's launch point and an action's effect point on its third-person model [orig:
+		// WeaponDef_ResolveAllReferences @ 0x5402EF, @ 0x5403E7]; an action's on its first-person model too, an
+		// edge of its own (catalog_references), and there alone where the weapon has no third-person model.
+		model = owner_names("gfx3");
+		if (model.empty() && kind == DefRecordKind::Action) model = owner_names("gfx1");
+	}
+	use.scope = user_point_scope(model, first_16);
+	if (use.scope.empty()) use.reference = ReferenceKind::None;
+}
+
+void catalog_references(const Document &document, Extracted &out) {
+	const auto *catalog = dynamic_cast<const DefCatalogDocument *>(&document);
+	if (!catalog || catalog->kind() != AssetKind::WeaponDefs) return;
+	// An action's effect point is looked up on its weapon's first-person model as well as its third-person one
+	// [orig: WeaponDef_ResolveAllReferences @ 0x540377 (+57) and @ 0x5403E7 (+56), each over
+	// modelgpm_FindUserpointByName @ 0x5B2170]: the field's reference is the third-person model's
+	// (refine_field), this the first-person one's, where the two are different files.
+	const NodeKind action_kind = node_kind(CatalogKind::Action);
+	for (const auto &row : document.rows()) {
+		if (!row || def_kind(row->kind) != DefRecordKind::Weapon) continue;
+		const NodeAddress weapon{row->id, row->kind, 0};
+		Value gfx1, gfx3;
+		if (!document.get(weapon, "gfx1", gfx1) || !document.get(weapon, "gfx3", gfx3)) continue;
+		const auto *first = std::get_if<std::string>(&gfx1);
+		const auto *third = std::get_if<std::string>(&gfx3);
+		if (!first || !third || first->empty() || third->empty()) continue;
+		const std::string scope = user_point_scope(*first, false);
+		if (scope == user_point_scope(*third, false)) continue;
+		document.walk_records(*row, [&](const NodeAddress &nested, const Document::Placement &) {
+			Value point;
+			if (nested.kind != action_kind || !document.get(nested, "particleuserpoint", point)) return true;
+			const auto *name = std::get_if<std::string>(&point);
+			// A name its reader reads as none is no reference, as the field's (reference_target).
+			if (!name || name->empty() || strutil::iequals(*name, "none") || strutil::iequals(*name, "null")) return true;
+			GraphEdge edge;
+			edge.source = document.path();
+			edge.record = document.record_path(nested);
+			edge.locator = document.locator(nested);
+			edge.address = nested;
+			edge.field = "particleuserpoint";
+			edge.kind = ReferenceKind::UserPoint;
+			edge.value = *name;
+			edge.scope = scope;
+			edge.rewritable = true;
+			out.edges.push_back(std::move(edge));
+			return true;
+		});
+	}
 }
 
 void DefCatalogDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) const {
