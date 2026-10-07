@@ -51,7 +51,7 @@ public:
 	void tick(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) override;
 	void resize(int width, int height) override;
 	// Where the canvas has the mouse over the picture this frame (its pixels), for the tick's pointer.
-	void pointer(bool over, float x, float y) override;
+	void pointer(bool hovered, bool over, float x, float y) override;
 
 	MenuFrame *frame() const { return frame_; }
 
@@ -88,7 +88,9 @@ private:
 	std::shared_ptr<const opennova::editor::ProjectAssetSource> assets_;
 	std::unique_ptr<Build> build_; // the configure in flight (null: none)
 	opennova::editor::OperationProgress done_; // the last configure's units, all done
-	// The mouse over the picture as this frame's canvas drew it (pointer()), taken by the tick.
+	// The mouse over the picture as this frame's canvas drew it (pointer()), taken by the tick: over it at
+	// all, and where the game's pointer is drawn.
+	bool canvas_hovered_ = false;
 	bool canvas_pointer_ = false;
 	float canvas_x_ = 0.0f;
 	float canvas_y_ = 0.0f;
