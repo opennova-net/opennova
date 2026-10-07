@@ -126,7 +126,7 @@ void slot_blip(MapCompile &c, const HudMinimapMarker &marker, uint8_t layer) {
 		// overlay pass's opaque alpha. This folds the bit5 loop-1 medic leg
 		// (whose player-slot table has no producer here) onto the bank blip.
 		// [orig: HUD_DrawEntityLabelsAndMarkers @0x5a49e0 — the
-		//  AnimMap_IsSlotActive(playerClass, 8) test @0x5a4ab3, the rect
+		//  CharAttr_ClassHasAttribute(playerClass, 8) test @0x5a4ab3, the rect
 		//  @0x5a4cd6..0x5a4d24 (flt_7C44B8 = 4.0, flt_7C691C = 4.5,
 		//  flt_7C3B94 = 0.5), HUD_DrawMedicCrossQuad @0x5a4d40]
 		if (!marker.entity_known) return;

@@ -2078,7 +2078,7 @@ add_test(NAME lfp_feed COMMAND lfp_feed_test)
 # charattr.def ATTRIBUTES -> World::class_attribute_flags -> the friendly-tag
 # medic plate: the whole per-class word, the first-missing-section stop, the
 # first-section-wins duplicate rule, the 16-slot wrap and the S2C 0x41 clear
-# [orig: CharAttr_LoadFromDef @0x412140; AnimMap_IsSlotActive @0x4125e0].
+# [orig: CharAttr_LoadFromDef @0x412140; CharAttr_ClassHasAttribute @0x4125e0].
 add_executable(charattr_flags_test world/charattr_flags_test.cpp)
 target_link_libraries(charattr_flags_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(charattr_flags_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -4205,6 +4205,14 @@ opennova_add_mixed_test(def_write COMMAND def_write_test)
 # hudpos.def's writer (formats/def/def_hudpos_write.h, ADR 0003; the editor deep-integration plan's DI-37):
 # read, written and read again the same model, its bytes canonical; the retail legs JO:CA's own hudpos.def
 # off the packed install (base and each expansion) and the extracted tree.
+# charattr.def's loader and writer (formats/charattr, ADR 0003): the classes in order to the first
+# missing, the first section of a label, each value's source and the unread sections; written and read
+# again the same rows; the retail legs JO:CA's own file (classes 1..9, CHARACTER8's CRC 0x22A25E01).
+add_executable(charattr_test charattr/charattr_test.cpp)
+target_link_libraries(charattr_test PRIVATE opennova_base opennova_formats)
+target_include_directories(charattr_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(charattr COMMAND charattr_test)
+
 add_executable(def_write_hudpos_test def/def_write_hudpos_test.cpp)
 target_link_libraries(def_write_hudpos_test PRIVATE opennova_base opennova_formats)
 target_include_directories(def_write_hudpos_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

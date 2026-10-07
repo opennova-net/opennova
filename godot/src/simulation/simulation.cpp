@@ -546,7 +546,7 @@ std::function<void(bool)> Simulation::role_bringup_tail() {
 	return [this](bool fresh_joiner_runtime) {
 		runtime_ = active_role().client_runtime();
 		if (fresh_joiner_runtime) {
-			install_charattr_challenge_table();
+			install_charattr_table();
 			install_character_join_vars();
 			install_join_integrity_profile();
 			install_expansion_version_root();
@@ -693,10 +693,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	net_.mission_text = host_boot_.mission_text;
 	net_.terrain_til_data = host_boot_.terrain_til;
 	assets_.env_water_z_q16 = host_boot_.water_z_q16;
-	if (host_role_ != nullptr) {
-		net_.charattr_challenge_table = host_boot_.charattr;
-		net_.charattr_challenge_loaded = host_boot_.charattr_loaded;
-	}
+	if (host_role_ != nullptr) net_.charattr_table = host_boot_.charattr;
 	finish_kernel_boot();
 	// The binding-side resolver inputs (the joiner's decoded rows read the
 	// anim root/item db Refs) and the collision Ref retention.
