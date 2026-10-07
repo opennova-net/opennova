@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include <editor/preview/definition_viewport.h>
+#include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_viewport.h>
 #include <editor/preview/viewports.h>
 #include <editor/session/session_core.h>
@@ -28,6 +29,7 @@ ViewportModel *previewed(SessionCore &core, ViewportKind kind) {
 const std::vector<ClipSoundFired> *fired_by(const ViewportModel &model) {
 	if (const auto *clip = dynamic_cast<const ModelViewport *>(&model)) return &clip->sounds_fired();
 	if (const auto *definition = dynamic_cast<const DefinitionViewport *>(&model)) return &definition->sounds_fired();
+	if (const auto *mission = dynamic_cast<const MissionViewport *>(&model)) return &mission->sounds_fired();
 	return nullptr;
 }
 
@@ -52,6 +54,16 @@ void fire_clip_sounds(SessionCore &core) {
 		                                 viewports.clip_sound_seq())
 		                 .empty() ||
 		        fired;
+	// A mission's Shoot tool's shots (DI-23), each mission viewport's.
+	std::vector<std::string> missions;
+	for (size_t i = 0; i < viewports.size(); ++i)
+		if (viewports.at(i).kind() == ViewportKind::Mission) missions.push_back(viewports.at(i).path());
+	for (const std::string &mission_path : missions)
+		if (auto *mission = dynamic_cast<MissionViewport *>(viewports.find(mission_path, ViewportKind::Mission)))
+			fired = !mission->fire_sounds(viewports.clock(), view.project.scan.get(), core.sound_selector(),
+			                              viewports.clip_sound_seq())
+			                 .empty() ||
+			        fired;
 	if (fired) core.touch(ViewConcern::Viewports);
 }
 
