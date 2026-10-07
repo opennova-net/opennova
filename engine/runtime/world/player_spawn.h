@@ -43,7 +43,7 @@ struct PlayerSpawn {
     // [orig: Server_PlayerAdd @0x51cbc0 writes entity+0x78 = conn->connection_id]
     uint32_t owner_connection_id = 0;
     // The soldier class (5..9 MP personas; entity+0x294 playerClass). Default 8 (rifleman) — the class
-    // the client re-resolves the soldier model from at round-load [AnimMap_GetSlotPropertyInt(class,lod)].
+    // the client re-resolves the soldier model from at round-load [CharAttr_GetCammoTypeId(class,lod)].
     // The spawn seed MUST carry it, or the World entity keeps player_class 0 (which build_pool0 masks to 8
     // on the wire, but the host's own logic then reads 0). [net-re §5.2b; host-diag 2026-07-01]
     uint8_t player_class = 8;

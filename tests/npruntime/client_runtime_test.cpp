@@ -23,7 +23,7 @@
 //      (NOT the dvxi5 fallback), and a HostClient ClientRuntime folds it off the loopback. Guards that
 //      the host's own local view is no longer starved and anchors correctly.
 
-#include <runtime/inmatch/charattr_challenge.h>
+#include <runtime/inmatch/charattr_table.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/novaworld_link.h>
@@ -3735,8 +3735,18 @@ bool run_host_pump_hook_observes_remote_before_first_tick() {
 //  NapiNPClientMsg_0x043 @0x42FA90 (-> 0x08), NapiNPClientMsg_0x068 @0x42DAA0 (-> 0x3D);
 //  host side NapiNPServerMsg_AnimChecksumRequest @0x501D40 (discard @0x501d71 + counter
 //  reset @0x501d79), NapiNPServerMsg_0x03D @0x500EC0, NapiNPServerMsg_ValidateTimeSync @0x502210]
-bool build_retail_class8_charattr_table(
-		inmatch::CharAttrChallengeTable &table) {
+// CR LF line ends, as charattr.def is stored: the ConfigFile reader ends a line at CR LF
+// and nowhere else (formats/configfile/config_file.h).
+std::string crlf(std::string_view text) {
+	std::string out;
+	for (char c : text) {
+		if (c == '\n') out += '\r';
+		out += c;
+	}
+	return out;
+}
+
+bool build_retail_class8_charattr_table(inmatch::CharAttrTable &table) {
 	// Sections 1..7 only need to exist: CharAttr_LoadFromDef stops at the
 	// first missing CHARACTER section. CHARACTER8 uses the authoritative JO
 	// resource.pff/localres.pff text and therefore produces the captured row.
@@ -3762,41 +3772,45 @@ ARCTIC_CAMMO    = 5305
 RUN_MODIFIER    = 0
 ATTRIBUTES      = KnifeBonus
 )CHARATTR";
-	return inmatch::parse_charattr_challenge_table(
-			reinterpret_cast<const uint8_t *>(source.data()),
-			source.size(), table);
+	const std::string text = crlf(source);
+	inmatch::charattr_load(table, reinterpret_cast<const uint8_t *>(text.data()), text.size());
+	return table.loaded;
 }
 
 // All sixteen sections present, every property S2C 0x41 can clear nonzero and distinct per
 // row, so a missed id or a wrong offset leaves a surviving dword the assertions can see.
-bool build_full_charattr_table(inmatch::CharAttrChallengeTable &table) {
+bool build_full_charattr_table(inmatch::CharAttrTable &table) {
 	std::string source;
 	for (int section = 1; section <= 16; ++section) {
 		const std::string n = std::to_string(section);
-		source += "[CHARACTER" + n + "]\n";
-		source += "STEALTH      = " + n + "1\n";
-		source += "HPBONUS      = " + n + "2\n";
-		source += "MANABONUS    = " + n + "3\n";
-		source += "RECOIL_MUTE  = " + n + "4\n";
-		source += "RELOAD_MUTE  = " + n + "5\n";
-		source += "XHAIR_MUTE   = " + n + "6\n";
-		source += "XHAIRDX_MUTE = " + n + "7\n";
-		source += "SCOPE_MUTE   = " + n + "8\n";
-		source += "ATTRIBUTES   = AutoScope, Medic\n";
+		source += "[CHARACTER" + n + "]\r\n";
+		source += "STEALTH      = " + n + "1\r\n";
+		source += "HPBONUS      = " + n + "2\r\n";
+		source += "MANABONUS    = " + n + "3\r\n";
+		source += "RECOIL_MUTE  = " + n + "4\r\n";
+		source += "RELOAD_MUTE  = " + n + "5\r\n";
+		source += "XHAIR_MUTE   = " + n + "6\r\n";
+		source += "XHAIRDX_MUTE = " + n + "7\r\n";
+		source += "SCOPE_MUTE   = " + n + "8\r\n";
+		source += "ATTRIBUTES   = AutoScope, Medic\r\n";
 	}
-	return inmatch::parse_charattr_challenge_table(
-			reinterpret_cast<const uint8_t *>(source.data()),
-			source.size(), table);
+	inmatch::charattr_load(table, reinterpret_cast<const uint8_t *>(source.data()), source.size());
+	return table.loaded;
+}
+
+// The class's 124 bytes as the checksum hashes them.
+std::array<uint8_t, charattr::kRowBytes> class_row(const inmatch::CharAttrTable &table, uint8_t class_id) {
+	return charattr::row_bytes(table.table.rows[static_cast<uint8_t>(class_id - 1u) & 0x0Fu]);
 }
 
 bool run_charattr_challenge_table_matches_retail() {
-	inmatch::CharAttrChallengeTable table;
+	inmatch::CharAttrTable table;
 	if (!expect(build_retail_class8_charattr_table(table),
 			"charattr parser accepts the authoritative CHARACTER syntax")) {
 		return false;
 	}
 
-	inmatch::CharAttrChallengeRow expected{};
+	std::array<uint8_t, charattr::kRowBytes> expected{};
 	auto put_u32 = [&](std::size_t offset, uint32_t value) {
 		expected[offset + 0] = static_cast<uint8_t>(value);
 		expected[offset + 1] = static_cast<uint8_t>(value >> 8);
@@ -3819,62 +3833,54 @@ bool run_charattr_challenge_table_matches_retail() {
 	put_u32(52, 5305);        // ARCTIC_CAMMO
 	put_u32(56, 0);           // RUN_MODIFIER; +60..123 remain zero
 
-	const inmatch::CharAttrChallengeRow *row =
-			inmatch::find_charattr_challenge_row(table, 8);
-	if (!expect(row != nullptr && *row == expected,
-			"CHARACTER8 is the exact 124-byte g_CharAttr row")) {
-		return false;
-	}
-	if (!expect(crc32_napi(row->data(), row->size()) == 0x22A25E01u,
+	const std::array<uint8_t, charattr::kRowBytes> row = class_row(table, 8);
+	if (!expect(row == expected, "CHARACTER8 is the exact 124-byte g_CharAttr row")) return false;
+	if (!expect(crc32_napi(row.data(), row.size()) == 0x22A25E01u,
 			"JO CHARACTER8 row has the capture-derived CRC 0x22A25E01")) {
 		return false;
 	}
-	if (!expect((0x0000F7EDu ^ 0x22A25E01u) == 0x22A2A9ECu &&
-	                    (0x0000B380u ^ 0x22A25E01u) == 0x22A2ED81u,
+	if (!expect(inmatch::charattr_class_checksum(table, 8, 0x0000F7EDu) == 0x22A2A9ECu &&
+	                    inmatch::charattr_class_checksum(table, 8, 0x0000B380u) == 0x22A2ED81u,
 			"the row reproduces both independent retail 0x1C replies")) {
 		return false;
 	}
-	if (!expect(inmatch::find_charattr_challenge_row(table, 0) == nullptr &&
-	                    inmatch::find_charattr_challenge_row(table, 17) == nullptr &&
-	                    inmatch::find_charattr_challenge_row(table, 255) == nullptr,
+	bool found = true;
+	if (!expect(inmatch::charattr_class_checksum(table, 0, 0x1234u, &found) == 0 && !found &&
+	                    inmatch::charattr_class_checksum(table, 17, 0x1234u, &found) == 0 && !found &&
+	                    inmatch::charattr_class_checksum(table, 255, 0x1234u, &found) == 0 && !found,
 			"class 0 and wrapped out-of-range classes fail the embedded-id check")) {
 		return false;
 	}
 
 	// Enumeration stops on the first missing section even if a later section
 	// exists in the file.
-	static constexpr std::string_view skipped =
-			"[CHARACTER1]\nSTEALTH=1\n[CHARACTER3]\nSTEALTH=3\n";
-	inmatch::CharAttrChallengeTable gap_table;
-	if (!expect(inmatch::parse_charattr_challenge_table(
-				reinterpret_cast<const uint8_t *>(skipped.data()),
-				skipped.size(), gap_table) &&
-	                    inmatch::find_charattr_challenge_row(gap_table, 1) != nullptr &&
-	                    inmatch::find_charattr_challenge_row(gap_table, 3) == nullptr,
+	const std::string skipped = crlf("[CHARACTER1]\nSTEALTH=1\n[CHARACTER3]\nSTEALTH=3\n");
+	inmatch::CharAttrTable gap_table;
+	inmatch::charattr_load(gap_table, reinterpret_cast<const uint8_t *>(skipped.data()), skipped.size());
+	if (!expect(gap_table.loaded && gap_table.table.rows[0].active && !gap_table.table.rows[2].active,
 			"first missing CHARACTER section terminates retail enumeration")) {
 		return false;
 	}
 
-	inmatch::CharAttrChallengeTable empty_table;
-	empty_table.rows[0].fill(0xFF);
-	const inmatch::CharAttrChallengeTable all_zero{};
-	if (!expect(!inmatch::parse_charattr_challenge_table(
-				nullptr, 0, empty_table) &&
-	                    empty_table.rows == all_zero.rows,
+	inmatch::CharAttrTable empty_table;
+	empty_table.table.rows[0].active = true;
+	empty_table.table.rows[0].stealth = 9.0f;
+	inmatch::charattr_load(empty_table, nullptr, 0);
+	if (!expect(!empty_table.loaded && charattr::same_rows(empty_table.table, charattr::Table{}),
 			"missing/empty source clears the table and leaves every slot inactive")) {
 		return false;
 	}
 
-	inmatch::CharAttrChallengeTable cleared = table;
-	inmatch::clear_charattr_challenge_property(cleared, 5);
-	inmatch::CharAttrChallengeRow expected_cleared = expected;
+	inmatch::CharAttrTable cleared = table;
+	inmatch::charattr_disable_property(cleared, 5);
+	std::array<uint8_t, charattr::kRowBytes> expected_cleared = expected;
 	std::fill(expected_cleared.begin() + 20, expected_cleared.begin() + 24, 0);
-	if (!expect(*inmatch::find_charattr_challenge_row(cleared, 8) == expected_cleared,
-			"property 5 clears exactly RECOIL_MUTE across the checksum row")) {
+	if (!expect(class_row(cleared, 8) == expected_cleared && cleared.disabled[5] == 1,
+			"property 5 clears exactly RECOIL_MUTE across the checksum row and disables it")) {
 		return false;
 	}
 	// The nine live property ids and the row offsets they zero.
-	// [orig: AnimMap_SetSlotProperty @0x412890 -- cases 0/2/3/4/5/6/7/8/9]
+	// [orig: CharAttr_SetProperty @0x412890 -- cases 0/2/3/4/5/6/7/8/9]
 	struct ClearCase {
 		uint8_t property_id;
 		std::size_t offset;
@@ -3890,19 +3896,19 @@ bool run_charattr_challenge_table_matches_retail() {
 			{8, 32}, // XHAIRDX_MUTE
 			{9, 24}, // RELOAD_MUTE
 	};
-	inmatch::CharAttrChallengeTable full;
+	inmatch::CharAttrTable full;
 	if (!expect(build_full_charattr_table(full),
 			"sixteen CHARACTER sections with every clearable property set")) {
 		return false;
 	}
 	constexpr uint32_t kClearSeed = 0x3D5D0000u;
 	for (const ClearCase &c : kClearMap) {
-		inmatch::CharAttrChallengeTable mutated = full;
-		inmatch::clear_charattr_challenge_property(mutated, c.property_id);
+		inmatch::CharAttrTable mutated = full;
+		inmatch::charattr_disable_property(mutated, c.property_id);
 		bool rows_match = true;
 		const auto field = static_cast<std::ptrdiff_t>(c.offset);
-		for (std::size_t r = 0; r < inmatch::kCharAttrChallengeRowCount; ++r) {
-			inmatch::CharAttrChallengeRow expected_row = full.rows[r];
+		for (uint8_t r = 1; r <= charattr::kClassCount; ++r) {
+			std::array<uint8_t, charattr::kRowBytes> expected_row = class_row(full, r);
 			// Falsifiability guard: the fixture must have made this dword nonzero.
 			rows_match = rows_match &&
 					std::any_of(expected_row.begin() + field,
@@ -3910,37 +3916,95 @@ bool run_charattr_challenge_table_matches_retail() {
 							[](uint8_t b) { return b != 0; });
 			std::fill(expected_row.begin() + field,
 					expected_row.begin() + field + 4, 0);
-			rows_match = rows_match && mutated.rows[r] == expected_row;
+			rows_match = rows_match && class_row(mutated, r) == expected_row;
 		}
 		const std::string rows_label = "S2C 0x41 property " +
 				std::to_string(c.property_id) +
 				" zeroes exactly its witnessed dword in all sixteen rows";
 		if (!expect(rows_match, rows_label.c_str())) return false;
-		const inmatch::CharAttrChallengeRow *before_row =
-				inmatch::find_charattr_challenge_row(full, 8);
-		const inmatch::CharAttrChallengeRow *after_row =
-				inmatch::find_charattr_challenge_row(mutated, 8);
-		if (!expect(before_row != nullptr && after_row != nullptr,
-				"the class-8 checksum row stays selectable across the clear")) {
-			return false;
-		}
-		const uint32_t before_reply =
-				kClearSeed ^ crc32_napi(before_row->data(), before_row->size());
-		const uint32_t after_reply =
-				kClearSeed ^ crc32_napi(after_row->data(), after_row->size());
 		const std::string crc_label = "S2C 0x41 property " +
 				std::to_string(c.property_id) + " moves the C2S 0x1C checksum";
-		if (!expect(before_reply != after_reply, crc_label.c_str())) return false;
+		if (!expect(inmatch::charattr_class_checksum(full, 8, kClearSeed) !=
+				            inmatch::charattr_class_checksum(mutated, 8, kClearSeed),
+				crc_label.c_str()))
+			return false;
 	}
-	// Only id 1 and ids >= 10 reach the original's default arm.
+	// Only id 1 and ids >= 10 reach the original's default arm: no row moves.
 	for (const uint8_t no_op_id : {uint8_t{1}, uint8_t{10}, uint8_t{255}}) {
-		inmatch::CharAttrChallengeTable untouched = full;
-		inmatch::clear_charattr_challenge_property(untouched, no_op_id);
+		inmatch::CharAttrTable untouched = full;
+		inmatch::charattr_disable_property(untouched, no_op_id);
 		const std::string label = "S2C 0x41 property " +
-				std::to_string(no_op_id) + " is an exact no-op";
-		if (!expect(untouched.rows == full.rows, label.c_str())) return false;
+				std::to_string(no_op_id) + " leaves every row as it was";
+		if (!expect(charattr::same_rows(untouched.table, full.table), label.c_str())) return false;
+	}
+	// A disabled property takes no later set: the latch gates the setter.
+	// [orig: CharAttr_SetProperty @0x4128b3]
+	inmatch::CharAttrTable latched = full;
+	inmatch::charattr_disable_property(latched, 2);
+	if (!expect(!inmatch::charattr_set_property(latched, 8, 2, 7.0f) && latched.table.rows[7].stealth == 0.0f &&
+	                    inmatch::charattr_set_property(latched, 8, 3, 7.0f) && latched.table.rows[7].hp_bonus == 7.0f,
+			"a disabled property's set is refused, another's goes through")) {
+		return false;
 	}
 	return true;
+}
+
+// The disable latches: the restriction step, S2C 0x42's eight packed latches and
+// the attribute reader's gate. [orig: CharAttr_ApplyMpRestrictions @0x4247d0,
+// CharAttr_PackDisabledProperties @0x412550, CharAttr_UnpackDisabledProperties
+// @0x4124d0, CharAttr_ClassHasAttribute @0x4125e0]
+bool run_charattr_latches_follow_retail() {
+	inmatch::CharAttrTable full;
+	if (!expect(build_full_charattr_table(full), "the full table loads")) return false;
+	if (!expect(inmatch::charattr_class_has_attribute(full, 8, charattr::kMedic) &&
+	                    !inmatch::charattr_class_has_attribute(full, 8, charattr::kKnifeBonus) &&
+	                    inmatch::charattr_pack_disabled(full) == 0,
+			"a loaded table answers its words and packs no latch")) {
+		return false;
+	}
+	inmatch::CharAttrTable restricted = full;
+	inmatch::CharAttrRestrictions all;
+	all.no_char_abilities = all.no_weapon_recoil = all.no_crosshair_spread = all.no_scope_drift = true;
+	inmatch::charattr_apply_restrictions(restricted, all);
+	const charattr::ClassRow &row = restricted.table.rows[7];
+	if (!expect(row.attributes == 0 && row.recoil_mute == 0.0f && row.xhair_mute == 0.0f &&
+	                    row.scope_mute == 0.0f && row.stealth != 0.0f && row.xhairdx_mute != 0.0f,
+			"the four restrictions zero ATTRIBUTES, RECOIL_MUTE, XHAIR_MUTE and SCOPE_MUTE alone")) {
+		return false;
+	}
+	// bit 1 property 0, bit 2 property 6, bit 3 property 5, bit 4 property 7.
+	if (!expect(inmatch::charattr_pack_disabled(restricted) == 0x001Eu,
+			"the restricted latches pack as S2C 0x42's 0x001E")) {
+		return false;
+	}
+	if (!expect(!inmatch::charattr_class_has_attribute(restricted, 8, charattr::kMedic),
+			"a disabled ATTRIBUTES answers no class")) {
+		return false;
+	}
+	// The latch alone gates the reader: a 0x42 bit 1 over an unrestricted table.
+	inmatch::CharAttrTable joiner = full;
+	inmatch::charattr_unpack_disabled(joiner, 0x0002u);
+	const std::array<uint32_t, charattr::kClassCount> words = inmatch::charattr_class_attribute_rows(joiner);
+	if (!expect(!inmatch::charattr_class_has_attribute(joiner, 8, charattr::kMedic) &&
+	                    joiner.table.rows[7].attributes == (charattr::kAutoScope | charattr::kMedic) &&
+	                    std::all_of(words.begin(), words.end(), [](uint32_t w) { return w == 0; }),
+			"0x42's ATTRIBUTES latch hides every class's words without zeroing them")) {
+		return false;
+	}
+	// The eight packed latches round-trip; the other six are kept.
+	inmatch::CharAttrTable packed = full;
+	packed.disabled[charattr::kStealth] = 1;
+	inmatch::charattr_unpack_disabled(packed, 0x303Fu);
+	if (!expect(inmatch::charattr_pack_disabled(packed) == 0x303Fu && packed.disabled[charattr::kStealth] == 1 &&
+	                    packed.disabled[charattr::kRunModifier] == 1 && packed.disabled[charattr::kHpBonus] == 1,
+			"S2C 0x42's eight latches round-trip and the unpacked six stay")) {
+		return false;
+	}
+	inmatch::charattr_unpack_disabled(packed, 0);
+	int32_t run = -9;
+	return expect(inmatch::charattr_pack_disabled(packed) == 0 && packed.disabled[charattr::kStealth] == 1 &&
+	                      inmatch::charattr_get_int(packed, 8, charattr::kRunModifier, run) && run == 0,
+			"a zero word clears the eight latches, and RUN_MODIFIER reads again");
 }
 
 bool run_periodic_request_quartet_is_answered() {
@@ -3957,7 +4021,7 @@ bool run_periodic_request_quartet_is_answered() {
 			server_tx, server_scrk, 1u,
 			{
 					make_protocol_message(0x39, {0x5D, 0x3D, 0x00, 0x00}), // CRC seed
-					make_protocol_message(0x42, {0x00, 0x00}),             // input-state flags
+					make_protocol_message(0x42, {0x00, 0x00}),             // charattr latches
 					make_protocol_message(0x43, {0x11, 0x22, 0x33, 0x44}), // server stamp
 					make_protocol_message(0x68, {0x32, 0x00, 0x00, 0x00}), // page start 50
 			});
@@ -4027,14 +4091,13 @@ bool run_periodic_request_quartet_is_answered() {
 	// deliberately ordered/duplicated renderer-definition snapshot. The response
 	// must use the challenge seed and page the frozen values VERBATIM, at most fifty
 	// dwords after the echoed cursor. This is not a live network-entity census.
-	inmatch::CharAttrChallengeTable charattr;
-	if (!expect(build_retail_class8_charattr_table(charattr),
+	inmatch::CharAttrTable class8_table;
+	if (!expect(build_retail_class8_charattr_table(class8_table),
 			"build production charattr challenge table")) {
 		return false;
 	}
-	const inmatch::CharAttrChallengeRow class8_row =
-			*inmatch::find_charattr_challenge_row(charattr, 8);
-	joiner.set_charattr_challenge_table(charattr);
+	const std::array<uint8_t, charattr::kRowBytes> class8_row = class_row(class8_table, 8);
+	joiner.set_charattr_table(class8_table);
 	std::vector<uint32_t> model_snapshot;
 	for (uint32_t i = 0; i < 60; ++i)
 		model_snapshot.push_back(0xC0000000u + i);
@@ -4125,7 +4188,7 @@ bool run_periodic_request_quartet_is_answered() {
 			"same-packet 0x41 then 0x39 emits one ordered checksum reply")) {
 		return false;
 	}
-	inmatch::CharAttrChallengeRow cleared_row = class8_row;
+	std::array<uint8_t, charattr::kRowBytes> cleared_row = class8_row;
 	std::fill(cleared_row.begin() + 20, cleared_row.begin() + 24, 0);
 	const uint32_t cleared_crc =
 			kChallenge ^ crc32_napi(cleared_row.data(), cleared_row.size());
@@ -4137,6 +4200,10 @@ bool run_periodic_request_quartet_is_answered() {
 	};
 	if (!expect(cleared_messages[0].payload == cleared_crc_body,
 			"S2C 0x41 property 5 clears RECOIL_MUTE before the next 0x39")) {
+		return false;
+	}
+	if (!expect(joiner.charattr_table().disabled[charattr::kRecoilMute] == 1,
+			"S2C 0x41 raises the property's disable latch")) {
 		return false;
 	}
 
@@ -4165,10 +4232,31 @@ bool run_periodic_request_quartet_is_answered() {
 			"ordered class changes yield two challenge replies")) {
 		return false;
 	}
-	return expect(ordered_messages[0].payload ==
+	if (!expect(ordered_messages[0].payload ==
 	                      std::vector<uint8_t>({0, 0, 0, 0}) &&
 	                      ordered_messages[1].payload == cleared_crc_body,
-			"class 17 is inactive and later class 8 observes the retained 0x41 clear");
+			"class 17 is inactive and later class 8 observes the retained 0x41 clear"))
+		return false;
+
+	// S2C 0x42 sets the eight packed latches over the joiner's own: bit 1 hides
+	// every class's ATTRIBUTES words, and a word without bit 3 lowers the
+	// RECOIL_MUTE latch the 0x41 raised; a short body unpacks 0.
+	// [orig: NapiNPClientMsg_CharAttrDisabledProperties @0x4281A0 ->
+	//  CharAttr_UnpackDisabledProperties @0x4124D0]
+	const std::vector<uint8_t> latch_word = frame_server_session(
+			server_tx, server_scrk, 1u, {make_protocol_message(0x42, {0x02, 0x00})});
+	joiner.handle_datagram(latch_word.data(), latch_word.size());
+	if (!expect(joiner.charattr_table().disabled[charattr::kAttributes] == 1 &&
+	                    joiner.charattr_table().disabled[charattr::kRecoilMute] == 0 &&
+	                    !inmatch::charattr_class_has_attribute(joiner.charattr_table(), 8, charattr::kKnifeBonus),
+			"S2C 0x42 sets the joiner's latches from its word"))
+		return false;
+	const std::vector<uint8_t> short_word = frame_server_session(
+			server_tx, server_scrk, 1u, {make_protocol_message(0x42, {0x02})});
+	joiner.handle_datagram(short_word.data(), short_word.size());
+	return expect(joiner.charattr_table().disabled[charattr::kAttributes] == 0 &&
+	                      inmatch::charattr_class_has_attribute(joiner.charattr_table(), 8, charattr::kKnifeBonus),
+			"a short S2C 0x42 unpacks 0");
 }
 
 bool run_reverse_rtt_probe_is_echoed() {
@@ -7379,6 +7467,7 @@ int main() {
                     run_host_client_refreshes_visible_players() &&
                     run_contextual_radio_keys_match_retail() &&
                     run_charattr_challenge_table_matches_retail() &&
+                    run_charattr_latches_follow_retail() &&
 	                run_spectator_clientauth_and_state_latch() &&
 	                run_seeded_objective_layout_hint() &&
 	                run_challenge_diagnostics_pass_through_the_runtime() &&
