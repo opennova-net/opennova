@@ -38,9 +38,9 @@ bool read_project_file(const SessionView &view, const std::string &path, std::ve
 	return entry && view.findings.assets && view.findings.assets->read(entry->logical_name, out);
 }
 
-// The mission's header facts: from its open document's record, else from the 616 bytes its file
-// starts with (the header the game reads first [orig: Mission_LoadBMSFile, bms.h Header]).
-bool mission_header(const SessionView &view, const std::string &path, mission::MissionInfo &out) {
+} // namespace
+
+bool read_mission_header(const SessionView &view, const std::string &path, mission::MissionInfo &out) {
 	if (const auto *mission = dynamic_cast<const MissionDocument *>(open_document(view, path))) {
 		const MissionRow *row = mission->mission_row();
 		if (!row) return false;
@@ -55,6 +55,8 @@ bool mission_header(const SessionView &view, const std::string &path, mission::M
 	out = mission::mission_info(file);
 	return true;
 }
+
+namespace {
 
 // The environment as the game reads it: its open document's record, else its file through the
 // engine's reader.
@@ -122,7 +124,7 @@ EnvironmentUses environment_uses(const SessionView &view, const std::string &pat
 			break;
 		}
 		mission::MissionInfo info;
-		use.read = mission_header(view, use.mission, info);
+		use.read = read_mission_header(view, use.mission, info);
 		if (use.read) {
 			use.title = info.mission_name;
 			use.overrides = env::bms_env_overrides_from_header(static_cast<uint32_t>(info.attrib_flags), info.water_override,
