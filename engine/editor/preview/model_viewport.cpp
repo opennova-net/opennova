@@ -17,6 +17,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/preview/animation_uses.h>
 #include <editor/preview/model_canvas.h>
+#include <editor/preview/model_placement.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/project/project_document.h>
 #include <editor/session/request_factories.h>
@@ -1596,8 +1597,22 @@ bool ModelViewport::drag(const ViewportContext &context, const ViewportDrag &dra
 
 bool ModelViewport::command(const ViewportContext &context, const std::string &name,
 		const std::vector<NodeId> &ids, CanvasRequests &out, std::string &error) const {
+	// Place in mission (ADR 0046 DI-12): the model's item, made where none draws it, armed in the mission's
+	// Place tool (preview/model_placement.h). A model's own document alone: a clip's rig is the item's.
+	if (name == "place_in_mission") {
+		if (!ids.empty()) {
+			error = "place_in_mission places the model the viewport shows: it takes no ids.";
+			return false;
+		}
+		const DocumentBase *document = context.input.document;
+		if (!document || document->kind() != AssetKind::Model) {
+			error = "Place in mission places a model: open the model (a clip's or a table's rig is placed as its item).";
+			return false;
+		}
+		return plan_place_in_mission(context.input.view, document->path(), out, error);
+	}
 	if (name != "frame") {
-		error = "Unknown model command \"" + name + "\" (frame).";
+		error = "Unknown model command \"" + name + "\" (frame, place_in_mission).";
 		return false;
 	}
 	if (!model_) {
