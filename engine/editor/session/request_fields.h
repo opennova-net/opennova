@@ -63,6 +63,7 @@ enum class RequestFieldId : uint8_t {
 	Start,
 	PlayMode,
 	SaveBeforePlay,
+	Alone,
 	kCount,
 };
 

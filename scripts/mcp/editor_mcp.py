@@ -266,7 +266,7 @@ REQUEST_TEXTS = ("dir", "title", "game", "expansion", "builds_on", "game_install
                  "purpose", "folder", "play_mode")
 REQUEST_LISTS = ("roles", "names")
 REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass", "rehash", "all",
-                    "planned", "behind", "fresh", "report", "save_before_play")
+                    "planned", "behind", "fresh", "report", "save_before_play", "alone")
 REQUEST_NUMBERS = ("plan", "steps")
 # How a Play runs (the session's play modes): the project's own (apply_project_settings' play_mode), or one Play's.
 PLAY_MODES = ("runtime", "install", "strict")
@@ -724,7 +724,9 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--field", default=None, help="a field of that record")
     request.add_argument("--new-name", dest="new_name", default=None, help="the name a rename gives")
     request.add_argument("--folder", default=None,
-                         help="move_asset: the project folder the file goes to ('' the top level)")
+                         help="move_asset: the project folder the file goes to ('' the top level); create_file: the "
+                              "folder it is made in ('/' the top level); new_folder, rename_folder, delete_folder: "
+                              "the folder")
     request.add_argument("--role", default=None, help="a requirement's role (assign_requirement)")
     request.add_argument("--file-kind", dest="file_kind", default=None,
                          help="create_file: an asset kind token, for a name that cannot say its kind")
@@ -790,7 +792,12 @@ def build_parser() -> argparse.ArgumentParser:
                               "set_import_dependencies: the setting")
     request.add_argument("--replace", choices=switch, default=None,
                          help="import_files: replace the project's files of the names")
-    request.add_argument("--force", choices=switch, default=None, help="reimport: import again even when unchanged")
+    request.add_argument("--force", choices=switch, default=None,
+                         help="reimport: import again even when unchanged; delete_asset: delete it though something "
+                              "names it (those uses then name nothing: Problems rows)")
+    request.add_argument("--alone", choices=switch, default=None,
+                         help="delete_asset: an import source deleted, its outputs kept as files of the project; "
+                              "duplicate_asset: an import source copied without its import record")
     request.add_argument("--ask-name", dest="ask_name", choices=switch, default=None,
                          help="show_in_files, preview_rename: and ask the new name")
     request.add_argument("--open-first", dest="open_first", choices=switch, default=None,
