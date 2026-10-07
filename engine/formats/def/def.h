@@ -1361,13 +1361,9 @@ typedef struct DefHudPosDef {
     DefHudGraphic parachute_icon;
     DefHudGraphic armor_icon;
 
-    /* VEHICLE_HUD blocks, parsed IN PARALLEL with the raw_lines passthrough
-       below so writer round-trip is untouched. */
+    /* VEHICLE_HUD blocks, each committed at its VEHICLE_END, in file order. */
     DefVehicleHudBlock *vehicle_huds;
     size_t vehicle_huds_count;
-
-    char (*raw_lines)[512];
-    size_t raw_lines_count;
 } DefHudPosDef;
 
 typedef struct DefHudPosFile {
