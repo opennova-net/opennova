@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <editor/import/importer.h>
+#include <formats/foliage/foliage.h>
 #include <formats/pcx/pcx.h>
 
 namespace opennova::editor {
@@ -35,9 +36,16 @@ namespace opennova::editor {
 //   of rounds and throwables), the char map legend (formats/trn/charmap_legend.h) its palette; with none
 //   the game reads surface 1 everywhere [orig: sub_605A10 @ 0x605A31; Terrain_GetSurfaceTypeAtPosition @
 //   0x606519];
-// - `<stem>.trn`: the settings naming them, the sector grid by the `layout` option, the water.
-// No foliage map is made: with none the game grows no foliage [orig: Foliage_SampleFoliageMapMask @
-// 0x60662B].
+// - `<stem>_f.pcx`: the foliage map (the .trn's polytrn_foliagemap, retail's `_f` name), when the set names
+//   one: 8-bit, each index a foliage code, its palette the source's (the game keeps the indices alone and
+//   turns each into the definitions whose `match` codes hold it [orig: Foliage_LoadFoliageMapPCX @
+//   0x605AD0, the remap @ 0x605B73..0x605B8A; Foliage_RemapPixelToDefMask @ 0x5FF4E0]); with none the game
+//   grows no foliage [orig: Foliage_SampleFoliageMapMask @ 0x60662B];
+// - `<stem>.trn`: the settings naming them, the sector grid by the `layout` option, the water, and the
+//   set's foliage definitions as its `foliage` blocks.
+// TrnGen.exe makes none of the maps: it bakes the heights alone (its project names a depth map, the
+// output and the locks), the char map, the foliage map and the `.trn` being NovaLogic's own, written beside
+// it (terrain-re.md, "A terrain from images").
 //
 // The set file: a line a key and a file name (relative to the set's folder), `;` to the line's end a
 // comment: `heightmap` (required: a PNG of 1024 x 1024 texels, grey at any depth or colour, read as its
@@ -45,7 +53,17 @@ namespace opennova::editor {
 // `colormap` (required: a PNG, TGA or PCX of 1024 x 1024), `detail` (a power of two a side), `tiles`
 // (sides multiples of 64), `surface` (a PNG, TGA or PCX, square, 256, 512 or 1024 a side, laid over the
 // heightmap as the colour map is: an 8-bit PCX's or a palette PNG's indices are the classes, 0 to 19; any
-// other's colours each a class's legend colour exactly, its alpha ignored).
+// other's colours each a class's legend colour exactly, its alpha ignored), `foliagemap` (a PNG, TGA or
+// PCX, square, a power of two at most 1024 a side (the game keeps its width alone, as the rows' length and
+// the power of two it samples the 1024-unit atlas by), laid over the heightmap as the colour map is: an
+// indexed image's indices are the codes, a grey image's levels; code 0 grows nothing). And up to four
+// `foliage` blocks, each the .trn's own (`foliage`, its keys, `end`): `graphic` (the model it places),
+// `match` (one to four codes, 1 to 255: it grows where the foliage map holds one of them), `color_lower`
+// and `color_upper` (0 to 2: the shipped files' comment, 0 match the ground, 1 a 50% blend, 2 its own
+// colour; the game's generator writes over the colour they pick before it draws, foliage-re.md) and
+// `attrib` (`forceon`: it grows on placed tiles too; `shadow`, which the game reads and never uses) [orig:
+// Terrain_ParseConfigCallback @ 0x60F330, its four slots; Foliage_RemapPixelToDefMask @ 0x5FF4E0, the four
+// codes it compares; Foliage_GenerateInstances_0 @ 0x6002DB..0x60030A, the colour overwritten].
 
 inline constexpr int kTerrainImporterVersion = 1;
 inline constexpr const char *kTerrainSetExtension = ".tset";
@@ -53,19 +71,32 @@ inline constexpr const char *kTerrainSetExtension = ".tset";
 // characters.
 inline constexpr size_t kTerrainStemMax = 9;
 
+// The foliage definitions a terrain holds at most: the game's four slots [orig: Terrain_ParseConfigCallback
+// @ 0x60F330, `dword_31BC900 < 4`].
+inline constexpr size_t kTerrainFoliageDefs = FOLIAGE_MAX_DEFS;
+
 struct TerrainSet {
 	std::string heightmap;
 	std::string colormap;
 	std::string detail;
 	std::string tiles;
 	std::string surface;
+	std::string foliagemap;
+	std::vector<FoliageDef> foliage; // the .trn's foliage blocks, in their order (their slots)
 };
 
-// The set's text read; false, with `why`, for a line of no key the set knows, or a set without its
-// heightmap or colour map.
+// The set's text read; false, with `why`, for a line of no key the set knows, a set without its
+// heightmap or colour map, or a foliage block the game would not read as written (a key no block takes, no
+// `end`, a fifth block, no graphic, no codes or one past 1..255, a colour mode past 0..2, an attrib other
+// than forceon or shadow).
 bool parse_terrain_set(const std::vector<uint8_t> &bytes, TerrainSet &out, std::string &why);
 // The set as a file (CRLF lines, a comment heading it).
 std::vector<uint8_t> write_terrain_set(const TerrainSet &set);
+
+// Foliage definitions on one line, as the new_terrain request takes them: each the foliage block's keys and
+// their values in a row (`graphic onfern1.3di match 253 color_upper 2`), several split by `|`. False, with
+// `why`, as parse_terrain_set refuses a block.
+bool parse_foliage_definitions(const std::string &text, std::vector<FoliageDef> &out, std::string &why);
 
 const std::vector<ImportOptionRow> &terrain_import_option_rows();
 
@@ -83,8 +114,8 @@ bool terrain_import_settings(const ImportOptions &options, TerrainImportSettings
 bool terrain_stem_fits(const std::string &stem, std::string &why);
 
 // The outputs' names for a stem, in the order the import makes them (the tile set's atlas only when
-// `tiles`, the surface map only when `surface`).
-std::vector<std::string> terrain_output_names(const std::string &stem, bool tiles, bool surface);
+// `tiles`, the surface map only when `surface`, the foliage map only when `foliage`).
+std::vector<std::string> terrain_output_names(const std::string &stem, bool tiles, bool surface, bool foliage);
 
 // A heightmap as the bake takes it, from the file `name` holds: an 8-bit map's texels (TrnGen's
 // input) or 16-bit heights (raw16, 1/256 world unit a step), scaled by `top`. False, with `why`, for a
@@ -109,6 +140,20 @@ bool decode_terrain_image(const std::string &key, const std::string &name, const
 // a colour the legend lacks: the first named by its place, column and row from the top left).
 bool decode_terrain_surface(const std::string &name, const std::vector<uint8_t> &bytes, IndexedImage8 &out,
                             std::string &why);
+
+// The set's foliage map as the import writes it: its codes as indices, an indexed image's palette kept (the
+// game reads none of it: a viewer shows the map as it was painted), a grey image's a grey ramp. An indexed
+// image (an 8-bit PCX, a palette PNG) is read by its indices, an image whose every texel is grey by its
+// levels. False, with `why` naming the file, for one that does not read, holds colour, or is not square with
+// a side a power of two at most 1024 [orig: Foliage_LoadFoliageMapPCX @ 0x605B44..0x605B60, the width's
+// log2; Foliage_SampleFoliageMapMask @ 0x60669C..0x60662D, the sample shifted by 10 less it].
+bool decode_terrain_foliage(const std::string &name, const std::vector<uint8_t> &bytes, IndexedImage8 &out,
+                            std::string &why);
+
+// What a foliage map grows by the definitions (`map` the codes, `defs` the slots): the codes it holds that
+// no definition selects (code 0 aside), and the definitions none of whose codes it holds, each a line for
+// the import's warnings ("" none).
+std::vector<std::string> terrain_foliage_notes(const IndexedImage8 &map, const std::vector<FoliageDef> &defs);
 
 // The stretches of 256 texels along a row (the CDEP section's blocks) whose heights span more than a
 // block holds: 32,766 raw (just under 128 world units), its width that of the range plus one within the
