@@ -156,9 +156,11 @@ func _copy_fixture(source: String, target: String) -> void:
 
 
 ## The files the mission's picture reads, written into the project at `root`: the terrain (Tmap.trn,
-## its heights, its two maps and the textures it names), the environment (synth_full.env and its
-## clouds), the item table the mission's items are in, and the models their graphics name.
-func _mint_project(root: String, skip: PackedStringArray = PackedStringArray()) -> void:
+## its heights, its two maps and the textures it names, its two foliage definitions' models), the
+## environment (synth_full.env and its clouds), the item table the mission's items are in, and the models
+## their graphics name. `effects` (DI-31): the pumps author a particle slot at their model's ground point,
+## its effect in a particle file of the project.
+func _mint_project(root: String, skip: PackedStringArray = PackedStringArray(), effects := false) -> void:
 	for name in ["Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"]:
 		if skip.has(name):
 			continue
@@ -173,15 +175,33 @@ func _mint_project(root: String, skip: PackedStringArray = PackedStringArray()) 
 	var items := FileAccess.get_file_as_string(ProjectSettings.globalize_path(FIXTURES + "def/items.def"))
 	# The fixture ends its lines in CR LF, the one break the retail def walk splits at.
 	assert_true(items.contains("graphic pump\r\n"))
-	_write(root.path_join("defs").path_join("items.def"), items.replace("graphic pump\r\n", "graphic crate\r\n").to_utf8_buffer())
+	var crate_line := "graphic crate\r\n" + ("particlefx Puff ground\r\n" if effects else "")
+	_write(root.path_join("defs").path_join("items.def"), items.replace("graphic pump\r\n", crate_line).to_utf8_buffer())
 	for name in ["crate.3di", "armory.3di", "shed.3di"]:
 		_copy_fixture("threedi/synth/" + name, root.path_join("models").path_join(name))
+	# The terrain's foliage definitions grow bush1 and bush2 (the synth crate under both names, as the foliage
+	# integration test stages them).
+	for name in ["bush1.3di", "bush2.3di"]:
+		_copy_fixture("threedi/synth/crate.3di", root.path_join("models").path_join(name))
+	if effects:
+		_write(root.path_join("particles").path_join("fx.ptl"), _ptl().to_utf8_buffer())
+		_copy_fixture("cbin/particle_dot.tga", root.path_join("particles").path_join("particle_dot.tga"))
+
+
+## A particle file of one effect, Puff: a burst of dots of the fixture's graphic emitting for a minute
+## (DI-14's recipe).
+func _ptl() -> String:
+	var text := "[effectdef]\n{\n\tid = Puff;\n\tpdefs = PuffDot;\n}\n\n"
+	text += "[particledef]\n{\n\tid = PuffDot;\n\temit_dur = 60;\n\temit_rate = 40;\n\temit_burst = 1;\n"
+	text += "\tage = 1.0;\n\tscale = 1.0;\n\tspeed = 1.5;\n\tspread = 40;\n\tgraphic1 = particle_dot.tga, blend;\n"
+	text += "\tg1_alpha = 1;\n\tg1_scale = 1;\n}\n\n"
+	return text
 
 
 ## A new project holding the minted mission as missions/synth_logic.bms (and, `whole`, the files its
 ## picture reads), scanned, the mission open.
 func _open_mission(whole := true, also: PackedStringArray = PackedStringArray(),
-		skip: PackedStringArray = PackedStringArray()) -> bool:
+		skip: PackedStringArray = PackedStringArray(), effects := false) -> bool:
 	var dir := OS.get_cache_dir().path_join("opennova editor mission project %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
 	assert_true(_seam.new_project(dir, "Mission Viewport Game"))
@@ -192,7 +212,7 @@ func _open_mission(whole := true, also: PackedStringArray = PackedStringArray(),
 	for name in also:
 		_write(root.path_join("missions").path_join(name), mission)
 	if whole:
-		_mint_project(root, skip)
+		_mint_project(root, skip, effects)
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 	return _seam.open_document("missions/synth_logic.bms")
@@ -1411,3 +1431,96 @@ func test_people_posed_as_they_spawn() -> void:
 	assert_eq(_person_model(walking), model, "the same model")
 	if model != null:
 		_assert_posed(model, now["pose"], "idle now")
+
+
+## DI-31: the device draws single-sampled (the particle renderer's passes bind its depth, DI-14's rule) and
+## carries the game's foliage beside the terrain and its particle renderer; the three layers are options on
+## the wire and the body says what the device drew of each.
+func test_the_device_draws_the_games_foliage_effects_and_lights() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	assert_eq(int(state.get("body", {}).get("missing", -1)), 0, str(state.get("notes", [])))
+	var device := _device(state)
+	assert_not_null(device)
+	if device == null:
+		return
+	assert_eq(device.msaa_3d, Viewport.MSAA_DISABLED, "single-sampled, as the game's view draws")
+	assert_not_null(_device_node(state, "FoliageDispatcher"), "the game's foliage beside the terrain")
+	assert_not_null(_device_node(state, "ParticleRenderer"), "the game's particle renderer")
+	var show: Dictionary = state.get("options", {}).get("show", {})
+	assert_true(bool(show.get("foliage", false)) and bool(show.get("effects", false)) and bool(show.get("lights", false)),
+			"the three layers on by default: %s" % str(show))
+	for _frame in 4:
+		_app.pump()
+		await get_tree().process_frame
+	var drawn: Dictionary = _state().get("body", {}).get("drawn", {})
+	assert_true(drawn.has("foliage") and drawn.has("lights") and drawn.has("effects"), str(drawn))
+	assert_eq(int(drawn.get("foliage", {}).get("slots", 0)), 2, "Tmap's two definitions configured: %s" % str(drawn))
+
+
+## DI-31: each placed item's particle slot as the mission's start attaches it: the pumps author Puff at their
+## model's ground point, the viewport plays the scene and the device's particle renderer draws it; the layer off
+## closes the scene.
+func test_items_attach_their_effects() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission(true, PackedStringArray(), PackedStringArray(), true))
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var effects: Dictionary = state.get("body", {}).get("effects", {})
+	assert_gt(int(effects.get("attached", 0)), 0, "the pumps' slots attached: %s" % str(effects))
+	assert_eq(int(effects.get("emitters", 0)), int(effects.get("attached", 0)), "once each, at its ground point")
+	var renderer: ParticleRenderer = _device_node(state, "ParticleRenderer")
+	assert_not_null(renderer)
+	if renderer == null:
+		return
+	for _frame in 30:
+		_app.pump()
+		await get_tree().process_frame
+	state = _state()
+	effects = state.get("body", {}).get("effects", {})
+	assert_gt(int(effects.get("particles", 0)), 0, "the scene holds live particles: %s" % str(effects))
+	var named: Array = effects.get("effects", [])
+	assert_eq(named.size(), 1)
+	if not named.is_empty():
+		assert_eq(String((named[0] as Dictionary).get("defined_in", "")), "particles/fx.ptl")
+	var carried := 0
+	for row: Variant in state.get("items", []):
+		var effect: Dictionary = (row as Dictionary).get("effect", {})
+		if String(effect.get("status", "")) == "attached":
+			carried += 1
+			assert_eq(effect.get("points", []), ["ground"], "at the crate's ground point")
+	assert_eq(carried, int(effects.get("attached", 0)), "each pump's mark names its slot")
+	assert_true(_change({"kind": "mission", "options": {"show": {"effects": false}}}))
+	_app.pump()
+	assert_eq(_state().get("body", {}).get("effects"), null, "the layer off: no scene")
+
+
+## DI-31: the lights the game lights the scene with: the armory's two LGHT records spawned for each placed
+## armory as the mission's start spawns them (the device's state, drawn or not; the frame's selection is the
+## windowed test's); the layer off empties the pool.
+func test_the_placed_models_light_the_scene() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var lights := {}
+	for _frame in 30:
+		_app.pump()
+		await get_tree().process_frame
+		lights = _state().get("body", {}).get("drawn", {}).get("lights", {})
+		if int(lights.get("pool", 0)) > 0:
+			break
+	assert_gte(int(lights.get("pool", 0)), 4, "two lights an armory, two armories: %s" % str(lights))
+	var builds := int(_state().get("builds", 0))
+	assert_true(_change({"kind": "mission", "options": {"show": {"lights": false}}}))
+	for _frame in 4:
+		_app.pump()
+		await get_tree().process_frame
+	lights = _state().get("body", {}).get("drawn", {}).get("lights", {})
+	assert_eq(int(lights.get("pool", -1)), 0, "the layer off: no light: %s" % str(lights))
+	assert_eq(int(_state().get("builds", 0)), builds, "an Update, never a build")

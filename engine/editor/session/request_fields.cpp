@@ -144,6 +144,8 @@ constexpr RequestField kFields[] = {
 			"send_to_back), a model's frame (its camera on the marker of the first id, else on the "
 			"whole model) or place_in_mission (the Place tool of the mission last active armed with the "
 			"model's item, the item made in the item catalog first where none draws it; no ids), "
+			"a definition's place_in_mission (an item record, the one row of ids or the record shown, armed in "
+			"the Place tool of the mission last active), "
 			"or a mission's frame, top, ground, select_same (every entity of the "
 			"selected entities' items), duplicate (the ids, else the selection, copied and moved by "
 			"[east, north] metres, one batch) or paste (the clipboard's copied entities and areas, "
@@ -166,7 +168,8 @@ constexpr RequestField kFields[] = {
 			"value, ...}, focus?}, each part and member left out as it is; the parts and their members are "
 			"editor_query catalog's workspace (card {path}, build_result {open}, new_project {open, title, dir, "
 			"game_install, builds_on, as_expansion, expansion}); focus a window brought forward (files, document, "
-			"preview, inspector, problems, output)." },
+			"preview, inspector, problems, output), as the Windows menu's tick shows it: opened where it was closed, "
+			"shown where it stands aside (the Preview beside a mission)." },
 	{ F::Purpose, "purpose", J::String,
 			"What a picked path is for: new_project_location, open_project, runtime_executable, "
 			"game_install or import_files." },

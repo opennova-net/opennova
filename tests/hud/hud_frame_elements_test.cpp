@@ -589,8 +589,77 @@ void test_squad_orders(const fnt_font_t *font) {
 	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty());
 }
 
+// THE MESSAGE FEEDS AND THE POWER-THROW LABEL ride the BOLD label slot at its
+// own scale even when hudpos names a HUD font, and the feeds' anchors and
+// 18-unit step scale to the surface once and add in surface pixels; the
+// power bar draws in the per-frame HUD colour.
+// [orig: HUD_DrawConsoleMessages @0x59ad30 -- g_HUDLabelFontBold @0x59ae09 /
+//  @0x59aea6, the step scaled alone @0x59adb0, added @0x59ae1a / @0x59aeb7;
+//  HUD_DrawPowerThrowChargeBar @0x599830 -- g_HUDFrameOverlayColor @0x599955 /
+//  @0x599982 / @0x5999f4, g_HUDLabelFontBold @0x599a0f]
+void test_feed_and_power_label_slots(const fnt_font_t *font) {
+	fnt_font_t hud_font = test_font::uniform_test_font();
+	HudLayout layout;
+	layout.chat_text = {122, 684, 0, 0, true};
+	layout.sys_text = {5, 22, 0, 0, true};
+	layout.power_rect = {14.0f, 576.0f, 160.0f, 6.0f, true};
+	HudFrameCompiler compiler;
+	compiler.configure(layout, &hud_font);
+	compiler.configure_label_fonts(font, font, font, 1.25f, 1.6f);
+	const float w = 1280.0f, h = 720.0f;
+	HudFrameState state;
+	state.ticks = 100;
+	compiler.push_chat_line("AB", 0xFFFFFFFFu, state.ticks);
+	compiler.push_chat_line("CD", 0xFFFFFFFFu, state.ticks);
+	compiler.push_message("EF", state.ticks);
+	{
+		const HudDrawList &list = compiler.compile(state, w, h);
+		CHECK(glyphs_on(list, kHudFontSlotHud).empty());
+		const std::vector<GameFontQuad> bold = glyphs_on(list, kHudFontSlotLabelBold);
+		CHECK(bold.size() == 6);
+		if (bold.size() == 6) {
+			// Two chat lines one scaled step apart, at the scaled HUDCHATTEXT.
+			const float step = static_cast<float>(design_to_screen_y(kFeedLineStepDesign, 720));
+			CHECK(bold[2].y_top - bold[0].y_top == step);
+			CHECK(bold[0].y_top - static_cast<float>(design_to_screen_y(684, 720)) < 1.0f &&
+					bold[0].y_top - static_cast<float>(design_to_screen_y(684, 720)) > -1.0f);
+			CHECK(bold[0].x_top_left - static_cast<float>(design_to_screen_x(122, 1280)) < 1.0f &&
+					bold[0].x_top_left - static_cast<float>(design_to_screen_x(122, 1280)) > -1.0f);
+			// The bold slot's 1.25 scale: a 16-px cell draws 20 px tall.
+			CHECK(bold[0].y_bottom - bold[0].y_top == 20.0f);
+			// The system line at the scaled HUDSYSTEXT.
+			CHECK(bold[4].y_top - static_cast<float>(design_to_screen_y(22, 720)) < 1.0f &&
+					bold[4].y_top - static_cast<float>(design_to_screen_y(22, 720)) > -1.0f);
+		}
+	}
+	// The power-throw label: bold slot, the outline in the per-frame colour.
+	HudFrameState power;
+	power.ticks = 100000;
+	power.windup_active = true;
+	power.windup_held_ticks = 31;
+	power.hud_color_index = 0;
+	const HudDrawList &list = compiler.compile(power, w, h);
+	CHECK(glyphs_on(list, kHudFontSlotHud).empty());
+	const std::vector<GameFontQuad> bold = glyphs_on(list, kHudFontSlotLabelBold);
+	CHECK(bold.size() == 2); // "0%"
+	HudFrameState scheme2 = power;
+	scheme2.hud_color_index = 2;
+	const uint32_t outline0 = [&] {
+		for (const HudQuad &q : list.quads)
+			if (!q.filled) return q.color;
+		return 0u;
+	}();
+	const HudDrawList &list2 = compiler.compile(scheme2, w, h);
+	uint32_t outline2 = 0;
+	for (const HudQuad &q : list2.quads)
+		if (!q.filled) outline2 = q.color;
+	CHECK(outline0 != 0u && outline2 == (0xFF000000u | layout.hud_text) && outline0 != outline2);
+	opennova::fnt::fnt_free(&hud_font);
+}
+
 int main() {
 	fnt_font_t font = test_font::uniform_test_font();
+	test_feed_and_power_label_slots(&font);
 	test_game_info(&font);
 	test_clock(&font);
 	test_team_id_line(&font);

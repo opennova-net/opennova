@@ -27,6 +27,7 @@
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/mission_palette_view.h>
+#include <editor/ui/project_find.h>
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/viewport_canvas.h>
@@ -107,6 +108,7 @@ struct MissionViewportView::Tools {
 	MissionPaletteView palette;
 	CanvasPoint menu_at;
 	NodeAddress menu_record;
+	MissionItemFacts menu_facts; // the item of the entity the menu was opened on, read as it opened (DI-18)
 	// The last hint the canvas gave (what a click does now), and where the pointer was on the picture
 	// (Ctrl+V pastes there).
 	std::string hint;
@@ -128,6 +130,8 @@ struct MissionViewportView::Tools {
 	void path_list(Workspace &workspace, const MissionViewport &mission);
 	void canvas_menu(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context,
 			const MissionCanvas &canvas);
+	void entity_jumps(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context,
+			const MissionEntityMark &entity);
 	void events_using(Workspace &workspace, const MissionViewport &mission, const SessionView &view);
 	void notes(const MissionViewport &mission);
 	void ground_line();
@@ -242,11 +246,17 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 				if (canvas_ui().right_clicked() && canvas && !canvas->gesture().pressed()) {
 					tools.menu_at = in.mouse;
 					tools.menu_record = NodeAddress();
+					tools.menu_facts = MissionItemFacts();
 					const int mark = mission_canvas_under(canvas->frame(), in, MissionPick::Click);
 					if (mark >= 0) {
 						tools.menu_record = canvas->frame().marks[size_t(mark)].record;
 						if (!view.documents.selection.holds(tools.menu_record))
 							workspace.request(request::select_record(path, tools.menu_record));
+						// What the entity's item draws, for the menu's Go to model (read once, as it opens).
+						if (const MissionEntityMark *entity = mission.scene().entity(tools.menu_record.row)) {
+							std::string why;
+							if (!mission_item_facts(view, entity->item, tools.menu_facts, why)) tools.menu_facts = MissionItemFacts();
+						}
 					}
 					ImGui::OpenPopup("mission_canvas_menu");
 				}
@@ -415,7 +425,7 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 		if (ui_kit::tool(row, "Script", view.project.open,
 					held ? "Open " + script.path + ", the script the game runs with this mission."
 						 : "The mission has no script (" + script.name + "): make one beside it.")) {
-			if (held) workspace.request(request::open_document(script.path));
+			if (held) window_requests::go_to_file(workspace, script.path);
 			else ImGui::OpenPopup("make_script");
 		}
 		if (ImGui::BeginPopup("make_script")) {
@@ -575,19 +585,61 @@ void MissionViewportView::Tools::canvas_menu(Workspace &workspace, const Mission
 		workspace.request(request::edit_record(mission.path(), std::move(removes)));
 	}
 	ImGui::Separator();
-	const bool entity = menu_record.row && mission.scene().entity(menu_record.row);
-	if (ImGui::MenuItem("Select same item", nullptr, false, entity || selected))
+	const MissionEntityMark *entity = menu_record.row ? mission.scene().entity(menu_record.row) : nullptr;
+	// The entity's jumps (DI-18): what it is made of, Files on its model, more of it, who names it.
+	if (entity) entity_jumps(workspace, mission, context, *entity);
+	if (ImGui::MenuItem("Select all like this", nullptr, false, entity || selected))
 		viewport_command(workspace, mission, "select_same");
 	ui_kit::tooltip("Select every entity of the mission placed from the same item.");
-	if (ImGui::MenuItem("Go to in outline", nullptr, false, menu_record.row != 0)) {
-		EditorRequest go = request::open_document(mission.path(), std::string(), entity ? "item" : "id");
-		go.address = menu_record;
-		workspace.request(std::move(go));
+	const Document *document = context.input.document ? records_of(*context.input.document) : nullptr;
+	const std::string locator = document && menu_record.row ? document->locator(menu_record) : std::string();
+	if (ImGui::MenuItem("Go to in outline", nullptr, false, !locator.empty())) {
+		ReferenceTarget target;
+		target.label = mission.path();
+		target.file = mission.path();
+		target.locator = locator;
+		target.field = entity ? "item" : "id";
+		target.editable = true;
+		window_requests::go_to(workspace, target);
 	}
+	const bool finds = view.findings.graph && !locator.empty();
+	if (ImGui::MenuItem("Find usages", "Shift+F12", false, finds) && finds)
+		ProjectFind::open_usages(workspace, mission.path(), locator);
+	ui_kit::tooltip("Who names it (an entity by its SSN, an area by its zone): the events and the other files, each a "
+	                "Go to.");
 	if (ImGui::BeginMenu("Show events using this", menu_record.row != 0)) {
 		events_using(workspace, mission, view);
 		ImGui::EndMenu();
 	}
+}
+
+// What an entity is made of (DI-18), from the menu over it: its item's record (Go to item, F12 with it selected:
+// the record its `item` names, where the game's lookup finds it) and the model the item draws (Go to model, Show
+// model in Files), and Place another (the Place tool armed with its item).
+void MissionViewportView::Tools::entity_jumps(Workspace &workspace, const MissionViewport &mission,
+		const ViewportContext &context, const MissionEntityMark &entity) {
+	const SessionView &view = workspace.view();
+	const AssetGraph *graph = view.findings.graph.get();
+	const GraphSymbol *item =
+			graph ? graph->resolve_symbol(ReferenceKind::Item, std::to_string(entity.item), std::string()) : nullptr;
+	const std::string id = std::to_string(entity.item);
+	if (ImGui::MenuItem("Go to item", "F12", false, item != nullptr) && item)
+		window_requests::go_to(workspace, symbol_target(*view.project.scan, *item));
+	ui_kit::tooltip(item ? "Open " + item->file + " at item " + id + "." : "No catalog of the project defines item " + id + ".");
+	// The item's facts, read as the menu opened.
+	const MissionItemFacts &facts = menu_facts;
+	const bool drawn = facts.item == entity.item && !facts.model.empty();
+	if (ImGui::MenuItem("Go to model", nullptr, false, drawn) && drawn) window_requests::go_to_file(workspace, facts.model);
+	ui_kit::tooltip(drawn ? "Open " + facts.model + ", the model the item draws." : "The item draws no model of the project.");
+	const bool reveals = drawn && view.allows(EditorRequestKind::ShowInFiles);
+	if (ImGui::MenuItem("Show model in Files", nullptr, false, reveals) && reveals)
+		workspace.request(request::show_in_files(facts.model));
+	const bool places = context.editable() && entity.item != 0;
+	if (ImGui::MenuItem("Place another", nullptr, false, places) && places)
+		set_tool(workspace, mission, MissionTool::Place, entity.item);
+	ui_kit::tooltip(places ? "The Place tool with " + (facts.name.empty() ? "item " + id : facts.name) +
+	                                 ": each click on the ground places one more."
+	                       : context.not_editable());
 }
 
 // The events (and any other record of the mission) that name the record the menu was opened on:
@@ -631,7 +683,7 @@ void MissionViewportView::Tools::events_using(Workspace &workspace, const Missio
 		}
 		ImGui::PushID(int(i));
 		if (ImGui::MenuItem(ui_kit::fit(label, ImGui::GetFontSize() * 24.0f).c_str()))
-			workspace.request(request::open_document(edge.source, edge.locator, edge.field));
+			window_requests::go_to(workspace, usage_target(*view.project.scan, edge));
 		ImGui::PopID();
 	}
 }
@@ -643,6 +695,16 @@ void MissionViewportView::Tools::show_popup(MissionViewportOptions &options) {
 	ImGui::Checkbox("Water", &options.water);
 	ImGui::Checkbox("Models", &options.models);
 	ImGui::Checkbox("Static shadows", &options.shadows);
+	// DI-31: the game's own foliage, effects and lights.
+	ImGui::Checkbox("Foliage", &options.foliage);
+	ui_kit::tooltip("The terrain's foliage as the game grows it from its foliage map around the camera (its .trn's "
+					"foliage definitions, the detail tier's cells near the eye).");
+	ImGui::Checkbox("Effects", &options.effects);
+	ui_kit::tooltip("Each placed item's particle effects as the mission's start attaches them (items.def's "
+					"particlefx at its model's points), played on the preview clock.");
+	ImGui::Checkbox("Lights", &options.lights);
+	ui_kit::tooltip("The lights the game lights the scene with: each placed model's own light records, on the "
+					"models, the terrain and their coronas.");
 	ImGui::Separator();
 	// DI-29: what the game reads at each point of the ground, tinted over the terrain with its legend.
 	ImGui::TextDisabled("Over the terrain");

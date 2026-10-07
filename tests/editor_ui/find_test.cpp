@@ -73,17 +73,24 @@ void press(Ui &ui, ImGuiKey key) {
 	ui.key(key, false);
 }
 
+// The project's finder (one modal over its scopes, its id "###project_find" whatever its title).
+const ImGuiWindow *finder() {
+	if (GImGui->OpenPopupStack.Size != 1 || !GImGui->OpenPopupStack[0].Window) return nullptr;
+	const std::string name = GImGui->OpenPopupStack[0].Window->Name;
+	return name.size() >= 15 && name.compare(name.size() - 15, 15, "###project_find") == 0 ? GImGui->OpenPopupStack[0].Window
+	                                                                                          : nullptr;
+}
+
 // Find in project's list of results (a child of the modal), whose id its items' ids start from.
 ImGuiID results_id() {
-	char name[96];
-	std::snprintf(name, sizeof(name), "Find in project/results_%08X", item_id(ImHashStr("Find in project"), {"results"}));
+	const ImGuiWindow *window = finder();
+	if (!window) return 0;
+	char name[160];
+	std::snprintf(name, sizeof(name), "%s/results_%08X", window->Name, item_id(window->ID, {"results"}));
 	return ImHashStr(name);
 }
 
-bool modal_open() {
-	return GImGui->OpenPopupStack.Size == 1 && GImGui->OpenPopupStack[0].Window &&
-	       std::string(GImGui->OpenPopupStack[0].Window->Name) == "Find in project";
-}
+bool modal_open() { return finder() != nullptr; }
 
 void test_find_bar() {
 	FindProject project;
