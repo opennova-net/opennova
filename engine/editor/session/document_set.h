@@ -148,6 +148,10 @@ public:
 	static bool position_after(const Document &document, const NodeAddress &record, NodeId &parent, size_t &position);
 
 private:
+	// The name a file create_file made defines (its request's define, DI-33), added to its open document as
+	// its type's Add makes one (an edit_record of the type's batch, opened first, selecting it); false, said
+	// in Problems and on the status line, where the type defines no name of the kind there.
+	bool define_in_made(const std::string &name, const ReferenceSubject &define);
 	bool apply_edits(DocumentBase &document, const std::vector<Edit> &edits);
 	// The status line's words for a batch (ADR 0046 S15): its records by their titles, a field set by
 	// its name (on `named`, its records as they read before) and the new value's words; "" where a

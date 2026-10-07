@@ -64,6 +64,7 @@ enum class RequestFieldId : uint8_t {
 	PlayMode,
 	SaveBeforePlay,
 	Alone,
+	Define,
 	kCount,
 };
 
@@ -75,7 +76,7 @@ enum class RequestJson : uint8_t {
 	Boolean, // true or false
 	Integer, // a whole number, 0 or more
 	Strings, // an array of strings
-	Object, // an object (address, paste_at, settings, viewport, drag, command, drop, workspace)
+	Object, // an object (address, paste_at, settings, viewport, drag, command, drop, workspace, define)
 	Objects, // an array of objects (imports, edits, records)
 };
 

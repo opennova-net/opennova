@@ -167,4 +167,19 @@ bool make_blank_pointer(const BlankRequest &request, std::vector<uint8_t> &out, 
 	return true;
 }
 
+// The player preview's environment cube (HwmCube.dds, DI-33): a cube map, as the game loads it [orig:
+// PlayerInfo_InitPreviewModel @ 0x5600d0 -> sub_58A690 -> D3DXCreateCubeTextureFromFileInMemory @ 0x68464e],
+// each of its six faces the checkerboard the game draws for a texture it cannot load, at its own 128 a side,
+// through the DDS writer's cube form.
+bool make_blank_cube(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
+	const std::vector<uint8_t> face = renderer::missing_material_texture_rgba();
+	const uint8_t *const faces[6] = {face.data(), face.data(), face.data(), face.data(), face.data(), face.data()};
+	std::string reason;
+	if (dds::dds_write_cube_a8r8g8b8(faces, renderer::kMissingMaterialTextureSide, out, reason)) return true;
+	out.clear();
+	error = make_finding(CoreFinding::BlankTexture, DiagnosticSeverity::Error, "The cube map could not be written: " + reason,
+	                     request.logical_name);
+	return false;
+}
+
 } // namespace opennova::editor
