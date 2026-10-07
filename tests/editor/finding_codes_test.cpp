@@ -85,8 +85,9 @@ static int test_tokens_unique() {
 	size_t rows = 0;
 	for (const Table &table : tables()) {
 		// Every table has rows but the text type's (S13 D9): the game reads its files through readers
-		// the editor does not model, so it makes no finding of its own.
-		TEST_EXPECT(table.rows.count > 0 || table.owner == "text");
+		// the editor does not model, so it makes no finding of its own; and the HUD layout's, whose line
+		// ends are the line-ends rule's (documents/line_ends.h), all it says of its file yet.
+		TEST_EXPECT(table.rows.count > 0 || table.owner == "text" || table.owner == "hud_layout");
 		for (const FindingCodeRow &row : table.rows) {
 			++rows;
 			const std::string token = row.token ? row.token : "";
@@ -284,10 +285,10 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::ItemId) == Tokens({ "catalog.item_identity", "catalog.reserved_kind", "catalog.reserved_name" }));
 	// DI-11: what a finding's maker planned with its file at hand (Diagnostic::planned): an id, a name or a key
 	// of its own for a record no lookup finds, an end pose's trigger moved, an entity set where the game grounds it
-	// (DI-28); a variable no menu names, removed.
+	// (DI-28); a variable no menu names, removed; a file's line ends restored to CR LF (the line-ends rule).
 	TEST_EXPECT(fixed_by(FindingFix::EditRecord) ==
-	            Tokens({ "animation.end_pose_trigger", "catalog.name_duplicate", "menu.duplicate_screen", "menu.duplicate_window",
-	                     "mission.off_ground", "mission.ssn_duplicate", "mission.zone_duplicate",
+	            Tokens({ "animation.end_pose_trigger", "catalog.name_duplicate", "document.line_ends", "menu.duplicate_screen",
+	                     "menu.duplicate_window", "mission.off_ground", "mission.ssn_duplicate", "mission.zone_duplicate",
 	                     "strings.key_duplicate" }));
 	TEST_EXPECT(fixed_by(FindingFix::UnusedVariable) == Tokens({ "style.unused" }));
 	TEST_EXPECT(fixed_by(FindingFix::FallbackRow) == Tokens({ "catalog.first_row" }));
@@ -295,15 +296,12 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::NormalRowType) == Tokens({ "texture.normal_slot_loader" }));
 	// (A catalog's input the game ignores has none: a save keeps it as the file has it, the demo round's bug 3.)
 	TEST_EXPECT(fixed_by(FindingFix::Rewrite) ==
-	            Tokens({ "animation_map.ignored_input", "credits.line_ending", "environment.ignored_input",
-	                     "hud_layout.line_ending",
+	            Tokens({ "animation_map.ignored_input", "environment.ignored_input",
 	                     "menu.ignored_input", "mission.event_order", "mission.rewrite_differs", "script.line_ending",
 	                     "shader.form", "sound_bank.ignored_input", "strings.regrouped", "style.line_ending" }));
 	const std::map<std::string, std::string> rewrites = {
 		{ "animation_map.ignored_input", "without the input the game ignores" },
-		{ "credits.line_ending", "with every line ending CR LF" },
 		{ "environment.ignored_input", "with each line as the game reads it" },
-		{ "hud_layout.line_ending", "with every line ending CR LF" },
 		{ "menu.ignored_input", "without the input the game ignores" },
 		{ "sound_bank.ignored_input", "without the input the game ignores" },
 		{ "mission.event_order", "with each event's triggers and actions where the event stands" },
@@ -337,7 +335,8 @@ static int test_columns() {
 	            Tokens({ "animation_map.no_reset", "asset.wave_unplayable", "build.expansion.exp_desc", "build.expansion.mission_twice",
 	                     "build.expansion.mission_untitled", "build.expansion.root_only", "build.unread", "catalog.first_row",
 	                     "catalog.item_type", "catalog.name_empty", "catalog.reserved_id", "catalog.reserved_kind",
-	                     "catalog.reserved_name", "catalog.reserved_refused", "environment.sky_height_default",
+	                     "catalog.reserved_name", "catalog.reserved_refused", "document.line_ends",
+	                     "environment.sky_height_default",
 	                     "expansion.file.unread", "export.cancelled",
 	                     "export.cleanup", "export.replaced",
 	                     "mission.event_missing",
