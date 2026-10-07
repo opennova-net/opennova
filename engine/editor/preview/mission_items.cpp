@@ -152,6 +152,20 @@ bool MissionItemCache::facts(const SessionView &view, int64_t item, MissionItemF
 	return true;
 }
 
+bool MissionItemCache::model_facts(const SessionView &view, int64_t item, int type, const std::string &file,
+		MissionItemFacts &out) {
+	out = MissionItemFacts();
+	out.item = item;
+	out.type = type;
+	out.pool = mission_item_pool_of_type(type);
+	out.model = file;
+	const Model &model = model_(view, file);
+	if (!model.read) return false;
+	for (int i = 0; i < 3; ++i) out.anchor[i] = model.anchor[i];
+	if (model.collision) out.radius = mission_item_bound_radius(model.radius_q16, true, 0, false, 0);
+	return true;
+}
+
 void MissionItemCache::ask_(const SessionView &view, int64_t item, const Reads &reads) {
 	++items_asked_;
 	radii_.erase(item);
