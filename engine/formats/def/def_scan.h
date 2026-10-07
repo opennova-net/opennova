@@ -40,17 +40,6 @@ typedef struct { const char *name; size_t name_len; int bit; int bit2; } FlagEnt
     (arr)[(count)++] = (elem); \
 } while(0)
 
-#define DA_PUSH_RAW(raw_lines, raw_count, raw_cap, line, line_len) do { \
-    if ((raw_count) >= (raw_cap)) { \
-        (raw_cap) = (raw_cap) ? (raw_cap) * 2 : 8; \
-        (raw_lines) = (decltype(raw_lines))realloc((raw_lines), (raw_cap) * sizeof(*(raw_lines))); \
-    } \
-    size_t _cplen = (line_len) < 511 ? (line_len) : 511; \
-    memcpy((raw_lines)[(raw_count)], (line), _cplen); \
-    (raw_lines)[(raw_count)][_cplen] = '\0'; \
-    (raw_count)++; \
-} while(0)
-
 // Records a finding. A blocking code (def_issue_blocks) also counts against the
 // record or file even when the caller collects no details, and the writers refuse
 // what it counts; an ignored-input or reinterpreted-value finding is reported only.
@@ -125,7 +114,7 @@ inline constexpr int kMaxValueTokens = io::kConfigMaxTokens - 1;
 // [orig: File_ParseASCIIFile @0x53D8C7..0x53D8F5]. A line is read up to its
 // first NUL, as the tokenizer's strlen reads it. `apply(tokens, line, line_len,
 // line_index)` gets the line's bytes in `buf` (its CR LF excluded) for the
-// parsers' raw_lines and its index counting every line the walk cuts, the
+// parser's own use and its index counting every line the walk cuts, the
 // skipped ones included. A callback that returns true ends the walk, as a
 // nonzero return ends retail's [orig: @0x53D942]. `tokens` carries the
 // tokenizer's slots across walks (io::ConfigTokens::slot). Returns the index of
