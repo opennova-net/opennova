@@ -68,8 +68,10 @@ bool environment_config(const SessionView &view, const std::string &path, env::C
 	}
 	std::vector<uint8_t> bytes;
 	if (!read_project_file(view, path, bytes)) return false;
-	const std::string text(bytes.begin(), bytes.end());
-	return env::load_mission_env(&text, out);
+	// Its own lines alone: each mission's terrain reads ahead of it (environment_uses' ladder).
+	std::istringstream input(std::string(bytes.begin(), bytes.end()));
+	std::string error;
+	return env::load_env(input, out, error);
 }
 
 std::string byte_triple(const env::Rgb &rgb) {
@@ -152,10 +154,10 @@ EnvironmentUses environment_uses(const SessionView &view, const std::string &pat
 				if (use.terrain_read) use.terrain_water = trn.water_height;
 			}
 		}
-		// The water plane by the game's ladder: the header's override, then the terrain's water height
-		// where it is set, then the environment's (runtime/environment/water_frame.h, env #28) [orig:
-		// TimeOfDay_ParseProperty @ 0x57cb4e; Terrain_Init @ 0x60fcb1..0x60fcba; Game_LoadTerrainDuringConnect
-		// @ 0x520710].
+		// The water plane by the game's ladder: the header's override, then the environment's water height
+		// where it writes one, then the terrain's, whose line the parse reads first (runtime/environment/
+		// water_frame.h, env #28 and #44) [orig: TimeOfDay_ParseProperty @ 0x57cb4e; Environment_LoadTimeOfDayConfig
+		// @ 0x57dbeb, @ 0x57dcbf; Terrain_Init @ 0x60fcb1..0x60fcba; Game_LoadTerrainDuringConnect @ 0x520710].
 		env::WaterHeightRungs rungs;
 		rungs.has_mission_override = use.overrides.has_water_height;
 		rungs.mission_override = use.overrides.has_water_height ? use.overrides.water_height * 0.5f : 0.0f;
@@ -164,9 +166,9 @@ EnvironmentUses environment_uses(const SessionView &view, const std::string &pat
 		env::EnvironmentState state;
 		if (environment_read) state.set_config(&environment, true);
 		use.water_height = env::resolve_water_height(rungs, environment_read ? &state : nullptr, 0.0f);
-		use.water_from = rungs.has_mission_override       ? WaterFrom::Mission
-		                 : rungs.terrain_height != 0.0f   ? WaterFrom::Terrain
+		use.water_from = rungs.has_mission_override                          ? WaterFrom::Mission
 		                 : environment_read && environment.water_height_set ? WaterFrom::Environment
+		                 : rungs.terrain_height != 0.0f                      ? WaterFrom::Terrain
 		                                                                     : WaterFrom::None;
 		uses.missions.push_back(std::move(use));
 	}
