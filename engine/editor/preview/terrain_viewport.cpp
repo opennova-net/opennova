@@ -324,10 +324,12 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 	const float reach = fog_reach_;
 	if (placed || fog_reach_ <= 0.0f) {
 		fog_reach_ = mission_fog_reach(*view.findings.assets, header_);
-		// With no mission's .env, the engine's own environment's fog [orig: Environment_InitDefaults @ 0x57c010].
+		// With no mission's .env, the engine's own environment's fog [orig: Environment_InitDefaults @ 0x57c010]
+		// under the terrain's own lines (env::load_mission_env).
 		if (fog_reach_ <= 0.0f && header_.environment.empty()) {
-			env::Config defaults;
-			env::load_mission_env(nullptr, defaults);
+			env::MissionEnv loaded;
+			mission_environment(*view.findings.assets, header_, loaded);
+			const env::Config &defaults = loaded.config;
 			const env::FogParams fog =
 					env::compute_fog_params(defaults.fog_type, mission_settled_fog_level(defaults.fog_level), 0.0f);
 			if (fog.enabled && fog.end > 0.0f) fog_reach_ = fog.end * 0.5f;
