@@ -192,6 +192,7 @@ void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const 
 	error_.clear();
 	surface_map_.clear();
 	tiles_.clear();
+	tiles_file_.clear();
 	placed_ = TilFile();
 	// Retail's memset table: every placed tile TSD_NULL with no .tsd [orig: PolyTrn_InitTextures @ 0x60c5c9].
 	tile_surface_.fill(0);
@@ -214,8 +215,14 @@ void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const 
 		if (store_.surface_map().data != nullptr) surface_map_ = trn.charmap;
 		// The mission's placed tiles, read as the game reads <mission>.til [orig: Terrain_LoadTileInfoFile @
 		// 0x60a740], and the table their tile set's .tsd fills.
+		// Where the mission has none, the terrain's own: polytrn_tileinfo, its extension forced to TIL from the
+		// first '.' [orig: Terrain_Init @ 0x60FCFD; PolyTrn_LoadTerrainConfig @ 0x60E6C9, @ 0x60E6DC..0x60E6E5].
 		std::vector<uint8_t> til;
-		if (!key_.mission.empty() && stamped->read(key_.mission + ".til", til)) {
+		const std::string own = trn.tileinfo.empty() ? std::string() : trn.tileinfo.substr(0, trn.tileinfo.find('.')) + ".til";
+		const std::string mission_til = key_.mission.empty() ? std::string() : key_.mission + ".til";
+		if (!mission_til.empty() && stamped->read(mission_til, til)) tiles_file_ = mission_til;
+		else if (!own.empty() && stamped->read(own, til)) tiles_file_ = own;
+		if (!tiles_file_.empty()) {
 			tiles_ = terrain::surface_tiles_from_til_bytes(til);
 			std::string til_error;
 			if (!load_til(til.data(), til.size(), placed_, til_error)) placed_ = TilFile();

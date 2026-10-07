@@ -100,6 +100,7 @@ enum class FindingGroup {
 	SoundProfiles,
 	Particles, // a particle file, through the effect system's reader (ADR 0046 DI-14)
 	Environments,
+	Terrains, // a .trn, through the terrain's reader (the deep-integration plan's DI-30)
 	FileChores, // Files' delete, duplicate, new here and folders, and their undo (DI-25)
 	kCount
 };
@@ -293,6 +294,7 @@ enum class CoreFinding {
 	DocumentCopy,
 	DocumentDecode,
 	DocumentDuplicate,
+	DocumentImported,
 	DocumentKind,
 	DocumentLineEnds,
 	DocumentMissing,
