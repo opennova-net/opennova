@@ -34,12 +34,13 @@ inline EditorRequest new_project(std::string dir, std::string title = std::strin
 	return request;
 }
 // A project made as new_project makes one, building as the expansion `expansion` on the installed one
-// `builds_on` ("" the base game; ADR 0046 S16).
+// `builds_on` ("" the base game; ADR 0046 S16) or on the base game's project `base_project` (T5).
 inline EditorRequest new_expansion_project(std::string dir, std::string title, std::string expansion,
-		std::string builds_on = std::string(), bool import_pass = true) {
+		std::string builds_on = std::string(), bool import_pass = true, std::string base_project = std::string()) {
 	EditorRequest request = new_project(std::move(dir), std::move(title), std::string(), import_pass);
 	request.expansion = std::move(expansion);
 	request.builds_on = std::move(builds_on);
+	request.base_project = std::move(base_project);
 	return request;
 }
 // The project in `dir` opened, its import pass first unless `import_pass` is false (its files as

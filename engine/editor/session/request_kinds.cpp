@@ -39,7 +39,7 @@ constexpr Holds kSlot = HoldsSlot;
 
 void serve_new_project(SessionCore &core, const EditorRequest &request) {
 	core.new_project(request.dir, request.title, request.game, request.import_pass,
-	                 ProjectExpansion{ request.expansion, request.builds_on }, request.game_install);
+	                 ProjectExpansion{ request.expansion, request.builds_on, request.base_project }, request.game_install);
 }
 void serve_check_install(SessionCore &core, const EditorRequest &request) {
 	core.check_install(request.game_install);
@@ -358,7 +358,8 @@ struct Request {
 constexpr RequestKindRow kRows[] = {
 	Request(K::NewProject, "new_project", serve_new_project,
 			"A project made in dir (its title, else the folder's name; its game, else jo; S16: built as "
-			"the expansion `expansion` on the installed one `builds_on`, its version text made and, on "
+			"the expansion `expansion` on the installed one `builds_on` or, T5, on the base game's project "
+			"`base_project` (its export the base game), its version text made and, on "
 			"the base game, its text table), then opened as open_project opens it (import_pass false: "
 			"no source the folder holds imported); refused, the open project kept, where dir holds a "
 			"project already, game names no game, or the expansion is one the game cannot take or the "
@@ -366,7 +367,8 @@ constexpr RequestKindRow kRows[] = {
 			"project lane): the game install it imports from and plays in, checked first (check_install: "
 			"refused, project.install.invalid, where the folder holds none of the game's archives) and "
 			"then the editor's install, which the project's local.json takes as it opens.")
-			.takes(request_params({ F::Dir }, { F::Title, F::Game, F::Expansion, F::BuildsOn, F::ImportPass, F::GameInstall }))
+			.takes(request_params({ F::Dir }, { F::Title, F::Game, F::Expansion, F::BuildsOn, F::BaseProject, F::ImportPass,
+			                                    F::GameInstall }))
 			.holds(kNone, kHoldsAll | kSlot, OnBusy::CancelRunning)
 			.ends_edit_groups()
 			.guarded(GuardScope::AllDirty, "Create a new project", "Save all")
