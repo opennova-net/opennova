@@ -30,7 +30,8 @@ it anywhere in the project. Keep new files at the top level.
 | File | What it is |
 |---|---|
 | `project.opennova` | The editor project: open this folder in the OpenNova Editor to edit, build or play the game. Its `.opennova/` cache (builds, runs, imports) ignores itself. |
-| `main.mnu` | The placeholder main menu: one `STARTUP` screen with literal text, `PLAY_RETAIL`, `CHANGE_FOLDER` and `EXIT`, its `MAIN` window naming the mouse pointer. Hand-written. |
+| `main.mnu` | The placeholder main menu: one `STARTUP` screen with literal text, `SINGLE_PLAYER_GO`, `MODS`, `PLAY_RETAIL`, `CHANGE_FOLDER` and `EXIT`, its `MAIN` window naming the mouse pointer. Hand-written. |
+| `options.mnu` | The `OPTIONS` screen the main menu's MODS button opens, the Mods list: the game fills any screen of that name as it opens, `AVAIL_LIST` with the base game and every expansion beside it (`expansion/<name>/`, by its Mods-list name), `MOD_DESC` with a picked one's description, and `ACCEPT` switches the game to the picked one (vfs-pff-mount-re.md, Expansions 3); `BACK` returns. Two hidden lists, `TEXFILTER` and `SHADERUSAGE`, hold the original game's own values for its ACCEPT, which compares them with its renderer's settings and would otherwise restart the renderer on an uninitialised value (the file's comment cites it). Hand-written. |
 | `newarow1.tga` | The mouse pointer every screen names (a white arrow outlined in black, 32 by 32). The original game hides the system pointer, so a screen naming none has no pointer at all. The name is the game's own: its start-mission splash draws it too. Made by the editor's blank factory (`engine/editor/blank/blank_texture.cpp`). |
 | `opennova.fnt` | The menu's one font (uppercase 5x7 stroke art drawn at 2x). Minted by `engine/editor/blank/blank_font_art.h` (the same art as the editor's blank font); `minimal_fnt_gen_test --write` regenerates it and the `minimal_fnt_gen` ctest keeps it byte-identical to the builder. |
 | `Arial12b.fnt`, `Arial14n.fnt`, `Arial14b.fnt`, `Arial16n.fnt`, `Arial16b.fnt`, `Impac22b.fnt`, `Impac38b.fnt` | The seven fonts the game's main menu loads by name. The editor's blank font (the same art as `opennova.fnt`), made by Create Missing. |
@@ -168,6 +169,11 @@ adding it to this table.
   first, so the `on_ar15`/`on_arms` art stays out of the site (drop it from
   the script's excludes and `game-web.yml`'s LFS pull then); the project file
   stays out too.
+- The base game's expansions are editor expansion projects of their own beside
+  it (`expansions/`, its README; ADR 0046 T5), built over this project's export.
+  The game zip ships each as `assets/expansion/<name>/`, which the main menu's
+  MODS lists and `/exp <name>` mounts, in OpenNova and in the original game
+  dropped into `assets/` alike.
 - `PLAY_RETAIL`, `CHANGE_FOLDER` and `EXIT` are wired by control name in
   `godot/game/bundled_menu_companion.gd` (retail wires its own `EXIT` by name
   too; its menus have no quit `ACTION`). `MainGame` mounts the picked install,
