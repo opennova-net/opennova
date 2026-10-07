@@ -1,7 +1,8 @@
 # Build and export the Windows products. Produces
 # dist/opennova-game-windows-v<version>.zip (opennova.exe, its matching native
 # dependencies and, in assets/, OpenNova's own game: the OpenNova Editor's export of
-# the base game project assets/, ADR 0048 d8) and
+# the base game project assets/, ADR 0048 d8, with each expansion project under
+# expansions/ exported into its expansion/<name>/, ADR 0046 T5) and
 # dist/opennova-editor-windows-v<version>.zip (editor/ = the OpenNova Editor,
 # runtime/ = the game it plays a project with, ADR 0046 d4). Retail game data is
 # supplied by the player. Debug exports include the game's ImGui tools; the
@@ -371,59 +372,95 @@ function Test-EditorAppBoot {
     }
 }
 
-# Stage the TRACKED files of assets/ (never a wildcard copy: a working checkout
-# may hold untracked local data there that must never ship, and the editor's
-# cache). The models, clips and textures ride LFS, so a checkout without them
-# pulled holds pointer files, which must never ship either.
-function Copy-BundledAssets {
-    param([string]$AssetsStageDir)
+# Stage the TRACKED files of one project folder of the repository (assets/, an
+# expansion under expansions/; never a wildcard copy: a working checkout may hold
+# untracked local data there that must never ship, and the editor's cache). The
+# models, clips and textures ride LFS, so a checkout without them pulled holds
+# pointer files, which must never ship either.
+function Copy-TrackedProject {
+    param([string]$Folder, [string]$StageDir)
 
-    New-Item -ItemType Directory -Force -Path $AssetsStageDir | Out-Null
-    $tracked = & git -C $ROOT ls-files -z assets
-    if ($LASTEXITCODE -ne 0) { throw "git ls-files assets failed (exit $LASTEXITCODE)" }
+    New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
+    $tracked = & git -C $ROOT ls-files -z -- $Folder
+    if ($LASTEXITCODE -ne 0) { throw "git ls-files $Folder failed (exit $LASTEXITCODE)" }
     $names = @($tracked -split "`0" | Where-Object { $_ })
-    if ($names.Count -eq 0) { throw "No tracked files found under assets/" }
+    if ($names.Count -eq 0) { throw "No tracked files found under $Folder/" }
     $pointerHead = "version https://git-lfs.github.com/spec/v1"
 
     foreach ($name in $names) {
         $src = Join-Path $ROOT ($name -replace "/", "\")
-        if (-not (Test-Path -LiteralPath $src)) { throw "Tracked asset missing from the working tree: $name" }
+        if (-not (Test-Path -LiteralPath $src)) { throw "Tracked file missing from the working tree: $name" }
         $head = New-Object byte[] $pointerHead.Length
         $stream = [IO.File]::OpenRead($src)
         try { $read = $stream.Read($head, 0, $head.Length) } finally { $stream.Dispose() }
         if ([Text.Encoding]::ASCII.GetString($head, 0, $read) -eq $pointerHead) {
-            throw "Tracked asset is an unpulled LFS pointer: $name (run git lfs pull --include=`"assets/**`")"
+            throw "Tracked file is an unpulled LFS pointer: $name (run git lfs pull --include=`"$Folder/**`")"
         }
-        $rel = $name -replace "^assets/", "" -replace "/", "\"
-        $dst = Join-Path $AssetsStageDir $rel
+        $rel = $name.Substring($Folder.Length + 1) -replace "/", "\"
+        $dst = Join-Path $StageDir $rel
         New-Item -ItemType Directory -Force -Path (Split-Path $dst -Parent) | Out-Null
         Copy-Item -LiteralPath $src -Destination $dst -Force
     }
-    Write-Host "    staged $($names.Count) tracked asset files"
+    Write-Host "    staged $($names.Count) tracked files of $Folder/"
 }
 
 # OpenNova's own game into $GameDir (ADR 0048 d8): the tracked files of assets/
 # staged as a project of their own, then the OpenNova Editor's export of it, as
 # its File > Export makes one: the build's three boot-table archives and loose
 # files (the editor's Build refuses a project the game could not boot) and
-# export.json. The staged project, and the cache its build fills, are removed.
+# export.json. Each expansion project of the repository (expansions/<folder>/,
+# its project.opennova naming assets/ as its base game's project, ADR 0046 T5)
+# is staged beside it as the repository lays them out, exported over the base
+# game's export, and its expansion\<name>\ folder put into $GameDir, where the
+# game mounts it with /exp <name> (OpenNova, and the original game dropped into
+# the folder alike). The staged projects, and the caches their builds fill, are
+# removed.
 function Export-BaseGame {
     param([string]$GameDir)
 
     Write-Host "=== Building the base game (opennova-project export) ==="
-    $projectStage = New-StageDir ".stage-base-game-project"
+    $stage = New-StageDir ".stage-game-projects"
     try {
-        Copy-BundledAssets -AssetsStageDir $projectStage
-        & $PROJECT_CLI export $projectStage --out $GameDir
+        $base = Join-Path $stage "assets"
+        Copy-TrackedProject -Folder "assets" -StageDir $base
+        # Into the project's own export folder (build\export), where an expansion
+        # on it finds its base game; then copied out as what ships.
+        & $PROJECT_CLI export $base
         if ($LASTEXITCODE -ne 0) { throw "opennova-project export of the base game failed (exit $LASTEXITCODE)" }
+        $baseExport = Join-Path $base "build\export"
         foreach ($archive in @("language.pff", "localres.pff", "resource.pff")) {
-            if (-not (Test-Path -LiteralPath (Join-Path $GameDir $archive))) {
+            if (-not (Test-Path -LiteralPath (Join-Path $baseExport $archive))) {
                 throw "The base game's export holds no $archive"
             }
         }
+        New-Item -ItemType Directory -Force -Path $GameDir | Out-Null
+        Copy-Item -Path (Join-Path $baseExport "*") -Destination $GameDir -Recurse -Force
+
+        $projects = & git -C $ROOT ls-files -- "expansions/*/project.opennova"
+        if ($LASTEXITCODE -ne 0) { throw "git ls-files expansions failed (exit $LASTEXITCODE)" }
+        foreach ($projectFile in @($projects | Where-Object { $_ })) {
+            $folder = Split-Path $projectFile -Parent
+            $folder = $folder -replace "\\", "/"
+            Write-Host "=== Building the expansion $folder (opennova-project export) ==="
+            $expStage = Join-Path $stage ($folder -replace "/", "\")
+            Copy-TrackedProject -Folder $folder -StageDir $expStage
+            $out = Join-Path $stage ("out-" + (Split-Path $folder -Leaf))
+            & $PROJECT_CLI export $expStage --out $out
+            if ($LASTEXITCODE -ne 0) { throw "opennova-project export of $folder failed (exit $LASTEXITCODE)" }
+            $built = @(Get-ChildItem -LiteralPath (Join-Path $out "expansion") -Directory)
+            if ($built.Count -ne 1) { throw "The export of $folder holds no expansion folder" }
+            $name = $built[0].Name
+            if (-not (Test-Path -LiteralPath (Join-Path $built[0].FullName "$name.pff"))) {
+                throw "The expansion $name's export holds no $name.pff"
+            }
+            $into = Join-Path $GameDir "expansion"
+            New-Item -ItemType Directory -Force -Path $into | Out-Null
+            Copy-Item -LiteralPath $built[0].FullName -Destination $into -Recurse -Force
+            Write-Host "    shipped expansion\$name"
+        }
     }
     finally {
-        Remove-Item -LiteralPath $projectStage -Recurse -Force
+        Remove-Item -LiteralPath $stage -Recurse -Force
     }
 }
 
@@ -484,7 +521,10 @@ Command line (advanced):
 Loose data:
   opennova.exe -- --resource-dir "C:\MyGameData" --loose-root /d
 
-Use /game <code> and /exp <name> to select a game or expansion.
+Use /game <code> and /exp <name> to select a game or expansion. OpenNova's own
+expansions ship in assets\expansion\; the main menu's MODS lists them, or start
+one with, for example:
+  opennova.exe -- /exp onjo1
 "@
     Set-Content -LiteralPath (Join-Path $stagePath "README.txt") -Value $launchHelp -Encoding UTF8
     Test-GodotAppBoot -ExePath $stagedExe
