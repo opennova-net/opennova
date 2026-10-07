@@ -13,6 +13,7 @@
 #include <editor/ui/catalog_inspector_view.h>
 #include <editor/ui/environment_inspector.h>
 #include <editor/ui/terrain_inspector.h>
+#include <editor/ui/hud_layout_inspector.h>
 #include <editor/ui/main_viewport_view.h>
 #include <editor/ui/menu_inspector.h>
 #include <editor/ui/menu_view.h>
@@ -168,8 +169,11 @@ constexpr DocumentViewRow kViews[] = {
 	// Main role, ui/main_viewport_view over the Environment viewport kind); the missions that run on it head
 	// the Inspector, each a Go to with its terrain and what its header sets over it (ui/environment_inspector).
 	{DocumentTypeId::Environment, DocumentViewRole::MainViewport, &kTreeOutline, nullptr, draw_environment_inspector},
-	// The HUD layout's text in its script device (DI-20), its HUD the Preview window's.
-	{DocumentTypeId::HudLayout, DocumentViewRole::MainViewport, nullptr, make_script_view},
+	// The HUD layout's text in its script device (DI-20), its HUD the Preview window's; the element picked
+	// there heads the Inspector, its place, size, anchor, font, colour and detail level each a field (DI-37,
+	// ui/hud_layout_inspector).
+	{DocumentTypeId::HudLayout, DocumentViewRole::MainViewport, nullptr, make_script_view, nullptr, nullptr, nullptr,
+	 draw_hud_layout_inspector},
 	// A terrain's row, its grid rows and its foliage definitions as a tree (DI-30a) beside its picture (DI-30b: the
 	// Main role, ui/main_viewport_view over the Terrain viewport kind); the import that makes it and the missions
 	// that run on it head the Inspector (ui/terrain_inspector).
