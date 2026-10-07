@@ -11,11 +11,13 @@
 #include <editor/run/play_lease.h>
 #include <editor/run/play_session.h>
 #include <editor/run/play_start.h>
+#include <editor/session/build_operation.h>
 #include <editor/session/play_log.h>
 
 namespace opennova::editor {
 
 class SessionCore;
+struct EditorRequest;
 struct SessionView;
 
 // The mission Play mission starts the game in for the active document (ADR 0046 S14): the
@@ -61,12 +63,16 @@ public:
 	// the editor's, else the one packaged beside the editor; "" when none).
 	std::string resolve_runtime_executable() const;
 
+	// The Play `request` asks for (a play's; the one an edit_in_viewport's command plans): its mission,
+	// behind, fresh and start, and its mode resolved now, the request's play_mode for this Play alone, else
+	// the open project's own (LocalSettings::play_mode: the OpenNova runtime for a project never set).
+	PlayIntent intent_of(const EditorRequest &request) const;
 	// Play refused before any build (no spawn on this platform, a game running, a `mission` that is
 	// no .bms of the project, a `start` with no mission to start in, the game install's game running
 	// already when Play runs there, Strict Play of an expansion): true, said why.
-	bool refused(const std::string &mission = std::string(), const PlayStart &start = PlayStart());
-	// The game started on the last build (its lease written, the view's run block filled), in
-	// `mission` ("" its menu): the project's .bms of that name as the scan spells it, looked up
+	bool refused(const PlayIntent &intent);
+	// The game started on the last build in the intent's mode (its lease written, the view's run block
+	// filled), in `mission` ("" its menu): the project's .bms of that name as the scan spells it, looked up
 	// again now the build landed (one gone since starts nothing, play.mission.unknown). The game
 	// install starts at its menu, a note saying so. `behind`: its window starts behind every other,
 	// never taking the foreground (LaunchPlan::behind; the run section says so). The run directory keeps
@@ -76,8 +82,7 @@ public:
 	// directory's copy of the mission has its player's start markers at the point (run/play_start.h), the
 	// runtime mounting the run directory, where the build is staged for it; one that cannot be staged
 	// starts nothing (play.start).
-	void start(const std::string &mission = std::string(), bool behind = false, bool fresh = false,
-	           const PlayStart &start = PlayStart());
+	void start(const PlayIntent &intent);
 	void stop();
 	// The poll's: the child's state, the game's log tail, how it ended once it has; the validation
 	// its report left due.
@@ -150,7 +155,7 @@ private:
 	uint64_t game_log_offset_ = 0;
 	std::string game_log_partial_;
 	// The running (or last) game: its plan, whether it is the game install's (its log read once it
-	// exited) and strictly so, whether its run directory held a game.cfg before its first start, whether
+	// exited) and strictly so (its mode's), whether its run directory held a game.cfg before its first start, whether
 	// it was started again, when it started, and what its file log said it loaded.
 	LaunchPlan plan_;
 	bool install_run_ = false;
