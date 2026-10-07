@@ -90,7 +90,7 @@ bool operator==(const MissionViewportOptions &a, const MissionViewportOptions &b
 		if (a.*flag.member != b.*flag.member) return false;
 	return a.mark_range == b.mark_range && a.stick == b.stick && a.time == b.time && a.tool == b.tool &&
 			a.item == b.item && a.path == b.path && a.snap == b.snap && a.turn == b.turn && a.palette == b.palette &&
-			a.overlay == b.overlay && a.ammo == b.ammo;
+			a.overlay == b.overlay && a.ammo == b.ammo && a.listen == b.listen;
 }
 
 io::JsonValue mission_options_to_json(const MissionViewportOptions &options) {
@@ -108,6 +108,7 @@ io::JsonValue mission_options_to_json(const MissionViewportOptions &options) {
 	out.set("palette", io::json_string(options.palette));
 	out.set("overlay", io::json_string(mission_ground_overlay_token(options.overlay)));
 	out.set("ammo", io::json_string(options.ammo));
+	out.set("listen", mission_listen_options_to_json(options.listen));
 	return out;
 }
 
@@ -183,6 +184,8 @@ bool mission_options_from_json(const JsonValue &json, MissionViewportOptions &he
 				return false;
 			}
 			read.palette = value.string;
+		} else if (member.key == "listen") {
+			if (!mission_listen_options_from_json(value, read.listen, error)) return false;
 		} else if (member.key == "overlay") {
 			if (!value.is_string() || !mission_ground_overlay_from_token(value.string, read.overlay)) {
 				error = "options.overlay is none, surfaces (the surface classes the game reads) or foliage (what the "
@@ -198,7 +201,43 @@ bool mission_options_from_json(const JsonValue &json, MissionViewportOptions &he
 		} else {
 			error = "Unknown options member \"" + member.key +
 					"\" (it takes show, marks, mark_range, stick, time, tool, item, path, snap, turn, palette, overlay, "
-					"ammo).";
+					"ammo, listen).";
+			return false;
+		}
+	}
+	held = read;
+	return true;
+}
+
+io::JsonValue mission_listen_options_to_json(const MissionListenOptions &options) {
+	JsonValue out = JsonValue::make_object();
+	out.set("on", JsonValue::make_bool(options.on));
+	out.set("volume", io::json_number(double(options.volume)));
+	return out;
+}
+
+bool mission_listen_options_from_json(const io::JsonValue &json, MissionListenOptions &held, std::string &error) {
+	if (!json.is_object()) {
+		error = "options.listen is an object, {on, volume}.";
+		return false;
+	}
+	MissionListenOptions read = held;
+	for (const io::JsonMember &member : json.object) {
+		if (member.key == "on") {
+			if (!member.value.is_bool()) {
+				error = "options.listen.on is true or false.";
+				return false;
+			}
+			read.on = member.value.boolean;
+		} else if (member.key == "volume") {
+			float volume = 0.0f;
+			if (!io::json_float(member.value, volume) || volume < 0.0f || volume > 1.0f) {
+				error = "options.listen.volume is the master volume, 0 to 1.";
+				return false;
+			}
+			read.volume = volume;
+		} else {
+			error = "Unknown options.listen member \"" + member.key + "\" (it takes on, volume).";
 			return false;
 		}
 	}
