@@ -257,6 +257,13 @@ WaveFacts wave_facts(const std::vector<uint8_t> &bytes, size_t bins) {
 	return facts;
 }
 
+double wave_seconds(const std::vector<uint8_t> &bytes) {
+	WaveSamples wave;
+	std::string error;
+	if (!decode_wave_source(bytes, wave, error) || !wave.rate) return 0.0;
+	return double(wave.frames()) / double(wave.rate);
+}
+
 namespace {
 
 // The bits a conversion writes.
