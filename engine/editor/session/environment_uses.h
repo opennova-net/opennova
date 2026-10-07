@@ -35,6 +35,14 @@ struct EnvironmentMissionUse {
 	env::BmsEnvOverrides overrides;   // what the header sets over the environment
 	int start_time = 0;               // the header's start time, 8.8 hours
 	int minutes_per_day = 0;          // the header's day length (0: the clock stands)
+	// The header's fields the game reads beside the environment, as written (DI-19b's environment
+	// viewport loads the mission's terrain, its tiles and its overrides as the mission device does):
+	// the tile set, the attribute flags that gate the overrides, the water and fog overrides, the fog
+	// and water colours, the murk.
+	std::string tile_set;
+	uint32_t attrib_flags = 0;
+	int water_override = 0, fog_override = 0, water_murk = 0;
+	int fog_color[3] = { 0, 0, 0 }, water_color[3] = { 0, 0, 0 };
 	WaterFrom water_from = WaterFrom::None;
 	float water_height = 0.0f;        // metres
 };
