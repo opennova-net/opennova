@@ -61,6 +61,14 @@ struct PrecipitationDrawState {
 	int32_t last_camera_q16[3] = {0, 0, 0};
 };
 
+// A render-frame camera (position, unit right and up; the render basis is
+// mission (x, y, z) as (x, z, -y)) as the drawer takes it: its position in
+// the mission frame, 16.16 rounded and saturated, under `mode`. What every
+// embedder hands the drawer, the game's frame and the editor's environment
+// preview alike.
+PrecipitationCamera precipitation_camera_from_render(const float position[3],
+		const float right[3], const float up[3], int32_t mode);
+
 // One compiled frame: `drops` triangles, 3 vertices each, interleaved
 // {x, y, z, u, v} (stride 5) in the render frame; one diffuse color for all.
 struct PrecipitationDrawFrame {
@@ -82,6 +90,20 @@ struct PrecipitationDrawFrame {
 // returns before any of it [orig: @ 0x5dee27..0x5dee48].
 void compile_precipitation_frame(env::PrecipitationField &field,
 		int32_t rain_pct_q16, uint32_t precipitation_kind,
+		uint32_t terrain_light_combined_rgb, const PrecipitationCamera &camera,
+		PrecipitationDrawState &state, PrecipitationDrawFrame &out);
+
+// The drawer's whole call for one camera over a pool no kernel owns (the
+// editor's environment preview, ADR 0046 DI-19b): while it rains the
+// per-render update first, every active slot wrapped into the camera's volume
+// and re-floored by `sampler` over the water plane at `water_z_q16`
+// [orig: WeatherParticle_UpdatePositions @ 0x5dec40, called by the drawer
+// @ 0x5dee65 before it builds], then the compile above. The game's frame
+// runs the same two through MissionKernel::update_precipitation, whose
+// sampler reads the kernel's terrain and collision.
+void update_and_compile_precipitation(env::PrecipitationField &field,
+		int32_t rain_pct_q16, uint32_t precipitation_kind, int32_t water_z_q16,
+		const env::PrecipitationFloorSampler &sampler,
 		uint32_t terrain_light_combined_rgb, const PrecipitationCamera &camera,
 		PrecipitationDrawState &state, PrecipitationDrawFrame &out);
 

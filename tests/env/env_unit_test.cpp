@@ -45,6 +45,16 @@ int main() {
 	clock_ok &= expect(opennova::env::tod_advance_per_tick(10) ==
 					opennova::env::tod_advance_per_tick(60),
 			"day lengths below 60 minutes clamp to the retail floor");
+	// A mission's day length of 0 is a clock that stands [orig: Environment_SetTodAdvanceRate
+	// @0x57d176, @0x57d196]; an .env's tod_rate of 0 takes the floor (its arm has no zero test,
+	// @0x57d0fe), and with neither the clock runs at Environment_InitDefaults' 75 (@0x57c22f).
+	clock_ok &= expect(opennova::env::tod_advance_per_tick(0) == 0,
+			"a mission day length of 0 stands the clock");
+	clock_ok &= expect(opennova::env::tod_rate_advance_per_tick(0) ==
+					opennova::env::tod_advance_per_tick(60),
+			"an .env tod_rate of 0 takes the 60-minute floor");
+	clock_ok &= expect(opennova::env::kTodDefaultAdvancePerTick == 75,
+			"the engine's default advance is 75");
 	// Q8.8 12.00 -> 12h in 8.24; 25.5h wraps to 1.5h.
 	clock_ok &= expect(opennova::env::tod_start_fixed24(12 << 8) == 12 << 24,
 			"the Q8.8 start hour widens by 16 bits");
