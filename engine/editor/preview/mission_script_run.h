@@ -24,8 +24,13 @@ struct MissionSceneHeader;
 // `soundsettossn` and `soundtotarget` [orig: WacCmd_SoundSetToSsn @ 0x4f1dd0; WacCmd_SoundToTarget @ 0x4f7f60 ->
 // Entity_PlaySound3D_FullVolume @ 0x528e20], and an item's time-of-day shot, items.def's dawnshot, dayshot, duskshot
 // and nightshot replayed at its sound point at random intervals [orig: Entity_SpawnRegionalEffect @ 0x408290]).
+// Dialog: a Play dialog action of the mission's events, its dialog's number (DI-32: the game queues the dialog on
+// its one dialog channel [orig: EventAction_Dispatch @ 0x454461 -> Dialog_PlayByIndex @ 0x527ae0]; the Listen plays
+// its lines). Voice: a script's voice wave on the scripted voice channel (SSNwave, SSNradio; wave and pwave where a
+// local player stands, which the Listen has none of [orig: Wac_PlayScriptedVoiceWave @ 0x4ed610, its local player
+// test; WacCmd_SsnWave @ 0x4f78d0; WacCmd_SsnRadio @ 0x4f79b0]), its file.
 struct MissionScriptSound {
-	enum class Kind : uint8_t { Thunder, Relative, Positional };
+	enum class Kind : uint8_t { Thunder, Relative, Positional, Dialog, Voice };
 	Kind kind = Kind::Thunder;
 	int32_t tick = 0;
 	std::string set;
@@ -33,8 +38,10 @@ struct MissionScriptSound {
 	int32_t bearing = 0;      // Thunder, Relative: a 0..255 turn from the listener's facing
 	double at[3] = { 0.0, 0.0, 0.0 }; // Positional: the mission point, metres
 	int shot = -1; // Positional: an item's time-of-day shot, its region (0 dawn .. 3 night); -1 the script's
+	int32_t dialog = 0; // Dialog: its number (dlg%03i)
+	std::string wave;   // Voice: the .wav it plays
 };
-// "thunder", "relative", "positional".
+// "thunder", "relative", "positional", "dialog", "voice".
 const char *mission_script_sound_kind_token(MissionScriptSound::Kind kind);
 
 // A mission's start and its script as the game runs them, for the mission view's Listen (ADR 0046 DI-36): the mission
@@ -45,7 +52,10 @@ const char *mission_script_sound_kind_token(MissionScriptSound::Kind kind);
 // settle) [orig: Game_StartMission @ 0x525cb8 -> WacScript_InitAndLoad @ 0x4f91f0; Environment_MissionStartInit
 // @ 0x57f1e0]. Then on the preview clock, a game tick at a time, the script alone as the game runs it while a player
 // plays (the WAC on its own divider, every 62nd tick, its admission open [orig: WacScript_AdvanceTick @ 0x4f81a0; the
-// gate @ 0x51d8bd reads a human]) and the weather tick after it (MissionKernel::tick_weather: the rain's and the
+// gate @ 0x51d8bd reads a human]), the mission's events after it in the script pass's order (BmsEventSystem: the
+// timed and variable conditions fire as the game's do, a Play dialog queuing its dialog, DI-32 [orig:
+// EventTrigger_UpdateAllEntries via Server_TickUpdate; the pre-mission pass at the start, Game_StartMission
+// @ 0x525b86]) and the weather tick after them (MissionKernel::tick_weather: the rain's and the
 // overcast's springs, the lightning sequencers and their thunder) [orig: Environment_UpdateWeatherTick @ 0x57e9b0, after
 // the entity update @ 0x52674b]; and between them the entity update's two cohort walks of the statics and the markers
 // (world::tick_item_event_pool: each item's class think on its age clock, whose env-sound class replays its
@@ -111,6 +121,9 @@ private:
 	bool failed_ = false; // the last boot failed: not tried again until what it read moves
 	uint32_t clock_fixed24_ = 12u << 24; // the picture's hour on the 8.24 clock
 	std::vector<MissionScriptSound> sounds_;
+	// What the start raised that the game plays once the mission runs: the dialogs the pre-mission pass queued (heard
+	// at tick 0, kept for a step back to the start).
+	std::vector<MissionScriptSound> start_sounds_;
 };
 
 // How many game ticks one run takes at most (a minute of the game's): a longer run (a jump of the clock) goes on at
