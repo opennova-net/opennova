@@ -46,6 +46,7 @@
 #include <editor/session/request_kinds.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/view/viewport_kind.h>
+#include <formats/tga/tga.h>
 #include <editor/session/view_json.h>
 #include <formats/pff/pff.h>
 #include <formats/rtxt/rtxt.h>
@@ -438,7 +439,20 @@ static int test_build_gate() {
 	TEST_EXPECT(!gate.get_bool("blocked", true) && missing_references() == 1);
 	// And a missing reference of a kind whose row cites the game's refusal (gates_when_missing): a
 	// mission's terrain, without which the mission does not start.
-	TEST_EXPECT(editor_test::write_text(dir.file("project/terrain/island.trn"), "trn") &&
+	// (A terrain the game's gate takes: its colour map, detail map and height data named, which the project
+	// holds; a terrain it refuses is its own finding, terrain.refused, which gates the build too.)
+	const char *const kIslandTrn = "polytrn_colormap island_c.tga\r\npolytrn_detailmap island_c.tga\r\n"
+	                               "polytrn_polydata island.cpt\r\npolytrn_sectorcount 1\r\npolytrn_sectors 1\r\n";
+	{
+		// The colour map as the game's TGA reader reads one: 1024 x 1024, 24-bit.
+		const std::vector<uint8_t> rgba(size_t(1024) * 1024 * 4, 128);
+		std::vector<uint8_t> tga;
+		std::string why;
+		TEST_EXPECT(opennova::tga::tga_write_rgb24(rgba.data(), 1024, 1024, tga, why) &&
+				editor_test::write_bytes(dir.file("project/terrain/island_c.tga"), tga) &&
+				editor_test::write_bytes(dir.file("project/terrain/island.cpt"), std::vector<uint8_t>(1, 0)));
+	}
+	TEST_EXPECT(editor_test::write_text(dir.file("project/terrain/island.trn"), kIslandTrn) &&
 			editor_test::write_text(dir.file("project/day.env"), "env"));
 	session.handle(request::rescan());
 	session.run_operations();
@@ -454,7 +468,7 @@ static int test_build_gate() {
 	TEST_EXPECT(gate.get_bool("blocked", false) && gate.get_number("count", 0.0) == 1.0 &&
 			gate.get("blocking")->array[0].get_string("code", "") == "reference.missing" &&
 			gate.get("blocking")->array[0].get_string("message", "").find("refuses to start the mission") != std::string::npos);
-	TEST_EXPECT(editor_test::write_text(dir.file("project/terrain/island.trn"), "trn"));
+	TEST_EXPECT(editor_test::write_text(dir.file("project/terrain/island.trn"), kIslandTrn));
 	session.handle(request::rescan());
 	session.run_operations();
 	gate = ask(session, "build_gate");

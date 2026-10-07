@@ -134,6 +134,9 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        // The environment (DI-19a): its row and its ten keyframes as a tree, the missions that run on it
 	        // heading the Inspector.
 	        {AssetKind::Environment, "synth_full.env", file("env/synth_full.env")},
+	        // The terrain (DI-30): its row, its grid rows and its foliage definitions as a tree, the import that
+	        // makes it and the missions that run on it heading the Inspector.
+	        {AssetKind::Terrain, "Tmap.trn", file("terrain/tmap/Tmap.trn")},
 	};
 }
 
