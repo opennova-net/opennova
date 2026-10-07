@@ -630,6 +630,52 @@ inline EditorRequest move_asset(std::string path, std::string folder) {
 	request.folder = std::move(folder);
 	return request;
 }
+// Files' chores (DI-25): a file deleted to the project's trash (`force` over the uses naming it, `alone` an import
+// source keeping its outputs), duplicated beside itself (`new_name` "" the name the rules give; `alone` a source
+// without its record), a new file made in `folder` ("/" the top level), a folder made, renamed or deleted, and
+// the file history's step taken back or done again.
+inline EditorRequest delete_asset(std::string path, bool force = false, bool alone = false) {
+	EditorRequest request = of(EditorRequestKind::DeleteAsset);
+	request.path = std::move(path);
+	request.force = force;
+	request.alone = alone;
+	return request;
+}
+inline EditorRequest duplicate_asset(std::string path, std::string new_name = std::string(), bool alone = false) {
+	EditorRequest request = of(EditorRequestKind::DuplicateAsset);
+	request.path = std::move(path);
+	request.new_name = std::move(new_name);
+	request.alone = alone;
+	return request;
+}
+inline EditorRequest create_file_in(std::string folder, std::string name, std::string file_kind = std::string(),
+		std::vector<std::pair<std::string, std::string>> values = {}) {
+	EditorRequest request = create_file(std::move(name), std::move(file_kind), std::move(values));
+	request.folder = folder.empty() ? std::string("/") : std::move(folder);
+	return request;
+}
+inline EditorRequest new_folder(std::string folder) {
+	EditorRequest request = of(EditorRequestKind::NewFolder);
+	request.folder = std::move(folder);
+	return request;
+}
+inline EditorRequest rename_folder(std::string folder, std::string new_name) {
+	EditorRequest request = of(EditorRequestKind::RenameFolder);
+	request.folder = std::move(folder);
+	request.new_name = std::move(new_name);
+	return request;
+}
+inline EditorRequest delete_folder(std::string folder) {
+	EditorRequest request = of(EditorRequestKind::DeleteFolder);
+	request.folder = std::move(folder);
+	return request;
+}
+inline EditorRequest undo_file() {
+	return of(EditorRequestKind::UndoFile);
+}
+inline EditorRequest redo_file() {
+	return of(EditorRequestKind::RedoFile);
+}
 
 // --- the shell's -------------------------------------------------------------------------------
 

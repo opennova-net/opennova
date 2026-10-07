@@ -101,6 +101,7 @@ enum class FindingGroup {
 	Particles, // a particle file, through the effect system's reader (ADR 0046 DI-14)
 	Environments,
 	HudLayouts,
+	FileChores, // Files' delete, duplicate, new here and folders, and their undo (DI-25)
 	kCount
 };
 inline constexpr size_t kFindingGroupCount = static_cast<size_t>(FindingGroup::kCount);
@@ -325,6 +326,15 @@ enum class CoreFinding {
 	ExportReplaced,
 	ExportRuntime,
 	ExportWrite,
+	FileExists,
+	FileFolder,
+	FileHistory,
+	FileImported,
+	FileName,
+	FileNamed,
+	FileTrash,
+	FileUnknown,
+	FileWrite,
 	GraphUnreadable,
 	ImportAlphaDropped,
 	ImportArchive,
