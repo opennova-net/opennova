@@ -63,6 +63,22 @@ bool ExpansionFields::draw(ExpansionChoice &choice, const std::vector<ProjectVie
 		choice.name = name_.sent();
 		changed = true;
 	}
+	// T5: the base game as a project of the modder's own, whose export it builds and plays over.
+	ImGui::BeginDisabled(!choice.builds_on.empty());
+	base_.follow(choice.base_project);
+	if (ImGui::InputText("Base game's project", base_.text, sizeof(base_.text))) {
+		choice.base_project = base_.sent();
+		changed = true;
+	}
+	ImGui::EndDisabled();
+	ui_kit::tooltip("Empty: the game install's base game. A folder: a standalone project of your own (from this "
+	                "project's folder when relative, as ../../assets), whose export is the base game the expansion "
+	                "imports from, builds over and plays over, Strict Play included. Export it first.");
+	if (!choice.base_project.empty() && !choice.builds_on.empty()) {
+		ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f),
+		                   "An expansion builds on an installed expansion or on a base game's project, never both.");
+		return false;
+	}
 	if (choice.value() == current && !current.standalone()) return true; // as the project holds it: nothing to weigh again
 	const std::string problem = expansion_name_problem(choice.name, ExpansionNameUse::Own);
 	if (!problem.empty()) {

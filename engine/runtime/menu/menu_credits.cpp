@@ -3,7 +3,7 @@
 
 #include <runtime/menu/menu_credits.h>
 
-#include <runtime/menu/config_text.h>
+#include <formats/configfile/config_file.h>
 
 #include <base/io/strutil.h>
 
@@ -17,78 +17,21 @@ namespace opennova::menu {
 
 namespace {
 
-// [orig: ConfigFile_FindSection @ 0x75eeb0 — the lowercased label; the structured
-// cursor reset (+16 = the first entry, +20 = 0)]
+using configfile::ConfigSection;
+
+// The ConfigFile's accessors (formats/configfile/config_file.h) [orig: ConfigFile_FindSection @ 0x75eeb0;
+// effect_get_param_value_0 @ 0x75fa00; effect_get_param_value @ 0x75f580].
 ConfigSection *find_section(std::vector<ConfigSection> &sections, const char *name) {
-	const std::string label = strutil::to_lower(name);
-	for (ConfigSection &s : sections) {
-		if (s.label != label) continue;
-		s.current = 0;
-		s.next = SIZE_MAX;
-		return &s;
-	}
-	return nullptr;
+	return configfile::find_config_section(sections, name);
 }
 
-// A read the way the structured accessor reads [orig: effect_get_param_value_0
-// @ 0x75fa00]: from the next entry (else the current one) to the first whose key
-// matches, stopping at an entry with no values; `index` is 1-based. A number read
-// as text is printed "%d" or "%f".
 bool read_value(ConfigSection &s, const char *key, int index, std::string *text, float *real,
 		int32_t *integer) {
-	if (real != nullptr) *real = 0.0f;
-	if (integer != nullptr) *integer = 0;
-	size_t at = s.next != SIZE_MAX ? s.next : s.current;
-	if (index < 1 || at >= s.entries.size()) return false;
-	while (!strutil::iequals(s.entries[at].key, key)) {
-		s.current = at;
-		if (s.entries[at].values.empty()) return false;
-		s.next = ++at;
-		if (at >= s.entries.size()) return false;
-	}
-	s.current = at;
-	s.next = at + 1;
-	const ConfigEntry &entry = s.entries[at];
-	if (static_cast<size_t>(index) > entry.values.size()) return false;
-	const ConfigValue &v = entry.values[static_cast<size_t>(index - 1)];
-	if (v.type == 1) {
-		if (real != nullptr) *real = static_cast<float>(v.integer);
-		if (integer != nullptr) *integer = v.integer;
-		if (text != nullptr) *text = std::to_string(v.integer);
-	} else if (v.type == 2) {
-		if (real != nullptr) *real = v.real;
-		if (integer != nullptr) *integer = static_cast<int32_t>(v.real);
-		if (text != nullptr) {
-			char buffer[64];
-			std::snprintf(buffer, sizeof buffer, "%f", static_cast<double>(v.real));
-			*text = buffer;
-		}
-	} else if (text != nullptr) {
-		*text = v.text;
-	}
-	return true;
+	return configfile::read_config_value(s, key, index, text, real, integer);
 }
 
-// The current entry's value `index`, when its key still matches [orig:
-// effect_get_param_value @ 0x75f580, reached through ini_read_value_with_context].
 bool read_current_value(ConfigSection &s, const char *key, int index, std::string *text) {
-	if (s.current >= s.entries.size() || !strutil::iequals(s.entries[s.current].key, key)) return false;
-	const ConfigEntry &entry = s.entries[s.current];
-	if (index < 1 || static_cast<size_t>(index) > entry.values.size()) {
-		s.next = s.current + 1;
-		return false;
-	}
-	const ConfigValue &v = entry.values[static_cast<size_t>(index - 1)];
-	if (v.type == 1) {
-		*text = std::to_string(v.integer);
-	} else if (v.type == 2) {
-		char buffer[64];
-		std::snprintf(buffer, sizeof buffer, "%f", static_cast<double>(v.real));
-		*text = buffer;
-	} else {
-		*text = v.text;
-	}
-	return true;
+	return configfile::read_current_config_value(s, key, index, text, nullptr, nullptr);
 }
 
 // [orig: String_CopyN — at most size - 1 characters]
@@ -125,7 +68,7 @@ bool marquee_load_credits(const uint8_t *data, size_t size, MarqueeCredits &io,
 	// "CBIN" (0x4E494243) takes ConfigFile_ParseBinary [orig: ConfigFile_LoadFromFile
 	// @ 0x760a10].
 	if (size >= 4 && std::memcmp(data, "CBIN", 4) == 0) return false;
-	std::vector<ConfigSection> sections = parse_config_text(data, size);
+	std::vector<ConfigSection> sections = configfile::parse_config_text(data, size);
 	// The file loaded: the values and the running offset start over
 	// [orig: @ 0x65c605..0x65c63d].
 	io.scroll_rate = 1.0f;

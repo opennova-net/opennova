@@ -497,7 +497,7 @@ struct Entity {
     uint8_t team = 0;
     // GamePlayerEntity.playerClass (entity+0x294) — the soldier class 5..9. The joiner's client
     // resolves its body-anim model from THIS at round-load [orig: Game_ReloadEntityModelsAndCallbacks
-    // @0x522830 -> AnimMap_GetSlotPropertyInt(playerClass) @0x4127b0 -> ADM -> AnimMap_RegisterEntity
+    // @0x522830 -> CharAttr_GetCammoTypeId(playerClass) @0x4127b0 -> ADM -> AnimMap_RegisterEntity
     // @0x40bb60 writes animChannelB(+0x188)]. The MP branch preloads classes 5..9 only; class 0 maps
     // to slot 15 -> empty ADM -> no anim channel -> Entity_UpdateInfantryPlayerBody @0x4b40e0 bails,
     // so the player cannot move/crouch/prone. Set from the player's loadout at spawn (default a valid

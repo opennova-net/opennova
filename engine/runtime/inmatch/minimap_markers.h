@@ -10,7 +10,7 @@
 // bank when no decoded regular row already covers its wire handle.
 // [orig: Render_MinimapSlotBlip @0x5BE240 -> Minimap_DrawBlip, the regular
 //  TSDicon submit @0x597F73; the medic gate HUD_DrawEntityLabelsAndMarkers
-//  @0x5a49e0 — AnimMap_IsSlotActive(playerClass, 8) @0x5a4ab3 under the
+//  @0x5a49e0 — CharAttr_ClassHasAttribute(playerClass, 8) @0x5a4ab3 under the
 //  local-team gate @0x5a4ac6/@0x5a4acf; see docs/interface/hud-re.md]
 
 #include <cstdint>

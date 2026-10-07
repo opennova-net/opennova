@@ -841,12 +841,13 @@ private:
 	// it). A host role is constructed with the same catalog. Called from
 	// resolve_item_traits, the boot's role hook, and enable_join.
 	void install_item_catalog();
-	// Install or clear the retained boot charattr table on the current Joiner runtime.
-	void install_charattr_challenge_table();
-	// Copy the per-class ATTRIBUTES words into World::class_attribute_flags -- the
-	// joiner's live table when one exists (S2C 0x41 mutates it in receive order),
-	// else the boot copy. Runs at world creation, at every table install, and
-	// after each net pump (engine: runtime/inmatch/charattr_challenge.cpp).
+	// Install the retained boot charattr table on the current Joiner runtime.
+	void install_charattr_table();
+	// Copy the per-class ATTRIBUTES words (and the latches S2C 0x42 carries)
+	// into the World -- the joiner's live table when one exists (S2C 0x41 and
+	// 0x42 mutate it in receive order), else the boot copy. Runs at world
+	// creation, at every table install, and after each net pump (engine:
+	// runtime/inmatch/charattr_table.h).
 	void sync_class_attribute_flags();
 	// Install the retained retail player-profile join block on the current runtime.
 	void install_character_join_vars();
@@ -1188,10 +1189,10 @@ public:
 	// VERSIONCRCSTRING checksum (D-NET-166). Empty keeps the golden "0".
 	// Retained across runtime rebuilds like the character/integrity data.
 	void set_join_expansion_version_root(const String &p_game_root);
-	// Load the process-scoped anti-cheat CHARACTER table before the first join
+	// Load the process-scoped character-attribute table before the first join
 	// network pump. Missing/empty charattr.def is soft and leaves all rows inactive,
 	// matching Game_Run's continue-after-error behavior.
-	bool load_charattr_challenge(
+	bool load_charattr(
 			const Ref<class ResourceRoot> &p_resource_root);
 	// Retail connects before constructing the wire-header world: drive only the socket/session
 	// legs until the terminal pre-world sync marker has been received and ACKed

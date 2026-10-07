@@ -102,6 +102,7 @@ enum class FindingGroup {
 	Environments,
 	Terrains, // a .trn, through the terrain's reader (the deep-integration plan's DI-30)
 	DialogBanks, // a .dbf, through the dialog bank's reader (the deep-integration plan's DI-32)
+	CharAttrs, // charattr.def, through the game's loader (formats/charattr, DI-09's follow-up)
 	FileChores, // Files' delete, duplicate, new here and folders, and their undo (DI-25)
 	kCount
 };
@@ -402,6 +403,7 @@ enum class CoreFinding {
 	PlayStart,
 	PlayStrictExpansion,
 	PlayUnsupported,
+	ProjectBaseProject,
 	ProjectExists,
 	ProjectExpansionNameTaken,
 	ProjectExpansionNotInstalled,
