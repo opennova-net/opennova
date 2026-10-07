@@ -1696,6 +1696,13 @@ target_link_libraries(menu_state_frame_test PRIVATE opennova_runtime)
 target_compile_features(menu_state_frame_test PRIVATE cxx_std_17)
 add_test(NAME menu_state_frame COMMAND menu_state_frame_test)
 
+# The Mods list (menu/mod_list.h, D-MNU-31): the base game's row and the expansion records, a pick's
+# description, ACCEPT's pick and its compare with the game running.
+add_executable(menu_mod_list_test menu/mod_list_test.cpp)
+target_link_libraries(menu_mod_list_test PRIVATE opennova_runtime)
+target_compile_features(menu_mod_list_test PRIVATE cxx_std_17)
+add_test(NAME menu_mod_list COMMAND menu_mod_list_test)
+
 # The menu's screen history across files and a mission (menu/screen_history.h) and the
 # menu mode's leave and re-entry over it: leaving a mission returns to the screen it
 # was started from (D-MNU-28).
