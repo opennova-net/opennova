@@ -43,7 +43,27 @@ public:
 	size_t symbol_count() const { return index_.symbol_count(); }
 
 private:
+	friend class GraphLayerBuilder;
 	GraphIndex index_;
+};
+
+// A layer built a file at a time, so an operation steps it within its budget (session/base_layer_build.h):
+// each file added as build() adds it (the first of a name kept, a kind the graph reads read through its
+// extractor, one that does not read left out of the names), the layer taken once at the end.
+class GraphLayerBuilder {
+public:
+	explicit GraphLayerBuilder(std::string game);
+	// One file added; the bytes it read (0 for a file of a kind the graph does not read, or one of a name
+	// added already).
+	uint64_t add(const LayerFile &file);
+	// The layer of the files added; the builder holds none after.
+	std::shared_ptr<const GraphLayer> finish();
+	const GraphStats &stats() const { return stats_; }
+
+private:
+	std::shared_ptr<GraphLayer> layer_;
+	std::string game_;
+	GraphStats stats_;
 };
 
 } // namespace opennova::editor
