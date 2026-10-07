@@ -136,6 +136,23 @@ struct ViewportHit {
 	// What a kind says of the pointer the game draws with the mouse at the point (the menu's, DI-08:
 	// menu_pointer_to_json); null for a kind that draws none.
 	io::JsonValue pointer;
+	// What the item under the point plays and when (a menu window's SOUND rows, DI-34:
+	// menu_window_sounds_to_json); null for a kind whose items play none.
+	io::JsonValue sounds;
+};
+
+// The mouse over a viewport's picture as its canvas has it this frame (DI-34): over the picture while the
+// canvas neither pans nor drags (a drag is the editor's own gesture, not the game's), at (x, y) in the
+// viewport's units, its left button held from a press on the picture. The windows hand each frame's to the
+// Shell (Workspace::canvas_mouse), which hands them to the session (ProjectSession::canvas_mice): a menu's
+// sounds hear it as the game's mouse.
+struct ViewportMouse {
+	std::string path;
+	ViewportKind kind = ViewportKind::kCount;
+	bool over = false;
+	float x = 0.0f;
+	float y = 0.0f;
+	bool down = false;
 };
 
 // A viewport (ADR 0046 S13 V5; CONTEXT.md "Viewport"): one document's picture as the game would
@@ -343,6 +360,10 @@ public:
 	// next follow: a RevealText's place, which a script viewport's device shows and selects. Nothing
 	// for a kind that takes none (the menu's and the model's: their windows take theirs).
 	virtual void receive(const ViewEvent &event) { (void)event; }
+	// The mouse a canvas has over its picture this frame (null: none has it), for a kind whose picture hears
+	// the game's mouse (a menu's sounds, DI-34). Input of the Shell's frames, as the clock's time is: none of
+	// its state.
+	virtual void take_mouse(const ViewportMouse *mouse) { (void)mouse; }
 
 protected:
 	ViewportModel(ViewportKind kind, std::string path, ViewportState state);
