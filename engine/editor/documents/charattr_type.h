@@ -25,6 +25,14 @@ namespace opennova::editor {
 std::unique_ptr<DocumentBase> make_charattr_document();
 std::vector<Diagnostic> validate_charattr_file(const DocumentBase &document);
 void charattr_references(const TextDocument &document, std::vector<TextReference> &out);
+// The entry lines the loader reads the same table without (DocumentType::config_idle_lines, the ConfigFile pool
+// rule's fix): every line of values it never reads (a key it never asks for, a later section of a label, a
+// section of no class), and each line it reads whose class's row is the same with the line commented out (a
+// key at 0, which the cleared table holds for a key the section lacks [orig: CharAttr_LoadFromDef @
+// 0x412168], or one a later line of the key repeats), kept only where all of them out together still read the
+// same table, byte for byte (charattr::same_rows). A class after the first the file lacks is left alone: it is
+// meant to be read, which charattr.unread_section says.
+void charattr_idle_lines(const TextDocument &document, std::vector<size_t> &line_starts);
 
 // All listed (none refuses a build: the game reads what it can of the file and goes on).
 enum class CharAttrFinding {
