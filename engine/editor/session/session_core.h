@@ -38,6 +38,7 @@ class ProjectRefresh;
 struct PlayIntent;
 struct ExportIntent;
 class RenameController;
+class FileChores;
 class UnsavedGuard;
 class TextureUseIndex;
 class Viewports;
@@ -74,6 +75,7 @@ public:
 		UnsavedGuard *guard = nullptr;
 		DiskWatch *disk = nullptr;
 		NavigationController *navigation = nullptr;
+		FileChores *chores = nullptr;
 	};
 	void bind(const Parts &parts) { parts_ = parts; }
 	DocumentSet &documents() const { return *parts_.documents; }
@@ -84,6 +86,7 @@ public:
 	UnsavedGuard &guard() const { return *parts_.guard; }
 	DiskWatch &disk() const { return *parts_.disk; }
 	NavigationController &navigation() const { return *parts_.navigation; }
+	FileChores &chores() const { return *parts_.chores; }
 
 	// Once, when the session starts: the preferences read (a store that cannot be read is a finding,
 	// the defaults in effect) and shown, no project open.
@@ -253,6 +256,10 @@ public:
 	// The project files at `paths` read again alone (AssetScan::update: a Save's, a create's, a
 	// rename's commit), the requirements evaluated again over the scan, the validation left due.
 	void update_files(const std::vector<std::string> &paths);
+	// The project's folders a request made or removed (DI-25: Files' New folder, a folder's delete or rename)
+	// set in the scan's folders (AssetScan::folders, each made one with its last write as a walk takes it), which
+	// Files lists an empty folder from; `gone` takes the folders under each with it. No file is read.
+	void update_folders(const std::vector<std::string> &made, const std::vector<std::string> &gone);
 	// How many files the last scan the view took read: every file of the project by a refresh (an
 	// Open's, a Rescan's, an import's), those it named by an update (update_files).
 	size_t files_scanned() const { return files_scanned_; }
