@@ -72,10 +72,14 @@ struct PreviewHearing {
 // listener's view admits picks its member through `selector` and composes the set's and the member's
 // pitch [orig: SoundBank_PlayTriggerEntries @ 0x75ccd0; audio::plan_oneshot_at_distance, flat], or at
 // the distance `heard` says.
-// `view_flags` the listener's view (2 first-person, 4 outside, 6 either: the editor's).
+// `view_flags` the listener's view (2 first-person, 4 outside, 6 either: the editor's). `menu_master` 0..255
+// (a menu's SOUND, DI-34): each layer plays as the menu plays it, at the menu's master volume where it has no
+// falloff (every shipped menu layer), else the member's scaled by it (menu::menu_channel_volume) [orig:
+// CWnd_ProcessMouseEvent @ 0x647bfb hands the menu's volume byte to the play; @ 0x75cf25..0x75cf6e]; -1 the
+// member's own volume.
 PreviewPlay plan_set_play(const std::vector<PreviewBank> &banks, const std::string &expansion, const std::string &set,
                           const std::string &only, audio::SoundSelector &selector, uint8_t view_flags = 6,
-                          const PreviewHearing *heard = nullptr);
+                          const PreviewHearing *heard = nullptr, int menu_master = -1);
 
 // The profile the game binds `name` to: the first of the name without case, else the first profile
 // [orig: SoundProfile_FindSlotByName @ 0x526e30]; null with none.

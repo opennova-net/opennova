@@ -2785,9 +2785,33 @@ void test_uses_open_users_ui() {
 	CHECK(focused, "Uses: the Inspector brought forward, its Referenced by the users");
 }
 
+// DI-34: what a menu window plays and when heads its Inspector (ui/menu_inspector): BACK's MOUSEIN row on a
+// Play; its SOUND row selected says the same; TITLE, with none, says nothing of sound; drawing raises nothing.
+void test_menu_sounds_inspector_ui() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_menu_sounds_test");
+	std::shared_ptr<MnuDocument> document = load_menu(dir);
+	const NodeAddress back = named(*document, "BACK");
+	SessionView v = menu_view(document);
+	select_in(v, back);
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.frames(4);
+	ui.drain();
+	const std::string said = "On hover: MOUSE_OVER (menu.lwf)";
+	CHECK(logged_frame(ui).find(said) != std::string::npos, "BACK's hover sound heads its Inspector");
+	CHECK(ui.drain().empty(), "drawing it raises nothing");
+	select_in(v, menu_test::child_of(*document, back, "sound"));
+	ui.frames(3);
+	CHECK(logged_frame(ui).find(said) != std::string::npos, "its SOUND row selected: the same");
+	select_in(v, named(*document, "TITLE"));
+	ui.frames(3);
+	CHECK(logged_frame(ui).find("On hover") == std::string::npos, "TITLE plays none: nothing said");
+}
+
 void run_inspector_tests() {
 	test_inspector_plan();
 	test_inspector_ui();
+	test_menu_sounds_inspector_ui();
 	test_inspector_kinds_alike();
 	test_go_to_ui();
 	test_numeric_go_to_ui();
