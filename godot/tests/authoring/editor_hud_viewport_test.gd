@@ -63,7 +63,8 @@ func _tga(side: int) -> PackedByteArray:
 	return bytes
 
 
-## A project holding a soldier panel's layout, its art, a weapon and the damage vignette.
+## A project holding a soldier panel's layout, its art, a weapon and the damage vignette. The panel's
+## HUDDECLUT rows show the health bar and the weapon group: without them the game hides both (D-HUD-54).
 func _project() -> String:
 	var dir := OS.get_cache_dir().path_join("opennova editor hud project %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
@@ -81,6 +82,8 @@ HUDSTANCE 5 0 0 stance5.tga PARACHUTE
 HUDCLIP 14,648
 HUDWPNICON 14,606
 alphafade 40 70 3
+HUDDECLUT_DMGBAR 1 1 1 1
+HUDDECLUT_WPNGRP 1 1 1 1
 """).to_utf8_buffer())
 	for name in ["frame.tga", "stance0.tga", "stance1.tga", "stance2.tga", "stance3.tga", "stance4.tga",
 			"stance5.tga", "h_clip.tga", "h_rnd.tga", "h_icon.tga", "vignette.tga", "NVG.tga"]:
