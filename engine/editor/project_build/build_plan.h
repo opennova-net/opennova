@@ -45,13 +45,20 @@ struct BuildArchive {
 // build's root, which a launch on the build directory mounts in place of the install's; or the
 // expansion `expansion` of the game install `install` (its target game's `game`), the folder
 // `expansion/<expansion>/` with its two archives and its loose files, which a launch with
-// `/exp <expansion>` mounts over the install's base game.
+// `/exp <expansion>` mounts over the install's base game. An expansion of a project's base game (ADR
+// 0046 T5) plays over that project's export instead: `install` is the export's folder and
+// `base_project` names the project, so a base that does not mount says to export it.
 struct BuildTarget {
-	std::string expansion; // "" for the standalone game
-	std::string install;   // the game install the expansion plays over ("" when none is set)
-	std::string game;      // the project's target game (gameprofile code): the base's SCR key
+	std::string expansion;    // "" for the standalone game
+	std::string install;      // the base game the expansion plays over ("" when none is set)
+	std::string game;         // the project's target game (gameprofile code): the base's SCR key
+	std::string base_project; // the base game's project as the project file names it ("" the install's)
 	bool is_expansion() const { return !expansion.empty(); }
 };
+
+// Why an expansion's base game is not there to build over: the game install unset or not mounting, or,
+// for an expansion of a project's base game, that project's export missing (build.expansion.base_missing).
+std::string base_missing_words(const BuildTarget &target);
 
 struct BuildPlan {
 	BuildTarget target;

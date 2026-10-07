@@ -255,6 +255,11 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::PlayStart, code("play.start", G::Play) },
 	{ C::PlayStrictExpansion, code("play.strict_expansion", G::Play) },
 	{ C::PlayUnsupported, code("play.unsupported", G::Play) },
+	// The base game's project an expansion names (ADR 0046 T5, project/base_project.h) that does not serve
+	// as one: no project there, one that does not read, an expansion itself, another game's. Refused where a
+	// project is made or its settings applied; listed where an open project's base is read again (the
+	// build's gate says build.expansion.base_missing).
+	{ C::ProjectBaseProject, listed(code("project.base_project", G::Project)) },
 	{ C::ProjectExists, code("project.exists", G::Project) },
 	// The project's expansion against its game install (ADR 0046 S16, expansion_name.h): a name the
 	// install has already, an expansion to build on it lacks. Refused where a project is made or its
