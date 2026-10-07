@@ -276,6 +276,12 @@ void ProjectSession::advance(double seconds) {
 	impl_->core.viewports().advance(seconds);
 	// The sounds the previewed clip's events fired over the ticks the clock ran through (DI-04).
 	fire_clip_sounds(impl_->core);
+	// A menu's sounds over the game's mouse, the pump's sample each frame as the game's (DI-34).
+	fire_menu_sounds(impl_->core);
+}
+
+void ProjectSession::canvas_mice(const std::vector<ViewportMouse> &mice) {
+	impl_->core.viewports().take_mice(mice);
 }
 
 std::vector<ClipSoundPlay> ProjectSession::clip_sounds_since(uint64_t after) {

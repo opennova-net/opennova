@@ -17,6 +17,7 @@ namespace opennova::editor {
 class ViewportDeviceSource;
 class ViewportModel;
 struct SessionView;
+struct ViewportMouse;
 struct ViewportBuildReport;
 struct ViewportDeviceReport;
 
@@ -95,6 +96,9 @@ public:
 
 	// `seconds` of the Shell's frames pass (the clock's while it plays).
 	void advance(double seconds) { clock_.advance(seconds); }
+	// The mice the canvases have over their pictures this frame (DI-34): each viewport its own
+	// (ViewportModel::take_mouse), null where no canvas has the mouse.
+	void take_mice(const std::vector<ViewportMouse> &mice);
 	const PreviewClock &clock() const { return clock_; }
 	// The order of every clip sound a model viewport fired (DI-04: ModelViewport::fire_sounds numbers
 	// each from it), the last one's.

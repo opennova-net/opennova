@@ -46,7 +46,23 @@ std::string unreadable_banner(const std::vector<std::string> &unreadable) {
 // The viewport's options set (a SetViewport of them).
 void set_options(Workspace &workspace, const MenuViewport &menu, const MenuViewportOptions &options) {
 	workspace.request(request::set_viewport(menu.path(),
-			viewport_change(ViewportKind::Menu, "options", menu_options_to_json(options, menu.show(), menu.pointer()))));
+			viewport_change(ViewportKind::Menu, "options",
+					menu_options_to_json(options, menu.show(), menu.pointer(), menu.sound()))));
+}
+
+// The sounds muted or heard (a SetViewport of that alone, DI-34).
+void set_mute(Workspace &workspace, const MenuViewport &menu, bool mute) {
+	MenuSoundOptions sound = menu.sound();
+	sound.mute = mute;
+	io::JsonValue options = io::JsonValue::make_object();
+	options.set("sound", menu_sound_options_to_json(sound));
+	workspace.request(request::set_viewport(menu.path(), viewport_change(ViewportKind::Menu, "options", std::move(options))));
+}
+
+// "PLAY on hover: MOUSE_OVER (menu.lwf)": what the last window sound fired, in a line.
+std::string fired_line(const MenuSoundFired &fired) {
+	return (fired.name.empty() ? std::string("A window") : fired.name) + " " + menu_sound_state_words(fired.state) + ": " +
+	       fired.sound.set + " (" + fired.sound.bank + ")" + (fired.sound.state == "played" ? "" : ", " + fired.sound.state);
 }
 
 // The game's pointer drawn or not (a SetViewport of that alone, DI-08: where a client holds it stands).
@@ -85,7 +101,7 @@ void zoom_canvas(ViewportCanvas &canvas, const MenuCanvasShow &show) {
 // The zoom and the snap set (a SetViewport of them alone: they change no picture).
 void set_show(Workspace &workspace, const MenuViewport &menu, const MenuCanvasShow &show) {
 	io::JsonValue options = io::JsonValue::make_object();
-	const io::JsonValue all = menu_options_to_json(MenuViewportOptions(), show, MenuPointerShow());
+	const io::JsonValue all = menu_options_to_json(MenuViewportOptions(), show, MenuPointerShow(), MenuSoundOptions());
 	for (const char *member : { "zoom", "scale", "snap" })
 		if (const io::JsonValue *value = all.get(member)) options.set(member, *value);
 	workspace.request(request::set_viewport(menu.path(), viewport_change(ViewportKind::Menu, "options", std::move(options))));
@@ -104,7 +120,10 @@ struct MenuViewportView::Tools {
 	bool mouse_on_picture = false;
 	int mouse_x = 0;
 	int mouse_y = 0;
+	float design_x = 0.0f; // where the mouse is on the picture, design units unrounded
+	float design_y = 0.0f;
 	MenuPointer pointer; // the game's pointer at the mouse (DI-08), while it is on the picture
+	bool panning = false; // the canvas pans its picture this frame
 
 	void toolbar(Workspace &workspace, ViewportView &view, ViewportCanvas &canvas, const MenuViewport &menu,
 			const MenuCanvasFrame &frame);
@@ -243,6 +262,22 @@ void MenuViewportView::Tools::toolbar(Workspace &workspace, ViewportView &, View
 		ui_kit::tooltip("No window of the screen names a CURSOR whose image loads, so the game shows no mouse "
 		                "pointer on it at all. Name one on its root window (Pointer image).");
 	}
+	// The windows' sounds (DI-34): heard or muted, and what was heard last.
+	row.next(ui_kit::checkbox_width("Sound"));
+	bool heard = !menu.sound().mute;
+	if (ImGui::Checkbox("Sound", &heard)) set_mute(workspace, menu, !heard);
+	ui_kit::tooltip("Play the windows' sounds as the game does with the mouse there: a window's SOUND of state "
+	                "MOUSEIN as the mouse comes onto it, SELECTED on a click (and MOUSEIN again while the mouse stays), "
+	                "MOUSEOUT as it leaves, each a set of the bank the SOUND names. Off, they are fired and listed, "
+	                "and nothing is heard.");
+	if (!menu.sounds_fired().empty()) {
+		const MenuSoundFired &last = menu.sounds_fired().back();
+		const std::string line = fired_line(last);
+		row.next(ui_kit::text_width(line.c_str()));
+		ImGui::AlignTextToFramePadding();
+		ImGui::TextDisabled("%s", line.c_str());
+		ui_kit::tooltip(last.sound.words);
+	}
 	if (options != before) set_options(workspace, menu, options);
 }
 
@@ -332,11 +367,14 @@ void MenuViewportView::draw_ready(Workspace &workspace, const ViewportModel &mod
 						in.mouse.x < float(in.width) && in.mouse.y < float(in.height);
 				// Read only on the picture: ImGui's position off it may be its "no position" (-FLT_MAX),
 				// which no int holds.
+				tools_->panning = in.panning;
 				if (tools_->mouse_on_picture) {
-					tools_->mouse_x = int(std::floor(in.mouse.x / sx));
-					tools_->mouse_y = int(std::floor(in.mouse.y / sy));
+					tools_->design_x = in.mouse.x / sx;
+					tools_->design_y = in.mouse.y / sy;
+					tools_->mouse_x = int(std::floor(tools_->design_x));
+					tools_->mouse_y = int(std::floor(tools_->design_y));
 					// The game's pointer there: the claim the pump makes at the point (DI-08).
-					tools_->pointer = menu_pointer_at(frame, in.mouse.x / sx, in.mouse.y / sy);
+					tools_->pointer = menu_pointer_at(frame, tools_->design_x, tools_->design_y);
 				}
 				// The right button: the window under it selected unless it already is, and the menu
 				// of what the selection can do.
@@ -368,6 +406,17 @@ void MenuViewportView::draw_ready(Workspace &workspace, const ViewportModel &mod
 					ImGui::EndPopup();
 				}
 			});
+	// The game's mouse (DI-34): over the picture while the canvas neither pans nor drags (a drag is the editor's
+	// own gesture, not the game's), its button a press begun on the picture, the frame's input the session's
+	// sounds hear (Workspace::canvas_mouse).
+	ViewportMouse mouse;
+	mouse.path = menu.path();
+	mouse.kind = ViewportKind::Menu;
+	mouse.over = tools_->mouse_on_picture && !tools_->panning && !(half() && half()->gesture().dragging());
+	mouse.x = tools_->design_x;
+	mouse.y = tools_->design_y;
+	mouse.down = mouse.over && half() && half()->gesture().pressed();
+	workspace.canvas_mouse(mouse);
 	// The zoom (the Zoom list's, Ctrl+wheel's) and the snap as the canvas has them now: the viewport's, sent
 	// where they moved from what it holds, once.
 	const MenuCanvasShow now = show_of(canvas_ui(), tools_->snap);

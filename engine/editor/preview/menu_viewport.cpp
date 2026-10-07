@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <variant>
 
 #include <editor/documents/mnu_document.h>
@@ -57,7 +58,7 @@ bool menu_zoom_from_token(const std::string &token, MenuZoom &out) {
 constexpr float kMenuScaleMin = 0.1f, kMenuScaleMax = 8.0f;
 
 bool read_options(const JsonValue &json, MenuViewportOptions &held, MenuCanvasShow &show, MenuPointerShow &pointer,
-		std::string &error) {
+		MenuSoundOptions &sound, std::string &error) {
 	if (!json.is_object()) {
 		error = "\"options\" is an object.";
 		return false;
@@ -65,11 +66,22 @@ bool read_options(const JsonValue &json, MenuViewportOptions &held, MenuCanvasSh
 	MenuViewportOptions out = held;
 	MenuCanvasShow shown = show;
 	MenuPointerShow pointed = pointer;
+	MenuSoundOptions heard = sound;
 	for (const io::JsonMember &member : json.object) {
 		const std::string &key = member.key;
 		const JsonValue &value = member.value;
 		int64_t number = 0;
-		if (key == "pointer") {
+		if (key == "sound") {
+			if (!read_menu_sound_options(value, heard, error)) return false;
+		} else if (key == "pointer_down") {
+			// The game's left button held where the pointer is (DI-34): its press and its release over one
+			// window are the game's click.
+			if (!value.is_bool()) {
+				error = "options.pointer_down is true or false.";
+				return false;
+			}
+			pointed.down = value.boolean;
+		} else if (key == "pointer") {
 			if (!value.is_bool()) {
 				error = "options.pointer is true or false.";
 				return false;
@@ -135,13 +147,14 @@ bool read_options(const JsonValue &json, MenuViewportOptions &held, MenuCanvasSh
 		} else {
 			error = "Unknown menu option \"" + key +
 					"\" (it takes show_hidden, force_id, force_state, checked, popup_open, focus, zoom, scale, snap, "
-					"pointer, pointer_at).";
+					"pointer, pointer_at, pointer_down, sound).";
 			return false;
 		}
 	}
 	held = out;
 	show = shown;
 	pointer = pointed;
+	sound = heard;
 	return true;
 }
 
@@ -235,8 +248,8 @@ HandleEdges edges_moved(LayoutHandle handle) {
 
 } // namespace
 
-io::JsonValue menu_options_to_json(
-		const MenuViewportOptions &held, const MenuCanvasShow &show, const MenuPointerShow &pointer) {
+io::JsonValue menu_options_to_json(const MenuViewportOptions &held, const MenuCanvasShow &show,
+		const MenuPointerShow &pointer, const MenuSoundOptions &sound) {
 	JsonValue options = JsonValue::make_object();
 	options.set("show_hidden", JsonValue::make_bool(held.show_hidden));
 	options.set("force_id", json_number(double(held.force_window)));
@@ -256,6 +269,8 @@ io::JsonValue menu_options_to_json(
 	} else {
 		options.set("pointer_at", JsonValue::make_null());
 	}
+	options.set("pointer_down", JsonValue::make_bool(pointer.down));
+	options.set("sound", menu_sound_options_to_json(sound));
 	return options;
 }
 
@@ -568,7 +583,8 @@ bool MenuViewport::check_(const io::JsonValue &json, std::string &error) const {
 	MenuViewportOptions held = options_;
 	MenuCanvasShow show = show_;
 	MenuPointerShow pointer = pointer_;
-	return !options || read_options(*options, held, show, pointer, error);
+	MenuSoundOptions sound = sound_;
+	return !options || read_options(*options, held, show, pointer, sound, error);
 }
 
 void MenuViewport::apply_(const io::JsonValue &json, PreviewClock &) {
@@ -576,12 +592,14 @@ void MenuViewport::apply_(const io::JsonValue &json, PreviewClock &) {
 	MenuViewportOptions held = options_;
 	MenuCanvasShow show = show_;
 	MenuPointerShow pointer = pointer_;
+	MenuSoundOptions sound = sound_;
 	std::string error;
-	if (!options || !read_options(*options, held, show, pointer, error)) return;
-	// The zoom and the snap change no picture, and the pointer only the cursor pass the device draws again
-	// (DI-08): the screen is configured again for the held window alone.
+	if (!options || !read_options(*options, held, show, pointer, sound, error)) return;
+	// The zoom and the snap change no picture, the pointer only the cursor pass the device draws again
+	// (DI-08), and the sounds none (DI-34): the screen is configured again for the held window alone.
 	show_ = show;
 	pointer_ = pointer;
+	sound_ = sound;
 	if (held == options_) return;
 	options_ = held;
 	++options_serial_;
@@ -628,8 +646,86 @@ ViewportHit MenuViewport::hit(const ViewportContext &context, float x, float y) 
 	if (out.index < 0) return out;
 	out.id = frame.document->window_at(*frame.screen, size_t(out.index));
 	out.name = render_.compiler().widget_name(out.index);
+	// What the window plays and when (DI-34).
+	out.sounds = menu_window_sounds_to_json(window_sounds(out.index));
 	const int type = render_.compiler().widget_kind(out.index);
 	out.kind = type >= 0 ? mnu::window_type_name(static_cast<mnu::WindowType>(type)) : "";
+	return out;
+}
+
+void MenuViewport::take_mouse(const ViewportMouse *mouse) {
+	canvas_mouse_ = mouse ? *mouse : ViewportMouse();
+}
+
+std::vector<MenuWindowSound> MenuViewport::window_sounds(int index) const {
+	const mnu::Window *window = status() == ViewportStatus::Ready ? render_.compiler().widget_window(index) : nullptr;
+	return window ? menu_window_sounds(*window) : std::vector<MenuWindowSound>();
+}
+
+std::vector<MenuSoundFired> MenuViewport::fire_sounds(const ViewportInput &input, const ProjectAssetSource &files,
+		const AssetScan *scan, audio::SoundSelector &selector, uint64_t &next_seq) {
+	std::vector<MenuSoundFired> out;
+	const auto *document = dynamic_cast<const MnuDocument *>(input.document);
+	const Node *screen = document ? document->row(part_) : nullptr;
+	if (!screen || !current(input)) return out;
+	const menu::MenuFrameCompiler &compiler = render_.compiler();
+	const menu::MenuFrameState &state = render_.state();
+	// The windows of the screen by their records, and back.
+	std::map<NodeId, int> index_of;
+	for (int index = 0; index < compiler.widget_count(); ++index)
+		if (const NodeId id = document->window_at(*screen, size_t(index))) index_of.emplace(id, index);
+	// The game's mouse: the canvas's while it has it over the picture, else the held point, with its button;
+	// the claim the pump makes there.
+	const bool canvas = canvas_mouse_.over;
+	const bool held = canvas || pointer_.held;
+	const float x = canvas ? canvas_mouse_.x : pointer_.x;
+	const float y = canvas ? canvas_mouse_.y : pointer_.y;
+	int claim = -1, spin_part = 0;
+	if (held) {
+		const menu::MenuFrameCompiler::MouseClaim at = compiler.claim_at(state, x, y, 1.0f, 1.0f);
+		claim = at.hovered;
+		spin_part = at.spin_part;
+	}
+	const bool down = held && (canvas ? canvas_mouse_.down : pointer_.down);
+	const NodeId id = claim >= 0 ? document->window_at(*screen, size_t(claim)) : 0;
+	const auto play = [&](const mnu::Window &window, NodeId record, int sound_state) {
+		const mnu::Sound *row = menu::menu_window_sound(window, sound_state);
+		if (!row) return; // no row for the state: the game plays nothing (the mask @ 0x647bb4..0x647bd7)
+		MenuSoundFired fired = plan_menu_sound(*row, sound_banks_, files, scan, selector, sound_.mute);
+		fired.sound.seq = ++next_seq;
+		fired.sound.path = path();
+		fired.screen = screen->name();
+		fired.window = record;
+		fired.name = window.name;
+		fired.state = sound_state;
+		out.push_back(fired);
+		sounds_fired_.push_back(std::move(fired));
+	};
+	std::vector<menu::MenuSoundPump::Edge> edges;
+	// The click, as the game's frame takes one, plays SELECTED first: a spin arrow's own row where it is on
+	// one, the arrow a button of its own (MenuRuntime::on_widget_clicked -> arrow_click_; its rows' sounds are
+	// its own), else the window's, its sound state let go [orig: CWnd_ProcessMouseEvent @ 0x647b28].
+	const int clicked = click_.sample(claim, down);
+	const mnu::Window *window = clicked >= 0 && id ? compiler.widget_window(clicked) : nullptr;
+	if (window && spin_part != 0 && window->type == mnu::WindowType::SpinList) {
+		const mnu::WindowPart &arrow = spin_part == 1 ? window->spinup : window->spindown;
+		if (arrow.present() && !arrow->disabled) play(*arrow, id, menu::kSoundSelected);
+	} else if (window) {
+		edges.push_back(sound_pump_.click(uint64_t(id)));
+	}
+	sound_pump_.sample(id != 0, uint64_t(id), claim >= 0 && compiler.widget_live(claim, state), down,
+			[&](uint64_t key) {
+				const auto found = index_of.find(NodeId(key));
+				return found != index_of.end() && compiler.widget_reached(found->second, state);
+			},
+			edges);
+	for (const menu::MenuSoundPump::Edge &edge : edges) {
+		const auto found = index_of.find(NodeId(edge.key));
+		const mnu::Window *each = found != index_of.end() ? compiler.widget_window(found->second) : nullptr;
+		if (each && edge.state != menu::kSoundNone) play(*each, NodeId(edge.key), edge.state);
+	}
+	if (sounds_fired_.size() > kSoundsFiredKept)
+		sounds_fired_.erase(sounds_fired_.begin(), sounds_fired_.end() - kSoundsFiredKept);
 	return out;
 }
 
@@ -769,7 +865,7 @@ bool MenuViewport::command(const ViewportContext &context, const std::string &na
 }
 
 io::JsonValue MenuViewport::options_json() const {
-	return menu_options_to_json(options_, show_, pointer_);
+	return menu_options_to_json(options_, show_, pointer_, sound_);
 }
 
 io::JsonValue MenuViewport::body_json(const ViewportInput &input) const {
@@ -789,6 +885,10 @@ io::JsonValue MenuViewport::body_json(const ViewportInput &input) const {
 	JsonValue unreadable = JsonValue::make_array();
 	for (const std::string &name : unreadable_) unreadable.push(json_string(name));
 	body.set("unreadable", std::move(unreadable));
+	// What its windows' sounds fired (DI-34), the last kSoundsFiredKept, oldest first.
+	JsonValue fired = JsonValue::make_array();
+	for (const MenuSoundFired &sound : sounds_fired_) fired.push(menu_sound_fired_to_json(sound));
+	body.set("sounds_fired", std::move(fired));
 	return body;
 }
 
