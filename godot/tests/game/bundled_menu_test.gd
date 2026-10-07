@@ -16,7 +16,6 @@ func before_each() -> void:
 	_config = TestFs.snapshot(STATE_CONFIG_PATH)
 	# No launch flags: the shell boots the bundled menu.
 	LaunchFlags.set_args_override(PackedStringArray([]))
-	ResourceDirSettings.set_expansion("")
 	ResourceDirSettings.set_game("jo")
 	ResourceDirSettings.set_retail_dir("")
 	Strings.clear()
@@ -120,9 +119,10 @@ func test_the_bundled_game_mounts_a_build_packed_and_a_folder_loose() -> void:
 
 
 # An expansion shipped beside the bundled game (expansion/<name>/, as the game
-# zip ships one) mounts over it with /exp or /mod, or with the Mods list's
-# pick, its archive's files standing over the base's; one the folder lacks
-# falls back to the base game, as the original's mount does.
+# zip ships one) mounts over it with /exp or /mod, its archive's files standing
+# over the base's; one the folder lacks falls back to the base game, as the
+# original's mount does. A Mods list's pick never reaches a launch: nothing
+# keeps it past its run (D-MNU-31), not even a key an earlier build wrote.
 func test_the_bundled_game_mounts_an_expansion_beside_it() -> void:
 	var build := _temp_dir("expansion")
 	WorldFixture.stage_shell_archives(self, build, false)
@@ -142,13 +142,77 @@ func test_the_bundled_game_mounts_an_expansion_beside_it() -> void:
 		if mounted != null:
 			assert_true(mounted.has_file("onxonly.txt"), "its archive's files are served")
 	LaunchFlags.set_args_override(PackedStringArray([]))
-	ResourceDirSettings.set_expansion("onx")
-	var picked := BootRootMount.mount_bundled(build)
-	assert_true(picked != null and picked.get_expansion() == "onx", "the Mods list's pick mounts it too")
+	ConfigStore.write(ResourceDirSettings.CONFIG_PATH, ResourceDirSettings.SECTION, "expansion", "onx")
+	var stale := BootRootMount.mount_bundled(build)
+	assert_true(stale != null and stale.get_expansion().is_empty(),
+			"a remembered pick mounts nothing: no /exp, the base game")
 	LaunchFlags.set_args_override(PackedStringArray(["/exp", "absent"]))
 	var fallback := BootRootMount.mount_bundled(build)
 	assert_true(fallback != null and fallback.is_runtime_mount() and fallback.get_expansion().is_empty(),
 			"an expansion the folder lacks: the base game")
+
+
+# The base game's Mods screen (options.mnu) over a build with expansions beside
+# it, as the game zip ships one (D-MNU-31): the base game's row first (the key
+# the original game's code looks up, its text where no table names it), then a
+# row per folder under expansion/ in the folder's order (upper-cased names; a
+# name starting with '.' skipped, a folder with no <n>.pff listed and unnamed),
+# each by its <n>.bin's EXP_NAME. A pick describes itself; ACCEPT switches the
+# live root for the run and the menu boots anew over it, the pick kept nowhere.
+func test_the_bundled_mods_screen_lists_the_base_game_and_its_expansions() -> void:
+	var build := _temp_dir("mods")
+	var resources := WorldFixture.shell_archive_entries(self, WorldFixture.SHELL_RESOURCE_FILES)
+	resources.append({"name": "options.mnu", "bytes": FileAccess.get_file_as_bytes(
+			BootRootMount.bundled_project_dir().path_join("options.mnu"))})
+	WorldFixture.stage_shell_archives(self, build, false)
+	WorldFixture.write_pff(self, build.path_join("resource.pff"), resources)
+	var storm := build.path_join("expansion/onx")
+	assert_eq(DirAccess.make_dir_recursive_absolute(storm), OK)
+	WorldFixture.write_pff(self, storm.path_join("onx.pff"),
+			[{"name": "onxonly.txt", "bytes": "the expansion's".to_utf8_buffer()}])
+	WorldFixture.write_pff(self, storm.path_join("onxL.pff"),
+			[{"name": "onx.bin", "bytes": _expansion_info_bin("Test Storm", "A storm.")}])
+	# The loose copy the game ships beside the archives: the text-override table's only source.
+	TestFs.write_bytes(self, storm.path_join("onx.bin"), _expansion_info_bin("Test Storm", "A storm."))
+	assert_eq(DirAccess.make_dir_recursive_absolute(build.path_join("expansion/aab")), OK)
+	assert_eq(DirAccess.make_dir_recursive_absolute(build.path_join("expansion/.hidden")), OK)
+	var root := ResourceRoot.new()
+	assert_eq(root.mount_runtime(build, "", false, "jo"), OK)
+	var shell := MenuShell.new()
+	shell.main_menu_file = "options.mnu"
+	shell.size = Vector2(800, 600)
+	add_child_autofree(shell)
+	assert_true(shell.setup(root), "the build serves the Mods screen")
+	var driver := shell.get_driver()
+	var avail := driver.widget_id("AVAIL_LIST")
+	assert_gte(avail, 0, "the Mods screen's list")
+	assert_eq(driver.get_widget_items(avail), PackedStringArray(
+			["Joint Operations: Typhoon Rising", "Unnamed Expansion", "Test Storm"]))
+	assert_eq(driver.selected_row(avail), 0, "the base game running is highlighted")
+	var desc := driver.widget_id("MOD_DESC")
+	driver.select_row(avail, 2, true)
+	assert_eq(driver.get_widget_text(desc), "A storm.", "a pick shows its EXP_DESC")
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	shell.update_menu_frame()
+	assert_eq(String(root.get_expansion()), "onx", "ACCEPT switched the live root")
+	assert_true(root.has_file("onxonly.txt"), "the expansion's archive is served")
+	assert_false(root.get_expansion_override_table().is_empty(),
+			"the reload closed every archive first: the loose <n>.bin is the override table, as at boot")
+	assert_eq(driver.selected_row(driver.widget_id("AVAIL_LIST")), 2,
+			"the menu booted anew highlights the expansion running")
+	var config := ConfigFile.new()
+	assert_false(config.load(STATE_CONFIG_PATH) == OK
+			and config.has_section_key(ResourceDirSettings.SECTION, "expansion"),
+			"the pick is kept nowhere: it lasts the run")
+	root.clear()
+
+
+func _expansion_info_bin(exp_name: String, exp_desc: String) -> PackedByteArray:
+	var table := RtxtStringFile.new()
+	var section := table.add_section("exp_info")
+	table.add_entry("EXP_NAME", exp_name, section, Vector2i.ZERO)
+	table.add_entry("EXP_DESC", exp_desc, section, Vector2i.ZERO)
+	return table.to_byte_array()
 
 
 # EXIT is a named control, as retail's is (retail's ACTION has no quit verb): the
