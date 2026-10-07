@@ -270,7 +270,15 @@ LabelledField labelled(R kind, const DefField &field) {
 	resolve_field(field, entry);
 	for (const Defines &row : kDefines)
 		if (row.kind == kind && field.id == row.field) entry.defines = row.defines;
-	for (const DefChoice &choice : field.choices) entry.choices.push_back({choice.name, choice.value, choice.label});
+	for (const DefChoice &choice : field.choices) {
+		FieldChoice offered{choice.name, choice.value, choice.label};
+		// A choice in a modder's words where a row gives them (def_choice_words_of: the shadow bits).
+		if (const DefChoiceWords *words = def_choice_words_of(kind, field.id, choice.name)) {
+			offered.label = words->label;
+			offered.description = std::string(words->meaning) + " " + words->cite;
+		}
+		entry.choices.push_back(std::move(offered));
+	}
 	entry.flags = field.flags;
 	entry.open_choices = field.open;
 	const bool flag = is_present_flag(kind, field.id);

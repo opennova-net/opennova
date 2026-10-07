@@ -1567,6 +1567,7 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 				option.set("name", json_string(choice.name));
 				option.set("value", json_number(double(choice.value)));
 				if (!choice.label.empty()) option.set("label", json_string(choice.label));
+				if (!choice.description.empty()) option.set("description", json_string(choice.description));
 				choices.push(std::move(option));
 			}
 			entry.set("choices", std::move(choices));

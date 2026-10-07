@@ -500,7 +500,10 @@ void value_control(Workspace &workspace, std::string &typed, const Document &doc
 					if (batch.size() == 1) window_requests::set(workspace, document, targets.front(), schema.id, batch.front().value, false);
 					else window_requests::edits(workspace, document, std::move(batch));
 				}
-				if (!choice.label.empty() || shown != title) ui_kit::tooltip(shown != title ? title + "\n" + choice.name : choice.name);
+				// Its whole name, the token the file writes, and what the game does with it.
+				std::string tip = shown != title ? title + "\n" + choice.name : choice.name;
+				if (!choice.description.empty()) tip += "\n" + choice.description;
+				if (!choice.label.empty() || shown != title || !choice.description.empty()) ui_kit::tooltip(tip);
 			}
 		};
 		if (!compact) return boxes();
