@@ -46,4 +46,16 @@ std::string sidecar_alternate_name(const std::string &mission_file, const Sideca
 	return mission_base_name(mission_file) + sidecar.alternate;
 }
 
+std::string dialog_bank_name(const std::string &mission_file, const std::string &header_slot) {
+	// [orig: DialogSystem_Init @ 0x52760c: the header's slot when its first byte is set, else
+	//  the mission's file name; the extension swapped from the first dot @ 0x52763e]
+	return mission_base_name(header_slot.empty() ? mission_file : header_slot) + ".dbf";
+}
+
+std::string dialog_sounds_name(const std::string &dialog_bank, bool alternate) {
+	// [orig: DialogManager_LoadFromFile @ 0x44e7bb strtok(filename, "."), "%s.lwf" @ 0x44e7d4, "%s.pwf"
+	//  @ 0x44e7f5 when the first does not exist]
+	return mission_base_name(dialog_bank) + (alternate ? ".pwf" : ".lwf");
+}
+
 } // namespace opennova::mission

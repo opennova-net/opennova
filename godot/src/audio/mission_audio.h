@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include <formats/lwf/lwf.h>
 #include <runtime/audio/dialog_queue.h>
 #include <runtime/audio/envs_markers.h>
 #include <runtime/world/script_voice.h>
@@ -163,9 +164,10 @@ public:
 	bool slot_soundset(const String &p_name, const Vector3 &p_world_pos,
 			int p_source_bms_id = 0, int p_sound_id = 0);
 	// Enqueue a mission dialog by its PlayWavList id (param1): the engine's
-	// resolution (runtime/audio/dialog_queue resolve_dialog_lines) then the
-	// serialized queue, pumped here by spawning one voice at a time. Returns
-	// true if the id resolved to at least one playable set.
+	// resolution (runtime/audio/dialog_queue resolve_dialog_lines: the dialog
+	// bank's dialog, each line the wave of its name in the bank's sounds) then
+	// the serialized queue, pumped here by spawning one voice at a time.
+	// Returns true if the id resolved to a dialog of the bank.
 	bool play_dialog(int p_wav_id);
 	// A co-op dialog line the host sent (the "dialog_line" effect): the
 	// engine's resolution (runtime/audio/dialog_queue resolve_dialog_line)
@@ -173,9 +175,9 @@ public:
 	// queue. Returns true when a clip spawned.
 	bool play_dialog_line(const String &p_dialog_name, int p_line, int p_player_class);
     void reset_dialog_queue() { dialog_queue_.discard_pending(); }
-	// Resolve-only (no playback) for tests/diagnostics: the first set name a dialog id
-	// maps to that the loaded banks actually contain, or "" if none.
-	String resolve_dialog_set(int p_wav_id);
+	// Resolve-only (no playback) for tests/diagnostics: the wave file the first
+	// line of a dialog id plays that the dialog bank's sounds hold, or "" if none.
+	String resolve_dialog_wave(int p_wav_id);
 	// Play through the mission's ScriptVoiceChannel. A new line interrupts the
 	// previous line independently of the DBF dialog queue. Standalone tooling
 	// uses the same interruption rule and tolerates a missing .wav extension.
@@ -234,6 +236,8 @@ private:
 	void _free_voice_nodes();
 	std::vector<opennova::audio::DialogLineRef> _resolve_dialog_lines(int p_wav_id) const;
 	void _pump_dialog_queue();
+	// A dialog line's wave on a voice of the dialog channel, at the wave's volume byte.
+	AudioStreamPlayer *_spawn_dialog_voice(const std::string &p_file, int p_volume);
 	AudioStreamPlayer *_dialog_voice_node() const;
 	AudioStreamPlayer *_wac_voice_node() const;
 	void _on_script_voice_finished(int64_t p_serial, int64_t p_player_id);
@@ -268,7 +272,11 @@ private:
 	// forwarded to the bank and every fresh mixer; production uses the sim.
 	Callable occlusion_override_;
 	Ref<SoundBank> bank_;
-	Ref<DbfData> dbf_; // mission co-named dialog bank; null if absent
+	Ref<DbfData> dbf_; // the mission's dialog bank; null if absent
+	// The dialog bank's sounds (<bank>.lwf, else .pwf), loaded with the bank: the
+	// waves its lines name. Empty when the mission has no dialog bank.
+	opennova::lwf::File dialog_sounds_;
+	bool dialog_sounds_loaded_ = false;
 	// True while this node has a SceneTree home (setup / set_markers with a
 	// container) -- the audio root exists; teardown clears it.
 	bool root_attached_ = false;
