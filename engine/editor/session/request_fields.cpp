@@ -264,6 +264,13 @@ constexpr RequestField kFields[] = {
 			"An import source alone (DI-25): delete_asset deletes it and its record and keeps its outputs as files "
 			"of the project, where the placement rule puts their kinds; duplicate_asset copies it without its "
 			"record (left out: its outputs go with it, a copy's import makes the copy's own)." },
+	{ F::Define, "define", J::Object,
+			"A name the new file defines as it is made (create_file, DI-33: a missing name whose file the project "
+			"lacks, a Problems row's Create ... with it): {kind, name, scope?}, the reference's kind by its token "
+			"(reference_kinds), the name as the reference writes it and its scope (a string id's table and section), "
+			"added to the made file's document as its type's Add makes one (Add it there's, DI-15), selected, one "
+			"step its Undo takes back. Refused (document.values), the file still made, where the type defines no "
+			"name of the kind there." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

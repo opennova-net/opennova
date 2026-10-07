@@ -304,31 +304,15 @@ bool convert_wave(const std::vector<uint8_t> &source, const WaveConversion &conv
 		}
 	}
 	const int bits = bits_written(wave, conversion);
-	const uint32_t data_size = uint32_t(samples.size() * (bits / 8));
-	out.clear();
-	const auto text = [&](const char *t) { out.insert(out.end(), t, t + 4); };
-	const auto u32 = [&](uint32_t v) { io::append_u32_le(out, v); };
-	const auto u16 = [&](uint16_t v) { io::append_u16_le(out, v); };
-	text("RIFF");
-	u32(4 + 24 + 8 + data_size + (data_size & 1));
-	text("WAVE");
-	text("fmt ");
-	u32(16);
-	u16(kTagPcm);
-	u16(1);
-	u32(rate);
-	u32(rate * uint32_t(bits / 8));
-	u16(uint16_t(bits / 8));
-	u16(uint16_t(bits));
-	text("data");
-	u32(data_size);
+	std::vector<uint8_t> data;
+	data.reserve(samples.size() * size_t(bits / 8));
 	for (const float s : samples) {
 		const float v = std::clamp(s, -1.0f, 1.0f);
-		if (bits == 8) out.push_back(uint8_t(std::clamp(std::lround(v * 127.0f) + 128, 0L, 255L)));
-		else u16(uint16_t(int16_t(std::clamp(std::lround(v * 32767.0f), -32768L, 32767L))));
+		if (bits == 8) data.push_back(uint8_t(std::clamp(std::lround(v * 127.0f) + 128, 0L, 255L)));
+		else io::append_u16_le(data, uint16_t(int16_t(std::clamp(std::lround(v * 32767.0f), -32768L, 32767L))));
 	}
-	if (data_size & 1) out.push_back(0);
-	return true;
+	// The plain RIFF the game's loader reads, through the format's writer.
+	return lwf::wav_write_pcm_mono(data.data(), data.size(), rate, uint16_t(bits), out, error);
 }
 
 std::string wave_conversion_words(const WaveSamples &source, const WaveConversion &conversion) {
