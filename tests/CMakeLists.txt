@@ -4977,6 +4977,13 @@ target_link_libraries(editor_clip_sounds_test PRIVATE opennova_editor)
 target_include_directories(editor_clip_sounds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_clip_sounds COMMAND editor_clip_sounds_test)
 
+# DI-24: a clip's fire events fire the item's ammo in the model preview (preview/preview_clip_fire, the weapon
+# range's soldier shots), over minted fixtures alone.
+add_executable(editor_clip_fire_test editor/clip_fire_test.cpp)
+target_link_libraries(editor_clip_fire_test PRIVATE opennova_editor)
+target_include_directories(editor_clip_fire_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_clip_fire COMMAND editor_clip_fire_test)
+
 # DI-13: a weapon's map in first person: the gun with the character's arms on its rig, the eye the game
 # draws the view model before, the weapon's actions as the game's pump runs them and their sets.
 add_executable(editor_first_person_test editor/first_person_test.cpp)

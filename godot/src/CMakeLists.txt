@@ -408,6 +408,7 @@ if(OPENNOVA_EDITOR)
         authoring/effect_viewport_applier.cpp
         authoring/preview_effects.cpp
         authoring/preview_model.cpp
+        authoring/preview_range_draw.cpp
         authoring/thumbnail_images.cpp
         authoring/viewport_device.cpp
         authoring/viewport_devices.cpp
