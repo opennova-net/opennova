@@ -33,6 +33,25 @@ bool same_spawns(const std::vector<DefinitionSpawn> &a, const std::vector<Defini
 bool DefinitionEffects::plan(const PreviewEffectCatalog &catalog, uint64_t catalog_serial,
                              std::vector<DefinitionSpawn> spawns) {
 	if (catalog_serial == catalog_serial_ && same_spawns(spawns, spawns_)) return false;
+	// More spawns after the same ones (a weapon's shots as its range runs, DI-22), each of an effect the scene
+	// holds: the scene plays on, the new ones made as the clock reaches them, or at once pre-aged by their age.
+	if (catalog_serial == catalog_serial_ && scene_ && spawns.size() > spawns_.size()) {
+		const std::vector<DefinitionSpawn> head(spawns.begin(), spawns.begin() + std::ptrdiff_t(spawns_.size()));
+		bool known = same_spawns(head, spawns_);
+		for (size_t i = spawns_.size(); known && i < spawns.size(); ++i) {
+			bool held = false;
+			for (const std::string &name : names_) held = held || strutil::iequals(name, spawns[i].effect);
+			known = held;
+		}
+		if (known) {
+			spawns_ = std::move(spawns);
+			groups_.resize(spawns_.size(), particle::EffectGroupId());
+			statuses_.resize(spawns_.size(), particle::EffectSpawnStatus::InvalidHandle);
+			made_.resize(spawns_.size(), false);
+			++serial_;
+			return false;
+		}
+	}
 	catalog_serial_ = catalog_serial;
 	spawns_ = std::move(spawns);
 	// Each effect once, in the order the spawns first name it.
@@ -46,6 +65,7 @@ bool DefinitionEffects::plan(const PreviewEffectCatalog &catalog, uint64_t catal
 	closures_.clear();
 	groups_.assign(spawns_.size(), particle::EffectGroupId());
 	statuses_.assign(spawns_.size(), particle::EffectSpawnStatus::InvalidHandle);
+	made_.assign(spawns_.size(), false);
 	played_ = false;
 	++serial_;
 	++opens_;
@@ -65,6 +85,7 @@ void DefinitionEffects::close() {
 	closures_.clear();
 	groups_.clear();
 	statuses_.clear();
+	made_.clear();
 	catalog_serial_ = UINT64_MAX;
 	played_ = false;
 	tick_ = 0;
@@ -92,6 +113,7 @@ void DefinitionEffects::spawn_(size_t spawn, int32_t age) {
 	request.initial_age_ticks = uint32_t(std::max(age, 0));
 	const particle::EffectSpawnReceipt receipt = scene_->spawn(request);
 	statuses_[spawn] = receipt.status;
+	made_[spawn] = true;
 	// A spawn whose catch-up outlived every emitter is gone already (EffectScene::spawn releases it).
 	groups_[spawn] = receipt.spawned() && scene_->contains_group(receipt.group) ? receipt.group : particle::EffectGroupId();
 }
@@ -108,6 +130,7 @@ void DefinitionEffects::play_to(int32_t tick) {
 		scene_->reset_runtime_state();
 		std::fill(groups_.begin(), groups_.end(), particle::EffectGroupId());
 		std::fill(statuses_.begin(), statuses_.end(), particle::EffectSpawnStatus::InvalidHandle);
+		std::fill(made_.begin(), made_.end(), false);
 		for (size_t i = 0; i < spawns_.size(); ++i)
 			if (spawns_[i].tick <= tick) spawn_(i, tick - spawns_[i].tick);
 		played_ = true;
@@ -115,13 +138,16 @@ void DefinitionEffects::play_to(int32_t tick) {
 		++serial_;
 		return;
 	}
+	// A spawn added after the clock passed its tick: made at once, pre-aged by its age.
+	for (size_t i = 0; i < spawns_.size(); ++i)
+		if (!made_[i] && spawns_[i].tick <= tick_) spawn_(i, tick_ - spawns_[i].tick);
 	// A game tick at a time (the scene's own fixed step), each spawn made on its tick.
 	particle::EffectAdvanceRequest step;
 	step.delta_seconds = 1.0f / static_cast<float>(io::kTickHz);
 	for (int32_t at = tick_ + 1; at <= tick; ++at) {
 		scene_->advance_simulation(step);
 		for (size_t i = 0; i < spawns_.size(); ++i)
-			if (spawns_[i].tick == at) spawn_(i, 0);
+			if (spawns_[i].tick == at && !made_[i]) spawn_(i, 0);
 	}
 	if (tick != tick_) ++serial_;
 	tick_ = tick;
