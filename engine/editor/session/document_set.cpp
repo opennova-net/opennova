@@ -1019,6 +1019,11 @@ size_t DocumentSet::note_save(const DocumentBase &document) {
 void DocumentSet::rewrite_file(const std::string &path) {
 	const AssetEntry *asset = core_.project_file(path);
 	if (!asset) return core_.refuse_request(missing_file(path));
+	if (!asset->imported_from.empty())
+		return core_.refuse_now(CoreFinding::DocumentImported,
+		                        asset->logical_name + " is made by the import of " + asset->imported_from +
+		                                ": Reimport it rather than rewriting it.",
+		                        asset->relative_path);
 	const std::string relative = asset->relative_path;
 	Diagnostic error;
 	const std::shared_ptr<DocumentBase> document = load(relative, asset->kind, error);
@@ -1191,6 +1196,18 @@ bool sets_one_record(const std::vector<Edit> &edits) {
 // it), refused as the type refuses it (document.collection), nothing applied.
 bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &requested) {
 	last_edit_ok_ = false;
+	// A file an import makes is the import's (DI-30): it lives in the machine's import cache, the next import
+	// makes it again from its source and options (an input changed, another machine's first scan, a Reimport),
+	// and a build packs what the import made, so an edit here would be lost and reach no other machine. Its
+	// document opens to be read and followed; what changes it is its source.
+	if (const AssetEntry *entry = core_.project_file(document.path()); entry && !entry->imported_from.empty()) {
+		core_.refuse_now(CoreFinding::DocumentImported,
+		                 basename_of(document.path()) + " is made by the import of " + entry->imported_from +
+		                         ": change that source or its import's options, then Reimport. An edit here would be lost "
+		                         "at the next import.",
+		                 document.path());
+		return false;
+	}
 	// The selection follows a record document's records (a document of another kind holds none).
 	const Document *records = records_of(document);
 	std::vector<Edit> expanded;
