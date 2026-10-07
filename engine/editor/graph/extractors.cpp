@@ -500,10 +500,11 @@ void extract_from_text(const TextDocument &document, Extracted &out) {
 		// The text is the game's code page (Windows-1252), the project's file names and every other
 		// document's names UTF-8: a name compared in one encoding, UTF-8 (the plain-words lane; its span
 		// keeps the text's own bytes, which a rename rewrites).
-		GraphEdge edge = edge_of(document.path(), std::string(), std::string(), reference.kind,
+		GraphEdge edge = edge_of(document.path(), cp1252_to_utf8(reference.record), reference.field, reference.kind,
 				cp1252_to_utf8(reference.value), reference.scope, reference.rewritable);
 		edge.locator = TextDocument::locator(reference.span.line, reference.span.column);
 		edge.span = reference.span;
+		edge.name_offset = reference.name_offset;
 		edge.fallback = cp1252_to_utf8(reference.fallback);
 		edge.scopes_after = std::move(reference.scopes_after);
 		edge.scope_alternate = std::move(reference.scope_alternate);
