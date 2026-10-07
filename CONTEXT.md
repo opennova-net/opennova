@@ -1217,6 +1217,7 @@ editor stamps on the preview clock. The run is a function of its gestures: the c
 again. What it hands the game's presenter is drawn where the presenter draws it: in first person the
 action legs at the gun's points, in third person a shot as another sees it (a soldier's, through the
 ammo; another player's, through the weapon's FIRE and RECOIL rows).
+An ammo record fires there too (DI-23), alone: a soldier's shot of it, Fire and Clear its only gestures.
 _Avoid_: shooting range (the game has none), firing test, gun sim
 
 **Clip fire**:
@@ -1228,6 +1229,24 @@ fire entry in a weapon range of its own: the ammo's `ai_launch` heard, its `ai_l
 round's flight, tracer and stop on the target. A player's body fires nothing; no magazine or weapon state gates
 it. Not the weapon range's gestures (those fire a weapon.def record in the player's hands).
 _Avoid_: clip shots, anim fire, NPC weapon (an NPC's clip fires ammo, not a weapon.def row)
+
+**Impact board**:
+An ammo record's impact rows in the Definition preview (ADR 0046 DI-23): for each of the twenty surface
+classes the game reads where a round stops (the terrain's char map, a placed tile's square, an object's
+bullet face), the effects-table row a round of it plays there (the class + 4), as the game's impact
+presenter picks it: the ammo's own row of the tag, else ammo def 0's bank at the tag's place (the fallback,
+which may be another tag's row, or nothing); its effect, its sound and the scar it leaves on an object's
+face, each a Go to. A row played fires one round of the ammo at a face of that class on the weapon range.
+_Avoid_: effects table (the ammo.def block the board reads), impact matrix
+
+**Shoot tool**:
+The mission view's tool (ADR 0046 DI-23) that fires the picked ammo where a click meets the terrain or an
+object, and plays the impact the game would play there: the round run in a world of the tool's own, built
+from the mission as it stands by the game's own load (the entities near the shot, their items' traits and
+collision models; the terrain, tiles and water as the game reads them), its effect, sound and scar drawn
+and heard, and the object's damage and, where it dies, its death as DI-10 plans it. Its shots stand on the
+preview clock; Clear shots forgets them. It edits nothing.
+_Avoid_: fire tool, test fire, gun
 
 **Rig**:
 What an animation plays on: an animation table (its reset clip the bind) or a lone clip
