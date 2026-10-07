@@ -69,8 +69,10 @@ public:
 	// A canvas draws the picture this frame with the mouse over it at (x, y) of its pixels, showing no
 	// pointer of its own there (opennova::editor::ViewportPicture::pointer), before the frame's tick: a
 	// picture that draws the game's pointer draws it there (a menu's, DI-08). Asked on every frame a
-	// canvas draws it, `over` false where the mouse is not.
-	virtual void pointer(bool over, float x, float y) {
+	// canvas draws it, `over` false where the mouse is not; `hovered` the mouse over the picture whatever
+	// the canvas shows there (ViewportPicture::hovered).
+	virtual void pointer(bool hovered, bool over, float x, float y) {
+		(void)hovered;
 		(void)over;
 		(void)x;
 		(void)y;
