@@ -63,8 +63,20 @@ bool make_blank_sound_profiles(const BlankRequest &, std::vector<uint8_t> &out, 
 
 // env (blank_environment.cpp): the environment writer's authoring template, named after the file
 bool make_blank_environment(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
-// lwf (blank_sound.cpp): a sound bank of no wave and no set
+// The sound lane (blank_sound.cpp, DI-33): a sound bank of no wave and no set; a wave of one sample of
+// silence; a dialog bank of no group; a music bank of no stream; the shell's and a mission's music script, idling
 bool make_blank_sound_bank(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+bool make_blank_wave(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+bool make_blank_dialog_bank(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+bool make_blank_music_bank(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+bool make_blank_menu_music_script(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+bool make_blank_game_music_script(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+
+// 3di, bad and adm (blank_model.cpp, DI-33): a model of one triangle; a clip of one bone at rest; an animation
+// map of its anim_reset row alone, naming its reset clip (blank_reset_clip_name)
+bool make_blank_model(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+bool make_blank_animation(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+bool make_blank_animation_map(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
 // fx (blank_shader.cpp): _ffp.fx, the fixed-function effect the renderer opens by name; an object
 // effect for the shader tag the request's `tag` names (blank_shader_tags)
@@ -82,6 +94,16 @@ bool make_blank_loading_screen(const BlankRequest &, std::vector<uint8_t> &out, 
 bool make_blank_monogram(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_boxtile(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_pointer(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+
+// The text families (blank_text.cpp, DI-33): a particle file of no effect; a credits roll of one line; an AI
+// profile of no type; the HUD layout with nothing moved; an avatars table of nothing
+bool make_blank_particles(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+bool make_blank_credits(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+bool make_blank_ai_profile(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+bool make_blank_hud_layout(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+bool make_blank_avatars(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+// The player preview's environment cube (blank_texture.cpp, DI-33): a DDS cube map of the checkerboard
+bool make_blank_cube(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
 // Hand-authored text goes to disk CRLF: retail's text parsers fail silently on LF.
 std::string blank_crlf(const std::string &text);
