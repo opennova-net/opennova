@@ -1804,7 +1804,7 @@ static int test_terrain_and_bank_extractors() {
 	TEST_EXPECT(loader_of_map("det.tga", loader) && loader == TextureLoader::Stage);
 	TEST_EXPECT(!loader_of_map("isle_m.pcx", loader));
 	const GraphEdge *palm = edge_to(graph, "isle.trn", ReferenceKind::Model, "palm");
-	TEST_EXPECT(palm && palm->record == "foliage 1" && palm->field == "graphic");
+	TEST_EXPECT(palm && palm->record == "Terrain/Foliage 1" && palm->field == "graphic");
 	TEST_EXPECT(graph.resolve(ReferenceKind::TerrainData, "isle.cpt") == ReferenceStatus::Missing &&
 	            graph.resolve(ReferenceKind::Texture, "isle_c.tga") == ReferenceStatus::Present);
 	const GraphEdge *shot = edge_to(graph, "game.lwf", ReferenceKind::Wave, "SFX\\WEAPON\\shot.wav");
@@ -1822,13 +1822,15 @@ static int test_terrain_and_bank_extractors() {
 	TEST_EXPECT(no_wave && no_wave->severity == DiagnosticSeverity::Warning &&
 	            no_wave->message.find("plays nothing") != std::string::npos && !missing("game.lwf", "shot.wav"));
 	TEST_EXPECT(count_code(session.view().findings.diagnostics, "graph.unreadable") == 0);
-	// The height data in: the terrain's reference resolves. A terrain with no height data named is
-	// one the game refuses: unread, a warning of the graph's.
+	// The height data in: the terrain's reference resolves. A terrain with no height data named is one the
+	// game refuses: read through its document all the same (DI-30), its refusal the terrain's own finding.
 	TEST_EXPECT(editor_test::write_text(root + "/isle.cpt", "x") &&
 	            editor_test::write_text(root + "/bare.trn", "polytrn_colormap isle_c.tga\r\npolytrn_detailmap det.tga\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(graph.resolve(ReferenceKind::TerrainData, "isle.cpt") == ReferenceStatus::Present && !missing("isle.trn", "isle.cpt"));
-	TEST_EXPECT(count_code(session.view().findings.diagnostics, "graph.unreadable") == 1 && graph.references_of("bare.trn").empty());
+	TEST_EXPECT(count_code(session.view().findings.diagnostics, "graph.unreadable") == 0 &&
+	            count_code(session.view().findings.diagnostics, "terrain.refused") == 1 &&
+	            graph.references_of("bare.trn").size() == 2);
 	return 0;
 }
 
