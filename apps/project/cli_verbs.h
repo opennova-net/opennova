@@ -8,6 +8,7 @@
 // with --json, as the Shell's query_json gives it.
 //
 //   opennova-project new <dir> [--title <text>] [--game <code>] [--expansion <name>] [--builds-on <expansion>]
+//                    [--base-project <dir>]
 //   opennova-project status <dir>
 //   opennova-project validate <dir>
 //   opennova-project create-missing <dir> [--role <token>]
