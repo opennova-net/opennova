@@ -29,7 +29,10 @@ inline constexpr bool object_subpixel_culled(int32_t projected_radius_q16) {
 inline constexpr int32_t kObjectLodBehindEyeRadiusQ16 = 0x10000000;
 
 // The highest shipped object-detail profile (the frame scale's fixed-quality
-// leg). [orig: Terrain_RenderWorldScene @ 0x5c944c]
+// leg). [orig: Terrain_RenderWorldScene @ 0x5c944c] Retail's level is game.cfg's
+// object_polydetail (the session copy dword_24D2048,
+// [orig: apply_session_settings_to_globals @ 0x551565..0x551574]); every caller
+// passes this one, the most detailed (D-RORD-13).
 inline constexpr int kObjectLodDetailLevelMax = 3;
 
 // Entity-local sphere consumed by the visibility projector, in the source
