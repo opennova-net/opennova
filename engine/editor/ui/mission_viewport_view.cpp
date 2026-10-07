@@ -126,6 +126,7 @@ struct MissionViewportView::Tools {
 	void toolbar(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context);
 	void show_popup(MissionViewportOptions &options);
 	void time_popup(MissionViewportOptions &options, const MissionViewport &mission);
+	void heard_popup(const MissionViewport &mission);
 	void numbers(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context);
 	void path_list(Workspace &workspace, const MissionViewport &mission);
 	void shoot_list(Workspace &workspace, const MissionViewport &mission);
@@ -393,6 +394,30 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 	if (ImGui::BeginPopup("time")) {
 		time_popup(options, mission);
 		ImGui::EndPopup();
+	}
+	// Listen (DI-36): the mission's soundscape where the camera stands, as the game plays it; its master volume, and
+	// what plays.
+	if (tool_button(row, "Listen", options.listen.on, true,
+				options.listen.on
+						? std::string("Stop listening.")
+						: std::string("Hear the mission where the camera stands, as the game plays it: its ambient sources by "
+									  "the hour, on the game's eight channels, the rain and the thunder its script makes, "
+									  "the script's own sounds. The sources' reach is ringed on the ground.")))
+		options.listen.on = !options.listen.on;
+	if (options.listen.on) {
+		const float width = unit * 5.0f;
+		row.next(ui_kit::field_width(width, "Volume"));
+		ImGui::SetNextItemWidth(width);
+		float volume = options.listen.volume;
+		if (ImGui::SliderFloat("Volume", &volume, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp))
+			options.listen.volume = volume;
+		ui_kit::tooltip("The master volume of everything Listen plays (the editor's, not the game's).");
+		if (ui_kit::tool(row, "Heard", true, "What plays on each of the game's channels now, the weather and the script."))
+			ImGui::OpenPopup("heard");
+		if (ImGui::BeginPopup("heard")) {
+			heard_popup(mission);
+			ImGui::EndPopup();
+		}
 	}
 	if (ui_kit::tool(row, "Frame", true, "Look at the selected records, or at every entity (F, or a double click on "
 										 "the picture)."))
@@ -809,6 +834,51 @@ void MissionViewportView::Tools::time_popup(MissionViewportOptions &options, con
 	if (ImGui::SliderFloat("Hour", &hour, 0.0f, 24.0f, "%.1f h", ImGuiSliderFlags_AlwaysClamp) && !own)
 		options.time = double(hour);
 	ImGui::EndDisabled();
+}
+
+// What the Listen plays now (DI-36): each channel the loudest-first mix binds, the weather the script made and the
+// script's own state, the sources by what they do.
+void MissionViewportView::Tools::heard_popup(const MissionViewport &mission) {
+	const MissionListen &listen = mission.listen();
+	if (!listen.open()) {
+		ImGui::TextDisabled("Not listening yet.");
+		return;
+	}
+	ImGui::TextDisabled("The game's %d channels, the loudest first", int(audio::kAmbientMixChannels));
+	int shown = 0;
+	for (const MissionSoundChannel &channel : listen.channels()) {
+		if (channel.candidate < 0) continue;
+		++shown;
+		const std::string from = std::string(channel.source) == "rain" ? "rain" : "source";
+		ImGui::Text("%d. %s (%s), %s, volume %d, %.0f m (%s)", channel.channel + 1, channel.set.c_str(),
+				channel.bank.c_str(), channel.wave.c_str(), channel.volume, double(channel.distance), from.c_str());
+	}
+	if (shown == 0) ImGui::TextDisabled("Nothing is heard here.");
+	ImGui::Separator();
+	size_t playing = 0, outranked = 0, silent = 0;
+	for (const MissionSoundSource &source : listen.sources()) {
+		const std::string status = source.status;
+		playing += status == "playing" ? 1 : 0;
+		outranked += status == "outranked" ? 1 : 0;
+		silent += status != "playing" && status != "outranked" ? 1 : 0;
+	}
+	ImGui::Text("%zu ambient sources: %zu playing, %zu outranked, %zu silent here", listen.sources().size(), playing,
+			outranked, silent);
+	const MissionScriptRun &script = listen.script();
+	if (const world::WeatherState *weather = script.weather()) {
+		ImGui::Text("Rain %.0f%% (to %.0f%%), overcast %.0f%%", double(weather->rain_pct_current_q16()) * 100.0 / 65535.0,
+				double(weather->rain_pct_target_q16()) * 100.0 / 65535.0,
+				double(weather->overcast_blend_q16()) * 100.0 / 65535.0);
+	}
+	if (!script.error().empty()) {
+		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.3f, 1.0f));
+		ImGui::TextWrapped("%s", script.error().c_str());
+		ImGui::PopStyleColor();
+	} else {
+		ImGui::TextDisabled("Script: %s, run %u times", script.scripted() ? "compiled" : "none", script.script_runs());
+	}
+	const std::vector<ClipSoundFired> &fired = listen.sounds_fired();
+	if (!fired.empty()) ImGui::TextDisabled("Last heard: %s", ui_kit::fit(fired.back().words, ImGui::GetFontSize() * 30.0f).c_str());
 }
 
 void MissionViewportView::Tools::ground_line() {
