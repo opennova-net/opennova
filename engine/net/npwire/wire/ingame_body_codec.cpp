@@ -323,7 +323,7 @@ const IngameBodyCodec kCodecs[] = {
 	{'S', s2c::ENTITY_CHECKSUM_REQ, "decode_entity_checksum_request", kNone, counted_only<EntityChecksumRequest, decode_entity_checksum_request>},
 	{'S', s2c::LOADOUT_CRC_REQ, "decode_loadout_crc_request", kNone, counted_only<LoadoutCrcRequest, decode_loadout_crc_request>},
 	{'S', s2c::CAPTURE_ZONE_STATE, "decode_capture_zone_overlay", kNone, whole_only<CaptureZoneOverlayBatch, decode_capture_zone_overlay>},
-	{'S', s2c::INPUT_STATE_FLAGS, "decode_input_state_flags", kNone, counted_only<uint16_t, decode_input_state_flags>},
+	{'S', s2c::CHARATTR_DISABLED_PROPERTIES, "decode_charattr_disabled_properties", kNone, counted_only<uint16_t, decode_charattr_disabled_properties>},
 	{'S', s2c::RTT_ECHO, "decode_rtt_sample", kNone, counted_only<RttSample, decode_rtt_sample>},
 	{'S', s2c::SESSION_STATUS, "decode_session_status", kNone, s_session_status},
 	{'S', s2c::FILE_TRANSFER_CHUNK, "decode_file_transfer_chunk", kNone, s_file_chunk},

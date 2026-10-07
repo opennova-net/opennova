@@ -116,7 +116,7 @@ int test_kind_table() {
 	TEST_EXPECT(viewport_kind_from_token("script", named) && named == ViewportKind::Script);
 	const ViewportKindRow &row = viewport_kind_row(ViewportKind::Script);
 	TEST_EXPECT(row.kind == ViewportKind::Script && row.role == ViewportRole::Main && !row.as_saved && !row.part &&
-	            row.feed_count == 7 && row.make && !row.canvas);
+	            row.feed_count == 8 && row.make && !row.canvas);
 	// Whether a kind has a canvas is what its viewport makes of one: the script's none, the others' one.
 	for (size_t i = 0; i < kViewportKindCount; ++i) {
 		const ViewportKindRow &kind_row = viewport_kind_row(static_cast<ViewportKind>(i));

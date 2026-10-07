@@ -34,7 +34,7 @@ void minimap_feed_encode(const std::vector<HudMinimapMarker> &markers,
         dst[15] = m.floor_px;
         // v4: the local-team medic bit the marker pass draws the red-cross
         // plate for [orig: HUD_DrawEntityLabelsAndMarkers @0x5a49e0 —
-        // AnimMap_IsSlotActive(playerClass, 8) @0x5a4ab3 under the local-team
+        // CharAttr_ClassHasAttribute(playerClass, 8) @0x5a4ab3 under the local-team
         // gate @0x5a4ac6/@0x5a4acf].
         dst[16] = m.medic ? 1 : 0;
         // v5: the live pool-entity facts (hud_minimap.h HudMinimapMarker).

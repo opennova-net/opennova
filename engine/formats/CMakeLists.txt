@@ -35,6 +35,11 @@ add_library(opennova_formats STATIC
     # cbin — credits binary
     ${CMAKE_CURRENT_SOURCE_DIR}/cbin/binary_config.cpp # the CBIN form read and written exactly
     ${CMAKE_CURRENT_SOURCE_DIR}/cbin/cbin.cpp
+    # charattr — charattr.def, the character classes' attributes (read and written)
+    ${CMAKE_CURRENT_SOURCE_DIR}/charattr/charattr.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/charattr/charattr_write.cpp
+    # configfile — the ConfigFile's text form and its accessors (charattr.def, a marquee's credits)
+    ${CMAKE_CURRENT_SOURCE_DIR}/configfile/config_file.cpp
     # cpt — terrain height/CDEP container
     ${CMAKE_CURRENT_SOURCE_DIR}/cpt/cpt_crypto.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cpt/cpt_io.cpp
