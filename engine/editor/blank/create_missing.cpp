@@ -37,7 +37,7 @@ CreateMissingResult create_missing_requirements(const ProjectPaths &paths, const
 		std::vector<uint8_t> bytes;
 		Diagnostic error;
 		std::string io_error;
-		if (!factory->make(request, bytes, error)) {
+		if (!make_from(*factory, request, bytes, error)) {
 			result.diagnostics.push_back(error);
 			return;
 		}
@@ -94,7 +94,7 @@ CreateMissingResult create_missing_requirements(const ProjectPaths &paths, const
 		request.project_title = doc.title;
 		std::vector<uint8_t> bytes;
 		Diagnostic error;
-		if (!factory->make(request, bytes, error)) {
+		if (!make_from(*factory, request, bytes, error)) {
 			result.diagnostics.push_back(error);
 			continue;
 		}

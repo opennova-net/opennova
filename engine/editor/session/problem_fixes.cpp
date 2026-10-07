@@ -357,7 +357,7 @@ void create_there_fix(const ReferenceSubject &missing, const SessionView &view, 
 	Diagnostic error;
 	const std::unique_ptr<DocumentBase> copy = type->make ? type->make() : nullptr;
 	PlannedFix planned;
-	if (!copy || !factory->make(blank, bytes, error) ||
+	if (!copy || !make_from(*factory, blank, bytes, error) ||
 	    !copy->load_bytes(bytes, name, kind, view.project.document->target_game, error) ||
 	    !type->define_symbol(*copy, missing, planned) || planned.edits.empty() ||
 	    !defines_after(*copy, planned, name, kind, missing, view))

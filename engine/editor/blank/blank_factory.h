@@ -123,6 +123,14 @@ const BlankFactory *find_blank_factory(std::string_view role, const std::string 
 bool make_blank(const BlankRequest &request, AssetKind kind, std::vector<uint8_t> &out,
                 Diagnostic &error);
 
+// The factory's file: what everything that makes a blank calls (make_blank, Create missing, a file a fix makes).
+// False with `error` where the factory refuses, and for a file the game's reader of the factory's kind would
+// take to its harm: one of a kind the ConfigFile text reader reads that holds more values than that reader's
+// pool of its text values takes (document.config_overrun, documents/config_overrun.h [orig:
+// ConfigFile_ParseText @ 0x7609e8]), never written.
+bool make_from(const BlankFactory &factory, const BlankRequest &request, std::vector<uint8_t> &out,
+               Diagnostic &error);
+
 // Whether the texture factory makes a placeholder of this name (blank_texture.cpp): the
 // checkerboard the game draws for a texture it cannot load, in the format the name's
 // extension asks for (a .tga or an .mdt as a TGA, which the game reads both as, a .pcx as a
