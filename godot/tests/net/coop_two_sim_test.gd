@@ -36,6 +36,9 @@ const SPAWN_ZONE_TYPE := 1359 # pool-1 fixture; ItemDef supplies SpawnPoint (0x4
 # player slot; it does not fall through to DM's 6002 family.
 # [orig: Server_PositionPlayerForSpawn @0x50D1A7..0x50D201]
 const OBJECTIVE_COOP_START_TYPE := 6094
+# A host StartDelay (seconds) that outlasts a real-UDP join, so a joiner's kit
+# submit lands inside the pre-round window the host accepts it in.
+const PREROUND_START_DELAY := 12
 # The USE scan admits a seat only inside the player's view cone (just under
 # 90 deg standing, 5 deg seated); a peer that presses USE looks at the seat first.
 const MountLook := preload("res://tests/support/mount_look.gd")
@@ -1987,15 +1990,6 @@ func test_listen_host_reload_relays_over_loopback_without_double_refill() -> voi
 
 
 func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> void:
-	# PENDING: the joiner reverts to its profile kit page on the deploy release
-	# that follows a granted kit change (pre-round or death-screen armory), where
-	# retail's Player_InitPlayer rebuilds from the restrictionData the last S2C
-	# 0x5A wrote. Until that deploy-fold reseed is fixed, no retail-legal fixture
-	# can hold a two-weapon kit past the join (a live, deployed player outside an
-	# armory volume is answered with its CURRENT list, as retail does).
-	pending("joiner deploy release re-seeds the kit from the profile page (follow-up)")
-	if true:
-		return
 	var mission := _combat_mission()
 	var host := Simulation.new()
 	var host_options := HostSessionOptions.new()
@@ -2005,7 +1999,10 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 	# dead / armory-zone / pre-round gate). The two-weapon kit is therefore chosen
 	# during the pre-round window (host StartDelay), the way a retail player picks
 	# a kit before the round opens; the round then starts and the joiner fires.
-	host_options.start_delay = 4
+	# The timer starts at the host's round init, so it has to outlast the join
+	# (about four seconds of steps here): a submit after it is refused, and the
+	# refusal's current list (the join pair's profile page) replaces the kit.
+	host_options.start_delay = PREROUND_START_DELAY
 	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
@@ -2025,18 +2022,17 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 		WeaponKitEntry.make("WPN_M4AUTO"),
 		WeaponKitEntry.make("WPN_M9Beretta"),
 	], 8))
-	var kit_granted := false
+	# The local apply holds the kit at once; the host's answer lands within a few
+	# frames, and a refusal would replace it with the current list (no M9).
 	for _i in range(60):
 		joiner.step()
 		host.step()
-		if _inventory_clip(joiner, "WPN_M9Beretta") == 15:
-			kit_granted = true
-			break
 		OS.delay_msec(2)
-	assert_true(kit_granted, "the pre-round armory submit is granted (S2C 0x5A)")
+	assert_eq(_inventory_clip(joiner, "WPN_M9Beretta"), 15,
+			"the pre-round armory submit is granted (S2C 0x5A)")
 	# Let the pre-round timer expire (StartDelay seconds of authority ticks) so
 	# the joiner may fire; the granted body survives the round start.
-	for _i in range(4 * 62 + 40):
+	for _i in range(PREROUND_START_DELAY * 62 + 40):
 		joiner.step()
 		host.step()
 	assert_eq(_inventory_clip(joiner, "WPN_M9Beretta"), 15,
@@ -2124,6 +2120,79 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 
 
 
+# A joiner's redeploy keeps the kit the host last granted it, counts included:
+# the host rebuilds the slot from its loadout buffer (the last accepted 0x2F)
+# and re-sends the 0x5A, and the joiner's kit is that 0x5A. Retail's client
+# reads no profile page and runs no Player_InitPlayer at a redeploy (D-NET-378).
+# [orig: Server_ProcessPlayerDeath @0x5178E1 (PlayerSlot_InitWeaponsFromLoadout
+#  @0x515550), @0x5178F2 (Server_SendWeaponSlotListToPlayer);
+#  NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0]
+func test_joiner_deploy_release_keeps_the_last_granted_kit() -> void:
+	var mission := _combat_mission()
+	var host := Simulation.new()
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host_options.start_delay = PREROUND_START_DELAY
+	host.configure_host_session(host_options)
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	_install_combat_tables(host)
+	var joiner := Simulation.new()
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "RedeployKitJoiner"))
+	assert_true(joiner.load_from_mission_data(mission))
+	_install_combat_tables(joiner)
+	assert_true(_drive_pair_to_match(host, joiner),
+			"joiner reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		return
+	# Two M4 magazines instead of the def's 210 start rounds, and a sidearm the
+	# profile's page does not carry.
+	assert_true(joiner.apply_local_player_loadout([
+		WeaponKitEntry.make("WPN_M4AUTO", 2, -1, -1),
+		WeaponKitEntry.make("WPN_M9Beretta"),
+	], 8))
+	for _i in range(60):
+		joiner.step()
+		host.step()
+		OS.delay_msec(2)
+	assert_eq(_inventory_clip(joiner, "WPN_M9Beretta"), 15,
+			"the pre-round submit is granted")
+	assert_true(_kill_joiner_from_host(host, joiner),
+			"the authority's death transaction killed the joiner")
+	if not joiner.is_local_player_dead():
+		return
+	var alive := false
+	for i in range(1200):
+		if i % 64 == 0:
+			joiner.send_deployment_pick(0)
+		host.step()
+		joiner.step()
+		if not joiner.is_local_player_dead() and not joiner.is_join_deploy_pick_pending():
+			alive = true
+			break
+		OS.delay_msec(1)
+	assert_true(alive, "the release brought the joiner back alive")
+	for _settle in range(4):
+		host.step()
+		joiner.step()
+	assert_eq(_inventory_clip(joiner, "WPN_M9Beretta"), 15,
+			"the redeployed kit is the granted one")
+	assert_eq(_inventory_clip(joiner, "WPN_SATCHEL_CHARGE"), -1,
+			"the profile page's satchel stays out")
+	assert_eq(_inventory_clip(joiner, "WPN_M4AUTO"), 30,
+			"the M4 magazine is full again")
+	joiner.set_local_player_weapon(_fixture_m4(), {})
+	joiner.step()
+	# The 0x5A apply sets the pool to the granted count's two magazines, and its
+	# last recalc returns the loaded clip before drawing it again, so the reserve
+	# is the two magazines; a local rebuild would have reseeded the def's 210.
+	# [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4295fc, @0x4296a9;
+	#  WeaponSlots_RecalculateAmmoFromCapacity @0x54233d..0x542374]
+	assert_eq(joiner.get_local_player_weapon_state().reserve, 60,
+			"the reserve is the granted two magazines, not the def's start rounds")
+
+
 func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 	var mission := _combat_mission()
 	var host := Simulation.new()
@@ -2138,9 +2207,10 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 	_install_combat_tables(host)
 
 	var joiner := Simulation.new()
-	# The joiner's deploy release re-seeds its kit from the profile page (the
-	# pending follow-up above), so the M4-only kit this regression needs is its
-	# profile's blue rifleman page, not the stock default page's full kit.
+	# With no pre-round, the host answers a deployed joiner's later kit submit
+	# with its current list: the kit the join pair's profile page was granted.
+	# So the M4-only kit this regression needs is its profile's blue rifleman
+	# page, not the stock default page's full kit.
 	assert_eq(joiner.use_player_profile(_m4_only_profile()), OK)
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "DoneEchoJoiner"))
