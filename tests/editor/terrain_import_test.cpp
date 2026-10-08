@@ -575,7 +575,7 @@ int test_new_terrain() {
 		const std::string dir = utf8_of(path_of(project.output("isle.trn")).parent_path());
 		TEST_EXPECT(index.scan(dir));
 		opennova::terrain::TerrainFieldStore store;
-		TEST_EXPECT(opennova::terrain::terrain_field_store_load(store, index, "isle", "", why));
+		TEST_EXPECT(opennova::terrain::terrain_field_store_load(store, index, "isle", "", "", why));
 		TEST_EXPECT(store.valid());
 		// No surface map: the game's surface 1 everywhere, on the island and off it.
 		TEST_EXPECT(store.surface_map().data == nullptr && opennova::terrain::surface_type_at_fixed(store.surface_map(), 0, 0) == 1 &&
@@ -760,7 +760,7 @@ int test_new_terrain_surface() {
 		opennova::ResourceIndex index;
 		TEST_EXPECT(index.scan(dir));
 		opennova::terrain::TerrainFieldStore store;
-		TEST_EXPECT(opennova::terrain::terrain_field_store_load(store, index, "reef", "", why) && store.valid());
+		TEST_EXPECT(opennova::terrain::terrain_field_store_load(store, index, "reef", "", "", why) && store.valid());
 		TEST_EXPECT(expect_surface_sampled(store.surface_map(), 512, c512) == 0);
 	}
 
@@ -773,7 +773,7 @@ int test_new_terrain_surface() {
 		opennova::ResourceIndex index;
 		TEST_EXPECT(index.scan(dir));
 		opennova::terrain::TerrainFieldStore store;
-		TEST_EXPECT(opennova::terrain::terrain_field_store_load(store, index, "reef", "", why) && store.valid());
+		TEST_EXPECT(opennova::terrain::terrain_field_store_load(store, index, "reef", "", "", why) && store.valid());
 		TEST_EXPECT(expect_surface_sampled(store.surface_map(), 1024, c1024) == 0);
 	}
 	return 0;
@@ -1044,7 +1044,7 @@ int test_new_terrain_foliage() {
 	opennova::ResourceIndex index;
 	TEST_EXPECT(index.scan(dir));
 	opennova::terrain::TerrainFieldStore store;
-	TEST_EXPECT(opennova::terrain::terrain_field_store_load(store, index, "isle", "", why) && store.valid());
+	TEST_EXPECT(opennova::terrain::terrain_field_store_load(store, index, "isle", "", "", why) && store.valid());
 	std::vector<uint8_t> masks(map.indices.size());
 	for (size_t i = 0; i < masks.size(); ++i)
 		masks[i] = uint8_t(opennova::foliage_remap_pixel_to_def_mask(trn.foliage_defs, map.indices[i]));
