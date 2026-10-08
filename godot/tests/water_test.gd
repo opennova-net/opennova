@@ -623,13 +623,15 @@ func test_strip_and_mirror_register_to_the_live_aspect_mode_target() -> void:
 	water.set_mission_water_height_override(7.0)
 	water.set_visible_terrain_bounds(false, 0.0, 0.0)
 	water.advance_frame(TICK)
-	assert_almost_eq(water.get_reflection_camera().fov, 80.0, 0.001,
-			"the mirror takes the TARGET camera's field (the frame's policy 80), "
-			+ "never the surface camera's culling superset")
 	var target_vp := through.get_viewport()
 	var target_size := Vector2(target_vp.get_visible_rect().size)
 	var mirror_vp: SubViewport = water.get_reflection_viewport()
 	var served := TargetProjectionXrInterface.served_projection(mirror_vp)
+	# The target camera draws through its frustum form (the D3D9 raster's
+	# half pixel), which the mirror mirrors: its field is the projection's.
+	assert_almost_eq(served.x.x, 1.0 / tan(deg_to_rad(40.0)), 0.001,
+			"the mirror takes the TARGET camera's field (the frame's policy 80), "
+			+ "never the surface camera's culling superset")
 	assert_eq(mirror_vp.size, Vector2i(512, 512), "the mirror raster is retail's square")
 	assert_almost_eq(served.y.y / served.x.x, target_size.x / target_size.y, 0.0001,
 			"the mirror frustum takes the TARGET's ratio (the selected mode)")

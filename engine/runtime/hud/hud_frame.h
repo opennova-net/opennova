@@ -201,8 +201,9 @@ struct HudQuad {
 	// with texture2 sampled SCREEN-ANCHORED and wrap-addressed: UV1 =
 	// (screen_px + 0.5) / stage2 at each corner, i.e. surface pixel i shows
 	// texel i mod stage2 (the half pixel is D3D9's pixel-centre rule; a
-	// raster whose pixel centres sit at i + 0.5 samples the same texel at
-	// px / stage2). Only the stdbox border pieces carry one.
+	// device whose pixel centres sit at i + 0.5 draws the list half a pixel
+	// over, renderer/d3d9_raster.h, and samples the same texel by the same
+	// formula). Only the stdbox border pieces carry one.
 	// [orig: HUD_DrawTexturedQuad_0 @0x56b3e0 -- UV1 @0x56b560..0x56b5a7 over
 	//  the stage dims passed in; the 0x651 two-texture material's preferred
 	//  permutation RenderState_FindBestTextureFormatPermutation @0x6820c0 --

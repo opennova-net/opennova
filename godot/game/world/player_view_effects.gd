@@ -212,6 +212,9 @@ func _notification(what: int) -> void:
 
 
 func _draw() -> void:
+	# The view effects are the original's window coordinates, D3D9 pixel
+	# centres on the integers (HudPos.d3d9_screen_offset).
+	draw_set_transform(HudPos.d3d9_screen_offset())
 	var surface := size if size.x > 1.0 and size.y > 1.0 else get_viewport_rect().size
 	if _nvg_visible:
 		_draw_nvg(surface)

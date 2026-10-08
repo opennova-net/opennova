@@ -7,6 +7,7 @@
 #include "hud/vehicle_hud_block.h"
 
 #include "hud/hud_pos.h"
+#include "render/d3d9_raster_device.h"
 #include "mnu/controls_model.h" // set_tip's binding (the key display source)
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
@@ -1851,6 +1852,7 @@ void HudOverlay::ensure_additive_item_() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	additive_item_ = rs->canvas_item_create();
 	rs->canvas_item_set_parent(additive_item_, get_canvas_item());
+	rs->canvas_item_set_transform(additive_item_, d3d9_screen_to_canvas());
 	rs->canvas_item_set_material(additive_item_, additive_material_->get_rid());
 	// Above the four-layer corner-map sandwich like every non-map additive row.
 	rs->canvas_item_set_draw_index(additive_item_, 4);
@@ -1956,6 +1958,10 @@ void HudOverlay::_draw() {
 	if (!configured_) {
 		return;
 	}
+	// The draw lists are the original's window coordinates, D3D9 pixel centres
+	// on the integers (renderer/d3d9_raster.h): every child item takes the same
+	// transform where it is made.
+	rs->canvas_item_add_set_transform(get_canvas_item(), d3d9_screen_to_canvas());
 	const Vector2 surface = draw_surface_();
 	// Retail re-inits the overlay fonts on resolution change; the lazy tier
 	// check is that re-init (the policy lives in hud_label_font_choice).
@@ -1997,6 +2003,7 @@ void HudOverlay::render_console_messages(const RID &p_item) {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	rs->canvas_item_clear(p_item);
 	if (!configured_) return;
+	rs->canvas_item_add_set_transform(p_item, d3d9_screen_to_canvas());
 	const Vector2 surface = draw_surface_();
 	ensure_label_fonts_(surface.x);
 	ensure_flat_material_();
@@ -2071,6 +2078,7 @@ void HudOverlay::ensure_top_item_() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	top_item_ = rs->canvas_item_create();
 	rs->canvas_item_set_parent(top_item_, get_canvas_item());
+	rs->canvas_item_set_transform(top_item_, d3d9_screen_to_canvas());
 	// Above the big-map sandwich (draw indices 5..8).
 	rs->canvas_item_set_draw_index(top_item_, 9);
 	ensure_flat_material_();
@@ -2082,6 +2090,7 @@ void HudOverlay::ensure_page_item_() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	page_item_ = rs->canvas_item_create();
 	rs->canvas_item_set_parent(page_item_, get_canvas_item());
+	rs->canvas_item_set_transform(page_item_, d3d9_screen_to_canvas());
 	rs->canvas_item_set_z_as_relative_to_parent(page_item_, false);
 	rs->canvas_item_set_z_index(page_item_, RenderingServer::CANVAS_ITEM_Z_MAX);
 	ensure_flat_material_();

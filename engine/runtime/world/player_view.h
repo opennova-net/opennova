@@ -18,6 +18,7 @@
 
 #include <cstdint>
 
+#include <runtime/renderer/d3d9_raster.h>
 #include <runtime/renderer/frame_fx_effects.h>
 #include <runtime/world/death_camera.h>
 #include <runtime/world/radar_contacts.h>
@@ -781,7 +782,11 @@ float fov_vertical_from_horizontal_deg(float fov_h_deg, float aspect);
 // reproduces the pass by rendering through such a target and blitting it
 // full-surface; `target_w/h` is that target, the surface itself at scale 1 and
 // otherwise never below the surface on either axis (the resampled axis is
-// super-, never under-sampled).
+// super-, never under-sampled). `raster_shift` is where D3D9 puts that image on
+// the raster retail draws it into, half a pixel right and down
+// (renderer/d3d9_raster.h): the surface's pixels, since retail stretches the
+// pass through its projection onto the backbuffer itself; a shell whose pixel
+// centres sit at i + 0.5 translates its clip image by it.
 struct ViewProjection {
     float fov_h_deg = 0.0f; // the horizontal fov, mode-invariant
     float fov_v_deg = 0.0f; // 2 * atan(tan(fov_h/2) * selected)
@@ -789,6 +794,7 @@ struct ViewProjection {
     float scale_y = 1.0f;   // flt_8409E8: the vertical stretch onto the surface
     int target_w = 0;
     int target_h = 0;
+    renderer::NdcShift raster_shift;
 };
 ViewProjection view_projection(float fov_h_deg, int aspect_mode, int surface_w,
                                int surface_h);
@@ -803,7 +809,8 @@ ViewProjection view_projection(float fov_h_deg, int aspect_mode, int surface_w,
 // target is the 512 square: the frame-shaped arms keep the frame's `aspect`
 // (and fov_v), their texels non-square, a projection a shell whose camera
 // couples the two fovs through its target's ratio must supply explicitly;
-// the Scoped arm's frustum is the square itself (aspect 1).
+// the Scoped arm's frustum is the square itself (aspect 1). Its raster_shift is
+// the square's half pixel, the target retail rasterises it into.
 // `frame` is the frame's view_projection, `nvg` the frame's NVG arms,
 // `selected_h_over_w` the selected ratio (flt_8409EC), `zoom` the slot's
 // clamped magnification.
