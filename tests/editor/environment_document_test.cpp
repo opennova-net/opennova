@@ -333,6 +333,9 @@ int test_source_issues() {
 		TEST_EXPECT(same && !same->blocked() && same->issues().empty());
 		auto terrain = load("polytrn_colormap map.tga\r\nsky_height 175\r\n");
 		TEST_EXPECT(terrain && terrain->blocked() && has_issue(*terrain, 1, true, "terrain keyword"));
+		// horizon is read by no arm of either reader (formats/trn trn_parser_key): a skipped line.
+		auto skipped = load("horizon 0\r\nsky_height 175\r\n");
+		TEST_EXPECT(skipped && !skipped->blocked() && has_issue(*skipped, 1, false, "skips"));
 	}
 	std::printf("source issues: a line read over, skipped, short, a time read as another, a 17th block, an envscale "
 	            "after a colour, a terrain keyword\n");
@@ -466,8 +469,30 @@ int test_session() {
 	const std::vector<uint8_t> saved = test_io::read_file(root + "/day.env");
 	const std::string saved_text(saved.begin(), saved.end());
 	TEST_EXPECT(saved_text.find("fog_level 640\r\n") != std::string::npos && parsed(saved_text).fog_level == 640.0f);
+	// A terrain key in an environment is its missions' terrain's, after the .trn's (D-TERRAIN-18): its uses list the
+	// line each mission's terrain takes.
+	{
+		TEST_EXPECT(editor_test::write_text(root + "/dusk.env", "sky_height 175\r\npolytrn_detaildensity 64\r\n"));
+		opennova::bms::File file;
+		opennova::mission::make_default(file);
+		std::string why;
+		TEST_EXPECT(opennova::mission::set_header_string(file, "terrain", "island", why) &&
+		            opennova::mission::set_header_string(file, "environment", "dusk", why));
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(opennova::bms::write(file, bytes, why));
+		TEST_EXPECT(editor_test::write_bytes(root + "/late.bms", bytes));
+		editor_test::handle_to_end(session, request::rescan());
+		const EnvironmentUses uses = environment_uses(view, "dusk.env");
+		TEST_EXPECT(uses.missions.size() == 1 && uses.missions[0].terrain_keys.size() == 1);
+		if (uses.missions.size() == 1 && uses.missions[0].terrain_keys.size() == 1) {
+			const opennova::TrnLaterLine &line = uses.missions[0].terrain_keys[0];
+			TEST_EXPECT(line.key == "polytrn_detaildensity" && line.value == "64" && line.line == 2);
+		}
+		TEST_EXPECT(environment_uses(view, "day.env").missions.size() == 2 &&
+		            environment_uses(view, "day.env").missions[0].terrain_keys.empty());
+	}
 	std::printf("session: the references through the document, the missions with their terrain, overrides and water, an "
-	            "edit followed and undone, a save\n");
+	            "edit followed and undone, a save, a terrain key's missions\n");
 	return 0;
 }
 
