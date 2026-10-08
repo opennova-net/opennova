@@ -54,6 +54,13 @@ struct TerrainRow : TableRow {
 // kinds, their fields in the game's words and units, cited, and the two lists.
 const RecordTable &terrain_table();
 
+// The terrain table's field of a keyword (the terrain's or a foliage definition's field whose id, else whose file
+// token, is the keyword: a lock's and the origin's first number) and, where given, the loader its value names a file
+// by (its texture role's, -1 none): what a later file's line of the keyword sets of the terrain (an environment's
+// terrain keys, D-TERRAIN-18). Null for a keyword the table holds no field of (foliage, end, a grid row,
+// polytrn_scale).
+const FieldSchema *terrain_key_field(const std::string &key, int32_t *loader_arg = nullptr);
+
 // The lines of a terrain's text the game's readers read otherwise than the record holds (each a
 // SourceIssue on its line): a key neither reader reads, one written again (the last line wins), a grid row
 // before the width or short of it (its cells the slots an earlier line left), a row past the width's
