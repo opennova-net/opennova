@@ -73,6 +73,9 @@ void ViewportView::canvas(Workspace &workspace, const ViewportModel &model, View
 	context.device = device;
 	half_->follow(model, context, requests);
 	ViewportCanvas &ui = *canvas_;
+	// What the picture draws behind it: the editor's preference on a kind that draws it, else its own.
+	ui.set_backdrop(viewport_kind_row(kind_).backdrop ? workspace.view().project.preview_background
+	                                                  : PreviewBackground::Dark);
 	if (ui.begin(height, model.state().width, model.state().height)) {
 		const CanvasInput &in = ui.input();
 		context.width = in.width;

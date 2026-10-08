@@ -259,8 +259,8 @@ func test_a_take_sizes_nothing_while_the_last_picture_is_kept() -> void:
 	assert_eq(device.size, Vector2i(123, 77), "no picture kept: the state's size")
 
 
-## The pixels of the last picture the device over `path` rendered that differ from its background (its
-## corner's colour); -1 for no picture.
+## The pixels of the last picture the device over `path` rendered that differ from its background (each row's
+## first pixel's colour: the editor's preview background falls from top to bottom); -1 for no picture.
 func _drawn_pixels(path: String) -> int:
 	var device := _device(path)
 	if device == null:
@@ -268,9 +268,9 @@ func _drawn_pixels(path: String) -> int:
 	var image := device.get_texture().get_image()
 	if image == null or image.is_empty():
 		return -1
-	var background := image.get_pixel(0, 0)
 	var count := 0
 	for y in image.get_height():
+		var background := image.get_pixel(0, y)
 		for x in image.get_width():
 			var pixel := image.get_pixel(x, y)
 			if absf(pixel.r - background.r) + absf(pixel.g - background.g) + absf(pixel.b - background.b) > 0.06:
