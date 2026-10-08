@@ -117,7 +117,8 @@ public:
 	MenuRectF widget_rect(int index) const override;
 	void design_scale(float &sx, float &sy) const override { sx = sy = 1.0f; }
 
-	int process_mouse(float x, float y, bool button_down, bool &scroll_owned) override;
+	std::vector<MenuPumpWindow> press_mouse(float x, float y) override;
+	int process_mouse(float x, float y, bool button_down) override;
 	bool process_popup_mouse(int index, float x, float y, bool button_down) override;
 	bool process_mouse_wheel(float x, float y, int steps) override;
 	void set_cursor_state(bool visible, float x, float y) override;

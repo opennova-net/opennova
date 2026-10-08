@@ -16,6 +16,13 @@
 // its own (pressed and let go over it, it steps; let go off it, nothing; a press on the list's body
 // never clicks the arrow); a slider's shuttle drags over a button and the button is not clicked; a
 // DISABLED window is never held, so a press there slid onto a button clicks the button.
+//
+// Pinned besides (D-MNU-32, D-MNU-33): a scrollbar's arrow steps on its click, never on its press, and
+// let go off it steps nothing; its track pages on the press and captures nothing, so a button it is slid
+// onto and let go over is clicked; a press on a list's scrollbar never presses the list; a disabled
+// window laid over a button leaves the claim and the press to the button; GLB_TABLE never takes the
+// claim, so the button under it does; a STATIC laid over a button passes the press on to the button,
+// which captures, and let go over the STATIC the button is not clicked (the STATIC takes the claim).
 #include <formats/mnu/mnu.h>
 #include <runtime/menu/menu_click.h>
 #include <runtime/menu/menu_runtime.h>
@@ -39,21 +46,31 @@ namespace {
 
 // --- the latch alone -------------------------------------------------------------------------------
 
-MenuClickLatch::Claim at(int index, bool captures = false, int part = 0, bool live = true) {
+// A window under the mouse: the claim, and whether a press reaching it takes the capture.
+struct At {
 	MenuClickLatch::Claim claim;
-	claim.window = MenuPumpWindow{ index, part };
-	claim.live = live;
-	claim.captures = captures;
-	return claim;
+	bool captures = false;
+};
+
+At at(int index, bool captures = false, int part = 0, bool live = true) {
+	At out;
+	out.claim.window = MenuPumpWindow{ index, part };
+	out.claim.live = live;
+	out.captures = captures;
+	return out;
 }
 
 const auto kAll = [](const MenuPumpWindow &) { return true; };
 
-// One sample as an embedder runs it: the capture let go on a release, then the claim (the capture's
-// window where one is held: `over_capture` says whether the mouse is over it), then the latch.
-MenuPumpWindow step(MenuClickLatch &latch, MenuClickLatch::Claim claim, bool down, bool over_capture = true) {
+// One sample as an embedder runs it: on a press edge the press first, a live capturing window under it
+// taking the capture (MenuFrameCompiler::press_reach's); the capture let go on a release; then the
+// claim (the capture's window where one is held: `over_capture` says whether the mouse is over it), then
+// the latch.
+MenuPumpWindow step(MenuClickLatch &latch, const At &under, bool down, bool over_capture = true) {
+	if (down && !latch.button_down() && under.captures && under.claim.live) latch.press(under.claim.window);
 	const MenuPumpWindow capture = latch.capture_for(down);
-	if (capture.valid()) claim = over_capture ? at(capture.index, true, capture.part) : MenuClickLatch::Claim();
+	MenuClickLatch::Claim claim = under.claim;
+	if (capture.valid()) claim = over_capture ? at(capture.index, true, capture.part).claim : MenuClickLatch::Claim();
 	return latch.sample(claim, down, kAll);
 }
 
@@ -110,7 +127,7 @@ void test_latch() {
 		CHECK(latch.held(MenuPumpWindow{ 5, 0 }));
 		latch.sample(MenuClickLatch::Claim(), false, [](const MenuPumpWindow &w) { return w.index != 5; });
 		CHECK(latch.held(MenuPumpWindow{ 5, 0 }));
-		CHECK(latch.sample(at(5), false, kAll) == (MenuPumpWindow{ 5, 0 }));
+		CHECK(latch.sample(at(5).claim, false, kAll) == (MenuPumpWindow{ 5, 0 }));
 	}
 	{
 		// A window that is not live never takes the claim: never held, never captures [orig: @ 0x647a27].
@@ -150,6 +167,13 @@ void test_latch() {
 	      !menu_window_captures(mnu::WindowType::Combo) && !menu_window_captures(mnu::WindowType::Scroll) &&
 	      !menu_window_captures(mnu::WindowType::Marquee) && !menu_window_captures(mnu::WindowType::GlbTable) &&
 	      !menu_window_captures(mnu::WindowType::RadioEdit) && !menu_window_captures(mnu::WindowType::Gopher));
+	// The windows a widget makes of its own: a spin arrow and a scrollbar's button capture, a scroll
+	// window's track never [orig: CScrollWnd_HandleEvent @ 0x64d087].
+	CHECK(menu_pump_window_captures(mnu::WindowType::SpinList, 1) &&
+	      menu_pump_window_captures(mnu::WindowType::List, kMenuPumpPartScrollUp) &&
+	      menu_pump_window_captures(mnu::WindowType::Scroll, kMenuPumpPartScrollShuttle) &&
+	      !menu_pump_window_captures(mnu::WindowType::List, kMenuPumpPartScroll) &&
+	      !menu_pump_window_captures(mnu::WindowType::Scroll, 0));
 }
 
 // --- through the compiler and the runtime ----------------------------------------------------------
@@ -205,6 +229,38 @@ const char *kMenu = R"(<SCREEN>
 		</WINDOW>
 		<WINDOW type="button" name="OFF" DISABLE>
 			<POSITION><LEFT>100</LEFT><TOP>500</TOP><RIGHT>200</RIGHT><BOTTOM>540</BOTTOM></POSITION>
+		</WINDOW>
+		<WINDOW type="list" name="LONG">
+			<POSITION><LEFT>450</LEFT><TOP>300</TOP><RIGHT>600</RIGHT><BOTTOM>420</BOTTOM></POSITION>
+			<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+			<ITEMS>
+				<ITEM value="0">R0</ITEM><ITEM value="1">R1</ITEM><ITEM value="2">R2</ITEM>
+				<ITEM value="3">R3</ITEM><ITEM value="4">R4</ITEM><ITEM value="5">R5</ITEM>
+				<ITEM value="6">R6</ITEM><ITEM value="7">R7</ITEM><ITEM value="8">R8</ITEM>
+				<ITEM value="9">R9</ITEM><ITEM value="10">R10</ITEM><ITEM value="11">R11</ITEM>
+			</ITEMS>
+			<SCROLLBAR>
+				<APPEARANCE type="color" state="default">303030</APPEARANCE>
+				<POSITION><LEFT>130</LEFT><TOP>0</TOP><RIGHT>150</RIGHT><BOTTOM>120</BOTTOM></POSITION>
+			</SCROLLBAR>
+		</WINDOW>
+		<WINDOW type="button" name="UNDER">
+			<POSITION><LEFT>100</LEFT><TOP>440</TOP><RIGHT>200</RIGHT><BOTTOM>480</BOTTOM></POSITION>
+		</WINDOW>
+		<WINDOW type="button" name="COVER" DISABLE>
+			<POSITION><LEFT>100</LEFT><TOP>440</TOP><RIGHT>150</RIGHT><BOTTOM>480</BOTTOM></POSITION>
+		</WINDOW>
+		<WINDOW type="button" name="C">
+			<POSITION><LEFT>300</LEFT><TOP>440</TOP><RIGHT>400</RIGHT><BOTTOM>480</BOTTOM></POSITION>
+		</WINDOW>
+		<WINDOW type="glb_table" name="GLB">
+			<POSITION><LEFT>300</LEFT><TOP>440</TOP><RIGHT>350</RIGHT><BOTTOM>480</BOTTOM></POSITION>
+		</WINDOW>
+		<WINDOW type="button" name="E">
+			<POSITION><LEFT>620</LEFT><TOP>440</TOP><RIGHT>720</RIGHT><BOTTOM>480</BOTTOM></POSITION>
+		</WINDOW>
+		<WINDOW type="static" name="OVER">
+			<POSITION><LEFT>620</LEFT><TOP>440</TOP><RIGHT>670</RIGHT><BOTTOM>480</BOTTOM></POSITION>
 		</WINDOW>
 	</WINDOW>
 </SCREEN>
@@ -431,6 +487,119 @@ void test_disabled_window_is_never_held() {
 	CHECK(run.activated("B") == 1);
 }
 
+// A scrollbar's arrow is a CButtonWnd child that captures its press and steps on its click; its track
+// (the scroll window's own press) pages on the press and captures nothing (D-MNU-32) [orig:
+// CScrollWnd_HandleEvent @ 0x64d2cd / 0x64d314 (SCROLLWND_UP / _DOWN on 0x3000001), @ 0x64d087..0x64d10e
+// (the track)]. A press on a list's scrollbar never reaches the list (its scroll window's rect keeps the
+// list from its own press, CWnd_DispatchMouseEventToChildren @ 0x6479b3).
+void test_scrollbar_arrows_and_track() {
+	Run run;
+	CHECK(run.open());
+	const int list = run.rt.widget_id("LONG");
+	const int index = run.rt.frame_index(list);
+	auto first_row = [&] {
+		const MenuWidgetState *r = find_frame_widget(run.frame.state(), index);
+		return r != nullptr ? r->scroll_row : 0;
+	};
+	// DOWN (580..600 x 400..420): nothing on the press; let go over it, one row.
+	run.move(590, 410, false);
+	run.events.clear();
+	run.move(590, 410, true);
+	CHECK(first_row() == 0);
+	run.move(590, 410, false);
+	CHECK(first_row() == 1);
+	// Pressed, slid off onto B and let go: nothing steps and B is not clicked (the arrow captured).
+	run.move(590, 410, true);
+	run.move(kBX, kBY, true);
+	run.move(kBX, kBY, false);
+	CHECK(first_row() == 1 && run.activated("B") == 0);
+	// Off and back over it before the release: its click.
+	run.move(590, 410, true);
+	run.move(kBX, kBY, true);
+	run.move(590, 410, true);
+	run.move(590, 410, false);
+	CHECK(first_row() == 2);
+	// UP (580..600 x 300..320): its click steps back.
+	run.move(590, 310, true);
+	run.move(590, 310, false);
+	CHECK(first_row() == 1);
+	// The track below the shuttle pages on the press (six rows show: a page of five, clamped to the six
+	// the rows leave) and holds nothing: slid onto B and let go there, B's click.
+	run.move(590, 395, false);
+	run.events.clear();
+	run.move(590, 395, true);
+	CHECK(first_row() == 6);
+	run.move(kBX, kBY, true);
+	CHECK(run.pressed("B"));
+	run.move(kBX, kBY, false);
+	CHECK(run.activated("B") == 1);
+	// Nothing of it reached the list: no activation, no row picked.
+	CHECK(run.activated("LONG") == 0);
+	for (const MenuEvent &e : run.events) CHECK(!(e.kind == MenuEvent::Kind::ValueChanged && e.text == "LONG"));
+	// A SCROLL widget's arrows the same: VOLUME's DOWN (680..700) steps its value on the click.
+	const int volume = run.rt.widget_id("VOLUME");
+	run.rt.set_widget_scroll_range(volume, 0, 100, 10, 0);
+	MenuScrollRangeState range;
+	run.move(690, 210, true);
+	CHECK(run.rt.get_widget_scroll_range(volume, range) && range.value == 0);
+	run.move(690, 210, false);
+	CHECK(run.rt.get_widget_scroll_range(volume, range) && range.value == 1);
+	// Its track past the shuttle pages on the press: value + page.
+	run.move(650, 210, true);
+	CHECK(run.rt.get_widget_scroll_range(volume, range) && range.value == 11);
+	run.move(650, 210, false);
+}
+
+// A disabled window never takes the claim and never takes the press: a button under it does both, so
+// pressed and let go where the disabled one covers it, the button is clicked (D-MNU-33) [orig:
+// CWnd_IsVisibleInHierarchy @ 0x646290, the pump's gate @ 0x647a27; CWnd_DispatchMouseEventToChildren
+// @ 0x647956, the enabled test].
+void test_disabled_window_over_a_button() {
+	Run run;
+	CHECK(run.open());
+	run.move(120, 460, false);
+	CHECK(run.hovered("UNDER") && !run.hovered("COVER"));
+	run.events.clear();
+	run.move(120, 460, true);
+	CHECK(run.pressed("UNDER"));
+	run.move(120, 460, false);
+	CHECK(run.activated("UNDER") == 1 && run.activated("COVER") == 0);
+}
+
+// GLB_TABLE's pump slot pumps its children alone: it never takes the claim, so the button under it does
+// (D-MNU-33) [orig: update_table_cell_values @ 0x65e0b0].
+void test_glb_table_never_claims() {
+	Run run;
+	CHECK(run.open());
+	run.move(320, 460, false);
+	CHECK(run.hovered("C"));
+	run.events.clear();
+	run.move(320, 460, true);
+	run.move(320, 460, false);
+	CHECK(run.activated("C") == 1);
+}
+
+// The press reaches every window under the point front to back until one captures: a STATIC laid over a
+// button passes it on, and the button captures; let go over the STATIC, the STATIC takes the claim and
+// the button is not clicked; slid onto the button's own part, it is (D-MNU-33) [orig:
+// CWnd_DispatchMouseEventToChildren @ 0x6479a1..0x6479db].
+void test_press_reaches_under_a_static() {
+	Run run;
+	CHECK(run.open());
+	run.move(640, 460, false);
+	CHECK(!run.hovered("E"));
+	run.events.clear();
+	run.move(640, 460, true);
+	// The button holds the capture: it takes the claim while its own rect holds the point.
+	CHECK(run.pressed("E"));
+	run.move(640, 460, false);
+	CHECK(run.activated("E") == 0);
+	run.move(640, 460, true);
+	run.move(700, 460, true);
+	run.move(700, 460, false);
+	CHECK(run.activated("E") == 1);
+}
+
 } // namespace
 
 int main() {
@@ -442,6 +611,10 @@ int main() {
 	test_spin_arrows();
 	test_slider_drag();
 	test_disabled_window_is_never_held();
+	test_scrollbar_arrows_and_track();
+	test_disabled_window_over_a_button();
+	test_glb_table_never_claims();
+	test_press_reaches_under_a_static();
 	if (failures) {
 		std::printf("menu_click: %d failure(s)\n", failures);
 		return 1;

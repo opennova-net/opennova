@@ -48,6 +48,9 @@ struct FakeFrame : MenuFrameSeam {
 	std::map<int, std::string> mnemonics;
 	std::set<int> disabled;
 	int claim = -1;
+	// The press's reach when set; else the claim's own window, a scrollbar's track when
+	// `scroll_owned` (the press reached the scrollbar, never the widget).
+	std::vector<MenuPumpWindow> reach;
 	bool scroll_owned = false;
 	bool popup_mouse = false;
 	bool wheel = true;
@@ -162,10 +165,12 @@ struct FakeFrame : MenuFrameSeam {
 		sx = 2.0f;
 		sy = 2.0f;
 	}
-	int process_mouse(float, float, bool, bool &owned) override {
-		owned = scroll_owned;
-		return claim;
+	std::vector<MenuPumpWindow> press_mouse(float, float) override {
+		if (!reach.empty()) return reach;
+		if (claim < 0) return {};
+		return { MenuPumpWindow{ claim, scroll_owned ? kMenuPumpPartScroll : 0 } };
 	}
+	int process_mouse(float, float, bool) override { return claim; }
 	bool process_popup_mouse(int, float, float, bool) override { return popup_mouse; }
 	bool process_mouse_wheel(float, float, int) override { return wheel; }
 	void set_cursor_state(bool, float, float) override {}
@@ -929,6 +934,15 @@ void test_mouse() {
 	CHECK(rec.count(MenuEvent::Kind::ValueChanged) == 0);
 	rt.process_mouse(5, 5, false, 9000);
 	frame.scroll_owned = false;
+	// A press a root behind the capturing one hands the captured list again is the same message: the
+	// list picks again, in the first press's form, never a double click [orig:
+	// CWnd_DispatchMouseEventToChildren @ 0x647926..0x64793f].
+	rec.events.clear();
+	frame.reach = { MenuPumpWindow{ 11, 0 }, MenuPumpWindow{ 11, 0 } };
+	rt.process_mouse(5, 5, true, 12000);
+	CHECK(rec.count(MenuEvent::Kind::WidgetActivated) == 2 && rec.count(MenuEvent::Kind::ListActivated) == 0);
+	rt.process_mouse(5, 5, false, 12000);
+	frame.reach.clear();
 	// MULTISELECT toggles the pressed row in the set, no modifier needed.
 	rt.set_selected_set(13, {});
 	frame.list_row = 0;
