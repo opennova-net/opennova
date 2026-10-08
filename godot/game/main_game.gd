@@ -134,9 +134,9 @@ func _init() -> void:
 
 func _on_player_options_changed(state: PlayerOptions.State) -> void:
 	# update() applied the device-global audio once already; only the running
-	# Simulation's mouse settings are this listener's to push.
+	# Simulation's view settings are this listener's to push.
 	var sim: Simulation = _world.get_sim() if _world != null else null
-	_player_options.apply_mouse(sim)
+	_player_options.apply_view(sim)
 	# The world copies the object detail at its next mission start.
 	if _world != null:
 		_world.set_object_polydetail(state.object_polydetail)
@@ -815,6 +815,7 @@ func _wire_shell() -> void:
 	_menu_shell.resume_requested.connect(resume)
 	_menu_shell.novaworld_requested.connect(_net.open_novaworld_panel)
 	_menu_shell.game_reloaded.connect(_on_game_reloaded)
+	_menu_shell.ingame_controls_accepted.connect(_on_ingame_controls_accepted)
 	_bundled_companion = BundledMenuCompanion.new()
 	_bundled_companion.play_retail_requested.connect(play_retail)
 	_bundled_companion.change_folder_requested.connect(request_retail_dir)
@@ -839,6 +840,19 @@ func _wire_shell() -> void:
 # uses (refresh_local_profile_for_mount hands it to PLAYER_INFO).
 func _on_game_reloaded() -> void:
 	refresh_local_profile_for_mount()
+
+
+# The in-game options Accept wrote the dialog into the current profile record:
+# the record's binding table and ENABLE_JOYSTICK word onto the live bindings,
+# the mouse look's live words into the running session, then the save, as the
+# original's Accept does (engine menu::OptionsScreen::ApplyControls carries
+# the witness).
+func _on_ingame_controls_accepted() -> void:
+	ControlsBindings.apply_profile(PlayerProfile.store())
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	if sim != null:
+		sim.apply_ingame_options(PlayerProfile.store())
+	PlayerProfile.save()
 
 
 # PLAYER_INFO ACCEPT writes the name and both side records into the current
@@ -1092,6 +1106,11 @@ func _begin_world_load() -> void:
 	# the round end writes back, and its ten macros, the chat presets
 	# (engine: runtime/profile/player_profiles.h).
 	PlayerProfile.store().begin_session()
+	# Every session start's controls apply: the record's binding table onto the
+	# live bindings and its ENABLE_JOYSTICK word into the joystick gate, before
+	# the mission loads (engine profile::apply_controls carries the witness). The
+	# session's own words follow at its load (Simulation.use_player_profile).
+	ControlsBindings.apply_profile(PlayerProfile.store())
 	if _hud_presenter != null:
 		_hud_presenter.set_chat_presets(PlayerProfile.store().get_macros())
 	# A mission start from the menu leaves it: the menu keeps the screen it was

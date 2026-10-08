@@ -657,7 +657,7 @@ static void pump_unoccupied_weapon_slot(World &world, Entity &row, uint32_t fram
     inputs.owner_present = false;
     inputs.is_local = false;
     inputs.is_authority = world.ai.is_authority;
-    inputs.auto_reload = true;
+    inputs.auto_reload = world.rules.auto_reload; // [orig: g_AutoReloadEnabled @ 0x24D2118]
     inputs.current_tick = static_cast<int32_t>(frame_tick);
     weapon_fire_environment_inputs(world, row, inputs);
     WeaponFsmEvents events;

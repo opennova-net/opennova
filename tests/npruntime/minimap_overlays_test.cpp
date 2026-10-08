@@ -200,6 +200,13 @@ void test_player_slot_table_feeds_loop_one() {
     inmatch::build_minimap_overlays(in, out);
     CHECK(out.zone_score_delta == 15);
     CHECK(!out.own_revive_profile);
+    // The own revive leg reads the profile's inverse OPTIONS_AUTOMEDIC word:
+    // any nonzero word (auto-medic off) raises it [orig: @0x5a4b4f].
+    in.own_auto_medic_off = 1;
+    inmatch::build_minimap_overlays(in, out);
+    CHECK(out.own_revive_profile);
+    in.own_auto_medic_off = 0;
+    inmatch::build_minimap_overlays(in, out);
     CHECK(out.player_slots.size() == 2);
     if (out.player_slots.size() == 2) {
         const hud::HudMinimapPlayerSlot &own = out.player_slots[0];

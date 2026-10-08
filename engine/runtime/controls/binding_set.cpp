@@ -295,6 +295,8 @@ uint8_t joystick_pov_mask(int32_t angle) {
 bool BindingSet::pressed_joystick(int index,
     const std::function<bool(int)> &button_down,
     const std::array<int32_t, 4> &pov_angles, bool dead) const {
+  // The ENABLE_JOYSTICK gate: see the header [orig: @0x499481].
+  if (!joystick_enabled_) return false;
   const BindingRecord *r = record(index);
   std::size_t count = 0;
   const ActionDef *cat = catalog(&count);

@@ -1170,7 +1170,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			weapon_fsm_reload_allowed(w.def, active_slot);
 	in.is_local = true;
 	in.is_authority = io.is_authority; // the joiner defers the refill to the §5.58 round-trip
-	in.auto_reload = true;             // [orig: g_AutoReloadEnabled @ 0x24D2118, default on]
+	in.auto_reload = world.rules.auto_reload; // [orig: g_AutoReloadEnabled @ 0x24D2118]
 	// The weapon FSM consumes the promoted/settled scope bit, not the raw
 	// requested-engagement bit. Player_UpdatePerFrame runs before the weapon
 	// pump in retail and only promotes g_WeaponScopeActive after the ease has

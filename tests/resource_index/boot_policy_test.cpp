@@ -52,6 +52,11 @@ void test_flags_parse_case_insensitively_with_values() {
     CHECK(parse_launch_flags({"game.exe", "/NOHUD", "/d"}).no_hud);
     CHECK(!parse_launch_flags({"game.exe", "/NOHUDX"}).no_hud);
     CHECK(!parse_launch_flags({"game.exe"}).no_hud);
+    // /noreload, the same whole-token match [orig: _stricmp(token,
+    // "/noreload") @0x4A76DD].
+    CHECK(parse_launch_flags({"game.exe", "/NoReload"}).no_reload);
+    CHECK(!parse_launch_flags({"game.exe", "/noreloads"}).no_reload);
+    CHECK(!parse_launch_flags({"game.exe"}).no_reload);
 }
 
 // `/mod` is `/exp`: one arm of the game's walk, the value token stepped over,

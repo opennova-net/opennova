@@ -638,6 +638,17 @@ struct SessionRules {
     bool last_tick_of_batch = true;
     bool ignore_weapon_ammo_cost = false; // dword_24C1930 bit 0x100
     bool cease_fire = false; // g_InCeaseFire @ 0x24C196C
+    // The player profile's auto-reload word as the mission start's session copy
+    // leaves it (profile::session_input): one process global the weapon action
+    // handlers read for EVERY slot they run, the local player's, the AI's and
+    // the remote players' an authority pumps alike — an empty magazine's IDLE
+    // queues the reload only with it set, and the last round's RECOIL queues it
+    // only with it set. Default on, a fresh record's +1524 = 1.
+    // [orig: g_autoReloadEnabled @0x24D2118 <- Game_ApplySessionSettingsToGlobals
+    //  @0x551a40 (forced 0 by `/noreload` @0x551a48); readers WeaponAction_Idle
+    //  @0x5429a6 (no owner test) and WeaponAction_Recoil @0x543013 (the local
+    //  player's arm)]
+    bool auto_reload = true;
     // Projectile_UpdatePhysics clamps the radius to 0.1u only for an
     // authoritative multiplayer FatBullets trace owned by a remote player.
     // These explicit host-fed gates keep that option out of ordinary/SP rays.

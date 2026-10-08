@@ -1013,14 +1013,21 @@ int check_C_25_reload_request() {
 // C2S 0x03 — inverse Auto Medic preference: zero enables automatic requests.
 int check_C_03_auto_medic_preference() {
 	AutoMedicPreference input;
-	input.enabled = false;
+	input.disabled = 1;
 	const std::vector<uint8_t> wire = encode_auto_medic_preference(input);
 	EXPECT(wire == std::vector<uint8_t>({1, 0, 0, 0}));
 	AutoMedicPreference output;
 	size_t consumed = 0;
 	EXPECT(decode_auto_medic_preference(
 			wire.data(), wire.size(), output, consumed));
-	EXPECT(consumed == 4 && !output.enabled);
+	EXPECT(consumed == 4 && !output.enabled() && output.disabled == 1);
+	// The profile word rides raw: any nonzero value is manual, and the
+	// codec keeps it [orig: NetPacket_WriteAutoMedicPreference @0x42A422].
+	input.disabled = 7;
+	const std::vector<uint8_t> raw = encode_auto_medic_preference(input);
+	EXPECT(raw == std::vector<uint8_t>({7, 0, 0, 0}));
+	EXPECT(decode_auto_medic_preference(raw.data(), raw.size(), output, consumed));
+	EXPECT(!output.enabled() && output.disabled == 7);
 	cover('C', 0x03);
 	return 0;
 }
