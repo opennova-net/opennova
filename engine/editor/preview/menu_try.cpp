@@ -91,7 +91,7 @@ MenuTry::MenuTry() {
 		return configure_(screen, compiler);
 	});
 	// The frame's click and scroll reach the runtime as the game's frame signals them (MenuDriver).
-	frame_.set_clicked([this](int index) { runtime_.on_widget_clicked(index); });
+	frame_.set_clicked([this](int index, int part) { runtime_.on_widget_clicked(index, part); });
 	frame_.set_scrolled([this](int index, int value) { runtime_.on_frame_scroll_value(index, value); });
 	runtime_.set_frame(&frame_);
 	runtime_.set_sink([this](const menu::MenuEvent &event) { on_event_(event); });
