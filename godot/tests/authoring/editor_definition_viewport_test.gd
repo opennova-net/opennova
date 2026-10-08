@@ -9,6 +9,7 @@ extends GutTest
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const PreviewBackgroundChecks := preload("res://tests/authoring/preview_background_checks.gd")
 const ITEMS := "defs/items.def"
 const ARMORY := "res://../fixtures/threedi/synth/armory.3di"
 const CRATE := "res://../fixtures/threedi/synth/crate.3di"
@@ -456,3 +457,16 @@ func test_an_ammo_plays_its_impact_rows() -> void:
 		if String(effect.get("source", "")) == "impact":
 			impact_spawns += 1
 	assert_gt(impact_spawns, 0, "the impact's effect spawned")
+
+
+## The editor's Preview background behind a definition's record: Grey as it first draws, then each of the four as
+## the editor sets it, live (preview_background_checks.gd).
+func test_the_preview_background_draws_behind_a_record() -> void:
+	if _app == null:
+		return
+	_new_project()
+	assert_true(_seam.open_document(ITEMS), "the item table opens")
+	assert_true(_seam.select_record(_seam.get_row_id(0)), "its first record selected")
+	var state := await _await_built()
+	assert_eq(String(state.get("status", "")), "ready", str(state.get("message", "")))
+	PreviewBackgroundChecks.check_each(self, _app, _seam, ITEMS, "definition")
