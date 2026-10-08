@@ -25,6 +25,16 @@ public:
 	// How many times its ticks were sought (seek_ticks): a clip's sounds fire only for the ticks the clock
 	// runs through, never for a seek (a scrub, a step, a clip newly chosen).
 	uint64_t tick_seeks() const { return tick_seeks_; }
+	// Where a reader of its runs (a viewport's sounds) hears the run since its last read from: `cursor`, the tick
+	// it read last (-1 none yet: from the clock's next run on); or, when the clock was sought since the `seen`
+	// seeks it took, the tick the last seek put it on, so nothing fires over what a seek passed and the run from
+	// there is heard whole however many ticks its first frame ran (a Play from the clip's start hears the start).
+	// Takes the seeks seen.
+	int32_t heard_from(int32_t cursor, uint64_t &seen) const {
+		if (seen == tick_seeks_) return cursor;
+		seen = tick_seeks_;
+		return sought_ticks_;
+	}
 
 	// `seconds` of the Shell's frames pass: while it plays, `seconds * rate` of the clock.
 	void advance(double seconds) {
@@ -52,6 +62,7 @@ public:
 		ticks_ = ticks > 0 ? ticks : 0;
 		tick_carry_ = 0.0;
 		++tick_seeks_;
+		sought_ticks_ = ticks_;
 	}
 
 private:
@@ -62,6 +73,7 @@ private:
 	int32_t ticks_ = 0;
 	double tick_carry_ = 0.0;
 	uint64_t tick_seeks_ = 0;
+	int32_t sought_ticks_ = 0; // where the last seek put its ticks
 };
 
 } // namespace opennova::editor
