@@ -133,6 +133,10 @@ bool draw_environment_inspector(Workspace &workspace, const Document &document, 
 			water.editable = true;
 		}
 		jump_line(workspace, water, "Its water plane: " + water_words(use), "w" + tag);
+		// The terrain keys of this file its terrain takes (the game's terrain reader reads its lines too).
+		for (const TrnLaterLine &line : use.terrain_keys)
+			note("Its terrain's " + line.key + " " + line.value + " from this file (line " + std::to_string(line.line) +
+			     "), over " + (use.terrain_file.empty() ? use.terrain : base_name(use.terrain_file)) + "'s");
 		ImGui::Unindent();
 	}
 	ImGui::Separator();
