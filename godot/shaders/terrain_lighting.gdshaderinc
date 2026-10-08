@@ -24,17 +24,22 @@
 // texel bytes enter the ps.1.4 math as-is. The gamma-space convention
 // (D-RMAT-7) lives in color.gdshaderinc; consumers encode the final
 // color once at their ALBEDO write.
-// The device-global texfilter mode applies to every stage whose texture
-// carries the mip-filter flag bit 3 (retail CGfxDevice_ApplyRenderStates
-// per-stage loop @ 0x67e3b5..0x67e50e; CGfxShader_ApplyTextureStages @ 0x68084c..
-// 0x680870), and the reference machine runs the anisotropic mode, so every
-// detail input samples anisotropically. The DBlendmap quadrants are
-// box-mipped in retail (created with flags 0x100001, retail
-// PolyTrn_InitTextures @ 0x60b2c9).
+// The device's texfilter mode applies to every stage whose texture carries
+// creation flag 0x8 (retail CGfxDevice_ApplyRenderStates per-stage loop
+// @ 0x67e3b5..0x67e50e; CGfxShader_ApplyTextureStages @ 0x680856..0x680870),
+// and the detail family is the one created with it (PolyTrn_InitTextures
+// @ 0x60aba0): the detail inputs follow game.cfg's texfilter_level through
+// opennova_texfilter_device and the viewport's anisotropy
+// (texture_filter.gdshaderinc; engine renderer/texture_filter.h,
+// TextureStage::TerrainDetail). The DBlendmap quadrants are box-mipped and
+// created with flags 0x100001, no 0x8 (retail PolyTrn_InitTextures
+// @ 0x60b515..0x60b51c), so they sample bilinear with point mips at any level
+// (TextureStage::TerrainBlendMap).
+#include "res://shaders/texture_filter.gdshaderinc"
 uniform sampler2D u_detail_c1 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D u_detail_c2 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D u_detail_c3 : filter_linear_mipmap_anisotropic, repeat_enable;
-uniform sampler2D u_blendmap : filter_linear_mipmap_anisotropic, repeat_disable;
+uniform sampler2D u_blendmap : filter_linear_mipmap, repeat_disable;
 // The ps.1.4 splat's stage-3 dp3 input: the authored SECOND detail pair at
 // its own density, dp3'd with the normalized blend — a blend-weighted
 // scalar modulation x2. It is NOT a normal map; the generated coefficient
@@ -133,6 +138,31 @@ int terrain_point_light_count(float slot) {
 	return int(texelFetch(u_terrain_light_rows, ivec2(1, int(slot + 0.5)), 0).a + 0.5);
 }
 
+vec4 sample_retail_detail_mips(sampler2D source, vec2 uv) {
+	// The device mode (texfilter_level + 1) gives a 0x8 stage MIN LINEAR /
+	// MIP POINT (mode 1), trilinear (mode 2), or MIN ANISOTROPIC with
+	// MAXANISOTROPY 2 (mode 3) or the device's cap (mode 4)
+	// [orig: Terrain_RenderSkyboxPass @ 0x610be8..0x610c1d; per-stage filter
+	// select @ 0x67e37d..0x67e45b]. Bilinear on the nearest level is the
+	// shader's (opennova_texfilter_device 0); the hardware sampler does the
+	// rest, its anisotropy the viewport's. The explicit longest-gradient scale
+	// is a conservative terminal guard: it keeps Godot's synthetic 2x2/1x1
+	// tail unselectable, but can bias a grazing anisotropic footprint sharper
+	// than the reference device's minor-axis/maximum-anisotropy selection.
+	vec2 dimensions = vec2(textureSize(source, 0));
+	vec2 dx = dFdx(uv);
+	vec2 dy = dFdy(uv);
+	float footprint = max(length(dx * dimensions), length(dy * dimensions));
+	float terminal_lod = max(floor(log2(max(min(dimensions.x, dimensions.y), 4.0))) - 2.0, 0.0);
+	if (opennova_texfilter_device == 0) {
+		return textureLod(source, uv,
+				retail_point_mip_level(log2(max(footprint, 1.0e-8)), terminal_lod));
+	}
+	float requested_lod = max(log2(max(footprint, 1.0)), 0.0);
+	float gradient_scale = exp2(min(terminal_lod - requested_lod, 0.0));
+	return textureGrad(source, uv, dx * gradient_scale, dy * gradient_scale);
+}
+
 vec3 terrain_point_light_pool(vec3 world_pos, vec2 detail_uv, float slot) {
 	vec3 sum = vec3(0.0);
 	if (!u_terrain_light_enabled) {
@@ -140,8 +170,11 @@ vec3 terrain_point_light_pool(vec3 world_pos, vec2 detail_uv, float slot) {
 	}
 	int row = int(slot + 0.5);
 	int count = int(texelFetch(u_terrain_light_rows, ivec2(1, row), 0).a + 0.5);
-	// t1_bx2: the coefficient texel is the batch's, shared by every light.
-	vec3 normal = texture(u_terrain_light_normal, detail_uv).rgb * 2.0 - 1.0;
+	// t1_bx2: the coefficient texel is the batch's, shared by every light. The
+	// coefficient map carries the detail family's flag 0x8
+	// [orig: PolyTrn_InitTextures @ 0x60b14d -> Texture_GenerateNormalMap
+	// @ 0x58c427], so it samples under the device mode like the details.
+	vec3 normal = sample_retail_detail_mips(u_terrain_light_normal, detail_uv).rgb * 2.0 - 1.0;
 	for (int k = 0; k < TERRAIN_LIGHT_ROWS_PER_PATCH; k++) {
 		if (k >= count) {
 			break;
@@ -178,24 +211,18 @@ vec2 retail_detail_uv_from_atlas(vec2 atlas_uv, float density) {
 	return atlas_uv * (density * 2.0);
 }
 
-vec4 sample_retail_detail_mips(sampler2D source, vec2 uv) {
-	// The witnessed device supports texfilter modes 0-4; modes 3/4 select
-	// MINFILTER=ANISOTROPIC with MAXANISOTROPY [orig: per-stage filter select
-	// @ 0x67e38a..0x67e45b; device init @ 0x679c28..0x679c9c]. The retail
-	// reference captures show the grain/textured-slope result of anisotropic
-	// ground sampling, which pins the sampler mode but not an exact host LOD
-	// reconstruction. The explicit longest-gradient scale below is a
-	// conservative terminal guard: it keeps Godot's synthetic 2x2/1x1 tail
-	// unselectable, but can bias a grazing anisotropic footprint sharper than
-	// the reference device's minor-axis/maximum-anisotropy selection.
-	vec2 dimensions = vec2(textureSize(source, 0));
-	vec2 dx = dFdx(uv);
-	vec2 dy = dFdy(uv);
-	float footprint = max(length(dx * dimensions), length(dy * dimensions));
-	float requested_lod = max(log2(max(footprint, 1.0)), 0.0);
-	float terminal_lod = max(floor(log2(max(min(dimensions.x, dimensions.y), 4.0))) - 2.0, 0.0);
-	float gradient_scale = exp2(min(terminal_lod - requested_lod, 0.0));
-	return textureGrad(source, uv, dx * gradient_scale, dy * gradient_scale);
+// The DBlendmap quadrant level the device samples: bilinear on the nearest
+// level of the quadrant's own chain, which stops at 4x4 (flags 0x100001, no
+// 0x8 [orig: PolyTrn_InitTextures @ 0x60b2c9; GTexture_CreateFromPixelData_0
+// @ 0x6877bc..0x6877d8]). The atlas holds the four quadrants side by side, so
+// its level of detail is a quadrant's and its last retail level is one above
+// the atlas's own 4x4. The level comes from the unclamped coordinate, so the
+// quadrant-edge clamp never pulls a border texel to level 0.
+vec4 sample_retail_blendmap(vec2 uv, vec2 lod_uv) {
+	vec2 dimensions = vec2(textureSize(u_blendmap, 0));
+	float terminal_lod = max(floor(log2(max(min(dimensions.x, dimensions.y), 8.0))) - 3.0, 0.0);
+	float lod = retail_isotropic_lod(lod_uv, dimensions);
+	return textureLod(u_blendmap, uv, retail_point_mip_level(lod, terminal_lod));
 }
 
 vec2 clamp_retail_quadrant_uv(vec2 uv, vec2 quadrant, ivec2 dimensions) {
@@ -217,7 +244,7 @@ vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
 	// PolyTrn_InitTextures @ 0x60AAA0, stage 2/3 binds @ 0x60C400..0x60C411]
 	vec2 blend_uv = clamp_retail_quadrant_uv(
 		blendmap_uv, quadrant, textureSize(u_blendmap, 0));
-	vec3 blend = texture(u_blendmap, blend_uv).rgb;
+	vec3 blend = sample_retail_blendmap(blend_uv, blendmap_uv).rgb;
 	vec3 c1 = sample_retail_detail_mips(u_detail_c1, detail_uv).rgb;
 	vec3 c2 = sample_retail_detail_mips(u_detail_c2, detail_uv).rgb;
 	vec3 c3 = sample_retail_detail_mips(u_detail_c3, detail_uv).rgb;

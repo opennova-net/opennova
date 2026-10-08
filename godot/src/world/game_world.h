@@ -20,6 +20,7 @@
 #include <cstdint>
 
 #include <runtime/renderer/object_lod.h> // the object detail rungs
+#include <runtime/renderer/texture_filter.h> // the texfilter rungs
 
 #include "audio/mission_audio.h"
 #include "devtools/frame_stats.h"
@@ -191,6 +192,25 @@ public:
 	int get_object_detail() const { return object_detail_; }
 	static int object_detail_fresh_profile();
 	static int clamp_object_detail(int p_level);
+	// game.cfg's texfilter_level (engine: renderer/texture_filter.h): the shell
+	// hands over its persisted options word whenever it changes. The model
+	// effects' filter follows it at once (retail reloads every effect at the
+	// Options' Accept); each mission start copies it into the session level
+	// whose device mode (level + 1) the terrain detail family samples at, so
+	// that half reaches the draw at the next mission.
+	void set_texfilter_level(int p_level);
+	int get_texfilter_level() const { return texfilter_level_; }
+	int get_session_texfilter_level() const { return session_texfilter_level_; }
+	// The state the world publishes: the device mode (session level + 1) and
+	// the effects' mode (from the options word), and the shader filter codes
+	// the device leg last published for the terrain detail family and the
+	// model stages (render/texture_filter_device).
+	int get_texfilter_device_mode() const;
+	int get_texfilter_effect_mode() const;
+	static int get_texfilter_device_filter();
+	static int get_texfilter_effect_filter();
+	static int texfilter_level_fresh_profile();
+	static int clamp_texfilter_level(int p_level);
 
 	// --- the load entries ------------------------------------------------------
 	// Load the world from `dir`, or from the persisted resource directory when
@@ -795,6 +815,12 @@ private:
 	// the LOD frames and the occlusion frame's death pieces read.
 	int object_polydetail_ = opennova::renderer::kObjectLodDetailFreshProfile;
 	int object_detail_ = opennova::renderer::kObjectLodDetailFreshProfile;
+	// The options' texfilter_level (set_texfilter_level) and the session's copy
+	// of it taken at each mission start; publish_texfilter_state hands both to
+	// the device leg (render/texture_filter_device).
+	int texfilter_level_ = opennova::renderer::kTexFilterLevelFreshProfile;
+	int session_texfilter_level_ = opennova::renderer::kTexFilterLevelFreshProfile;
+	void publish_texfilter_state();
 	Color idle_frame_clear_color_ = Color(0, 0, 0);
 	// A shell-injected resource root (main_game hands its boot mount over;
 	// tests hand fixture roots). When set, the load_* entries skip the

@@ -133,6 +133,7 @@ add_library(${TARGET_NAME} SHARED
     render/scene_overlay_compositor.cpp
     render/slot_capture_adapter.cpp
     render/target_projection_xr_interface.cpp
+    render/texture_filter_device.cpp
     render/tracer_ribbon_surfaces.cpp
     object/entity_index.cpp
     object/entity_ref.cpp

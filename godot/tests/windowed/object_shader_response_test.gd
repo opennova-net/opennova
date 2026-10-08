@@ -7,7 +7,9 @@ extends GutTest
 # - the SELFLUM emissive saturates SelfLumColor x gain before MODULATE2X;
 # - fixed-function lighting sums and saturates per vertex (Gouraud);
 # - the armed reflection view draws _FFP.fx TBoringFFPClip instead of NORMAL;
-# - the object sampler is a 2x anisotropic minifier.
+# - the object sampler follows the effects' filter mode (D-RMAT-22): the 2x
+#   anisotropic minifier from game.cfg's texfilter_level 2, trilinear at 1,
+#   bilinear on the nearest level at 0.
 
 const GLOBALS := [
 	"opennova_light_block_dir", "opennova_light_block_dir_color",
@@ -17,7 +19,7 @@ const GLOBALS := [
 	"opennova_fog_end", "opennova_fog_type",
 	"opennova_water_active", "opennova_water_height",
 	"opennova_water_mirror_fog_color", "opennova_water_mirror_fog_range",
-	"opennova_environment_cube_ready",
+	"opennova_environment_cube_ready", "opennova_texfilter_effect",
 ]
 const EYE := Vector3(0.0, 0.0, 5.0)
 
@@ -35,6 +37,8 @@ func before_each() -> void:
 	_reflection_view = false
 	_clip_armed = true
 	_global("opennova_environment_cube_ready", false)
+	# The ANISO effects (texfilter_level 2 and 3) unless a case says otherwise.
+	_global("opennova_texfilter_effect", 2)
 	_global("opennova_light_block_gain", Vector3.ONE)
 	_global("opennova_light_block_dir", Vector3(0.0, 0.0, -1.0))
 	_global("opennova_light_block_dir_color", Vector3.ZERO)
@@ -357,6 +361,34 @@ func test_object_sampler_is_a_2x_anisotropic_minifier() -> void:
 	var pixel: Color = await _centre(viewport)
 	assert_gt(pixel.r, 0.8, "the 2:1 footprint samples level 0: %s" % pixel)
 	assert_lt(pixel.g, 0.2, "and not the isotropic level 1: %s" % pixel)
+
+
+func test_object_sampler_follows_the_effects_filter_mode() -> void:
+	# A tilt of acos(2/3) packs 1.5 texels into each pixel vertically: the
+	# isotropic level of detail is log2(1.5) = 0.58. The ANISO minifier
+	# covers the 1.5:1 footprint at level 0 (red); TRILINEAR blends level 0
+	# into level 1 (green) by 0.58; the bilinear block's MIP POINT takes the
+	# nearest level, 1. [orig: _BaseInc.fx sampLinearWrap2D under ANISO /
+	# TRILINEAR / neither; HLSLEffect_LoadFromFile @ 0x5ae6b9..0x5ae6e5]
+	if not _rd_available():
+		pending("RenderingDevice unavailable under this Godot renderer")
+		return
+	var tilt := rad_to_deg(acos(2.0 / 3.0))
+	var expected := {
+		2: Color(1.0, 0.0, 0.0),
+		1: Color(0.415, 0.585, 0.0),
+		0: Color(0.0, 1.0, 0.0),
+	}
+	for code: int in [2, 1, 0]:
+		_global("opennova_texfilter_effect", code)
+		var viewport := _view()
+		var quad := _quad(_material("fixed/opaque_double_sided", _mip_level_texture()))
+		quad.rotation_degrees = Vector3(tilt, 0.0, 0.0)
+		viewport.add_child(quad)
+		var pixel: Color = await _centre(viewport)
+		var want: Color = expected[code]
+		assert_almost_eq(pixel.r, want.r, 0.08, "filter code %d red: %s" % [code, pixel])
+		assert_almost_eq(pixel.g, want.g, 0.08, "filter code %d green: %s" % [code, pixel])
 
 
 func test_object_sampler_stops_at_the_textures_last_retail_mip_level() -> void:

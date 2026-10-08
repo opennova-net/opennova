@@ -5,6 +5,7 @@
 #include "render/q3_vertex_format.h"
 #include "render/rd_glsl.h"
 #include "render/rd_uniforms.h"
+#include "render/texture_filter_device.h"
 #include "render/visual_layers.h"
 
 #include <algorithm>
@@ -253,8 +254,8 @@ float q3_fog_visibility(float dist, float fog_start, float fog_end,
 	return clamp((safe_end - dist) / max(safe_end - fog_start, 1.0), 0.0, 1.0);
 }
 
-// The object stages' sampLinearWrap2D (rd_glsl.h kGlslSampleAniso2).
-@SAMPLE_ANISO2@
+// The object stages' sampLinearWrap2D (rd_glsl.h kGlslSampleEffectStage).
+@SAMPLE_EFFECT_STAGE@
 
 // runtime/renderer/q3_frame.h q3_unpack_mip_ceiling: two 4-bit level codes,
 // 15 = no ceiling.
@@ -262,6 +263,11 @@ float q3_mip_ceiling(float packed, uint stage) {
 	uint bits = uint(packed + 0.5);
 	uint level = stage == 0u ? (bits & 15u) : ((bits >> 4u) & 15u);
 	return level == 15u ? @NO_MIP_CEILING@ : float(level);
+}
+
+// q3_unpack_filter_code: the effect stage's shader filter code above them.
+uint q3_filter_code(float packed) {
+	return (uint(packed + 0.5) >> 8u) & 3u;
 }
 
 void main() {
@@ -279,13 +285,15 @@ void main() {
 	if (mode <= 1u || mode >= 3u) {
 		// params.w carries the stages' mip ceilings for the object copies.
 		float primary_max_lod = q3_mip_ceiling(pc.params.w, 0u);
+		uint filter_code = q3_filter_code(pc.params.w);
 		// Coverage: the LUM NORMAL block is the SELFLUM specialization, whose
 		// MaterialDiffuse.a = 0 makes its alpha-test source 0 (the beauty
 		// wrappers' OBJ_COVERAGE_ZERO); Glass.fx TECHNIQUE_GLOW keeps
 		// Diffuse1's alpha only for the cutout variants. Neither consumes
 		// alpha_mod (OBJ_ALPHA_MOD_NONE), so params.w carries the ceilings.
 		float coverage = mode == 1u ?
-				rd_sample_aniso2(primary_texture, uv, primary_max_lod).a : 0.0;
+				rd_sample_effect_stage(primary_texture, uv, primary_max_lod,
+						filter_code).a : 0.0;
 		if ((coverage_flags & 1u) != 0u) {
 			bool passes = coverage > pc.params.z;
 			if (pc.light_local_gain.w < 0.0) passes = !passes;
@@ -304,10 +312,11 @@ void main() {
 			// the wrapper's fog policy, and alpha 0 (SELFLUM MaterialDiffuse.a):
 			// an AlphaBlend LUM contributes nothing, an Additive LUM adds its
 			// colour, an opaque LUM replaces.
-			vec3 base = rd_sample_aniso2(primary_texture, uv, primary_max_lod).rgb;
+			vec3 base = rd_sample_effect_stage(primary_texture, uv, primary_max_lod,
+					filter_code).rgb;
 			if ((coverage_flags & 2u) != 0u) {
-				base *= rd_sample_aniso2(secondary_texture, detail_uv,
-						q3_mip_ceiling(pc.params.w, 1u)).rgb * 2.0;
+				base *= rd_sample_effect_stage(secondary_texture, detail_uv,
+						q3_mip_ceiling(pc.params.w, 1u), filter_code).rgb * 2.0;
 			}
 			vec3 lit = base * pc.draw_color.rgb;
 			vec3 fogged = (coverage_flags & 32u) != 0u ?
@@ -370,7 +379,7 @@ std::string q3_vertex_shader_source() {
 
 std::string q3_fragment_shader_source() {
 	std::string source(kQ3FragmentShaderTemplate);
-	splice_token(source, "@SAMPLE_ANISO2@", kGlslSampleAniso2);
+	splice_token(source, "@SAMPLE_EFFECT_STAGE@", kGlslSampleEffectStage);
 	splice_token(source, "@GLASS_WHITE_GAIN@", glsl_float(kQ3GlassWhiteLobeGain));
 	splice_token(source, "@GLASS_WHITE_POWER@",
 			glsl_float(kQ3GlassWhiteLobePower));
@@ -974,6 +983,9 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 	const float fog_end = frame->fog_end;
 	const float fog_flags = (fog_enabled ? 4.0f : 0.0f) +
 			static_cast<float>((std::clamp(frame->fog_type, 0, 3)) << 3);
+	// The effects' filter code the copies sample their stages under (the
+	// device leg's; engine renderer/texture_filter.h).
+	const int effect_filter_code = TextureFilterDevice::effect_filter_code();
 	const int64_t framebuffer_format = rd->framebuffer_get_format(p_framebuffer);
 	for (const DeviceCommand &command : frame->commands) {
 		if (!pipeline_for(framebuffer_format, command.draw).is_valid())
@@ -1024,7 +1036,7 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 						fog_flags;
 				push.params[2] = draw.object.classification.alpha_test_value;
 				push.params[3] = q3_pack_mip_ceilings(draw.object.diffuse_max_lod,
-						draw.object.detail_max_lod);
+						draw.object.detail_max_lod, effect_filter_code);
 				const float model_uniform_scale = std::max(1.0e-6f,
 						std::cbrt(std::abs(model.basis.determinant())));
 				push.light_local_gain[3] =
@@ -1071,7 +1083,7 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 				if (draw.celestial.blend != ObjectBlendMode::Additive)
 					push.params[1] += 32.0f;
 				push.params[3] = q3_pack_mip_ceilings(draw.celestial.diffuse_max_lod,
-						kQ3NoMipCeiling);
+						kQ3NoMipCeiling, effect_filter_code);
 				push.light_local_gain[3] = std::max(1.0e-6f,
 						std::cbrt(std::abs(model.basis.determinant())));
 				const std::array<float, 3> self_lum = q3_celestial_emissive(

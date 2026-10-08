@@ -338,6 +338,13 @@ void check_mip_ceilings_pack_both_stages() {
 	CHECK(q3_unpack_mip_ceiling(both, 0) == 0.0f);
 	CHECK(q3_unpack_mip_ceiling(both, 1) == 14.0f);
 	CHECK(q3_unpack_mip_ceiling(q3_pack_mip_ceilings(-1.0f, 15.0f), 0) == kQ3NoMipCeiling);
+	// The effect stage's filter code rides above both ceilings (D-RMAT-22).
+	CHECK(q3_unpack_filter_code(packed) == 0);
+	const float filtered = q3_pack_mip_ceilings(6.0f, kQ3NoMipCeiling, 2);
+	CHECK(q3_unpack_filter_code(filtered) == 2);
+	CHECK(q3_unpack_mip_ceiling(filtered, 0) == 6.0f);
+	CHECK(q3_unpack_mip_ceiling(filtered, 1) == kQ3NoMipCeiling);
+	CHECK(q3_unpack_filter_code(q3_pack_mip_ceilings(0.0f, 14.0f, 1)) == 1);
 	const Q3ObjectMaterialParameters defaults{};
 	CHECK(defaults.diffuse_max_lod == kQ3NoMipCeiling);
 	CHECK(defaults.detail_max_lod == kQ3NoMipCeiling);

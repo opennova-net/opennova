@@ -38,7 +38,7 @@ void fragment() {
 	if (obj_foliage_mask_outcome(FRAGCOORD, CAMERA_POSITION_WORLD) != 0) {
 		discard;
 	}
-	vec4 source = obj_sample_aniso2(u_diffuse, v_raw_uv, u_diffuse_max_lod);
+	vec4 source = obj_sample_effect_stage(u_diffuse, v_raw_uv, u_diffuse_max_lod);
 	#ifdef OBJ_POSTMULTIPLY_CUTOUT
 	bool accepted = u_alpha_test_invert > 0.5
 			? source.a <= u_alpha_test_threshold

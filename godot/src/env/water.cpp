@@ -792,6 +792,14 @@ void Water::_update_reflection_camera(Camera3D *p_cam, const Projection &p_proje
 	if (source_size.x <= 1.0f || source_size.y <= 1.0f) {
 		return;
 	}
+	// The mirror draws under the device's one texfilter mode like the main
+	// view (engine renderer/texture_filter.h): the terrain detail family's
+	// hardware anisotropy is the viewport's, so the mirror takes the view's.
+	if (reflection_viewport_->get_anisotropic_filtering_level() !=
+			viewport->get_anisotropic_filtering_level()) {
+		reflection_viewport_->set_anisotropic_filtering_level(
+				viewport->get_anisotropic_filtering_level());
+	}
 	// The drawn frustum's width over height: proj[1][1] / proj[0][0] for the
 	// perspective, orthogonal and frustum forms alike (the NVG raster's served
 	// matrix included, whose aspect its square target does not carry).
