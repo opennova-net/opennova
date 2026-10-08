@@ -79,6 +79,17 @@ void keyframe_words(const EnvironmentDocument &document, const NodeAddress &reco
 		     clock(next) + ".");
 }
 
+// A terrain key's line of a mission: its terrain takes it after its .trn and overcast.def, over what the keyword held
+// before it (the file and value that set it, else the load's default).
+std::string terrain_key_words(const EnvironmentMissionUse &use, const EnvironmentTerrainKey &key, const std::string &self) {
+	const std::string terrain = use.terrain_file.empty() ? use.terrain : base_name(use.terrain_file);
+	std::string words = "Its terrain's " + key.key + (key.value.empty() ? "" : " " + key.value) + " from this file";
+	if (key.over.empty()) return words + ", read after " + terrain + "'s lines";
+	if (key.over_file.empty()) return words + ", over the default " + key.over;
+	if (key.over_file == self) return words + ", over its own " + key.over + " above";
+	return words + ", over " + base_name(key.over_file) + "'s " + key.over;
+}
+
 } // namespace
 
 bool draw_environment_inspector(Workspace &workspace, const Document &document, const NodeAddress &record,
@@ -87,6 +98,12 @@ bool draw_environment_inspector(Workspace &workspace, const Document &document, 
 	if (!environment) return false;
 	const SessionView &view = workspace.view();
 	if (record.child && record.kind == node_kind(EnvironmentKind::Keyframe)) keyframe_words(*environment, record);
+	// A terrain key: what the terrain's reader does with this file's lines [orig: Terrain_LoadEnvironmentConfig
+	// @ 0x6109AD; Environment_LoadTimeOfDayConfig @ 0x57DCBF] (D-TERRAIN-18).
+	const bool on_key = record.child && record.kind == node_kind(EnvironmentKind::TerrainKey);
+	if (on_key)
+		note("A terrain key: the terrain's reader reads this file's lines after each mission's .trn and overcast.def, "
+		     "so the terrain of a mission that runs on this environment takes it over theirs.");
 	if (!view.project.scan) return true;
 	const AssetScan &scan = *view.project.scan;
 	const EnvironmentUses &uses = uses_of(view, environment->path());
@@ -133,10 +150,25 @@ bool draw_environment_inspector(Workspace &workspace, const Document &document, 
 			water.editable = true;
 		}
 		jump_line(workspace, water, "Its water plane: " + water_words(use), "w" + tag);
-		// The terrain keys of this file its terrain takes (the game's terrain reader reads its lines too).
-		for (const TrnLaterLine &line : use.terrain_keys)
-			note("Its terrain's " + line.key + " " + line.value + " from this file (line " + std::to_string(line.line) +
-			     "), over " + (use.terrain_file.empty() ? use.terrain : base_name(use.terrain_file)) + "'s");
+		// The terrain keys of this file its terrain takes (the game's terrain reader reads its lines too), each a Go to
+		// on its record; on a terrain key, its own line alone, or that its terrain does not take it.
+		bool taken = false;
+		for (const EnvironmentTerrainKey &key : use.terrain_keys) {
+			const NodeAddress at = environment->terrain_key_address(key.index);
+			if (on_key && at != record) continue;
+			taken = true;
+			ReferenceTarget target;
+			target.file = environment->path();
+			target.locator = at.child ? environment->locator(at) : std::string();
+			target.field = "value";
+			target.editable = true;
+			jump_line(workspace, target, terrain_key_words(use, key, environment->path()),
+			          "k" + tag + "." + std::to_string(key.index));
+		}
+		if (on_key && !taken)
+			note(use.terrain_file.empty() ? "Its terrain is not in the project, so the line is read over nothing here."
+			                              : "Its terrain does not take this line (Problems says why where the file alone "
+			                                "shows it).");
 		ImGui::Unindent();
 	}
 	ImGui::Separator();
