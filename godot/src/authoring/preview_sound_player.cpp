@@ -100,73 +100,45 @@ PreviewSoundPlayer::State PreviewSoundPlayer::pump(std::string &r_error) {
 	return state_;
 }
 
-// --- PreviewWaves -------------------------------------------------------------------------------------
+// --- PreviewWaveStreams ------------------------------------------------------------------------------
 
-PreviewWaves::~PreviewWaves() {
-	// A decode in flight is let finish (its future's end waits for it).
-	waves_.clear();
-}
-
-Ref<AudioStreamWAV> PreviewWaves::stream(const std::string &p_file, bool &r_failed, int64_t *r_frames) {
-	Wave &wave = waves_[p_file];
-	if (wave.stream.is_null() && !wave.failed) {
-		if (!wave.job.valid())
-			wave.job = std::async(std::launch::async, [p_file]() {
-				Decode out;
-				std::vector<uint8_t> bytes;
-				if (!opennova::editor::read_file_bytes(p_file, bytes, out.error)) return out;
-				out.decoded = opennova::lwf::wav_decode_pcm16(bytes.data(), bytes.size(), out.pcm, out.error);
-				return out;
-			}).share();
-		if (wave.job.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-			const Decode &decoded = wave.job.get();
-			wave.stream = decoded.decoded ? WavLoader::from_pcm(decoded.pcm) : Ref<AudioStreamWAV>();
-			wave.frames = decoded.decoded && decoded.pcm.channels > 0
-					? int64_t(decoded.pcm.pcm16.size() / (2u * decoded.pcm.channels))
-					: 0;
-			wave.failed = wave.stream.is_null();
-			wave.job = std::shared_future<Decode>();
-		}
+Ref<AudioStreamWAV> PreviewWaveStreams::stream(const std::string &p_file, bool &r_failed, int64_t *r_frames) {
+	const opennova::editor::PreviewWaves::Wave wave = waves_.wave(p_file);
+	r_failed = wave.state == opennova::editor::PreviewWaves::State::Failed;
+	if (r_frames) *r_frames = 0;
+	if (wave.state != opennova::editor::PreviewWaves::State::Decoded) return Ref<AudioStreamWAV>();
+	Boxed &boxed = streams_[p_file];
+	if (boxed.serial != wave.serial) {
+		boxed.serial = wave.serial;
+		boxed.stream = WavLoader::from_pcm(*wave.pcm);
+		boxed.frames = wave.pcm->channels > 0 ? int64_t(wave.pcm->pcm16.size() / (2u * wave.pcm->channels)) : 0;
 	}
-	r_failed = wave.failed;
-	if (r_frames) *r_frames = wave.frames;
-	return wave.stream;
+	r_failed = boxed.stream.is_null();
+	if (r_frames) *r_frames = r_failed ? 0 : boxed.frames;
+	return boxed.stream;
 }
 
-int PreviewWaves::decoding() const {
-	int count = 0;
-	for (const auto &[file, wave] : waves_) count += wave.job.valid() ? 1 : 0;
-	return count;
+void PreviewWaveStreams::drop(const std::vector<std::string> &p_files) {
+	for (const std::string &file : p_files) streams_.erase(file);
 }
 
 // --- PreviewSoundVoices ------------------------------------------------------------------------------
 
 PreviewSoundVoices::~PreviewSoundVoices() {
 	// The players are the parent's children, freed with it; a decode in flight is let finish.
-	pending_.clear();
-	waves_.forget();
+	queue_.clear();
 }
 
 void PreviewSoundVoices::add(const std::string &p_root, const std::vector<opennova::editor::WorkspaceView::Voice> &p_voices) {
-	for (const opennova::editor::WorkspaceView::Voice &voice : p_voices) {
-		const std::string file = opennova::editor::join_path(p_root, voice.path);
-		bool failed = false;
-		(void)waves_.stream(file, failed); // its decode begun
-		pending_.emplace_back(file, voice);
-	}
+	queue_.add(p_root, p_voices);
 }
 
 void PreviewSoundVoices::pump() {
 	// The voices whose waves are decoded start, in the order they fired.
-	std::vector<std::pair<std::string, opennova::editor::WorkspaceView::Voice>> waiting;
-	for (const auto &[file, voice] : pending_) {
+	for (const opennova::editor::PreviewVoiceQueue::Ready &ready : queue_.take_ready()) {
 		bool failed = false;
-		const Ref<AudioStreamWAV> stream = waves_.stream(file, failed);
-		if (failed) continue;
-		if (stream.is_null()) {
-			waiting.emplace_back(file, voice);
-			continue;
-		}
+		const Ref<AudioStreamWAV> stream = streams_.stream(ready.file, failed);
+		if (stream.is_null()) continue;
 		if (players_.size() >= kMaxPlayers) {
 			players_.front()->stop();
 			players_.front()->queue_free();
@@ -175,15 +147,14 @@ void PreviewSoundVoices::pump() {
 		AudioStreamPlayer *player = memnew(AudioStreamPlayer);
 		player->set_name("ClipSound");
 		player->set_stream(stream);
-		const double pitch = double(voice.pitch_q16) / 65536.0;
+		const double pitch = double(ready.voice.pitch_q16) / 65536.0;
 		player->set_pitch_scale(pitch > 0.01 ? pitch : 1.0);
-		player->set_volume_db(opennova::audio::volume_db_from_byte(voice.volume));
+		player->set_volume_db(opennova::audio::volume_db_from_byte(ready.voice.volume));
 		parent_->add_child(player);
 		player->play();
 		players_.push_back(player);
 		++started_;
 	}
-	pending_ = std::move(waiting);
 	// The players that played through, freed.
 	for (size_t i = 0; i < players_.size();) {
 		if (players_[i]->is_playing()) {
@@ -196,7 +167,7 @@ void PreviewSoundVoices::pump() {
 }
 
 void PreviewSoundVoices::stop() {
-	pending_.clear();
+	queue_.clear();
 	for (AudioStreamPlayer *player : players_) {
 		player->stop();
 		player->queue_free();
@@ -204,9 +175,8 @@ void PreviewSoundVoices::stop() {
 	players_.clear();
 }
 
-void PreviewSoundVoices::forget() {
-	pending_.clear();
-	waves_.forget();
+void PreviewSoundVoices::refresh() {
+	streams_.drop(queue_.refresh());
 }
 
 int PreviewSoundVoices::playing() const {

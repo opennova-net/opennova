@@ -256,11 +256,11 @@ private:
 	// with the EditorApp, its players children of it; the session's play it plays (its serial).
 	std::unique_ptr<PreviewSoundPlayer> sound_;
 	uint64_t sound_serial_ = 0;
-	// The clip sounds' player (DI-04), the order of the last clip sound it took, and the project files'
-	// generation its decoded waves are of.
+	// The clip sounds' player (DI-04), the order of the last clip sound it took, and the project's scan its
+	// waves were last checked against (a rescan replaces it).
 	std::unique_ptr<PreviewSoundVoices> clip_voices_;
 	uint64_t clip_sound_seq_ = 0;
-	uint64_t clip_wave_generation_ = 0;
+	std::weak_ptr<const opennova::editor::AssetScan> clip_wave_scan_;
 	Node *mcp_service_ = nullptr;
 	int mcp_port_ = 0;
 	String window_title_; // the title last set on the OS window
