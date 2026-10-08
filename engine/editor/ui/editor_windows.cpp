@@ -598,6 +598,31 @@ void EditorWindows::draw_edit_menu(const SessionView &v, const DocumentBase *doc
 	if (menu_item("Find...", "Ctrl+F", document != nullptr) && document_window_) document_window_->open_find();
 	if (menu_item("Find in project...", "Ctrl+Shift+F", v.project.open && v.findings.graph))
 		ProjectFind::open(*this);
+	ImGui::Separator();
+	// The editor's preference (session/preview_background.h): what a model's, a clip's, a texture's, an effect's,
+	// a definition's and a HUD's preview draws behind its picture, each open one at once.
+	if (ImGui::BeginMenu("Preview background")) {
+		for (const PreviewBackground background : kPreviewBackgrounds) {
+			const bool chosen = v.project.preview_background == background;
+			const bool allowed = v.allows(EditorRequestKind::SetPreviewBackground);
+			if (ImGui::MenuItem(preview_background_words(background), nullptr, chosen, allowed) && allowed && !chosen)
+				request(request::set_preview_background(background));
+			switch (background) {
+			case PreviewBackground::Dark: ui_kit::tooltip("Each preview's own dark background, as before."); break;
+			case PreviewBackground::Grey:
+				ui_kit::tooltip("A mid grey, darker toward the bottom: dark textures (camouflage, dark metal) still read.");
+				break;
+			case PreviewBackground::Light: ui_kit::tooltip("A pale grey."); break;
+			case PreviewBackground::Checker:
+				ui_kit::tooltip("A checkerboard of two greys: what a texture's alpha leaves out shows.");
+				break;
+			}
+		}
+		ImGui::EndMenu();
+	}
+	ui_kit::tooltip("What the model, animation, texture, particle, definition and HUD previews draw behind their "
+	                "picture, an editor setting kept on this computer. A mission's, an environment's, a terrain's and a "
+	                "menu's picture draws the game's own.");
 	ImGui::EndMenu();
 }
 
