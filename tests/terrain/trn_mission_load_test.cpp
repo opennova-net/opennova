@@ -192,6 +192,78 @@ int run() {
 	return 0;
 }
 
+// A later file's terrain lines as a reader of it keeps them (the editor's environment, its terrain keys): read in order
+// as the game's walk cuts them, each written again from scratch so the walk reads back the same keyword and values,
+// the configuration a mission's terrain loads the same.
+int run_key_lines() {
+	using opennova::TrnKeyLine;
+	const std::string text = crlf("sky_height 175\n"
+	                              "POLYTRN_COLORMAP \"red map.tga\" ; tinted\n"
+	                              "lock_topleft 3,4\n"
+	                              "// a comment\n"
+	                              "foliage\n"
+	                              "graphic tree.3di\n"
+	                              "match 1 2 3\n"
+	                              "end\n"
+	                              "terrain_name \"x\"\n"
+	                              "polytrn_colormap map;x.tga\n");
+	std::vector<int> lines;
+	const std::vector<TrnKeyLine> read = opennova::read_trn_key_lines(text, &lines);
+	const std::vector<TrnKeyLine> expected = { { "polytrn_colormap", { "red map.tga" } }, { "lock_topleft", { "3", "4" } },
+		{ "foliage", {} }, { "graphic", { "tree.3di" } }, { "match", { "1", "2", "3" } }, { "end", {} },
+		// The comment cut writes no terminator: the token runs on to the line's end [orig: Terrain_TokenizeConfigLine
+		// @0x53CC2A..0x53CC31].
+		{ "polytrn_colormap", { "map;x.tga" } } };
+	TEST_EXPECT(read == expected && lines == std::vector<int>({ 2, 3, 5, 6, 7, 8, 10 }));
+	std::string written, error;
+	for (const TrnKeyLine &line : read) TEST_EXPECT(opennova::write_trn_key_line(written, line, error));
+	TEST_EXPECT(written == crlf("polytrn_colormap \"red map.tga\"\nlock_topleft 3 4\nfoliage\ngraphic tree.3di\n"
+	                            "match 1 2 3\nend\npolytrn_colormap \"map;x.tga\"\n"));
+	TEST_EXPECT(opennova::read_trn_key_lines(written) == expected);
+	// The terrain a mission loads under either is the same.
+	const std::string trn = text_of(test_io::read_file(fixture("terrain/tmap/Tmap.trn")));
+	TrnLaterTexts later;
+	TrnConfig original, again;
+	later.environment = &text;
+	TEST_EXPECT(opennova::load_mission_trn(trn, later, original, error) && original.colormap == "map;x.tga");
+	later.environment = &written;
+	TEST_EXPECT(opennova::load_mission_trn(trn, later, again, error));
+	TEST_EXPECT(opennova::trn_key_value(original, "lock_topleft") == "3 4" &&
+	            opennova::trn_key_value(again, "lock_topleft") == "3 4" && original.foliage_defs.size() == again.foliage_defs.size());
+	// What no line carries is refused, writing nothing: a quote, a control character, an empty value, a keyword no arm
+	// compares, the 30th token holding a separator (the walk reads it to the line's end).
+	std::string none;
+	TEST_EXPECT(!opennova::write_trn_key_line(none, { "polytrn_colormap", { "a\"b" } }, error) && none.empty());
+	TEST_EXPECT(!opennova::write_trn_key_line(none, { "polytrn_colormap", { "a\tb" } }, error));
+	TEST_EXPECT(!opennova::write_trn_key_line(none, { "polytrn_colormap", { "" } }, error));
+	TEST_EXPECT(!opennova::write_trn_key_line(none, { "fog_level", { "900" } }, error) && none.empty());
+	TrnKeyLine row{ "polytrn_sectors", std::vector<std::string>(28, "1") };
+	row.values.push_back("x y");
+	TEST_EXPECT(!opennova::write_trn_key_line(none, row, error) && none.empty());
+	row.values.back() = "xy";
+	TEST_EXPECT(opennova::write_trn_key_line(none, row, error));
+	// A text of values, cut as the tokenizer cuts a line: quotes keep a value whole, a comment or an open quote
+	// refused.
+	std::vector<std::string> values;
+	TEST_EXPECT(opennova::trn_values_of_text("1, 2\t\"three four\"", values, error) &&
+	            values == std::vector<std::string>({ "1", "2", "three four" }));
+	TEST_EXPECT(opennova::trn_values_text(values) == "1 2 \"three four\"" && opennova::trn_values_text(values, 2) == "\"three four\"");
+	TEST_EXPECT(!opennova::trn_values_of_text("1 ; 2", values, error) && !opennova::trn_values_of_text("1 // 2", values, error) &&
+	            !opennova::trn_values_of_text("\"open", values, error) && opennova::trn_values_of_text("\"a;b\"", values, error) &&
+	            values == std::vector<std::string>({ "a;b" }));
+	// The values a configuration holds for a keyword an arm sets whole; none for one that adds.
+	TrnConfig defaults;
+	TEST_EXPECT(opennova::trn_key_value(defaults, "polytrn_detaildensity") == "128" &&
+	            opennova::trn_key_value(defaults, "polytrn_colormap").empty() &&
+	            opennova::trn_key_value(defaults, "polytrn_sectors").empty() && opennova::trn_key_value(defaults, "graphic").empty());
+	TEST_EXPECT(opennova::trn_parser_reads_one_value("polytrn_colormap") && !opennova::trn_parser_reads_one_value("lock_topleft") &&
+	            !opennova::trn_parser_reads_one_value("polytrn_sectors") && !opennova::trn_parser_reads_one_value("foliage"));
+	TEST_EXPECT(opennova::trn_parser_keys(true).size() == opennova::trn_parser_keys().size() + 9);
+	for (const std::string &key : opennova::trn_parser_keys(true)) TEST_EXPECT(opennova::trn_parser_key(key, true));
+	std::printf("OK: a later file's terrain lines read, written from scratch and read back the same\n");
+	return 0;
+}
+
 std::string saved(const TrnConfig &config) {
 	std::ostringstream out;
 	std::string error;
@@ -258,5 +330,6 @@ int run_retail() {
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	if (const int failed = run()) return failed;
+	if (const int failed = run_key_lines()) return failed;
 	return run_retail();
 }
