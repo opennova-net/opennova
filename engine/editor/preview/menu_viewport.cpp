@@ -414,7 +414,7 @@ MenuPointer menu_pointer_at(const MenuCanvasFrame &frame, float x, float y) {
 	if (!frame.current) return MenuPointer();
 	// The claim the pump makes there (MenuFrameCompiler::claim_at), and the cursor it stamps.
 	const menu::MenuFrameCompiler::MouseClaim claim = frame.compiler->claim_at(*frame.state, x, y, 1.0f, 1.0f);
-	return pointer_of_claim(frame, claim.hovered, claim.spin_part);
+	return pointer_of_claim(frame, claim.stamp_index(), claim.stamp_part());
 }
 
 MenuPointer menu_screen_pointer(const MenuCanvasFrame &frame) {
@@ -1002,8 +1002,8 @@ MenuPointer MenuViewport::pointer_at(const ViewportContext &context, float x, fl
 	menu::MenuFrameState stamped = try_->state();
 	const menu::MenuFrameCompiler::MouseClaim claim =
 			x < 0.0f ? menu::MenuFrameCompiler::MouseClaim() : compiler.claim_at(stamped, x, y, 1.0f, 1.0f);
-	stamped.cursor_claim = claim.hovered;
-	stamped.cursor_spin_part = claim.spin_part;
+	stamped.cursor_claim = claim.stamp_index();
+	stamped.cursor_spin_part = claim.stamp_part();
 	const menu::MenuFrameCompiler::FrameCursor cursor = compiler.frame_cursor(stamped);
 	MenuPointer pointer;
 	if (cursor.owner < 0) return pointer;
@@ -1079,6 +1079,10 @@ std::vector<MenuSoundFired> MenuViewport::fire_sounds(const ViewportInput &input
 	const float x = canvas ? canvas_mouse_.x : pointer_.x;
 	const float y = canvas ? canvas_mouse_.y : pointer_.y;
 	const bool down = held && (canvas ? canvas_mouse_.down : pointer_.down);
+	// The press reaches the windows under the mouse ahead of the pump, the one holding the capture last
+	// (MenuFrameCompiler::press_reach).
+	if (held && down && !click_.button_down())
+		click_.press(compiler.press_capture(compiler.press_reach(state, x, y, 1.0f, 1.0f)));
 	const menu::MenuPumpWindow capture = click_.capture_for(down);
 	menu::MenuFrameCompiler::MouseClaim at;
 	if (held) at = compiler.claim_at(state, x, y, 1.0f, 1.0f, capture);
