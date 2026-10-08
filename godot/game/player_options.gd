@@ -33,6 +33,12 @@ const GAMEPLAY_TIPS_KEY := "enable_gameplaytips"
 # witness; GameWorld re-exports the fresh profile's word and the load clamp).
 const DISPLAY_SECTION := "display"
 const OBJECT_POLYDETAIL_KEY := "object_polydetail"
+# The texture filter persists as retail's game.cfg word `texfilter_level`
+# (0..3), which the front-end Options row TEXFILTER edits; the model effects
+# follow it at once and the terrain's device filter at the next mission start
+# (engine renderer/texture_filter.h; GameWorld re-exports the fresh profile's
+# word and the load clamp).
+const TEXFILTER_LEVEL_KEY := "texfilter_level"
 
 # The slider ranges are the engine's witnessed Options ranges
 # (options_policy.h kOptionsScrollRanges through MenuFrame), read by control
@@ -76,6 +82,7 @@ class State extends RefCounted:
 	var keyboard_tips: bool
 	var gameplay_tips: bool
 	var object_polydetail: int
+	var texfilter_level: int
 
 	func _init(p_sound_fx_volume := DEFAULT_VOLUME,
 			p_dialog_volume := DEFAULT_VOLUME,
@@ -86,7 +93,8 @@ class State extends RefCounted:
 			p_aspect_mode := DEFAULT_ASPECT_MODE,
 			p_keyboard_tips := true,
 			p_gameplay_tips := true,
-			p_object_polydetail := GameWorld.object_detail_fresh_profile()) -> void:
+			p_object_polydetail := GameWorld.object_detail_fresh_profile(),
+			p_texfilter_level := GameWorld.texfilter_level_fresh_profile()) -> void:
 		sound_fx_volume = p_sound_fx_volume
 		dialog_volume = p_dialog_volume
 		music_volume = p_music_volume
@@ -97,11 +105,12 @@ class State extends RefCounted:
 		keyboard_tips = p_keyboard_tips
 		gameplay_tips = p_gameplay_tips
 		object_polydetail = p_object_polydetail
+		texfilter_level = p_texfilter_level
 
 	func copy() -> State:
 		return State.new(sound_fx_volume, dialog_volume, music_volume, crosshair_style,
 				crosshair_color, crosshair_spread, aspect_mode,
-				keyboard_tips, gameplay_tips, object_polydetail)
+				keyboard_tips, gameplay_tips, object_polydetail, texfilter_level)
 
 
 signal changed(state: State)
@@ -144,6 +153,7 @@ func update(state: State) -> void:
 		config.set_value(PLAYER_SECTION, KEYBOARD_TIPS_KEY, 1 if _state.keyboard_tips else 0)
 		config.set_value(PLAYER_SECTION, GAMEPLAY_TIPS_KEY, 1 if _state.gameplay_tips else 0)
 		config.set_value(DISPLAY_SECTION, OBJECT_POLYDETAIL_KEY, _state.object_polydetail)
+		config.set_value(DISPLAY_SECTION, TEXFILTER_LEVEL_KEY, _state.texfilter_level)
 	)
 	apply()
 	changed.emit(current())
@@ -199,7 +209,8 @@ func _load_state() -> State:
 			_load_aspect_mode(),
 			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION, KEYBOARD_TIPS_KEY, 1)) != 0,
 			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION, GAMEPLAY_TIPS_KEY, 1)) != 0,
-			_load_object_polydetail()))
+			_load_object_polydetail(),
+			_load_texfilter_level()))
 
 
 # The persisted object detail, clamped as the config load clamps it, or the
@@ -211,6 +222,18 @@ static func _load_object_polydetail() -> int:
 				GameWorld.object_detail_fresh_profile())))
 	var seeded := GameWorld.object_detail_fresh_profile()
 	ConfigStore.write(CONFIG_PATH, DISPLAY_SECTION, OBJECT_POLYDETAIL_KEY, seeded)
+	return seeded
+
+
+# The persisted texture filter, clamped as the config load clamps it, or the
+# fresh profile's word, written at once as the video test saves it.
+static func _load_texfilter_level() -> int:
+	if ConfigStore.has_key(CONFIG_PATH, DISPLAY_SECTION, TEXFILTER_LEVEL_KEY):
+		return GameWorld.clamp_texfilter_level(int(ConfigStore.read(CONFIG_PATH,
+				DISPLAY_SECTION, TEXFILTER_LEVEL_KEY,
+				GameWorld.texfilter_level_fresh_profile())))
+	var seeded := GameWorld.texfilter_level_fresh_profile()
+	ConfigStore.write(CONFIG_PATH, DISPLAY_SECTION, TEXFILTER_LEVEL_KEY, seeded)
 	return seeded
 
 
@@ -237,7 +260,8 @@ static func _normalized(state: State) -> State:
 			state.crosshair_color & CROSSHAIR_COLOR_MASK,
 			state.crosshair_spread, state.aspect_mode,
 			state.keyboard_tips, state.gameplay_tips,
-			GameWorld.clamp_object_detail(state.object_polydetail))
+			GameWorld.clamp_object_detail(state.object_polydetail),
+			GameWorld.clamp_texfilter_level(state.texfilter_level))
 
 
 # Clamp to the engine's witnessed range for an Options slider, by control

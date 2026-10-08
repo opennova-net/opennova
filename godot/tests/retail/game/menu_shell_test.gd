@@ -220,7 +220,6 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 		"SHADOWQUALITY": "3",
 		"PARTICLES": "2",
 		"FBEFFECTS": "3",
-		"TEXFILTER": "3",
 		"TEXCOMPRESSION": "2",
 	}
 	for control_name in expected:
@@ -240,6 +239,14 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 			str(PlayerOptions.new().current().object_polydetail),
 			"OBJECTPOLY shows the persisted object detail")
 	assert_false(driver.is_widget_disabled(object_poly), "OBJECTPOLY is editable")
+	# The texture filter is served too: game.cfg's texfilter_level, seeded by
+	# value and editable (options_policy.h kTextureFilterControls).
+	var texfilter := driver.widget_id("TEXFILTER")
+	assert_gte(texfilter, 0, "TEXFILTER exists")
+	assert_eq(driver.item_value(texfilter, driver.selected_row(texfilter)),
+			str(PlayerOptions.new().current().texfilter_level),
+			"TEXFILTER shows the persisted texture filter")
+	assert_false(driver.is_widget_disabled(texfilter), "TEXFILTER is editable")
 	_cleanup(dir)
 
 

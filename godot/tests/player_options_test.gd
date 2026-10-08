@@ -195,6 +195,31 @@ func test_object_detail_seeds_persists_and_clamps_as_the_cfg_word() -> void:
 	assert_eq(PlayerOptions.new().current().object_polydetail, 0)
 
 
+func test_texture_filter_seeds_persists_and_clamps_as_the_cfg_word() -> void:
+	# game.cfg's texfilter_level: a fresh profile starts at the video test's
+	# 1 (trilinear) and writes it at once; the load clamps a persisted word
+	# into 0..3 (the engine's renderer/texture_filter.h through GameWorld).
+	assert_eq(GameWorld.texfilter_level_fresh_profile(), 1)
+	assert_eq(GameWorld.clamp_texfilter_level(-4), 0)
+	assert_eq(GameWorld.clamp_texfilter_level(7), 3)
+	var options := PlayerOptions.new()
+	assert_eq(options.current().texfilter_level, 1)
+	var config := ConfigFile.new()
+	assert_eq(config.load(PlayerOptions.CONFIG_PATH), OK)
+	assert_eq(int(config.get_value("display", "texfilter_level", -1)), 1,
+			"the fresh word persists at once")
+	var state := options.current()
+	state.texfilter_level = 3
+	options.update(state)
+	assert_eq(PlayerOptions.new().current().texfilter_level, 3)
+	assert_eq(state.copy().texfilter_level, 3, "the snapshot copy carries the word")
+	ConfigStore.write(PlayerOptions.CONFIG_PATH, "display", "texfilter_level", 12)
+	assert_eq(PlayerOptions.new().current().texfilter_level, 3,
+			"a persisted word past the top rung loads as 3")
+	ConfigStore.write(PlayerOptions.CONFIG_PATH, "display", "texfilter_level", 0)
+	assert_eq(PlayerOptions.new().current().texfilter_level, 0)
+
+
 func test_update_maps_each_audio_option_to_its_runtime_buses() -> void:
 	var options := PlayerOptions.new()
 	var state := options.current()

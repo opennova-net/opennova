@@ -6,10 +6,16 @@ render_mode unshaded, cull_back, depth_draw_never, blend_mix;
 
 #include "res://shaders/sky.gdshaderinc"
 
-// The reference device applies anisotropic minification to active texture
-// stages; this matters most at the dome's grazing-angle horizon.
-uniform sampler2D u_cloud_tex1 : filter_linear_mipmap_anisotropic, repeat_enable;
-uniform sampler2D u_cloud_tex2 : filter_linear_mipmap_anisotropic, repeat_enable;
+#include "res://shaders/texture_filter.gdshaderinc"
+
+// The sky maps are created with flags 0x100000, no 0x8, so the device samples
+// them MIN/MAG LINEAR with MIPFILTER POINT whatever game.cfg's texfilter_level
+// says [orig: Terrain_InitRenderingResources @ 0x578a82..0x578a9a;
+// CGfxDevice_ApplyRenderStates @ 0x67e463..0x67e4a7] (engine
+// renderer/texture_filter.h, TextureStage::SkyMap): bilinear on the nearest
+// level of each map's own chain.
+uniform sampler2D u_cloud_tex1 : filter_linear_mipmap, repeat_enable;
+uniform sampler2D u_cloud_tex2 : filter_linear_mipmap, repeat_enable;
 
 
 void fragment() {
@@ -19,8 +25,8 @@ void fragment() {
 	//   s1 alpha = tex0.a*tex1.a*2, s2 alpha = current^2*2 (each saturated)
 	// The pass fogs its own colour toward the skyfog block before the blend
 	// (the dome wrapper's device fog applies per pass).
-	vec4 c0 = texture(u_cloud_tex1, v_uv1);
-	vec4 c1 = texture(u_cloud_tex2, v_uv2);
+	vec4 c0 = sample_point_mip(u_cloud_tex1, v_uv1, float(textureQueryLevels(u_cloud_tex1) - 1));
+	vec4 c1 = sample_point_mip(u_cloud_tex2, v_uv2, float(textureQueryLevels(u_cloud_tex2) - 1));
 	vec3 density = min(c0.rgb * c1.rgb * 2.0, vec3(1.0));
 	vec3 cloud_rgb = density * v_cloud_ramp + (1.0 - density) * v_sky_behind;
 	float a1 = min(c0.a * c1.a * 2.0, 1.0);
