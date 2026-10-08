@@ -13,6 +13,7 @@
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 
+#include <editor/preview/preview_waves.h>
 #include <editor/session/view/workspace_view.h>
 #include <formats/lwf/wav_pcm.h>
 
@@ -64,39 +65,39 @@ private:
 	uint64_t playing_since_msec_ = 0; // when the decodes were done and the first voices started
 };
 
-// The project's waves as the preview decodes them, each once: decoded as the game decodes it (lwf::wav_decode_pcm16,
-// boxed by WavLoader) on a worker, kept as a stream until the project's files move (forget). What the clip sounds' and
-// the Listen's players share.
-class PreviewWaves {
+// The project's waves as the preview plays them: each decoded once as the game decodes it (editor::PreviewWaves, on
+// a worker, kept until its file changes) and boxed as a stream (WavLoader). What the clip sounds' and the Listen's
+// players share.
+class PreviewWaveStreams {
 public:
-	~PreviewWaves();
 	// The wave at the full path `p_file`: its stream once decoded, null meanwhile (its decode begun on a worker the
 	// first time it is asked) and for one that did not decode (`r_failed`); `r_frames` its frames.
 	Ref<AudioStreamWAV> stream(const std::string &p_file, bool &r_failed, int64_t *r_frames = nullptr);
-	void forget() { waves_.clear(); }
+	// The streams of `p_files` dropped (their waves decoded anew: their files changed).
+	void drop(const std::vector<std::string> &p_files);
+	void forget() {
+		waves_.forget();
+		streams_.clear();
+	}
 	// How many decode still.
-	int decoding() const;
+	int decoding() const { return waves_.decoding(); }
+	opennova::editor::PreviewWaves &waves() { return waves_; }
 
 private:
-	struct Decode {
-		bool decoded = false;
-		std::string error;
-		opennova::lwf::WavPcm pcm;
-	};
-	struct Wave {
-		std::shared_future<Decode> job;
+	struct Boxed {
+		uint64_t serial = 0; // the decode it boxes
 		Ref<AudioStreamWAV> stream;
 		int64_t frames = 0;
-		bool failed = false;
 	};
-	std::map<std::string, Wave> waves_; // by the wave's full path
+	opennova::editor::PreviewWaves waves_;
+	std::map<std::string, Boxed> streams_; // by the wave's full path
 };
 
 // The clip sounds' player (DI-04): the device half of the sounds a clip's events fire in the model preview
 // (ProjectSession::clip_sounds_since). Each sound's voices start together beside those still playing, a
-// player each, freed as it ends; a wave is decoded as the game decodes it once (lwf::wav_decode_pcm16 on a
-// worker) and kept until the project's files move (forget). The picks, pitches and volumes are the
-// session's; this only sounds them.
+// player each, freed as it ends, once their waves decode (editor::PreviewVoiceQueue: a wave decoded as the
+// game decodes it once, kept until its file changes). The picks, pitches and volumes are the session's;
+// this only sounds them.
 class PreviewSoundVoices {
 public:
 	explicit PreviewSoundVoices(Node *p_parent) : parent_(p_parent) {}
@@ -110,8 +111,9 @@ public:
 	void pump();
 	// Every voice stopped and dropped (the project closing); the decoded waves kept.
 	void stop();
-	// The decoded waves dropped (the project's files moved).
-	void forget();
+	// The project's files moved (a rescan): the waves whose files changed or went decoded anew and the voices
+	// waiting on them dropped; the rest wait on, their decodes in flight (PreviewVoiceQueue::refresh).
+	void refresh();
 	// How many voices it started in all, and how many play now (the tests' measure).
 	uint64_t started() const { return started_; }
 	int playing() const;
@@ -120,8 +122,8 @@ private:
 	// The players kept at most: the oldest stopped for a new one past it.
 	static constexpr size_t kMaxPlayers = 24;
 	Node *parent_ = nullptr;
-	PreviewWaves waves_;
-	std::vector<std::pair<std::string, opennova::editor::WorkspaceView::Voice>> pending_;
+	PreviewWaveStreams streams_;
+	opennova::editor::PreviewVoiceQueue queue_{ streams_.waves() }; // after streams_: it reads its waves
 	std::vector<AudioStreamPlayer *> players_;
 	uint64_t started_ = 0;
 };
@@ -172,7 +174,7 @@ private:
 		bool paused = false; // held (the picture not drawn)
 	};
 	Node3D *parent_ = nullptr;
-	PreviewWaves waves_;
+	PreviewWaveStreams waves_;
 	std::vector<Voice> voices_;
 	uint64_t started_ = 0;
 };
