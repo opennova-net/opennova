@@ -20,6 +20,7 @@
 #include <editor/documents/source_issue_findings.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/model/staged_rows.h>
+#include <formats/trn/trn_io.h>
 
 namespace opennova::editor {
 
@@ -624,18 +625,12 @@ RecordTable make_table() {
 
 // --- the source issues ------------------------------------------------------------------------------
 
-// The keywords the terrain's reader reads (formats/trn's reader): its hook stays on for the .env pass,
-// so it reads an environment's lines too [orig: Terrain_LoadEnvironmentConfig @ 0x6109AD pushes
-// Terrain_ParseConfigCallback; Environment_LoadTimeOfDayConfig @ 0x57DB44 keeps it as g_EnvParseHook
-// for every pass].
-bool terrain_key(const std::string &key) {
-	static const char *const kKeys[] = {"terrain_name", "foliage", "horizon", "lock_topleft", "lock_topright",
-	                                    "lock_bottomleft", "lock_bottomright"};
-	if (key.rfind("polytrn_", 0) == 0) return true;
-	for (const char *known : kKeys)
-		if (key == known) return true;
-	return false;
-}
+// The keywords the terrain's reader reads (formats/trn's reader, trn_parser_key): its hook stays on for the .env
+// pass, so it reads an environment's lines too, and the mission's terrain takes them after its .trn's
+// (D-TERRAIN-18) [orig: Terrain_LoadEnvironmentConfig @ 0x6109AD pushes Terrain_ParseConfigCallback;
+// Environment_LoadTimeOfDayConfig @ 0x57DB44 keeps it as g_EnvParseHook for every pass]. terrain_name and horizon
+// are read by no arm of either reader: a line the game skips.
+bool terrain_key(const std::string &key) { return trn_parser_key(key); }
 
 } // namespace
 
