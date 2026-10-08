@@ -1682,6 +1682,15 @@ target_link_libraries(menu_sound_test PRIVATE opennova_runtime)
 target_compile_features(menu_sound_test PRIVATE cxx_std_17)
 add_test(NAME menu_sound COMMAND menu_sound_test)
 
+# The menu's click and its press's mouse capture (menu/menu_click.h, D-MNU-30): the latch alone, then
+# through the compiler's claim and the runtime (a press elsewhere let go over a button clicks it; a
+# capturing press holds the claim; lists, check boxes, double clicks, spin arrows, a slider's drag and
+# a disabled window).
+add_executable(menu_click_test menu/menu_click_test.cpp)
+target_link_libraries(menu_click_test PRIVATE opennova_runtime)
+target_compile_features(menu_click_test PRIVATE cxx_std_17)
+add_test(NAME menu_click COMMAND menu_click_test)
+
 # A menu run headless through the runtime's own driver (menu/menu_state_frame.h, ADR 0046 DI-35): the
 # frame seam over a compiler and its state, the runtime's Sound and ServiceRequested events, what the
 # game's code binds by name (menu/menu_commands.h) and the Options policy (OptionsScreen::apply_policy).
