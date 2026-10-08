@@ -10,8 +10,8 @@
 // finding on a charattr.def and a credits file, its place and words, the fix that comments out the lines the
 // loader reads the same without (applied: no finding, the same classes; Undo: the finding again), none where no
 // such line brings it under, none for a CBIN credits file nor a kind of another reader; the blanks of both kinds
-// under the line and a credits blank over it refused; and through a session, the row over a closed charattr.def
-// and its fix. The retail leg reads every file JO:CA's game reads through the text reader (charattr.def, base and
+// under the line and a credits blank over it refused; and through a session, the row over a closed charattr.def,
+// the build it refuses (the game's own failure, cited), and its fix, after which the project builds. The retail leg reads every file JO:CA's game reads through the text reader (charattr.def, base and
 // each expansion and the extracted tree; every DATASOURCE a shipped menu names) and asserts none overruns, and
 // that the editor makes no finding of JO:CA's charattr.def.
 #include <algorithm>
@@ -28,7 +28,10 @@
 #include <editor/documents/charattr_type.h>
 #include <editor/documents/config_overrun.h>
 #include <editor/documents/document_types.h>
+#include <editor/graph/reference_kinds.h>
 #include <editor/model/text_document.h>
+#include <editor/project_build/build_plan.h>
+#include <editor/project_build/build_run.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
@@ -345,15 +348,41 @@ int test_session() {
 	const Diagnostic *d = finding();
 	TEST_EXPECT(d && session.document_for(path) == nullptr);
 	if (!d) return 1;
+	TEST_EXPECT(blocks_build(*d) && blocker_is_the_games(*d) && contains(blocker_reason(*d), "0x7609e8"));
+	// The build is refused for it, the game's heap corrupt from that load on: the row is its refusal, named.
+	const SessionView &v = session.view();
+	const auto refused_for_it = [&]() {
+		if (!v.activity.has_build || v.activity.last_build->ok || !v.activity.last_build->refused) return false;
+		bool row = false, named = false;
+		for (const Diagnostic &b : v.activity.last_build->diagnostics) {
+			if (b.code() == "document.config_overrun" && b.asset == path && blocks_build(b)) row = true;
+			if (b.code() == "build.blocked" && contains(b.message, "1 problem stops it: charattr.def holds 65 values"))
+				named = true;
+		}
+		return row && named;
+	};
+	editor_test::handle_to_end(session, request::build());
+	TEST_EXPECT(refused_for_it());
+	TEST_EXPECT(contains(v.activity.status, "Build refused: charattr.def holds 65 values"));
+	d = finding();
+	TEST_EXPECT(d != nullptr);
+	if (!d) return 1;
 	const std::vector<ProblemFix> fixes = fixes_for(*d, session.view());
 	TEST_EXPECT(fixes.size() == 1 && fixes[0].request.kind == EditorRequestKind::EditRecord &&
 	            fixes[0].request.path == path && fixes[0].request.open_first && !fixes[0].bulk);
 	if (fixes.size() != 1) return 1;
 	editor_test::handle_to_end(session, fixes[0].request);
 	TEST_EXPECT(session.outcome().done() && !finding());
+	// Fixed and saved, the project builds.
+	editor_test::handle_to_end(session, request::save(path));
+	editor_test::handle_to_end(session, request::build());
+	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok && !v.activity.last_build->refused);
 	editor_test::handle_to_end(session, request::undo(path));
 	TEST_EXPECT(finding() != nullptr);
-	std::printf("session: the closed charattr.def's row, its fix applied and undone\n");
+	editor_test::handle_to_end(session, request::save(path));
+	editor_test::handle_to_end(session, request::build());
+	TEST_EXPECT(refused_for_it());
+	std::printf("session: the closed charattr.def's row refuses the build; its fix applied (the build lands) and undone\n");
 	return 0;
 }
 
