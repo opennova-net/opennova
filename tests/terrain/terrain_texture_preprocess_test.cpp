@@ -121,11 +121,14 @@ int main() {
 			heightfield[y * 4 + x] = static_cast<uint16_t>(x * 256);
 		}
 	}
+	// The centred difference over an up of 2: a unit ramp is a 45-degree
+	// normal. [orig: Terrain_GenerateNormalMap @ 0x603210, the two unit ups
+	// summed @ 0x603425] (D-TERRAIN-19)
 	const std::vector<uint8_t> expected_height_normals = {
-		241,127,184,128, 13,127,184,128, 13,127,184,128, 241,127,184,128,
-		241,127,184,128, 13,127,184,128, 13,127,184,128, 241,127,184,128,
-		241,127,184,128, 13,127,184,128, 13,127,184,128, 241,127,184,128,
-		241,127,184,128, 13,127,184,128, 13,127,184,128, 241,127,184,128,
+		217,127,217,128, 37,127,217,128, 37,127,217,128, 217,127,217,128,
+		217,127,217,128, 37,127,217,128, 37,127,217,128, 217,127,217,128,
+		217,127,217,128, 37,127,217,128, 37,127,217,128, 217,127,217,128,
+		217,127,217,128, 37,127,217,128, 37,127,217,128, 217,127,217,128,
 	};
 	ok &= expect_pixels(build_heightfield_normal_map(heightfield, 4, 4),
 			4, 4, expected_height_normals,
@@ -146,18 +149,18 @@ int main() {
 	x_locks[0].x = 1;
 	const Rgba8Image locked_x =
 			build_heightfield_normal_map(x_ramp, 8, 8, x_locks);
-	ok &= expect_pixel(locked_x, 3, 0, {241,127,184,128},
+	ok &= expect_pixel(locked_x, 3, 0, {217,127,217,128},
 			"TL X lock must wrap the +X tap to the TL quadrant origin");
-	ok &= expect_pixel(locked_x, 3, 4, {13,127,184,128},
+	ok &= expect_pixel(locked_x, 3, 4, {37,127,217,128},
 			"unlocked BL X must continue across the full atlas seam");
 
 	opennova::TerrainQuadrantLocks y_locks{};
 	y_locks[3].y = 1;
 	const Rgba8Image locked_y =
 			build_heightfield_normal_map(y_ramp, 8, 8, y_locks);
-	ok &= expect_pixel(locked_y, 7, 7, {127,241,184,128},
+	ok &= expect_pixel(locked_y, 7, 7, {127,217,217,128},
 			"BR Y lock must wrap the +Y tap to the BR quadrant origin");
-	ok &= expect_pixel(locked_y, 3, 7, {127,253,148,128},
+	ok &= expect_pixel(locked_y, 3, 7, {127,248,167,128},
 			"unlocked BL Y must wrap across the full atlas");
 
 	ok &= expect(!build_heightfield_normal_map({0}, 1, 1).is_valid(),

@@ -179,18 +179,21 @@ int main() {
     }
 
     // 4. Normal queries use the retail generated-map basis: centered raw16
-    //    differences, a literal unit up, normalization, and the same quadrant
-    //    locks as height sampling. Invalid/empty sectors retain canonical up.
-    // [orig: Terrain_GenerateNormalMap @0x603210; diff scale @0x7C6950]
+    //    differences over an up of 2 (two one-sided unit-up vectors summed),
+    //    normalization, and the same quadrant locks as height sampling.
+    //    Invalid/empty sectors retain canonical up.
+    // [orig: Terrain_GenerateNormalMap @0x603210; diff scale @0x7C6950; the
+    //  two ups summed @0x603425] (D-TERRAIN-19)
     {
         const TerrainSurfaceNormal asymmetric =
                 height_field_normal_from_raw16(512, 0, 768, 256);
-        check_close(asymmetric.x, 2.0 / 3.0, 1e-12,
+        const double third = 1.0 / std::sqrt(3.0);
+        check_close(asymmetric.x, third, 1e-12,
                     "normal kernel: asymmetric x component");
-        check_close(asymmetric.z, 2.0 / 3.0, 1e-12,
+        check_close(asymmetric.z, third, 1e-12,
                     "normal kernel: asymmetric z component");
-        check_close(asymmetric.up, 1.0 / 3.0, 1e-12,
-                    "normal kernel: unit-up component normalized");
+        check_close(asymmetric.up, third, 1e-12,
+                    "normal kernel: the up of 2 normalized");
 
         const TerrainHeightField invalid{};
         const TerrainSurfaceNormal invalid_normal =

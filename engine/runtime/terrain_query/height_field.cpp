@@ -79,16 +79,22 @@ float height_field_height_world_bilinear(const TerrainHeightField &f, float worl
 TerrainSurfaceNormal height_field_normal_from_raw16(
 		uint16_t x_minus, uint16_t x_plus,
 		uint16_t z_minus, uint16_t z_plus) {
-	// Retail differences raw16 neighbours in height units (1/256), keeps a
-	// literal unit up component, then normalizes the three doubles.
+	// Retail differences raw16 neighbours in height units (1/256) as two
+	// one-sided vectors, each with a unit up component, and adds them before
+	// normalizing: the sum is the centred difference on both axes over an up
+	// of 2 (D-TERRAIN-19). The first vector is spilled to the stack, its up the
+	// 1.0 stored from the fld1; the second keeps the fld1 itself on the x87
+	// stack, and the two ups add in `fadd st, st(5)`.
 	// [orig: Terrain_GenerateNormalMap @0x603210; diff scale @0x7C6950;
-	// fld1 third component @0x603248]
+	// fld1 @0x603248 stored @0x60324C; first vector @0x603381..0x6033CC;
+	// second @0x6033EE..0x603419; sum @0x60341B..0x603425; normalize
+	// @0x603427..0x60344E]
 	constexpr double kHeightScale = 1.0 / 256.0;
 	const double nx = (static_cast<double>(x_minus) -
 	                   static_cast<double>(x_plus)) * kHeightScale;
 	const double nz = (static_cast<double>(z_minus) -
 	                   static_cast<double>(z_plus)) * kHeightScale;
-	constexpr double up = 1.0;
+	constexpr double up = 2.0;
 	const double inverse_length =
 			1.0 / std::sqrt(nx * nx + nz * nz + up * up);
 	return TerrainSurfaceNormal{
