@@ -682,11 +682,10 @@ std::vector<ClipSoundFired> ModelViewport::fire_sounds(const PreviewClock &clock
 		audio::SoundSelector &selector, uint64_t &next_seq) {
 	std::vector<ClipSoundFired> out;
 	const int32_t now = clock.ticks();
-	// The clock sought since (a scrub, a step, the clip's start), or a clip newly chosen: nothing fires
-	// for what that passed over, and the sounds go on from where the clock is.
-	const bool sought = clock.tick_seeks() != sound_seeks_;
-	sound_seeks_ = clock.tick_seeks();
-	const int32_t from = sound_cursor_;
+	// The clock sought since (a scrub, a step, the clip's start, a clip newly chosen): nothing fires for what
+	// the seek passed over, and the sounds go on from where it put the clock, the run since heard whole (the
+	// shot on the clip's tick 0 after a Play from it, however long the frame the clock first ran).
+	const int32_t from = clock.heard_from(sound_cursor_, sound_seeks_);
 	sound_cursor_ = now;
 	const anim::SkeletalClips::LoadedClip *clip =
 			animating_ && reason_ == ModelViewStatus::Ready && skeleton_ && !clip_key_.empty()
@@ -694,7 +693,7 @@ std::vector<ClipSoundFired> ModelViewport::fire_sounds(const PreviewClock &clock
 					: nullptr;
 	// A run longer than kClipSoundCatchUpTicks since the last (the viewport not the one previewed meanwhile,
 	// the Shell held up) fires nothing either: the sounds go on from here rather than in a burst.
-	if (!clip || from < 0 || sought || now <= from || now - from > kClipSoundCatchUpTicks) return out;
+	if (!clip || from < 0 || now <= from || now - from > kClipSoundCatchUpTicks) return out;
 	// The clip's own tick of each clock tick (clip_ticks): a repeated one-shot's taken again from 0.
 	const int32_t period = repeat_period_();
 	if (first_person_.active()) {
@@ -1124,11 +1123,10 @@ std::vector<ClipSoundFired> ModelViewport::fire_damage_sounds(const PreviewClock
 		audio::SoundSelector &selector, uint64_t &next_seq) {
 	std::vector<ClipSoundFired> out;
 	const int32_t now = clock.ticks();
-	const bool sought = clock.tick_seeks() != damage_seeks_;
-	damage_seeks_ = clock.tick_seeks();
-	const int32_t from = damage_cursor_;
+	// After a seek, from where it put the clock (the death's tick 0 after a Play from it).
+	const int32_t from = clock.heard_from(damage_cursor_, damage_seeks_);
 	damage_cursor_ = now;
-	if (!damage_playing() || reason_ != ModelViewStatus::Ready || from < 0 || sought || now <= from ||
+	if (!damage_playing() || reason_ != ModelViewStatus::Ready || from < 0 || now <= from ||
 	    now - from > kClipSoundCatchUpTicks)
 		return out;
 	// The legs on the ticks [from, now): the death on tick 0 heard as the clock leaves it.
