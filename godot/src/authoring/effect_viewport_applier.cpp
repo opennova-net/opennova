@@ -118,7 +118,6 @@ void EffectViewportApplier::apply(const opennova::editor::ViewportModel &model, 
 }
 
 void EffectViewportApplier::tick(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &clock) {
-	follow_display_decode(*backdrop_, camera_);
 	if (!shows_) return;
 	// The scene the viewport stepped, drawn as it stands (a scene opened again since the last Rebuild is the
 	// next one's to take).
