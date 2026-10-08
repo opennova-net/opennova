@@ -65,6 +65,11 @@ struct ViewportKindRow {
 	// a step of the navigation history (a menu's screen); else a row is a record picked one after another
 	// (a definition table's, DI-21), no step.
 	bool pages = false;
+	// It draws the editor's preview background behind its picture (the Preview background preference,
+	// session/preview_background.h): a picture of the project's own data on no sky of the game's (a model's,
+	// a texture's, an effect's, a HUD's, a definition's). A picture of the game's own sky or screen (a menu's,
+	// a mission's, an environment's, a terrain's) draws the game's, and a text's script device has none.
+	bool backdrop = false;
 };
 
 // A kind's row; Menu's for a value past the last kind.

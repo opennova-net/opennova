@@ -5,6 +5,7 @@
 
 #include <editor/preview/viewport_device.h>
 #include <editor/session/operation_progress.h>
+#include <editor/session/preview_background.h>
 
 namespace opennova::editor {
 class PreviewClock;
@@ -119,6 +120,11 @@ public:
 	virtual uint64_t scene_state() const { return 0; }
 	virtual void publish_scene_state() {}
 	virtual void present(double dt) { (void)dt; }
+	// What the picture draws behind it, the editor's preference (the view's preview_background): asked as the
+	// device first takes the viewport and again whenever it changes, never during a draw. A kind whose row draws
+	// the editor's background (ViewportKindRow::backdrop) draws it (authoring/preview_backdrop); any other keeps
+	// the game's own (a mission's, a menu's) and takes nothing.
+	virtual void background(opennova::editor::PreviewBackground background) { (void)background; }
 	// Whether its picture reads the process-wide render state at all (ADR 0046 S18): a texture's flat
 	// picture reads none, so it never enters the frame's arbitration (its device asks no render of it)
 	// and renders beside any state.
