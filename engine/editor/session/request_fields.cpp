@@ -277,6 +277,12 @@ constexpr RequestField kFields[] = {
 			"added to the made file's document as its type's Add makes one (Add it there's, DI-15), selected, one "
 			"step its Undo takes back. Refused (document.values), the file still made, where the type defines no "
 			"name of the kind there." },
+	{ F::PreviewBackground, "preview_background", J::String,
+			"What the previews of the project's own data (a model's, a clip's, a texture's, a particle effect's, a "
+			"definition's, a HUD's) draw behind their picture, the editor's preference: dark (each picture's own, as "
+			"before the preference), grey (a mid grey, the default), light (a pale grey) or checker (two greys' "
+			"squares, through which alpha shows). A mission's, an environment's, a terrain's and a menu's picture "
+			"draws the game's own." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

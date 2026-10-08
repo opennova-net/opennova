@@ -101,6 +101,11 @@ inline EditorRequest plan_import(std::vector<ImportChoice> imports, bool with_de
 	request.with_dependencies = with_dependencies;
 	return request;
 }
+inline EditorRequest set_preview_background(PreviewBackground background) {
+	EditorRequest request = of(EditorRequestKind::SetPreviewBackground);
+	request.preview_background = background;
+	return request;
+}
 inline EditorRequest set_import_dependencies(bool with_dependencies) {
 	EditorRequest request = of(EditorRequestKind::SetImportDependencies);
 	request.with_dependencies = with_dependencies;
