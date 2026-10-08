@@ -14,7 +14,6 @@
 // CUISpinList_ParseXMLDefinition @ 0x64bd10 + CSpinListWnd_Render @ 0x64b220;
 // the APPEARANCE COLOR / OUTLINE value, CRT_wcstoxl base 16 @ 0x648562.]
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -40,27 +39,8 @@ FrameTileRect frame_tile_rect(int size, int col, int row);
 // (the canonical 4x4 grid).
 int frame_stencil_tile_size(int authored_size, int texture_width);
 
-// One of the 8 border pieces: which tile it draws and where it hangs. The
-// anchors pick which window edges the piece follows (0 = leading, 1 =
-// trailing); the offsets are the element-local geometry — the border hangs
-// OUTSIDE the window rect by SIZE, pulled back in by the authored STENCIL
-// INSETX/INSETY [orig: left - SIZE + INSETX; the trailing edges sit at
-// -inset - 1 against their anchor].
-struct FrameBorderPiece {
-	const char *name = "";
-	int tile_col = 0;
-	int tile_row = 0;
-	float anchor_left = 0.0f;
-	float anchor_right = 0.0f;
-	float anchor_top = 0.0f;
-	float anchor_bottom = 0.0f;
-	float off_left = 0.0f;
-	float off_top = 0.0f;
-	float off_right = 0.0f;
-	float off_bottom = 0.0f;
-};
-std::array<FrameBorderPiece, 8> frame_border_layout(int size, int insetx,
-		int insety);
+// Where the 8 border pieces hang is device geometry, the scaled cell and insets in
+// floats: the menu compiler's (runtime/menu MenuFrameCompiler::emit_frame).
 
 // --- The three-stage POSITION solve ------------------------------------------
 

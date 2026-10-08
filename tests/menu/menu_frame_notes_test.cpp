@@ -640,7 +640,10 @@ static int test_layout_notes() {
 // The notes observe. configure()'s hooks are const (they write only the note log), and this
 // screen compiles to the draw list the compiler drew before it had notes: the golden is
 // the S9j1 compiler's (a one-off build of that code, 2026-09-24, design scale), its list's
-// rows laid out by the ITEMS justification since (D-MNU-34, 2026-10-07): the hash below. layout_notes and add_load_note leave the next compile as it was, and two
+// rows laid out by the ITEMS justification since (D-MNU-34, 2026-10-07), its images'
+// UVs carrying the strip's half texel, its frame in device floats and its glyphs the
+// drawer's biased height since (D-MNU-35, D-FNT-6, 2026-10-08): the hash below.
+// layout_notes and add_load_note leave the next compile as it was, and two
 // configures note the same.
 static int test_notes_only_observe() {
 	Rig rig;
@@ -668,8 +671,8 @@ static int test_notes_only_observe() {
 	hover.hovered = true;
 	rig.state.widgets.push_back(hover);
 	const uint64_t design = golden(rig.compiler.compile(rig.state, 1.0f, 1.0f));
-	if (design != 0x0d6b29a4c9879447ull) std::fprintf(stderr, "  golden %016llx\n", (unsigned long long)design);
-	TEST_EXPECT(design == 0x0d6b29a4c9879447ull);
+	if (design != 0x51f8dc985531ccf0ull) std::fprintf(stderr, "  golden %016llx\n", (unsigned long long)design);
+	TEST_EXPECT(design == 0x51f8dc985531ccf0ull);
 	const std::string before = digest(rig.compiler.compile(rig.state, 1.6f, 1.2f));
 	const std::vector<MenuFrameNote> first = rig.notes();
 	TEST_EXPECT(!first.empty());

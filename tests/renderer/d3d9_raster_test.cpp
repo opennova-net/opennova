@@ -77,12 +77,45 @@ void test_near_plane_offset_moves_the_image() {
 	CHECK(near(-(moved_y - centred_y) * 768.0 * 0.5, 0.5, 1.0e-4));
 }
 
+// A quad covers the pixels whose centres (the integers) lie in [x0, x1) x [y0, y1):
+// from ceil(x0) up to, not including, ceil(x1).
+void test_quad_pixels() {
+	const PixelRect whole = d3d9_quad_pixels(10.0f, 20.0f, 30.0f, 40.0f);
+	CHECK(whole.x0 == 10 && whole.y0 == 20 && whole.x1 == 30 && whole.y1 == 40);
+	// A menu frame's piece at 1024 x 768: (5.12, -0.0) to (15.36, 10.24).
+	const PixelRect piece = d3d9_quad_pixels(5.12f, 0.0f, 15.36f, 10.24f);
+	CHECK(piece.x0 == 6 && piece.y0 == 0 && piece.x1 == 16 && piece.y1 == 11);
+	const PixelRect thin = d3d9_quad_pixels(5.2f, 1.0f, 5.9f, 2.0f);
+	CHECK(thin.x1 - thin.x0 == 0); // no pixel centre inside: nothing drawn
+}
+
+// A line-list segment lights its first point's pixel through the one before its
+// last point's: an outline of four segments round a rect lights every pixel of its
+// perimeter once, the corners included [orig: CUIElement_DrawOutlineRect @ 0x647fc0].
+void test_axis_line_pixels() {
+	PixelRect px;
+	CHECK(d3d9_axis_line_pixels(256.0f, 192.0f, 767.0f, 192.0f, &px));
+	CHECK(px.x0 == 256 && px.x1 == 767 && px.y0 == 192 && px.y1 == 193); // top: 256..766
+	CHECK(d3d9_axis_line_pixels(767.0f, 192.0f, 767.0f, 536.0f, &px));
+	CHECK(px.x0 == 767 && px.x1 == 768 && px.y0 == 192 && px.y1 == 536); // right: 192..535
+	CHECK(d3d9_axis_line_pixels(767.0f, 536.0f, 256.0f, 536.0f, &px));
+	CHECK(px.x0 == 257 && px.x1 == 768 && px.y0 == 536 && px.y1 == 537); // bottom: 767..257
+	CHECK(d3d9_axis_line_pixels(256.0f, 536.0f, 256.0f, 192.0f, &px));
+	CHECK(px.x0 == 256 && px.x1 == 257 && px.y0 == 193 && px.y1 == 537); // left: 536..193
+	// Off the integers, diagonal or of no length: the device draws its own way.
+	CHECK(!d3d9_axis_line_pixels(10.5f, 4.0f, 20.0f, 4.0f, &px));
+	CHECK(!d3d9_axis_line_pixels(10.0f, 4.0f, 20.0f, 8.0f, &px));
+	CHECK(!d3d9_axis_line_pixels(10.0f, 4.0f, 10.0f, 4.0f, &px));
+}
+
 } // namespace
 
 int main() {
 	test_pixel_centre();
 	test_ndc_shift();
 	test_near_plane_offset_moves_the_image();
+	test_quad_pixels();
+	test_axis_line_pixels();
 	if (failures != 0) {
 		std::printf("d3d9_raster: %d failure(s)\n", failures);
 		return 1;

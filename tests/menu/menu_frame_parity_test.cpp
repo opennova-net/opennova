@@ -409,20 +409,23 @@ void test_image_band(const fnt_font_t *font) {
 	const MenuDrawList &dl = c.compile(st, 1.0f, 1.0f);
 	CHECK(quad_with(dl, slot_of(c, "m.tga")) == nullptr, "MAP_STATE 1 with no HEIGHT draws nothing");
 	const MenuQuad *h = quad_with(dl, slot_of(c, "h.tga"));
-	CHECK(h != nullptr && h->v0 == 0.0f && h->v1 == 0.25f, "a HEIGHT alone crops row 0");
+	// Each band carries the strip's half texel at both ends (set_image_uv)
+	// [orig: Render_DrawTiledTextureStrip @ 0x67b058].
+	const float half = 0.5f / 80.0f;
+	CHECK(h != nullptr && h->v0 == 0.0f + half && h->v1 == 0.25f + half, "a HEIGHT alone crops row 0");
 	int s_quads = 0;
 	for (const MenuQuad &q : dl.quads) {
 		if (q.texture == slot_of(c, "s.tga")) {
 			++s_quads;
 			if (q.y0 >= 90.0f) {
-				CHECK(q.v0 == 0.5f && q.v1 == 0.75f,
+				CHECK(q.v0 == 0.5f + half && q.v1 == 0.75f + half,
 						"a later row draws the band the texture's first load baked (20, not 24)");
 			}
 		}
 	}
 	CHECK(s_quads == 2, "both users of the shared texture draw");
 	const MenuQuad *z = quad_with(dl, slot_of(c, "z.tga"));
-	CHECK(z != nullptr && z->v0 == 0.0f && z->v1 == 1.0f / 80.0f, "a HEIGHT of 0 stretches texel row 0");
+	CHECK(z != nullptr && z->v0 == half && z->v1 == half, "a HEIGHT of 0 stretches texel row 0's centre");
 	// The texture loads persist: a second document reads the first's height.
 	opennova::mnu::Document second = parse_or_die(screen(button("X",
 			"<APPEARANCE state=\"default\" type=\"image\" map_state=\"1\" height=\"30\">s.tga</APPEARANCE>")));
@@ -430,13 +433,14 @@ void test_image_band(const fnt_font_t *font) {
 	c.set_texture_size(slot_of(c, "s.tga"), 32, 80);
 	const MenuDrawList &dl2 = c.compile(st, 1.0f, 1.0f);
 	const MenuQuad *x = quad_with(dl2, slot_of(c, "s.tga"));
-	CHECK(x != nullptr && x->v0 == 0.25f && x->v1 == 0.5f, "the first load's HEIGHT holds across screens");
+	CHECK(x != nullptr && x->v0 == 0.25f + half && x->v1 == 0.5f + half,
+			"the first load's HEIGHT holds across screens");
 	c.reset_texture_loads();
 	c.configure(second.first_screen());
 	c.set_texture_size(slot_of(c, "s.tga"), 32, 80);
 	const MenuDrawList &dl3 = c.compile(st, 1.0f, 1.0f);
 	const MenuQuad *y = quad_with(dl3, slot_of(c, "s.tga"));
-	CHECK(y != nullptr && y->v0 == 30.0f / 80.0f, "until the loads are reset");
+	CHECK(y != nullptr && y->v0 == 30.0f / 80.0f + half, "until the loads are reset");
 }
 
 // The rect's image extents as parsed [orig: @ 0x6485cd..0x648634]: every IMAGE
@@ -500,7 +504,8 @@ void test_spin_arrows(const fnt_font_t *font) {
 	MenuFrameState st;
 	const MenuDrawList &dl = c.compile(st, 1.0f, 1.0f);
 	const MenuQuad *up = quad_with(dl, arrow);
-	CHECK(up != nullptr && up->x0 == 80.0f && up->v0 == 0.0f, "the SPINUP draws its DEFAULT row");
+	const float half = 0.5f / 80.0f; // the strip's half texel (set_image_uv)
+	CHECK(up != nullptr && up->x0 == 80.0f && up->v0 == 0.0f + half, "the SPINUP draws its DEFAULT row");
 	// The SPINDOWN's STRING reads its own table (none): the raw key; the list's
 	// item reads the root's.
 	bool raw_key = false;
@@ -515,7 +520,7 @@ void test_spin_arrows(const fnt_font_t *font) {
 	CHECK(claim.hovered == 1 && claim.spin_part == 1, "the arrow claims through its spin list");
 	const MenuDrawList &dl2 = c.compile(st, 1.0f, 1.0f);
 	const MenuQuad *hover = quad_with(dl2, arrow);
-	CHECK(hover != nullptr && hover->v0 == 0.25f, "the hovered arrow draws its MOUSEOVER row");
+	CHECK(hover != nullptr && hover->v0 == 0.25f + half, "the hovered arrow draws its MOUSEOVER row");
 	// An arrow with no art, text or far edges is 0x0 and never hit; one with its
 	// far edges but no art still is.
 	CHECK(c.spin_arrow_at(2, st, 101.0f, 201.0f, 1.0f, 1.0f) == 2,

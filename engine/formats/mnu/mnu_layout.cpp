@@ -21,48 +21,6 @@ int frame_stencil_tile_size(int authored_size, int texture_width) {
 	return texture_width / 4;
 }
 
-// [orig: CUIElement_DrawFrame @ 0x64a210 — the 8 border quads hang outside
-// the rect by SIZE, pulled back by INSETX/INSETY; edges stretch between the
-// corners]
-std::array<FrameBorderPiece, 8> frame_border_layout(int size, int insetx,
-		int insety) {
-	const float s = static_cast<float>(size);
-	const float ix = static_cast<float>(insetx);
-	const float iy = static_cast<float>(insety);
-	const float x0 = -s + ix; // border overhangs the rect [orig: left - SIZE + INSETX]
-	const float y0 = -s + iy;
-	const float xr = -ix - 1.0f; // against the right edge (anchor 1)
-	const float yb = -iy - 1.0f; // against the bottom edge (anchor 1)
-
-	auto piece = [&](const char *name, int col, int row, float ax0, float ax1,
-						 float ay0, float ay1, float l, float t, float r,
-						 float b) {
-		FrameBorderPiece p;
-		p.name = name;
-		p.tile_col = col;
-		p.tile_row = row;
-		p.anchor_left = ax0;
-		p.anchor_right = ax1;
-		p.anchor_top = ay0;
-		p.anchor_bottom = ay1;
-		p.off_left = l;
-		p.off_top = t;
-		p.off_right = r;
-		p.off_bottom = b;
-		return p;
-	};
-	return {
-		piece("FrameTL", 0, 0, 0, 0, 0, 0, x0, y0, x0 + s, y0 + s),
-		piece("FrameTop", 1, 0, 0, 1, 0, 0, x0 + s, y0, xr, y0 + s),
-		piece("FrameTR", 2, 0, 1, 1, 0, 0, xr, y0, xr + s, y0 + s),
-		piece("FrameLeft", 0, 1, 0, 0, 0, 1, x0, y0 + s, x0 + s, yb),
-		piece("FrameRight", 2, 1, 1, 1, 0, 1, xr, y0 + s, xr + s, yb),
-		piece("FrameBL", 0, 2, 0, 0, 1, 1, x0, yb, x0 + s, yb + s),
-		piece("FrameBottom", 1, 2, 0, 1, 1, 1, x0 + s, yb, xr, yb + s),
-		piece("FrameBR", 2, 2, 1, 1, 1, 1, xr, yb, xr + s, yb + s),
-	};
-}
-
 // [orig: the POSITION branch @ 0x648120 — missing edges read 0 like the
 // zeroed element fields; the parse tail's degenerate-axis fallback to the
 // accumulated max texture extents @ 0x649736..0x64975e]

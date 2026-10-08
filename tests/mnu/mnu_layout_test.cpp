@@ -5,7 +5,6 @@
 
 #include <formats/mnu/mnu_layout.h>
 
-#include <cmath>
 #include <cstdio>
 
 namespace {
@@ -19,10 +18,6 @@ void check(bool ok, const char *message) {
 	}
 }
 
-bool near(float actual, float expected) {
-	return std::fabs(actual - expected) <= 0.0001f;
-}
-
 void frame_contract() {
 	// The stencil grid slices SIZE x SIZE tiles [orig: CUIElement_InitBorderMaterials
 	// @ 0x646f70]; the authored STENCIL attr wins, else width/4.
@@ -33,27 +28,8 @@ void frame_contract() {
 			"the authored STENCIL size wins");
 	check(opennova::mnu::frame_stencil_tile_size(0, 64) == 16,
 			"an unauthored size recovers width/4");
-
-	// The 8 border pieces hang OUTSIDE the rect by SIZE, pulled back by the
-	// insets; edges stretch between the corners [orig: @ 0x64a210].
-	const auto layout = opennova::mnu::frame_border_layout(16, 2, 3);
-	const auto &tl = layout[0];
-	check(tl.tile_col == 0 && tl.tile_row == 0 &&
-					near(tl.anchor_left, 0) && near(tl.anchor_right, 0) &&
-					near(tl.off_left, -14.0f) && near(tl.off_top, -13.0f) &&
-					near(tl.off_right, 2.0f) && near(tl.off_bottom, 3.0f),
-			"TL overhangs by SIZE minus the insets");
-	const auto &top = layout[1];
-	check(top.tile_col == 1 && near(top.anchor_left, 0) &&
-					near(top.anchor_right, 1) && near(top.off_left, 2.0f) &&
-					near(top.off_right, -3.0f),
-			"the top edge stretches between the corners (trailing -inset-1)");
-	const auto &br = layout[7];
-	check(br.tile_col == 2 && br.tile_row == 2 &&
-					near(br.anchor_left, 1) && near(br.anchor_top, 1) &&
-					near(br.off_left, -3.0f) && near(br.off_top, -4.0f) &&
-					near(br.off_right, 13.0f) && near(br.off_bottom, 12.0f),
-			"BR hangs off the trailing anchors");
+	// Where the pieces hang is device geometry: ctest menu_frame_compiler
+	// (test_frame_pieces_hang_in_device_floats).
 }
 
 void position_contract() {

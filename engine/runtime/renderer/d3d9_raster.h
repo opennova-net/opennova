@@ -21,6 +21,8 @@
 // Measured on JO:CA at 1024x768 (2026-10-08): retail's crosshair, compass ring and HUD
 // text sit 0.5 px right and 0.5 px down of OpenNova's before this rule.
 
+#include <cmath>
+
 namespace opennova::renderer {
 
 // The offset from a D3D9 window coordinate to the same point on a raster whose
@@ -52,6 +54,53 @@ struct NearPlaneOffset {
 inline NearPlaneOffset near_plane_offset(const NdcShift &shift, float near_width,
                                          float near_height) {
     return {-shift.x * near_width * 0.5f, -shift.y * near_height * 0.5f};
+}
+
+// A block of whole pixels, [x0, x1) x [y0, y1).
+struct PixelRect {
+    int x0 = 0;
+    int y0 = 0;
+    int x1 = 0;
+    int y1 = 0;
+};
+
+// The pixels Direct3D 9 covers with a pre-transformed quad from (x0, y0) to (x1, y1):
+// those whose centres lie in [x0, x1) x [y0, y1) (its top-left fill rule), the first
+// column ceil(x0) and the last ceil(x1) - 1. A quad on the integers covers the same
+// pixels on either raster; one off them (the menu frame's border pieces,
+// MenuFrameCompiler::emit_frame) is where the two disagree.
+inline PixelRect d3d9_quad_pixels(float x0, float y0, float x1, float y1) {
+    return {static_cast<int>(std::ceil(x0)), static_cast<int>(std::ceil(y0)),
+            static_cast<int>(std::ceil(x1)), static_cast<int>(std::ceil(y1))};
+}
+
+// The pixels Direct3D 9 lights for a one-pixel line-list segment from a to b, both on
+// the integers and the segment axis-aligned: its diamond-exit rule lights a's pixel and
+// every one up to, not including, b's, which the next segment of an outline starts on.
+// False for a segment that is diagonal, off the integers or of no length, which a
+// device draws its own way. A raster that draws a line as a one-pixel-wide quad
+// centred on it covers both ends alike, so an outline drawn that way loses the corner
+// its last segment ends on [orig: draw_line_2d @ 0x6786d0 — the points verbatim,
+// D3DPT_LINELIST; CUIElement_DrawOutlineRect @ 0x647fc0 strings four such segments
+// round a rect].
+inline bool d3d9_axis_line_pixels(float ax, float ay, float bx, float by, PixelRect *out) {
+    if (ax != std::floor(ax) || ay != std::floor(ay) || bx != std::floor(bx) ||
+        by != std::floor(by)) {
+        return false;
+    }
+    const int x0 = static_cast<int>(ax);
+    const int y0 = static_cast<int>(ay);
+    const int x1 = static_cast<int>(bx);
+    const int y1 = static_cast<int>(by);
+    if (y0 == y1 && x0 != x1) {
+        *out = x1 > x0 ? PixelRect{x0, y0, x1, y0 + 1} : PixelRect{x1 + 1, y0, x0 + 1, y0 + 1};
+        return true;
+    }
+    if (x0 == x1 && y0 != y1) {
+        *out = y1 > y0 ? PixelRect{x0, y0, x0 + 1, y1} : PixelRect{x0, y1 + 1, x0 + 1, y0 + 1};
+        return true;
+    }
+    return false;
 }
 
 } // namespace opennova::renderer

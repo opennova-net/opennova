@@ -374,8 +374,10 @@ void test_clip_viewport(const fnt_font_t *font) {
 	state.widgets.push_back(ws);
 	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
 	bool clipped = false;
+	// The image's U runs over texel columns 0.5 .. 16.5 (the strip's half texel,
+	// MenuFrameCompiler::set_image_uv): cut halfway, it ends at column 8.5.
 	for (const MenuQuad &q : dl.quads)
-		if (q.texture == tex && q.x0 == 90.0f && q.x1 == 100.0f && q.u1 == 0.5f) clipped = true;
+		if (q.texture == tex && q.x0 == 90.0f && q.x1 == 100.0f && q.u1 == 8.5f / 16.0f) clipped = true;
 	CHECK(clipped, "the image is cut at the viewport's right edge (99 + 1) with its UVs");
 }
 

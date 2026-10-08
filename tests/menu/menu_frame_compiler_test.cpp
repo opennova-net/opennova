@@ -201,19 +201,23 @@ void test_draw_order_and_state_selection(const fnt_font_t *font) {
 				dl.quads[1].u1 == 1.0f && dl.quads[1].v1 == 0.25f,
 			"the fill samples stencil cell (3, 0)");
 	int stencil_quads = 0;
-	bool stencil_quads_are_untinted = true;
+	bool stencil_quads_take_the_half_diffuse = true;
 	for (size_t i = 2; i < 10; ++i) {
 		if (dl.quads[i].texture == border && dl.quads[i].texture2 == brush) {
 			++stencil_quads;
-			stencil_quads_are_untinted =
-					stencil_quads_are_untinted && dl.quads[i].color == 0xFFFFFFFFu;
+			stencil_quads_take_the_half_diffuse =
+					stencil_quads_take_the_half_diffuse && dl.quads[i].color == 0xFF7F7F7Fu;
 		}
 	}
 	CHECK(stencil_quads == 8, "eight stencil/brush border material pieces");
-	CHECK(dl.quads[1].color == 0xFFFFFFFFu,
-			"the frame fill preserves the copied stencil color and alpha");
-	CHECK(stencil_quads_are_untinted,
-			"the frame material carries no extra compiler tint");
+	// Retail submits every frame quad in 0xFF7F7F7F through the 0x651
+	// material's MODULATE2X: the fill reads its texel x 254/255, and each piece
+	// carries the diffuse its two stages double [orig: CUIElement_DrawFrame
+	// @ 0x64a2b3 / @ 0x64a392, colour -8421505].
+	CHECK(dl.quads[1].color == 0xFFFEFEFEu,
+			"the frame fill reads its copied stencil texel x 254/255, alpha whole");
+	CHECK(stencil_quads_take_the_half_diffuse,
+			"the border pieces carry retail's 0x7F diffuse");
 	// Default state: the idle art draws, the hover art does not.
 	CHECK(count_quads_with_texture(dl, ok_idle) == 1,
 			"default state draws the default appearance");
@@ -330,9 +334,11 @@ void test_image_appearance_crops_authored_map_state(const fnt_font_t *font) {
 	}
 	CHECK(tab != nullptr, "the Options tab image draws");
 	if (tab != nullptr) {
-		CHECK(tab->u0 == 0.0f && tab->u1 == 1.0f,
+		// Texel columns 0.5 .. 100.5 and rows 40.5 .. 60.5: the strip's half
+		// texel at both ends [orig: Render_DrawTiledTextureStrip @ 0x67b058].
+		CHECK(tab->u0 == 0.5f / 100.0f && tab->u1 == 0.5f / 100.0f + 1.0f,
 				"the atlas row spans the full texture width");
-		CHECK(tab->v0 == 0.5f && tab->v1 == 0.75f,
+		CHECK(tab->v0 == 0.5f + 0.5f / 80.0f && tab->v1 == 0.75f + 0.5f / 80.0f,
 				"map_state 2 crops the third 20px row from an 80px atlas");
 	}
 }
@@ -460,7 +466,7 @@ void test_spin_arrow_uses_cropped_atlas_extent(const fnt_font_t *font) {
 		CHECK(arrow->x0 == 110.0f && arrow->y0 == 105.0f && arrow->x1 == 126.0f &&
 						arrow->y1 == 125.0f,
 				"the omitted arrow edges use the 16x20 cropped native extent");
-		CHECK(arrow->v0 == 0.5f && arrow->v1 == 0.75f,
+		CHECK(arrow->v0 == 0.5f + 0.5f / 80.0f && arrow->v1 == 0.75f + 0.5f / 80.0f,
 				"the spin arrow draws only map_state 2 from the 80px atlas");
 	}
 	CHECK(c.spin_arrow_at(1, state, 115.0f, 124.0f, 1.0f, 1.0f) == 1,
@@ -557,8 +563,9 @@ void test_list_scrollbar_uses_authored_geometry_and_range(
 						down_quad->x0 == 90.0f && down_quad->y0 == 100.0f &&
 						down_quad->x1 == 110.0f && down_quad->y1 == 120.0f,
 				"the arrows occupy the authored scrollbar's two ends");
-		CHECK(up_quad->v0 == 0.25f && up_quad->v1 == 0.5f &&
-						down_quad->v0 == 0.75f && down_quad->v1 == 1.0f,
+		const float half = 0.5f / 80.0f; // the strip's half texel
+		CHECK(up_quad->v0 == 0.25f + half && up_quad->v1 == 0.5f + half &&
+						down_quad->v0 == 0.75f + half && down_quad->v1 == 1.0f + half,
 				"each arrow crops its authored 20px atlas row");
 	}
 	if (shuttle_quad != nullptr) {
@@ -953,6 +960,88 @@ void test_scale_truncation(const fnt_font_t *font) {
 						ok->y1 == 51.0f,
 				"scaled rects truncate to int per element");
 	}
+	// The scale pair is the surface times the float 0.00125 (1/600), each
+	// product a float [orig: CUIScene_SetScreenScale @ 0x639488]: at 1280 the
+	// x scale is one float below 1.6, and 5 design units truncate to 7.
+	using opennova::menu::menu_scale_x;
+	using opennova::menu::menu_scale_y;
+	using opennova::menu::menu_scaled_edge;
+	using opennova::menu::menu_text_anchor;
+	CHECK(menu_scale_x(1024.0f) == 1.28f && menu_scale_y(768.0f) == 1.28f &&
+					menu_scale_x(800.0f) == 1.0f && menu_scale_y(600.0f) == 1.0f,
+			"the pair at 1024x768 and 800x600");
+	CHECK(menu_scale_x(1280.0f) < 1.6f && menu_scaled_edge(5, menu_scale_x(1280.0f)) == 7.0f,
+			"1280 wide scales by 1280 x 0.00125f, a float below 1.6");
+	// Each edge is the float product truncated: the x87 unit runs at single
+	// precision under Direct3D 9, so 150 x 1.2799999 is 192, not 191.99999
+	// [orig: CGfxDevice_CreateDevice @ 0x67e9fd, no D3DCREATE_FPU_PRESERVE].
+	CHECK(menu_scaled_edge(150, 1.28f) == 192.0f && menu_scaled_edge(200, 1.28f) == 256.0f &&
+					menu_scaled_edge(600, 1.28f) == 768.0f && menu_scaled_edge(420, 1.28f) == 537.0f,
+			"edges truncate the float product");
+	// The text anchor is the design point times the pair, untruncated: TITLE's
+	// label at (200 + EDGE 5, 50) lands at (262.4, 64), its glyph quad half a
+	// pixel up and left [orig: CFontCache_DrawTextScaled @ 0x6531f1..0x65322c].
+	bool title_at_anchor = false;
+	for (const auto &g : dl.glyphs) {
+		if (g.x_top_left == menu_text_anchor(205, 1.28f) - 0.5f &&
+				g.y_top == menu_text_anchor(50, 1.28f) - 0.5f) {
+			title_at_anchor = true;
+		}
+	}
+	CHECK(title_at_anchor, "a label's first glyph sits at the untruncated anchor");
+}
+
+// The frame's eight pieces hang in device floats: the cell scaled by the pair,
+// the left and top a cell out and the scaled inset back in, the right and bottom
+// an inset in and one pixel more; the brush is screen-anchored, its HEIGHT the x
+// period and its WIDTH the y period [orig: CUIElement_DrawFrame @ 0x64a2d7..0x64a73d;
+// CUIElement_InitBorderMaterials @ 0x6470ee..0x647116].
+void test_frame_pieces_hang_in_device_floats(const fnt_font_t *font) {
+	opennova::mnu::Document doc = parse_or_die(kScreenXml);
+	MenuFrameCompiler c;
+	configure_with(c, doc.first_screen(), font);
+	const int32_t border = slot_of(c, "border.tga");
+	const int32_t brush = slot_of(c, "tile.tga");
+	c.set_texture_size(border, 32, 32);
+	c.set_texture_size(brush, 64, 48);
+	MenuFrameState state;
+	const float s = 1.28f;
+	const MenuDrawList &dl = c.compile(state, s, s);
+	std::vector<const MenuQuad *> pieces;
+	const MenuQuad *fill = nullptr;
+	for (const MenuQuad &q : dl.quads) {
+		if (q.texture == border && q.texture2 == brush) pieces.push_back(&q);
+		if (q.texture == border && q.tiled) fill = &q;
+	}
+	CHECK(fill != nullptr && pieces.size() == 8, "the fill and eight pieces");
+	if (fill == nullptr || pieces.size() != 8) return;
+	// MAIN is (0, 0)-(800, 600): on the device (0, 0)-(1024, 768); the cell 8,
+	// the insets the constructor's 12 and 8 [orig: CWnd_Construct].
+	CHECK(fill->x0 == 0.0f && fill->y0 == 0.0f && fill->x1 == 1024.0f && fill->y1 == 768.0f,
+			"the fill covers the window's truncated device rect");
+	const float cell_w = 8.0f * s;
+	const float cell_h = 8.0f * s;
+	const float left = (0.0f - 8.0f * s) + s * 12.0f;
+	const float top = (0.0f - 8.0f * s) + 8.0f * s;
+	const float top_row_end = 8.0f * s + top;
+	const float right = (1024.0f - s * 12.0f) - 1.0f;
+	const float bottom = (768.0f - 8.0f * s) - 1.0f;
+	const MenuQuad &tl = *pieces[0];
+	const MenuQuad &top_edge = *pieces[1];
+	const MenuQuad &tr = *pieces[2];
+	const MenuQuad &right_edge = *pieces[4];
+	const MenuQuad &br = *pieces[7];
+	CHECK(tl.x0 == left && tl.y0 == top && tl.x1 == left + cell_w && tl.y1 == top_row_end,
+			"TL: a scaled cell out, the scaled inset back");
+	CHECK(top_edge.x0 == left + cell_w && top_edge.x1 == right,
+			"the top edge stretches to the right piece");
+	CHECK(tr.x0 == right && tr.x1 == right + cell_w, "TR: the scaled inset in, one pixel more");
+	CHECK(right_edge.y0 == top_row_end && right_edge.y1 == bottom, "the right edge's span");
+	CHECK(br.y0 == bottom && br.y1 == bottom + cell_h, "BR: the bottom inset in, one pixel more");
+	CHECK(tl.u0 == 0.0f && tl.v0 == 0.0f && tl.u1 == 0.25f && tl.v1 == 0.25f,
+			"stage 0 is the stencil cell, no half texel");
+	CHECK(tl.texture2_period_x == 48.0f && tl.texture2_period_y == 64.0f,
+			"the brush period: its height across, its width down");
 }
 
 void test_radio_checkbox_forcing(const fnt_font_t *font) {
@@ -1071,11 +1160,12 @@ void test_edit_caret(const fnt_font_t *font) {
 	CHECK(hover_fill, "focused edit draws the mouseover appearance");
 	// 2 text glyphs + the caret underscore.
 	CHECK(dl.glyphs.size() == 3, "text plus one caret glyph");
-	// The caret after 'A': left-run width 8, plus the (spacing-1)+1 gap = 2
-	// for a non-empty left run, plus the same gap again for a mid-string
-	// caret [orig: the two gated adds @ 0x6534dc / 0x653562] -> x 12,
-	// vertex 11.5.
-	CHECK(dl.glyphs[2].x_top_left == 11.5f,
+	// The caret after 'A': left-run width 8, plus a gap of
+	// CGameFont_GetSpacingPad (trunc((spacing - 1) * design) + 1 = 2) and the
+	// caller's + 1 for a non-empty left run, plus the same gap again for a
+	// mid-string caret [orig: the two gated adds @ 0x6534de..0x6534eb /
+	// @ 0x653583..0x653590] -> x 14, vertex 13.5.
+	CHECK(dl.glyphs[2].x_top_left == 13.5f,
 			"caret x after the left run + the two gap terms");
 	bool mouseover_text = (dl.glyphs[0].color & 0xFFFFFFu) == text_rgb(0x222222u);
 	CHECK(mouseover_text, "focused edit text uses the mouseover fg");
@@ -1879,13 +1969,13 @@ void test_label_mnemonic(const fnt_font_t *font) {
 	const MenuDrawList &draw = c.compile(st, 1.0f, 1.0f);
 	// The mnemonic rides retail's caret leg: no underline markup, one extra
 	// '_' glyph stretched to the marked char, at prefix width + the two gap
-	// terms (8 + 2 + 2 = 12 -> vertex 11.5)
+	// terms (8 + 3 + 3 = 14 -> vertex 13.5)
 	// [orig: CFontCache_DrawTextWithCursor @0x6533b0 — gated adds @0x6534dc/0x653562].
 	CHECK(draw.underlines.empty(),
 			"the label mnemonic draws a glyph, not an underline segment");
 	CHECK(draw.glyphs.size() == 5, "the four label glyphs plus the mnemonic '_'");
 	if (draw.glyphs.size() == 5) {
-		CHECK(draw.glyphs[4].x_top_left == 11.5f,
+		CHECK(draw.glyphs[4].x_top_left == 13.5f,
 				"the '_' lands at the marked byte's prefix offset");
 	}
 	// A runtime relabel draws its own marker but registers nothing new.
@@ -2878,6 +2968,7 @@ int main() {
 	test_list_rows_lay_out_by_the_items_justification(&font);
 	test_text_inline_colour_tags(&font);
 	test_scale_truncation(&font);
+	test_frame_pieces_hang_in_device_floats(&font);
 	test_radio_checkbox_forcing(&font);
 	test_edit_caret(&font);
 	test_list_rows_and_item_cell(&font);

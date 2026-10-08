@@ -626,8 +626,9 @@ void test_feed_and_power_label_slots(const fnt_font_t *font) {
 					bold[0].y_top - static_cast<float>(design_to_screen_y(684, 720)) > -1.0f);
 			CHECK(bold[0].x_top_left - static_cast<float>(design_to_screen_x(122, 1280)) < 1.0f &&
 					bold[0].x_top_left - static_cast<float>(design_to_screen_x(122, 1280)) > -1.0f);
-			// The bold slot's 1.25 scale: a 16-px cell draws 20 px tall.
-			CHECK(bold[0].y_bottom - bold[0].y_top == 20.0f);
+			// The bold slot's 1.25 scale: a 16-px cell and the drawer's half-texel
+			// bottom bias draw 16.5 x 1.25 px tall (D-FNT-6).
+			CHECK(bold[0].y_bottom - bold[0].y_top == 16.5f * 1.25f);
 			// The system line at the scaled HUDSYSTEXT.
 			CHECK(bold[4].y_top - static_cast<float>(design_to_screen_y(22, 720)) < 1.0f &&
 					bold[4].y_top - static_cast<float>(design_to_screen_y(22, 720)) > -1.0f);

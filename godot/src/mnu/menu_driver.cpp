@@ -569,14 +569,13 @@ void MenuDriver::focus_widget(int p_id) {
 }
 
 Vector2 MenuDriver::design_scale() const {
-	// The fixed authoring design space (the witness lives at the engine home,
-	// engine/runtime/menu menu_frame.h kMenuDesignWidth/Height).
+	// The scale pair of the fixed authoring design space (the witness lives at the
+	// engine home, engine/runtime/menu menu_frame.h menu_scale_x/y).
 	MenuFrame *frame = frame_();
 	if (frame == nullptr) return Vector2(1.0f, 1.0f);
 	const Vector2 size = frame->get_size();
 	if (size.x > 1.0f && size.y > 1.0f)
-		return Vector2(size.x / static_cast<float>(MenuFrame::DESIGN_WIDTH),
-				size.y / static_cast<float>(MenuFrame::DESIGN_HEIGHT));
+		return Vector2(opennova::menu::menu_scale_x(size.x), opennova::menu::menu_scale_y(size.y));
 	return Vector2(1.0f, 1.0f);
 }
 

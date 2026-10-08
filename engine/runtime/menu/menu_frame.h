@@ -46,30 +46,71 @@ enum WidgetVisualState : int32_t {
 inline constexpr int32_t kMenuTexNone = -1;
 
 // Menus are authored in the fixed 800x600 design space; the anamorphic scale
-// pair every compile/hit call takes is surface_w / kMenuDesignWidth and
-// surface_h / kMenuDesignHeight [orig: CUIScene_SetScreenScale @ 0x639480].
+// pair every compile/hit call takes is menu_scale_x / menu_scale_y of the surface
+// [orig: CUIScene_SetScreenScale @ 0x639480].
 inline constexpr int kMenuDesignWidth = 800;
 inline constexpr int kMenuDesignHeight = 600;
 
-// A design-space edge on the device: scaled and truncated to an int per element, the
-// way every emitted coordinate is [orig: @ 0x647d40]. An embedder that draws over the
-// picture (the editor's outlines) lands on the same pixels.
+// The scale pair: the surface's width times the float 0.00125 and its height times the
+// float 1/600, each product a float, not width / 800: at 1280 wide the pair's x is
+// 1.5999999, one float below 1.6, and every edge it truncates follows
+// [orig: CUIScene_SetScreenScale @ 0x639480 — fild width; fmul flt_7D2294
+// (0x3AA3D70A, 0.00125f); fstp float @ 0x639488..0x639493; fild height; fmul
+// flt_7DA0C0 (0x3ADA740E, 0.0016666667f) @ 0x63949a..0x6394a0].
+inline float menu_scale_x(float surface_w) { return surface_w * 0.00125f; }
+inline float menu_scale_y(float surface_h) { return surface_h * 0.0016666667f; }
+
+// The game's arithmetic runs on an x87 unit Direct3D 9 left at single precision: the
+// device is created without D3DCREATE_FPU_PRESERVE, so every product the menus truncate
+// is first rounded to a float. 150 x 1.2799999 is 191.99999 in double and 192 in float,
+// and the game draws the edge at 192 [orig: CGfxDevice_CreateDevice @ 0x67e5d0 —
+// IDirect3D9::CreateDevice with behaviour flags 0x80 @ 0x67e9fd, 0x20 @ 0x67ea35;
+// measured: the base game's list outline at 1024x768 sits on columns 256 and 767 and
+// rows 192 and 536, the float products' edges].
+
+// A design-space edge on the device: the float product truncated to an int per element,
+// the way every emitted coordinate is [orig: CUIElement_DrawStretchedTexture @ 0x647d40
+// — fild; fmul float; _ftol2_sse (cvttsd2si) @ 0x76bc00]. An embedder that draws over
+// the picture (the editor's outlines) lands on the same pixels.
 inline float menu_scaled_edge(int design, float scale) {
-	return static_cast<float>(static_cast<int>(static_cast<double>(design) * scale));
+	return static_cast<float>(static_cast<int>(static_cast<float>(design) * scale));
 }
 
-// One draw-list quad. `texture` indexes the compiler's interned texture-name
-// table (texture_names()); kMenuTexNone is an untextured color fill. A valid
-// `texture2` asks the device leg for retail's two-stage frame material:
-// 2 * texture * texture2, with the first texture's alpha masking the result.
+// A text anchor on the device: the design coordinate times the scale, kept as a float.
+// The text sink is the one menu draw that does not truncate, so a label sits wherever
+// the scale puts it, between the pixels its element's edges land on, and the drawer
+// rounds only each later glyph's pen [orig: CFontCache_DrawTextScaled @ 0x653170 --
+// fild x; fmul scaleX; fstp float @ 0x6531f1..0x65322c, handed to CGameFont_DrawText
+// as the first pen; CGameFont_DrawText @ 0x6752c0 floors the advance @ 0x675744].
+inline float menu_text_anchor(int design, float scale) {
+	return static_cast<float>(design) * scale;
+}
+
+// One draw-list quad. Every coordinate in a draw list is the original's window
+// coordinate, which Direct3D 9 rasterises with pixel i's centre on the integer i
+// (renderer/d3d9_raster.h): a device whose centres sit at i + 0.5 draws the list
+// half a pixel over. `texture` indexes the compiler's interned texture-name
+// table (texture_names()); kMenuTexNone is an untextured color fill
+// [orig: CUIElement_DrawStretchedTexture @ 0x647d40]. A plain textured quad is a
+// menu image [orig: the IMAGE pass CUIElement_DrawTextureNative @ 0x647e40 ->
+// CTextureManager_DrawScaledRect @ 0x654e60 -> Render_DrawTiledTextureStrip
+// @ 0x67aed0]: its UVs are in the image's own size and carry the strip's half texel
+// (MenuFrameCompiler::set_image_uv), and the image sits top-left in a power-of-two
+// texture, transparent black past it, clamped (menu_image_texture_side). `tiled`
+// is a frame fill: stencil atlas cell (3, 0) (u0..v1), copied by retail into the
+// cell-sized border_fill_material and drawn at UV (x + 0.5) / cell at every window
+// coordinate x, wrapped [orig: CUIElement_DrawFrame @ 0x64a2b3 ->
+// draw_textured_quad_from_rect @ 0x64a000]. A valid `texture2` is a frame border
+// piece in retail's two-stage material: stage 0 the stencil at u0..v1 across the
+// quad (no half texel), stage 1 the brush SCREEN-anchored, UV ((x + 0.5) /
+// texture2_period_x, (y + 0.5) / texture2_period_y) at window coordinate (x, y),
+// wrapped; the colour 2 x stage0 x diffuse 0x7F7F7F, then 2 x that x the brush,
+// each saturated, the alpha the stencil's times the brush's
 // [orig: CUIElement_InitBorderMaterials @ 0x646f70 creates border_material from the
-// STENCIL and BRUSH handles with mode 0x651 / two stages]. `tiled` repeats the
-// selected UV region at native device pixels; frame fills select the stencil
-// atlas cell (3, 0), copied by retail into border_fill_material. Everything
-// else is stretched into the quad, UV 0..1 (or an atlas sub-rect)
-// [orig: CUIElement_DrawStretchedTexture @ 0x647d40; the IMAGE pass
-//  CUIElement_DrawTextureNative @ 0x647e40 -> CTextureManager_DrawScaledRect
-//  @ 0x654e60].
+// STENCIL and BRUSH handles with mode 0x651 / two stages; CUIElement_DrawFrame
+// @ 0x64a392.. -> draw_textured_quad @ 0x649e80]. A frame piece's corners are
+// floats, so the device covers what Direct3D 9 does: the pixels whose centres lie
+// in [x0, x1) x [y0, y1).
 struct MenuQuad {
 	float x0 = 0.0f;
 	float y0 = 0.0f;
@@ -82,10 +123,29 @@ struct MenuQuad {
 	uint32_t color = 0xFFFFFFFFu; // 0xAARRGGBB modulate
 	int32_t texture = kMenuTexNone;
 	int32_t texture2 = kMenuTexNone;
+	float texture2_period_x = 0.0f;
+	float texture2_period_y = 0.0f;
 	bool tiled = false;
 };
 
-// One 1px outline segment [orig: CUIElement_DrawOutlineRect @ 0x647fc0 —
+// The side of the power-of-two texture a menu image of `side` texels is copied into:
+// the image top-left, transparent black past it [orig: GImage_CreateTiledTextures_0
+// @ 0x67a830 — a zeroed tile buffer @ 0x67a96d, the side from sub_679DF0 @ 0x679df0
+// (rounded up to a power of two, clamped to the device's maximum texture side, the
+// image split into tiles past that); each tile created with its FLAGS word | 1, CLAMP
+// @ 0x67aa30]. No menu image reaches the maximum on any device this runs on, so the
+// split is not ported.
+inline int menu_image_texture_side(int side) {
+	int pot = 1;
+	while (pot < side) pot *= 2;
+	return pot;
+}
+
+// One 1px line between two window coordinates, drawn as Direct3D 9 draws a
+// line list [orig: draw_line_2d @ 0x6786d0 — the two points verbatim, D3DPT_LINELIST]:
+// for the menus' axis-aligned lines on the integers, the pixels from the first
+// point's up to the one before the second's (renderer::d3d9_line_pixels).
+// [orig: CUIElement_DrawOutlineRect @ 0x647fc0 —
 // four lines around the scaled rect in the entry color].
 struct MenuLine {
 	float x0 = 0.0f;
@@ -1008,6 +1068,8 @@ private:
 	void push_quad(const MenuQuad &quad);
 	void push_line(const MenuLine &line);
 	void push_font_run(const MenuDrawList::FontRun &run);
+	static void set_image_uv(MenuQuad &quad, int width, int height,
+			int64_t band_start, int64_t band_end);
 	void emit_rect_quad(const mnu::RectEdges &design, const WalkScale &s,
 			uint32_t color, int32_t texture, bool tiled, float tile_u,
 			float tile_v);
@@ -1027,8 +1089,8 @@ private:
 	void emit_glyph_run_with_(int32_t font_slot, const std::string &text,
 			int design_x, int design_y, const WalkScale &s, uint32_t color,
 			int caret);
-	void emit_caret(hud::GameFont &gf, const std::string &text, float x,
-			float y, const WalkScale &s, uint32_t color, int caret);
+	void emit_caret(hud::GameFont &gf, const std::string &text, int design_x,
+			int design_y, const WalkScale &s, uint32_t color, int caret);
 	void emit_widget_text(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s, int color_state, const MenuWidgetState *ws,
 			int caret, const std::string *override_text = nullptr);
