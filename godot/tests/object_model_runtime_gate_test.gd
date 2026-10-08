@@ -231,8 +231,12 @@ func test_stage_textures_carry_their_last_retail_mip_level() -> void:
 		return
 	assert_eq(material.get_shader_parameter("u_diffuse_max_lod"), 5.0,
 			"the checkerboard's chain ends at level 5 (4x4)")
-	assert_eq(material.get_shader_parameter("u_normal_max_lod"), 1000.0,
-			"a 1x1 flat normal has no ceiling")
+	# The flat normal is 1x1: its creation chain (renderer::texture_level_count,
+	# D3DX's count of 0 expanded to the full chain) is one level, so its last
+	# level is 0. Level 0 is the only one a 1x1 texture has, so it samples the
+	# same as no ceiling.
+	assert_eq(material.get_shader_parameter("u_normal_max_lod"), 0.0,
+			"a 1x1 flat normal's one level is its last")
 
 
 func test_a_dds_stage_texture_keeps_its_authored_chain() -> void:
