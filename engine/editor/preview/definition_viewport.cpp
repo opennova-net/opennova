@@ -820,12 +820,11 @@ std::vector<ClipSoundFired> DefinitionViewport::fire_sounds(const PreviewClock &
 		audio::SoundSelector &selector, uint64_t &next_seq) {
 	std::vector<ClipSoundFired> out;
 	const int32_t now = clock.ticks();
-	// A seek since (a replay, a scrub) fires nothing for what it passed over: the sounds go on from the clock.
-	const bool sought = clock.tick_seeks() != sound_seeks_;
-	sound_seeks_ = clock.tick_seeks();
-	const int32_t from = sound_cursor_;
+	// A seek since (a replay, a scrub) fires nothing for what it passed over: the sounds go on from where it put the
+	// clock, the run since heard whole (a shot on tick 0 after a replay, however long the frame the clock first ran).
+	const int32_t from = clock.heard_from(sound_cursor_, sound_seeks_);
 	sound_cursor_ = now;
-	if (reason_ != DefinitionViewStatus::Ready || from < 0 || sought || now <= from || now - from > kClipSoundCatchUpTicks)
+	if (reason_ != DefinitionViewStatus::Ready || from < 0 || now <= from || now - from > kClipSoundCatchUpTicks)
 		return out;
 	if (range_shown()) {
 		// A weapon's (DI-22), or an ammo's fired alone (DI-23): what its run sounded on the ticks [from, now), heard at
