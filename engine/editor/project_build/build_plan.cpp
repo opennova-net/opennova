@@ -355,6 +355,7 @@ std::string blocker_words(const Diagnostic &d) {
 }
 
 bool blocker_is_the_games(const Diagnostic &d) {
+	if (d.row() && d.row()->game_refusal) return true;
 	if (requirement_subject(d)) return true;
 	if (const ReferenceSubject *reference = reference_subject(d)) return reference_row(reference->kind).gates_when_missing;
 	return false;
@@ -374,6 +375,8 @@ std::string blocker_reason(const Diagnostic &d) {
 	if (const ReferenceSubject *reference = reference_subject(d))
 		if (const char *orig = reference_row(reference->kind).gates_when_missing)
 			return std::string("The game refuses to go on without it, as the original does ") + orig + ".";
+	if (d.row() && d.row()->game_refusal)
+		return std::string("The game fails here as the original does: ") + d.row()->game_refusal + ".";
 	return "The editor does not pack what it cannot vouch for: it cannot read, write or store this as it is.";
 }
 std::string refusal_words(const std::vector<Diagnostic> &blockers) {
