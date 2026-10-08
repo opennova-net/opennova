@@ -37,7 +37,25 @@ constexpr const char *kPlayerSave[] = {".sav", nullptr};
 constexpr const char *kShader[] = {".fx", nullptr};
 // assets.cd is read before any archive mounts, as game.cfg is (docs/required-resources.md).
 constexpr const char *kConfig[] = {".cfg", ".ini", ".ssc", ".cd", nullptr};
-constexpr const char *kText[] = {".txt", nullptr};
+// The texts the game reads, each by its bare name from its folder (no other .txt: every other .txt name its
+// program holds is one it only writes, a log or a marker, but the menu cache's own cache\mru.txt, kept in the
+// cache folder [orig: CUICache_ScanCacheDirectory @ 0x64d6b0], a player's file; docs/correspondence.md, "The
+// texts the game reads by name"): earlyerr.txt [orig: Game_ShowEarlyError @
+// 0x4a68a0 -> Game_ReadLineFromFile @ 0x4a59a0]; an expansion's version.txt [orig: Expansion_LoadAssets @
+// 0x4a4730, "expansion\%s\version.txt" @ 0x4a4852]; the chat filter [orig: ChatFilter_LoadFromFile @
+// 0x4fd640]; the high scores [orig: HUD_LoadHighScoreText @ 0x5630e0]; the banned addresses [orig:
+// Server_InitNewRoundState @ 0x51c8e0, the read @ 0x51cb3b]; a NovaWorld host's ban list [orig:
+// BanList_InitFromMission @ 0x5098f0]; the session timeout, read when it is there [orig: CNapiNetwork_Init @
+// 0x4ca4a0, "_NSTMOUT.TXT" @ 0x4ca9e1]; and four the game reads by their being there: the development gate,
+// no stack trace and the network log [orig: Game_ParseCommandLineAndInit @ 0x4a7310, "_devnova.txt" @
+// 0x4a7c7b, "_NOSTACKTRACE.TXT" @ 0x4a7caa, "_DONETLOG.TXT" @ 0x4a7cc1], and no video test [orig:
+// Game_RunVideoTestDialog @ 0x53ec10, "_VIDTEST.TXT" @ 0x53ec4b].
+constexpr const char *kTextNames[] = {"earlyerr.txt",  "version.txt",  "filter.txt",        "hiscore.txt",
+                                      "banned.txt",    "banlist.txt",  "_nstmout.txt",      "_devnova.txt",
+                                      "_nostacktrace.txt", "_donetlog.txt", "_vidtest.txt", nullptr};
+// What the project keeps for its people and the game never reads: Markdown (no reader of it in the game's
+// program), and a .txt of any name but those above.
+constexpr const char *kNotes[] = {".md", ".txt", nullptr};
 
 // A row built up column by column, so each row names only what it sets; the slot is always
 // stated.
@@ -58,6 +76,11 @@ struct Kind {
 	constexpr Kind file(const char *name) const {
 		Kind out = *this;
 		out.row.file_name = name;
+		return out;
+	}
+	constexpr Kind files(const char *const *names) const {
+		Kind out = *this;
+		out.row.file_names = names;
 		return out;
 	}
 	constexpr Kind extensions(const char *const *names) const {
@@ -498,14 +521,24 @@ constexpr AssetKindRow kRows[] = {
 	        .expansion(ExpansionLoose::RootOnly)
 	        .about("The score table, read from the game's own folder.")
 	        .row,
-	// A text the game reads opens its bare name in the install's folder (earlyerr.txt [orig:
-	// Game_ShowEarlyError @ 0x4a68a0 through Game_ReadLineFromFile @ 0x4a59a0]); an expansion's
-	// version.txt is its own row of the expansion's files (route_for_expansion).
+	// A text the game reads opens its bare name in the install's folder, by the names it knows (kTextNames,
+	// earlyerr.txt [orig: Game_ShowEarlyError @ 0x4a68a0 through Game_ReadLineFromFile @ 0x4a59a0]); an
+	// expansion's version.txt is its own row of the expansion's files (route_for_expansion).
 	Kind(AssetKind::Text, "text", "Text", ArchiveSlot::Loose)
-	        .extensions(kText)
+	        .files(kTextNames)
 	        .edited_by(DocumentTypeId::Text)
 	        .expansion(ExpansionLoose::RootOnly)
 	        .about("A text the game reads from its own folder.")
+	        .row,
+	// What the game never reads: a project's README, its licence, its list of sources, a note of any kind.
+	// The build leaves it out, with no word (unlike a file of no kind the game knows, which may be data the
+	// game misses); the editor opens it as a text. A file with no extension (a LICENSE) is one when it holds
+	// text (classify_asset); one that holds bytes stays of no kind, said, as it may be data.
+	Kind(AssetKind::Notes, "notes", "Project notes", ArchiveSlot::None)
+	        .extensions(kNotes)
+	        .edited_by(DocumentTypeId::Text)
+	        .about("A note for the people who make the project (a README, a licence, a list of sources): the game "
+	               "never reads it, so the build leaves it out.")
 	        .row,
 	// No name gives it: the scan gives it to a file an importer converts while its import record
 	// is there (scan_project_assets), whatever the file's name would make it (a .png a texture).
@@ -557,9 +590,18 @@ constexpr bool new_name_fits(const AssetKindRow &row) {
 	return false;
 }
 
-// One row per kind, at the kind's own index; no two rows share a token, a runtime token, a file
-// name or an extension (a name gives one kind); an archive, an import source and a file of no
-// kind the game knows pack nowhere, every other kind somewhere; no name gives an import source or
+// Whether row `a` and row `b` give a whole name both: one's file name or a name of its list the other's.
+constexpr bool share_a_name(const AssetKindRow &a, const AssetKindRow &b) {
+	if (a.file_name && (lists(b.file_names, a.file_name) || (b.file_name && same_text(a.file_name, b.file_name))))
+		return true;
+	for (const char *const *name = a.file_names; name && *name; ++name)
+		if (lists(b.file_names, *name) || (b.file_name && same_text(*name, b.file_name))) return true;
+	return false;
+}
+
+// One row per kind, at the kind's own index; no two rows share a token, a runtime token, a whole
+// name or an extension (a name gives one kind); an archive, an import source, a file of no kind
+// the game knows and the project's notes pack nowhere, every other kind somewhere; no name gives an import source or
 // a material chunk (the scan does, by a record beside the file or by its bytes); a kind is edited
 // by a type the registry has; a new file's name ends with one of the kind's extensions where it
 // lists them; every kind says what it is (about).
@@ -569,21 +611,20 @@ constexpr bool rows_well_formed() {
 		if (static_cast<size_t>(row.kind) != i || !*row.token || !*row.label) return false;
 		const bool left_out = row.kind == AssetKind::Archive || row.kind == AssetKind::ImportSource ||
 		                      row.kind == AssetKind::ImportInput || row.kind == AssetKind::Unknown ||
-		                      row.kind == AssetKind::MissionText;
+		                      row.kind == AssetKind::MissionText || row.kind == AssetKind::Notes;
 		if ((row.archive_slot == ArchiveSlot::None) != left_out) return false;
 		// A loose kind says where an expansion's game reads it; no other kind does.
 		if ((row.archive_slot == ArchiveSlot::Loose) != (row.expansion_loose != ExpansionLoose::None)) return false;
 		const bool by_the_scan = row.kind == AssetKind::ImportSource || row.kind == AssetKind::ImportInput ||
 		                         row.kind == AssetKind::MaterialChunk;
-		if (by_the_scan && (*row.runtime || row.file_name || row.extensions)) return false;
+		if (by_the_scan && (*row.runtime || row.file_name || row.file_names || row.extensions)) return false;
 		if (static_cast<size_t>(row.document) > kDocumentTypeCount) return false;
 		if (!row.folder || !row.new_name || !new_name_fits(row) || !row.about || !*row.about) return false;
 		for (size_t j = 0; j < i; ++j) {
 			const AssetKindRow &other = kRows[j];
 			if (same_text(row.token, other.token)) return false;
 			if (*row.runtime && same_text(row.runtime, other.runtime)) return false;
-			if (row.file_name && other.file_name && same_text(row.file_name, other.file_name))
-				return false;
+			if (share_a_name(row, other)) return false;
 			for (const char *const *name = row.extensions; name && *name; ++name)
 				if (lists(other.extensions, *name)) return false;
 		}
@@ -624,7 +665,7 @@ AssetKind asset_kind_for_name(const std::string &logical_name) {
 	const std::string file = io::utf8_file_name(logical_name);
 	const std::string name = strutil::to_lower(file);
 	for (const AssetKindRow &row : kRows)
-		if (row.file_name && name == row.file_name) return row.kind;
+		if ((row.file_name && name == row.file_name) || lists(row.file_names, name.c_str())) return row.kind;
 	const std::string extension = resource_extension_for_name(logical_name);
 	if (extension.empty()) return AssetKind::Unknown;
 	for (const AssetKindRow &row : kRows)
