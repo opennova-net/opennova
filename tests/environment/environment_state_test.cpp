@@ -486,6 +486,15 @@ int main() {
 					near(field.aspect, 1024.0f / 600.0f) &&
 					opennova::env::kReflectionRttSize == 512,
 				"the mirror takes the source field at its aspect over the 512 square");
+		// The reflected pass rasterises on the RTT through its own viewport and
+		// the frame's plain projection [orig: Render_MainScene @ 0x5c1614,
+		// @ 0x5c163e]: D3D9's half texel of the 512 square, right and down,
+		// not the main raster's half pixel.
+		ok &= expect(field.raster_shift.x == 1.0f / 512.0f &&
+							field.raster_shift.y == -1.0f / 512.0f &&
+							live.raster_shift.x == field.raster_shift.x &&
+							live.raster_shift.y == field.raster_shift.y,
+				"the mirror image sits on the RTT's own D3D9 pixel centres, above or below the plane");
 		source.aspect = 600.0f / 1024.0f;
 		ok &= expect(near(opennova::env::build_water_mirror_view(source, 7.0f).aspect,
 							 600.0f / 1024.0f),

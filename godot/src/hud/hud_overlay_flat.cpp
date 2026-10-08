@@ -81,10 +81,11 @@ void fragment() {
 // (renderer::hud_color_material_argb; D-HUD-49). A quad with a second texture
 // stage arrives as a triangle pair whose UV.x carries a +8 flag (flat HUD UVs
 // stay inside [0, ~1.01]); its vertex() strips the flag and derives the
-// stage-1 UV from the surface position -- UV1 = (screen_px + 0.5) / stage dims
-// in retail's D3D9 raster, whose pixel centres sit on the integers; here pixel
-// centres sit at +0.5, so px / stage dims samples the same texel -- and
-// fragment() then applies MODULATE2X(CURRENT, TEXTURE1) to the colour and
+// stage-1 UV from the surface position as retail does, UV1 = (screen_px + 0.5)
+// / stage dims: VERTEX is the draw list's window coordinate, which the item's
+// d3d9_screen_to_canvas carries onto this raster's pixel centres, so pixel i
+// samples texel i mod stage as retail's does -- and fragment() then applies
+// MODULATE2X(CURRENT, TEXTURE1) to the colour and
 // MODULATE(CURRENT, TEXTURE1) to the alpha, the stage-1 texture
 // wrap-addressed. Every other command keeps the default COLOR (vertex colour x
 // TEXTURE). The stage-1 witness rides the engine's HudQuad::texture2
@@ -107,7 +108,7 @@ void vertex() {
 	if (UV.x >= 4.0) {
 		UV.x -= 8.0;
 		stage1_on = 1.0;
-		stage1_uv = VERTEX * stage1_inv_size;
+		stage1_uv = (VERTEX + vec2(0.5)) * stage1_inv_size;
 	}
 	if (UV.y >= 8.0) {
 		UV.y -= 16.0;

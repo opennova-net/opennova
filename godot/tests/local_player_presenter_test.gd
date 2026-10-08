@@ -557,11 +557,12 @@ func test_nvg_composite_renders_the_world_into_the_nvg_raster() -> void:
 	assert_almost_eq(projection.y.y, aspect / half_h, 0.0001,
 			"proj[1][1] = aspect / tan(fov_h/2): non-square texels on the square")
 	# A vertical edge 20 degrees right of the view axis lands on retail's
-	# column 256 + 256 tan(20) / tan(40) of the 512.
+	# column 256 + 256 tan(20) / tan(40) of the 512, on D3D9's pixel centres:
+	# half a column further on this raster (renderer/d3d9_raster.h).
 	var angle := deg_to_rad(20.0)
 	var clip := projection * Vector4(tan(angle), 0.0, -1.0, 1.0)
 	assert_almost_eq((clip.x / clip.w * 0.5 + 0.5) * 512.0,
-			256.0 + 256.0 * tan(angle) / half_h, 0.01, "the edge's raster column")
+			256.0 + 256.0 * tan(angle) / half_h + 0.5, 0.01, "the edge's raster column")
 	assert_true(camera.get_viewport().disable_3d,
 			"one world render a frame: the surface's own 3D pass is off")
 	assert_false(sim.request_local_player_nvg_toggle())

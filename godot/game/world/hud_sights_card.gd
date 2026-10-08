@@ -89,7 +89,9 @@ class SightRowControl:
 			return
 		# The virtual design space and rect scaling are the engine's
 		# (HudPos.DESIGN_* / sight_scale_rect — the witness lives at the engine home,
-		# engine/runtime/hud hud/hud_math.h).
+		# engine/runtime/hud hud/hud_math.h), the rect the original's window
+		# coordinates (D3D9 pixel centres on the integers: HudPos.d3d9_screen_offset).
+		draw_set_transform(HudPos.d3d9_screen_offset())
 		draw_texture_rect(tex,
 				HudPos.sight_scale_rect(rect_v, get_viewport_rect().size), false)
 

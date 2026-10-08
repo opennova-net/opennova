@@ -704,6 +704,12 @@ func test_strip_and_mirror_register_to_the_nvg_raster() -> void:
 	assert_almost_eq(served.x.x, frame_projection.x.x, 0.0001,
 			"the mirror frustum is the frame's")
 	assert_almost_eq(served.y.y, frame_projection.y.y, 0.0001)
+	# The reflected pass rasterises on its own RTT (env::WaterMirrorView
+	# raster_shift): D3D9's half texel of the 512 square, right and down,
+	# whatever the frame's raster carries; the frame's own projection is the
+	# original's, the half texel of its own square.
+	assert_almost_eq(served.z.x, -1.0 / 512.0, 1e-6, "the mirror image half an RTT texel right")
+	assert_almost_eq(served.z.y, 1.0 / 512.0, 1e-6, "...and half an RTT texel down")
 	presenter.teardown()
 
 

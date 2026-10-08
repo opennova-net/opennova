@@ -881,10 +881,13 @@ func _resolve_waypoint_name(wp: WaypointHudView, sim: Simulation) -> String:
 # pixels the blit stretches over the surface the overlay draws on; the play
 # camera then carries only a CULLING SUPERSET of the frustum and would land a
 # label off on one axis (LocalPlayerPresenter.view_projection) -- else the
-# play camera's own. Public as the ADR 0018 read seam.
+# play camera's own. It is the frame's SCREEN projection, the D3D9 raster's
+# half pixel taken back out (LocalPlayerPresenter.screen_projection): the
+# overlay draws the original's window coordinates and carries them onto this
+# raster's pixel centres itself. Public as the ADR 0018 read seam.
 func hud_view_projection(camera: Camera3D) -> Projection:
 	if _player_presenter != null and _player_presenter.camera() != null:
-		return _player_presenter.view_projection()
+		return _player_presenter.screen_projection()
 	return camera.get_camera_projection()
 
 

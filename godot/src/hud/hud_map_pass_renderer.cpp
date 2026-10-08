@@ -1,5 +1,6 @@
 #include "hud/hud_map_pass_renderer.h"
 #include "hud/font_page_glyphs.h"
+#include "render/d3d9_raster_device.h"
 #include "util/color_convert.h"
 
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -80,6 +81,10 @@ void HudMapPassRenderer::ensure(const RID &parent, int first_draw_index, bool be
 		rs->canvas_item_set_material(top_item_, top_material);
 		top_sampling_configured_ = true;
 	}
+	// The map passes are the original's window coordinates (D3D9 pixel centres
+	// on the integers, renderer/d3d9_raster.h); an owner that moves them
+	// (MapViewWindow) composes its own translation with this one.
+	set_transform(d3d9_screen_to_canvas());
 }
 
 void HudMapPassRenderer::clear() {

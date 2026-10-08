@@ -592,6 +592,10 @@ ViewProjection view_projection(float fov_h_deg, int aspect_mode, int surface_w,
     out.target_w = surface_w;
     out.target_h = surface_h;
     if (surface_w <= 0 || surface_h <= 0) return out;
+    // Retail draws the pass straight onto the backbuffer, whose D3D9 pixel
+    // centres sit on the integers [orig: Render_SetViewport @0x58A720], whatever
+    // the stretch: the shift is the surface's half pixel.
+    out.raster_shift = renderer::d3d9_raster_ndc_shift(surface_w, surface_h);
     const float w = static_cast<float>(surface_w);
     const float h = static_cast<float>(surface_h);
     const float selected = renderer::aspect_height_over_width(aspect_mode, w, h);
@@ -617,6 +621,8 @@ ViewProjection nvg_view_projection(const ViewProjection &frame,
                                    float selected_h_over_w, int32_t zoom) {
     ViewProjection out = frame;
     const int side = renderer::kNvgSceneSide;
+    // Every arm rasterises into the square, so its D3D9 half pixel is the square's.
+    out.raster_shift = renderer::d3d9_raster_ndc_shift(side, side);
     if (nvg.lens) {
         const float fov =
             static_cast<float>(renderer::nvg_scoped_scene_fov_q16(selected_h_over_w, zoom)) /

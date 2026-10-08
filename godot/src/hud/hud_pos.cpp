@@ -1,6 +1,7 @@
 #include "hud/hud_pos.h"
 #include "fnt/fnt_resource.h"
 #include "hud/font_page_glyphs.h"
+#include "render/d3d9_raster_device.h"
 #include "util/color_convert.h"
 #include "util/string_convert.h"
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -81,6 +82,7 @@ namespace {
 void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("scale_point", "design", "surface"), &HudPos::scale_point);
 	ClassDB::bind_static_method("HudPos", D_METHOD("scale_rect", "design", "surface"), &HudPos::scale_rect);
+	ClassDB::bind_static_method("HudPos", D_METHOD("d3d9_screen_offset"), &HudPos::d3d9_screen_offset);
 	ClassDB::bind_static_method("HudPos", D_METHOD("sight_scale_rect", "design", "surface"), &HudPos::sight_scale_rect);
 	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scene_sight_rect", "design", "surface", "aspect_mode"), &HudPos::nvg_scene_sight_rect);
 	ClassDB::bind_static_method("HudPos", D_METHOD("pixel_delta_to_design", "delta", "surface"), &HudPos::pixel_delta_to_design);
@@ -289,6 +291,10 @@ Vector2 HudPos::scale_point(const Vector2 &p_design, const Vector2 &p_surface) {
 					p_design.x, p_surface.x, opennova::hud::kDesignWidth)),
 			static_cast<float>(opennova::hud::scale_axis(
 					p_design.y, p_surface.y, opennova::hud::kDesignHeight)));
+}
+
+Vector2 HudPos::d3d9_screen_offset() {
+	return d3d9_screen_to_canvas().get_origin();
 }
 
 Rect2 HudPos::scale_rect(const Rect2 &p_design, const Vector2 &p_surface) {

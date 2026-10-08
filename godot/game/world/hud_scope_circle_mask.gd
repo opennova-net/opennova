@@ -92,6 +92,10 @@ func _draw() -> void:
 	if not _cached:
 		return
 	var item := get_canvas_item()
+	# The mask is the original's window coordinates, D3D9 pixel centres on the
+	# integers (HudPos.d3d9_screen_offset).
+	RenderingServer.canvas_item_add_set_transform(item,
+			Transform2D(0.0, HudPos.d3d9_screen_offset()))
 	# Submit order: the annulus, then (only with no authored rows) the reticle
 	# cross and the cardinal grid ticks.
 	for batch in BATCHES:
