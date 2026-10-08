@@ -137,9 +137,12 @@ func _on_player_options_changed(state: PlayerOptions.State) -> void:
 	# Simulation's view settings are this listener's to push.
 	var sim: Simulation = _world.get_sim() if _world != null else null
 	_player_options.apply_view(sim)
-	# The world copies the object detail at its next mission start.
+	# The world copies the object detail at its next mission start; the
+	# texture filter reaches the model effects at once and the terrain's
+	# device filter at the next mission start.
 	if _world != null:
 		_world.set_object_polydetail(state.object_polydetail)
+		_world.set_texfilter_level(state.texfilter_level)
 	if _hud_presenter != null:
 		_hud_presenter.set_crosshair_style(state.crosshair_style)
 		_hud_presenter.set_crosshair_color(state.crosshair_color)

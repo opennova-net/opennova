@@ -151,6 +151,7 @@ add_library(opennova_bindings OBJECT
     render/scene_overlay_compositor.cpp
     render/slot_capture_adapter.cpp
     render/target_projection_xr_interface.cpp
+    render/texture_filter_device.cpp
     render/tracer_ribbon_surfaces.cpp
     object/entity_index.cpp
     object/entity_ref.cpp
