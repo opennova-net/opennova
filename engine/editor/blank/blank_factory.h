@@ -72,7 +72,7 @@ std::string blank_mission_title(const BlankRequest &request);
 // The game's mouse pointer (blank_texture.cpp). The original game hides the system pointer for
 // good as it starts [orig: Game_InitSubsystems @ 0x4a725a -> Game_HideCursorLoop @ 0x7612e0], so
 // a menu's only pointer is the texture a CURSOR of the current screen's windows names, drawn last
-// at the mouse [orig: CUIScene_DrawScreensAndCursor @ 0x63bf60 over scene_end_frame @ 0x63e600's
+// at the mouse [orig: CUIScene_DrawScreensAndCursor @ 0x63bf60 over CUIScene_EndFrame @ 0x63e600's
 // pick]: a screen whose windows name none, or name one that does not load, has no pointer at all.
 // The blank menus name the game's own pointer file, the one its start-mission splash draws by
 // name (hud::kSplashArrowImage, newarow1.tga, which every shipped screen's CURSOR names too), and

@@ -6,7 +6,9 @@
 //
 // Pinned: MOUSEIN as the mouse comes onto a window (the last row of the state, at the menu's master volume, the
 // row's own bank alone), nothing more while it stays or while the button is down, SELECTED on the click and
-// MOUSEIN again on the next sample there (the Shell's next frame), MOUSEOUT as it leaves; a disabled window and
+// MOUSEIN again on the next sample there (the Shell's next frame), MOUSEOUT as it leaves; a press begun on a
+// window that takes no capture and let go over a button clicks it (the game's click rule, menu_click.h); a
+// disabled window and
 // a window with no row play nothing; a bank the project lacks (no_bank) and a set the bank lacks (missing);
 // Mute (fired and listed, nothing handed to the Shell); the canvas's mouse over the picture the game's while it
 // is there, over a pointer a client holds; the envelope's options and sounds_fired; what the Shell
@@ -203,13 +205,18 @@ int test_hover_click_leave() {
 	before = project.seq();
 	TEST_EXPECT(project.mouse(20, 20));
 	TEST_EXPECT(project.fired_after(before) == Lines({"BTN:MOUSEOUT:OUT:played"}));
-	// A press begun on MAIN and let go over BTN is no click (the game frame's rule); and left with the button
-	// held, BTN plays no MOUSEOUT, nor MOUSEIN as the mouse comes back up.
+	// A press begun on MAIN (whose press takes no capture) and let go over BTN clicks BTN, held under the
+	// mouse with the button down the sample before (the game's rule, menu_click.h, D-MNU-30); the next frame
+	// with the mouse still there, its MOUSEIN.
 	before = project.seq();
 	TEST_EXPECT(project.mouse(20, 20, true));
 	TEST_EXPECT(project.mouse(200, 120, true));
 	TEST_EXPECT(project.mouse(200, 120, false));
-	TEST_EXPECT(project.fired_after(before) == Lines({"BTN:MOUSEIN:OVER:played"}));
+	TEST_EXPECT(project.fired_after(before) == Lines({"BTN:SELECTED:CLICK:played"}));
+	project.session.advance(1.0 / 60.0);
+	TEST_EXPECT(project.fired_after(before) == Lines({"BTN:SELECTED:CLICK:played", "BTN:MOUSEIN:OVER:played"}));
+	// Pressed on BTN (its press captures), left with the button held and let go off it: no click, no
+	// MOUSEOUT, nor MOUSEIN as the mouse comes back up.
 	before = project.seq();
 	TEST_EXPECT(project.mouse(200, 120, true) && project.mouse(20, 20, true) && project.mouse(20, 20, false) &&
 	            project.mouse(200, 120, false));
@@ -230,7 +237,7 @@ int test_hover_click_leave() {
 
 	// The Shell is handed what played, in the clip sounds' order, and nothing muted.
 	const std::vector<ClipSoundPlay> plays = project.session.clip_sounds_since(0);
-	TEST_EXPECT(plays.size() == 6 && plays[0].voices.size() == 1 && plays[0].voices[0].path == "sounds/over.wav" &&
+	TEST_EXPECT(plays.size() == 7 && plays[0].voices.size() == 1 && plays[0].voices[0].path == "sounds/over.wav" &&
 	            plays[1].voices[0].path == "sounds/click.wav" && plays[0].seq < plays[1].seq);
 	before = project.seq();
 	TEST_EXPECT(project.set(R"({"sound": {"mute": true}})") && project.mouse(200, 120));
@@ -245,7 +252,7 @@ int test_hover_click_leave() {
 	TEST_EXPECT(options && options->get("sound") && options->get("sound")->get_bool("mute", false) &&
 	            !options->get_bool("pointer_down", true) && options->get("pointer_at")->array.size() == 2);
 	const JsonValue *fired = shown.get("body") ? shown.get("body")->get("sounds_fired") : nullptr;
-	TEST_EXPECT(fired && fired->array.size() == 9 && fired->array.back().get_string("sound", "") == "MOUSEIN" &&
+	TEST_EXPECT(fired && fired->array.size() == 10 && fired->array.back().get_string("sound", "") == "MOUSEIN" &&
 	            fired->array.back().get_string("name", "") == "BTN" &&
 	            fired->array.back().get_string("set", "") == "OVER" &&
 	            fired->array.back().get_string("bank", "") == "menu.lwf" &&

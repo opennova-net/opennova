@@ -66,6 +66,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_text_tables.cpp # the menu string tables
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_screen_inputs.cpp # a screen's string tables and the shell's style, through a file source
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_assets.cpp # a screen's fonts and textures, kept by (file, stamp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_texture_header.cpp # a menu texture's size from its header, no pixels
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_table.cpp # a table's columns and row sort
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_clip.cpp # a widget's clip viewport over its own ops
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_table_row.cpp # the TABLE row records and their CTableWnd operations
@@ -79,6 +80,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/loadout_labels.cpp # the loadout screens' labels, row order and weight readout
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_runtime.cpp # the compiled-menu interaction runtime (id tree, nav, state, actions, input)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_sound.cpp # the windows' SOUND rows and when the pump plays them
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_click.cpp # the click and the press's mouse capture (D-MNU-30)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_state_frame.cpp # the frame seam's state writes, and the seam headless
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_commands.cpp # what the game's code does with a control it binds by name
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/screen_history.cpp # the screen history across menu files and a mission (D-MNU-28)
@@ -105,6 +107,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/script_debug_report.cpp # the F3 Script window's WAC/BMS/vars read
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/teammate_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/placement_traits.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/player_start.cpp # a player start placed in a mission (its start markers moved)
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/static_sources.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/promote.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/runtime_boot.cpp
@@ -167,17 +170,21 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/scar_draw_list.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_terrain_pass.cpp # the per-light terrain projected pass
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_dxt.cpp # the D3DX DXT texture codec
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/dxt_encode.cpp # the tools' authoring DXT encoder (rgbcx's blocks)
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_authoring.cpp # an image made into a texture file (the image import)
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_eval.cpp
     renderer/model_mesh_prepare.cpp
     renderer/model_controls.cpp
     renderer/model_panm_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_texture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_load_rules.cpp   # the game's texture loaders as rules
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_registry.cpp   # the key the game keeps a loaded texture under
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/device_texture.cpp   # the device texture a texture file becomes
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/d3dx_image_codecs.cpp   # D3DX's PPM/PFM/HDR/DIB codecs (D-RMAT-17)
     renderer/material_texture_producers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_classify.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/object_shader_template.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/shader_effect_info.cpp # the tags a shader file registers
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/object_lod.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/foliage_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_atlas.cpp
@@ -193,6 +200,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/tracer_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/uv_anim.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_store.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/mission_fixed_files.cpp # the files a running mission opens by a fixed name
     # terrain — runtime terrain collection, rendering, and queries
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/foliage_detail_collector.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/lighting.cpp
@@ -313,6 +321,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/nvg_laser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/destruction.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/item_events.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/physics_class_table.cpp  # the move_function row lookup
     ${CMAKE_CURRENT_SOURCE_DIR}/world/item_squib.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_squib.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/item_sections.cpp
@@ -496,6 +505,9 @@ target_link_libraries(opennova_runtime PUBLIC opennova_net opennova_base opennov
 # platform thread library explicitly (pthread on a pre-2.34 glibc).
 find_package(Threads REQUIRED)
 target_link_libraries(opennova_runtime PUBLIC Threads::Threads)
+# The tools' DXT textures take rgbcx's blocks (renderer/dxt_encode): private, no
+# consumer of the runtime sees rgbcx.h.
+target_link_libraries(opennova_runtime PRIVATE opennova_rgbcx)
 
 target_compile_features(opennova_runtime PUBLIC cxx_std_17)
 
