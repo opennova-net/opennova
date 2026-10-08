@@ -129,7 +129,8 @@ public:
     void reset_local_round_state();
 	// Monotonic receive-side deployment-release edge. It advances when initial
 	// establishment becomes applicable (even if deploy UI remains pending), and
-	// again on an ACK-qualified post-pick release. Unrelated valid 0x5A grants
+	// again on an ACK-qualified post-pick release or the self record's respawn
+	// edge (a medic revive's deploy sends no 0x5A). Unrelated valid 0x5A grants
 	// still open gameplay_gate_open(), but do not invent a pose/respawn edge.
 	// Consumers use the revision,
 	// rather than positive health alone, to distinguish a real respawn from a
@@ -138,7 +139,8 @@ public:
 		return deployment_release_revision_;
 	}
 	// The independent authoritative spawn/health latch. Death closes it; an
-	// applicable 0x5A reopens it. Input case 12 never changes it, so a player-paced
+	// applicable 0x5A or the self record's respawn edge reopens it. Input case 12
+	// never changes it, so a player-paced
 	// pick cannot manufacture a local death while its gameplay hold is armed.
 	bool authoritative_spawn_released() const {
 		return authoritative_spawn_released_;

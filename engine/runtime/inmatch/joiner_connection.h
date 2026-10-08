@@ -615,9 +615,17 @@ public:
 	bool prepare_deployment_pick(
 			uint16_t wire_value, ProtocolMessage &message_out);
 	// Death returns an established connection to the pick/release portion of the deployment FSM.
-	// The self handle and authenticated transport remain valid; a covering 0x5A release returns
-	// Phase::InMatch and raises PollResult::reached_in_match again.
+	// The self handle and authenticated transport remain valid; a covering 0x5A release, or the
+	// self record's respawn edge, returns Phase::InMatch.
 	bool begin_redeployment();
+	// The local respawn edge: the host's record of our own player cleared its dead bit while
+	// we held it dead. The record apply runs Game_InitNewRound for the local player, which
+	// clears the deploy hold, so it releases a fresh deploy and a medic revive's deploy alike;
+	// the revive's is the only release, since its deploy sends no 0x5A (D-NET-379). Leaves
+	// the pick/release stages for Complete and returns Phase::InMatch; true on a release.
+	// [orig: NetPacket_SerializePlayerState @0x4C1109 -> Game_InitNewRound @0x4C114C, its
+	//  dword_81474C clear @0x4227CE]
+	bool release_deployment_on_respawn();
 
 	// Retail completes the 0x00 -> 0x01 -> 0x02 exchange and learns the mission from S2C 0x7B before it
 	// begins the load/spawn drive. A binding that must load that advertised mission sets this false

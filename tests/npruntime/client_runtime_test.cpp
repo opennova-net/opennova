@@ -4987,6 +4987,73 @@ bool run_unrelated_loadout_cannot_revive_dead_client() {
 			"the effective send predicate rejects dead gameplay after the unrelated grant");
 }
 
+// A medic revive's deploy sends no 0x5A (D-NET-379): the dead joiner's pick is
+// released by its own record's respawn edge, where the record apply's
+// Game_InitNewRound clears the deploy hold. Another player's respawn edge
+// releases nothing, and the self row's first alive sample is no edge.
+// [orig: NetPacket_SerializePlayerState @0x4C1109 -> Game_InitNewRound
+//  @0x4C114C, dword_81474C = 0 @0x4227CE; Server_ProcessPlayerDeath @0x5178C5]
+bool run_self_respawn_edge_releases_a_revive_deploy() {
+	const std::string client_scrk = "CLIENT-REVIVE-EDGE-SCRK";
+	const std::string server_scrk = "SERVER-REVIVE-EDGE-SCRK";
+	inmatch::ClientRuntime client("ReviveEdge", [] { return uint64_t{4000}; });
+	client.seed_session(
+			0x50607080u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/false);
+	constexpr uint16_t kSelf = 0x0002;
+	constexpr uint16_t kOther = 0x0003;
+	for (const uint16_t handle : {kSelf, kOther}) {
+		ns::ClientEntityState &row = client.state().upsert(handle);
+		row.type_id = w::kPlayerInfantryTypeId;
+		row.cls = EntityClass::Player;
+	}
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	uint32_t tick = 1;
+	auto frame = [&](int16_t health, uint8_t self_flags, uint8_t other_flags) {
+		FrameUpdate fu;
+		fu.carried_handle = 0xFFFF;
+		fu.health = health;
+		for (const uint16_t handle : {kSelf, kOther}) {
+			FrameUpdateRecord rec;
+			rec.handle = handle;
+			rec.type_id = w::kPlayerInfantryTypeId;
+			rec.cls = EntityClass::Player;
+			rec.player.carrier_handle = 0xFFFF;
+			rec.player.state_flags = handle == kSelf ? self_flags : other_flags;
+			fu.records.push_back(rec);
+		}
+		const std::vector<uint8_t> dg = frame_server_session(server_tx, server_scrk, 1u,
+				{make_protocol_message(0x0A, encode_frame_update(fu))});
+		client.receive(dg.data(), dg.size());
+		(void)client.Client_ProcessNetworkFrame(tick++);
+	};
+	frame(100, 0x00, 0x00);
+	const uint64_t releases = client.deployment_release_revision();
+	if (!expect(client.is_deployed() && !client.deployment_pick_pending() && releases == 0,
+			"the first alive sample of the self row is no respawn edge"))
+		return false;
+	frame(0, 0x02, 0x02);
+	if (!expect(client.deployment_pick_pending() && !client.is_deployed(),
+			"the death frame re-enters the deploy flow"))
+		return false;
+	if (!expect(client.queue_deployment_pick(0xFFFF),
+			"the revived player picks Default Spawn"))
+		return false;
+	(void)client.Client_ProcessNetworkFrame(tick++);
+	const uint64_t loadouts = client.authoritative_loadout_revision();
+	frame(0, 0x02, 0x00);
+	if (!expect(client.deployment_pick_pending() && !client.is_deployed() &&
+			client.deployment_release_revision() == releases,
+			"another player's respawn edge releases nothing"))
+		return false;
+	frame(100, 0x00, 0x00);
+	return expect(!client.deployment_pick_pending() && client.in_match() &&
+			client.is_deployed() && client.deployment_release_revision() == releases + 1 &&
+			client.authoritative_loadout_revision() == loadouts,
+			"the self record's respawn edge releases the revive deploy with no 0x5A");
+}
+
 // D-NET-235: a queued producer's message leaves at the next open send boundary even when the
 // player died in between. Retail's QueueReliableMessage puts it on the connection's list, and
 // PumpClientProtocolSend builds whatever is queued; only the 0x2C ping and the 0x0C uplink are
@@ -7512,6 +7579,7 @@ int main() {
 	                run_network_spawn_does_not_mutate_loaded_model_snapshot() &&
 	                run_split_batch_keeps_deployment_pick_ack_causal() &&
 	                run_unrelated_loadout_cannot_revive_dead_client() &&
+	                run_self_respawn_edge_releases_a_revive_deploy() &&
 	                run_live_frame_uses_wall_clock_and_batches_mount_requests() &&
 	                run_queued_gameplay_survives_a_death_before_the_boundary() &&
 	                run_mounted_slot_select_and_reload_producers() &&

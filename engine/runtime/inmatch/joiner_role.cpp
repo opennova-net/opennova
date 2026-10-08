@@ -1453,8 +1453,8 @@ void JoinerRole::spawn_and_arm_local_player() {
 // the frame's decoded health signal). A fresh-frame guard prevents
 // ClientState's pre-frame zero default from killing L during the handshake.
 // Once L is dead, positive health revives it only after the separate
-// ACK-qualified deployment release latched by the net-frame folds, and only
-// from a later tail. That edge also snaps L to H's redeployed authoritative
+// deployment release latched by the net-frame folds (the ACK-qualified 0x5A, or
+// the self record's respawn edge), and only from a later tail. That edge also snaps L to H's redeployed authoritative
 // pose before its next uplink can run.
 // [orig: tail health read @0x430428; store to local Health @0x4305df]
 void JoinerRole::apply_authoritative_health() {
@@ -1571,7 +1571,8 @@ void JoinerRole::apply_authoritative_health() {
 					lp.weapon.reload_pressed = false;
 					// The embedder clears its device-input latches, seeds the
 					// look heading and resets its view and map; the kit is the
-					// release's 0x5A, already folded (D-NET-378).
+					// release's 0x5A, already folded (D-NET-378), or after a medic
+					// revive, which sends none, the kit L died with (D-NET-379).
 					lp.reset_local_player_input(heading);
                     lp.reset_for_new_round();
                     rt.reset_local_round_state();

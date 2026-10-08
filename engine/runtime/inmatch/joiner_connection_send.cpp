@@ -456,7 +456,8 @@ bool JoinerConnection::prepare_deployment_pick(
 	deployment_pick_sent_ = true;
 	// Input case 12 re-arms dword_81474C without leaving the established
 	// in-session phase. ClientRuntime closes its separate gameplay gate when the
-	// input action is accepted; the ACK-qualified S2C 0x5A above opens it again.
+	// input action is accepted; the ACK-qualified S2C 0x5A, or the self record's
+	// respawn edge (release_deployment_on_respawn), opens it again.
 	deployment_reply_seen_ = false;
 	post_auth_stage_ = PostAuthStage::AwaitDeployRelease;
 	return true;
@@ -472,6 +473,19 @@ bool JoinerConnection::begin_redeployment() {
 	deployment_pick_sequence_ = 0;
 	deployment_pick_sequence_unbound_ = false;
 	deployment_reply_seen_ = false;
+	return true;
+}
+
+bool JoinerConnection::release_deployment_on_respawn() {
+	// Game_InitNewRound's clear is unconditional: whether or not the pick went
+	// out, the host has deployed us. [orig: Game_InitNewRound @0x4227CE]
+	if (!has_self_handle_ ||
+	    (post_auth_stage_ != PostAuthStage::AwaitDeployPick &&
+	     post_auth_stage_ != PostAuthStage::AwaitDeployRelease))
+		return false;
+	post_auth_stage_ = PostAuthStage::Complete;
+	deployment_reply_seen_ = true;
+	phase_ = Phase::InMatch;
 	return true;
 }
 
