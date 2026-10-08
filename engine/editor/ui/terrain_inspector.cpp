@@ -129,6 +129,16 @@ bool draw_terrain_inspector(Workspace &workspace, const Document &document, cons
 			note("Under the environment " + use.environment + ", which the project does not have.");
 		if (!use.tile_set.empty()) note("Its tiles from the tile set " + use.tile_set + ", not the terrain's own.");
 		if (use.tiles) note("It places its own tiles (" + use.name + ".til).");
+		// The terrain keys overcast.def and its environment set after this file's (the game's terrain reader reads
+		// their lines too): the mission's terrain has each from there.
+		for (const TrnLaterLine &line : use.later) {
+			const std::string &file =
+					line.file == TrnLaterLine::File::Environment ? use.environment_file : uses.overcast_file;
+			jump_line(workspace, file_target(scan, file),
+			          "Its " + line.key + " " + line.value + " from " + base_name(file) + " (line " +
+			                  std::to_string(line.line) + "), read after this file",
+			          "k" + tag + "." + std::to_string(int(line.file)) + "." + std::to_string(line.line));
+		}
 		ImGui::Unindent();
 	}
 	ImGui::Separator();

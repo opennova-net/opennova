@@ -97,6 +97,12 @@ inline bool operator!=(const MissionSceneHeader &a, const MissionSceneHeader &b)
 // when the .env was skipped (the header names none, or the project lacks it).
 bool mission_environment(const FileSource &files, const MissionSceneHeader &header, env::MissionEnv &out);
 
+// The lines of overcast.def and of `environment_file` (a mission's .env by name; empty: none) that the terrain's
+// parser can take after the mission's .trn (formats/trn load_mission_trn and trn_parser_lines, D-TERRAIN-18), as
+// `files` holds them: what a preview keys the terrain it draws on beside its name, so that an edit of either file
+// that sets nothing of the terrain loads none again.
+std::string mission_terrain_later_lines(const FileSource &files, const std::string &environment_file);
+
 // What a patch found changed, in the picture's terms: a header field the device reads; an entity
 // added, removed or with another item, group or attributes (the device places again what differs); an entity's
 // transform (the device moves it in place); an entity's route or SSN (a person's spawn pose: the device poses

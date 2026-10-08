@@ -507,7 +507,10 @@ int test_session() {
 	const std::string root = view.project.root;
 	TEST_EXPECT(editor_test::write_text(root + "/isle.trn", kShipped));
 	TEST_EXPECT(editor_test::write_text(root + "/isle_c.tga", "x"));
-	TEST_EXPECT(editor_test::write_text(root + "/day.env", "sky_height 175\r\n"));
+	// The mission's .env and overcast.def each set a terrain key, which the game's terrain reader takes after the
+	// .trn (D-TERRAIN-18): the terrain's uses say where each comes from.
+	TEST_EXPECT(editor_test::write_text(root + "/day.env", "sky_height 175\r\npolytrn_detaildensity 64\r\n"));
+	TEST_EXPECT(editor_test::write_text(root + "/overcast.def", "polytrn_wrapx 1\r\n"));
 	{
 		opennova::bms::File file;
 		opennova::mission::make_default(file);
@@ -548,6 +551,13 @@ int test_session() {
 			const TerrainMissionUse &use = uses.missions[0];
 			TEST_EXPECT(use.read && use.name == "landing" && use.environment == "day" && use.environment_file == "day.env" &&
 			            use.tile_set == "rock.tga" && use.tiles && use.edge && use.edge->field == "terrain");
+			TEST_EXPECT(uses.overcast_file == "overcast.def" && use.later.size() == 2);
+			if (use.later.size() == 2) {
+				TEST_EXPECT(use.later[0].file == opennova::TrnLaterLine::File::Overcast && use.later[0].key == "polytrn_wrapx" &&
+				            use.later[0].value == "1" && use.later[0].line == 1);
+				TEST_EXPECT(use.later[1].file == opennova::TrnLaterLine::File::Environment &&
+				            use.later[1].key == "polytrn_detaildensity" && use.later[1].value == "64" && use.later[1].line == 2);
+			}
 		}
 		opennova::io::JsonValue args = opennova::io::JsonValue::make_object();
 		args.set("path", opennova::io::json_string("isle.trn"));
@@ -555,6 +565,9 @@ int test_session() {
 		const opennova::io::JsonValue answer = session.query("terrain_uses", args, why);
 		const opennova::io::JsonValue *missions = member(answer, "missions");
 		TEST_EXPECT(why.empty() && missions && missions->is_array() && missions->array.size() == 1);
+		const opennova::io::JsonValue *later =
+				missions && missions->is_array() && missions->array.size() == 1 ? member(missions->array[0], "later") : nullptr;
+		TEST_EXPECT(later && later->is_array() && later->array.size() == 2);
 		TEST_EXPECT(member(answer, "import") && member(answer, "import")->is_null());
 		args.set("path", opennova::io::json_string("day.env"));
 		session.query("terrain_uses", args, why);
