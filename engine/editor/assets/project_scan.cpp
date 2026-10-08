@@ -6,6 +6,7 @@
 
 #include <base/io/file_time.h>
 #include <base/io/strutil.h>
+#include <base/resource_index/resource_kind.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/import/import_context.h>
 #include <editor/import/import_run.h>
@@ -174,6 +175,11 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 		// material chunk and leaves a file of no kind the game knows out (S13 A8).
 		if (asset.kind == AssetKind::Unknown && is_material_chunk_file(utf8_of(path), read))
 			asset.kind = AssetKind::MaterialChunk;
+		// A name with no extension that holds text is a note (a LICENSE), asked of its head alone: the
+		// build leaves it out without a word, where a file of no kind is said (classify_asset).
+		if (asset.kind == AssetKind::Unknown && resource_extension_for_name(filename).empty() &&
+		    is_text_file(utf8_of(path), read))
+			asset.kind = AssetKind::Notes;
 	}
 	// A file an importer converts is an import source while its `.import` record is there,
 	// whatever its name makes it otherwise (S13 A8): the build packs its outputs, never it. One
