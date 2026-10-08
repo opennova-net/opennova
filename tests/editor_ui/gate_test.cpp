@@ -270,6 +270,9 @@ void test_windows_show_the_gate() {
 	        {"File > Quit", K::Quit, menu("File", {"Quit"}, K::Quit), nullptr},
 	        {"Edit > Undo", K::Undo, menu("Edit", {"Undo"}, K::Undo), nullptr},
 	        {"Edit > Redo", K::Redo, menu("Edit", {"Redo"}, K::Redo), nullptr},
+	        // An editor preference, which holds nothing: raised whatever runs.
+	        {"Edit > Preview background > Light", K::SetPreviewBackground,
+	         menu("Edit", {"Preview background", "Light"}, K::SetPreviewBackground), nullptr},
 	        {"Build > Build", K::Build, menu("Build", {"Build"}, K::Build), nullptr},
 	        {"Build > Play", K::Play, menu("Build", {"Play"}, K::Play), nullptr},
 	        {"Build > Export", K::Export, menu("Build", {"Export"}, K::Export), nullptr},

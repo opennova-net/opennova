@@ -8,13 +8,14 @@
 #include <vector>
 
 #include <editor/model/diagnostic.h>
+#include <editor/session/preview_background.h>
 
 namespace opennova::editor {
 
 // The editor's own preferences, per machine and per user, not per project (ADR 0046 d6, S13 A2):
 // the recent-projects list, the game runtime Play launches, the game install last chosen (where this
-// machine's game is installed: a project naming none starts there), and whether an import brings the
-// files the chosen ones need. A project's `.opennova/local.json` overrides the runtime for that project
+// machine's game is installed: a project naming none starts there), whether an import brings the
+// files the chosen ones need, and the previews' background. A project's `.opennova/local.json` overrides the runtime for that project
 // alone, and holds its own game install and its Play settings (how it plays, whether Play saves first):
 // a project's choice never reaches another project, nor another editor on the machine, all of which
 // read and write this one file. Schema 2 (S13 A4) renamed the game install's keys ("game_install",
@@ -34,6 +35,9 @@ struct Preferences {
 	// The import dialog's "Include the files these need" (ADR 0046 S11g): what a preview the
 	// windows raise plans with; a store that does not say reads as on.
 	bool import_dependencies = true;
+	// What the previews of the project's own data draw behind their picture (session/preview_background.h): a
+	// store that does not say, or says a word no background has, reads as the default, Grey.
+	PreviewBackground preview_background = kDefaultPreviewBackground;
 	// The items most recently placed in a mission's viewport (ADR 0046 S15: its Place tool's palette
 	// lists them first), by their items.def id, most recent first, kept per game (the polish: an id
 	// names another item in another game's catalogs) by the game the project was for
