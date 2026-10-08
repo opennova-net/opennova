@@ -38,8 +38,8 @@ add_subdirectory(../../third_party/godot-cpp godot-cpp)
 add_subdirectory(../../third_party/sqlite opennova_sqlite)
 # Vendored miniz: the BFC1 container decoder's inflate (engine/formats/bfc1).
 add_subdirectory(../../third_party/miniz opennova_miniz)
-# rgbcx: the authoring DXT encoder of the editor core's image import
-# (engine/editor/import/dxt_encode), which the editor variant links.
+# rgbcx: the authoring DXT encoder (engine/runtime/renderer/dxt_encode), which the
+# runtime links privately.
 add_subdirectory(../../third_party/rgbcx opennova_rgbcx)
 option(OPENNOVA_DEVTOOLS "Build the game's in-engine dev-tool windows (Dear ImGui)" ON)
 # The imgui-godot addon ships no web binaries, so the web build has no host
@@ -141,6 +141,7 @@ add_library(opennova_bindings OBJECT
     particle/particle_far_pass.cpp
     particle/particle_renderer.cpp
     particle/particle_atlas_page_upload.cpp
+    render/d3d9_raster_device.cpp
     render/environment_cube_blit.cpp
     render/frame_fx.cpp
     render/nvg_view_device.cpp
@@ -168,6 +169,7 @@ add_library(opennova_bindings OBJECT
     object/object_data_materials.cpp
     object/object_data_geometry.cpp
     object/object_data_runtime_eval.cpp
+    object/object_data_build.cpp
     object/object_shader_cache.cpp
     object/item_database.cpp
     object/model_light.cpp
