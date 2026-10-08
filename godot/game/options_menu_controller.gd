@@ -78,6 +78,11 @@ func _seed_player_options() -> void:
 		var detail_id := _driver.widget_id(control_name)
 		if detail_id >= 0:
 			_driver.select_row_by_value(detail_id, str(state.object_polydetail), false)
+	# The texture-filter row (TEXFILTER, front end only) seeds by value too.
+	for control_name: String in MenuFrame.texture_filter_controls():
+		var filter_id := _driver.widget_id(control_name)
+		if filter_id >= 0:
+			_driver.select_row_by_value(filter_id, str(state.texfilter_level), false)
 
 
 func _seed_scroll(control_name: String, value: int) -> void:
@@ -133,12 +138,16 @@ func _on_widget_value_changed(widget_name: String, kind: String,
 			if color_id < 0: return
 			state.crosshair_color = int(_driver.item_value(color_id, index))
 		_:
-			# The object-detail rows write the selected row's value back.
-			if not MenuFrame.object_detail_controls().has(widget_name.to_upper()):
+			# The object-detail and texture-filter rows write the selected
+			# row's value back.
+			var row_id := _driver.widget_id(widget_name)
+			if row_id < 0 or index < 0: return
+			if MenuFrame.object_detail_controls().has(widget_name.to_upper()):
+				state.object_polydetail = int(_driver.item_value(row_id, index))
+			elif MenuFrame.texture_filter_controls().has(widget_name.to_upper()):
+				state.texfilter_level = int(_driver.item_value(row_id, index))
+			else:
 				return
-			var detail_id := _driver.widget_id(widget_name)
-			if detail_id < 0 or index < 0: return
-			state.object_polydetail = int(_driver.item_value(detail_id, index))
 	_options.update(state)
 
 

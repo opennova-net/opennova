@@ -1661,8 +1661,8 @@ func _red_level0_texture() -> ImageTexture:
 
 
 func test_lum_q3_copy_stops_at_the_stage_textures_last_retail_mip_level() -> void:
-	# The Q3 copy samples Diffuse1 like the beauty wrapper: the 2x anisotropic
-	# footprint clamped at the stage's last retail mip level
+	# The Q3 copy samples Diffuse1 like the beauty wrapper: sampLinearWrap2D under the effects' filter mode,
+	# clamped at the stage's last retail mip level
 	# (u_diffuse_max_lod; GTexture_CreateFromPixelData_0, retail). The bulb
 	# minifies a 1024 texture far past level 0: unbounded it reads the white
 	# small levels, with a ceiling of 0 it keeps level 0's red.

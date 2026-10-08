@@ -99,7 +99,8 @@ void main() {
 )GLSL";
 
 // The MODEL draw's alpha test (D3DCMP_GREATER against the per-entity
-// reference) over the :fd texture, sampled like foliage_fd_sampling; the
+// reference) over the :fd texture, sampled like foliage_fd_sampling (bilinear
+// on the nearest level, never past the 4x4 terminal); the
 // surviving fragment's depth is the mask.
 const char *kFragmentShader = R"GLSL(#version 450
 layout(location = 0) in vec2 v_uv;
@@ -118,14 +119,11 @@ layout(location = 0) out vec4 frag_depth;
 
 vec4 sample_retail_foliage_fd(vec2 uv) {
 	vec2 dimensions = vec2(textureSize(fd_texture, 0));
-	vec2 dx = dFdx(uv);
-	vec2 dy = dFdy(uv);
-	float footprint = max(length(dx * dimensions), length(dy * dimensions));
-	float requested_lod = max(log2(max(footprint, 1.0)), 0.0);
+	float footprint = max(length(dFdx(uv) * dimensions), length(dFdy(uv) * dimensions));
 	float terminal_lod = max(
 			floor(log2(max(min(dimensions.x, dimensions.y), 4.0))) - 2.0, 0.0);
-	float gradient_scale = exp2(min(terminal_lod - requested_lod, 0.0));
-	return textureGrad(fd_texture, uv, dx * gradient_scale, dy * gradient_scale);
+	float level = clamp(floor(log2(max(footprint, 1.0e-8)) + 0.5), 0.0, terminal_lod);
+	return textureLod(fd_texture, uv, level);
 }
 
 void main() {
@@ -262,15 +260,15 @@ public:
 			set_failure("shader_create_failed", "RenderingDevice rejected the mask shader");
 			return false;
 		}
-		// The :fd sampler: linear, linear mips, the anisotropic mode of the
-		// highest-quality texfilter setting, wrap (foliage_fd_sampling).
+		// The :fd sampler: MIN/MAG LINEAR, MIPFILTER POINT at any texfilter
+		// level (the :fd texture carries no flag 0x8; engine
+		// renderer/texture_filter.h TextureStage::FoliageMask), wrap. The
+		// shader picks the nearest level itself (foliage_fd_sampling).
 		Ref<RDSamplerState> sampler_state;
 		sampler_state.instantiate();
 		sampler_state->set_mag_filter(RenderingDevice::SAMPLER_FILTER_LINEAR);
 		sampler_state->set_min_filter(RenderingDevice::SAMPLER_FILTER_LINEAR);
-		sampler_state->set_mip_filter(RenderingDevice::SAMPLER_FILTER_LINEAR);
-		sampler_state->set_use_anisotropy(true);
-		sampler_state->set_anisotropy_max(16.0f);
+		sampler_state->set_mip_filter(RenderingDevice::SAMPLER_FILTER_NEAREST);
 		sampler_state->set_repeat_u(RenderingDevice::SAMPLER_REPEAT_MODE_REPEAT);
 		sampler_state->set_repeat_v(RenderingDevice::SAMPLER_REPEAT_MODE_REPEAT);
 		sampler = rd->sampler_create(sampler_state);

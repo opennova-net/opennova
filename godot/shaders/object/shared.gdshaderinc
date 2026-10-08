@@ -4,6 +4,7 @@
 
 #include "res://shaders/color.gdshaderinc"
 #include "res://shaders/viewmodel_pass.gdshaderinc"
+#include "res://shaders/texture_filter.gdshaderinc"
 
 uniform vec3 u_uv_transform_u = vec3(1.0, 0.0, 0.0);
 uniform vec3 u_uv_transform_v = vec3(0.0, 1.0, 0.0);
@@ -264,24 +265,35 @@ vec2 obj_transform_uv(vec2 uv) {
 	return vec2(dot(uv1, u_uv_transform_u), dot(uv1, u_uv_transform_v));
 }
 
-// sampLinearWrap2D at retail's highest texture-filter tier: every object
-// effect compiles with ANISO, a MaxAnisotropy 2 ANISOTROPIC minifier with
-// LINEAR mip and magnification filters. The project's anisotropy level is
-// global and set for terrain, so the object sampler applies its own 2x
-// footprint: the level of detail follows the pixel footprint's major axis
-// shortened by the anisotropy ratio (capped at 2), and two trilinear taps
-// cover the major axis. retail Render_InitAllSubsystems @ 0x586413..0x586427
-// (filter tier -> mode 2), HLSLEffect_LoadFromFile @ 0x5AE6C5..0x5AE6D8
-// ("ANISO" define), _BaseInc.fx sampLinearWrap2D. max_lod is the texture's
-// last retail mip level (texture_path_resolver material_texture_max_lod):
-// pixel-built textures stop at the 4x4 level, D3D clamps there.
-vec4 obj_sample_aniso2(sampler2D tex, vec2 uv, float max_lod) {
+// sampLinearWrap2D under the effects' filter mode: every object effect
+// compiles its samplers with no define (MIN/MAG LINEAR, MIP POINT), TRILINEAR
+// (LINEAR mip) or ANISO (a MaxAnisotropy 2 ANISOTROPIC minifier with LINEAR
+// mip and magnification) as game.cfg's texfilter_level is 0, 1, or 2 and above
+// (opennova_texfilter_effect, texture_filter.gdshaderinc; engine
+// renderer/texture_filter.h effect_stage_sampler). retail
+// Render_InitAllSubsystems @ 0x58640e..0x586427 (level -> mode),
+// HLSLEffect_LoadFromFile @ 0x5ae6b9..0x5ae6e5 (the define), _BaseInc.fx
+// sampLinearWrap2D. The hardware anisotropy is the viewport's (the terrain
+// detail family's), so the 2x minifier is the shader's own footprint: the
+// level of detail follows the pixel footprint's major axis shortened by the
+// anisotropy ratio (capped at 2), and two trilinear taps cover the major axis.
+// max_lod is the texture's last retail mip level (texture_path_resolver
+// material_texture_max_lod): pixel-built textures stop at the 4x4 level, D3D
+// clamps there.
+vec4 obj_sample_effect_stage(sampler2D tex, vec2 uv, float max_lod) {
 	vec2 size = vec2(textureSize(tex, 0));
 	vec2 du = dFdx(uv);
 	vec2 dv = dFdy(uv);
 	float length_x = length(du * size);
 	float length_y = length(dv * size);
 	float major = max(length_x, length_y);
+	float isotropic_lod = log2(max(major, 1.0e-8));
+	if (opennova_texfilter_effect <= 0) {
+		return textureLod(tex, uv, retail_point_mip_level(isotropic_lod, max_lod));
+	}
+	if (opennova_texfilter_effect == 1) {
+		return textureLod(tex, uv, min(isotropic_lod, max_lod));
+	}
 	float minor = min(length_x, length_y);
 	float ratio = clamp(major / max(minor, 1.0e-8), 1.0, 2.0);
 	float lod = min(log2(max(major / ratio, 1.0e-8)), max_lod);

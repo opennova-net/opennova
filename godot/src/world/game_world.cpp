@@ -15,6 +15,7 @@
 #include <runtime/inmatch/mission_exit.h>
 #include "audio/music_director.h"
 #include "hud/hud_inset_scope.h"
+#include "render/texture_filter_device.h"
 
 using namespace godot;
 
@@ -184,6 +185,46 @@ int GameWorld::object_detail_fresh_profile() {
 
 int GameWorld::clamp_object_detail(int p_level) {
 	return opennova::renderer::clamp_object_lod_detail(p_level);
+}
+
+int GameWorld::texfilter_level_fresh_profile() {
+	return opennova::renderer::kTexFilterLevelFreshProfile;
+}
+
+int GameWorld::clamp_texfilter_level(int p_level) {
+	return opennova::renderer::clamp_texfilter_level(p_level);
+}
+
+void GameWorld::set_texfilter_level(int p_level) {
+	texfilter_level_ = opennova::renderer::clamp_texfilter_level(p_level);
+	publish_texfilter_state();
+}
+
+// The device leg: the effects' code from the options word, the device mode's
+// code and the world viewport's anisotropy from the session copy.
+void GameWorld::publish_texfilter_state() {
+	const opennova::renderer::TexFilterState state =
+			opennova::renderer::texfilter_state(session_texfilter_level_, texfilter_level_);
+	TextureFilterDevice::publish(state);
+	if (is_inside_tree()) {
+		TextureFilterDevice::apply_viewport(get_viewport(), state);
+	}
+}
+
+int GameWorld::get_texfilter_device_mode() const {
+	return opennova::renderer::texfilter_state(session_texfilter_level_, texfilter_level_).device_mode;
+}
+
+int GameWorld::get_texfilter_effect_mode() const {
+	return opennova::renderer::texfilter_state(session_texfilter_level_, texfilter_level_).effect_mode;
+}
+
+int GameWorld::get_texfilter_device_filter() {
+	return TextureFilterDevice::device_filter_code();
+}
+
+int GameWorld::get_texfilter_effect_filter() {
+	return TextureFilterDevice::effect_filter_code();
 }
 
 void GameWorld::set_local_player_spawn_loadout(const Ref<PlayerSpawnLoadout> &p_loadout) {
@@ -705,6 +746,20 @@ void GameWorld::_bind_methods() {
 			&GameWorld::object_detail_fresh_profile);
 	ClassDB::bind_static_method("GameWorld", D_METHOD("clamp_object_detail", "level"),
 			&GameWorld::clamp_object_detail);
+	ClassDB::bind_method(D_METHOD("set_texfilter_level", "level"), &GameWorld::set_texfilter_level);
+	ClassDB::bind_method(D_METHOD("get_texfilter_level"), &GameWorld::get_texfilter_level);
+	ClassDB::bind_method(D_METHOD("get_session_texfilter_level"),
+			&GameWorld::get_session_texfilter_level);
+	ClassDB::bind_method(D_METHOD("get_texfilter_device_mode"), &GameWorld::get_texfilter_device_mode);
+	ClassDB::bind_method(D_METHOD("get_texfilter_effect_mode"), &GameWorld::get_texfilter_effect_mode);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("get_texfilter_device_filter"),
+			&GameWorld::get_texfilter_device_filter);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("get_texfilter_effect_filter"),
+			&GameWorld::get_texfilter_effect_filter);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("texfilter_level_fresh_profile"),
+			&GameWorld::texfilter_level_fresh_profile);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("clamp_texfilter_level", "level"),
+			&GameWorld::clamp_texfilter_level);
 
 	ClassDB::bind_method(D_METHOD("load_world", "dir"), &GameWorld::load_world, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("load_mission", "bms_name", "dir"), &GameWorld::load_mission,
