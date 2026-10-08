@@ -636,11 +636,13 @@ const SLIDER_AND_BUTTON_XML := """
 """
 
 
-func test_scroll_press_never_ghost_clicks_another_widget() -> void:
-	# A press that lands on a scrollbar part is captured by that part until
-	# release [orig: CScrollWnd_HandleEvent @ 0x64d050 capture] — drifting
-	# onto a neighboring button while held must not press or click it, and
-	# the arrow must not auto-repeat on the held samples.
+func test_scrollbar_arrow_steps_on_its_click_and_the_track_holds_nothing() -> void:
+	# A scrollbar's arrow is a button of its own that captures its press and
+	# steps on its click [orig: CScrollWnd_HandleEvent @ 0x64d2cd, SCROLLWND_UP /
+	# _DOWN on 0x3000001]: pressed, drifted onto a neighbouring button and let
+	# go there, nothing steps and the button is not clicked. The track pages on
+	# its press and captures nothing [orig: @ 0x64d087..0x64d10e]: slid onto the
+	# button and let go there, the button's click (D-MNU-32).
 	var frame := MenuFrame.new()
 	add_child_autofree(frame)
 	frame.size = Vector2(800, 600)
@@ -651,16 +653,31 @@ func test_scroll_press_never_ghost_clicks_another_widget() -> void:
 	var gamma := driver.widget_id("GAMMA")
 	driver.set_widget_scroll_range(gamma, 0, 100, 10, 50)
 	watch_signals(driver)
+	driver.process_mouse(Vector2(290, 80), false)
 	driver.process_mouse(Vector2(290, 80), true)   # press the right arrow
-	assert_signal_emitted_with_parameters(driver, "widget_value_changed",
-			["GAMMA", "scroll", 51, "51"])
+	assert_signal_not_emitted(driver, "widget_value_changed",
+			"the arrow's press steps nothing")
 	driver.process_mouse(Vector2(200, 215), true)  # drift onto APPLY, held
 	driver.process_mouse(Vector2(200, 215), true)  # further held samples
 	driver.process_mouse(Vector2(200, 215), false) # release over APPLY
 	assert_signal_not_emitted(driver, "widget_activated",
-			"the scroll-captured press never activates the button")
-	assert_signal_emit_count(driver, "widget_value_changed", 1,
-			"the arrow steps once — no auto-repeat, no ghost press")
+			"the arrow's capture never lets the button be clicked")
+	assert_signal_not_emitted(driver, "widget_value_changed",
+			"let go off the arrow, it steps nothing")
+	# Pressed and let go over it: one step.
+	driver.process_mouse(Vector2(290, 80), true)
+	driver.process_mouse(Vector2(290, 80), false)
+	assert_signal_emitted_with_parameters(driver, "widget_value_changed",
+			["GAMMA", "scroll", 51, "51"])
+	# The track before the shuttle pages on the press, and holds nothing.
+	driver.process_mouse(Vector2(125, 80), false)
+	driver.process_mouse(Vector2(125, 80), true)
+	assert_signal_emitted_with_parameters(driver, "widget_value_changed",
+			["GAMMA", "scroll", 41, "41"])
+	driver.process_mouse(Vector2(200, 215), true)
+	driver.process_mouse(Vector2(200, 215), false)
+	assert_signal_emitted_with_parameters(driver, "widget_activated",
+			[driver.widget_id("APPLY"), "APPLY"])
 
 
 func test_combo_popup_row_hover_tracks_mouse() -> void:

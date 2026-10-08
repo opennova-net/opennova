@@ -384,17 +384,16 @@ int MenuFrameCompiler::hit_widget(const MenuFrameState &state, float mx,
 	if (screen_ == nullptr || nodes_.empty()) {
 		return -1;
 	}
-	int hit = -1;
-	int part = 0;
-	hit_roots_(state, mx, my, sx, sy, &hit, &part);
-	return hit;
+	HitClaim hit;
+	hit_roots_(state, mx, my, sx, sy, false, &hit);
+	return hit.index;
 }
 
 // The pump's claim at a point with no state written [orig: CWnd_ProcessMouseEvent
 // @ 0x647a00 — the claim walk, and the claimant's own-or-root cursor stamped
-// @ 0x647b09]: no scrollbar part takes the sample (nothing is pressed or
-// captured where nothing pumps); a press's capture, where the embedder keeps
-// one (MenuClickLatch), holds the claim to the captured window.
+// @ 0x647b09]: nothing scrolls or is pressed where nothing pumps; a press's
+// capture, where the embedder keeps one (MenuClickLatch), holds the claim to
+// the captured window.
 MenuFrameCompiler::MouseClaim MenuFrameCompiler::claim_at(const MenuFrameState &state,
 		float mouse_x, float mouse_y, float scale_x, float scale_y,
 		const MenuPumpWindow &capture) const {
@@ -402,16 +401,14 @@ MenuFrameCompiler::MouseClaim MenuFrameCompiler::claim_at(const MenuFrameState &
 	if (screen_ == nullptr || nodes_.empty()) {
 		return claim;
 	}
-	int hit = -1;
-	int part = 0;
+	HitClaim hit;
 	if (capture.valid()) {
-		capture_hit_(state, capture, mouse_x, mouse_y, scale_x, scale_y, &hit, &part);
+		capture_hit_(state, capture, mouse_x, mouse_y, scale_x, scale_y, &hit);
 	} else {
-		hit_roots_(state, mouse_x, mouse_y, scale_x, scale_y, &hit, &part);
+		hit_roots_(state, mouse_x, mouse_y, scale_x, scale_y, true, &hit);
 	}
-	claim.hovered = hit;
-	claim.spin_part = part;
-	claim.cursor = claim_cursor_(hit, part, capture.index, capture.part);
+	fill_claim_(hit, &claim);
+	claim.cursor = claim_cursor_(hit.index, hit.part, capture.index, capture.part);
 	return claim;
 }
 
@@ -420,42 +417,66 @@ MenuFrameCompiler::MouseClaim MenuFrameCompiler::claim_at(const MenuFrameState &
 // consulted [orig: CWnd_ProcessMouseEvent @ 0x647a88..0x647b02 —
 // g_UIMouseCaptureWnd set and not this window: no claim; this window: the child
 // walk skipped @ 0x647afe; CWnd_HitTestPoint @ 0x646700 with no recursion
-// @ 0x647a66]. A window the pump does not reach (hidden, or outside the open
-// popup) takes nothing, and neither does an open dropdown's list once it picked
-// (hidden). A spin arrow is a window of its own: its own rect.
+// @ 0x647a66], past the gate every claim passes first: visible in the
+// hierarchy (@ 0x647a27). A window the pump does not reach (hidden, or outside
+// the open popup) takes nothing, and neither does an open dropdown's list once
+// it picked (hidden). A spin arrow and a scrollbar's window are windows of
+// their own: their own rects.
 void MenuFrameCompiler::capture_hit_(const MenuFrameState &state,
 		const MenuPumpWindow &capture, float mx, float my, float sx, float sy,
-		int *io_hit, int *io_part) const {
+		HitClaim *io_hit) const {
 	if (capture.index < 0 || capture.index >= document_nodes_ || capture.part < 0 ||
-			capture.part > 2 || !widget_reached(capture.index, state)) {
+			capture.part == kMenuPumpPartDropdown || capture.part > kMenuPumpPartScrollShuttle ||
+			!widget_live(capture.index, state)) {
 		return;
 	}
 	mnu::RectEdges rect;
 	if (!widget_rect(capture.index, state, &rect)) {
 		return;
 	}
+	const auto holds = [&](const mnu::RectEdges &r) {
+		return mx >= emit_x(r.left, sx) && mx < emit_x(r.right, sx) &&
+				my >= emit_x(r.top, sy) && my < emit_x(r.bottom, sy);
+	};
 	const WidgetNode &node = nodes_[static_cast<size_t>(capture.index)];
-	if (capture.part != 0) {
-		if (node.window->type == mnu::WindowType::SpinList &&
+	if (capture.part == 1 || capture.part == 2) {
+		const int arrow = capture.part == 1 ? node.spin_up : node.spin_down;
+		if (node.window->type == mnu::WindowType::SpinList && arrow >= 0 &&
+				!nodes_[static_cast<size_t>(arrow)].window->disabled &&
 				spin_arrow_hit_(node, rect, state, mx, my, sx, sy) == capture.part) {
-			*io_hit = capture.index;
-			*io_part = capture.part;
+			*io_hit = HitClaim{ capture.index, capture.part };
 		}
 		return;
 	}
-	if (mx >= emit_x(rect.left, sx) && mx < emit_x(rect.right, sx) &&
-			my >= emit_x(rect.top, sy) && my < emit_x(rect.bottom, sy)) {
-		*io_hit = capture.index;
-		*io_part = 0;
+	if (menu_pump_part_scroll(capture.part)) {
+		ScrollParts parts;
+		if (!scroll_windows_(capture.index, state, &parts)) {
+			return;
+		}
+		const mnu::RectEdges &own = capture.part == kMenuPumpPartScrollUp ? parts.up
+				: capture.part == kMenuPumpPartScrollDown                 ? parts.down
+				: capture.part == kMenuPumpPartScrollShuttle              ? parts.shuttle
+																		  : parts.window;
+		if (holds(own)) {
+			*io_hit = HitClaim{ capture.index, capture.part };
+		}
+		return;
+	}
+	if (holds(rect)) {
+		*io_hit = HitClaim{ capture.index, 0 };
 	}
 }
 
 MenuClickLatch::Claim MenuFrameCompiler::click_claim(const MouseClaim &claim,
 		const MenuFrameState &state) const {
 	MenuClickLatch::Claim out;
-	// A scrollbar part owns the sample: the part is the window the pump holds
-	// (a child button of the scrollbar), never its owner (D-MNU-32).
-	if (claim.scroll_index >= 0 || claim.hovered < 0 || claim.hovered >= document_nodes_) {
+	// A scrollbar's window: its owner's, live while the owner is.
+	if (claim.scroll_owner >= 0 && claim.scroll_owner < document_nodes_) {
+		out.window = MenuPumpWindow{ claim.scroll_owner, claim.scroll_part };
+		out.live = widget_live(claim.scroll_owner, state);
+		return out;
+	}
+	if (claim.hovered < 0 || claim.hovered >= document_nodes_) {
 		return out;
 	}
 	out.window = MenuPumpWindow{ claim.hovered, claim.spin_part };
@@ -463,20 +484,21 @@ MenuClickLatch::Claim MenuFrameCompiler::click_claim(const MouseClaim &claim,
 	const WidgetNode &node = nodes_[static_cast<size_t>(claim.hovered)];
 	if (claim.spin_part == 1 || claim.spin_part == 2) {
 		// The arrow is a CButtonWnd of its own: live while its list is and it is
-		// enabled, and its press captures [orig: CSpinListWnd_CreateUpDownChildren
-		// @ 0x64b8b0; CButtonWnd_HandleNamedEvent @ 0x65839c].
+		// enabled [orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8b0].
 		const int arrow = claim.spin_part == 1 ? node.spin_up : node.spin_down;
 		out.live = out.live && arrow >= 0 && !nodes_[static_cast<size_t>(arrow)].window->disabled;
-		out.captures = true;
-	} else {
-		out.captures = menu_window_captures(node.window->type);
 	}
 	return out;
 }
 
 bool MenuFrameCompiler::pump_window_reached(const MenuPumpWindow &window,
 		const MenuFrameState &state) const {
-	return widget_reached(window.index, state);
+	if (!widget_reached(window.index, state)) {
+		return false;
+	}
+	// A scrollbar's window is pumped while it shows.
+	ScrollParts parts;
+	return !menu_pump_part_scroll(window.part) || scroll_windows_(window.index, state, &parts);
 }
 
 // Every root in draw order: a later root's hit replaces an earlier one's, so
@@ -484,9 +506,12 @@ bool MenuFrameCompiler::pump_window_reached(const MenuPumpWindow &window,
 // roots in reverse].
 // With a popup open only the popup is pumped, from its own shown gate down (its
 // ancestors are not consulted) [orig: CUIScene_EndFrame @ 0x63e600 calls the
-// popup's CWnd_ProcessMouseEvent alone while g_UIOpenPopupWnd is set].
+// popup's CWnd_ProcessMouseEvent alone while g_UIOpenPopupWnd is set; the popup
+// is visible in the hierarchy whatever its ancestors are, CWnd_IsVisibleInHierarchy
+// @ 0x6462b8].
 void MenuFrameCompiler::hit_roots_(const MenuFrameState &state, float mx,
-		float my, float sx, float sy, int *io_hit, int *io_part) const {
+		float my, float sx, float sy, bool pump, HitClaim *io_claim) const {
+	bool holds = false;
 	const int popup = state.popup_root;
 	if (popup >= 0 && popup < document_nodes_) {
 		int origin_x = 0;
@@ -497,12 +522,152 @@ void MenuFrameCompiler::hit_roots_(const MenuFrameState &state, float mx,
 			origin_x = parent_rect.left;
 			origin_y = parent_rect.top;
 		}
-		hit_walk(popup, origin_x, origin_y, state, mx, my, sx, sy, io_hit, io_part);
+		hit_walk(popup, origin_x, origin_y, state, mx, my, sx, sy, pump, true, io_claim, &holds);
 		return;
 	}
 	for (int next = 0; next < document_nodes_;) {
-		next = hit_walk(next, 0, 0, state, mx, my, sx, sy, io_hit, io_part);
+		next = hit_walk(next, 0, 0, state, mx, my, sx, sy, pump, true, io_claim, &holds);
 	}
+}
+
+// The press message's walk down one window [orig: CWnd_DispatchMouseEventToChildren
+// @ 0x647900]: a window hidden or disabled takes nothing and passes nothing on
+// (@ 0x647949..0x64795d, its own flags); its children, last first, each keep it
+// from its own press where their own rect holds the point (CWnd_HitTestPoint
+// unrecursed @ 0x6479b3, shown windows alone: a disabled child's rect too), and
+// each takes the press while no window has taken the capture (@ 0x6479be);
+// then the window's own handler where its rect held the point and no child's
+// did (@ 0x6479e5). A widget's own windows are its last children: a spin
+// list's arrows, a scrollbar's windows (its buttons first, then its track).
+void MenuFrameCompiler::press_walk_(int index, int origin_x, int origin_y,
+		const MenuFrameState &state, float mx, float my, float sx, float sy,
+		std::vector<MenuPumpWindow> *out, MenuPumpWindow *capture) const {
+	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
+	const mnu::Window &w = *node.window;
+	const MenuWidgetState *ws = state_for(state, index);
+	if (!node_shown(w, ws) || disabled_(w, ws)) {
+		return;
+	}
+	const mnu::RectEdges rect = offset_rect(node_rect_(node, ws), origin_x, origin_y);
+	auto holds = [&](const mnu::RectEdges &r) {
+		return mx >= emit_x(r.left, sx) && mx < emit_x(r.right, sx) &&
+				my >= emit_x(r.top, sy) && my < emit_x(r.bottom, sy);
+	};
+	// A window the press reaches: its own handler; a capturing one takes the
+	// capture [orig: CButtonWnd_HandleNamedEvent @ 0x65839c].
+	auto handle = [&](int part) {
+		const MenuPumpWindow window{ index, part };
+		out->push_back(window);
+		if (menu_pump_window_captures(w.type, part)) {
+			*capture = window;
+		}
+	};
+	bool self_hit = holds(rect);
+	// The widget's own windows, the last made first.
+	ScrollParts parts;
+	if (w.type == mnu::WindowType::SpinList) {
+		for (const int arrow : { 2, 1 }) {
+			const int arrow_node = arrow == 1 ? node.spin_up : node.spin_down;
+			if (arrow_node < 0 || spin_arrow_hit_(node, rect, state, mx, my, sx, sy) != arrow) {
+				continue;
+			}
+			self_hit = false;
+			if (!capture->valid() && !nodes_[static_cast<size_t>(arrow_node)].window->disabled) {
+				handle(arrow);
+			}
+		}
+	} else if (scroll_windows_(index, state, &parts)) {
+		const int part = scroll_window_part_(parts, mx, my, sx, sy);
+		if (w.type == mnu::WindowType::Scroll) {
+			// The SCROLL widget's buttons; its track is its own press.
+			if (part != 0 && part != kMenuPumpPartScroll) {
+				self_hit = false;
+				if (!capture->valid()) {
+					handle(part);
+				}
+			}
+		} else if (part != 0) {
+			// The owner's scroll window: its buttons, else its own press (the
+			// track) [orig: CListWnd_CreateScrollChild @ 0x6444c0].
+			self_hit = false;
+			if (!capture->valid()) {
+				handle(part);
+			}
+		}
+	}
+	// The authored children, last first.
+	std::vector<int> children;
+	int next = index + 1;
+	for (size_t c = 0; c < w.children.size(); ++c) {
+		children.push_back(next);
+		next = skip_widget(next);
+	}
+	for (auto it = children.rbegin(); it != children.rend(); ++it) {
+		const WidgetNode &child = nodes_[static_cast<size_t>(*it)];
+		const MenuWidgetState *cws = state_for(state, *it);
+		if (node_shown(*child.window, cws) &&
+				holds(offset_rect(node_rect_(child, cws), rect.left, rect.top))) {
+			self_hit = false;
+		}
+		if (!capture->valid()) {
+			press_walk_(*it, rect.left, rect.top, state, mx, my, sx, sy, out, capture);
+		}
+	}
+	if (self_hit) {
+		handle(0);
+	}
+}
+
+// The press [orig: UI_DispatchMouseEvent @ 0x63ab00 — the open popup alone
+// (@ 0x63abb5), else every root, last first (@ 0x63abd3)]. Once a window has
+// taken the capture, a root's walk hands the press to the captured window
+// instead (CWnd_DispatchMouseEventToChildren @ 0x647926..0x64793f), so each
+// root behind the one holding it presses it again.
+std::vector<MenuPumpWindow> MenuFrameCompiler::press_reach(const MenuFrameState &state,
+		float mouse_x, float mouse_y, float scale_x, float scale_y) const {
+	std::vector<MenuPumpWindow> out;
+	if (screen_ == nullptr || nodes_.empty()) {
+		return out;
+	}
+	MenuPumpWindow capture;
+	const int popup = state.popup_root;
+	if (popup >= 0 && popup < document_nodes_) {
+		int origin_x = 0;
+		int origin_y = 0;
+		const int parent = nodes_[static_cast<size_t>(popup)].parent;
+		mnu::RectEdges parent_rect;
+		if (parent >= 0 && widget_rect(parent, state, &parent_rect)) {
+			origin_x = parent_rect.left;
+			origin_y = parent_rect.top;
+		}
+		press_walk_(popup, origin_x, origin_y, state, mouse_x, mouse_y, scale_x, scale_y, &out,
+				&capture);
+		return out;
+	}
+	std::vector<int> roots;
+	for (int next = 0; next < document_nodes_; next = skip_widget(next)) {
+		roots.push_back(next);
+	}
+	for (auto it = roots.rbegin(); it != roots.rend(); ++it) {
+		if (capture.valid()) {
+			out.push_back(capture);
+			continue;
+		}
+		press_walk_(*it, 0, 0, state, mouse_x, mouse_y, scale_x, scale_y, &out, &capture);
+	}
+	return out;
+}
+
+MenuPumpWindow MenuFrameCompiler::press_capture(const std::vector<MenuPumpWindow> &reach) const {
+	MenuPumpWindow capture;
+	for (const MenuPumpWindow &window : reach) {
+		if (window.index >= 0 && window.index < document_nodes_ &&
+				menu_pump_window_captures(nodes_[static_cast<size_t>(window.index)].window->type,
+						window.part)) {
+			capture = window;
+		}
+	}
+	return capture;
 }
 
 bool MenuFrameCompiler::in_subtree_(int index, int root) const {

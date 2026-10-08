@@ -306,23 +306,40 @@ PumpHeld pump_held(const MenuFrameState &state) {
 
 } // namespace
 
-int MenuStateFrame::process_mouse(float x, float y, bool button_down, bool &scroll_owned) {
-	scroll_owned = false;
+std::vector<MenuPumpWindow> MenuStateFrame::press_mouse(float x, float y) {
+	if (!configured_) return {};
+	// The press ahead of its sample's pump, as the game's frame takes it (MenuFrame::press_mouse): the
+	// windows it reaches, the capture, the scrollbar windows' own press.
+	const std::vector<MenuPumpWindow> reach = compiler_.press_reach(state_, x, y, 1.0f, 1.0f);
+	click_.press(compiler_.press_capture(reach));
+	for (const MenuPumpWindow &window : reach) {
+		MenuFrameCompiler::MouseClaim changed;
+		compiler_.press_scroll_window(state_, window, x, y, 1.0f, 1.0f, &changed);
+		if (changed.scroll_value_changed) {
+			++serial_;
+			if (scrolled_) scrolled_(changed.scroll_index, changed.scroll_value);
+		}
+	}
+	return reach;
+}
+
+int MenuStateFrame::process_mouse(float x, float y, bool button_down) {
 	if (!configured_) return -1;
 	const PumpHeld before = pump_held(state_);
 	// The claim honors a press's capture, which the release lets go first; the click is the claim let go
 	// over that was held the sample before, as the game's frame takes it (MenuFrame::process_mouse)
-	// [orig: CWnd_ProcessMouseEvent @ 0x647b14 — the click event 0x3000001 after the child pump].
+	// [orig: CWnd_ProcessMouseEvent @ 0x647b14 — the click event 0x3000001 after the child pump]; a
+	// scrollbar window's is the scrollbar's own (MenuFrameCompiler::click_scroll_window).
 	const MenuPumpWindow capture = click_.capture_for(button_down);
-	const MenuFrameCompiler::MouseClaim claim =
+	MenuFrameCompiler::MouseClaim claim =
 			compiler_.pump_mouse(state_, x, y, button_down, 1.0f, 1.0f, capture);
 	state_.cursor_x = x;
 	state_.cursor_y = y;
 	if (pump_held(state_) != before) ++serial_;
 	const MenuPumpWindow clicked = click_.sample(compiler_.click_claim(claim, state_), button_down,
 			[this](const MenuPumpWindow &window) { return compiler_.pump_window_reached(window, state_); });
-	scroll_owned = claim.scroll_index >= 0;
-	if (clicked.valid() && clicked_) clicked_(clicked.index, clicked.part);
+	if (clicked.valid() && !compiler_.click_scroll_window(state_, clicked, &claim) && clicked_)
+		clicked_(clicked.index, clicked.part);
 	if (claim.scroll_value_changed) {
 		++serial_;
 		if (scrolled_) scrolled_(claim.scroll_index, claim.scroll_value);
