@@ -1,11 +1,12 @@
 name: CI
 
 on:
-  # Master and the editor trunk: their pushes are the runs that save the
-  # compiler caches (.github/actions/compiler-cache lists the same two), which
-  # the pull requests into each branch then read.
+  # Master and the two trunks (the fixes trunk, and the editor trunk on it):
+  # their pushes are the runs that save the compiler caches
+  # (.github/actions/compiler-cache lists the same three), which the pull
+  # requests into each branch then read.
   push:
-    branches: [master, editor/s1-project-core]
+    branches: [master, fixes/trunk, editor/s1-project-core]
   # Every pull request, whatever its base: a PR stacked on another PR's
   # branch gets the same checks as one targeting master.
   pull_request:
@@ -17,14 +18,14 @@ permissions:
 # On a PR, github.head_ref is the source branch, so a new push cancels the older
 # run (and prevents two runs racing to post the build-links comment). On push to
 # master, head_ref is empty and we fall back to the unique run_id, so master runs
-# are never cancelled. The trunk's pushes and manual runs queue in one group of
+# are never cancelled. Each trunk's pushes and manual runs queue in one group of
 # their own, never cancelled once started: the merge train lands PRs faster than
-# a run takes, so the trunk runs one at a time, each newer push replaces the
-# one still waiting, and every run starts from the compiler cache the last one
+# a run takes, so a trunk runs one at a time, each newer push replaces the one
+# still waiting, and every run starts from the compiler cache the last one
 # saved. (The ref, not the bare branch name, keeps that group apart from the
-# trunk's own PR into master, whose head_ref is the bare name.)
+# trunk's own PR, whose head_ref is the bare name.)
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.head_ref || (github.ref == 'refs/heads/editor/s1-project-core' && github.ref) || github.run_id }}
+  group: ci-${{ github.workflow }}-${{ github.head_ref || ((github.ref == 'refs/heads/fixes/trunk' || github.ref == 'refs/heads/editor/s1-project-core') && github.ref) || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -296,7 +297,7 @@ jobs:
           path: build/Testing/
 
   # Match the Windows flavours: PRs exercise the editor/debug extension;
-  # pushes (master, the trunk) and manual runs also compile the release
+  # pushes (master, the trunks) and manual runs also compile the release
   # extension. Both Linux flavours build as CMake Release (no debug info,
   # stripped): the template_debug .so only feeds godot-tests-linux, and
   # RelWithDebInfo made it a 674 MiB artifact and a compiler cache several
@@ -514,7 +515,7 @@ jobs:
   # A pull request builds only template_debug and packages in debug export mode
   # (~4.7 min per flavour on a warm cache, mostly MSVC preprocessing on sccache
   # hits — halving the legs halves the wall-clock in front of godot-tests and the
-  # PR build links). Pushes (master, the trunk) and manual runs also build
+  # PR build links). Pushes (master, the trunks) and manual runs also build
   # template_release, in parallel, so the release flavour and release-mode
   # packaging stay continuously verified. sccache caches godot-cpp's objects across runs, so
   # after one warm-up only changed engine/ sources recompile. Windows must

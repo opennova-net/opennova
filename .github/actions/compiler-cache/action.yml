@@ -2,7 +2,7 @@ name: Compiler cache
 description: >-
   sccache on a local disk directory carried between runs as ONE Actions cache
   entry per build flavour and branch: restored by every run, saved only by
-  pushes to (and manual runs on) master and the editor trunk.
+  pushes to (and manual runs on) master and the two trunks.
 
 # Why not sccache's own GitHub Actions backend: it stores one cache entry per
 # object file. Seven flavours times ~1.5k objects put the repository past the
@@ -14,8 +14,8 @@ description: >-
 # - Restore (`mode: restore`, before the build) takes the newest entry of the
 #   flavour in the nearest scope the run can read: its own branch, then a pull
 #   request's base branch, then master (GitHub searches the scopes in that
-#   order). So a pull request into the editor trunk reads the trunk's entry and
-#   one into master reads master's; forks included.
+#   order). So a pull request into a trunk reads that trunk's entry and one
+#   into master reads master's; forks included.
 # - Save (`mode: save`, after the build, on the cache branches below only)
 #   first prunes every object this build did not touch (sccache refreshes an
 #   entry's file times on each hit, sccache src/lru_disk_cache/mod.rs
@@ -24,11 +24,13 @@ description: >-
 #   on the same branch (never another branch's), which needs `actions: write`
 #   on the job.
 #
-# The cache branches are master and the editor trunk, editor/s1-project-core
-# (ci.yml's push trigger lists the same two). The trunk differs from master in
-# the whole editor group and many shared headers, so master's objects gave a
-# trunk build 19% hits and 25-45 min of compiles on the 4-core runner; the
-# trunk's own entry gives 93-100% while it is a merge or two behind. A pull
+# The cache branches are master and the two trunks: the fixes trunk,
+# fixes/trunk, which the engine and game fixes land in before master, and the
+# editor trunk on it, editor/s1-project-core (ci.yml's push trigger lists the
+# same three). The editor trunk differs from master in the whole editor group
+# and many shared headers, so master's objects gave a trunk build 19% hits and
+# 25-45 min of compiles on the 4-core runner; the trunk's own entry gives
+# 93-100% while it is a merge or two behind. A pull
 # request's own entry would be readable by that pull request alone, so pull
 # requests never save.
 #
@@ -93,7 +95,7 @@ runs:
         save=false
         if [[ "$EVENT" == "push" || "$EVENT" == "workflow_dispatch" ]]; then
           case "$GITHUB_REF" in
-            refs/heads/master | refs/heads/editor/s1-project-core) save=true ;;
+            refs/heads/master | refs/heads/fixes/trunk | refs/heads/editor/s1-project-core) save=true ;;
           esac
         fi
         echo "save=${save}" >> "$GITHUB_OUTPUT"
