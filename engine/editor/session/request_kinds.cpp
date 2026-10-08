@@ -74,6 +74,9 @@ void serve_plan_import(SessionCore &core, const EditorRequest &request) {
 void serve_set_import_dependencies(SessionCore &core, const EditorRequest &request) {
 	core.imports().set_dependencies(request.with_dependencies);
 }
+void serve_set_preview_background(SessionCore &core, const EditorRequest &request) {
+	if (request.preview_background) core.set_preview_background(*request.preview_background);
+}
 void serve_import_files(SessionCore &core, const EditorRequest &request) {
 	core.imports().import_files(request);
 }
@@ -459,6 +462,12 @@ constexpr RequestKindRow kRows[] = {
 			"(with_dependencies), remembered; an open import dialog is planned again with it, as "
 			"plan_import plans it (whatever the setting was).")
 			.takes(request_params({ F::WithDependencies }))
+			.row,
+	// A preference alone, as the import setting is: it holds nothing of the session's.
+	Request(K::SetPreviewBackground, "set_preview_background", serve_set_preview_background,
+			"The editor's setting of what the previews of the project's own data draw behind their picture "
+			"(preview_background: dark, grey, light or checker), remembered; every open preview draws it at once.")
+			.takes(request_params({ F::PreviewBackground }))
 			.row,
 	Request(K::ImportFiles, "import_files", serve_import_files,
 			"The import dialog's rows kept, imports (or, with planned and the plan it names, the open "
