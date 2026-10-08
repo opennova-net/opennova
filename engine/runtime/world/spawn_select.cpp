@@ -11,6 +11,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/entity.h> // Entity
 #include <base/gameprofile/game_type.h>
+#include <base/io/bam.h>
 #include <base/io/fixed.h>
 #include <runtime/world/world.h>  // World, EntityRegistry registry
 #include <runtime/world/zone_chain.h>
@@ -19,6 +20,19 @@ namespace opennova::world {
 
 namespace {
 
+// An entity's orientation words (+0x10 heading, +0x14 pitch, +0x18 roll) as
+// the placement copies them: a vehicle's live motor attitude once its motor
+// has run, else the placement angles the BMS load stored, each
+// `((deg << 16) / 360) << 16` with its low 16 bits zero; the heading passes
+// the raw record's 90 - yaw, so a marker authored at -197 holds 0xCC160000.
+// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6; the vehicle motors'
+//  live +0x10..+0x18]
+void entity_orientation_words(const Entity &entity, int32_t out[3]) {
+    out[0] = entity.veh.yaw_seeded ? entity.veh.yaw_bam : spawn_angle_bam(90 - entity.yaw);
+    out[1] = entity.veh.yaw_seeded ? entity.veh.air_pitch_bam : spawn_angle_bam(entity.pitch);
+    out[2] = entity.veh.yaw_seeded ? entity.veh.air_roll_bam : spawn_angle_bam(entity.roll);
+}
+
 SpawnPointResult entity_pose(const Entity &entity) {
     SpawnPointResult out;
     out.found = true;
@@ -26,6 +40,9 @@ SpawnPointResult entity_pose(const Entity &entity) {
     out.yaw = entity.yaw;
     out.pitch = entity.pitch;
     out.roll = entity.roll;
+    int32_t words[3];
+    entity_orientation_words(entity, words);
+    out.heading_bam = words[0];
     return out;
 }
 
@@ -35,14 +52,16 @@ SpawnPointResult marker_pose(const World &world, const Entity &marker) {
     if (parent == nullptr)
         return out;
 
+    // The parent's own +0x10..+0x18 words turn the marker's local position
+    // and add to its heading. [orig: Entity_TransformLocalToWorld @0x43BD00,
+    //  refEntity[3..5] @0x43BD22..0x43BD64]
+    int32_t parent_words[3];
+    entity_orientation_words(*parent, parent_words);
     const int32_t parent_position[3] = {
         to_fixed(parent->position.x), to_fixed(parent->position.y),
         to_fixed(parent->position.z)};
     const CollisionMatrix parent_pose = collision_matrix_from_euler(
-        bam_heading_from_mission_yaw_deg(static_cast<double>(parent->yaw)),
-        bam_from_degrees_wrapped(static_cast<double>(parent->pitch)),
-        bam_from_degrees_wrapped(static_cast<double>(parent->roll)),
-        parent_position);
+        parent_words[0], parent_words[1], parent_words[2], parent_position);
     const int32_t local[3] = {
         to_fixed(marker.position.x), to_fixed(marker.position.y),
         to_fixed(marker.position.z)};
@@ -56,6 +75,8 @@ SpawnPointResult marker_pose(const World &world, const Entity &marker) {
     // local pitch and roll. Entity stores the inverse mission-yaw convention.
     out.yaw = static_cast<int16_t>(std::lround(normalize_mission_yaw_deg(
         static_cast<double>(parent->yaw) + marker.yaw - 90.0)));
+    // The heading word is the two words' sum, wrapping. [orig: @0x43BE7E]
+    out.heading_bam = io::bam_add(parent_words[0], out.heading_bam);
     return out;
 }
 

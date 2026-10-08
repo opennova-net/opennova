@@ -6,7 +6,9 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
+#include <runtime/world/angle.h>  // bam_heading_from_mission_yaw_deg
 #include <runtime/world/entity.h> // EntityHandle, Vec3
 
 namespace opennova::world {
@@ -30,6 +32,14 @@ inline constexpr uint16_t kRetailPlayerMinEntitySlot = 0;
 struct PlayerSpawn {
     Vec3 position;
     int16_t yaw = 0;
+    // The heading word (+0x10) the motor starts from, when the spawn copies a
+    // source pose: the placement's (SpawnPointResult::heading_bam) or a
+    // joiner's spawn record's full orientation. Retail copies it verbatim,
+    // never through the whole-degree `yaw` (D-NET-376). A spawn with no source
+    // pose (a test's, a tool's) turns `yaw` into its heading.
+    // [orig: Entity_FindBestSpawnPoint @0x50CF38;
+    //  Server_PositionPlayerForSpawn @0x50D3F7]
+    std::optional<int32_t> heading_bam;
     int16_t pitch = 0;
     int16_t roll = 0;
     uint8_t team = 0;
@@ -68,6 +78,14 @@ struct PlayerSpawn {
     //  and Server_InitAllPlayerEntitiesForRound @0x516B67]
     bool berserk = false;
 };
+
+// The heading word a spawn starts the motor and the local look yaw from: the
+// copied source word, else `yaw` turned to the (90 - yaw) heading.
+// [orig: Entity_FindBestSpawnPoint @0x50CF38 (Yaw), @0x50CF4D (the look yaw)]
+inline int32_t player_spawn_heading(const PlayerSpawn &spawn) {
+    return spawn.heading_bam.has_value() ? *spawn.heading_bam
+                                         : bam_heading_from_mission_yaw_deg(spawn.yaw);
+}
 
 // Faithful §5.2b sequence: (1) alloc a pool-0 player-infantry (0x14B9) entity; (2/3)
 // item-template health init; (4) place Position/Yaw/Team; (5) entity_reset_to_spawn_state

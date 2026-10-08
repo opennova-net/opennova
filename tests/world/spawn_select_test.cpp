@@ -223,6 +223,69 @@ int main() {
         CHECK(r.flags_or == 0 && !r.carrier.valid()); // team 0 marker: no latch
     }
 
+    // --- D-NET-376: the placement copies the chosen entity's heading WORD.
+    //     A marker's word is its BMS placement angle, ((90 - yaw) << 16) / 360
+    //     truncated, << 16, over the RAW record yaw: JO:CA CP01's 6001 markers
+    //     at -197 and -167 hold 0xCC160000 and 0xB6C10000 in retail's process
+    //     (163 and 193 normalized first would give 0xCC170000 / 0xB6C20000).
+    //     A parented marker adds its parent's word; a seeded vehicle's word is
+    //     its live motor heading.
+    // [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66;
+    //  Server_PositionPlayerForSpawn @0x50D3F7; Entity_TransformLocalToWorld
+    //  @0x43BE7E]
+    {
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
+        w.registry.configure_pool(1, 4);
+        w.registry.configure_pool(3, 16);
+        spawn_marker(w, 6001, {-534.9119f, -139.3639f, 25.5f}, -197);
+        spawn_marker(w, 6001, {-529.2835f, -138.3019f, 25.5f}, -167);
+        SpawnPointResult r = resolve_player_spawn_pose(
+            w, EntityHandle{}, EntityHandle{}, 0, 1, 0x30020u);
+        CHECK(r.found && r.yaw == -197);
+        CHECK(static_cast<uint32_t>(r.heading_bam) == 0xCC160000u);
+        r = resolve_player_spawn_pose(w, EntityHandle{}, EntityHandle{}, 1, 1, 0x30020u);
+        CHECK(r.found && r.yaw == -167);
+        CHECK(static_cast<uint32_t>(r.heading_bam) == 0xB6C10000u);
+    }
+    {
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
+        w.registry.configure_pool(1, 4);
+        w.registry.configure_pool(3, 16);
+        Entity parent;
+        parent.kind = EntityKind::Item;
+        parent.yaw = 73; // word 0x0C160000 (17 degrees truncated)
+        const EntityHandle parent_h = w.registry.spawn(1, parent);
+        const EntityHandle marker_h = spawn_marker(w, 6094, {1.0f, 0.0f, 0.0f}, 180);
+        w.registry.get(marker_h)->ground_target = parent_h; // word 0xC0000000
+        SpawnPointResult r = resolve_player_spawn_pose(
+            w, EntityHandle{}, EntityHandle{}, 0, 1, 0x30020u);
+        CHECK(r.found && static_cast<uint32_t>(r.heading_bam) == 0xCC160000u);
+
+        // The parent's motor has run: its live word turns and adds.
+        Entity *carrier = w.registry.get(parent_h);
+        carrier->veh.yaw_seeded = true;
+        carrier->veh.yaw_bam = 0x12345678;
+        r = resolve_player_spawn_pose(w, EntityHandle{}, EntityHandle{}, 0, 1, 0x30020u);
+        CHECK(static_cast<uint32_t>(r.heading_bam) == 0xD2345678u);
+    }
+    {
+        // A picked vehicle zone with no scatter: its live heading word.
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
+        w.registry.configure_pool(1, 4);
+        w.registry.configure_pool(3, 4);
+        const EntityHandle zone = spawn_zone(w, 1, 1, 0);
+        Entity *vehicle = w.registry.get(zone);
+        vehicle->yaw = 30;
+        vehicle->veh.yaw_seeded = true;
+        vehicle->veh.yaw_bam = 0x2AAA1234;
+        const SpawnPointResult r = resolve_player_spawn_pose(
+            w, EntityHandle{}, zone, 0, 1, 0x10010u);
+        CHECK(r.found && r.yaw == 30 && r.heading_bam == 0x2AAA1234);
+    }
+
     // --- The Co-op direct-marker arm's two survivors: the chosen marker's
     //     parachute bit is copied, and a team-2 marker arms the queued 0x200
     //     mount with carrier = its parent (else the MARKER itself, since
