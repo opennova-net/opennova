@@ -109,6 +109,13 @@ EnvironmentUses environment_uses(const SessionView &view, const std::string &pat
 	if (!graph) return uses;
 	env::Config environment;
 	const bool environment_read = environment_config(view, uses.path, environment);
+	// The texts a mission's terrain load reads after its .trn: overcast.def, then this file (D-TERRAIN-18).
+	std::vector<uint8_t> overcast_bytes, environment_bytes;
+	const AssetEntry *overcast_entry = view.project.scan->find(env::kOvercastFile);
+	const bool overcast_read = overcast_entry && read_project_file(view, overcast_entry->relative_path, overcast_bytes);
+	const bool has_environment_text = read_project_file(view, uses.path, environment_bytes);
+	const std::string overcast(overcast_bytes.begin(), overcast_bytes.end());
+	const std::string environment_lines(environment_bytes.begin(), environment_bytes.end());
 	for (const GraphEdge *edge : graph->referrers_of_file(uses.path)) {
 		if (edge->kind != ReferenceKind::Environment) continue;
 		const AssetEntry *source = view.project.scan->at_path(edge->source);
@@ -147,11 +154,20 @@ EnvironmentUses environment_uses(const SessionView &view, const std::string &pat
 		if (!use.terrain_file.empty()) {
 			std::vector<uint8_t> bytes;
 			if (read_project_file(view, use.terrain_file, bytes)) {
-				std::istringstream input(std::string(bytes.begin(), bytes.end()));
+				const std::string text(bytes.begin(), bytes.end());
+				std::istringstream input(text);
 				TrnConfig trn;
 				std::string error;
 				use.terrain_read = load_trn(input, trn, error);
 				if (use.terrain_read) use.terrain_water = trn.water_height;
+				// The lines of this file the terrain takes, after the .trn's and overcast.def's.
+				TrnLaterTexts later;
+				if (overcast_read) later.overcast = &overcast;
+				if (has_environment_text) later.environment = &environment_lines;
+				std::vector<TrnLaterLine> taken;
+				load_mission_trn(text, later, trn, error, &taken);
+				for (TrnLaterLine &line : taken)
+					if (line.file == TrnLaterLine::File::Environment) use.terrain_keys.push_back(std::move(line));
 			}
 		}
 		// The water plane by the game's ladder: the header's override, then the environment's water height
@@ -250,6 +266,15 @@ io::JsonValue environment_uses_json(const EnvironmentUses &uses) {
 		water.set("height", json_number(double(use.water_height)));
 		water.set("words", json_string(water_words(use)));
 		mission.set("water", std::move(water));
+		JsonValue terrain_keys = JsonValue::make_array();
+		for (const TrnLaterLine &line : use.terrain_keys) {
+			JsonValue row = JsonValue::make_object();
+			row.set("line", json_number(double(line.line)));
+			row.set("key", json_string(line.key));
+			row.set("value", json_string(line.value));
+			terrain_keys.push(std::move(row));
+		}
+		mission.set("terrain_keys", std::move(terrain_keys));
 		missions.push(std::move(mission));
 	}
 	out.set("missions", std::move(missions));

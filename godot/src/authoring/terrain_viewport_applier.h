@@ -99,10 +99,15 @@ private:
 	};
 	enum Layer : uint8_t { kEnvironment, kTerrain, kLayers };
 	static int layer_of_(Unit::Kind kind);
+	// The terrain's name and tile set, the mission whose .til the game reads beside it, and the .env the
+	// terrain's load reads after its .trn and overcast.def with the lines of the two its parser can take
+	// (D-TERRAIN-18, editor::mission_terrain_later_lines): an edit of either that sets nothing of the
+	// terrain loads it not again.
 	struct TerrainKey {
-		std::string terrain, tile_set, mission;
+		std::string terrain, tile_set, mission, environment, later;
 		bool operator==(const TerrainKey &o) const {
-			return terrain == o.terrain && tile_set == o.tile_set && mission == o.mission;
+			return terrain == o.terrain && tile_set == o.tile_set && mission == o.mission &&
+					environment == o.environment && later == o.later;
 		}
 	};
 	struct EnvironmentKey {
@@ -113,7 +118,7 @@ private:
 		int start_time = 0, minutes_per_day = 0;
 		bool operator==(const EnvironmentKey &o) const;
 	};
-	static TerrainKey terrain_key_of_(const opennova::editor::TerrainViewport &model);
+	TerrainKey terrain_key_of_(const opennova::editor::TerrainViewport &model) const;
 	static EnvironmentKey environment_key_of_(const opennova::editor::TerrainViewport &model);
 	struct Build {
 		bool environment = false, terrain = false;
