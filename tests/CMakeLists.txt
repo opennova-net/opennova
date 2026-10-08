@@ -1821,6 +1821,15 @@ target_link_libraries(cpt_jo_assets_sweep_test PRIVATE opennova_formats)
 target_include_directories(cpt_jo_assets_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_gated_test(cpt_jo_assets_sweep COMMAND cpt_jo_assets_sweep_test)
 
+# D-TERRAIN-18: a mission's terrain reads overcast.def and its .env after the
+# .trn through the terrain's parser (formats/trn load_mission_trn), over the
+# Tmap fixture and synthetic later files; the runtime's field-store load with it.
+# Retail leg: every JO:CA terrain under overcast.def and each shipped .env.
+add_executable(trn_mission_load_test terrain/trn_mission_load_test.cpp)
+target_link_libraries(trn_mission_load_test PRIVATE opennova_runtime opennova_formats opennova_base)
+target_include_directories(trn_mission_load_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(trn_mission_load COMMAND trn_mission_load_test)
+
 add_executable(trn_config_roundtrip_test terrain/trn_config_roundtrip_test.cpp)
 target_link_libraries(trn_config_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(trn_config_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
