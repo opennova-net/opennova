@@ -302,6 +302,10 @@ public:
 	void quit();
 	// The preferences kept by their store, and shown.
 	void save_preferences();
+	// The previews' background (the Preview background preference, session/preview_background.h): written from a
+	// copy (one that could not be written stays the one in effect, its failure a finding), shown at once, each
+	// open preview drawing it at its device's next pump.
+	void set_preview_background(PreviewBackground background);
 	// `item` first among the items recently placed for the open project's game (ADR 0046 S15; per game
 	// since the polish, recent_items_game), shown at once; kept by the next poll's save_recent_items
 	// (nothing to keep when it was first already, or with no project open).

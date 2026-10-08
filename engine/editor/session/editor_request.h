@@ -10,6 +10,7 @@
 #include <editor/model/diagnostic.h>
 #include <editor/model/edit.h>
 #include <editor/project/play_mode.h>
+#include <editor/session/preview_background.h>
 #include <editor/run/play_start.h>
 #include <editor/session/view/viewport_kind.h>
 
@@ -33,6 +34,7 @@ enum class EditorRequestKind {
 	PreviewImport,
 	PlanImport,
 	SetImportDependencies,
+	SetPreviewBackground,
 	ImportFiles,
 	CancelImport,
 	CreateMissing,
@@ -403,6 +405,9 @@ struct EditorRequest {
 	// lacks): the reference's kind, the name as it writes it and its scope, added to the made file's document
 	// as its type's Add makes one (DocumentType::define_symbol), one step its Undo takes back. Kind None: none.
 	ReferenceSubject define;
+	// What the previews of the project's own data draw behind their picture (SetPreviewBackground: the editor's
+	// preference, session/preview_background.h).
+	std::optional<PreviewBackground> preview_background;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -426,7 +431,7 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.all == b.all && a.planned == b.planned && a.behind == b.behind && a.fresh == b.fresh && a.plan == b.plan &&
 			a.report == b.report && a.steps == b.steps && a.folder == b.folder && a.start == b.start &&
 			a.play_mode == b.play_mode && a.save_before_play == b.save_before_play && a.alone == b.alone &&
-			a.define == b.define;
+			a.define == b.define && a.preview_background == b.preview_background;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);
