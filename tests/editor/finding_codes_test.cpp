@@ -19,6 +19,7 @@
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/diagnostic.h>
 #include <editor/preview/menu_render_check.h>
+#include <editor/project_build/build_plan.h>
 #include <editor/session/finding_codes.h>
 #include <editor/session/session_json.h>
 #include <base/io/json.h>
@@ -343,8 +344,7 @@ static int test_columns() {
 	                     "catalog.item_type", "catalog.name_empty", "catalog.reserved_id", "catalog.reserved_kind",
 	                     "catalog.reserved_name", "catalog.reserved_refused", "charattr.attribute_word",
 	                     "charattr.no_cammo", "charattr.not_a_number", "charattr.unread_section", "dialog_bank.line_no_wave",
-	                     "dialog_bank.name_repeated", "dialog_bank.name_unplayed", "dialog_bank.silent", "document.config_overrun",
-	                     "document.line_ends",
+	                     "dialog_bank.name_repeated", "dialog_bank.name_unplayed", "dialog_bank.silent", "document.line_ends",
 	                     "environment.sky_height_default",
 	                     "expansion.file.unread", "export.cancelled",
 	                     "export.cleanup", "export.replaced",
@@ -362,6 +362,14 @@ static int test_columns() {
 	                     "text.unreadable" }));
 	TEST_EXPECT(finding_row("model.light_no_registers") && finding_row("model.light_no_registers")->gates_build &&
 	            finding_row("style.hangs")->gates_build && finding_row("style.line_ending")->gates_build);
+	// A ConfigFile past its reader's pool gates, the game's own failure, which its row says and cites: the reader
+	// clears past the pool into the heap, and the game crashes later [orig: ConfigFile_ParseText @ 0x7609e8].
+	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.game_refusal != nullptr; }) ==
+	            Tokens({ "document.config_overrun" }));
+	const Diagnostic overrun = make_finding(CoreFinding::DocumentConfigOverrun, DiagnosticSeverity::Error, "past the pool");
+	TEST_EXPECT(blocks_build(overrun) && blocker_is_the_games(overrun) &&
+	            blocker_reason(overrun).rfind("The game fails here as the original does: its ConfigFile reader clears", 0) == 0 &&
+	            blocker_reason(overrun).find("[orig: ConfigFile_ParseText @ 0x7609e8]") != std::string::npos);
 	// A missing required file blocks where its manifest row is the boot's refusal (gametext.bin: the
 	// boot exits), never where the game boots on (weapon.def: a single None weapon).
 	Diagnostic gametext = make_finding(CoreFinding::RequirementMissing, DiagnosticSeverity::Error, "required");
