@@ -1,6 +1,8 @@
 #include <editor/session/environment_uses.h>
 
+#include <algorithm>
 #include <cstdio>
+#include <map>
 #include <memory>
 #include <sstream>
 
@@ -116,6 +118,9 @@ EnvironmentUses environment_uses(const SessionView &view, const std::string &pat
 	const bool has_environment_text = read_project_file(view, uses.path, environment_bytes);
 	const std::string overcast(overcast_bytes.begin(), overcast_bytes.end());
 	const std::string environment_lines(environment_bytes.begin(), environment_bytes.end());
+	// Each of this file's terrain keys by its line: its place among them (the document's list).
+	std::vector<int> key_lines;
+	read_trn_key_lines(environment_lines, &key_lines);
 	for (const GraphEdge *edge : graph->referrers_of_file(uses.path)) {
 		if (edge->kind != ReferenceKind::Environment) continue;
 		const AssetEntry *source = view.project.scan->at_path(edge->source);
@@ -160,14 +165,40 @@ EnvironmentUses environment_uses(const SessionView &view, const std::string &pat
 				std::string error;
 				use.terrain_read = load_trn(input, trn, error);
 				if (use.terrain_read) use.terrain_water = trn.water_height;
-				// The lines of this file the terrain takes, after the .trn's and overcast.def's.
+				// The configuration this file's lines come over (the .trn's, then overcast.def's), and the lines of
+				// this file the terrain takes after them.
 				TrnLaterTexts later;
 				if (overcast_read) later.overcast = &overcast;
+				TrnConfig prior;
+				std::vector<TrnLaterLine> earlier;
+				load_mission_trn(text, later, prior, error, &earlier);
 				if (has_environment_text) later.environment = &environment_lines;
 				std::vector<TrnLaterLine> taken;
 				load_mission_trn(text, later, trn, error, &taken);
-				for (TrnLaterLine &line : taken)
-					if (line.file == TrnLaterLine::File::Environment) use.terrain_keys.push_back(std::move(line));
+				const std::vector<TrnKeyLine> own = read_trn_key_lines(text);
+				const auto writes = [](const auto &lines, const std::string &key) {
+					return std::any_of(lines.begin(), lines.end(), [&key](const auto &line) { return line.key == key; });
+				};
+				std::map<std::string, std::string> here; // a keyword an earlier line of this file set: its value
+				for (TrnLaterLine &line : taken) {
+					if (line.file != TrnLaterLine::File::Environment) continue;
+					EnvironmentTerrainKey key;
+					static_cast<TrnLaterLine &>(key) = std::move(line);
+					const auto at = std::find(key_lines.begin(), key_lines.end(), key.line);
+					key.index = size_t(at - key_lines.begin());
+					// What it sets over: an earlier line of this file's value, else the configuration's before it.
+					const std::string held = trn_key_value(prior, key.key);
+					if (const auto earlier_here = here.find(key.key); earlier_here != here.end()) {
+						key.over = earlier_here->second;
+						key.over_file = uses.path;
+					} else if (!held.empty()) {
+						key.over = held;
+						if (writes(earlier, key.key)) key.over_file = overcast_entry->relative_path;
+						else if (writes(own, key.key)) key.over_file = use.terrain_file;
+					}
+					if (!held.empty()) here[key.key] = key.value;
+					use.terrain_keys.push_back(std::move(key));
+				}
 			}
 		}
 		// The water plane by the game's ladder: the header's override, then the environment's water height
@@ -267,11 +298,14 @@ io::JsonValue environment_uses_json(const EnvironmentUses &uses) {
 		water.set("words", json_string(water_words(use)));
 		mission.set("water", std::move(water));
 		JsonValue terrain_keys = JsonValue::make_array();
-		for (const TrnLaterLine &line : use.terrain_keys) {
+		for (const EnvironmentTerrainKey &line : use.terrain_keys) {
 			JsonValue row = JsonValue::make_object();
 			row.set("line", json_number(double(line.line)));
+			row.set("index", json_number(double(line.index)));
 			row.set("key", json_string(line.key));
 			row.set("value", json_string(line.value));
+			if (!line.over.empty()) row.set("over", json_string(line.over));
+			if (!line.over_file.empty()) row.set("over_file", json_string(line.over_file));
 			terrain_keys.push(std::move(row));
 		}
 		mission.set("terrain_keys", std::move(terrain_keys));
