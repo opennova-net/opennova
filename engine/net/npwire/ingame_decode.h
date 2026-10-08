@@ -1718,7 +1718,10 @@ bool decode_mounted_weapon_slot_selection(
 // MultiPlayer_JoinSessionStateMachine @0x56A340; consumer
 // NapiNPServerMsg_AutoMedicPreference @0x501BE0]
 struct AutoMedicPreference {
-	bool enabled = true;
+	// The profile dword as written, raw (the writer copies +1660 unchanged
+	// [orig: @0x42A411..0x42A422]); 0 = automatic requests.
+	uint32_t disabled = 0;
+	bool enabled() const { return disabled == 0; }
 };
 bool decode_auto_medic_preference(
 		const uint8_t *body, size_t len,

@@ -36,6 +36,7 @@ public:
 	PlayerProfiles();
 
 	const opennova::profile::PlayerProfiles &native() const { return store_; }
+	opennova::profile::PlayerProfiles &native() { return store_; }
 
 	// The defaults a fresh record takes: the character table (null: none), the
 	// menu table and the expansion's override table the macros read (either
@@ -84,6 +85,13 @@ public:
 	PackedStringArray get_macros() const;
 	int get_voice(int p_side) const;
 	int get_binding_count() const { return static_cast<int>(store_.current().bindings.size()); }
+	// PLAYER_INFO's OPTIONS_AUTORELOAD / OPTIONS_AUTOMEDIC over the current
+	// record: the checked states its fill shows and its ACCEPT's writes, the
+	// auto-medic box stored inverted (engine profile_controls.h).
+	bool is_auto_reload_checked() const;
+	bool is_auto_medic_checked() const;
+	void set_auto_reload_checked(bool p_checked);
+	void set_auto_medic_checked(bool p_checked);
 
 	// The character side of the current weapon.sav record.
 	Ref<WeaponProfileSummary> character_summary() const;

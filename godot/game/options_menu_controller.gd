@@ -2,11 +2,18 @@ class_name OptionsMenuController
 extends RefCounted
 
 ## Binds the shared PlayerOptions model to either retail options surface:
-## options.mnu from the front end or game.mnu's inline OPTIONS_WRAPPER. It also
-## owns the one keyboard/mouse remap interaction, keeping MenuShell focused on
-## cross-document navigation and game launch policy.
+## options.mnu from the front end or game.mnu's inline OPTIONS_WRAPPER. The
+## controls words and the key bindings are the player profile's current
+## record, which the engine's options screen seeds, edits and writes back
+## (MenuDriver over menu::OptionsScreen); this controller hands it the profile
+## and the device events, and relays the in-game Accept's apply.
 
 const CROSSHAIR_STYLE_CONTROL := "XHAIR_APPEARANCE"
+
+## The in-game options Accept wrote the dialog into the current record: the
+## owner applies the record onto the live bindings and the running session's
+## live words, then saves the profile (engine OptionsScreen::ApplyControls).
+signal controls_accepted
 
 var _driver: MenuDriver
 var _options: PlayerOptions
@@ -27,23 +34,21 @@ func setup(driver: MenuDriver, options: PlayerOptions) -> void:
 ## Rebuild every options-owned widget after MenuDriver opens a document. All
 ## helpers are presence-gated, so non-options menu files are a cheap no-op.
 func prepare_document() -> void:
-	_driver.prepare_options(ControlsBindings.model())
+	_driver.prepare_options(PlayerProfile.store())
 	if not _driver.is_options_surface():
 		return
 	# The engine's Options policy (OptionsScreen::apply_policy): the slider ranges, the pinned
-	# VIDEO rows and the controls not serviced yet, locked; then the player's values.
-	_driver.apply_options_policy()
+	# VIDEO rows and the controls not serviced yet, locked; then the profile's controls words
+	# (OptionsScreen::seed_profile) and the player's options.
+	_driver.apply_options_policy(PlayerProfile.store())
 	if _options != null:
 		_entry_state = _options.current()
 	_seed_player_options()
 
 
-## The native capture returns input ownership and persistence requests.
+## The native capture returns input ownership.
 func consume_input(event: InputEvent) -> bool:
-	var effects := _driver.consume_options_input(ControlsBindings.model(), event)
-	if effects & MenuDriver.OPTIONS_PERSIST_BINDINGS:
-		ControlsBindings.persist()
-	return (effects & MenuDriver.OPTIONS_CONSUMED) != 0
+	return (_driver.consume_options_input(event) & MenuDriver.OPTIONS_CONSUMED) != 0
 
 
 func _seed_player_options() -> void:
@@ -53,8 +58,6 @@ func _seed_player_options() -> void:
 	_seed_scroll("SOUNDFXVOLUME", state.sound_fx_volume)
 	_seed_scroll("DIALOGVOLUME", state.dialog_volume)
 	_seed_scroll("MUSICVOLUME", state.music_volume)
-	_seed_scroll("MOUSE_SENSITIVITY", state.mouse_sensitivity)
-	_set_checked("INVERT_MOUSE", state.invert_mouse)
 	var style_id := _driver.widget_id(CROSSHAIR_STYLE_CONTROL)
 	if style_id >= 0 and _driver.widget_kind_of(style_id) == MnuDocument.TYPE_SPINLIST:
 		_driver.select_row(style_id, state.crosshair_style, false)
@@ -95,7 +98,7 @@ func _set_checked(control_name: String, checked: bool) -> void:
 
 func _on_screen_changed(_screen_name: String) -> void:
 	# Screen/document switches invalidate an armed table selection.
-	_driver.end_options_remap(ControlsBindings.model(), true)
+	_driver.end_options_remap(true)
 
 
 func _on_widget_value_changed(widget_name: String, kind: String,
@@ -113,9 +116,6 @@ func _on_widget_value_changed(widget_name: String, kind: String,
 		"MUSICVOLUME":
 			if kind != "scroll": return
 			state.music_volume = index
-		"MOUSE_SENSITIVITY":
-			if kind != "scroll": return
-			state.mouse_sensitivity = index
 		"XHAIR_APPEARANCE":
 			if kind != "spinlist": return
 			state.crosshair_style = index
@@ -146,12 +146,6 @@ func _on_widget_activated(id: int, widget_name: String) -> void:
 	if not _driver.is_options_surface():
 		return
 	match widget_name.to_upper():
-		"INVERT_MOUSE":
-			if _options == null:
-				return
-			var state := _options.current()
-			state.invert_mouse = _driver.is_widget_checked(id)
-			_options.update(state)
 		"XHAIR_SPREAD":
 			if _options == null:
 				return
@@ -170,9 +164,9 @@ func _on_widget_activated(id: int, widget_name: String) -> void:
 			var state := _options.current()
 			state.gameplay_tips = _driver.is_widget_checked(id)
 			_options.update(state)
-	var effects := _driver.activate_options(ControlsBindings.model(), widget_name)
-	if effects & MenuDriver.OPTIONS_PERSIST_BINDINGS:
-		ControlsBindings.persist()
+	var effects := _driver.activate_options(PlayerProfile.store(), widget_name)
+	if effects & MenuDriver.OPTIONS_APPLY_CONTROLS:
+		controls_accepted.emit()
 	if effects & MenuDriver.OPTIONS_COMMIT_PREVIEW:
 		if _options != null:
 			_entry_state = _options.current()
@@ -185,4 +179,4 @@ func _on_widget_activated(id: int, widget_name: String) -> void:
 
 
 func _on_list_activated(id: int, row: int) -> void:
-	_driver.arm_options_remap(ControlsBindings.model(), id, row)
+	_driver.arm_options_remap(id, row)

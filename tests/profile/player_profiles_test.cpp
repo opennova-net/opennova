@@ -1,6 +1,7 @@
 // engine/runtime/profile — the player profile's in-memory image: the fresh
 // record's seeds, the binding merge, the load and the save, the screens' name
-// rules and the session steps. Fixtures are built in code; the retail legs
+// rules, the session steps and the controls words the game reads
+// (profile_controls.h). Fixtures are built in code; the retail legs
 // check the fresh record's tables against the installed program's own static
 // data (Jointops.exe, read only) and load and save the install's weapon.sav in
 // memory (docs/asset-gated-tests.md).
@@ -21,7 +22,9 @@
 #include <formats/playersav/weapon_sav.h>
 #include <formats/rtxt/rtxt.h>
 #include <runtime/controls/controls.h>
+#include <runtime/controls/binding_set.h>
 #include <runtime/profile/player_profiles.h>
+#include <runtime/profile/profile_controls.h>
 
 using namespace opennova;
 using opennova::profile::PlayerProfiles;
@@ -315,6 +318,108 @@ int test_session_steps() {
     return 0;
 }
 
+// --- 6b. the controls words the game reads (runtime/profile/profile_controls.h) ----
+
+int test_controls_words() {
+    PlayerProfiles p;
+    PlayerProfiles::LoadInput in;
+    p.load(in, defaults());
+    playersav::ProfileRecord &r = p.current();
+    // The session copy [orig: Game_ApplySessionSettingsToGlobals @0x551612,
+    // @0x55161e, @0x551a40/@0x551a48]: a fresh record's words, then edited ones.
+    profile::SessionInput s = profile::session_input(r, false);
+    TEST_EXPECT(!s.invert_mouse && s.mouse_sensitivity == 128 && s.auto_reload);
+    r.invert_mouse = 1;
+    r.mouse_sensitivity = 300;
+    r.auto_reload = 0;
+    s = profile::session_input(r, false);
+    TEST_EXPECT(s.invert_mouse && s.mouse_sensitivity == 300 && !s.auto_reload);
+    r.auto_reload = 1;
+    TEST_EXPECT(!profile::session_input(r, true).auto_reload);  // `/noreload`
+    // The in-game Accept writes the two mouse words at once and leaves the
+    // auto-reload global to the next session copy [orig: @0x55525e, @0x555271].
+    profile::SessionInput held;
+    held.auto_reload = false;
+    const profile::SessionInput accepted = profile::ingame_accept_input(r, held);
+    TEST_EXPECT(accepted.invert_mouse && accepted.mouse_sensitivity == 300 && !accepted.auto_reload);
+
+    // A fresh record's table onto the live records changes nothing: the default
+    // table is the catalog's own defaults, row for row.
+    {
+        controls::BindingSet fresh;
+        const controls::BindingSet applied = profile::options_bindings(r);
+        for (int i = 0; i < static_cast<int>(fresh.size()); ++i) {
+            const controls::BindingRecord *a = fresh.record(i);
+            const controls::BindingRecord *b = applied.record(i);
+            TEST_EXPECT(a && b && a->primary == b->primary && a->secondary == b->secondary &&
+                        a->primary_mod == b->primary_mod && a->secondary_mod == b->secondary_mod &&
+                        a->mouse_mask == b->mouse_mask && a->mouse_mod == b->mouse_mod &&
+                        a->joy_button == b->joy_button && a->joy_mod == b->joy_mod);
+        }
+    }
+    // The table onto the live records [orig: sub_562E60 -> sub_562DF0]: a row
+    // the table names takes the entry's fields, the joystick gate the word.
+    controls::BindingSet live;
+    const int forward = live.index_of_token("move_forward");
+    TEST_EXPECT(forward >= 0);
+    for (playersav::BindingEntry &e : r.bindings) {
+        if (e.token != "move_forward") continue;
+        e.primary = 'Y';
+        e.secondary = 0;
+        e.mouse_mask = 0x10;
+    }
+    TEST_EXPECT(!live.joystick_enabled());
+    r.joystick_enabled = 1;
+    profile::apply_controls(r, live);
+    TEST_EXPECT(live.joystick_enabled());
+    const controls::BindingRecord *rec = live.record(forward);
+    TEST_EXPECT(rec != nullptr && rec->primary == 'Y' && rec->secondary == 0 && rec->mouse_mask == 0x10);
+    r.joystick_enabled = 0;
+    profile::apply_controls(r, live);
+    TEST_EXPECT(!live.joystick_enabled());
+
+    // The Options screen's records [orig: UI_BuildKeyBindingLoadoutTable
+    // @0x559e50] and their store back [orig: @0x559d50]: the count and the
+    // identity fields stand, the eight binding fields follow the records.
+    controls::BindingSet options = profile::options_bindings(r);
+    TEST_EXPECT(options.record(forward)->primary == 'Y');
+    TEST_EXPECT(options.assign_key(forward, 'K', false, false, false, false));
+    const size_t count = r.bindings.size();
+    profile::store_bindings(options, r);
+    TEST_EXPECT(r.bindings.size() == count);
+    for (const playersav::BindingEntry &e : r.bindings) {
+        if (e.token != "move_forward") continue;
+        TEST_EXPECT(e.primary == 'Y' && e.secondary == 'K' && e.mouse_mask == 0x10);  // the empty slot
+        TEST_EXPECT(e.index == controls::action_code(forward) && e.id == e.index);
+    }
+    // A record that round-trips through the file keeps the stored table.
+    std::vector<uint8_t> image(playersav::kPlayerRecordBytes, 0);
+    playersav::write_record(r, image.data());
+    controls::BindingSet reread = profile::options_bindings(playersav::read_record(image.data()));
+    TEST_EXPECT(reread.record(forward)->secondary == 'K');
+
+    // The two checkboxes [orig: @0x554d36, @0x56074c; @0x55528c, @0x5552b5].
+    r.auto_reload = 1;
+    r.auto_medic_off = 0;
+    TEST_EXPECT(profile::auto_reload_checked(r) && profile::auto_medic_checked(r));
+    profile::set_auto_reload(r, false);
+    profile::set_auto_medic(r, false);
+    TEST_EXPECT(r.auto_reload == 0 && r.auto_medic_off == 1);
+    TEST_EXPECT(!profile::auto_reload_checked(r) && !profile::auto_medic_checked(r));
+    profile::set_auto_medic(r, true);
+    TEST_EXPECT(r.auto_medic_off == 0);
+    r.auto_medic_off = 7;  // any nonzero word shows the box clear
+    TEST_EXPECT(!profile::auto_medic_checked(r));
+
+    // DEFAULTS [orig: sub_55BD90 @0x55be93..0x55beca].
+    r.mouse_sensitivity = 5;
+    r.invert_mouse = r.joystick_enabled = r.invert_joystick = r.force_feedback = 1;
+    profile::restore_controls_defaults(r);
+    TEST_EXPECT(r.mouse_sensitivity == 128 && r.invert_mouse == 0 && r.joystick_enabled == 0);
+    TEST_EXPECT(r.invert_joystick == 0 && r.force_feedback == 0);
+    return 0;
+}
+
 // --- 7. retail: the fresh record against the installed program's static data -------
 
 uint32_t le(const std::vector<uint8_t> &b, size_t at, size_t n) {
@@ -460,6 +565,46 @@ int test_retail_program() {
     return 0;
 }
 
+// --- 7b. retail: the controls words' readers and writers in the installed program ---
+
+// The instructions profile_controls.h ports, read from the installed
+// Jointops.exe: each reads or writes the record offset the port names.
+int test_retail_controls_code() {
+    const std::string exe = retail::jointops_exe();
+    if (exe.empty()) return retail::skip_leg("OPENNOVA_JO_DIR carrying Jointops.exe");
+    pe::Image image;
+    if (!image.open(exe)) {
+        std::fprintf(stderr, "Jointops.exe found but not a readable PE32 image: %s\n", exe.c_str());
+        return 1;
+    }
+    struct Site {
+        uint32_t va;
+        std::vector<uint8_t> bytes;
+    };
+    const Site sites[] = {
+        // The session copy: +1432, +1428, +1424, +1524.
+        {0x5515c0, {0x8B, 0x88, 0x98, 0x05, 0x00, 0x00}},  // mov ecx, [eax+598h]
+        {0x55160c, {0x8B, 0x88, 0x94, 0x05, 0x00, 0x00}},  // mov ecx, [eax+594h]
+        {0x551618, {0x8B, 0x90, 0x90, 0x05, 0x00, 0x00}},  // mov edx, [eax+590h]
+        {0x551a3a, {0x8B, 0x91, 0xF4, 0x05, 0x00, 0x00}},  // mov edx, [ecx+5F4h]
+        // The joystick dispatch's gate: cmp dword_24D2088, 0.
+        {0x499481, {0x83, 0x3D, 0x88, 0x20, 0x4D, 0x02, 0x00}},
+        // The in-game Accept's inverted OPTIONS_AUTOMEDIC store to +1660.
+        {0x5552b5, {0xF7, 0xD8, 0x1B, 0xC0, 0x83, 0xC0, 0x01, 0x89, 0x82, 0x7C, 0x06, 0x00, 0x00}},
+        // C2S 0x03's body: the current record's +1660, raw.
+        {0x42a40b, {0xA1, 0xFC, 0x10, 0x55, 0x02, 0x56, 0x8B, 0xB0, 0x7C, 0x06, 0x00, 0x00}},
+        // DEFAULTS: +1424 = 0x80.
+        {0x55be93, {0xC7, 0x82, 0x90, 0x05, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00}},
+    };
+    for (const Site &site : sites) {
+        std::vector<uint8_t> b;
+        TEST_EXPECT(image.read(site.va, site.bytes.size(), b) && b == site.bytes);
+    }
+    std::printf("Jointops.exe: the controls words' %zu reader and writer sites match\n",
+                sizeof(sites) / sizeof(sites[0]));
+    return 0;
+}
+
 // --- 8. retail: the install's weapon.sav, loaded and saved in memory ---------------
 
 int test_retail_weapon_sav() {
@@ -501,7 +646,9 @@ int main(int argc, char **argv) {
         {"load_with_files", test_load_with_files},
         {"name_rules", test_name_rules},
         {"session_steps", test_session_steps},
+        {"controls_words", test_controls_words},
         {"retail_program", test_retail_program},
+        {"retail_controls_code", test_retail_controls_code},
         {"retail_weapon_sav", test_retail_weapon_sav},
     };
     int failures = 0;

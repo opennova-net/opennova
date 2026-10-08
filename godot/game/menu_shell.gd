@@ -119,6 +119,11 @@ signal novaworld_requested()
 # original's menu boot does after the switch (docs/mnu/menu-re.md "The Mods
 # list").
 signal game_reloaded()
+# The in-game options dialog's Accept wrote the controls words and the key
+# bindings into the player profile's current record: main_game applies them
+# to the live bindings and the running session, then saves the profile
+# (docs/playerinfo/player-sav-re.md "The controls words").
+signal ingame_controls_accepted()
 
 
 var _driver: MenuDriver
@@ -334,6 +339,7 @@ func _assemble_assets() -> void:
 		_player_options = PlayerOptions.new()
 	_options_controller = OptionsMenuController.new()
 	_options_controller.setup(_driver, _player_options)
+	_options_controller.controls_accepted.connect(ingame_controls_accepted.emit)
 	set_process(true)
 
 

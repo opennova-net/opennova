@@ -7,6 +7,7 @@
 
 #include <formats/playersav/player_sav.h>
 #include <runtime/inmatch/character_registry.h>
+#include <runtime/profile/profile_controls.h>
 
 #include <cstdio>
 #include <cstring>
@@ -246,6 +247,22 @@ int PlayerProfiles::get_voice(int p_side) const {
 	return store_.current().voice[static_cast<size_t>(p_side)];
 }
 
+bool PlayerProfiles::is_auto_reload_checked() const {
+	return opennova::profile::auto_reload_checked(store_.current());
+}
+
+bool PlayerProfiles::is_auto_medic_checked() const {
+	return opennova::profile::auto_medic_checked(store_.current());
+}
+
+void PlayerProfiles::set_auto_reload_checked(bool p_checked) {
+	opennova::profile::set_auto_reload(store_.current(), p_checked);
+}
+
+void PlayerProfiles::set_auto_medic_checked(bool p_checked) {
+	opennova::profile::set_auto_medic(store_.current(), p_checked);
+}
+
 bool PlayerProfiles::set_word(const String &p_name, int p_value) {
 	const playersav::RecordWord *word = playersav::find_record_word(opennova::to_std(p_name));
 	if (word == nullptr) return false;
@@ -363,6 +380,12 @@ void PlayerProfiles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_macros"), &PlayerProfiles::get_macros);
 	ClassDB::bind_method(D_METHOD("get_voice", "side"), &PlayerProfiles::get_voice);
 	ClassDB::bind_method(D_METHOD("get_binding_count"), &PlayerProfiles::get_binding_count);
+	ClassDB::bind_method(D_METHOD("is_auto_reload_checked"), &PlayerProfiles::is_auto_reload_checked);
+	ClassDB::bind_method(D_METHOD("is_auto_medic_checked"), &PlayerProfiles::is_auto_medic_checked);
+	ClassDB::bind_method(D_METHOD("set_auto_reload_checked", "checked"),
+			&PlayerProfiles::set_auto_reload_checked);
+	ClassDB::bind_method(D_METHOD("set_auto_medic_checked", "checked"),
+			&PlayerProfiles::set_auto_medic_checked);
 	ClassDB::bind_method(D_METHOD("character_summary"), &PlayerProfiles::character_summary);
 	ClassDB::bind_method(D_METHOD("apply_character_selection", "profile"),
 			&PlayerProfiles::apply_character_selection);

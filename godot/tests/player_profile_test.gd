@@ -112,3 +112,70 @@ func test_a_fresh_profile_restricts_nothing() -> void:
 	assert_not_null(sim)
 	if sim != null:
 		assert_eq(sim.get_charattr_disabled_word(), 0)
+
+
+# The mission start's session copy of the record's input words (docs/playerinfo/
+# player-sav-re.md "The controls words"): the look's sensitivity and Y invert
+# and the auto-reload global, from the record the world hands the sim; the
+# in-game Accept's live writes of the two mouse words.
+# [orig: Game_ApplySessionSettingsToGlobals @0x551612, @0x55161e, @0x551a40;
+#  UI_IngameOptionsDialogEventHandler @0x55525e, @0x555271]
+func test_the_session_copy_takes_the_profile_input_words() -> void:
+	var profiles := PlayerProfiles.new()
+	profiles.load_bytes(PackedByteArray(), false, PackedByteArray(), false, "")
+	assert_true(profiles.set_word("invert_mouse", 1))
+	assert_true(profiles.set_word("mouse_sensitivity", 511))
+	assert_true(profiles.set_word("auto_reload", 0))
+	var world := WorldFixture.make_world(self)
+	world.set_player_profiles(profiles)
+	assert_eq(WorldFixture.load_mission(world, ProjectSettings.globalize_path(
+			WorldFixture.BOOT_FIXTURE_DIR)), OK)
+	var sim := world.get_sim()
+	assert_not_null(sim)
+	if sim == null:
+		return
+	assert_eq(sim.get_session_mouse_sensitivity(), 511)
+	assert_true(sim.is_session_mouse_inverted())
+	assert_false(sim.is_session_auto_reload(), "the record's auto-reload word")
+	# The in-game Accept writes the two mouse words at once; the auto-reload
+	# global waits for the next mission start.
+	assert_true(profiles.set_word("invert_mouse", 0))
+	assert_true(profiles.set_word("mouse_sensitivity", 64))
+	assert_true(profiles.set_word("auto_reload", 1))
+	assert_eq(sim.apply_ingame_options(profiles), OK)
+	assert_eq(sim.get_session_mouse_sensitivity(), 64)
+	assert_false(sim.is_session_mouse_inverted())
+	assert_false(sim.is_session_auto_reload(), "auto-reload waits for the session copy")
+
+
+# /noreload forces the auto-reload global off whatever the record holds
+# [orig: dword_B4C4F4 @0x4A76E9; @0x551a48].
+func test_noreload_forces_auto_reload_off() -> void:
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", _run_dir, "/noreload"]))
+	var profiles := PlayerProfiles.new()
+	profiles.load_bytes(PackedByteArray(), false, PackedByteArray(), false, "")
+	var world := WorldFixture.make_world(self)
+	world.set_player_profiles(profiles)
+	assert_eq(WorldFixture.load_mission(world, ProjectSettings.globalize_path(
+			WorldFixture.BOOT_FIXTURE_DIR)), OK)
+	var sim := world.get_sim()
+	assert_not_null(sim)
+	if sim != null:
+		assert_false(sim.is_session_auto_reload())
+
+
+# PLAYER_INFO's two boxes over the record: the auto-medic box is the INVERSE of
+# the +1660 word [orig: PlayerInfo_PopulateAllControls @0x56074c;
+# PlayerInfo_SaveFromDialog @0x55ef5f, @0x55ef92].
+func test_the_auto_boxes_read_and_write_the_record() -> void:
+	PlayerProfile.load_for(null)
+	var store := PlayerProfile.store()
+	assert_true(store.is_auto_reload_checked() and store.is_auto_medic_checked(),
+			"a fresh record has both boxes checked")
+	store.set_auto_reload_checked(false)
+	store.set_auto_medic_checked(false)
+	assert_eq(store.get_word("auto_reload"), 0)
+	assert_eq(store.get_word("auto_medic_off"), 1, "a clear auto-medic box stores 1")
+	assert_false(store.is_auto_reload_checked() or store.is_auto_medic_checked())
+	store.set_auto_medic_checked(true)
+	assert_eq(store.get_word("auto_medic_off"), 0)

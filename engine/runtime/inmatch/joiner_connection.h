@@ -434,6 +434,12 @@ public:
 	void set_character_join_vars(CharacterJoinVars vars) {
 		character_join_vars_ = vars;
 	}
+	// The current profile's inverse OPTIONS_AUTOMEDIC word (+1660), raw: the
+	// C2S 0x03 the game-start reply groups carries it. 0 (a fresh record's)
+	// asks the host for automatic medic requests.
+	// [orig: MultiPlayer_JoinSessionStateMachine @0x56A6E9..0x56A70F ->
+	//  NetPacket_WriteAutoMedicPreference @0x42A400 reading +1660 @0x42A411]
+	void set_auto_medic_preference(uint32_t disabled) { auto_medic_disabled_ = disabled; }
 	// Configure the retail game-session request before start(). Spectator emits
 	// JSR=1 and optional JSPP; join_password emits JSP for a side/squad credential.
 	// The transport PW, JSP and spectator JSPP remain separate.
@@ -926,6 +932,7 @@ private:
 	LoadoutKit loadout_kit_;      // binding-injected submission content (see set_loadout_kit)
 	bool loadout_kit_set_ = false;
 	CharacterJoinVars character_join_vars_{};
+	uint32_t auto_medic_disabled_ = 0; // profile +1660 (set_auto_medic_preference)
 	uint8_t current_player_class_ = 0; // authoritative S2C 0x5A avatarClass
 	// The boot-loaded g_CharAttr[16] and its latches. Ordered S2C 0x41 and
 	// 0x42 mutate this retained table before every later 0x39 challenge.

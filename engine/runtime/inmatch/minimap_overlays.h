@@ -36,6 +36,10 @@ struct MinimapOverlayInputs {
     // The wire handle the local player goes by on a joiner (its S2C 0x4C
     // entries and decoded rows name it so); kInvalid = the world handle.
     uint16_t self_handle = 0xFFFF;
+    // The current profile record's inverse OPTIONS_AUTOMEDIC word (+1660), which
+    // the own slot's revive leg reads live each frame; 0 = automatic requests.
+    // [orig: draw_entity_labels_and_markers @0x5a4b49..0x5a4b56]
+    int32_t own_auto_medic_off = 0;
 };
 
 // Fills `out` (replaced).

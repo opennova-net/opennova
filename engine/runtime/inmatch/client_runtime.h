@@ -453,6 +453,9 @@ public:
 	void set_character_join_vars(CharacterJoinVars vars) {
 		if (joiner_) joiner_->set_character_join_vars(vars);
 	}
+	void set_auto_medic_preference(uint32_t disabled) {
+		if (joiner_) joiner_->set_auto_medic_preference(disabled);
+	}
 	void set_join_request(JoinRole role, std::string spectator_password,
 			std::string server_password, std::string join_password = {}) {
 		if (joiner_) {

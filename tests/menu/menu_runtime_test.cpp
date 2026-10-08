@@ -17,6 +17,7 @@
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/menu_flow.h>
 #include <runtime/menu/options_screen.h>
+#include <runtime/profile/player_profiles.h>
 #include <base/gameprofile/game_type.h>
 
 #include <cstdio>
@@ -1451,68 +1452,165 @@ void test_options_screen() {
 	auto doc = flow_document(true);
 	MenuRuntime menu;
 	menu.open_document(&doc, "options.mnu", "");
-	controls::BindingSet bindings;
 	OptionsScreen options;
-	options.prepare(menu, bindings);
+	options.prepare(menu, nullptr);  // no profile: the catalog defaults
 	const int table = menu.widget_id("CONTROL_MAPPING");
 	CHECK(options.is_surface() && menu.table_row_count(table) > 40);
 	CHECK(menu.table_cell_text(table, 0, 2) == "W or Up");
-	options.arm(menu, bindings, table, 0);
+	options.arm(menu, table, 0);
 	CHECK(menu.table_cell_text(table, 0, 2).empty());
 	RemapInput input;
 	input.kind = RemapInput::Kind::Key;
 	input.vk = 'Y';
-	CHECK(options.consume(menu, bindings, input) == OptionsScreen::Consumed);
+	CHECK(options.consume(menu, input) == OptionsScreen::Consumed);
 	CHECK(menu.table_cell_text(table, 0, 2).empty()); // key release keeps capture
 	input.pressed = true;
 	input.vk = 0; // unmapped device key
-	CHECK(options.consume(menu, bindings, input) == OptionsScreen::Consumed);
+	CHECK(options.consume(menu, input) == OptionsScreen::Consumed);
 	input.vk = 0xDE; // rejected retail capture
-	CHECK(options.consume(menu, bindings, input) == OptionsScreen::Consumed);
+	CHECK(options.consume(menu, input) == OptionsScreen::Consumed);
 	input.vk = 'Y';
-	CHECK(options.consume(menu, bindings, input) ==
-		(OptionsScreen::Consumed | OptionsScreen::PersistBindings));
+	CHECK(options.consume(menu, input) == OptionsScreen::Consumed);
 	CHECK(menu.table_cell_text(table, 0, 2) == "Y or Up");
-	CHECK(options.consume(menu, bindings, input) == OptionsScreen::None);
-	options.arm(menu, bindings, table, 0);
+	CHECK(options.consume(menu, input) == OptionsScreen::None);
+	options.arm(menu, table, 0);
 	input.escape = true;
-	CHECK(options.consume(menu, bindings, input) == OptionsScreen::Consumed);
+	CHECK(options.consume(menu, input) == OptionsScreen::Consumed);
 	CHECK(menu.table_cell_text(table, 0, 2) == "Y or Up");
-	options.arm(menu, bindings, table, 0);
-	options.end_remap(menu, bindings, true); // screen change
+	options.arm(menu, table, 0);
+	options.end_remap(menu, true); // screen change
 	CHECK(menu.table_cell_text(table, 0, 2) == "Y or Up");
-	CHECK(options.consume(menu, bindings, input) == OptionsScreen::None);
+	CHECK(options.consume(menu, input) == OptionsScreen::None);
 	menu.table_select_row(table, 0, false);
-	CHECK(options.activate(menu, bindings, "CLEAR_KEY") == OptionsScreen::PersistBindings);
+	CHECK(options.activate(menu, nullptr, "CLEAR_KEY") == OptionsScreen::None);
 	CHECK(menu.table_cell_text(table, 0, 2).empty());
-	CHECK(options.activate(menu, bindings, "DEFAULTS") == OptionsScreen::PersistBindings);
+	CHECK(options.activate(menu, nullptr, "DEFAULTS") == OptionsScreen::None);
 	CHECK(menu.table_cell_text(table, 0, 2) == "W or Up");
-	options.activate(menu, bindings, "MOUSE");
-	options.arm(menu, bindings, table, 0);
+	options.activate(menu, nullptr, "MOUSE");
+	options.arm(menu, table, 0);
 	input = RemapInput();
 	input.kind = RemapInput::Kind::Mouse;
 	input.mouse_mask = controls::kMouseRight;
-	CHECK(options.consume(menu, bindings, input) == OptionsScreen::None); // release falls through
+	CHECK(options.consume(menu, input) == OptionsScreen::None); // release falls through
 	input.pressed = true;
-	CHECK(options.consume(menu, bindings, input) ==
-		(OptionsScreen::Consumed | OptionsScreen::PersistBindings));
+	CHECK(options.consume(menu, input) == OptionsScreen::Consumed);
+	const controls::BindingSet &bindings = options.bindings();
 	CHECK(bindings.record(bindings.action_index_for_row(0))->mouse_mask == controls::kMouseRight);
-	options.activate(menu, bindings, "JOYSTICK");
-	options.arm(menu, bindings, table, 0);
-	CHECK(options.consume(menu, bindings, input) == OptionsScreen::None);
-	CHECK(options.activate(menu, bindings, "OPT_ACCEPT") == OptionsScreen::CommitPreview);
-	CHECK(options.activate(menu, bindings, "OPT_CANCEL") == OptionsScreen::RestorePreview);
+	options.activate(menu, nullptr, "JOYSTICK");
+	options.arm(menu, table, 0);
+	CHECK(options.consume(menu, input) == OptionsScreen::None);
+	CHECK(options.activate(menu, nullptr, "OPT_ACCEPT") ==
+		(OptionsScreen::CommitPreview | OptionsScreen::ApplyControls));
+	CHECK(options.activate(menu, nullptr, "OPT_CANCEL") == OptionsScreen::RestorePreview);
 	OptionsScreen::show_ingame_main(menu);
 	CHECK(menu.is_widget_shown(menu.widget_id("MAIN_WRAPPER")));
 	CHECK(!menu.is_widget_shown(menu.widget_id("OPTIONS_WRAPPER")));
 
 	auto non_options = flow_document();
 	menu.open_document(&non_options, "sp.mnu", "");
-	options.prepare(menu, bindings);
+	options.prepare(menu, nullptr);
 	CHECK(!options.is_surface());
-	CHECK(options.activate(menu, bindings, "DEFAULTS") == OptionsScreen::None);
-	CHECK(options.activate(menu, bindings, "OPT_CANCEL") == OptionsScreen::None);
-	CHECK(bindings.record(bindings.action_index_for_row(0))->mouse_mask == controls::kMouseRight);
+	CHECK(options.activate(menu, nullptr, "DEFAULTS") == OptionsScreen::None);
+	CHECK(options.activate(menu, nullptr, "OPT_CANCEL") == OptionsScreen::None);
+}
+
+// The Options screens over the current player.sav record: the screen's own
+// records built from the record's table, the controls words seeded and written
+// back by its Accepts, the auto pair the in-game dialog's alone, DEFAULTS
+// resetting the record's mouse and joystick words at once, and the joystick
+// rows interactive only with the joystick enabled.
+// [orig: UI_BuildKeyBindingLoadoutTable @0x559e50; UI_OptionsScreenInit
+//  @0x554ba0..0x554d6e; sub_55A710 @0x55ab5f..0x55ace5;
+//  UI_IngameOptionsDialogEventHandler @0x554e74, @0x5550de..0x5552bc;
+//  sub_55BD90 @0x55be93..0x55beca; sub_55B010 @0x55b010]
+void test_options_profile() {
+	auto doc = flow_document(true);
+	mnu::Window &root = doc.screens[0].roots[0];
+	root.children.push_back(widget("MOUSE_SENSITIVITY", mnu::WindowType::Scroll));
+	for (const char *name : {"INVERT_MOUSE", "ENABLE_JOYSTICK", "INVERT_JOYSTICK",
+			"ENABLE_FORCE_FEEDBACK", "OPTIONS_AUTORELOAD", "OPTIONS_AUTOMEDIC"})
+		root.children.push_back(widget(name, mnu::WindowType::CheckBox));
+	MenuRuntime menu;
+	menu.open_document(&doc, "options.mnu", "");
+	playersav::ProfileRecord record;
+	record.bindings = profile::default_binding_table();
+	record.invert_mouse = 1;
+	record.mouse_sensitivity = 300;
+	record.auto_medic_off = 1;
+	for (playersav::BindingEntry &e : record.bindings)
+		if (e.token == "move_forward") e.primary = 'K';
+	OptionsScreen options;
+	options.prepare(menu, &record);
+	options.apply_policy(menu);
+	options.seed_profile(menu, &record);
+	const int table = menu.widget_id("CONTROL_MAPPING");
+	CHECK(menu.table_cell_text(table, 0, 2) == "K or Up");  // the record's table
+	CHECK(menu.is_widget_checked(menu.widget_id("INVERT_MOUSE")));
+	MenuScrollRangeState range;
+	CHECK(menu.get_widget_scroll_range(menu.widget_id("MOUSE_SENSITIVITY"), range) &&
+			range.value == 300 && range.minimum == 4 && range.maximum == 511);
+	CHECK(!menu.is_widget_checked(menu.widget_id("ENABLE_JOYSTICK")));
+	CHECK(menu.is_widget_disabled(menu.widget_id("INVERT_JOYSTICK")));
+	CHECK(menu.is_widget_disabled(menu.widget_id("ENABLE_FORCE_FEEDBACK")));
+	// The front-end screen (no OPT_ACCEPT) leaves the auto pair as authored.
+	CHECK(!menu.is_widget_checked(menu.widget_id("OPTIONS_AUTORELOAD")));
+
+	// ENABLE_JOYSTICK makes the two joystick rows interactive.
+	menu.set_widget_checked(menu.widget_id("ENABLE_JOYSTICK"), true);
+	CHECK(options.activate(menu, &record, "ENABLE_JOYSTICK") == OptionsScreen::None);
+	CHECK(!menu.is_widget_disabled(menu.widget_id("INVERT_JOYSTICK")));
+	CHECK(!menu.is_widget_disabled(menu.widget_id("ENABLE_FORCE_FEEDBACK")));
+
+	// A remap edits the screen's records only, until the ACCEPT stores them.
+	options.arm(menu, table, 0);
+	RemapInput key;
+	key.kind = RemapInput::Kind::Key;
+	key.pressed = true;
+	key.vk = 'J';
+	CHECK(options.consume(menu, key) == OptionsScreen::Consumed);
+	const auto forward = [&record]() {
+		for (const playersav::BindingEntry &e : record.bindings)
+			if (e.token == "move_forward") return e;
+		return playersav::BindingEntry{};
+	};
+	CHECK(forward().primary == 'K');
+	menu.set_widget_checked(menu.widget_id("INVERT_MOUSE"), false);
+	menu.set_widget_checked(menu.widget_id("OPTIONS_AUTORELOAD"), false);
+	menu.set_widget_scroll_range(menu.widget_id("MOUSE_SENSITIVITY"), 4, 511, 10, 200);
+	CHECK(options.activate(menu, &record, "ACCEPT") == OptionsScreen::None);
+	CHECK(forward().primary == 'J');
+	CHECK(record.invert_mouse == 0 && record.mouse_sensitivity == 200 && record.joystick_enabled == 1);
+	CHECK(record.auto_reload == 1 && record.auto_medic_off == 1);  // the front ACCEPT skips the pair
+
+	// DEFAULTS: the screen's records and the record's mouse/joystick words.
+	CHECK(options.activate(menu, &record, "DEFAULTS") == OptionsScreen::None);
+	CHECK(menu.table_cell_text(table, 0, 2) == "W or Up");
+	CHECK(record.mouse_sensitivity == 128 && record.joystick_enabled == 0);
+	CHECK(menu.get_widget_scroll_range(menu.widget_id("MOUSE_SENSITIVITY"), range) && range.value == 128);
+	CHECK(forward().primary == 'J');  // the record's table waits for an Accept
+
+	// The in-game dialog: its init seeds the pair, its Accept writes it (the
+	// medic box inverted) and the records, and asks the shell to apply.
+	root.children.push_back(widget("OPT_ACCEPT", mnu::WindowType::Button));
+	menu.open_document(&doc, "game.mnu", "");
+	record.auto_reload = 0;
+	record.auto_medic_off = 0;
+	options.prepare(menu, &record);
+	options.apply_policy(menu);
+	options.seed_profile(menu, &record);
+	CHECK(!menu.is_widget_checked(menu.widget_id("OPTIONS_AUTORELOAD")));
+	CHECK(menu.is_widget_checked(menu.widget_id("OPTIONS_AUTOMEDIC")));
+	CHECK(menu.table_cell_text(menu.widget_id("CONTROL_MAPPING"), 0, 2) == "J or Up");
+	menu.set_widget_checked(menu.widget_id("OPTIONS_AUTORELOAD"), true);
+	menu.set_widget_checked(menu.widget_id("OPTIONS_AUTOMEDIC"), false);
+	menu.set_widget_checked(menu.widget_id("INVERT_MOUSE"), true);
+	CHECK(options.activate(menu, &record, "OPT_ACCEPT") ==
+		(OptionsScreen::CommitPreview | OptionsScreen::ApplyControls));
+	CHECK(record.auto_reload == 1 && record.auto_medic_off == 1 && record.invert_mouse == 1);
+	// Cancel re-seeds the screen from the record it left alone.
+	menu.set_widget_checked(menu.widget_id("INVERT_MOUSE"), false);
+	CHECK(options.activate(menu, &record, "OPT_CANCEL") == OptionsScreen::RestorePreview);
+	CHECK(menu.is_widget_checked(menu.widget_id("INVERT_MOUSE")) && record.invert_mouse == 1);
 }
 
 } // namespace
@@ -1794,6 +1892,7 @@ int main() {
 	test_host_dialog_multiselect();
 	test_multiple_roots();
 	test_options_screen();
+	test_options_profile();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

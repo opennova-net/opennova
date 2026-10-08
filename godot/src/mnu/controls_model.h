@@ -16,15 +16,17 @@
 
 namespace godot {
 
+class PlayerProfiles;
+
 // GDScript-facing wrapper over the portable engine/runtime/controls catalog and
-// its LIVE binding records. Hands the menu shell the Class/Action/Control rows
-// for the Options -> Controls (CONTROL_MAPPING) table, applies the witnessed
-// remap operations (assign / clear / defaults), and exposes the live keys to
-// the gameplay input sampler. The engine logic (catalog, key-name decode,
+// its LIVE binding records — the game's catalog rows, which the player
+// profile's binding table reaches at each session start and at the in-game
+// options Accept (apply_profile; the Options screen edits its own copy,
+// engine menu::OptionsScreen). Exposes the live keys to the gameplay input
+// sampler and the HUD's key labels. The engine logic (catalog, key-name decode,
 // binding format, record semantics) lives in engine/runtime/controls
 // (binding_set.h carries the [orig:, see docs/mnu/menu-re.md] chain); this class adds only the
-// Godot-device seam: the VK <-> Godot Key translation and the Variant blob
-// the shell persists.
+// Godot-device seam: the VK <-> Godot Key translation and the device sampling.
 class ControlsModel : public RefCounted {
 	GDCLASS(ControlsModel, RefCounted)
 
@@ -125,8 +127,17 @@ public:
 	static int vk_from_godot_key(int p_godot_key);
 	static int godot_key_from_vk(int p_vk);
 
-	// Persistence blob: token -> [primary, secondary, primary_mod,
-	// secondary_mod, mouse_mask, joy_button]. The shell owns where it lives.
+	// The controls apply over the player profile's current record: its binding
+	// table onto these live records and its ENABLE_JOYSTICK word into the
+	// joystick gate (engine profile::apply_controls). The shell runs it at
+	// every session start and at the in-game options Accept. Null: nothing.
+	void apply_profile(const Ref<PlayerProfiles> &p_profiles);
+	bool is_joystick_enabled() const { return bindings_.joystick_enabled(); }
+
+	// A snapshot of the live records: token -> [primary, secondary,
+	// primary_mod, secondary_mod, mouse_mask, joy_button, mouse_mod, joy_mod].
+	// Tests and probes set and restore the live records through it; nothing
+	// persists it (the records' home is the player profile's table).
 	Dictionary save_blob() const;
 	void load_blob(const Dictionary &p_blob);
 

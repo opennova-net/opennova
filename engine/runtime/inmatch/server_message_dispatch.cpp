@@ -1203,7 +1203,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				size_t consumed = 0;
 				conn.link.auto_medic_enabled = !decode_auto_medic_preference(
 						msg.payload.data(), msg.payload.size(),
-						preference, consumed) || preference.enabled;
+						preference, consumed) || preference.enabled();
 				break;
 			}
 			case c2s::MEDIC_REQUEST: { // [orig: Server_BroadcastMedicRequest @0x515390]

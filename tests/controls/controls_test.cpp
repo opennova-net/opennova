@@ -565,6 +565,13 @@ bool test_joystick_pov_dispatch() {
   CHECK(joystick_pov_mask(-1) == 0 && joystick_pov_mask(65535) == 0, "POV center sentinel");
   std::array<int32_t, 4> hats{4500, -1, -1, -1};
   const auto no_buttons = [](int) { return false; };
+  // A fresh set's joystick is off, as a fresh profile's ENABLE_JOYSTICK word
+  // (+1432 = 0) leaves it: no row fires from the device [orig:
+  // Input_ProcessToggleBindings @0x499481].
+  CHECK(!bindings.joystick_enabled(), "the joystick starts disabled");
+  CHECK(!bindings.pressed_joystick(bindings.index_of_token("look_up"), no_buttons, hats),
+        "a disabled joystick fires nothing");
+  bindings.set_joystick_enabled(true);
   CHECK(bindings.pressed_joystick(bindings.index_of_token("look_up"), no_buttons, hats), "default up POV");
   CHECK(bindings.pressed_joystick(bindings.index_of_token("turn_right"), no_buttons, hats), "diagonal also turns right");
   CHECK(!bindings.pressed_joystick(bindings.index_of_token("look_down"), no_buttons, hats), "opposite POV stays released");

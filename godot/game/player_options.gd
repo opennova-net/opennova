@@ -2,8 +2,12 @@ class_name PlayerOptions
 extends RefCounted
 
 ## Process-lifetime owner for the player-facing options shared by the front-end
-## and pause menus. Values are normalized at the boundary, saved together, and
-## applied through one runtime seam so neither menu needs its own settings copy.
+## and pause menus (retail's game.cfg words). Values are normalized at the
+## boundary, saved together, and applied through one runtime seam so neither
+## menu needs its own settings copy. The controls words (the mouse, the
+## joystick, auto-reload, auto-medic) and the key bindings are the player
+## profile's instead: the Options screens edit the current player.sav record
+## (engine menu::OptionsScreen over runtime/profile/profile_controls.h).
 
 const CONFIG_PATH := "user://opennova.cfg"
 
@@ -11,10 +15,6 @@ const AUDIO_SECTION := "audio"
 const SOUND_FX_VOLUME_KEY := "sound_fx_volume"
 const DIALOG_VOLUME_KEY := "dialog_volume"
 const MUSIC_VOLUME_KEY := "music_volume"
-
-const CONTROLS_SECTION := "controls"
-const MOUSE_SENSITIVITY_KEY := "mouse_sensitivity"
-const INVERT_MOUSE_KEY := "invert_mouse"
 
 const PLAYER_SECTION := "player"
 const CROSSHAIR_STYLE_KEY := "crosshair_style"
@@ -40,10 +40,8 @@ const OBJECT_POLYDETAIL_KEY := "object_polydetail"
 const SOUND_FX_VOLUME_CONTROL := "SOUNDFXVOLUME"
 const DIALOG_VOLUME_CONTROL := "DIALOGVOLUME"
 const MUSIC_VOLUME_CONTROL := "MUSICVOLUME"
-const MOUSE_SENSITIVITY_CONTROL := "MOUSE_SENSITIVITY"
 # Initial channel volumes come from the engine configuration defaults.
 const DEFAULT_VOLUME := SoundSelector.DEFAULT_CHANNEL_VOLUME
-const DEFAULT_MOUSE_SENSITIVITY := 128
 # One home for the crosshair art range, colour default / mask and spread
 # default: the native HudOverlay binding over the engine's HudLayout
 # (Config_SetDefaults @0x54d461 / @0x54d472 via hud_frame.h).
@@ -71,8 +69,6 @@ class State extends RefCounted:
 	var sound_fx_volume: int
 	var dialog_volume: int
 	var music_volume: int
-	var mouse_sensitivity: int
-	var invert_mouse: bool
 	var crosshair_style: int
 	var crosshair_color: int
 	var crosshair_spread: bool
@@ -84,8 +80,6 @@ class State extends RefCounted:
 	func _init(p_sound_fx_volume := DEFAULT_VOLUME,
 			p_dialog_volume := DEFAULT_VOLUME,
 			p_music_volume := DEFAULT_VOLUME,
-			p_mouse_sensitivity := DEFAULT_MOUSE_SENSITIVITY,
-			p_invert_mouse := false,
 			p_crosshair_style := DEFAULT_CROSSHAIR_STYLE,
 			p_crosshair_color := DEFAULT_CROSSHAIR_COLOR,
 			p_crosshair_spread := DEFAULT_CROSSHAIR_SPREAD,
@@ -96,8 +90,6 @@ class State extends RefCounted:
 		sound_fx_volume = p_sound_fx_volume
 		dialog_volume = p_dialog_volume
 		music_volume = p_music_volume
-		mouse_sensitivity = p_mouse_sensitivity
-		invert_mouse = p_invert_mouse
 		crosshair_style = p_crosshair_style
 		crosshair_color = p_crosshair_color
 		crosshair_spread = p_crosshair_spread
@@ -107,8 +99,7 @@ class State extends RefCounted:
 		object_polydetail = p_object_polydetail
 
 	func copy() -> State:
-		return State.new(sound_fx_volume, dialog_volume, music_volume,
-				mouse_sensitivity, invert_mouse, crosshair_style,
+		return State.new(sound_fx_volume, dialog_volume, music_volume, crosshair_style,
 				crosshair_color, crosshair_spread, aspect_mode,
 				keyboard_tips, gameplay_tips, object_polydetail)
 
@@ -143,10 +134,6 @@ func update(state: State) -> void:
 				_state.dialog_volume)
 		config.set_value(AUDIO_SECTION, MUSIC_VOLUME_KEY,
 				_state.music_volume)
-		config.set_value(CONTROLS_SECTION, MOUSE_SENSITIVITY_KEY,
-				_state.mouse_sensitivity)
-		config.set_value(CONTROLS_SECTION, INVERT_MOUSE_KEY,
-				_state.invert_mouse)
 		config.set_value(PLAYER_SECTION, CROSSHAIR_STYLE_KEY,
 				_state.crosshair_style)
 		config.set_value(PLAYER_SECTION, CROSSHAIR_COLOR_KEY,
@@ -162,23 +149,23 @@ func update(state: State) -> void:
 	changed.emit(current())
 
 
-## Apply device-global audio and, when present, the live local-player mouse
+## Apply device-global audio and, when present, the live local-player view
 ## settings. A newly constructed Simulation is passed here at world-load time.
+## The mouse words are the player profile's, which the mission start's session
+## copy hands the Simulation itself (Simulation.use_player_profile).
 func apply(simulation: Simulation = null) -> void:
 	for bus_name: StringName in SOUND_FX_BUSES:
 		_set_bus_volume(bus_name, _state.sound_fx_volume)
 	_set_bus_volume(DIALOG_BUS, _state.dialog_volume)
 	_set_bus_volume(MUSIC_BUS, _state.music_volume)
-	apply_mouse(simulation)
+	apply_view(simulation)
 
 
-## The live local-player mouse settings alone — what a `changed` listener
+## The live local-player view settings alone — what a `changed` listener
 ## with a running Simulation pushes (update() already applied the audio).
-func apply_mouse(simulation: Simulation) -> void:
+func apply_view(simulation: Simulation) -> void:
 	if simulation != null:
 		simulation.set_local_player_aspect_mode(_state.aspect_mode)
-		simulation.set_local_player_mouse(
-				_state.mouse_sensitivity, _state.invert_mouse)
 
 
 ## The aspect mode a fresh profile seeds. Retail's first launch runs the video
@@ -203,10 +190,6 @@ func _load_state() -> State:
 					DIALOG_VOLUME_KEY, DEFAULT_VOLUME)),
 			int(ConfigStore.read(CONFIG_PATH, AUDIO_SECTION,
 					MUSIC_VOLUME_KEY, DEFAULT_VOLUME)),
-			int(ConfigStore.read(CONFIG_PATH, CONTROLS_SECTION,
-					MOUSE_SENSITIVITY_KEY, DEFAULT_MOUSE_SENSITIVITY)),
-			bool(ConfigStore.read(CONFIG_PATH, CONTROLS_SECTION,
-					INVERT_MOUSE_KEY, false)),
 			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION,
 					CROSSHAIR_STYLE_KEY, DEFAULT_CROSSHAIR_STYLE)),
 			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION,
@@ -249,8 +232,6 @@ static func _normalized(state: State) -> State:
 			_clamp_to_control(state.sound_fx_volume, SOUND_FX_VOLUME_CONTROL),
 			_clamp_to_control(state.dialog_volume, DIALOG_VOLUME_CONTROL),
 			_clamp_to_control(state.music_volume, MUSIC_VOLUME_CONTROL),
-			_clamp_to_control(state.mouse_sensitivity, MOUSE_SENSITIVITY_CONTROL),
-			state.invert_mouse,
 			clampi(state.crosshair_style,
 					MIN_CROSSHAIR_STYLE, MAX_CROSSHAIR_STYLE),
 			state.crosshair_color & CROSSHAIR_COLOR_MASK,
