@@ -139,7 +139,9 @@ enum class FindingProblem { None, Info, Warning };
 // findings are shown, counted and fixable and refuse nothing. A listed code whose subject names the
 // witness gates where it does: a missing reference of a kind whose row cites the game's refusal
 // (ReferenceKindRow::gates_when_missing), a missing required file whose manifest row is the game's
-// refusal to boot (RES_FATAL).
+// refusal to boot (RES_FATAL). `game_refusal`, on a gating row whose refusal is the game's own rather
+// than the editor's integrity, says what the game does there, cited: why a build is refused for it
+// (project_build/build_plan.h's blocker_reason).
 struct FindingCodeRow {
 	const char *token = nullptr;
 	FindingFix fixes = FindingFix::None;
@@ -150,6 +152,7 @@ struct FindingCodeRow {
 	FindingSource source = FindingSource::Own;
 	FindingProblem problem = FindingProblem::None;
 	bool gates_build = true;
+	const char *game_refusal = nullptr;
 };
 
 // A document type's row of a code whose findings are listed and refuse no build (gates_build false):
@@ -221,6 +224,8 @@ constexpr bool finding_entries_well_formed(const FindingCodeEntry<Code> (&entrie
 		// A file that does not serialize cannot be packed as the editor holds it: it gates, but over
 		// the game's own bytes held unedited, which the build packs as stored (ShippedFiles, S16).
 		if (row.blocks_save && !row.gates_build) return false;
+		// The game's refusal is said only on a row whose errors refuse a build.
+		if (row.game_refusal && !row.gates_build) return false;
 		for (size_t j = 0; j < i; ++j)
 			if (same_finding_token(row.token, entries[j].row.token)) return false;
 	}
