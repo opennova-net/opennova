@@ -1496,14 +1496,30 @@ void MenuRuntime::process_mouse(float x, float y, bool button_down, uint32_t now
 		}
 	}
 
-	// The CScrollWnd interaction (arrows/track/shuttle drag) lives in the
-	// engine pump; its value changes arrive through on_frame_scroll_value.
-	bool scroll_owned = false;
+	// The press first: its message reaches the windows under the mouse ahead of the frame's pump
+	// [orig: Input_DispatchMouseEvent -> UI_DispatchMouseEvent @ 0x63ab00 on WM_LBUTTONDOWN; the
+	// pump, CUIScene_EndFrame @ 0x63e600, at the frame's end]: the frame runs the scrollbar windows'
+	// own (a value they change arrives through on_frame_scroll_value), the widgets' are ours, front
+	// to back (MenuFrameCompiler::press_reach, D-MNU-33). One may show another screen.
+	if (down_edge) {
+		const uint32_t pressed_on = open_generation_;
+		const std::string pressed_screen = current_screen_;
+		const std::vector<MenuPumpWindow> reach = frame_->press_mouse(x, y);
+		for (size_t i = 0; i < reach.size(); ++i) {
+			if (reach[i].part != 0) continue; // a spin arrow, a scrollbar's window: the frame's
+			const bool again = std::find(reach.begin(), reach.begin() + static_cast<std::ptrdiff_t>(i),
+									   reach[i]) != reach.begin() + static_cast<std::ptrdiff_t>(i);
+			press_(reach[i].index, x, y, now_ms, again);
+			if (frame_ == nullptr || open_generation_ != pressed_on || current_screen_ != pressed_screen)
+				break;
+		}
+		if (frame_ == nullptr) return;
+	}
 	// A click inside the frame's pump (on_widget_clicked) may show another screen or open another
 	// document: the claim then indexes the screen it left, and the next sample plays its sounds.
 	const uint32_t generation = open_generation_;
 	const std::string screen = current_screen_;
-	const int claim = frame_->process_mouse(x, y, button_down, scroll_owned);
+	const int claim = frame_->process_mouse(x, y, button_down);
 	if (frame_ == nullptr) return;
 	frame_->set_cursor_state(false, x, y);
 	if (open_generation_ == generation && current_screen_ == screen) sample_sounds_(claim, button_down);
@@ -1511,7 +1527,6 @@ void MenuRuntime::process_mouse(float x, float y, bool button_down, uint32_t now
 		on_claim_changed_(last_claim_, claim);
 		last_claim_ = claim;
 	}
-	if (down_edge && claim >= 0 && !scroll_owned) press_(claim, x, y, now_ms);
 	if (frame_ != nullptr) frame_->apply_claim_cursor();
 }
 
@@ -1555,10 +1570,10 @@ void MenuRuntime::on_claim_changed_(int previous, int current) {
 	}
 }
 
-// The press reaches the widget under the mouse through shown and enabled
-// windows only [orig: CWnd_DispatchMouseEventToChildren @ 0x647900 checks +0xE0
-// and +0xE4 at every level; only the popup's subtree while one is open].
-void MenuRuntime::press_(int index, float x, float y, uint32_t now_ms) {
+// A widget's own press handler, one window of the press's reach (shown and enabled at every
+// level, inside the open popup while one is open) [orig: CWnd_DispatchMouseEventToChildren
+// @ 0x647900 checks +0xE0 and +0xE4 at every level, then the window's own handler @ 0x6479f4].
+void MenuRuntime::press_(int index, float x, float y, uint32_t now_ms, bool again) {
 	const int id = id_at_index(index);
 	if (id < 0 || !visible_in_hierarchy_(id)) return;
 	const uint32_t generation = open_generation_;
@@ -1575,7 +1590,7 @@ void MenuRuntime::press_(int index, float x, float y, uint32_t now_ms) {
 			activate(id);
 			if (open_generation_ != generation || frame_ == nullptr) return;
 			const int row = frame_index(id) == index ? frame_->list_row_at(index, x, y) : -1;
-			if (row >= 0) list_press_(id, row, now_ms);
+			if (row >= 0) list_press_(id, row, now_ms, again);
 			break;
 		}
 		case kKindTable: {
@@ -1588,7 +1603,7 @@ void MenuRuntime::press_(int index, float x, float y, uint32_t now_ms) {
 			int column = -1;
 			if (frame_->table_hit(index, x, y, &row, &column) && row >= 0 &&
 					row < table_row_count(id))
-				table_press_(id, row, column, now_ms);
+				table_press_(id, row, column, now_ms, again);
 			break;
 		}
 		case kKindSpinList:
@@ -1647,14 +1662,15 @@ bool MenuRuntime::register_click_(int id, int row, uint32_t now_ms) {
 	last_click_id_ = id;
 	last_click_row_ = row;
 	last_click_ms_ = is_double ? 0 : now_ms;
+	last_click_double_ = is_double;
 	return is_double;
 }
 
 // [orig: list_wnd_on_command @ 0x643cb0 — an ITEMS MULTISELECT list (+0x318)
 // toggles the row's state between 3 and 0, a single-select list selects it alone;
 // then the selection event, 0x5000002 on a double click]
-void MenuRuntime::list_press_(int id, int row, uint32_t now_ms) {
-	const bool is_double = register_click_(id, row, now_ms);
+void MenuRuntime::list_press_(int id, int row, uint32_t now_ms, bool again) {
+	const bool is_double = again ? last_click_double_ : register_click_(id, row, now_ms);
 	const mnu::Window *w = index_.window(id);
 	int pick = row;
 	if (w != nullptr && w->items.multiselect) {
@@ -1686,8 +1702,8 @@ void MenuRuntime::list_press_(int id, int row, uint32_t now_ms) {
 // column's cell value) and 0x5000002 on a double click. The header's click
 // sorts the columns in retail (CTableWnd_SortByColumn), which is not ported
 // here (docs/mnu/menu-re.md "Table input").
-void MenuRuntime::table_press_(int id, int row, int column, uint32_t now_ms) {
-	const bool is_double = register_click_(id, row, now_ms);
+void MenuRuntime::table_press_(int id, int row, int column, uint32_t now_ms, bool again) {
+	const bool is_double = again ? last_click_double_ : register_click_(id, row, now_ms);
 	MenuWidgetRuntimeState &state = state_of_(id);
 	if (!menu::table_click_select(state.table_rows, row, table_multiselect_(id))) return;
 	push_table_rows_(id);

@@ -21,6 +21,21 @@ bool menu_window_captures(mnu::WindowType type) {
 	}
 }
 
+bool menu_pump_window_captures(mnu::WindowType type, int part) {
+	// [orig: the spin arrows and the scrollbar's buttons are CButtonWnds, CButtonWnd_HandleNamedEvent
+	// @ 0x65839c; a scroll window's own press pages and captures nothing, CScrollWnd_HandleEvent
+	// @ 0x64d087..0x64d10e]
+	switch (part) {
+	case 0: return menu_window_captures(type);
+	case 1:
+	case 2:
+	case kMenuPumpPartScrollUp:
+	case kMenuPumpPartScrollDown:
+	case kMenuPumpPartScrollShuttle: return true;
+	default: return false;
+	}
+}
+
 MenuPumpWindow MenuClickLatch::capture_for(bool button_down) {
 	// The release reaches the captured window ahead of the pump and lets the capture go [orig:
 	// CButtonWnd_HandleNamedEvent @ 0x6583ed, 0x1000003 -> UI_ClearMouseCaptureWnd].
@@ -42,11 +57,15 @@ MenuPumpWindow MenuClickLatch::sample(const Claim &claim, bool button_down,
 			held_.end());
 	// The claim with the button down is held: verdict 3 [orig: @ 0x647b3e -> 0x647b53].
 	if (claimed && button_down) held_.push_back(claim.window);
-	// The press reaches the claim; a capturing class takes the capture [orig:
-	// CButtonWnd_HandleNamedEvent @ 0x65839c].
-	if (claimed && button_down && !down_ && claim.captures) capture_ = claim.window;
 	down_ = button_down;
 	return clicked;
+}
+
+void MenuClickLatch::press(const MenuPumpWindow &capture) {
+	// The window whose press handler reached CButtonWnd_HandleNamedEvent last [orig:
+	// UI_SetMouseCaptureWnd @ 0x65839c]; a press that reached none leaves the capture as it was (none:
+	// the release before let it go).
+	if (capture.valid()) capture_ = capture;
 }
 
 void MenuClickLatch::dropdown_sample(int combo, bool button_down) {
