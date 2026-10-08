@@ -138,6 +138,7 @@ const Route kRoutes[] = {
 	{AssetKind::Config, ArchiveSlot::Loose},
 	{AssetKind::Score, ArchiveSlot::Loose}, // a Config before S13 D5
 	{AssetKind::Text, ArchiveSlot::Loose},
+	{AssetKind::Notes, ArchiveSlot::None}, // a .md (no kind, said) and a .txt the game never reads (Text) before
 	{AssetKind::ImportSource, ArchiveSlot::None}, // ImageSource, a .png's, before S13 A8
 	{AssetKind::ImportInput, ArchiveSlot::None}, // a terrain set's images (S20)
 };
@@ -1414,6 +1415,53 @@ static int test_unknown_kinds_are_left_out() {
 	return 0;
 }
 
+// The project's notes, which the game never reads (asset_kinds' Notes row): a README and a list of sources in
+// Markdown, a licence with no extension, a .txt of a name the game does not read. The scan gives them their kind
+// and says nothing; the build leaves them out without a word. A .txt the game reads by its name still builds,
+// loose beside the archives (earlyerr.txt, and _VIDTEST.TXT, whose being there the game checks); a file with no
+// extension that holds bytes stays of no kind and is said, as it may be data the game misses.
+static int test_project_notes_are_left_out_silently() {
+	Project p("opennova_editor_build_notes_test");
+	TEST_EXPECT(p.create());
+	TEST_EXPECT(p.fill());
+	TEST_EXPECT(editor_test::write_text(p.root + "/README.md", "# The game\r\n\r\nWhat this folder holds.\r\n"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/art/SOURCES.md", "| File | Source |\n|---|---|\n"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/LICENSE", "MIT License\n\nCopyright (c) the authors\n"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/notes/todo.txt", "the hut's roof\n"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/earlyerr.txt", "Line one\r\nLine two\r\n"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/_VIDTEST.TXT", ""));
+	TEST_EXPECT(editor_test::write_bytes(p.root + "/data/blob", {0x4E, 0x00, 0x01, 0xFF}));
+	const AssetScan scan = scan_project_assets(p.paths, p.doc);
+	for (const char *name : {"README.md", "SOURCES.md", "LICENSE", "todo.txt"})
+		TEST_EXPECT(scan.find(name) && scan.find(name)->kind == AssetKind::Notes);
+	TEST_EXPECT(scan.find("earlyerr.txt") && scan.find("earlyerr.txt")->kind == AssetKind::Text);
+	TEST_EXPECT(scan.find("_VIDTEST.TXT") && scan.find("_VIDTEST.TXT")->kind == AssetKind::Text);
+	TEST_EXPECT(scan.find("blob") && scan.find("blob")->kind == AssetKind::Unknown);
+	size_t unknown = 0;
+	for (const Diagnostic &d : scan.diagnostics) {
+		const AssetEntry *entry = scan.at_path(d.asset);
+		TEST_EXPECT(!entry || entry->kind != AssetKind::Notes);
+		if (d.code() == "asset.kind.unknown") {
+			++unknown;
+			TEST_EXPECT(d.asset == "data/blob");
+		}
+	}
+	TEST_EXPECT(unknown == 1);
+	const BuildPlan plan = p.plan();
+	TEST_EXPECT(plan.ok);
+	for (const Diagnostic &d : plan.diagnostics) {
+		const AssetEntry *entry = scan.at_path(d.asset);
+		TEST_EXPECT(!entry || entry->kind != AssetKind::Notes);
+	}
+	for (const char *name : {"README.md", "SOURCES.md", "LICENSE", "todo.txt", "blob"}) TEST_EXPECT(!in_build(plan, name));
+	TEST_EXPECT(in_build(plan, "earlyerr.txt") && in_build(plan, "_VIDTEST.TXT"));
+	const BuildReport report = run_build(plan, p.output_root());
+	TEST_EXPECT(report.ok && fs::exists(fs::path(report.build_dir) / "earlyerr.txt") &&
+	            fs::exists(fs::path(report.build_dir) / "_VIDTEST.TXT"));
+	TEST_EXPECT(!fs::exists(fs::path(report.build_dir) / "README.md") && !fs::exists(fs::path(report.build_dir) / "LICENSE"));
+	return 0;
+}
+
 // S13 A8: the build keeps each file's content hash by the size and last write it was read at (the
 // plan's hash cache, the import cache's rule), so it reads only the files that changed: the first
 // build every file, an unchanged one none (the same build), one with a file changed that file
@@ -1756,6 +1804,7 @@ int main() {
 	failures += test_protected_build_survives_and_archives_are_refused();
 	failures += test_long_names_bind_packed_files_only();
 	failures += test_unknown_kinds_are_left_out();
+	failures += test_project_notes_are_left_out_silently();
 	failures += test_hash_cache();
 	failures += test_held_archives_are_never_written_through();
 	failures += test_publish_waits_for_a_held_file();
