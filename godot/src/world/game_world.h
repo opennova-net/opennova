@@ -725,7 +725,9 @@ private:
 	bool apply_join_wire_til_if_ready();
 	void place_streamed_mission_objects(const Ref<Simulation> &p_sim);
 	void clear_mission_tile_info();
-	bool load_terrain(const String &p_trn_path, const String &p_tile_set);
+	// The terrain's load: the .trn, then overcast.def and the mission's `p_env_path` (empty: none) through the
+	// terrain's parser (D-TERRAIN-18), with the mission's tile set over its tilestrip.
+	bool load_terrain(const String &p_trn_path, const String &p_tile_set, const String &p_env_path);
 	void configure_foliage();
 	int start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name);
 	void load_player_weapon_profile();

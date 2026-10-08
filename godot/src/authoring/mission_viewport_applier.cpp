@@ -21,6 +21,7 @@
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_options.h>
+#include <editor/preview/mission_scene.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/preview_clock.h>
 #include <editor/preview/viewport_device.h>
@@ -115,12 +116,17 @@ MissionViewportApplier::EnvironmentKey MissionViewportApplier::environment_key_o
 	return key;
 }
 
-MissionViewportApplier::TerrainKey MissionViewportApplier::terrain_key_of_(const MissionViewport &mission) {
+MissionViewportApplier::TerrainKey MissionViewportApplier::terrain_key_of_(const MissionViewport &mission) const {
+	const opennova::editor::MissionSceneHeader &header = mission.scene().header();
 	TerrainKey key;
-	key.terrain = mission.scene().header().terrain;
-	key.tile_set = mission.scene().header().tile_set;
+	key.terrain = header.terrain;
+	key.tile_set = header.tile_set;
 	// The mission's own name: the game reads <mission>.til beside its terrain.
 	key.mission = opennova::to_std(opennova::to_gd(mission.path()).get_file().get_basename());
+	// Its .env, which the terrain's load reads after the .trn (D-TERRAIN-18).
+	key.environment = header.environment.empty() ? std::string() : header.environment + ".env";
+	if (!key.terrain.empty() && stamped_)
+		key.later = opennova::editor::mission_terrain_later_lines(*stamped_, key.environment);
 	return key;
 }
 
@@ -292,7 +298,9 @@ bool MissionViewportApplier::mount_(const opennova::editor::SessionView &view) {
 		// What moved: the layers that read it; a moved file no layer's units read (a texture a model
 		// read as it was first drawn) is the entities'.
 		stale[kEnvironment] = layer_files_[kEnvironment].moved(*source);
-		stale[kTerrain] = layer_files_[kTerrain].moved(*source);
+		// The .env and overcast.def the terrain's load read are the terrain's by the lines of them its parser
+		// takes, which its key holds (D-TERRAIN-18): their other edits leave the ground standing.
+		stale[kTerrain] = layer_files_[kTerrain].moved_but(*source, { terrain_key_.environment, opennova::env::kOvercastFile });
 		stale[kEntities] = layer_files_[kEntities].moved(*source) || (!stale[kEnvironment] && !stale[kTerrain]);
 	}
 	// A fresh record of what is asked for, the root mounted over it (its own caches dropped: a file
@@ -387,6 +395,7 @@ void MissionViewportApplier::plan_(Build &build, const MissionViewport &mission,
 		layer_missing_[kTerrain].clear();
 		loading_.instantiate();
 		loading_->set_mission_tile_set(opennova::to_gd(header.tile_set));
+		loading_->set_mission_environment(opennova::to_gd(terrain_key.environment));
 		const String trn = opennova::to_gd(header.terrain) + ".trn";
 		const size_t from = reads_();
 		const bool begun = !header.terrain.empty() && root_files_->has_file(trn) &&

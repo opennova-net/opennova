@@ -125,7 +125,7 @@ int GameWorld::load_world(const String &p_dir) {
 	clear_mission_tile_info();
 	resource_root_ = resource_root;
 	load_environment(terrain_file_, env_file_);
-	if (!load_terrain(terrain_file_, String())) {
+	if (!load_terrain(terrain_file_, String(), env_file_)) {
 		emit_signal(kSignalLoadFailed, vformat("failed to load %s", terrain_file_));
 		return ERR_CANT_OPEN;
 	}
@@ -297,7 +297,8 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	timeline->end_span();
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_TERRAIN));
 	timeline->span("terrain");
-	if (!load_terrain(trn, p_mission->get_tile_set_ref())) {
+	if (!load_terrain(trn, p_mission->get_tile_set_ref(),
+				p_mission->get_environment_ref().is_empty() ? String() : env_name)) {
 		emit_signal(kSignalLoadFailed, vformat("failed to load %s", trn));
 		timeline->finish();
 		return ERR_CANT_OPEN;
@@ -915,10 +916,11 @@ void GameWorld::clear_mission_tile_info() {
 
 // --- terrain + foliage ---------------------------------------------------------------
 
-bool GameWorld::load_terrain(const String &p_trn_path, const String &p_tile_set) {
+bool GameWorld::load_terrain(const String &p_trn_path, const String &p_tile_set, const String &p_env_path) {
 	Ref<TerrainData> data;
 	data.instantiate();
 	data->set_mission_tile_set(p_tile_set);
+	data->set_mission_environment(p_env_path);
 	if (data->load_from_resource_root(resource_root_, p_trn_path) != OK) {
 		return false;
 	}

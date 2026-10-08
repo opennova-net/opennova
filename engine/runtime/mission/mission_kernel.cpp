@@ -284,8 +284,9 @@ void MissionKernel::wire_terrain() {
 bool MissionKernel::load_terrain_field() {
 	if (asset_index() == nullptr) return false;
 	std::string terrain_error;
-	if (!terrain::terrain_field_store_load(terrain_store, *asset_index(), mission.get_terrain(),
-				mission_info(mission).tile_set, terrain_error)) {
+	const MissionInfo info = mission_info(mission);
+	if (!terrain::terrain_field_store_load(terrain_store, *asset_index(), mission.get_terrain(), info.tile_set,
+				info.environment, terrain_error)) {
 		io::logf(io::LogLevel::kWarn,
 				"mission kernel: terrain not loaded (%s) - the ground solve will not run",
 				terrain_error.c_str());
