@@ -191,3 +191,29 @@ func test_an_environment_draws_its_sky_over_its_missions_terrain() -> void:
 	assert_gt(int(state.get("builds", 0)), builds, "the device built again")
 	await _frames(4)
 	assert_almost_eq(environment.get_fog_level_target(), 300.0, 1.0, "the edited fog reached the runtime")
+
+	# A terrain key added to the environment (D-TERRAIN-18): the terrain's reader takes the .env's lines after
+	# the mission's .trn, so the picture's terrain loads again with the key over Tmap.trn's (its detail density,
+	# 128), and the environment's uses say what it sets over.
+	builds = int(_state().get("builds", 0))
+	edit = {"kind": "edit_record", "path": ENV, "edits": [{"op": "add", "kind": "terrain_key", "parent": row, "as": "k"},
+			{"op": "set", "id": "k", "field": "value", "value": "64"}]}
+	answer = _seam.request(edit)
+	assert_true(bool(answer.get("outcome", {}).get("done", false)), str(answer))
+	state = await _await_built(builds)
+	assert_gt(int(state.get("builds", 0)), builds, "the device built again")
+	terrain = _device_node("Terrain") as Terrain
+	assert_not_null(terrain, "the terrain drawn again")
+	if terrain != null and terrain.get_terrain_data() != null:
+		assert_eq(terrain.get_terrain_data().get_detail_density(), 64, "the environment's key over Tmap.trn's 128")
+	var uses: Dictionary = _seam.query("environment_uses", {"path": ENV})
+	var missions: Array = uses.get("missions", [])
+	assert_eq(missions.size(), 1, str(uses))
+	if missions.size() == 1:
+		var keys: Array = missions[0].get("terrain_keys", [])
+		assert_eq(keys.size(), 1, str(missions[0]))
+		if keys.size() == 1:
+			assert_eq(String(keys[0].get("key", "")), "polytrn_detaildensity")
+			assert_eq(String(keys[0].get("value", "")), "64")
+			assert_eq(String(keys[0].get("over", "")), "128", "over Tmap.trn's own")
+			assert_eq(String(keys[0].get("over_file", "")), "terrain/Tmap.trn")
