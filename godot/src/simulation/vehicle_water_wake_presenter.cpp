@@ -3,7 +3,9 @@
 #include "particle/effect_world.h"
 #include "env/water.h"
 #include <runtime/renderer/render_order.h>
+#include <runtime/renderer/texture_filter.h>
 #include <runtime/renderer/water_wake_frame.h>
+#include "util/texture_path_resolver.h"
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
@@ -56,6 +58,13 @@ void VehicleTrailPresenter::sync_water_wakes() {
 		water_material_->set_shader(shader);
 		water_material_->set_shader_parameter("wake_texture", wake);
 		water_material_->set_shader_parameter("gradient_texture", gradient);
+		// Both sample bilinear with point mips over their pixel chains
+		// (renderer::TextureStage::WaterWake).
+		const uint32_t flags =
+				opennova::renderer::texture_stage_flags(opennova::renderer::TextureStage::WaterWake);
+		water_material_->set_shader_parameter("wake_max_lod", opennova::texture_max_lod(wake, flags));
+		water_material_->set_shader_parameter("gradient_max_lod",
+				opennova::texture_max_lod(gradient, flags));
 		// The wake rings draw inside the water pass, right after the surface
 		// strip (renderer::kRungWaterDecals carries the witness).
 		water_material_->set_render_priority(opennova::renderer::kRungWaterDecals);

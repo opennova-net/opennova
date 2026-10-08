@@ -119,7 +119,8 @@ void Precipitation::append_overlay(SceneOverlaySubmission &r_submission) {
 		if (view.frame.drops <= 0) {
 			continue;
 		}
-		const uint32_t texture = r_submission.texture_index(_texture_for(view.frame.snow));
+		const uint32_t texture = r_submission.texture_index(_texture_for(view.frame.snow),
+				opennova::renderer::texture_stage_flags(opennova::renderer::TextureStage::Precipitation));
 		opennova::renderer::append_precipitation_overlay(view.frame, texture,
 				r_submission.frame, view.slot);
 	}

@@ -821,7 +821,8 @@ void EffectLightDirector::append_overlay(SceneOverlaySubmission &r_submission) {
 	// from Terrain_RenderWorldScene @ 0x5c96ad and from
 	// Water_RenderReflectedWorldScene @ 0x5c85fd); the weapon Inset pass's
 	// own walk rides its own slot (scene_overlay.h kInsetOverlayOrder).
-	const uint32_t texture = r_submission.texture_index(_corona_texture());
+	const uint32_t texture = r_submission.texture_index(_corona_texture(),
+			opennova::renderer::texture_stage_flags(opennova::renderer::TextureStage::LightCorona));
 	opennova::renderer::append_corona_overlay(coronas_, texture, r_submission.frame);
 	opennova::renderer::append_corona_overlay(inset_coronas_, texture, r_submission.frame,
 			opennova::renderer::SceneOverlaySlot::InsetLightCoronas);
@@ -834,6 +835,10 @@ Ref<ImageTexture> EffectLightDirector::_corona_texture() {
 	const int size = LightScene::corona_texture_size();
 	const Ref<Image> image = Image::create_from_data(size, size, false, Image::FORMAT_RGBA8,
 			LightScene::corona_texture_rgba8());
+	// Built from pixels, so the device's texture carries the box-filtered pixel
+	// chain the corona's draws sample with point mips
+	// (renderer::TextureStage::LightCorona).
+	image->generate_mipmaps();
 	corona_texture_ = ImageTexture::create_from_image(image);
 	return corona_texture_;
 }

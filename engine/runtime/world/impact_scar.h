@@ -243,6 +243,26 @@ inline uint32_t scar_texture_strip_mode_word(int strip) {
 	return strip == kScarStripHole ? kScarModeWordHole : kScarModeWordScorch;
 }
 
+// THE STRIP'S CREATION FLAGS: the table's loadFlags@28 | 1 (CLAMP), the
+// archive loader's flags [orig: Scar_LoadTextures @0x5CC2F0..0x5CC302 —
+// `or eax, 1` @0x5CC2F3 into load_texture_from_archive @0x58B980]. The word
+// is 0 for scorch1..4 (strips 0..3) and bhole1 (27), 0x80000 for bigscar (4:
+// at most three mip levels) and 0x40000 for the glass holes (5..26: one
+// level) [orig: the 32-byte table @0x8413A8]; none carries 0x8, so every
+// strip samples bilinear with point mips at every texfilter level
+// (renderer::TextureStage::ImpactScar).
+inline constexpr uint32_t kScarStripLoadFlagsBigScar = 0x80000u;
+inline constexpr uint32_t kScarStripLoadFlagsGlass = 0x40000u;
+inline constexpr int kScarStripBigScar = 4;
+inline constexpr int kScarStripGlassFirst = 5;
+inline constexpr int kScarStripGlassLast = 26;
+inline uint32_t scar_texture_strip_creation_flags(int strip) {
+	uint32_t word = 0;
+	if (strip == kScarStripBigScar) word = kScarStripLoadFlagsBigScar;
+	else if (strip >= kScarStripGlassFirst && strip <= kScarStripGlassLast) word = kScarStripLoadFlagsGlass;
+	return word | 1u;
+}
+
 // ---------------------------------------------------------------------------
 // THE RING CACHE — the 64-byte slot Scar_AddEntry @0x5CC830 writes and
 // Scar_RenderCache @0x5CD830 reads: normal @0, tangent @12, bitangent @24,

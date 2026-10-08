@@ -115,6 +115,12 @@ void check_stages() {
 		CHECK(stage_sampler(TextureStage::TerrainBlendMap, state) == kBilinearPointMip);
 		CHECK(stage_sampler(TextureStage::FoliageMask, state) == kBilinearPointMip);
 		CHECK(stage_sampler(TextureStage::SkyMap, state) == kBilinearPointMip);
+		CHECK(stage_sampler(TextureStage::ImpactScar, state) == kBilinearPointMip);
+		CHECK(stage_sampler(TextureStage::TracerSmoke, state) == kBilinearPointMip);
+		CHECK(stage_sampler(TextureStage::WaterWake, state) == kBilinearPointMip);
+		CHECK(stage_sampler(TextureStage::Precipitation, state) == kBilinearPointMip);
+		CHECK(stage_sampler(TextureStage::LightCorona, state) == kBilinearPointMip);
+		CHECK(stage_sampler(TextureStage::MapIconStrip, state) == kBilinearPointMip);
 		CHECK(stage_sampler(TextureStage::ObjectCube, state) == kBilinearPointMip);
 	}
 	// The two consumers keep their own timing: the session copy drives the
@@ -133,6 +139,21 @@ void check_stages() {
 	CHECK(hardware_max_anisotropy(stage_sampler(TextureStage::TerrainDetail, fresh)) == 1);
 }
 
+void check_chains() {
+	// GTexture_CreateFromPixelData_0's chain: halvings while the smaller side
+	// exceeds 2 (4 x 4 last), one level under 0x40000, at most three under
+	// 0x80000, D3DX's full chain for a side of 2 or less.
+	CHECK(pixel_texture_last_level(256, 256, 0x100000u) == 6); // the sky maps, the smoke
+	CHECK(pixel_texture_last_level(32, 32, 0x100000u) == 3);   // wakegrad.tga
+	CHECK(pixel_texture_last_level(128, 128, kTextureFlagClamp) == 5); // the corona
+	CHECK(pixel_texture_last_level(64, 64, kTextureFlagThreeLevels | kTextureFlagClamp) == 2);
+	CHECK(pixel_texture_last_level(256, 256, kTextureFlagOneLevel) == 0);
+	CHECK(pixel_texture_last_level(16, 480, 0x100000u) == 2);
+	CHECK(pixel_texture_last_level(2, 2, 0) == 1);
+	CHECK(pixel_texture_last_level(1, 1, kTextureFlagThreeLevels) == 0);
+	CHECK(pixel_texture_last_level(0, 0, 0) == 0);
+}
+
 } // namespace
 
 int main() {
@@ -141,6 +162,7 @@ int main() {
 	check_device_stage();
 	check_effects();
 	check_stages();
+	check_chains();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

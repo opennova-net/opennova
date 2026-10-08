@@ -1,6 +1,7 @@
 #include "env/sky_dome.h"
 
 #include "util/axes.h"
+#include "util/texture_path_resolver.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
@@ -15,6 +16,7 @@
 #include "env/weather.h"
 
 #include <runtime/renderer/render_order.h>
+#include <runtime/renderer/texture_filter.h>
 
 namespace godot {
 
@@ -290,10 +292,17 @@ void SkyDome::_update_cloud_textures(MissionEnvironment *p_env) {
 	bound_cloud_tex2_ = tex2;
 	has_clouds_ = tex1.is_valid() || tex2.is_valid();
 	if (has_clouds_) {
-		cloud_material_->set_shader_parameter("u_cloud_tex1",
-				tex1.is_valid() ? tex1 : tex2);
-		cloud_material_->set_shader_parameter("u_cloud_tex2",
-				tex2.is_valid() ? tex2 : tex1);
+		const Ref<Texture2D> layer1 = tex1.is_valid() ? tex1 : tex2;
+		const Ref<Texture2D> layer2 = tex2.is_valid() ? tex2 : tex1;
+		cloud_material_->set_shader_parameter("u_cloud_tex1", layer1);
+		cloud_material_->set_shader_parameter("u_cloud_tex2", layer2);
+		// Each map's last retail level (renderer::TextureStage::SkyMap).
+		const uint32_t flags = opennova::renderer::texture_stage_flags(
+				opennova::renderer::TextureStage::SkyMap);
+		cloud_material_->set_shader_parameter("u_cloud_max_lod1",
+				opennova::texture_max_lod(layer1, flags));
+		cloud_material_->set_shader_parameter("u_cloud_max_lod2",
+				opennova::texture_max_lod(layer2, flags));
 	}
 }
 

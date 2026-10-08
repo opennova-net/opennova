@@ -20,6 +20,10 @@ std::atomic<int> g_device_code{opennova::renderer::shader_filter_code(
 		opennova::renderer::stage_sampler(TextureStage::TerrainDetail, kFreshProfile))};
 std::atomic<int> g_effect_code{opennova::renderer::shader_filter_code(
 		opennova::renderer::stage_sampler(TextureStage::ObjectStage, kFreshProfile))};
+// The published state itself, for stage_filter_code.
+std::atomic<int> g_device_mode{kFreshProfile.device_mode};
+std::atomic<int> g_effect_mode{kFreshProfile.effect_mode};
+std::atomic<int> g_device_max_anisotropy{kFreshProfile.device_max_anisotropy};
 
 } // namespace
 
@@ -30,6 +34,9 @@ void TextureFilterDevice::publish(const TexFilterState &p_state) {
 			opennova::renderer::stage_sampler(TextureStage::ObjectStage, p_state));
 	g_device_code.store(device_code);
 	g_effect_code.store(effect_code);
+	g_device_mode.store(p_state.device_mode);
+	g_effect_mode.store(p_state.effect_mode);
+	g_device_max_anisotropy.store(p_state.device_max_anisotropy);
 	RenderingServer *server = RenderingServer::get_singleton();
 	if (server == nullptr) {
 		return;
@@ -44,6 +51,14 @@ int TextureFilterDevice::device_filter_code() {
 
 int TextureFilterDevice::effect_filter_code() {
 	return g_effect_code.load();
+}
+
+int TextureFilterDevice::stage_filter_code(TextureStage p_stage) {
+	TexFilterState state;
+	state.device_mode = g_device_mode.load();
+	state.effect_mode = g_effect_mode.load();
+	state.device_max_anisotropy = g_device_max_anisotropy.load();
+	return opennova::renderer::shader_filter_code(opennova::renderer::stage_sampler(p_stage, state));
 }
 
 Viewport::AnisotropicFiltering TextureFilterDevice::viewport_anisotropy(const TexFilterState &p_state) {

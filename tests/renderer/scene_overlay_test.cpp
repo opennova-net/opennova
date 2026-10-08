@@ -204,6 +204,7 @@ void test_the_builders_carry_the_pass_states() {
 	append_precipitation_overlay(rain, 9, frame);
 	CHECK(frame.batches.size() == 1);
 	CHECK(frame.batches[0].shading == SceneOverlayShading::Modulate2xBlend);
+	CHECK(frame.batches[0].stage == TextureStage::Precipitation);
 	CHECK(frame.batches[0].depth == SceneOverlayDepth::TestNoWrite);
 	CHECK(frame.batches[0].vertex_count == 6);
 	CHECK(frame.vertices[5].position[0] == 5.0f);
@@ -223,6 +224,7 @@ void test_the_builders_carry_the_pass_states() {
 	append_corona_overlay(quads, 1, frame);
 	const SceneOverlayBatch &corona = frame.batches[1];
 	CHECK(corona.shading == SceneOverlayShading::AdditiveModulate);
+	CHECK(corona.stage == TextureStage::LightCorona);
 	CHECK(corona.depth == SceneOverlayDepth::TestNoWrite);
 	CHECK(corona.geometry == SceneOverlayGeometry::Billboard);
 	CHECK(corona.vertex_count == 6);
@@ -241,6 +243,7 @@ void test_the_builders_carry_the_pass_states() {
 			frame);
 	const SceneOverlayBatch &glare = frame.batches[2];
 	CHECK(glare.shading == SceneOverlayShading::SelfLumAdditive);
+	CHECK(glare.stage == TextureStage::ObjectStage);
 	CHECK(glare.depth == SceneOverlayDepth::Always);
 	const SceneOverlayVertex &g0 = frame.vertices[glare.first_vertex];
 	CHECK(g0.color[0] == 1.0f);
@@ -330,6 +333,7 @@ void test_the_nvg_laser_beam_overlay() {
 	const SceneOverlayBatch &beam = frame.batches[0];
 	CHECK(beam.slot == SceneOverlaySlot::NvgLaserBeams);
 	CHECK(beam.shading == SceneOverlayShading::NvgLaser);
+	CHECK(beam.stage == TextureStage::TracerSmoke);
 	CHECK(beam.depth == SceneOverlayDepth::TestNoWrite);
 	CHECK(beam.geometry == SceneOverlayGeometry::World);
 	CHECK(beam.texture == 9);

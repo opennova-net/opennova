@@ -9,6 +9,9 @@
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 
 #include "util/color_convert.h"
+#include "util/texture_path_resolver.h"
+
+#include <runtime/renderer/texture_filter.h>
 
 namespace godot {
 
@@ -67,7 +70,14 @@ Ref<ShaderMaterial> TracerRibbonSurfaces::material(TracerShader p_shader, bool p
 		material->set_shader(shader);
 		material->set_shader_parameter("fog_black", p_fog_black);
 		if (p_shader != TracerShader::Stock) {
-			material->set_shader_parameter("smoke_tex", smoke_texture());
+			const Ref<Texture2D> smoke = smoke_texture();
+			material->set_shader_parameter("smoke_tex", smoke);
+			// Bilinear with point mips over its pixel chain
+			// (renderer::TextureStage::TracerSmoke).
+			material->set_shader_parameter("smoke_max_lod",
+					opennova::texture_max_lod(smoke,
+							opennova::renderer::texture_stage_flags(
+									opennova::renderer::TextureStage::TracerSmoke)));
 		}
 	}
 	return material;

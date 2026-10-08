@@ -697,6 +697,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	const Ref<Texture2D> map_icons = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapIcons), ResourceRoot::TEXTURE_LOADER_FILE, true,
 			opennova::hud::kTsdIconMaterialWord);
 	textures_[opennova::hud::kHudTexMapIcons] = map_icons;
+	apply_map_icon_sampling_();
 	if (map_icons.is_valid()) {
 		state_.minimap.icon_strip_w_px =
 				static_cast<float>(map_icons->get_width());

@@ -2,6 +2,7 @@
 #include <formats/tga/tga_read.h>
 #include <runtime/renderer/d3dx_image_codecs.h>
 #include <runtime/renderer/material_texture.h>
+#include <runtime/renderer/texture_filter.h>
 #include <runtime/renderer/texture_load_rules.h>
 #include "util/texture_path_resolver.h"
 
@@ -332,9 +333,12 @@ godot::Ref<godot::Image> decode_texture_load(const renderer::TextureLoad &load,
 }
 
 godot::Ref<godot::Image> load_texture_image(const std::vector<renderer::TextureLoad> &attempts,
-		const TextureReadFn &read, bool *r_alpha_only) {
+		const TextureReadFn &read, bool *r_alpha_only, renderer::TextureReader *r_reader) {
 	if (r_alpha_only != nullptr) {
 		*r_alpha_only = false;
+	}
+	if (r_reader != nullptr) {
+		*r_reader = renderer::TextureReader::None;
 	}
 	if (!read) {
 		return godot::Ref<godot::Image>();
@@ -344,6 +348,9 @@ godot::Ref<godot::Image> load_texture_image(const std::vector<renderer::TextureL
 		if (image.is_valid()) {
 			if (r_alpha_only != nullptr) {
 				*r_alpha_only = load.alpha_only;
+			}
+			if (r_reader != nullptr) {
+				*r_reader = load.reader;
 			}
 			return image;
 		}
@@ -362,6 +369,14 @@ std::string texture_load_key(const std::vector<renderer::TextureLoad> &attempts)
 	return key;
 }
 
+namespace {
+// The textures whose mip chain D3DX built, the DDS reader's (the file's own
+// levels for a DDS, a full chain for any other image it decodes; the
+// resolver's own table). ObjectIDs are never reused within a session, so the table outlives
+// cache clears: a material bound before a clear keeps a correct answer.
+std::unordered_set<uint64_t> g_authored_mip_chains;
+} // namespace
+
 godot::Ref<godot::Texture2D> texture_with_mipmaps(const godot::Ref<godot::Image> &image) {
 	if (image.is_null() || image->is_empty()) {
 		return godot::Ref<godot::Texture2D>();
@@ -374,6 +389,19 @@ godot::Ref<godot::Texture2D> texture_with_mipmaps(const godot::Ref<godot::Image>
 		image->generate_mipmaps();
 	}
 	return godot::ImageTexture::create_from_image(image);
+}
+
+godot::Ref<godot::Texture2D> load_texture_with_mipmaps(const std::vector<renderer::TextureLoad> &attempts,
+		const TextureReadFn &read) {
+	renderer::TextureReader reader = renderer::TextureReader::None;
+	const godot::Ref<godot::Texture2D> texture =
+			texture_with_mipmaps(load_texture_image(attempts, read, nullptr, &reader));
+	// The archive and stage loaders' DDS sibling goes through D3DX (its chain);
+	// a TGA or PCX is built from pixels (renderer::pixel_texture_last_level).
+	if (reader == renderer::TextureReader::Dds && texture.is_valid()) {
+		g_authored_mip_chains.insert(texture->get_instance_id());
+	}
+	return texture;
 }
 
 godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, const godot::String &filename,
@@ -418,31 +446,21 @@ godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, con
 		}
 		return bytes;
 	};
-	const godot::Ref<godot::Texture2D> texture = texture_with_mipmaps(load_texture_image(attempts, read));
+	const godot::Ref<godot::Texture2D> texture = load_texture_with_mipmaps(attempts, read);
 	// Cache the null too: a missing or undecodable file is not re-read per probe.
 	g_texture_cache.emplace(key, texture);
 	return texture;
 }
 
-namespace {
-// The textures whose mip chain D3DX built, the DDS reader's (the file's own
-// levels for a DDS, a full chain for any other image it decodes; the
-// resolver's own table). ObjectIDs are never reused within a session, so the table outlives
-// cache clears: a material bound before a clear keeps a correct answer.
-std::unordered_set<uint64_t> g_authored_mip_chains;
-} // namespace
-
-float material_texture_max_lod(const godot::Ref<godot::Texture> &texture) {
-	constexpr float kUnbounded = 1000.0f;
+float texture_max_lod(const godot::Ref<godot::Texture> &texture, uint32_t creation_flags) {
 	const godot::Ref<godot::Texture2D> texture_2d = texture;
 	if (texture_2d.is_null() ||
 			g_authored_mip_chains.count(texture_2d->get_instance_id()) != 0) {
-		return kUnbounded;
+		return kUnboundedMaxLod;
 	}
-	const uint32_t levels = renderer::pixel_texture_mip_levels(
+	return static_cast<float>(renderer::pixel_texture_last_level(
 			static_cast<uint32_t>(texture_2d->get_width()),
-			static_cast<uint32_t>(texture_2d->get_height()));
-	return levels == 0 ? kUnbounded : static_cast<float>(levels - 1);
+			static_cast<uint32_t>(texture_2d->get_height()), creation_flags));
 }
 
 godot::Ref<godot::Texture2D> load_material_image_from_bytes(

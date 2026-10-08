@@ -693,10 +693,10 @@ Ref<Texture2D> ResourceRoot::load_texture(const String &name, TextureLoader load
 	if (cached != texture_cache_.end()) {
 		return cached->second;
 	}
-	const Ref<Texture2D> result = opennova::texture_with_mipmaps(opennova::load_texture_image(attempts,
+	const Ref<Texture2D> result = opennova::load_texture_with_mipmaps(attempts,
 			[this, policy](const opennova::renderer::TextureLoad &load) {
 				return read_texture_attempt_(load, policy);
-			}));
+			});
 	texture_cache_.emplace(cache_key, result);
 	return result;
 }
