@@ -1,6 +1,7 @@
 #include "hud/map_view_window.h"
 
 #include "hud/hud_overlay.h"
+#include "render/d3d9_raster_device.h"
 #include "simulation/simulation.h"
 
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
@@ -332,8 +333,9 @@ void MapViewWindow::_draw() {
 	if (draw == nullptr) return;
 	renderer_.ensure(get_canvas_item(), 0, false, hud->map_additive_material(),
 			hud->map_water_material(), hud->map_modulate2x_material());
-	// The pass is in frame pixels; this window sits at its widget's origin.
-	renderer_.set_transform(Transform2D(0.0, -get_position()));
+	// The pass is in frame pixels (the original's window coordinates, D3D9 pixel
+	// centres on the integers); this window sits at its widget's origin.
+	renderer_.set_transform(d3d9_screen_to_canvas() * Transform2D(0.0, -get_position()));
 	HudMapSegmentsView segments;
 	segments.pass = &draw->pass.zones;
 	segments.segments = &draw->pass.segments;

@@ -42,6 +42,7 @@
 #pragma once
 
 #include <formats/env/env.h>
+#include <runtime/renderer/d3d9_raster.h>
 
 #include <cstdint>
 
@@ -149,6 +150,15 @@ struct WaterMirrorView {
 	// reflection of the source rather than shifted oppositely. The unmirrored
 	// below-water view keeps the source's.
 	float v_offset = 0.0f;
+	// Where D3D9 puts the mirror's image on the RTT: the reflected pass sets
+	// the selected RTT's own viewport and the frame's plain projection (the
+	// frame's fov, scaleX 1.0, no sub-pixel term) [orig: Render_MainScene
+	// @ 0x5c1614 (Render_SetViewport over the RTT GTexRT_SelectThunk bound),
+	// @ 0x5c163e (Render_SetViewAndProjectionMatrices)], so its pixel centres
+	// sit on the RTT's integer coordinates: half an RTT texel right and down of
+	// a raster whose centres sit at i + 0.5 (renderer/d3d9_raster.h), whatever
+	// half pixel the main view's raster carries.
+	renderer::NdcShift raster_shift;
 };
 
 // The reflected pass arms an object's CLIP technique per DRAW while it renders
@@ -233,6 +243,7 @@ inline WaterMirrorView build_water_mirror_view(const MirrorSourceView &source,
 	// The main view's aspect over the square RTT [orig: Render_MainScene
 	// @ 0x5c1619..0x5c163e].
 	view.aspect = source.aspect;
+	view.raster_shift = renderer::d3d9_raster_ndc_shift(kReflectionRttSize, kReflectionRttSize);
 	return view;
 }
 

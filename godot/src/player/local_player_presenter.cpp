@@ -6,6 +6,7 @@
 #include "object/item_database.h"
 #include "player/local_player_visuals.h"
 #include "player/player_viewmodel_def.h"
+#include "render/d3d9_raster_device.h"
 #include "render/target_projection_xr_interface.h"
 #include "render/visual_layers.h"
 #include "simulation/entity_presenter.h"
@@ -162,6 +163,10 @@ Projection LocalPlayerPresenter::view_projection() const {
 	return cam != nullptr ? cam->get_camera_projection() : Projection();
 }
 
+Projection LocalPlayerPresenter::screen_projection() const {
+	return ndc_translation({-raster_shift_.x, -raster_shift_.y}) * view_projection();
+}
+
 GameplayCamera *LocalPlayerPresenter::fly_camera() const {
 	return Object::cast_to<GameplayCamera>(ObjectDB::get_instance(fly_camera_id_));
 }
@@ -203,6 +208,7 @@ void LocalPlayerPresenter::setup(Node *p_world, Camera3D *p_camera, GameplayCame
 	input_router_.setup(p_world, this, p_controls);
 	camera_saved_fov_ = p_camera != nullptr ? static_cast<float>(p_camera->get_fov()) : -1.0f;
 	camera_saved_keep_aspect_ = p_camera != nullptr ? static_cast<int>(p_camera->get_keep_aspect_mode()) : -1;
+	camera_saved_projection_ = p_camera != nullptr ? static_cast<int>(p_camera->get_projection()) : -1;
 	camera_saved_cull_mask_ = p_camera != nullptr ? static_cast<int64_t>(p_camera->get_cull_mask()) : -1;
 	// The player camera never draws the FP body layer: retail renders no local
 	// body in first person, and the water mirror never draws persons either
@@ -260,8 +266,13 @@ void LocalPlayerPresenter::teardown() {
 		if (camera_saved_keep_aspect_ >= 0) {
 			cam->set_keep_aspect_mode(static_cast<Camera3D::KeepAspect>(camera_saved_keep_aspect_));
 		}
+		if (camera_saved_projection_ >= 0) {
+			cam->set_projection(static_cast<Camera3D::ProjectionType>(camera_saved_projection_));
+		}
 	}
 	camera_saved_keep_aspect_ = -1;
+	camera_saved_projection_ = -1;
+	raster_shift_ = {};
 	if (weapon_effects_.is_valid()) {
 		weapon_effects_->teardown();
 	}
@@ -511,6 +522,10 @@ void LocalPlayerPresenter::clear_models() {
 	if (cam != nullptr && camera_saved_keep_aspect_ >= 0) {
 		cam->set_keep_aspect_mode(static_cast<Camera3D::KeepAspect>(camera_saved_keep_aspect_));
 	}
+	if (cam != nullptr && camera_saved_projection_ >= 0) {
+		cam->set_projection(static_cast<Camera3D::ProjectionType>(camera_saved_projection_));
+	}
+	raster_shift_ = {};
 }
 
 void LocalPlayerPresenter::set_fly_camera_locked(bool p_locked) {
@@ -531,24 +546,25 @@ Vector2 LocalPlayerPresenter::aim_screen_point() const {
 	const Ref<Simulation> aim_sim = sim();
 	const Vector3 eye = eye_position(aim_sim.is_valid() ? aim_sim->get_local_player_position() : Vector3());
 	const Vector3 target = Simulation::aim_ray_endpoint(eye, angles.x, angles.y);
-	// Through the frame's projection (view_projection): the target's camera
-	// while it is live -- its pixels reach the surface through the blit's
-	// full-surface stretch, so its clip space maps straight onto the surface --
-	// else the surface camera.
+	// Through the frame's screen projection (screen_projection): the target's
+	// camera while it is live -- its pixels reach the surface through the
+	// blit's full-surface stretch, so its clip space maps straight onto the
+	// surface -- else the surface camera; the HUD draws the point in the
+	// original's window coordinates, the raster shift taken back out.
 	Camera3D *through = projection_camera();
 	SubViewport *target_viewport = projection_viewport();
 	Viewport *surface = cam->get_viewport();
-	if (through == nullptr || target_viewport == nullptr || surface == nullptr) {
+	if (surface == nullptr) {
+		return kNoProjection;
+	}
+	if (through == nullptr || target_viewport == nullptr) {
 		through = cam;
 	}
 	if (through->is_position_behind(target)) {
 		return kNoProjection;
 	}
-	if (through == cam) {
-		return cam->unproject_position(target);
-	}
 	const Vector3 view_point = through->get_camera_transform().xform_inv(target);
-	const Vector4 clip = view_projection().xform(Vector4(view_point.x, view_point.y, view_point.z, 1.0f));
+	const Vector4 clip = screen_projection().xform(Vector4(view_point.x, view_point.y, view_point.z, 1.0f));
 	if (clip.w <= 0.0f) {
 		return kNoProjection;
 	}
@@ -881,6 +897,11 @@ void LocalPlayerPresenter::update_scope_camera() {
 	// (engine witness: renderer::kScenePassNearZ, the
 	// Render_ProcessMainSceneFrame per-frame depth pins)
 	cam->set_near(opennova::renderer::kScenePassNearZ);
+	// Retail's pixel centres sit on the integers: the world lands half a
+	// surface pixel right and down of this raster's (the engine's
+	// ViewProjection::raster_shift; renderer/d3d9_raster.h).
+	draw_camera_through_d3d9_raster(cam, projection.raster_shift);
+	raster_shift_ = projection.raster_shift;
 	// While the NVG composite is up the world pass IS the NVG scene: retail
 	// renders it into the 512-square target instead of the backbuffer (retail
 	// Render_ProcessMainSceneFrame @0x5ca516..0x5ca5b0 -> NVG_RenderSceneToTarget,
@@ -893,9 +914,10 @@ void LocalPlayerPresenter::update_scope_camera() {
 		const float selected = opennova::renderer::aspect_height_over_width(
 				projection_sim.is_valid() ? projection_sim->get_local_player_aspect_mode() : -1,
 				size.x, size.y);
-		update_view_projection(opennova::world::nvg_view_projection(projection, nvg, selected,
-									   view_->get_scope_magnification()),
-				true);
+		const opennova::world::ViewProjection nvg_projection = opennova::world::nvg_view_projection(
+				projection, nvg, selected, view_->get_scope_magnification());
+		raster_shift_ = nvg_projection.raster_shift;
+		update_view_projection(nvg_projection, true);
 		return;
 	}
 	update_view_projection(projection, false);
@@ -979,6 +1001,7 @@ void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewPro
 	through->set_fov(p_projection.fov_h_deg);
 	through->set_near(cam->get_near());
 	through->set_far(cam->get_far());
+	draw_camera_through_d3d9_raster(through, p_projection.raster_shift);
 	through->set_cull_mask(cam->get_cull_mask());
 	through->set_h_offset(cam->get_h_offset());
 	through->set_v_offset(cam->get_v_offset());
@@ -1000,8 +1023,9 @@ void LocalPlayerPresenter::update_view_projection(const opennova::world::ViewPro
 	// Camera3D builds for this fov at the frame's aspect (world::ViewProjection).
 	nvg_raster_served_ = false;
 	if (p_nvg_raster) {
-		nvg_raster_projection_ = Projection::create_perspective(p_projection.fov_h_deg,
-				p_projection.aspect, through->get_near(), through->get_far(), true);
+		nvg_raster_projection_ = ndc_translation(p_projection.raster_shift) *
+				Projection::create_perspective(p_projection.fov_h_deg, p_projection.aspect,
+						through->get_near(), through->get_far(), true);
 		nvg_raster_served_ = TargetProjectionXrInterface::serve(target,
 				through->get_camera_transform(), nvg_raster_projection_);
 	}
@@ -1186,6 +1210,7 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("person_overlays"), &LocalPlayerPresenter::person_overlays);
 	ClassDB::bind_method(D_METHOD("camera"), &LocalPlayerPresenter::camera);
 	ClassDB::bind_method(D_METHOD("view_projection"), &LocalPlayerPresenter::view_projection);
+	ClassDB::bind_method(D_METHOD("screen_projection"), &LocalPlayerPresenter::screen_projection);
 	ClassDB::bind_method(D_METHOD("presented_view"), &LocalPlayerPresenter::presented_view);
 	ClassDB::bind_method(D_METHOD("projection_camera"), &LocalPlayerPresenter::projection_camera);
 	ClassDB::bind_method(D_METHOD("projection_viewport"), &LocalPlayerPresenter::projection_viewport);

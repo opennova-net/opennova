@@ -115,6 +115,11 @@ public:
 	static Rect2 nvg_scene_sight_rect(const Rect2 &p_design, const Vector2 &p_surface,
 			int p_aspect_mode);
 	static Vector2 pixel_delta_to_design(const Vector2 &p_delta, const Vector2 &p_surface);
+	// Where a HUD draw lands on this raster: the original's window coordinate
+	// plus D3D9's pixel centre on both axes (engine renderer/d3d9_raster.h). A
+	// GDScript HUD drawer that draws the original's coordinates opens its
+	// _draw with draw_set_transform(HudPos.d3d9_screen_offset()).
+	static Vector2 d3d9_screen_offset();
 	static int fade_decay(int p_elapsed_ticks, int p_ramp_ticks);
 	static int fade_flash_alpha(int p_elapsed_ticks, int p_ramp_ticks,
 			int p_base_alpha, int p_max_alpha);

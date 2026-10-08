@@ -301,8 +301,10 @@ func test_stance_assets_use_explicit_ids_for_slots() -> void:
 	await get_tree().process_frame
 	RenderingServer.canvas_item_set_custom_rect(hud.get_canvas_item(), false)
 
+	# The draw list's window coordinates land on this raster's pixel centres
+	# half a pixel over (HudPos.d3d9_screen_offset, D3D9's).
 	assert_eq(RenderingServer.debug_canvas_item_get_rect(hud.get_canvas_item()),
-		Rect2(43, 653, 128, 128),
+		Rect2(Vector2(43, 653) + HudPos.d3d9_screen_offset(), Vector2(128, 128)),
 		"Explicit IDs select slots independent of file order; the later ID 2 offset replaces the earlier one.")
 
 
@@ -866,8 +868,8 @@ func test_player_view_effects_draw_retail_asset_stack() -> void:
 	RenderingServer.canvas_item_set_custom_rect(effects.get_canvas_item(), false)
 
 	assert_eq(RenderingServer.debug_canvas_item_get_rect(effects.get_canvas_item()),
-			Rect2(0, 0, 1024, 768),
-			"Retail masks cover the viewport while inset art stays in design coordinates.")
+			Rect2(HudPos.d3d9_screen_offset(), Vector2(1024, 768)),
+			"Retail masks cover the viewport (on D3D9's pixel centres) while inset art stays in design coordinates.")
 	assert_eq(effects.get_child_count(true), 4,
 			"The sun veil and the three fullscreen damage-feedback quads are "
 			+ "internal children; the NVG image is the terminal FrameFx pass's, and "

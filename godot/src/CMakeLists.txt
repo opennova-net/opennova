@@ -123,6 +123,7 @@ add_library(${TARGET_NAME} SHARED
     particle/particle_far_pass.cpp
     particle/particle_renderer.cpp
     particle/particle_atlas_page_upload.cpp
+    render/d3d9_raster_device.cpp
     render/environment_cube_blit.cpp
     render/frame_fx.cpp
     render/nvg_view_device.cpp

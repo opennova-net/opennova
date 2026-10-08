@@ -118,7 +118,9 @@ func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
 		var design := sight.evaluate_rect(HudOverlay.sight_scale_index_default(), 0)
 		assert_eq(card.row_rect(i), design,
 			"SIGHTS row %d resolves its rect through the engine evaluator" % i)
+		# Drawn on D3D9's pixel centres, half a pixel over (HudPos.d3d9_screen_offset).
 		var expected := HudPos.sight_scale_rect(design, surface)
+		expected.position += HudPos.d3d9_screen_offset()
 		assert_eq(RenderingServer.debug_canvas_item_get_rect(row.get_canvas_item()), expected,
 			"SIGHTS row %d emits its mode-resolved draw rectangle" % i)
 	# The scale-flagged red-dot row draws three quarters of its authored box

@@ -36,7 +36,12 @@ vec4 viewmodel_clip(vec4 view_pos, mat4 projection) {
 	// with the near plane swapped to n: n * (z_view + f) / (f - n), which is
 	// 1.0 * w at z_view = -n and 0.0 at z_view = -f.
 	float z_fp = n * (view_pos.z + f) / (f - n);
-	clip.xy *= opennova_viewmodel_projection.x;
+	// The focal scale is about the projection's own centre: the beauty
+	// projection carries the D3D9 raster's half-pixel translation (its third
+	// column's x and y, LocalPlayerPresenter's draw through d3d9_raster_device),
+	// and retail's renderfov pass lands on the same half pixel, unscaled.
+	vec2 centre = -vec2(projection[2][0], projection[2][1]) * clip.w;
+	clip.xy = (clip.xy - centre) * opennova_viewmodel_projection.x + centre;
 	clip.z = (1.0 - NOVA_VIEWMODEL_DEPTH_WINDOW) * clip.w
 			+ NOVA_VIEWMODEL_DEPTH_WINDOW * z_fp;
 	return clip;

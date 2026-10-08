@@ -625,6 +625,15 @@ void test_view_projection_retail_stretch() {
     // A sizeless surface degrades to the identity aspect.
     const ViewProjection none = view_projection(80.0f, 0, 0, 0);
     CHECK(none.scale_y == 1.0f && none.fov_v_deg == 80.0f);
+    CHECK(none.raster_shift.x == 0.0f && none.raster_shift.y == 0.0f);
+    // D3D9 rasterises the pass on the backbuffer, pixel centres on the integers
+    // [orig: Render_SetViewport @0x58A720; Render_SetViewAndProjectionMatrices
+    // @0x58D9DE, no sub-pixel term]: half a surface pixel right and down, in NDC
+    // (y up), stretched or not.
+    const ViewProjection xga = view_projection(80.0f, -1, 1024, 768);
+    CHECK(xga.raster_shift.x == 1.0f / 1024.0f && xga.raster_shift.y == -1.0f / 768.0f);
+    CHECK(wide.raster_shift.x == 1.0f / 1920.0f && wide.raster_shift.y == -1.0f / 1080.0f);
+    CHECK(tall.raster_shift.x == 1.0f / 1920.0f && tall.raster_shift.y == -1.0f / 1200.0f);
 
     // The FP viewmodel pass shares scaleY [orig: @0x4dee7f / @0x58f6b0]: the
     // focal ratio is the ratio of the horizontal half-tangents, aspect-invariant.
@@ -663,6 +672,11 @@ void test_nvg_view_projection() {
     CHECK(sighted.fov_h_deg == 20.0f && sighted.aspect == wide.aspect);
     CHECK(std::fabs(sighted.fov_v_deg - fov_vertical_from_horizontal_deg(20.0f, wide.aspect)) < 1e-5f);
     CHECK(sighted.target_w == 512 && sighted.target_h == 512);
+    // Each arm rasterises into the square [orig: NVG_RenderSceneToTarget's
+    // Render_SetViewport @0x5D06D0]: the square's half pixel, not the surface's.
+    for (const ViewProjection &arm : {nvg, native_nvg, lens, sighted}) {
+        CHECK(arm.raster_shift.x == 1.0f / 512.0f && arm.raster_shift.y == -1.0f / 512.0f);
+    }
 }
 
 // [orig: Game_RunVideoTestDialog @0x53ed3e..0x53ed6b] The first launch's video
