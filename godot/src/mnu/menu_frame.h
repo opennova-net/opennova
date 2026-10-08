@@ -272,14 +272,18 @@ public:
 	// or press written; drawn again only when it moved. Hidden: no claim.
 	void place_cursor(bool p_visible, const Vector2 &p_position);
 
+	// The press (the left button's down edge) ahead of its sample's
+	// process_mouse (engine MenuFrameCompiler::press_reach, D-MNU-33): the
+	// windows its message reaches front to back, the capture taken, the
+	// scrollbar windows' own press run (a value change on
+	// "scroll_value_changed"); the runtime runs the widgets' (not bound).
+	std::vector<opennova::menu::MenuPumpWindow> press_mouse(const Vector2 &p_position);
 	// Feed one raw-mouse sample through the engine pump (menu_frame.h
 	// pump_mouse carries the witness): updates every row's hover/press, the
-	// cursor position, and returns the claimed widget index (-1 = none).
-	// Local control coordinates; the pump scales by this control's size.
+	// cursor position, and returns the claimed widget index (-1 = none, or a
+	// scrollbar's window). Local control coordinates; the pump scales by this
+	// control's size.
 	int process_mouse(const Vector2 &p_position, bool p_button_down);
-	// True when a scrollbar part took the last process_mouse sample (its press
-	// never reaches the owner widget).
-	bool last_sample_scrolled() const { return last_sample_scrolled_; }
 
 	// The open-dropdown sample: only the popup's scrollbar interaction runs,
 	// restricted to the open combo. True when the scrollbar owns the sample
@@ -302,7 +306,9 @@ public:
 	// the claim let go over was held under the mouse with the button down the
 	// sample before, wherever the press began (part: a spin arrow's 1 up, 2
 	// down, else 0); a press on a capturing class holds the claim to it until
-	// the release (engine menu_click.h, the game's rule, D-MNU-30).
+	// the release (engine menu_click.h, the game's rule, D-MNU-30). A
+	// scrollbar's window's click is the scrollbar's own: an arrow steps
+	// (D-MNU-32), and nothing is emitted.
 
 	// Debug/test accessor: compile at the current size and report counts.
 	Ref<MenuDrawListStats> get_draw_list_stats();
@@ -349,7 +355,6 @@ private:
 	Ref<MnuDocument> document_;
 	// The click and the press's capture over the claims (engine MenuClickLatch).
 	opennova::menu::MenuClickLatch click_;
-	bool last_sample_scrolled_ = false;
 	int32_t cursor_slot_ = -1;  // last claim's cursor texture slot
 	bool configured_ = false;
 	opennova::menu::MenuFrameCompiler compiler_;

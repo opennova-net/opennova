@@ -579,10 +579,6 @@ public:
 	// visible row and the page step (visible - 1) the driver's arrow/track
 	// presses use.
 	int scroll_row_limit(int index, const MenuFrameState &state) const;
-	// The widget whose scrollbar parts contain the point (shipped menus
-	// author scrollbars OUTSIDE the owner rect — the D-MNU-16 claim class).
-	int scroll_owner_at(const MenuFrameState &state, float mouse_x,
-			float mouse_y, float scale_x, float scale_y) const;
 	int scroll_page_rows(int index, const MenuFrameState &state) const;
 	int spin_arrow_at(int index, const MenuFrameState &state, float mx,
 			float my, float sx, float sy) const;
@@ -604,8 +600,9 @@ public:
 	// Bind (or clear, with an empty function) the custom-draw handler of the
 	// table at `index`; kept across configure() while the index stays a table.
 	void set_table_cell_painter(int index, MenuTableCellPainter painter);
-	// Non-mutating front-most hit (the pump's claim walk without the state
-	// writes) — editor/preview picking.
+	// The editor's pick: the front-most shown window under the point by its rect
+	// alone, a disabled one or GLB_TABLE included, a spin arrow its list's, a
+	// scrollbar its owner's (hit_walk with `pump` false; no state written).
 	int hit_widget(const MenuFrameState &state, float mx, float my, float sx,
 			float sy) const;
 	// The multiline edit's wrapped-line counts at scale 1.0 — the scroll
@@ -641,36 +638,43 @@ public:
 	bool solve_local_rect(int index, const mnu::Position &candidate, mnu::RectEdges *out) const;
 
 	// The witnessed per-frame mouse pump [orig: CUIScene_EndFrame @ 0x63e600 ->
-	// CWnd_ProcessMouseEvent @ 0x647a00 (vtable+20)]: ONE widget claims
-	// the mouse per frame — front-most = last drawn (the reverse sibling walk
-	// + the per-frame claim scene+16; equivalently the LAST hit of the
-	// forward draw walk). A disabled claimant keeps visual state 1 (no
-	// hover/press); hit + button down -> pressed (3); hit + button up ->
-	// hovered (2); every other row's hover/press clears (0). Hidden subtrees
-	// never hit. The mouse is RAW screen coordinates against the scaled
-	// rects. While a press holds the mouse capture (`capture`, MenuClickLatch)
-	// no window but the captured one takes the claim, and it takes it while its
-	// own rect holds the point, its children not consulted (a spin arrow's, the
-	// arrow's rect) [orig: CWnd_ProcessMouseEvent @ 0x647a88..0x647b02]. The
-	// cursor rides back for the unscaled cursor pass: the claimed widget's own
-	// CURSOR else its root window's (a spin arrow's own when the claim is over
-	// one), counting only a cursor whose texture loaded, else (nothing claimed
-	// or no cursor) the captured window's the same way, then the capturing
-	// scroll part owner's, else the first root window with one [orig:
+	// CWnd_ProcessMouseEvent @ 0x647a00 (vtable+20)]: ONE window claims the
+	// mouse per frame, the claim walk's (hit_walk): the front-most window whose
+	// own rect holds the point and none of whose shown children's subtrees does,
+	// visible in the hierarchy (a disabled window never claims and a window
+	// behind it may; GLB_TABLE never claims: D-MNU-33). Claim + button down ->
+	// pressed (3); claim + button up -> hovered (2); every other row's
+	// hover/press clears (0). Hidden subtrees never hit. The mouse is RAW screen
+	// coordinates against the scaled rects. While a press holds the mouse capture
+	// (`capture`, MenuClickLatch) no window but the captured one takes the claim,
+	// and it takes it while its own rect holds the point, its children not
+	// consulted (a spin arrow's or a scrollbar window's, its own rect) [orig:
+	// CWnd_ProcessMouseEvent @ 0x647a88..0x647b02]; a shuttle holding it drags
+	// first. The cursor rides back for the unscaled cursor pass: the claimed
+	// widget's own CURSOR else its root window's (a spin arrow's own when the
+	// claim is over one; a scrollbar window's, its root's), counting only a cursor
+	// whose texture loaded, else (nothing claimed or no cursor) the captured
+	// window's the same way, else the first root window with one [orig:
 	// CWnd_ProcessMouseEvent @ 0x647ad0..0x647b09; CUIScene_EndFrame
 	// @ 0x63e600, the capture's cursor @ 0x63e6e3].
 	struct MouseClaim {
-		int hovered = -1;               // claimed widget index; -1 = none
+		int hovered = -1;               // the claimed widget (or its spin arrow's list); -1 = none
 		int spin_part = 0;              // the claimed spin list's arrow (1 up, 2 down)
+		// A scrollbar's window took the claim (menu_click.h): its owner and the part
+		// (kMenuPumpPartScroll .. kMenuPumpPartScrollShuttle); hovered is then -1.
+		int scroll_owner = -1;
+		int scroll_part = 0;
+		// The window the cursor's stamp names (MenuFrameState::cursor_claim and
+		// cursor_spin_part): the widget, else the scrollbar window's owner, with
+		// the part.
+		int stamp_index() const { return scroll_owner >= 0 ? scroll_owner : hovered; }
+		int stamp_part() const { return scroll_owner >= 0 ? scroll_part : spin_part; }
 		int32_t cursor = kMenuTexNone;  // the cursor texture slot
-		// The CScrollWnd interaction result for this sample [orig:
-		// CScrollWnd_HandleEvent @ 0x64d050]: when a scrollbar part owns the
-		// sample (press, latch, or drag capture) scroll_index is the owning
-		// widget — the claim above stays on it, exactly like retail's child
-		// BUTTON capture, so no other widget sees the held samples. A
-		// completed arrow/track/drag step reports the new value (standalone
-		// Scroll: the authored range value; embedded owners: the
-		// first-visible row).
+		// A scroll value the sample changed [orig: CScrollWnd_HandleEvent
+		// @ 0x64d126..0x64d15c, the 0x4000001 with the value]: the widget whose
+		// scrollbar it is (a standalone Scroll's authored-range value; an embedded
+		// owner's first visible row). The open dropdown's pump (pump_popup_mouse)
+		// also names the combo for a sample its scrollbar took.
 		int scroll_index = -1;
 		bool scroll_value_changed = false;
 		int scroll_value = 0;
@@ -679,25 +683,46 @@ public:
 			float mouse_y, bool button_down, float scale_x, float scale_y,
 			const MenuPumpWindow &capture = MenuPumpWindow());
 	// The claim pump_mouse would make at a point, without its state writes (no
-	// scrollbar interaction, no hover or press): the widget the claim walk finds,
-	// the spin arrow under the point and the cursor the claim stamps. What an
-	// embedder that never pumps (the editor's picture) stamps the cursor pass with
-	// (MenuFrameState::cursor_claim).
+	// drag, no hover or press): the window the claim walk finds and the cursor
+	// the claim stamps. What an embedder that never pumps (the editor's picture)
+	// stamps the cursor pass with (MenuFrameState::cursor_claim).
 	MouseClaim claim_at(const MenuFrameState &state, float mouse_x, float mouse_y,
 			float scale_x, float scale_y,
 			const MenuPumpWindow &capture = MenuPumpWindow()) const;
 	// The claim as the click latch reads it (MenuClickLatch::Claim): the window
-	// (none when a scrollbar part owns the sample: the part, a child button of
-	// the scrollbar, is the window the pump holds, never its owner), whether it
-	// is live (visible in the hierarchy; a spin arrow, its list live and the
-	// arrow enabled) and whether a press there takes the capture
-	// (menu_window_captures; a spin arrow's always).
+	// (a widget, its spin arrow, or a scrollbar's window by its owner) and
+	// whether it is live (visible in the hierarchy; a spin arrow, its list live
+	// and the arrow enabled; a scrollbar's window, its owner live).
 	MenuClickLatch::Claim click_claim(const MouseClaim &claim,
 			const MenuFrameState &state) const;
 	// Whether the pump reaches a window of the latch's this sample
-	// (widget_reached; a spin arrow, its list's).
+	// (widget_reached; a spin arrow, its list's; a scrollbar's window, its
+	// owner's while the scrollbar shows).
 	bool pump_window_reached(const MenuPumpWindow &window,
 			const MenuFrameState &state) const;
+	// The press, the left button's down edge, ahead of its sample's pump [orig:
+	// UI_DispatchMouseEvent @ 0x63ab00 -> CWnd_DispatchMouseEventToChildren
+	// @ 0x647900]: the windows its message reaches, front to back, each in turn
+	// until one takes the capture (every shown and enabled window whose own rect
+	// holds the point and none of whose shown children's rects does; with a popup
+	// open, the popup's alone), then the captured window once more for each root
+	// behind the one holding it. A window may appear twice that way. D-MNU-33.
+	std::vector<MenuPumpWindow> press_reach(const MenuFrameState &state, float mouse_x,
+			float mouse_y, float scale_x, float scale_y) const;
+	// The window a press's reach leaves holding the capture (none: no window it
+	// reached captures) [orig: CButtonWnd_HandleNamedEvent @ 0x65839c].
+	MenuPumpWindow press_capture(const std::vector<MenuPumpWindow> &reach) const;
+	// A scrollbar window's own press, one window of a press's reach: the track
+	// pages toward the point and holds nothing; the shuttle anchors its drag; an
+	// arrow does nothing until its click. A value it changes rides `claim`.
+	// False for a window that is not a scrollbar's (its press is the runtime's).
+	bool press_scroll_window(MenuFrameState &io_state, const MenuPumpWindow &window,
+			float mouse_x, float mouse_y, float scale_x, float scale_y, MouseClaim *claim);
+	// A scrollbar window's click (MenuClickLatch::sample's): an arrow steps; the
+	// track's and the shuttle's do nothing here. True for a scrollbar's window
+	// (never its owner's click), false otherwise. D-MNU-32.
+	bool click_scroll_window(MenuFrameState &io_state, const MenuPumpWindow &window,
+			MouseClaim *claim);
 	// The cursor the cursor pass draws over `state` (emit_cursor): the widget
 	// whose CURSOR it is (-1: none, so nothing is drawn: a screen whose windows
 	// name no CURSOR that loads has no pointer), its texture slot and the native
@@ -710,10 +735,11 @@ public:
 		int height = 0;
 	};
 	FrameCursor frame_cursor(const MenuFrameState &state) const;
-	// The open-dropdown sample: the popup's scrollbar interaction only,
-	// restricted to the open combo `index` (the popup-exclusive dispatch
-	// gate). scroll_index >= 0 in the result means the scrollbar owns the
-	// sample and the caller must not treat it as a row hover/pick.
+	// The open-dropdown sample: the dropdown's scrollbar alone, restricted to
+	// the open combo `index` (the popup-exclusive dispatch gate), its windows
+	// by the game's rule (an arrow steps on its click). scroll_index >= 0 in the
+	// result means the scrollbar took the sample and the caller must not treat
+	// it as a row hover/pick.
 	MouseClaim pump_popup_mouse(MenuFrameState &io_state, int index,
 			float mouse_x, float mouse_y, bool button_down, float scale_x,
 			float scale_y);
@@ -825,13 +851,26 @@ private:
 	// The enabled flag the pump reads: the runtime's once written, else the
 	// authored DISABLE.
 	static bool disabled_(const mnu::Window &w, const MenuWidgetState *ws);
+	// A claim of the walk: the widget and the part (menu_click.h MenuPumpWindow).
+	struct HitClaim {
+		int index = -1;
+		int part = 0;
+	};
+	// The claim walk over one window's subtree (`pump` false: the editor's
+	// pick); `enabled` its ancestors' enabled chain; *io_holds set when a shown
+	// window of the subtree holds the point.
 	int hit_walk(int index, int origin_x, int origin_y,
 			const MenuFrameState &state, float mx, float my, float sx,
-			float sy, int *io_hit, int *io_part) const;
+			float sy, bool pump, bool enabled, HitClaim *io_claim, bool *io_holds) const;
 	// hit_walk over every root window in draw order; with an open popup, over
 	// the popup's subtree alone.
 	void hit_roots_(const MenuFrameState &state, float mx, float my, float sx,
-			float sy, int *io_hit, int *io_part) const;
+			float sy, bool pump, HitClaim *io_claim) const;
+	static void fill_claim_(const HitClaim &hit, MouseClaim *claim);
+	// The press's walk down one window (press_reach).
+	void press_walk_(int index, int origin_x, int origin_y, const MenuFrameState &state,
+			float mx, float my, float sx, float sy, std::vector<MenuPumpWindow> *out,
+			MenuPumpWindow *capture) const;
 	const MenuWidgetState *state_for(const MenuFrameState &state,
 			int index) const;
 	// Shared row-height rule (authored MIN_ITEM_HEIGHT wins, else the "W"
@@ -960,7 +999,7 @@ private:
 	// alone, where its own rect (a spin arrow's, the arrow's) holds the point and
 	// the pump reaches it.
 	void capture_hit_(const MenuFrameState &state, const MenuPumpWindow &capture,
-			float mx, float my, float sx, float sy, int *io_hit, int *io_part) const;
+			float mx, float my, float sx, float sy, HitClaim *io_hit) const;
 	int32_t first_root_cursor_() const;
 	int first_root_cursor_owner_() const;
 
@@ -1018,7 +1057,13 @@ private:
 	void emit_item_cell(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s, int color_state, const MenuWidgetState *ws);
 	void emit_list_rows(const WidgetNode &node, const mnu::RectEdges &rect,
-			const WalkScale &s, const MenuWidgetState *ws, int scrollbar_width);
+			const WalkScale &s, const MenuWidgetState *ws);
+	// One list row's text: the row rect, the row's justify word (WidgetNode::RowLayout::align)
+	// and text offsets, the list's EDGE and its edge pad (+0xFF8: a combo dropdown's
+	// sb_edge_pad while its scrollbar shows, else 0).
+	void emit_list_row_text_(const WidgetNode &node, const mnu::RectEdges &row,
+			const std::string &text, int align, int offset_x, int offset_y, int edge,
+			int edge_pad, const WalkScale &s, uint32_t color);
 	void emit_combo_popup(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s, const MenuWidgetState *ws);
 	// Combos with an open dropdown collected during the walk; their popups
@@ -1036,6 +1081,7 @@ private:
 			int fallback_height, int fallback_width,
 			mnu::RectEdges *out) const;
 	struct ScrollParts {
+		mnu::RectEdges window{}; // the scroll window: the arrows and the track between
 		mnu::RectEdges track{};
 		mnu::RectEdges up{};
 		mnu::RectEdges down{};
@@ -1060,24 +1106,33 @@ private:
 	void emit_row_scrollbar_(int index, const WidgetNode &node,
 			const mnu::RectEdges &rect, const WalkScale &s,
 			const MenuFrameState &state, const MenuWidgetState *ws);
-	// The width a list's rows leave its scrollbar: the bar's own while it shows (the rows
-	// overflow), else 0.
-	int row_scrollbar_width_(int index, const WidgetNode &node, const mnu::RectEdges &rect,
-			const MenuFrameState &state) const;
-	// The CScrollWnd interaction pump ahead of the claim walk (compiler
-	// runtime state, like edit_scroll_): the shuttle drag capture and the
-	// pressed-part latch until release
-	// [orig: CScrollWnd_HandleEvent @ 0x64d050].
-	struct ScrollPump {
-		bool button_was_down = false;
-		int captured_index = -1;  // shuttle drag capture owner
-		int drag_anchor = 0;
-		int latched_index = -1;   // arrow/track press owner until release
+	// The scrollbar's interaction [orig: CScrollWnd_HandleEvent @ 0x64d050]
+	// (compiler runtime state, like edit_scroll_): the shuttle press's drag
+	// anchor, the button at the pump's last sample (a press's own sample is no
+	// move), and the open dropdown's scrollbar window its press holds.
+	struct ScrollDrag {
+		int index = -1;
+		int anchor = 0;
 	};
-	ScrollPump scroll_pump_;
-	bool scroll_pump_mouse_(MenuFrameState &io_state, float mouse_x,
-			float mouse_y, bool button_down, float scale_x, float scale_y,
-			MouseClaim *claim, int restrict_index = -1);
+	ScrollDrag scroll_drag_;
+	bool pump_down_ = false;
+	struct PopupScroll {
+		bool down = false;
+		int part = 0;       // the held window (menu_click.h), 0 none
+		bool under = false; // the mouse over it at the last sample
+	};
+	PopupScroll popup_scroll_;
+	// The scrollbar windows of a widget the pump and the press reach (a SCROLL's
+	// own, a LIST's, LAN_LIST's or TABLE's shown scroll window), solved.
+	bool scroll_windows_(int index, const MenuFrameState &state, ScrollParts *out) const;
+	// The scrollbar's window under the point, front first: kMenuPumpPartScrollDown,
+	// _Up, _Shuttle, else kMenuPumpPartScroll (the scroll window's track), 0 none.
+	static int scroll_window_part_(const ScrollParts &parts, float mx, float my, float sx,
+			float sy);
+	int scroll_value_(int index, const MenuFrameState &state) const;
+	void apply_scroll_value_(MenuFrameState &io_state, int index, int value, MouseClaim *claim);
+	void drag_scroll_shuttle_(MenuFrameState &io_state, const MenuPumpWindow &capture,
+			float mouse_x, float mouse_y, float scale_x, float scale_y, MouseClaim *claim);
 	void emit_scrollbar(const WidgetNode &node, ScrollbarKind kind,
 			const mnu::RectEdges &rect, const WalkScale &s,
 			int range_min, int range_max, int page, int value,

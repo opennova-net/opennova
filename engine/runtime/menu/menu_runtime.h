@@ -26,6 +26,7 @@
 //  UI_DispatchKeyboardEventToChildren @0x63ad10]
 
 #include <formats/mnu/mnu.h>
+#include <runtime/menu/menu_click.h>
 #include <runtime/menu/menu_sound.h>
 #include <runtime/menu/menu_table.h>
 #include <runtime/menu/menu_table_row.h>
@@ -141,10 +142,14 @@ public:
 	// Surface pixels per design unit (1,1 before the surface has a size).
 	virtual void design_scale(float &sx, float &sy) const = 0;
 
-	// The per-sample pump: returns the claimed widget index (-1 none);
-	// `scroll_owned` reports a sample a scrollbar part took (its press never
-	// reaches the owner widget).
-	virtual int process_mouse(float x, float y, bool button_down, bool &scroll_owned) = 0;
+	// The press, the left button's down edge, ahead of its sample's pump: the windows its message
+	// reaches front to back (MenuFrameCompiler::press_reach), the capture taken
+	// (MenuClickLatch::press) and the scrollbar windows' own press run; the runtime runs the
+	// widgets' (press_).
+	virtual std::vector<MenuPumpWindow> press_mouse(float x, float y) = 0;
+	// The per-sample pump: returns the claimed widget index (-1 none: nothing, or a scrollbar's
+	// window).
+	virtual int process_mouse(float x, float y, bool button_down) = 0;
 	virtual bool process_popup_mouse(int index, float x, float y, bool button_down) = 0;
 	virtual bool process_mouse_wheel(float x, float y, int steps) = 0;
 	virtual void set_cursor_state(bool visible, float x, float y) = 0;
@@ -620,9 +625,11 @@ private:
 	void sample_sounds_(int claim, bool button_down);
 	bool sound_reached_(int id) const;
 	// The press (WM_LBUTTONDOWN) of the widget at `index`.
-	void press_(int index, float x, float y, uint32_t now_ms);
-	void list_press_(int id, int row, uint32_t now_ms);
-	void table_press_(int id, int row, int column, uint32_t now_ms);
+	// A widget's own press; `again` the captured window's press a root behind its own hands it
+	// (MenuFrameCompiler::press_reach), the same message: a double click's form is the first's.
+	void press_(int index, float x, float y, uint32_t now_ms, bool again);
+	void list_press_(int id, int row, uint32_t now_ms, bool again);
+	void table_press_(int id, int row, int column, uint32_t now_ms, bool again);
 	bool register_click_(int id, int row, uint32_t now_ms);
 	// A spin arrow's click: its own SELECTED sound and ACTION rows, then the spin
 	// list's step [orig: CSpinListWnd_HandleEvent @ 0x64c370 on
@@ -687,6 +694,7 @@ private:
 	int last_click_id_ = -1;
 	int last_click_row_ = -1;
 	uint32_t last_click_ms_ = 0;
+	bool last_click_double_ = false; // the last press's form, which a press handed again keeps
 };
 
 } // namespace opennova::menu
