@@ -4,17 +4,17 @@
 // read moving its stamp, a menu's options; Update for a model's options and an edit only its overlays
 // show; Clear for a document the game could not read, kept so until it changes (the failure latch);
 // what changed in the document (ChangeClass None, Changed, Unknown) read once a follow. The one
-// preview clock. Two menus keep their own options; the device cache gives up its least recently used
-// device (four held), its viewport keeping its state (a camera) for the next, which makes the picture
-// again. The envelope and its pages. A SetViewport, a drag and a command through a real session, the
-// refused answering false. One undo step per gesture through a real session: a menu drag of four
-// samples, a drag of three selected windows moving all three, a gesture its canvas ends by not
-// drawing, a model marker's drag (two selected markers moving as one). S13 V7: a SetViewport with no
-// path the active document's; a hit naming its viewport. An edit in a viewport over the wire
-// (edit_in_viewport) is viewport_wire_test.cpp's. S13 V6: devices that build their pictures over
-// frames (loading, then ready; a newer Rebuild cancelling one by generation; an Update folded into a
-// build; a Clear and a failure mid-build; the frame's budget, shared by the builds in flight), and the
-// follow's comparison of a file a build read between two follows.
+// preview clock (a run after a seek heard from where the seek put it). Two menus keep their own
+// options; the device cache gives up its least recently used device (four held), its viewport keeping
+// its state (a camera) for the next, which makes the picture again. The envelope and its pages. A
+// SetViewport, a drag and a command through a real session, the refused answering false. One undo step
+// per gesture through a real session: a menu drag of four samples, a drag of three selected windows
+// moving all three, a gesture its canvas ends by not drawing, a model marker's drag (two selected
+// markers moving as one). S13 V7: a SetViewport with no path the active document's; a hit naming its
+// viewport. An edit in a viewport over the wire (edit_in_viewport) is viewport_wire_test.cpp's. S13 V6:
+// devices that build their pictures over frames (loading, then ready; a newer Rebuild cancelling one by
+// generation; an Update folded into a build; a Clear and a failure mid-build; the frame's budget, shared
+// by the builds in flight), and the follow's comparison of a file a build read between two follows.
 //
 // S13 V8, change sets: a menu's edit of a later screen is Keep (no configure), of the shown screen's
 // window a Rebuild; a screen before the shown one feeds it (a texture's first load fixes the band a
@@ -554,6 +554,15 @@ static int test_clock() {
 	TEST_EXPECT(clock.ticks() == INT32_MAX);
 	clock.seek_ticks(-5);
 	TEST_EXPECT(clock.ticks() == 0);
+	// A reader of its runs (a viewport's sounds) hears from where it read last, or, after a seek, from where the
+	// seek put the clock: a Play from tick 12 whose first frame ran 5 ticks is heard from 12, not from 17.
+	uint64_t seen = clock.tick_seeks();
+	TEST_EXPECT(clock.heard_from(40, seen) == 40 && seen == clock.tick_seeks());
+	clock.seek_ticks(30);
+	clock.seek_ticks(12);
+	clock.advance(5.0 / 62.5);
+	TEST_EXPECT(clock.ticks() >= 16 && clock.heard_from(-1, seen) == 12 && seen == clock.tick_seeks());
+	TEST_EXPECT(clock.heard_from(17, seen) == 17);
 
 	editor_test::TempProjectDir dir("opennova_editor_viewport_clock");
 	NoProcess platform;

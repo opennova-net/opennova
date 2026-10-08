@@ -10,10 +10,11 @@
 // none); the character seeded and one chosen, its team; the actions' runs (FIRE's soundsetend on its
 // first tick, RELOAD's soundset as it begins and soundsetend 20 ticks on, the ticks the channel steps the
 // clip, the action handed to); the legs fired as the clock runs, again as a repeated one-shot plays again,
-// muted, handed to the Shell; a first-person clip's events not fired and its marks refused; a leg pressed
-// (play_sound {leg}) and its refusal; the eye: a posed camera standing where the game's presenter stands
-// the view model (renderer::fp_viewmodel_pose) with the 4:3 drop, refusing the camera and Frame; a map an
-// item pairs, and a model chosen, show no first person; the options' wire and refusals.
+// the tick-0 shot heard however many ticks the Play's first frame runs, muted, handed to the Shell; a
+// first-person clip's events not fired and its marks refused; a leg pressed (play_sound {leg}) and its
+// refusal; the eye: a posed camera standing where the game's presenter stands the view model
+// (renderer::fp_viewmodel_pose) with the 4:3 drop, refusing the camera and Frame; a map an item pairs, and
+// a model chosen, show no first person; the options' wire and refusals.
 #include <cmath>
 #include <cstdio>
 #include <iterator>
@@ -324,6 +325,10 @@ int test_actions_and_their_sets() {
 	const JsonValue *wire = shown.get("body")->get("animation")->get("sounds_fired");
 	TEST_EXPECT(wire && !wire->array.empty() && wire->array.back().get_string("action", "") == "fire" &&
 	            wire->array.back().get_string("leg", "") == "end");
+	// The Play's first frame running four ticks at once (a slow frame; a 60 Hz frame runs one): the shot still
+	// heard on tick 0, the run from where the Play's seek put the clock heard whole.
+	fired = project.run(60, 4.0);
+	TEST_EXPECT(fired.size() == 2 && fired[0].tick == 0 && fired[0].set == "GS_TEST" && fired[1].tick == 48);
 	// Muted: fired and said, not handed over.
 	TEST_EXPECT(project.set(R"({"options": {"sound": {"mute": true}}})"));
 	fired = project.run(4);
