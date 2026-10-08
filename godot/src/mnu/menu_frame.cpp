@@ -271,7 +271,7 @@ bool MenuFrame::configure_screen(const opennova::mnu::Document *p_document,
 	configured_ = false;
 	state_ = opennova::menu::MenuFrameState{};
 	cursor_slot_ = -1;
-	click_.pressed = -1;
+	click_.reset();
 	++configure_count_;
 	if (p_document == nullptr) {
 		clear_screen();
@@ -289,7 +289,7 @@ void MenuFrame::clear_screen() {
 	configured_ = false;
 	state_ = opennova::menu::MenuFrameState{};
 	cursor_slot_ = -1;
-	click_.pressed = -1;
+	click_.reset();
 	++configure_count_;
 	assets_.clear(compiler_, texture_store_);
 	files_ = nullptr;
@@ -802,17 +802,23 @@ int MenuFrame::process_mouse(const Vector2 &p_position, bool p_button_down) {
 		return -1;
 	}
 	const Vector2 scale = design_scale_();
+	// The claim honors a press's capture, which the release lets go first; then
+	// the click: the claim let go over that was held the sample before
+	// (engine menu_click.h, D-MNU-30).
+	const opennova::menu::MenuPumpWindow capture = click_.capture_for(p_button_down);
 	const opennova::menu::MenuFrameCompiler::MouseClaim claim =
 			compiler_.pump_mouse(state_, p_position.x, p_position.y,
-					p_button_down, scale.x, scale.y);
+					p_button_down, scale.x, scale.y, capture);
 	state_.cursor_x = p_position.x;
 	state_.cursor_y = p_position.y;
 	cursor_slot_ = claim.cursor;
-	// The click: the release edge over the widget the press edge claimed
-	// (engine MenuClickLatch; a press a scrollbar part took never arms one).
-	const int clicked = click_.sample(claim.hovered, p_button_down, claim.scroll_index < 0);
-	if (clicked >= 0) {
-		emit_signal("widget_clicked", clicked);
+	const opennova::menu::MenuPumpWindow clicked = click_.sample(
+			compiler_.click_claim(claim, state_), p_button_down,
+			[this](const opennova::menu::MenuPumpWindow &p_window) {
+				return compiler_.pump_window_reached(p_window, state_);
+			});
+	if (clicked.valid()) {
+		emit_signal("widget_clicked", clicked.index, clicked.part);
 	}
 	last_sample_scrolled_ = claim.scroll_index >= 0;
 	if (claim.scroll_value_changed) {
@@ -829,6 +835,9 @@ bool MenuFrame::process_popup_mouse(int p_index, const Vector2 &p_position,
 		return false;
 	}
 	const Vector2 scale = design_scale_();
+	// The dropdown has the mouse: a press it takes holds the capture until the
+	// release (engine MenuClickLatch::dropdown_sample).
+	click_.dropdown_sample(p_index, p_button_down);
 	const opennova::menu::MenuFrameCompiler::MouseClaim claim =
 			compiler_.pump_popup_mouse(state_, p_index, p_position.x,
 					p_position.y, p_button_down, scale.x, scale.y);
@@ -879,8 +888,8 @@ void MenuFrame::place_cursor(bool p_visible, const Vector2 &p_position) {
 	int32_t spin_part = 0;
 	if (p_visible && is_configured()) {
 		const Vector2 scale = design_scale_();
-		const opennova::menu::MenuFrameCompiler::MouseClaim at =
-				compiler_.claim_at(state_, p_position.x, p_position.y, scale.x, scale.y);
+		const opennova::menu::MenuFrameCompiler::MouseClaim at = compiler_.claim_at(
+				state_, p_position.x, p_position.y, scale.x, scale.y, click_.captured());
 		claim = at.hovered;
 		spin_part = at.spin_part;
 	}
@@ -1191,7 +1200,8 @@ void MenuFrame::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("widget_index", "name"),
 			&MenuFrame::widget_index);
 	ADD_SIGNAL(MethodInfo("widget_clicked",
-			PropertyInfo(Variant::INT, "index")));
+			PropertyInfo(Variant::INT, "index"),
+			PropertyInfo(Variant::INT, "part")));
 	// The engine pump's CScrollWnd interaction result: a standalone Scroll's
 	// authored-range value, or an embedded row owner's new first-visible row.
 	ADD_SIGNAL(MethodInfo("scroll_value_changed",

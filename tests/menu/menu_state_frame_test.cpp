@@ -86,7 +86,7 @@ struct Run {
 			compiler.configure(found);
 			return found != nullptr;
 		});
-		frame.set_clicked([this](int index) { rt.on_widget_clicked(index); });
+		frame.set_clicked([this](int index, int part) { rt.on_widget_clicked(index, part); });
 		frame.set_scrolled([this](int index, int value) { rt.on_frame_scroll_value(index, value); });
 		rt.set_frame(&frame);
 		rt.set_sink([this](const MenuEvent &e) { events.push_back(e); });

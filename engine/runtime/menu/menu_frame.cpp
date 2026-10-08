@@ -1436,31 +1436,41 @@ int32_t MenuFrameCompiler::first_root_cursor_() const {
 // document order that has one]. A spin arrow is its own button: over one, the
 // claim stamps the arrow's own-or-root, not the list's [orig:
 // CSpinListWnd_CreateUpDownChildren @ 0x64b8b0 attaches the arrows as child
-// windows the pump claims]. The compiler's capture is the scroll pump's part
+// windows the pump claims]. The capture is a press's (MenuClickLatch: the window
+// it captured, a spin arrow's the arrow; an open dropdown's list, a child of the
+// combo with no CURSOR of its own, its root's), else the scroll pump's part
 // capture (retail's child-button capture of the scrollbar parts).
-int MenuFrameCompiler::claim_cursor_owner_(int hovered, int spin_part) const {
-	int claimed = hovered;
-	if (hovered >= 0 && hovered < static_cast<int>(nodes_.size()) && spin_part != 0) {
-		const WidgetNode &list = nodes_[static_cast<size_t>(hovered)];
-		const int arrow = spin_part == 1 ? list.spin_up : spin_part == 2 ? list.spin_down : -1;
-		if (arrow >= 0) {
-			claimed = arrow;
+int MenuFrameCompiler::claim_cursor_owner_(int hovered, int spin_part, int capture,
+		int capture_part) const {
+	const auto window_of = [this](int index, int part) {
+		if (index < 0 || index >= static_cast<int>(nodes_.size())) {
+			return index;
 		}
-	}
-	const int stamped = inherited_cursor_owner_(claimed);
+		const WidgetNode &node = nodes_[static_cast<size_t>(index)];
+		if (part == 1 || part == 2) {
+			const int arrow = part == 1 ? node.spin_up : node.spin_down;
+			return arrow >= 0 ? arrow : index;
+		}
+		return part == kMenuPumpPartDropdown ? node.root : index;
+	};
+	const int stamped = inherited_cursor_owner_(window_of(hovered, spin_part));
 	if (stamped >= 0) {
 		return stamped;
 	}
-	const int capture = scroll_pump_.captured_index >= 0 ? scroll_pump_.captured_index
-												  : scroll_pump_.latched_index;
 	if (capture >= 0 && capture < static_cast<int>(nodes_.size())) {
-		return inherited_cursor_owner_(capture);
+		return inherited_cursor_owner_(window_of(capture, capture_part));
+	}
+	const int scroll = scroll_pump_.captured_index >= 0 ? scroll_pump_.captured_index
+												 : scroll_pump_.latched_index;
+	if (scroll >= 0 && scroll < static_cast<int>(nodes_.size())) {
+		return inherited_cursor_owner_(scroll);
 	}
 	return first_root_cursor_owner_();
 }
 
-int32_t MenuFrameCompiler::claim_cursor_(int hovered, int spin_part) const {
-	const int owner = claim_cursor_owner_(hovered, spin_part);
+int32_t MenuFrameCompiler::claim_cursor_(int hovered, int spin_part, int capture,
+		int capture_part) const {
+	const int owner = claim_cursor_owner_(hovered, spin_part, capture, capture_part);
 	return owner < 0 ? kMenuTexNone : nodes_[static_cast<size_t>(owner)].cursor;
 }
 
@@ -1474,7 +1484,8 @@ MenuFrameCompiler::FrameCursor MenuFrameCompiler::frame_cursor(const MenuFrameSt
 	const int claim = state.cursor_claim >= 0 && state.cursor_claim < static_cast<int>(nodes_.size())
 			? state.cursor_claim
 			: -1;
-	out.owner = claim_cursor_owner_(claim, claim >= 0 ? state.cursor_spin_part : 0);
+	out.owner = claim_cursor_owner_(claim, claim >= 0 ? state.cursor_spin_part : 0,
+			state.cursor_capture, state.cursor_capture_part);
 	if (out.owner < 0) {
 		return out;
 	}
@@ -1555,7 +1566,8 @@ int MenuFrameCompiler::hit_walk(int index, int origin_x, int origin_y,
 
 MenuFrameCompiler::MouseClaim MenuFrameCompiler::pump_mouse(
 		MenuFrameState &io_state, float mouse_x, float mouse_y,
-		bool button_down, float scale_x, float scale_y) {
+		bool button_down, float scale_x, float scale_y,
+		const MenuPumpWindow &capture) {
 	MouseClaim claim;
 	if (screen_ == nullptr || nodes_.empty()) {
 		return claim;
@@ -1564,10 +1576,14 @@ MenuFrameCompiler::MouseClaim MenuFrameCompiler::pump_mouse(
 	int part = 0;
 	// The scrollbar interaction runs ahead of the claim walk: a pressed part
 	// owns every sample until release (retail's child-window capture), so the
-	// walk never turns a scrollbar press into another widget's press.
+	// walk never turns a scrollbar press into another widget's press. A press's
+	// capture holds the claim to the captured window [orig:
+	// CWnd_ProcessMouseEvent @ 0x647a88..0x647b02].
 	if (scroll_pump_mouse_(io_state, mouse_x, mouse_y, button_down, scale_x,
 				scale_y, &claim)) {
 		hit = claim.hovered;
+	} else if (capture.valid()) {
+		capture_hit_(io_state, capture, mouse_x, mouse_y, scale_x, scale_y, &hit, &part);
 	} else {
 		hit_roots_(io_state, mouse_x, mouse_y, scale_x, scale_y, &hit, &part);
 	}
@@ -1578,11 +1594,13 @@ MenuFrameCompiler::MouseClaim MenuFrameCompiler::pump_mouse(
 	}
 	claim.hovered = hit;
 	claim.spin_part = part;
-	claim.cursor = claim_cursor_(hit, part);
+	claim.cursor = claim_cursor_(hit, part, capture.index, capture.part);
 	// The stamp the cursor pass reads, a disabled claimant's included [orig:
-	// CWnd_ProcessMouseEvent @ 0x647b09].
+	// CWnd_ProcessMouseEvent @ 0x647b09], and the capture it falls back to.
 	io_state.cursor_claim = hit;
 	io_state.cursor_spin_part = part;
+	io_state.cursor_capture = capture.index;
+	io_state.cursor_capture_part = capture.part;
 	if (hit < 0) {
 		return claim;
 	}
