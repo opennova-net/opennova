@@ -1,7 +1,6 @@
 #pragma once
 
 #include <godot_cpp/classes/array_mesh.hpp>
-#include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/variant/color.hpp>
@@ -15,7 +14,8 @@ namespace godot {
 // The editor's preview background (the Preview background preference, editor/session/preview_background.h) as a
 // preview's device draws it behind its picture: the editor's tool, not the game's look. Each colour goes in as it
 // shows on screen: a 2D picture draws its numbers as they are, and a 3D picture's are the gamma-domain numbers
-// every engine shader writes, which its one display decode (render/frame_fx.h, DisplayDecode) shows as they are.
+// every engine shader writes, which its one display decode (render/frame_fx.h, DisplayDecode) shows as they are,
+// particles drawing or not (the particle renderer composes its passes around the decode).
 // Dark leaves each picture's own (a 3D picture's clear colour, `own` for a 2D one).
 
 // The background's uniforms and `vec3 preview_backdrop(float down, vec2 pixel)` (`down` 0 at the picture's top
@@ -28,12 +28,6 @@ extern const char *const kPreviewBackdropCode;
 // view's clear colour shows, as before the preference). Added to the SubViewport by the applier that owns it.
 MeshInstance3D *make_preview_backdrop_3d();
 void set_preview_backdrop(MeshInstance3D &backdrop, opennova::editor::PreviewBackground background);
-// The quad's colours shown as they are whether or not the view's one display decode runs, followed each frame: the
-// decode DisplayDecode installs on the view's scenario stands while `camera` has no compositor of its own, and a
-// compositor the camera takes (the particle renderer's, composed around the WorldEnvironment's chain: none in a
-// preview with no WorldEnvironment) holds it or not; where it does not, the view shows its target encoded once, so
-// the quad writes its colours decoded.
-void follow_display_decode(MeshInstance3D &backdrop, const Camera3D *camera);
 
 // A 2D picture's background over a whole ColorRect (the HUD's): its material, `own` the colour Dark draws.
 Ref<ShaderMaterial> make_preview_backdrop_canvas(const Color &own);
