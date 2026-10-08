@@ -57,6 +57,7 @@
 #include <editor/preview/preview_clock.h>
 #include <editor/preview/viewport_json.h>
 #include <editor/preview/viewport_model.h>
+#include <editor/preview/viewport_kinds.h>
 #include <editor/preview/viewports.h>
 #include <editor/session/editor_queries.h>
 #include <editor/session/preferences_store.h>
@@ -2322,8 +2323,24 @@ static int test_scene_state_arbitration() {
 	return 0;
 }
 
+// The kinds that draw the editor's preview background (the Preview background preference): the previews of the
+// project's own data, the model's (a clip's and an animation table's too), the texture's, the effect's, the HUD's and
+// the definition's; never a picture of the game's own sky or screen (the menu's, the mission's, the environment's,
+// the terrain's) nor the script device.
+static int test_backdrop_kinds() {
+	std::vector<std::string> drawn;
+	for (size_t k = 0; k < kViewportKindCount; ++k)
+		if (viewport_kind_row(static_cast<ViewportKind>(k)).backdrop)
+			drawn.push_back(viewport_kind_token(static_cast<ViewportKind>(k)));
+	TEST_EXPECT(drawn == std::vector<std::string>({ "model", "texture", "effect", "hud", "definition" }));
+	TEST_EXPECT(preview_kind_of(DocumentTypeId::Animation) == ViewportKind::Model &&
+	            preview_kind_of(DocumentTypeId::AnimationMap) == ViewportKind::Model);
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
+	TEST_EXPECT(test_backdrop_kinds() == 0);
 	TEST_EXPECT(test_scene_state_arbitration() == 0);
 	TEST_EXPECT(test_kind_limit() == 0);
 	TEST_EXPECT(test_mission_devices() == 0);

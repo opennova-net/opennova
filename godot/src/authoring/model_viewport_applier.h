@@ -1,6 +1,7 @@
 #pragma once
 
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 
 #include <array>
@@ -72,6 +73,8 @@ public:
 			opennova::editor::ViewportDeviceReport &report) override;
 	void tick(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) override;
 	void resize(int, int) override {}
+	// The editor's preview background behind the model.
+	void background(opennova::editor::PreviewBackground background) override;
 
 	// Its nodes, for the parity tests: the camera, the model and the first-person arms.
 	Camera3D *camera() const { return camera_; }
@@ -131,6 +134,7 @@ private:
 
 	SubViewport *viewport_ = nullptr;
 	Node3D *root_ = nullptr;
+	MeshInstance3D *backdrop_ = nullptr; // the editor's preview background (authoring/preview_backdrop)
 	MissionEnvironment *environment_ = nullptr;
 	Camera3D *camera_ = nullptr;
 	ObjectModel *object_ = nullptr;

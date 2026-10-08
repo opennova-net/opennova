@@ -8,6 +8,7 @@
 #include <algorithm>
 
 #include <editor/preview/viewport_model.h>
+#include <editor/session/view/session_view.h>
 
 #include "env/mission_environment.h"
 #include "env/water.h"
@@ -139,6 +140,11 @@ void ViewportDevice::take(opennova::editor::ViewportAction action, const opennov
 	// run's, its window hidden), unless it holds a picture a build or a failure keeps.
 	const uint64_t frame = frame_now();
 	if (drawn_ == 0 && !(keeps_last_() && rendered_)) size_(model.state().width, model.state().height);
+	// The editor's preview background, live: at the first take, and whenever the preference changes.
+	if (int(view.project.preview_background) != background_) {
+		background_ = int(view.project.preview_background);
+		applier_->background(view.project.preview_background);
+	}
 	switch (action) {
 	case opennova::editor::ViewportAction::Rebuild: {
 		// The build of the viewport's newest generation: one in flight dropped (the applier's rebuild
