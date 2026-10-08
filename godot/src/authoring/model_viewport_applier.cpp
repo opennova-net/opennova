@@ -393,7 +393,6 @@ void ModelViewportApplier::apply(const opennova::editor::ViewportModel &viewport
 }
 
 void ModelViewportApplier::tick(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &clock) {
-	follow_display_decode(*backdrop_, camera_);
 	if (!build_) {
 		apply_registers_(viewport, clock);
 		play_clip_(viewport, clock);
