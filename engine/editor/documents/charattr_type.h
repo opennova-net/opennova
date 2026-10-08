@@ -34,7 +34,8 @@ void charattr_references(const TextDocument &document, std::vector<TextReference
 // meant to be read, which charattr.unread_section says.
 void charattr_idle_lines(const TextDocument &document, std::vector<size_t> &line_starts);
 
-// All listed (none refuses a build: the game reads what it can of the file and goes on).
+// All listed (none refuses a build: the game reads what it can of the file and goes on). A file past the
+// ConfigFile reader's pool is the core document.config_overrun's (documents/config_overrun.h), which refuses one.
 enum class CharAttrFinding {
 	// A [CHARACTERn] the game never reads: after the first class the file lacks, a second of a label, or
 	// a section of no class's label.
