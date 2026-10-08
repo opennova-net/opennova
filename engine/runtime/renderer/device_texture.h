@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include <runtime/renderer/texture_dxt.h>
 
@@ -95,6 +96,25 @@ uint64_t texture_stat_bytes(uint32_t width, uint32_t height, DeviceTextureFormat
 // [orig: GTexture_CreateFromPixelData_0 @ 0x687785..0x68781A].
 DeviceTexture pixel_device_texture(uint32_t width, uint32_t height, uint32_t flags,
 		uint32_t max_side = kReferenceMaxTextureSide);
+
+// One level of a device texture as its texels read back: RGBA8, row-major.
+struct DeviceTextureLevel {
+	uint32_t width = 0, height = 0;
+	std::vector<uint8_t> rgba;
+};
+
+// The levels of the device texture the game builds from `width` x `height` RGBA8 pixels under
+// `flags`, as their texels decode: halved as pixel_texture_halvings asks (each halving
+// GTexture_Downsample2x2_RGBA8), in the format select_texture_dxt_format picks for `caps`, with
+// texture_level_count's levels over the halved sides (at most `level_limit` of them when it is not 0).
+// An A8R8G8B8 texture's level 0 is the halved pixels and every later level D3DX's box filter of the
+// bytes the level before was stored as; a DXT texture's levels are build_dxt_texture_levels' blocks,
+// decoded [orig: GTexture_CreateFromPixelData_0 @ 0x687717..0x687766 (the format), @ 0x687785 (the
+// halvings), @ 0x6877BA..0x687801 (the count), @ 0x6878A0 (level 0, D3DXLoadSurfaceFromMemory),
+// @ 0x6878B5..0x6878BE (D3DXFilterTexture, D3DX_FILTER_BOX, each level from the one before)].
+std::vector<DeviceTextureLevel> pixel_device_texture_levels(const uint8_t *rgba, uint32_t width,
+		uint32_t height, uint32_t flags, const TextureDxtCaps &caps = kReferenceTextureDxtCaps,
+		uint32_t level_limit = 0, uint32_t max_side = kReferenceMaxTextureSide);
 
 // What a DDS file states of itself, as GTexture_InitFromMemory reads it.
 struct DdsSource {

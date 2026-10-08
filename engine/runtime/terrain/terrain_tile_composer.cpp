@@ -3,6 +3,8 @@
 // [orig: PolyTrn_RenderTile @ 0x60DA70; tile overlay submission
 // PolyTrn_DrawTileOverlayQuad @ 0x604700; docs/tiles/til-re.md]
 
+#include <runtime/renderer/device_texture.h>
+#include <runtime/renderer/texture_compression.h>
 #include <runtime/renderer/texture_dxt.h>
 #include <runtime/terrain/row_stripes.h>
 
@@ -155,32 +157,98 @@ std::vector<Rgba8Image> retail_box_levels(const Rgba8Image &base) {
 	return levels;
 }
 
+bool power_of_two(uint32_t value) {
+	return value != 0 && (value & (value - 1)) == 0;
+}
+
+// A quadrant texture's levels as the device reads them back; a synthetic
+// texture whose sides are not powers of two keeps its single base level.
+std::vector<Rgba8Image> quadrant_device_levels(const Rgba8Image &base,
+		uint32_t creation_flags, uint32_t level_limit = 0) {
+	std::vector<Rgba8Image> levels;
+	if (!base.is_valid()) return levels;
+	if (!power_of_two(base.width) || !power_of_two(base.height)) {
+		levels.push_back(base);
+		return levels;
+	}
+	for (renderer::DeviceTextureLevel &level : renderer::pixel_device_texture_levels(
+				 base.pixels.data(), base.width, base.height, creation_flags,
+				 renderer::kReferenceTextureDxtCaps, level_limit)) {
+		Rgba8Image image;
+		image.width = level.width;
+		image.height = level.height;
+		image.pixels = std::move(level.rgba);
+		levels.push_back(std::move(image));
+	}
+	return levels;
+}
+
+Rgba8Image quadrant_block(const Rgba8Image &atlas, int quadrant) {
+	const uint32_t half_width = atlas.width / 2;
+	const uint32_t half_height = atlas.height / 2;
+	const uint32_t origin_x = (quadrant >> 1) * half_width;
+	const uint32_t origin_y = (quadrant & 1) * half_height;
+	Rgba8Image block;
+	block.width = half_width;
+	block.height = half_height;
+	block.pixels.resize(static_cast<size_t>(half_width) * half_height * 4u);
+	for (uint32_t row = 0; row < half_height; ++row) {
+		const auto source = atlas.pixels.begin() +
+				4u * (static_cast<size_t>(origin_y + row) * atlas.width + origin_x);
+		std::copy(source, source + 4u * half_width,
+				block.pixels.begin() + 4u * static_cast<size_t>(row) * half_width);
+	}
+	return block;
+}
+
 } // namespace
 
 bool TerrainTileQuadrantSource::is_valid() const noexcept {
 	return std::all_of(quadrants.begin(), quadrants.end(), valid_chain);
 }
 
+uint32_t terrain_colormap_quadrant_flags(int32_t session_texcompression_level) {
+	return kTerrainQuadrantCreationFlags |
+			renderer::terrain_colormap_compression_flags(session_texcompression_level);
+}
+
 TerrainTileQuadrantSource build_terrain_tile_quadrant_source(
-		const Rgba8Image &atlas) {
+		const Rgba8Image &atlas, uint32_t creation_flags) {
 	TerrainTileQuadrantSource result;
 	if (!atlas.is_valid() || atlas.width < 2 || atlas.height < 2) return result;
+	for (int quadrant = 0; quadrant < 4; ++quadrant) {
+		result.quadrants[static_cast<size_t>(quadrant)] =
+				quadrant_device_levels(quadrant_block(atlas, quadrant), creation_flags);
+	}
+	return result;
+}
+
+Rgba8Image terrain_colormap_device_image(const Rgba8Image &atlas,
+		int32_t session_texcompression_level) {
+	if (!atlas.is_valid() || atlas.width < 2 || atlas.height < 2) return atlas;
+	const uint32_t flags = terrain_colormap_quadrant_flags(session_texcompression_level);
+	if (renderer::select_texture_dxt_format(flags, renderer::kReferenceTextureDxtCaps) ==
+			renderer::TextureDxtFormat::None) {
+		return atlas;
+	}
+	Rgba8Image result = atlas;
 	const uint32_t half_width = atlas.width / 2;
 	const uint32_t half_height = atlas.height / 2;
 	for (int quadrant = 0; quadrant < 4; ++quadrant) {
+		const std::vector<Rgba8Image> levels =
+				quadrant_device_levels(quadrant_block(atlas, quadrant), flags, 1);
+		if (levels.empty() || levels.front().width != half_width ||
+				levels.front().height != half_height) {
+			continue;
+		}
 		const uint32_t origin_x = (quadrant >> 1) * half_width;
 		const uint32_t origin_y = (quadrant & 1) * half_height;
-		Rgba8Image block;
-		block.width = half_width;
-		block.height = half_height;
-		block.pixels.resize(static_cast<size_t>(half_width) * half_height * 4u);
 		for (uint32_t row = 0; row < half_height; ++row) {
-			const auto source = atlas.pixels.begin() +
-					4u * (static_cast<size_t>(origin_y + row) * atlas.width + origin_x);
-			std::copy(source, source + 4u * half_width,
-					block.pixels.begin() + 4u * static_cast<size_t>(row) * half_width);
+			const auto source = levels.front().pixels.begin() +
+					4u * static_cast<size_t>(row) * half_width;
+			std::copy(source, source + 4u * half_width, result.pixels.begin() +
+					4u * (static_cast<size_t>(origin_y + row) * atlas.width + origin_x));
 		}
-		result.quadrants[static_cast<size_t>(quadrant)] = retail_box_levels(block);
 	}
 	return result;
 }

@@ -207,9 +207,13 @@ uint32_t hud_alpha_material_argb(uint32_t argb);
 // A8R8G8B8.
 uint32_t hud_color_material_argb(uint32_t texel, uint32_t diffuse);
 
-// GTexture_DownsampleToLimits's cap halving: while either side exceeds `cap`, both
-// sides halve with a 2x2 box. `rgba` holds width x height RGBA8 pixels; width and
+// One GTexture_DownsampleToLimits halving: both sides halve with a 2x2 box, every
+// channel the truncated mean. `rgba` holds width x height RGBA8 pixels; width and
 // height are updated.
+void halve_rgba(std::vector<uint8_t> &rgba, uint32_t &width, uint32_t &height);
+
+// GTexture_DownsampleToLimits's cap halving: while either side exceeds `cap`, both
+// sides halve with a 2x2 box (halve_rgba).
 inline constexpr uint32_t kNormalMapSideCap = 512;
 void halve_rgba_to_cap(std::vector<uint8_t> &rgba, uint32_t &width, uint32_t &height, uint32_t cap);
 

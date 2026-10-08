@@ -48,6 +48,12 @@ private:
 	ObjectID reflection_camera_;
 	ObjectID second_scene_camera_;
 	float water_height_ = 0.0f;
+	// The session's texcompression_level and particle_density (the fresh
+	// profile's until an embedder hands the mission's copy over) and whether
+	// the main view renders as the NVG scene this frame (D-RMAT-24).
+	int session_texcompression_level_ = 1;
+	int session_particle_density_ = 2;
+	bool main_view_nvg_scene_ = false;
 	bool hidden_ = false;
 	bool shutdown_ = false;
 	bool procedural_fallback_enabled_ = false;
@@ -83,6 +89,15 @@ public:
 	// ObjectID is kept; a freed camera retires the view on the next render.
 	void set_second_scene_camera(Camera3D *p_camera);
 	Camera3D *get_second_scene_camera() const;
+	// The session's game.cfg texcompression_level and particle_density
+	// (renderer/texture_compression.h, renderer/particle_density.h): the
+	// atlas pages are built again under the flags they give (DXT5 at a
+	// compression word of 1 or less, halved once at a density of 1 or less),
+	// and every view's particle stride follows the density.
+	void set_session_render_settings(int p_texcompression_level, int p_particle_density);
+	// Whether the main view renders as the NVG scene this frame, whose stride
+	// is twice the main scene's (renderer::ParticleScenePass::NvgScene).
+	void set_main_view_nvg_scene(bool p_nvg_scene);
 
 	void set_hidden(bool p_hidden);
 	bool get_hidden() const;

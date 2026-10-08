@@ -1,8 +1,10 @@
 #include "object/weapon_def.h"
 
+#include "resource_index/resource_root.h"
 #include "util/string_convert.h"
 
 #include <runtime/hud/sight_overlay.h>
+#include <runtime/renderer/texture_compression.h>
 #include <base/io/fixed.h>
 
 #include <algorithm>
@@ -84,6 +86,17 @@ Rect2 WeaponSightRow::evaluate_rect(int p_sight_scale_index, int p_slide_multipl
 			static_cast<real_t>(rect.x2 - rect.x1), static_cast<real_t>(rect.y2 - rect.y1));
 }
 
+// The stage loader with the row's creation word (renderer::sight_card_texture_flags
+// carries the witness).
+Ref<Texture2D> WeaponSightRow::load_card_texture(const Ref<ResourceRoot> &p_root,
+		int p_texcompression_level) const {
+	if (p_root.is_null()) {
+		return Ref<Texture2D>();
+	}
+	return p_root->load_texture_created(get_texture().get_file(), ResourceRoot::TEXTURE_LOADER_STAGE,
+			static_cast<int64_t>(opennova::renderer::sight_card_texture_flags(p_texcompression_level)));
+}
+
 void WeaponSightRow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_texture"), &WeaponSightRow::get_texture);
 	ClassDB::bind_method(D_METHOD("get_x1"), &WeaponSightRow::get_x1);
@@ -94,6 +107,8 @@ void WeaponSightRow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_scale"), &WeaponSightRow::is_scale);
 	ClassDB::bind_method(D_METHOD("evaluate_rect", "sight_scale_index", "slide_multiplier"),
 			&WeaponSightRow::evaluate_rect);
+	ClassDB::bind_method(D_METHOD("load_card_texture", "root", "texcompression_level"),
+			&WeaponSightRow::load_card_texture);
 	ClassDB::bind_static_method("WeaponSightRow",
 			D_METHOD("make", "texture", "x1", "y1", "x2", "y2", "blend", "scale", "slide",
 					"slide_frames"),

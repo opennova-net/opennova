@@ -1,5 +1,6 @@
 #include <runtime/terrain/texture_preprocess.h>
 #include <runtime/terrain_query/height_field.h>
+#include <runtime/renderer/texture_compression.h>
 
 #include <algorithm>
 #include <cmath>
@@ -228,10 +229,13 @@ std::vector<Rgba8Image> build_paired_detail_mip_chain(
 
 std::vector<renderer::DxtSurface> build_detail_layer_levels(
 		const Rgba8Image &base,
-		const Rgba8Image *far_detail) {
-	// Full texture quality and full terrain detail.
-	// [orig: PolyTrn_InitTextures @ 0x60ABBC (0x400200), @ 0x60ABA0 (| 8)]
-	constexpr uint32_t kDetailLayerFlags = 0x400208u;
+		const Rgba8Image *far_detail,
+		int32_t session_texcompression_level) {
+	// The session's compression word and full terrain detail.
+	// [orig: PolyTrn_InitTextures @ 0x60AB9B..0x60ABBC (0x400100 / 0x400200),
+	//  @ 0x60ABA0 (| 8)]
+	const uint32_t kDetailLayerFlags =
+			renderer::terrain_detail_layer_compression_flags(session_texcompression_level) | 8u;
 	const renderer::TextureDxtFormat format = renderer::select_texture_dxt_format(
 			kDetailLayerFlags, renderer::kReferenceTextureDxtCaps);
 	std::vector<renderer::DxtSurface> levels;

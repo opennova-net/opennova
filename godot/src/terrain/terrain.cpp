@@ -47,6 +47,8 @@ void Terrain::_bind_methods() {
 		"set_lod_quality", "get_lod_quality");
 
 	ClassDB::bind_method(D_METHOD("set_tile_info_override", "tile_info"), &Terrain::set_tile_info_override);
+	ClassDB::bind_method(D_METHOD("set_texcompression_level", "level"), &Terrain::set_texcompression_level);
+	ClassDB::bind_method(D_METHOD("get_texcompression_level"), &Terrain::get_texcompression_level);
 	ClassDB::bind_method(D_METHOD("get_tile_info_override"), &Terrain::get_tile_info_override);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "tile_info_override", PROPERTY_HINT_RESOURCE_TYPE, "TerrainTileInfo"),
 		"set_tile_info_override", "get_tile_info_override");
@@ -331,6 +333,14 @@ void Terrain::set_lod_quality(float p_quality) {
 
 float Terrain::get_lod_quality() const {
 	return lod_quality;
+}
+
+void Terrain::set_texcompression_level(int p_level) {
+	surface_inputs->set_texcompression_level(p_level);
+}
+
+int Terrain::get_texcompression_level() const {
+	return surface_inputs->get_texcompression_level();
 }
 
 void Terrain::set_tile_info_override(const Ref<TerrainTileInfo> &p_info) {

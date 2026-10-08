@@ -69,6 +69,8 @@ ParticleRenderer *EffectWorld::_ensure_renderer() {
 	renderer->set_environment_source(_environment_source());
 	renderer->set_water_plane(water_height_, _reflection_camera());
 	renderer->set_second_scene_camera(get_second_scene_camera());
+	renderer->set_session_render_settings(session_texcompression_level_, session_particle_density_);
+	renderer->set_main_view_nvg_scene(main_view_nvg_scene_);
 	renderer->set_hidden(particles_disabled_);
 	return renderer;
 }
@@ -153,6 +155,20 @@ void EffectWorld::set_second_scene_camera(Camera3D *p_camera) {
 
 Camera3D *EffectWorld::get_second_scene_camera() const {
 	return Object::cast_to<Camera3D>(ObjectDB::get_instance(second_scene_camera_id_));
+}
+
+void EffectWorld::set_session_render_settings(int p_texcompression_level, int p_particle_density) {
+	session_texcompression_level_ = p_texcompression_level;
+	session_particle_density_ = p_particle_density;
+	_ensure_renderer()->set_session_render_settings(p_texcompression_level, p_particle_density);
+}
+
+void EffectWorld::set_main_view_nvg_scene(bool p_nvg_scene) {
+	if (main_view_nvg_scene_ == p_nvg_scene) {
+		return;
+	}
+	main_view_nvg_scene_ = p_nvg_scene;
+	_ensure_renderer()->set_main_view_nvg_scene(p_nvg_scene);
 }
 
 int EffectWorld::load_from_resource_root(const Ref<ResourceRoot> &p_root) {
@@ -830,6 +846,11 @@ void EffectWorld::_bind_methods() {
 			&EffectWorld::set_second_scene_camera);
 	ClassDB::bind_method(D_METHOD("get_second_scene_camera"),
 			&EffectWorld::get_second_scene_camera);
+	ClassDB::bind_method(D_METHOD("set_session_render_settings", "texcompression_level",
+								 "particle_density"),
+			&EffectWorld::set_session_render_settings);
+	ClassDB::bind_method(D_METHOD("set_main_view_nvg_scene", "nvg_scene"),
+			&EffectWorld::set_main_view_nvg_scene);
 	ClassDB::bind_method(D_METHOD("load_from_resource_root", "root"),
 			&EffectWorld::load_from_resource_root);
 	ClassDB::bind_method(D_METHOD("load_particle_file", "file"), &EffectWorld::load_particle_file);
