@@ -8,6 +8,7 @@
 #include <editor/preview/canvas_gesture.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/preview/viewport_overlay.h>
+#include <editor/session/preview_background.h>
 
 namespace opennova::editor {
 
@@ -80,6 +81,12 @@ public:
 	// the canvas, whose right button is its kind's (a look), a click is the button let go having
 	// travelled less than a drag does.
 	bool right_clicked() const { return right_clicked_; }
+	// What the picture draws behind it (the Preview background preference: a kind whose row draws it, else
+	// Dark, each picture's own), before picture(): over a background of the preference's, each line, dot and
+	// word of the shapes gets a dark edge of its own, and the picture's frame is dark, so both read on the
+	// light and the checkered ones (PreviewBackdrop::halo, frame).
+	void set_backdrop(PreviewBackground background) { backdrop_ = preview_backdrop(background); }
+	const PreviewBackdrop &backdrop() const { return backdrop_; }
 	void draw(const OverlayList &shapes, CanvasCursor cursor);
 	void end();
 	// After every frame's windows: a canvas that did not draw lets go of its pan.
@@ -100,6 +107,7 @@ private:
 	CanvasPoint origin_; // the picture's top-left corner on the screen
 	CanvasPoint surface_min_, surface_max_; // the canvas's surface on the screen (the shapes' clip)
 	CanvasInput input_;
+	PreviewBackdrop backdrop_ = preview_backdrop(PreviewBackground::Dark);
 };
 
 } // namespace opennova::editor
