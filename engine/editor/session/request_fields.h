@@ -66,6 +66,7 @@ enum class RequestFieldId : uint8_t {
 	SaveBeforePlay,
 	Alone,
 	Define,
+	PreviewBackground,
 	kCount,
 };
 

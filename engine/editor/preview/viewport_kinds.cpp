@@ -101,22 +101,29 @@ constexpr ViewportFeed kTerrainFeeds[] = {
 // of its devices at most (each holds a terrain and the mission's models). A menu's screen and a
 // definition's record are each one row of the document, the selection's: a screen a page of the menu, a
 // record one of the table's records picked one after another.
+// A kind that draws the editor's preview background behind its picture.
+constexpr ViewportKindRow on_backdrop(ViewportKindRow row) {
+	row.backdrop = true;
+	return row;
+}
+
 constexpr ViewportKindRow kRows[] = {
 	{ ViewportKind::Menu, ViewportRole::Preview, true, true, false, kMenuFeeds, std::size(kMenuFeeds),
 			MenuViewport::make, true, 0, false, true },
-	{ ViewportKind::Model, ViewportRole::Preview, true, false, true, kModelFeeds, std::size(kModelFeeds),
-			ModelViewport::make },
+	on_backdrop({ ViewportKind::Model, ViewportRole::Preview, true, false, true, kModelFeeds, std::size(kModelFeeds),
+			ModelViewport::make }),
 	{ ViewportKind::Script, ViewportRole::Main, false, false, false, kScriptFeeds, std::size(kScriptFeeds),
 			ScriptViewport::make, false },
 	{ ViewportKind::Mission, ViewportRole::Main, false, false, true, kMissionFeeds, std::size(kMissionFeeds),
 			MissionViewport::make, true, 2 },
-	{ ViewportKind::Texture, ViewportRole::Main, false, false, false, kTextureFeeds, std::size(kTextureFeeds),
-			TextureViewport::make, true, 0, true },
-	{ ViewportKind::Effect, ViewportRole::Preview, true, false, false, kEffectFeeds, std::size(kEffectFeeds),
-			EffectViewport::make },
-	{ ViewportKind::Hud, ViewportRole::Preview, true, false, false, kHudFeeds, std::size(kHudFeeds), HudViewport::make },
-	{ ViewportKind::Definition, ViewportRole::Preview, false, true, false, kDefinitionFeeds, std::size(kDefinitionFeeds),
-			DefinitionViewport::make },
+	on_backdrop({ ViewportKind::Texture, ViewportRole::Main, false, false, false, kTextureFeeds, std::size(kTextureFeeds),
+			TextureViewport::make, true, 0, true }),
+	on_backdrop({ ViewportKind::Effect, ViewportRole::Preview, true, false, false, kEffectFeeds, std::size(kEffectFeeds),
+			EffectViewport::make }),
+	on_backdrop({ ViewportKind::Hud, ViewportRole::Preview, true, false, false, kHudFeeds, std::size(kHudFeeds),
+			HudViewport::make }),
+	on_backdrop({ ViewportKind::Definition, ViewportRole::Preview, false, true, false, kDefinitionFeeds,
+			std::size(kDefinitionFeeds), DefinitionViewport::make }),
 	{ ViewportKind::Environment, ViewportRole::Main, true, false, false, kEnvironmentFeeds, std::size(kEnvironmentFeeds),
 			EnvironmentViewport::make, true, 2 },
 	{ ViewportKind::Terrain, ViewportRole::Main, true, false, false, kTerrainFeeds, std::size(kTerrainFeeds),
