@@ -8,6 +8,9 @@
 #include <editor/preview/mission_options.h>
 #include <editor/preview/viewport_device.h>
 #include <runtime/environment/environment_state.h>
+#include <base/vfs/file_source.h>
+#include <formats/env/env.h>
+#include <formats/trn/trn_io.h>
 
 namespace opennova::editor {
 
@@ -54,6 +57,17 @@ bool mission_environment(const FileSource &files, const MissionSceneHeader &head
 	// @ 0x57dbb6, @ 0x57dc99 (Path_ReplaceOrAppendExtension)].
 	return env::read_mission_env(files, header.terrain.empty() ? std::string() : header.terrain + ".trn",
 	                             header.environment.empty() ? std::string() : header.environment + ".env", out);
+}
+
+std::string mission_terrain_later_lines(const FileSource &files, const std::string &environment_file) {
+	std::string lines;
+	std::vector<uint8_t> bytes;
+	for (const std::string &name : { std::string(env::kOvercastFile), environment_file }) {
+		bytes.clear();
+		if (!name.empty() && files.read(name, bytes)) lines += trn_parser_lines(std::string(bytes.begin(), bytes.end()));
+		lines += '\x1e';
+	}
+	return lines;
 }
 
 PreviewVec3 mission_scene_point(double x, double y, double z) {
