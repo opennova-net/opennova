@@ -27,6 +27,7 @@
 #include <runtime/world/player_present.h>
 
 #include "authoring/effect_viewport_applier.h"
+#include "authoring/preview_backdrop.h"
 #include "env/mission_environment.h"
 #include "render/frame_fx.h"
 #include "util/color_convert.h"
@@ -51,6 +52,9 @@ DefinitionViewportApplier::DefinitionViewportApplier(SubViewport &viewport) {
 	// Single-sampled, as the game's own view draws: the particle renderer's compositor passes bind the view's depth
 	// (DI-14's rule).
 	viewport.set_msaa_3d(Viewport::MSAA_DISABLED);
+	// The editor's preview background, behind everything the picture draws.
+	backdrop_ = make_preview_backdrop_3d();
+	viewport.add_child(backdrop_);
 	Node3D *root = memnew(Node3D);
 	viewport.add_child(root);
 	// One terminal display decode for the view, and the environment with no .env, which lights like the retail noon
@@ -65,7 +69,7 @@ DefinitionViewportApplier::DefinitionViewportApplier(SubViewport &viewport) {
 	root->add_child(camera_);
 	grid_ = memnew(MeshInstance3D);
 	grid_->set_name("Grid");
-	grid_->set_mesh(preview_grid_mesh());
+	grid_->set_mesh(preview_grid_mesh(opennova::editor::PreviewBackground::Dark));
 	root->add_child(grid_);
 	model_ = std::make_unique<PreviewModel>(*root);
 	// A weapon's first-person arms (DI-22).
@@ -92,6 +96,11 @@ DefinitionViewportApplier::DefinitionViewportApplier(SubViewport &viewport) {
 }
 
 DefinitionViewportApplier::~DefinitionViewportApplier() = default;
+
+void DefinitionViewportApplier::background(opennova::editor::PreviewBackground background) {
+	set_preview_backdrop(*backdrop_, background);
+	grid_->set_mesh(preview_grid_mesh(background));
+}
 
 void DefinitionViewportApplier::rebuild(const opennova::editor::ViewportModel &viewport,
 		const opennova::editor::SessionView &view, const opennova::editor::PreviewClock &clock) {
@@ -340,6 +349,7 @@ void DefinitionViewportApplier::apply(const opennova::editor::ViewportModel &vie
 }
 
 void DefinitionViewportApplier::tick(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &clock) {
+	follow_display_decode(*backdrop_, camera_);
 	const opennova::editor::DefinitionViewport &model = definition_of(viewport);
 	if (!building() && !model_->built() && model.range_shown()) {
 		// An ammo with no round model (DI-23): its range moves with the clock all the same.

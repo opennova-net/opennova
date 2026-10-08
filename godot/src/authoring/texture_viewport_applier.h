@@ -35,6 +35,8 @@ public:
 	void tick(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) override;
 	void resize(int width, int height) override;
 	bool reads_scene_state() const override { return false; }
+	// The editor's preview background around the texture (its own 0.16 grey on Dark).
+	void background(opennova::editor::PreviewBackground background) override;
 
 	// What it holds (a GUT device test reads it): the levels uploaded, the level bound, the shader's
 	// placement.
