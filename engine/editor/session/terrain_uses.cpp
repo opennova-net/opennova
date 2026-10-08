@@ -1,5 +1,6 @@
 #include <editor/session/terrain_uses.h>
 
+#include <algorithm>
 #include <memory>
 
 #include <base/io/strutil.h>
@@ -155,7 +156,20 @@ TerrainUses terrain_uses(const SessionView &view, const std::string &path) {
 			if (read_text(view, use.environment_file, environment)) later.environment = &environment;
 			TrnConfig config;
 			std::string error;
-			load_mission_trn(terrain, later, config, error, &use.later);
+			std::vector<TrnLaterLine> taken;
+			load_mission_trn(terrain, later, config, error, &taken);
+			// Each line's place among its file's terrain lines.
+			std::vector<int> overcast_lines, environment_lines;
+			if (later.overcast) read_trn_key_lines(*later.overcast, &overcast_lines);
+			if (later.environment) read_trn_key_lines(*later.environment, &environment_lines);
+			for (TrnLaterLine &line : taken) {
+				const std::vector<int> &lines =
+						line.file == TrnLaterLine::File::Environment ? environment_lines : overcast_lines;
+				TerrainMissionUse::Later kept;
+				static_cast<TrnLaterLine &>(kept) = std::move(line);
+				kept.index = size_t(std::find(lines.begin(), lines.end(), kept.line) - lines.begin());
+				use.later.push_back(std::move(kept));
+			}
 		}
 		uses.missions.push_back(std::move(use));
 	}
@@ -188,11 +202,12 @@ io::JsonValue terrain_uses_json(const TerrainUses &uses) {
 		mission.set("start_time", json_number(double(use.start_time)));
 		mission.set("minutes_per_day", json_number(double(use.minutes_per_day)));
 		JsonValue later = JsonValue::make_array();
-		for (const TrnLaterLine &line : use.later) {
+		for (const TerrainMissionUse::Later &line : use.later) {
 			JsonValue row = JsonValue::make_object();
 			const bool environment = line.file == TrnLaterLine::File::Environment;
 			row.set("file", json_string(environment ? use.environment_file : uses.overcast_file));
 			row.set("line", json_number(double(line.line)));
+			row.set("index", json_number(double(line.index)));
 			row.set("key", json_string(line.key));
 			row.set("value", json_string(line.value));
 			later.push(std::move(row));
