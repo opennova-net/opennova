@@ -2088,6 +2088,14 @@ target_include_directories(guided_missile_flight_test PRIVATE ${CMAKE_CURRENT_SO
 target_compile_features(guided_missile_flight_test PRIVATE cxx_std_17)
 add_test(NAME guided_missile_flight COMMAND guided_missile_flight_test)
 
+# The trail anchor (D-AI-20): a round's tracer point waved across its flight
+# path by its style's +8/+0xC words on the entity-update clock.
+add_executable(world_tracer_trail_anchor_test world/tracer_trail_anchor_test.cpp)
+target_link_libraries(world_tracer_trail_anchor_test PRIVATE opennova_runtime)
+target_include_directories(world_tracer_trail_anchor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(world_tracer_trail_anchor_test PRIVATE cxx_std_17)
+add_test(NAME world_tracer_trail_anchor COMMAND world_tracer_trail_anchor_test)
+
 # The message-feed line policy (0x1E -> canned sentence + color) and the
 # witnessed game-event classification corrections.
 add_executable(feed_format_test hud/feed_format_test.cpp)
