@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <formats/trn/trn_io.h>
 
 namespace opennova::editor {
 
@@ -33,6 +34,9 @@ struct TerrainMissionUse {
 	int fog_color[3] = { 0, 0, 0 }, water_color[3] = { 0, 0, 0 };
 	int start_time = 0;      // 8.8 hours
 	int minutes_per_day = 0; // 0: the clock stands
+	// The lines of overcast.def and of its environment the terrain's parser takes after this terrain's lines
+	// (D-TERRAIN-18, formats/trn load_mission_trn): each key there is the mission's terrain's, over this file's.
+	std::vector<TrnLaterLine> later;
 };
 
 // One image a terrain set names (S20, terrain_import.h's keys), and the project's file at it.
@@ -68,15 +72,16 @@ struct TerrainUses {
 	std::string path;
 	bool found = false;   // the project has the file
 	bool reading = false; // the project's references are not read yet
+	std::string overcast_file; // the project's overcast.def ("" none), which every mission's terrain reads after it
 	std::vector<TerrainMissionUse> missions;
 	TerrainImport import;
 };
 TerrainUses terrain_uses(const SessionView &view, const std::string &path);
 
-// The terrain_uses query's answer: {path, found, reading?, missions [{mission, name, title, read, locator, field,
-// environment {name, file?}, tile_set, tiles, start_time, minutes_per_day}], import: null or {source, record,
-// error?, images [{key, name, file?}], foliage, options [{key, label, value, set, words}], outputs, reimport
-// (the request that imports it again)}}.
+// The terrain_uses query's answer: {path, found, reading?, overcast?, missions [{mission, name, title, read, locator,
+// field, environment {name, file?}, tile_set, tiles, start_time, minutes_per_day, later [{file, line, key, value}]}],
+// import: null or {source, record, error?, images [{key, name, file?}], foliage, options [{key, label, value, set,
+// words}], outputs, reimport (the request that imports it again)}}.
 io::JsonValue terrain_uses_json(const TerrainUses &uses);
 
 } // namespace opennova::editor

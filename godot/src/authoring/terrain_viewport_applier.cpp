@@ -12,6 +12,7 @@
 #include <cmath>
 
 #include <editor/assets/project_asset_source.h>
+#include <editor/preview/mission_scene.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/preview_clock.h>
 #include <editor/preview/terrain_viewport.h>
@@ -59,11 +60,15 @@ bool TerrainViewportApplier::EnvironmentKey::operator==(const EnvironmentKey &o)
 			std::equal(std::begin(water_color), std::end(water_color), std::begin(o.water_color));
 }
 
-TerrainViewportApplier::TerrainKey TerrainViewportApplier::terrain_key_of_(const TerrainViewport &model) {
+TerrainViewportApplier::TerrainKey TerrainViewportApplier::terrain_key_of_(const TerrainViewport &model) const {
 	TerrainKey key;
 	key.terrain = model.header().terrain;
 	key.tile_set = model.header().tile_set;
 	key.mission = model.mission_name();
+	// The mission's .env, which its terrain's load reads after the .trn (D-TERRAIN-18); none with no mission.
+	key.environment = model.header().environment.empty() ? std::string() : model.header().environment + ".env";
+	if (!key.terrain.empty() && stamped_)
+		key.later = opennova::editor::mission_terrain_later_lines(*stamped_, key.environment);
 	return key;
 }
 
@@ -170,7 +175,10 @@ void TerrainViewportApplier::mount_(const opennova::editor::SessionView &view) {
 		if (!stamped_->stamps().moved(*source)) return;
 		// What moved: the layers that read it (an edit of the terrain's document moves its .trn).
 		stale[kEnvironment] = layer_files_[kEnvironment].moved(*source);
-		stale[kTerrain] = layer_files_[kTerrain].moved(*source) || !stale[kEnvironment];
+		// The .env and overcast.def the terrain's load read are the terrain's by the lines of them its parser
+		// takes, which its key holds (D-TERRAIN-18): their other edits leave the ground standing.
+		stale[kTerrain] = layer_files_[kTerrain].moved_but(*source, { terrain_key_.environment, opennova::env::kOvercastFile }) ||
+				!stale[kEnvironment];
 	}
 	mounted_ = source;
 	stamped_ = std::make_shared<opennova::editor::StampedFiles>(source);
@@ -224,6 +232,7 @@ void TerrainViewportApplier::plan_(Build &build, const TerrainViewport &model) {
 		if (!terrain_key.terrain.empty() && root_files_->has_file(trn)) {
 			loading_.instantiate();
 			loading_->set_mission_tile_set(opennova::to_gd(terrain_key.tile_set));
+			loading_->set_mission_environment(opennova::to_gd(terrain_key.environment));
 			begun = loading_->begin_load_from_resource_root(root_files_, trn) == OK;
 		}
 		note_reads_(kTerrain, from);
