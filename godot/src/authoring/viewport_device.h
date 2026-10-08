@@ -106,6 +106,8 @@ private:
 	// microseconds its units ran this frame (-1 from the tick until one runs).
 	opennova::editor::ViewportBuildReport build_;
 	int64_t frame_us_ = -1;
+	// The preview background its applier draws (-1 before its first take): handed again as the view's changes.
+	int background_ = -1;
 };
 
 } // namespace godot
