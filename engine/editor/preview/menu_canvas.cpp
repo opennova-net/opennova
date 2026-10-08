@@ -20,12 +20,12 @@ bool has(const std::vector<NodeAddress> &windows, const NodeAddress &window) {
 	return std::find(windows.begin(), windows.end(), window) != windows.end();
 }
 
-// The picture's scale: device pixels per design unit.
+// The picture's scale: device pixels per design unit, the game's pair (menu::menu_scale_x).
 float scale_x_of(const CanvasInput &in) {
-	return float(in.width) / float(menu::kMenuDesignWidth);
+	return menu::menu_scale_x(float(in.width));
 }
 float scale_y_of(const CanvasInput &in) {
-	return float(in.height) / float(menu::kMenuDesignHeight);
+	return menu::menu_scale_y(float(in.height));
 }
 
 // A compiled widget's rect on the picture; false for none (index -1, or out of range).
