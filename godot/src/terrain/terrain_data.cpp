@@ -4,6 +4,7 @@
 #include "terrain/terrain_foliage_map.h"
 #include "terrain/terrain_tile_info.h"
 
+#include <formats/env/env.h>
 #include <formats/til/til_io.h>
 #include <base/io/fixed.h>
 #include <runtime/terrain_query/coords.h>
@@ -277,6 +278,7 @@ opennova::terrain::TerrainRaycastSample raycast_sample_bilinear(void *ctx, int32
 
 void TerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_trn_path", "path"), &TerrainData::set_trn_path);
+	ClassDB::bind_method(D_METHOD("set_mission_environment", "file"), &TerrainData::set_mission_environment);
 
 	ClassDB::bind_method(D_METHOD("load"), &TerrainData::load);
 	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "name"), &TerrainData::load_from_resource_root);
@@ -457,6 +459,9 @@ Error TerrainData::_import_pcx_slot_bytes(const String &slot_id, const String &f
 void TerrainData::set_trn_path(const String &p_path) { trn_path = p_path; }
 void TerrainData::set_mission_tile_set(const String &p_tile_set) {
 	mission_tile_set = opennova::to_std(p_tile_set);
+}
+void TerrainData::set_mission_environment(const String &p_file) {
+	mission_environment = opennova::to_std(p_file);
 }
 
 void TerrainData::set_terrain_name(const String &p_name) { terrain_name = p_name; _notify_terrain_changed(); }
@@ -645,7 +650,8 @@ Error TerrainData::load_from_resource_root(const Ref<ResourceRoot> &p_resource_r
 
 Error TerrainData::_load_from_trn_text(const std::string &trn_content, const String &source_label) {
 	(void)source_label;
-	const Error begun = _begin_load_from_trn_text(trn_content);
+	// A .trn on its own (no mission, no project): the file alone.
+	const Error begun = _begin_load_from_trn_text(trn_content, opennova::TrnLaterTexts());
 	if (begun != OK) {
 		return begun;
 	}
@@ -686,13 +692,25 @@ Error TerrainData::begin_load_from_resource_root(const Ref<ResourceRoot> &p_reso
 	trn_path = file;
 	resource_root = p_resource_root;
 	const std::string trn_content(reinterpret_cast<const char *>(trn_bytes.ptr()), static_cast<size_t>(trn_bytes.size()));
-	return _begin_load_from_trn_text(trn_content);
+	// overcast.def and the mission's .env after the .trn, through the terrain's parser (D-TERRAIN-18; the witness is
+	// opennova::load_mission_trn's).
+	const auto read_text = [&p_resource_root](const String &p_file, std::string &r_text) {
+		if (p_file.is_empty() || !p_resource_root->has_file(p_file)) return false;
+		const PackedByteArray bytes = p_resource_root->read_file(p_file);
+		r_text.assign(reinterpret_cast<const char *>(bytes.ptr()), static_cast<size_t>(bytes.size()));
+		return true;
+	};
+	std::string overcast_text, environment_text;
+	opennova::TrnLaterTexts later;
+	if (read_text(String(opennova::env::kOvercastFile), overcast_text)) later.overcast = &overcast_text;
+	if (read_text(opennova::to_gd(mission_environment).get_file(), environment_text)) later.environment = &environment_text;
+	return _begin_load_from_trn_text(trn_content, later);
 }
 
 // The .trn text parsed and its scalars synced, then the rest of the load planned as units, in the
 // order the load takes them: the nine texture slots, the two PCX-backed maps, the tilestrip, the
 // height data. load_step() runs one.
-Error TerrainData::_begin_load_from_trn_text(const std::string &trn_content) {
+Error TerrainData::_begin_load_from_trn_text(const std::string &trn_content, const opennova::TrnLaterTexts &later) {
 	load_units_.clear();
 	load_next_ = 0;
 	load_error_ = OK;
@@ -700,8 +718,7 @@ Error TerrainData::_begin_load_from_trn_text(const std::string &trn_content) {
 	load_missing_.clear();
 	load_failure_ = String();
 	std::string error;
-	std::istringstream trn_stream(trn_content);
-	if (!opennova::load_trn(trn_stream, trn, error)) {
+	if (!opennova::load_mission_trn(trn_content, later, trn, error)) {
 		UtilityFunctions::push_warning("TerrainData: TRN parse failed: ", error.c_str());
 		return ERR_FILE_CANT_READ;
 	}

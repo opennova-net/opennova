@@ -164,6 +164,11 @@ public:
 	// [orig: sub_54D6A0 @0x54d6a0 — the gate @0x54d6c6..0x54d6e5, @0x54d70a,
 	// @0x54d712, @0x54d724]. True when the original goes on to save
 	// (@0x54d72f); outside a session a player who never spawned returns first.
+	// The callers' copy before it on a won SP round has no counterpart: it
+	// writes g_MissionFlagBits, which is 0 at every round end, into a word only
+	// the input recorder's header reads, and nothing turns the recorder on
+	// [orig: @0x51eaa0, @0x522683, @0x5263c5; RecordFile_WriteHeader @0x412dd9;
+	// g_InputRecordEnabled @0xB4C3B8 read @0x525c59 alone] (D-MNU-24).
 	void begin_session() { session_word_1460_ = current().word_1460; }
 	bool record_round_end(bool in_session, bool spawn_gate, int32_t campaign,
 			int32_t campaign_mission, bool won);

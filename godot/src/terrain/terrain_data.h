@@ -42,6 +42,10 @@ private:
 	// The loading mission's tile-set name (BMS header), applied over the .trn
 	// tilestrip at load (formats/trn trn_mission_tilestrip). Empty = the .trn's.
 	std::string mission_tile_set;
+	// The loading mission's environment file (`<environment>.env`; empty: none), whose lines the
+	// terrain's parser reads after the .trn's and overcast.def's (D-TERRAIN-18, formats/trn
+	// load_mission_trn).
+	std::string mission_environment;
 
 	// Identity
 	String terrain_name;
@@ -133,7 +137,7 @@ private:
 	mutable std::vector<std::string> load_missing_;
 	String load_failure_;
 	void _note_load_missing(const String &p_name) const;
-	Error _begin_load_from_trn_text(const std::string &trn_content);
+	Error _begin_load_from_trn_text(const std::string &trn_content, const opennova::TrnLaterTexts &later);
 	Ref<Texture2D> _load_slot_texture(const char *slot, const String &filename,
 			opennova::renderer::TextureLoader loader) const;
 	void _use_default_pcx_slot(const String &slot_id);
@@ -162,6 +166,10 @@ public:
 	// Set before load(): the mission's tile-set name overriding the .trn
 	// tilestrip atlas (and so the .TSD the surface table pairs with it).
 	void set_mission_tile_set(const String &p_tile_set);
+	// Set before a load from a resource root: the mission's environment file by name
+	// ("<environment>.env"; empty: the mission names none), which that load reads after the .trn and
+	// overcast.def through the terrain's parser, as the game's does (D-TERRAIN-18).
+	void set_mission_environment(const String &p_file);
 
 	void set_terrain_name(const String &p_name);
 	String get_terrain_name() const;
