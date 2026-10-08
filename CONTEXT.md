@@ -697,6 +697,13 @@ A `.mis`: the original mission editor's interchange text (`dfx2med.exe`), which 
 Its own kind, packed nowhere; never a mission.
 _Avoid_: mission (the `.bms` the game loads), mission file
 
+**Project notes**:
+What a project keeps for its people and the game never reads: a `.md`, a `.txt` of any name but those
+the game reads (earlyerr.txt, an expansion's version.txt, ...), a text with no extension (a LICENSE).
+Its own kind, opened as a text, left out of the build without a word; a file of no kind the game knows
+is said instead, as it may be data.
+_Avoid_: unknown file (said, and maybe data), docs (the repo's golden docs)
+
 **Display name**:
 What a value a document holds reads as to a modder where it stands for something with a name (ADR
 0046 S15): an item id by its catalog's name, an SSN by its entity's item and SSN ("Ranger #12"), a

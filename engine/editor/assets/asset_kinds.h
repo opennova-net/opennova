@@ -25,8 +25,9 @@ namespace opennova::editor {
 // read before any mount [orig: Game_ShowEarlyError @ 0x4a68a0]; retail's own loose files
 // (videos, configs, saves, the machine-keyed NovaWorld cache) stay loose with them. None: an
 // archive (a build output, which the build refuses in a project), an import source (its
-// outputs, named after it, pack by their own kinds) and a file of no kind the game knows, which
-// the game never asks for (S13 A8: the build leaves it out).
+// outputs, named after it, pack by their own kinds), the project's notes, which the game never
+// reads, and a file of no kind the game knows, which the game never asks for (S13 A8: the build
+// leaves it out, and says so).
 enum class ArchiveSlot { Language, Localres, Resource, Loose, None };
 
 // Where the game reads a loose file of a kind when it runs an expansion (`/exp <name>`, ADR 0046
@@ -102,9 +103,11 @@ struct AssetKindRow {
 	// runtime's classifier types such a file (resource_kind_for_name_and_magic), the one
 	// implementation of that fact; "" for any other kind.
 	const char *runtime = "";
-	// What else names a file of the kind: its whole name, lower case ("items.def"), which is
-	// looked for before any extension; its extensions, lower case with the dot (null-ended).
+	// What else names a file of the kind: its whole name, lower case ("items.def"), or the whole
+	// names it has (null-ended: the texts the game reads, "earlyerr.txt"), which are looked for
+	// before any extension; its extensions, lower case with the dot (null-ended).
 	const char *file_name = nullptr;
+	const char *const *file_names = nullptr;
 	const char *const *extensions = nullptr;
 	ArchiveSlot archive_slot = ArchiveSlot::Resource;
 	// A loose kind's place in an expansion build (ExpansionLoose): set exactly on the Loose rows.
@@ -143,7 +146,8 @@ AssetKind asset_kind_for_runtime(const std::string &runtime_kind);
 // extension; Unknown for none. The runtime's classifier is asked first (classify_asset).
 AssetKind asset_kind_for_name(const std::string &logical_name);
 // Whether a build puts a file of the kind in the build (in an archive, or loose): false for an
-// archive, an import source and a file of no kind the game knows.
+// archive, an import source and its inputs, a mission's interchange text, the project's notes and a
+// file of no kind the game knows.
 bool asset_kind_packed(AssetKind kind);
 // The kind a text names as a modder writes it in a filter (the UX round's project lane: Files, the files
 // query): a kind's label or its token, in any case, singular or plural ("texture", "Textures",
