@@ -207,15 +207,18 @@ private:
 	// The layers a build makes, each with the files its units read.
 	enum Layer : uint8_t { kEnvironment, kTerrain, kEntities, kLayers };
 	static int layer_of_(Unit::Kind kind);
-	// The keys the layers were built from: the terrain's name and tile set, and the mission whose
-	// .til the game reads beside it.
+	// The keys the layers were built from: the terrain's name and tile set, the mission whose .til the game reads
+	// beside it, and the .env the terrain's load reads after its .trn and overcast.def with the lines of the two
+	// its parser can take (D-TERRAIN-18, editor::mission_terrain_later_lines): an edit of either that sets nothing
+	// of the terrain loads it not again.
 	struct TerrainKey {
-		std::string terrain, tile_set, mission;
+		std::string terrain, tile_set, mission, environment, later;
 		bool operator==(const TerrainKey &o) const {
-			return terrain == o.terrain && tile_set == o.tile_set && mission == o.mission;
+			return terrain == o.terrain && tile_set == o.tile_set && mission == o.mission &&
+					environment == o.environment && later == o.later;
 		}
 	};
-	static TerrainKey terrain_key_of_(const opennova::editor::MissionViewport &mission);
+	TerrainKey terrain_key_of_(const opennova::editor::MissionViewport &mission) const;
 	struct EnvironmentKey {
 		std::string environment, terrain; // the .env, and the .trn the load reads ahead of it
 		int start_time = 0, minutes_per_day = 0;

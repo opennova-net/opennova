@@ -14,7 +14,9 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
+#include <formats/env/env.h>
 #include <formats/mission/mission.h>
+#include <formats/trn/trn_io.h>
 
 namespace opennova::editor {
 
@@ -27,6 +29,15 @@ using io::json_string;
 std::string folder_of(const std::string &path) {
 	const size_t slash = path.find_last_of('/');
 	return slash == std::string::npos ? std::string() : path.substr(0, slash);
+}
+
+// A project file's bytes as the game would read them now: the open document standing in for its file.
+bool read_text(const SessionView &view, const std::string &path, std::string &out) {
+	const AssetEntry *entry = path.empty() || !view.project.scan ? nullptr : view.project.scan->at_path(path);
+	std::vector<uint8_t> bytes;
+	if (!entry || !view.findings.assets || !view.findings.assets->read(entry->logical_name, bytes)) return false;
+	out.assign(bytes.begin(), bytes.end());
+	return true;
 }
 
 std::string stem_of(const std::string &path) {
@@ -98,6 +109,11 @@ TerrainUses terrain_uses(const SessionView &view, const std::string &path) {
 	read_import(view, *entry, uses.import);
 	const AssetGraph *graph = view.findings.graph.get();
 	if (!graph) return uses;
+	// The texts a mission's terrain load reads after this one, the .env its own (D-TERRAIN-18).
+	std::string terrain, overcast;
+	const bool terrain_read = read_text(view, uses.path, terrain);
+	if (const AssetEntry *file = view.project.scan->find(env::kOvercastFile)) uses.overcast_file = file->relative_path;
+	const bool overcast_read = read_text(view, uses.overcast_file, overcast);
 	for (const GraphEdge *edge : graph->referrers_of_file(uses.path)) {
 		if (edge->kind != ReferenceKind::Terrain) continue;
 		const AssetEntry *source = view.project.scan->at_path(edge->source);
@@ -132,6 +148,15 @@ TerrainUses terrain_uses(const SessionView &view, const std::string &path) {
 			use.minutes_per_day = info.minutes_per_day;
 		}
 		use.tiles = view.project.scan->find(use.name + ".til") != nullptr;
+		if (terrain_read) {
+			std::string environment;
+			TrnLaterTexts later;
+			if (overcast_read) later.overcast = &overcast;
+			if (read_text(view, use.environment_file, environment)) later.environment = &environment;
+			TrnConfig config;
+			std::string error;
+			load_mission_trn(terrain, later, config, error, &use.later);
+		}
 		uses.missions.push_back(std::move(use));
 	}
 	return uses;
@@ -142,6 +167,7 @@ io::JsonValue terrain_uses_json(const TerrainUses &uses) {
 	out.set("path", json_string(uses.path));
 	out.set("found", JsonValue::make_bool(uses.found));
 	if (uses.reading) out.set("reading", JsonValue::make_bool(true));
+	if (!uses.overcast_file.empty()) out.set("overcast", json_string(uses.overcast_file));
 	JsonValue missions = JsonValue::make_array();
 	for (const TerrainMissionUse &use : uses.missions) {
 		JsonValue mission = JsonValue::make_object();
@@ -161,6 +187,17 @@ io::JsonValue terrain_uses_json(const TerrainUses &uses) {
 		mission.set("tiles", JsonValue::make_bool(use.tiles));
 		mission.set("start_time", json_number(double(use.start_time)));
 		mission.set("minutes_per_day", json_number(double(use.minutes_per_day)));
+		JsonValue later = JsonValue::make_array();
+		for (const TrnLaterLine &line : use.later) {
+			JsonValue row = JsonValue::make_object();
+			const bool environment = line.file == TrnLaterLine::File::Environment;
+			row.set("file", json_string(environment ? use.environment_file : uses.overcast_file));
+			row.set("line", json_number(double(line.line)));
+			row.set("key", json_string(line.key));
+			row.set("value", json_string(line.value));
+			later.push(std::move(row));
+		}
+		mission.set("later", std::move(later));
 		missions.push(std::move(mission));
 	}
 	out.set("missions", std::move(missions));
