@@ -1,5 +1,6 @@
 #include <editor/assets/asset_type_registry.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <system_error>
@@ -38,8 +39,29 @@ bool asset_name_fits_kind(const std::string &logical_name, AssetKind kind) {
 	// either.
 	if (kind == AssetKind::ImportSource) return importer_for(logical_name) != nullptr;
 	const AssetKind named = classify_asset(logical_name, nullptr);
-	// A name no rule types may be a material chunk by its content (classify_asset).
-	return named == kind || (named == AssetKind::Unknown && kind == AssetKind::MaterialChunk);
+	// A name no rule types may be a material chunk by its content, one with no extension the project's
+	// notes (classify_asset).
+	return named == kind || (named == AssetKind::Unknown && kind == AssetKind::MaterialChunk) ||
+	       (named == AssetKind::Unknown && kind == AssetKind::Notes && resource_extension_for_name(logical_name).empty());
+}
+
+bool looks_like_text(const uint8_t *data, size_t size) {
+	for (size_t i = 0; i < size; ++i) {
+		const uint8_t c = data[i];
+		if (c >= 0x20 || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == 0x1A) continue;
+		return false;
+	}
+	return true;
+}
+
+bool is_text_file(const std::string &path, uint64_t &read) {
+	std::ifstream in(system_path(path), std::ios::binary);
+	if (!in) return false;
+	char head[kTextSniffBytes];
+	in.read(head, static_cast<std::streamsize>(sizeof(head)));
+	const size_t got = static_cast<size_t>(in.gcount());
+	read += got;
+	return looks_like_text(reinterpret_cast<const uint8_t *>(head), got);
 }
 
 bool is_material_chunk_container(const std::vector<uint8_t> &bytes) {
@@ -79,6 +101,10 @@ AssetKind classify_asset(const std::string &logical_name, const std::vector<uint
 	if (!shared.empty()) return asset_kind_for_runtime(shared);
 	const AssetKind named = asset_kind_for_name(logical_name);
 	if (named == AssetKind::Unknown && bytes && is_material_chunk_container(*bytes)) return AssetKind::MaterialChunk;
+	// A name with no extension that holds text is a note (a LICENSE): the Notes row's comment.
+	if (named == AssetKind::Unknown && bytes && resource_extension_for_name(logical_name).empty() &&
+	    looks_like_text(bytes->data(), std::min(bytes->size(), kTextSniffBytes)))
+		return AssetKind::Notes;
 	return named;
 }
 
