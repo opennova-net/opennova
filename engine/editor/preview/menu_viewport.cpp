@@ -1073,18 +1073,16 @@ std::vector<MenuSoundFired> MenuViewport::fire_sounds(const ViewportInput &input
 	for (int index = 0; index < compiler.widget_count(); ++index)
 		if (const NodeId id = document->window_at(*screen, size_t(index))) index_of.emplace(id, index);
 	// The game's mouse: the canvas's while it has it over the picture, else the held point, with its button;
-	// the claim the pump makes there.
+	// the claim the pump makes there, held to the window a press captured (menu_click.h).
 	const bool canvas = canvas_mouse_.over;
 	const bool held = canvas || pointer_.held;
 	const float x = canvas ? canvas_mouse_.x : pointer_.x;
 	const float y = canvas ? canvas_mouse_.y : pointer_.y;
-	int claim = -1, spin_part = 0;
-	if (held) {
-		const menu::MenuFrameCompiler::MouseClaim at = compiler.claim_at(state, x, y, 1.0f, 1.0f);
-		claim = at.hovered;
-		spin_part = at.spin_part;
-	}
 	const bool down = held && (canvas ? canvas_mouse_.down : pointer_.down);
+	const menu::MenuPumpWindow capture = click_.capture_for(down);
+	menu::MenuFrameCompiler::MouseClaim at;
+	if (held) at = compiler.claim_at(state, x, y, 1.0f, 1.0f, capture);
+	const int claim = at.hovered;
 	const NodeId id = claim >= 0 ? document->window_at(*screen, size_t(claim)) : 0;
 	const auto play = [&](const mnu::Window &window, NodeId record, int sound_state) {
 		const mnu::Sound *row = menu::menu_window_sound(window, sound_state);
@@ -1100,13 +1098,15 @@ std::vector<MenuSoundFired> MenuViewport::fire_sounds(const ViewportInput &input
 		sounds_fired_.push_back(std::move(fired));
 	};
 	std::vector<menu::MenuSoundPump::Edge> edges;
-	// The click, as the game's frame takes one, plays SELECTED first: a spin arrow's own row where it is on
-	// one, the arrow a button of its own (MenuRuntime::on_widget_clicked -> arrow_click_; its rows' sounds are
-	// its own), else the window's, its sound state let go [orig: CWnd_ProcessMouseEvent @ 0x647b28].
-	const int clicked = click_.sample(claim, down);
-	const mnu::Window *window = clicked >= 0 && id ? compiler.widget_window(clicked) : nullptr;
-	if (window && spin_part != 0 && window->type == mnu::WindowType::SpinList) {
-		const mnu::WindowPart &arrow = spin_part == 1 ? window->spinup : window->spindown;
+	// The click, as the game's frame takes one (the claim let go over that was held the sample before,
+	// menu_click.h), plays SELECTED first: a spin arrow's own row where it is on one, the arrow a button of
+	// its own (MenuRuntime::on_widget_clicked -> arrow_click_; its rows' sounds are its own), else the
+	// window's, its sound state let go [orig: CWnd_ProcessMouseEvent @ 0x647b14..0x647b28].
+	const menu::MenuPumpWindow clicked = click_.sample(compiler.click_claim(at, state), down,
+			[&](const menu::MenuPumpWindow &window) { return compiler.pump_window_reached(window, state); });
+	const mnu::Window *window = clicked.valid() && id ? compiler.widget_window(clicked.index) : nullptr;
+	if (window && clicked.part != 0 && window->type == mnu::WindowType::SpinList) {
+		const mnu::WindowPart &arrow = clicked.part == 1 ? window->spinup : window->spindown;
 		if (arrow.present() && !arrow->disabled) play(*arrow, id, menu::kSoundSelected);
 	} else if (window) {
 		edges.push_back(sound_pump_.click(uint64_t(id)));
