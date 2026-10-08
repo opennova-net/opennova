@@ -12,7 +12,9 @@
 // is the editor's picture again; refused changes (a click or a key with Try off, a key no name gives). A Mods
 // screen (D-MNU-31) lists the base game's row, then the expansion folders of the game install the project plays
 // over by their names in the game's order, the base game highlighted; a pick shows its description, ACCEPT on the
-// game running takes nothing and on another says the switch.
+// game running takes nothing and on another says the switch. Try's mouse follows the game's click rule (a press
+// on the backdrop slid onto a button and let go there clicks it; a press on a button let go over another clicks
+// neither).
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -160,6 +162,12 @@ struct TryProject {
 		return change("click", text);
 	}
 	bool key(const std::string &name) { return change("key", R"({"key": ")" + name + R"("})"); }
+	// The game's mouse where a client holds it, with its button: one sample of Try's pump.
+	bool pointer(float x, float y, bool down) {
+		char text[96];
+		std::snprintf(text, sizeof(text), R"({"pointer_at": [%g, %g], "pointer_down": %s})", x, y, down ? "true" : "false");
+		return change("options", text);
+	}
 	JsonValue json() {
 		ViewportModel *model = session.viewports().follow_one(session.view(), path, ViewportKind::Menu);
 		return model ? viewport_to_json(session.view(), *model, JsonPage()) : JsonValue();
@@ -331,6 +339,24 @@ int test_try_navigates() {
 	return 0;
 }
 
+// Try's mouse follows the game's click rule (menu_click.h, D-MNU-30): a press on the backdrop (MAIN, whose press
+// takes no capture) slid onto GO and let go there clicks GO; a press on SAME (a button: it captures) let go over
+// GO clicks neither.
+int test_try_click_rule() {
+	TryProject project;
+	TEST_EXPECT(project.made);
+	if (!project.made) return 1;
+	TEST_EXPECT(project.change("try", R"({"on": true})"));
+	TEST_EXPECT(project.pointer(700, 500, false) && project.pointer(700, 500, true));
+	TEST_EXPECT(project.pointer(200, 120, true) && project.pointer(200, 120, false));
+	TEST_EXPECT(project.at() == "other.mnu:OTHER");
+	TEST_EXPECT(project.key("VK_ESCAPE") && project.at() == "main.mnu:STARTUP");
+	TEST_EXPECT(project.pointer(200, 170, false) && project.pointer(200, 170, true));
+	TEST_EXPECT(project.pointer(200, 120, true) && project.pointer(200, 120, false));
+	TEST_EXPECT(project.at() == "main.mnu:STARTUP");
+	return 0;
+}
+
 std::vector<uint8_t> exp_info(const char *name, const char *description) {
 	rtxt::File text;
 	text.sections.push_back({ "exp_info", 2 });
@@ -406,6 +432,7 @@ int test_key_names() {
 int main() {
 	TEST_EXPECT(test_try_navigates() == 0);
 	TEST_EXPECT(test_try_lists_the_mods() == 0);
+	TEST_EXPECT(test_try_click_rule() == 0);
 	TEST_EXPECT(test_key_names() == 0);
 	std::printf("editor_menu_try OK\n");
 	return 0;
