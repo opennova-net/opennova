@@ -19,6 +19,8 @@
 
 #include <cstdint>
 
+#include <runtime/renderer/texture_dxt.h>
+
 namespace opennova::renderer {
 
 // --- the configuration word ---------------------------------------------------
@@ -198,6 +200,43 @@ enum class TextureStage : uint8_t {
 	// The sky maps (both cloud layers): 0x100000.
 	// [orig: Terrain_InitRenderingResources @ 0x578A82..0x578A9A]
 	SkyMap,
+	// The impact scar strip (scorch1..4, bigscar, the glass holes, bhole1):
+	// each entry's load word | 1, the word 0, 0x80000 (bigscar) or 0x40000
+	// (the glass holes) (world::scar_texture_strip_creation_flags), drawn by
+	// the scar drawer's GfxShader pass.
+	// [orig: Scar_LoadTextures @ 0x5CC2F0..0x5CC302; Scar_DrawBatches
+	//  @ 0x5CCDDE]
+	ImpactScar,
+	// The tracer pool's smoke texture (smoktest.pcx): 0x100000, on both stages
+	// of the smoke and NVG ribbon passes, which draw through a GfxShader pass,
+	// never an HLSL effect, the normal pass and the distortion pass alike.
+	// [orig: CEffectEmitterPool_CreateShaders @ 0x5DC913; CEffectChannel_RenderRibbon
+	//  @ 0x5DC86C..0x5DC877 (pass flags 0x10520000), the distortion branch
+	//  @ 0x5DC0B6]
+	TracerSmoke,
+	// The water wake's ring and gradient (wake5.tga, wakegrad.tga): 0x100000.
+	// [orig: WaterRing_LoadResources @ 0x5DDCA1, @ 0x5DDCBC; WaterRing_Draw
+	//  @ 0x5DE245]
+	WaterWake,
+	// The rain and snow drops (eraindrp.tga, jsnwflk.tga): 0x100000 through the
+	// stage loader, drawn under the mode word 0x651.
+	// [orig: WeatherParticle_LoadTextures @ 0x5DE84C, @ 0x5DE88E;
+	//  Render_WeatherTrailParticles @ 0x5DEF85]
+	Precipitation,
+	// The procedural light corona "texlightcrn", 128 x 128: 1.
+	// [orig: Lighting_InitTextures @ 0x5A97D3..0x5A97F2;
+	//  EffectWorld_RenderLightCoronas @ 0x5AAFCC]
+	LightCorona,
+	// The map icon strip (TSDicon.tga): the file loader's 0x100000, the image
+	// tile it is built as created with it | 1, drawn by the tiled-image
+	// drawer's GfxShader pass. The tile is the strip at its sides rounded up to
+	// powers of two (16 x 512 for the stock 16 x 480), so its chain follows the
+	// strip's width.
+	// [orig: HUD_LoadAllTextures @ 0x59E03D..0x59E04C; Texture_LoadFromFile_0
+	//  @ 0x58FE55, @ 0x58FE80 (the flags into CEffect_BeginPassTraced);
+	//  GImage_CreateTiledTextures_0 @ 0x67A8B9 (the tile sides, sub_679DF0),
+	//  @ 0x67AA30..0x67AA43 (| 1); render_tiled_image_strip @ 0x67B6FC]
+	MapIconStrip,
 	// A model stage through its effect: TexDiffuse1/2 and TexNormal1.
 	ObjectStage,
 	// A model's cube map through its effect.
@@ -205,17 +244,44 @@ enum class TextureStage : uint8_t {
 };
 
 // The texture flags a fixed-function family is created with, as far as the
-// sampler reads them (the halving and DXT words left out).
+// sampler reads them (the halving, DXT and 0x100000 words left out; a scar
+// strip's chain word is its table entry's).
 inline constexpr uint32_t texture_stage_flags(TextureStage stage) {
 	switch (stage) {
 	case TextureStage::TerrainDetail: return kTextureFlagDeviceFilter;
-	case TextureStage::TerrainBlendMap: return kTextureFlagClamp;
+	case TextureStage::TerrainBlendMap:
+	case TextureStage::ImpactScar:
+	case TextureStage::LightCorona:
+	case TextureStage::MapIconStrip: return kTextureFlagClamp;
 	case TextureStage::FoliageMask:
 	case TextureStage::SkyMap:
+	case TextureStage::TracerSmoke:
+	case TextureStage::WaterWake:
+	case TextureStage::Precipitation:
 	case TextureStage::ObjectStage:
 	case TextureStage::ObjectCube: return 0;
 	}
 	return 0;
+}
+
+// --- the stage's mip chain ------------------------------------------------------
+
+// The chain flags a texture built from pixels is created with: one level, or
+// at most three. MIPFILTER POINT never reads past a texture's last level, and
+// the chain GTexture_CreateFromPixelData_0 asks for (texture_level_count:
+// one level per halving while the smaller side exceeds 2, so 4 x 4 is the
+// last, unless these cap it) is shorter than the full chain OpenNova's
+// textures carry, so a stage stops at that chain's last level. A DDS keeps
+// D3DX's chain, the one its OpenNova texture carries.
+// [orig: GTexture_CreateFromPixelData_0 @ 0x6877BA..0x687801]
+inline constexpr uint32_t kTextureFlagOneLevel = 0x40000;
+inline constexpr uint32_t kTextureFlagThreeLevels = 0x80000;
+
+// The last level a stage samples on a texture the game builds from pixels,
+// `width` x `height` (after its halvings) under its creation flags.
+inline uint32_t pixel_texture_last_level(uint32_t width, uint32_t height, uint32_t creation_flags) {
+	const uint32_t levels = texture_level_count(width, height, creation_flags);
+	return levels == 0 ? 0 : levels - 1;
 }
 
 // The device and effect state a frame draws under: the session's device mode,

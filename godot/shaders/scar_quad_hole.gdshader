@@ -17,8 +17,11 @@ render_mode unshaded, blend_mix, depth_draw_always, cull_disabled;
 // the exact inverse of the blit's transfer curve on the way out.
 #include "res://shaders/color.gdshaderinc"
 #include "res://shaders/effect_fog.gdshaderinc"
+#include "res://shaders/texture_filter.gdshaderinc"
 
+// The strip's sampling: scar_quad.gdshader.
 uniform sampler2D albedo_tex : repeat_disable, filter_linear_mipmap;
+uniform float albedo_max_lod = 1000.0;
 
 // The same view-space pull as the scorch quad (see scar_quad.gdshader).
 const float SCAR_VIEW_PULL = 0.998;
@@ -38,7 +41,7 @@ void vertex() {
 }
 
 void fragment() {
-	vec4 tex = texture(albedo_tex, UV);
+	vec4 tex = sample_point_mip(albedo_tex, UV, albedo_max_lod);
 	// MODULATE(TEXTURE, DIFFUSE) alpha feeds both the test and the blend.
 	float alpha = tex.a * COLOR.a;
 	if (alpha * 255.0 <= SCAR_ALPHA_TEST_REF) {

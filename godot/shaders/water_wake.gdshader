@@ -19,13 +19,28 @@ shader_type spatial;
 render_mode unshaded, blend_mix, cull_back, depth_draw_never;
 
 #include "res://shaders/color.gdshaderinc"
+#include "res://shaders/texture_filter.gdshaderinc"
 
-uniform sampler2D wake_texture : filter_linear, repeat_enable;
-uniform sampler2D gradient_texture : filter_linear, repeat_disable;
+// Both textures are created with 0x100000, no 0x8, so the device samples them
+// MIN/MAG LINEAR with MIPFILTER POINT whatever game.cfg's texfilter_level says,
+// over their pixel chains (wake5.tga 256 x 256 and wakegrad.tga 32 x 32, each
+// down to 4 x 4) [orig: WaterRing_LoadResources @ 0x5ddca1, @ 0x5ddcbc;
+// GTexture_CreateFromPixelData_0 @ 0x6877ba..0x6877e0; CGfxDevice_ApplyRenderStates
+// @ 0x67e463..0x67e4a7] (engine renderer/texture_filter.h, TextureStage::WaterWake):
+// bilinear on the nearest level, never past *_max_lod (the presenter's
+// texture_max_lod).
+uniform sampler2D wake_texture : filter_linear_mipmap, repeat_enable;
+uniform sampler2D gradient_texture : filter_linear_mipmap, repeat_disable;
+uniform float wake_max_lod = 1000.0;
+uniform float gradient_max_lod = 1000.0;
 
 void fragment() {
-    vec4 wake = texture(wake_texture, UV);
-    vec4 gradient = texture(gradient_texture, UV2);
+    vec4 wake = sample_point_mip(wake_texture, UV, wake_max_lod);
+    // The gradient clamps where the ring wraps, and a shader function takes
+    // one sampler setting, so its nearest level is taken here.
+    float gradient_lod = retail_isotropic_lod(UV2, vec2(textureSize(gradient_texture, 0)));
+    vec4 gradient = textureLod(gradient_texture, UV2,
+            retail_point_mip_level(gradient_lod, gradient_max_lod));
     ALBEDO = scene_output(min(wake.rgb * gradient.rgb * 0.8, vec3(1.0)));
     ALPHA = wake.a * gradient.a * COLOR.a;
 }

@@ -414,7 +414,10 @@ int FirePresenter::append_nvg_laser_beams(const std::vector<NvgLaserSource> &p_s
 		opennova::renderer::append_tracer_beam(points, count,
 				opennova::world::kNvgLaserTracerStyle, view, laser_frame_);
 		opennova::renderer::append_nvg_laser_overlay(laser_frame_,
-				r_submission.texture_index(ribbons_.smoke_texture()), p_view.fog, r_submission.frame,
+				r_submission.texture_index(ribbons_.smoke_texture(),
+						opennova::renderer::texture_stage_flags(
+								opennova::renderer::TextureStage::TracerSmoke)),
+				p_view.fog, r_submission.frame,
 				p_view.inset_view ? opennova::renderer::SceneOverlaySlot::InsetNvgLaserBeams
 								  : opennova::renderer::SceneOverlaySlot::NvgLaserBeams);
 		++drawn;

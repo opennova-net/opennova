@@ -1689,7 +1689,7 @@ void ObjectModel::apply_dynamic_material(const Ref<ShaderMaterial> &material,
 						postmultiply_material_for_index(material_index);
 				set_material_and_auxiliary_parameter(material, postmultiply, "u_diffuse", frame);
 				set_material_and_auxiliary_parameter(material, postmultiply,
-						"u_diffuse_max_lod", opennova::material_texture_max_lod(frame));
+						"u_diffuse_max_lod", opennova::texture_max_lod(frame));
 				stamp.anim_frame = frame_index;
 				q3_parameters_changed = true;
 			}

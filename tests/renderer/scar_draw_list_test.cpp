@@ -6,6 +6,7 @@
 // [orig: Scar_RenderCache @0x5CD830; Scar_RenderAllCaches @0x5CDF70]
 
 #include <runtime/renderer/scar_draw_list.h>
+#include <runtime/renderer/texture_filter.h>
 
 #include <runtime/world/collision.h>
 
@@ -303,7 +304,26 @@ void test_strip_mode_words() {
 		const uint32_t expected = strip == 27 ? 0x460651u : 0x120651u;
 		CHECK(scar_texture_strip_mode_word(strip) == expected,
 				"every strip but bhole1 selects the scorch word");
+		// The table's load word | 1 [orig: Scar_LoadTextures @0x5CC2F3]: bigscar
+		// at most three levels, the glass holes one, the rest the pixel chain;
+		// none carries 0x8.
+		const uint32_t flags = scar_texture_strip_creation_flags(strip);
+		const uint32_t word = strip == 4 ? 0x80001u : (strip >= 5 && strip <= 26) ? 0x40001u : 1u;
+		CHECK(flags == word, "the strip's creation flags are its table word | 1");
+		CHECK((flags & opennova::renderer::kTextureFlagDeviceFilter) == 0u,
+				"no scar strip takes the device mode");
 	}
+	// The chains the shipped strips get (pixel_texture_last_level): the 64 x 64
+	// scorches end at 4 x 4 (level 4), bhole1 128 x 128 at level 5, bigscar
+	// 64 x 64 after three levels (2), a 64 x 64 glass hole on its one level.
+	CHECK(opennova::renderer::pixel_texture_last_level(64, 64, scar_texture_strip_creation_flags(0)) == 4,
+			"scorch1: five levels");
+	CHECK(opennova::renderer::pixel_texture_last_level(128, 128, scar_texture_strip_creation_flags(27)) == 5,
+			"bhole1: six levels");
+	CHECK(opennova::renderer::pixel_texture_last_level(64, 64, scar_texture_strip_creation_flags(4)) == 2,
+			"bigscar: three levels");
+	CHECK(opennova::renderer::pixel_texture_last_level(64, 64, scar_texture_strip_creation_flags(5)) == 0,
+			"a glass hole: one level");
 	const opennova::renderer::ScarStripState scorch =
 			opennova::renderer::decode_scar_strip_mode(kScarModeWordScorch);
 	CHECK(scorch.src_alpha_blend, "scorch: SRCALPHA/INVSRCALPHA");

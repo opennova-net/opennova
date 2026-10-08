@@ -1,9 +1,12 @@
 #include "render/scene_overlay_compositor.h"
 #include "render/rd_glsl.h"
 #include "render/rd_uniforms.h"
+#include "render/texture_filter_device.h"
 #include "util/string_convert.h"
+#include "util/texture_path_resolver.h"
 
 #include <runtime/renderer/q3_frame.h>
+#include <runtime/renderer/texture_filter.h>
 
 #include <algorithm>
 #include <atomic>
@@ -76,7 +79,7 @@ layout(push_constant, std430) uniform OverlayPush {
 	mat4 view_projection;
 	vec4 view_right;
 	vec4 view_up;
-	uvec4 mode; // x = shading, y = geometry, z = the far depth band
+	uvec4 mode; // x = shading, y = geometry, z = the far depth band, w = the sampling
 } pc;
 
 void main() {
@@ -114,7 +117,12 @@ std::string vertex_shader_source() {
 	return source;
 }
 
-const char *kFragmentShader = R"GLSL(#version 450
+// The batch's texture samples as its stage family does (texture_filter.h
+// stage_sampler, renderer::SceneOverlayBatch::stage): mode.w's low byte is the
+// shader filter code (0 bilinear on the nearest level: the drops, the coronas,
+// the NVG laser's smoke; a SELFLUM model stage its effect's code), the next
+// byte the texture's last mip level (255 for D3DX's own chain).
+const char *kFragmentShaderTemplate = R"GLSL(#version 450
 layout(location = 0) in vec2 v_uv;
 layout(location = 1) in vec4 v_color;
 layout(location = 2) in vec2 v_uv1;
@@ -130,10 +138,14 @@ layout(push_constant, std430) uniform OverlayPush {
 
 layout(location = 0) out vec4 frag_color;
 
+@SAMPLE_EFFECT_STAGE@
+
 void main() {
+	uint filter_code = pc.mode.w & 0xFFu;
+	float max_lod = float((pc.mode.w >> 8) & 0xFFu);
 	// Gamma-domain combines into the gamma-domain scene target
 	// (shaders/color.gdshaderinc carries that contract).
-	vec4 texel = texture(overlay_texture, v_uv);
+	vec4 texel = rd_sample_effect_stage(overlay_texture, v_uv, max_lod, filter_code);
 	uint shading = pc.mode.x;
 	if (shading == 0u) {
 		// COLOROP MODULATE2X(TEXTURE, DIFFUSE), ALPHAOP MODULATE.
@@ -153,13 +165,30 @@ void main() {
 		// The NVG laser (the tracer pool's 0x3008 material): COLOR = DIFFUSE,
 		// ALPHA = DIFFUSE.a x (1 - T0.a) x (1 - T1.a), T1 on the second set;
 		// SRCALPHA / ONE blends it.
-		float t1 = texture(overlay_texture, v_uv1).a;
+		float t1 = rd_sample_effect_stage(overlay_texture, v_uv1, max_lod, filter_code).a;
 		frag_color = vec4(v_color.rgb, v_color.a * (1.0 - texel.a) * (1.0 - t1));
 	} else {
 		frag_color = v_color;
 	}
 }
 )GLSL";
+
+std::string fragment_shader_source() {
+	std::string source(kFragmentShaderTemplate);
+	splice_token(source, "@SAMPLE_EFFECT_STAGE@", kGlslSampleEffectStage);
+	return source;
+}
+
+// mode.w: the batch's filter code and its texture's last level.
+std::uint32_t sampling_word(const SceneOverlayBatch &p_batch, const SceneOverlaySubmission &p_submission) {
+	const std::uint32_t filter_code =
+			static_cast<std::uint32_t>(TextureFilterDevice::stage_filter_code(p_batch.stage)) & 0xFFu;
+	const float max_lod = p_batch.texture < p_submission.texture_max_lods.size() ?
+			p_submission.texture_max_lods[p_batch.texture] : opennova::kUnboundedMaxLod;
+	const std::uint32_t last_level =
+			static_cast<std::uint32_t>(std::clamp(max_lod, 0.0f, 255.0f) + 0.5f);
+	return filter_code | (last_level << 8);
+}
 
 bool additive(SceneOverlayShading p_shading) {
 	return p_shading == SceneOverlayShading::AdditiveModulate ||
@@ -168,7 +197,8 @@ bool additive(SceneOverlayShading p_shading) {
 
 } // namespace
 
-std::uint32_t SceneOverlaySubmission::texture_index(const Ref<Texture2D> &p_texture) {
+std::uint32_t SceneOverlaySubmission::texture_index(const Ref<Texture2D> &p_texture,
+		std::uint32_t p_creation_flags) {
 	if (p_texture.is_null())
 		return opennova::renderer::kSceneOverlayNoTexture;
 	const RID rid = p_texture->get_rid();
@@ -177,6 +207,7 @@ std::uint32_t SceneOverlaySubmission::texture_index(const Ref<Texture2D> &p_text
 			return static_cast<std::uint32_t>(i);
 	}
 	textures.push_back(rid);
+	texture_max_lods.push_back(opennova::texture_max_lod(p_texture, p_creation_flags));
 	return static_cast<std::uint32_t>(textures.size() - 1);
 }
 
@@ -258,7 +289,11 @@ int SceneOverlayModelSurfaces::append_instance(opennova::renderer::SceneOverlayS
 		}
 		opennova::renderer::append_self_lum_overlay(p_slot, placed_.data(),
 				geometry.uvs.data(), vertex_count, self_lum_rgb, p_light_scale_rgb,
-				p_fog_visibility, r_submission.texture_index(texture), r_submission.frame,
+				p_fog_visibility,
+				r_submission.texture_index(texture,
+						opennova::renderer::texture_stage_flags(
+								opennova::renderer::TextureStage::ObjectStage)),
+				r_submission.frame,
 				p_options.depth);
 		++appended;
 	}
@@ -437,7 +472,7 @@ bool SceneOverlayCompositorEffect::Impl::initialize_rd() {
 	}
 	Ref<RDShaderSPIRV> spirv;
 	const std::string errors =
-			compile_rd_spirv(rd, vertex_shader_source(), kFragmentShader, spirv);
+			compile_rd_spirv(rd, vertex_shader_source(), fragment_shader_source(), spirv);
 	if (!errors.empty()) {
 		set_status("shader_compile_failed", errors);
 		release_all();
@@ -753,7 +788,7 @@ void SceneOverlayCompositorEffect::Impl::draw(const SceneOverlaySubmission &p_su
 			write_u32(push_constants, 100, static_cast<std::uint32_t>(batch.geometry));
 			write_u32(push_constants, 104,
 					batch.depth == SceneOverlayDepth::FarBand ? 1u : 0u);
-			write_u32(push_constants, 108, 0u);
+			write_u32(push_constants, 108, sampling_word(batch, p_submission));
 			vertex_offsets[0] = static_cast<int64_t>(batch.first_vertex) * kVertexStride;
 			rd->draw_list_bind_render_pipeline(list, pipeline);
 			rd->draw_list_bind_uniform_set(list, uniform_set, 0);

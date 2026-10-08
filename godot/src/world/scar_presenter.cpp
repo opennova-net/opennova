@@ -20,6 +20,7 @@
 
 #include <runtime/renderer/render_order.h>
 #include <runtime/renderer/scar_draw_list.h>
+#include <runtime/renderer/texture_filter.h>
 #include <runtime/world/impact_scar.h>
 #include <runtime/world/present_passes.h>
 
@@ -31,6 +32,7 @@
 #include "object/object_model.h"
 #include "simulation/entity_presenter.h"
 #include "simulation/simulation.h"
+#include "util/texture_path_resolver.h"
 
 namespace godot {
 
@@ -203,6 +205,13 @@ ScarPresenter::StripMaterial &ScarPresenter::material_for_strip_(int p_strip,
 		const Ref<Texture2D> texture = texture_(p_texture_name);
 		if (texture.is_valid()) {
 			cached->material->set_shader_parameter("albedo_tex", texture);
+			// The strip samples bilinear with point mips over the chain its
+			// table word gives it (renderer::TextureStage::ImpactScar).
+			cached->material->set_shader_parameter("albedo_max_lod",
+					opennova::texture_max_lod(texture,
+							opennova::renderer::texture_stage_flags(
+									opennova::renderer::TextureStage::ImpactScar) |
+									opennova::world::scar_texture_strip_creation_flags(p_strip)));
 			cached->texture_bound = true;
 		}
 	}

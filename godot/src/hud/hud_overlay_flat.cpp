@@ -9,6 +9,7 @@
 #include "hud/font_page_glyphs.h"
 #include "util/color_convert.h"
 #include "util/string_convert.h"
+#include "util/texture_path_resolver.h"
 
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -17,6 +18,7 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/rect2.hpp>
 
+#include <runtime/renderer/texture_filter.h>
 #include <runtime/renderer/texture_load_rules.h>
 
 #include <algorithm>
@@ -38,12 +40,18 @@ using opennova::renderer::MaterialColorStage;
 // MODULATE(TEXTURE, DIFFUSE) left as COLOR has it, under the
 // SRCALPHA/INVSRCALPHA blend (renderer::hud_color_material_argb). Every other
 // command draws texel x vertex colour, so the flagged sprites keep their place
-// in the pass's order.
+// in the pass's order. Every texel is sampled as the device's fixed-function
+// stage samples it, MIN/MAG LINEAR with MIPFILTER POINT (renderer::TextureStage::
+// MapIconStrip): bilinear on the nearest level, never past icon_max_lod (the
+// TSDicon strip's last retail level; the pass's other textures carry no chain).
 constexpr const char *kMapModulate2xShader = R"(
 shader_type canvas_item;
 render_mode unshaded, blend_mix;
 
+uniform float icon_max_lod = 1000.0;
+
 varying flat float modulate2x_on;
+varying vec4 vertex_color;
 
 void vertex() {
 	modulate2x_on = 0.0;
@@ -51,9 +59,14 @@ void vertex() {
 		UV.x -= 8.0;
 		modulate2x_on = 1.0;
 	}
+	vertex_color = COLOR;
 }
 
 void fragment() {
+	vec2 texels = vec2(textureSize(TEXTURE, 0));
+	float footprint = max(length(dFdx(UV) * texels), length(dFdy(UV) * texels));
+	float level = clamp(floor(log2(max(footprint, 1.0e-8)) + 0.5), 0.0, max(icon_max_lod, 0.0));
+	COLOR = vertex_color * textureLod(TEXTURE, UV, level);
 	if (modulate2x_on > 0.5) {
 		COLOR.rgb = min(COLOR.rgb * 2.0, vec3(1.0));
 	}
@@ -235,7 +248,20 @@ void HudOverlay::ensure_map_materials_() {
 		map_modulate2x_shader_->set_code(kMapModulate2xShader);
 		map_modulate2x_material_.instantiate();
 		map_modulate2x_material_->set_shader(map_modulate2x_shader_);
+		apply_map_icon_sampling_();
 	}
+}
+
+void HudOverlay::apply_map_icon_sampling_() {
+	if (map_modulate2x_material_.is_null()) {
+		return;
+	}
+	// The strip's last retail level (renderer::TextureStage::MapIconStrip); with
+	// no strip loaded the pass's textures carry no chain to bound.
+	map_modulate2x_material_->set_shader_parameter("icon_max_lod",
+			opennova::texture_max_lod(textures_[opennova::hud::kHudTexMapIcons],
+					opennova::renderer::texture_stage_flags(
+							opennova::renderer::TextureStage::MapIconStrip)));
 }
 
 void HudOverlay::render_flat_runs_(const RID &p_item, const HudDrawList &p_list,
