@@ -89,6 +89,7 @@ add_library(opennova_runtime STATIC
     # profile — the player profile's in-memory image (player.sav + weapon.sav),
     # its load and save (witness: docs/playerinfo/player-sav-re.md)
     ${CMAKE_CURRENT_SOURCE_DIR}/profile/player_profiles.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/profile/profile_controls.cpp # the controls words the game reads
     # mission (runtime half) — the BMS event runtime + mission->world promotion,
     # the boot policy, and the ONE mission kernel (boot + state + no-net tick,
     # ADR 0042 d3) evaluated against the shared runtime world
