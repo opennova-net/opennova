@@ -83,9 +83,9 @@ std::string panel(const char *name, const Box &box, bool hidden, const std::stri
 // screen's MAIN names it. The game hides the system pointer for good as it starts [orig:
 // Game_InitSubsystems @ 0x4a725a -> Game_HideCursorLoop @ 0x7612e0], and a screen's only pointer is
 // the CURSOR texture its windows name, drawn last at the mouse [orig: CUIScene_DrawScreensAndCursor
-// @ 0x63bf60 over scene_end_frame @ 0x63e600's pick, zeroed each frame @ 0x63e606]. The mouse still
+// @ 0x63bf60 over CUIScene_EndFrame @ 0x63e600's pick, zeroed each frame @ 0x63e606]. The mouse still
 // works without one, each message's own point hit-testing the buttons [orig: Game_WindowProc @
-// 0x7624c0 -> Input_DispatchMouseEvent @ 0x761470 -> widget_process_mouse_event @ 0x647a00], so a
+// 0x7624c0 -> Input_DispatchMouseEvent @ 0x761470 -> CWnd_ProcessMouseEvent @ 0x647a00], so a
 // screen naming none is clicked blind: its buttons light under a mouse the player cannot see.
 std::string screen(const char *name, const std::string &children) {
 	return "<SCREEN>\n<NAME>" + std::string(name) +
