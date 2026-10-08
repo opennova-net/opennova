@@ -298,10 +298,11 @@ public:
 	// widget NAME; -1 = absent). Valid after configure().
 	int widget_index(const String &p_name) const;
 
-	// Activation edge, emitted by process_mouse: "widget_clicked(index)" on
-	// the release edge while the widget claimed on the button-down edge still
-	// owns the claim (the standard control-activation contract the
-	// Control-tree buttons had).
+	// The click, emitted by process_mouse: "widget_clicked(index, part)" when
+	// the claim let go over was held under the mouse with the button down the
+	// sample before, wherever the press began (part: a spin arrow's 1 up, 2
+	// down, else 0); a press on a capturing class holds the claim to it until
+	// the release (engine menu_click.h, the game's rule, D-MNU-30).
 
 	// Debug/test accessor: compile at the current size and report counts.
 	Ref<MenuDrawListStats> get_draw_list_stats();
@@ -346,7 +347,7 @@ private:
 	Vector2 design_scale_() const;
 
 	Ref<MnuDocument> document_;
-	// The press and the click over the claims (engine MenuClickLatch).
+	// The click and the press's capture over the claims (engine MenuClickLatch).
 	opennova::menu::MenuClickLatch click_;
 	bool last_sample_scrolled_ = false;
 	int32_t cursor_slot_ = -1;  // last claim's cursor texture slot

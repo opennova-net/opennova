@@ -224,6 +224,39 @@ func test_top_level_exit_control_requests_exit() -> void:
 	_cleanup(dir)
 
 
+# The menu's pump reads the left button alone: a right-button press and release
+# over EXIT clicks nothing, the left button's does [orig: CWnd_ProcessMouseEvent
+# @ 0x647b04 reads input_mask's MK_LBUTTON alone; the right button's messages
+# reach no capture, CButtonWnd_HandleNamedEvent @ 0x658340].
+func test_right_button_never_clicks() -> void:
+	var dir := _make_dir()
+	var shell = _make_shell(dir)
+	if shell == null:
+		pending("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	watch_signals(shell)
+	var driver: MenuDriver = shell.get_driver()
+	# Through Godot's input dispatch, as a real mouse arrives (the shell's gui input).
+	var shell_control: Control = shell
+	var at := shell_control.get_global_transform_with_canvas() \
+			* driver.widget_frame_rect(driver.widget_id("EXIT")).get_center()
+	for button: MouseButton in [MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_LEFT]:
+		for pressed: bool in [true, false]:
+			var event := InputEventMouseButton.new()
+			event.button_index = button
+			event.pressed = pressed
+			event.position = at
+			event.global_position = at
+			Input.parse_input_event(event)
+			await get_tree().process_frame
+		if button == MOUSE_BUTTON_RIGHT:
+			assert_signal_not_emitted(shell, "exit_to_desktop_requested",
+					"the right button never clicks a window")
+	assert_signal_emitted(shell, "exit_to_desktop_requested", "the left button's click reaches EXIT")
+	_cleanup(dir)
+
+
 func test_pop_screen_with_no_history_does_nothing() -> void:
 	# POP_SCREEN pops a history that is not empty and otherwise does nothing: it
 	# never exits the game or resumes the mission (docs/mnu/menu-re.md).

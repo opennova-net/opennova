@@ -11,6 +11,7 @@
 // Witness record: docs/mnu/menu-re.md ("Widget render dispatch").
 
 #include <runtime/hud/game_font.h>
+#include <runtime/menu/menu_click.h>
 #include <runtime/menu/menu_credits.h>
 #include <runtime/menu/menu_edit.h>
 #include <runtime/menu/menu_table.h>
@@ -249,6 +250,11 @@ struct MenuFrameState {
 	// claim_at.
 	int32_t cursor_claim = -1;
 	int32_t cursor_spin_part = 0;
+	// The mouse capture the pump's last sample honored (MenuClickLatch's), -1 none: where no claim
+	// stamped a cursor the pass draws the captured window's own-or-root one [orig: CUIScene_EndFrame
+	// @ 0x63e6e3..0x63e6f4, g_UIMouseCaptureWnd's cursor when g_UIFrameCursorTexture is 0].
+	int32_t cursor_capture = -1;
+	int32_t cursor_capture_part = 0;
 	// The custom-draw widget an embedder mounts its own Control over (a map
 	// window), -1 none: every op the walk emits after that widget's subtree
 	// joins the menu-top overlay, so the later siblings still paint over the
@@ -381,31 +387,6 @@ const char *menu_frame_note_token(MenuFrameNoteCode code);
 MenuFrameNoteBasis menu_frame_note_basis(MenuFrameNoteCode code);
 // "witnessed", "port_policy", "deferred".
 const char *menu_frame_note_basis_token(MenuFrameNoteBasis basis);
-
-// OpenNova's click over the pump's claims: the release edge over the widget the press edge
-// claimed; moving off it before the release cancels, and a press a scrollbar part took never arms
-// one (the part keeps the mouse until the release, like retail's child-BUTTON capture). The game's
-// frame (godot/src/mnu/menu_frame.cpp) and the editor's menu preview (DI-34) take their clicks from
-// it. Retail clicks the widget the pump held down the sample before wherever the press began
-// [orig: CWnd_ProcessMouseEvent @ 0x647b14: the verdict 3 at +0xE8 and the button up], so a press
-// begun on another widget and released over this one clicks it there (D-MNU-30).
-struct MenuClickLatch {
-	int pressed = -1; // the widget the press edge claimed, -1 none
-	bool down = false; // the button as the last sample had it
-	// One sample: the claim (-1 none), the button, and whether a press edge here may arm (false: a
-	// scrollbar part took it). The widget the sample clicks, -1 none.
-	int sample(int claim, bool button_down, bool armable = true) {
-		int clicked = -1;
-		if (button_down && !down && claim >= 0 && armable) {
-			pressed = claim;
-		} else if (!button_down && down) {
-			if (pressed >= 0 && pressed == claim) clicked = pressed;
-			pressed = -1;
-		}
-		down = button_down;
-		return clicked;
-	}
-};
 
 // Deep in-process module: configure() walks the screen once (interning every
 // texture and font name it will reference); compile() emits one frame's draw
@@ -667,12 +648,17 @@ public:
 	// hover/press); hit + button down -> pressed (3); hit + button up ->
 	// hovered (2); every other row's hover/press clears (0). Hidden subtrees
 	// never hit. The mouse is RAW screen coordinates against the scaled
-	// rects. The cursor rides back for the unscaled cursor pass: the claimed
-	// widget's own CURSOR else its root window's (a spin arrow's own when the
-	// claim is over one), counting only a cursor whose texture loaded, else
-	// (nothing claimed or no cursor) the capturing scroll part owner's the same
-	// way, else the first root window with one [orig: CWnd_ProcessMouseEvent
-	// @ 0x647ad0..0x647b09; CUIScene_EndFrame @ 0x63e600].
+	// rects. While a press holds the mouse capture (`capture`, MenuClickLatch)
+	// no window but the captured one takes the claim, and it takes it while its
+	// own rect holds the point, its children not consulted (a spin arrow's, the
+	// arrow's rect) [orig: CWnd_ProcessMouseEvent @ 0x647a88..0x647b02]. The
+	// cursor rides back for the unscaled cursor pass: the claimed widget's own
+	// CURSOR else its root window's (a spin arrow's own when the claim is over
+	// one), counting only a cursor whose texture loaded, else (nothing claimed
+	// or no cursor) the captured window's the same way, then the capturing
+	// scroll part owner's, else the first root window with one [orig:
+	// CWnd_ProcessMouseEvent @ 0x647ad0..0x647b09; CUIScene_EndFrame
+	// @ 0x63e600, the capture's cursor @ 0x63e6e3].
 	struct MouseClaim {
 		int hovered = -1;               // claimed widget index; -1 = none
 		int spin_part = 0;              // the claimed spin list's arrow (1 up, 2 down)
@@ -690,14 +676,28 @@ public:
 		int scroll_value = 0;
 	};
 	MouseClaim pump_mouse(MenuFrameState &io_state, float mouse_x,
-			float mouse_y, bool button_down, float scale_x, float scale_y);
+			float mouse_y, bool button_down, float scale_x, float scale_y,
+			const MenuPumpWindow &capture = MenuPumpWindow());
 	// The claim pump_mouse would make at a point, without its state writes (no
 	// scrollbar interaction, no hover or press): the widget the claim walk finds,
 	// the spin arrow under the point and the cursor the claim stamps. What an
 	// embedder that never pumps (the editor's picture) stamps the cursor pass with
 	// (MenuFrameState::cursor_claim).
 	MouseClaim claim_at(const MenuFrameState &state, float mouse_x, float mouse_y,
-			float scale_x, float scale_y) const;
+			float scale_x, float scale_y,
+			const MenuPumpWindow &capture = MenuPumpWindow()) const;
+	// The claim as the click latch reads it (MenuClickLatch::Claim): the window
+	// (none when a scrollbar part owns the sample: the part, a child button of
+	// the scrollbar, is the window the pump holds, never its owner), whether it
+	// is live (visible in the hierarchy; a spin arrow, its list live and the
+	// arrow enabled) and whether a press there takes the capture
+	// (menu_window_captures; a spin arrow's always).
+	MenuClickLatch::Claim click_claim(const MouseClaim &claim,
+			const MenuFrameState &state) const;
+	// Whether the pump reaches a window of the latch's this sample
+	// (widget_reached; a spin arrow, its list's).
+	bool pump_window_reached(const MenuPumpWindow &window,
+			const MenuFrameState &state) const;
 	// The cursor the cursor pass draws over `state` (emit_cursor): the widget
 	// whose CURSOR it is (-1: none, so nothing is drawn: a screen whose windows
 	// name no CURSOR that loads has no pointer), its texture slot and the native
@@ -949,10 +949,18 @@ private:
 	int32_t inherited_cursor_(int index) const;
 	int inherited_cursor_owner_(int index) const;
 	// The cursor a claim shows: the hovered widget's (the arrow's when the
-	// claim is over a spin arrow), then the scroll capture's, then the first
-	// root's that loaded one; the widget whose CURSOR that is (-1: none).
-	int32_t claim_cursor_(int hovered, int spin_part) const;
-	int claim_cursor_owner_(int hovered, int spin_part) const;
+	// claim is over a spin arrow), then a press's capture's (-1 none), then the
+	// scroll capture's, then the first root's that loaded one; the widget whose
+	// CURSOR that is (-1: none).
+	int32_t claim_cursor_(int hovered, int spin_part, int capture,
+			int capture_part) const;
+	int claim_cursor_owner_(int hovered, int spin_part, int capture,
+			int capture_part) const;
+	// The pump's claim while a press holds the capture: the captured window
+	// alone, where its own rect (a spin arrow's, the arrow's) holds the point and
+	// the pump reaches it.
+	void capture_hit_(const MenuFrameState &state, const MenuPumpWindow &capture,
+			float mx, float my, float sx, float sy, int *io_hit, int *io_part) const;
 	int32_t first_root_cursor_() const;
 	int first_root_cursor_owner_() const;
 

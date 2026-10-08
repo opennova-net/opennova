@@ -780,7 +780,7 @@ void click(MenuRuntime &rt, FakeFrame &frame, int index, uint32_t now) {
 	frame.claim = index;
 	rt.process_mouse(5, 5, true, now);
 	rt.process_mouse(5, 5, false, now);
-	rt.on_widget_clicked(index);
+	rt.on_widget_clicked(index, 0);
 }
 
 // The pump's sound edges through the runtime (menu/menu_sound.h), per window as the game's
@@ -816,7 +816,7 @@ void test_sound_edges() {
 	rt.process_mouse(5, 5, true, 0);
 	CHECK(sounds() == "OVER_B");
 	// The frame's click fires inside its release pump, ahead of the sample.
-	rt.on_widget_clicked(1);
+	rt.on_widget_clicked(1, 0);
 	rt.process_mouse(5, 5, false, 0);
 	CHECK(sounds() == "OVER_B CLICK_B");
 	rt.process_mouse(6, 5, false, 0);
@@ -867,19 +867,19 @@ void test_mouse() {
 	// A disabled widget's click does nothing; any other fires SELECTED and the
 	// activation.
 	rec.events.clear();
-	rt.on_widget_clicked(10);
+	rt.on_widget_clicked(10, 0);
 	CHECK(rec.events.empty());
-	rt.on_widget_clicked(13);
+	rt.on_widget_clicked(13, 0);
 	CHECK(rec.count(MenuEvent::Kind::WidgetActivated) == 1);
 
 	// The single open dropdown: a click opens, a second combo click closes.
 	frame.log.clear();
-	rt.on_widget_clicked(6);
+	rt.on_widget_clicked(6, 0);
 	CHECK(rt.is_combo_popup_open(8) && frame.saw("popup 6 1"));
-	rt.on_widget_clicked(6);
+	rt.on_widget_clicked(6, 0);
 	CHECK(!rt.is_combo_popup_open(8) && frame.saw("popup 6 0"));
 	// While open it owns the mouse: a row press selects and closes...
-	rt.on_widget_clicked(6);
+	rt.on_widget_clicked(6, 0);
 	frame.popup_row = 1;
 	frame.claim = 3; // the main pump must NOT run
 	rec.events.clear();
@@ -890,7 +890,7 @@ void test_mouse() {
 			rec.count(MenuEvent::Kind::HoverChanged) == 0);
 	rt.process_mouse(50, 50, false, 0);
 	// ...a press on the closed cell (design rect 10,20 100x40 at scale 2) is dead...
-	rt.on_widget_clicked(6);
+	rt.on_widget_clicked(6, 0);
 	frame.popup_row = -1;
 	rt.process_mouse(40, 60, true, 0);
 	CHECK(rt.is_combo_popup_open(8));
@@ -900,7 +900,7 @@ void test_mouse() {
 	CHECK(!rt.is_combo_popup_open(8));
 	rt.process_mouse(900, 900, false, 0);
 	// A screen switch closes it too.
-	rt.on_widget_clicked(6);
+	rt.on_widget_clicked(6, 0);
 	rt.show_screen("OPTIONS");
 	CHECK(!rt.is_combo_popup_open(8));
 	rt.show_screen("MAIN");
@@ -998,10 +998,10 @@ void test_mouse() {
 	rt.process_mouse(5, 5, true, 0); // an arrow press: nothing yet
 	CHECK(rt.selected_row(9) == 1);
 	rt.process_mouse(5, 5, false, 0);
-	rt.on_widget_clicked(7);
+	rt.on_widget_clicked(7, 1);
 	CHECK(rt.selected_row(9) == 2 && rec.last(MenuEvent::Kind::Sound)->text2 == "UP_CLICK");
 	frame.spin_arrow = 2;
-	rt.on_widget_clicked(7);
+	rt.on_widget_clicked(7, 2);
 	CHECK(rt.selected_row(9) == 1);
 	frame.spin_arrow = 0;
 
