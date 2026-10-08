@@ -237,10 +237,11 @@ public:
 	const ClipFire &clip_fire() const { return clip_fire_; }
 	std::vector<std::string> event_fire_words(uint32_t trigger) const;
 	// The sounds the clip's events fired over the ticks the clock ran through since the last call
-	// (clip_events_due: never over a seek, a clip newly chosen, a pause; from the clip's tick of each, a
-	// repeated one-shot's taken again from 0), each planned through `selector` (plan_clip_event) and
-	// numbered from `next_seq` on, kept with the last ones fired, and returned. Nothing while no clip
-	// plays. Each voice's wave is the project's file of its name (`scan`, find_clip_sound_waves).
+	// (clip_events_due: never over a seek, a clip newly chosen, a pause, the run from where a seek put the
+	// clock heard whole, PreviewClock::heard_from; from the clip's tick of each, a repeated one-shot's taken
+	// again from 0), each planned through `selector` (plan_clip_event) and numbered from `next_seq` on, kept
+	// with the last ones fired, and returned. Nothing while no clip plays. Each voice's wave is the project's
+	// file of its name (`scan`, find_clip_sound_waves).
 	std::vector<ClipSoundFired> fire_sounds(const PreviewClock &clock, const AssetScan *scan,
 			audio::SoundSelector &selector, uint64_t &next_seq);
 	// The sounds the clip's event at `frame` plays, once, as a press of its mark on the timeline asks
