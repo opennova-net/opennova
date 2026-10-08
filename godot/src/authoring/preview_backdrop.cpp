@@ -1,8 +1,6 @@
 #include "authoring/preview_backdrop.h"
 
 #include <godot_cpp/classes/base_material3d.hpp>
-#include <godot_cpp/classes/compositor.hpp>
-#include <godot_cpp/classes/compositor_effect.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/quad_mesh.hpp>
@@ -13,10 +11,7 @@
 #include <godot_cpp/variant/packed_color_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/vector2.hpp>
-#include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
-
-#include "render/frame_fx.h"
 
 namespace godot {
 
@@ -47,17 +42,13 @@ namespace {
 // hair nearer, so a depth cleared to 0 lets it through), unlit, behind whatever the picture draws.
 constexpr const char *kSpatialHead = R"(shader_type spatial;
 render_mode unshaded, cull_disabled, shadows_disabled, fog_disabled;
-uniform bool backdrop_undecoded = false;
 )";
 constexpr const char *kSpatialBody = R"(
 void vertex() {
 	POSITION = vec4(VERTEX.xy * 2.0, 0.0000005, 1.0);
 }
 void fragment() {
-	vec3 shown = preview_backdrop(SCREEN_UV.y, FRAGCOORD.xy);
-	ALBEDO = backdrop_undecoded
-			? mix(shown / 12.92, pow((shown + vec3(0.055)) / 1.055, vec3(2.4)), step(vec3(0.04045), shown))
-			: shown;
+	ALBEDO = preview_backdrop(SCREEN_UV.y, FRAGCOORD.xy);
 }
 )";
 
@@ -114,24 +105,6 @@ void set_preview_backdrop(MeshInstance3D &backdrop, PreviewBackground background
 	const Ref<ShaderMaterial> material = backdrop.get_material_override();
 	if (material.is_valid()) set_preview_backdrop(**material, background);
 	backdrop.set_visible(!opennova::editor::preview_backdrop(background).own);
-}
-
-void follow_display_decode(MeshInstance3D &backdrop, const Camera3D *camera) {
-	bool decoded = true;
-	const Ref<Compositor> own = camera ? camera->get_compositor() : Ref<Compositor>();
-	if (own.is_valid()) {
-		decoded = false;
-		const TypedArray<Ref<CompositorEffect>> effects = own->get_compositor_effects();
-		for (int64_t i = 0; i < effects.size() && !decoded; ++i) {
-			const Ref<CompositorEffect> effect = effects[i];
-			decoded = effect.is_valid() && Object::cast_to<FrameFxCompositorEffect>(effect.ptr()) != nullptr;
-		}
-	}
-	const Ref<ShaderMaterial> material = backdrop.get_material_override();
-	if (material.is_null()) return;
-	const bool undecoded = !decoded;
-	if (bool(material->get_shader_parameter("backdrop_undecoded")) != undecoded)
-		material->set_shader_parameter("backdrop_undecoded", undecoded);
 }
 
 Ref<ShaderMaterial> make_preview_backdrop_canvas(const Color &own) {
