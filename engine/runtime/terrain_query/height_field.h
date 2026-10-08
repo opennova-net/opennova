@@ -94,7 +94,8 @@ float height_field_height_world_bilinear(const TerrainHeightField &f, float worl
 // The one per-cell normal kernel shared by the generated terrain normal atlas
 // and runtime surface queries. Inputs are the raw16 neighbours around the cell.
 // [orig: Terrain_GenerateNormalMap @0x603210: (left-right)/256,
-// (back-forward)/256, unit up, then normalize]
+// (back-forward)/256, up 2 (two one-sided unit-up vectors summed), then
+// normalize]
 TerrainSurfaceNormal height_field_normal_from_raw16(
 		uint16_t x_minus, uint16_t x_plus,
 		uint16_t z_minus, uint16_t z_plus);
