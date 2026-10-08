@@ -13,6 +13,7 @@
 
 #include <net/npwire/ingame_decode.h> // LoadoutSubmit / WeaponLoadout
 
+#include <runtime/inmatch/game_config.h> // GameConfig::class_allow_mask
 #include <runtime/inmatch/napi_np_connection.h>
 
 namespace opennova::world {
@@ -78,6 +79,27 @@ bool loadout_envelope_accepted(const LoadoutSubmit &req, uint32_t game_type);
 GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 										  uint16_t class_allow_mask,
 										  const world::WeaponTable *table);
+
+// The rebuilt kit onto the slot: the retained 0x5A body the re-sends answer with, the
+// authority ammo pools and loaded-round buckets, and (with a weapon table) the
+// host-side slot rows — every granted combo with its drawn clip replaces the previous
+// rows. A table-less host keeps its rows (the lazy first-fire seed).
+// [orig: WeaponSlotPool_ResetAllEntries + WeaponSlotTable_LoadAllFromDefs +
+//  WeaponSlots_RecalculateAmmoFromCapacity, NapiNPServerMsg_HandlePlayerLoadout
+//  @0x515DB5..0x515F4D and PlayerSlot_InitWeaponsFromLoadout @0x515571..0x51577C]
+void apply_granted_loadout(NapiNPConnection &conn, const GrantedWeaponLoadout &grant,
+                           bool rebuild_rows);
+
+// The deploy's kit rebuild: the slot's weapon table, ammo pools and clips rebuilt
+// from its loadout buffer (the last accepted 0x2F's entries and counts under the
+// stamped class), so a redeployed player starts every life with the kit it was
+// granted, full again. Nothing else changes: no class stamp, no damage-class table,
+// no carry-flag clear, no cooldown. A slot with no buffer, or a host with no weapon
+// table, keeps its state. (D-NET-378)
+// [orig: PlayerSlot_InitWeaponsFromLoadout @0x515550, called from
+//  Server_ProcessPlayerDeath @0x5178E1 on a deploy that is not a revive]
+void PlayerSlot_InitWeaponsFromLoadout(const GameConfig &config, NapiNPConnection &conn,
+                                       const world::WeaponTable &table);
 
 // The player's live soldier class (entity+660), the header byte a current-slot-list
 // re-send carries.

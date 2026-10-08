@@ -60,8 +60,12 @@ public:
 		std::function<bool()> reseed_on_side_change;
 		// Re-arm the joiner 0x2F loadout-submission seam.
 		std::function<void()> push;
-		// L revived on an ACK-qualified redeploy release: rebuild the respawn
-		// loadout (Player_InitPlayer's weapon leg + its view/map resets).
+		// L revived on an ACK-qualified redeploy release: the view/map resets.
+		// The kit is the release bundle's 0x5A, already folded by
+		// apply_authoritative: retail's client rebuilds no kit of its own at a
+		// redeploy (D-NET-378). [orig: Player_InitPlayer @0x4E15F0, called only
+		//  from Game_StartMission @0x525BBC and NapiNPClientMsg_TeamAssign
+		//  @0x431B14; NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0]
 		std::function<void()> respawn;
 	};
 	KitSeams kit_seams;

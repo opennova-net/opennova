@@ -932,26 +932,25 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	world::SpawnPointResult pose = world::resolve_player_spawn_pose(
 			world, player->handle, target_zone, conn.reply.player_slot,
 			player->team, config.game_type, slot_state);
-	// A medic revive lands the player on the pose the revive transaction
-	// saved (its death position raised 0x4000) instead of a marker, and the
-	// revive latch (+89932) skips the 620-tick spawn protection.
-	// [orig: GameEvent_RevivePlayer @0x517DCD..0x517E09 saves; the deploy leg
-	//  reads the latch @0x51791C]
+	// A medic revive lands the player on the position the revive saved (its
+	// death position raised 0x4000) after the placement ran, so the angles stay
+	// the placement's: the picked marker's words, or the body's own when nothing
+	// was picked (D-NET-377). The revive latch (+89932) also skips the spawn
+	// protection. [orig: Server_PositionPlayerForSpawn @0x50D60A..0x50D62A;
+	//  GameEvent_RevivePlayer @0x517DCD..0x517E09 saves; the latch @0x51791C]
 	const bool revive_deploy = conn.reply.revive_pose_valid;
-	if (revive_deploy) {
-		player->position.x = opennova::io::fp16_16_to_float(conn.reply.revive_pos[0]);
-		player->position.y = opennova::io::fp16_16_to_float(conn.reply.revive_pos[1]);
-		player->position.z = opennova::io::fp16_16_to_float(conn.reply.revive_pos[2]);
-		player->yaw = conn.reply.revive_yaw;
-		player->pitch = conn.reply.revive_pitch;
-		player->roll = conn.reply.revive_roll;
-		conn.reply.revive_pose_valid = false;
-	} else if (pose.found) {
+	if (pose.found) {
 		player->position = pose.position;
 		player->yaw = pose.yaw;
 		player->pitch = pose.pitch;
 		player->roll = pose.roll;
-	} else {
+	}
+	if (revive_deploy) {
+		player->position.x = opennova::io::fp16_16_to_float(conn.reply.revive_pos[0]);
+		player->position.y = opennova::io::fp16_16_to_float(conn.reply.revive_pos[1]);
+		player->position.z = opennova::io::fp16_16_to_float(conn.reply.revive_pos[2]);
+		conn.reply.revive_pose_valid = false;
+	} else if (!pose.found) {
 		// No authored marker: the deploy transaction restores the position
 		// recorded by the previous Entity_ResetToSpawnState. Keeping this in the
 		// shared release makes C2S, wave, and listen-host paths identical.
@@ -988,24 +987,26 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 				world::to_fixed(player->position.y),
 				world::to_fixed(player->position.z),
 		};
-		// A marker deploy keeps the placement's heading word (D-NET-376) [orig: @0x50D3F7].
-		const int32_t heading = pose.found && !revive_deploy ? pose.heading_bam
-				: world::bam_heading_from_mission_yaw_deg(player->yaw);
+		// The placement's heading word (D-NET-376), a revive's included; with no
+		// pick the body keeps its own word (D-NET-377) [orig: @0x50D3F7; @0x50D60A].
+		const int32_t heading = pose.found ? pose.heading_bam : motor->heading;
 		world::infantry_respawn_snap(*motor, motor_position, heading, player->health);
 	}
 	// [orig: Server_ProcessPlayerDeath @0x5178aa]
     if (player->handle == world.cached.local_player && world.local_player_state != nullptr)
         world.local_player_state->reset_for_new_round();
-	// A deploy that is not a medic revive, of a slot that is not a spectator,
-	// removes the devices the player placed in its last life, each through the
-	// notifying removal, after the spawn-state reset and ahead of the loadout.
-	// The devices stay armed from the death until this deploy.
+	// A deploy that is not a medic revive removes the devices a non-spectator
+	// placed in its last life (each through the notifying removal; they stay
+	// armed from the death until here), then rebuilds the slot's kit from its
+	// loadout buffer; a revived player keeps the kit it died with (D-NET-378).
 	// [orig: Server_ProcessPlayerDeath @0x517740 — the revive latch test
 	//  @0x5178C5, the spectator latch test @0x5178CD, the
-	//  Entity_RemovePlacedDevicesByOwner call @0x5178D8, ahead of the
+	//  Entity_RemovePlacedDevicesByOwner call @0x5178D8, the
 	//  PlayerSlot_InitWeaponsFromLoadout call @0x5178E1]
-	if (!revive_deploy && !conn.link.spectator)
-		world.commands.remove_placed_devices_by_owner(player->handle);
+	if (!revive_deploy) {
+		if (!conn.link.spectator) world.commands.remove_placed_devices_by_owner(player->handle);
+		PlayerSlot_InitWeaponsFromLoadout(config, conn, world.tables.weapons);
+	}
 	conn.discard_pre_deploy_uplinks = true;
 	// [orig: Server_ProcessPlayerDeath @0x517791 `and byte ptr [esi+15F38h], 0EFh`]
 	conn.link.respawn_pending = false;
@@ -1036,6 +1037,9 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 					world, target_zone, player->handle, selected))
 			world.vehicles.attach_to_seat(player->handle, selected);
 	}
+	// Retail sends this 0x5A only after the rebuild, never on a revive deploy; our
+	// joiner's deploy release still keys on it, so it rides every deploy (D-NET-379).
+	// [orig: Server_SendWeaponSlotListToPlayer @0x5178F2, under the @0x5178C5 test]
 	replies.push_back(make_protocol_message(
 			0x5A, build_current_loadout_reply(
 					conn.reply.last_loadout_reply, player->player_class)));
@@ -1502,24 +1506,15 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				const GrantedWeaponLoadout grant = conn.link.spectator
 						? GrantedWeaponLoadout{}
 						: grant_weapon_loadout(req, config.class_allow_mask, armory);
-				// Retain the GRANTED body: the deploy-release bundle re-sends it (the client's
-				// 0x5A apply is the deploy un-latcher — resets dword_81474C; §5.30, D-NET-156).
-				st.last_loadout_reply = encode_weapon_loadout(grant.reply);
-				st.ammo_pools = grant.ammo_pools;
-                st.shared_clips = grant.shared_clips;
-				// The rebuilt host-side slot table: every granted combo with its drawn clip
-				// replaces the previous rows (the 0x06 pipeline used to seed a full clip on
-				// first fire; the accept now owns the rows retail's rebuild leaves behind).
-				// A table-less host keeps the lazy first-fire seed.
-				// [orig: WeaponSlotPool reset + WeaponSlotTable_LoadAllFromDefs +
-				//  WeaponSlots_RecalculateAmmoFromCapacity @0x515db5..0x515f4d]
+				// The accepted entries become the slot's loadout buffer, which every
+				// deploy rebuilds the kit from (D-NET-378) [orig: @0x515CBD..0x515D83].
+				if (!conn.link.spectator) {
+					st.loadout_buffer = req;
+					st.loadout_buffer.player_class = grant.reply.avatar_class;
+					st.loadout_buffer_set = true;
+				}
+				apply_granted_loadout(conn, grant, armory != nullptr);
 				if (armory != nullptr) {
-					conn.weapon_slots.clear();
-					for (const GrantedWeaponLoadout::Row &row : grant.rows) {
-						WeaponSlotState &slot = conn.weapon_slots[row.combo];
-						slot.adm_index = row.adm_index;
-						slot.clip = row.clip;
-					}
 					// The accept points the entity's EquippedSlot at the submitted slot and
 					// keeps it only when that slot's def is NoSelect.
 					// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515f52..0x515f8a]

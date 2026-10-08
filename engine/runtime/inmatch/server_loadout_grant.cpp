@@ -195,6 +195,40 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 	return grant;
 }
 
+void apply_granted_loadout(NapiNPConnection &conn, const GrantedWeaponLoadout &grant,
+                           bool rebuild_rows) {
+	SessionReplyState &st = conn.reply;
+	// Retain the GRANTED body: the deploy-release bundle re-sends it (the client's
+	// 0x5A apply is the deploy un-latcher — resets dword_81474C; §5.30, D-NET-156).
+	st.last_loadout_reply = encode_weapon_loadout(grant.reply);
+	st.ammo_pools = grant.ammo_pools;
+	st.shared_clips = grant.shared_clips;
+	// The 0x06 pipeline used to seed a full clip on first fire; the rebuild now owns
+	// the rows retail's leaves behind.
+	if (!rebuild_rows) return;
+	conn.weapon_slots.clear();
+	for (const GrantedWeaponLoadout::Row &row : grant.rows) {
+		WeaponSlotState &slot = conn.weapon_slots[row.combo];
+		slot.adm_index = row.adm_index;
+		slot.clip = row.clip;
+	}
+}
+
+void PlayerSlot_InitWeaponsFromLoadout(const GameConfig &config, NapiNPConnection &conn,
+                                       const world::WeaponTable &table) {
+	if (!conn.reply.loadout_buffer_set || table.empty()) return;
+	// The rebuild loads the buffer's names over a fresh table, seeds the pools from
+	// the defs under the slot's class, sets each entry's pool from its requested
+	// count (min(count, maxclips) clips, else startrounds) and draws the clips again
+	// [orig: @0x515571..0x5155A9, the entry walk @0x51560D..0x515752, the final
+	//  recalc @0x51577C] -- the accept's own rebuild over the same entries, so the
+	// grant reproduces it, the 0x5A body the deploy re-sends included
+	// [orig: Server_SendWeaponSlotListToPlayer @0x5178F2 walks the rebuilt table].
+	apply_granted_loadout(conn,
+			grant_weapon_loadout(conn.reply.loadout_buffer, config.class_allow_mask, &table),
+			/*rebuild_rows=*/true);
+}
+
 // The player's live soldier class (entity+660), the header byte a current-slot-list re-send carries
 // [orig: Server_SendWeaponSlotListToPlayer @0x502550 reads player+89820 = player[22455]].
 uint8_t current_player_class(const NapiNPConnection &conn, const world::World *world) {
