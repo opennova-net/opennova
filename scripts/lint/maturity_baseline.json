@@ -32,7 +32,10 @@
     "formats/def/def_schema_properties.cpp",
     "formats/def/def_write.cpp",
     "formats/def/def_write_record.cpp",
-    "formats/def/def_compose.cpp"
+    "formats/def/def_compose.cpp",
+    "formats/png",
+    "formats/pcx/pcx_quantize.cpp",
+    "formats/tga/tga_source.cpp"
   ],
   "counters": {
     "cpp_binding_console_writes": 0,
@@ -42,7 +45,7 @@
     "gd_foreign_private_accesses": 1,
     "gd_prints_outside_debug": 0,
     "gd_test_production_subclasses": 15,
-    "godot_orig_cites": 757,
+    "godot_orig_cites": 755,
     "godot_src_dictionary_returns": 28,
     "has_method_guards": 0,
     "oversize_cpp_files": 0,

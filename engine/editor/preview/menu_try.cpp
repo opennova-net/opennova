@@ -6,6 +6,7 @@
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
 #include <runtime/menu/menu_sound.h>
+#include <runtime/profile/player_profiles.h>
 
 namespace opennova::editor {
 
@@ -138,7 +139,8 @@ bool MenuTry::start(const MenuTrySource &source, const std::string &file, const 
 	outcomes_.clear();
 	settings_.clear();
 	sounds_.clear();
-	bindings_ = controls::BindingSet();
+	profile_ = playersav::ProfileRecord{};
+	profile_.bindings = profile::default_binding_table();
 	runtime_.screen_history().clear();
 	runtime_.set_game_code(std::string());
 	started_ = open_(file, screen);
@@ -181,8 +183,9 @@ bool MenuTry::open_(const std::string &file, const std::string &screen) {
 }
 
 void MenuTry::prepare_() {
-	options_.prepare(runtime_, bindings_);
+	options_.prepare(runtime_, &profile_);
 	options_.apply_policy(runtime_);
+	options_.seed_profile(runtime_, &profile_);
 	commands_.wire(runtime_, in_mission_);
 	flow_.clear_rows();
 	if (!commands_.mission_lists().empty() && source_ && source_->missions) {
@@ -229,9 +232,10 @@ bool MenuTry::key(const MenuTrySource &source, const menu::MenuKeyInput &key) {
 	remap.escape = key.vk == 0x1B;
 	remap.shift = key.shift;
 	remap.vk = key.vk;
-	const int effects = options_.consume(runtime_, bindings_, remap);
+	const uint32_t revision = options_.bindings().revision();
+	const int effects = options_.consume(runtime_, remap);
 	bool taken = (effects & menu::OptionsScreen::Consumed) != 0;
-	if (effects & menu::OptionsScreen::PersistBindings)
+	if (options_.bindings().revision() != revision)
 		setting_("CONTROL_MAPPING", "binding", "changed (the sandbox's bindings: nothing saved)");
 	if (!taken) taken = runtime_.handle_key(key);
 	source_ = nullptr;
@@ -346,7 +350,7 @@ void MenuTry::on_event_(const menu::MenuEvent &event) {
 	switch (event.kind) {
 	case Kind::ScreenChanged: {
 		// A screen change drops an armed remap (options_menu_controller.gd _on_screen_changed).
-		options_.end_remap(runtime_, bindings_, true);
+		options_.end_remap(runtime_, true);
 		if (breadcrumb_.empty() || breadcrumb_.back().file != file_ || breadcrumb_.back().screen != event.text)
 			breadcrumb_.push_back({ file_, event.text });
 		if (breadcrumb_.size() > kBreadcrumbKept)
@@ -428,10 +432,11 @@ void MenuTry::on_event_(const menu::MenuEvent &event) {
 		if (kind == kCheckBox) setting_(event.text, "checkbox", runtime_.is_widget_checked(event.id) ? "checked" : "unchecked");
 		else if (kind == kRadio || kind == kRadioEdit) setting_(event.text, "radio", "checked");
 		// The Options surface's own controls (the device radios, DEFAULTS, CLEAR_KEY, its ACCEPT), over the
-		// sandbox's bindings.
+		// sandbox's profile record.
 		const std::string screen = runtime_.current_screen();
-		const int effects = options_.activate(runtime_, bindings_, event.text);
-		if (effects & menu::OptionsScreen::PersistBindings)
+		const uint32_t revision = options_.bindings().revision();
+		const int effects = options_.activate(runtime_, &profile_, event.text);
+		if (options_.bindings().revision() != revision)
 			setting_("CONTROL_MAPPING", "binding", "changed (the sandbox's bindings: nothing saved)");
 		// The in-game dialog's OK and Cancel keep or put back what it holds, then show the menu again
 		// (options_menu_controller.gd; the sandbox keeps what it holds either way).
@@ -453,7 +458,7 @@ void MenuTry::on_event_(const menu::MenuEvent &event) {
 			on_command_(menu::MenuCommand::StartMission, name);
 			return;
 		}
-		options_.arm(runtime_, bindings_, event.id, event.value);
+		options_.arm(runtime_, event.id, event.value);
 		return;
 	}
 	case Kind::MusicVar:
