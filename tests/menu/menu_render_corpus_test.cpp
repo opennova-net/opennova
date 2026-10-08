@@ -315,10 +315,14 @@ const MenuQuad *quad_at(const MenuDrawList &list, int32_t slot, int x, int y) {
 	return nullptr;
 }
 
-// The quad's texel band [top, bottom) in a texture `height` texels tall.
+// The quad's texel band [top, bottom) in a texture `height` texels tall: its V runs over
+// texel rows top + 0.5 .. bottom + 0.5, the strip's half texel at both ends
+// [orig: Render_DrawTiledTextureStrip @ 0x67b058].
 bool band_is(const MenuQuad *q, int height, int top, int bottom) {
-	return q != nullptr && height > 0 && std::lround(q->v0 * static_cast<float>(height)) == top &&
-			std::lround(q->v1 * static_cast<float>(height)) == bottom;
+	if (q == nullptr || height <= 0) return false;
+	const float h = static_cast<float>(height);
+	return std::fabs(q->v0 * h - (static_cast<float>(top) + 0.5f)) < 1.0e-3f &&
+			std::fabs(q->v1 * h - (static_cast<float>(bottom) + 0.5f)) < 1.0e-3f;
 }
 
 bool same_draw(const MenuDrawList &a, const MenuDrawList &b) {

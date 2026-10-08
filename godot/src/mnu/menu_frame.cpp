@@ -1,5 +1,6 @@
 #include "mnu/menu_frame.h"
 #include "hud/font_page_glyphs.h"
+#include "render/d3d9_raster_device.h"
 #include "util/color_convert.h"
 #include "mnu/menu_draw_list_stats.h"
 #include "util/string_convert.h"
@@ -55,19 +56,21 @@ int positive_mod(int value, int divisor) {
 	return result < 0 ? result + divisor : result;
 }
 
-Color sample_bilinear(const Ref<Image> &image, float u, float v) {
+// A bilinear sample of a WRAP-addressed texture at a UV: the four texels around
+// (u * W - 0.5, v * H - 0.5), their indices wrapped.
+Color sample_bilinear_wrap(const Ref<Image> &image, float u, float v) {
 	const int width = image->get_width();
 	const int height = image->get_height();
-	const float px = std::clamp(u * static_cast<float>(width) - 0.5f,
-			0.0f, static_cast<float>(width - 1));
-	const float py = std::clamp(v * static_cast<float>(height) - 0.5f,
-			0.0f, static_cast<float>(height - 1));
-	const int x0 = static_cast<int>(std::floor(px));
-	const int y0 = static_cast<int>(std::floor(py));
-	const int x1 = std::min(x0 + 1, width - 1);
-	const int y1 = std::min(y0 + 1, height - 1);
-	const float fx = px - static_cast<float>(x0);
-	const float fy = py - static_cast<float>(y0);
+	const float px = u * static_cast<float>(width) - 0.5f;
+	const float py = v * static_cast<float>(height) - 0.5f;
+	const float fx0 = std::floor(px);
+	const float fy0 = std::floor(py);
+	const int x0 = positive_mod(static_cast<int>(fx0), width);
+	const int y0 = positive_mod(static_cast<int>(fy0), height);
+	const int x1 = (x0 + 1) % width;
+	const int y1 = (y0 + 1) % height;
+	const float fx = px - fx0;
+	const float fy = py - fy0;
 	const Color top = image->get_pixel(x0, y0).lerp(
 			image->get_pixel(x1, y0), fx);
 	const Color bottom = image->get_pixel(x0, y1).lerp(
@@ -192,6 +195,27 @@ bool MenuFrameTextures::decode(const std::string &p_key, opennova::menu::MenuTex
 	if (entry.texture.is_null()) {
 		return false;
 	}
+	// A menu image draws from its pixels in a power-of-two texture, transparent black
+	// past them (engine menu_image_texture_side): a stretched image's last column and
+	// row blend with that black as the game's do.
+	const int side_w = opennova::menu::menu_image_texture_side(image->get_width());
+	const int side_h = opennova::menu::menu_image_texture_side(image->get_height());
+	entry.drawn = entry.texture;
+	if (side_w != image->get_width() || side_h != image->get_height()) {
+		Ref<Image> padded = Image::create(side_w, side_h, false, Image::FORMAT_RGBA8);
+		padded->fill(Color(0.0f, 0.0f, 0.0f, 0.0f));
+		Ref<Image> source = image;
+		if (source->get_format() != Image::FORMAT_RGBA8) {
+			source = image->duplicate();
+			if (source->is_compressed()) {
+				source->decompress();
+			}
+			source->convert(Image::FORMAT_RGBA8);
+		}
+		padded->blit_rect(source, Rect2i(0, 0, image->get_width(), image->get_height()),
+				Vector2i(0, 0));
+		entry.drawn = ImageTexture::create_from_image(padded);
+	}
 	r_width = image->get_width();
 	r_height = image->get_height();
 	entries_[p_key] = entry;
@@ -302,10 +326,12 @@ void MenuFrame::clear_screen() {
 void MenuFrame::adopt_slots_() {
 	texture_keys_ = assets_.slot_keys();
 	textures_.assign(texture_keys_.size(), Ref<Texture2D>());
+	drawn_textures_.assign(texture_keys_.size(), Ref<Texture2D>());
 	texture_images_.assign(texture_keys_.size(), Ref<Image>());
 	for (size_t i = 0; i < texture_keys_.size(); ++i) {
 		if (const MenuFrameTextures::Entry *entry = texture_store_.find(texture_keys_[i])) {
 			textures_[i] = entry->texture;
+			drawn_textures_[i] = entry->drawn;
 			texture_images_[i] = entry->image;
 		}
 	}
@@ -360,13 +386,17 @@ Ref<Texture2D> MenuFrame::texture_for_quad_(
 	if (has_second && !valid_slot(p_quad.texture2)) {
 		return Ref<Texture2D>();
 	}
-	const bool full_uv = p_quad.u0 == 0.0f && p_quad.v0 == 0.0f &&
-			p_quad.u1 == 1.0f && p_quad.v1 == 1.0f;
-	if (!has_second && (!p_quad.tiled || full_uv)) {
-		return textures_[static_cast<size_t>(p_quad.texture)];
+	if (!has_second && !p_quad.tiled) {
+		// A menu image: its power-of-two texture (MenuFrameTextures::Entry::drawn).
+		const Ref<Texture2D> &drawn = drawn_textures_[static_cast<size_t>(p_quad.texture)];
+		return drawn.is_valid() ? drawn : textures_[static_cast<size_t>(p_quad.texture)];
 	}
 
 	const Ref<Image> first = texture_images_[static_cast<size_t>(p_quad.texture)];
+	if (has_second) {
+		return frame_piece_texture_(p_quad, first,
+				texture_images_[static_cast<size_t>(p_quad.texture2)]);
+	}
 	const int first_w = first->get_width();
 	const int first_h = first->get_height();
 	const int src_x0 = std::clamp(
@@ -413,40 +443,63 @@ Ref<Texture2D> MenuFrame::texture_for_quad_(
 		keep_frame_texture_(key, texture);
 		return texture;
 	}
+	return Ref<Texture2D>();
+}
 
-	const int dst_w = std::max(
-			1, static_cast<int>(std::lround(p_quad.x1 - p_quad.x0)));
-	const int dst_h = std::max(
-			1, static_cast<int>(std::lround(p_quad.y1 - p_quad.y0)));
-	const std::string key = "frame:" + texture_keys_[static_cast<size_t>(p_quad.texture)] + ":" +
-			texture_keys_[static_cast<size_t>(p_quad.texture2)] + ":" + std::to_string(src_x0) + ":" +
-			std::to_string(src_y0) + ":" + std::to_string(src_w) + ":" +
-			std::to_string(src_h) + ":" + std::to_string(dst_w) + ":" +
-			std::to_string(dst_h);
+// A frame border piece as Direct3D 9 rasterises it (the MenuQuad contract,
+// engine menu/menu_frame.h): one texel per pixel it covers
+// (renderer::d3d9_quad_pixels), each at the window coordinate of its centre: the
+// stencil at the UV that centre interpolates to, the brush screen-anchored at
+// ((x + 0.5) / period_x, (y + 0.5) / period_y), both wrapped and bilinear as the
+// game's textures are (created WRAP, LINEAR: flags 0x140000 and 0x40000), then the
+// two MODULATE2X stages over the quad's diffuse, each saturated, the alpha the
+// product. Drawn 1:1 over the pixels it covers, the image is what the game's
+// rasteriser writes there.
+Ref<Texture2D> MenuFrame::frame_piece_texture_(const opennova::menu::MenuQuad &p_quad,
+		const Ref<Image> &p_stencil, const Ref<Image> &p_brush) {
+	const opennova::renderer::PixelRect px =
+			opennova::renderer::d3d9_quad_pixels(p_quad.x0, p_quad.y0, p_quad.x1, p_quad.y1);
+	const int dst_w = px.x1 - px.x0;
+	const int dst_h = px.y1 - px.y0;
+	if (dst_w <= 0 || dst_h <= 0 || p_quad.texture2_period_x <= 0.0f ||
+			p_quad.texture2_period_y <= 0.0f || p_quad.x1 <= p_quad.x0 || p_quad.y1 <= p_quad.y0) {
+		return Ref<Texture2D>();
+	}
+	const auto bits = [](float value) {
+		uint32_t out = 0;
+		std::memcpy(&out, &value, sizeof(out));
+		return std::to_string(out);
+	};
+	const std::string key = "piece:" + texture_keys_[static_cast<size_t>(p_quad.texture)] + ":" +
+			texture_keys_[static_cast<size_t>(p_quad.texture2)] + ":" + bits(p_quad.x0) + ":" +
+			bits(p_quad.y0) + ":" + bits(p_quad.x1) + ":" + bits(p_quad.y1) + ":" + bits(p_quad.u0) +
+			":" + bits(p_quad.v0) + ":" + bits(p_quad.u1) + ":" + bits(p_quad.v1) + ":" +
+			bits(p_quad.texture2_period_x) + ":" + bits(p_quad.texture2_period_y) + ":" +
+			std::to_string(p_quad.color);
 	const Ref<Texture2D> cached = cached_frame_texture_(key);
 	if (cached.is_valid()) {
 		return cached;
 	}
-	const Ref<Image> second =
-			texture_images_[static_cast<size_t>(p_quad.texture2)];
-	Ref<Image> composed =
-			Image::create(dst_w, dst_h, false, Image::FORMAT_RGBA8);
-	// Two MODULATE2X stages with retail's 0x7F vertex diffuse reduce to
-	// (4 * 127/255) * stencil * brush = (508/255) * stencil * brush.
-	constexpr float kFrameRgbScale = 508.0f / 255.0f;
+	const Color diffuse = opennova::color_from_argb(p_quad.color);
+	Ref<Image> composed = Image::create(dst_w, dst_h, false, Image::FORMAT_RGBA8);
+	const float span_x = p_quad.x1 - p_quad.x0;
+	const float span_y = p_quad.y1 - p_quad.y0;
 	for (int y = 0; y < dst_h; ++y) {
-		const float v = p_quad.v0 + (p_quad.v1 - p_quad.v0) *
-				(static_cast<float>(y) + 0.5f) / static_cast<float>(dst_h);
+		const float window_y = static_cast<float>(px.y0 + y);
+		const float v = p_quad.v0 + (p_quad.v1 - p_quad.v0) * (window_y - p_quad.y0) / span_y;
+		const float brush_v = (window_y + 0.5f) / p_quad.texture2_period_y;
 		for (int x = 0; x < dst_w; ++x) {
-			const float u = p_quad.u0 + (p_quad.u1 - p_quad.u0) *
-					(static_cast<float>(x) + 0.5f) / static_cast<float>(dst_w);
-			const Color stencil = sample_bilinear(first, u, v);
-			const Color brush = sample_bilinear(second, u, v);
+			const float window_x = static_cast<float>(px.x0 + x);
+			const float u = p_quad.u0 + (p_quad.u1 - p_quad.u0) * (window_x - p_quad.x0) / span_x;
+			const Color stencil = sample_bilinear_wrap(p_stencil, u, v);
+			const Color brush = sample_bilinear_wrap(p_brush,
+					(window_x + 0.5f) / p_quad.texture2_period_x, brush_v);
+			const float r0 = std::min(1.0f, 2.0f * stencil.r * diffuse.r);
+			const float g0 = std::min(1.0f, 2.0f * stencil.g * diffuse.g);
+			const float b0 = std::min(1.0f, 2.0f * stencil.b * diffuse.b);
 			composed->set_pixel(x, y,
-					Color(std::min(1.0f, kFrameRgbScale * stencil.r * brush.r),
-							std::min(1.0f, kFrameRgbScale * stencil.g * brush.g),
-							std::min(1.0f, kFrameRgbScale * stencil.b * brush.b),
-							stencil.a * brush.a));
+					Color(std::min(1.0f, 2.0f * r0 * brush.r), std::min(1.0f, 2.0f * g0 * brush.g),
+							std::min(1.0f, 2.0f * b0 * brush.b), stencil.a * diffuse.a * brush.a));
 		}
 	}
 	const Ref<Texture2D> texture = ImageTexture::create_from_image(composed);
@@ -928,10 +981,8 @@ void MenuFrame::place_cursor(bool p_visible, const Vector2 &p_position) {
 Vector2 MenuFrame::design_scale_() const {
 	const Vector2 size = get_size();
 	if (size.x > 1.0f && size.y > 1.0f) {
-		// The design space and its witness live at menu/menu_frame.h.
-		return Vector2(
-				size.x / static_cast<float>(opennova::menu::kMenuDesignWidth),
-				size.y / static_cast<float>(opennova::menu::kMenuDesignHeight));
+		// The scale pair and its witness live at menu/menu_frame.h.
+		return Vector2(opennova::menu::menu_scale_x(size.x), opennova::menu::menu_scale_y(size.y));
 	}
 	return Vector2(1.0f, 1.0f);
 }
@@ -998,6 +1049,18 @@ void MenuFrame::_draw() {
 	// Ops before overlay_op_start paint on this Control's own canvas item; the
 	// menu-top overlay (open popups + cursor) paints on the z-above child item
 	// so frame-child mounts never cover it.
+	// The draw list is the original's window coordinates, which Direct3D 9
+	// rasterises with pixel centres on the integers: every item draws it under
+	// d3d9_screen_to_canvas, half a pixel right and down, a draw-only transform
+	// that leaves the Control's input on the original's coordinates
+	// (renderer/d3d9_raster.h; the MenuQuad contract, engine menu/menu_frame.h).
+	const Transform2D d3d9 = d3d9_screen_to_canvas();
+	for (const RID &item : { get_canvas_item(), overlay_canvas_item_, overlay_upper_canvas_item_ }) {
+		rs->canvas_item_add_set_transform(item, d3d9);
+	}
+	// What the device rasterised itself pixel for pixel (a frame piece, the fill's
+	// phased tile) sits on whole pixels: drawn back half a pixel, 1:1.
+	const float centre = opennova::renderer::kD3d9PixelCentre;
 	RID target = get_canvas_item();
 	const auto apply_quad = [&](const opennova::menu::MenuQuad &quad) {
 		const Rect2 rect(quad.x0, quad.y0, quad.x1 - quad.x0, quad.y1 - quad.y0);
@@ -1016,29 +1079,45 @@ void MenuFrame::_draw() {
 			return;
 		}
 		if (quad.texture2 != opennova::menu::kMenuTexNone) {
-			// texture_for_quad_ already rasterized retail's two-stage material
-			// at the final device size, so this is a straight 1:1 submission.
-			rs->canvas_item_add_texture_rect(target, rect, tex->get_rid(), false,
-					color);
+			// frame_piece_texture_ rasterised retail's two-stage material over the
+			// pixels the piece covers; its colour is in the image.
+			const opennova::renderer::PixelRect px =
+					opennova::renderer::d3d9_quad_pixels(quad.x0, quad.y0, quad.x1, quad.y1);
+			rs->canvas_item_add_texture_rect(target,
+					Rect2(px.x0 - centre, px.y0 - centre, px.x1 - px.x0, px.y1 - px.y0),
+					tex->get_rid(), false);
 		} else if (quad.tiled) {
-			rs->canvas_item_add_texture_rect(target, rect, tex->get_rid(), true,
-					color);
-		} else if (quad.u0 != 0.0f || quad.v0 != 0.0f || quad.u1 != 1.0f ||
-				quad.v1 != 1.0f) {
-			const Vector2 tex_size = tex->get_size();
-			rs->canvas_item_add_texture_rect_region(target, rect, tex->get_rid(),
-					Rect2(quad.u0 * tex_size.x, quad.v0 * tex_size.y,
-							(quad.u1 - quad.u0) * tex_size.x,
-							(quad.v1 - quad.v0) * tex_size.y),
+			// The phased tile repeats from the rect's corner: pixel x shows texel
+			// x mod cell, retail's (x + 0.5) / cell (the MenuQuad contract).
+			rs->canvas_item_add_texture_rect(target,
+					Rect2(rect.position - Vector2(centre, centre), rect.size), tex->get_rid(), true,
 					color);
 		} else {
-			rs->canvas_item_add_texture_rect(target, rect, tex->get_rid(), false,
-					color);
+			// A menu image: the region in the image's texels, the strip's half
+			// texel included, out of its power-of-two texture.
+			const Ref<Image> &image = texture_images_[static_cast<size_t>(quad.texture)];
+			const Vector2 image_size = image.is_valid()
+					? Vector2(image->get_width(), image->get_height())
+					: tex->get_size();
+			rs->canvas_item_add_texture_rect_region(target, rect, tex->get_rid(),
+					Rect2(quad.u0 * image_size.x, quad.v0 * image_size.y,
+							(quad.u1 - quad.u0) * image_size.x,
+							(quad.v1 - quad.v0) * image_size.y),
+					color, false, false);
 		}
 	};
 	const auto apply_line = [&](const opennova::menu::MenuLine &line) {
+		// The pixels Direct3D 9's line rule lights, where the engine knows them;
+		// any other segment as a one-pixel line on this raster.
+		opennova::renderer::PixelRect px;
+		const Color color = opennova::color_from_argb(line.color);
+		if (opennova::renderer::d3d9_axis_line_pixels(line.x0, line.y0, line.x1, line.y1, &px)) {
+			rs->canvas_item_add_rect(target,
+					Rect2(px.x0 - centre, px.y0 - centre, px.x1 - px.x0, px.y1 - px.y0), color);
+			return;
+		}
 		rs->canvas_item_add_line(target, Vector2(line.x0, line.y0),
-				Vector2(line.x1, line.y1), opennova::color_from_argb(line.color), 1.0f);
+				Vector2(line.x1, line.y1), color, 1.0f);
 	};
 	const auto apply_font_run =
 			[&](const opennova::menu::MenuDrawList::FontRun &run) {

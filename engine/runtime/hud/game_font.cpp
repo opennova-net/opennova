@@ -280,9 +280,11 @@ void GameFont::measure(const char *text, float scale_x, float scale_y,
 		if (glyph == nullptr) {
 			continue;
 		}
-		cursor = std::floor(cursor +
-				(glyph->uv.u1 - glyph->uv.u0) * 256.0f * scaled_x +
-				pad * scaled_x + 0.5f);
+		// The advance first, then the pen, then the half, as the drawer sums
+		// them [orig: @0x67506d..0x675093].
+		cursor = std::floor((cursor + ((glyph->uv.u1 - glyph->uv.u0) * 256.0f * scaled_x +
+										pad * scaled_x)) +
+				0.5f);
 		max_w = std::max(max_w, cursor);
 	}
 	max_w = std::max(max_w, cursor);
@@ -420,10 +422,22 @@ GameFontRun GameFont::layout(const char *text, float x, float y,
 				}
 				const float glyph_w =
 						(glyph->uv.u1 - glyph->uv.u0) * 256.0f * scaled_x;
-				const float glyph_h =
-						(glyph->uv.v1 - glyph->uv.v0) * 256.0f * scaled_y;
-				const float next = std::floor(cursor + glyph_w +
-						pad * scaled_x + 0.5f);
+				// The bottom V carries the half-texel bias, and the quad's
+				// height is that biased V extent: the quad is half a texel
+				// taller than the glyph, so its V runs one texel per pixel and
+				// every row, the last too, samples its texel's centre
+				// [orig: fld v1; fadd 0.001953125 @0x6756ff; fsub v0; fmul
+				// scaled_y; fmul 256.0 -> the height @0x675733, which the
+				// bottom edge (@0x675850), the underline (@0x6757b2) and the
+				// italic shear (@0x675776) all read].
+				const float v1 = glyph->uv.v1 + kBottomVBias;
+				const float glyph_h = (v1 - glyph->uv.v0) * scaled_y * 256.0f;
+				// The next pen, in the drawer's order: the advance first, then
+				// the pen, then the half, each sum a float (the x87 unit runs
+				// at single precision under Direct3D 9, menu_frame.h)
+				// [orig: fimul pad; faddp (w + pad) @0x67573b; faddp (pen +)
+				// @0x67573d; faddp (+ 0.5) @0x67573f; floor @0x675744].
+				const float next = std::floor((cursor + (glyph_w + pad * scaled_x)) + 0.5f);
 				if (glyph->page == page) {
 					// The vertex colour is the live colour as it stands
 					// [orig: v45 = v146, textBuffer[2], @0x675837].
@@ -434,28 +448,35 @@ GameFontRun GameFont::layout(const char *text, float x, float y,
 					const float skew = state.italic ? glyph_h * 0.125f : 0.0f;
 					const int strikes = state.bold ? 2 : 1;
 					// Bold double-strikes at +1 x (same y); each strike's
-					// underline rides one pixel higher [orig: the strike loop's
-					// cursor+1 / underline-y-1 stepping].
+					// underline rides one pixel higher at the glyph's own x
+					// [orig: the strike loop's cursor+1 / underline-y-1
+					// stepping; the underline's x0 is cursor - 0.5, taken once
+					// per glyph @0x6757a0 and written for every strike
+					// @0x675b2c].
+					const float underline_x0 = cursor - 0.5f;
 					for (int strike = 0; strike < strikes; ++strike) {
 						const float sx = cursor + static_cast<float>(strike);
 						GameFontQuad quad;
 						quad.page = page + page_base_;
-						quad.x_top_left = sx + skew - 0.5f;
-						quad.x_top_right = sx + glyph_w + skew - 0.5f;
-						quad.x_bottom_left = sx - skew - 0.5f;
-						quad.x_bottom_right = sx + glyph_w - skew - 0.5f;
+						// The corners in the drawer's order of sums
+						// [orig: @0x6758a4 (bottom left), @0x6758d9 (top left),
+						// @0x675931 (bottom right), @0x675982 (top right)].
+						quad.x_top_left = (skew + sx) - 0.5f;
+						quad.x_top_right = ((skew + glyph_w) + sx) - 0.5f;
+						quad.x_bottom_left = (sx - skew) - 0.5f;
+						quad.x_bottom_right = ((glyph_w + sx) - skew) - 0.5f;
 						quad.y_top = line_y - 0.5f;
 						quad.y_bottom = line_y + glyph_h - 0.5f;
 						quad.u0 = glyph->uv.u0;
 						quad.v0 = glyph->uv.v0;
 						quad.u1 = glyph->uv.u1;
-						quad.v1 = glyph->uv.v1 + kBottomVBias;
+						quad.v1 = v1;
 						quad.color = draw_color;
 						run.quads.push_back(quad);
 						if (state.underline) {
 							GameFontUnderline seg;
-							seg.x0 = sx - 0.5f;
-							seg.x1 = sx + glyph_w - 0.5f;
+							seg.x0 = underline_x0;
+							seg.x1 = underline_x0 + glyph_w;
 							seg.y = line_y + glyph_h - 1.5f -
 									static_cast<float>(strike);
 							seg.color = double_channel_clamped(draw_color);

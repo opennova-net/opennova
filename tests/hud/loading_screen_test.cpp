@@ -152,7 +152,9 @@ int main() {
 			check(left < 640.0f && right > 640.0f && (left + right) * 0.5f > 638.0f &&
 			              (left + right) * 0.5f < 642.0f,
 			      "centred on (512 * 1280 + 512) / 1024");
-			check(std::fabs(on.quads[0].y_bottom - on.quads[0].y_top - 16.0f * 1.6f) < 0.01f,
+			// The glyph's 16 texel rows and the drawer's half-texel bottom bias
+			// (D-FNT-6), at the slot's scale.
+			check(std::fabs(on.quads[0].y_bottom - on.quads[0].y_top - 16.5f * 1.6f) < 0.01f,
 			      "the glyph at the slot's 1280 / 800");
 			check(on.quads[0].color == 0xFF7F7F7Fu && on.quads[1].color == 0xFF7F7F7Fu,
 			      "the white phase halved, alpha forced");

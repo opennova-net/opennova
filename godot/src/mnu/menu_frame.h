@@ -46,6 +46,10 @@ public:
 	struct Entry {
 		Ref<Image> image;
 		Ref<Texture2D> texture;
+		// What a menu image draws from: the pixels top-left in a power-of-two
+		// texture, transparent black past them (engine menu_image_texture_side);
+		// `texture` itself when the image's sides already are powers of two.
+		Ref<Texture2D> drawn;
 	};
 	bool decode(const std::string &p_key, opennova::menu::MenuTextureFormat p_format,
 			const std::vector<uint8_t> &p_bytes, int &r_width, int &r_height) override;
@@ -345,6 +349,8 @@ protected:
 private:
 	opennova::menu::MenuWidgetState &widget_(int p_index);
 	Ref<Texture2D> texture_for_quad_(const opennova::menu::MenuQuad &p_quad);
+	Ref<Texture2D> frame_piece_texture_(const opennova::menu::MenuQuad &p_quad,
+			const Ref<Image> &p_stencil, const Ref<Image> &p_brush);
 	// A composed frame texture by key, kept across configures while drawn (the
 	// cache lets go of what two configures in a row did not draw).
 	Ref<Texture2D> cached_frame_texture_(const std::string &p_key) const;
@@ -376,6 +382,7 @@ private:
 	// textures' keys, UV and destination.
 	std::vector<std::string> texture_keys_;
 	std::vector<Ref<Texture2D>> textures_;
+	std::vector<Ref<Texture2D>> drawn_textures_; // Entry::drawn per slot
 	std::vector<Ref<Image>> texture_images_;
 	struct FrameTexture {
 		Ref<Texture2D> texture;

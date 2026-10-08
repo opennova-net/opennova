@@ -94,6 +94,17 @@ void test_layout_pages_bold_underline(const fnt_font_t *font) {
 	CHECK(run.quads[1].x_top_left == 108.5f,
 			"the second glyph starts at the floored advance");
 	CHECK(run.underlines.empty(), "no underline without the flag");
+	// D-FNT-6: the bottom V carries the half-texel bias and the quad is that
+	// biased V extent tall, so V runs one texel per pixel and the last row
+	// samples its own texel's centre [orig: CGameFont_DrawText @0x6756ff /
+	// @0x675733 / @0x675850].
+	const float rows = (font->glyphs['a' - FNT_FIRST_CHAR].uv.v1 -
+			font->glyphs['a' - FNT_FIRST_CHAR].uv.v0) * 256.0f;
+	CHECK(run.quads[0].y_top == 49.5f && run.quads[0].y_bottom == 49.5f + rows + 0.5f,
+			"the quad spans the glyph's rows and the half-texel bias");
+	CHECK((run.quads[0].v1 - run.quads[0].v0) * 256.0f ==
+					run.quads[0].y_bottom - run.quads[0].y_top,
+			"one texel of V per pixel, the last row included");
 
 	const auto bold = gf.layout("a", 0.0f, 0.0f, 1.0f, 1.0f,
 			opennova::hud::kFontStyleBold, 0xFF000000u);

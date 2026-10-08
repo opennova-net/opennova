@@ -746,8 +746,34 @@ void MenuFrameCompiler::emit_rect_quad(const mnu::RectEdges &design,
 	if (tiled) {
 		quad.u1 = tile_u;
 		quad.v1 = tile_v;
+	} else if (texture != kMenuTexNone && texture_loaded_(texture)) {
+		const auto &size = texture_sizes_[static_cast<size_t>(texture)];
+		set_image_uv(quad, size.first, size.second, 0, size.second);
 	}
 	push_quad(quad);
+}
+
+// Every menu image draws through the tiled-texture strip, which adds half a texel
+// to both ends of its U and V: the image's texel columns 0.5 .. W + 0.5 and its band's
+// rows start + 0.5 .. end + 0.5 run across the quad, so on Direct3D 9's pixel centres
+// a 1:1 draw samples each texel's centre and a stretched one lands where the game's
+// does [orig: Render_DrawTiledTextureStrip @ 0x67aed0 — u0 = 0.5 / texW, u1 = 0.5 /
+// texW + imageW / texW, v0 = start / texH + 0.5 / texH, v1 = end / texH + 0.5 / texH
+// @ 0x67b032..0x67b0b8; its alternate arm (positions minus half a pixel instead) reads
+// g_TiledTextureHalfPixelPositions, which nothing sets]. texW and texH are the power-of-
+// two tile the image was copied into, so in the image's own texels the offsets are the
+// same half texel (menu_image_texture_side).
+void MenuFrameCompiler::set_image_uv(MenuQuad &quad, int width, int height,
+		int64_t band_start, int64_t band_end) {
+	if (width <= 0 || height <= 0) {
+		return;
+	}
+	const float w = static_cast<float>(width);
+	const float h = static_cast<float>(height);
+	quad.u0 = 0.5f / w;
+	quad.u1 = 0.5f / w + 1.0f;
+	quad.v0 = static_cast<float>(band_start) / h + 0.5f / h;
+	quad.v1 = static_cast<float>(band_end) / h + 0.5f / h;
 }
 
 // The IMAGE pass draws the band [MAP_STATE * H, (MAP_STATE + 1) * H) of the
@@ -757,9 +783,8 @@ void MenuFrameCompiler::emit_rect_quad(const mnu::RectEdges &design,
 // [orig: CUIElement_DrawTextureNative @ 0x647e40 -> CTextureManager_DrawScaledRect
 // @ 0x654e60 -> Render_DrawTiledTextureStrip @ 0x67aed0, the -65280 return]. So a
 // MAP_STATE of 1 or more with no HEIGHT draws nothing, a HEIGHT alone crops row
-// 0, and a HEIGHT of 0 stretches texel row 0 (v0 == v1, carried as that one
-// texel row). Retail's half-texel shift is D3D9's texel-centre convention, which
-// the device leg's sampling already has. A texture that did not load draws
+// 0, and a HEIGHT of 0 stretches texel row 0 (v0 == v1, row 0's centre, through
+// the strip's half texel: set_image_uv). A texture that did not load draws
 // nothing (its handle is 0).
 void MenuFrameCompiler::emit_state_texture(const mnu::RectEdges &design,
 		const WalkScale &s,
@@ -777,13 +802,9 @@ void MenuFrameCompiler::emit_state_texture(const mnu::RectEdges &design,
 		return;
 	}
 	emit_rect_quad(design, s, 0xFFFFFFFFu, pass.texture, false, 1.0f, 1.0f);
-	if (start == 0 && end == texture_height) {
-		return;
-	}
-	MenuQuad &quad = draw_list_.quads.back();
-	const int64_t last = end > start ? end : start + 1;
-	quad.v0 = static_cast<float>(start) / static_cast<float>(texture_height);
-	quad.v1 = static_cast<float>(last) / static_cast<float>(texture_height);
+	const int texture_width =
+			texture_sizes_[static_cast<size_t>(pass.texture)].first;
+	set_image_uv(draw_list_.quads.back(), texture_width, texture_height, start, end);
 }
 
 void MenuFrameCompiler::emit_state_pass(const mnu::RectEdges &design,
@@ -866,19 +887,28 @@ void MenuFrameCompiler::emit_frame(const WidgetNode &node,
 	const mnu::Frame &frame =
 			nodes_[static_cast<size_t>(node.frame_owner)].window->frame;
 	const bool has_brush = node.frame_brush >= 0;
-	const int w = rect.right - rect.left;
-	const int h = rect.bottom - rect.top;
 	const auto &stencil_size =
 			texture_sizes_[static_cast<size_t>(node.frame_stencil)];
 	const float tex_w = static_cast<float>(stencil_size.first);
 	const float tex_h = static_cast<float>(stencil_size.second);
+	// The window's rect on the device, each edge truncated
+	// [orig: CUIScene_ScaleRectDesignToDevice @ 0x63b210 from @ 0x64a255].
+	const float left_edge = emit_x(rect.left, s.x);
+	const float top_edge = emit_x(rect.top, s.y);
+	const float right_edge = emit_x(rect.right, s.x);
+	const float bottom_edge = emit_x(rect.bottom, s.y);
+	// The fill: the cell-sized copy of stencil cell (3, 0), at UV (x + 0.5) / cell
+	// over the rect, in diffuse 0xFF7F7F7F through the material's MODULATE2X: the
+	// texel times 254/255 [orig: @ 0x64a281..0x64a2b3 -> draw_textured_quad_from_rect
+	// @ 0x64a000, UV (pos + 0.5) / size @ 0x64a0cb; border_fill_material made with
+	// mode 0x651 by CUIElement_InitBorderMaterials @ 0x64715a].
 	const mnu::FrameTileRect fill_uv = mnu::frame_tile_rect(tile, 3, 0);
 	MenuQuad fill;
-	fill.x0 = emit_x(rect.left, s.x);
-	fill.y0 = emit_x(rect.top, s.y);
-	fill.x1 = emit_x(rect.right, s.x);
-	fill.y1 = emit_x(rect.bottom, s.y);
-	fill.color = 0xFFFFFFFFu;
+	fill.x0 = left_edge;
+	fill.y0 = top_edge;
+	fill.x1 = right_edge;
+	fill.y1 = bottom_edge;
+	fill.color = 0xFFFEFEFEu;
 	fill.texture = node.frame_stencil;
 	fill.tiled = true;
 	fill.u0 = static_cast<float>(fill_uv.x) / tex_w;
@@ -889,35 +919,60 @@ void MenuFrameCompiler::emit_frame(const WidgetNode &node,
 	if (!has_brush) {
 		return;
 	}
-	const auto pieces =
-			mnu::frame_border_layout(tile, frame.insetx, frame.insety);
-	for (const mnu::FrameBorderPiece &piece : pieces) {
-		const mnu::FrameTileRect uv =
-				mnu::frame_tile_rect(tile, piece.tile_col, piece.tile_row);
-		mnu::RectEdges dest;
-		dest.left = rect.left +
-				static_cast<int>(
-						piece.anchor_left * static_cast<float>(w) +
-						piece.off_left);
-		dest.top = rect.top +
-				static_cast<int>(piece.anchor_top * static_cast<float>(h) +
-						piece.off_top);
-		dest.right = rect.left +
-				static_cast<int>(
-						piece.anchor_right * static_cast<float>(w) +
-						piece.off_right);
-		dest.bottom = rect.top +
-				static_cast<int>(
-						piece.anchor_bottom * static_cast<float>(h) +
-						piece.off_bottom);
+	// The eight pieces on the device, in floats: the cell scaled by the pair,
+	// the left and top hung a cell out and pulled back by the scaled inset, the
+	// right and bottom an inset in and one pixel more, each sum a float (the
+	// x87 unit's single precision, menu_scaled_edge)
+	// [orig: CUIElement_DrawFrame @ 0x64a2d7 (left = L - cell * sx + sx * INSETX),
+	// @ 0x64a318 (top), @ 0x64a332 (the top row's bottom), @ 0x64a3c0 (right =
+	// R - sx * INSETX - 1.0), @ 0x64a4bb (bottom = B - INSETY * sy - 1.0)].
+	const float cell = static_cast<float>(tile);
+	const float inset_x = static_cast<float>(frame.insetx);
+	const float inset_y = static_cast<float>(frame.insety);
+	const float cell_w = cell * s.x;
+	const float cell_h = cell * s.y;
+	const float left = (left_edge - cell * s.x) + s.x * inset_x;
+	const float top = (top_edge - cell * s.y) + inset_y * s.y;
+	const float top_row_end = cell * s.y + top;
+	const float right = (right_edge - s.x * inset_x) - 1.0f;
+	const float bottom = (bottom_edge - inset_y * s.y) - 1.0f;
+	const float bottom_row_end = bottom + cell * s.y;
+	struct Piece {
+		int col;
+		int row;
+		float x0, y0, x1, y1;
+	};
+	// TL, top, TR, left, right, BL, bottom, BR, in the draw order
+	// [orig: @ 0x64a392, 0x64a417, 0x64a489, 0x64a51b, 0x64a5a7, 0x64a63d,
+	// 0x64a6c5, 0x64a73d].
+	const Piece pieces[] = {
+		{ 0, 0, left, top, left + cell_w, top_row_end },
+		{ 1, 0, left + cell_w, top, right, top_row_end },
+		{ 2, 0, right, top, right + cell_w, top_row_end },
+		{ 0, 1, left, top_row_end, left + cell_w, bottom },
+		{ 2, 1, right, top_row_end, right + cell_w, bottom },
+		{ 0, 2, left, bottom, left + cell_w, bottom_row_end },
+		{ 1, 2, left + cell_w, bottom, right, bottom_row_end },
+		{ 2, 2, right, bottom, right + cell_w, bottom_row_end },
+	};
+	// The brush's period: its HEIGHT across x and its WIDTH down y, the
+	// dimensions the border block stores swapped [orig: CUIElement_InitBorderMaterials
+	// @ 0x6470ee..0x647116 stores the brush's height at +0x27C and its width at
+	// +0x280; CUIElement_DrawFrame passes +0x27C (frameInfo + 324) as the x divisor
+	// @ 0x64a384 and +0x280 as the y divisor @ 0x64a372].
+	const auto &brush_size = texture_sizes_[static_cast<size_t>(node.frame_brush)];
+	for (const Piece &piece : pieces) {
+		const mnu::FrameTileRect uv = mnu::frame_tile_rect(tile, piece.col, piece.row);
 		MenuQuad quad;
-		quad.x0 = emit_x(dest.left, s.x);
-		quad.y0 = emit_x(dest.top, s.y);
-		quad.x1 = emit_x(dest.right, s.x);
-		quad.y1 = emit_x(dest.bottom, s.y);
-		quad.color = 0xFFFFFFFFu;
+		quad.x0 = piece.x0;
+		quad.y0 = piece.y0;
+		quad.x1 = piece.x1;
+		quad.y1 = piece.y1;
+		quad.color = 0xFF7F7F7Fu;
 		quad.texture = node.frame_stencil;
 		quad.texture2 = node.frame_brush;
+		quad.texture2_period_x = static_cast<float>(brush_size.second);
+		quad.texture2_period_y = static_cast<float>(brush_size.first);
 		if (tex_w > 0.0f && tex_h > 0.0f) {
 			quad.u0 = static_cast<float>(uv.x) / tex_w;
 			quad.v0 = static_cast<float>(uv.y) / tex_h;
@@ -928,10 +983,28 @@ void MenuFrameCompiler::emit_frame(const WidgetNode &node,
 	}
 }
 
+namespace {
+
+// The text sink's colour: it halves the RGB on a modulate-2x device (the UI
+// half-bright mode, the device caps' modulate flag) and forces the alpha
+// opaque, menus never passing the keep-alpha flag 0x10000; the font page's
+// MODULATE2X doubles it back on the device (hud::kFontPageMaterialWord), so a
+// menu text reads at its colour with each channel's low bit lost
+// [orig: CFontCache_DrawTextScaled @0x653170 — g_UIHalfBrightMode @0x31C3760
+// (caps dword 6, set from the adapter's TextureOpCaps unless the device's
+// no-modulate-2x workaround, CGfxDevice_QueryAdapterCaps @0x67df72..0x67df8e)
+// -> (c >> 1) & 0x7F7F7F @0x6531e7..0x6531eb, | 0xFF000000 @0x6531db].
+uint32_t menu_text_sink_color(uint32_t color) {
+	return ((color >> 1) & 0x7F7F7Fu) | 0xFF000000u;
+}
+
+} // namespace
+
 // Glyph runs: layout in design space at the anamorphic pair — the anchor is
-// scaled with the per-element truncation, and the glyphs scale by the same
-// pair [orig: CFontCache_DrawTextScaled @ 0x653170 scales the anchor and
-// forwards scaleX/scaleY into CGameFont_DrawText @ 0x6752c0].
+// the design point times the pair, untruncated (menu_text_anchor), and the
+// glyphs scale by the same pair [orig: CFontCache_DrawTextScaled @ 0x653170
+// scales the anchor and forwards scaleX/scaleY into CGameFont_DrawText
+// @ 0x6752c0].
 void MenuFrameCompiler::emit_glyph_run(const WidgetNode &node,
 		const std::string &text, int design_x, int design_y,
 		const WalkScale &s, uint32_t color, int caret) {
@@ -951,18 +1024,9 @@ void MenuFrameCompiler::emit_glyph_run_with_(int32_t font_slot,
 	gf.set_font(font);
 	const size_t first = draw_list_.glyphs.size();
 	const size_t underline_first = draw_list_.underlines.size();
-	const float x = emit_x(design_x, s.x);
-	const float y = emit_x(design_y, s.y);
-	// The sink halves the RGB on a modulate-2x device (the UI half-bright mode,
-	// the device caps' modulate flag) and forces the alpha opaque, menus never
-	// passing the keep-alpha flag 0x10000; the font page's MODULATE2X doubles it
-	// back on the device (hud::kFontPageMaterialWord), so a menu text reads at
-	// its colour with each channel's low bit lost [orig: CFontCache_DrawTextScaled
-	// @0x653170 — g_UIHalfBrightMode @0x31C3760 (caps dword 6, set from the
-	// adapter's TextureOpCaps unless the device's no-modulate-2x workaround,
-	// CGfxDevice_QueryAdapterCaps @0x67df72..0x67df8e) -> (c >> 1) & 0x7F7F7F
-	// @0x6531e7..0x6531eb, | 0xFF000000 @0x6531db].
-	color = ((color >> 1) & 0x7F7F7Fu) | 0xFF000000u;
+	const float x = menu_text_anchor(design_x, s.x);
+	const float y = menu_text_anchor(design_y, s.y);
+	color = menu_text_sink_color(color);
 	const hud::GameFontRun run =
 			gf.layout(text.c_str(), x, y, s.x, s.y, 0u, color);
 	draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
@@ -970,7 +1034,7 @@ void MenuFrameCompiler::emit_glyph_run_with_(int32_t font_slot,
 	draw_list_.underlines.insert(draw_list_.underlines.end(),
 			run.underlines.begin(), run.underlines.end());
 	if (caret >= 0) {
-		emit_caret(gf, text, x, y, s, color, caret);
+		emit_caret(gf, text, design_x, design_y, s, color, caret);
 	}
 	const size_t count = draw_list_.glyphs.size() - first;
 	if (count > 0) {
@@ -986,12 +1050,22 @@ void MenuFrameCompiler::emit_glyph_run_with_(int32_t font_slot,
 }
 
 // The caret: an underscore drawn at the caret character's x, x-stretched to
-// that character's width; the char at end-of-text measures as '_' itself
-// [orig: CFontCache_DrawTextWithCursor @ 0x6533b0 — the left-run measure, the
-//  (spacing-1)*design_scale + 1 gap terms (CGameFont_GetSpacingPad
-//  @ 0x6741e0), then the stretched '_' strike].
+// that character's width; the char at end-of-text measures as '_' itself.
+// The caret's design x is the anchor plus the left run's width, plus a gap of
+// trunc((spacing - 1) * design_scale) + 2 after a non-empty left run and again
+// when the caret sits inside the text (CGameFont_GetSpacingPad's
+// trunc(...) + 1, and the caller's + 1). The strike is the '_' glyph at the
+// stretched scale pair, so its anchor is that design x divided by the stretch,
+// truncated, then multiplied back by the sink: retail's pen lands where the
+// division's truncation leaves it [orig: CFontCache_DrawTextWithCursor
+// @ 0x6533b0 — the left-run measure @0x6534b7, the gaps @0x6534de..0x6534eb
+// and @0x653583..0x653590 (CGameFont_GetSpacingPad @ 0x6741e0: ftol((spacing
+// - 1) * design) + 1), the char and '_' widths @0x65352a / @0x653550, the
+// stretch charW / underW * scaleX @0x6535f0..0x653600 and the anchor
+// ftol(underW / charW * x) @0x653605..0x65360f, drawn through
+// CFontCache_DrawTextScaled @0x653624].
 void MenuFrameCompiler::emit_caret(hud::GameFont &gf, const std::string &text,
-		float x, float y, const WalkScale &s, uint32_t color, int caret) {
+		int design_x, int design_y, const WalkScale &s, uint32_t color, int caret) {
 	const fnt_font_t *font = gf.font();
 	const int len = static_cast<int>(text.size());
 	const int at = std::clamp(caret, 0, len);
@@ -1001,28 +1075,35 @@ void MenuFrameCompiler::emit_caret(hud::GameFont &gf, const std::string &text,
 		gf.measure(text.substr(0, static_cast<size_t>(at)).c_str(), 1.0f,
 				1.0f, &left_w, &left_h);
 	}
-	const float pad = static_cast<float>(font->glyph_spacing - 1) *
-					fnt_design_scale(font->design_width) +
-			1.0f;
-	float cursor_design_x = static_cast<float>(left_w);
+	const int gap = static_cast<int>(static_cast<float>(font->glyph_spacing - 1) *
+							fnt_design_scale(font->design_width)) +
+			2;
+	int caret_x = design_x + left_w;
 	if (left_w > 0) {
-		cursor_design_x += pad;
+		caret_x += gap;
 	}
 	if (at > 0 && at < len) {
-		cursor_design_x += pad;
+		caret_x += gap;
 	}
 	const char under = at < len ? text[static_cast<size_t>(at)] : '_';
 	const char under_str[2] = {under == '\0' ? '_' : under, '\0'};
-	int under_w = 0;
+	int char_w = 0;
 	int under_h = 0;
-	gf.measure(under_str, 1.0f, 1.0f, &under_w, &under_h);
+	gf.measure(under_str, 1.0f, 1.0f, &char_w, &under_h);
 	int bar_w = 0;
 	gf.measure("_", 1.0f, 1.0f, &bar_w, &under_h);
-	const float stretch = bar_w > 0
-			? static_cast<float>(under_w) / static_cast<float>(bar_w)
-			: 1.0f;
-	const hud::GameFontRun run = gf.layout("_",
-			x + cursor_design_x * s.x, y, s.x * stretch, s.y, 0u, color);
+	if (char_w <= 0 || bar_w <= 0) {
+		return; // a strike of no width (or an infinite one): nothing shows
+	}
+	// Float arithmetic throughout, the x87 unit's single precision
+	// (menu_scaled_edge).
+	const float stretch_x =
+			static_cast<float>(char_w) / static_cast<float>(bar_w) * s.x;
+	const int strike_x = static_cast<int>(
+			static_cast<float>(bar_w) / static_cast<float>(char_w) *
+			static_cast<float>(caret_x));
+	const hud::GameFontRun run = gf.layout("_", menu_text_anchor(strike_x, stretch_x),
+			menu_text_anchor(design_y, s.y), stretch_x, s.y, 0u, color);
 	draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
 			run.quads.end());
 }
@@ -1152,10 +1233,12 @@ void MenuFrameCompiler::emit_edit(int index, const WidgetNode &node,
 					y = rect.bottom - line_h;
 				}
 				const size_t first = draw_list_.glyphs.size();
-				emit_caret(gf, std::string(), emit_x(rect.left + edge, s.x),
-						emit_x(y, s.y), s, node.colors[visual >= 0 && visual < 4
-													? visual
-													: 0],
+				// The strike goes through the text sink, which halves its
+				// colour like any menu text's (menu_text_sink_color).
+				emit_caret(gf, std::string(), rect.left + edge, y, s,
+						menu_text_sink_color(node.colors[visual >= 0 && visual < 4
+										? visual
+										: 0]),
 						0);
 				const size_t count = draw_list_.glyphs.size() - first;
 				if (count > 0) {
@@ -1586,6 +1669,9 @@ void MenuFrameCompiler::emit_cursor(const MenuFrameState &state) {
 	quad.x1 = state.cursor_x + static_cast<float>(cursor.width);
 	quad.y1 = state.cursor_y + static_cast<float>(cursor.height);
 	quad.texture = cursor.texture;
+	// Through the strip like every menu image [orig: CTextureManager_DrawScaledRect
+	// @ 0x63c046 at scale 1].
+	set_image_uv(quad, cursor.width, cursor.height, 0, cursor.height);
 	push_quad(quad);
 }
 

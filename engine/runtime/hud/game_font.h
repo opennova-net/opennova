@@ -63,9 +63,13 @@ struct GameFontState {
 	int tab_width = 0;           // [4] 0 = the font's own tab stop; <Tnnn> sets it
 };
 
-// One glyph quad in output space. The four corners are explicit because the
-// italic pass shears the TOP edge by height/8 [orig: @ 0x6752c0 the 0.125
-// skew]; UVs carry the drawer's half-texel bottom-V bias.
+// One glyph quad in output space: the original's window coordinates, half a
+// pixel up and left of the glyph's cell, so that on Direct3D 9's pixel centres
+// (renderer/d3d9_raster.h) each texel lands on a pixel centre. The four corners
+// are explicit because the italic pass shears the TOP edge by height/8
+// [orig: @ 0x6752c0 the 0.125 skew]; the bottom V carries the drawer's
+// half-texel bias and the height is that biased V extent (one texel per pixel
+// at scale 1).
 struct GameFontQuad {
 	uint32_t page = 0;
 	float x_top_left = 0.0f;
