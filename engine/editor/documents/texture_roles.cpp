@@ -207,15 +207,18 @@ constexpr TextureRoleRow kRows[] = {
 	// --- Environment --------------------------------------------------------------------------------
 	Role(R::SkyCloud, "sky_cloud", "sky cloud layer", G::Environment, L::Archive, kArchiveFormats)
 	        .alpha("the cloud density; a PCX's is its palette brightness, (85 x (r + g + b)) >> 8")
+	        .sampling("filtered, its mips by the nearest level")
 	        .missing("an opaque decode covers the whole dome")
 	        .witness("Terrain_InitRenderingResources @ 0x578A97; Texture_LoadFromArchive @ 0x58BC21..0x58BCFB")
 	        .row,
 	Role(R::WaterWake, "water_wake", "water wake", G::Environment, L::Archive, kArchiveFormats)
 	        .alpha("as stored")
+	        .sampling("filtered, its mips by the nearest level")
 	        .witness("WaterRing_LoadResources @ 0x5DDC90")
 	        .row,
 	Role(R::WeatherDrop, "weather_drop", "rain or snow drop", G::Environment, L::Stage, kStageFormats)
 	        .alpha("blended by its alpha")
+	        .sampling("filtered, its mips by the nearest level")
 	        .missing("the weather draws no texture")
 	        .witness("WeatherParticle_LoadTextures @ 0x5DE840")
 	        .row,
@@ -233,11 +236,12 @@ constexpr TextureRoleRow kRows[] = {
 	        .row,
 	Role(R::ImpactScar, "impact_scar", "impact scar", G::Effects, L::Archive, kArchiveFormats)
 	        .alpha("blended by its alpha; bhole1 also alpha-tested")
-	        .sampling("clamped")
+	        .sampling("clamped, filtered, its mips by the nearest level (bigscar three levels, a glass hole one)")
 	        .witness("Scar_LoadTextures @ 0x5CC2E0 (the table @ 0x8413A8)")
 	        .row,
 	Role(R::TracerSmoke, "tracer_smoke", "tracer smoke", G::Effects, L::Archive, kArchiveFormats)
 	        .alpha("its palette brightness")
+	        .sampling("filtered, its mips by the nearest level")
 	        .witness("CEffectEmitterPool_CreateShaders @ 0x5DC8F0")
 	        .row,
 	// A character's face animation (.grm): its base texture, the base's .MDT twin and its two eye textures,
