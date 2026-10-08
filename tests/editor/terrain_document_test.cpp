@@ -17,6 +17,7 @@
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/environment_document.h>
 #include <editor/documents/line_ends.h>
 #include <editor/documents/terrain_document.h>
 #include <editor/documents/texture_roles.h>
@@ -557,6 +558,9 @@ int test_session() {
 				            use.later[0].value == "1" && use.later[0].line == 1);
 				TEST_EXPECT(use.later[1].file == opennova::TrnLaterLine::File::Environment &&
 				            use.later[1].key == "polytrn_detaildensity" && use.later[1].value == "64" && use.later[1].line == 2);
+				// Each the first terrain line of its file: the environment's its first terrain key, where a Go to opens
+				// it (its document's locator).
+				TEST_EXPECT(use.later[0].index == 0 && use.later[1].index == 0 && terrain_key_locator(0) == "0/terrain_key:0");
 			}
 		}
 		opennova::io::JsonValue args = opennova::io::JsonValue::make_object();

@@ -6,9 +6,11 @@
 #include <imgui.h>
 
 #include <editor/assets/asset_registry.h>
+#include <editor/documents/environment_document.h>
 #include <editor/documents/terrain_document.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/model/text_document.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/terrain_uses.h>
 #include <editor/session/view/session_view.h>
@@ -130,11 +132,15 @@ bool draw_terrain_inspector(Workspace &workspace, const Document &document, cons
 		if (!use.tile_set.empty()) note("Its tiles from the tile set " + use.tile_set + ", not the terrain's own.");
 		if (use.tiles) note("It places its own tiles (" + use.name + ".til).");
 		// The terrain keys overcast.def and its environment set after this file's (the game's terrain reader reads
-		// their lines too): the mission's terrain has each from there.
-		for (const TrnLaterLine &line : use.later) {
-			const std::string &file =
-					line.file == TrnLaterLine::File::Environment ? use.environment_file : uses.overcast_file;
-			jump_line(workspace, file_target(scan, file),
+		// their lines too): the mission's terrain has each from there. A Go to on the line: the environment's terrain
+		// key, overcast.def's line (a text).
+		for (const TerrainMissionUse::Later &line : use.later) {
+			const bool environment = line.file == TrnLaterLine::File::Environment;
+			const std::string &file = environment ? use.environment_file : uses.overcast_file;
+			ReferenceTarget target = file_target(scan, file);
+			target.locator = environment ? terrain_key_locator(line.index) : TextDocument::locator(size_t(line.line), 1);
+			if (environment) target.field = "value";
+			jump_line(workspace, target,
 			          "Its " + line.key + " " + line.value + " from " + base_name(file) + " (line " +
 			                  std::to_string(line.line) + "), read after this file",
 			          "k" + tag + "." + std::to_string(int(line.file)) + "." + std::to_string(line.line));
