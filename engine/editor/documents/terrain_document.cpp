@@ -946,6 +946,19 @@ const RecordTable &terrain_table() {
 	return table;
 }
 
+const FieldSchema *terrain_key_field(const std::string &key, int32_t *loader_arg) {
+	if (loader_arg) *loader_arg = -1;
+	for (const NodeKind kind : {kTerrain, kFoliage})
+		for (const FieldSchema &field : terrain_table().fields(kind)) {
+			if (field.id != key && field.token != key) continue;
+			if (loader_arg && field.reference == ReferenceKind::Texture)
+				for (const MapRole &map : kMapRoles)
+					if (field.id == map.id) *loader_arg = texture_role_arg(map.role, map.flags);
+			return &field;
+		}
+	return nullptr;
+}
+
 bool is_terrain_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::Terrain; }
 
 std::string terrain_refusal(const TrnConfig &config) {

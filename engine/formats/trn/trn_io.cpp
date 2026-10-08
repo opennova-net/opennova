@@ -323,21 +323,32 @@ bool read_mission_trn(const TrnTextReader &read, const std::string &terrain_file
 	return load_mission_trn(terrain, later, out, error, taken);
 }
 
+namespace {
+
+// Every keyword an arm compares out of a block, then in one [orig: Terrain_ParseConfigCallback @0x60f330, the
+// block's arms @0x60f36c..0x60f5f0, the others from @0x60f5fa].
+const char *const kParserKeys[] = { "foliage", "polytrn_colormap", "polytrn_detailmap", "polytrn_detailmap_c1",
+	"polytrn_detailmap_c2", "polytrn_detailmap_c3", "polytrn_detailmap2", "polytrn_detailmapdist",
+	"polytrn_detailmapdist2", "polytrn_detailblendmap", "polytrn_charmap", "polytrn_depthmap", "polytrn_polydata",
+	"polytrn_tilestrip", "polytrn_foliagemap", "polytrn_tileinfo", "polytrn_wrapx", "polytrn_wrapy",
+	"polytrn_detaildensity", "polytrn_detaildensity2", "polytrn_sectorcount", "polytrn_sectors", "polytrn_origin",
+	"polytrn_scale", "lock_topleft", "lock_topright", "lock_bottomleft", "lock_bottomright" };
+const char *const kParserBlockKeys[] = { "end", "graphic", "stampdown_file", "stampdown_color", "stampdown_radius",
+	"color_lower", "color_upper", "match", "attrib" };
+
+} // namespace
+
 bool trn_parser_key(const std::string &key, bool block) {
-	// Every keyword an arm compares out of a block, then in one [orig: Terrain_ParseConfigCallback @0x60f330, the
-	// block's arms @0x60f36c..0x60f5f0, the others from @0x60f5fa].
-	static const char *const kKeys[] = { "foliage", "polytrn_colormap", "polytrn_detailmap", "polytrn_detailmap_c1",
-		"polytrn_detailmap_c2", "polytrn_detailmap_c3", "polytrn_detailmap2", "polytrn_detailmapdist",
-		"polytrn_detailmapdist2", "polytrn_detailblendmap", "polytrn_charmap", "polytrn_depthmap", "polytrn_polydata",
-		"polytrn_tilestrip", "polytrn_foliagemap", "polytrn_tileinfo", "polytrn_wrapx", "polytrn_wrapy",
-		"polytrn_detaildensity", "polytrn_detaildensity2", "polytrn_sectorcount", "polytrn_sectors", "polytrn_origin",
-		"polytrn_scale", "lock_topleft", "lock_topright", "lock_bottomleft", "lock_bottomright" };
-	static const char *const kBlockKeys[] = { "end", "graphic", "stampdown_file", "stampdown_color", "stampdown_radius",
-		"color_lower", "color_upper", "match", "attrib" };
 	const auto in = [&key](const auto &keys) {
 		return std::any_of(std::begin(keys), std::end(keys), [&key](const char *k) { return key == k; });
 	};
-	return in(kKeys) || (block && in(kBlockKeys));
+	return in(kParserKeys) || (block && in(kParserBlockKeys));
+}
+
+std::vector<std::string> trn_parser_keys(bool block) {
+	std::vector<std::string> keys(std::begin(kParserKeys), std::end(kParserKeys));
+	if (block) keys.insert(keys.end(), std::begin(kParserBlockKeys), std::end(kParserBlockKeys));
+	return keys;
 }
 
 std::string trn_parser_lines(const std::string &text) {
@@ -352,6 +363,173 @@ std::string trn_parser_lines(const std::string &text) {
 		lines += '\n';
 	});
 	return lines;
+}
+
+std::vector<TrnKeyLine> read_trn_key_lines(const std::string &text, std::vector<int> *lines) {
+	std::vector<TrnKeyLine> out;
+	if (lines != nullptr) lines->clear();
+	io::ConfigTokens walk;
+	int line = 0;
+	io::for_each_config_line_span(text.data(), text.size(), walk, [&](const io::ConfigTokens &tokens, const io::ConfigLineSpan &) {
+		++line;
+		// The callback's gate [orig: File_ParseASCIIFile @0x53D915, @0x53D91E].
+		if (tokens.count == 0 || tokens.tokens[0][0] == '/') return;
+		TrnKeyLine read;
+		read.key = strutil::to_lower(tokens.tokens[0]);
+		if (!trn_parser_key(read.key, true)) return;
+		for (int i = 1; i < tokens.count; ++i) read.values.emplace_back(tokens.tokens[i]);
+		out.push_back(std::move(read));
+		if (lines != nullptr) lines->push_back(line);
+	});
+	return out;
+}
+
+namespace {
+
+// What the tokenizer ends a token or a line at outside quotes [orig: Terrain_TokenizeConfigLine @0x53CC16..0x53CC4C].
+bool needs_quotes(const std::string &value) {
+	return value.find_first_of(" ,\t;") != std::string::npos || value.find("//") != std::string::npos;
+}
+
+} // namespace
+
+bool trn_value_writable(const std::string &value, std::string &error) {
+	if (value.empty()) {
+		error = "A value holds at least one character: the game's reader makes no empty value.";
+		return false;
+	}
+	for (const unsigned char c : value)
+		if (c < 0x20 || c == 0x7F || c == '"') {
+			error = "A value holds no '\"' and no control character: the game's reader cannot read one back.";
+			return false;
+		}
+	return true;
+}
+
+std::string trn_values_text(const std::vector<std::string> &values, size_t from) {
+	std::string out;
+	for (size_t i = from; i < values.size(); ++i) {
+		if (i > from) out += ' ';
+		out += needs_quotes(values[i]) ? "\"" + values[i] + "\"" : values[i];
+	}
+	return out;
+}
+
+bool trn_values_of_text(const std::string &text, std::vector<std::string> &values, std::string &error) {
+	values.clear();
+	bool quoted = false;
+	std::string token;
+	bool in_token = false;
+	const auto end_token = [&] {
+		if (in_token) values.push_back(token);
+		token.clear();
+		in_token = false;
+	};
+	for (size_t i = 0; i < text.size(); ++i) {
+		const unsigned char c = static_cast<unsigned char>(text[i]);
+		if (c < 0x20 || c == 0x7F) {
+			if (c == '\t' && !quoted) {
+				end_token();
+				continue;
+			}
+			error = "A value holds no control character: the game's reader cannot read one back.";
+			return false;
+		}
+		if (!quoted && (c == ';' || (c == '/' && i + 1 < text.size() && text[i + 1] == '/'))) {
+			error = "A ';' or \"//\" outside quotes starts a comment, where the game's reader cuts the line: quote the "
+			        "value that holds it.";
+			return false;
+		}
+		if (c == '"') {
+			// A quote toggles quoting and ends a token either way [orig: Terrain_TokenizeConfigLine @0x53CC4E..0x53CC70].
+			quoted = !quoted;
+			end_token();
+		} else if (!quoted && (c == ' ' || c == ',')) {
+			end_token();
+		} else {
+			token += static_cast<char>(c);
+			in_token = true;
+		}
+	}
+	if (quoted) {
+		error = "A quote is left open.";
+		return false;
+	}
+	end_token();
+	if (values.size() > size_t(io::kConfigMaxTokens - 1)) {
+		error = "A line holds " + std::to_string(io::kConfigMaxTokens - 1) +
+		        " values after its keyword at most: the game's reader cuts 30 tokens.";
+		return false;
+	}
+	return true;
+}
+
+bool write_trn_key_line(std::string &out, const TrnKeyLine &line, std::string &error) {
+	if (!trn_parser_key(line.key, true)) {
+		error = "'" + line.key + "' is no keyword of the terrain's reader.";
+		return false;
+	}
+	for (const std::string &value : line.values)
+		if (!trn_value_writable(value, error)) return false;
+	std::string text = line.key;
+	if (!line.values.empty()) text += ' ' + trn_values_text(line.values);
+	// Read back as the game's tokenizer reads the line: the same keyword and values, or the line is refused.
+	io::ConfigTokens back;
+	io::tokenize_config_line(text.c_str(), back);
+	bool same = text.size() <= io::kConfigMaxLineChars && back.count == int(line.values.size()) + 1 &&
+	            strutil::to_lower(back.tokens[0]) == line.key;
+	for (size_t i = 0; same && i < line.values.size(); ++i) same = line.values[i] == back.tokens[i + 1];
+	if (!same) {
+		error = "The game's reader would read this " + line.key +
+		        " line otherwise: it cuts a line at 30 tokens and 1000 characters, the 30th token running to the line's "
+		        "end.";
+		return false;
+	}
+	out += text;
+	out += "\r\n";
+	return true;
+}
+
+std::string trn_key_value(const TrnConfig &config, const std::string &key) {
+	const auto name = [](const std::string &value) {
+		return value.empty() ? std::string() : trn_values_text({ value });
+	};
+	const auto pair = [](int x, int y) { return std::to_string(x) + " " + std::to_string(y); };
+	if (key == "polytrn_colormap") return name(config.colormap);
+	if (key == "polytrn_detailmap") return name(config.detailmap);
+	if (key == "polytrn_detailmap_c1") return name(config.detailmap_c1);
+	if (key == "polytrn_detailmap_c2") return name(config.detailmap_c2);
+	if (key == "polytrn_detailmap_c3") return name(config.detailmap_c3);
+	if (key == "polytrn_detailmap2") return name(config.detailmap2);
+	if (key == "polytrn_detailmapdist") return name(config.detailmapdist);
+	if (key == "polytrn_detailmapdist2") return name(config.detailmapdist2);
+	if (key == "polytrn_detailblendmap") return name(config.detailblendmap);
+	if (key == "polytrn_polydata") return name(config.polydata);
+	if (key == "polytrn_charmap") return name(config.charmap);
+	if (key == "polytrn_foliagemap") return name(config.foliagemap);
+	if (key == "polytrn_tilestrip") return name(config.tilestrip);
+	if (key == "polytrn_tileinfo") return name(config.tileinfo);
+	if (key == "polytrn_detaildensity") return std::to_string(config.detail_density);
+	if (key == "polytrn_detaildensity2") return std::to_string(config.detail_density2);
+	if (key == "polytrn_sectorcount") return std::to_string(config.sector_count);
+	if (key == "polytrn_wrapx") return std::to_string(config.wrap_x);
+	if (key == "polytrn_wrapy") return std::to_string(config.wrap_y);
+	if (key == "polytrn_origin") return pair(config.origin_x, config.origin_y);
+	if (key == "lock_topleft") return pair(config.lock_topleft.x, config.lock_topleft.y);
+	if (key == "lock_topright") return pair(config.lock_topright.x, config.lock_topright.y);
+	if (key == "lock_bottomleft") return pair(config.lock_bottomleft.x, config.lock_bottomleft.y);
+	if (key == "lock_bottomright") return pair(config.lock_bottomright.x, config.lock_bottomright.y);
+	return std::string();
+}
+
+bool trn_parser_reads_one_value(const std::string &key) {
+	// The arms that read tokens[2] alone (walk_trn above): the names, the numbers, a block's model and colours.
+	static const char *const kOne[] = { "polytrn_colormap", "polytrn_detailmap", "polytrn_detailmap_c1",
+		"polytrn_detailmap_c2", "polytrn_detailmap_c3", "polytrn_detailmap2", "polytrn_detailmapdist",
+		"polytrn_detailmapdist2", "polytrn_detailblendmap", "polytrn_charmap", "polytrn_polydata", "polytrn_tilestrip",
+		"polytrn_foliagemap", "polytrn_tileinfo", "polytrn_wrapx", "polytrn_wrapy", "polytrn_detaildensity",
+		"polytrn_detaildensity2", "polytrn_sectorcount", "graphic", "color_lower", "color_upper" };
+	return std::any_of(std::begin(kOne), std::end(kOne), [&key](const char *k) { return key == k; });
 }
 
 bool save_trn(std::ostream &f, const TrnConfig &cfg, std::string &error) {
