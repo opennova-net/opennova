@@ -5,6 +5,7 @@
 
 #include <base/io/json.h>
 #include <formats/env/env.h>
+#include <formats/trn/trn_io.h>
 
 namespace opennova::mission {
 struct MissionInfo;
@@ -54,6 +55,9 @@ struct EnvironmentMissionUse {
 	int fog_color[3] = { 0, 0, 0 }, water_color[3] = { 0, 0, 0 };
 	WaterFrom water_from = WaterFrom::None;
 	float water_height = 0.0f;        // metres
+	// The lines of this environment the mission's terrain's parser takes after its .trn's and overcast.def's
+	// (D-TERRAIN-18, formats/trn load_mission_trn): each key the terrain's, over theirs.
+	std::vector<TrnLaterLine> terrain_keys;
 };
 
 // The missions of the project that run on the environment at `path`, by the graph's edges into it
@@ -80,8 +84,8 @@ std::string water_words(const EnvironmentMissionUse &use);
 
 // The environment_uses query's answer: {path, found, reading?, missions [{mission, title, locator,
 // field, terrain {name, file?, water_height?}, overrides [{field, words}], start_time, minutes_per_day,
-// clock, water {from, height}}]}; a mission's file and locator are where Go to opens it, and an
-// override's field the header's field there.
+// clock, water {from, height}, terrain_keys [{line, key, value}]}]}; a mission's file and locator are where
+// Go to opens it, and an override's field the header's field there.
 io::JsonValue environment_uses_json(const EnvironmentUses &uses);
 
 } // namespace opennova::editor
