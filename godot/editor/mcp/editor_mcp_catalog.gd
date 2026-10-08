@@ -18,6 +18,9 @@ const PLAY_OPS: Array[String] = ["start", "stop", "state"]
 ## How a Play runs (the session's PlayMode tokens): the OpenNova runtime, the game install, or Strict Play
 ## in it. A project's own (apply_project_settings' play_mode, its .opennova/local.json), or one Play's.
 const PLAY_MODES: Array[String] = ["runtime", "install", "strict"]
+## What the previews of the project's own data draw behind their picture (the session's PreviewBackground
+## tokens), the editor's preference: set_preview_background sets it, the preferences section says it.
+const PREVIEW_BACKGROUNDS: Array[String] = ["dark", "grey", "light", "checker"]
 
 ## editor_viewport's writes (S13 V7): each a request, the members it takes flat beside op and the one
 ## it needs, and where the tool's `kind` goes (the request's member that names the viewport's kind):
@@ -123,6 +126,7 @@ const FIELD_SCHEMAS := {
 	"mode": {"type": "string", "enum": ["replace", "add", "toggle"]},
 	"choice": {"type": "string", "enum": ["save", "discard", "cancel"]},
 	"play_mode": {"type": "string", "enum": PLAY_MODES},
+	"preview_background": {"type": "string", "enum": PREVIEW_BACKGROUNDS},
 }
 
 

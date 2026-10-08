@@ -9,6 +9,7 @@ extends GutTest
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const PreviewBackgroundChecks := preload("res://tests/authoring/preview_background_checks.gd")
 const PTL := "particles/puff.ptl"
 
 var _dirs: Array[String] = []
@@ -149,3 +150,19 @@ func test_an_open_particle_file_plays_through_the_particle_renderer() -> void:
 	assert_eq(String(state.get("body", {}).get("effect", "")), "Glow")
 	assert_eq(_renderer(), renderer, "the same device")
 	assert_gt(renderer.get_rendered_quad_count(), 0, "Glow drawn")
+
+
+## The editor's Preview background behind an effect: Grey as it first draws, then each of the four as the editor
+## sets it, live (preview_background_checks.gd); the grid stays on whichever.
+func test_the_preview_background_draws_behind_an_effect() -> void:
+	if _app == null:
+		return
+	_new_project()
+	assert_true(_seam.open_document(PTL), "the particle file opens")
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	PreviewBackgroundChecks.check_each(self, _app, _seam, PTL, "effect")
+	var grid := _grid()
+	assert_not_null(grid)
+	if grid != null:
+		assert_true(grid.visible and grid.mesh != null, "the grid stays, its lines read against the background")
