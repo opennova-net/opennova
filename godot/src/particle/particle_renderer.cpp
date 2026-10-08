@@ -434,12 +434,17 @@ particle_camera_compositors() {
 	return states;
 }
 
+// The compositor a camera with none of its own renders with in `viewport`: its
+// WorldEnvironment's, else the one a DisplayDecode put on its scenario (an
+// editor preview with no WorldEnvironment). The camera's composition keeps
+// that chain's terminal decode, so the view shows the frame decoded once
+// whether or not particles draw.
 Ref<Compositor> world_compositor_for(Viewport *viewport) {
 	if (viewport == nullptr)
 		return Ref<Compositor>();
-	WorldEnvironment *environment = find_world_environment(viewport);
-	return environment != nullptr ? environment->get_compositor() :
-			Ref<Compositor>();
+	if (WorldEnvironment *environment = find_world_environment(viewport))
+		return environment->get_compositor();
+	return DisplayDecode::scenario_compositor(viewport->find_world_3d());
 }
 
 // The viewport whose WorldEnvironment a second scene camera inherits. That
