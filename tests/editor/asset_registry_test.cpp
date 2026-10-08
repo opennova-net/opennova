@@ -89,6 +89,26 @@ static int test_classification() {
 	TEST_EXPECT(classify_asset("ASP_G7.npz", nullptr) == AssetKind::MapProject);
 	TEST_EXPECT(classify_asset("x.npj", nullptr) == AssetKind::MapProject);
 	TEST_EXPECT(classify_asset("earlyerr.txt", nullptr) == AssetKind::Text);
+	// The texts the game reads are Text by the names it reads them by (asset_kinds' kTextNames, each cited
+	// there), in any case; any other .txt, a Markdown file and a text with no extension are the project's
+	// notes, which the text type opens and no build packs; a file with no extension that holds bytes, or
+	// whose bytes the caller does not have, is of no kind.
+	for (const char *name : {"earlyerr.txt", "EARLYERR.TXT", "version.txt", "filter.txt", "hiscore.txt", "banned.txt",
+	                         "banlist.txt", "_NSTMOUT.TXT", "_devnova.txt", "_NOSTACKTRACE.TXT", "_DONETLOG.TXT",
+	                         "_VIDTEST.TXT"})
+		TEST_EXPECT(classify_asset(name, nullptr) == AssetKind::Text);
+	for (const char *name : {"README.md", "SOURCES.md", "notes.txt", "Readme.txt", "MisList.txt", "3dilst01.txt"})
+		TEST_EXPECT(classify_asset(name, nullptr) == AssetKind::Notes);
+	const std::vector<uint8_t> licence = bytes_of("MIT License\r\n\r\nCopyright (c)\tthe authors\n\f\x1a");
+	TEST_EXPECT(classify_asset("LICENSE", &licence) == AssetKind::Notes && classify_asset("LICENSE", nullptr) == AssetKind::Unknown);
+	TEST_EXPECT(classify_asset("blob", &raw) == AssetKind::Unknown && classify_asset("x.docx", &licence) == AssetKind::Unknown);
+	TEST_EXPECT(looks_like_text(licence.data(), licence.size()) && !looks_like_text(raw.data(), raw.size()));
+	TEST_EXPECT(asset_name_fits_kind("LICENSE", AssetKind::Notes) && asset_name_fits_kind("README.md", AssetKind::Notes) &&
+	            !asset_name_fits_kind("earlyerr.txt", AssetKind::Notes) && !asset_name_fits_kind("todo.txt", AssetKind::Text));
+	TEST_EXPECT(std::string(asset_kind_token(AssetKind::Notes)) == "notes" &&
+	            std::string(asset_kind_label(AssetKind::Notes)) == "Project notes" &&
+	            !asset_kind_packed(AssetKind::Notes) && document_type_for(AssetKind::Notes) == document_type_for(AssetKind::Text) &&
+	            asset_kind_named_by("notes") == AssetKind::Notes && asset_kind_named_by("Project notes") == AssetKind::Notes);
 	TEST_EXPECT(classify_asset("resource.pff", nullptr) == AssetKind::Archive);
 	TEST_EXPECT(classify_asset("readme.docx", nullptr) == AssetKind::Unknown);
 	TEST_EXPECT(asset_classification_needs_bytes("a.bin") && !asset_classification_needs_bytes("a.mnu"));
@@ -138,6 +158,8 @@ static int test_classification() {
 	for (size_t i = 0; i < kAssetKindCount; ++i) {
 		const AssetKindRow &row = asset_kind_row(AssetKind(i));
 		if (row.file_name) TEST_EXPECT(classify_asset(row.file_name, nullptr) == row.kind);
+		for (const char *const *name = row.file_names; name && *name; ++name)
+			TEST_EXPECT(classify_asset(*name, nullptr) == row.kind);
 		for (const char *const *extension = row.extensions; extension && *extension; ++extension)
 			TEST_EXPECT(classify_asset(std::string("x") + *extension, nullptr) == row.kind);
 	}
