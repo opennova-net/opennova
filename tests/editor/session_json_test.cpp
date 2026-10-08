@@ -839,6 +839,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 			break;
 		case F::PlayMode: out.play_mode = PlayMode::Install; break;
 		case F::SaveBeforePlay: out.save_before_play = false; break;
+		case F::PreviewBackground: out.preview_background = PreviewBackground::Checker; break;
 		case F::kCount: break;
 		}
 	}
@@ -1848,6 +1849,33 @@ static int test_field_metadata() {
 	return 0;
 }
 
+// The previews' background (the Preview background preference): set_preview_background reads back as written for
+// each background, its field required and a word none has refused naming the four; the preferences section says
+// the one in effect by its token.
+static int test_preview_background_json() {
+	TEST_EXPECT(std::string(editor_request_kind_token(EditorRequestKind::SetPreviewBackground)) == "set_preview_background");
+	JsonValue parsed;
+	EditorRequest back;
+	std::string error;
+	for (const PreviewBackground background : kPreviewBackgrounds) {
+		const EditorRequest set = request::set_preview_background(background);
+		TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(set)).c_str(), parsed));
+		TEST_EXPECT(parsed.get_string("preview_background", "") == preview_background_token(background));
+		TEST_EXPECT(editor_request_from_json(parsed, back, error) && back == set);
+	}
+	TEST_EXPECT(request_error("{\"kind\":\"set_preview_background\"}", back).find("preview_background") != std::string::npos);
+	const std::string refused = request_error("{\"kind\":\"set_preview_background\",\"preview_background\":\"purple\"}", back);
+	TEST_EXPECT(refused.find("dark, grey, light, checker") != std::string::npos && refused.find("\"purple\"") != std::string::npos);
+	TEST_EXPECT(!request_error("{\"kind\":\"set_preview_background\",\"preview_background\":3}", back).empty());
+	TEST_EXPECT(request_error("{\"kind\":\"set_preview_background\",\"preview_background\":\"light\"}", back).empty() &&
+	            back.kind == EditorRequestKind::SetPreviewBackground && back.preview_background == PreviewBackground::Light);
+	SessionView view;
+	TEST_EXPECT(view_section_to_json(view, ViewSection::Preferences).get_string("preview_background", "") == "grey");
+	view.project.preview_background = PreviewBackground::Checker;
+	TEST_EXPECT(view_section_to_json(view, ViewSection::Preferences).get_string("preview_background", "") == "checker");
+	return 0;
+}
+
 // The import dialog's requests and state (S11g): plan_import and set_import_dependencies
 // read back as written; the import_preview page carries the preview (S13 A5): what it lists to
 // choose from and the files chosen, as a request's imports take them; the plan's importable
@@ -2351,6 +2379,7 @@ int main() {
 	failures += test_search_json();
 	failures += test_field_metadata();
 	failures += test_import_plan_json();
+	failures += test_preview_background_json();
 	failures += test_view_events_json();
 	if (failures == 0) std::printf("editor_session_json: all tests passed\n");
 	return failures == 0 ? 0 : 1;

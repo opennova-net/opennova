@@ -19,6 +19,7 @@
 #include <editor/session/view/session_view.h>
 #include <runtime/hud/hud_elements.h>
 
+#include "authoring/preview_backdrop.h"
 #include "hud/hud_pos.h"
 #include "hud/player_hud_weapon_def.h"
 #include "object/weapon_def.h"
@@ -31,8 +32,9 @@ namespace {
 // The game's own first-person view effects, mounted under the overlay as its HUD presenter mounts them
 // (godot/game/world/game_hud_presenter.gd ensure_game_hud).
 constexpr const char *kViewEffectsPath = "res://game/world/player_view_effects.gd";
-// What the preview's backdrop is where the game has its 3D view: a plain mid grey, which the HUD's
-// light and dark art both read over.
+// What the preview's backdrop is where the game has its 3D view on the Dark preview background (each
+// picture's own): a plain mid grey, which the HUD's light and dark art both read over; the editor's preview
+// background otherwise (authoring/preview_backdrop).
 const Color kBackdrop(0.27f, 0.29f, 0.31f, 1.0f);
 // The rangefinder's reading and the goggles' gain the preview's view effects show.
 constexpr int kBinocularRange = 250;
@@ -51,6 +53,8 @@ HudViewportApplier::HudViewportApplier(SubViewport &viewport) {
 	ColorRect *backdrop = memnew(ColorRect);
 	backdrop->set_name("Backdrop");
 	backdrop->set_color(kBackdrop);
+	backdrop_material_ = make_preview_backdrop_canvas(kBackdrop);
+	backdrop->set_material(backdrop_material_);
 	backdrop->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 	viewport.add_child(backdrop);
 	backdrop_id_ = backdrop->get_instance_id();
@@ -208,6 +212,10 @@ void HudViewportApplier::tick(const opennova::editor::ViewportModel &model, cons
 	// The player's state on the preview clock's ticks, the HUD's clock (its fades, its flashes).
 	const opennova::editor::HudViewportOptions &options = static_cast<const opennova::editor::HudViewport &>(model).options();
 	hud->set_player_state(int(clock.ticks()), float(options.health) / 100.0f, options.stance, kFovDegrees);
+}
+
+void HudViewportApplier::background(opennova::editor::PreviewBackground background) {
+	set_preview_backdrop(**backdrop_material_, background);
 }
 
 void HudViewportApplier::resize(int width, int height) {
