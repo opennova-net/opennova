@@ -1264,3 +1264,36 @@ func test_thermal_frames_bind_the_secondary_particle_materials() -> void:
 	assert_lt(far_additive_thermal.b, 0.45,
 			"pass A's thermal Additive darkens the grey behind it: %s" % far_additive_thermal)
 	assert_engine_error_count(0)
+
+
+# Every atlas page carries the levels retail builds it with: 0x180000, so at
+# most three box-filtered levels, and the materials bound the stage to the last
+# of them, sampled bilinear on the nearest level (D-RMAT-23; retail
+# CParticleTexture_InitTextureAndChannels @ 0x5E82B2..0x5E82EB,
+# GTexture_CreateFromPixelData_0 @ 0x6877F2..0x687801).
+func test_atlas_pages_carry_their_three_point_mip_levels() -> void:
+	for blend in [0, 3]:
+		var viewport := SubViewport.new()
+		viewport.size = Vector2i(64, 64)
+		viewport.own_world_3d = true
+		add_child_autofree(viewport)
+		var camera := Camera3D.new()
+		camera.position = Vector3(0.0, 1.0, 5.0)
+		camera.current = true
+		viewport.add_child(camera)
+		var renderer := ParticleRenderer.new()
+		renderer.scene = _single_quad_scene("mips%d" % blend, blend)
+		renderer.texture_provider = _overlap_texture
+		viewport.add_child(renderer)
+		renderer.render_now(GameWorld.current_frame_clock_ms())
+		var pages: Array = renderer.get_debug_draw_list_report().get("atlas_pages", [])
+		assert_eq(pages.size(), 1, "one page for the one graphic (blend %d)" % blend)
+		for value in pages:
+			var page: Dictionary = value
+			assert_eq(int(page.get("side", 0)), 1024 if blend == 0 else 256,
+					"the page side by the graphic's type")
+			assert_eq(int(page.get("levels", 0)), 3, "three retail levels (blend %d)" % blend)
+			assert_eq(float(page.get("max_lod", -1.0)), 2.0,
+					"the stage stops at level 2 (blend %d)" % blend)
+			assert_true(bool(page.get("texture_mipmaps", false)),
+					"the page texture carries a chain (blend %d)" % blend)

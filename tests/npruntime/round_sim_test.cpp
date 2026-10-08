@@ -2402,12 +2402,20 @@ int main() {
 		if (!expect(ch.count == -1, "a fresh channel starts at count -1")) return 1;
 		sim.tick(world, nullptr, nullptr);
 		if (!expect(ch.count == 0, "the first append stores nothing")) return 1;
-		const w::Vec3 after_first_move = sim.rounds[size_t(slot)].pos;
+		const w::LiveRound &live = sim.rounds[size_t(slot)];
+		const w::Vec3 after_first_move = live.pos;
+		// The stored point is the round's trail anchor at that pre-move position,
+		// at update 4 a sixty-fourth out (ctest world_tracer_trail_anchor pins it).
+		world.entity_update_counter = 4;
+		const w::Vec3 first_anchor =
+				w::tracer_trail_anchor(ch, after_first_move, live.yaw_bam, live.pitch_bam,
+						live.roll_bam, world.entity_update_counter);
+		if (!expect(first_anchor.z != after_first_move.z, "the anchor leaves the path")) return 1;
 		for (int t = 0; t < 4; ++t) sim.tick(world, nullptr, nullptr);
 		if (!expect(ch.count == 4, "one trail point per tick after the first")) return 1;
-		if (!expect(ch.pts[0].pos.x == after_first_move.x &&
-		                    ch.pts[0].pos.y == after_first_move.y &&
-		                    ch.pts[0].pos.z == after_first_move.z &&
+		if (!expect(ch.pts[0].pos.x == first_anchor.x &&
+		                    ch.pts[0].pos.y == first_anchor.y &&
+		                    ch.pts[0].pos.z == first_anchor.z &&
 		                    !(after_first_move.x == 0.0f && after_first_move.z == 500.0f),
 		            "the first STORED point is the second tick's pre-move point, not the origin"))
 			return 1;
@@ -2425,6 +2433,7 @@ int main() {
 			return 1;
 		for (int t = 0; t < 30; ++t) sim.tick(world, nullptr, nullptr);
 		if (!expect(!ch.active, "the drained channel frees its slot")) return 1;
+		world.entity_update_counter = 0;
 
 		// Enemy select: a presenting client on another team gets the enemy style.
 		sim.local_player = w::EntityHandle{};

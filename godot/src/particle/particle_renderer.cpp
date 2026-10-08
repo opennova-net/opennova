@@ -58,6 +58,7 @@
 #include <runtime/renderer/particle_color.h>
 #include <runtime/renderer/particle_frame.h>
 #include <runtime/renderer/render_order.h>
+#include <runtime/renderer/texture_dxt.h>
 
 #include "particle/particle_compositor.h"
 #include "particle/effect_distortion_drawer.h"
@@ -142,6 +143,12 @@ Ref<Image> make_fallback_image() {
 struct AtlasPage {
 	std::uint8_t type = 0;
 	int side = 0;
+	// The page's retail levels and the last of them, the stage's point-mip
+	// bound (renderer::particle_atlas_page_levels / _last_level).
+	int levels = 0;
+	float max_lod = 0.0f;
+	// The uploaded image carries a mip chain.
+	bool mipmapped = false;
 	Ref<ImageTexture> texture;
 };
 
@@ -197,12 +204,45 @@ opennova::renderer::ParticleRgbaImage particle_rgba_image(const Ref<Image> &imag
 	return result;
 }
 
-PackedByteArray packed_rgba(const std::vector<std::uint8_t> &pixels) {
+// A page's retail levels end to end, level 0 first: the compositor uploads
+// exactly these as one texture (renderer::particle_atlas_page_levels).
+PackedByteArray packed_levels(const std::vector<opennova::renderer::ParticleRgbaImage> &levels) {
+	std::size_t total = 0;
+	for (const opennova::renderer::ParticleRgbaImage &level : levels)
+		total += level.rgba.size();
 	PackedByteArray result;
-	result.resize(static_cast<int64_t>(pixels.size()));
-	if (!pixels.empty())
-		std::memcpy(result.ptrw(), pixels.data(), pixels.size());
+	result.resize(static_cast<int64_t>(total));
+	std::size_t at = 0;
+	for (const opennova::renderer::ParticleRgbaImage &level : levels) {
+		if (!level.rgba.empty())
+			std::memcpy(result.ptrw() + at, level.rgba.data(), level.rgba.size());
+		at += level.rgba.size();
+	}
 	return result;
+}
+
+// The page as a Godot image carrying its retail levels. A mipmapped Godot
+// image holds every level down to 1 x 1, so the chain goes on past the
+// retail levels with the same box filter; no draw reads those, the stage
+// stopping at the page's last level (albedo_max_lod).
+Ref<Image> page_image_with_levels(std::vector<opennova::renderer::ParticleRgbaImage> levels) {
+	if (levels.empty() || !levels.front().valid())
+		return Ref<Image>();
+	const int width = levels.front().width;
+	const int height = levels.front().height;
+	while (levels.back().width > 1 || levels.back().height > 1) {
+		const opennova::renderer::ParticleRgbaImage &above = levels.back();
+		const std::uint32_t above_w = static_cast<std::uint32_t>(above.width);
+		const std::uint32_t above_h = static_cast<std::uint32_t>(above.height);
+		opennova::renderer::ParticleRgbaImage below;
+		below.width = static_cast<int>(std::max(1u, above_w / 2));
+		below.height = static_cast<int>(std::max(1u, above_h / 2));
+		below.rgba = opennova::renderer::encode_rgba8(opennova::renderer::box_filter_half(
+				opennova::renderer::decode_rgba8(above.rgba.data(), above_w, above_h), above_w,
+				above_h));
+		levels.push_back(std::move(below));
+	}
+	return Image::create_from_data(width, height, true, Image::FORMAT_RGBA8, packed_levels(levels));
 }
 
 String shader_path_for_pipeline(opennova::renderer::ParticlePipeline pipeline) {
@@ -1086,18 +1126,25 @@ public:
 			AtlasPage page;
 			page.type = source.type;
 			page.side = source.image.width;
-			const PackedByteArray pixels = packed_rgba(source.image.rgba);
-			Ref<Image> page_image = Image::create_from_data(
-					source.image.width, source.image.height, false,
-					Image::FORMAT_RGBA8, pixels);
-			if (page_image.is_valid())
+			// The page's device levels: at most three box-filtered levels,
+			// sampled with point mips (D-RMAT-23).
+			const std::vector<opennova::renderer::ParticleRgbaImage> levels =
+					opennova::renderer::particle_atlas_page_levels(source.image);
+			page.levels = static_cast<int>(levels.size());
+			page.max_lod = static_cast<float>(
+					opennova::renderer::particle_atlas_page_last_level(page.side));
+			Ref<Image> page_image = page_image_with_levels(levels);
+			if (page_image.is_valid()) {
+				page.mipmapped = page_image->has_mipmaps();
 				page.texture = ImageTexture::create_from_image(page_image);
+			}
 			pages.push_back(page);
 
 			ParticleAtlasPageSnapshot upload;
 			upload.type = source.type;
 			upload.side = static_cast<std::uint32_t>(source.image.width);
-			upload.rgba8 = pixels;
+			upload.levels = static_cast<std::uint32_t>(levels.size());
+			upload.rgba8 = packed_levels(levels);
 			snapshot->pages.push_back(std::move(upload));
 		}
 		atlas_snapshot = std::shared_ptr<const ParticleAtlasSnapshot>(
@@ -1135,6 +1182,8 @@ public:
 				pages[command.atlas_page].texture.is_valid()) {
 			material->set_shader_parameter("albedo_tex",
 					pages[command.atlas_page].texture);
+			material->set_shader_parameter("albedo_max_lod",
+					pages[command.atlas_page].max_lod);
 			material->set_shader_parameter("has_texture", true);
 		} else {
 			material->set_shader_parameter("has_texture", false);
@@ -1200,6 +1249,8 @@ public:
 				pages[command.atlas_page].texture.is_valid()) {
 			material->set_shader_parameter("albedo_tex",
 					pages[command.atlas_page].texture);
+			material->set_shader_parameter("albedo_max_lod",
+					pages[command.atlas_page].max_lod);
 			material->set_shader_parameter("has_texture", true);
 		} else {
 			material->set_shader_parameter("has_texture", false);
@@ -2244,6 +2295,9 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 		value["page"] = static_cast<int64_t>(i);
 		value["type"] = static_cast<int>(impl_->pages[i].type);
 		value["side"] = impl_->pages[i].side;
+		value["levels"] = impl_->pages[i].levels;
+		value["max_lod"] = impl_->pages[i].max_lod;
+		value["texture_mipmaps"] = impl_->pages[i].mipmapped;
 		atlas_pages[static_cast<int64_t>(i)] = value;
 	}
 	result["atlas_pages"] = atlas_pages;

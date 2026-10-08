@@ -1675,6 +1675,16 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
 
 void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     CollisionWorld *collision) {
+    // The point a round with a trail channel appends: its position waved across
+    // the flight path by the channel's style words on the entity-update clock
+    // [orig: Projectile_GetTrailAnchorPos @ 0x4E64E0 at the per-tick appends
+    // @ 0x4EA04F / @ 0x4EA97A and Projectile_ReleaseEffects' death append
+    // @ 0x4E8292; world/tracer_trails.h tracer_trail_anchor].
+    const auto trail_anchor = [this, &world](const LiveRound &round) {
+        return tracer_trail_anchor(trails.channels[static_cast<size_t>(round.trail_slot)],
+                                   round.pos, round.yaw_bam, round.pitch_bam,
+                                   round.roll_bam, world.entity_update_counter);
+    };
     // Keep the shared query seam synchronized even on an idle round tick; a
     // mission transition may clear or replace the terrain before another
     // collision consumer runs.
@@ -1735,7 +1745,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
             }
             if (r.trail_slot >= 0) {
-                trails.append(r.trail_slot, r.pos);
+                trails.append(r.trail_slot, trail_anchor(r));
                 trails.request_kill(r.trail_slot);
             }
             RoundDebugEvent event;
@@ -1753,7 +1763,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         }
         ++r.age_ticks;
 
-        if (r.trail_slot >= 0) trails.append(r.trail_slot, r.pos);
+        if (r.trail_slot >= 0) trails.append(r.trail_slot, trail_anchor(r));
 
         const AmmoTableEntry *ammo = world.tables.ammo.by_index(r.ammo_index);
         const uint32_t ammo_flags = ammo != nullptr ? ammo->flags : 0;
@@ -1817,7 +1827,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     world, *this, r, *ammo, queries, terrain, authoritative);
             if (!alive) {
                 if (r.trail_slot >= 0) {
-                    trails.append(r.trail_slot, r.pos);
+                    trails.append(r.trail_slot, trail_anchor(r));
                     trails.request_kill(r.trail_slot);
                 }
                 r.active = false;
@@ -2426,7 +2436,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         round_tracer_whiz(world, r, ammo, position_q16, collision.position_q16,
                 incoming_velocity_q16);
         if (r.trail_slot >= 0) {
-            trails.append(r.trail_slot, r.pos);
+            trails.append(r.trail_slot, trail_anchor(r));
             trails.request_kill(r.trail_slot);
         }
         if (has_dud_replacement) {

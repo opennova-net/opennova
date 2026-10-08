@@ -12,13 +12,13 @@ render_mode unshaded, cull_disabled, blend_premul_alpha, depth_draw_never;
 #include "res://shaders/viewmodel_pass.gdshaderinc"
 #include "res://shaders/color.gdshaderinc"
 
-uniform sampler2D albedo_tex : filter_linear, repeat_disable;
+#include "res://shaders/particle/particle_atlas.gdshaderinc"
 uniform bool has_texture = false;
 
 void fragment() {
 	vec3 rgb = COLOR.rgb;
 	if (has_texture) {
-		rgb *= texture(albedo_tex, UV).rgb;
+		rgb *= particle_atlas_texel(UV).rgb;
 	} else {
 		vec2 centered = UV - vec2(0.5);
 		float r = length(centered) * 2.0;

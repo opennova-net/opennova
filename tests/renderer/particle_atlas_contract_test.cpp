@@ -294,6 +294,54 @@ bool raw_rgba_preprocess_contract() {
 			"type 7 uses scale 0.03125, forces blue to 255, and retains alpha");
 }
 
+// The page's device levels [orig: CParticleTexture_InitTextureAndChannels
+// @ 0x5E82B2..0x5E82EB, 0x180000 on the full-quality branch;
+// GTexture_CreateFromPixelData_0 @ 0x6877F2..0x687801 (at most three
+// levels), @ 0x6878BE (D3DXFilterTexture BOX, each level from the one
+// before, stored as A8R8G8B8 bytes)]: three levels for both page sides,
+// each texel the rounded mean of the four above it.
+bool page_levels_contract() {
+	r::ParticleRgbaImage big = solid_image(1024, 1024, {0, 0, 0, 0});
+	// One 2x2 block at the origin: three zero texels and a full one on R and
+	// A, the mirror on G; B a ramp 10/20/30/41.
+	const auto put = [&big](int x, int y, std::array<std::uint8_t, 4> rgba) {
+		const std::size_t at = static_cast<std::size_t>((y * big.width + x) * 4);
+		for (int c = 0; c < 4; ++c)
+			big.rgba[at + static_cast<std::size_t>(c)] = rgba[static_cast<std::size_t>(c)];
+	};
+	put(0, 0, {0, 255, 10, 0});
+	put(1, 0, {0, 255, 20, 0});
+	put(0, 1, {0, 255, 30, 0});
+	put(1, 1, {255, 0, 41, 255});
+	const std::vector<r::ParticleRgbaImage> levels = r::particle_atlas_page_levels(big);
+	if (!check(r::kParticlePageCreationFlags == 0x180000u && levels.size() == 3 &&
+					levels[0].width == 1024 && levels[1].width == 512 &&
+					levels[1].height == 512 && levels[2].width == 256 &&
+					levels[1].valid() && levels[2].valid(),
+				"a 1024 page carries three levels: 1024, 512, 256"))
+		return false;
+	// (0 + 0 + 0 + 1) / 4 x 255 = 63.75, +0.5 -> 64; (3 x 255) / 4 = 191.25 -> 191;
+	// (10 + 20 + 30 + 41) / 4 = 25.25 -> 25.
+	const std::uint8_t *texel = levels[1].rgba.data();
+	if (!check(texel[0] == 64 && texel[1] == 191 && texel[2] == 25 && texel[3] == 64,
+				"level 1 is D3DX's box filter of level 0, rounded half up"))
+		return false;
+	// Level 2 filters level 1's stored bytes: 64 and three zeros -> 16.
+	if (!check(levels[2].rgba[0] == 16 && levels[2].rgba[3] == 16,
+				"level 2 filters the bytes level 1 was stored as"))
+		return false;
+	const std::vector<r::ParticleRgbaImage> small =
+			r::particle_atlas_page_levels(solid_image(256, 256, {9, 8, 7, 6}));
+	if (!check(small.size() == 3 && small[2].width == 64 && small[2].rgba[0] == 9 &&
+					small[2].rgba[3] == 6,
+				"a 256 page carries three levels: 256, 128, 64"))
+		return false;
+	return check(r::particle_atlas_page_last_level(1024) == 2 &&
+					r::particle_atlas_page_last_level(256) == 2 &&
+					r::particle_atlas_page_levels(r::ParticleRgbaImage{}).empty(),
+			"both page sides stop at level 2; an empty page has no levels");
+}
+
 } // namespace
 
 int main() {
@@ -305,6 +353,7 @@ int main() {
 	if (!strict_page_edge_contract()) return 1;
 	if (!overlapping_skyline_candidate_contract()) return 1;
 	if (!raw_rgba_preprocess_contract()) return 1;
+	if (!page_levels_contract()) return 1;
 	std::puts("renderer_particle_atlas_contract_test ok");
 	return 0;
 }
