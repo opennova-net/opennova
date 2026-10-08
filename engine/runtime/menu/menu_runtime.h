@@ -539,11 +539,12 @@ public:
 	void process_mouse(float x, float y, bool button_down, uint32_t now_ms);
 	// One wheel tick (+1 rows-down, -1 rows-up); true when a target claimed it.
 	bool process_wheel(float x, float y, int steps);
-	// The frame reported a click on widget `index` (the release over the widget
-	// it was pressed on): the pump's click, the SELECTED sound and the
-	// activation, or a spin arrow's own click [orig: CWnd_ProcessMouseEvent
-	// @ 0x647a00 — the click event 0x3000001 after the child pump].
-	void on_widget_clicked(int index);
+	// The frame reported a click on widget `index` (the claim let go over that
+	// the pump held down under the mouse the sample before, menu_click.h): the
+	// pump's click, the SELECTED sound and the activation; `part` 1 or 2, the
+	// spin arrow's own click (a button of its own) [orig: CWnd_ProcessMouseEvent
+	// @ 0x647b14 — the click event 0x3000001 after the child pump].
+	void on_widget_clicked(int index, int part);
 	// One key press; true when consumed (a hotkey fired, or the focused widget
 	// took it) [orig: UI_DispatchKeyboardEventToChildren @ 0x63ad10].
 	bool handle_key(const MenuKeyInput &key);
@@ -682,7 +683,6 @@ private:
 	int last_claim_ = -1;
 	// The windows' sound states and verdicts (menu_sound.h), by widget id.
 	MenuSoundPump sound_pump_;
-	float last_mouse_x_ = 0.0f, last_mouse_y_ = 0.0f;
 	bool mouse_down_ = false;
 	int last_click_id_ = -1;
 	int last_click_row_ = -1;

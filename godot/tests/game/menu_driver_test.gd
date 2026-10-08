@@ -784,6 +784,36 @@ func test_wheel_ticks_scroll_open_popup_rows() -> void:
 			"with the popup closed, a tick over nothing scrollable is unclaimed")
 
 
+# The click is the game's rule (engine menu_click.h, D-MNU-30): the claim let go
+# over is clicked when the pump held it under the mouse with the button down the
+# sample before, wherever the press began; a press on a capturing class (a
+# button) holds the claim to it until the release [orig: CWnd_ProcessMouseEvent
+# @ 0x647b14; CButtonWnd_HandleNamedEvent @ 0x65839c / 0x6583ed].
+func test_click_is_the_game_s_rule() -> void:
+	var driver := _framed_driver(BOARD_XML)
+	var frame := driver.get_frame()
+	var other := driver.widget_id("OTHER")
+	var at := driver.widget_frame_rect(other).get_center()
+	var snd := driver.widget_frame_rect(driver.widget_id("SND_BTN")).get_center()
+	watch_signals(driver)
+	watch_signals(frame)
+	# Pressed on the backdrop (ROOT's press takes no capture), slid onto OTHER, let go.
+	driver.process_mouse(Vector2(700, 100), false)
+	driver.process_mouse(Vector2(700, 100), true)
+	driver.process_mouse(at, true)
+	driver.process_mouse(at, false)
+	assert_signal_emitted_with_parameters(frame, "widget_clicked", [frame.widget_index("OTHER"), 0])
+	assert_signal_emitted_with_parameters(driver, "widget_activated", [other, "OTHER"])
+	# Pressed on SND_BTN (a button captures), let go over OTHER: neither is clicked.
+	driver.process_mouse(snd, true)
+	driver.process_mouse(at, true)
+	driver.process_mouse(at, false)
+	assert_signal_emit_count(driver, "widget_activated", 1,
+			"a button's press let go over another button clicks neither")
+	assert_signal_not_emitted(driver, "sound_requested",
+			"SND_BTN's SELECTED never plays: it was not let go over")
+
+
 func test_combo_outside_click_dismisses_and_is_consumed() -> void:
 	var driver := _framed_driver(BOARD_XML)
 	var combo := driver.widget_id("MODE")

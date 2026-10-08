@@ -181,7 +181,7 @@ EditKeyResult frame_edit_key(const MenuFrameCompiler &compiler, MenuFrameState &
 
 void MenuStateFrame::clear() {
 	state_ = MenuFrameState();
-	click_ = MenuClickLatch();
+	click_.reset();
 	configured_ = false;
 	++serial_;
 }
@@ -189,7 +189,7 @@ void MenuStateFrame::clear() {
 void MenuStateFrame::configure_screen(const std::string &screen) {
 	// A configure starts the frame over, as the device's does (MenuFrame::configure_screen).
 	state_ = MenuFrameState();
-	click_ = MenuClickLatch();
+	click_.reset();
 	configured_ = configure_ && configure_(screen, compiler_);
 	++configures_;
 	++serial_;
@@ -290,7 +290,7 @@ MenuRectF MenuStateFrame::widget_rect(int index) const {
 namespace {
 
 // What the pump holds of a frame state that a sample can change: each window's hover, press and
-// spin arrow, and the cursor's claim.
+// spin arrow, and the cursor's claim and the capture it falls back to.
 using PumpHeld = std::vector<std::tuple<int32_t, bool, bool, int32_t>>;
 PumpHeld pump_held(const MenuFrameState &state) {
 	PumpHeld held;
@@ -299,6 +299,8 @@ PumpHeld pump_held(const MenuFrameState &state) {
 			held.emplace_back(row.index, row.hovered, row.pressed, row.spin_part);
 	held.emplace_back(-2, false, false, state.cursor_claim);
 	held.emplace_back(-3, false, false, state.cursor_spin_part);
+	held.emplace_back(-4, false, false, state.cursor_capture);
+	held.emplace_back(-5, false, false, state.cursor_capture_part);
 	return held;
 }
 
@@ -308,16 +310,19 @@ int MenuStateFrame::process_mouse(float x, float y, bool button_down, bool &scro
 	scroll_owned = false;
 	if (!configured_) return -1;
 	const PumpHeld before = pump_held(state_);
-	const MenuFrameCompiler::MouseClaim claim = compiler_.pump_mouse(state_, x, y, button_down, 1.0f, 1.0f);
+	// The claim honors a press's capture, which the release lets go first; the click is the claim let go
+	// over that was held the sample before, as the game's frame takes it (MenuFrame::process_mouse)
+	// [orig: CWnd_ProcessMouseEvent @ 0x647b14 — the click event 0x3000001 after the child pump].
+	const MenuPumpWindow capture = click_.capture_for(button_down);
+	const MenuFrameCompiler::MouseClaim claim =
+			compiler_.pump_mouse(state_, x, y, button_down, 1.0f, 1.0f, capture);
 	state_.cursor_x = x;
 	state_.cursor_y = y;
 	if (pump_held(state_) != before) ++serial_;
-	// The click: the release over the widget the press claimed (a press a scrollbar part took never
-	// arms one), as the game's frame takes it (MenuFrame::process_mouse) [orig: CWnd_ProcessMouseEvent
-	// @ 0x647a00 — the click event 0x3000001 after the child pump].
-	const int clicked = click_.sample(claim.hovered, button_down, claim.scroll_index < 0);
+	const MenuPumpWindow clicked = click_.sample(compiler_.click_claim(claim, state_), button_down,
+			[this](const MenuPumpWindow &window) { return compiler_.pump_window_reached(window, state_); });
 	scroll_owned = claim.scroll_index >= 0;
-	if (clicked >= 0 && clicked_) clicked_(clicked);
+	if (clicked.valid() && clicked_) clicked_(clicked.index, clicked.part);
 	if (claim.scroll_value_changed) {
 		++serial_;
 		if (scrolled_) scrolled_(claim.scroll_index, claim.scroll_value);
@@ -327,6 +332,8 @@ int MenuStateFrame::process_mouse(float x, float y, bool button_down, bool &scro
 
 bool MenuStateFrame::process_popup_mouse(int index, float x, float y, bool button_down) {
 	if (!configured_) return false;
+	// The dropdown has the mouse: a press it takes holds the capture until the release.
+	click_.dropdown_sample(index, button_down);
 	const MenuFrameCompiler::MouseClaim claim =
 			compiler_.pump_popup_mouse(state_, index, x, y, button_down, 1.0f, 1.0f);
 	state_.cursor_x = x;

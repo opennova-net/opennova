@@ -1447,8 +1447,6 @@ bool MenuRuntime::visible_in_hierarchy_(int id) const {
 void MenuRuntime::process_mouse(float x, float y, bool button_down, uint32_t now_ms) {
 	if (frame_ == nullptr || !frame_->is_configured()) return;
 	sync_popup_();
-	last_mouse_x_ = x;
-	last_mouse_y_ = y;
 	const bool down_edge = button_down && !mouse_down_;
 	mouse_down_ = button_down;
 
@@ -1607,15 +1605,12 @@ void MenuRuntime::press_(int index, float x, float y, uint32_t now_ms) {
 	}
 }
 
-void MenuRuntime::on_widget_clicked(int index) {
+void MenuRuntime::on_widget_clicked(int index, int part) {
 	const int id = id_at_index(index);
 	if (id < 0 || frame_ == nullptr || !visible_in_hierarchy_(id)) return;
-	if (widget_kind_of(id) == kKindSpinList) {
-		const int arrow = frame_->spin_arrow_at(index, last_mouse_x_, last_mouse_y_);
-		if (arrow != 0) {
-			arrow_click_(id, arrow);
-			return;
-		}
+	if ((part == 1 || part == 2) && widget_kind_of(id) == kKindSpinList) {
+		arrow_click_(id, part);
+		return;
 	}
 	// The pump's click plays the SELECTED sound, then the click event [orig:
 	// CWnd_ProcessMouseEvent @ 0x647a00 — the state-3 sound, then vtable+28
