@@ -57,11 +57,14 @@ public:
 			opennova::editor::ViewportDeviceReport &report) override;
 	void tick(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) override;
 	void resize(int, int) override {}
+	// The editor's preview background behind the record's picture, the grid's lines read against it.
+	void background(opennova::editor::PreviewBackground background) override;
 
 	// Its nodes, for the device tests: the camera, the grid, the model, the effects drawn, a weapon's arms, its
 	// tracers, its scars and its target.
 	Camera3D *camera() const { return camera_; }
 	MeshInstance3D *grid() const { return grid_; }
+	MeshInstance3D *backdrop() const { return backdrop_; }
 	ObjectModel *object_model() const { return model_->object(); }
 	PreviewEffects &effects() { return *effects_; }
 	ObjectModel *arms_model() const { return arms_->object(); }
@@ -82,6 +85,7 @@ private:
 
 	Camera3D *camera_ = nullptr;
 	MeshInstance3D *grid_ = nullptr;
+	MeshInstance3D *backdrop_ = nullptr;
 	MissionEnvironment *environment_ = nullptr;
 	std::unique_ptr<PreviewModel> model_;
 	std::unique_ptr<PreviewModel> arms_;

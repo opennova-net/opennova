@@ -16,10 +16,6 @@ namespace godot {
 
 class MissionEnvironment;
 
-// A metre's squares on the ground a preview's picture stands on (the editor's aid: the effect device's and the
-// definition device's), the lines through the origin brighter.
-Ref<ArrayMesh> preview_grid_mesh();
-
 // An effect viewport's device work (ADR 0046 DI-14): the scene the viewport's playback steps
 // (editor/preview/effect_viewport: the engine's effect scene, the effect spawned and played on the
 // preview clock) drawn by the game's particle renderer (authoring/preview_effects) through the camera the
@@ -42,10 +38,13 @@ public:
 			opennova::editor::ViewportDeviceReport &report) override;
 	void tick(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) override;
 	void resize(int, int) override {}
+	// The editor's preview background behind the effect, the grid's lines read against it.
+	void background(opennova::editor::PreviewBackground background) override;
 
-	// Its nodes and values, for the device tests: the camera, the grid, the effects drawn.
+	// Its nodes and values, for the device tests: the camera, the grid, the backdrop, the effects drawn.
 	Camera3D *camera() const { return camera_; }
 	MeshInstance3D *grid() const { return grid_; }
+	MeshInstance3D *backdrop() const { return backdrop_; }
 	PreviewEffects &effects() { return *effects_; }
 
 private:
@@ -54,6 +53,7 @@ private:
 
 	Camera3D *camera_ = nullptr;
 	MeshInstance3D *grid_ = nullptr;
+	MeshInstance3D *backdrop_ = nullptr;
 	MissionEnvironment *environment_ = nullptr;
 	std::unique_ptr<PreviewEffects> effects_;
 	bool shows_ = false; // a scene was taken (a Rebuild) and not cleared since
