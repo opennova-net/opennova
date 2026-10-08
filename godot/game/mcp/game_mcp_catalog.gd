@@ -85,7 +85,8 @@ static func definitions() -> Array[McpToolDef]:
 			+ "set_audio_bus_mute {bus,muted}; set_audio_bus_solo {bus,soloed}; "
 			+ "set_audio_bus_bypass {bus,bypassed}."
 			+ " Automation actions: deploy_pick {zone} (0 = Default Spawn); "
-			+ "set_viewmodel_weapon {weapon}; clear_viewmodel_weapon; "
+			+ "set_viewmodel_weapon {weapon} (the viewmodel and its FSM only: the round fired "
+			+ "stays the equipped slot's); clear_viewmodel_weapon; "
 			+ "kill_group {group}; crew_vehicle {occupant_ssn,vehicle_ssn}; "
 			+ "crew_local_player {vehicle_ssn}; local_player_look {dx_px,dy_px}; "
 			+ "plus the net_joiner_diagnostics check.",

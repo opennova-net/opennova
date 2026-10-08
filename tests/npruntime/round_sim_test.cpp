@@ -2402,12 +2402,18 @@ int main() {
 		if (!expect(ch.count == -1, "a fresh channel starts at count -1")) return 1;
 		sim.tick(world, nullptr, nullptr);
 		if (!expect(ch.count == 0, "the first append stores nothing")) return 1;
-		const w::Vec3 after_first_move = sim.rounds[size_t(slot)].pos;
+		const w::LiveRound &live = sim.rounds[size_t(slot)];
+		const w::Vec3 after_first_move = live.pos;
+		// The stored point is the round's trail anchor at that pre-move position
+		// (section 8 pins the anchor itself).
+		const w::Vec3 first_anchor =
+				w::tracer_trail_anchor(ch, after_first_move, live.yaw_bam, live.pitch_bam,
+						live.roll_bam, world.entity_update_counter);
 		for (int t = 0; t < 4; ++t) sim.tick(world, nullptr, nullptr);
 		if (!expect(ch.count == 4, "one trail point per tick after the first")) return 1;
-		if (!expect(ch.pts[0].pos.x == after_first_move.x &&
-		                    ch.pts[0].pos.y == after_first_move.y &&
-		                    ch.pts[0].pos.z == after_first_move.z &&
+		if (!expect(ch.pts[0].pos.x == first_anchor.x &&
+		                    ch.pts[0].pos.y == first_anchor.y &&
+		                    ch.pts[0].pos.z == first_anchor.z &&
 		                    !(after_first_move.x == 0.0f && after_first_move.z == 500.0f),
 		            "the first STORED point is the second tick's pre-move point, not the origin"))
 			return 1;
@@ -2470,6 +2476,90 @@ int main() {
 		sim.no_tracers_rule = false;
 		sim.rounds[size_t(slot_f)].active = false;
 		--sim.active_count;
+		sim.trails.reset();
+		sim.fired.clear();
+	}
+
+	// --- 8. The trail anchor [orig: Projectile_GetTrailAnchorPos @ 0x4E64E0 — the
+	// round position plus its euler matrix applied to {0, d, d}; d = the channel's
+	// amplitude word (style +0xC) x the Q22 sine at (g_EntityUpdateCounter x the
+	// rate word (style +8) + 0x200000) >> 22, shifted to 16.16; CEffectChannel_Init
+	// copies the two words @ 0x5DB243..0x5DB249].
+	{
+		auto &sim = world.round_sim;
+		auto &ammo1 = world.tables.ammo.entries[1];
+		ammo1.tracer_rate = 1;
+		ammo1.tracer_type_friendly = 3; // rocket: rate 0x8000000, amplitude 0x4000
+		ammo1.tracer_type_enemy = 3;
+		w::Entity *shooter = world.registry.get(hb);
+		shooter->tracer_shot_counter = 0;
+		sim.local_player = hb;
+		sim.local_team = static_cast<uint8_t>(shooter->team);
+		w::RoundSpawnParams rp;
+		rp.owner = hb;
+		rp.shooter_handle = hb.packed;
+		rp.ammo_index = 1;
+		rp.origin = {0.0f, 0.0f, 500.0f};
+		const int slot = sim.spawn(world, rp);
+		if (!expect(slot >= 0 && sim.rounds[size_t(slot)].trail_slot >= 0,
+		            "the rocket-style round allocates a channel"))
+			return 1;
+		w::LiveRound &round = sim.rounds[size_t(slot)];
+		auto &ch = sim.trails.channels[size_t(round.trail_slot)];
+		if (!expect(ch.wobble_rate == 0x8000000 && ch.wobble_amplitude == 0x4000,
+		            "the channel copies the rocket block's +8 / +0xC words"))
+			return 1;
+		// Heading 90 degrees, level: local Y swings to -X, local Z stays up.
+		round.yaw_bam = 0x40000000;
+		round.pitch_bam = 0;
+		round.roll_bam = 0;
+		world.entity_update_counter = 7;
+		sim.tick(world, nullptr, nullptr); // the first append only lifts the count
+		// 8 x 0x8000000 + 0x200000 >> 22 = table entry 256, the sine's crest:
+		// d = (0x4000 x 0x10000 + 0x8000) >> 16 = 0x4000, a quarter unit.
+		world.entity_update_counter = 8;
+		const w::Vec3 crest_pos = round.pos;
+		sim.tick(world, nullptr, nullptr);
+		const auto moved = [](float v, int32_t q16) {
+			return static_cast<float>(w::from_fixed(w::to_fixed(v) + q16));
+		};
+		if (!expect(ch.count == 1 && ch.pts[0].pos.x == moved(crest_pos.x, -0x4000) &&
+		                    ch.pts[0].pos.y == moved(crest_pos.y, 0) &&
+		                    ch.pts[0].pos.z == moved(crest_pos.z, 0x4000),
+		            "at the crest the point sits a quarter unit out along the round's "
+		            "local Y and Z"))
+			return 1;
+		// 24 x 0x8000000 wraps to entry 768, the trough: the other side.
+		world.entity_update_counter = 24;
+		const w::Vec3 trough_pos = round.pos;
+		sim.tick(world, nullptr, nullptr);
+		if (!expect(ch.count == 2 && ch.pts[1].pos.x == moved(trough_pos.x, 0x4000) &&
+		                    ch.pts[1].pos.z == moved(trough_pos.z, -0x4000),
+		            "at the trough the point swings to the other side"))
+			return 1;
+		// Entry 0 leaves the point on the flight path.
+		world.entity_update_counter = 0;
+		const w::Vec3 still_pos = round.pos;
+		sim.tick(world, nullptr, nullptr);
+		if (!expect(ch.count == 3 && ch.pts[2].pos.x == moved(still_pos.x, 0) &&
+		                    ch.pts[2].pos.z == moved(still_pos.z, 0),
+		            "entry 0 leaves the point on the flight path"))
+			return 1;
+		// The bullet tracers wave a sixty-fourth of a unit every 16 updates.
+		w::TracerTrailChannel stdred;
+		stdred.wobble_rate = w::tracer_style_wobble_rate(1);
+		stdred.wobble_amplitude = w::tracer_style_wobble_amplitude(1);
+		const w::Vec3 at =
+				w::tracer_trail_anchor(stdred, w::Vec3{0.0f, 0.0f, 0.0f}, 0, 0, 0, 4);
+		if (!expect(stdred.wobble_rate == 0x10000000 && stdred.wobble_amplitude == 0x400 &&
+		                    at.x == 0.0f && at.y == 0.015625f && at.z == 0.015625f,
+		            "stdred: entry 256 at update 4, d = 0x400"))
+			return 1;
+		round.active = false;
+		--sim.active_count;
+		ammo1.tracer_type_friendly = 0;
+		ammo1.tracer_type_enemy = 0;
+		world.entity_update_counter = 0;
 		sim.trails.reset();
 		sim.fired.clear();
 	}

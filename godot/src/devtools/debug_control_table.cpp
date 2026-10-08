@@ -906,7 +906,7 @@ void DebugControlTable::register_automation_actions() {
 	bind_action(deploy_pick, &DebugControlTable::sim, &Simulation::send_deployment_pick);
 
 	Entry &viewmodel = action(control_id::kSetViewmodelWeapon, "Player", "Set viewmodel weapon",
-			"Rig the first-person viewmodel and action FSM to a weapon.def name (A/B against another SKU's def).",
+			"Rig the first-person viewmodel and action FSM to a weapon.def name (A/B against another SKU's def). The round each shot spawns stays the equipped inventory slot's; equip through the armory or a kit to fire another weapon's round.",
 			DebugControlRow::TARGET_WORLD, DebugControlRow::OWNER_DEVICE,
 			args_of(DebugArgSpec::text("weapon")));
 	viewmodel.row->requires_confirm_ = true;
