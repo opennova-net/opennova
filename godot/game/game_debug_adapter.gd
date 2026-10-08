@@ -219,6 +219,15 @@ func _session_facts(sim: Simulation) -> Dictionary:
 		# The charattr properties the restriction step disabled, in the S2C 0x42
 		# packing (0x02 ATTRIBUTES, 0x04 XHAIR_MUTE, 0x08 RECOIL_MUTE, 0x10 SCOPE_MUTE).
 		"charattr_disabled": int(sim.get_charattr_disabled_word()),
+		# The profile's input words as the session copy left them (the look's
+		# sensitivity and Y invert, the auto-reload global), and the live
+		# bindings' joystick gate (docs/playerinfo/player-sav-re.md).
+		"input": {
+			"mouse_sensitivity": int(sim.get_session_mouse_sensitivity()),
+			"invert_mouse": bool(sim.is_session_mouse_inverted()),
+			"auto_reload": bool(sim.is_session_auto_reload()),
+			"joystick_enabled": ControlsBindings.model().is_joystick_enabled(),
+		},
 	}
 
 

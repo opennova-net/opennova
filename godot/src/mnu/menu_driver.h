@@ -27,6 +27,7 @@ namespace godot {
 
 class MenuAudio;
 class ControlsModel;
+class PlayerProfiles;
 class MissionCatalogRow;
 class MenuFrame;
 class MnsStyleSheet;
@@ -120,9 +121,9 @@ protected:
 public:
 	enum OptionsEffect {
 		OPTIONS_CONSUMED = opennova::menu::OptionsScreen::Consumed,
-		OPTIONS_PERSIST_BINDINGS = opennova::menu::OptionsScreen::PersistBindings,
 		OPTIONS_COMMIT_PREVIEW = opennova::menu::OptionsScreen::CommitPreview,
 		OPTIONS_RESTORE_PREVIEW = opennova::menu::OptionsScreen::RestorePreview,
+		OPTIONS_APPLY_CONTROLS = opennova::menu::OptionsScreen::ApplyControls,
 	};
 	void set_mission_controls(const PackedStringArray &p_lists,
 			const PackedStringArray &p_briefings, const PackedStringArray &p_accepts);
@@ -154,20 +155,27 @@ public:
 	void toggle_host_mission_switch(int p_row) { host_dialog_.toggle_switch(runtime_, p_row); }
 	PackedInt32Array selected_host_launch_options() const;
 	void select_host_location(int p_id, const String &p_country);
-	void prepare_options(const Ref<ControlsModel> &p_controls);
+	// The Options screens over the profile's current record (engine
+	// menu::OptionsScreen): the screen's binding records built from the
+	// record's table; null profiles = the catalog defaults, no words.
+	void prepare_options(const Ref<PlayerProfiles> &p_profiles);
 	bool is_options_surface() const { return options_.is_surface(); }
 	// The retail Options policy on the surface prepare_options found (engine
-	// OptionsScreen::apply_policy), before the settings owner seeds its values.
-	void apply_options_policy() { options_.apply_policy(runtime_); }
+	// OptionsScreen::apply_policy), then the record's controls words
+	// (OptionsScreen::seed_profile), before the settings owner seeds its values.
+	void apply_options_policy(const Ref<PlayerProfiles> &p_profiles);
 	// The shell's name set by its token (engine menu_commands.h: "start", "exit", "return",
 	// "restart", "back", "novaworld", "mission_lists", "sp_lists", "briefings", "sp_accepts",
 	// "mod_lists", "mod_descriptions"): MenuShell's defaults, one table the editor's Try mode
 	// reads too. Empty for another token.
 	static PackedStringArray command_names(const String &p_set);
-	int activate_options(const Ref<ControlsModel> &p_controls, const String &p_name);
-	void arm_options_remap(const Ref<ControlsModel> &p_controls, int p_id, int p_row);
-	int consume_options_input(const Ref<ControlsModel> &p_controls, const Ref<InputEvent> &p_event);
-	void end_options_remap(const Ref<ControlsModel> &p_controls, bool p_refill);
+	int activate_options(const Ref<PlayerProfiles> &p_profiles, const String &p_name);
+	void arm_options_remap(int p_id, int p_row) { options_.arm(runtime_, p_id, p_row); }
+	int consume_options_input(const Ref<InputEvent> &p_event);
+	void end_options_remap(bool p_refill) { options_.end_remap(runtime_, p_refill); }
+	// The Options screen's own binding records' Control-column text (tests and
+	// tools read the remap flow through it).
+	String options_control_text(int p_action, int p_device) const;
 	void show_ingame_main() { opennova::menu::OptionsScreen::show_ingame_main(runtime_); }
 
 	int fill_player_info_ammo(const Ref<WeaponDatabase> &p_weapons, const String &p_control,

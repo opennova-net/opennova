@@ -162,8 +162,8 @@ func test_hud_hidden_capture_is_scoped_non_persisting_and_keeps_effects_active()
 
 func test_shared_key_fires_huddetail_not_hudcolor() -> void:
 	# Pin the catalog default rows (huddetail F6 / hudcolor F6) so the
-	# shared-key predicate holds regardless of ambient user remaps. In-memory
-	# only — the user's controls.cfg is never rewritten here.
+	# shared-key predicate holds regardless of an earlier profile's apply. In-memory
+	# only — no player.sav is written here.
 	ControlsBindings.model().restore_defaults()
 	var presenter: GameHudPresenter = autofree(GameHudPresenter.new())
 	var detail_start := presenter.hud_detail_level()

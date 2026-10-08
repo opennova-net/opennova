@@ -18,14 +18,19 @@ const OPTIONS_FIXTURE := "mnu/jo_options.mnu"  # has the Mods tab (AVAIL_LIST/MO
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 
 var _state_config: TestFs.Snapshot
-var _controls_cfg: TestFs.Snapshot
+var _run_dir := ""
 
 
 func before_each() -> void:
 	_state_config = TestFs.snapshot(STATE_CONFIG_PATH)
 	if _state_config.existed:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
-	_controls_cfg = TestFs.snapshot(ControlsBindings.CONFIG_PATH)
+	# The Options screens edit the player profile's current record: each case
+	# starts from a fresh one in an empty run directory.
+	_run_dir = OS.get_cache_dir().path_join("opennova_menu_shell_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(_run_dir)
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", _run_dir]))
+	PlayerProfile.load_for(null)
 
 
 func after_each() -> void:
@@ -33,9 +38,10 @@ func after_each() -> void:
 	MusicService.stop_context()
 	_state_config.restore()
 	# The live binding model is a static shared with the whole run: restore the
-	# catalog defaults and the on-disk cfg even when a remap test fails early.
+	# catalog defaults even when a remap test fails early.
 	ControlsBindings.model().restore_defaults()
-	_controls_cfg.restore()
+	LaunchFlags.clear_args_override()
+	TestFs.remove_dir_recursive(_run_dir)
 
 
 # Build a throwaway resource dir holding main.mnu (+ a sp.mnu jump target and a

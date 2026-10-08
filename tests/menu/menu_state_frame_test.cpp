@@ -267,11 +267,10 @@ void test_options_policy() {
 	Run run;
 	CHECK(run.open(kOptions, "options.mnu"));
 	OptionsScreen options;
-	const controls::BindingSet bindings;
 	// Off the surface, nothing.
 	options.apply_policy(run.rt);
 	CHECK(!run.rt.is_widget_disabled(run.rt.widget_id("DIFFICULTY")));
-	options.prepare(run.rt, bindings);
+	options.prepare(run.rt, nullptr);
 	CHECK(options.is_surface());
 	options.apply_policy(run.rt);
 	MenuScrollRangeState range;
@@ -279,7 +278,8 @@ void test_options_policy() {
 	      range.maximum == 255 && range.page == 10 && range.value == 0);
 	const int poly = run.rt.widget_id("TERRAINPOLY");
 	CHECK(run.rt.selected_row(poly) == 1 && run.rt.is_widget_disabled(poly));
-	CHECK(run.rt.is_widget_checked(run.rt.widget_id("OPTIONS_AUTORELOAD")));
+	// The auto-reload box is the profile's (OptionsScreen::seed_profile), served.
+	CHECK(!run.rt.is_widget_disabled(run.rt.widget_id("OPTIONS_AUTORELOAD")));
 	CHECK(run.rt.is_widget_disabled(run.rt.widget_id("DIFFICULTY")));
 }
 

@@ -976,10 +976,12 @@ std::vector<uint8_t> encode_auto_medic_preference(
 		const AutoMedicPreference &preference) {
 	std::vector<uint8_t> out;
 	Writer w{out};
-	// The profile stores the inverse checkbox value: zero means Auto Medic on.
-	// [orig: NetPacket_WriteAutoMedicPreference @0x42A400; OPTIONS_AUTOMEDIC
+	// The profile stores the inverse checkbox value: zero means Auto Medic on;
+	// the writer copies the dword raw.
+	// [orig: NetPacket_WriteAutoMedicPreference @0x42A400 (`mov esi,
+	// [eax+67Ch]` @0x42A411, `mov [ecx], esi` @0x42A422); OPTIONS_AUTOMEDIC
 	// reads/writes @0x5549E7/@0x554E40]
-	w.u32(preference.enabled ? 0u : 1u);
+	w.u32(preference.disabled);
 	return out;
 }
 

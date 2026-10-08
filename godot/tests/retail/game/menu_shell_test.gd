@@ -40,14 +40,19 @@ class _MissingBankMusicRoot extends RefCounted:
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 
 var _state_config: TestFs.Snapshot
-var _controls_cfg: TestFs.Snapshot
+var _profile_dir := ""
 
 
 func before_each() -> void:
 	_state_config = TestFs.snapshot(STATE_CONFIG_PATH)
 	if _state_config.existed:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
-	_controls_cfg = TestFs.snapshot(ControlsBindings.CONFIG_PATH)
+	# The Options screens edit the player profile's current record: each case
+	# starts from a fresh one in an empty run directory.
+	_profile_dir = OS.get_cache_dir().path_join("opennova_menu_shell_retail_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(_profile_dir)
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", _profile_dir]))
+	PlayerProfile.load_for(null)
 
 
 func after_each() -> void:
@@ -55,9 +60,10 @@ func after_each() -> void:
 	MusicService.stop_context()
 	_state_config.restore()
 	# The live binding model is a static shared with the whole run: restore the
-	# catalog defaults and the on-disk cfg even when a remap test fails early.
+	# catalog defaults even when a remap test fails early.
 	ControlsBindings.model().restore_defaults()
-	_controls_cfg.restore()
+	LaunchFlags.clear_args_override()
+	TestFs.remove_dir_recursive(_profile_dir)
 
 
 # Build a throwaway resource dir holding main.mnu (+ a sp.mnu jump target and a
@@ -138,9 +144,10 @@ func test_options_scrolls_seed_original_ranges_and_persisted_values() -> void:
 	config.set_value("audio", "sound_fx_volume", 31)
 	config.set_value("audio", "dialog_volume", 93)
 	config.set_value("audio", "music_volume", 159)
-	config.set_value("controls", "mouse_sensitivity", 287)
-	config.set_value("controls", "invert_mouse", true)
 	assert_eq(config.save(PlayerOptions.CONFIG_PATH), OK)
+	# The mouse words are the player profile's current record's.
+	assert_true(PlayerProfile.store().set_word("mouse_sensitivity", 287))
+	assert_true(PlayerProfile.store().set_word("invert_mouse", 1))
 	var options := PlayerOptions.new()
 	var dir := _make_dir()
 	_copy(OPTIONS_FIXTURE, dir.path_join("options.mnu"))
@@ -169,7 +176,7 @@ func test_options_scrolls_seed_original_ranges_and_persisted_values() -> void:
 				"%s receives its original range/page and persisted value" \
 						% control_name)
 	assert_true(driver.is_widget_checked(driver.widget_id("INVERT_MOUSE")),
-			"the persisted mouse inversion seeds the checkbox")
+			"the record's mouse inversion seeds the checkbox")
 	assert_true(driver.is_widget_disabled(driver.widget_id("GAMMA")),
 			"gamma is visible but locked to the comparison profile")
 	for unlocked_name in ["SOUNDFXVOLUME", "DIALOGVOLUME", "MUSICVOLUME",
@@ -425,11 +432,14 @@ func test_pause_options_share_state_apply_accept_and_retain_cancel_changes() -> 
 	var initial := options.current()
 	initial.sound_fx_volume = 45
 	initial.music_volume = 67
-	initial.mouse_sensitivity = 301
-	initial.invert_mouse = true
 	initial.crosshair_style = 7
 	initial.object_polydetail = 1
 	options.update(initial)
+	# The mouse and auto words are the player profile's current record's.
+	var profile := PlayerProfile.store()
+	assert_true(profile.set_word("mouse_sensitivity", 301))
+	assert_true(profile.set_word("invert_mouse", 1))
+	assert_true(profile.set_word("auto_medic_off", 1))
 
 	var dir := _make_dir()
 	_copy(GAME_FIXTURE, dir.path_join("game.mnu"))
@@ -450,6 +460,15 @@ func test_pause_options_share_state_apply_accept_and_retain_cancel_changes() -> 
 		assert_eq(scroll.value, int(pair[1]),
 				"%s reads the same shared state as the front surface" % pair[0])
 	assert_true(driver.is_widget_checked(driver.widget_id("INVERT_MOUSE")))
+	# The in-game dialog seeds the auto pair from the record, the medic box
+	# inverted [orig: UI_OptionsScreenInit @0x554d36 / @0x554d62].
+	var auto_reload := driver.widget_id("OPTIONS_AUTORELOAD")
+	var auto_medic := driver.widget_id("OPTIONS_AUTOMEDIC")
+	if auto_reload >= 0:
+		assert_true(driver.is_widget_checked(auto_reload), "a fresh record's auto-reload is on")
+		assert_false(driver.is_widget_disabled(auto_reload), "the auto-reload box is served")
+	if auto_medic >= 0:
+		assert_false(driver.is_widget_checked(auto_medic), "+1660 = 1 shows the box clear")
 	assert_eq(driver.selected_row(driver.widget_id("XHAIR_APPEARANCE")), 7)
 	assert_gt(driver.table_row_count(driver.widget_id("CONTROL_MAPPING")), 40,
 			"the same remap controller seeds the pause table")
@@ -471,11 +490,23 @@ func test_pause_options_share_state_apply_accept_and_retain_cancel_changes() -> 
 	driver.set_widget_shown(main_wrapper, false)
 	driver.set_widget_shown(options_wrapper, true)
 	driver.widget_value_changed.emit("SOUNDFXVOLUME", "scroll", 72, "72")
+	# The dialog's mouse and auto edits reach the record only at its Accept,
+	# which asks the owner to apply them [orig: @0x5550de..0x5552bc].
+	driver.set_widget_checked(driver.widget_id("INVERT_MOUSE"), false)
+	if auto_medic >= 0:
+		driver.set_widget_checked(auto_medic, true)
+	assert_eq(profile.get_word("invert_mouse"), 1, "an edit waits for the Accept")
+	watch_signals(shell)
 	driver.widget_activated.emit(driver.widget_id("OPT_ACCEPT"), "OPT_ACCEPT")
 	assert_true(driver.is_widget_shown(main_wrapper))
 	assert_false(driver.is_widget_shown(options_wrapper),
 			"the formerly actionless pause Accept returns to the pause menu")
 	assert_eq(options.current().sound_fx_volume, 72)
+	assert_eq(profile.get_word("invert_mouse"), 0, "the Accept writes the record")
+	if auto_medic >= 0:
+		assert_eq(profile.get_word("auto_medic_off"), 0, "a checked medic box stores 0")
+	assert_signal_emitted(shell, "ingame_controls_accepted",
+			"the owner applies the record and saves the profile")
 
 	driver.set_widget_shown(main_wrapper, false)
 	driver.set_widget_shown(options_wrapper, true)
@@ -789,19 +820,14 @@ func test_options_controls_inert_without_control_table() -> void:
 	assert_eq(shell.get_current_menu_file(), "main.mnu",
 			"no options pop underneath the launch")
 	assert_eq(shell.get_menu_stack_depth(), 0)
-	# Re-bind an action, then fire the name the options surface would own; a
-	# stray DEFAULTS must not restore (rows already at defaults would make a
-	# no-op restore pass vacuously, hence the edit first).
-	var model: ControlsModel = ControlsBindings.model()
-	var saved: Dictionary = model.save_blob()
-	var action: int = model.action_index_for_row(0)
-	model.assign_godot_key(action, KEY_G, false)
-	var edited := model.control_text(action, ControlsModel.DEVICE_KEYBOARD)
+	# Edit the record's words, then fire the name the options surface would
+	# own; a stray DEFAULTS must not reset them (words already at defaults
+	# would make a no-op reset pass vacuously, hence the edit first).
+	var profile := PlayerProfile.store()
+	assert_true(profile.set_word("mouse_sensitivity", 300))
 	driver.widget_activated.emit(-1, "DEFAULTS")
-	assert_eq(model.control_text(action, ControlsModel.DEVICE_KEYBOARD), edited,
-			"a stray DEFAULTS on a non-options document leaves the bindings alone")
-	model.load_blob(saved)
-	ControlsBindings.persist()
+	assert_eq(profile.get_word("mouse_sensitivity"), 300,
+			"a stray DEFAULTS on a non-options document leaves the record alone")
 	DirAccess.remove_absolute(dir.path_join("main.mnu"))
 	DirAccess.remove_absolute(dir.path_join("alpha.bms"))
 	DirAccess.remove_absolute(dir)
@@ -1091,9 +1117,15 @@ func _expansion_info_bin(exp_name: String, exp_desc: String) -> PackedByteArray:
 # A throwaway companion: claims the menu (or not) and records whether it was driven.
 # The shell can hold several companions (mp.mnu + player.mnu); the first whose
 # owns_menu() claims a built menu drives it, and a non-owning companion is skipped.
+#
+# The remap flow edits the Options screen's own records, built from the player
+# profile's table; its ACCEPT stores them into the record, and the live
+# bindings take them at the next session start's controls apply
+# [orig: UI_BuildKeyBindingLoadoutTable @0x559e50; sub_55A710 @0x55ace5;
+# sub_563620 @0x563620].
 func test_control_mapping_remap_flow() -> void:
-	# before_each snapshots user://controls.cfg; after_each restores it and the
-	# catalog defaults even on an early assert failure.
+	# after_each restores the catalog defaults even on an early assert failure;
+	# before_each gave the case a fresh profile record.
 	ControlsBindings.model().restore_defaults()
 
 	var dir := OS.get_temp_dir().path_join("menu_shell_remap_%d" % Time.get_ticks_usec())
@@ -1127,9 +1159,9 @@ func test_control_mapping_remap_flow() -> void:
 	key.physical_keycode = KEY_Y
 	shell.get_viewport().push_input(key)
 	assert_eq(driver.table_cell_text(table, 0, 2), "Y or Up",
-			"the captured key lands in the record and the cell restores")
-	assert_true(FileAccess.file_exists(ControlsBindings.CONFIG_PATH),
-			"the edit persists")
+			"the captured key lands in the screen's record and the cell restores")
+	assert_false(ControlsBindings.model().godot_keys_for_token("move_forward").has(KEY_Y),
+			"the live bindings wait for the ACCEPT and the next session start")
 
 	# Esc cancels a fresh capture without changing the record.
 	driver.list_activated.emit(table, 0)
@@ -1149,9 +1181,18 @@ func test_control_mapping_remap_flow() -> void:
 	assert_eq(driver.table_cell_text(table, 0, 2), "W or Up",
 			"DEFAULTS restores the catalog binding")
 
-	# The gameplay lookup follows the live records again.
+	# Rebind again and ACCEPT: the record's table takes the screen's records;
+	# the session start's controls apply hands them to the gameplay sampler.
+	driver.list_activated.emit(table, 0)
+	shell.get_viewport().push_input(key)
+	assert_eq(driver.table_cell_text(table, 0, 2), "Y or Up")
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	assert_false(ControlsBindings.model().godot_keys_for_token("move_forward").has(KEY_Y),
+			"the ACCEPT writes the profile, not the live bindings")
+	ControlsBindings.apply_profile(PlayerProfile.store())
 	var keys: PackedInt32Array = ControlsBindings.model().godot_keys_for_token("move_forward")
-	assert_eq(keys.size(), 2, "defaults restored for the sampler")
+	assert_true(keys.has(KEY_Y), "the rebound key reaches the sampler at the apply")
+	assert_false(keys.has(KEY_W), "Y replaced the primary W")
 
 	DirAccess.remove_absolute(dir.path_join("options.mnu"))
 	DirAccess.remove_absolute(dir)
@@ -1195,10 +1236,10 @@ func test_control_mapping_capture_dies_on_screen_change() -> void:
 	key.pressed = true
 	key.physical_keycode = KEY_U
 	shell.get_viewport().push_input(key)
-	assert_eq(ControlsBindings.model().control_text(
+	assert_eq(driver.options_control_text(
 			ControlsBindings.model().action_index_for_row(0),
 			ControlsModel.DEVICE_KEYBOARD), "W or Up",
-			"the Forward record still holds its defaults")
+			"the screen's Forward record still holds its defaults")
 	DirAccess.remove_absolute(dir.path_join("options.mnu"))
 	DirAccess.remove_absolute(dir)
 

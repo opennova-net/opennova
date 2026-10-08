@@ -14,6 +14,8 @@ extends MenuCompanion
 # then applies the requested preview update to its mounted Godot nodes.
 const ATBL_SECTION := "Avatars"
 const VOICE_PREVIEW_CONTROL := "TESTPLAYERVOICE"
+const AUTO_RELOAD_CONTROL := "OPTIONS_AUTORELOAD"
+const AUTO_MEDIC_CONTROL := "OPTIONS_AUTOMEDIC"
 
 # The 3D character preview (compatible head/body .3di composited). Mounted over
 # the PLAYER_PREVIEW widget rect and fed the
@@ -148,6 +150,14 @@ func _wire(_file: String, _screen: String) -> void:
 	var name_edit := _id("PLAYERNAME")
 	if name_edit >= 0 and not saved_name.is_empty():
 		_driver.set_widget_text(name_edit, saved_name)
+	# The auto-reload / auto-medic boxes show the current record's words
+	# (engine profile_controls.h).
+	var auto_reload := _id(AUTO_RELOAD_CONTROL)
+	if auto_reload >= 0:
+		_driver.set_widget_checked(auto_reload, PlayerProfile.store().is_auto_reload_checked())
+	var auto_medic := _id(AUTO_MEDIC_CONTROL)
+	if auto_medic >= 0:
+		_driver.set_widget_checked(auto_medic, PlayerProfile.store().is_auto_medic_checked())
 	# OK saves the chosen avatar; the .mnu's own ACTION still navigates back to main.mnu.
 	_connect_pressed("ACCEPT", commit)  # [orig: PlayerInfo_SaveFromDialog @ 0x55ee10]
 
@@ -735,6 +745,14 @@ func _slot_weapon_index(control: String) -> int:
 
 
 func commit() -> void:
+	# The two boxes the ACCEPT writes into the current record, each when
+	# authored, the medic box inverted (engine profile_controls.h).
+	var auto_reload := _id(AUTO_RELOAD_CONTROL)
+	if auto_reload >= 0:
+		PlayerProfile.store().set_auto_reload_checked(_driver.is_widget_checked(auto_reload))
+	var auto_medic := _id(AUTO_MEDIC_CONTROL)
+	if auto_medic >= 0:
+		PlayerProfile.store().set_auto_medic_checked(_driver.is_widget_checked(auto_medic))
 	avatar_chosen.emit(snapshot())
 
 

@@ -6,11 +6,13 @@
 #include "simulation/player_inventory.h"
 #include "simulation/weapon_kit_entry.h"
 #include "player/player_profiles.h"
+#include "resource_index/launch_flags.h" // the /noreload flag the session copy reads
 #include "util/string_convert.h"
 
 #include <runtime/inmatch/loadout_submit.h> // the 0x2F submission + 0x5A grant conversions
 
 #include <runtime/mission/promote.h> // stash_mission_loadout_rules (the chunk-tuple conversion)
+#include <runtime/profile/profile_controls.h> // the session copy's input words
 #include <runtime/renderer/fp_viewmodel_spec.h> // the FP viewmodel submit rule
 #include <runtime/world/local_player_view.h> // the USE key's vehicle-loadout zone gates
 
@@ -352,6 +354,10 @@ Error Simulation::use_player_profile(const Ref<PlayerProfiles> &p_profiles) {
 	player_.weapon_profile_loaded = true;
 	player_.profile_record = profiles.current();
 	player_.profile_record_set = true;
+	// The mission start's session copy of the record's input words, and its
+	// inverse OPTIONS_AUTOMEDIC word onto a live joiner runtime.
+	apply_session_input();
+	install_auto_medic_preference();
 	// The record just changed, so the resident kit buffer and the seam both have to
 	// follow it. Retail never has to re-run this because PlayerProfile_LoadAllFromDisk
 	// completes at boot / expansion switch, long before Game_StartMission copies a page
@@ -365,6 +371,55 @@ Error Simulation::use_player_profile(const Ref<PlayerProfiles> &p_profiles) {
 	// The seam's class AND its kit page both come out of this record — re-arm it.
 	push_joiner_loadout_kit();
 	return OK;
+}
+
+namespace {
+
+// The words the session holds, as profile_controls.h names them.
+opennova::profile::SessionInput live_input(const opennova::mission::MissionKernel &kernel) {
+	opennova::profile::SessionInput live;
+	live.mouse_sensitivity = kernel.local.look_settings.sensitivity;
+	live.invert_mouse = kernel.local.look_settings.invert_y;
+	live.auto_reload = kernel.world.rules.auto_reload;
+	return live;
+}
+
+void install_input(opennova::mission::MissionKernel &kernel,
+		const opennova::profile::SessionInput &input) {
+	kernel.local.look_settings.sensitivity = input.mouse_sensitivity;
+	kernel.local.look_settings.invert_y = input.invert_mouse;
+	kernel.world.rules.auto_reload = input.auto_reload;
+}
+
+} // namespace
+
+void Simulation::apply_session_input() {
+	if (!kernel_) return;
+	install_input(*kernel_, opennova::profile::session_input(
+			player_.profile_record, LaunchFlags::no_reload()));
+}
+
+Error Simulation::apply_ingame_options(const Ref<PlayerProfiles> &p_profiles) {
+	if (p_profiles.is_null()) return ERR_INVALID_PARAMETER;
+	// The record's copy the own revive mark reads follows the Accept too.
+	player_.profile_record = p_profiles->native().current();
+	player_.profile_record_set = true;
+	if (kernel_)
+		install_input(*kernel_, opennova::profile::ingame_accept_input(
+				player_.profile_record, live_input(*kernel_)));
+	return OK;
+}
+
+int Simulation::get_session_mouse_sensitivity() const {
+	return kernel_ ? kernel_->local.look_settings.sensitivity : 0;
+}
+
+bool Simulation::is_session_mouse_inverted() const {
+	return kernel_ && kernel_->local.look_settings.invert_y;
+}
+
+bool Simulation::is_session_auto_reload() const {
+	return kernel_ && kernel_->world.rules.auto_reload;
 }
 
 void Simulation::apply_joiner_authoritative_loadout() {
