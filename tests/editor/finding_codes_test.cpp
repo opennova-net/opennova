@@ -345,7 +345,7 @@ static int test_columns() {
 	                     "catalog.reserved_name", "catalog.reserved_refused", "charattr.attribute_word",
 	                     "charattr.no_cammo", "charattr.not_a_number", "charattr.unread_section", "dialog_bank.line_no_wave",
 	                     "dialog_bank.name_repeated", "dialog_bank.name_unplayed", "dialog_bank.silent", "document.line_ends",
-	                     "environment.sky_height_default",
+	                     "environment.sky_height_default", "environment.terrain_key",
 	                     "expansion.file.unread", "export.cancelled",
 	                     "export.cleanup", "export.replaced",
 	                     "mission.event_missing",

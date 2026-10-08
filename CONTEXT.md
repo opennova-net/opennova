@@ -982,11 +982,14 @@ A mission's environment (a .env: its sky, light, fog and water) open in the edit
 plan's DI-19a), read and written through the engine's own reader and writer: one record, the
 environment, whose fields are the keywords the game reads in the units the file writes them (a time as
 HHMM, a fog distance in whole metres, a water height in half metres, a colour as its three bytes), and
-its time-of-day keyframes, at most 16, each its time and its twelve colours. The cloud layers name
-textures and the sun, moon, glare and star models, each a Go to; the Inspector heads it with the missions
-that run on it, each with the terrain it pairs it with, what its header sets over it (fog, water) and
-where its water plane comes from. A line the game reads otherwise than written is a finding of its line;
-Save writes the file in the editor's layout, the game reading the same environment.
+its time-of-day keyframes, at most 16, each its time and its twelve colours; and its terrain keys, the
+lines the terrain's reader takes after the mission's .trn (a keyword and its values, in the file's order),
+each the mission's terrain's over its .trn's. The cloud layers name textures and the sun, moon, glare and
+star models, each a Go to; the Inspector heads it with the missions that run on it, each with the terrain
+it pairs it with, what its header sets over it (fog, water), where its water plane comes from and what
+each terrain key sets over. A line the game reads otherwise than written is a finding of its line; Save
+writes the file in the editor's layout, its terrain keys after the environment's keywords, the game
+reading the same environment and the same terrain.
 _Avoid_: env file (the file alone), weather (the runtime's state), sky (one part of it)
 
 **Environment viewport**:
