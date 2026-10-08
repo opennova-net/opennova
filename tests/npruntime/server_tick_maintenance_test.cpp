@@ -1223,6 +1223,96 @@ bool check_kit_weight_recompute() {
 }
 
 // --------------------------------------------------------------------------
+// The deploy's kit rebuild from the loadout buffer (D-NET-378).
+// --------------------------------------------------------------------------
+
+// Every deploy that is not a medic revive rebuilds the slot's weapon table, ammo
+// pools and clips from the last accepted 0x2F, then re-sends the 0x5A built from
+// the rebuilt table; a revive keeps the kit the player died with.
+// [orig: Server_ProcessPlayerDeath @0x5178C5 (the revive test), @0x5178E1
+//  (PlayerSlot_InitWeaponsFromLoadout @0x515550), @0x5178F2
+//  (Server_SendWeaponSlotListToPlayer); the buffer NapiNPServerMsg_HandlePlayerLoadout
+//  @0x515CBD..0x515D83]
+bool check_deploy_rebuilds_the_kit_from_the_loadout_buffer() {
+	w::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	install_rifle_armory(world);
+	const w::EntityHandle remote = w::spawn_remote_player(world, player_spawn(3, 0, 0));
+	if (!expect(remote.valid(), "the deploy fixture spawned a remote player")) return false;
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = game_type::kTeamDeathmatch;
+	w::MatchRules rules;
+	rules.game_type = ctx.config.game_type;
+	world.match.configure(rules);
+	ns::UdpSessionTransport remote_wire(ns::UdpSessionTransport::Role::Host);
+	auto &roster = ctx.np_protocol.connection_list;
+	roster.push_back(make_seeded_conn(3, 1, &remote_wire, ns::TransportMode::Client, remote, true));
+	inmatch::NapiNPConnection &conn = roster[0];
+	w::Entity *body = world.registry.get(remote);
+	const uint16_t combo = 3 * 65 + 2;
+
+	body->flags |= w::kEntityFlagDead; // the armory-window gate admits a dead player
+	LoadoutSubmit request;
+	request.team = 1;
+	request.player_class = 8;
+	request.weapon_slot_index = combo;
+	request.entries.push_back(LoadoutSubmitEntry{5, 3, 0xFF, 0xFF});
+	(void)inmatch::dispatch_session_replies(ctx.config, conn,
+			{make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(request))},
+			100, roster, &world);
+	const std::vector<uint8_t> granted = conn.reply.last_loadout_reply;
+	if (!expect(conn.reply.loadout_buffer_set && conn.reply.ammo_pools[0] == 60 &&
+			conn.weapon_slots[combo].clip == 30 && !granted.empty(),
+			"the accept keeps the buffer and seeds 60 + one 30-round clip"))
+		return false;
+	body->flags &= ~w::kEntityFlagDead;
+
+	uint32_t client_tick = conn.tick_seed;
+	auto spend_clip = [&]() {
+		for (int i = 0; i < 30; ++i)
+			(void)inmatch::dispatch_session_replies(ctx.config, conn,
+					{make_protocol_message(c2s::FIRED_ROUND,
+							fire_body(conn, remote.packed, 5, client_tick))},
+					100, roster, &world);
+	};
+	spend_clip();
+	conn.reply.ammo_pools[0] = 7; // a reload or two in the last life
+	if (!expect(conn.weapon_slots[combo].clip == 0, "the last life spent the clip")) return false;
+
+	auto deploy = [&]() {
+		body->flags |= w::kEntityFlagDead;
+		body->alive = false;
+		body->health = 0;
+		return inmatch::Server_ReleasePlayerDeployment(ctx.config, conn, world, {});
+	};
+	auto loadout_body = [](const std::vector<ProtocolMessage> &replies) {
+		for (const ProtocolMessage &m : replies)
+			if (m.tag == 0x5A) return m.payload;
+		return std::vector<uint8_t>{};
+	};
+	std::vector<ProtocolMessage> replies = deploy();
+	if (!expect(conn.reply.ammo_pools[0] == 60 && conn.weapon_slots[combo].clip == 30,
+			"the deploy rebuilds the pool and the clip from the loadout buffer"))
+		return false;
+	if (!expect(loadout_body(replies) == granted,
+			"the deploy's 0x5A is the rebuilt table, the accept's body again"))
+		return false;
+
+	// A medic revive's deploy keeps the spent kit (no rebuild).
+	client_tick = conn.tick_seed;
+	spend_clip();
+	conn.reply.ammo_pools[0] = 7;
+	conn.reply.revive_pose_valid = true;
+	(void)deploy();
+	return expect(conn.reply.ammo_pools[0] == 7 && conn.weapon_slots[combo].clip == 0,
+			"a revive deploy leaves the kit the player died with");
+}
+
+// --------------------------------------------------------------------------
 // SpawnWaveList_TryQueuePlayer's unconditional other-row eviction.
 // --------------------------------------------------------------------------
 
@@ -1577,6 +1667,7 @@ int main() {
 	ok = check_armory_reuse_cooldown() && ok;
 	ok = check_priority_target_sweep() && ok;
 	ok = check_kit_weight_recompute() && ok;
+	ok = check_deploy_rebuilds_the_kit_from_the_loadout_buffer() && ok;
 	ok = check_try_queue_evicts_on_failed_pick() && ok;
 	ok = check_respawn_pick_admission() && ok;
 	if (ok) std::printf("OK\n");
