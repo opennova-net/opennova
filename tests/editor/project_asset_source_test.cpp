@@ -89,15 +89,18 @@ static int test_names_decode_and_rescan() {
 	TEST_EXPECT(assets.read("Main.Mnu", read) && file_bytes(root + "/" + menu->relative_path, disk) && read == disk);
 	TEST_EXPECT(!assets.read("absent.tga", read));
 
-	// A file added outside the editor resolves after a rescan; an SCR payload reads decoded.
+	// A file added outside the editor resolves after a rescan; an SCR payload reads decoded. The project's
+	// notes are no file the game reads: none resolves.
 	const std::string plain = "WEAPON\r\nNAME test\r\n";
-	TEST_EXPECT(editor_test::write_bytes(root + "/notes/secret.txt", scr_encoded(plain, opennova::scr::SCR_KEY_JO_DFX2)));
-	TEST_EXPECT(assets.stamp("secret.txt") == 0);
+	TEST_EXPECT(editor_test::write_bytes(root + "/defs/secret.def", scr_encoded(plain, opennova::scr::SCR_KEY_JO_DFX2)));
+	TEST_EXPECT(editor_test::write_text(root + "/notes/todo.txt", "the roof\r\n"));
+	TEST_EXPECT(assets.stamp("secret.def") == 0);
 	const uint64_t before = assets.generation();
 	session.handle(request::rescan());
 	session.run_operations();
-	TEST_EXPECT(assets.generation() != before && assets.stamp("secret.txt") != 0);
-	TEST_EXPECT(assets.read("SECRET.TXT", read) && std::string(read.begin(), read.end()) == plain);
+	TEST_EXPECT(assets.generation() != before && assets.stamp("secret.def") != 0);
+	TEST_EXPECT(assets.stamp("todo.txt") == 0 && !assets.read("todo.txt", read));
+	TEST_EXPECT(assets.read("SECRET.DEF", read) && std::string(read.begin(), read.end()) == plain);
 
 	// An import output under .opennova/imported/ resolves by its own name.
 	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", editor_test::gradient_png(8, 8)));
@@ -124,11 +127,11 @@ static int test_names_decode_and_rescan() {
 	TEST_EXPECT(assets.stamp("plain.png") != 0 && assets.read("plain.png", read) && !read.empty());
 
 	// A changed file moves its stamp on the next rescan.
-	const uint64_t stamp = assets.stamp("secret.txt");
-	TEST_EXPECT(editor_test::write_text(root + "/notes/secret.txt", "a different, longer plain text file"));
+	const uint64_t stamp = assets.stamp("secret.def");
+	TEST_EXPECT(editor_test::write_text(root + "/defs/secret.def", "a different, longer plain text file"));
 	session.handle(request::rescan());
 	session.run_operations();
-	TEST_EXPECT(assets.stamp("secret.txt") != stamp);
+	TEST_EXPECT(assets.stamp("secret.def") != stamp);
 	std::printf("test_names_decode_and_rescan passed\n");
 	return 0;
 }
