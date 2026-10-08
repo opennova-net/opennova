@@ -4953,6 +4953,13 @@ target_link_libraries(editor_clip_sounds_test PRIVATE opennova_editor)
 target_include_directories(editor_clip_sounds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_clip_sounds COMMAND editor_clip_sounds_test)
 
+# DI-04's player: the preview's waves decoded once and kept until their files change; a clip sound's voices wait
+# for their waves through a rescan (a sound fired in the frame a save lands still plays).
+add_executable(editor_preview_waves_test editor/preview_waves_test.cpp)
+target_link_libraries(editor_preview_waves_test PRIVATE opennova_editor)
+target_include_directories(editor_preview_waves_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_preview_waves COMMAND editor_preview_waves_test)
+
 # DI-34: a menu's sounds heard in its preview: the game's mouse over the picture runs the game's pump of the
 # windows' sounds (the runtime's MenuSoundPump), each row's set from its own bank at the menu's volume.
 add_executable(editor_menu_sounds_test editor/menu_sounds_test.cpp)
