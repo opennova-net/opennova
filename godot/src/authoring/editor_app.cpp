@@ -540,7 +540,9 @@ void EditorApp::pump_sound_() {
 }
 
 // The clip sounds (DI-04): each the session fired since the last taken started beside those playing, its
-// waves decoded once while the project's files stand; none while no project is open.
+// waves decoded once while their files stand; none while no project is open. A rescan (a save, a file
+// changed outside) decodes again only the waves whose files changed or went, dropping the voices waiting on
+// them; a voice whose wave still decodes plays as it was fired (a sound fired in the frame a save lands).
 void EditorApp::pump_clip_sounds_() {
 	if (!session_) return;
 	const opennova::editor::SessionView &view = session_->view();
@@ -548,9 +550,8 @@ void EditorApp::pump_clip_sounds_() {
 		if (clip_voices_) clip_voices_->stop();
 		return;
 	}
-	const uint64_t generation = view.findings.assets ? view.findings.assets->generation() : 0;
-	if (clip_voices_ && generation != clip_wave_generation_) clip_voices_->forget();
-	clip_wave_generation_ = generation;
+	if (clip_voices_ && clip_wave_scan_.lock() != view.project.scan) clip_voices_->refresh();
+	clip_wave_scan_ = view.project.scan;
 	for (const opennova::editor::ClipSoundPlay &play : session_->clip_sounds_since(clip_sound_seq_)) {
 		clip_sound_seq_ = play.seq;
 		if (!clip_voices_) clip_voices_ = std::make_unique<PreviewSoundVoices>(this);
