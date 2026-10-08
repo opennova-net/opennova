@@ -10,10 +10,10 @@
 // its particle slot at its user points along their directions, a drivable item's slot only while occupied, the
 // enemy's model); its death (Destroying: the graphic until the swap, the husk from it with its fade's registers
 // and its pieces' sections, the death's banks spawned at the piece model's points on the swap's tick, the death
-// sound heard as the clock runs from the death and never over a seek); its husk (the wreck standing, its Fire and
-// Other banks burning) and its final husk; a person posed as its spawn poses it on its graphic's rig; a weapon's
-// third- and first-person models; an ammo's round as its tracer item; a powerup and a record of no model said in
-// words; the envelope; the options refused; the canvas and its commands.
+// sound heard as the clock runs from the death, its first frame however long, and never over a seek); its husk
+// (the wreck standing, its Fire and Other banks burning) and its final husk; a person posed as its spawn poses it
+// on its graphic's rig; a weapon's third- and first-person models; an ammo's round as its tracer item; a powerup
+// and a record of no model said in words; the envelope; the options refused; the canvas and its commands.
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -254,12 +254,12 @@ struct DefinitionRig {
 	}
 	bool state(const char *token) { return set(std::string(R"({"options": {"state": ")") + token + "\"}}"); }
 	bool hold(int32_t ticks) { return set(R"({"clock": {"ticks": )" + std::to_string(ticks) + R"(, "playing": false}})"); }
-	// From tick 0, the clock run to `ticks`: the sounds the viewport fired on the way.
-	std::vector<ClipSoundFired> run(int32_t ticks) {
+	// From tick 0, the clock run to `ticks`, `per_call` ticks a frame: the sounds the viewport fired on the way.
+	std::vector<ClipSoundFired> run(int32_t ticks, double per_call = 0.5) {
 		set(R"({"clock": {"ticks": 0, "playing": true, "rate": 1}})");
 		const uint64_t before = session.viewports().clip_sound_seq();
 		while (session.viewports().clock().ticks() < ticks) {
-			session.advance(0.5 / 62.5);
+			session.advance(per_call / 62.5);
 			devices.sync(session);
 		}
 		std::vector<ClipSoundFired> out;
@@ -509,6 +509,9 @@ static int test_item_death() {
 	const std::vector<ClipSoundFired> heard = rig.run(10);
 	TEST_EXPECT(heard.size() == 1 && heard[0].set == "EXPLO_PUMP" && heard[0].tick == 4 && heard[0].state == "played" &&
 	            heard[0].path == rig.path);
+	// The Play's first frame running six ticks at once: heard all the same, from where its seek put the clock.
+	const std::vector<ClipSoundFired> slow = rig.run(10, 6.0);
+	TEST_EXPECT(slow.size() == 1 && slow[0].set == "EXPLO_PUMP" && slow[0].tick == 4);
 	const size_t fired = viewport->sounds_fired().size();
 	TEST_EXPECT(rig.hold(2) && rig.set(R"({"clock": {"ticks": 8, "playing": false}})"));
 	rig.session.advance(0.1);
