@@ -27,7 +27,7 @@
 
 #include "res://shaders/color.gdshaderinc"
 
-uniform sampler2D albedo_tex : filter_linear, repeat_disable;
+#include "res://shaders/particle/particle_atlas.gdshaderinc"
 uniform bool has_texture = false;
 // The view this run was compiled for (0 the main view, 1 the second scene
 // view): its camera-facing quads belong to that eye alone. The main view is
@@ -75,7 +75,7 @@ float particle_far_fog_visibility(vec3 camera_position, vec3 camera_forward) {
 
 vec4 particle_far_texel(vec2 uv) {
 	if (has_texture) {
-		return texture(albedo_tex, uv);
+		return particle_atlas_texel(uv);
 	}
 	// The procedural fallback for a missing atlas page (the first-person
 	// batch's shape).

@@ -9,7 +9,7 @@
 #include "res://shaders/viewmodel_pass.gdshaderinc"
 #include "res://shaders/color.gdshaderinc"
 
-uniform sampler2D albedo_tex : filter_linear, repeat_disable;
+#include "res://shaders/particle/particle_atlas.gdshaderinc"
 uniform bool has_texture = false;
 
 // The SPECULAR dword, readable in the fragment stage only through a varying.
@@ -18,7 +18,7 @@ varying vec3 v_specular;
 void fragment() {
 	vec4 texel = vec4(0.5, 0.5, 1.0, 1.0);
 	if (has_texture) {
-		texel = texture(albedo_tex, UV);
+		texel = particle_atlas_texel(UV);
 	} else {
 		vec2 centered = UV - vec2(0.5);
 		float r = length(centered) * 2.0;
