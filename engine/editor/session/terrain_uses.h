@@ -36,7 +36,12 @@ struct TerrainMissionUse {
 	int minutes_per_day = 0; // 0: the clock stands
 	// The lines of overcast.def and of its environment the terrain's parser takes after this terrain's lines
 	// (D-TERRAIN-18, formats/trn load_mission_trn): each key there is the mission's terrain's, over this file's.
-	std::vector<TrnLaterLine> later;
+	// Each with its place among its file's terrain lines (formats/trn read_trn_key_lines): the environment's
+	// terrain key it is (environment_document.h terrain_key_locator).
+	struct Later : TrnLaterLine {
+		size_t index = 0;
+	};
+	std::vector<Later> later;
 };
 
 // One image a terrain set names (S20, terrain_import.h's keys), and the project's file at it.
@@ -79,7 +84,7 @@ struct TerrainUses {
 TerrainUses terrain_uses(const SessionView &view, const std::string &path);
 
 // The terrain_uses query's answer: {path, found, reading?, overcast?, missions [{mission, name, title, read, locator,
-// field, environment {name, file?}, tile_set, tiles, start_time, minutes_per_day, later [{file, line, key, value}]}],
+// field, environment {name, file?}, tile_set, tiles, start_time, minutes_per_day, later [{file, line, index, key, value}]}],
 // import: null or {source, record, error?, images [{key, name, file?}], foliage, options [{key, label, value, set,
 // words}], outputs, reimport (the request that imports it again)}}.
 io::JsonValue terrain_uses_json(const TerrainUses &uses);
