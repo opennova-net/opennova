@@ -22,8 +22,8 @@
 //   - the 1 Hz / accept-time kit-weight recompute [orig: Server_RecalculateAllPlayerScores
 //     @0x5014E0];
 //   - the unconditional other-row eviction of SpawnWaveList_TryQueuePlayer @0x52A490;
-//   - the C2S 0x0E Conquer & Control auto-pick rejection and the handle-0 admission
-//     [orig: Server_ProcessClientRequestRespawn @0x519AF0].
+//   - the C2S 0x0E Conquer & Control auto-pick rejection, the handle-0 admission and
+//     the revive latch's targetless deploy [orig: Server_ProcessClientRequestRespawn @0x519AF0].
 
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_protocol.h>
@@ -1302,14 +1302,21 @@ bool check_deploy_rebuilds_the_kit_from_the_loadout_buffer() {
 			"the deploy's 0x5A is the rebuilt table, the accept's body again"))
 		return false;
 
-	// A medic revive's deploy keeps the spent kit (no rebuild).
+	// A medic revive's deploy keeps the spent kit (no rebuild) and sends no 0x5A,
+	// only the seed reroll (D-NET-379) [orig: Server_ProcessPlayerDeath @0x5178C5
+	// skips @0x5178E1 and @0x5178F2; the 0x61 @0x51796D].
 	client_tick = conn.tick_seed;
 	spend_clip();
 	conn.reply.ammo_pools[0] = 7;
 	conn.reply.revive_pose_valid = true;
-	(void)deploy();
-	return expect(conn.reply.ammo_pools[0] == 7 && conn.weapon_slots[combo].clip == 0,
-			"a revive deploy leaves the kit the player died with");
+	replies = deploy();
+	if (!expect(conn.reply.ammo_pools[0] == 7 && conn.weapon_slots[combo].clip == 0,
+			"a revive deploy leaves the kit the player died with"))
+		return false;
+	bool seed = false;
+	for (const ProtocolMessage &m : replies) seed = seed || m.tag == 0x61;
+	return expect(loadout_body(replies).empty() && seed,
+			"a revive deploy sends the 0x61 reroll and no 0x5A");
 }
 
 // --------------------------------------------------------------------------
@@ -1461,6 +1468,110 @@ bool check_respawn_pick_admission() {
 	return expect(dispatch_empty({0x00, 0x00}).empty() &&
 					empty_world.registry.get(second)->health == 0,
 			"handle 0 over an empty pool-0 row is rejected");
+}
+
+// C2S 0x0E under the medic-revive latch (slot+89932): the revived player deploys
+// with no target, where its body lay. A picked handle is dropped before the
+// resolve, the auto pick's frontier zone becomes -1 (so it never joins that
+// zone's wave), and `nodefaultspawnpoints` lets it through.
+// [orig: Server_ProcessClientRequestRespawn @0x519AF0 — @0x519c3d..0x519c4b,
+//  @0x519c5a, @0x519c97]
+bool check_revived_pick_takes_no_target() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(2, 4);
+	w::Entity player_seed;
+	player_seed.kind = w::EntityKind::Organic;
+	player_seed.flags = w::kEntityFlagPlayer | w::kEntityFlagDead;
+	player_seed.engine_flags = player_seed.flags;
+	player_seed.team = 1;
+	player_seed.alive = false;
+	player_seed.health = 0;
+	player_seed.health_max = 100;
+	const w::EntityHandle player = world.registry.spawn(0, player_seed);
+	w::Entity zone_seed;
+	zone_seed.kind = w::EntityKind::Item;
+	zone_seed.team = 1;
+	zone_seed.alive = true;
+	zone_seed.is_spawn_point = true;
+	zone_seed.zone_control = 0x10000;
+	const w::EntityHandle zone = world.registry.spawn(2, zone_seed);
+	world.zones.spawn_waves.build_from_mission(world, 5, 5); // the zone's wave row
+
+	inmatch::GameConfig config;
+	config.game_type = game_type::kObjectiveCoop; // the auto pick takes the unnumbered zone
+	config.default_spawn_requires_no_team_zone = 1;
+	std::vector<inmatch::NapiNPConnection> roster(1);
+	auto &conn = roster.front();
+	conn.type = 1;
+	conn.phase = inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.link.owned_entity = player;
+	conn.reply.player_slot = 0;
+	auto reset_player = [&](bool revived) {
+		w::Entity *entity = world.registry.get(player);
+		entity->alive = false;
+		entity->health = 0;
+		entity->flags |= w::kEntityFlagDead;
+		entity->engine_flags |= w::kEntityFlagDead;
+		conn.link.respawn_pending = true;
+		conn.link.respawn_delay_seconds = 0;
+		conn.link.spawn_target_hold_seconds = 0;
+		world.zones.spawn_waves.remove_player(player);
+		conn.reply.revive_pose_valid = revived;
+		conn.reply.revive_pos[0] = 7 << 16;
+		conn.reply.revive_pos[1] = 8 << 16;
+		conn.reply.revive_pos[2] = 9 << 16;
+	};
+	auto dispatch = [&](uint16_t pick) {
+		return inmatch::dispatch_session_replies(config, conn,
+				{make_protocol_message(c2s::RESPAWN_REQUEST,
+						{static_cast<uint8_t>(pick), static_cast<uint8_t>(pick >> 8)})},
+				100, roster, &world);
+	};
+	auto has_tag = [](const std::vector<ProtocolMessage> &replies, uint8_t tag) {
+		for (const ProtocolMessage &m : replies)
+			if (m.tag == tag) return true;
+		return false;
+	};
+	auto queued = [&]() {
+		for (const w::SpawnWaveEntry &entry : world.zones.spawn_waves.entries())
+			for (const w::EntityHandle member : entry.queued)
+				if (member == player) return true;
+		return false;
+	};
+
+	// Unrevived, the auto pick resolves the zone and queues in its wave.
+	reset_player(false);
+	std::vector<ProtocolMessage> replies = dispatch(w::kDeployPickAutoTeam);
+	if (!expect(has_tag(replies, s2c::SPAWN_WAVE_STATUS) && queued() &&
+			world.registry.get(player)->health == 0,
+			"an ordinary auto pick queues at the team's zone"))
+		return false;
+	reset_player(true);
+	if (!expect(dispatch(zone.packed).empty() && world.registry.get(player)->health == 0 &&
+			conn.reply.revive_pose_valid,
+			"a revived player's picked zone is dropped, the latch kept"))
+		return false;
+	reset_player(true);
+	replies = dispatch(w::kDeployPickAutoTeam);
+	const w::Entity *body = world.registry.get(player);
+	if (!expect(body->health > 0 && !queued() && !has_tag(replies, s2c::SPAWN_WAVE_STATUS) &&
+			!conn.reply.revive_pose_valid,
+			"a revived player's auto pick deploys at once, outside the zone's wave"))
+		return false;
+	if (!expect(body->position.x == 7.0f && body->position.y == 8.0f &&
+			body->position.z == 9.0f && !has_tag(replies, 0x5A) && has_tag(replies, 0x61),
+			"it stands where the revive saved, with the reroll and no 0x5A"))
+		return false;
+	reset_player(false);
+	if (!expect(dispatch(w::kDeployPickNone).empty() && world.registry.get(player)->health == 0,
+			"nodefaultspawnpoints refuses Default Spawn while the team holds a zone"))
+		return false;
+	reset_player(true);
+	(void)dispatch(w::kDeployPickNone);
+	return expect(world.registry.get(player)->health > 0,
+			"the revive latch passes nodefaultspawnpoints");
 }
 
 bool check_shared_loaded_ammo_fire_and_reload() {
@@ -1670,6 +1781,7 @@ int main() {
 	ok = check_deploy_rebuilds_the_kit_from_the_loadout_buffer() && ok;
 	ok = check_try_queue_evicts_on_failed_pick() && ok;
 	ok = check_respawn_pick_admission() && ok;
+	ok = check_revived_pick_takes_no_target() && ok;
 	if (ok) std::printf("OK\n");
 	return ok ? 0 : 1;
 }

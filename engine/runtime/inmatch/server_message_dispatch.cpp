@@ -1037,12 +1037,12 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 					world, target_zone, player->handle, selected))
 			world.vehicles.attach_to_seat(player->handle, selected);
 	}
-	// Retail sends this 0x5A only after the rebuild, never on a revive deploy; our
-	// joiner's deploy release still keys on it, so it rides every deploy (D-NET-379).
-	// [orig: Server_SendWeaponSlotListToPlayer @0x5178F2, under the @0x5178C5 test]
-	replies.push_back(make_protocol_message(
-			0x5A, build_current_loadout_reply(
-					conn.reply.last_loadout_reply, player->player_class)));
+	// Never on a revive deploy, whose client leaves the deploy wait on its record's
+	// respawn edge (D-NET-379) [orig: @0x5178F2, under the @0x5178C5 test].
+	if (!revive_deploy)
+		replies.push_back(make_protocol_message(
+				0x5A, build_current_loadout_reply(
+						conn.reply.last_loadout_reply, player->player_class)));
 	replies.push_back(make_protocol_message(
 			0x61, Server_RerollPlayerTickSeed(conn)));
 	const uint8_t frontier = world.zones.frontier_zone(player->team);
@@ -1667,15 +1667,20 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						? static_cast<uint16_t>(msg.payload[0] | (msg.payload[1] << 8))
 						: 0;
 				const world::Entity *target = nullptr;
+				const bool revive_latch = conn.reply.revive_pose_valid; // +89932
 				if (pick == world::kDeployPickAutoTeam) {
 					// Conquer & Control rejects the auto pick outright, before the frontier
 					// resolve: no deploy, no wave queue, no reply.
 					// [orig: Server_ProcessClientRequestRespawn @0x519bc8..0x519bd4]
 					if (config.game_type == game_type::kConquerAndControl) break;
 					// Auto-deploy: the team's frontier zone; null falls back to the marker chain
-					// [orig: Spawn_FindEntityForTeam @0x4fc810 -> requestedHandle -1 on miss].
-					target = world->zones.find_spawn_zone_for_team(player->team, config.game_type);
+					// [orig: Spawn_FindEntityForTeam @0x4fc810 -> requestedHandle -1 on miss],
+					// as a revived player always does [orig: the latch @0x519c3d..0x519c4b].
+					if (!revive_latch)
+						target = world->zones.find_spawn_zone_for_team(
+								player->team, config.game_type);
 				} else if (pick != world::kDeployPickNone) {
+					if (revive_latch) break; // a revived player's pick [orig: @0x519c5a]
 					// Only 0xFFFF is the no-target (Default Spawn) pick. Handle 0 — and the
 					// absent-body default above — resolves pool 0 index 0 through the ordinary
 					// spawn-point attrib/team test like any other handle, so it deploys only
@@ -1703,9 +1708,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// and walks SpawnZoneList for an unnumbered or fully controlled
 				// same-team zone; it never counts living teammates.
 				// [orig: Server_ProcessClientRequestRespawn @0x519C8E..0x519CB2;
-				// Entity_HasAliveEntityOfTeam @0x4FC7B0]
+				// Entity_HasAliveEntityOfTeam @0x4FC7B0; the revive latch @0x519c97]
 				if (config.default_spawn_requires_no_team_zone != 0 &&
-						target == nullptr &&
+						!revive_latch && target == nullptr &&
 						world->zones.team_has_available_spawn_zone(player->team))
 					break;
 				// The dead-or-pending gate [orig: @0x519cc7 — requester must be dead

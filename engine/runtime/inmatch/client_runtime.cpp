@@ -1116,11 +1116,31 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			queue_replies_after(0);
 			std::size_t entries_folded = 0;
 			bool death_edge_in_poll = false;
+			bool respawn_release_in_poll = false;
 			for (const auto &tb : pr.inbound_reducer) {
 				const uint32_t health_before =
 						tb.first == s2c::PER_FRAME_UPDATE
 						? view_.state().health_updates_applied : 0;
+				const replication::ClientEntityState *self_before =
+						tb.first == s2c::PER_FRAME_UPDATE && joiner_->has_self_handle()
+						? view_.state().find(joiner_->self_handle()) : nullptr;
+				const bool self_row_before = self_before != nullptr;
+				const uint32_t self_respawns_before =
+						self_row_before ? self_before->respawn_revision : 0u;
 				view_.apply(tb.first, tb.second);
+				// The self record's respawn edge (its dead bit fell while ours was set)
+				// is the local respawn, whose Game_InitNewRound clears the deploy
+				// hold: the release of a deploy that sent no 0x5A, a medic revive's.
+				// [orig: NetPacket_SerializePlayerState @0x4C1109 -> Game_InitNewRound
+				//  @0x4C114C, dword_81474C = 0 @0x4227CE; D-NET-379]
+				if (self_row_before) {
+					const replication::ClientEntityState *self_after =
+							view_.state().find(joiner_->self_handle());
+					if (self_after != nullptr &&
+							self_after->respawn_revision != self_respawns_before &&
+							joiner_->release_deployment_on_respawn())
+						respawn_release_in_poll = true;
+				}
 				// Every 0x0F a joiner handles clears the link errors and holds
 				// new ones off for 10 s [orig: NapiNPClientMsg_0x00F — the
 				// `!is_authority` burst @0x42e5b7, CNetQuality_SetLinkErrorFlag
@@ -1198,10 +1218,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				cleared_player_slots_.push_back(slot);
 			// WeaponLoadout_ApplyFromBuffer clears dword_81474C for EVERY valid
 			// S2C 0x5A. That is distinct from the causal spawn release below.
-			if (pr.gameplay_release_applied || pr.reached_in_match) deployed_ = true;
+			if (pr.gameplay_release_applied || pr.reached_in_match || respawn_release_in_poll)
+				deployed_ = true;
 			// The owner-ID match may precede loadout by dozens of world-stream packets. Retail only
 			// opens its authoritative spawn latch after H and the applicable deployment release meet.
-			if (pr.reached_in_match) {
+			if (pr.reached_in_match || respawn_release_in_poll) {
 				++deployment_release_revision_;
 				if (!authoritative_spawn_released_) {
 					authoritative_spawn_released_ = true;
