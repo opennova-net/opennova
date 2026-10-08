@@ -400,6 +400,7 @@ int MissionKernel::spawn_local_player_at_start(uint32_t game_type) {
 	if (sel.found) {
 		spawn.position = sel.position;
 		spawn.yaw = sel.yaw;
+		spawn.heading_bam = sel.heading_bam;
 		spawn.pitch = sel.pitch;
 		spawn.roll = sel.roll;
 	}
@@ -416,8 +417,9 @@ bool MissionKernel::spawn_local_player(const w::PlayerSpawn &spawn) {
 	const w::EntityHandle h = w::spawn_player(world, spawn);
 	if (!h.valid()) return false;
 	resolve_new_infantry_adm_ids();
-	// Seed the look heading from the spawn facing so the body starts aligned.
-	local.reset_local_player_input(w::bam_heading_from_mission_yaw_deg(spawn.yaw));
+	// The look yaw starts at the spawn's heading word [orig:
+	// Entity_FindBestSpawnPoint @0x50CF4D].
+	local.reset_local_player_input(w::player_spawn_heading(spawn));
 	w::local_player_view_reset(&world, local.weapon, local.view, local.view_tracker);
 	return true;
 }

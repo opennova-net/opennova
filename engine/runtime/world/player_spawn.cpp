@@ -104,8 +104,10 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     ae.pos[0] = to_fixed(spawn.position.x);
     ae.pos[1] = to_fixed(spawn.position.y);
     ae.pos[2] = to_fixed(spawn.position.z);
-    // Mission yaw (deg) -> engine heading (BAM32), the canonical (90 - yaw) convention.
-    ae.heading = bam_heading_from_mission_yaw_deg(spawn.yaw);
+    // The heading word the placement copied (D-NET-376), else the (90 - yaw)
+    // heading of a spawn with no source pose.
+    // [orig: Entity_FindBestSpawnPoint @0x50CF38]
+    ae.heading = player_spawn_heading(spawn);
     ae.team = spawn.team;
     ae.net_id = spawn.net_id;
     ae.health = static_cast<int16_t>(hp); // hp was explicitly narrowed/sign-extended above

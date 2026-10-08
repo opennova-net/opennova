@@ -23,9 +23,18 @@ class World;
 struct SpawnPointResult {
     bool found = false; // a start marker of some family type existed
     Vec3 position{};    // mission space (Z-up), copied from the chosen marker
-    int16_t yaw = 0;    // mission yaw (degrees); spawn_player applies the (90 - yaw) heading
+    int16_t yaw = 0;    // the whole-degree mission yaw mirror (Entity::yaw)
     int16_t pitch = 0;
     int16_t roll = 0;
+    // The heading word (+0x10) the placement copies onto the player verbatim:
+    // the chosen entity's own Yaw (a start marker's placement angle, low 16
+    // bits zero; a vehicle's live motor heading), plus its parent's Yaw for a
+    // parented marker. The motor heading and the local look yaw start from it
+    // (D-NET-376). [orig: Entity_FindBestSpawnPoint @0x50CED7..0x50CF38,
+    //  look yaw @0x50CF4D; Server_PositionPlayerForSpawn @0x50CFD6 /
+    //  @0x50D16E / @0x50D3F7 / @0x50D51B; Entity_TransformLocalToWorld
+    //  @0x43BE7E]
+    int32_t heading_bam = 0;
     // The Co-op direct-marker arm's two survivor latches. The chosen 6094/6001
     // marker's parachute bit (0x20) is copied onto the player, and a marker
     // whose team byte is 2 additionally arms the queued mount (0x200) with

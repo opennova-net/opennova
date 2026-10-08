@@ -112,6 +112,30 @@ int main() {
         CHECK(ae->inf.is_local_player);
     }
 
+    // --- D-NET-376: the motor heading is the placement's copied word, never its
+    //     whole-degree mirror re-converted. JO:CA CP01's start marker (raw BMS yaw
+    //     -197) puts 0xCC160000 in retail's player +0x10 and look yaw (read from
+    //     the process); 163 degrees turned exactly would be 0xCC16C16C. A spawn
+    //     with no source pose still turns its yaw.
+    //     [orig: Entity_FindBestSpawnPoint @0x50CF38, @0x50CF4D]
+    {
+        World w;
+        w.registry.configure_pool(0, 8);
+        PlayerSpawn ps;
+        ps.yaw = -197;
+        ps.heading_bam = static_cast<int32_t>(0xCC160000u);
+        CHECK(player_spawn_heading(ps) == static_cast<int32_t>(0xCC160000u));
+        const EntityHandle h = spawn_player(w, ps);
+        const AiEntity *ae = w.ai.for_handle(h);
+        CHECK(ae != nullptr && static_cast<uint32_t>(ae->heading) == 0xCC160000u);
+        CHECK(ae != nullptr && static_cast<uint32_t>(ae->inf.body_heading) == 0xCC160000u);
+        CHECK(w.registry.get(h)->yaw == -197); // the mirror stays the record's
+
+        PlayerSpawn synthetic;
+        synthetic.yaw = 163;
+        CHECK(player_spawn_heading(synthetic) == bam_heading_from_mission_yaw_deg(163.0));
+    }
+
     // --- D-NET-144: spawns seed FULL health from the items.def Player hp when the traits sweep
     //     resolved it (late joiners spawn after the sweep), stamping health_max so the §5.10
     //     field-17 tier denominator reads full (tier 2 / golden 0x28).
