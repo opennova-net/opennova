@@ -6,6 +6,7 @@
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/vector2.hpp>
+#include <godot_cpp/variant/vector3.hpp>
 
 #include <algorithm>
 #include <cstring>
@@ -13,15 +14,19 @@
 #include <editor/preview/texture_viewport.h>
 #include <editor/preview/viewport_device.h>
 
+#include "authoring/preview_backdrop.h"
+
 namespace godot {
 
 namespace {
 
-// The picture: each pixel's first-level texel by the camera; the background off the texture; the
-// level's texel (nearest, or filtered where a texel covers less than a pixel) through the channels
-// shown (a normal map lit, 6, is the viewport's lit picture drawn as its colour); the checkerboard 8 pixels a
-// square, behind the colour by its alpha.
-constexpr const char *kShader = R"(shader_type canvas_item;
+// The picture: each pixel's first-level texel by the camera; the editor's preview background off the
+// texture (authoring/preview_backdrop: its own 0.16 grey on Dark); the level's texel (nearest, or filtered
+// where a texel covers less than a pixel) through the channels shown (a normal map lit, 6, is the viewport's
+// lit picture drawn as its colour); the checkerboard 8 pixels a square, behind the colour by its alpha (S18:
+// what the texture's alpha leaves out, whatever the background).
+constexpr const char *kShaderHead = "shader_type canvas_item;\n";
+constexpr const char *kShader = R"(
 uniform sampler2D level_nearest : filter_nearest, repeat_disable;
 uniform sampler2D level_linear : filter_linear, repeat_disable;
 uniform vec2 canvas_size = vec2(1.0);
@@ -35,7 +40,7 @@ void fragment() {
 	vec2 pixel = UV * canvas_size;
 	vec2 texel = centre + (pixel - canvas_size * 0.5) / scale;
 	if (!has_texture || texel.x < 0.0 || texel.y < 0.0 || texel.x >= base_size.x || texel.y >= base_size.y) {
-		COLOR = vec4(0.16, 0.16, 0.16, 1.0);
+		COLOR = vec4(preview_backdrop(UV.y, pixel), 1.0);
 	} else {
 		vec2 uv = texel / base_size;
 		vec4 c = nearest ? texture(level_nearest, uv) : texture(level_linear, uv);
@@ -56,9 +61,11 @@ void fragment() {
 TextureViewportApplier::TextureViewportApplier(SubViewport &viewport) {
 	Ref<Shader> shader;
 	shader.instantiate();
-	shader->set_code(kShader);
+	shader->set_code(String(kShaderHead) + kPreviewBackdropCode + kShader);
 	material_.instantiate();
 	material_->set_shader(shader);
+	// Dark: the viewport's own grey around the texture, as before the preview background.
+	material_->set_shader_parameter("backdrop_own", Vector3(0.16f, 0.16f, 0.16f));
 	rect_ = memnew(ColorRect);
 	rect_->set_name("Texture");
 	rect_->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
@@ -89,6 +96,10 @@ void TextureViewportApplier::rebuild(const opennova::editor::ViewportModel &mode
 }
 
 void TextureViewportApplier::update(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &) {}
+
+void TextureViewportApplier::background(opennova::editor::PreviewBackground background) {
+	set_preview_backdrop(**material_, background);
+}
 
 void TextureViewportApplier::clear() {
 	levels_.clear();

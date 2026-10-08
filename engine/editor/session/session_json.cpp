@@ -1067,6 +1067,19 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		return true;
 	}
 	case F::Alone: return flag_of(json, token, request.alone, error);
+	case F::PreviewBackground: {
+		PreviewBackground background = kDefaultPreviewBackground;
+		if (!json.is_string() || !preview_background_from_token(json.string, background)) {
+			std::string tokens;
+			for (const PreviewBackground each : kPreviewBackgrounds)
+				tokens += std::string(tokens.empty() ? "" : ", ") + preview_background_token(each);
+			error = std::string("\"") + token + "\" must be a preview background (" + tokens + ")" +
+			        (json.is_string() ? ", not \"" + json.string + "\"" : std::string()) + ".";
+			return false;
+		}
+		request.preview_background = background;
+		return true;
+	}
 	case F::kCount: break;
 	}
 	error = std::string("Unknown request member \"") + token + "\".";
@@ -1186,6 +1199,9 @@ bool field_to_json(
 	case F::Define:
 		out = define_to_json(request.define);
 		return request.define.kind != ReferenceKind::None;
+	case F::PreviewBackground:
+		out = json_string(preview_background_token(request.preview_background.value_or(kDefaultPreviewBackground)));
+		return request.preview_background.has_value();
 	case F::kCount: break;
 	}
 	out = JsonValue::make_null();
