@@ -9,6 +9,7 @@
 #include <editor/assets/install_check.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/play_mode.h>
+#include <editor/session/preview_background.h>
 
 namespace opennova::editor {
 
@@ -109,6 +110,9 @@ struct ProjectView {
 	bool save_before_play = true;
 	std::string runtime_setting;
 	bool import_dependencies = true;
+	// What the previews of the project's own data draw behind their picture (the editor's preference,
+	// Preferences::preview_background): each open preview's device draws it at its next pump.
+	PreviewBackground preview_background = kDefaultPreviewBackground;
 	std::vector<int64_t> recent_items;
 	// The folder the project's last Build to folder built into (its local settings' build_folder; "" for
 	// none): Build > Build to <it> builds there again (the UX round's problems lane).

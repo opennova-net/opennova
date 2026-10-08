@@ -12,6 +12,7 @@ extends GutTest
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const PreviewBackgroundChecks := preload("res://tests/authoring/preview_background_checks.gd")
 const LAYOUT := "defs/hudpos.def"
 
 var _dirs: Array[String] = []
@@ -291,3 +292,19 @@ func test_the_handles_write_its_lines_and_the_picture_follows() -> void:
 	_seam.request({"kind": "undo", "path": LAYOUT})
 	state = await _await_left("health", (25 * 640 + 512) / 1024)
 	assert_eq(int(_item(state, "health").get("rect", [0])[0]), (25 * 640 + 512) / 1024, "undone")
+
+
+## The editor's Preview background behind a HUD, its own mid grey on Dark: Grey as it first draws, then each of
+## the four as the editor sets it, live (preview_background_checks.gd).
+func test_the_preview_background_draws_behind_the_hud() -> void:
+	if _app == null:
+		return
+	_project()
+	assert_true(_seam.open_document(LAYOUT), "hudpos.def opens")
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	PreviewBackgroundChecks.check_each(self, _app, _seam, LAYOUT, "hud", "Backdrop")
+	var drawn := PreviewBackgroundChecks.read(_app.get_viewport_device(LAYOUT, "hud"), "Backdrop")
+	if not drawn.is_empty():
+		assert_almost_eq((drawn["material"] as ShaderMaterial).get_shader_parameter("backdrop_own") as Vector3,
+				Vector3(0.27, 0.29, 0.31), Vector3.ONE * 0.001, "Dark draws the HUD preview's own grey")

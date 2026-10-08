@@ -129,6 +129,7 @@ void SessionCore::start() {
 	}
 	view_.project.runtime_setting = settings.runtime_executable;
 	view_.project.import_dependencies = settings.import_dependencies;
+	view_.project.preview_background = settings.preview_background;
 	show_recent_items();
 	view_.activity.status = "No project open.";
 	read_install_expansions();
@@ -1358,8 +1359,23 @@ void SessionCore::save_preferences() {
 	read_recent_details(); // a root new to the list read, the others kept
 	show_installs();
 	view_.project.import_dependencies = settings.import_dependencies;
+	view_.project.preview_background = settings.preview_background;
 	show_recent_items();
 	touch(ViewConcern::Preferences);
+}
+
+void SessionCore::set_preview_background(PreviewBackground background) {
+	if (background != preferences_.values().preview_background) {
+		Preferences editor = preferences_.values();
+		editor.preview_background = background;
+		Diagnostic error;
+		if (!preferences_.write(editor, error)) report(error);
+	}
+	view_.project.preview_background = preferences_.values().preview_background;
+	view_.activity.status = std::string("Previews draw on the ") +
+	                        preview_background_words(view_.project.preview_background) + " background.";
+	touch(ViewConcern::Preferences);
+	touch(ViewConcern::Output);
 }
 
 void SessionCore::remember_recent_item(int64_t item) {
