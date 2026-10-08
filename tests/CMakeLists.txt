@@ -47,6 +47,14 @@ target_compile_features(io_test PRIVATE cxx_std_17)
 target_include_directories(io_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME io COMMAND io_test)
 
+# Whole-file reads, the atomic write and the rename it takes (base/io/file_io.h), through
+# UTF-8 paths past MAX_PATH; and base/io/os_path.h's path_within.
+add_executable(file_io_test io/file_io_test.cpp)
+target_link_libraries(file_io_test PRIVATE opennova_io)
+target_compile_features(file_io_test PRIVATE cxx_std_17)
+target_include_directories(file_io_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME file_io COMMAND file_io_test)
+
 # Roundtrip test
 add_executable(threedi_roundtrip_test threedi/roundtrip_test.cpp)
 target_link_libraries(threedi_roundtrip_test PRIVATE opennova_formats)
@@ -164,7 +172,7 @@ add_executable(threedi_o3d_commands_test threedi/o3d_commands_test.cpp)
 target_link_libraries(threedi_o3d_commands_test PRIVATE opennova_3di_commands)
 add_test(NAME threedi_o3d_commands COMMAND threedi_o3d_commands_test ${CMAKE_CURRENT_BINARY_DIR})
 # `texture`: an image written as a model's .dds, .tga or .mdt through the
-# editor's image import and its authoring DXT encoder.
+# runtime's image import and its authoring DXT encoder.
 add_executable(threedi_texture_command_test threedi/texture_command_test.cpp)
 target_link_libraries(threedi_texture_command_test PRIVATE opennova_3di_commands)
 add_test(NAME threedi_texture_command COMMAND threedi_texture_command_test ${CMAKE_CURRENT_BINARY_DIR})
@@ -247,6 +255,13 @@ add_executable(threedi_collision_3di_test threedi/collision_3di_test.cpp)
 target_link_libraries(threedi_collision_3di_test PRIVATE opennova_formats)
 target_include_directories(threedi_collision_3di_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_collision_3di COMMAND threedi_collision_3di_test)
+
+# A collision volume's planes -> its convex solid (threedi_volume_solid.h), on synthetic planes.
+add_executable(threedi_volume_solid_test threedi/volume_solid_test.cpp)
+target_link_libraries(threedi_volume_solid_test PRIVATE opennova_formats)
+target_include_directories(threedi_volume_solid_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(threedi_volume_solid_test PRIVATE cxx_std_17)
+add_test(NAME threedi_volume_solid COMMAND threedi_volume_solid_test)
 
 # The synthetic 3DI model set fixtures/threedi/synth (eleven base models plus
 # the one-edit variants the GUT suite loads), minted through the parity
@@ -341,6 +356,22 @@ target_include_directories(anim_skeletal_pose_test PRIVATE ${CMAKE_CURRENT_SOURC
 target_compile_features(anim_skeletal_pose_test PRIVATE cxx_std_17)
 add_test(NAME anim_skeletal_pose COMMAND anim_skeletal_pose_test)
 
+# ANIM skeletal FK: the parent-local pose globals (with the collision pose's
+# collapsed right-hand row) and a point or direction carried by a transform.
+add_executable(anim_skeletal_fk_test anim/skeletal_fk_test.cpp)
+target_link_libraries(anim_skeletal_fk_test PRIVATE opennova_runtime)
+target_include_directories(anim_skeletal_fk_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_skeletal_fk_test PRIVATE cxx_std_17)
+add_test(NAME anim_skeletal_fk COMMAND anim_skeletal_fk_test)
+
+# ANIM event bits: the trigger word's known mask and the end-pose record no
+# channel reads.
+add_executable(anim_event_bits_test anim/anim_event_bits_test.cpp)
+target_link_libraries(anim_event_bits_test PRIVATE opennova_runtime)
+target_include_directories(anim_event_bits_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_event_bits_test PRIVATE cxx_std_17)
+add_test(NAME anim_event_bits COMMAND anim_event_bits_test)
+
 # DEF tests
 add_executable(def_comment_strip_test def/def_comment_strip_test.cpp)
 target_link_libraries(def_comment_strip_test PRIVATE opennova_formats)
@@ -373,6 +404,12 @@ target_link_libraries(def_parse_powerup_test PRIVATE opennova_base)
 add_executable(def_loadout_weight_test def/def_loadout_weight_test.cpp)
 target_link_libraries(def_loadout_weight_test PRIVATE opennova_formats)
 add_test(NAME def_loadout_weight COMMAND def_loadout_weight_test)
+
+# The weapon.def name cap: 32 characters only in a block with no `sameas`, which a 32-character
+# name runs on into otherwise (D-ITEMDEF-10): the writer's cap and the parser's finding.
+add_executable(def_weapon_name_cap_test def/def_weapon_name_cap_test.cpp)
+target_link_libraries(def_weapon_name_cap_test PRIVATE opennova_formats)
+add_test(NAME def_weapon_name_cap COMMAND def_weapon_name_cap_test)
 
 # The items.def ids and rows the engine fixes (docs/world/itemdef-re.md, "The ids and rows the
 # engine fixes"): the table, its lookups and rules, and the runtime's constants for the same ids.
@@ -522,6 +559,14 @@ opennova_add_gated_test(lwf_jo_assets_sweep COMMAND lwf_jo_assets_sweep_test)
 add_executable(wav_pcm_test lwf/wav_pcm_test.cpp)
 target_link_libraries(wav_pcm_test PRIVATE opennova_formats)
 add_test(NAME wav_pcm COMMAND wav_pcm_test)
+
+# A wave as the game's loader takes it (formats/lwf/wav_source.h): its acceptance walk
+# [orig: Audio_LoadWavFileFromArchive @ 0x766480], a source wave read and converted into the
+# form it takes; the retail leg every shipped wave through the walk (OPENNOVA_JO_ASSETS).
+add_executable(wav_source_test lwf/wav_source_test.cpp)
+target_link_libraries(wav_source_test PRIVATE opennova_formats)
+target_include_directories(wav_source_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(wav_source COMMAND wav_source_test)
 
 add_executable(inmatch_session_test frame/inmatch_session_test.cpp)
 target_link_libraries(inmatch_session_test PRIVATE opennova_runtime)
@@ -708,6 +753,18 @@ add_executable(required_resources_test gameprofile/required_resources_test.cpp)
 target_link_libraries(required_resources_test PRIVATE opennova_base)
 add_test(NAME required_resources COMMAND required_resources_test)
 
+# The player's and this machine's own files, which an import never takes nor a build packs.
+add_executable(player_files_test gameprofile/player_files_test.cpp)
+target_link_libraries(player_files_test PRIVATE opennova_base)
+target_include_directories(player_files_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME player_files COMMAND player_files_test)
+
+# The game's graphics log (ghw.txt): the missions it began and finished loading.
+add_executable(graphics_log_test gameprofile/graphics_log_test.cpp)
+target_link_libraries(graphics_log_test PRIVATE opennova_base)
+target_include_directories(graphics_log_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME graphics_log COMMAND graphics_log_test)
+
 # SBF tests
 add_executable(sbf_header_test sbf/sbf_header_test.cpp)
 target_link_libraries(sbf_header_test PRIVATE opennova_formats)
@@ -883,6 +940,13 @@ target_include_directories(vfs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(vfs_test PRIVATE cxx_std_17)
 add_test(NAME vfs COMMAND vfs_test)
 
+# The files a build read from a FileSource, by stamp (base/vfs/file_stamps.h).
+add_executable(file_stamps_test vfs/file_stamps_test.cpp)
+target_link_libraries(file_stamps_test PRIVATE opennova_base)
+target_include_directories(file_stamps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(file_stamps_test PRIVATE cxx_std_17)
+add_test(NAME file_stamps COMMAND file_stamps_test)
+
 # An install root deeper than MAX_PATH under a non-ASCII name: the VFS, the resource
 # index and the session's _NSTMOUT.TXT read through base/io/os_path.h.
 add_executable(vfs_long_path_test vfs/vfs_long_path_test.cpp)
@@ -927,7 +991,7 @@ target_compile_definitions(minimal_rtxt_gen_test PRIVATE
 add_test(NAME minimal_rtxt_gen COMMAND minimal_rtxt_gen_test)
 
 # Synthetic fonts: validity, byte-stable round trips and drawable glyphs.
-# The builder mints
+# The stroke font (formats/fnt/fnt_stroke_font.h) mints
 # assets/opennova.fnt and fixtures/fnt/synth_{1,3}page.fnt, byte-compared every
 # run (--write regenerates).
 add_executable(minimal_fnt_gen_test fixtures/minimal_fnt_gen.cpp)
@@ -1092,12 +1156,20 @@ target_link_libraries(mission_seat_spec_extract_test PRIVATE opennova_runtime)
 target_include_directories(mission_seat_spec_extract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_seat_spec_extract COMMAND mission_seat_spec_extract_test)
 
+# The def tables through an embedder's files (runtime_boot: weapon.def with the
+# mount's SIGHTS test, ammo.def) and items.def's per-id first-row index.
+add_executable(mission_def_table_read_test mission/def_table_read_test.cpp)
+target_link_libraries(mission_def_table_read_test PRIVATE opennova_runtime)
+target_include_directories(mission_def_table_read_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_def_table_read COMMAND mission_def_table_read_test)
+
 # Object renderer/shader tests
 foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_wind light_runtime light_scene light_terrain_pass material_classify material_eval material_texture
         particle_atlas_contract particle_frame_compiler_contract render_order
         frame_fx_effects nvg_scope_lens q3_frame render_slot_shadow
         scene_overlay state_vectors tracer_frame precipitation_frame texture_dxt texture_load_rules
-        d3dx_image_codecs device_texture texture_filter)
+        texture_registry texture_authoring d3dx_image_codecs device_texture texture_filter d3d9_raster shader_effect_info
+        texture_roles fixed_texture_names)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
     target_link_libraries(renderer_${test}_test PRIVATE opennova_runtime opennova_formats)
     target_include_directories(renderer_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1130,12 +1202,33 @@ target_link_libraries(pcx_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(pcx_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pcx_roundtrip COMMAND pcx_roundtrip_test)
 
+# The 256-colour quantizer an 8-bit PCX is written through (formats/pcx/pcx_quantize.h).
+add_executable(pcx_quantize_test pcx/pcx_quantize_test.cpp)
+target_link_libraries(pcx_quantize_test PRIVATE opennova_formats)
+target_include_directories(pcx_quantize_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME pcx_quantize COMMAND pcx_quantize_test)
+
+# The PNG reader and writer (formats/png): every color type and depth, the filters,
+# the refusals, a palette image's indices, grey at its depth, the IHDR size, a round trip.
+add_executable(png_codec_test png/png_codec_test.cpp)
+target_link_libraries(png_codec_test PRIVATE opennova_formats)
+target_include_directories(png_codec_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME png_codec COMMAND png_codec_test)
+
 # The game's TGA reader (formats/tga/tga_read.h): the unconditional flip, the
 # pixel start, the forms it reads and the ones it zero-fills.
 add_executable(tga_read_test tga/tga_read_test.cpp)
 target_link_libraries(tga_read_test PRIVATE opennova_formats)
 target_include_directories(tga_read_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME tga_read COMMAND tga_read_test)
+
+# The TGA an import source is read by (formats/tga/tga_source.h), the format's own
+# decode: every origin, depth, colour map and run-length form decoded upright, and what
+# it refuses.
+add_executable(tga_source_test tga/tga_source_test.cpp)
+target_link_libraries(tga_source_test PRIVATE opennova_formats)
+target_include_directories(tga_source_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tga_source COMMAND tga_source_test)
 
 # The texture writers the editor's placeholder textures go through (S11h): every header
 # byte and the pixels' order, each read back as the game's readers read the file; and the
@@ -1209,10 +1302,23 @@ target_link_libraries(trn_admission_gate_test PRIVATE opennova_formats)
 target_include_directories(trn_admission_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME trn_admission_gate COMMAND trn_admission_gate_test)
 
+add_executable(trn_key_lines_test trn/trn_key_lines_test.cpp)
+target_link_libraries(trn_key_lines_test PRIVATE opennova_formats)
+target_include_directories(trn_key_lines_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME trn_key_lines COMMAND trn_key_lines_test)
+
 add_executable(cpt_roundtrip_test cpt/cpt_roundtrip_test.cpp)
 target_link_libraries(cpt_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(cpt_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME cpt_roundtrip COMMAND cpt_roundtrip_test)
+
+# The TrnGen.exe terrain bake (formats/cpt/trngen): a procedural map baked and read back
+# as the game reads it, the same bytes on one thread and on four. `cpt_trngen_bake_test
+# <dir>` runs the by-hand byte parity with TrnGen's own .cpt (the test's header).
+add_executable(cpt_trngen_bake_test cpt/trngen_bake_test.cpp)
+target_link_libraries(cpt_trngen_bake_test PRIVATE opennova_formats)
+target_include_directories(cpt_trngen_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cpt_trngen_bake COMMAND cpt_trngen_bake_test)
 
 # ENV environment/time-of-day format tests
 add_executable(env_unit_test env/env_unit_test.cpp)
@@ -1225,6 +1331,11 @@ add_executable(env_render_unit_test env/env_render_unit_test.cpp)
 target_link_libraries(env_render_unit_test PRIVATE opennova_formats)
 target_include_directories(env_render_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME env_render_unit COMMAND env_render_unit_test)
+
+add_executable(env_source_issue_test env/env_source_issue_test.cpp)
+target_link_libraries(env_source_issue_test PRIVATE opennova_formats)
+target_include_directories(env_source_issue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME env_source_issue COMMAND env_source_issue_test)
 
 # The environment runtime (engine/runtime/environment): the TOD state owner +
 # weather embedding ported from the shell scripts (ADR 0034 d6 de-scripting).
@@ -1789,6 +1900,12 @@ target_link_libraries(menu_frame_assets_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_assets_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME menu_frame_assets COMMAND menu_frame_assets_test)
 
+# A menu texture's size from its header, no pixels decoded (menu/menu_texture_header.h).
+add_executable(menu_texture_header_test menu/menu_texture_header_test.cpp)
+target_link_libraries(menu_texture_header_test PRIVATE opennova_runtime)
+target_include_directories(menu_texture_header_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_texture_header COMMAND menu_texture_header_test)
+
 add_executable(menu_video_test menu/menu_video_test.cpp)
 target_link_libraries(menu_video_test PRIVATE opennova_runtime)
 target_include_directories(menu_video_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1880,7 +1997,7 @@ add_test(NAME minimal_particle_gen COMMAND minimal_particle_gen_test)
 # Jointops.exe IDB).
 foreach(name smallest minimal_effect multi_section multi_layer table_handles
         smoke_all_fixtures enum_parse writer_roundtrip curve_lut
-        lenient_lines)
+        lenient_lines effect_places)
     add_executable(particle_${name}_test particle/particle_${name}_test.cpp)
     target_link_libraries(particle_${name}_test PRIVATE opennova_formats)
     target_include_directories(particle_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1891,12 +2008,15 @@ foreach(name smallest minimal_effect multi_section multi_layer table_handles
         add_test(NAME particle_${name} COMMAND particle_${name}_test)
     endif()
 endforeach()
-foreach(name emitter emit_shape translate effect_scene_contract)
+# effect_pose pins the spawn poses every producer hands the scene; effect_closure
+# (mixed) one effect's closure and several folded, the retail leg every effect
+# of the install's catalog alike from its closure (OPENNOVA_JO_DIR).
+foreach(name emitter emit_shape translate effect_scene_contract effect_pose effect_closure)
     add_executable(particle_${name}_test particle/particle_${name}_test.cpp)
     target_link_libraries(particle_${name}_test PRIVATE opennova_runtime)
     target_include_directories(particle_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(particle_${name}_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-    if(name STREQUAL "smoke_all_fixtures")
+    if(name STREQUAL "effect_closure")
         opennova_add_mixed_test(particle_${name} COMMAND particle_${name}_test)
     else()
         add_test(NAME particle_${name} COMMAND particle_${name}_test)
@@ -1923,6 +2043,28 @@ target_link_libraries(cbin_display_view_test PRIVATE opennova_formats)
 target_include_directories(cbin_display_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(cbin_display_view_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME cbin_display_view COMMAND cbin_display_view_test)
+
+# The CBIN form and its ConfigFile text form, each into the other (formats/cbin/binary_config_text.h):
+# a credits-shaped CBIN through its text and back byte for byte, what the text form cannot carry, and
+# the lines the text reader does not read whole, each refused at its line.
+add_executable(cbin_binary_config_text_test cbin/binary_config_text_test.cpp)
+target_link_libraries(cbin_binary_config_text_test PRIVATE opennova_formats)
+target_include_directories(cbin_binary_config_text_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cbin_binary_config_text COMMAND cbin_binary_config_text_test)
+
+# The ConfigFile text reader's data-strings pool and its clear (formats/configfile DataStringsPool,
+# ConfigFile_ParseText @ 0x7609e8): the allocator's rounding, fixtures/configfile/pool_*.def on either
+# side of the line, the reader's own count, the first value past the pool, the reader's comment.
+add_executable(configfile_data_strings_pool_test configfile/data_strings_pool_test.cpp)
+target_link_libraries(configfile_data_strings_pool_test PRIVATE opennova_formats)
+target_include_directories(configfile_data_strings_pool_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME configfile_data_strings_pool COMMAND configfile_data_strings_pool_test)
+
+# The original game's /FRISK file log, _filelog.txt (formats/filelog/file_access_log.h).
+add_executable(filelog_file_access_log_test filelog/file_access_log_test.cpp)
+target_link_libraries(filelog_file_access_log_test PRIVATE opennova_formats)
+target_include_directories(filelog_file_access_log_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME filelog_file_access_log COMMAND filelog_file_access_log_test)
 
 # MNU menu UI tests (forgiving XML parser, MNU AST + serialize roundtrip, MNS stylesheet)
 add_executable(mnu_xml_unit_test mnu/mnu_xml_unit_test.cpp)
@@ -2206,6 +2348,14 @@ target_include_directories(ai_los_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(ai_los_test PRIVATE cxx_std_17)
 add_test(NAME ai_los COMMAND ai_los_test)
 
+# The ammo table's shared lookups: the entity-face material cost a round pays
+# to go on through a face (runtime/world/ammo_table.h).
+add_executable(ammo_table_test world/ammo_table_test.cpp)
+target_link_libraries(ammo_table_test PRIVATE opennova_runtime)
+target_include_directories(ammo_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ammo_table_test PRIVATE cxx_std_17)
+add_test(NAME ammo_table COMMAND ammo_table_test)
+
 # The global hit record and the script kills that read it: the BMS kills keep
 # the last recorded round, WAC killSSN zeroes it, items read its section and
 # a brained item's machine its owner word.
@@ -2273,6 +2423,14 @@ target_include_directories(item_death_traits_resolve_test PRIVATE ${CMAKE_CURREN
 target_compile_features(item_death_traits_resolve_test PRIVATE cxx_std_17)
 add_test(NAME item_death_traits_resolve COMMAND item_death_traits_resolve_test)
 
+# The death schedule's def-side half: the death traits a def row carries, the
+# destroy fade's defaults, the class callbacks' numbers and names.
+add_executable(item_death_schedule_test world/item_death_schedule_test.cpp)
+target_link_libraries(item_death_schedule_test PRIVATE opennova_runtime)
+target_include_directories(item_death_schedule_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(item_death_schedule_test PRIVATE cxx_std_17)
+add_test(NAME item_death_schedule COMMAND item_death_schedule_test)
+
 # The collectors' render model, stamped where the model resolves (placed
 # entities) and carried on the decoded wire row's resolved shape.
 add_executable(render_model_resolve_test world/render_model_resolve_test.cpp)
@@ -2294,6 +2452,13 @@ target_link_libraries(round_debug_trail_test PRIVATE opennova_runtime)
 target_include_directories(round_debug_trail_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(round_debug_trail_test PRIVATE cxx_std_17)
 opennova_add_gated_test(round_debug_trail COMMAND round_debug_trail_test)
+
+# The physics callback table (world/physics_class_table.h): a move_function
+# binds its row by whole name, ignoring case; anything else binds null.
+add_executable(physics_class_table_test world/physics_class_table_test.cpp)
+target_link_libraries(physics_class_table_test PRIVATE opennova_runtime)
+target_compile_features(physics_class_table_test PRIVATE cxx_std_17)
+add_test(NAME physics_class_table COMMAND physics_class_table_test)
 
 # Throwables (world/throwables.h; world-wac-ai-re §27): PowerThrow charge,
 # grenade bounce/fuse, satchel place/detonator, claymore cone + fan, the AV
@@ -2410,6 +2575,15 @@ if(MSVC)
     target_link_options(collision_test PRIVATE "/STACK:4194304")
 endif()
 add_test(NAME collision COMMAND collision_test)
+
+# The collision placement and probe helpers: the item scale, the placement from
+# mission eulers, a placed box, the ground-settle probe origin, the terrain
+# height under a column.
+add_executable(collision_placement_test world/collision_placement_test.cpp)
+target_link_libraries(collision_placement_test PRIVATE opennova_runtime)
+target_include_directories(collision_placement_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(collision_placement_test PRIVATE cxx_std_17)
+add_test(NAME collision_placement COMMAND collision_placement_test)
 
 add_executable(collision_vertical_test world/collision_vertical_test.cpp)
 target_link_libraries(collision_vertical_test PRIVATE opennova_runtime)
@@ -2911,6 +3085,13 @@ add_executable(mission_text_test mission/mission_text_test.cpp)
 target_link_libraries(mission_text_test PRIVATE opennova_runtime)
 target_compile_features(mission_text_test PRIVATE cxx_std_17)
 add_test(NAME mission_text COMMAND mission_text_test)
+
+# A player start placed in a mission (runtime/mission/player_start.h): the start markers of the
+# type the single player deploys at moved to the point, one added where the mission has none.
+add_executable(player_start_test mission/player_start_test.cpp)
+target_link_libraries(player_start_test PRIVATE opennova_runtime)
+target_include_directories(player_start_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_player_start COMMAND player_start_test)
 
 # The F3 debug oracles over the kernel (runtime/mission/debug_oracles.h): the
 # hitbox view's stand-in fallback and its exclusions, the pick's zero ray and
@@ -4245,6 +4426,13 @@ target_link_libraries(asset_store_test PRIVATE opennova_runtime)
 target_include_directories(asset_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME asset_store COMMAND asset_store_test)
 
+# The files a running mission opens by a fixed name (runtime/assets/mission_fixed_files.h): each
+# set by the runtime's own constants, every name once.
+add_executable(mission_fixed_files_test assets/mission_fixed_files_test.cpp)
+target_link_libraries(mission_fixed_files_test PRIVATE opennova_runtime)
+target_include_directories(mission_fixed_files_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_fixed_files COMMAND mission_fixed_files_test)
+
 # Target cursors, vehicle instruments, Inset geometry, mortar preview, and peer feedback.
 add_executable(hud_combat_test hud/hud_combat_test.cpp)
 target_link_libraries(hud_combat_test PRIVATE opennova_runtime)
@@ -5168,6 +5356,13 @@ add_executable(charattr_test charattr/charattr_test.cpp)
 target_link_libraries(charattr_test PRIVATE opennova_base opennova_formats)
 target_include_directories(charattr_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(charattr COMMAND charattr_test)
+
+# hudpos.def's lines as the game's parser is handed them (formats/def/def_hudpos_text.h): the line the
+# game takes a key from is the key's last.
+add_executable(def_hudpos_text_test def/def_hudpos_text_test.cpp)
+target_link_libraries(def_hudpos_text_test PRIVATE opennova_formats)
+target_include_directories(def_hudpos_text_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME def_hudpos_text COMMAND def_hudpos_text_test)
 
 add_executable(def_write_hudpos_test def/def_write_hudpos_test.cpp)
 target_link_libraries(def_write_hudpos_test PRIVATE opennova_base opennova_formats)
