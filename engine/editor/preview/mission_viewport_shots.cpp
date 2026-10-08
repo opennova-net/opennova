@@ -143,13 +143,12 @@ renderer::ScarDrawList MissionViewport::shot_scars() const {
 std::vector<ClipSoundFired> MissionViewport::fire_sounds(const PreviewClock &clock, const AssetScan *scan,
 		audio::SoundSelector &selector, uint64_t &next_seq) {
 	std::vector<ClipSoundFired> out;
-	// What the run reached (the follow runs it to the clock): its sounds on the ticks [from, now), none over a seek.
+	// What the run reached (the follow runs it to the clock): its sounds on the ticks [from, now), none over a seek
+	// (from where a seek put the clock, PreviewClock::heard_from).
 	const int32_t now = std::min(clock.ticks(), shots_.tick());
-	const bool sought = clock.tick_seeks() != shot_seeks_;
-	shot_seeks_ = clock.tick_seeks();
-	const int32_t from = shot_cursor_;
+	const int32_t from = clock.heard_from(shot_cursor_, shot_seeks_);
 	shot_cursor_ = now;
-	if (shots_.shots().empty() || from < 0 || sought || now <= from || now - from > kClipSoundCatchUpTicks) return out;
+	if (shots_.shots().empty() || from < 0 || now <= from || now - from > kClipSoundCatchUpTicks) return out;
 	const PreviewVec3 listener = camera_.eye();
 	for (const MissionShotEvent &event : shots_.events()) {
 		if (event.kind != MissionShotEvent::Kind::Sound || event.tick < from || event.tick >= now || event.set.empty())
