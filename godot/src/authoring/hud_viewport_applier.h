@@ -1,5 +1,6 @@
 #pragma once
 
+#include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 
 #include <cstdint>
@@ -51,6 +52,8 @@ public:
 	void tick(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) override;
 	void resize(int width, int height) override;
 	bool reads_scene_state() const override { return false; }
+	// The editor's preview background behind the HUD (its own mid grey on Dark).
+	void background(opennova::editor::PreviewBackground background) override;
 
 	// What it holds (a GUT device test reads it): the overlay, the view effects (null where the game's
 	// script is not in the build), whether a layout is configured, the weapon applied.
@@ -64,6 +67,7 @@ private:
 	void apply_options_(const opennova::editor::HudViewport &hud);
 
 	uint64_t backdrop_id_ = 0;
+	Ref<ShaderMaterial> backdrop_material_; // the backdrop's: the editor's preview background over it
 	uint64_t overlay_id_ = 0;
 	uint64_t effects_id_ = 0;
 	Ref<ResourceRoot> root_;
