@@ -17,6 +17,9 @@
 #include "env/weather.h"
 #include "object/object_model.h"
 
+#include <runtime/environment/water_mirror.h>
+#include <runtime/renderer/light_runtime.h>
+
 namespace godot {
 
 namespace {
@@ -939,6 +942,28 @@ int LightScene::render_static_frame(
 	static_bytes_resident_ = cacheable;
 	last_lit_static_draws_ = lit_draws;
 	return lit_draws;
+}
+
+Vector4 LightScene::static_row_entity_lane(bool p_is_building, int32_t p_robj_index,
+		float p_light_transfer, bool p_contained, int32_t p_model_floor_q16,
+		int32_t p_entity_bound_radius_q16) {
+	const opennova::renderer::EntityLightingState lane =
+			opennova::renderer::static_row_entity_lighting(p_is_building, p_robj_index,
+					p_light_transfer, p_contained);
+	const opennova::env::MirrorClipWave clip_wave = p_is_building ?
+			opennova::env::MirrorClipWave::kSectorModel :
+			opennova::env::MirrorClipWave::kEntity;
+	return Vector4(lane.effect_scale, lane.interior_lerp ? 1.0f : 0.0f, lane.interior_daylight,
+			opennova::env::water_mirror_clip_origin_offset(clip_wave,
+					p_is_building ? p_model_floor_q16 : p_entity_bound_radius_q16));
+}
+
+void LightScene::publish_static_rows() const {
+	if (static_light_rows_texture_.is_null()) return;
+	if (RenderingServer *rs = RenderingServer::get_singleton()) {
+		rs->global_shader_parameter_set("opennova_static_point_light_rows",
+				static_light_rows_texture_);
+	}
 }
 
 void LightScene::build_corona_inputs(const Vector3 &p_camera_pos,

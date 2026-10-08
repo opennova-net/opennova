@@ -1,4 +1,8 @@
-// Unit tests for mnu: MNU menu file parser.
+// Unit tests for mnu: the typed layer over the retail reader, and the writer.
+// Each reading case pins one rule of docs/mnu/menu-re.md "The reader" (the
+// 2026-09-23 grill, sets A1-A3, B1-B3, C1-C3), each writing case one of "The
+// writer"; the corpus checks are mnu_compat (the differential and the fixed point)
+// and mnu_coverage (no lost key).
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
@@ -6,2261 +10,948 @@
 #include <vector>
 
 #include <formats/mnu/mnu.h>
+#include <formats/mnu/mnu_layout.h>
 
 namespace {
 
-#define CHECK(cond, msg)                                      \
-  do {                                                        \
-    if (!(cond)) {                                            \
-      std::cerr << "FAIL: " << msg << " at line " << __LINE__ \
-                << "\n";                                      \
-      return false;                                           \
-    }                                                         \
+namespace mnu = opennova::mnu;
+
+#define CHECK(cond, msg)                                                   \
+  do {                                                                     \
+    if (!(cond)) {                                                         \
+      std::cerr << "FAIL: " << msg << " at line " << __LINE__ << "\n";     \
+      return false;                                                        \
+    }                                                                      \
   } while (0)
 
-bool position_eq(const opennova::mnu::Position &a, const opennova::mnu::Position &b) {
-  return a.has_left == b.has_left && a.has_top == b.has_top &&
-         a.has_right == b.has_right && a.has_bottom == b.has_bottom &&
-         (!a.has_left || a.left == b.left) &&
-         (!a.has_top || a.top == b.top) &&
-         (!a.has_right || a.right == b.right) &&
-         (!a.has_bottom || a.bottom == b.bottom);
+// A screen named S holding `body` as its one root WINDOW's content.
+std::string screen_of(const std::string &window_attrs, const std::string &body) {
+  return "<SCREEN><NAME>S</NAME><WINDOW " + window_attrs + ">" + body + "</WINDOW></SCREEN>";
 }
 
-bool appearance_eq(const opennova::mnu::Appearance &a, const opennova::mnu::Appearance &b) {
-  return a.state == b.state && a.type == b.type && a.value == b.value &&
-         a.has_map_state == b.has_map_state &&
-         (!a.has_map_state || a.map_state == b.map_state) &&
-         a.has_height == b.has_height &&
-         (!a.has_height || a.height == b.height);
-}
+const char *kPos = "<POSITION><LEFT>0</LEFT></POSITION>";
 
-bool sound_eq(const opennova::mnu::Sound &a, const opennova::mnu::Sound &b) {
-  return a.state == b.state && a.trigger == b.trigger && a.file == b.file;
-}
-
-bool action_eq(const opennova::mnu::Action &a, const opennova::mnu::Action &b) {
-  return a.type == b.type && a.state == b.state && a.file == b.file &&
-         a.source == b.source && a.field == b.field &&
-         a.has_target_form == b.has_target_form &&
-         (!a.has_target_form || a.target_form == b.target_form) &&
-         a.toggle == b.toggle &&
-         a.test == b.test && a.target == b.target &&
-         a.external_browser == b.external_browser;
-}
-
-bool string_eq(const opennova::mnu::String &a, const opennova::mnu::String &b) {
-  if (a.present != b.present) return false;
-  if (!a.present) return true;
-  return a.type == b.type && a.justify == b.justify &&
-         a.vjustify == b.vjustify && a.has_edge == b.has_edge &&
-         (!a.has_edge || a.edge == b.edge) && a.value == b.value;
-}
-
-bool font_eq(const opennova::mnu::Font &a, const opennova::mnu::Font &b) {
-  return a.name == b.name && a.default_fg == b.default_fg &&
-         a.default_bg == b.default_bg && a.mouseover_fg == b.mouseover_fg &&
-         a.mouseover_bg == b.mouseover_bg && a.selected_fg == b.selected_fg &&
-         a.selected_bg == b.selected_bg && a.disabled_fg == b.disabled_fg &&
-         a.disabled_bg == b.disabled_bg;
-}
-
-bool frame_eq(const opennova::mnu::Frame &a, const opennova::mnu::Frame &b) {
-  return a.stencil == b.stencil &&
-         a.has_stencil_size == b.has_stencil_size &&
-         (!a.has_stencil_size || a.stencil_size == b.stencil_size) &&
-         a.brush == b.brush && a.monogram == b.monogram &&
-         a.has_insetx == b.has_insetx &&
-         (!a.has_insetx || a.insetx == b.insetx) &&
-         a.has_insety == b.has_insety &&
-         (!a.has_insety || a.insety == b.insety);
-}
-
-bool items_eq(const opennova::mnu::Items &a, const opennova::mnu::Items &b) {
-  if (a.present != b.present) return false;
-  if (!a.present) return true;
-  if (a.justify != b.justify || a.vjustify != b.vjustify ||
-      a.multiselect != b.multiselect ||
-      a.selection_color != b.selection_color ||
-      a.appearances.size() != b.appearances.size() ||
-      a.items.size() != b.items.size()) {
-    return false;
-  }
-  for (size_t i = 0; i < a.appearances.size(); ++i) {
-    if (!appearance_eq(a.appearances[i], b.appearances[i])) return false;
-  }
-  for (size_t i = 0; i < a.items.size(); ++i) {
-    const auto &ai = a.items[i];
-    const auto &bi = b.items[i];
-    if (ai.type != bi.type || ai.value != bi.value || ai.text != bi.text) {
-      return false;
-    }
-  }
-  return true;
-}
-
-bool spin_eq(const opennova::mnu::SpinButton &a, const opennova::mnu::SpinButton &b) {
-  if (a.present != b.present) return false;
-  if (!a.present) return true;
-  if (!position_eq(a.position, b.position)) return false;
-  if (a.appearances.size() != b.appearances.size()) return false;
-  for (size_t i = 0; i < a.appearances.size(); ++i) {
-    if (!appearance_eq(a.appearances[i], b.appearances[i])) return false;
-  }
-  return true;
-}
-
-bool cursor_eq(const opennova::mnu::Cursor &a, const opennova::mnu::Cursor &b) {
-  return a.file == b.file && a.flags == b.flags;
-}
-
-bool table_header_eq(const opennova::mnu::TableHeader &a, const opennova::mnu::TableHeader &b) {
-  return a.justify == b.justify && a.vjustify == b.vjustify &&
-         a.has_column == b.has_column &&
-         (!a.has_column || a.column == b.column) && a.sort == b.sort &&
-         a.has_width == b.has_width &&
-         (!a.has_width || a.width == b.width) &&
-         a.type == b.type && a.text == b.text;
-}
-
-bool table_body_eq(const opennova::mnu::TableBody &a, const opennova::mnu::TableBody &b) {
-  return a.justify == b.justify && a.vjustify == b.vjustify &&
-         a.has_column == b.has_column &&
-         (!a.has_column || a.column == b.column) &&
-         a.bitmap_draw == b.bitmap_draw &&
-         a.bitmap_flags == b.bitmap_flags &&
-         a.scale_bitmap == b.scale_bitmap &&
-         a.custom_draw == b.custom_draw;
-}
-
-bool table_subst_eq(const opennova::mnu::TableSubst &a, const opennova::mnu::TableSubst &b) {
-  return a.has_column == b.has_column &&
-         (!a.has_column || a.column == b.column) &&
-         a.value == b.value && a.is_file == b.is_file &&
-         a.file == b.file;
-}
-
-bool table_column_eq(const opennova::mnu::TableColumn &a, const opennova::mnu::TableColumn &b) {
-  if (a.has_count != b.has_count ||
-      (a.has_count && a.count != b.count) ||
-      a.has_spacing != b.has_spacing ||
-      (a.has_spacing && a.spacing != b.spacing))
-    return false;
-  if (a.headers.size() != b.headers.size()) return false;
-  if (a.bodies.size() != b.bodies.size()) return false;
-  if (a.substitutions.size() != b.substitutions.size()) return false;
-  for (size_t i = 0; i < a.headers.size(); ++i) {
-    if (!table_header_eq(a.headers[i], b.headers[i])) return false;
-  }
-  for (size_t i = 0; i < a.bodies.size(); ++i) {
-    if (!table_body_eq(a.bodies[i], b.bodies[i])) return false;
-  }
-  for (size_t i = 0; i < a.substitutions.size(); ++i) {
-    if (!table_subst_eq(a.substitutions[i], b.substitutions[i])) return false;
-  }
-  return true;
-}
-
-bool table_scrollbar_eq(const opennova::mnu::TableScrollbar &a, const opennova::mnu::TableScrollbar &b) {
-  if (a.present != b.present) return false;
-  if (!a.present) return true;
-  if (!position_eq(a.position, b.position)) return false;
-  if (a.track.size() != b.track.size()) return false;
-  if (a.shuttle.size() != b.shuttle.size()) return false;
-  if (a.scrollup.size() != b.scrollup.size()) return false;
-  if (a.scrolldown.size() != b.scrolldown.size()) return false;
-  if (a.sounds.size() != b.sounds.size()) return false;
-  for (size_t i = 0; i < a.track.size(); ++i)
-    if (!appearance_eq(a.track[i], b.track[i])) return false;
-  for (size_t i = 0; i < a.shuttle.size(); ++i)
-    if (!appearance_eq(a.shuttle[i], b.shuttle[i])) return false;
-  for (size_t i = 0; i < a.scrollup.size(); ++i)
-    if (!appearance_eq(a.scrollup[i], b.scrollup[i])) return false;
-  for (size_t i = 0; i < a.scrolldown.size(); ++i)
-    if (!appearance_eq(a.scrolldown[i], b.scrolldown[i])) return false;
-  for (size_t i = 0; i < a.sounds.size(); ++i)
-    if (!sound_eq(a.sounds[i], b.sounds[i])) return false;
-  return true;
-}
-
-bool table_data_eq(const opennova::mnu::TableData &a, const opennova::mnu::TableData &b) {
-  if (!table_column_eq(a.column, b.column)) return false;
-  if (!table_scrollbar_eq(a.scrollbar, b.scrollbar)) return false;
-  if (a.has_min_item_height != b.has_min_item_height ||
-      (a.has_min_item_height && a.min_item_height != b.min_item_height))
-    return false;
-  if (a.outline_color != b.outline_color) return false;
-  if (a.selection_color != b.selection_color) return false;
-  if (a.multiselect != b.multiselect) return false;
-  return true;
-}
-
-bool listbox_scrollbar_eq(const opennova::mnu::ListBoxScrollbar &a,
-                          const opennova::mnu::ListBoxScrollbar &b) {
-  if (a.present != b.present) return false;
-  if (!a.present) return true;
-  if (!position_eq(a.position, b.position) ||
-      a.track.size() != b.track.size() ||
-      a.shuttle.size() != b.shuttle.size() ||
-      a.scrollup.size() != b.scrollup.size() ||
-      a.scrolldown.size() != b.scrolldown.size() ||
-      a.sounds.size() != b.sounds.size())
-    return false;
-  for (size_t i = 0; i < a.track.size(); ++i)
-    if (!appearance_eq(a.track[i], b.track[i])) return false;
-  for (size_t i = 0; i < a.shuttle.size(); ++i)
-    if (!appearance_eq(a.shuttle[i], b.shuttle[i])) return false;
-  for (size_t i = 0; i < a.scrollup.size(); ++i)
-    if (!appearance_eq(a.scrollup[i], b.scrollup[i])) return false;
-  for (size_t i = 0; i < a.scrolldown.size(); ++i)
-    if (!appearance_eq(a.scrolldown[i], b.scrolldown[i])) return false;
-  for (size_t i = 0; i < a.sounds.size(); ++i)
-    if (!sound_eq(a.sounds[i], b.sounds[i])) return false;
-  return true;
-}
-
-bool listbox_eq(const opennova::mnu::ListBox &a, const opennova::mnu::ListBox &b) {
-  if (a.present != b.present) return false;
-  if (!a.present) return true;
-  if (!position_eq(a.position, b.position) ||
-      a.appearances.size() != b.appearances.size() ||
-      !string_eq(a.string_data, b.string_data) ||
-      !items_eq(a.items, b.items) ||
-      a.has_min_item_height != b.has_min_item_height ||
-      (a.has_min_item_height &&
-       a.min_item_height != b.min_item_height) ||
-      a.has_sb_edge_pad != b.has_sb_edge_pad ||
-      (a.has_sb_edge_pad && a.sb_edge_pad != b.sb_edge_pad) ||
-      !listbox_scrollbar_eq(a.scrollbar, b.scrollbar))
-    return false;
-  for (size_t i = 0; i < a.appearances.size(); ++i)
-    if (!appearance_eq(a.appearances[i], b.appearances[i])) return false;
-  return true;
-}
-
-bool window_eq(const opennova::mnu::Window &a, const opennova::mnu::Window &b) {
-  const std::string a_type =
-      a.type_token.empty() ? opennova::mnu::window_type_name(a.type) : a.type_token;
-  const std::string b_type =
-      b.type_token.empty() ? opennova::mnu::window_type_name(b.type) : b.type_token;
-  if (a.name != b.name || a.type != b.type || a_type != b_type ||
-      a.hidden != b.hidden ||
-      a.disabled != b.disabled || a.checked != b.checked ||
-      a.draw_frame != b.draw_frame || a.modal != b.modal ||
-      a.readonly != b.readonly || a.as_button != b.as_button ||
-      a.has_group != b.has_group ||
-      (a.has_group && a.group != b.group))
-    return false;
-  if (a.number != b.number || a.has_minval != b.has_minval ||
-      (a.has_minval && a.minval != b.minval) ||
-      a.has_maxval != b.has_maxval ||
-      (a.has_maxval && a.maxval != b.maxval) ||
-      a.has_maxchar != b.has_maxchar ||
-      (a.has_maxchar && a.maxchar != b.maxchar))
-    return false;
-  if (a.has_form != b.has_form ||
-      (a.has_form && a.form != b.form) ||
-      a.global_var != b.global_var || a.password != b.password)
-    return false;
-  if (a.has_scroll_height != b.has_scroll_height ||
-      (a.has_scroll_height && a.scroll_height != b.scroll_height) ||
-      a.has_scroll_width != b.has_scroll_width ||
-      (a.has_scroll_width && a.scroll_width != b.scroll_width))
-    return false;
-  if (!position_eq(a.position, b.position)) return false;
-  if (a.appearances.size() != b.appearances.size()) return false;
-  if (a.sounds.size() != b.sounds.size()) return false;
-  if (a.actions.size() != b.actions.size()) return false;
-  if (!string_eq(a.string_data, b.string_data)) return false;
-  if (!font_eq(a.font, b.font)) return false;
-  if (!frame_eq(a.frame, b.frame)) return false;
-  if (!items_eq(a.items, b.items)) return false;
-  if (!listbox_eq(a.list_box, b.list_box)) return false;
-  if (!spin_eq(a.spinup, b.spinup) || !spin_eq(a.spindown, b.spindown))
-    return false;
-  if (!cursor_eq(a.cursor, b.cursor)) return false;
-  if (a.text_rsrc != b.text_rsrc || a.datasource != b.datasource)
-    return false;
-  if (a.hotkeys.size() != b.hotkeys.size()) return false;
-  for (size_t i = 0; i < a.hotkeys.size(); ++i) {
-    if (a.hotkeys[i].value != b.hotkeys[i].value ||
-        a.hotkeys[i].virtual_key != b.hotkeys[i].virtual_key)
-      return false;
-  }
-
-  // Scroll/slider fields.
-  if (a.orientation != b.orientation) return false;
-  if (a.shuttle.size() != b.shuttle.size()) return false;
-  if (a.scrollup.size() != b.scrollup.size()) return false;
-  if (a.scrolldown.size() != b.scrolldown.size()) return false;
-  for (size_t i = 0; i < a.shuttle.size(); ++i)
-    if (!appearance_eq(a.shuttle[i], b.shuttle[i])) return false;
-  for (size_t i = 0; i < a.scrollup.size(); ++i)
-    if (!appearance_eq(a.scrollup[i], b.scrollup[i])) return false;
-  for (size_t i = 0; i < a.scrolldown.size(); ++i)
-    if (!appearance_eq(a.scrolldown[i], b.scrolldown[i])) return false;
-
-  // Table data.
-  if (!table_data_eq(a.table_data, b.table_data)) return false;
-
-  for (size_t i = 0; i < a.appearances.size(); ++i) {
-    if (!appearance_eq(a.appearances[i], b.appearances[i])) return false;
-  }
-  for (size_t i = 0; i < a.sounds.size(); ++i) {
-    if (!sound_eq(a.sounds[i], b.sounds[i])) return false;
-  }
-  for (size_t i = 0; i < a.actions.size(); ++i) {
-    if (!action_eq(a.actions[i], b.actions[i])) return false;
-  }
-  if (a.children.size() != b.children.size()) return false;
-  for (size_t i = 0; i < a.children.size(); ++i) {
-    if (!window_eq(a.children[i], b.children[i])) return false;
-  }
-  return true;
-}
-
-bool screen_eq(const opennova::mnu::Screen &a, const opennova::mnu::Screen &b) {
-  if (a.name != b.name ||
-      a.has_music_var != b.has_music_var ||
-      (a.has_music_var && a.music_var != b.music_var) ||
-      a.text_rsrc != b.text_rsrc || a.cursor_file != b.cursor_file ||
-      a.cursor_flags != b.cursor_flags) {
-    return false;
-  }
-  return window_eq(a.root_window, b.root_window);
-}
-
-// Test basic screen parsing.
-bool test_basic_screen() {
-  const std::string xml = R"(
-<SCREEN>
-  <NAME>STARTUP</NAME>
-  <MUSICVAR>1</MUSICVAR>
-  <WINDOW type="window" name="MAIN">
-  </WINDOW>
-</SCREEN>
-  )";
-  opennova::mnu::Document doc;
+bool parse(const std::string &xml, mnu::Document &doc, std::vector<mnu::ParseNote> *notes = nullptr) {
   std::string err;
-
-  CHECK(opennova::mnu::parse(xml, doc, err), "parse failed: " + err);
-  CHECK(doc.screens.size() == 1, "expected 1 screen");
-  CHECK(doc.screens[0].name == "STARTUP", "expected name STARTUP");
-  CHECK(doc.screens[0].music_var == 1, "expected music_var 1");
-  CHECK(doc.screens[0].root_window.name == "MAIN", "expected window MAIN");
-
+  if (!mnu::parse(xml, doc, err, notes)) {
+    std::cerr << "  parse: " << err << "\n";
+    return false;
+  }
   return true;
 }
 
-// Test position parsing.
-bool test_position() {
-  const std::string xml = R"(
-<SCREEN>
-  <NAME>TEST</NAME>
-  <WINDOW type="window" name="MAIN">
-    <POSITION>
-      <LEFT>10</LEFT>
-      <TOP>20</TOP>
-      <RIGHT>100</RIGHT>
-      <BOTTOM>200</BOTTOM>
-    </POSITION>
-  </WINDOW>
-</SCREEN>
-  )";
-  opennova::mnu::Document doc;
-  std::string err;
+// A note whose key ends with `suffix`.
+bool noted(const std::vector<mnu::ParseNote> &notes, const std::string &suffix) {
+  for (const mnu::ParseNote &n : notes)
+    if (n.key.size() >= suffix.size() && n.key.compare(n.key.size() - suffix.size(), suffix.size(), suffix) == 0)
+      return true;
+  return false;
+}
 
-  CHECK(opennova::mnu::parse(xml, doc, err), "parse failed: " + err);
+const mnu::Window &root(const mnu::Document &doc) { return doc.screens.at(0).roots.at(0); }
 
-  const auto& pos = doc.screens[0].root_window.position;
-  CHECK(pos.left == 10, "expected left=10");
-  CHECK(pos.top == 20, "expected top=20");
-  CHECK(pos.right == 100, "expected right=100");
-  CHECK(pos.bottom == 200, "expected bottom=200");
-  CHECK(pos.width() == 90, "expected width=90");
-  CHECK(pos.height() == 180, "expected height=180");
-
+// serialize -> parse -> serialize reproduces the bytes (the writer writes what the
+// reader reads back).
+bool fixed_point(const mnu::Document &doc) {
+  const std::string first = mnu::serialize(doc);
+  mnu::Document again;
+  std::vector<mnu::ParseNote> notes;
+  if (!parse(first, again, &notes)) return false;
+  if (!notes.empty()) {
+    std::cerr << "  the written menu reads with a note: " << notes[0].key << " " << notes[0].message << "\n";
+    return false;
+  }
+  if (mnu::serialize(again) != first) {
+    std::cerr << "  not a fixed point:\n" << first << "\n---\n" << mnu::serialize(again) << "\n";
+    return false;
+  }
   return true;
 }
 
-// Test font parsing.
-bool test_font() {
-  const std::string xml = R"(
-<SCREEN>
-  <NAME>TEST</NAME>
-  <WINDOW type="window" name="MAIN">
-    <FONT>
-      <NAME>Arial12b.fnt</NAME>
-      <DEFAULT_FG>FFFFFF</DEFAULT_FG>
-      <DEFAULT_BG>000000</DEFAULT_BG>
-      <MOUSEOVER_FG>FF0000</MOUSEOVER_FG>
-      <MOUSEOVER_BG>001100</MOUSEOVER_BG>
-      <SELECTED_FG>00FF00</SELECTED_FG>
-      <DISABLED_FG>808080</DISABLED_FG>
-    </FONT>
-  </WINDOW>
-</SCREEN>
-  )";
-  opennova::mnu::Document doc;
-  std::string err;
+// --- the screen [orig: CUIScene_ParseNodeAttributes @ 0x639630] -------------------
 
-  CHECK(opennova::mnu::parse(xml, doc, err), "parse failed: " + err);
-
-  const auto& font = doc.screens[0].root_window.font;
-  CHECK(font.name == "Arial12b.fnt", "font name mismatch");
-  CHECK(font.default_fg == "FFFFFF", "default_fg mismatch");
-  CHECK(font.default_bg == "000000", "default_bg mismatch");
-  CHECK(font.mouseover_fg == "FF0000", "mouseover_fg mismatch");
-  CHECK(font.mouseover_bg == "001100", "mouseover_bg mismatch");
-  CHECK(font.selected_fg == "00FF00", "selected_fg mismatch");
-  CHECK(font.disabled_fg == "808080", "disabled_fg mismatch");
-
+bool test_screen_reads_name_musicvar_windows() {
+  mnu::Document doc;
+  std::vector<mnu::ParseNote> notes;
+  CHECK(parse("<SCREEN NAME=\"ATTR\" MUSICVAR=\"9\"><NAME>ONE</NAME><MUSICVAR>2</MUSICVAR>"
+              "<TEXT_RSRC>screen.bin</TEXT_RSRC><CURSOR><FILE>s.tga</FILE></CURSOR>"
+              "<WINDOW type=\"window\" name=\"A\">" + std::string(kPos) + "</WINDOW>"
+              "<NAME>TWO</NAME><MUSICVAR>3</MUSICVAR>"
+              "<WINDOW type=\"window\" name=\"B\">" + std::string(kPos) + "</WINDOW></SCREEN>",
+              doc, &notes),
+        "parse");
+  const mnu::Screen &s = doc.screens[0];
+  CHECK(s.name == "TWO" && s.has_music_var && s.music_var == 3, "the last NAME and MUSICVAR win");
+  CHECK(s.roots.size() == 2 && s.roots[0].name == "A" && s.roots[1].name == "B", "every root, in order");
+  CHECK(noted(notes, "/SCREEN[0]@NAME") && noted(notes, "/SCREEN[0]@MUSICVAR"), "SCREEN attributes are noted");
+  CHECK(noted(notes, "/SCREEN[0]/TEXT_RSRC") && noted(notes, "/SCREEN[0]/CURSOR"), "SCREEN TEXT_RSRC and CURSOR");
+  CHECK(noted(notes, "/SCREEN[0]/NAME"), "the replaced NAME");
+  CHECK(fixed_point(doc), "fixed point");
+  // Duplicate screen names: the last one is found, as retail's newest-first walk does.
+  CHECK(parse("<SCREEN><NAME>X</NAME><MUSICVAR>1</MUSICVAR></SCREEN><SCREEN><NAME>x</NAME><MUSICVAR>2</MUSICVAR></SCREEN>",
+              doc),
+        "parse dup");
+  CHECK(doc.find_screen("X") && doc.find_screen("X")->music_var == 2, "find_screen: the last of the name");
+  // Only top-level SCREENs are read: a wrapper or an XML declaration holds everything.
+  CHECK(parse("<MNU><SCREEN><NAME>W</NAME></SCREEN></MNU>", doc, &notes) && doc.screens.empty() &&
+            noted(notes, "/MNU"),
+        "a wrapper element is not read");
+  CHECK(parse("<?xml version=\"1.0\"?><SCREEN><NAME>W</NAME></SCREEN>", doc) && doc.screens.empty(),
+        "after an XML declaration no screen loads");
   return true;
 }
 
-// Test appearance parsing.
-bool test_appearance() {
-  const std::string xml = R"(
-<SCREEN>
-  <NAME>TEST</NAME>
-  <WINDOW type="window" name="MAIN">
-    <APPEARANCE type="image" state="default">texture.tga</APPEARANCE>
-    <APPEARANCE type="custom" state="mouseover"></APPEARANCE>
-  </WINDOW>
-</SCREEN>
-  )";
-  opennova::mnu::Document doc;
-  std::string err;
-
-  CHECK(opennova::mnu::parse(xml, doc, err), "parse failed: " + err);
-
-  const auto& apps = doc.screens[0].root_window.appearances;
-  CHECK(apps.size() == 2, "expected 2 appearances");
-  CHECK(apps[0].type == "image", "type mismatch");
-  CHECK(apps[0].state == "default", "state mismatch");
-  CHECK(apps[0].value == "texture.tga", "value mismatch");
-  CHECK(apps[1].type == "custom", "type mismatch");
-  CHECK(apps[1].state == "mouseover", "state mismatch");
-
+// [orig: CUIScene_CreateWidgetByType @ 0x64f630] The first child element and the
+// last TYPE's first token; no TYPE or no child element creates nothing.
+bool test_window_creation() {
+  mnu::Document doc;
+  std::vector<mnu::ParseNote> notes;
+  CHECK(parse(screen_of("type=\"window\" name=\"R\"",
+                        std::string(kPos) + "<WINDOW name=\"NOTYPE\">" + kPos + "</WINDOW>"
+                        "<WINDOW type=\"static\" name=\"EMPTY\"></WINDOW>"
+                        "<WINDOW type=\"list\" type=\"STATIC\" name=\"TWO\">" + kPos + "</WINDOW>"
+                        "<WINDOW type='static' name=\"SQ\">" + kPos + "</WINDOW>"
+                        "<WINDOW type=\"combo\" name=\"ALIAS\">" + kPos + "</WINDOW>"),
+              doc, &notes),
+        "parse");
+  const mnu::Window &r = root(doc);
+  CHECK(r.children.size() == 3, "NOTYPE and EMPTY are not created");
+  CHECK(noted(notes, "WINDOW[NOTYPE]") && noted(notes, "WINDOW[EMPTY]"), "both are noted");
+  CHECK(r.children[0].type == mnu::WindowType::Static && r.children[0].type_token == "STATIC", "the last TYPE");
+  CHECK(r.children[1].type == mnu::WindowType::Window && r.children[1].type_token == "static'",
+        "a single-quoted keyword keeps its quote and never matches");
+  CHECK(r.children[2].type == mnu::WindowType::Window && r.children[2].type_token == "combo",
+        "an OpenNova-only alias builds a generic window, its token kept");
+  for (const char *alias : {"check", "combo", "spin", "multi", "map", "globe", "label", "goto", "marquee",
+                            "multilineedit", "window"})
+    CHECK(mnu::parse_window_type(alias) == mnu::WindowType::Window, std::string("alias ") + alias);
+  for (int i = 0; i < mnu::kWindowTypeCount; ++i) {
+    const auto t = static_cast<mnu::WindowType>(i);
+    CHECK(mnu::parse_window_type(mnu::window_type_name(t)) == t, "factory names round-trip");
+  }
+  CHECK(mnu::parse_window_type("MarQuee_Wnd") == mnu::WindowType::Marquee, "ignoring case");
   return true;
 }
 
-// Test sound parsing.
-bool test_sound() {
-  const std::string xml = R"(
-<SCREEN>
-  <NAME>TEST</NAME>
-  <WINDOW type="button" name="BTN">
-    <SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
-    <SOUND state="selected" trigger="CLICK_SELECT">click.lwf</SOUND>
-  </WINDOW>
-</SCREEN>
-  )";
-  opennova::mnu::Document doc;
-  std::string err;
-
-  CHECK(opennova::mnu::parse(xml, doc, err), "parse failed: " + err);
-
-  const auto& sounds = doc.screens[0].root_window.sounds;
-  CHECK(sounds.size() == 2, "expected 2 sounds");
-  CHECK(sounds[0].state == "mousein", "state mismatch");
-  CHECK(sounds[0].trigger == "MOUSE_OVER", "trigger mismatch");
-  CHECK(sounds[0].file == "menu.lwf", "file mismatch");
-  CHECK(sounds[1].file == "click.lwf", "file mismatch");
-
+// Flags are presence-only; DISABLE is the flag (DISABLED is not read); GROUP is a child
+// element; NAME and FORM are the first authored.
+bool test_window_attributes() {
+  mnu::Document doc;
+  std::vector<mnu::ParseNote> notes;
+  CHECK(parse(screen_of("type=\"radio\" name=\"A\" name=\"B\" HIDDEN=\"0\" DISABLED GROUP=\"4\" FORM=\"2\" FORM=\"5\" "
+                        "CHECKED=\"false\" MODAL",
+                        std::string(kPos) + "<GROUP>7</GROUP>"),
+              doc, &notes),
+        "parse");
+  const mnu::Window &w = root(doc);
+  CHECK(w.name == "A" && w.form == 2, "the first authored NAME and FORM");
+  CHECK(w.hidden && w.checked && w.modal, "presence flags, whatever their value");
+  CHECK(!w.disabled && noted(notes, "@DISABLED"), "DISABLED is not the flag");
+  CHECK(w.has_group && w.group == 7 && noted(notes, "@GROUP"), "GROUP: the element; the attribute noted");
+  CHECK(parse(screen_of("type=\"static\" name=\"X\" DISABLE", kPos), doc) && root(doc).disabled, "DISABLE");
+  const std::string out = mnu::serialize(doc);
+  CHECK(out.find(" DISABLE>") != std::string::npos && out.find("disabled") == std::string::npos, "written DISABLE");
   return true;
 }
 
-// Test action parsing.
-bool test_action() {
-  const std::string xml = R"(
-<SCREEN>
-  <NAME>TEST</NAME>
-  <WINDOW type="button" name="BTN">
-    <ACTION type="screen" file="sp.mnu">SINGLE_PLAYER</ACTION>
-    <ACTION type="window" state="SHOW" target="OPTIONS_PANEL"/>
-  </WINDOW>
-</SCREEN>
-  )";
-  opennova::mnu::Document doc;
-  std::string err;
-
-  CHECK(opennova::mnu::parse(xml, doc, err), "parse failed: " + err);
-
-  const auto& actions = doc.screens[0].root_window.actions;
-  CHECK(actions.size() == 2, "expected 2 actions");
-  CHECK(actions[0].type == "screen", "type mismatch");
-  CHECK(actions[0].file == "sp.mnu", "file mismatch");
-  CHECK(actions[0].target == "SINGLE_PLAYER", "target mismatch");
-  CHECK(actions[1].type == "window", "type mismatch");
-  CHECK(actions[1].state == "SHOW", "state mismatch");
-  CHECK(actions[1].target == "OPTIONS_PANEL", "target mismatch");
-
+// [orig: @ 0x648226 / 0x648909] An APPEARANCE with no attribute or no STATE retail
+// knows, or a SOUND without STATE and TRIGGER, ends the base parse: the elements after
+// it and the child windows are lost; the type's own elements (STRING) still read.
+bool test_base_parse_stops() {
+  mnu::Document doc;
+  std::vector<mnu::ParseNote> notes;
+  CHECK(parse(screen_of("type=\"static\" name=\"W\"",
+                        "<APPEARANCE type=\"image\" state=\"default\">a.tga</APPEARANCE>"
+                        "<WINDOW type=\"static\" name=\"EARLY\">" + std::string(kPos) + "</WINDOW>"
+                        "<APPEARANCE type=\"image\" state=\"hover\">b.tga</APPEARANCE>"
+                        "<POSITION><LEFT>5</LEFT></POSITION><STRING>kept</STRING>"
+                        "<WINDOW type=\"static\" name=\"LATE\">" + kPos + "</WINDOW>"),
+              doc, &notes),
+        "parse");
+  const mnu::Window &w = root(doc);
+  CHECK(w.appearances.size() == 1 && !w.position.has_left, "the rest of the base parse is lost");
+  CHECK(w.children.empty(), "no child window is created after the stop");
+  CHECK(w.string_data.present && w.string_data.value == "kept", "the type's STRING still reads");
+  CHECK(noted(notes, "/APPEARANCE") && noted(notes, "/POSITION") && noted(notes, "WINDOW[EARLY]"), "noted");
+  CHECK(parse(screen_of("type=\"static\" name=\"W\"",
+                        "<SOUND state=\"mousein\">menu.lwf</SOUND>" + std::string(kPos)),
+              doc, &notes) &&
+            root(doc).sounds.empty() && !root(doc).position.has_left,
+        "a SOUND with no TRIGGER");
+  CHECK(parse(screen_of("type=\"static\" name=\"W\"", "<APPEARANCE></APPEARANCE>" + std::string(kPos)), doc) &&
+            !root(doc).position.has_left,
+        "an APPEARANCE with no attribute");
+  CHECK(parse(screen_of("type=\"static\" name=\"W\"",
+                        "<SOUND state=\"SELECTED\" trigger=\"CLICK\" LOOP>c.lwf</SOUND>" + std::string(kPos)),
+              doc, &notes) &&
+            root(doc).sounds.size() == 1 && root(doc).sounds[0].file == "c.lwf" && noted(notes, "@LOOP"),
+        "LOOP has no effect and is noted");
   return true;
 }
 
-// Test string parsing.
-bool test_string() {
-  const std::string xml = R"(
-<SCREEN>
-  <NAME>TEST</NAME>
-  <WINDOW type="button" name="BTN">
-    <STRING type="id" justify="LEFT" vjustify="CENTER" edge="5">MM_Exit</STRING>
-  </WINDOW>
-</SCREEN>
-  )";
-  opennova::mnu::Document doc;
-  std::string err;
-
-  CHECK(opennova::mnu::parse(xml, doc, err), "parse failed: " + err);
-
-  const auto& str = doc.screens[0].root_window.string_data;
-  CHECK(str.type == "id", "type mismatch");
-  CHECK(str.justify == "LEFT", "justify mismatch");
-  CHECK(str.vjustify == "CENTER", "vjustify mismatch");
-  CHECK(str.edge == 5, "edge mismatch");
-  CHECK(str.value == "MM_Exit", "value mismatch");
-
+// Element text is kept whole: no trim, no collapse; entities decode in text only.
+bool test_text_rules() {
+  mnu::Document doc;
+  CHECK(parse(screen_of("type=\"static\" name=\"W&amp;\"",
+                        std::string(kPos) + "<STRING type=\"id\">  KEY \r\n</STRING><HOTKEY> V</HOTKEY>"
+                        "<APPEARANCE type=\"image\" state=\"default\">a&amp;b&#233;.tga</APPEARANCE>"),
+              doc),
+        "parse");
+  const mnu::Window &w = root(doc);
+  CHECK(w.name == "W&amp;", "attributes are raw");
+  CHECK(w.string_data.value == "  KEY \r\n", "untrimmed text");
+  CHECK(w.hotkeys[0].value == " V", "an untrimmed HOTKEY");
+  // &#233; is U+FFE9 to retail's reader; a code-page menu narrows it as every retail
+  // consumer does (WideCharToMultiByte on 1252): '?'.
+  CHECK(w.appearances[0].value == "a&b?.tga", "decoded text, the numeric entity narrowed");
+  CHECK(fixed_point(doc), "fixed point");
   return true;
 }
 
-// Test cursor parsing.
-bool test_cursor() {
-  const std::string xml = R"(
-<SCREEN>
-  <NAME>TEST</NAME>
-  <WINDOW type="window" name="MAIN">
-    <CURSOR>
-      <FILE>newarow1.tga</FILE>
-      <FLAGS>STANDARD_TRANSPARENT</FLAGS>
-    </CURSOR>
-  </WINDOW>
-</SCREEN>
-  )";
-  opennova::mnu::Document doc;
-  std::string err;
-
-  CHECK(opennova::mnu::parse(xml, doc, err), "parse failed: " + err);
-
-  // Cursor in root window is extracted to screen level.
-  CHECK(doc.screens[0].cursor_file == "newarow1.tga", "cursor file mismatch");
-  CHECK(doc.screens[0].cursor_flags == "STANDARD_TRANSPARENT",
-        "cursor flags mismatch");
-
+// [orig: @ 0x648ae6] POSITION's edges are child elements read in order.
+bool test_position_rules() {
+  mnu::Document doc;
+  std::vector<mnu::ParseNote> notes;
+  CHECK(parse(screen_of("type=\"static\" name=\"W\"",
+                        "<POSITION left=\"9\"><WIDTH>100</WIDTH><ULX>10</ULX><ULY>20</ULY><HEIGHT>40</HEIGHT>"
+                        "</POSITION><POSITION><TOP>30</TOP></POSITION>"),
+              doc, &notes),
+        "parse");
+  const mnu::Position &p = root(doc).position;
+  CHECK(p.left == 10 && p.right == 100, "WIDTH adds to the left as it stood (0)");
+  CHECK(p.top == 30 && p.bottom == 60, "a second POSITION reads into the same fields");
+  CHECK(noted(notes, "/POSITION@LEFT"), "POSITION attributes are noted");
+  const std::string out = mnu::serialize(doc);
+  CHECK(out.find("<RIGHT>100</RIGHT>") != std::string::npos && out.find("WIDTH") == std::string::npos,
+        "written as LEFT/TOP/RIGHT/BOTTOM");
   return true;
 }
 
-// An unmodelled TYPE token must survive parse -> serialize verbatim: the
-// original engine maps it to a generic CWnd and keeps going [orig:
-// CUIScene_CreateWidgetByType @ 0x64f630], so rewriting it (the old behavior
-// emitted "unknown") corrupts a menu the real engine still understands.
-bool test_unknown_type_token_roundtrip() {
-  const std::string xml = R"(
-<SCREEN>
-  <NAME>S</NAME>
-  <WINDOW type="window" name="ROOT">
-    <WINDOW type="FUTURE_WIDGET" name="MYSTERY">
-      <POSITION left="1" top="2" right="3" bottom="4"></POSITION>
-    </WINDOW>
-    <WINDOW type="GLB_TABLE" name="BROWSER">
-    </WINDOW>
-  </WINDOW>
-</SCREEN>
-  )";
-  opennova::mnu::Document doc;
-  std::string err;
-  CHECK(opennova::mnu::parse(xml, doc, err), "parse failed: " + err);
-  const opennova::mnu::Window &root = doc.screens[0].root_window;
-  CHECK(root.children.size() == 2, "expected 2 children");
-  CHECK(root.children[0].type == opennova::mnu::WindowType::Unknown,
-        "FUTURE_WIDGET maps to Unknown (generic CWnd analogue)");
-  CHECK(root.children[0].type_token == "FUTURE_WIDGET",
-        "raw token preserved on the window");
-  CHECK(root.children[1].type == opennova::mnu::WindowType::GlbTable,
-        "GLB_TABLE is a typed factory token");
-
-  const std::string out = opennova::mnu::serialize(doc);
-  CHECK(out.find("FUTURE_WIDGET") != std::string::npos,
-        "unknown token survives serialization verbatim");
-  CHECK(out.find("\"unknown\"") == std::string::npos,
-        "no window degrades to type=\"unknown\"");
-  CHECK(out.find("GLB_TABLE") != std::string::npos,
-        "GLB_TABLE authored casing survives via the token");
-
-  // Idempotence: a second pass parses back to the same shape.
-  opennova::mnu::Document doc2;
-  CHECK(opennova::mnu::parse(out, doc2, err), "re-parse failed: " + err);
-  CHECK(doc2.screens[0].root_window.children[0].type_token == "FUTURE_WIDGET",
-        "token stable across round-trips");
-
+// [orig: @ 0x648ee2] The target is the text; FIELD/SOURCE/NAME share a slot (the first
+// authored); flags by presence; rows kept in document order.
+bool test_action_rules() {
+  mnu::Document doc;
+  std::vector<mnu::ParseNote> notes;
+  CHECK(parse(screen_of("type=\"button\" name=\"B\"",
+                        std::string(kPos) +
+                            "<ACTION type=\"WINDOW\" state=\"SHOW\" target=\"ATTR\" TOGGLE=\"0\">PANEL</ACTION>"
+                            "<ACTION type=\"URL\" SOURCE=\"s\" FIELD=\"f\" EXTERNAL_BROWSER=\"0\"> addr </ACTION>"
+                            "<ACTION type=\"FLY\" test=\"GE\">X</ACTION>"),
+              doc, &notes),
+        "parse");
+  const auto &a = root(doc).actions;
+  CHECK(a.size() == 3, "every row");
+  CHECK(a[0].target == "PANEL" && a[0].toggle && noted(notes, "/ACTION@TARGET"), "the text; TARGET noted");
+  CHECK(a[1].field == "s" && a[1].field_attr == "SOURCE" && a[1].external_browser && a[1].target == " addr ",
+        "one slot, the first authored; EXTERNAL_BROWSER by presence; the text untrimmed");
+  CHECK(noted(notes, "/ACTION@FIELD"), "the second of the slot is noted");
+  CHECK(a[2].type == "FLY" && a[2].test == "GE", "an unknown TYPE is kept (code 0 at runtime)");
+  CHECK(fixed_point(doc), "fixed point");
   return true;
 }
 
-// Test window type parsing.
-bool test_window_types() {
-  CHECK(opennova::mnu::parse_window_type("window") == opennova::mnu::WindowType::Window,
-        "window type");
-  CHECK(opennova::mnu::parse_window_type("WINDOW") == opennova::mnu::WindowType::Window,
-        "WINDOW type");
-  CHECK(opennova::mnu::parse_window_type("button") == opennova::mnu::WindowType::Button,
-        "button type");
-  CHECK(opennova::mnu::parse_window_type("static") == opennova::mnu::WindowType::Static,
-        "static type");
-  CHECK(opennova::mnu::parse_window_type("edit") == opennova::mnu::WindowType::Edit, "edit type");
-  CHECK(opennova::mnu::parse_window_type("list") == opennova::mnu::WindowType::List, "list type");
-  CHECK(opennova::mnu::parse_window_type("checkbox") == opennova::mnu::WindowType::CheckBox,
-        "checkbox type");
-  CHECK(opennova::mnu::parse_window_type("radio") == opennova::mnu::WindowType::Radio,
-        "radio type");
-  CHECK(opennova::mnu::parse_window_type("combo") == opennova::mnu::WindowType::Combo,
-        "combo type");
-  CHECK(opennova::mnu::parse_window_type("spinlist") == opennova::mnu::WindowType::SpinList,
-        "spinlist type");
-  CHECK(opennova::mnu::parse_window_type("unknown_type") == opennova::mnu::WindowType::Unknown,
-        "unknown type");
+// STRING (WRAP, the repeated merge), TOGGLE_STRING, PRIVATE_DATA, FONT and CURSOR.
+bool test_text_elements() {
+  mnu::Document doc;
+  std::vector<mnu::ParseNote> notes;
+  CHECK(parse(screen_of("type=\"button\" name=\"B\"",
+                        std::string(kPos) +
+                            "<STRING type=\"ID\" justify=\"RIGHT\" edge=\"3\">FIRST</STRING>"
+                            "<STRING WRAP>SECOND</STRING>"
+                            "<TOGGLE_STRING type=\"id\">ALT</TOGGLE_STRING><PRIVATE_DATA>p1</PRIVATE_DATA>"
+                            "<FONT name=\"attr.fnt\"><NAME>a.fnt</NAME></FONT><FONT><DEFAULT_FG>FF0000</DEFAULT_FG></FONT>"
+                            "<CURSOR file=\"x.tga\"><FILE>c.tga</FILE></CURSOR>"),
+              doc, &notes),
+        "parse");
+  const mnu::Window &w = root(doc);
+  CHECK(w.string_data.value == "SECOND" && w.string_data.type.empty(), "the last text, TYPE reset");
+  CHECK(w.string_data.justify == "RIGHT" && w.string_data.edge == 3 && w.string_data.wrap,
+        "JUSTIFY and EDGE carry over; WRAP");
+  CHECK(w.toggle_string.present && w.toggle_string.type == "id" && w.toggle_string.value == "ALT", "TOGGLE_STRING");
+  CHECK(w.private_data == "p1", "PRIVATE_DATA");
+  CHECK(w.font.name == "a.fnt" && w.font.default_fg == "FF0000", "FONTs merge");
+  CHECK(noted(notes, "/FONT@NAME") && noted(notes, "/CURSOR@FILE"), "attribute forms are noted");
+  CHECK(w.cursor.file == "c.tga", "CURSOR FILE");
+  CHECK(fixed_point(doc), "fixed point");
+  return true;
+}
 
-  // Shipped-content aliases: pin the parse table so a rename can't silently route
-  // a real widget type to Unknown/placeholder (combobox/marquee_wnd appear in the
-  // committed fixtures; the rest are exercised by the full corpus).
-  CHECK(opennova::mnu::parse_window_type("combobox") == opennova::mnu::WindowType::Combo,
-        "combobox alias -> Combo");
-  CHECK(opennova::mnu::parse_window_type("marquee_wnd") == opennova::mnu::WindowType::Marquee,
-        "marquee_wnd -> Marquee");
-  CHECK(opennova::mnu::parse_window_type("multiline_edit") == opennova::mnu::WindowType::MultilineEdit,
-        "multiline_edit -> MultilineEdit");
-  CHECK(opennova::mnu::parse_window_type("multi") == opennova::mnu::WindowType::Multi, "multi type");
-  CHECK(opennova::mnu::parse_window_type("scroll") == opennova::mnu::WindowType::Scroll, "scroll type");
-  CHECK(opennova::mnu::parse_window_type("table") == opennova::mnu::WindowType::Table, "table type");
-  CHECK(opennova::mnu::parse_window_type("map") == opennova::mnu::WindowType::Map, "map type");
-  CHECK(opennova::mnu::parse_window_type("globe") == opennova::mnu::WindowType::Globe, "globe type");
-  CHECK(opennova::mnu::parse_window_type("goto") == opennova::mnu::WindowType::Goto, "goto type");
+// SPINUP / SPINDOWN / LIST_BOX / SCROLLBAR are whole windows of their owner's embedded
+// widget; an empty one crashes retail and is left out; a repeated one merges.
+bool test_parts() {
+  mnu::Document doc;
+  std::vector<mnu::ParseNote> notes;
+  CHECK(parse(screen_of("type=\"spinlist\" name=\"SP\"",
+                        std::string(kPos) +
+                            "<SPINUP NAME=\"UP\" type=\"static\"><POSITION><LEFT>1</LEFT></POSITION>"
+                            "<APPEARANCE type=\"image\" state=\"default\" map_state=\"0\" height=\"24\">r.tga</APPEARANCE>"
+                            "<STRING>+</STRING><FONT><NAME>f.fnt</NAME></FONT><SOUND state=\"SELECTED\" "
+                            "trigger=\"CLICK\">c.lwf</SOUND><HOTKEY>u</HOTKEY>"
+                            "<WINDOW type=\"static\" name=\"IN\">" + kPos + "</WINDOW></SPINUP>"
+                            "<SPINUP><TOGGLE_STRING>T</TOGGLE_STRING></SPINUP><SPINDOWN></SPINDOWN>"),
+              doc, &notes),
+        "parse");
+  const mnu::Window &w = root(doc);
+  CHECK(w.spinup && w.spinup->type == mnu::WindowType::Button && w.spinup->name == "UP", "a button part");
+  CHECK(w.spinup->string_data.value == "+" && w.spinup->font.name == "f.fnt" && w.spinup->sounds.size() == 1 &&
+            w.spinup->hotkeys.size() == 1 && w.spinup->children.size() == 1,
+        "everything a button reads");
+  CHECK(w.spinup->toggle_string.value == "T", "a repeated SPINUP merges");
+  CHECK(!w.spindown && noted(notes, "/SPINDOWN"), "an empty SPINDOWN is left out");
+  CHECK(noted(notes, "/SPINUP@TYPE"), "a part's TYPE is noted");
+  CHECK(fixed_point(doc), "fixed point");
 
-  // The four remaining factory tokens [orig: CUIScene_CreateWidgetByType
-  // @ 0x64f630] now carry typed identity (runtime behavior still a container).
-  CHECK(opennova::mnu::parse_window_type("GLB_TABLE") == opennova::mnu::WindowType::GlbTable,
-        "GLB_TABLE -> GlbTable");
-  CHECK(opennova::mnu::parse_window_type("RADIOEDIT") == opennova::mnu::WindowType::RadioEdit,
-        "RADIOEDIT -> RadioEdit");
-  CHECK(opennova::mnu::parse_window_type("LAN_LIST") == opennova::mnu::WindowType::LanList,
-        "LAN_LIST -> LanList");
-  CHECK(opennova::mnu::parse_window_type("GOPHER") == opennova::mnu::WindowType::Gopher,
-        "GOPHER -> Gopher");
+  CHECK(parse(screen_of("type=\"combobox\" name=\"C\"",
+                        std::string(kPos) +
+                            "<LIST_BOX sb_edge_pad=\"21\" HIDDEN><POSITION><TOP>20</TOP></POSITION>"
+                            "<ITEMS MULTISELECT><ITEM PAIRS_LIST justify=\"LEFT\" value=\"2\">row</ITEM></ITEMS>"
+                            "<MIN_ITEM_HEIGHT>18</MIN_ITEM_HEIGHT>"
+                            "<SCROLLBAR><ORIENTATION>HORIZONTAL</ORIENTATION><WIDTH>12</WIDTH>"
+                            "<SHUTTLE type=\"image\" state=\"default\">s.tga</SHUTTLE>"
+                            "<SCROLLLEFT type=\"image\" state=\"default\">l.tga</SCROLLLEFT></SCROLLBAR></LIST_BOX>"),
+              doc),
+        "parse combo");
+  const mnu::Window &c = root(doc);
+  CHECK(c.has_sb_edge_pad && c.sb_edge_pad == 21, "sb_edge_pad is the combo's");
+  CHECK(c.list_box && c.list_box->type == mnu::WindowType::List && c.list_box->hidden, "a list part");
+  CHECK(c.list_box->items.multiselect && c.list_box->items.items[0].pairs_list &&
+            c.list_box->items.items[0].justify == "LEFT",
+        "ITEMS and ITEM attributes");
+  CHECK(c.list_box->table_data.min_item_height == 18, "MIN_ITEM_HEIGHT on the list");
+  const mnu::WindowPart &bar = c.list_box->scrollbar;
+  CHECK(bar && bar->orientation == "HORIZONTAL" && bar->has_scroll_extent && bar->scroll_extent == 12 &&
+            bar->scroll_extent_is_width,
+        "a scroll part");
+  CHECK(bar->shuttle.size() == 1 && bar->scrollup.size() == 1, "SCROLLLEFT reads as SCROLLUP");
+  CHECK(fixed_point(doc), "fixed point");
+  return true;
+}
 
-  // Every type's serialized name must re-parse to the same type, locking the
-  // Combo->"combobox"->Combo style remaps.
-  const opennova::mnu::WindowType all[] = {
-      opennova::mnu::WindowType::Window,   opennova::mnu::WindowType::Static,
-      opennova::mnu::WindowType::Button,   opennova::mnu::WindowType::Edit,
-      opennova::mnu::WindowType::MultilineEdit, opennova::mnu::WindowType::List,
-      opennova::mnu::WindowType::CheckBox, opennova::mnu::WindowType::Radio,
-      opennova::mnu::WindowType::Combo,    opennova::mnu::WindowType::Scroll,
-      opennova::mnu::WindowType::Table,    opennova::mnu::WindowType::SpinList,
-      opennova::mnu::WindowType::Multi,    opennova::mnu::WindowType::Map,
-      opennova::mnu::WindowType::Globe,    opennova::mnu::WindowType::Label,
-      opennova::mnu::WindowType::Goto,     opennova::mnu::WindowType::Marquee,
-      opennova::mnu::WindowType::GlbTable, opennova::mnu::WindowType::RadioEdit,
-      opennova::mnu::WindowType::LanList,  opennova::mnu::WindowType::Gopher,
+// [orig: CUIScrollWidget_ParseExtendedXMLDef @ 0x64c6d0] One HEIGHT/WIDTH slot (the
+// last); a part row with no STATE ends a SCROLL's own parse.
+bool test_scroll_rules() {
+  mnu::Document doc;
+  std::vector<mnu::ParseNote> notes;
+  CHECK(parse(screen_of("type=\"scroll\" name=\"S\"",
+                        std::string(kPos) + "<HEIGHT>9</HEIGHT><WIDTH>14</WIDTH>"
+                        "<SHUTTLE type=\"image\" state=\"default\">a.tga</SHUTTLE>"
+                        "<SCROLLUP type=\"image\">b.tga</SCROLLUP><ORIENTATION>HORIZONTAL</ORIENTATION>"),
+              doc, &notes),
+        "parse");
+  const mnu::Window &w = root(doc);
+  CHECK(w.has_scroll_extent && w.scroll_extent == 14 && w.scroll_extent_is_width, "the last of HEIGHT/WIDTH");
+  CHECK(w.shuttle.size() == 1 && w.scrollup.empty() && w.orientation.empty(), "the stop");
+  CHECK(noted(notes, "/SCROLLUP") && noted(notes, "/ORIENTATION") && noted(notes, "/HEIGHT"), "noted");
+  return true;
+}
+
+// [orig: CListWnd_ParseXMLDefinition @ 0x645770; CTableWnd_ParseXMLContentDefinition
+// @ 0x6427d0] An ITEMS APPEARANCE with no STATE ends a LIST's or a TABLE's own parse.
+bool test_list_rules() {
+  mnu::Document doc;
+  std::vector<mnu::ParseNote> notes;
+  CHECK(parse(screen_of("type=\"list\" name=\"L\"",
+                        std::string(kPos) + "<ITEMS><ITEM>a</ITEM><APPEARANCE type=\"color\">FF</APPEARANCE>"
+                        "<ITEM>b</ITEM></ITEMS><MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>"),
+              doc, &notes),
+        "parse");
+  CHECK(root(doc).items.items.size() == 1 && !root(doc).table_data.has_min_item_height, "the list parse ends");
+  CHECK(noted(notes, "/ITEMS/APPEARANCE") && noted(notes, "/MIN_ITEM_HEIGHT"), "noted");
+  // Any other type keeps the row as authored (it reads no ITEMS APPEARANCE).
+  CHECK(parse(screen_of("type=\"spinlist\" name=\"L\"",
+                        std::string(kPos) + "<ITEMS><APPEARANCE type=\"color\">FF</APPEARANCE><ITEM>b</ITEM></ITEMS>"),
+              doc) &&
+            root(doc).items.appearances.size() == 1 && root(doc).items.items.size() == 1,
+        "a spin list keeps it");
+  return true;
+}
+
+// TABLE: the running COLUMN index is written in; a HEADER past COUNT is noted; the
+// draw kind keeps its first authored flag; ROW cells; IMAGEROW; a second COLUMN.
+bool test_table_rules() {
+  mnu::Document doc;
+  std::vector<mnu::ParseNote> notes;
+  CHECK(parse(screen_of("type=\"table\" name=\"T\"",
+                        std::string(kPos) +
+                            "<COLUMN count=\"2\" spacing=\"3\"><HEADER column=\"1\" width=\"50\" sort=\"A\" PRIMARY_SORT "
+                            "type=\"id\">One</HEADER><BODY CUSTOM_DRAW BITMAP_DRAW BITMAP_FLAGS=\"STANDARD\"></BODY>"
+                            "<SUBST value=\"1\" URL>http://x</SUBST><HEADER column=\"2\">Past</HEADER></COLUMN>"
+                            "<COLUMN count=\"1\"></COLUMN>"
+                            "<ITEMS MULTISELECT><APPEARANCE type=\"IMAGEROW\" state=\"selected\">row.tga</APPEARANCE>"
+                            "<ROW><ITEM column=\"1\" type=\"BITMAP\" value=\"4\">cell.tga</ITEM></ROW></ITEMS>"
+                            "<FIXED_HEADER_HEIGHT>22</FIXED_HEADER_HEIGHT><MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT>"),
+              doc, &notes),
+        "parse");
+  const mnu::Window &w = root(doc);
+  const mnu::TableColumn &c = w.table_data.column;
+  CHECK(c.count == 2 && c.spacing == 3 && c.headers.size() == 2, "COLUMN");
+  CHECK(c.headers[0].width == 50 && c.headers[0].sort == "A", "HEADER");
+  // PRIMARY_SORT authored after the HEADER's COLUMN: the walk (last authored first)
+  // meets it while the running index is still 0 [orig: @ 0x643240 / 0x64325f].
+  CHECK(c.primary_sort == 0 && c.primary_sort_token == "PRIMARY_SORT" && c.secondary_sort == -1,
+        "a sort key takes the index as the walk stands");
+  CHECK(c.bodies[0].has_column && c.bodies[0].column == 1, "BODY takes the running index");
+  CHECK(c.bodies[0].display == "CUSTOM_DRAW" && c.bodies[0].bitmap_draw, "the first authored draw kind");
+  CHECK(c.substitutions[0].column == 1 && c.substitutions[0].is_url, "SUBST URL");
+  CHECK(noted(notes, "/COLUMN/HEADER") && noted(notes, "/COLUMN"), "HEADER past COUNT, the second COLUMN");
+  CHECK(w.items.rows.size() == 1 && w.items.rows[0].cells[0].column == 1 && w.items.rows[0].cells[0].type == "BITMAP",
+        "ROW cells");
+  CHECK(w.items.appearances[0].type == "IMAGEROW", "IMAGEROW");
+  CHECK(w.table_data.has_fixed_header_height && w.table_data.fixed_header_height == 22, "FIXED_HEADER_HEIGHT");
+  // A table MIN_ITEM_HEIGHT of 0 divides by zero in retail: the writer refuses it.
+  const auto issues = mnu::write_issues(doc);
+  CHECK(!issues.empty() && issues[0].field == "min_item_height" && issues[0].locator == "0/window:0",
+        "MIN_ITEM_HEIGHT 0 is a write issue");
+  mnu::Document ok = doc;
+  ok.screens[0].roots[0].table_data.min_item_height = 20;
+  ok.screens[0].roots[0].table_data.column.headers.pop_back(); // the one past COUNT reads with its note
+  CHECK(fixed_point(ok), "fixed point");
+  CHECK(mnu::serialize(ok).find("column=\"1\" PRIMARY_SORT") != std::string::npos,
+        "the key is written after COLUMN, where it reads the index before it");
+  return true;
+}
+
+// [orig: CTableWnd_ParseXMLContentDefinition @ 0x6427d0] A key authored before the
+// HEADER's COLUMN takes that HEADER's index; the last write wins; WIDTH (100 at the
+// COLUMN element) and SORT carry from HEADER to HEADER; no COUNT leaves one column.
+bool test_table_header_walk() {
+  mnu::Document doc;
+  std::vector<mnu::ParseNote> notes;
+  CHECK(parse(screen_of("type=\"table\" name=\"T\"",
+                        std::string(kPos) +
+                            "<COLUMN count=\"0\" count=\"4\"><HEADER>A</HEADER>"
+                            "<HEADER SECONDARY_SORT column=\"1\" width=\"60\" sort=\"1\">B</HEADER>"
+                            "<HEADER column=\"2\" DEFAULT_SORT>C</HEADER>"
+                            "<HEADER TERTIARY_SORT column=\"3\" sort=\"x\">D</HEADER>"
+                            "<HEADER SECONDARY_SORT column=\"3\" sort=\"a\" width=\"0\">E</HEADER></COLUMN>"),
+              doc, &notes),
+        "parse");
+  const mnu::TableColumn &c = root(doc).table_data.column;
+  CHECK(c.count == 4 && noted(notes, "/COLUMN@COUNT"), "the first COUNT of 1 or more; the other noted");
+  CHECK(c.primary_sort == 1 && c.primary_sort_token == "DEFAULT_SORT", "after COLUMN: the index before it");
+  CHECK(c.secondary_sort == 3 && c.tertiary_sort == 3, "before COLUMN: the HEADER's own; the last write wins");
+  CHECK(noted(notes, "/HEADER@SECONDARY_SORT"), "the replaced key is noted");
+  const std::vector<mnu::TableHeaderSetup> setup = mnu::table_header_setup(c);
+  CHECK(setup.size() == 5 && setup[0].column == 0 && setup[0].width == 100 && !setup[0].numeric_sort,
+        "100 and the text compare at the COLUMN element");
+  CHECK(setup[1].column == 1 && setup[1].width == 60 && setup[1].numeric_sort, "authored");
+  CHECK(setup[2].width == 60 && setup[2].numeric_sort && setup[3].numeric_sort, "carried (an unknown SORT keeps it)");
+  CHECK(setup[4].width == 0 && !setup[4].numeric_sort, "'a' is the text compare; WIDTH 0 is authored");
+  CHECK(fixed_point(doc), "fixed point");
+  mnu::Document written;
+  std::vector<mnu::ParseNote> again;
+  CHECK(parse(mnu::serialize(doc), written, &again), "reparse");
+  const mnu::TableColumn &w = root(written).table_data.column;
+  CHECK(w.primary_sort == 1 && w.secondary_sort == 3 && w.tertiary_sort == 3, "the keys read back");
+  CHECK(mnu::table_header_setup(w)[2].width == 60, "the carried width reads back");
+  // No COUNT: the table keeps its one column, so index 1 is not set up.
+  CHECK(parse(screen_of("type=\"table\" name=\"T\"",
+                        std::string(kPos) + "<COLUMN><HEADER column=\"0\">A</HEADER><HEADER column=\"1\">B</HEADER>"
+                                            "</COLUMN>"),
+              doc, &notes),
+        "parse no COUNT");
+  const std::vector<mnu::TableHeaderSetup> one = mnu::table_header_setup(root(doc).table_data.column);
+  CHECK(one[0].set_up && !one[1].set_up && noted(notes, "/HEADER"), "one column without a COUNT");
+  // A key no HEADER's index reaches cannot be written.
+  mnu::Document bad = doc;
+  bad.screens[0].roots[0].table_data.column.primary_sort = 7;
+  CHECK(!mnu::write_issues(bad).empty(), "an unplaceable sort key");
+  return true;
+}
+
+// An ORIENTATION only ever sets horizontal; every DATASOURCE loads; an empty TEXT_RSRC
+// is a table.
+bool test_repeated_type_elements() {
+  mnu::Document doc;
+  std::vector<mnu::ParseNote> notes;
+  CHECK(parse(screen_of("type=\"scroll\" name=\"S\"",
+                        std::string(kPos) + "<ORIENTATION>VERTICAL</ORIENTATION><ORIENTATION>horizontal"
+                                            "</ORIENTATION><ORIENTATION>VERTICAL</ORIENTATION>"),
+              doc, &notes),
+        "parse");
+  CHECK(root(doc).orientation == "horizontal" && noted(notes, "/ORIENTATION"), "any HORIZONTAL decides");
+  CHECK(parse(screen_of("type=\"marquee_wnd\" name=\"M\"",
+                        std::string(kPos) + "<DATASOURCE>a.kda</DATASOURCE><DATASOURCE>b.kda</DATASOURCE>"
+                                            "<TEXT_RSRC></TEXT_RSRC>"),
+              doc, &notes),
+        "parse marquee");
+  const mnu::Window &m = root(doc);
+  CHECK(m.datasources == std::vector<std::string>({"a.kda", "b.kda"}) && notes.empty(), "every DATASOURCE");
+  CHECK(m.has_text_rsrc && m.text_rsrc.empty(), "an empty TEXT_RSRC is kept");
+  CHECK(mnu::serialize(doc).find("<TEXT_RSRC></TEXT_RSRC>") != std::string::npos, "and written");
+  CHECK(fixed_point(doc), "fixed point");
+  return true;
+}
+
+// What retail crashes or hangs on is a fatal note, where retail reads it.
+bool test_fatal_notes() {
+  auto fatal = [](const std::string &xml, const std::string &suffix) {
+    mnu::Document doc;
+    std::vector<mnu::ParseNote> notes;
+    std::string error;
+    if (!mnu::parse(xml, doc, error, &notes)) return -1;
+    for (const mnu::ParseNote &n : notes)
+      if (n.key.size() >= suffix.size() && n.key.compare(n.key.size() - suffix.size(), suffix.size(), suffix) == 0)
+        return n.fatal ? 1 : 0;
+    return -2;
   };
-  for (opennova::mnu::WindowType t : all) {
-    CHECK(opennova::mnu::parse_window_type(opennova::mnu::window_type_name(t)) == t,
-          std::string("type name round-trips: ") + opennova::mnu::window_type_name(t));
+  CHECK(fatal(screen_of("type=\"button\" name=\"B\"", std::string(kPos) + "<ACTION type=\"\">X</ACTION>"),
+              "/ACTION@TYPE") == 1,
+        "an empty ACTION TYPE");
+  CHECK(fatal(screen_of("type=\"button\" name=\"B\"",
+                        std::string(kPos) + "<ACTION type=\"URL\" FIELD=\"f\" SOURCE=\"\">X</ACTION>"),
+              "/ACTION@SOURCE") == 1,
+        "an empty slot attribute retail walks past");
+  CHECK(fatal(screen_of("type=\"spinlist\" name=\"S\"", std::string(kPos) + "<SPINDOWN></SPINDOWN>"), "/SPINDOWN") ==
+            1,
+        "an empty part its owner reads");
+  CHECK(fatal(screen_of("type=\"static\" name=\"S\"", std::string(kPos) + "<SPINDOWN></SPINDOWN>"), "/SPINDOWN") ==
+            0,
+        "an empty part its owner does not read");
+  CHECK(fatal(screen_of("type=\"edit\" name=\"E\" MAXCHAR=\"\"", kPos), "@MAXCHAR") == 1, "MAXCHAR on an edit");
+  CHECK(fatal(screen_of("type=\"combobox\" name=\"C\" MAXCHAR=\"\"", kPos), "@MAXCHAR") == 0,
+        "MAXCHAR on a combo (not read)");
+  CHECK(fatal(screen_of("type=\"window\" name=\"W\"", std::string(kPos) + "<STRING justify=\"\">x</STRING>"),
+              "/STRING@JUSTIFY") == 0,
+        "STRING on a generic window (not read)");
+  CHECK(fatal("<SCREEN><NAME>S</NAME><WINDOW type=\"\" name=\"W\">" + std::string(kPos) + "</WINDOW></SCREEN>",
+              "WINDOW[W]") == 1,
+        "a WINDOW with an empty TYPE");
+  CHECK(fatal("<SCREEN><NAME>S</NAME><MUSICVAR></MUSICVAR></SCREEN>", "/MUSICVAR") == 1, "an empty MUSICVAR");
+  CHECK(fatal(screen_of("type=\"static\" name=\"W\"", std::string(kPos) + "<GROUP>1</GROUP>"), "/GROUP") == -2,
+        "a note-free menu");
+  // A number holding a stylesheet variable: retail reads the variable's value, the model
+  // only the number wcstol reads here, so a save would lose it (D-MNU-1).
+  CHECK(fatal(screen_of("type=\"static\" name=\"W\"", "<POSITION><LEFT>%X%</LEFT></POSITION>"),
+              "/POSITION/LEFT") == 1,
+        "a POSITION edge holding a variable");
+  CHECK(fatal(screen_of("type=\"static\" name=\"W\"", "<POSITION><LEFT>1%X% </LEFT></POSITION>"),
+              "/POSITION/LEFT") == 1,
+        "a variable inside a POSITION edge");
+  CHECK(fatal(screen_of("type=\"edit\" name=\"E\" MAXCHAR=\"%X%\"", kPos), "@MAXCHAR") == 1,
+        "an attribute number holding a variable");
+  CHECK(fatal(screen_of("type=\"combobox\" name=\"C\" MAXCHAR=\"%X%\"", kPos), "@MAXCHAR") == 0,
+        "a variable in a number retail does not read there");
+  CHECK(fatal("<SCREEN><NAME>S</NAME><MUSICVAR>%X%</MUSICVAR></SCREEN>", "/MUSICVAR") == 1,
+        "a MUSICVAR holding a variable");
+  CHECK(fatal(screen_of("type=\"static\" name=\"W\"", "<POSITION><LEFT>50%</LEFT><TOP>%A B%</TOP></POSITION>"),
+              "/POSITION/LEFT") == -2,
+        "a '%' that opens no name is no variable");
+  // Under a merged or replaced element's own note, a fatal note still comes out: retail
+  // parses a repeated POSITION or STRING into the same fields.
+  CHECK(fatal(screen_of("type=\"static\" name=\"W\"",
+                        "<POSITION><TOP>7</TOP></POSITION><POSITION><LEFT>%X%</LEFT></POSITION>"),
+              "/POSITION/LEFT") == 1,
+        "a variable edge in a repeated POSITION");
+  CHECK(fatal(screen_of("type=\"static\" name=\"W\"", std::string(kPos) +
+                                                          "<STRING>a</STRING><STRING JUSTIFY=\"\">b</STRING>"),
+              "/STRING@JUSTIFY") == 1,
+        "an empty value in a repeated STRING");
+  {
+    // What retail ignores inside a merged element stays under its note.
+    mnu::Document merged;
+    std::vector<mnu::ParseNote> merged_notes;
+    CHECK(parse(screen_of("type=\"static\" name=\"W\"",
+                          "<POSITION><LEFT>0</LEFT></POSITION><POSITION FOO=\"1\"><LEFT>1</LEFT></POSITION>"),
+                merged, &merged_notes) &&
+              merged_notes.size() == 1 && !merged_notes[0].fatal,
+          "one note for a merged element");
   }
-
+  // A replaced element's value is overwritten by the later one: its variable is lost to nothing.
+  CHECK(fatal(screen_of("type=\"radio\" name=\"R\"", std::string(kPos) + "<GROUP>%X%</GROUP><GROUP>2</GROUP>"),
+              "/GROUP") == 0,
+        "a variable in a replaced GROUP");
+  // The HEADER walk (last authored first) converts every COLUMN, and a sort key keeps the
+  // index as it stands: a repeated COLUMN it took is read, one it did not take is not.
+  const std::string table = "type=\"table\" name=\"T\"";
+  CHECK(fatal(screen_of(table, std::string(kPos) +
+                                   "<COLUMN COUNT=\"2\"><HEADER COLUMN=\"0\" PRIMARY_SORT COLUMN=\"%X%\">H</HEADER>"
+                                   "</COLUMN>"),
+              "/HEADER@COLUMN") == 1,
+        "a repeated COLUMN a sort key took");
+  CHECK(fatal(screen_of(table, std::string(kPos) +
+                                   "<COLUMN COUNT=\"2\"><HEADER PRIMARY_SORT COLUMN=\"0\" COLUMN=\"%X%\">H</HEADER>"
+                                   "</COLUMN>"),
+              "/HEADER@COLUMN") == 0,
+        "a repeated COLUMN no sort key took");
+  // A number field only some types read blocks only there (docs/mnu/menu-re.md, the
+  // per-type table and the ITEMS forms).
+  CHECK(fatal(screen_of("type=\"static\" name=\"W\"", std::string(kPos) + "<MIN_ITEM_HEIGHT>%X%</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == 0,
+        "MIN_ITEM_HEIGHT on a STATIC");
+  CHECK(fatal(screen_of("type=\"list\" name=\"L\"", std::string(kPos) + "<MIN_ITEM_HEIGHT>%X%</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == 1,
+        "MIN_ITEM_HEIGHT on a LIST");
+  CHECK(fatal(screen_of("type=\"list\" name=\"L\"",
+                        std::string(kPos) + "<FIXED_HEADER_HEIGHT>%X%</FIXED_HEADER_HEIGHT>"),
+              "/FIXED_HEADER_HEIGHT") == 0,
+        "FIXED_HEADER_HEIGHT on a LIST");
+  CHECK(fatal(screen_of(table, std::string(kPos) + "<FIXED_HEADER_HEIGHT>%X%</FIXED_HEADER_HEIGHT>"),
+              "/FIXED_HEADER_HEIGHT") == 1,
+        "FIXED_HEADER_HEIGHT on a TABLE");
+  CHECK(fatal(screen_of("type=\"button\" name=\"B\"", std::string(kPos) + "<GROUP>%X%</GROUP>"), "/GROUP") == 0,
+        "GROUP on a BUTTON");
+  CHECK(fatal(screen_of("type=\"radioedit\" name=\"E\"", std::string(kPos) + "<GROUP>%X%</GROUP>"), "/GROUP") == 1,
+        "GROUP on a RADIOEDIT");
+  CHECK(fatal(screen_of("type=\"list\" name=\"L\"", std::string(kPos) + "<ITEMS><ITEM COLUMN=\"%X%\">a</ITEM></ITEMS>"),
+              "/ITEM@COLUMN") == 0,
+        "a LIST ITEM's COLUMN");
+  CHECK(fatal(screen_of(table, std::string(kPos) + "<ITEMS><ROW><ITEM COLUMN=\"%X%\">a</ITEM></ROW></ITEMS>"),
+              "/ITEM@COLUMN") == 1,
+        "a TABLE cell's COLUMN");
+  {
+    mnu::Document held;
+    std::vector<mnu::ParseNote> held_notes;
+    CHECK(parse(screen_of("type=\"static\" name=\"W\"", "<POSITION><LEFT>%X%</LEFT><TOP>7</TOP></POSITION>"), held,
+                &held_notes),
+          "parse");
+    CHECK(root(held).position.has_left && root(held).position.left == 0 && root(held).position.top == 7,
+          "the model keeps the number wcstol reads here");
+  }
+  mnu::Document doc;
+  std::vector<mnu::ParseNote> notes;
+  std::string error;
+  CHECK(mnu::parse("<SCREEN><NAME>S</NAME><WINDOW type=\"static\"", doc, error, &notes) && !notes.empty() &&
+            notes[0].fatal,
+        "the end of the text inside a tag (retail hangs)");
+  CHECK(mnu::parse(screen_of("type=\"static\" name=\"W\" SCREENX=\"1\"", kPos), doc, error, &notes) &&
+            notes.size() == 1 && !notes[0].fatal,
+        "an attribute retail ignores is not fatal");
   return true;
 }
 
-// Test nested windows.
-bool test_nested_windows() {
-  const std::string xml = R"(
-<SCREEN>
-  <NAME>TEST</NAME>
-  <WINDOW type="window" name="MAIN">
-    <WINDOW type="window" name="PANEL">
-      <WINDOW type="button" name="BTN1" HIDDEN/>
-      <WINDOW type="button" name="BTN2" DISABLE/>
-    </WINDOW>
-  </WINDOW>
-</SCREEN>
-  )";
-  opennova::mnu::Document doc;
-  std::string err;
-
-  CHECK(opennova::mnu::parse(xml, doc, err), "parse failed: " + err);
-
-  const auto& main = doc.screens[0].root_window;
-  CHECK(main.name == "MAIN", "expected MAIN");
-  CHECK(main.children.size() == 1, "expected 1 child (PANEL)");
-
-  const auto& panel = main.children[0];
-  CHECK(panel.name == "PANEL", "expected PANEL");
-  CHECK(panel.children.size() == 2, "expected 2 children");
-
-  CHECK(panel.children[0].name == "BTN1", "expected BTN1");
-  CHECK(panel.children[0].hidden == true, "expected BTN1 hidden");
-  CHECK(panel.children[0].disabled == false, "expected BTN1 not disabled");
-
-  CHECK(panel.children[1].name == "BTN2", "expected BTN2");
-  CHECK(panel.children[1].hidden == false, "expected BTN2 not hidden");
-  CHECK(panel.children[1].disabled == true, "expected BTN2 disabled");
-
+// What only the GLB_TABLE, GOPHER and LAN_LIST parses read is kept as read.
+bool test_extras() {
+  mnu::Document doc;
+  std::vector<mnu::ParseNote> notes;
+  CHECK(parse(screen_of("type=\"glb_table\" name=\"G\" PLAYERLIST",
+                        std::string(kPos) +
+                            "<GLB_TABLE><COLUMN count=\"2\"><HEADER column=\"1\" FIELD=\"ping\">P</HEADER></COLUMN>"
+                            "</GLB_TABLE><TARGET>http://x</TARGET><JOIN_BUTTON name=\"J\"><POSITION><LEFT>1</LEFT>"
+                            "</POSITION></JOIN_BUTTON><BOGUS></BOGUS>"),
+              doc, &notes),
+        "parse");
+  const mnu::Window &w = root(doc);
+  CHECK(w.extra_attributes.size() == 1 && w.extra_attributes[0].name == "PLAYERLIST", "PLAYERLIST");
+  CHECK(w.extras.size() == 3 && w.extras[0].tag == "GLB_TABLE" && w.extras[1].text == "http://x", "extras");
+  CHECK(w.extras[0].children[0].children[0].attributes[1].value == "ping", "the subtree as read");
+  CHECK(noted(notes, "/BOGUS") && notes.size() == 1, "only the unknown element is noted");
+  CHECK(fixed_point(doc), "fixed point");
   return true;
 }
 
-// Test hex color parsing.
-bool test_hex_color() {
-  uint8_t r, g, b, a;
+// --- the writer -------------------------------------------------------------------
 
-  CHECK(opennova::mnu::parse_hex_color("FF0000", r, g, b, a), "parse FF0000");
-  CHECK(r == 255 && g == 0 && b == 0 && a == 255, "FF0000 values");
-
-  CHECK(opennova::mnu::parse_hex_color("00FF00", r, g, b, a), "parse 00FF00");
-  CHECK(r == 0 && g == 255 && b == 0, "00FF00 values");
-
-  CHECK(opennova::mnu::parse_hex_color("#0000FF", r, g, b, a), "parse #0000FF");
-  CHECK(r == 0 && g == 0 && b == 255, "#0000FF values");
-
-  CHECK(opennova::mnu::parse_hex_color("80FFFFFF", r, g, b, a), "parse 80FFFFFF");
-  CHECK(a == 128 && r == 255 && g == 255 && b == 255, "80FFFFFF values");
-
-  CHECK(!opennova::mnu::parse_hex_color("%VAR%", r, g, b, a), "variable should fail");
-  CHECK(!opennova::mnu::parse_hex_color("", r, g, b, a), "empty should fail");
-
+bool test_writer_forms() {
+  mnu::Document doc;
+  mnu::Screen screen;
+  screen.name = "S";
+  mnu::Window w;
+  w.type = mnu::WindowType::SpinList;
+  w.name = "A&B<C>";
+  w.items.present = true;
+  mnu::Item empty;
+  empty.value = "33";
+  w.items.items.push_back(empty);
+  w.string_data.present = true;
+  w.string_data.value = "x < y & z > w \"q\"";
+  screen.roots.push_back(w);
+  mnu::Window second;
+  second.name = "SECOND";
+  second.position.has_left = true;
+  screen.roots.push_back(second);
+  doc.screens.push_back(screen);
+  const std::string out = mnu::serialize(doc);
+  CHECK(out.find("/>") == std::string::npos, "never a self-closing tag");
+  CHECK(out.find("<ITEM value=\"33\"></ITEM>") != std::string::npos, "an empty ITEM keeps its close tag");
+  CHECK(out.find("name=\"A&B<C>\"") != std::string::npos, "attribute values raw");
+  CHECK(out.find(">x &lt; y &amp; z > w \"q\"</STRING>") != std::string::npos, "text escapes '<' and '&' only");
+  CHECK(out.find("<?xml") == std::string::npos, "no declaration");
+  mnu::Document back;
+  CHECK(parse(out, back), "parse");
+  CHECK(back.screens[0].roots.size() == 2 && back.screens[0].roots[0].name == "A&B<C>" &&
+            back.screens[0].roots[0].string_data.value == w.string_data.value,
+        "every root, the values read back");
+  CHECK(fixed_point(doc), "fixed point");
   return true;
 }
 
-// Test color variable detection.
-bool test_color_variable() {
-  CHECK(opennova::mnu::is_color_variable("%TRIM_COLOR%"), "%TRIM_COLOR% is variable");
-  CHECK(opennova::mnu::is_color_variable("%VAR%"), "%VAR% is variable");
-  CHECK(!opennova::mnu::is_color_variable("FF0000"), "FF0000 is not variable");
-  CHECK(!opennova::mnu::is_color_variable(""), "empty is not variable");
-  CHECK(!opennova::mnu::is_color_variable("%"), "single % is not variable");
-
+// A value the file cannot hold, or one retail faults on, is a WriteIssue and the
+// serialization refuses.
+bool test_write_issues() {
+  auto issue_for = [](mnu::Document doc) {
+    std::vector<uint8_t> bytes;
+    std::string error;
+    const auto issues = mnu::write_issues(doc);
+    const bool refused = !mnu::serialize_bytes(doc, bytes, error);
+    return issues.empty() || !refused ? std::string() : issues[0].message;
+  };
+  mnu::Document base;
+  CHECK(parse(screen_of("type=\"static\" name=\"W\"", kPos), base), "parse");
+  CHECK(issue_for(base).empty(), "a plain menu writes");
+  mnu::Document d = base;
+  d.screens[0].roots[0].name = "a\"b";
+  CHECK(issue_for(d).find("quote") != std::string::npos, "a '\"' in an attribute");
+  d = base;
+  d.screens[0].roots[0].string_data.present = true;
+  d.screens[0].roots[0].string_data.justify = "it's";
+  CHECK(issue_for(d).find("quote") != std::string::npos, "a '\\'' in an attribute");
+  d = base;
+  mnu::Action screen_action;
+  screen_action.type = "SCREEN";
+  screen_action.target = "NEXT";
+  d.screens[0].roots[0].actions.push_back(screen_action);
+  CHECK(issue_for(d).find("FILE") != std::string::npos, "a SCREEN action with no FILE");
+  d = base;
+  d.screens[0].roots[0].type = mnu::WindowType::Edit;
+  d.screens[0].roots[0].type_token.clear();
+  d.screens[0].roots[0].global_var = true;
+  CHECK(issue_for(d).find("GLOBAL_VAR") != std::string::npos, "GLOBAL_VAR on an edit");
+  d = base;
+  d.screens[0].roots[0].type = mnu::WindowType::CheckBox;
+  d.screens[0].roots[0].global_var = true;
+  CHECK(issue_for(d).empty(), "GLOBAL_VAR on an unchecked checkbox writes");
+  d.screens[0].roots[0].checked = true;
+  CHECK(!issue_for(d).empty(), "GLOBAL_VAR on a checked checkbox");
+  d = base;
+  d.screens[0].name.clear();
+  CHECK(issue_for(d).find("NAME") != std::string::npos, "a SCREEN with no NAME");
+  d = base;
+  d.screens[0].roots[0].position = mnu::Position{};
+  CHECK(!issue_for(d).empty(), "a WINDOW with no child element");
+  d = base;
+  d.screens[0].roots[0].spinup.author(mnu::WindowType::Button);
+  CHECK(issue_for(d).find("SPINUP") != std::string::npos, "an empty part");
+  d = base;
+  mnu::Appearance stateless;
+  stateless.type = "image";
+  stateless.value = "a.tga";
+  d.screens[0].roots[0].appearances.push_back(stateless);
+  CHECK(issue_for(d).find("STATE") != std::string::npos, "an APPEARANCE with no STATE");
+  d = base;
+  mnu::Sound silent;
+  silent.state = "MOUSEIN";
+  silent.file = "a.lwf";
+  d.screens[0].roots[0].sounds.push_back(silent);
+  CHECK(issue_for(d).find("TRIGGER") != std::string::npos, "a SOUND with no TRIGGER");
+  // Each issue names the record (the property table's list paths) and the field.
+  d = base;
+  d.screens[0].roots[0].children.push_back(base.screens[0].roots[0]);
+  d.screens[0].roots[0].children[0].actions.push_back(screen_action);
+  d.screens[0].roots[0].children[0].actions.push_back(screen_action);
+  d.screens[0].roots[0].children[0].actions[1].file.clear();
+  d.screens[0].roots[0].children[0].actions[0].file = "a.mnu";
+  const auto located = mnu::write_issues(d);
+  CHECK(located.size() == 1 && located[0].locator == "0/window:0/window:0/action:1" && located[0].field == "file",
+        "the action and its field");
+  d = base;
+  d.screens[0].roots[0].spinup.author(mnu::WindowType::Button);
+  CHECK(mnu::write_issues(d)[0].locator == "0/window:0/spinup:0" && mnu::write_issues(d)[0].field.empty(),
+        "the part itself");
+  d.screens[0].roots[0].spinup.hide();
+  CHECK(mnu::write_issues(d).empty(), "a part left out writes nothing, so it holds no issue");
   return true;
 }
 
-// Test hotkey marker stripping.
-bool test_strip_hotkey() {
+// Every modeled element and attribute, built in code (ADR 0003), writes and reads
+// back to the same bytes with nothing left out.
+bool test_every_element_fixed_point() {
+  mnu::Appearance image;
+  image.state = "default";
+  image.type = "image";
+  image.value = "a.tga";
+  image.has_map_state = true;
+  image.map_state = 0;
+  image.has_height = true;
+  image.height = 24;
+  image.flags = "STANDARD_TRANSPARENT";
+  mnu::Window w;
+  w.name = "ALL";
+  w.type = mnu::WindowType::Table;
+  w.hidden = w.disabled = w.checked = w.draw_frame = w.modal = w.readonly = w.as_button = true;
+  w.number = w.global_var = w.password = true;
+  w.has_group = true;
+  w.group = 0;
+  w.has_minval = w.has_maxval = w.has_maxchar = w.has_form = true;
+  w.minval = -1;
+  w.maxval = 99;
+  w.maxchar = 2;
+  w.form = 3;
+  w.orientation = "HORIZONTAL";
+  w.has_scroll_extent = true;
+  w.scroll_extent = 20;
+  w.position = {1, 2, 3, 4, true, true, true, true};
+  w.appearances = {image};
+  w.sounds = {mnu::Sound{"MOUSEIN", "MOUSE_OVER", "menu.lwf"}};
+  mnu::Action action;
+  action.type = "WINDOW";
+  action.state = "SHOW";
+  action.file = "f.mnu";
+  action.field = "slot";
+  action.field_attr = "NAME";
+  action.has_target_form = true;
+  action.target_form = 0;
+  action.toggle = action.external_browser = true;
+  action.test = "EQ";
+  action.target = "PANEL";
+  w.actions = {action};
+  w.string_data = {true, "ID", "CENTER", "BOTTOM", true, 0, true, "KEY"};
+  w.toggle_string = {true, "ID", "ALT"};
+  w.font = {"f.fnt", "1", "2", "3", "4", "5", "6", "7", "8"};
+  w.frame.stencil = "s.tga";
+  w.frame.has_stencil_size = w.frame.has_insetx = w.frame.has_insety = true;
+  w.frame.brush = "b.tga";
+  w.frame.monogram = "m.tga";
+  w.items.present = w.items.multiselect = true;
+  w.items.justify = "LEFT";
+  w.items.vjustify = "TOP";
+  w.items.appearances = {image};
+  mnu::Item item;
+  item.type = "ID";
+  item.value = "1";
+  item.text = "T";
+  item.justify = "RIGHT";
+  item.vjustify = "CENTER";
+  item.pairs_list = true;
+  item.has_column = true;
+  item.column = 0;
+  w.items.items = {item};
+  w.items.rows = {mnu::TableRow{{item}}};
+  mnu::Window &list = w.list_box.author(mnu::WindowType::List);
+  list.position.has_top = true;
+  list.scrollbar.author(mnu::WindowType::Scroll).shuttle = {image};
+  w.has_sb_edge_pad = true;
+  w.sb_edge_pad = 0;
+  w.spinup.author(mnu::WindowType::Button).appearances = {image};
+  w.spindown.author(mnu::WindowType::Button).string_data = {true, "", "", "", false, 0, false, "-"};
+  w.scrollbar.author(mnu::WindowType::Scroll).scrolldown = {image};
+  w.cursor = {"c.tga", "STANDARD"};
+  w.has_text_rsrc = true;
+  w.text_rsrc = "menutxt.BIN";
+  w.private_data = "p";
+  w.datasources = {"nlist.kda", "credits.ini"};
+  w.hotkeys = {mnu::Hotkey{"VK_ESCAPE", true}, mnu::Hotkey{"=", false}};
+  w.shuttle = w.scrollup = w.scrolldown = {image};
+  mnu::TableHeader header;
+  header.has_column = header.has_width = true;
+  header.width = 100;
+  header.sort = "A";
+  header.type = "id";
+  header.text = "H";
+  mnu::TableBody body;
+  body.has_column = true;
+  body.bitmap_draw = body.custom_draw = body.bitmap_text = body.scale_bitmap = true;
+  body.display = "BITMAP_TEXT";
+  body.bitmap_flags = "STANDARD";
+  mnu::TableSubst subst;
+  subst.has_column = true;
+  subst.value = "1";
+  subst.is_file = subst.is_url = true;
+  subst.file = "x.tga";
+  w.table_data.column = {true, 1, true, 0, {header}, {body}, {subst}};
+  w.table_data.column.primary_sort = 0;
+  w.table_data.column.primary_sort_token = "DEFAULT_SORT";
+  w.table_data.column.secondary_sort = w.table_data.column.tertiary_sort = 0;
+  w.table_data.has_min_item_height = true;
+  w.table_data.min_item_height = 20;
+  w.table_data.has_fixed_header_height = true;
+  w.table_data.fixed_header_height = 0;
+  mnu::Element target;
+  target.tag = "TARGET";
+  target.text = "http://x";
+  mnu::Element join;
+  join.tag = "JOIN_BUTTON";
+  join.attributes = {{"name", "J", true}, {"BARE", "", false}};
+  join.text = "note";
+  join.children = {target};
+  w.extras = {join, target};
+  w.extra_attributes = {{"SERVERLIST", "", false}};
+  mnu::Window child;
+  child.name = "CHILD";
+  child.type = mnu::WindowType::Static;
+  child.position.has_left = true;
+  w.children = {child};
+
+  mnu::Document doc;
+  mnu::Screen screen;
+  screen.name = "EVERY";
+  screen.has_music_var = true;
+  screen.music_var = 0;
+  screen.roots = {w, child};
+  doc.screens = {screen};
+  CHECK(mnu::write_issues(doc).empty(), "no write issue");
+  CHECK(fixed_point(doc), "every element writes and reads back");
+  mnu::Document back;
+  CHECK(parse(mnu::serialize(doc), back), "parse");
+  const mnu::Window &r = back.screens[0].roots[0];
+  CHECK(r.table_data.column.bodies[0].display == "BITMAP_TEXT", "the draw kind written first");
+  CHECK(r.actions[0].field_attr == "NAME" && r.actions[0].field == "slot", "the slot's spelling");
+  CHECK(r.extras[0].text == "note" && r.extras[0].children.size() == 1, "text beside children, compact");
+  CHECK(r.spindown && r.spindown->string_data.value == "-" && r.list_box->scrollbar, "parts");
+  CHECK(back.screens[0].roots.size() == 2, "both roots");
+  return true;
+}
+
+// --- helpers and encodings ---------------------------------------------------------
+
+bool test_helpers() {
+  // [orig: CUIElement_ParseXMLDefinition @ 0x648562 — COLOR / OUTLINE are
+  // wcstoul(text, 16)]: six digits leave alpha 0, eight are the word.
+  CHECK(mnu::color_value("FF0000") == 0x00FF0000u, "RRGGBB: alpha 0");
+  CHECK(mnu::color_value("80FFFFFF") == 0x80FFFFFFu, "AARRGGBB");
+  CHECK(mnu::color_value("%VAR%") == 0u, "an unresolved variable reads 0");
   std::string hotkey;
   int pos = -1;
-
-  std::string result = opennova::mnu::strip_hotkey_marker("{hot}Exit", &hotkey, &pos);
-  CHECK(result == "Exit", "result should be Exit");
-  CHECK(hotkey == "E", "hotkey should be E");
-  CHECK(pos == 0, "pos should be 0");
-
-  result = opennova::mnu::strip_hotkey_marker("E{hot}xit", &hotkey, &pos);
-  CHECK(result == "Exit", "result should be Exit");
-  CHECK(hotkey == "x", "hotkey should be x");
-  CHECK(pos == 1, "pos should be 1");
-
-  // Retail's marker scan is strstr — case-sensitive — so "{HOT}" stays
-  // literal and the lowercase marker is the first (and only) hit
-  // [orig: CButtonWnd_SetLabel strstr("{hot}") @0x657451].
-  result = opennova::mnu::strip_hotkey_marker(
-      "A{HOT}b{hot}c", &hotkey, &pos);
-  CHECK(result == "A{HOT}bc", "the uppercase pseudo-marker stays literal");
-  CHECK(hotkey == "c", "the lowercase marker supplies the hotkey");
-  CHECK(pos == 7, "the recorded offset follows the literal {HOT}");
-
-  result = opennova::mnu::strip_hotkey_marker(
-      "A{hot}b{hot}c", &hotkey, &pos);
-  CHECK(result == "Ab{hot}c", "only the first marker should be removed");
-  CHECK(hotkey == "b", "first marker should supply the hotkey");
-  CHECK(pos == 1, "first marker position should be retained");
-
-  result = opennova::mnu::strip_hotkey_marker("Tail{hot}", &hotkey, &pos);
-  CHECK(result == "Tail", "a trailing marker should still be removed");
-  CHECK(hotkey.empty(), "a trailing marker has no hotkey byte");
-  CHECK(pos == 4, "a trailing marker still reports its position");
-
-  hotkey = "stale";
-  pos = 99;
-  result = opennova::mnu::strip_hotkey_marker(
-      "No hotkey here", &hotkey, &pos);
-  CHECK(result == "No hotkey here", "no change expected");
-  CHECK(hotkey.empty(), "a missing marker clears the hotkey output");
-  CHECK(pos == -1, "a missing marker resets the position output");
-
+  CHECK(mnu::strip_hotkey_marker("A{HOT}b{hot}c", &hotkey, &pos) == "A{HOT}bc" && hotkey == "c" && pos == 7,
+        "the case-sensitive first marker");
+  CHECK(mnu::strip_hotkey_marker("Tail{hot}", &hotkey, &pos) == "Tail" && hotkey.empty() && pos == 4, "trailing");
   return true;
 }
 
-// Test full MNU-style document.
-bool test_full_mnu_document() {
-  const std::string xml = R"(
-<SCREEN>
-  <NAME>STARTUP</NAME>
-  <MUSICVAR>1</MUSICVAR>
-  <WINDOW type="window" name="MAIN">
-    <APPEARANCE type="custom" state="default"></APPEARANCE>
-    <POSITION>
-      <LEFT>0</LEFT>
-      <TOP>75</TOP>
-      <RIGHT>800</RIGHT>
-      <BOTTOM>525</BOTTOM>
-    </POSITION>
-    <TEXT_RSRC>menutxt.BIN</TEXT_RSRC>
-    <CURSOR>
-      <FILE>newarow1.tga</FILE>
-      <FLAGS>STANDARD_TRANSPARENT</FLAGS>
-    </CURSOR>
-    <WINDOW type="window" name="BUTTONS">
-      <FONT>
-        <NAME>Gunpl27b.fnt</NAME>
-        <DEFAULT_FG>FFFFFF</DEFAULT_FG>
-        <MOUSEOVER_FG>FF0000</MOUSEOVER_FG>
-        <SELECTED_FG>FF0000</SELECTED_FG>
-        <DISABLED_FG>545252</DISABLED_FG>
-      </FONT>
-      <WINDOW type="button" name="SINGLE_PLAYER">
-        <ACTION type="screen" file="sp.mnu">SINGLE_PLAYER</ACTION>
-        <APPEARANCE state="default"></APPEARANCE>
-        <SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
-        <STRING type="id" justify="LEFT">MM_Singleplayer</STRING>
-      </WINDOW>
-      <WINDOW type="button" name="DATABASE" HIDDEN DISABLE>
-        <STRING type="id" justify="CENTER">MM_Database</STRING>
-      </WINDOW>
-    </WINDOW>
-  </WINDOW>
-</SCREEN>
-  )";
-  opennova::mnu::Document doc;
-  std::string err;
-
-  CHECK(opennova::mnu::parse(xml, doc, err), "parse failed: " + err);
-  CHECK(doc.screens.size() == 1, "expected 1 screen");
-
-  const auto& screen = doc.screens[0];
-  CHECK(screen.name == "STARTUP", "screen name");
-  CHECK(screen.music_var == 1, "music_var");
-  CHECK(screen.text_rsrc == "menutxt.BIN", "text_rsrc");
-  CHECK(screen.cursor_file == "newarow1.tga", "cursor file");
-  CHECK(screen.cursor_flags == "STANDARD_TRANSPARENT", "cursor flags");
-
-  const auto& main = screen.root_window;
-  CHECK(main.name == "MAIN", "main window name");
-  CHECK(main.position.left == 0, "position left");
-  CHECK(main.position.top == 75, "position top");
-  CHECK(main.position.right == 800, "position right");
-  CHECK(main.position.bottom == 525, "position bottom");
-
-  CHECK(main.children.size() == 1, "expected 1 child (BUTTONS)");
-  const auto& buttons = main.children[0];
-  CHECK(buttons.name == "BUTTONS", "buttons name");
-  CHECK(buttons.font.name == "Gunpl27b.fnt", "font name");
-  CHECK(buttons.font.default_fg == "FFFFFF", "font default_fg");
-  CHECK(buttons.font.mouseover_fg == "FF0000", "font mouseover_fg");
-
-  CHECK(buttons.children.size() == 2, "expected 2 button children");
-
-  const auto& sp_btn = buttons.children[0];
-  CHECK(sp_btn.name == "SINGLE_PLAYER", "sp button name");
-  CHECK(sp_btn.type == opennova::mnu::WindowType::Button, "sp button type");
-  CHECK(sp_btn.actions.size() == 1, "sp button actions");
-  CHECK(sp_btn.actions[0].file == "sp.mnu", "sp action file");
-  CHECK(sp_btn.actions[0].target == "SINGLE_PLAYER", "sp action target");
-  CHECK(sp_btn.sounds.size() == 1, "sp sounds");
-  CHECK(sp_btn.sounds[0].file == "menu.lwf", "sp sound file");
-  CHECK(sp_btn.string_data.value == "MM_Singleplayer", "sp string");
-
-  const auto& db_btn = buttons.children[1];
-  CHECK(db_btn.name == "DATABASE", "db button name");
-  CHECK(db_btn.hidden == true, "db button hidden");
-  CHECK(db_btn.disabled == true, "db button disabled");
-
-  return true;
-}
-
-// Test scroll/slider element parsing.
-bool test_scroll_elements() {
-  const std::string xml = R"(
-<SCREEN>
-  <NAME>TEST</NAME>
-  <WINDOW type="scroll" name="SLIDER">
-    <POSITION>
-      <LEFT>10</LEFT>
-      <TOP>20</TOP>
-      <RIGHT>200</RIGHT>
-      <BOTTOM>40</BOTTOM>
-    </POSITION>
-    <ORIENTATION>HORIZONTAL</ORIENTATION>
-    <APPEARANCE type="image" state="default">track.tga</APPEARANCE>
-    <SHUTTLE type="image" state="default">shuttle.tga</SHUTTLE>
-    <SHUTTLE type="image" state="mouseover">shuttle_hover.tga</SHUTTLE>
-    <SCROLLUP type="image" state="default" map_state="0" height="24">left_arrow.tga</SCROLLUP>
-    <SCROLLUP type="image" state="mouseover" map_state="1" height="24">left_arrow.tga</SCROLLUP>
-    <SCROLLDOWN type="image" state="default" map_state="0" height="24">right_arrow.tga</SCROLLDOWN>
-    <SCROLLDOWN type="image" state="mouseover" map_state="1" height="24">right_arrow.tga</SCROLLDOWN>
-  </WINDOW>
-</SCREEN>
-  )";
-  opennova::mnu::Document doc;
-  std::string err;
-
-  CHECK(opennova::mnu::parse(xml, doc, err), "parse failed: " + err);
-
-  const auto& slider = doc.screens[0].root_window;
-  CHECK(slider.name == "SLIDER", "expected name SLIDER");
-  CHECK(slider.type == opennova::mnu::WindowType::Scroll, "expected Scroll type");
-  CHECK(slider.orientation == "HORIZONTAL", "expected HORIZONTAL orientation");
-
-  // Track appearance.
-  CHECK(slider.appearances.size() == 1, "expected 1 track appearance");
-  CHECK(slider.appearances[0].value == "track.tga", "track texture mismatch");
-
-  // Shuttle appearances.
-  CHECK(slider.shuttle.size() == 2, "expected 2 shuttle appearances");
-  CHECK(slider.shuttle[0].value == "shuttle.tga", "shuttle default mismatch");
-  CHECK(slider.shuttle[0].state == "default", "shuttle state mismatch");
-  CHECK(slider.shuttle[1].value == "shuttle_hover.tga", "shuttle hover mismatch");
-
-  // Scrollup appearances.
-  CHECK(slider.scrollup.size() == 2, "expected 2 scrollup appearances");
-  CHECK(slider.scrollup[0].value == "left_arrow.tga", "scrollup texture mismatch");
-  CHECK(slider.scrollup[0].map_state == 0, "scrollup map_state mismatch");
-  CHECK(slider.scrollup[0].height == 24, "scrollup height mismatch");
-
-  // Scrolldown appearances.
-  CHECK(slider.scrolldown.size() == 2, "expected 2 scrolldown appearances");
-  CHECK(slider.scrolldown[0].value == "right_arrow.tga", "scrolldown texture mismatch");
-
-  return true;
-}
-
-// Test table column parsing.
-bool test_table_column() {
-  const std::string xml = R"(
-<SCREEN>
-  <NAME>TEST</NAME>
-  <WINDOW type="table" name="CONTROL_MAPPING">
-    <POSITION>
-      <TOP>40</TOP>
-      <LEFT>240</LEFT>
-      <RIGHT>691</RIGHT>
-      <BOTTOM>320</BOTTOM>
-    </POSITION>
-    <COLUMN count="3" spacing="0">
-      <HEADER justify="CENTER" vjustify="CENTER" column="0" sort="A" width="150">Class</HEADER>
-      <HEADER justify="CENTER" vjustify="CENTER" column="1" sort="A" width="150">Action</HEADER>
-      <HEADER justify="CENTER" vjustify="CENTER" column="2" sort="A" width="150">Control</HEADER>
-      <BODY justify="LEFT" vjustify="CENTER" column="0"></BODY>
-      <BODY justify="LEFT" vjustify="CENTER" column="1"></BODY>
-    </COLUMN>
-    <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
-  </WINDOW>
-</SCREEN>
-  )";
-  opennova::mnu::Document doc;
-  std::string err;
-
-  CHECK(opennova::mnu::parse(xml, doc, err), "parse failed: " + err);
-
-  const auto& table = doc.screens[0].root_window;
-  CHECK(table.name == "CONTROL_MAPPING", "expected name CONTROL_MAPPING");
-  CHECK(table.type == opennova::mnu::WindowType::Table, "expected Table type");
-
-  // Column data.
-  const auto& col = table.table_data.column;
-  CHECK(col.count == 3, "expected 3 columns");
-  CHECK(col.spacing == 0, "expected 0 spacing");
-  CHECK(col.headers.size() == 3, "expected 3 headers");
-
-  // Header 0.
-  CHECK(col.headers[0].text == "Class", "header 0 text mismatch");
-  CHECK(col.headers[0].column == 0, "header 0 column mismatch");
-  CHECK(col.headers[0].width == 150, "header 0 width mismatch");
-  CHECK(col.headers[0].justify == "CENTER", "header 0 justify mismatch");
-  CHECK(col.headers[0].sort == "A", "header 0 sort mismatch");
-
-  // Header 1.
-  CHECK(col.headers[1].text == "Action", "header 1 text mismatch");
-  CHECK(col.headers[1].column == 1, "header 1 column mismatch");
-
-  // Header 2.
-  CHECK(col.headers[2].text == "Control", "header 2 text mismatch");
-  CHECK(col.headers[2].column == 2, "header 2 column mismatch");
-
-  // Body elements.
-  CHECK(col.bodies.size() == 2, "expected 2 body elements");
-  CHECK(col.bodies[0].column == 0, "body 0 column mismatch");
-  CHECK(col.bodies[0].justify == "LEFT", "body 0 justify mismatch");
-
-  // Min item height.
-  CHECK(table.table_data.min_item_height == 20, "expected min_item_height 20");
-
-  return true;
-}
-
-// Test table scrollbar parsing.
-bool test_table_scrollbar() {
-  const std::string xml = R"(
-<SCREEN>
-  <NAME>TEST</NAME>
-  <WINDOW type="table" name="TABLE">
-    <SCROLLBAR>
-      <APPEARANCE type="image" state="default">m_scrolV.tga</APPEARANCE>
-      <SHUTTLE type="image" state="default">shuttlev.tga</SHUTTLE>
-      <SHUTTLE type="image" state="mouseover">shuttlev.tga</SHUTTLE>
-      <SCROLLUP type="image" state="default" map_state="0" height="24">up2arrw.tga</SCROLLUP>
-      <SCROLLUP type="image" state="mouseover" map_state="1" height="24">up2arrw.tga</SCROLLUP>
-      <SCROLLDOWN type="image" state="default" map_state="0" height="24">dn2arrw.tga</SCROLLDOWN>
-      <SOUND state="selected" trigger="CLICK_VALUE">menu.lwf</SOUND>
-      <POSITION>
-        <LEFT>452</LEFT>
-        <TOP>20</TOP>
-        <RIGHT>472</RIGHT>
-        <BOTTOM>280</BOTTOM>
-      </POSITION>
-    </SCROLLBAR>
-  </WINDOW>
-</SCREEN>
-  )";
-  opennova::mnu::Document doc;
-  std::string err;
-
-  CHECK(opennova::mnu::parse(xml, doc, err), "parse failed: " + err);
-
-  const auto& sb = doc.screens[0].root_window.table_data.scrollbar;
-  CHECK(sb.present == true, "scrollbar should be present");
-
-  // Position.
-  CHECK(sb.position.left == 452, "scrollbar left mismatch");
-  CHECK(sb.position.top == 20, "scrollbar top mismatch");
-  CHECK(sb.position.right == 472, "scrollbar right mismatch");
-  CHECK(sb.position.bottom == 280, "scrollbar bottom mismatch");
-
-  // Track appearance.
-  CHECK(sb.track.size() == 1, "expected 1 track appearance");
-  CHECK(sb.track[0].value == "m_scrolV.tga", "track texture mismatch");
-
-  // Shuttle.
-  CHECK(sb.shuttle.size() == 2, "expected 2 shuttle appearances");
-  CHECK(sb.shuttle[0].value == "shuttlev.tga", "shuttle texture mismatch");
-
-  // Scrollup.
-  CHECK(sb.scrollup.size() == 2, "expected 2 scrollup appearances");
-  CHECK(sb.scrollup[0].value == "up2arrw.tga", "scrollup texture mismatch");
-  CHECK(sb.scrollup[0].map_state == 0, "scrollup map_state mismatch");
-  CHECK(sb.scrollup[0].height == 24, "scrollup height mismatch");
-
-  // Scrolldown.
-  CHECK(sb.scrolldown.size() == 1, "expected 1 scrolldown appearance");
-  CHECK(sb.scrolldown[0].value == "dn2arrw.tga", "scrolldown texture mismatch");
-
-  // Sound.
-  CHECK(sb.sounds.size() == 1, "expected 1 sound");
-  CHECK(sb.sounds[0].file == "menu.lwf", "sound file mismatch");
-
-  return true;
-}
-
-// Test table items colors parsing.
-bool test_table_items_colors() {
-  const std::string xml = R"(
-<SCREEN>
-  <NAME>TEST</NAME>
-  <WINDOW type="table" name="TABLE">
-    <ITEMS>
-      <APPEARANCE type="outline" state="default">3870BF</APPEARANCE>
-      <APPEARANCE type="color" state="selected">7f1E6DF3</APPEARANCE>
-    </ITEMS>
-  </WINDOW>
-</SCREEN>
-  )";
-  opennova::mnu::Document doc;
-  std::string err;
-
-  CHECK(opennova::mnu::parse(xml, doc, err), "parse failed: " + err);
-
-  const auto& td = doc.screens[0].root_window.table_data;
-  CHECK(td.outline_color == "3870BF", "outline color mismatch");
-  CHECK(td.selection_color == "7f1E6DF3", "selection color mismatch");
-
-  return true;
-}
-
-// Test serialize -> parse roundtrip.
-bool test_serialize_roundtrip() {
-  opennova::mnu::Document doc;
-  opennova::mnu::Screen screen;
-  screen.name = "ROUNDTRIP";
-  screen.has_music_var = true;
-  screen.music_var = 3;
-  screen.text_rsrc = "menutxt.BIN";
-  // The MNU format stores a single cursor inside the root window for original
-  // game compatibility (see write_screen in mnu.cpp); Screen.cursor_file is a
-  // parse-time mirror of it. So the screen cursor must match the root window's
-  // cursor below to round-trip (the format cannot hold two distinct cursors).
-  screen.cursor_file = "newarow1.tga";
-  screen.cursor_flags = "STANDARD_TRANSPARENT";
-
-  opennova::mnu::Window root;
-  root.name = "ROOT";
-  root.type = opennova::mnu::WindowType::Window;
-  root.position.left = 0;
-  root.position.top = 10;
-  root.position.right = 200;
-  root.position.bottom = 300;
-  root.position.has_left = root.position.has_top = true;
-  root.position.has_right = root.position.has_bottom = true;
-
-  opennova::mnu::Appearance app;
-  app.state = "default";
-  app.type = "image";
-  app.value = "main_hdr.tga";
-  app.has_map_state = true;
-  app.map_state = 1;
-  app.has_height = true;
-  app.height = 64;
-  root.appearances.push_back(app);
-
-  opennova::mnu::Sound snd;
-  snd.state = "mousein";
-  snd.trigger = "MOUSE_OVER";
-  snd.file = "menu.lwf";
-  root.sounds.push_back(snd);
-
-  opennova::mnu::Action act;
-  act.type = "screen";
-  act.file = "sp.mnu";
-  act.target = "SINGLE_PLAYER";
-  root.actions.push_back(act);
-
-  root.string_data.present = true;
-  root.string_data.type = "id";
-  root.string_data.justify = "CENTER";
-  root.string_data.vjustify = "BOTTOM";
-  root.string_data.has_edge = true;
-  root.string_data.edge = 4;
-  root.string_data.value = "MM_Start";
-
-  root.font.name = "Gunpl27b.fnt";
-  root.font.default_fg = "FFFFFF";
-  root.font.mouseover_fg = "FF0000";
-
-  root.frame.stencil = "border.tga";
-  root.frame.has_stencil_size = true;
-  root.frame.stencil_size = 8;
-
-  root.items.present = true;
-  root.items.justify = "LEFT";
-  opennova::mnu::Item item;
-  item.type = "ID";
-  item.value = "0";
-  item.text = "OPTION_LOW";
-  root.items.items.push_back(item);
-
-  root.spinup.present = true;
-  root.spinup.position.left = 10;
-  root.spinup.position.has_left = true;
-  root.spinup.appearances.push_back(app);
-
-  root.cursor.file = "newarow1.tga";
-  root.cursor.flags = "STANDARD_TRANSPARENT";
-  root.text_rsrc = "menutxt.BIN";
-
-  opennova::mnu::Window child;
-  child.name = "ChildBtn";
-  child.type = opennova::mnu::WindowType::Button;
-  child.checked = true;
-  child.has_group = true;
-  child.group = 2;
-  child.position.left = 5;
-  child.position.top = 15;
-  child.position.has_left = child.position.has_top = true;
-  child.string_data.present = true;
-  child.string_data.value = "Child";
-  root.children.push_back(child);
-
-  screen.root_window = root;
-  doc.screens.push_back(screen);
-
-  std::string serialized = opennova::mnu::serialize(doc, true, 2);
-
-  opennova::mnu::Document roundtrip;
-  std::string err;
-  CHECK(opennova::mnu::parse(serialized, roundtrip, err), "roundtrip parse failed: " + err);
-  CHECK(roundtrip.screens.size() == doc.screens.size(), "screen count mismatch");
-  CHECK(screen_eq(doc.screens[0], roundtrip.screens[0]), "roundtrip screen mismatch");
-
-  return true;
-}
-
-// Test table SUBST (value->image) parse + serialize round-trip. SUBST cells were
-// historically dropped on save (the COLUMN serializer emitted HEADER/BODY only);
-// this guards that they survive parse -> serialize -> parse.
-bool test_table_subst() {
-  const std::string xml = R"(
-<SCREEN>
-  <NAME>TEST</NAME>
-  <WINDOW type="table" name="MISSION_TABLE">
-    <POSITION>
-      <TOP>40</TOP>
-      <LEFT>240</LEFT>
-      <RIGHT>691</RIGHT>
-      <BOTTOM>320</BOTTOM>
-    </POSITION>
-    <COLUMN count="3" spacing="0">
-      <BODY justify="CENTER" vjustify="CENTER" column="2" BITMAP_DRAW></BODY>
-      <SUBST column="2" value="0" FILE>alphachk0.tga</SUBST>
-      <SUBST column="2" value="1" FILE>alphachk1.tga</SUBST>
-    </COLUMN>
-  </WINDOW>
-</SCREEN>
-  )";
-  opennova::mnu::Document doc;
-  std::string err;
-  CHECK(opennova::mnu::parse(xml, doc, err), "parse failed: " + err);
-
-  const auto &col = doc.screens[0].root_window.table_data.column;
-  CHECK(col.substitutions.size() == 2, "expected 2 SUBST elements");
-  CHECK(col.substitutions[0].column == 2, "subst 0 column mismatch");
-  CHECK(col.substitutions[0].value == "0", "subst 0 value mismatch");
-  CHECK(col.substitutions[0].is_file, "subst 0 should carry the FILE flag");
-  CHECK(col.substitutions[0].file == "alphachk0.tga", "subst 0 file mismatch");
-  CHECK(col.substitutions[1].file == "alphachk1.tga", "subst 1 file mismatch");
-
-  // Round-trip: serialize then re-parse and confirm the substitutions survive
-  // (regression guard for the dropped-on-save bug).
-  const std::string serialized = opennova::mnu::serialize(doc, true, 2);
-  opennova::mnu::Document roundtrip;
-  CHECK(opennova::mnu::parse(serialized, roundtrip, err), "roundtrip parse failed: " + err);
-  const auto &rcol = roundtrip.screens[0].root_window.table_data.column;
-  CHECK(table_column_eq(col, rcol), "SUBST did not survive serialize round-trip");
-
-  return true;
-}
-
-// Build a document entirely in code (no parse, no imported file) exercising every
-// round-trip-preserved field, then serialize -> parse and confirm each survived.
-// This is the "create from nothing + no raw passthrough" proof (ADR 0003): each
-// construct is typed data the model owns, so a from-scratch menu round-trips.
-bool test_create_from_scratch() {
-  opennova::mnu::Document doc;
-  opennova::mnu::Screen screen;
-  screen.name = "SCREEN";
-  opennova::mnu::Window &root = screen.root_window;
-  root.name = "ROOT";
-  root.type = opennova::mnu::WindowType::Window;
-
-  opennova::mnu::Window cb;  // checkbox rendered as a toggle button
-  cb.name = "GRID";
-  cb.type = opennova::mnu::WindowType::CheckBox;
-  cb.as_button = true;
-  root.children.push_back(cb);
-
-  opennova::mnu::Window ed;  // numeric edit with range + length constraints
-  ed.name = "MAXPLAYERS";
-  ed.type = opennova::mnu::WindowType::Edit;
-  ed.number = true;
-  ed.has_minval = true;
-  ed.minval = 1;
-  ed.has_maxval = true;
-  ed.maxval = 99;
-  ed.has_maxchar = true;
-  ed.maxchar = 2;
-  root.children.push_back(ed);
-
-  opennova::mnu::Window combo;  // combobox whose listbox carries SB_EDGE_PAD + item height
-  combo.name = "CLASS";
-  combo.type = opennova::mnu::WindowType::Combo;
-  combo.list_box.present = true;
-  combo.list_box.has_sb_edge_pad = true;
-  combo.list_box.sb_edge_pad = 21;
-  combo.list_box.has_min_item_height = true;
-  combo.list_box.min_item_height = 20;
-  root.children.push_back(combo);
-
-  opennova::mnu::Window table;  // table column body drawn by the shell
-  table.name = "ROSTER";
-  table.type = opennova::mnu::WindowType::Table;
-  table.table_data.column.has_count = true;
-  table.table_data.column.count = 1;
-  opennova::mnu::TableBody body;
-  body.has_column = true;
-  body.column = 0;
-  body.custom_draw = true;
-  table.table_data.column.bodies.push_back(body);
-  root.children.push_back(table);
-
-  opennova::mnu::Window btn;  // button opening a URL in an external browser
-  btn.name = "PREORDER";
-  btn.type = opennova::mnu::WindowType::Button;
-  opennova::mnu::Action act;
-  act.type = "URL";
-  act.target = "www.novalogic.com";
-  act.external_browser = true;
-  btn.actions.push_back(act);
-  root.children.push_back(btn);
-
-  doc.screens.push_back(screen);
-
-  // Round-trip the from-scratch document.
-  const std::string text = opennova::mnu::serialize(doc, true, 2);
-  opennova::mnu::Document parsed;
-  std::string err;
-  CHECK(opennova::mnu::parse(text, parsed, err), "from-scratch doc failed to parse");
-  CHECK(parsed.screens.size() == 1, "expected one screen");
-  const opennova::mnu::Window &proot = parsed.screens[0].root_window;
-  CHECK(proot.children.size() == 5, "expected five child widgets");
-
-  const opennova::mnu::Window *pcb = nullptr, *ped = nullptr, *pcombo = nullptr,
-                    *ptable = nullptr, *pbtn = nullptr;
-  for (const auto &c : proot.children) {
-    if (c.name == "GRID") pcb = &c;
-    else if (c.name == "MAXPLAYERS") ped = &c;
-    else if (c.name == "CLASS") pcombo = &c;
-    else if (c.name == "ROSTER") ptable = &c;
-    else if (c.name == "PREORDER") pbtn = &c;
-  }
-  CHECK(pcb && pcb->as_button, "AS_BUTTON lost");
-  CHECK(ped && ped->number, "NUMBER lost");
-  CHECK(ped->has_minval && ped->minval == 1, "MINVAL lost");
-  CHECK(ped->has_maxval && ped->maxval == 99, "MAXVAL lost");
-  CHECK(ped->has_maxchar && ped->maxchar == 2, "MAXCHAR lost");
-  CHECK(pcombo && pcombo->list_box.has_sb_edge_pad &&
-            pcombo->list_box.sb_edge_pad == 21,
-        "SB_EDGE_PAD lost");
-  CHECK(pcombo->list_box.min_item_height == 20, "listbox MIN_ITEM_HEIGHT lost");
-  CHECK(ptable, "table widget lost");
-  bool custom = false;
-  for (const auto &b : ptable->table_data.column.bodies)
-    if (b.custom_draw) custom = true;
-  CHECK(custom, "CUSTOM_DRAW lost");
-  CHECK(pbtn && !pbtn->actions.empty() && pbtn->actions[0].external_browser,
-        "EXTERNAL_BROWSER lost");
-
-  return true;
-}
-
-// Round-trip the attributes recovered by the 2026-06-01 Jointops.exe grill:
-// table HEADER type, STENCIL INSETX/INSETY, WINDOW FORM/GLOBAL_VAR/PASSWORD, the
-// window-level scroll <HEIGHT>, and the POSITION ULX/ULY/WIDTH/HEIGHT aliases.
-bool test_grill_attributes_roundtrip() {
-  // (A) Build in code, serialize, re-parse, confirm every field survives.
-  opennova::mnu::Document doc;
-  opennova::mnu::Screen screen;
-  screen.name = "S";
-  opennova::mnu::Window &root = screen.root_window;
-  root.name = "ROOT";
-
-  opennova::mnu::Window framed;  // FRAME with data-driven insets
-  framed.name = "PANEL";
-  framed.frame.stencil = "border.tga";
-  framed.frame.has_stencil_size = true;
-  framed.frame.stencil_size = 32;
-  framed.frame.has_insetx = true;
-  framed.frame.insetx = 12;
-  framed.frame.has_insety = true;
-  framed.frame.insety = 18;
-  root.children.push_back(framed);
-
-  opennova::mnu::Window edit;  // FORM + GLOBAL_VAR + PASSWORD
-  edit.name = "PW";
-  edit.type = opennova::mnu::WindowType::Edit;
-  edit.has_form = true;
-  edit.form = 3;
-  edit.global_var = true;
-  edit.password = true;
-  root.children.push_back(edit);
-
-  opennova::mnu::Window scroll;  // window-level scroll thickness
-  scroll.name = "BAR";
-  scroll.type = opennova::mnu::WindowType::Scroll;
-  scroll.has_scroll_height = true;
-  scroll.scroll_height = 12;
-  root.children.push_back(scroll);
-
-  opennova::mnu::Window tbl;  // table HEADER type="id"
-  tbl.name = "GRID";
-  tbl.type = opennova::mnu::WindowType::Table;
-  tbl.table_data.column.has_count = true;
-  tbl.table_data.column.count = 1;
-  opennova::mnu::TableHeader hdr;
-  hdr.has_column = true;
-  hdr.column = 0;
-  hdr.has_width = true;
-  hdr.width = 150;
-  hdr.type = "id";
-  hdr.text = "Class";
-  tbl.table_data.column.headers.push_back(hdr);
-  root.children.push_back(tbl);
-
-  doc.screens.push_back(screen);
-
-  const std::string text = opennova::mnu::serialize(doc, true, 2);
-  opennova::mnu::Document parsed;
-  std::string err;
-  CHECK(opennova::mnu::parse(text, parsed, err), "grill-attrs doc failed to parse");
-  CHECK(parsed.screens.size() == 1, "expected one screen");
-  CHECK(window_eq(doc.screens[0].root_window, parsed.screens[0].root_window),
-        "grill attributes lost on round-trip");
-
-  const opennova::mnu::Window &pr = parsed.screens[0].root_window;
-  const opennova::mnu::Window *pf = nullptr, *ppw = nullptr, *psc = nullptr, *pt = nullptr;
-  for (const auto &c : pr.children) {
-    if (c.name == "PANEL") pf = &c;
-    else if (c.name == "PW") ppw = &c;
-    else if (c.name == "BAR") psc = &c;
-    else if (c.name == "GRID") pt = &c;
-  }
-  CHECK(pf && pf->frame.has_insetx && pf->frame.insetx == 12 &&
-            pf->frame.has_insety && pf->frame.insety == 18,
-        "STENCIL INSETX/INSETY lost");
-  CHECK(ppw && ppw->has_form && ppw->form == 3 && ppw->global_var &&
-            ppw->password,
-        "FORM/GLOBAL_VAR/PASSWORD lost");
-  CHECK(psc && psc->has_scroll_height && psc->scroll_height == 12,
-        "scroll <HEIGHT> lost");
-  CHECK(pt && !pt->table_data.column.headers.empty() &&
-            pt->table_data.column.headers[0].type == "id",
-        "HEADER type=id lost (the round-trip data-loss bug)");
-
-  // (B) Parse the original authored syntax directly: STENCIL inset attributes, the
-  // POSITION ULX/ULY/WIDTH/HEIGHT aliases, and a window-level scroll <HEIGHT>.
-  const char *src =
-      "<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">"
-      "<WINDOW type=\"static\" name=\"A\">"
-      "<FRAME><STENCIL size=\"16\" insetx=\"4\" insety=\"6\">b.tga</STENCIL></FRAME>"
-      "<POSITION><ULX>10</ULX><ULY>20</ULY><WIDTH>100</WIDTH><HEIGHT>40</HEIGHT></POSITION>"
-      "</WINDOW>"
-      "<WINDOW type=\"scroll\" name=\"B\"><HEIGHT>12</HEIGHT></WINDOW>"
-      "</WINDOW></SCREEN>";
-  opennova::mnu::Document d2;
-  CHECK(opennova::mnu::parse(src, d2, err), "authored-syntax parse failed");
-  CHECK(d2.screens.size() == 1, "expected one screen (B)");
-  const opennova::mnu::Window &r2 = d2.screens[0].root_window;
-  CHECK(r2.children.size() == 2, "expected two children (B)");
-  const opennova::mnu::Window &a = r2.children[0];
-  CHECK(a.frame.insetx == 4 && a.frame.insety == 6,
-        "STENCIL insetx/insety attribute parse");
-  CHECK(a.position.has_left && a.position.left == 10, "POSITION ULX alias");
-  CHECK(a.position.has_top && a.position.top == 20, "POSITION ULY alias");
-  CHECK(a.position.has_right && a.position.right == 110,
-        "POSITION WIDTH alias (left+width)");
-  CHECK(a.position.has_bottom && a.position.bottom == 60,
-        "POSITION HEIGHT alias (top+height)");
-  const opennova::mnu::Window &b = r2.children[1];
-  CHECK(b.has_scroll_height && b.scroll_height == 12,
-        "scroll-level <HEIGHT> parse");
-
-  return true;
-}
-
-// The native model is the lossless authoring seam. Compound containers must
-// remain independent: a combobox may author both its closed-state ITEMS and its
-// popup LIST_BOX/ITEMS, and editing either must not manufacture or overwrite the
-// other.
-bool test_compound_container_preservation() {
-  const char *src =
-      "<SCREEN><NAME>S</NAME><WINDOW type=\"combobox\" name=\"C\">"
-      "<ITEMS justify=\"CENTER\">"
-      "<APPEARANCE type=\"outline\" state=\"default\">111111</APPEARANCE>"
-      "<APPEARANCE type=\"color\" state=\"selected\">222222</APPEARANCE>"
-      "<ITEM type=\"ID\" value=\"1\">TOP</ITEM></ITEMS>"
-      "<LIST_BOX SB_EDGE_PAD=\"0\">"
-      "<STRING type=\"id\" justify=\"LEFT\" vjustify=\"CENTER\" edge=\"0\">ROW_FMT</STRING>"
-      "<ITEMS justify=\"RIGHT\">"
-      "<APPEARANCE type=\"color\" state=\"selected\">333333</APPEARANCE>"
-      "<APPEARANCE type=\"custom\" state=\"mouseover\" map_state=\"0\" height=\"0\">popup.tga</APPEARANCE>"
-      "<ITEM type=\"ID\" value=\"2\">POPUP</ITEM></ITEMS>"
-      "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT>"
-      "<SCROLLBAR><SHUTTLE type=\"image\" state=\"default\" map_state=\"0\" height=\"0\">s.tga</SHUTTLE></SCROLLBAR>"
-      "</LIST_BOX>"
-      "</WINDOW></SCREEN>";
-
-  opennova::mnu::Document doc;
-  std::string error;
-  CHECK(opennova::mnu::parse(src, doc, error), "compound parse failed: " + error);
-  const opennova::mnu::Window &w = doc.screens[0].root_window;
-  CHECK(w.items.items.size() == 1 && w.items.items[0].text == "TOP",
-        "top-level ITEMS was not retained independently");
-  CHECK(w.list_box.items.items.size() == 1 &&
-            w.list_box.items.items[0].text == "POPUP",
-        "LIST_BOX ITEMS was not retained independently");
-  CHECK(w.items.appearances.size() == 2,
-        "ordered top-level ITEMS/APPEARANCE rows were dropped");
-  CHECK(w.list_box.items.appearances.size() == 2,
-        "ordered popup ITEMS/APPEARANCE rows were dropped");
-  CHECK(w.list_box.string_data.value == "ROW_FMT",
-        "LIST_BOX nested STRING was dropped");
-  CHECK(w.list_box.has_sb_edge_pad && w.list_box.sb_edge_pad == 0,
-        "explicit zero SB_EDGE_PAD presence was dropped");
-  CHECK(w.list_box.has_min_item_height && w.list_box.min_item_height == 0,
-        "explicit zero MIN_ITEM_HEIGHT presence was dropped");
-  CHECK(w.list_box.string_data.has_edge && w.list_box.string_data.edge == 0,
-        "explicit zero STRING edge presence was dropped");
-  CHECK(w.list_box.scrollbar.shuttle.size() == 1,
-        "popup shuttle was dropped");
-  CHECK(w.list_box.scrollbar.shuttle[0].has_map_state &&
-            w.list_box.scrollbar.shuttle[0].map_state == 0,
-        "popup shuttle map_state=0 presence was dropped");
-  CHECK(w.list_box.scrollbar.shuttle[0].has_height &&
-            w.list_box.scrollbar.shuttle[0].height == 0,
-        "popup shuttle height=0 presence was dropped");
-
-  const std::string text = opennova::mnu::serialize(doc, true, 2);
-  opennova::mnu::Document reparsed;
-  CHECK(opennova::mnu::parse(text, reparsed, error), "compound reparse failed: " + error);
-  const opennova::mnu::Window &r = reparsed.screens[0].root_window;
-  CHECK(r.items.items.size() == 1 && r.items.items[0].text == "TOP",
-        "top-level ITEMS changed after save");
-  CHECK(r.list_box.items.items.size() == 1 &&
-            r.list_box.items.items[0].text == "POPUP",
-        "popup ITEMS changed after save");
-  CHECK(r.items.appearances.size() == 2 &&
-            r.list_box.items.appearances.size() == 2,
-        "ordered item appearances changed after save");
-  CHECK(r.list_box.string_data.value == "ROW_FMT",
-        "LIST_BOX STRING changed after save");
-  return true;
-}
-
-bool test_ordered_hotkeys() {
-  const char *src =
-      "<SCREEN><NAME>S</NAME><WINDOW type=\"button\" name=\"B\">"
-      "<HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>"
-      "<HOTKEY>=</HOTKEY><HOTKEY>-</HOTKEY>"
-      "</WINDOW></SCREEN>";
-  opennova::mnu::Document doc;
-  std::string error;
-  CHECK(opennova::mnu::parse(src, doc, error), "hotkey parse failed");
-  const auto &keys = doc.screens[0].root_window.hotkeys;
-  CHECK(keys.size() == 3, "all authored HOTKEY rows must survive");
-  CHECK(keys[0].value == "VK_ESCAPE" && keys[0].virtual_key,
-        "virtual hotkey mismatch");
-  CHECK(keys[1].value == "=" && !keys[1].virtual_key &&
-            keys[2].value == "-",
-        "character hotkey order mismatch");
-
-  opennova::mnu::Document reparsed;
-  CHECK(opennova::mnu::parse(opennova::mnu::serialize(doc), reparsed, error),
-        "serialized hotkeys failed to parse");
-  const auto &roundtrip = reparsed.screens[0].root_window.hotkeys;
-  CHECK(roundtrip.size() == 3 && roundtrip[0].value == "VK_ESCAPE" &&
-            roundtrip[1].value == "=" && roundtrip[2].value == "-",
-        "ordered hotkeys changed after save");
-  return true;
-}
-
-bool test_complete_action_attributes() {
-  const char *src =
-      "<SCREEN><NAME>S</NAME><WINDOW type=\"button\" name=\"B\">"
-      "<ACTION type=\"GLB_FILTER_NUM\" state=\"ENABLE\" file=\"browser.mnu\" "
-      "SOURCE=\"servers\" FIELD=\"players\" TARGET_FORM=\"0\" TOGGLE "
-      "TEST=\"GE\">16</ACTION>"
-      "</WINDOW></SCREEN>";
-  opennova::mnu::Document doc;
-  std::string error;
-  CHECK(opennova::mnu::parse(src, doc, error), "complete ACTION failed to parse");
-  const auto &actions = doc.screens[0].root_window.actions;
-  CHECK(actions.size() == 1, "expected one ACTION");
-  const opennova::mnu::Action &a = actions[0];
-  CHECK(a.type == "GLB_FILTER_NUM" && a.state == "ENABLE" &&
-            a.file == "browser.mnu" && a.source == "servers" &&
-            a.field == "players" && a.has_target_form &&
-            a.target_form == 0 && a.toggle && a.test == "GE" &&
-            a.target == "16",
-        "ACTION typed attributes were dropped");
-
-  opennova::mnu::Document reparsed;
-  CHECK(opennova::mnu::parse(opennova::mnu::serialize(doc), reparsed, error),
-        "serialized ACTION failed to parse");
-  CHECK(action_eq(a, reparsed.screens[0].root_window.actions[0]),
-        "ACTION typed attributes changed after save");
-  return true;
-}
-
-bool test_flag_only_action_roundtrip() {
-  const char *src =
-      "<SCREEN><NAME>S</NAME><WINDOW type=\"button\" name=\"B\">"
-      "<ACTION EXTERNAL_BROWSER></ACTION>"
-      "</WINDOW></SCREEN>";
-  opennova::mnu::Document doc;
-  std::string error;
-  CHECK(opennova::mnu::parse(src, doc, error), "flag-only ACTION failed to parse");
-  const auto &actions = doc.screens[0].root_window.actions;
-  CHECK(actions.size() == 1 && actions[0].external_browser,
-        "flag-only EXTERNAL_BROWSER ACTION was not modeled");
-
-  opennova::mnu::Document reparsed;
-  CHECK(opennova::mnu::parse(opennova::mnu::serialize(doc), reparsed, error),
-        "serialized flag-only ACTION failed to parse");
-  const auto &roundtrip = reparsed.screens[0].root_window.actions;
-  CHECK(roundtrip.size() == 1 && roundtrip[0].external_browser,
-        "flag-only EXTERNAL_BROWSER ACTION was omitted on save");
-  return true;
-}
-
-bool test_explicit_zero_presence() {
-  const char *src =
-      "<SCREEN><NAME>S</NAME><MUSICVAR>0</MUSICVAR>"
-      "<WINDOW type=\"table\" name=\"T\" GROUP=\"0\">"
-      "<FRAME><STENCIL size=\"0\">frame.tga</STENCIL></FRAME>"
-      "<APPEARANCE type=\"image\" state=\"default\" map_state=\"0\" height=\"0\">a.tga</APPEARANCE>"
-      "<STRING edge=\"0\"></STRING>"
-      "<ITEMS MULTISELECT></ITEMS><MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT>"
-      "<COLUMN count=\"0\" spacing=\"0\">"
-      "<HEADER column=\"0\" width=\"0\"></HEADER>"
-      "<BODY column=\"0\"></BODY><SUBST column=\"0\" value=\"0\"></SUBST>"
-      "</COLUMN></WINDOW></SCREEN>";
-  opennova::mnu::Document doc;
-  std::string error;
-  CHECK(opennova::mnu::parse(src, doc, error), "zero-presence MNU failed to parse");
-  const opennova::mnu::Screen &screen = doc.screens[0];
-  const opennova::mnu::Window &w = screen.root_window;
-  CHECK(screen.has_music_var && screen.music_var == 0, "MUSICVAR=0 absent");
-  CHECK(w.has_group && w.group == 0, "GROUP=0 absent");
-  CHECK(w.frame.has_stencil_size && w.frame.stencil_size == 0,
-        "STENCIL size=0 absent");
-  CHECK(w.appearances[0].has_map_state && w.appearances[0].has_height,
-        "APPEARANCE zero-valued attributes absent");
-  CHECK(w.string_data.present && w.string_data.has_edge,
-        "empty STRING edge=0 absent");
-  CHECK(w.items.present && w.items.multiselect,
-        "empty MULTISELECT ITEMS absent");
-  CHECK(w.table_data.has_min_item_height, "MIN_ITEM_HEIGHT=0 absent");
-  CHECK(w.table_data.column.has_count &&
-            w.table_data.column.has_spacing &&
-            w.table_data.column.headers[0].has_column &&
-            w.table_data.column.headers[0].has_width &&
-            w.table_data.column.bodies[0].has_column &&
-            w.table_data.column.substitutions[0].has_column,
-        "table zero-valued attribute presence absent");
-
-  opennova::mnu::Document roundtrip;
-  CHECK(opennova::mnu::parse(opennova::mnu::serialize(doc), roundtrip, error),
-        "zero-presence MNU failed to reparse");
-  CHECK(screen_eq(screen, roundtrip.screens[0]),
-        "explicit zero presence changed after save");
-  return true;
-}
-
-// Presence bits are the authored state. Clearing one must omit its optional
-// scalar even when the editor retains the previous non-default value for a
-// possible later re-enable.
-bool test_cleared_scalar_presence_omits_latent_values() {
-  const char *src =
-      "<SCREEN><NAME>S</NAME><MUSICVAR>9</MUSICVAR>"
-      "<WINDOW type=\"table\" name=\"T\" MINVAL=\"1\" MAXVAL=\"2\" "
-      "MAXCHAR=\"3\" FORM=\"4\">"
-      "<GROUP>5</GROUP>"
-      "<POSITION left=\"6\" top=\"7\" right=\"8\" bottom=\"9\"></POSITION>"
-      "<HEIGHT>10</HEIGHT><WIDTH>11</WIDTH>"
-      "<ACTION type=\"window\" TARGET_FORM=\"12\">TARGET</ACTION>"
-      "<APPEARANCE type=\"image\" state=\"default\" map_state=\"13\" "
-      "height=\"14\">widget.tga</APPEARANCE>"
-      "<STRING edge=\"15\">LABEL</STRING>"
-      "<FRAME><STENCIL size=\"16\" insetx=\"17\" insety=\"18\">"
-      "frame.tga</STENCIL></FRAME>"
-      "<LIST_BOX SB_EDGE_PAD=\"19\"><MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>"
-      "</LIST_BOX>"
-      "<COLUMN count=\"21\" spacing=\"22\">"
-      "<HEADER column=\"23\" width=\"24\">HEAD</HEADER>"
-      "<BODY column=\"25\"></BODY>"
-      "<SUBST column=\"26\" value=\"yes\" FILE>yes.tga</SUBST>"
-      "</COLUMN>"
-      "<MIN_ITEM_HEIGHT>27</MIN_ITEM_HEIGHT>"
-      "</WINDOW></SCREEN>";
-
-  opennova::mnu::Document doc;
-  std::string error;
-  CHECK(opennova::mnu::parse(src, doc, error),
-        "authoritative scalar presence parse failed: " + error);
-  opennova::mnu::Screen &screen = doc.screens[0];
-  opennova::mnu::Window &w = screen.root_window;
-  CHECK(screen.has_music_var && w.has_group && w.has_minval &&
-            w.has_maxval && w.has_maxchar && w.has_form &&
-            w.has_scroll_height && w.has_scroll_width,
-        "window/screen optional scalars did not parse as present");
-  CHECK(w.position.has_left && w.position.has_top &&
-            w.position.has_right && w.position.has_bottom &&
-            w.actions[0].has_target_form &&
-            w.appearances[0].has_map_state &&
-            w.appearances[0].has_height && w.string_data.has_edge,
-        "common optional scalars did not parse as present");
-  CHECK(w.frame.has_stencil_size && w.frame.has_insetx &&
-            w.frame.has_insety && w.list_box.has_sb_edge_pad &&
-            w.list_box.has_min_item_height &&
-            w.table_data.has_min_item_height,
-        "frame/list/table optional scalars did not parse as present");
-  CHECK(w.table_data.column.has_count &&
-            w.table_data.column.has_spacing &&
-            w.table_data.column.headers[0].has_column &&
-            w.table_data.column.headers[0].has_width &&
-            w.table_data.column.bodies[0].has_column &&
-            w.table_data.column.substitutions[0].has_column,
-        "COLUMN optional scalars did not parse as present");
-
-  screen.has_music_var = false;
-  w.has_group = false;
-  w.has_minval = false;
-  w.has_maxval = false;
-  w.has_maxchar = false;
-  w.has_form = false;
-  w.has_scroll_height = false;
-  w.has_scroll_width = false;
-  w.position.has_left = false;
-  w.position.has_top = false;
-  w.position.has_right = false;
-  w.position.has_bottom = false;
-  w.actions[0].has_target_form = false;
-  w.appearances[0].has_map_state = false;
-  w.appearances[0].has_height = false;
-  w.string_data.has_edge = false;
-  w.frame.has_stencil_size = false;
-  w.frame.has_insetx = false;
-  w.frame.has_insety = false;
-  w.list_box.has_sb_edge_pad = false;
-  w.list_box.has_min_item_height = false;
-  w.table_data.has_min_item_height = false;
-  w.table_data.column.has_count = false;
-  w.table_data.column.has_spacing = false;
-  w.table_data.column.headers[0].has_column = false;
-  w.table_data.column.headers[0].has_width = false;
-  w.table_data.column.bodies[0].has_column = false;
-  w.table_data.column.substitutions[0].has_column = false;
-
-  // The editor may retain these latent values; clearing presence must be enough.
-  CHECK(screen.music_var == 9 && w.group == 5 && w.position.left == 6 &&
-            w.actions[0].target_form == 12 &&
-            w.appearances[0].map_state == 13 &&
-            w.appearances[0].height == 14 && w.string_data.edge == 15 &&
-            w.frame.stencil_size == 16 && w.frame.insetx == 17 &&
-            w.frame.insety == 18 && w.list_box.sb_edge_pad == 19 &&
-            w.list_box.min_item_height == 20 &&
-            w.table_data.column.count == 21 &&
-            w.table_data.column.spacing == 22 &&
-            w.table_data.min_item_height == 27,
-        "test setup did not retain latent scalar values");
-
-  opennova::mnu::Document reparsed;
-  CHECK(opennova::mnu::parse(opennova::mnu::serialize(doc), reparsed, error),
-        "authoritative scalar presence reparse failed: " + error);
-  const opennova::mnu::Screen &saved_screen = reparsed.screens[0];
-  const opennova::mnu::Window &saved = saved_screen.root_window;
-  CHECK(!saved_screen.has_music_var && !saved.has_group &&
-            !saved.has_minval && !saved.has_maxval &&
-            !saved.has_maxchar && !saved.has_form &&
-            !saved.has_scroll_height && !saved.has_scroll_width,
-        "cleared window/screen presence re-materialized latent values");
-  CHECK(!saved.position.has_left && !saved.position.has_top &&
-            !saved.position.has_right && !saved.position.has_bottom &&
-            !saved.actions[0].has_target_form &&
-            !saved.appearances[0].has_map_state &&
-            !saved.appearances[0].has_height && saved.string_data.present &&
-            !saved.string_data.has_edge,
-        "cleared common scalar presence re-materialized latent values");
-  CHECK(saved.frame.stencil == "frame.tga" &&
-            !saved.frame.has_stencil_size && !saved.frame.has_insetx &&
-            !saved.frame.has_insety && saved.list_box.present &&
-            !saved.list_box.has_sb_edge_pad &&
-            !saved.list_box.has_min_item_height &&
-            !saved.table_data.has_min_item_height,
-        "cleared frame/list/table presence re-materialized latent values");
-  CHECK(!saved.table_data.column.has_count &&
-            !saved.table_data.column.has_spacing &&
-            saved.table_data.column.headers.size() == 1 &&
-            !saved.table_data.column.headers[0].has_column &&
-            !saved.table_data.column.headers[0].has_width &&
-            saved.table_data.column.bodies.size() == 1 &&
-            !saved.table_data.column.bodies[0].has_column &&
-            saved.table_data.column.substitutions.size() == 1 &&
-            !saved.table_data.column.substitutions[0].has_column,
-        "cleared COLUMN presence re-materialized latent values");
-  return true;
-}
-
-// Container presence is an editor-visible authored-block toggle. False omits
-// the whole block without destroying its retained payload, including table
-// convenience aliases that would otherwise synthesize ITEMS.
-bool test_container_presence_is_authoritative() {
-  const char *src =
-      "<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">"
-      "<WINDOW type=\"table\" name=\"OFF\">"
-      "<STRING edge=\"3\">WINDOW_TEXT</STRING>"
-      "<ITEMS><APPEARANCE type=\"outline\" state=\"default\">111111</APPEARANCE>"
-      "<APPEARANCE type=\"color\" state=\"selected\">222222</APPEARANCE>"
-      "<ITEM type=\"ID\" value=\"1\">ROW</ITEM></ITEMS>"
-      "<LIST_BOX><STRING>POPUP_TEXT</STRING><ITEMS><ITEM>POPUP_ROW</ITEM></ITEMS>"
-      "<SCROLLBAR><SHUTTLE type=\"image\" state=\"default\">popup.tga</SHUTTLE>"
-      "</SCROLLBAR></LIST_BOX>"
-      "<SPINUP><APPEARANCE type=\"image\" state=\"default\">up.tga</APPEARANCE>"
-      "</SPINUP>"
-      "<SPINDOWN><APPEARANCE type=\"image\" state=\"default\">down.tga</APPEARANCE>"
-      "</SPINDOWN>"
-      "<SCROLLBAR><APPEARANCE type=\"color\" state=\"default\">333333</APPEARANCE>"
-      "</SCROLLBAR>"
-      "</WINDOW>"
-      "<WINDOW type=\"combobox\" name=\"NESTED\">"
-      "<LIST_BOX><STRING>LATENT_STRING</STRING>"
-      "<ITEMS><ITEM>LATENT_ITEM</ITEM></ITEMS>"
-      "<SCROLLBAR><SHUTTLE type=\"image\" state=\"default\">latent.tga</SHUTTLE>"
-      "</SCROLLBAR></LIST_BOX>"
-      "</WINDOW>"
-      "</WINDOW></SCREEN>";
-
-  opennova::mnu::Document doc;
-  std::string error;
-  CHECK(opennova::mnu::parse(src, doc, error),
-        "authoritative container presence parse failed: " + error);
-  opennova::mnu::Window &off = doc.screens[0].root_window.children[0];
-  CHECK(off.string_data.present && off.items.present &&
-            off.list_box.present && off.spinup.present &&
-            off.spindown.present && off.table_data.scrollbar.present &&
-            !off.table_data.selection_color.empty(),
-        "top-level containers did not parse as present");
-  off.string_data.present = false;
-  off.items.present = false;
-  off.list_box.present = false;
-  off.spinup.present = false;
-  off.spindown.present = false;
-  off.table_data.scrollbar.present = false;
-
-  opennova::mnu::Window &nested = doc.screens[0].root_window.children[1];
-  CHECK(nested.list_box.present && nested.list_box.string_data.present &&
-            nested.list_box.items.present &&
-            nested.list_box.scrollbar.present,
-        "nested containers did not parse as present");
-  nested.list_box.string_data.present = false;
-  nested.list_box.items.present = false;
-  nested.list_box.scrollbar.present = false;
-
-  // Retained payload and table aliases remain available for undo/re-enable.
-  CHECK(off.string_data.value == "WINDOW_TEXT" &&
-            off.items.appearances.size() == 2 &&
-            off.table_data.selection_color == "222222" &&
-            off.list_box.items.items.size() == 1 &&
-            off.spinup.appearances.size() == 1 &&
-            off.table_data.scrollbar.track.size() == 1 &&
-            nested.list_box.string_data.value == "LATENT_STRING" &&
-            nested.list_box.items.items.size() == 1 &&
-            nested.list_box.scrollbar.shuttle.size() == 1,
-        "test setup did not retain latent container payload");
-
-  opennova::mnu::Document reparsed;
-  CHECK(opennova::mnu::parse(opennova::mnu::serialize(doc), reparsed, error),
-        "authoritative container presence reparse failed: " + error);
-  const opennova::mnu::Window &saved_off =
-      reparsed.screens[0].root_window.children[0];
-  CHECK(!saved_off.string_data.present && !saved_off.items.present &&
-            !saved_off.list_box.present && !saved_off.spinup.present &&
-            !saved_off.spindown.present &&
-            !saved_off.table_data.scrollbar.present,
-        "present=false top-level containers were re-materialized");
-  const opennova::mnu::Window &saved_nested =
-      reparsed.screens[0].root_window.children[1];
-  CHECK(saved_nested.list_box.present &&
-            !saved_nested.list_box.string_data.present &&
-            !saved_nested.list_box.items.present &&
-            !saved_nested.list_box.scrollbar.present,
-        "present=false nested containers were re-materialized");
-
-  opennova::mnu::Items authored;
-  CHECK(!authored.present, "new Items should begin absent");
-  authored.set_appearance_value("selected", "color", "ABCDEF");
-  CHECK(authored.present,
-        "typed Items mutator must author the ITEMS container");
-  return true;
-}
-
-// Every WINDOW type shares the same typed child parser. Saving must therefore
-// preserve modeled table/list payloads even when the runtime factory token is a
-// specialized or future widget rather than exactly "table".
-bool test_table_payloads_on_specialized_and_unknown_widgets() {
-  const auto widget = [](const std::string &type, const std::string &name) {
-    return "<WINDOW type=\"" + type + "\" name=\"" + name + "\">"
-           "<COLUMN count=\"0\" spacing=\"0\">"
-           "<HEADER justify=\"CENTER\" vjustify=\"BOTTOM\" column=\"0\" "
-           "width=\"0\" type=\"id\">TITLE</HEADER>"
-           "<BODY justify=\"RIGHT\" vjustify=\"TOP\" column=\"0\" "
-           "BITMAP_DRAW BITMAP_FLAGS=\"STANDARD\" SCALE_BITMAP CUSTOM_DRAW></BODY>"
-           "<SUBST column=\"0\" value=\"ready\" FILE>ready.tga</SUBST>"
-           "</COLUMN>"
-           "<ITEMS justify=\"CENTER\" vjustify=\"BOTTOM\" MULTISELECT>"
-           "<APPEARANCE type=\"outline\" state=\"default\">101010</APPEARANCE>"
-           "<APPEARANCE type=\"color\" state=\"selected\">202020</APPEARANCE>"
-           "<ITEM type=\"ID\" value=\"7\">ROW</ITEM>"
-           "</ITEMS>"
-           "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT>"
-           "<SCROLLBAR>"
-           "<APPEARANCE type=\"color\" state=\"default\">303030</APPEARANCE>"
-           "<SHUTTLE type=\"image\" state=\"default\" map_state=\"0\" "
-           "height=\"0\">shuttle.tga</SHUTTLE>"
-           "<SCROLLUP type=\"image\" state=\"default\">up.tga</SCROLLUP>"
-           "<SCROLLDOWN type=\"image\" state=\"default\">down.tga</SCROLLDOWN>"
-           "<SOUND state=\"CLICK_VALUE\" trigger=\"MOUSE_DOWN\">click.wav</SOUND>"
-           "<POSITION left=\"0\" top=\"0\" right=\"12\" bottom=\"24\"></POSITION>"
-           "</SCROLLBAR>"
-           "</WINDOW>";
-  };
-
-  const std::string src =
-      "<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">" +
-      widget("GLB_TABLE", "GLB") +
-      widget("LAN_LIST", "LAN") +
-      widget("RADIOEDIT", "RADIO") +
-      widget("GOPHER", "NEWS") +
-      widget("FUTURE_GRID", "FUTURE") +
-      "</WINDOW></SCREEN>";
-
-  opennova::mnu::Document doc;
-  std::string error;
-  CHECK(opennova::mnu::parse(src, doc, error),
-        "specialized table payload parse failed: " + error);
-  const opennova::mnu::Window &root = doc.screens[0].root_window;
-  CHECK(root.children.size() == 5, "expected five specialized widgets");
-
-  const opennova::mnu::WindowType expected_types[] = {
-      opennova::mnu::WindowType::GlbTable, opennova::mnu::WindowType::LanList,
-      opennova::mnu::WindowType::RadioEdit, opennova::mnu::WindowType::Gopher,
-      opennova::mnu::WindowType::Unknown,
-  };
-  for (size_t i = 0; i < root.children.size(); ++i) {
-    const opennova::mnu::Window &w = root.children[i];
-    CHECK(w.type == expected_types[i], "specialized widget type mismatch");
-    CHECK(w.table_data.column.has_count &&
-              w.table_data.column.has_spacing &&
-              w.table_data.column.headers.size() == 1 &&
-              w.table_data.column.bodies.size() == 1 &&
-              w.table_data.column.substitutions.size() == 1,
-          "typed COLUMN payload was not parsed");
-    CHECK(w.items.present && w.items.multiselect &&
-              w.items.appearances.size() == 2 && w.items.items.size() == 1,
-          "typed ITEMS payload was not parsed");
-    CHECK(w.table_data.has_min_item_height &&
-              w.table_data.min_item_height == 0,
-          "typed MIN_ITEM_HEIGHT=0 payload was not parsed");
-    CHECK(w.table_data.scrollbar.present &&
-              w.table_data.scrollbar.track.size() == 1 &&
-              w.table_data.scrollbar.shuttle.size() == 1 &&
-              w.table_data.scrollbar.scrollup.size() == 1 &&
-              w.table_data.scrollbar.scrolldown.size() == 1 &&
-              w.table_data.scrollbar.sounds.size() == 1,
-          "typed SCROLLBAR payload was not parsed");
-  }
-
-  const opennova::mnu::Window &glb = root.children[0];
-  CHECK(glb.table_data.outline_color == "101010" &&
-            glb.table_data.selection_color == "202020" &&
-            glb.table_data.multiselect,
-        "GLB_TABLE did not extract Table ITEMS conveniences");
-
-  const std::string saved = opennova::mnu::serialize(doc, true, 2);
-  const auto count = [&saved](const std::string &needle) {
-    size_t found = 0;
-    for (size_t at = 0; (at = saved.find(needle, at)) != std::string::npos;
-         at += needle.size()) {
-      ++found;
-    }
-    return found;
-  };
-  CHECK(count("<COLUMN") == 5, "COLUMN must be emitted exactly once per widget");
-  CHECK(count("<ITEMS") == 5, "ITEMS must be emitted exactly once per widget");
-  CHECK(count("<MIN_ITEM_HEIGHT") == 5,
-        "MIN_ITEM_HEIGHT must be emitted exactly once per widget");
-  CHECK(count("<SCROLLBAR") == 5,
-        "SCROLLBAR must be emitted exactly once per widget");
-
-  opennova::mnu::Document reparsed;
-  CHECK(opennova::mnu::parse(saved, reparsed, error),
-        "specialized table payload reparse failed: " + error);
-  CHECK(screen_eq(doc.screens[0], reparsed.screens[0]),
-        "specialized/unknown typed payload changed after save");
-  return true;
-}
-
-// selection_color mirrors the last selected/color row. An untouched parsed
-// ITEMS must retain every duplicate row verbatim; assigning the convenience
-// value updates only that last/canonical row, never all authored duplicates.
-bool test_duplicate_selected_color_convenience() {
-  const char *src =
-      "<SCREEN><NAME>S</NAME><WINDOW type=\"list\" name=\"L\">"
-      "<ITEMS>"
-      "<APPEARANCE type=\"color\" state=\"selected\">111111</APPEARANCE>"
-      "<APPEARANCE type=\"image\" state=\"selected\">selected.tga</APPEARANCE>"
-      "<APPEARANCE type=\"color\" state=\"selected\">222222</APPEARANCE>"
-      "</ITEMS></WINDOW></SCREEN>";
-
-  opennova::mnu::Document doc;
-  std::string error;
-  CHECK(opennova::mnu::parse(src, doc, error), "duplicate color parse failed: " + error);
-  const opennova::mnu::Items &items = doc.screens[0].root_window.items;
-  CHECK(items.selection_color == "222222",
-        "selection_color must mirror the last selected/color row");
-
-  opennova::mnu::Document untouched;
-  CHECK(opennova::mnu::parse(opennova::mnu::serialize(doc), untouched, error),
-        "untouched duplicate color reparse failed: " + error);
-  const auto &unchanged = untouched.screens[0].root_window.items.appearances;
-  CHECK(unchanged.size() == 3 && unchanged[0].value == "111111" &&
-            unchanged[1].value == "selected.tga" &&
-            unchanged[2].value == "222222",
-        "untouched duplicate selected/color rows were collapsed");
-
-  doc.screens[0].root_window.items.selection_color = "333333";
-  opennova::mnu::Document edited;
-  CHECK(opennova::mnu::parse(opennova::mnu::serialize(doc), edited, error),
-        "edited duplicate color reparse failed: " + error);
-  const auto &changed = edited.screens[0].root_window.items.appearances;
-  CHECK(changed.size() == 3 && changed[0].value == "111111" &&
-            changed[1].value == "selected.tga" &&
-            changed[2].value == "333333",
-        "convenience edit must update only the last selected/color row");
-
-  doc = untouched;
-  doc.screens[0].root_window.items.set_appearance_value(
-      "selected", "color", "444444");
-  opennova::mnu::Document helper_edited;
-  CHECK(opennova::mnu::parse(opennova::mnu::serialize(doc), helper_edited, error),
-        "helper-edited duplicate color reparse failed: " + error);
-  const auto &helper_changed =
-      helper_edited.screens[0].root_window.items.appearances;
-  CHECK(helper_changed.size() == 3 &&
-            helper_changed[0].value == "111111" &&
-            helper_changed[2].value == "444444",
-        "set_appearance_value must update only the canonical duplicate row");
-
-  doc = untouched;
-  doc.screens[0].root_window.items.selection_color.clear();
-  opennova::mnu::Document empty_alias;
-  CHECK(opennova::mnu::parse(opennova::mnu::serialize(doc), empty_alias, error),
-        "empty convenience alias reparse failed: " + error);
-  const auto &empty_alias_rows =
-      empty_alias.screens[0].root_window.items.appearances;
-  CHECK(empty_alias_rows.size() == 3 &&
-            empty_alias_rows[0].value == "111111" &&
-            empty_alias_rows[2].value == "222222",
-        "empty convenience alias must not delete or rewrite authored rows");
-
-  doc = untouched;
-  opennova::mnu::Items &synth_items = doc.screens[0].root_window.items;
-  synth_items.appearances.erase(
-      std::remove_if(
-          synth_items.appearances.begin(), synth_items.appearances.end(),
-          [](const opennova::mnu::Appearance &app) {
-            return app.state == "selected" && app.type == "color";
-          }),
-      synth_items.appearances.end());
-  synth_items.selection_color = "555555";
-  opennova::mnu::Document synthesized;
-  CHECK(opennova::mnu::parse(opennova::mnu::serialize(doc), synthesized, error),
-        "synthesized convenience row reparse failed: " + error);
-  const auto &synth_rows =
-      synthesized.screens[0].root_window.items.appearances;
-  CHECK(synth_rows.size() == 2 && synth_rows[0].type == "image" &&
-            synth_rows[1].state == "selected" &&
-            synth_rows[1].type == "color" &&
-            synth_rows[1].value == "555555",
-        "convenience value must synthesize one row when no match exists");
-  return true;
-}
-
-bool test_table_duplicate_appearance_aliases() {
-  for (const char *type : {"table", "GLB_TABLE"}) {
-    const std::string src =
-        "<SCREEN><NAME>S</NAME><WINDOW type=\"" + std::string(type) +
-        "\" name=\"T\"><ITEMS>"
-        "<APPEARANCE type=\"outline\" state=\"default\">101010</APPEARANCE>"
-        "<APPEARANCE type=\"outline\" state=\"default\">202020</APPEARANCE>"
-        "<APPEARANCE type=\"color\" state=\"selected\">303030</APPEARANCE>"
-        "<APPEARANCE type=\"color\" state=\"selected\">404040</APPEARANCE>"
-        "</ITEMS></WINDOW></SCREEN>";
-
-    opennova::mnu::Document doc;
-    std::string error;
-    CHECK(opennova::mnu::parse(src, doc, error),
-          std::string(type) + " duplicate alias parse failed: " + error);
-    opennova::mnu::Window &w = doc.screens[0].root_window;
-    CHECK(w.table_data.outline_color == "202020" &&
-              w.table_data.selection_color == "404040" &&
-              w.items.selection_color == "404040",
-          std::string(type) + " aliases must mirror last matching rows");
-
-    opennova::mnu::Document untouched;
-    CHECK(opennova::mnu::parse(opennova::mnu::serialize(doc), untouched, error),
-          std::string(type) + " untouched duplicate reparse failed: " + error);
-    const auto &same = untouched.screens[0].root_window.items.appearances;
-    CHECK(same.size() == 4 && same[0].value == "101010" &&
-              same[1].value == "202020" && same[2].value == "303030" &&
-              same[3].value == "404040",
-          std::string(type) + " untouched table duplicates changed");
-
-    w.items.selection_color = "ITEMS_ALIAS";
-    w.table_data.outline_color = "OUTLINE_ALIAS";
-    w.table_data.selection_color = "TABLE_ALIAS";
-    opennova::mnu::Document edited;
-    CHECK(opennova::mnu::parse(opennova::mnu::serialize(doc), edited, error),
-          std::string(type) + " edited alias reparse failed: " + error);
-    const auto &changed = edited.screens[0].root_window.items.appearances;
-    CHECK(changed.size() == 4 && changed[0].value == "101010" &&
-              changed[1].value == "OUTLINE_ALIAS" &&
-              changed[2].value == "303030" &&
-              changed[3].value == "TABLE_ALIAS",
-          std::string(type) +
-              " table aliases must win and update only final matches");
-
-    doc = untouched;
-    opennova::mnu::Window &empty = doc.screens[0].root_window;
-    empty.table_data.outline_color.clear();
-    empty.table_data.selection_color.clear();
-    empty.items.selection_color.clear();
-    opennova::mnu::Document empty_saved;
-    CHECK(opennova::mnu::parse(opennova::mnu::serialize(doc), empty_saved, error),
-          std::string(type) + " empty table alias reparse failed: " + error);
-    const auto &empty_rows =
-        empty_saved.screens[0].root_window.items.appearances;
-    CHECK(empty_rows.size() == 4 && empty_rows[0].value == "101010" &&
-              empty_rows[1].value == "202020" &&
-              empty_rows[2].value == "303030" &&
-              empty_rows[3].value == "404040",
-          std::string(type) + " empty aliases must not delete table rows");
-
-    doc = untouched;
-    opennova::mnu::Window &synth = doc.screens[0].root_window;
-    synth.items.appearances.clear();
-    synth.items.selection_color = "IGNORED_ITEMS_ALIAS";
-    synth.table_data.outline_color = "SYNTH_OUTLINE";
-    synth.table_data.selection_color = "SYNTH_SELECTION";
-    opennova::mnu::Document synthesized;
-    CHECK(opennova::mnu::parse(opennova::mnu::serialize(doc), synthesized, error),
-          std::string(type) + " synthesized table alias reparse failed: " +
-              error);
-    const auto &synth_rows =
-        synthesized.screens[0].root_window.items.appearances;
-    CHECK(synth_rows.size() == 2 &&
-              synth_rows[0].state == "default" &&
-              synth_rows[0].type == "outline" &&
-              synth_rows[0].value == "SYNTH_OUTLINE" &&
-              synth_rows[1].state == "selected" &&
-              synth_rows[1].type == "color" &&
-              synth_rows[1].value == "SYNTH_SELECTION",
-          std::string(type) +
-              " table aliases must synthesize one canonical row each");
-  }
-  return true;
-}
-
-// STENCIL is itself meaningful typed structure: explicit zero size and inset
-// attributes must survive even when it has no texture text.
-bool test_empty_stencil_attributes_roundtrip() {
-  const char *src =
-      "<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">"
-      "<WINDOW type=\"static\" name=\"ZERO\">"
-      "<FRAME><STENCIL size=\"0\"></STENCIL></FRAME></WINDOW>"
-      "<WINDOW type=\"static\" name=\"INSETS\">"
-      "<FRAME><STENCIL insetx=\"0\" insety=\"7\"></STENCIL></FRAME></WINDOW>"
-      "</WINDOW></SCREEN>";
-
-  opennova::mnu::Document doc;
-  std::string error;
-  CHECK(opennova::mnu::parse(src, doc, error), "empty STENCIL parse failed: " + error);
-  const auto &children = doc.screens[0].root_window.children;
-  CHECK(children.size() == 2, "expected two framed children");
-  CHECK(children[0].frame.stencil.empty() &&
-            children[0].frame.has_stencil_size &&
-            children[0].frame.stencil_size == 0,
-        "empty STENCIL size=0 was not modeled");
-  CHECK(children[1].frame.stencil.empty() &&
-            children[1].frame.has_insetx &&
-            children[1].frame.insetx == 0 &&
-            children[1].frame.has_insety &&
-            children[1].frame.insety == 7,
-        "empty STENCIL inset attributes were not modeled");
-
-  const std::string saved = opennova::mnu::serialize(doc, true, 2);
-  opennova::mnu::Document reparsed;
-  CHECK(opennova::mnu::parse(saved, reparsed, error),
-        "empty STENCIL reparse failed: " + error);
-  CHECK(screen_eq(doc.screens[0], reparsed.screens[0]),
-        "empty STENCIL attributes changed after save");
-  return true;
-}
-
-static std::vector<uint8_t> test_utf16(const std::string &text, bool big_endian) {
-  std::vector<uint8_t> out = big_endian
-                                 ? std::vector<uint8_t>{0xFE, 0xFF}
-                                 : std::vector<uint8_t>{0xFF, 0xFE};
-  auto append_unit = [&](uint16_t unit) {
-    if (big_endian) {
-      out.push_back(static_cast<uint8_t>(unit >> 8));
-      out.push_back(static_cast<uint8_t>(unit & 0xFF));
-    } else {
-      out.push_back(static_cast<uint8_t>(unit & 0xFF));
-      out.push_back(static_cast<uint8_t>(unit >> 8));
-    }
-  };
-  for (size_t i = 0; i < text.size();) {
-    const uint8_t lead = static_cast<uint8_t>(text[i++]);
-    uint32_t cp = lead;
-    if ((lead & 0xE0) == 0xC0) {
-      cp = ((lead & 0x1F) << 6) |
-           (static_cast<uint8_t>(text[i++]) & 0x3F);
-    } else if ((lead & 0xF0) == 0xE0) {
-      cp = ((lead & 0x0F) << 12) |
-           ((static_cast<uint8_t>(text[i++]) & 0x3F) << 6) |
-           (static_cast<uint8_t>(text[i++]) & 0x3F);
-    } else if ((lead & 0xF8) == 0xF0) {
-      cp = ((lead & 0x07) << 18) |
-           ((static_cast<uint8_t>(text[i++]) & 0x3F) << 12) |
-           ((static_cast<uint8_t>(text[i++]) & 0x3F) << 6) |
-           (static_cast<uint8_t>(text[i++]) & 0x3F);
-    }
-    if (cp <= 0xFFFF) {
-      append_unit(static_cast<uint16_t>(cp));
-    } else {
-      cp -= 0x10000;
-      append_unit(static_cast<uint16_t>(0xD800 | (cp >> 10)));
-      append_unit(static_cast<uint16_t>(0xDC00 | (cp & 0x3FF)));
-    }
+std::vector<uint8_t> utf16le(const std::u16string &text) {
+  std::vector<uint8_t> out{0xFF, 0xFE};
+  for (char16_t u : text) {
+    out.push_back(static_cast<uint8_t>(u & 0xFF));
+    out.push_back(static_cast<uint8_t>(u >> 8));
   }
   return out;
 }
 
-bool test_source_encoding_retained() {
-  const std::string src =
-      "<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"ROOT\">"
-      "<STRING>caf\xC3\xA9</STRING></WINDOW></SCREEN>";
-  const struct {
-    opennova::mnu::SourceEncoding encoding;
-    std::vector<uint8_t> bytes;
-  } cases[] = {
-      {opennova::mnu::SourceEncoding::Utf8, std::vector<uint8_t>(src.begin(), src.end())},
-      {opennova::mnu::SourceEncoding::Utf8Bom,
-       [&]() {
-         std::vector<uint8_t> b{0xEF, 0xBB, 0xBF};
-         b.insert(b.end(), src.begin(), src.end());
-         return b;
-       }()},
-      {opennova::mnu::SourceEncoding::Utf16LE, test_utf16(src, false)},
-      {opennova::mnu::SourceEncoding::Utf16BE, test_utf16(src, true)},
-  };
-
-  for (const auto &c : cases) {
-    opennova::mnu::Document doc;
-    std::string error;
-    CHECK(opennova::mnu::parse(c.bytes.data(), c.bytes.size(), doc, error),
-          "encoded MNU failed to parse: " + error);
-    CHECK(doc.source_encoding == c.encoding, "source encoding was not retained");
-    std::vector<uint8_t> saved;
-    CHECK(opennova::mnu::serialize_bytes(doc, saved, error),
-          "encoded MNU failed to serialize: " + error);
-    opennova::mnu::Document reparsed;
-    CHECK(opennova::mnu::parse(saved.data(), saved.size(), reparsed, error),
-          "saved encoded MNU failed to parse: " + error);
-    CHECK(reparsed.source_encoding == c.encoding,
-          "save changed the document encoding");
-    CHECK(reparsed.screens.size() == 1 && reparsed.screens[0].name == "S",
-          "save changed encoded document semantics");
-    CHECK(reparsed.screens[0].root_window.string_data.value ==
-              "caf\xC3\xA9",
-          "non-ASCII text changed across encoded save");
+// [orig: XML_ParseWithBOMDetection @ 0x76a690] The code page, UTF-8 with its mark and
+// UTF-16 LE are kept; a big-endian file is read as little-endian and loads nothing.
+bool test_source_encoding() {
+  const std::string src = "<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"R\"><STRING>caf\xE9</STRING>"
+                          "</WINDOW></SCREEN>";
+  mnu::Document doc;
+  std::string error;
+  CHECK(mnu::parse(src, doc, error) && doc.source_encoding == mnu::SourceEncoding::CodePage, "code page");
+  CHECK(root(doc).string_data.value == "caf\xE9", "the code page's bytes");
+  std::vector<uint8_t> saved;
+  CHECK(mnu::serialize_bytes(doc, saved, error) && std::string(saved.begin(), saved.end()).find("caf\xE9") !=
+                                                        std::string::npos,
+        "written back as bytes");
+  const std::string bom = "\xEF\xBB\xBF<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"R\"><STRING>caf\xC3\xA9"
+                          "</STRING></WINDOW></SCREEN>";
+  CHECK(mnu::parse(bom, doc, error) && doc.source_encoding == mnu::SourceEncoding::Utf8Bom &&
+            root(doc).string_data.value == "caf\xC3\xA9",
+        "UTF-8 with its mark");
+  const std::vector<uint8_t> wide =
+      utf16le(u"<SCREEN><NAME>S</NAME><WINDOW type=\"window\" name=\"R\"><STRING>caf" + std::u16string(1, char16_t(0xE9)) +
+              u"</STRING></WINDOW></SCREEN>");
+  CHECK(mnu::parse(wide.data(), wide.size(), doc, error) && doc.source_encoding == mnu::SourceEncoding::Utf16LE &&
+            root(doc).string_data.value == "caf\xC3\xA9",
+        "UTF-16 LE");
+  CHECK(mnu::serialize_bytes(doc, saved, error) && saved.size() > 2 && saved[0] == 0xFF && saved[1] == 0xFE,
+        "written back as UTF-16 LE");
+  mnu::Document again;
+  CHECK(mnu::parse(saved.data(), saved.size(), again, error) && root(again).string_data.value == "caf\xC3\xA9",
+        "and read back");
+  std::vector<uint8_t> big{0xFE, 0xFF};
+  for (size_t i = 2; i < wide.size(); i += 2) {
+    big.push_back(wide[i + 1]);
+    big.push_back(wide[i]);
   }
-
-  opennova::mnu::Document fresh;
-  CHECK(fresh.source_encoding == opennova::mnu::SourceEncoding::Utf8,
-        "new documents must default to UTF-8 without a BOM");
+  CHECK(!mnu::parse(big.data(), big.size(), doc, error), "UTF-16 BE loads nothing");
   return true;
 }
 
@@ -2268,7 +959,6 @@ bool test_source_encoding_retained() {
 
 int main() {
   int failed = 0;
-
 #define RUN_TEST(name)                     \
   do {                                     \
     std::cout << "Running " #name "... "; \
@@ -2280,47 +970,32 @@ int main() {
     }                                      \
   } while (0)
 
-  RUN_TEST(test_basic_screen);
-  RUN_TEST(test_position);
-  RUN_TEST(test_font);
-  RUN_TEST(test_appearance);
-  RUN_TEST(test_sound);
-  RUN_TEST(test_action);
-  RUN_TEST(test_string);
-  RUN_TEST(test_cursor);
-  RUN_TEST(test_window_types);
-  RUN_TEST(test_unknown_type_token_roundtrip);
-  RUN_TEST(test_nested_windows);
-  RUN_TEST(test_hex_color);
-  RUN_TEST(test_color_variable);
-  RUN_TEST(test_strip_hotkey);
-  RUN_TEST(test_full_mnu_document);
-  RUN_TEST(test_scroll_elements);
-  RUN_TEST(test_table_column);
-  RUN_TEST(test_table_subst);
-  RUN_TEST(test_table_scrollbar);
-  RUN_TEST(test_table_items_colors);
-  RUN_TEST(test_serialize_roundtrip);
-  RUN_TEST(test_create_from_scratch);
-  RUN_TEST(test_grill_attributes_roundtrip);
-  RUN_TEST(test_compound_container_preservation);
-  RUN_TEST(test_ordered_hotkeys);
-  RUN_TEST(test_complete_action_attributes);
-  RUN_TEST(test_flag_only_action_roundtrip);
-  RUN_TEST(test_explicit_zero_presence);
-  RUN_TEST(test_cleared_scalar_presence_omits_latent_values);
-  RUN_TEST(test_container_presence_is_authoritative);
-  RUN_TEST(test_table_payloads_on_specialized_and_unknown_widgets);
-  RUN_TEST(test_duplicate_selected_color_convenience);
-  RUN_TEST(test_table_duplicate_appearance_aliases);
-  RUN_TEST(test_empty_stencil_attributes_roundtrip);
-  RUN_TEST(test_source_encoding_retained);
+  RUN_TEST(test_screen_reads_name_musicvar_windows);
+  RUN_TEST(test_window_creation);
+  RUN_TEST(test_window_attributes);
+  RUN_TEST(test_base_parse_stops);
+  RUN_TEST(test_text_rules);
+  RUN_TEST(test_position_rules);
+  RUN_TEST(test_action_rules);
+  RUN_TEST(test_text_elements);
+  RUN_TEST(test_parts);
+  RUN_TEST(test_scroll_rules);
+  RUN_TEST(test_list_rules);
+  RUN_TEST(test_table_rules);
+  RUN_TEST(test_table_header_walk);
+  RUN_TEST(test_repeated_type_elements);
+  RUN_TEST(test_fatal_notes);
+  RUN_TEST(test_extras);
+  RUN_TEST(test_writer_forms);
+  RUN_TEST(test_write_issues);
+  RUN_TEST(test_every_element_fixed_point);
+  RUN_TEST(test_helpers);
+  RUN_TEST(test_source_encoding);
 
   if (failed > 0) {
     std::cerr << "\n" << failed << " test(s) FAILED\n";
     return EXIT_FAILURE;
   }
-
   std::cout << "\nAll tests passed!\n";
   return EXIT_SUCCESS;
 }

@@ -625,6 +625,15 @@ void test_view_projection_retail_stretch() {
     // A sizeless surface degrades to the identity aspect.
     const ViewProjection none = view_projection(80.0f, 0, 0, 0);
     CHECK(none.scale_y == 1.0f && none.fov_v_deg == 80.0f);
+    CHECK(none.raster_shift.x == 0.0f && none.raster_shift.y == 0.0f);
+    // D3D9 rasterises the pass on the backbuffer, pixel centres on the integers
+    // [orig: Render_SetViewport @0x58A720; Render_SetViewAndProjectionMatrices
+    // @0x58D9DE, no sub-pixel term]: half a surface pixel right and down, in NDC
+    // (y up), stretched or not.
+    const ViewProjection xga = view_projection(80.0f, -1, 1024, 768);
+    CHECK(xga.raster_shift.x == 1.0f / 1024.0f && xga.raster_shift.y == -1.0f / 768.0f);
+    CHECK(wide.raster_shift.x == 1.0f / 1920.0f && wide.raster_shift.y == -1.0f / 1080.0f);
+    CHECK(tall.raster_shift.x == 1.0f / 1920.0f && tall.raster_shift.y == -1.0f / 1200.0f);
 
     // The FP viewmodel pass shares scaleY [orig: @0x4dee7f / @0x58f6b0]: the
     // focal ratio is the ratio of the horizontal half-tangents, aspect-invariant.
@@ -663,6 +672,11 @@ void test_nvg_view_projection() {
     CHECK(sighted.fov_h_deg == 20.0f && sighted.aspect == wide.aspect);
     CHECK(std::fabs(sighted.fov_v_deg - fov_vertical_from_horizontal_deg(20.0f, wide.aspect)) < 1e-5f);
     CHECK(sighted.target_w == 512 && sighted.target_h == 512);
+    // Each arm rasterises into the square [orig: NVG_RenderSceneToTarget's
+    // Render_SetViewport @0x5D06D0]: the square's half pixel, not the surface's.
+    for (const ViewProjection &arm : {nvg, native_nvg, lens, sighted}) {
+        CHECK(arm.raster_shift.x == 1.0f / 512.0f && arm.raster_shift.y == -1.0f / 512.0f);
+    }
 }
 
 // [orig: Game_RunVideoTestDialog @0x53ed3e..0x53ed6b] The first launch's video
@@ -1114,7 +1128,7 @@ void test_compose_camera_third_person() {
 // @0x437B1F..0x437B4B, the ease @0x437C56..0x437C79, the distance
 // @0x438121..0x438136, the quarter yaw @0x438138..0x43814A, the pitch
 // @0x438150, the clearances @0x438409..0x438456, the slope march
-// @0x43846E..0x438619, the watercraft drop @0x43861D..0x43864C].
+// @0x43846E..0x438619, the aircraft drop @0x43861D..0x43864C].
 PlayerViewState mounted_state(float bound_radius, float carrier_z = 10.0f) {
     PlayerViewState v;
     v.third_person = true;
@@ -1211,15 +1225,15 @@ void test_compose_camera_mounted() {
     CHECK(near_eq(pose.eye[0], 7.0f * std::sin(ten) * std::cos(p), 0.002f));
     CHECK(pose.yaw_deg > 350.0f && pose.yaw_deg < 359.5f);
 
-    // The WATERCRAFT drop: half the radius off the eye.
-    PlayerViewState boat = mounted_state(4.0f);
-    boat.mount.watercraft = true;
-    PlayerCameraPose boat_pose;
-    player_view_compose_camera(boat, position, no_anchor, false, nullptr, false,
-            0.0f, 0.0f, 0, 0, 0, false, 0.0f, boat_pose);
+    // The AIRCRAFT drop: half the radius off the eye.
+    PlayerViewState air = mounted_state(4.0f);
+    air.mount.aircraft = true;
+    PlayerCameraPose air_pose;
+    player_view_compose_camera(air, position, no_anchor, false, nullptr, false,
+            0.0f, 0.0f, 0, 0, 0, false, 0.0f, air_pose);
     player_view_compose_camera(v, position, no_anchor, false, nullptr, false,
             0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
-    CHECK(near_eq(boat_pose.eye[2], pose.eye[2] - 2.0f, 0.001f));
+    CHECK(near_eq(air_pose.eye[2], pose.eye[2] - 2.0f, 0.001f));
 
     // The water floor's polarity: with the water at 100 an entity ABOVE it
     // (position z 200) gets the eye raised to 100.25, a submerged one keeps

@@ -184,10 +184,20 @@ public:
 	// square at the frame's frustum instead, through the matrix it serves to
 	// TargetProjectionXrInterface (which this returns while it is served).
 	// Anything that projects world points onto the surface (HUD labels, tags,
-	// picks) must read THIS projection: while the target is live the gameplay
-	// camera only carries a CULLING SUPERSET of the frustum (the cullers that
-	// read it must never clip what the target draws).
+	// picks) must read THIS frame (screen_projection for the HUD): while the
+	// target is live the gameplay camera only carries a CULLING SUPERSET of the
+	// frustum (the cullers that read it must never clip what the target draws).
+	// Every camera here draws through the frame's D3D9 raster shift (the
+	// engine's ViewProjection::raster_shift, render/d3d9_raster_device.h), and
+	// this is the projection the raster draws with, the shift included.
 	Projection view_projection() const;
+	// The frame's projection without that raster shift: the original's screen
+	// projection, which maps a world point to the window coordinate its 2D draws
+	// at (D3D9's, pixel centres on the integers). The HUD's world anchors (attach
+	// labels, friendly tags, the third-person aim point) project through it and
+	// draw under the overlay's d3d9_screen_to_canvas, as the original's do; the
+	// water's strip march and mirror take it too (Water::_drawing_view).
+	Projection screen_projection() const;
 	// The camera drawing the world while the stretched target is live (null
 	// when the surface draws directly), and that target.
 	Camera3D *projection_camera() const;
@@ -312,6 +322,10 @@ private:
 	Ref<PlayerLocalView> view_; // the sim's per-tick view snapshot (null = no sim)
 	float camera_saved_fov_ = -1.0f;
 	int camera_saved_keep_aspect_ = -1;
+	int camera_saved_projection_ = -1;
+	// The D3D9 raster shift the frame's cameras draw through (view_projection
+	// carries it, screen_projection takes it back out).
+	opennova::renderer::NdcShift raster_shift_;
 	// The stretched-mode target (view_projection): the SubViewport, its camera,
 	// the blit CanvasLayer, and the surface viewport whose own 3D draw it
 	// replaced while live.

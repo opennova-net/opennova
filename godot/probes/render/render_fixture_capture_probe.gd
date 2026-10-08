@@ -10,7 +10,6 @@ extends GameProbe
 ## transaction in FixturePublication; this file orchestrates. Needs a window
 ## (the capture resolution is the window's).
 
-const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const ShadowAttributionCaptureSession := preload(
 		"res://probes/render/shadow_attribution_capture_session.gd")
 
@@ -134,15 +133,15 @@ func _capture(ctx: ProbeContext) -> void:
 	var mission_root := String(ctx.args.get("mission_resource_dir", "")).strip_edges()
 	if mission_root.is_empty():
 		mission_root = LaunchFlags.resource_dir()
-	# The packed runtime root and its expansion are the launch's (--resource-dir,
-	# /exp); the manifest records the mounted expansion.
-	var expansion := ResourceDirSettings.get_expansion().strip_edges()
 	if not ResourceRoot.is_valid_root(mission_root):
 		_fail("invalid loose mission root: %s" % mission_root)
 		return
 	if ctx.resource_root() == null:
 		_fail("the shell has no mounted packed runtime root")
 		return
+	# The packed runtime root and its expansion are the launch's (--resource-dir,
+	# /exp); the manifest records the mounted expansion.
+	var expansion := String(ctx.resource_root().get_expansion())
 	var mission_path := Paths.resolve_file(mission_root, mission_name)
 	if mission_path.is_empty():
 		_fail("%s is absent from loose mission root %s" % [mission_name, mission_root])

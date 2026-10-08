@@ -266,6 +266,8 @@ std::vector<DetailInstance> generate_detail_cell(
 		instance.slot = static_cast<uint8_t>(slot_index);
 		instance.candidate = candidate.index;
 		instance.cell_key = cell_key;
+		instance.atlas_x = cell.atlas_x;
+		instance.atlas_z = cell.atlas_z;
 		instance.center = {
 		    from_fixed(candidate.x_fixed),
 		    from_fixed(candidate.z_fixed),

@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/font.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
@@ -16,9 +17,11 @@
 #include <godot_cpp/variant/vector2i.hpp>
 
 #include <formats/def/def.h>
+#include <runtime/hud/hud_texture_names.h>
 
 namespace godot {
 
+class FntResource;
 class ResourceRoot;
 class RtxtStringFile;
 class VehicleHudBlock;
@@ -86,6 +89,13 @@ public:
 		// the rangefinder digit advance and the 16px digit-strip cell.
 		BINOCULAR_DIGIT_STEP = 10,
 		VIEW_DIGIT_CELL = 16,
+		// The view effects' textures (view_effect_texture; hud/hud_texture_names.h).
+		VIEW_TEXTURE_BINOCULAR_MASK = opennova::hud::kViewTexBinocularMask,
+		VIEW_TEXTURE_BINOCULAR_CROSSHAIR = opennova::hud::kViewTexBinocularCrosshair,
+		VIEW_TEXTURE_BINOCULAR_DIGITS = opennova::hud::kViewTexBinocularDigits,
+		VIEW_TEXTURE_NVG_MASK = opennova::hud::kViewTexNvgMask,
+		VIEW_TEXTURE_NVG_SCALE = opennova::hud::kViewTexNvgScale,
+		VIEW_TEXTURE_VIGNETTE = opennova::hud::kViewTexVignette,
 	};
 	// kPercentToAlpha (2.55 — authored percent -> 0..255 alpha), bound as a
 	// method because class constants are integer-only.
@@ -105,6 +115,11 @@ public:
 	static Rect2 nvg_scene_sight_rect(const Rect2 &p_design, const Vector2 &p_surface,
 			int p_aspect_mode);
 	static Vector2 pixel_delta_to_design(const Vector2 &p_delta, const Vector2 &p_surface);
+	// Where a HUD draw lands on this raster: the original's window coordinate
+	// plus D3D9's pixel centre on both axes (engine renderer/d3d9_raster.h). A
+	// GDScript HUD drawer that draws the original's coordinates opens its
+	// _draw with draw_set_transform(HudPos.d3d9_screen_offset()).
+	static Vector2 d3d9_screen_offset();
 	static int fade_decay(int p_elapsed_ticks, int p_ramp_ticks);
 	static int fade_flash_alpha(int p_elapsed_ticks, int p_ramp_ticks,
 			int p_base_alpha, int p_max_alpha);
@@ -181,13 +196,22 @@ public:
 	static Vector2i loading_bar_size();
 	static Color loading_bar_border_gray();
 	static Color loading_bar_fill_color();
-	// The SP start-mission splash strings and the phase-selected continue-line
-	// color, already through the witnessed half-bright fold.
+	// The SP start-mission splash strings.
 	static String loading_splash_arrow_image();
 	static String loading_splash_sound_set();
 	static String loading_splash_continue_key();
 	static String loading_splash_continue_font();
-	static Color loading_splash_continue_color(bool p_phase_on);
+	// The continue line through its font page's material (D-LOADSCR-10): the engine's run
+	// (hud::splash_continue_run) over a `p_size` display, a triangle array per page run into `p_item`
+	// (none for a null item) over `p_pages` (font_page_textures'), its UVs flagged for the item's glyph
+	// shader (glyph_shader_code), which runs the page's MODULATE2X stage over the halved colours. Returns
+	// each run as drawn ({page, uvs, colors}); none where the font holds no glyphs.
+	static Array draw_splash_continue(CanvasItem *p_item, const Ref<FntResource> &p_font, const Array &p_pages,
+			const String &p_text, const Vector2i &p_size, bool p_phase_on);
+	// A font's pages as the textures its glyph runs draw from (font_page_glyphs), by page.
+	static Array font_page_textures(const Ref<FntResource> &p_font);
+	// The canvas_item shader an item whose glyph runs draw through their page's material carries.
+	static String glyph_shader_code();
 
 	// The first-person view-effect spec (hud/view_effects.h carries the
 	// values and witnesses): binocular/NVG overlay rects in the 1024x768
@@ -197,6 +221,9 @@ public:
 	static Rect2 nvg_scale_rect();
 	static Color nvg_scale_modulate();
 	static int binocular_range_step(int p_current, int p_target);
+	// The view effects' texture names, by VIEW_TEXTURE_* (hud/hud_texture_names.h carries
+	// the names and witnesses); "" past them.
+	static String view_effect_texture(int p_which);
 
 	// The scoped-view circle mask (runtime/hud/scope_circle_mask.h carries the
 	// geometry and the witnesses). One batch per call, in VIEWPORT PIXELS and

@@ -317,6 +317,17 @@ EntityHandle los_walker_parent(const Entity *e, bool parent_cleared = false);
 bool terrain_clip_segment(const terrain::TerrainHeightField &field, const int32_t a[3],
                           const int32_t b[3], int32_t out_hit[3]);
 
+// The movement resolver's ground-settle tail over the terrain alone (an empty candidate set): Z
+// raised to the 6144 grid, a 2.0 u column clipped by the heightfield (an indoors body, or none,
+// skips it: the column's foot is the ground), then clearance = feet (pos z less the capsule
+// bottom) - ground. The motor runs it with no collision world wired; the editor's mission view
+// stands a placed person's spawn on the terrain with it.
+// [orig: Entity_MovementCollisionResolver ground-settle tail @0x4B3D6E..0x4B3DA9 ->
+//  Entity_RaycastGroundHeightAndObject(e, 0, 0, 0, 0x20000) @0x4B3D95 -> Entity_RaycastCollision
+//  terrain leg @0x413760 (no candidates)]
+int32_t terrain_settle_clearance(const terrain::TerrainHeightField *field, const int32_t pos[3],
+                                 int32_t capsule_bottom, bool indoors);
+
 // ----------------------------------------------------------------------------
 // Per-query blink accumulation. [orig: g_BlinkFlagsAccum @ 0xB57C70,
 // g_BlinkHitSlot0..3 @ 0xB57C74, g_BlinkHitCount @ 0x82AE20 — cleared per query
@@ -393,9 +404,13 @@ inline constexpr uint32_t kTouchFlagGrounded = 0x800;
 
 // Collision-face flag bits [orig: face tests @0x4e5073-family]; the F3 hitbox
 // report (godot/src/simulation/hitbox_debug_report.h) carries them per face.
+// Every ray takes a face from either side but a 0x800 face, which it takes
+// only entering from its front; flag 1 takes even that one from either side
+// [orig: Physics_RaycastAgainstBoneCollision @ 0x4e5115..0x4e5139, every caller
+// passing the back-face argument 1].
 inline constexpr uint32_t kFaceFlagBothSides = 0x1;
 inline constexpr uint32_t kFaceFlagNeverHit = 0x100;
-inline constexpr uint32_t kFaceFlagDoubleSided = 0x800;
+inline constexpr uint32_t kFaceFlagFrontOnly = 0x800;
 
 // A test point (stride-4 record, xyz + spare — faithful to the caller layout).
 struct CollisionPoint {
@@ -498,8 +513,8 @@ bool collision_raycast_polygons(const CollisionTargetView &target,
 // transform of the segment, face AABB reject, flags & 0x100 skip, the
 // material-17 foliage skip when the ammo carries flag 0x4000000, the
 // plane-straddle test ((v.n >> 14) + dist on both endpoints), the direction
-// rule (face flag 1 = both sides; 0x800 = double-sided via the witnessed
-// nonzero stack-residue arg; else enter-front d0>0 && d1<=0), the distance
+// rule (either side, the back-face argument every caller pushes being 1; a
+// 0x800 face enter-front d0>0 && d1<=0 alone, unless flag 1), the distance
 // split |d0| * len / (|d0| + |d1|) with the "Rounds Divide Error"
 // 0x40000000 clamp, accept at <= best, and the odd-even point-in-triangle on
 // the normal's projection plane (Math_PointInTriangle2D @ 0x414050, Q8

@@ -7,6 +7,7 @@
 #include <imgui_internal.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <cstring>
 
 // The engine's ImGui copy must be the commit the imgui-godot addon bundles
@@ -21,24 +22,53 @@ namespace opennova::devtools {
 
 namespace {
 
-constexpr const char *kWorkspaceDockspace = "OpenNovaWorkspaceDockspace";
-
-void create_default_layout(ImGuiID dockspace_id, const ImGuiViewport &viewport,
+void create_default_layout(ImGuiID dockspace_id, const ImGuiViewport &viewport, const DockLayout &layout,
 		const std::vector<std::unique_ptr<Window>> &windows) {
+	const auto wanted = [&windows](InitialDockPlacement placement) {
+		return std::any_of(windows.begin(), windows.end(),
+				[placement](const auto &window) { return window->initial_dock_placement() == placement; });
+	};
 	ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
 	ImGui::DockBuilderSetNodePos(dockspace_id, viewport.WorkPos);
 	ImGui::DockBuilderSetNodeSize(dockspace_id, viewport.WorkSize);
 	ImGuiID center_id = dockspace_id;
 	ImGuiID right_id = 0;
-	ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Right, 0.30f, &right_id, &center_id);
+	ImGuiID bottom_id = 0;
+	ImGuiID left_id = 0;
+	if (layout.bottom_full_width) {
+		// The bottom strip under everything first, then the two columns off what is
+		// above it.
+		if (wanted(InitialDockPlacement::Bottom)) {
+			ImGui::DockBuilderSplitNode(center_id, ImGuiDir_Down, layout.bottom, &bottom_id, &center_id);
+		}
+		if (wanted(InitialDockPlacement::Left)) {
+			ImGui::DockBuilderSplitNode(center_id, ImGuiDir_Left, layout.left, &left_id, &center_id);
+		}
+		ImGui::DockBuilderSplitNode(center_id, ImGuiDir_Right, layout.right, &right_id, &center_id);
+	} else {
+		ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Right, layout.right, &right_id, &center_id);
+	}
 	// The right column splits only when a window asks for its lower half, so
 	// a product without one keeps the whole column for its right windows.
 	ImGuiID right_bottom_id = 0;
-	for (const auto &window : windows) {
-		if (window->initial_dock_placement() == InitialDockPlacement::RightBottom) {
-			ImGui::DockBuilderSplitNode(right_id, ImGuiDir_Down, 0.45f, &right_bottom_id, &right_id);
-			break;
+	if (wanted(InitialDockPlacement::RightBottom)) {
+		ImGui::DockBuilderSplitNode(right_id, ImGuiDir_Down, 0.45f, &right_bottom_id, &right_id);
+	}
+	// Likewise a bottom strip and a left column come off the centre only on request,
+	// so the game's layout (centre + right column) is untouched.
+	if (!layout.bottom_full_width) {
+		for (const auto &window : windows) {
+			const InitialDockPlacement placement = window->initial_dock_placement();
+			if (placement == InitialDockPlacement::Bottom && bottom_id == 0) {
+				ImGui::DockBuilderSplitNode(center_id, ImGuiDir_Down, layout.bottom, &bottom_id, &center_id);
+			} else if (placement == InitialDockPlacement::Left && left_id == 0) {
+				ImGui::DockBuilderSplitNode(center_id, ImGuiDir_Left, layout.left, &left_id, &center_id);
+			}
 		}
+	}
+	ImGuiID center_right_id = 0;
+	if (wanted(InitialDockPlacement::CenterRight)) {
+		ImGui::DockBuilderSplitNode(center_id, ImGuiDir_Right, layout.center_right, &center_right_id, &center_id);
 	}
 	for (const auto &window : windows) {
 		const InitialDockPlacement placement = window->initial_dock_placement();
@@ -48,9 +78,47 @@ void create_default_layout(ImGuiID dockspace_id, const ImGuiViewport &viewport,
 			ImGui::DockBuilderDockWindow(window->title(), right_id);
 		} else if (placement == InitialDockPlacement::RightBottom) {
 			ImGui::DockBuilderDockWindow(window->title(), right_bottom_id);
+		} else if (placement == InitialDockPlacement::Bottom) {
+			ImGui::DockBuilderDockWindow(window->title(), bottom_id);
+		} else if (placement == InitialDockPlacement::Left) {
+			ImGui::DockBuilderDockWindow(window->title(), left_id);
+		} else if (placement == InitialDockPlacement::CenterRight) {
+			ImGui::DockBuilderDockWindow(window->title(), center_right_id);
 		}
 	}
 	ImGui::DockBuilderFinish(dockspace_id);
+}
+
+// The frame's hover taken back after NewFrame: no window hovered, so no item is and no tooltip
+// starts. The position stays the bridge's.
+void drop_hover() {
+	ImGuiContext &g = *ImGui::GetCurrentContext();
+	g.HoveredWindow = nullptr;
+	g.HoveredWindowUnderMovingWindow = nullptr;
+	g.HoveredWindowBeforeClear = nullptr;
+}
+
+// The frame's wheel taken back: NewFrame set the scroll target of the window it wheels (applied as
+// the window begins), and the canvases read io.MouseWheel.
+void drop_wheel() {
+	ImGuiContext &g = *ImGui::GetCurrentContext();
+	g.IO.MouseWheel = 0.0f;
+	g.IO.MouseWheelH = 0.0f;
+	if (g.WheelingWindow && g.WheelingWindowScrolledFrame == g.FrameCount)
+		g.WheelingWindow->ScrollTarget = ImVec2(FLT_MAX, FLT_MAX);
+	g.WheelingWindow = nullptr;
+	g.WheelingWindowReleaseTimer = 0.0f;
+}
+
+// The frame's presses taken back: the buttons read up.
+void drop_presses() {
+	ImGuiIO &io = ImGui::GetIO();
+	for (int button = 0; button < ImGuiMouseButton_COUNT; ++button) {
+		if (!io.MouseClicked[button]) continue;
+		io.MouseDown[button] = false;
+		io.MouseClicked[button] = false;
+		io.MouseDownDuration[button] = -1.0f;
+	}
 }
 
 }  // namespace
@@ -184,6 +252,18 @@ bool ImGuiPass::attach_imgui(void *context, ImGuiAllocFn alloc, ImGuiFreeFn free
 	ImGui::SetCurrentContext(static_cast<ImGuiContext *>(context));
 	ImGuiIO &io = ImGui::GetIO();
 	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+	if (!user_layout_) {
+		// No layout file for this run: none read from now on, none written, and what the context
+		// already read from the user's (its docking, its windows' places) dropped once, at the first
+		// such attach of the process, so the default layout is built. (The embedder's ImGui may hold
+		// the file's name itself and hand it back: the shell lets it go there too.)
+		static bool user_layout_dropped = false;
+		io.IniFilename = nullptr;
+		if (!user_layout_dropped) {
+			user_layout_dropped = true;
+			ImGui::ClearIniSettings();
+		}
+	}
 	attached_ = true;
 	set_platform_windows_enabled(platform_windows_enabled_);
 	return true;
@@ -226,7 +306,7 @@ Window &ImGuiPass::register_window(std::unique_ptr<Window> window) {
 
 void ImGuiPass::sync_visibility() {
 	for (auto &window : windows_) {
-		const bool visible = open_ && window->open;
+		const bool visible = open_ && window->open && !window->stands_aside();
 		if (visible != window->visible_) {
 			window->visible_ = visible;
 			window->on_visibility(visible);
@@ -234,10 +314,35 @@ void ImGuiPass::sync_visibility() {
 	}
 }
 
+void ImGuiPass::gate_mouse() {
+	const ImGuiIO &io = ImGui::GetIO();
+	bool pressed = false, down = false, released = false;
+	for (int button = 0; button < ImGuiMouseButton_COUNT; ++button) {
+		pressed = pressed || io.MouseClicked[button];
+		down = down || io.MouseDown[button];
+		released = released || io.MouseReleased[button];
+	}
+	const bool wheel = io.MouseWheel != 0.0f || io.MouseWheelH != 0.0f;
+	// A press is the pass's with the cursor over its window; then it is held or let go as it was taken.
+	if (pressed && !press_taken_) {
+		press_taken_ = mouse_over_;
+		if (!press_taken_) drop_presses();
+	}
+	const bool press = press_taken_ && (down || released);
+	if (!down) press_taken_ = false;
+	if (wheel && !mouse_over_ && !press) drop_wheel();
+	const bool hover = (mouse_focused_ && mouse_over_) || press || (wheel && mouse_over_);
+	if (!hover) drop_hover();
+}
+
 bool ImGuiPass::draw_frame(uint64_t frame_index) {
 	if (!attached_ || !open_) {
 		return false;
 	}
+
+	// What of the frame's mouse is the pass's (set_mouse_place), after the bridge's NewFrame
+	// took the events and before anything draws.
+	gate_mouse();
 
 	// A reset requested last frame (the menu item, a probe) rebuilds the
 	// default layout below and expands every window this frame.
@@ -249,13 +354,16 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 	// a reset: the persisted dockspace is torn down first, so every window
 	// (a new one the ini never saw, one dragged out to another monitor)
 	// docks back into its declared placement.
-	const ImGuiID dockspace_id = ImHashStr(kWorkspaceDockspace);
+	const ImGuiID dockspace_id = ImHashStr(layout_.dockspace.c_str());
 	const ImGuiViewport *viewport = ImGui::GetMainViewport();
 	if (reset_layout) {
 		ImGui::DockBuilderRemoveNode(dockspace_id);
 	}
 	if (ImGui::DockBuilderGetNode(dockspace_id) == nullptr) {
-		create_default_layout(dockspace_id, *viewport, windows_);
+		create_default_layout(dockspace_id, *viewport, layout_, windows_);
+		layout_focus_ = layout_.focus;
+		layout_focus_first_ = layout_.focus.empty() ? std::string() : layout_.focus.front();
+		layout_focus_armed_ = false;
 	}
 	ImGui::DockSpaceOverViewport(dockspace_id, viewport, ImGuiDockNodeFlags_None);
 
@@ -271,6 +379,10 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 			// A closed window never carries a focus request forward: the pick
 			// that raised it was declined when the window was closed again.
 			window.take_focus_request();
+			continue;
+		}
+		if (window.stands_aside()) {
+			// Not drawn this frame; a focus request waits for its return.
 			continue;
 		}
 		if (window.owns_frame()) {
@@ -309,12 +421,20 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 		if (!window.is_scrollable()) {
 			flags |= ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
 		}
+		if (!window.focus_on_appearing()) {
+			flags |= ImGuiWindowFlags_NoFocusOnAppearing;
+		}
 		const WindowSizeHint hint = window.preferred_size();
 		if (!reset_layout && hint.width > 0.0f && hint.height > 0.0f) {
 			ImGui::SetNextWindowSize(ImVec2(hint.width, hint.height), ImGuiCond_FirstUseEver);
 		}
 		bool *open = window.is_closeable() ? &window.open : nullptr;
-		if (window.focus_requested()) {
+		// A window the layout just built brings forward: selected in its dock node, the
+		// layout's first one focused (the others' tabs only selected).
+		const auto layout_pick = layout_focus_armed_
+				? std::find(layout_focus_.begin(), layout_focus_.end(), window.title())
+				: layout_focus_.end();
+		if (window.focus_requested() || layout_pick != layout_focus_.end()) {
 			// Honoured once the window has had its first Begin (a window
 			// opening this very frame is docked by that Begin; the request
 			// waits a frame so the tab exists to select). Two windows may ask
@@ -322,11 +442,17 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 			// selects its own tab in its dock node explicitly, since ImGui's
 			// tab bar only follows the window that ends the frame focused.
 			if (ImGuiWindow *imgui_window = ImGui::FindWindowByName(window.title())) {
-				window.take_focus_request();
+				const bool layout_first = layout_pick != layout_focus_.end() && *layout_pick == layout_focus_first_;
+				const bool focus = window.take_focus_request() || layout_first;
+				if (layout_pick != layout_focus_.end()) {
+					layout_focus_.erase(layout_pick);
+				}
 				if (imgui_window->DockNode != nullptr && imgui_window->DockNode->TabBar != nullptr) {
 					imgui_window->DockNode->TabBar->NextSelectedTabId = imgui_window->TabId;
 				}
-				ImGui::SetNextWindowFocus();
+				if (focus) {
+					ImGui::SetNextWindowFocus();
+				}
 			}
 		}
 		if (ImGui::Begin(window.title(), open, flags)) {
@@ -336,6 +462,7 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 	}
 
 	sync_visibility();
+	layout_focus_armed_ = !layout_focus_.empty();
 	if (close_requested_) {
 		close_requested_ = false;
 		set_open(false);
@@ -347,9 +474,22 @@ void ImGuiPass::draw_menu_bar() {
 	if (!ImGui::BeginMainMenuBar()) {
 		return;
 	}
+	if (menu_bar_ != nullptr) {
+		menu_bar_->draw_menu_bar(*this);
+	}
 	const auto menu_item = [](Window &window) {
 		if (window.is_closeable()) {
-			ImGui::MenuItem(window.title(), nullptr, &window.open);
+			// Ticked while it shows: one standing aside reads unticked, and ticking it is the author's
+			// ask to see it anyway.
+			const bool aside = window.open && window.stands_aside();
+			bool shown = window.open && !aside;
+			if (ImGui::MenuItem(window.title(), nullptr, &shown)) {
+				if (shown && aside) {
+					window.show_anyway();
+				} else {
+					window.open = shown;
+				}
+			}
 		} else {
 			bool selected = true;
 			ImGui::BeginDisabled();
@@ -377,7 +517,7 @@ void ImGuiPass::draw_menu_bar() {
 		if (ImGui::MenuItem("Reset layout")) {
 			layout_reset_pending_ = true;
 		}
-		if (ImGui::MenuItem("Close dev tools", "F3")) {
+		if (closeable_ && ImGui::MenuItem("Close dev tools", "F3")) {
 			close_requested_ = true;
 		}
 		ImGui::EndMenu();
@@ -392,6 +532,9 @@ void ImGuiPass::draw_menu_bar() {
 			if (window->menu_group() == MenuGroup::Help) menu_item(*window);
 		}
 		ImGui::EndMenu();
+	}
+	if (menu_bar_ != nullptr) {
+		menu_bar_->draw_menu_bar_trailing(*this);
 	}
 	draw_status();
 	ImGui::EndMainMenuBar();

@@ -14,6 +14,7 @@
 
 #include <runtime/hud/end_round_overlay.h>
 #include <runtime/hud/end_round_statistics.h>
+#include <runtime/hud/game_text_lookup.h>
 #include <runtime/hud/feed_format.h>
 #include <runtime/world/objectives_feed.h>
 #include <runtime/inmatch/stat_screen_feed.h>
@@ -33,8 +34,8 @@ opennova::hud::EndRoundTextLookup overlays_lookup(const Ref<RtxtStringFile> &gam
 	return [gametext](const std::string &key, std::string &value) {
 		if (gametext.is_null()) return false;
 		const String k = opennova::to_gd(key);
-		if (!gametext->has_string_in_section("Overlays", StringName(k))) return false;
-		value = opennova::to_std(gametext->get_string_in_section("Overlays", StringName(k)));
+		if (!gametext->has_string_in_section(opennova::hud::kGameTextOverlays, StringName(k))) return false;
+		value = opennova::to_std(gametext->get_string_in_section(opennova::hud::kGameTextOverlays, StringName(k)));
 		return true;
 	};
 }

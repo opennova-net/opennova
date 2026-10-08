@@ -14,6 +14,7 @@
 
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/menu_flow.h>
+#include <runtime/menu/mod_list.h>
 #include <runtime/menu/options_screen.h>
 #include <runtime/menu/player_info_avatars.h>
 
@@ -26,6 +27,7 @@ namespace godot {
 
 class MenuAudio;
 class ControlsModel;
+class PlayerProfiles;
 class MissionCatalogRow;
 class MenuFrame;
 class MnsStyleSheet;
@@ -35,6 +37,8 @@ class ResourceRoot;
 class RtxtStringFile;
 class AvatarDatabase;
 class AvatarComboRow;
+class EndRoundColumn;
+class EndRoundRow;
 class WeaponDatabase;
 class WeaponDef;
 
@@ -64,10 +68,10 @@ public:
 // routing — is the engine's opennova::menu::MenuRuntime
 // (engine/runtime/menu/menu_runtime.h carries the witnesses); this class is
 // its device half: it implements the frame seam over the MenuFrame node,
-// resolves the screen's text table and marquee data through the resource
-// root, mounts the credits scrollers, plays the widget sound edges, pushes
-// the screen MUSICVAR and relays the runtime's events as signals. Widgets go
-// by stable MnuDocument id, valid across screens.
+// reads the marquee data through the resource root, mounts the credits
+// scrollers, plays the widget sound edges, pushes the screen MUSICVAR and
+// relays the runtime's events as signals. Widgets go by stable MnuDocument id,
+// valid across screens.
 class MenuDriver : public RefCounted {
 	GDCLASS(MenuDriver, RefCounted)
 
@@ -76,6 +80,8 @@ class MenuDriver : public RefCounted {
 
 	opennova::menu::MenuRuntime runtime_;
 	opennova::menu::MenuFlow flow_;
+	opennova::menu::ModList mods_;
+	String mods_root_; // the game folder the Mods list's records were scanned in
 	opennova::menu::HostDialog host_dialog_;
 	opennova::menu::OptionsScreen options_;
 	opennova::menu::PlayerInfoAvatars avatars_;
@@ -87,9 +93,8 @@ class MenuDriver : public RefCounted {
 	Ref<MnuDocument> doc_;
 	Ref<ResourceRoot> root_;
 	Ref<MnsStyleSheet> style_;
-	Ref<RtxtStringFile> text_;
-	// Per-screen RTXT text tables (TEXT_RSRC), cached by lowercased filename.
-	HashMap<String, Ref<RtxtStringFile>> text_rsrc_cache_;
+	// The expansion's string table every menu lookup tries first.
+	Ref<RtxtStringFile> override_text_;
 	// CBIN credits scrollers mounted over marquee widgets of the current
 	// screen. The overlays are frame CHILDREN, outside the compiled draw walk,
 	// so the driver re-applies the walk's shown gate whenever widget
@@ -104,12 +109,10 @@ class MenuDriver : public RefCounted {
 	MenuAudio *audio_() const;
 	MusicDirector *music_director_() const;
 	void on_runtime_event_(const opennova::menu::MenuEvent &p_event);
-	void fill_screen_text_lookup_(Dictionary &r_out);
-	Ref<RtxtStringFile> load_text_rsrc_(const String &p_file);
 	void seed_marquee_widgets_();
 	void clear_credits_();
 	void sync_credits_();
-	void on_frame_widget_clicked_(int p_index);
+	void on_frame_widget_clicked_(int p_index, int p_part);
 	void on_frame_scroll_value_(int p_index, int p_value);
 
 protected:
@@ -118,9 +121,9 @@ protected:
 public:
 	enum OptionsEffect {
 		OPTIONS_CONSUMED = opennova::menu::OptionsScreen::Consumed,
-		OPTIONS_PERSIST_BINDINGS = opennova::menu::OptionsScreen::PersistBindings,
 		OPTIONS_COMMIT_PREVIEW = opennova::menu::OptionsScreen::CommitPreview,
 		OPTIONS_RESTORE_PREVIEW = opennova::menu::OptionsScreen::RestorePreview,
+		OPTIONS_APPLY_CONTROLS = opennova::menu::OptionsScreen::ApplyControls,
 	};
 	void set_mission_controls(const PackedStringArray &p_lists,
 			const PackedStringArray &p_briefings, const PackedStringArray &p_accepts);
@@ -130,6 +133,14 @@ public:
 	void activate_mission(int p_id, int p_row) { flow_.activate_mission(p_id, p_row); }
 	String get_selected_mission() const;
 	void clear_selected_mission() { flow_.clear_selected_mission(); }
+	// The Mods list (engine menu::ModList): the descriptions a pick fills (the shell's
+	// ModDescriptions names); the list filled with the base game's row and the expansion records of
+	// the bound root's folder (scanned once per folder, as the game scans once at boot), the one
+	// running highlighted; a row picked; and ACCEPT's pick ("" the base game).
+	void set_mod_descriptions(const PackedStringArray &p_names);
+	void seed_mod_list(int p_id);
+	void select_mod(int p_id, int p_row) { mods_.select(runtime_, p_id, p_row); }
+	String mod_list_pick(int p_id) const;
 	bool request_expansion(const String &p_name, const String &p_current, bool p_packed);
 	bool has_pending_expansion_reload() const { return flow_.has_pending_expansion(); }
 	String take_expansion_reload();
@@ -144,12 +155,27 @@ public:
 	void toggle_host_mission_switch(int p_row) { host_dialog_.toggle_switch(runtime_, p_row); }
 	PackedInt32Array selected_host_launch_options() const;
 	void select_host_location(int p_id, const String &p_country);
-	void prepare_options(const Ref<ControlsModel> &p_controls);
+	// The Options screens over the profile's current record (engine
+	// menu::OptionsScreen): the screen's binding records built from the
+	// record's table; null profiles = the catalog defaults, no words.
+	void prepare_options(const Ref<PlayerProfiles> &p_profiles);
 	bool is_options_surface() const { return options_.is_surface(); }
-	int activate_options(const Ref<ControlsModel> &p_controls, const String &p_name);
-	void arm_options_remap(const Ref<ControlsModel> &p_controls, int p_id, int p_row);
-	int consume_options_input(const Ref<ControlsModel> &p_controls, const Ref<InputEvent> &p_event);
-	void end_options_remap(const Ref<ControlsModel> &p_controls, bool p_refill);
+	// The retail Options policy on the surface prepare_options found (engine
+	// OptionsScreen::apply_policy), then the record's controls words
+	// (OptionsScreen::seed_profile), before the settings owner seeds its values.
+	void apply_options_policy(const Ref<PlayerProfiles> &p_profiles);
+	// The shell's name set by its token (engine menu_commands.h: "start", "exit", "return",
+	// "restart", "back", "novaworld", "mission_lists", "sp_lists", "briefings", "sp_accepts",
+	// "mod_lists", "mod_descriptions"): MenuShell's defaults, one table the editor's Try mode
+	// reads too. Empty for another token.
+	static PackedStringArray command_names(const String &p_set);
+	int activate_options(const Ref<PlayerProfiles> &p_profiles, const String &p_name);
+	void arm_options_remap(int p_id, int p_row) { options_.arm(runtime_, p_id, p_row); }
+	int consume_options_input(const Ref<InputEvent> &p_event);
+	void end_options_remap(bool p_refill) { options_.end_remap(runtime_, p_refill); }
+	// The Options screen's own binding records' Control-column text (tests and
+	// tools read the remap flow through it).
+	String options_control_text(int p_action, int p_device) const;
 	void show_ingame_main() { opennova::menu::OptionsScreen::show_ingame_main(runtime_); }
 
 	int fill_player_info_ammo(const Ref<WeaponDatabase> &p_weapons, const String &p_control,
@@ -196,8 +222,11 @@ public:
 
 	// Bind a parsed document and show `target_screen` (empty = the first
 	// screen). Rebuilds every per-document cache; runtime widget state is dropped.
+	// Every string table a screen reads is its windows' TEXT_RSRC (the frame
+	// loads them); `override_text` is the expansion's table tried first (null:
+	// none; the lookup order is the engine's, menu_text_tables.h).
 	bool open_document(const Ref<MnuDocument> &p_doc, const Ref<ResourceRoot> &p_root,
-			const Ref<MnsStyleSheet> &p_style, const Ref<RtxtStringFile> &p_text,
+			const Ref<MnsStyleSheet> &p_style, const Ref<RtxtStringFile> &p_override_text,
 			const String &p_menu_file, const String &p_target_screen);
 	Ref<MnuDocument> document() const { return doc_; }
 	PackedStringArray get_screen_names() const;
@@ -272,6 +301,13 @@ public:
 	int table_row_count(int p_id) const;
 	String table_cell_text(int p_id, int p_row, int p_col) const;
 	void table_select_row(int p_id, int p_row, bool p_additive);
+	int table_sort_column(int p_id) const;
+	// The end-of-round stat table (StatScreen_PopulateStatResultsList, witnessed in
+	// inmatch stat_screen_feed.h): the engine's column set installed (the RESULTLIST authors no HEADER), the
+	// rows with their team colours, the local row selected, then the sort on
+	// the first stat column, descending (inmatch stat_screen_feed.h).
+	void fill_stat_results(int p_id, const TypedArray<EndRoundColumn> &p_columns,
+			const TypedArray<EndRoundRow> &p_rows);
 	// The CTableWnd operations (engine menu_table_row.h).
 	int table_insert_row(int p_id, const String &p_text0, int p_value0, int p_flags,
 			int p_insert_index);
@@ -292,6 +328,7 @@ public:
 	void activate(int p_id);
 	void spin_cycle(int p_id, int p_delta);
 	String spin_value_attr(int p_id) const;
+	// One ACTION row run as the current screen's (MenuRuntime::dispatch_action).
 	bool dispatch_action_row(const Ref<MnuActionRow> &p_action);
 	// Direct play seam (voice preview etc.); emits sound_requested always.
 	void play_widget_sound(const String &p_trigger, const String &p_file);

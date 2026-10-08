@@ -96,10 +96,10 @@ void builds_saying(const std::string &name, const std::string &text, const std::
 }
 
 const std::string kSkinned =
-		"o3d 1\nmodel SKIN\nskinned 1\nmaterial VS_SKBASIC\ntexture skin.tga\nlod 128 gnrc\n"
-		"part 0 0 0 0\npart 0 0 0 1\npart 0 0 0 -1\nstrip 0 0\nbones 0 1\n"
-		"v 1 1 0 0 0 1 0 0 0 1 0 0 1 0 0\nv -1 1 0 0 0 1 0 1 0 1 0 0 0.5 0.5 0\n"
-		"v -1 -1 1 0 0 1 1 1 1 0 0 0 1 0 0\nv 1 -1 1 0 0 1 1 0 1 0 0 0 0.75 0.25 0\nt 0 1 2\nt 0 2 3\n"
+		"o3d 2\nmodel SKIN\nskinned 1\nmaterial VS_SKBASIC\ntexture skin.tga\nlod 128 gnrc\n"
+		"part 0 0 0 0\npart 0 0 0 1\npart 0 0 0 -1\nmesh 0 0\n"
+		"v 1 1 0 0 0 1 0 0 0 1\nv -1 1 0 0 0 1 0 1 0 0.5 1 0.5\n"
+		"v -1 -1 1 0 0 1 1 1 1 1\nv 1 -1 1 0 0 1 1 0 1 0.75 0 0.25\nt 0 1 2\nt 0 2 3\n"
 		"panm 0 0\npanm 1 0\npanm 2 0\n"
 		"cobj 0 0 0 0\ncsphere 0 0 0 0.5\ncobj 0 0 0 1\ncsphere 0 0 1 0.25\n"
 		"cobj 0 0 0 -1\ncv 1 1 0\ncv -1 1 0\ncv -1 -1 1\ncf 0 1 2 1\n";
@@ -123,7 +123,7 @@ int main(int argc, char **argv) {
 	// planes carry both NaN signs) print as nan, -nan, inf and -inf, which
 	// strtod and Python's float() read, and rebuild to the same bits.
 	{
-		const std::string text = "o3d 1\nmodel NAN\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0\n"
+		const std::string text = "o3d 2\nmodel NAN\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nmesh 0\n"
 				"v 0 0 0 nan -nan inf 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 -inf 0 1 0 1\nt 0 1 2\n"
 				"occ 0 0 0\nov 0 0 0\nov 1 0 0\nov 0 1 0\nop 0 0 1 nan\nop 0 0 -1 -nan\nof 0 1 2 0\n";
 		round_trip("nan", text);
@@ -154,7 +154,7 @@ int main(int argc, char **argv) {
 	// 24 m out); a bare `cxlt` is an empty table (Chair03X: 7 sections, no
 	// row); without either, one row per non-root section at its offset.
 	{
-		const std::string rigid = "o3d 1\nmodel CXLT\nlod 0\npart 0 0 0 0\npart 0 1 0 0\npart 0 0 2 0\n"
+		const std::string rigid = "o3d 2\nmodel CXLT\nlod 0\npart 0 0 0 0\npart 0 1 0 0\npart 0 0 2 0\n"
 				"cobj 0 0 0 0\ncobj 0 1 0 0\ncobj 0 0 2 0\n";
 		const auto rows = [&](const std::string &name, std::vector<std::array<int32_t, 3>> want) {
 			Threedi3di3 m{};
@@ -182,12 +182,12 @@ int main(int argc, char **argv) {
 	// (docs/threedi/o3d-scene-format.md, "derived collision values").
 	{
 		const std::string text =
-				"o3d 1\nmodel RULES\nmaterial FF_ST_OP\nlod 0\npart 0 1 2 3\n"
+				"o3d 2\nmodel RULES\nmaterial FF_ST_OP\nlod 0\npart 0 1 2 3\n"
 				// A diamond: its farthest vertex (1) is not its box's corner (1.414).
-				"strip 0\nv 1 0 0 0 0 1 0 0\nv 0 1 0 0 0 1 0 0\nv -1 0 0 0 0 1 0 0\nv 0 -1 0 0 0 1 0 0\n"
+				"mesh 0\nv 1 0 0 0 0 1 0 0\nv 0 1 0 0 0 1 0 0\nv -1 0 0 0 0 1 0 0\nv 0 -1 0 0 0 1 0 0\n"
 				"t 0 1 2\nt 0 2 3\n"
 				// 1 + 3/262144 (a float): 65536.75 in 16.16, truncated to 65536.
-				"part 0 1.00001144 2 3\nstrip 0\nv 1.00001144 0 0 0 0 1 0 0\nv 0 0.5 0 0 0 1 0 0\nv 0 0 0.5 0 0 0 0 0\nt 0 1 2\n"
+				"part 0 1.00001144 2 3\nmesh 0\nv 1.00001144 0 0 0 0 1 0 0\nv 0 0.5 0 0 0 1 0 0\nv 0 0 0.5 0 0 0 0 0\nt 0 1 2\n"
 				"userpoint p 0.1 0 0 0 0 1 0\n"
 				"cobj 0 0.1 0 0\ncv 0 0 1\ncv 1 0 1\ncv 0 1 1\ncf 0 1 2\n"
 				// x spans -2 .. 1 in 16.16: a midpoint of -0.5, which floors to -1.
@@ -217,7 +217,7 @@ int main(int argc, char **argv) {
 		}
 		// The vertexless occlusion record's centre is the 0/0 NaN retail ChmLFP1
 		// stores: (+nan, -nan, -nan) in model axes.
-		round_trip("occ-empty", "o3d 1\nmodel OCC\nlod 0\npart 0 0 0 0\nocc 2 0 0\nop 1 0 0 0\nop -1 0 0 0\n"
+		round_trip("occ-empty", "o3d 2\nmodel OCC\nlod 0\npart 0 0 0 0\nocc 2 0 0\nop 1 0 0 0\nop -1 0 0 0\n"
 				"op 0 1 0 0\nop 0 -1 0 0\nop 0 0 1 0\nop 0 0 -1 0\n");
 		if (threedi_3di3_read(path_of("occ-empty", ".3di").c_str(), &m) == 0 && m.occlusion_object_count == 1) {
 			uint32_t c[3];
@@ -235,70 +235,97 @@ int main(int argc, char **argv) {
 	for (int i = 0; i < 40; ++i) {
 		char text[256];
 		std::snprintf(text, sizeof(text),
-				"o3d 1\nmodel L\nlod 0\npart 0 0 0 0\n"
+				"o3d 2\nmodel L\nlod 0\npart 0 0 0 0\n"
 				"light 0 1 0 1.5 0 6 24 0 0 255 255 255 0 0 0 0x48 0.3 0.1 -1 %.6f\n",
 				1.0 + i * 0.4371);
 		round_trip("spot-" + std::to_string(i), text);
 	}
 
-	// A skinned strip authored on a bone (dM1A1's hull has no mesh part)
+	// A skinned mesh authored on a bone (dM1A1's hull has no mesh part)
 	// comes back on that bone, so the bone keeps its bounds.
 	round_trip("skinned-on-bones",
-			"o3d 1\nmodel BONES\nskinned 1\nmaterial VS_SKBASIC\nlod 0\npart 0 0 0 0\n"
-			"strip 0\nbones 0\nv 1 1 0 0 0 1 0 0 0 0 0 0 1 0 0\nv -1 1 0 0 0 1 0 1 0 0 0 0 1 0 0\n"
-			"v -1 -1 1 0 0 1 1 1 0 0 0 0 1 0 0\nt 0 1 2\n"
+			"o3d 2\nmodel BONES\nskinned 1\nmaterial VS_SKBASIC\nlod 0\npart 0 0 0 0\n"
+			"mesh 0\nv 1 1 0 0 0 1 0 0 0 1\nv -1 1 0 0 0 1 0 1 0 1\n"
+			"v -1 -1 1 0 0 1 1 1 0 1\nt 0 1 2\n"
 			"part 0 3 0 0\n"
-			"strip 0\nbones 1\nv 4 0 0 0 0 1 0 0 0 0 0 0 1 0 0\nv 3 1 0 0 0 1 0 1 0 0 0 0 1 0 0\n"
-			"v 3 0 2 0 0 1 1 1 0 0 0 0 1 0 0\nt 0 1 2\n"
+			"mesh 0\nv 4 0 0 0 0 1 0 0 1 1\nv 3 1 0 0 0 1 0 1 1 1\n"
+			"v 3 0 2 0 0 1 1 1 1 1\nt 0 1 2\n"
 			"panm 0 0\npanm 1 0\n");
 
-	// A skinned vertex carries four bone-table slots and three weights; slot 3
-	// takes the rest, 1 - (w0 + w1 + w2), as retail's vertex shader blends.
-	// The fourth slot comes back from `scene`, and build refuses a weight that
-	// is no finite number from 0 to 1 and weights summing past 1 (retail's
-	// four-decimal weights reach 1.0001 in float, ArmGlovD, which builds).
+	// A skinned vertex gives `part weight` pairs, the primary first. The
+	// lowering stores the primary in slot 0 (the lit shaders light a vertex
+	// by its first slot alone) and the first three weights; slot 3 takes the
+	// rest, 1 - (w0 + w1 + w2), as retail's vertex shader blends. `scene`
+	// writes the same pairs back, the fourth weight explicit. Build refuses a
+	// weight that is no finite number from 0 to 1, a part named twice and
+	// weights that do not sum to 1 (within the 1e-4 retail's four-decimal
+	// weights reach in float, ArmGlovD, which builds).
 	{
-		const std::string head = "o3d 1\nmodel FOUR\nskinned 1\nmaterial VS_SKBASIC\nlod 0 gnrc\n"
-				"part 0 0 0 0\npart 0 0 0 1\npart 1 0 0 2\nstrip 0\nbones 0 1 2\n";
-		const std::string tail = "v 1 0 0 0 0 1 1 0 0 1 2 2 0.25 0.25 0.25\nv 0 1 0 0 0 1 0 1 0 1 1 2 0.5 0.5 0\n"
-				"t 0 1 2\npanm 0 0\npanm 1 0\npanm 2 1\n";
-		round_trip("fourth-slot", head + "v 0 0 0 0 0 1 0 0 2 1 0 1 0.5 0.25 0\n" + tail);
+		const std::string head = "o3d 2\nmodel FOUR\nskinned 1\nmaterial VS_SKBASIC\nlod 0 gnrc\n"
+				"part 0 0 0 0\npart 0 0 0 1\npart 1 0 0 2\npart 2 0 0 3\nmesh 0\n";
+		const std::string tail = "v 1 0 0 0 0 1 1 0 0 0.25 1 0.25 2 0.5\nv 0 1 0 0 0 1 0 1 1 0.5 2 0.5\n"
+				"t 0 1 2\npanm 0 0\npanm 1 0\npanm 2 1\npanm 3 2\n";
+		round_trip("four-influences", head + "v 0 0 0 0 0 1 0 0 3 0.5 1 0.25 0 0 2 0.25\n" + tail);
 		Threedi3di3 m{};
-		if (threedi_3di3_read(path_of("fourth-slot", ".3di").c_str(), &m) == 0) {
+		if (threedi_3di3_read(path_of("four-influences", ".3di").c_str(), &m) == 0) {
 			const ThreediVertex &v = m.lods[0].vertices.items[0];
 			const ThreediTriangleStrip &st = m.lods[0].strips[0];
-			check(v.bone_indices[0] == 2 && v.bone_indices[1] == 1 && v.bone_indices[2] == 0 && v.bone_indices[3] == 1 &&
+			// The table lists the parts as the triangle's corners name them in
+			// the order the file stores the corners (OED's: the retail tables
+			// follow it): vertex 0 (3 1 0 2), then vertex 2, then vertex 1.
+			check(st.bone_table_length == 4 && st.bone_table[0] == 3 && st.bone_table[1] == 1 && st.bone_table[2] == 0 &&
+							st.bone_table[3] == 2,
+					"four-influences: the table in first-use order");
+			check(v.bone_indices[0] == 0 && v.bone_indices[1] == 1 && v.bone_indices[2] == 2 && v.bone_indices[3] == 3 &&
 							v.bone_weights[0] == 0.5f && v.bone_weights[1] == 0.25f && v.bone_weights[2] == 0.0f,
-					"fourth-slot: the four slots and three weights are stored as given");
+					"four-influences: the slots in the pairs' order, the first three weights");
 			ThreediSkinInfluence influences[4];
 			threedi_skin_influences(&v, st.bone_table, st.bone_table_length, influences);
-			check(influences[0].part == 2 && influences[3].slot == 1 && influences[3].part == 1 &&
-							influences[3].weight == 0.25f,
-					"fourth-slot: slot 3's part takes the rest");
+			check(influences[0].part == 3 && influences[3].part == 2 && influences[3].weight == 0.25f,
+					"four-influences: the primary in slot 0, slot 3 taking the rest");
+			// The vertex of two influences pads its unused slots with its first.
+			const ThreediVertex &two = m.lods[0].vertices.items[2];
+			check(two.bone_indices[0] == 1 && two.bone_indices[1] == 3 && two.bone_indices[2] == 1 &&
+							two.bone_indices[3] == 1 && two.bone_weights[2] == 0.0f,
+					"four-influences: unused slots repeat the first, at no weight");
 			threedi_3di3_free(&m);
 		} else {
-			check(false, "fourth-slot: read back");
+			check(false, "four-influences: read back");
 		}
-		check(read_file_text(path_of("fourth-slot", ".rt.o3d")).find(" 2 1 0 1 0.5 0.25 0\n") != std::string::npos,
-				"fourth-slot: scene writes the four slots");
-		check(build("weights-retail-sum", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 0.4487 0.3871 0.1643\n" + tail),
+		check(read_file_text(path_of("four-influences", ".rt.o3d")).find(" 3 0.5 1 0.25 0 0 2 0.25\n") != std::string::npos,
+				"four-influences: scene writes the pairs, a zero-weight part and the fourth weight included");
+		check(build("weights-retail-sum", head + "v 0 0 0 0 0 1 0 0 0 0.4487 1 0.3871 2 0.1643\n" + tail),
 				"weights-retail-sum: retail's 1.0001 builds");
-		refuses("weights-sum", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 0.5 0.5 0.01\n" + tail);
-		refuses("weights-negative", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 1.25 -0.25 0\n" + tail);
-		refuses("weights-above-one", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 1.5 0 0\n" + tail);
-		refuses("weights-nan", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 nan 0 0\n" + tail);
-		refuses("weights-infinite", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 inf 0 0\n" + tail);
-		refuses("weights-three-slots", head + "v 0 0 0 0 0 1 0 0 0 1 2 0.5 0.25 0.25\n" + tail);
+		refuses("weights-sum", head + "v 0 0 0 0 0 1 0 0 0 0.5 1 0.5 2 0.01\n" + tail);
+		refuses("weights-short", head + "v 0 0 0 0 0 1 0 0 0 0.5 1 0.25\n" + tail);
+		refuses("weights-negative", head + "v 0 0 0 0 0 1 0 0 0 1.25 1 -0.25\n" + tail);
+		refuses("weights-above-one", head + "v 0 0 0 0 0 1 0 0 0 1.5\n" + tail);
+		refuses("weights-nan", head + "v 0 0 0 0 0 1 0 0 0 nan\n" + tail);
+		refuses("weights-infinite", head + "v 0 0 0 0 0 1 0 0 0 inf\n" + tail);
+		refuses("weights-twice", head + "v 0 0 0 0 0 1 0 0 0 0.5 0 0.5\n" + tail);
+		refuses("weights-none", head + "v 0 0 0 0 0 1 0 0\n" + tail);
+		refuses("weights-odd", head + "v 0 0 0 0 0 1 0 0 0 0.5 1\n" + tail);
+		refuses("weights-missing-part", head + "v 0 0 0 0 0 1 0 0 7 1\n" + tail);
+		refuses("weights-on-rigid", "o3d 2\nmodel RIGID\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nmesh 0\n"
+				"v 0 0 0 0 0 1 0 0 0 1\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n");
 	}
 
-	// A strip with vertices and no triangle is carried as it is.
-	round_trip("empty-strip", "o3d 1\nmodel E\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0 0\nv 0 0 0 0 0 1 0 0\n");
+	// A tangent-space shader's model scenes its stored frames (`vt`), which
+	// the rebuild keeps: the frames come back bit for bit.
+	round_trip("tangent-frames", "o3d 2\nmodel TAN\nmaterial VS_PHONGT\nlod 0\npart 0 0 0 0\nmesh 0\n"
+			"v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 0.3 0.1\nv 0 -1 0 0 0 1 0.05 0.7\nv 1 -1 0.2 0 0 1 0.4 0.9\nt 0 1 2\nt 1 3 2\n");
+	check(read_file_text(path_of("tangent-frames", ".rt.o3d")).find("\nvt ") != std::string::npos &&
+					read_file_text(path_of("tangent-frames", ".rt.o3d")).find("# dropped") == std::string::npos,
+			"tangent-frames: scene writes them and drops nothing");
+
+	// A mesh with vertices and no triangle is carried as it is (one strip).
+	round_trip("empty-strip", "o3d 2\nmodel E\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nmesh 0 0\nv 0 0 0 0 0 1 0 0\n");
 	check(read_file_text(path_of("empty-strip", ".rt.o3d")).find("# dropped") == std::string::npos,
 			"empty-strip: nothing is reported dropped");
 
 	// A triangle that repeats a corner is refused: the scene of the model
 	// could not carry it (the loader's decode drops it).
-	refuses("repeated-corner", "o3d 1\nmodel R\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0\n"
+	refuses("repeated-corner", "o3d 2\nmodel R\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nmesh 0\n"
 			"v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 0 1\n");
 
 	// What the scene text cannot hold is reported: a nameless model and a
@@ -325,7 +352,7 @@ int main(int argc, char **argv) {
 	// records it parents; a skinned mesh section, which no weight names,
 	// keeps the empty sentinels.
 	{
-		const std::string rigid = "o3d 1\nmodel SRC\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0\n"
+		const std::string rigid = "o3d 2\nmodel SRC\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nmesh 0\n"
 				"v 0 0 0.1 0 0 1 0 0\nv 1 0 0.1 0 0 1 1 0\nv 0 1 0.1 0 0 1 0 1\nt 0 1 2\npanm 0 0\n"
 				"occ 2 0 0\nov 0 0 -2\nov 1 0 -2\nov 0 1 -2\nop 0 0 -1 -2\nof 0 1 2 0\n"
 				"cobj 0 0 0 0\ncv 0 0 0.1\ncv 1 0 0.1\ncv 0 1 0.1\ncf 0 1 2\n";
@@ -354,7 +381,7 @@ int main(int argc, char **argv) {
 
 	// A part that draws nothing keeps the point its sphere sits on.
 	{
-		round_trip("seeded-part", "o3d 1\nmodel SEED\nlod 0\npart 0 0 0 0\npart 0 1 2 3 1.5 2.5 3.5\npanm 0 0\npanm 1 0\n");
+		round_trip("seeded-part", "o3d 2\nmodel SEED\nlod 0\npart 0 0 0 0\npart 0 1 2 3 1.5 2.5 3.5\npanm 0 0\npanm 1 0\n");
 		Threedi3di3 m{};
 		if (threedi_3di3_read(path_of("seeded-part", ".3di").c_str(), &m) == 0 && m.lod_count == 1 &&
 				m.lods[0].render_object_count == 2) {
@@ -367,13 +394,13 @@ int main(int argc, char **argv) {
 		} else {
 			check(false, "seeded-part: read back");
 		}
-		refuses("seeded-drawing-part", "o3d 1\nmodel SEED\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0 1 1 1\nstrip 0\n"
+		refuses("seeded-drawing-part", "o3d 2\nmodel SEED\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0 1 1 1\nmesh 0\n"
 				"v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n");
 	}
 
 	// PANM tables are canonical: row i transforms part i (every retail one).
 	{
-		const std::string head = "o3d 1\nmodel PANM\nlod 0\npart 0 0 0 0\npart 0 0 0 1\n";
+		const std::string head = "o3d 2\nmodel PANM\nlod 0\npart 0 0 0 0\npart 0 0 0 1\n";
 		check(build("panm-canonical", head + "panm 0 0\npanm 1 0\n"), "panm-canonical: built");
 		refuses("panm-order", head + "panm 1 0\npanm 0 0\n");
 		refuses("panm-duplicate", head + "panm 0 0\npanm 0 0\n");
@@ -383,19 +410,19 @@ int main(int argc, char **argv) {
 	// name as a comment, a row at a section's offset quantizes as the derived
 	// one does, and an empty register name (IBlock02) builds.
 	{
-		const std::string two = "o3d 1\nmodel ROWS\nlod 0\npart 0 0 0 0\npart 0 0.1 0.2 0.3\n"
+		const std::string two = "o3d 2\nmodel ROWS\nlod 0\npart 0 0 0 0\npart 0 0.1 0.2 0.3\n"
 				"cobj 0 0 0 0\ncobj 0 0.1 0.2 0.3\n";
 		check(build("cxlt-derived-two", two) && build("cxlt-helper", two + "cxlt 0.1 0.2 0.3  # ~PP02 attach\n"),
 				"cxlt-helper: built");
 		check(read_file_text(path_of("cxlt-derived-two", ".3di")) == read_file_text(path_of("cxlt-helper", ".3di")),
 				"cxlt-helper: a row at the section's offset gives the derived bytes");
-		round_trip("empty-register", "o3d 1\nmodel REG\nregister \"\"\nlod 0\npart 0 0 0 0\n");
+		round_trip("empty-register", "o3d 2\nmodel REG\nregister \"\"\nlod 0\npart 0 0 0 0\n");
 	}
 
 	// A light's rate and phase pack as WriteLGHT packs them: times 256 in
 	// float, truncated (0.1 -> 25, 0.3 -> 76; rounding gave 26 and 77).
 	{
-		const std::string text = "o3d 1\nmodel LIGHT\nlod 0\npart 0 0 0 0\n"
+		const std::string text = "o3d 2\nmodel LIGHT\nlod 0\npart 0 0 0 0\n"
 				"light 0 1 0 1.5 0 6 24 0.1 0.3 255 255 255 0 0 0 0x40\n";
 		round_trip("light-pack", text);
 		Threedi3di3 m{};
@@ -420,7 +447,7 @@ int main(int argc, char **argv) {
 		const std::string scene_out = path_of("write-safety", ".rt.o3d");
 		std::ofstream(scene_out, std::ios::binary) << "stale";
 		check(threedi_cli::cmd_scene(path_of("write-safety", ".3di").c_str(), scene_out.c_str()) == 0 &&
-						read_file_text(scene_out).rfind("o3d 1", 0) == 0,
+						read_file_text(scene_out).rfind("o3d 2", 0) == 0,
 				"write-safety: scene replaces an existing file");
 		std::filesystem::create_directories(dir / "a-folder.o3d");
 		check(threedi_cli::cmd_scene(path_of("write-safety", ".3di").c_str(), (dir / "a-folder.o3d").string().c_str()) != 0,
@@ -433,7 +460,7 @@ int main(int argc, char **argv) {
 	// The reader is strict (docs/threedi/o3d-scene-format.md "Validation"):
 	// each case below changes one field of a scene build accepts.
 	{
-		const std::string head = "o3d 1\nmodel STRICT\nmaterial FF_ST_OP\ntexture skin.tga\nlod 0\npart 0 0 0 0\nstrip 0\n"
+		const std::string head = "o3d 2\nmodel STRICT\nmaterial FF_ST_OP\ntexture skin.tga\nlod 0\npart 0 0 0 0\nmesh 0\n"
 				"v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\npanm 0 0\n";
 		const std::string face = "cobj 0\ncv 0 0 0\ncv 1 0 0\ncv 0 1 0\ncf 0 1 2 1 0x100\n";
 		check(build("strict-base", head + face), "strict-base: built");
@@ -468,21 +495,23 @@ int main(int argc, char **argv) {
 		full.reserve(full.size() + 32770 * 9);
 		for (int i = 0; i < 32770; ++i) full += "cv 0 0 0\n";
 		refuses_saying("strict-cv-count", full,
-				"collision section 0 exceeds 32,768 vertices: retail reads a bullet face's corners as signed 16-bit indices");
+				"collision section 0 holds 32,770 vertices: retail reads a bullet face's corners as signed 16-bit indices");
 		const std::string said = read_file_text(path_of("strict-cv-count", ".err"));
-		check(said.find("exceeds 32,768") == said.rfind("exceeds 32,768"), "strict-cv-count: said once");
-		// A strip's triangles index its vertices with u16 words, said once too.
-		std::string long_strip = "o3d 1\nmodel STRIP\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0\n";
-		long_strip.reserve(long_strip.size() + 65537 * 18);
-		for (int i = 0; i < 65537; ++i) long_strip += "v 0 0 0 0 0 1 0 0\n";
-		refuses_saying("strict-strip-count", long_strip, "strip exceeds 65,535 vertices: its triangles index them with u16 words");
+		check(said.find("holds 32,770") == said.rfind("holds 32,770"), "strict-cv-count: said once");
+		// A mesh splits into strips by its triangles; one with no triangle
+		// keeps its vertices in one strip, whose u16 indices reach 65,535.
+		std::string long_mesh = "o3d 2\nmodel STRIP\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nmesh 0\n";
+		long_mesh.reserve(long_mesh.size() + 65537 * 18);
+		for (int i = 0; i < 65537; ++i) long_mesh += "v 0 0 0 0 0 1 0 0\n";
+		refuses_saying("strict-strip-count", long_mesh,
+				"the mesh holds 65,537 vertices and no triangle: a strip's indices reach 65,535");
 		const std::string strip_said = read_file_text(path_of("strict-strip-count", ".err"));
-		check(strip_said.find("exceeds 65,535") == strip_said.rfind("exceeds 65,535"), "strict-strip-count: said once");
+		check(strip_said.find("65,537") == strip_said.rfind("65,537"), "strict-strip-count: said once");
 		// A texture name is the MTRL row's 16-byte field, counted in bytes,
 		// printable ASCII and a file name alone; retail fills all 16 bytes
 		// (bo105blur.dds.tg), and the loader's name cut decides what loads.
 		refuses_saying("strict-texture-bytes", swap(base, "texture skin.tga", "texture seventeen_chars.tga"),
-				"texture name 'seventeen_chars.tga' is 19 bytes: the MTRL field holds 16");
+				"texture name 'seventeen_chars.tga' is 19 bytes: the MTRL field's width (at most 16)");
 		refuses_saying("strict-texture-utf8", swap(base, "texture skin.tga", "texture \xD1\x81\xD1\x82\xD0\xB2\xD0\xBE\xD0\xBB_c.tga"),
 				"holds the byte 0xD1: a texture name is printable ASCII");
 		refuses_saying("strict-texture-folder", swap(base, "texture skin.tga", "texture tex/skin.tga"),
@@ -492,15 +521,23 @@ int main(int argc, char **argv) {
 				"note: texture 'skin.png' loads only as 'skin.dds'");
 		builds_saying("texture-cut", swap(base, "texture skin.tga", "texture a.bmp.tga"),
 				"note: texture 'a.bmp.tga' loads only as 'a.dds': the game opens 'a.bmp'");
+		// Only the rows that loader reads: a chunk producer (type 16) reads the
+		// name as written, and type 1 takes the plain path on the whole name.
+		builds_saying("texture-chunk", swap(base, "texture skin.tga", "texture field.nq8 1 16"), "note: texture", false);
+		builds_saying("texture-plain", swap(base, "texture skin.tga", "texture skin.png 1 1"), "note: texture", false);
 		std::string planes = base + "occ 0 0 0\nov 0 0 0\nov 1 0 0\nov 0 1 0\n";
 		for (int i = 0; i < 33; ++i) planes += "op 0 0 1 " + std::to_string(i) + "\n";
 		refuses("strict-occ-planes", planes);
 		std::string verts = base + "occ 0 0 0\n";
 		for (int i = 0; i < 129; ++i) verts += "ov " + std::to_string(i) + " 0 0\n";
 		refuses("strict-occ-verts", verts);
+		// A ninth `sitex` seat (any case) takes the control seat and the game still
+		// loads the model: a note, never a refusal; eight say nothing.
 		std::string seats = base;
-		for (int i = 0; i < 9; ++i) seats += "userpoint SiteX0" + std::to_string(i) + " 0 0 0 1 0 0 0\n";
-		refuses("strict-seats", seats);
+		for (int i = 0; i < 8; ++i) seats += "userpoint SiteX0" + std::to_string(i) + " 0 0 0 1 0 0 0\n";
+		builds_saying("seats-eight", seats, "sitex seats", false);
+		builds_saying("seats-nine", seats + "userpoint sitex08 0 0 0 1 0 0 0\n",
+				"note: more than 8 sitex seats: the game takes the ninth for the control seat");
 		refuses("strict-volume-planes", base + "cvolume 1 0 0 0 0 1 1 1\ncp 1 0 0 -1\ncp -1 0 0 0\ncp 0 1 0 -1\n");
 		// Accepted: a UTF-8 byte order mark, and a name holding a vertical tab
 		// (the scene quotes it, so it comes back).
@@ -513,9 +550,9 @@ int main(int argc, char **argv) {
 	// strip with the vertices its own triangles use, so each part's sphere
 	// comes back over its own geometry rather than over its neighbour's too.
 	{
-		const std::string text = "o3d 1\nmodel SHARE\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0\n"
+		const std::string text = "o3d 2\nmodel SHARE\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nmesh 0\n"
 				"v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"
-				"part 0 10 0 0\nstrip 0\nv 10 0 0 0 0 1 0 0\nv 13 0 0 0 0 1 1 0\nv 10 3 0 0 0 1 0 1\nt 0 1 2\n";
+				"part 0 10 0 0\nmesh 0\nv 10 0 0 0 0 1 0 0\nv 13 0 0 0 0 1 1 0\nv 10 3 0 0 0 1 0 1\nt 0 1 2\n";
 		check(build("shared-window", text), "shared-window: build");
 		Threedi3di3 m{};
 		const bool loaded = threedi_3di3_read(path_of("shared-window", ".3di").c_str(), &m) == 0;
@@ -562,7 +599,7 @@ int main(int argc, char **argv) {
 	// change (a rough 130 x 130 height field: 33,282 faces, nearly every one
 	// facing its own way).
 	{
-		std::string rough = "o3d 1\nmodel ROUGH\nlod 0\npart 0 0 0 0\ncobj 0\n";
+		std::string rough = "o3d 2\nmodel ROUGH\nlod 0\npart 0 0 0 0\ncobj 0\n";
 		uint32_t seed = 12345;
 		for (int j = 0; j < 130; ++j)
 			for (int i = 0; i < 130; ++i) {
@@ -579,15 +616,16 @@ int main(int argc, char **argv) {
 		std::string said;
 		check(build_with_cli("collision-normals", rough, said) != 0, "collision-normals: refused");
 		check(said.find("collision section 0 (part 0) has ") != std::string::npos &&
-						said.find(" distinct bullet-face normals, past the 32,768 a face's signed 16-bit normal index "
-								  "reaches") != std::string::npos,
+						said.find(" distinct bullet-face normals: a face names its normal by a signed 16-bit index") !=
+								std::string::npos &&
+						said.find("(at most 32,768)") != std::string::npos,
 				"collision-normals: names the part and the limit (it said: " + said.substr(0, 400) + ")");
 	}
 
 	// A 3DI3 chunk says its payload length in 24 bits: the writer refuses a
 	// model one of whose chunks outgrows that and says which chunk, and how
 	// large, so the CLI can tell the author (a 262,200-vertex LOD with
-	// tangents holds 16,780,812 bytes of VERT).
+	// tangents, five strips' windows, holds 16,780,812 bytes of VERT).
 	{
 		ThreediBuildModel m;
 		m.name = "BIG";
@@ -595,16 +633,81 @@ int main(int argc, char **argv) {
 		const int lod = m.add_lod();
 		const int part = m.add_part(lod, 0, ThreediBuildVec3{});
 		m.add_material("FF_ST_OP", "big.tga");
-		ThreediBuildStrip strip;
-		strip.vertices.resize(262200);
-		m.lods[lod].parts[part].strips.push_back(std::move(strip));
+		for (int s = 0; s < 5; ++s) {
+			ThreediBuildStrip strip;
+			strip.vertices.resize(262200 / 5);
+			m.lods[lod].parts[part].strips.push_back(std::move(strip));
+		}
 		m.add_panm(lod, part, 0);
 		std::vector<uint8_t> bytes;
-		ThreediChunkOverflow overflow{};
-		check(!threedi_build_mint(m, bytes, &overflow), "overflow: refused");
-		check(std::string(overflow.chunk) == "ROOT/RDTA/RLOD/VERT" && overflow.bytes == 12u + 262200u * 64u,
-				std::string("overflow: names the VERT chunk and its size (") + overflow.chunk + ", " +
-						std::to_string(overflow.bytes) + ")");
+		ThreediBuildRefusal refusal;
+		check(!threedi_build_mint(m, bytes, &refusal), "overflow: refused");
+		check(std::string(refusal.overflow.chunk) == "ROOT/RDTA/RLOD/VERT" && refusal.overflow.bytes == 12u + 262200u * 64u,
+				std::string("overflow: names the VERT chunk and its size (") + refusal.overflow.chunk + ", " +
+						std::to_string(refusal.overflow.bytes) + ")");
+		check(refusal.what.find("its ROOT/RDTA/RLOD/VERT chunk holds 16,780,812 bytes") != std::string::npos,
+				"overflow: says so (" + refusal.what + ")");
+	}
+
+	// The mint refuses what its words cannot hold rather than truncating it
+	// (threedi_build_check): each case one word past its width.
+	{
+		const auto base = []() {
+			ThreediBuildModel m;
+			m.name = "WORDS";
+			m.skinned = true;
+			const int lod = m.add_lod();
+			m.add_part(lod, 0, ThreediBuildVec3{});
+			m.add_part(lod, 0, ThreediBuildVec3{});
+			m.add_material("VS_SKBASIC", "w.tga");
+			ThreediBuildStrip strip;
+			strip.vertices.resize(3);
+			strip.indices = {0, 1, 2};
+			strip.bone_table = {0, 1};
+			m.lods[lod].parts[0].strips.push_back(strip);
+			return m;
+		};
+		const auto refused = [](const ThreediBuildModel &m, const std::string &words) {
+			std::vector<uint8_t> bytes;
+			ThreediBuildRefusal refusal;
+			const bool minted = threedi_build_mint(m, bytes, &refusal);
+			return !minted && refusal.what.find(words) != std::string::npos;
+		};
+		std::vector<uint8_t> bytes;
+		check(threedi_build_mint(base(), bytes), "mint-check: the base mints");
+		ThreediBuildModel m = base();
+		m.name = "SEVENTEEN_CHARS__";
+		check(refused(m, "GHDR holds 16"), "mint-check: a 17-byte model name");
+		m = base();
+		m.lods[0].type = "gnrcx";
+		check(refused(m, "RMDL holds 4"), "mint-check: a 5-byte LOD type");
+		m = base();
+		m.lods[0].parts[0].strips[0].indices = {0, 1};
+		check(refused(m, "three per triangle"), "mint-check: a strip of whole triangles");
+		m = base();
+		m.lods[0].parts[0].strips[0].indices = {0, 1, 3};
+		check(refused(m, "indexes vertex 3"), "mint-check: an index past the window");
+		m = base();
+		m.lods[0].parts[0].strips[0].bone_table = {0, 1, 2};
+		check(refused(m, "names part 2"), "mint-check: a bone table naming a part the LOD lacks");
+		m = base();
+		m.lods[0].parts[0].strips[0].bone_table.assign(17, 0);
+		check(refused(m, "STRP holds 16"), "mint-check: a 17-part bone table (was clamped)");
+		m = base();
+		m.add_control_register("TWENTY_FIVE_CHARACTERS_XX");
+		check(refused(m, "CTRL holds 24"), "mint-check: a 25-byte register name");
+		m = base();
+		m.lods[0].parts[0].strips[0].vertices.resize(65537);
+		check(refused(m, "its u16 indices reach 65,536"), "mint-check: a window past what u16 indices reach");
+		// The add_* calls with a fixed field refuse a name or part past it.
+		m = base();
+		const int white[3] = {255, 255, 255};
+		check(m.add_material("SHADER_TAG_OF_THIRTY_THREE_BYTES!", nullptr) == -1 &&
+						m.add_material("FF_ST_OP", "seventeen_chars.t") == -1 &&
+						m.add_user_point("SEVENTEEN_CHARS__", ThreediBuildVec3{}, ThreediBuildVec3{}, 0, 71) == -1 &&
+						m.add_light(ThreediBuildVec3{}, 0.0, 1.0, 0, 256, white, white) == -1 &&
+						m.materials.size() == 1 && m.user_points.empty() && m.lights.empty(),
+				"mint-check: add_* refuse what their fields cannot hold");
 	}
 
 	std::printf("o3d_build_test: %d failures\n", failures);

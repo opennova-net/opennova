@@ -18,6 +18,7 @@
 
 #include <cstdint>
 
+#include <runtime/renderer/d3d9_raster.h>
 #include <runtime/renderer/frame_fx_effects.h>
 #include <runtime/world/death_camera.h>
 #include <runtime/world/radar_contacts.h>
@@ -120,7 +121,7 @@ inline bool player_view_narrow_aspect(int viewport_w, int viewport_h) {
 // The MOUNTED camera's inputs, resolved by the hosting simulation from the
 // local player's carrier each tick: a control seat (mount state +0x168 == 2
 // or 5 — Entity::is_vehicle_control_seat()) with the carrier's position,
-// heading, look-ahead target and bound radius, its watercraft class
+// heading, look-ahead target and bound radius, its air class
 // (itemDef+0x196 in {3,4}), and the water plane the clearances read.
 // `control_seat` false = on foot or a passenger/gunner seat, which keeps the
 // on-foot chase.
@@ -136,7 +137,7 @@ struct MountedCameraInput {
     //  parentMatrix(+0xB4) x (0x60000, 0, 0), called @0x438855].
     int32_t lookahead_target_q16[3] = {0, 0, 0};
     float bound_radius = 0.0f;              // carrier +0, mission units
-    bool watercraft = false;                // unit_type 3/4 [orig: @0x43861D]
+    bool aircraft = false;                  // unit_type 3/4 [orig: @0x43861D]
     // The water plane every chase eye clears, on foot as well as mounted
     // [orig: g_EnvWaterHeightFixed + 0x4000 @0x438409..0x43841E].
     float water_z = 0.0f;                   // g_EnvWaterHeightFixed, units
@@ -781,7 +782,11 @@ float fov_vertical_from_horizontal_deg(float fov_h_deg, float aspect);
 // reproduces the pass by rendering through such a target and blitting it
 // full-surface; `target_w/h` is that target, the surface itself at scale 1 and
 // otherwise never below the surface on either axis (the resampled axis is
-// super-, never under-sampled).
+// super-, never under-sampled). `raster_shift` is where D3D9 puts that image on
+// the raster retail draws it into, half a pixel right and down
+// (renderer/d3d9_raster.h): the surface's pixels, since retail stretches the
+// pass through its projection onto the backbuffer itself; a shell whose pixel
+// centres sit at i + 0.5 translates its clip image by it.
 struct ViewProjection {
     float fov_h_deg = 0.0f; // the horizontal fov, mode-invariant
     float fov_v_deg = 0.0f; // 2 * atan(tan(fov_h/2) * selected)
@@ -789,6 +794,7 @@ struct ViewProjection {
     float scale_y = 1.0f;   // flt_8409E8: the vertical stretch onto the surface
     int target_w = 0;
     int target_h = 0;
+    renderer::NdcShift raster_shift;
 };
 ViewProjection view_projection(float fov_h_deg, int aspect_mode, int surface_w,
                                int surface_h);
@@ -803,7 +809,8 @@ ViewProjection view_projection(float fov_h_deg, int aspect_mode, int surface_w,
 // target is the 512 square: the frame-shaped arms keep the frame's `aspect`
 // (and fov_v), their texels non-square, a projection a shell whose camera
 // couples the two fovs through its target's ratio must supply explicitly;
-// the Scoped arm's frustum is the square itself (aspect 1).
+// the Scoped arm's frustum is the square itself (aspect 1). Its raster_shift is
+// the square's half pixel, the target retail rasterises it into.
 // `frame` is the frame's view_projection, `nvg` the frame's NVG arms,
 // `selected_h_over_w` the selected ratio (flt_8409EC), `zoom` the slot's
 // clamped magnification.
@@ -930,11 +937,11 @@ void player_view_floor_eye_to_terrain(const terrain::TerrainHeightField *terrain
 // R*(nudge,nudge,nudge) is the look-at target; the clearances apply to every
 // chase eye; roll 0. Mounted (`v.mount.control_seat`) [orig: the mounted arm
 // of mode 1 — yaw @0x438138..0x43814A, pitch @0x438150, distance
-// @0x438121..0x438136, the slope march @0x43846E..0x438619, the watercraft
+// @0x438121..0x438136, the slope march @0x43846E..0x438619, the aircraft
 // drop @0x43861D..0x43864C, the look-ahead @0x438811..0x4388AF]: the eye sits
 // mount_distance(r) behind the eased mounted anchor along the quarter-damped
 // look yaw at the fixed downward pitch, is floored by the clearances and the
-// slope raise, dropped r/2 on a watercraft, and the final angles look at the
+// slope raise, dropped r/2 on an aircraft, and the final angles look at the
 // pivot plus the eased look-ahead (world/tp_camera_mount.h carries the
 // constants).
 // Mode 4 [orig: the lerp @0x4389eb..0x438b49]: the death camera's FROM/TO

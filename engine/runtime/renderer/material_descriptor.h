@@ -166,4 +166,13 @@ inline const MaterialDescriptorRecord* find_material_descriptor(std::string_view
   return nullptr;
 }
 
+// Whether the table knows `tag`, and whether its shader reads the TANGENT
+// semantic: the lookup the `.o3d` lowering takes (formats/threedi/
+// threedi_o3d_lower.h, ThreediShaderLookup; model_target.h), which cannot include this header.
+inline bool material_descriptor_tangent_lookup(const char* tag, bool& reads_tangents) {
+  const MaterialDescriptorRecord* record = find_material_descriptor(tag);
+  reads_tangents = record != nullptr && (record->shader_flags & MATERIAL_FLAG_TANGENT) != 0;
+  return record != nullptr;
+}
+
 }  // namespace opennova::renderer

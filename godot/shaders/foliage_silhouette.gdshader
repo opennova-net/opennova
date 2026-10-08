@@ -18,7 +18,7 @@ render_mode unshaded, cull_disabled, blend_add, depth_draw_always, fog_disabled;
 //  Foliage_DrawModelTileSlot @ 0x601d90].
 // Retail GridPlacementVS literal @ 0x7de3a0; the blocks from
 // Foliage_UploadModelTileVSConstants @ 0x6010e6..0x601209.
-uniform sampler2D u_fd_texture : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D u_fd_texture : filter_linear_mipmap, repeat_enable;
 uniform bool u_has_fd_texture = false;
 instance uniform float u_wind_offset = 0.0;
 instance uniform float u_alpha_ref = 0.0;

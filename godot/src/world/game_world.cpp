@@ -15,6 +15,7 @@
 #include <runtime/inmatch/mission_exit.h>
 #include "audio/music_director.h"
 #include "hud/hud_inset_scope.h"
+#include "render/texture_filter_device.h"
 
 using namespace godot;
 
@@ -177,6 +178,82 @@ Ref<ObjectData> GameWorld::static_source_object_data(uint64_t asset_id) const {
 }
 
 // --- the injection seams ---------------------------------------------------
+
+int GameWorld::object_detail_fresh_profile() {
+	return opennova::renderer::kObjectLodDetailFreshProfile;
+}
+
+int GameWorld::clamp_object_detail(int p_level) {
+	return opennova::renderer::clamp_object_lod_detail(p_level);
+}
+
+int GameWorld::texfilter_level_fresh_profile() {
+	return opennova::renderer::kTexFilterLevelFreshProfile;
+}
+
+int GameWorld::clamp_texfilter_level(int p_level) {
+	return opennova::renderer::clamp_texfilter_level(p_level);
+}
+
+int GameWorld::texcompression_level_fresh_profile() {
+	return opennova::renderer::kTexCompressionLevelFreshProfile;
+}
+
+int GameWorld::particle_density_fresh_profile() {
+	return opennova::renderer::kParticleDensityFreshProfile;
+}
+
+int GameWorld::clamp_particle_density(int p_density) {
+	return opennova::renderer::clamp_particle_density(p_density);
+}
+
+void GameWorld::set_particle_density(int p_density) {
+	particle_density_ = opennova::renderer::clamp_particle_density(p_density);
+}
+
+// The session's words to the devices that build from them: the terrain's
+// compressed families (its detail layers and colormap quadrants) and the
+// effect world's pages and scene-pass stride.
+void GameWorld::publish_session_render_settings() {
+	if (terrain_ != nullptr) {
+		terrain_->set_texcompression_level(session_texcompression_level_);
+	}
+	if (EffectWorld *effects = get_effect_world()) {
+		effects->set_session_render_settings(session_texcompression_level_, session_particle_density_);
+	}
+}
+
+void GameWorld::set_texfilter_level(int p_level) {
+	texfilter_level_ = opennova::renderer::clamp_texfilter_level(p_level);
+	publish_texfilter_state();
+}
+
+// The device leg: the effects' code from the options word, the device mode's
+// code and the world viewport's anisotropy from the session copy.
+void GameWorld::publish_texfilter_state() {
+	const opennova::renderer::TexFilterState state =
+			opennova::renderer::texfilter_state(session_texfilter_level_, texfilter_level_);
+	TextureFilterDevice::publish(state);
+	if (is_inside_tree()) {
+		TextureFilterDevice::apply_viewport(get_viewport(), state);
+	}
+}
+
+int GameWorld::get_texfilter_device_mode() const {
+	return opennova::renderer::texfilter_state(session_texfilter_level_, texfilter_level_).device_mode;
+}
+
+int GameWorld::get_texfilter_effect_mode() const {
+	return opennova::renderer::texfilter_state(session_texfilter_level_, texfilter_level_).effect_mode;
+}
+
+int GameWorld::get_texfilter_device_filter() {
+	return TextureFilterDevice::device_filter_code();
+}
+
+int GameWorld::get_texfilter_effect_filter() {
+	return TextureFilterDevice::effect_filter_code();
+}
 
 void GameWorld::set_local_player_spawn_loadout(const Ref<PlayerSpawnLoadout> &p_loadout) {
 	player_visuals_->set_spawn_loadout(p_loadout);
@@ -689,6 +766,43 @@ void GameWorld::_bind_methods() {
 			&GameWorld::set_local_player_spawn_loadout);
 	ClassDB::bind_method(D_METHOD("set_playable", "enabled"), &GameWorld::set_playable);
 	ClassDB::bind_method(D_METHOD("is_playable"), &GameWorld::is_playable);
+	ClassDB::bind_method(D_METHOD("set_object_polydetail", "level"),
+			&GameWorld::set_object_polydetail);
+	ClassDB::bind_method(D_METHOD("get_object_polydetail"), &GameWorld::get_object_polydetail);
+	ClassDB::bind_method(D_METHOD("get_object_detail"), &GameWorld::get_object_detail);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("object_detail_fresh_profile"),
+			&GameWorld::object_detail_fresh_profile);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("clamp_object_detail", "level"),
+			&GameWorld::clamp_object_detail);
+	ClassDB::bind_method(D_METHOD("set_texfilter_level", "level"), &GameWorld::set_texfilter_level);
+	ClassDB::bind_method(D_METHOD("get_texfilter_level"), &GameWorld::get_texfilter_level);
+	ClassDB::bind_method(D_METHOD("get_session_texfilter_level"),
+			&GameWorld::get_session_texfilter_level);
+	ClassDB::bind_method(D_METHOD("get_texfilter_device_mode"), &GameWorld::get_texfilter_device_mode);
+	ClassDB::bind_method(D_METHOD("get_texfilter_effect_mode"), &GameWorld::get_texfilter_effect_mode);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("get_texfilter_device_filter"),
+			&GameWorld::get_texfilter_device_filter);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("get_texfilter_effect_filter"),
+			&GameWorld::get_texfilter_effect_filter);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("texfilter_level_fresh_profile"),
+			&GameWorld::texfilter_level_fresh_profile);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("clamp_texfilter_level", "level"),
+			&GameWorld::clamp_texfilter_level);
+	ClassDB::bind_method(D_METHOD("set_texcompression_level", "level"),
+			&GameWorld::set_texcompression_level);
+	ClassDB::bind_method(D_METHOD("get_texcompression_level"), &GameWorld::get_texcompression_level);
+	ClassDB::bind_method(D_METHOD("get_session_texcompression_level"),
+			&GameWorld::get_session_texcompression_level);
+	ClassDB::bind_method(D_METHOD("set_particle_density", "density"), &GameWorld::set_particle_density);
+	ClassDB::bind_method(D_METHOD("get_particle_density"), &GameWorld::get_particle_density);
+	ClassDB::bind_method(D_METHOD("get_session_particle_density"),
+			&GameWorld::get_session_particle_density);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("texcompression_level_fresh_profile"),
+			&GameWorld::texcompression_level_fresh_profile);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("particle_density_fresh_profile"),
+			&GameWorld::particle_density_fresh_profile);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("clamp_particle_density", "density"),
+			&GameWorld::clamp_particle_density);
 
 	ClassDB::bind_method(D_METHOD("load_world", "dir"), &GameWorld::load_world, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("load_mission", "bms_name", "dir"), &GameWorld::load_mission,
@@ -766,6 +880,7 @@ void GameWorld::_bind_methods() {
 			&GameWorld::get_current_frame_clear_color);
 
 	ClassDB::bind_method(D_METHOD("set_music_director", "director"), &GameWorld::set_music_director);
+	ClassDB::bind_method(D_METHOD("set_player_profiles", "profiles"), &GameWorld::set_player_profiles);
 	ClassDB::bind_method(D_METHOD("set_frame_stats", "board"), &GameWorld::set_frame_stats);
 	ClassDB::bind_method(D_METHOD("is_water_render_stats_measured"),
 			&GameWorld::is_water_render_stats_measured);

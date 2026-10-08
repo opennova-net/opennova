@@ -440,6 +440,15 @@ Ref<Compositor> compositor_with_terminal(const Ref<Compositor> &previous,
 	return compositor;
 }
 
+// The DisplayDecode whose compositor each scenario renders with, by the
+// scenario's RID (DisplayDecode::scenario_compositor; Godot binds no getter for
+// a scenario's compositor). Object ids, never references: nothing here holds a
+// resource past the servers at exit.
+std::map<std::int64_t, ObjectID> &scenario_decodes() {
+	static std::map<std::int64_t, ObjectID> decodes;
+	return decodes;
+}
+
 } // namespace
 
 class FrameFxCompositorEffect::Impl {
@@ -2051,6 +2060,18 @@ void DisplayDecode::install() {
 	installed_compositor_ = compositor_with_terminal(Ref<Compositor>(), effect_);
 	server->scenario_set_compositor(world_->get_scenario(),
 			installed_compositor_->get_rid());
+	scenario_decodes()[world_->get_scenario().get_id()] = ObjectID(get_instance_id());
+}
+
+Ref<Compositor> DisplayDecode::scenario_compositor(const Ref<World3D> &p_world) {
+	if (p_world.is_null())
+		return Ref<Compositor>();
+	const auto found = scenario_decodes().find(p_world->get_scenario().get_id());
+	if (found == scenario_decodes().end())
+		return Ref<Compositor>();
+	const DisplayDecode *decode = Object::cast_to<DisplayDecode>(
+			ObjectDB::get_instance(static_cast<std::uint64_t>(found->second)));
+	return decode != nullptr ? decode->installed_compositor_ : Ref<Compositor>();
 }
 
 void DisplayDecode::uninstall() {
@@ -2063,6 +2084,11 @@ void DisplayDecode::uninstall() {
 			world_environment->get_compositor() == installed_compositor_)
 		world_environment->set_compositor(previous_compositor_);
 	RenderingServer *server = RenderingServer::get_singleton();
+	if (world_.is_valid()) {
+		const auto found = scenario_decodes().find(world_->get_scenario().get_id());
+		if (found != scenario_decodes().end() && found->second == ObjectID(get_instance_id()))
+			scenario_decodes().erase(found);
+	}
 	if (world_.is_valid() && server != nullptr)
 		server->scenario_set_compositor(world_->get_scenario(), RID());
 	world_environment_id_ = ObjectID();

@@ -151,12 +151,16 @@ public:
 
 	Error load();
 	Error load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
-	// The environment a mission starts under (opennova::env::load_mission_env):
-	// the named .env through `p_resource_root`, or, when that file is not there,
-	// the engine's pre-parse defaults with no time-of-day keyframe (never the
-	// authoring template reset_to_default writes). Always leaves the document
-	// loaded; false when the file was skipped.
-	bool load_mission_environment(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
+	// The environment a mission starts under (opennova::env::read_mission_env):
+	// the terrain's .trn `p_terrain` (empty: none), overcast.def and the .env
+	// `p_name` through `p_resource_root`, each over the one before; a .env that is
+	// not there leaves the earlier passes over the engine's pre-parse defaults,
+	// with no time-of-day keyframe (never the authoring template reset_to_default
+	// writes). `p_overcast`, where valid, takes the overcast table the load makes
+	// (the .trn's keyframes and overcast.def's). Always leaves the document
+	// loaded; false when the .env was skipped.
+	bool load_mission_environment(const Ref<ResourceRoot> &p_resource_root, const String &p_terrain,
+			const String &p_name, const Ref<EnvFile> &p_overcast);
 	Error save_to_path(const String &p_path);
 	void reset_to_default();
 	bool is_loaded() const;

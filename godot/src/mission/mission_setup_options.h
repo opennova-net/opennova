@@ -14,6 +14,7 @@
 #include "network/join_target.h"
 #include "object/character_join_profile.h"
 #include "object/item_database.h"
+#include "player/player_profiles.h"
 #include "resource_index/resource_root.h"
 #include "simulation/simulation.h"
 #include "terrain/terrain_data.h"
@@ -77,6 +78,10 @@ public:
 	void set_local_character_profile(const Ref<CharacterJoinProfile> &p_value) {
 		local_character_profile_ = p_value;
 	}
+	// The player profile whose current records the sim takes before the boot
+	// (Simulation.use_player_profile). Null = a fresh profile's defaults.
+	Ref<PlayerProfiles> get_player_profiles() const { return player_profiles_; }
+	void set_player_profiles(const Ref<PlayerProfiles> &p_value) { player_profiles_ = p_value; }
 	// The joiner's profile-to-wire projection (Simulation.set_join_character_profile).
 	// Null = none staged.
 	Ref<CharacterJoinProfile> get_join_character_profile() const {
@@ -151,6 +156,7 @@ private:
 	Ref<HostSessionOptions> host_session_;
 	Ref<JoinTarget> join_target_;
 	Ref<CharacterJoinProfile> local_character_profile_;
+	Ref<PlayerProfiles> player_profiles_;
 	Ref<CharacterJoinProfile> join_character_profile_;
 	PackedStringArray spawn_names_;
 	Ref<ResourceRoot> resource_root_;

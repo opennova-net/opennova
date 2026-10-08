@@ -11,6 +11,7 @@
 #include <formats/mission/bms_edit.h> // mission_info (the BMS tile set)
 #include <formats/mission/mission.h>
 #include <runtime/mission/item_traits.h>
+#include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/seat_spec_extract.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/terrain_query/terrain_field_build.h> // the terrain field's file entry (ADR 0043 E9)
@@ -283,8 +284,9 @@ void MissionKernel::wire_terrain() {
 bool MissionKernel::load_terrain_field() {
 	if (asset_index() == nullptr) return false;
 	std::string terrain_error;
-	if (!terrain::terrain_field_store_load(terrain_store, *asset_index(), mission.get_terrain(),
-				mission_info(mission).tile_set, terrain_error)) {
+	const MissionInfo info = mission_info(mission);
+	if (!terrain::terrain_field_store_load(terrain_store, *asset_index(), mission.get_terrain(), info.tile_set,
+				info.environment, terrain_error)) {
 		io::logf(io::LogLevel::kWarn,
 				"mission kernel: terrain not loaded (%s) - the ground solve will not run",
 				terrain_error.c_str());
@@ -399,6 +401,7 @@ int MissionKernel::spawn_local_player_at_start(uint32_t game_type) {
 	if (sel.found) {
 		spawn.position = sel.position;
 		spawn.yaw = sel.yaw;
+		spawn.heading_bam = sel.heading_bam;
 		spawn.pitch = sel.pitch;
 		spawn.roll = sel.roll;
 	}
@@ -415,8 +418,9 @@ bool MissionKernel::spawn_local_player(const w::PlayerSpawn &spawn) {
 	const w::EntityHandle h = w::spawn_player(world, spawn);
 	if (!h.valid()) return false;
 	resolve_new_infantry_adm_ids();
-	// Seed the look heading from the spawn facing so the body starts aligned.
-	local.reset_local_player_input(w::bam_heading_from_mission_yaw_deg(spawn.yaw));
+	// The look yaw starts at the spawn's heading word [orig:
+	// Entity_FindBestSpawnPoint @0x50CF4D].
+	local.reset_local_player_input(w::player_spawn_heading(spawn));
 	w::local_player_view_reset(&world, local.weapon, local.view, local.view_tracker);
 	return true;
 }
@@ -485,7 +489,7 @@ bool MissionKernel::load_weapon_table(const BootFileSource &files,
 				return static_cast<const BootFileSource *>(ctx)->has_file(name);
 			},
 			&files};
-	if (def_parse_weapons_memory(bytes.data(), bytes.size(), &file, &probe) != 0) return false;
+	if (def_parse_weapons_memory(bytes.data(), bytes.size(), &file, nullptr, &probe) != 0) return false;
 	world.tables.weapons = w::build_weapon_table(file,
 			table_assets != nullptr ? table_assets : &assets());
 	if (weapon_defs_ok) def_free_weapons(&weapon_defs);
@@ -657,15 +661,29 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		step("script_catalogs");
 		wac::load_script_sound_sets(files_, mission_basename, script_sound_catalog);
 		world.tables.sound_sets = &script_sound_catalog;
-		// The mission's dialog bank, <mission>.dbf when it exists.
-		// [orig: DialogSystem_Init @0x527640..0x527659 -> DialogManager_LoadFromFile]
+		// The mission's dialog bank when it exists, <mission>.dbf or the one the
+		// header's slot names, and with it the bank's sounds, <bank>.lwf else
+		// <bank>.pwf. [orig: DialogSystem_Init @0x52760c..0x527659 ->
+		// DialogManager_LoadFromFile @0x44e650, the sounds @0x44e7d4..0x44e807]
 		world.tables.dialog_bank = nullptr;
+		world.tables.dialog_sounds = nullptr;
 		dialog_bank = dbf::File{};
+		dialog_sounds = lwf::File{};
+		const std::string bank_name = mission::dialog_bank_name(mission_basename,
+				strutil::fixed_string(mission.header.terrain + 16, 16));
 		std::vector<uint8_t> dbf_bytes;
 		std::string dbf_error;
-		if (files_.read_file(mission_basename + ".dbf", dbf_bytes) &&
-				dbf::parse_dbf_memory(dbf_bytes.data(), dbf_bytes.size(), dialog_bank, dbf_error))
+		if (files_.read_file(bank_name, dbf_bytes) &&
+				dbf::parse_dbf_memory(dbf_bytes.data(), dbf_bytes.size(), dialog_bank, dbf_error)) {
 			world.tables.dialog_bank = &dialog_bank;
+			std::vector<uint8_t> lwf_bytes;
+			std::string lwf_error;
+			const std::string sounds = mission::dialog_sounds_name(bank_name);
+			const std::string sounds_alternate = mission::dialog_sounds_name(bank_name, true);
+			if ((files_.read_file(sounds, lwf_bytes) || files_.read_file(sounds_alternate, lwf_bytes)) &&
+					lwf::parse_lwf_buffer(lwf_bytes.data(), lwf_bytes.size(), dialog_sounds, lwf_error))
+				world.tables.dialog_sounds = &dialog_sounds;
+		}
 		// SndProf.def -> the footstep/foley/landing/scream slot table. The
 		// parse appends, so it runs only over an EMPTY table: a table the
 		// embedder filled before the boot (Simulation::set_sound_profiles,
@@ -842,8 +860,9 @@ void MissionKernel::carry_across_load_from(MissionKernel &previous) {
 void MissionKernel::tick_weather() {
 	w::WeatherTickEvents events;
 	world.weather.tick_sim(&world, events);
-	if (events.thunder_a) world.out.weather_sounds.push_back(w::WeatherSoundEvent{0x10000, 0});
-	if (events.thunder_b) world.out.weather_sounds.push_back(w::WeatherSoundEvent{0xA0000, 128});
+	w::WeatherSoundEvent thunder[2];
+	const size_t thunders = w::weather_thunder_sounds(events, thunder);
+	for (size_t i = 0; i < thunders; ++i) world.out.weather_sounds.push_back(thunder[i]);
 	// A host without an audio presenter (the dedicated host) never drains
 	// the queue: keep it bounded, dropping the oldest.
 	constexpr size_t kWeatherSoundQueueCap = 32;

@@ -4,7 +4,7 @@
 // Expanded detail foliage. Retail emits the source model once per accepted
 // candidate and bends every transformed vertex onto the terrain before this
 // shader runs [orig: Foliage_GenerateInstances_0 @ 0x5ffdd0].
-uniform sampler2D u_fd_texture : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D u_fd_texture : filter_linear_mipmap, repeat_enable;
 uniform bool u_has_fd_texture = false;
 uniform sampler2D u_colormap : filter_linear, repeat_disable;
 uniform bool u_has_colormap = false;

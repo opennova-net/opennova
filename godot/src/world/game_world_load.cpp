@@ -10,6 +10,9 @@
 
 #include <cmath>
 
+#include <base/gameprofile/resource_missing.h>
+#include <runtime/environment/environment_state.h>
+
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -121,8 +124,8 @@ int GameWorld::load_world(const String &p_dir) {
 	set_mission_water_height_override(NAN);
 	clear_mission_tile_info();
 	resource_root_ = resource_root;
-	load_environment(env_file_);
-	if (!load_terrain(terrain_file_, String())) {
+	load_environment(terrain_file_, env_file_);
+	if (!load_terrain(terrain_file_, String(), env_file_)) {
 		emit_signal(kSignalLoadFailed, vformat("failed to load %s", terrain_file_));
 		return ERR_CANT_OPEN;
 	}
@@ -226,6 +229,21 @@ int GameWorld::load_mission_data(const Ref<MissionData> &p_mission, const String
 int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const String &p_bms_name,
 		const Ref<ResourceRoot> &p_resource_root) {
 	const bool wire_header_join = p_mission->is_wire_header_only();
+	// The mission start's copy of the options' object detail: the frames draw
+	// at it until the next mission start (engine: renderer/object_lod.h).
+	object_detail_ = object_polydetail_;
+	// The same copy of the texfilter level: the device mode the terrain detail
+	// family samples at follows it until the next mission start (engine:
+	// renderer/texture_filter.h).
+	session_texfilter_level_ = texfilter_level_;
+	publish_texfilter_state();
+	// The same copy of texcompression_level and particle_density: the terrain
+	// and the particle pages this mission builds, and the scene passes' particle
+	// stride, follow them until the next mission start (engine:
+	// renderer/texture_compression.h, renderer/particle_density.h).
+	session_texcompression_level_ = texcompression_level_;
+	session_particle_density_ = particle_density_;
+	publish_session_render_settings();
 	join_wire_assets_pending_ = wire_header_join;
 	join_wire_til_applied_ = false;
 	join_wire_assets_failed_ = false;
@@ -264,7 +282,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	emit_signal(kSignalLoadProgress,
 			MissionData::load_progress_percent(MissionData::LOAD_STAGE_ENVIRONMENT));
 	timeline->span("environment");
-	load_environment(env_name);
+	load_environment(trn, env_name);
 	apply_mission_environment_overrides(p_mission);
 	// Initialize the exact mission clock and the reset weather owner before the
 	// runtime is constructed. The authority publishes this T0 sample after setup
@@ -279,7 +297,8 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	timeline->end_span();
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_TERRAIN));
 	timeline->span("terrain");
-	if (!load_terrain(trn, p_mission->get_tile_set_ref())) {
+	if (!load_terrain(trn, p_mission->get_tile_set_ref(),
+				p_mission->get_environment_ref().is_empty() ? String() : env_name)) {
 		emit_signal(kSignalLoadFailed, vformat("failed to load %s", trn));
 		timeline->finish();
 		return ERR_CANT_OPEN;
@@ -407,6 +426,11 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 				avatar_db->character_join_profile_from_loadout(player_visuals_->spawn_loadout());
 	} else {
 		UtilityFunctions::push_warning("GameWorld: Avatars.def unavailable; players draw their item model");
+		if (!resource_root_->has_file("Avatars.def")) {
+			// The log line the editor's Play reads back into a Problems row (ADR 0046 DI-27).
+			ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kFile, "Avatars.def", String(),
+					"players draw their item model");
+		}
 		local_character_profile_.unref();
 	}
 	panm_clock_->sample(get_frame_clock_ms(),
@@ -541,29 +565,38 @@ void GameWorld::unload() {
 
 // --- environment ---------------------------------------------------------------------
 
-void GameWorld::load_environment(const String &p_env_path) {
+void GameWorld::load_environment(const String &p_trn_path, const String &p_env_path) {
 	if (env_ == nullptr) {
 		return;
 	}
 	Ref<EnvFile> env;
 	env.instantiate();
-	// A .env that is not there is skipped and the world runs on the engine's
-	// defaults (opennova::env::load_mission_env); the load goes on either way.
-	if (!env->load_mission_environment(resource_root_, p_env_path)) {
+	// The overcast table the overcast blend cross-fades against: the .trn's
+	// keyframes and overcast.def's after them, as the same load takes them
+	// (an empty one fades toward black, env #41).
+	Ref<EnvFile> overcast;
+	overcast.instantiate();
+	// The terrain's .trn, overcast.def, then the .env over them; a .env that is
+	// not there is skipped and the world runs on the earlier passes over the
+	// engine's defaults (opennova::env::load_mission_env); the load goes on
+	// either way.
+	if (!env->load_mission_environment(resource_root_, p_trn_path, p_env_path, overcast)) {
 		UtilityFunctions::push_warning(vformat(
 				"GameWorld: environment '%s' did not load; the engine defaults stand", p_env_path));
+		// One that is not there (one that does not parse is no miss): the log line the editor's Play reads
+		// back into a Problems row on the mission naming it (ADR 0046 DI-27).
+		if (!p_env_path.is_empty() && resource_root_.is_valid() && !resource_root_->has_file(p_env_path.get_file())) {
+			ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kEnvironment, p_env_path.get_file(), String(),
+					"the mission runs on the engine's default environment");
+		}
 	}
 	// MissionEnvironment's setter reloads + pushes shader globals on assignment.
 	env_->set_environment_data(env);
-	// The overcast table the overcast blend cross-fades against: overcast.def
-	// appended after the .trn pass (stock .trn files carry no TOD blocks)
-	// (retail Environment_LoadTimeOfDayConfig @ 0x57db30).
-	Ref<EnvFile> overcast;
-	overcast.instantiate();
-	if (overcast->load_from_resource_root(resource_root_, "overcast.def") == OK) {
-		env_->set_overcast_data(overcast);
-	} else {
-		env_->set_overcast_data(Ref<EnvFile>());
+	env_->set_overcast_data(overcast);
+	// The engine's env::kOvercastFile carries the name and the witness.
+	if (resource_root_.is_valid() && !resource_root_->has_file(opennova::env::kOvercastFile)) {
+		ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kFile, opennova::env::kOvercastFile, String(),
+				"the overcast weather has no table of its own to blend toward");
 	}
 	// GameWorld retains one Weather node across loads. A replacement ENV is
 	// a discrete state change: retail snaps every color block to the new mission
@@ -883,10 +916,11 @@ void GameWorld::clear_mission_tile_info() {
 
 // --- terrain + foliage ---------------------------------------------------------------
 
-bool GameWorld::load_terrain(const String &p_trn_path, const String &p_tile_set) {
+bool GameWorld::load_terrain(const String &p_trn_path, const String &p_tile_set, const String &p_env_path) {
 	Ref<TerrainData> data;
 	data.instantiate();
 	data->set_mission_tile_set(p_tile_set);
+	data->set_mission_environment(p_env_path);
 	if (data->load_from_resource_root(resource_root_, p_trn_path) != OK) {
 		return false;
 	}
@@ -993,6 +1027,7 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	// not the shared default. [D-INF-6]
 	opts->set_item_db(placer_.is_valid() ? placer_->get_item_db() : Ref<ItemDatabase>());
 	opts->set_local_character_profile(local_character_profile_);
+	opts->set_player_profiles(player_profiles_);
 	// Serve-and-play hosts run the listen server AND spawn their own player
 	// (ADR 0011/0012, net-re §5.2b/§5.38). A DEDICATED host (config
 	// "dedicated") serves WITHOUT a local player — same listen server, just no
@@ -1073,50 +1108,18 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	return OK;
 }
 
-// The on-disk path of the player profile's weapon file. Retail builds it from
-// the ACTIVE expansion name — with an expansion loaded it looks ONLY under
-// that expansion's directory (there is no base-game fallback leg), otherwise
-// it reads the game root's copy [orig: PlayerProfile_LoadAllFromDisk @ 0x54f4d0,
-// path build @ 0x54f68c-@ 0x54f6b7: g_ExpansionName[0] ?
-// "expansion\<name>\weapon.sav" : "weapon.sav"]. The mount is the authority
-// on both halves — for a joiner it has already been reconciled to the HOST's
-// expansion (D-NET-178), which is what makes the profile's ADM index space
-// agree with the host's.
-// Load weapon.sav onto the sim: five profile-slot records, each carrying a
-// per-side class byte and the five 2048-byte class kit pages the MP loadout
-// submit indexes BY that class byte [orig: PlayerProfile_LoadAllFromDisk
-// @ 0x54f4d0 — header check @ 0x54f586 ("FPBC"/"0211"), the 5 x 0x1080C
-// record reads]. This is a plain disk file, not archive content, so it is
-// read through the mount's directory rather than the VFS. A file that is
-// absent or not a profile is NOT a load failure: retail's own miss leaves
-// PlayerProfile_InitDefaults' shipped defaults in place (BLUE/RED class 8,
-// one weapon name per class page) [orig: @ 0x54bb40].
+// The player profile's current weapon.sav record onto the sim, again after the
+// boot now that the session and the catalog exist: five profile-slot records
+// the shell loaded at the menu's start, each carrying a per-side class byte and
+// the five 2048-byte class kit pages the MP loadout submit indexes BY that
+// class byte (engine: runtime/profile/player_profiles.h). With no profile the
+// shipped defaults stay installed, as a missing weapon.sav leaves them.
 void GameWorld::load_player_weapon_profile() {
 	Ref<Simulation> sim = get_sim();
-	if (sim.is_null()) {
+	if (sim.is_null() || player_profiles_.is_null()) {
 		return;
 	}
-	// The mount root joined with the engine's expansion-scoped relpath (the
-	// shell's PlayerProfile.weapon_profile_path computes the same path).
-	if (resource_root_.is_null() || resource_root_->get_root_dir().is_empty()) {
-		return;
-	}
-	const String path = resource_root_->get_root_dir().path_join(
-			Simulation::weapon_profile_relpath(resource_root_->get_expansion()));
-	if (path.is_empty()) {
-		return;
-	}
-	if (!FileAccess::file_exists(path)) {
-		UtilityFunctions::print_verbose(
-				vformat("GameWorld: no weapon.sav at %s — keeping the shipped profile defaults", path));
-		return;
-	}
-	const int err = sim->load_weapon_profile(path);
-	if (err != OK) {
-		UtilityFunctions::push_warning(vformat(
-				"GameWorld: weapon.sav at %s not accepted (error %d) — keeping the shipped profile defaults",
-				path, err));
-	}
+	sim->use_player_profile(player_profiles_);
 }
 
 // Place real ambient sounds at the mission's sound markers: load the co-named
@@ -1247,6 +1250,9 @@ void GameWorld::start_effect_world() {
 			effect_world->set_mission_wind(info->get_wind_speed(), info->get_wind_direction());
 		}
 	}
+	// The session's words, before the pages are built (CParticleTexture_InitTextureAndChannels
+	// runs inside the effect load, after the mission start's copy).
+	effect_world->set_session_render_settings(session_texcompression_level_, session_particle_density_);
 	const int count = effect_world->load_from_resource_root(resource_root_);
     if (const Ref<Simulation> sim = get_sim(); sim.is_valid())
         sim->bind_item_effect_scene(effect_world->shared_native_scene());

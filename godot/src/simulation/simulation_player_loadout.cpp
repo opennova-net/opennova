@@ -5,31 +5,18 @@
 #include "simulation/fp_viewmodel_spec.h"
 #include "simulation/player_inventory.h"
 #include "simulation/weapon_kit_entry.h"
-#include "simulation/weapon_profile_summary.h"
+#include "player/player_profiles.h"
+#include "resource_index/launch_flags.h" // the /noreload flag the session copy reads
 #include "util/string_convert.h"
 
 #include <runtime/inmatch/loadout_submit.h> // the 0x2F submission + 0x5A grant conversions
 
 #include <runtime/mission/promote.h> // stash_mission_loadout_rules (the chunk-tuple conversion)
+#include <runtime/profile/profile_controls.h> // the session copy's input words
 #include <runtime/renderer/fp_viewmodel_spec.h> // the FP viewmodel submit rule
 #include <runtime/world/local_player_view.h> // the USE key's vehicle-loadout zone gates
 
 #include <algorithm>
-#include <cstdio>
-
-#include <godot_cpp/classes/dir_access.hpp>
-#include <godot_cpp/classes/file_access.hpp> // weapon.sav lives on the filesystem, not a mount
-#include <godot_cpp/classes/os.hpp>
-
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#endif
 
 using namespace sim_internal;
 
@@ -44,93 +31,6 @@ std::vector<opennova::world::WeaponKitEntry> kit_rows_from(const TypedArray<Weap
 		kit.push_back(row->value());
 	}
 	return kit;
-}
-
-} // namespace
-
-namespace {
-
-Error read_weapon_profile_file(const String &path,
-		opennova::playersav::File &out, bool p_clamp_classes = false) {
-	if (path.is_empty()) return ERR_INVALID_PARAMETER;
-	Ref<FileAccess> file = FileAccess::open(path, FileAccess::READ);
-	if (file.is_null()) return FileAccess::get_open_error();
-	const PackedByteArray bytes =
-			file->get_buffer(static_cast<int64_t>(file->get_length()));
-	file->close();
-	if (!opennova::playersav::read(bytes.ptr(),
-			static_cast<std::size_t>(bytes.size()), out))
-		return ERR_FILE_CORRUPT;
-	if (p_clamp_classes)
-		opennova::playersav::clamp_classes(out);
-	return OK;
-}
-
-Error replace_file_atomic(const String &temp_path, const String &target_path) {
-#ifdef _WIN32
-	const CharWideString temp = temp_path.wide_string();
-	const CharWideString target = target_path.wide_string();
-	// MoveFileExW with REPLACE_EXISTING is the Windows atomic same-volume rename
-	// primitive; WRITE_THROUGH keeps ACCEPT from returning before metadata lands.
-	if (::MoveFileExW(temp.get_data(), target.get_data(),
-			MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == 0)
-		return ERR_FILE_CANT_WRITE;
-#else
-	const CharString temp = temp_path.utf8();
-	const CharString target = target_path.utf8();
-	if (std::rename(temp.get_data(), target.get_data()) != 0)
-		return ERR_FILE_CANT_WRITE;
-#endif
-	return OK;
-}
-
-Error write_weapon_profile_atomic(const String &path,
-		const opennova::playersav::File &profile) {
-	if (path.is_empty()) return ERR_INVALID_PARAMETER;
-	const String base_dir = path.get_base_dir();
-	if (!base_dir.is_empty()) {
-		const Error dir_error = DirAccess::make_dir_recursive_absolute(base_dir);
-		if (dir_error != OK) return dir_error;
-	}
-	const String temp_path = vformat("%s.tmp.%d", path,
-			OS::get_singleton()->get_process_id());
-	Ref<FileAccess> file = FileAccess::open(temp_path, FileAccess::WRITE);
-	if (file.is_null()) return FileAccess::get_open_error();
-	const std::vector<uint8_t> encoded = opennova::playersav::write(profile);
-	PackedByteArray bytes;
-	bytes.resize(static_cast<int64_t>(encoded.size()));
-	if (!encoded.empty())
-		std::memcpy(bytes.ptrw(), encoded.data(), encoded.size());
-	file->store_buffer(bytes);
-	file->flush();
-	const Error write_error = file->get_error();
-	file->close();
-	if (write_error != OK) {
-		DirAccess::remove_absolute(temp_path);
-		return write_error;
-	}
-	const Error rename_error = replace_file_atomic(temp_path, path);
-	if (rename_error != OK)
-		DirAccess::remove_absolute(temp_path);
-	return rename_error;
-}
-
-bool avatar_selection_from_dictionary(const Dictionary &profile, int side,
-		uint8_t &avatar_a, uint8_t &avatar_b, uint16_t &avatar_packed) {
-	if (profile.is_empty() || !profile.has("avatar_a") ||
-			!profile.has("avatar_b") || !profile.has("avatar_packed"))
-		return false;
-	const int a = profile.get("avatar_a", -1);
-	const int b = profile.get("avatar_b", -1);
-	const int packed = profile.get("avatar_packed", -1);
-	if (a < 0 || a > 0xff || b < 0 || b > 0xff ||
-			packed < 0 || packed > 0xffff ||
-			((packed >> 15) & 1) != side)
-		return false;
-	avatar_a = static_cast<uint8_t>(a);
-	avatar_b = static_cast<uint8_t>(b);
-	avatar_packed = static_cast<uint16_t>(packed);
-	return true;
 }
 
 } // namespace
@@ -355,15 +255,23 @@ bool Simulation::seed_session_kit_from_profile() {
 }
 
 // The loadout profile seams the joiner role keeps shell-side (the weapon.sav
-// page composition, the respawn rebuild with its view/map resets); every other
-// leg of the joiner frame is the role's (ADR 0043 d3, slice E8b). The role is
-// constructed with them.
+// page composition, the respawn's view/map resets); every other leg of the
+// joiner frame is the role's (ADR 0043 d3, slice E8b). The role is constructed
+// with them.
 opennova::inmatch::JoinerRole::KitSeams Simulation::joiner_kit_seams() {
 	opennova::inmatch::JoinerRole::KitSeams seams;
 	seams.apply_authoritative = [this] { apply_joiner_authoritative_loadout(); };
 	seams.reseed_on_side_change = [this] { return reseed_session_kit_on_side_change(); };
 	seams.push = [this] { push_joiner_loadout_kit(); };
-	seams.respawn = [this] { respawn_local_player_loadout(); };
+	// A joiner's redeploy rebuilds no kit of its own: the release bundle's 0x5A,
+	// which the host built from the slot's loadout buffer, has already rebuilt the
+	// slots with its counts (apply_authoritative above), and retail's client runs
+	// Player_InitPlayer only at the mission start and a team change (D-NET-378;
+	// the witness is the JoinerRole::KitSeams note in runtime/inmatch/joiner_role.h).
+	seams.respawn = [this] {
+		reset_local_player_view_effects();
+		kernel_->local.hud_map_control.reset_spawn();
+	};
 	return seams;
 }
 
@@ -407,110 +315,6 @@ void Simulation::push_joiner_loadout_kit() {
 	player_.pushing_joiner_loadout_kit = false;
 }
 
-String Simulation::weapon_profile_relpath(const String &p_expansion_name) {
-	return String(opennova::playersav::weapon_sav_relpath(
-			opennova::to_std(p_expansion_name))
-					.c_str());
-}
-
-Ref<WeaponProfileSummary> Simulation::read_weapon_profile_summary(const String &p_path) {
-	opennova::playersav::File profile = opennova::playersav::make_defaults();
-	// Raw bytes for the menu: the PLAYER_INFO screen selects its rows straight
-	// from the profile globals; the [5,9] class clamp is a SESSION-START step
-	// (Game_ApplySessionSettingsToGlobals) that load_weapon_profile applies.
-	const Error error = read_weapon_profile_file(p_path, profile);
-	Ref<WeaponProfileSummary> out;
-	out.instantiate();
-	// OpenNova's active profile is slot 0. Retail indexes the same five-record
-	// array by g_GameConfigState.currentProfileSlot_000 @0x25506B8 (0x1080C stride) before reading or
-	// writing its record; see docs/playerinfo/avatars-re.md.
-	out->assign(profile.slots[0], int(error), error == OK);
-	return out;
-}
-
-Error Simulation::save_weapon_profile_selection(const String &p_path,
-		const Dictionary &p_profile) {
-	if (p_path.is_empty() || p_profile.is_empty())
-		return ERR_INVALID_PARAMETER;
-
-	// The ACCEPT snapshot (PlayerCharacterSelectionState.snapshot): the shared
-	// PLAYERCLASS value plus side_profiles[blue, red], each carrying the side's
-	// authored nationality/division ids and packed character id.
-	const int player_class = p_profile.get("player_class", -1);
-	if (player_class < opennova::playersav::kMinPlayerClass ||
-			player_class > opennova::playersav::kMaxPlayerClass)
-		return ERR_INVALID_PARAMETER;
-	const Array side_profiles = p_profile.get("side_profiles", Array());
-
-	opennova::playersav::File profile;
-	if (FileAccess::file_exists(p_path)) {
-		const Error read_error = read_weapon_profile_file(p_path, profile);
-		// Never replace an unrecognized/short existing file. ACCEPT must be
-		// recoverable even when the user's profile needs manual repair.
-		if (read_error != OK) return read_error;
-	} else {
-		profile = opennova::playersav::make_defaults();
-	}
-
-	bool updated = false;
-	for (int side = 0; side < 2; ++side) {
-		Dictionary selected;
-		if (side < side_profiles.size() &&
-				side_profiles[side].get_type() == Variant::DICTIONARY)
-			selected = side_profiles[side];
-		if (selected.is_empty()) continue;
-		uint8_t avatar_a = 0;
-		uint8_t avatar_b = 0;
-		uint16_t avatar_packed = 0;
-		if (!avatar_selection_from_dictionary(selected, side,
-				avatar_a, avatar_b, avatar_packed))
-			return ERR_INVALID_PARAMETER;
-		opennova::playersav::update_avatar_selection(profile, 0,
-				side == 0 ? opennova::playersav::SideId::Blue
-				          : opennova::playersav::SideId::Red,
-				static_cast<uint8_t>(player_class), avatar_a, avatar_b,
-				avatar_packed);
-		updated = true;
-	}
-	if (!updated) return ERR_INVALID_PARAMETER;
-
-	// The ACCEPT snapshot also carries the edited side's kit page exactly as the
-	// PLAYER screen serializes it (knife, class-5 medpack, PRIMARY/SECONDARY/
-	// ACCESSORY, three grenade slots; every entry name + three decimal values,
-	// "-1" filler). Retail writes that string block into the profile record's
-	// class page before PlayerProfile_SaveToFiles; the kit belongs to the side
-	// being edited ("team") and the shared PLAYERCLASS page. An absent "kit" key
-	// (no weapon.def loaded) leaves the saved pages untouched.
-	// See docs/playerinfo/avatars-re.md "Kit page serialization".
-	if (p_profile.has("kit")) {
-		const int team = p_profile.get("team", -1);
-		const Array kit = p_profile.get("kit", Array());
-		if (team < 0 || team > 1) return ERR_INVALID_PARAMETER;
-		opennova::playersav::KitPage page;
-		for (int i = 0; i < kit.size(); ++i) {
-			if (kit[i].get_type() != Variant::DICTIONARY) return ERR_INVALID_PARAMETER;
-			const Dictionary entry = kit[i];
-			const String name = entry.get("name", String());
-			if (name.is_empty()) return ERR_INVALID_PARAMETER;
-			opennova::playersav::KitEntry out;
-			out.name = opennova::to_std(name);
-			out.ammo_primary = int32_t(int(entry.get("ammo_primary", -1)));
-			out.ammo_secondary = int32_t(int(entry.get("ammo_secondary", -1)));
-			out.flags = int32_t(int(entry.get("flags", -1)));
-			page.entries.push_back(std::move(out));
-		}
-		opennova::playersav::Side &side = profile.slots[0].side(
-				team == 0 ? opennova::playersav::SideId::Blue
-				          : opennova::playersav::SideId::Red);
-		side.pages[static_cast<size_t>(player_class) -
-				opennova::playersav::kMinPlayerClass] = std::move(page);
-	}
-
-	// `write()` recreates every modeled record, while the temp + same-volume
-	// replace keeps the previous file intact until the new one is complete.
-	return write_weapon_profile_atomic(p_path, profile);
-}
-
 double Simulation::weapon_def_pos_scale() {
 	return opennova::renderer::kWeaponDefPosScale;
 }
@@ -546,51 +350,84 @@ Ref<FpViewmodelSpec> Simulation::fp_viewmodel_spec(bool p_has_def, const String 
 	return out;
 }
 
-Error Simulation::load_weapon_profile(const String &p_path) {
-	// The caller supplies the already resolved absolute path (retail builds it
-	// as g_ExpansionName[0] ? "expansion\\<g_ExpansionName>\\weapon.sav" :
-	// "weapon.sav" [orig: @0x54f68c..@0x54f6b7]). weapon.sav is a SAVE file on
-	// the filesystem, not a PFF/mount entry, so it is read through FileAccess;
-	// the defaults / header-gate / class-clamp law is the engine's
-	// playersav::profile_or_defaults. A joiner still submits a class-legal pair.
-	player_.weapon_profile_loaded = false;
-	Error result = OK;
-	PackedByteArray bytes;
-	if (p_path.is_empty()) {
-		result = ERR_INVALID_PARAMETER;
-	} else {
-		Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::READ);
-		if (file.is_null()) {
-			print_verbose(vformat(
-					"weapon.sav: cannot open \"%s\" — keeping the shipped profile defaults",
-					p_path));
-			result = ERR_FILE_CANT_OPEN;
-		} else {
-			bytes = file->get_buffer(static_cast<int64_t>(file->get_length()));
-			file->close();
-		}
-	}
-	player_.weapon_profile_loaded = opennova::playersav::profile_or_defaults(
-			bytes.ptr(), static_cast<std::size_t>(bytes.size()), player_.weapon_profile);
-	if (result == OK && !player_.weapon_profile_loaded) {
-		print_verbose(vformat(
-				"weapon.sav: \"%s\" is not a readable profile — keeping the shipped defaults",
-				p_path));
-		result = ERR_FILE_CORRUPT;
-	}
+Error Simulation::use_player_profile(const Ref<PlayerProfiles> &p_profiles) {
+	if (p_profiles.is_null()) return ERR_INVALID_PARAMETER;
+	const opennova::profile::PlayerProfiles &profiles = p_profiles->native();
+	// The weapon record with the session start's class clamp (playersav
+	// clamp_classes), the player.sav record for single player's session words.
+	opennova::playersav::File clamped;
+	clamped.slots[0] = profiles.current_weapons();
+	opennova::playersav::clamp_classes(clamped);
+	player_.weapon_profile = clamped.slots[0];
+	player_.weapon_profile_loaded = true;
+	player_.profile_record = profiles.current();
+	player_.profile_record_set = true;
+	// The mission start's session copy of the record's input words, and its
+	// inverse OPTIONS_AUTOMEDIC word onto a live joiner runtime.
+	apply_session_input();
+	install_auto_medic_preference();
 	// The record just changed, so the resident kit buffer and the seam both have to
 	// follow it. Retail never has to re-run this because PlayerProfile_LoadAllFromDisk
 	// completes at boot / expansion switch, long before Game_StartMission copies a page
-	// into restrictionData [orig: @0x54f4d0 vs @0x525813]; our profile can only load
-	// AFTER the runtime exists (the reader is a sim method), so the copy is redone here
-	// instead of depending on the shell's call order. seed_session_kit_from_profile is
-	// a no-op outside a live session and before the catalog resolves names, so this
-	// leaves single player and a pre-catalog load exactly as they were.
+	// into restrictionData [orig: @0x54f4d0 vs @0x525813]; our profile can only reach
+	// the sim AFTER the runtime exists, so the copy is redone here instead of
+	// depending on the shell's call order. seed_session_kit_from_profile is a no-op
+	// outside a live session and before the catalog resolves names, so this leaves
+	// single player and a pre-catalog load exactly as they were.
 	if (seed_session_kit_from_profile())
 		rebuild_local_player_loadout(/*p_select_spawn_default=*/true);
 	// The seam's class AND its kit page both come out of this record — re-arm it.
 	push_joiner_loadout_kit();
-	return result;
+	return OK;
+}
+
+namespace {
+
+// The words the session holds, as profile_controls.h names them.
+opennova::profile::SessionInput live_input(const opennova::mission::MissionKernel &kernel) {
+	opennova::profile::SessionInput live;
+	live.mouse_sensitivity = kernel.local.look_settings.sensitivity;
+	live.invert_mouse = kernel.local.look_settings.invert_y;
+	live.auto_reload = kernel.world.rules.auto_reload;
+	return live;
+}
+
+void install_input(opennova::mission::MissionKernel &kernel,
+		const opennova::profile::SessionInput &input) {
+	kernel.local.look_settings.sensitivity = input.mouse_sensitivity;
+	kernel.local.look_settings.invert_y = input.invert_mouse;
+	kernel.world.rules.auto_reload = input.auto_reload;
+}
+
+} // namespace
+
+void Simulation::apply_session_input() {
+	if (!kernel_) return;
+	install_input(*kernel_, opennova::profile::session_input(
+			player_.profile_record, LaunchFlags::no_reload()));
+}
+
+Error Simulation::apply_ingame_options(const Ref<PlayerProfiles> &p_profiles) {
+	if (p_profiles.is_null()) return ERR_INVALID_PARAMETER;
+	// The record's copy the own revive mark reads follows the Accept too.
+	player_.profile_record = p_profiles->native().current();
+	player_.profile_record_set = true;
+	if (kernel_)
+		install_input(*kernel_, opennova::profile::ingame_accept_input(
+				player_.profile_record, live_input(*kernel_)));
+	return OK;
+}
+
+int Simulation::get_session_mouse_sensitivity() const {
+	return kernel_ ? kernel_->local.look_settings.sensitivity : 0;
+}
+
+bool Simulation::is_session_mouse_inverted() const {
+	return kernel_ && kernel_->local.look_settings.invert_y;
+}
+
+bool Simulation::is_session_auto_reload() const {
+	return kernel_ && kernel_->world.rules.auto_reload;
 }
 
 void Simulation::apply_joiner_authoritative_loadout() {

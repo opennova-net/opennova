@@ -201,6 +201,19 @@ class BindingSet {
   bool pressed_joystick(int index, const std::function<bool(int)> &button_down,
       const std::array<int32_t, 4> &pov_angles, bool dead = false) const;
 
+  // The joystick's whole dispatch is gated on the profile's ENABLE_JOYSTICK
+  // word (+1432): with it clear the device is neither polled nor walked, so no
+  // row fires from a joystick button or hat. A fresh profile carries 0, so a
+  // stock game ignores the joystick until the player enables it. The session
+  // copy, the controls apply and the in-game options Accept each copy the word
+  // into the gate (profile::apply_controls).
+  // [orig: Input_ProcessToggleBindings @0x499480 -- `cmp dword_24D2088, 0`
+  //  @0x499481 returns before Joystick_UpdateInputBitfield @0x49948e;
+  //  writers Game_ApplySessionSettingsToGlobals @0x5515c6, sub_563620
+  //  @0x563664, UI_IngameOptionsDialogEventHandler @0x55515e]
+  void set_joystick_enabled(bool enabled) { joystick_enabled_ = enabled; }
+  bool joystick_enabled() const { return joystick_enabled_; }
+
   std::size_t size() const { return records_.size(); }
   const BindingRecord *record(int index) const;
   bool set_record(int index, const BindingRecord &rec);  // persistence load
@@ -214,6 +227,7 @@ class BindingSet {
  private:
   std::vector<BindingRecord> records_;  // catalog order
   bool keyboard_captured_ = false;
+  bool joystick_enabled_ = false;  // dword_24D2088, 0 until a profile enables it
   uint32_t revision_ = 0;
 };
 

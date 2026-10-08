@@ -72,7 +72,7 @@ bool display_name(const world::Entity &e, uint8_t hud_team, uint32_t rules_word,
 // (the listen host's players, the local player) through the shared policy
 // and facts, a joiner's decoded Player row through its own fields.
 // [orig: HUD_DrawEntityLabelsAndMarkers @0x5a4a80..0x5a4ac6 — slot+0x24,
-//  AnimMap_IsSlotActive(entity+0x294, 8), the team compare; Minimap_DrawBlip
+//  CharAttr_ClassHasAttribute(entity+0x294, 8), the team compare; Minimap_DrawBlip
 //  @0x597890 over the entity]
 struct SlotEntityFacts {
     bool known = false;
@@ -187,11 +187,10 @@ void build_minimap_overlays(const MinimapOverlayInputs &in, hud::HudMinimapOverl
         out.zone_score_delta = team1 - team2;
         // The own-slot revive leg's profile dword is the inverse
         // OPTIONS_AUTOMEDIC preference, the same word the C2S 0x03 uplink
-        // sends; the Options control is read-only here with automatic
-        // requests on (D-MNU-21), so the word is 0.
-        // [orig: *((_DWORD *)g_CurPlayerProfile + 415) @0x5a4b40;
+        // sends, read from the current record each frame.
+        // [orig: *((_DWORD *)g_CurPlayerProfile + 415) @0x5a4b4f;
         //  NetPacket_WriteAutoMedicPreference @0x42A411]
-        out.own_revive_profile = false;
+        out.own_revive_profile = in.own_auto_medic_off != 0;
     }
     if (out.location_names.empty() && in.authority_location_names != nullptr)
         out.location_names = *in.authority_location_names;

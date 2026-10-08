@@ -8,6 +8,7 @@ extends GutTest
 
 const LoadingScreen := preload("res://game/ui/loading_screen.gd")
 static var ARROW_FIXTURE := RuntimeFixture.file("newarow1.tga")
+const FONT_FIXTURE := "res://../fixtures/fnt/synth_1page.fnt"
 
 var _temp_dirs: Array[String] = []
 
@@ -35,17 +36,45 @@ func test_splash_spec_carries_the_witnessed_names() -> void:
 	assert_eq(HudPos.loading_splash_continue_font(), "Impac22b.fnt")
 
 
-func test_splash_continue_colors_ride_the_half_bright_fold() -> void:
-	# White and the light-red pulse phase, each through the witnessed
-	# ((c >> 1) & 0x7F7F7F) | FF alpha fold
-	# [orig: blink select @ 0x5209b0; HUD_DrawTextRightAligned_HalfBright
-	# fold @ 0x580850].
-	var on := HudPos.loading_splash_continue_color(true)
-	assert_true(on.is_equal_approx(Color(127 / 255.0, 127 / 255.0, 127 / 255.0)),
-		"phase-on = half-bright white")
-	var off := HudPos.loading_splash_continue_color(false)
-	assert_true(off.is_equal_approx(Color(127 / 255.0, 64 / 255.0, 64 / 255.0)),
-		"phase-off = half-bright 0xFF8080")
+func test_splash_continue_draws_through_the_font_pages_modulate2x() -> void:
+	# White and the light-red pulse phase, each through the centred drawer's
+	# ((c >> 1) & 0x7F7F7F) | FF alpha fold, every run flagged for the glyph
+	# shader, which runs the font page's MODULATE2X stage over it: the line
+	# reads at the phase's colour (D-LOADSCR-10) [orig: blink select
+	# @ 0x5209b0; HUD_DrawTextCentered_HalfBright @ 0x580680 -> CGameFont_DrawText
+	# @ 0x6752c0, the page's material 0x651].
+	var font := FntResource.new()
+	assert_eq(font.load_from_bytes(FileAccess.get_file_as_bytes(FONT_FIXTURE)), OK)
+	var pages := HudPos.font_page_textures(font)
+	assert_eq(pages.size(), font.get_page_count())
+	var phases := {
+		true: Color(127 / 255.0, 127 / 255.0, 127 / 255.0),
+		false: Color(127 / 255.0, 64 / 255.0, 64 / 255.0),
+	}
+	for phase: bool in phases:
+		var runs := HudPos.draw_splash_continue(null, font, pages, "GO", Vector2i(1280, 720), phase)
+		assert_eq(runs.size(), 1, "one page run")
+		if runs.is_empty():
+			continue
+		var run: Dictionary = runs[0]
+		var colors: PackedColorArray = run["colors"]
+		var uvs: PackedVector2Array = run["uvs"]
+		assert_eq(colors.size(), 8, "two glyphs, four corners each")
+		for color in colors:
+			assert_true(color.is_equal_approx(phases[phase]), "the halved phase colour: %s" % color)
+		for uv in uvs:
+			assert_lt(uv.y, -8.0, "flagged for the glyph shader's MODULATE2X")
+	assert_true(HudPos.glyph_shader_code().contains("min(COLOR.rgb * 2.0, vec3(1.0))"))
+	assert_true(HudPos.draw_splash_continue(null, null, [], "GO", Vector2i(1280, 720), true).is_empty(),
+		"no font, nothing drawn")
+
+
+func test_raised_splash_carries_the_glyph_shader() -> void:
+	var screen := _mounted_splash()
+	var shaded := screen.material as ShaderMaterial
+	assert_not_null(shaded, "the screen's draws run the glyph shader")
+	if shaded != null:
+		assert_eq(shaded.shader.code, HudPos.glyph_shader_code())
 
 
 # --- raise / degrade -----------------------------------------------------------

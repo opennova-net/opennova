@@ -27,6 +27,7 @@
 #include <formats/threedi/threedi_panm.h>
 #include <runtime/anim/anim_event_bits.h>
 #include <runtime/renderer/material_descriptor.h>
+#include <runtime/world/ammo_table.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/weapon_fsm.h>
 
@@ -58,8 +59,9 @@ int usage(const char *why) {
 // The engine's CTRL register catalog, generator-style names and shader tags
 // with their capability words, the anim slot keys a table row can name, the
 // weapon actions an author times and the event trigger bits the runtime
-// consumes, one per line (`register NAME`, `style CODE NAME`, `shader TAG
-// 0xFLAGS`, `animslot INDEX KEY`, `weaponaction SUFFIX SLOT KEY`, `trigger 0xMASK NAME`),
+// consumes and the bullet-face surfaces, one per line (`register NAME`, `style CODE NAME`, `shader TAG
+// 0xFLAGS`, `animslot INDEX KEY`, `weaponaction SUFFIX SLOT KEY`, `trigger 0xMASK NAME`, `surface
+// BYTE TAG WORDS`),
 // so a front end offers exactly what the builder and the runtime know without
 // keeping its own copy. The shader flag bits are
 // runtime/renderer/material_descriptor.h's (BLENDING 0x1000 puts a strip in
@@ -90,6 +92,11 @@ int cmd_catalog() {
 	}
 	for (const opennova::anim::AnimEventBit &bit : opennova::anim::kAnimEventBits)
 		std::printf("trigger 0x%x %s\n", static_cast<unsigned>(bit.mask), bit.name);
+	// A bullet face's surface byte b plays its ammo's effects row b + 4 [orig:
+	// Projectile_HandleEntityImpact @ 0x4e9390, `ray[22] + 4` @ 0x4e982b], rows 4 to 27 of the tag table.
+	for (int tag = 4; tag < opennova::world::kImpactEffectTagCount; ++tag)
+		std::printf("surface %d %s %s\n", tag - 4, opennova::world::kImpactEffectTagNames[tag],
+				opennova::world::kImpactEffectTagWords[tag]);
 	return 0;
 }
 

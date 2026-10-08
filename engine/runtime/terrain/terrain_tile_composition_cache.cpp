@@ -296,6 +296,38 @@ std::optional<TerrainTilePageBinding> TerrainTileCompositionCache::lookup(
 	return std::nullopt;
 }
 
+std::optional<TerrainTilePageBinding> TerrainTileCompositionCache::find_sector_patch(
+		const TerrainTileSectorPatchPoint &point) noexcept {
+	// The patch key's halves and each record's are compared under a ten-bit
+	// mask per half, granularity 32 << level for level 0..4, every record in
+	// order per level; the routed world sector must match exactly. A record's
+	// packed coordinate is its request's source-atlas origin; the flat page
+	// is canonicalized to zero. [orig: Terrain_FindSectorPatchRT @0x6042A0:
+	// the mask (-1 << (level + 5)) & 0x3FF, times 0x10001 @0x6042B0..0x6042C3,
+	// the key compare @0x6042DD..0x6042E7, the sector compares
+	// @0x6042E9..0x6042F5; PolyTrn_RenderTile's flat canonicalization
+	// @0x60DA98..0x60DAA8]
+	const uint32_t point_key = (static_cast<uint32_t>(point.atlas_x & 0x3FF) << 16) |
+			static_cast<uint32_t>(point.atlas_z & 0x3FF);
+	for (int level = 0; level < 5; ++level) {
+		const uint32_t mask = ((~0u << (level + 5)) & 0x3FFu) * 0x10001u;
+		for (uint16_t layer = 0; layer < kCapacity; ++layer) {
+			Slot &slot = slots_[layer];
+			if (!slot.resident || !slot.ready) continue;
+			const uint32_t slot_key = (static_cast<uint32_t>(slot.source_origin_x & 0x3FF) << 16) |
+					static_cast<uint32_t>(slot.source_origin_z & 0x3FF);
+			if ((slot_key & mask) != (point_key & mask) ||
+					slot.page.sector_origin_x != point.sector_origin_x ||
+					slot.page.sector_origin_z != point.sector_origin_z) {
+				continue;
+			}
+			slot.last_use = frame_;
+			return binding(slot, layer);
+		}
+	}
+	return std::nullopt;
+}
+
 std::optional<TerrainTilePageBinding> TerrainTileCompositionCache::resident_layer(
 		uint16_t layer) const noexcept {
 	if (layer >= kCapacity || !slots_[layer].resident || !slots_[layer].ready) {

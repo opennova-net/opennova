@@ -115,8 +115,8 @@ static int test_raw_114_to_117_are_waves_with_ctrl_reference_params(void) {
                 strcmp(decoded.ctrl_reg_name, "STRUCTURAL_CTRL_REF") != 0 ||
                 decoded.control_name == NULL ||
                 strcmp(decoded.control_name, expected[code - 114]) != 0 ||
-                threedi_panm_control_uses_register(code) != 0 ||
-                threedi_panm_parameter_is_ctrl_reference(code) == 0) {
+                threedi_generator_reads_register(THREEDI_GENERATOR_CONSUMER_PANM, code) ||
+                !threedi_generator_names_register(code)) {
             fprintf(stderr,
                     "raw PANM code %u lost the structural/reference split\n",
                     code);
@@ -126,10 +126,68 @@ static int test_raw_114_to_117_are_waves_with_ctrl_reference_params(void) {
     return 1;
 }
 
+// Every style above 0x70 names a register for every consumer (the load swaps
+// it); which of them read the register's value is the consumer's rule: UV all
+// of them, RGB and a light 0x71 and 0x72, alpha and PANM 0x71 alone.
+static int test_generator_register_rules(void) {
+    static const int kStyles[] = {0, 24, 50, 0x6F, 0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x80, 0xFF};
+    static const struct {
+        ThreediGeneratorConsumer consumer;
+        const char *name;
+        int reads[13]; // by kStyles
+    } kRows[] = {
+        {THREEDI_GENERATOR_CONSUMER_UV, "uv", {0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1}},
+        {THREEDI_GENERATOR_CONSUMER_RGB, "rgb", {0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0}},
+        {THREEDI_GENERATOR_CONSUMER_LIGHT, "light", {0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0}},
+        {THREEDI_GENERATOR_CONSUMER_ALPHA, "alpha", {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0}},
+        {THREEDI_GENERATOR_CONSUMER_PANM, "panm", {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0}},
+    };
+    int ok = 1;
+    for (size_t s = 0; s < sizeof(kStyles) / sizeof(kStyles[0]); ++s) {
+        const int style = kStyles[s];
+        if (threedi_generator_names_register(style) != (style > 0x70)) {
+            fprintf(stderr, "style 0x%02X names a register only above 0x70\n", style);
+            ok = 0;
+        }
+        for (const auto &row : kRows) {
+            if (threedi_generator_reads_register(row.consumer, style) != (row.reads[s] != 0)) {
+                fprintf(stderr, "%s style 0x%02X: reads the register %s\n", row.name, style,
+                        row.reads[s] ? "(expected)" : "(not expected)");
+                ok = 0;
+            }
+        }
+    }
+    return ok;
+}
+
+// A flipbook reads a register only with frames on the register clock (type 1).
+static int test_flipbook_register_rule(void) {
+    static const struct {
+        uint8_t frames, type;
+        bool reads;
+    } kRows[] = {{0, 0, false}, {0, 1, false}, {1, 0, false}, {4, 0, false}, {1, 1, true}, {4, 1, true}};
+    int ok = 1;
+    for (const auto &row : kRows) {
+        ThreediTexAnim animation;
+        memset(&animation, 0, sizeof(animation));
+        animation.num_frames = row.frames;
+        animation.animation_type = row.type;
+        animation.cycle_frame_time = 5;
+        if (threedi_flipbook_reads_register(animation) != row.reads) {
+            fprintf(stderr, "flipbook frames %u type %u: reads a register %s\n", row.frames, row.type,
+                    row.reads ? "(expected)" : "(not expected)");
+            ok = 0;
+        }
+    }
+    return ok;
+}
+
 int main(void) {
     int ok = 1;
     ok &= test_decode_transform_with_reg();
     ok &= test_decode_panm_wave_no_reg();
     ok &= test_raw_114_to_117_are_waves_with_ctrl_reference_params();
+    ok &= test_generator_register_rules();
+    ok &= test_flipbook_register_rule();
     return ok ? 0 : 1;
 }

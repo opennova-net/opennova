@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <base/io/bam.h>
+#include <formats/threedi/threedi_3di3.h>
 
 namespace opennova::world {
 namespace {
@@ -66,19 +67,36 @@ void slot_position(const Entity &e, const DeathEffectBank &bank, int slot,
 }
 } // namespace
 
+// The banks' points on the piece model: every user point the first-16 mask of
+// Dead, Fire and Other sets, the walk over every point with the x86 shift's
+// wrap. [orig: Game_ResolveItemMaterialsAndSpawnBoneTrails @0x522EE0]
+void death_effect_banks_of(const threedi::Threedi3di3 &piece, std::array<DeathEffectBank, 3> &banks) {
+	const char *names[3] = { "Dead", "Fire", "Other" };
+	for (int bank = 0; bank < 3; ++bank) {
+		auto &out = banks[bank];
+		out.mask = threedi::threedi_3di3_user_point_mask(&piece, names[bank]);
+		out.points.clear();
+		for (size_t i = 0; i < piece.user_point_count; ++i) {
+			if ((out.mask & (1u << (i & 31u))) == 0)
+				continue;
+			float pos[3], dir[3];
+			threedi::threedi_user_point_position(&piece.user_points[i], pos);
+			threedi::threedi_user_point_direction(&piece.user_points[i], dir);
+			out.points.push_back({ { pos[2], -pos[0], pos[1] }, { dir[2], -dir[0], dir[1] } });
+		}
+	}
+}
+
 // Three four-handle banks, with an origin fallback only for the death family.
 // [orig: Entity_InitDeathSounds @0x4939B0; Entity_SpawnMaskedEffectBank @0x5F7620]
 // The water test precedes the independent Fire and Other bank scans.
 // [orig: @0x493A88, @0x493B6C, @0x493BBA]
-void spawn_death_effect_banks(
-		Entity &e, const ItemDeathTraits &traits, bool underwater, DestructionEvents &events) {
-	std::fill_n(e.death_effect_active, 3, uint8_t(0));
-	e.death_effect_underwater = underwater && !traits.particleh2odeath.empty();
+std::vector<DeathBankSpawn> death_bank_spawns(const ItemDeathTraits &traits, bool underwater) {
+	std::vector<DeathBankSpawn> out;
 	if (!traits.husk_model_loaded)
-		return;
-	const auto matrix = effect_frame(e);
-	const std::string *effects[3] = { e.death_effect_underwater ? &traits.particleh2odeath
-																: &traits.particledeath,
+		return out;
+	const bool water = underwater && !traits.particleh2odeath.empty();
+	const std::string *effects[3] = { water ? &traits.particleh2odeath : &traits.particledeath,
 		&traits.particlefire, &traits.particleother };
 	for (uint8_t bank = 0; bank < 3; ++bank) {
 		if (effects[bank]->empty())
@@ -90,11 +108,23 @@ void spawn_death_effect_banks(
 		//  0x493B80 / 0x493BD4 push esi, the entity @ 0x4939B3; the fallback
 		//  Effect_SubmitDescriptor(0, 0, ...) @ 0x493ABB / 0x493B0E]
 		for (size_t i = 0; i < points.size(); ++i)
-			spawn_slot(e, matrix, bank + 1, uint8_t(i), *effects[bank], points[i], events,
-					true);
+			out.push_back({ uint8_t(bank + 1), uint8_t(i), *effects[bank], points[i], true });
 		if (bank == 0 && points.empty())
-			spawn_slot(e, matrix, 1, 0, *effects[0], {}, events, false);
+			out.push_back({ 1, 0, *effects[0], {}, false });
 	}
+	return out;
+}
+
+void spawn_death_effect_banks(
+		Entity &e, const ItemDeathTraits &traits, bool underwater, DestructionEvents &events) {
+	std::fill_n(e.death_effect_active, 3, uint8_t(0));
+	e.death_effect_underwater = underwater && !traits.particleh2odeath.empty();
+	if (!traits.husk_model_loaded)
+		return;
+	const auto matrix = effect_frame(e);
+	for (const DeathBankSpawn &spawn : death_bank_spawns(traits, underwater))
+		spawn_slot(e, matrix, spawn.family, spawn.slot, spawn.effect, spawn.point, events,
+				spawn.section_tagged);
 }
 
 // The victim's +0x1CC emitter is released when the victim owns it (every

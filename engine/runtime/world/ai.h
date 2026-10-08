@@ -32,6 +32,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/infantry.h>
+#include <runtime/world/organic_fire.h>
 #include <runtime/world/system.h>
 
 namespace opennova::terrain {
@@ -325,11 +326,9 @@ struct AiProfile {
     // resolved per field from its def name [orig: Entity_InitOrganicAI
     // @0x4BFCC0 -> AmmoDef_LookupByName @0x409870, calls @0x4BFE27..0x4BFE81].
     // The three one-based launch points are +0x365/+0x366/+0x367; both
-    // rocket ammo slots use the middle point. Runtime storage is per body.
-    struct OrganicWeapons {
-        std::array<uint8_t, 4> ammo{};
-        std::array<uint8_t, 3> launch{};
-    } organic;
+    // rocket ammo slots use the middle point. Runtime storage is per body
+    // (world/organic_fire.h: the resolve and the fire block's shots).
+    OrganicWeapons organic;
     int32_t clip_size = 0;        // items.def clipsize (magazine reseed)
     // Indices into world.sound_profiles (the def's sound_profile pair, resolved
     // at the host's item-traits sweep; -1 = unresolved -> the table's
@@ -1276,15 +1275,6 @@ public:
     // original gates it to `(current_tick & 0xF) == 0` while the advance around it runs
     // every tick from AnimMap_UpdateDualChannels @0x40b8c0.
     void infantry_weapon_channel_select(AiEntity &e);
-    // The SHARED dual-channel advance — the part of the secondary channel that runs
-    // for EVERY organic entity, player or AI: the clip-end deferred promotion and the
-    // playhead/blend step. Both body updaters pass their out-array to it
-    // [orig: AnimMap_UpdateDualChannels @0x40b8c0, called from the org2 body
-    //  @0x4b40e0 AND the org1 body @0x4b9910; witness world-wac-ai-re.md §14.8.1].
-    // Org1 mirrors primary current/pending into the secondary at the motor
-    // head [orig: @0x4B9A14..0x4B9A48]; this advance keeps the two channels'
-    // phases, blends and variant rings independent.
-    void infantry_weapon_channel_advance(AiEntity &e);
     // Availability resolution against root_motion->has_clip with the cited fallback chains.
     int infantry_resolve_state(int adm_id, int state) const;
     // The slope pass: 4 ground probes around the entity feeding the slide impulse and

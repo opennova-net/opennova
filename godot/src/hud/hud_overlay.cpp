@@ -1,4 +1,5 @@
 #include "hud/hud_overlay.h"
+#include "hud/font_page_glyphs.h"
 #include "hud/hud_chat_entry.h"
 #include "simulation/hud_view_records.h" // HudMapOverlays
 #include "util/color_convert.h"
@@ -6,16 +7,19 @@
 #include "hud/vehicle_hud_block.h"
 
 #include "hud/hud_pos.h"
+#include "render/d3d9_raster_device.h"
 #include "mnu/controls_model.h" // set_tip's binding (the key display source)
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
 #include "simulation/simulation.h"
 #include "simulation/player_local_view.h"
 #include "terrain/terrain_data.h"
+#include "terrain/terrain_image_convert.h"
 #include "util/axes.h"
 #include "util/string_convert.h"
 
 #include <formats/def/def.h> // DefVehicleHudBlock (the VEHICLE_HUD block the panel feed reads)
+#include <formats/def/def_hudpos_write.h> // hudpos_unauthored (the layout of a file with no key)
 #include <runtime/hud/feed_format.h> // kGameTextLineColor (the 0x32 join/leave lines)
 #include <base/gameprofile/game_type.h> // the conquest arm of the zone panel
 
@@ -41,10 +45,14 @@
 
 using namespace godot;
 
+#include <runtime/hud/game_text_lookup.h> // the game-text section names
 #include <runtime/hud/hud_minimap_feed.h> // the marker feed layout (decode)
+#include <runtime/renderer/texture_compression.h> // the minimap colormap's fresh-profile word
+#include <runtime/terrain/terrain_tile_composer.h> // terrain_colormap_device_image
 #include <runtime/hud/hud_game_text.h> // hud_session_text (the session lines' strings)
 #include <runtime/hud/hud_layout_from_hudpos.h> // the hudpos.def parse applied to the layout
 #include <runtime/hud/hud_texture_materials.h> // the non-HUD-loader textures' material words
+#include <runtime/hud/hud_texture_names.h> // the fixed texture names
 #include <runtime/world/friendly_tags.h> // FriendlyTagSource (the D-HUD-20 gather)
 #include <runtime/world/vehicle_attach.h> // AttachLabel (the seat/armory label scan)
 
@@ -260,8 +268,10 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("cycle_sight_scale"), &HudOverlay::cycle_sight_scale);
 	ClassDB::bind_method(D_METHOD("get_sight_scale_index"),
 			&HudOverlay::get_sight_scale_index);
-	ClassDB::bind_method(D_METHOD("set_minimap_terrain", "terrain", "water_mask"),
-			&HudOverlay::set_minimap_terrain, DEFVAL(Ref<Texture2D>()));
+	ClassDB::bind_method(D_METHOD("set_minimap_terrain", "terrain", "water_mask",
+								 "texcompression_level"),
+			&HudOverlay::set_minimap_terrain, DEFVAL(Ref<Texture2D>()),
+			DEFVAL(opennova::renderer::kTexCompressionLevelFreshProfile));
 	ClassDB::bind_method(D_METHOD("get_minimap_water_mask"),
 			&HudOverlay::get_minimap_water_mask);
 	ClassDB::bind_method(D_METHOD("set_minimap_state", "mission_position",
@@ -349,6 +359,9 @@ void HudOverlay::clear_font_() {
 	label_font_impact38_ = {};
 	label_font_impact38_valid_ = false;
 	label_tier_ = -1;
+	for (const Ref<Texture2D> &page : page_textures_) {
+		if (page.is_valid()) texture_material_words_.erase(page->get_instance_id());
+	}
 	page_textures_ = {};
 }
 
@@ -363,18 +376,17 @@ bool HudOverlay::load_fnt_(const String &p_name, fnt_font_t &r_font, int p_slot)
 	}
 	const size_t base = static_cast<size_t>(p_slot) * FNT_MAX_PAGES;
 	for (uint32_t page = 0; page < r_font.num_pages && page < FNT_MAX_PAGES; ++page) {
-		const uint8_t *data = fnt_get_page_data_const(&r_font, page);
-		if (data == nullptr) {
+		const Ref<Texture2D> texture = font_page_texture(r_font, page);
+		if (texture.is_null()) {
 			continue;
 		}
-		PackedByteArray page_bytes;
-		page_bytes.resize(FNT_TEXTURE_SIZE);
-		memcpy(page_bytes.ptrw(), data, FNT_TEXTURE_SIZE);
-		const Ref<Image> image = Image::create_from_data(FNT_TEXTURE_WIDTH,
-				FNT_TEXTURE_HEIGHT, false, Image::FORMAT_RGBA8, page_bytes);
-		if (image.is_valid()) {
-			page_textures_[base + page] = ImageTexture::create_from_image(image);
-		}
+		// Every page draws through the font's page material (its glyph runs
+		// take the flat shader's MODULATE2X flag like any family-0x600 texture).
+		Ref<Texture2D> &slot = page_textures_[base + page];
+		if (slot.is_valid()) texture_material_words_.erase(slot->get_instance_id());
+		texture_material_words_[texture->get_instance_id()] =
+				opennova::hud::kFontPageMaterialWord;
+		slot = texture;
 	}
 	return true;
 }
@@ -492,11 +504,11 @@ Ref<Texture2D> HudOverlay::load_hud_texture_(const String &p_name, ResourceRoot:
 }
 
 void HudOverlay::load_crosshair_texture_() {
-	// Retail's "cross%02d.tga" (style + 1) selection, colour mode at HUD init;
-	// witness in hud-re.md.
-	char name[16];
-	std::snprintf(name, sizeof(name), "cross%02d.tga", crosshair_style_ + 1);
-	const Ref<Texture2D> tex = load_hud_texture_(String(name), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+	// The style's texture by the engine's name (hud_texture_names.h carries the witness),
+	// colour mode at HUD init (hud-re.md).
+	const Ref<Texture2D> tex = load_hud_texture_(
+			String(opennova::hud::hud_crosshair_texture_name(crosshair_style_).c_str()),
+			ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
 	textures_[opennova::hud::kHudTexCrosshair] = tex;
 	layout_.crosshair_texture_valid = tex.is_valid();
 	layout_.crosshair_tex_w = tex.is_valid() ? tex->get_width() : 0;
@@ -516,9 +528,11 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// ensure_label_fonts_ reloads it for the fresh root.
 	compiler_.configure_label_fonts(nullptr, nullptr, nullptr, 1.0f, 1.0f);
 	configured_ = false;
-	if (p_hudpos.is_null() || !p_hudpos->is_loaded()) {
-		// No hudpos -> the declutter module's all-visible default (the level
-		// itself persists across rebuilds like retail's global).
+	if (p_hudpos.is_null()) {
+		// No layout handed over (the editor's viewport between documents): the
+		// overlay is cleared and draws nothing; the declutter module's
+		// all-visible default stands (the level itself persists across
+		// rebuilds like retail's global).
 		const int level = declutter_.level();
 		declutter_ = opennova::hud::HudDeclutter();
 		declutter_.set_level(level);
@@ -526,22 +540,28 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		queue_redraw();
 		return;
 	}
+	// A hudpos.def that did not load (missing, or nothing in it) is a parse of
+	// no line: retail's HUD carries on over the globals no arm wrote, every
+	// position, colour and HUDDECLUT mask zero, so every gated element stays
+	// hidden while the rest of the walk runs (hud_declutter.h
+	// declutter_from_hudpos carries the witness; docs/interface/hud-re.md
+	// D-HUD-54).
+	opennova::def::DefHudPosFile unauthored{};
+	unauthored.hud = opennova::def::hudpos_unauthored();
+	const opennova::def::DefHudPosFile &file = p_hudpos->is_loaded() ? p_hudpos->native_file() : unauthored;
 
 	// The layout globals the parse authors are the engine's fill; this leg
 	// resolves the names it hands back and stamps the texture-derived fields.
 	opennova::hud::HudLayoutAssets assets;
-	opennova::hud::hud_layout_from_hudpos(p_hudpos->native_file(), layout_, assets);
+	opennova::hud::hud_layout_from_hudpos(file, layout_, assets);
 	configure_combat_(assets);
 
-	// The HUDDECLUT mask table from the parsed rows: the engine's
-	// declutter_from_hudpos (see docs/interface/hud-re.md); a file with no
-	// declutter rows keeps the module's all-visible default.
+	// The HUDDECLUT mask table the file authors: the engine's
+	// declutter_from_hudpos, from retail's zeroed table whatever the file
+	// holds (docs/interface/hud-re.md D-HUD-54).
 	{
 		const int level = declutter_.level();
-		opennova::hud::HudDeclutter authored;
-		declutter_ = opennova::hud::declutter_from_hudpos(p_hudpos->native_file(), authored)
-				? authored
-				: opennova::hud::HudDeclutter();
+		declutter_ = opennova::hud::declutter_from_hudpos(file);
 		declutter_.set_level(level);
 		apply_declutter_();
 	}
@@ -573,14 +593,14 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		// secondary texture (the combined material rec+0x30 gates the whole
 		// drawer) [orig: the combine @0x56af3c, the null gate @0x56b71f,
 		// see docs/interface/hud-re.md].
-		const Ref<Texture2D> border = load_hud_texture_("border.tga", ResourceRoot::TEXTURE_LOADER_TGA, false,
+		const Ref<Texture2D> border = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexBoxBorder), ResourceRoot::TEXTURE_LOADER_TGA, false,
 				opennova::hud::kBoxMaterialWord);
-		const Ref<Texture2D> brush = load_hud_texture_("boxtile.tga", ResourceRoot::TEXTURE_LOADER_TGA);
+		const Ref<Texture2D> brush = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexBoxTile), ResourceRoot::TEXTURE_LOADER_TGA);
 		// The camo's own dims divide the pieces' screen-anchored second UV
 		// (HudLayout::box_tile_w/h carries the witness).
 		layout_.box_tile_w = brush.is_valid() ? brush->get_width() : 0;
 		layout_.box_tile_h = brush.is_valid() ? brush->get_height() : 0;
-		const Ref<Texture2D> icon = load_hud_texture_("neticon2.tga", ResourceRoot::TEXTURE_LOADER_TGA, false,
+		const Ref<Texture2D> icon = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexNetIcon), ResourceRoot::TEXTURE_LOADER_TGA, false,
 				opennova::hud::kNetIconMaterialWord);
 		textures_[opennova::hud::kHudTexBoxBorder] = border;
 		textures_[opennova::hud::kHudTexBoxTile] = brush;
@@ -593,20 +613,20 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		// The connection indicators' other two atlases: the T/R link-error
 		// pair and the NovaWorld N (hud_frame.h kHudTexNetLinkIcon carries the
 		// load witness). Absent files leave that icon undrawn.
-		const Ref<Texture2D> link_icon = load_hud_texture_("neticon1.tga", ResourceRoot::TEXTURE_LOADER_TGA, false,
+		const Ref<Texture2D> link_icon = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexNetLinkIcon), ResourceRoot::TEXTURE_LOADER_TGA, false,
 				opennova::hud::kNetIconMaterialWord);
-		const Ref<Texture2D> novaworld_icon = load_hud_texture_("neticon3.tga", ResourceRoot::TEXTURE_LOADER_TGA, false,
+		const Ref<Texture2D> novaworld_icon = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexNetNovaWorldIcon), ResourceRoot::TEXTURE_LOADER_TGA, false,
 				opennova::hud::kNetIconMaterialWord);
 		textures_[opennova::hud::kHudTexNetLinkIcon] = link_icon;
 		textures_[opennova::hud::kHudTexNetNovaWorldIcon] = novaworld_icon;
 		layout_.net_link_icon_texture_valid = link_icon.is_valid();
 		layout_.net_novaworld_icon_texture_valid = novaworld_icon.is_valid();
 		// The tip panel's own box atlas (no second stage) and its two icons.
-		const Ref<Texture2D> tip_box = load_hud_texture_("border3.tga", ResourceRoot::TEXTURE_LOADER_TGA, false,
+		const Ref<Texture2D> tip_box = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexTipBox), ResourceRoot::TEXTURE_LOADER_TGA, false,
 				opennova::hud::kBoxMaterialWord);
-		const Ref<Texture2D> tip_keyboard = load_hud_texture_("k_tip.tga", ResourceRoot::TEXTURE_LOADER_STAGE, false,
+		const Ref<Texture2D> tip_keyboard = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexTipKeyboard), ResourceRoot::TEXTURE_LOADER_STAGE, false,
 				opennova::hud::kTipIconMaterialWord);
-		const Ref<Texture2D> tip_gameplay = load_hud_texture_("g_tip.tga", ResourceRoot::TEXTURE_LOADER_STAGE, false,
+		const Ref<Texture2D> tip_gameplay = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexTipGameplay), ResourceRoot::TEXTURE_LOADER_STAGE, false,
 				opennova::hud::kTipIconMaterialWord);
 		textures_[opennova::hud::kHudTexTipBox] = tip_box;
 		textures_[opennova::hud::kHudTexTipKeyboard] = tip_keyboard;
@@ -623,14 +643,14 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		// everyone else's zones -> 0x27239C0 @0x59e104/@0x59e10e, lfp_dlf.tga
 		// the tile for the viewer's OWN zones -> 0x27239D0 (textureId +4 =
 		// 0x27239D4) @0x59e11a/@0x59e11f, see docs/interface/hud-re.md].
-		const Ref<Texture2D> team1 = load_hud_texture_("JO_LFP.tga", ResourceRoot::TEXTURE_LOADER_FILE, false,
+		const Ref<Texture2D> team1 = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTeam1), ResourceRoot::TEXTURE_LOADER_FILE, false,
 				opennova::hud::kLfpIconMaterialWord);
-		const Ref<Texture2D> team2 = load_hud_texture_("R_LFP.tga", ResourceRoot::TEXTURE_LOADER_FILE, false,
+		const Ref<Texture2D> team2 = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTeam2), ResourceRoot::TEXTURE_LOADER_FILE, false,
 				opennova::hud::kLfpIconMaterialWord);
-		const Ref<Texture2D> neutral = load_hud_texture_("N_LFP.tga", ResourceRoot::TEXTURE_LOADER_FILE, false,
+		const Ref<Texture2D> neutral = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpNeutral), ResourceRoot::TEXTURE_LOADER_FILE, false,
 				opennova::hud::kLfpIconMaterialWord);
-		const Ref<Texture2D> tile_own = load_hud_texture_("lfp_dlf.tga", ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
-		const Ref<Texture2D> tile_other = load_hud_texture_("lfp_alf.tga", ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+		const Ref<Texture2D> tile_own = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTileOwn), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+		const Ref<Texture2D> tile_other = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTileOther), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
 		textures_[opennova::hud::kHudTexLfpTeam1] = team1;
 		textures_[opennova::hud::kHudTexLfpTeam2] = team2;
 		textures_[opennova::hud::kHudTexLfpNeutral] = neutral;
@@ -680,9 +700,10 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// armory "A". The compiler's half-texel cell insets ride the PHYSICAL
 	// dimensions of whatever strip this install mounts (stock 16x480,
 	// RevX02 64x1920), so stamp the measured size.
-	const Ref<Texture2D> map_icons = load_hud_texture_("TSDicon.tga", ResourceRoot::TEXTURE_LOADER_FILE, true,
+	const Ref<Texture2D> map_icons = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapIcons), ResourceRoot::TEXTURE_LOADER_FILE, true,
 			opennova::hud::kTsdIconMaterialWord);
 	textures_[opennova::hud::kHudTexMapIcons] = map_icons;
+	apply_map_icon_sampling_();
 	if (map_icons.is_valid()) {
 		state_.minimap.icon_strip_w_px =
 				static_cast<float>(map_icons->get_width());
@@ -700,14 +721,14 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// so the textures stay raw. The marks draw only while both loaded
 	// (HudMinimapInput::radar_slices_loaded carries the witness).
 	textures_[opennova::hud::kHudTexMapCompass] =
-			load_hud_texture_("compring.tga", ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
-	textures_[opennova::hud::kHudTexMapRadar] = load_hud_texture_("dmgslice.tga", ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
-	textures_[opennova::hud::kHudTexMapRadarNarrow] = load_hud_texture_("dmgslc_n.tga", ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+			load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapCompass), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+	textures_[opennova::hud::kHudTexMapRadar] = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapRadar), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+	textures_[opennova::hud::kHudTexMapRadarNarrow] = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapRadarNarrow), ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
 	state_.minimap.radar_slices_loaded =
 			textures_[opennova::hud::kHudTexMapRadar].is_valid() &&
 			textures_[opennova::hud::kHudTexMapRadarNarrow].is_valid();
 	textures_[opennova::hud::kHudTexMapWpIndicator] =
-			load_hud_texture_("WPIndctr.tga", ResourceRoot::TEXTURE_LOADER_FILE, false,
+			load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapWpIndicator), ResourceRoot::TEXTURE_LOADER_FILE, false,
 					opennova::hud::kWpIndicatorMaterialWord);
 
 	// The two hudpos font names; the width pick and the load ride
@@ -937,8 +958,8 @@ void HudOverlay::set_scope_state(const Ref<PlayerLocalView> &p_view, const Ref<R
         const auto text = [&](const char *section, const char *key) -> std::string {
             return opennova::to_std(p_gametext->get_string_in_section(section, key));
         };
-        scope.range_format = text("Overlays", "STROVER_DIST");
-        scope.range_over_1km = text("Overlays", "STROVER_DIST1KM");
+        scope.range_format = text(opennova::hud::kGameTextOverlays, "STROVER_DIST");
+        scope.range_over_1km = text(opennova::hud::kGameTextOverlays, "STROVER_DIST1KM");
         scope.zero_format = text("hud", "hud_scope_zero");
         scope.zero_auto = text("hud", "hud_scope_zero_auto");
         scope.zero_none = text("hud", "hud_scope_zero_none");
@@ -1202,8 +1223,8 @@ bool project_to_overlay(const Transform3D &p_camera, const Projection &p_project
 String overlay_text(const Ref<RtxtStringFile> &p_gametext, const String &p_key,
 		const String &p_fallback) {
 	if (p_gametext.is_valid() &&
-			p_gametext->has_string_in_section("Overlays", StringName(p_key))) {
-		return p_gametext->get_string_in_section("Overlays", StringName(p_key));
+			p_gametext->has_string_in_section(opennova::hud::kGameTextOverlays, StringName(p_key))) {
+		return p_gametext->get_string_in_section(opennova::hud::kGameTextOverlays, StringName(p_key));
 	}
 	return p_fallback;
 }
@@ -1509,7 +1530,7 @@ Ref<Texture2D> HudOverlay::get_minimap_water_mask() const {
 }
 
 void HudOverlay::set_minimap_terrain(const Ref<TerrainData> &p_terrain,
-		const Ref<Texture2D> &p_water_mask) {
+		const Ref<Texture2D> &p_water_mask, int p_texcompression_level) {
 	state_.minimap.terrain = opennova::hud::HudMinimapTerrain{};
 	textures_[opennova::hud::kHudTexMapTerrain].unref();
 	textures_[opennova::hud::kHudTexMapWater].unref();
@@ -1531,16 +1552,24 @@ void HudOverlay::set_minimap_terrain(const Ref<TerrainData> &p_terrain,
 	terrain.sector_rows = p_terrain->get_sector_rows();
 	terrain.present = copy_count == static_cast<int64_t>(terrain.sector_grid.size()) &&
 			terrain.sector_count > 0 && terrain.sector_rows > 0;
-	// Retail's base pass samples the original 512x512 colormap quadrants
-	// directly. Bind an RGB copy so authored alpha cannot ghost the backing,
-	// then keep depthspin's transparent shore cutout in its own texture slot.
+	// Retail's base pass samples the 512x512 colormap quadrants directly, as
+	// the session's texcompression_level made them (DXT1 below 2 on the
+	// reference card: terrain::terrain_colormap_device_image). Bind an RGB
+	// copy so authored alpha cannot ghost the backing, then keep depthspin's
+	// transparent shore cutout in its own texture slot.
 	Ref<Texture2D> colormap = p_terrain->get_colormap();
-	if (colormap.is_valid()) {
-		Ref<Image> image = colormap->get_image();
+	opennova::terrain::Rgba8Image source;
+	if (texture_to_rgba8(colormap, source)) {
+		const opennova::terrain::Rgba8Image device =
+				opennova::terrain::terrain_colormap_device_image(source, p_texcompression_level);
+		PackedByteArray bytes;
+		bytes.resize(static_cast<int64_t>(device.pixels.size()));
+		if (!device.pixels.empty()) {
+			std::memcpy(bytes.ptrw(), device.pixels.data(), device.pixels.size());
+		}
+		Ref<Image> image = Image::create_from_data(static_cast<int>(device.width),
+				static_cast<int>(device.height), false, Image::FORMAT_RGBA8, bytes);
 		if (image.is_valid()) {
-			if (image->is_compressed()) {
-				image->decompress();
-			}
 			image->convert(Image::FORMAT_RGB8);
 			colormap = ImageTexture::create_from_image(image);
 		}
@@ -1672,6 +1701,14 @@ Vector2 HudOverlay::draw_surface_() const {
 		return get_viewport_rect().size;
 	}
 	return Vector2(1024.0f, 768.0f);
+}
+
+const opennova::hud::HudDrawList &HudOverlay::compile_draw_list() {
+	static const opennova::hud::HudDrawList kNone;
+	if (!configured_) return kNone;
+	const Vector2 surface = draw_surface_();
+	ensure_label_fonts_(surface.x); // the fonts the draw would have loaded
+	return compiler_.compile(state_, surface.x, surface.y);
 }
 
 Ref<HudDrawListStats> HudOverlay::get_draw_list_stats() {
@@ -1815,6 +1852,7 @@ void HudOverlay::ensure_additive_item_() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	additive_item_ = rs->canvas_item_create();
 	rs->canvas_item_set_parent(additive_item_, get_canvas_item());
+	rs->canvas_item_set_transform(additive_item_, d3d9_screen_to_canvas());
 	rs->canvas_item_set_material(additive_item_, additive_material_->get_rid());
 	// Above the four-layer corner-map sandwich like every non-map additive row.
 	rs->canvas_item_set_draw_index(additive_item_, 4);
@@ -1862,6 +1900,14 @@ HudMapPassTextures HudOverlay::map_pass_textures() const {
 	out.slot_modulate2x = slot_modulate2x_.data();
 	out.pages = page_textures_.data();
 	out.page_count = page_textures_.size();
+	// A glyph run takes its page's material (hud::kFontPageMaterialWord).
+	for (size_t page = 0; page < page_textures_.size(); ++page) {
+		page_modulate2x_[page] = texture_stage_(page_textures_[page]) ==
+								opennova::renderer::MaterialColorStage::Modulate2x
+						? 1
+						: 0;
+	}
+	out.page_modulate2x = page_modulate2x_.data();
 	return out;
 }
 
@@ -1912,6 +1958,10 @@ void HudOverlay::_draw() {
 	if (!configured_) {
 		return;
 	}
+	// The draw lists are the original's window coordinates, D3D9 pixel centres
+	// on the integers (renderer/d3d9_raster.h): every child item takes the same
+	// transform where it is made.
+	rs->canvas_item_add_set_transform(get_canvas_item(), d3d9_screen_to_canvas());
 	const Vector2 surface = draw_surface_();
 	// Retail re-inits the overlay fonts on resolution change; the lazy tier
 	// check is that re-init (the policy lives in hud_label_font_choice).
@@ -1953,6 +2003,7 @@ void HudOverlay::render_console_messages(const RID &p_item) {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	rs->canvas_item_clear(p_item);
 	if (!configured_) return;
+	rs->canvas_item_add_set_transform(p_item, d3d9_screen_to_canvas());
 	const Vector2 surface = draw_surface_();
 	ensure_label_fonts_(surface.x);
 	ensure_flat_material_();
@@ -2027,6 +2078,7 @@ void HudOverlay::ensure_top_item_() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	top_item_ = rs->canvas_item_create();
 	rs->canvas_item_set_parent(top_item_, get_canvas_item());
+	rs->canvas_item_set_transform(top_item_, d3d9_screen_to_canvas());
 	// Above the big-map sandwich (draw indices 5..8).
 	rs->canvas_item_set_draw_index(top_item_, 9);
 	ensure_flat_material_();
@@ -2038,6 +2090,7 @@ void HudOverlay::ensure_page_item_() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	page_item_ = rs->canvas_item_create();
 	rs->canvas_item_set_parent(page_item_, get_canvas_item());
+	rs->canvas_item_set_transform(page_item_, d3d9_screen_to_canvas());
 	rs->canvas_item_set_z_as_relative_to_parent(page_item_, false);
 	rs->canvas_item_set_z_index(page_item_, RenderingServer::CANVAS_ITEM_Z_MAX);
 	ensure_flat_material_();

@@ -84,6 +84,9 @@ inline float threedi_q16f(double v) { return static_cast<float>(threedi_q16(v)) 
 inline float threedi_q14f(double v) { return static_cast<float>(std::lround(v * io::kFp14One)) / io::kFp14One; }
 inline float threedi_q8f(double v) { return static_cast<float>(std::lround(v * 256.0)) / 256.0f; }
 inline float threedi_byte_unit(int c) { return static_cast<float>(c) / 255.0f; }
+// A colour channel (0..1) as the byte it was authored as: threedi_byte_unit's
+// inverse.
+inline int threedi_build_byte_of(float unit) { return static_cast<int>(std::lround(unit * 255.0f)); }
 // The quantizers of the collision fields the retired OED writer derives: it
 // truncates toward zero where the helpers above round (CVRT 8.8, BPLN Q14,
 // and the 16.16 CFAC, BPLN, BVOL, COBJ and CMDL values) [orig: WriteCVRT @
@@ -106,11 +109,17 @@ struct ThreediBuildStrip {
 	bool alpha = false;
 	int bone = -1; // skinned strips: the skeleton bone every vertex rides
 	std::vector<ThreediVertex> vertices;
+	// A triangle list over `vertices` (strip-relative, retail's winding: three
+	// per triangle, at most 65,535, STRP's u16 count).
 	std::vector<uint16_t> indices;
 	// Skinned strips with several bones: the STRP bone table (at most 16
 	// parts) the vertices' local bone_indices address; empty means the
 	// single-bone form above.
 	std::vector<uint8_t> bone_table;
+	// The vertices carry their tangent frames already (model axes): the
+	// assembly keeps them where the layout carries tangents, and derives the
+	// frames of every other strip (derive_tangents).
+	bool tangents_given = false;
 };
 
 struct ThreediBuildPart {
@@ -220,6 +229,23 @@ void threedi_build_light_view_proj(ThreediLight &light, float falloff);
 // port's deg_to_rad).
 float threedi_build_light_cone_cos(float falloff);
 
+// A spot light's cone half-angle (degrees) as the float build re-derives the
+// record from: its byte (wrapped), the cosine and the view_proj all follow from
+// it. The float nearest the angle the cosine holds rarely gives back the same
+// cosine, and a small cone leaves thousands of floats with one cosine, so the
+// floats around it are tried for one that reproduces the byte, the cosine and
+// the view_proj, then the byte and the cosine (a retail record whose view_proj
+// another tool built), else the angle itself.
+float threedi_build_light_cone_half_angle(const ThreediLight &light);
+
+// A material's glass, reflection and emissive words from its shader's
+// capabilities, by the OED rule WriteMTRL applies (it holds for every material
+// of the 958 JO models; 5fc5b4f6a^:engine/formats/oed/export_3di.cpp): a GLASS
+// shader reflects 0x80 grey unless another colour is set, and is glass while it
+// reflects; an EMISSIVE one is emissive type 2; any other is neither. The
+// shader table is the renderer's, so the caller says which the shader is.
+void threedi_build_material_surface(ThreediMaterial &material, bool glass_shader, bool emissive_shader);
+
 ThreediTransform threedi_build_track(uint8_t control, uint8_t param, int16_t rate, int16_t start, int16_t end);
 
 struct ThreediBuildModel {
@@ -250,6 +276,9 @@ struct ThreediBuildModel {
 	std::vector<ThreediMatrix4x4> frames;
 
 	// --- render ------------------------------------------------------------
+	// The add_* calls that fill a fixed field return -1 and add nothing when a
+	// name or part does not fit it (a shader tag past 32 bytes, a texture or
+	// user point name past 16, a light's part past its byte).
 	int add_lod(int32_t threshold = 0, const char *type = "gnrc");
 	int add_part(int lod, int parent, ThreediBuildVec3 pivot);
 	int add_material(const char *shader, const char *texture, uint8_t slot = THREEDI_TEX_SLOT_DIFFUSE);
@@ -321,17 +350,38 @@ struct ThreediBuildModel {
 	// collision/occlusion plane table; witnessed on Armry01's OCCL]. `planes`
 	// given explicitly (mission axes, n . p + d == 0) replace the rule. The
 	// record's sphere is threedi_build_occ_sphere's unless `sphere` gives the
-	// one it stores. False when the rule overflows 32.
+	// one it stores. False when the rule needs more than `plane_limit` planes
+	// (the target's: OED stops at 32, the runtime's 32-bit clip mask).
 	bool add_occ_record(uint8_t type, int section_a, int section_b, const std::vector<ThreediBuildVec3> &verts,
 			const std::vector<std::array<int, 4>> &faces, const std::vector<std::array<double, 4>> &explicit_planes = {},
-			const ThreediBuildOccSphere *sphere = nullptr);
+			const ThreediBuildOccSphere *sphere = nullptr, size_t plane_limit = 32);
 };
 
-// Assemble the contiguous Threedi3di3 and serialize it through the parity
-// writer into `out`. Returns false when the writer refused the model;
-// `overflow` then names a chunk too large for its length field, when that
-// is why (threedi_3di3_write_memory).
+// Why threedi_build_mint refused a model: `what` names the word that cannot
+// hold it, and `overflow` the chunk too large for its 24-bit length field
+// when that is why (threedi_3di3_write_memory).
+struct ThreediBuildRefusal {
+	std::string what;
+	ThreediChunkOverflow overflow{};
+};
+
+// Whether every word the assembly fills holds what `m` gives it, so nothing is
+// truncated, clamped or wrapped on the way to the writer: a strip's index
+// count (STRP's u16, whole triangles), its indices inside its vertex window
+// and that window inside what a u16 index reaches (65,536), a skinned strip's
+// bone table (at most 16 parts, each one its LOD holds), the GHDR name (16
+// bytes), a LOD type (4), a CTRL register name (24), a material's texture
+// rows (24) and every bullet face's corners and normal inside its section
+// (signed 16-bit indices). False with `why` set to the first word that does
+// not. What only the game imposes beyond the words (name lengths the
+// loader's C strings keep a NUL in, a strip's palette) is the scene
+// lowering's (threedi_o3d_lower.h), not this check's.
+bool threedi_build_check(const ThreediBuildModel &m, std::string &why);
+
+// Check (threedi_build_check), assemble the contiguous Threedi3di3 and
+// serialize it through the parity writer into `out`. False when the check or
+// the writer refused the model, with why in `refusal`.
 bool threedi_build_mint(const ThreediBuildModel &m, std::vector<uint8_t> &out,
-		ThreediChunkOverflow *overflow = nullptr);
+		ThreediBuildRefusal *refusal = nullptr);
 
 } // namespace opennova::threedi

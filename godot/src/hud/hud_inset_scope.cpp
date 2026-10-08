@@ -1,4 +1,5 @@
 #include "hud/hud_inset_scope.h"
+#include "render/d3d9_raster_device.h"
 #include "render/visual_layers.h"
 #include "simulation/player_local_view.h"
 #include "util/axes.h"
@@ -79,6 +80,12 @@ void HudInsetScope::update_view(const Ref<PlayerLocalView> &view, Camera3D *sour
 	camera_->set_near(0.2);
 	camera_->set_far(source->get_far());
 	camera_->set_fov(geometry_.fov_h_deg);
+	// The Inset scene rasterises onto the backbuffer through its own integer
+	// viewport, pixel centres on the integers; the target is that rect pixel
+	// for pixel, so the camera draws through the rect's half pixel
+	// (renderer/d3d9_raster.h).
+	draw_camera_through_d3d9_raster(
+			camera_, opennova::renderer::d3d9_raster_ndc_shift(size.x, size.y));
 	// The gameplay camera admits the first-person viewmodel layer; this second
 	// scene pass draws terrain, sky and the world only, so the aimed gun must
 	// never render magnified inside the aperture. It takes the Inset's own

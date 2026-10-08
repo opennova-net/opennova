@@ -19,6 +19,7 @@
 #include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/templates/local_vector.hpp>
 
+#include <base/io/hash.h>
 #include <runtime/renderer/object_lod.h>
 #include <runtime/renderer/render_order.h>
 
@@ -65,26 +66,30 @@ const StringName *twin_uniform_names() {
 int ObjectModel::update_authored_lods(const Transform3D &p_camera_transform,
 		float p_vertical_fov_degrees,
 		float p_viewport_width,
-		float p_viewport_height) {
+		float p_viewport_height,
+		int p_object_detail) {
 	// The frame scale, the projected radius and the selector are engine facts
 	// (runtime/renderer/object_lod.h); the frame struct converts the camera.
 	const ObjectLodFrame frame = ObjectLodFrame::make(p_camera_transform,
-			p_vertical_fov_degrees, p_viewport_width, p_viewport_height);
+			p_vertical_fov_degrees, p_viewport_width, p_viewport_height, p_object_detail);
 	return update_authored_lod_views(&frame, 1);
 }
 
-int ObjectModel::update_authored_lods_for_camera(Camera3D *p_camera, float p_viewport_width) {
-	const ObjectLodFrame frame = ObjectLodFrame::from_camera(p_camera, p_viewport_width);
+int ObjectModel::update_authored_lods_for_camera(Camera3D *p_camera, float p_viewport_width,
+		int p_object_detail) {
+	const ObjectLodFrame frame = ObjectLodFrame::from_camera(p_camera, p_viewport_width,
+			p_object_detail);
 	return update_authored_lod_views(&frame, 1);
 }
 
 int ObjectModel::update_authored_lods_for_views(Camera3D *p_main, float p_main_width,
-		Camera3D *p_inset, float p_inset_width) {
+		Camera3D *p_inset, float p_inset_width, int p_object_detail) {
 	ObjectLodFrame frames[kViewCount];
-	frames[kMainView] = ObjectLodFrame::from_camera(p_main, p_main_width);
+	frames[kMainView] = ObjectLodFrame::from_camera(p_main, p_main_width, p_object_detail);
 	int count = 1;
 	if (p_inset != nullptr) {
-		frames[kInsetView] = ObjectLodFrame::from_camera(p_inset, p_inset_width);
+		frames[kInsetView] = ObjectLodFrame::from_camera(p_inset, p_inset_width,
+				p_object_detail);
 		count = kViewCount;
 	}
 	const int applied = update_authored_lod_views(frames, count);
@@ -525,12 +530,9 @@ void ObjectModel::write_twin_point_lights(bool p_all, int p_robj_index, int p_co
 	// The node's packed form (apply_point_light_selection_to_robj): the
 	// count, then four (posr, colour) pairs, zero past the count.
 	const int count = CLAMP(p_count, 0, 4);
-	uint64_t hash = 0xcbf29ce484222325ull;
+	uint64_t hash = opennova::io::kFnv1a64Offset;
 	const auto mix = [&hash](const void *data, size_t size) {
-		const uint8_t *bytes = static_cast<const uint8_t *>(data);
-		for (size_t i = 0; i < size; ++i) {
-			hash = (hash ^ bytes[i]) * 0x100000001b3ull;
-		}
+		hash = opennova::io::fnv1a64_bytes(hash, data, size);
 	};
 	mix(&count, sizeof(count));
 	for (int i = 0; i < count; ++i) {

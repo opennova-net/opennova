@@ -1029,6 +1029,20 @@ func test_multi_lod_static_selects_its_rlod_per_instance_inside_the_bin() -> voi
 			"the next frame re-evaluates the restored instance")
 	assert_eq(_live_populations(placer, first_bms), ["Batch_StaticCrate1_1"])
 
+	# The frame scale reads the object detail the view draws at (game.cfg's
+	# object_polydetail, the session copy; engine renderer/object_lod.h): 50 u
+	# off, the entity projects to ~13.7 px, which detail 3 (x2.0) lifts past the
+	# 20 px row to level 0 and detail 2 (x1.0) leaves at level 1.
+	var detail_camera := Transform3D(Basis.IDENTITY, Vector3(10, 0, 60))
+	placer.update_static_lods(detail_camera, 70.0, 640.0, 480.0, 3)
+	assert_eq(placer.get_static_instance_lod(first_bms), 0)
+	placer.update_static_lods(detail_camera, 70.0, 640.0, 480.0, 2)
+	assert_eq(placer.get_static_instance_lod(first_bms), 1,
+			"detail 2 draws the coarser level from half the distance")
+	placer.update_static_lods(detail_camera, 70.0, 640.0, 480.0)
+	assert_eq(placer.get_static_instance_lod(first_bms), 0,
+			"the scripted seam's default is detail 3")
+
 
 func test_multi_lod_document_harvests_every_level_into_the_bins() -> void:
 	# The real harvest: an inert-PANM document with more than one authored
@@ -1450,3 +1464,273 @@ func test_static_and_live_placement_share_initialized_entity_light_radius() -> v
 			assert_eq(float((surfaces[0] as GeometryInstance3D).get_instance_shader_parameter(
 					"u_point_light_count")), 1.0,
 					"the live query has the same padded radius as its static source")
+
+
+# ADR 0046 S14: the editor moves a retained static in place (move_static_instance).
+# Its rows stay where they are in their populations (the packing and the
+# swap-remove order stand), its transform reads back (get_static_instance_transform),
+# its level's sphere moves with it (the next LOD walk evaluates it where it is now)
+# and the population's bounds grow to hold it; a bms id that is no retained static
+# is refused; a carved instance moves too and shows again where it went.
+func test_move_static_instance_rewrites_rows_in_place() -> void:
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var fixture := _dense_fixture(parent, false)
+	var placer: MissionObjectPlacer = fixture.placer
+	var bms: Array[int] = fixture.bms
+	var container: Node3D = fixture.container
+	assert_not_null(container)
+	if container == null:
+		return
+	var level0 := _lod_population(container, "Batch_StaticCrate1_0")
+	var level1 := _lod_population(container, "Batch_StaticCrate1_1")
+	if level0 == null or level1 == null:
+		return
+	var placed: Variant = placer.get_static_instance_transform(bms[1])
+	assert_eq(placed, MissionObjectPlacer.entity_transform(Vector3(10, -100, 0), Vector3.ZERO),
+			"the read-back is the entity transform the placement made")
+	assert_null(placer.get_static_instance_transform(999999), "no retained static: null")
+	assert_false(placer.move_static_instance(999999, Transform3D.IDENTITY), "no retained static: refused")
+
+	# The second building moved beside the third (BMS y -100 to -200, turned 90):
+	# the same rows in the same order, the transform the new one, the bounds grown.
+	var moved := MissionObjectPlacer.entity_transform(Vector3(10, -200, 3), Vector3(0, 90, 0))
+	var before := level0.custom_aabb
+	var level1_before := level1.custom_aabb
+	assert_true(placer.move_static_instance(bms[1], moved))
+	assert_eq(placer.get_static_instance_transform(bms[1]), moved)
+	assert_eq(_live_bms(placer, level0), [bms[0], bms[1], bms[2]], "the rows stand as packed")
+	assert_eq(_live_bms(placer, level1), [])
+	assert_eq(_live_populations(placer, bms[1]), ["Batch_StaticCrate1_0"])
+	assert_eq(placer.get_static_instance_binding_count(bms[1]), 2, "its bindings stand")
+	assert_true(level0.custom_aabb.encloses(before), "the bounds only grow")
+	assert_true(level0.custom_aabb.has_point(moved.origin), "and hold the row where it is now")
+	# Every population it may draw in grows with it, live or not: a later level switch (or a show)
+	# appends it there, inside the bounds the population advertises (review M6).
+	assert_true(level1.custom_aabb.encloses(level1_before), "the level 1 bounds only grow")
+	assert_true(level1.custom_aabb.has_point(moved.origin), "and hold it before it switches there")
+
+	# The LOD walk evaluates it where it is now: at the near camera the third
+	# building (z 200) stays at level 0, and so does the second one beside it;
+	# only the first switches.
+	assert_eq(_dense_lod_switches(placer, DENSE_NEAR_CAMERA), 1)
+	assert_eq(_live_bms(placer, level1), [bms[0]])
+	assert_eq(_live_bms(placer, level0), [bms[2], bms[1]],
+			"swap-remove: the third filled the first one's hole; the moved one stayed last")
+	assert_eq(_live_populations(placer, bms[1]), ["Batch_StaticCrate1_0"])
+	# A move while a row sits after a swap-remove: still in place, still right.
+	var nudged := MissionObjectPlacer.entity_transform(Vector3(11, -200, 3), Vector3(0, 90, 0))
+	assert_true(placer.move_static_instance(bms[1], nudged))
+	assert_eq(placer.get_static_instance_transform(bms[1]), nudged)
+	assert_eq(_live_bms(placer, level0), [bms[2], bms[1]])
+	assert_eq(placer.get_static_instance_transform(bms[2]),
+			MissionObjectPlacer.entity_transform(Vector3(10, -200, 0), Vector3.ZERO),
+			"the other rows keep their transforms")
+
+	# A carved instance moves with no live row, and shows again where it went.
+	placer.hide_static_instance(bms[2])
+	assert_eq(_live_bms(placer, level0), [bms[1]])
+	var far := MissionObjectPlacer.entity_transform(Vector3(10, -150, 0), Vector3.ZERO)
+	assert_true(placer.move_static_instance(bms[2], far))
+	assert_eq(placer.get_static_instance_transform(bms[2]), far)
+	assert_eq(_live_bms(placer, level0), [bms[1]], "carved: no row to rewrite")
+	assert_true(placer.show_static_instance(bms[2]))
+	assert_eq(_live_bms(placer, level0), [bms[1], bms[2]])
+	assert_eq(placer.get_static_instance_transform(bms[2]), far)
+	assert_true(level0.custom_aabb.has_point(far.origin), "hidden, moved, shown: the bounds held it all along")
+
+	# A far move out of its 512-unit bin (700 m east): each level's bounds hold it, live or not, so the
+	# level switch the camera makes later never draws it outside the advertised bounds.
+	var away := MissionObjectPlacer.entity_transform(Vector3(700, -200, 3), Vector3.ZERO)
+	assert_true(placer.move_static_instance(bms[1], away))
+	assert_true(level0.custom_aabb.has_point(away.origin), "level 0 holds it where it went")
+	assert_true(level1.custom_aabb.has_point(away.origin), "and level 1, before any switch")
+
+
+# ADR 0046 S14: a graphic's static batches warmed before a placement names it
+# (warm_static_graphic): a graphic whose batches are registered or resolve is
+# warm, one that resolves to nothing is not, and an empty name never.
+func test_warm_static_graphic_caches_the_batches() -> void:
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
+	var root := ResourceRoot.new()
+	root.set_root_dir(_abs("res://../fixtures/def"))
+	var placer := MissionObjectPlacer.create(root, item_db)
+	assert_false(placer.warm_static_graphic("", parent), "no name")
+	assert_false(placer.warm_static_graphic("NoSuchGraphic", parent), "nothing resolves")
+	var mesh := BoxMesh.new()
+	assert_true(placer.register_resolved_static_graphic("StaticCrate1", ObjectData.new(), [{
+		"mesh": mesh, "material": null, "offset": Transform3D.IDENTITY, "submesh": 0,
+	}]))
+	assert_true(placer.warm_static_graphic("StaticCrate1", parent), "registered: warm")
+	assert_eq(parent.get_child_count(), 0, "a warm graphic harvests nothing under the parent")
+
+
+# ADR 0046 S14 (decision D5): the placement a unit at a time (MissionPlacementRun) comes to what
+# place() places whole, over the same walk: the rows bucketed, a unit per static group, the animated
+# models four a unit, the finish; nothing is placed until its units ran, the census comes with the
+# last; a run begun after it on the placer cancels it (its next step does nothing, no census).
+func test_a_stepped_placement_is_the_whole_placement() -> void:
+	var whole_parent := Node3D.new()
+	add_child_autofree(whole_parent)
+	var whole := _dense_fixture(whole_parent, false)
+	var whole_stats: MissionPlacementStats = whole["stats"]
+	assert_eq(whole_stats.placed, 3, "the fixture places its three statics whole")
+
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var mission: MissionData = whole["mission"]
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
+	var root := ResourceRoot.new()
+	root.set_root_dir(_abs("res://../fixtures/def"))
+	var placer := MissionObjectPlacer.create(root, item_db)
+	var fine := BoxMesh.new()
+	fine.size = Vector3(4, 4, 4)
+	var coarse := BoxMesh.new()
+	coarse.size = Vector3(3, 3, 3)
+	assert_true(placer.register_resolved_static_graphic(
+			"StaticCrate1", ObjectData.new(), [{
+				"mesh": fine, "material": null,
+				"offset": Transform3D.IDENTITY, "submesh": 0, "lod_index": 0,
+			}, {
+				"mesh": coarse, "material": null,
+				"offset": Transform3D.IDENTITY, "submesh": 1, "lod_index": 1,
+			}], {
+				"thresholds_q16": PackedInt32Array([20 << 16, 0]),
+				"sphere_radius": 2.0,
+			}))
+	var run := placer.begin_place(mission, parent)
+	assert_not_null(run)
+	assert_false(run.is_done(), "begun, not done")
+	assert_eq(run.get_steps_done(), 0)
+	assert_eq(run.get_step_label(), "bucket", "the rows bucketed first")
+	assert_eq(run.get_step_count(), 2, "one bucket unit and the finish, before the groups are known")
+	assert_null(run.get_stats(), "no census before the end")
+	var container: Node3D = parent.get_node_or_null("MissionObjects")
+	assert_not_null(container, "the container stands as the run begins")
+	var labels: Array = []
+	var step := MissionPlacementRun.STEP_MORE
+	while step == MissionPlacementRun.STEP_MORE:
+		labels.append(run.get_step_label())
+		step = run.step()
+	assert_eq(step, MissionPlacementRun.STEP_DONE)
+	assert_eq(labels, ["bucket", "statics", "finish"], "a unit per static group, no animated model")
+	assert_true(run.is_done())
+	assert_false(run.is_cancelled())
+	assert_eq(run.get_steps_done(), 3)
+	assert_eq(run.get_step_count(), 3)
+	assert_eq(run.get_step_label(), "")
+	assert_eq(run.step(), MissionPlacementRun.STEP_DONE, "done: nothing left to step")
+	# The same census, the same populations.
+	var stats := run.get_stats()
+	assert_not_null(stats)
+	for field in ["placed", "batched", "animated", "unresolved", "graphics", "batches", "markers",
+			"static_bins", "static_binned_batches", "static_global_batches",
+			"static_instances_retained", "static_lod_populations", "static_live_populations",
+			"static_shadow_batches"]:
+		assert_eq(stats.get(field), whole_stats.get(field), "%s as the whole placement's" % field)
+	assert_not_null(container.get_node_or_null("StaticPopulations/Batch_StaticCrate1_0"))
+	assert_not_null(container.get_node_or_null("StaticPopulations/Batch_StaticCrate1_1"))
+	assert_eq(placer.get_static_live_population_count(), whole["placer"].get_static_live_population_count())
+	for bms_id in whole["bms"]:
+		assert_eq(placer.get_static_instance_lod(bms_id), whole["placer"].get_static_instance_lod(bms_id))
+
+	# A run begun after another cancels it: the older run's step does nothing and it is done with no
+	# census; the newer runs to its end.
+	var first := placer.begin_place(mission, parent)
+	assert_eq(first.step(), MissionPlacementRun.STEP_MORE)
+	var second := placer.begin_place(mission, parent)
+	assert_true(second.get_generation() > first.get_generation())
+	assert_eq(first.step(), MissionPlacementRun.STEP_DONE, "cancelled by the newer run")
+	assert_true(first.is_cancelled() and first.is_done())
+	assert_null(first.get_stats())
+	while second.step() == MissionPlacementRun.STEP_MORE:
+		pass
+	assert_false(second.is_cancelled())
+	assert_eq(second.get_stats().placed, 3)
+
+	# No mission: done at once with an empty census, no container made.
+	var bare_parent := Node3D.new()
+	add_child_autofree(bare_parent)
+	var empty := placer.begin_place(null, bare_parent)
+	assert_eq(empty.get_step_label(), "finish")
+	assert_eq(empty.step(), MissionPlacementRun.STEP_DONE)
+	assert_eq(empty.get_stats().placed, 0)
+	assert_null(bare_parent.get_node_or_null("MissionObjects"))
+
+
+# S14 review m13: the stepped run is the whole placement over a mission that crosses its unit sizes:
+# 600 statics of one graphic (two bucket units of 512 rows) and 6 individual models (two models units
+# of four): the labels in order, the same census and as many individual models as place() makes.
+func _crossing_placer(root: ResourceRoot, item_db: ItemDatabase, data: ObjectData) -> MissionObjectPlacer:
+	var placer := MissionObjectPlacer.create(root, item_db)
+	assert_true(placer.register_resolved_static_graphic("StaticCrate1", data, [{
+		"mesh": BoxMesh.new(), "material": null, "offset": Transform3D.IDENTITY, "submesh": 0,
+	}]))
+	placer.register_object_data("pump", data)
+	placer.register_occlusion_verdict(106103, true)
+	return placer
+
+
+func test_a_stepped_placement_crossing_its_units_is_the_whole_placement() -> void:
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(_abs("res://../fixtures/threedi/synth")), OK)
+	var data := ObjectData.new()
+	assert_eq(data.open_from_resource_root(root, "crate.3di"), OK)
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	for i in 600:
+		assert_not_null(mission.add_entity(MissionData.KIND_ITEM, 105004, Vector3(float(i % 30) * 40.0, float(i / 30) * 40.0, 0.0),
+				Vector3.ZERO))
+	for i in 6:
+		assert_not_null(mission.add_entity(MissionData.KIND_ITEM, 106103, Vector3(float(i) * 10.0, -50.0, 0.0), Vector3.ZERO))
+	var whole_parent := Node3D.new()
+	add_child_autofree(whole_parent)
+	var whole := _crossing_placer(root, item_db, data)
+	var whole_stats := whole.place(mission, whole_parent)
+	assert_eq(whole_stats.batched, 600)
+	assert_eq(whole_stats.animated, 6)
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var placer := _crossing_placer(root, item_db, data)
+	var run := placer.begin_place(mission, parent)
+	var labels: Array = []
+	var step := MissionPlacementRun.STEP_MORE
+	while step == MissionPlacementRun.STEP_MORE:
+		var label := run.get_step_label()
+		if labels.is_empty() or labels[labels.size() - 1] != label:
+			labels.append(label)
+		step = run.step()
+	assert_eq(labels, ["bucket", "statics", "models", "finish"])
+	assert_eq(run.get_steps_done(), 2 + 1 + 2 + 1, "two buckets of 512 rows, one static group, two models units of four")
+	var stats := run.get_stats()
+	for field in ["placed", "batched", "animated", "unresolved", "graphics", "batches", "markers",
+			"static_bins", "static_binned_batches", "static_global_batches",
+			"static_instances_retained", "static_lod_populations", "static_live_populations",
+			"static_shadow_batches"]:
+		assert_eq(stats.get(field), whole_stats.get(field), "%s as the whole placement's" % field)
+	assert_eq(placer.get_placed_models().size(), whole.get_placed_models().size())
+	assert_eq(placer.get_placed_models().size(), 6)
+
+
+# ADR 0046 S14: the transform the placement draws an item's entity at (item_entity_transform): the
+# entity transform for an item of no scale, scaled by the item's `scale` (106103, 1.5) otherwise;
+# what the editor's moves hand move_static_instance and an individual model's node.
+func test_item_entity_transform_carries_the_item_scale() -> void:
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
+	var root := ResourceRoot.new()
+	root.set_root_dir(_abs("res://../fixtures/def"))
+	var placer := MissionObjectPlacer.create(root, item_db)
+	var position := Vector3(10, -40, 3)
+	var rotation := Vector3(0, 90, 0)
+	var plain := MissionObjectPlacer.entity_transform(position, rotation)
+	assert_eq(placer.item_entity_transform(position, rotation, 106100), plain, "no scale: the entity transform")
+	var scaled := placer.item_entity_transform(position, rotation, 106103)
+	assert_eq(scaled.origin, plain.origin)
+	assert_true(scaled.basis.is_equal_approx(plain.basis.scaled(Vector3(1.5, 1.5, 1.5))), "scale 1.5")

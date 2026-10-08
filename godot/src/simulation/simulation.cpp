@@ -92,7 +92,7 @@ opennova::bms::File make_demo_mission() {
 	// radius + a name id so the view surfaces meaningful fields).
 	m.markers[0].wp_distance = 25;
 	m.markers[0].ttool_index = 1;
-	m.waypoint_records[2].flags = opennova::bms::WaypointFlags::BlueTeam;
+	m.waypoint_records[2].flags = opennova::bms::WaypointFlags::PlayerRoute;
 	m.waypoint_records[2].marker_count = 3;
 	m.waypoint_records[2].waypoint_numbers = {0, 1, 2};
 
@@ -278,24 +278,15 @@ const opennova::renderer::PrecipitationDrawFrame &Simulation::compile_precipitat
 		return assets_.precipitation_frame;
 	}
 	opennova::world::WeatherState &weather = kernel_->world.weather;
-	// Godot (x, y, z) -> mission 16.16 (x, -z, y).
-	const int32_t cam_q16[3] = {
-		opennova::io::float_to_fp16_16_round_sat(p_camera.x),
-		opennova::io::float_to_fp16_16_round_sat(-p_camera.z),
-		opennova::io::float_to_fp16_16_round_sat(p_camera.y),
-	};
+	const float position[3] = { p_camera.x, p_camera.y, p_camera.z };
+	const float right[3] = { p_camera_right.x, p_camera_right.y, p_camera_right.z };
+	const float up[3] = { p_camera_up.x, p_camera_up.y, p_camera_up.z };
+	const opennova::renderer::PrecipitationCamera camera =
+			opennova::renderer::precipitation_camera_from_render(position, right, up, p_camera_mode);
 	// The per-render update precedes the compile (retail the drawer calls
 	// WeatherParticle_UpdatePositions first @ 0x5dee65).
-	if (weather.raining()) kernel_->update_precipitation(cam_q16[0], cam_q16[1], cam_q16[2]);
-	opennova::renderer::PrecipitationCamera camera;
-	for (int i = 0; i < 3; ++i) camera.position_q16[i] = cam_q16[i];
-	camera.right[0] = p_camera_right.x;
-	camera.right[1] = p_camera_right.y;
-	camera.right[2] = p_camera_right.z;
-	camera.up[0] = p_camera_up.x;
-	camera.up[1] = p_camera_up.y;
-	camera.up[2] = p_camera_up.z;
-	camera.mode = p_camera_mode;
+	if (weather.raining())
+		kernel_->update_precipitation(camera.position_q16[0], camera.position_q16[1], camera.position_q16[2]);
 	opennova::renderer::PrecipitationDrawFrame &frame = assets_.precipitation_frame;
 	opennova::renderer::compile_precipitation_frame(weather.precipitation,
 			weather.core.scalar_channels.rain_pct_fp, weather.precipitation_kind,
@@ -555,8 +546,9 @@ std::function<void(bool)> Simulation::role_bringup_tail() {
 	return [this](bool fresh_joiner_runtime) {
 		runtime_ = active_role().client_runtime();
 		if (fresh_joiner_runtime) {
-			install_charattr_challenge_table();
+			install_charattr_table();
 			install_character_join_vars();
+			install_auto_medic_preference();
 			install_join_integrity_profile();
 			install_expansion_version_root();
 		}
@@ -702,10 +694,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	net_.mission_text = host_boot_.mission_text;
 	net_.terrain_til_data = host_boot_.terrain_til;
 	assets_.env_water_z_q16 = host_boot_.water_z_q16;
-	if (host_role_ != nullptr) {
-		net_.charattr_challenge_table = host_boot_.charattr;
-		net_.charattr_challenge_loaded = host_boot_.charattr_loaded;
-	}
+	if (host_role_ != nullptr) net_.charattr_table = host_boot_.charattr;
 	finish_kernel_boot();
 	// The binding-side resolver inputs (the joiner's decoded rows read the
 	// anim root/item db Refs) and the collision Ref retention.

@@ -47,6 +47,8 @@ void Terrain::_bind_methods() {
 		"set_lod_quality", "get_lod_quality");
 
 	ClassDB::bind_method(D_METHOD("set_tile_info_override", "tile_info"), &Terrain::set_tile_info_override);
+	ClassDB::bind_method(D_METHOD("set_texcompression_level", "level"), &Terrain::set_texcompression_level);
+	ClassDB::bind_method(D_METHOD("get_texcompression_level"), &Terrain::get_texcompression_level);
 	ClassDB::bind_method(D_METHOD("get_tile_info_override"), &Terrain::get_tile_info_override);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "tile_info_override", PROPERTY_HINT_RESOURCE_TYPE, "TerrainTileInfo"),
 		"set_tile_info_override", "get_tile_info_override");
@@ -93,6 +95,12 @@ void Terrain::_bind_methods() {
 		&Terrain::get_suppressed_static_shadow_bms_ids);
 
 	ClassDB::bind_method(D_METHOD("build"), &Terrain::build);
+	ClassDB::bind_method(D_METHOD("build_begin"), &Terrain::build_begin);
+	ClassDB::bind_method(D_METHOD("build_step"), &Terrain::build_step);
+	ClassDB::bind_method(D_METHOD("get_build_step_count"), &Terrain::get_build_step_count);
+	ClassDB::bind_method(D_METHOD("get_build_steps_done"), &Terrain::get_build_steps_done);
+	ClassDB::bind_method(D_METHOD("get_build_step_label"), &Terrain::get_build_step_label);
+	ClassDB::bind_method(D_METHOD("is_built"), &Terrain::is_built);
 	ClassDB::bind_method(D_METHOD("render_frame"), &Terrain::render_frame);
 	ClassDB::bind_method(D_METHOD("render_inset_frame", "camera"), &Terrain::render_inset_frame);
 	ClassDB::bind_method(D_METHOD("release_inset_frame"), &Terrain::release_inset_frame);
@@ -121,11 +129,19 @@ void Terrain::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_debug_mode", "mode"), &Terrain::set_debug_mode);
 	ClassDB::bind_method(D_METHOD("get_debug_mode"), &Terrain::get_debug_mode);
+	ClassDB::bind_method(D_METHOD("set_ground_overlay", "image", "rect", "outside", "outside_on"),
+			&Terrain::set_ground_overlay);
+	ClassDB::bind_method(D_METHOD("clear_ground_overlay"), &Terrain::clear_ground_overlay);
+	ClassDB::bind_method(D_METHOD("has_ground_overlay"), &Terrain::has_ground_overlay);
 	BIND_ENUM_CONSTANT(DEBUG_MODE_NORMAL);
 	BIND_ENUM_CONSTANT(DEBUG_MODE_LOD_COLORS);
 	BIND_ENUM_CONSTANT(DEBUG_MODE_SECTOR_COLORS);
 	BIND_ENUM_CONSTANT(DEBUG_MODE_NORMALS);
 	BIND_ENUM_CONSTANT(DEBUG_MODE_HEIGHTMAP);
+
+	BIND_ENUM_CONSTANT(BUILD_STEP_MORE);
+	BIND_ENUM_CONSTANT(BUILD_STEP_DONE);
+	BIND_ENUM_CONSTANT(BUILD_STEP_FAILED);
 
 	ADD_GROUP("Debug", "debug_");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "debug_mode", PROPERTY_HINT_ENUM,
@@ -170,6 +186,14 @@ Terrain::~Terrain() {
 void Terrain::set_terrain_data(const Ref<TerrainData> &p_data) {
 	if (terrain_data.is_valid() && terrain_data->is_connected("terrain_changed", callable_mp(this, &Terrain::_on_terrain_changed))) {
 		terrain_data->disconnect("terrain_changed", callable_mp(this, &Terrain::_on_terrain_changed));
+	}
+	// A stepped build in flight is of the old data: dropped with what it made so far (its next
+	// build_step fails; a build of the new data begins again).
+	if (building_) {
+		_clear_terrain();
+		building_ = false;
+		build_done_ = 0;
+		build_total_ = 0;
 	}
 	terrain_data = p_data;
 	static_shadow_rasterizer.set_terrain_data(p_data);
@@ -297,12 +321,26 @@ Terrain::get_tile_cache_binding_for_world_point_native(
 			opennova::TerrainTileResidentPoint{p_world_x, p_world_z});
 }
 
+std::optional<opennova::TerrainTilePageBinding>
+Terrain::get_tile_cache_binding_for_sector_patch_native(
+		const opennova::TerrainTileSectorPatchPoint &p_point) {
+	return tile_cache_device.find_sector_patch(p_point);
+}
+
 void Terrain::set_lod_quality(float p_quality) {
 	lod_quality = p_quality;
 }
 
 float Terrain::get_lod_quality() const {
 	return lod_quality;
+}
+
+void Terrain::set_texcompression_level(int p_level) {
+	surface_inputs->set_texcompression_level(p_level);
+}
+
+int Terrain::get_texcompression_level() const {
+	return surface_inputs->get_texcompression_level();
 }
 
 void Terrain::set_tile_info_override(const Ref<TerrainTileInfo> &p_info) {
@@ -678,6 +716,14 @@ const std::vector<opennova::TerrainTilePageBinding> &Terrain::_compose_pages(
 	if (p_display_frame_start) {
 		static_shadow_rasterizer.begin_frame(page_light_direction,
 				light_time_ms < 0 ? 0u : static_cast<uint32_t>(light_time_ms));
+		// The pages a changed caster's shadow touched or touches, composed
+		// again below (only while the casters are followed: the editor's
+		// mission device). Mission (x, y) is Godot (x, -z).
+		for (const opennova::terrain::TerrainStaticShadowReach &reach :
+				static_shadow_rasterizer.take_changed_reaches()) {
+			tile_cache_device.invalidate_region(reach.min_x, -reach.max_y,
+					reach.max_x, -reach.min_y);
+		}
 	}
 	// The page claims stamp the weather clock's TOD epoch (g_EnvTodEpoch,
 	// one step per 311 logic ticks); a page whose stamp falls behind is
@@ -1171,48 +1217,134 @@ void Terrain::_clear_terrain() {
 	tile_infos.clear();
 	scene_snapshot = opennova::TerrainSceneSnapshot();
 	built = false;
+	// A build in flight goes with what it built.
+	building_ = false;
 }
 
 void Terrain::build() {
-	_clear_terrain();
-
-	if (terrain_data.is_null() || !terrain_data->is_loaded()) {
-		UtilityFunctions::push_warning("Terrain::build() — terrain_data not loaded");
+	if (!build_begin()) {
 		return;
 	}
-
-	// The engine owns the scene: quadtree, tile metadata, mipchain, sector
-	// routing (ADR 0033 R2). The mesh build below uploads the same CPT tiles
-	// the snapshot's index counts describe.
-	scene_snapshot = opennova::build_terrain_scene_snapshot(
-			terrain_data->get_cpt(), terrain_data->get_trn());
-	if (!scene_snapshot.valid()) {
-		UtilityFunctions::push_warning("Terrain: no valid baked CPT data; skipping native mesh build");
-		return;
+	while (build_step() == BUILD_STEP_MORE) {
 	}
-	if (!_build_terrain()) {
-		UtilityFunctions::push_warning("Terrain: no valid baked CPT data; skipping native mesh build");
-		return;
-	}
-
-	// Create lightweight RenderingServer instances for the main view's pool
-	// (the Inset's is created when it first renders).
-	_create_pool_instances(main_pool, terrain_material->get_rid());
-
-	_load_textures();
-	light_textures_bound = false;
-	if (light_scene.is_valid()) {
-		_bind_light_textures();
-	}
-
-	built = true;
-
-	UtilityFunctions::print_verbose("Terrain: Built ", static_cast<int>(tile_infos.size()),
-		" tiles, ", static_cast<int>(scene_snapshot.quad_nodes.size()),
-		" quad nodes, pool=", PATCH_POOL_SIZE);
 }
 
-bool Terrain::_build_terrain() {
+bool Terrain::build_begin() {
+	_clear_terrain();
+	build_done_ = 0;
+	build_total_ = 0;
+	if (terrain_data.is_null() || !terrain_data->is_loaded()) {
+		UtilityFunctions::push_warning("Terrain::build() — terrain_data not loaded");
+		return false;
+	}
+	// The prepare unit, a unit per tile, then the pool, the surface inputs' three
+	// texture sets, the tile cache and the end.
+	build_total_ = static_cast<int>(terrain_data->get_cpt().tiles.size()) + kBuildTailUnits + 1;
+	building_ = true;
+	return true;
+}
+
+Terrain::BuildStep Terrain::build_step() {
+	if (!building_) {
+		return built ? BUILD_STEP_DONE : BUILD_STEP_FAILED;
+	}
+	const auto failed = [this]() {
+		UtilityFunctions::push_warning("Terrain: no valid baked CPT data; skipping native mesh build");
+		building_ = false;
+		return BUILD_STEP_FAILED;
+	};
+	const int tiles = static_cast<int>(tile_infos.size());
+	if (build_done_ == 0) {
+		// The engine owns the scene: quadtree, tile metadata, mipchain, sector
+		// routing (ADR 0033 R2). The mesh build uploads the same CPT tiles
+		// the snapshot's index counts describe.
+		scene_snapshot = opennova::build_terrain_scene_snapshot(
+				terrain_data->get_cpt(), terrain_data->get_trn());
+		if (!scene_snapshot.valid() || !_build_terrain_begin()) {
+			return failed();
+		}
+		// A terrain with no tile is refused by the prepare; the count stands.
+		build_total_ = static_cast<int>(tile_infos.size()) + kBuildTailUnits + 1;
+	} else if (build_done_ <= tiles) {
+		if (!_build_terrain_tile(static_cast<size_t>(build_done_ - 1))) {
+			return failed();
+		}
+	} else {
+		switch (build_done_ - tiles) {
+			case 1:
+				UtilityFunctions::print_verbose("Terrain: ", build_total_verts_, " verts, ",
+						build_total_indices_, " indices across ", tiles, " tiles");
+				// Create lightweight RenderingServer instances for the main view's pool
+				// (the Inset's is created when it first renders).
+				_create_pool_instances(main_pool, terrain_material->get_rid());
+				break;
+			case 2:
+				if (terrain_material.is_valid()) {
+					surface_inputs->set_terrain_data(terrain_data);
+					surface_inputs->set_tile_info_override(tile_info_override);
+					surface_inputs->rebuild_heightfield();
+				}
+				break;
+			case 3:
+				if (terrain_material.is_valid()) {
+					surface_inputs->rebuild_blend();
+				}
+				break;
+			case 4:
+				if (terrain_material.is_valid()) {
+					surface_inputs->rebuild_detail_textures();
+					surface_inputs->apply_to_material(terrain_material);
+				}
+				break;
+			case 5:
+				if (terrain_material.is_valid()) {
+					tile_cache_device.rebuild(terrain_data, surface_inputs, tile_info_override);
+					terrain_material->set_shader_parameter(
+							"u_tile_cache", tile_cache_device.get_texture());
+					terrain_material->set_shader_parameter(
+							"u_has_tile_cache", tile_cache_device.is_ready());
+				}
+				break;
+			default:
+				light_textures_bound = false;
+				if (light_scene.is_valid()) {
+					_bind_light_textures();
+				}
+				built = true;
+				building_ = false;
+				UtilityFunctions::print_verbose("Terrain: Built ", static_cast<int>(tile_infos.size()),
+					" tiles, ", static_cast<int>(scene_snapshot.quad_nodes.size()),
+					" quad nodes, pool=", PATCH_POOL_SIZE);
+				++build_done_;
+				return BUILD_STEP_DONE;
+		}
+	}
+	++build_done_;
+	return BUILD_STEP_MORE;
+}
+
+String Terrain::get_build_step_label() const {
+	if (!building_) {
+		return String();
+	}
+	const int tiles = static_cast<int>(tile_infos.size());
+	if (build_done_ == 0) {
+		return "scene";
+	}
+	if (build_done_ <= tiles) {
+		return "tiles";
+	}
+	switch (build_done_ - tiles) {
+		case 1: return "patches";
+		case 2: return "heightfield";
+		case 3: return "blend";
+		case 4: return "detail";
+		case 5: return "pages";
+		default: return "lights";
+	}
+}
+
+bool Terrain::_build_terrain_begin() {
 	const auto& cpt = terrain_data->get_cpt();
 
 	if (cpt.tiles.empty() || cpt.depth_buffer.empty()) {
@@ -1233,85 +1365,87 @@ bool Terrain::_build_terrain() {
 	terrain_shader = _load_terrain_shader();
 	terrain_material.instantiate();
 	terrain_material->set_shader(terrain_shader);
+	_apply_ground_overlay();
 
 	tile_infos.resize(cpt.tiles.size());
+	build_total_verts_ = 0;
+	build_total_indices_ = 0;
+	return true;
+}
 
-	int total_verts = 0;
-	int total_indices = 0;
+bool Terrain::_build_terrain_tile(size_t ti) {
+	const auto& cpt = terrain_data->get_cpt();
+	if (ti >= cpt.tiles.size() || ti >= tile_infos.size()) {
+		return false;
+	}
+	const auto& tile = cpt.tiles[ti];
+	auto& info = tile_infos[ti];
 
-	for (size_t ti = 0; ti < cpt.tiles.size(); ti++) {
-		const auto& tile = cpt.tiles[ti];
-		auto& info = tile_infos[ti];
+	// The engine produces both vertex variants; this only uploads
+	// the selected positions, normals and unchanged detail atlas UVs.
+	// Only quadrant 1 can be the empty-sector fallback topology.
+	const int variants = tile.tile_x < 512 && tile.tile_y < 512 ? 2 : 1;
+	for (int variant = 0; variant < variants; ++variant) {
+		const std::vector<opennova::TerrainTileVertex> vertices =
+				opennova::build_terrain_tile_vertices(cpt, terrain_data->get_trn(),
+						static_cast<int>(ti), variant != 0);
+		if (vertices.size() != tile.vertex_count) return false;
+		PackedVector3Array positions;
+		PackedVector3Array normals;
+		PackedVector2Array uvs;
+		positions.resize(tile.vertex_count);
+		normals.resize(tile.vertex_count);
+		uvs.resize(tile.vertex_count);
+		for (int vi = 0; vi < tile.vertex_count; ++vi) {
+			const opennova::TerrainTileVertex &vertex = vertices[vi];
+			positions.set(vi, Vector3(
+					vertex.position[0], vertex.position[1], vertex.position[2]));
+			normals.set(vi, Vector3(
+					vertex.normal[0], vertex.normal[1], vertex.normal[2]));
+			uvs.set(vi, Vector2(vertex.atlas_uv[0], vertex.atlas_uv[1]));
+		}
 
-		// The engine produces both vertex variants; this loop only uploads
-		// the selected positions, normals and unchanged detail atlas UVs.
-		// Only quadrant 1 can be the empty-sector fallback topology.
-		const int variants = tile.tile_x < 512 && tile.tile_y < 512 ? 2 : 1;
-		for (int variant = 0; variant < variants; ++variant) {
-			const std::vector<opennova::TerrainTileVertex> vertices =
-					opennova::build_terrain_tile_vertices(cpt, terrain_data->get_trn(),
-							static_cast<int>(ti), variant != 0);
-			if (vertices.size() != tile.vertex_count) return false;
-			PackedVector3Array positions;
-			PackedVector3Array normals;
-			PackedVector2Array uvs;
-			positions.resize(tile.vertex_count);
-			normals.resize(tile.vertex_count);
-			uvs.resize(tile.vertex_count);
-			for (int vi = 0; vi < tile.vertex_count; ++vi) {
-				const opennova::TerrainTileVertex &vertex = vertices[vi];
-				positions.set(vi, Vector3(
-						vertex.position[0], vertex.position[1], vertex.position[2]));
-				normals.set(vi, Vector3(
-						vertex.normal[0], vertex.normal[1], vertex.normal[2]));
-				uvs.set(vi, Vector2(vertex.atlas_uv[0], vertex.atlas_uv[1]));
-			}
+		// Both variants share one vertex count; tally it once per tile.
+		if (variant == 0) build_total_verts_ += tile.vertex_count;
 
-			// Both variants share one vertex count; tally it once per tile.
-			if (variant == 0) total_verts += tile.vertex_count;
+		// Create one ArrayMesh per LOD level (single surface each)
+		for (int lod = 0; lod < 8; lod++) {
+			const auto& src_lod = tile.lods[lod];
 
-			// Create one ArrayMesh per LOD level (single surface each)
-			for (int lod = 0; lod < 8; lod++) {
-				const auto& src_lod = tile.lods[lod];
-
-				PackedInt32Array indices;
-				if (src_lod.is_strip) {
-					_strip_to_list(src_lod.indices, indices);
-				} else {
-					// Swap first two indices per triangle (CW -> CCW for Godot)
-					for (size_t i = 0; i + 2 < src_lod.indices.size(); i += 3) {
-						indices.push_back(src_lod.indices[i + 1]);
-						indices.push_back(src_lod.indices[i]);
-						indices.push_back(src_lod.indices[i + 2]);
-					}
+			PackedInt32Array indices;
+			if (src_lod.is_strip) {
+				_strip_to_list(src_lod.indices, indices);
+			} else {
+				// Swap first two indices per triangle (CW -> CCW for Godot)
+				for (size_t i = 0; i + 2 < src_lod.indices.size(); i += 3) {
+					indices.push_back(src_lod.indices[i + 1]);
+					indices.push_back(src_lod.indices[i]);
+					indices.push_back(src_lod.indices[i + 2]);
 				}
-
-				// The <3 gate matches the snapshot's per-LOD index counts, so the
-				// compiler's family fallback and this mesh set agree by
-				// construction (both derive from the same converted counts).
-				if (indices.size() < 3) continue;
-
-				total_indices += indices.size();
-
-				Array arrays;
-				arrays.resize(Mesh::ARRAY_MAX);
-				arrays[Mesh::ARRAY_VERTEX] = positions;
-				arrays[Mesh::ARRAY_NORMAL] = normals;
-				arrays[Mesh::ARRAY_TEX_UV] = uvs;
-				arrays[Mesh::ARRAY_INDEX] = indices;
-
-				Ref<ArrayMesh> lod_mesh;
-				lod_mesh.instantiate();
-				lod_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
-				lod_mesh->surface_set_material(0, terrain_material);
-				if (variant == 0) info.lod_meshes[lod] = lod_mesh;
-				else info.flat_lod_meshes[lod] = lod_mesh;
 			}
+
+			// The <3 gate matches the snapshot's per-LOD index counts, so the
+			// compiler's family fallback and this mesh set agree by
+			// construction (both derive from the same converted counts).
+			if (indices.size() < 3) continue;
+
+			build_total_indices_ += indices.size();
+
+			Array arrays;
+			arrays.resize(Mesh::ARRAY_MAX);
+			arrays[Mesh::ARRAY_VERTEX] = positions;
+			arrays[Mesh::ARRAY_NORMAL] = normals;
+			arrays[Mesh::ARRAY_TEX_UV] = uvs;
+			arrays[Mesh::ARRAY_INDEX] = indices;
+
+			Ref<ArrayMesh> lod_mesh;
+			lod_mesh.instantiate();
+			lod_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+			lod_mesh->surface_set_material(0, terrain_material);
+			if (variant == 0) info.lod_meshes[lod] = lod_mesh;
+			else info.flat_lod_meshes[lod] = lod_mesh;
 		}
 	}
-
-	UtilityFunctions::print_verbose("Terrain: ", total_verts, " verts, ", total_indices, " indices across ",
-		static_cast<int>(cpt.tiles.size()), " tiles");
 	return true;
 }
 
@@ -1370,3 +1504,32 @@ bool Terrain::get_debug_force_lod0() const { return traversal_config.force_lod0;
 
 void Terrain::set_debug_mode(DebugMode mode) { debug_mode = mode; }
 Terrain::DebugMode Terrain::get_debug_mode() const { return debug_mode; }
+
+void Terrain::set_ground_overlay(const Ref<Image> &p_image, const Rect2 &p_rect, const Color &p_outside,
+		bool p_outside_on) {
+	ground_overlay_texture_.unref();
+	if (p_image.is_valid() && !p_image->is_empty()) ground_overlay_texture_ = ImageTexture::create_from_image(p_image);
+	const float span_x = p_rect.size.x > 0.0f ? p_rect.size.x : 1.0f;
+	const float span_z = p_rect.size.y > 0.0f ? p_rect.size.y : 1.0f;
+	// No picture: every point is past it.
+	ground_overlay_rect_ = ground_overlay_texture_.is_valid()
+			? Vector4(p_rect.position.x, p_rect.position.y, 1.0f / span_x, 1.0f / span_z)
+			: Vector4(0.0f, 0.0f, 0.0f, 0.0f);
+	ground_overlay_outside_ = p_outside_on ? p_outside : Color(0.0f, 0.0f, 0.0f, 0.0f);
+	ground_overlay_on_ = true;
+	_apply_ground_overlay();
+}
+
+void Terrain::clear_ground_overlay() {
+	ground_overlay_texture_.unref();
+	ground_overlay_on_ = false;
+	_apply_ground_overlay();
+}
+
+void Terrain::_apply_ground_overlay() {
+	if (terrain_material.is_null()) return;
+	terrain_material->set_shader_parameter("u_overlay_on", ground_overlay_on_);
+	terrain_material->set_shader_parameter("u_overlay", ground_overlay_texture_);
+	terrain_material->set_shader_parameter("u_overlay_rect", ground_overlay_rect_);
+	terrain_material->set_shader_parameter("u_overlay_outside", ground_overlay_outside_);
+}

@@ -589,21 +589,37 @@ int main_impl() {
 		// @0x51A680]; drive to completion.
 		jconn.burst.loadout_received = true;
 		jconn.reply.mission_status_received = true;
+		// D-NET-374: the session's mp_NoCharAbilities and mp_NoScopeDrift ride the
+		// join as one S2C 0x41 each (properties 0 and 7) ahead of the 0x42, whose
+		// body is the authority's packed latches [orig: Server_OnPlayerJoin
+		// @0x51a7e2 -> Server_SendCharAttrRestrictionsToPlayer @0x509950, then
+		// @0x51a802 -> CharAttr_PackDisabledProperties @0x412550].
+		ctx3.config.no_char_abilities = 1;
+		ctx3.config.no_scope_drift = 1;
+		w3.tables.charattr_disabled_word = 0x0012u;
 		bool saw_0f = false, saw_42 = false, saw_3e = false;
 		bool saw_transient_42 = false;
+		std::vector<std::vector<uint8_t>> clears;
+		std::vector<uint8_t> latches;
 		bool reached = false;
 		for (int i = 0; i < 16 && !reached; ++i) {
 			inmatch::InitialStateStep s = inmatch::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/2);
 			for (const auto &m : s.messages) {
+				if (m.tag == 0x41 && !saw_42) clears.push_back(m.body);
 				if (m.tag == 0x42) {
 					saw_42 = true;
 					saw_transient_42 = !m.reliable;
+					latches = m.body;
 				}
 				if (m.tag == 0x0F) saw_0f = true;
 				if (m.tag == 0x3E) saw_3e = true;
 			}
 			reached = s.reached_in_game;
 		}
+		if (!expect(clears == std::vector<std::vector<uint8_t>>({{0x00}, {0x07}}),
+		            "the join's 0x41s name the session's restricted properties, ahead of its 0x42")) return 1;
+		if (!expect(latches == std::vector<uint8_t>({0x12, 0x00}), "the join's 0x42 carries the authority's latches"))
+			return 1;
 		if (!expect(reached, "joiner burst reached game-state 9 after loadout gate opened")) return 1;
 		if (!expect(jconn.burst.spawned, "joiner burst spawned after loadout gate opened")) return 1;
 		if (!expect(saw_42 && saw_0f && saw_3e, "phase 8 emits the game-start bundle (0x42/0x0F/0x3E)")) return 1;

@@ -720,7 +720,7 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 	const bool scope_promoted = weapon.active && w::player_view_scope_settled(view);
 	p->inf.aimed_shot_available = false;
 	if (p->inf.active) {
-		if (weapon.active) w::infantry_weapon_switch_stamp(p->inf, weapon.anim_map_serial);
+		if (weapon.active) w::infantry_weapon_switch_stamp(p->inf, weapon.category_serial);
 		p->inf.scope_raised = scope_promoted;
 		p->inf.binoculars_raised = view.binoculars_raised;
 		p->inf.wpn_run_anim = weapon.active ? weapon.run_anim : 0;
@@ -823,7 +823,12 @@ void LocalPlayer::reset_for_new_round() {
     world_.cached.sound_listener_view_flags = 2;
     world_.script.waypoints.reset_selection(world_.registry, *local,
             world_.waypoint_context().game_type);
-    input.look_heading = bam_heading_from_mission_yaw_deg(local->yaw);
+    // The look yaw takes the player's +0x10 word, the heading the deploy just
+    // placed, never its whole-degree mirror (D-NET-376)
+    // [orig: Game_InitNewRound @0x4227DA..0x4227E3].
+    const w::AiEntity *motor = player_ai();
+    input.look_heading = motor != nullptr ? motor->heading
+                                          : bam_heading_from_mission_yaw_deg(local->yaw);
     // Dialog and HUD buffers belong to the presenting device; one ordered
     // effect carries the reset without discarding unrelated mission events.
     Effect reset;

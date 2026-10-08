@@ -1027,16 +1027,16 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                     imp.position = vec_from_fixed(hit.position_q16);
                     imp.direction = direction;
                     imp.ammo_index = params.ammo_index;
+                    // The leaf reads the ammo's own row at the tag's place
+                    // [orig: @0x4e88c3..0x4e88dc].
+                    imp.own_row = true;
                     if (hit.hit_class == ProjectileHitClass::Terrain) {
                         const int32_t surface = terrain::surface_type_at_fixed(
                             world.tables.surface_map, hit.position_q16.x,
                             hit.position_q16.y);
-                        imp.effect_tag =
-                            (surface >= 0 && surface + 4 < kImpactEffectTagCount)
-                                ? surface + 4
-                                : 5;
+                        imp.effect_tag = terrain_impact_effect_tag(surface);
                     } else if (hit.hit_class == ProjectileHitClass::Water) {
-                        imp.effect_tag = 11;
+                        imp.effect_tag = kWaterImpactEffectTag;
                     } else if (hit.hit_class == ProjectileHitClass::Person &&
                                hit.surface_type == 1) {
                         // The PERSON leg (hit type 3 = the default slot-type
@@ -1675,6 +1675,16 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
 
 void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     CollisionWorld *collision) {
+    // The point a round with a trail channel appends: its position waved across
+    // the flight path by the channel's style words on the entity-update clock
+    // [orig: Projectile_GetTrailAnchorPos @ 0x4E64E0 at the per-tick appends
+    // @ 0x4EA04F / @ 0x4EA97A and Projectile_ReleaseEffects' death append
+    // @ 0x4E8292; world/tracer_trails.h tracer_trail_anchor].
+    const auto trail_anchor = [this, &world](const LiveRound &round) {
+        return tracer_trail_anchor(trails.channels[static_cast<size_t>(round.trail_slot)],
+                                   round.pos, round.yaw_bam, round.pitch_bam,
+                                   round.roll_bam, world.entity_update_counter);
+    };
     // Keep the shared query seam synchronized even on an idle round tick; a
     // mission transition may clear or replace the terrain before another
     // collision consumer runs.
@@ -1735,7 +1745,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
             }
             if (r.trail_slot >= 0) {
-                trails.append(r.trail_slot, r.pos);
+                trails.append(r.trail_slot, trail_anchor(r));
                 trails.request_kill(r.trail_slot);
             }
             RoundDebugEvent event;
@@ -1753,7 +1763,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         }
         ++r.age_ticks;
 
-        if (r.trail_slot >= 0) trails.append(r.trail_slot, r.pos);
+        if (r.trail_slot >= 0) trails.append(r.trail_slot, trail_anchor(r));
 
         const AmmoTableEntry *ammo = world.tables.ammo.by_index(r.ammo_index);
         const uint32_t ammo_flags = ammo != nullptr ? ammo->flags : 0;
@@ -1817,7 +1827,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     world, *this, r, *ammo, queries, terrain, authoritative);
             if (!alive) {
                 if (r.trail_slot >= 0) {
-                    trails.append(r.trail_slot, r.pos);
+                    trails.append(r.trail_slot, trail_anchor(r));
                     trails.request_kill(r.trail_slot);
                 }
                 r.active = false;
@@ -2153,14 +2163,13 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             // Projectile_UpdatePhysics @ 0x4e9d70]
             const int32_t surface =
                 terrain::surface_type_at_fixed(world.tables.surface_map, impact_q16.x, impact_q16.y);
-            imp.effect_tag =
-                (surface >= 0 && surface + 4 < kImpactEffectTagCount) ? surface + 4 : 5;
+            imp.effect_tag = terrain_impact_effect_tag(surface);
             // The terrain handler records the round with no damage, section
             // or target [orig: Projectile_HandleTerrainImpact
             // @0x4E9319..0x4E932B].
             copy_round_to_hit_record(hit_record, r, velocity_q16);
         } else if (collision.hit_class == ProjectileHitClass::Water) {
-            imp.effect_tag = 11;
+            imp.effect_tag = kWaterImpactEffectTag;
         } else if (person_collision) {
             // The person leg. Bullets reach a person ONLY through the bone-section
             // pass — Projectile_RaycastProximitySlots walks pool 2 (statics) for
@@ -2427,7 +2436,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         round_tracer_whiz(world, r, ammo, position_q16, collision.position_q16,
                 incoming_velocity_q16);
         if (r.trail_slot >= 0) {
-            trails.append(r.trail_slot, r.pos);
+            trails.append(r.trail_slot, trail_anchor(r));
             trails.request_kill(r.trail_slot);
         }
         if (has_dud_replacement) {

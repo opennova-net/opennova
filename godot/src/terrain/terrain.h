@@ -2,6 +2,9 @@
 
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/variant/vector4.hpp>
+#include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/shader.hpp>
@@ -44,6 +47,12 @@ public:
 		DEBUG_MODE_SECTOR_COLORS = 2,
 		DEBUG_MODE_NORMALS = 3,
 		DEBUG_MODE_HEIGHTMAP = 4,
+	};
+	// What one step of a build came to (build_step).
+	enum BuildStep {
+		BUILD_STEP_MORE = 0,
+		BUILD_STEP_DONE = 1,
+		BUILD_STEP_FAILED = 2,
 	};
 
 private:
@@ -155,6 +164,14 @@ private:
 	TerrainTileCacheDevice tile_cache_device;
 
 	bool built = false;
+	// A build in flight (build_begin / build_step): the units that ran of its total, and the
+	// tallies its tiles add to.
+	static constexpr int kBuildTailUnits = 6;
+	bool building_ = false;
+	int build_done_ = 0;
+	int build_total_ = 0;
+	int build_total_verts_ = 0;
+	int build_total_indices_ = 0;
 
 	// The terrain leg of the EffectWorld light pool: the shell hands this node
 	// the shared LightScene + the frame time each light frame (the SlotShadow
@@ -203,7 +220,8 @@ private:
 	opennova::TraversalConfig traversal_config;
 	DebugMode debug_mode = DEBUG_MODE_NORMAL; // the shader's u_debug_mode
 
-	bool _build_terrain();
+	bool _build_terrain_begin();
+	bool _build_terrain_tile(size_t ti);
 	void _load_textures();
 	void _clear_derived_textures();
 	void _rebuild_tile_overlay_pages();
@@ -228,10 +246,30 @@ public:
 
 	void set_terrain_data(const Ref<TerrainData> &p_data);
 	Ref<TerrainData> get_terrain_data() const;
+	// What the terrain built and draws dropped (its patches, its tile cache, its derived textures): a
+	// picture with no ground (the editor's mission device, where the mission's terrain names a file the
+	// project lacks: the demo round's bug 5, the old ground kept drawing). set_terrain_data leaves what a
+	// finished build drew until a build of the new data takes its place. C++ only.
+	void clear_built() { _clear_terrain(); }
 	void set_static_shadow_placer(
 			const Ref<MissionObjectPlacer> &p_placer);
+	// A caster graphic's static-shadow geometry resolved ahead of the placer
+	// that will name it (TerrainStaticShadowRasterizer::prepare_caster_geometry:
+	// the editor's mission device does it a graphic a unit). C++ only.
+	bool prepare_static_shadow_caster(const String &p_graphic, const Ref<ObjectData> &p_data) {
+		return static_shadow_rasterizer.prepare_caster_geometry(p_graphic, p_data);
+	}
 	void set_static_terrain_shadow_enabled(bool p_enabled);
 	bool is_static_terrain_shadow_enabled() const;
+	// Whether a caster's change composes again the pages its static shadow
+	// touched and touches: on in the editor's mission device, whose picture
+	// shows the mission as a load composes it (a NoShadow set, an entity moved,
+	// removed or brought back); off in the game, which keeps a composed page as
+	// retail does (TerrainStaticShadowPlanner::set_reports_caster_changes).
+	// C++ only.
+	void set_static_shadow_follows_casters(bool p_on) {
+		static_shadow_rasterizer.set_reports_caster_changes(p_on);
+	}
 	void set_tile_cache_capture_diagnostics(bool p_enabled);
 	void set_suppressed_static_shadow_bms_ids(
 			const PackedInt32Array &p_bms_ids);
@@ -252,12 +290,24 @@ public:
 	std::optional<opennova::TerrainTilePageBinding>
 	get_tile_cache_binding_for_world_point_native(
 			float p_world_x, float p_world_z);
+	// A detail foliage patch's page: its cell's source-atlas minimum and its
+	// routed world sector (TerrainTileCompositionCache::find_sector_patch).
+	std::optional<opennova::TerrainTilePageBinding>
+	get_tile_cache_binding_for_sector_patch_native(
+			const opennova::TerrainTileSectorPatchPoint &p_point);
 
 	void set_lod_quality(float p_quality);
 	float get_lod_quality() const;
 
 	void set_tile_info_override(const Ref<TerrainTileInfo> &p_info);
 	Ref<TerrainTileInfo> get_tile_info_override() const;
+
+	// The session's game.cfg texcompression_level the detail layers and the
+	// colormap quadrants are built under (renderer/texture_compression.h,
+	// D-RMAT-24), from the next build: the world hands the mission start's copy
+	// over before it builds the mission's terrain.
+	void set_texcompression_level(int p_level);
+	int get_texcompression_level() const;
 
 	void set_environment_path(const NodePath& p_path);
 	NodePath get_environment_path() const;
@@ -285,6 +335,22 @@ public:
 	int get_light_rows_total() const { return light_rows_total; }
 
 	void build();
+	// The same build a unit at a time (the OpenNova Editor's mission device builds a terrain over
+	// its frames): build_begin drops what was built and plans the units (the scene snapshot and
+	// the material, a unit per tile's meshes, the patch pool, the surface inputs' heightfield,
+	// blend and detail textures, the tile cache's pages, the lights); build_step runs the next and
+	// says whether more are left, the terrain is built or the build failed (no valid baked
+	// terrain). build() is build_begin and every step. The node must be in the tree, as for
+	// build(): its patch pool binds the scenario. False from build_begin: no loaded terrain data.
+	bool build_begin();
+	BuildStep build_step();
+	bool is_built() const { return built; }
+	// A stepped build is in flight (begun, its last unit not run). C++ only.
+	bool is_building() const { return building_; }
+	// The units of the build in flight, how many ran, and what the next one makes ("" none).
+	int get_build_step_count() const { return build_total_; }
+	int get_build_steps_done() const { return build_done_; }
+	String get_build_step_label() const;
 
 	// The terrain frame leg (ADR 0033 R2): compile the engine patch draw list for
 	// this node's viewport camera and apply it onto the instance pool. Driven
@@ -344,8 +410,27 @@ public:
 
 	void set_debug_mode(DebugMode mode);
 	DebugMode get_debug_mode() const;
+
+	// The editor's ground overlay (ADR 0046 DI-29, the mission view's Show > Surface classes and Foliage):
+	// `p_image` (RGBA8; null for none) laid over the terrain from above, its north-west corner at
+	// `p_rect.position` on the world's x/z plane and `p_rect.size` its span; past it `p_outside` where
+	// `p_outside_on`. Each texel tints the terrain by its alpha after the fog (the shader's u_overlay); the
+	// game never sets one.
+	void set_ground_overlay(const Ref<Image> &p_image, const Rect2 &p_rect, const Color &p_outside,
+			bool p_outside_on);
+	void clear_ground_overlay();
+	bool has_ground_overlay() const { return ground_overlay_on_; }
+
+private:
+	// The overlay as last set, pushed to the material as it is set and as a build makes the material.
+	void _apply_ground_overlay();
+	Ref<ImageTexture> ground_overlay_texture_;
+	Vector4 ground_overlay_rect_;
+	Color ground_overlay_outside_;
+	bool ground_overlay_on_ = false;
 };
 
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::Terrain::DebugMode);
+VARIANT_ENUM_CAST(godot::Terrain::BuildStep);

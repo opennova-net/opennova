@@ -163,6 +163,10 @@ bool Simulation::is_round_over() const {
 	return kernel_ != nullptr && kernel_->world.match.outcome().ended;
 }
 
+int Simulation::get_charattr_disabled_word() const {
+	return kernel_ != nullptr ? static_cast<int>(kernel_->world.tables.charattr_disabled_word) : 0;
+}
+
 opennova::hud::ChatEntryFacts Simulation::chat_entry_facts(uint32_t p_frame) const {
 	// The NovaWorld network type (hud::ChatEntryFacts::novaworld): the
 	// authority's own transport mode, or the network type the joiner's join

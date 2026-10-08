@@ -1477,6 +1477,69 @@ bool run_world_state_load_resnaps_local_pose() {
 	return expect(!local->hidden, "0x0F re-snap: the un-hide ran with no death screen up");
 }
 
+// A medic revive's deploy sends no 0x5A (D-NET-379): L comes back on its own
+// record's respawn edge, facing the record's heading byte, through the same
+// respawn reset as any deploy, with the kit it died with (no grant folded).
+// [orig: NetPacket_SerializePlayerState @0x4C1109..0x4C114C -> Game_InitNewRound;
+//  Server_ProcessPlayerDeath @0x5178C5]
+bool run_revive_deploy_respawns_l_on_its_record_edge() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	auto &self_row = h.role.runtime->state().upsert(0x0005);
+	self_row.cls = EntityClass::Player;
+	self_row.type_id = w::kPlayerInfantryTypeId;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	auto frame = [&](int16_t health, uint8_t state_flags) {
+		FrameUpdate fu;
+		fu.carried_handle = 0xFFFF;
+		fu.health = health;
+		FrameUpdateRecord rec;
+		rec.handle = 0x0005;
+		rec.type_id = w::kPlayerInfantryTypeId;
+		rec.cls = EntityClass::Player;
+		rec.player.carrier_handle = 0xFFFF;
+		rec.player.yaw_byte = 0xCC;
+		rec.player.state_flags = state_flags;
+		fu.records.push_back(rec);
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))}, packet);
+		auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.role.run_tick(h.input);
+	};
+	frame(100, 0x00);
+	frame(0, w::kEntityFlagDead);
+	const w::Entity *local = h.kernel->local.player();
+	if (!expect(local != nullptr && !local->alive && h.role.runtime->deployment_pick_pending(),
+			"revive: the death frame downs L and opens the deploy flow"))
+		return false;
+	if (!expect(h.role.runtime->queue_deployment_pick(0xFFFF), "revive: the Default Spawn pick"))
+		return false;
+	h.role.run_tick(h.input);
+	const uint64_t grants = h.role.runtime->authoritative_loadout_revision();
+	h.seams.clear();
+	frame(100, 0x00); // the revive deploy: no 0x5A, the record alive again
+	frame(100, 0x00); // the next tail revives L
+	local = h.kernel->local.player();
+	const w::AiEntity *local_ai = h.kernel->local.player_ai();
+	if (!expect(local != nullptr && local_ai != nullptr && local->alive && local->health == 100 &&
+					!h.role.runtime->deployment_pick_pending(),
+			"revive: the record's respawn edge releases the deploy and L stands"))
+		return false;
+	bool respawned = false;
+	for (const std::string &seam : h.seams) respawned = respawned || seam == "respawn";
+	if (!expect(respawned, "revive: L runs the respawn reset")) return false;
+	if (!expect(local_ai->heading == static_cast<int32_t>(0xCC000000u),
+			"revive: L faces the record's heading byte"))
+		return false;
+	return expect(h.role.runtime->authoritative_loadout_revision() == grants,
+			"revive: no grant folds, so L keeps the kit it died with");
+}
+
 // The socket seam that also records where each datagram went.
 class TargetSocket final : public opennova::IDatagramSocket {
 public:
@@ -1560,6 +1623,7 @@ int main() {
 	ok &= run_holdoff_window_taps_reach_the_boundary_uplink();
 	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();
+	ok &= run_revive_deploy_respawns_l_on_its_record_edge();
 	ok &= run_proxy_rendezvous_pump();
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");

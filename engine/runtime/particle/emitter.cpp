@@ -910,7 +910,7 @@ void emitter_init(Emitter &e, const ParticleDef *def, Vec3 pos, std::uint32_t se
 	e.emit_budget = emitter_initial_budget(e);
 	e.last_translation_delta = {0.0f, 0.0f, 0.0f};
 	e.cumulative_translation = {0.0f, 0.0f, 0.0f};
-	// Note: `spring_const`, `lod_divisor`, the kill plane and `self_emitting`
+	// Note: `spring_const`, the kill plane and `self_emitting`
 	// are NOT reset here — they are caller-set scalars (engine equivalents
 	// come from the spawn descriptor or the manager), and resetting them on
 	// every `play()` / `restart()` would clobber the caller's intent.

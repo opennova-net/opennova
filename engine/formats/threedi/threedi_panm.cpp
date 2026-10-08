@@ -93,16 +93,31 @@ const char *threedi_panm_control_name(uint8_t code) {
     }
 }
 
-int threedi_panm_control_uses_register(uint8_t code) {
-    // [orig: PANM_SampleTrack @ 0x5B2270]
-    return code == 113;
+bool threedi_generator_names_register(int style) {
+    // [orig: ThreediGp_LoadFromFile PANM fixups @ 0x5B5E0B..0x5B5EF6]
+    return style > THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD;
 }
 
-int threedi_panm_parameter_is_ctrl_reference(uint8_t code) {
-    // The model loader fixes up the parameter field before PANM dispatch. Its
-    // structural threshold is broader than the one runtime value-read case.
-    // [orig: ThreediGp_LoadFromFile PANM fixups @ 0x5B5E0B..0x5B5EF6]
-    return code > THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD;
+bool threedi_generator_reads_register(ThreediGeneratorConsumer consumer, int style) {
+    // [orig: Material_ComputeUVTransformMatrix @ 0x5B1990; RgbGen_EvaluateColor
+    //  @ 0x5B23D0; AlphaGen_EvaluateValue @ 0x5B2320; PANM_SampleTrack @ 0x5B2270]
+    switch (consumer) {
+        case THREEDI_GENERATOR_CONSUMER_UV:
+            return threedi_generator_names_register(style);
+        case THREEDI_GENERATOR_CONSUMER_RGB:
+        case THREEDI_GENERATOR_CONSUMER_LIGHT:
+            return style == THREEDI_STYLE_CONTROL_SET || style == THREEDI_STYLE_CONTROL_ADD;
+        case THREEDI_GENERATOR_CONSUMER_ALPHA:
+        case THREEDI_GENERATOR_CONSUMER_PANM:
+            return style == THREEDI_STYLE_CONTROL_SET;
+    }
+    return false;
+}
+
+bool threedi_flipbook_reads_register(const ThreediTexAnim &animation) {
+    // [orig: ThreediGp_LoadFromFile @ 0x5B5D6E..0x5B5D99;
+    //  Material_ApplyShaderParameters @ 0x58DBB2..0x58DBC2, @ 0x58DBF0..0x58DC13]
+    return animation.num_frames != 0 && animation.animation_type == 1;
 }
 
 const char *threedi_ctrl_reg_name(const ThreediCtrl *ctrl, uint8_t idx) {
@@ -140,7 +155,7 @@ int threedi_decode_transform(const ThreediTransform *t,
     out->is_rotation = is_rotation ? 1 : 0;
 
     out->control_name = threedi_panm_control_name(t->control);
-    if (threedi_panm_parameter_is_ctrl_reference(t->control)) {
+    if (threedi_generator_names_register(t->control)) {
         out->ctrl_reg_name = threedi_ctrl_reg_name(ctrl, t->control_param);
     }
 

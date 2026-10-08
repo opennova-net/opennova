@@ -22,7 +22,7 @@ class LaunchFlags : public RefCounted {
 public:
 	// True when `/d` (dev / loose-override) was passed.
 	static bool loose_override_enabled();
-	// `/exp <name>`, else the persisted fallback.
+	// `/exp <name>` (or `/mod`, the last one), else `fallback` ("" the base game).
 	static String expansion(const String &fallback);
 	// `/game <code>` lowercased, else the persisted fallback, else "jo".
 	static String game(const String &fallback);
@@ -55,6 +55,16 @@ public:
 	static int mcp_port();
 	// `/NOHUD` — the HUD overlay master word's clear (boot_policy.h no_hud).
 	static bool no_hud();
+	// `/noreload` — the auto-reload global forced off (boot_policy.h no_reload).
+	static bool no_reload();
+
+	// The directory the game was started in, '/'-separated, where retail keeps the files it
+	// writes beside itself, its saves among them (weapon.sav: PlayerProfile_LoadAllFromDisk @
+	// 0x54f4d0 builds the path relative to it), and which the editor's Play makes its run
+	// directory (ADR 0046 S13 A8), so the build the game runs from is never written:
+	// `--working-dir <path>`, which a source run passes since Godot's `--path` moved the process
+	// to the project, else the process's working directory (a packaged runtime's own).
+	static String working_dir();
 
 	// Tests substitute the launch token list; the real runtime parses its own
 	// command line (engine + user args).

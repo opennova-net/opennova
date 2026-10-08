@@ -5,6 +5,9 @@
 #include <string.h>
 
 #include <base/gameprofile/required_resources.h>
+#include <base/gameprofile/resource_missing.h>
+
+#include <string>
 
 using namespace opennova::gameprofile;
 
@@ -83,6 +86,16 @@ static int test_the_witnessed_fatal_set(void) {
     const RequiredResource *items = gameprofile_required_resource_find("items.def");
     CHECK(items != NULL && items->severity == RES_REQUIRED && items->phase == BOOT_PHASE_BOOT,
           "items.def is required (the boot goes on without it), not fatal");
+    /* SndProf.def never refuses a boot either, but without it the profile
+     * table SoundProfile_LoadAll allocated is never cleared and every item
+     * definition binds its first slot, so a mission's items read their sounds
+     * from that memory [orig: FastMem_Alloc @ 0x7697b0, no clear;
+     * SoundProfile_FindSlotByName @ 0x526e30, the miss @ 0x526e6a;
+     * ItemDef_ResolveAllResources @ 0x49e62d..0x49e687]: required. */
+    const RequiredResource *profiles = gameprofile_required_resource_find("sndprof.def");
+    CHECK(profiles != NULL && profiles->severity == RES_REQUIRED && profiles->phase == BOOT_PHASE_BOOT &&
+          strcmp(profiles->role, "sndprof_def") == 0,
+          "SndProf.def is required (a mission's items read uncleared memory without it), not fatal");
     for (int i = 0; i < 7; ++i) {
         const RequiredResource *row = gameprofile_required_resource_find(fatal_names[i]);
         CHECK(row != NULL, "fatal row present");
@@ -111,11 +124,96 @@ static int test_known_row_lookups(void) {
           "the hardcoded HUD font set is menu-phase required");
     const RequiredResource *failsafe = gameprofile_required_resource_find("failsafe.bad");
     CHECK(failsafe != NULL && failsafe->phase == BOOT_PHASE_MISSION &&
-              failsafe->severity == RES_REQUIRED,
-          "failsafe.bad is the mission-phase anim fallback");
+              failsafe->severity == RES_OPTIONAL,
+          "failsafe.bad is the mission-phase anim fallback, optional (retail JO ships none)");
     const RequiredResource *scan = gameprofile_required_resource_find("*.npj/*.npz");
     CHECK(scan != NULL && (scan->flags & RES_F_PATTERN) != 0,
           "the mission-list wildcard scan is a pattern row");
+    /* The player's and this machine's own files carry RES_F_PLAYER_FILE, and only they. */
+    static const char *const player_names[] = {"game.cfg", "assets.cd", "filter.txt", "gt.ssc", "hiscore.txt",
+                                               "admin.cfg", "player.sav", "weapon.sav", "epass.bin", "passgen.bin"};
+    int players = 0;
+    for (int i = 0; i < gameprofile_required_resource_count(); ++i)
+        players += (gameprofile_required_resource_at(i)->flags & RES_F_PLAYER_FILE) != 0;
+    CHECK(players == 10, "exactly the ten player-file rows");
+    for (const char *name : player_names)
+        CHECK(gameprofile_required_resource_find(name)->flags & RES_F_PLAYER_FILE, "a player's own file is flagged");
+    CHECK((gameprofile_required_resource_find("CC.BIN")->flags & RES_F_PLAYER_FILE) == 0 &&
+              (gameprofile_required_resource_find("items.def")->flags & RES_F_PLAYER_FILE) == 0,
+          "a resource the game ships is not");
+    /* An expansion's own files (ADR 0046 S16): eight pattern rows, every one optional, named
+       with <n>; no other row is an expansion's. */
+    static const char *const expansion_roles[] = {"expansion_table", "expansion_version", "expansion_menumus_sbf",
+                                                  "expansion_menumus_bin", "expansion_locl_lwf", "expansion_lwf",
+                                                  "expansion_gamemus_sbf", "expansion_gamemus_bin"};
+    int expansions = 0;
+    for (int i = 0; i < gameprofile_required_resource_count(); ++i)
+        expansions += (gameprofile_required_resource_at(i)->flags & RES_F_EXPANSION) != 0;
+    CHECK(expansions == 8, "exactly the eight expansion rows");
+    for (const char *role : expansion_roles) {
+        const RequiredResource *row = gameprofile_required_resource_by_role(role);
+        CHECK(row != NULL && (row->flags & RES_F_EXPANSION) && (row->flags & RES_F_PATTERN) &&
+                  row->severity == RES_OPTIONAL && strstr(row->name, "<n>") != NULL,
+              "an expansion row is an optional pattern naming <n>");
+    }
+    return 1;
+}
+
+static int test_roles_are_unique_snake_case_tokens(void) {
+    /* The editor keys its requirements checklist on the role token (ADR 0046 d5/d7):
+     * one per row, lower-case snake_case, never empty, never shared. */
+    for (int i = 0; i < gameprofile_required_resource_count(); ++i) {
+        const RequiredResource *row = gameprofile_required_resource_at(i);
+        CHECK(row->role != NULL && row->role[0] != '\0', "row has a role token");
+        for (const char *c = row->role; *c; ++c) {
+            CHECK((*c >= 'a' && *c <= 'z') || (*c >= '0' && *c <= '9') || *c == '_',
+                  "role token is lower-case snake_case");
+        }
+        CHECK(gameprofile_required_resource_by_role(row->role) == row,
+              "by_role(role) resolves to its own row (tokens are unique)");
+    }
+    CHECK(gameprofile_required_resource_by_role(NULL) == NULL, "NULL role -> NULL");
+    CHECK(gameprofile_required_resource_by_role("not_a_role") == NULL, "unknown role -> NULL");
+    CHECK(gameprofile_required_resource_by_role("MAIN_MENU") == NULL, "roles match exactly");
+    const RequiredResource *menu = gameprofile_required_resource_by_role("main_menu");
+    CHECK(menu != NULL && strcmp(menu->name, "main.mnu") == 0, "main_menu is main.mnu");
+    const RequiredResource *strings = gameprofile_required_resource_by_role("gametext");
+    CHECK(strings != NULL && strcmp(strings->name, "gametext.bin") == 0, "gametext is gametext.bin");
+    return 1;
+}
+
+/* DI-27: a miss the runtime says on a line of its log reads back as it was said, after any prefix
+ * the site puts before the marker; a line with no marker, no kind or no quoted name says none. */
+static int test_resource_missing_lines(void) {
+    ResourceMiss full;
+    full.kind = resource_kind::kTexture;
+    full.name = "barrel.tga";
+    full.by = "onbarrel.3di";
+    full.words = "the material draws the checkerboard";
+    const std::string text = resource_missing_text(full);
+    CHECK(text == "resource missing: texture \"barrel.tga\" named by \"onbarrel.3di\": the material draws the checkerboard",
+          "the line's form");
+    ResourceMiss read;
+    CHECK(parse_resource_missing("WARNING: ResourceRoot: " + text + "\r\n", read) && read == full,
+          "read back after a prefix, its line end cut");
+    ResourceMiss bare;
+    bare.kind = resource_kind::kFile;
+    bare.name = "my file.def";
+    CHECK(parse_resource_missing(resource_missing_text(bare), read) && read == bare, "a name with a space, nothing else said");
+    ResourceMiss words;
+    words.kind = resource_kind::kSound;
+    words.name = "SSRFootGND";
+    words.words = "it plays nothing";
+    CHECK(parse_resource_missing(resource_missing_text(words), read) && read == words, "words with no file naming it");
+    ResourceMiss quoted;
+    quoted.kind = resource_kind::kModel;
+    quoted.name = "a\"b.3di";
+    CHECK(resource_missing_text(quoted) == "resource missing: model \"ab.3di\"", "a quote left out");
+    CHECK(!parse_resource_missing("WARNING: nothing to see", read), "no marker");
+    CHECK(!parse_resource_missing("resource missing: texture", read), "no name");
+    CHECK(!parse_resource_missing("resource missing: texture barrel.tga", read), "an unquoted name");
+    CHECK(!parse_resource_missing("resource missing: texture \"\"", read), "an empty name");
+    CHECK(!parse_resource_missing("resource missing: texture \"barrel.tga", read), "an unended name");
     return 1;
 }
 
@@ -125,6 +223,8 @@ int main(void) {
     RUN_TEST(test_names_are_unique);
     RUN_TEST(test_the_witnessed_fatal_set);
     RUN_TEST(test_known_row_lookups);
+    RUN_TEST(test_roles_are_unique_snake_case_tokens);
+    RUN_TEST(test_resource_missing_lines);
     printf("%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

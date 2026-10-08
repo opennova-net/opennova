@@ -9,7 +9,7 @@
 #include <runtime/inmatch/game_config.h>
 
 #include <runtime/devtools/tick_profile.h>
-#include <runtime/inmatch/charattr_challenge.h>
+#include <runtime/inmatch/charattr_table.h>
 #include <runtime/mission/mission_kernel.h>
 
 #include <runtime/replication/client_replica_pipeline.h>
@@ -596,16 +596,17 @@ void JoinerRole::tick_local_weapon() {
 	}
 }
 
-// An S2C 0x41 applied inside the frame mutated the live charattr table; the
-// World's per-class ATTRIBUTES words follow it the same frame [orig: the
-// HUD reads g_CharAttr directly, AnimMap_IsSlotActive @0x4125e0, so the
-// clear is visible on the next draw; see docs/interface/hud-re.md]. A
-// failed/missing charattr.def leaves the all-zero table -- no class carries
-// an attribute, retail's failed-load state [orig: CharAttr_LoadFromDef
-// @0x412140 memsets 0x7C0 bytes first].
+// An S2C 0x41 or 0x42 applied inside the frame mutated the live charattr
+// table; the World's per-class ATTRIBUTES words follow it the same frame
+// [orig: the HUD reads g_CharAttr directly, CharAttr_ClassHasAttribute
+// @0x4125e0, its ATTRIBUTES latch among its gates, so the change is visible
+// on the next draw; see docs/interface/hud-re.md]. A failed/missing
+// charattr.def leaves the all-zero table -- no class carries an attribute,
+// retail's failed-load state [orig: CharAttr_LoadFromDef @0x412140 memsets
+// 0x7C0 bytes first].
 void JoinerRole::sync_class_attribute_flags() {
-	const CharAttrChallengeTable *live = runtime ? runtime->charattr_challenge_table() : nullptr;
-	static const CharAttrChallengeTable kNoTable{};
+	const CharAttrTable *live = runtime ? runtime->charattr_table() : nullptr;
+	static const CharAttrTable kNoTable{};
 	kernel_->world.tables.class_attribute_flags =
 			charattr_class_attribute_rows(live != nullptr ? *live : kNoTable);
 }
@@ -654,6 +655,9 @@ world::PlayerSpawn spawn_from_self(const JoinerConnection::SelfSpawn &s) {
 	// the host shifts << 16) -> pass it straight to the (90 - heading) mission-degree map.
 	spawn.yaw = static_cast<int16_t>(
 			std::lround(world::mission_yaw_deg_from_bam_heading(s.orientation)));
+	// The motor keeps the record's full word, never its whole-degree mirror
+	// (D-NET-376) [orig: NapiNPClientMsg_0x00C @0x42E967 `mov [edi+10h], ecx`].
+	spawn.heading_bam = s.orientation;
 	spawn.team = s.team;
 	// The named player record carries the host-stamped character selector and
 	// packed minimap/character id. Preserve both on local L just as retail's
@@ -1439,8 +1443,7 @@ void JoinerRole::spawn_and_arm_local_player() {
 		lp.weapon.fire_pressed = false;
 		lp.weapon.reload_pressed = false;
 		kernel.resolve_new_infantry_adm_ids();
-		lp.reset_local_player_input(
-				world::bam_heading_from_mission_yaw_deg(spawn.yaw));
+		lp.reset_local_player_input(world::player_spawn_heading(spawn));
 	}
 }
 
@@ -1450,8 +1453,8 @@ void JoinerRole::spawn_and_arm_local_player() {
 // the frame's decoded health signal). A fresh-frame guard prevents
 // ClientState's pre-frame zero default from killing L during the handshake.
 // Once L is dead, positive health revives it only after the separate
-// ACK-qualified deployment release latched by the net-frame folds, and only
-// from a later tail. That edge also snaps L to H's redeployed authoritative
+// deployment release latched by the net-frame folds (the ACK-qualified 0x5A, or
+// the self record's respawn edge), and only from a later tail. That edge also snaps L to H's redeployed authoritative
 // pose before its next uplink can run.
 // [orig: tail health read @0x430428; store to local Health @0x4305df]
 void JoinerRole::apply_authoritative_health() {
@@ -1567,7 +1570,9 @@ void JoinerRole::apply_authoritative_health() {
 					lp.weapon.fire_pressed = false;
 					lp.weapon.reload_pressed = false;
 					// The embedder clears its device-input latches, seeds the
-					// look heading, and rebuilds the respawn loadout.
+					// look heading and resets its view and map; the kit is the
+					// release's 0x5A, already folded (D-NET-378), or after a medic
+					// revive, which sends none, the kit L died with (D-NET-379).
 					lp.reset_local_player_input(heading);
                     lp.reset_for_new_round();
                     rt.reset_local_round_state();

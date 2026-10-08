@@ -39,7 +39,7 @@ import bpy
 import numpy as np
 
 from . import export
-from .o3dtext import CTRL_REFERENCE_THRESHOLD, ExportError, fmt, quoted
+from .o3dtext import CTRL_REFERENCE_THRESHOLD, ExportError, flipbook_reads_register, fmt, quoted
 
 
 # Shader capability bits (runtime/renderer/material_descriptor.h
@@ -389,6 +389,78 @@ def face_flags(mat):
             (0x800 if p.face_front_only else 0) | (p.face_other_flags & ~0x901))
 
 
+# A bullet face keeps its material's surface and flags unless its polygon says
+# otherwise: two integer face attributes of the collision LOD's meshes, each
+# holding the polygon's own value plus one, 0 (or none) taking the material's.
+# The +1 is what keeps a polygon Blender makes on its own the material's: a new
+# face, a fill, a mesh joined in without the attribute get 0, and 0 must not
+# read as surface 0 (Object) and no flags. Import writes them where a retail
+# face disagrees with its material's vote (the file keeps a surface and flags
+# per face, so a material's faces may differ), so a re-export keeps each face
+# as it was; the material panel counts them and Make all clears them. The
+# API below speaks in values (-1: the material's); the +1 is the attributes'.
+FACE_SURFACE = "o3d_own_surface"
+FACE_FLAGS = "o3d_own_face_flags"
+# An own value past this does not fit the INT attribute with its +1.
+FACE_VALUE_MAX = 0x7FFFFFFE
+
+
+def face_attribute(mesh, name):
+    """The mesh's per-polygon integer attribute `name`, or None."""
+    attr = mesh.attributes.get(name)
+    return attr if attr is not None and attr.domain == "FACE" and attr.data_type == "INT" else None
+
+
+def face_overrides(mesh, name):
+    """Each polygon's own value of a face attribute (-1: the material's), or
+    None when the mesh has none."""
+    attr = face_attribute(mesh, name)
+    if attr is None:
+        return None
+    stored = [0] * len(mesh.polygons)
+    attr.data.foreach_get("value", stored)
+    return [v - 1 if v > 0 else -1 for v in stored]
+
+
+def set_face_overrides(mesh, name, values):
+    """Write a face attribute's values (-1: the material's); the attribute is
+    made where some polygon holds its own value, and taken off where none
+    does."""
+    attr = face_attribute(mesh, name)
+    if all(v < 0 or v > FACE_VALUE_MAX for v in values):
+        if attr is not None:
+            mesh.attributes.remove(attr)
+        return
+    if attr is None:
+        attr = mesh.attributes.new(name, "INT", "FACE")
+    attr.data.foreach_set("value", [v + 1 if 0 <= v <= FACE_VALUE_MAX else 0 for v in values])
+
+
+def material_face_overrides(meshes, mat):
+    """Over `meshes` (the collision LOD's), the polygons drawn with `mat` that
+    keep a surface or flags of their own: {(mesh object, polygon index):
+    (surface or -1, flags or -1)}, and how many polygons draw with it."""
+    found, drawn = {}, 0
+    for ob in meshes:
+        me = ob.data
+        slots = [i for i, s in enumerate(ob.material_slots) if s.material == mat]
+        if not slots:
+            continue
+        surfaces = face_overrides(me, FACE_SURFACE)
+        flags = face_overrides(me, FACE_FLAGS)
+        index = [0] * len(me.polygons)
+        me.polygons.foreach_get("material_index", index)
+        for pi, slot in enumerate(index):
+            if slot not in slots:
+                continue
+            drawn += 1
+            s = surfaces[pi] if surfaces is not None else -1
+            f = flags[pi] if flags is not None else -1
+            if (s >= 0 and s != mat.o3d.surface) or (f >= 0 and f != face_flags(mat)):
+                found[(ob, pi)] = (s, f)
+    return found, drawn
+
+
 # --- images -----------------------------------------------------------------
 
 def check_image(image, what):
@@ -490,8 +562,8 @@ def check_pixels(image, what):
 
 # --- texture names ------------------------------------------------------------
 
-# A texture row's name field holds 16 characters and a NUL (the MTRL row,
-# formats/threedi/threedi_3di3.h ThreediMaterialTexture); a file the export
+# A texture row's name holds what the retail target takes (16 bytes, its MTRL
+# row: opennova-3di's lowering says so at the row); a file the export
 # writes is named in at most export.FILE_NAME_BYTES (15), as every texture
 # retail packs is (a PFF entry's 16-byte name field, formats/pff/pff.h). The
 # game asks for a row's name cut three characters past its first dot
@@ -500,7 +572,6 @@ def check_pixels(image, what):
 # Texture_LoadByNameWithChannel @ 0x58B4E1..0x58B598;
 # renderer::material_texture_query, material_dds_sibling]: a written file's
 # name has one dot.
-ROW_NAME_BYTES = 16
 WRITTEN_EXTENSIONS = (".tga", ".mdt")
 # The files the game reads a texture from: .tga and .mdt through its TGA
 # reader, .pcx through its PCX reader, a .dds sibling [orig:
@@ -512,16 +583,14 @@ MATERIAL_ROWS = 24
 
 
 def check_row_name(name, what):
-    """An ExportError unless `name` is a texture row name opennova-3di takes:
-    printable ASCII, at most 16 bytes, a file name without a folder. An empty
+    """An ExportError unless `name` is a texture row name the game reads:
+    printable ASCII, a file name without a folder (its length is the CLI's to
+    check, against the target it builds for). An empty
     name is a row that names no file, which the format holds: 63 rows of the
     JO models are empty (M24_1st's VS_BMTXMIRRT material keeps one in slot 2,
     Chair3's FF_ST_OP one in slot 1)."""
     if any(not " " <= c <= "~" for c in name):
         raise ExportError(f"{what}: the texture name '{name}' is not printable ASCII")
-    if len(name) > ROW_NAME_BYTES:
-        raise ExportError(f"{what}: the texture name '{name}' exceeds {ROW_NAME_BYTES} characters (its row's "
-                          "field)")
     if any(c in name for c in "/\\"):
         raise ExportError(f"{what}: the texture name '{name}' names a folder; the game finds a texture by its "
                           "file name alone")
@@ -1144,9 +1213,15 @@ class ModelMaterials:
             if p.anim_type not in (0, 1):
                 raise ExportError(f"{mat.name}: the flipbook's anim type is {p.anim_type}; it is 0 (time) or 1 "
                                   "(register)")
-            if p.anim_type == 1:
+            # Only a flipbook with frames on the register clock names a
+            # register (the loader's gate, threedi_flipbook_reads_register);
+            # any other writes its time word as it stands.
+            if flipbook_reads_register(p.anim_frames, p.anim_type):
                 time_or_register = self.exporter.register(p.anim_register, f"{mat.name} texture flipbook")
             else:
+                if p.anim_register:
+                    self.exporter.note(f"{mat.name}: the flipbook names the register '{p.anim_register}', but only "
+                                       "one with frames on anim type 1 reads a register; its frame time is written")
                 time_or_register = fixed(p.anim_time, 1, -0x8000, 0x7FFF, f"{mat.name}: the flipbook frame time")
             lines.append(f"texanim {p.anim_frames} {p.anim_type} {time_or_register}")
         # A generator's words: an RGB rate a u16 of 1/256 steps, the other
@@ -1208,15 +1283,16 @@ class ModelMaterials:
 
 # --- import -----------------------------------------------------------------
 
-def import_image(builder, name):
-    """The Blender image of texture reference `name`, loaded once per import
-    from the file `opennova-3di scene` resolved beside the model (None, with a
-    note, when it found none; None for an empty name, a row that names no
-    file). An image this load makes is named after the reference, which export
-    names it by (file_reference)."""
-    if name in builder.images:
-        return builder.images[name]
-    path = builder.sc["texfiles"].get(name)
+def import_image(builder, name, typ):
+    """The Blender image of texture reference `name` on a row of type `typ`,
+    loaded once per import from the file `opennova-3di scene` resolved beside
+    the model for that name and type, the one file the row's loader opens
+    (None, with a note, when it found none; None for an empty name, a row that
+    names no file). An image this load makes is named after the reference,
+    which export names it by (file_reference)."""
+    if (name, typ) in builder.images:
+        return builder.images[(name, typ)]
+    path = builder.sc["texfiles"].get((name, typ))
     img = None
     if name and not path:
         builder.note(f"texture {name} not found beside the model")
@@ -1241,7 +1317,7 @@ def import_image(builder, name):
                 builder.note(f"texture {name}: Blender cannot read {os.path.basename(path)}")
         except RuntimeError:
             builder.note(f"texture {name}: Blender cannot read {os.path.basename(path)}")
-    builder.images[name] = img
+    builder.images[(name, typ)] = img
     return img
 
 
@@ -1295,7 +1371,7 @@ def import_materials(builder):
         shown = {}  # slot -> the image its node shows
         tangent = caps & FLAG_NORMAL and caps & FLAG_TANGENT
         for slot, rows in by_slot.items():
-            images = [import_image(builder, row[0]) for row in rows]
+            images = [import_image(builder, row[0], row[2]) for row in rows]
             # A slot's lone plain row is its node's image when that image
             # names it as the row does; the normal map's when the shader reads
             # tangent-space normals from an .mdt file (read through a green
@@ -1318,7 +1394,9 @@ def import_materials(builder):
         if m["texanim"]:
             frames, typ, time_or_register = m["texanim"]
             p.anim_frames, p.anim_type = frames, typ
-            if typ == 1:
+            # The time word names a register only under the loader's gate
+            # (threedi_flipbook_reads_register); otherwise it is a plain value.
+            if flipbook_reads_register(frames, typ):
                 p.anim_register = reg[time_or_register] if 0 <= time_or_register < len(reg) else ""
             else:
                 p.anim_time = time_or_register

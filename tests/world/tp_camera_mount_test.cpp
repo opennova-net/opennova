@@ -82,16 +82,16 @@ void test_mount_pitch_is_downward() {
 	CHECK(near(kMountPitchDeg, -11.25f), "and is the witnessed -11.25 degrees");
 }
 
-// A WATERCRAFT drops the eye by half its radius; unit_type 3/4 are the boat
-// classes (Entity_ClassifyForMinimap @0x50FA70 — 5..8 are the helicopters).
-void test_watercraft_eye_drop() {
-	CHECK(near(watercraft_eye_drop(4.0f), 2.0f), "half the carrier radius");
-	CHECK(near(watercraft_eye_drop(0.0f), 0.0f), "a zero radius drops nothing");
+// An AIRCRAFT drops the eye by half its radius; unit_type 3/4 are the air
+// classes (Entity_GetVehicleClass @0x4f9e27: 5..8 are the boats).
+void test_aircraft_eye_drop() {
+	CHECK(near(aircraft_eye_drop(4.0f), 2.0f), "half the carrier radius");
+	CHECK(near(aircraft_eye_drop(0.0f), 0.0f), "a zero radius drops nothing");
 	// The gate is the item def's unit type: 3 and 4 only.
-	CHECK(vehicle_unit_type_is_watercraft(3) && vehicle_unit_type_is_watercraft(4),
-			"unit types 3 and 4 are watercraft");
-	CHECK(!vehicle_unit_type_is_watercraft(2) && !vehicle_unit_type_is_watercraft(5),
-			"2 and 5 (a helicopter) are not — the test is a two-value window");
+	CHECK(vehicle_unit_type_is_aircraft(3) && vehicle_unit_type_is_aircraft(4),
+			"unit types 3 and 4 are aircraft");
+	CHECK(!vehicle_unit_type_is_aircraft(2) && !vehicle_unit_type_is_aircraft(5),
+			"2 (land) and 5 (a boat) are not: the test is a two-value window");
 }
 
 // The Q16 anchor lift mirrors the float form: `(24576 * r + 0x8000) >> 16`
@@ -173,7 +173,7 @@ int main() {
 	test_mount_anchor_ease();
 	test_mount_look_yaw_damping();
 	test_mount_pitch_is_downward();
-	test_watercraft_eye_drop();
+	test_aircraft_eye_drop();
 	test_clearances_are_a_floor();
 	test_slope_raise_floor();
 	test_seeds_differ();

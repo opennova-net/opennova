@@ -11,6 +11,7 @@
 
 #include <runtime/replication/connection.h>             // replication::Connection, replication::TransportMode
 #include <net/npwire/cs_config.h> // opennova::CsConfig (the cs_dir template copy) and its helpers
+#include <net/npwire/ingame_decode_session.h> // opennova::LoadoutSubmit (the per-player loadout buffer)
 #include <net/npwire/peer_addr.h> // opennova::PeerAddr (the transport-addr key)
 #include <net/npwire/protocol_message.h> // opennova::SessionSequencing (the per-connection seq/ack, ADR 0013)
 #include <net/npwire/session_hello.h>    // opennova::DisconnectEvent (the latched disconnect record)
@@ -269,12 +270,14 @@ struct SessionReplyState {
 	// reply carries no payload the host reads. [orig: NapiNPServerMsg_0x03D
 	//  @0x500EC0 -> player+97560 = dword_A87060]
 	uint32_t loaded_model_reply_frame = 0;
-	// The revive pose GameEvent_RevivePlayer saves on the victim (its live
-	// position raised 0x4000, and yaw/pitch/roll) for the deploy that follows a
-	// medic revive. [orig: @0x517DCD..0x517E09 (weaponSlots[20..40])]
+	// The revive position GameEvent_RevivePlayer saves on the victim (its live
+	// position raised 0x4000) for the deploy that follows a medic revive. The
+	// revive saves the yaw/pitch/roll beside it too, but nothing reads those three
+	// words: the deploy restores the position alone and zeroes all six (D-NET-377).
+	// [orig: GameEvent_RevivePlayer @0x517DCD..0x517E09 (entity+0x1E4..+0x1F8);
+	//  Server_PositionPlayerForSpawn @0x50D60A..0x50D655]
 	bool revive_pose_valid = false;
 	int32_t revive_pos[3] = {0, 0, 0};
-	int16_t revive_yaw = 0, revive_pitch = 0, revive_roll = 0;
 	// A C2S 0x51 spectator-respawn request the dispatcher admitted; the host
 	// tick performs the conversion (it needs the owning context).
 	// [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840]
@@ -318,6 +321,16 @@ struct SessionReplyState {
 	// 0x5A + 0x61 + 0x1E in one datagram; v32: without it both joiners' uplinks stopped
 	// forever at the pick — the rubber-band]. (D-NET-156 tail)
 	std::vector<uint8_t> last_loadout_reply;
+	// The per-player loadout buffer: the last accepted C2S 0x2F's entries with
+	// their requested counts, under the class that accept stamped. Every deploy
+	// that is not a medic revive rebuilds the slot's weapon table, ammo pools and
+	// clips from it before the 0x5A re-send (D-NET-378). A slot with no accepted
+	// submission has none here (retail seeds it from the host's own kit then).
+	// [orig: slot+94408, written by NapiNPServerMsg_HandlePlayerLoadout
+	//  @0x515CBD..0x515D83, read by PlayerSlot_InitWeaponsFromLoadout @0x515550;
+	//  the host-kit seed Server_PlayerAdd @0x51D12A]
+	LoadoutSubmit loadout_buffer;
+	bool loadout_buffer_set = false;
 	bool mission_status_received = false; // 0x0B mission-file status report seen
 	// Retail's join completion is three packet boundaries, not one semantic
 	// bag. The C2S 0x02 handler emits admission metadata; a later pending-spawn

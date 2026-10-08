@@ -4,6 +4,7 @@
 #include "object/object_data_internal.h"
 #include "object/material_info.h"
 
+#include <base/gameprofile/resource_missing.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <runtime/renderer/material_texture.h>
 
@@ -238,9 +239,19 @@ Ref<Texture> ObjectData::load_material_texture(int p_material_index, int p_textu
 	const String texture_name = from_native(row.name);
 	// The dispatcher reads the loader's runtime type, not the authored byte.
 	const uint8_t type = opennova::renderer::material_texture_runtime_type(row.type);
-	return resource_root.is_valid()
-			? resource_root->load_material_texture(texture_name, type)
-			: opennova::load_material_texture_from_dir(source_dir, texture_name, type);
+	if (texture_files_) {
+		return texture_files_->load_material_texture(texture_name, type);
+	}
+	if (resource_root.is_valid()) {
+		// A row whose loader finds no file: the log line the editor's Play reads back into a Problems row
+		// on this model's material (ADR 0046 DI-27).
+		if (resource_root->material_texture_missing(texture_name, type)) {
+			ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kTexture, texture_name, source_path,
+					"its material draws the missing-texture checkerboard");
+		}
+		return resource_root->load_material_texture(texture_name, type);
+	}
+	return opennova::load_material_texture_from_dir(source_dir, texture_name, type);
 }
 
 Ref<Texture2D> ObjectData::load_texture_name(const String &p_texture_name) const {
@@ -248,6 +259,9 @@ Ref<Texture2D> ObjectData::load_texture_name(const String &p_texture_name) const
 		return Ref<Texture2D>();
 	}
 	// A model texture name loads through the stage loader, as its diffuse row does.
+	if (texture_files_) {
+		return texture_files_->load_texture(p_texture_name, opennova::renderer::TextureLoader::Stage);
+	}
 	if (resource_root.is_valid()) {
 		return resource_root->load_texture(p_texture_name, ResourceRoot::TEXTURE_LOADER_STAGE);
 	}

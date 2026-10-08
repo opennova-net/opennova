@@ -620,60 +620,29 @@ void AiSystem::infantry_select(AiEntity &e, World &world, int selected_state) {
 // original runs the same @0x4b40e0 body for both. Inputs are the already-deposited
 // entity+0x12C mirrors (player_moving / dir index / stance / lean bits) plus the
 // per-tick weapon mirrors (scope_raised, wpn_run_anim, wpn_force_crouch).
-// The local player's rain ambient [orig: Entity_UpdateInfantryPlayerBody
-// @ 0x4b4747..0x4b490e — on the frame's last 16 ms quantum, while
-// g_EnvRainPctCurrent != 0, the rain set handles are loaded (dword_24E0E80)
-// and the kind is rain: the volume is the rain current (<= 0xFFFF by its max
-// clamp), scaled by (lightTransfer x 0.5 + 0.5) when the first blink hit
-// (entity+0x1D0) names a pool-2 building (ItemDef+0x218) — that hit alone
-// gates it, no indoor-flag test (@ 0x4b4770..0x4b47a8) — and its low 16 bits
-// are the 8.8 volume word (`mov word ptr [..], bx` @ 0x4b4845); the
-// LPNV_RAIN_L set registers at (x + 2 m, y, z + eyeOffsetZ) on slot type 1
-// and LPNV_RAIN_R at (x - 2 m, y, z + eyeOffsetZ) on slot type 2 (entity
-// +0x74 added to Z @ 0x4b47b0 / @ 0x4b4865), lifetime 20, pitch 0x10000,
-// through SoundEmitter_RegisterSetLayers @ 0x528340]. Our per-tick
-// registration coalesces per (source, lane) in the mailbox exactly like the
-// per-frame one.
+// The local player's rain ambient: the weather's rain_ambient_emitters over
+// this body (its first blink hit's building light transfer, its eye offset),
+// published through the sound-emitter mailbox, whose per-tick registration
+// coalesces per (source, lane) exactly like the per-frame one
+// [orig: Entity_UpdateInfantryPlayerBody @ 0x4b4747..0x4b490e].
 void infantry_rain_ambient(World &world, const Entity &ent) {
-    const WeatherState &weather = world.weather;
-    if (weather.core.scalar_channels.rain_pct_fp == 0 ||
-        weather.precipitation_kind != static_cast<uint32_t>(PrecipitationKind::Rain))
-        return;
-    int32_t volume = weather.core.scalar_channels.rain_pct_fp;
-    // The first blink hit's owner carries the interior daylight transfer.
+    RainAmbientBody body;
+    body.pos = ent.position;
+    body.eye_offset_z = ent.eye_offset_z;
     if (ent.blink_hits[0] != 0) {
         const EntityHandle building = EntityHandle::make(2, static_cast<int>(ent.blink_hits[0] >> 20));
         if (const Entity *b = world.registry.get(building)) {
-            volume = static_cast<int32_t>((b->light_transfer * 0.5f + 0.5f) *
-                                          static_cast<float>(volume));
+            body.lit = true;
+            body.light_transfer = b->light_transfer;
         }
     }
-    // The word registers as is: the registrar tests the WHOLE word, so
-    // 1..0xFF keeps a live level-0 slot and only 0 is the unregister
-    // [orig: SoundEmitter_RegisterSetLayers @ 0x528377 `cmp [ecx+18h], bx`];
-    // the mailbox's zero-volume clear is the same contract.
-    const uint16_t volume_word = static_cast<uint16_t>(volume);
-    constexpr uint16_t kLifetimeTicks = 20;
-    constexpr int32_t kEarOffset = 2 << 16;
-    const int32_t px = static_cast<int32_t>(ent.position.x * 65536.0f);
-    // The emitter Z is the entity Z plus the eye-offset Z (entity +0x74).
-    const float emitter_z = ent.position.z + static_cast<float>(ent.eye_offset_z) / 65536.0f;
-    for (int side = 0; side < 2; ++side) {
-        SoundEmitterEvent ev;
-        ev.source_spawn_id = ent.registry_spawn_id;
-        ev.source_handle = ent.handle.packed;
-        ev.pos = ent.position;
-        ev.pos.x = static_cast<float>(side == 0 ? px + kEarOffset : px - kEarOffset) / 65536.0f;
-        ev.pos.z = emitter_z;
-        ev.source_bms_id = ent.bms_id;
-        ev.emitted_tick = world.logic_tick + 1;
-        ev.lane = static_cast<uint8_t>(side == 0 ? 1 : 2);
-        ev.lifetime_ticks = kLifetimeTicks;
-        ev.pitch_q16 = 0x10000;
-        ev.volume_q8_8 = volume_word;
-        ev.set_name = side == 0 ? "LPNV_RAIN_L" : "LPNV_RAIN_R";
-        world.out.sound_emitters.publish(std::move(ev));
-    }
+    body.source_spawn_id = ent.registry_spawn_id;
+    body.source_handle = ent.handle.packed;
+    body.bms_id = ent.bms_id;
+    body.emitted_tick = world.logic_tick + 1;
+    SoundEmitterEvent events[2];
+    const size_t count = rain_ambient_emitters(world.weather, body, events);
+    for (size_t i = 0; i < count; ++i) world.out.sound_emitters.publish(std::move(events[i]));
 }
 
 // [orig: Entity_UpdateInfantryPlayerBody @0x4b7183-0x4b7396]
@@ -1280,15 +1249,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // [orig: org1 @0x4B9A48; org2 @0x4B41DF; dual order @0x40B908/@0x40B94E]
     if (!e.net_is_remote_peer) {
         devtools::ProfileLap animation_lap(world.profile);
-        infantry_weapon_channel_advance(e);
-        if (reset_capsule_bottom_state(e.inf.anim_state)) e.inf.prev_capsule_bottom = 0;
-        if (root_motion != nullptr)
-            have_clip = advance_primary_channel(e.inf, *root_motion, anim_rings, frame);
-        if (have_clip) {
-            if (e.inf.prev_capsule_bottom != 0)
-                frame.dz = frame.capsule_bottom - e.inf.prev_capsule_bottom;
-            e.inf.prev_capsule_bottom = frame.capsule_bottom;
-        }
+        have_clip = infantry_dual_update(e.inf, root_motion, anim_rings, frame);
         e.inf.last_events = have_clip ? frame.events : 0;
         animation_lap.mark(devtools::Slot::SIM_AI_INFANTRY_ANIMATION);
     }
@@ -2074,12 +2035,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                     ? (tick_entity->flags | tick_entity->engine_flags)
                     : 0u;
             const bool indoors = (settle_flags & kEntityFlagIndoors) != 0;
-            const int32_t feet_z = e.pos[2] - frame.capsule_bottom;
-            const int32_t start[3] = {e.pos[0], e.pos[1], (e.pos[2] + 6143) & ~0x17FF};
-            int32_t end[3] = {start[0], start[1], start[2] - 0x20000};
-            if (terrain->valid() && !indoors)
-                (void)terrain_clip_segment(*terrain, start, end, end);
-            foot_clearance = feet_z - end[2];
+            foot_clearance = terrain_settle_clearance(terrain, e.pos, frame.capsule_bottom, indoors);
             // The probe's +0x28 store is unconditional (null on a miss), and
             // this IS the probe over an empty candidate set — clear the link so
             // the footstep pick cannot read a stale platform. [orig: the

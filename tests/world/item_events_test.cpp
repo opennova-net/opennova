@@ -1,5 +1,6 @@
 #include <runtime/world/world.h>
 #include <runtime/world/destruction.h>
+#include <cmath>
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -32,7 +33,7 @@ int test_regional_sound() {
     const auto h = spawn(w, 2, 10, ItemDeathClass::kEnvironmentSound);
     auto &e = *w.registry.get(h);
     auto *traits = w.tables.item_death_traits.get_mutable(10);
-    w.env.time_of_day = 12 * 65536;
+    w.weather.tod_fixed24 = uint32_t(12 * 65536) << 8;
     // The re-arm draw steps the inline dword_31BFBB8 LCG (the throwable fan
     // stream); PRNG_Next16's dword_31BFBB0 never moves here.
     const uint32_t seed = w.prng16_state;
@@ -52,11 +53,11 @@ int test_regional_sound() {
     traits->sound_point = {0, 0, 2};
     e.position = {3, 4, 5};
     for (const int hour : {4, 10, 17, 21}) {
-        w.env.time_of_day = hour * 65536;
+        w.weather.tod_fixed24 = uint32_t(hour * 65536) << 8;
         destruction_notify_item_damage(w, e, 0);
         CHECK(w.out.slot_sounds.empty()); // Exact boundaries choose night.
     }
-    w.env.time_of_day = 4 * 65536 + 1;
+    w.weather.tod_fixed24 = uint32_t(4 * 65536 + 1) << 8;
     destruction_notify_item_damage(w, e, 0);
     CHECK(e.class_think_ticks == 99 && w.out.slot_sounds.size() == 1);
     CHECK(w.out.slot_sounds[0].pos[2] == 7 * 65536);
@@ -68,7 +69,7 @@ int test_regional_sound() {
     CHECK(w.prng16_state == seed);
     const auto staggered = spawn(w, 2, 11, ItemDeathClass::kEnvironmentSound);
     w.tables.item_death_traits.get_mutable(11)->regional_sounds[0] = {"Bird", 99, 0};
-    w.env.time_of_day = 4 * 65536;
+    w.weather.tod_fixed24 = uint32_t(4 * 65536) << 8;
     destruction_notify_item_damage(w, *w.registry.get(staggered), 0);
     CHECK(w.out.slot_sounds.size() == 3); // Handle low nibble moves the boundary.
 
@@ -527,6 +528,23 @@ int test_piece_spawn_clears_class_selectors() {
     return 0;
 }
 
+// The fade's math alone, as the editor's model preview reads it (DI-10): the authored duration and stagger
+// (0 takes 50 and 25), each phase clamped, the overall share unclamped.
+int test_destroy_fade_phases() {
+    const int32_t timing[3] = {10, 50, 25};
+    DestroyFade fade = destroy_fade_phases(50, timing);
+    CHECK(fade.phases_q16 == (std::array<int32_t,6>{21845,65536,32768,0,0,0}));
+    CHECK(std::fabs(fade.progress - 50.0/150.0) < 1e-12);
+    const int32_t defaults[3] = {0, 0, 0};
+    fade = destroy_fade_phases(100, defaults);
+    CHECK(fade.phases_q16 == (std::array<int32_t,6>{43690,65536,65536,65536,32768,0}));
+    fade = destroy_fade_phases(-5, defaults);
+    CHECK(fade.phases_q16 == (std::array<int32_t,6>{}) && fade.progress < 0);
+    fade = destroy_fade_phases(400, defaults);
+    CHECK(fade.phases_q16 == (std::array<int32_t,6>{65536,65536,65536,65536,65536,65536}) && fade.progress > 1);
+    return 0;
+}
+
 int test_destroy_phases_and_ambient() {
     auto heap = std::make_unique<World>();
     auto &w = *heap;
@@ -556,7 +574,7 @@ int test_destroy_phases_and_ambient() {
     e.item_type = 5;
     e.position = {3,4,5};
     e.bbox_center = {0,0,2};
-    w.env.time_of_day = 12*65536;
+    w.weather.tod_fixed24 = uint32_t(12*65536) << 8;
     traits->regional_loops[1] = "Day";
     tick_item_death_motion(w,e,nullptr,0,w.out.destruction);
     CHECK(e.destroy_phases_q16 == (std::array<int32_t,6>{}));
@@ -618,7 +636,8 @@ int test_class_scoring_and_explosion_draws() {
 }
 
 int main() {
-    if (test_destroy_phases_and_ambient() || test_class_scoring_and_explosion_draws()) return 1;
+    if (test_destroy_fade_phases() || test_destroy_phases_and_ambient() ||
+            test_class_scoring_and_explosion_draws()) return 1;
     if (test_tower_sections() != 0) return 1;
     if (test_piece_spawn_clears_class_selectors() != 0) return 1;
     if (test_palm_sections() != 0) return 1;

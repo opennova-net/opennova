@@ -10,6 +10,7 @@
 #include <runtime/hud/hud_capture_labels.h>
 #include <runtime/hud/hud_game_text.h>
 #include <runtime/hud/hud_layout_from_hudpos.h>
+#include <runtime/hud/hud_texture_names.h>
 
 namespace godot {
 void HudOverlay::combat_texture_(int slot, const String &name, ResourceRoot::TextureLoader loader,
@@ -25,24 +26,34 @@ void HudOverlay::combat_texture_(int slot, const String &name, ResourceRoot::Tex
 	sprite = { texture.is_valid() ? texture->get_width() : 0,
 		texture.is_valid() ? texture->get_height() : 0, texture.is_valid() };
 }
+void HudOverlay::set_weapon_icon(const String &p_weapon_name, const String &p_hudicon) {
+	// The combat feed's two weapon fields (world::fill_hud_combat_view): the identity the silhouette's
+	// flash stamps on, the hudicon art in alpha mode.
+	state_.combat.weapon_identity = opennova::to_std(p_weapon_name);
+	combat_texture_(opennova::hud::kHudTexWeaponSilhouette, p_hudicon, ResourceRoot::TEXTURE_LOADER_HUD_ALPHA,
+			layout_.combat.weapon);
+	compiler_.update_layout(layout_);
+	queue_redraw();
+}
+
 void HudOverlay::configure_combat_(const opennova::hud::HudLayoutAssets &assets) {
 	using namespace opennova::hud;
 	auto &l = layout_.combat;
 	// HUD_LoadAllTextures loads the fixed art in colour mode and the hudpos
 	// parachute and armor icons in alpha mode (docs/interface/hud-re.md
-	// "The HUD texture loader").
+	// "The HUD texture loader"); the names are the engine's (hud_texture_names.h).
 	constexpr ResourceRoot::TextureLoader colour = ResourceRoot::TEXTURE_LOADER_HUD_COLOR;
 	constexpr ResourceRoot::TextureLoader alpha = ResourceRoot::TEXTURE_LOADER_HUD_ALPHA;
-	combat_texture_(kHudTexVehicleFixed, "rockpip.tga", colour, l.vehicle_fixed);
-	combat_texture_(kHudTexVehicleLag, "turrpip.tga", colour, l.vehicle_lag);
-	combat_texture_(kHudTexDriverCrosshair, "dirguide.tga", colour, l.driver_crosshair);
-	combat_texture_(kHudTexTarget, "comalck2.tga", colour, l.target);
-	combat_texture_(kHudTexTargetFriendly, "comlck2x.tga", colour, l.target_friendly);
+	combat_texture_(kHudTexVehicleFixed, hud_fixed_texture_name(kHudTexVehicleFixed), colour, l.vehicle_fixed);
+	combat_texture_(kHudTexVehicleLag, hud_fixed_texture_name(kHudTexVehicleLag), colour, l.vehicle_lag);
+	combat_texture_(kHudTexDriverCrosshair, hud_fixed_texture_name(kHudTexDriverCrosshair), colour, l.driver_crosshair);
+	combat_texture_(kHudTexTarget, hud_fixed_texture_name(kHudTexTarget), colour, l.target);
+	combat_texture_(kHudTexTargetFriendly, hud_fixed_texture_name(kHudTexTargetFriendly), colour, l.target_friendly);
 	combat_texture_(kHudTexParachute, opennova::to_gd(assets.parachute_icon), alpha, l.parachute);
 	combat_texture_(kHudTexArmor, opennova::to_gd(assets.armor_icon), alpha, l.armor);
-	combat_texture_(kHudTexLogoHelo, "LogoHelo.tga", colour, l.logo_helo);
-	combat_texture_(kHudTexLogoHumm, "LogoHumm.tga", colour, l.logo_humm);
-	combat_texture_(kHudTexLogoBoat, "LogoBoat.tga", colour, l.logo_boat);
+	combat_texture_(kHudTexLogoHelo, hud_fixed_texture_name(kHudTexLogoHelo), colour, l.logo_helo);
+	combat_texture_(kHudTexLogoHumm, hud_fixed_texture_name(kHudTexLogoHumm), colour, l.logo_humm);
+	combat_texture_(kHudTexLogoBoat, hud_fixed_texture_name(kHudTexLogoBoat), colour, l.logo_boat);
 }
 void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transform3D &camera,
 		const Projection &projection, bool has_camera, const Ref<RtxtStringFile> &gametext,
@@ -124,12 +135,12 @@ void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transf
 				s.service_wait_seconds, game_text_lookup(gametext));
 	}
 	if (gametext.is_valid()) {
-		const String impact = gametext->get_string_in_section("Overlays", "STROVER_DIST");
+		const String impact = gametext->get_string_in_section(opennova::hud::kGameTextOverlays, "STROVER_DIST");
 		if (!impact.is_empty())
 			s.impact_format = opennova::to_std(impact);
 		const char *keys[] = { "STROVER_MEDGEAR", "STROVER_LOWGEAR", "STROVER_HIGEAR" };
 		for (int i = 0; i < 3; ++i) {
-			const String text = gametext->get_string_in_section("Overlays", keys[i]);
+			const String text = gametext->get_string_in_section(opennova::hud::kGameTextOverlays, keys[i]);
 			if (!text.is_empty())
 				s.gear_text[i] = opennova::to_std(text);
 		}

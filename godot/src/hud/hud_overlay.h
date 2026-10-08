@@ -26,6 +26,7 @@
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_layout_from_hudpos.h> // HudLayoutAssets (the names the fill hands back)
 #include <runtime/hud/hud_map_view.h> // the DEATH window pass seam
+#include <runtime/hud/hud_texture_names.h> // the crosshair styles
 #include <runtime/renderer/texture_load_rules.h> // MaterialColorStage
 
 #include "hud/hud_map_pass_renderer.h"
@@ -66,13 +67,13 @@ class HudOverlay : public Control {
 	GDCLASS(HudOverlay, Control)
 
 public:
-	// The user crosshair-style range; retail loads "cross%02d.tga" (style + 1)
-	// from the player config. The colour default / mask and the spread default
+	// The user crosshair-style range and its texture names are the engine's
+	// (hud_texture_names.h). The colour default / mask and the spread default
 	// are the engine's (HudLayout, Config_SetDefaults), re-exported so the
 	// options model has one home for them.
 	enum {
-		MIN_CROSSHAIR_STYLE = 0,
-		MAX_CROSSHAIR_STYLE = 24,
+		MIN_CROSSHAIR_STYLE = opennova::hud::kHudCrosshairStyleMin,
+		MAX_CROSSHAIR_STYLE = opennova::hud::kHudCrosshairStyleMax,
 		DEFAULT_CROSSHAIR_COLOR =
 				static_cast<int>(opennova::hud::HudLayout::kCrosshairColorDefault),
 		CROSSHAIR_COLOR_MASK =
@@ -344,9 +345,11 @@ public:
 	void set_friendly_tag_env(float p_fog_distance_units, int p_speaking_level255);
 	// Device-facing minimap feeds. TerrainData is sampled once into the
 	// portable sector layout; snapshot is Simulation's versioned fixed-stride
-	// retained overlay buffer.
+	// retained overlay buffer. The colormap is bound as the session's
+	// texcompression_level makes its quadrants (D-RMAT-24).
 	void set_minimap_terrain(const Ref<TerrainData> &p_terrain,
-			const Ref<Texture2D> &p_water_mask = Ref<Texture2D>());
+			const Ref<Texture2D> &p_water_mask = Ref<Texture2D>(),
+			int p_texcompression_level = 1);
 	// The water mask the last set_minimap_terrain installed (a read seam the
 	// GUT presenter pins use; nothing else reads it).
 	Ref<Texture2D> get_minimap_water_mask() const;
@@ -374,6 +377,14 @@ public:
 	// Debug/test accessor: compile at the current surface size and report the
 	// draw list's element counts.
 	Ref<HudDrawListStats> get_draw_list_stats();
+	// The seams of an embedder with no world (the OpenNova Editor's HUD preview, the plan's DI-20),
+	// C++ only. The draw list compiled at the overlay's surface now, as the next draw compiles it (its
+	// element spans name what each element drew, runtime/hud/hud_elements.h); an empty list before
+	// configure(). And the held weapon's silhouette as the combat feed gives it with a world
+	// (world::fill_hud_combat_view: the weapon's identity and its weapon.def hudicon, loaded in alpha
+	// mode), which a configure() drops with the rest of the layout's art.
+	const opennova::hud::HudDrawList &compile_draw_list();
+	void set_weapon_icon(const String &p_weapon_name, const String &p_hudicon);
 	// Debug/test accessor: each textured quad's colour in draw order, the compiled
 	// vertex colour or (`p_drawn`) the colour the device draws a white texel with
 	// under the texture's material: doubled by the alpha material
@@ -580,6 +591,10 @@ private:
 	// Per texture slot, whether the map top item flags its sprites MODULATE2X
 	// (refreshed by map_pass_textures for the pass renderers).
 	mutable std::array<uint8_t, kTextureSlots> slot_modulate2x_{};
+	// The same per font page (page_textures_' namespace): whether a map glyph run
+	// on that page takes the MODULATE2X flag.
+	mutable std::array<uint8_t, opennova::hud::kHudFontSlotCount * opennova::fnt::FNT_MAX_PAGES>
+			page_modulate2x_{};
 	// Set while get_flat_submissions records render_flat_'s textured commands.
 	Array *flat_record_ = nullptr;
 	// Stamp the cached colour/spread options into layout_.
@@ -596,6 +611,8 @@ private:
 	void ensure_minimap_water_material_();
 	void ensure_flat_material_();
 	void ensure_map_materials_();
+	// The map pass shader's TSDicon chain bound (icon_max_lod).
+	void apply_map_icon_sampling_();
 	void render_list_(const opennova::hud::HudDrawList &p_list);
 	const opennova::hud::HudDrawList &server_status_page_draw_list_(const Vector2 &p_surface);
 	void server_status_clock_(uint32_t &r_now_ms, bool &r_window_active) const;

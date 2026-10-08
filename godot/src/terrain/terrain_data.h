@@ -42,6 +42,10 @@ private:
 	// The loading mission's tile-set name (BMS header), applied over the .trn
 	// tilestrip at load (formats/trn trn_mission_tilestrip). Empty = the .trn's.
 	std::string mission_tile_set;
+	// The loading mission's environment file (`<environment>.env`; empty: none), whose lines the
+	// terrain's parser reads after the .trn's and overcast.def's (D-TERRAIN-18, formats/trn
+	// load_mission_trn).
+	std::string mission_environment;
 
 	// Identity
 	String terrain_name;
@@ -111,6 +115,35 @@ private:
 	Error _import_pcx_slot_bytes(const String &slot_id, const String &filename, const PackedByteArray &bytes);
 	Error _load_from_trn_text(const std::string &trn_content, const String &source_label);
 
+	// A load in flight (begin_load_from_resource_root / load_step): what is left of it, a unit per
+	// file it reads, in the load's order.
+	struct LoadUnit {
+		enum class Kind : uint8_t { Texture, PcxSlot, Tilestrip, Heights };
+		Kind kind = Kind::Texture;
+		const char *slot = "";
+		String filename;
+		Ref<Texture2D> TerrainData::*target = nullptr;
+		// A texture's retail loader (renderer::TextureLoader): Texture and Tilestrip units.
+		opennova::renderer::TextureLoader loader = opennova::renderer::TextureLoader::Tga;
+	};
+	std::vector<LoadUnit> load_units_;
+	size_t load_next_ = 0;
+	// What load_step answers: no load begun (or one refused), one running, done, failed.
+	enum class LoadState : uint8_t { None, Running, Done, Failed };
+	LoadState load_state_ = LoadState::None;
+	bool load_use_root_ = false;
+	String load_dir_;
+	Error load_error_ = OK;
+	mutable std::vector<std::string> load_missing_;
+	String load_failure_;
+	void _note_load_missing(const String &p_name) const;
+	Error _begin_load_from_trn_text(const std::string &trn_content, const opennova::TrnLaterTexts &later);
+	Ref<Texture2D> _load_slot_texture(const char *slot, const String &filename,
+			opennova::renderer::TextureLoader loader) const;
+	void _use_default_pcx_slot(const String &slot_id);
+	void _load_pcx_slot(const String &slot_id, const String &filename);
+	bool _load_heights(const String &cpt_name);
+
 protected:
 	static void _bind_methods();
 
@@ -133,6 +166,10 @@ public:
 	// Set before load(): the mission's tile-set name overriding the .trn
 	// tilestrip atlas (and so the .TSD the surface table pairs with it).
 	void set_mission_tile_set(const String &p_tile_set);
+	// Set before a load from a resource root: the mission's environment file by name
+	// ("<environment>.env"; empty: the mission names none), which that load reads after the .trn and
+	// overcast.def through the terrain's parser, as the game's does (D-TERRAIN-18).
+	void set_mission_environment(const String &p_file);
 
 	void set_terrain_name(const String &p_name);
 	String get_terrain_name() const;
@@ -190,6 +227,29 @@ public:
 
 	Error load();
 	Error load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
+	// The same load a file at a time (the OpenNova Editor's mission device builds a terrain a unit
+	// a frame): begin reads and parses the .trn and plans a unit per file the load reads (the nine
+	// texture slots, the two PCX-backed maps, the tilestrip, the height data); load_step runs the
+	// next and says whether more are left, the load is done (is_loaded()) or it failed (the height
+	// data does not parse). load_from_resource_root is begin and every step. The terrain is not
+	// loaded until the last step.
+	enum LoadStep {
+		LOAD_STEP_MORE = 0,
+		LOAD_STEP_DONE = 1,
+		LOAD_STEP_FAILED = 2,
+	};
+	Error begin_load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
+	LoadStep load_step();
+	// The units of the load in flight, how many ran, and the slot the next one reads ("" none).
+	int get_load_step_count() const;
+	int get_load_steps_done() const;
+	String get_load_step_label() const;
+	// The files the last load named and did not find (a texture slot, a map, the tilestrip, the
+	// height data: each loads on without it), and why it failed ("" for a load that did not): the
+	// file and what went wrong, as a failed step leaves it. C++ only (the editor's mission device
+	// notes them).
+	const std::vector<std::string> &get_load_missing() const { return load_missing_; }
+	const String &get_load_failure() const { return load_failure_; }
 	bool is_loaded() const;
 	uint64_t get_change_revision() const { return change_revision_; }
 	// Returns depth as little-endian raw16 (value = clamp(height*256)). Reads an
@@ -256,3 +316,5 @@ public:
 };
 
 } // namespace godot
+
+VARIANT_ENUM_CAST(godot::TerrainData::LoadStep);

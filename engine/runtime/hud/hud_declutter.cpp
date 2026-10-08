@@ -155,24 +155,24 @@ void HudDeclutter::rebuild_at(int level) {
 	}
 }
 
-bool declutter_from_hudpos(const DefHudPosFile &file, HudDeclutter &out) {
-	HudDeclutter authored;
-	authored.begin_authoring();
-	bool any_row = false;
-	for (int slot = 0; slot < kDeclutterSlotCount; ++slot) {
-		const char *token = declutter_token_name(slot);
-		for (size_t i = 0; i < file.hud.declutter_count; ++i) {
-			const DefDeclutterEntry &row = file.hud.declutter[i];
-			if (!strutil::iequals(row.name, token)) continue;
-			int flags[4];
-			for (int f = 0; f < 4; ++f) flags[f] = row.flags[f] != 0 ? 1 : 0;
-			authored.set_mask(slot, HudDeclutter::mask_from_flags(flags));
-			any_row = true;
+HudDeclutter declutter_from_hudpos(const DefHudPosFile &file) {
+	// [orig: byte_2723CE0 BSS-zero; nothing but the parse arms writes it]
+	HudDeclutter table;
+	table.begin_authoring();
+	// One arm per known token, each storing the mask it builds (`_stricmp`
+	// on the key, then `mov byte_2723CE0[slot], bl`), so the rows apply in
+	// file order and the last row for a slot is the one that stands.
+	// [orig: HUD_ParseHudposToken @0x59F370 — the MSNTITLE arm
+	//  @0x5A15F5..0x5A1683]
+	for (size_t i = 0; i < file.hud.declutter_count; ++i) {
+		const DefDeclutterEntry &row = file.hud.declutter[i];
+		for (int slot = 0; slot < kDeclutterSlotCount; ++slot) {
+			if (!strutil::iequals(row.name, kTokenNames[slot])) continue;
+			table.set_mask(slot, HudDeclutter::mask_from_flags(row.flags));
 			break;
 		}
 	}
-	if (any_row) out = authored;
-	return any_row;
+	return table;
 }
 
 } // namespace opennova::hud

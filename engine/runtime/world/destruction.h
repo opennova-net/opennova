@@ -32,6 +32,9 @@
 namespace opennova::terrain {
 struct TerrainHeightField;
 }
+namespace opennova::threedi {
+struct Threedi3di3;
+}
 
 namespace opennova::world {
 
@@ -294,6 +297,14 @@ struct DeathPieceType {
 inline constexpr int kDeathPieceTypeCount = 13;
 const DeathPieceType &death_piece_type(int index); // clamped [orig: index > 16 -> 16]
 
+// The debris-type row husk section `section` (1..N of the piece model) rolls: the def's
+// husk_sub_part_types byte at that slot, the slot clamped at 16 while every section still spawns
+// [orig: the loop bound @ 0x493918 vs the index clamp @ 0x49362f]. spawn_death_pieces' lookup, and
+// the editor's model preview's (DI-10).
+inline uint8_t death_piece_type_index(const uint8_t (&types)[17], int section) {
+    return types[section <= 16 ? section : 16];
+}
+
 // ----------------------------------------------------------------------------
 // The explosion queue. [orig: 64 x 52-B entries @ 0xB7C688, count @ 0xB7C680;
 // writer WeaponEffect_QueueExplosion @ 0x4e8330 (authority-only), drained once
@@ -345,6 +356,25 @@ struct DestructionEffectEvent {
 };
 
 struct DestructionEvents;
+// The banks' points on the piece model (the loaded huskFinal, else the husk): the
+// user points the first-16 masks of Dead, Fire and Other set, in mission-local
+// axes [orig: Game_ResolveItemMaterialsAndSpawnBoneTrails @0x522EE0]. The mission
+// load's resolve and the editor's definition preview (ADR 0046 DI-21) read them.
+void death_effect_banks_of(const threedi::Threedi3di3 &piece, std::array<DeathEffectBank, 3> &banks);
+// One emitter the death tail spawns: its family (1 the Dead bank, the water
+// death's under water; 2 Fire; 3 Other), its slot among the bank's points, its
+// effect, the point (mission-local; zero for the death family's fallback at the
+// item's origin) and whether the descriptor carries the entity's tag (the
+// fallback's does not). In the order spawn_death_effect_banks spawns them; none
+// without a loaded husk model.
+struct DeathBankSpawn {
+	uint8_t family = 0;
+	uint8_t slot = 0;
+	std::string effect;
+	DeathEffectPoint point;
+	bool section_tagged = false;
+};
+std::vector<DeathBankSpawn> death_bank_spawns(const ItemDeathTraits &traits, bool underwater);
 void spawn_death_effect_banks(
 		Entity &entity, const ItemDeathTraits &traits, bool underwater, DestructionEvents &events);
 void update_dead_wreck_effects(World &world, Entity &entity, const ItemDeathTraits *traits,
@@ -588,6 +618,17 @@ struct ItemStateEvent {
 // Class callbacks enqueue the section payload at their original send sites.
 // [orig: Server_SendEntityStatePacket @ 0x509D70]
 void emit_item_state(World &world, Entity &target, int32_t section);
+// The six destroy phases a husk publishes `elapsed` ticks into its fade (the CTRL registers
+// OBJECT_DESTROY and OBJECT_DESTROY01..05, ordinals 65..70), from the def's destroy_timing (its
+// duration [1] and stagger [2]; 0 takes 50 and 25): [0] elapsed / (duration + 4 x stagger), [i + 1]
+// (elapsed - i x stagger) / duration, each clamped to 0..1 in Q16; `progress` the overall share
+// unclamped (0 over a zero denominator). update_item_destroy_fade's evaluation, and the editor's model
+// preview's (DI-10). [orig: Entity_PublishSwapFadePhases @0x5C3F40]
+struct DestroyFade {
+    std::array<int32_t, 6> phases_q16{};
+    double progress = 0.0;
+};
+DestroyFade destroy_fade_phases(int32_t elapsed, const int32_t destroy_timing_ticks[3]);
 void update_item_destroy_fade(World &world, Entity &entity);
 void update_item_ambient_sound(World &world, const Entity &entity);
 void squib_event(World &world, Entity &entity, int phase);

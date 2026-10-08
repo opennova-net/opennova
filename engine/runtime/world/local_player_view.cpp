@@ -490,6 +490,16 @@ void local_player_binocular_sway_latch(World &world, const PlayerViewState &v,
                                       t.binocular_pitch_offset_deg);
 }
 
+namespace {
+// [orig: Sound_PlayInterfaceTriggerSet @0x527be0 -- the 2D interface play]
+void play_nvg_interface_set(World &world, const char *set) {
+    ScriptSoundEvent sound;
+    sound.name = set;
+    sound.kind = ScriptSoundEvent::Kind::Interface;
+    world.out.script_sounds.push_back(std::move(sound));
+}
+} // namespace
+
 bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState &v,
                              const std::function<bool()> &scope_toggle) {
     if (world.registry.get(world.cached.local_player) == nullptr) return false;
@@ -500,8 +510,11 @@ bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState
             w.nvg_scope_restore = scope_toggle();
         }
         const bool on = player_view_toggle_nvg(v);
-        // The NVG tip, once [orig: case 41's on branch — CTipSystem_HandleEvent(7)
-        // @0x4e06ec, after the scope drop and the sound].
+        // NV_ON after the scope drop [orig: case 41's on branch — `mov edx,
+        // g_SndNvOn` @0x4e06d0, Sound_PlayInterfaceTriggerSet @0x4e06dd].
+        play_nvg_interface_set(world, kNvgOnSoundset);
+        // The NVG tip, once [orig: CTipSystem_HandleEvent(7) @0x4e06ec, after
+        // the scope drop and the sound].
         world.out.tip_events.push_back(static_cast<uint8_t>(hud::kTipEventNvgOn));
         return on;
     }
@@ -511,6 +524,9 @@ bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState
     const bool restore_scope = w.nvg_scope_restore;
     w.nvg_scope_restore = false;
     if (restore_scope && !v.scope_engaged) scope_toggle();
+    // NV_OFF after the scope restore [orig: case 41's off branch — `mov ecx,
+    // g_SndNvOff` @0x4e0691, Sound_PlayInterfaceTriggerSet @0x4e0698].
+    play_nvg_interface_set(world, kNvgOffSoundset);
     // The off branch fades it [orig: CTipSystem_HandleEvent(8) @0x4e06a7, after
     // the scope restore and the sound].
     world.out.tip_events.push_back(static_cast<uint8_t>(hud::kTipEventNvgOff));
@@ -539,7 +555,7 @@ void local_player_view_tick(World *world, PlayerViewState &v,
     // The mounted camera's carrier read, refreshed every tick: only a CONTROL
     // seat (the retail parentSlot 2/5 test) takes the mounted leg, and the
     // carrier's pose/radius/class feed the chase target, the back-off and the
-    // watercraft eye drop [orig: Camera_ComputeThirdPersonView @0x437D10 --
+    // aircraft eye drop [orig: Camera_ComputeThirdPersonView @0x437D10 --
     // the +0x168 seat test, parentEntity +0x16C, boundRadius +0, the unitType
     // +0x196 in {3,4} test @0x43861D..0x43864C; see player_view.h]. The same
     // seat test is the arbiter's [orig: Render_ProcessMainSceneFrame
@@ -564,7 +580,7 @@ void local_player_view_tick(World *world, PlayerViewState &v,
         collision_matrix_from_euler(mount.carrier_yaw_bam, pitch_bam, roll_bam, zero)
                 .rotate_point(ahead, mount.lookahead_target_q16);
         mount.bound_radius = carrier->bound_radius;
-        mount.watercraft = carrier->item_unit_type == 3 || carrier->item_unit_type == 4;
+        mount.aircraft = vehicle_unit_type_is_aircraft(carrier->item_unit_type);
     }
     v.mount = mount;
     // The remaining arbiter inputs [orig: Render_ProcessMainSceneFrame

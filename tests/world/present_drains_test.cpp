@@ -62,9 +62,8 @@ struct Rig {
 		w.tables.ammo.entries.resize(3);
 		AmmoTableEntry &a = w.tables.ammo.entries[1];
 		a.valid = true;
-		a.impact_effects[1].effect = "smoke_trail";
-		a.impact_effects[3].effect = "dirt_hit";
-		a.impact_effects[3].sound = "thud";
+		a.impact_effects[1] = {"smoke_trail", "", true};
+		a.impact_effects[3] = {"dirt_hit", "thud", true};
 		a.light_impact_radius = 4.0f;
 		a.light_impact_color = 0x00FF8040u;
 		a.light_impact_ticks = 12;
@@ -250,6 +249,28 @@ void test_impact_drain() {
 	CHECK(w.round_sim.impacts.empty());
 	drain_round_impact_rows(w, rows);
 	CHECK(rows.empty());
+
+	// A tag the ammo authors no row of plays ammo def 0's bank at the tag's place; a tag
+	// past the table plays obj's [orig: AmmoDef_ProcessImpactEffect @0x40a1b8..0x40a1fd].
+	w.tables.ammo.null_bank[3] = {5, "bank_dirt", "bank_thud"};
+	w.tables.ammo.null_bank[4] = {6, "bank_obj", ""};
+	RoundImpact unauthored = full;
+	unauthored.ammo_index = 2;
+	w.round_sim.impacts.push_back(unauthored);
+	RoundImpact past = bad_tag;
+	past.ammo_index = 2;
+	w.round_sim.impacts.push_back(past);
+	RoundImpact own_reader = unauthored;
+	own_reader.own_row = true; // a direct reader takes its own row by position: none
+	w.round_sim.impacts.push_back(own_reader);
+	drain_round_impact_rows(w, rows);
+	CHECK(rows.size() == 2);
+	if (rows.size() == 2) {
+		CHECK(rows[0].effect == "bank_dirt");
+		CHECK(rows[0].sound == "bank_thud");
+		CHECK(rows[1].effect == "bank_obj");
+		CHECK(rows[1].sound.empty());
+	}
 }
 
 void test_fire_drain() {

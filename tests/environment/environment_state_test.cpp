@@ -486,6 +486,15 @@ int main() {
 					near(field.aspect, 1024.0f / 600.0f) &&
 					opennova::env::kReflectionRttSize == 512,
 				"the mirror takes the source field at its aspect over the 512 square");
+		// The reflected pass rasterises on the RTT through its own viewport and
+		// the frame's plain projection [orig: Render_MainScene @ 0x5c1614,
+		// @ 0x5c163e]: D3D9's half texel of the 512 square, right and down,
+		// not the main raster's half pixel.
+		ok &= expect(field.raster_shift.x == 1.0f / 512.0f &&
+							field.raster_shift.y == -1.0f / 512.0f &&
+							live.raster_shift.x == field.raster_shift.x &&
+							live.raster_shift.y == field.raster_shift.y,
+				"the mirror image sits on the RTT's own D3D9 pixel centres, above or below the plane");
 		source.aspect = 600.0f / 1024.0f;
 		ok &= expect(near(opennova::env::build_water_mirror_view(source, 7.0f).aspect,
 							 600.0f / 1024.0f),
@@ -952,6 +961,51 @@ int main() {
 				"200 -> 163, 128 -> 255 (clamp), 0 -> 0x80, packed r<<16|g<<8|b");
 	}
 
+	// --- the overcast cross-fade, with and without an overcast table ---------
+	// [orig: Environment_ComputeTimeOfDayColors @ 0x57de40 lerps the .env set
+	//  toward the .trn/overcast.def set by the overcast blend whatever that set
+	//  holds; an empty one is Environment_InitDefaults' zeros (env #41)]
+	{
+		EnvironmentState env;
+		opennova::env::Config cfg = make_config();
+		env.set_config(&cfg, true);
+		WeatherRuntime weather;
+		weather.prepare_world_driven(&env);
+		env.set_time_of_day(1200.0f);
+		const opennova::env::TodState clear = opennova::env::interpolate_tod(
+				cfg.keyframes, 1200.0f, cfg.envscale);
+		ok &= expect(rgb_near(env.sun_light_target(), clear.sun),
+				"no overcast: the .env colors as they are");
+
+		weather.state().overcast_for_tod_q16 = 0x8000;
+		env.update_tod();
+		const opennova::env::TodState to_black = opennova::env::blend_tod_states(
+				clear, opennova::env::TodState{}, 0x8000);
+		ok &= expect(rgb_near(env.sun_light_target(), to_black.sun) &&
+						rgb_near(env.sky_ambient_target(), to_black.sky) &&
+						rgb_near(env.fog_color_base_target(), to_black.fog),
+				"overcast with no overcast table fades half way to black");
+		ok &= expect(env.sun_light_target().r < clear.sun.r * 0.6f,
+				"the faded sun is about half the clear one");
+
+		opennova::env::Config overcast_cfg = opennova::env::make_default_config();
+		opennova::env::Keyframe grey;
+		grey.time = 1200;
+		grey.sun = {0.2f, 0.2f, 0.2f};
+		grey.sky = {0.5f, 0.5f, 0.5f};
+		grey.fog = {0.3f, 0.3f, 0.3f};
+		overcast_cfg.keyframes.assign(1, grey);
+		env.set_overcast_config(&overcast_cfg);
+		const opennova::env::TodState to_grey = opennova::env::blend_tod_states(clear,
+				opennova::env::interpolate_tod(overcast_cfg.keyframes, 1200.0f,
+						overcast_cfg.envscale),
+				0x8000);
+		ok &= expect(rgb_near(env.sun_light_target(), to_grey.sun) &&
+						rgb_near(env.sky_ambient_target(), to_grey.sky),
+				"overcast with a table fades half way to the table's colors");
+		env.set_overcast_config(nullptr);
+	}
+
 	// --- the light values carry the one device fog range ---------------------
 	{
 		// Under overcast the device end is Environment_GetFogEndDistance's
@@ -1220,6 +1274,45 @@ int main() {
 		ok &= expect(rgb_near(runtime.smooth_sky(), packed(0x404064), 2.0f / 255.0f) &&
 						rgb_near(runtime.smooth_fill(), packed(0x202020), 2.0f / 255.0f),
 				"the weather snap starts the world on those targets");
+	}
+
+	// A terrain's water keywords through the mission's load (env #43, #44): every shipped .trn
+	// writes water_rgb and water_murk, no shipped .env a murk; the murk the load leaves is what
+	// the underwater fog, the murk overlay and the water strips read, and the water plane takes
+	// the header's override, then the .env's line, then the .trn's [orig:
+	// Environment_LoadTimeOfDayConfig @ 0x57db30; Terrain_Init @ 0x60fcb1..0x60fcba].
+	{
+		const std::string trn = "terrain_name \"Dvxi5\"\r\nwater_height 21\r\nwater_rgb 108,81,48\r\nwater_murk .3\r\n";
+		const std::string env_text = "water_rgb 56,59,39\r\nfog_level 640\r\n";
+		opennova::env::MissionEnvTexts texts;
+		texts.terrain = &trn;
+		texts.environment = &env_text;
+		opennova::env::MissionEnv loaded;
+		ok &= expect(opennova::env::load_mission_env(texts, loaded), "the .trn and the .env load");
+		EnvironmentState state;
+		state.set_config(&loaded.config, true);
+		state.set_time_of_day(1200.0f);
+		ok &= expect(near(state.water_murk(), 0.3f) &&
+						near(state.build_scene_fog(true).end, opennova::env::fog_end_underwater(0.3f)) &&
+						opennova::env::underwater_murk_overlay_alpha_byte(state.water_murk()) == 156,
+				"the terrain's murk is the underwater fog's and the overlay's (128 + trunc(96 * 0.3))");
+		const opennova::env::WaterFrameInputs inputs = opennova::env::build_water_frame_inputs(&state, 0.6f);
+		ok &= expect(near(inputs.murk, 0.3f), "the water strips read the terrain's murk");
+		opennova::env::WaterHeightRungs rungs;
+		rungs.terrain_height = 10.5f;
+		rungs.has_loaded_terrain = true;
+		ok &= expect(near(opennova::env::resolve_water_height(rungs, &state, 0.0f), 10.5f),
+				"the .trn's height stands where the .env writes none");
+		const std::string env_height = "water_height 30\r\n";
+		texts.environment = &env_height;
+		ok &= expect(opennova::env::load_mission_env(texts, loaded), "the .env with a height loads");
+		state.set_config(&loaded.config, true);
+		ok &= expect(near(opennova::env::resolve_water_height(rungs, &state, 0.0f), 15.0f),
+				"the .env's water_height writes after the .trn's: 30 half units over the terrain's");
+		rungs.has_mission_override = true;
+		rungs.mission_override = 0.0f;
+		ok &= expect(near(opennova::env::resolve_water_height(rungs, &state, 7.0f), 0.0f),
+				"the header's flagged override, zero included, over both");
 	}
 
 	if (!ok) {

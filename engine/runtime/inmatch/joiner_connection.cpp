@@ -1123,7 +1123,8 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					make_protocol_message(c2s::GAME_START_ACK, std::vector<uint8_t>(4, 0)),
 					make_protocol_message(
 							c2s::AUTO_MEDIC_PREFERENCE,
-							encode_auto_medic_preference(AutoMedicPreference{})),
+							encode_auto_medic_preference(
+									AutoMedicPreference{auto_medic_disabled_})),
 					make_protocol_message(c2s::CLIENT_ACK, le32_value(conn_.connection_id)),
 					make_protocol_message(c2s::PING, {}),
 					// [the last 0x60 id, 0]: eight zero bytes on a first join
@@ -1562,16 +1563,30 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				}
 			}
 		} else if (m.tag == s2c::CHARATTR_PROPERTY_CLEAR) {
-			// Session-option mutation of the boot charattr table. A short body
-			// defaults to property 0; trailing bytes are ignored. Every row is
-			// touched before the next inner message dispatches.
-			// [orig: NapiNPClientMsg_ClearAnimSlot @0x4254C0 (misnamed) ->
-			//  AnimMap_SetSlotProperty @0x412890]
+			// The session's restriction of the boot charattr table: the property
+			// zeroed in every class, then disabled. A short body defaults to
+			// property 0; trailing bytes are ignored. Every row is touched before
+			// the next inner message dispatches. A host sends 0, 5, 6 and 7 at a
+			// join, one for each of its mp_No* words.
+			// [orig: NapiNPClientMsg_CharAttrDisableProperty @0x4254C0 ->
+			//  CharAttr_SetProperty @0x412890, CharAttr_SetPropertyAllowed
+			//  @0x4125C0; the sender Server_SendCharAttrRestrictionsToPlayer
+			//  @0x509950]
 			const uint8_t property_id =
 					m.payload.empty() ? uint8_t{0} : m.payload[0];
-			clear_charattr_challenge_property(
-					charattr_challenge_table_, property_id);
+			charattr_disable_property(charattr_table_, property_id);
 			++challenge_diagnostics_.property_clears;
+		} else if (m.tag == s2c::CHARATTR_DISABLED_PROPERTIES) {
+			// The authority's disable latches: eight of the table's fourteen set
+			// from the word (a body short of two bytes reads 0), at the join and
+			// with every periodic challenge.
+			// [orig: NapiNPClientMsg_CharAttrDisabledProperties @0x4281A0 ->
+			//  CharAttr_UnpackDisabledProperties @0x4124D0]
+			uint16_t word = 0;
+			std::size_t word_consumed = 0;
+			if (!decode_charattr_disabled_properties(m.payload.data(), m.payload.size(), word, word_consumed))
+				word = 0;
+			charattr_unpack_disabled(charattr_table_, word);
 		} else if (m.tag == s2c::CHARATTR_CRC_CHALLENGE) {
 			// Anti-cheat character-attribute CRC challenge. The reply is one
 			// 4-byte C2S 0x1C, and
@@ -1585,25 +1600,19 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// from charattr.def. Its embedded class must match the latest
 			// authoritative 0x5A class; absent/inactive/mismatched rows return zero.
 			// [orig: NapiNPClientMsg_HandleChecksumChallenge @0x42E6D0 (reply tag 0x1C,
-			//  len 4 @0x42e723); checksum @0x412aa0 (IDB
-			//  AnimMap_GetSlotChecksum is misnamed) — the `return 0` arm
+			//  len 4 @0x42e723); CharAttr_GetClassChecksum @0x412aa0 (IDB
+			//  AnimMap_GetSlotChecksum until 2026-10-07) — the `return 0` arm
 			//  @0x412abf; the host's discard + counter reset
 			//  NapiNPServerMsg_AnimChecksumRequest @0x501D40 @0x501d71/@0x501d79]
 			uint32_t challenge_seed = 0;
 			std::size_t seed_consumed = 0;
 			decode_u32_scalar(m.payload.data(), m.payload.size(), challenge_seed,
 					seed_consumed);
-			uint32_t checksum = 0;
 			++challenge_diagnostics_.charattr_seen;
-			if (const CharAttrChallengeRow *row =
-					    find_charattr_challenge_row(
-							    charattr_challenge_table_,
-							    current_player_class_)) {
-				checksum = challenge_seed ^
-						crc32_napi(row->data(), row->size());
-			} else {
-				++challenge_diagnostics_.charattr_row_missing;
-			}
+			bool row_found = false;
+			const uint32_t checksum = charattr_class_checksum(
+					charattr_table_, current_player_class_, challenge_seed, &row_found);
+			if (!row_found) ++challenge_diagnostics_.charattr_row_missing;
 			periodic_replies.push_back(
 					make_protocol_message(c2s::CHARATTR_CRC_REPLY, le32_value(checksum)));
 		} else if (m.tag == s2c::ENTITY_CHECKSUM_REQ) {

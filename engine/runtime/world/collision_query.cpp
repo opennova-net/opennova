@@ -372,12 +372,16 @@ bool collision_raycast_faces(const CollisionTargetView &target, const int32_t st
                                          14) +
                     face.plane_dist;
             if (d0 > 0 ? d1 > 0 : d1 <= 0) continue; // both on one side [orig: @ 0x4e5101]
-            // Direction rule [orig: @ 0x4e5115 — flag 1 always; the double-sided
-            // 0x800 branch rides the witnessed nonzero stack-residue arg; else
-            // enter-front only].
-            if ((face.flags & 1u) == 0) {
-                if ((face.flags & kFaceFlagDoubleSided) == 0 && !(d0 > 0 && d1 <= 0)) continue;
-            }
+            // Direction rule [orig: @ 0x4e5115..0x4e5139 — flag 1 takes the face
+            // from either side; with the back-face argument set a face is taken
+            // from either side unless 0x800, which takes it only entering from its
+            // front (d0 > 0, d1 <= 0); every caller pushes that argument as 1
+            // (Projectile_UpdatePhysics @ 0x4ea4ee; each Projectile_RaycastProximitySlots
+            // caller, e.g. @ 0x5384c8, @ 0x4e871a; Entity_ProcessTerrainBounce
+            // @ 0x445ac7 through Weapon_ValidateHitTarget), as collision_raycast_polygons
+            // takes it].
+            if ((face.flags & 1u) == 0 && (face.flags & kFaceFlagFrontOnly) != 0 && !(d0 > 0 && d1 <= 0))
+                continue;
             const int32_t a0 = abs32(d0);
             const int32_t total = a0 + abs32(d1);
             int32_t dist;

@@ -33,8 +33,9 @@ class MnuDocument : public Resource {
 	GDCLASS(MnuDocument, Resource)
 
 public:
-	// Mirrors opennova::mnu::WindowType (same order). -1 is used for screen containers,
-	// which are not widgets.
+	// Mirrors opennova::mnu::WindowType (same order): the original factory's tokens, and
+	// TYPE_WINDOW for the generic window any other token builds. -1 is used for screen
+	// containers, which are not widgets.
 	enum WidgetType {
 		TYPE_WINDOW = 0,
 		TYPE_STATIC,
@@ -48,17 +49,11 @@ public:
 		TYPE_SCROLL,
 		TYPE_TABLE,
 		TYPE_SPINLIST,
-		TYPE_MULTI,
-		TYPE_MAP,
-		TYPE_GLOBE,
-		TYPE_LABEL,
-		TYPE_GOTO,
 		TYPE_MARQUEE,
 		TYPE_GLB_TABLE,
 		TYPE_RADIOEDIT,
 		TYPE_LAN_LIST,
 		TYPE_GOPHER,
-		TYPE_UNKNOWN,
 	};
 
 	// Color slots map to fields of opennova::mnu::Font. Values are raw strings (hex like
@@ -121,6 +116,7 @@ public:
 	// --- Tree read ---
 	int get_screen_count() const;
 	PackedInt32Array get_screen_ids() const;
+	// The screen's first root window (get_child_ids of a screen lists every root).
 	int get_screen_root_id(int p_screen_id) const;
 	bool is_screen(int p_id) const;
 	int get_parent_id(int p_id) const;
@@ -133,7 +129,6 @@ public:
 	String get_screen_name(int p_screen_id) const;
 	bool get_screen_has_music_var(int p_screen_id) const;
 	int get_screen_music_var(int p_screen_id) const;
-	String get_screen_text_rsrc(int p_screen_id) const;
 
 	// Which POSITION extents are explicitly authored (the window-rect
 	// bitmask). Shipped menus omit RIGHT/BOTTOM for auto-size widgets (the
@@ -150,9 +145,12 @@ public:
 	String get_widget_string_type(int p_id) const; // "id" or "" (literal)
 
 	String get_widget_font(int p_id) const;
+	// The window's own TEXT_RSRC (a SCREEN has none: retail reads it on windows only).
+	String get_widget_text_rsrc(int p_id) const;
 
-	// The marquee data source file and the scroll/marquee orientation.
-	String get_widget_datasource(int p_id) const;
+	// The marquee's DATASOURCE files, in document order (retail loads each and appends
+	// its credits), and the scroll/marquee orientation.
+	PackedStringArray get_widget_datasources(int p_id) const;
 	String get_widget_orientation(int p_id) const;
 
 	// Per-widget interaction sounds (hover/click etc.), one MnuSoundRow each.

@@ -1,8 +1,8 @@
 extends GutTest
 
 # The runtime HudOverlay (native, over the engine HudFrameCompiler): configure
-# from the shipped hudpos.def (the reference fixture set; those legs pend
-# without it), feed typed per-frame state, and assert on the
+# from authored hudpos.def text (the reference fixture's legs are in
+# retail/hud_overlay_test.gd), feed typed per-frame state, and assert on the
 # compiled draw list (get_draw_list_stats) plus the visible canvas geometry.
 # The shell-side HudSightsCard child stack is covered here too.
 
@@ -36,7 +36,10 @@ func _load_temp_layout(lines: PackedStringArray, textures: PackedStringArray,
 		var texture_size: Vector2i = texture_sizes.get(texture_name, Vector2i(2, 2))
 		TestFs.write_bytes(self, fixture.dir.path_join(texture_name),
 				TestFs.tga_bytes(texture_size))
-	TestFs.write_text(self, fixture.dir.path_join("hudpos.def"), "\n".join(lines))
+	# Every gated element shown first (an unauthored HUDDECLUT row hides its
+	# slot, D-HUD-54); a test's own row for a slot comes later and stands.
+	TestFs.write_text(self, fixture.dir.path_join("hudpos.def"),
+			"\n".join(PackedStringArray(HudFixture.DECLUTTER_ROWS) + lines))
 	fixture.layout = HudPos.new()
 	assert_eq(fixture.layout.load(fixture.dir.path_join("hudpos.def")), OK)
 	fixture.root = ResourceRoot.new()
@@ -117,7 +120,7 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	assert_true(is_instance_valid(hud), "The complete minimap pass renders safely.")
 	stats = hud.get_draw_list_stats()
 	assert_eq(stats.map_texture_filter, 4,
-			"The spinmap icon strip uses explicit linear mip filtering.")
+			"The spinmap icon strip's sampler reaches its mip chain (the shader takes the nearest level).")
 	assert_eq(stats.map_texture_repeat, 1,
 			"The spinmap icon strip clamps past its half texel.")
 	assert_true(stats.map_icon_mipmaps,
@@ -298,8 +301,10 @@ func test_stance_assets_use_explicit_ids_for_slots() -> void:
 	await get_tree().process_frame
 	RenderingServer.canvas_item_set_custom_rect(hud.get_canvas_item(), false)
 
+	# The draw list's window coordinates land on this raster's pixel centres
+	# half a pixel over (HudPos.d3d9_screen_offset, D3D9's).
 	assert_eq(RenderingServer.debug_canvas_item_get_rect(hud.get_canvas_item()),
-		Rect2(43, 653, 128, 128),
+		Rect2(Vector2(43, 653) + HudPos.d3d9_screen_offset(), Vector2(128, 128)),
 		"Explicit IDs select slots independent of file order; the later ID 2 offset replaces the earlier one.")
 
 
@@ -342,6 +347,34 @@ func test_crosshair_requires_active_weapon() -> void:
 	hud.set_weapon_state(true, -1, -1, 0, 0, false, false, false, 0)
 	assert_eq(hud.get_draw_list_stats().tris, 14,
 		"An armed hip stance emits the five tapered regions (14 triangles).")
+
+
+# A hudpos.def with no key (no byte, a comment alone, or no file at all) runs the
+# HUD over the globals no arm wrote: the HUDDECLUT mask table stays zero and
+# every gated element hides, the armed crosshair among them, where the overlay
+# used to keep everything shown (D-HUD-54; the hud_layout ctest walks every
+# element). A file with the XHAIRS row alone shows it, and only it.
+func test_a_hudpos_with_no_key_hides_every_gated_element() -> void:
+	for text: String in ["", "// The HUD layout: nothing yet.\r\n", "<missing>", "HUDDECLUT_XHAIRS 1 1 1 1\r\n"]:
+		var dir := TestFs.cache_dir(self, "hud_overlay_no_key")
+		_temp_dirs.append(dir)
+		TestFs.write_bytes(self, dir.path_join("cross01.tga"), TestFs.tga_bytes(Vector2i(8, 8)))
+		if text != "<missing>":
+			TestFs.write_bytes(self, dir.path_join("hudpos.def"), text.to_utf8_buffer())
+		var root := ResourceRoot.new()
+		assert_eq(root.set_root_dir(dir), OK)
+		var layout := HudPos.new()
+		var loaded := layout.load_from_resource_root(root, "hudpos.def")
+		assert_eq(loaded, ERR_FILE_NOT_FOUND if text == "<missing>" else OK,
+				"%s: an empty file is a file of no line, not an error" % text)
+		var hud := _make_overlay()
+		hud.configure(layout, root)
+		assert_true(hud.is_configured(), "%s: the HUD runs without a layout" % text)
+		hud.set_player_state(100, 1.0, 0, 80.0)
+		hud.set_weapon_state(true, 30, 90, 0, 0, false, false, false, 0)
+		var shown := text.begins_with("HUDDECLUT_XHAIRS")
+		assert_eq(hud.get_draw_list_stats().tris, 14 if shown else 0,
+				"%s: the crosshair draws only when a row shows it" % text)
 
 
 # A texture whose material word is colour family 0x600 draws under
@@ -392,6 +425,84 @@ func test_shaders_decode_the_submitted_modulate2x_flags() -> void:
 	assert_true(map.contains(
 			"if (modulate2x_on > 0.5) {\n\t\tCOLOR.rgb = min(COLOR.rgb * 2.0, vec3(1.0));"),
 			"the flagged sprite's colour doubles, saturated")
+	# The fixed-function stage's MIPFILTER POINT: the nearest level, bounded by
+	# the strip's last retail level (renderer::TextureStage::MapIconStrip).
+	assert_true(map.contains("COLOR = vertex_color * textureLod(TEXTURE, UV, level);"),
+			"the map pass samples the nearest mip level")
+	assert_true(map.contains("max(icon_max_lod, 0.0)"),
+			"the level stops at the strip's last retail level")
+
+
+# Every glyph draws through its font page's material, 0x651: MODULATE2X(TEXTURE,
+# DIFFUSE), so the half-bright drawers' halved colour reads at full brightness
+# (D-HUD-51). The flat HUD's glyph runs carry the +16 UV.y flag and the map's its
+# +8 UV.x flag, each at the drawer's raw halved diffuse [orig: GameFont_LoadFromBlob
+# @0x674825 (0x651 per page); CGameFont_DrawText @0x6752c0 binds it per page run;
+# sub_580560 @0x59aeab halves the system ring's white].
+func test_glyph_runs_draw_through_the_font_pages_modulate2x() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"fonthud1_hi Gunpl22b.fnt",
+		"HUDSPINMAPX1 810",
+		"HUDSPINMAPX2 1020",
+		"HUDSPINMAPY1 552",
+		"HUDSPINMAPY2 762",
+	]), PackedStringArray(["TSDicon.tga", "compring.tga"]), {
+		"TSDicon.tga": Vector2i(64, 1920),
+	})
+	_copy_font_into(fixture.dir)
+	# A fresh root sees the font copied in after the fixture's scan.
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture.dir), OK)
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, root)
+	hud.set_player_state(50, 1.0, 0, 80.0)
+	hud.push_message("Move to the extraction point")
+	await get_tree().process_frame
+	var runs := 0
+	for row: Dictionary in hud.get_flat_submissions():
+		if row.kind != "glyphs":
+			continue
+		runs += 1
+		assert_eq(row.size, Vector2i(256, 256), "a glyph run samples its 256x256 font page")
+		for uv: Vector2 in row.uvs:
+			assert_gte(uv.y, FLAT_MODULATE2X_FLAG * 0.5, "every glyph vertex carries the flag")
+		for c: Color in row.colors:
+			assert_eq(c.to_argb32(), 0xFF7F7F7F,
+					"the white line's diffuse is the drawer's halved white, doubled on the device")
+	assert_gt(runs, 0, "the system ring's line submits its glyph run")
+
+	# The spinmap's distance and grid labels: the map pass's flag, the raw halved
+	# diffuse (the compile-side doubling is gone).
+	var terrain := TerrainData.new()
+	terrain.set_sector_count(16)
+	terrain.set_sector_rows(16)
+	var sectors := PackedInt32Array()
+	sectors.resize(256)
+	sectors.fill(1)
+	terrain.set_sector_grid(sectors)
+	hud.set_minimap_terrain(terrain)
+	hud.set_waypoint("Target", 1024, Vector2(100, 0), 20.0)
+	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false, PackedInt32Array([
+		7, 36, 1,
+		0, 0x1001, 64 << 16, 0, 0, 0, 10, -16711936, 0, 0, 1984, 1,
+		1, 0, 0, 6, 0,
+		0, 0, 0, 1, -1, 0, 64 << 16, 0, 64 << 16, 0, 0,
+		0, 0,
+		0, 0, 0, 0, 0, 0,
+	]))
+	assert_gt(hud.get_draw_list_stats().map_labels, 0, "the distance and grid labels compile")
+	await get_tree().process_frame
+	var map_runs := 0
+	for row: Dictionary in hud.get_map_submissions():
+		if not row.has("page"):
+			continue
+		map_runs += 1
+		for uv: Vector2 in row.uvs:
+			assert_gte(uv.x, MAP_MODULATE2X_FLAG * 0.5, "every map glyph vertex carries the flag")
+		for c: Color in row.colors:
+			assert_true(c.r8 <= 127 and c.g8 <= 127 and c.b8 <= 127,
+					"a map label's diffuse is the drawer's halved colour (%s)" % c)
+	assert_gt(map_runs, 0, "the map labels submit their glyph runs")
 
 
 # Every HUD texture draws through its maker's material word, not its loader's:
@@ -757,8 +868,8 @@ func test_player_view_effects_draw_retail_asset_stack() -> void:
 	RenderingServer.canvas_item_set_custom_rect(effects.get_canvas_item(), false)
 
 	assert_eq(RenderingServer.debug_canvas_item_get_rect(effects.get_canvas_item()),
-			Rect2(0, 0, 1024, 768),
-			"Retail masks cover the viewport while inset art stays in design coordinates.")
+			Rect2(HudPos.d3d9_screen_offset(), Vector2(1024, 768)),
+			"Retail masks cover the viewport (on D3D9's pixel centres) while inset art stays in design coordinates.")
 	assert_eq(effects.get_child_count(true), 4,
 			"The sun veil and the three fullscreen damage-feedback quads are "
 			+ "internal children; the NVG image is the terminal FrameFx pass's, and "

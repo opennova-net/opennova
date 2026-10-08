@@ -36,16 +36,16 @@ func test_00trg_mission_dialog_resolves() -> void:
 	var dialog_count := int(stats.dialogs)
 	assert_gt(dialog_count, 0, "the mission .DBF loaded with dialog groups")
 
-	# Every dialog id should resolve to a set the loaded banks (mission .LWF +
-	# game.lwf + gamelocl.LWF) actually contain -- proving the .dbf -> bank pipeline
-	# end-to-end without an audio device.
+	# Every dialog id should resolve to a wave the dialog bank's sounds (the mission's
+	# .LWF beside its .DBF) hold -- proving the .dbf -> dialog bank pipeline end-to-end
+	# without an audio device.
 	var resolved := 0
 	for i in range(1, dialog_count + 1):
-		var set_name := audio.resolve_dialog_set(i)
-		if not set_name.is_empty():
+		var wave := audio.resolve_dialog_wave(i)
+		if not wave.is_empty():
 			resolved += 1
-	gut.p("resolved %d / %d dialog ids to loaded sets" % [resolved, dialog_count])
-	assert_gt(resolved, 0, "at least one dialog id resolves to a playable set")
+	gut.p("resolved %d / %d dialog ids to the dialog bank's waves" % [resolved, dialog_count])
+	assert_eq(resolved, dialog_count, "every dialog id resolves to a wave of the dialog bank")
 
 	# The dialog/zone wavs are IMA-ADPCM (audioFormat 0x11) -- they must now decode
 	# to a non-empty 16-bit stream (previously WavLoader returned null -> silence).

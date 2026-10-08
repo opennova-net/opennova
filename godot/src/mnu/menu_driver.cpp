@@ -10,13 +10,18 @@
 #include "object/weapon_database.h"
 #include "object/avatar_database.h"
 #include "object/avatar_records.h"
+#include "player/player_profiles.h"
 #include "mnu/mns_stylesheet.h"
 #include "mnu/mnu_document.h"
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
+#include "simulation/hud_view_records.h"
 #include "util/string_convert.h"
 
+#include <runtime/inmatch/stat_screen_feed.h>
 #include <runtime/menu/loadout_screen.h>
+#include <runtime/menu/menu_commands.h>
+#include <runtime/menu/menu_credits.h>
 
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
@@ -119,11 +124,9 @@ public:
 		return f != nullptr && f->is_configured();
 	}
 	void configure_screen(const std::string &screen) override {
-		if (MenuFrame *f = frame()) {
-			Dictionary text_lookup;
-			owner_->fill_screen_text_lookup_(text_lookup);
-			f->configure(owner_->doc_, to_gd(screen), owner_->root_, owner_->style_, text_lookup);
-		}
+		if (MenuFrame *f = frame())
+			f->configure(owner_->doc_, to_gd(screen), owner_->root_, owner_->style_,
+					owner_->override_text_);
 	}
 	void screen_configured() override {
 		owner_->seed_marquee_widgets_();
@@ -158,14 +161,15 @@ public:
 			const std::vector<opennova::menu::MenuTableRow> &rows) override {
 		if (MenuFrame *f = frame()) f->set_widget_table_rows(index, rows);
 	}
-	void set_widget_table_columns(int index,
-			const std::vector<opennova::menu::MenuTableColumnDef> &columns) override {
-		if (MenuFrame *f = frame()) f->set_widget_table_columns(index, columns);
-	}
 	void set_widget_clip_rect(int index, bool enabled, int left, int top, int right,
 			int bottom) override {
 		if (MenuFrame *f = frame())
 			f->set_widget_clip_rect(index, enabled, Rect2i(left, top, right - left, bottom - top));
+	}
+	void set_widget_table_columns(int index, bool installed,
+			const std::vector<opennova::menu::MenuTableColumn> &columns,
+			int sort_column) override {
+		if (MenuFrame *f = frame()) f->set_widget_table_columns(index, installed, columns, sort_column);
 	}
 	void set_widget_hover_item(int index, int row) override {
 		if (MenuFrame *f = frame()) f->set_widget_hover_item(index, row);
@@ -219,6 +223,10 @@ public:
 		sx = scale.x;
 		sy = scale.y;
 	}
+	std::vector<opennova::menu::MenuPumpWindow> press_mouse(float x, float y) override {
+		MenuFrame *f = frame();
+		return f != nullptr ? f->press_mouse(Vector2(x, y)) : std::vector<opennova::menu::MenuPumpWindow>();
+	}
 	int process_mouse(float x, float y, bool button_down) override {
 		MenuFrame *f = frame();
 		return f != nullptr ? f->process_mouse(Vector2(x, y), button_down) : -1;
@@ -270,9 +278,16 @@ public:
 		}
 		return f->table_hit(index, Vector2(x, y), row, column);
 	}
-	int hotkey_widget(const std::string &key, bool virtual_key) const override {
+	std::string widget_mnemonic(int index) const override {
 		MenuFrame *f = frame();
-		return f != nullptr ? f->hotkey_widget(to_gd(key), virtual_key) : -1;
+		return f != nullptr ? f->widget_mnemonic(index) : std::string();
+	}
+	std::string widget_string(int index, const std::string &key) const override {
+		MenuFrame *f = frame();
+		return f != nullptr ? f->widget_string(index, key) : key;
+	}
+	void set_open_popup(int index) override {
+		if (MenuFrame *f = frame()) f->set_open_popup(index);
 	}
 	bool edit_char(int index, int unicode) override {
 		MenuFrame *f = frame();
@@ -332,13 +347,12 @@ String MenuDriver::get_menu_file() const { return to_gd(runtime_.menu_file()); }
 String MenuDriver::get_current_screen() const { return to_gd(runtime_.current_screen()); }
 
 bool MenuDriver::open_document(const Ref<MnuDocument> &p_doc, const Ref<ResourceRoot> &p_root,
-		const Ref<MnsStyleSheet> &p_style, const Ref<RtxtStringFile> &p_text,
+		const Ref<MnsStyleSheet> &p_style, const Ref<RtxtStringFile> &p_override_text,
 		const String &p_menu_file, const String &p_target_screen) {
 	doc_ = p_doc;
 	root_ = p_root;
 	style_ = p_style;
-	text_ = p_text;
-	text_rsrc_cache_.clear();
+	override_text_ = p_override_text;
 	// The mounted game picks the version text the STARTUP label shows.
 	runtime_.set_game_code(p_root.is_valid() ? to_std(p_root->game_code()) : std::string());
 	return runtime_.open_document(doc_.is_valid() ? &doc_->get_native() : nullptr,
@@ -412,11 +426,15 @@ void MenuDriver::on_runtime_event_(const opennova::menu::MenuEvent &p_event) {
 		case Kind::MenuRequested:
 			emit_signal("menu_requested", to_gd(p_event.text), to_gd(p_event.text2));
 			break;
-		case Kind::QuitRequested:
-			emit_signal("quit_requested");
+		case Kind::PopRequested:
+			emit_signal("pop_requested");
 			break;
 		case Kind::UrlRequested:
-			emit_signal("url_requested", to_gd(p_event.text));
+			emit_signal("url_requested", to_gd(p_event.text), p_event.flag);
+			break;
+		case Kind::FilterRequested:
+			emit_signal("filter_requested", p_event.id, p_event.value, to_gd(p_event.text),
+					p_event.flag, to_gd(p_event.text2));
 			break;
 		case Kind::Sound:
 			play_widget_sound(to_gd(p_event.text2), to_gd(p_event.text));
@@ -444,81 +462,53 @@ void MenuDriver::on_runtime_event_(const opennova::menu::MenuEvent &p_event) {
 			emit_signal("table_cell_clicked", p_event.id, to_gd(p_event.text), p_event.value,
 					p_event.column, p_event.state, p_event.cell_value, p_event.flag);
 			break;
+		case Kind::ServiceRequested:
+			// The service verbs' rows: the game serves its LAN and NovaWorld screens through the
+			// companions' controls by name, none through these rows yet.
+			break;
 	}
 }
 
-// The id->text table for String/Item type=="id" lookups: the screen's own
-// TEXT_RSRC (loaded through the VFS, cached) wins, else the shell-provided
-// text resource.
-void MenuDriver::fill_screen_text_lookup_(Dictionary &r_out) {
-	Ref<RtxtStringFile> table = text_;
-	const opennova::mnu::Screen *screen = runtime_.index().screen(runtime_.current_screen_id());
-	if (screen != nullptr && !screen->text_rsrc.empty()) {
-		const Ref<RtxtStringFile> loaded = load_text_rsrc_(to_gd(screen->text_rsrc));
-		if (loaded.is_valid()) table = loaded;
-	}
-	if (table.is_null()) return;
-	// First-match-wins across sections (the engine-faithful flat lookup).
-	for (int section = 0; section < table->get_section_count(); ++section) {
-		const String section_name = table->get_section_name(section);
-		const PackedStringArray keys = table->get_section_keys(section);
-		for (int i = 0; i < keys.size(); ++i) {
-			const String token = keys[i];
-			if (!r_out.has(token))
-				r_out[token] = table->get_string_in_section(section_name, token);
-		}
-	}
-}
-
-Ref<RtxtStringFile> MenuDriver::load_text_rsrc_(const String &p_file) {
-	const String key = p_file.to_lower();
-	if (const Ref<RtxtStringFile> *cached = text_rsrc_cache_.getptr(key)) return *cached;
-	Ref<RtxtStringFile> loaded;
-	if (root_.is_valid()) {
-		const PackedByteArray bytes = root_->read_file(p_file.get_file());
-		if (!bytes.is_empty()) {
-			loaded.instantiate();
-			if (loaded->load_from_byte_array(bytes) != OK) loaded.unref();
-		}
-	}
-	text_rsrc_cache_[key] = loaded;
-	return loaded;
-}
-
-// Marquee DATASOURCE routing: a marquee_wnd DATASOURCE is either a
-// CBIN-encrypted credits config (ENV scroll settings + TEXT entries — routed
-// to the dedicated CreditsPlayer scroller) or plain text fed to the compiled
-// roll (the retail loader is CMarqueeWnd_LoadCreditsFromIni; the CBIN scroller
-// is godot/src/cbin).
+// Marquee DATASOURCE routing: every DATASOURCE of a marquee_wnd loads and appends
+// its credits (the witness lives at the engine home, menu_credits.h). A text
+// config reads through the engine's port into the compiled roll; a CBIN config (the
+// binary form the engine does not read there) goes to a CreditsPlayer scroller of
+// its own (godot/src/cbin, D-MNU-6).
 void MenuDriver::seed_marquee_widgets_() {
 	clear_credits_();
 	MenuFrame *frame = frame_();
 	if (root_.is_null() || frame == nullptr) return;
 	for (int id : runtime_.current_screen_ids()) {
 		const opennova::mnu::Window *window = runtime_.index().window(id);
-		if (window == nullptr || window->type != opennova::mnu::WindowType::Marquee ||
-				window->datasource.empty())
-			continue;
-		const PackedByteArray bytes = root_->read_file(to_gd(window->datasource).get_file());
-		if (bytes.is_empty()) continue;
-		const Ref<CbinCreditsResource> credits = CbinCreditsResource::from_cbin_bytes(bytes);
-		if (credits.is_valid()) {
+		if (window == nullptr || window->type != opennova::mnu::WindowType::Marquee) continue;
+		opennova::menu::MarqueeCredits credits;
+		bool loaded = false;
+		for (const std::string &source : window->datasources) {
+			if (source.empty()) continue;
+			const PackedByteArray bytes = root_->read_file(to_gd(source).get_file());
+			if (bytes.is_empty()) continue;
+			if (opennova::menu::marquee_load_credits(bytes.ptr(), static_cast<size_t>(bytes.size()),
+						credits, [frame](const std::string &name) {
+							return frame->texture_loads(to_gd(name));
+						})) {
+				loaded = true;
+				continue;
+			}
+			const Ref<CbinCreditsResource> cbin = CbinCreditsResource::from_cbin_bytes(bytes);
+			if (cbin.is_null()) continue;
 			const Rect2 rect = widget_frame_rect(id);
 			CreditsPlayer *player = memnew(CreditsPlayer);
 			player->set_name("Credits");
-			player->set_credits_resource(credits);
+			player->set_credits_resource(cbin);
 			player->set_autoplay(true);
 			player->set_position(rect.position);
 			player->set_size(rect.size);
 			player->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 			frame->add_child(player);
 			credits_.push_back({ ObjectID(player->get_instance_id()), id });
-			continue;
 		}
-		const String text = bytes.get_string_from_ascii();
 		const int index = runtime_.frame_index(id);
-		if (index >= 0 && !text.is_empty())
-			frame->set_widget_marquee_lines(index, text.replace("\r\n", "\n").split("\n"));
+		if (index >= 0 && loaded) frame->set_widget_marquee(index, credits);
 	}
 	sync_credits_();
 }
@@ -579,14 +569,13 @@ void MenuDriver::focus_widget(int p_id) {
 }
 
 Vector2 MenuDriver::design_scale() const {
-	// The fixed authoring design space (the witness lives at the engine home,
-	// engine/runtime/menu menu_frame.h kMenuDesignWidth/Height).
+	// The scale pair of the fixed authoring design space (the witness lives at the
+	// engine home, engine/runtime/menu menu_frame.h menu_scale_x/y).
 	MenuFrame *frame = frame_();
 	if (frame == nullptr) return Vector2(1.0f, 1.0f);
 	const Vector2 size = frame->get_size();
 	if (size.x > 1.0f && size.y > 1.0f)
-		return Vector2(size.x / static_cast<float>(MenuFrame::DESIGN_WIDTH),
-				size.y / static_cast<float>(MenuFrame::DESIGN_HEIGHT));
+		return Vector2(opennova::menu::menu_scale_x(size.x), opennova::menu::menu_scale_y(size.y));
 	return Vector2(1.0f, 1.0f);
 }
 
@@ -696,6 +685,55 @@ void MenuDriver::clear_widget_clip_rect(int p_id) {
 	runtime_.set_widget_clip_rect(p_id, false, 0, 0, 0, 0);
 }
 
+int MenuDriver::table_sort_column(int p_id) const {
+	return runtime_.table_sort_column(p_id);
+}
+
+// The stat RESULTLIST filled the way StatScreen_PopulateStatResultsList fills it (the
+// witness lives at the engine home, inmatch stat_screen_feed.h): the column
+// set-up, the rows with their team colours, the local row selected, the sort.
+// The engine supplies the columns, the rows and the sort constants; the
+// local row is selected before the sort, which carries it.
+void MenuDriver::fill_stat_results(int p_id, const TypedArray<EndRoundColumn> &p_columns,
+		const TypedArray<EndRoundRow> &p_rows) {
+	std::vector<opennova::menu::MenuTableColumn> columns;
+	for (int i = 0; i < p_columns.size(); ++i) {
+		const Ref<EndRoundColumn> column = p_columns[i];
+		if (column.is_null()) continue;
+		opennova::menu::MenuTableColumn c;
+		c.label = to_std(column->get_header());
+		c.width = column->get_width();
+		c.justify = opennova::inmatch::kStatScreenColumnJustify;
+		c.vjustify = opennova::inmatch::kStatScreenColumnVJustify;
+		c.body_justify = c.justify;
+		c.body_vjustify = c.vjustify;
+		// NAME and Squad compare as text; a stat field numerically (init_table_row's
+		// sort argument 0 / 1 @ 0x562346 / 0x56237a / 0x56242b).
+		c.numeric_sort = column->get_field_id() != 0;
+		columns.push_back(std::move(c));
+	}
+	runtime_.table_clear_rows(p_id);
+	runtime_.table_set_columns(p_id, columns);
+	int selected = -1;
+	for (int i = 0; i < p_rows.size(); ++i) {
+		const Ref<EndRoundRow> row = p_rows[i];
+		if (row.is_null()) continue;
+		std::vector<std::string> cells{ to_std(row->get_name()), to_std(row->get_squad()) };
+		for (const String &cell : row->get_cells()) cells.push_back(to_std(cell));
+		runtime_.table_add_row(p_id, cells);
+		const int index = runtime_.table_row_count(p_id) - 1;
+		// A team row takes its colour (stat_screen_feed.h); any other keeps the
+		// table's (the feed's white).
+		const uint32_t color = static_cast<uint32_t>(row->get_color());
+		if (color != 0xFFFFFFFFu) runtime_.table_set_row_color(p_id, index, true, color);
+		if (row->get_selected()) selected = index;
+	}
+	if (selected >= 0) runtime_.table_select_row(p_id, selected, false);
+	runtime_.table_set_column_ascending(p_id, opennova::inmatch::kStatScreenSortColumn,
+			opennova::inmatch::kStatScreenSortAscending);
+	runtime_.table_sort_by_column(p_id, opennova::inmatch::kStatScreenSortColumn);
+}
+
 // ---- activation / actions --------------------------------------------------------
 
 void MenuDriver::activate(int p_id) { runtime_.activate(p_id); }
@@ -715,10 +753,8 @@ void MenuDriver::play_widget_sound(const String &p_trigger, const String &p_file
 
 // ---- input -------------------------------------------------------------------------
 
-void MenuDriver::on_frame_widget_clicked_(int p_index) {
-	runtime_.on_widget_clicked(p_index,
-			static_cast<uint32_t>(Time::get_singleton()->get_ticks_msec()),
-			Input::get_singleton()->is_key_pressed(KEY_CTRL));
+void MenuDriver::on_frame_widget_clicked_(int p_index, int p_part) {
+	runtime_.on_widget_clicked(p_index, p_part);
 }
 
 void MenuDriver::on_frame_scroll_value_(int p_index, int p_value) {
@@ -726,7 +762,8 @@ void MenuDriver::on_frame_scroll_value_(int p_index, int p_value) {
 }
 
 void MenuDriver::process_mouse(const Vector2 &p_position, bool p_button_down) {
-	runtime_.process_mouse(p_position.x, p_position.y, p_button_down);
+	runtime_.process_mouse(p_position.x, p_position.y, p_button_down,
+			static_cast<uint32_t>(Time::get_singleton()->get_ticks_msec()));
 }
 
 bool MenuDriver::process_wheel(const Vector2 &p_position, int p_steps) {
@@ -735,29 +772,15 @@ bool MenuDriver::process_wheel(const Vector2 &p_position, int p_steps) {
 
 bool MenuDriver::handle_key_input(const Ref<InputEventKey> &p_event) {
 	if (p_event.is_null() || p_event->is_echo() || !p_event->is_pressed()) return false;
-	// Godot key -> the runtime's key classes (the edit VK codes live at the
-	// engine home, engine/runtime/menu menu_edit.h kEditKey*).
+	// The Godot key as Windows delivers it: WM_KEYDOWN's virtual-key code (the
+	// keypad Enter is VK_RETURN there), then WM_CHAR's character.
 	opennova::menu::MenuKeyInput key;
-	using Key = opennova::menu::MenuKeyInput::Key;
 	const godot::Key keycode = p_event->get_keycode();
-	switch (keycode) {
-		case KEY_ESCAPE: key.key = Key::Escape; break;
-		case KEY_ENTER:
-		case KEY_KP_ENTER: key.key = Key::Enter; break;
-		case KEY_BACKSPACE: key.key = Key::Backspace; break;
-		case KEY_END: key.key = Key::End; break;
-		case KEY_HOME: key.key = Key::Home; break;
-		case KEY_LEFT: key.key = Key::Left; break;
-		case KEY_RIGHT: key.key = Key::Right; break;
-		case KEY_DELETE: key.key = Key::Delete; break;
-		default: break;
-	}
+	key.vk = keycode == KEY_KP_ENTER ? 0x0D : ControlsModel::vk_from_godot_key(static_cast<int>(keycode));
 	key.unicode = static_cast<int>(p_event->get_unicode());
 	key.printable_keycode = static_cast<int>(keycode);
 	key.shift = p_event->is_shift_pressed();
-	return runtime_.handle_key(key,
-			static_cast<uint32_t>(Time::get_singleton()->get_ticks_msec()),
-			Input::get_singleton()->is_key_pressed(KEY_CTRL));
+	return runtime_.handle_key(key);
 }
 
 void MenuDriver::close_active_combo_popup() { runtime_.close_active_combo_popup(); }
@@ -783,6 +806,23 @@ void MenuDriver::select_mission(int p_id, int p_row, const String &p_fallback) {
 }
 
 String MenuDriver::get_selected_mission() const { return to_gd(flow_.selected_mission()); }
+
+void MenuDriver::set_mod_descriptions(const PackedStringArray &p_names) {
+	mods_.set_descriptions(to_std_strings(p_names));
+}
+
+void MenuDriver::seed_mod_list(int p_id) {
+	const String dir = root_.is_valid() ? root_->get_root_dir() : String();
+	if (dir != mods_root_) {
+		mods_root_ = dir;
+		std::vector<opennova::ExpansionRecord> records;
+		if (!dir.is_empty()) records = opennova::vfs_expansion_records(to_std(dir));
+		mods_.set_records(std::move(records));
+	}
+	mods_.populate(runtime_, p_id, root_.is_valid() ? to_std(root_->get_expansion()) : std::string());
+}
+
+String MenuDriver::mod_list_pick(int p_id) const { return to_gd(mods_.pick(runtime_, p_id)); }
 
 bool MenuDriver::request_expansion(const String &p_name, const String &p_current, bool p_packed) {
 	return flow_.request_expansion(to_std(p_name), to_std(p_current), p_packed) !=
@@ -813,22 +853,41 @@ void MenuDriver::select_host_location(int p_id, const String &p_country) {
 	opennova::menu::HostDialog::select_location(runtime_, p_id, to_std(p_country));
 }
 
-void MenuDriver::prepare_options(const Ref<ControlsModel> &p_controls) {
-	if (p_controls.is_valid()) options_.prepare(runtime_, p_controls->native_bindings());
+PackedStringArray MenuDriver::command_names(const String &p_set) {
+	opennova::menu::MenuNameSet set = opennova::menu::MenuNameSet::kCount;
+	if (!opennova::menu::menu_name_set_from_token(to_std(p_set), set)) return PackedStringArray();
+	return to_gd_strings(opennova::menu::menu_name_set(set));
 }
 
-int MenuDriver::activate_options(const Ref<ControlsModel> &p_controls, const String &p_name) {
-	return p_controls.is_valid() ? options_.activate(runtime_, p_controls->native_bindings(),
-			to_std(p_name)) : 0;
+namespace {
+
+// The profile's current record, or null with no profile.
+opennova::playersav::ProfileRecord *current_record(const Ref<PlayerProfiles> &p_profiles) {
+	return p_profiles.is_valid() ? &p_profiles->native().current() : nullptr;
 }
 
-void MenuDriver::arm_options_remap(const Ref<ControlsModel> &p_controls, int p_id, int p_row) {
-	if (p_controls.is_valid()) options_.arm(runtime_, p_controls->native_bindings(), p_id, p_row);
+} // namespace
+
+void MenuDriver::prepare_options(const Ref<PlayerProfiles> &p_profiles) {
+	options_.prepare(runtime_, current_record(p_profiles));
 }
 
-int MenuDriver::consume_options_input(const Ref<ControlsModel> &p_controls,
-		const Ref<InputEvent> &p_event) {
-	if (p_controls.is_null() || p_event.is_null()) return 0;
+void MenuDriver::apply_options_policy(const Ref<PlayerProfiles> &p_profiles) {
+	options_.apply_policy(runtime_);
+	options_.seed_profile(runtime_, current_record(p_profiles));
+}
+
+int MenuDriver::activate_options(const Ref<PlayerProfiles> &p_profiles, const String &p_name) {
+	return options_.activate(runtime_, current_record(p_profiles), to_std(p_name));
+}
+
+String MenuDriver::options_control_text(int p_action, int p_device) const {
+	return String::utf8(options_.bindings().control_text(p_action,
+			static_cast<opennova::controls::Device>(p_device)).c_str());
+}
+
+int MenuDriver::consume_options_input(const Ref<InputEvent> &p_event) {
+	if (p_event.is_null()) return 0;
 	opennova::menu::RemapInput input;
 	const Ref<InputEventKey> key = p_event;
 	const Ref<InputEventMouseButton> mouse = p_event;
@@ -846,11 +905,7 @@ int MenuDriver::consume_options_input(const Ref<ControlsModel> &p_controls,
 		input.mouse_mask = static_cast<uint16_t>(ControlsModel::mouse_mask_from_godot_button(
 				static_cast<int>(mouse->get_button_index())));
 	}
-	return options_.consume(runtime_, p_controls->native_bindings(), input);
-}
-
-void MenuDriver::end_options_remap(const Ref<ControlsModel> &p_controls, bool p_refill) {
-	if (p_controls.is_valid()) options_.end_remap(runtime_, p_controls->native_bindings(), p_refill);
+	return options_.consume(runtime_, input);
 }
 
 // ---- loadout screen adapters --------------------------------------------------------
@@ -968,6 +1023,10 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("activate_mission", "id", "row"), &MenuDriver::activate_mission);
 	ClassDB::bind_method(D_METHOD("get_selected_mission"), &MenuDriver::get_selected_mission);
 	ClassDB::bind_method(D_METHOD("clear_selected_mission"), &MenuDriver::clear_selected_mission);
+	ClassDB::bind_method(D_METHOD("set_mod_descriptions", "names"), &MenuDriver::set_mod_descriptions);
+	ClassDB::bind_method(D_METHOD("seed_mod_list", "id"), &MenuDriver::seed_mod_list);
+	ClassDB::bind_method(D_METHOD("select_mod", "id", "row"), &MenuDriver::select_mod);
+	ClassDB::bind_method(D_METHOD("mod_list_pick", "id"), &MenuDriver::mod_list_pick);
 	ClassDB::bind_method(D_METHOD("request_expansion", "name", "current", "packed"), &MenuDriver::request_expansion);
 	ClassDB::bind_method(D_METHOD("has_pending_expansion_reload"), &MenuDriver::has_pending_expansion_reload);
 	ClassDB::bind_method(D_METHOD("take_expansion_reload"), &MenuDriver::take_expansion_reload);
@@ -982,17 +1041,21 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("selected_host_launch_options"),
 			&MenuDriver::selected_host_launch_options);
 	ClassDB::bind_method(D_METHOD("select_host_location", "id", "country"), &MenuDriver::select_host_location);
-	ClassDB::bind_method(D_METHOD("prepare_options", "controls"), &MenuDriver::prepare_options);
+	ClassDB::bind_method(D_METHOD("prepare_options", "profiles"), &MenuDriver::prepare_options);
 	ClassDB::bind_method(D_METHOD("is_options_surface"), &MenuDriver::is_options_surface);
-	ClassDB::bind_method(D_METHOD("activate_options", "controls", "name"), &MenuDriver::activate_options);
-	ClassDB::bind_method(D_METHOD("arm_options_remap", "controls", "id", "row"), &MenuDriver::arm_options_remap);
-	ClassDB::bind_method(D_METHOD("consume_options_input", "controls", "event"), &MenuDriver::consume_options_input);
-	ClassDB::bind_method(D_METHOD("end_options_remap", "controls", "refill"), &MenuDriver::end_options_remap);
+	ClassDB::bind_method(D_METHOD("apply_options_policy", "profiles"), &MenuDriver::apply_options_policy);
+	ClassDB::bind_static_method("MenuDriver", D_METHOD("command_names", "set"), &MenuDriver::command_names);
+	ClassDB::bind_method(D_METHOD("activate_options", "profiles", "name"), &MenuDriver::activate_options);
+	ClassDB::bind_method(D_METHOD("arm_options_remap", "id", "row"), &MenuDriver::arm_options_remap);
+	ClassDB::bind_method(D_METHOD("consume_options_input", "event"), &MenuDriver::consume_options_input);
+	ClassDB::bind_method(D_METHOD("end_options_remap", "refill"), &MenuDriver::end_options_remap);
+	ClassDB::bind_method(D_METHOD("options_control_text", "action", "device"),
+			&MenuDriver::options_control_text);
 	ClassDB::bind_method(D_METHOD("show_ingame_main"), &MenuDriver::show_ingame_main);
 	BIND_ENUM_CONSTANT(OPTIONS_CONSUMED);
-	BIND_ENUM_CONSTANT(OPTIONS_PERSIST_BINDINGS);
 	BIND_ENUM_CONSTANT(OPTIONS_COMMIT_PREVIEW);
 	BIND_ENUM_CONSTANT(OPTIONS_RESTORE_PREVIEW);
+	BIND_ENUM_CONSTANT(OPTIONS_APPLY_CONTROLS);
 	ClassDB::bind_method(D_METHOD("attach", "frame", "audio"), &MenuDriver::attach);
 	ClassDB::bind_method(D_METHOD("set_music_director", "director"),
 			&MenuDriver::set_music_director);
@@ -1001,8 +1064,8 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_frame"), &MenuDriver::get_frame);
 	ClassDB::bind_method(D_METHOD("get_menu_file"), &MenuDriver::get_menu_file);
 	ClassDB::bind_method(D_METHOD("get_current_screen"), &MenuDriver::get_current_screen);
-	ClassDB::bind_method(D_METHOD("open_document", "doc", "root", "style", "text", "menu_file",
-								 "target_screen"),
+	ClassDB::bind_method(D_METHOD("open_document", "doc", "root", "style", "override_text",
+								 "menu_file", "target_screen"),
 			&MenuDriver::open_document, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("document"), &MenuDriver::document);
 	ClassDB::bind_method(D_METHOD("get_screen_names"), &MenuDriver::get_screen_names);
@@ -1069,6 +1132,9 @@ void MenuDriver::_bind_methods() {
 			&MenuDriver::table_cell_text);
 	ClassDB::bind_method(D_METHOD("table_select_row", "id", "row", "additive"),
 			&MenuDriver::table_select_row, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("table_sort_column", "id"), &MenuDriver::table_sort_column);
+	ClassDB::bind_method(D_METHOD("fill_stat_results", "id", "columns", "rows"),
+			&MenuDriver::fill_stat_results);
 	ClassDB::bind_method(D_METHOD("table_insert_row", "id", "text0", "value0", "flags",
 								 "insert_index"),
 			&MenuDriver::table_insert_row, DEFVAL(0), DEFVAL(-1));
@@ -1109,7 +1175,7 @@ void MenuDriver::_bind_methods() {
 
 	// The frame's signals land here (the pump's click edge and its CScrollWnd
 	// interaction result).
-	ClassDB::bind_method(D_METHOD("_on_frame_widget_clicked", "index"),
+	ClassDB::bind_method(D_METHOD("_on_frame_widget_clicked", "index", "part"),
 			&MenuDriver::on_frame_widget_clicked_);
 	ClassDB::bind_method(D_METHOD("_on_frame_scroll_value", "index", "value"),
 			&MenuDriver::on_frame_scroll_value_);
@@ -1117,8 +1183,18 @@ void MenuDriver::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("screen_changed", PropertyInfo(Variant::STRING, "screen_name")));
 	ADD_SIGNAL(MethodInfo("menu_requested", PropertyInfo(Variant::STRING, "file"),
 			PropertyInfo(Variant::STRING, "target_screen")));
-	ADD_SIGNAL(MethodInfo("quit_requested"));
-	ADD_SIGNAL(MethodInfo("url_requested", PropertyInfo(Variant::STRING, "url")));
+	// POP_SCREEN with the document's own history empty: the shell's cross-file
+	// history pops, else nothing happens.
+	ADD_SIGNAL(MethodInfo("pop_requested"));
+	// A URL action: the trimmed URL, and whether retail opens the external
+	// browser (EXTERNAL_BROWSER, or external_browser=1 / commercial_browser=1).
+	ADD_SIGNAL(MethodInfo("url_requested", PropertyInfo(Variant::STRING, "url"),
+			PropertyInfo(Variant::BOOL, "external")));
+	// GLB_FILTER / GLB_FILTER_NUM from an edit's keys, to the control that
+	// receives it (a GLB_TABLE, whose runtime the shell does not host).
+	ADD_SIGNAL(MethodInfo("filter_requested", PropertyInfo(Variant::INT, "receiver_id"),
+			PropertyInfo(Variant::INT, "column"), PropertyInfo(Variant::STRING, "text"),
+			PropertyInfo(Variant::BOOL, "numeric"), PropertyInfo(Variant::STRING, "test")));
 	// The widget sound edge as resolved from the SOUND table (trigger, bank);
 	// the MenuAudio player plays it.
 	ADD_SIGNAL(MethodInfo("sound_requested", PropertyInfo(Variant::STRING, "file"),

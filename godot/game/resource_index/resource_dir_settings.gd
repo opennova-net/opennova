@@ -1,24 +1,15 @@
 class_name ResourceDirSettings
 extends RefCounted
 
-## Persisted game and expansion selection, and the retail install the bundled
-## menu's PLAY RETAIL picked (ADR 0048). A --resource-dir is never persisted.
+## Persisted game selection, and the retail install the bundled menu's PLAY
+## RETAIL picked (ADR 0048). A --resource-dir is never persisted, nor an
+## expansion: `/exp` names it, and the Mods list's pick lasts the run, as the
+## original's does (D-MNU-31).
 
 const CONFIG_PATH := "user://opennova.cfg"
 const SECTION := "resources"
-const EXPANSION_KEY := "expansion"
 const GAME_KEY := "game"
 const RETAIL_DIR_KEY := "retail_dir"
-
-
-## The persisted expansion name (e.g. "jox01"), or "" for the base game.
-static func get_expansion() -> String:
-	return String(ConfigStore.read(CONFIG_PATH, SECTION, EXPANSION_KEY, ""))
-
-
-## Persist the expansion name, preserving any other sections in the config.
-static func set_expansion(name: String) -> void:
-	ConfigStore.write(CONFIG_PATH, SECTION, EXPANSION_KEY, name.strip_edges())
 
 
 ## The persisted game code (e.g. "jodemo"), or "jo" when unset. Selects the SCR decode

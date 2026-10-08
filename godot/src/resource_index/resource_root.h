@@ -12,10 +12,12 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <unordered_map>
 
 #include <base/resource_index/resource_index.h>
+#include <base/vfs/file_source.h>
 #include <runtime/assets/asset_store.h>
 #include <runtime/renderer/texture_load_rules.h>
 
@@ -56,6 +58,7 @@ private:
 		None,
 		Loose,
 		Runtime,
+		Source,
 	};
 
 	String root_dir_;
@@ -96,11 +99,10 @@ private:
 	static String lookup_name(const String &name);
 	static opennova::VfsLookupPolicy to_vfs_lookup_policy(LookupPolicy policy);
 
-	// Shared validate-and-scan body for both mount entry points. `game_code` selects the SCR
-	// decode policy (gameprofile code, e.g. "jo"/"jodemo"); an empty/unknown code is the JO default.
-	// `discovery` selects the witnessed retail boot table or an explicit archive scan.
-	Error mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode,
-	                      const String &game_code, opennova::VfsArchiveDiscovery discovery);
+	// The body both mount entry points share before their scan: the caches keyed to the old
+	// root dropped, the old mount discarded, `path` validated; `r_clean` the directory to
+	// scan, root_dir_ set to it.
+	Error begin_mount(const String &path, String &r_clean);
 	// The files a texture loader tries for `name` under `policy` (the mount's own
 	// query rules, the policy's loose-first answer), and one attempt's bytes.
 	std::vector<opennova::renderer::TextureLoad> texture_attempts_(const String &name,
@@ -136,9 +138,21 @@ public:
 	// Safe to call on an already-mounted root: the mount is replaced, not layered (the index
 	// rebuilds, the resolver caches drop, and the epoch bump self-clears every epoch-keyed
 	// holder), so holders of this object move with it — the in-place expansion switch the
-	// Mods screen and the LAN joiner both perform.
+	// LAN joiner performs (the Mods list's reload clears the root first, then mounts here).
 	Error mount_runtime(const String &path, const String &expansion = String(),
 	                    bool allow_loose_override = false, const String &game_code = "jo");
+	// C++ siblings only (not bound; the OpenNova Editor's devices): an embedder's own file set mounted
+	// in place of a directory (ResourceIndex::mount_source: the editor's project files, its open
+	// documents standing in for theirs), replacing the mount as the entry points above do. Every flat
+	// name the source resolves is a file of this root (has_file, read_file, load_texture,
+	// load_material_texture, load_font through its bytes); a lookup policy changes nothing; nothing is
+	// listed (list_files, list_file_entries) and no name resolves to a path on disk (resolve_file);
+	// get_root_dir() is ResourceIndex::kSourceRootDir, a label and no directory, so every "is a root
+	// mounted" test answers yes. The source is read as it stands at each call; a mount drops what
+	// this root cached, never the global cache epoch: another root's holders keep theirs (another
+	// editor device's placer, say), and the mounting device makes afresh what read a moved file (its
+	// placer among them).
+	Error mount_files(std::shared_ptr<const opennova::FileSource> files);
 	// Global cache epoch (see base/resource_index/resource_index.h): bumped by every mount/clear on ANY
 	// root. GDScript cache holders compare it against the epoch they were built under and
 	// self-clear when it moved. bump_cache_epoch() lets tools/tests force an
@@ -163,19 +177,15 @@ public:
 	// expansion/<n>/<n>.bin's bytes, or empty (no expansion, no loose file, a loose
 	// mount, a failed mount). The rule is the engine's vfs_expansion_override_table: a
 	// mount over a root that is not runtime-mounted is the boot's load (no archive
-	// open), a mount over a runtime-mounted one the in-place switch's (the old archives
-	// open: the loose file only under `/d`). Every mount_runtime() and set_root_dir()
+	// open; the Mods list's reload clears the root first), a mount over a runtime-mounted
+	// one the join's in-place switch's (the old archives open: the loose file only under
+	// `/d`). Every mount_runtime() and set_root_dir()
 	// emits `mounted` once it is done, so a holder re-reads this.
 	PackedByteArray get_expansion_override_table() const;
 
 	// Expansion names discoverable under `<path>/expansion/` (each subdir with a matching
 	// <name>.pff). Independent of the currently mounted root, so the UI can list before mounting.
 	PackedStringArray list_expansions(const String &path) const;
-	// The expansion's own EXP_NAME / EXP_DESC (with the scan's fallbacks) out of
-	// <name>.bin under <path>/expansion/<name>/ — engine vfs_expansion_info, which
-	// resolves the .bin independently of the mounted stack.
-	String expansion_name(const String &path, const String &expansion) const;
-	String expansion_description(const String &path, const String &expansion) const;
 	String get_root_dir() const;
 	String get_last_error() const;
 	void clear();
@@ -198,17 +208,31 @@ public:
 	// null when nothing it opens decodes. No loader reads an alternate name.
 	Ref<Texture2D> load_texture(const String &name, TextureLoader loader,
 			LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
+	// The texture `loader` makes of `name` under the caller's texture creation
+	// `flags`: a file built from pixels in a DXT format the flags ask for is
+	// the levels that format's blocks decode to, halved and with the levels the
+	// flags give (renderer/device_texture.h pixel_device_texture_levels), then
+	// the tail on to 1 x 1 a mipmapped image needs; a DDS, which D3DX loads in
+	// its own format, and a file the flags keep A8R8G8B8 are load_texture's.
+	// Cached per epoch with the flags.
+	Ref<Texture2D> load_texture_created(const String &name, TextureLoader loader,
+			int64_t flags) const;
 	// C++ siblings only (not bound): the same load's decoded RGBA8 image, no
 	// mips, uncached, for a device that uploads it itself (the HUD, the menus);
 	// `r_alpha_only` reports whether the HUD loader resolved alpha mode (its
 	// ".FULL" / ".ALPHA" suffixes override the caller's), which picks the
 	// material the device draws it with.
 	Ref<Image> load_texture_image(const String &name, TextureLoader loader,
-			LookupPolicy policy = LOOKUP_SESSION_DEFAULT, bool *r_alpha_only = nullptr) const;
+			LookupPolicy policy = LOOKUP_SESSION_DEFAULT, bool *r_alpha_only = nullptr,
+			opennova::renderer::TextureReader *r_reader = nullptr) const;
+	// One material row's texture of runtime `type`: the one file retail's loader
+	// opens for it, decoded by that loader's reader and prepared as the
+	// dispatcher does; the checkerboard when it does not load.
 	Ref<Texture> load_material_texture(const String &name, uint8_t type) const;
-	// A diffuse-family material row (runtime types 0, 1, 2, 8) decoded from the
-	// one file retail's loader selects for it; null when that file is absent.
-	Ref<Texture2D> load_material_image(const String &name, uint8_t type) const;
+	// C++ siblings only (not bound): whether that row's loader finds no file to open: the file it
+	// opens is not there, or it opens none and the name as written is not there either (a file of the
+	// name its loader cannot read is no miss). False for an empty name.
+	bool material_texture_missing(const String &name, uint8_t type) const;
 	Ref<Resource> load_font(const String &name) const;
 
 	// The witnessed boot-required manifest (ENG-6, engine/base/gameprofile
@@ -222,6 +246,19 @@ public:
 	// so owners can raise honest missing-resource errors.
 	PackedStringArray list_missing_boot_resources() const;
 	String boot_resource_failure_text(const String &name) const;
+	// The text the boot report's line puts before a missing file's name, the one the editor's
+	// Play reads the name back by (gameprofile::kBootResourceMissingMarker).
+	static String boot_resource_missing_marker();
+	// The text the launch mission's report puts before the mission's file name and the reason it
+	// did not load (gameprofile::kLaunchMissionFailedMarker), which the editor's Play reads back.
+	static String launch_mission_failed_marker();
+	// A name a load site looked up and did not find (ADR 0046 DI-27), said once a process on a line of
+	// the log under gameprofile::kResourceMissingMarker (gameprofile::resource_missing_text), which the
+	// editor's Play reads back into a Problems row on the file that names it: `kind` one of
+	// gameprofile::resource_kind's words, `by` the file that named it where the site knows it, `words`
+	// what the game does without it. Diagnostics only (push_warning): nothing the game does reads it.
+	static void report_missing(const String &kind, const String &name, const String &by = String(),
+			const String &words = String());
 
 	// C++ siblings only (not bound): direct access to the mounted index without
 	// Variant-boxing its rows through GDScript dictionaries.

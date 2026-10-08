@@ -167,6 +167,26 @@ bool terrain_static_shadow_strip_indices_are_valid(
 	return relative || absolute;
 }
 
+TerrainStaticShadowReach terrain_static_shadow_caster_reach(
+		const TerrainStaticShadowCandidate &candidate) noexcept {
+	// The sphere r on either side, plus the largest tile extension: |t| <= 2
+	// (0x20000 in 16.16) once the vertical is clamped to 0x4000, and the
+	// extension's rounding adds at most one unit.
+	const int64_t radius = std::max<int64_t>(candidate.model_radius_fixed, 0);
+	const int64_t reach = 3 * radius + 1;
+	// Symmetric, so the Godot z (-y) of either edge is an int32 too.
+	const auto clamp = [](int64_t value) {
+		return static_cast<int32_t>(std::clamp<int64_t>(value,
+				-std::numeric_limits<int32_t>::max(), std::numeric_limits<int32_t>::max()));
+	};
+	TerrainStaticShadowReach out;
+	out.min_x = clamp(int64_t(candidate.position_fixed[0]) - reach);
+	out.max_x = clamp(int64_t(candidate.position_fixed[0]) + reach);
+	out.min_y = clamp(int64_t(candidate.position_fixed[1]) - reach);
+	out.max_y = clamp(int64_t(candidate.position_fixed[1]) + reach);
+	return out;
+}
+
 void TerrainStaticShadowCollector::replace(
 		std::vector<TerrainStaticShadowCandidate> candidates) {
 	candidate_count_ = candidates.size();

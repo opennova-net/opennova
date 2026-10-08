@@ -137,11 +137,15 @@ public:
     // (they share ordinals). Defaults to version-detect; persists across mounts. The game-aware
     // caller sets this so demo-vs-retail keying is correct.
     void set_scr_policy(int scr_policy);
+    int scr_policy() const; // how read_file keys SCR payloads (VfsScrPolicy)
 
     // --- Flat resolution (case-insensitive filename) ---
     bool has_file(const std::string &name) const;
     bool read_file(const std::string &name, std::vector<uint8_t> &out) const;      // + SCR/BFC1 decode
     bool read_file_raw(const std::string &name, std::vector<uint8_t> &out) const;  // stored bytes only
+    // The stored size of the file a flat name resolves to (an archive entry's, a loose file's
+    // on disk), without reading it: what read_file_raw would hand back. False for no such file.
+    bool file_size(const std::string &name, uint64_t &out) const;
 
     // --- Retail per-query resolution ---
     // The full relative query is used for loose probes and archive comparison. Policy changes
@@ -203,6 +207,33 @@ struct ExpansionInfo {
 inline constexpr const char *kExpansionUnnamed = "Unnamed Expansion";
 inline constexpr const char *kExpansionNoDescription = "This expansion lacks a description.";
 ExpansionInfo vfs_expansion_info(const std::string &game_root, const std::string &expansion);
+// The same read of a <name>.bin's bytes in hand: EXP_NAME / EXP_DESC of [exp_info], each with
+// its fallback, both for bytes that do not parse (what the editor reads of a project's own
+// <name>.bin before a build puts it under expansion/).
+ExpansionInfo expansion_info_from_bin(const std::vector<uint8_t> &bytes);
+
+// One record of the scan the Mods list lists (Expansion_ScanAndRegister's 596-byte record,
+// its count @ 0xB4C72C): the folder's name under expansion/ and the name and description its
+// <name>.bin gives (vfs_expansion_info).
+struct ExpansionRecord {
+    std::string directory;
+    ExpansionInfo info;
+};
+// The scan registers no more than this many [orig: Expansion_ScanAndRegister @ 0x4a445d,
+// the count's compare with 0x10].
+inline constexpr size_t kExpansionRecordsMax = 16;
+// Every directory under <game_root>/expansion whose name does not start with '.', whether
+// or not its <name>.pff opens, in the order FindFirstFile walks `expansion\*.*` (an NTFS
+// directory's: the names upper-cased and compared by code unit, ASCII here), the first
+// kExpansionRecordsMax, each read as vfs_expansion_info reads it. Retail scans once, at boot,
+// and copies EXP_NAME and EXP_DESC unbounded into 64 and 272 bytes; the records here keep each
+// whole (vfs-pff-mount-re.md "Expansions", item 3).
+// [orig: Expansion_ScanAndRegister @ 0x4a43d0 — FindFirstFileA("expansion\\*.*") @ 0x4a4426,
+//  the directory, '.' and count gate @ 0x4a445d, the directory copied @ 0x4a4532,
+//  FindNextFileA @ 0x4a46fa; called once from Game_InitSubsystems @ 0x4a6f32]
+std::vector<ExpansionRecord> vfs_expansion_records(const std::string &game_root);
+// Whether the folder `a` comes before `b` in that walk (the names upper-cased, by code unit).
+bool vfs_expansion_folder_before(const std::string &a, const std::string &b);
 
 // Where Expansion_LoadAssets runs, which decides what its override-table load
 // reaches (vfs_expansion_override_table).

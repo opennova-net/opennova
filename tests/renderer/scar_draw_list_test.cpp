@@ -1,9 +1,14 @@
 // The impact-scar draw list: the witnessed six-vertex quad order and UVs, the
 // per-texture batching, the shared-ring-first order, the entity rings'
-// section-local batches, and the fog-box / owner-visibility culls.
+// section-local batches and their world-space form through the section
+// matrix, and the fog-box / owner-visibility culls (keyed on each slot's
+// building byte).
 // [orig: Scar_RenderCache @0x5CD830; Scar_RenderAllCaches @0x5CDF70]
 
 #include <runtime/renderer/scar_draw_list.h>
+#include <runtime/renderer/texture_filter.h>
+
+#include <runtime/world/collision.h>
 
 #include <cmath>
 #include <cstdio>
@@ -143,9 +148,15 @@ void test_fog_box_cull_is_world_only() {
 	CHECK(out.slots_culled == 0, "a zero fog distance disables the box cull");
 }
 
-bool hide_everything(std::uint16_t, void *) { return false; }
-bool show_owner_7(std::uint16_t owner, void *) {
+bool hide_everything(std::uint16_t, bool, void *) { return false; }
+bool show_owner_7(std::uint16_t owner, bool, void *) {
 	return owner == EntityHandle::make(1, 7).packed;
+}
+// Records the building byte each gated slot hands the predicate.
+bool record_building(std::uint16_t, bool building, void *user) {
+	auto *seen = static_cast<std::vector<bool> *>(user);
+	seen->push_back(building);
+	return true;
 }
 
 void test_owner_visibility() {
@@ -174,6 +185,113 @@ void test_owner_visibility() {
 	CHECK(out.batches.size() == 2, "one shared batch + the visible entity ring's batch");
 }
 
+// The gate reads each SLOT's building byte, in both rings, never the ring's
+// kind [orig: Scar_RenderCache @0x5CD92C — `cmp byte [slot+60], 0`].
+void test_owner_gate_takes_the_slot_building_byte() {
+	ScarCache cache;
+	const EntityHandle building = EntityHandle::make(2, 3);
+	const EntityHandle crate = EntityHandle::make(2, 4);
+	ScarSlot hut = make_slot(0, 0, 0, 0, building);
+	hut.building = true;
+	cache.world_ring().slots[0] = hut;
+	cache.world_ring().slots[1] = make_slot(1, 0, 0, 0, crate); // a decoration: byte 0
+	const EntityHandle vehicle = EntityHandle::make(1, 9);
+	ScarRing *ring = cache.ring_for(vehicle, 1);
+	ring->slots[0] = make_slot(2, 0, 0, 0, vehicle);
+	std::vector<bool> seen;
+	ScarViewContext ctx;
+	ctx.owner_visible = record_building;
+	ctx.user = &seen;
+	ScarDrawList out;
+	opennova::renderer::compile_scar_draws(cache, ctx, out);
+	CHECK(seen.size() == 3, "every live owned slot is gated, the entity ring's included");
+	if (seen.size() != 3) return;
+	CHECK(seen[0] && !seen[1], "the shared ring hands each slot's own byte");
+	CHECK(!seen[2], "the entity ring's slot hands its byte too");
+}
+
+struct MatrixFixture {
+	CollisionMatrix section;
+	EntityHandle owner;
+	int section_index = 0;
+};
+
+bool fixture_matrix(std::uint16_t owner, int section, CollisionMatrix &out, void *user) {
+	const auto *f = static_cast<const MatrixFixture *>(user);
+	if (owner != f->owner.packed || section != f->section_index) return false;
+	out = f->section;
+	return true;
+}
+
+// An entity ring's batch also comes out in WORLD space through the owner's
+// section matrix, the way Scar_RenderCache draws it: the centre with the
+// translation (Math_FixedPointTransformPoint22), both axes rotation-only
+// (Math_TransformPointFixedPoint22), then the radius products
+// [orig: @0x5CDA49, @0x5CDA64, @0x5CDA7F; Math_FixedPointTransformPoint22
+//  @0x615810; Math_TransformPointFixedPoint22 @0x412E90].
+void test_entity_ring_world_form() {
+	ScarCache cache;
+	MatrixFixture f;
+	f.owner = EntityHandle::make(1, 5);
+	f.section_index = 2;
+	const int32_t origin[3] = {100 * 0x10000, -40 * 0x10000, 7 * 0x10000};
+	f.section = collision_matrix_from_heading(0x40000000, origin); // 90 deg
+	ScarRing *ring = cache.ring_for(f.owner, 1);
+	ring->slots[0] = make_slot(1, 2, 3, 0, f.owner, 2);
+	ring->slots[1] = make_slot(4, 0, 0, 0, f.owner, 6); // a section the matrix refuses
+	ScarViewContext ctx;
+	ctx.section_matrix = fixture_matrix;
+	ctx.user = &f;
+	ScarDrawList out;
+	opennova::renderer::compile_scar_draws(cache, ctx, out);
+	CHECK(out.batches.size() == 2, "one batch per section");
+	if (out.batches.size() != 2) return;
+	const opennova::renderer::ScarDrawBatch &posed = out.batches[0];
+	const opennova::renderer::ScarDrawBatch &refused = out.batches[1];
+	CHECK(posed.section == 2 && posed.entity_local && posed.world_resolved,
+			"the resolved section carries a world form");
+	CHECK(!refused.world_resolved, "a section whose matrix does not resolve stays local only");
+	CHECK(out.world_vertices.size() == 6, "only the resolved batch's quad is in world space");
+	CHECK(out.vertices.size() == 12, "the section-local stream keeps both batches");
+	if (out.world_vertices.size() != 6) return;
+	// Expected, from the slot through the same fixed-point transforms.
+	const ScarSlot &slot = ring->slots[0];
+	int32_t c[3];
+	int32_t a[3];
+	int32_t b[3];
+	f.section.transform_point(slot.pos, c);
+	f.section.rotate_point(slot.axis_a, a);
+	f.section.rotate_point(slot.axis_b, b);
+	const auto half = [&](int32_t axis) {
+		return static_cast<float>((static_cast<int64_t>(slot.radius_q16) * axis + 0x8000) >> 16) /
+				65536.0f;
+	};
+	const float cx = static_cast<float>(c[0]) / 65536.0f;
+	const float cy = static_cast<float>(c[1]) / 65536.0f;
+	const float cz = static_cast<float>(c[2]) / 65536.0f;
+	const opennova::renderer::ScarVertex &v0 = out.world_vertices[posed.world_first_vertex];
+	CHECK(near(v0.x, cx - half(a[0]) - half(b[0])) && near(v0.y, cy - half(a[1]) - half(b[1])) &&
+					near(v0.z, cz - half(a[2]) - half(b[2])),
+			"world vertex 0 = M*C - M*A*r - M*B*r");
+	const opennova::renderer::ScarVertex &v4 = out.world_vertices[posed.world_first_vertex + 4];
+	CHECK(near(v4.x, cx + half(a[0]) + half(b[0])) && near(v4.y, cy + half(a[1]) + half(b[1])),
+			"world vertex 4 = M*C + M*A*r + M*B*r");
+	// The quarter turn keeps the local point's ground distance from the
+	// section origin and lifts it by the translation.
+	const float ground = std::sqrt((cx - 100.0f) * (cx - 100.0f) + (cy + 40.0f) * (cy + 40.0f));
+	CHECK(std::fabs(ground - std::sqrt(5.0f)) < 0.001f && near(cz, 10.0f) &&
+					!near(cx, 101.0f),
+			"the centre is the local point posed (turned and moved) through the section matrix");
+	const opennova::renderer::ScarVertex &l0 = out.vertices[posed.first_vertex];
+	CHECK(near(l0.u, v0.u) && near(l0.v, v0.v) && l0.argb == v0.argb,
+			"the two forms share the UVs and the colour");
+	// Without a matrix callback the batches stay section-local only.
+	ctx.section_matrix = nullptr;
+	opennova::renderer::compile_scar_draws(cache, ctx, out);
+	CHECK(out.world_vertices.empty() && !out.batches[0].world_resolved,
+			"no callback, no world form");
+}
+
 } // namespace
 
 // The strip table's drawer state: the two mode words the loader builds from
@@ -186,7 +304,26 @@ void test_strip_mode_words() {
 		const uint32_t expected = strip == 27 ? 0x460651u : 0x120651u;
 		CHECK(scar_texture_strip_mode_word(strip) == expected,
 				"every strip but bhole1 selects the scorch word");
+		// The table's load word | 1 [orig: Scar_LoadTextures @0x5CC2F3]: bigscar
+		// at most three levels, the glass holes one, the rest the pixel chain;
+		// none carries 0x8.
+		const uint32_t flags = scar_texture_strip_creation_flags(strip);
+		const uint32_t word = strip == 4 ? 0x80001u : (strip >= 5 && strip <= 26) ? 0x40001u : 1u;
+		CHECK(flags == word, "the strip's creation flags are its table word | 1");
+		CHECK((flags & opennova::renderer::kTextureFlagDeviceFilter) == 0u,
+				"no scar strip takes the device mode");
 	}
+	// The chains the shipped strips get (pixel_texture_last_level): the 64 x 64
+	// scorches end at 4 x 4 (level 4), bhole1 128 x 128 at level 5, bigscar
+	// 64 x 64 after three levels (2), a 64 x 64 glass hole on its one level.
+	CHECK(opennova::renderer::pixel_texture_last_level(64, 64, scar_texture_strip_creation_flags(0)) == 4,
+			"scorch1: five levels");
+	CHECK(opennova::renderer::pixel_texture_last_level(128, 128, scar_texture_strip_creation_flags(27)) == 5,
+			"bhole1: six levels");
+	CHECK(opennova::renderer::pixel_texture_last_level(64, 64, scar_texture_strip_creation_flags(4)) == 2,
+			"bigscar: three levels");
+	CHECK(opennova::renderer::pixel_texture_last_level(64, 64, scar_texture_strip_creation_flags(5)) == 0,
+			"a glass hole: one level");
 	const opennova::renderer::ScarStripState scorch =
 			opennova::renderer::decode_scar_strip_mode(kScarModeWordScorch);
 	CHECK(scorch.src_alpha_blend, "scorch: SRCALPHA/INVSRCALPHA");
@@ -220,34 +357,51 @@ void test_native_owner_visibility() {
 		return found == masks.end() ? std::nullopt : std::optional<uint32_t>(found->second);
 	};
 	using opennova::renderer::scar_owner_visible;
-	CHECK(!scar_owner_visible(nullptr, lookup) && reads == 0, "absent owner is rejected without a mask read");
+	CHECK(!scar_owner_visible(nullptr, true, lookup) && reads == 0,
+			"absent owner is rejected without a mask read");
 	Entity owner;
 	owner.handle = EntityHandle::make(2, 7);
 	owner.kind = EntityKind::Building;
-	CHECK(scar_owner_visible(&owner, lookup), "an unregistered occlusion instance keeps the all-visible host fallback");
+	CHECK(scar_owner_visible(&owner, true, lookup), "an unregistered occlusion instance keeps the all-visible host fallback");
 	masks[owner.handle.packed] = 0;
-	CHECK(!scar_owner_visible(&owner, lookup), "zero building mask is hidden");
+	CHECK(!scar_owner_visible(&owner, true, lookup), "zero building mask is hidden");
 	masks[owner.handle.packed] = 0xF0000000u;
-	CHECK(!scar_owner_visible(&owner, lookup), "building ignores the high four bits");
+	CHECK(!scar_owner_visible(&owner, true, lookup), "building ignores the high four bits");
 	masks[owner.handle.packed] = 0x08000000u;
-	CHECK(scar_owner_visible(&owner, lookup), "building includes bit 27");
+	CHECK(scar_owner_visible(&owner, true, lookup), "building includes bit 27");
+	// A decoration in the BMS Building list: pool 2 like a building, but its
+	// slots carry byte 0 (def type != 5), so its own mask is never read and
+	// an empty first containing-box slot admits it outright
+	// [orig: @0x5CD92C; Scar_AddEntry @0x5CCCC6].
+	masks[owner.handle.packed] = 0;
+	for (auto &hit : owner.blink_hits) hit = 0;
+	reads = 0;
+	CHECK(scar_owner_visible(&owner, false, lookup) && reads == 0,
+			"a pool-2 decoration takes the containing-box leg, not its own mask");
+	owner.blink_hits[0] = (9u << 20) | (2u << 12);
+	masks[EntityHandle::make(2, 9).packed] = 0;
+	CHECK(!scar_owner_visible(&owner, false, lookup),
+			"a decoration inside a hidden building section is hidden");
+	masks[EntityHandle::make(2, 9).packed] = 1u << 2;
+	CHECK(scar_owner_visible(&owner, false, lookup),
+			"and drawn once that section is visible");
 	owner.kind = EntityKind::Organic;
 	for (auto &hit : owner.blink_hits) hit = 0;
 	owner.blink_hits[1] = (7u << 20) | (3u << 12);
 	masks[EntityHandle::make(2, 7).packed] = 0;
 	reads = 0;
-	CHECK(scar_owner_visible(&owner, lookup) && reads == 0,
+	CHECK(scar_owner_visible(&owner, false, lookup) && reads == 0,
 			"retail's first empty blink slot bypasses later nonzero slots");
 	owner.blink_hits[0] = (8u << 20) | (31u << 12);
 	masks[EntityHandle::make(2, 8).packed] = 0;
-	CHECK(!scar_owner_visible(&owner, lookup), "all referenced sections hidden");
+	CHECK(!scar_owner_visible(&owner, false, lookup), "all referenced sections hidden");
 	masks[EntityHandle::make(2, 8).packed] = 0x80000000u;
-	CHECK(scar_owner_visible(&owner, lookup), "non-building hit includes section 31");
+	CHECK(scar_owner_visible(&owner, false, lookup), "non-building hit includes section 31");
 	masks[EntityHandle::make(2, 8).packed] = 0;
 	masks[EntityHandle::make(2, 7).packed] = 1u << 3;
-	CHECK(scar_owner_visible(&owner, lookup), "a later containing box can admit the owner");
+	CHECK(scar_owner_visible(&owner, false, lookup), "a later containing box can admit the owner");
 	masks.erase(EntityHandle::make(2, 7).packed);
-	CHECK(scar_owner_visible(&owner, lookup), "a missing containing-building instance keeps the host fallback");
+	CHECK(scar_owner_visible(&owner, false, lookup), "a missing containing-building instance keeps the host fallback");
 }
 
 int main() {
@@ -256,6 +410,8 @@ int main() {
 	test_batches_per_texture_and_ring_order();
 	test_fog_box_cull_is_world_only();
 	test_owner_visibility();
+	test_owner_gate_takes_the_slot_building_byte();
+	test_entity_ring_world_form();
 	test_strip_mode_words();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

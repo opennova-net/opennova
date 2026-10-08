@@ -1,20 +1,25 @@
 extends GutTest
 
 
-func test_project_uses_the_retail_reference_anisotropy() -> void:
+func test_project_starts_at_the_fresh_profiles_texture_filter() -> void:
+	# A fresh profile's texfilter_level is 1 (trilinear), whose device mode
+	# programs no anisotropy (engine renderer/texture_filter.h); the world
+	# raises the viewport's at a mission start under levels 2 and 3.
 	assert_eq(int(ProjectSettings.get_setting(
-			"rendering/textures/default_filters/anisotropic_filtering_level", 0)), 4,
-		"The retail reference machine used 16x anisotropy (Godot enum 4).")
+			"rendering/textures/default_filters/anisotropic_filtering_level", -1)), 0)
 
 
-func test_render_snapshot_reports_the_active_anisotropy() -> void:
+func test_render_snapshot_reports_the_texture_filter_state() -> void:
 	var world := preload("res://game/world/game_world.tscn").instantiate() as GameWorld
 	add_child_autofree(world)
 	var value: Dictionary = GameRenderDiagnostics.sample(world).to_json_value()
 	var anisotropy := value["renderer"]["default_anisotropy"] as Dictionary
-	assert_eq(int(anisotropy["level"]), 4)
-	assert_eq(int(anisotropy["samples"]), 16)
-	assert_true(bool(anisotropy["active"]))
+	assert_eq(int(anisotropy["level"]), 0)
+	assert_false(bool(anisotropy["active"]))
+	var texfilter := value["renderer"]["texfilter"] as Dictionary
+	assert_eq(int(texfilter["level"]), GameWorld.texfilter_level_fresh_profile())
+	assert_eq(int(texfilter["session_level"]), GameWorld.texfilter_level_fresh_profile())
+	assert_eq(int(texfilter["device_mode"]), 2)
 
 
 func test_render_snapshot_carries_the_live_terrain_surface_inputs() -> void:

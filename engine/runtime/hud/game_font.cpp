@@ -109,7 +109,8 @@ bool GameFont::parse_format_tag(const char *text, int *index,
 		GameFontState *state) {
 	// [orig: GText_ParseFormatTag @ 0x674200] — mutations land only on a
 	// well-formed (terminated) tag, exactly like the original's local-copy
-	// commit; the tags_disabled byte freezes everything but the scan.
+	// commit (@0x6743cb..0x6743ed); the inert byte, textBuffer[1]'s low byte,
+	// freezes everything but the cursor (@0x6743b0..0x6743b3).
 	GameFontState local = *state;
 	int i = *index;
 	if (text[i] != '<') {
@@ -158,18 +159,22 @@ bool GameFont::parse_format_tag(const char *text, int *index,
 					} else if (h >= 'a' && h <= 'f') {
 						value = value * 16 + (h - 'a' + 10);
 					} else if (h == 'O' || h == 'o') {
+						// The original colour, textBuffer[3] [orig: @0x674315].
 						value = local.original_color;
 					} else if (h == 'H' || h == 'h') {
-						// Half-bright: 3/4 c + 0x40 per channel
-						// [orig: 3 * (((c >> 2) & 0x3F3F3F) + 0x156B40)].
-						value = 3u * (((local.color_xor ^ 0u) >> 2 & 0x3F3F3Fu) +
+						// Half-bright of the ORIGINAL colour, textBuffer[3]
+						// [orig: 3 * (((c >> 2) & 0x3F3F3F) + 0x156B40)
+						//  @0x674321..0x674336].
+						value = 3u * (((local.original_color >> 2) & 0x3F3F3Fu) +
 								0x156B40u);
 					}
 				}
 				if (value != 0) {
-					// The original XOR-folds the new color into the low 24
-					// bits of the live color slot.
-					local.color_xor ^= (value ^ local.color_xor) & 0xFFFFFFu;
+					// A bitfield insert: the value's low 24 bits replace the
+					// live colour's, its alpha kept; a zero value changes
+					// nothing [orig: v13 ^= (value ^ v13) & 0xFFFFFF
+					// @0x674346..0x674357].
+					local.color ^= (value ^ local.color) & 0xFFFFFFu;
 				}
 				if (text[i] == 0) {
 					goto done;
@@ -190,7 +195,9 @@ bool GameFont::parse_format_tag(const char *text, int *index,
 					}
 				}
 				if (value != 0) {
-					local.timer = value;
+					// textBuffer[4], the drawer's tab width [orig: @0x67439a;
+					// CGameFont_DrawText's tab arm reads it @0x6755eb].
+					local.tab_width = value;
 				}
 				if (text[i] == 0) {
 					goto done;
@@ -203,7 +210,7 @@ bool GameFont::parse_format_tag(const char *text, int *index,
 		}
 	}
 done:
-	if (state->tags_disabled) {
+	if (state->tags_inert) {
 		*index = i;
 	} else if (ok) {
 		*index = i;
@@ -273,9 +280,11 @@ void GameFont::measure(const char *text, float scale_x, float scale_y,
 		if (glyph == nullptr) {
 			continue;
 		}
-		cursor = std::floor(cursor +
-				(glyph->uv.u1 - glyph->uv.u0) * 256.0f * scaled_x +
-				pad * scaled_x + 0.5f);
+		// The advance first, then the pen, then the half, as the drawer sums
+		// them [orig: @0x67506d..0x675093].
+		cursor = std::floor((cursor + ((glyph->uv.u1 - glyph->uv.u0) * 256.0f * scaled_x +
+										pad * scaled_x)) +
+				0.5f);
 		max_w = std::max(max_w, cursor);
 	}
 	max_w = std::max(max_w, cursor);
@@ -318,7 +327,13 @@ GameFontRun GameFont::layout(const char *text, float x, float y,
 	if ((flags & kFontTagsDisabled) != 0) {
 		base_state.tags_disabled = true;
 	}
-	base_state.original_color = color & 0xFFFFFFu;
+	if ((flags & kFontTagsInert) != 0) {
+		base_state.tags_inert = true; // [orig: @0x67539e]
+	}
+	// The live and original colours are the caller's colour, as retail seeds
+	// them for a null state [orig: v151 = tabWidth = color @0x675342..0x675349].
+	base_state.color = color;
+	base_state.original_color = color;
 
 	const float design = fnt_design_scale(font_->design_width);
 	const float scaled_x = design * scale_x;
@@ -364,7 +379,9 @@ GameFontRun GameFont::layout(const char *text, float x, float y,
 				cursor = x - static_cast<float>(w) * scaled_x;
 			}
 
-			for (int j = 0; line[j] != 0; ++j) {
+			// The walk runs to the line's length [orig: ++formatState >= v155
+			// @0x675660].
+			for (int j = 0; j < len; ++j) {
 				uint8_t byte = static_cast<uint8_t>(line[j]);
 				if (byte == '\\') {
 					byte = static_cast<uint8_t>(line[++j]);
@@ -373,9 +390,15 @@ GameFontRun GameFont::layout(const char *text, float x, float y,
 					}
 				} else if (byte == '<') {
 					if (!state.tags_disabled) {
+						// The parser moves the walk's own cursor: past a
+						// well-formed tag, and while inert also to where an
+						// unterminated one's scan stopped, after which the '<'
+						// still draws [orig: GText_ParseFormatTag(..,
+						// &formatState, ..) @0x67563a].
 						int idx = j;
-						if (parse_format_tag(line, &idx, &state)) {
-							j = idx;
+						const bool ok = parse_format_tag(line, &idx, &state);
+						j = idx;
+						if (ok) {
 							continue;
 						}
 					}
@@ -399,42 +422,61 @@ GameFontRun GameFont::layout(const char *text, float x, float y,
 				}
 				const float glyph_w =
 						(glyph->uv.u1 - glyph->uv.u0) * 256.0f * scaled_x;
-				const float glyph_h =
-						(glyph->uv.v1 - glyph->uv.v0) * 256.0f * scaled_y;
-				const float next = std::floor(cursor + glyph_w +
-						pad * scaled_x + 0.5f);
+				// The bottom V carries the half-texel bias, and the quad's
+				// height is that biased V extent: the quad is half a texel
+				// taller than the glyph, so its V runs one texel per pixel and
+				// every row, the last too, samples its texel's centre
+				// [orig: fld v1; fadd 0.001953125 @0x6756ff; fsub v0; fmul
+				// scaled_y; fmul 256.0 -> the height @0x675733, which the
+				// bottom edge (@0x675850), the underline (@0x6757b2) and the
+				// italic shear (@0x675776) all read].
+				const float v1 = glyph->uv.v1 + kBottomVBias;
+				const float glyph_h = (v1 - glyph->uv.v0) * scaled_y * 256.0f;
+				// The next pen, in the drawer's order: the advance first, then
+				// the pen, then the half, each sum a float (the x87 unit runs
+				// at single precision under Direct3D 9, menu_frame.h)
+				// [orig: fimul pad; faddp (w + pad) @0x67573b; faddp (pen +)
+				// @0x67573d; faddp (+ 0.5) @0x67573f; floor @0x675744].
+				const float next = std::floor((cursor + (glyph_w + pad * scaled_x)) + 0.5f);
 				if (glyph->page == page) {
-					const uint32_t draw_color =
-							(color & 0xFF000000u) |
-							((color ^ state.color_xor) & 0xFFFFFFu);
+					// The vertex colour is the live colour as it stands
+					// [orig: v45 = v146, textBuffer[2], @0x675837].
+					const uint32_t draw_color = state.color;
 					// Italic shears the TOP edge by h/8; bold double-strikes
 					// at (+1, -1) [orig: the passArray skew + the second
 					// strike pass].
 					const float skew = state.italic ? glyph_h * 0.125f : 0.0f;
 					const int strikes = state.bold ? 2 : 1;
 					// Bold double-strikes at +1 x (same y); each strike's
-					// underline rides one pixel higher [orig: the strike loop's
-					// cursor+1 / underline-y-1 stepping].
+					// underline rides one pixel higher at the glyph's own x
+					// [orig: the strike loop's cursor+1 / underline-y-1
+					// stepping; the underline's x0 is cursor - 0.5, taken once
+					// per glyph @0x6757a0 and written for every strike
+					// @0x675b2c].
+					const float underline_x0 = cursor - 0.5f;
 					for (int strike = 0; strike < strikes; ++strike) {
 						const float sx = cursor + static_cast<float>(strike);
 						GameFontQuad quad;
 						quad.page = page + page_base_;
-						quad.x_top_left = sx + skew - 0.5f;
-						quad.x_top_right = sx + glyph_w + skew - 0.5f;
-						quad.x_bottom_left = sx - skew - 0.5f;
-						quad.x_bottom_right = sx + glyph_w - skew - 0.5f;
+						// The corners in the drawer's order of sums
+						// [orig: @0x6758a4 (bottom left), @0x6758d9 (top left),
+						// @0x675931 (bottom right), @0x675982 (top right)].
+						quad.x_top_left = (skew + sx) - 0.5f;
+						quad.x_top_right = ((skew + glyph_w) + sx) - 0.5f;
+						quad.x_bottom_left = (sx - skew) - 0.5f;
+						quad.x_bottom_right = ((glyph_w + sx) - skew) - 0.5f;
 						quad.y_top = line_y - 0.5f;
 						quad.y_bottom = line_y + glyph_h - 0.5f;
 						quad.u0 = glyph->uv.u0;
 						quad.v0 = glyph->uv.v0;
 						quad.u1 = glyph->uv.u1;
-						quad.v1 = glyph->uv.v1 + kBottomVBias;
+						quad.v1 = v1;
 						quad.color = draw_color;
 						run.quads.push_back(quad);
 						if (state.underline) {
 							GameFontUnderline seg;
-							seg.x0 = sx - 0.5f;
-							seg.x1 = sx + glyph_w - 0.5f;
+							seg.x0 = underline_x0;
+							seg.x1 = underline_x0 + glyph_w;
 							seg.y = line_y + glyph_h - 1.5f -
 									static_cast<float>(strike);
 							seg.color = double_channel_clamped(draw_color);

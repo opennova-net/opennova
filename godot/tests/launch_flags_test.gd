@@ -90,3 +90,23 @@ func test_clearing_the_override_returns_to_the_process_command_line() -> void:
 	# The GUT process itself carries none of the runtime launch flags.
 	assert_eq(LaunchFlags.mission(), "")
 	assert_eq(LaunchFlags.mcp_port(), 0)
+
+
+# ADR 0046 S13 A8: the directory the game was started in, where it keeps the files it
+# writes beside itself as retail keeps its saves in its working directory [orig:
+# PlayerProfile_LoadAllFromDisk @ 0x54f4d0]. `--working-dir`, which a source run's
+# launcher passes (Godot's --path moved the process to the project), names it, '/'-
+# separated; without the flag it is the process's own working directory, here the
+# project GUT runs in (--path godot).
+func test_working_dir_is_the_flag_else_the_process_working_directory() -> void:
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", "C:\\p\\.opennova\\run\\runtime\\1"]))
+	assert_eq(LaunchFlags.working_dir(), "C:/p/.opennova/run/runtime/1")
+	LaunchFlags.set_args_override(PackedStringArray(["--", "--Working-Dir", " /tmp/run/2 "]))
+	assert_eq(LaunchFlags.working_dir(), "/tmp/run/2")
+	LaunchFlags.set_args_override(PackedStringArray([]))
+	var own := String(LaunchFlags.working_dir())
+	assert_false(own.is_empty())
+	assert_true(DirAccess.dir_exists_absolute(own), own)
+	assert_eq(own.trim_suffix("/").to_lower(),
+			ProjectSettings.globalize_path("res://").trim_suffix("/").to_lower(),
+			"Godot's --path makes the project the process's working directory")

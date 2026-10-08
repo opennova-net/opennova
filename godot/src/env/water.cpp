@@ -15,6 +15,7 @@
 #include "env/mission_environment.h"
 #include "object/object_shader_cache.h"
 #include "player/local_player_presenter.h"
+#include "render/d3d9_raster_device.h"
 #include "render/target_projection_xr_interface.h"
 #include "world/game_world.h"
 
@@ -53,6 +54,10 @@ void Water::_bind_methods() {
 			&Water::set_mission_water_height_override);
 	ClassDB::bind_method(D_METHOD("set_world_rendering_enabled", "value"),
 			&Water::set_world_rendering_enabled);
+	ClassDB::bind_method(D_METHOD("set_mirror_enabled", "value"), &Water::set_mirror_enabled);
+	ClassDB::bind_method(D_METHOD("is_mirror_enabled"), &Water::is_mirror_enabled);
+	ClassDB::bind_method(D_METHOD("is_globals_held"), &Water::is_globals_held);
+	ClassDB::bind_static_method("Water", D_METHOD("get_global_writes"), &Water::get_global_writes);
 	ClassDB::bind_method(D_METHOD("release_runtime_renderer_resources"),
 			&Water::release_runtime_renderer_resources);
 	ClassDB::bind_method(D_METHOD("is_water_active"), &Water::is_water_active);
@@ -161,6 +166,23 @@ void Water::set_world_rendering_enabled(bool p_value) {
 	_sync_render_activity();
 }
 
+void Water::set_mirror_enabled(bool p_value) {
+	if (mirror_enabled_ == p_value) {
+		return;
+	}
+	mirror_enabled_ = p_value;
+	_sync_render_activity();
+}
+
+int64_t Water::global_writes_ = 0;
+
+void Water::publish_absent() {
+	++global_writes_;
+	RenderingServer::get_singleton()->global_shader_parameter_set("opennova_water_active", false);
+	RenderingServer::get_singleton()->global_shader_parameter_set("opennova_water_height", 0.0f);
+	ObjectShaderCache::get_singleton()->clear_water_plane();
+}
+
 void Water::release_runtime_renderer_resources() {
 	world_rendering_enabled_ = false;
 	RenderingServer *server = RenderingServer::get_singleton();
@@ -222,10 +244,11 @@ void Water::release_runtime_renderer_resources() {
 // blended world materials can take their far/camera-side rung; cleared when
 // the water node leaves the tree.
 void Water::_push_water_split_height() {
-	if (!built_ || !is_inside_tree()) {
+	if (!built_ || !is_inside_tree() || globals_held_) {
 		return;
 	}
 	const bool active = is_water_pass_active() && is_visible_in_tree();
+	++global_writes_;
 	RenderingServer *rs = RenderingServer::get_singleton();
 	rs->global_shader_parameter_set("opennova_water_active", active);
 	rs->global_shader_parameter_set("opennova_water_height", water_height_);
@@ -289,7 +312,7 @@ void Water::_sync_render_activity() {
 	// off-screen surface. The strip march re-arms this after it produces
 	// rows.
 	const bool reflection_active = world_active && has_drawable_surface_ &&
-			cached_cam_id_.is_valid();
+			cached_cam_id_.is_valid() && mirror_enabled_;
 	if (reflection_viewport_ != nullptr) {
 		reflection_viewport_->set_update_mode(reflection_active
 						? SubViewport::UPDATE_ALWAYS
@@ -367,7 +390,8 @@ void Water::_exit_tree() {
 	// requires `built`): an unconditional call here CREATED the shader-cache
 	// singleton during scene teardown on every quit — the never-freed
 	// extension object behind the packaging boot-smoke teardown AV.
-	if (built_) {
+	if (built_ && !globals_held_) {
+		++global_writes_;
 		ObjectShaderCache::get_singleton()->clear_water_plane();
 		RenderingServer::get_singleton()->global_shader_parameter_set(
 				"opennova_water_active", false);
@@ -632,7 +656,7 @@ void Water::advance_frame(double) {
 	// the SubViewport renders ahead of the main view, like the witnessed
 	// prerender (itself gated on g_WaterActive).
 	if (beauty_active) {
-		_update_reflection_camera(view_cam, drawing.projection);
+		_update_reflection_camera(view_cam, drawing.projection, drawing.frame_perspective);
 	}
 
 	// Regenerate the animated noise pair once per rendered water frame, at
@@ -720,9 +744,14 @@ Water::DrawingView Water::_drawing_view(Camera3D *p_surface_cam) const {
 	LocalPlayerPresenter *presenter = world != nullptr ? world->local_view_presenter() : nullptr;
 	Camera3D *through = presenter != nullptr ? presenter->projection_camera() : nullptr;
 	SubViewport *target = presenter != nullptr ? presenter->projection_viewport() : nullptr;
+	// The strip march and the mirror take the original's own projection, the
+	// presenter's screen projection with its D3D9 raster shift taken out: the
+	// march runs in the original's window coordinates and the mirror rasterises
+	// on its own RTT (env::WaterMirrorView::raster_shift).
 	if (through != nullptr && through->is_inside_tree() && target != nullptr) {
 		view.camera = through;
-		view.projection = presenter->view_projection();
+		view.projection = presenter->screen_projection();
+		view.frame_perspective = true;
 		// The target's raster: its node size, or the served square while the
 		// NVG raster draws through TargetProjectionXrInterface.
 		view.raster = target->get_size();
@@ -730,7 +759,12 @@ Water::DrawingView Water::_drawing_view(Camera3D *p_surface_cam) const {
 	}
 	view.camera = p_surface_cam;
 	if (p_surface_cam != nullptr && p_surface_cam->is_inside_tree()) {
-		view.projection = p_surface_cam->get_camera_projection();
+		if (presenter != nullptr && presenter->camera() == p_surface_cam) {
+			view.projection = presenter->screen_projection();
+			view.frame_perspective = true;
+		} else {
+			view.projection = p_surface_cam->get_camera_projection();
+		}
 		if (Viewport *viewport = p_surface_cam->get_viewport()) {
 			view.raster = Vector2i(viewport->get_visible_rect().size);
 		}
@@ -748,7 +782,8 @@ Water::DrawingView Water::_drawing_view(Camera3D *p_surface_cam) const {
 // serves the mirror's 512 x 512 raster that frustum through
 // TargetProjectionXrInterface: a camera would draw the square's own ratio,
 // retail draws the main view's field into it (non-square texels).
-void Water::_update_reflection_camera(Camera3D *p_cam, const Projection &p_projection) {
+void Water::_update_reflection_camera(Camera3D *p_cam, const Projection &p_projection,
+		bool p_frame_perspective) {
 	if (reflection_viewport_ == nullptr || reflection_camera_ == nullptr) {
 		return;
 	}
@@ -769,6 +804,14 @@ void Water::_update_reflection_camera(Camera3D *p_cam, const Projection &p_proje
 	if (source_size.x <= 1.0f || source_size.y <= 1.0f) {
 		return;
 	}
+	// The mirror draws under the device's one texfilter mode like the main
+	// view (engine renderer/texture_filter.h): the terrain detail family's
+	// hardware anisotropy is the viewport's, so the mirror takes the view's.
+	if (reflection_viewport_->get_anisotropic_filtering_level() !=
+			viewport->get_anisotropic_filtering_level()) {
+		reflection_viewport_->set_anisotropic_filtering_level(
+				viewport->get_anisotropic_filtering_level());
+	}
 	// The drawn frustum's width over height: proj[1][1] / proj[0][0] for the
 	// perspective, orthogonal and frustum forms alike (the NVG raster's served
 	// matrix included, whose aspect its square target does not carry).
@@ -788,7 +831,11 @@ void Water::_update_reflection_camera(Camera3D *p_cam, const Projection &p_proje
 	source.basis_y = to_vec3(xform.get_basis().get_column(1));
 	source.basis_z = to_vec3(xform.get_basis().get_column(2));
 	source.origin = to_vec3(xform.get_origin());
-	switch (p_cam->get_projection()) {
+	// The frame's cameras draw their perspective through a frustum form only
+	// for their raster's half pixel; the mirror takes the perspective itself
+	// (its fov and keep mode), as the reflected pass takes the frame's plain
+	// projection (the witness at env::WaterMirrorView::raster_shift).
+	switch (p_frame_perspective ? Camera3D::PROJECTION_PERSPECTIVE : p_cam->get_projection()) {
 		case Camera3D::PROJECTION_ORTHOGONAL:
 			source.projection = opennova::env::MirrorProjection::kOrthogonal;
 			break;
@@ -852,6 +899,14 @@ void Water::_update_reflection_camera(Camera3D *p_cam, const Projection &p_proje
 	// lost when the reflection camera is rebuilt from the source transform.
 	reflection_camera_->set_h_offset(p_cam->get_h_offset());
 	reflection_camera_->set_v_offset(view.v_offset);
+	// The mirror image sits on the RTT's own D3D9 pixel centres
+	// (env::WaterMirrorView::raster_shift): a perspective mirror's node draws
+	// through that half texel, so its projection meets the served raster. An
+	// orthogonal or frustum source (an editor or test camera) keeps its node's
+	// own frustum; the served raster below takes the half texel in every form.
+	if (view.projection == opennova::env::MirrorProjection::kPerspective) {
+		draw_camera_through_d3d9_raster(reflection_camera_, view.raster_shift);
+	}
 	// The raster: the mirror frustum at the source's aspect over the 512
 	// square, the matrix Camera3D builds for these settings over a viewport of
 	// that aspect (its frustum form takes no keep-aspect flip).
@@ -872,6 +927,7 @@ void Water::_update_reflection_camera(Camera3D *p_cam, const Projection &p_proje
 					p_cam->get_near(), p_cam->get_far(), !view.keep_aspect_height);
 			break;
 	}
+	mirror_projection = ndc_translation(view.raster_shift) * mirror_projection;
 	TargetProjectionXrInterface::serve(reflection_viewport_,
 			reflection_camera_->get_camera_transform(), mirror_projection);
 	_apply_reflection_clear();

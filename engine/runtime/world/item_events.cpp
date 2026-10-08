@@ -24,7 +24,9 @@ void regional_sound_event(World &world, Entity &entity, int phase) {
     bool has_sound = false;
     for (const auto &shot : traits->regional_sounds) has_sound |= !shot.name.empty();
     if (!has_sound) return;
-    const int32_t time = io::bam_add(world.env.time_of_day, (entity.handle.packed & 15) << 11);
+    // The mission clock, the weather's (D-SND-39) [orig: Entity_CalcTimeOfDayRegion @0x408110 ->
+    // Env_GetTimeOfDayHoursQ16 @0x57d5b0].
+    const int32_t time = io::bam_add(world.weather.tod_hours_q16(), (entity.handle.packed & 15) << 11);
     const int region = time > 4 * 65536 && time < 10 * 65536 ? 0 :
             time > 10 * 65536 && time < 17 * 65536 ? 1 :
             time > 17 * 65536 && time < 21 * 65536 ? 2 : 3;
@@ -624,6 +626,22 @@ void emit_item_state(World &world, Entity &target, int32_t section) {
 }
 
 // [orig: Entity_PublishSwapFadePhases @0x5C3F40]
+DestroyFade destroy_fade_phases(int32_t elapsed, const int32_t destroy_timing_ticks[3]) {
+    DestroyFade fade;
+    const int32_t duration=destroy_timing_ticks[1] ? destroy_timing_ticks[1] : 50;
+    const int32_t step=destroy_timing_ticks[2] ? destroy_timing_ticks[2] : 25;
+    const int32_t total=io::bam_add(duration,int32_t(uint32_t(step)*4u));
+    // Zero denominators are malformed authored data; preserve finite render values.
+    fade.progress=total ? double(elapsed)/total : 0;
+    const auto phase=[](double value) { return int32_t(std::clamp(value,0.0,1.0)*65536.0); };
+    fade.phases_q16[0]=phase(fade.progress);
+    for (int i=0;i<5;++i)
+        fade.phases_q16[i+1]=duration ? phase(double(
+                io::bam_sub(elapsed,int32_t(uint32_t(step)*uint32_t(i))))/duration) : 0;
+    return fade;
+}
+
+// [orig: Entity_PublishSwapFadePhases @0x5C3F40]
 void update_item_destroy_fade(World &world, Entity &entity) {
     entity.destroy_phases_q16.fill(0);
     entity.destroy_progress = 0;
@@ -635,23 +653,17 @@ void update_item_destroy_fade(World &world, Entity &entity) {
         if (elapsed < entity.destroy_timer) return;
         entity.destroy_timer=0; entity.death_tick=world.logic_tick; elapsed=0;
     }
-    const int32_t duration=traits->destroy_timing_ticks[1] ? traits->destroy_timing_ticks[1] : 50;
-    const int32_t step=traits->destroy_timing_ticks[2] ? traits->destroy_timing_ticks[2] : 25;
-    const int32_t total=io::bam_add(duration,int32_t(uint32_t(step)*4u));
-    // Zero denominators are malformed authored data; preserve finite render values.
-    entity.destroy_progress=total ? double(elapsed)/total : 0;
-    const auto phase=[](double value) { return int32_t(std::clamp(value,0.0,1.0)*65536.0); };
-    entity.destroy_phases_q16[0]=phase(entity.destroy_progress);
-    for (int i=0;i<5;++i)
-        entity.destroy_phases_q16[i+1]=duration ? phase(double(
-                io::bam_sub(elapsed,int32_t(uint32_t(step)*uint32_t(i))))/duration) : 0;
+    const DestroyFade fade=destroy_fade_phases(elapsed,traits->destroy_timing_ticks);
+    entity.destroy_progress=fade.progress;
+    entity.destroy_phases_q16=fade.phases_q16;
 }
 
 // [orig: Entity_UpdateEnvSoundEmitter @0x4A8080]
 void update_item_ambient_sound(World &world, const Entity &entity) {
     const auto *traits=world.tables.item_death_traits.get(entity.item_id);
     if (!traits) return;
-    const int32_t hours=io::bam_add(world.env.time_of_day,(entity.handle.packed&15)<<11);
+    // The mission clock, the weather's (D-SND-39) [orig: Env_GetTimeOfDayHoursQ16 @0x57d5b0].
+    const int32_t hours=io::bam_add(world.weather.tod_hours_q16(),(entity.handle.packed&15)<<11);
     const auto region=audio::time_of_day_region(hours/65536.0f);
     const auto &set=traits->regional_loops[region.region];
     if (set.empty()) return;

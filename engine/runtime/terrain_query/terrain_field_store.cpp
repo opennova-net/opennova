@@ -1,5 +1,5 @@
 #include <runtime/terrain_query/terrain_field_build.h>
-#include <sstream>
+#include <formats/env/env.h>
 #include <formats/trn/trn_io.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/cpt/cpt_io.h>
@@ -89,6 +89,10 @@ void TerrainFieldStore::build(const uint16_t *heightmap, size_t heightmap_count,
 		surface_map_.sector_grid = sector_grid_.data();
 		surface_map_.origin_x = origin_x;
 		surface_map_.origin_y = origin_y;
+		// The cell masks the sampler clamps or wraps by (D-TERRAIN-16) [orig:
+		// PolyTrn_LoadTerrainConfig @ 0x60E4B1..0x60E4CB].
+		surface_map_.wrap_x = wrap_x;
+		surface_map_.wrap_z = wrap_z;
 	}
 	attach_placed_tiles();
 }
@@ -154,29 +158,50 @@ void terrain_field_store_resolve_tile_surfaces(TerrainFieldStore &store,
 	store.set_tile_surface_table(table);
 }
 
-bool terrain_field_store_load(TerrainFieldStore &store, const ResourceIndex &index,
-		const std::string &terrain_name, const std::string &tile_set, std::string &error) {
+namespace {
+
+// The one load body: `read` answers a file by its flat name (the resource index's, a file source's).
+template <typename Read>
+bool load_store(TerrainFieldStore &store, const Read &read, const std::string &terrain_name,
+		const std::string &tile_set, const std::string &environment, std::string &error, TrnConfig *trn_out) {
 	if (terrain_name.empty()) {
 		error = "the mission names no terrain";
 		return false;
 	}
-	std::vector<uint8_t> cpt_bytes, trn_bytes;
-	if (!index.read_file(terrain_name + ".cpt", cpt_bytes) ||
-			!index.read_file(terrain_name + ".trn", trn_bytes)) {
-		error = terrain_name + ".cpt/.trn are not under the mount";
+	std::vector<uint8_t> cpt_bytes;
+	const auto read_text = [&read](const std::string &name, std::string &text) {
+		std::vector<uint8_t> bytes;
+		if (!read(name, bytes)) return false;
+		text.assign(bytes.begin(), bytes.end());
+		return true;
+	};
+	std::string trn_text;
+	if (!read_text(terrain_name + ".trn", trn_text)) {
+		error = terrain_name + ".trn is not under the mount";
 		return false;
 	}
+	// The .trn, then overcast.def and the mission's .env through the terrain's parser (D-TERRAIN-18) [orig:
+	// Terrain_LoadEnvironmentConfig @ 0x6109ad -> Environment_LoadTimeOfDayConfig @ 0x57db44].
+	std::string overcast_text, environment_text;
+	TrnLaterTexts later;
+	if (read_text(env::kOvercastFile, overcast_text)) later.overcast = &overcast_text;
+	if (!environment.empty() && read_text(environment + ".env", environment_text)) later.environment = &environment_text;
 	std::string doc_error;
-	CptFile cpt;
-	if (!load_cpt(cpt_bytes.data(), cpt_bytes.size(), cpt, doc_error)) {
-		error = terrain_name + ".cpt: " + doc_error;
+	TrnConfig trn;
+	if (!load_mission_trn(trn_text, later, trn, doc_error)) {
+		error = terrain_name + ".trn: " + doc_error;
 		return false;
 	}
-	TrnConfig trn;
-	std::string raw(reinterpret_cast<const char *>(trn_bytes.data()), trn_bytes.size());
-	std::istringstream ts(raw);
-	if (!load_trn(ts, trn, doc_error) || cpt.depth_buffer.empty()) {
-		error = terrain_name + ".trn: " + doc_error;
+	// The height data by the name the .trn writes (D-TERRAIN-17), never the terrain's own: terrains share one (15 of
+	// JO:CA's 38 name another's, dvxg8a.trn dvxg8.cpt) [orig: PolyTrn_LoadTerrainConfig @ 0x60E62F -> sub_603CC0 @
+	// 0x603D0A].
+	if (!read(trn.polydata, cpt_bytes)) {
+		error = trn.polydata + " (" + terrain_name + ".trn's height data) is not under the mount";
+		return false;
+	}
+	CptFile cpt;
+	if (!load_cpt(cpt_bytes.data(), cpt_bytes.size(), cpt, doc_error) || cpt.depth_buffer.empty()) {
+		error = trn.polydata + ": " + (doc_error.empty() ? std::string("no heights") : doc_error);
 		return false;
 	}
 	// One name drives the atlas and the .TSD: the mission's tile set over the
@@ -185,7 +210,7 @@ bool terrain_field_store_load(TerrainFieldStore &store, const ResourceIndex &ind
 	IndexedImage8 charmap;
 	std::vector<uint8_t> charmap_bytes;
 	if (!trn.charmap.empty()) {
-		if (!index.read_file(trn.charmap, charmap_bytes)) {
+		if (!read(trn.charmap, charmap_bytes)) {
 			io::logf(io::LogLevel::kWarn, "terrain: charmap %s is not under the mount - no surface map",
 					trn.charmap.c_str());
 		} else {
@@ -201,7 +226,28 @@ bool terrain_field_store_load(TerrainFieldStore &store, const ResourceIndex &ind
 	terrain_field_store_build(store, cpt, trn,
 			charmap.empty() ? nullptr : charmap.indices.data(),
 			charmap.width, charmap.height);
+	if (trn_out != nullptr) *trn_out = std::move(trn);
 	return store.valid();
+}
+
+} // namespace
+
+bool terrain_field_store_load(TerrainFieldStore &store, const ResourceIndex &index,
+		const std::string &terrain_name, const std::string &tile_set, const std::string &environment,
+		std::string &error) {
+	const auto read = [&index](const std::string &name, std::vector<uint8_t> &out) {
+		return index.read_file(name, out);
+	};
+	return load_store(store, read, terrain_name, tile_set, environment, error, nullptr);
+}
+
+bool terrain_field_store_load(TerrainFieldStore &store, const FileSource &files,
+		const std::string &terrain_name, const std::string &tile_set, const std::string &environment,
+		std::string &error, TrnConfig *trn) {
+	const auto read = [&files](const std::string &name, std::vector<uint8_t> &out) {
+		return files.read(name, out);
+	};
+	return load_store(store, read, terrain_name, tile_set, environment, error, trn);
 }
 
 } // namespace opennova::terrain

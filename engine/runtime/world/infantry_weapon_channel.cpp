@@ -69,9 +69,8 @@ void AiSystem::infantry_weapon_channel(AiEntity &e, World &world, uint32_t logic
 
 }
 
-void AiSystem::infantry_weapon_channel_advance(AiEntity &e) {
-    InfantryState &inf = e.inf;
-
+void advance_weapon_channel(InfantryState &inf, IRootMotionSource *root_motion,
+                            AnimVariantRings &anim_rings) {
     if (inf.wpn_playing_state < 0) inf.wpn_playing_state = inf.wpn_state;
     if (inf.wpn_state != inf.weapon_clip_state()) {
         const int requested = inf.wpn_state;
@@ -281,9 +280,9 @@ bool infantry_weapon_emote_stamp(InfantryState &inf, const IRootMotionSource *so
     return true;
 }
 
-void infantry_weapon_switch_stamp(InfantryState &inf, uint64_t anim_map_serial) {
-    if (anim_map_serial == 0 || inf.wpn_anim_map_serial == anim_map_serial) return;
-    inf.wpn_anim_map_serial = anim_map_serial;
+void infantry_weapon_switch_stamp(InfantryState &inf, uint64_t category_serial) {
+    if (category_serial == 0 || inf.wpn_category_serial == category_serial) return;
+    inf.wpn_category_serial = category_serial;
     inf.arms_dip_ticks = 20;
 }
 

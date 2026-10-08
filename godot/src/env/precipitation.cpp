@@ -18,6 +18,7 @@ void Precipitation::_bind_methods() {
 			&Precipitation::get_weather_path);
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "weather_path"),
 			"set_weather_path", "get_weather_path");
+	ClassDB::bind_method(D_METHOD("get_frame_drops"), &Precipitation::get_frame_drops);
 }
 
 void Precipitation::set_resource_root(const Ref<ResourceRoot> &p_root) {
@@ -80,6 +81,27 @@ void Precipitation::compile_into_(Object *p_sim, Camera3D *p_camera, int p_camer
 			p_camera_mode);
 }
 
+void Precipitation::render_pool_frame(opennova::env::PrecipitationField &r_field,
+		int32_t p_rain_pct_q16, uint32_t p_kind, int32_t p_water_z_q16,
+		const opennova::env::PrecipitationFloorSampler &p_sampler, Camera3D *p_camera,
+		int p_camera_mode, uint32_t p_light_rgb) {
+	inset_frame_.clear();
+	if (p_camera == nullptr) {
+		frame_.clear();
+		return;
+	}
+	const Transform3D xform = p_camera->get_global_transform();
+	const Vector3 right = xform.basis.get_column(0).normalized();
+	const Vector3 up = xform.basis.get_column(1).normalized();
+	const float position[3] = { xform.origin.x, xform.origin.y, xform.origin.z };
+	const float right_axis[3] = { right.x, right.y, right.z };
+	const float up_axis[3] = { up.x, up.y, up.z };
+	opennova::renderer::update_and_compile_precipitation(r_field, p_rain_pct_q16, p_kind,
+			p_water_z_q16, p_sampler, p_light_rgb,
+			opennova::renderer::precipitation_camera_from_render(position, right_axis, up_axis, p_camera_mode),
+			pool_draw_, frame_);
+}
+
 void Precipitation::hide_frame() {
 	frame_.clear();
 	inset_frame_.clear();
@@ -97,7 +119,8 @@ void Precipitation::append_overlay(SceneOverlaySubmission &r_submission) {
 		if (view.frame.drops <= 0) {
 			continue;
 		}
-		const uint32_t texture = r_submission.texture_index(_texture_for(view.frame.snow));
+		const uint32_t texture = r_submission.texture_index(_texture_for(view.frame.snow),
+				opennova::renderer::texture_stage_flags(opennova::renderer::TextureStage::Precipitation));
 		opennova::renderer::append_precipitation_overlay(view.frame, texture,
 				r_submission.frame, view.slot);
 	}

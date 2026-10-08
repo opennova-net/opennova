@@ -5,21 +5,30 @@
 // tree over a parsed document, navigation and the back stack, the per-widget
 // runtime state store and its replay onto a recompiled screen, ACTION
 // dispatch, radio groups, the spin cycle, list / table / combo selection, the
-// single open dropdown and its exclusive pump, edit focus, and the key
-// routing (edit keys, VK hotkeys, character hotkeys).
+// single open dropdown and its exclusive pump, the open MODAL popup, the
+// keyboard focus, the per-screen hotkey table and the key routing.
 //
 // It drives ONE compiled frame through MenuFrameSeam (the embedder implements
 // it over the engine draw-list/pump surface plus its redraw and cursor
 // device work) and reports what happened through a SYNCHRONOUS event sink:
 // observers may re-enter the runtime from the sink (a cross-.mnu jump swaps
-// the document under a widget activation), so no document pointer is held
-// across a sink call.
+// the document), so no document pointer is held across a sink call.
+// Retail keeps every loaded screen in one scene; this runtime holds one
+// document, and a jump to another file (MenuRequested) or back past the
+// file's own history (PopRequested) is the embedder's, raised after the
+// activation's callbacks so they read the screen they fired on, as retail's
+// still-loaded screen lets them (docs/mnu/menu-re.md, "Activation and the
+// ACTION walk").
 // [orig: CUIWidget_HandleScriptedAction @0x6497f0; CUIScene_SelectNodeByName
 //  @0x63b6b0; UI_DispatchScreenEvent @0x54e6a0; UI_DispatchMouseEvent
 //  @0x63ab00; CWnd_ProcessMouseEvent @0x647a00; CComboWnd_HandleEvent
-//  @0x65c190; CEditWnd_HandleInputEvent @0x661510]
+//  @0x65c190; CEditWnd_HandleInputEvent @0x661510;
+//  UI_DispatchKeyboardEventToChildren @0x63ad10]
 
 #include <formats/mnu/mnu.h>
+#include <runtime/menu/menu_click.h>
+#include <runtime/menu/menu_sound.h>
+#include <runtime/menu/menu_table.h>
 #include <runtime/menu/menu_table_row.h>
 #include <runtime/menu/screen_history.h>
 
@@ -63,6 +72,8 @@ public:
 	// The screen container ids, in document order.
 	const std::vector<int> &screen_ids() const { return screen_ids_; }
 	const mnu::Screen *screen(int screen_id) const;
+	// The screen's first root window (a screen node's children are all its
+	// roots, in document order); -1 when it has none.
 	int screen_root_id(int screen_id) const;
 
 private:
@@ -106,10 +117,11 @@ public:
 			int value) = 0;
 	virtual void set_widget_selected_set(int index, const std::vector<int> &rows) = 0;
 	virtual void set_widget_table_rows(int index, const std::vector<MenuTableRow> &rows) = 0;
-	// The table's runtime column records (menu_table_row.h MenuTableColumnDef:
-	// a record a count kept, one it started over, an init over either).
-	virtual void set_widget_table_columns(int index,
-			const std::vector<MenuTableColumnDef> &columns) = 0;
+	// The column records code set up (none: the XML ones; menu_table.h
+	// MenuTableColumn: a record a count kept, one it started over, an init over
+	// either) and the sorted column (-1 none).
+	virtual void set_widget_table_columns(int index, bool installed,
+			const std::vector<MenuTableColumn> &columns, int sort_column) = 0;
 	// CWnd_SetClipRect: the widget's own passes clipped to an absolute design
 	// rect (`enabled` false removes the clip).
 	virtual void set_widget_clip_rect(int index, bool enabled, int left, int top, int right,
@@ -130,7 +142,13 @@ public:
 	// Surface pixels per design unit (1,1 before the surface has a size).
 	virtual void design_scale(float &sx, float &sy) const = 0;
 
-	// The per-sample pump: returns the claimed widget index (-1 none).
+	// The press, the left button's down edge, ahead of its sample's pump: the windows its message
+	// reaches front to back (MenuFrameCompiler::press_reach), the capture taken
+	// (MenuClickLatch::press) and the scrollbar windows' own press run; the runtime runs the
+	// widgets' (press_).
+	virtual std::vector<MenuPumpWindow> press_mouse(float x, float y) = 0;
+	// The per-sample pump: returns the claimed widget index (-1 none: nothing, or a scrollbar's
+	// window).
 	virtual int process_mouse(float x, float y, bool button_down) = 0;
 	virtual bool process_popup_mouse(int index, float x, float y, bool button_down) = 0;
 	virtual bool process_mouse_wheel(float x, float y, int steps) = 0;
@@ -143,10 +161,22 @@ public:
 	virtual bool combo_popup_contains(int index, float x, float y) const = 0;
 	virtual int list_row_at(int index, float x, float y) const = 0;
 	virtual int spin_arrow_at(int index, float x, float y) const = 0; // 0 / 1 up / 2 down
-	// CTableWnd_HitTest: the data row (-1 the header) and column (-1 none)
-	// under the point; false when the test fails.
+	// The table hit test (MenuFrameCompiler::table_hit, CTableWnd_HitTest): the
+	// data row (-1 the header strip) and column (-1 none) under the point;
+	// false where retail fails.
 	virtual bool table_hit(int index, float x, float y, int *row, int *column) const = 0;
-	virtual int hotkey_widget(const std::string &key, bool virtual_key) const = 0;
+	// The parse-time {hot} mnemonic of a widget (MenuFrameCompiler::
+	// widget_mnemonic), empty when none.
+	virtual std::string widget_mnemonic(int index) const = 0;
+	// The text the widget's string table gives a key the game's code names, the key itself on
+	// a miss (MenuFrameCompiler::widget_string); a frame that loads no table answers the key.
+	virtual std::string widget_string(int index, const std::string &key) const {
+		(void)index;
+		return key;
+	}
+	// The open popup (a shown MODAL window) as a pre-order index, -1 none: the
+	// frame's pump then serves its subtree alone.
+	virtual void set_open_popup(int index) = 0;
 	virtual bool edit_char(int index, int unicode) = 0;
 	virtual int edit_key(int index, int key, bool shift) = 0; // EditKeyResult
 };
@@ -158,9 +188,18 @@ struct MenuEvent {
 		ScreenChanged,   // text = screen name
 		MusicVar,        // value = the screen's MUSICVAR (0 when unauthored)
 		MenuRequested,   // text = file, text2 = target screen
-		QuitRequested,
-		UrlRequested,    // text = url
-		Sound,           // text = bank file, text2 = trigger
+		// POP_SCREEN with the file's own history empty: the embedder's
+		// cross-file history pops, else nothing happens.
+		PopRequested,
+		UrlRequested,    // text = url (trimmed), flag = the external browser
+		// GLB_FILTER / GLB_FILTER_NUM from an edit's keys: id = the receiving
+		// control, value = atol(FIELD) (the column), text = the edit's text,
+		// flag = numeric (GLB_FILTER_NUM), text2 = TEST.
+		FilterRequested,
+		// text = bank file, text2 = trigger; id = the widget whose row it is (a spin arrow's: its spin
+		// list's), value = its sound state (menu_sound.h MenuSoundState), text3 = the NAME of the window
+		// the row is on (the arrow's own).
+		Sound,
 		ValueChanged,    // text = widget name, text2 = kind, value = row, text3 = value text
 		WidgetActivated, // id, text = widget name
 		ListActivated,   // id, value = row
@@ -172,6 +211,13 @@ struct MenuEvent {
 		// column (-1 none), state = the row's state after the write,
 		// cell_value = that column's cell value, flag = the double-click form.
 		TableCellClicked,
+		// A row of the embedder's service verbs ran (FORM_POST, GLB_LOAD, GLB_LOADANDPING, GLB_PING,
+		// GLB_JOIN, APPMSG, LAN_SEARCH, LAN_JOIN, MNX): id = the acting widget (-1 a row run on its
+		// own), text = the TYPE as the parse spells it, text2 = the row's text, text3 = its FILE, value
+		// = its code. Raised as the row runs, in walk order; the runtime does nothing more with it
+		// [orig: CUIWidget_HandleScriptedAction @ 0x6497f0 — the jump table's service arms, which
+		// call into the NovaWorld, LAN and application layers].
+		ServiceRequested,
 	};
 	Kind kind = Kind::ScreenChanged;
 	int id = -1;
@@ -184,13 +230,22 @@ struct MenuEvent {
 };
 using MenuEventSink = std::function<void(const MenuEvent &)>;
 
-// One key press as the runtime routes it (the embedder maps its key events).
+// One key press as the runtime routes it, the way Windows delivers it: a
+// WM_KEYDOWN with the key's virtual-key code, then a WM_CHAR with the
+// character it types (the embedder maps its key events).
 struct MenuKeyInput {
-	enum class Key { None, Escape, Enter, Backspace, End, Home, Left, Right, Delete };
-	Key key = Key::None;
+	int vk = 0;                // the virtual-key code (VK_RETURN 13, VK_ESCAPE 27, ...), 0 none
 	int unicode = 0;           // the typed character, 0 when none
-	int printable_keycode = 0; // 0x20..0x7E fallback when `unicode` is 0
+	int printable_keycode = 0; // 0x20..0x7E: the character scan's fallback when `unicode` is 0
 	bool shift = false;
+};
+
+// One row of the current screen's hotkey table [orig: scene_add_widget_event_callback
+// @ 0x63a8e0 — {isVirtual, key, widget}].
+struct MenuHotkeyRow {
+	bool virtual_key = false;
+	int key = 0;
+	int id = -1;
 };
 
 // The standalone CScrollWnd range a companion seeds.
@@ -219,8 +274,13 @@ struct MenuWidgetRuntimeState {
 	std::vector<int> selected_set;
 	bool has_table_rows = false;
 	std::vector<MenuTableRow> table_rows;
+	// The columns code installed [orig: init_table_row @ 0x63f9c0 from the shell],
+	// the sort-key stack and the sorted column [orig: CTableWnd_SortByColumn
+	// @ 0x640900].
 	bool has_table_columns = false;
-	std::vector<MenuTableColumnDef> table_columns;
+	std::vector<MenuTableColumn> table_columns;
+	std::vector<int> table_sort_keys;
+	int table_sort_column = -1;
 	// A runtime rect (CWnd_SetRect), parent-relative design units.
 	bool has_rect = false;
 	int rect_left = 0, rect_top = 0, rect_right = 0, rect_bottom = 0;
@@ -233,7 +293,7 @@ struct MenuWidgetRuntimeState {
 	bool empty() const {
 		return !(has_shown || has_disabled || has_checked || has_text || has_items ||
 				has_selected_item || has_scroll_row || has_scroll_range || has_selected_set ||
-				has_table_rows || has_rect || has_clip);
+				has_table_rows || has_table_columns || has_rect || has_clip);
 	}
 };
 
@@ -267,15 +327,21 @@ public:
 	// The current screen's container id, -1 when none.
 	int current_screen_id() const;
 
-	// Show a screen (no stack change); unknown screen -> false. Closes the open
-	// dropdown first [orig: CUIScene_SelectNodeByName @0x63b6b0 closes
-	// g_UIActiveComboWnd].
+	// Show a screen (no stack change); unknown screen -> false. By-name
+	// lookups find the LAST screen of a name [orig: CUIScene_SelectNodeByName
+	// @0x63b6b0 walks the scene newest first]. Closes the open dropdown and
+	// the open popup and drops the focus [orig: @ 0x63b6b8 clears
+	// g_UIOpenPopupWnd; @ 0x63b7ca clears focus, capture and mouseover].
 	bool show_screen(const std::string &name);
-	// The in-menu forward move (same-file SCREEN actions): pushes the current
-	// screen for pop_screen.
+	// The SCREEN action's select: the screen by name, pushing the current one
+	// on the history (even when it is the same screen) [orig:
+	// CUIScene_SelectNodeByName(name, 1) -> UIScene_PushScreenHistory
+	// @ 0x63b350]. An unknown name changes nothing.
 	bool navigate_to_screen(const std::string &name);
-	// Back within the file; popping past the root is the shell's back/quit
-	// (QuitRequested, returns false).
+	// POP_SCREEN [orig: UIScene_PopScreenHistory @ 0x63c410]: the file's own
+	// history pops; with it empty the embedder's cross-file history does
+	// (PopRequested at once, returns false; a POP_SCREEN row holds it until the
+	// activation's callbacks ran); with that empty too nothing happens.
 	bool pop_screen();
 
 	// ---- the screen history across files and a mission (screen_history.h) ----
@@ -283,6 +349,9 @@ public:
 	// The shell pushes the screen a cross-file jump leaves and pops a row when a
 	// back passes this file's own stack.
 	ScreenHistory &screen_history() { return history_; }
+	// The screens this file's own back stack holds (a SCREEN row's pushes within the file), oldest first:
+	// what an embedder that opens the file anew carries into the history across files.
+	const std::vector<std::string> &own_history() const { return nav_stack_; }
 	const ScreenHistory &screen_history() const { return history_; }
 	// The menu mode's leave, at a mission's start: the screens this file's own back
 	// stack holds join the history in order (retail keeps one history for every
@@ -302,9 +371,16 @@ public:
 	//  @0x54e635]
 	void trim_screen_history() { history_.return_to_mark(false, nullptr); }
 
-	// ---- addressing (document-wide, doc-id keyed) ----
-	// Case-insensitive, first match in document order; -1 = absent.
+	// ---- addressing (doc-id keyed) ----
+	// The embedder's by-name seam: the current screen's control (find_control),
+	// else the first screen in document order holding one; -1 = absent.
 	int widget_id(const std::string &name) const;
+	// Retail's control lookup [orig: UI_FindScreenControl @ 0x63ae80]: the
+	// screen of that name (empty: the current screen; a duplicate name finds
+	// the last), its root windows in document order, each searched pre-order
+	// by NAME (case-insensitive) where a window with no NAME ends its branch
+	// [orig: CWnd_FindChildByName @ 0x646850]. -1 = absent.
+	int find_control(const std::string &screen, const std::string &name) const;
 	std::string widget_name_of(int id) const;
 	int widget_kind_of(int id) const; // mnu::WindowType as int, -1 unknown id
 	std::string widget_screen_of(int id) const;
@@ -348,6 +424,9 @@ public:
 	// The row's displayed text (an authored `type="id"` row resolved through
 	// the screen's string table); "" off-screen or out of range.
 	std::string item_display_text(int id, int row) const;
+	// The text the widget's string table gives a key the game's code names, the key itself on
+	// a miss or off-screen (MenuFrameSeam::widget_string).
+	std::string widget_string(int id, const std::string &key) const;
 	// The authored item `value=` attribute of a row.
 	std::string item_value(int id, int row) const;
 	// Retail's select-by-value seed [orig: SpinList_SelectItemByValue
@@ -370,11 +449,12 @@ public:
 	// The column count a populate sets before it defines its columns: false
 	// below 1 (the resize fails). A count that does not grow the table keeps
 	// its records (the authored columns); one that grows it starts every record
-	// over, zeroed (menu_table_row.h MenuTableColumnDef::kept).
+	// over, zeroed (menu_table.h MenuTableColumn::kept).
 	// [orig: CTableWnd vtable +0x6C -> CTableWnd_ResizeColumnCount @0x63f6c0]
 	bool table_set_column_count(int id, int count);
-	// CTableWnd_InitRow on one record of the current count: false out of range.
-	// The record keeps its draw kind, cell offsets, SUBST rows and bitmap scale.
+	// CTableWnd_InitRow(column, 0, width, label, justify, vjustify) on one record
+	// of the current count: false out of range. The record keeps its cell type,
+	// cell offsets, SUBST rows and bitmap scale (menu_table.h).
 	// [orig: CTableWnd_InitRow @0x63f9c0 — the bounds @0x63f9c8..0x63f9d9]
 	bool table_init_column(int id, int column, int width, const std::string &label,
 			int justify, int vjustify);
@@ -400,50 +480,91 @@ public:
 	bool table_row_selected(int id, int row) const {
 		return table_row_state(id, row) == kTableRowSelected;
 	}
+	// A row's colour override; `enable` false drops it, row -1 is every row
+	// [orig: sub_640110 — the row's +28 bit 4 and +32].
 	void table_set_row_color(int id, int row, bool enable, uint32_t color);
 	// The rows in state 3, ascending.
 	std::vector<int> table_selected_rows(int id) const;
 	// Select `row` alone (every other non-locked row cleared), or toggle it
 	// with `additive`.
 	void table_select_row(int id, int row, bool additive);
+	// Code-installed columns, as the stat fill sets them up: the count
+	// (table_set_column_count), then one init per column with its label, width,
+	// justification and sort compare (table_init_column; the rest of each entry
+	// is not read) [orig: StatScreen_PopulateStatResultsList @ 0x562240 ->
+	// CTableWnd_ResizeColumnCount, CTableWnd_InitRow]; the sort-key stack starts
+	// over. A count that grows the table (the stat RESULTLIST's, which authors no
+	// COLUMN) leaves no authored column behind; an empty set changes nothing.
+	void table_set_columns(int id, const std::vector<MenuTableColumn> &columns);
+	// A column's sort direction [orig: sub_63EC30 writes the column's +120].
+	void table_set_column_ascending(int id, int column, bool ascending);
+	// Sort the rows by `column` [orig: CTableWnd_SortByColumn @ 0x640900: the key
+	// pushed, the rows sorted by CTableWnd_CompareRows @ 0x63e9c0 with their
+	// selection and colours, the column's sort indicator set]; needs installed
+	// columns.
+	void table_sort_by_column(int id, int column);
+	// The column whose header shows the sort indicator, -1 none.
+	int table_sort_column(int id) const;
 
 	// ---- activation / actions ----
-	// WidgetActivated fires BEFORE the scripted ACTION list. Retail runs ACTIONs
-	// first [orig: CUIWidget_HandleScriptedAction @0x6497f0: ACTION walk, then
-	// widget[63]->vtable+32] but keeps every screen alive; the shell replaces
-	// the document on a cross-.mnu jump, so observers read their still-live
-	// controls first, and the dispatch is skipped when an observer swapped the
-	// document under the event.
+	// The widget's activation, the click event 0x3000001 [orig:
+	// CWnd_EmitEventToNamedHandlerAndCallbacks @ 0x646970 -> the class handler
+	// (vtable+32), then the control callbacks]: the class's own step (a
+	// checkbox toggles, a radio checks, a combo opens or closes its list), the
+	// ACTION rows last-authored first (a widget with no NAME runs none), the
+	// event up the parents (an ancestor whose NAME matches the child's byte for
+	// byte runs its rows too), then WidgetActivated (the control callbacks the
+	// embedder binds by name), then the cross-file requests the rows made (a
+	// SCREEN row naming another file, a POP_SCREEN past the file's own
+	// history, and every SCREEN or POP_SCREEN row after one of those), in walk
+	// order. A row or observer that swaps the document stops the rest.
 	void activate(int id);
-	// Check one radio and uncheck its GROUP siblings on the same screen.
+	// Check a radio and uncheck the radios beside it (the same parent) of the
+	// same nonzero GROUP [orig: radio_button_on_click @ 0x656cd0].
 	void select_radio(int id);
-	// Wrap-around cycle (the spin arrows' step); emits the value change.
+	// The spin list's step: +1 SelectNext, -1 SelectPrevious, wrapping; emits
+	// the value change [orig: CSpinListWnd_SelectNext @ 0x64b910,
+	// CSpinListWnd_SelectPrevious @ 0x64b9a0].
 	void spin_cycle(int id, int delta);
-	// One parsed ACTION row [orig: CUIWidget_HandleScriptedAction @0x6497f0].
-	// True when handled; the service verbs (FORM_POST, GLB_*, APPMSG, LAN_*,
-	// MNX) are the shell's and return false.
+	// One parsed ACTION row, run as the current screen's [orig:
+	// CUIWidget_HandleScriptedAction @0x6497f0]. True when it did something:
+	// SCREEN, WINDOW, URL and POP_SCREEN rows; the service verbs (FORM_POST,
+	// GLB_*, APPMSG, LAN_*, MNX) are the embedder's, and code 0, GLB_FILTER,
+	// GLB_FILTER_NUM and TAB do nothing on activation: false. A cross-file
+	// request the row makes is raised after it.
 	bool dispatch_action(const mnu::Action &action);
-	// WINDOW action: show/hide/enable/disable a named widget of the CURRENT
-	// screen, with the retail TOGGLE flag inverting the current state.
-	bool handle_window_action(const std::string &target, const std::string &state_lower,
-			bool toggle);
 	void play_widget_state_sound(int id, const std::string &state_token);
 	void emit_edit_changed(int id);
 
 	// ---- input ----
-	// One raw-mouse sample in frame-local coordinates.
-	void process_mouse(float x, float y, bool button_down);
+	// One raw-mouse sample in frame-local coordinates. The press edge is the
+	// widget's WM_LBUTTONDOWN event [orig: UI_DispatchMouseEvent @ 0x63ab00]:
+	// an edit takes the focus; a list, a table and a spin list's body are
+	// activated and then pick (a row, or the spin's next value).
+	void process_mouse(float x, float y, bool button_down, uint32_t now_ms);
 	// One wheel tick (+1 rows-down, -1 rows-up); true when a target claimed it.
 	bool process_wheel(float x, float y, int steps);
-	// The frame reported a click on widget `index` (its pump's press edge).
-	void on_widget_clicked(int index, uint32_t now_ms, bool ctrl_down);
-	// One key press; true when consumed. Order: focused edit, the virtual-key
-	// hotkey scan, the character scan.
-	bool handle_key(const MenuKeyInput &key, uint32_t now_ms, bool ctrl_down);
+	// The frame reported a click on widget `index` (the claim let go over that
+	// the pump held down under the mouse the sample before, menu_click.h): the
+	// pump's click, the SELECTED sound and the activation; `part` 1 or 2, the
+	// spin arrow's own click (a button of its own) [orig: CWnd_ProcessMouseEvent
+	// @ 0x647b14 — the click event 0x3000001 after the child pump].
+	void on_widget_clicked(int index, int part);
+	// One key press; true when consumed (a hotkey fired, or the focused widget
+	// took it) [orig: UI_DispatchKeyboardEventToChildren @ 0x63ad10].
+	bool handle_key(const MenuKeyInput &key);
+	// A click focus: an edit that is not READONLY [orig:
+	// CEditWnd_HandleInputEvent @ 0x661510, g_UIFocusWnd on 0x1000002].
 	void focus_edit(int id);
 	void close_active_combo_popup();
 	bool is_combo_popup_open(int id) const { return open_combo_id_ == id; }
+	// The keyboard focus [orig: g_UIFocusWnd @0x31C16D4], any widget a TAB
+	// row names, an edit a click focused; -1 none.
 	int focused_widget() const { return focus_id_; }
+	// The open popup [orig: g_UIOpenPopupWnd], -1 none.
+	int open_popup() const { return open_popup_id_; }
+	// The current screen's hotkey table in registration order.
+	const std::vector<MenuHotkeyRow> &hotkey_rows() const { return hotkeys_; }
 
 private:
 	void emit_(const MenuEvent &event) const;
@@ -463,20 +584,75 @@ private:
 	void push_table_rows_(int id);
 	bool table_multiselect_(int id) const;
 	int table_column_count_(int id) const;
-	// The records at `count` (menu_table_row.h): kept when it does not grow the
+	// The records at `count` (menu_table.h): kept when it does not grow the
 	// table, every one zeroed when it does.
 	void table_resize_records_(int id, int count);
 	void push_table_columns_(int id);
 	void emit_value_changed_for_(int id, int row);
 	void on_claim_changed_(int previous, int current);
-	void activate_widget_(int id, int index, float x, float y, uint32_t now_ms, bool ctrl_down);
-	void list_click_(int id, int kind, int row, uint32_t now_ms, bool ctrl_down);
-	void table_click_(int id, int row, int column, uint32_t now_ms);
+	// The parent window's id, -1 for a root (or an unknown id).
+	int parent_window_(int id) const;
+	// [orig: CWnd_FindChildByName @ 0x646850]
+	int find_child_by_name_(int id, const std::string &name) const;
+	// [orig: CWnd_IsVisibleInHierarchy @ 0x646290]
+	bool visible_in_hierarchy_(int id) const;
+	// Shown up the whole chain (what the draw walk reaches).
+	bool drawn_(int id) const;
+	// The popup a draw claims: the last shown MODAL generic window in draw order
+	// [orig: CUIElement_Draw @ 0x64a8a0 makes a drawn MODAL window the popup];
+	// else the one an action left open. Pushed to the frame.
+	void sync_popup_();
+	void set_popup_(int id);
+	// The ACTION walk of one window for the click event [orig:
+	// CUIWidget_HandleScriptedAction @0x6497f0], run as `owner_id`'s; false
+	// when the document was swapped under it.
+	bool walk_rows_(const mnu::Window &w, int owner_id, bool named, uint32_t generation);
+	void run_row_(int owner_id, const mnu::Action &action, bool &handled);
+	// Raise the held cross-file requests in order; an observer may swap the
+	// document under each, and each carries what it needs.
+	void raise_pending_requests_();
+	bool window_row_(int owner_id, const mnu::Action &action);
+	void set_interactive_recursive_(int id, bool enabled);
+	void url_row_(const mnu::Action &action);
+	// The row of `w` for the state (`id` the widget whose row it is), raised as a Sound.
+	void play_sound_(int id, const mnu::Window &w, const std::string &state_token);
+	void service_row_(int owner_id, const mnu::Action &action, int code);
+	// The pump's sound edges of one mouse sample (menu_sound.h's MenuSoundPump over
+	// the widget ids): the claim, live when visible in the hierarchy; a widget the
+	// pump reaches is one of the current screen shown up its chain, the open
+	// popup's alone while one is open [orig: CWnd_ProcessMouseEvent @ 0x647a00;
+	// CUIScene_EndFrame @ 0x63e600 pumps the popup alone].
+	void sample_sounds_(int claim, bool button_down);
+	bool sound_reached_(int id) const;
+	// The press (WM_LBUTTONDOWN) of the widget at `index`.
+	// A widget's own press; `again` the captured window's press a root behind its own hands it
+	// (MenuFrameCompiler::press_reach), the same message: a double click's form is the first's.
+	void press_(int index, float x, float y, uint32_t now_ms, bool again);
+	void list_press_(int id, int row, uint32_t now_ms, bool again);
+	void table_press_(int id, int row, int column, uint32_t now_ms, bool again);
 	bool register_click_(int id, int row, uint32_t now_ms);
+	// A spin arrow's click: its own SELECTED sound and ACTION rows, then the spin
+	// list's step [orig: CSpinListWnd_HandleEvent @ 0x64c370 on
+	// SPINLISTWND_UP / SPINLISTWND_DOWN].
+	void arrow_click_(int id, int arrow);
 	void open_combo_popup_(int id);
-	void clear_edit_focus_();
-	bool route_edit_key_(const MenuKeyInput &key);
-	bool trigger_hotkey_target_(int index, uint32_t now_ms, bool ctrl_down);
+	// Focus moves [orig: g_UIFocusWnd]: the edit losing it keeps the text it
+	// was typed (the store) without a commit event.
+	void set_focus_(int id);
+	void drop_focus_();
+	void commit_edit_(int id);
+	// The key goes to the focused widget once per root window of the screen
+	// [orig: the broadcast in UI_DispatchKeyboardEventToChildren @ 0x63ad10
+	// calls every root's UI_EmitEventToFocusWnd @ 0x6461f0].
+	size_t current_root_count_() const;
+	void key_down_to_focus_(const MenuKeyInput &key);
+	void char_to_focus_(int unicode);
+	void edit_filter_rows_(int id);
+	void tab_rows_(int id);
+	// The hotkey scan [orig: UI_DispatchKeyboardEventToChildren @ 0x63ad10,
+	// dispatch_key_event @ 0x63ac30]; true when a row fired.
+	bool scan_hotkeys_(bool virtual_key, int key);
+	void build_hotkeys_();
 
 	struct WidgetInfo {
 		std::string screen;
@@ -492,25 +668,33 @@ private:
 	std::string current_screen_;
 	std::vector<std::string> nav_stack_;
 	ScreenHistory history_; // kept across open_document
-	std::unordered_map<std::string, int> screen_ids_; // upper name -> screen id
+	std::unordered_map<std::string, int> screen_ids_; // upper name -> the LAST screen id
 	std::vector<std::string> screen_order_;
-	std::unordered_map<std::string, int> name_to_id_; // upper name -> first doc id
 	std::unordered_map<int, WidgetInfo> id_info_;
+	std::vector<MenuHotkeyRow> hotkeys_;
+	// The cross-file requests the rows made (MenuRequested, PopRequested), in walk
+	// order, raised after the activation's callbacks.
+	std::vector<MenuEvent> pending_requests_;
 	std::unordered_map<int, MenuWidgetRuntimeState> id_state_;
 	MenuWidgetRuntimeState scratch_state_;
 	std::vector<int> id_of_index_;
 	std::unordered_map<int, int> index_of_id_;
 
-	// keyboard/edit focus [orig: g_UIFocusWnd @0x31C16D4]
+	// keyboard focus [orig: g_UIFocusWnd @0x31C16D4]
 	int focus_id_ = -1;
 	// single open dropdown [orig: g_UIActiveComboWnd @0x31C16D0]
 	int open_combo_id_ = -1;
+	// the open popup [orig: g_UIOpenPopupWnd], and the index the frame has
+	int open_popup_id_ = -1;
+	int frame_popup_index_ = -1;
 	int last_claim_ = -1;
-	float last_mouse_x_ = 0.0f, last_mouse_y_ = 0.0f;
+	// The windows' sound states and verdicts (menu_sound.h), by widget id.
+	MenuSoundPump sound_pump_;
 	bool mouse_down_ = false;
 	int last_click_id_ = -1;
 	int last_click_row_ = -1;
 	uint32_t last_click_ms_ = 0;
+	bool last_click_double_ = false; // the last press's form, which a press handed again keeps
 };
 
 } // namespace opennova::menu

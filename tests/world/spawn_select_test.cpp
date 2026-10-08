@@ -5,6 +5,7 @@
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
 #include <base/io/crt_rand.h>
+#include <base/gameprofile/game_type.h>
 
 #include <cmath>
 #include <cstdio>
@@ -220,6 +221,69 @@ int main() {
         CHECK(approx(r.position.z, 12.0f));
         CHECK(r.yaw == 0 && r.pitch == 4 && r.roll == 5);
         CHECK(r.flags_or == 0 && !r.carrier.valid()); // team 0 marker: no latch
+    }
+
+    // --- D-NET-376: the placement copies the chosen entity's heading WORD.
+    //     A marker's word is its BMS placement angle, ((90 - yaw) << 16) / 360
+    //     truncated, << 16, over the RAW record yaw: JO:CA CP01's 6001 markers
+    //     at -197 and -167 hold 0xCC160000 and 0xB6C10000 in retail's process
+    //     (163 and 193 normalized first would give 0xCC170000 / 0xB6C20000).
+    //     A parented marker adds its parent's word; a seeded vehicle's word is
+    //     its live motor heading.
+    // [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66;
+    //  Server_PositionPlayerForSpawn @0x50D3F7; Entity_TransformLocalToWorld
+    //  @0x43BE7E]
+    {
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
+        w.registry.configure_pool(1, 4);
+        w.registry.configure_pool(3, 16);
+        spawn_marker(w, 6001, {-534.9119f, -139.3639f, 25.5f}, -197);
+        spawn_marker(w, 6001, {-529.2835f, -138.3019f, 25.5f}, -167);
+        SpawnPointResult r = resolve_player_spawn_pose(
+            w, EntityHandle{}, EntityHandle{}, 0, 1, 0x30020u);
+        CHECK(r.found && r.yaw == -197);
+        CHECK(static_cast<uint32_t>(r.heading_bam) == 0xCC160000u);
+        r = resolve_player_spawn_pose(w, EntityHandle{}, EntityHandle{}, 1, 1, 0x30020u);
+        CHECK(r.found && r.yaw == -167);
+        CHECK(static_cast<uint32_t>(r.heading_bam) == 0xB6C10000u);
+    }
+    {
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
+        w.registry.configure_pool(1, 4);
+        w.registry.configure_pool(3, 16);
+        Entity parent;
+        parent.kind = EntityKind::Item;
+        parent.yaw = 73; // word 0x0C160000 (17 degrees truncated)
+        const EntityHandle parent_h = w.registry.spawn(1, parent);
+        const EntityHandle marker_h = spawn_marker(w, 6094, {1.0f, 0.0f, 0.0f}, 180);
+        w.registry.get(marker_h)->ground_target = parent_h; // word 0xC0000000
+        SpawnPointResult r = resolve_player_spawn_pose(
+            w, EntityHandle{}, EntityHandle{}, 0, 1, 0x30020u);
+        CHECK(r.found && static_cast<uint32_t>(r.heading_bam) == 0xCC160000u);
+
+        // The parent's motor has run: its live word turns and adds.
+        Entity *carrier = w.registry.get(parent_h);
+        carrier->veh.yaw_seeded = true;
+        carrier->veh.yaw_bam = 0x12345678;
+        r = resolve_player_spawn_pose(w, EntityHandle{}, EntityHandle{}, 0, 1, 0x30020u);
+        CHECK(static_cast<uint32_t>(r.heading_bam) == 0xD2345678u);
+    }
+    {
+        // A picked vehicle zone with no scatter: its live heading word.
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
+        w.registry.configure_pool(1, 4);
+        w.registry.configure_pool(3, 4);
+        const EntityHandle zone = spawn_zone(w, 1, 1, 0);
+        Entity *vehicle = w.registry.get(zone);
+        vehicle->yaw = 30;
+        vehicle->veh.yaw_seeded = true;
+        vehicle->veh.yaw_bam = 0x2AAA1234;
+        const SpawnPointResult r = resolve_player_spawn_pose(
+            w, EntityHandle{}, zone, 0, 1, 0x10010u);
+        CHECK(r.found && r.yaw == 30 && r.heading_bam == 0x2AAA1234);
     }
 
     // --- The Co-op direct-marker arm's two survivors: the chosen marker's
@@ -746,6 +810,25 @@ int main() {
         w.zones.spawn_waves.reset_on_zone_team_change(w, zone);
         CHECK(w.zones.spawn_waves.entries()[0].queued.empty());
         CHECK(w.zones.spawn_waves.entries()[0].team == 2);
+    }
+
+    // --- The chain's marker types by mode and team, the one table the no-pick arm reads (and the
+    //     editor's Play from here, editor/run/play_start.h).
+    // [orig: Server_PositionPlayerForSpawn @0x50CF60]
+    {
+        namespace gt = opennova::game_type;
+        const StartMarkerTypes coop = start_marker_types(gt::kCoop, 1);
+        const StartMarkerTypes objective = start_marker_types(gt::kObjectiveCoop, 3);
+        const StartMarkerTypes deathmatch = start_marker_types(gt::kDeathmatch, 1);
+        const StartMarkerTypes red = start_marker_types(gt::kTeamDeathmatch, 2);
+        const StartMarkerTypes violet = start_marker_types(gt::kTeamDeathmatch, 4);
+        const StartMarkerTypes teamless = start_marker_types(gt::kTeamDeathmatch, 0);
+        CHECK(coop.primary == 6094 && coop.fallback == 6001);
+        CHECK(objective.primary == 6094 && objective.fallback == 6001);
+        CHECK(deathmatch.primary == 6095 && deathmatch.fallback == 6002);
+        CHECK(red.primary == 6097 && red.fallback == 6004);
+        CHECK(violet.primary == 6099 && violet.fallback == 6091);
+        CHECK(teamless.primary == 0 && teamless.fallback == 0);
     }
 
     if (failures == 0) std::printf("OK spawn_select\n");

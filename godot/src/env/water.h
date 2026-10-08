@@ -83,6 +83,24 @@ public:
 	void set_mission_water_height_override(float p_value);
 	// Disable retained runtime rendering while no world is loaded.
 	void set_world_rendering_enabled(bool p_value);
+	// The mirror pass on or off, the surface drawn either way: an editor device renders its mirror
+	// only in the frames it presents (ADR 0046 S14, E13), so a picture no canvas draws this frame
+	// spends no mirror pass. On in the game, always.
+	void set_mirror_enabled(bool p_value);
+	bool is_mirror_enabled() const { return mirror_enabled_; }
+	// The water's process-wide globals as a process has them with no water (the
+	// active flag, the height, the shader cache's plane): what a picture with no
+	// water (a model's) renders under after a mission's picture published its
+	// own (ADR 0046 S14, E13).
+	static void publish_absent();
+	// The hold (ADR 0046 S14, E13), as MissionEnvironment's: while held, the water writes none of its
+	// process-wide globals (the active flag, the height, the shader cache's plane); its node state
+	// still moves. The editor's mission device releases it to publish and to present its own frame.
+	void set_globals_held(bool p_held) { globals_held_ = p_held; }
+	bool is_globals_held() const { return globals_held_; }
+	// How many times a water wrote its process-wide globals since the process began (a read-back for
+	// the hold's tests: a headless renderer keeps no global to read back).
+	static int64_t get_global_writes() { return global_writes_; }
 	// Irreversibly drop the retained water renderer graph during process
 	// exit. Normal world unload deliberately keeps this graph warm for the
 	// next mission; SceneTree teardown is too late because shell-owned
@@ -170,11 +188,19 @@ private:
 	// viewport.
 	struct DrawingView {
 		Camera3D *camera = nullptr;
+		// The projection the original projects the view through: the local
+		// view presenter's screen projection (its D3D9 raster shift taken out)
+		// for the frame's cameras, else the camera's own.
 		Projection projection;
 		Vector2i raster;
+		// True for the frame's cameras: their screen projection is the plain
+		// perspective their fov and keep mode describe (the camera node draws
+		// it through its raster's half pixel, render/d3d9_raster_device).
+		bool frame_perspective = false;
 	};
 	DrawingView _drawing_view(Camera3D *p_surface_cam) const;
-	void _update_reflection_camera(Camera3D *p_cam, const Projection &p_projection);
+	void _update_reflection_camera(Camera3D *p_cam, const Projection &p_projection,
+			bool p_frame_perspective);
 	void _apply_reflection_clear();
 	void _install_reflection_decode();
 	void _release_reflection_decode();
@@ -199,6 +225,9 @@ private:
 	// The world retains this node across unload/reload, while a standalone
 	// water node starts enabled.
 	bool world_rendering_enabled_ = true;
+	bool mirror_enabled_ = true;
+	bool globals_held_ = false;
+	static int64_t global_writes_;
 	float terrain_water_height_ = 0.0f;
 	bool terrain_bounds_valid_ = false;
 	float terrain_min_height_ = 0.0f;

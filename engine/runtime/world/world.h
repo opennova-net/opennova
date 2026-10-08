@@ -75,6 +75,7 @@ struct TerrainHeightField;
 
 namespace opennova::audio { class SoundSetIndex; }
 namespace opennova::dbf { struct File; }
+namespace opennova::lwf { struct File; }
 namespace opennova::rtxt { struct File; }
 
 namespace opennova::world {
@@ -529,12 +530,15 @@ struct MissionTables {
     audio::SoundProfileTable sound_profiles;
     // MissionKernel owns this immutable bank catalog for the world's lifetime.
     const audio::SoundSetIndex *sound_sets = nullptr;
-    // And the mission's co-named dialog bank and its mission text table, which
-    // a dialog line's clip and chat lines resolve against (null when the
+    // And the mission's dialog bank, its sounds and its mission text table,
+    // which a dialog line's clip and chat lines resolve against (null when the
     // mission has none). [orig: DialogSystem_Init @0x5275E0 ->
-    // DialogManager_LoadFromFile @0x44E650 (the .dbf); g_TextMission, read by
-    // Dialog_LoadAudioClip @0x44DDCD / Dialog_LoadAudioClipLocalized @0x44E054]
+    // DialogManager_LoadFromFile @0x44E650 (the .dbf, then its <base>.lwf or
+    // .pwf @0x44E7D4..0x44E807 into the dialog bank @0xA8A348); g_TextMission,
+    // read by Dialog_LoadAudioClip @0x44DDCD / Dialog_LoadAudioClipLocalized
+    // @0x44E054]
     const dbf::File *dialog_bank = nullptr;
+    const lwf::File *dialog_sounds = nullptr;
     const rtxt::File *mission_text = nullptr;
     CharacterTraitsTable character_traits;
     // charattr.def: each CHARACTER row's tokenized ATTRIBUTES dword (AutoScope 1,
@@ -542,11 +546,20 @@ struct MissionTables {
     // soldier class as retail indexes g_CharAttr — row (class - 1) & 0xF, the
     // dword at row offset 40. The embedder stamps it from its parsed table
     // (inmatch::charattr_class_attribute_rows over the boot-soft charattr table,
-    // re-stamped after every S2C 0x41 clear); zero rows carry no attribute,
-    // which is retail's empty-table behaviour. [orig: CharAttr_LoadFromDef @0x412140;
-    //  the reader AnimMap_IsSlotActive @0x4125e0 — dword_A79568[31 *
-    //  ((slot - 1) & 0xF)] & mask, with dword_A79568 = g_CharAttr + 0x28]
+    // re-stamped after every S2C 0x41 and 0x42); zero rows carry no attribute,
+    // which is retail's empty-table behaviour, and a disabled ATTRIBUTES zeroes
+    // them all. [orig: CharAttr_LoadFromDef @0x412140; the reader
+    //  CharAttr_ClassHasAttribute @0x4125e0 — !g_CharAttrPropertyDisabled[0] &&
+    //  g_CharAttr row active && dword_A79568[31 * ((slot - 1) & 0xF)] & mask,
+    //  with dword_A79568 = g_CharAttr + 0x28]
     std::array<uint32_t, 16> class_attribute_flags{};
+    // The authority's charattr disable latches as S2C 0x42 carries them
+    // (inmatch::charattr_pack_disabled), stamped with the words above: the body
+    // of the join's 0x42 and of every periodic one.
+    // [orig: CharAttr_PackDisabledProperties @0x412550, from
+    //  NetPacket_WriteCharAttrDisabledProperties @0x505BA0 (Server_OnPlayerJoin
+    //  @0x51a802) and Server_SendEntityHandleAndInputState @0x507C02]
+    uint16_t charattr_disabled_word = 0;
     static constexpr uint32_t kCharAttrKnifeBonus = 0x4u;
     static constexpr uint32_t kCharAttrMedic = 0x8u;
     bool class_has_attribute(uint8_t player_class, uint32_t bit) const {
@@ -625,6 +638,17 @@ struct SessionRules {
     bool last_tick_of_batch = true;
     bool ignore_weapon_ammo_cost = false; // dword_24C1930 bit 0x100
     bool cease_fire = false; // g_InCeaseFire @ 0x24C196C
+    // The player profile's auto-reload word as the mission start's session copy
+    // leaves it (profile::session_input): one process global the weapon action
+    // handlers read for EVERY slot they run, the local player's, the AI's and
+    // the remote players' an authority pumps alike — an empty magazine's IDLE
+    // queues the reload only with it set, and the last round's RECOIL queues it
+    // only with it set. Default on, a fresh record's +1524 = 1.
+    // [orig: g_autoReloadEnabled @0x24D2118 <- Game_ApplySessionSettingsToGlobals
+    //  @0x551a40 (forced 0 by `/noreload` @0x551a48); readers WeaponAction_Idle
+    //  @0x5429a6 (no owner test) and WeaponAction_Recoil @0x543013 (the local
+    //  player's arm)]
+    bool auto_reload = true;
     // Projectile_UpdatePhysics clamps the radius to 0.1u only for an
     // authoritative multiplayer FatBullets trace owned by a remote player.
     // These explicit host-fed gates keep that option out of ordinary/SP rays.

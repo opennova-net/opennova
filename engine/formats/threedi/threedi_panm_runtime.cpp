@@ -83,7 +83,7 @@ int32_t threedi_panm_sample_track_raw(const ThreediTransform *track,
 
     // Retail PANM recognizes only 113 as a control-register sampler. Codes
     // 114..117 deliberately fall through to CWaveformTable_WaveLookup by their low nibble.
-    if (track->control == 113) {
+    if (threedi_generator_reads_register(THREEDI_GENERATOR_CONSUMER_PANM, track->control)) {
         const uint8_t ordinal = track->control_param;
         const int32_t ctrl =
             ctrl_values && ordinal < THREEDI_CTRL_REGISTER_COUNT

@@ -5,10 +5,47 @@
 
 #include <runtime/menu/menu_frame.h>
 
+#include <base/io/strutil.h>
+
 namespace opennova::menu {
 
 inline mnu::RectEdges offset_rect(const mnu::RectEdges &rect, int dx, int dy) {
 	return { rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy };
+}
+
+// The per-node shown gate the draw walk, the hit walk and the ancestor query share: the
+// authored hidden flag, overridden by a widget state's hide and then its show.
+inline bool node_shown(const mnu::Window &w, const MenuWidgetState *ws) {
+	bool shown = !w.hidden;
+	if (ws != nullptr) {
+		if (ws->hide) {
+			shown = false;
+		}
+		if (ws->show) {
+			shown = true;
+		}
+	}
+	return shown;
+}
+
+// The state slot an APPEARANCE STATE attribute parses to, -1 for a token the parse does
+// not know [orig: CUIElement_ParseXMLDefinition @ 0x6483d4..0x64845e — DEFAULT=0,
+// DISABLED=1, MOUSEOVER=2, SELECTED=3; an unknown STATE fails the row @ 0x648511, so it
+// sets nothing].
+inline int appearance_state_slot(const std::string &state) {
+	if (strutil::iequals(state, "default")) {
+		return kStateDefault;
+	}
+	if (strutil::iequals(state, "disabled")) {
+		return kStateDisabled;
+	}
+	if (strutil::iequals(state, "mouseover")) {
+		return kStateMouseover;
+	}
+	if (strutil::iequals(state, "selected")) {
+		return kStateSelected;
+	}
+	return -1;
 }
 
 // Per-widget resolved build info. Rects stay in the 800x600 design space
@@ -17,30 +54,68 @@ inline mnu::RectEdges offset_rect(const mnu::RectEdges &rect, int dx, int dy) {
 struct MenuFrameCompiler::WidgetNode {
 	const mnu::Window *window = nullptr;
 	int parent = -1;
+	// The root window's node (a root's own index): the own-or-root walks end
+	// there [orig: CWnd_GetInheritedTextRsrc @ 0x646AB0 and
+	// CWnd_GetInheritedCursorTexture @ 0x646AD0 return the widget's own value,
+	// else the TOPMOST ancestor's: the loop re-tests the widget's own field].
+	int root = -1;
+	// A SPINUP / SPINDOWN arrow: a whole button window the spin list parses
+	// before attaching it [orig: CUISpinList_ParseXMLDefinition @ 0x64bd10 ->
+	// CButtonWnd_ParseTooltipXML @ 0x658170; CSpinListWnd_CreateUpDownChildren
+	// @ 0x64b8b0 attaches it]. Parts sit past the document's index space.
+	bool part = false;
+	int part_kind = 0;    // 1 SPINUP, 2 SPINDOWN
+	int spin_up = -1;     // a spin list's arrow nodes
+	int spin_down = -1;
 	// The per-visual-state appearance records [orig: the 28-byte state
-	// records at elem+8; flags bit0 COLOR / bit1 IMAGE / bit3 OUTLINE].
+	// records at elem+8; flags bit0 COLOR / bit1 IMAGE / bit2 CUSTOM / bit3
+	// OUTLINE].
 	StatePass states[4];
+	// Every IMAGE row of the window's APPEARANCE as parsed, for the rect's
+	// fallback extents [orig: @ 0x6485cd..0x648634].
+	struct ImageRow {
+		int32_t texture = kMenuTexNone;
+		int32_t height = -1; // HEIGHT, -1 when absent
+	};
+	std::vector<ImageRow> image_rows;
 	// The ITEMS per-state appearance records (list-row highlight)
 	// [orig: CListWnd_DrawItems @ 0x643f30 — the row style records at +828].
 	StatePass items_states[4];
-	// The effective FONT + per-state fg colors, resolved like the draw-time
-	// walk [orig: CWnd_GetFontAndColors @ 0x646a70 — self-then-parent to the
-	// first widget with a font; colors in parse order, only fg is drawn].
+	// The drawing FONT slot and its 8 colors, from the nearest self-or-ancestor
+	// whose FONT loaded [orig: CWnd_GetFontAndColors @ 0x646a70 — font and
+	// colors from the same widget; none up the chain: slot 0, nothing measured
+	// or drawn]. `measure_font` is the one the parse measured the text size
+	// with: the same, except a part parsed before it is attached reaches only
+	// its own FONT.
 	int32_t font = 0;
+	int32_t measure_font = 0;
 	uint32_t colors[4] = { 0, 0, 0, 0 };
+	// The string table the widget's ids read: its own TEXT_RSRC, else its root
+	// window's; a part parsed before it is attached reads only its own. Null:
+	// neither authors one (ids show raw).
+	const std::string *text_table = nullptr;
 	// The effective FRAME block [orig: CWnd_FindInheritedFrameBlock
 	// @ 0x647190 — nearest ancestor carrying a frame; the draw gate stays the
 	// widget's own DRAW_FRAME].
 	int frame_owner = -1;
 	int32_t frame_stencil = kMenuTexNone;
 	int32_t frame_brush = kMenuTexNone;
-	// The inherited CURSOR texture [orig: CWnd_ProcessMouseEvent
-	// @ 0x647a00 walks parents for +276 into g_UIFrameCursorTexture].
+	// The widget's own CURSOR texture (inherited_cursor_ picks own-or-root
+	// by what loaded).
 	int32_t cursor = kMenuTexNone;
-	// Spin arrows: default-state art (their independent hover states are
-	// child-widget state the compiled path defers — D-MNU-13).
-	StatePass spin_up;
-	StatePass spin_down;
+	// A list row's layout: its justify word (+20: the low nibble 1 CENTER, 2 RIGHT, else LEFT; the
+	// high 0x10 VCENTER, 0x20 BOTTOM, else TOP) and its text offsets (+24 / +28), the list's own at
+	// the row's insert, an authored ITEM's over them [orig: list_insert_row @ 0x6450c8..0x6450e8;
+	// CListWnd_ParseXMLDefinition @ 0x645c74..0x645c9d]. The list's start CENTER and VCENTER with
+	// no offset [orig: CListWnd_Construct @ 0x643c08 (+0x330 = 1), @ 0x643c50 (+0x334 = 0x10),
+	// +0x328 / +0x32C zeroed].
+	struct RowLayout {
+		int justify = 1;     // +0x330
+		int vjustify = 0x10; // +0x334
+		int x = 0;           // +0x328
+		int y = 0;           // +0x32C
+		int align() const { return justify | vjustify; }
+	};
 	// Item rows [orig: CUISpinList_ParseXMLDefinition @ 0x64bd10].
 	struct ItemVisual {
 		enum Kind { kText,
@@ -49,9 +124,14 @@ struct MenuFrameCompiler::WidgetNode {
 		std::string text;
 		int32_t texture = kMenuTexNone;
 		uint32_t color = 0;
+		RowLayout layout; // as a list's row
 	};
 	std::vector<ItemVisual> items;
 	std::vector<ItemVisual> popup_items; // combo LIST_BOX rows when authored
+	// What a row the game adds takes: the ITEMS block's (a combo's dropdown: its LIST_BOX's)
+	// [orig: UIList_AddRow @ 0x6453c0 -> list_insert_row @ 0x644f20].
+	RowLayout row_layout;
+	RowLayout popup_row_layout;
 	StatePass popup_states[4]; // LIST_BOX background appearances
 	StatePass popup_items_states[4]; // LIST_BOX ITEMS row appearances
 	// Authored sprite scrollbars. `scrollbar` is the standalone type=scroll

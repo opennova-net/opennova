@@ -1,0 +1,178 @@
+#pragma once
+
+// charattr.def: the character classes' attributes, the table retail loads once at boot on every peer
+// [orig: Game_Run @ 0x4A7FE3 -> CharAttr_LoadFromDef @ 0x412140] into sixteen 124-byte rows at g_CharAttr
+// (0xA79540). A ConfigFile (formats/configfile/config_file.h): a class is a [CHARACTERn] section, each key
+// one field of its row. The loader clears the whole table (memset 0x7C0 bytes @ 0x412168), then reads
+// CHARACTER1, CHARACTER2 and so on, stopping at the first class the file has no section of (@ 0x4121bf),
+// sixteen at most; of two sections of a label the first is read (config_file.h find_config_section).
+//
+// What the game reads of it (docs/net/novaworld-net-re.md, "charattr.def: the table and its readers"):
+// a class's ATTRIBUTES Medic and KnifeBonus words (the medic heal and its HUD markers, the medic-filtered
+// send, the knife's reach), and its three *_CAMMO item type ids (the item a player of the class spawns as
+// by the mission's camouflage, ItemList_FindIndexByTypeId's items.def id less 100000, the first items.def
+// row for a type no row has). Every other field (STEALTH, HPBONUS, MANABONUS, the five *_MUTE scales,
+// RUN_MODIFIER) and the AutoScope, SpreadBonus and WaterGirl words are read by no game code: only the
+// anti-cheat challenge hashes them with the row (S2C 0x39 -> C2S 0x1C) and a debug page shows them.
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace opennova::charattr {
+
+inline constexpr size_t kClassCount = 16;
+inline constexpr size_t kRowBytes = 124;      // 31 dwords [orig: the 0x7C stride, CharAttr_LoadFromDef @ 0x412454]
+inline constexpr size_t kPropertyCount = 14;  // the disable latches g_CharAttrPropertyDisabled[0..13] @ 0xA79508
+
+// A field by the id the table's accessors and S2C 0x41 name it by [orig: CharAttr_SetProperty @ 0x412890,
+// CharAttr_GetAttributeFloat @ 0x412640, CharAttr_GetIntProperty @ 0x412800]. Id 1 names none.
+enum Property : uint8_t {
+	kAttributes = 0,
+	kStealth = 2,
+	kHpBonus = 3,
+	kManaBonus = 4,
+	kRecoilMute = 5,
+	kXhairMute = 6,
+	kScopeMute = 7,
+	kXhairDxMute = 8,
+	kReloadMute = 9,
+	kJungleCammo = 10,
+	kDesertCammo = 11,
+	kArcticCammo = 12,
+	kRunModifier = 13,
+};
+
+// The ATTRIBUTES words [orig: g_CharAttrAttributeNames @ 0x813F18, 20-byte rows: AutoScope 1, SpreadBonus 2,
+// KnifeBonus 4, Medic 8, WaterGirl 0x20, then an empty name], each matched without case.
+inline constexpr uint32_t kAutoScope = 0x01;
+inline constexpr uint32_t kSpreadBonus = 0x02;
+inline constexpr uint32_t kKnifeBonus = 0x04;
+inline constexpr uint32_t kMedic = 0x08;
+inline constexpr uint32_t kWaterGirl = 0x20;
+struct AttributeName {
+	const char *name;
+	uint32_t flag;
+};
+inline constexpr std::array<AttributeName, 5> kAttributeNames{{
+		{"AutoScope", kAutoScope},
+		{"SpreadBonus", kSpreadBonus},
+		{"KnifeBonus", kKnifeBonus},
+		{"Medic", kMedic},
+		{"WaterGirl", kWaterGirl},
+}};
+// A word's flag, 0 for a word the table has none of [orig: CharAttr_LoadFromDef @ 0x4123b0, stricmp over
+// the 20-byte rows to the empty name].
+uint32_t attribute_flag(std::string_view word);
+
+// One class's row as the loader fills it [orig: g_CharAttr + 124 * (class - 1)].
+struct ClassRow {
+	bool active = false;     // +0: the loader found the class's section (@ 0x4121e0)
+	uint8_t class_id = 0;    // +4: the class, 1..16 (@ 0x412451)
+	float stealth = 0.0f;      // +8  STEALTH
+	float hp_bonus = 0.0f;     // +12 HPBONUS
+	float mana_bonus = 0.0f;   // +16 MANABONUS
+	float recoil_mute = 0.0f;  // +20 RECOIL_MUTE
+	float reload_mute = 0.0f;  // +24 RELOAD_MUTE
+	float xhair_mute = 0.0f;   // +28 XHAIR_MUTE
+	float xhairdx_mute = 0.0f; // +32 XHAIRDX_MUTE
+	float scope_mute = 0.0f;   // +36 SCOPE_MUTE
+	uint32_t attributes = 0;   // +40 ATTRIBUTES, the words' flags
+	int32_t jungle_cammo = 0;  // +44 JUNGLE_CAMMO, an item type id
+	int32_t desert_cammo = 0;  // +48 DESERT_CAMMO
+	int32_t arctic_cammo = 0;  // +52 ARCTIC_CAMMO
+	int32_t run_modifier = 0;  // +56 RUN_MODIFIER
+	// +60..+123: no key fills them; zero.
+};
+
+struct Table {
+	std::array<ClassRow, kClassCount> rows{};
+};
+
+// The keys the loader reads, each with the property it fills, in the loader's order [orig:
+// CharAttr_LoadFromDef @ 0x4121e7..0x412353]: a float (ConfigFile type 2) or an integer (type 1); then
+// ATTRIBUTES, its words (@ 0x412381).
+struct KeySpec {
+	const char *key;
+	Property property;
+	bool real;
+};
+inline constexpr std::array<KeySpec, 12> kScalarKeys{{
+		{"STEALTH", kStealth, true},
+		{"HPBONUS", kHpBonus, true},
+		{"MANABONUS", kManaBonus, true},
+		{"RECOIL_MUTE", kRecoilMute, true},
+		{"XHAIR_MUTE", kXhairMute, true},
+		{"XHAIRDX_MUTE", kXhairDxMute, true},
+		{"SCOPE_MUTE", kScopeMute, true},
+		{"RELOAD_MUTE", kReloadMute, true},
+		{"JUNGLE_CAMMO", kJungleCammo, false},
+		{"DESERT_CAMMO", kDesertCammo, false},
+		{"ARCTIC_CAMMO", kArcticCammo, false},
+		{"RUN_MODIFIER", kRunModifier, false},
+}};
+inline constexpr const char *kAttributesKey = "ATTRIBUTES";
+// The key a property is written under; null for id 1 and ids past 13.
+const char *property_key(uint8_t property);
+
+// The row's 124 bytes as retail holds them: the anti-cheat challenge's CRC input [orig:
+// CharAttr_GetClassChecksum @ 0x412aa0 -> CRC_ComputeCustomTable(row, 124)].
+std::array<uint8_t, kRowBytes> row_bytes(const ClassRow &row);
+// The same rows byte for byte (a float by its bits: 0.0 and -0.0 differ, as the challenge's CRC sees them).
+bool same_rows(const Table &a, const Table &b);
+
+// Where the loader read a value: the value's token (its byte offset into the text and its length) and the
+// token as written.
+struct ValueSource {
+	bool read = false;
+	size_t offset = 0;
+	size_t length = 0;
+	std::string written;
+};
+
+// What the loader read of one class.
+struct ClassSource {
+	bool read = false;          // the loader reached the class's section
+	size_t section_offset = 0;  // its '[' line
+	std::array<ValueSource, kPropertyCount> values{}; // by Property (ATTRIBUTES: its first word)
+	std::vector<ValueSource> attribute_words;          // each ATTRIBUTES word read, in order
+};
+
+// A section the loader never reads: one of a class after the first class the file has no section of, a
+// second of a label (the first is read), or one whose label names no class 1 to 16.
+struct UnreadSection {
+	enum class Why { AfterMissing, Repeated, NotAClass };
+	Why why = Why::NotAClass;
+	std::string label;  // as the file writes it, upper case
+	int class_id = 0;   // the class it names, 0 for none
+	size_t offset = 0;  // its '[' line
+};
+
+struct Reading {
+	size_t classes = 0;  // the classes read: 1 to `classes`
+	std::array<ClassSource, kClassCount> sources{};
+	std::vector<UnreadSection> unread;
+};
+
+// The table from charattr.def's bytes as the loader fills it [orig: CharAttr_LoadFromDef @ 0x412140]: `out`
+// cleared first, then each class read. False when the loader's load fails and the table stays cleared
+// (no bytes; a CBIN-form file, which ConfigFile_LoadFromFile reads through its binary reader and this one
+// does not: no shipped charattr.def is one). `reading`, when given, says where each value came from and
+// which sections are never read.
+bool read_table(const uint8_t *data, size_t size, Table &out, Reading *reading = nullptr);
+
+// charattr.def's text holding `table` (ADR 0003: from the table, not from any file's bytes), which
+// read_table reads back to the same table: each active class's section (CR LF line ends, the ConfigFile's)
+// with every key the loader reads that holds other than 0 (a key the section lacks reads 0: the loader
+// clears the table first; a float of all-zero bits is that 0, a -0.0 is written), a float always with a
+// point and the digits that read back to its bits, ATTRIBUTES the words of its flags (left out at 0).
+// False with the reason for a table no file loads as: an active class after an inactive one, a class id
+// other than its row's, a row the loader leaves zero holding a value, a flag no word has, a float that
+// is no number; or for a text whose values the ConfigFile reader's pool of its words cannot take, which
+// would overrun the game's heap (configfile::data_strings_pool, ConfigFile_ParseText @ 0x7609e8).
+bool write_table(const Table &table, std::string &text, std::string &error);
+
+} // namespace opennova::charattr

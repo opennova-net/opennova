@@ -437,6 +437,32 @@ int test_retail_tank_sets_select_view_layers() {
     return 0;
 }
 
+// A set's layers as the emitter mix reads them (MissionAudio's candidates and the editor's Listen alike): each layer
+// with a member, from its member 0 (its volume, ceiling and pitch) with the layer's two radii; a layer with no member
+// left out [orig: SoundEmitter_UpdateAndMixTop8 @ 0x528649 reads layer+16].
+int test_emitter_layers_read_member_zero() {
+	BankBuilder bank;
+	const uint32_t quiet = bank.member(90, 200);
+	const uint32_t loud = bank.member(250, 255);
+	bank.file.sndparms[loud].pitch_scaled = 0x18000;
+	const uint32_t first = bank.layer(120, 15, lwf::kFlagInternal | lwf::kFlagExternal, {quiet, loud});
+	const uint32_t empty = bank.layer(50, 0, lwf::kFlagInternal, {});
+	const uint32_t second = bank.layer(300, 0, lwf::kFlagExternal, {loud, quiet});
+	const int32_t set = bank.set("AMB", 0, {first, empty, second});
+	const std::vector<EmitterLayer> layers = emitter_layers(bank.file, bank.file.multis[size_t(set)]);
+	int failed = 0;
+	failed |= !(layers.size() == 2);
+	if (layers.size() == 2) {
+		failed |= !(layers[0].playlist == first && layers[0].sndparm == quiet && layers[0].falloff_u == 120 &&
+				layers[0].min_u == 15 && layers[0].volume == 90 && layers[0].clamp == 200 &&
+				layers[0].pitch_q16 == lwf::kPitchUnityQ16);
+		failed |= !(layers[1].playlist == second && layers[1].sndparm == loud && layers[1].falloff_u == 300 &&
+				layers[1].min_u == 0 && layers[1].volume == 250 && layers[1].pitch_q16 == 0x18000u);
+	}
+	if (failed) std::printf("FAIL: emitter_layers reads each layer's member 0\n");
+	return failed;
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
 	int failed = test_radio_selection_keeps_unity_pitch_and_gates_view_layers();
@@ -454,6 +480,7 @@ int main(int argc, char **argv) {
 	failed |= test_silent_layers_drop_and_every_layer_picks();
 	failed |= test_member_pick_skips_dangling_indices();
     failed |= test_direct_distance_skips_set_cull_but_retains_layer_gain_and_selection();
+	failed |= test_emitter_layers_read_member_zero();
 	if (failed) {
 		return 1;
 	}

@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/string.hpp>
@@ -16,6 +17,8 @@
 #include <vector>
 
 namespace godot {
+
+class ResourceRoot;
 
 // One authored SIGHTS card row of a weapon.def entry (DefSightEntry): the
 // texture and its virtual 1024x768 rect, the blend mode, the scale/slide
@@ -45,6 +48,12 @@ public:
 	// or slid (the engine's sight_row_rect, <runtime/hud/sight_overlay.h>,
 	// carries the three-mode policy).
 	Rect2 evaluate_rect(int p_sight_scale_index, int p_slide_multiplier) const;
+	// The row's picture as the card draws it: the stage loader's texture under
+	// the creation word the session's texcompression_level gives a SIGHTS row,
+	// DXT5 at 1 or less (renderer/texture_compression.h sight_card_texture_flags,
+	// D-RMAT-24). Null when the picture does not load.
+	Ref<Texture2D> load_card_texture(const Ref<ResourceRoot> &p_root,
+			int p_texcompression_level) const;
 
 	// A row from its texture, 1024x768 rect and blend mode plus the optional
 	// scale/slide flags.
@@ -199,6 +208,7 @@ public:
 	void set_hudrndgfx_layout(const Vector3i &p_value);
 	TypedArray<WeaponSightRow> get_sights() const;
 	// The ACTION ladder the weapon FSM bakes (weapon_fsm.h).
+	TypedArray<WeaponActionRow> get_actions() const;
 	void set_actions(const TypedArray<WeaponActionRow> &p_rows);
 };
 

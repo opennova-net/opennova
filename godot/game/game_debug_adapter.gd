@@ -155,16 +155,31 @@ func get_mcp_game_state() -> Variant:
 		player["class"] = sim.get_local_player_class()
 		player["weapon"] = sim.get_local_player_weapon_name()
 		player["weapon_state"] = sim.get_local_player_weapon_state().to_json_value()
+	var mission_file := String(world.get_loaded_mission_file()) if world != null else ""
+	var root := _resource_root()
 	return {
 		"shell": {
 			"state": _shell.shell_state_name() if _shell != null else "",
 			"world_loading": _is_world_loading(),
 			"world_loaded": world != null and world.is_loaded(),
-			"mission_file": world.get_loaded_mission_file() \
-					if world != null else "",
+			"mission_file": mission_file,
 			"dev_tools_open": _shell != null and _shell.is_dev_tools_open(),
+			# The expansion the game data mounted with (/exp; "" for the base game), and whether
+			# OpenNova's mission catalog over it holds the loaded mission (ADR 0046 S16: an
+			# editor's expansion build, played). The catalog reads a mission's text through the
+			# mount stack, not retail's archive pairs (runtime/mission/mission_catalog.h), so this
+			# says nothing of the pair rule; the build says that (build.expansion.mission_*).
+			"expansion": String(root.get_expansion()) if root != null else "",
+			"mission_in_catalog": _mission_in_catalog(root, mission_file),
+			# What the game's string lookup answers for the expansion's Mods-list name ([exp_info]
+			# EXP_NAME), the override table consulted first: the expansion's loose <n>.bin, the only
+			# file that serves it (Strings.track_expansion_override); "" with no expansion mounted.
+			"expansion_title": (Strings.lookup(Strings.TABLE_GAMETEXT, "exp_info", "EXP_NAME")
+					if root != null and not String(root.get_expansion()).is_empty() else ""),
 		},
 		"session": _session_facts(sim),
+		# The player profile's current record (player.sav): its slot, name and words.
+		"profile": _profile_state(),
 		"runtime": runtime_state,
 		"player": player,
 		"mission": (world.get_mission_stats().to_json_value()
@@ -173,6 +188,23 @@ func get_mcp_game_state() -> Variant:
 				if world != null else {}),
 		"audio_buses": _audio_bus_state(),
 	}
+
+
+## The player profile's current record (PlayerProfile.store()): its slot, name,
+## flags, every named word, the macros, the voice pair and the binding count.
+func _profile_state() -> Dictionary:
+	var profiles := PlayerProfile.store()
+	var state := {
+		"slot": profiles.get_current_slot(),
+		"name": profiles.get_player_name(),
+		"flags": profiles.get_flags(),
+		"macros": profiles.get_macros(),
+		"voice": [profiles.get_voice(0), profiles.get_voice(1)],
+		"binding_count": profiles.get_binding_count(),
+	}
+	for word in PlayerProfiles.word_names():
+		state[word] = profiles.get_word(word)
+	return state
 
 
 ## The in-match session facts (ADR 0042: Simulation.session_state()/
@@ -184,6 +216,18 @@ func _session_facts(sim: Simulation) -> Dictionary:
 	return {
 		"state": _session_state_name(int(sim.session_state())),
 		"role": _session_role_name(int(sim.session_role())),
+		# The charattr properties the restriction step disabled, in the S2C 0x42
+		# packing (0x02 ATTRIBUTES, 0x04 XHAIR_MUTE, 0x08 RECOIL_MUTE, 0x10 SCOPE_MUTE).
+		"charattr_disabled": int(sim.get_charattr_disabled_word()),
+		# The profile's input words as the session copy left them (the look's
+		# sensitivity and Y invert, the auto-reload global), and the live
+		# bindings' joystick gate (docs/playerinfo/player-sav-re.md).
+		"input": {
+			"mouse_sensitivity": int(sim.get_session_mouse_sensitivity()),
+			"invert_mouse": bool(sim.is_session_mouse_inverted()),
+			"auto_reload": bool(sim.is_session_auto_reload()),
+			"joystick_enabled": ControlsBindings.model().is_joystick_enabled(),
+		},
 	}
 
 
@@ -375,6 +419,22 @@ func _menu_shell() -> MenuShell:
 	return _shell.get_menu_shell() if _shell != null else null
 
 
+func _resource_root() -> ResourceRoot:
+	var menu := _menu_shell()
+	return menu.get_resource_root() if menu != null else null
+
+
+## Whether OpenNova's mission catalog over `root` holds `mission` (compared as the game compares
+## names).
+static func _mission_in_catalog(root: ResourceRoot, mission: String) -> bool:
+	if root == null or mission.is_empty():
+		return false
+	for name in MissionCatalog.mission_names(root):
+		if String(name).to_lower() == mission.to_lower():
+			return true
+	return false
+
+
 func mcp_game_menu(args: Dictionary) -> Variant:
 	var shell := _menu_shell()
 	if shell == null:
@@ -390,11 +450,14 @@ func mcp_game_menu(args: Dictionary) -> Variant:
 			if not shell.menu_press(target):
 				return {"error": "no widget named '%s'" % target}
 			return shell.menu_snapshot(false)
-		"press_at":
+		"press_at", "move_at", "hold_at":
+			# press_at: a press and its release there; move_at / hold_at: one
+			# sample there with the button up / held, as a motion is.
 			if not args.has("x") or not args.has("y"):
-				return {"error": "press_at requires x and y (design coords)"}
-			var hit := shell.menu_press_at(
-					Vector2(float(args["x"]), float(args["y"])))
+				return {"error": "%s requires x and y (design coords)" % op}
+			var at := Vector2(float(args["x"]), float(args["y"]))
+			var hit := shell.menu_press_at(at) if op == "press_at" \
+					else shell.menu_move_at(at, op == "hold_at")
 			var out := shell.menu_snapshot(false)
 			out["hit_index"] = hit
 			return out

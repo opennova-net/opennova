@@ -162,8 +162,8 @@ func test_hud_hidden_capture_is_scoped_non_persisting_and_keeps_effects_active()
 
 func test_shared_key_fires_huddetail_not_hudcolor() -> void:
 	# Pin the catalog default rows (huddetail F6 / hudcolor F6) so the
-	# shared-key predicate holds regardless of ambient user remaps. In-memory
-	# only — the user's controls.cfg is never rewritten here.
+	# shared-key predicate holds regardless of an earlier profile's apply. In-memory
+	# only — no player.sav is written here.
 	ControlsBindings.model().restore_defaults()
 	var presenter: GameHudPresenter = autofree(GameHudPresenter.new())
 	var detail_start := presenter.hud_detail_level()
@@ -264,6 +264,16 @@ func test_world_points_project_through_the_presenter_view_projection() -> void:
 			"proj[1][1] follows the SELECTED ratio")
 	assert_false(is_equal_approx(camera.get_camera_projection().x.x, projection.x.x),
 			"the gameplay camera carries only the culling superset, which the HUD never projects through")
+	# The frame draws through the surface's D3D9 half pixel (the third column's
+	# clip translation), and the HUD projects through the SCREEN projection, the
+	# original's, with it taken back out: the overlay places the original's
+	# window coordinates on this raster's pixel centres itself.
+	assert_almost_eq(player.view_projection().z.x, -1.0 / 1024.0, 1e-6,
+			"the target camera draws half a surface pixel right")
+	assert_almost_eq(player.view_projection().z.y, 1.0 / 600.0, 1e-6,
+			"...and half a surface pixel down")
+	assert_almost_eq(projection.z.x, 0.0, 1e-6, "the HUD's projection takes the half pixel back out")
+	assert_almost_eq(projection.z.y, 0.0, 1e-6)
 
 	# The pick ray rides the same frame: a surface point maps into the
 	# target's pixels by the blit stretch (target size / surface size) and the

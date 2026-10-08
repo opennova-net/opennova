@@ -1,6 +1,6 @@
 #pragma once
 
-#include <runtime/inmatch/charattr_challenge.h>
+#include <runtime/inmatch/charattr_table.h>
 #include <runtime/inmatch/disconnect_reason.h>
 #include <runtime/inmatch/pre_game_menu.h>
 #include <runtime/inmatch/integrity_challenge_profile.h>
@@ -434,6 +434,12 @@ public:
 	void set_character_join_vars(CharacterJoinVars vars) {
 		character_join_vars_ = vars;
 	}
+	// The current profile's inverse OPTIONS_AUTOMEDIC word (+1660), raw: the
+	// C2S 0x03 the game-start reply groups carries it. 0 (a fresh record's)
+	// asks the host for automatic medic requests.
+	// [orig: MultiPlayer_JoinSessionStateMachine @0x56A6E9..0x56A70F ->
+	//  NetPacket_WriteAutoMedicPreference @0x42A400 reading +1660 @0x42A411]
+	void set_auto_medic_preference(uint32_t disabled) { auto_medic_disabled_ = disabled; }
 	// Configure the retail game-session request before start(). Spectator emits
 	// JSR=1 and optional JSPP; join_password emits JSP for a side/squad credential.
 	// The transport PW, JSP and spectator JSPP remain separate.
@@ -481,19 +487,16 @@ public:
 	}
 	const std::vector<uint8_t> &cd_cookie() const { return cd_cookie_; }
 
-	// Anti-cheat character-attribute challenge source. This is the exact
-	// sixteen-row table loaded from charattr.def at boot, not AnimMap/.adm data.
-	// S2C 0x41 mutates the retained table in receive order.
-	void set_charattr_challenge_table(CharAttrChallengeTable table) {
-		charattr_challenge_table_ = std::move(table);
-	}
-	void clear_charattr_challenge_table() { charattr_challenge_table_ = {}; }
-	// The LIVE table (post every S2C 0x41 applied so far) -- the HUD's
+	// The process's character-attribute table (inmatch/charattr_table.h): the
+	// sixteen rows loaded from charattr.def at boot and their disable latches.
+	// S2C 0x41 zeroes and disables a property and S2C 0x42 sets the latches,
+	// each in receive order; S2C 0x39 hashes a row.
+	void set_charattr_table(CharAttrTable table) { charattr_table_ = std::move(table); }
+	void clear_charattr_table() { charattr_table_ = {}; }
+	// The LIVE table (every S2C 0x41 and 0x42 applied so far) -- the HUD's
 	// per-class ATTRIBUTES words read from here, the same g_CharAttr the
-	// checksum hashes [orig: AnimMap_IsSlotActive @0x4125e0].
-	const CharAttrChallengeTable &charattr_challenge_table() const {
-		return charattr_challenge_table_;
-	}
+	// checksum hashes [orig: CharAttr_ClassHasAttribute @0x4125e0].
+	const CharAttrTable &charattr_table() const { return charattr_table_; }
 
 	// Install one exact retail-corpus anti-cheat source profile. Unknown ids
 	// clear any previous profile and return false. With no profile—or when a
@@ -612,9 +615,17 @@ public:
 	bool prepare_deployment_pick(
 			uint16_t wire_value, ProtocolMessage &message_out);
 	// Death returns an established connection to the pick/release portion of the deployment FSM.
-	// The self handle and authenticated transport remain valid; a covering 0x5A release returns
-	// Phase::InMatch and raises PollResult::reached_in_match again.
+	// The self handle and authenticated transport remain valid; a covering 0x5A release, or the
+	// self record's respawn edge, returns Phase::InMatch.
 	bool begin_redeployment();
+	// The local respawn edge: the host's record of our own player cleared its dead bit while
+	// we held it dead. The record apply runs Game_InitNewRound for the local player, which
+	// clears the deploy hold, so it releases a fresh deploy and a medic revive's deploy alike;
+	// the revive's is the only release, since its deploy sends no 0x5A (D-NET-379). Leaves
+	// the pick/release stages for Complete and returns Phase::InMatch; true on a release.
+	// [orig: NetPacket_SerializePlayerState @0x4C1109 -> Game_InitNewRound @0x4C114C, its
+	//  dword_81474C clear @0x4227CE]
+	bool release_deployment_on_respawn();
 
 	// Retail completes the 0x00 -> 0x01 -> 0x02 exchange and learns the mission from S2C 0x7B before it
 	// begins the load/spawn drive. A binding that must load that advertised mission sets this false
@@ -929,10 +940,11 @@ private:
 	LoadoutKit loadout_kit_;      // binding-injected submission content (see set_loadout_kit)
 	bool loadout_kit_set_ = false;
 	CharacterJoinVars character_join_vars_{};
+	uint32_t auto_medic_disabled_ = 0; // profile +1660 (set_auto_medic_preference)
 	uint8_t current_player_class_ = 0; // authoritative S2C 0x5A avatarClass
-	// Boot-loaded g_CharAttr[16] bytes. Ordered S2C 0x41 property clears
-	// mutate this retained table before every later 0x39 challenge.
-	CharAttrChallengeTable charattr_challenge_table_{};
+	// The boot-loaded g_CharAttr[16] and its latches. Ordered S2C 0x41 and
+	// 0x42 mutate this retained table before every later 0x39 challenge.
+	CharAttrTable charattr_table_{};
 	const IntegrityChallengeProfile *integrity_challenge_profile_ = nullptr;
 	// Frozen renderer-definition snapshot for S2C 0x68 -> C2S 0x3D. Configuration
 	// survives start(): bindings may finish loading models before the first net pump.

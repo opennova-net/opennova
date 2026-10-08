@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include <formats/def/def.h>
+#include <formats/def/def_notes.h>
 
 #include <string>
 
@@ -38,6 +39,27 @@ int main(int argc, char **argv) {
         }
         def_free_weapons(&parsed);
     }
+    // The loadout list's team mask is the loadout reader's: yellow as blue, violet as red, an
+    // unknown team none [orig: WeaponDef_ParseProperty @ 0x54d730, teamfilter
+    // @ 0x54daae..0x54db08]. (The host's mask, from the weapon def reader's red / blue table,
+    // is world::teamfilter_bit's.) The tokens stay as written.
+    {
+        static const char kTeams[] =
+            "weapon \"WPN_YELLOW\"\r\nteamfilter yellow\r\nend\r\n"
+            "weapon \"WPN_VIOLET\"\r\nteamfilter violet\r\nteamfilter green\r\nend\r\n"
+            "weapon \"WPN_BOTH\"\r\nteamfilter RED\r\nteamfilter blue\r\nend\r\n";
+        DefWeaponsFile parsed{};
+        if (def_parse_weapons_memory(reinterpret_cast<const unsigned char *>(kTeams), sizeof(kTeams) - 1, &parsed) != 0 ||
+            parsed.count != 3) return 1;
+        const bool masks = parsed.entries[0].teamfilter_mask == 2 && parsed.entries[1].teamfilter_mask == 1 &&
+                           parsed.entries[2].teamfilter_mask == 3 && parsed.entries[1].teamfilter_count == 2 &&
+                           strcmp(parsed.entries[1].teamfilter[1], "green") == 0;
+        def_free_weapons(&parsed);
+        if (!masks) {
+            fprintf(stderr, "FAIL: the loadout reader's team masks\n");
+            return 1;
+        }
+    }
 
     /* A weapon.def with no weapon rows is an empty table, never a failure: a
        comment-only file and a zero-length one both parse to zero rows
@@ -60,6 +82,15 @@ int main(int argc, char **argv) {
             return 1;
         }
         def_free_weapons(&empty);
+        // The editor's noted read takes the same rule.
+        DefTextNotes notes;
+        DefWeaponsFile noted{};
+        if (def_parse_weapons_memory(nullptr, 0, &noted, nullptr, notes) != 0 || noted.count != 0) {
+            fprintf(stderr, "FAIL: a zero-length weapon.def read with notes is an empty table\n");
+            def_free_weapons(&noted);
+            return 1;
+        }
+        def_free_weapons(&noted);
         DefWeaponsFile refused{};
         if (def_parse_weapons_memory(nullptr, 4, &refused) == 0) {
             fprintf(stderr, "FAIL: a null buffer with a length is refused\n");
@@ -434,7 +465,7 @@ int main(int argc, char **argv) {
        16-B-stride {name, 0, flags1, flags2} table @ 0x830bf0]: auto = 0x100,
        Sighted = 0x2, WhileSwimming = 0x1000000 (the old 7-entry table aliased it
        onto Underwater's 0x4 — corrected), LaserBeam = 0x40000000 (previously
-       unmapped -> raw_lines only), NoAmmoTypes = flags2 0x40.
+       unmapped -> authoring diagnostic), NoAmmoTypes = flags2 0x40.
        [orig: WeaponSlot_CanFireInCurrentState @ 0x53f0b0 auto gate;
        Player_ToggleWeaponScope @ 0x4df0c0 Flags & 3 gate + FOV 80/zoom @ 0x4df401]. */
     if (m4->flags != (0x100 | 0x2 | 0x1000000 | 0x40000000)) {
@@ -762,7 +793,7 @@ int main(int argc, char **argv) {
         DefWeaponsFile rf;
         memset(&rf, 0, sizeof(rf));
         if (def_parse_weapons_memory((const unsigned char *)kRowsDef, sizeof(kRowsDef) - 1, &rf,
-                                     &probe) != 0 || rf.count != 1) {
+                                     nullptr, &probe) != 0 || rf.count != 1) {
             fprintf(stderr, "FAIL: sight rows inline parse failed\n");
             def_free_weapons(&rf);
             def_free_weapons(&wf);
@@ -1179,15 +1210,19 @@ int main(int argc, char **argv) {
         const char text[] =
                 "weapon TEST_SOUNDS\r\n"
                 " soundhead MINI_HEAD\r\n soundfireloop MINI_LOOP\r\n"
-                " soundtrailoff MINI_TAIL\r\n soundlockedtone TARGET_LOCK\r\nend\r\n";
+                " soundtrailoff MINI_TAIL\r\n soundlockedtone TARGET_LOCK\r\n"
+                " heat_sound OVERHEAT extra\r\nend\r\n";
         DefWeaponsFile parsed{};
         if (def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(text),
                 sizeof(text) - 1, &parsed) != 0 || parsed.count != 1) return 1;
         const DefWeaponDef &w = parsed.entries[0];
+        /* heat_sound reads its first value token alone [orig: WeaponDefs_ParseLineCallback
+           'heat_sound' @ 0x543e85, tokens[1] @ 0x543e97 -> +0x368 @ 0x543eac]. */
         const bool ok = strcmp(w.soundhead, "MINI_HEAD") == 0 &&
                 strcmp(w.soundfireloop, "MINI_LOOP") == 0 &&
                 strcmp(w.soundtrailoff, "MINI_TAIL") == 0 &&
-                strcmp(w.soundlockedtone, "TARGET_LOCK") == 0;
+                strcmp(w.soundlockedtone, "TARGET_LOCK") == 0 &&
+                strcmp(w.heat_sound, "OVERHEAT") == 0;
         def_free_weapons(&parsed);
         if (!ok) { fprintf(stderr, "FAIL: weapon-level sound names\n"); return 1; }
     }
@@ -1405,7 +1440,7 @@ int main(int argc, char **argv) {
                 nf.count == 1 && nf.stopped == 1 && nf.stop_line == 3 &&
                 nf.entries[0].unclosed == 1 && nf.entries[0].clipsize == 3 &&
                 nf.entries[0].end_line == 3 && nf.entries[0].actions_count == 1 &&
-                nf.entries[0].actions[0].raw_lines_count == 0;
+                nf.entries[0].actions[0].unmodeled_count == 0;
         if (!ok) {
             fprintf(stderr, "FAIL: nested weapon line: %zu entries, stopped %d at %zu, clipsize %d\n",
                     nf.count, nf.stopped, nf.stop_line, nf.count > 0 ? nf.entries[0].clipsize : -1);
@@ -1457,7 +1492,7 @@ int main(int argc, char **argv) {
         DefWeaponsFile sf;
         memset(&sf, 0, sizeof(sf));
         if (def_parse_weapons_memory((const unsigned char *)kSlotsDef, sizeof(kSlotsDef) - 1, &sf,
-                                     &probe) != 0 || sf.count != 1) {
+                                     nullptr, &probe) != 0 || sf.count != 1) {
             fprintf(stderr, "FAIL: slot-read inline parse failed\n");
             def_free_weapons(&sf);
             def_free_weapons(&wf);

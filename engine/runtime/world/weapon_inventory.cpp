@@ -6,6 +6,7 @@
 #include <cstdio>
 
 #include <base/io/strutil.h>
+#include <formats/playersav/weapon_sav.h>
 
 namespace opennova::world {
 
@@ -100,9 +101,14 @@ void weapon_availability_apply_pairs(
 }
 
 std::vector<WeaponKitEntry> weapon_kit_default() {
-    // [orig: Buffer_CopyUntilDoubleNull(restrictionData, "WPN_M4AUTO", 2048)
-    //  @ 0x5246be / @ 0x5519e4 — the profile-less spawn kit]
-    return {WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
+    // [orig: Buffer_CopyUntilDoubleNull(restrictionData, 0x833BF8, 2048)
+    //  @ 0x5246be / @ 0x5519e4 — the profile-less spawn kit: the whole static
+    //  page blob (eight "<name> -1 -1 -1" rows) the double-NUL copy takes, the
+    //  page a fresh profile's single-player page is seeded from]
+    std::vector<WeaponKitEntry> kit;
+    for (const playersav::KitEntry &e : playersav::default_single_player_page().entries)
+        kit.push_back(WeaponKitEntry{e.name, e.ammo_primary, e.ammo_secondary, e.flags});
+    return kit;
 }
 
 std::vector<WeaponKitEntry> weapon_kit_knife_fallback() {

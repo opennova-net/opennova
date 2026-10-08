@@ -447,4 +447,49 @@ void WeatherState::apply_quake_jitter(World &world, WeatherTickEvents &events) {
     });
 }
 
+size_t weather_thunder_sounds(const WeatherTickEvents &events, WeatherSoundEvent out[2]) {
+    size_t count = 0;
+    if (events.thunder_a) out[count++] = WeatherSoundEvent{0x10000, 0};   // [orig: @ 0x57ecfb]
+    if (events.thunder_b) out[count++] = WeatherSoundEvent{0xA0000, 128}; // [orig: @ 0x57edc4]
+    return count;
+}
+
+size_t rain_ambient_emitters(const WeatherState &weather, const RainAmbientBody &body,
+                             SoundEmitterEvent out[2]) {
+    if (weather.core.scalar_channels.rain_pct_fp == 0 ||
+        weather.precipitation_kind != static_cast<uint32_t>(PrecipitationKind::Rain))
+        return 0;
+    int32_t volume = weather.core.scalar_channels.rain_pct_fp;
+    // The first blink hit's owner carries the interior daylight transfer.
+    if (body.lit)
+        volume = static_cast<int32_t>((body.light_transfer * 0.5f + 0.5f) * static_cast<float>(volume));
+    // The word registers as is: the registrar tests the WHOLE word, so
+    // 1..0xFF keeps a live level-0 slot and only 0 is the unregister
+    // [orig: SoundEmitter_RegisterSetLayers @ 0x528377 `cmp [ecx+18h], bx`];
+    // the mailbox's zero-volume clear is the same contract.
+    const uint16_t volume_word = static_cast<uint16_t>(volume);
+    constexpr uint16_t kLifetimeTicks = 20;
+    constexpr int32_t kEarOffset = 2 << 16;
+    const int32_t px = static_cast<int32_t>(body.pos.x * 65536.0f);
+    // The emitter Z is the entity Z plus the eye-offset Z (entity +0x74).
+    const float emitter_z = body.pos.z + static_cast<float>(body.eye_offset_z) / 65536.0f;
+    for (int side = 0; side < 2; ++side) {
+        SoundEmitterEvent &ev = out[side];
+        ev = SoundEmitterEvent{};
+        ev.source_spawn_id = body.source_spawn_id;
+        ev.source_handle = body.source_handle;
+        ev.pos = body.pos;
+        ev.pos.x = static_cast<float>(side == 0 ? px + kEarOffset : px - kEarOffset) / 65536.0f;
+        ev.pos.z = emitter_z;
+        ev.source_bms_id = body.bms_id;
+        ev.emitted_tick = body.emitted_tick;
+        ev.lane = static_cast<uint8_t>(side == 0 ? 1 : 2);
+        ev.lifetime_ticks = kLifetimeTicks;
+        ev.pitch_q16 = 0x10000;
+        ev.volume_q8_8 = volume_word;
+        ev.set_name = side == 0 ? "LPNV_RAIN_L" : "LPNV_RAIN_R";
+    }
+    return 2;
+}
+
 } // namespace opennova::world

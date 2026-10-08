@@ -39,18 +39,30 @@ inline void splice_token(std::string &p_text, const char *p_token, const std::st
 		p_text.replace(at, token.size(), p_value);
 }
 
-// The object stages' sampLinearWrap2D at retail's highest filter tier: the 2x
-// anisotropic footprint of the beauty wrappers (shared.gdshaderinc
-// obj_sample_aniso2), clamped at the stage texture's last retail mip level.
-// A fragment template splices it into its @SAMPLE_ANISO2@ slot and calls
-// rd_sample_aniso2(texture, uv, max_lod).
-inline const char *const kGlslSampleAniso2 = R"GLSL(vec4 rd_sample_aniso2(sampler2D tex, vec2 tex_uv, float max_lod) {
+// The object stages' sampLinearWrap2D under the effects' filter mode, as the
+// beauty wrappers sample it (shared.gdshaderinc obj_sample_effect_stage),
+// clamped at the stage texture's last retail mip level. filter_code is the
+// effect stage's shader filter code (engine renderer/texture_filter.h
+// shader_filter_code; render/texture_filter_device.h effect_filter_code): 0
+// bilinear on the nearest level, 1 trilinear, 2 the 2x anisotropic footprint.
+// A fragment template splices it into its @SAMPLE_EFFECT_STAGE@ slot and calls
+// rd_sample_effect_stage(texture, uv, max_lod, filter_code).
+inline const char *const kGlslSampleEffectStage = R"GLSL(vec4 rd_sample_effect_stage(sampler2D tex, vec2 tex_uv, float max_lod,
+		uint filter_code) {
 	vec2 size = vec2(textureSize(tex, 0));
 	vec2 du = dFdx(tex_uv);
 	vec2 dv = dFdy(tex_uv);
 	float length_x = length(du * size);
 	float length_y = length(dv * size);
 	float major = max(length_x, length_y);
+	float isotropic_lod = log2(max(major, 1.0e-8));
+	if (filter_code == 0u) {
+		return textureLod(tex, tex_uv,
+				clamp(floor(isotropic_lod + 0.5), 0.0, max(max_lod, 0.0)));
+	}
+	if (filter_code == 1u) {
+		return textureLod(tex, tex_uv, min(isotropic_lod, max_lod));
+	}
 	float minor = min(length_x, length_y);
 	float ratio = clamp(major / max(minor, 1.0e-8), 1.0, 2.0);
 	float lod = min(log2(max(major / ratio, 1.0e-8)), max_lod);

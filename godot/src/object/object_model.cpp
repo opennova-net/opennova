@@ -6,6 +6,7 @@
 #include "object/model_light.h"
 
 #include <base/io/fixed.h>
+#include <base/io/hash.h>
 #include <cmath>
 
 #include <godot_cpp/classes/mesh_instance3d.hpp>
@@ -1688,7 +1689,7 @@ void ObjectModel::apply_dynamic_material(const Ref<ShaderMaterial> &material,
 						postmultiply_material_for_index(material_index);
 				set_material_and_auxiliary_parameter(material, postmultiply, "u_diffuse", frame);
 				set_material_and_auxiliary_parameter(material, postmultiply,
-						"u_diffuse_max_lod", opennova::material_texture_max_lod(frame));
+						"u_diffuse_max_lod", opennova::texture_max_lod(frame));
 				stamp.anim_frame = frame_index;
 				q3_parameters_changed = true;
 			}
@@ -1877,12 +1878,9 @@ Vector3 ObjectModel::get_model_light_world_position(int p_index) const {
 void ObjectModel::apply_point_light_selection_to_robj(int p_robj_index,
 		int p_count, const Vector4 *p_posr, const Vector4 *p_color) {
 	const int count = CLAMP(p_count, 0, 4);
-	uint64_t hash = 0xcbf29ce484222325ull;
+	uint64_t hash = opennova::io::kFnv1a64Offset;
 	const auto mix = [&hash](const void *data, size_t size) {
-		const uint8_t *bytes = static_cast<const uint8_t *>(data);
-		for (size_t i = 0; i < size; ++i) {
-			hash = (hash ^ bytes[i]) * 0x100000001b3ull;
-		}
+		hash = opennova::io::fnv1a64_bytes(hash, data, size);
 	};
 	mix(&count, sizeof(count));
 	for (int i = 0; i < count; ++i) {
@@ -1962,15 +1960,19 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("update_authored_lods",
 					"camera_transform", "vertical_fov",
-					"viewport_width", "viewport_height"),
-			&ObjectModel::update_authored_lods);
+					"viewport_width", "viewport_height", "object_detail"),
+			&ObjectModel::update_authored_lods,
+			DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));
 	ClassDB::bind_static_method("ObjectModel",
-			D_METHOD("update_authored_lods_for_camera", "camera", "viewport_width"),
-			&ObjectModel::update_authored_lods_for_camera);
+			D_METHOD("update_authored_lods_for_camera", "camera", "viewport_width",
+					"object_detail"),
+			&ObjectModel::update_authored_lods_for_camera,
+			DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));
 	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("update_authored_lods_for_views", "main_camera", "main_width",
-					"inset_camera", "inset_width"),
-			&ObjectModel::update_authored_lods_for_views);
+					"inset_camera", "inset_width", "object_detail"),
+			&ObjectModel::update_authored_lods_for_views,
+			DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));
 	ClassDB::bind_static_method("ObjectModel", D_METHOD("sync_view_twins"),
 			&ObjectModel::sync_view_twins);
 	ClassDB::bind_method(D_METHOD("set_inset_occlusion_hidden", "hidden"),

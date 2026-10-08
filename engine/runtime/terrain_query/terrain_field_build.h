@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <base/resource_index/resource_index.h>
+#include <base/vfs/file_source.h>
 #include <formats/cpt/cpt.h>
 #include <formats/trn/trn.h>
 #include <runtime/terrain_query/terrain_field_store.h>
@@ -53,15 +54,24 @@ void terrain_field_store_build(TerrainFieldStore &store, const CptFile &cpt,
 
 // The whole embedder-side load for an embedder that holds no parsed terrain
 // documents of its own (the mission kernel's file entry: opennova-serve, the
-// ctests): read `<terrain_name>.cpt/.trn` through `index`, apply the
-// mission's BMS tile set (`tile_set`; empty keeps the .trn's own tilestrip),
-// decode the .trn-named charmap PCX when present (absent or undecodable = no
-// surface map, the sampler's "no charmap -> surface 1" leg, logged at kWarn),
-// and build the store. False with `error` when the documents are missing or
-// malformed. The shell keeps its parsed TerrainData and calls
-// terrain_field_store_build directly.
+// ctests): read `<terrain_name>.trn` through `index`, then overcast.def and the
+// mission's `<environment>.env` (empty: it names none) through the terrain's
+// parser after it (formats/trn load_mission_trn, D-TERRAIN-18), the height data
+// the result names, apply the mission's BMS tile set (`tile_set`; empty keeps
+// the configuration's own tilestrip), decode the named charmap PCX when present
+// (absent or undecodable = no surface map, the sampler's "no charmap -> surface
+// 1" leg, logged at kWarn), and build the store. False with `error` when the
+// documents are missing or malformed. The shell keeps its parsed TerrainData
+// and calls terrain_field_store_build directly.
 bool terrain_field_store_load(TerrainFieldStore &store, const ResourceIndex &index,
-		const std::string &terrain_name, const std::string &tile_set, std::string &error);
+		const std::string &terrain_name, const std::string &tile_set, const std::string &environment,
+		std::string &error);
+// The same load over any flat-name file source (the editor's project files, its open documents
+// standing in for theirs): the configuration it read handed back in `trn` where asked (its water
+// height, the mission's tile strip and its char map name).
+bool terrain_field_store_load(TerrainFieldStore &store, const FileSource &files,
+		const std::string &terrain_name, const std::string &tile_set, const std::string &environment,
+		std::string &error, TrnConfig *trn = nullptr);
 
 // The mission .til placements onto the store's placed-tile overlay: the S2C
 // 0x45 stream's til0 bytes folded to the surface walk's rows (unparseable or

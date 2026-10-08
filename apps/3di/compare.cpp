@@ -22,7 +22,8 @@
 //   DRIFT (a `drift:` line per category with the count and the worst value,
 //   exit 0; exit 1 under --strict): a value our builder derives by a
 //   heuristic of ours where retail's tool is unwitnessed (tangent and
-//   bitangent values, volume seam flags); a zero-length vertex normal (it has
+//   bitangent values, volume seam flags); a weight on a bone slot past its
+//   strip's bone table (it names no part); a zero-length vertex normal (it has
 //   no direction to keep) given one; the dominant axis of a diagonal bullet
 //   face (either axis projects it); a part's bound sphere beside a GHDR
 //   radius (nothing reads it); and any value above that moved by more
@@ -102,9 +103,11 @@ constexpr double kNormalLengthTol = 1e-3;
 // degrees (a few Q14 steps), and for a bullet face one 8.8 step per corner
 // across its smallest altitude (Section::faces).
 constexpr double kFaceNormalTolDeg = 0.05;
-// Tangents and bitangents are rebuilt from positions and UVs by the OED rule
-// (docs/threedi/o3d-scene-format.md); retail's tool is unwitnessed, so their
-// values are DRIFT only, above what renormalizing float noise moves.
+// Tangents and bitangents: a scene carries the stored frames (`vt`), but an
+// author's tool derives its own (Blender's MikkTSpace) and a mesh without
+// frames takes the OED rule's (docs/threedi/o3d-scene-format.md); retail's
+// tool is unwitnessed, so their values are DRIFT only, above what
+// renormalizing float noise moves.
 constexpr double kTangentNoise = 1e-4;
 // Quantized data: the collision block (8.8 CVRT corners, Q14 CNRM and BPLN
 // normals, 16.16 planes, boxes, offsets and radii), the CXLT rows and the
@@ -201,10 +204,14 @@ std::string vs(const Vec &v) { return "(" + num(v[0]) + " " + num(v[1]) + " " + 
 
 Vec q16v(const int32_t *v) { return {v[0] * kQ16, v[1] * kQ16, v[2] * kQ16}; }
 
-std::string reg_name(const Threedi3di3 &m, int style, int reg) {
-	if (style <= THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD) return "-";
+// A register by its index in the model's table: its name, or #index past the table.
+std::string register_label(const Threedi3di3 &m, int reg) {
 	if (reg >= 0 && static_cast<uint32_t>(reg) < m.ctrl.count) return m.ctrl.registers[reg].name;
 	return "#" + std::to_string(reg);
+}
+
+std::string reg_name(const Threedi3di3 &m, int style, int reg) {
+	return threedi_generator_names_register(style) ? register_label(m, reg) : "-";
 }
 
 // Everything a material means, as one comparable string (generator rates and
@@ -214,7 +221,7 @@ std::string material_key(const Threedi3di3 &m, const ThreediMaterial &mt) {
 	if (mt.material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) k += " at " + std::to_string(mt.alpha_test_value_byte);
 	k += " glass " + std::to_string(mt.is_glass) + " emissive " + std::to_string(mt.emissive_type);
 	k += " reflect";
-	for (int c = 0; c < 4; ++c) k += " " + std::to_string(byte_of(mt.reflect_color[c]));
+	for (int c = 0; c < 4; ++c) k += " " + std::to_string(threedi_build_byte_of(mt.reflect_color[c]));
 	for (uint32_t t = 0; t < mt.texture_count && t < 24; ++t) {
 		const ThreediMaterialTexture &x = mt.textures[t];
 		k += std::string(" [") + x.name + " " + std::to_string(x.slot) + " " + std::to_string(x.type) + " " +
@@ -223,13 +230,13 @@ std::string material_key(const Threedi3di3 &m, const ThreediMaterial &mt) {
 	const ThreediTexAnim &a = mt.animation;
 	if (a.num_frames || a.animation_type || a.cycle_frame_time)
 		k += " anim " + std::to_string(a.num_frames) + "/" + std::to_string(a.animation_type) + "/" +
-				(a.animation_type == 1 ? reg_name(m, THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD + 1, a.cycle_frame_time)
-									 : std::to_string(a.cycle_frame_time));
+				(threedi_flipbook_reads_register(a) ? register_label(m, a.cycle_frame_time)
+												   : std::to_string(a.cycle_frame_time));
 	const ThreediRgbGen &g = mt.rgb_gen;
 	if (g.style) {
 		k += " rgb " + std::to_string(g.style) + " " + reg_name(m, g.style, g.reg) + " " + num(g.rate) + " " + num(g.phase);
-		for (int c = 0; c < 3; ++c) k += " " + std::to_string(byte_of(g.start_color[c]));
-		for (int c = 0; c < 3; ++c) k += " " + std::to_string(byte_of(g.end_color[c]));
+		for (int c = 0; c < 3; ++c) k += " " + std::to_string(threedi_build_byte_of(g.start_color[c]));
+		for (int c = 0; c < 3; ++c) k += " " + std::to_string(threedi_build_byte_of(g.end_color[c]));
 	}
 	const ThreediAlphaGen &ag = mt.alpha_gen;
 	if (ag.style)
@@ -256,6 +263,7 @@ struct Corner {
 	// entry).
 	std::array<int, 4> bone{{INT_MAX, INT_MAX, INT_MAX, INT_MAX}};
 	std::array<double, 4> weight{};
+	double stray = 0.0;               // the weight on slots past the strip's bone table (DRIFT only)
 	std::array<double, 6> tangent{};  // tangent then bitangent (DRIFT only)
 	bool tangents = false;
 };
@@ -279,12 +287,15 @@ struct Tolerance {
 // A skinned vertex's blend as the renderer draws it, normalized for
 // comparison: its four influences as retail's shader blends them
 // (threedi_skin_influences: slot 3 takes 1 - (w0 + w1 + w2)), summed per
-// part, a slot past its strip's bone table kept apart as 256 + slot (retail
-// FSldr03 weights one), zero weights and the hair of negative remainder
-// retail's four-decimal weights leave (they sum to 1.0001 in ArmGlovD) left
-// out, and divided by the total so the blend sums to 1. Slot order,
-// bone-table order and one part's weight split over several slots then no
-// longer matter, only each part's share of the vertex.
+// part, zero weights and the hair of negative remainder retail's
+// four-decimal weights leave (they sum to 1.0001 in ArmGlovD) left out, and
+// divided by the total so the blend sums to 1. Slot order, bone-table order
+// and one part's weight split over several slots then no longer matter, only
+// each part's share of the vertex. A slot past its strip's bone table names
+// no part (retail FSldr03 weights slot 255, which reads whatever the palette
+// constant last held): its weight is set apart as `stray` and the parts'
+// shares are taken without it, so a scene that cannot name it compares by
+// the rest, and the stray weight itself is DRIFT.
 void skin_blend(Corner &c, const ThreediVertex &v, const ThreediTriangleStrip &st) {
 	ThreediSkinInfluence influences[4];
 	threedi_skin_influences(&v, st.bone_table, st.bone_table_length, influences);
@@ -297,7 +308,11 @@ void skin_blend(Corner &c, const ThreediVertex &v, const ThreediTriangleStrip &s
 			return;
 		}
 		if (!(x.weight > 0.0f)) continue;
-		const int part = x.part >= 0 ? x.part : 256 + x.slot;
+		if (x.part < 0) {
+			c.stray += x.weight;
+			continue;
+		}
+		const int part = x.part;
 		for (int k = 0; k < 4; ++k)
 			if (c.bone[k] == part || c.bone[k] == INT_MAX) {
 				c.bone[k] = part;
@@ -306,7 +321,8 @@ void skin_blend(Corner &c, const ThreediVertex &v, const ThreediTriangleStrip &s
 			}
 		total += x.weight;
 	}
-	for (int k = 0; k < 4 && c.bone[k] != INT_MAX; ++k) c.weight[k] /= total;
+	if (total > 0.0)
+		for (int k = 0; k < 4 && c.bone[k] != INT_MAX; ++k) c.weight[k] /= total;
 	for (int i = 1; i < 4; ++i)
 		for (int k = i; k > 0 && c.bone[k] < c.bone[k - 1]; --k) {
 			std::swap(c.bone[k], c.bone[k - 1]);
@@ -777,7 +793,7 @@ std::map<std::string, Geometry> lod_geometry(Diff &d, const std::string &where, 
 }
 
 // The DRIFT of matched render corners: whatever moved within tolerance, and
-// the tangent frames, which the builder derives by a heuristic.
+// the tangent frames, which an author's tool or the builder derives.
 void render_drift(Diff &d, const std::string &label, const Geometry &x, const Geometry &y,
 		const std::vector<Pairing> &pairs) {
 	for (const Pairing &p : pairs)
@@ -793,11 +809,14 @@ void render_drift(Diff &d, const std::string &label, const Geometry &x, const Ge
 						kNormalNoiseDeg);
 			within(d, "render UVs", label, gap(a.uv, b.uv), kUvTol, kUvNoise);
 			within(d, "skin weights", label, weight_gap(a, b), kWeightTol, kWeightNoise);
+			if (gap(a.stray, b.stray) > kWeightNoise)
+				d.note("weights on slots past a strip's bone table (no part to name; compared without them)",
+						gap(a.stray, b.stray), label, p.count);
 			if (a.tangents && b.tangents) {
 				const double g = gap(a.tangent, b.tangent);
 				if (g > kTangentNoise)
-					d.note("tangent/bitangent values (the builder derives them by the OED rule; retail's tool is unwitnessed)", g,
-							label, p.count);
+					d.note("tangent/bitangent values (a scene's 'vt' frames, else the builder's OED rule; retail's tool "
+							"is unwitnessed)", g, label, p.count);
 			}
 		}
 }
@@ -882,9 +901,8 @@ void compare_parts(Diff &d, const std::string &where, const ThreediLod &x, const
 
 std::string track_key(const Threedi3di3 &m, const ThreediTransform &t) {
 	if (t.control == 0 && t.control_param == 0 && t.rate == 0 && t.start == 0 && t.end == 0) return "-";
-	std::string param = threedi_panm_parameter_is_ctrl_reference(t.control)
-			? (t.control_param < m.ctrl.count ? m.ctrl.registers[t.control_param].name : "#" + std::to_string(t.control_param))
-			: std::to_string(t.control_param);
+	std::string param = threedi_generator_names_register(t.control) ? register_label(m, t.control_param)
+																	 : std::to_string(t.control_param);
 	return std::to_string(t.control) + " " + param + " " + std::to_string(t.rate) + " " + std::to_string(t.start) + " " +
 			std::to_string(t.end);
 }
@@ -929,10 +947,10 @@ void compare_panm(Diff &d, const std::string &where, const Threedi3di3 &a, const
 			std::snprintf(buf, sizeof(buf), ": flags 0x%08x vs 0x%08x", x.flags, y.flags);
 			d.add(w + buf);
 		}
-		const auto tx = panm_tracks(x), ty = panm_tracks(y);
-		for (int t = 0; t < kTrackCount; ++t) {
+		const auto tx = threedi_panm_tracks(x), ty = threedi_panm_tracks(y);
+		for (int t = 0; t < THREEDI_PANM_TRACK_COUNT; ++t) {
 			const std::string kx = track_key(a, *tx[t]), ky = track_key(b, *ty[t]);
-			if (kx != ky) d.add(w + " " + track_label(t) + ": " + kx + " vs " + ky);
+			if (kx != ky) d.add(w + " " + threedi_panm_track_label(t) + ": " + kx + " vs " + ky);
 		}
 		// The rotation frame the row selects (a positive matrix_index).
 		const auto frame = [](const Threedi3di3 &m, const ThreediPartAnimation &r) {

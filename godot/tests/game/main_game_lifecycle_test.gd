@@ -135,12 +135,6 @@ func before_each() -> void:
 	# A shell booted here sees only the launch flags a case sets through the
 	# override (the GUT process carries none; no sibling leftovers).
 	LaunchFlags.set_args_override(PackedStringArray([]))
-	# The persisted expansion is process-wide state an earlier suite file can leave set, and
-	# these cases join a fixture host that has no expansion archives at all. A stale name makes
-	# the host advertise an expansion this install cannot mount, which the joiner's preload
-	# correctly refuses (D-NET-178) — a failure about suite order, not about what is under test.
-	# after_each restores the whole config file, so pinning it here leaks nothing.
-	ResourceDirSettings.set_expansion("")
 
 
 func after_each() -> void:
@@ -421,7 +415,7 @@ func test_mission_return_shows_the_screen_it_was_started_from() -> void:
 	assert_eq(driver.get_current_screen(), "LAN_MULTI_PLAYER",
 			"the menu returns to the screen the mission was started from")
 	assert_eq(menu_shell.get_menu_stack_depth(), 1, "STARTUP is still under it")
-	driver.quit_requested.emit()
+	driver.pop_screen()
 	assert_eq(menu_shell.get_current_menu_file().to_lower(), "main.mnu")
 	assert_eq(driver.get_current_screen(), "STARTUP")
 

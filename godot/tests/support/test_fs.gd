@@ -173,6 +173,16 @@ static func snapshot(path: String) -> Snapshot:
 	return snap
 
 
+## Snapshot `path` and remove it, so the test starts with no such file: a direct
+## gut_cmdln.gd run reads the developer's own user:// (only scripts/test_godot.sh
+## isolates it), whose keys must not reach the test. after_each calls restore().
+static func isolate(path: String) -> Snapshot:
+	var snap := snapshot(path)
+	if snap.existed:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	return snap
+
+
 ## Delete a directory tree (a missing path is a no-op).
 static func remove_dir_recursive(path: String) -> void:
 	var dir := DirAccess.open(path)

@@ -17,7 +17,6 @@
 #include "util/color_convert.h"
 #include "simulation/simulation.h"
 
-#include <runtime/environment/water_mirror.h>
 #include <runtime/mission/placement_traits.h>
 
 #include <godot_cpp/classes/camera3d.hpp>
@@ -57,6 +56,16 @@ void EffectLightDirector::setup_with_provider(Node *p_world, StaticSourceProvide
 	static_rows_revision_ = -1;
 }
 
+void EffectLightDirector::set_scene(const TypedArray<ObjectModel> &p_models, MissionEnvironment *p_environment,
+		Weather *p_weather) {
+	scene_set_ = true;
+	scene_models_.clear();
+	for (int64_t i = 0; i < p_models.size(); ++i) scene_models_.push_back(p_models[i]);
+	scene_environment_ = p_environment != nullptr ? ObjectID(p_environment->get_instance_id()) : ObjectID();
+	scene_weather_ = p_weather != nullptr ? ObjectID(p_weather->get_instance_id()) : ObjectID();
+	reg_dirty_ = true;
+}
+
 std::vector<opennova::mission::StaticEffectSource> EffectLightDirector::_static_sources() const {
 	return provider_ != nullptr ? provider_->static_item_effect_sources()
 			: std::vector<opennova::mission::StaticEffectSource>();
@@ -92,6 +101,9 @@ Ref<Simulation> EffectLightDirector::_sim() const {
 }
 
 MissionEnvironment *EffectLightDirector::_environment() const {
+	if (scene_set_) {
+		return Object::cast_to<MissionEnvironment>(ObjectDB::get_instance(scene_environment_));
+	}
 	Node *world = _world();
 	if (world == nullptr) {
 		return nullptr;
@@ -101,6 +113,9 @@ MissionEnvironment *EffectLightDirector::_environment() const {
 }
 
 Weather *EffectLightDirector::_weather() const {
+	if (scene_set_) {
+		return Object::cast_to<Weather>(ObjectDB::get_instance(scene_weather_));
+	}
 	Node *world = _world();
 	if (world == nullptr) {
 		return nullptr;
@@ -142,8 +157,9 @@ void EffectLightDirector::reset() {
 
 void EffectLightDirector::reattach() {
 	reset();
-	if (Node *container = _mission_objects()) {
-		const TypedArray<Node> children = container->get_children();
+	Node *container = scene_set_ ? nullptr : _mission_objects();
+	if (scene_set_ || container != nullptr) {
+		const TypedArray<Node> children = scene_set_ ? scene_models_ : container->get_children();
 		for (int64_t i = 0; i < children.size(); ++i) {
 			ObjectModel *node = Object::cast_to<ObjectModel>(static_cast<Object *>(children[i]));
 			if (node == nullptr || node->get_entity_ref().is_null()) {
@@ -495,21 +511,11 @@ void EffectLightDirector::_rebuild_static_light_rows() {
 		}
 		// The row's per-entry lighting state (the u_entity_light lane a
 		// MultiMesh instance cannot carry): a building's ROBJ 1+ lerps by its
-		// own daylight, a contained static lerps with t = 0.
-		const opennova::renderer::EntityLightingState lane =
-				opennova::renderer::static_row_entity_lighting(inputs.is_building,
-						descriptor.robj_index, descriptor.light_transfer, inputs.blink_hit);
-		// w: the water mirror's CLIP arming as an offset from the instance
-		// origin (a static row is never a person; the building pass tests a
-		// building's floor, the first entity wave the bound radius).
-		const opennova::env::MirrorClipWave clip_wave = inputs.is_building ?
-				opennova::env::MirrorClipWave::kSectorModel :
-				opennova::env::MirrorClipWave::kEntity;
-		entity_lights[atlas_row] = Vector4(lane.effect_scale, lane.interior_lerp ? 1.0f : 0.0f,
-				lane.interior_daylight,
-				opennova::env::water_mirror_clip_origin_offset(clip_wave,
-						inputs.is_building ? source.model_floor_q16 :
-											 source.entity_bound_radius_q16));
+		// own daylight, a contained static lerps with t = 0; w the water
+		// mirror's CLIP arming.
+		entity_lights[atlas_row] = LightScene::static_row_entity_lane(inputs.is_building,
+				descriptor.robj_index, descriptor.light_transfer, inputs.blink_hit,
+				source.model_floor_q16, source.entity_bound_radius_q16);
 		const opennova::renderer::LightActiveGroups groups =
 				opennova::renderer::static_light_row_groups(inputs);
 		owner_entities[atlas_row] = static_cast<int64_t>(groups.owner_group_entity);
@@ -541,8 +547,7 @@ void EffectLightDirector::render_frame(Camera3D *p_camera, int64_t p_time_ms,
 	const int time_ms = static_cast<int>(p_time_ms);
 	_clear_frame_draws();
 	_render_static_light_rows(gain, weather, time_ms);
-	if (Node *container = _mission_objects()) {
-		_ensure_model_registry(container);
+	if (_walk_models()) {
 		for (int64_t i = 0; i < reg_models_.size(); ++i) {
 			ObjectModel *model = Object::cast_to<ObjectModel>(ObjectDB::get_instance(reg_models_[i]));
 			if (model == nullptr || !model->is_visible_in_tree()) {
@@ -649,8 +654,7 @@ void EffectLightDirector::render_inset_frame(Camera3D *p_camera, int64_t p_time_
 	// The registry rows the Inset pass draws (its twins, or the node both
 	// views draw), gathered around the Inset eye like the main pass's.
 	_clear_frame_draws();
-	if (Node *container = _mission_objects()) {
-		_ensure_model_registry(container);
+	if (_walk_models()) {
 		for (int64_t i = 0; i < reg_models_.size(); ++i) {
 			ObjectModel *model = Object::cast_to<ObjectModel>(ObjectDB::get_instance(reg_models_[i]));
 			if (model == nullptr || !model->is_inset_view_drawn()) {
@@ -687,6 +691,21 @@ void EffectLightDirector::run_census_now() {
 	census_stale_ = false;
 }
 
+bool EffectLightDirector::_walk_models() {
+	if (scene_set_) {
+		if (reg_dirty_) {
+			_rebuild_model_registry(scene_models_);
+		}
+		return true;
+	}
+	Node *container = _mission_objects();
+	if (container == nullptr) {
+		return false;
+	}
+	_ensure_model_registry(container);
+	return true;
+}
+
 // Rebuild the MissionObjects walk registry only when membership changed.
 // Owner identity and kind come off entity_ref, stamped once before a node's
 // first light frame, so registration-time reads hold for its tree lifetime.
@@ -704,7 +723,7 @@ void EffectLightDirector::_ensure_model_registry(Node *p_container) {
 		}
 	}
 	if (reg_dirty_) {
-		_rebuild_model_registry(p_container);
+		_rebuild_model_registry(p_container->get_children());
 	}
 }
 
@@ -716,13 +735,12 @@ void EffectLightDirector::_on_container_membership_changed(Node *p_node) {
 	blink_owner_cache_.clear();
 }
 
-void EffectLightDirector::_rebuild_model_registry(Node *p_container) {
+void EffectLightDirector::_rebuild_model_registry(const TypedArray<Node> &p_models) {
 	reg_models_.clear();
 	reg_owners_.clear();
 	reg_robj_scoped_.clear();
-	const TypedArray<Node> children = p_container->get_children();
-	for (int64_t i = 0; i < children.size(); ++i) {
-		ObjectModel *model = Object::cast_to<ObjectModel>(static_cast<Object *>(children[i]));
+	for (int64_t i = 0; i < p_models.size(); ++i) {
+		ObjectModel *model = Object::cast_to<ObjectModel>(static_cast<Object *>(p_models[i]));
 		if (model == nullptr) {
 			continue;
 		}
@@ -803,7 +821,8 @@ void EffectLightDirector::append_overlay(SceneOverlaySubmission &r_submission) {
 	// from Terrain_RenderWorldScene @ 0x5c96ad and from
 	// Water_RenderReflectedWorldScene @ 0x5c85fd); the weapon Inset pass's
 	// own walk rides its own slot (scene_overlay.h kInsetOverlayOrder).
-	const uint32_t texture = r_submission.texture_index(_corona_texture());
+	const uint32_t texture = r_submission.texture_index(_corona_texture(),
+			opennova::renderer::texture_stage_flags(opennova::renderer::TextureStage::LightCorona));
 	opennova::renderer::append_corona_overlay(coronas_, texture, r_submission.frame);
 	opennova::renderer::append_corona_overlay(inset_coronas_, texture, r_submission.frame,
 			opennova::renderer::SceneOverlaySlot::InsetLightCoronas);
@@ -816,6 +835,10 @@ Ref<ImageTexture> EffectLightDirector::_corona_texture() {
 	const int size = LightScene::corona_texture_size();
 	const Ref<Image> image = Image::create_from_data(size, size, false, Image::FORMAT_RGBA8,
 			LightScene::corona_texture_rgba8());
+	// Built from pixels, so the device's texture carries the box-filtered pixel
+	// chain the corona's draws sample with point mips
+	// (renderer::TextureStage::LightCorona).
+	image->generate_mipmaps();
 	corona_texture_ = ImageTexture::create_from_image(image);
 	return corona_texture_;
 }

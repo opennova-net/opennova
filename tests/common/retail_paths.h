@@ -158,6 +158,20 @@ inline std::string weapon_sav() {
     return file_exists(base) ? base : std::string();
 }
 
+// <install>/Jointops.exe, the program whose static tables a port is checked
+// against (read only, common/pe_image.h); "" when the install carries none.
+inline std::string jointops_exe() {
+    const std::string root = install();
+    if (root.empty() || !dir_exists(root)) return std::string();
+    std::error_code ec;
+    for (const auto &entry : std::filesystem::directory_iterator(root, ec)) {
+        if (!entry.is_regular_file(ec)) continue;
+        if (lower_ascii(entry.path().filename().string()) == "jointops.exe")
+            return entry.path().generic_string();
+    }
+    return std::string();
+}
+
 // The whole test is gated: report what it needs and exit Skipped.
 inline int skip(const char *needs) {
     std::printf("SKIP: needs %s\n", needs);

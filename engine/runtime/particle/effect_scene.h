@@ -187,7 +187,6 @@ struct EffectSpawnRequest {
 	std::uint64_t source_order = 0;
 
 	float spring_const = 0.0f;
-	std::uint32_t lod_divisor = 1;
 	EffectKillPlane kill_plane = EffectKillPlane::Disabled;
 	float kill_plane_y = 0.0f;
 	EffectSectionGate section_gate;
@@ -282,7 +281,6 @@ struct EffectEmitterFrameSnapshot {
 	float age = 0.0f;
 	float spring_const = 0.0f;
 	float camera_pull = 0.0f;
-	std::uint32_t lod_divisor = 1;
 	EffectKillPlane kill_plane = EffectKillPlane::Disabled;
 	float kill_plane_y = 0.0f;
 	// A `child_id` emitter fed by its parent's per-particle schedule rather

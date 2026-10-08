@@ -497,7 +497,7 @@ struct Entity {
     uint8_t team = 0;
     // GamePlayerEntity.playerClass (entity+0x294) — the soldier class 5..9. The joiner's client
     // resolves its body-anim model from THIS at round-load [orig: Game_ReloadEntityModelsAndCallbacks
-    // @0x522830 -> AnimMap_GetSlotPropertyInt(playerClass) @0x4127b0 -> ADM -> AnimMap_RegisterEntity
+    // @0x522830 -> CharAttr_GetCammoTypeId(playerClass) @0x4127b0 -> ADM -> AnimMap_RegisterEntity
     // @0x40bb60 writes animChannelB(+0x188)]. The MP branch preloads classes 5..9 only; class 0 maps
     // to slot 15 -> empty ADM -> no anim channel -> Entity_UpdateInfantryPlayerBody @0x4b40e0 bails,
     // so the player cannot move/crouch/prone. Set from the player's loadout at spawn (default a valid
@@ -545,7 +545,7 @@ struct Entity {
     // state: slot-less organic fire passes weaponSlot 0 [orig:
     // WeaponSlot_FireAndSpawnEffects @0x53F477 -> Entity_FireWeaponAndSendPacket
     // @0x42bd80], so one entity byte serves all four organic ammo ids
-    // (AiProfile::OrganicWeapons) — the D-AI-8 (a) residual. The
+    // (world::OrganicWeapons) — the D-AI-8 (a) residual. The
     // local player's fire passes its ACTIVE slot's WeaponSlotState byte instead
     // (RoundSpawnParams::tracer_counter), so each weapon keeps its own phase
     // across switches. [orig: RoundData_SpawnRound @0x4ec199-0x4ec1bb]
@@ -1400,7 +1400,7 @@ inline void stamp_item_attrib(Entity &e, uint32_t attrib, uint32_t attrib2) {
 // field (0 b/fire, 1 m/flash, 2 c/casing); 0 unless the def has weapon slots
 // (ItemDefAttrib 0x20) — the person layout (attrib 0x40, entity+0x4D8) is not
 // carried: person fire origins ride the organic launch bytes +0x365..+0x367
-// (AiProfile::OrganicWeapons::launch).
+// (world::OrganicWeapons::launch).
 // [orig: Entity_GetWeaponSlotByte @0x5459c0 (attrib test @0x5459d3, the
 //  +0x327 cluster read @0x5459ef..0x5459f9)]
 inline uint8_t weapon_userpoint_byte(const Entity &e, int slot, int field) {

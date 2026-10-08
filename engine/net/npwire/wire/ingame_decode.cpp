@@ -1435,11 +1435,10 @@ bool decode_auto_medic_preference(
 	// The handler reads the first dword when at least four bytes arrived and
 	// ignores any tail. [orig: NapiNPServerMsg_AutoMedicPreference @0x501C12]
 	if (body == nullptr || len < 4) return false;
-	const uint32_t disabled = static_cast<uint32_t>(body[0]) |
+	out.disabled = static_cast<uint32_t>(body[0]) |
 			(static_cast<uint32_t>(body[1]) << 8) |
 			(static_cast<uint32_t>(body[2]) << 16) |
 			(static_cast<uint32_t>(body[3]) << 24);
-	out.enabled = disabled == 0;
 	consumed = 4;
 	return true;
 }
@@ -1562,8 +1561,8 @@ bool decode_loadout_crc_request(const uint8_t *body, size_t len,
 	return consumed == 3;
 }
 
-// S2C 0x42 input/state-flags — [u16] (2 B). [orig: NapiNPClientMsg_0x042 @ 0x4281A0]
-bool decode_input_state_flags(const uint8_t *body, size_t len,
+// S2C 0x42 the charattr disable latches — [u16] (2 B). [orig: NapiNPClientMsg_CharAttrDisabledProperties @ 0x4281A0]
+bool decode_charattr_disabled_properties(const uint8_t *body, size_t len,
                               uint16_t &out_flags, size_t &consumed) {
 	consumed = 0;
 	Cursor c{body, body + len, true};

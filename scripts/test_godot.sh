@@ -81,6 +81,21 @@ if [[ "$keep_user_dir" == "0" ]]; then
   trap 'rm -f "$log"; rm -rf "$user_dir" "$root/.godot-test-fixtures"' EXIT
 fi
 
+# --- the class cache ------------------------------------------------------------
+# A headless run resolves a class_name only through the class cache an import
+# writes. After a base change brings a new class_name (or moves one), the
+# scripts naming it fail to parse and GUT drops them until the project is
+# imported again; the cache is checked against the scripts and the project
+# imported when it is stale (inside the isolated user://, like the run).
+if ! python "$root/scripts/godot_class_cache.py" "$root/godot"; then
+  echo "test_godot: the class cache is stale; importing the project" >&2
+  "$GODOT_BIN" --headless --path "$root/godot" --import >/dev/null 2>&1 || true
+  if ! python "$root/scripts/godot_class_cache.py" "$root/godot"; then
+    echo "error: the class cache is still stale after an import" >&2
+    exit 1
+  fi
+fi
+
 reports="$root/build/Testing"
 mkdir -p "$reports"
 config="$reports/gut-$label.json"
@@ -97,11 +112,22 @@ behind=()
 if [[ "$windowed" == "1" ]]; then
   behind=(python "$root/scripts/mcp/game_mcp.py" run --)
 fi
+# The game's own files (the player profile's player.sav and weapon.sav) live in
+# the directory it runs in (LaunchFlags.working_dir), for a GUT run the project
+# (Godot's --path makes it the process's working directory; GUT refuses a
+# --working-dir after its own options). A run starts without them and leaves
+# none behind (git ignores them for a direct single-file run).
+profile_files=("$root/godot/player.sav" "$root/godot/weapon.sav")
+rm -f "${profile_files[@]}"
+rm -f "$root"/godot/expansion/*/weapon.sav 2>/dev/null || true
 set +e
 ${behind[@]+"${behind[@]}"} "$GODOT_BIN" "${display[@]}" --path "$root/godot" \
   -s addons/gut/gut_cmdln.gd -gconfig="$config" -gexit 2>&1 | tee "$log"
 status=${PIPESTATUS[0]}
 set -e
+rm -f "${profile_files[@]}"
+rm -f "$root"/godot/expansion/*/weapon.sav 2>/dev/null || true
+rmdir "$root"/godot/expansion/* "$root/godot/expansion" 2>/dev/null || true
 
 cp "$log" "$reports/gut-$label.log"
 

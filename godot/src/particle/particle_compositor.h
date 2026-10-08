@@ -22,8 +22,14 @@ namespace godot {
 // when the mounted PTL catalog changes; render callbacks retain it by value.
 struct ParticleAtlasPageSnapshot {
 	std::uint8_t type = 0;
+	// Level 0's side: the page's after its halvings.
 	std::uint32_t side = 0;
-	PackedByteArray rgba8;
+	// The page's retail levels (renderer::particle_atlas_page_texture), end to
+	// end from level 0, each level half the side of the one before: RGBA8
+	// bytes, or a DXT5 page's blocks for the GPU to decode (D-RMAT-24).
+	std::uint32_t levels = 1;
+	bool dxt5 = false;
+	PackedByteArray data;
 };
 
 struct ParticleAtlasSnapshot {

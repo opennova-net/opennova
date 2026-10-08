@@ -90,6 +90,44 @@ uint64_t caster_set_stamp(
 	return hash == 0 ? 1 : hash;
 }
 
+// Whether two admissions of one caster draw the same silhouettes into the same
+// pages: what the tile test and the draws read (TerrainStaticShadowCollector::
+// compile), the transform revision standing for the pose, the model, the team
+// and the ground under it.
+bool draws_alike(const TerrainStaticShadowCandidate &a,
+		const TerrainStaticShadowCandidate &b) noexcept {
+	return a.position_fixed == b.position_fixed &&
+			a.model_radius_fixed == b.model_radius_fixed &&
+			a.transform_revision == b.transform_revision &&
+			a.geometry.geometry_key == b.geometry.geometry_key &&
+			a.geometry.render_object_counts == b.geometry.render_object_counts;
+}
+
+// The reaches of the admitted casters one snapshot changes: one gone or no
+// longer admitted names where it was, one new or newly admitted where it is,
+// one that draws otherwise both.
+void name_changed_reaches(const std::vector<TerrainStaticShadowCandidate> &before,
+		const std::vector<TerrainStaticShadowCandidate> &after,
+		std::vector<TerrainStaticShadowReach> &out) {
+	std::unordered_map<uint64_t, const TerrainStaticShadowCandidate *> was;
+	was.reserve(before.size());
+	for (const TerrainStaticShadowCandidate &candidate : before)
+		was.emplace(candidate.caster_key, &candidate);
+	std::unordered_map<uint64_t, bool> kept;
+	kept.reserve(after.size());
+	for (const TerrainStaticShadowCandidate &candidate : after) {
+		const auto found = was.find(candidate.caster_key);
+		kept[candidate.caster_key] = true;
+		if (found != was.end() && draws_alike(*found->second, candidate)) continue;
+		if (found != was.end())
+			out.push_back(terrain_static_shadow_caster_reach(*found->second));
+		out.push_back(terrain_static_shadow_caster_reach(candidate));
+	}
+	for (const TerrainStaticShadowCandidate &candidate : before)
+		if (kept.find(candidate.caster_key) == kept.end())
+			out.push_back(terrain_static_shadow_caster_reach(candidate));
+}
+
 } // namespace
 
 bool TerrainStaticShadowPlanner::PageKeyEq::operator()(
@@ -229,10 +267,25 @@ void TerrainStaticShadowPlanner::replace_casters(
 		next->records[key] = std::move(record);
 	}
 	next->collector.replace(std::move(candidates));
+	if (reports_caster_changes_)
+		name_changed_reaches(casters_->collector.admitted(), next->collector.admitted(),
+				changed_reaches_);
 	casters_ = std::move(next);
 	diagnostics_.snapshot_exact = casters_->exact;
 	diagnostics_.caster_count = casters_->records.size();
 	bump_epoch();
+}
+
+void TerrainStaticShadowPlanner::set_reports_caster_changes(bool on) {
+	reports_caster_changes_ = on;
+	if (!on) changed_reaches_.clear();
+}
+
+std::vector<TerrainStaticShadowReach>
+TerrainStaticShadowPlanner::take_changed_reaches() {
+	std::vector<TerrainStaticShadowReach> out;
+	out.swap(changed_reaches_);
+	return out;
 }
 
 void TerrainStaticShadowPlanner::reset_frame_diagnostics() {

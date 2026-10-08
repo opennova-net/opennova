@@ -227,6 +227,15 @@ static func _is_integral(value: Variant) -> bool:
 
 static func _build_definitions() -> Array[ProbeDef]:
 	return [
+		ProbeDef.make("catalog_readback",
+				"Verify authored item, weapon and ammo values in this process's mounted resource root.",
+				RUNTIME + "catalog_readback_probe.gd", {
+					"item_id": { "type": "integer" }, "item_name": { "type": "string" },
+					"weapon_name": { "type": "string" }, "weapon_clipsize": { "type": "integer" },
+					"ammo_name": { "type": "string" }, "ammo_velocity": { "type": "integer" },
+				}, ["item_id", "item_name", "weapon_name", "weapon_clipsize", "ammo_name", "ammo_velocity"],
+				false, false, 30_000),
+
 		ProbeDef.make("perf_sample",
 				"Sample the shell's frame-time counters (world tick legs, the audio "
 				+ "leg, the runtime's sim/present/effects spans) for a fixed window "
@@ -329,6 +338,18 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"move": { "type": "boolean", "default": true },
 					"interval_ms": { "type": "integer", "minimum": 0, "maximum": 4000, "default": 0 },
 				}, [], true, true, 120_000),
+		ProbeDef.make("object_lod_sweep",
+				"The authored RLOD level the live process draws for one placed entity of "
+				+ "each named graphic (every graphic when none is named), the local player "
+				+ "stood at each distance (metres, on the entity's mission +x side) facing "
+				+ "it: an individual model's active level, a static row's population level; "
+				+ "optionally captures each frame.",
+				RENDER + "object_lod_sweep_probe.gd", {
+					"graphics": { "type": "array", "default": [] },
+					"distances": { "type": "array",
+							"default": [2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96] },
+					"capture": { "type": "boolean", "default": false },
+				}, [], true, true, 600_000),
 		ProbeDef.make("environment_cube_capture",
 				"The highest-quality environment-cube proof on Forward+ D3D12: six rendered "
 				+ "faces, the X/Z axis map, Cubemap sampling orientation and the 0x60 "
@@ -419,6 +440,29 @@ static func _build_definitions() -> Array[ProbeDef]:
 				RUNTIME + "mission_audio_probe.gd", {
 					"missions": { "type": "array", "items": { "type": "string" }, "default": [] },
 				}, [], false, false, 300_000),
+		ProbeDef.make("ambient_channels",
+				"What the mission's ambience plays where the listener stands: for each point "
+				+ "the local player is teleported to (mission frame, yaw), after `settle_ms` the "
+				+ "live mission audio's ambient channels, each its wave, volume (dB and the "
+				+ "0..255 byte) and place (mission frame), loudest first, and the camera's place; "
+				+ "with no points, where the player stands. The editor's Listen (ADR 0046 DI-36) "
+				+ "is compared against it.",
+				RUNTIME + "ambient_channels_probe.gd", {
+					"points": { "type": "array", "items": { "type": "object" }, "default": [] },
+					"settle_ms": { "type": "integer", "minimum": 0, "default": 1500 },
+				}, [], false, true, 300_000),
+		ProbeDef.make("slot_sounds",
+				"The sounds the local player's body and rounds play where (footsteps, foley, "
+				+ "stance, impacts): `weapon` equipped first when given, then for each point a "
+				+ "teleport (mission frame, yaw, pitch), a `look_px` delta, a `round` from the "
+				+ "round sim, and the point's scripted steps (forward then back by default); "
+				+ "every one-shot recorded meanwhile with its set, whether it was a body slot "
+				+ "sound, whether the bank played it and its mission position.",
+				RUNTIME + "slot_sounds_probe.gd", {
+					"points": { "type": "array", "items": { "type": "object" }, "default": [] },
+					"settle_ms": { "type": "integer", "minimum": 0, "default": 400 },
+					"weapon": { "type": "string", "default": "" },
+				}, [], false, true, 600_000),
 		ProbeDef.make("vehicle_drive",
 				"Seat the local player in a vehicle, drive, steer and brake through the "
 				+ "presenter's movement seam; verify native displacement and capture the HUD. "

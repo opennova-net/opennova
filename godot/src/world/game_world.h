@@ -19,6 +19,11 @@
 
 #include <cstdint>
 
+#include <runtime/renderer/object_lod.h> // the object detail rungs
+#include <runtime/renderer/particle_density.h> // the particle_density rungs
+#include <runtime/renderer/texture_compression.h> // the texcompression_level word
+#include <runtime/renderer/texture_filter.h> // the texfilter rungs
+
 #include "audio/mission_audio.h"
 #include "devtools/frame_stats.h"
 #include "env/celestial.h"
@@ -178,6 +183,52 @@ public:
 	void set_local_player_spawn_loadout(const Ref<PlayerSpawnLoadout> &p_loadout);
 	void set_playable(bool p_enabled) { playable_ = p_enabled; }
 	bool is_playable() const { return playable_; }
+	// The object detail (engine: renderer/object_lod.h, game.cfg's
+	// object_polydetail): the shell hands over its persisted options word
+	// whenever it changes, and each mission start copies it into the session
+	// detail the frames draw at, so a change made mid-mission reaches the draw
+	// at the next mission. The fresh profile's word and the config load's
+	// clamp are the engine's, re-exported for the shell's options owner.
+	void set_object_polydetail(int p_level) { object_polydetail_ = p_level; }
+	int get_object_polydetail() const { return object_polydetail_; }
+	int get_object_detail() const { return object_detail_; }
+	static int object_detail_fresh_profile();
+	static int clamp_object_detail(int p_level);
+	// game.cfg's texfilter_level (engine: renderer/texture_filter.h): the shell
+	// hands over its persisted options word whenever it changes. The model
+	// effects' filter follows it at once (retail reloads every effect at the
+	// Options' Accept); each mission start copies it into the session level
+	// whose device mode (level + 1) the terrain detail family samples at, so
+	// that half reaches the draw at the next mission.
+	void set_texfilter_level(int p_level);
+	int get_texfilter_level() const { return texfilter_level_; }
+	int get_session_texfilter_level() const { return session_texfilter_level_; }
+	// The state the world publishes: the device mode (session level + 1) and
+	// the effects' mode (from the options word), and the shader filter codes
+	// the device leg last published for the terrain detail family and the
+	// model stages (render/texture_filter_device).
+	int get_texfilter_device_mode() const;
+	int get_texfilter_effect_mode() const;
+	static int get_texfilter_device_filter();
+	static int get_texfilter_effect_filter();
+	static int texfilter_level_fresh_profile();
+	static int clamp_texfilter_level(int p_level);
+	// game.cfg's texcompression_level (engine: renderer/texture_compression.h)
+	// and particle_density (renderer/particle_density.h): the shell hands over
+	// its persisted options words whenever they change, and each mission start
+	// copies them into the session's words, which the mission builds its
+	// compressed textures and its particle pages with and the scene passes
+	// draw their particle stride from, so a change reaches the draw at the
+	// next mission (D-RMAT-24).
+	void set_texcompression_level(int p_level) { texcompression_level_ = p_level; }
+	int get_texcompression_level() const { return texcompression_level_; }
+	int get_session_texcompression_level() const { return session_texcompression_level_; }
+	void set_particle_density(int p_density);
+	int get_particle_density() const { return particle_density_; }
+	int get_session_particle_density() const { return session_particle_density_; }
+	static int texcompression_level_fresh_profile();
+	static int particle_density_fresh_profile();
+	static int clamp_particle_density(int p_density);
 
 	// --- the load entries ------------------------------------------------------
 	// Load the world from `dir`, or from the persisted resource directory when
@@ -361,6 +412,9 @@ public:
 	// MissionRoot it creates and feeds its own tick legs.
 	void set_music_director(MusicDirector *director);
 	MusicDirector *get_music_director() const;
+	// The shell's player profile, whose current records every mission's sim
+	// takes (Simulation.use_player_profile). Null = a fresh profile's defaults.
+	void set_player_profiles(const Ref<PlayerProfiles> &p_profiles) { player_profiles_ = p_profiles; }
 	void set_frame_stats(const Ref<FrameStats> &p_board);
 	bool is_water_render_stats_measured() const;
 	// Enables the manual frame-span/A-B probe. Disabling restores every skip
@@ -656,8 +710,9 @@ private:
 	// The placer's per-model progress pulse (the load plan's per-model pulse
 	// witness): the loading screen at the object stage's constant value.
 	void pulse_object_stage_progress();
-	// The named .env, or the engine defaults when it is not there; never fails.
-	void load_environment(const String &p_env_path);
+	// The terrain's .trn, overcast.def and the named .env over the engine
+	// defaults, as the time-of-day load reads them; never fails.
+	void load_environment(const String &p_trn_path, const String &p_env_path);
 	void apply_mission_environment_overrides(const Ref<MissionData> &p_mission);
 	void set_mission_water_height_override(float p_world_height);
 	void set_water_world_rendering_enabled(bool p_enabled);
@@ -670,7 +725,9 @@ private:
 	bool apply_join_wire_til_if_ready();
 	void place_streamed_mission_objects(const Ref<Simulation> &p_sim);
 	void clear_mission_tile_info();
-	bool load_terrain(const String &p_trn_path, const String &p_tile_set);
+	// The terrain's load: the .trn, then overcast.def and the mission's `p_env_path` (empty: none) through the
+	// terrain's parser (D-TERRAIN-18), with the mission's tile set over its tilestrip.
+	bool load_terrain(const String &p_trn_path, const String &p_tile_set, const String &p_env_path);
 	void configure_foliage();
 	int start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name);
 	void load_player_weapon_profile();
@@ -773,6 +830,25 @@ private:
 	// Stays on the world (mission state); handed to the occlusion frame's
 	// entries as an argument. [orig: g_BmsAttribFlags & 0x10 @ 0x5ca1c8-0x5ca1cd]
 	bool mission_forces_indoors_ = false;
+	// The options' object detail (set_object_polydetail) and the session's
+	// copy of it taken at each mission start (load_mission_internal), which
+	// the LOD frames and the occlusion frame's death pieces read.
+	int object_polydetail_ = opennova::renderer::kObjectLodDetailFreshProfile;
+	int object_detail_ = opennova::renderer::kObjectLodDetailFreshProfile;
+	// The options' texfilter_level (set_texfilter_level) and the session's copy
+	// of it taken at each mission start; publish_texfilter_state hands both to
+	// the device leg (render/texture_filter_device).
+	int texfilter_level_ = opennova::renderer::kTexFilterLevelFreshProfile;
+	int session_texfilter_level_ = opennova::renderer::kTexFilterLevelFreshProfile;
+	void publish_texfilter_state();
+	// The options' texcompression_level and particle_density and the session's
+	// copies taken at each mission start; the terrain and the effect world
+	// take the copies (publish_session_render_settings).
+	int texcompression_level_ = opennova::renderer::kTexCompressionLevelFreshProfile;
+	int session_texcompression_level_ = opennova::renderer::kTexCompressionLevelFreshProfile;
+	int particle_density_ = opennova::renderer::kParticleDensityFreshProfile;
+	int session_particle_density_ = opennova::renderer::kParticleDensityFreshProfile;
+	void publish_session_render_settings();
 	Color idle_frame_clear_color_ = Color(0, 0, 0);
 	// A shell-injected resource root (main_game hands its boot mount over;
 	// tests hand fixture roots). When set, the load_* entries skip the
@@ -794,6 +870,7 @@ private:
 	// projected for the sim (the listen host's own type-2 connection / a
 	// joiner's ClientAuth).
 	Ref<CharacterJoinProfile> local_character_profile_;
+	Ref<PlayerProfiles> player_profiles_;
 	// The last frame's world-tick leg counters (RuntimePerfCounters).
 	int64_t perf_tick_us_ = 0;
 	int64_t perf_foliage_us_ = 0;

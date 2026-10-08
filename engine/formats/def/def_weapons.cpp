@@ -3,6 +3,7 @@
 // WEAPONS.DEF: one record per weapon.
 
 #include <base/io/crt_ftol.h>
+#include "def_notes.h"
 #include "def_scan.h"
 
 #include <base/io/ascii_config.h>
@@ -14,6 +15,7 @@
 #include <string.h>
 
 #include <string>
+#include <vector>
 
 using namespace opennova::defscan; // the shared .def scanner, unqualified as before
 
@@ -64,6 +66,17 @@ static void parse_view_pose(const io::ConfigTokens &tokens, float position[3], i
         rotation[i] = parse_fixed16_digits_n(values[i + 3].s, values[i + 3].len);
 }
 
+void def_init_weapon(DefWeaponDef &value) {
+    memset(&value, 0, sizeof(value));
+    /* [orig: AdmDef_InitEntryDefaults @ 0x53ff31 seeds renderfov = 80.0] */
+    value.renderfov = 80.0f;
+    /* [orig: AdmDef_InitEntryDefaults def[38] = 2 @ 0x53ff73 -> +0x98
+       'scope_min_mag', the scope zoom floor] */
+    value.scope_min_mag = 2;
+    /* [orig: AdmDef_InitEntryDefaults @ 0x53FF61/0x53FF67/0x53FF6D] */
+    for (int &stability : value.stability_fp16) stability = 0x10000;
+}
+
 /* Whether a named file is one the game can open: never an empty name, and
    every name when the reader was given no probe [orig: FileSystem_FileExists
    @0x75AA50]. */
@@ -80,16 +93,31 @@ static int parse_delay(const char *v, size_t vl) {
 
 /* Shared buffer parser for weapon.def, used by both the path and memory entry points. */
 static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *out,
-                             const DefFileProbe *files) {
+                             DefParseReport *report, const DefFileProbe *files, DefTextNoter &noter) {
     enum { ST_TOP, ST_WEAPON, ST_ACTION };
     int state = ST_TOP;
+    bool indent_noted = false; // the file's indentation read (DefLayout)
 
     size_t entries_cap = 0, carry_cap = 0;
     DefWeaponDef cw; memset(&cw, 0, sizeof(cw));
     DefWeaponAction ca; memset(&ca, 0, sizeof(ca));
-    size_t cw_raw_cap = 0, cw_act_cap = 0, cw_sight_cap = 0;
-    size_t ca_raw_cap = 0;
+    size_t cw_act_cap = 0, cw_sight_cap = 0;
     bool stopped = false;
+    // Where each of the open weapon's action rows came from: the line its
+    // block opened on and the span of the report its block's findings fill.
+    // The open block's findings wait apart until its `end`, so a block's
+    // findings stay together (an ammoclass_max_carry line inside it reports
+    // straight away). A later block of a row's name replaces the row, and the
+    // game keeps nothing of the earlier block: its findings give way to one
+    // notice that the block is ignored.
+    struct ActionSource {
+        size_t line = 0;
+        size_t first = 0, last = 0;
+    };
+    std::vector<ActionSource> action_sources;
+    ActionSource open_source;
+    DefParseReport open_findings;
+    DefParseReport *const block_report = report ? &open_findings : nullptr;
 
     /* One row per suffix: a later block of the same name finds the row and
        re-runs ActionDef_InitDefaults on it, so it replaces the earlier block
@@ -102,32 +130,68 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
         size_t row = cw.actions_count;
         for (size_t i = 0; i < cw.actions_count; ++i)
             if (strutil::iequals(cw.actions[i].name, ca.name)) row = i;
+        // The block it replaces is read for nothing: its lines are the weapon's.
+        if (row < cw.actions_count) noter.drop_nested(cw.actions[row].note);
+        if (report) {
+            if (row < cw.actions_count) {
+                // The game keeps nothing of the earlier block, so none
+                // of its findings holds: one notice where it opened
+                // takes their place (the writer alone drops the block; over
+                // the file's layout its lines are tokens read for nothing),
+                // and the spans of the blocks after it move (a block's span
+                // lands at its `end`, so they follow in line order).
+                const ActionSource earlier = action_sources[row];
+                DefParseReport notice;
+                authoring_issue(cw.unmodeled_count, &notice, earlier.line, cw.actions[row].name, "action", 6,
+                                DefIssueCode::UnknownProperty);
+                report->erase(report->begin() + earlier.first, report->begin() + earlier.last);
+                report->insert(report->begin() + earlier.first, notice.begin(), notice.end());
+                const size_t removed = earlier.last - earlier.first;
+                for (ActionSource &source : action_sources)
+                    if (source.line > earlier.line) {
+                        source.first = source.first - removed + notice.size();
+                        source.last = source.last - removed + notice.size();
+                    }
+            }
+            open_source.first = report->size();
+            report->insert(report->end(), open_findings.begin(), open_findings.end());
+            open_source.last = report->size();
+        }
         if (row < cw.actions_count) {
-            free(cw.actions[row].raw_lines);
             cw.actions[row] = ca;
+            action_sources[row] = open_source;
         } else {
             DA_PUSH(cw.actions, cw.actions_count, cw_act_cap, ca);
+            action_sources.push_back(open_source);
         }
         memset(&ca, 0, sizeof(ca));
-        ca_raw_cap = 0;
     };
 
     // Every line counts, numbered as the retail walk cuts them at CR LF
-    // [orig: File_ParseASCIIFile @0x53D8C7..0x53D8F5].
-    const size_t walk_end = for_each_def_line(buf, file_len, [&](const io::ConfigTokens &tokens,
-                                                                 const char *line, size_t line_len,
-                                                                 size_t line_index) {
+    // [orig: File_ParseASCIIFile @0x53D8C7..0x53D8F5]; a finding names the
+    // line counting from 1.
+    size_t number = 0;
+    io::ConfigTokens tokens_state;
+    const size_t walk_end = for_each_def_line_noted(buf, file_len, tokens_state, [&](const char *at) { noter.line(at); },
+                                                    [&](const io::ConfigTokens &tokens,
+                                                        const char *line, size_t line_len,
+                                                        size_t line_index) {
         const char *key = tokens.tokens[0];
         const char *v = tokens.token(1); // the first value token, "" when none
         const size_t vl = strlen(v);
+        number = line_index + 1;
+        const std::string as_read = line_as_read(tokens);
 
         /* A `weapon` line while an entry is open, in an action block too (the
            compare comes ahead of the in-block forward), logs "weapon didn't
            have an end" and returns 1, which ends the walk: the open entry and
            every line from here on stay as they are
-           [orig: WeaponDefs_ParseLineCallback @0x5436AD..0x5436D2]. */
+           [orig: WeaponDefs_ParseLineCallback @0x5436AD..0x5436D2]. Nothing
+           from here on is read, which a save cannot give back. */
         if (state != ST_TOP && key_is(key, "weapon")) {
             stopped = true;
+            authoring_issue(out->unmodeled_count, report, number, cw.weapon_name, as_read.c_str(), as_read.size(),
+                            DefIssueCode::MalformedBlock);
             return true;
         }
 
@@ -141,22 +205,20 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             memset(&carry, 0, sizeof(carry));
             safe_copy(carry.name, sizeof(carry.name), v, vl);
             const char *cap = tokens.token(2);
-            carry.cap = abs32_of(io::retail_atol(cap));
-            DA_PUSH(out->ammo_class_carries, out->ammo_class_carries_count, carry_cap, carry);
+            carry.max_carry = abs32_of(io::retail_atol(cap));
+            // A record of the file's, one line.
+            const int carry_step = def_line_step(DefRecordKind::Carry, key, strlen(key));
+            carry.note = noter.open(DefRecordKind::Carry, false, uint8_t(carry_step < 0 ? 0 : carry_step));
+            DA_PUSH(out->ammo_classes, out->ammo_classes_count, carry_cap, carry);
+            validate_property(DefRecordKind::Carry, as_read.c_str(), as_read.size(), out->unmodeled_count, report, number, carry.name);
             return false;
         }
 
         if (state == ST_TOP) {
             if (key_is(key, "weapon")) {
-                memset(&cw, 0, sizeof(cw));
-                cw_raw_cap = 0; cw_act_cap = 0; cw_sight_cap = 0;
-                /* [orig: AdmDef_InitEntryDefaults @ 0x53ff31 seeds renderfov = 80.0] */
-                cw.renderfov = 80.0f;
-                /* [orig: AdmDef_InitEntryDefaults def[38] = 2 @ 0x53ff73 -> +0x98
-                   'scope_min_mag', the scope zoom floor] */
-                cw.scope_min_mag = 2;
-                /* [orig: AdmDef_InitEntryDefaults @ 0x53FF61/0x53FF67/0x53FF6D] */
-                for (int &stability : cw.stability_fp16) stability = 0x10000;
+                cw_act_cap = 0; cw_sight_cap = 0;
+                action_sources.clear();
+                def_init_weapon(cw);
                 /* The name is strncpy'd 32 bytes into the record [orig:
                    WeaponDefs_ParseLineCallback, strncpy(def+0x14, tokens[2], 0x20)
                    @0x543737], so a longer name keeps its first 32 characters. Past
@@ -164,36 +226,56 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                    port cuts there (D-ITEMDEF-10; no shipped name exceeds 21). */
                 safe_copy(cw.weapon_name, 33, v, vl);
                 cw.open_line = line_index;
+                cw.note = noter.open(DefRecordKind::Weapon);
+                validate_header(as_read.c_str(), as_read.size(), 6, 33, cw.unmodeled_count, report, number, cw.weapon_name);
                 state = ST_WEAPON;
-            }
+            } else authoring_issue(out->unmodeled_count, report, number, "", as_read.c_str(), as_read.size());
             return false;
         }
 
         if (state == ST_WEAPON) {
             if (key_is(key, "action")) {
+                def_note_line(DefRecordKind::Weapon, cw.line_order, key, strlen(key)); // where its blocks stand
                 memset(&ca, 0, sizeof(ca));
-                ca_raw_cap = 0;
+                open_source = ActionSource{number};
+                open_findings.clear();
                 safe_copy(ca.name, sizeof(ca.name), v, vl);
                 ca.open_line = line_index;
+                ca.note = noter.open_nested(DefRecordKind::Action, DEF_LINE_ORDER_BLOCKS);
+                validate_header(as_read.c_str(), as_read.size(), 6, sizeof(ca.name), ca.unmodeled_count, block_report, number, ca.name);
                 state = ST_ACTION;
                 return false;
             }
 
             if (key_is(key, "end")) {
                 cw.end_line = line_index;
+                noter.close();
                 DA_PUSH(out->entries, out->count, entries_cap, cw);
                 memset(&cw, 0, sizeof(cw));
-                cw_raw_cap = 0; cw_act_cap = 0; cw_sight_cap = 0;
+                cw_act_cap = 0; cw_sight_cap = 0;
                 state = ST_TOP;
                 return false;
             }
 
             int parsed = 0;
+            bool row_line = false; // a row of its own (a sight), noted as one
             if (key_is(key, "category")) {
-                cw.category = parse_int_n(v, vl);
+                /* 0..11, any other warned and stored as 0 [orig: WeaponDefs_ParseLineCallback
+                   @ 0x543997..0x5439c6], tested on the atol saturated at 32 bits (parse_int_n: 4294967297
+                   is 2147483647, not 1): reported, the record holding what the game holds. */
+                const int read = parse_int_n(v, vl);
+                cw.category = read >= 0 && read < DEF_WEAPON_CATEGORIES ? read : 0;
+                if (cw.category != read)
+                    authoring_issue(cw.unmodeled_count, report, number, cw.weapon_name, as_read.c_str(), as_read.size(),
+                                    DefIssueCode::Reinterpreted, "0");
                 parsed = 1;
             } else if (key_is(key, "rank")) {
-                cw.rank = parse_int_n(v, vl);
+                /* 0..64, any other warned and stored as 0 [@ 0x5439eb..0x543a1b]. */
+                const int read = parse_int_n(v, vl);
+                cw.rank = read >= 0 && read < DEF_WEAPON_RANKS ? read : 0;
+                if (cw.rank != read)
+                    authoring_issue(cw.unmodeled_count, report, number, cw.weapon_name, as_read.c_str(), as_read.size(),
+                                    DefIssueCode::Reinterpreted, "0");
                 parsed = 1;
             } else if (key_is(key, "clipsize")) {
                 cw.clipsize = parse_int_n(v, vl);
@@ -292,6 +374,8 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                    table walk over tokens[2] @0x543F40..0x543F6E]. Also packs the
                    original producer's class-mask bit [orig: WeaponDef_ParseProperty
                    @ 0x54d730]. */
+                if (tokens.count >= 2 && cw.charfilter_count >= 8)
+                    authoring_issue(cw.unmodeled_count, report, number, cw.weapon_name, as_read.c_str(), as_read.size(), DefIssueCode::Unrepresentable);
                 if (tokens.count >= 2 && cw.charfilter_count < 8) {
                     copy_token(cw.charfilter[cw.charfilter_count], sizeof(cw.charfilter[0]),
                                tokens, 1);
@@ -306,8 +390,12 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             } else if (key_is(key, "teamfilter")) {
                 /* Repeatable, one team token per line: only token 1 is read
                    [orig: the table walk over tokens[2] @0x543FB5..0x543FE3]. Also
-                   packs the original producer's team-mask bit
-                   [orig: WeaponDef_ParseProperty @ 0x54d730]. */
+                   packs the loadout reader's team-mask bit, which takes yellow as
+                   blue and violet as red where the weapon def reader's table
+                   @0x830ED8 has red and blue alone [orig: WeaponDef_ParseProperty
+                   @ 0x54d730, @ 0x54daae..0x54db08]. */
+                if (tokens.count >= 2 && cw.teamfilter_count >= 4)
+                    authoring_issue(cw.unmodeled_count, report, number, cw.weapon_name, as_read.c_str(), as_read.size(), DefIssueCode::Unrepresentable);
                 if (tokens.count >= 2 && cw.teamfilter_count < 4) {
                     copy_token(cw.teamfilter[cw.teamfilter_count], sizeof(cw.teamfilter[0]),
                                tokens, 1);
@@ -343,7 +431,13 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             } else if (key_is(key, "loadout_menu_icon")) {
                 safe_copy(cw.loadout_menu_icon, sizeof(cw.loadout_menu_icon), v, vl);
                 parsed = 1;
-            } else if (key_is(key, "animadm")) {
+            } else if (key_is(key, "animadm") || key_is(key, "animcal")) {
+                /* Both keys copy the first value token into the one buffer the weapon's
+                   `end` loads its anim map from and clears [orig: 'animadm' @ 0x543D47 and
+                   'animcal' @ 0x543D77, each strcpy into byte_252DB98 @ 0x543D5C /
+                   0x543D8C; Anim_InitActions @ 0x541FA0 loads it, WeaponDefs_ResetParseState
+                   @ 0x53FF90 clears it, both from the `end` arm @ 0x5437D0 / 0x5437DC]:
+                   `animcal` is `animadm` by another name, the later line winning. */
                 safe_copy(cw.animadm, sizeof(cw.animadm), v, vl);
                 parsed = 1;
             } else if (key_is(key, "launchuserpoint")) {
@@ -410,11 +504,14 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             } else if (key_is(key, "gfx1b")) {
                 safe_copy(cw.gfx1b, sizeof(cw.gfx1b), v, vl);
                 parsed = 1;
-            } else if (key_is(key, "gfx1")) {
-                safe_copy(cw.gfx1, sizeof(cw.gfx1), v, vl);
-                parsed = 1;
-            } else if (key_is(key, "gfx3")) {
-                safe_copy(cw.gfx3, sizeof(cw.gfx3), v, vl);
+            } else if (key_is(key, "gfx1") || key_is(key, "gfx3")) {
+                /* The model by the first value token; `nocheckdepth` second loads it with
+                   the depth check off [orig: @ 0x544F85..0x544FBB, stricmp of tokens[2]
+                   @ 0x544F92]. */
+                const bool first = key_is(key, "gfx1");
+                safe_copy(first ? cw.gfx1 : cw.gfx3, sizeof(cw.gfx1), v, vl);
+                (first ? cw.gfx1_nocheckdepth : cw.gfx3_nocheckdepth) =
+                        strutil::iequals(tokens.token(2), "nocheckdepth") ? 1 : 0;
                 parsed = 1;
             } else if (key_is(key, "flags")) {
                 char flag_lower[64];
@@ -426,7 +523,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                     cw.flags2 |= fe->bit2;
                     parsed = 1;
                 }
-                /* Unknown flags fall through to raw_lines */
+                /* Unknown flags produce a diagnostic */
             } else if (key_is(key, "stability")) {
                 /* Slots 1..3 whatever the line's count [orig:
                    WeaponDefs_ParseLineCallback @ 0x544118..0x544169;
@@ -538,8 +635,27 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 const char *threshold = tokens.token(2);
                 cw.heat_glow_threshold = parse_fixed16_digits_n(threshold, strlen(threshold));
                 parsed = 1;
+            } else if (key_is(key, "heat_sound")) {
+                /* The first value token names a sound set; the original resolves it
+                   at parse and stores the set, we keep the name.
+                   [orig: @ 0x543e85, tokens[1] @ 0x543e97 -> SoundBank_FindSetByNameAnyBank
+                   @ 0x5274f0 -> +0x368 @ 0x543eac] */
+                safe_copy(cw.heat_sound, sizeof(cw.heat_sound), v, vl);
+                parsed = 1;
             } else if (key_is(key, "emplacedstance")) {
                 cw.emplacedstance = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (key_is(key, "farpinfo")) {
+                /* The FARP rearm's rounds and interval, each atol'd; a token the line
+                   lacks reads as the tokenizer's "" (0). [orig: @ 0x544da3 -> +0xE8
+                   @ 0x544dc4, +0xEC @ 0x544ddf] */
+                cw.farp_rounds = io::retail_atol(tokens.token(1));
+                cw.farp_interval = io::retail_atol(tokens.token(2));
+                parsed = 1;
+            } else if (key_is(key, "designation_time")) {
+                /* Seconds, atol x 62 (n*31*2, wrapping as the 32-bit imul does).
+                   [orig: @ 0x544895 -> +0x458 @ 0x5448c5] */
+                cw.designation_ticks = static_cast<int>(static_cast<uint32_t>(parse_int_n(v, vl)) * 62u);
                 parsed = 1;
             } else if (key_is(key, "special_hold")) {
                 /* 3P hold-pose kind, atol [orig: weapon.def key 'special_hold' ->
@@ -575,6 +691,8 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                    corrupts the record; rows past the fourth are not kept
                    (D-ITEMDEF-7) [orig: the count bump @0x544B11..0x544B20, the row
                    address @0x544B2F..0x544B32]. */
+                if (file_exists(files, tokens.token(1)) && cw.sights_count >= 4)
+                    authoring_issue(cw.unmodeled_count, report, number, cw.weapon_name, as_read.c_str(), as_read.size(), DefIssueCode::Unrepresentable);
                 if (file_exists(files, tokens.token(1)) && cw.sights_count < 4) {
                     DefSightEntry se;
                     memset(&se, 0, sizeof(se));
@@ -607,19 +725,32 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                             se.slide_frames = io::retail_atol(tokens.token(8));
                         }
                     }
+                    // A row of the weapon's, one line (its notes its own).
+                    const int row_step = def_line_step(DefRecordKind::Sight, key, strlen(key));
+                    se.note = noter.open_nested(DefRecordKind::Sight, DEF_LINE_ORDER_ROWS, false,
+                                                uint8_t(row_step < 0 ? 0 : row_step));
+                    row_line = true;
                     DA_PUSH(cw.sights, cw.sights_count, cw_sight_cap, se);
                 }
                 parsed = 1;
             }
 
+            if (parsed) {
+                validate_property(DefRecordKind::Weapon, as_read.c_str(), as_read.size(), cw.unmodeled_count, report, number, cw.weapon_name);
+                // What a writer keeps of the line: its place in the weapon's order, the file's indentation.
+                def_note_line(DefRecordKind::Weapon, cw.line_order, key, strlen(key));
+                def_note_indent(out->layout, indent_noted, line, line_len);
+                if (!row_line) noter.property(def_line_step(DefRecordKind::Weapon, key, strlen(key)));
+            }
             if (!parsed) {
-                DA_PUSH_RAW(cw.raw_lines, cw.raw_lines_count, cw_raw_cap, line, line_len);
+                authoring_issue(cw.unmodeled_count, report, number, cw.weapon_name, as_read.c_str(), as_read.size());
             }
             return false;
         }
 
         if (state == ST_ACTION) {
             if (key_is(key, "end")) {
+                noter.close();
                 commit_action(line_index);
                 state = ST_WEAPON;
                 return false;
@@ -631,8 +762,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                zeroed generated defaults at bind time
                [orig: ActionDef_ParseScriptLine @ 0x402409 "forgot an end";
                the driver forwards in-ACTION lines before its own `action`
-               dispatch, WeaponDefs_ParseLineCallback @ 0x54388d]. Falling
-               through to raw_lines below reproduces exactly that. Every
+               dispatch, WeaponDefs_ParseLineCallback @ 0x54388d]. Recording a diagnostic below preserves that refusal. Every
                shipped weapon.def corpus (JOX, JOTAC localres, RevX02, JO:CA,
                jox01, demo) is fully END-terminated, so no retail data hits
                this path. */
@@ -643,7 +773,32 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 safe_copy(ca.anim, sizeof(ca.anim), v, vl);
                 parsed = 1;
             } else if (key_is(key, "function")) {
-                safe_copy(ca.function, sizeof(ca.function), v, vl);
+                Token args[6]; const int count = value_tokens(tokens, args, 6);
+                if (count > 0) safe_copy(ca.function, sizeof(ca.function), args[0].s, args[0].len);
+                ca.function_args_count = count > 0 ? static_cast<size_t>(count - 1) : 0;
+                if (ca.function_args_count > 4) {
+                    authoring_issue(ca.unmodeled_count, block_report, number, ca.name, as_read.c_str(), as_read.size(), DefIssueCode::InvalidValue);
+                    ca.function_args_count = 4;
+                }
+                for (size_t i = 0; i < ca.function_args_count; ++i)
+                    ca.function_args[i] = parse_int_n(args[i + 1].s, args[i + 1].len);
+                parsed = 1;
+            } else if (key_is(key, "ctrlreg")) {
+                safe_copy(ca.ctrl_register, sizeof(ca.ctrl_register), v, vl);
+                parsed = 1;
+            } else if (key_is(key, "ctrlreginc")) {
+                ca.ctrl_increment = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (key_is(key, "texttoken")) {
+                safe_copy(ca.text_token, sizeof(ca.text_token), v, vl);
+                parsed = 1;
+            } else if (key_is(key, "dupsound")) {
+                if (tokens.count >= 3) {
+                    ca.duplicate_sound_count = parse_int_n(v, vl);
+                    if (ca.duplicate_sound_count == 1) ca.duplicate_sound_count = 0;
+                    const char *delay = tokens.token(2);
+                    ca.duplicate_sound_delay = parse_int_n(delay, strlen(delay));
+                } else authoring_issue(ca.unmodeled_count, block_report, number, ca.name, as_read.c_str(), as_read.size(), DefIssueCode::InvalidValue);
                 parsed = 1;
             } else if (key_is(key, "delaystart")) {
                 ca.delaystart = parse_delay(v, vl);
@@ -670,18 +825,28 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 parsed = 1;
             }
 
+            if (parsed) {
+                validate_property(DefRecordKind::Action, as_read.c_str(), as_read.size(), ca.unmodeled_count, block_report, number, ca.name);
+                def_note_line(DefRecordKind::Action, ca.line_order, key, strlen(key));
+                noter.property(def_line_step(DefRecordKind::Action, key, strlen(key)));
+            }
             if (!parsed) {
-                DA_PUSH_RAW(ca.raw_lines, ca.raw_lines_count, ca_raw_cap, line, line_len);
+                authoring_issue(ca.unmodeled_count, block_report, number, ca.name, as_read.c_str(), as_read.size());
             }
         }
         return false;
     });
+    noter.finish();
 
     /* An entry no `end` closed keeps the slot its `weapon` line claimed, and
        an action block left open in it the row its `action` line claimed
        (DefWeaponDef::unclosed). */
-    if (state == ST_ACTION) commit_action(walk_end);
     if (state != ST_TOP) {
+        // A block the file leaves open: its `end` is missing, which the
+        // writer's form of the entry would add (its findings, an action
+        // block's included, ahead of the notice).
+        if (state == ST_ACTION) commit_action(walk_end);
+        authoring_issue(out->unmodeled_count, report, number, cw.weapon_name, "end", 3, DefIssueCode::MalformedBlock);
         cw.end_line = walk_end;
         cw.unclosed = 1;
         DA_PUSH(out->entries, out->count, entries_cap, cw);
@@ -693,39 +858,51 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
     return 0;
 }
 
-int def_parse_weapons(const char *path, DefWeaponsFile *out, const DefFileProbe *files) {
+int def_parse_weapons(const char *path, DefWeaponsFile *out, DefParseReport *report,
+                      const DefFileProbe *files) {
     memset(out, 0, sizeof(*out));
     size_t file_len;
     char *buf = read_file(path, &file_len);
     if (!buf) return -1;
-    int rc = parse_weapons_buf(buf, file_len, out, files);
+    DefTextNoter none(buf, file_len, nullptr);
+    int rc = parse_weapons_buf(buf, file_len, out, report, files, none);
     free(buf);
     return rc;
 }
 
 int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out,
-                             const DefFileProbe *files) {
+                             DefParseReport *report, const DefFileProbe *files) {
     memset(out, 0, sizeof(*out));
     // A zero-length file is an empty table: the walk finds no line, and the
     // game's loadout catalog keeps only its seeded "None" row [orig:
     // WeaponDef_LoadAll @0x54dd10 never reads File_ParseASCIIFile's result].
     if (size == 0) return 0;
     if (!data) return -1;
-    return parse_weapons_buf((const char *)data, size, out, files);
+    DefTextNoter none((const char *)data, size, nullptr);
+    return parse_weapons_buf((const char *)data, size, out, report, files, none);
+}
+
+int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out, DefParseReport *report,
+                             DefTextNotes &notes) {
+    memset(out, 0, sizeof(*out));
+    notes = DefTextNotes();
+    // A zero-length file is an empty table, as the overload above reads one.
+    if (size == 0) return 0;
+    if (!data) return -1;
+    DefTextNoter noter((const char *)data, size, &notes);
+    const int rc = parse_weapons_buf((const char *)data, size, out, report, nullptr, noter);
+    def_note_baseline(*out, notes);
+    return rc;
 }
 
 void def_free_weapons(DefWeaponsFile *f) {
     if (!f) return;
     for (size_t i = 0; i < f->count; ++i) {
-        for (size_t j = 0; j < f->entries[i].actions_count; ++j) {
-            free(f->entries[i].actions[j].raw_lines);
-        }
         free(f->entries[i].actions);
         free(f->entries[i].sights);
-        free(f->entries[i].raw_lines);
     }
     free(f->entries);
-    free(f->ammo_class_carries);
+    free(f->ammo_classes);
     memset(f, 0, sizeof(*f));
 }
 

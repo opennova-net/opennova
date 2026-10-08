@@ -1264,3 +1264,128 @@ func test_thermal_frames_bind_the_secondary_particle_materials() -> void:
 	assert_lt(far_additive_thermal.b, 0.45,
 			"pass A's thermal Additive darkens the grey behind it: %s" % far_additive_thermal)
 	assert_engine_error_count(0)
+
+
+# Every atlas page carries the levels retail builds it with: 0x180000, so at
+# most three box-filtered levels, and the materials bound the stage to the last
+# of them, sampled bilinear on the nearest level (D-RMAT-23; retail
+# CParticleTexture_InitTextureAndChannels @ 0x5E82B2..0x5E82EB,
+# GTexture_CreateFromPixelData_0 @ 0x6877F2..0x687801).
+func test_atlas_pages_carry_their_three_point_mip_levels() -> void:
+	for blend in [0, 3]:
+		var viewport := SubViewport.new()
+		viewport.size = Vector2i(64, 64)
+		viewport.own_world_3d = true
+		add_child_autofree(viewport)
+		var camera := Camera3D.new()
+		camera.position = Vector3(0.0, 1.0, 5.0)
+		camera.current = true
+		viewport.add_child(camera)
+		var renderer := ParticleRenderer.new()
+		renderer.scene = _single_quad_scene("mips%d" % blend, blend)
+		renderer.texture_provider = _overlap_texture
+		viewport.add_child(renderer)
+		renderer.render_now(GameWorld.current_frame_clock_ms())
+		var pages: Array = renderer.get_debug_draw_list_report().get("atlas_pages", [])
+		assert_eq(pages.size(), 1, "one page for the one graphic (blend %d)" % blend)
+		for value in pages:
+			var page: Dictionary = value
+			assert_eq(int(page.get("side", 0)), 1024 if blend == 0 else 256,
+					"the page side by the graphic's type")
+			assert_eq(int(page.get("levels", 0)), 3, "three retail levels (blend %d)" % blend)
+			assert_eq(float(page.get("max_lod", -1.0)), 2.0,
+					"the stage stops at level 2 (blend %d)" % blend)
+			assert_true(bool(page.get("texture_mipmaps", false)),
+					"the page texture carries a chain (blend %d)" % blend)
+
+
+# The pages follow the session's two game.cfg words (D-RMAT-24): DXT5 at a
+# texcompression_level of 1 or less (the fresh profile's 1), halved once at a
+# particle_density of 1 or less, three levels and the stage's level-2 bound
+# either way (retail CParticleTexture_InitTextureAndChannels @ 0x5E82B2..0x5E82CC).
+func test_atlas_pages_follow_the_session_compression_and_density() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 1.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var renderer := ParticleRenderer.new()
+	renderer.scene = _single_quad_scene("pagewords", 0)
+	renderer.texture_provider = _overlap_texture
+	viewport.add_child(renderer)
+	var cases := [
+		# [texcompression, density, flags, dxt5, device side]
+		[GameWorld.texcompression_level_fresh_profile(), GameWorld.particle_density_fresh_profile(),
+				0x180200, true, 1024],
+		[2, 2, 0x180000, false, 1024],
+		[2, 1, 0x190000, false, 512],
+		[0, 0, 0x190200, true, 512],
+	]
+	for words in cases:
+		renderer.set_session_render_settings(words[0], words[1])
+		renderer.render_now(GameWorld.current_frame_clock_ms())
+		var report := renderer.get_debug_draw_list_report()
+		assert_eq(int(report.get("atlas_page_flags", 0)), words[2], "the page flags for %s" % [words])
+		var pages: Array = report.get("atlas_pages", [])
+		assert_eq(pages.size(), 1)
+		for value in pages:
+			var page: Dictionary = value
+			assert_eq(bool(page.get("dxt5", false)), words[3], "the page format for %s" % [words])
+			assert_eq(int(page.get("side", 0)), 1024, "the packed side stays the type's")
+			assert_eq(int(page.get("device_side", 0)), words[4], "the device side for %s" % [words])
+			assert_eq(int(page.get("levels", 0)), 3, "three levels for %s" % [words])
+			assert_eq(float(page.get("max_lod", -1.0)), 2.0, "level 2 bounds the stage")
+			assert_true(bool(page.get("texture_mipmaps", false)), "the page texture is mipmapped")
+
+
+# Every view builds one particle in its scene pass's stride (D-RMAT-24): the
+# main scene's 1, 2 or 4 at particle_density 2, 1 or 0, twice that while the
+# main view renders as the NVG scene (retail Render_ProcessMainSceneFrame
+# @ 0x5CA8B8..0x5CA8DE, NVG_RenderSceneToTarget @ 0x5D088F..0x5D08B5,
+# CParticleEmitter_BuildBillboardQuads @ 0x5E6DA2..0x5E6E06).
+func test_views_build_particles_in_the_scene_pass_stride() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(64, 64)
+	viewport.own_world_3d = true
+	add_child_autofree(viewport)
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 1.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var authored := "emit_dur = 0.1;\nemit_rate = 10;\nemit_burst = 8;\nage = 100;\nalpha = 1;\n"
+	for index in range(1, 5):
+		authored += "color%d = 255, 255, 255;\n" % index
+	authored += "graphic1 = stride.tga, blend;\ng1_alpha = 1;\ng1_scale = 1;\n"
+	var file := ParticleFixture.parse(self,
+			ParticleFixture.definition("stride", authored) + ParticleFixture.effect("stride", ["stride"]))
+	var scene := EffectScene.new()
+	scene.open([file])
+	_overlap_spawn(scene, "stride", 0.0)
+	var renderer := ParticleRenderer.new()
+	renderer.scene = scene
+	renderer.texture_provider = _overlap_texture
+	viewport.add_child(renderer)
+	var built := {}
+	for words in [[2, false], [1, false], [0, false], [2, true], [0, true]]:
+		renderer.set_session_render_settings(2, words[0])
+		renderer.set_main_view_nvg_scene(words[1])
+		renderer.render_now(GameWorld.current_frame_clock_ms())
+		var report := renderer.get_debug_draw_list_report()
+		var quads := 0
+		var skipped := 0
+		for key in ["world_far_side", "world_camera_side"]:
+			quads += int(_slot(report, key).get("rendered_quad_count", 0))
+			skipped += int(_slot(report, key).get("lod_skipped_particles", 0))
+		built[words] = quads
+		if words == [2, false]:
+			assert_eq(skipped, 0, "density 2 in the main scene skips nothing")
+	# The emitter's serials run 0..n-1, so a stride of d builds ceil(n / d).
+	var n: int = built[[2, false]]
+	assert_gte(n, 8, "the burst's particles all build at density 2")
+	assert_eq(built[[1, false]], ceili(n / 2.0), "density 1: one in two")
+	assert_eq(built[[0, false]], ceili(n / 4.0), "density 0: one in four")
+	assert_eq(built[[2, true]], ceili(n / 2.0), "the NVG scene at density 2: one in two")
+	assert_eq(built[[0, true]], ceili(n / 8.0), "the NVG scene at density 0: one in eight")

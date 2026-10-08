@@ -89,7 +89,7 @@ class PlayerWeaponView;     // the local weapon FSM view (simulation/player_weap
 class PlayerWeaponEvent;    // one ordered weapon presentation event (simulation/player_weapon_event.h)
 class ScarDrawList;         // one frame's impact-scar draw list (world/scar_draw_list.h)
 class WeaponKitEntry;       // one loadout tuple (simulation/weapon_kit_entry.h)
-class WeaponProfileSummary; // the weapon.sav slot-0 summary (simulation/weapon_profile_summary.h)
+class PlayerProfiles; // the player profile's records (player/player_profiles.h)
 class EnvironmentSnapshot;  // the F3 Environment record as a typed read (simulation/environment_snapshot.h)
 class PlayerInventory;      // the local inventory snapshot (simulation/player_inventory.h)
 class EndRoundState;  // the typed end-of-round session facts (simulation_end_round.cpp)
@@ -456,7 +456,7 @@ public:
 	enum FaceFlag {
 		FACE_FLAG_BOTH_SIDES = opennova::world::kFaceFlagBothSides,
 		FACE_FLAG_NEVER_HIT = opennova::world::kFaceFlagNeverHit,
-		FACE_FLAG_DOUBLE_SIDED = opennova::world::kFaceFlagDoubleSided,
+		FACE_FLAG_FRONT_ONLY = opennova::world::kFaceFlagFrontOnly,
 	};
 
 	// Bounding-volume type codes (world/collision.h bvol_type carries the
@@ -841,15 +841,20 @@ private:
 	// it). A host role is constructed with the same catalog. Called from
 	// resolve_item_traits, the boot's role hook, and enable_join.
 	void install_item_catalog();
-	// Install or clear the retained boot charattr table on the current Joiner runtime.
-	void install_charattr_challenge_table();
-	// Copy the per-class ATTRIBUTES words into World::class_attribute_flags -- the
-	// joiner's live table when one exists (S2C 0x41 mutates it in receive order),
-	// else the boot copy. Runs at world creation, at every table install, and
-	// after each net pump (engine: runtime/inmatch/charattr_challenge.cpp).
+	// Install the retained boot charattr table on the current Joiner runtime.
+	void install_charattr_table();
+	// Copy the per-class ATTRIBUTES words (and the latches S2C 0x42 carries)
+	// into the World -- the joiner's live table when one exists (S2C 0x41 and
+	// 0x42 mutate it in receive order), else the boot copy. Runs at world
+	// creation, at every table install, and after each net pump (engine:
+	// runtime/inmatch/charattr_table.h).
 	void sync_class_attribute_flags();
 	// Install the retained retail player-profile join block on the current runtime.
 	void install_character_join_vars();
+	// The current record's auto-medic word onto the joiner runtime (C2S 0x03).
+	void install_auto_medic_preference();
+	// The session copy of the record's input words (profile::session_input).
+	void apply_session_input();
 	// Install or clear the explicitly selected retail integrity corpus profile.
 	void install_join_integrity_profile();
 	// Install the retained JOIN-checksum install root (D-NET-166).
@@ -1188,10 +1193,10 @@ public:
 	// VERSIONCRCSTRING checksum (D-NET-166). Empty keeps the golden "0".
 	// Retained across runtime rebuilds like the character/integrity data.
 	void set_join_expansion_version_root(const String &p_game_root);
-	// Load the process-scoped anti-cheat CHARACTER table before the first join
+	// Load the process-scoped character-attribute table before the first join
 	// network pump. Missing/empty charattr.def is soft and leaves all rows inactive,
 	// matching Game_Run's continue-after-error behavior.
-	bool load_charattr_challenge(
+	bool load_charattr(
 			const Ref<class ResourceRoot> &p_resource_root);
 	// Retail connects before constructing the wire-header world: drive only the socket/session
 	// legs until the terminal pre-world sync marker has been received and ACKed
@@ -1692,6 +1697,9 @@ public:
 	// (queue_chat_message), the menu picks (C2S 0x14 / 0x13) and the crew key's denied tone.
 	opennova::hud::ChatEntryFacts chat_entry_facts(uint32_t p_frame) const;
 	bool is_round_over() const; // the world's round-over latch (MatchOutcome::ended)
+	// The charattr property latches the session's restriction step raised, one
+	// bit a property (inmatch charattr_pack_disabled, the S2C 0x42 body).
+	int get_charattr_disabled_word() const;
 	opennova::hud::ChatSendResult send_chat_line(int p_dispatch, std::string &r_text, uint32_t p_frame);
 	bool send_voice_menu_pick(bool p_radio, int p_value);
 	void raise_chat_denied_sound();
@@ -1730,33 +1738,22 @@ public:
 	bool apply_local_player_loadout(const TypedArray<WeaponKitEntry> &p_kit, int p_player_class);
 	// Commit the profile class without replacing a mission-authored weapon kit.
 	bool set_local_player_class(int p_player_class);
-	// Load the player's weapon profile (weapon.sav) from an ABSOLUTE filesystem path.
-	// This is a save file, not a mounted PFF/loose resource, so it is read through
-	// FileAccess rather than the resource root. Header gate: magic "FPBC" + version
-	// "0211", then five 0x1080C profile-slot records; slot 0 becomes the active
-	// record and its class bytes are clamped to [5,9]. A missing or malformed file is
-	// NOT fatal — the shipped defaults stay installed and an Error is returned so the
-	// caller can warn. (engine: base/gameprofile/required_resources.c)
-	Error load_weapon_profile(const String &p_path);
-	// Read slot 0's two character headers (raw bytes, no session clamp) without
-	// requiring a live Simulation: a WeaponProfileSummary (error, loaded, the
-	// blue and red WeaponProfileSide with player_class, avatar_a (nationality
-	// id), avatar_b (division id) and avatar_packed). This is the menu boot
-	// seam over the same five-record file as load_weapon_profile().
-	static Ref<WeaponProfileSummary> read_weapon_profile_summary(const String &p_path);
-	// Persist PLAYER_INFO's ACCEPT snapshot into active profile slot 0:
-	// `profile.player_class` (5..9) is written to BOTH side blocks and each
-	// non-empty `profile.side_profiles[side]` {avatar_a, avatar_b, avatar_packed}
-	// to its own block — playersav::update_avatar_selection carries the
-	// PlayerInfo_SaveFromDialog witness. The other four slots and every kit
-	// page survive; the file is replaced atomically.
-	// ERR_INVALID_PARAMETER when the snapshot carries no committable side.
-	static Error save_weapon_profile_selection(const String &p_path,
-			const Dictionary &p_profile);
-	// The profile file's path RULE relative to the mount root (playersav
-	// weapon_sav_relpath): with an active expansion retail looks ONLY under
-	// "expansion/<name>/", never the root (engine: formats/playersav/weapon_sav.cpp). Static so shell path assembly stays a join.
-	static String weapon_profile_relpath(const String &p_expansion_name);
+	// Take the player profile's current records (the shell's in-memory
+	// PlayerProfiles, loaded at the menu's start): the weapon.sav record, its
+	// class bytes clamped to [5,9] as a session start does, becomes the active
+	// one, and the player.sav record supplies single player's session words
+	// (runtime/profile/player_profiles.h, inmatch singleplayer_game_config),
+	// and the session copy of its input words and auto-medic word
+	// (runtime/profile/profile_controls.h). ERR_INVALID_PARAMETER with no
+	// profile; the defaults then stand.
+	Error use_player_profile(const Ref<PlayerProfiles> &p_profiles);
+	// The in-game options Accept over the record it wrote
+	// (profile::ingame_accept_input: the look's two words at once).
+	Error apply_ingame_options(const Ref<PlayerProfiles> &p_profiles);
+	// The session's live input words (diagnostics).
+	int get_session_mouse_sensitivity() const;
+	bool is_session_mouse_inverted() const;
+	bool is_session_auto_reload() const;
 	// The FP viewmodel submit spec {gun, arms, adm, show_arms} (renderer
 	// fp_viewmodel_spec (engine: runtime/inmatch/joiner_role.cpp)). `character_arms` is the local
 	// player's resolved combo arms graphic (retail's CharacterEntity arms model,
@@ -2223,7 +2220,8 @@ public:
 	void run_occlusion_frame(const Transform3D &p_camera, double p_fov_y_deg,
 	                         double p_aspect, double p_viewport_width,
 	                         double p_fog_dist_units, double p_water_z_units,
-	                         bool p_force_indoors);
+	                         bool p_force_indoors,
+	                         int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);
 	// The weapon Inset pass's own collect, after the main one (simulation_present_state.h).
 	const InsetOcclusionView &run_inset_occlusion(const InsetOcclusionRequest &p_request);
 	void release_inset_occlusion();
@@ -2337,7 +2335,8 @@ public:
 	// camera (Godot space), fog distance and g_EnvTerrainLightCombined
 	// (EnvFile.combine_terrain_light(sun, sky) — the sun+sky combine).
 	// { vertices (PackedVector3Array, Godot axes; world space for shared-ring
-	//   batches, SECTION-LOCAL for entity-ring batches), uvs, colors,
+	//   batches, SECTION-LOCAL for entity-ring batches, which world_vertices
+	//   from batch_world_first also hold in world space, -1 none), uvs, colors,
 	//   batch_owner/texture/section/flags(bit0 entity_local, bit1 building)/
 	//   first/count, batch_bms_id, batch_spawn_origin, strip_names,
 	//   slots_live, slots_culled, rings_leased }. Empty without a world.
@@ -2346,9 +2345,9 @@ public:
 	// The same list over the weapon Inset view's section masks (world/occlusion.h OcclusionView).
 	Ref<ScarDrawList> get_scar_draw_list_inset(const Vector3 &p_camera_godot, float p_fog_distance,
 			const Color &p_terrain_light) const;
-	// The Scar_RenderCache owner gate over OcclusionWorld's section masks and
-	// the entity's blink-box quad (see simulation_scars.cpp).
-	bool scar_owner_visible(uint16_t p_owner_packed) const;
+	// The Scar_RenderCache owner gate (the slot's building byte) over OcclusionWorld's
+	// section masks and the entity's blink-box quad (see simulation_scars.cpp).
+	bool scar_owner_visible(uint16_t p_owner_packed, bool p_building) const;
 
 	// The round hit-detection reality as a HitboxDebugReport
 	// (simulation/hitbox_debug_report.h) — the GUT collision oracle: the nearby entity

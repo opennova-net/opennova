@@ -96,7 +96,7 @@ bool build(std::vector<uint8_t> &bytes, std::string &err) {
 		}
 		(void)mission::waypoint_path(doc, path, authored);
 		const int flags = path == 2 ? static_cast<int>(opennova::bms::WaypointFlags::DoesNotLoop) |
-		                                  static_cast<int>(opennova::bms::WaypointFlags::BlueTeam)
+		                                  static_cast<int>(opennova::bms::WaypointFlags::PlayerRoute)
 		                            : 0;
 		if (!mission::set_waypoint_path(doc, path, authored.marker_indices, flags, edit_error)) {
 			err = "set_waypoint_path failed";
@@ -153,11 +153,29 @@ bool build(std::vector<uint8_t> &bytes, std::string &err) {
 		}
 	}
 
+	// Every record's authored members as this fixture has always held them (a new record's values are
+	// the shipped missions' most common ones, bms_edit's new_entity, which this dense mission is not a
+	// sample of): the ranges and accuracies below, every other optional member zero.
 	opennova::bms::File file = doc;
 	std::vector<opennova::bms::Entity> *pools[4] = {&file.items, &file.buildings, &file.markers, &file.organics};
 	uint8_t team = 0;
 	for (std::vector<opennova::bms::Entity> *pool : pools) {
 		for (opennova::bms::Entity &e : *pool) {
+			e.perception2 = 100;
+			e.perfectionist2 = 100;
+			e.min_engagement_distance = 20;
+			e.max_engagement_distance = 200;
+			e.w_accuracy1 = 50;
+			e.w_accuracy2 = 50;
+			e.max_attack_distance = 100;
+			e.wp_distance = 0;
+			e.crouch_timer = 0;
+			e.shoot_timer = 0;
+			e.wp_adv_trigger = 0;
+			e.obliqueness = 0;
+			e.map_symbol = 0;
+			e.advancetimer = 0;
+			std::memset(e.gen_string, 0, sizeof(e.gen_string));
 			e.spawns = 0;
 			e.no_more_than = 0;
 			e.no_less_than = 0;

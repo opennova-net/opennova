@@ -237,6 +237,9 @@ func _handle_initialize(conn: McpHttpConnection, id: Variant, params: Dictionary
 	}
 	if not instructions.is_empty():
 		result["instructions"] = instructions
+	# The process that serves this endpoint, so a client given a process (scripts/mcp's `stop --pid`)
+	# asks only that one to quit, never whatever else listens on the port (docs/mcp.md).
+	result["_meta"] = { "pid": OS.get_process_id() }
 	_log("session %s initialized (protocol %s)" % [session_id.substr(0, 8), negotiated])
 	conn.respond_json(200, McpProtocol.result_envelope(id, result), { "Mcp-Session-Id": session_id }, keep_alive)
 

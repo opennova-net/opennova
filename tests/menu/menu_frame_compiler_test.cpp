@@ -7,18 +7,28 @@
 //  @ 0x64ae20; CListWnd_DrawItems @ 0x643f30]
 // Witness record: docs/mnu/menu-re.md ("Widget render dispatch").
 
+#include <runtime/menu/menu_click.h>
 #include <runtime/menu/menu_edit.h>
 #include <runtime/menu/menu_frame.h>
+#include <runtime/menu/menu_text_tables.h>
 #include <formats/mnu/mnu.h>
 
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
+#include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
-#include "fixtures/minimal_fnt_builder.h"
+#include "common/test_font.h"
 
 using namespace opennova::fnt;
 
+using opennova::menu::MenuClickLatch;
+using opennova::menu::MenuPumpWindow;
+using opennova::menu::kMenuPumpPartScrollDown;
+using opennova::menu::kMenuPumpPartScrollShuttle;
 using opennova::menu::MenuDrawList;
 using opennova::menu::MenuFrameCompiler;
 using opennova::menu::MenuFrameState;
@@ -29,6 +39,13 @@ using opennova::menu::kTableRowSelected;
 using opennova::menu::kMenuTexNone;
 
 namespace {
+
+// A text colour as the menus' text sink submits it: the RGB halved on a
+// modulate-2x device, which the font page's MODULATE2X doubles back on the
+// device (D-HUD-51) [orig: CFontCache_DrawTextScaled @0x6531e7..0x6531eb].
+constexpr uint32_t text_rgb(uint32_t rgb) {
+	return (rgb >> 1) & 0x7F7F7Fu;
+}
 
 // One table row of cell texts (values 0, state 0).
 MenuTableRow table_row(std::initializer_list<std::string> cells) {
@@ -46,6 +63,30 @@ int failures = 0;
 			++failures;                                                        \
 		}                                                                      \
 	} while (0)
+
+// There is no default menu font: a widget draws with the nearest FONT that
+// loaded. Every fixture FONT name registers the one synthetic font.
+void configure_with(MenuFrameCompiler &c, const opennova::mnu::Screen *screen,
+		const fnt_font_t *font) {
+	for (const char *name : { "test.fnt", "f.fnt", "t.fnt" }) {
+		c.register_font(name, font);
+	}
+	c.configure(screen);
+}
+
+// A string table whose "Menu" section holds `rows`.
+std::shared_ptr<opennova::rtxt::File> menu_table(
+		std::initializer_list<std::pair<const char *, const char *>> rows) {
+	auto file = std::make_shared<opennova::rtxt::File>();
+	file->sections.push_back({ "Menu", static_cast<uint32_t>(rows.size()) });
+	for (const auto &row : rows) {
+		opennova::rtxt::Entry entry;
+		entry.key = row.first;
+		entry.text = row.second;
+		file->entries.push_back(entry);
+	}
+	return file;
+}
 
 opennova::mnu::Document parse_or_die(const char *xml) {
 	opennova::mnu::Document doc;
@@ -124,7 +165,7 @@ const char *kScreenXml = R"(
 void test_draw_order_and_state_selection(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kScreenXml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t border = slot_of(c, "border.tga");
 	const int32_t brush = slot_of(c, "tile.tga");
 	const int32_t ok_idle = slot_of(c, "ok_idle.tga");
@@ -160,19 +201,23 @@ void test_draw_order_and_state_selection(const fnt_font_t *font) {
 				dl.quads[1].u1 == 1.0f && dl.quads[1].v1 == 0.25f,
 			"the fill samples stencil cell (3, 0)");
 	int stencil_quads = 0;
-	bool stencil_quads_are_untinted = true;
+	bool stencil_quads_take_the_half_diffuse = true;
 	for (size_t i = 2; i < 10; ++i) {
 		if (dl.quads[i].texture == border && dl.quads[i].texture2 == brush) {
 			++stencil_quads;
-			stencil_quads_are_untinted =
-					stencil_quads_are_untinted && dl.quads[i].color == 0xFFFFFFFFu;
+			stencil_quads_take_the_half_diffuse =
+					stencil_quads_take_the_half_diffuse && dl.quads[i].color == 0xFF7F7F7Fu;
 		}
 	}
 	CHECK(stencil_quads == 8, "eight stencil/brush border material pieces");
-	CHECK(dl.quads[1].color == 0xFFFFFFFFu,
-			"the frame fill preserves the copied stencil color and alpha");
-	CHECK(stencil_quads_are_untinted,
-			"the frame material carries no extra compiler tint");
+	// Retail submits every frame quad in 0xFF7F7F7F through the 0x651
+	// material's MODULATE2X: the fill reads its texel x 254/255, and each piece
+	// carries the diffuse its two stages double [orig: CUIElement_DrawFrame
+	// @ 0x64a2b3 / @ 0x64a392, colour -8421505].
+	CHECK(dl.quads[1].color == 0xFFFEFEFEu,
+			"the frame fill reads its copied stencil texel x 254/255, alpha whole");
+	CHECK(stencil_quads_take_the_half_diffuse,
+			"the border pieces carry retail's 0x7F diffuse");
 	// Default state: the idle art draws, the hover art does not.
 	CHECK(count_quads_with_texture(dl, ok_idle) == 1,
 			"default state draws the default appearance");
@@ -182,7 +227,7 @@ void test_draw_order_and_state_selection(const fnt_font_t *font) {
 	CHECK(dl.lines.size() == 4, "the outline draws four 1px lines");
 	// Text: both labels emit glyphs with the default color.
 	CHECK(!dl.glyphs.empty(), "glyph quads emitted");
-	CHECK((dl.glyphs[0].color & 0xFFFFFFu) == 0xAABBCCu,
+	CHECK((dl.glyphs[0].color & 0xFFFFFFu) == text_rgb(0xAABBCCu),
 			"default text color from the inherited FONT");
 
 	// Hover flips the button to the MOUSEOVER appearance and color pair
@@ -198,38 +243,46 @@ void test_draw_order_and_state_selection(const fnt_font_t *font) {
 			"hover replaces the default appearance");
 	bool found_red = false;
 	for (const auto &g : dl2.glyphs) {
-		if ((g.color & 0xFFFFFFu) == 0xFF0000u) {
+		if ((g.color & 0xFFFFFFu) == text_rgb(0xFF0000u)) {
 			found_red = true;
 		}
 	}
 	CHECK(found_red, "hover text uses the mouseover fg");
 
-	// Pressed (state 3) has no authored appearance: the availability
-	// fallback draws the DEFAULT slot [orig: CWnd_SetVisualState @ 0x646340].
+	// Pressed (state 3) has no authored appearance: the pump's availability
+	// fallback leaves DEFAULT in +236, which the appearance AND the label read
+	// [orig: CWnd_ProcessMouseEvent @ 0x647c89..0x647cb5; the label color
+	// switch @ 0x653445].
 	state.widgets[0].hovered = false;
 	state.widgets[0].pressed = true;
 	const MenuDrawList &dl3 = c.compile(state, 1.0f, 1.0f);
 	CHECK(count_quads_with_texture(dl3, ok_idle) == 1,
 			"missing selected appearance falls back to default");
+	bool found_default = false;
 	bool found_green = false;
 	for (const auto &g : dl3.glyphs) {
-		if ((g.color & 0xFFFFFFu) == 0x00FF00u) {
+		if ((g.color & 0xFFFFFFu) == text_rgb(0xAABBCCu)) {
+			found_default = true;
+		}
+		if ((g.color & 0xFFFFFFu) == text_rgb(0x00FF00u)) {
 			found_green = true;
 		}
 	}
-	CHECK(found_green, "pressed text still uses the selected fg pair");
+	CHECK(found_default && !found_green,
+			"pressed text follows the resolved state: the default pair");
 
-	// Disabled (state 1): no disabled appearance -> default art, disabled fg.
+	// Disabled (state 1): no disabled appearance -> default art and colors.
 	state.widgets[0].pressed = false;
+	state.widgets[0].has_disabled = true;
 	state.widgets[0].disabled = true;
 	const MenuDrawList &dl4 = c.compile(state, 1.0f, 1.0f);
 	bool found_gray = false;
 	for (const auto &g : dl4.glyphs) {
-		if ((g.color & 0xFFFFFFu) == 0x808080u) {
+		if ((g.color & 0xFFFFFFu) == text_rgb(0x808080u)) {
 			found_gray = true;
 		}
 	}
-	CHECK(found_gray, "disabled text uses the disabled fg");
+	CHECK(!found_gray, "an unauthored disabled state keeps the default colors");
 
 	// A hidden widget skips its draw but the sibling still renders.
 	MenuWidgetState hide;
@@ -265,7 +318,7 @@ void test_image_appearance_crops_authored_map_state(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t atlas = slot_of(c, "tab_atlas.tga");
 	CHECK(atlas >= 0, "the Options tab atlas is interned");
 	c.set_texture_size(atlas, 100, 80);
@@ -281,9 +334,11 @@ void test_image_appearance_crops_authored_map_state(const fnt_font_t *font) {
 	}
 	CHECK(tab != nullptr, "the Options tab image draws");
 	if (tab != nullptr) {
-		CHECK(tab->u0 == 0.0f && tab->u1 == 1.0f,
+		// Texel columns 0.5 .. 100.5 and rows 40.5 .. 60.5: the strip's half
+		// texel at both ends [orig: Render_DrawTiledTextureStrip @ 0x67b058].
+		CHECK(tab->u0 == 0.5f / 100.0f && tab->u1 == 0.5f / 100.0f + 1.0f,
 				"the atlas row spans the full texture width");
-		CHECK(tab->v0 == 0.5f && tab->v1 == 0.75f,
+		CHECK(tab->v0 == 0.5f + 0.5f / 80.0f && tab->v1 == 0.75f + 0.5f / 80.0f,
 				"map_state 2 crops the third 20px row from an 80px atlas");
 	}
 }
@@ -316,7 +371,7 @@ void test_scroll_draws_authored_visual_parts(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t track = slot_of(c, "track.tga");
 	const int32_t up = slot_of(c, "left.tga");
 	const int32_t down = slot_of(c, "right.tga");
@@ -392,7 +447,7 @@ void test_spin_arrow_uses_cropped_atlas_extent(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t up = slot_of(c, "spin_up_atlas.tga");
 	CHECK(up >= 0, "the spin-arrow atlas is interned");
 	c.set_texture_size(up, 16, 80);
@@ -411,7 +466,7 @@ void test_spin_arrow_uses_cropped_atlas_extent(const fnt_font_t *font) {
 		CHECK(arrow->x0 == 110.0f && arrow->y0 == 105.0f && arrow->x1 == 126.0f &&
 						arrow->y1 == 125.0f,
 				"the omitted arrow edges use the 16x20 cropped native extent");
-		CHECK(arrow->v0 == 0.5f && arrow->v1 == 0.75f,
+		CHECK(arrow->v0 == 0.5f + 0.5f / 80.0f && arrow->v1 == 0.75f + 0.5f / 80.0f,
 				"the spin arrow draws only map_state 2 from the 80px atlas");
 	}
 	CHECK(c.spin_arrow_at(1, state, 115.0f, 124.0f, 1.0f, 1.0f) == 1,
@@ -461,7 +516,7 @@ void test_list_scrollbar_uses_authored_geometry_and_range(
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t track = slot_of(c, "list_track.tga");
 	const int32_t shuttle = slot_of(c, "list_shuttle.tga");
 	const int32_t up = slot_of(c, "list_up_atlas.tga");
@@ -508,8 +563,9 @@ void test_list_scrollbar_uses_authored_geometry_and_range(
 						down_quad->x0 == 90.0f && down_quad->y0 == 100.0f &&
 						down_quad->x1 == 110.0f && down_quad->y1 == 120.0f,
 				"the arrows occupy the authored scrollbar's two ends");
-		CHECK(up_quad->v0 == 0.25f && up_quad->v1 == 0.5f &&
-						down_quad->v0 == 0.75f && down_quad->v1 == 1.0f,
+		const float half = 0.5f / 80.0f; // the strip's half texel
+		CHECK(up_quad->v0 == 0.25f + half && up_quad->v1 == 0.5f + half &&
+						down_quad->v0 == 0.75f + half && down_quad->v1 == 1.0f + half,
 				"each arrow crops its authored 20px atlas row");
 	}
 	if (shuttle_quad != nullptr) {
@@ -546,7 +602,7 @@ void test_combo_scrollbar_offsets_rows_and_hit(const fnt_font_t *font) {
   <NAME>COMBO_SCROLL</NAME>
   <WINDOW type="window" name="ROOT">
     <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
-    <WINDOW type="combo" name="COMBO">
+    <WINDOW type="combobox" name="COMBO">
       <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>
       <ITEMS>
         <ITEM type="ID" value="0">ZERO</ITEM><ITEM type="ID" value="1">ONE</ITEM>
@@ -570,7 +626,7 @@ void test_combo_scrollbar_offsets_rows_and_hit(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	for (const char *name : { "combo_track.tga", "combo_shuttle.tga",
 				 "combo_up.tga", "combo_down.tga" }) {
 		c.set_texture_size(slot_of(c, name), 20, 20);
@@ -650,7 +706,7 @@ void test_table_scrollbar_separates_header_and_body_row_heights(
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t shuttle = slot_of(c, "table_shuttle.tga");
 	const int32_t up = slot_of(c, "table_up.tga");
 	CHECK(shuttle >= 0 && up >= 0,
@@ -718,7 +774,7 @@ void test_table_visible_count_floors_to_one(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t up = slot_of(c, "tiny_up.tga");
 	CHECK(up >= 0, "the tiny-table scrollbar visual is interned");
 	c.set_texture_size(up, 16, 16);
@@ -761,7 +817,7 @@ void test_table_rows_draw_row_state_not_widget_hover(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuWidgetState table_state;
 	table_state.index = 1;
 	table_state.hovered = true; // the widget-level visual must not tint cells
@@ -781,14 +837,14 @@ void test_table_rows_draw_row_state_not_widget_hover(const fnt_font_t *font) {
 	bool other_text_default_fg = false;
 	for (const auto &g : dl.glyphs) {
 		const uint32_t rgb = g.color & 0xFFFFFFu;
-		if (rgb == 0xFF0000u) {
+		if (rgb == text_rgb(0xFF0000u)) {
 			any_mouseover_text = true;
 		}
 		if (g.y_top >= 35.0f && g.y_top < 55.0f) {
-			if (rgb == 0x00FF00u) {
+			if (rgb == text_rgb(0x00FF00u)) {
 				selected_row_text_selected_fg = true;
 			}
-		} else if (rgb == 0xAAAAAAu) {
+		} else if (rgb == text_rgb(0xAAAAAAu)) {
 			other_text_default_fg = true;
 		}
 	}
@@ -823,7 +879,7 @@ void test_table_rows_draw_row_state_not_widget_hover(const fnt_font_t *font) {
 void test_text_placement_and_truncation(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kScreenXml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuFrameState state;
 	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
 	// The OK button: rect (10,20)-(110,40) in MAIN at (0,0); "OK" measures
@@ -855,10 +911,36 @@ void test_text_placement_and_truncation(const fnt_font_t *font) {
 			"overflowing text truncates to the fitting prefix");
 }
 
+// Menu text honours the inline tags: a colour tag draws its own RGB under the
+// text colour's alpha and <co> the text colour again (D-FNT-5)
+// [orig: font_cache_draw_text_scaled @0x653230 -> CGameFont_DrawText_Cdecl
+// @0x676290, a null state; GText_ParseFormatTag @0x674346..0x674357].
+void test_text_inline_colour_tags(const fnt_font_t *font) {
+	opennova::mnu::Document doc = parse_or_die(kScreenXml);
+	MenuFrameCompiler c;
+	configure_with(c, doc.first_screen(), font);
+	MenuWidgetState tagged;
+	tagged.index = 1;
+	tagged.has_text = true;
+	tagged.text = "<cFF0000>A<co>B";
+	MenuFrameState state;
+	state.widgets.push_back(tagged);
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	CHECK(!dl.font_runs.empty() && dl.font_runs[0].count == 2, "the tags draw no glyph");
+	if (!dl.font_runs.empty() && dl.font_runs[0].count == 2) {
+		const size_t first = static_cast<size_t>(dl.font_runs[0].first);
+		CHECK((dl.glyphs[first].color & 0xFFFFFFu) == 0xFF0000u, "<cFF0000> draws red");
+		CHECK((dl.glyphs[first + 1].color & 0xFFFFFFu) == text_rgb(0xAABBCCu),
+				"<co> restores the text colour (as the sink submits it, D-HUD-51)");
+		CHECK((dl.glyphs[first].color & 0xFF000000u) == (dl.glyphs[first + 1].color & 0xFF000000u),
+				"the tag keeps the text colour's alpha");
+	}
+}
+
 void test_scale_truncation(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kScreenXml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t ok_idle = slot_of(c, "ok_idle.tga");
 	c.set_texture_size(ok_idle, 100, 20);
 	MenuFrameState state;
@@ -878,6 +960,88 @@ void test_scale_truncation(const fnt_font_t *font) {
 						ok->y1 == 51.0f,
 				"scaled rects truncate to int per element");
 	}
+	// The scale pair is the surface times the float 0.00125 (1/600), each
+	// product a float [orig: CUIScene_SetScreenScale @ 0x639488]: at 1280 the
+	// x scale is one float below 1.6, and 5 design units truncate to 7.
+	using opennova::menu::menu_scale_x;
+	using opennova::menu::menu_scale_y;
+	using opennova::menu::menu_scaled_edge;
+	using opennova::menu::menu_text_anchor;
+	CHECK(menu_scale_x(1024.0f) == 1.28f && menu_scale_y(768.0f) == 1.28f &&
+					menu_scale_x(800.0f) == 1.0f && menu_scale_y(600.0f) == 1.0f,
+			"the pair at 1024x768 and 800x600");
+	CHECK(menu_scale_x(1280.0f) < 1.6f && menu_scaled_edge(5, menu_scale_x(1280.0f)) == 7.0f,
+			"1280 wide scales by 1280 x 0.00125f, a float below 1.6");
+	// Each edge is the float product truncated: the x87 unit runs at single
+	// precision under Direct3D 9, so 150 x 1.2799999 is 192, not 191.99999
+	// [orig: CGfxDevice_CreateDevice @ 0x67e9fd, no D3DCREATE_FPU_PRESERVE].
+	CHECK(menu_scaled_edge(150, 1.28f) == 192.0f && menu_scaled_edge(200, 1.28f) == 256.0f &&
+					menu_scaled_edge(600, 1.28f) == 768.0f && menu_scaled_edge(420, 1.28f) == 537.0f,
+			"edges truncate the float product");
+	// The text anchor is the design point times the pair, untruncated: TITLE's
+	// label at (200 + EDGE 5, 50) lands at (262.4, 64), its glyph quad half a
+	// pixel up and left [orig: CFontCache_DrawTextScaled @ 0x6531f1..0x65322c].
+	bool title_at_anchor = false;
+	for (const auto &g : dl.glyphs) {
+		if (g.x_top_left == menu_text_anchor(205, 1.28f) - 0.5f &&
+				g.y_top == menu_text_anchor(50, 1.28f) - 0.5f) {
+			title_at_anchor = true;
+		}
+	}
+	CHECK(title_at_anchor, "a label's first glyph sits at the untruncated anchor");
+}
+
+// The frame's eight pieces hang in device floats: the cell scaled by the pair,
+// the left and top a cell out and the scaled inset back in, the right and bottom
+// an inset in and one pixel more; the brush is screen-anchored, its HEIGHT the x
+// period and its WIDTH the y period [orig: CUIElement_DrawFrame @ 0x64a2d7..0x64a73d;
+// CUIElement_InitBorderMaterials @ 0x6470ee..0x647116].
+void test_frame_pieces_hang_in_device_floats(const fnt_font_t *font) {
+	opennova::mnu::Document doc = parse_or_die(kScreenXml);
+	MenuFrameCompiler c;
+	configure_with(c, doc.first_screen(), font);
+	const int32_t border = slot_of(c, "border.tga");
+	const int32_t brush = slot_of(c, "tile.tga");
+	c.set_texture_size(border, 32, 32);
+	c.set_texture_size(brush, 64, 48);
+	MenuFrameState state;
+	const float s = 1.28f;
+	const MenuDrawList &dl = c.compile(state, s, s);
+	std::vector<const MenuQuad *> pieces;
+	const MenuQuad *fill = nullptr;
+	for (const MenuQuad &q : dl.quads) {
+		if (q.texture == border && q.texture2 == brush) pieces.push_back(&q);
+		if (q.texture == border && q.tiled) fill = &q;
+	}
+	CHECK(fill != nullptr && pieces.size() == 8, "the fill and eight pieces");
+	if (fill == nullptr || pieces.size() != 8) return;
+	// MAIN is (0, 0)-(800, 600): on the device (0, 0)-(1024, 768); the cell 8,
+	// the insets the constructor's 12 and 8 [orig: CWnd_Construct].
+	CHECK(fill->x0 == 0.0f && fill->y0 == 0.0f && fill->x1 == 1024.0f && fill->y1 == 768.0f,
+			"the fill covers the window's truncated device rect");
+	const float cell_w = 8.0f * s;
+	const float cell_h = 8.0f * s;
+	const float left = (0.0f - 8.0f * s) + s * 12.0f;
+	const float top = (0.0f - 8.0f * s) + 8.0f * s;
+	const float top_row_end = 8.0f * s + top;
+	const float right = (1024.0f - s * 12.0f) - 1.0f;
+	const float bottom = (768.0f - 8.0f * s) - 1.0f;
+	const MenuQuad &tl = *pieces[0];
+	const MenuQuad &top_edge = *pieces[1];
+	const MenuQuad &tr = *pieces[2];
+	const MenuQuad &right_edge = *pieces[4];
+	const MenuQuad &br = *pieces[7];
+	CHECK(tl.x0 == left && tl.y0 == top && tl.x1 == left + cell_w && tl.y1 == top_row_end,
+			"TL: a scaled cell out, the scaled inset back");
+	CHECK(top_edge.x0 == left + cell_w && top_edge.x1 == right,
+			"the top edge stretches to the right piece");
+	CHECK(tr.x0 == right && tr.x1 == right + cell_w, "TR: the scaled inset in, one pixel more");
+	CHECK(right_edge.y0 == top_row_end && right_edge.y1 == bottom, "the right edge's span");
+	CHECK(br.y0 == bottom && br.y1 == bottom + cell_h, "BR: the bottom inset in, one pixel more");
+	CHECK(tl.u0 == 0.0f && tl.v0 == 0.0f && tl.u1 == 0.25f && tl.v1 == 0.25f,
+			"stage 0 is the stencil cell, no half texel");
+	CHECK(tl.texture2_period_x == 48.0f && tl.texture2_period_y == 64.0f,
+			"the brush period: its height across, its width down");
 }
 
 void test_radio_checkbox_forcing(const fnt_font_t *font) {
@@ -902,7 +1066,7 @@ void test_radio_checkbox_forcing(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t r_off = slot_of(c, "r_off.tga");
 	const int32_t r_on = slot_of(c, "r_on.tga");
 	const int32_t c_off = slot_of(c, "c_off.tga");
@@ -932,7 +1096,7 @@ void test_radio_checkbox_forcing(const fnt_font_t *font) {
 			"checked radio drops the default art");
 	bool radio_green = false;
 	for (const auto &g : dl.glyphs) {
-		if ((g.color & 0xFFFFFFu) == 0x00FF00u) {
+		if ((g.color & 0xFFFFFFu) == text_rgb(0x00FF00u)) {
 			radio_green = true;
 			break;
 		}
@@ -973,7 +1137,7 @@ void test_edit_caret(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 
 	MenuWidgetState edit;
 	edit.index = 1;
@@ -996,13 +1160,14 @@ void test_edit_caret(const fnt_font_t *font) {
 	CHECK(hover_fill, "focused edit draws the mouseover appearance");
 	// 2 text glyphs + the caret underscore.
 	CHECK(dl.glyphs.size() == 3, "text plus one caret glyph");
-	// The caret after 'A': left-run width 8, plus the (spacing-1)+1 gap = 2
-	// for a non-empty left run, plus the same gap again for a mid-string
-	// caret [orig: the two gated adds @ 0x6534dc / 0x653562] -> x 12,
-	// vertex 11.5.
-	CHECK(dl.glyphs[2].x_top_left == 11.5f,
+	// The caret after 'A': left-run width 8, plus a gap of
+	// CGameFont_GetSpacingPad (trunc((spacing - 1) * design) + 1 = 2) and the
+	// caller's + 1 for a non-empty left run, plus the same gap again for a
+	// mid-string caret [orig: the two gated adds @ 0x6534de..0x6534eb /
+	// @ 0x653583..0x653590] -> x 14, vertex 13.5.
+	CHECK(dl.glyphs[2].x_top_left == 13.5f,
 			"caret x after the left run + the two gap terms");
-	bool mouseover_text = (dl.glyphs[0].color & 0xFFFFFFu) == 0x222222u;
+	bool mouseover_text = (dl.glyphs[0].color & 0xFFFFFFu) == text_rgb(0x222222u);
 	CHECK(mouseover_text, "focused edit text uses the mouseover fg");
 
 	// Blink OFF phase: no caret glyph.
@@ -1060,7 +1225,7 @@ void test_list_rows_and_item_cell(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 
 	MenuWidgetState list;
 	list.index = 1;
@@ -1083,10 +1248,10 @@ void test_list_rows_and_item_cell(const fnt_font_t *font) {
 	int green_runs = 0;
 	int default_runs = 0;
 	for (const auto &g : dl.glyphs) {
-		if ((g.color & 0xFFFFFFu) == 0x00FF00u) {
+		if ((g.color & 0xFFFFFFu) == text_rgb(0x00FF00u)) {
 			++green_runs;
 		}
-		if ((g.color & 0xFFFFFFu) == 0x111111u) {
+		if ((g.color & 0xFFFFFFu) == text_rgb(0x111111u)) {
 			++default_runs;
 		}
 	}
@@ -1105,13 +1270,48 @@ void test_list_rows_and_item_cell(const fnt_font_t *font) {
 	CHECK(swatch, "the spinlist color item draws the opaque swatch");
 }
 
+// A list row wider than the row (with the edges and a shown scrollbar) draws
+// its widest prefix narrower than the span; one that fits draws whole [orig:
+// CListWnd_DrawItems @ 0x643f30, @ 0x644101..0x644170] (the Mods list's base
+// row, D-MNU-31).
+void test_list_row_truncation(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>T</NAME>
+  <WINDOW type="window" name="ROOT">
+    <FONT><NAME>f.fnt</NAME></FONT>
+    <WINDOW type="list" name="L1">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>64</BOTTOM></POSITION>
+      <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	opennova::mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	configure_with(c, doc.first_screen(), font);
+	MenuWidgetState list;
+	list.index = 1;
+	list.has_items = true;
+	list.items = { "ABCDEFGHIJKLMNOP", "AB" }; // 143px and 17px wide, the row 100
+	MenuFrameState st;
+	st.widgets.push_back(list);
+	const MenuDrawList &dl = c.compile(st, 1.0f, 1.0f);
+	CHECK(dl.font_runs.size() == 2, "a run per row");
+	if (dl.font_runs.size() == 2) {
+		// width(n) = 9n-1 reaches 100 first at n=12: the 11 before it drawn.
+		CHECK(dl.font_runs[0].count == 11, "an overflowing row draws its fitting prefix");
+		CHECK(dl.font_runs[1].count == 2, "a row that fits draws whole");
+	}
+}
+
 // The mouse pump [orig: CUIScene_EndFrame @ 0x63e600 ->
 // CWnd_ProcessMouseEvent @ 0x647a00]: front-most claim, disabled keeps
 // state 1, hit+down -> pressed, hit+up -> hovered, misses clear.
 void test_mouse_pump(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kScreenXml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 
 	MenuFrameState state;
 	// Over the OK button (design rect 10,20..110,40 under the root at 0,0),
@@ -1158,17 +1358,20 @@ void test_mouse_pump(const fnt_font_t *font) {
 	claim = c.pump_mouse(state, 5000.0f, 5000.0f, false, 1.0f, 1.0f);
 	CHECK(claim.hovered == -1, "a miss claims nothing");
 
-	// A DISABLED claimant blocks widgets beneath but takes no hover/press
-	// (visual state 1 wins).
+	// A DISABLED window never takes the claim, and its rect still keeps its
+	// parent from it: nothing claims, nothing hovers (D-MNU-33) [orig:
+	// CWnd_IsVisibleInHierarchy @ 0x646290, the gate @ 0x647a27;
+	// CWnd_HitTestPoint recursing @ 0x647ab0].
 	MenuWidgetState disabled_row;
 	disabled_row.index = 1;
+	disabled_row.has_disabled = true;
 	disabled_row.disabled = true;
 	state.widgets.clear();
 	state.widgets.push_back(disabled_row);
 	claim = c.pump_mouse(state, 50.0f, 30.0f, false, 1.0f, 1.0f);
-	CHECK(claim.hovered == 1, "a disabled widget still owns the claim");
+	CHECK(claim.hovered == -1, "a disabled widget never takes the claim, nor its parent");
 	CHECK(!state.widgets[0].hovered && !state.widgets[0].pressed,
-			"a disabled claimant keeps visual state 1 - no hover/press");
+			"a disabled window keeps visual state 1 - no hover/press");
 
 	// A HIDDEN subtree never hits: hide the button, the point falls through
 	// to the root container.
@@ -1209,7 +1412,7 @@ void test_table_interior(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuFrameState state;
 	MenuWidgetState grid;
 	grid.index = 1;
@@ -1225,7 +1428,7 @@ void test_table_interior(const fnt_font_t *font) {
 			divider = true;
 		}
 	}
-	CHECK(!divider, "an unsorted column draws no rule beside its header label");
+	CHECK(!divider, "an unsorted table draws no sort indicator");
 	// Second column starts after width 200: some glyph must anchor at x>=200.
 	bool second_col = false;
 	for (const auto &g : dl.glyphs) {
@@ -1242,9 +1445,10 @@ void test_table_interior(const fnt_font_t *font) {
 			"the scroll window drops rows above first-visible");
 }
 
-// The marquee credits roll [orig: CMarqueeWnd_RenderScrollingCredits @ 0x65ca00]:
-// seeded lines draw centered, the roll advances with time_ms, and the whole
-// roll resets after the last line passes the top.
+// The marquee credits roll [orig: CMarqueeWnd_RenderScrollingCredits @ 0x65ca00]: the
+// nodes start at the rect's bottom edge plus their offset, fall SCROLL_RATE
+// pixels a rendered frame (a compile whose clock moved), draw centred in their
+// own font, and the whole roll resets once the last node passes the top.
 void test_marquee_roll(const fnt_font_t *font) {
 	const char *xml = R"(
 <SCREEN>
@@ -1252,7 +1456,7 @@ void test_marquee_roll(const fnt_font_t *font) {
   <WINDOW type="window" name="MAIN">
     <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
     <FONT><NAME>t.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
-    <WINDOW type="marquee" name="ROLL">
+    <WINDOW type="marquee_wnd" name="ROLL">
       <POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>700</RIGHT><BOTTOM>300</BOTTOM></POSITION>
     </WINDOW>
   </WINDOW>
@@ -1260,18 +1464,27 @@ void test_marquee_roll(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
+	const char *config = "[ENV]\r\nSCROLL_RATE=50\r\nVERTICAL_SPACE=20\r\n[TEXT]\r\n"
+			"TEXT=CREDITS, t.fnt\r\nTEXT=<CR>\r\nTEXT=OPEN_NOVA\r\n";
+	opennova::menu::MarqueeCredits credits;
+	CHECK(opennova::menu::marquee_load_credits(reinterpret_cast<const uint8_t *>(config),
+				  std::strlen(config), credits, nullptr),
+			"a text config loads");
+	CHECK(credits.scroll_rate == 50.0f && credits.vertical_space == 20 &&
+					credits.nodes.size() == 2 && credits.nodes[1].offset == 40,
+			"[ENV] and the <CR> spacing");
+	CHECK(credits.nodes.size() == 2 &&
+					opennova::menu::marquee_node_text(credits, credits.nodes[1]) == "OPEN NOVA",
+			"'_' draws as a space");
 	MenuFrameState state;
 	MenuWidgetState roll;
 	roll.index = 1;
-	roll.marquee_lines = {"CREDITS", "", "OPENNOVA"};
+	roll.marquee = credits;
 	state.widgets.push_back(roll);
-	// The roll enters from the BOTTOM: nothing draws at t=0.
-	state.time_ms = 0;
-	const MenuDrawList &dl0 = c.compile(state, 1.0f, 1.0f);
-	CHECK(dl0.glyphs.empty(), "the roll starts below the rect (enters from the bottom)");
-	// After the clock advances, the first line has scrolled into view.
-	state.time_ms = 3000;
+	// The first frame steps once: the first node sits at 300 - 50, the second at
+	// 340 - 50 (still below the rect); glyph vertices sit half a pixel up-left.
+	state.time_ms = 1;
 	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
 	float first_y = -1.0f;
 	for (const auto &g : dl.glyphs) {
@@ -1279,25 +1492,33 @@ void test_marquee_roll(const fnt_font_t *font) {
 			first_y = g.y_top;
 		}
 	}
-	CHECK(first_y >= 0.0f, "seeded credits lines draw");
-	const size_t early_glyphs = dl.glyphs.size();
-	(void)early_glyphs;
-	// Further advance WITHIN one roll cycle (the whole-roll reset fires
-	// once the offset exceeds the 3-line roll height): the roll scrolls UP.
-	state.time_ms = 4400;
+	CHECK(first_y == 249.5f, "a node starts at the bottom edge and falls one step a frame");
+	// A compile on the same clock is the same frame: no step.
+	const MenuDrawList &same = c.compile(state, 1.0f, 1.0f);
+	CHECK(!same.glyphs.empty() && same.glyphs[0].y_top == 249.5f, "one step a rendered frame");
+	state.time_ms = 2;
 	const MenuDrawList &dl2 = c.compile(state, 1.0f, 1.0f);
-	float second_y = 1.0e9f;
-	for (const auto &g : dl2.glyphs) {
-		if (g.y_top < second_y) {
-			second_y = g.y_top;
-		}
+	CHECK(!dl2.glyphs.empty() && dl2.glyphs[0].y_top == 199.5f, "the roll moves up SCROLL_RATE");
+	// The last node starts at 340: the fifth frame takes it to 90, above the top
+	// (100), and that frame the whole roll goes back to its initial layout (the
+	// first node on the bottom edge, not drawn); the next frame steps again.
+	for (uint32_t t = 3; t <= 4; ++t) {
+		state.time_ms = t;
+		c.compile(state, 1.0f, 1.0f);
 	}
-	CHECK(!dl2.glyphs.empty() && second_y < first_y,
-			"the roll advances upward with time_ms");
-	// A reset restarts the roll below the rect: nothing draws again.
-	state.widgets[0].marquee_reset = true;
+	state.time_ms = 5;
+	const MenuDrawList &reset = c.compile(state, 1.0f, 1.0f);
+	CHECK(reset.glyphs.empty(), "the roll starts over once the last node passes the top");
+	state.time_ms = 6;
 	const MenuDrawList &dl3 = c.compile(state, 1.0f, 1.0f);
-	CHECK(dl3.glyphs.empty(), "marquee_reset restarts the roll from the bottom");
+	CHECK(!dl3.glyphs.empty() && dl3.glyphs[0].y_top == 249.5f, "and rolls again");
+	// A reset restarts the roll from its initial layout (one step on).
+	state.time_ms = 7;
+	c.compile(state, 1.0f, 1.0f);
+	state.widgets[0].marquee_reset = true;
+	state.time_ms = 8;
+	const MenuDrawList &dl4 = c.compile(state, 1.0f, 1.0f);
+	CHECK(!dl4.glyphs.empty() && dl4.glyphs[0].y_top == 249.5f, "marquee_reset restarts the roll");
 }
 
 // DRAW_FRAME gating [orig: CStaticWnd_Render @ 0x657b10 — field +0x134 guards
@@ -1325,7 +1546,7 @@ void test_draw_frame_gate(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t border = slot_of(c, "border.tga");
 	const int32_t brush = slot_of(c, "tile.tga");
 	CHECK(border >= 0 && brush >= 0, "the parent's FRAME textures intern");
@@ -1460,7 +1681,7 @@ void test_runtime_items_and_multiselect(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 
 	MenuWidgetState list;
 	list.index = 1;
@@ -1489,7 +1710,7 @@ void test_runtime_items_and_multiselect(const fnt_font_t *font) {
 void test_widget_queries(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kScreenXml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 
 	CHECK(c.widget_count() == 3, "widget_count covers the pre-order tree");
 	CHECK(c.widget_name(1) == "OK", "widget_name reads the authored NAME");
@@ -1515,7 +1736,7 @@ void test_widget_queries(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document edoc = parse_or_die(edit_xml);
 	MenuFrameCompiler ec;
-	ec.configure(edoc.first_screen(), font);
+	configure_with(ec, edoc.first_screen(), font);
 	opennova::menu::EditLimits lim;
 	CHECK(ec.widget_edit_limits(1, &lim) && lim.numeric &&
 					lim.min_value == 1 && lim.max_value == 99 &&
@@ -1542,7 +1763,7 @@ void test_interaction_geometry(const fnt_font_t *font) {
       </ITEMS>
       <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
     </WINDOW>
-    <WINDOW type="combo" name="C1">
+    <WINDOW type="combobox" name="C1">
       <POSITION><LEFT>200</LEFT><TOP>0</TOP><RIGHT>300</RIGHT><BOTTOM>20</BOTTOM></POSITION>
       <ITEMS>
         <ITEM type="ID" value="0">ONE</ITEM>
@@ -1570,7 +1791,7 @@ void test_interaction_geometry(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuFrameState st;
 
 	// List rows: 20 high from the top; the scroll window offsets.
@@ -1624,7 +1845,7 @@ void test_combo_face_and_outside_arrow_claim(const fnt_font_t *font) {
   <NAME>K</NAME>
   <WINDOW type="window" name="ROOT">
     <FONT><NAME>f.fnt</NAME><DEFAULT_FG>111111</DEFAULT_FG></FONT>
-    <WINDOW type="combo" name="C1">
+    <WINDOW type="combobox" name="C1">
       <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>
       <LIST_BOX>
         <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>100</RIGHT><BOTTOM>80</BOTTOM></POSITION>
@@ -1648,7 +1869,7 @@ void test_combo_face_and_outside_arrow_claim(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 
 	// No authored items, no runtime rows: the swapped row text is empty and
 	// the face draws NOTHING — never the widget's own authored TEXT
@@ -1701,13 +1922,19 @@ void test_combo_face_and_outside_arrow_claim(const fnt_font_t *font) {
 			"hit_widget mirrors the arrow claim");
 }
 
-// The accelerator scan [orig: the screen hotkey registration family
-// @ 0x5674a8; hidden subtrees prune — a hidden BACK must not eat ESC].
-void test_hotkey_widget(const fnt_font_t *font) {
+// The label mnemonic [orig: CUIButtonWidget_ParseXMLAttributes @ 0x657c30 ->
+// CButtonWnd_SetLabel @ 0x6572F0]: the byte after the first {hot} of the label as
+// the parse resolved it (the string table looked up), drawn as the caret leg's
+// '_' and never as text; a runtime relabel does not re-register it (the scan's
+// table is the parse's). The runtime builds the hotkey table from it (the
+// menu_runtime ctest).
+void test_label_mnemonic(const fnt_font_t *font) {
 	const char *xml = R"(
 <SCREEN>
   <NAME>H</NAME>
   <WINDOW type="window" name="ROOT">
+    <FONT><NAME>f.fnt</NAME></FONT>
+    <TEXT_RSRC>menutxt.bin</TEXT_RSRC>
     <WINDOW type="window" name="HIDDEN_GROUP" HIDDEN>
       <WINDOW type="button" name="HIDDEN_ESC">
         <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION>
@@ -1729,56 +1956,35 @@ void test_hotkey_widget(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.set_text_lookup({ { "BACK_TEXT", "B{hot}ack" } });
-	c.configure(doc.first_screen(), font);
+	opennova::menu::MenuTextTables tables;
+	tables.set_table("menutxt.bin", menu_table({ { "BACK_TEXT", "B{hot}ack" } }));
+	c.set_text_tables(&tables);
+	configure_with(c, doc.first_screen(), font);
 	MenuFrameState st;
 	CHECK(c.widget_authored_text(3) == "Back",
 			"the localized marker is absent from the display label");
-	// The hidden subtree's ESC never matches; the shown BACK does.
-	CHECK(c.hotkey_widget("VK_ESCAPE", true, st) == 3,
-			"a hidden subtree prunes; the shown widget matches");
-	// Explicit character rows and label mnemonics coexist in their namespace.
-	CHECK(c.hotkey_widget("v", false, st) == 3,
-			"character hotkeys match case-insensitively");
-	CHECK(c.hotkey_widget("a", false, st) == 3,
-			"a localized {hot} marker supplies a case-insensitive mnemonic");
-	CHECK(c.hotkey_widget("VK_ESCAPE", false, st) == -1,
-			"a virtual name never matches as a character");
+	CHECK(c.widget_mnemonic(3) == "a", "a localized {hot} marker supplies the mnemonic");
+	CHECK(c.widget_mnemonic(4).empty() && c.widget_mnemonic(0).empty(),
+			"no marker, or a generic window: none");
 	const MenuDrawList &draw = c.compile(st, 1.0f, 1.0f);
 	// The mnemonic rides retail's caret leg: no underline markup, one extra
 	// '_' glyph stretched to the marked char, at prefix width + the two gap
-	// terms (8 + 2 + 2 = 12 -> vertex 11.5)
+	// terms (8 + 3 + 3 = 14 -> vertex 13.5)
 	// [orig: CFontCache_DrawTextWithCursor @0x6533b0 — gated adds @0x6534dc/0x653562].
 	CHECK(draw.underlines.empty(),
 			"the label mnemonic draws a glyph, not an underline segment");
 	CHECK(draw.glyphs.size() == 5, "the four label glyphs plus the mnemonic '_'");
 	if (draw.glyphs.size() == 5) {
-		CHECK(draw.glyphs[4].x_top_left == 11.5f,
+		CHECK(draw.glyphs[4].x_top_left == 13.5f,
 				"the '_' lands at the marked byte's prefix offset");
 	}
-	// VK_RETURN and VK_ENTER are interchangeable.
-	CHECK(c.hotkey_widget("VK_RETURN", true, st) == 4,
-			"VK_RETURN matches an authored VK_ENTER");
-	// Runtime relabeling replaces the derived mnemonic without disturbing
-	// authored HOTKEY rows.
+	// A runtime relabel draws its own marker but registers nothing new.
 	MenuWidgetState relabel;
 	relabel.index = 3;
 	relabel.has_text = true;
 	relabel.text = "E{hot}xit";
 	st.widgets.push_back(relabel);
-	CHECK(c.hotkey_widget("a", false, st) == -1,
-			"a runtime label removes the prior derived mnemonic");
-	CHECK(c.hotkey_widget("x", false, st) == 3,
-			"a runtime label supplies its replacement mnemonic");
-	CHECK(c.hotkey_widget("v", false, st) == 3,
-			"runtime relabeling preserves explicit character hotkeys");
-	// A runtime show override un-prunes the subtree; pre-order then prefers it.
-	MenuWidgetState shown;
-	shown.index = 1;
-	shown.show = true;
-	st.widgets.push_back(shown);
-	CHECK(c.hotkey_widget("VK_ESCAPE", true, st) == 2,
-			"a shown-override subtree joins the scan in pre-order");
+	CHECK(c.widget_mnemonic(3) == "a", "the parse-time mnemonic stays the registered one");
 }
 
 // The wrapped multiline-edit drawer [orig: CMEditWnd_Render @ 0x6608e0 ->
@@ -1799,7 +2005,7 @@ void test_multiline_wrap(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 
 	// 9 px advance per glyph: 12 chars measure 106 > 100, so the line breaks
 	// at the LAST SPACE (index 9) — "AAAA BBBB" then "CCCC".
@@ -1860,7 +2066,7 @@ void test_multiline_wrap(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document sdoc = parse_or_die(short_xml);
 	MenuFrameCompiler sc;
-	sc.configure(sdoc.first_screen(), font);
+	configure_with(sc, sdoc.first_screen(), font);
 	MenuFrameState sst;
 	MenuWidgetState sbody;
 	sbody.index = 1;
@@ -1904,7 +2110,7 @@ void test_draw_list_preserves_interleaved_primitive_order(
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 
 	MenuFrameState state;
 	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
@@ -1953,7 +2159,7 @@ void test_scroll_interaction_hits_and_drag(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	c.set_texture_size(slot_of(c, "track.tga"), 76, 20);
 	c.set_texture_size(slot_of(c, "left.tga"), 12, 20);
 	c.set_texture_size(slot_of(c, "right.tga"), 12, 20);
@@ -2029,7 +2235,7 @@ void test_table_embedded_scrollbar_scrolls_rows(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuWidgetState table;
 	table.index = 1;
 	for (int i = 0; i < 10; ++i) {
@@ -2078,7 +2284,7 @@ void test_combo_face_shows_list_box_selection(const fnt_font_t *font) {
   <WINDOW type="window" name="ROOT">
     <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
     <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
-    <WINDOW type="combo" name="WATER">
+    <WINDOW type="combobox" name="WATER">
       <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>152</RIGHT><BOTTOM>20</BOTTOM></POSITION>
       <STRING edge="5" justify="CENTER" vjustify="CENTER"></STRING>
       <LIST_BOX>
@@ -2096,7 +2302,7 @@ void test_combo_face_shows_list_box_selection(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuWidgetState combo;
 	combo.index = 1;
 	combo.selected_item = 1; // NORMAL
@@ -2128,7 +2334,7 @@ void test_open_combo_popup_draws_over_later_widgets(const fnt_font_t *font) {
   <WINDOW type="window" name="ROOT">
     <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
     <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
-    <WINDOW type="combo" name="WATER">
+    <WINDOW type="combobox" name="WATER">
       <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>152</RIGHT><BOTTOM>20</BOTTOM></POSITION>
       <LIST_BOX>
         <APPEARANCE type="color" state="default">445566</APPEARANCE>
@@ -2149,7 +2355,7 @@ void test_open_combo_popup_draws_over_later_widgets(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuWidgetState combo;
 	combo.index = 1;
 	combo.popup_open = true;
@@ -2185,14 +2391,15 @@ void test_open_combo_popup_draws_over_later_widgets(const fnt_font_t *font) {
 			"the open popup paints AFTER the later sibling that overlaps it");
 }
 
-// The pump-integrated CScrollWnd interaction: a press on a part claims and
-// applies at the pump seam, the pressed part captures every held sample
-// until release (retail's child-window capture — no other widget can turn
-// the press into a click), and a disabled owner claims without acting.
-// [orig: CScrollWnd_HandleEvent @ 0x64d050 — arrows @ 0x64d2d9/0x64d31a,
-//  track @ 0x64d0f0/0x64d10e, anchor @ 0x64d1cb..0x64d217, drag
-//  @ 0x64d231..0x64d2aa]
-void test_scroll_pump_owns_press_capture_and_value(const fnt_font_t *font) {
+// A scrollbar's windows by the game's rule (D-MNU-32), as an embedder runs
+// them (the press, then the pump, then the latch's click): the arrows and the
+// shuttle are CButtonWnd children that take the claim themselves, never the
+// slider; an arrow captures its press and steps on its click; the track pages
+// on the press and holds nothing; the shuttle captures and drags; a disabled
+// slider takes neither the claim nor the press [orig: CScrollWnd_HandleEvent
+// @ 0x64d050; CScrollWnd_Construct @ 0x64c450; CWnd_IsVisibleInHierarchy
+// @ 0x646290].
+void test_scrollbar_windows_take_the_game_s_rule(const fnt_font_t *font) {
 	const char *xml = R"(
 <SCREEN>
   <NAME>OPTIONS</NAME>
@@ -2211,7 +2418,7 @@ void test_scroll_pump_owns_press_capture_and_value(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuWidgetState gamma;
 	gamma.index = 1;
 	gamma.has_scroll_range = true;
@@ -2221,47 +2428,92 @@ void test_scroll_pump_owns_press_capture_and_value(const fnt_font_t *font) {
 	gamma.scroll_value = 50;
 	MenuFrameState state;
 	state.widgets.push_back(gamma);
+	MenuClickLatch latch;
+	const auto reached = [&](const MenuPumpWindow &w) { return c.pump_window_reached(w, state); };
+	// One sample as an embedder runs it (MenuStateFrame::press_mouse / process_mouse).
+	const auto sample = [&](float x, float y, bool down) {
+		MenuFrameCompiler::MouseClaim pressed;
+		if (down && !latch.button_down()) {
+			const std::vector<MenuPumpWindow> reach = c.press_reach(state, x, y, 1.0f, 1.0f);
+			latch.press(c.press_capture(reach));
+			for (const MenuPumpWindow &w : reach) c.press_scroll_window(state, w, x, y, 1.0f, 1.0f, &pressed);
+		}
+		MenuFrameCompiler::MouseClaim claim =
+				c.pump_mouse(state, x, y, down, 1.0f, 1.0f, latch.capture_for(down));
+		const MenuPumpWindow clicked = latch.sample(c.click_claim(claim, state), down, reached);
+		if (clicked.valid()) c.click_scroll_window(state, clicked, &claim);
+		if (pressed.scroll_value_changed) {
+			claim.scroll_value_changed = true;
+			claim.scroll_value = pressed.scroll_value;
+		}
+		return claim;
+	};
 
-	// Press edge on the right arrow: the slider claims, steps +1, applies.
-	auto claim = c.pump_mouse(state, 295.0f, 80.0f, true, 1.0f, 1.0f);
-	CHECK(claim.hovered == 1 && claim.scroll_index == 1,
-			"the arrow press claims the slider through the pump");
-	CHECK(claim.scroll_value_changed && claim.scroll_value == 51,
-			"the arrow steps +1");
-	CHECK(state.widgets[0].scroll_value == 51,
-			"the pump applies the value into the widget state");
+	// The right arrow (280..300): its own window takes the claim, never the
+	// slider; its press steps nothing; let go over it, +1.
+	auto claim = sample(295.0f, 80.0f, false);
+	CHECK(claim.hovered == -1 && claim.scroll_owner == 1 &&
+					claim.scroll_part == kMenuPumpPartScrollDown,
+			"the arrow claims as the slider's own window");
+	claim = sample(295.0f, 80.0f, true);
+	CHECK(!claim.scroll_value_changed && state.widgets[0].scroll_value == 50,
+			"the arrow's press steps nothing");
+	CHECK(latch.captured() == (MenuPumpWindow{ 1, kMenuPumpPartScrollDown }),
+			"the arrow's press takes the capture");
+	claim = sample(295.0f, 80.0f, false);
+	CHECK(claim.scroll_value_changed && claim.scroll_value == 51 &&
+					state.widgets[0].scroll_value == 51,
+			"the arrow steps +1 on its click");
 
-	// Held samples drifting elsewhere: the latch keeps the claim on the
-	// slider and never auto-repeats — the ghost-press class is impossible.
-	claim = c.pump_mouse(state, 400.0f, 300.0f, true, 1.0f, 1.0f);
-	CHECK(claim.hovered == 1 && claim.scroll_index == 1 &&
-					!claim.scroll_value_changed,
-			"the latched part keeps the mouse without repeating");
-	claim = c.pump_mouse(state, 400.0f, 300.0f, false, 1.0f, 1.0f);
-	CHECK(claim.scroll_index == -1, "release frees the latch to the walk");
+	// Pressed, drifted off and let go: the capture held the claim to the arrow,
+	// which the mouse left, so nothing steps and nothing repeats.
+	sample(295.0f, 80.0f, true);
+	claim = sample(400.0f, 300.0f, true);
+	CHECK(claim.hovered == -1 && claim.scroll_owner == -1,
+			"off the captured arrow nothing takes the claim");
+	claim = sample(400.0f, 300.0f, false);
+	CHECK(!claim.scroll_value_changed && state.widgets[0].scroll_value == 51,
+			"let go off the arrow: no step");
 
-	// Shuttle press captures with no step; the drag lands the ratio value.
-	// value 51 -> shuttle offset 20 + 51*140/100 = 91 -> x 191..211.
-	claim = c.pump_mouse(state, 200.0f, 80.0f, true, 1.0f, 1.0f);
-	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed,
+	// The track before the shuttle (value 51: the shuttle 191..211) pages on
+	// the press and holds nothing: the window under the mouse takes the claim.
+	claim = sample(150.0f, 80.0f, true);
+	CHECK(claim.scroll_value_changed && claim.scroll_value == 41 &&
+					!latch.captured().valid(),
+			"the track pages -10 on its press and captures nothing");
+	CHECK(claim.hovered == 1 && claim.spin_part == 0,
+			"the track is the slider's own claim");
+	claim = sample(400.0f, 300.0f, true);
+	CHECK(claim.hovered == 0, "held off the track, the window under the mouse claims");
+	sample(400.0f, 300.0f, false);
+
+	// The shuttle (value 41: 177..197) captures with no step; the drag lands
+	// the ratio value.
+	claim = sample(185.0f, 80.0f, true);
+	CHECK(!claim.scroll_value_changed &&
+					latch.captured() == (MenuPumpWindow{ 1, kMenuPumpPartScrollShuttle }),
 			"the shuttle press captures without a value step");
-	claim = c.pump_mouse(state, 500.0f, 80.0f, true, 1.0f, 1.0f);
+	claim = sample(500.0f, 80.0f, true);
 	CHECK(claim.scroll_value_changed && claim.scroll_value == 100,
 			"the captured drag past the track end lands the max");
-	c.pump_mouse(state, 500.0f, 80.0f, false, 1.0f, 1.0f);
+	sample(500.0f, 80.0f, false);
 
-	// A disabled owner claims (blocking beneath) but takes no action.
+	// A disabled slider takes neither the claim nor the press, and its rect
+	// keeps its parent from both.
+	state.widgets[0].has_disabled = true;
 	state.widgets[0].disabled = true;
-	claim = c.pump_mouse(state, 295.0f, 80.0f, true, 1.0f, 1.0f);
-	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed,
-			"a disabled slider claims without scrolling");
+	CHECK(c.press_reach(state, 295.0f, 80.0f, 1.0f, 1.0f).empty(),
+			"no window takes a press on the disabled slider");
+	claim = sample(295.0f, 80.0f, true);
+	CHECK(claim.hovered == -1 && claim.scroll_owner == -1 && !claim.scroll_value_changed,
+			"a disabled slider never claims");
+	sample(295.0f, 80.0f, false);
 	CHECK(state.widgets[0].scroll_value == 100, "the disabled value holds");
-	c.pump_mouse(state, 295.0f, 80.0f, false, 1.0f, 1.0f);
 }
 
-// An OPEN combo popup's scrollbar child is interactive through the same
-// pump: arrows step scroll_row, the shuttle captures and drags, and the
-// pressed part owns the sample so it can never become a popup row pick.
+// An OPEN combo's dropdown scrollbar through the dropdown's own pump: its
+// arrows step on their click, the shuttle captures and drags, the track pages
+// on the press, and a press its windows take never becomes a row pick.
 // [orig: UI_DispatchMouseEvent @ 0x63ab00 g_UIOpenPopupWnd gate routes to
 //  the popup; CListWnd child walk @ 0x643f30 gives its scrollbar the event
 //  first; CScrollWnd_HandleEvent @ 0x64d050 is the part interaction]
@@ -2272,7 +2524,7 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
   <WINDOW type="window" name="ROOT">
     <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
     <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
-    <WINDOW type="combo" name="COMBO">
+    <WINDOW type="combobox" name="COMBO">
       <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>
       <ITEMS>
         <ITEM type="ID" value="0">ZERO</ITEM><ITEM type="ID" value="1">ONE</ITEM>
@@ -2296,7 +2548,7 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuWidgetState combo;
 	combo.index = 1;
 	combo.popup_open = true;
@@ -2307,60 +2559,66 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
 	// Popup (0,20)-(100,100): 6 rows, 4 visible, range 0..2, page 3. The
 	// authored scrollbar sits absolute (80,20)-(100,100): up arrow to y 40,
 	// track to y 80, down arrow below.
-	auto claim = c.pump_mouse(state, 90.0f, 90.0f, true, 1.0f, 1.0f);
-	CHECK(claim.hovered == 1 && claim.scroll_index == 1,
-			"the popup down-arrow press claims the combo through the pump");
-	CHECK(claim.scroll_value_changed && claim.scroll_value == 1,
-			"the popup down arrow steps scroll_row +1");
-	CHECK(state.widgets[0].scroll_row == 1,
-			"the pump applies the popup scroll into the widget state");
-	// Held drift onto the row strip: the latch keeps the claim — a scrollbar
-	// press can never become a popup row pick.
-	claim = c.pump_mouse(state, 50.0f, 55.0f, true, 1.0f, 1.0f);
+	auto claim = c.pump_popup_mouse(state, 1, 90.0f, 90.0f, true, 1.0f, 1.0f);
+	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed &&
+					state.widgets[0].scroll_row == 0,
+			"the down arrow's press takes the sample and steps nothing");
+	claim = c.pump_popup_mouse(state, 1, 90.0f, 90.0f, false, 1.0f, 1.0f);
+	CHECK(claim.scroll_value_changed && claim.scroll_value == 1 &&
+					state.widgets[0].scroll_row == 1,
+			"let go over it, the down arrow steps scroll_row +1");
+	// Held, drifted onto the row strip and let go there: the arrow keeps the
+	// sample (never a row pick) and steps nothing.
+	c.pump_popup_mouse(state, 1, 90.0f, 90.0f, true, 1.0f, 1.0f);
+	claim = c.pump_popup_mouse(state, 1, 50.0f, 55.0f, true, 1.0f, 1.0f);
 	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed,
-			"the latched popup arrow keeps the mouse without repeating");
-	c.pump_mouse(state, 50.0f, 55.0f, false, 1.0f, 1.0f);
+			"the held arrow keeps the sample without repeating");
+	claim = c.pump_popup_mouse(state, 1, 50.0f, 55.0f, false, 1.0f, 1.0f);
+	CHECK(!claim.scroll_value_changed && state.widgets[0].scroll_row == 1,
+			"let go off the arrow: no step");
 
-	// Up arrow steps back.
-	claim = c.pump_mouse(state, 90.0f, 30.0f, true, 1.0f, 1.0f);
+	// Up arrow steps back on its click.
+	c.pump_popup_mouse(state, 1, 90.0f, 30.0f, true, 1.0f, 1.0f);
+	claim = c.pump_popup_mouse(state, 1, 90.0f, 30.0f, false, 1.0f, 1.0f);
 	CHECK(claim.scroll_value_changed && claim.scroll_value == 0 &&
 					state.widgets[0].scroll_row == 0,
-			"the popup up arrow steps scroll_row -1");
-	c.pump_mouse(state, 90.0f, 30.0f, false, 1.0f, 1.0f);
+			"the up arrow steps scroll_row -1 on its click");
 
 	// Shuttle drag: at scroll_row 0 the 26px shuttle tops the track (y 40).
 	// Capture there, drag past the track end: the ratio lands the max row.
-	claim = c.pump_mouse(state, 90.0f, 50.0f, true, 1.0f, 1.0f);
+	claim = c.pump_popup_mouse(state, 1, 90.0f, 50.0f, true, 1.0f, 1.0f);
 	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed,
-			"the popup shuttle press captures without a value step");
-	claim = c.pump_mouse(state, 90.0f, 100.0f, true, 1.0f, 1.0f);
+			"the shuttle press captures without a value step");
+	claim = c.pump_popup_mouse(state, 1, 90.0f, 100.0f, true, 1.0f, 1.0f);
 	CHECK(claim.scroll_value_changed && claim.scroll_value == 2 &&
 					state.widgets[0].scroll_row == 2,
-			"the captured popup drag lands the clamped last first-row");
-	c.pump_mouse(state, 90.0f, 100.0f, false, 1.0f, 1.0f);
+			"the captured drag lands the clamped last first-row");
+	c.pump_popup_mouse(state, 1, 90.0f, 100.0f, false, 1.0f, 1.0f);
 
-	// The popup-exclusive entry: restricted to the open combo, it claims the
-	// scrollbar parts and nothing else — a press on the row strip flows back
-	// to the caller's row picking, and other widgets can never claim.
-	state.widgets[0].scroll_row = 0;
-	claim = c.pump_popup_mouse(state, 1, 90.0f, 90.0f, true, 1.0f, 1.0f);
+	// The track above the shuttle (row 2: the shuttle 54..80) pages back on
+	// the press and holds nothing: the next held sample is the rows'.
+	claim = c.pump_popup_mouse(state, 1, 90.0f, 45.0f, true, 1.0f, 1.0f);
 	CHECK(claim.scroll_index == 1 && claim.scroll_value_changed &&
-					claim.scroll_value == 1 && state.widgets[0].scroll_row == 1,
-			"pump_popup_mouse steps the popup down arrow");
-	c.pump_popup_mouse(state, 1, 90.0f, 90.0f, false, 1.0f, 1.0f);
+					state.widgets[0].scroll_row == 0,
+			"the track pages -3 on its press");
+	claim = c.pump_popup_mouse(state, 1, 50.0f, 55.0f, true, 1.0f, 1.0f);
+	CHECK(claim.scroll_index == -1, "the track holds nothing");
+	c.pump_popup_mouse(state, 1, 50.0f, 55.0f, false, 1.0f, 1.0f);
+
+	// A press on the row strip flows back to the caller's row picking.
 	claim = c.pump_popup_mouse(state, 1, 50.0f, 55.0f, true, 1.0f, 1.0f);
 	CHECK(claim.scroll_index == -1,
 			"a row-strip press flows past the popup pump to row picking");
 	c.pump_popup_mouse(state, 1, 50.0f, 55.0f, false, 1.0f, 1.0f);
 
-	// A CLOSED combo exposes no scroll parts to the pump.
+	// A CLOSED combo exposes no scrollbar to the pump.
 	state.widgets[0].popup_open = false;
-	CHECK(c.scroll_owner_at(state, 90.0f, 90.0f, 1.0f, 1.0f) == -1,
-			"a closed combo's popup scrollbar is not claimable");
 	claim = c.pump_popup_mouse(state, 1, 90.0f, 90.0f, true, 1.0f, 1.0f);
 	CHECK(claim.scroll_index == -1,
 			"the popup pump refuses a closed combo's scrollbar strip");
 	c.pump_popup_mouse(state, 1, 90.0f, 90.0f, false, 1.0f, 1.0f);
+	CHECK(c.pump_mouse(state, 90.0f, 90.0f, false, 1.0f, 1.0f).scroll_owner == -1,
+			"nor the main pump");
 }
 
 // Wheel ticks (D-MNU-18, deliberate divergence — retail ships no functioning
@@ -2382,7 +2640,7 @@ void test_wheel_ticks_scroll_popup_and_row_owners(const fnt_font_t *font) {
       </ITEMS>
       <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
     </WINDOW>
-    <WINDOW type="combo" name="COMBO">
+    <WINDOW type="combobox" name="COMBO">
       <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>
       <ITEMS>
         <ITEM type="ID" value="0">ZERO</ITEM><ITEM type="ID" value="1">ONE</ITEM>
@@ -2399,7 +2657,7 @@ void test_wheel_ticks_scroll_popup_and_row_owners(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuFrameState state;
 
 	// The 4-row list shows 2 rows: wheel over it scrolls, clamped 0..2.
@@ -2464,7 +2722,7 @@ void test_degenerate_list_draws_no_dead_scrollbar(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuFrameState state;
 	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
 	bool shuttle_drawn = false;
@@ -2475,14 +2733,228 @@ void test_degenerate_list_draws_no_dead_scrollbar(const fnt_font_t *font) {
 	}
 	CHECK(!shuttle_drawn,
 			"the one-visible-row clamp hides the single-item scrollbar");
-	CHECK(c.scroll_owner_at(state, 290.0f, 105.0f, 1.0f, 1.0f) == -1,
+	CHECK(c.pump_mouse(state, 290.0f, 105.0f, false, 1.0f, 1.0f).scroll_owner == -1,
 			"the interaction solve agrees with the draw gate");
 }
 
 } // namespace
 
+// Several root windows: the current screen's roots draw in document order [orig:
+// CUIScene_DrawScreensAndCursor @ 0x63bf60], the mouse pump runs them in reverse so the
+// last root wins a point it shares, and where the widget under the mouse has no cursor
+// the first root with one supplies it [orig: CUIScene_EndFrame @ 0x63e600].
+void test_multiple_roots(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>R</NAME>
+  <WINDOW type="window" name="A">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>400</RIGHT><BOTTOM>300</BOTTOM></POSITION>
+    <APPEARANCE type="color" state="default">111111</APPEARANCE>
+  </WINDOW>
+  <WINDOW type="window" name="B">
+    <POSITION><LEFT>200</LEFT><TOP>0</TOP><RIGHT>600</RIGHT><BOTTOM>300</BOTTOM></POSITION>
+    <APPEARANCE type="color" state="default">222222</APPEARANCE>
+    <CURSOR><FILE>b.tga</FILE></CURSOR>
+  </WINDOW>
+  <WINDOW type="window" name="C">
+    <POSITION><LEFT>700</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>100</BOTTOM></POSITION>
+    <APPEARANCE type="color" state="default">333333</APPEARANCE>
+    <CURSOR><FILE>c.tga</FILE></CURSOR>
+  </WINDOW>
+</SCREEN>
+)";
+	opennova::mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	configure_with(c, doc.first_screen(), font);
+	MenuFrameState st;
+	const MenuDrawList &dl = c.compile(st, 1.0f, 1.0f);
+	CHECK(dl.widgets_drawn == 3 && dl.quads.size() == 3, "every root draws");
+	CHECK(dl.quads.size() == 3 && (dl.quads[0].color & 0xFFFFFFu) == 0x111111u &&
+					(dl.quads[1].color & 0xFFFFFFu) == 0x222222u &&
+					(dl.quads[2].color & 0xFFFFFFu) == 0x333333u,
+			"the roots draw in document order");
+	CHECK(c.hit_widget(st, 300.0f, 100.0f, 1.0f, 1.0f) == 1,
+			"the later root wins the point both cover");
+	CHECK(c.hit_widget(st, 100.0f, 100.0f, 1.0f, 1.0f) == 0,
+			"the first root where it alone is");
+	const int32_t b = slot_of(c, "b.tga");
+	const int32_t cc = slot_of(c, "c.tga");
+	CHECK(b >= 0 && cc >= 0, "both cursors are interned");
+	// A cursor counts once its texture loaded [orig: CTextureManager_LoadOrFindTexture
+	// @ 0x654980 zeroes a failed load's handle].
+	c.set_texture_size(b, 16, 16);
+	c.set_texture_size(cc, 16, 16);
+	MenuFrameCompiler::MouseClaim claim =
+			c.pump_mouse(st, 100.0f, 100.0f, false, 1.0f, 1.0f);
+	CHECK(claim.hovered == 0 && claim.cursor == b,
+			"a root with no cursor shows the first root's that has one");
+	claim = c.pump_mouse(st, 750.0f, 50.0f, false, 1.0f, 1.0f);
+	CHECK(claim.hovered == 2 && claim.cursor == cc, "a root's own cursor");
+	claim = c.pump_mouse(st, 5000.0f, 5000.0f, false, 1.0f, 1.0f);
+	CHECK(claim.hovered == -1 && claim.cursor == b,
+			"off every root: the first root with a cursor");
+}
+
+// The cursor pass draws the cursor of the claim the pump stamped [orig:
+// CWnd_ProcessMouseEvent @ 0x647a00 stamps g_UIFrameCursorTexture @ 0x647b09;
+// CUIScene_DrawScreensAndCursor @ 0x63bf60 reads the stamp alone @ 0x63bfa2]; a
+// disabled window never takes the claim (the gate @ 0x647a27 comes first), so
+// it stamps nothing and the first root's cursor is drawn (D-MNU-33).
+// claim_at makes the pump's claim with nothing written (the editor's picture,
+// which never pumps), and frame_cursor names the window whose CURSOR is drawn.
+void test_cursor_follows_the_claim(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>P</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <APPEARANCE type="color" state="default">101010</APPEARANCE>
+    <CURSOR><FILE>a.tga</FILE></CURSOR>
+    <WINDOW type="button" name="OWN">
+      <POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>200</RIGHT><BOTTOM>140</BOTTOM></POSITION>
+      <APPEARANCE type="color" state="default">202020</APPEARANCE>
+      <CURSOR><FILE>b.tga</FILE></CURSOR>
+    </WINDOW>
+    <WINDOW type="button" name="PLAIN">
+      <POSITION><LEFT>300</LEFT><TOP>100</TOP><RIGHT>400</RIGHT><BOTTOM>140</BOTTOM></POSITION>
+      <APPEARANCE type="color" state="default">303030</APPEARANCE>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	opennova::mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	configure_with(c, doc.first_screen(), font);
+	const int32_t a = slot_of(c, "a.tga");
+	const int32_t b = slot_of(c, "b.tga");
+	CHECK(a >= 0 && b >= 0, "both cursors are interned");
+	c.set_texture_size(a, 32, 32);
+	c.set_texture_size(b, 16, 24);
+	const int own = c.widget_index("OWN");
+	const int plain = c.widget_index("PLAIN");
+	MenuFrameState st;
+	// The claim at a point, nothing written.
+	const MenuFrameCompiler::MouseClaim at = c.claim_at(st, 150.0f, 120.0f, 1.0f, 1.0f);
+	CHECK(at.hovered == own && at.cursor == b, "claim_at: the pump's claim and its cursor");
+	CHECK(st.cursor_claim == -1 && st.widgets.empty(), "claim_at writes nothing");
+	CHECK(c.claim_at(st, 300.0f, 240.0f, 2.0f, 2.0f).hovered == own, "claim_at scales like the pump");
+	// No claim stamped: the first root's; a claimant with none of its own: its root's.
+	MenuFrameCompiler::FrameCursor cursor = c.frame_cursor(st);
+	CHECK(cursor.owner == 0 && cursor.texture == a && cursor.width == 32 && cursor.height == 32,
+			"nothing claimed: the first root's cursor");
+	st.cursor_claim = plain;
+	cursor = c.frame_cursor(st);
+	CHECK(cursor.owner == 0 && cursor.texture == a, "a claimant with no cursor: its root's");
+	st.cursor_claim = own;
+	cursor = c.frame_cursor(st);
+	CHECK(cursor.owner == own && cursor.texture == b && cursor.width == 16 && cursor.height == 24,
+			"a claimant's own cursor");
+	// A disabled window: the pump stamps nothing (no window claims there, its
+	// parent kept off by its rect), and the pass draws the first root's cursor at
+	// the mouse, at its own size, unscaled.
+	st = MenuFrameState();
+	MenuWidgetState disabled;
+	disabled.index = own;
+	disabled.has_disabled = true;
+	disabled.disabled = true;
+	st.widgets.push_back(disabled);
+	const MenuFrameCompiler::MouseClaim pumped = c.pump_mouse(st, 300.0f, 240.0f, false, 2.0f, 2.0f);
+	CHECK(pumped.hovered == -1 && st.cursor_claim == -1 && !st.widgets[0].hovered &&
+					!st.widgets[0].pressed,
+			"a disabled window is never stamped, its visual state 1");
+	st.cursor_visible = true;
+	st.cursor_x = 300.0f;
+	st.cursor_y = 240.0f;
+	const MenuDrawList &dl = c.compile(st, 2.0f, 2.0f);
+	CHECK(!dl.quads.empty() && dl.quads.back().texture == a && dl.quads.back().x0 == 300.0f &&
+					dl.quads.back().x1 == 332.0f && dl.quads.back().y1 == 272.0f,
+			"the first root's cursor drawn last, unscaled");
+	// No CURSOR loads: no pointer at all [orig: @ 0x63bfa2].
+	c.set_texture_size(a, 0, 0);
+	c.set_texture_size(b, 0, 0);
+	CHECK(c.frame_cursor(st).owner == -1, "no cursor loaded: none");
+	const MenuDrawList &bare = c.compile(st, 2.0f, 2.0f);
+	bool drawn = false;
+	for (const MenuQuad &quad : bare.quads) {
+		drawn = drawn || quad.texture == a || quad.texture == b;
+	}
+	CHECK(!drawn, "nothing drawn for the pointer");
+}
+
+// A list's rows lay out by its ITEMS block's justification, CENTER and VCENTER
+// where it says none, an authored ITEM by its own over it; a numeric JUSTIFY
+// or VJUSTIFY is the text's offset, the justification kept; the draw's own
+// alignment moves a word of exactly 1 (CENTER, TOP) back by half the drawn
+// width, of exactly 2 (RIGHT, TOP) by all of it; a list's edge pad is 0, so its
+// shown scrollbar never shortens a row (D-MNU-34) [orig: CListWnd_Construct
+// @ 0x643c08 / 0x643c50; CListWnd_ParseXMLDefinition @ 0x6457ef..0x645907 and
+// @ 0x6459b2..0x645b62; list_insert_row @ 0x6450c8..0x6450e8;
+// CListWnd_DrawItems @ 0x6440f7..0x644345; CFontCache_DrawTextWithCursor
+// @ 0x65341f..0x653436].
+void test_list_rows_lay_out_by_the_items_justification(const fnt_font_t *font) {
+	// One list (100,100)-(300,140), rows 20 high; "OK" measures 17 wide, 16 high.
+	const auto glyphs = [&](const std::string &items, bool runtime) {
+		const std::string xml = R"(
+<SCREEN>
+  <NAME>L</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
+    <WINDOW type="list" name="LIST">
+      <POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>300</RIGHT><BOTTOM>140</BOTTOM></POSITION>
+      <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+)" + items + R"(
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+		opennova::mnu::Document doc = parse_or_die(xml.c_str());
+		MenuFrameCompiler c;
+		configure_with(c, doc.first_screen(), font);
+		MenuFrameState state;
+		if (runtime) {
+			MenuWidgetState rows;
+			rows.index = 1;
+			rows.has_items = true;
+			rows.items = { "OK", "OK" };
+			state.widgets.push_back(rows);
+		}
+		std::vector<std::pair<float, float>> out;
+		const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+		for (size_t i = 0; i + 1 < dl.glyphs.size(); i += 2) {
+			out.emplace_back(dl.glyphs[i].x_top_left, dl.glyphs[i].y_top);
+		}
+		return out;
+	};
+	// No ITEMS: a row the game adds centres both ways: x = (200>>1) - (17>>1)
+	// + 100 = 192, y = 100 + (20>>1) - (16>>1) = 102 (the drawer's -0.5).
+	auto rows = glyphs("", true);
+	CHECK(rows.size() == 2 && rows[0].first == 191.5f && rows[0].second == 101.5f &&
+					rows[1].second == 121.5f,
+			"a list with no ITEMS justification centres its rows");
+	// LEFT / CENTER, an ITEM RIGHT over it (word 0x12: no second move).
+	rows = glyphs(R"(<ITEMS justify="LEFT" vjustify="CENTER">
+        <ITEM value="0">OK</ITEM><ITEM value="1" justify="RIGHT">OK</ITEM></ITEMS>)",
+			false);
+	CHECK(rows.size() == 2 && rows[0].first == 99.5f && rows[0].second == 101.5f &&
+					rows[1].first == 282.5f,
+			"the ITEMS justification, an ITEM's own over it");
+	// CENTER / TOP: the word is 1, so the draw moves it back by half again.
+	rows = glyphs(R"(<ITEMS justify="CENTER" vjustify="TOP"></ITEMS>)", true);
+	CHECK(rows.size() == 2 && rows[0].first == 183.5f && rows[0].second == 99.5f,
+			"CENTER with TOP moves back by half the width twice");
+	// RIGHT / TOP: the word is 2, so the draw moves it back by the width again.
+	rows = glyphs(R"(<ITEMS justify="RIGHT" vjustify="TOP"></ITEMS>)", true);
+	CHECK(rows.size() == 2 && rows[0].first == 265.5f,
+			"RIGHT with TOP moves back by the width twice");
+	// Numeric tokens: the offsets, the justification kept (CENTER / VCENTER).
+	rows = glyphs(R"(<ITEMS justify="7" vjustify="3"></ITEMS>)", true);
+	CHECK(rows.size() == 2 && rows[0].first == 198.5f && rows[0].second == 104.5f,
+			"a numeric JUSTIFY / VJUSTIFY offsets the text");
+}
+
 int main() {
-	fnt_font_t font = minimal_fnt::uniform_test_font();
+	fnt_font_t font = test_font::uniform_test_font();
 	test_draw_order_and_state_selection(&font);
 	test_image_appearance_crops_authored_map_state(&font);
 	test_scroll_draws_authored_visual_parts(&font);
@@ -2493,10 +2965,14 @@ int main() {
 	test_table_visible_count_floors_to_one(&font);
 	test_table_rows_draw_row_state_not_widget_hover(&font);
 	test_text_placement_and_truncation(&font);
+	test_list_rows_lay_out_by_the_items_justification(&font);
+	test_text_inline_colour_tags(&font);
 	test_scale_truncation(&font);
+	test_frame_pieces_hang_in_device_floats(&font);
 	test_radio_checkbox_forcing(&font);
 	test_edit_caret(&font);
 	test_list_rows_and_item_cell(&font);
+	test_list_row_truncation(&font);
 	test_mouse_pump(&font);
 	test_table_interior(&font);
 	test_marquee_roll(&font);
@@ -2506,17 +2982,19 @@ int main() {
 	test_widget_queries(&font);
 	test_interaction_geometry(&font);
 	test_combo_face_and_outside_arrow_claim(&font);
-	test_hotkey_widget(&font);
+	test_label_mnemonic(&font);
 	test_multiline_wrap(&font);
 	test_draw_list_preserves_interleaved_primitive_order(&font);
 	test_scroll_interaction_hits_and_drag(&font);
-	test_scroll_pump_owns_press_capture_and_value(&font);
+	test_scrollbar_windows_take_the_game_s_rule(&font);
 	test_combo_popup_scrollbar_scrolls_through_pump(&font);
 	test_wheel_ticks_scroll_popup_and_row_owners(&font);
 	test_degenerate_list_draws_no_dead_scrollbar(&font);
 	test_table_embedded_scrollbar_scrolls_rows(&font);
 	test_combo_face_shows_list_box_selection(&font);
 	test_open_combo_popup_draws_over_later_widgets(&font);
+	test_multiple_roots(&font);
+	test_cursor_follows_the_claim(&font);
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

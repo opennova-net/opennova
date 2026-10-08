@@ -57,6 +57,11 @@ const char *sound_profile_slot_keyword(int slot) {
     return kSlotKeywords[slot];
 }
 
+const char *sound_profile_loop_keyword(int index) {
+    if (index < 0 || index >= kSoundProfileLoopParamCount) return nullptr;
+    return kLoopKeywords[index];
+}
+
 const char *body_model_prefix(int anim_slot) {
     // [orig: Entity_GetBodyModelPrefix @ 0x5280F0 — a null entity or a zero
     // +0x374 byte defaults to type 1; the switch maps the prefix strings
@@ -152,6 +157,104 @@ size_t SoundProfileTable::parse(const char *text, size_t len) {
     return entries_.size() - before;
 }
 
+namespace {
+
+// The shortest fixed-point decimal parse_q16 reads back as `value`. Sixteen
+// places always do: a Q16 word over 65536 is an exact 16-place decimal.
+std::string q16_text(int32_t value) {
+    char text[64];
+    for (int places = 0; places <= 16; ++places) {
+        std::snprintf(text, sizeof(text), "%.*f", places, value / 65536.0);
+        if (parse_q16(text) == value) break;
+    }
+    return text;
+}
+
+// A token's text in a line: quoted when the tokenizer would split or cut it
+// there (a space, tab or comma; a ';' or "//" comment), else as it is.
+std::string token_text(const std::string &value) {
+    const bool plain = value.find_first_of(" \t,;") == std::string::npos &&
+                       value.find("//") == std::string::npos;
+    return plain ? value : "\"" + value + "\"";
+}
+
+// Whether the walk can carry `value` as one token: a quote would end it, a
+// CR or LF the line.
+bool tokenizable(const std::string &value) {
+    return value.find_first_of("\"\r\n") == std::string::npos;
+}
+
+} // namespace
+
+bool write_sound_profiles(const std::vector<SoundProfile> &profiles, std::string &out,
+                          std::string &error) {
+    std::string text;
+    for (const SoundProfile &profile : profiles) {
+        const std::string named = "Sound profile \"" + profile.name + "\"";
+        if (profile.name.empty() || profile.name.size() >= 64 || !tokenizable(profile.name)) {
+            error = profile.name.empty() ? "A sound profile has no name."
+                                         : named + " cannot be written: a name holds at most 63 "
+                                                   "characters and no quote or line break.";
+            return false;
+        }
+        text += "begin \"" + profile.name + "\"\r\n";
+        for (int slot = 0; slot < kSoundProfileSlotCount; ++slot) {
+            const std::string &set = profile.set_names[slot];
+            const bool params = profile.param2_q16[slot] != 0 || profile.param3_q16[slot] != 0 ||
+                                profile.param4[slot] != 0;
+            if (set.empty() && !params) continue;
+            if (set.empty()) {
+                // No set, so no column 1 for the values to follow: a bare
+                // keyword line, whose column 2 reads "" (slots 0..2 reset each
+                // line) and whose columns 3 and 4 read the tokenizer's slots
+                // as the last longer line left them, pointing into the reused
+                // line buffer past the short line's terminator. A line whose
+                // first token starts with '/' is tokenized but never reaches
+                // the callback, so one just ahead, its slot-3 token past where
+                // the keyword line ends, carries the two values; shipped files
+                // hold such slots (JO's SP_FuelTruck enginehighrev)
+                // [orig: Terrain_TokenizeConfigLine @ 0x53cb71..0x53cb81;
+                // File_ParseASCIIFile, the '/' test @ 0x53d91e].
+                if (profile.param2_q16[slot] != 0) {
+                    error = named + " gives " + kSlotKeywords[slot] +
+                            " a column-2 value but no sound set: the file reads column 2 "
+                            "only after a set.";
+                    return false;
+                }
+                text += "/" + std::string(std::strlen(kSlotKeywords[slot]), '-') + " - - " +
+                        q16_text(profile.param3_q16[slot]) + " " +
+                        std::to_string(profile.param4[slot]) + "\r\n";
+                text += std::string("\t") + kSlotKeywords[slot] + "\r\n";
+                continue;
+            }
+            if (set.size() > 23 || !tokenizable(set)) {
+                error = named + "'s " + kSlotKeywords[slot] + " set \"" + set +
+                        "\" cannot be written: a set name holds at most 23 characters and no "
+                        "quote or line break.";
+                return false;
+            }
+            text += std::string("\t") + kSlotKeywords[slot] + " " + token_text(set) + " " +
+                    q16_text(profile.param2_q16[slot]) + " " +
+                    q16_text(profile.param3_q16[slot]) + " " +
+                    std::to_string(profile.param4[slot]) + "\r\n";
+        }
+        for (int i = 0; i < 12; ++i) {
+            const int32_t value = profile.loop_params[i];
+            if (value == 0) continue;
+            const std::string percent = std::to_string(value / 655);
+            if (value % 655 != 0 || parse_pct(percent.c_str()) != value) {
+                error = named + "'s " + kLoopKeywords[i] +
+                        " is no whole percent: the file stores a percent times 655.";
+                return false;
+            }
+            text += std::string("\t") + kLoopKeywords[i] + " " + percent + "\r\n";
+        }
+        text += "end\r\n";
+    }
+    out = std::move(text);
+    return true;
+}
+
 const SoundProfile *SoundProfileTable::find(const char *name) const {
     const int i = index_of(name);
     return i < 0 ? nullptr : &entries_[static_cast<size_t>(i)];
@@ -167,6 +270,14 @@ int SoundProfileTable::index_of(const char *name) const {
     // Miss -> the first profile [orig: SoundProfile_FindSlotByName @ 0x526e30
     // returns the array base when no name matches].
     return 0;
+}
+
+const SoundProfile *item_sound_profile(const std::vector<SoundProfile> &profiles, const char *authored) {
+    if (profiles.empty()) return nullptr;
+    const char *name = authored != nullptr && authored[0] != '\0' ? authored : "default";
+    for (const SoundProfile &profile : profiles)
+        if (strutil::iequals(profile.name, name)) return &profile;
+    return &profiles.front();
 }
 
 } // namespace opennova::audio

@@ -43,18 +43,6 @@ namespace {
 
 using opennova::renderer::TracerShader;
 
-// The normal-pass materials (godot/shaders/tracer_ribbon_*.gdshader).
-const char *ribbon_shader_path(TracerShader p_shader) {
-	switch (p_shader) {
-		case TracerShader::Smoke:
-			return "res://shaders/tracer_ribbon_smoke.gdshader";
-		case TracerShader::NvgLaser:
-			return "res://shaders/tracer_ribbon_nvg.gdshader";
-		default:
-			return "res://shaders/tracer_ribbon_stock.gdshader";
-	}
-}
-
 } // namespace
 
 FirePresenter::FirePresenter(EntityPresenter *p_owner) :
@@ -109,14 +97,7 @@ void FirePresenter::setup(Simulation *p_sim, Node3D *p_container, MissionAudio *
 	fx_id_ = p_fx != nullptr ? p_fx->get_instance_id() : ObjectID();
 	lights_id_ = p_lights != nullptr ? p_lights->get_instance_id() : ObjectID();
 	environment_id_ = p_environment != nullptr ? p_environment->get_instance_id() : ObjectID();
-	if (resource_root_ != p_resource_root) {
-		resource_root_ = p_resource_root;
-		smoke_texture_.unref();
-		smoke_texture_loaded_ = false;
-		for (Ref<ShaderMaterial> &material : materials_) {
-			material.unref();
-		}
-	}
+	ribbons_.set_resource_root(p_resource_root);
 	// A re-setup replaces the previous tracer geometry instead of stranding it.
 	free_mesh_instance();
 	if (p_container != nullptr) {
@@ -128,40 +109,6 @@ void FirePresenter::setup(Simulation *p_sim, Node3D *p_container, MissionAudio *
 		p_container->add_child(instance);
 		mesh_instance_id_ = instance->get_instance_id();
 	}
-}
-
-// smoktest.pcx, the pool's one texture, with its palette-luminance alpha
-// [orig: CEffectEmitterPool_CreateShaders @ 0x5DC8F0 ->
-// Texture_LoadFromArchive("smoktest.pcx", "smoktest.pcx") @ 0x58B980].
-Ref<Texture2D> FirePresenter::smoke_texture() {
-	if (smoke_texture_loaded_ || resource_root_.is_null()) {
-		return smoke_texture_;
-	}
-	smoke_texture_loaded_ = true;
-	smoke_texture_ = resource_root_->load_texture("smoktest.pcx",
-			ResourceRoot::TEXTURE_LOADER_ARCHIVE_SELF_ALPHA);
-	return smoke_texture_;
-}
-
-Ref<ShaderMaterial> FirePresenter::ribbon_material(TracerShader p_shader, bool p_fog_black) {
-	const std::size_t slot = static_cast<std::size_t>(p_shader) * 2u + (p_fog_black ? 1u : 0u);
-	if (slot >= materials_.size()) {
-		return Ref<ShaderMaterial>();
-	}
-	Ref<ShaderMaterial> &material = materials_[slot];
-	if (material.is_null()) {
-		Ref<Shader> shader = ResourceLoader::get_singleton()->load(ribbon_shader_path(p_shader));
-		if (shader.is_null()) {
-			return Ref<ShaderMaterial>();
-		}
-		material.instantiate();
-		material->set_shader(shader);
-		material->set_shader_parameter("fog_black", p_fog_black);
-		if (p_shader != TracerShader::Stock) {
-			material->set_shader_parameter("smoke_tex", smoke_texture());
-		}
-	}
-	return material;
 }
 
 void FirePresenter::teardown() {
@@ -381,66 +328,7 @@ void FirePresenter::draw_tracer_rows(const PackedFloat32Array &p_rows) {
 	stat_tracer_peak_ = MAX(stat_tracer_peak_, static_cast<int64_t>(frame_.channels));
 	const MissionEnvironment *env = environment();
 	const int rung = opennova::renderer::tracer_rung(env == nullptr || !env->is_underwater_view());
-	std::size_t run_start = 0;
-	for (std::size_t d = 1; d <= frame_.draws.size(); ++d) {
-		if (d < frame_.draws.size() && frame_.draws[d].shader == frame_.draws[run_start].shader &&
-				frame_.draws[d].fog_black == frame_.draws[run_start].fog_black) {
-			continue;
-		}
-		emit_surface(frame_, run_start, d, rung);
-		run_start = d;
-	}
-}
-
-// One run of consecutive same-material draws as one indexed surface. The
-// draws' vertices are contiguous, so the run re-bases its indices on its first
-// vertex.
-void FirePresenter::emit_surface(const opennova::renderer::TracerRibbonFrame &p_frame,
-		std::size_t p_first_draw, std::size_t p_end_draw, int p_rung) {
-	if (p_first_draw >= p_end_draw) {
-		return;
-	}
-	const opennova::renderer::TracerDraw &first = p_frame.draws[p_first_draw];
-	const opennova::renderer::TracerDraw &last = p_frame.draws[p_end_draw - 1];
-	const Ref<ShaderMaterial> material = ribbon_material(first.shader, first.fog_black);
-	if (material.is_null()) {
-		return;
-	}
-	material->set_render_priority(p_rung);
-	const std::uint32_t base = first.first_vertex;
-	const std::uint32_t vertex_end = last.first_vertex + last.vertex_count;
-	const int64_t vertex_count = static_cast<int64_t>(vertex_end - base);
-	const std::uint32_t index_end = last.first_index + last.index_count;
-	PackedVector3Array positions;
-	PackedColorArray colors;
-	PackedVector2Array uv0;
-	PackedVector2Array uv1;
-	PackedInt32Array indices;
-	positions.resize(vertex_count);
-	colors.resize(vertex_count);
-	uv0.resize(vertex_count);
-	uv1.resize(vertex_count);
-	indices.resize(static_cast<int64_t>(index_end - first.first_index));
-	for (int64_t v = 0; v < vertex_count; ++v) {
-		const opennova::renderer::TracerVertex &src = p_frame.vertices[base + v];
-		positions.set(v, Vector3(src.x, src.y, src.z));
-		colors.set(v, opennova::color_from_argb(src.argb));
-		uv0.set(v, Vector2(src.u0, src.v0));
-		uv1.set(v, Vector2(src.u1, src.v1));
-	}
-	for (std::uint32_t k = first.first_index; k < index_end; ++k) {
-		indices.set(static_cast<int64_t>(k - first.first_index),
-				static_cast<int32_t>(p_frame.indices[k] - base));
-	}
-	Array arrays;
-	arrays.resize(Mesh::ARRAY_MAX);
-	arrays[Mesh::ARRAY_VERTEX] = positions;
-	arrays[Mesh::ARRAY_COLOR] = colors;
-	arrays[Mesh::ARRAY_TEX_UV] = uv0;
-	arrays[Mesh::ARRAY_TEX_UV2] = uv1;
-	arrays[Mesh::ARRAY_INDEX] = indices;
-	mesh_->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
-	mesh_->surface_set_material(mesh_->get_surface_count() - 1, material);
+	ribbons_.emit(frame_, mesh_, rung);
 }
 
 // retail Render_NVGLaserBeamsForVisiblePersons @ 0x5c63b0 walks the frame's visible persons (the drawn
@@ -526,7 +414,10 @@ int FirePresenter::append_nvg_laser_beams(const std::vector<NvgLaserSource> &p_s
 		opennova::renderer::append_tracer_beam(points, count,
 				opennova::world::kNvgLaserTracerStyle, view, laser_frame_);
 		opennova::renderer::append_nvg_laser_overlay(laser_frame_,
-				r_submission.texture_index(smoke_texture()), p_view.fog, r_submission.frame,
+				r_submission.texture_index(ribbons_.smoke_texture(),
+						opennova::renderer::texture_stage_flags(
+								opennova::renderer::TextureStage::TracerSmoke)),
+				p_view.fog, r_submission.frame,
 				p_view.inset_view ? opennova::renderer::SceneOverlaySlot::InsetNvgLaserBeams
 								  : opennova::renderer::SceneOverlaySlot::NvgLaserBeams);
 		++drawn;
@@ -543,7 +434,7 @@ void FirePresenter::warm_pipelines(const Vector3 &p_position) {
 	const std::pair<TracerShader, bool> materials[] = {{TracerShader::Stock, true},
 			{TracerShader::Smoke, false}, {TracerShader::NvgLaser, true}};
 	for (const std::pair<TracerShader, bool> &entry : materials) {
-		const Ref<ShaderMaterial> material = ribbon_material(entry.first, entry.second);
+		const Ref<ShaderMaterial> material = ribbons_.material(entry.first, entry.second);
 		if (material.is_null()) {
 			continue;
 		}

@@ -2,8 +2,12 @@ class_name PlayerOptions
 extends RefCounted
 
 ## Process-lifetime owner for the player-facing options shared by the front-end
-## and pause menus. Values are normalized at the boundary, saved together, and
-## applied through one runtime seam so neither menu needs its own settings copy.
+## and pause menus (retail's game.cfg words). Values are normalized at the
+## boundary, saved together, and applied through one runtime seam so neither
+## menu needs its own settings copy. The controls words (the mouse, the
+## joystick, auto-reload, auto-medic) and the key bindings are the player
+## profile's instead: the Options screens edit the current player.sav record
+## (engine menu::OptionsScreen over runtime/profile/profile_controls.h).
 
 const CONFIG_PATH := "user://opennova.cfg"
 
@@ -11,10 +15,6 @@ const AUDIO_SECTION := "audio"
 const SOUND_FX_VOLUME_KEY := "sound_fx_volume"
 const DIALOG_VOLUME_KEY := "dialog_volume"
 const MUSIC_VOLUME_KEY := "music_volume"
-
-const CONTROLS_SECTION := "controls"
-const MOUSE_SENSITIVITY_KEY := "mouse_sensitivity"
-const INVERT_MOUSE_KEY := "invert_mouse"
 
 const PLAYER_SECTION := "player"
 const CROSSHAIR_STYLE_KEY := "crosshair_style"
@@ -27,16 +27,36 @@ const ASPECT_MODE_KEY := "display_16x9"
 const KEYBOARD_TIPS_KEY := "enable_keyboardtips"
 const GAMEPLAY_TIPS_KEY := "enable_gameplaytips"
 
+# The object detail persists as retail's game.cfg word `object_polydetail`
+# (0..3), which the Options rows OBJECTPOLY / OBJECTDETAIL edit and the world
+# copies at each mission start (engine renderer/object_lod.h carries the
+# witness; GameWorld re-exports the fresh profile's word and the load clamp).
+const DISPLAY_SECTION := "display"
+const OBJECT_POLYDETAIL_KEY := "object_polydetail"
+# The texture filter persists as retail's game.cfg word `texfilter_level`
+# (0..3), which the front-end Options row TEXFILTER edits; the model effects
+# follow it at once and the terrain's device filter at the next mission start
+# (engine renderer/texture_filter.h; GameWorld re-exports the fresh profile's
+# word and the load clamp).
+const TEXFILTER_LEVEL_KEY := "texfilter_level"
+# The particle density persists as retail's game.cfg word `particle_density`
+# (0..2), which the Options rows PARTICLES (front end and in game) edit, and
+# the texture compression as `texcompression_level` (0..2 on the row, never
+# clamped by the load), which the front-end row TEXCOMPRESSION edits; the
+# world copies both at each mission start (engine renderer/particle_density.h,
+# renderer/texture_compression.h; GameWorld re-exports the fresh profiles'
+# words and the density's load clamp).
+const PARTICLE_DENSITY_KEY := "particle_density"
+const TEXCOMPRESSION_LEVEL_KEY := "texcompression_level"
+
 # The slider ranges are the engine's witnessed Options ranges
 # (options_policy.h kOptionsScrollRanges through MenuFrame), read by control
 # name so the clamp can never drift from what the sliders seed.
 const SOUND_FX_VOLUME_CONTROL := "SOUNDFXVOLUME"
 const DIALOG_VOLUME_CONTROL := "DIALOGVOLUME"
 const MUSIC_VOLUME_CONTROL := "MUSICVOLUME"
-const MOUSE_SENSITIVITY_CONTROL := "MOUSE_SENSITIVITY"
 # Initial channel volumes come from the engine configuration defaults.
 const DEFAULT_VOLUME := SoundSelector.DEFAULT_CHANNEL_VOLUME
-const DEFAULT_MOUSE_SENSITIVITY := 128
 # One home for the crosshair art range, colour default / mask and spread
 # default: the native HudOverlay binding over the engine's HudLayout
 # (Config_SetDefaults @0x54d461 / @0x54d472 via hud_frame.h).
@@ -64,43 +84,49 @@ class State extends RefCounted:
 	var sound_fx_volume: int
 	var dialog_volume: int
 	var music_volume: int
-	var mouse_sensitivity: int
-	var invert_mouse: bool
 	var crosshair_style: int
 	var crosshair_color: int
 	var crosshair_spread: bool
 	var aspect_mode: int
 	var keyboard_tips: bool
 	var gameplay_tips: bool
+	var object_polydetail: int
+	var texfilter_level: int
+	var particle_density: int
+	var texcompression_level: int
 
 	func _init(p_sound_fx_volume := DEFAULT_VOLUME,
 			p_dialog_volume := DEFAULT_VOLUME,
 			p_music_volume := DEFAULT_VOLUME,
-			p_mouse_sensitivity := DEFAULT_MOUSE_SENSITIVITY,
-			p_invert_mouse := false,
 			p_crosshair_style := DEFAULT_CROSSHAIR_STYLE,
 			p_crosshair_color := DEFAULT_CROSSHAIR_COLOR,
 			p_crosshair_spread := DEFAULT_CROSSHAIR_SPREAD,
 			p_aspect_mode := DEFAULT_ASPECT_MODE,
 			p_keyboard_tips := true,
-			p_gameplay_tips := true) -> void:
+			p_gameplay_tips := true,
+			p_object_polydetail := GameWorld.object_detail_fresh_profile(),
+			p_texfilter_level := GameWorld.texfilter_level_fresh_profile(),
+			p_particle_density := GameWorld.particle_density_fresh_profile(),
+			p_texcompression_level := GameWorld.texcompression_level_fresh_profile()) -> void:
 		sound_fx_volume = p_sound_fx_volume
 		dialog_volume = p_dialog_volume
 		music_volume = p_music_volume
-		mouse_sensitivity = p_mouse_sensitivity
-		invert_mouse = p_invert_mouse
 		crosshair_style = p_crosshair_style
 		crosshair_color = p_crosshair_color
 		crosshair_spread = p_crosshair_spread
 		aspect_mode = p_aspect_mode
 		keyboard_tips = p_keyboard_tips
 		gameplay_tips = p_gameplay_tips
+		object_polydetail = p_object_polydetail
+		texfilter_level = p_texfilter_level
+		particle_density = p_particle_density
+		texcompression_level = p_texcompression_level
 
 	func copy() -> State:
-		return State.new(sound_fx_volume, dialog_volume, music_volume,
-				mouse_sensitivity, invert_mouse, crosshair_style,
+		return State.new(sound_fx_volume, dialog_volume, music_volume, crosshair_style,
 				crosshair_color, crosshair_spread, aspect_mode,
-				keyboard_tips, gameplay_tips)
+				keyboard_tips, gameplay_tips, object_polydetail, texfilter_level,
+				particle_density, texcompression_level)
 
 
 signal changed(state: State)
@@ -133,10 +159,6 @@ func update(state: State) -> void:
 				_state.dialog_volume)
 		config.set_value(AUDIO_SECTION, MUSIC_VOLUME_KEY,
 				_state.music_volume)
-		config.set_value(CONTROLS_SECTION, MOUSE_SENSITIVITY_KEY,
-				_state.mouse_sensitivity)
-		config.set_value(CONTROLS_SECTION, INVERT_MOUSE_KEY,
-				_state.invert_mouse)
 		config.set_value(PLAYER_SECTION, CROSSHAIR_STYLE_KEY,
 				_state.crosshair_style)
 		config.set_value(PLAYER_SECTION, CROSSHAIR_COLOR_KEY,
@@ -146,28 +168,32 @@ func update(state: State) -> void:
 		config.set_value(PLAYER_SECTION, ASPECT_MODE_KEY, _state.aspect_mode)
 		config.set_value(PLAYER_SECTION, KEYBOARD_TIPS_KEY, 1 if _state.keyboard_tips else 0)
 		config.set_value(PLAYER_SECTION, GAMEPLAY_TIPS_KEY, 1 if _state.gameplay_tips else 0)
+		config.set_value(DISPLAY_SECTION, OBJECT_POLYDETAIL_KEY, _state.object_polydetail)
+		config.set_value(DISPLAY_SECTION, TEXFILTER_LEVEL_KEY, _state.texfilter_level)
+		config.set_value(DISPLAY_SECTION, PARTICLE_DENSITY_KEY, _state.particle_density)
+		config.set_value(DISPLAY_SECTION, TEXCOMPRESSION_LEVEL_KEY, _state.texcompression_level)
 	)
 	apply()
 	changed.emit(current())
 
 
-## Apply device-global audio and, when present, the live local-player mouse
+## Apply device-global audio and, when present, the live local-player view
 ## settings. A newly constructed Simulation is passed here at world-load time.
+## The mouse words are the player profile's, which the mission start's session
+## copy hands the Simulation itself (Simulation.use_player_profile).
 func apply(simulation: Simulation = null) -> void:
 	for bus_name: StringName in SOUND_FX_BUSES:
 		_set_bus_volume(bus_name, _state.sound_fx_volume)
 	_set_bus_volume(DIALOG_BUS, _state.dialog_volume)
 	_set_bus_volume(MUSIC_BUS, _state.music_volume)
-	apply_mouse(simulation)
+	apply_view(simulation)
 
 
-## The live local-player mouse settings alone — what a `changed` listener
+## The live local-player view settings alone — what a `changed` listener
 ## with a running Simulation pushes (update() already applied the audio).
-func apply_mouse(simulation: Simulation) -> void:
+func apply_view(simulation: Simulation) -> void:
 	if simulation != null:
 		simulation.set_local_player_aspect_mode(_state.aspect_mode)
-		simulation.set_local_player_mouse(
-				_state.mouse_sensitivity, _state.invert_mouse)
 
 
 ## The aspect mode a fresh profile seeds. Retail's first launch runs the video
@@ -192,10 +218,6 @@ func _load_state() -> State:
 					DIALOG_VOLUME_KEY, DEFAULT_VOLUME)),
 			int(ConfigStore.read(CONFIG_PATH, AUDIO_SECTION,
 					MUSIC_VOLUME_KEY, DEFAULT_VOLUME)),
-			int(ConfigStore.read(CONFIG_PATH, CONTROLS_SECTION,
-					MOUSE_SENSITIVITY_KEY, DEFAULT_MOUSE_SENSITIVITY)),
-			bool(ConfigStore.read(CONFIG_PATH, CONTROLS_SECTION,
-					INVERT_MOUSE_KEY, false)),
 			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION,
 					CROSSHAIR_STYLE_KEY, DEFAULT_CROSSHAIR_STYLE)),
 			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION,
@@ -204,7 +226,58 @@ func _load_state() -> State:
 					CROSSHAIR_SPREAD_KEY, DEFAULT_CROSSHAIR_SPREAD)),
 			_load_aspect_mode(),
 			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION, KEYBOARD_TIPS_KEY, 1)) != 0,
-			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION, GAMEPLAY_TIPS_KEY, 1)) != 0))
+			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION, GAMEPLAY_TIPS_KEY, 1)) != 0,
+			_load_object_polydetail(),
+			_load_texfilter_level(),
+			_load_particle_density(),
+			_load_texcompression_level()))
+
+
+# The persisted object detail, clamped as the config load clamps it, or the
+# fresh profile's word, written at once as the aspect seed is.
+static func _load_object_polydetail() -> int:
+	if ConfigStore.has_key(CONFIG_PATH, DISPLAY_SECTION, OBJECT_POLYDETAIL_KEY):
+		return GameWorld.clamp_object_detail(int(ConfigStore.read(CONFIG_PATH,
+				DISPLAY_SECTION, OBJECT_POLYDETAIL_KEY,
+				GameWorld.object_detail_fresh_profile())))
+	var seeded := GameWorld.object_detail_fresh_profile()
+	ConfigStore.write(CONFIG_PATH, DISPLAY_SECTION, OBJECT_POLYDETAIL_KEY, seeded)
+	return seeded
+
+
+# The persisted texture filter, clamped as the config load clamps it, or the
+# fresh profile's word, written at once as the video test saves it.
+static func _load_texfilter_level() -> int:
+	if ConfigStore.has_key(CONFIG_PATH, DISPLAY_SECTION, TEXFILTER_LEVEL_KEY):
+		return GameWorld.clamp_texfilter_level(int(ConfigStore.read(CONFIG_PATH,
+				DISPLAY_SECTION, TEXFILTER_LEVEL_KEY,
+				GameWorld.texfilter_level_fresh_profile())))
+	var seeded := GameWorld.texfilter_level_fresh_profile()
+	ConfigStore.write(CONFIG_PATH, DISPLAY_SECTION, TEXFILTER_LEVEL_KEY, seeded)
+	return seeded
+
+
+# The persisted particle density, clamped as the config load clamps it, or the
+# fresh profile's word, written at once as the video test saves it.
+static func _load_particle_density() -> int:
+	if ConfigStore.has_key(CONFIG_PATH, DISPLAY_SECTION, PARTICLE_DENSITY_KEY):
+		return GameWorld.clamp_particle_density(int(ConfigStore.read(CONFIG_PATH,
+				DISPLAY_SECTION, PARTICLE_DENSITY_KEY,
+				GameWorld.particle_density_fresh_profile())))
+	var seeded := GameWorld.particle_density_fresh_profile()
+	ConfigStore.write(CONFIG_PATH, DISPLAY_SECTION, PARTICLE_DENSITY_KEY, seeded)
+	return seeded
+
+
+# The persisted texture compression as written (the config load never clamps
+# it), or the fresh profile's word, written at once as the video test saves it.
+static func _load_texcompression_level() -> int:
+	if ConfigStore.has_key(CONFIG_PATH, DISPLAY_SECTION, TEXCOMPRESSION_LEVEL_KEY):
+		return int(ConfigStore.read(CONFIG_PATH, DISPLAY_SECTION,
+				TEXCOMPRESSION_LEVEL_KEY, GameWorld.texcompression_level_fresh_profile()))
+	var seeded := GameWorld.texcompression_level_fresh_profile()
+	ConfigStore.write(CONFIG_PATH, DISPLAY_SECTION, TEXCOMPRESSION_LEVEL_KEY, seeded)
+	return seeded
 
 
 # The persisted cfg word, or the one-time desktop seed a fresh profile writes
@@ -225,13 +298,15 @@ static func _normalized(state: State) -> State:
 			_clamp_to_control(state.sound_fx_volume, SOUND_FX_VOLUME_CONTROL),
 			_clamp_to_control(state.dialog_volume, DIALOG_VOLUME_CONTROL),
 			_clamp_to_control(state.music_volume, MUSIC_VOLUME_CONTROL),
-			_clamp_to_control(state.mouse_sensitivity, MOUSE_SENSITIVITY_CONTROL),
-			state.invert_mouse,
 			clampi(state.crosshair_style,
 					MIN_CROSSHAIR_STYLE, MAX_CROSSHAIR_STYLE),
 			state.crosshair_color & CROSSHAIR_COLOR_MASK,
 			state.crosshair_spread, state.aspect_mode,
-			state.keyboard_tips, state.gameplay_tips)
+			state.keyboard_tips, state.gameplay_tips,
+			GameWorld.clamp_object_detail(state.object_polydetail),
+			GameWorld.clamp_texfilter_level(state.texfilter_level),
+			GameWorld.clamp_particle_density(state.particle_density),
+			state.texcompression_level)
 
 
 # Clamp to the engine's witnessed range for an Options slider, by control

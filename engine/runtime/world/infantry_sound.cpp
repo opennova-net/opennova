@@ -67,7 +67,7 @@ void AiSystem::emit_slot_sound(World &world, const AiEntity &e, int slot, const 
     const audio::SoundProfile *p =
         (profile_index >= 0 && static_cast<size_t>(profile_index) < entries.size())
             ? &entries[profile_index]
-            : world.tables.sound_profiles.find("default");
+            : audio::item_sound_profile(entries, nullptr);
     if (p == nullptr) return;
     const std::string &set = p->set_names[slot];
     if (set.empty()) return; // the resolved-id-0 no-op [orig: table[slot] == 0]
@@ -85,45 +85,54 @@ void AiSystem::infantry_anim_sound_pass(AiEntity &e, World &world, uint32_t logi
                                         int32_t capsule_bottom) {
     InfantryState &inf = e.inf;
     // Opposite tick halves: the NPC updater consumes on ODD ticks, the player
-    // body on EVEN [orig: org1 `and eax,1; jz skip` @0x4bf144-0x4bf156; org2
-    // `test current_tick,1; jnz skip` @0x4b76e6 (var = current_tick @0x4b4147)].
-    if (inf.is_local_player ? ((logic_tick & 1u) != 0) : ((logic_tick & 1u) == 0)) return;
+    // body on EVEN (anim_sound_tick, witnessed at its declaration).
+    if (!anim_sound_tick(logic_tick, inf.is_local_player)) return;
     const uint32_t ev = inf.last_events;
     if (ev == 0) return; // [orig: org1 whole-block skip @0x4bf161-0x4bf163]
 
-    // The six anim-driven foley sounds, bit order 0x20..0x400 -> SSAudio1..6
-    // (JO persons author prone rolls, swim strokes, gear rustle here), at the
-    // entity origin [orig: org1 @0x4bf169-0x4bf23e; org2 @0x4b76f1-0x4b77c6].
-    for (int i = 0; i < anim::kAnimEventFoleyCount; ++i) {
-        if ((ev & (anim::kAnimEventFoley1 << i)) != 0)
-            emit_slot_sound(world, e, audio::kSlotAudio1 + i, e.pos);
-    }
-
-    // Footsteps: bit 0x1 = left, 0x2 = right. The sound fires at FOOT level —
-    // pos.z dipped by the root-motion frame's capsule bottom (the same value
-    // the collision capsule uses; the original subtracts it in place, plays,
-    // and restores) — and the slot picks by, in order: feet under the water
-    // plane -> standing on an entity -> terrain surface 3 (snow) -> ground.
-    // [orig: org1 @0x4bf23e-0x4bf2b0; org2 @0x4b77c6-0x4b78a8; the dip slot is
+    // The six anim-driven foley sounds (JO persons author prone rolls, swim
+    // strokes, gear rustle here) at the entity origin, then the footsteps at
+    // FOOT level — pos.z dipped by the root-motion frame's capsule bottom (the
+    // same value the collision capsule uses; the original subtracts it in
+    // place, plays, and restores) — each slot picked by, in order: feet under
+    // the water plane -> standing on an entity -> terrain surface 3 (snow) ->
+    // ground (anim_event_sounds over audio::footstep_slot, the one order the
+    // wire-fed remote body channel and the editor's clip preview share).
+    // [orig: org1 @0x4bf169-0x4bf2b0; org2 @0x4b76f1-0x4b78a8; the dip slot is
     // the AnimMap out[3] stack cell both bodies pass to the anim update]
-    const Entity *went = world.registry.get(e.handle);
+    // The on-entity read is last tick's link: this pass runs BEFORE this
+    // tick's resolve, the same order as org1 (sound block @0x4bf23e precedes
+    // the resolve tail @0x4bf7b8+). Mounted bodies never reach here — seat
+    // clips author no foot-event bits.
+    const int32_t feet[3] = {e.pos[0], e.pos[1], e.pos[2] - capsule_bottom};
+    const bool any_foot = (ev & (anim::kAnimEventFootLeft | anim::kAnimEventFootRight)) != 0;
+    const Entity *went = any_foot ? world.registry.get(e.handle) : nullptr;
+    const int32_t surface = any_foot
+            ? terrain::surface_type_at_fixed(world.tables.surface_map, feet[0], feet[1]) : 0;
+    AnimEventSound sounds[kAnimEventSoundMax];
+    const int count = anim_event_sounds(ev, feet[2], world.env.water_z,
+            went != nullptr && went->ground_target.valid(), surface, sounds);
+    for (int i = 0; i < count; ++i)
+        emit_slot_sound(world, e, sounds[i].slot, sounds[i].foot < 0 ? e.pos : feet);
+}
+
+int anim_event_sounds(uint32_t word, int32_t feet_z, int32_t water_z, bool on_entity,
+                      int32_t surface_type, AnimEventSound out[kAnimEventSoundMax]) {
+    int count = 0;
+    // The foley block: bit order 0x20..0x400 -> SSAudio1..6 [orig: org1
+    // @0x4bf169-0x4bf23e; org2 @0x4b76f1-0x4b77c6].
+    for (int i = 0; i < anim::kAnimEventFoleyCount; ++i)
+        if ((word & (anim::kAnimEventFoley1 << i)) != 0)
+            out[count++] = AnimEventSound{audio::kSlotAudio1 + i, -1};
+    // Then the feet, left before right, each through the one footstep pick
+    // [orig: org1 @0x4bf23e-0x4bf2b0; org2 @0x4b77c6-0x4b78a8].
     for (int foot = 0; foot < 2; ++foot) {
         const uint32_t foot_bit = foot == 0 ? anim::kAnimEventFootLeft : anim::kAnimEventFootRight;
-        if ((ev & foot_bit) == 0) continue;
-        const int32_t pos[3] = {e.pos[0], e.pos[1], e.pos[2] - capsule_bottom};
-        // The witnessed test order lives in audio::footstep_slot, shared with
-        // the wire-fed remote body channel so both consume one implementation.
-        // The on-entity read is last tick's link: this pass runs BEFORE this
-        // tick's resolve, the same order as org1 (sound block @0x4bf23e
-        // precedes the resolve tail @0x4bf7b8+). Mounted bodies never reach
-        // here — seat clips author no foot-event bits.
-        const int slot = audio::footstep_slot(
-                pos[2], world.env.water_z,
-                went != nullptr && went->ground_target.valid(),
-                terrain::surface_type_at_fixed(world.tables.surface_map, pos[0], pos[1]),
-                foot);
-        emit_slot_sound(world, e, slot, pos);
+        if ((word & foot_bit) == 0) continue;
+        out[count++] = AnimEventSound{
+                audio::footstep_slot(feet_z, water_z, on_entity, surface_type, foot), foot};
     }
+    return count;
 }
 
 } // namespace opennova::world

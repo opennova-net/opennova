@@ -3,6 +3,7 @@
 
 // ITEMS.DEF: one record per world item, the largest of the families.
 
+#include "def_notes.h"
 #include "def_scan.h"
 
 #include <base/io/strutil.h>
@@ -10,6 +11,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <string>
 
 using namespace opennova::defscan; // the shared .def scanner, unqualified as before
 
@@ -40,6 +43,15 @@ static int item_type_from_string(const char *s, size_t len) {
     return DEF_ITEM_TYPE_UNSET;
 }
 
+/* Which of a value's two words the token is (DefItemDef::type_word): 1 for foliage and object, the
+   second the chain reads for 2 and 6, else 0. */
+static uint8_t item_type_word(const char *s, size_t len) {
+    char low[16];
+    size_t ll = len < 15 ? len : 15;
+    to_lower_buf(low, s, ll);
+    return ((ll == 7 && memcmp(low, "foliage", 7) == 0) || (ll == 6 && memcmp(low, "object", 6) == 0)) ? 1 : 0;
+}
+
 /* The twelve weapon userpoint keys in slot order (def.h weapon_userpoints), -1
    for any other key [orig: ItemDef_ParseProperty @ 0x4a0ff2..0x4a12e1] */
 static int weapon_userpoint_slot(const char *key) {
@@ -57,8 +69,12 @@ static int weapon_userpoint_slot(const char *key) {
    third value only when the line carries more than 3 tokens (argc > 3, key
    included); extra tokens beyond those are ignored. `with_secondary` is 0 for
    particlefx/particlefxw3/particlefxw4, which never read a third token. A token
-   past the line's count reads as "".
-   [orig: ItemDef_ParseProperty @ 0x49eb00, particlefx chain @ 0x4a13ad..0x4a15eb] */
+   past the line's count reads as "": the tokenizer resets the first three tokens
+   to "" for every line, so a missing one stores an empty name over what an
+   earlier line of the slot left (jox01's `particlefx fx_Mosquitos_2m_L`: no
+   userpoint).
+   [orig: ItemDef_ParseProperty @ 0x49eb00, particlefx chain @ 0x4a13ad..0x4a15eb,
+   the copies @ 0x4a13bf..0x4a13fc; Terrain_TokenizeConfigLine @ 0x53cb71..0x53cb81] */
 static void parse_item_particle_slot(const io::ConfigTokens &tokens, DefItemParticleFx *slot,
                                      int with_secondary) {
     copy_token(slot->effect, sizeof(slot->effect), tokens, 1);
@@ -92,7 +108,9 @@ static void set_def_byte(int32_t &dword, int byte_index, uint8_t value) {
    (62 6F 62 00; the IDB typed it as the pointer off_7C7D78 until 2026-10-04)
    [orig: the compare @0x49DEA4..0x49DEAA, the store to +0x93C @0x49DECE; the
    allocator's 5 to the same +0x93C @0x49E4F0]. */
-static void apply_item_def_defaults(DefItemDef *d) {
+void def_init_item(DefItemDef &value) {
+    memset(&value, 0, sizeof(value));
+    DefItemDef *d = &value;
     d->climb_speed = 1;    /* [orig: @0x0049E3B0 climbSpeed] */
     d->torque = 3;         /* [orig: torque] */
     d->mass = 5;           /* [orig: mass] */
@@ -110,13 +128,6 @@ static void apply_item_def_defaults(DefItemDef *d) {
     d->tire_slip = 5;      /* [orig: tireSlip] */
 }
 
-/* A fresh record, as `begin` allocates it [orig: ItemDef_AllocateWithDefaults
-   @0x49E3B0]. */
-static void reset_item_def(DefItemDef *d) {
-    memset(d, 0, sizeof(*d));
-    apply_item_def_defaults(d);
-}
-
 /* Shared items.def parser over an in-memory buffer. The caller owns `buf` and must have
    zeroed `out` first. Lets both the path loader and the VFS/PFF byte loader share one parser.
 
@@ -130,22 +141,36 @@ static void reset_item_def(DefItemDef *d) {
    `end` @0x49EB1D clears the open flag]: a `begin` inside an open block keeps the open
    record and starts the next, and a block the file never closes is still an item. Lines
    outside a block are ignored (the open-flag test @0x49EC1A). */
-static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) {
+static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, DefParseReport *report,
+                           DefTextNoter &noter) {
     size_t entries_cap = 0;
     DefItemDef current;
-    reset_item_def(&current);
+    def_init_item(current);
     int in_block = 0;
-    size_t raw_cap = 0;
+    bool powerup_branch = false, numeric_branch = false;
+    bool indent_noted = false;
     size_t emplacement_attachments_cap = 0;
+    size_t number = 0; // the line a finding names, counting from 1
 
-    for_each_def_line(buf, file_len, [&](io::ConfigTokens &tokens, const char *line,
-                                         size_t line_len, size_t) {
+    io::ConfigTokens tokens_state;
+    for_each_def_line_noted(buf, file_len, tokens_state, [&](const char *at) { noter.line(at); },
+                            [&](io::ConfigTokens &tokens, const char *line, size_t line_len,
+                                size_t line_index) {
         const char *key = tokens.tokens[0];
         const char *v = tokens.token(1); // the first value token, "" when none
         const size_t vl = strlen(v);
+        number = line_index + 1;
+        const std::string as_read = line_as_read(tokens);
 
         if (key_is(key, "end")) {
+            if (!in_block) {
+                authoring_issue(out->unmodeled_count, report, number, "", as_read.c_str(), as_read.size());
+                return;
+            }
             if (in_block) {
+                if (powerup_branch && numeric_branch)
+                    authoring_issue(current.unmodeled_count, report, number, current.display_name,
+                        "powerupdef", 10, DefIssueCode::Unrepresentable);
                 /* A record closed with no alias takes "S%06i" of its authored
                    id [orig: the `end` arm @0x49EB2F..0x49EB5F, `cmp
                    [esi+30h], bl` then sprintf(alias, "S%06i", [esi+50h] +
@@ -154,11 +179,13 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                    32-bit offsets cancel, so `id 105310` reads S105310. A
                    record a nested `begin` or the file's end closes keeps it
                    empty. */
-                if (current.sid[0] == '\0')
+                if (current.sid[0] == '\0') {
                     snprintf(current.sid, sizeof(current.sid), "S%06i", current.id);
+                    current.sid_derived = 1;
+                }
                 DA_PUSH(out->entries, out->count, entries_cap, current);
-                reset_item_def(&current);
-                raw_cap = 0;
+                def_init_item(current);
+                noter.close();
                 emplacement_attachments_cap = 0;
                 in_block = 0;
             }
@@ -166,26 +193,51 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         }
 
         if (key_is(key, "begin")) {
-            if (in_block) DA_PUSH(out->entries, out->count, entries_cap, current);
-            reset_item_def(&current); /* [orig: the begin arm calls
+            if (in_block) {
+                // The open record, closed by no `end`, which the writer's form of it would add.
+                authoring_issue(out->unmodeled_count, report, number, current.display_name, "end", 3,
+                                DefIssueCode::MalformedBlock);
+                DA_PUSH(out->entries, out->count, entries_cap, current);
+            }
+            def_init_item(current); /* [orig: the begin arm calls
                 ItemDef_AllocateWithDefaults @0x49E3B0 from ItemDef_ParseProperty @0x49EB00] */
-            raw_cap = 0;
+            current.note = noter.open(DefRecordKind::Item);
             emplacement_attachments_cap = 0;
+            powerup_branch = numeric_branch = false;
             /* The name is token 1, cut to 46 characters in the line buffer
                itself, where a later short line's stale slot still reads the
                cut (io::ConfigTokens::terminate_at) [orig: the strlen compare
                @0x49EBD9, `mov byte ptr [edx+2Eh], 0` @0x49EBFB] */
             if (vl >= 46) tokens.terminate_at(v + 46);
             copy_token(current.display_name, 47, tokens, 1);
+            validate_header(as_read.c_str(), as_read.size(), 5, 47, current.unmodeled_count, report, number, current.display_name);
             in_block = 1;
             return;
         }
 
-        if (!in_block) return;
+        if (!in_block) {
+            authoring_issue(out->unmodeled_count, report, number, "", as_read.c_str(), as_read.size());
+            return;
+        }
 
+        // These are alternate meanings of the original's type-specific union at
+        // +0x890 (world/itemdef-re.md). Mixing both cannot be represented by a
+        // symbolic powerup definition.
+        powerup_branch |= key_is(key, "powerupdef");
+        for (const char *numeric : {"deathtime", "clipsize", "num_doors", "first_door", "first_subobject",
+                "door_type", "door_dir", "open_rate", "max_angle", "sqb_rate", "sqb_distance", "sqb_error",
+                "rotor_parts", "aux_parts", "door_open_sound_id", "door_close_sound_id"})
+            numeric_branch |= key_is(key, numeric);
         int parsed = 0;
+        bool row_line = false; // a row of its own (an attachment), noted as one
 
-        if (key_is(key, "sqb_rate") || key_is(key, "sqb_distance") || key_is(key, "sqb_error")) {
+        if (key_is(key, "graphicenemy")) {
+            copy_token(current.graphic_enemy, sizeof(current.graphic_enemy), tokens, 1);
+            parsed = 1;
+        } else if (key_is(key, "textid")) {
+            copy_token(current.text_id, sizeof(current.text_id), tokens, 1);
+            parsed = 1;
+        } else if (key_is(key, "sqb_rate") || key_is(key, "sqb_distance") || key_is(key, "sqb_error")) {
             // These share the door/death fields, including last-write order.
             // Each value goes through _ftol2_sse's SSE2 leg (io/crt_ftol.h).
             // [orig: ItemDef_ParseProperty @0x49EB00, squib arms @0x49F06F (the
@@ -279,9 +331,9 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
                 int slot = 0;
                 while (slot < out->vehicle_spawn_id_count && out->vehicle_spawn_ids[slot] != id)
                     ++slot;
-                if (slot == out->vehicle_spawn_id_count && slot < 32)
+                if (slot == out->vehicle_spawn_id_count && slot < DEF_VEHICLE_SPAWN_SLOTS)
                     out->vehicle_spawn_ids[out->vehicle_spawn_id_count++] = id;
-                if (slot < 32)
+                if (slot < DEF_VEHICLE_SPAWN_SLOTS)
                     current.vehicle_spawn_mask |= uint32_t(1) << slot;
             }
             parsed = 1;
@@ -293,7 +345,11 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             /* A token the chain does not know leaves the type as it was
                [orig: the type chain @0x4A02E4..0x4A04B7] */
             const int type = item_type_from_string(v, vl);
-            if (type != DEF_ITEM_TYPE_UNSET) current.type = type;
+            if (type != DEF_ITEM_TYPE_UNSET) {
+                current.type = type;
+                /* The word the file spells the value with, of the two the chain reads for it */
+                current.type_word = item_type_word(v, vl);
+            }
             parsed = 1;
         } else if (key_is(key, "graphic")) {
             copy_token(current.graphic, sizeof(current.graphic), tokens, 1);
@@ -406,9 +462,10 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             copy_token(current.disk_function, sizeof(current.disk_function), tokens, 1);
             parsed = 1;
         } else if (key_is(key, "powerupdef")) {
-            /* The name lands in def+0x890 and the same arm raises the Powerup
-               attrib bit [orig: ItemDef_ParseProperty @0x49F698 -- the copy
-               @0x49F6C4..0x49F6D0, `or [edx+54h],2` @0x49F6D2]. */
+            /* A symbolic powerup definition, not a death/door numeric value: the
+               name lands in def+0x890 (the death/door union) and the same arm
+               raises the Powerup attrib bit [orig: ItemDef_ParseProperty @0x49F698
+               -- the copy @0x49F6C4..0x49F6D0, `or [edx+54h],2` @0x49F6D2]. */
             copy_token(current.powerup_def, sizeof(current.powerup_def), tokens, 1);
             current.attrib |= DEF_ITEM_ATTRIB_POWERUP;
             parsed = 1;
@@ -471,16 +528,28 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             const int n = value_tokens(tokens, tok, 6);
             /* Retail has four fixed slots. A fifth valid record is recognized but
                silently ignored. The optional arc is all-or-none: partial tails
-               remain raw diagnostics instead of inventing missing limits. */
-            if (n == 2 || n >= 6) {
+               produce authoring diagnostics instead of inventing missing limits. */
+            if (n != 2 && n < 6) {
+                authoring_issue(current.unmodeled_count, report, number, current.display_name, as_read.c_str(), as_read.size(), DefIssueCode::InvalidValue);
+                return;
+            }
+            {
                 parsed = 1;
-                if (current.emplacement_attachments_count >= 4) return;
+                if (current.emplacement_attachments_count >= 4) {
+                    authoring_issue(current.unmodeled_count, report, number, current.display_name, as_read.c_str(), as_read.size(), DefIssueCode::Unrepresentable);
+                    return;
+                }
                 DefItemEmplacementAttachment attachment;
                 memset(&attachment, 0, sizeof(attachment));
                 safe_copy(attachment.userpoint, sizeof(attachment.userpoint), tok[0].s, tok[0].len);
                 attachment.item_id = parse_int_n(tok[1].s, tok[1].len);
                 attachment.kind = kind;
                 attachment.angle_count = n >= 6 ? 4 : 0;
+                // A row of the item's, one line (its notes its own).
+                const int row_step = def_line_step(DefRecordKind::Attachment, key, strlen(key));
+                attachment.note = noter.open_nested(DefRecordKind::Attachment, DEF_LINE_ORDER_ROWS, false,
+                                                    uint8_t(row_step < 0 ? 0 : row_step));
+                row_line = true;
                 if (n >= 6) {
                     constexpr int kBamPerDegree = 11930464;
                     attachment.down_angle = parse_int_n(tok[2].s, tok[2].len) * kBamPerDegree;
@@ -679,10 +748,16 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             copy_token(current.hud_image, sizeof(current.hud_image), tokens, 1);
             parsed = 1;
         } else if (key_is(key, "unit_type")) {
-            current.unit_type = parse_int_n(v, vl); /* minimap icon class [orig: @0x50FA70]
-                                                       + the death-dispatch row key
-                                                       [orig: Entity_DispatchDeathCallback
-                                                       @0x493f23 vs table @0x815410] */
+            /* The low byte of its atol, read unsigned [orig: ItemDef_ParseProperty @0x49ee31 atol
+               -> byte +0x196 @0x49ee47]; the atol saturates at 32 bits first (parse_int_n), so
+               2147483651 is 2147483647, byte 255. A number past a byte reported, the record holding
+               what the game holds. The minimap icon class [orig: @0x50FA70] and the death-dispatch row
+               key [orig: Entity_DispatchDeathCallback @0x493f23 vs table @0x815410]. */
+            const int read = parse_int_n(v, vl);
+            current.unit_type = static_cast<unsigned char>(read);
+            if (current.unit_type != read)
+                authoring_issue(current.unmodeled_count, report, number, current.display_name, as_read.c_str(), as_read.size(),
+                                DefIssueCode::Reinterpreted, std::to_string(current.unit_type).c_str());
             parsed = 1;
         } else if (key_is(key, "shadow")) {
             /* 'shadow <name> <w> <l> <ox> <oy>' — the authored ground-shadow
@@ -841,39 +916,63 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
             parsed = 1;
         }
 
+        if (parsed) {
+            validate_property(DefRecordKind::Item, as_read.c_str(), as_read.size(), current.unmodeled_count, report, number, current.display_name);
+            // What a writer keeps of the line: its place in the record's order, the file's indentation.
+            def_note_line(DefRecordKind::Item, current.line_order, key, strlen(key));
+            def_note_indent(out->layout, indent_noted, line, line_len);
+            if (!row_line) noter.property(def_line_step(DefRecordKind::Item, key, strlen(key)));
+        }
         if (!parsed) {
-            DA_PUSH_RAW(current.raw_lines, current.raw_lines_count, raw_cap, line, line_len);
+            authoring_issue(current.unmodeled_count, report, number, current.display_name, as_read.c_str(), as_read.size());
         }
     });
+    noter.finish();
 
     /* A block the file never closes was allocated at its `begin` and stays an
-       item [orig: the begin arm @0x49EBA8]. */
-    if (in_block) DA_PUSH(out->entries, out->count, entries_cap, current);
+       item [orig: the begin arm @0x49EBA8]; its `end` is missing, which the
+       writer's form of it would add. */
+    if (in_block) {
+        authoring_issue(out->unmodeled_count, report, number, current.display_name, "end", 3, DefIssueCode::MalformedBlock);
+        DA_PUSH(out->entries, out->count, entries_cap, current);
+    }
 
     return 0;
 }
 
-int def_parse_items(const char *path, DefItemsFile *out) {
+int def_parse_items(const char *path, DefItemsFile *out, DefParseReport *report) {
     memset(out, 0, sizeof(*out));
     size_t file_len;
     char *buf = read_file(path, &file_len);
     if (!buf) return -1;
-    int rc = parse_items_buf(buf, file_len, out);
+    DefTextNoter none(buf, file_len, nullptr);
+    int rc = parse_items_buf(buf, file_len, out, report, none);
     free(buf);
     return rc;
 }
 
-int def_parse_items_memory(const uint8_t *data, size_t size, DefItemsFile *out) {
+int def_parse_items_memory(const uint8_t *data, size_t size, DefItemsFile *out, DefParseReport *report) {
     memset(out, 0, sizeof(*out));
     if (!data) return -1;
-    return parse_items_buf((const char *)data, size, out);
+    DefTextNoter none((const char *)data, size, nullptr);
+    return parse_items_buf((const char *)data, size, out, report, none);
+}
+
+int def_parse_items_memory(const uint8_t *data, size_t size, DefItemsFile *out, DefParseReport *report,
+                           DefTextNotes &notes) {
+    memset(out, 0, sizeof(*out));
+    notes = DefTextNotes();
+    if (!data) return -1;
+    DefTextNoter noter((const char *)data, size, &notes);
+    const int rc = parse_items_buf((const char *)data, size, out, report, noter);
+    def_note_baseline(*out, notes);
+    return rc;
 }
 
 void def_free_items(DefItemsFile *f) {
     if (!f) return;
     for (size_t i = 0; i < f->count; ++i) {
         free(f->entries[i].emplacement_attachments);
-        free(f->entries[i].raw_lines);
     }
     free(f->entries);
     memset(f, 0, sizeof(*f));

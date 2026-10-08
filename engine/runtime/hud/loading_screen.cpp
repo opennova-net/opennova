@@ -1,13 +1,32 @@
 // The loading screen's wrapped text block (loading_screen.h): the line breaker
 // and the line placer of Render_DrawWrappedTextBlockEx, ported break rule
 // for break rule. Pushed down from the Godot shell (ADR 0040 ladder E2); the
-// embedder supplies the width measure and paints the placed lines.
+// embedder supplies the width measure and paints the placed lines. And the
+// start-mission splash's continue line, laid out as the game draws it.
 #include <runtime/hud/loading_screen.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <utility>
 
+#include <runtime/hud/hud_math.h>
+
 namespace opennova::hud {
+
+GameFontRun splash_continue_run(const GameFont &font, const char *text, int surface_w, int surface_h,
+		bool phase_on) {
+	if (font.font() == nullptr || text == nullptr || surface_w <= 0 || surface_h <= 0) return {};
+	// The design point scaled with retail's integer rounding [orig: HUD_DrawTextAtVirtualPos @ 0x5d3ec0,
+	// ((x * W + 512) / 1024, (y * H + 384) / 768)].
+	const int64_t x = (static_cast<int64_t>(kSplashContinueX) * surface_w + 512) / 1024;
+	const int64_t y = (static_cast<int64_t>(kSplashContinueY) * surface_h + 384) / 768;
+	// The large slot's scale [orig: HUD_InitAllFonts @ 0x51ef62] and the centred drawer's halved colour,
+	// alpha forced [orig: HUD_DrawTextCentered_HalfBright @ 0x580688..0x5806ab; the blink select @
+	// 0x5209b0..0x5209be].
+	const float scale = hud_label_font_choice(surface_w).large_scale;
+	const uint32_t color = half_bright_argb(phase_on ? kSplashContinueColorOn : kSplashContinueColorOff);
+	return font.layout(text, static_cast<float>(x), static_cast<float>(y), scale, scale, kFontAlignCenter, color);
+}
 
 namespace {
 

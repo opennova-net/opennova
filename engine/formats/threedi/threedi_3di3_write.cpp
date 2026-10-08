@@ -13,6 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <formats/threedi/threedi_panm.h>
+
 namespace opennova::threedi {
 
 #define THREEDI_DEFAULT_VERSION 259u
@@ -470,7 +472,7 @@ static int append_material_texture(BufferBuilder *buf, const ThreediMaterialText
 static int append_alpha_gen(BufferBuilder *buf, const ThreediAlphaGen *alpha)
 {
     uint8_t phase_or_reg = 0;
-    if (alpha->style <= 112) {
+    if (!threedi_generator_names_register(alpha->style)) {
         phase_or_reg = float_to_byte(alpha->phase, 256.0f);
     } else {
         phase_or_reg = (uint8_t)alpha->reg;
@@ -489,7 +491,7 @@ static int append_rgb_gen(BufferBuilder *buf, const ThreediRgbGen *rgb)
 {
     uint8_t block[12] = {0};
     block[0] = rgb->style;
-    block[1] = rgb->style <= 112 ? float_to_byte(rgb->phase, 256.0f) : (uint8_t)rgb->reg;
+    block[1] = !threedi_generator_names_register(rgb->style) ? float_to_byte(rgb->phase, 256.0f) : (uint8_t)rgb->reg;
     uint16_t rate_raw = (uint16_t)round_nearest((double)rgb->rate * 256.0);
     block[2] = (uint8_t)(rate_raw & 0xFFu);
     block[3] = (uint8_t)((rate_raw >> 8) & 0xFFu);
@@ -509,7 +511,7 @@ static int append_rgb_gen(BufferBuilder *buf, const ThreediRgbGen *rgb)
 
 static int append_uv_params(BufferBuilder *buf, const ThreediUvParams *uv)
 {
-    uint8_t phase_or_reg = uv->style <= 112 ? float_to_byte(uv->phase, 256.0f) : (uint8_t)uv->reg;
+    uint8_t phase_or_reg = !threedi_generator_names_register(uv->style) ? float_to_byte(uv->phase, 256.0f) : (uint8_t)uv->reg;
     if (buffer_append_u8(buf, uv->style) != 0 ||
         buffer_append_u8(buf, phase_or_reg) != 0 ||
         buffer_append_scaled_s16(buf, uv->gen_rate, 256.0f) != 0 ||

@@ -742,11 +742,11 @@ struct InfantryState {
     // reload2); 0 = rifle default, mirror the primary. [orig: read @ 0x4b5dba;
     // parser key 'special_hold' @ 0x543cb7]
     int wpn_hold_kind = 0;
-    // Host-issued identity serial for the resolved held AnimMap. This lives on the
+    // Host-issued serial of the held weapon's category edge. This lives on the
     // entity (the original's previous-held record is per entity), so a fresh local
     // player receives the initial switch stamp even when the simulation keeps the
     // same equipped weapon across a world/player replacement.
-    uint64_t wpn_anim_map_serial = 0;
+    uint64_t wpn_category_serial = 0;
     // Local-player Flags-bit mirrors, refreshed per tick by the host [orig: the
     // @ 0x4b5d7f..0x4b5da9 refresh — Flags|0x10 from g_WeaponScopeActive,
     // Flags|8 from g_BinocularsRaised (the case-26 input toggle @ 0x4e064c, forced
@@ -757,7 +757,7 @@ struct InfantryState {
     // dip window runs, pitch_kick_accum drops 0x2800000 per tick before the eighth-step
     // ease, and the window decrements TWICE per tick (both witnessed sub-1 sites), so
     // the 20-tick weapon-switch stamp dips for 10 ticks. Seeds: 20 on a held-weapon
-    // adm change [orig: @ 0x4b46f5], 80 by the remote-reload 0x49 path (net-re §5.58).
+    // category change [orig: @ 0x4b46e7..0x4b46f5], 80 by the remote-reload 0x49 path (net-re §5.58).
     // [orig: @ 0x4b5cab..0x4b5ce7; consumed by the section-14.2 aim overlay]
     int32_t arms_dip_ticks = 0;
     int32_t pitch_kick_accum = 0;
@@ -947,6 +947,39 @@ struct InfantryState {
     int16_t magazine = 0;             // entity+0x35C word (reload at <=0, refill = clipsize)
 };
 
+// The primary (body) channel's pose as a renderer draws it: the playing clip's state, its
+// playhead and served ring entry, whether the armed end-notify parks it, and while it blends
+// the outgoing clip with the target's weight. The present rows publish it, and the editor's
+// mission view draws a placed person's spawn pose from it.
+// [orig: AnimChannel_BlendTwoChannels @0x410740 composes the two channels at the weight;
+//  AnimChannel_AdvancePlayback @0x40B19E..0x40B1B1 the park]
+struct InfantryBodyPose {
+    int state = -1;
+    int32_t phase = 0;
+    int32_t variant = 0;
+    bool parked = false;
+    bool blending = false; // the source fields and the weight hold only while it blends
+    int source_state = -1;
+    int32_t source_phase = 0;
+    int32_t source_variant = 0;
+    float weight = 1.0f;
+};
+inline InfantryBodyPose infantry_body_pose(const InfantryState &inf) {
+    InfantryBodyPose pose;
+    pose.state = inf.body_clip_state();
+    pose.phase = inf.clip_phase;
+    pose.variant = inf.anim_variant;
+    pose.parked = inf.body_phase_parked();
+    pose.blending = inf.body_blend_active();
+    if (pose.blending) {
+        pose.source_state = inf.anim_prev;
+        pose.source_phase = inf.anim_prev_clip_phase;
+        pose.source_variant = inf.anim_prev_variant;
+        pose.weight = inf.anim_blend_weight;
+    }
+    return pose;
+}
+
 // Pure retail body-tick kernels, exposed so deterministic tests can pin the
 // wrap/arithmetic-shift behavior independently of locomotion.
 // [orig: Entity_UpdateInfantryPlayerBody / Entity_UpdateInfantryAI]
@@ -989,10 +1022,12 @@ void infantry_weapon_attack_stamp(InfantryState &inf, int attack_kind);
 inline constexpr int kEmoteAnimStateBase = 114;
 bool infantry_weapon_emote_stamp(InfantryState &inf, const IRootMotionSource *source, int emote);
 
-// Stamp the witnessed 20-tick arms dip when this entity observes a different resolved
-// held AnimMap identity. Serial 0 means no mounted weapon map. Keeping the observed
-// serial on InfantryState makes the edge per entity rather than simulation-global.
-void infantry_weapon_switch_stamp(InfantryState &inf, uint64_t anim_map_serial);
+// Stamp the witnessed 20-tick arms dip when this entity observes a new held weapon
+// category serial (a mount whose category differs from the one held before)
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b46e7..0x4b46f5]. Serial 0 means no
+// mounted weapon. Keeping the observed serial on InfantryState makes the edge per
+// entity rather than simulation-global.
+void infantry_weapon_switch_stamp(InfantryState &inf, uint64_t category_serial);
 
 // Consumer gate for the secondary channel. Equal primary/secondary state ids do NOT
 // disable composition: their playheads are independent. mount_blocks_channel is true

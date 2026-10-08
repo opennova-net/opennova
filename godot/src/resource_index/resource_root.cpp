@@ -9,15 +9,24 @@
 
 #include <base/gameprofile/gameprofile.h>
 #include <base/gameprofile/required_resources.h>
+#include <base/gameprofile/resource_missing.h>
+#include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
+#include <runtime/renderer/device_texture.h>
+#include <runtime/renderer/texture_dxt.h>
 
 #include <godot_cpp/classes/dir_access.hpp>
 #include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 #include <algorithm>
 #include <cstring>
+#include <mutex>
+#include <set>
+#include <string>
 #include <vector>
 
 using namespace godot;
@@ -69,9 +78,6 @@ void ResourceRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("mount_runtime", "path", "expansion", "allow_loose_override", "game_code"),
 			&ResourceRoot::mount_runtime, DEFVAL(String()), DEFVAL(false), DEFVAL("jo"));
 	ClassDB::bind_method(D_METHOD("list_expansions", "path"), &ResourceRoot::list_expansions);
-	ClassDB::bind_method(D_METHOD("expansion_name", "path", "expansion"), &ResourceRoot::expansion_name);
-	ClassDB::bind_method(D_METHOD("expansion_description", "path", "expansion"),
-			&ResourceRoot::expansion_description);
 	ClassDB::bind_method(D_METHOD("get_expansion"), &ResourceRoot::get_expansion);
 	ClassDB::bind_method(D_METHOD("is_runtime_mount"), &ResourceRoot::is_runtime_mount);
 	ClassDB::bind_method(D_METHOD("get_expansion_override_table"),
@@ -86,12 +92,20 @@ void ResourceRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("effect_files"), &ResourceRoot::effect_files);
 	ClassDB::bind_method(D_METHOD("has_file", "name", "policy"), &ResourceRoot::has_file, DEFVAL(LOOKUP_SESSION_DEFAULT));
 	ClassDB::bind_method(D_METHOD("read_file", "name", "policy"), &ResourceRoot::read_file, DEFVAL(LOOKUP_SESSION_DEFAULT));
+	ClassDB::bind_method(D_METHOD("load_texture_created", "name", "loader", "flags"),
+			&ResourceRoot::load_texture_created);
 	ClassDB::bind_method(D_METHOD("load_texture", "name", "loader", "policy"), &ResourceRoot::load_texture,
 			DEFVAL(LOOKUP_SESSION_DEFAULT));
 	ClassDB::bind_method(D_METHOD("load_material_texture", "name", "type"), &ResourceRoot::load_material_texture);
 	ClassDB::bind_method(D_METHOD("load_font", "name"), &ResourceRoot::load_font);
 	ClassDB::bind_method(D_METHOD("list_missing_boot_resources"), &ResourceRoot::list_missing_boot_resources);
 	ClassDB::bind_method(D_METHOD("boot_resource_failure_text", "name"), &ResourceRoot::boot_resource_failure_text);
+	ClassDB::bind_static_method("ResourceRoot", D_METHOD("boot_resource_missing_marker"),
+			&ResourceRoot::boot_resource_missing_marker);
+	ClassDB::bind_static_method("ResourceRoot", D_METHOD("launch_mission_failed_marker"),
+			&ResourceRoot::launch_mission_failed_marker);
+	ClassDB::bind_static_method("ResourceRoot", D_METHOD("report_missing", "kind", "name", "by", "words"),
+			&ResourceRoot::report_missing, DEFVAL(String()), DEFVAL(String()));
 
 	BIND_ENUM_CONSTANT(LOOKUP_FORCE_LOOSE_FIRST);
 	BIND_ENUM_CONSTANT(LOOKUP_FORCE_ARCHIVE_ONLY);
@@ -135,6 +149,37 @@ PackedStringArray ResourceRoot::list_missing_boot_resources() const {
 		}
 	}
 	return missing;
+}
+
+String ResourceRoot::boot_resource_missing_marker() {
+	return String::utf8(kBootResourceMissingMarker);
+}
+
+String ResourceRoot::launch_mission_failed_marker() {
+	return String::utf8(kLaunchMissionFailedMarker);
+}
+
+void ResourceRoot::report_missing(const String &kind, const String &name, const String &by, const String &words) {
+	if (kind.is_empty() || name.is_empty()) {
+		return;
+	}
+	// Once a process for each (kind, name, file naming it), as the game's lookups compare names: a model
+	// every instance of an item draws, a set every footstep plays, is said once.
+	static std::mutex mutex;
+	static std::set<std::string> said;
+	const std::string key = opennova::to_std(kind + String("|") + name.to_lower() + String("|") + by.to_lower());
+	{
+		std::lock_guard<std::mutex> lock(mutex);
+		if (!said.insert(key).second) {
+			return;
+		}
+	}
+	ResourceMiss miss;
+	miss.kind = opennova::to_std(kind);
+	miss.name = opennova::to_std(name);
+	miss.by = opennova::to_std(by);
+	miss.words = opennova::to_std(words);
+	UtilityFunctions::push_warning(String("ResourceRoot: ") + String::utf8(resource_missing_text(miss).c_str()));
 }
 
 String ResourceRoot::boot_resource_failure_text(const String &name) const {
@@ -228,11 +273,24 @@ Error ResourceRoot::set_root_dir(const String &path) {
 	expansion_ = String();
 	expansion_override_table_ = PackedByteArray();
 	mount_kind_ = MountKind::None;
-	const Error err = mount_with_mode(path, String(), opennova::VfsMountMode::LooseOnly, "jo",
-			opennova::VfsArchiveDiscovery::ScanAll);
-	if (err == OK) {
+	const Error err = [&]() -> Error {
+		String clean;
+		const Error begun = begin_mount(path, clean);
+		if (begun != OK) {
+			return begun;
+		}
+		if (!index_.scan(clean.utf8().get_data(), std::string(), opennova::VfsMountMode::LooseOnly,
+					opennova::VfsArchiveDiscovery::ScanAll)) {
+			root_dir_ = String();
+			last_error_ = String(index_.last_error().c_str());
+			return ERR_CANT_OPEN;
+		}
+		index_.set_scr_policy(gameprofile_scr_policy_for_code("jo"));
+		game_code_ = "jo";
+		last_error_ = String();
 		mount_kind_ = MountKind::Loose;
-	}
+		return OK;
+	}();
 	emit_signal("mounted");
 	return err;
 }
@@ -240,8 +298,9 @@ Error ResourceRoot::set_root_dir(const String &path) {
 Error ResourceRoot::mount_runtime(const String &path, const String &expansion, bool allow_loose_override,
 		const String &game_code) {
 	// A root already runtime-mounted switches in place with its old archives still open
-	// (the menu's and the join's expansion switch); any other mount is the boot's, with
-	// none open. The engine's vfs_expansion_override_table says what each one reaches.
+	// (the join's expansion switch); any other mount is the boot's, with none open (the
+	// Mods list's reload clears the root first). The engine's vfs_expansion_override_table
+	// says what each one reaches.
 	const opennova::ExpansionLoadPoint load_point = mount_kind_ == MountKind::Runtime
 			? opennova::ExpansionLoadPoint::ArchivesOpen
 			: opennova::ExpansionLoadPoint::ArchivesClosed;
@@ -259,26 +318,38 @@ Error ResourceRoot::mount_runtime(const String &path, const String &expansion, b
 
 Error ResourceRoot::mount_runtime_archives_(const String &path, const String &expansion,
 		bool allow_loose_override, const String &game_code) {
-	// Runtime: the packed PFFs are the game data; loose files only shadow them under `/d`.
+	// Runtime: the install mounted as a launch with these flags mounts it (mount_install): the
+	// witnessed fixed boot table (extra .pff files in the root never mount in retail,
+	// docs/vfs/vfs-pff-mount-re.md D-VFS-2), the packed PFFs the game data, loose files only
+	// shadowing them under `/d`.
 	mount_kind_ = MountKind::None;
-	const opennova::VfsMountMode mode = allow_loose_override
-			? opennova::VfsMountMode::PackedWithLooseOverride
-			: opennova::VfsMountMode::Packed;
-	// The game mounts the witnessed fixed boot table - extra .pff files in the
-	// root never mount in retail (docs/vfs/vfs-pff-mount-re.md D-VFS-2).
-	const Error err = mount_with_mode(path, expansion, mode, game_code,
-			opennova::VfsArchiveDiscovery::RetailTable);
+	opennova::LaunchFlags flags;
+	flags.loose_override = allow_loose_override;
+	flags.expansion = opennova::to_std(expansion);
+	flags.game = opennova::to_std(game_code.to_lower());
+	String clean;
+	const Error err = begin_mount(path, clean);
 	if (err != OK) {
 		expansion_ = String();
 		return err;
 	}
-	// Retail aborts subsystem initialization when the fixed boot table opens no archives.
-	// [orig: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44, see docs/vfs/vfs-pff-mount-re.md]
-	if (!index_.has_mounted_archive()) {
+	const opennova::ResourceIndex::InstallScan scanned = index_.scan_install(clean.utf8().get_data(), flags);
+	if (scanned == opennova::ResourceIndex::InstallScan::Unmounted) {
+		expansion_ = String();
+		root_dir_ = String();
+		last_error_ = String(index_.last_error().c_str());
+		return ERR_CANT_OPEN;
+	}
+	if (scanned == opennova::ResourceIndex::InstallScan::NoArchive) {
+		// Retail aborts subsystem initialization when the fixed boot table opens no archives
+		// (a corrupt sole archive included), and the partial loose mount goes with it.
+		// [orig: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44, see docs/vfs/vfs-pff-mount-re.md]
 		clear();
 		last_error_ = "No game data archives could be opened";
 		return ERR_FILE_NOT_FOUND;
 	}
+	game_code_ = game_code;
+	last_error_ = String();
 	// The expansion that actually mounted, which is NOT necessarily the requested one:
 	// opennova::Vfs::mount_game falls back to base-game mounting for a missing/unknown
 	// expansion and still succeeds. Reporting the request back would make every caller-side
@@ -288,8 +359,28 @@ Error ResourceRoot::mount_runtime_archives_(const String &path, const String &ex
 	return OK;
 }
 
-Error ResourceRoot::mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode,
-		const String &game_code, opennova::VfsArchiveDiscovery discovery) {
+Error ResourceRoot::mount_files(std::shared_ptr<const opennova::FileSource> files) {
+	expansion_ = String();
+	expansion_override_table_ = PackedByteArray();
+	mount_kind_ = MountKind::None;
+	// This root's caches keyed to the old mount dropped; the global epoch stands, so another root's
+	// holders keep theirs (the mounting device makes afresh whatever read a moved file).
+	opennova::clear_texture_resolver_caches();
+	texture_cache_.clear();
+	resolve_memo_built_ = false;
+	assets_.invalidate();
+	if (!index_.mount_source(std::move(files))) {
+		root_dir_ = String();
+		last_error_ = String(index_.last_error().c_str());
+		return ERR_INVALID_PARAMETER;
+	}
+	root_dir_ = String(opennova::ResourceIndex::kSourceRootDir);
+	last_error_ = String();
+	mount_kind_ = MountKind::Source;
+	return OK;
+}
+
+Error ResourceRoot::begin_mount(const String &path, String &r_clean) {
 	// The resolver's per-session caches are keyed to the previous root; drop them so a
 	// a new or re-scanned resource directory is read fresh. The epoch bump tells
 	// GDScript-side cache holders (placer, veg assets) the same thing.
@@ -312,16 +403,7 @@ Error ResourceRoot::mount_with_mode(const String &path, const String &expansion,
 		return ERR_DOES_NOT_EXIST;
 	}
 	root_dir_ = clean;
-	if (!index_.scan(clean.utf8().get_data(), expansion.utf8().get_data(), mode, discovery)) {
-		root_dir_ = String();
-		last_error_ = String(index_.last_error().c_str());
-		return ERR_CANT_OPEN;
-	}
-	// Game-aware SCR keying: resolve the chosen game's policy once (gameprofile is the single
-	// source) and apply it for subsequent read_file calls. An empty/unknown code is the JO default.
-	index_.set_scr_policy(gameprofile_scr_policy_for_code(game_code.utf8().get_data()));
-	game_code_ = game_code;
-	last_error_ = String();
+	r_clean = clean;
 	return OK;
 }
 
@@ -335,24 +417,6 @@ PackedStringArray ResourceRoot::list_expansions(const String &path) const {
 		out.push_back(String(name.c_str()));
 	}
 	return out;
-}
-
-String ResourceRoot::expansion_name(const String &path, const String &expansion) const {
-	const String clean = normalize_dir(path);
-	if (clean.is_empty()) {
-		return String();
-	}
-	return opennova::to_gd(opennova::vfs_expansion_info(
-			opennova::to_std(clean), opennova::to_std(expansion)).name);
-}
-
-String ResourceRoot::expansion_description(const String &path, const String &expansion) const {
-	const String clean = normalize_dir(path);
-	if (clean.is_empty()) {
-		return String();
-	}
-	return opennova::to_gd(opennova::vfs_expansion_info(
-			opennova::to_std(clean), opennova::to_std(expansion)).description);
 }
 
 String ResourceRoot::get_root_dir() const {
@@ -406,6 +470,10 @@ String ResourceRoot::resolve_file(const String &name) {
 	}
 	if (!is_flat_filename(name.strip_edges())) {
 		last_error_ = "Resource lookup requires a flat filename: " + name;
+		return String();
+	}
+	if (mount_kind_ == MountKind::Source) {
+		last_error_ = "A file source has no directory to resolve a file in: " + file;
 		return String();
 	}
 	const String wanted = file.to_lower();
@@ -574,7 +642,11 @@ PackedByteArray ResourceRoot::read_texture_attempt_(const opennova::renderer::Te
 		LookupPolicy policy) const {
 	if (load.source == opennova::renderer::TextureFileSource::ParticleTextureDir) {
 		// The particle manager's own folder, "<game directory>\tga\", opened directly
-		// (renderer::TextureFileSource::ParticleTextureDir); raw bytes, as fopen reads.
+		// (renderer::TextureFileSource::ParticleTextureDir); raw bytes, as fopen reads. A file
+		// source (mount_files) has no game directory, so no such folder.
+		if (mount_kind_ == MountKind::Source) {
+			return PackedByteArray();
+		}
 		const String tga_dir = root_dir_.path_join("tga");
 		const String file = opennova::to_gd(load.file).replace("\\", "/");
 		const String path = file.contains("/")
@@ -586,9 +658,12 @@ PackedByteArray ResourceRoot::read_texture_attempt_(const opennova::renderer::Te
 }
 
 Ref<Image> ResourceRoot::load_texture_image(const String &name, TextureLoader loader,
-		LookupPolicy policy, bool *r_alpha_only) const {
+		LookupPolicy policy, bool *r_alpha_only, opennova::renderer::TextureReader *r_reader) const {
 	if (r_alpha_only != nullptr) {
 		*r_alpha_only = false;
+	}
+	if (r_reader != nullptr) {
+		*r_reader = opennova::renderer::TextureReader::None;
 	}
 	if (root_dir_.is_empty() || name.strip_edges().is_empty()) {
 		return Ref<Image>();
@@ -597,7 +672,7 @@ Ref<Image> ResourceRoot::load_texture_image(const String &name, TextureLoader lo
 			[this, policy](const opennova::renderer::TextureLoad &load) {
 				return read_texture_attempt_(load, policy);
 			},
-			r_alpha_only);
+			r_alpha_only, r_reader);
 	// An image consumer takes the top level alone.
 	if (image.is_valid() && image->has_mipmaps()) {
 		image->clear_mipmaps();
@@ -626,33 +701,24 @@ Ref<Texture2D> ResourceRoot::load_texture(const String &name, TextureLoader load
 	if (cached != texture_cache_.end()) {
 		return cached->second;
 	}
-	const Ref<Texture2D> result = opennova::texture_with_mipmaps(opennova::load_texture_image(attempts,
+	const Ref<Texture2D> result = opennova::load_texture_with_mipmaps(attempts,
 			[this, policy](const opennova::renderer::TextureLoad &load) {
 				return read_texture_attempt_(load, policy);
-			}));
+			});
 	texture_cache_.emplace(cache_key, result);
 	return result;
 }
 
-Ref<Texture2D> ResourceRoot::load_material_image(const String &name, uint8_t type) const {
-	if (root_dir_.is_empty() || name.is_empty()) {
-		return Ref<Texture2D>();
+// The device texture's levels are renderer::pixel_device_texture_levels' (the engine
+// carries the witness); a DDS keeps load_texture's D3DX chain.
+Ref<Texture2D> ResourceRoot::load_texture_created(const String &name, TextureLoader loader,
+		int64_t flags) const {
+	const uint32_t creation = static_cast<uint32_t>(flags);
+	if (opennova::renderer::select_texture_dxt_format(creation,
+				opennova::renderer::kReferenceTextureDxtCaps) == opennova::renderer::TextureDxtFormat::None) {
+		return load_texture(name, loader);
 	}
-	// The diffuse loaders resolve exactly one file: the DDS sibling or the
-	// row's own name, never an alternate extension or suffix
-	// (renderer::stage_texture_load); type 1 the whole name, an upper-case
-	// .PCX turned white with its blue as alpha (renderer::plain_texture_load).
-	const std::string native = opennova::to_std(name);
-	opennova::renderer::TextureLoad source;
-	if (type == 1) {
-		source = opennova::renderer::plain_texture_load(native);
-	} else {
-		const std::string query = opennova::renderer::material_texture_query(native);
-		source = opennova::renderer::stage_texture_load(query,
-				index_.prefers_loose_file(query),
-				has_file(opennova::to_gd(opennova::renderer::material_dds_sibling(query))));
-	}
-	if (source.reader == opennova::renderer::TextureReader::None) {
+	if (root_dir_.is_empty() || name.strip_edges().is_empty()) {
 		return Ref<Texture2D>();
 	}
 	const uint64_t epoch = opennova::cache_epoch();
@@ -660,37 +726,101 @@ Ref<Texture2D> ResourceRoot::load_material_image(const String &name, uint8_t typ
 		texture_cache_.clear();
 		texture_cache_epoch_ = epoch;
 	}
-	const std::string key = std::string("material-image:") +
-			std::to_string(static_cast<int>(source.transform)) + ":" +
-			opennova::to_std(opennova::to_gd(source.file).to_lower());
-	const auto cached = texture_cache_.find(key);
+	const std::string cache_key = "created:" + std::to_string(creation) + ":" +
+			opennova::texture_load_key(texture_attempts_(name, loader, LOOKUP_SESSION_DEFAULT));
+	const auto cached = texture_cache_.find(cache_key);
 	if (cached != texture_cache_.end()) {
 		return cached->second;
 	}
-	const Ref<Texture2D> texture = opennova::load_material_image_from_bytes(
-			source, read_file(opennova::to_gd(source.file)));
-	texture_cache_.emplace(key, texture);
-	return texture;
+	opennova::renderer::TextureReader reader = opennova::renderer::TextureReader::None;
+	Ref<Image> image = load_texture_image(name, loader, LOOKUP_SESSION_DEFAULT, nullptr, &reader);
+	Ref<Texture2D> result;
+	if (reader == opennova::renderer::TextureReader::Dds) {
+		result = load_texture(name, loader);
+	} else if (image.is_valid() && !image->is_empty()) {
+		if (image->get_format() != Image::FORMAT_RGBA8) {
+			image->convert(Image::FORMAT_RGBA8);
+		}
+		const PackedByteArray data = image->get_data();
+		// The levels as their blocks decode, uploaded as RGBA8 (a picture's sides
+		// need not be multiples of the 4 x 4 block), then the box chain's tail to
+		// 1 x 1 a mipmapped image needs; no draw past the retail chain reads it.
+		std::vector<opennova::renderer::DeviceTextureLevel> levels =
+				opennova::renderer::pixel_device_texture_levels(data.ptr(),
+						static_cast<uint32_t>(image->get_width()),
+						static_cast<uint32_t>(image->get_height()), creation);
+		while (!levels.empty() && (levels.back().width > 1 || levels.back().height > 1)) {
+			const opennova::renderer::DeviceTextureLevel &above = levels.back();
+			opennova::renderer::DeviceTextureLevel below;
+			below.width = std::max(1u, above.width / 2);
+			below.height = std::max(1u, above.height / 2);
+			below.rgba = opennova::renderer::encode_rgba8(opennova::renderer::box_filter_half(
+					opennova::renderer::decode_rgba8(above.rgba.data(), above.width, above.height),
+					above.width, above.height));
+			levels.push_back(std::move(below));
+		}
+		if (!levels.empty()) {
+			PackedByteArray bytes;
+			for (const opennova::renderer::DeviceTextureLevel &level : levels) {
+				const int64_t at = bytes.size();
+				bytes.resize(at + static_cast<int64_t>(level.rgba.size()));
+				std::memcpy(bytes.ptrw() + at, level.rgba.data(), level.rgba.size());
+			}
+			const Ref<Image> device = Image::create_from_data(static_cast<int>(levels.front().width),
+					static_cast<int>(levels.front().height), true, Image::FORMAT_RGBA8, bytes);
+			if (device.is_valid() && !device->is_empty()) {
+				result = ImageTexture::create_from_image(device);
+			}
+		}
+	}
+	texture_cache_.emplace(cache_key, result);
+	return result;
 }
 
 Ref<Texture> ResourceRoot::load_material_texture(const String &name, uint8_t type) const {
-    if (type >= 16 && type <= 18) return opennova::prepare_material_chunk(read_file(name), type);
-    if (type < 4 || type > 7)
-        return opennova::prepare_material_texture(load_material_image(name, type), name, type);
-    const String dds = name.get_basename() + ".dds";
-    const std::string native_name = opennova::to_std(name);
-    const std::string selected = opennova::renderer::normal_material_filename(native_name,
-            index_.prefers_loose_file(native_name), has_file(dds));
-    const std::string key = "normal-source:" + selected;
-    const uint64_t epoch = opennova::cache_epoch();
-    if (texture_cache_epoch_ != epoch) { texture_cache_.clear(); texture_cache_epoch_ = epoch; }
-    auto cached = texture_cache_.find(key);
-    if (cached == texture_cache_.end()) {
-        const auto source = opennova::load_material_image_from_bytes(
-                opennova::normal_material_load(name, selected), read_file(opennova::to_gd(selected)));
-        cached = texture_cache_.emplace(key, source).first;
-    }
-    return opennova::prepare_material_texture(cached->second, name, type);
+	using opennova::renderer::MaterialTextureReader;
+	// The one file the row's loader opens and the reader that decodes it, never an
+	// alternate extension, suffix or reader (renderer::material_texture_source; a type-1
+	// row's upper-case .PCX turned white with its blue as alpha, renderer::material_texture_load);
+	// the session's loose-first policy decides a loose hit.
+	opennova::renderer::MaterialTextureSource source;
+	if (!root_dir_.is_empty() && !name.is_empty()) {
+		source = opennova::renderer::material_texture_source(opennova::to_std(name), type,
+				[this](const std::string &file) { return has_file(opennova::to_gd(file)); },
+				[this](const std::string &file) { return index_.prefers_loose_file(file); });
+	}
+	if (source.reader == MaterialTextureReader::Chunk) {
+		return opennova::prepare_material_chunk(read_file(opennova::to_gd(source.file)), type);
+	}
+	const opennova::renderer::TextureLoad load = opennova::renderer::material_texture_load(source, type);
+	Ref<Texture2D> image;
+	if (load.reader != opennova::renderer::TextureReader::None) {
+		const uint64_t epoch = opennova::cache_epoch();
+		if (texture_cache_epoch_ != epoch) {
+			texture_cache_.clear();
+			texture_cache_epoch_ = epoch;
+		}
+		const std::string key = "material-image:" + std::to_string(static_cast<int>(load.reader)) + ":" +
+				std::to_string(static_cast<int>(load.transform)) + ":" +
+				opennova::to_std(opennova::to_gd(load.file).to_lower());
+		auto cached = texture_cache_.find(key);
+		if (cached == texture_cache_.end()) {
+			cached = texture_cache_.emplace(key, opennova::load_material_image_from_bytes(
+					load, read_file(opennova::to_gd(load.file)))).first;
+		}
+		image = cached->second;
+	}
+	return opennova::prepare_material_texture(image, name, type);
+}
+
+bool ResourceRoot::material_texture_missing(const String &name, uint8_t type) const {
+	if (root_dir_.is_empty() || name.is_empty()) {
+		return false;
+	}
+	const opennova::renderer::MaterialTextureSource source = opennova::renderer::material_texture_source(
+			opennova::to_std(name), type, [this](const std::string &file) { return has_file(opennova::to_gd(file)); },
+			[this](const std::string &file) { return index_.prefers_loose_file(file); });
+	return source.file.empty() ? !has_file(name) : !has_file(opennova::to_gd(source.file));
 }
 
 Ref<Resource> ResourceRoot::load_font(const String &name) const {
@@ -708,6 +838,10 @@ Ref<Resource> ResourceRoot::load_font(const String &name) const {
 		if (font->load_from_bytes(bytes) == OK) {
 			return font;
 		}
+	}
+	// A CBIN font is found by walking the root's directory: a file source has none.
+	if (mount_kind_ == MountKind::Source) {
+		return Ref<Resource>();
 	}
 	return cbin_internal::find_font_by_name(file, root_dir_);
 }

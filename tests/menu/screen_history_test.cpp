@@ -92,8 +92,10 @@ mnu::Document document(const std::vector<const char *> &screens) {
 	for (const char *name : screens) {
 		mnu::Screen screen;
 		screen.name = name;
-		screen.root_window.name = std::string(name) + "_ROOT";
-		screen.root_window.type = mnu::WindowType::Window;
+		mnu::Window root;
+		root.name = std::string(name) + "_ROOT";
+		root.type = mnu::WindowType::Window;
+		screen.roots.push_back(root);
 		doc.screens.push_back(screen);
 	}
 	return doc;

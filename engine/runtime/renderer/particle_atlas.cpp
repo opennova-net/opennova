@@ -9,13 +9,28 @@
 
 #include <base/io/log.h>
 #include <base/io/strutil.h>
+#include <runtime/renderer/device_texture.h>
+#include <runtime/renderer/particle_density.h>
+#include <runtime/renderer/texture_compression.h>
+#include <runtime/renderer/texture_dxt.h>
+#include <runtime/renderer/texture_filter.h>
+#include <runtime/renderer/texture_load_rules.h>
 
 namespace opennova::renderer {
+
+int particle_atlas_page_side(std::uint8_t type) {
+	return unsigned(type) - 3u <= 4u ? 256 : 1024;
+}
+
+bool particle_atlas_fits(std::uint8_t type, int width, int height) {
+	const int side = particle_atlas_page_side(type);
+	return side - height >= 0 && side - width > 0;
+}
+
 namespace {
 
-
 int atlas_page_size(std::uint8_t type) {
-	return type <= 2 ? 1024 : 256;
+	return particle_atlas_page_side(type);
 }
 
 bool atlas_types_compatible(std::uint8_t page_type, std::uint8_t entry_type) {
@@ -149,6 +164,81 @@ bool ParticleRgbaImage::valid() const noexcept {
 	if (pixels > std::numeric_limits<std::size_t>::max() / 4)
 		return false;
 	return rgba.size() == pixels * 4;
+}
+
+// [orig: CParticleTexture_InitTextureAndChannels @ 0x5E82B2..0x5E82CC]
+std::uint32_t particle_atlas_page_creation_flags(std::int32_t session_texcompression_level,
+		std::int32_t session_particle_density) {
+	return kParticlePageCreationFlags |
+			particle_page_compression_flags(session_texcompression_level) |
+			particle_page_density_flags(session_particle_density);
+}
+
+int ParticleAtlasPageTexture::side() const noexcept {
+	if (format == TextureDxtFormat::None)
+		return rgba_levels.empty() ? 0 : rgba_levels.front().width;
+	return dxt_levels.empty() ? 0 : static_cast<int>(dxt_levels.front().width);
+}
+
+std::size_t ParticleAtlasPageTexture::level_count() const noexcept {
+	return format == TextureDxtFormat::None ? rgba_levels.size() : dxt_levels.size();
+}
+
+// [orig: GTexture_CreateFromPixelData_0 @ 0x6876C0]
+ParticleAtlasPageTexture particle_atlas_page_texture(const ParticleRgbaImage &page,
+		std::uint32_t creation_flags, const TextureDxtCaps &caps) {
+	ParticleAtlasPageTexture texture;
+	if (!page.valid())
+		return texture;
+	// [orig: @ 0x687717..0x687766 (the format)]
+	texture.format = select_texture_dxt_format(creation_flags, caps);
+	// [orig: @ 0x687785 -> GTexture_DownsampleToLimits @ 0x687170 (the halvings
+	//  the flags ask for, each GTexture_Downsample2x2_RGBA8)]
+	std::uint32_t width = static_cast<std::uint32_t>(page.width);
+	std::uint32_t height = static_cast<std::uint32_t>(page.height);
+	std::vector<std::uint8_t> base = page.rgba;
+	const std::uint32_t halvings = pixel_texture_halvings(width, height, creation_flags);
+	for (std::uint32_t i = 0; i < halvings && width > 1 && height > 1; ++i)
+		halve_rgba(base, width, height);
+	// [orig: @ 0x6877BA..0x687801 (the count over the halved sides)]
+	const std::uint32_t count = texture_level_count(width, height, creation_flags);
+	if (texture.format != TextureDxtFormat::None) {
+		texture.dxt_levels = build_dxt_texture_levels(base.data(), width, height,
+				texture.format, count);
+		return texture;
+	}
+	ParticleRgbaImage level0;
+	level0.width = static_cast<int>(width);
+	level0.height = static_cast<int>(height);
+	level0.rgba = std::move(base);
+	texture.rgba_levels.push_back(std::move(level0));
+	while (texture.rgba_levels.size() < count) {
+		const ParticleRgbaImage &above = texture.rgba_levels.back();
+		const std::uint32_t above_w = static_cast<std::uint32_t>(above.width);
+		const std::uint32_t above_h = static_cast<std::uint32_t>(above.height);
+		if (above_w <= 1 && above_h <= 1)
+			break;
+		// [orig: D3DXFilterTexture @ 0x6878BE, filter 5 (BOX)]
+		const std::vector<DxtColor> filtered =
+				box_filter_half(decode_rgba8(above.rgba.data(), above_w, above_h), above_w, above_h);
+		ParticleRgbaImage level;
+		level.width = static_cast<int>(std::max(1u, above_w / 2));
+		level.height = static_cast<int>(std::max(1u, above_h / 2));
+		level.rgba = encode_rgba8(filtered);
+		texture.rgba_levels.push_back(std::move(level));
+	}
+	return texture;
+}
+
+std::uint32_t particle_atlas_page_last_level(int side, std::uint32_t creation_flags) {
+	if (side <= 0)
+		return 0;
+	std::uint32_t width = static_cast<std::uint32_t>(side);
+	std::uint32_t height = width;
+	const std::uint32_t halvings = pixel_texture_halvings(width, height, creation_flags);
+	width = std::max(1u, width >> std::min(halvings, 31u));
+	height = std::max(1u, height >> std::min(halvings, 31u));
+	return pixel_texture_last_level(width, height, creation_flags);
 }
 
 ParticleAtlasAllocation allocate_retail_particle_atlas_rect(

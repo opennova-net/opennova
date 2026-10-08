@@ -1249,9 +1249,8 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
     int32_t pose_bam[3];
     entity_live_euler_bam(target, pose_bam);
     for (int s = 1; s < sections; ++s) {
-        // Every section spawns; only the TYPE lookup clamps at slot 16
-        // [orig: the loop bound @ 0x493918 vs the index clamp @ 0x49362f].
-        const int type_idx = traits->husk_sub_part_types[s <= 16 ? s : 16];
+        // Every section spawns; only the TYPE lookup clamps at slot 16.
+        const int type_idx = death_piece_type_index(traits->husk_sub_part_types, s);
         const DeathPieceType &tp = death_piece_type(type_idx);
         if (tp.probability < 1.0f) {
             // [orig: the probability roll @ 0x49365f — rand16 vs prob*65536]
@@ -1421,8 +1420,9 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
     if (!was_husked) target.death_motion = DeathMotionMode::None;
     uint32_t mask = 0;
     // The dispatch table @ 0x815410: every row spawns pieces and ORs Flags 6;
-    // buildings (5-8) additionally play the collapse sound and require a live husk
-    // [orig: Entity_ProcessBuildingDeath @ 0x494420]; bridges (11) add the
+    // boats (5-8; the IDB's name for their callback says building) additionally play
+    // the ship explosion and require a live husk [orig: Entity_ProcessBuildingDeath
+    // @ 0x494420; the boat class Entity_GetVehicleClass @0x4f9e27]; bridges (11) add the
     // water shock at DEAD points (present-pass leg); the no-row default also
     // clears 0x20000 [orig: Flags & ~0x20006 | 6 @ 0x493f4b].
     switch (unit_type) {
@@ -1437,7 +1437,7 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
             target.death_motion = DeathMotionMode::PiecePhysics;
         break;
     case 5: case 6: case 7: case 8:
-        // The building callback no-ops without a husk model, but the dispatch
+        // The boat callback no-ops without a husk model, but the dispatch
         // still ORs the death flags after it [orig: the huskFinal||husk gate
         // @ 0x49442c wraps ONLY the callback body; Flags |= table flagBits
         // @ 0x493f63 runs regardless].

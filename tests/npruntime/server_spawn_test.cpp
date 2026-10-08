@@ -5,6 +5,7 @@
 // own dcb, host's local player untouched). End-to-end: build_pool0_organic_batch then carries the
 // real dcb at OrganicSpawnRecord::owner_connection_id (the §1 wiring), the F3 self-match field.
 
+#include <runtime/inmatch/server_message_dispatch.h> // Server_ReleasePlayerDeployment
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/napi_np_protocol.h>
@@ -18,6 +19,7 @@
 
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/geom.h> // to_fixed
 #include <base/gameprofile/game_type.h>
 #include <base/gameprofile/game_type.h> // for_mission_mode: the SP/offline g_GameType seed
 #include <runtime/world/player_spawn.h> // kPlayerInfantryTypeId
@@ -602,6 +604,118 @@ int main() {
 		            "SP host still spawns under a default (0) game type")) return 1;
 		if (!expect(unseeded.x == 0.0f && unseeded.y == 0.0f,
 		            "the default 0 word walks the DM 6095/6002 chain past 6001 and lands at the origin")) return 1;
+	}
+
+	// D-NET-376: the host's own player takes the start marker's heading WORD. JO:CA
+	// CP01's 6001 start is authored at -197; retail's process holds 0xCC160000 on the
+	// marker, the spawned player's +0x10 and the look yaw (163 turned exactly would be
+	// 0xCC16C16C). [orig: Server_PositionPlayerForSpawn @0x50D3F7;
+	// Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
+	{
+		auto cp01_world = std::make_unique<w::World>();
+		cp01_world->registry.configure_pool(0, 16);
+		cp01_world->registry.configure_pool(3, 16);
+		w::Entity start;
+		start.kind = w::EntityKind::Marker;
+		start.item_id = 6001;
+		start.position = {-534.9119f, -139.3639f, 25.5f};
+		start.yaw = -197;
+		cp01_world->registry.spawn(3, start);
+
+		ns::LoopbackChannel cp01_loop;
+		inmatch::NapiNPServerCtx cp01_ctx;
+		inmatch::GameConfig cp01_settings;
+		cp01_settings.server_name = "SINGLEPLAYERGAME";
+		cp01_settings.max_players = 1;
+		cp01_settings.game_type = 0x30020u; // CP01's word, read from retail's process
+		inmatch::test::bring_up_host(cp01_ctx, inmatch::ConnectionMode::HostClient,
+		                        inmatch::SocketMode::Socketless, /*host_key=*/0, &cp01_loop,
+		                        cp01_settings);
+		cp01_ctx.world = cp01_world.get();
+		inmatch::Server_InitNewRoundState(cp01_ctx);
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cp01_ctx, *cp01_world) == 1,
+		            "the CP01 host player spawns")) return 1;
+		const w::AiEntity *motor = cp01_world->ai.for_handle(cp01_world->cached.local_player);
+		if (!expect(motor != nullptr && static_cast<uint32_t>(motor->heading) == 0xCC160000u,
+		            "the host player's motor heading is the marker's word 0xCC160000")) return 1;
+		const w::Entity *player = cp01_world->registry.get(cp01_world->cached.local_player);
+		if (!expect(player != nullptr && player->yaw == -197,
+		            "the player's whole-degree mirror stays the record's")) return 1;
+
+		// D-NET-377: a medic revive's deploy restores ONLY the saved position. The
+		// placement arm has already copied the marker's words onto +0x10..+0x18, so the
+		// revived player faces the start marker's way, not the way its body died; the
+		// yaw/pitch/roll the revive saved beside the position have no reader.
+		// [orig: Server_PositionPlayerForSpawn @0x50D60A..0x50D62A (the position
+		//  only), @0x50D637..0x50D655 (all six words zeroed); GameEvent_RevivePlayer
+		//  @0x517DCD..0x517E09 (the save)]
+		inmatch::NapiNPConnection &own = cp01_ctx.np_protocol.connection_list.front();
+		w::Entity *body = cp01_world->registry.get(cp01_world->cached.local_player);
+		w::AiEntity *body_motor = cp01_world->ai.for_handle(cp01_world->cached.local_player);
+		if (!expect(own.link.owned_entity == cp01_world->cached.local_player &&
+		                    body != nullptr && body_motor != nullptr,
+		            "the host's own connection owns the CP01 player")) return 1;
+		// The body died 30 units away facing elsewhere; the revive saved its spot.
+		body->position = {-504.9119f, -139.3639f, 26.0f};
+		body->yaw = 10;
+		body->pitch = 7;
+		body_motor->heading = 0x12340000;
+		body->alive = false;
+		body->health = 0;
+		body->flags |= w::kEntityFlagDead;
+		own.reply.revive_pose_valid = true;
+		own.reply.revive_pos[0] = w::to_fixed(body->position.x);
+		own.reply.revive_pos[1] = w::to_fixed(body->position.y);
+		own.reply.revive_pos[2] = w::to_fixed(body->position.z) + 0x4000;
+		inmatch::Server_ReleasePlayerDeployment(
+				cp01_ctx.config, own, *cp01_world, w::EntityHandle{});
+		if (!expect(body->alive && !own.reply.revive_pose_valid &&
+		                    body->position.x == -504.9119f && body->position.z == 26.25f,
+		            "the revive deploy lands on the saved spot raised 0x4000")) return 1;
+		if (!expect(static_cast<uint32_t>(body_motor->heading) == 0xCC160000u &&
+		                    body->yaw == -197 && body->pitch == 0,
+		            "the revived player keeps the start marker's facing, not the body's")) return 1;
+	}
+
+	// D-NET-377's no-pick arm: with no marker to place on, nothing writes +0x10, so
+	// a revived player keeps the heading word its body held.
+	// [orig: Server_PositionPlayerForSpawn — no arm stores +0x10 before @0x50D57A]
+	{
+		auto bare_world = std::make_unique<w::World>();
+		bare_world->registry.configure_pool(0, 16);
+		bare_world->registry.configure_pool(3, 16);
+		ns::LoopbackChannel bare_loop;
+		inmatch::NapiNPServerCtx bare_ctx;
+		inmatch::GameConfig bare_settings;
+		bare_settings.server_name = "SINGLEPLAYERGAME";
+		bare_settings.max_players = 1;
+		bare_settings.game_type = 0x30020u;
+		inmatch::test::bring_up_host(bare_ctx, inmatch::ConnectionMode::HostClient,
+		                        inmatch::SocketMode::Socketless, /*host_key=*/0, &bare_loop,
+		                        bare_settings);
+		bare_ctx.world = bare_world.get();
+		inmatch::Server_InitNewRoundState(bare_ctx);
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(bare_ctx, *bare_world) == 1,
+		            "the marker-less host player spawns")) return 1;
+		inmatch::NapiNPConnection &own = bare_ctx.np_protocol.connection_list.front();
+		w::Entity *body = bare_world->registry.get(bare_world->cached.local_player);
+		w::AiEntity *body_motor = bare_world->ai.for_handle(bare_world->cached.local_player);
+		if (!expect(body != nullptr && body_motor != nullptr,
+		            "the marker-less player has a body and a motor")) return 1;
+		body_motor->heading = 0x12340000;
+		body->yaw = 10;
+		body->alive = false;
+		body->health = 0;
+		body->flags |= w::kEntityFlagDead;
+		own.reply.revive_pose_valid = true;
+		own.reply.revive_pos[0] = 5 << 16;
+		own.reply.revive_pos[1] = 6 << 16;
+		own.reply.revive_pos[2] = (7 << 16) + 0x4000;
+		inmatch::Server_ReleasePlayerDeployment(
+				bare_ctx.config, own, *bare_world, w::EntityHandle{});
+		if (!expect(body->alive && body->position.x == 5.0f && body->position.z == 7.25f &&
+		                    static_cast<uint32_t>(body_motor->heading) == 0x12340000u,
+		            "with no placement the revived player keeps its body's heading word")) return 1;
 	}
 
 	// A join-time spectator is POSITIONED with the substitute team while its

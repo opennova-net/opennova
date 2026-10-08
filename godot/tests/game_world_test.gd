@@ -51,6 +51,89 @@ func test_mission_load_reports_only_real_stage_checkpoints() -> void:
 		"the real load pipeline reports exact stage starts through world ready")
 
 
+# The object detail (game.cfg's object_polydetail; engine renderer/object_lod.h):
+# the shell's options word reaches the frames only through the copy each
+# mission start takes, so a change made mid-mission waits for the next one.
+func test_object_detail_reaches_the_frames_at_the_next_mission_start() -> void:
+	var world := WorldFixture.make_world(self)
+	assert_eq(world.get_object_detail(), GameWorld.object_detail_fresh_profile())
+	world.set_object_polydetail(1)
+	assert_eq(world.get_object_polydetail(), 1)
+	assert_eq(world.get_object_detail(), GameWorld.object_detail_fresh_profile(),
+			"the options word waits for a mission start")
+	assert_eq(WorldFixture.load_mission(
+			world, _minimal_assets_dir(), WorldFixture.MINIMAL_MISSION), OK)
+	assert_eq(world.get_object_detail(), 1, "the mission start copies the word")
+	world.set_object_polydetail(3)
+	assert_eq(world.get_object_detail(), 1,
+			"a change made mid-mission waits for the next mission start")
+
+
+# The texture filter (game.cfg's texfilter_level; engine
+# renderer/texture_filter.h): the model effects follow the options word at
+# once, while the terrain's device mode and the viewport's anisotropy follow
+# the copy each mission start takes.
+func test_texture_filter_reaches_the_effects_now_and_the_device_at_a_mission_start() -> void:
+	var world := WorldFixture.make_world(self)
+	var restore_level: int = world.get_viewport().anisotropic_filtering_level
+	assert_eq(world.get_session_texfilter_level(), GameWorld.texfilter_level_fresh_profile())
+	world.set_texfilter_level(3)
+	assert_eq(world.get_texfilter_effect_mode(), 2, "the effects take the ANISO define at once")
+	assert_eq(GameWorld.get_texfilter_effect_filter(), 2)
+	assert_eq(world.get_texfilter_device_mode(), 2, "the device keeps the session's trilinear mode")
+	assert_eq(GameWorld.get_texfilter_device_filter(), 1)
+	assert_eq(WorldFixture.load_mission(
+			world, _minimal_assets_dir(), WorldFixture.MINIMAL_MISSION), OK)
+	assert_eq(world.get_session_texfilter_level(), 3, "the mission start copies the word")
+	assert_eq(world.get_texfilter_device_mode(), 4)
+	assert_eq(GameWorld.get_texfilter_device_filter(), 2)
+	assert_eq(world.get_viewport().anisotropic_filtering_level, Viewport.ANISOTROPY_16X,
+			"mode 4 is the device's MaxAnisotropy, 16 on the reference machine")
+	world.set_texfilter_level(0)
+	assert_eq(GameWorld.get_texfilter_effect_filter(), 0, "the bilinear effects at once")
+	assert_eq(world.get_texfilter_device_mode(), 4,
+			"a change made mid-mission waits for the next mission start")
+	# The process-wide device state goes back to the fresh profile's.
+	world.set_texfilter_level(GameWorld.texfilter_level_fresh_profile())
+	world.get_viewport().anisotropic_filtering_level = restore_level
+	ShaderGlobals.restore_defaults(["opennova_texfilter_device", "opennova_texfilter_effect"])
+
+
+# The texture compression and the particle density (game.cfg's
+# texcompression_level and particle_density; engine renderer/texture_compression.h,
+# renderer/particle_density.h): the options words reach the terrain the mission
+# builds and the effect world's pages and stride only through the copy each
+# mission start takes (D-RMAT-24).
+func test_compression_and_density_reach_the_next_mission_start() -> void:
+	var world := WorldFixture.make_world(self)
+	assert_eq(world.get_session_texcompression_level(),
+			GameWorld.texcompression_level_fresh_profile())
+	assert_eq(world.get_session_particle_density(), GameWorld.particle_density_fresh_profile())
+	world.set_texcompression_level(2)
+	world.set_particle_density(7)
+	assert_eq(world.get_particle_density(), 2, "the density word is clamped into 0..2")
+	world.set_particle_density(0)
+	assert_eq(world.get_session_texcompression_level(),
+			GameWorld.texcompression_level_fresh_profile(), "the options words wait for a mission start")
+	assert_eq(WorldFixture.load_mission(
+			world, _minimal_assets_dir(), WorldFixture.MINIMAL_MISSION), OK)
+	assert_eq(world.get_session_texcompression_level(), 2, "the mission start copies the word")
+	assert_eq(world.get_session_particle_density(), 0, "and the density")
+	var terrain: Terrain = world.get_terrain_node()
+	assert_not_null(terrain)
+	if terrain != null:
+		assert_eq(terrain.get_texcompression_level(), 2, "the terrain builds under the copy")
+	var effects: EffectWorld = world.get_effect_world()
+	assert_not_null(effects)
+	if effects != null:
+		var report: Dictionary = effects.get_debug_draw_list_report()
+		assert_eq(int(report.get("session_texcompression_level", -1)), 2)
+		assert_eq(int(report.get("session_particle_density", -1)), 0)
+	world.set_texcompression_level(0)
+	assert_eq(world.get_session_texcompression_level(), 2,
+			"a change made mid-mission waits for the next mission start")
+
+
 func _append_to_file(path: String, text: String) -> void:
 	var file := FileAccess.open(path, FileAccess.READ_WRITE)
 	assert_not_null(file, "the staged root carries %s to append to" % path.get_file())

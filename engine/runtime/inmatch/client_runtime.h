@@ -129,7 +129,8 @@ public:
     void reset_local_round_state();
 	// Monotonic receive-side deployment-release edge. It advances when initial
 	// establishment becomes applicable (even if deploy UI remains pending), and
-	// again on an ACK-qualified post-pick release. Unrelated valid 0x5A grants
+	// again on an ACK-qualified post-pick release or the self record's respawn
+	// edge (a medic revive's deploy sends no 0x5A). Unrelated valid 0x5A grants
 	// still open gameplay_gate_open(), but do not invent a pose/respawn edge.
 	// Consumers use the revision,
 	// rather than positive health alone, to distinguish a real respawn from a
@@ -138,7 +139,8 @@ public:
 		return deployment_release_revision_;
 	}
 	// The independent authoritative spawn/health latch. Death closes it; an
-	// applicable 0x5A reopens it. Input case 12 never changes it, so a player-paced
+	// applicable 0x5A or the self record's respawn edge reopens it. Input case 12
+	// never changes it, so a player-paced
 	// pick cannot manufacture a local death while its gameplay hold is armed.
 	bool authoritative_spawn_released() const {
 		return authoritative_spawn_released_;
@@ -453,6 +455,9 @@ public:
 	void set_character_join_vars(CharacterJoinVars vars) {
 		if (joiner_) joiner_->set_character_join_vars(vars);
 	}
+	void set_auto_medic_preference(uint32_t disabled) {
+		if (joiner_) joiner_->set_auto_medic_preference(disabled);
+	}
 	void set_join_request(JoinRole role, std::string spectator_password,
 			std::string server_password, std::string join_password = {}) {
 		if (joiner_) {
@@ -482,16 +487,17 @@ public:
 	void set_join_cd_cookie(std::vector<uint8_t> cookie) {
 		if (joiner_) joiner_->set_cd_cookie(std::move(cookie));
 	}
-	void set_charattr_challenge_table(CharAttrChallengeTable table) {
-		if (joiner_) joiner_->set_charattr_challenge_table(std::move(table));
+	void set_charattr_table(CharAttrTable table) {
+		if (joiner_) joiner_->set_charattr_table(std::move(table));
 	}
-	void clear_charattr_challenge_table() {
-		if (joiner_) joiner_->clear_charattr_challenge_table();
+	void clear_charattr_table() {
+		if (joiner_) joiner_->clear_charattr_table();
 	}
 	// The joiner's live charattr table (null without a joiner: a HostClient
-	// reads its embedder's boot copy, which no 0x41 ever mutates).
-	const CharAttrChallengeTable *charattr_challenge_table() const {
-		return joiner_ ? &joiner_->charattr_challenge_table() : nullptr;
+	// reads its embedder's boot copy, which its own restriction step alone
+	// mutates).
+	const CharAttrTable *charattr_table() const {
+		return joiner_ ? &joiner_->charattr_table() : nullptr;
 	}
 	bool set_integrity_challenge_profile(std::string_view id) {
 		return joiner_ != nullptr &&

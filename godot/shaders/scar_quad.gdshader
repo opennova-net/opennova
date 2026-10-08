@@ -28,8 +28,19 @@ render_mode unshaded, blend_mix, depth_draw_never, cull_back;
 // the exact inverse of the blit's transfer curve on the way out.
 #include "res://shaders/color.gdshaderinc"
 #include "res://shaders/effect_fog.gdshaderinc"
+#include "res://shaders/texture_filter.gdshaderinc"
 
+// The strip's TGA is created with its table word | 1 (CLAMP), no 0x8, so the
+// device samples it MIN/MAG LINEAR with MIPFILTER POINT whatever game.cfg's
+// texfilter_level says, over the chain its creation flags give it (the
+// scorches' 64 x 64 down to 4 x 4, bigscar three levels, the glass holes one)
+// [orig: Scar_LoadTextures @ 0x5cc2f0..0x5cc302; GTexture_CreateFromPixelData_0
+// @ 0x6877ba..0x687801; CGfxDevice_ApplyRenderStates @ 0x67e463..0x67e4a7]
+// (engine renderer/texture_filter.h, TextureStage::ImpactScar): bilinear on the
+// nearest level, never past albedo_max_lod (the presenter's
+// texture_max_lod under world::scar_texture_strip_creation_flags).
 uniform sampler2D albedo_tex : repeat_disable, filter_linear_mipmap;
+uniform float albedo_max_lod = 1000.0;
 
 // The presenter's ONE device fold: retail writes no depth bias — the scar quad
 // is coplanar with the struck face and the D3D rasteriser's own bias keeps it
@@ -50,7 +61,7 @@ void vertex() {
 }
 
 void fragment() {
-	vec4 tex = texture(albedo_tex, UV);
+	vec4 tex = sample_point_mip(albedo_tex, UV, albedo_max_lod);
 	// MODULATE2X(TEXTURE, DIFFUSE), saturating [orig: RenderState_DecodeModeColorStage
 	// @0x681080 family 0x600 under GfxDevice_Modulate2XEnabled].
 	vec3 rgb = min(tex.rgb * COLOR.rgb * 2.0, vec3(1.0));

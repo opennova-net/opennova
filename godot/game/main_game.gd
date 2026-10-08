@@ -77,7 +77,7 @@ var _frame_stats := FrameStats.new()
 var _render_stats := RootRenderStatsSampler.new()
 var _frame_phase_sampler := RootFramePhaseSampler.new()
 var _mp_companion: MpMenuCompanion  # drives the multiplayer (mp.mnu) menu by control name
-var _bundled_companion: BundledMenuCompanion  # the bundled menu's PLAY RETAIL / CHANGE FOLDER
+var _bundled_companion: BundledMenuCompanion  # the bundled menu's PLAY RETAIL / CHANGE FOLDER / EXIT
 var _retail_picker: FileDialog  # the PLAY RETAIL folder picker, while open
 var _web_retail_picking := false  # the web page's picker is open (ADR 0049)
 var _lan_session: LanSession  # retail-style 0x41/0x81 LAN enumeration browser
@@ -87,9 +87,13 @@ var _deploy_presenter: DeployScreenPresenter  # the joiner's deploy-map screen (
 var _command_map_presenter: CommandMapPresenter  # the commander map (cmap.mnu CMAP)
 var _end_round_presenter: EndRoundPresenter  # the MP end-of-round overlay + stat.mnu STAT
 var _chosen_avatar: Dictionary = {}  # canonical active + per-side PLAYER_INFO selection
-var _profile_root_key := ""  # reload weapon.sav only when the mounted game/expansion changes
+var _profile_root_key := ""  # reload the profile only when the mounted game/expansion changes
+var _intro_tail_run := false  # the first menu start's profile save ran
 var _world_load := WorldLoadCoordinatorScript.new()
 var _world_load_pending := false
+# The mission a `--mission` launch starts in, until its load ends: one that fails is named on a
+# line of the log the editor's Play reads back (ResourceRoot.launch_mission_failed_marker()).
+var _launch_mission := ""
 var _end_flow := MissionEndFlow.new()  # the SP end-of-mission flow (round_end -> the cine's screen)
 var _sp_restart_info: LoadingScreenInfo = null  # the last SP load: the restart's entry
 var _sp_restart_loader := Callable()
@@ -130,9 +134,19 @@ func _init() -> void:
 
 func _on_player_options_changed(state: PlayerOptions.State) -> void:
 	# update() applied the device-global audio once already; only the running
-	# Simulation's mouse settings are this listener's to push.
+	# Simulation's view settings are this listener's to push.
 	var sim: Simulation = _world.get_sim() if _world != null else null
-	_player_options.apply_mouse(sim)
+	_player_options.apply_view(sim)
+	# The world copies the object detail at its next mission start; the
+	# texture filter reaches the model effects at once and the terrain's
+	# device filter at the next mission start.
+	if _world != null:
+		_world.set_object_polydetail(state.object_polydetail)
+		_world.set_texfilter_level(state.texfilter_level)
+		# The particle density and the texture compression reach the next
+		# mission the world starts (its session copies, D-RMAT-24).
+		_world.set_particle_density(state.particle_density)
+		_world.set_texcompression_level(state.texcompression_level)
 	if _hud_presenter != null:
 		_hud_presenter.set_crosshair_style(state.crosshair_style)
 		_hud_presenter.set_crosshair_color(state.crosshair_color)
@@ -300,6 +314,9 @@ func _ready() -> void:
 	# world names the mission-start open, the mission-end teardown and the
 	# per-frame gamemus var pump through these three signals.
 	_world.set_music_director(MusicService.director())
+	# The player profile every mission's sim takes its current records from
+	# (PlayerProfile, loaded again at each menu start on a mount).
+	_world.set_player_profiles(PlayerProfile.store())
 	_world.music_context_opened.connect(MusicService.open_game_context)
 	_world.music_context_closed.connect(MusicService.stop_context)
 	_world.music_var_changed.connect(MusicService.set_var)
@@ -345,12 +362,12 @@ func _ready() -> void:
 	if not _world.mission_effects.is_connected(_on_shell_mission_effects):
 		_world.mission_effects.connect(_on_shell_mission_effects)
 	if dir.is_empty():
-		# No --resource-dir: OpenNova's own placeholder menu. The launch
-		# shortcuts below all need game data, so they only follow a real dir.
+		# No --resource-dir: OpenNova's own game (ADR 0048), whose build is game
+		# data as an install is, so the launch shortcuts below follow it too.
 		if not _enter_bundled_menu():
 			get_tree().quit(1)
-		return
-	if not _enter_menu(dir):
+			return
+	elif not _enter_menu(dir):
 		get_tree().quit(1)
 		return
 	# F6 is still the real standalone game and normal loading presentation; it
@@ -365,6 +382,7 @@ func _ready() -> void:
 	# default; a post-spawn pose rides the game_debug teleport action over MCP.
 	var sp_mission := LaunchFlags.mission()
 	if not sp_mission.is_empty():
+		_launch_mission = sp_mission
 		_on_start_requested(sp_mission)
 		return
 	# Co-op LAN launches (`--lan-host` / `--lan-join`) ride the controller.
@@ -642,7 +660,6 @@ func _enter_menu(dir: String) -> bool:
 		if root == null:
 			return false
 		_root = root
-	refresh_local_profile_for_mount()
 	# The menu, loading screen, and world are one runtime resource session.
 	# GameWorld must not remount from mutable persisted settings after boot.
 	_world.set_resource_root(_root)
@@ -666,8 +683,24 @@ func _enter_menu(dir: String) -> bool:
 	if not _menu_shell.setup(_root):
 		push_warning("MainGame: no menu found in resource dir (looked for %s)"
 				% _menu_shell.main_menu_file)
+	# The player profile loads after the menu's text tables, as the original's
+	# menu start loads game.bin before it (engine: runtime/profile/player_profiles.h).
+	refresh_local_profile_for_mount()
+	_run_intro_tail()
 	_menu_shell.show_menu()
 	return true
+
+
+# The first menu start's intro step without its videos (which OpenNova does not
+# play): every profile record's +1412 cleared and the profile saved, so a first
+# run writes player.sav and weapon.sav as the original's does
+# (engine: PlayerProfiles.clear_intro_pending).
+func _run_intro_tail() -> void:
+	if _intro_tail_run:
+		return
+	_intro_tail_run = true
+	PlayerProfile.store().clear_intro_pending()
+	PlayerProfile.save()
 
 
 # --- Bundled menu + retail picker (ADR 0048) ----------------------------------
@@ -788,9 +821,12 @@ func _wire_shell() -> void:
 	_menu_shell.restart_requested.connect(_on_restart_requested)
 	_menu_shell.resume_requested.connect(resume)
 	_menu_shell.novaworld_requested.connect(_net.open_novaworld_panel)
+	_menu_shell.game_reloaded.connect(_on_game_reloaded)
+	_menu_shell.ingame_controls_accepted.connect(_on_ingame_controls_accepted)
 	_bundled_companion = BundledMenuCompanion.new()
 	_bundled_companion.play_retail_requested.connect(play_retail)
 	_bundled_companion.change_folder_requested.connect(request_retail_dir)
+	_bundled_companion.exit_requested.connect(_on_exit_to_desktop)
 	_menu_shell.add_companion(_bundled_companion)
 	# Delegate mp.mnu and player.mnu to their respective companions.
 	_mp_companion = MpMenuCompanion.new()
@@ -806,32 +842,58 @@ func _wire_shell() -> void:
 	_player_info_companion.avatar_chosen.connect(_on_avatar_chosen)
 
 
-# PLAYER_INFO ACCEPT persists both side records and the shared callsign, while
-# the selected loadout continues through the existing spawn-kit seam.
+# The Mods list switched the game: the profile loads again under the expansion it
+# took (the expansion's weapon.sav), the one the menu shows and the next spawn
+# uses (refresh_local_profile_for_mount hands it to PLAYER_INFO).
+func _on_game_reloaded() -> void:
+	refresh_local_profile_for_mount()
+
+
+# The in-game options Accept wrote the dialog into the current profile record:
+# the record's binding table and ENABLE_JOYSTICK word onto the live bindings,
+# the mouse look's live words into the running session, then the save, as the
+# original's Accept does (engine menu::OptionsScreen::ApplyControls carries
+# the witness).
+func _on_ingame_controls_accepted() -> void:
+	ControlsBindings.apply_profile(PlayerProfile.store())
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	if sim != null:
+		sim.apply_ingame_options(PlayerProfile.store())
+	PlayerProfile.save()
+
+
+# PLAYER_INFO ACCEPT writes the name and both side records into the current
+# profile record in memory, as the original's dialog does (the next save point
+# writes the files), while the selected loadout continues through the existing
+# spawn-kit seam.
 func _on_avatar_chosen(profile: Dictionary) -> void:
 	set_local_player_profile(profile)
-	var typed_name := String(profile.get("name", "")).strip_edges()
-	if not typed_name.is_empty():
-		PlayerProfile.save_callsign(typed_name)
-	if _root != null:
-		var save_error := PlayerProfile.save_character_profile(_root, profile)
-		if save_error != OK:
-			push_warning("MainGame: could not save PLAYER_INFO profile (error %d)"
-					% save_error)
+	var accept_error := PlayerProfile.accept_player_info(profile)
+	if accept_error != OK:
+		push_warning("MainGame: the PLAYER_INFO selection was not taken (error %d)"
+				% accept_error)
 
 
-## Re-read the local player's character profile (weapon.sav) when the mounted
-## root or its expansion changed. The menu entry and a join's pre-dial switch to
-## the host's expansion both land here, so the next spawn kit and the join's
-## character vars come from the mounted expansion's profile.
+## Load the player profile (player.sav, and the mounted expansion's weapon.sav)
+## again when the mounted root or its expansion changed, as the original's menu
+## start loads it; the menu entry and a join's pre-dial switch to the host's
+## expansion both land here, so the next spawn kit and the join's character vars
+## come from the mounted expansion's profile. The menu's text tables must be
+## registered first: a fresh record's macros are the menu table's.
 func refresh_local_profile_for_mount() -> void:
 	if _root == null:
 		return
-	var profile_root_key := "%s|%s" % [String(_root.get_root_dir()),
-			String(_root.get_expansion()).to_lower()]
+	var profile_root_key := "%s|%s|%s" % [String(_root.get_root_dir()),
+			String(_root.get_expansion()).to_lower(), String(LaunchFlags.working_dir())]
 	if profile_root_key != _profile_root_key:
+		var load_error := PlayerProfile.load_for(_root)
+		if load_error != OK:
+			push_warning("MainGame: the player profile could not be read (error %d); defaults stand"
+					% load_error)
 		_chosen_avatar = PlayerProfile.load_character_profile(_root)
 		_profile_root_key = profile_root_key
+		if _player_info_companion != null:
+			_player_info_companion.set_persisted_profile(_chosen_avatar)
 
 
 # Install the in-memory local-player profile used by the next mission spawn.
@@ -865,6 +927,7 @@ func _is_use_item_key(keycode: Key) -> bool:
 # --- Menu <-> world transitions ----------------------------------------------
 
 func _on_start_requested(bms_name: String) -> void:
+	_save_profile_for_single_player()
 	# Single-player: the loading screen is the sidecar image alone — no session
 	# text [orig: the not-in-session path draws only the background @ 0x521ebe].
 	start_world_load(
@@ -872,9 +935,18 @@ func _on_start_requested(bms_name: String) -> void:
 		_world.load_mission.bind(bms_name))
 
 
+# The single-player start's profile legs: the started mission's campaign index
+# into the current record (the catalog's, -1 on every row), then the profile
+# saved ahead of the session (engine: PlayerProfiles.record_mission_start).
+func _save_profile_for_single_player() -> void:
+	PlayerProfile.store().record_mission_start(-1)
+	PlayerProfile.save()
+
+
 ## Boot an exact loose mission through the same loading
 ## presentation and GameWorld lifecycle as menu play.
 func start_loose_mission(bms_name: String) -> void:
+	_save_profile_for_single_player()
 	start_world_load(
 		LoadingScreenInfo.for_mission(bms_name),
 		_world.load_loose_mission.bind(bms_name))
@@ -898,6 +970,7 @@ func start_saved_mission(saved_path: String, bms_name: String, profile: Dictiona
 		return ERR_FILE_CANT_OPEN
 	if not profile.is_empty():
 		set_local_player_profile(profile)
+	_save_profile_for_single_player()
 	start_world_load(LoadingScreenInfo.for_mission(bms_name),
 			_world.load_mission_data.bind(mission, bms_name))
 	return OK
@@ -1036,6 +1109,17 @@ func _on_join_screen_cancelled() -> void:
 
 
 func _begin_world_load() -> void:
+	# Every mission start's session apply copies the profile's +1460 word, which
+	# the round end writes back, and its ten macros, the chat presets
+	# (engine: runtime/profile/player_profiles.h).
+	PlayerProfile.store().begin_session()
+	# Every session start's controls apply: the record's binding table onto the
+	# live bindings and its ENABLE_JOYSTICK word into the joystick gate, before
+	# the mission loads (engine profile::apply_controls carries the witness). The
+	# session's own words follow at its load (Simulation.use_player_profile).
+	ControlsBindings.apply_profile(PlayerProfile.store())
+	if _hud_presenter != null:
+		_hud_presenter.set_chat_presets(PlayerProfile.store().get_macros())
 	# A mission start from the menu leaves it: the menu keeps the screen it was
 	# started from, which the return after the mission shows again (D-MNU-28).
 	_menu_shell.leave_menu_mode()
@@ -1058,6 +1142,7 @@ func _on_world_loaded() -> void:
 	# under the loading presentation until the separate authoritative edge.
 	# A fresh mission gets a fresh pick set (stale handles never cross
 	# sessions); the pick session curates the shell-owned list from here on.
+	_launch_mission = ""  # the launch's mission loaded: a later load's failure is not its
 	_pick_session.begin_world(_world)
 	_on_dev_tools_open_changed(is_dev_tools_open())
 	var sim := _world.get_sim()
@@ -1252,6 +1337,12 @@ func _on_world_load_failed(reason: String) -> void:
 	# (Client_CheckDisconnectOrEscDuringLoad) and the network-wait failure legs;
 	# scene_entry = "Post Menu"] (docs/interface/loading-screen-re.md, the
 	# load-flow case matrix).
+	if not _launch_mission.is_empty():
+		# The launch's own mission (`--mission`, the editor's Play mission): said on a line of
+		# its own, which Play reads back by its marker.
+		push_warning("MainGame: %s%s %s"
+				% [ResourceRoot.launch_mission_failed_marker(), _launch_mission, reason])
+		_launch_mission = ""
 	_abort_to_menu("mission load failed", reason)
 
 
@@ -1416,6 +1507,7 @@ func _teardown_world_to_menu(exit_reason := GameWorld.MISSION_EXIT_QUIT) -> void
 # the SP restart's (`restart` keeps the HUD tip's once-counters, as the
 # restart's start does).
 func _teardown_world(restart: bool) -> void:
+	_record_round_end()
 	_world_load.dismiss()
 	_join_screen.close()
 	finish_hud_hidden_capture()
@@ -1440,6 +1532,19 @@ func _teardown_world(restart: bool) -> void:
 		_player_presenter.setup(_world, _camera, _camera, ControlsBindings.model())
 	if _hud_presenter != null:
 		_hud_presenter.teardown(restart)
+
+
+# The mission teardown's profile step (and the SP restart's): outside a session
+# it runs only once the round is over, then the profile's +1460 word goes back
+# and the profile is saved. No catalog row carries a campaign, so no
+# completion byte is written (engine: PlayerProfiles.record_round_end).
+func _record_round_end() -> void:
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	if sim == null:
+		return
+	var in_session := sim.is_host_listening() or sim.is_joiner()
+	if PlayerProfile.store().record_round_end(in_session, sim.is_round_over(), -1, -1, false):
+		PlayerProfile.save()
 
 
 ## The SP restart: the main frame routed exit reason 4 out of a session (engine
@@ -1500,6 +1605,9 @@ static func post_mission_error_text(route: PostMissionRoute) -> String:
 # leave a frozen canvas, so the web build ignores EXIT (ADR 0049).
 func _on_exit_to_desktop() -> void:
 	if not OS.has_feature("web"):
+		# The main menu's EXIT saves the player profile before the game quits
+		# (engine: runtime/profile/player_profiles.h, the save points).
+		PlayerProfile.save()
 		request_quit()
 
 

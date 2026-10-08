@@ -85,7 +85,8 @@ static func definitions() -> Array[McpToolDef]:
 			+ "set_audio_bus_mute {bus,muted}; set_audio_bus_solo {bus,soloed}; "
 			+ "set_audio_bus_bypass {bus,bypassed}."
 			+ " Automation actions: deploy_pick {zone} (0 = Default Spawn); "
-			+ "set_viewmodel_weapon {weapon}; clear_viewmodel_weapon; "
+			+ "set_viewmodel_weapon {weapon} (the viewmodel and its FSM only: the round fired "
+			+ "stays the equipped slot's); clear_viewmodel_weapon; "
 			+ "kill_group {group}; crew_vehicle {occupant_ssn,vehicle_ssn}; "
 			+ "crew_local_player {vehicle_ssn}; local_player_look {dx_px,dy_px}; "
 			+ "plus the net_joiner_diagnostics check.",
@@ -140,14 +141,18 @@ static func definitions() -> Array[McpToolDef]:
 			"Drive the compiled menu. op=state returns the current file/screen + widget rows "
 			+ "(design-space rects); press activates a named widget through the real mouse pump "
 			+ "(press+release at its center); press_at pumps at design coords x,y (list rows, "
-			+ "combo popups, spin arrows) and returns the hit widget index; click_at feeds a REAL "
+			+ "combo popups, spin arrows) and returns the hit widget index; move_at (hold_at) "
+			+ "pumps one sample there with the button up (held), as a motion does (the hover and "
+			+ "its sounds); state's sounds are the last 16 window sounds the menu played "
+			+ "({seq, file, trigger}); click_at feeds a REAL "
 			+ "left click at design coords through Godot input dispatch (mouse filters and mounts "
 			+ "apply; lands next frame); key feeds one key event (keycode + optional unicode); "
 			+ "screen jumps within the open .mnu; open loads another .mnu file.",
 			{
 				"op": {
 					"type": "string",
-					"enum": ["state", "press", "press_at", "click_at", "key", "screen", "open"],
+					"enum": ["state", "press", "press_at", "move_at", "hold_at", "click_at", "key", "screen",
+						"open"],
 				},
 				"name": {
 					"type": "string",

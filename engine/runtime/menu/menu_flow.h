@@ -24,10 +24,14 @@ public:
 	const std::string &selected_mission() const { return selected_mission_; }
 	void clear_selected_mission() { selected_mission_.clear(); }
 
+	// ACCEPT's pick of the Mods list (ModList::pick): `name` the expansion, "" the base game,
+	// against `current`, the one running ("" the base game). The same name, without case, takes
+	// nothing and drops a request raised before; another is queued for the next update.
 	enum class ExpansionPick { Ignored, Queued, NeedsPackedRoot };
 	ExpansionPick request_expansion(const std::string &name, const std::string &current,
 			bool packed_root);
-	bool has_pending_expansion() const { return !expansion_request_.empty(); }
+	bool has_pending_expansion() const { return expansion_pending_; }
+	// The request's name ("" the base game), the request dropped; "" with none.
 	std::string take_expansion_reload();
 
 private:
@@ -37,6 +41,7 @@ private:
 	std::vector<std::string> sp_lists_, briefings_, accepts_;
 	std::unordered_map<int, std::vector<MissionChoice>> mission_rows_;
 	std::string selected_mission_, expansion_request_;
+	bool expansion_pending_ = false;
 };
 
 // Host-dialog mission rotation. The networking option-value readback stays

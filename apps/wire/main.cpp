@@ -1770,7 +1770,7 @@ void print_tag_03_c2s(const std::vector<uint8_t> &body) {
 		return;
 	}
 	std::printf("        [0x03 C2S] auto-medic=%s\n",
-	            preference.enabled ? "enabled" : "manual");
+	            preference.enabled() ? "enabled" : "manual");
 }
 
 void print_tag_2e_c2s(const std::vector<uint8_t> &body) {
@@ -1809,14 +1809,14 @@ void print_tag_31(const std::vector<uint8_t> &body) {
 	            unsigned(r.ammo_index), unsigned(r.xor_key));
 }
 
-// S2C 0x42 input/state-flags push.
+// S2C 0x42 the authority's charattr disable latches.
 void print_tag_42(const std::vector<uint8_t> &body) {
 	uint16_t flags = 0; size_t used = 0;
-	if (!decode_input_state_flags(body.data(), body.size(), flags, used)) {
-		std::printf("        [0x42] input-state-flags decode failed (need 2 B got %zu)\n", body.size());
+	if (!decode_charattr_disabled_properties(body.data(), body.size(), flags, used)) {
+		std::printf("        [0x42] charattr-disabled-properties decode failed (need 2 B got %zu)\n", body.size());
 		return;
 	}
-	std::printf("        [0x42] input-state-flags=0x%04x\n", unsigned(flags));
+	std::printf("        [0x42] charattr-disabled-properties=0x%04x\n", unsigned(flags));
 }
 
 // S2C 0x79 host network-quality scalar.
@@ -2053,7 +2053,7 @@ void print_payload(char dir, int frame, int tag,
 	else if (dir == 'S' && tag == s2c::SCORE_DELTA_SOUND) print_tag_81(payload);
 	else if (dir == 'S' && tag == s2c::ENTITY_CHECKSUM_REQ) print_tag_30(payload);
 	else if (dir == 'S' && tag == s2c::LOADOUT_CRC_REQ) print_tag_31(payload);
-	else if (dir == 'S' && tag == s2c::INPUT_STATE_FLAGS) print_tag_42(payload);
+	else if (dir == 'S' && tag == s2c::CHARATTR_DISABLED_PROPERTIES) print_tag_42(payload);
 	else if (dir == 'S' && tag == s2c::NETWORK_QUALITY) print_tag_79(payload);
 	else if (dir == 'S' && tag == s2c::SPECTATOR_FLAGS) print_tag_75(payload);
 	else if (dir == 'S' && tag == s2c::CHAT_HISTORY) print_tag_2a(payload);

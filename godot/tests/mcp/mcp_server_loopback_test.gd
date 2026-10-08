@@ -55,6 +55,7 @@ func test_initialize_handshake() -> void:
 	assert_eq(result["serverInfo"]["name"], "opennova")
 	assert_eq(result["instructions"], "test instructions")
 	assert_eq(result["capabilities"]["tools"]["listChanged"], false)
+	assert_eq(int(result["_meta"]["pid"]), OS.get_process_id(), "The endpoint names the process serving it.")
 
 
 func test_initialized_notification_gets_202() -> void:

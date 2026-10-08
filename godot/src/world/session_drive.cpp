@@ -110,7 +110,7 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	// Retail builds g_CharAttr from the boot-soft charattr.def before any
 	// network receive can deliver the 0x41 property clears or 0x39 challenge.
 	// A missing file deliberately leaves the inactive all-zero table.
-	join_preload_sim_->load_charattr_challenge(resource_root);
+	join_preload_sim_->load_charattr(resource_root);
 	Ref<CharacterJoinProfile> join_profile = build_join_character_profile(
 			resource_root, world_->player_visuals_->spawn_loadout());
 	if (join_profile.is_valid()) {

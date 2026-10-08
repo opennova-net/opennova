@@ -783,7 +783,6 @@ EffectSpawnReceipt EffectScene::spawn(const EffectSpawnRequest &request) {
 				emitter.max_particles = kDefaultEmitterCapacity;
 			}
 			emitter.spring_const = request.spring_const;
-			emitter.lod_divisor = std::max(request.lod_divisor, 1u);
 			EffectKillPlane kill_plane = request.kill_plane;
 			if (kill_plane == EffectKillPlane::Disabled) {
 				if ((definition.flags & particle_flag::BelowH2O) != 0) {
@@ -1187,7 +1186,6 @@ void EffectScene::write_snapshot(ParticleFrameSnapshot &snapshot) const {
 			emitter_snapshot.age = emitter.age;
 			emitter_snapshot.spring_const = emitter.spring_const;
 			emitter_snapshot.camera_pull = emitter.camera_pull;
-			emitter_snapshot.lod_divisor = emitter.lod_divisor;
 			emitter_snapshot.kill_plane =
 					static_cast<EffectKillPlane>(emitter.kill_plane_mode);
 			emitter_snapshot.kill_plane_y = emitter.kill_plane_y;

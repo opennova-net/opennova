@@ -9,6 +9,7 @@
 #include "render/rd_glsl.h"
 #include "render/rd_timestamp_span.h"
 #include "render/rd_uniforms.h"
+#include "render/texture_filter_device.h"
 #include "util/string_convert.h"
 
 #include <algorithm>
@@ -165,15 +166,19 @@ layout(location = 1) in vec2 uv2;
 layout(location = 0) out vec4 frag_color;
 
 // TBoringFFPProjShad samples with sampLinearWrap2D (rd_glsl.h
-// kGlslSampleAniso2), clamped at the stage texture's last retail mip level
-// (max_lods.x Diffuse1, max_lods.y Diffuse2).
-@SAMPLE_ANISO2@
+// kGlslSampleEffectStage) under the effects' filter code (max_lods.z),
+// clamped at the stage texture's last retail mip level (max_lods.x Diffuse1,
+// max_lods.y Diffuse2).
+@SAMPLE_EFFECT_STAGE@
 
 void main() {
 	uint flags = uint(pc.params.z + 0.5);
-	float coverage = rd_sample_aniso2(diffuse_texture, uv, pc.max_lods.x).a;
+	uint filter_code = uint(pc.max_lods.z + 0.5);
+	float coverage = rd_sample_effect_stage(diffuse_texture, uv, pc.max_lods.x,
+			filter_code).a;
 	if ((flags & 8u) != 0u) {
-		coverage *= rd_sample_aniso2(detail_texture, uv2, pc.max_lods.y).a;
+		coverage *= rd_sample_effect_stage(detail_texture, uv2, pc.max_lods.y,
+				filter_code).a;
 	}
 	if ((flags & 4u) != 0u) {
 		coverage *= pc.params.y;
@@ -192,7 +197,7 @@ void main() {
 
 std::string slot_capture_fragment_shader_source() {
 	std::string source(kSlotCaptureFragmentShaderTemplate);
-	splice_token(source, "@SAMPLE_ANISO2@", kGlslSampleAniso2);
+	splice_token(source, "@SAMPLE_EFFECT_STAGE@", kGlslSampleEffectStage);
 	return source;
 }
 
@@ -219,7 +224,7 @@ struct DeviceCommand {
 	float alpha_test_value = 0.0f;
 	float alpha_mod = 1.0f;
 	// The stages' last retail mip levels (texture_path_resolver
-	// material_texture_max_lod; kQ3NoMipCeiling = unbounded).
+	// texture_max_lod; kQ3NoMipCeiling = unbounded).
 	float diffuse_max_lod = kQ3NoMipCeiling;
 	float detail_max_lod = kQ3NoMipCeiling;
 	std::uint32_t flags = 0;
@@ -808,6 +813,8 @@ bool SlotCaptureAdapter::Impl::draw(const DeviceFrame &p_frame) {
 	transient_uniforms.clear();
 	int captures_drawn = 0;
 	int draw_calls = 0;
+	// The effects' filter code the frame draws under (the device leg's).
+	const int effect_filter_code = TextureFilterDevice::effect_filter_code();
 	for (const DeviceCapture &capture : p_frame.captures) {
 		if (capture.order < 0 || capture.order >= kSlotCaptureCount ||
 				capture.size <= 0 || !capture.target.is_valid() ||
@@ -860,7 +867,8 @@ bool SlotCaptureAdapter::Impl::draw(const DeviceFrame &p_frame) {
 				push.params = {command.alpha_test_value, command.alpha_mod,
 						static_cast<float>(command.flags),
 						static_cast<float>(command.first_bone)};
-				push.max_lods = {command.diffuse_max_lod, command.detail_max_lod, 0.0f, 0.0f};
+				push.max_lods = {command.diffuse_max_lod, command.detail_max_lod,
+						static_cast<float>(effect_filter_code), 0.0f};
 				PackedByteArray push_bytes;
 				push_bytes.resize(kPushConstantBytes);
 				std::memcpy(push_bytes.ptrw(), &push, sizeof(push));

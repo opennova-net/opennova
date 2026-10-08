@@ -34,14 +34,6 @@ const RED_PAGE := ["WPN_KNIFE2", "WPN_DRAGUNOV", "WPN_357"]
 # built from something other than the profile page.
 const OFF_PAGE := "WPN_M9Beretta"
 
-var _sav_path := ""
-
-
-func after_each() -> void:
-	if not _sav_path.is_empty() and FileAccess.file_exists(_sav_path):
-		DirAccess.remove_absolute(_sav_path)
-	_sav_path = ""
-
 
 func _def_root() -> ResourceRoot:
 	var root := ResourceRoot.new()
@@ -85,16 +77,6 @@ func _make_weapon_sav() -> PackedByteArray:
 	return buf
 
 
-func _write_weapon_sav() -> String:
-	var path := ProjectSettings.globalize_path("user://weapon_profile_kit_test.sav")
-	var f := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(f, "could not open %s for writing" % path)
-	f.store_buffer(_make_weapon_sav())
-	f.close()
-	_sav_path = path
-	return path
-
-
 func test_an_unlatched_team_commits_no_page() -> void:
 	if RetailData.def_root().is_empty():
 		pending(RetailData.fixture_pending_text("def/weapon.def"))
@@ -115,7 +97,9 @@ func test_an_unlatched_team_commits_no_page() -> void:
 	# Loaded AFTER the catalog on purpose: the shell can only read the profile once the
 	# sim exists, so this edge has to be handled too. An earlier revision seeded only at
 	# catalog load and silently shipped the defaults.
-	assert_eq(sim.load_weapon_profile(_write_weapon_sav()), OK)
+	var profiles := PlayerProfiles.new()
+	profiles.load_bytes(PackedByteArray(), false, _make_weapon_sav(), true, "")
+	assert_eq(sim.use_player_profile(profiles), OK)
 
 	var inv := sim.get_local_player_inventory()
 	var held := []

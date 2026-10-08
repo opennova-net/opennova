@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -45,6 +46,16 @@ int main() {
 	clock_ok &= expect(opennova::env::tod_advance_per_tick(10) ==
 					opennova::env::tod_advance_per_tick(60),
 			"day lengths below 60 minutes clamp to the retail floor");
+	// A mission's day length of 0 is a clock that stands [orig: Environment_SetTodAdvanceRate
+	// @0x57d176, @0x57d196]; an .env's tod_rate of 0 takes the floor (its arm has no zero test,
+	// @0x57d0fe), and with neither the clock runs at Environment_InitDefaults' 75 (@0x57c22f).
+	clock_ok &= expect(opennova::env::tod_advance_per_tick(0) == 0,
+			"a mission day length of 0 stands the clock");
+	clock_ok &= expect(opennova::env::tod_rate_advance_per_tick(0) ==
+					opennova::env::tod_advance_per_tick(60),
+			"an .env tod_rate of 0 takes the 60-minute floor");
+	clock_ok &= expect(opennova::env::kTodDefaultAdvancePerTick == 75,
+			"the engine's default advance is 75");
 	// Q8.8 12.00 -> 12h in 8.24; 25.5h wraps to 1.5h.
 	clock_ok &= expect(opennova::env::tod_start_fixed24(12 << 8) == 12 << 24,
 			"the Q8.8 start hour widens by 16 bits");
@@ -64,26 +75,129 @@ int main() {
 	// pre-parse defaults with no keyframe [orig: Environment_LoadTimeOfDayConfig @ 0x57dca3;
 	// Environment_InitDefaults @ 0x57c010]; one that is there parses over them.
 	{
-		opennova::env::Config mission;
-		mission.fog_level = 1.0f;
-		mission.keyframes.resize(3);
-		const bool skipped = !opennova::env::load_mission_env(nullptr, mission);
+		using opennova::env::MissionEnv;
+		using opennova::env::MissionEnvTexts;
+		MissionEnv loaded;
+		loaded.config.fog_level = 1.0f;
+		loaded.config.keyframes.resize(3);
+		const bool skipped = !opennova::env::load_mission_env(MissionEnvTexts{}, loaded);
+		const opennova::env::Config &mission = loaded.config;
 		const opennova::env::Config defaults;
-		if (!expect(skipped && mission.keyframes.empty() && near(mission.fog_level, 1024.0f) &&
+		if (!expect(skipped && !loaded.environment && mission.keyframes.empty() && near(mission.fog_level, 1024.0f) &&
 		                    mission.fog_type == 1 && mission.sky_map1 == "cld_day1.pcx" &&
 		                    mission.sun_3di == "msun.3di" && mission.curtime == defaults.curtime &&
-		                    near(mission.water_murk, 0.8f) && near(mission.iris_percent, 50.0f),
+		                    near(mission.water_murk, 0.8f) && near(mission.iris_percent, 50.0f) &&
+		                    loaded.overcast.keyframes.empty(),
 		            "a missing mission .env leaves the engine defaults and no keyframe"))
 			return 1;
 		const std::string empty;
-		if (!expect(opennova::env::load_mission_env(&empty, mission) && mission.keyframes.empty() &&
-		                    near(mission.fog_level, 1024.0f),
+		MissionEnvTexts texts;
+		texts.environment = &empty;
+		if (!expect(opennova::env::load_mission_env(texts, loaded) && loaded.environment &&
+		                    loaded.config.keyframes.empty() && near(loaded.config.fog_level, 1024.0f),
 		            "an empty mission .env parses to the same defaults"))
 			return 1;
 		const std::string authored = "fog_level 640\r\nfog_type 2\r\n";
-		if (!expect(opennova::env::load_mission_env(&authored, mission) && near(mission.fog_level, 640.0f) &&
-		                    mission.fog_type == 2 && mission.sky_map1 == "cld_day1.pcx",
+		texts.environment = &authored;
+		if (!expect(opennova::env::load_mission_env(texts, loaded) && near(loaded.config.fog_level, 640.0f) &&
+		                    loaded.config.fog_type == 2 && loaded.config.sky_map1 == "cld_day1.pcx",
 		            "a mission .env parses over the defaults"))
+			return 1;
+	}
+
+	// The terrain's pass (env #43): the parser reads the .trn first, then overcast.def into the
+	// same table, then the .env, one set of globals under all three [orig:
+	// Environment_LoadTimeOfDayConfig @ 0x57db30, @ 0x57dbeb, @ 0x57dc3b, @ 0x57dcbf]. A shipped
+	// terrain's water_rgb and water_murk stand where its .env writes neither; the .env's win where
+	// it writes them; the envscale read last scales what follows it; the .trn's keyframes and
+	// overcast.def's are the overcast table, the .env's the mission's; the terrain's own keys
+	// (polytrn_*, terrain_creator, its foliage blocks) are no keyword of the parser.
+	{
+		using opennova::env::MissionEnv;
+		using opennova::env::MissionEnvTexts;
+		const std::string trn = "terrain_name     \"Dvxi5\"\r\nterrain_creator  \"Brophy\"\r\n"
+		                        "water_height     21         ;default, if zero will take from mission\r\n"
+		                        "polytrn_colormap         Dvxi5_c.tga\r\n"
+		                        "water_rgb \t\t 108,81,48\r\nwater_murk  \t\t .3\r\n"
+		                        "foliage\r\n  graphic mveg5.3di\r\n  match 254\r\nend\r\n";
+		const std::string env = "fog_level 640\r\nwater_rgb 56,59,39\r\n"
+		                        "tod_begin 1200\r\n  sun_rgb 10,20,30\r\ntod_end\r\n";
+		MissionEnv loaded;
+		MissionEnvTexts texts;
+		texts.terrain = &trn;
+		texts.environment = &env;
+		if (!expect(opennova::env::load_mission_env(texts, loaded) && near(loaded.config.water_murk, 0.3f) &&
+		                    near(loaded.config.water_rgb.r, 56.0f / 255.0f) &&
+		                    near(loaded.config.water_rgb.b, 39.0f / 255.0f) && loaded.config.water_height_set &&
+		                    near(loaded.config.water_height, 21.0f) && near(loaded.config.fog_level, 640.0f) &&
+		                    loaded.config.keyframes.size() == 1 && loaded.config.name == "Untitled",
+		            "the .trn's murk and height stand under a .env that writes neither; its water_rgb is the .env's"))
+			return 1;
+		const std::string env_writes = "water_murk 0.6\r\nwater_height 30\r\n";
+		texts.environment = &env_writes;
+		if (!expect(opennova::env::load_mission_env(texts, loaded) && near(loaded.config.water_murk, 0.6f) &&
+		                    near(loaded.config.water_height, 30.0f) && near(loaded.config.water_rgb.r, 108.0f / 255.0f),
+		            "the .env's murk and height are over the .trn's; the .trn's water_rgb stands"))
+			return 1;
+		const std::string pinned_murk = "water_murk 1.0\r\n";
+		texts.terrain = &pinned_murk;
+		texts.environment = nullptr;
+		if (!expect(!opennova::env::load_mission_env(texts, loaded) && !loaded.environment &&
+		                    near(loaded.config.water_murk, 0.99f) && loaded.config.keyframes.empty(),
+		            "a missing .env leaves the .trn's murk (clamped at 0.99) over the defaults"))
+			return 1;
+		// The overcast table: the .trn's blocks then overcast.def's, one table, sorted; the .env's
+		// own table starts empty; the .trn's envscale scales the .env's colours where the .env
+		// writes none.
+		const std::string trn_blocks = "envscale 2\r\ntod_begin 1800\r\n sun_rgb 1,1,1\r\ntod_end\r\n";
+		const std::string overcast = "tod_begin 0600\r\n sun_rgb 2,2,2\r\ntod_end\r\n";
+		const std::string env_table = "tod_begin 1200\r\n sun_rgb 100,100,100\r\ntod_end\r\n";
+		texts.terrain = &trn_blocks;
+		texts.overcast = &overcast;
+		texts.environment = &env_table;
+		if (!expect(opennova::env::load_mission_env(texts, loaded) && loaded.overcast.keyframes.size() == 2 &&
+		                    loaded.overcast.keyframes[0].time == 600 && loaded.overcast.keyframes[1].time == 1800 &&
+		                    near(loaded.overcast.envscale, 2.0f) && loaded.config.keyframes.size() == 1 &&
+		                    loaded.config.keyframes[0].time == 1200 && near(loaded.config.envscale, 2.0f),
+		            "the overcast table is the .trn's and overcast.def's blocks; the .env's own"))
+			return 1;
+		// A naked colour line in the .trn lands on the scratch keyframe the .env's pass goes on
+		// over, seeded once a load; with the .env skipped the blocks keep their defaults.
+		const std::string trn_naked = "sky_rgb 1,2,3\r\n";
+		texts.terrain = &trn_naked;
+		texts.overcast = nullptr;
+		const std::string env_naked = "sun_rgb 4,5,6\r\n";
+		texts.environment = &env_naked;
+		if (!expect(opennova::env::load_mission_env(texts, loaded) &&
+		                    near(loaded.config.scratch.sky.b, 3.0f / 255.0f) &&
+		                    near(loaded.config.scratch.sun.b, 6.0f / 255.0f),
+		            "the scratch keyframe carries the .trn's naked colour into the .env's pass"))
+			return 1;
+		texts.environment = nullptr;
+		const opennova::env::Keyframe seed = opennova::env::scratch_keyframe_defaults();
+		if (!expect(!opennova::env::load_mission_env(texts, loaded) &&
+		                    near(loaded.config.scratch.sky.b, seed.sky.b),
+		            "a skipped .env leaves the scratch's seed"))
+			return 1;
+		// The reader's names: the .trn and the .env as named, overcast.def by kOvercastFile.
+		std::vector<std::string> asked;
+		const opennova::env::EnvTextReader read = [&](const std::string &name, std::string &text) {
+			asked.push_back(name);
+			if (name == "Dvxi5.trn") text = trn;
+			else if (name == "full_00.env") text = env;
+			else return false;
+			return true;
+		};
+		if (!expect(opennova::env::read_mission_env(read, "Dvxi5.trn", "full_00.env", loaded) &&
+		                    asked.size() == 3 && asked[0] == "Dvxi5.trn" &&
+		                    asked[1] == opennova::env::kOvercastFile && asked[2] == "full_00.env" &&
+		                    near(loaded.config.water_murk, 0.3f),
+		            "the reader reads the .trn, overcast.def and the .env in the load's order"))
+			return 1;
+		asked.clear();
+		if (!expect(!opennova::env::read_mission_env(read, "", "", loaded) && asked.size() == 1 &&
+		                    near(loaded.config.water_murk, 0.8f),
+		            "no names: overcast.def alone, the defaults standing"))
 			return 1;
 	}
 
@@ -251,14 +365,17 @@ int main() {
 		if (!expect(near(scaled.sun.r, 187.0f / 255.0f), "envscale should truncate at the byte level (170*1.1 = 187)")) return 1;
 	}
 
-	// The engine caps TOD keyframes at 16; a 17th block's colors bleed into the
-	// 16th slot and its time is dropped. [orig: TimeOfDay_ParseProperty @ 0x57c65b]
-	{
+	// The engine caps TOD keyframes at 16. A 17th tod_begin takes no slot, stores no time and
+	// leaves the slot pointer where it is: after the 16th block's tod_end that is the scratch
+	// keyframe, so the 17th block's colors land there, packed; with the 16th block still open
+	// they bleed into its slot. [orig: TimeOfDay_ParseProperty @ 0x57c65b; tod_end's reset
+	// @ 0x57c6a3]
+	for (const bool closed : {true, false}) {
 		std::ostringstream many;
 		for (int i = 0; i < 17; ++i) {
 			many << "tod_begin " << (100 * (i % 24)) << "\r\n";
 			many << "    sun_rgb " << (i + 1) << "," << (i + 1) << "," << (i + 1) << "\r\n";
-			many << "tod_end\r\n";
+			if (closed || i < 15) many << "tod_end\r\n";
 		}
 		std::istringstream many_input(many.str());
 		opennova::env::Config many_cfg;
@@ -268,13 +385,78 @@ int main() {
 			return 1;
 		}
 		if (!expect(many_cfg.keyframes.size() == 16, "keyframes should cap at 16")) return 1;
-		bool bleed_found = false;
-		for (const opennova::env::Keyframe &kf : many_cfg.keyframes) {
-			if (kf.time == 1500 && near(kf.sun.r, 17.0f / 255.0f)) {
-				bleed_found = true;
-			}
+		const opennova::env::Keyframe *sixteenth = nullptr;
+		for (const opennova::env::Keyframe &kf : many_cfg.keyframes)
+			if (kf.time == 1500) sixteenth = &kf;
+		if (!expect(sixteenth != nullptr, "the 16th block keeps its time")) return 1;
+		if (closed) {
+			if (!expect(near(sixteenth->sun.r, 16.0f / 255.0f) && near(many_cfg.scratch.sun.r, 17.0f / 255.0f),
+			            "after the 16th block's tod_end, the 17th block's colors land on the scratch keyframe"))
+				return 1;
+		} else if (!expect(near(sixteenth->sun.r, 17.0f / 255.0f) &&
+		                           near(many_cfg.scratch.sun.r, opennova::env::scratch_keyframe_defaults().sun.r),
+		                   "with the 16th block open, the 17th block's colors bleed into its slot")) {
+			return 1;
 		}
-		if (!expect(bleed_found, "17th block colors should bleed into the 16th slot, keeping its time")) return 1;
+	}
+
+	// tod_rate, the day's length in minutes, is read and written back as written
+	// [orig: TimeOfDay_ParseProperty @ 0x57d0e4].
+	{
+		std::istringstream rate_input("tod_rate 45\r\n");
+		opennova::env::Config rate_cfg;
+		std::ostringstream rate_saved;
+		if (!expect(opennova::env::load_env(rate_input, rate_cfg, error) && rate_cfg.tod_rate_set &&
+		                    rate_cfg.tod_rate == 45 && opennova::env::save_env(rate_saved, rate_cfg, error) &&
+		                    rate_saved.str().find("tod_rate 45\r\n") != std::string::npos,
+		            "tod_rate reads and writes back"))
+			return 1;
+		std::ostringstream none;
+		if (!expect(opennova::env::save_env(none, opennova::env::Config(), error) &&
+		                    none.str().find("tod_rate") == std::string::npos,
+		            "a file that writes no tod_rate gets none"))
+			return 1;
+	}
+
+	// Each value is written in the form the parser reads back as held: a time before 01:00 as
+	// four digits (a short token reads 00:00), an atol keyword as a whole number however large,
+	// an atof keyword in as many digits as its float needs, a name holding a separator quoted;
+	// a name holding a '"' has no line form. [orig: Environment_ParseTimeString @ 0x57c500;
+	// TimeOfDay_ParseProperty @ 0x57c590]
+	{
+		opennova::env::Config forms;
+		forms.curtime = 30;
+		forms.fog_level = 1500000.0f;
+		forms.sky_speed = -7.0f;
+		forms.water_height = 2000000.0f;
+		forms.water_height_set = true;
+		forms.iris_center = 0.123456789f;
+		forms.envscale = 1.1f;
+		forms.sky_map1 = "my clouds.pcx";
+		forms.sun_3di = "sun;1.3di";
+		std::ostringstream written;
+		if (!expect(opennova::env::save_env(written, forms, error), "save the value forms")) return 1;
+		const std::string text = written.str();
+		std::istringstream back_in(text);
+		opennova::env::Config back;
+		if (!expect(opennova::env::load_env(back_in, back, error) && back.curtime == 30 &&
+		                    back.fog_level == 1500000.0f && back.sky_speed == -7.0f &&
+		                    back.water_height == 2000000.0f && back.iris_center == forms.iris_center &&
+		                    back.envscale == forms.envscale && back.sky_map1 == "my clouds.pcx" &&
+		                    back.sun_3di == "sun;1.3di",
+		            "every value form reads back as held"))
+			return 1;
+		if (!expect(text.find("curtime 0030\r\n") != std::string::npos &&
+		                    text.find("fog_level 1500000\r\n") != std::string::npos &&
+		                    text.find("envscale 1.1\r\n") != std::string::npos &&
+		                    text.find("sky_map1 \"my clouds.pcx\"\r\n") != std::string::npos,
+		            "the forms are the plain ones"))
+			return 1;
+		forms.moon_3di = "a\"b.3di";
+		std::ostringstream refused;
+		if (!expect(!opennova::env::save_env(refused, forms, error) && !error.empty(),
+		            "a name holding a '\"' is refused"))
+			return 1;
 	}
 
 	// curtime sanitizes digits positionally (hours <= 23, minutes <= 59).

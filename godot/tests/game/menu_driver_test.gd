@@ -2,10 +2,12 @@ extends GutTest
 
 # Menu-RUNTIME semantics on MenuDriver (the binding over engine/runtime/menu/menu_runtime.cpp) — the
 # carve-out coverage the deleted MnuMenu Control-tree tests pinned, now driven
-# through the compiled surface: action dispatch (screen/pop/quit/url/window/
-# shell verbs), the per-screen MUSICVAR push, hotkey routing, the
-# widget_value_changed relay kinds, combo popup lifecycle, edit focus/typing,
-# checkbox/radio toggling, and sound-trigger edges. The engine owns the
+# through the compiled surface and ported to retail's dispatch (the 2026-09-23
+# grill): action dispatch (screen/pop/url/window/shell verbs, the activation's
+# order), the per-screen MUSICVAR push, hotkey routing (the VK names, the label
+# mnemonics of tabs, the edit focus, Enter's commit), the widget_value_changed
+# relay kinds, combo popup lifecycle, edit focus/typing, checkbox/radio toggling,
+# and sound-trigger edges. The engine owns the
 # witnessed primitives (draw walk, pump, geometry, edit ops — pinned by ctest
 # tests/menu/menu_frame_compiler_test.cpp); these tests pin the orchestration
 # the driver performs around them.
@@ -73,7 +75,7 @@ const BOARD_XML := """
       <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
       <HOTKEY>V</HOTKEY>
     </WINDOW>
-    <WINDOW type="combo" name="MODE">
+    <WINDOW type="combobox" name="MODE">
       <POSITION><LEFT>200</LEFT><TOP>0</TOP><RIGHT>300</RIGHT><BOTTOM>20</BOTTOM></POSITION>
       <ITEMS>
         <ITEM value="0">ONE</ITEM>
@@ -93,10 +95,12 @@ const BOARD_XML := """
     <WINDOW type="checkbox" name="CHK">
       <POSITION><LEFT>10</LEFT><TOP>200</TOP><RIGHT>110</RIGHT><BOTTOM>220</BOTTOM></POSITION>
     </WINDOW>
-    <WINDOW type="radio" name="R1" group="1">
+    <WINDOW type="radio" name="R1">
+      <GROUP>1</GROUP>
       <POSITION><LEFT>10</LEFT><TOP>240</TOP><RIGHT>110</RIGHT><BOTTOM>260</BOTTOM></POSITION>
     </WINDOW>
-    <WINDOW type="radio" name="R2" group="1">
+    <WINDOW type="radio" name="R2">
+      <GROUP>1</GROUP>
       <POSITION><LEFT>10</LEFT><TOP>280</TOP><RIGHT>110</RIGHT><BOTTOM>300</BOTTOM></POSITION>
     </WINDOW>
     <WINDOW type="button" name="SND_BTN">
@@ -195,7 +199,7 @@ func test_attached_driver_releases_itself_and_its_document() -> void:
 	var driver := _framed_driver(ACTIONS_XML)
 	var driver_ref: WeakRef = weakref(driver)
 	var document_ref: WeakRef = weakref(driver.document())
-	driver.get_frame().configure(null, "", null, null, {})
+	driver.get_frame().configure(null, "", null, null, null)
 	driver = null
 	assert_null(driver_ref.get_ref(), "the frame's signal connections do not retain the driver")
 	assert_null(document_ref.get_ref(), "closing the driver releases its document")
@@ -203,23 +207,23 @@ func test_attached_driver_releases_itself_and_its_document() -> void:
 
 func test_screen_action_same_file_navigates_and_pushes_stack() -> void:
 	var driver := _frameless_driver(ACTIONS_XML)
-	# Empty file = same file.
-	assert_true(driver.dispatch_action_row(MnuActionRow.make("screen", "SUB", "", false, "")),
-			"empty-file screen action handled")
-	assert_eq(driver.get_current_screen(), "SUB", "navigated to SUB")
-	assert_true(driver.pop_screen(), "pop returns")
-	assert_eq(driver.get_current_screen(), "MAIN", "pop returned to MAIN")
+	# No FILE is no same-file jump (retail faults there; the editor refuses it).
+	assert_false(driver.dispatch_action_row(MnuActionRow.make("screen", "SUB", "", false, "")),
+			"a SCREEN row with no FILE does nothing")
+	assert_eq(driver.get_current_screen(), "MAIN", "still MAIN")
 	# Shipped same-file jumps spell their own filename, case-insensitively.
 	assert_true(driver.dispatch_action_row(MnuActionRow.make("screen", "SUB", "", false, "MENU.MNU")),
 			"own-filename screen action handled")
 	assert_eq(driver.get_current_screen(), "SUB", "case-insensitive same-file jump navigated")
+	assert_true(driver.pop_screen(), "pop returns")
+	assert_eq(driver.get_current_screen(), "MAIN", "pop returned to MAIN")
 
 
-func test_pop_past_root_emits_quit_requested() -> void:
+func test_pop_past_root_emits_pop_requested() -> void:
 	var driver := _frameless_driver(ACTIONS_XML)
 	watch_signals(driver)
-	assert_false(driver.pop_screen(), "pop past the root fails")
-	assert_signal_emitted(driver, "quit_requested")
+	assert_false(driver.pop_screen(), "pop past the file's own history is the shell's")
+	assert_signal_emitted(driver, "pop_requested")
 	assert_eq(driver.get_current_screen(), "MAIN", "screen unchanged")
 
 
@@ -232,14 +236,19 @@ func test_cross_file_screen_action_emits_menu_requested() -> void:
 	assert_eq(driver.get_current_screen(), "MAIN", "cross-file jump does not navigate in-file")
 
 
-func test_quit_and_url_actions() -> void:
+func test_url_action_and_no_quit_token() -> void:
 	var driver := _frameless_driver(ACTIONS_XML)
 	watch_signals(driver)
-	assert_true(driver.dispatch_action_row(MnuActionRow.make("quit", "", "", false, "")), "quit consumed")
-	assert_signal_emitted(driver, "quit_requested")
-	assert_true(driver.dispatch_action_row(MnuActionRow.make("url", "www.novalogic.com", "", false, "")),
+	# QUIT is no ACTION type: code 0, nothing happens.
+	assert_false(driver.dispatch_action_row(MnuActionRow.make("quit", "", "", false, "")),
+			"quit is not an action")
+	assert_true(driver.dispatch_action_row(MnuActionRow.make("url", " www.novalogic.com\n", "", false, "")),
 			"url consumed")
-	assert_signal_emitted_with_parameters(driver, "url_requested", ["www.novalogic.com"])
+	assert_signal_emitted_with_parameters(driver, "url_requested", ["www.novalogic.com", false])
+	assert_true(driver.dispatch_action_row(
+			MnuActionRow.make("url", "www.x.com/?external_browser=1", "", false, "")))
+	assert_signal_emitted_with_parameters(driver, "url_requested",
+			["www.x.com/?external_browser=1", true], 1)
 
 
 func test_window_actions_show_hide_enable_disable_toggle() -> void:
@@ -254,8 +263,9 @@ func test_window_actions_show_hide_enable_disable_toggle() -> void:
 	assert_false(driver.is_widget_shown(panel), "hide+TOGGLE flips shown -> hidden")
 	assert_true(driver.dispatch_action_row(MnuActionRow.make("window", "PANEL", "show", true, "")))
 	assert_true(driver.is_widget_shown(panel), "show+TOGGLE flips hidden -> shown")
-	assert_true(driver.dispatch_action_row(MnuActionRow.make("window", "PANEL", "toggle", false, "")))
-	assert_false(driver.is_widget_shown(panel), "the toggle state verb flips")
+	assert_false(driver.dispatch_action_row(MnuActionRow.make("window", "PANEL", "toggle", false, "")),
+			"TOGGLE is no STATE (it is the flag)")
+	assert_true(driver.is_widget_shown(panel), "an unknown STATE changes nothing")
 
 	assert_false(driver.is_widget_disabled(panel), "panel starts enabled")
 	assert_true(driver.dispatch_action_row(MnuActionRow.make("window", "PANEL", "disable", false, "")))
@@ -288,9 +298,10 @@ func test_service_verbs_are_not_driver_actions() -> void:
 	assert_signal_not_emitted(driver, "menu_requested")
 
 
-# The deliberate retail-order inversion (menu-re.md): widget_activated fires
-# BEFORE the scripted ACTION list, so an observer reads pre-action state.
-func test_widget_activated_precedes_action_dispatch() -> void:
+# Retail's order (menu-re.md, "Activation and the ACTION walk"): the ACTION rows
+# run first, then the control callbacks (widget_activated), so an observer reads
+# the screen the rows left.
+func test_widget_activated_follows_action_dispatch() -> void:
 	var driver := _framed_driver(ACTION_BUTTON_XML)
 	var order: Array = []
 	var popup_shown_at_emit: Array = []
@@ -301,15 +312,13 @@ func test_widget_activated_precedes_action_dispatch() -> void:
 						driver.is_widget_shown(driver.widget_id("POPUP"))))
 	assert_true(driver.handle_key_input(_key(KEY_ENTER)), "GO consumed")
 	assert_eq(order, ["activated:GO"], "the activation observer ran once")
-	assert_eq(popup_shown_at_emit, [false],
-			"the observer runs before the ACTION list mutates the screen")
-	assert_true(driver.is_widget_shown(driver.widget_id("POPUP")),
-			"the ACTION still ran after the observer")
+	assert_eq(popup_shown_at_emit, [true],
+			"the observer runs after the ACTION list showed the popup")
 
 
-# The inversion's guard: an observer that synchronously swaps the document
-# (the game.mnu CONFIRM_YES -> teardown -> main.mnu chain) must not have the
-# OLD widget id's ACTION list dispatched against the NEW document.
+# An observer that synchronously swaps the document (the game.mnu CONFIRM_YES ->
+# teardown -> main.mnu chain) leaves the new document untouched: the rows ran on
+# the old one before the callbacks.
 func test_document_swap_during_activation_blocks_stale_dispatch() -> void:
 	var driver := _framed_driver(ACTION_BUTTON_XML)
 	# The swapped-in document authors the same hidden POPUP the stale GO
@@ -384,12 +393,15 @@ func test_hidden_subtree_hotkey_never_fires() -> void:
 	assert_signal_not_emitted(driver, "widget_activated")
 
 
-func test_disabled_hotkey_target_consumes_without_activating() -> void:
+func test_disabled_hotkey_row_is_skipped() -> void:
+	# A row whose widget is not visible in the hierarchy (disabled here) is
+	# skipped and the scan goes on [orig: UI_DispatchKeyboardEventToChildren
+	# @ 0x63ad10]; with no other ESC row the key goes unanswered.
 	var driver := _framed_driver(BOARD_XML)
 	driver.set_widget_disabled(driver.widget_id("BACK"), true)
 	watch_signals(driver)
-	assert_true(driver.handle_key_input(_key(KEY_ESCAPE)),
-			"a disabled target still consumes the key")
+	assert_false(driver.handle_key_input(_key(KEY_ESCAPE)),
+			"a disabled row neither fires nor consumes")
 	assert_signal_not_emitted(driver, "widget_activated")
 
 
@@ -413,6 +425,96 @@ func test_label_marker_hotkey_fires_and_stays_out_of_display_text() -> void:
 			"a lowercase label mnemonic is consumed")
 	assert_signal_emitted_with_parameters(driver, "widget_activated",
 			[back, "BACK"])
+
+
+const KEYS_XML := """
+<SCREEN>
+  <NAME>MAIN</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="radio" name="TAB_VIDEO">
+      <GROUP>1</GROUP>
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+      <STRING>{hot}Video</STRING>
+    </WINDOW>
+    <WINDOW type="radio" name="TAB_AUDIO" CHECKED>
+      <GROUP>1</GROUP>
+      <POSITION><LEFT>100</LEFT><TOP>0</TOP><RIGHT>200</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+      <STRING>{hot}Audio</STRING>
+    </WINDOW>
+    <WINDOW type="edit" name="PLAYERNAME">
+      <POSITION><LEFT>10</LEFT><TOP>100</TOP><RIGHT>210</RIGHT><BOTTOM>120</BOTTOM></POSITION>
+    </WINDOW>
+    <WINDOW type="button" name="ACCEPT">
+      <POSITION><LEFT>600</LEFT><TOP>500</TOP><RIGHT>700</RIGHT><BOTTOM>530</BOTTOM></POSITION>
+      <HOTKEY VIRTUAL>VK_RETURN</HOTKEY>
+    </WINDOW>
+    <WINDOW type="button" name="CANCEL">
+      <POSITION><LEFT>400</LEFT><TOP>500</TOP><RIGHT>500</RIGHT><BOTTOM>530</BOTTOM></POSITION>
+      <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+    </WINDOW>
+    <WINDOW type="button" name="DEAD">
+      <POSITION><LEFT>200</LEFT><TOP>500</TOP><RIGHT>300</RIGHT><BOTTOM>530</BOTTOM></POSITION>
+      <HOTKEY VIRTUAL>VK_ENTER</HOTKEY>
+      <HOTKEY VIRTUAL>VK_SPACE</HOTKEY>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+"""
+
+
+# A tab radio's {hot} label letter selects it (the 18 shipped tab labels carry
+# one): the mnemonic registers for every class whose parse reads a STRING
+# [orig: CUIButtonWidget_ParseXMLAttributes @ 0x657c30].
+func test_tab_radio_selects_by_its_letter() -> void:
+	var driver := _framed_driver(KEYS_XML)
+	var video := driver.widget_id("TAB_VIDEO")
+	var audio := driver.widget_id("TAB_AUDIO")
+	assert_true(driver.is_widget_checked(audio), "AUDIO starts checked")
+	watch_signals(driver)
+	assert_true(driver.handle_key_input(_key(KEY_V, "v".unicode_at(0))), "the letter is consumed")
+	assert_true(driver.is_widget_checked(video), "the letter selects the tab")
+	assert_false(driver.is_widget_checked(audio), "the sibling of its GROUP unchecks")
+	assert_signal_emitted_with_parameters(driver, "widget_activated", [video, "TAB_VIDEO"])
+
+
+# VK_ENTER names no key (only VK_RETURN, VK_ESCAPE and VK_SPACE do)
+# [orig: CWnd_ParseVirtualKeyNameW @ 0x6467f0]: the shipped cmap WPNAME_OK and
+# loadout ACCEPT rows are dead; VK_SPACE works.
+func test_vk_names() -> void:
+	var driver := _framed_driver(KEYS_XML)
+	watch_signals(driver)
+	assert_true(driver.handle_key_input(_key(KEY_ENTER)), "Enter is ACCEPT's")
+	assert_signal_emitted_with_parameters(driver, "widget_activated",
+			[driver.widget_id("ACCEPT"), "ACCEPT"])
+	assert_true(driver.handle_key_input(_key(KEY_SPACE, " ".unicode_at(0))), "Space fires")
+	assert_signal_emitted_with_parameters(driver, "widget_activated",
+			[driver.widget_id("DEAD"), "DEAD"], 1)
+	assert_signal_emit_count(driver, "widget_activated", 2,
+			"Enter never reached the VK_ENTER row")
+
+
+# With an edit focused the hotkey scan is off: ESC does nothing; Enter commits
+# the edit, drops the focus and then presses the VK_RETURN button
+# [orig: CEditWnd_HandleKeyEvent @ 0x6623a0 -> dispatch_key_event @ 0x63ac30].
+func test_edit_focus_esc_and_enter() -> void:
+	var driver := _framed_driver(KEYS_XML)
+	var edit := driver.widget_id("PLAYERNAME")
+	_click_widget(driver, "PLAYERNAME")
+	assert_eq(driver.get_focused_widget(), edit, "the click focused the edit")
+	watch_signals(driver)
+	assert_true(driver.handle_key_input(_key(KEY_ESCAPE)), "the focused edit takes ESC")
+	assert_signal_not_emitted(driver, "widget_activated", "ESC with the edit focused does nothing")
+	assert_eq(driver.get_focused_widget(), edit, "the focus stays")
+	assert_true(driver.handle_key_input(_key(KEY_V, "v".unicode_at(0))), "typed")
+	assert_false(driver.is_widget_checked(driver.widget_id("TAB_VIDEO")),
+			"a letter goes to the edit, not to the tab")
+	assert_true(driver.handle_key_input(_key(KEY_ENTER)), "Enter consumed")
+	assert_eq(driver.get_focused_widget(), -1, "the commit dropped the focus")
+	assert_signal_emitted_with_parameters(driver, "widget_value_changed",
+			["PLAYERNAME", "edit", -1, "v"])
+	assert_signal_emitted_with_parameters(driver, "widget_activated",
+			[driver.widget_id("ACCEPT"), "ACCEPT"])
 
 
 # --- (d) widget_value_changed relay kinds ---------------------------------------
@@ -534,11 +636,13 @@ const SLIDER_AND_BUTTON_XML := """
 """
 
 
-func test_scroll_press_never_ghost_clicks_another_widget() -> void:
-	# A press that lands on a scrollbar part is captured by that part until
-	# release [orig: CScrollWnd_HandleEvent @ 0x64d050 capture] — drifting
-	# onto a neighboring button while held must not press or click it, and
-	# the arrow must not auto-repeat on the held samples.
+func test_scrollbar_arrow_steps_on_its_click_and_the_track_holds_nothing() -> void:
+	# A scrollbar's arrow is a button of its own that captures its press and
+	# steps on its click [orig: CScrollWnd_HandleEvent @ 0x64d2cd, SCROLLWND_UP /
+	# _DOWN on 0x3000001]: pressed, drifted onto a neighbouring button and let
+	# go there, nothing steps and the button is not clicked. The track pages on
+	# its press and captures nothing [orig: @ 0x64d087..0x64d10e]: slid onto the
+	# button and let go there, the button's click (D-MNU-32).
 	var frame := MenuFrame.new()
 	add_child_autofree(frame)
 	frame.size = Vector2(800, 600)
@@ -549,16 +653,31 @@ func test_scroll_press_never_ghost_clicks_another_widget() -> void:
 	var gamma := driver.widget_id("GAMMA")
 	driver.set_widget_scroll_range(gamma, 0, 100, 10, 50)
 	watch_signals(driver)
+	driver.process_mouse(Vector2(290, 80), false)
 	driver.process_mouse(Vector2(290, 80), true)   # press the right arrow
-	assert_signal_emitted_with_parameters(driver, "widget_value_changed",
-			["GAMMA", "scroll", 51, "51"])
+	assert_signal_not_emitted(driver, "widget_value_changed",
+			"the arrow's press steps nothing")
 	driver.process_mouse(Vector2(200, 215), true)  # drift onto APPLY, held
 	driver.process_mouse(Vector2(200, 215), true)  # further held samples
 	driver.process_mouse(Vector2(200, 215), false) # release over APPLY
 	assert_signal_not_emitted(driver, "widget_activated",
-			"the scroll-captured press never activates the button")
-	assert_signal_emit_count(driver, "widget_value_changed", 1,
-			"the arrow steps once — no auto-repeat, no ghost press")
+			"the arrow's capture never lets the button be clicked")
+	assert_signal_not_emitted(driver, "widget_value_changed",
+			"let go off the arrow, it steps nothing")
+	# Pressed and let go over it: one step.
+	driver.process_mouse(Vector2(290, 80), true)
+	driver.process_mouse(Vector2(290, 80), false)
+	assert_signal_emitted_with_parameters(driver, "widget_value_changed",
+			["GAMMA", "scroll", 51, "51"])
+	# The track before the shuttle pages on the press, and holds nothing.
+	driver.process_mouse(Vector2(125, 80), false)
+	driver.process_mouse(Vector2(125, 80), true)
+	assert_signal_emitted_with_parameters(driver, "widget_value_changed",
+			["GAMMA", "scroll", 41, "41"])
+	driver.process_mouse(Vector2(200, 215), true)
+	driver.process_mouse(Vector2(200, 215), false)
+	assert_signal_emitted_with_parameters(driver, "widget_activated",
+			[driver.widget_id("APPLY"), "APPLY"])
 
 
 func test_combo_popup_row_hover_tracks_mouse() -> void:
@@ -595,7 +714,7 @@ const COMBO_SCROLL_XML := """
   <NAME>ARMORY</NAME>
   <WINDOW type="window" name="ROOT">
     <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
-    <WINDOW type="combo" name="SCROLLY">
+    <WINDOW type="combobox" name="SCROLLY">
       <POSITION><LEFT>200</LEFT><TOP>0</TOP><RIGHT>300</RIGHT><BOTTOM>20</BOTTOM></POSITION>
       <ITEMS>
         <ITEM value="0">ZERO</ITEM><ITEM value="1">ONE</ITEM>
@@ -680,6 +799,36 @@ func test_wheel_ticks_scroll_open_popup_rows() -> void:
 			"the wheel-scrolled top row picks its absolute index")
 	assert_false(driver.process_wheel(Vector2(240, 30), 1),
 			"with the popup closed, a tick over nothing scrollable is unclaimed")
+
+
+# The click is the game's rule (engine menu_click.h, D-MNU-30): the claim let go
+# over is clicked when the pump held it under the mouse with the button down the
+# sample before, wherever the press began; a press on a capturing class (a
+# button) holds the claim to it until the release [orig: CWnd_ProcessMouseEvent
+# @ 0x647b14; CButtonWnd_HandleNamedEvent @ 0x65839c / 0x6583ed].
+func test_click_is_the_game_s_rule() -> void:
+	var driver := _framed_driver(BOARD_XML)
+	var frame := driver.get_frame()
+	var other := driver.widget_id("OTHER")
+	var at := driver.widget_frame_rect(other).get_center()
+	var snd := driver.widget_frame_rect(driver.widget_id("SND_BTN")).get_center()
+	watch_signals(driver)
+	watch_signals(frame)
+	# Pressed on the backdrop (ROOT's press takes no capture), slid onto OTHER, let go.
+	driver.process_mouse(Vector2(700, 100), false)
+	driver.process_mouse(Vector2(700, 100), true)
+	driver.process_mouse(at, true)
+	driver.process_mouse(at, false)
+	assert_signal_emitted_with_parameters(frame, "widget_clicked", [frame.widget_index("OTHER"), 0])
+	assert_signal_emitted_with_parameters(driver, "widget_activated", [other, "OTHER"])
+	# Pressed on SND_BTN (a button captures), let go over OTHER: neither is clicked.
+	driver.process_mouse(snd, true)
+	driver.process_mouse(at, true)
+	driver.process_mouse(at, false)
+	assert_signal_emit_count(driver, "widget_activated", 1,
+			"a button's press let go over another button clicks neither")
+	assert_signal_not_emitted(driver, "sound_requested",
+			"SND_BTN's SELECTED never plays: it was not let go over")
 
 
 func test_combo_outside_click_dismisses_and_is_consumed() -> void:
@@ -771,3 +920,74 @@ func test_selected_sound_emits_sound_requested_on_activation() -> void:
 	# MenuAudio is null: play_widget_sound still emits the request seam.
 	assert_signal_emitted_with_parameters(driver, "sound_requested",
 			["bank.lwf", "CLICK_SET"])
+
+
+const SOUND_XML := """
+<SCREEN>
+  <NAME>SND</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="button" name="BTN">
+      <POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>300</RIGHT><BOTTOM>140</BOTTOM></POSITION>
+      <SOUND state="mousein" trigger="OVER">bank.lwf</SOUND>
+      <SOUND state="selected" trigger="CLICK">bank.lwf</SOUND>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+"""
+
+
+# DI-34: the pump's sound edges through the frame and the runtime, per window as
+# the game's pump plays them (engine menu_sound.h's MenuSoundPump): OVER as the
+# mouse comes onto BTN, nothing more while it stays or while the button is down,
+# CLICK on the click, and OVER again on the next sample with the mouse still there.
+func test_hover_sounds_follow_the_game_s_pump() -> void:
+	var driver := _framed_driver(SOUND_XML)
+	var heard: Array[String] = []
+	driver.sound_requested.connect(func(_file: String, trigger: String) -> void: heard.append(trigger))
+	var at := driver.widget_frame_rect(driver.widget_id("BTN")).get_center()
+	driver.process_mouse(at, false)
+	driver.process_mouse(at + Vector2(2, 0), false)
+	assert_eq(heard, ["OVER"] as Array[String], "onto BTN: its MOUSEIN once")
+	driver.process_mouse(at, true)
+	driver.process_mouse(at, false)
+	assert_eq(heard, ["OVER", "CLICK"] as Array[String], "held: nothing; let go over it: its SELECTED")
+	driver.process_mouse(at + Vector2(1, 0), false)
+	assert_eq(heard, ["OVER", "CLICK", "OVER"] as Array[String], "the next sample there: MOUSEIN again")
+	driver.process_mouse(Vector2(700, 500), false)
+	assert_eq(heard.size(), 3, "BTN has no MOUSEOUT row: leaving it plays nothing")
+
+
+# --- (h) the end-of-round stat table --------------------------------------------
+
+const STAT_XML := """
+<SCREEN>
+  <NAME>STATS</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="table" name="RESULTLIST">
+      <POSITION><LEFT>10</LEFT><TOP>10</TOP><RIGHT>610</RIGHT><BOTTOM>410</BOTTOM></POSITION>
+      <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+"""
+
+
+# The stat RESULTLIST authors no COLUMN: fill_stat_results installs the feed's
+# columns, adds the rows and sorts by the third column descending, as
+# StatScreen_PopulateStatResultsList does [orig: StatScreen_PopulateStatResultsList @ 0x562240;
+# CTableWnd_SortByColumn(2) @ 0x5626f9]. The column draw is pinned in the
+# menu_frame_parity ctest.
+func test_stat_results_fill_installs_columns_and_sorts() -> void:
+	var driver := _framed_driver(STAT_XML, "stat.mnu")
+	var table := driver.widget_id("RESULTLIST")
+	assert_eq(driver.table_sort_column(table), -1, "an unfilled table is unsorted")
+	var columns: Array[EndRoundColumn] = [EndRoundColumn.new(), EndRoundColumn.new(), EndRoundColumn.new()]
+	var rows: Array[EndRoundRow] = [EndRoundRow.new(), EndRoundRow.new()]
+	driver.fill_stat_results(table, columns, rows)
+	assert_eq(driver.table_row_count(table), 2, "every feed row lands")
+	assert_eq(driver.table_sort_column(table), 2, "sorted by the third column")
+	var none: Array[EndRoundRow] = []
+	driver.fill_stat_results(table, columns, none)
+	assert_eq(driver.table_row_count(table), 0, "a refill clears the old rows")

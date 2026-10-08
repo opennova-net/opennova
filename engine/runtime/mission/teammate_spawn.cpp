@@ -26,8 +26,8 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
         if (found == ai_profiles.end()) {
             std::vector<uint8_t> bytes;
             const bool loaded = files_.valid()
-                    ? files_.read_file("H_BHawkN.aip", bytes)
-                    : asset_index() && asset_index()->read_file("H_BHawkN.aip", bytes);
+                    ? files_.read_file(kTeammateHelicopterAiProfile, bytes)
+                    : asset_index() && asset_index()->read_file(kTeammateHelicopterAiProfile, bytes);
             if (!loaded || bytes.empty()) return {};
             ai_profiles.push_back({"h_bhawkn", aip::parse_profile(bytes.data(), bytes.size())});
             profile = &ai_profiles.back().data;

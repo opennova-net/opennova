@@ -209,8 +209,8 @@ void play_flag_event_sound(World &world, uint8_t event, const Entity &actor,
             world.out.script_sounds.push_back(std::move(sound));
         } else {
             // Wire XY are signed whole units; the third coordinate is ZERO.
-            // The misnamed HUD_DrawDefaultProgressBar is a positional sound wrapper.
-            // [orig: HUD_DrawDefaultProgressBar @ 0x527E60 -> Sound_Play3DPositional]
+            // [orig: Sound_PlayAtPosition @ 0x527E60, a Sound_Play3DPositional
+            //  wrapper, null entity, volume 255]
             world.out.fire_sounds.play_immediate(cue, {float(x), float(y), 0.0f}, 0);
         }
     }
@@ -222,10 +222,11 @@ void play_flag_event_sound(World &world, uint8_t event, const Entity &actor,
 
 void play_round_impact_sound(World &world, const RoundImpact &impact, bool full_volume) {
     if (!impact.present_sound) return; // the record's sign-bit gate [orig: @0x40a20d]
-    const AmmoTableEntry *ammo = world.tables.ammo.by_index(impact.ammo_index);
-    if (ammo == nullptr || impact.effect_tag < 0 || impact.effect_tag >= kImpactEffectTagCount)
-        return;
-    const std::string &sound = ammo->impact_effects[impact.effect_tag].sound;
+    if (impact.effect_tag < 0) return;
+    // The ammo's row of the tag, else ammo def 0's bank at its place [orig:
+    // AmmoDef_ProcessImpactEffect @0x40a1b8..0x40a1fd]; a direct reader's own row.
+    const ImpactRowPick row = round_impact_row(world.tables.ammo, impact);
+    const std::string &sound = row.sound;
     if (sound.empty()) return; // the row's null sound id [orig: @0x40a204]
     // The play carries no entity [orig: `push 0` @0x40a20f / @0x449607].
     if (full_volume)

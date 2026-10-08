@@ -99,6 +99,13 @@ public:
 	// of that view hands it in every frame; clear_world() drops it.
 	void set_second_scene_camera(Camera3D *p_camera);
 	Camera3D *get_second_scene_camera() const;
+	// The mission's copies of game.cfg's texcompression_level and
+	// particle_density (ParticleRenderer::set_session_render_settings), handed
+	// over at each mission start before the effects load, and whether the
+	// main view renders as the NVG scene this frame
+	// (ParticleRenderer::set_main_view_nvg_scene).
+	void set_session_render_settings(int p_texcompression_level, int p_particle_density);
+	void set_main_view_nvg_scene(bool p_nvg_scene);
 	// FrameFX's type-0 row device (ParticleRenderer::distortion_drawer): the
 	// world registers it with FrameFx; the fire presenter publishes the tracer
 	// distortion ribbons into it.
@@ -293,6 +300,9 @@ private:
 	float water_height_ = 0.0f;
 	ObjectID reflection_camera_id_;
 	ObjectID second_scene_camera_id_;
+	int session_texcompression_level_ = 1;
+	int session_particle_density_ = 2;
+	bool main_view_nvg_scene_ = false;
 	ObjectID section_source_id_;
 	Simulation *_section_source() const;
 	// Stamps a tagged request with the blink volumes containing its spawn

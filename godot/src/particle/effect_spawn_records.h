@@ -26,8 +26,7 @@ namespace godot {
 
 // admission / binding / render_domain / kill_plane are EffectScene's bound
 // enums (Admission, Binding, RenderDomain, KillPlane); slot_token /
-// owner_token are the interned identities the shell holds; lod_divisor is
-// clamped to >= 1 by the scene.
+// owner_token are the interned identities the shell holds.
 #define EFFECT_SPAWN_REQUEST_FIELDS(X)                                                             \
 	X(int64_t, effect_handle, 0)                                                                   \
 	X(Transform3D, transform, Transform3D())                                                       \
@@ -42,7 +41,7 @@ namespace godot {
 	X(int64_t, source_tick, 0)                                                                     \
 	X(int64_t, source_order, 0)                                                                    \
 	X(float, spring_const, 0.0f)                                                                   \
-	X(int, lod_divisor, 1)                                                                         \
+\
 	X(int, kill_plane, 0)                                                                          \
 	X(float, kill_plane_y, 0.0f)                                                                   \
 	X(bool, section_tagged, false)                                                                 \

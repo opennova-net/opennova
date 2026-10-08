@@ -64,11 +64,12 @@ import re
 from array import array
 
 import bpy
+import numpy as np
 from mathutils import Matrix, Vector
 
 from . import assembly, materials
 from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ModelSpace, Notes, at_world_origin, cli_notes,
-                      export_text, fmt, quoted)
+                      export_text, flipbook_reads_register, fmt, quoted)
 from .rig import (PART_RE, WEIGHT_EPS, clean_name, descendants, hung_elsewhere, ignored, is_lod_root, is_model_root,
                   lod_of, lod_parts, lod_roots, model_of, model_roots, part_bones, part_of, rig_of)
 
@@ -97,12 +98,11 @@ BLINK_LETTER_BITS = {"V": 0x2, "S": 0x4, "W": 0x8, "L": 0x10, "O": 0x20}
 # z, translation), the order OED collected their registers in.
 TRACK_ORDER = ("rotx", "roty", "rotz", "scalex", "scaley", "scalez", "trans")
 
-# A strip holds at most 65535 indices (u16), so 21,845 triangles; export
-# starts another strip there, and a skinned one's bone table holds at most 16
-# parts (the skinned palette, MAX_SKIN_MATRICES), filled by OED's rule
-# (skinned_strips).
-STRIP_TRIANGLES = 65535 // 3
-SKIN_TABLE = 16
+# A part's geometry under one material is one `mesh` of any size, its skinned
+# vertices with any number of influences: opennova-3di's lowering splits it
+# into the strips the game holds (21,845 triangles, a palette of 16 parts by
+# OED's rule) and keeps four influences (ADR 0052).
+#
 # Every first-person bone buffer is a 64-entry array: a gun of more parts
 # overruns it [orig: Player_RenderFirstPersonViewModel @ 0x4DED60, its
 # 64-matrix locals; the part-count test @ 0x4DEF8B], and the arms draw with
@@ -150,22 +150,29 @@ def bone_bounds(points):
     return centre, radius, mn + mx
 
 
-def shared_vertex(strip, key, vert, corners):
-    """A triangle corner's vertex in its strip: the one it shares with every
+def shared_vertex(mesh, key, vert, corners):
+    """A triangle corner's vertex in its mesh: the one it shares with every
     corner of the same key, but never one another corner of its triangle
     already took. Two corners of a Blender triangle are always two vertices,
     and a sliver whose corners coincide (retail ships them) keeps all three,
     as the CLI takes a triangle only on three vertices."""
-    at = strip["index"].get(key)
+    at = mesh["index"].get(key)
     if at is None or at in corners:
-        at = len(strip["verts"])
-        strip["verts"].append(vert)
-        strip["index"].setdefault(key, at)
+        at = len(mesh["verts"])
+        mesh["verts"].append(vert)
+        mesh["index"].setdefault(key, at)
     return at
 
 
-def new_strip(ob):
-    return {"verts": [], "index": {}, "tris": [], "meshes": [ob.name], "table": [], "slots": {}}
+def mesh_of(meshes, mi, ob):
+    """The scene mesh of material `mi` on a part (one per material), naming
+    the Blender objects that give it triangles and, under a shader that reads
+    tangents, those Blender computed no tangent frames for (`unframed`)."""
+    m = meshes.setdefault(mi, {"verts": [], "index": {}, "tris": [], "meshes": [], "framed": False,
+                               "unframed": []})
+    if not m["meshes"] or m["meshes"][-1] != ob.name:
+        m["meshes"].append(ob.name)
+    return m
 
 
 def fixed(value, scale, lo, hi, what):
@@ -292,6 +299,7 @@ class Exporter(Notes):
         self.frames = []
         self.skinned = False
         self.uv1 = False
+        self.tangent_reads = {}  # material index -> whether its shader reads TANGENT
         self.bone_points = {}  # skinned LOD 0: part -> rest positions it moves
         self.sections = {}  # collision section -> its part and the meshes giving its faces
         self.notes = []
@@ -318,7 +326,7 @@ class Exporter(Notes):
                                       (p.rgb_style, p.rgb_register, "the RGB gen")):
                 if style > CTRL_REFERENCE_THRESHOLD:
                     self.register(name, f"{mat.name}: {what}")
-            if p.anim_type == 1:
+            if flipbook_reads_register(p.anim_frames, p.anim_type):
                 self.register(p.anim_register, f"{mat.name} texture flipbook")
         for lod in lods:
             for part in lod.parts:
@@ -340,8 +348,6 @@ class Exporter(Notes):
         if not name:
             self.note(f"{what}: a register-driven style (above 112) with no register name reads the unnamed "
                       "register")
-        if len(name) > 24:
-            raise ExportError(f"{what}: the register name '{name}' exceeds 24 characters (its CTRL field)")
         if name not in self.registers:
             self.registers.append(name)
         return self.registers.index(name)
@@ -495,8 +501,6 @@ class Exporter(Notes):
                         lod0_only(ob, "user points")
                         continue
                     label = m.group(3) if m.group(3) is not None else "Noname"
-                    if len(label) > 15:
-                        raise ExportError(f"{ob.name}: user point label '{label}' exceeds 15 characters")
                     lod.points.append((m.group(1), self.on_part(ob, part, m.group(2), lod, none_ok=True), label, ob))
                     continue
                 m = HELPER_RE.match(raw)
@@ -618,10 +622,63 @@ class Exporter(Notes):
             vert += (b[0], 1.0 - b[1])
         return vert
 
-    def mesh_strips(self, ob, strips):
-        """A rigid part's mesh into its strips (material index -> [strip]),
-        each at most STRIP_TRIANGLES triangles: a full strip starts another,
-        as a skinned one does."""
+    def reads_tangents(self, mi):
+        """Whether material index `mi` draws with a shader that reads the
+        TANGENT semantic (its catalog capability word)."""
+        if mi not in self.tangent_reads:
+            shader = self.materials.shader(self.materials.used[mi])
+            self.tangent_reads[mi] = bool(materials.shader_flags(shader) & materials.FLAG_TANGENT)
+        return self.tangent_reads[mi]
+
+    def loop_frames(self, mesh, mw):
+        """Each loop's tangent frame as the scene's `vt` gives it: Blender's
+        own (MikkTSpace on the render UV map, the frame its Normal Map node
+        and its bakes use), tangent then bitangent, in mission axes on D3D UVs
+        (v runs down, so the bitangent turns over). The frames are directions
+        in the object's space, so they go through its matrix itself, not the
+        normals' inverse transpose. None where Blender computes none (no UV
+        map; a face of more than four corners)."""
+        layers = mesh.uv_layers
+        if len(layers) == 0:
+            return None
+        render = next((l for l in layers if l.active_render), layers[0]).name
+        try:
+            mesh.calc_tangents(uvmap=render)
+        except RuntimeError:
+            return None
+        count = len(mesh.loops)
+        tangent = np.empty(count * 3, dtype=np.float64)
+        bitangent = np.empty(count * 3, dtype=np.float64)
+        mesh.loops.foreach_get("tangent", tangent)
+        mesh.loops.foreach_get("bitangent", bitangent)
+        # The object's matrix, then Blender's axes as mission axes (the basis
+        # change ModelSpace.mission is), on row vectors.
+        into = np.array(self.space.basis.transposed() @ mw.to_3x3(), dtype=np.float64).T
+        frames = []
+        for vectors, sign in ((tangent, 1.0), (bitangent, -1.0)):
+            mission = sign * (vectors.reshape(-1, 3) @ into)
+            length = np.linalg.norm(mission, axis=1, keepdims=True)
+            frames.append(np.divide(mission, length, out=np.zeros_like(mission), where=length > 1e-12))
+        return np.concatenate(frames, axis=1).astype(np.float32)  # the file stores float32
+
+    def framed_corner(self, s, mi, frames, li, ob, vert):
+        """`vert` with its loop's tangent frame when its material reads
+        tangents and Blender gave the object frames; an object it gave none
+        is named on the mesh, which then writes no frame at all."""
+        if not self.reads_tangents(mi):
+            return vert
+        if frames is None:
+            if ob.name not in s["unframed"]:
+                s["unframed"].append(ob.name)
+            return vert
+        s["framed"] = True
+        return vert + tuple(float(x) for x in frames[li])
+
+    def mesh_triangles(self, ob, meshes):
+        """A rigid part's mesh into the part's scene meshes (material index ->
+        mesh), each of any size: the CLI's lowering splits a mesh into the
+        strips the game holds. Under a shader that reads tangents a corner
+        carries its tangent frame (loop_frames)."""
         ev = self.evaluated(ob)
         mesh = ev.to_mesh()
         try:
@@ -632,29 +689,28 @@ class Exporter(Notes):
             normals = mesh.corner_normals
             uv0, uv1 = self.uv_layers(mesh)
             self.materials.record_mesh(ob, ev, mesh, uv0)
-            for tri in mesh.loop_triangles:
-                mi = self.materials.index_of(slot_material(ev, tri.material_index))
-                runs = strips.setdefault(mi, [])
-                if not runs or len(runs[-1]["tris"]) >= STRIP_TRIANGLES:
-                    runs.append(new_strip(ob))
-                s = runs[-1]
-                if s["meshes"][-1] != ob.name:
-                    s["meshes"].append(ob.name)
+            mis = [self.materials.index_of(slot_material(ev, tri.material_index)) for tri in mesh.loop_triangles]
+            frames = self.loop_frames(mesh, mw) if any(self.reads_tangents(mi) for mi in set(mis)) else None
+            for tri, mi in zip(mesh.loop_triangles, mis):
+                s = mesh_of(meshes, mi, ob)
                 corners = []
                 for li in reversed(tri.loops) if mirrored else tri.loops:
                     vert = self.corner(mesh, mesh.loops[li], mw, nmat, normals, uv0, uv1)
+                    vert = self.framed_corner(s, mi, frames, li, ob, vert)
                     corners.append(shared_vertex(s, tuple(round(x, 5) for x in vert), vert, corners))
                 s["tris"].append(corners)
         finally:
             ev.to_mesh_clear()
 
     def weights(self, ob, ev, mesh, lod):
-        """Each vertex's influences, [(part, weight)] dominant first (contract
-        C1: up to four, each a part bone of the LOD, normalized to one as
-        Blender's Armature modifier blends them), from the vertex groups named
-        after the rig's deforming bones; an error for a vertex with more than
-        four, with none, or with a weight on a deforming bone that is no part
-        (Root, a control bone) or past the LOD's parts."""
+        """Each vertex's influences, [(part, weight)] dominant first (each a
+        part bone of the LOD, normalized to one as Blender's Armature modifier
+        blends them; the dominant one is the bone the game lights the vertex
+        by), from the vertex groups named after the rig's deforming bones; an
+        error for a vertex with none, or with a weight on a deforming bone
+        that is no part (Root, a control bone) or past the LOD's parts. Past
+        four the CLI keeps the dominant one and the three heaviest others, as
+        the game blends four, and says so."""
         rig = lod.lp.rig
         parts = {b.name: i for i, b in part_bones(rig).items()}
         groups = {}      # vertex group index -> part index
@@ -687,27 +743,18 @@ class Exporter(Notes):
             if not infl:
                 raise ExportError(f"{ob.name}: vertex {v.index} has no weight of {WEIGHT_EPS:g} or more on a part "
                                   "bone")
-            if len(infl) > 4:
-                raise ExportError(f"{ob.name}: vertex {v.index} is weighted to {len(infl)} bones; the game blends "
-                                  "four (Weights > Limit Total)")
             total = sum(infl.values())
             out.append(sorted(((b, w / total) for b, w in infl.items()), key=lambda e: (-e[1], e[0])))
         return out
 
-    def skinned_strips(self, ob, strips, lod, bone=None):
-        """A mesh's triangles on a skinned model, grouped per material into
-        strips whose bone tables stay within SKIN_TABLE parts and whose
-        triangles within STRIP_TRIANGLES, by OED's palette rule (the retired
-        port's rdta.cpp, WriteRDTA_Skinned's grouping): a triangle joins the
-        first strip of its material whose table, counting each corner's
-        bones anew where the table lacks them, stays within SKIN_TABLE, and
-        else starts one; a table lists its bones in the order they come. So a
-        table of 15 bones takes no triangle bringing a 16th on more than one
-        corner: 56 retail splits (JNTOPSB2's 15 and 2 bones, CIndo01's 15 and
-        1) keep a union a plain count would have fitted in one strip. A
-        corner carries its rest position and its influences (weights), or
-        wholly `bone` for a mesh hung from it. LOD 0's vertices bound the
-        bones that move them (bone_points)."""
+    def skinned_triangles(self, ob, meshes, lod, bone=None):
+        """A mesh's triangles on a skinned model into the part's scene meshes
+        (material index -> mesh), each of any size: the CLI's lowering splits
+        a mesh into strips whose bone tables hold the 16 parts a palette does,
+        by OED's rule. A corner carries its rest position and its influences
+        (weights) as part weight pairs, dominant first, or wholly `bone` for a
+        mesh hung from it. LOD 0's vertices bound the bones that move them
+        (bone_points)."""
         ev = self.evaluated(ob)
         mesh = ev.to_mesh()
         try:
@@ -731,52 +778,39 @@ class Exporter(Notes):
                     at = self.space.mission(mw @ mesh.vertices[vi].co)
                     for b, _ in influences[vi]:
                         self.bone_points.setdefault(b, []).append(at)
-            for tri in mesh.loop_triangles:
-                mi = self.materials.index_of(slot_material(ev, tri.material_index))
-                corners = []
+            mis = [self.materials.index_of(slot_material(ev, tri.material_index)) for tri in mesh.loop_triangles]
+            frames = self.loop_frames(mesh, mw) if any(self.reads_tangents(mi) for mi in set(mis)) else None
+            for tri, mi in zip(mesh.loop_triangles, mis):
+                s = mesh_of(meshes, mi, ob)
+                ids = []
                 for li in reversed(tri.loops) if mirrored else tri.loops:
                     loop = mesh.loops[li]
-                    corners.append((self.corner(mesh, loop, mw, nmat, normals, uv0, uv1),
-                                    influences[loop.vertex_index]))
-                bones = [b for _, infl in corners for b, _ in infl]
-                runs = strips.setdefault(mi, [])
-                s = next((run for run in runs if len(run["tris"]) < STRIP_TRIANGLES and
-                          len(run["table"]) + sum(1 for b in bones if b not in run["slots"]) <= SKIN_TABLE), None)
-                if s is None:
-                    s = new_strip(ob)
-                    runs.append(s)
-                if s["meshes"][-1] != ob.name:
-                    s["meshes"].append(ob.name)
-                for b in bones:
-                    if b not in s["slots"]:
-                        s["slots"][b] = len(s["table"])
-                        s["table"].append(b)
-                ids = []
-                for vert, infl in corners:
-                    slots = [s["slots"][b] for b, _ in infl]
-                    # Four bone-table slots and three stored weights: the
-                    # fourth slot takes 1 - (w0 + w1 + w2) (contract C1, the
-                    # retail blend); an unused slot repeats the first, as
-                    # retail pads them.
-                    slots += [slots[0]] * (4 - len(slots))
-                    stored = [w for _, w in infl[:3]] + [0.0] * (3 - min(3, len(infl)))
-                    full = vert + tuple(slots) + tuple(stored)
-                    ids.append(shared_vertex(s, tuple(round(x, 5) for x in full), full, ids))
+                    vert = self.corner(mesh, loop, mw, nmat, normals, uv0, uv1)
+                    vert = self.framed_corner(s, mi, frames, li, ob, vert)
+                    infl = tuple(influences[loop.vertex_index])
+                    key = tuple(round(x, 5) for x in vert) + tuple((b, round(w, 5)) for b, w in infl)
+                    ids.append(shared_vertex(s, key, (vert, infl), ids))
                 s["tris"].append(ids)
         finally:
             ev.to_mesh_clear()
 
-    def emit_strip(self, s, mi, lines, skinned):
-        lines.append(f"strip {mi} {self.materials.strip_alpha(mi)}  # {', '.join(s['meshes'])}")
-        if skinned:
-            lines.append("bones " + " ".join(str(b) for b in s["table"]))
+    def emit_mesh(self, s, mi, lines, skinned):
+        lines.append(f"mesh {mi} {self.materials.strip_alpha(mi)}  # {', '.join(s['meshes'])}")
+        # A mesh gives a tangent frame on every vertex or none: one an object
+        # gave no frames to takes the CLI's rule for all of it.
+        framed = s["framed"] and not s["unframed"]
+        if s["unframed"]:
+            self.note(f"{', '.join(s['unframed'])}: Blender computes tangent frames on triangles and quads only, "
+                      "with a UV map, so the CLI derives this mesh's (triangulate it to export Blender's own)")
         uv_end = 10 if self.uv1 else 8
         for v in s["verts"]:
+            vert, infl = v if skinned else (v, ())
+            line = "v " + fmt(*vert[:uv_end])
             if skinned:
-                lines.append("v " + fmt(*v[:uv_end]) + " " + " ".join(str(int(x)) for x in v[uv_end:uv_end + 4]) +
-                             " " + fmt(*(float(x) for x in v[uv_end + 4:uv_end + 7])))
-            else:
-                lines.append("v " + fmt(*v))
+                line += " " + " ".join(f"{b} {fmt(float(w))}" for b, w in infl)
+            lines.append(line)
+            if framed:
+                lines.append("vt " + fmt(*vert[uv_end:uv_end + 6]))
         for t in s["tris"]:
             lines.append(f"t {t[0]} {t[1]} {t[2]}")
 
@@ -801,21 +835,20 @@ class Exporter(Notes):
         p = lod.root.o3d
         lines.append(f"lod {p.lod_threshold} {quoted(p.lod_type or 'gnrc')}  # {lod.root.name}")
         for part in lod.parts:
-            strips = {}
+            meshes = {}
             if self.skinned:
                 if part.index == lod.authored:
                     for ob in lod.skinned:
-                        self.skinned_strips(ob, strips, lod)
+                        self.skinned_triangles(ob, meshes, lod)
                 for ob in lod.meshes.get(part.index, []):
-                    self.skinned_strips(ob, strips, lod, part.index)
+                    self.skinned_triangles(ob, meshes, lod, part.index)
             else:
                 for ob in lod.meshes.get(part.index, []):
-                    self.mesh_strips(ob, strips)
-            centre = self.part_centre(lod, part.index) if not strips and not self.skinned else None
+                    self.mesh_triangles(ob, meshes)
+            centre = self.part_centre(lod, part.index) if not meshes and not self.skinned else None
             lines.append(self.part_line(lod, part, centre))
-            for mi in sorted(strips):
-                for s in strips[mi]:
-                    self.emit_strip(s, mi, lines, self.skinned)
+            for mi in sorted(meshes):
+                self.emit_mesh(meshes[mi], mi, lines, self.skinned)
         for part in lod.parts:
             self.emit_panm(lod, part, lines)
 
@@ -864,11 +897,8 @@ class Exporter(Notes):
     # --- user points, lights, occlusion -------------------------------------
     def emit_points(self, lod, lines):
         # USRP order: each helper's `order` (the imported index), then label.
-        # The seat scan reads `sitex` without case and stops at 8 [orig:
-        # Entity_GetBoneSlotType @ 0x434ED0; the scan end @ 0x43A5AF].
-        seats = [ob.name for _, _, label, ob in lod.points if label.lower().startswith("sitex")]
-        if len(seats) > 8:
-            raise ExportError(f"{len(seats)} sitex seats ({', '.join(sorted(seats))}); the game reads 8")
+        # More than 8 `sitex` seats is opennova-3di's note: the game loads
+        # such a model (THREEDI_SITEX_SEAT_LIMIT).
         for letter, part, label, ob in sorted(lod.points, key=lambda e: point_key(e[2], e[3])):
             pos = self.space.mission(self.world(ob).translation)
             d = self.space.mission((self.world(ob).to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized())
@@ -907,8 +937,6 @@ class Exporter(Notes):
             ev = self.evaluated(ob)
             mesh = ev.to_mesh()
             try:
-                if len(mesh.vertices) > 128:
-                    raise ExportError(f"{ob.name}: an occlusion mesh holds at most 128 vertices")
                 # The record's sphere: its `_sphere` empty's, else the builder
                 # derives it from the vertices (docs/threedi/o3d-scene-format.md).
                 sphere = lod.occ_spheres.get(ob.name)
@@ -952,12 +980,16 @@ class Exporter(Notes):
     def bullet_faces(self, section, meshes):
         """The meshes' triangles as a section's bullet faces, on the 8.8 grid
         the section stores, counter-clockwise about their outward normal (the
-        retail order)."""
+        retail order). A face takes its material's surface and flags, or its
+        polygon's own where the mesh keeps them (materials.FACE_SURFACE and
+        FACE_FLAGS: what an import of a retail model found on that face)."""
         for ob in meshes:
             ev = self.evaluated(ob)
             mesh = ev.to_mesh()
             try:
                 mesh.calc_loop_triangles()
+                own_surface = materials.face_overrides(mesh, materials.FACE_SURFACE)
+                own_flags = materials.face_overrides(mesh, materials.FACE_FLAGS)
                 mw = self.world(ob)
                 mirrored = mw.to_3x3().determinant() < 0
                 for tri in mesh.loop_triangles:
@@ -976,8 +1008,14 @@ class Exporter(Notes):
                     if len(set(corners)) != 3:
                         continue
                     mat = slot_material(ev, tri.material_index)
-                    section["faces"].append((corners, mat.o3d.surface if mat is not None else 14,
-                                             materials.face_flags(mat)))
+                    surface = mat.o3d.surface if mat is not None else 14
+                    flags = materials.face_flags(mat)
+                    pi = tri.polygon_index
+                    if own_surface is not None and own_surface[pi] >= 0:
+                        surface = own_surface[pi]
+                    if own_flags is not None and own_flags[pi] >= 0:
+                        flags = own_flags[pi]
+                    section["faces"].append((corners, surface, flags))
             finally:
                 ev.to_mesh_clear()
 
@@ -1200,8 +1238,6 @@ class Exporter(Notes):
         self.export_run.claim(out_path, self.model)
         out_dir = os.path.dirname(out_path)
         name = model_name(self.model)
-        if len(name) > 15:
-            raise ExportError(f"{model}: the model name exceeds 15 characters")
         # Edit Mode keeps its edits out of the data export reads (an
         # armature's new bones, a mesh's new faces): leave it for the export
         # and return to it after.
@@ -1309,14 +1345,14 @@ class Exporter(Notes):
         self.emit_occlusion(lods[0], tail_lines)
         self.emit_collision(lods[0], lods[bullet_index], tail_lines)
         for i, line in enumerate(lod_lines):
-            if line.startswith("strip "):
+            if line.startswith("mesh "):
                 record, _, comment = line.partition("  #")
                 fields = record.split()
-                lod_lines[i] = f"strip {remap[int(fields[1])]} {fields[2]}  #{comment}"
+                lod_lines[i] = f"mesh {remap[int(fields[1])]} {fields[2]}  #{comment}"
         self.materials.emit(material_lines, name)
 
         frame_lines = ["mtrx " + fmt(*(float(x) for x in r)) for r in self.frames]
-        text = ["o3d 1", f"model {quoted(name)}"] + (["skinned 1"] if self.skinned else []) + \
+        text = ["o3d 2", f"model {quoted(name)}"] + (["skinned 1"] if self.skinned else []) + \
             (["uv1 1"] if self.uv1 else []) + [f"register {quoted(r)}" for r in self.registers] + frame_lines + \
             material_lines + lod_lines + tail_lines
         os.makedirs(out_dir, exist_ok=True)

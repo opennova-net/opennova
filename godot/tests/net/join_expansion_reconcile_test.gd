@@ -4,7 +4,7 @@ extends GutTest
 # in-process listen host over loopback UDP, mounting a REAL packed install (base
 # resource.pff + expansion/jox01/jox01.pff). The host advertises its expansion in S2C 0x7B,
 # and the joiner must be running the host's data set before it resolves anything of the
-# host's — the ADM weapon index space is expansion-scoped, so mounting the local persisted
+# host's — the ADM weapon index space is expansion-scoped, so mounting the local
 # expansion instead silently renames every wire ADM index at and after the first diverging
 # weapon.def row.
 #
@@ -13,7 +13,7 @@ extends GutTest
 # invalid, but a retail-shaped join must never open it:
 #   assets found (expansion mounted) -> the wire-header world loads
 #   assets absent (base mounted)     -> referenced terrain-not-found failure
-# Each case starts from a persisted local expansion that is the WRONG one, and the
+# Each case starts from a local mount that is the WRONG data set, and the
 # pre-assertions pin what that local-only mount would have resolved.
 #
 # Half the cases inject the root the way the shipping game does — main_game's menu-entry leg hands
@@ -37,16 +37,10 @@ polytrn_sectors 1
 # joiner's own admission observer is tick-polled, so both are pumped from one loop.
 const PRELOAD_PUMP_FRAMES := 900
 
-var _saved_expansion := ""
 var _dirs: Array[String] = []
 
 
-func before_each() -> void:
-	_saved_expansion = ResourceDirSettings.get_expansion()
-
-
 func after_each() -> void:
-	ResourceDirSettings.set_expansion(_saved_expansion)
 	for dir in _dirs:
 		_remove_install(dir)
 	_dirs.clear()
@@ -54,7 +48,6 @@ func after_each() -> void:
 
 func test_expansion_host_remounts_a_base_mounted_joiner() -> void:
 	var dir := _make_install()
-	ResourceDirSettings.set_expansion("")  # the local (wrong) choice: base game
 
 	# BEFORE: mounted exactly as the joiner would have mounted it on its own, the host's
 	# mission is unreachable — this is the state the fix has to move off.
@@ -77,7 +70,6 @@ func test_expansion_host_remounts_a_base_mounted_joiner() -> void:
 
 func test_base_host_remounts_an_expansion_mounted_joiner() -> void:
 	var dir := _make_install()
-	ResourceDirSettings.set_expansion("jox01")  # the local (wrong) choice: an expansion
 
 	# BEFORE: the local-only mount DOES resolve the host's mission, so a joiner that never
 	# reconciled would sail past the lookup on expansion data while the host runs base JO.
@@ -95,7 +87,6 @@ func test_base_host_remounts_an_expansion_mounted_joiner() -> void:
 
 func test_uninstalled_host_expansion_aborts_the_join() -> void:
 	var dir := _make_install()
-	ResourceDirSettings.set_expansion("jox01")
 
 	var world := _make_world()
 	var failures := _watch_failures(world)
@@ -109,7 +100,6 @@ func test_uninstalled_host_expansion_aborts_the_join() -> void:
 
 func test_matching_expansion_leaves_the_mount_alone() -> void:
 	var dir := _make_install()
-	ResourceDirSettings.set_expansion("jox01")
 
 	var local := ResourceRoot.new()
 	assert_eq(local.mount_runtime(dir, "jox01"), OK)
@@ -126,7 +116,6 @@ func test_matching_expansion_leaves_the_mount_alone() -> void:
 
 func test_injected_shell_root_is_switched_in_place() -> void:
 	var dir := _make_install()
-	ResourceDirSettings.set_expansion("")  # the local (wrong) choice: base game
 
 	# The mount the shipping game actually joins on: the shell's live runtime root, handed to
 	# GameWorld at menu entry and sitting on the local choice.
@@ -144,15 +133,12 @@ func test_injected_shell_root_is_switched_in_place() -> void:
 	assert_eq(shell_root.get_expansion(), "jox01",
 		"and it is the SHELL's own root that moved — the switch is in place, not a swap")
 	assert_true(shell_root.has_file(HOST_TERRAIN + ".trn"))
-	assert_eq(ResourceDirSettings.get_expansion(), "",
-		"the host owns this session's data set, not the persisted menu choice")
 	world.unload()
 	shell_root.clear()  # release the archive handles before after_each deletes the install
 
 
 func test_uninstalled_host_expansion_aborts_an_injected_shell_root_too() -> void:
 	var dir := _make_install()
-	ResourceDirSettings.set_expansion("jox01")
 
 	var shell_root := ResourceRoot.new()
 	assert_eq(shell_root.mount_runtime(dir, "jox01"), OK)
@@ -179,7 +165,6 @@ func test_loose_root_stands_down_rather_than_aborting_an_uninstalled_expansion()
 	# precede the abort — the abort belongs to runtime mounts, which are what the shipping game
 	# always joins on.
 	var dir := _make_install()
-	ResourceDirSettings.set_expansion("")
 
 	var loose_root := ResourceRoot.new()
 	assert_eq(loose_root.set_root_dir(dir), OK)
@@ -200,7 +185,6 @@ func test_loose_root_stands_down_rather_than_aborting_an_uninstalled_expansion()
 
 func test_injected_loose_root_stands_down_instead_of_switching() -> void:
 	var dir := _make_install()
-	ResourceDirSettings.set_expansion("")
 
 	# Injected-fixture shape: a loose authoring mount layers no expansion
 	# archives, so there is nothing to switch and the authored data set stands.

@@ -18,14 +18,19 @@ const OPTIONS_FIXTURE := "mnu/jo_options.mnu"  # has the Mods tab (AVAIL_LIST/MO
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 
 var _state_config: TestFs.Snapshot
-var _controls_cfg: TestFs.Snapshot
+var _run_dir := ""
 
 
 func before_each() -> void:
 	_state_config = TestFs.snapshot(STATE_CONFIG_PATH)
 	if _state_config.existed:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
-	_controls_cfg = TestFs.snapshot(ControlsBindings.CONFIG_PATH)
+	# The Options screens edit the player profile's current record: each case
+	# starts from a fresh one in an empty run directory.
+	_run_dir = OS.get_cache_dir().path_join("opennova_menu_shell_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(_run_dir)
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", _run_dir]))
+	PlayerProfile.load_for(null)
 
 
 func after_each() -> void:
@@ -33,9 +38,10 @@ func after_each() -> void:
 	MusicService.stop_context()
 	_state_config.restore()
 	# The live binding model is a static shared with the whole run: restore the
-	# catalog defaults and the on-disk cfg even when a remap test fails early.
+	# catalog defaults even when a remap test fails early.
 	ControlsBindings.model().restore_defaults()
-	_controls_cfg.restore()
+	LaunchFlags.clear_args_override()
+	TestFs.remove_dir_recursive(_run_dir)
 
 
 # Build a throwaway resource dir holding main.mnu (+ a sp.mnu jump target and a
@@ -204,7 +210,7 @@ func test_failed_cross_mnu_jump_does_not_change_back_stack() -> void:
 	_cleanup(dir)
 
 
-func test_top_level_quit_requests_exit() -> void:
+func test_top_level_exit_control_requests_exit() -> void:
 	var dir := _make_dir()
 	var shell = _make_shell(dir)
 	if shell == null:
@@ -212,36 +218,86 @@ func test_top_level_quit_requests_exit() -> void:
 		_cleanup(dir)
 		return
 	watch_signals(shell)
-	shell.get_driver().quit_requested.emit()  # main menu, empty stack -> exit to desktop
+	var driver: MenuDriver = shell.get_driver()
+	driver.widget_activated.emit(driver.widget_id("EXIT"), "EXIT")  # the EXIT Command
 	assert_signal_emitted(shell, "exit_to_desktop_requested")
 	_cleanup(dir)
 
 
-func test_in_game_back_requests_resume() -> void:
+# The menu's pump reads the left button alone: a right-button press and release
+# over EXIT clicks nothing, the left button's does [orig: CWnd_ProcessMouseEvent
+# @ 0x647b04 reads input_mask's MK_LBUTTON alone; the right button's messages
+# reach no capture, CButtonWnd_HandleNamedEvent @ 0x658340].
+func test_right_button_never_clicks() -> void:
 	var dir := _make_dir()
 	var shell = _make_shell(dir)
 	if shell == null:
 		pending("temp resource root unavailable")
 		_cleanup(dir)
 		return
-	# Enter the pause context. game.mnu is absent so the overlay fails to load, but
-	# the in-game flag is set, so a top-level back now means resume, not exit.
-	shell.open_ingame_menu()
 	watch_signals(shell)
-	shell.get_driver().quit_requested.emit()
-	assert_signal_emitted(shell, "resume_requested")
+	var driver: MenuDriver = shell.get_driver()
+	# Through Godot's input dispatch, as a real mouse arrives (the shell's gui input).
+	var shell_control: Control = shell
+	var at := shell_control.get_global_transform_with_canvas() \
+			* driver.widget_frame_rect(driver.widget_id("EXIT")).get_center()
+	for button: MouseButton in [MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_LEFT]:
+		for pressed: bool in [true, false]:
+			var event := InputEventMouseButton.new()
+			event.button_index = button
+			event.pressed = pressed
+			event.position = at
+			event.global_position = at
+			Input.parse_input_event(event)
+			await get_tree().process_frame
+		if button == MOUSE_BUTTON_RIGHT:
+			assert_signal_not_emitted(shell, "exit_to_desktop_requested",
+					"the right button never clicks a window")
+	assert_signal_emitted(shell, "exit_to_desktop_requested", "the left button's click reaches EXIT")
+	_cleanup(dir)
+
+
+func test_pop_screen_with_no_history_does_nothing() -> void:
+	# POP_SCREEN pops a history that is not empty and otherwise does nothing: it
+	# never exits the game or resumes the mission (docs/mnu/menu-re.md).
+	var dir := _make_dir()
+	var shell = _make_shell(dir)
+	if shell == null:
+		pending("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	watch_signals(shell)
+	shell.get_driver().pop_screen()
+	assert_eq(shell.get_current_menu_file(), "main.mnu", "the main menu stays")
+	shell.open_ingame_menu()
+	shell.get_driver().pop_screen()
 	assert_signal_not_emitted(shell, "exit_to_desktop_requested")
+	assert_signal_not_emitted(shell, "resume_requested")
+	_cleanup(dir)
+
+
+func test_cross_mnu_jump_to_a_missing_screen_changes_nothing() -> void:
+	var dir := _make_dir()
+	var shell = _make_shell(dir)
+	if shell == null:
+		pending("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	shell.get_driver().menu_requested.emit("sp.mnu", "NO_SUCH_SCREEN")
+	assert_eq(shell.get_current_menu_file(), "main.mnu",
+		"a target the file does not hold keeps the current menu")
+	assert_eq(shell.get_menu_stack_depth(), 0, "and pushes no Back step")
 	_cleanup(dir)
 
 
 # Leaving a mission returns to the screen it was started from, the history under
 # it kept (D-MNU-28, docs/mnu/menu-re.md; the engine half is ctest screen_history).
 # The start leaves the menu once: a restart's reload marks nothing more. In the
-# mission a back pops nothing past the mark, so it resumes.
+# mission a POP_SCREEN pops nothing past the mark, and the named back resumes.
 func test_mission_return_shows_the_screen_it_was_started_from() -> void:
 	var dir := _make_dir()
-	TestFs.write_bytes(self, dir.path_join("game.mnu"),
-			MenuDriverFixture.screen_xml("INGAME", "").to_utf8_buffer())
+	TestFs.write_bytes(self, dir.path_join("game.mnu"), MenuDriverFixture.screen_xml(
+			"INGAME", MenuDriverFixture.wnd("button", "HIDDEN_BACK", 20)).to_utf8_buffer())
 	var shell = _make_shell(dir)
 	if shell == null:
 		pending("temp resource root unavailable")
@@ -262,7 +318,11 @@ func test_mission_return_shows_the_screen_it_was_started_from() -> void:
 	# The in-game menu: its back never reaches the menu's screens.
 	assert_true(shell.open_ingame_menu(), "the in-game overlay loads")
 	watch_signals(shell)
-	driver.quit_requested.emit()
+	driver.pop_screen()
+	assert_signal_not_emitted(shell, "resume_requested", "a POP_SCREEN stops at the mark")
+	assert_eq(shell.get_current_menu_file(), "game.mnu", "the pop reached no menu screen")
+	assert_eq(shell.get_menu_stack_depth(), 3)
+	driver.widget_activated.emit(driver.widget_id("HIDDEN_BACK"), "HIDDEN_BACK")
 	assert_signal_emitted(shell, "resume_requested")
 	assert_eq(shell.get_current_menu_file(), "game.mnu", "the back popped no menu screen")
 	assert_eq(shell.get_menu_stack_depth(), 3)
@@ -272,7 +332,7 @@ func test_mission_return_shows_the_screen_it_was_started_from() -> void:
 	assert_eq(driver.get_current_screen(), "LOADOUT", "back on the screen the mission left")
 	assert_eq(shell.get_menu_stack_depth(), 1, "STARTUP is still under it")
 	# Its back is the menu's again.
-	driver.quit_requested.emit()
+	driver.pop_screen()
 	assert_eq(shell.get_current_menu_file(), "main.mnu")
 	assert_eq(driver.get_current_screen(), "STARTUP")
 	assert_eq(shell.get_menu_stack_depth(), 0)
@@ -422,6 +482,134 @@ func test_companion_released_when_document_changes_hands() -> void:
 	assert_eq(stub.released, 1, "a re-claim is not a release")
 	_cleanup(dir)
 
+
+
+# The object-detail row is game.cfg's object_polydetail, served rather than
+# pinned (engine runtime/menu/options_policy.h kObjectDetailControls): the
+# options surface selects the row whose value is the persisted word, leaves
+# it editable, and a pick writes the row's value back at once.
+func test_object_detail_row_seeds_by_value_and_writes_the_word_back() -> void:
+	var options := PlayerOptions.new()
+	var seeded := options.current()
+	seeded.object_polydetail = 1
+	options.update(seeded)
+	var dir := _make_dir()
+	var list_box := ('<LIST_BOX><POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>200</RIGHT>'
+			+ '<BOTTOM>100</BOTTOM></POSITION><ITEMS>%s</ITEMS></LIST_BOX>')
+	var rows := ""
+	for level in 4:
+		rows += '<ITEM value="%d">Level %d</ITEM>' % [level, level]
+	var body := MenuDriverFixture.wnd("scroll", "MUSICVOLUME", 20)
+	body += MenuDriverFixture.wnd("combobox", "OBJECTPOLY", 60, list_box % rows)
+	TestFs.write_bytes(self, dir.path_join("options.mnu"),
+			MenuDriverFixture.screen_xml("OPTIONS", body).to_utf8_buffer())
+	var shell = _make_shell(dir, options)
+	if shell == null:
+		pending("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	assert_true(shell.open_menu("options.mnu", ""), "the options document opens")
+	var driver: MenuDriver = shell.get_driver()
+	assert_true(driver.is_options_surface())
+	var detail := driver.widget_id("OBJECTPOLY")
+	assert_gte(detail, 0)
+	assert_eq(driver.item_value(detail, driver.selected_row(detail)), "1",
+			"the row whose value is the persisted word is selected")
+	assert_false(driver.is_widget_disabled(detail), "the object-detail row is editable")
+	driver.select_row(detail, 3)  # emits the combo's value change
+	assert_eq(options.current().object_polydetail, 3,
+			"the pick writes the row's value to the shared owner")
+	assert_eq(PlayerOptions.new().current().object_polydetail, 3, "and persists")
+	_cleanup(dir)
+
+
+# The texture-filter row is game.cfg's texfilter_level, served the same way
+# (engine runtime/menu/options_policy.h kTextureFilterControls): the TEXFILTER
+# combobox selects the row whose value is the persisted word, stays editable,
+# and a pick writes the row's value back at once.
+func test_texture_filter_row_seeds_by_value_and_writes_the_word_back() -> void:
+	var options := PlayerOptions.new()
+	var seeded := options.current()
+	seeded.texfilter_level = 2
+	options.update(seeded)
+	var dir := _make_dir()
+	var list_box := ('<LIST_BOX><POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>200</RIGHT>'
+			+ '<BOTTOM>100</BOTTOM></POSITION><ITEMS>%s</ITEMS></LIST_BOX>')
+	var rows := ""
+	for level in 4:
+		rows += '<ITEM value="%d">Level %d</ITEM>' % [level, level]
+	var body := MenuDriverFixture.wnd("scroll", "MUSICVOLUME", 20)
+	body += MenuDriverFixture.wnd("combobox", "TEXFILTER", 60, list_box % rows)
+	TestFs.write_bytes(self, dir.path_join("options.mnu"),
+			MenuDriverFixture.screen_xml("OPTIONS", body).to_utf8_buffer())
+	var shell = _make_shell(dir, options)
+	if shell == null:
+		pending("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	assert_true(shell.open_menu("options.mnu", ""), "the options document opens")
+	var driver: MenuDriver = shell.get_driver()
+	assert_true(driver.is_options_surface())
+	var filter := driver.widget_id("TEXFILTER")
+	assert_gte(filter, 0)
+	assert_eq(driver.item_value(filter, driver.selected_row(filter)), "2",
+			"the row whose value is the persisted word is selected")
+	assert_false(driver.is_widget_disabled(filter), "the texture-filter row is editable")
+	driver.select_row(filter, 0)  # emits the combo's value change
+	assert_eq(options.current().texfilter_level, 0,
+			"the pick writes the row's value to the shared owner")
+	assert_eq(PlayerOptions.new().current().texfilter_level, 0, "and persists")
+	_cleanup(dir)
+
+
+# The particle-density and texture-compression rows are game.cfg's
+# particle_density and texcompression_level, served the same way (engine
+# runtime/menu/options_policy.h kParticleDensityControls,
+# kTexCompressionControls): each combobox selects the row whose value is the
+# persisted word, stays editable, and a pick writes the row's value back at once.
+func test_particle_and_compression_rows_seed_by_value_and_write_the_words_back() -> void:
+	var options := PlayerOptions.new()
+	var seeded := options.current()
+	seeded.particle_density = 1
+	seeded.texcompression_level = 0
+	options.update(seeded)
+	var dir := _make_dir()
+	var list_box := ('<LIST_BOX><POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>200</RIGHT>'
+			+ '<BOTTOM>100</BOTTOM></POSITION><ITEMS>%s</ITEMS></LIST_BOX>')
+	var rows := ""
+	for level in 3:
+		rows += '<ITEM value="%d">Level %d</ITEM>' % [level, level]
+	var body := MenuDriverFixture.wnd("scroll", "MUSICVOLUME", 20)
+	body += MenuDriverFixture.wnd("combobox", "PARTICLES", 60, list_box % rows)
+	body += MenuDriverFixture.wnd("combobox", "TEXCOMPRESSION", 140, list_box % rows)
+	TestFs.write_bytes(self, dir.path_join("options.mnu"),
+			MenuDriverFixture.screen_xml("OPTIONS", body).to_utf8_buffer())
+	var shell = _make_shell(dir, options)
+	if shell == null:
+		pending("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	assert_true(shell.open_menu("options.mnu", ""), "the options document opens")
+	var driver: MenuDriver = shell.get_driver()
+	assert_true(driver.is_options_surface())
+	var density := driver.widget_id("PARTICLES")
+	var compression := driver.widget_id("TEXCOMPRESSION")
+	assert_gte(density, 0)
+	assert_gte(compression, 0)
+	assert_eq(driver.item_value(density, driver.selected_row(density)), "1",
+			"the density row whose value is the persisted word is selected")
+	assert_eq(driver.item_value(compression, driver.selected_row(compression)), "0",
+			"the compression row whose value is the persisted word is selected")
+	assert_false(driver.is_widget_disabled(density), "the particle-density row is editable")
+	assert_false(driver.is_widget_disabled(compression), "the compression row is editable")
+	driver.select_row(density, 2)
+	driver.select_row(compression, 2)
+	assert_eq(options.current().particle_density, 2, "the density pick writes the word")
+	assert_eq(options.current().texcompression_level, 2, "the compression pick writes the word")
+	var reloaded := PlayerOptions.new().current()
+	assert_eq(reloaded.particle_density, 2, "the density persists")
+	assert_eq(reloaded.texcompression_level, 2, "the compression persists")
+	_cleanup(dir)
 
 
 # A root switch reloads every text table: a root without menutxt.BIN clears

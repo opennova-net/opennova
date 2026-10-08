@@ -248,24 +248,24 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index,
 		r_postmultiply = proxy_material;
 	}
 	// Each stage also carries its texture's last retail mip level
-	// (material_texture_max_lod): pixel-built textures stop at 4x4.
+	// (texture_max_lod): pixel-built textures stop at 4x4.
 	const Ref<Texture> bound_diffuse = diffuse.is_valid()
 			? Ref<Texture>(diffuse)
 			: opennova::prepare_material_texture({}, {}, 0);
 	set_material_and_auxiliary_parameter(material, r_postmultiply, "u_diffuse", bound_diffuse);
 	set_material_and_auxiliary_parameter(material, r_postmultiply, "u_diffuse_max_lod",
-			opennova::material_texture_max_lod(bound_diffuse));
+			opennova::texture_max_lod(bound_diffuse));
 	if (detail.is_valid()) {
 		material->set_shader_parameter("u_detail", detail);
 		material->set_shader_parameter("u_detail_max_lod",
-				opennova::material_texture_max_lod(detail));
+				opennova::texture_max_lod(detail));
 	}
 	const Ref<Texture> bound_normal = normal.is_valid()
 			? Ref<Texture>(normal)
 			: Ref<Texture>(solid_colour_texture(Color(0.5f, 0.5f, 1.0f, 1.0f)));
 	material->set_shader_parameter("u_normal_map", bound_normal);
 	material->set_shader_parameter("u_normal_max_lod",
-			opennova::material_texture_max_lod(bound_normal));
+			opennova::texture_max_lod(bound_normal));
 	if ((material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) != 0) {
 		// The ref byte feeds the compare exactly; the shader keeps a > ref
 		// (invert: a <= ref) [orig: CGfxDevice_SetAlphaTestRef @ 0x6770a0].

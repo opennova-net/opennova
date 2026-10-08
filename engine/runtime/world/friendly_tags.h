@@ -32,7 +32,7 @@ struct FriendlyTagSource {
     int32_t eye_offset_z = 0;
     bool player = false;
     // The class's charattr Medic attribute — the red-cross plate feed
-    // [orig: AnimMap_IsSlotActive(entity+0x294 playerClass, 8) @0x4125e0,
+    // [orig: CharAttr_ClassHasAttribute(entity+0x294 playerClass, 8) @0x4125e0,
     //  read by HUD_DrawEntityLabel for the plate @0x5a4309].
     bool medic = false;
     // The DOWNED legs of the bad tier [orig: HUD_DrawEntityLabel — the dead

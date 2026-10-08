@@ -13,6 +13,7 @@
 #include <runtime/hud/hud_combat.h>
 #include <runtime/hud/game_font.h>
 #include <runtime/hud/hud_declutter.h>
+#include <runtime/hud/hud_elements.h> // which element of the walk drew each run
 #include <runtime/hud/hud_math.h>
 #include <runtime/hud/hud_scoreboard.h>
 #include <runtime/hud/hud_minimap.h>
@@ -200,8 +201,9 @@ struct HudQuad {
 	// with texture2 sampled SCREEN-ANCHORED and wrap-addressed: UV1 =
 	// (screen_px + 0.5) / stage2 at each corner, i.e. surface pixel i shows
 	// texel i mod stage2 (the half pixel is D3D9's pixel-centre rule; a
-	// raster whose pixel centres sit at i + 0.5 samples the same texel at
-	// px / stage2). Only the stdbox border pieces carry one.
+	// device whose pixel centres sit at i + 0.5 draws the list half a pixel
+	// over, renderer/d3d9_raster.h, and samples the same texel by the same
+	// formula). Only the stdbox border pieces carry one.
 	// [orig: HUD_DrawTexturedQuad_0 @0x56b3e0 -- UV1 @0x56b560..0x56b5a7 over
 	//  the stage dims passed in; the 0x651 two-texture material's preferred
 	//  permutation RenderState_FindBestTextureFormatPermutation @0x6820c0 --
@@ -340,9 +342,10 @@ struct HudLayout {
 	// HUDSYSTEXT — the SYSTEM feed anchor (kills, joins, system lines). The
 	// def parser already produces it (def_hudpos.cpp HUDSYSTEXT -> sys_text).
 	HudPosRecord sys_text;
-	// HUDORDERS — the right edge of the two squad order lines; -1 / -1 when
-	// unauthored [orig: dword_2723D84 / dword_2723D88].
-	HudPosRecord squad_orders{-1, -1};
+	// HUDORDERS — the right edge of the two squad order lines; (0, 0) when
+	// unauthored, the BSS pair only the arm writes (D-HUD-54)
+	// [orig: dword_2723D84 / dword_2723D88].
+	HudPosRecord squad_orders;
 	// BREATHTIME — the breath bar's anchor: x, y and the alignment word, three
 	// fields with no hidden dword. Unauthored it keeps the BSS zero (0, 0,
 	// left): the bar has no presence gate [orig: HUD_ParseHudposToken
@@ -1098,6 +1101,10 @@ struct HudDrawList {
 	// kind cursors at the point it was marked.
 	std::vector<TopBegin> order_breaks;
 	int64_t elements_drawn = 0;
+	// Which element of the walk emitted each run of the flat lists (and drew a map pass), in the
+	// walk's order: hud_elements.h, a tool's record of the walk (what lies under a point of the HUD),
+	// never read by a draw.
+	std::vector<HudElementSpan> element_spans;
 };
 
 // Draw-list font-page namespaces: each compiler font emits glyph pages at
@@ -1371,8 +1378,8 @@ private:
 	void element_breath_bar(const HudFrameState &state, float w, float h);
 	void element_waypoint(const HudFrameState &state, float w, float h);
 	void element_spinmap(const HudFrameState &state, float w, float h);
-	// A map pass's labels through the CPU half-bright drawer and the
-	// fixed-function MODULATE2X fold, bold or large slot per label.
+	// A map pass's labels through the CPU half-bright drawer, bold, large or
+	// regular slot per label; the page's MODULATE2X doubles them on the device.
 	void layout_map_labels(const HudMapPass &pass, std::vector<GameFontQuad> &out) const;
 	// The same over pass.labels[begin, end) (the DEATH zone walk's segments).
 	void layout_map_labels(const HudMapPass &pass, size_t begin, size_t end,
@@ -1447,6 +1454,17 @@ private:
 	// (emit_net_quality_indicators).
 	void element_net_quality_indicators(const HudFrameState &state, float w, float h);
 	void mark_order_break();
+	// One element of the walk, `draw` its call: what it emitted recorded as its span
+	// (HudDrawList::element_spans) when it drew anything.
+	template <typename Draw>
+	void element_(HudElement element, Draw &&draw) {
+		const HudDrawCursor from = draw_cursor_();
+		const bool map = draw_list_.map.visible, big_map = draw_list_.big_map.visible;
+		draw();
+		note_element_(element, from, !map && draw_list_.map.visible, !big_map && draw_list_.big_map.visible);
+	}
+	HudDrawCursor draw_cursor_() const;
+	void note_element_(HudElement element, const HudDrawCursor &from, bool map, bool big_map);
 	void element_targeting(const HudFrameState &state, float w, float h);
 	void element_instruments(const HudFrameState &state, float w, float h);
 	void element_crosshair(const HudFrameState &state, float w, float h);

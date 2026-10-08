@@ -93,9 +93,11 @@ add_library(${TARGET_NAME} SHARED
     mission/mission_catalog.cpp
     mission/mission_object_placer.cpp
     mission/mission_placement_stats.cpp
+    mission/mission_placement_run.cpp
     mission/static_population_instance.cpp
     mission/mission_object_placer_static_sources.cpp
     env/celestial.cpp
+    env/celestial_overlay.cpp
     env/environment_cube_capture.cpp
     env/sky_dome.cpp
     env/slot_shadow.cpp
@@ -120,6 +122,8 @@ add_library(${TARGET_NAME} SHARED
     particle/particle_compositor.cpp
     particle/particle_far_pass.cpp
     particle/particle_renderer.cpp
+    particle/particle_atlas_page_upload.cpp
+    render/d3d9_raster_device.cpp
     render/environment_cube_blit.cpp
     render/frame_fx.cpp
     render/nvg_view_device.cpp
@@ -131,6 +135,8 @@ add_library(${TARGET_NAME} SHARED
     render/scene_overlay_compositor.cpp
     render/slot_capture_adapter.cpp
     render/target_projection_xr_interface.cpp
+    render/texture_filter_device.cpp
+    render/tracer_ribbon_surfaces.cpp
     object/entity_index.cpp
     object/entity_ref.cpp
     object/object_model.cpp
@@ -150,6 +156,7 @@ add_library(${TARGET_NAME} SHARED
     object/model_light.cpp
     object/model_user_point.cpp
     object/weapon_database.cpp
+    object/ammo_database.cpp
     object/weapon_def.cpp
     object/avatar_database.cpp
     object/avatar_records.cpp
@@ -173,6 +180,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/weapon_kit_entry.cpp
     object/skeletal_anim.cpp
     hud/hud_draw_list_stats.cpp
+    hud/font_page_glyphs.cpp
     hud/hud_overlay.cpp
     hud/hud_overlay_combat.cpp
     hud/hud_overlay_flat.cpp
@@ -187,6 +195,7 @@ add_library(${TARGET_NAME} SHARED
     hud/player_hud_weapon_def.cpp
     devtools/frame_stats.cpp
     devtools/dev_tools.cpp
+    devtools/imgui_pass_node.cpp
     devtools/dev_tools_overlay.cpp
     devtools/dev_tools_windows.cpp
     devtools/debug_arg_spec.cpp
@@ -262,10 +271,13 @@ add_library(${TARGET_NAME} SHARED
     dbf/dbf_data.cpp
     rtxt/rtxt_string_file.cpp
     util/data_format.cpp
+    util/dxt_texture.cpp
     util/paths.cpp
     util/pcx_texture_bridge.cpp
+    util/texture_files.cpp
     util/texture_path_resolver.cpp
     resource_index/resource_root.cpp
+    resource_index/resource_root_file_source.cpp
     resource_index/launch_flags.cpp
     fnt/fnt_resource.cpp
     audio/sbf_bank.cpp
@@ -289,11 +301,20 @@ add_library(${TARGET_NAME} SHARED
     player/local_player_visuals.cpp
     player/player_input_router.cpp
     player/player_move_intent.cpp
+    player/player_profiles.cpp
     player/player_spawn_loadout.cpp
     player/player_viewmodel_def.cpp
     player/player_viewmodel_rig.cpp
     player/player_weapon_effects.cpp
 )
+
+# The ImGui pass node (devtools/imgui_pass_node.cpp) attaches only when the
+# game's dev tools are compiled in.
+if(OPENNOVA_DEVTOOLS)
+    target_compile_definitions(${TARGET_NAME} PRIVATE OPENNOVA_IMGUI_NODE=1)
+else()
+    target_compile_definitions(${TARGET_NAME} PRIVATE OPENNOVA_IMGUI_NODE=0)
+endif()
 
 target_include_directories(${TARGET_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}

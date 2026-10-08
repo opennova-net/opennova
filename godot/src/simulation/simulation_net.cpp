@@ -66,8 +66,10 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type)
 		if (cfg.config.server_name.empty()) cfg.config.server_name = "OpenNova LAN Host";
 		cfg.config.max_players = net_.host_max_players; // the UI cap as configure_host_session published it (host_player_slot_limit)
 	} else {
-		// The SP listen server's config (docs/net/novaworld-net-re.md §5.0).
-		cfg.config = inmatch::singleplayer_game_config(p_game_type);
+		// The SP listen server's config (docs/net/novaworld-net-re.md §5.0), its
+		// session words the current player profile record's.
+		cfg.config = inmatch::singleplayer_game_config(p_game_type,
+				player_.profile_record_set ? &player_.profile_record : nullptr);
 	}
 	cfg.socket_mode = is_host_listening() ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless;
 	cfg.serve_and_play = is_host_listening() ? net_.host_serve_and_play : true;
@@ -77,6 +79,10 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type)
 	// keeps the 120000 ms / 1200-record template.
 	cfg.game_root = host_game_root_;
 	if (net_.local_character_vars_set) cfg.local_character_vars = net_.local_character_vars;
+	// The host's own inverse OPTIONS_AUTOMEDIC word, its record's +1660 (engine
+	// HostConfig::local_auto_medic_disabled carries the witness).
+	if (player_.profile_record_set)
+		cfg.local_auto_medic_disabled = static_cast<uint32_t>(player_.profile_record.auto_medic_off);
 	return cfg;
 }
 
@@ -580,8 +586,9 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 			opennova::to_std(p_spectator_password),
 			opennova::to_std(p_server_password),
 			opennova::to_std(p_join_password));
-	install_charattr_challenge_table();
+	install_charattr_table();
 	install_character_join_vars();
+	install_auto_medic_preference();
 	install_join_integrity_profile();
 	install_expansion_version_root();
 	install_app_id();
@@ -669,27 +676,19 @@ bool Simulation::set_local_spectator(bool p_spectator) {
 	return false;
 }
 
-bool Simulation::load_charattr_challenge(
+bool Simulation::load_charattr(
 		const Ref<ResourceRoot> &p_resource_root) {
 	// Game_Run clears all 0x7C0 bytes before attempting the boot-soft load.
 	// Preserve that failure result: missing/empty input is not replaced with a
-	// synthetic row, and joining continues with the checksum's inactive zero.
-	net_.charattr_challenge_table = {};
-	net_.charattr_challenge_loaded = false;
-	if (p_resource_root.is_valid() &&
-	    p_resource_root->has_file("charattr.def")) {
-		const PackedByteArray bytes =
-				p_resource_root->read_file("charattr.def");
-		if (!bytes.is_empty()) {
-			net_.charattr_challenge_loaded =
-					opennova::inmatch::parse_charattr_challenge_table(
-							bytes.ptr(),
-							static_cast<std::size_t>(bytes.size()),
-							net_.charattr_challenge_table);
-		}
-	}
-	install_charattr_challenge_table();
-	return net_.charattr_challenge_loaded;
+	// synthetic row, and joining continues with the checksum's inactive zero
+	// (runtime/inmatch/charattr_table.h charattr_load).
+	net_.charattr_table = {};
+	PackedByteArray bytes;
+	if (p_resource_root.is_valid() && p_resource_root->has_file("charattr.def"))
+		bytes = p_resource_root->read_file("charattr.def");
+	opennova::inmatch::charattr_load(net_.charattr_table, bytes.ptr(), static_cast<std::size_t>(bytes.size()));
+	install_charattr_table();
+	return net_.charattr_table.loaded;
 }
 
 void Simulation::set_join_world_ready(bool p_ready) {

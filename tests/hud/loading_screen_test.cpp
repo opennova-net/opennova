@@ -4,6 +4,9 @@
 
 #include <runtime/hud/loading_screen.h>
 
+#include "common/test_font.h"
+
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -133,6 +136,33 @@ int main() {
 	}
 	check(layout_text_block(mono, 20, "one", 10, 0, 10, 0, TextBlockAlign::kLeft).lines.empty(),
 			"a zero-width box lays out nothing");
+
+	// The splash's continue line (D-LOADSCR-10): at 1280 x 720 the design point (512, 730) lands at
+	// (640, 684) through the integer rounding, the run centred on it at the large slot's 1280 / 800, each
+	// glyph at the phase's halved colour, the raw diffuse the font page's MODULATE2X doubles.
+	{
+		const opennova::fnt::fnt_font_t uniform = test_font::uniform_test_font();
+		GameFont font;
+		font.set_font(&uniform);
+		const GameFontRun on = splash_continue_run(font, "GO", 1280, 720, true);
+		check(on.quads.size() == 2, "the line's two glyphs");
+		if (on.quads.size() == 2) {
+			const float left = on.quads[0].x_top_left + 0.5f, right = on.quads[1].x_top_right + 0.5f;
+			check(on.quads[0].y_top == 684.0f - 0.5f, "the line's top at (730 * 720 + 384) / 768");
+			check(left < 640.0f && right > 640.0f && (left + right) * 0.5f > 638.0f &&
+			              (left + right) * 0.5f < 642.0f,
+			      "centred on (512 * 1280 + 512) / 1024");
+			// The glyph's 16 texel rows and the drawer's half-texel bottom bias
+			// (D-FNT-6), at the slot's scale.
+			check(std::fabs(on.quads[0].y_bottom - on.quads[0].y_top - 16.5f * 1.6f) < 0.01f,
+			      "the glyph at the slot's 1280 / 800");
+			check(on.quads[0].color == 0xFF7F7F7Fu && on.quads[1].color == 0xFF7F7F7Fu,
+			      "the white phase halved, alpha forced");
+		}
+		const GameFontRun off = splash_continue_run(font, "GO", 1280, 720, false);
+		check(!off.quads.empty() && off.quads[0].color == 0xFF7F4040u, "the red phase halved");
+		check(splash_continue_run(font, "GO", 0, 720, true).quads.empty(), "no display, no line");
+	}
 
 	if (g_failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);

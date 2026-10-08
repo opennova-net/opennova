@@ -633,6 +633,21 @@ bool Vfs::read_file_raw(const std::string &name, std::vector<uint8_t> &out) cons
     return true;
 }
 
+bool Vfs::file_size(const std::string &name, uint64_t &out) const {
+    out = 0;
+    const ResolvedEntry *e = impl_->find(name);
+    if (!e) return false;
+    if (e->source == VfsSource::Archive) {
+        out = e->entry->size;
+        return true;
+    }
+    std::error_code ec;
+    const auto size = fs::file_size(io::os_path(e->loose_full_path), ec);
+    if (ec) return false;
+    out = static_cast<uint64_t>(size);
+    return true;
+}
+
 bool Vfs::read_file_raw(const std::string &name, std::vector<uint8_t> &out,
                         VfsLookupPolicy policy) const {
     out.clear();
@@ -683,6 +698,10 @@ bool Vfs::read_file(const std::string &name, std::vector<uint8_t> &out,
 
 void Vfs::set_scr_policy(int scr_policy) {
     impl_->scr_policy = scr_policy;
+}
+
+int Vfs::scr_policy() const {
+    return impl_->scr_policy;
 }
 
 std::vector<VfsFileLocation> Vfs::list_files() const {
@@ -806,14 +825,45 @@ ExpansionInfo vfs_expansion_info(const std::string &game_root, const std::string
     const std::string exp_dir = io::utf8_join(io::utf8_join(game_root, "expansion"), expansion);
     std::vector<uint8_t> bytes;
     if (!read_expansion_text_bytes(exp_dir, expansion, bytes)) return info;  // @ 0x4a4664
+    return expansion_info_from_bin(bytes);
+}
+
+ExpansionInfo expansion_info_from_bin(const std::vector<uint8_t> &bytes) {
+    ExpansionInfo info{kExpansionUnnamed, kExpansionNoDescription};
     rtxt::File file;
     std::string error;
-    if (!rtxt::parse(bytes.data(), bytes.size(), file, error)) return info;
+    if (bytes.empty() || !rtxt::parse(bytes.data(), bytes.size(), file, error)) return info;
     if (const rtxt::Entry *e = find_in_section(file, "exp_info", "EXP_NAME"))  // @ 0x4a4578
         info.name = e->text;
     if (const rtxt::Entry *e = find_in_section(file, "exp_info", "EXP_DESC"))  // @ 0x4a45ef
         info.description = e->text;
     return info;
+}
+
+// FindFirstFile's order over an NTFS directory: its index sorts the names upper-cased.
+bool vfs_expansion_folder_before(const std::string &a, const std::string &b) {
+    return strutil::to_upper(a) < strutil::to_upper(b);
+}
+
+std::vector<ExpansionRecord> vfs_expansion_records(const std::string &game_root) {
+    std::vector<std::string> names;
+    std::error_code ec;
+    const fs::path os_exp_root = io::os_path(io::utf8_join(game_root, "expansion"));
+    if (fs::is_directory(os_exp_root, ec)) {
+        for (const fs::directory_entry &de :
+             fs::directory_iterator(os_exp_root, fs::directory_options::skip_permission_denied, ec)) {
+            if (ec) break;
+            if (!de.is_directory(ec)) continue;  // FILE_ATTRIBUTE_DIRECTORY @ 0x4a445d
+            const std::string name = io::utf8_path(de.path().filename());
+            if (name.empty() || name[0] == '.') continue;  // cFileName[0] != '.'
+            names.push_back(name);
+        }
+    }
+    std::stable_sort(names.begin(), names.end(), vfs_expansion_folder_before);
+    if (names.size() > kExpansionRecordsMax) names.resize(kExpansionRecordsMax);
+    std::vector<ExpansionRecord> records;
+    for (const std::string &name : names) records.push_back({name, vfs_expansion_info(game_root, name)});
+    return records;
 }
 
 int32_t vfs_version_crc(const uint8_t *data, size_t size) {

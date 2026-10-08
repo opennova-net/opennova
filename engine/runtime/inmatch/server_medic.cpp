@@ -100,15 +100,15 @@ void revive_player(NapiNPServerCtx &ctx, world::World &world,
 	// GameEvent_ProcessScoring(g_GameType, healer, 6, 0, 0) call @0x517DC5)].
 	world.match.record_revive(world, r.healer);
 
-	// The revive pose the following deploy consumes [orig: @0x517DCD..0x517E09].
+	// The revive position the following deploy consumes. Retail stores the
+	// victim's yaw/pitch/roll beside it (@0x517DF1..0x517E03), but no code reads
+	// them: the deploy restores the position alone (D-NET-377).
+	// [orig: @0x517DCD..0x517E09; the reader Server_PositionPlayerForSpawn @0x50D60A]
 	{
 		SessionReplyState &st = victim_connection->reply;
 		st.revive_pos[0] = world::to_fixed(victim->position.x);
 		st.revive_pos[1] = world::to_fixed(victim->position.y);
 		st.revive_pos[2] = world::to_fixed(victim->position.z) + kRevivePoseRaise;
-		st.revive_yaw = victim->yaw;
-		st.revive_pitch = victim->pitch;
-		st.revive_roll = victim->roll;
 	}
 	// The window again and the medic request cleared
 	// [orig: +368 = 0 @0x517E14, byte +89856 = 0 @0x517E1A].

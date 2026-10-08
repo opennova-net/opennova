@@ -3,12 +3,16 @@
 // suite (ADR 0040 ladder E3b): the corner rects against the one x,y,w,h rect,
 // the 4-field positioned records, the packed colours, the spinmap extent gate,
 // the stance slots by id (later wins), the last-authored static frame and the
-// font fallback — on a synthetic file, then on the shipped hudpos.def.
+// font fallback — on a synthetic file, then on the reference fixture's hudpos.def
+// (an earlier build's layout, not JO:CA's: hud-re.md "Render pipeline"); and the
+// HUD an empty, a key-less and a partial file make (D-HUD-54).
 // [orig: HUD_ParseHudposToken @0x59f370; HUD_DrawHealthBar @0x5a2e50;
 //  HUD_DrawPowerThrowChargeBar @0x599830]
 #include <runtime/hud/hud_layout_from_hudpos.h>
 
 #include <formats/def/def.h>
+#include <runtime/hud/hud_declutter.h>
+#include <runtime/hud/hud_frame.h>
 
 #include <array>
 #include <cstdio>
@@ -16,9 +20,11 @@
 #include <string>
 
 #include "common/retail_paths.h"
+#include "common/test_font.h"
 
 using namespace opennova::def;
 using namespace opennova::hud;
+using opennova::fnt::fnt_font_t;
 
 static int failures = 0;
 #define CHECK(c)                                                                       \
@@ -274,10 +280,140 @@ static void network_indicator() {
 	def_free_hudpos(&file);
 }
 
+// An armed soldier on foot: the state the gated elements would all draw for.
+static HudFrameState armed_soldier() {
+	HudFrameState state;
+	state.ticks = 10;
+	state.health_fraction = 0.5f;
+	state.weapon.active = true;
+	state.weapon.clip = 12;
+	state.weapon.reserve = 90;
+	state.weapon.capacity = 30;
+	state.weapon.display_name = "M16";
+	state.windup_active = true;
+	state.windup_held_ticks = 31;
+	state.waypoint.present = true;
+	state.waypoint.name = "Alpha";
+	state.waypoint.distance_m = 120;
+	return state;
+}
+
+static bool drew(const HudDrawList &list, HudElement element) {
+	for (const HudElementSpan &span : list.element_spans)
+		if (span.element == element) return true;
+	return false;
+}
+
+// The layout and the declutter table a file authors, through the compiler
+// with every font slot set and the crosshair art stamped (the device's leg).
+struct Compiled {
+	HudLayout layout;
+	HudDeclutter table;
+	HudFrameCompiler compiler;
+};
+
+static void compile_from(const DefHudPosFile &file, const fnt_font_t *font, Compiled &out) {
+	HudLayoutAssets assets;
+	hud_layout_from_hudpos(file, out.layout, assets);
+	out.layout.crosshair_texture_valid = true;
+	out.layout.crosshair_tex_w = out.layout.crosshair_tex_h = 64;
+	out.table = declutter_from_hudpos(file);
+	out.compiler.configure(out.layout, font);
+	out.compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
+}
+
+// D-HUD-54: an empty, a key-less and a partial hudpos.def. Retail's HUD tables
+// are BSS-zero and only a parse arm writes them, so a file that authors no
+// HUDDECLUT row hides every gated element at every level (the ammo count drew
+// at (0, 0) through the old all-visible fallback, where retail draws nothing);
+// a partial file shows what its rows show, a later row for a slot replacing an
+// earlier one; an unauthored HUDORDERS is (0, 0).
+// [orig: HUD_ParseHudposToken @0x59F370 -> byte_2723CE0 (the MSNTITLE arm's
+//  store @0x5A1683); CRenderState_SetLayerVisibility @0x59B0F0; the WPNGRP
+//  cmp HUD_RenderOverlays @0x5A7CC8; dword_2723D84 / dword_2723D88]
+static void unauthored_hud() {
+	fnt_font_t font = test_font::uniform_test_font();
+	for (const char *text : { "", "// nothing but a comment\r\n", "NOSUCHKEY\t1\r\n" }) {
+		DefHudPosFile file;
+		if (!parse(text, file)) {
+			std::printf("FAIL: key-less parse\n");
+			++failures;
+			continue;
+		}
+		Compiled hud;
+		compile_from(file, &font, hud);
+		CHECK(hud.layout.squad_orders.x == 0 && hud.layout.squad_orders.y == 0);
+		for (int level = 0; level < 4; ++level) {
+			hud.table.set_level(level);
+			bool any = false;
+			for (bool shown : hud.table.visible()) any = any || shown;
+			CHECK(!any);
+		}
+		hud.table.set_level(0);
+		HudFrameState state = armed_soldier();
+		hud.compiler.push_message("radio check", 10);
+		// Contrast: the embedder's all-visible default draws the ammo count at
+		// the unauthored (0, 0), so the hidden run below is not vacuous.
+		{
+			const HudDrawList &shown = hud.compiler.compile(state, 1024.0f, 768.0f);
+			CHECK(drew(shown, HudElement::AmmoCount) && drew(shown, HudElement::Crosshair));
+		}
+		state.declutter_visible = hud.table.visible();
+		const HudDrawList &list = hud.compiler.compile(state, 1024.0f, 768.0f);
+		for (HudElement gated : { HudElement::AmmoCount, HudElement::WeaponName, HudElement::ClipIndicator,
+				 HudElement::Stance, HudElement::Health, HudElement::Crosshair, HudElement::Power,
+				 HudElement::Waypoint, HudElement::Spinmap, HudElement::Feed, HudElement::Clock,
+				 HudElement::TeamIdLine, HudElement::WeaponSlotBar, HudElement::BreathBar })
+			CHECK(!drew(list, gated));
+		// Nothing else of the walk draws for this soldier either: retail's
+		// screen with an empty hudpos.def carries no HUD element.
+		CHECK(list.element_spans.empty());
+		def_free_hudpos(&file);
+	}
+
+	// A partial file: WPNGRP at level 0 only, no DMGBAR row, and two XHAIRS
+	// rows of which the later (all off) stands; a row without an arm
+	// (HUDDECLUT_CTAPE) authors nothing.
+	DefHudPosFile file;
+	if (!parse("AMMOCOUNTPOS\t40,700,0,left\r\n"
+	           "HUDWEAPONNAME\t40,720,0,left\r\n"
+	           "HUDHEALTH\t2,739,141,757\r\n"
+	           "HUDDECLUT_WPNGRP\t1 0 0 0\r\n"
+	           "HUDDECLUT_XHAIRS\t1 1 1 1\r\n"
+	           "HUDDECLUT_CTAPE\t1 1 1 1\r\n"
+	           "HUDDECLUT_XHAIRS\t0 0 0 0\r\n",
+	           file)) {
+		std::printf("FAIL: partial parse\n");
+		++failures;
+		opennova::fnt::fnt_free(&font);
+		return;
+	}
+	Compiled hud;
+	compile_from(file, &font, hud);
+	CHECK(hud.table.mask(kDeclutterWpnGrp) == 0x1 && hud.table.mask(kDeclutterXhairs) == 0 &&
+			hud.table.mask(kDeclutterDmgBar) == 0);
+	HudFrameState state = armed_soldier();
+	state.declutter_visible = hud.table.visible();
+	{
+		const HudDrawList &list = hud.compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(drew(list, HudElement::AmmoCount) && drew(list, HudElement::WeaponName));
+		CHECK(!drew(list, HudElement::Health) && !drew(list, HudElement::Crosshair));
+	}
+	hud.table.set_level(1);
+	state.declutter_visible = hud.table.visible();
+	state.hud_detail_level = 1;
+	{
+		const HudDrawList &list = hud.compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(!drew(list, HudElement::AmmoCount) && !drew(list, HudElement::WeaponName));
+	}
+	def_free_hudpos(&file);
+	opennova::fnt::fnt_free(&font);
+}
+
 static void retail_leg() {
 	const std::string fixture = retail::reference_fixture("def/hudpos.def");
 	if (fixture.empty()) {
-		retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/hudpos.def (the shipped HUD layout table)");
+		retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/hudpos.def (an earlier build's HUD layout, not JO:CA's)");
 		return;
 	}
 	DefHudPosFile file;
@@ -306,8 +442,38 @@ static void retail_leg() {
 	CHECK(layout.chat_lines == 8);
 	CHECK(layout.veh_stance_pos.x == 0 && layout.veh_stance_pos.y == 272);
 	CHECK(layout.lfp_anchor_x == 1020 && layout.lfp_anchor_y == 27);
-	// The shipped file authors no NETWORKINDICATOR: the reset corners stand.
+	// The fixture authors no NETWORKINDICATOR: the reset corners stand.
 	CHECK(layout.net_indicator_pos == kNetIndicatorResetPos);
+	// Its HUDDECLUT rows decide the soldier's panel level by level: each gated
+	// element draws exactly at the levels its row shows, and each draws at one
+	// level at least (D-HUD-54 leaves an authored layout as it drew; this file
+	// shows the ammo count and the health bar at levels 1 and 2, `0 1 1 0`,
+	// where JO:CA's two hudpos.def files author `1 1 1 0`).
+	{
+		fnt_font_t font = test_font::uniform_test_font();
+		Compiled hud;
+		compile_from(file, &font, hud);
+		const struct {
+			HudElement element;
+			int slot;
+		} gated[] = { { HudElement::AmmoCount, kDeclutterWpnGrp }, { HudElement::Health, kDeclutterDmgBar },
+			{ HudElement::Crosshair, kDeclutterXhairs }, { HudElement::Spinmap, kDeclutterSpinmap } };
+		bool ever[4] = {};
+		for (int level = 0; level < 3; ++level) {
+			hud.table.set_level(level);
+			HudFrameState state = armed_soldier();
+			state.declutter_visible = hud.table.visible();
+			state.hud_detail_level = level;
+			const HudDrawList &list = hud.compiler.compile(state, 1024.0f, 768.0f);
+			for (size_t i = 0; i < 4; ++i) {
+				const bool shown = hud.table.visible()[static_cast<size_t>(gated[i].slot)];
+				CHECK(drew(list, gated[i].element) == shown);
+				ever[i] = ever[i] || shown;
+			}
+		}
+		CHECK(ever[0] && ever[1] && ever[2] && ever[3]);
+		opennova::fnt::fnt_free(&font);
+	}
 	def_free_hudpos(&file);
 }
 
@@ -316,6 +482,7 @@ int main(int argc, char **argv) {
 	synthetic();
 	alphafade_converts();
 	network_indicator();
+	unauthored_hud();
 	retail_leg();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

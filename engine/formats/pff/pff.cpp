@@ -6,8 +6,6 @@
 
 #include <formats/pff/pff.h>
 
-#include "pff_internal.h"
-
 #include <base/io/os_path.h>
 
 #include <ctype.h>
@@ -38,7 +36,7 @@ static int pff_count_sane(uint32_t num_entries)
 /* Normalize a PFF name into an uppercase, trailing-space-trimmed C string. Reads up to
    raw_cap bytes or until a NUL; result is capped to out_sz - 1 chars. Matches the engine's
    strupr + trailing-0x20 trim used for sort/lookup (PFF_SortEntries / PFF_FindEntry).
-   Non-static: shared with pff_writer.cpp via pff_internal.h. */
+   Declared in pff.h: the writer's sort and the editor's asset registry share it. */
 void pff_norm_name(const char *raw, size_t raw_cap, char *out, size_t out_sz)
 {
     size_t n = 0, i;

@@ -1,4 +1,5 @@
 #include "particle/particle_compositor.h"
+#include "particle/particle_atlas_page_upload.h"
 #include "particle/particle_convert.h"
 #include "render/rd_fullscreen.h"
 #include "render/rd_glsl.h"
@@ -688,33 +689,41 @@ bool ParticleCompositorEffect::Impl::ensure_atlas(
 	for (std::size_t page_index = 0; page_index < atlas->pages.size();
 			++page_index) {
 		const ParticleAtlasPageSnapshot &source = atlas->pages[page_index];
-		const std::uint64_t expected = static_cast<std::uint64_t>(source.side) *
-				static_cast<std::uint64_t>(source.side) * 4u;
-		if (source.side == 0 || expected >
+		// The page's retail levels end to end: at most three box-filtered
+		// levels, sampled bilinear on the nearest level (the sampler's
+		// MIPFILTER NEAREST), which never reads past the last (D-RMAT-23;
+		// renderer::particle_atlas_page_texture), A8R8G8B8 or DXT5 (D-RMAT-24).
+		std::uint64_t expected = 0;
+		for (std::uint32_t level = 0; level < source.levels && level < 32u; ++level) {
+			expected += particle_atlas_page_level_bytes(source.side >> level, source.dxt5);
+		}
+		if (source.side == 0 || source.levels == 0 || source.levels > 32u || expected >
 				static_cast<std::uint64_t>(std::numeric_limits<int64_t>::max()) ||
-				static_cast<std::uint64_t>(source.rgba8.size()) != expected) {
+				static_cast<std::uint64_t>(source.data.size()) != expected) {
 			set_failure("Atlas page " + std::to_string(page_index) +
-					" has invalid RGBA dimensions", "atlas_upload_failed");
+					" has invalid level dimensions", "atlas_upload_failed");
 			release_atlas();
 			return false;
 		}
 
 		Ref<RDTextureFormat> format;
 		format.instantiate();
-		format->set_format(RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM);
+		format->set_format(source.dxt5 ? RenderingDevice::DATA_FORMAT_BC3_UNORM_BLOCK :
+										 RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM);
 		format->set_width(source.side);
 		format->set_height(source.side);
 		format->set_depth(1);
 		format->set_array_layers(1);
-		format->set_mipmaps(1);
+		format->set_mipmaps(source.levels);
 		format->set_texture_type(RenderingDevice::TEXTURE_TYPE_2D);
 		format->set_samples(RenderingDevice::TEXTURE_SAMPLES_1);
 		format->set_usage_bits(BitField<RenderingDevice::TextureUsageBits>(
 				RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT));
 		Ref<RDTextureView> view;
 		view.instantiate();
+		// One layer: every level of it, end to end.
 		TypedArray<PackedByteArray> data;
-		data.push_back(source.rgba8);
+		data.push_back(source.data);
 
 		GpuAtlasPage uploaded;
 		uploaded.texture = rd->texture_create(format, view, data);

@@ -9,7 +9,7 @@
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_overlay_windows.h>
 
-#include "fixtures/minimal_fnt_builder.h"
+#include "common/test_font.h"
 
 #include <cstdio>
 #include <string>
@@ -180,13 +180,35 @@ void test_windows_ride_the_top_layer(const fnt_font_t *font) {
 	}
 }
 
+// The briefing's inline markup (D-HUD-50): the wrapper's state block leaves
+// its inert byte unwritten and the panel's residue there is not zero, so
+// retail consumes every tag and draws the briefing plain in the halved
+// colour, the markup neither shown nor underlined nor coloured
+// [orig: HUD_DrawWrappedText @0x580caa..0x580cce; GText_ParseFormatTag
+// @0x6743b0]. Retail's own briefing2 texts (CP01, 00TRa) carry this markup.
+void test_briefing_markup_draws_plain(const fnt_font_t *font) {
+	HudFrameCompiler compiler;
+	configure(compiler, font);
+	HudFrameState state;
+	state.briefing.shown = true;
+	state.briefing.text = " <ucFC8932>Goals: <-uco>\r\n\r\n<cFC8932> 1.<-co> Move";
+	compiler.briefing_pages().reset();
+	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+	// " Goals: " (8), " 1." (3) and " Move" (5): the tags draw nothing.
+	CHECK(list.glyphs.size() - list.top_begin.glyphs == 16);
+	CHECK(list.underlines.size() == list.top_begin.underlines);
+	for (size_t i = list.top_begin.glyphs; i < list.glyphs.size(); ++i)
+		CHECK(list.glyphs[i].color == 0xFF7F7F7Fu);
+}
+
 } // namespace
 
 int main() {
-	fnt_font_t font = minimal_fnt::uniform_test_font();
+	fnt_font_t font = test_font::uniform_test_font();
 	test_wrapped_text_layout(&font);
 	test_briefing_pages();
 	test_windows_ride_the_top_layer(&font);
+	test_briefing_markup_draws_plain(&font);
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

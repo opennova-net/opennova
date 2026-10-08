@@ -40,14 +40,19 @@ class _MissingBankMusicRoot extends RefCounted:
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 
 var _state_config: TestFs.Snapshot
-var _controls_cfg: TestFs.Snapshot
+var _profile_dir := ""
 
 
 func before_each() -> void:
 	_state_config = TestFs.snapshot(STATE_CONFIG_PATH)
 	if _state_config.existed:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
-	_controls_cfg = TestFs.snapshot(ControlsBindings.CONFIG_PATH)
+	# The Options screens edit the player profile's current record: each case
+	# starts from a fresh one in an empty run directory.
+	_profile_dir = OS.get_cache_dir().path_join("opennova_menu_shell_retail_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(_profile_dir)
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", _profile_dir]))
+	PlayerProfile.load_for(null)
 
 
 func after_each() -> void:
@@ -55,9 +60,10 @@ func after_each() -> void:
 	MusicService.stop_context()
 	_state_config.restore()
 	# The live binding model is a static shared with the whole run: restore the
-	# catalog defaults and the on-disk cfg even when a remap test fails early.
+	# catalog defaults even when a remap test fails early.
 	ControlsBindings.model().restore_defaults()
-	_controls_cfg.restore()
+	LaunchFlags.clear_args_override()
+	TestFs.remove_dir_recursive(_profile_dir)
 
 
 # Build a throwaway resource dir holding main.mnu (+ a sp.mnu jump target and a
@@ -138,9 +144,10 @@ func test_options_scrolls_seed_original_ranges_and_persisted_values() -> void:
 	config.set_value("audio", "sound_fx_volume", 31)
 	config.set_value("audio", "dialog_volume", 93)
 	config.set_value("audio", "music_volume", 159)
-	config.set_value("controls", "mouse_sensitivity", 287)
-	config.set_value("controls", "invert_mouse", true)
 	assert_eq(config.save(PlayerOptions.CONFIG_PATH), OK)
+	# The mouse words are the player profile's current record's.
+	assert_true(PlayerProfile.store().set_word("mouse_sensitivity", 287))
+	assert_true(PlayerProfile.store().set_word("invert_mouse", 1))
 	var options := PlayerOptions.new()
 	var dir := _make_dir()
 	_copy(OPTIONS_FIXTURE, dir.path_join("options.mnu"))
@@ -169,7 +176,7 @@ func test_options_scrolls_seed_original_ranges_and_persisted_values() -> void:
 				"%s receives its original range/page and persisted value" \
 						% control_name)
 	assert_true(driver.is_widget_checked(driver.widget_id("INVERT_MOUSE")),
-			"the persisted mouse inversion seeds the checkbox")
+			"the record's mouse inversion seeds the checkbox")
 	assert_true(driver.is_widget_disabled(driver.widget_id("GAMMA")),
 			"gamma is visible but locked to the comparison profile")
 	for unlocked_name in ["SOUNDFXVOLUME", "DIALOGVOLUME", "MUSICVOLUME",
@@ -206,16 +213,12 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 	var expected := {
 		"TERRAINPOLY": "3",
 		"TERRAINTEX": "3",
-		"OBJECTPOLY": "3",
 		"OBJECTTEX": "3",
 		"ANTIALIAS": "2",
 		"SHADERUSAGE": "2",
 		"WATERQUALITY": "3",
 		"SHADOWQUALITY": "3",
-		"PARTICLES": "2",
 		"FBEFFECTS": "3",
-		"TEXFILTER": "3",
-		"TEXCOMPRESSION": "2",
 	}
 	for control_name in expected:
 		var id := driver.widget_id(control_name)
@@ -226,6 +229,37 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 	for preset_name in ["VIDEODEFAULT", "VIDEOPERFORMANCE", "VIDEOQUALITY"]:
 		assert_true(driver.is_widget_disabled(driver.widget_id(preset_name)),
 				"obsolete retail preset %s is disabled" % preset_name)
+	# Object detail is served: game.cfg's object_polydetail, seeded by value
+	# from the shared options and editable (options_policy.h kObjectDetailControls).
+	var object_poly := driver.widget_id("OBJECTPOLY")
+	assert_gte(object_poly, 0, "OBJECTPOLY exists")
+	assert_eq(driver.item_value(object_poly, driver.selected_row(object_poly)),
+			str(PlayerOptions.new().current().object_polydetail),
+			"OBJECTPOLY shows the persisted object detail")
+	assert_false(driver.is_widget_disabled(object_poly), "OBJECTPOLY is editable")
+	# The texture filter is served too: game.cfg's texfilter_level, seeded by
+	# value and editable (options_policy.h kTextureFilterControls).
+	var texfilter := driver.widget_id("TEXFILTER")
+	assert_gte(texfilter, 0, "TEXFILTER exists")
+	assert_eq(driver.item_value(texfilter, driver.selected_row(texfilter)),
+			str(PlayerOptions.new().current().texfilter_level),
+			"TEXFILTER shows the persisted texture filter")
+	assert_false(driver.is_widget_disabled(texfilter), "TEXFILTER is editable")
+	# The particle density and the texture compression are served as well:
+	# game.cfg's particle_density and texcompression_level, seeded by value and
+	# editable (options_policy.h kParticleDensityControls, kTexCompressionControls).
+	var particles := driver.widget_id("PARTICLES")
+	assert_gte(particles, 0, "PARTICLES exists")
+	assert_eq(driver.item_value(particles, driver.selected_row(particles)),
+			str(PlayerOptions.new().current().particle_density),
+			"PARTICLES shows the persisted particle density")
+	assert_false(driver.is_widget_disabled(particles), "PARTICLES is editable")
+	var compression := driver.widget_id("TEXCOMPRESSION")
+	assert_gte(compression, 0, "TEXCOMPRESSION exists")
+	assert_eq(driver.item_value(compression, driver.selected_row(compression)),
+			str(PlayerOptions.new().current().texcompression_level),
+			"TEXCOMPRESSION shows the persisted texture compression")
+	assert_false(driver.is_widget_disabled(compression), "TEXCOMPRESSION is editable")
 	_cleanup(dir)
 
 
@@ -418,10 +452,14 @@ func test_pause_options_share_state_apply_accept_and_retain_cancel_changes() -> 
 	var initial := options.current()
 	initial.sound_fx_volume = 45
 	initial.music_volume = 67
-	initial.mouse_sensitivity = 301
-	initial.invert_mouse = true
 	initial.crosshair_style = 7
+	initial.object_polydetail = 1
 	options.update(initial)
+	# The mouse and auto words are the player profile's current record's.
+	var profile := PlayerProfile.store()
+	assert_true(profile.set_word("mouse_sensitivity", 301))
+	assert_true(profile.set_word("invert_mouse", 1))
+	assert_true(profile.set_word("auto_medic_off", 1))
 
 	var dir := _make_dir()
 	_copy(GAME_FIXTURE, dir.path_join("game.mnu"))
@@ -442,15 +480,25 @@ func test_pause_options_share_state_apply_accept_and_retain_cancel_changes() -> 
 		assert_eq(scroll.value, int(pair[1]),
 				"%s reads the same shared state as the front surface" % pair[0])
 	assert_true(driver.is_widget_checked(driver.widget_id("INVERT_MOUSE")))
+	# The in-game dialog seeds the auto pair from the record, the medic box
+	# inverted [orig: UI_OptionsScreenInit @0x554d36 / @0x554d62].
+	var auto_reload := driver.widget_id("OPTIONS_AUTORELOAD")
+	var auto_medic := driver.widget_id("OPTIONS_AUTOMEDIC")
+	if auto_reload >= 0:
+		assert_true(driver.is_widget_checked(auto_reload), "a fresh record's auto-reload is on")
+		assert_false(driver.is_widget_disabled(auto_reload), "the auto-reload box is served")
+	if auto_medic >= 0:
+		assert_false(driver.is_widget_checked(auto_medic), "+1660 = 1 shows the box clear")
 	assert_eq(driver.selected_row(driver.widget_id("XHAIR_APPEARANCE")), 7)
 	assert_gt(driver.table_row_count(driver.widget_id("CONTROL_MAPPING")), 40,
 			"the same remap controller seeds the pause table")
 
 	var object_detail := driver.widget_id("OBJECTDETAIL")
 	assert_gte(object_detail, 0)
-	assert_eq(driver.item_value(object_detail, driver.selected_row(object_detail)), "3")
-	assert_true(driver.is_widget_disabled(object_detail),
-			"the in-game object-detail alias is pinned to the supported renderer")
+	assert_eq(driver.item_value(object_detail, driver.selected_row(object_detail)), "1",
+			"the in-game object-detail alias seeds by value from the shared options")
+	assert_false(driver.is_widget_disabled(object_detail),
+			"the in-game object-detail alias is editable")
 	for unsupported_name: String in MenuFrame.options_unsupported_controls():
 		var id := driver.widget_id(unsupported_name)
 		if id >= 0:
@@ -462,11 +510,23 @@ func test_pause_options_share_state_apply_accept_and_retain_cancel_changes() -> 
 	driver.set_widget_shown(main_wrapper, false)
 	driver.set_widget_shown(options_wrapper, true)
 	driver.widget_value_changed.emit("SOUNDFXVOLUME", "scroll", 72, "72")
+	# The dialog's mouse and auto edits reach the record only at its Accept,
+	# which asks the owner to apply them [orig: @0x5550de..0x5552bc].
+	driver.set_widget_checked(driver.widget_id("INVERT_MOUSE"), false)
+	if auto_medic >= 0:
+		driver.set_widget_checked(auto_medic, true)
+	assert_eq(profile.get_word("invert_mouse"), 1, "an edit waits for the Accept")
+	watch_signals(shell)
 	driver.widget_activated.emit(driver.widget_id("OPT_ACCEPT"), "OPT_ACCEPT")
 	assert_true(driver.is_widget_shown(main_wrapper))
 	assert_false(driver.is_widget_shown(options_wrapper),
 			"the formerly actionless pause Accept returns to the pause menu")
 	assert_eq(options.current().sound_fx_volume, 72)
+	assert_eq(profile.get_word("invert_mouse"), 0, "the Accept writes the record")
+	if auto_medic >= 0:
+		assert_eq(profile.get_word("auto_medic_off"), 0, "a checked medic box stores 0")
+	assert_signal_emitted(shell, "ingame_controls_accepted",
+			"the owner applies the record and saves the profile")
 
 	driver.set_widget_shown(main_wrapper, false)
 	driver.set_widget_shown(options_wrapper, true)
@@ -490,18 +550,20 @@ func test_pause_options_share_state_apply_accept_and_retain_cancel_changes() -> 
 			"the reverted edit never reaches the config")
 	_cleanup(dir)
 
-# Options -> Mods: the shell lists discoverable expansions in AVAIL_LIST by name, and
-# activating one mounts it over the base game, fills MOD_DESC, persists the choice
-# (read back by main_game at the next launch), and announces it. Uses a runtime
-# (packed PFF) mount so list_expansions/mount_runtime have real archives to work on.
-func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
-	var saved := ResourceDirSettings.get_expansion()
-	ResourceDirSettings.set_expansion("")  # clean slate so the activate is not a no-op
+# Options -> Mods (D-MNU-31): AVAIL_LIST lists the base game's row first (the
+# key "Joint Operations: Typhoon Rising" through the list's string table, which
+# this folder lacks, so the key shows), then each expansion folder by its own
+# EXP_NAME; the game running is highlighted. A pick shows its EXP_DESC alone
+# (the base row: nothing); a double click does nothing; ACCEPT raises the reload
+# request, and the next menu tick switches the live root, boots the menu anew
+# over it and persists nothing [orig: Options_PopulateModList @ 0x559fb0;
+# Options_OnModListSelect @ 0x55a530; Options_HandleAcceptOrBack @ 0x55ad05].
+# Uses a runtime (packed PFF) mount so mount_runtime has real archives.
+func test_mods_tab_lists_the_base_game_and_switches_for_the_run() -> void:
 	var dir := _make_runtime_dir()
 	var shell = _make_runtime_shell(dir)
 	if shell == null:
 		pending("runtime resource root unavailable in this environment")
-		ResourceDirSettings.set_expansion(saved)
 		TestFs.remove_dir_recursive(dir)
 		return
 	assert_eq(MusicService.current_context(), "menu", "base MENU music starts with the shell")
@@ -512,70 +574,98 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 	var driver: MenuDriver = shell.get_driver()
 	var avail: int = driver.widget_id("AVAIL_LIST")
 	assert_gte(avail, 0, "AVAIL_LIST authored")
-	assert_eq(driver.item_count(avail), 1, "one expansion discovered under expansion/")
-	assert_eq(driver.item_text(avail, 0), "jox01")
-	# Activation (list double-click) only RAISES the reload request; the remount,
-	# the persist and the describe all run at the next menu update tick, the way
-	# Menu_UpdateFrame consumes retail's request flag (docs/mnu/menu-re.md,
-	# "Deferred expansion reload").
-	driver.list_activated.emit(avail, 0)
+	assert_eq(driver.item_count(avail), 2, "the base game's row, then the one expansion")
+	assert_eq(driver.item_text(avail, 0), "Joint Operations: Typhoon Rising",
+		"the base row's key shows where no string table names it")
+	assert_eq(driver.item_text(avail, 1), "Kendari", "an expansion's row is its EXP_NAME")
+	assert_eq(driver.selected_row(avail), 0, "the base game running is highlighted")
+	var desc: int = driver.widget_id("MOD_DESC")
+	assert_gte(desc, 0, "MOD_DESC authored")
+	driver.select_row(avail, 1, true)
+	assert_eq(driver.get_widget_text(desc), "Kendari island: the JO expansion.",
+		"a pick shows its EXP_DESC alone")
+	driver.select_row(avail, 0, true)
+	assert_eq(driver.get_widget_text(desc), "", "the base row describes nothing")
+	driver.list_activated.emit(avail, 1)
+	assert_false(shell.has_pending_expansion_reload(), "a double click switches nothing")
+	driver.select_row(avail, 1, true)
+	var accept: int = driver.widget_id("ACCEPT")
+	assert_gte(accept, 0, "options ACCEPT control authored")
+	driver.widget_activated.emit(accept, "ACCEPT")
 	assert_true(shell.has_pending_expansion_reload(),
-		"the click raises the request instead of remounting inline")
-	assert_eq(ResourceDirSettings.get_expansion(), "",
-		"nothing is persisted before the update tick runs")
+		"ACCEPT raises the request instead of remounting inline")
+	assert_eq(String(shell.get_resource_root().get_expansion()), "", "nothing switches before the tick")
+	watch_signals(shell)
 	shell.update_menu_frame()
-	assert_false(shell.has_pending_expansion_reload(),
-		"the update tick lowers the request flag")
-	assert_eq(shell.get_selected_expansion(), "jox01")
-	assert_eq(ResourceDirSettings.get_expansion(), "jox01", "choice persisted to config")
+	assert_false(shell.has_pending_expansion_reload(), "the update tick lowers the request flag")
+	assert_eq(String(shell.get_resource_root().get_expansion()), "jox01", "the live root switched")
+	assert_signal_emitted(shell, "game_reloaded", "the shell says the game reloaded")
+	assert_false(_persisted_expansion_key(), "the pick is not persisted: it lasts the run")
 	assert_not_null(MusicService.current_script(), "expansion menu context reopens")
 	if MusicService.current_script() != null:
 		assert_eq(MusicService.current_script().get_source_path(), "Mjox01.bin",
 			"live expansion selection swaps to the M<exp> script")
-	assert_eq(MusicService.get_var(2), 9,
-		"full expansion reload re-drives the active screen MUSICVAR")
-	var desc: int = driver.widget_id("MOD_DESC")
-	assert_gte(desc, 0, "MOD_DESC authored")
-	assert_string_contains(driver.get_widget_text(desc), "Kendari",
-		"the expansion's own EXP_NAME shows")
-	assert_string_contains(driver.get_widget_text(desc), "Kendari island: the JO expansion.",
-		"the expansion's own EXP_DESC shows")
-	# The expansion's packed asset is now reachable through the live root.
+	assert_eq(MusicService.get_var(2), 9, "the menu booted anew drives its screen's MUSICVAR")
+	# The menu booted anew over the switched root: its list highlights the game running.
+	avail = driver.widget_id("AVAIL_LIST")
+	desc = driver.widget_id("MOD_DESC")
+	assert_eq(driver.selected_row(avail), 1, "the expansion running is highlighted")
+	assert_eq(driver.get_widget_text(desc), "Kendari island: the JO expansion.")
 	assert_eq(shell.get_resource_root().read_file("expmodel.3di").get_string_from_utf8(),
 		"exp model", "expansion archive mounted over the base game")
+	# The base game's row switches back.
+	driver.select_row(avail, 0, true)
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	shell.update_menu_frame()
+	assert_eq(String(shell.get_resource_root().get_expansion()), "",
+		"the base row switches to the base game")
+	assert_eq(driver.selected_row(driver.widget_id("AVAIL_LIST")), 0)
 	shell.get_resource_root().clear()  # release PFF handles before deleting the temp archives
-	ResourceDirSettings.set_expansion(saved)
 	TestFs.remove_dir_recursive(dir)
 
 
-# Options -> Mods OK (the ACCEPT button) must APPLY the highlighted expansion, not
+# Options -> Mods OK (the ACCEPT button) must APPLY the highlighted row, not
 # launch a mission. ACCEPT is overloaded across JO screens (launch on Single Player,
 # plain OK on Options); the shell scopes it by screen role, so on a Mods screen (mod
 # list, no mission list) ACCEPT applies. Regression for the "OK loads a mission" bug.
+# ACCEPT on the game running takes nothing. A switch saves the player profile
+# first, under the expansion it leaves [orig: Options_HandleAcceptOrBack
+# @ 0x55ad35 -> PlayerProfile_SaveToFiles; playerinfo/player-sav-re.md].
 func test_mods_ok_applies_expansion_without_launching() -> void:
-	var saved := ResourceDirSettings.get_expansion()
-	ResourceDirSettings.set_expansion("")  # so the apply is not a no-op
 	var dir := _make_runtime_dir()
 	var shell = _make_runtime_shell(dir)
 	if shell == null:
 		pending("runtime resource root unavailable in this environment")
-		ResourceDirSettings.set_expansion(saved)
 		TestFs.remove_dir_recursive(dir)
 		return
+	var run_dir := OS.get_cache_dir().path_join("menu_shell_mods_profile_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(run_dir), OK)
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", run_dir]))
+	PlayerProfile.load_for(shell.get_resource_root())
 	var driver: MenuDriver = shell.get_driver()
 	var avail: int = driver.widget_id("AVAIL_LIST")
 	assert_gte(avail, 0, "AVAIL_LIST authored")
-	driver.select_row(avail, 0, false)  # highlight jox01 (no double-click / activation)
 	var accept: int = driver.widget_id("ACCEPT")
 	assert_gte(accept, 0, "options ACCEPT control authored")
+	driver.widget_activated.emit(accept, "ACCEPT")  # the base game running, its row highlighted
+	assert_false(shell.has_pending_expansion_reload(), "ACCEPT on the game running takes nothing")
+	assert_false(FileAccess.file_exists(run_dir.path_join("player.sav")), "and saves nothing")
+	driver.select_row(avail, 1, false)  # highlight jox01 (no double-click / activation)
 	watch_signals(shell)
 	driver.widget_activated.emit(accept, "ACCEPT")  # press OK
 	assert_signal_not_emitted(shell, "start_requested", "OK on the Mods screen must not launch")
+	assert_true(FileAccess.file_exists(run_dir.path_join("player.sav")),
+			"the switch saves the player profile before it takes place")
+	assert_true(FileAccess.file_exists(run_dir.path_join("weapon.sav")),
+			"weapon.sav under the expansion it leaves, the base game's")
+	assert_false(FileAccess.file_exists(run_dir.path_join("expansion/jox01/weapon.sav")))
 	shell.update_menu_frame()  # the deferred remount runs on the next menu tick
-	assert_eq(shell.get_selected_expansion(), "jox01", "OK applied the highlighted mod")
-	assert_eq(ResourceDirSettings.get_expansion(), "jox01", "applied choice persisted")
+	assert_eq(String(shell.get_resource_root().get_expansion()), "jox01",
+		"OK applied the highlighted mod")
+	assert_false(_persisted_expansion_key(), "nothing persisted")
+	LaunchFlags.clear_args_override()
+	TestFs.remove_dir_recursive(run_dir)
 	shell.get_resource_root().clear()
-	ResourceDirSettings.set_expansion(saved)
 	TestFs.remove_dir_recursive(dir)
 
 
@@ -584,8 +674,6 @@ func test_mods_ok_applies_expansion_without_launching() -> void:
 # leave the live loose mount untouched, not remount it through mount_runtime into
 # a cleared root (the zero-archives fatal would kill the running play-test).
 func test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount() -> void:
-	var saved := ResourceDirSettings.get_expansion()
-	ResourceDirSettings.set_expansion("")
 	var dir := OS.get_temp_dir().path_join("menu_shell_loose_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01"))
 	var file := FileAccess.open(dir.path_join("options.mnu"), FileAccess.WRITE)
@@ -597,7 +685,7 @@ func test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount() -> void:
 	file.store_buffer(_fixture_bytes(MUS_FIXTURE))
 	file.close()
 	_copy(SBF_FIXTURE, dir.path_join("menumus.sbf"))
-	# The expansion pair exists ON DISK (list_expansions scans the path), but the
+	# The expansion pair exists ON DISK (the scan lists its folder), but the
 	# mounted root is a loose-only mount, which cannot layer it.
 	WorldFixture.write_pff(self, dir.path_join("expansion/jox01/jox01.pff"), [
 		{"name": "expmodel.3di", "bytes": "exp model"},
@@ -612,24 +700,32 @@ func test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount() -> void:
 	var driver: MenuDriver = shell.get_driver()
 	var avail: int = driver.widget_id("AVAIL_LIST")
 	assert_gte(avail, 0)
-	assert_eq(driver.item_count(avail), 1, "the packed expansion is still discoverable on disk")
-	driver.select_row(avail, 0, false)
+	assert_eq(driver.item_count(avail), 2, "the base row and the expansion folder on disk")
+	assert_eq(driver.item_text(avail, 1), "Unnamed Expansion", "a folder with no <n>.bin is unnamed")
+	driver.select_row(avail, 1, false)
 	var accept: int = driver.widget_id("ACCEPT")
 	assert_gte(accept, 0)
 	driver.widget_activated.emit(accept, "ACCEPT")
 	assert_false(shell.has_pending_expansion_reload(),
 			"an unusable pick never raises the reload request")
 	shell.update_menu_frame()
-	assert_eq(shell.get_selected_expansion(), "", "the loose mount refuses the switch")
-	assert_eq(ResourceDirSettings.get_expansion(), "", "nothing persisted")
+	assert_eq(String(root.get_expansion()), "", "the loose mount refuses the switch")
+	assert_false(_persisted_expansion_key(), "nothing persisted")
 	assert_false(root.read_file("options.mnu").is_empty(),
 			"the live loose mount survives untouched (no clear())")
 	root.clear()
-	ResourceDirSettings.set_expansion(saved)
 	for sub in ["options.mnu", "menumus.bin", "menumus.sbf",
 			"expansion/jox01/jox01.pff", "expansion/jox01", "expansion"]:
 		DirAccess.remove_absolute(dir.path_join(sub))
 	DirAccess.remove_absolute(dir)
+
+
+# Whether opennova.cfg holds an expansion key (the pick a build before D-MNU-31
+# remembered).
+func _persisted_expansion_key() -> bool:
+	var config := ConfigFile.new()
+	return config.load(STATE_CONFIG_PATH) == OK \
+			and config.has_section_key(ResourceDirSettings.SECTION, "expansion")
 
 
 # D-MNU-14: the SP mission list rides the catalog — Co-op-family rows only,
@@ -744,19 +840,14 @@ func test_options_controls_inert_without_control_table() -> void:
 	assert_eq(shell.get_current_menu_file(), "main.mnu",
 			"no options pop underneath the launch")
 	assert_eq(shell.get_menu_stack_depth(), 0)
-	# Re-bind an action, then fire the name the options surface would own; a
-	# stray DEFAULTS must not restore (rows already at defaults would make a
-	# no-op restore pass vacuously, hence the edit first).
-	var model: ControlsModel = ControlsBindings.model()
-	var saved: Dictionary = model.save_blob()
-	var action: int = model.action_index_for_row(0)
-	model.assign_godot_key(action, KEY_G, false)
-	var edited := model.control_text(action, ControlsModel.DEVICE_KEYBOARD)
+	# Edit the record's words, then fire the name the options surface would
+	# own; a stray DEFAULTS must not reset them (words already at defaults
+	# would make a no-op reset pass vacuously, hence the edit first).
+	var profile := PlayerProfile.store()
+	assert_true(profile.set_word("mouse_sensitivity", 300))
 	driver.widget_activated.emit(-1, "DEFAULTS")
-	assert_eq(model.control_text(action, ControlsModel.DEVICE_KEYBOARD), edited,
-			"a stray DEFAULTS on a non-options document leaves the bindings alone")
-	model.load_blob(saved)
-	ControlsBindings.persist()
+	assert_eq(profile.get_word("mouse_sensitivity"), 300,
+			"a stray DEFAULTS on a non-options document leaves the record alone")
 	DirAccess.remove_absolute(dir.path_join("main.mnu"))
 	DirAccess.remove_absolute(dir.path_join("alpha.bms"))
 	DirAccess.remove_absolute(dir)
@@ -770,8 +861,9 @@ func test_options_controls_inert_without_control_table() -> void:
 func test_runtime_loads_pff_archived_stylesheet_by_canonical_name() -> void:
 	var dir := OS.get_temp_dir().path_join("menu_shell_style_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(dir)
-	var mns := "// test stylesheet\nDEF_FONTNAME_LG Gunpl27b.fnt\nDEF_TEXT_FG FFFFFFFF\n" \
-		+ "DEF_TEXT_MOUSEOVER_FG FFFF0000\nDEF_TEXT_SELECTED_FG FFFF0000\nDEF_TEXT_DISABLED_FG FF545252\n"
+	# CRLF: the game's reader stops responding on a value line ended by a lone LF.
+	var mns := "// test stylesheet\r\nDEF_FONTNAME_LG Gunpl27b.fnt\r\nDEF_TEXT_FG FFFFFFFF\r\n" \
+		+ "DEF_TEXT_MOUSEOVER_FG FFFF0000\r\nDEF_TEXT_SELECTED_FG FFFF0000\r\nDEF_TEXT_DISABLED_FG FF545252\r\n"
 	WorldFixture.write_pff(self, dir.path_join("resource.pff"), [
 		{"name": "main.mnu", "bytes": _fixture_bytes(MAIN_FIXTURE)},
 		{"name": "menu_style.mns", "bytes": mns},
@@ -1045,9 +1137,15 @@ func _expansion_info_bin(exp_name: String, exp_desc: String) -> PackedByteArray:
 # A throwaway companion: claims the menu (or not) and records whether it was driven.
 # The shell can hold several companions (mp.mnu + player.mnu); the first whose
 # owns_menu() claims a built menu drives it, and a non-owning companion is skipped.
+#
+# The remap flow edits the Options screen's own records, built from the player
+# profile's table; its ACCEPT stores them into the record, and the live
+# bindings take them at the next session start's controls apply
+# [orig: UI_BuildKeyBindingLoadoutTable @0x559e50; sub_55A710 @0x55ace5;
+# sub_563620 @0x563620].
 func test_control_mapping_remap_flow() -> void:
-	# before_each snapshots user://controls.cfg; after_each restores it and the
-	# catalog defaults even on an early assert failure.
+	# after_each restores the catalog defaults even on an early assert failure;
+	# before_each gave the case a fresh profile record.
 	ControlsBindings.model().restore_defaults()
 
 	var dir := OS.get_temp_dir().path_join("menu_shell_remap_%d" % Time.get_ticks_usec())
@@ -1081,9 +1179,9 @@ func test_control_mapping_remap_flow() -> void:
 	key.physical_keycode = KEY_Y
 	shell.get_viewport().push_input(key)
 	assert_eq(driver.table_cell_text(table, 0, 2), "Y or Up",
-			"the captured key lands in the record and the cell restores")
-	assert_true(FileAccess.file_exists(ControlsBindings.CONFIG_PATH),
-			"the edit persists")
+			"the captured key lands in the screen's record and the cell restores")
+	assert_false(ControlsBindings.model().godot_keys_for_token("move_forward").has(KEY_Y),
+			"the live bindings wait for the ACCEPT and the next session start")
 
 	# Esc cancels a fresh capture without changing the record.
 	driver.list_activated.emit(table, 0)
@@ -1103,9 +1201,18 @@ func test_control_mapping_remap_flow() -> void:
 	assert_eq(driver.table_cell_text(table, 0, 2), "W or Up",
 			"DEFAULTS restores the catalog binding")
 
-	# The gameplay lookup follows the live records again.
+	# Rebind again and ACCEPT: the record's table takes the screen's records;
+	# the session start's controls apply hands them to the gameplay sampler.
+	driver.list_activated.emit(table, 0)
+	shell.get_viewport().push_input(key)
+	assert_eq(driver.table_cell_text(table, 0, 2), "Y or Up")
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	assert_false(ControlsBindings.model().godot_keys_for_token("move_forward").has(KEY_Y),
+			"the ACCEPT writes the profile, not the live bindings")
+	ControlsBindings.apply_profile(PlayerProfile.store())
 	var keys: PackedInt32Array = ControlsBindings.model().godot_keys_for_token("move_forward")
-	assert_eq(keys.size(), 2, "defaults restored for the sampler")
+	assert_true(keys.has(KEY_Y), "the rebound key reaches the sampler at the apply")
+	assert_false(keys.has(KEY_W), "Y replaced the primary W")
 
 	DirAccess.remove_absolute(dir.path_join("options.mnu"))
 	DirAccess.remove_absolute(dir)
@@ -1149,10 +1256,10 @@ func test_control_mapping_capture_dies_on_screen_change() -> void:
 	key.pressed = true
 	key.physical_keycode = KEY_U
 	shell.get_viewport().push_input(key)
-	assert_eq(ControlsBindings.model().control_text(
+	assert_eq(driver.options_control_text(
 			ControlsBindings.model().action_index_for_row(0),
 			ControlsModel.DEVICE_KEYBOARD), "W or Up",
-			"the Forward record still holds its defaults")
+			"the screen's Forward record still holds its defaults")
 	DirAccess.remove_absolute(dir.path_join("options.mnu"))
 	DirAccess.remove_absolute(dir)
 

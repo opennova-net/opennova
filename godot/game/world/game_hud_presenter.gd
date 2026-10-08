@@ -198,6 +198,13 @@ func setup(world: GameWorld, player_presenter_in: LocalPlayerPresenter, ui_paren
 ## tap (the built menu-era teardown main_game carried). `restart` is the SP
 ## restart's teardown: the toggles take the restart's reset (the tip's
 ## once-counters survive it).
+## The chat presets F1..F10 insert: the player profile's ten macros, which each
+## mission start's session apply copies (engine: hud/hud_chat_entry.h).
+func set_chat_presets(macros: PackedStringArray) -> void:
+	for i in macros.size():
+		_chat.set_preset(i, macros[i])
+
+
 func teardown(restart := false) -> void:
 	finish_hud_hidden_capture()
 	if _game_hud != null:
@@ -244,7 +251,16 @@ func _on_minimap_water_changed(mask: ImageTexture) -> void:
 	if _game_hud == null:
 		return
 	_game_hud.set_minimap_terrain(
-			_world.get_terrain_data() if _world != null else null, mask)
+			_world.get_terrain_data() if _world != null else null, mask,
+			_session_texcompression_level())
+
+
+## The session's texcompression_level the map's colormap quadrants and the
+## SIGHTS card pictures were made under (GameWorld's mission-start copy;
+## D-RMAT-24).
+func _session_texcompression_level() -> int:
+	return _world.get_session_texcompression_level() if _world != null \
+			else GameWorld.texcompression_level_fresh_profile()
 
 
 ## Hand the world's particle renderer the weapon Inset pass's camera, or null
@@ -388,6 +404,10 @@ func ensure_game_hud() -> void:
 		push_warning("GameHud: world exposed no resource root; the HUD layout cannot load.")
 	elif hudpos.load_from_resource_root(root, "hudpos.def") != OK:
 		push_warning("GameHud: hudpos.def did not load: %s" % hudpos.get_last_error())
+		# Not there (one that does not parse is no miss): the line the editor's Play reads back into a
+		# Problems row (ADR 0046 DI-27).
+		if not root.has_file("hudpos.def"):
+			ResourceRoot.report_missing("file", "hudpos.def")
 	_game_hud.set_crosshair_style(_crosshair_style)
 	_game_hud.set_crosshair_color(_crosshair_color)
 	_game_hud.set_crosshair_spread_enabled(_crosshair_spread)
@@ -399,7 +419,8 @@ func ensure_game_hud() -> void:
 	# The raw colormap remains the sharp base; depthspin supplies water only.
 	_game_hud.set_minimap_terrain(
 			_world.get_terrain_data() if _world != null else null,
-			_world.get_minimap_water_mask() if _world != null else null)
+			_world.get_minimap_water_mask() if _world != null else null,
+			_session_texcompression_level())
 	# The grid-label origin marker (mission type-2043 entity), resolved once
 	# per world. [orig: HUD_InitOverlaySystem @0x5a4999 pool scan]
 	var sim_for_origin := _world.get_sim() if _world != null else null
@@ -504,7 +525,8 @@ func tick(gameplay_input_active: bool = false) -> void:
 			_sight_slide_multiplier = weapon.sight_slide_multiplier if weapon != null else 0
 			_push_sight_state()
 			_sights_card.set_weapon_sights(sights,
-					_world.get_resource_root() if _world != null else null)
+					_world.get_resource_root() if _world != null else null,
+					_session_texcompression_level())
 
 	# Live weapon/view state (the FSM clip/reserve + ADS + fov), mirroring the info
 	# struct's ammo fields; an infinite-capacity weapon reads clip -1.
@@ -859,10 +881,13 @@ func _resolve_waypoint_name(wp: WaypointHudView, sim: Simulation) -> String:
 # pixels the blit stretches over the surface the overlay draws on; the play
 # camera then carries only a CULLING SUPERSET of the frustum and would land a
 # label off on one axis (LocalPlayerPresenter.view_projection) -- else the
-# play camera's own. Public as the ADR 0018 read seam.
+# play camera's own. It is the frame's SCREEN projection, the D3D9 raster's
+# half pixel taken back out (LocalPlayerPresenter.screen_projection): the
+# overlay draws the original's window coordinates and carries them onto this
+# raster's pixel centres itself. Public as the ADR 0018 read seam.
 func hud_view_projection(camera: Camera3D) -> Projection:
 	if _player_presenter != null and _player_presenter.camera() != null:
-		return _player_presenter.view_projection()
+		return _player_presenter.screen_projection()
 	return camera.get_camera_projection()
 
 

@@ -42,7 +42,7 @@ std::string waypoint_display_name(const WaypointNameKey &key, bool in_session,
 	// Empty or the literal "null" falls back to the gametext default
 	// [orig: @0x59476F..0x59477B].
 	if (name.empty() || strutil::iequals(name.c_str(), "null"))
-		return game_text(gametext, "WPNames", "STRWPNAMEDEFAULT", "");
+		return game_text(gametext, kGameTextWPNames, "STRWPNAMEDEFAULT", "");
 	return name;
 }
 
@@ -98,7 +98,7 @@ std::string subgoal_message(bool lost, int header_id, const GameTextLookup &miss
 }
 
 std::string objective_header(const GameTextLookup &gametext) {
-	return game_text(gametext, "Misc", "STRMISC_NEWOBJECTIVE", "");
+	return game_text(gametext, kGameTextMisc, "STRMISC_NEWOBJECTIVE", "");
 }
 
 std::string objective_directive(bool win, int header_id, const GameTextLookup &mission) {
@@ -118,7 +118,7 @@ std::string triggered_text(int text_id, const GameTextLookup &mission) {
 
 std::string weapon_display_name(const std::string &weapon_id, const GameTextLookup &gametext) {
 	if (weapon_id.empty()) return std::string();
-	return game_text(gametext, "WepDes", weapon_id.c_str(), "");
+	return game_text(gametext, kGameTextWepDes, weapon_id.c_str(), "");
 }
 
 namespace {
@@ -235,14 +235,14 @@ std::string service_prompt_text(int prompt, const std::string &use_key, int32_t 
 	key.text = use_key;
 	switch (prompt) {
 		case 1: // [orig: @0x5BDF2D GameText_GetString -> sprintf(buf, fmt, keyname) @0x5BDF45]
-			return hud_sprintf(game_text(gametext, "Overlays", "STROVER_ARMORY_INFO", ""), {key});
+			return hud_sprintf(game_text(gametext, kGameTextOverlays, "STROVER_ARMORY_INFO", ""), {key});
 		case 2: // [orig: @0x5BDFAC..0x5BDFBB GameText_GetStringWithFallback -> @0x5BDFC9]
-			return hud_sprintf(game_text(gametext, "Overlays", "STROVER_VEHICLEBAY_INFO",
+			return hud_sprintf(game_text(gametext, kGameTextOverlays, "STROVER_VEHICLEBAY_INFO",
 					"!Press '%s' to activate vehicle bay menu"), {key});
 		case 3: // [orig: @0x5BE084 GameText_GetString -> sprintf(buf, fmt, wait) @0x5BE09C]
-			return hud_sprintf(game_text(gametext, "Overlays", "STROVER_FARP_WAIT", ""), wait_seconds);
+			return hud_sprintf(game_text(gametext, kGameTextOverlays, "STROVER_FARP_WAIT", ""), wait_seconds);
 		case 4: // [orig: @0x5BE0D4 GameText_GetString -> sprintf(buf, fmt) @0x5BE0E9]
-			return hud_sprintf(game_text(gametext, "Overlays", "STROVER_FARP_RELOADING", ""));
+			return hud_sprintf(game_text(gametext, kGameTextOverlays, "STROVER_FARP_RELOADING", ""));
 		default:
 			return std::string();
 	}

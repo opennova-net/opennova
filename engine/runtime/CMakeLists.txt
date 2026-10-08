@@ -54,8 +54,19 @@ add_library(opennova_runtime STATIC
     # menu — the .mnu screen draw-list compiler (ADR 0033 R2; witness:
     # docs/mnu/menu-re.md "Widget render dispatch")
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_marquee.cpp # the marquee credits roll
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_notes.cpp # the compiler notes (build, loader, layout)
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_queries.cpp # the widget queries and hit geometry
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_scrollbar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_table.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_wrap.cpp # the wrapped-text drawer and the multiline edit
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_assets.cpp # which file a menu texture or font name loads
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_style.cpp # the shell's stylesheets, menu_style.mns then brand.mns
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_credits.cpp # a marquee DATASOURCE's credits
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_text_tables.cpp # the menu string tables
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_screen_inputs.cpp # a screen's string tables and the shell's style, through a file source
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_assets.cpp # a screen's fonts and textures, kept by (file, stamp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_table.cpp # a table's columns and row sort
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_clip.cpp # a widget's clip viewport over its own ops
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_table_row.cpp # the TABLE row records and their CTableWnd operations
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_assets.cpp # which file a menu texture or font name loads
@@ -67,10 +78,19 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/loadout_screen.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/loadout_labels.cpp # the loadout screens' labels, row order and weight readout
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_runtime.cpp # the compiled-menu interaction runtime (id tree, nav, state, actions, input)
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_sound.cpp # the windows' SOUND rows and when the pump plays them
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_click.cpp # the click and the press's mouse capture (D-MNU-30)
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_state_frame.cpp # the frame seam's state writes, and the seam headless
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_commands.cpp # what the game's code does with a control it binds by name
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/screen_history.cpp # the screen history across menu files and a mission (D-MNU-28)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_flow.cpp # SP selection, expansion requests and host rotation
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/mod_list.cpp # the Mods list's rows, its pick's description and ACCEPT's pick (D-MNU-31)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/options_screen.cpp # options remap and preview decisions
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/command_map_screen.cpp # the CMAP tables and ORDERS composer
+    # profile — the player profile's in-memory image (player.sav + weapon.sav),
+    # its load and save (witness: docs/playerinfo/player-sav-re.md)
+    ${CMAKE_CURRENT_SOURCE_DIR}/profile/player_profiles.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/profile/profile_controls.cpp # the controls words the game reads
     # mission (runtime half) — the BMS event runtime + mission->world promotion,
     # the boot policy, and the ONE mission kernel (boot + state + no-net tick,
     # ADR 0042 d3) evaluated against the shared runtime world
@@ -80,6 +100,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/event_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_catalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_kernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_sidecars.cpp # the files the game finds by a mission's name, as one table
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_text.cpp # the <mission>.bin RTXT harvest (briefings, locations, people names)
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/debug_oracles.cpp # the F3 hitbox view and entity pick over the kernel
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/script_debug_report.cpp # the F3 Script window's WAC/BMS/vars read
@@ -92,11 +113,13 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/emitter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/effect_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/effect_catalog_names.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/particle/effect_closure.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/script_effects.cpp
     # hud — the retail game-font text engine + element frame math
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/game_font.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_declutter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_elements.cpp      # which element of the walk drew each run (a tool's record)
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_layout_from_hudpos.cpp    # the hudpos.def parse applied to the layout globals
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_game_text.cpp    # the HUD's game-text key compositions and fallbacks
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/squad_feed.cpp       # the command map squad feed lines
@@ -151,6 +174,7 @@ add_library(opennova_runtime STATIC
     renderer/model_panm_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_texture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_load_rules.cpp   # the game's texture loaders as rules
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/device_texture.cpp   # the device texture a texture file becomes
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/d3dx_image_codecs.cpp   # D3DX's PPM/PFM/HDR/DIB codecs (D-RMAT-17)
     renderer/material_texture_producers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_classify.cpp
@@ -248,6 +272,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_ladder.cpp         # the D-COL-5 climb legs
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_board.cpp           # the 123..127 command legs (ex-D-INF-2)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_combat.cpp          # the D-AI-4 combat pass
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/organic_fire.cpp             # an NPC body's ammo bytes, launch points and clip fire shots
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_animation.cpp     # motor-head channel update
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_remote_anim.cpp   # remote-player body anim (size gate)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_sound.cpp          # the foley/footstep slot-sound leg
@@ -383,7 +408,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/admin_console.cpp          # the remote-admin console's verbs (ADR 0051 PR5)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/admin_console_player.cpp   # its slot walks: PLAYER, PETERRABBIT, QUERY
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/character_registry.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/charattr_challenge.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/charattr_table.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_card.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_emplaced.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_present_projection.cpp

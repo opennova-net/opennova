@@ -89,7 +89,9 @@ class SightRowControl:
 			return
 		# The virtual design space and rect scaling are the engine's
 		# (HudPos.DESIGN_* / sight_scale_rect — the witness lives at the engine home,
-		# engine/runtime/hud hud/hud_math.h).
+		# engine/runtime/hud hud/hud_math.h), the rect the original's window
+		# coordinates (D3D9 pixel centres on the integers: HudPos.d3d9_screen_offset).
+		draw_set_transform(HudPos.d3d9_screen_offset())
 		draw_texture_rect(tex,
 				HudPos.sight_scale_rect(rect_v, get_viewport_rect().size), false)
 
@@ -109,15 +111,19 @@ var _slide_multiplier := 0
 ## Rebuild the card for the equipped weapon's authored SIGHTS rows
 ## ({texture,x1,y1,x2,y2,blend,...} dicts in draw order; an empty array clears
 ## the card). Rows stay hidden until set_card_up(true).
-func set_weapon_sights(sights: Array[WeaponSightRow], root: ResourceRoot) -> void:
+## `texcompression_level` is the session's game.cfg word the row pictures are
+## created under (WeaponSightRow.load_card_texture).
+func set_weapon_sights(sights: Array[WeaponSightRow], root: ResourceRoot,
+		texcompression_level := GameWorld.texcompression_level_fresh_profile()) -> void:
 	for row in _rows:
 		if is_instance_valid(row):
 			row.queue_free()
 	_rows.clear()
 	for e: WeaponSightRow in sights:
-		# A sight card's texture loads through the stage loader (its .dds first).
-		var tex: Texture2D = root.load_texture(String(e.get_texture()).get_file(),
-				ResourceRoot.TEXTURE_LOADER_STAGE) if root != null else null
+		# A sight card's texture loads through the stage loader (its .dds first),
+		# DXT5 at a session texcompression_level of 1 or less (D-RMAT-24).
+		var tex: Texture2D = e.load_card_texture(root, texcompression_level) \
+				if root != null else null
 		if tex == null:
 			continue
 		var row := SightRowControl.new()

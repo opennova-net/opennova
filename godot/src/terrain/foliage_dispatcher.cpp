@@ -2108,14 +2108,26 @@ void FoliageDispatcher::_apply_draw_list(
     // the analytic colormap. Retail Foliage_RenderDetailPatches @ 0x609de0:
     // the Terrain_FindSectorPatchRT lookup (the call @ 0x60a1de), the null
     // skip @ 0x60a1e6..0x60a1e8 to the slot loop's next iteration @ 0x60a6a2.
+    // The lookup reads the patch key's source-atlas halves and the routed
+    // world sector the collector stored beside it, not the cell's world
+    // position: its ten-bit compare keeps the shared flat page off a patch
+    // routed outside the atlas's first quadrant (the pushes
+    // @ 0x60a1d2..0x60a1dd, the key's halves Terrain_CollectNearFoliagePatches
+    // @ 0x603f69..0x603f8a, the sectors @ 0x603fc1..0x603fc7).
     bool page_ready = false;
     float page_layer = 0.0f;
     Vector4 page_projection;
     if (detail && terrain_ != nullptr) {
       const Vector2 center = foliage_detail_cell_center(command.cell_key);
+      opennova::TerrainTileSectorPatchPoint patch;
+      patch.atlas_x = command.atlas_x;
+      patch.atlas_z = command.atlas_z;
+      patch.sector_origin_x =
+          static_cast<int32_t>(std::floor(center.x)) & ~int32_t(0x1FF);
+      patch.sector_origin_z =
+          static_cast<int32_t>(std::floor(center.y)) & ~int32_t(0x1FF);
       const std::optional<opennova::TerrainTilePageBinding> page =
-          terrain_->get_tile_cache_binding_for_world_point_native(
-              static_cast<float>(center.x), static_cast<float>(center.y));
+          terrain_->get_tile_cache_binding_for_sector_patch_native(patch);
       if (page.has_value() && page->ready) {
         const std::optional<opennova::TerrainTilePageProjection> projection =
             opennova::TerrainTileCompositionCache::page_projection(page->page);

@@ -29,10 +29,14 @@ struct SceneOverlaySubmission {
 	std::uint64_t frame_id = 0;
 	opennova::renderer::SceneOverlayFrame frame;
 	std::vector<RID> textures;
+	// Each texture's last retail mip level (texture_max_lod), beside it.
+	std::vector<float> texture_max_lods;
 
-	// The table index of a texture (each texture enters the table once);
+	// The table index of a texture (each texture enters the table once, its
+	// last level from `p_creation_flags`, the flags the game creates it with
+	// as texture_filter.h's texture_stage_flags reads them);
 	// kSceneOverlayNoTexture for a null one.
-	std::uint32_t texture_index(const Ref<Texture2D> &p_texture);
+	std::uint32_t texture_index(const Ref<Texture2D> &p_texture, std::uint32_t p_creation_flags);
 };
 
 // The SELFLUM surfaces of one model for the overlay tail: the sun glare and

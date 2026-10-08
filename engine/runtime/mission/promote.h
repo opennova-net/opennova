@@ -158,6 +158,14 @@ struct PromoteOptions {
             world::kRetailPoolCapacity[4]};
 };
 
+// The profile a placed vehicle naming none loads last [orig: Entity_InitHelicopterAIFromDef @0x4683C0,
+// the "helo1.aip" arm @0x4684c9; Entity_InitVehicleAIFromDef @0x4686C0, "helo1" @0x4687d3], without
+// its extension (the loader appends .aip).
+inline constexpr const char *kFallbackAiProfile = "helo1";
+// The teammates' helicopter's AI profile, loaded by its file's name when one spawns [orig:
+// Entity_SpawnHelicopter @0x4521A0].
+inline constexpr const char *kTeammateHelicopterAiProfile = "H_BHawkN.aip";
+
 // The profile NAME retail's AI init loads for a record (lowercase, no
 // extension): the ai_textfile when authored; else, for a placed item whose AI
 // class row the embedder knows (`placed_item` + a `known` answer), the
