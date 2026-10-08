@@ -349,7 +349,6 @@ void DefinitionViewportApplier::apply(const opennova::editor::ViewportModel &vie
 }
 
 void DefinitionViewportApplier::tick(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &clock) {
-	follow_display_decode(*backdrop_, camera_);
 	const opennova::editor::DefinitionViewport &model = definition_of(viewport);
 	if (!building() && !model_->built() && model.range_shown()) {
 		// An ammo with no round model (DI-23): its range moves with the clock all the same.
