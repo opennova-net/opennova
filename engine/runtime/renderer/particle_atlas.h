@@ -89,6 +89,33 @@ struct ParticleAtlasPage {
 	ParticleRgbaImage image;
 };
 
+// The creation flags a page is built from pixels with on the full-quality
+// branch: 0x100000 and 0x80000, so at most three levels. A session
+// texcompression_level of 1 or less adds 0x200 (a DXT5 page) and a
+// particle_density of 1 or less 0x10000 (the page halved once before its
+// levels are made); those two legs are D-RMAT-24.
+// [orig: CParticleTexture_InitTextureAndChannels @ 0x5E82B2..0x5E82EB
+//  (g_SessionTexCompressionLevel @ 0x24D2070, g_SessionParticleDensity
+//  @ 0x24D2058, against edi = 1 @ 0x5E823D)]
+inline constexpr std::uint32_t kParticlePageCreationFlags = 0x180000u;
+
+// The device levels of one composed page: level 0 the page as loaded, every
+// later level D3DX's box filter of the level before it, as many as the
+// creation flags' chain holds (three for both page sides). A page the
+// device holds as A8R8G8B8, so each level is the bytes the one before was
+// stored as, filtered and rounded back to bytes.
+// [orig: GTexture_CreateFromPixelData_0 @ 0x6877BA..0x687801 (the count),
+//  @ 0x6878A0 (level 0, D3DXLoadSurfaceFromMemory), @ 0x6878B5..0x6878BE
+//  (D3DXFilterTexture, D3DX_FILTER_BOX, each level from the one before)]
+std::vector<ParticleRgbaImage> particle_atlas_page_levels(const ParticleRgbaImage &page);
+
+// The last level a page's stage samples: the particle batch draws through a
+// GfxShader pass, so the stage is MIN/MAG LINEAR with MIPFILTER POINT, which
+// never reads past the page's last level.
+// [orig: CParticleBatch_FlushAndBindMaterial @ 0x5E42DC;
+//  CGfxDevice_ApplyRenderStates @ 0x67E463..0x67E4A7]
+std::uint32_t particle_atlas_page_last_level(int side);
+
 struct ParticleAtlasBuild {
 	// Entries retain registration order, so ParticleAtlasEntryId indexes this
 	// vector directly. Pages retain creation order.

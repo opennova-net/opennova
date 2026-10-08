@@ -23,6 +23,9 @@ namespace godot {
 struct ParticleAtlasPageSnapshot {
 	std::uint8_t type = 0;
 	std::uint32_t side = 0;
+	// The page's retail levels (renderer::particle_atlas_page_levels), end to
+	// end from level 0, each level half the side of the one before.
+	std::uint32_t levels = 1;
 	PackedByteArray rgba8;
 };
 

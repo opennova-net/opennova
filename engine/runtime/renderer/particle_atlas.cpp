@@ -9,6 +9,8 @@
 
 #include <base/io/log.h>
 #include <base/io/strutil.h>
+#include <runtime/renderer/texture_dxt.h>
+#include <runtime/renderer/texture_filter.h>
 
 namespace opennova::renderer {
 
@@ -158,6 +160,40 @@ bool ParticleRgbaImage::valid() const noexcept {
 	if (pixels > std::numeric_limits<std::size_t>::max() / 4)
 		return false;
 	return rgba.size() == pixels * 4;
+}
+
+// [orig: GTexture_CreateFromPixelData_0 @ 0x6876C0]
+std::vector<ParticleRgbaImage> particle_atlas_page_levels(const ParticleRgbaImage &page) {
+	std::vector<ParticleRgbaImage> levels;
+	if (!page.valid())
+		return levels;
+	const std::uint32_t width = static_cast<std::uint32_t>(page.width);
+	const std::uint32_t height = static_cast<std::uint32_t>(page.height);
+	const std::uint32_t count = texture_level_count(width, height, kParticlePageCreationFlags);
+	levels.push_back(page);
+	while (levels.size() < count) {
+		const ParticleRgbaImage &above = levels.back();
+		const std::uint32_t above_w = static_cast<std::uint32_t>(above.width);
+		const std::uint32_t above_h = static_cast<std::uint32_t>(above.height);
+		if (above_w <= 1 && above_h <= 1)
+			break;
+		// [orig: D3DXFilterTexture @ 0x6878BE, filter 5 (BOX)]
+		const std::vector<DxtColor> filtered =
+				box_filter_half(decode_rgba8(above.rgba.data(), above_w, above_h), above_w, above_h);
+		ParticleRgbaImage level;
+		level.width = static_cast<int>(std::max(1u, above_w / 2));
+		level.height = static_cast<int>(std::max(1u, above_h / 2));
+		level.rgba = encode_rgba8(filtered);
+		levels.push_back(std::move(level));
+	}
+	return levels;
+}
+
+std::uint32_t particle_atlas_page_last_level(int side) {
+	if (side <= 0)
+		return 0;
+	return pixel_texture_last_level(static_cast<std::uint32_t>(side),
+			static_cast<std::uint32_t>(side), kParticlePageCreationFlags);
 }
 
 ParticleAtlasAllocation allocate_retail_particle_atlas_rect(

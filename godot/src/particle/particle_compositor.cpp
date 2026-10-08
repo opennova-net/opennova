@@ -688,9 +688,17 @@ bool ParticleCompositorEffect::Impl::ensure_atlas(
 	for (std::size_t page_index = 0; page_index < atlas->pages.size();
 			++page_index) {
 		const ParticleAtlasPageSnapshot &source = atlas->pages[page_index];
-		const std::uint64_t expected = static_cast<std::uint64_t>(source.side) *
-				static_cast<std::uint64_t>(source.side) * 4u;
-		if (source.side == 0 || expected >
+		// The page's retail levels end to end: at most three box-filtered
+		// levels, sampled bilinear on the nearest level (the sampler's
+		// MIPFILTER NEAREST), which never reads past the last (D-RMAT-23;
+		// renderer::particle_atlas_page_levels).
+		std::uint64_t expected = 0;
+		for (std::uint32_t level = 0; level < source.levels && level < 32u; ++level) {
+			const std::uint64_t level_side =
+					std::max<std::uint64_t>(1u, static_cast<std::uint64_t>(source.side) >> level);
+			expected += level_side * level_side * 4u;
+		}
+		if (source.side == 0 || source.levels == 0 || source.levels > 32u || expected >
 				static_cast<std::uint64_t>(std::numeric_limits<int64_t>::max()) ||
 				static_cast<std::uint64_t>(source.rgba8.size()) != expected) {
 			set_failure("Atlas page " + std::to_string(page_index) +
@@ -706,13 +714,14 @@ bool ParticleCompositorEffect::Impl::ensure_atlas(
 		format->set_height(source.side);
 		format->set_depth(1);
 		format->set_array_layers(1);
-		format->set_mipmaps(1);
+		format->set_mipmaps(source.levels);
 		format->set_texture_type(RenderingDevice::TEXTURE_TYPE_2D);
 		format->set_samples(RenderingDevice::TEXTURE_SAMPLES_1);
 		format->set_usage_bits(BitField<RenderingDevice::TextureUsageBits>(
 				RenderingDevice::TEXTURE_USAGE_SAMPLING_BIT));
 		Ref<RDTextureView> view;
 		view.instantiate();
+		// One layer: every level of it, end to end.
 		TypedArray<PackedByteArray> data;
 		data.push_back(source.rgba8);
 
