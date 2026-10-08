@@ -188,11 +188,19 @@ private:
 	// viewport.
 	struct DrawingView {
 		Camera3D *camera = nullptr;
+		// The projection the original projects the view through: the local
+		// view presenter's screen projection (its D3D9 raster shift taken out)
+		// for the frame's cameras, else the camera's own.
 		Projection projection;
 		Vector2i raster;
+		// True for the frame's cameras: their screen projection is the plain
+		// perspective their fov and keep mode describe (the camera node draws
+		// it through its raster's half pixel, render/d3d9_raster_device).
+		bool frame_perspective = false;
 	};
 	DrawingView _drawing_view(Camera3D *p_surface_cam) const;
-	void _update_reflection_camera(Camera3D *p_cam, const Projection &p_projection);
+	void _update_reflection_camera(Camera3D *p_cam, const Projection &p_projection,
+			bool p_frame_perspective);
 	void _apply_reflection_clear();
 	void _install_reflection_decode();
 	void _release_reflection_decode();

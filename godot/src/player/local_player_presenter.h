@@ -195,7 +195,8 @@ public:
 	// projection, which maps a world point to the window coordinate its 2D draws
 	// at (D3D9's, pixel centres on the integers). The HUD's world anchors (attach
 	// labels, friendly tags, the third-person aim point) project through it and
-	// draw under the overlay's d3d9_screen_to_canvas, as the original's do.
+	// draw under the overlay's d3d9_screen_to_canvas, as the original's do; the
+	// water's strip march and mirror take it too (Water::_drawing_view).
 	Projection screen_projection() const;
 	// The camera drawing the world while the stretched target is live (null
 	// when the surface draws directly), and that target.
