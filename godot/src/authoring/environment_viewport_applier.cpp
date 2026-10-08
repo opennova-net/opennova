@@ -14,6 +14,7 @@
 #include <editor/assets/project_asset_source.h>
 #include <editor/preview/environment_viewport.h>
 #include <editor/preview/mission_camera.h>
+#include <editor/preview/mission_scene.h>
 #include <editor/preview/preview_clock.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/view/session_view.h>
@@ -61,12 +62,16 @@ bool EnvironmentViewportApplier::EnvironmentKey::operator==(const EnvironmentKey
 			std::equal(std::begin(water_color), std::end(water_color), std::begin(o.water_color));
 }
 
-EnvironmentViewportApplier::TerrainKey EnvironmentViewportApplier::terrain_key_of_(const EnvironmentViewport &model) {
+EnvironmentViewportApplier::TerrainKey EnvironmentViewportApplier::terrain_key_of_(const EnvironmentViewport &model) const {
 	TerrainKey key;
 	if (!model.options().terrain) return key;
 	key.terrain = model.header().terrain;
 	key.tile_set = model.header().tile_set;
 	key.mission = model.mission_name();
+	// The file this viewport draws is the .env the drawn mission's terrain reads after its .trn (D-TERRAIN-18).
+	key.environment = model.file_name();
+	if (!key.terrain.empty() && stamped_)
+		key.later = opennova::editor::mission_terrain_later_lines(*stamped_, key.environment);
 	return key;
 }
 
@@ -182,7 +187,9 @@ bool EnvironmentViewportApplier::mount_(const opennova::editor::SessionView &vie
 		if (!stamped_->stamps().moved(*source)) return false;
 		// What moved: the layers that read it; a moved file neither layer's units read (a model the sun
 		// read as it was first drawn, the drops' texture) is the environment's.
-		stale[kTerrain] = layer_files_[kTerrain].moved(*source);
+		// The .env and overcast.def the terrain's load read are the terrain's by the lines of them its parser
+		// takes, which its key holds (D-TERRAIN-18): their other edits leave the ground standing.
+		stale[kTerrain] = layer_files_[kTerrain].moved_but(*source, { environment, opennova::env::kOvercastFile });
 		stale[kEnvironment] = layer_files_[kEnvironment].moved(*source) || !stale[kTerrain];
 		// A file the bodies read moved (a model, its textures; not the environment's own text, whose edits
 		// rebuild the environment as they are made): the bodies loaded again with the layer.
@@ -245,6 +252,7 @@ void EnvironmentViewportApplier::plan_(Build &build, const EnvironmentViewport &
 		if (!terrain_key.terrain.empty() && root_files_->has_file(trn)) {
 			loading_.instantiate();
 			loading_->set_mission_tile_set(opennova::to_gd(terrain_key.tile_set));
+			loading_->set_mission_environment(opennova::to_gd(terrain_key.environment));
 			begun = loading_->begin_load_from_resource_root(root_files_, trn) == OK;
 		}
 		note_reads_(kTerrain, from);
