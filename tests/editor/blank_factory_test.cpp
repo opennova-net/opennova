@@ -434,10 +434,8 @@ public:
 	bool is_widget_disabled(int) const override { return false; }
 	opennova::menu::MenuRectF widget_rect(int) const override { return opennova::menu::MenuRectF{}; }
 	void design_scale(float &sx, float &sy) const override { sx = sy = 1.0f; }
-	int process_mouse(float, float, bool, bool &owned) override {
-		owned = false;
-		return -1;
-	}
+	std::vector<opennova::menu::MenuPumpWindow> press_mouse(float, float) override { return {}; }
+	int process_mouse(float, float, bool) override { return -1; }
 	bool process_popup_mouse(int, float, float, bool) override { return false; }
 	bool process_mouse_wheel(float, float, int) override { return false; }
 	void set_cursor_state(bool, float, float) override {}

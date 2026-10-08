@@ -13,7 +13,9 @@ var _shell: MainGame = null
 
 
 func before_each() -> void:
-	_config = TestFs.snapshot(STATE_CONFIG_PATH)
+	# The test's own opennova.cfg: none of the developer's keys (an earlier build's
+	# [resources] expansion) reaches it, so what it finds there is what it wrote.
+	_config = TestFs.isolate(STATE_CONFIG_PATH)
 	# No launch flags: the shell boots the bundled menu.
 	LaunchFlags.set_args_override(PackedStringArray([]))
 	ResourceDirSettings.set_game("jo")
