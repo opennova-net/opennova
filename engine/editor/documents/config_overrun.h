@@ -16,7 +16,8 @@ namespace opennova::editor {
 // values than that pool's bytes writes zeros past it into the game's heap, which crashes the game later (a
 // single-player mission start in the witness: docs/mnu/menu-re.md, the ConfigFile text reader). The count
 // is the reader's own (configfile::data_strings_pool). A file over the line is document.config_overrun, an
-// error at the first value past the pool, saying how many bytes past; one in the CBIN form (a credits file
+// error at the first value past the pool, saying how many bytes past, which refuses a build (its row's
+// game_refusal: the game's heap is corrupt from that load on); one in the CBIN form (a credits file
 // stored so, which its type writes back so) is read by the binary reader, whose pools are cleared at their
 // own sizes, and makes none. Its fix, where the kind's type says which lines change nothing its loader
 // reads (DocumentType::config_idle_lines) and putting the ConfigFile's comment (';') before those of them
