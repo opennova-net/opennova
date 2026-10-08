@@ -60,7 +60,8 @@ enum class AssetKind {
 	Shader,         // .fx
 	Config,         // .cfg .ini .ssc .cd
 	Score,          // score.ini (the scoring table per game type)
-	Text,           // .txt
+	Text,           // a .txt the game reads by its name (earlyerr.txt, an expansion's version.txt, ...)
+	Notes,          // the project's notes, which the game never reads: a .md, any other .txt, a text with no extension
 	// A file the project imports, whatever its name: an importer's source with its import record
 	// beside it (a .png the image importer turns into a texture), which the scan gives this kind;
 	// never packed itself, its outputs are.
