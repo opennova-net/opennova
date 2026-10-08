@@ -206,15 +206,17 @@ static int test_the_table() {
 		const AssetKind kind = AssetKind(i);
 		const AssetKindRow &row = asset_kind_row(kind);
 		TEST_EXPECT(row.kind == kind && asset_kind_from_token(row.token) == kind);
+		// A kind a document type edits is one the build packs, but the project's notes, which the text type
+		// opens and the game never reads.
 		if (row.document != DocumentTypeId::None) {
 			edited.insert(row.document);
 			const DocumentType *type = document_type(row.document);
-			TEST_EXPECT(type && document_type_for(kind) == type && asset_kind_packed(kind));
+			TEST_EXPECT(type && document_type_for(kind) == type && asset_kind_packed(kind) == (kind != AssetKind::Notes));
 		} else {
 			TEST_EXPECT(document_type_for(kind) == nullptr);
 		}
 		const bool left_out = kind == AssetKind::Unknown || kind == AssetKind::Archive || kind == AssetKind::ImportSource ||
-		                      kind == AssetKind::ImportInput || kind == AssetKind::MissionText;
+		                      kind == AssetKind::ImportInput || kind == AssetKind::MissionText || kind == AssetKind::Notes;
 		TEST_EXPECT(asset_kind_packed(kind) == !left_out);
 	}
 	TEST_EXPECT(edited.size() == kDocumentTypeCount);
@@ -225,12 +227,15 @@ static int test_the_table() {
 	TEST_EXPECT(document_type(DocumentTypeId::None) == nullptr);
 	for (const AssetKind kind : {AssetKind::ImportSource, AssetKind::MaterialChunk}) {
 		const AssetKindRow &row = asset_kind_row(kind);
-		TEST_EXPECT(!*row.runtime && !row.file_name && !row.extensions);
+		TEST_EXPECT(!*row.runtime && !row.file_name && !row.file_names && !row.extensions);
 	}
+	// The project's notes: the text type opens them, no build packs them, and no archive's name limit binds them.
+	TEST_EXPECT(document_type_for(AssetKind::Notes) == document_type_for(AssetKind::Text) &&
+	            !asset_kind_packed(AssetKind::Notes) && !archive_name_limit_binds(AssetKind::Notes));
 	TEST_EXPECT(archive_name_limit_binds(AssetKind::ImportSource) &&
 	            asset_kind_row(AssetKind::MaterialChunk).archive_slot == ArchiveSlot::Resource);
 	const AssetKindRow &unknown = asset_kind_row(AssetKind::Unknown);
-	TEST_EXPECT(!*unknown.runtime && !unknown.file_name && !unknown.extensions);
+	TEST_EXPECT(!*unknown.runtime && !unknown.file_name && !unknown.file_names && !unknown.extensions);
 	TEST_EXPECT(!asset_kind_packed(AssetKind::Unknown) && unknown.archive_slot == ArchiveSlot::None);
 	TEST_EXPECT(!archive_name_limit_binds(AssetKind::Unknown) && !archive_name_limit_binds(AssetKind::Archive));
 	TEST_EXPECT(asset_kind_for_name("logo.png") == AssetKind::Texture && asset_kind_for_name("LOGO.PNG") == AssetKind::Texture);
