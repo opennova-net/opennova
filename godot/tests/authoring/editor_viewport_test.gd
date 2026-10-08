@@ -32,6 +32,7 @@ extends GutTest
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const PreviewBackgroundChecks := preload("res://tests/authoring/preview_background_checks.gd")
 const ARMORY := "res://../fixtures/threedi/synth/armory.3di"
 const CRATE := "res://../fixtures/threedi/synth/crate.3di"
 ## The JO-sized model (S13 V6), as large as the 967 the game ships come near their 99th percentile
@@ -1986,3 +1987,15 @@ func test_two_builds_share_the_frame() -> void:
 			% [budget_ms, widest, frames, longest_frame, int(units["longest"])])
 	assert_lte(longest_frame, widest * 1000 + int(units["longest"]) + 1000,
 			"the frame's units, both builds', past the budget by no more than one unit")
+
+
+## The editor's Preview background behind a model (the clip's and the animation table's picture is the same
+## device): Grey as it first draws, then each of the four as the editor sets it, live (preview_background_checks.gd).
+func test_the_preview_background_draws_behind_a_model() -> void:
+	if _app == null:
+		return
+	assert_true(_new_project_with(CRATE, "crate.3di"))
+	assert_true(_seam.open_document("models/crate.3di"))
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	PreviewBackgroundChecks.check_each(self, _app, _seam, "models/crate.3di", "model")

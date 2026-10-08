@@ -15,6 +15,7 @@
 #include <runtime/renderer/fp_viewmodel_spec.h>
 #include <runtime/world/player_present.h>
 
+#include "authoring/preview_backdrop.h"
 #include "env/mission_environment.h"
 #include "object/avatar_database.h"
 #include "render/frame_fx.h"
@@ -37,6 +38,9 @@ const opennova::editor::ModelViewport &model_of(const opennova::editor::Viewport
 
 ModelViewportApplier::ModelViewportApplier(SubViewport &viewport) : viewport_(&viewport) {
 	viewport.set_msaa_3d(Viewport::MSAA_4X);
+	// The editor's preview background, behind everything the picture draws.
+	backdrop_ = make_preview_backdrop_3d();
+	viewport.add_child(backdrop_);
 	Node3D *root = memnew(Node3D);
 	viewport.add_child(root);
 	root_ = root;
@@ -64,6 +68,10 @@ ModelViewportApplier::ModelViewportApplier(SubViewport &viewport) : viewport_(&v
 	arms_->set_panm_clock(clock_);
 	arms_->set_avatar_part(ObjectModel::AVATAR_PART_ARMS);
 	root->add_child(arms_);
+}
+
+void ModelViewportApplier::background(opennova::editor::PreviewBackground background) {
+	set_preview_backdrop(*backdrop_, background);
 }
 
 void ModelViewportApplier::make_fire_() {
@@ -385,6 +393,7 @@ void ModelViewportApplier::apply(const opennova::editor::ViewportModel &viewport
 }
 
 void ModelViewportApplier::tick(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &clock) {
+	follow_display_decode(*backdrop_, camera_);
 	if (!build_) {
 		apply_registers_(viewport, clock);
 		play_clip_(viewport, clock);
