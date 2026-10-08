@@ -604,6 +604,43 @@ int main() {
 		            "the default 0 word walks the DM 6095/6002 chain past 6001 and lands at the origin")) return 1;
 	}
 
+	// D-NET-376: the host's own player takes the start marker's heading WORD. JO:CA
+	// CP01's 6001 start is authored at -197; retail's process holds 0xCC160000 on the
+	// marker, the spawned player's +0x10 and the look yaw (163 turned exactly would be
+	// 0xCC16C16C). [orig: Server_PositionPlayerForSpawn @0x50D3F7;
+	// Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
+	{
+		auto cp01_world = std::make_unique<w::World>();
+		cp01_world->registry.configure_pool(0, 16);
+		cp01_world->registry.configure_pool(3, 16);
+		w::Entity start;
+		start.kind = w::EntityKind::Marker;
+		start.item_id = 6001;
+		start.position = {-534.9119f, -139.3639f, 25.5f};
+		start.yaw = -197;
+		cp01_world->registry.spawn(3, start);
+
+		ns::LoopbackChannel cp01_loop;
+		inmatch::NapiNPServerCtx cp01_ctx;
+		inmatch::GameConfig cp01_settings;
+		cp01_settings.server_name = "SINGLEPLAYERGAME";
+		cp01_settings.max_players = 1;
+		cp01_settings.game_type = 0x30020u; // CP01's word, read from retail's process
+		inmatch::test::bring_up_host(cp01_ctx, inmatch::ConnectionMode::HostClient,
+		                        inmatch::SocketMode::Socketless, /*host_key=*/0, &cp01_loop,
+		                        cp01_settings);
+		cp01_ctx.world = cp01_world.get();
+		inmatch::Server_InitNewRoundState(cp01_ctx);
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(cp01_ctx, *cp01_world) == 1,
+		            "the CP01 host player spawns")) return 1;
+		const w::AiEntity *motor = cp01_world->ai.for_handle(cp01_world->cached.local_player);
+		if (!expect(motor != nullptr && static_cast<uint32_t>(motor->heading) == 0xCC160000u,
+		            "the host player's motor heading is the marker's word 0xCC160000")) return 1;
+		const w::Entity *player = cp01_world->registry.get(cp01_world->cached.local_player);
+		if (!expect(player != nullptr && player->yaw == -197,
+		            "the player's whole-degree mirror stays the record's")) return 1;
+	}
+
 	// A join-time spectator is POSITIONED with the substitute team while its
 	// assigned team stays 0: in a team mode the tick parity (odd -> team 1,
 	// even -> team 2) selects the base marker, so the hidden body lands on a

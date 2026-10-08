@@ -301,6 +301,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	if (sel.found) {
 		spawn.position = sel.position; // mission space, straight from the chosen marker
 		spawn.yaw = sel.yaw;
+		spawn.heading_bam = sel.heading_bam; // the copied word (D-NET-376)
 		spawn.pitch = sel.pitch;
 		spawn.roll = sel.roll;
 	} else {
@@ -715,8 +716,12 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 				world::to_fixed(player->position.x),
 				world::to_fixed(player->position.y),
 				world::to_fixed(player->position.z)};
-		const int32_t heading =
-				world::bam_heading_from_mission_yaw_deg(player->yaw);
+		// The placement's copied heading word (D-NET-376) [orig:
+		// Server_PositionPlayerForSpawn @0x50D3F7; Entity_FindBestSpawnPoint
+		// @0x50CF38]; with no marker, the mirror's heading.
+		const int32_t heading = selected.found
+				? selected.heading_bam
+				: world::bam_heading_from_mission_yaw_deg(player->yaw);
 		const int16_t health = static_cast<int16_t>(
 				std::min<int32_t>(player->health, 32767));
 		ai->team = team;

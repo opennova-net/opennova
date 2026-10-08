@@ -988,10 +988,10 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 				world::to_fixed(player->position.y),
 				world::to_fixed(player->position.z),
 		};
-		world::infantry_respawn_snap(
-				*motor, motor_position,
-				world::bam_heading_from_mission_yaw_deg(player->yaw),
-				player->health);
+		// A marker deploy keeps the placement's heading word (D-NET-376) [orig: @0x50D3F7].
+		const int32_t heading = pose.found && !revive_deploy ? pose.heading_bam
+				: world::bam_heading_from_mission_yaw_deg(player->yaw);
+		world::infantry_respawn_snap(*motor, motor_position, heading, player->health);
 	}
 	// [orig: Server_ProcessPlayerDeath @0x5178aa]
     if (player->handle == world.cached.local_player && world.local_player_state != nullptr)
