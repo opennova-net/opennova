@@ -140,6 +140,7 @@ add_library(opennova_bindings OBJECT
     particle/particle_compositor.cpp
     particle/particle_far_pass.cpp
     particle/particle_renderer.cpp
+    particle/particle_atlas_page_upload.cpp
     render/environment_cube_blit.cpp
     render/frame_fx.cpp
     render/nvg_view_device.cpp
@@ -286,6 +287,7 @@ add_library(opennova_bindings OBJECT
     dbf/dbf_data.cpp
     rtxt/rtxt_string_file.cpp
     util/data_format.cpp
+    util/dxt_texture.cpp
     util/paths.cpp
     util/pcx_texture_bridge.cpp
     util/texture_files.cpp
