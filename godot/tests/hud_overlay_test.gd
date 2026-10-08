@@ -120,7 +120,7 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	assert_true(is_instance_valid(hud), "The complete minimap pass renders safely.")
 	stats = hud.get_draw_list_stats()
 	assert_eq(stats.map_texture_filter, 4,
-			"The spinmap icon strip uses explicit linear mip filtering.")
+			"The spinmap icon strip's sampler reaches its mip chain (the shader takes the nearest level).")
 	assert_eq(stats.map_texture_repeat, 1,
 			"The spinmap icon strip clamps past its half texel.")
 	assert_true(stats.map_icon_mipmaps,
@@ -423,6 +423,12 @@ func test_shaders_decode_the_submitted_modulate2x_flags() -> void:
 	assert_true(map.contains(
 			"if (modulate2x_on > 0.5) {\n\t\tCOLOR.rgb = min(COLOR.rgb * 2.0, vec3(1.0));"),
 			"the flagged sprite's colour doubles, saturated")
+	# The fixed-function stage's MIPFILTER POINT: the nearest level, bounded by
+	# the strip's last retail level (renderer::TextureStage::MapIconStrip).
+	assert_true(map.contains("COLOR = vertex_color * textureLod(TEXTURE, UV, level);"),
+			"the map pass samples the nearest mip level")
+	assert_true(map.contains("max(icon_max_lod, 0.0)"),
+			"the level stops at the strip's last retail level")
 
 
 # Every glyph draws through its font page's material, 0x651: MODULATE2X(TEXTURE,

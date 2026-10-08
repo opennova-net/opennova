@@ -19,6 +19,7 @@
 #include <runtime/environment/precipitation.h>
 #include <runtime/renderer/light_scene.h>
 #include <runtime/renderer/precipitation_frame.h>
+#include <runtime/renderer/texture_filter.h>
 #include <runtime/renderer/tracer_frame.h>
 
 #include <array>
@@ -178,6 +179,11 @@ struct SceneOverlayBatch {
 	SceneOverlayDepth depth = SceneOverlayDepth::TestNoWrite;
 	SceneOverlayGeometry geometry = SceneOverlayGeometry::World;
 	uint32_t texture = kSceneOverlayNoTexture; // the embedder's texture table index
+	// The family its texture samples as (texture_filter.h stage_sampler): the
+	// drops, the coronas and the NVG laser's smoke are fixed-function stages,
+	// bilinear with point mips at every texfilter level; a SELFLUM surface is
+	// a model stage through its effect. The untextured draws keep the default.
+	TextureStage stage = TextureStage::ObjectStage;
 	uint32_t first_vertex = 0;
 	uint32_t vertex_count = 0;
 	// The murk quad's side test, per view: drawn only while the view's eye is

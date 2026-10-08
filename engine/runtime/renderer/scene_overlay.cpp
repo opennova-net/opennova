@@ -59,6 +59,7 @@ void append_precipitation_overlay(const PrecipitationDrawFrame &precipitation,
 	SceneOverlayBatch batch;
 	batch.slot = slot;
 	batch.shading = SceneOverlayShading::Modulate2xBlend;
+	batch.stage = TextureStage::Precipitation;
 	batch.depth = SceneOverlayDepth::TestNoWrite;
 	batch.geometry = SceneOverlayGeometry::World;
 	batch.texture = texture;
@@ -86,6 +87,7 @@ void append_corona_overlay(const std::vector<LightCoronaQuad> &quads, uint32_t t
 	SceneOverlayBatch batch;
 	batch.slot = slot;
 	batch.shading = SceneOverlayShading::AdditiveModulate;
+	batch.stage = TextureStage::LightCorona;
 	batch.depth = SceneOverlayDepth::TestNoWrite;
 	batch.geometry = SceneOverlayGeometry::Billboard;
 	batch.texture = texture;
@@ -158,6 +160,7 @@ void append_self_lum_overlay(SceneOverlaySlot slot, const float *positions, cons
 	SceneOverlayBatch batch;
 	batch.slot = slot;
 	batch.shading = SceneOverlayShading::SelfLumAdditive;
+	batch.stage = TextureStage::ObjectStage;
 	batch.depth = depth;
 	batch.geometry = SceneOverlayGeometry::World;
 	batch.texture = texture;
@@ -191,6 +194,7 @@ void append_nvg_laser_overlay(const TracerRibbonFrame &ribbons, uint32_t texture
 		SceneOverlayBatch batch;
 		batch.slot = slot;
 		batch.shading = SceneOverlayShading::NvgLaser;
+		batch.stage = TextureStage::TracerSmoke;
 		batch.depth = SceneOverlayDepth::TestNoWrite;
 		batch.geometry = SceneOverlayGeometry::World;
 		batch.texture = texture;

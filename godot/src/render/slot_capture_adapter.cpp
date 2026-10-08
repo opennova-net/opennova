@@ -224,7 +224,7 @@ struct DeviceCommand {
 	float alpha_test_value = 0.0f;
 	float alpha_mod = 1.0f;
 	// The stages' last retail mip levels (texture_path_resolver
-	// material_texture_max_lod; kQ3NoMipCeiling = unbounded).
+	// texture_max_lod; kQ3NoMipCeiling = unbounded).
 	float diffuse_max_lod = kQ3NoMipCeiling;
 	float detail_max_lod = kQ3NoMipCeiling;
 	std::uint32_t flags = 0;

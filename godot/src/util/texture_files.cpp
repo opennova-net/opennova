@@ -36,9 +36,9 @@ Ref<Texture2D> TextureFiles::load_texture(const String &name, renderer::TextureL
 	const std::string key = "texture:" + texture_load_key(attempts);
 	const auto cached = cache_.find(key);
 	if (cached != cache_.end()) return cached->second;
-	const Ref<Texture2D> result = texture_with_mipmaps(load_texture_image(attempts, [this](const renderer::TextureLoad &load) {
+	const Ref<Texture2D> result = load_texture_with_mipmaps(attempts, [this](const renderer::TextureLoad &load) {
 		return load.source == renderer::TextureFileSource::Mounted ? read_(to_gd(load.file)) : PackedByteArray();
-	}));
+	});
 	cache_.emplace(key, result);
 	return result;
 }

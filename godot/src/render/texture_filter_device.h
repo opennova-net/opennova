@@ -9,7 +9,8 @@
 // - the world viewports' hardware anisotropy, which only the detail family's
 //   sampler hint reads;
 // - the effect code the RenderingDevice object passes (the Q3 copies and the
-//   slot captures) read at their draw.
+//   slot captures) read at their draw, and the state the overlay tail reads
+//   per batch (stage_filter_code).
 
 #include <runtime/renderer/texture_filter.h>
 
@@ -25,6 +26,10 @@ public:
 	// publish, as project.godot's shader globals hold them).
 	static int device_filter_code();
 	static int effect_filter_code();
+	// The shader filter code of one stage family under the state last
+	// published (renderer::stage_sampler): what a RenderingDevice pass that
+	// draws several families picks per draw. Safe on the render thread.
+	static int stage_filter_code(opennova::renderer::TextureStage p_stage);
 	// The viewport anisotropy the terrain detail family's sampler needs: off
 	// unless the device mode is anisotropic, else the power of two at or
 	// below its MaxAnisotropy (Godot's levels stop at 16x).

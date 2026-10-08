@@ -609,6 +609,8 @@ private:
 	void ensure_minimap_water_material_();
 	void ensure_flat_material_();
 	void ensure_map_materials_();
+	// The map pass shader's TSDicon chain bound (icon_max_lod).
+	void apply_map_icon_sampling_();
 	void render_list_(const opennova::hud::HudDrawList &p_list);
 	const opennova::hud::HudDrawList &server_status_page_draw_list_(const Vector2 &p_surface);
 	void server_status_clock_(uint32_t &r_now_ms, bool &r_window_active) const;

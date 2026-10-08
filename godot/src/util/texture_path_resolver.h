@@ -29,9 +29,10 @@ using TextureReadFn = std::function<godot::PackedByteArray(const renderer::Textu
 
 // The image of the first of a loader's attempts (renderer::texture_load_attempts)
 // that reads and decodes, else null; `r_alpha_only` reports whether the winning
-// attempt is alpha-only (the HUD's alpha material).
+// attempt is alpha-only (the HUD's alpha material), `r_reader` its reader.
 godot::Ref<godot::Image> load_texture_image(const std::vector<renderer::TextureLoad> &attempts,
-		const TextureReadFn &read, bool *r_alpha_only = nullptr);
+		const TextureReadFn &read, bool *r_alpha_only = nullptr,
+		renderer::TextureReader *r_reader = nullptr);
 
 // A loader's resolved attempts as a cache identity: each attempt's source, reader,
 // transform, mode and file (lower-cased: the file sets are case-insensitive, and the
@@ -41,6 +42,12 @@ std::string texture_load_key(const std::vector<renderer::TextureLoad> &attempts)
 // The texture the game draws an image with: the mip chain a DDS carries, else
 // generated.
 godot::Ref<godot::Texture2D> texture_with_mipmaps(const godot::Ref<godot::Image> &image);
+
+// A loader's texture: the first of its attempts that reads and decodes
+// (load_texture_image), with its mip chain (texture_with_mipmaps). A texture the
+// DDS reader decoded is remembered as D3DX's chain for texture_max_lod.
+godot::Ref<godot::Texture2D> load_texture_with_mipmaps(const std::vector<renderer::TextureLoad> &attempts,
+		const TextureReadFn &read);
 
 // A loader's texture for `filename` within `dir`, the one source (no loose-first
 // hit): what retail's loader opens, case-insensitively, and nothing else. A res://
@@ -59,10 +66,13 @@ godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, con
 godot::Ref<godot::Texture2D> load_material_image_from_bytes(
 		const renderer::TextureLoad &load, const godot::PackedByteArray &bytes);
 
-// The highest mip level retail's device samples for a texture bound to an
-// object stage: a DDS row keeps its file's chain (no ceiling), every texture
-// built from decoded pixels ends at renderer::pixel_texture_mip_levels.
-float material_texture_max_lod(const godot::Ref<godot::Texture> &texture);
+// The highest mip level retail's device samples for a texture: one D3DX built
+// (a DDS row's or sibling's) keeps its chain (no ceiling, kUnboundedMaxLod);
+// every texture built from decoded pixels ends at its creation chain's last
+// level (renderer::pixel_texture_last_level under `creation_flags`; a model
+// stage's word carries no chain cap).
+inline constexpr float kUnboundedMaxLod = 1000.0f;
+float texture_max_lod(const godot::Ref<godot::Texture> &texture, uint32_t creation_flags = 0);
 
 // Upload the engine's material-specific pixel transform; generated textures
 // share the resolver's epoch and shutdown lifetime. A normal map (type 4 or 5)
