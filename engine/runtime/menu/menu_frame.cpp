@@ -11,6 +11,7 @@
 #include <formats/mns/mns.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 
 using namespace opennova::fnt;
@@ -29,6 +30,37 @@ bool iequals(const std::string &a, const char *b) {
 // token table sub_646CC0 @ 0x646cc0 is not ported).
 std::string texture_load_key(const std::string &name, const std::string &flags) {
 	return opennova::strutil::to_lower(name) + '\n' + opennova::strutil::to_lower(flags);
+}
+
+// The JUSTIFY and VJUSTIFY of a list's ITEMS block or of one of its ITEMs over the layout so far
+// [orig: CListWnd_ParseXMLDefinition @ 0x6457ef..0x645907 (ITEMS), @ 0x6459b2..0x645b62 (an
+// ITEM)]: JUSTIFY LEFT 0 / CENTER 1 / RIGHT 2, another token read by wcstol as the x offset, the
+// justification kept; VJUSTIFY TOP 0 / CENTER 0x10 / BOTTOM 0x20, another the y offset. An empty
+// value is the reader's to leave out (docs/mnu/menu-re.md "Crash and hang cases").
+void list_row_justify(const std::string &justify, const std::string &vjustify, int *io_justify,
+		int *io_vjustify, int *io_x, int *io_y) {
+	if (!justify.empty()) {
+		if (iequals(justify, "LEFT")) {
+			*io_justify = 0;
+		} else if (iequals(justify, "CENTER")) {
+			*io_justify = 1;
+		} else if (iequals(justify, "RIGHT")) {
+			*io_justify = 2;
+		} else {
+			*io_x = static_cast<int>(std::strtol(justify.c_str(), nullptr, 10));
+		}
+	}
+	if (!vjustify.empty()) {
+		if (iequals(vjustify, "TOP")) {
+			*io_vjustify = 0;
+		} else if (iequals(vjustify, "CENTER")) {
+			*io_vjustify = 0x10;
+		} else if (iequals(vjustify, "BOTTOM")) {
+			*io_vjustify = 0x20;
+		} else {
+			*io_y = static_cast<int>(std::strtol(vjustify.c_str(), nullptr, 10));
+		}
+	}
 }
 
 } // namespace
@@ -444,11 +476,25 @@ void MenuFrameCompiler::resolve_node_(int index) {
 	node.cursor = intern_texture(w.cursor.file);
 	// Item rows [orig: id -> text via the string table, image filename loaded,
 	// color wcstoul base 16 @ 0x64bd10].
+	// A list's rows lay out by the ITEMS block's JUSTIFY / VJUSTIFY, an ITEM by its own over them
+	// (WidgetNode::RowLayout).
+	auto row_layout = [](const mnu::Items &items) {
+		WidgetNode::RowLayout layout;
+		list_row_justify(items.justify, items.vjustify, &layout.justify, &layout.vjustify,
+				&layout.x, &layout.y);
+		return layout;
+	};
+	node.row_layout = row_layout(w.items);
+	node.popup_row_layout = w.list_box ? row_layout(w.list_box->items) : WidgetNode::RowLayout();
 	auto build_items = [&](const std::vector<mnu::Item> &rows, const std::string *table,
+								const WidgetNode::RowLayout &list_layout,
 								std::vector<WidgetNode::ItemVisual> &out) {
 		out.clear();
 		for (const mnu::Item &item : rows) {
 			WidgetNode::ItemVisual visual;
+			visual.layout = list_layout;
+			list_row_justify(item.justify, item.vjustify, &visual.layout.justify,
+					&visual.layout.vjustify, &visual.layout.x, &visual.layout.y);
 			if (iequals(item.type, "image")) {
 				visual.kind = WidgetNode::ItemVisual::kImage;
 				visual.texture = intern_texture(item.text);
@@ -463,13 +509,13 @@ void MenuFrameCompiler::resolve_node_(int index) {
 			out.push_back(visual);
 		}
 	};
-	build_items(w.items.items, node.text_table, node.items);
+	build_items(w.items.items, node.text_table, node.row_layout, node.items);
 	// A combo's LIST_BOX list is attached before its parse: its own TEXT_RSRC,
 	// else the root's, never the combo's [orig: CComboWnd_ParseXMLDefinition
 	// @ 0x65c0d0 -> CWnd_SetParentAndAttach].
 	if (w.list_box) {
 		build_items(w.list_box->items.items, window_text_rsrc(*w.list_box, root.window),
-				node.popup_items);
+				node.popup_row_layout, node.popup_items);
 	} else {
 		node.popup_items.clear();
 	}
@@ -1293,18 +1339,68 @@ void MenuFrameCompiler::emit_item_cell(const WidgetNode &node,
 	}
 }
 
+// One list row's text [orig: CListWnd_DrawItems @ 0x6440f7..0x644345], the list's and a combo
+// dropdown's alike. The text is measured whole; wider than the row with the edges (EDGE, +756)
+// and the edge pad (+0xFF8, which only a combo's parse sets: CComboWnd_ParseXMLDefinition
+// @ 0x65c149; a list's is 0) it draws its widest prefix narrower than the span left, the width
+// then the prefix's one character longer (@ 0x644101..0x644170). It lays out in the row rect by
+// the row's justify word against that width (@ 0x64426a..0x6442dc), moves by the row's x / y
+// offsets (@ 0x6442f8..0x644308), and draws through CFontCache_DrawTextWithCursor, which takes
+// the word as its alignment and moves a word of exactly 1 left by half the drawn text's width
+// again, of exactly 2 by all of it [orig: CFontCache_DrawTextWithCursor @ 0x65341f..0x653436].
+void MenuFrameCompiler::emit_list_row_text_(const WidgetNode &node, const mnu::RectEdges &row,
+		const std::string &text, int align, int offset_x, int offset_y, int edge, int edge_pad,
+		const WalkScale &s, uint32_t color) {
+	if (text.empty()) {
+		return;
+	}
+	int width = 0;
+	int height = 0;
+	measure_text(node, text, &width, &height);
+	std::string drawn = text;
+	const int row_w = row.right - row.left;
+	if (edge_pad + width + 2 * edge > row_w) {
+		const int span = row_w - 2 * edge - edge_pad;
+		size_t count = 0;
+		do {
+			++count;
+			measure_text(node, text.substr(0, count), &width, &height);
+		} while (width < span && count < text.size());
+		drawn = text.substr(0, count - 1);
+	}
+	int x = row.left;
+	int y = row.top;
+	if ((align & 0xF0) == 0x10) {
+		y += ((row.bottom - row.top) >> 1) - (height >> 1);
+	} else if ((align & 0xF0) == 0x20) {
+		y = row.bottom - height;
+	}
+	if ((align & 0xF) == 1) {
+		x = ((row.right - row.left) >> 1) - (width >> 1) + row.left;
+	} else if ((align & 0xF) == 2) {
+		x = row.right - width;
+	}
+	x += offset_x;
+	y += offset_y;
+	if (align == 1 || align == 2) {
+		int drawn_w = 0;
+		int drawn_h = 0;
+		measure_text(node, drawn, &drawn_w, &drawn_h);
+		x -= align == 1 ? drawn_w >> 1 : drawn_w;
+	}
+	emit_glyph_run(node, drawn, x, y, s, color, -1);
+}
+
 // List rows [orig: CListWnd_DrawItems @ 0x643f30]: each visible row first
 // draws the ITEMS per-state appearance for its style index (selection/hover
 // highlight) into the row rect, then the row text with the SAME style index
-// selecting the FONT color pair. Height = font "W" else MIN_ITEM_HEIGHT;
-// rows run from the scroll row and clip to the widget rect. A row whose text
-// with its edges and the shown scrollbar is wider than the row draws its
-// widest prefix narrower than the span left [orig: @ 0x644101..0x644170 —
-// the whole measured, then each prefix until one reaches the span; the count
-// before it drawn, @ 0x644345].
+// selecting the FONT color pair (emit_list_row_text_). Height = font "W" else
+// MIN_ITEM_HEIGHT; rows run from the scroll row and clip to the widget rect. A
+// row the game added lays out by the ITEMS block's justification, an authored
+// ITEM by its own (WidgetNode::RowLayout).
 void MenuFrameCompiler::emit_list_rows(const WidgetNode &node,
 		const mnu::RectEdges &rect, const WalkScale &s,
-		const MenuWidgetState *ws, int scrollbar_width) {
+		const MenuWidgetState *ws) {
 	const mnu::Window &w = *node.window;
 	const int row_h = row_height_(node);
 	const bool runtime_rows = ws != nullptr && ws->has_items;
@@ -1317,23 +1413,6 @@ void MenuFrameCompiler::emit_list_rows(const WidgetNode &node,
 	const int hovered = ws != nullptr ? ws->hover_item : -1;
 	const int first = ws != nullptr ? std::max(ws->scroll_row, 0) : 0;
 	const int edge = w.string_data.has_edge ? w.string_data.edge : 0;
-	const int row_w = rect.right - rect.left;
-	const auto fitted = [&](const std::string &text) {
-		int full_w = 0;
-		int h = 0;
-		measure_text(node, text, &full_w, &h);
-		if (scrollbar_width + full_w + 2 * edge <= row_w) {
-			return text;
-		}
-		const int span = row_w - 2 * edge - scrollbar_width;
-		size_t count = 0;
-		int prefix_w = 0;
-		do {
-			++count;
-			measure_text(node, text.substr(0, count), &prefix_w, &h);
-		} while (prefix_w < span && count < text.size());
-		return text.substr(0, count - 1);
-	};
 	int y = rect.top;
 	for (int i = first; i < row_count; ++i) {
 		if (y + row_h > rect.bottom) {
@@ -1365,21 +1444,17 @@ void MenuFrameCompiler::emit_list_rows(const WidgetNode &node,
 			const mnu::RectEdges hi{ row.left + 1, row.top, row.right - 1, row.bottom };
 			emit_state_pass(hi, s, pass);
 		}
+		const int color_state = style >= 0 ? style : kStateDefault;
 		if (runtime_rows) {
-			const std::string &text = ws->items[static_cast<size_t>(i)];
-			if (!text.empty()) {
-				const int color_state = style >= 0 ? style : kStateDefault;
-				emit_glyph_run(node, fitted(text), row.left + edge, row.top, s,
-						node.colors[color_state], -1);
-			}
+			const WidgetNode::RowLayout &layout = node.row_layout;
+			emit_list_row_text_(node, row, ws->items[static_cast<size_t>(i)], layout.align(),
+					layout.x, layout.y, edge, 0, s, node.colors[color_state]);
 		} else {
 			const WidgetNode::ItemVisual &item =
 					node.items[static_cast<size_t>(i)];
-			if (item.kind == WidgetNode::ItemVisual::kText &&
-					!item.text.empty()) {
-				const int color_state = style >= 0 ? style : kStateDefault;
-				emit_glyph_run(node, fitted(item.text), row.left + edge, row.top, s,
-						node.colors[color_state], -1);
+			if (item.kind == WidgetNode::ItemVisual::kText) {
+				emit_list_row_text_(node, row, item.text, item.layout.align(), item.layout.x,
+						item.layout.y, edge, 0, s, node.colors[color_state]);
 			}
 		}
 		y += row_h;
@@ -1451,7 +1526,9 @@ int MenuFrameCompiler::claim_cursor_owner_(int hovered, int spin_part, int captu
 			const int arrow = part == 1 ? node.spin_up : node.spin_down;
 			return arrow >= 0 ? arrow : index;
 		}
-		return part == kMenuPumpPartDropdown ? node.root : index;
+		// The dropdown's list and a scrollbar's windows draw no cursor of their own:
+		// the root's [orig: CWnd_ProcessMouseEvent @ 0x647ad0 — own, else the root's].
+		return part == kMenuPumpPartDropdown || menu_pump_part_scroll(part) ? node.root : index;
 	};
 	const int stamped = inherited_cursor_owner_(window_of(hovered, spin_part));
 	if (stamped >= 0) {
@@ -1459,11 +1536,6 @@ int MenuFrameCompiler::claim_cursor_owner_(int hovered, int spin_part, int captu
 	}
 	if (capture >= 0 && capture < static_cast<int>(nodes_.size())) {
 		return inherited_cursor_owner_(window_of(capture, capture_part));
-	}
-	const int scroll = scroll_pump_.captured_index >= 0 ? scroll_pump_.captured_index
-												 : scroll_pump_.latched_index;
-	if (scroll >= 0 && scroll < static_cast<int>(nodes_.size())) {
-		return inherited_cursor_owner_(scroll);
 	}
 	return first_root_cursor_owner_();
 }
@@ -1519,9 +1591,27 @@ void MenuFrameCompiler::emit_cursor(const MenuFrameState &state) {
 
 // --- the walk ----------------------------------------------------------------
 
+// The claim walk over a window and its subtree [orig: CWnd_ProcessMouseEvent
+// @ 0x647a00, vtable+20, down the tree from CUIScene_EndFrame @ 0x63e600]. A
+// hidden window holds nothing and pumps nothing below it (@ 0x647a21;
+// CWnd_HitTestPoint @ 0x646706). A window takes the claim where its own rect
+// holds the point and none of its shown children's subtrees does (@ 0x647a97..
+// 0x647ab7, CWnd_HitTestPoint recursing @ 0x647ab0: a disabled child's rect
+// still keeps its parent from the claim), the first such window front to back
+// winning (the claim flag scene+16, @ 0x647a7c / 0x647b7f): the last of them in
+// the draw's pre-order. It must be visible in the hierarchy, enabled at every
+// level up its chain (CWnd_IsVisibleInHierarchy @ 0x646290, the gate
+// @ 0x647a27): a disabled window never takes it and a window behind it may
+// (D-MNU-33). GLB_TABLE's pump slot pumps its children alone, so it never takes
+// the claim (update_table_cell_values @ 0x65e0b0). A widget's own windows are
+// its last children: a spin list's arrows, and a scrollbar's windows (a SCROLL
+// widget's buttons; the scroll window of a LIST, LAN_LIST or TABLE, its
+// buttons in front of its track; menu_click.h), which take the claim as their
+// owner's index with their part. The editor's pick (`pump` false) takes every
+// shown window by its rect, its arrows its own, its scrollbar its owner's.
 int MenuFrameCompiler::hit_walk(int index, int origin_x, int origin_y,
 		const MenuFrameState &state, float mx, float my, float sx, float sy,
-		int *io_hit, int *io_part) const {
+		bool pump, bool enabled, HitClaim *io_claim, bool *io_holds) const {
 	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
 	const mnu::Window &w = *node.window;
 	const MenuWidgetState *ws = state_for(state, index);
@@ -1536,17 +1626,17 @@ int MenuFrameCompiler::hit_walk(int index, int origin_x, int origin_y,
 	}
 	const mnu::RectEdges local = node_rect_(node, ws);
 	const mnu::RectEdges rect = offset_rect(local, origin_x, origin_y);
+	const bool live = enabled && !disabled_(w, ws);
 	// Raw mouse against the SCALED rect (the same per-element truncation the
 	// draw emits with).
-	if (mx >= emit_x(rect.left, sx) && mx < emit_x(rect.right, sx) &&
-			my >= emit_x(rect.top, sy) && my < emit_x(rect.bottom, sy)) {
-		*io_hit = index; // later in draw order = front-most; the claim
-		*io_part = 0;
-	}
+	const bool own = mx >= emit_x(rect.left, sx) && mx < emit_x(rect.right, sx) &&
+			my >= emit_x(rect.top, sy) && my < emit_x(rect.bottom, sy);
+	bool child_holds = false;
 	for (size_t c = 0; c < w.children.size(); ++c) {
-		next = hit_walk(next, rect.left, rect.top, state, mx, my, sx, sy,
-				io_hit, io_part);
+		next = hit_walk(next, rect.left, rect.top, state, mx, my, sx, sy, pump,
+				live, io_claim, &child_holds);
 	}
+	ScrollParts parts;
 	if (w.type == mnu::WindowType::SpinList) {
 		// The SPINUP/SPINDOWN arrows are the list's last child windows, hit by
 		// their own rects (art or none; a 0x0 arrow is never hit), and shipped
@@ -1557,10 +1647,31 @@ int MenuFrameCompiler::hit_walk(int index, int origin_x, int origin_y,
 		// @ 0x646700].
 		const int arrow = spin_arrow_hit_(node, rect, state, mx, my, sx, sy);
 		if (arrow != 0) {
-			*io_hit = index;
-			*io_part = arrow;
+			child_holds = true;
+			const int arrow_node = arrow == 1 ? node.spin_up : node.spin_down;
+			const bool arrow_live = live && arrow_node >= 0 &&
+					!nodes_[static_cast<size_t>(arrow_node)].window->disabled;
+			if (!pump || arrow_live) {
+				*io_claim = HitClaim{ index, arrow };
+			}
+		}
+	} else if (pump && scroll_windows_(index, state, &parts)) {
+		const int part = scroll_window_part_(parts, mx, my, sx, sy);
+		const bool standalone = w.type == mnu::WindowType::Scroll;
+		// A SCROLL widget's track is the widget's own claim; an owner's scroll
+		// window is a child of its own, its track included.
+		if (part != 0 && !(standalone && part == kMenuPumpPartScroll)) {
+			child_holds = true;
+			if (live) {
+				*io_claim = HitClaim{ index, part };
+			}
 		}
 	}
+	if (own && !child_holds &&
+			(!pump || (live && w.type != mnu::WindowType::GlbTable))) {
+		*io_claim = HitClaim{ index, 0 };
+	}
+	*io_holds = *io_holds || own || child_holds;
 	return next;
 }
 
@@ -1572,60 +1683,70 @@ MenuFrameCompiler::MouseClaim MenuFrameCompiler::pump_mouse(
 	if (screen_ == nullptr || nodes_.empty()) {
 		return claim;
 	}
-	int hit = -1;
-	int part = 0;
-	// The scrollbar interaction runs ahead of the claim walk: a pressed part
-	// owns every sample until release (retail's child-window capture), so the
-	// walk never turns a scrollbar press into another widget's press. A press's
-	// capture holds the claim to the captured window [orig:
+	const bool press = button_down && !pump_down_;
+	pump_down_ = button_down;
+	// The moves reach the captured window ahead of the frame's pump: a
+	// shuttle holding the capture drags (drag_scroll_shuttle_); the press's own
+	// sample is no move.
+	if (button_down && !press) {
+		drag_scroll_shuttle_(io_state, capture, mouse_x, mouse_y, scale_x, scale_y, &claim);
+	}
+	HitClaim hit;
+	// A press's capture holds the claim to the captured window [orig:
 	// CWnd_ProcessMouseEvent @ 0x647a88..0x647b02].
-	if (scroll_pump_mouse_(io_state, mouse_x, mouse_y, button_down, scale_x,
-				scale_y, &claim)) {
-		hit = claim.hovered;
-	} else if (capture.valid()) {
-		capture_hit_(io_state, capture, mouse_x, mouse_y, scale_x, scale_y, &hit, &part);
+	if (capture.valid()) {
+		capture_hit_(io_state, capture, mouse_x, mouse_y, scale_x, scale_y, &hit);
 	} else {
-		hit_roots_(io_state, mouse_x, mouse_y, scale_x, scale_y, &hit, &part);
+		hit_roots_(io_state, mouse_x, mouse_y, scale_x, scale_y, true, &hit);
 	}
 	for (MenuWidgetState &row : io_state.widgets) {
 		row.hovered = false;
 		row.pressed = false;
 		row.spin_part = 0;
 	}
-	claim.hovered = hit;
-	claim.spin_part = part;
-	claim.cursor = claim_cursor_(hit, part, capture.index, capture.part);
-	// The stamp the cursor pass reads, a disabled claimant's included [orig:
-	// CWnd_ProcessMouseEvent @ 0x647b09], and the capture it falls back to.
-	io_state.cursor_claim = hit;
-	io_state.cursor_spin_part = part;
+	fill_claim_(hit, &claim);
+	claim.cursor = claim_cursor_(hit.index, hit.part, capture.index, capture.part);
+	// The stamp the cursor pass reads, the claim's own [orig:
+	// CWnd_ProcessMouseEvent @ 0x647b09, past the visibility gate @ 0x647a27],
+	// and the capture it falls back to.
+	io_state.cursor_claim = hit.index;
+	io_state.cursor_spin_part = hit.part;
 	io_state.cursor_capture = capture.index;
 	io_state.cursor_capture_part = capture.part;
-	if (hit < 0) {
-		return claim;
-	}
-	// A disabled claimant still owns the mouse (blocking widgets beneath)
-	// but keeps visual state 1 — no hover/press write.
-	if (hit < document_nodes_ && widget_disabled(hit, io_state)) {
+	// The claimed widget's visual state (a scrollbar window's own is D-MNU-13's
+	// residue).
+	if (hit.index < 0 || hit.index >= document_nodes_ || menu_pump_part_scroll(hit.part)) {
 		return claim;
 	}
 	MenuWidgetState *row = nullptr;
 	for (MenuWidgetState &candidate : io_state.widgets) {
-		if (candidate.index == hit) {
+		if (candidate.index == hit.index) {
 			row = &candidate;
 			break;
 		}
 	}
 	if (row == nullptr) {
 		MenuWidgetState fresh;
-		fresh.index = hit;
+		fresh.index = hit.index;
 		io_state.widgets.push_back(fresh);
 		row = &io_state.widgets.back();
 	}
 	row->pressed = button_down;
 	row->hovered = !button_down;
-	row->spin_part = part;
+	row->spin_part = hit.part;
 	return claim;
+}
+
+// The claim as the MouseClaim reads it: a widget (or its spin arrow), else a
+// scrollbar's window by its owner.
+void MenuFrameCompiler::fill_claim_(const HitClaim &hit, MouseClaim *claim) {
+	if (menu_pump_part_scroll(hit.part)) {
+		claim->scroll_owner = hit.index;
+		claim->scroll_part = hit.part;
+		return;
+	}
+	claim->hovered = hit.index;
+	claim->spin_part = hit.part;
 }
 
 int MenuFrameCompiler::widget_index(const std::string &name) const {
@@ -1785,7 +1906,7 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 				emit_frame(node, rect, s);
 			}
 			emit_appearance(node, rect, s, visual);
-			emit_list_rows(node, rect, s, ws, row_scrollbar_width_(index, node, rect, state));
+			emit_list_rows(node, rect, s, ws);
 			emit_row_scrollbar_(index, node, rect, s, state, ws);
 			break;
 		}

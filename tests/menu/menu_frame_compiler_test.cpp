@@ -7,6 +7,7 @@
 //  @ 0x64ae20; CListWnd_DrawItems @ 0x643f30]
 // Witness record: docs/mnu/menu-re.md ("Widget render dispatch").
 
+#include <runtime/menu/menu_click.h>
 #include <runtime/menu/menu_edit.h>
 #include <runtime/menu/menu_frame.h>
 #include <runtime/menu/menu_text_tables.h>
@@ -18,11 +19,16 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "common/test_font.h"
 
 using namespace opennova::fnt;
 
+using opennova::menu::MenuClickLatch;
+using opennova::menu::MenuPumpWindow;
+using opennova::menu::kMenuPumpPartScrollDown;
+using opennova::menu::kMenuPumpPartScrollShuttle;
 using opennova::menu::MenuDrawList;
 using opennova::menu::MenuFrameCompiler;
 using opennova::menu::MenuFrameState;
@@ -1262,8 +1268,10 @@ void test_mouse_pump(const fnt_font_t *font) {
 	claim = c.pump_mouse(state, 5000.0f, 5000.0f, false, 1.0f, 1.0f);
 	CHECK(claim.hovered == -1, "a miss claims nothing");
 
-	// A DISABLED claimant blocks widgets beneath but takes no hover/press
-	// (visual state 1 wins).
+	// A DISABLED window never takes the claim, and its rect still keeps its
+	// parent from it: nothing claims, nothing hovers (D-MNU-33) [orig:
+	// CWnd_IsVisibleInHierarchy @ 0x646290, the gate @ 0x647a27;
+	// CWnd_HitTestPoint recursing @ 0x647ab0].
 	MenuWidgetState disabled_row;
 	disabled_row.index = 1;
 	disabled_row.has_disabled = true;
@@ -1271,9 +1279,9 @@ void test_mouse_pump(const fnt_font_t *font) {
 	state.widgets.clear();
 	state.widgets.push_back(disabled_row);
 	claim = c.pump_mouse(state, 50.0f, 30.0f, false, 1.0f, 1.0f);
-	CHECK(claim.hovered == 1, "a disabled widget still owns the claim");
+	CHECK(claim.hovered == -1, "a disabled widget never takes the claim, nor its parent");
 	CHECK(!state.widgets[0].hovered && !state.widgets[0].pressed,
-			"a disabled claimant keeps visual state 1 - no hover/press");
+			"a disabled window keeps visual state 1 - no hover/press");
 
 	// A HIDDEN subtree never hits: hide the button, the point falls through
 	// to the root container.
@@ -2293,14 +2301,15 @@ void test_open_combo_popup_draws_over_later_widgets(const fnt_font_t *font) {
 			"the open popup paints AFTER the later sibling that overlaps it");
 }
 
-// The pump-integrated CScrollWnd interaction: a press on a part claims and
-// applies at the pump seam, the pressed part captures every held sample
-// until release (retail's child-window capture — no other widget can turn
-// the press into a click), and a disabled owner claims without acting.
-// [orig: CScrollWnd_HandleEvent @ 0x64d050 — arrows @ 0x64d2d9/0x64d31a,
-//  track @ 0x64d0f0/0x64d10e, anchor @ 0x64d1cb..0x64d217, drag
-//  @ 0x64d231..0x64d2aa]
-void test_scroll_pump_owns_press_capture_and_value(const fnt_font_t *font) {
+// A scrollbar's windows by the game's rule (D-MNU-32), as an embedder runs
+// them (the press, then the pump, then the latch's click): the arrows and the
+// shuttle are CButtonWnd children that take the claim themselves, never the
+// slider; an arrow captures its press and steps on its click; the track pages
+// on the press and holds nothing; the shuttle captures and drags; a disabled
+// slider takes neither the claim nor the press [orig: CScrollWnd_HandleEvent
+// @ 0x64d050; CScrollWnd_Construct @ 0x64c450; CWnd_IsVisibleInHierarchy
+// @ 0x646290].
+void test_scrollbar_windows_take_the_game_s_rule(const fnt_font_t *font) {
 	const char *xml = R"(
 <SCREEN>
   <NAME>OPTIONS</NAME>
@@ -2329,48 +2338,92 @@ void test_scroll_pump_owns_press_capture_and_value(const fnt_font_t *font) {
 	gamma.scroll_value = 50;
 	MenuFrameState state;
 	state.widgets.push_back(gamma);
+	MenuClickLatch latch;
+	const auto reached = [&](const MenuPumpWindow &w) { return c.pump_window_reached(w, state); };
+	// One sample as an embedder runs it (MenuStateFrame::press_mouse / process_mouse).
+	const auto sample = [&](float x, float y, bool down) {
+		MenuFrameCompiler::MouseClaim pressed;
+		if (down && !latch.button_down()) {
+			const std::vector<MenuPumpWindow> reach = c.press_reach(state, x, y, 1.0f, 1.0f);
+			latch.press(c.press_capture(reach));
+			for (const MenuPumpWindow &w : reach) c.press_scroll_window(state, w, x, y, 1.0f, 1.0f, &pressed);
+		}
+		MenuFrameCompiler::MouseClaim claim =
+				c.pump_mouse(state, x, y, down, 1.0f, 1.0f, latch.capture_for(down));
+		const MenuPumpWindow clicked = latch.sample(c.click_claim(claim, state), down, reached);
+		if (clicked.valid()) c.click_scroll_window(state, clicked, &claim);
+		if (pressed.scroll_value_changed) {
+			claim.scroll_value_changed = true;
+			claim.scroll_value = pressed.scroll_value;
+		}
+		return claim;
+	};
 
-	// Press edge on the right arrow: the slider claims, steps +1, applies.
-	auto claim = c.pump_mouse(state, 295.0f, 80.0f, true, 1.0f, 1.0f);
-	CHECK(claim.hovered == 1 && claim.scroll_index == 1,
-			"the arrow press claims the slider through the pump");
-	CHECK(claim.scroll_value_changed && claim.scroll_value == 51,
-			"the arrow steps +1");
-	CHECK(state.widgets[0].scroll_value == 51,
-			"the pump applies the value into the widget state");
+	// The right arrow (280..300): its own window takes the claim, never the
+	// slider; its press steps nothing; let go over it, +1.
+	auto claim = sample(295.0f, 80.0f, false);
+	CHECK(claim.hovered == -1 && claim.scroll_owner == 1 &&
+					claim.scroll_part == kMenuPumpPartScrollDown,
+			"the arrow claims as the slider's own window");
+	claim = sample(295.0f, 80.0f, true);
+	CHECK(!claim.scroll_value_changed && state.widgets[0].scroll_value == 50,
+			"the arrow's press steps nothing");
+	CHECK(latch.captured() == (MenuPumpWindow{ 1, kMenuPumpPartScrollDown }),
+			"the arrow's press takes the capture");
+	claim = sample(295.0f, 80.0f, false);
+	CHECK(claim.scroll_value_changed && claim.scroll_value == 51 &&
+					state.widgets[0].scroll_value == 51,
+			"the arrow steps +1 on its click");
 
-	// Held samples drifting elsewhere: the latch keeps the claim on the
-	// slider and never auto-repeats — the ghost-press class is impossible.
-	claim = c.pump_mouse(state, 400.0f, 300.0f, true, 1.0f, 1.0f);
-	CHECK(claim.hovered == 1 && claim.scroll_index == 1 &&
-					!claim.scroll_value_changed,
-			"the latched part keeps the mouse without repeating");
-	claim = c.pump_mouse(state, 400.0f, 300.0f, false, 1.0f, 1.0f);
-	CHECK(claim.scroll_index == -1, "release frees the latch to the walk");
+	// Pressed, drifted off and let go: the capture held the claim to the arrow,
+	// which the mouse left, so nothing steps and nothing repeats.
+	sample(295.0f, 80.0f, true);
+	claim = sample(400.0f, 300.0f, true);
+	CHECK(claim.hovered == -1 && claim.scroll_owner == -1,
+			"off the captured arrow nothing takes the claim");
+	claim = sample(400.0f, 300.0f, false);
+	CHECK(!claim.scroll_value_changed && state.widgets[0].scroll_value == 51,
+			"let go off the arrow: no step");
 
-	// Shuttle press captures with no step; the drag lands the ratio value.
-	// value 51 -> shuttle offset 20 + 51*140/100 = 91 -> x 191..211.
-	claim = c.pump_mouse(state, 200.0f, 80.0f, true, 1.0f, 1.0f);
-	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed,
+	// The track before the shuttle (value 51: the shuttle 191..211) pages on
+	// the press and holds nothing: the window under the mouse takes the claim.
+	claim = sample(150.0f, 80.0f, true);
+	CHECK(claim.scroll_value_changed && claim.scroll_value == 41 &&
+					!latch.captured().valid(),
+			"the track pages -10 on its press and captures nothing");
+	CHECK(claim.hovered == 1 && claim.spin_part == 0,
+			"the track is the slider's own claim");
+	claim = sample(400.0f, 300.0f, true);
+	CHECK(claim.hovered == 0, "held off the track, the window under the mouse claims");
+	sample(400.0f, 300.0f, false);
+
+	// The shuttle (value 41: 177..197) captures with no step; the drag lands
+	// the ratio value.
+	claim = sample(185.0f, 80.0f, true);
+	CHECK(!claim.scroll_value_changed &&
+					latch.captured() == (MenuPumpWindow{ 1, kMenuPumpPartScrollShuttle }),
 			"the shuttle press captures without a value step");
-	claim = c.pump_mouse(state, 500.0f, 80.0f, true, 1.0f, 1.0f);
+	claim = sample(500.0f, 80.0f, true);
 	CHECK(claim.scroll_value_changed && claim.scroll_value == 100,
 			"the captured drag past the track end lands the max");
-	c.pump_mouse(state, 500.0f, 80.0f, false, 1.0f, 1.0f);
+	sample(500.0f, 80.0f, false);
 
-	// A disabled owner claims (blocking beneath) but takes no action.
+	// A disabled slider takes neither the claim nor the press, and its rect
+	// keeps its parent from both.
 	state.widgets[0].has_disabled = true;
 	state.widgets[0].disabled = true;
-	claim = c.pump_mouse(state, 295.0f, 80.0f, true, 1.0f, 1.0f);
-	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed,
-			"a disabled slider claims without scrolling");
+	CHECK(c.press_reach(state, 295.0f, 80.0f, 1.0f, 1.0f).empty(),
+			"no window takes a press on the disabled slider");
+	claim = sample(295.0f, 80.0f, true);
+	CHECK(claim.hovered == -1 && claim.scroll_owner == -1 && !claim.scroll_value_changed,
+			"a disabled slider never claims");
+	sample(295.0f, 80.0f, false);
 	CHECK(state.widgets[0].scroll_value == 100, "the disabled value holds");
-	c.pump_mouse(state, 295.0f, 80.0f, false, 1.0f, 1.0f);
 }
 
-// An OPEN combo popup's scrollbar child is interactive through the same
-// pump: arrows step scroll_row, the shuttle captures and drags, and the
-// pressed part owns the sample so it can never become a popup row pick.
+// An OPEN combo's dropdown scrollbar through the dropdown's own pump: its
+// arrows step on their click, the shuttle captures and drags, the track pages
+// on the press, and a press its windows take never becomes a row pick.
 // [orig: UI_DispatchMouseEvent @ 0x63ab00 g_UIOpenPopupWnd gate routes to
 //  the popup; CListWnd child walk @ 0x643f30 gives its scrollbar the event
 //  first; CScrollWnd_HandleEvent @ 0x64d050 is the part interaction]
@@ -2416,60 +2469,66 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
 	// Popup (0,20)-(100,100): 6 rows, 4 visible, range 0..2, page 3. The
 	// authored scrollbar sits absolute (80,20)-(100,100): up arrow to y 40,
 	// track to y 80, down arrow below.
-	auto claim = c.pump_mouse(state, 90.0f, 90.0f, true, 1.0f, 1.0f);
-	CHECK(claim.hovered == 1 && claim.scroll_index == 1,
-			"the popup down-arrow press claims the combo through the pump");
-	CHECK(claim.scroll_value_changed && claim.scroll_value == 1,
-			"the popup down arrow steps scroll_row +1");
-	CHECK(state.widgets[0].scroll_row == 1,
-			"the pump applies the popup scroll into the widget state");
-	// Held drift onto the row strip: the latch keeps the claim — a scrollbar
-	// press can never become a popup row pick.
-	claim = c.pump_mouse(state, 50.0f, 55.0f, true, 1.0f, 1.0f);
+	auto claim = c.pump_popup_mouse(state, 1, 90.0f, 90.0f, true, 1.0f, 1.0f);
+	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed &&
+					state.widgets[0].scroll_row == 0,
+			"the down arrow's press takes the sample and steps nothing");
+	claim = c.pump_popup_mouse(state, 1, 90.0f, 90.0f, false, 1.0f, 1.0f);
+	CHECK(claim.scroll_value_changed && claim.scroll_value == 1 &&
+					state.widgets[0].scroll_row == 1,
+			"let go over it, the down arrow steps scroll_row +1");
+	// Held, drifted onto the row strip and let go there: the arrow keeps the
+	// sample (never a row pick) and steps nothing.
+	c.pump_popup_mouse(state, 1, 90.0f, 90.0f, true, 1.0f, 1.0f);
+	claim = c.pump_popup_mouse(state, 1, 50.0f, 55.0f, true, 1.0f, 1.0f);
 	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed,
-			"the latched popup arrow keeps the mouse without repeating");
-	c.pump_mouse(state, 50.0f, 55.0f, false, 1.0f, 1.0f);
+			"the held arrow keeps the sample without repeating");
+	claim = c.pump_popup_mouse(state, 1, 50.0f, 55.0f, false, 1.0f, 1.0f);
+	CHECK(!claim.scroll_value_changed && state.widgets[0].scroll_row == 1,
+			"let go off the arrow: no step");
 
-	// Up arrow steps back.
-	claim = c.pump_mouse(state, 90.0f, 30.0f, true, 1.0f, 1.0f);
+	// Up arrow steps back on its click.
+	c.pump_popup_mouse(state, 1, 90.0f, 30.0f, true, 1.0f, 1.0f);
+	claim = c.pump_popup_mouse(state, 1, 90.0f, 30.0f, false, 1.0f, 1.0f);
 	CHECK(claim.scroll_value_changed && claim.scroll_value == 0 &&
 					state.widgets[0].scroll_row == 0,
-			"the popup up arrow steps scroll_row -1");
-	c.pump_mouse(state, 90.0f, 30.0f, false, 1.0f, 1.0f);
+			"the up arrow steps scroll_row -1 on its click");
 
 	// Shuttle drag: at scroll_row 0 the 26px shuttle tops the track (y 40).
 	// Capture there, drag past the track end: the ratio lands the max row.
-	claim = c.pump_mouse(state, 90.0f, 50.0f, true, 1.0f, 1.0f);
+	claim = c.pump_popup_mouse(state, 1, 90.0f, 50.0f, true, 1.0f, 1.0f);
 	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed,
-			"the popup shuttle press captures without a value step");
-	claim = c.pump_mouse(state, 90.0f, 100.0f, true, 1.0f, 1.0f);
+			"the shuttle press captures without a value step");
+	claim = c.pump_popup_mouse(state, 1, 90.0f, 100.0f, true, 1.0f, 1.0f);
 	CHECK(claim.scroll_value_changed && claim.scroll_value == 2 &&
 					state.widgets[0].scroll_row == 2,
-			"the captured popup drag lands the clamped last first-row");
-	c.pump_mouse(state, 90.0f, 100.0f, false, 1.0f, 1.0f);
+			"the captured drag lands the clamped last first-row");
+	c.pump_popup_mouse(state, 1, 90.0f, 100.0f, false, 1.0f, 1.0f);
 
-	// The popup-exclusive entry: restricted to the open combo, it claims the
-	// scrollbar parts and nothing else — a press on the row strip flows back
-	// to the caller's row picking, and other widgets can never claim.
-	state.widgets[0].scroll_row = 0;
-	claim = c.pump_popup_mouse(state, 1, 90.0f, 90.0f, true, 1.0f, 1.0f);
+	// The track above the shuttle (row 2: the shuttle 54..80) pages back on
+	// the press and holds nothing: the next held sample is the rows'.
+	claim = c.pump_popup_mouse(state, 1, 90.0f, 45.0f, true, 1.0f, 1.0f);
 	CHECK(claim.scroll_index == 1 && claim.scroll_value_changed &&
-					claim.scroll_value == 1 && state.widgets[0].scroll_row == 1,
-			"pump_popup_mouse steps the popup down arrow");
-	c.pump_popup_mouse(state, 1, 90.0f, 90.0f, false, 1.0f, 1.0f);
+					state.widgets[0].scroll_row == 0,
+			"the track pages -3 on its press");
+	claim = c.pump_popup_mouse(state, 1, 50.0f, 55.0f, true, 1.0f, 1.0f);
+	CHECK(claim.scroll_index == -1, "the track holds nothing");
+	c.pump_popup_mouse(state, 1, 50.0f, 55.0f, false, 1.0f, 1.0f);
+
+	// A press on the row strip flows back to the caller's row picking.
 	claim = c.pump_popup_mouse(state, 1, 50.0f, 55.0f, true, 1.0f, 1.0f);
 	CHECK(claim.scroll_index == -1,
 			"a row-strip press flows past the popup pump to row picking");
 	c.pump_popup_mouse(state, 1, 50.0f, 55.0f, false, 1.0f, 1.0f);
 
-	// A CLOSED combo exposes no scroll parts to the pump.
+	// A CLOSED combo exposes no scrollbar to the pump.
 	state.widgets[0].popup_open = false;
-	CHECK(c.scroll_owner_at(state, 90.0f, 90.0f, 1.0f, 1.0f) == -1,
-			"a closed combo's popup scrollbar is not claimable");
 	claim = c.pump_popup_mouse(state, 1, 90.0f, 90.0f, true, 1.0f, 1.0f);
 	CHECK(claim.scroll_index == -1,
 			"the popup pump refuses a closed combo's scrollbar strip");
 	c.pump_popup_mouse(state, 1, 90.0f, 90.0f, false, 1.0f, 1.0f);
+	CHECK(c.pump_mouse(state, 90.0f, 90.0f, false, 1.0f, 1.0f).scroll_owner == -1,
+			"nor the main pump");
 }
 
 // Wheel ticks (D-MNU-18, deliberate divergence — retail ships no functioning
@@ -2584,7 +2643,7 @@ void test_degenerate_list_draws_no_dead_scrollbar(const fnt_font_t *font) {
 	}
 	CHECK(!shuttle_drawn,
 			"the one-visible-row clamp hides the single-item scrollbar");
-	CHECK(c.scroll_owner_at(state, 290.0f, 105.0f, 1.0f, 1.0f) == -1,
+	CHECK(c.pump_mouse(state, 290.0f, 105.0f, false, 1.0f, 1.0f).scroll_owner == -1,
 			"the interaction solve agrees with the draw gate");
 }
 
@@ -2646,11 +2705,11 @@ void test_multiple_roots(const fnt_font_t *font) {
 			"off every root: the first root with a cursor");
 }
 
-// The cursor pass draws the cursor of the claim the pump stamped, whatever the
-// claimant's visual state: a disabled claimant keeps state 1 (no hover) yet
-// stamps its own cursor [orig: CWnd_ProcessMouseEvent @ 0x647a00 stamps
-// g_UIFrameCursorTexture @ 0x647b09 before the visual-state verdict;
-// CUIScene_DrawScreensAndCursor @ 0x63bf60 reads the stamp alone @ 0x63bfa2].
+// The cursor pass draws the cursor of the claim the pump stamped [orig:
+// CWnd_ProcessMouseEvent @ 0x647a00 stamps g_UIFrameCursorTexture @ 0x647b09;
+// CUIScene_DrawScreensAndCursor @ 0x63bf60 reads the stamp alone @ 0x63bfa2]; a
+// disabled window never takes the claim (the gate @ 0x647a27 comes first), so
+// it stamps nothing and the first root's cursor is drawn (D-MNU-33).
 // claim_at makes the pump's claim with nothing written (the editor's picture,
 // which never pumps), and frame_cursor names the window whose CURSOR is drawn.
 void test_cursor_follows_the_claim(const fnt_font_t *font) {
@@ -2700,8 +2759,9 @@ void test_cursor_follows_the_claim(const fnt_font_t *font) {
 	cursor = c.frame_cursor(st);
 	CHECK(cursor.owner == own && cursor.texture == b && cursor.width == 16 && cursor.height == 24,
 			"a claimant's own cursor");
-	// A disabled claimant: the pump stamps it with no hover written, and the
-	// pass draws its cursor at the mouse, at its own size, unscaled.
+	// A disabled window: the pump stamps nothing (no window claims there, its
+	// parent kept off by its rect), and the pass draws the first root's cursor at
+	// the mouse, at its own size, unscaled.
 	st = MenuFrameState();
 	MenuWidgetState disabled;
 	disabled.index = own;
@@ -2709,16 +2769,16 @@ void test_cursor_follows_the_claim(const fnt_font_t *font) {
 	disabled.disabled = true;
 	st.widgets.push_back(disabled);
 	const MenuFrameCompiler::MouseClaim pumped = c.pump_mouse(st, 300.0f, 240.0f, false, 2.0f, 2.0f);
-	CHECK(pumped.hovered == own && st.cursor_claim == own && !st.widgets[0].hovered &&
+	CHECK(pumped.hovered == -1 && st.cursor_claim == -1 && !st.widgets[0].hovered &&
 					!st.widgets[0].pressed,
-			"a disabled claimant is stamped, its visual state 1");
+			"a disabled window is never stamped, its visual state 1");
 	st.cursor_visible = true;
 	st.cursor_x = 300.0f;
 	st.cursor_y = 240.0f;
 	const MenuDrawList &dl = c.compile(st, 2.0f, 2.0f);
-	CHECK(!dl.quads.empty() && dl.quads.back().texture == b && dl.quads.back().x0 == 300.0f &&
-					dl.quads.back().x1 == 316.0f && dl.quads.back().y1 == 264.0f,
-			"the disabled claimant's own cursor drawn last, unscaled");
+	CHECK(!dl.quads.empty() && dl.quads.back().texture == a && dl.quads.back().x0 == 300.0f &&
+					dl.quads.back().x1 == 332.0f && dl.quads.back().y1 == 272.0f,
+			"the first root's cursor drawn last, unscaled");
 	// No CURSOR loads: no pointer at all [orig: @ 0x63bfa2].
 	c.set_texture_size(a, 0, 0);
 	c.set_texture_size(b, 0, 0);
@@ -2729,6 +2789,78 @@ void test_cursor_follows_the_claim(const fnt_font_t *font) {
 		drawn = drawn || quad.texture == a || quad.texture == b;
 	}
 	CHECK(!drawn, "nothing drawn for the pointer");
+}
+
+// A list's rows lay out by its ITEMS block's justification, CENTER and VCENTER
+// where it says none, an authored ITEM by its own over it; a numeric JUSTIFY
+// or VJUSTIFY is the text's offset, the justification kept; the draw's own
+// alignment moves a word of exactly 1 (CENTER, TOP) back by half the drawn
+// width, of exactly 2 (RIGHT, TOP) by all of it; a list's edge pad is 0, so its
+// shown scrollbar never shortens a row (D-MNU-34) [orig: CListWnd_Construct
+// @ 0x643c08 / 0x643c50; CListWnd_ParseXMLDefinition @ 0x6457ef..0x645907 and
+// @ 0x6459b2..0x645b62; list_insert_row @ 0x6450c8..0x6450e8;
+// CListWnd_DrawItems @ 0x6440f7..0x644345; CFontCache_DrawTextWithCursor
+// @ 0x65341f..0x653436].
+void test_list_rows_lay_out_by_the_items_justification(const fnt_font_t *font) {
+	// One list (100,100)-(300,140), rows 20 high; "OK" measures 17 wide, 16 high.
+	const auto glyphs = [&](const std::string &items, bool runtime) {
+		const std::string xml = R"(
+<SCREEN>
+  <NAME>L</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
+    <WINDOW type="list" name="LIST">
+      <POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>300</RIGHT><BOTTOM>140</BOTTOM></POSITION>
+      <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+)" + items + R"(
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+		opennova::mnu::Document doc = parse_or_die(xml.c_str());
+		MenuFrameCompiler c;
+		configure_with(c, doc.first_screen(), font);
+		MenuFrameState state;
+		if (runtime) {
+			MenuWidgetState rows;
+			rows.index = 1;
+			rows.has_items = true;
+			rows.items = { "OK", "OK" };
+			state.widgets.push_back(rows);
+		}
+		std::vector<std::pair<float, float>> out;
+		const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+		for (size_t i = 0; i + 1 < dl.glyphs.size(); i += 2) {
+			out.emplace_back(dl.glyphs[i].x_top_left, dl.glyphs[i].y_top);
+		}
+		return out;
+	};
+	// No ITEMS: a row the game adds centres both ways: x = (200>>1) - (17>>1)
+	// + 100 = 192, y = 100 + (20>>1) - (16>>1) = 102 (the drawer's -0.5).
+	auto rows = glyphs("", true);
+	CHECK(rows.size() == 2 && rows[0].first == 191.5f && rows[0].second == 101.5f &&
+					rows[1].second == 121.5f,
+			"a list with no ITEMS justification centres its rows");
+	// LEFT / CENTER, an ITEM RIGHT over it (word 0x12: no second move).
+	rows = glyphs(R"(<ITEMS justify="LEFT" vjustify="CENTER">
+        <ITEM value="0">OK</ITEM><ITEM value="1" justify="RIGHT">OK</ITEM></ITEMS>)",
+			false);
+	CHECK(rows.size() == 2 && rows[0].first == 99.5f && rows[0].second == 101.5f &&
+					rows[1].first == 282.5f,
+			"the ITEMS justification, an ITEM's own over it");
+	// CENTER / TOP: the word is 1, so the draw moves it back by half again.
+	rows = glyphs(R"(<ITEMS justify="CENTER" vjustify="TOP"></ITEMS>)", true);
+	CHECK(rows.size() == 2 && rows[0].first == 183.5f && rows[0].second == 99.5f,
+			"CENTER with TOP moves back by half the width twice");
+	// RIGHT / TOP: the word is 2, so the draw moves it back by the width again.
+	rows = glyphs(R"(<ITEMS justify="RIGHT" vjustify="TOP"></ITEMS>)", true);
+	CHECK(rows.size() == 2 && rows[0].first == 265.5f,
+			"RIGHT with TOP moves back by the width twice");
+	// Numeric tokens: the offsets, the justification kept (CENTER / VCENTER).
+	rows = glyphs(R"(<ITEMS justify="7" vjustify="3"></ITEMS>)", true);
+	CHECK(rows.size() == 2 && rows[0].first == 198.5f && rows[0].second == 104.5f,
+			"a numeric JUSTIFY / VJUSTIFY offsets the text");
 }
 
 int main() {
@@ -2743,6 +2875,7 @@ int main() {
 	test_table_visible_count_floors_to_one(&font);
 	test_table_rows_draw_row_state_not_widget_hover(&font);
 	test_text_placement_and_truncation(&font);
+	test_list_rows_lay_out_by_the_items_justification(&font);
 	test_text_inline_colour_tags(&font);
 	test_scale_truncation(&font);
 	test_radio_checkbox_forcing(&font);
@@ -2762,7 +2895,7 @@ int main() {
 	test_multiline_wrap(&font);
 	test_draw_list_preserves_interleaved_primitive_order(&font);
 	test_scroll_interaction_hits_and_drag(&font);
-	test_scroll_pump_owns_press_capture_and_value(&font);
+	test_scrollbar_windows_take_the_game_s_rule(&font);
 	test_combo_popup_scrollbar_scrolls_through_pump(&font);
 	test_wheel_ticks_scroll_popup_and_row_owners(&font);
 	test_degenerate_list_draws_no_dead_scrollbar(&font);

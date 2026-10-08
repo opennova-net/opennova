@@ -797,6 +797,26 @@ int MenuFrame::widget_index(const String &p_name) const {
 	return compiler_.widget_index(p_name.utf8().get_data());
 }
 
+std::vector<opennova::menu::MenuPumpWindow> MenuFrame::press_mouse(const Vector2 &p_position) {
+	if (!is_configured()) {
+		return {};
+	}
+	const Vector2 scale = design_scale_();
+	const std::vector<opennova::menu::MenuPumpWindow> reach =
+			compiler_.press_reach(state_, p_position.x, p_position.y, scale.x, scale.y);
+	click_.press(compiler_.press_capture(reach));
+	for (const opennova::menu::MenuPumpWindow &window : reach) {
+		opennova::menu::MenuFrameCompiler::MouseClaim changed;
+		compiler_.press_scroll_window(state_, window, p_position.x, p_position.y, scale.x,
+				scale.y, &changed);
+		if (changed.scroll_value_changed) {
+			emit_signal("scroll_value_changed", changed.scroll_index, changed.scroll_value);
+			queue_redraw();
+		}
+	}
+	return reach;
+}
+
 int MenuFrame::process_mouse(const Vector2 &p_position, bool p_button_down) {
 	if (!is_configured()) {
 		return -1;
@@ -804,9 +824,9 @@ int MenuFrame::process_mouse(const Vector2 &p_position, bool p_button_down) {
 	const Vector2 scale = design_scale_();
 	// The claim honors a press's capture, which the release lets go first; then
 	// the click: the claim let go over that was held the sample before
-	// (engine menu_click.h, D-MNU-30).
+	// (engine menu_click.h, D-MNU-30), a scrollbar window's the scrollbar's own.
 	const opennova::menu::MenuPumpWindow capture = click_.capture_for(p_button_down);
-	const opennova::menu::MenuFrameCompiler::MouseClaim claim =
+	opennova::menu::MenuFrameCompiler::MouseClaim claim =
 			compiler_.pump_mouse(state_, p_position.x, p_position.y,
 					p_button_down, scale.x, scale.y, capture);
 	state_.cursor_x = p_position.x;
@@ -817,10 +837,9 @@ int MenuFrame::process_mouse(const Vector2 &p_position, bool p_button_down) {
 			[this](const opennova::menu::MenuPumpWindow &p_window) {
 				return compiler_.pump_window_reached(p_window, state_);
 			});
-	if (clicked.valid()) {
+	if (clicked.valid() && !compiler_.click_scroll_window(state_, clicked, &claim)) {
 		emit_signal("widget_clicked", clicked.index, clicked.part);
 	}
-	last_sample_scrolled_ = claim.scroll_index >= 0;
 	if (claim.scroll_value_changed) {
 		emit_signal("scroll_value_changed", claim.scroll_index,
 				claim.scroll_value);
@@ -890,8 +909,8 @@ void MenuFrame::place_cursor(bool p_visible, const Vector2 &p_position) {
 		const Vector2 scale = design_scale_();
 		const opennova::menu::MenuFrameCompiler::MouseClaim at = compiler_.claim_at(
 				state_, p_position.x, p_position.y, scale.x, scale.y, click_.captured());
-		claim = at.hovered;
-		spin_part = at.spin_part;
+		claim = at.stamp_index();
+		spin_part = at.stamp_part();
 	}
 	if (state_.cursor_visible == p_visible && state_.cursor_x == p_position.x &&
 			state_.cursor_y == p_position.y && state_.cursor_claim == claim &&

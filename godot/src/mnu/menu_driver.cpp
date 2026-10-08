@@ -223,15 +223,13 @@ public:
 		sx = scale.x;
 		sy = scale.y;
 	}
-	int process_mouse(float x, float y, bool button_down, bool &scroll_owned) override {
+	std::vector<opennova::menu::MenuPumpWindow> press_mouse(float x, float y) override {
 		MenuFrame *f = frame();
-		if (f == nullptr) {
-			scroll_owned = false;
-			return -1;
-		}
-		const int claim = f->process_mouse(Vector2(x, y), button_down);
-		scroll_owned = f->last_sample_scrolled();
-		return claim;
+		return f != nullptr ? f->press_mouse(Vector2(x, y)) : std::vector<opennova::menu::MenuPumpWindow>();
+	}
+	int process_mouse(float x, float y, bool button_down) override {
+		MenuFrame *f = frame();
+		return f != nullptr ? f->process_mouse(Vector2(x, y), button_down) : -1;
 	}
 	bool process_popup_mouse(int index, float x, float y, bool button_down) override {
 		MenuFrame *f = frame();
