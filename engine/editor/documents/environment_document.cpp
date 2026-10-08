@@ -18,6 +18,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
+#include <editor/documents/terrain_document.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/model/staged_rows.h>
 #include <formats/trn/trn_io.h>
@@ -32,10 +33,12 @@ using env::Rgb;
 
 constexpr NodeKind kEnvironment = node_kind(EnvironmentKind::Environment);
 constexpr NodeKind kKeyframe = node_kind(EnvironmentKind::Keyframe);
+constexpr NodeKind kTerrainKey = node_kind(EnvironmentKind::TerrainKey);
 
 EnvironmentRow &row_of(const RecordHandle &record) { return record.as<EnvironmentRow>(); }
 Config &config_of(const RecordHandle &record) { return row_of(record).config; }
 Keyframe &keyframe_of(const RecordHandle &record) { return record.as<Keyframe>(); }
+TrnKeyLine &terrain_key_of(const RecordHandle &record) { return record.as<TrnKeyLine>(); }
 
 // --- values -------------------------------------------------------------------------------------
 
@@ -598,6 +601,156 @@ Keyframe fresh_keyframe(const EnvironmentRow &row, size_t index) {
 	return made;
 }
 
+// --- the terrain keys [orig: Terrain_ParseConfigCallback @ 0x60F330, every arm a stricmp of the line's first
+// token; Terrain_LoadEnvironmentConfig @ 0x6109AD installs it as the time-of-day load's hook, which
+// Environment_LoadTimeOfDayConfig keeps for the .env's pass @ 0x57DCBF: D-TERRAIN-18]
+
+bool block_bound(const std::string &key) { return key == "foliage" || key == "end"; }
+
+// Every keyword an arm of the terrain's parser compares, out of a block and in one, each in the terrain's words
+// where its table has a field of it (terrain_key_field).
+std::vector<FieldChoice> terrain_key_choices() {
+	std::vector<FieldChoice> out;
+	int64_t index = 0;
+	for (const std::string &key : trn_parser_keys(true)) {
+		FieldChoice choice;
+		choice.name = key;
+		choice.value = index++;
+		if (const FieldSchema *field = terrain_key_field(key)) {
+			choice.label = key + ": " + (field->group.empty() ? field->label : field->group);
+			choice.description = field->description;
+		} else if (key == "foliage") {
+			choice.description = "Opens a foliage definition: the lines after it are its own until an end.";
+		} else if (key == "end") {
+			choice.description = "Closes the foliage definition a foliage line opened.";
+		} else if (key == "polytrn_sectors") {
+			choice.description = "A row of the sector grid, which adds a row after the terrain's own.";
+		}
+		out.push_back(std::move(choice));
+	}
+	return out;
+}
+
+// A text a terrain line carries as the game reads it: in its code page (Windows-1252), the editor's words UTF-8.
+bool cp1252_of(const Value &value, std::string &stored, std::string &error) {
+	const auto *text = std::get_if<std::string>(&value);
+	if (!text) {
+		error = "A text.";
+		return false;
+	}
+	if (!utf8_to_cp1252(*text, stored)) {
+		error = "The game's text encoding (Windows-1252) has no character for part of this text.";
+		return false;
+	}
+	return true;
+}
+
+void terrain_key_fields(TableKind &kind) {
+	{
+		LabelledField field;
+		field.schema = schema("key", FieldType::Text, "Keyword", "",
+		                      "The terrain's keyword. The terrain's reader reads this file's lines after the mission's .trn "
+		                      "and overcast.def, so what it sets here is the mission's terrain's, over theirs.");
+		field.schema.choices = terrain_key_choices();
+		field.value.get = [](const RecordHandle &record, Value &out) {
+			out = terrain_key_of(record).key;
+			return true;
+		};
+		field.value.set = [](const RecordHandle &record, const Value &value, std::string &error) {
+			const auto *text = std::get_if<std::string>(&value);
+			const std::string key = text ? strutil::to_lower(*text) : std::string();
+			if (!trn_parser_key(key, true)) {
+				error = "A keyword the terrain's reader reads (polytrn_colormap, lock_topleft, foliage...).";
+				return false;
+			}
+			terrain_key_of(record).key = key;
+			return true;
+		};
+		kind.field(std::move(field));
+	}
+	{
+		LabelledField field;
+		field.schema = schema("value", FieldType::Text, "Value", "",
+		                      "The keyword's value as the line writes it: what the terrain's reader reads for it.");
+		field.schema.code_page = true;
+		field.value.get = [](const RecordHandle &record, Value &out) {
+			const TrnKeyLine &line = terrain_key_of(record);
+			out = cp1252_to_utf8(line.values.empty() ? std::string() : line.values.front());
+			return true;
+		};
+		field.value.set = [](const RecordHandle &record, const Value &value, std::string &error) {
+			std::string stored;
+			if (!cp1252_of(value, stored, error)) return false;
+			TrnKeyLine &line = terrain_key_of(record);
+			if (stored.empty()) {
+				if (line.values.size() > 1) {
+					error = "The line has more values: a line's values are its tokens, none of them empty.";
+					return false;
+				}
+				line.values.clear();
+				return true;
+			}
+			if (!trn_value_writable(stored, error)) return false;
+			if (line.values.empty()) line.values.push_back(stored);
+			else line.values.front() = stored;
+			return true;
+		};
+		// foliage and end read no value [orig: Terrain_ParseConfigCallback @ 0x60F330].
+		field.applies = [](const RecordHandle &record, const RecordOwners &) {
+			return block_bound(terrain_key_of(record).key) ? Applicability::Ignored : Applicability::Reads;
+		};
+		// The terrain's field of the keyword names what it names (a map's texture, the height data, a block's model).
+		field.reference = [](const RecordHandle &record, const RecordOwners &) {
+			const TrnKeyLine &line = terrain_key_of(record);
+			const FieldSchema *terrain = terrain_key_field(line.key);
+			return terrain && terrain->id == line.key ? terrain->reference : ReferenceKind::None;
+		};
+		kind.field(std::move(field));
+	}
+	{
+		LabelledField field;
+		field.schema = schema("more", FieldType::Text, "More values", "",
+		                      "The values after the first, a space apart (one holding a space in quotes): what the arms that "
+		                      "read several take (a lock's or the origin's second number, a grid row's sectors, a foliage "
+		                      "block's codes and attributes).");
+		field.schema.code_page = true;
+		field.value.get = [](const RecordHandle &record, Value &out) {
+			out = cp1252_to_utf8(trn_values_text(terrain_key_of(record).values, 1));
+			return true;
+		};
+		field.value.set = [](const RecordHandle &record, const Value &value, std::string &error) {
+			std::string stored;
+			std::vector<std::string> more;
+			if (!cp1252_of(value, stored, error) || !trn_values_of_text(stored, more, error)) return false;
+			TrnKeyLine &line = terrain_key_of(record);
+			if (!more.empty() && line.values.empty()) {
+				error = "The line has no value yet: set its value first.";
+				return false;
+			}
+			if (line.values.size() + more.size() > size_t(io::kConfigMaxTokens)) {
+				error = "A line holds " + std::to_string(io::kConfigMaxTokens - 1) +
+				        " values after its keyword at most: the game's reader cuts 30 tokens.";
+				return false;
+			}
+			for (const std::string &each : more)
+				if (!trn_value_writable(each, error)) return false;
+			line.values.resize(line.values.empty() ? 0 : 1);
+			line.values.insert(line.values.end(), more.begin(), more.end());
+			return true;
+		};
+		// An arm that reads its first value alone reads none of these [orig: Terrain_ParseConfigCallback @ 0x60F330].
+		field.applies = [](const RecordHandle &record, const RecordOwners &) {
+			const std::string &key = terrain_key_of(record).key;
+			return trn_parser_reads_one_value(key) || block_bound(key) ? Applicability::Ignored : Applicability::Reads;
+		};
+		kind.field(std::move(field));
+	}
+}
+
+// A new terrain key: the detail density at the load's own default, 128 [orig: Terrain_LoadEnvironmentConfig
+// @ 0x610972], which the Inspector then names otherwise.
+TrnKeyLine fresh_terrain_key(const EnvironmentRow &, size_t) { return TrnKeyLine{ "polytrn_detaildensity", { "128" } }; }
+
 RecordTable make_table() {
 	TableKind environment(RecordKindRow{kEnvironment, "environment", "Environment", "", true});
 	environment_fields(environment);
@@ -618,19 +771,29 @@ RecordTable make_table() {
 		return insert(owner, index, record, error);
 	};
 	environment.list(std::move(keyframes));
+	// The terrain keys in the file's order: a foliage block's lines and a grid's rows are read in it.
+	TableList terrain_keys;
+	terrain_keys.spec.kind = kTerrainKey;
+	terrain_keys.spec.label = "Terrain keys";
+	terrain_keys.spec.name_field = "key";
+	terrain_keys.ops = vector_list<EnvironmentRow, TrnKeyLine>(
+			kTerrainKey, [](EnvironmentRow &row) -> std::vector<TrnKeyLine> & { return row.terrain_keys; }, fresh_terrain_key);
+	environment.list(std::move(terrain_keys));
 	TableKind keyframe(RecordKindRow{kKeyframe, "keyframe", "Keyframe", "", false});
 	keyframe_fields(keyframe);
-	return RecordTable({std::move(environment), std::move(keyframe)});
+	TableKind terrain_key(RecordKindRow{kTerrainKey, "terrain_key", "Terrain key", "", false});
+	terrain_key_fields(terrain_key);
+	return RecordTable({std::move(environment), std::move(keyframe), std::move(terrain_key)});
 }
 
 // --- the source issues ------------------------------------------------------------------------------
 
-// The keywords the terrain's reader reads (formats/trn's reader, trn_parser_key): its hook stays on for the .env
-// pass, so it reads an environment's lines too, and the mission's terrain takes them after its .trn's
-// (D-TERRAIN-18) [orig: Terrain_LoadEnvironmentConfig @ 0x6109AD pushes Terrain_ParseConfigCallback;
-// Environment_LoadTimeOfDayConfig @ 0x57DB44 keeps it as g_EnvParseHook for every pass]. terrain_name and horizon
-// are read by no arm of either reader: a line the game skips.
-bool terrain_key(const std::string &key) { return trn_parser_key(key); }
+// The keywords the terrain's reader compares, a foliage block's included (formats/trn's reader, trn_parser_key): its
+// hook stays on for the .env pass, so it reads an environment's lines too, and the mission's terrain takes them after
+// its .trn's (D-TERRAIN-18) [orig: Terrain_LoadEnvironmentConfig @ 0x6109AD pushes Terrain_ParseConfigCallback;
+// Environment_LoadTimeOfDayConfig @ 0x57DB44 keeps it as g_EnvParseHook for every pass]: the row's terrain keys.
+// terrain_name and horizon are read by no arm of either reader: a line the game skips.
+bool terrain_key(const std::string &key) { return trn_parser_key(key, true); }
 
 } // namespace
 
@@ -674,11 +837,17 @@ void environment_source_issues(const std::string &text, std::vector<SourceIssue>
 			              "game read it, ended.");
 		if (!env::is_env_key(key)) {
 			if (terrain_key(key)) {
-				issue(true, line, key,
-				      "'" + std::string(tokens.tokens[0]) +
-				              "' is a terrain keyword: the game's terrain reader reads the environment's lines too and "
-				              "takes it for the mission's terrain, which the editor's environment cannot keep. Move it to "
-				              "the terrain's .trn.");
+				// A terrain key: the row keeps it, and a save writes it again, from scratch, after the environment's
+				// keywords. One whose line reads back otherwise (a quote, a control character, past the 30 tokens)
+				// the row cannot keep.
+				TrnKeyLine kept;
+				kept.key = key;
+				for (int i = 1; i < tokens.count; ++i) kept.values.emplace_back(tokens.tokens[i]);
+				std::string written, why;
+				if (!write_trn_key_line(written, kept, why))
+					issue(true, line, key,
+					      "This terrain key's line cannot be written again as the game's reader reads it: " + why +
+					              " Correct the line in the file.");
 			} else {
 				issue(false, line, key,
 				      "The game's environment reader skips '" + std::string(tokens.tokens[0]) +
@@ -742,6 +911,59 @@ void environment_source_issues(const std::string &text, std::vector<SourceIssue>
 	std::stable_sort(issues.begin(), issues.end(), [](const SourceIssue &a, const SourceIssue &b) { return a.line < b.line; });
 }
 
+std::vector<std::string> terrain_key_readings(const std::vector<TrnKeyLine> &keys) {
+	// The terrain's parser's block state over the file's own lines: inside a block every line is the block's, the
+	// first four blocks read their keys, `end` closes one, and from the fifth on nothing closes it [orig:
+	// Terrain_ParseConfigCallback @ 0x60F330, its block test of dword_31BC904, `dword_31BC900 < 4` around every block
+	// key, the block's arms @ 0x60F36C..0x60F5F0]. A terrain may close blocks before the file, or leave one open into
+	// it; what the file alone shows is said.
+	std::vector<std::string> out(keys.size());
+	bool in_block = false;
+	int closed = 0;
+	for (size_t i = 0; i < keys.size(); ++i) {
+		const std::string &key = keys[i].key;
+		const bool block_key = trn_parser_key(key, true) && !trn_parser_key(key);
+		if (in_block) {
+			if (closed >= 4) {
+				out[i] = "This line is inside a fifth foliage block, which the terrain's reader opens but reads nothing of: "
+				         "no end closes it, so no arm reads a line after it [orig: Terrain_ParseConfigCallback @ 0x60F330, "
+				         "`dword_31BC900 < 4` around every block key].";
+			} else if (key == "end") {
+				in_block = false;
+				++closed;
+			} else if (!block_key) {
+				out[i] = "This line is inside the foliage block a foliage line above opens: the terrain's reader reads a "
+				         "block's lines as the block's, so it skips this one until an end closes the block [orig: "
+				         "Terrain_ParseConfigCallback @ 0x60F330, its block test of dword_31BC904].";
+			}
+			continue;
+		}
+		if (key == "foliage") {
+			in_block = true;
+			if (closed >= 4)
+				out[i] = "A fifth foliage block: the terrain's reader opens it but reads none of its lines, and nothing "
+				         "closes it, so no arm reads a line after it [orig: Terrain_ParseConfigCallback @ 0x60F330, "
+				         "`dword_31BC900 < 4` around every block key].";
+		} else if (block_key) {
+			out[i] = "'" + key +
+			         "' is a foliage block's keyword: the terrain's reader reads it only inside a block, and no foliage "
+			         "line above opens one in this file, so the game takes it only on a terrain whose .trn ends inside "
+			         "a block [orig: Terrain_ParseConfigCallback @ 0x60F330, its block test of dword_31BC904].";
+		} else if (key == "polytrn_sectors") {
+			out[i] = "A grid row here is a row after the terrain's own, not in place of one: the terrain's reader counts "
+			         "every polytrn_sectors line of the load, the .trn's first, and refuses the terrain where the count "
+			         "is past 16 or not a power of two [orig: Terrain_ParseConfigCallback @ 0x60F330, its row count "
+			         "dword_31BCB30, which no pass resets; Terrain_LoadEnvironmentConfig @ 0x610A24..0x610A77].";
+		}
+	}
+	return out;
+}
+
+std::string terrain_key_locator(size_t index) {
+	// The one row (0), then the terrain keys' list by its kind's token (Document::locator).
+	return "0/" + std::string(environment_table().kind(kTerrainKey)->row().token) + ":" + std::to_string(index);
+}
+
 // --- the row --------------------------------------------------------------------------------------
 
 EnvironmentRow::EnvironmentRow() { kind = kEnvironment; }
@@ -749,9 +971,14 @@ EnvironmentRow::EnvironmentRow() { kind = kEnvironment; }
 RecordHandle EnvironmentRow::record() const { return {kEnvironment, const_cast<EnvironmentRow *>(this)}; }
 
 size_t EnvironmentRow::footprint() const {
+	size_t terrain = footprint_of(terrain_keys);
+	for (const TrnKeyLine &line : terrain_keys) {
+		terrain += footprint_of(line.key) + footprint_of(line.values);
+		for (const std::string &value : line.values) terrain += footprint_of(value);
+	}
 	return sizeof(*this) + footprint_of(config.name) + footprint_of(config.timeofday) + footprint_of(config.sky_map1) +
 	       footprint_of(config.sky_map2) + footprint_of(config.sun_3di) + footprint_of(config.moon_3di) +
-	       footprint_of(config.glare_3di) + footprint_of(config.star_3di) + footprint_of(config.keyframes) +
+	       footprint_of(config.glare_3di) + footprint_of(config.star_3di) + footprint_of(config.keyframes) + terrain +
 	       ids_footprint();
 }
 
@@ -783,7 +1010,31 @@ std::string EnvironmentDocument::record_title(const NodeAddress &address) const 
 		if (get(address, "time", time))
 			if (const auto *hhmm = std::get_if<int64_t>(&time)) return "Keyframe " + clock_words(int(*hhmm));
 	}
+	if (address.child && address.kind == kTerrainKey)
+		if (const TrnKeyLine *line = terrain_key_at(address)) {
+			const std::string values = trn_values_text(line->values);
+			return values.empty() ? line->key : line->key + " " + cp1252_to_utf8(values);
+		}
 	return Document::record_title(address);
+}
+
+const TrnKeyLine *EnvironmentDocument::terrain_key_at(const NodeAddress &address) const {
+	const EnvironmentRow *row = environment_row();
+	if (!row || address.kind != kTerrainKey || !address.child || address.row != row->id) return nullptr;
+	for (const Collection &list : collections_of({row->id, kEnvironment, 0})) {
+		if (list.spec.kind != kTerrainKey) continue;
+		for (size_t i = 0; i < list.ids.size() && i < row->terrain_keys.size(); ++i)
+			if (list.ids[i] == address.child) return &row->terrain_keys[i];
+	}
+	return nullptr;
+}
+
+NodeAddress EnvironmentDocument::terrain_key_address(size_t index) const {
+	const EnvironmentRow *row = environment_row();
+	if (!row) return {};
+	for (const Collection &list : collections_of({row->id, kEnvironment, 0}))
+		if (list.spec.kind == kTerrainKey && index < list.ids.size()) return {row->id, kTerrainKey, list.ids[index]};
+	return {};
 }
 
 void EnvironmentDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
@@ -793,6 +1044,17 @@ void EnvironmentDocument::refine_field(const NodeAddress &address, FieldUse &use
 	// @ 0x57CC83..0x57CC8D] (kTextureArgPcx).
 	if (use.reference == ReferenceKind::Texture && (use.schema->id == "sky_map1" || use.schema->id == "sky_map2"))
 		use.loader_arg = texture_role_arg(TextureRoleId::SkyCloud, kTextureArgPcx);
+	// A terrain key's value is the terrain's field of its keyword: its words, and the loader of a map's role (the
+	// terrain's own PolyTrn_InitTextures opens a map an environment names as it opens the .trn's).
+	if (address.kind == kTerrainKey && use.schema && use.schema->id == "value")
+		if (const TrnKeyLine *line = terrain_key_at(address)) {
+			int32_t loader = -1;
+			const FieldSchema *terrain = terrain_key_field(line->key, &loader);
+			if (terrain && terrain->id == line->key) {
+				use.label = terrain->label.c_str();
+				if (use.reference != ReferenceKind::None) use.loader_arg = loader;
+			}
+		}
 }
 
 bool EnvironmentDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
@@ -813,6 +1075,8 @@ bool EnvironmentDocument::parse(const std::vector<uint8_t> &bytes, std::vector<s
 		return false;
 	}
 	row->sky_height_latent = row->sky_height_written() ? static_cast<int>(row->config.sky_height) : 0;
+	// The lines the terrain's parser takes after the mission's .trn and overcast.def (D-TERRAIN-18), in their order.
+	row->terrain_keys = read_trn_key_lines(text);
 	environment_source_issues(text, issues);
 	shape(*row);
 	rows.push_back(row);
@@ -833,6 +1097,15 @@ SerializeResult EnvironmentDocument::serialize() const {
 		return result;
 	}
 	result.text = output.str();
+	// The terrain keys after the environment's keywords, in their order, each line from scratch: the environment's
+	// reader skips them (no arm of it compares a terrain keyword) and the terrain's reads them in this order, its
+	// blocks and rows with them (D-TERRAIN-18).
+	for (const TrnKeyLine &line : environment_row()->terrain_keys)
+		if (!write_trn_key_line(result.text, line, error)) {
+			result.issues.push_back({true, 0, "", "", error});
+			result.text.clear();
+			return result;
+		}
 	// The game sorts the keyframes by time as it reads them [orig: Environment_SortAndSnapshotKeyframes
 	// @ 0x57c240], and the writer writes them so.
 	if (!std::is_sorted(held->keyframes.begin(), held->keyframes.end(),
@@ -844,6 +1117,8 @@ SerializeResult EnvironmentDocument::serialize() const {
 std::string EnvironmentDocument::save_words() const {
 	std::string words = "Saving writes the environment in the editor's layout: each keyword the game reads on a line "
 	                    "of its own in a fixed order, the keyframes in time order";
+	const EnvironmentRow *row = environment_row();
+	if (row && !row->terrain_keys.empty()) words += ", then its terrain keys in their order";
 	const size_t ignored = ignored_lines();
 	if (ignored)
 		words += ", without the " + std::to_string(ignored) + (ignored == 1 ? " thing" : " things") +
@@ -853,7 +1128,7 @@ std::string EnvironmentDocument::save_words() const {
 
 std::shared_ptr<Node> EnvironmentDocument::make_node(NodeKind, NodeId, const std::vector<std::shared_ptr<const Node>> &,
                                                      std::string &error) {
-	error = "An environment keeps its one row; add keyframes inside it.";
+	error = "An environment keeps its one row; add keyframes and terrain keys inside it.";
 	return nullptr;
 }
 
@@ -876,6 +1151,9 @@ constexpr FindingCodeEntry<EnvironmentFinding> kFindingEntries[] = {
 	// The game loads the mission all the same, its dome at the engine's default height [orig:
 	// Environment_InitDefaults @ 0x57c1ab, the raw 200; SkyDome_BuildMesh @ 0x578db0 scales by it]: listed.
 	{ EnvironmentFinding::SkyHeightDefault, listed_code("environment.sky_height_default") },
+	// The game reads the line as its parser does (a row added, a line a block keeps or skips): listed, the line kept as
+	// written (D-TERRAIN-18).
+	{ EnvironmentFinding::TerrainKey, listed_code("environment.terrain_key") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(EnvironmentFinding::kCount),
               "every EnvironmentFinding has exactly one row");
@@ -907,6 +1185,21 @@ std::vector<Diagnostic> validate_environment_file(const DocumentBase &document) 
 		d.record_kind = kEnvironment;
 		d.record = row->name();
 		findings.push_back(std::move(d));
+	}
+	// A terrain key the terrain's parser reads otherwise than its line says, on its record.
+	if (row) {
+		const std::vector<std::string> readings = terrain_key_readings(row->terrain_keys);
+		for (size_t i = 0; i < readings.size(); ++i) {
+			if (readings[i].empty()) continue;
+			const NodeAddress record = environment->terrain_key_address(i);
+			Diagnostic d = make_finding(EnvironmentFinding::TerrainKey, DiagnosticSeverity::Warning, readings[i],
+			                            document.path(), "key");
+			d.row_id = record.row;
+			d.child_id = record.child;
+			d.record_kind = record.child ? record.kind : kEnvironment;
+			d.record = record.child ? environment->record_path(record) : row->name();
+			findings.push_back(std::move(d));
+		}
 	}
 	return findings;
 }
