@@ -11,6 +11,7 @@ extends GutTest
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const PreviewBackgroundChecks := preload("res://tests/authoring/preview_background_checks.gd")
 
 var _dirs: Array[String] = []
 var _app: Node = null
@@ -425,3 +426,22 @@ func test_a_texture_edited_in_its_program() -> void:
 	var texture := material.get_shader_parameter("level_nearest") as Texture2D
 	assert_eq(texture.get_image().get_pixel(0, 1), Color8(255, 0, 0, 50), "the texel the program saved")
 	_app.notification(NOTIFICATION_APPLICATION_FOCUS_OUT)
+
+
+## The editor's Preview background around a texture, its shader's own 0.16 grey on Dark: Grey as it first draws,
+## then each of the four as the editor sets it, live (preview_background_checks.gd).
+func test_the_preview_background_draws_around_a_texture() -> void:
+	if _app == null:
+		return
+	var root := _new_project()
+	_write(root.path_join("textures/brick.tga"), _tga(0x28))
+	_seam.request({"kind": "rescan"})
+	assert_true(_seam.done({"kind": "select_file", "path": "textures/brick.tga"}), "select_file is served")
+	var state := await _await_ready("textures/brick.tga")
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	PreviewBackgroundChecks.check_each(self, _app, _seam, "textures/brick.tga", "texture", "Texture")
+	var material := _material("textures/brick.tga")
+	assert_not_null(material)
+	if material != null:
+		assert_almost_eq(material.get_shader_parameter("backdrop_own") as Vector3, Vector3(0.16, 0.16, 0.16),
+				Vector3.ONE * 0.001, "Dark draws the texture viewport's own grey")

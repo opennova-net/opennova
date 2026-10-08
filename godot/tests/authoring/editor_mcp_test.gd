@@ -540,6 +540,33 @@ func test_play_settings_are_each_projects() -> void:
 	assert_eq(String((await _state(["run"])).get("run", {}).get("state", "")), "stopped")
 
 
+## The previews' background is an editor preference the MCP reads and sets: the preferences section says it
+## (grey before any is set), set_preview_background sets each of the four (its catalog enum the four tokens),
+## the editor's settings file keeps it, and a word none has is refused naming the field, nothing changed.
+## No project is needed: it is the editor's, not a project's.
+func test_the_preview_background_through_the_editor_mcp() -> void:
+	if _client == null:
+		return
+	assert_eq(String((await _state(["preferences"])).get("preferences", {}).get("preview_background", "")), "grey")
+	var listed: Variant = await _client.rpc(get_tree(), "tools/list")
+	var request_tool := {}
+	for tool in (listed as Dictionary).get("result", {}).get("tools", []):
+		if String(tool["name"]) == "editor_request":
+			request_tool = tool
+	var schema: Dictionary = request_tool.get("inputSchema", {}).get("properties", {})
+	assert_eq(schema.get("preview_background", {}).get("enum", []), ["dark", "grey", "light", "checker"], str(schema.keys()))
+	assert_true((schema.get("kind", {}).get("enum", []) as Array).has("set_preview_background"))
+	for background in ["light", "checker", "dark", "grey", "light"]:
+		var answer := await _call("editor_request", {"kind": "set_preview_background", "preview_background": background})
+		assert_true(bool(answer.get("outcome", {}).get("done", false)), str(answer))
+		assert_eq(String((await _state(["preferences"])).get("preferences", {}).get("preview_background", "")), background)
+	var settings_text := FileAccess.get_file_as_string(String(_app.get("settings_path")))
+	assert_true(settings_text.contains("\"preview_background\": \"light\""), settings_text)
+	var refused := await _call("editor_request", {"kind": "set_preview_background", "preview_background": "purple"})
+	assert_true(String(refused.get("_error", "")).contains("preview_background"), str(refused))
+	assert_eq(String((await _state(["preferences"])).get("preferences", {}).get("preview_background", "")), "light")
+
+
 func test_john_smith_through_the_editor_mcp() -> void:
 	if _client == null:
 		return
