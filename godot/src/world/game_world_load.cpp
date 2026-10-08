@@ -232,6 +232,11 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// The mission start's copy of the options' object detail: the frames draw
 	// at it until the next mission start (engine: renderer/object_lod.h).
 	object_detail_ = object_polydetail_;
+	// The same copy of the texfilter level: the device mode the terrain detail
+	// family samples at follows it until the next mission start (engine:
+	// renderer/texture_filter.h).
+	session_texfilter_level_ = texfilter_level_;
+	publish_texfilter_state();
 	join_wire_assets_pending_ = wire_header_join;
 	join_wire_til_applied_ = false;
 	join_wire_assets_failed_ = false;

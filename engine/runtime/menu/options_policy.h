@@ -61,7 +61,6 @@ inline constexpr VideoQualityControl kVideoQualityControls[] = {
     {"SHADOWQUALITY", "3"},
     {"PARTICLES", "2"},
     {"FBEFFECTS", "3"},
-    {"TEXFILTER", "3"},
     // "Minimal" means minimal compression and therefore maximum fidelity.
     {"TEXCOMPRESSION", "2"},
 };
@@ -83,6 +82,19 @@ inline constexpr VideoQualityControl kVideoQualityControls[] = {
 // @0x554efb..0x554f0f]. Neither Accept touches the session copy the draw
 // reads, so the word reaches the draw at the next mission start.
 inline constexpr const char *kObjectDetailControls[] = {"OBJECTPOLY", "OBJECTDETAIL"};
+
+// The texture-filter row is served, not pinned: game.cfg's `texfilter_level`
+// (renderer/texture_filter.h). The front-end OPTIONS screen's TEXFILTER
+// combobox selects the row whose item value is the persisted word and writes
+// the selected row's value back [orig: UI_PopulateRenderAndAudioSettings
+// @0x55d059..0x55d0a1 locks only the rows above the device's own maximum
+// (g_CfgTexFilterLevelMax, 3 on a shader-model-2 device past 120 MiB:
+// RenderSettings_ComputeFromGPUCaps @0x587969..0x587993), so every row is open
+// on the device OpenNova ports; UI_SyncRenderSettingsToWidgets
+// @0x55a300..0x55a31f (the select by value); sub_55A710 @0x55a97d..0x55a998
+// (the ACCEPT's read), @0x55ad65..0x55adb1 (a changed word reloads every
+// effect at once)]. The in-game options author no such row.
+inline constexpr const char *kTextureFilterControls[] = {"TEXFILTER"};
 
 // The registered retail comparison profile's gamma reference. Gamma is
 // calibration, not a quality rung, so pushing it to the numeric maximum would

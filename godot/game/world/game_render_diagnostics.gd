@@ -84,7 +84,7 @@ func _sample(world: GameWorld, camera: Camera3D, viewport: Viewport) -> void:
 			"water_reflection": _viewport_pass_state(
 					water.get_reflection_viewport() if water != null else null),
 		},
-		"renderer": _renderer_state(viewport),
+		"renderer": _renderer_state(world, viewport),
 		"runtime": {
 			"performance": world.get_runtime_perf_counters().to_json_value(),
 		},
@@ -548,7 +548,7 @@ static func _viewport_pass_state(viewport: Viewport) -> Dictionary:
 	}
 
 
-static func _renderer_state(viewport: Viewport) -> Dictionary:
+static func _renderer_state(world: GameWorld, viewport: Viewport) -> Dictionary:
 	var anisotropy_level := int(ProjectSettings.get_setting(
 			ANISOTROPY_SETTING, 0))
 	var anisotropy_samples := _anisotropy_samples(anisotropy_level)
@@ -565,9 +565,25 @@ static func _renderer_state(viewport: Viewport) -> Dictionary:
 			"samples": anisotropy_samples,
 			"active": anisotropy_samples > 1,
 		},
+		# game.cfg's texfilter_level as the world publishes it (engine
+		# renderer/texture_filter.h): the device and effect modes and the
+		# shaders' filter codes.
+		"texfilter": {
+			"level": world.get_texfilter_level(),
+			"session_level": world.get_session_texfilter_level(),
+			"device_mode": world.get_texfilter_device_mode(),
+			"effect_mode": world.get_texfilter_effect_mode(),
+			"device_filter": GameWorld.get_texfilter_device_filter(),
+			"effect_filter": GameWorld.get_texfilter_effect_filter(),
+		},
 	}
 	if viewport != null:
+		var viewport_level := int(viewport.anisotropic_filtering_level)
 		state.merge({
+			"viewport_anisotropy": {
+				"level": viewport_level,
+				"samples": _anisotropy_samples(viewport_level),
+			},
 			"viewport_size": viewport.get_visible_rect().size,
 			"scaling_3d_scale": viewport.get_scaling_3d_scale(),
 			"scaling_3d_mode": viewport.get_scaling_3d_mode(),

@@ -69,6 +69,36 @@ func test_object_detail_reaches_the_frames_at_the_next_mission_start() -> void:
 			"a change made mid-mission waits for the next mission start")
 
 
+# The texture filter (game.cfg's texfilter_level; engine
+# renderer/texture_filter.h): the model effects follow the options word at
+# once, while the terrain's device mode and the viewport's anisotropy follow
+# the copy each mission start takes.
+func test_texture_filter_reaches_the_effects_now_and_the_device_at_a_mission_start() -> void:
+	var world := WorldFixture.make_world(self)
+	var restore_level: int = world.get_viewport().anisotropic_filtering_level
+	assert_eq(world.get_session_texfilter_level(), GameWorld.texfilter_level_fresh_profile())
+	world.set_texfilter_level(3)
+	assert_eq(world.get_texfilter_effect_mode(), 2, "the effects take the ANISO define at once")
+	assert_eq(GameWorld.get_texfilter_effect_filter(), 2)
+	assert_eq(world.get_texfilter_device_mode(), 2, "the device keeps the session's trilinear mode")
+	assert_eq(GameWorld.get_texfilter_device_filter(), 1)
+	assert_eq(WorldFixture.load_mission(
+			world, _minimal_assets_dir(), WorldFixture.MINIMAL_MISSION), OK)
+	assert_eq(world.get_session_texfilter_level(), 3, "the mission start copies the word")
+	assert_eq(world.get_texfilter_device_mode(), 4)
+	assert_eq(GameWorld.get_texfilter_device_filter(), 2)
+	assert_eq(world.get_viewport().anisotropic_filtering_level, Viewport.ANISOTROPY_16X,
+			"mode 4 is the device's MaxAnisotropy, 16 on the reference machine")
+	world.set_texfilter_level(0)
+	assert_eq(GameWorld.get_texfilter_effect_filter(), 0, "the bilinear effects at once")
+	assert_eq(world.get_texfilter_device_mode(), 4,
+			"a change made mid-mission waits for the next mission start")
+	# The process-wide device state goes back to the fresh profile's.
+	world.set_texfilter_level(GameWorld.texfilter_level_fresh_profile())
+	world.get_viewport().anisotropic_filtering_level = restore_level
+	ShaderGlobals.restore_defaults(["opennova_texfilter_device", "opennova_texfilter_effect"])
+
+
 func _append_to_file(path: String, text: String) -> void:
 	var file := FileAccess.open(path, FileAccess.READ_WRITE)
 	assert_not_null(file, "the staged root carries %s to append to" % path.get_file())

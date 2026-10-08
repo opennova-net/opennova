@@ -52,7 +52,7 @@ enabled=PackedStringArray("res://addons/imgui-godot/plugin.cfg")
 rendering_device/driver.windows="d3d12"
 textures/vram_compression/import_s3tc_bptc=true
 textures/vram_compression/import_etc2_astc=true
-textures/default_filters/anisotropic_filtering_level=4
+textures/default_filters/anisotropic_filtering_level=0
 limits/global_shader_variables/buffer_size=262144
 environment/defaults/default_clear_color=Color(0.08, 0.09, 0.12, 1)
 
@@ -189,4 +189,12 @@ opennova_viewmodel_fog_color={
 opennova_viewmodel_fog_range={
 "type": "vec3",
 "value": Vector3(30000, 100000, 1)
+}
+opennova_texfilter_device={
+"type": "int",
+"value": 1
+}
+opennova_texfilter_effect={
+"type": "int",
+"value": 1
 }

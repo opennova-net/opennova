@@ -153,6 +153,7 @@ add_library(opennova_bindings OBJECT
     render/scene_overlay_compositor.cpp
     render/slot_capture_adapter.cpp
     render/target_projection_xr_interface.cpp
+    render/texture_filter_device.cpp
     render/tracer_ribbon_surfaces.cpp
     object/entity_index.cpp
     object/entity_ref.cpp
@@ -403,6 +404,7 @@ if(OPENNOVA_EDITOR)
         authoring/menu_viewport_applier.cpp
         authoring/mission_viewport_applier.cpp
         authoring/model_viewport_applier.cpp
+        authoring/preview_backdrop.cpp
         authoring/preview_sound_player.cpp
         authoring/script_device.cpp
         authoring/terrain_viewport_applier.cpp

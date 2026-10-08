@@ -1136,8 +1136,8 @@ func _opaque_level0_texture() -> ImageTexture:
 
 
 func test_windowed_capture_stops_at_the_stage_textures_last_retail_mip_level() -> void:
-	# TBoringFFPProjShad samples Diffuse1 through sampLinearWrap2D: the 2x
-	# anisotropic footprint clamped at the stage's last retail mip level
+	# TBoringFFPProjShad samples Diffuse1 through sampLinearWrap2D under the
+	# effects' filter mode, clamped at the stage's last retail mip level
 	# (u_diffuse_max_lod; GTexture_CreateFromPixelData_0, retail). The capture
 	# minifies the 1024 texture past level 0, whose alpha alone is opaque:
 	# unbounded the slab casts nothing, with a ceiling of 0 it casts black.

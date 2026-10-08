@@ -43,6 +43,7 @@ Preferences every_preference() {
 	preferences.runtime_executable = "C:/tools/opennova.exe";
 	preferences.game_install = "D:/Joint Operations";
 	preferences.import_dependencies = false;
+	preferences.preview_background = PreviewBackground::Checker;
 	preferences.recent_items = {{"jo", {106100, 2044}}, {"dfx", {7}}};
 	return preferences;
 }
@@ -50,15 +51,17 @@ Preferences every_preference() {
 bool same(const Preferences &a, const Preferences &b) {
 	return a.recent_projects == b.recent_projects && a.runtime_executable == b.runtime_executable &&
 	       a.game_install == b.game_install && a.import_dependencies == b.import_dependencies &&
-	       a.recent_items == b.recent_items && a.retired_play == b.retired_play;
+	       a.preview_background == b.preview_background && a.recent_items == b.recent_items &&
+	       a.retired_play == b.retired_play;
 }
 
 // The settings file every_preference() is: the keys sorted, two spaces an indent, a newline last;
-// the game install's keys as S13 A4 named them; the recently placed items (S15) per game (the polish),
-// schema 2.
+// the game install's keys as S13 A4 named them; the recently placed items (S15) per game (the polish);
+// the previews' background by its token; schema 2.
 const char *const kSettingsFile = "{\n"
                                   "  \"game_install\": \"D:/Joint Operations\",\n"
                                   "  \"import_dependencies\": false,\n"
+                                  "  \"preview_background\": \"checker\",\n"
                                   "  \"recent_items_by_game\": {\n"
                                   "    \"dfx\": [\n"
                                   "      7\n"
@@ -115,6 +118,7 @@ const char *const kRetiredPlayFile = "{\n"
                                      "  \"import_dependencies\": false,\n"
                                      "  \"play_in_install\": true,\n"
                                      "  \"play_in_install_strict\": true,\n"
+                                     "  \"preview_background\": \"checker\",\n"
                                      "  \"recent_items_by_game\": {\n"
                                      "    \"dfx\": [\n"
                                      "      7\n"
@@ -174,6 +178,11 @@ static int test_memory_store_round_trips() {
 	one = Preferences();
 	one.recent_items = {{"jo", {7}}};
 	TEST_EXPECT(store.save(one, error) && store.load(loaded, error) && same(loaded, one));
+	one = Preferences();
+	one.preview_background = PreviewBackground::Light;
+	TEST_EXPECT(store.save(one, error) && store.load(loaded, error) && same(loaded, one));
+	// The previews' background starts Grey.
+	TEST_EXPECT(Preferences().preview_background == PreviewBackground::Grey);
 	return 0;
 }
 
@@ -225,10 +234,12 @@ static int test_file_store_writes_the_settings_file() {
 	Preferences kept = every_preference();
 	kept.recent_items.clear();
 	kept.retired_play = {"play_in_install true"}; // Play's, each project's since: named, read by nothing
+	kept.preview_background = PreviewBackground::Grey; // S15's file has no background: the default
 	loaded = Preferences();
 	Diagnostic two;
 	TEST_EXPECT(FilePreferencesStore(s15).load(loaded, two) && same(loaded, kept) && two.code().empty());
 	loaded.recent_items = every_preference().recent_items;
+	loaded.preview_background = every_preference().preview_background;
 	TEST_EXPECT(FilePreferencesStore(s15).save(loaded, error));
 	TEST_EXPECT(test_io::read_file_text(s15, written) && written == kSettingsFile);
 	// An item that is no whole number a double holds exactly is skipped, never cast: a fraction, one
@@ -246,7 +257,23 @@ static int test_file_store_writes_the_settings_file() {
 	TEST_EXPECT(FilePreferencesStore(dir.file("missing.json")).load(loaded, error) && same(loaded, Preferences()));
 	TEST_EXPECT(editor_test::write_text(dir.file("bare.json"), "{\"schema_version\": 2}"));
 	TEST_EXPECT(FilePreferencesStore(dir.file("bare.json")).load(loaded, error) && loaded.import_dependencies &&
-	            loaded.game_install.empty() && loaded.retired_play.empty());
+	            loaded.game_install.empty() && loaded.retired_play.empty() &&
+	            loaded.preview_background == PreviewBackground::Grey);
+	// Each background by its token; a word none has, or a value that is no word, reads as the default.
+	for (const PreviewBackground background : kPreviewBackgrounds) {
+		TEST_EXPECT(editor_test::write_text(dir.file("background.json"),
+				std::string("{\"schema_version\": 2, \"preview_background\": \"") +
+						preview_background_token(background) + "\"}"));
+		TEST_EXPECT(FilePreferencesStore(dir.file("background.json")).load(loaded, error) &&
+		            loaded.preview_background == background);
+	}
+	for (const char *odd : { "\"purple\"", "\"Grey\"", "3", "true" }) {
+		TEST_EXPECT(editor_test::write_text(dir.file("background.json"),
+				std::string("{\"schema_version\": 2, \"preview_background\": ") + odd + "}"));
+		loaded.preview_background = PreviewBackground::Dark;
+		TEST_EXPECT(FilePreferencesStore(dir.file("background.json")).load(loaded, error) &&
+		            loaded.preview_background == PreviewBackground::Grey);
+	}
 	TEST_EXPECT(editor_test::write_text(dir.file("newer.json"), "{\"schema_version\": 99}"));
 	Diagnostic newer;
 	TEST_EXPECT(FilePreferencesStore(dir.file("newer.json")).load(loaded, newer) &&
@@ -367,6 +394,13 @@ static int test_session_over_a_store() {
 		session.handle(request::set_import_dependencies(true));
 		session.run_operations();
 		TEST_EXPECT(v.project.import_dependencies && store.preferences().import_dependencies);
+		// The previews' background: shown from the store, set, kept, and the view's preferences moved.
+		TEST_EXPECT(v.project.preview_background == PreviewBackground::Checker);
+		const uint64_t before = v.revisions.of(ViewConcern::Preferences);
+		TEST_EXPECT(session.handle(request::set_preview_background(PreviewBackground::Light)));
+		TEST_EXPECT(v.project.preview_background == PreviewBackground::Light &&
+		            store.preferences().preview_background == PreviewBackground::Light &&
+		            v.revisions.of(ViewConcern::Preferences) > before);
 		session.handle(request::forget_recent("C:/games/Armory"));
 		TEST_EXPECT(v.project.recent_projects == std::vector<std::string>({"D:/mods/Harbor"}) &&
 		            store.preferences().recent_projects == v.project.recent_projects);

@@ -1097,7 +1097,7 @@ foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_win
         particle_atlas_contract particle_frame_compiler_contract render_order
         frame_fx_effects nvg_scope_lens q3_frame render_slot_shadow
         scene_overlay state_vectors tracer_frame precipitation_frame texture_dxt texture_load_rules
-        d3dx_image_codecs device_texture)
+        d3dx_image_codecs device_texture texture_filter)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
     target_link_libraries(renderer_${test}_test PRIVATE opennova_runtime opennova_formats)
     target_include_directories(renderer_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -4717,8 +4717,9 @@ add_test(NAME editor_line_ends COMMAND editor_line_ends_test)
 # bytes, rounded up to 64, cleared one byte per value [orig: ConfigFile_ParseText @ 0x7609e8]) and the editor's
 # rule over it (documents/config_overrun.h, document.config_overrun): fixtures/configfile/pool_at_line.def and
 # pool_past_line.def on either side of the line, the three witnessed files' numbers, the reader's own count,
-# the finding and its fix on a charattr.def and a credits file, the blanks, a session's row; the retail leg every
-# file JO:CA reads through the text reader (charattr.def, the menus' DATASOURCEs), none past its pool.
+# the finding and its fix on a charattr.def and a credits file, the blanks, a session's row and the build it refuses;
+# the retail leg every file JO:CA reads through the text reader (charattr.def, the menus' DATASOURCEs), none past
+# its pool.
 add_executable(editor_config_overrun_test editor/config_overrun_test.cpp)
 target_link_libraries(editor_config_overrun_test PRIVATE opennova_editor)
 target_include_directories(editor_config_overrun_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
