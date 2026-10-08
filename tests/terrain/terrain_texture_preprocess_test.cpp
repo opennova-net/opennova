@@ -1,4 +1,6 @@
 #include <runtime/terrain/texture_preprocess.h>
+#include <runtime/renderer/texture_compression.h>
+#include <runtime/renderer/texture_dxt.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -195,20 +197,37 @@ int main() {
 				"paired detail mip 1 must blend independently downsampled RGB at 160/96 and preserve base alpha");
 	}
 
-	// The detail layers are DXT1 on the reference adapter: without a far
-	// texture the layer is D3DX's filtered level chain, with one each paired
-	// level is encoded as it is. [orig: PolyTrn_InitTextures @ 0x60ABBC,
-	// @ 0x60ABA0; GTexture_CreateFromPixelDataWithAlphaBlend @ 0x6875C5]
+	// The detail layers are DXT1 on the reference adapter at every session
+	// texcompression_level (0x400100 below 1, the DXT5 request with its DXT1
+	// fallback from 1): without a far texture the layer is D3DX's filtered
+	// level chain, with one each paired level is encoded as it is. The keep-DXT5
+	// adapter list takes the request from 1 (D-RMAT-24).
+	// [orig: PolyTrn_InitTextures @ 0x60AB9B..0x60ABBC, @ 0x60ABA0;
+	// GTexture_CreateFromPixelDataWithAlphaBlend @ 0x6875C5]
 	{
 		using opennova::renderer::TextureDxtFormat;
-		const auto plain = opennova::terrain::build_detail_layer_levels(base, nullptr);
+		for (const int level : {0, 1, 2, 3}) {
+			const auto layer = opennova::terrain::build_detail_layer_levels(base, nullptr, level);
+			ok &= expect(!layer.empty() && layer[0].format == TextureDxtFormat::Dxt1,
+					"the detail layer is DXT1 on the reference adapter at every texcompression level");
+		}
+		opennova::renderer::TextureDxtCaps keep;
+		keep.keep_dxt5 = true;
+		ok &= expect(opennova::renderer::select_texture_dxt_format(
+						opennova::renderer::terrain_detail_layer_compression_flags(0) | 8u, keep) ==
+						TextureDxtFormat::Dxt1 &&
+				opennova::renderer::select_texture_dxt_format(
+						opennova::renderer::terrain_detail_layer_compression_flags(1) | 8u, keep) ==
+						TextureDxtFormat::Dxt5,
+				"a keep-DXT5 adapter takes DXT5 from texcompression 1, DXT1 at 0");
+		const auto plain = opennova::terrain::build_detail_layer_levels(base, nullptr, 1);
 		const auto plain_chain = opennova::renderer::build_dxt_texture_levels(
 				base.pixels.data(), base.width, base.height, TextureDxtFormat::Dxt1, 2);
 		ok &= expect(plain.size() == 2 && plain[0].format == TextureDxtFormat::Dxt1 &&
 				plain[0].blocks == plain_chain[0].blocks &&
 				plain[1].blocks == plain_chain[1].blocks,
 				"an unpaired detail layer is the DXT1 filtered chain down to 4x4");
-		const auto paired = opennova::terrain::build_detail_layer_levels(base, &far_detail);
+		const auto paired = opennova::terrain::build_detail_layer_levels(base, &far_detail, 1);
 		ok &= expect(paired.size() == mips.size(), "a paired layer keeps the paired level count");
 		for (size_t level = 0; level < paired.size() && level < mips.size(); ++level) {
 			const auto encoded = opennova::renderer::encode_dxt_surface(

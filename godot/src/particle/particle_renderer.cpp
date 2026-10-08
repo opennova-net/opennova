@@ -58,8 +58,10 @@
 #include <runtime/renderer/particle_color.h>
 #include <runtime/renderer/particle_frame.h>
 #include <runtime/renderer/render_order.h>
-#include <runtime/renderer/texture_dxt.h>
+#include <runtime/renderer/particle_density.h>
+#include <runtime/renderer/texture_compression.h>
 
+#include "particle/particle_atlas_page_upload.h"
 #include "particle/particle_compositor.h"
 #include "particle/effect_distortion_drawer.h"
 #include "particle/particle_convert.h"
@@ -144,11 +146,15 @@ struct AtlasPage {
 	std::uint8_t type = 0;
 	int side = 0;
 	// The page's retail levels and the last of them, the stage's point-mip
-	// bound (renderer::particle_atlas_page_levels / _last_level).
+	// bound (renderer::particle_atlas_page_texture / _last_level).
 	int levels = 0;
 	float max_lod = 0.0f;
 	// The uploaded image carries a mip chain.
 	bool mipmapped = false;
+	// The device texture's level-0 side (the page's after its halvings) and
+	// whether it is DXT5 (D-RMAT-24).
+	int device_side = 0;
+	bool dxt5 = false;
 	Ref<ImageTexture> texture;
 };
 
@@ -202,47 +208,6 @@ opennova::renderer::ParticleRgbaImage particle_rgba_image(const Ref<Image> &imag
 		}
 	}
 	return result;
-}
-
-// A page's retail levels end to end, level 0 first: the compositor uploads
-// exactly these as one texture (renderer::particle_atlas_page_levels).
-PackedByteArray packed_levels(const std::vector<opennova::renderer::ParticleRgbaImage> &levels) {
-	std::size_t total = 0;
-	for (const opennova::renderer::ParticleRgbaImage &level : levels)
-		total += level.rgba.size();
-	PackedByteArray result;
-	result.resize(static_cast<int64_t>(total));
-	std::size_t at = 0;
-	for (const opennova::renderer::ParticleRgbaImage &level : levels) {
-		if (!level.rgba.empty())
-			std::memcpy(result.ptrw() + at, level.rgba.data(), level.rgba.size());
-		at += level.rgba.size();
-	}
-	return result;
-}
-
-// The page as a Godot image carrying its retail levels. A mipmapped Godot
-// image holds every level down to 1 x 1, so the chain goes on past the
-// retail levels with the same box filter; no draw reads those, the stage
-// stopping at the page's last level (albedo_max_lod).
-Ref<Image> page_image_with_levels(std::vector<opennova::renderer::ParticleRgbaImage> levels) {
-	if (levels.empty() || !levels.front().valid())
-		return Ref<Image>();
-	const int width = levels.front().width;
-	const int height = levels.front().height;
-	while (levels.back().width > 1 || levels.back().height > 1) {
-		const opennova::renderer::ParticleRgbaImage &above = levels.back();
-		const std::uint32_t above_w = static_cast<std::uint32_t>(above.width);
-		const std::uint32_t above_h = static_cast<std::uint32_t>(above.height);
-		opennova::renderer::ParticleRgbaImage below;
-		below.width = static_cast<int>(std::max(1u, above_w / 2));
-		below.height = static_cast<int>(std::max(1u, above_h / 2));
-		below.rgba = opennova::renderer::encode_rgba8(opennova::renderer::box_filter_half(
-				opennova::renderer::decode_rgba8(above.rgba.data(), above_w, above_h), above_w,
-				above_h));
-		levels.push_back(std::move(below));
-	}
-	return Image::create_from_data(width, height, true, Image::FORMAT_RGBA8, packed_levels(levels));
 }
 
 String shader_path_for_pipeline(opennova::renderer::ParticlePipeline pipeline) {
@@ -416,6 +381,7 @@ Dictionary draw_list_report(const opennova::renderer::ParticleDrawList &draw_lis
 	result["water_filtered_particles"] =
 			static_cast<int64_t>(debug.water_filtered_particles);
 	result["invisible_particles"] = static_cast<int64_t>(debug.invisible_particles);
+	result["lod_skipped_particles"] = static_cast<int64_t>(debug.lod_skipped_particles);
 	result["truncated_particles"] = static_cast<int64_t>(debug.truncated_particles);
 	result["rendered_quad_count"] = static_cast<int64_t>(debug.emitted_quads);
 	result["draw_command_count"] = static_cast<int64_t>(debug.draw_commands);
@@ -702,6 +668,14 @@ public:
 	bool inherited_reflection_compositor = false;
 	bool inherited_second_scene_compositor = false;
 	bool catalog_dirty = true;
+	// The creation flags the current pages were built with
+	// (renderer::particle_atlas_page_creation_flags).
+	std::uint32_t catalog_page_flags = opennova::renderer::kParticlePageCreationFlags;
+	// The stride the frame's last scene pass left, which the next frame's
+	// water mirror draws in (renderer::particle_frame_strides); the effect
+	// world's scale starts at kParticleDensityScaleInitial.
+	std::uint32_t last_pass_lod_divisor = opennova::renderer::particle_lod_divisor(
+			opennova::renderer::kParticleDensityScaleInitial);
 	ObjectID cached_environment_source;
 	std::int64_t cached_environment_generation =
 			std::numeric_limits<std::int64_t>::min();
@@ -1005,8 +979,9 @@ public:
 	void rebuild_catalog(
 			const std::shared_ptr<const std::vector<opennova::particle::ParticleDef>> &definitions,
 			const Callable &provider, const String &texture_dir,
-			bool procedural_fallback) {
+			bool procedural_fallback, std::uint32_t page_flags) {
 		catalog_definitions = definitions;
+		catalog_page_flags = page_flags;
 		definition_visuals.clear();
 		entries.clear();
 		pages.clear();
@@ -1126,25 +1101,28 @@ public:
 			AtlasPage page;
 			page.type = source.type;
 			page.side = source.image.width;
-			// The page's device levels: at most three box-filtered levels,
-			// sampled with point mips (D-RMAT-23).
-			const std::vector<opennova::renderer::ParticleRgbaImage> levels =
-					opennova::renderer::particle_atlas_page_levels(source.image);
-			page.levels = static_cast<int>(levels.size());
+			// The page's device texture under the session's two words: at most
+			// three levels sampled with point mips (D-RMAT-23), DXT5 and halved
+			// once on the low branches (D-RMAT-24).
+			const ParticleAtlasPageUpload device = particle_atlas_page_upload(
+					opennova::renderer::particle_atlas_page_texture(source.image, page_flags));
+			page.levels = static_cast<int>(device.level_count);
+			page.device_side = static_cast<int>(device.side);
+			page.dxt5 = device.dxt5;
 			page.max_lod = static_cast<float>(
-					opennova::renderer::particle_atlas_page_last_level(page.side));
-			Ref<Image> page_image = page_image_with_levels(levels);
-			if (page_image.is_valid()) {
-				page.mipmapped = page_image->has_mipmaps();
-				page.texture = ImageTexture::create_from_image(page_image);
+					opennova::renderer::particle_atlas_page_last_level(page.side, page_flags));
+			if (device.image.is_valid()) {
+				page.mipmapped = device.image->has_mipmaps();
+				page.texture = ImageTexture::create_from_image(device.image);
 			}
 			pages.push_back(page);
 
 			ParticleAtlasPageSnapshot upload;
 			upload.type = source.type;
-			upload.side = static_cast<std::uint32_t>(source.image.width);
-			upload.levels = static_cast<std::uint32_t>(levels.size());
-			upload.rgba8 = packed_levels(levels);
+			upload.side = device.side;
+			upload.levels = device.level_count;
+			upload.dxt5 = device.dxt5;
+			upload.data = device.levels;
 			snapshot->pages.push_back(std::move(upload));
 		}
 		atlas_snapshot = std::shared_ptr<const ParticleAtlasSnapshot>(
@@ -1362,8 +1340,6 @@ public:
 					frame.particles.size());
 			const std::size_t available = frame.particles.size() - first;
 			const std::size_t count = std::min(source_emitter.particle_count, available);
-			const std::uint32_t lod_divisor =
-					std::max<std::uint32_t>(1u, source_emitter.lod_divisor);
 
 			for (std::size_t particle_index = 0; particle_index < count;
 					++particle_index) {
@@ -1374,9 +1350,6 @@ public:
 				// remain exact expanded quad bounds.
 				include_point(emitter.bounds, particle_vec(particle.position),
 						particle.size * 0.5f);
-				if (lod_divisor > 1u &&
-						(static_cast<std::uint32_t>(particle.serial) % lod_divisor) != 0u)
-					continue;
 
 				int layer_index = std::clamp<int>(
 						static_cast<int>(particle.graphic_layer), 0,
@@ -1471,6 +1444,8 @@ public:
 				}
 
 				opennova::renderer::ParticleQuadSnapshot quad;
+				// Each view's density stride reads the serial at quad build.
+				quad.serial = particle.serial;
 				quad.center = particle_vec(particle.position);
 				quad.half_width = size * 0.5f;
 				quad.half_height = size * 0.5f;
@@ -1730,6 +1705,11 @@ void ParticleRenderer::_bind_methods() {
 			&ParticleRenderer::set_water_plane);
 	ClassDB::bind_method(D_METHOD("set_second_scene_camera", "camera"),
 			&ParticleRenderer::set_second_scene_camera);
+	ClassDB::bind_method(D_METHOD("set_session_render_settings", "texcompression_level",
+								 "particle_density"),
+			&ParticleRenderer::set_session_render_settings);
+	ClassDB::bind_method(D_METHOD("set_main_view_nvg_scene", "nvg_scene"),
+			&ParticleRenderer::set_main_view_nvg_scene);
 	ClassDB::bind_method(D_METHOD("get_second_scene_camera"),
 			&ParticleRenderer::get_second_scene_camera);
 	ClassDB::bind_method(D_METHOD("set_hidden", "hidden"),
@@ -1858,6 +1838,16 @@ void ParticleRenderer::set_water_plane(float p_height,
 	water_height_ = p_height;
 	reflection_camera_ = p_reflection_camera != nullptr ?
 			ObjectID(p_reflection_camera->get_instance_id()) : ObjectID();
+}
+
+void ParticleRenderer::set_session_render_settings(int p_texcompression_level,
+		int p_particle_density) {
+	session_texcompression_level_ = p_texcompression_level;
+	session_particle_density_ = opennova::renderer::clamp_particle_density(p_particle_density);
+}
+
+void ParticleRenderer::set_main_view_nvg_scene(bool p_nvg_scene) {
+	main_view_nvg_scene_ = p_nvg_scene;
 }
 
 void ParticleRenderer::set_second_scene_camera(Camera3D *p_camera) {
@@ -2043,11 +2033,20 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 
 	const opennova::particle::ParticleFrameSnapshot &frame =
 			scene_->native_frame_snapshot();
+	const std::uint32_t page_flags = opennova::renderer::particle_atlas_page_creation_flags(
+			session_texcompression_level_, session_particle_density_);
 	if (impl_->catalog_dirty ||
-			impl_->catalog_definitions.get() != frame.definitions.get()) {
+			impl_->catalog_definitions.get() != frame.definitions.get() ||
+			impl_->catalog_page_flags != page_flags) {
 		impl_->rebuild_catalog(frame.definitions, texture_provider_, texture_dir_,
-				procedural_fallback_enabled_);
+				procedural_fallback_enabled_, page_flags);
 	}
+	// Each view's particle stride from the session's density (D-RMAT-24;
+	// renderer::particle_frame_strides).
+	const opennova::renderer::ParticleFrameStrides strides = opennova::renderer::particle_frame_strides(
+			session_particle_density_, main_view_nvg_scene_, impl_->last_pass_lod_divisor);
+	impl_->last_pass_lod_divisor = strides.last_pass;
+	const std::uint32_t world_divisor = strides.main_view;
 
 	const ParticleCameraFrame world_camera = particle_camera_frame(camera);
 	const bool camera_above_water = world_camera.position.y >= water_height_;
@@ -2061,8 +2060,10 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 	auto compile_world = [&](ParticleDrawSlot slot,
 			opennova::renderer::ParticleWaterSubset subset,
 			const ParticleCameraFrame &view_camera,
-			const Ref<ParticleCompositorEffect> &effect, bool view_thermal) {
+			const Ref<ParticleCompositorEffect> &effect, bool view_thermal,
+			std::uint32_t lod_divisor) {
 		opennova::renderer::ParticleViewInput view;
+		view.lod_divisor = lod_divisor;
 		view.domain = opennova::renderer::ParticleRenderDomain::World;
 		view.water_subset = subset;
 		view.water_height = water_height_;
@@ -2102,17 +2103,17 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 
 	compile_world(kWorldFarSide,
 			opennova::renderer::particle_water_subset_for_side(camera_above_water, false),
-			world_camera, impl_->world_effects[0], thermal);
+			world_camera, impl_->world_effects[0], thermal, world_divisor);
 	compile_world(kWorldCameraSide,
 			opennova::renderer::particle_water_subset_for_side(camera_above_water, true),
-			world_camera, impl_->world_effects[1], thermal);
+			world_camera, impl_->world_effects[1], thermal, world_divisor);
 	// The post-scene distortion pass: the class-7 emitters, compiled for the
 	// main eye and drawn by FrameFX's type-0 row through the drawer (retail
 	// FrameFX_DistortionPass @ 0x5838F8). The row's content gate reads the
 	// live class-7 emitters (EffectWorld_HasDistortionParticles
 	// @ 0x5F6640); the pass fog rides along for the tracer distortion ribbons.
 	compile_world(kDistortion, opennova::renderer::ParticleWaterSubset::Distortion,
-			world_camera, impl_->distortion_effect, thermal);
+			world_camera, impl_->distortion_effect, thermal, world_divisor);
 	impl_->distortion_drawer->set_particles_present(
 			impl_->compilers[kDistortion].draw_list().debug.selected_emitters > 0);
 	impl_->distortion_drawer->set_pass_fog(impl_->fog_color, impl_->fog_start,
@@ -2129,6 +2130,7 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 			first_person_view.projection);
 	first_person_view.projection_valid = world_camera.projection_valid;
 	first_person_view.projection_near_is_one = true;
+	first_person_view.lod_divisor = world_divisor;
 	const opennova::renderer::ParticleDrawList &first_person_draw =
 			impl_->compilers[kFirstPerson].compile(impl_->render_snapshot,
 					first_person_view);
@@ -2143,14 +2145,15 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 	// another draws, whichever of them compiles first.
 	auto compile_secondary_pair = [&](const ParticleCameraFrame &view_camera,
 			bool above_water, ParticleDrawSlot far_slot,
-			ParticleDrawSlot camera_slot, const ParticleEffectPair &effects) {
+			ParticleDrawSlot camera_slot, const ParticleEffectPair &effects,
+			std::uint32_t lod_divisor) {
 		impl_->relight_render_snapshot(view_camera.view_basis);
 		compile_world(far_slot,
 				opennova::renderer::particle_water_subset_for_side(above_water, false),
-				view_camera, effects[0], false);
+				view_camera, effects[0], false, lod_divisor);
 		compile_world(camera_slot,
 				opennova::renderer::particle_water_subset_for_side(above_water, true),
-				view_camera, effects[1], false);
+				view_camera, effects[1], false, lod_divisor);
 	};
 
 	if (reflection_camera != nullptr) {
@@ -2159,7 +2162,7 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 		// below-water flag), whether its eye is mirrored or not.
 		compile_secondary_pair(particle_camera_frame(reflection_camera),
 				camera_above_water, kReflectionFarSide, kReflectionCameraSide,
-				impl_->reflection_effects);
+				impl_->reflection_effects, strides.mirror);
 	} else {
 		impl_->retire_view_pair(impl_->reflection_effects, kReflectionFarSide,
 				kReflectionCameraSide);
@@ -2174,7 +2177,7 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 				particle_camera_frame(second_scene_camera);
 		compile_secondary_pair(second_camera,
 				second_camera.position.y >= water_height_, kSecondSceneFarSide,
-				kSecondSceneCameraSide, impl_->second_scene_effects);
+				kSecondSceneCameraSide, impl_->second_scene_effects, strides.inset);
 	} else {
 		impl_->retire_view_pair(impl_->second_scene_effects, kSecondSceneFarSide,
 				kSecondSceneCameraSide);
@@ -2298,9 +2301,15 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 		value["levels"] = impl_->pages[i].levels;
 		value["max_lod"] = impl_->pages[i].max_lod;
 		value["texture_mipmaps"] = impl_->pages[i].mipmapped;
+		value["device_side"] = impl_->pages[i].device_side;
+		value["dxt5"] = impl_->pages[i].dxt5;
 		atlas_pages[static_cast<int64_t>(i)] = value;
 	}
 	result["atlas_pages"] = atlas_pages;
+	result["atlas_page_flags"] = static_cast<int64_t>(impl_->catalog_page_flags);
+	result["session_texcompression_level"] = session_texcompression_level_;
+	result["session_particle_density"] = session_particle_density_;
+	result["main_view_nvg_scene"] = main_view_nvg_scene_;
 	Array atlas_entries;
 	atlas_entries.resize(static_cast<int64_t>(impl_->entries.size()));
 	for (std::size_t i = 0; i < impl_->entries.size(); ++i) {

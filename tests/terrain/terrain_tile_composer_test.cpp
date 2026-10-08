@@ -894,8 +894,67 @@ bool test_tile_set_levels_are_the_dxt5_decode() {
 			"the composer no longer samples the raw TGA texels");
 }
 
+// The colormap quadrants follow the session's texcompression_level: 0x100001
+// with the DXT5 request and its DXT1 fallback below 2, so DXT1 on the reference
+// card, their levels the blocks decoded; 0x100001 alone from 2, D3DX's box chain
+// of the stored bytes. The map's colormap is the quadrants' first levels put back
+// together (D-RMAT-24).
+// [orig: PolyTrn_InitTextures @ 0x60ABAD..0x60ABC6, @ 0x60B515..0x60B51C;
+// GTexture_CreateFromPixelData_0 @ 0x687717..0x687766, @ 0x6878A0..0x6878BE]
+bool test_colormap_quadrants_follow_texcompression() {
+	if (!expect(opennova::terrain::terrain_colormap_quadrant_flags(0) == 0x500201u &&
+			opennova::terrain::terrain_colormap_quadrant_flags(1) == 0x500201u &&
+			opennova::terrain::terrain_colormap_quadrant_flags(2) == 0x100001u &&
+			opennova::terrain::terrain_colormap_quadrant_flags(5) == 0x100001u,
+			"the colormap quadrants' flags follow the compression word")) {
+		return false;
+	}
+	Rgba8Image atlas = solid_image(32, 32, {200, 80, 40, 255});
+	for (uint32_t i = 0; i < atlas.pixels.size(); i += 4) {
+		atlas.pixels[i] = static_cast<uint8_t>((i * 13) % 256);
+		atlas.pixels[i + 1] = static_cast<uint8_t>((i * 7) % 256);
+	}
+	const auto compressed = opennova::terrain::build_terrain_tile_quadrant_source(atlas,
+			opennova::terrain::terrain_colormap_quadrant_flags(1));
+	const auto plain = opennova::terrain::build_terrain_tile_quadrant_source(atlas,
+			opennova::terrain::terrain_colormap_quadrant_flags(2));
+	// Quadrant 2 (x half 1, z half 0) is the atlas' top-right 16x16 block.
+	Rgba8Image block = solid_image(16, 16, {0, 0, 0, 0});
+	for (uint32_t y = 0; y < 16; ++y) {
+		std::copy(atlas.pixels.begin() + 4u * (y * 32u + 16u),
+				atlas.pixels.begin() + 4u * (y * 32u + 32u),
+				block.pixels.begin() + 4u * y * 16u);
+	}
+	const std::vector<opennova::renderer::DxtSurface> chain =
+			opennova::renderer::build_dxt_texture_levels(block.pixels.data(), 16, 16,
+					opennova::renderer::TextureDxtFormat::Dxt1, 3);
+	if (!expect(compressed.is_valid() && compressed.quadrants[2].size() == 3 &&
+			compressed.quadrants[2][0].pixels == opennova::renderer::encode_rgba8(
+					opennova::renderer::decode_dxt_surface(chain[0])) &&
+			compressed.quadrants[2][2].pixels == opennova::renderer::encode_rgba8(
+					opennova::renderer::decode_dxt_surface(chain[2])),
+			"a compressed quadrant is its DXT1 chain decoded")) {
+		return false;
+	}
+	if (!expect(plain.is_valid() && plain.quadrants[2].size() == 3 &&
+			plain.quadrants[2][0].pixels == block.pixels &&
+			plain.quadrants[2][1].pixels == opennova::renderer::encode_rgba8(
+					opennova::renderer::box_filter_half(opennova::renderer::decode_rgba8(
+							block.pixels.data(), 16, 16), 16, 16)),
+			"an uncompressed quadrant is D3DX's box chain of its bytes")) {
+		return false;
+	}
+	const Rgba8Image map_plain = opennova::terrain::terrain_colormap_device_image(atlas, 2);
+	const Rgba8Image map_compressed = opennova::terrain::terrain_colormap_device_image(atlas, 1);
+	return expect(map_plain.pixels == atlas.pixels &&
+			pixel(map_compressed, 20, 3) == pixel(compressed.quadrants[2][0], 4, 3) &&
+			map_compressed.pixels != atlas.pixels,
+			"the map's colormap is the quadrants' first levels put back together");
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
+	if (!test_colormap_quadrants_follow_texcompression()) return 1;
 	if (!test_tile_set_levels_are_the_dxt5_decode()) return 1;
 	if (!test_level_density()) return 1;
 	if (!test_flat_page_source_and_overlay_gate()) return 1;

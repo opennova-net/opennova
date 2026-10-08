@@ -20,6 +20,8 @@
 #include <cstdint>
 
 #include <runtime/renderer/object_lod.h> // the object detail rungs
+#include <runtime/renderer/particle_density.h> // the particle_density rungs
+#include <runtime/renderer/texture_compression.h> // the texcompression_level word
 #include <runtime/renderer/texture_filter.h> // the texfilter rungs
 
 #include "audio/mission_audio.h"
@@ -211,6 +213,22 @@ public:
 	static int get_texfilter_effect_filter();
 	static int texfilter_level_fresh_profile();
 	static int clamp_texfilter_level(int p_level);
+	// game.cfg's texcompression_level (engine: renderer/texture_compression.h)
+	// and particle_density (renderer/particle_density.h): the shell hands over
+	// its persisted options words whenever they change, and each mission start
+	// copies them into the session's words, which the mission builds its
+	// compressed textures and its particle pages with and the scene passes
+	// draw their particle stride from, so a change reaches the draw at the
+	// next mission (D-RMAT-24).
+	void set_texcompression_level(int p_level) { texcompression_level_ = p_level; }
+	int get_texcompression_level() const { return texcompression_level_; }
+	int get_session_texcompression_level() const { return session_texcompression_level_; }
+	void set_particle_density(int p_density);
+	int get_particle_density() const { return particle_density_; }
+	int get_session_particle_density() const { return session_particle_density_; }
+	static int texcompression_level_fresh_profile();
+	static int particle_density_fresh_profile();
+	static int clamp_particle_density(int p_density);
 
 	// --- the load entries ------------------------------------------------------
 	// Load the world from `dir`, or from the persisted resource directory when
@@ -821,6 +839,14 @@ private:
 	int texfilter_level_ = opennova::renderer::kTexFilterLevelFreshProfile;
 	int session_texfilter_level_ = opennova::renderer::kTexFilterLevelFreshProfile;
 	void publish_texfilter_state();
+	// The options' texcompression_level and particle_density and the session's
+	// copies taken at each mission start; the terrain and the effect world
+	// take the copies (publish_session_render_settings).
+	int texcompression_level_ = opennova::renderer::kTexCompressionLevelFreshProfile;
+	int session_texcompression_level_ = opennova::renderer::kTexCompressionLevelFreshProfile;
+	int particle_density_ = opennova::renderer::kParticleDensityFreshProfile;
+	int session_particle_density_ = opennova::renderer::kParticleDensityFreshProfile;
+	void publish_session_render_settings();
 	Color idle_frame_clear_color_ = Color(0, 0, 0);
 	// A shell-injected resource root (main_game hands its boot mount over;
 	// tests hand fixture roots). When set, the load_* entries skip the

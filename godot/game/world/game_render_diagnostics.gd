@@ -576,6 +576,17 @@ static func _renderer_state(world: GameWorld, viewport: Viewport) -> Dictionary:
 			"device_filter": GameWorld.get_texfilter_device_filter(),
 			"effect_filter": GameWorld.get_texfilter_effect_filter(),
 		},
+		# game.cfg's texcompression_level and particle_density, the options'
+		# words and the mission start's copies (engine
+		# renderer/texture_compression.h, renderer/particle_density.h).
+		"texcompression": {
+			"level": world.get_texcompression_level(),
+			"session_level": world.get_session_texcompression_level(),
+		},
+		"particle_density": {
+			"level": world.get_particle_density(),
+			"session_level": world.get_session_particle_density(),
+		},
 	}
 	if viewport != null:
 		var viewport_level := int(viewport.anisotropic_filtering_level)

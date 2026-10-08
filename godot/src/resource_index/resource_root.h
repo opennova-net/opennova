@@ -208,13 +208,23 @@ public:
 	// null when nothing it opens decodes. No loader reads an alternate name.
 	Ref<Texture2D> load_texture(const String &name, TextureLoader loader,
 			LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
+	// The texture `loader` makes of `name` under the caller's texture creation
+	// `flags`: a file built from pixels in a DXT format the flags ask for is
+	// the levels that format's blocks decode to, halved and with the levels the
+	// flags give (renderer/device_texture.h pixel_device_texture_levels), then
+	// the tail on to 1 x 1 a mipmapped image needs; a DDS, which D3DX loads in
+	// its own format, and a file the flags keep A8R8G8B8 are load_texture's.
+	// Cached per epoch with the flags.
+	Ref<Texture2D> load_texture_created(const String &name, TextureLoader loader,
+			int64_t flags) const;
 	// C++ siblings only (not bound): the same load's decoded RGBA8 image, no
 	// mips, uncached, for a device that uploads it itself (the HUD, the menus);
 	// `r_alpha_only` reports whether the HUD loader resolved alpha mode (its
 	// ".FULL" / ".ALPHA" suffixes override the caller's), which picks the
 	// material the device draws it with.
 	Ref<Image> load_texture_image(const String &name, TextureLoader loader,
-			LookupPolicy policy = LOOKUP_SESSION_DEFAULT, bool *r_alpha_only = nullptr) const;
+			LookupPolicy policy = LOOKUP_SESSION_DEFAULT, bool *r_alpha_only = nullptr,
+			opennova::renderer::TextureReader *r_reader = nullptr) const;
 	// One material row's texture of runtime `type`: the one file retail's loader
 	// opens for it, decoded by that loader's reader and prepared as the
 	// dispatcher does; the checkerboard when it does not load.

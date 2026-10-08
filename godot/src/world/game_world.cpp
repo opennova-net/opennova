@@ -195,6 +195,34 @@ int GameWorld::clamp_texfilter_level(int p_level) {
 	return opennova::renderer::clamp_texfilter_level(p_level);
 }
 
+int GameWorld::texcompression_level_fresh_profile() {
+	return opennova::renderer::kTexCompressionLevelFreshProfile;
+}
+
+int GameWorld::particle_density_fresh_profile() {
+	return opennova::renderer::kParticleDensityFreshProfile;
+}
+
+int GameWorld::clamp_particle_density(int p_density) {
+	return opennova::renderer::clamp_particle_density(p_density);
+}
+
+void GameWorld::set_particle_density(int p_density) {
+	particle_density_ = opennova::renderer::clamp_particle_density(p_density);
+}
+
+// The session's words to the devices that build from them: the terrain's
+// compressed families (its detail layers and colormap quadrants) and the
+// effect world's pages and scene-pass stride.
+void GameWorld::publish_session_render_settings() {
+	if (terrain_ != nullptr) {
+		terrain_->set_texcompression_level(session_texcompression_level_);
+	}
+	if (EffectWorld *effects = get_effect_world()) {
+		effects->set_session_render_settings(session_texcompression_level_, session_particle_density_);
+	}
+}
+
 void GameWorld::set_texfilter_level(int p_level) {
 	texfilter_level_ = opennova::renderer::clamp_texfilter_level(p_level);
 	publish_texfilter_state();
@@ -760,6 +788,21 @@ void GameWorld::_bind_methods() {
 			&GameWorld::texfilter_level_fresh_profile);
 	ClassDB::bind_static_method("GameWorld", D_METHOD("clamp_texfilter_level", "level"),
 			&GameWorld::clamp_texfilter_level);
+	ClassDB::bind_method(D_METHOD("set_texcompression_level", "level"),
+			&GameWorld::set_texcompression_level);
+	ClassDB::bind_method(D_METHOD("get_texcompression_level"), &GameWorld::get_texcompression_level);
+	ClassDB::bind_method(D_METHOD("get_session_texcompression_level"),
+			&GameWorld::get_session_texcompression_level);
+	ClassDB::bind_method(D_METHOD("set_particle_density", "density"), &GameWorld::set_particle_density);
+	ClassDB::bind_method(D_METHOD("get_particle_density"), &GameWorld::get_particle_density);
+	ClassDB::bind_method(D_METHOD("get_session_particle_density"),
+			&GameWorld::get_session_particle_density);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("texcompression_level_fresh_profile"),
+			&GameWorld::texcompression_level_fresh_profile);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("particle_density_fresh_profile"),
+			&GameWorld::particle_density_fresh_profile);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("clamp_particle_density", "density"),
+			&GameWorld::clamp_particle_density);
 
 	ClassDB::bind_method(D_METHOD("load_world", "dir"), &GameWorld::load_world, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("load_mission", "bms_name", "dir"), &GameWorld::load_mission,

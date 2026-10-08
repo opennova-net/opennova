@@ -331,6 +331,8 @@ public:
 	static Array video_quality_controls();
 	static PackedStringArray object_detail_controls();
 	static PackedStringArray texture_filter_controls();
+	static PackedStringArray particle_density_controls();
+	static PackedStringArray texture_compression_controls();
 	static int video_gamma_reference();
 	static PackedStringArray video_preset_buttons();
 	static PackedStringArray options_unsupported_controls();

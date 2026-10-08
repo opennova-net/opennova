@@ -151,8 +151,11 @@ bool TerrainTileCacheDevice::rebuild(
 	if (!have_colormap || !have_normal) {
 		return false;
 	}
-	snapshot->colormap =
-			opennova::terrain::build_terrain_tile_quadrant_source(colormap);
+	// The colormap quadrants under the session's texcompression_level (DXT1
+	// below 2 on the reference card, D-RMAT-24); the heightfield normals stay
+	// 0x100001.
+	snapshot->colormap = opennova::terrain::build_terrain_tile_quadrant_source(colormap,
+			opennova::terrain::terrain_colormap_quadrant_flags(p_surface_inputs->get_texcompression_level()));
 	snapshot->heightfield_normal =
 			opennova::terrain::build_terrain_tile_quadrant_source(heightfield_normal);
 	if (!snapshot->colormap.is_valid() || !snapshot->heightfield_normal.is_valid()) {

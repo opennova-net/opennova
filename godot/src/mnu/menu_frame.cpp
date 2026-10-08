@@ -1161,6 +1161,18 @@ PackedStringArray MenuFrame::texture_filter_controls() {
 	return out;
 }
 
+PackedStringArray MenuFrame::particle_density_controls() {
+	PackedStringArray out;
+	for (const char *name : opennova::menu::kParticleDensityControls) out.push_back(String(name));
+	return out;
+}
+
+PackedStringArray MenuFrame::texture_compression_controls() {
+	PackedStringArray out;
+	for (const char *name : opennova::menu::kTexCompressionControls) out.push_back(String(name));
+	return out;
+}
+
 PackedStringArray MenuFrame::video_preset_buttons() {
 	PackedStringArray out;
 	for (const char *name : opennova::menu::kVideoPresetButtons) out.push_back(String(name));
@@ -1193,6 +1205,10 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::object_detail_controls);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("texture_filter_controls"),
 			&MenuFrame::texture_filter_controls);
+	ClassDB::bind_static_method("MenuFrame", D_METHOD("particle_density_controls"),
+			&MenuFrame::particle_density_controls);
+	ClassDB::bind_static_method("MenuFrame", D_METHOD("texture_compression_controls"),
+			&MenuFrame::texture_compression_controls);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("video_gamma_reference"),
 			&MenuFrame::video_gamma_reference);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("options_unsupported_controls"),

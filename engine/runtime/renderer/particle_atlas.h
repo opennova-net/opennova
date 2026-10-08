@@ -6,6 +6,7 @@
 // and fully preprocessed page pixels without depending on Godot.
 
 #include <runtime/renderer/particle_frame.h>
+#include <runtime/renderer/texture_dxt.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -90,31 +91,53 @@ struct ParticleAtlasPage {
 };
 
 // The creation flags a page is built from pixels with on the full-quality
-// branch: 0x100000 and 0x80000, so at most three levels. A session
-// texcompression_level of 1 or less adds 0x200 (a DXT5 page) and a
-// particle_density of 1 or less 0x10000 (the page halved once before its
-// levels are made); those two legs are D-RMAT-24.
-// [orig: CParticleTexture_InitTextureAndChannels @ 0x5E82B2..0x5E82EB
-//  (g_SessionTexCompressionLevel @ 0x24D2070, g_SessionParticleDensity
-//  @ 0x24D2058, against edi = 1 @ 0x5E823D)]
+// branch: 0x100000 and 0x80000, so at most three levels.
+// [orig: CParticleTexture_InitTextureAndChannels @ 0x5E82B2..0x5E82EB]
 inline constexpr std::uint32_t kParticlePageCreationFlags = 0x180000u;
 
-// The device levels of one composed page: level 0 the page as loaded, every
-// later level D3DX's box filter of the level before it, as many as the
-// creation flags' chain holds (three for both page sides). A page the
-// device holds as A8R8G8B8, so each level is the bytes the one before was
-// stored as, filtered and rounded back to bytes.
-// [orig: GTexture_CreateFromPixelData_0 @ 0x6877BA..0x687801 (the count),
-//  @ 0x6878A0 (level 0, D3DXLoadSurfaceFromMemory), @ 0x6878B5..0x6878BE
-//  (D3DXFilterTexture, D3DX_FILTER_BOX, each level from the one before)]
-std::vector<ParticleRgbaImage> particle_atlas_page_levels(const ParticleRgbaImage &page);
+// The flags under the session's two settings words: a texcompression_level of
+// 1 or less adds 0x200 (a DXT5 page, renderer/texture_compression.h) and a
+// particle_density of 1 or less 0x10000 (the page halved once before its
+// levels, renderer/particle_density.h) (D-RMAT-24).
+// [orig: CParticleTexture_InitTextureAndChannels @ 0x5E82B2..0x5E82CC
+//  (g_SessionTexCompressionLevel @ 0x24D2070, g_SessionParticleDensity
+//  @ 0x24D2058, against edi = 1 @ 0x5E823D)]
+std::uint32_t particle_atlas_page_creation_flags(std::int32_t session_texcompression_level,
+		std::int32_t session_particle_density);
+
+// The device texture one composed page becomes under its creation flags: the
+// page halved as the flags ask (each halving GTexture_Downsample2x2_RGBA8),
+// then as many levels as the flags' chain holds (three for both page sides).
+// An A8R8G8B8 page (format None) holds rgba_levels: level 0 the halved page,
+// every later level D3DX's box filter of the bytes the level before was
+// stored as. A DXT page holds dxt_levels: level 0 the halved page through
+// D3DX's encoder, every later level the box filter of the level before as its
+// blocks decode (renderer::build_dxt_texture_levels).
+// [orig: GTexture_CreateFromPixelData_0 @ 0x687717..0x687766 (the format),
+//  @ 0x687785 (GTexture_DownsampleToLimits @ 0x687170), @ 0x6877BA..0x687801
+//  (the count, over the halved sides), @ 0x6878A0 (level 0,
+//  D3DXLoadSurfaceFromMemory), @ 0x6878B5..0x6878BE (D3DXFilterTexture,
+//  D3DX_FILTER_BOX, each level from the one before)]
+struct ParticleAtlasPageTexture {
+	TextureDxtFormat format = TextureDxtFormat::None;
+	std::vector<ParticleRgbaImage> rgba_levels;
+	std::vector<DxtSurface> dxt_levels;
+
+	// Level 0's side (the page's after its halvings), 0 for an empty texture.
+	int side() const noexcept;
+	std::size_t level_count() const noexcept;
+};
+
+ParticleAtlasPageTexture particle_atlas_page_texture(const ParticleRgbaImage &page,
+		std::uint32_t creation_flags, const TextureDxtCaps &caps = kReferenceTextureDxtCaps);
 
 // The last level a page's stage samples: the particle batch draws through a
 // GfxShader pass, so the stage is MIN/MAG LINEAR with MIPFILTER POINT, which
-// never reads past the page's last level.
+// never reads past the last level of the page's chain (`side` the page's as
+// packed, before any halving).
 // [orig: CParticleBatch_FlushAndBindMaterial @ 0x5E42DC;
 //  CGfxDevice_ApplyRenderStates @ 0x67E463..0x67E4A7]
-std::uint32_t particle_atlas_page_last_level(int side);
+std::uint32_t particle_atlas_page_last_level(int side, std::uint32_t creation_flags);
 
 struct ParticleAtlasBuild {
 	// Entries retain registration order, so ParticleAtlasEntryId indexes this

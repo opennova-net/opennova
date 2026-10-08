@@ -39,6 +39,15 @@ const OBJECT_POLYDETAIL_KEY := "object_polydetail"
 # (engine renderer/texture_filter.h; GameWorld re-exports the fresh profile's
 # word and the load clamp).
 const TEXFILTER_LEVEL_KEY := "texfilter_level"
+# The particle density persists as retail's game.cfg word `particle_density`
+# (0..2), which the Options rows PARTICLES (front end and in game) edit, and
+# the texture compression as `texcompression_level` (0..2 on the row, never
+# clamped by the load), which the front-end row TEXCOMPRESSION edits; the
+# world copies both at each mission start (engine renderer/particle_density.h,
+# renderer/texture_compression.h; GameWorld re-exports the fresh profiles'
+# words and the density's load clamp).
+const PARTICLE_DENSITY_KEY := "particle_density"
+const TEXCOMPRESSION_LEVEL_KEY := "texcompression_level"
 
 # The slider ranges are the engine's witnessed Options ranges
 # (options_policy.h kOptionsScrollRanges through MenuFrame), read by control
@@ -83,6 +92,8 @@ class State extends RefCounted:
 	var gameplay_tips: bool
 	var object_polydetail: int
 	var texfilter_level: int
+	var particle_density: int
+	var texcompression_level: int
 
 	func _init(p_sound_fx_volume := DEFAULT_VOLUME,
 			p_dialog_volume := DEFAULT_VOLUME,
@@ -94,7 +105,9 @@ class State extends RefCounted:
 			p_keyboard_tips := true,
 			p_gameplay_tips := true,
 			p_object_polydetail := GameWorld.object_detail_fresh_profile(),
-			p_texfilter_level := GameWorld.texfilter_level_fresh_profile()) -> void:
+			p_texfilter_level := GameWorld.texfilter_level_fresh_profile(),
+			p_particle_density := GameWorld.particle_density_fresh_profile(),
+			p_texcompression_level := GameWorld.texcompression_level_fresh_profile()) -> void:
 		sound_fx_volume = p_sound_fx_volume
 		dialog_volume = p_dialog_volume
 		music_volume = p_music_volume
@@ -106,11 +119,14 @@ class State extends RefCounted:
 		gameplay_tips = p_gameplay_tips
 		object_polydetail = p_object_polydetail
 		texfilter_level = p_texfilter_level
+		particle_density = p_particle_density
+		texcompression_level = p_texcompression_level
 
 	func copy() -> State:
 		return State.new(sound_fx_volume, dialog_volume, music_volume, crosshair_style,
 				crosshair_color, crosshair_spread, aspect_mode,
-				keyboard_tips, gameplay_tips, object_polydetail, texfilter_level)
+				keyboard_tips, gameplay_tips, object_polydetail, texfilter_level,
+				particle_density, texcompression_level)
 
 
 signal changed(state: State)
@@ -154,6 +170,8 @@ func update(state: State) -> void:
 		config.set_value(PLAYER_SECTION, GAMEPLAY_TIPS_KEY, 1 if _state.gameplay_tips else 0)
 		config.set_value(DISPLAY_SECTION, OBJECT_POLYDETAIL_KEY, _state.object_polydetail)
 		config.set_value(DISPLAY_SECTION, TEXFILTER_LEVEL_KEY, _state.texfilter_level)
+		config.set_value(DISPLAY_SECTION, PARTICLE_DENSITY_KEY, _state.particle_density)
+		config.set_value(DISPLAY_SECTION, TEXCOMPRESSION_LEVEL_KEY, _state.texcompression_level)
 	)
 	apply()
 	changed.emit(current())
@@ -210,7 +228,9 @@ func _load_state() -> State:
 			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION, KEYBOARD_TIPS_KEY, 1)) != 0,
 			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION, GAMEPLAY_TIPS_KEY, 1)) != 0,
 			_load_object_polydetail(),
-			_load_texfilter_level()))
+			_load_texfilter_level(),
+			_load_particle_density(),
+			_load_texcompression_level()))
 
 
 # The persisted object detail, clamped as the config load clamps it, or the
@@ -234,6 +254,29 @@ static func _load_texfilter_level() -> int:
 				GameWorld.texfilter_level_fresh_profile())))
 	var seeded := GameWorld.texfilter_level_fresh_profile()
 	ConfigStore.write(CONFIG_PATH, DISPLAY_SECTION, TEXFILTER_LEVEL_KEY, seeded)
+	return seeded
+
+
+# The persisted particle density, clamped as the config load clamps it, or the
+# fresh profile's word, written at once as the video test saves it.
+static func _load_particle_density() -> int:
+	if ConfigStore.has_key(CONFIG_PATH, DISPLAY_SECTION, PARTICLE_DENSITY_KEY):
+		return GameWorld.clamp_particle_density(int(ConfigStore.read(CONFIG_PATH,
+				DISPLAY_SECTION, PARTICLE_DENSITY_KEY,
+				GameWorld.particle_density_fresh_profile())))
+	var seeded := GameWorld.particle_density_fresh_profile()
+	ConfigStore.write(CONFIG_PATH, DISPLAY_SECTION, PARTICLE_DENSITY_KEY, seeded)
+	return seeded
+
+
+# The persisted texture compression as written (the config load never clamps
+# it), or the fresh profile's word, written at once as the video test saves it.
+static func _load_texcompression_level() -> int:
+	if ConfigStore.has_key(CONFIG_PATH, DISPLAY_SECTION, TEXCOMPRESSION_LEVEL_KEY):
+		return int(ConfigStore.read(CONFIG_PATH, DISPLAY_SECTION,
+				TEXCOMPRESSION_LEVEL_KEY, GameWorld.texcompression_level_fresh_profile()))
+	var seeded := GameWorld.texcompression_level_fresh_profile()
+	ConfigStore.write(CONFIG_PATH, DISPLAY_SECTION, TEXCOMPRESSION_LEVEL_KEY, seeded)
 	return seeded
 
 
@@ -261,7 +304,9 @@ static func _normalized(state: State) -> State:
 			state.crosshair_spread, state.aspect_mode,
 			state.keyboard_tips, state.gameplay_tips,
 			GameWorld.clamp_object_detail(state.object_polydetail),
-			GameWorld.clamp_texfilter_level(state.texfilter_level))
+			GameWorld.clamp_texfilter_level(state.texfilter_level),
+			GameWorld.clamp_particle_density(state.particle_density),
+			state.texcompression_level)
 
 
 # Clamp to the engine's witnessed range for an Options slider, by control

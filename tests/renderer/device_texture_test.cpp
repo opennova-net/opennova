@@ -180,9 +180,35 @@ void test_dxt5_opaque() {
 	CHECK(!dxt5_first_level_opaque(one.data(), 8, 4, 4), "bytes too few");
 }
 
+// The levels of a texture built from pixels as their texels read back: A8R8G8B8
+// keeps level 0 and box-filters the stored bytes; a DXT format's levels are its
+// blocks decoded; the halvings come first [orig: GTexture_CreateFromPixelData_0
+// @ 0x6876C0].
+void test_pixel_device_texture_levels() {
+	std::vector<uint8_t> rgba(16 * 16 * 4, 0);
+	for (size_t i = 0; i < rgba.size(); ++i) rgba[i] = static_cast<uint8_t>((i * 37) % 256);
+	const auto plain = pixel_device_texture_levels(rgba.data(), 16, 16, 0x100001u);
+	CHECK(plain.size() == 3 && plain[0].width == 16 && plain[2].width == 4, "16 to 4 uncompressed");
+	CHECK(plain[0].rgba == rgba, "level 0 is the pixels");
+	CHECK(plain[1].rgba == encode_rgba8(box_filter_half(decode_rgba8(rgba.data(), 16, 16), 16, 16)),
+			"level 1 is D3DX's box filter of the stored bytes");
+	const auto dxt1 = pixel_device_texture_levels(rgba.data(), 16, 16, 0x500201u);
+	const auto blocks = build_dxt_texture_levels(rgba.data(), 16, 16, TextureDxtFormat::Dxt1, 3);
+	CHECK(dxt1.size() == 3 && dxt1[0].rgba == encode_rgba8(decode_dxt_surface(blocks[0])) &&
+			dxt1[2].rgba == encode_rgba8(decode_dxt_surface(blocks[2])),
+			"0x500201 is DXT1 on the reference card, its blocks decoded");
+	const auto limited = pixel_device_texture_levels(rgba.data(), 16, 16, 0x500201u,
+			kReferenceTextureDxtCaps, 1);
+	CHECK(limited.size() == 1 && limited[0].rgba == dxt1[0].rgba, "a level limit keeps level 0");
+	const auto halved = pixel_device_texture_levels(rgba.data(), 16, 16, kTextureFlagHalveOnce);
+	CHECK(!halved.empty() && halved[0].width == 8 && halved.size() == 2, "0x10000 halves first");
+	CHECK(pixel_device_texture_levels(nullptr, 16, 16, 0).empty(), "no pixels, no levels");
+}
+
 } // namespace
 
 int main() {
+	test_pixel_device_texture_levels();
 	test_object_texdetail_flags();
 	test_pixel_halvings();
 	test_pixel_device_texture();

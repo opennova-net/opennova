@@ -562,6 +562,56 @@ func test_texture_filter_row_seeds_by_value_and_writes_the_word_back() -> void:
 	_cleanup(dir)
 
 
+# The particle-density and texture-compression rows are game.cfg's
+# particle_density and texcompression_level, served the same way (engine
+# runtime/menu/options_policy.h kParticleDensityControls,
+# kTexCompressionControls): each combobox selects the row whose value is the
+# persisted word, stays editable, and a pick writes the row's value back at once.
+func test_particle_and_compression_rows_seed_by_value_and_write_the_words_back() -> void:
+	var options := PlayerOptions.new()
+	var seeded := options.current()
+	seeded.particle_density = 1
+	seeded.texcompression_level = 0
+	options.update(seeded)
+	var dir := _make_dir()
+	var list_box := ('<LIST_BOX><POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>200</RIGHT>'
+			+ '<BOTTOM>100</BOTTOM></POSITION><ITEMS>%s</ITEMS></LIST_BOX>')
+	var rows := ""
+	for level in 3:
+		rows += '<ITEM value="%d">Level %d</ITEM>' % [level, level]
+	var body := MenuDriverFixture.wnd("scroll", "MUSICVOLUME", 20)
+	body += MenuDriverFixture.wnd("combobox", "PARTICLES", 60, list_box % rows)
+	body += MenuDriverFixture.wnd("combobox", "TEXCOMPRESSION", 140, list_box % rows)
+	TestFs.write_bytes(self, dir.path_join("options.mnu"),
+			MenuDriverFixture.screen_xml("OPTIONS", body).to_utf8_buffer())
+	var shell = _make_shell(dir, options)
+	if shell == null:
+		pending("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	assert_true(shell.open_menu("options.mnu", ""), "the options document opens")
+	var driver: MenuDriver = shell.get_driver()
+	assert_true(driver.is_options_surface())
+	var density := driver.widget_id("PARTICLES")
+	var compression := driver.widget_id("TEXCOMPRESSION")
+	assert_gte(density, 0)
+	assert_gte(compression, 0)
+	assert_eq(driver.item_value(density, driver.selected_row(density)), "1",
+			"the density row whose value is the persisted word is selected")
+	assert_eq(driver.item_value(compression, driver.selected_row(compression)), "0",
+			"the compression row whose value is the persisted word is selected")
+	assert_false(driver.is_widget_disabled(density), "the particle-density row is editable")
+	assert_false(driver.is_widget_disabled(compression), "the compression row is editable")
+	driver.select_row(density, 2)
+	driver.select_row(compression, 2)
+	assert_eq(options.current().particle_density, 2, "the density pick writes the word")
+	assert_eq(options.current().texcompression_level, 2, "the compression pick writes the word")
+	var reloaded := PlayerOptions.new().current()
+	assert_eq(reloaded.particle_density, 2, "the density persists")
+	assert_eq(reloaded.texcompression_level, 2, "the compression persists")
+	_cleanup(dir)
+
+
 # A root switch reloads every text table: a root without menutxt.BIN clears
 # the previous root's registration instead of keeping its strings alive.
 func test_root_switch_drops_the_previous_roots_text_table() -> void:

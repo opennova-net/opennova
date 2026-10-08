@@ -160,6 +160,9 @@ struct ParticleQuadSnapshot {
 	ParticleAlignment alignment = ParticleAlignment::CameraFacing;
 	ParticleDrawState state{};
 	bool visible = true;
+	// The particle's serial byte (+0), which the density stride reads
+	// (ParticleViewInput::lod_divisor).
+	std::uint8_t serial = 0;
 };
 
 struct ParticleEmitterSnapshot {
@@ -209,6 +212,14 @@ struct ParticleViewInput {
 	float projection[16]{};
 	bool projection_valid = false;
 	bool projection_near_is_one = true;
+	// The scene pass's density stride (renderer/particle_density.h
+	// particle_lod_divisor): a quad is built only for a particle whose serial
+	// byte modulo the stride is 0, after the batch's depth sort; 1 builds every
+	// particle.
+	// [orig: CParticleEmitter_BuildBillboardQuads @ 0x5E6DA2..0x5E6E06;
+	//  CParticleEmitter_RenderStaticBillboards @ 0x5F4E82..0x5F4EC2;
+	//  CParticleEmitter_RenderTopAlignedBillboards @ 0x5F5681..0x5F56E6]
+	std::uint32_t lod_divisor = 1;
 };
 
 struct ParticleDrawCommand {
@@ -245,6 +256,8 @@ struct ParticleFrameDebugCounters {
 	std::size_t water_filtered_emitters = 0;
 	std::size_t water_filtered_particles = 0;
 	std::size_t invisible_particles = 0;
+	// Particles the view's density stride left unbuilt.
+	std::size_t lod_skipped_particles = 0;
 	std::size_t truncated_particles = 0;
 	std::size_t emitted_quads = 0;
 	std::size_t draw_commands = 0;

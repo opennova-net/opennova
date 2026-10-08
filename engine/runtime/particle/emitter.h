@@ -209,21 +209,15 @@ struct Emitter {
 	Vec3 bounds_max{};
 	bool bounds_valid = false;
 
-	// CParticleEmitter_BuildBillboardQuads @ 0x5e6d60 LOD decimation:
-	// engine computes `divisor = round(1.0 / *(emitter+8 + 0x3F4))` each
-	// frame from a manager-set perf budget, then skips particles where
-	// `(particle.serial % divisor) != 0`. Default 1 = render every
-	// particle (engine behaviour at full perf budget). Physics remains
-	// untouched because the simulator never reads this field.
-	std::uint32_t lod_divisor = 1;
-
 	// CParticleEmitter_UpdateParticles @ 0x5e6980 kill-plane:
 	//   def.flags & 0x08000000 (bit 27 = BELOWH20): kill if particle.y > threshold
 	//   def.flags & 0x10000000 (bit 28 = ABOVEH20): kill if particle.y <= threshold
 	// Engine threshold lives at `*(emitter+332)` (a manager-supplied
 	// `float*` populated per spawn site). We expose the value + mode directly.
-	// Default mode 0 = disabled (no kill plane). Like `spring_const` /
-	// `lod_divisor`, these are runtime scalars NOT reset by `emitter_init`.
+	// Default mode 0 = disabled (no kill plane). Like `spring_const`, these
+	// are runtime scalars NOT reset by `emitter_init`. (The billboard
+	// builders' density stride is the scene pass's, not the emitter's:
+	// renderer/particle_density.h.)
 	std::uint32_t kill_plane_mode = 0;  // 0=disabled, 1=kill above, 2=kill at/below
 	float kill_plane_y = 0.0f;
 

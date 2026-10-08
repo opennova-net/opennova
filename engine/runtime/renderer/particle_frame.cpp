@@ -1,4 +1,5 @@
 #include <runtime/renderer/particle_frame.h>
+#include <runtime/renderer/particle_density.h>
 
 // [orig: CParticleEmitter_BuildBillboardQuads @ 0x5e6d60;
 // CParticleEmitter_ComputeViewDepths @ 0x5e7580;
@@ -549,6 +550,12 @@ const ParticleDrawList &ParticleFrameCompiler::compile(
 				break;
 			const ParticleQuadSnapshot &particle =
 					snapshot.particles[particle_entry.particle_index];
+			// The density stride skips a particle at quad build, after the
+			// batch sorted every particle it filled.
+			if (!particle_lod_draws(particle.serial, view.lod_divisor)) {
+				++debug.lod_skipped_particles;
+				continue;
+			}
 			ParticleEmitterDrawBounds &output_bounds =
 					draw_list.emitter_bounds[particle_entry.bounds_index];
 			if (output_bounds.quad_count == 0) {
@@ -664,8 +671,8 @@ const ParticleDrawList &ParticleFrameCompiler::compile(
 	}
 
 	debug.draw_commands = draw_list.commands.size();
-	debug.truncated_particles =
-			selected_particles - debug.invisible_particles - debug.emitted_quads;
+	debug.truncated_particles = selected_particles - debug.invisible_particles -
+			debug.lod_skipped_particles - debug.emitted_quads;
 	debug.lifetime_capacity_growths = impl.lifetime_capacity_growths;
 	debug.vertex_capacity = draw_list.vertices.capacity();
 	debug.command_capacity = draw_list.commands.capacity();
