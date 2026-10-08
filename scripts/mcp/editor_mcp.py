@@ -264,13 +264,16 @@ def parse_list(text: str, flag: str, shape: str) -> list:
 REQUEST_TEXTS = ("dir", "title", "game", "expansion", "builds_on", "base_project", "game_install", "path", "locator",
                  "field",
                  "new_name", "role", "file_kind", "out_dir", "export_dir", "mission", "operation", "mode", "choice",
-                 "purpose", "folder", "play_mode")
+                 "purpose", "folder", "play_mode", "preview_background")
 REQUEST_LISTS = ("roles", "names")
 REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass", "rehash", "all",
                     "planned", "behind", "fresh", "report", "save_before_play", "alone")
 REQUEST_NUMBERS = ("plan", "steps")
 # How a Play runs (the session's play modes): the project's own (apply_project_settings' play_mode), or one Play's.
 PLAY_MODES = ("runtime", "install", "strict")
+# What the previews of the project's own data draw behind their picture (the editor's preference,
+# set_preview_background; the state's preferences section says the one in effect).
+PREVIEW_BACKGROUNDS = ("dark", "grey", "light", "checker")
 
 
 def request_of(args: argparse.Namespace) -> dict:
@@ -837,6 +840,9 @@ def build_parser() -> argparse.ArgumentParser:
                               "before the game starts")
     request.add_argument("--report", choices=switch, default=None,
                          help="build: false leaves the build result's panel closed as the build ends")
+    request.add_argument("--preview-background", dest="preview_background", choices=PREVIEW_BACKGROUNDS, default=None,
+                         help="set_preview_background: what the model, texture, particle, definition and HUD "
+                              "previews draw behind their picture (an editor preference)")
     request.add_argument("--play-mode", dest="play_mode", choices=PLAY_MODES, default=None,
                          help="play, edit_in_viewport: how this Play runs, for itself alone (left out: the project's "
                               "own, runtime unless it was set otherwise)")
