@@ -7,7 +7,8 @@
 // Pinned: the NPC body's odd ticks and the player body's even ones (a 30 fps clip of 8 frames: frame 2
 // first read on tick 5, frame 6 on tick 13); a loop's second pass; the Surface's slots (ground, snow, an
 // object, water); foley before the foot in one word; a repeated one-shot's start reading nothing and its
-// next pass firing again; nothing over a seek, a frame step or a pause; ticks passed several at a time;
+// next pass firing again; nothing over a seek, a frame step or a pause; ticks passed several at a time, the
+// first run after a seek heard whole from where the seek put the clock;
 // the item's profile and body (sound_profile, sound_profileFemale for a female player, move_function
 // org2), a profile picked, an empty slot; Mute; the camera's distance (a volume by the falloff, a set out
 // of range); the envelope's options, sound_profile, sound_body, each event's plays and sounds_fired; what
@@ -251,6 +252,9 @@ int test_walk_fires_on_the_body_s_ticks() {
 	TEST_EXPECT(ticks_slots(project.run(15)) == TS({{6, audio::kSlotFootLGround}, {14, audio::kSlotFootRGround}}));
 	// Ticks passed four at a time fire the same.
 	TEST_EXPECT(ticks_slots(project.run(15, 4.0)) == TS({{6, audio::kSlotFootLGround}, {14, audio::kSlotFootRGround}}));
+	// The Play's first frame running seven ticks at once: the run from where its seek put the clock heard whole,
+	// tick 6 among it.
+	TEST_EXPECT(ticks_slots(project.run(15, 7.5)) == TS({{6, audio::kSlotFootLGround}, {14, audio::kSlotFootRGround}}));
 	TEST_EXPECT(project.sound(R"({"body": "npc"})"));
 
 	// The Surface: the slots the game's test picks.
