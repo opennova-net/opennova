@@ -30,6 +30,10 @@ constexpr ImU32 kSquareEdge = IM_COL32(40, 40, 40, 255); // a handle's edge
 constexpr ImU32 kDotEdge = IM_COL32(20, 20, 20, 255); // a light's ring
 constexpr ImU32 kBadgeFill = IM_COL32(20, 20, 20, 200); // a badge's ground over the picture
 constexpr ImU32 kBadgeText = IM_COL32(235, 235, 235, 255);
+// The edge each shape gets over a background of the preview preference's (PreviewBackdrop::halo): a line's and a
+// ring's this much wider, a word's a pixel each way, dark enough that a pale shape reads on the light grey.
+constexpr ImU32 kHaloColor = IM_COL32(12, 12, 12, 190);
+constexpr float kHaloWidth = 2.0f;
 constexpr float kBadgeInset = 6.0f; // from the picture's corner
 constexpr float kBadgePad = 3.0f; // around its text
 
@@ -64,6 +68,49 @@ ImU32 shape_color(const OverlayShape &shape) {
 	}
 	return IM_COL32(
 			(shape.rgb >> 16) & 0xFF, (shape.rgb >> 8) & 0xFF, shape.rgb & 0xFF, shape.alpha);
+}
+
+// A shape's dark edge, drawn under it (PreviewBackdrop::halo): its outline's lines a little wider, a filled
+// shape's outline around it, a word's letters a pixel each way. A Marquee's fill and a badge's plate need none.
+void draw_halo(ImDrawList &paint, CanvasPoint origin, const OverlayShape &shape) {
+	const auto at = [&](int i) {
+		return ImVec2(origin.x + shape.points[i].x, origin.y + shape.points[i].y);
+	};
+	const float wide = shape.thickness + kHaloWidth;
+	const float s = shape.size;
+	switch (shape.kind) {
+		case OverlayKind::Rect:
+			if (!shape.filled) paint.AddRect(at(0), at(1), kHaloColor, 0.0f, 0, wide);
+			break;
+		case OverlayKind::Line:
+			paint.AddLine(at(0), at(1), kHaloColor, wide);
+			break;
+		case OverlayKind::Circle:
+			if (shape.filled) paint.AddCircleFilled(at(0), s + kHaloWidth * 0.5f, kHaloColor);
+			else paint.AddCircle(at(0), s, kHaloColor, 0, wide);
+			break;
+		case OverlayKind::Quad:
+			if (!shape.filled) paint.AddQuad(at(0), at(1), at(2), at(3), kHaloColor, wide);
+			break;
+		case OverlayKind::Marker: {
+			const ImVec2 p = at(0);
+			if (shape.glyph == OverlayGlyph::Cross) {
+				paint.AddLine(ImVec2(p.x - s, p.y), ImVec2(p.x + s, p.y), kHaloColor, wide);
+				paint.AddLine(ImVec2(p.x, p.y - s), ImVec2(p.x, p.y + s), kHaloColor, wide);
+			}
+			// A square and a dot have their dark edge already; a corner is filled.
+			break;
+		}
+		case OverlayKind::Text: {
+			if (shape.filled) break; // on its plate
+			const ImVec2 p = at(0);
+			const char *begin = shape.text.c_str();
+			const char *end = begin + shape.text.size();
+			for (const ImVec2 step : { ImVec2(-1, 0), ImVec2(1, 0), ImVec2(0, -1), ImVec2(0, 1) })
+				paint.AddText(ImVec2(p.x + step.x, p.y + step.y), kHaloColor, begin, end);
+			break;
+		}
+	}
 }
 
 void draw_shape(ImDrawList &paint, CanvasPoint origin, const OverlayShape &shape) {
@@ -372,9 +419,12 @@ void ViewportCanvas::picture(const Device &device, const Tip &tip, bool pointer)
 	device(shown);
 	// The picture's edge: a design picture's just outside it, on its margin.
 	const float edge = zoom_ != Zoom::Fill ? 1.0f : 0.0f;
+	// Over a background of the preview preference's, a dark frame: the Grey's top is the old frame's grey.
+	const ImU32 frame = backdrop_.own ? kFrameColor
+	                                  : IM_COL32((backdrop_.frame >> 16) & 0xFF, (backdrop_.frame >> 8) & 0xFF,
+	                                             backdrop_.frame & 0xFF, 255);
 	ImGui::GetWindowDrawList()->AddRect(ImVec2(origin_.x - edge, origin_.y - edge),
-			ImVec2(origin_.x + float(input_.width) + edge, origin_.y + float(input_.height) + edge),
-			kFrameColor);
+			ImVec2(origin_.x + float(input_.width) + edge, origin_.y + float(input_.height) + edge), frame);
 }
 
 void ViewportCanvas::badge(const std::string &text) {
@@ -428,6 +478,10 @@ void ViewportCanvas::draw(const OverlayList &shapes, CanvasCursor cursor) {
 	ImDrawList &paint = *ImGui::GetWindowDrawList();
 	paint.PushClipRect(
 			ImVec2(surface_min_.x, surface_min_.y), ImVec2(surface_max_.x, surface_max_.y), true);
+	// Every edge first, so no shape's edge covers another shape.
+	if (backdrop_.halo)
+		for (const OverlayShape &shape : shapes.shapes)
+			draw_halo(paint, origin_, shape);
 	for (const OverlayShape &shape : shapes.shapes)
 		draw_shape(paint, origin_, shape);
 	paint.PopClipRect();

@@ -467,6 +467,7 @@ JsonValue preferences_section(const SessionView &view) {
 	out.set("save_before_play", boolean(view.project.save_before_play));
 	out.set("runtime_setting", json_string(view.project.runtime_setting));
 	out.set("import_dependencies", boolean(view.project.import_dependencies));
+	out.set("preview_background", json_string(preview_background_token(view.project.preview_background)));
 	out.set("build_folder", json_string(view.project.build_folder));
 	JsonValue items = JsonValue::make_array();
 	for (const int64_t item : view.project.recent_items) items.push(json_number(double(item)));
@@ -588,7 +589,8 @@ constexpr ViewSectionRow kSections[] = {
 			"resolve to nothing)." },
 	{ S::Preferences, "preferences", concern_set({ C::Preferences }), preferences_section,
 			"The editor's settings: the recent projects [{root, found, title, game, expansion, builds_on}], "
-			"the game install, the runtime, the import setting; and the open project's own: how it plays "
+			"the game install, the runtime, the import setting, the previews' background (preview_background: "
+			"dark, grey, light or checker); and the open project's own: how it plays "
 			"(play_mode) and whether Play saves first (save_before_play), its build folder." },
 	{ S::Output, "output", concern_set({ C::Output }), output_section,
 			"The output lines held, first and next by absolute index (the output query pages "
