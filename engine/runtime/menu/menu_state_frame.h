@@ -59,15 +59,16 @@ EditKeyResult frame_edit_key(const MenuFrameCompiler &compiler, MenuFrameState &
 
 // The frame seam over a compiler and its state, nothing drawn (MenuRuntime's seam, menu_runtime.h):
 // the runtime's writes land in the state as Godot's MenuFrame lands them, and the mouse runs the
-// compiler's own pump at design scale, its click the game frame's (MenuClickLatch), each click and
-// each scroll value reported as the frame's signals report them (the embedder hands them to the
-// runtime: on_widget_clicked, on_frame_scroll_value). What a screen loads is the embedder's: the
+// compiler's own pump at design scale, its click and its press's capture the game frame's
+// (MenuClickLatch, menu_click.h), each click (the window and its spin arrow part) and each scroll
+// value reported as the frame's signals report them (the embedder hands them to the runtime:
+// on_widget_clicked, on_frame_scroll_value). What a screen loads is the embedder's: the
 // configure hook configures the compiler for a screen by name (its document, fonts, string tables
 // and textures), true when it did.
 class MenuStateFrame final : public MenuFrameSeam {
 public:
 	using Configure = std::function<bool(const std::string &screen, MenuFrameCompiler &compiler)>;
-	using Clicked = std::function<void(int index)>;
+	using Clicked = std::function<void(int index, int part)>;
 	using Scrolled = std::function<void(int index, int value)>;
 
 	void set_configure(Configure configure) { configure_ = std::move(configure); }

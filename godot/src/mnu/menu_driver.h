@@ -112,7 +112,7 @@ class MenuDriver : public RefCounted {
 	void seed_marquee_widgets_();
 	void clear_credits_();
 	void sync_credits_();
-	void on_frame_widget_clicked_(int p_index);
+	void on_frame_widget_clicked_(int p_index, int p_part);
 	void on_frame_scroll_value_(int p_index, int p_value);
 
 protected:

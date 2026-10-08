@@ -199,8 +199,9 @@ public:
 	// One sample of the game's mouse over the picture (the canvas's while it has it over the picture, else the
 	// pointer held, at its point with its button), the
 	// game's pump of the windows' sounds run over it against the viewport's compile (menu_sounds.h): the claim
-	// there (MenuFrameCompiler::claim_at), live while enabled up its chain; a click as the game's frame takes
-	// one (menu::MenuClickLatch), its SELECTED a spin arrow's own row where the click is on one (a button of
+	// there (MenuFrameCompiler::claim_at, held to the window a press captured), live while enabled up its
+	// chain; a click as the game's frame takes one (menu::MenuClickLatch: the claim let go over that was held
+	// the sample before), its SELECTED a spin arrow's own row where the click is on one (a button of
 	// its own, as the runtime's arrow click plays it), else the window's; then MOUSEIN and MOUSEOUT
 	// (menu::MenuSoundPump over the windows' records, so an edit keeps what each holds). Each edge of a window
 	// with a row for its state plays it (plan_menu_sound, the member picked through `selector`, numbered from
@@ -332,7 +333,8 @@ private:
 	MenuCanvasShow show_;
 	MenuPointerShow pointer_;
 	MenuSoundOptions sound_;
-	// The game's pump over the windows, by their records (DI-34): their sound states, the press and click.
+	// The game's pump over the windows, by their records (DI-34): their sound states, the click and the
+	// press's capture.
 	menu::MenuSoundPump sound_pump_;
 	menu::MenuClickLatch click_;
 	ViewportMouse canvas_mouse_; // over false: no canvas has the mouse over the picture

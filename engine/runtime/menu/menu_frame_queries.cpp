@@ -393,20 +393,90 @@ int MenuFrameCompiler::hit_widget(const MenuFrameState &state, float mx,
 // The pump's claim at a point with no state written [orig: CWnd_ProcessMouseEvent
 // @ 0x647a00 — the claim walk, and the claimant's own-or-root cursor stamped
 // @ 0x647b09]: no scrollbar part takes the sample (nothing is pressed or
-// captured where nothing pumps).
+// captured where nothing pumps); a press's capture, where the embedder keeps
+// one (MenuClickLatch), holds the claim to the captured window.
 MenuFrameCompiler::MouseClaim MenuFrameCompiler::claim_at(const MenuFrameState &state,
-		float mouse_x, float mouse_y, float scale_x, float scale_y) const {
+		float mouse_x, float mouse_y, float scale_x, float scale_y,
+		const MenuPumpWindow &capture) const {
 	MouseClaim claim;
 	if (screen_ == nullptr || nodes_.empty()) {
 		return claim;
 	}
 	int hit = -1;
 	int part = 0;
-	hit_roots_(state, mouse_x, mouse_y, scale_x, scale_y, &hit, &part);
+	if (capture.valid()) {
+		capture_hit_(state, capture, mouse_x, mouse_y, scale_x, scale_y, &hit, &part);
+	} else {
+		hit_roots_(state, mouse_x, mouse_y, scale_x, scale_y, &hit, &part);
+	}
 	claim.hovered = hit;
 	claim.spin_part = part;
-	claim.cursor = claim_cursor_(hit, part);
+	claim.cursor = claim_cursor_(hit, part, capture.index, capture.part);
 	return claim;
+}
+
+// While a press holds the capture no window but the captured one takes the
+// claim, and it takes it where its own rect holds the point, its children not
+// consulted [orig: CWnd_ProcessMouseEvent @ 0x647a88..0x647b02 —
+// g_UIMouseCaptureWnd set and not this window: no claim; this window: the child
+// walk skipped @ 0x647afe; CWnd_HitTestPoint @ 0x646700 with no recursion
+// @ 0x647a66]. A window the pump does not reach (hidden, or outside the open
+// popup) takes nothing, and neither does an open dropdown's list once it picked
+// (hidden). A spin arrow is a window of its own: its own rect.
+void MenuFrameCompiler::capture_hit_(const MenuFrameState &state,
+		const MenuPumpWindow &capture, float mx, float my, float sx, float sy,
+		int *io_hit, int *io_part) const {
+	if (capture.index < 0 || capture.index >= document_nodes_ || capture.part < 0 ||
+			capture.part > 2 || !widget_reached(capture.index, state)) {
+		return;
+	}
+	mnu::RectEdges rect;
+	if (!widget_rect(capture.index, state, &rect)) {
+		return;
+	}
+	const WidgetNode &node = nodes_[static_cast<size_t>(capture.index)];
+	if (capture.part != 0) {
+		if (node.window->type == mnu::WindowType::SpinList &&
+				spin_arrow_hit_(node, rect, state, mx, my, sx, sy) == capture.part) {
+			*io_hit = capture.index;
+			*io_part = capture.part;
+		}
+		return;
+	}
+	if (mx >= emit_x(rect.left, sx) && mx < emit_x(rect.right, sx) &&
+			my >= emit_x(rect.top, sy) && my < emit_x(rect.bottom, sy)) {
+		*io_hit = capture.index;
+		*io_part = 0;
+	}
+}
+
+MenuClickLatch::Claim MenuFrameCompiler::click_claim(const MouseClaim &claim,
+		const MenuFrameState &state) const {
+	MenuClickLatch::Claim out;
+	// A scrollbar part owns the sample: the part is the window the pump holds
+	// (a child button of the scrollbar), never its owner (D-MNU-32).
+	if (claim.scroll_index >= 0 || claim.hovered < 0 || claim.hovered >= document_nodes_) {
+		return out;
+	}
+	out.window = MenuPumpWindow{ claim.hovered, claim.spin_part };
+	out.live = widget_live(claim.hovered, state);
+	const WidgetNode &node = nodes_[static_cast<size_t>(claim.hovered)];
+	if (claim.spin_part == 1 || claim.spin_part == 2) {
+		// The arrow is a CButtonWnd of its own: live while its list is and it is
+		// enabled, and its press captures [orig: CSpinListWnd_CreateUpDownChildren
+		// @ 0x64b8b0; CButtonWnd_HandleNamedEvent @ 0x65839c].
+		const int arrow = claim.spin_part == 1 ? node.spin_up : node.spin_down;
+		out.live = out.live && arrow >= 0 && !nodes_[static_cast<size_t>(arrow)].window->disabled;
+		out.captures = true;
+	} else {
+		out.captures = menu_window_captures(node.window->type);
+	}
+	return out;
+}
+
+bool MenuFrameCompiler::pump_window_reached(const MenuPumpWindow &window,
+		const MenuFrameState &state) const {
+	return widget_reached(window.index, state);
 }
 
 // Every root in draw order: a later root's hit replaces an earlier one's, so

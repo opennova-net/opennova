@@ -756,8 +756,8 @@ void MenuDriver::play_widget_sound(const String &p_trigger, const String &p_file
 
 // ---- input -------------------------------------------------------------------------
 
-void MenuDriver::on_frame_widget_clicked_(int p_index) {
-	runtime_.on_widget_clicked(p_index);
+void MenuDriver::on_frame_widget_clicked_(int p_index, int p_part) {
+	runtime_.on_widget_clicked(p_index, p_part);
 }
 
 void MenuDriver::on_frame_scroll_value_(int p_index, int p_value) {
@@ -1178,7 +1178,7 @@ void MenuDriver::_bind_methods() {
 
 	// The frame's signals land here (the pump's click edge and its CScrollWnd
 	// interaction result).
-	ClassDB::bind_method(D_METHOD("_on_frame_widget_clicked", "index"),
+	ClassDB::bind_method(D_METHOD("_on_frame_widget_clicked", "index", "part"),
 			&MenuDriver::on_frame_widget_clicked_);
 	ClassDB::bind_method(D_METHOD("_on_frame_scroll_value", "index", "value"),
 			&MenuDriver::on_frame_scroll_value_);
