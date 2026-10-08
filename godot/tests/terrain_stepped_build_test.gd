@@ -139,6 +139,29 @@ func test_a_load_is_refused_as_the_whole_load_is() -> void:
 	assert_eq(data.get_load_step_label(), "colormap")
 
 
+# The mission's .env is read after the .trn by the terrain's parser too, so a terrain key there is the
+# terrain's (D-TERRAIN-18; engine: formats/trn load_mission_trn). A mission that names no .env, or one the
+# root lacks, loads the .trn's.
+func test_a_terrain_key_in_the_mission_environment_is_the_terrain_s() -> void:
+	var env_path := _root_dir.path_join("t18.env")
+	var file := FileAccess.open(env_path, FileAccess.WRITE)
+	file.store_string("fog_level 900\r\npolytrn_detaildensity 64\r\npolytrn_wrapx 1\r\n")
+	file.close()
+	var root := _root()
+	var plain := TerrainData.new()
+	assert_eq(plain.load_from_resource_root(root, TestFs.TMAP_TRN), OK)
+	assert_eq(plain.get_detail_density(), 128, "the .trn's density")
+	var mission := TerrainData.new()
+	mission.set_mission_environment("t18.env")
+	assert_eq(mission.load_from_resource_root(root, TestFs.TMAP_TRN), OK)
+	assert_eq(mission.get_detail_density(), 64, "the .env's density, over the .trn's")
+	var missing := TerrainData.new()
+	missing.set_mission_environment("nosuch.env")
+	assert_eq(missing.load_from_resource_root(root, TestFs.TMAP_TRN), OK)
+	assert_eq(missing.get_detail_density(), 128, "no such .env: the .trn's")
+	DirAccess.remove_absolute(env_path)
+
+
 func test_a_build_stepped_is_the_build_whole() -> void:
 	var root := _root()
 	var whole := _terrain_over(_loaded(root))
