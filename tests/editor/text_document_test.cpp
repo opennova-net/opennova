@@ -1194,6 +1194,50 @@ static int test_text_readers() {
 	return 0;
 }
 
+// The project's notes open as texts (asset_kinds' Notes row): a README in Markdown and a licence with no
+// extension, in a session, each its text with no finding; Problems says nothing of them, where a file of no
+// kind beside them is said; an edit and a save write the note.
+static int test_project_notes() {
+	const DocumentType *text = document_type(DocumentTypeId::Text);
+	TEST_EXPECT(text && document_type_for(AssetKind::Notes) == text && is_editable_kind(AssetKind::Notes));
+	editor_test::TempProjectDir dir("opennova_editor_text_notes");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Notes"));
+	editor_test::create_missing_files(session);
+	const std::string root = session.view().project.root;
+	const std::string readme = "# Notes\r\n\r\nWhat this project holds.\r\n";
+	TEST_EXPECT(editor_test::write_text(root + "/README.md", readme));
+	TEST_EXPECT(editor_test::write_text(root + "/LICENSE", "MIT License\n"));
+	TEST_EXPECT(editor_test::write_bytes(root + "/blob", {0x00, 0x01, 0x02}));
+	editor_test::handle_to_end(session, request::rescan());
+	size_t unknown = 0, about_notes = 0;
+	for (const Diagnostic &d : session.view().findings.diagnostics) {
+		unknown += d.code() == "asset.kind.unknown" && d.asset == "blob";
+		about_notes += d.asset == "README.md" || d.asset == "LICENSE";
+	}
+	TEST_EXPECT(unknown == 1 && about_notes == 0);
+	for (const char *name : {"README.md", "LICENSE"}) {
+		const AssetEntry *entry = session.view().project.scan->find(name);
+		TEST_EXPECT(entry && entry->kind == AssetKind::Notes);
+	}
+	editor_test::handle_to_end(session, request::open_document("README.md"));
+	TextDocument *open = text_of(*session.document_base_for("README.md"));
+	TEST_EXPECT(open != nullptr);
+	if (!open) return 1;
+	TEST_EXPECT(open->text() == readme && text->validate_file(*open).empty());
+	editor_test::handle_to_end(session, request::open_document("LICENSE"));
+	TEST_EXPECT(text_of(*session.document_base_for("LICENSE")) != nullptr);
+	editor_test::handle_to_end(session, request::edit_record("README.md", {TextDocument::replace(span(3, 1, 4), "Each")}));
+	TEST_EXPECT(session.last_edit_ok() && open->dirty());
+	editor_test::handle_to_end(session, request::save("README.md"));
+	const std::vector<uint8_t> saved = test_io::read_file(root + "/README.md");
+	TEST_EXPECT(!open->dirty() &&
+	            std::string(saved.begin(), saved.end()).find("Each this project holds.") != std::string::npos);
+	return 0;
+}
+
 // The tags a shader registers, which a model material's shader names (ReferenceKind::Shader): _ffp.fx the
 // renderer's twelve fixed-function tags and their #UV twins whatever its EffectTag says [orig:
 // HLSLEffect_InitFixedFunctionShaders @ 0x5AF790]; another effect its EffectTag and, where EffectAlt_UV
@@ -1504,6 +1548,7 @@ int main(int argc, char **argv) {
 	failures += test_music_script();
 	failures += test_shader_and_text();
 	failures += test_text_readers();
+	failures += test_project_notes();
 	failures += test_shader_definitions();
 	failures += test_gate_tag_config();
 	failures += test_import_shader();
