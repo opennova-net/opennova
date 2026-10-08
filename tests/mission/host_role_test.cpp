@@ -415,7 +415,10 @@ int main() {
                 !lp.view.binoculars_view_active && !lp.view.scope_engaged &&
                 !lp.view.scope_settled);
         CHECK(lp.stance_latch() == 0 && !lp.input.prone && !lp.input.crouch);
-        CHECK(lp.input.look_heading == w::bam_heading_from_mission_yaw_deg(lp.player()->yaw));
+        // The look yaw is the player's +0x10 word the deploy placed (D-NET-376)
+        // [orig: Game_InitNewRound @0x4227E3].
+        CHECK(lp.input.look_heading ==
+                kernel.world.ai.for_handle(lp.player()->handle)->heading);
         CHECK(lp.input.look_pitch == 12345 && lp.input.forward);
         CHECK(lp.view.shake.counter == 0 && lp.view.shake.roll == 111 &&
                 lp.view.shake.pitch == 222 && lp.view.shake.yaw == 333);

@@ -655,6 +655,9 @@ world::PlayerSpawn spawn_from_self(const JoinerConnection::SelfSpawn &s) {
 	// the host shifts << 16) -> pass it straight to the (90 - heading) mission-degree map.
 	spawn.yaw = static_cast<int16_t>(
 			std::lround(world::mission_yaw_deg_from_bam_heading(s.orientation)));
+	// The motor keeps the record's full word, never its whole-degree mirror
+	// (D-NET-376) [orig: NapiNPClientMsg_0x00C @0x42E967 `mov [edi+10h], ecx`].
+	spawn.heading_bam = s.orientation;
 	spawn.team = s.team;
 	// The named player record carries the host-stamped character selector and
 	// packed minimap/character id. Preserve both on local L just as retail's
@@ -1440,8 +1443,7 @@ void JoinerRole::spawn_and_arm_local_player() {
 		lp.weapon.fire_pressed = false;
 		lp.weapon.reload_pressed = false;
 		kernel.resolve_new_infantry_adm_ids();
-		lp.reset_local_player_input(
-				world::bam_heading_from_mission_yaw_deg(spawn.yaw));
+		lp.reset_local_player_input(world::player_spawn_heading(spawn));
 	}
 }
 
