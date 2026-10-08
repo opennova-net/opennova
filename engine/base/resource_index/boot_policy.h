@@ -86,6 +86,7 @@ inline constexpr const char *kLaunchFlagCapturePcap = "--capture-pcap";
 inline constexpr const char *kLaunchFlagMcpPort = "--mcp-port";
 inline constexpr const char *kLaunchFlagWorkingDir = "--working-dir";
 inline constexpr const char *kLaunchFlagNoHud = "/NOHUD";
+inline constexpr const char *kLaunchFlagNoReload = "/noreload";
 
 struct LaunchFlags {
     bool loose_override = false;   // /d
@@ -114,6 +115,12 @@ struct LaunchFlags {
     // Game_ParseCommandLineAndInit @0x4a7310 — `_stricmp(token, "/NOHUD")`
     // @0x4A79FC -> sub_58FF20(0) @0x4A7A09].
     bool no_hud = false;
+    // /noreload — the whole token, any case: the session copy forces the
+    // auto-reload global off whatever the profile's word holds
+    // (profile::session_input) [orig: Game_ParseCommandLineAndInit
+    // `_stricmp(token, "/noreload")` @0x4A76DD -> dword_B4C4F4 = 1 @0x4A76E9;
+    // Game_ApplySessionSettingsToGlobals @0x551a24..0x551a48].
+    bool no_reload = false;
 };
 
 LaunchFlags parse_launch_flags(const std::vector<std::string> &args);

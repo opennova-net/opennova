@@ -146,6 +146,12 @@ struct HostConfig {
 	// @0x551500]. Defaults to the stock fresh-profile seed; the shell replaces it
 	// from the mounted Avatars.def + weapon.sav.
 	CharacterJoinVars local_character_vars = retail_fresh_profile_character_vars();
+	// The listen host's OWN inverse OPTIONS_AUTOMEDIC word, its profile's +1660:
+	// the round init copies it into the host's own player slot +372, where a
+	// joiner's arrives by C2S 0x03; 0 (a fresh record's) is automatic requests.
+	// [orig: Server_InitNewRoundState @0x51ca4d..0x51ca61 — under
+	//  is_mp_session_peer, slot +0x174 = g_curPlayerProfile +0x67C]
+	uint32_t local_auto_medic_disabled = 0;
 	// The host process's log devices (server_files.h) and its socket's bound
 	// address for the /INOUT lines; the session start installs both on the
 	// fresh context.

@@ -851,6 +851,10 @@ private:
 	void sync_class_attribute_flags();
 	// Install the retained retail player-profile join block on the current runtime.
 	void install_character_join_vars();
+	// The current record's auto-medic word onto the joiner runtime (C2S 0x03).
+	void install_auto_medic_preference();
+	// The session copy of the record's input words (profile::session_input).
+	void apply_session_input();
 	// Install or clear the explicitly selected retail integrity corpus profile.
 	void install_join_integrity_profile();
 	// Install the retained JOIN-checksum install root (D-NET-166).
@@ -1738,9 +1742,18 @@ public:
 	// PlayerProfiles, loaded at the menu's start): the weapon.sav record, its
 	// class bytes clamped to [5,9] as a session start does, becomes the active
 	// one, and the player.sav record supplies single player's session words
-	// (runtime/profile/player_profiles.h, inmatch singleplayer_game_config).
-	// ERR_INVALID_PARAMETER with no profile; the defaults then stand.
+	// (runtime/profile/player_profiles.h, inmatch singleplayer_game_config),
+	// and the session copy of its input words and auto-medic word
+	// (runtime/profile/profile_controls.h). ERR_INVALID_PARAMETER with no
+	// profile; the defaults then stand.
 	Error use_player_profile(const Ref<PlayerProfiles> &p_profiles);
+	// The in-game options Accept over the record it wrote
+	// (profile::ingame_accept_input: the look's two words at once).
+	Error apply_ingame_options(const Ref<PlayerProfiles> &p_profiles);
+	// The session's live input words (diagnostics).
+	int get_session_mouse_sensitivity() const;
+	bool is_session_mouse_inverted() const;
+	bool is_session_auto_reload() const;
 	// The FP viewmodel submit spec {gun, arms, adm, show_arms} (renderer
 	// fp_viewmodel_spec (engine: runtime/inmatch/joiner_role.cpp)). `character_arms` is the local
 	// player's resolved combo arms graphic (retail's CharacterEntity arms model,

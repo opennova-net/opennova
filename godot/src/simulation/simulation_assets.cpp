@@ -124,6 +124,13 @@ void Simulation::install_character_join_vars() {
 	runtime_->set_character_join_vars(net_.join_character_vars);
 }
 
+void Simulation::install_auto_medic_preference() {
+	if (!runtime_ || !player_.profile_record_set) return;
+	// The record's +1660, raw (engine JoinerConnection::set_auto_medic_preference).
+	runtime_->set_auto_medic_preference(
+			static_cast<uint32_t>(player_.profile_record.auto_medic_off));
+}
+
 void Simulation::install_join_integrity_profile() {
 	if (!runtime_) return;
 	if (net_.join_integrity_profile_id.empty()) {

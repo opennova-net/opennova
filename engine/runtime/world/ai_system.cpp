@@ -632,7 +632,7 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
         WeaponFsmInputs inputs;
         inputs.is_local = owner.handle == world.cached.local_player;
         inputs.is_authority = is_authority;
-        inputs.auto_reload = true;
+        inputs.auto_reload = world.rules.auto_reload; // [orig: g_AutoReloadEnabled @ 0x24D2118]
         // The heat window is derived from the tick, so the pump needs it. AI gunners
         // sit on the emplaced guns that actually author heat, so this is the path
         // that overheats in practice. [orig: current_tick @ 0x24C1968]

@@ -458,6 +458,12 @@ void Simulation::_bind_methods() {
 	                     &Simulation::set_local_player_class);
 	ClassDB::bind_method(D_METHOD("use_player_profile", "profiles"),
 	                     &Simulation::use_player_profile);
+	ClassDB::bind_method(D_METHOD("apply_ingame_options", "profiles"),
+	                     &Simulation::apply_ingame_options);
+	ClassDB::bind_method(D_METHOD("get_session_mouse_sensitivity"),
+	                     &Simulation::get_session_mouse_sensitivity);
+	ClassDB::bind_method(D_METHOD("is_session_mouse_inverted"), &Simulation::is_session_mouse_inverted);
+	ClassDB::bind_method(D_METHOD("is_session_auto_reload"), &Simulation::is_session_auto_reload);
 	ClassDB::bind_static_method("Simulation",
 			D_METHOD("player_eye_min_above_position"),
 			&Simulation::player_eye_min_above_position);

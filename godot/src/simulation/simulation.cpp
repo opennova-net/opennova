@@ -548,6 +548,7 @@ std::function<void(bool)> Simulation::role_bringup_tail() {
 		if (fresh_joiner_runtime) {
 			install_charattr_table();
 			install_character_join_vars();
+			install_auto_medic_preference();
 			install_join_integrity_profile();
 			install_expansion_version_root();
 		}

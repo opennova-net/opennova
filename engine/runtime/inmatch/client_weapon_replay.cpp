@@ -118,6 +118,9 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
         input.owner_present = row || native_owner;
         input.is_local = false;
         input.is_authority = false;
+        // The one process global every slot reads [orig: g_AutoReloadEnabled
+        // @0x24D2118; WeaponAction_Idle @0x5429a6 tests no owner].
+        input.auto_reload = world.rules.auto_reload;
         input.current_tick = static_cast<int32_t>(world.logic_tick);
         input.submerged = world.env.water_z != 0 && world::to_fixed(owner.position.z) <= world.env.water_z;
         input.last_tick_of_batch = world.rules.last_tick_of_batch;
