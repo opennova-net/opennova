@@ -46,6 +46,12 @@ constexpr FindingCodeRow listed(FindingCodeRow row) {
 	return row;
 }
 
+// A gating code whose refusal is the game's own: what the game does there, cited.
+constexpr FindingCodeRow the_game_fails(FindingCodeRow row, const char *refusal) {
+	row.game_refusal = refusal;
+	return row;
+}
+
 constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::AssetKindUnknown, code("asset.kind.unknown", G::ProjectFiles) },
 	{ C::AssetNameDuplicate, about_the_file("asset.name.duplicate", G::ProjectFiles, F::Rename) },
@@ -117,10 +123,15 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::DocumentCollection, code("document.collection", G::Documents) },
 	// A file of a kind the ConfigFile text reader reads holding more values than that reader's pool of its
 	// text values takes (documents/config_overrun.h): an error, the reader clearing past the pool into the
-	// game's heap [orig: ConfigFile_ParseText @ 0x7609e8]. Listed: the load goes on and the crash comes later,
-	// as the heap's next block is used (8 bytes past ran in the witness, 41 crashed a mission start). Its fix,
-	// the lines the kind's loader reads the same without commented out, an edit of its document.
-	{ C::DocumentConfigOverrun, listed(code("document.config_overrun", G::Documents, F::EditRecord)) },
+	// game's heap [orig: ConfigFile_ParseText @ 0x7609e8]. It gates: the load goes on, but the game's heap is
+	// corrupt from there and the crash comes later, as the heap's next block is used (41 bytes past crashed a
+	// single-player mission start in the witness; 8 past ran, which no build may count on). Its fix, the lines
+	// the kind's loader reads the same without commented out, an edit of its document.
+	{ C::DocumentConfigOverrun,
+	  the_game_fails(code("document.config_overrun", G::Documents, F::EditRecord),
+	                 "its ConfigFile reader clears the buffer of the file's text values one byte per value, past its "
+	                 "end into the game's memory, and the game crashes later, as a mission starts [orig: "
+	                 "ConfigFile_ParseText @ 0x7609e8]") },
 	{ C::DocumentConflict, code("document.conflict", G::Documents, F::Reload) },
 	{ C::DocumentCopy, code("document.copy", G::Documents) },
 	{ C::DocumentDecode, code("document.decode", G::Documents) },
