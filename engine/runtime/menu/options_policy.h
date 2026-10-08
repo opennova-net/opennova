@@ -59,10 +59,7 @@ inline constexpr VideoQualityControl kVideoQualityControls[] = {
     {"SHADERUSAGE", "2"},
     {"WATERQUALITY", "3"},
     {"SHADOWQUALITY", "3"},
-    {"PARTICLES", "2"},
     {"FBEFFECTS", "3"},
-    // "Minimal" means minimal compression and therefore maximum fidelity.
-    {"TEXCOMPRESSION", "2"},
 };
 
 // The object-detail rows are served, not pinned: game.cfg's
@@ -95,6 +92,33 @@ inline constexpr const char *kObjectDetailControls[] = {"OBJECTPOLY", "OBJECTDET
 // (the ACCEPT's read), @0x55ad65..0x55adb1 (a changed word reloads every
 // effect at once)]. The in-game options author no such row.
 inline constexpr const char *kTextureFilterControls[] = {"TEXFILTER"};
+
+// The particle-density rows are served, not pinned: game.cfg's
+// `particle_density` (renderer/particle_density.h). The front-end OPTIONS
+// screen's PARTICLES combobox and the in-game options' PARTICLES row select
+// the row whose item value is the persisted word and write the selected row's
+// value back [orig: UI_PopulateRenderAndAudioSettings @0x55cfb3..0x55d001
+// locks only the rows above the device's own maximum (g_CfgParticleDensityMax
+// @0x2550810, 2 on every pixel-shader device: RenderSettings_ComputeFromGPUCaps
+// @0x587983, @0x587a15), so every row is open on the device OpenNova ports;
+// UI_SyncRenderSettingsToWidgets @0x55a2a6..0x55a2cb (the select by value);
+// sub_55A710 @0x55a905..0x55a926 (the ACCEPT's read); UI_OptionsScreenInit
+// @0x554a0c..0x554a31 and UI_IngameOptionsDialogEventHandler
+// @0x554f14..0x554f35 (the in-game pair)]. Neither Accept touches the session
+// copy, so the word reaches the particles at the next mission start.
+inline constexpr const char *kParticleDensityControls[] = {"PARTICLES"};
+
+// The texture-compression row is served, not pinned: game.cfg's
+// `texcompression_level` (renderer/texture_compression.h). The front-end
+// OPTIONS screen's TEXCOMPRESSION combobox selects the row whose item value is
+// the persisted word and writes the selected row's value back
+// [orig: UI_PopulateRenderAndAudioSettings @0x55d0f3..0x55d141 locks only the
+// rows above g_CfgTexCompressionLevelMax @0x2550828, 2 on every device
+// (RenderSettings_ComputeFromGPUCaps @0x587a43); UI_SyncRenderSettingsToWidgets
+// @0x55a34e..0x55a373 (the select by value); sub_55A710 @0x55a957..0x55a972
+// (the ACCEPT's read)]. The in-game options author no such row. The word
+// reaches the textures the next mission builds.
+inline constexpr const char *kTexCompressionControls[] = {"TEXCOMPRESSION"};
 
 // The registered retail comparison profile's gamma reference. Gamma is
 // calibration, not a quality rung, so pushing it to the numeric maximum would

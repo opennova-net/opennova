@@ -1,5 +1,6 @@
 #include <runtime/renderer/particle_frame.h>
 #include <runtime/renderer/particle_color.h>
+#include <runtime/renderer/particle_density.h>
 
 #include <cmath>
 #include <cstdio>
@@ -580,6 +581,63 @@ bool flat_particle_runs_contract() {
 			"every selected emitter reports exactly one bounds entry");
 }
 
+bool density_stride_contract() {
+	// The scene pass's density stride builds a quad only for a particle whose
+	// serial byte modulo the stride is 0, after the batch's depth sort; the
+	// skipped particles are neither invisible nor truncated
+	// [orig: CParticleEmitter_BuildBillboardQuads @ 0x5E6DA2..0x5E6E06].
+	const auto draw_state = state(r::ParticlePipeline::Blend, 2, 0, 3);
+	r::ParticleFrameSnapshot snapshot;
+	std::vector<r::ParticleQuadSnapshot> particles;
+	for (std::uint8_t serial = 0; serial < 8; ++serial) {
+		r::ParticleQuadSnapshot particle =
+				quad(10.0f + serial, 0x10u + serial, draw_state);
+		particle.serial = serial;
+		particles.push_back(particle);
+	}
+	add_emitter(snapshot, 1, r::ParticleRenderDomain::World, 10.0f, particles);
+
+	r::ParticleFrameCompiler compiler;
+	r::ParticleViewInput view;
+	const auto &full = compiler.compile(snapshot, view);
+	if (!check(full.debug.emitted_quads == 8 && full.debug.lod_skipped_particles == 0,
+			"a stride of 1 builds every particle")) return false;
+	view.lod_divisor = 4;
+	const auto &quarter = compiler.compile(snapshot, view);
+	if (!check(quarter.debug.emitted_quads == 2 &&
+			quarter.debug.lod_skipped_particles == 6 &&
+			quarter.debug.truncated_particles == 0 &&
+			quarter.debug.invisible_particles == 0,
+			"a stride of 4 builds serials 0 and 4 alone")) return false;
+	// Far to near: the serial-4 particle (depth 14) before the serial-0 (10).
+	if (!check(quarter.vertices.size() == 8 &&
+			quarter.vertices[0].primary_color == 0x14u &&
+			quarter.vertices[4].primary_color == 0x10u,
+			"the stride keeps the sorted order of what it builds")) return false;
+	// The views' strides in one frame: the NVG scene replaces the main view,
+	// the Inset keeps the main scene's, and the mirror takes what the previous
+	// frame's last pass left.
+	const r::ParticleFrameStrides nvg = r::particle_frame_strides(0, true, 4u);
+	const r::ParticleFrameStrides plain = r::particle_frame_strides(1, false, nvg.last_pass);
+	if (!check(nvg.main_view == 8u && nvg.inset == 4u && nvg.mirror == 4u &&
+			nvg.last_pass == 8u && plain.main_view == 2u && plain.inset == 2u &&
+			plain.mirror == 8u && plain.last_pass == 2u &&
+			r::particle_frame_strides(2, false, 0u).mirror == 1u,
+			"the frame's strides by view")) return false;
+	return check(r::particle_scene_lod_divisor(2, r::ParticleScenePass::Main) == 1u &&
+			r::particle_scene_lod_divisor(1, r::ParticleScenePass::Main) == 2u &&
+			r::particle_scene_lod_divisor(0, r::ParticleScenePass::Main) == 4u &&
+			r::particle_scene_lod_divisor(2, r::ParticleScenePass::NvgScene) == 2u &&
+			r::particle_scene_lod_divisor(1, r::ParticleScenePass::NvgScene) == 4u &&
+			r::particle_scene_lod_divisor(0, r::ParticleScenePass::NvgScene) == 8u &&
+			r::particle_scene_lod_divisor(9, r::ParticleScenePass::Main) == 1u &&
+			r::particle_scene_lod_divisor(-3, r::ParticleScenePass::Main) == 4u &&
+			r::particle_density_scale(1, r::ParticleScenePass::Main) == 0.5f &&
+			r::particle_density_scale(0, r::ParticleScenePass::NvgScene) == 0.125f &&
+			r::particle_lod_divisor(r::kParticleDensityScaleInitial) == 1u,
+			"the scene passes' strides: 1, 2, 4 in the main scene, twice that in the NVG scene");
+}
+
 bool retained_sort_stack_contract() {
 	// A near-to-far run is the first-element-pivot quicksort's degenerate
 	// input (one partition per element). The explicit recursion stack is
@@ -718,6 +776,7 @@ int main() {
 	if (!world_oriented_and_rolled_quad_contract()) return 1;
 	if (!flat_particle_runs_contract()) return 1;
 	if (!retained_sort_stack_contract()) return 1;
+	if (!density_stride_contract()) return 1;
 	if (!empty_batch_leaves_emitters_unstamped_contract()) return 1;
 	if (!thermal_material_contract()) return 1;
 	if (!distortion_class_pass_contract()) return 1;

@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include <runtime/renderer/texture_load_rules.h>
+
 namespace opennova::renderer {
 
 namespace {
@@ -143,6 +145,50 @@ DeviceTexture pixel_device_texture(uint32_t width, uint32_t height, uint32_t fla
 	out.bytes = chain_bytes(out.width, out.height, out.levels, out.format, out.bits);
 	out.stat_bytes = texture_stat_bytes(out.width, out.height, out.format, out.bits);
 	return out;
+}
+
+// [orig: GTexture_CreateFromPixelData_0 @ 0x6876C0]
+std::vector<DeviceTextureLevel> pixel_device_texture_levels(const uint8_t *rgba, uint32_t width,
+		uint32_t height, uint32_t flags, const TextureDxtCaps &caps, uint32_t level_limit,
+		uint32_t max_side) {
+	std::vector<DeviceTextureLevel> levels;
+	if (rgba == nullptr || width == 0 || height == 0)
+		return levels;
+	std::vector<uint8_t> base(rgba, rgba + static_cast<size_t>(width) * height * 4);
+	const uint32_t halvings = pixel_texture_halvings(width, height, flags, max_side);
+	for (uint32_t i = 0; i < halvings && width > 1 && height > 1; ++i)
+		halve_rgba(base, width, height);
+	uint32_t count = texture_level_count(width, height, flags);
+	if (level_limit != 0)
+		count = std::min(count, level_limit);
+	const TextureDxtFormat format = select_texture_dxt_format(flags, caps);
+	if (format != TextureDxtFormat::None) {
+		for (const DxtSurface &surface : build_dxt_texture_levels(base.data(), width, height, format, count)) {
+			DeviceTextureLevel level;
+			level.width = surface.width;
+			level.height = surface.height;
+			level.rgba = encode_rgba8(decode_dxt_surface(surface));
+			levels.push_back(std::move(level));
+		}
+		return levels;
+	}
+	DeviceTextureLevel level0;
+	level0.width = width;
+	level0.height = height;
+	level0.rgba = std::move(base);
+	levels.push_back(std::move(level0));
+	while (levels.size() < count) {
+		const DeviceTextureLevel &above = levels.back();
+		if (above.width <= 1 && above.height <= 1)
+			break;
+		DeviceTextureLevel level;
+		level.width = std::max(1u, above.width / 2);
+		level.height = std::max(1u, above.height / 2);
+		level.rgba = encode_rgba8(box_filter_half(decode_rgba8(above.rgba.data(), above.width, above.height),
+				above.width, above.height));
+		levels.push_back(std::move(level));
+	}
+	return levels;
 }
 
 // [orig: GTexture_InitFromMemory @ 0x687DF0 — the detail's skip @ 0x687E3B..0x687E49; the DXT5 made DXT1

@@ -13,6 +13,7 @@
 #include "simulation/simulation.h"
 #include "simulation/player_local_view.h"
 #include "terrain/terrain_data.h"
+#include "terrain/terrain_image_convert.h"
 #include "util/axes.h"
 #include "util/string_convert.h"
 
@@ -45,6 +46,8 @@ using namespace godot;
 
 #include <runtime/hud/game_text_lookup.h> // the game-text section names
 #include <runtime/hud/hud_minimap_feed.h> // the marker feed layout (decode)
+#include <runtime/renderer/texture_compression.h> // the minimap colormap's fresh-profile word
+#include <runtime/terrain/terrain_tile_composer.h> // terrain_colormap_device_image
 #include <runtime/hud/hud_game_text.h> // hud_session_text (the session lines' strings)
 #include <runtime/hud/hud_layout_from_hudpos.h> // the hudpos.def parse applied to the layout
 #include <runtime/hud/hud_texture_materials.h> // the non-HUD-loader textures' material words
@@ -264,8 +267,10 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("cycle_sight_scale"), &HudOverlay::cycle_sight_scale);
 	ClassDB::bind_method(D_METHOD("get_sight_scale_index"),
 			&HudOverlay::get_sight_scale_index);
-	ClassDB::bind_method(D_METHOD("set_minimap_terrain", "terrain", "water_mask"),
-			&HudOverlay::set_minimap_terrain, DEFVAL(Ref<Texture2D>()));
+	ClassDB::bind_method(D_METHOD("set_minimap_terrain", "terrain", "water_mask",
+								 "texcompression_level"),
+			&HudOverlay::set_minimap_terrain, DEFVAL(Ref<Texture2D>()),
+			DEFVAL(opennova::renderer::kTexCompressionLevelFreshProfile));
 	ClassDB::bind_method(D_METHOD("get_minimap_water_mask"),
 			&HudOverlay::get_minimap_water_mask);
 	ClassDB::bind_method(D_METHOD("set_minimap_state", "mission_position",
@@ -1524,7 +1529,7 @@ Ref<Texture2D> HudOverlay::get_minimap_water_mask() const {
 }
 
 void HudOverlay::set_minimap_terrain(const Ref<TerrainData> &p_terrain,
-		const Ref<Texture2D> &p_water_mask) {
+		const Ref<Texture2D> &p_water_mask, int p_texcompression_level) {
 	state_.minimap.terrain = opennova::hud::HudMinimapTerrain{};
 	textures_[opennova::hud::kHudTexMapTerrain].unref();
 	textures_[opennova::hud::kHudTexMapWater].unref();
@@ -1546,16 +1551,24 @@ void HudOverlay::set_minimap_terrain(const Ref<TerrainData> &p_terrain,
 	terrain.sector_rows = p_terrain->get_sector_rows();
 	terrain.present = copy_count == static_cast<int64_t>(terrain.sector_grid.size()) &&
 			terrain.sector_count > 0 && terrain.sector_rows > 0;
-	// Retail's base pass samples the original 512x512 colormap quadrants
-	// directly. Bind an RGB copy so authored alpha cannot ghost the backing,
-	// then keep depthspin's transparent shore cutout in its own texture slot.
+	// Retail's base pass samples the 512x512 colormap quadrants directly, as
+	// the session's texcompression_level made them (DXT1 below 2 on the
+	// reference card: terrain::terrain_colormap_device_image). Bind an RGB
+	// copy so authored alpha cannot ghost the backing, then keep depthspin's
+	// transparent shore cutout in its own texture slot.
 	Ref<Texture2D> colormap = p_terrain->get_colormap();
-	if (colormap.is_valid()) {
-		Ref<Image> image = colormap->get_image();
+	opennova::terrain::Rgba8Image source;
+	if (texture_to_rgba8(colormap, source)) {
+		const opennova::terrain::Rgba8Image device =
+				opennova::terrain::terrain_colormap_device_image(source, p_texcompression_level);
+		PackedByteArray bytes;
+		bytes.resize(static_cast<int64_t>(device.pixels.size()));
+		if (!device.pixels.empty()) {
+			std::memcpy(bytes.ptrw(), device.pixels.data(), device.pixels.size());
+		}
+		Ref<Image> image = Image::create_from_data(static_cast<int>(device.width),
+				static_cast<int>(device.height), false, Image::FORMAT_RGBA8, bytes);
 		if (image.is_valid()) {
-			if (image->is_compressed()) {
-				image->decompress();
-			}
 			image->convert(Image::FORMAT_RGB8);
 			colormap = ImageTexture::create_from_image(image);
 		}

@@ -251,7 +251,16 @@ func _on_minimap_water_changed(mask: ImageTexture) -> void:
 	if _game_hud == null:
 		return
 	_game_hud.set_minimap_terrain(
-			_world.get_terrain_data() if _world != null else null, mask)
+			_world.get_terrain_data() if _world != null else null, mask,
+			_session_texcompression_level())
+
+
+## The session's texcompression_level the map's colormap quadrants and the
+## SIGHTS card pictures were made under (GameWorld's mission-start copy;
+## D-RMAT-24).
+func _session_texcompression_level() -> int:
+	return _world.get_session_texcompression_level() if _world != null \
+			else GameWorld.texcompression_level_fresh_profile()
 
 
 ## Hand the world's particle renderer the weapon Inset pass's camera, or null
@@ -410,7 +419,8 @@ func ensure_game_hud() -> void:
 	# The raw colormap remains the sharp base; depthspin supplies water only.
 	_game_hud.set_minimap_terrain(
 			_world.get_terrain_data() if _world != null else null,
-			_world.get_minimap_water_mask() if _world != null else null)
+			_world.get_minimap_water_mask() if _world != null else null,
+			_session_texcompression_level())
 	# The grid-label origin marker (mission type-2043 entity), resolved once
 	# per world. [orig: HUD_InitOverlaySystem @0x5a4999 pool scan]
 	var sim_for_origin := _world.get_sim() if _world != null else null
@@ -515,7 +525,8 @@ func tick(gameplay_input_active: bool = false) -> void:
 			_sight_slide_multiplier = weapon.sight_slide_multiplier if weapon != null else 0
 			_push_sight_state()
 			_sights_card.set_weapon_sights(sights,
-					_world.get_resource_root() if _world != null else null)
+					_world.get_resource_root() if _world != null else null,
+					_session_texcompression_level())
 
 	# Live weapon/view state (the FSM clip/reserve + ADS + fov), mirroring the info
 	# struct's ammo fields; an infinite-capacity weapon reads clip -1.

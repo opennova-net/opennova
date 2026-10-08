@@ -274,8 +274,6 @@ Ref<EffectSpawnReceipt> EffectScene::spawn(const Ref<EffectSpawnRequest> &p_requ
 	request.source_tick = token_from_godot(p_request->get_source_tick());
 	request.source_order = token_from_godot(p_request->get_source_order());
 	request.spring_const = p_request->get_spring_const();
-	request.lod_divisor = std::max<std::uint32_t>(
-			non_negative_u32(p_request->get_lod_divisor()), 1u);
 
 	request.kill_plane =
 			static_cast<opennova::particle::EffectKillPlane>(kill_plane);

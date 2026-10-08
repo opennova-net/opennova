@@ -12,9 +12,12 @@
 #include <base/gameprofile/resource_missing.h>
 #include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
+#include <runtime/renderer/device_texture.h>
+#include <runtime/renderer/texture_dxt.h>
 
 #include <godot_cpp/classes/dir_access.hpp>
 #include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -89,6 +92,8 @@ void ResourceRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("effect_files"), &ResourceRoot::effect_files);
 	ClassDB::bind_method(D_METHOD("has_file", "name", "policy"), &ResourceRoot::has_file, DEFVAL(LOOKUP_SESSION_DEFAULT));
 	ClassDB::bind_method(D_METHOD("read_file", "name", "policy"), &ResourceRoot::read_file, DEFVAL(LOOKUP_SESSION_DEFAULT));
+	ClassDB::bind_method(D_METHOD("load_texture_created", "name", "loader", "flags"),
+			&ResourceRoot::load_texture_created);
 	ClassDB::bind_method(D_METHOD("load_texture", "name", "loader", "policy"), &ResourceRoot::load_texture,
 			DEFVAL(LOOKUP_SESSION_DEFAULT));
 	ClassDB::bind_method(D_METHOD("load_material_texture", "name", "type"), &ResourceRoot::load_material_texture);
@@ -653,9 +658,12 @@ PackedByteArray ResourceRoot::read_texture_attempt_(const opennova::renderer::Te
 }
 
 Ref<Image> ResourceRoot::load_texture_image(const String &name, TextureLoader loader,
-		LookupPolicy policy, bool *r_alpha_only) const {
+		LookupPolicy policy, bool *r_alpha_only, opennova::renderer::TextureReader *r_reader) const {
 	if (r_alpha_only != nullptr) {
 		*r_alpha_only = false;
+	}
+	if (r_reader != nullptr) {
+		*r_reader = opennova::renderer::TextureReader::None;
 	}
 	if (root_dir_.is_empty() || name.strip_edges().is_empty()) {
 		return Ref<Image>();
@@ -664,7 +672,7 @@ Ref<Image> ResourceRoot::load_texture_image(const String &name, TextureLoader lo
 			[this, policy](const opennova::renderer::TextureLoad &load) {
 				return read_texture_attempt_(load, policy);
 			},
-			r_alpha_only);
+			r_alpha_only, r_reader);
 	// An image consumer takes the top level alone.
 	if (image.is_valid() && image->has_mipmaps()) {
 		image->clear_mipmaps();
@@ -697,6 +705,74 @@ Ref<Texture2D> ResourceRoot::load_texture(const String &name, TextureLoader load
 			[this, policy](const opennova::renderer::TextureLoad &load) {
 				return read_texture_attempt_(load, policy);
 			});
+	texture_cache_.emplace(cache_key, result);
+	return result;
+}
+
+// The device texture's levels are renderer::pixel_device_texture_levels' (the engine
+// carries the witness); a DDS keeps load_texture's D3DX chain.
+Ref<Texture2D> ResourceRoot::load_texture_created(const String &name, TextureLoader loader,
+		int64_t flags) const {
+	const uint32_t creation = static_cast<uint32_t>(flags);
+	if (opennova::renderer::select_texture_dxt_format(creation,
+				opennova::renderer::kReferenceTextureDxtCaps) == opennova::renderer::TextureDxtFormat::None) {
+		return load_texture(name, loader);
+	}
+	if (root_dir_.is_empty() || name.strip_edges().is_empty()) {
+		return Ref<Texture2D>();
+	}
+	const uint64_t epoch = opennova::cache_epoch();
+	if (texture_cache_epoch_ != epoch) {
+		texture_cache_.clear();
+		texture_cache_epoch_ = epoch;
+	}
+	const std::string cache_key = "created:" + std::to_string(creation) + ":" +
+			opennova::texture_load_key(texture_attempts_(name, loader, LOOKUP_SESSION_DEFAULT));
+	const auto cached = texture_cache_.find(cache_key);
+	if (cached != texture_cache_.end()) {
+		return cached->second;
+	}
+	opennova::renderer::TextureReader reader = opennova::renderer::TextureReader::None;
+	Ref<Image> image = load_texture_image(name, loader, LOOKUP_SESSION_DEFAULT, nullptr, &reader);
+	Ref<Texture2D> result;
+	if (reader == opennova::renderer::TextureReader::Dds) {
+		result = load_texture(name, loader);
+	} else if (image.is_valid() && !image->is_empty()) {
+		if (image->get_format() != Image::FORMAT_RGBA8) {
+			image->convert(Image::FORMAT_RGBA8);
+		}
+		const PackedByteArray data = image->get_data();
+		// The levels as their blocks decode, uploaded as RGBA8 (a picture's sides
+		// need not be multiples of the 4 x 4 block), then the box chain's tail to
+		// 1 x 1 a mipmapped image needs; no draw past the retail chain reads it.
+		std::vector<opennova::renderer::DeviceTextureLevel> levels =
+				opennova::renderer::pixel_device_texture_levels(data.ptr(),
+						static_cast<uint32_t>(image->get_width()),
+						static_cast<uint32_t>(image->get_height()), creation);
+		while (!levels.empty() && (levels.back().width > 1 || levels.back().height > 1)) {
+			const opennova::renderer::DeviceTextureLevel &above = levels.back();
+			opennova::renderer::DeviceTextureLevel below;
+			below.width = std::max(1u, above.width / 2);
+			below.height = std::max(1u, above.height / 2);
+			below.rgba = opennova::renderer::encode_rgba8(opennova::renderer::box_filter_half(
+					opennova::renderer::decode_rgba8(above.rgba.data(), above.width, above.height),
+					above.width, above.height));
+			levels.push_back(std::move(below));
+		}
+		if (!levels.empty()) {
+			PackedByteArray bytes;
+			for (const opennova::renderer::DeviceTextureLevel &level : levels) {
+				const int64_t at = bytes.size();
+				bytes.resize(at + static_cast<int64_t>(level.rgba.size()));
+				std::memcpy(bytes.ptrw() + at, level.rgba.data(), level.rgba.size());
+			}
+			const Ref<Image> device = Image::create_from_data(static_cast<int>(levels.front().width),
+					static_cast<int>(levels.front().height), true, Image::FORMAT_RGBA8, bytes);
+			if (device.is_valid() && !device->is_empty()) {
+				result = ImageTexture::create_from_image(device);
+			}
+		}
+	}
 	texture_cache_.emplace(cache_key, result);
 	return result;
 }

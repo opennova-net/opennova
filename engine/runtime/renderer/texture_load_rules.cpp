@@ -316,34 +316,39 @@ const std::vector<DdsCodec> &dds_reader_codec_order() {
 	return order;
 }
 
-// [orig: GTexture_DownsampleToLimits @ 0x687170 — the cap (flag 0x1000 -> 512, 0x2000 ->
-//  256, 0x4000 -> 128) halving both sides while either exceeds it; each halving
+// [orig: GTexture_DownsampleToLimits @ 0x687200..0x68723C — the sides halved, then
 //  GTexture_Downsample2x2_RGBA8 @ 0x687000, every channel the truncated mean of a 2x2
-//  block read at twice the new width's stride; a model normal map loads with 0x1000,
-//  Material_LoadStageTexture @ 0x5B1782]
-void halve_rgba_to_cap(std::vector<uint8_t> &rgba, uint32_t &width, uint32_t &height, uint32_t cap) {
-	while ((width > cap || height > cap) && width > 0 && height > 0) {
-		const uint32_t w = width >> 1, h = height >> 1;
-		std::vector<uint8_t> out(static_cast<size_t>(w) * h * 4, 0);
-		const size_t stride = static_cast<size_t>(2) * w; // the source row as the halving reads it
-		const auto at = [&](size_t pixel, int channel) -> uint32_t {
-			const size_t offset = pixel * 4 + static_cast<size_t>(channel);
-			return offset < rgba.size() ? rgba[offset] : 0u;
-		};
-		for (uint32_t y = 0; y < h; ++y) {
-			for (uint32_t x = 0; x < w; ++x) {
-				const size_t top = static_cast<size_t>(y) * 2 * stride + static_cast<size_t>(x) * 2;
-				for (int c = 0; c < 4; ++c) {
-					const uint32_t sum = at(top, c) + at(top + 1, c) + at(top + stride, c) +
-							at(top + stride + 1, c);
-					out[(static_cast<size_t>(y) * w + x) * 4 + static_cast<size_t>(c)] =
-							static_cast<uint8_t>(sum >> 2);
-				}
+//  block read at twice the new width's stride]
+void halve_rgba(std::vector<uint8_t> &rgba, uint32_t &width, uint32_t &height) {
+	const uint32_t w = width >> 1, h = height >> 1;
+	std::vector<uint8_t> out(static_cast<size_t>(w) * h * 4, 0);
+	const size_t stride = static_cast<size_t>(2) * w; // the source row as the halving reads it
+	const auto at = [&](size_t pixel, int channel) -> uint32_t {
+		const size_t offset = pixel * 4 + static_cast<size_t>(channel);
+		return offset < rgba.size() ? rgba[offset] : 0u;
+	};
+	for (uint32_t y = 0; y < h; ++y) {
+		for (uint32_t x = 0; x < w; ++x) {
+			const size_t top = static_cast<size_t>(y) * 2 * stride + static_cast<size_t>(x) * 2;
+			for (int c = 0; c < 4; ++c) {
+				const uint32_t sum = at(top, c) + at(top + 1, c) + at(top + stride, c) +
+						at(top + stride + 1, c);
+				out[(static_cast<size_t>(y) * w + x) * 4 + static_cast<size_t>(c)] =
+						static_cast<uint8_t>(sum >> 2);
 			}
 		}
-		rgba = std::move(out);
-		width = w;
-		height = h;
+	}
+	rgba = std::move(out);
+	width = w;
+	height = h;
+}
+
+// [orig: GTexture_DownsampleToLimits @ 0x687170 — the cap (flag 0x1000 -> 512, 0x2000 ->
+//  256, 0x4000 -> 128) halving both sides while either exceeds it (@ 0x6871B7..0x6871BD);
+//  a model normal map loads with 0x1000, Material_LoadStageTexture @ 0x5B1782]
+void halve_rgba_to_cap(std::vector<uint8_t> &rgba, uint32_t &width, uint32_t &height, uint32_t cap) {
+	while ((width > cap || height > cap) && width > 0 && height > 0) {
+		halve_rgba(rgba, width, height);
 	}
 }
 

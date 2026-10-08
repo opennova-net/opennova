@@ -220,6 +220,50 @@ func test_texture_filter_seeds_persists_and_clamps_as_the_cfg_word() -> void:
 	assert_eq(PlayerOptions.new().current().texfilter_level, 0)
 
 
+func test_particle_density_seeds_persists_and_clamps_as_the_cfg_word() -> void:
+	# game.cfg's particle_density: a fresh profile starts at the video test's
+	# 2 (a CPU past its 2980 MHz mark) and writes it at once; the load clamps a
+	# persisted word into 0..2 (the engine's renderer/particle_density.h).
+	assert_eq(GameWorld.particle_density_fresh_profile(), 2)
+	assert_eq(GameWorld.clamp_particle_density(-4), 0)
+	assert_eq(GameWorld.clamp_particle_density(7), 2)
+	var options := PlayerOptions.new()
+	assert_eq(options.current().particle_density, 2)
+	var config := ConfigFile.new()
+	assert_eq(config.load(PlayerOptions.CONFIG_PATH), OK)
+	assert_eq(int(config.get_value("display", "particle_density", -1)), 2,
+			"the fresh word persists at once")
+	var state := options.current()
+	state.particle_density = 0
+	options.update(state)
+	assert_eq(PlayerOptions.new().current().particle_density, 0)
+	assert_eq(state.copy().particle_density, 0, "the snapshot copy carries the word")
+	ConfigStore.write(PlayerOptions.CONFIG_PATH, "display", "particle_density", 9)
+	assert_eq(PlayerOptions.new().current().particle_density, 2,
+			"a persisted word past the top rung loads as 2")
+
+
+func test_texture_compression_seeds_and_persists_the_unclamped_cfg_word() -> void:
+	# game.cfg's texcompression_level: a fresh profile starts at the video
+	# test's 1 (a shader-model-2 card) and writes it at once; the load never
+	# clamps it (the engine's renderer/texture_compression.h).
+	assert_eq(GameWorld.texcompression_level_fresh_profile(), 1)
+	var options := PlayerOptions.new()
+	assert_eq(options.current().texcompression_level, 1)
+	var config := ConfigFile.new()
+	assert_eq(config.load(PlayerOptions.CONFIG_PATH), OK)
+	assert_eq(int(config.get_value("display", "texcompression_level", -1)), 1,
+			"the fresh word persists at once")
+	var state := options.current()
+	state.texcompression_level = 2
+	options.update(state)
+	assert_eq(PlayerOptions.new().current().texcompression_level, 2)
+	assert_eq(state.copy().texcompression_level, 2, "the snapshot copy carries the word")
+	ConfigStore.write(PlayerOptions.CONFIG_PATH, "display", "texcompression_level", 7)
+	assert_eq(PlayerOptions.new().current().texcompression_level, 7,
+			"the load keeps a word past the rows as written")
+
+
 func test_update_maps_each_audio_option_to_its_runtime_buses() -> void:
 	var options := PlayerOptions.new()
 	var state := options.current()

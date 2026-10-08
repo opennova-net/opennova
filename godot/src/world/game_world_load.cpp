@@ -237,6 +237,13 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// renderer/texture_filter.h).
 	session_texfilter_level_ = texfilter_level_;
 	publish_texfilter_state();
+	// The same copy of texcompression_level and particle_density: the terrain
+	// and the particle pages this mission builds, and the scene passes' particle
+	// stride, follow them until the next mission start (engine:
+	// renderer/texture_compression.h, renderer/particle_density.h).
+	session_texcompression_level_ = texcompression_level_;
+	session_particle_density_ = particle_density_;
+	publish_session_render_settings();
 	join_wire_assets_pending_ = wire_header_join;
 	join_wire_til_applied_ = false;
 	join_wire_assets_failed_ = false;
@@ -1241,6 +1248,9 @@ void GameWorld::start_effect_world() {
 			effect_world->set_mission_wind(info->get_wind_speed(), info->get_wind_direction());
 		}
 	}
+	// The session's words, before the pages are built (CParticleTexture_InitTextureAndChannels
+	// runs inside the effect load, after the mission start's copy).
+	effect_world->set_session_render_settings(session_texcompression_level_, session_particle_density_);
 	const int count = effect_world->load_from_resource_root(resource_root_);
     if (const Ref<Simulation> sim = get_sim(); sim.is_valid())
         sim->bind_item_effect_scene(effect_world->shared_native_scene());

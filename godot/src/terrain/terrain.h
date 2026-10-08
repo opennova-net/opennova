@@ -302,6 +302,13 @@ public:
 	void set_tile_info_override(const Ref<TerrainTileInfo> &p_info);
 	Ref<TerrainTileInfo> get_tile_info_override() const;
 
+	// The session's game.cfg texcompression_level the detail layers and the
+	// colormap quadrants are built under (renderer/texture_compression.h,
+	// D-RMAT-24), from the next build: the world hands the mission start's copy
+	// over before it builds the mission's terrain.
+	void set_texcompression_level(int p_level);
+	int get_texcompression_level() const;
+
 	void set_environment_path(const NodePath& p_path);
 	NodePath get_environment_path() const;
 

@@ -1050,53 +1050,6 @@ bool test_emit_rate_curve_quadruples_with_lut_255() {
 	return true;
 }
 
-bool test_lod_divisor_default_is_one() {
-	using namespace opennova::particle;
-	ParticleDef def = make_minimal_def();
-	Emitter e;
-	emitter_init(e, &def, {0, 0, 0}, 1);
-	if (!expect(e.lod_divisor == 1u, "default lod_divisor is 1 (render every particle)")) {
-		std::fprintf(stderr, "  got %u\n", e.lod_divisor);
-		return false;
-	}
-	return true;
-}
-
-bool test_lod_divisor_does_not_affect_simulation() {
-	// CParticleEmitter_BuildBillboardQuads @ 0x5e6d60 reads lod_divisor;
-	// the simulator (UpdateParticles, SpawnParticle) does NOT. Verify our
-	// portable simulator preserves this property: changing lod_divisor
-	// after init must not affect particle spawn/integration counts.
-	using namespace opennova::particle;
-	ParticleDef def = make_minimal_def();
-	def.emit_rate = 50.0f;
-	def.emit_dur = 1.0f;
-	def.emit_burst = 1;
-
-	Emitter e_full;
-	emitter_init(e_full, &def, {0, 0, 0}, 0xCAFE);
-	e_full.lod_divisor = 1;
-	emitter_advance(e_full, 0.5f);
-
-	Emitter e_culled;
-	emitter_init(e_culled, &def, {0, 0, 0}, 0xCAFE);
-	e_culled.lod_divisor = 4;
-	emitter_advance(e_culled, 0.5f);
-
-	if (!expect(e_full.particles.size() == e_culled.particles.size(),
-			"lod_divisor must not affect simulator particle count")) {
-		std::fprintf(stderr, "  full=%zu culled=%zu\n",
-				e_full.particles.size(), e_culled.particles.size());
-		return false;
-	}
-	// Per-particle state must also match (spawn order, positions, ...).
-	for (std::size_t i = 0; i < e_full.particles.size(); ++i) {
-		if (!expect(e_full.particles[i].serial == e_culled.particles[i].serial,
-				"per-particle serials match across LOD")) return false;
-	}
-	return true;
-}
-
 bool test_kill_plane_disabled_keeps_particles_alive() {
 	// Engine: CParticleEmitter_UpdateParticles @ 0x5e6980 only checks the
 	// kill plane when def.flags bits 27/28 are set; with our portable
@@ -1602,8 +1555,6 @@ int main() {
 	if (!test_emit_rate_curve_zeroes_emission_when_lut_zero()) ++failures;
 	if (!test_emit_rate_curve_neutral_lut_matches_constant_rate()) ++failures;
 	if (!test_emit_rate_curve_quadruples_with_lut_255())  ++failures;
-	if (!test_lod_divisor_default_is_one())            ++failures;
-	if (!test_lod_divisor_does_not_affect_simulation()) ++failures;
 	if (!test_kill_plane_disabled_keeps_particles_alive()) ++failures;
 	if (!test_kill_plane_above_kills_when_particle_rises()) ++failures;
 	if (!test_kill_plane_below_kills_at_threshold_or_lower()) ++failures;

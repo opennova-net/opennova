@@ -1260,6 +1260,11 @@ void GameWorld::render_material_frame() {
 void GameWorld::render_particle_frame() {
 	EffectWorld *effect_world = get_effect_world();
 	if (effect_world != nullptr) {
+		// While the NVG composite is up the world renders as the NVG scene,
+		// whose particle stride is twice the main scene's
+		// (LocalPlayerPresenter::is_nvg_raster_active; renderer/particle_density.h).
+		LocalPlayerPresenter *presenter = local_view_presenter();
+		effect_world->set_main_view_nvg_scene(presenter != nullptr && presenter->is_nvg_raster_active());
 		effect_world->render_frame(get_frame_clock_ms());
 	}
 }

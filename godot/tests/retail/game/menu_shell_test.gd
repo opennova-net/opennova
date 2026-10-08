@@ -218,9 +218,7 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 		"SHADERUSAGE": "2",
 		"WATERQUALITY": "3",
 		"SHADOWQUALITY": "3",
-		"PARTICLES": "2",
 		"FBEFFECTS": "3",
-		"TEXCOMPRESSION": "2",
 	}
 	for control_name in expected:
 		var id := driver.widget_id(control_name)
@@ -247,6 +245,21 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 			str(PlayerOptions.new().current().texfilter_level),
 			"TEXFILTER shows the persisted texture filter")
 	assert_false(driver.is_widget_disabled(texfilter), "TEXFILTER is editable")
+	# The particle density and the texture compression are served as well:
+	# game.cfg's particle_density and texcompression_level, seeded by value and
+	# editable (options_policy.h kParticleDensityControls, kTexCompressionControls).
+	var particles := driver.widget_id("PARTICLES")
+	assert_gte(particles, 0, "PARTICLES exists")
+	assert_eq(driver.item_value(particles, driver.selected_row(particles)),
+			str(PlayerOptions.new().current().particle_density),
+			"PARTICLES shows the persisted particle density")
+	assert_false(driver.is_widget_disabled(particles), "PARTICLES is editable")
+	var compression := driver.widget_id("TEXCOMPRESSION")
+	assert_gte(compression, 0, "TEXCOMPRESSION exists")
+	assert_eq(driver.item_value(compression, driver.selected_row(compression)),
+			str(PlayerOptions.new().current().texcompression_level),
+			"TEXCOMPRESSION shows the persisted texture compression")
+	assert_false(driver.is_widget_disabled(compression), "TEXCOMPRESSION is editable")
 	_cleanup(dir)
 
 

@@ -20,6 +20,8 @@ class TerrainSurfaceInputs : public RefCounted {
 private:
 	Ref<TerrainData> terrain_data;
 	Ref<TerrainTileInfo> tile_info_override;
+	// The session's texcompression_level (the fresh profile's until handed one).
+	int texcompression_level = 1;
 
 	Ref<Texture2D> detail_coefficient_texture;
 	Ref<Texture2D> normalized_blend_texture;
@@ -36,6 +38,12 @@ public:
 
 	void set_tile_info_override(const Ref<TerrainTileInfo> &p_info);
 	Ref<TerrainTileInfo> get_tile_info_override() const;
+
+	// The session's game.cfg texcompression_level: the detail layers' DXT
+	// request (rebuild_detail_textures) and the colormap quadrants' the tile
+	// cache builds (renderer/texture_compression.h, D-RMAT-24).
+	void set_texcompression_level(int p_level) { texcompression_level = p_level; }
+	int get_texcompression_level() const { return texcompression_level; }
 
 	bool rebuild(const Ref<TerrainData> &p_data,
 			const Ref<TerrainTileInfo> &p_tile_info = Ref<TerrainTileInfo>());

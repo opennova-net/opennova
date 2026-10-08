@@ -313,8 +313,12 @@ bool page_levels_contract() {
 	put(1, 0, {0, 255, 20, 0});
 	put(0, 1, {0, 255, 30, 0});
 	put(1, 1, {255, 0, 41, 255});
-	const std::vector<r::ParticleRgbaImage> levels = r::particle_atlas_page_levels(big);
-	if (!check(r::kParticlePageCreationFlags == 0x180000u && levels.size() == 3 &&
+	const r::ParticleAtlasPageTexture texture =
+			r::particle_atlas_page_texture(big, r::kParticlePageCreationFlags);
+	const std::vector<r::ParticleRgbaImage> &levels = texture.rgba_levels;
+	if (!check(r::kParticlePageCreationFlags == 0x180000u &&
+					texture.format == r::TextureDxtFormat::None && levels.size() == 3 &&
+					texture.side() == 1024 && texture.level_count() == 3 &&
 					levels[0].width == 1024 && levels[1].width == 512 &&
 					levels[1].height == 512 && levels[2].width == 256 &&
 					levels[1].valid() && levels[2].valid(),
@@ -330,16 +334,78 @@ bool page_levels_contract() {
 	if (!check(levels[2].rgba[0] == 16 && levels[2].rgba[3] == 16,
 				"level 2 filters the bytes level 1 was stored as"))
 		return false;
-	const std::vector<r::ParticleRgbaImage> small =
-			r::particle_atlas_page_levels(solid_image(256, 256, {9, 8, 7, 6}));
-	if (!check(small.size() == 3 && small[2].width == 64 && small[2].rgba[0] == 9 &&
-					small[2].rgba[3] == 6,
+	const r::ParticleAtlasPageTexture small = r::particle_atlas_page_texture(
+			solid_image(256, 256, {9, 8, 7, 6}), r::kParticlePageCreationFlags);
+	if (!check(small.rgba_levels.size() == 3 && small.rgba_levels[2].width == 64 &&
+					small.rgba_levels[2].rgba[0] == 9 && small.rgba_levels[2].rgba[3] == 6,
 				"a 256 page carries three levels: 256, 128, 64"))
 		return false;
-	return check(r::particle_atlas_page_last_level(1024) == 2 &&
-					r::particle_atlas_page_last_level(256) == 2 &&
-					r::particle_atlas_page_levels(r::ParticleRgbaImage{}).empty(),
+	return check(r::particle_atlas_page_last_level(1024, r::kParticlePageCreationFlags) == 2 &&
+					r::particle_atlas_page_last_level(256, r::kParticlePageCreationFlags) == 2 &&
+					r::particle_atlas_page_texture(r::ParticleRgbaImage{},
+							r::kParticlePageCreationFlags).level_count() == 0,
 			"both page sides stop at level 2; an empty page has no levels");
+}
+
+// The page flags under the session's two words (D-RMAT-24): 0x200 at a
+// texcompression_level of 1 or less, 0x10000 at a particle_density of 1 or
+// less [orig: CParticleTexture_InitTextureAndChannels @ 0x5E82B2..0x5E82CC].
+bool page_flags_contract() {
+	return check(r::particle_atlas_page_creation_flags(2, 2) == 0x180000u &&
+					r::particle_atlas_page_creation_flags(1, 2) == 0x180200u &&
+					r::particle_atlas_page_creation_flags(0, 2) == 0x180200u &&
+					r::particle_atlas_page_creation_flags(-4, 2) == 0x180200u &&
+					r::particle_atlas_page_creation_flags(7, 2) == 0x180000u &&
+					r::particle_atlas_page_creation_flags(2, 1) == 0x190000u &&
+					r::particle_atlas_page_creation_flags(2, 0) == 0x190000u &&
+					r::particle_atlas_page_creation_flags(1, 1) == 0x190200u,
+			"the page flags follow the two session words");
+}
+
+// A particle_density of 1 or less halves the page once with
+// GTexture_Downsample2x2_RGBA8 (each channel the truncated mean) before its
+// three levels [orig: GTexture_DownsampleToLimits @ 0x6871DB; @ 0x687000].
+bool page_halving_contract() {
+	r::ParticleRgbaImage big = solid_image(1024, 1024, {0, 0, 0, 0});
+	big.rgba[3] = 255; // one texel of the first 2x2 block opaque
+	const r::ParticleAtlasPageTexture texture = r::particle_atlas_page_texture(big, 0x190000u);
+	if (!check(texture.format == r::TextureDxtFormat::None && texture.side() == 512 &&
+					texture.rgba_levels.size() == 3 && texture.rgba_levels[2].width == 128,
+				"a halved 1024 page carries 512, 256 and 128"))
+		return false;
+	if (!check(texture.rgba_levels[0].rgba[3] == 63,
+				"the halving truncates (255 / 4 = 63), where D3DX's filter rounds"))
+		return false;
+	return check(r::particle_atlas_page_last_level(1024, 0x190000u) == 2 &&
+					r::particle_atlas_page_texture(solid_image(256, 256), 0x190000u).side() == 128,
+			"the halved pages still stop at level 2");
+}
+
+// A texcompression_level of 1 or less makes the page DXT5: level 0 the page
+// through D3DX's encoder, every later level the box filter of the level
+// before as its blocks decode [orig: GTexture_CreateFromPixelData_0
+// @ 0x687717..0x687727, @ 0x6878A0..0x6878BE].
+bool page_dxt5_contract() {
+	r::ParticleRgbaImage page = solid_image(256, 256, {200, 100, 50, 255});
+	for (std::size_t i = 0; i < page.rgba.size(); i += 4) {
+		const std::size_t texel = i / 4;
+		page.rgba[i] = static_cast<std::uint8_t>(texel % 251);
+		page.rgba[i + 3] = static_cast<std::uint8_t>((texel * 7) % 256);
+	}
+	const r::ParticleAtlasPageTexture texture = r::particle_atlas_page_texture(page, 0x180200u);
+	const std::vector<r::DxtSurface> expected =
+			r::build_dxt_texture_levels(page.rgba.data(), 256, 256, r::TextureDxtFormat::Dxt5, 3);
+	if (!check(texture.format == r::TextureDxtFormat::Dxt5 && texture.rgba_levels.empty() &&
+					texture.dxt_levels.size() == 3 && texture.side() == 256 &&
+					texture.dxt_levels[2].width == 64 &&
+					texture.dxt_levels[0].blocks == expected[0].blocks &&
+					texture.dxt_levels[2].blocks == expected[2].blocks,
+				"a compressed page is D3DX's DXT5 chain of three levels"))
+		return false;
+	const r::ParticleAtlasPageTexture both = r::particle_atlas_page_texture(page, 0x190200u);
+	return check(both.format == r::TextureDxtFormat::Dxt5 && both.side() == 128 &&
+					both.dxt_levels.size() == 3 && both.dxt_levels[2].width == 32,
+			"a compressed, halved page is DXT5 from 128 down to 32");
 }
 
 } // namespace
@@ -354,6 +420,9 @@ int main() {
 	if (!overlapping_skyline_candidate_contract()) return 1;
 	if (!raw_rgba_preprocess_contract()) return 1;
 	if (!page_levels_contract()) return 1;
+	if (!page_flags_contract()) return 1;
+	if (!page_halving_contract()) return 1;
+	if (!page_dxt5_contract()) return 1;
 	std::puts("renderer_particle_atlas_contract_test ok");
 	return 0;
 }

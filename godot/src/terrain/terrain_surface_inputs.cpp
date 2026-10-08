@@ -4,6 +4,7 @@
 #include "terrain/terrain_image_convert.h"
 #include "terrain/terrain_tile_info.h"
 #include "util/data_format.h"
+#include "util/dxt_texture.h"
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
@@ -101,51 +102,6 @@ Ref<Texture2D> texture_from_retail_mips(
 	return ImageTexture::create_from_image(image);
 }
 
-// Uploads the blocks as they are, so the GPU decodes them as the retail
-// device did. Godot needs the pyramid down to 1x1 where retail stops at 4
-// texels; the tail continues D3DXFilterTexture's box chain, and
-// sample_retail_detail_mips never selects it.
-Ref<Texture2D> texture_from_dxt_levels(
-		const std::vector<opennova::renderer::DxtSurface> &p_levels) {
-	using opennova::renderer::DxtSurface;
-	if (p_levels.empty() || !p_levels.front().is_valid()) {
-		return {};
-	}
-	std::vector<DxtSurface> chain = p_levels;
-	uint32_t expected_width = chain.front().width;
-	uint32_t expected_height = chain.front().height;
-	for (const DxtSurface &level : chain) {
-		if (!level.is_valid() || level.format != chain.front().format ||
-				level.width != expected_width || level.height != expected_height) {
-			return {};
-		}
-		expected_width = std::max(1u, expected_width >> 1);
-		expected_height = std::max(1u, expected_height >> 1);
-	}
-	while (chain.back().width > 1 || chain.back().height > 1) {
-		const DxtSurface last = chain.back();
-		chain.push_back(opennova::renderer::encode_dxt_surface(
-			opennova::renderer::box_filter_half(
-				opennova::renderer::decode_dxt_surface(last), last.width, last.height),
-			std::max(1u, last.width >> 1), std::max(1u, last.height >> 1),
-			last.format));
-	}
-	std::vector<uint8_t> bytes;
-	for (const DxtSurface &level : chain) {
-		bytes.insert(bytes.end(), level.blocks.begin(), level.blocks.end());
-	}
-	const Image::Format format =
-		chain.front().format == opennova::renderer::TextureDxtFormat::Dxt1
-			? Image::FORMAT_DXT1 : Image::FORMAT_DXT5;
-	Ref<Image> image = Image::create_from_data(
-		static_cast<int>(chain.front().width), static_cast<int>(chain.front().height),
-		true, format, to_packed_bytes(bytes));
-	if (image.is_null() || image->is_empty()) {
-		return {};
-	}
-	return ImageTexture::create_from_image(image);
-}
-
 bool live_depth_to_u16(const Ref<TerrainData> &p_data,
 		std::vector<uint16_t> &r_depth, uint32_t &r_width, uint32_t &r_height) {
 	if (p_data.is_null()) {
@@ -194,6 +150,10 @@ void TerrainSurfaceInputs::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_tile_info_override", "tile_info"),
 		&TerrainSurfaceInputs::set_tile_info_override);
+	ClassDB::bind_method(D_METHOD("set_texcompression_level", "level"),
+		&TerrainSurfaceInputs::set_texcompression_level);
+	ClassDB::bind_method(D_METHOD("get_texcompression_level"),
+		&TerrainSurfaceInputs::get_texcompression_level);
 	ClassDB::bind_method(D_METHOD("get_tile_info_override"),
 		&TerrainSurfaceInputs::get_tile_info_override);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "tile_info_override",
@@ -342,7 +302,7 @@ bool TerrainSurfaceInputs::rebuild_detail_textures() {
 		if (texture_to_rgba8(authored_layers[layer], base_source)) {
 			detail_layer_textures[layer] = texture_from_dxt_levels(
 				opennova::terrain::build_detail_layer_levels(
-					base_source, have_far ? &far_source : nullptr));
+					base_source, have_far ? &far_source : nullptr, texcompression_level));
 		}
 	}
 

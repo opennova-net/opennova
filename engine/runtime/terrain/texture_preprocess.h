@@ -47,9 +47,10 @@ std::vector<Rgba8Image> build_paired_detail_mip_chain(
 		const Rgba8Image &far_detail);
 
 // One of the three splat detail layers as the device texture retail creates:
-// flags 0x400200 (texture quality above 0) with the terrain-detail flags (0 at
-// full detail) and 8, which pick DXT1 on an adapter outside the NVIDIA DXT5
-// list. Without a far texture the layer's TGA goes through
+// the session texcompression_level's flags (0x400100 below 1, else 0x400200:
+// renderer/texture_compression.h) with the terrain-detail flags (0 at full
+// detail) and 8, which pick DXT1 either way on an adapter outside the NVIDIA
+// DXT5 list. Without a far texture the layer's TGA goes through
 // GTexture_CreateFromPixelData_0 (level 0 loaded, later levels
 // D3DXFilterTexture's chain); with one, GTexture_CreateFromPixelDataWithAlphaBlend
 // loads each paired level with D3DX_FILTER_NONE.
@@ -59,7 +60,8 @@ std::vector<Rgba8Image> build_paired_detail_mip_chain(
 // @ 0x58B73F; GTexture_CreateFromPixelDataWithAlphaBlend @ 0x6875C5]
 std::vector<renderer::DxtSurface> build_detail_layer_levels(
 		const Rgba8Image &base,
-		const Rgba8Image *far_detail);
+		const Rgba8Image *far_detail,
+		int32_t session_texcompression_level);
 
 // D3DXFilterTexture(D3DX_FILTER_BOX) level chain used by ordinary TGA
 // textures. Retail allocates while min(width,height)>2, so the terminal

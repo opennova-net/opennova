@@ -345,9 +345,11 @@ public:
 	void set_friendly_tag_env(float p_fog_distance_units, int p_speaking_level255);
 	// Device-facing minimap feeds. TerrainData is sampled once into the
 	// portable sector layout; snapshot is Simulation's versioned fixed-stride
-	// retained overlay buffer.
+	// retained overlay buffer. The colormap is bound as the session's
+	// texcompression_level makes its quadrants (D-RMAT-24).
 	void set_minimap_terrain(const Ref<TerrainData> &p_terrain,
-			const Ref<Texture2D> &p_water_mask = Ref<Texture2D>());
+			const Ref<Texture2D> &p_water_mask = Ref<Texture2D>(),
+			int p_texcompression_level = 1);
 	// The water mask the last set_minimap_terrain installed (a read seam the
 	// GUT presenter pins use; nothing else reads it).
 	Ref<Texture2D> get_minimap_water_mask() const;
