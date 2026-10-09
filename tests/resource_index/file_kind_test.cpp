@@ -260,6 +260,12 @@ static int test_master_copies() {
 	}
 	TEST_EXPECT(extensions > 0);
 	TEST_EXPECT(file_kind_for_name("glass.fx") == FileKind::Shader && vfs_loader_takes_stored("glass.fx"));
+	// Retail packs its effects with the menus' and the missions' files (localres.pff), and a mission's
+	// dialog sounds of the bank's name read as a .lwf or a .pwf alike [orig: DialogManager_LoadFromFile
+	// @ 0x44e7f5 -> SoundBank_OpenFile @ 0x44e807].
+	TEST_EXPECT(file_kind_facts(FileKind::Shader).archive_slot == ArchiveSlot::Localres);
+	TEST_EXPECT(file_kind_for_name("cp01.pwf") == FileKind::SoundBank && file_kind_for_name("CP01.PWF") == FileKind::SoundBank &&
+	            file_kind_for_name("cp01.lwf") == FileKind::SoundBank);
 	TEST_EXPECT(std::string(archive_slot_file_name(ArchiveSlot::Language)) == kBootArchiveTable[0] &&
 	            std::string(archive_slot_file_name(ArchiveSlot::Localres)) == kBootArchiveTable[1] &&
 	            std::string(archive_slot_file_name(ArchiveSlot::Resource)) == kBootArchiveTable[2]);
