@@ -1574,7 +1574,7 @@ std::string SessionCore::export_folder(const std::string &to) {
 		                            "outside it, or the project's export folder."));
 		return std::string();
 	}
-	return without_trailing_separator(utf8_of(out));
+	return io::without_trailing_separator(utf8_of(out));
 }
 
 BuildTarget SessionCore::build_target() const {

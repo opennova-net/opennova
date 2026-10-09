@@ -105,8 +105,8 @@ bool make_blank_avatars(const BlankRequest &, std::vector<uint8_t> &out, Diagnos
 // The player preview's environment cube (blank_texture.cpp, DI-33): a DDS cube map of the checkerboard
 bool make_blank_cube(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
-// Hand-authored text goes to disk CRLF: retail's text parsers fail silently on LF.
-std::string blank_crlf(const std::string &text);
+// Hand-authored text goes to disk CRLF (strutil::normalized_crlf_line_ends): retail's text parsers fail
+// silently on LF.
 void blank_text_to_bytes(const std::string &text, std::vector<uint8_t> &out);
 
 } // namespace opennova::editor
