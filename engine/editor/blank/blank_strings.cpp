@@ -2,6 +2,7 @@
 
 #include <formats/rtxt/rtxt.h>
 #include <runtime/hud/game_text_lookup.h>
+#include <runtime/mission/mission_catalog.h>
 
 namespace opennova::editor {
 
@@ -80,10 +81,12 @@ bool make_blank_menutxt(const BlankRequest &request, std::vector<uint8_t> &out, 
 }
 
 // A mission's text table (<mission>.bin): the two keys the mission list reads of it, its title
-// and its briefing [orig: MissionList_ScanAndBuildFromFiles @ 0x563170], the briefing empty.
+// and its briefing (mission_catalog's [Info] TITLE and BRIEFING) [orig:
+// MissionList_ScanAndBuildFromFiles @ 0x563170], the briefing empty.
 bool make_blank_mission_text(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
 	File table;
-	add_section(table, "Info", {{"TITLE", blank_mission_title(request)}, {"BRIEFING", std::string()}});
+	add_section(table, mission_catalog::kTextInfoSection,
+	            {{mission_catalog::kTextTitleKey, blank_mission_title(request)}, {mission_catalog::kTextBriefingKey, std::string()}});
 	return write_table(table, request, out, error);
 }
 
