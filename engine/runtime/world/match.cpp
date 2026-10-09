@@ -9,6 +9,7 @@
 #include <limits>
 #include <utility>
 
+#include <formats/def/reserved_items.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/carrier_motion.h>
@@ -46,7 +47,7 @@ constexpr int32_t kBlueBay = 4098;        // [orig: @0x4dd1fa (0x1002, team 1)]
 constexpr int32_t kRedBay = 4100;         // [orig: @0x4dd1ec (0x1004, team 2)]
 constexpr int32_t kTeam4Bay = 4102;       // [orig: @0x4dd216 (0x1006, team 4)]
 constexpr int32_t kTeam3Bay = 4103;       // [orig: @0x4dd208 (0x1007, team 3)]
-constexpr int32_t kHill = 6006;           // [orig: @0x5089e8 (0x1776)]
+constexpr int32_t kHill = def::DEF_TYPE_KOTH_CENTRE; // [orig: @0x5089e8 (0x1776)]
 
 // The drop's radian-per-BAM word, the verbatim retail double (30.5 ppm off
 // 2pi/2^32, base/io/bam.h); its Q22 partner dbl_7C3600 is io::kQ22One.

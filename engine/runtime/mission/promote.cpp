@@ -2,6 +2,7 @@
 #include <runtime/mission/promote.h>
 
 #include <base/io/le.h>
+#include <formats/def/reserved_items.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/vehicle_part_anim.h>
@@ -268,7 +269,7 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
 	s.waypoint_id = e.waypoint_id;
     s.wp_number = e.wp_number;
     // [orig: Entity_SpawnFromBMSRecord @0x40E9F0, entity+672]
-    s.script_next_ssn = (e.type_id == 6005 || e.type_id == 6006) ?
+    s.script_next_ssn = (e.type_id == def::DEF_TYPE_WAYPOINT || e.type_id == def::DEF_TYPE_KOTH_CENTRE) ?
             e.ttool_index : e.next_ssn;
     if (e.type_id == kParticleEffectMarkerTypeId) {
         size_t length = 0;
@@ -321,7 +322,8 @@ Entity make_seed(const bms::Entity &e, EntityKind kind, uint16_t ssn, uint32_t o
     // physical bound. [orig: Entity_SpawnFromBMSRecord
     // @0x40F05A..0x40F173/@0x40F213..0x40F227]
     if (kind == EntityKind::Marker &&
-        (e.type_id == 6005 || e.type_id == 6006 || e.type_id == 2044)) {
+        (e.type_id == def::DEF_TYPE_WAYPOINT || e.type_id == def::DEF_TYPE_KOTH_CENTRE ||
+         e.type_id == def::DEF_TYPE_NAMED_LOCATION)) {
         s.bound_radius = e.wp_distance != 0
             ? static_cast<float>(e.wp_distance)
             : 0.5f;
@@ -770,7 +772,8 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         //  and the radius @0x40F096..0x40F0A4, 0x1776 @0x40F157..0x40F16D, 0x7FC
         //  @0x40F213..0x40F221; the memset @0x40EA27; Entity_InitFromModel's
         //  model-null skip @0x40DCCB..0x40DCD1]
-        if (mk.type_id == 6005 || mk.type_id == 6006 || mk.type_id == 2044)
+        if (mk.type_id == def::DEF_TYPE_WAYPOINT || mk.type_id == def::DEF_TYPE_KOTH_CENTRE ||
+                mk.type_id == def::DEF_TYPE_NAMED_LOCATION)
             n.f[0] = mk.wp_distance != 0
                     ? static_cast<int32_t>(static_cast<uint32_t>(mk.wp_distance) << 16)
                     : opts.arrival_radius;
@@ -783,7 +786,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         // Hold time, the waypoint marker (6005) only: 62 ticks per movetimer second
         // from the signed record word (bms 'spawns' = .mis movetimer); 0 = no hold.
         // [orig: entity+0x148 = 62 * movsx word rec+0x3E @0x40F066..0x40F08D]
-        if (mk.type_id == 6005)
+        if (mk.type_id == def::DEF_TYPE_WAYPOINT)
             n.wait_ticks = 62 * static_cast<int32_t>(mk.spawns);
         ai.nav.nodes.push_back(n);
     }
@@ -841,11 +844,9 @@ PromoteResult promote_mission(const bms::File &m, World &world,
     //  Entity_SpawnFromBMSRecord @0x40f0aa (the marker fields); ≤128 entries]
     world.script.waypoints.clear();
     for (const bms::WaypointRecord &wr : m.waypoint_records) {
-        if ((static_cast<uint32_t>(wr.flags) &
-             static_cast<uint32_t>(bms::WaypointFlags::PlayerRoute)) == 0)
+        if (!bms::is_player_route(wr))
             continue;
-        const int count = std::min<int>({static_cast<int>(wr.marker_count),
-                                         static_cast<int>(wr.waypoint_numbers.size()), 128});
+        const int count = static_cast<int>(bms::player_route_stop_count(wr));
         for (int k = 0; k < count; ++k) {
             const int idx = static_cast<int>(wr.waypoint_numbers[k]);
             if (idx < 0 || idx >= static_cast<int>(m.markers.size())) continue;
@@ -872,7 +873,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             e.chain_back = (mk.bmsi_attributes & (1u << 22)) != 0;
             // [orig: entity+0x20C = the record's wpgoal0..3 dword (+0x64) on a
             //  type-6005 marker @0x40f090; read bytewise @0x4dbeb4]
-            if (mk.type_id == 6005)
+            if (mk.type_id == def::DEF_TYPE_WAYPOINT)
                 for (int g = 0; g < 4; ++g)
                     e.goals[g] = static_cast<uint8_t>(
                             static_cast<uint32_t>(mk.wp_goals) >> (8 * g));

@@ -186,10 +186,70 @@ int test_names_and_domains() {
 	return 0;
 }
 
+// The record values that name nothing and the rows the lookups key: a waypoint list's 0 and its
+// commands 123..127 (by the original editor's names), group 0, the player's SSN; the relation records'
+// SSN rows (0..127) a trigger's SSN slot keys; the pools each narrowed SSN lookup scans.
+int test_named_values() {
+	TEST_EXPECT(path_names_none(0) && path_names_none(123) && path_names_none(127) && !path_names_none(1) &&
+	            !path_names_none(122) && !path_names_none(128) && !path_names_none(-1));
+	TEST_EXPECT(std::string(path_command_editor_name(123)) == "Goto SSN (not driver, gunner)" &&
+	            std::string(path_command_editor_name(124)) == "Goto SSN (not driver)" &&
+	            std::string(path_command_editor_name(125)) == "Goto SSN (any)" &&
+	            std::string(path_command_editor_name(126)) == "Goto group" &&
+	            std::string(path_command_editor_name(127)) == "Goto player");
+	TEST_EXPECT(!path_command_editor_name(0) && !path_command_editor_name(122) && !path_command_editor_name(128));
+	TEST_EXPECT(group_names_none(0) && !group_names_none(1) && !group_names_none(63));
+	TEST_EXPECT(kPlayerSsn == 10000 && kRelationSsnRows == 128);
+
+	const auto trigger_of = [](bms::TriggerMainType main, int32_t sub, int32_t p1 = 0, int32_t p2 = 0) {
+		bms::Trigger out{};
+		out.main_type = main;
+		out.sub_type = sub;
+		out.param1 = p1;
+		out.param2 = p2;
+		return out;
+	};
+	using M = bms::TriggerMainType;
+	// A group's sees-single keys its entity (param2); a destroyed test keys no relation record.
+	TEST_EXPECT(trigger_ssn_unrecorded(trigger_of(M::Group, 16, 4, 200), 1) &&
+	            !trigger_ssn_unrecorded(trigger_of(M::Group, 16, 4, 20), 1) &&
+	            !trigger_ssn_unrecorded(trigger_of(M::Single, 4, 10034), 0));
+	// A single's relation subs key both slots, its sees/targeted/shot-group and visited subs param1 alone.
+	TEST_EXPECT(trigger_ssn_unrecorded(trigger_of(M::Single, 16, kPlayerSsn, 12), 0) &&
+	            trigger_ssn_unrecorded(trigger_of(M::Single, 15, 12, 128), 1) &&
+	            !trigger_ssn_unrecorded(trigger_of(M::Single, 17, 127, 0), 0) &&
+	            trigger_ssn_unrecorded(trigger_of(M::Single, 7, -1, 5), 0) &&
+	            !trigger_ssn_unrecorded(trigger_of(M::Single, 7, 12, 500), 1) &&
+	            !trigger_ssn_unrecorded(trigger_of(M::Group, 16, 400, 20), 0));
+
+	TEST_EXPECT(kAllPools == (kOrganicPool | kItemPool | kBuildingPool | kMarkerPool) && kAllPools == 15);
+	TEST_EXPECT(trigger_ssn_pools(trigger_of(M::Single, 4)) == (kOrganicPool | kItemPool | kBuildingPool) &&
+	            trigger_ssn_pools(trigger_of(M::Single, 5)) == (kOrganicPool | kItemPool | kBuildingPool));
+	for (const int32_t sub : {3, 14, 6, 9, 12, 10}) TEST_EXPECT(trigger_ssn_pools(trigger_of(M::Single, sub)) == (kOrganicPool | kItemPool));
+	TEST_EXPECT(trigger_ssn_pools(trigger_of(M::Single, 11)) == kOrganicPool);
+	TEST_EXPECT(trigger_ssn_pools(trigger_of(M::Single, 16)) == 0 && trigger_ssn_pools(trigger_of(M::Group, 4)) == 0);
+	bms::Action action{};
+	using A = bms::ActionType;
+	for (const A type : {A::ChangeSingleAI, A::ChangeSteamAction, A::SingleChangeGroup, A::SingleTeleportAction}) {
+		action.action_type = type;
+		TEST_EXPECT(action_ssn_pools(action) == (kOrganicPool | kItemPool | kBuildingPool));
+	}
+	action.action_type = A::Teammates;
+	action.action_sub_type = 1;
+	TEST_EXPECT(action_ssn_pools(action) == kOrganicPool);
+	action.action_sub_type = 3;
+	TEST_EXPECT(action_ssn_pools(action) == 0);
+	action.action_type = A::KillSingle;
+	action.action_sub_type = 0;
+	TEST_EXPECT(action_ssn_pools(action) == 0);
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	if (test_triggers() != 0) return 1;
 	if (test_actions() != 0) return 1;
+	if (test_named_values() != 0) return 1;
 	return test_names_and_domains();
 }
