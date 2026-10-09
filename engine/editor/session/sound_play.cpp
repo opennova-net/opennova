@@ -214,7 +214,7 @@ void play_dialog(SessionCore &core, const EditorRequest &request) {
 
 // A slot by its keyword, without case, or its number; -1 for none.
 int slot_named(const std::string &text) {
-	if (const int slot = sound_profile_slot_of(text); slot >= 0) return slot;
+	if (const int slot = audio::sound_profile_slot_of(text); slot >= 0) return slot;
 	if (const std::optional<int> number = strutil::parse_int(text); number && *number >= 0 &&
 	    *number < audio::kSoundProfileSlotCount)
 		return *number;
@@ -289,7 +289,7 @@ void serve_sound_play(SessionCore &core, const EditorRequest &request) {
 		const std::string profile = has_value(request, "profile") ? value_of(request, "profile") : std::string("default");
 		const std::string &slot_text = value_of(request, "slot");
 		if (slot_text.empty() || strutil::iequals(slot_text, "footstep") || has_value(request, "surface")) {
-			FootSurface surface = FootSurface::Ground;
+			audio::FootSurface surface = audio::FootSurface::Ground;
 			if (has_value(request, "surface") && !foot_surface_of(value_of(request, "surface"), surface))
 				return refuse(core, "A surface is ground, snow, object or water.");
 			const std::string &foot = value_of(request, "foot");

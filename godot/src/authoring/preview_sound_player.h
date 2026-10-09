@@ -71,8 +71,8 @@ private:
 class PreviewWaveStreams {
 public:
 	// The wave at the full path `p_file`: its stream once decoded, null meanwhile (its decode begun on a worker the
-	// first time it is asked) and for one that did not decode (`r_failed`); `r_frames` its frames.
-	Ref<AudioStreamWAV> stream(const std::string &p_file, bool &r_failed, int64_t *r_frames = nullptr);
+	// first time it is asked) and for one that did not decode (`r_failed`).
+	Ref<AudioStreamWAV> stream(const std::string &p_file, bool &r_failed);
 	// The streams of `p_files` dropped (their waves decoded anew: their files changed).
 	void drop(const std::vector<std::string> &p_files);
 	void forget() {
@@ -87,7 +87,6 @@ private:
 	struct Boxed {
 		uint64_t serial = 0; // the decode it boxes
 		Ref<AudioStreamWAV> stream;
-		int64_t frames = 0;
 	};
 	opennova::editor::PreviewWaves waves_;
 	std::map<std::string, Boxed> streams_; // by the wave's full path

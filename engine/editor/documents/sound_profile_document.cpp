@@ -19,11 +19,6 @@ namespace {
 constexpr NodeKind kProfile = node_kind(SoundProfileKind::Profile);
 constexpr NodeKind kSlot = node_kind(SoundProfileKind::Slot);
 
-// The bytes the game keeps a name in, its terminator among them: a profile's 64 [orig: the strlen
-// >= 0x40 cut @ 0x527043], a slot's set 24 [orig: the 24-byte name24 rows at +928].
-constexpr size_t kProfileNameBytes = 64;
-constexpr size_t kSetNameBytes = 24;
-
 struct SlotWords {
 	const char *words;
 	const char *family;
@@ -114,12 +109,12 @@ RecordTable make_table() {
 	FieldSchema name = schema_of("name", FieldType::Text, "Name",
 			"What an item's sound_profile binds by: the first profile of the name, without case; a name no "
 			"profile has binds the file's first profile [orig: SoundProfile_FindSlotByName @ 0x526e30].");
-	name.width = kProfileNameBytes;
+	name.width = audio::kSoundProfileNameBytes;
 	name.defines = ReferenceKind::SoundProfile;
 	profile.field(RF{name,
 	                 {[](const RecordHandle &r, Value &out) { return out = profile_of(r).name, true; },
 	                  [](const RecordHandle &r, const Value &v, std::string &e) {
-		                  return set_text(r.as<ProfileRecord>().name, kProfileNameBytes, "A profile's name", v, e);
+		                  return set_text(r.as<ProfileRecord>().name, audio::kSoundProfileNameBytes, "A profile's name", v, e);
 	                  }}});
 	for (int i = 0; i < audio::kSoundProfileLoopParamCount; ++i) {
 		FieldSchema percent = schema_of(audio::sound_profile_loop_keyword(i), FieldType::Integer, kLoopWords[i],
@@ -157,12 +152,12 @@ RecordTable make_table() {
 	FieldSchema set = schema_of("set", FieldType::Text, "Sound set",
 			"The set the game plays for the slot, found by name across the loaded banks at mission start; "
 			"empty plays nothing [orig: SoundProfile_ResolveAllTriggers @ 0x528210].");
-	set.width = kSetNameBytes;
+	set.width = audio::kSoundProfileSetNameBytes;
 	set.reference = ReferenceKind::Sound;
 	slot.field(RF{set,
 	              {[](const RecordHandle &r, Value &out) { return out = slot_of(r).set, true; },
 	               [](const RecordHandle &r, const Value &v, std::string &e) {
-		               return set_text(r.as<ProfileSlot>().set, kSetNameBytes, "A set's name", v, e);
+		               return set_text(r.as<ProfileSlot>().set, audio::kSoundProfileSetNameBytes, "A set's name", v, e);
 	               }}});
 	slot.field(RF{schema_of("param2", FieldType::Real, "Number 1",
 	                        "The line's third column, stored x 65536 [orig: @ 0x527122]; a loop's low pitch, a "
@@ -201,7 +196,7 @@ std::string free_name(const std::vector<std::shared_ptr<const Node>> &rows, cons
 	if (!taken(stem)) return stem;
 	for (int n = 2; n < 100000; ++n) {
 		const std::string suffix = "_" + std::to_string(n);
-		const std::string name = stem.substr(0, std::min(stem.size(), kProfileNameBytes - 1 - suffix.size())) + suffix;
+		const std::string name = stem.substr(0, std::min(stem.size(), audio::kSoundProfileNameBytes - 1 - suffix.size())) + suffix;
 		if (!taken(name)) return name;
 	}
 	return stem;
@@ -240,12 +235,6 @@ const char *sound_profile_slot_words(int slot) {
 
 const char *sound_profile_slot_family(int slot) {
 	return slot >= 0 && slot < audio::kSoundProfileSlotCount ? kSlotWords[slot].family : "";
-}
-
-int sound_profile_slot_of(const std::string &keyword) {
-	for (int i = 0; i < audio::kSoundProfileSlotCount; ++i)
-		if (strutil::iequals(keyword, audio::sound_profile_slot_keyword(i))) return i;
-	return -1;
 }
 
 SoundProfileRow::SoundProfileRow() {
@@ -387,7 +376,7 @@ FindingTable sound_profile_finding_codes() { return { kFindingRows.data(), kFind
 bool define_sound_profile(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out) {
 	const auto *profiles = dynamic_cast<const SoundProfileDocument *>(&document);
 	if (!profiles || missing.kind != ReferenceKind::SoundProfile || missing.target.empty() ||
-	    missing.target.size() >= kProfileNameBytes)
+	    missing.target.size() >= audio::kSoundProfileNameBytes)
 		return false;
 	const SoundProfileRow *bound = profiles->find_profile(missing.target);
 	Edit add;
