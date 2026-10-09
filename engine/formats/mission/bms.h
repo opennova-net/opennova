@@ -659,6 +659,16 @@ struct WaypointRecord {
     std::vector<uint8_t> padding;      // Remaining bytes after waypoint numbers
 };
 
+// The player's waypoint route is the FIRST waypoint path whose flags carry PlayerRoute, the pick the
+// world-state writer serializes for a team-1 recipient, over its first stops: min(marker_count, the
+// slots read, 128) compared as signed ints (a count of 2^31 or more walks none), each a marker's
+// index as the slot holds it (one past the markers names none) [orig:
+// NetPacket_WriteWorldStateLoad0x0F @0x502e50, the scan stopping on the first hit @0x502e53, the
+// count capped at 128 @0x502efc].
+inline constexpr size_t kPlayerRouteMaxStops = 128;
+bool is_player_route(const WaypointRecord& record);
+size_t player_route_stop_count(const WaypointRecord& record);
+
 // [orig editor: Med_WriteBmsFile @0x44f920 packs each 32-byte group as: @0 flags (bit0/bit1 from the editor
 //  group flags), @4=0, @8 = a value, @12 = constant 10, @16..28 = 0. The JO loader keeps @0/@8/@12; @12 is
 //  the literal 10, @0 a 2-bit flags, @8 the only free int (2026-06-06 grill).]
@@ -735,6 +745,16 @@ struct Event {
     uint8_t unknown6;                  // [orig: raw-fread with the 24B record @0x453f87; no reader anywhere in
                                        //  the event system => pad/reserved]
 };
+
+// An event's delay and repeat count steps: the reload is the authored value << 6, counted down by 64
+// a processing pass, one pass every 64 ticks [orig: EventTrigger_UpdateEntry @0x454c30]. The
+// countdown word is tested as SIGNED 16-bit after each decrement (@0x454cef/@0x454d40), so a value
+// past 512 steps (a reload of (513 << 6) or more) wraps negative on the first decrement and ends on
+// the next pass.
+inline constexpr int32_t kEventStepShift = 6;
+inline constexpr int32_t kEventStepTicks = 1 << kEventStepShift;
+inline constexpr int64_t kEventStepsUnwrapped = 512;
+constexpr bool event_steps_wrap(int64_t steps) { return steps > kEventStepsUnwrapped; }
 
 // [orig: EventTrigger_EvaluateCondition @0x453620 reads param1..4 as triggerParams[3..6]]
 // Per-type param meaning (group/entity/zone/var/event refs, thresholds, distances) in
@@ -923,6 +943,17 @@ bool write_file(const File& file, const std::string& path, std::string& error);
 
 // Check if data starts with BMS magic.
 bool is_bms(const uint8_t* data, size_t size);
+
+// The first section of a written mission whose bytes differ between `a` (the bytes read) and `b`
+// (the writer's), in the loader's order [orig: Mission_LoadBMSFile @0x40f7b6]: "header", "loadout
+// chunk", "availability chunk", "items", "buildings", "markers", "organics", "waypoint paths",
+// "groups", "layers", "area triggers", "event counts", "events", "triggers", "actions", "bounding box
+// count", "bounding boxes"; "length" where every section matches and the sizes differ; "" for none.
+// The sections are laid out as `a` holds them: the two chunks by the lengths its header holds, the
+// tables by the records `file` (the parse of `a`) kept. The header's count and chunk length words
+// (area_trigger_count, weapon_loadout_chunk_len, secondary_chunk_len), which the writer derives
+// from the records again, differ with the chunks they describe, so they are not compared.
+std::string first_differing_section(const File& file, const std::vector<uint8_t>& a, const std::vector<uint8_t>& b);
 
 // Value-equality of two in-memory missions: true iff they would serialize (write()) to the same
 // bytes. The editor's undo / dirty tracking uses this to decide whether an edit changed anything,

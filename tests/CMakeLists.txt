@@ -733,6 +733,12 @@ add_executable(required_resources_test gameprofile/required_resources_test.cpp)
 target_link_libraries(required_resources_test PRIVATE opennova_base)
 add_test(NAME required_resources COMMAND required_resources_test)
 
+# The player's and this machine's own files, which an import never takes nor a build packs.
+add_executable(player_files_test gameprofile/player_files_test.cpp)
+target_link_libraries(player_files_test PRIVATE opennova_base)
+target_include_directories(player_files_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME player_files COMMAND player_files_test)
+
 # The game's graphics log (ghw.txt): the missions it began and finished loading.
 add_executable(graphics_log_test gameprofile/graphics_log_test.cpp)
 target_link_libraries(graphics_log_test PRIVATE opennova_base)
@@ -1278,6 +1284,14 @@ add_executable(cpt_roundtrip_test cpt/cpt_roundtrip_test.cpp)
 target_link_libraries(cpt_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(cpt_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME cpt_roundtrip COMMAND cpt_roundtrip_test)
+
+# The TrnGen.exe terrain bake (formats/cpt/trngen): a procedural map baked and read back
+# as the game reads it, the same bytes on one thread and on four. `cpt_trngen_bake_test
+# <dir>` runs the by-hand byte parity with TrnGen's own .cpt (the test's header).
+add_executable(cpt_trngen_bake_test cpt/trngen_bake_test.cpp)
+target_link_libraries(cpt_trngen_bake_test PRIVATE opennova_formats)
+target_include_directories(cpt_trngen_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cpt_trngen_bake COMMAND cpt_trngen_bake_test)
 
 # ENV environment/time-of-day format tests
 add_executable(env_unit_test env/env_unit_test.cpp)
@@ -1858,6 +1872,12 @@ add_executable(menu_frame_assets_test menu/menu_frame_assets_test.cpp)
 target_link_libraries(menu_frame_assets_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_assets_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME menu_frame_assets COMMAND menu_frame_assets_test)
+
+# A menu texture's size from its header, no pixels decoded (menu/menu_texture_header.h).
+add_executable(menu_texture_header_test menu/menu_texture_header_test.cpp)
+target_link_libraries(menu_texture_header_test PRIVATE opennova_runtime)
+target_include_directories(menu_texture_header_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_texture_header COMMAND menu_texture_header_test)
 
 add_executable(menu_video_test menu/menu_video_test.cpp)
 target_link_libraries(menu_video_test PRIVATE opennova_runtime)
@@ -3018,6 +3038,13 @@ add_executable(mission_text_test mission/mission_text_test.cpp)
 target_link_libraries(mission_text_test PRIVATE opennova_runtime)
 target_compile_features(mission_text_test PRIVATE cxx_std_17)
 add_test(NAME mission_text COMMAND mission_text_test)
+
+# A player start placed in a mission (runtime/mission/player_start.h): the start markers of the
+# type the single player deploys at moved to the point, one added where the mission has none.
+add_executable(player_start_test mission/player_start_test.cpp)
+target_link_libraries(player_start_test PRIVATE opennova_runtime)
+target_include_directories(player_start_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_player_start COMMAND player_start_test)
 
 # The F3 debug oracles over the kernel (runtime/mission/debug_oracles.h): the
 # hitbox view's stand-in fallback and its exclusions, the pick's zero ray and
@@ -4351,6 +4378,13 @@ add_executable(asset_store_test assets/asset_store_test.cpp)
 target_link_libraries(asset_store_test PRIVATE opennova_runtime)
 target_include_directories(asset_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME asset_store COMMAND asset_store_test)
+
+# The files a running mission opens by a fixed name (runtime/assets/mission_fixed_files.h): each
+# set by the runtime's own constants, every name once.
+add_executable(mission_fixed_files_test assets/mission_fixed_files_test.cpp)
+target_link_libraries(mission_fixed_files_test PRIVATE opennova_runtime)
+target_include_directories(mission_fixed_files_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_fixed_files COMMAND mission_fixed_files_test)
 
 # Target cursors, vehicle instruments, Inset geometry, mortar preview, and peer feedback.
 add_executable(hud_combat_test hud/hud_combat_test.cpp)

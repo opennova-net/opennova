@@ -44,6 +44,16 @@ add_library(opennova_formats STATIC
     # cpt — terrain height/CDEP container
     ${CMAKE_CURRENT_SOURCE_DIR}/cpt/cpt_crypto.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cpt/cpt_io.cpp
+    # cpt/trngen — TrnGen.exe's terrain bake ported (a depth map to the .cpt's depth atlas and its
+    # ground mesh: the quadtree, the mesh simplifier, the strips, the TPM1 tile files kept in
+    # memory); a quadtree level's nodes run on the embedder's thread count (Threads, below)
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/lod_mesh_data.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/mesh_data.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/mesh_simp.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/quadtree_node.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/terrain_bake.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/terrain_mesh.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/tristrip.cpp
     # dbf — dialog bank
     ${CMAKE_CURRENT_SOURCE_DIR}/dbf/dbf.cpp
     # dds — the DirectDraw surface the game hands to D3DX (writer only: A8R8G8B8)
@@ -201,6 +211,12 @@ target_link_libraries(opennova_formats PUBLIC opennova_io opennova_crt)
 # to this group (a STATIC library's PRIVATE deps still ride every downstream
 # link line, so nothing else needs to name it).
 target_link_libraries(opennova_formats PRIVATE opennova_miniz)
+
+# The TrnGen bake (cpt/trngen) makes a quadtree level's nodes on std::threads, as many
+# as its embedder asks for: link the platform thread library explicitly (pthread on a
+# pre-2.34 glibc), as opennova_runtime does.
+find_package(Threads REQUIRED)
+target_link_libraries(opennova_formats PUBLIC Threads::Threads)
 
 # Link the math library (sin/cos/floorf on the non-MSVC toolchains; not needed
 # on Windows/MSVC).

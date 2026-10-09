@@ -69,6 +69,9 @@ public:
 	int node_count() const { return static_cast<int>(nodes_.size()); }
 	const Node *node(int id) const;
 	const mnu::Window *window(int id) const;
+	// The id of one of the document's windows (what mnu::find_window finds); -1 for null or
+	// a window the walk did not number (a part's).
+	int id_of(const mnu::Window *window) const;
 	// The screen container ids, in document order.
 	const std::vector<int> &screen_ids() const { return screen_ids_; }
 	const mnu::Screen *screen(int screen_id) const;
@@ -82,6 +85,7 @@ private:
 	const mnu::Document *doc_ = nullptr;
 	std::vector<Node> nodes_; // nodes_[id - 1]
 	std::vector<int> screen_ids_;
+	std::unordered_map<const mnu::Window *, int> ids_; // every numbered window's id
 };
 
 // ---- The frame seam ---------------------------------------------------------
@@ -592,8 +596,6 @@ private:
 	void on_claim_changed_(int previous, int current);
 	// The parent window's id, -1 for a root (or an unknown id).
 	int parent_window_(int id) const;
-	// [orig: CWnd_FindChildByName @ 0x646850]
-	int find_child_by_name_(int id, const std::string &name) const;
 	// [orig: CWnd_IsVisibleInHierarchy @ 0x646290]
 	bool visible_in_hierarchy_(int id) const;
 	// Shown up the whole chain (what the draw walk reaches).

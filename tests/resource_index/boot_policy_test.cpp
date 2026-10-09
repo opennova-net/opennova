@@ -79,6 +79,16 @@ void test_mod_is_exp_and_the_name_keeps_32_bytes() {
     CHECK(parse_launch_flags({"game.exe", "/exp", name32 + "6789ABCD"}).expansion == name32);
     CHECK(launch_expansion_name(" " + name32 + "XY ") == name32);
     CHECK(launch_expansion_name("jox01") == "jox01");
+    // The longest name that mounts: 31 bytes and the terminator [orig: @ 0x4a76ca].
+    CHECK(kExpansionNameMax == 31 && kExpansionNameMax + 1 == kExpansionNameBytes);
+}
+
+// What ends an /exp token on the command line [orig: Terrain_TokenizeConfigLine @ 0x53cb60]: a
+// space, tab or comma, a quote, a semicolon; nothing else a name holds.
+void test_launch_token_breaks() {
+    for (const char c : {' ', '\t', ',', '"', ';'}) CHECK(launch_token_breaks_at(c));
+    for (const char c : {'a', 'Z', '0', '.', '-', '_', '/', '\\', ':', '\'', '\x01', '\xe9'})
+        CHECK(!launch_token_breaks_at(c));
 }
 
 void test_runtime_launch_flags_parse() {
@@ -245,6 +255,7 @@ void test_mount_install() {
 int main() {
     test_flags_parse_case_insensitively_with_values();
     test_mod_is_exp_and_the_name_keeps_32_bytes();
+    test_launch_token_breaks();
     test_runtime_launch_flags_parse();
     test_lan_fallbacks_and_join_endpoint();
     test_flags_win_over_fallbacks_and_jo_is_the_default_game();
