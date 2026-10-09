@@ -180,6 +180,12 @@ void GameWorld::on_runtime_fixed_tick(int p_logic_tick) {
 	route_terrain_scorches();
 	route_round_impacts();
     route_script_effects();
+	// The dialog channel's playback tick, once a logic tick, after this tick's
+	// PlayWavList dialogs reached the queue (on_runtime_effects): the engine's
+	// dialog slots load their lines on their timers (runtime/audio/dialog_queue).
+	if (MissionAudio *audio = get_mission_audio()) {
+		audio->advance_dialog_tick();
+	}
 	// The light-pool lifecycle decay + the light_move round-glow follow, on
 	// the witnessed 62 Hz cadence [orig: EffectWorld_TickInstancesAndLightScale
 	// @ 0x5aa170 from Game_ProcessMainFrame; the round follow @ 0x4eaa9f].

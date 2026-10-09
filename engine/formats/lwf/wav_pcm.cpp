@@ -46,6 +46,8 @@ bool decode_aoa1(const uint8_t *bytes, size_t size, WavPcm &out, std::string &er
     }
     out.sample_rate = rate;
     out.channels = 1;
+    out.loader_samples = samples;
+    out.loader_pitch_q16 = rate_q16;
     return true;
 }
 
@@ -182,6 +184,8 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 	bool have_fmt = false;
 	int64_t data_off = -1;
 	uint32_t data_size = 0;
+	bool have_fact = false;
+	uint32_t fact_samples = 0;
 
 	const int64_t total = static_cast<int64_t>(size);
 	int64_t pos = 12;
@@ -204,6 +208,9 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 			block_align = io::read_u16_le(chunk + 20);
 			bits_per_sample = io::read_u16_le(chunk + 22);
 			have_fmt = true;
+		} else if (tag_eq(chunk, "fact") && chunk_size >= 4) {
+			have_fact = true;
+			fact_samples = io::read_u32_le(chunk + 8);
 		} else if (tag_eq(chunk, "data")) {
 			data_off = body;
 			data_size = chunk_size;
@@ -256,6 +263,18 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 
 	r_out.sample_rate = sample_rate;
 	r_out.channels = channels;
+	// The loader's record: 8-bit the data's bytes, 16-bit half of them, IMA
+	// ADPCM the fact chunk's count; the pitch ratio rounded from the rate
+	// [orig: Audio_LoadWavFileFromArchive @ 0x766609, @ 0x766706..0x76670e,
+	// @ 0x76678a..0x7667ba; @ 0x766612..0x76662d / @ 0x766717..0x766735].
+	if (audio_format == 1) {
+		r_out.loader_samples = bits_per_sample == 8 ? data_size : (data_size >> 1);
+	} else {
+		r_out.loader_samples = have_fact ? fact_samples
+		                                 : static_cast<uint32_t>(r_out.pcm16.size() / (2u * channels));
+	}
+	r_out.loader_pitch_q16 = static_cast<uint32_t>(
+			((static_cast<uint64_t>(sample_rate) << 16) + 22050u) / 44100u);
 	return true;
 }
 
