@@ -2,7 +2,6 @@
 
 #include <runtime/world/world.h>
 
-#include <cstdio>
 #include <utility>
 
 namespace opennova::world {
@@ -24,9 +23,7 @@ void fill_objective_rows(const World &world, const hud::GameTextLookup &mission_
 		if (id == 0 || id == 255) break;
 		if ((sg.show_win & (1u << slot)) == 0) continue;
 		hud::HudObjectiveRow row;
-		char key[32];
-		std::snprintf(key, sizeof(key), "STRWINCOND%03d", static_cast<int>(id));
-		row.text = hud::game_text(mission_text, "WinConditions", key, "");
+		row.text = hud::game_text(mission_text, hud::kWinConditionKey, static_cast<int>(id), "");
 		row.done = (sg.won & (1u << slot)) != 0;
 		r_rows.push_back(std::move(row));
 	}

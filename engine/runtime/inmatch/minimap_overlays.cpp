@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdio>
 
+#include <formats/def/reserved_items.h>
 #include <runtime/hud/hud_math.h>
 #include <runtime/inmatch/minimap_markers.h>
 #include <runtime/replication/client_roster_tags.h>
@@ -241,7 +242,7 @@ void build_minimap_overlays(const MinimapOverlayInputs &in, hud::HudMinimapOverl
         row.x = world::to_fixed(e->position.x);
         row.y = world::to_fixed(e->position.y);
         row.radius_q16 = world::to_fixed(e->bound_radius);
-        if (e->item_id == 2044) row.location_index = location++;
+        if (e->item_id == def::DEF_TYPE_NAMED_LOCATION) row.location_index = location++;
         out.pool3.push_back(row);
     }
     for (const world::Entity *e : pool4) {

@@ -33,16 +33,15 @@ std::string waypoint_display_name(const WaypointNameKey &key, bool in_session,
 			}
 			// An empty key misses like any other [orig: GameText_GetString
 			// @0x59471F; the empty test @0x59472D].
-			std::string special = buf[0] != 0 ? game_text(gametext, "WPNames", buf, "") : std::string();
+			std::string special = buf[0] != 0 ? game_text(gametext, kGameTextWPNames, buf, "") : std::string();
 			if (!special.empty()) return special;
 		}
 	}
-	std::snprintf(buf, sizeof(buf), "STRWPNAME%03d", id); // [orig: @0x59473D]
-	const std::string name = game_text(mission, "WPNames", buf, "");
+	const std::string name = game_text(mission, kWaypointNameKey, id, ""); // [orig: @0x59473D]
 	// Empty or the literal "null" falls back to the gametext default
 	// [orig: @0x59476F..0x59477B].
 	if (name.empty() || strutil::iequals(name.c_str(), "null"))
-		return game_text(gametext, kGameTextWPNames, "STRWPNAMEDEFAULT", "");
+		return game_text(gametext, kGameTextWaypointNameDefault, "");
 	return name;
 }
 
@@ -50,7 +49,7 @@ std::string waypoint_label_text(const std::string &name, const WaypointNameKey &
 		uint32_t game_type, const GameTextLookup &gametext) {
 	// "m to" is gametext hud/mto [orig: GameText_GetString(off_7C4B24 "hud",
 	// off_7D8F74 "mto") @0x59492B / @0x59490B / @0x59494B / @0x5949AD].
-	const std::string mto = game_text(gametext, "hud", "mto", "");
+	const std::string mto = game_text(gametext, kGameTextWaypointTo, "");
 	std::string label;
 	const char *format = "%s %s"; // [orig: @0x594956]
 	if (key.has_def && game_type == 0x10004u) { // [orig: @0x5948C2..0x5948D3]
@@ -92,28 +91,21 @@ void hud_session_text(const GameTextLookup &gametext, HudSessionText &out) {
 }
 
 std::string subgoal_message(bool lost, int header_id, const GameTextLookup &mission) {
-	char key[32];
-	std::snprintf(key, sizeof(key), lost ? "STRLOSEMSG%03d" : "STRWINMSG%03d", header_id);
-	return game_text(mission, lost ? "LoseConditions" : "WinConditions", key, "");
+	return game_text(mission, lost ? kLoseMessageKey : kWinMessageKey, header_id, "");
 }
 
 std::string objective_header(const GameTextLookup &gametext) {
-	return game_text(gametext, kGameTextMisc, "STRMISC_NEWOBJECTIVE", "");
+	return game_text(gametext, kGameTextNewObjective, "");
 }
 
 std::string objective_directive(bool win, int header_id, const GameTextLookup &mission) {
-	char key[32];
-	std::snprintf(key, sizeof(key), win ? "STRWINDIRECTIVE%03d" : "STRLOSEDIRECTIVE%03d",
-			header_id);
-	std::string line = game_text(mission, win ? "WinConditions" : "LoseConditions", key, "");
+	std::string line = game_text(mission, win ? kWinDirectiveKey : kLoseDirectiveKey, header_id, "");
 	if (line.size() <= 1) line.clear();
 	return line;
 }
 
 std::string triggered_text(int text_id, const GameTextLookup &mission) {
-	char key[32];
-	std::snprintf(key, sizeof(key), "ID%03d", text_id);
-	return game_text(mission, "Triggered Text", key, "");
+	return game_text(mission, kTriggeredTextKey, text_id, "");
 }
 
 std::string weapon_display_name(const std::string &weapon_id, const GameTextLookup &gametext) {

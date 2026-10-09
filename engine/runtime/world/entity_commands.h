@@ -45,12 +45,9 @@ class EntityCommands {
 public:
     explicit EntityCommands(World &world) : world_(world) {}
 
-    // The script-facing local-player SSN [orig: the dfx2med player-slot
-    // convention — the SP player entity carries 10000 as its net id].
-    static constexpr uint16_t kLocalPlayerSsn = 10000;
-
     // Script SSN -> entity handle (the WAC SSN*/BMS Single resolve), including
-    // the retail player mapping: SSN 10000 = the local player. Our player
+    // the retail player mapping: SSN 10000 (mission::kPlayerSsn, the
+    // script-facing local-player SSN) = the local player. Our player
     // entities carry net_id 0 (the wire is handle-based), so the mapping lives
     // here at the script seam. [orig: EntityPool_FindByNetId @0x4f0a20]
     EntityHandle resolve_ssn(uint16_t ssn) const;

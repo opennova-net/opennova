@@ -102,5 +102,61 @@ inline constexpr int32_t kLastEntityPathCommand = 125;
 constexpr bool path_command_names_entity(int64_t path) {
 	return path >= kFirstPathCommand && path <= kLastEntityPathCommand;
 }
+// Whether a waypoint list's number names no path: a path is 1 to 122; 0 is none and 123 to 127 are
+// commands (go to an SSN, a group, the player) [orig editor: dfx2med Med_ParamWaypointList @0x449c60;
+// docs/world/world-wac-ai-re.md section 11].
+constexpr bool path_names_none(int64_t path) {
+	return path == 0 || (path >= kFirstPathCommand && path <= kLastPathCommand);
+}
+// The original editor's name of a waypoint list's command 123..127 ("Goto SSN (not driver)"); null
+// for any other number [orig editor: dfx2med Med_ParamWaypointList @0x449c60 names them;
+// docs/world/world-wac-ai-re.md section 11].
+const char *path_command_editor_name(int64_t number);
+
+// Whether a group parameter names no group: group 0, which every witnessed consumer exits on or reads
+// false for [orig: Entity_KillAllByNetId @0x43C8F2, Entity_IsTeamInTriggerBounds @0x43c730,
+// Entity_HandleAlertCommand @0x43CF10, Entity_TeleportAllByNetId @0x43D5D0].
+constexpr bool group_names_none(int64_t group) { return group == 0; }
+
+// The SSN a mission's parameter names the player by: no record of a mission carries it, and the game
+// stamps it on the player as its net id [orig: PlayerClass_InitEntity @0x4b1149..0x4b1173, 10000 plus
+// the slot byte, the key EntityPool_FindByNetId @0x4f0a20 matches; 04TR's watchdog
+// SingleIsWithinArea(10000, zone 6), docs/mission/bms-event-runtime-re.md 7.3].
+inline constexpr int32_t kPlayerSsn = 10000;
+
+// The SSNs the sees, targeted and shot relation records and the visited words keyed by an SSN hold:
+// rows 0 to 127, the setters skipping any other [orig: the row bound-checks @0x452b60, @0x452bf0;
+// docs/mission/bms-event-runtime-re.md 3a].
+inline constexpr int32_t kRelationSsnRows = 128;
+// Whether a trigger's SSN parameter at `slot` (0 for param1 .. 3 for param4) keys a sees, targeted,
+// shot or visited record the game never writes for it: one past the rows those hold (the player's
+// 10000 among those never kept). The keyed slots: a Single's subs 1, 2, 13 (its param1) and 7 (the
+// visited word, its param1), 15 to 17 (both); a Group's 15 to 17 (the entity, param2).
+bool trigger_ssn_unrecorded(const bms::Trigger &trigger, int slot);
+
+// The pools a lookup of an SSN scans, one bit a pool (1 << pool): 0 the organics, 1 the items, 2 the
+// buildings, 3 the markers. The lookups by SSN scan all four [orig: EntityPool_FindByNetId @0x4f0a20,
+// Entity_KillByNetId @0x43DBD0: pools 0, 1, 2, 3]; some tests and actions fewer.
+inline constexpr uint8_t kOrganicPool = 1u << 0, kItemPool = 1u << 1, kBuildingPool = 1u << 2,
+                         kMarkerPool = 1u << 3;
+inline constexpr uint8_t kAllPools = kOrganicPool | kItemPool | kBuildingPool | kMarkerPool;
+// The pools the lookup of a trigger's param1 SSN scans where it scans fewer than the four
+// (docs/mission/bms-event-runtime-re.md 3b, 7.2a, 7.4), each false for an SSN it finds no row of:
+// the Single alive test (SingleDestroyed, SingleAlive) the organics, items and buildings, a marker's
+// SSN reading not alive [orig: cat 2 subs 4, 5 @0x453985 / @0x45399D -> Entity_IsAliveByBmsRef
+// @0x43e640, pools 0/1/2]; the alert, health and area tests the organics and items [orig:
+// Entity_IsSsnAtAlertLevel @0x43e780, Entity_HasDamageCapacity @0x43e3d0, Entity_HasFullHealth
+// @0x43e470, Entity_HasHealthAboveThreshold @0x43e350, Entity_IsBmsRefInTriggerBounds @0x43e510:
+// pools 0-1]; the holding test the organics [orig: Entity_IsSsnHoldingItemGroup @0x43e2f0, pool 0].
+// 0 for any other trigger.
+uint8_t trigger_ssn_pools(const bms::Trigger &trigger);
+// The same of an action's param1 (docs/mission/bms-event-runtime-re.md 7.5, 10): ChangeSingleAI,
+// ChangeSteam, SingleChangeGroup and SingleTeleport the organics, items and buildings [orig:
+// Entity_HandleAlertStateEvent @0x43DEE0, pools 0, 1, 2 @0x43DF20 / @0x43DF41 / @0x43DF69;
+// Entity_FindByDCBAndSetFlag @0x43DB30; Entity_SetNetIdByParentRef @0x43D6C0;
+// EventAction_TeleportEntityToSpawn @0x43DFC0, @0x43E02D / @0x43E0DD / @0x43E180]; a medevac's or a
+// flyover's patient the organics [orig: HeliLift_SpawnPickup @0x4525E0; docs/world/world-wac-ai-re.md
+// 33.32]. 0 for any other action.
+uint8_t action_ssn_pools(const bms::Action &action);
 
 } // namespace opennova::mission

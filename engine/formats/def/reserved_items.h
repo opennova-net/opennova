@@ -34,6 +34,14 @@ struct ReservedItem {
  * [orig: ItemDef_ParseProperty @ 0x49eb00, `sub eax, 186A0h` @0x49EC54]. */
 inline constexpr int DEF_ITEM_ID_BASE = 100000;
 
+/* The marker types a mission's spawn reads its waypoint fields for, each a reserved row below
+ * [orig: Entity_SpawnFromBMSRecord @ 0x40e9f0]: a named location (2044: the next Locations name,
+ * @0x40F17C), a waypoint (6005: its radius, spawn timer and WPNames name id, `cmp [edi], 1775h`
+ * @0x40F05A) and the KOTH centre (6006: its radius and the name id, `cmp [edi], 1776h` @0x40F157). */
+inline constexpr int DEF_TYPE_NAMED_LOCATION = 2044;
+inline constexpr int DEF_TYPE_WAYPOINT = 6005;
+inline constexpr int DEF_TYPE_KOTH_CENTRE = 6006;
+
 /* Every reserved row, in type order. */
 const ReservedItem *reserved_items(size_t *count);
 /* The reserved row of a runtime type (null: none). */

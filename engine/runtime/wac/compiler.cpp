@@ -14,6 +14,7 @@
 #include <vector>
 
 #include <formats/wac/bytecode.h>
+#include <formats/mission/mission_params.h>
 #include <formats/wac/command.h>
 #include <runtime/world/entity_commands.h>
 #include <runtime/world/entity_registry.h>
@@ -1252,11 +1253,11 @@ private:
 			// lookup; the leg never answers NULL. The port binds the net id
 			// when the VM first meets its world, and the embedder's registry
 			// answers the "Unknown SSN" question the pooled handle answered.
-			// The 10000 player alias is EntityCommands::resolve_ssn's
+			// The 10000 player alias (mission::kPlayerSsn) is EntityCommands::resolve_ssn's
 			// authoring seam, not a retail lookup. [orig: @0x4F2E97..0x4F2EED
 			// -> EntityPool_FindByNetId @0x4F0A20, the 16-bit key @0x4F0A3A]
 			const int32_t net = crt_atol(s + p) & 0xFFFF;
-			if (env_.registry != nullptr && uint16_t(net) != world::EntityCommands::kLocalPlayerSsn &&
+			if (env_.registry != nullptr && uint16_t(net) != mission::kPlayerSsn &&
 					!env_.registry->find_by_net_id(uint16_t(net)).valid())
 				error(f, f.line, "Unknown SSN");
 			return Operand{encode_operand(OperandKind::EntitySsn, pool(f, net, int(ParamType::Ssn), expected)), {}};
