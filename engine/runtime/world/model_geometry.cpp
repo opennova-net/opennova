@@ -231,14 +231,9 @@ opennova::renderer::ObjectProjectionSphere collision_projection_sphere_from_3di(
     unstamped.valid = true;
     return unstamped;
   }
-  const auto &bounds = model.collision->model_data;
-  std::array<int32_t, 3> minimum{}, maximum{};
-  for (int axis = 0; axis < 3; ++axis) {
-    minimum[axis] = bounds.has_bbox_fp16 ? bounds.bbox_fp16[axis]
-        : io::float_to_fp16_16_round_sat(bounds.bbox[axis]);
-    maximum[axis] = bounds.has_bbox_fp16 ? bounds.bbox_fp16[axis + 3]
-        : io::float_to_fp16_16_round_sat(bounds.bbox[axis + 3]);
-  }
+  const std::array<int32_t, 6> box = collision_bbox_q16(model.collision->model_data);
+  const std::array<int32_t, 3> minimum{box[0], box[1], box[2]};
+  const std::array<int32_t, 3> maximum{box[3], box[4], box[5]};
   return opennova::renderer::object_projection_sphere_from_bounds_q16(
       minimum, maximum, runtime_scale_q16, definition_scale_q16, zero_center);
 }
@@ -424,6 +419,24 @@ bool model_has_collision(const Threedi3di3 &model) {
 		}
 	}
 	return false;
+}
+
+bool model_section_is_person_sphere(const Threedi3di3 &model, size_t section) {
+	const ThreediCollisionModel *c = model.collision;
+	if (!model_is_skinned(model, 0) || c == nullptr || c->objects == nullptr || section >= c->object_count)
+		return false;
+	const ThreediCollisionObject &object = c->objects[section];
+	if (object.num_faces != 0 || object.num_bounding_volumes != 0) return false;
+	for (size_t o = 0; o < c->object_count; ++o)
+		if (c->objects[o].num_faces > 0) return true;
+	return false;
+}
+
+std::array<int32_t, 6> collision_bbox_q16(const ThreediCollisionModelData &data) {
+	std::array<int32_t, 6> box{};
+	for (int i = 0; i < 6; ++i)
+		box[i] = data.has_bbox_fp16 ? data.bbox_fp16[i] : io::float_to_fp16_16_round_sat(data.bbox[i]);
+	return box;
 }
 
 } // namespace opennova::world

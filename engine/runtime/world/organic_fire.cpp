@@ -2,6 +2,7 @@
 
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/world/ammo_table.h>
+#include <runtime/world/world.h>
 
 namespace opennova::world {
 
@@ -22,6 +23,19 @@ void resolve_organic_weapons(const char *const ammo_names[kOrganicAmmoSlots],
 		if (name == nullptr || name[0] == '\0') continue;
 		const int point = threedi::threedi_3di3_find_user_point(model, name);
 		if (point >= 0) out.launch[size_t(slot)] = static_cast<uint8_t>(point + 1);
+	}
+}
+
+void organic_fire_shot(World &world, EntityHandle shooter, const FixedVec3 &at, int32_t yaw, int32_t pitch,
+                       uint8_t ammo, bool spawn_round) {
+	Entity *entity = world.registry.get(shooter);
+	if (entity) entity->equipped_adm_index = ammo;
+	if (ammo == 0) return;
+	if (spawn_round) world.round_sim.fire_npc_ammo(world, shooter, at, yaw, pitch, ammo);
+	if (entity) {
+		entity->equipped_adm_index = 0;
+		entity->flags |= kEntityFlagPriorityTarget;
+		entity->engine_flags |= kEntityFlagPriorityTarget;
 	}
 }
 

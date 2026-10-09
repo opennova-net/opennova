@@ -52,6 +52,56 @@ void extract_item_seat_specs(const opennova::def::DefItemsFile &items,
 // [orig: Entity_GetBoneSlotType @ 0x434ED0]
 world::SeatType seat_type_for_user_point(std::string_view name);
 
+// What else a userpoint's name makes of it, beside the seats: the names the
+// game looks a model's points up by, each compared ASCII case-insensitively
+// from byte zero of the raw USRP name with no trim. A bullet02 point is both
+// banks' muzzle.
+enum UserPointUse : uint32_t {
+	kUserPointPrimaryMuzzle = 1u << 0,     // prim, bullet01, bullet02 (the first bank)
+	kUserPointSecondaryMuzzle = 1u << 1,   // sec, bullet02 (the second bank)
+	kUserPointFlare = 1u << 2,             // flare: a countermeasure flare's launch point
+	kUserPointGunnerAttachment = 1u << 3,  // agun
+	kUserPointAimOrigin = 1u << 4,         // TARGET
+	kUserPointLineOfSight = 1u << 5,       // LOOK
+	kUserPointCamera = 1u << 6,            // CAMERA
+	kUserPointGround = 1u << 7,            // ground
+};
+
+// The names: a prefix row compares the name's first `strlen(name)` bytes
+// (strnicmp), a whole row the whole name (stricmp).
+// [orig: Entity_InitVehicleAI @0x460200 -- the three bounded prefix scans:
+//  prim/bullet01/bullet02 into the first bank @0x4603ae..0x4603f4, sec/bullet02
+//  into the second @0x460468..0x4604ae, flare @0x46051b; Entity_SetupGunnerAttachments
+//  @0x4681AA..0x4681D9 (agun); Entity_InitFromModel @0x40dd04 -> def+1350 (TARGET);
+//  Entity_ComputeWeaponFireOrigin @0x43b5d4 and the line-of-sight origin @0x43B749
+//  (LOOK); Entity_InitBoneReferences @0x4414A9..0x4414B4 -> +0x318 (CAMERA), each
+//  through ModelGPM_FindUserpointByName @0x5B2170]. "ground" is the placement
+//  rule's point, not the game's (threedi_3di3_ground_anchor).
+struct UserPointName {
+	const char *name;
+	bool prefix;
+	uint32_t uses;
+};
+inline constexpr const char *kUserPointTargetName = "TARGET";
+inline constexpr const char *kUserPointLookName = "LOOK";
+inline constexpr const char *kUserPointCameraName = "CAMERA";
+inline constexpr UserPointName kUserPointNames[] = {
+		{"prim", true, kUserPointPrimaryMuzzle},
+		{"bullet01", true, kUserPointPrimaryMuzzle},
+		{"bullet02", true, kUserPointPrimaryMuzzle | kUserPointSecondaryMuzzle},
+		{"sec", true, kUserPointSecondaryMuzzle},
+		{"flare", true, kUserPointFlare},
+		{"agun", true, kUserPointGunnerAttachment},
+		{kUserPointTargetName, false, kUserPointAimOrigin},
+		{kUserPointLookName, false, kUserPointLineOfSight},
+		{kUserPointCameraName, false, kUserPointCamera},
+		{opennova::threedi::THREEDI_USER_POINT_GROUND, false, kUserPointGround},
+};
+
+// The uses a userpoint's raw name carries (kUserPointNames' rows it matches,
+// together); 0 for a name the game looks up nowhere itself.
+uint32_t user_point_uses(std::string_view name);
+
 // The userpoint-local conversions, exposed for tests: the authored 16.16
 // model point into the mission-local seat frame (the yaw-zero correction
 // baked in), and the authored direction into the seat yaw offset in degrees.

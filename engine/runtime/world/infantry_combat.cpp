@@ -841,24 +841,16 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
 void AiSystem::infantry_fire_pass(AiEntity &e, World &world, uint32_t logic_tick) {
     InfantryState &inf = e.inf;
     const auto &ammo = e.profile.organic.ammo;
-    Entity *entity = world.registry.get(e.handle);
     const auto shoot = [&](uint8_t id, const int32_t pose[6]) {
-        if (entity) entity->equipped_adm_index = id;
-        if (id == 0) return;
         // WeaponSlot_FireAndSpawnEffects owns this session gate; the pass
         // itself runs on the authority only (tick_infantry's gate), so the
         // marks and the magazine decrement are authority work too.
         // [orig: @0x53F440, @0x4BF345..0x4BF4AD]
-        if (!is_in_session || is_authority) {
+        const bool spawn = !is_in_session || is_authority;
+        if (spawn && id != 0) {
             if (inf.aim_established) ++inf.dbg_fires_aimed; else ++inf.dbg_fires_body;
-            world.round_sim.fire_npc_ammo(world, e.handle,
-                    FixedVec3{pose[0], pose[1], pose[2]}, pose[3], pose[4], id);
         }
-        if (entity) {
-            entity->equipped_adm_index = 0;
-            entity->flags |= kEntityFlagPriorityTarget;
-            entity->engine_flags |= kEntityFlagPriorityTarget;
-        }
+        organic_fire_shot(world, e.handle, FixedVec3{pose[0], pose[1], pose[2]}, pose[3], pose[4], id, spawn);
     };
     // The block's shots in its order (world/organic_fire.h, which the editor's
     // clip preview shares): only animation event bits have the odd-tick gate;

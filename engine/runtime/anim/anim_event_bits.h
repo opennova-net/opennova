@@ -35,6 +35,10 @@ inline constexpr int kAnimEventFoleyCount = 6;
 inline constexpr uint32_t kAnimEventFirePrimary = 0x4u;
 inline constexpr uint32_t kAnimEventFireSecondary = 0x8u;
 inline constexpr uint32_t kAnimEventFireMarker3 = 0x10u;
+// The fire block's three bits together: a frame whose word carries any of them
+// makes an NPC's body fire (a player's body reads none).
+inline constexpr uint32_t kAnimEventFireMask =
+		kAnimEventFirePrimary | kAnimEventFireSecondary | kAnimEventFireMarker3;
 
 // A bit: its mask, its token (what the .o3a and the add-on's markers spell), what the body does
 // on the frame, and the same in a few words for a title or a timeline's mark ("right footstep").

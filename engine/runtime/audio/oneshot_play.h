@@ -25,6 +25,19 @@
 
 namespace opennova::audio {
 
+// The listener's view flags a set's layers are admitted against (a layer plays
+// where its flags share a view bit with the listener's): first person 2, an
+// external camera mode 4; the startup word, before any camera is tracked, both.
+// The camera's tracked entity stamps 2 for camera mode 0 and 4 for any other.
+// [orig: Camera_SetTrackedEntity @0x4391D0 -> sub_75BE80 @0x75BE80; the startup
+//  word @0x43924A; SoundBank_PlayTriggerEntries @0x75CD54, the admission test]
+inline constexpr uint8_t kListenerViewFirstPerson = 2;
+inline constexpr uint8_t kListenerViewExternal = 4;
+inline constexpr uint8_t kListenerViewStartup = kListenerViewFirstPerson | kListenerViewExternal;
+inline constexpr uint8_t listener_view_flags_for_camera(int camera_mode) {
+	return camera_mode == 0 ? kListenerViewFirstPerson : kListenerViewExternal;
+}
+
 // A set's home in the loaded bank chain: the bank's load index and the Multi
 // index inside it. bank < 0 = no such set.
 struct SetLocation {

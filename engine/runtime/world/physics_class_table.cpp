@@ -33,4 +33,20 @@ PhysicsClass physics_class_from_move_function(std::string_view move_function) {
 	return PhysicsClass::Null;
 }
 
+bool physics_class_keeps_height(PhysicsClass row) {
+	switch (row) {
+	case PhysicsClass::Null:
+	case PhysicsClass::Envs:
+	case PhysicsClass::Ewep:
+	case PhysicsClass::Door:
+	case PhysicsClass::Genx:
+	case PhysicsClass::Upfx:
+	case PhysicsClass::Org0:
+	case PhysicsClass::Chld:
+		return true;
+	default:
+		return false;
+	}
+}
+
 } // namespace opennova::world

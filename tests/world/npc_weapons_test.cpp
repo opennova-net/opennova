@@ -167,6 +167,29 @@ static void test_rejected_fire_still_consumes_caller_state() {
     CHECK(f.body().inf.magazine == 32766);
 }
 
+// One shot of the block, as the org1 think and the editor's weapon range take it: the byte
+// rides the shooter while it fires and returns to zero, a zero byte fires nothing and marks
+// nothing, a refused spawn still marks the shooter. [orig: Entity_UpdateInfantryAI
+// @0x4BF345..0x4BF4AD; WeaponSlot_FireAndSpawnEffects @0x53F440]
+static void test_organic_fire_shot() {
+    Fixture f;
+    const FixedVec3 at{5 << 16, 6 << 16, 7 << 16};
+    f.entity().equipped_adm_index = 9;
+    organic_fire_shot(f.world, f.shooter, at, 0x100, -0x80, 0);
+    CHECK(f.entity().equipped_adm_index == 0 && (f.entity().flags & kEntityFlagPriorityTarget) == 0);
+    CHECK(f.world.out.rounds.count == 0);
+    organic_fire_shot(f.world, f.shooter, at, 0x100, -0x80, 2, false);
+    CHECK(f.entity().equipped_adm_index == 0 && (f.entity().flags & kEntityFlagPriorityTarget) != 0 &&
+          (f.entity().engine_flags & kEntityFlagPriorityTarget) != 0);
+    CHECK(f.world.out.rounds.count == 0);
+    organic_fire_shot(f.world, f.shooter, at, 0x100, -0x80, 1);
+    CHECK(f.world.out.rounds.count == 1 && f.entity().equipped_adm_index == 0);
+    const auto &event = f.world.out.rounds.records[0];
+    CHECK(event.adm_index == 1 && event.shooter_handle == f.shooter.packed);
+    CHECK(event.origin_x == at.x && event.origin_y == at.y && event.origin_z == at.z);
+    CHECK(event.dir_yaw == 0x100 && event.dir_pitch == -0x80);
+}
+
 static void test_attachment_fallback_and_special_parent() {
     Fixture f;
     f.body().profile.organic.launch[0] = 0;
@@ -302,6 +325,7 @@ static void test_definition_names_byte_width_and_missing_resources() {
 int main() {
     test_event_order_pose_and_magazine();
     test_rejected_fire_still_consumes_caller_state();
+    test_organic_fire_shot();
     test_attachment_fallback_and_special_parent();
     test_definition_names_byte_width_and_missing_resources();
     if (!failures) std::puts("npc_weapons: OK");
