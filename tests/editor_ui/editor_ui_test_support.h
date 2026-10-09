@@ -39,6 +39,7 @@
 #include "../editor/anim_test_support.h"
 #include "../editor/editor_test_support.h"
 #include "../editor/test_platform.h"
+#include "../devtools/imgui_null_backend.h"
 #include "common/file_io.h"
 #include "common/test_paths.h"
 
@@ -60,25 +61,10 @@ inline int g_failures = 0;
 		}                                                                             \
 	} while (0)
 
-// A headless ImGui frame: the null example's setup, no platform or renderer backend.
-struct NullBackend {
-	ImGuiContext *context = nullptr;
-	NullBackend() {
-		context = ImGui::CreateContext();
-		ImGuiIO &io = ImGui::GetIO();
-		io.IniFilename = nullptr;
-		io.DisplaySize = ImVec2(1280.0f, 720.0f);
-		io.DeltaTime = 1.0f / 60.0f;
-		unsigned char *pixels = nullptr;
-		int width = 0;
-		int height = 0;
-		io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
-	}
-	~NullBackend() { ImGui::DestroyContext(context); }
-};
-
-inline void *test_alloc(size_t size, void *) { return std::malloc(size); }
-inline void test_free(void *ptr, void *) { std::free(ptr); }
+// A headless ImGui frame and the pass hand-off's allocator hooks (tests/devtools/imgui_null_backend.h).
+using imgui_test::NullBackend;
+using imgui_test::test_alloc;
+using imgui_test::test_free;
 
 inline bool frame(EditorWindows &windows, uint64_t index) {
 	ImGui::NewFrame();

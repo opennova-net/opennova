@@ -319,13 +319,11 @@ void TerrainViewportApplier::run_environment_(const TerrainViewport &model) {
 	overrides.instantiate();
 	overrides->assign(opennova::env::bms_env_overrides_from_header(header.attrib_flags, header.water_override,
 			header.fog_override, header.fog_color, header.water_color, header.water_murk));
-	if (overrides->is_empty()) env->clear_mission_overrides();
-	else env->apply_mission_overrides(overrides);
+	env->apply_mission_overrides_or_clear(overrides);
 	// The fog as the mission's start settles it, which no weather tick here does (the mission view's helper).
 	env->set_fog_level(opennova::editor::mission_settled_fog_level(env->get_fog_level()));
 	environment_->set_environment_data(env);
-	water_->set_mission_water_height_override(
-			overrides->get_has_water_height() ? overrides->get_water_height_world() : NAN);
+	water_->set_mission_water_height_override(overrides->get_water_height_world_or_nan());
 	environment_->set_overcast_data(overcast);
 	// The texts the load read are the environment's whatever unit read one first (the .trn its terrain's units
 	// stamped already): an edit of one builds the environment again.
@@ -431,9 +429,7 @@ void TerrainViewportApplier::configure_foliage_() {
 	// the terrain's own), each definition's model and :fd texture through the root.
 	Ref<TerrainTileInfo> tiles = terrain_->get_tile_info_override();
 	if (tiles.is_null()) tiles = terrain_data_->get_tileinfo_resource();
-	foliage_->set_terrain_data(terrain_data_);
-	foliage_->set_tile_info(tiles);
-	foliage_->configure_slots_from_defs(root_files_, terrain_data_->get_foliage_defs());
+	foliage_->configure_for_terrain(root_files_, terrain_data_, tiles);
 	const Array diagnostics = foliage_->get_slot_diagnostics();
 	for (int64_t i = 0; i < diagnostics.size(); ++i) {
 		const Dictionary diagnostic = diagnostics[i];
@@ -510,8 +506,7 @@ void TerrainViewportApplier::place_camera_(const TerrainViewport &model) {
 	camera.axes(right, up, back);
 	camera_->set_transform(Transform3D(Basis(to_godot(right), to_godot(up), to_godot(back)), to_godot(camera.eye())));
 	// The world pass's planes: the game's near, its far from the environment's fog.
-	camera_->set_near(opennova::renderer::kScenePassNearZ);
-	camera_->set_far(opennova::renderer::scene_far_plane(environment_->get_fog_distance()));
+	environment_->apply_scene_pass_planes(*camera_);
 }
 
 void TerrainViewportApplier::clear() {

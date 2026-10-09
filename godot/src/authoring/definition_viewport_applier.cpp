@@ -7,13 +7,7 @@
 #include <godot_cpp/classes/standard_material3d.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/basis.hpp>
-#include <godot_cpp/variant/packed_color_array.hpp>
-#include <godot_cpp/variant/packed_int32_array.hpp>
-#include <godot_cpp/variant/packed_int64_array.hpp>
-#include <godot_cpp/variant/packed_string_array.hpp>
-#include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
-#include <godot_cpp/variant/projection.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
@@ -23,14 +17,13 @@
 #include <editor/preview/viewport_device.h>
 #include <editor/session/view/session_view.h>
 #include <runtime/renderer/fp_viewmodel_spec.h>
-#include <runtime/world/impact_scar.h>
 #include <runtime/world/player_present.h>
 
 #include "authoring/effect_viewport_applier.h"
 #include "authoring/preview_backdrop.h"
 #include "env/mission_environment.h"
+#include "player/player_viewmodel_rig.h"
 #include "render/frame_fx.h"
-#include "util/color_convert.h"
 #include "world/scar_draw_list.h"
 #include "world/scar_presenter.h"
 
@@ -44,6 +37,13 @@ const opennova::editor::DefinitionViewport &definition_of(const opennova::editor
 
 Vector3 to_godot(const opennova::editor::PreviewVec3 &v) {
 	return Vector3(v.x, v.y, v.z);
+}
+
+ScarDrawList::CompiledFrame device_scar_frame() {
+	// Compiled in the device's space, with no entity rings to resolve (ScarDrawList::from_compiled).
+	ScarDrawList::CompiledFrame frame;
+	frame.mission_space = false;
+	return frame;
 }
 
 } // namespace
@@ -247,15 +247,13 @@ void DefinitionViewportApplier::apply_weapon_(const opennova::editor::ViewportMo
 	const int team = first_person ? opennova::renderer::viewmodel_team_byte(fire.first_person().team()) : INT32_MIN;
 	if (team != applied_team_ && model_->built()) {
 		applied_team_ = team;
-		static const String kOwner("first_person:team");
 		for (PreviewModel *part : {model_.get(), arms_.get()}) {
 			ObjectModel *object = part->object();
 			if (!part->built()) continue;
 			const opennova::world::FpCtrlRegisterWrites writes =
 					opennova::world::fp_ctrl_register_writes(first_person, true, false, part == arms_.get());
 			object->begin_ctrl_update();
-			if (writes.team && team != INT32_MIN) object->set_ctrl_override(kOwner, "TEX_TEAM", team);
-			else object->clear_ctrl_override(kOwner, "TEX_TEAM");
+			PlayerViewmodelRig::write_fp_team(*object, writes.team && team != INT32_MIN, team);
 			object->end_ctrl_update();
 		}
 	}
@@ -291,7 +289,7 @@ void DefinitionViewportApplier::apply_weapon_(const opennova::editor::ViewportMo
 		scars_shown_ = UINT64_MAX;
 	} else if (mounted_ && fire.range().serial() != scars_shown_) {
 		scars_shown_ = fire.range().serial();
-		if (fire.range().scar_count() > 0) scars_->present(preview_scar_record(fire.scars()), Dictionary());
+		if (fire.range().scar_count() > 0) scars_->present(ScarDrawList::from_compiled(fire.scars(), device_scar_frame()), Dictionary());
 		else scars_->clear();
 	}
 	// The tracers, built as the game's ribbon pass builds them against this camera.
@@ -318,13 +316,7 @@ void DefinitionViewportApplier::apply_weapon_(const opennova::editor::ViewportMo
 		}
 		channels.push_back(channel);
 	}
-	const Transform3D eye = camera_->get_global_transform();
-	const Vector3 forward = -eye.basis.get_column(2);
-	opennova::renderer::TracerView view;
-	view.camera = {float(eye.origin.x), float(eye.origin.y), float(eye.origin.z)};
-	view.forward = {float(forward.x), float(forward.y), float(forward.z)};
-	view.projection_x_scale = float(camera_->get_camera_projection()[0][0]);
-	view.tick_ms = uint32_t(clock.ms());
+	const opennova::renderer::TracerView view = tracer_view_from_camera(*camera_, uint32_t(clock.ms()));
 	opennova::renderer::compile_tracer_ribbons(channels.data(), channels.size(), view,
 			opennova::renderer::TracerPass::Main, tracer_frame_);
 	ribbons_.emit(tracer_frame_, tracer_mesh_, opennova::renderer::tracer_rung(true));
