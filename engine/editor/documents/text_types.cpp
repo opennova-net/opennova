@@ -10,20 +10,11 @@
 #include <formats/scr/scr.h>
 #include <formats/score/score.h>
 #include <net/novacrypto/pubcrypto.h>
+#include <runtime/renderer/shader_effect_info.h>
 
 namespace opennova::editor {
 
 namespace {
-
-// The shader loader's form: "SCR", version 1, then the text and a NUL under the shaders' key
-// [orig: ScriptFile_LoadAndDecrypt @ 0x5AE060: the sniff for 'S','C','R',1 @ 0x5AE0A9, the key
-// 0xA55B1EED at 0x5AE0C0, one trailing NUL dropped].
-constexpr uint8_t kShaderScrVersion = 1;
-
-bool scr_header(const std::vector<uint8_t> &stored) {
-	return stored.size() >= scr::SCR_HEADER_SIZE && stored[0] == 'S' && stored[1] == 'C' &&
-			stored[2] == 'R';
-}
 
 // The text written back in the shader loader's form, its NUL after it where the file had one (a new
 // file's as every shipped shader has it). `plain`: the file as stored is not in the form (the loader
@@ -35,11 +26,9 @@ public:
 	bool encode(const std::string &text, std::string &stored,
 			std::vector<SourceIssue> &issues) const override {
 		(void)issues;
-		std::string payload = text;
-		if (nul_) payload.push_back('\0');
-		scr::scr_encrypt(reinterpret_cast<uint8_t *>(payload.data()), payload.size(),
-				scr::SCR_KEY_SHADERS);
-		stored = std::string("SCR") + char(kShaderScrVersion) + payload;
+		// The shader loader's form (formats/scr scr_shader_encode).
+		const std::vector<uint8_t> bytes = scr::scr_shader_encode(text, nul_);
+		stored.assign(bytes.begin(), bytes.end());
 		return true;
 	}
 
@@ -52,33 +41,23 @@ bool decode_shader(const std::string &, const std::vector<uint8_t> &stored, std:
 		std::shared_ptr<const TextEncoding> &encoding, std::vector<SourceIssue> &issues,
 		std::string &error) {
 	(void)issues;
-	if (!scr_header(stored) || stored[3] > 2) {
+	if (!scr::scr_is_scr(stored.data(), stored.size())) {
 		// Not in the form: the loader rejects it; the document holds it as its text, and Save
 		// writes the form (the fact the encoding's: validate_file reads it).
 		text.assign(stored.begin(), stored.end());
 		encoding = std::make_shared<ShaderEncoding>(true, true);
 		return true;
 	}
-	if (stored[3] != kShaderScrVersion) {
+	// The shader loader's form (formats/scr scr_shader_decode): version 1 alone.
+	bool nul = false;
+	if (!scr::scr_shader_decode(stored.data(), stored.size(), text, &nul)) {
 		error = "This shader is in the SCR form of version " + std::to_string(stored[3]) +
 				", which the game's shader loader rejects (it reads version 1 alone).";
 		return false;
 	}
-	std::string payload(stored.begin() + scr::SCR_HEADER_SIZE, stored.end());
-	scr::scr_decrypt(reinterpret_cast<uint8_t *>(payload.data()), payload.size(),
-			scr::SCR_KEY_SHADERS);
-	const bool nul = !payload.empty() && payload.back() == '\0';
-	if (nul) payload.pop_back();
-	text = std::move(payload);
 	encoding = std::make_shared<ShaderEncoding>(nul, false);
 	return true;
 }
-
-// gt.ssc, the gate tag the game reads encoded by its name alone [orig: Mission_LoadEncryptedConfig @
-// 0x4cdcd0: the name @ 0x7cbb50, the file read whole, at most 0x1FFF bytes, and decoded under the key
-// chain @ 0x7cbb44 by NapiNP_DecodeEncryptedString @ 0x4cdd65; one that does not decode is skipped].
-constexpr const char *kGateTagFile = "gt.ssc";
-constexpr const char *kGateTagKeys = "jop:2:oyez";
 
 // The gate tag written back in the form the game decodes, with what followed the encoded text in the
 // file (its line end: the decode reads printable characters alone), so the tag as it was read writes
@@ -273,122 +252,21 @@ FindingTable shader_finding_codes() {
 	return { kShaderRows.data(), kShaderRows.size() };
 }
 
-std::vector<uint8_t> shader_file_bytes(const std::string &text) {
-	std::string stored;
-	std::vector<SourceIssue> issues;
-	ShaderEncoding(true, false).encode(text, stored, issues);
-	return std::vector<uint8_t>(stored.begin(), stored.end());
-}
-
-const std::vector<std::string> &fixed_function_shader_tags() {
-	// In the order the renderer compiles them, texture by self-lit by blending [orig:
-	// HLSLEffect_InitFixedFunctionShaders @ 0x5AFA54..0x5AFCFC; the suffixes @ 0x5AF8D6..0x5AF91E].
-	static const std::vector<std::string> tags = [] {
-		std::vector<std::string> out;
-		for (const char *texture : {"_ST", "_MT"})
-			for (const char *lum : {"", "_LUM"})
-				for (const char *blend : {"_OP", "_AB", "_AD"})
-					out.push_back(std::string("FF") + texture + blend + lum);
-		return out;
-	}();
-	return tags;
-}
-
-namespace {
-
-// The text with its comments blanked to spaces (a line comment to its end, a block comment whole, its line
-// ends kept), so an offset into it is one into the text; a string's contents kept.
-std::string without_comments(const std::string &text) {
-	std::string out = text;
-	for (size_t i = 0; i < out.size();) {
-		if (out[i] == '"') {
-			for (++i; i < out.size() && out[i] != '"' && out[i] != '\n'; ++i)
-				if (out[i] == '\\') ++i;
-			++i;
-		} else if (out.compare(i, 2, "//") == 0) {
-			for (; i < out.size() && out[i] != '\n'; ++i) out[i] = ' ';
-		} else if (out.compare(i, 2, "/*") == 0) {
-			const size_t end = out.find("*/", i + 2);
-			const size_t stop = end == std::string::npos ? out.size() : end + 2;
-			for (; i < stop; ++i)
-				if (out[i] != '\n') out[i] = ' ';
-		} else {
-			++i;
-		}
-	}
-	return out;
-}
-
-bool word_char(char c) {
-	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
-}
-
-// The first `word` of `text` in [from, to) standing alone, npos for none.
-size_t find_word(const std::string &text, const char *word, size_t from, size_t to) {
-	const size_t length = std::char_traits<char>::length(word);
-	for (size_t at = text.find(word, from); at != std::string::npos && at + length <= to; at = text.find(word, at + 1))
-		if ((at == 0 || !word_char(text[at - 1])) && (at + length >= text.size() || !word_char(text[at + length])))
-			return at;
-	return std::string::npos;
-}
-
-size_t skip_space(const std::string &text, size_t at, size_t to) {
-	while (at < to && (text[at] == ' ' || text[at] == '\t' || text[at] == '\r' || text[at] == '\n')) ++at;
-	return at;
-}
-
-} // namespace
-
-ShaderEffectInfo read_shader_effect_info(const std::string &text) {
-	ShaderEffectInfo info;
-	const std::string code = without_comments(text);
-	const size_t name = find_word(code, "EffectInfo", 0, code.size());
-	if (name == std::string::npos) return info;
-	// Its annotations, between the '<' after the name and the '>' closing them outside a string.
-	const size_t open = code.find('<', name);
-	if (open == std::string::npos) return info;
-	size_t close = open + 1;
-	for (bool quoted = false; close < code.size() && (quoted || code[close] != '>'); ++close)
-		if (code[close] == '"') quoted = !quoted;
-	info.found = true;
-	info.info_offset = name;
-	// `<name> = <value>` after the annotation's own name.
-	const auto value_at = [&](const char *annotation) -> size_t {
-		const size_t at = find_word(code, annotation, open, close);
-		if (at == std::string::npos) return at;
-		const size_t eq = skip_space(code, at + std::char_traits<char>::length(annotation), close);
-		return eq < close && code[eq] == '=' ? skip_space(code, eq + 1, close) : std::string::npos;
-	};
-	const size_t tag = value_at("EffectTag");
-	if (tag != std::string::npos && code[tag] == '"') {
-		const size_t end = code.find('"', tag + 1);
-		if (end != std::string::npos && end < close) {
-			info.tag = text.substr(tag + 1, end - tag - 1);
-			info.tag_offset = tag + 1;
-			info.tag_length = end - tag - 1;
-		}
-	}
-	const size_t uv = value_at("EffectAlt_UV");
-	if (uv != std::string::npos)
-		info.alt_uv = code.compare(uv, 4, "true") == 0 || (code[uv] >= '1' && code[uv] <= '9');
-	return info;
-}
-
 void shader_definitions(const TextDocument &document, std::vector<TextDefinition> &out) {
 	const std::string name = basename_of(document.path());
-	const ShaderEffectInfo info = read_shader_effect_info(document.text());
+	const renderer::ShaderEffectInfo info = renderer::read_shader_effect_info(document.text());
 	const auto define = [&](const std::string &tag, size_t offset, size_t length) {
 		out.push_back({ReferenceKind::Shader, tag, document.span_at(offset, length)});
 		// The twin the loader compiles with TEX_UVXFORM, registered as the tag and "#UV".
 		if (info.alt_uv) out.push_back({ReferenceKind::Shader, tag + "#UV", document.span_at(offset, length)});
 	};
-	if (strutil::iequals(name, kFixedFunctionShaderFile)) {
+	if (strutil::iequals(name, renderer::kFixedFunctionShaderFile)) {
 		// The renderer names each compile itself, whatever EffectTag says [orig: @ 0x5AFC3A].
-		for (const std::string &tag : fixed_function_shader_tags())
+		for (const std::string &tag : renderer::fixed_function_shader_tags())
 			define(tag, info.found ? info.info_offset : 0, info.found ? std::char_traits<char>::length("EffectInfo") : 0);
 		return;
 	}
-	if (name.empty() || name[0] == '_' || info.tag.empty()) return;
+	if (renderer::shader_file_is_include(name) || name.empty() || info.tag.empty()) return;
 	define(info.tag, info.tag_offset, info.tag_length);
 }
 
