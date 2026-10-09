@@ -9,7 +9,6 @@
 
 #include <base/io/json.h>
 #include <base/vfs/file_source.h>
-#include <editor/preview/texture_header.h>
 #include <editor/preview/viewport_follow.h>
 #include <formats/mnu/mnu.h>
 #include <formats/playersav/player_sav.h>
@@ -18,6 +17,7 @@
 #include <runtime/menu/menu_frame_assets.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/menu_state_frame.h>
+#include <runtime/menu/menu_texture_header.h>
 #include <runtime/menu/mod_list.h>
 #include <runtime/menu/options_screen.h>
 
@@ -175,7 +175,7 @@ private:
 	menu::MenuRuntime runtime_;
 	menu::MenuStateFrame frame_;
 	menu::MenuFrameAssets assets_;
-	TextureHeaderProbe decoder_;
+	menu::MenuTextureHeaderProbe decoder_;
 	menu::MenuCommands commands_;
 	menu::MenuFlow flow_;
 	menu::ModList mods_;
