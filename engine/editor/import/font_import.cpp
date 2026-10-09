@@ -346,8 +346,8 @@ bool run_font_import(ImportContext &context, ImportProduct &out) {
 	// The sheet read through the context: an input, a change to it importing the font again.
 	std::vector<uint8_t> bytes;
 	if (!context.read(set.sheet, bytes)) return false;
-	ImageSource sheet;
-	if (!decode_image_source(set.sheet, bytes, sheet, why))
+	renderer::ImageSource sheet;
+	if (!renderer::decode_image_source(set.sheet, bytes, sheet, why))
 		return refuse(set.sheet + ": " + why + " (a glyph sheet is a PNG, a TGA or a PCX).", CoreFinding::ImportDecode);
 	ImportOutput output;
 	output.name = name;
