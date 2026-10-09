@@ -20,20 +20,13 @@ namespace opennova::assets {
 
 namespace {
 
-// The name as an archive keys it (pff_norm_name's rule over a buffer of the name's own length plus
-// its terminator, so nothing past a fixed size is cut off).
-std::string archive_key(const std::string &name) {
-	std::string key(name.size() + 1, '\0');
-	pff::pff_norm_name(name.data(), name.size(), &key[0], key.size());
-	key.resize(std::char_traits<char>::length(key.c_str()));
-	return key;
-}
-
 std::vector<MissionFixedFile> collect() {
 	std::vector<MissionFixedFile> out;
+	// Each name once, as an archive keys it (pff::normalized_logical_name).
 	std::set<std::string> seen;
 	const auto add = [&out, &seen](const std::string &name, const char *what) {
-		if (!name.empty() && seen.insert(archive_key(name)).second) out.push_back({ name, what });
+		if (!name.empty() && seen.insert(pff::normalized_logical_name(name)).second)
+			out.push_back({ name, what });
 	};
 	// [orig: HUD_LoadAllTextures @0x59dda0; the carried flag and item @0x59de53, @0x59de64; the
 	// crosshair styles @0x59e3d6]
