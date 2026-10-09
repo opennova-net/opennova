@@ -16,8 +16,9 @@ namespace opennova::editor {
 // the project's assets. BOOT and MENU rows always apply; MISSION rows when the project
 // enables missions. Archive-table rows are build outputs and pattern rows are not files,
 // so neither appears. The engine's names stay fixed (ADR 0046 d5): a row is satisfied by
-// a project file of that exact name and the expected kind.
-enum class RequirementState { Present, Missing, WrongKind };
+// a project file of that exact name and the expected kind. A file an expansion's project lacks that its base
+// game serves is Served: the game reads the base's under /exp, so it is no file the project misses.
+enum class RequirementState { Present, Missing, WrongKind, Served };
 
 struct RequirementRow {
 	const gameprofile::RequiredResource *resource = nullptr; // the manifest row
@@ -32,15 +33,17 @@ struct RequirementRow {
 	AssetKind found_kind = AssetKind::Unknown;
 };
 
-// The counts are the Required rows'. The findings: an error per unmet Required row
-// (`requirement.missing` is the project's, `requirement.wrong_kind` the offending file's)
-// and a note per optional row the project lacks (`requirement.optional_missing`, what the
-// game does without it), each naming its row's role and file.
+// The counts are the Required rows': missing (neither the project nor a base game has it), of the wrong
+// kind, and served (the project lacks it, its base game serves it). The findings: an error per unmet
+// Required row (`requirement.missing` is the project's, `requirement.wrong_kind` the offending file's), a
+// note for one the base serves, and a note per optional row the project lacks
+// (`requirement.optional_missing`, what the game does without it), each naming its row's role and file.
 struct RequirementReport {
 	std::vector<RequirementRow> rows; // manifest order (phase-major)
 	int required_total = 0;
 	int required_missing = 0;
 	int required_wrong_kind = 0;
+	int required_served = 0;
 	std::vector<Diagnostic> diagnostics;
 };
 
@@ -66,7 +69,8 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 // The roles of the Required rows the project does not meet (missing, or of the wrong
 // kind), in manifest order: what "create every missing required file" names (the command
 // line's create-missing, the editor's Create all). A wrong-kind row is refused there,
-// never overwritten.
+// never overwritten; a row the base game serves is met (named alone, it is made: the project's own
+// then stands over the base's).
 std::vector<std::string> unmet_required_roles(const RequirementReport &report);
 
 } // namespace opennova::editor

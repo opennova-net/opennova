@@ -105,7 +105,9 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 			row.state = asset->kind == row.expected_kind ? RequirementState::Present
 			                                             : RequirementState::WrongKind;
 		} else {
-			row.state = RequirementState::Missing;
+			// A file an expansion's base game serves: the game reads the base's under /exp [orig:
+			// PFF_OpenAllArchives @ 0x4a4310, slots 2..4].
+			row.state = base.has(row.name) ? RequirementState::Served : RequirementState::Missing;
 		}
 
 		// The finding names its row (the role, the required name); a missing file is the
@@ -122,14 +124,14 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 		// A file an expansion's base game serves: the game reads the base's under /exp [orig:
 		// PFF_OpenAllArchives @ 0x4a4310, slots 2..4], as the build's gate lets it through (blocks_build
 		// over BaseNames): said so, never what the game does with no file (the demo round's bug 6).
-		const bool served = row.state == RequirementState::Missing && base.has(row.name);
+		const bool served = row.state == RequirementState::Served;
 		const std::string then = served ? " The game reads the base game's, which the expansion builds on."
 		                         : without.empty() ? std::string(" The game reads it by name.")
 		                                           : " " + without;
 		if (row.required) {
 			++report.required_total;
-			if (row.state == RequirementState::Missing) {
-				++report.required_missing;
+			if (row.state == RequirementState::Missing || served) {
+				++(served ? report.required_served : report.required_missing);
 				// One the base game serves is no file the game goes without: a note, never an error (the
 				// game reads the base's, and the build's gate lets it through).
 				report.diagnostics.push_back(finding(served ? DiagnosticSeverity::Info : DiagnosticSeverity::Error,
@@ -145,7 +147,7 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 				                                             " (found: " + asset_kind_label(row.found_kind) + ").",
 				                                     row.asset_path));
 			}
-		} else if (row.state == RequirementState::Missing) {
+		} else if (row.state == RequirementState::Missing || served) {
 			// An optional file the game does without: a note that says how.
 			report.diagnostics.push_back(finding(DiagnosticSeverity::Info, CoreFinding::RequirementOptionalMissing,
 			                                     "Optional file " + row.name + " is not in the project." + then,
@@ -178,7 +180,8 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 std::vector<std::string> unmet_required_roles(const RequirementReport &report) {
 	std::vector<std::string> roles;
 	for (const RequirementRow &row : report.rows)
-		if (row.required && row.state != RequirementState::Present) roles.push_back(row.role);
+		if (row.required && (row.state == RequirementState::Missing || row.state == RequirementState::WrongKind))
+			roles.push_back(row.role);
 	return roles;
 }
 

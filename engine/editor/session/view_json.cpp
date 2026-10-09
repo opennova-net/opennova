@@ -43,6 +43,8 @@ const char *requirement_state_token(RequirementState state) {
 			return "missing";
 		case RequirementState::WrongKind:
 			return "wrong_kind";
+		case RequirementState::Served:
+			return "served";
 	}
 	return "missing";
 }
@@ -144,6 +146,7 @@ JsonValue requirements_section(const SessionView &view) {
 	out.set("total", json_number(double(report.required_total)));
 	out.set("missing", json_number(double(report.required_missing)));
 	out.set("wrong_kind", json_number(double(report.required_wrong_kind)));
+	out.set("served", json_number(double(report.required_served)));
 	JsonValue rows = JsonValue::make_array();
 	for (const RequirementRow &row : report.rows) {
 		JsonValue entry = JsonValue::make_object();
