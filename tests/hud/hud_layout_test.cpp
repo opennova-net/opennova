@@ -180,6 +180,19 @@ static void synthetic() {
 	// The static frame: the LAST authored line draws.
 	CHECK(layout.frame_pos.present && layout.frame_pos.x == 508 && layout.frame_pos.y == 685);
 	CHECK(assets.static_frame == "CompMark.tga");
+	// Each name's loader mode [orig: HUD_LoadAllTextures @0x59DED8..0x59DFC9]: the
+	// static frame and the HUDLS pair in colour, the stances and the two icons
+	// alpha only, a VEHICLE_HUD block's interface art alpha only (@0x59E26A).
+	{
+		using opennova::renderer::TextureLoader;
+		using opennova::renderer::texture_role;
+		CHECK(texture_role(HudLayoutAssets::kStaticFrameRole).loader == TextureLoader::HudColor);
+		CHECK(texture_role(HudLayoutAssets::kHudlsRole).loader == TextureLoader::HudColor);
+		CHECK(texture_role(HudLayoutAssets::kStanceRole).loader == TextureLoader::HudAlpha);
+		CHECK(texture_role(HudLayoutAssets::kParachuteIconRole).loader == TextureLoader::HudAlpha);
+		CHECK(texture_role(HudLayoutAssets::kArmorIconRole).loader == TextureLoader::HudAlpha);
+		CHECK(texture_role(kVehicleHudInterfaceRole).loader == TextureLoader::HudAlpha);
+	}
 	// The fonts: each key fills its own name, and the width pick has no
 	// fallback from one to the other [orig: HUD_SelectHudposFont @0x591890].
 	CHECK(assets.font_lo == "fontlo" && assets.font_hi.empty());

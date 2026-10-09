@@ -15,6 +15,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include <formats/mission/bms.h>
 #include <formats/mission/mission_field.h>
@@ -123,6 +124,12 @@ constexpr bool group_names_none(int64_t group) { return group == 0; }
 // the slot byte, the key EntityPool_FindByNetId @0x4f0a20 matches; 04TR's watchdog
 // SingleIsWithinArea(10000, zone 6), docs/mission/bms-event-runtime-re.md 7.3].
 inline constexpr int32_t kPlayerSsn = 10000;
+// The SSN a new entity takes after the largest the mission's records hold: one past it, the player's
+// skipped, since a parameter naming kPlayerSsn names the player and never a record. A tool's rule:
+// the game assigns no SSN, and the original editor's allocator is not witnessed (D-MIS-3).
+constexpr int32_t ssn_after(int32_t largest) {
+	return largest + 1 == kPlayerSsn ? kPlayerSsn + 1 : largest + 1;
+}
 
 // The SSNs the sees, targeted and shot relation records and the visited words keyed by an SSN hold:
 // rows 0 to 127, the setters skipping any other [orig: the row bound-checks @0x452b60, @0x452bf0;
@@ -134,9 +141,10 @@ inline constexpr int32_t kRelationSsnRows = 128;
 // visited word, its param1), 15 to 17 (both); a Group's 15 to 17 (the entity, param2).
 bool trigger_ssn_unrecorded(const bms::Trigger &trigger, int slot);
 
-// The pools a lookup of an SSN scans, one bit a pool (1 << pool): 0 the organics, 1 the items, 2 the
-// buildings, 3 the markers. The lookups by SSN scan all four [orig: EntityPool_FindByNetId @0x4f0a20,
-// Entity_KillByNetId @0x43DBD0: pools 0, 1, 2, 3]; some tests and actions fewer.
+// The pools a lookup of an SSN scans, one bit a pool (1 << mission.h entity_pool): 0 the organics,
+// 1 the items, 2 the buildings, 3 the markers. The lookups by SSN scan all four [orig:
+// EntityPool_FindByNetId @0x4f0a20, Entity_KillByNetId @0x43DBD0: pools 0, 1, 2, 3]; some tests and
+// actions fewer.
 inline constexpr uint8_t kOrganicPool = 1u << 0, kItemPool = 1u << 1, kBuildingPool = 1u << 2,
                          kMarkerPool = 1u << 3;
 inline constexpr uint8_t kAllPools = kOrganicPool | kItemPool | kBuildingPool | kMarkerPool;
@@ -158,5 +166,21 @@ uint8_t trigger_ssn_pools(const bms::Trigger &trigger);
 // flyover's patient the organics [orig: HeliLift_SpawnPickup @0x4525E0; docs/world/world-wac-ai-re.md
 // 33.32]. 0 for any other action.
 uint8_t action_ssn_pools(const bms::Action &action);
+
+// A zone parameter names an area trigger by its id: at mission start the game scans the area table
+// for the FIRST record whose first word is that id and rewrites the parameter to its index; one whose
+// id no record has, or whose record's box is flat, does not resolve, the trigger or the action
+// neutered [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000, the scan @0x453077, the box test
+// @0x453093; EventTrigger_ResolveZoneActionRefs @0x453100, the scan @0x453162, the box test
+// @0x45317e; docs/mission/bms-event-runtime-re.md 7.3].
+// The index of the first area trigger of `id`; -1 where none has it.
+int zone_area_index(const std::vector<bms::AreaTrigger> &areas, int64_t id);
+// Whether an area trigger's box is flat: x_min == x_max or y_min == y_max, compared as the record's
+// 16.16 words.
+constexpr bool zone_box_flat(const bms::AreaTrigger &area) {
+	return area.x_min == area.x_max || area.y_min == area.y_max;
+}
+// Whether a zone id resolves: the first area trigger of the id is there and its box is not flat.
+bool zone_resolves(const std::vector<bms::AreaTrigger> &areas, int64_t id);
 
 } // namespace opennova::mission

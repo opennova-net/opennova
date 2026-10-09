@@ -78,7 +78,10 @@ struct WaypointNameKey {
 // picks a gametext WPNames special key — attrib 0x80000 ARMORY, else 0x8000
 // TARGET, else type 4091/4093/4095/4096/4097 FLAG, 4098/4100..4103 FLAGBAY
 // (@0x594688..0x59470D) — and an empty result (no key, a miss) falls back to
-// the mission STRWPNAME%03i of the remapped id (@0x59472D). The mission
+// the mission STRWPNAME%03i of the remapped id (@0x59472D), read as the spawn
+// left it: its first 15 characters (game_text_lookup.h kWaypointNameChars; the
+// spawn cuts the key of each type-6005 record's own id, the one read out of a
+// session, and the port cuts every read). The mission
 // fallback's empty or "null" (any case) takes gametext
 // WPNames/STRWPNAMEDEFAULT (@0x59476F..0x59477B); a special key's text is
 // never "null"-tested.

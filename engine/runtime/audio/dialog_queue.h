@@ -32,9 +32,13 @@ namespace opennova::audio {
 
 // The dialog a PlayWavList number plays: "dlg%03i" of it, 0 playing none
 // [orig: Dialog_PlayByIndex @ 0x527ae0, the zero test @ 0x527af4, the sprintf @ 0x527b01].
-// "" for 0. (The PLYRDIALOG triggers form "dlg%.3d" of any number instead,
-// which differs for -99..-1: DialogQueue::active / finished.)
+// "" for 0. (The PLYRDIALOG triggers form trigger_dialog_name's instead.)
 std::string dialog_name_of(int32_t dialog_index);
+// The name a PLYRDIALOG trigger looks its number up by: "dlg%.3d" of any number,
+// 0 included, which differs from dialog_name_of's for -99..-1 ("dlg-005", not
+// "dlg-05") [orig: Dialog_ExistsByIndex "dlg%.3d" @ 0x44e190; sub_44E220 @ 0x44e23f;
+// DialogQueue::active / finished].
+std::string trigger_dialog_name(int32_t dialog_index);
 // The number whose "dlg%03i" forms `name` (dlg012: 12, dlg1234: 1234), the
 // inverse of the formation above, matched exactly; -1 where no number forms the
 // name (dlg12, dlg0012, DLG012, intro), which no number's lookup finds.

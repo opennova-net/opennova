@@ -86,6 +86,19 @@ uint32_t game_type_of(const Row &row);
 // FIRST '.' replaced).
 // [orig: Path_ReplaceOrAppendExtension @ 0x53c780, called with "bin" @ 0x56345b]
 std::string text_table_name(const std::string &file);
+// The section and the two keys the scan reads of that table: [Info] TITLE, the row's title, and
+// BRIEFING, its briefing.
+// [orig: MissionList_ScanAndBuildFromFiles @ 0x563170, the title arm @ 0x563489..0x56354f;
+//  Mission_BuildMapListFromPFF @ 0x562910 the same @ 0x562c55..0x562d1f]
+inline constexpr const char *kTextInfoSection = "Info";
+inline constexpr const char *kTextTitleKey = "TITLE";
+inline constexpr const char *kTextBriefingKey = "BRIEFING";
+// Whether the archive walk lists an entry as a mission: its name from the FIRST '.' on is ".bms",
+// ".npj" or ".npz" without case, so "a.b.bms" is none and a name with no '.' none. build() lists
+// the `.bms` alone (D-MNU-25: OpenNova cannot load a map project).
+// [orig: Mission_BuildMapListFromPFF @ 0x562910, File_HasExtension @ 0x53c640 @ 0x5629a0 /
+//  @ 0x5629bc / @ 0x5629d8]
+bool lists_as_mission(const std::string &name);
 
 // The SP screen's row filter — (code_word & 0xFFFDFFFF) == 0x10020, i.e. the
 // waypoint (Co-op) family with the objective bit forgiven — lives with the

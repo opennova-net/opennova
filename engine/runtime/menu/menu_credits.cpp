@@ -71,11 +71,11 @@ bool marquee_load_credits(const uint8_t *data, size_t size, MarqueeCredits &io,
 	std::vector<ConfigSection> sections = configfile::parse_config_text(data, size);
 	// The file loaded: the values and the running offset start over
 	// [orig: @ 0x65c605..0x65c63d].
-	io.scroll_rate = 1.0f;
-	io.center_x = 400;
-	io.space_mark = '_';
-	io.comma_mark = '@';
-	io.vertical_space = 0;
+	io.scroll_rate = kMarqueeScrollRate;
+	io.center_x = kMarqueeCenterX;
+	io.space_mark = kMarqueeSpaceMark;
+	io.comma_mark = kMarqueeCommaMark;
+	io.vertical_space = kMarqueeVerticalSpace;
 	int offset = 0;
 	if (ConfigSection *env = find_section(sections, "ENV")) {
 		// A missing key reads 0 (the accessor writes 0 first).
@@ -169,6 +169,17 @@ std::string marquee_node_text(const MarqueeCredits &credits, const MarqueeCredit
 	for (char &c : out) {
 		if (c == credits.space_mark) c = ' ';
 		else if (c == credits.comma_mark) c = ',';
+	}
+	return out;
+}
+
+std::string marquee_marked_line(const std::string &shown) {
+	std::string out;
+	for (const char c : shown) {
+		if (c == '%') out += "%%";
+		else if (c == ' ') out += kMarqueeSpaceMark;
+		else if (c == ',') out += kMarqueeCommaMark;
+		else out += c;
 	}
 	return out;
 }
