@@ -42,7 +42,7 @@ DocumentSet::DocumentSet(SessionCore &core) : core_(core), view_(core.view()), p
 DocumentBase *DocumentSet::document_for(const std::string &path) {
 	const std::string &wanted = path.empty() ? view_.documents.active : path;
 	for (auto &document : documents_)
-		if (document->path() == wanted || normalized_logical_name(basename_of(document->path())) == normalized_logical_name(wanted))
+		if (document->path() == wanted || pff::normalized_logical_name(basename_of(document->path())) == pff::normalized_logical_name(wanted))
 			return document.get();
 	// Named in another case (names are the game's, case-insensitive): the project's file of it.
 	if (const AssetEntry *file = core_.project_file(wanted))
@@ -306,7 +306,7 @@ void DocumentSet::create_file(const EditorRequest &request) {
 	blank.project_title = view_.project.document->title;
 	blank.values = request.values;
 	for (const RequirementRow &row : view_.project.requirements->rows)
-		if (row.expected_kind == kind && normalized_logical_name(row.name) == normalized_logical_name(request.path))
+		if (row.expected_kind == kind && pff::normalized_logical_name(row.name) == pff::normalized_logical_name(request.path))
 			blank.role = row.role;
 	// A refusal says why in Problems, and the status line that nothing was made.
 	const auto refuse = [&](const Diagnostic &finding) {

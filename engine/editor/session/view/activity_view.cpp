@@ -11,7 +11,7 @@ ActivityView::ActivityView() :
 
 bool ActivityView::missing_at_boot(const std::string &name) const {
 	for (const std::string &reported : boot_missing)
-		if (normalized_logical_name(reported) == normalized_logical_name(name)) return true;
+		if (pff::normalized_logical_name(reported) == pff::normalized_logical_name(name)) return true;
 	return false;
 }
 

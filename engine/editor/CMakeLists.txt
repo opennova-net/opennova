@@ -17,7 +17,6 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/import_choice.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/install_check.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/install_view.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/assets/player_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_asset_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_layout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_scan.cpp
