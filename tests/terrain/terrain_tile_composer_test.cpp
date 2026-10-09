@@ -952,8 +952,20 @@ bool test_colormap_quadrants_follow_texcompression() {
 			"the map's colormap is the quadrants' first levels put back together");
 }
 
+// The colour map's fixed side and the quadrant split's overrun: the split takes the map's width as its side,
+// so a map shorter than its even width is read and written past.
+bool test_map_split_rules() {
+	using opennova::terrain::kTerrainColourMapSide;
+	using opennova::terrain::terrain_map_split_overruns;
+	return expect(kTerrainColourMapSide == 1024 && !terrain_map_split_overruns(1024, 1024) &&
+			!terrain_map_split_overruns(512, 1024) && terrain_map_split_overruns(1024, 512) &&
+			!terrain_map_split_overruns(3, 2) && terrain_map_split_overruns(4, 3),
+			"a map shorter than its even width overruns the split");
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
+	if (!test_map_split_rules()) return 1;
 	if (!test_colormap_quadrants_follow_texcompression()) return 1;
 	if (!test_tile_set_levels_are_the_dxt5_decode()) return 1;
 	if (!test_level_density()) return 1;

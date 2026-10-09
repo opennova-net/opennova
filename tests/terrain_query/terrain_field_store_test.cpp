@@ -142,6 +142,10 @@ int main() {
 
 	// Surface round-trip at fixed-point mission (300, -200): same sector cell,
 	// fine (300, 200), 4-wide raster shift 8 -> texel (1, 0) = charmap[1] = 3.
+	// The rows a lookup samples: a width up to 1024 its power of two below, a wider map its first texel.
+	check(terrain::surface_sample_extent(1024) == 1024 && terrain::surface_sample_extent(600) == 512 &&
+			terrain::surface_sample_extent(4) == 4 && terrain::surface_sample_extent(1) == 1 &&
+			terrain::surface_sample_extent(2048) == 1, "the sampled extent by the width");
 	const terrain::SurfaceTypeMap &surface = store.surface_map();
 	check(surface.width == 4 && surface.height == 4, "charmap dims land in the view");
 	check(surface.origin_x == -4 && surface.origin_y == -4,

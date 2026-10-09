@@ -196,9 +196,69 @@ void test_particle_loose_leg() {
 			"unsigned: 32768 wide");
 }
 
+opennova::tga::TgaHeader read_header(const std::vector<uint8_t> &bytes) {
+	opennova::tga::TgaHeader h;
+	opennova::tga::tga_read_header(bytes.data(), bytes.size(), h);
+	return h;
+}
+
+void test_retail_form() {
+	using opennova::tga::TgaRetailForm;
+	using opennova::tga::tga_retail_form;
+	// The forms the reader decodes, zeroes, and leaves unset.
+	CHECK(tga_retail_form(read_header(header(2, 2, 2, 24, 0))) == TgaRetailForm::Decoded, "2 at 24 decoded");
+	CHECK(tga_retail_form(read_header(header(10, 2, 2, 32, 0))) == TgaRetailForm::Decoded, "10 at 32 decoded");
+	CHECK(tga_retail_form(read_header(header(3, 2, 2, 8, 0))) == TgaRetailForm::Decoded, "3 at 8 decoded");
+	CHECK(tga_retail_form(read_header(header(1, 2, 2, 8, 0, 0, 4, 24))) == TgaRetailForm::Decoded, "1 with a 24-bit map");
+	CHECK(tga_retail_form(read_header(header(1, 2, 2, 8, 0, 0, 4, 32))) == TgaRetailForm::Zeroed, "1 with a 32-bit map zeroed");
+	CHECK(tga_retail_form(read_header(header(2, 2, 2, 16, 0))) == TgaRetailForm::Zeroed, "2 at 16 zeroed");
+	CHECK(tga_retail_form(read_header(header(10, 2, 2, 16, 0))) == TgaRetailForm::Zeroed, "10 at 16 zeroed");
+	CHECK(tga_retail_form(read_header(header(9, 2, 2, 8, 0))) == TgaRetailForm::Zeroed &&
+			tga_retail_form(read_header(header(11, 2, 2, 8, 0))) == TgaRetailForm::Zeroed, "9 and 11 zeroed");
+	CHECK(tga_retail_form(read_header(header(3, 2, 2, 16, 0))) == TgaRetailForm::Unset, "3 at 16 unset");
+	CHECK(tga_retail_form(read_header(header(7, 2, 2, 24, 0))) == TgaRetailForm::Unset, "an unknown type unset");
+}
+
+void test_reads_past_end() {
+	using opennova::tga::tga_reads_past_end;
+	// 2 x 2 at 32 bits: 16 texel bytes after the header and its 3-byte ID.
+	std::vector<uint8_t> whole = header(2, 2, 2, 32, 0, 3);
+	whole.resize(whole.size() + 16, 0);
+	CHECK(!tga_reads_past_end(read_header(whole), whole.data(), whole.size()), "every texel held");
+	std::vector<uint8_t> cut = whole;
+	cut.pop_back();
+	CHECK(tga_reads_past_end(read_header(cut), cut.data(), cut.size()), "a byte short");
+	// A zeroed form reads nothing.
+	const std::vector<uint8_t> zeroed = header(2, 2, 2, 16, 0);
+	CHECK(!tga_reads_past_end(read_header(zeroed), zeroed.data(), zeroed.size()), "a zeroed form reads nothing");
+	// Run-length: a run of 4 reads one pixel; a raw packet copies each.
+	std::vector<uint8_t> run = header(10, 2, 2, 24, 0);
+	run.insert(run.end(), {0x83, 1, 2, 3});
+	CHECK(!tga_reads_past_end(read_header(run), run.data(), run.size()), "one run holds four pixels");
+	std::vector<uint8_t> raw = header(10, 2, 2, 24, 0);
+	raw.insert(raw.end(), {0x03, 1, 2, 3, 4, 5, 6, 7, 8, 9});
+	CHECK(tga_reads_past_end(read_header(raw), raw.data(), raw.size()), "a raw packet short of its pixels");
+	// A colour-mapped file: its 24-bit map and its indices.
+	std::vector<uint8_t> mapped = header(1, 2, 2, 8, 0, 0, 2, 24);
+	mapped.resize(mapped.size() + 6 + 4, 0);
+	CHECK(!tga_reads_past_end(read_header(mapped), mapped.data(), mapped.size()), "a map and its indices held");
+	mapped.pop_back();
+	CHECK(tga_reads_past_end(read_header(mapped), mapped.data(), mapped.size()), "an index short");
+}
+
+void test_colour_map_misread() {
+	using opennova::tga::tga_colour_map_misread;
+	CHECK(tga_colour_map_misread(read_header(header(2, 2, 2, 24, 0, 0, 4, 24))), "a true-colour file's map not skipped");
+	CHECK(!tga_colour_map_misread(read_header(header(2, 2, 2, 24, 0))), "no map");
+	CHECK(!tga_colour_map_misread(read_header(header(1, 2, 2, 8, 0, 0, 4, 24))), "a colour-mapped file's map is read");
+}
+
 } // namespace
 
 int main() {
+	test_retail_form();
+	test_reads_past_end();
+	test_colour_map_misread();
 	test_rows_always_flipped();
 	test_pixels_follow_the_image_id_not_the_colour_map();
 	test_forms();

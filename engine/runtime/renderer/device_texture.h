@@ -2,9 +2,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 #include <runtime/renderer/texture_dxt.h>
+#include <runtime/renderer/texture_load_rules.h>
 
 namespace opennova::renderer {
 
@@ -137,6 +139,38 @@ struct DdsSource {
 // @ 0x687F9F..0x6880E0]; the reference card takes both DXTs.
 DeviceTexture dds_device_texture(const DdsSource &source, uint32_t flags,
 		const TextureDxtCaps &caps = kReferenceTextureDxtCaps, uint32_t max_side = kReferenceMaxTextureSide);
+
+// A DDS's format as its device texture takes it, by the name of the Direct3D format D3DX matches
+// the file's pixel format to (dds::DdsFormat::name): the DXTs by their blocks (DXT2 and DXT4, the
+// premultiplied twins, by DXT3's and DXT5's), A8R8G8B8 (or no name), any other format uncompressed
+// at its bits a texel (DdsSource::bits).
+DeviceTextureFormat dds_device_format(std::string_view format_name);
+
+// The side the DDS reader's texture is made at for an image side of `side`: the reader asks D3DX
+// for a texture of D3DX_DEFAULT sides, which rounds each up to a power of two, and under Filter NONE
+// copies the image into its top-left corner, transparent black past it [orig: GTexture_InitFromMemory
+// @ 0x68830E..0x688310; D3DXCreateTextureFromFileInMemoryEx_Internal @ 0x6914D9..0x6914EE,
+// @ 0x69150B..0x691520; CBlt::BltNone @ 0x6E0D57] (render-material-re D-RMAT-18).
+uint32_t d3dx_default_texture_side(uint32_t side);
+
+// The creation flags a model texture row's loader (`loader` Stage, Plain or Normal: material_texture
+// .h's dispatch by the row's runtime type) makes its texture with at object texture detail `level`:
+// the stage and plain loaders the row's slot's detail word (object_texdetail_flags), the normal-map
+// loader that word and the 512 cap [orig: Material_LoadStageTexture @ 0x5B173E..0x5B1742 (stage),
+// @ 0x5B174F..0x5B1758 (plain), @ 0x5B1782..0x5B1790 (normal: or eax, 1000h)].
+uint32_t model_row_texture_flags(TextureLoader loader, uint8_t slot, int level);
+
+// The device texture a model texture row's loader makes of the file it opens at object texture detail
+// `level`, under model_row_texture_flags: `file` its sides and, where it is a DDS (`dds`), what it
+// states of itself. Only the stage loader reads a DDS through D3DX (dds_device_texture) [orig:
+// Texture_LoadByNameWithChannel @ 0x58B616, GTexture_FindOrCreateByName over GTexture_InitFromMemory];
+// it builds every other file from its pixels (pixel_device_texture) [orig: @ 0x58B74D,
+// GTexture_FindOrCreateFromData], the plain loader reads pixels alone [orig: Texture_LoadAndRegister
+// @ 0x58B920], and the normal-map loader decodes a DDS into pixels before it converts them [orig:
+// Texture_LoadAsNormalMap @ 0x58C6CB, Texture_DecompressDDSFromPFF32 @ 0x56E450], so its texture is
+// always built from pixels.
+DeviceTexture model_row_device_texture(TextureLoader loader, uint8_t slot, int level, const DdsSource &file,
+		bool dds);
 
 // convert_dxt_alpha_blocks's test of a DXT5's first level: the first word of each of its blocks (both
 // alpha endpoints) 0xFFFF, over max(1, width / 4) x max(1, height / 4) blocks from the level's start
