@@ -35,7 +35,9 @@ enum class WireReplicationPath : uint8_t {
 
 // Physical movement is independent of controller and wire codec. For example,
 // a vehicle can select its compact through ai_function and its mover through a
-// different move_function.
+// different move_function. The family is the physics row's
+// (world/physics_class_table.h): Static is the null row, which every name the
+// table lacks binds; Unresolved is a row this catalog names no family for.
 enum class MotionFamily : uint8_t {
 	Unresolved = 0,
 	Static,

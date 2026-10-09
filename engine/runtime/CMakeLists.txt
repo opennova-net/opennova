@@ -316,6 +316,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/nvg_laser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/destruction.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/item_events.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/physics_class_table.cpp  # the move_function row lookup
     ${CMAKE_CURRENT_SOURCE_DIR}/world/item_squib.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_squib.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/item_sections.cpp

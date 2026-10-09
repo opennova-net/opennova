@@ -2318,6 +2318,13 @@ target_include_directories(round_debug_trail_test PRIVATE ${CMAKE_CURRENT_SOURCE
 target_compile_features(round_debug_trail_test PRIVATE cxx_std_17)
 opennova_add_gated_test(round_debug_trail COMMAND round_debug_trail_test)
 
+# The physics callback table (world/physics_class_table.h): a move_function
+# binds its row by whole name, ignoring case; anything else binds null.
+add_executable(physics_class_table_test world/physics_class_table_test.cpp)
+target_link_libraries(physics_class_table_test PRIVATE opennova_runtime)
+target_compile_features(physics_class_table_test PRIVATE cxx_std_17)
+add_test(NAME physics_class_table COMMAND physics_class_table_test)
+
 # Throwables (world/throwables.h; world-wac-ai-re §27): PowerThrow charge,
 # grenade bounce/fuse, satchel place/detonator, claymore cone + fan, the AV
 # mine's moving-vehicle cone, owner-death cleanup.

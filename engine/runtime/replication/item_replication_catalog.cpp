@@ -1,11 +1,10 @@
 #include <runtime/replication/item_replication_catalog.h>
 
 #include <cstring>
-#include <string_view>
 #include <utility>
 
 #include <formats/def/def.h>
-#include <base/io/strutil.h>
+#include <runtime/world/physics_class_table.h>
 
 using namespace opennova::def;
 
@@ -22,33 +21,37 @@ std::string bounded_string(const char *value, size_t capacity) {
 	return std::string(value, length);
 }
 
-MotionFamily motion_family_from_tag(const std::string &tag) {
-	// The retail update-callback table stores its keys as 4-byte fourccs
-	// ([tag u32] rows @ 0x82ABC0) while items.def authors longer tokens onto
-	// them — the shipped corpus writes `cbike`, `ctank`, `catv` and mixed-case
-	// `CHel`, and the record names those exact rows "the cbike row via
-	// Entity_DispatchPhysics_cbike @0x48EFF0" / "0x488AB0 is the ctank row's
-	// mover" (docs/world/vehicle-client-movers-re.md). Exact whole-string
-	// matching therefore strands every 5-char family on Unresolved; resolve
-	// on the case-folded fourcc prefix instead.
-	const std::string key = strutil::to_lower(
-			std::string_view(tag).substr(0, 4));
-	if (key.empty() || key == "null") return MotionFamily::Static;
-	if (key == "plyr" || key == "org0" || key == "org1" || key == "org2")
-		return MotionFamily::Person;
-	// ctan stays at this catalog's GroundVehicle granularity; the WORLD
+// The catalog's motion family of the physics row a move_function binds
+// (world/physics_class_table.h): the whole token, any case, and a name the
+// table lacks binds the null row, which is Static. A row this catalog has no
+// family for (ewep, door, upfx, ...) is Unresolved.
+MotionFamily motion_family_from_move_function(const std::string &move_function) {
+	using world::PhysicsClass;
+	switch (world::physics_class_from_move_function(move_function)) {
+	case PhysicsClass::Null: return MotionFamily::Static;
+	case PhysicsClass::Org0:
+	case PhysicsClass::Org1:
+	case PhysicsClass::Org2: return MotionFamily::Person;
+	// ctank stays at this catalog's GroundVehicle granularity; the WORLD
 	// classifier routes it to VehicleFamily::Tank for the mover/solve split
 	// (the tank mover @0x488AB0 + the wheeled solve @0x475DE0). This value
 	// is catalog metadata — the world-side family owns dispatch.
-	if (key == "cveh" || key == "ctrn" || key == "ctan" || key == "catv")
-		return MotionFamily::GroundVehicle;
-	if (key == "cbik") return MotionFamily::LightVehicle;
-	if (key == "cbot") return MotionFamily::Watercraft;
-	if (key == "chel" || key == "cpln") return MotionFamily::Aircraft;
-	if (key == "rokt" || key == "stng" || key == "hlfr" || key == "jvln" ||
-	    key == "arty" || key == "arti")
-		return MotionFamily::Guided;
-	return MotionFamily::Unresolved;
+	case PhysicsClass::Cveh:
+	case PhysicsClass::Ctrn:
+	case PhysicsClass::Ctank:
+	case PhysicsClass::Catv: return MotionFamily::GroundVehicle;
+	case PhysicsClass::Cbike: return MotionFamily::LightVehicle;
+	case PhysicsClass::Cbot: return MotionFamily::Watercraft;
+	case PhysicsClass::Chel:
+	case PhysicsClass::Cpln: return MotionFamily::Aircraft;
+	case PhysicsClass::Rokt:
+	case PhysicsClass::Stng:
+	case PhysicsClass::Hlfr:
+	case PhysicsClass::Jvln:
+	case PhysicsClass::Arty:
+	case PhysicsClass::Arti: return MotionFamily::Guided;
+	default: return MotionFamily::Unresolved;
+	}
 }
 
 ItemReplicationProfile profile_from(const ItemReplicationDefinition &definition) {
@@ -71,7 +74,7 @@ ItemReplicationProfile profile_from(const ItemReplicationDefinition &definition)
 
 	// Physical movement dispatch is a separate ItemDef callback lookup.
 	// [orig: EntityDef_LookupPhysicsCallback @0x4A9240]
-	profile.motion_family = motion_family_from_tag(definition.move_function);
+	profile.motion_family = motion_family_from_move_function(definition.move_function);
 	profile.allocation.item_type = definition.item_type;
 	profile.allocation.attrib = definition.attrib;
 	profile.allocation.attrib2 = definition.attrib2;

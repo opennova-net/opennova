@@ -34,6 +34,10 @@ int main() {
 	check(loading_sidecar_image_name("maps/ASH_I5A.bms") == "ASH_I5A.pcx", "sidecar strips dir");
 	check(loading_sidecar_image_name("maps\\ASH_I5A.bms") == "ASH_I5A.pcx",
 			"sidecar strips backslash dir");
+	// The swap replaces from the FIRST '.' left after the last one is cut
+	// [orig: Path_RemoveExtension @ 0x521d66; Path_ReplaceOrAppendExtension's
+	// scan @ 0x53c7c4].
+	check(loading_sidecar_image_name("op.v2.bms") == "op.pcx", "sidecar cut at the first dot");
 
 	// The present-due rule pumps on its interval or a real checkpoint change;
 	// repeated presents never invent work between checkpoints.

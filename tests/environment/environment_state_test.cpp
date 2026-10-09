@@ -85,6 +85,23 @@ int main() {
 	// --- HHMM / minute / fixed24 clock views --------------------------------
 	ok &= expect(near(EnvironmentState::hhmm_to_minute_of_day(1230.0f), 750.0f),
 			"12:30 is minute 750");
+	// The curtime word: the truncating 16.16 parse widened by << 8, so a minute
+	// that is not a quarter hour lands below the exact 8.24 hour (12:10 is not
+	// llround(12.1667 * 2^24) = 204122795), and the minutes clamp to 59.
+	// [orig: TimeOfDay_ParseProperty @0x57d0b6..0x57d0d2;
+	//  Environment_ParseTimeString @0x57c500, clamps @0x57c552/@0x57c55c,
+	//  divide @0x57c566..0x57c57c]
+	ok &= expect(EnvironmentState::hhmm_to_fixed24(1210.0) == ((12u << 16) + (10u << 16) / 60u) << 8 &&
+					EnvironmentState::hhmm_to_fixed24(1210.0) == 204122624u,
+			"12:10 truncates its minute before the shift");
+	ok &= expect(EnvironmentState::hhmm_to_fixed24(1215.0) == (12u << 24) + (1u << 22),
+			"a quarter hour is exact");
+	ok &= expect(EnvironmentState::hhmm_to_fixed24(1275.0) == ((12u << 16) + (59u << 16) / 60u) << 8,
+			"the minutes clamp to 59, not into the next hour");
+	ok &= expect(EnvironmentState::hhmm_to_fixed24(2359.0) == 402373376u &&
+					EnvironmentState::hhmm_to_fixed24(2359.0) < 0x18000000u,
+			"the last minute stays under one day");
+	ok &= expect(EnvironmentState::hhmm_to_fixed24(0.0) == 0u, "midnight is zero");
 
 	// --- the mission clock lives in the weather home ---------------------------
 	{
