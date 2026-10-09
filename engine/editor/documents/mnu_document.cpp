@@ -801,7 +801,7 @@ bool MnuDocument::set_value(Node &node, const Located &at, size_t field, const V
 			characters = bytes.size();
 			stored = std::move(bytes);
 		} else {
-			for (const char c : *text) characters += (static_cast<unsigned char>(c) & 0xC0) != 0x80;
+			characters = strutil::utf8_length(*text);
 		}
 		if (schema.width && characters >= schema.width) {
 			error = "The text is too long.";

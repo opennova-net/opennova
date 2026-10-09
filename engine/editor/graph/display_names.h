@@ -81,8 +81,6 @@ std::vector<ReferenceChoice> picker_choices(const AssetGraph *graph, const Docum
 // the terminator: a sound loop's 24 [orig: ItemDef_ParseProperty's strncpy of 0x18 @ 0x49FF08]); 0 for a field
 // with no such limit (a number, a text of no width).
 size_t field_name_limit(const FieldUse &field);
-// How many characters the game's code page spells a UTF-8 name in (one byte a character).
-size_t name_characters(const std::string &name);
 
 // A picker's name as completing what is typed (ADR 0046 DI-09).
 struct ReferenceCompletion {
@@ -103,7 +101,7 @@ std::vector<ReferenceCompletion> complete_reference(const std::vector<ReferenceC
 // number in three digits at least, sprintf's "%s%03i": STRNAME005 is 5, STRNAME1234 is 1234; dlg012 is
 // 12), the prefix compared as the kind's names compare (a text key's without case, a dialog's exactly:
 // DLG012 is no dialog the game forms); false for a name of another prefix or one no number forms
-// (STRNAME5, STRNAME0005), which no lookup of the game reads.
+// (STRNAME5, STRNAME0005), which no lookup of the game reads: strutil::key_number, the case the kind's.
 bool key_number(ReferenceKind kind, const std::string &key, const char *prefix, int64_t &out);
 // A text key's (key_number of a TextId).
 bool text_key_number(const std::string &key, const char *prefix, int64_t &out);

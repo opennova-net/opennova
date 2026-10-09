@@ -1,5 +1,6 @@
 #include "file_page_view.h"
 
+#include <base/io/strutil.h>
 #include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
 #include <editor/session/file_page.h>
@@ -134,7 +135,7 @@ void draw_file_page(Workspace &workspace, const std::string &path, FilePageCache
 	}
 	ImGui::TextUnformatted(page.name.c_str());
 	ImGui::SameLine();
-	ImGui::TextDisabled("%s, %s", page.kind.c_str(), ui_kit::size_text(page.size).c_str());
+	ImGui::TextDisabled("%s, %s", page.kind.c_str(), strutil::byte_size_text(page.size).c_str());
 	ImGui::TextWrapped("%s", page.what.c_str());
 	ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
 	ImGui::TextWrapped("Read by the game: %s", page.read_by.c_str());

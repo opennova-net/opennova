@@ -114,7 +114,7 @@ struct LastGood {
 bool read_last_good(const std::string &output_root, LastGood &out) {
 	std::string text;
 	std::string io_error;
-	if (!read_file_text(join_path(output_root, kLastGoodBuildFileName), text, io_error))
+	if (!io::read_file_text(join_path(output_root, kLastGoodBuildFileName), text, io_error))
 		return false;
 	io::JsonValue json;
 	std::string parse_error;
@@ -162,7 +162,7 @@ io::JsonValue build_record(const std::string &build_id, const std::string &proje
 // The directory a loose file lands in, made first (an expansion's folder: ADR 0046 S16).
 bool ensure_parent(const std::string &path, std::string &error) {
 	const fs::path parent = path_of(path).parent_path();
-	return parent.empty() || ensure_directory(utf8_of(parent), error);
+	return parent.empty() || io::ensure_directory(utf8_of(parent), error);
 }
 
 // Every planned name must resolve through the engine's own mount of the staged
@@ -218,7 +218,7 @@ bool is_prunable_build_dir(const fs::path &dir) {
 	if (!is_build_id(name)) return false;
 	std::string text;
 	std::string io_error;
-	if (!read_file_text(utf8_of(dir / kBuildRecordFileName), text, io_error)) return false;
+	if (!io::read_file_text(utf8_of(dir / kBuildRecordFileName), text, io_error)) return false;
 	io::JsonValue json;
 	std::string parse_error;
 	if (!io::json_parse(text, json, parse_error) || !json.is_object()) return false;
@@ -230,13 +230,13 @@ bool is_prunable_build_dir(const fs::path &dir) {
 bool build_project(const fs::path &dir, std::string &project) {
 	std::string text, io_error;
 	if (!staged_build_id(utf8_of(dir.filename())).empty()) {
-		if (!read_file_text(utf8_of(dir / kBuildStagingMarkerFileName), text, io_error)) return false;
+		if (!io::read_file_text(utf8_of(dir / kBuildStagingMarkerFileName), text, io_error)) return false;
 		const size_t line = text.find('\n');
 		if (line == std::string::npos) return false;
 		project = text.substr(line + 1);
 		return true;
 	}
-	if (!read_file_text(utf8_of(dir / kBuildRecordFileName), text, io_error)) return false;
+	if (!io::read_file_text(utf8_of(dir / kBuildRecordFileName), text, io_error)) return false;
 	io::JsonValue json;
 	std::string parse_error;
 	if (!io::json_parse(text, json, parse_error) || !json.is_object() || !json.get("project")) return false;
@@ -325,7 +325,7 @@ struct BuildRun::Streams {
 	// A copy's target made at `path`, which no file may hold yet (false when one does).
 	bool open_out(const std::string &path) {
 		drop_out();
-		out = create_new_file(path);
+		out = io::create_new_file(path);
 		return out != nullptr;
 	}
 	// `size` bytes of the buffer written to the copy's target.
@@ -549,7 +549,7 @@ void BuildRun::load_cache() {
 	if (plan_.hash_cache.empty()) return;
 	std::string message;
 	std::error_code ec;
-	if (!fs::is_regular_file(system_path(plan_.hash_cache), ec) || !read_file_text(plan_.hash_cache, cache_text_, message))
+	if (!fs::is_regular_file(system_path(plan_.hash_cache), ec) || !io::read_file_text(plan_.hash_cache, cache_text_, message))
 		return;
 	io::JsonValue json;
 	if (!io::json_parse(cache_text_, json, message) || !json.is_object() ||
@@ -599,7 +599,7 @@ void BuildRun::save_cache() const {
 	const std::string text = io::json_write(json);
 	if (text == cache_text_) return;
 	std::string message;
-	write_file_atomic(plan_.hash_cache, text, message); // a cache that cannot be written is only slower
+	io::write_file_atomic(plan_.hash_cache, text, message); // a cache that cannot be written is only slower
 }
 
 void BuildRun::fold(const BuildEntry &entry, uint64_t size, uint64_t content) {
@@ -808,7 +808,7 @@ void BuildRun::drop_same_as_base() {
 		std::string error;
 		BaseCopy copy;
 		uint64_t read = 0;
-		const bool same = read_file_bytes(entry.source_path, bytes, error) && base_->root_copy(entry.logical_name, copy, read) &&
+		const bool same = io::read_file_bytes(entry.source_path, bytes, error) && base_->root_copy(entry.logical_name, copy, read) &&
 		                  copy.size == bytes.size() &&
 		                  copy.raw == io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size());
 		report_.base_bytes_read += read;
@@ -843,7 +843,7 @@ void BuildRun::fold_all() {
 // Settle whether this content is built already, and open the staging directory.
 void BuildRun::settle() {
 	std::string io_error;
-	if (!ensure_directory(output_root_, io_error)) {
+	if (!io::ensure_directory(output_root_, io_error)) {
 		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
 	}
 	final_dir_ = join_path(output_root_, report_.build_id);
@@ -913,11 +913,11 @@ void BuildRun::settle() {
 		                         "cannot stage the build: its staging directories could not be emptied (a file in "
 		                         "them is in use)"));
 	}
-	if (!ensure_directory(tmp_dir, io_error)) {
+	if (!io::ensure_directory(tmp_dir, io_error)) {
 		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
 	}
 	tmp_dir_ = tmp_dir; // from here a failure or a cancel removes it
-	if (!write_file_atomic(join_path(tmp_dir, kBuildStagingMarkerFileName), report_.build_id + "\n" + plan_.project,
+	if (!io::write_file_atomic(join_path(tmp_dir, kBuildStagingMarkerFileName), report_.build_id + "\n" + plan_.project,
 	                       io_error)) {
 		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
 	}
@@ -957,7 +957,7 @@ void BuildRun::pack(uint64_t budget) {
 				return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, folder_error));
 			if (item_reused_) {
 				std::string link_error;
-				if (link_file(previous, target, link_error)) {
+				if (io::link_file(previous, target, link_error)) {
 					report_.archives_reused.push_back(archive.file_name);
 					report_.archives_linked.push_back(archive.file_name);
 					label_ = "Linking " + archive.file_name + " from the last build";
@@ -1122,15 +1122,15 @@ void BuildRun::publish() {
 		for (const BuildArchive &archive : plan_.archives)
 			sizes[archive.file_name] = size_of(join_path(tmp_dir_, archive.file_name));
 		record_ = io::json_write(build_record(report_.build_id, plan_.project, hashes_, sizes, report_.loose_written));
-		if (!write_file_atomic(join_path(tmp_dir_, kBuildRecordFileName), record_, io_error)) {
+		if (!io::write_file_atomic(join_path(tmp_dir_, kBuildRecordFileName), record_, io_error)) {
 			return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
 		}
 		publish_ready_ = true;
 	}
 	std::error_code ec;
-	if (!rename_with_retry(system_path(tmp_dir_), system_path(final_dir_), ec)) {
+	if (!io::rename_with_retry(system_path(tmp_dir_), system_path(final_dir_), ec)) {
 		const auto now = std::chrono::steady_clock::now();
-		if (rename_refusal_passes(ec)) {
+		if (io::rename_refusal_passes(ec)) {
 			if (publish_refused_at_ == std::chrono::steady_clock::time_point{}) publish_refused_at_ = now;
 			if (now - publish_refused_at_ < kPublishPatience) return; // the next step tries again
 		}
@@ -1139,7 +1139,7 @@ void BuildRun::publish() {
 	}
 	tmp_dir_.clear(); // published: nothing left to clean up
 	fs::remove(system_path(join_path(final_dir_, kBuildStagingMarkerFileName)), ec); // the record is its proof now
-	if (!write_file_atomic(join_path(output_root_, kLastGoodBuildFileName), record_, io_error)) {
+	if (!io::write_file_atomic(join_path(output_root_, kLastGoodBuildFileName), record_, io_error)) {
 		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
 	}
 	// The directories games run from, asked now: a game started (or found alive) since the build
