@@ -123,9 +123,15 @@ std::vector<HostPlayerSlot> ServeListing::wanted_roster(const std::map<int, Host
 }
 
 // A ServerCommand runs on the match. PuntPlayer at the server's own slot leaves the hosting (the
-// session's word drops and the match's NovaWorld exit ends it); a changed name or message reads
-// back through registration() and rides the next refresh.
-// [orig: CNapiGameSession_HandleServerCommand — PuntPlayer @0x4D2515..0x4D254D]
+// session's word drops and the match's NovaWorld exit ends it). SetServerName / SetServerMsg /
+// SetMPReset write the cfg block (game_name +0x3A5, servermsg +0x560, mpreset +0x344) beside the
+// live config and save game.cfg, as retail's handler does, so the map change's re-apply of the
+// block keeps them; the changed columns read back through registration() and ride the next
+// refresh or the map change's republish. The executor already capped the strings to the block's
+// widths (31 / 127).
+// [orig: CNapiGameSession_HandleServerCommand — PuntPlayer @0x4D2515..0x4D254D; SetServerName's
+//  block copy @0x4D2CFC, SetServerMsg's @0x4D2DAD, SetMPReset's @0x4D2E28; Game_SaveConfig
+//  @0x4D2DDF (SetServerName / SetServerMsg) and @0x4D2E2D (SetMPReset)]
 void ServeListing::on_command(const ServerCommand &command) {
 	if (role_ == nullptr || kernel_ == nullptr) {
 		io::logf(LogLevel::kInfo, "[host] ServerCommand %s before the match: ignored",
@@ -140,6 +146,19 @@ void ServeListing::on_command(const ServerCommand &command) {
 		return;
 	}
 	io::logf(LogLevel::kInfo, "[host] ServerCommand %s", command.command.c_str());
+	if (outcome.config_changed) {
+		const inmatch::GameConfig &config = role_->state.host_owner.ctx.config;
+		if (seams_.config_block != nullptr) {
+			gamecfg::GameCfg &block = *seams_.config_block;
+			switch (command.verb) {
+			case ServerCommandVerb::SetServerName: block.game_name = config.server_name; break;
+			case ServerCommandVerb::SetServerMsg: block.servermsg = config.custom_text; break;
+			case ServerCommandVerb::SetMPReset: block.mp_reset = config.multiplayer_reset; break;
+			default: break;
+			}
+		}
+		if (seams_.save_config) seams_.save_config();
+	}
 	if (outcome.stop_hosting && lister_ != nullptr) lister_->host_role().stop();
 }
 
