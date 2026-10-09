@@ -1,7 +1,6 @@
 {
   "_comment": "scripts/lint/orphan_header_check.py: engine/godot-src headers included by nothing outside tests/ and their own unit that are NOT staged policy code. Each entry names why it has no include consumer. The 2026-08-25 census debt was burned down on 2026-08-27 (threedi_compare moved to tests/threedi/, terrain/types.h deleted, serializing_sink.h STAGED with its owner named); never grow this list without a reason that names the consumer.",
   "allow": {
-    "godot/src/object/object_data_build.h": "The steppable warm-up of a model's data (each material's stage textures and flipbook frames, each level's meshes) the editor's model and definition previews build a large model over several frames with (godot/src/authoring/preview_model.cpp, model_viewport_applier.cpp). Its include consumers are the OpenNova Editor's, on the editor trunk (PR #665); delete this entry when the editor lands.",
     "godot/src/register_types.h": "The GDExtension entry-point declaration: consumed by its own register_types.cpp plus the .gdextension config's entry_symbol resolution at load time - the linker/loader is the consumer, not an #include."
   }
 }
