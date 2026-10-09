@@ -9,7 +9,6 @@
 #include <formats/env/env.h>
 #include <formats/foliage/runtime.h>
 #include <formats/mission/bms.h>
-#include <formats/pcx/pcx_io.h>
 #include <formats/til/til_io.h>
 #include <formats/til/til_tsd.h>
 #include <formats/trn/charmap_legend.h>
@@ -200,8 +199,7 @@ void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const 
 	tile_surface_.fill(0);
 	water_z_ = 0;
 	foliage_map_.clear();
-	foliage_codes_ = IndexedImage8();
-	foliage_masks_.clear();
+	foliage_ = terrain::FoliageMaskRaster();
 	foliage_defs_.clear();
 	stamps_.clear();
 	if (!files) {
@@ -230,23 +228,14 @@ void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const 
 			std::string til_error;
 			if (!load_til(til.data(), til.size(), placed_, til_error)) placed_ = TilFile();
 		}
-		// The foliage map through the game's 8-bit PCX reader, its indices kept, and each texel remapped to
-		// the definition slots it selects [orig: Foliage_LoadFoliageMapPCX @ 0x605AD0, the remap @
-		// 0x605B73..0x605B8A; Foliage_RemapPixelToDefMask @ 0x5FF4E0]; a map that does not read grows nothing.
+		// The foliage map as the game's load keeps it, its indices and each texel remapped to the definition slots it
+		// selects (terrain::load_foliage_mask_raster) [orig: Foliage_LoadFoliageMapPCX @ 0x605AD0]; a map that does
+		// not read grows nothing.
 		foliage_defs_ = trn.foliage_defs;
 		std::vector<uint8_t> foliage_bytes;
-		std::string foliage_error;
 		if (!trn.foliagemap.empty() && stamped->read(trn.foliagemap, foliage_bytes) &&
-				decode_pcx_indexed(foliage_bytes.data(), foliage_bytes.size(), foliage_codes_, foliage_error) &&
-				!foliage_codes_.empty()) {
+				terrain::load_foliage_mask_raster(foliage_bytes, foliage_defs_, foliage_))
 			foliage_map_ = trn.foliagemap;
-			uint8_t remap[256];
-			for (int code = 0; code < 256; ++code) remap[code] = uint8_t(foliage_remap_pixel_to_def_mask(foliage_defs_, code));
-			foliage_masks_.resize(foliage_codes_.indices.size());
-			for (size_t i = 0; i < foliage_masks_.size(); ++i) foliage_masks_[i] = remap[foliage_codes_.indices[i]];
-		} else {
-			foliage_codes_ = IndexedImage8();
-		}
 		terrain::SurfaceTileFileSource tile_files;
 		tile_files.has_file = [stamped](const std::string &name) { return stamped->stamp(name) != 0; };
 		tile_files.read_file = [stamped](const std::string &name, std::vector<uint8_t> &out) {
@@ -284,18 +273,8 @@ terrain::SurfaceTypeMap MissionGround::surface_sampler() const {
 }
 
 terrain::FoliageMaskMap MissionGround::foliage_sampler(bool codes) const {
-	terrain::FoliageMaskMap map;
-	if (!terrain() || foliage_codes_.empty()) return map;
-	const terrain::TerrainHeightField &field = store_.height_field();
-	map.data = codes ? foliage_codes_.indices.data() : foliage_masks_.data();
-	map.width = foliage_codes_.width;
-	map.height = foliage_codes_.height;
-	map.sector_grid = field.layout.sector_grid;
-	map.origin_x = field.layout.origin_x;
-	map.origin_y = field.layout.origin_y;
-	map.wrap_x = field.wrap_x;
-	map.wrap_z = field.wrap_z;
-	return map;
+	if (!terrain()) return terrain::FoliageMaskMap();
+	return terrain::foliage_mask_map(foliage_, store_.height_field(), codes);
 }
 
 int MissionGround::foliage_kept_off(double x, double y, int mask) const {
@@ -367,7 +346,7 @@ MissionGroundFacts MissionGround::terrain_at(double x, double y, double z) const
 			}
 		}
 		// The foliage there (DI-29): the map's code and the definitions it selects, by the game's own sampler.
-		if (!foliage_codes_.empty()) {
+		if (!foliage_.empty()) {
 			facts.foliage_code = terrain::foliage_mask_at_fixed(foliage_sampler(true), fx, fy);
 			const int mask = terrain::foliage_mask_at_fixed(foliage_sampler(false), fx, fy);
 			const int kept = foliage_kept_off(x, y, mask);
