@@ -257,6 +257,11 @@ public:
 	// armed fields land on a copy of the base config.
 	void apply_mission_overrides(const Ref<MissionEnvironmentOverrides> &p_overrides);
 	void clear_mission_overrides();
+	// The layer as a mission's load lays it: its armed fields over the base
+	// config, or the base config alone (no layer held) when it arms nothing.
+	// GameWorld's mission load and the editor's previews of a mission's
+	// environment lay the header's layer through here.
+	void apply_mission_overrides_or_clear(const Ref<MissionEnvironmentOverrides> &p_overrides);
 	bool has_mission_overrides() const;
 
 	// Byte snapshots of the BASE config (CRLF .env text) for editor undo.

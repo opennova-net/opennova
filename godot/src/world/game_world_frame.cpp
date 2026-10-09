@@ -749,12 +749,7 @@ void GameWorld::render_scene_overlay_frame() {
 			light_director_->append_overlay(*submission);
 		}
 		if (env_ != nullptr && is_water_render_active()) {
-			const Vector3 lit = env_->get_underwater_overlay_color();
-			const float rgb[3] = { static_cast<float>(lit.x), static_cast<float>(lit.y),
-				static_cast<float>(lit.z) };
-			opennova::renderer::append_underwater_murk_overlay(rgb,
-					static_cast<uint8_t>(env_->get_underwater_overlay_alpha_byte()),
-					water_->get_water_height(), submission->frame);
+			append_underwater_murk_overlay(*env_, *water_, *submission);
 		}
 		append_celestial_overlays(*submission);
 		append_water_mirror_overlays(*submission);
@@ -991,10 +986,7 @@ void GameWorld::apply_scene_environment_frame() {
 		return;
 	}
 	if (Camera3D *cam = render_camera()) {
-		cam->set_far(opennova::renderer::scene_far_plane(env_->get_fog_distance()));
-		// The world pass's near plane, every view and camera mode (retail
-		// Render_ProcessMainSceneFrame @ 0x5ca4d7..0x5ca4e0).
-		cam->set_near(opennova::renderer::kScenePassNearZ);
+		env_->apply_scene_pass_planes(*cam);
 	}
 	// The device leg only samples: the strict-vs-inclusive waterline
 	// comparison semantics live in the engine behind apply_render_eye.
