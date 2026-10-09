@@ -99,14 +99,6 @@ bool contains_ci(const std::string &haystack, const char *needle) {
 	return strutil::to_lower(haystack).find(needle) != std::string::npos;
 }
 
-// Code points in a UTF-8 string (the caret rides characters, not bytes).
-int utf8_length(const std::string &s) {
-	int n = 0;
-	for (unsigned char c : s)
-		if ((c & 0xC0) != 0x80) ++n;
-	return n;
-}
-
 // Toggle `row` in a selection set (remove when present, append otherwise).
 void toggle_row(std::vector<int> &selected, int row) {
 	const auto it = std::find(selected.begin(), selected.end(), row);
@@ -1762,8 +1754,9 @@ void MenuRuntime::set_focus_(int id) {
 	const int index = frame_index(id);
 	if (index >= 0) {
 		frame_->set_widget_focused(index, true);
+		// An edit's caret rides characters (code points), not bytes.
 		if (widget_kind_of(id) == kKindEdit && frame_->get_widget_caret(index) < 0)
-			frame_->set_widget_caret(index, utf8_length(get_widget_text(id)));
+			frame_->set_widget_caret(index, static_cast<int>(strutil::utf8_length(get_widget_text(id))));
 	}
 }
 

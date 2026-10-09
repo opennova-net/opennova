@@ -16,6 +16,7 @@
 #include <unordered_map>
 
 #include <base/io/crc32_mpeg2.h>
+#include <base/io/file_io.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
@@ -172,19 +173,6 @@ bool resolve_retail_loose_file(const std::string &search_root,
     if (!fs::is_regular_file(current, ec)) return false;
     resolved_file = current;
     return true;
-}
-
-bool read_whole_file(const std::string &path, std::vector<uint8_t> &out) {
-    out.clear();
-    std::ifstream f(io::os_path(path), std::ios::binary | std::ios::ate);
-    if (!f) return false;
-    const std::streamoff sz = f.tellg();
-    if (sz < 0) return false;
-    f.seekg(0, std::ios::beg);
-    out.resize(static_cast<size_t>(sz));
-    if (out.empty()) return true;
-    f.read(reinterpret_cast<char *>(out.data()), static_cast<std::streamsize>(out.size()));
-    return static_cast<size_t>(f.gcount()) == out.size();
 }
 
 bool has_pff_ext(const std::string &file_name) {
@@ -617,7 +605,8 @@ bool Vfs::read_file_raw(const std::string &name, std::vector<uint8_t> &out) cons
     if (!e) { impl_->last_error = "File not found: " + name; return false; }
 
     if (e->source == VfsSource::LooseDir) {
-        if (!read_whole_file(e->loose_full_path, out)) {
+        std::string ignored; // the VFS says its own reason
+        if (!io::read_file_bytes(e->loose_full_path, out, ignored)) {
             impl_->last_error = "Failed to read loose file: " + e->loose_full_path;
             return false;
         }
@@ -658,7 +647,8 @@ bool Vfs::read_file_raw(const std::string &name, std::vector<uint8_t> &out,
     }
 
     if (resolved.source == VfsSource::LooseDir) {
-        if (!read_whole_file(resolved.loose_full_path, out)) {
+        std::string ignored; // the VFS says its own reason
+        if (!io::read_file_bytes(resolved.loose_full_path, out, ignored)) {
             impl_->last_error = "Failed to read loose file: " + resolved.loose_full_path;
             return false;
         }
