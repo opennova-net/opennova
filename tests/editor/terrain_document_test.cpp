@@ -22,7 +22,6 @@
 #include <editor/documents/terrain_document.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
-#include <editor/import/png_encode.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -30,6 +29,7 @@
 #include <editor/session/view/session_view.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
+#include <formats/png/png_encode.h>
 #include <formats/trn/trn_io.h>
 
 #include "common/file_io.h"
@@ -41,6 +41,7 @@
 using namespace opennova::editor;
 using opennova::FoliageDef;
 using opennova::TrnConfig;
+using opennova::png::encode_png_rgba;
 
 namespace {
 

@@ -48,7 +48,7 @@
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
 #include "editor/import_test_support.h"
-#include "editor/png_test_support.h"
+#include "common/png_test_support.h"
 
 using namespace opennova::editor;
 using namespace import_test;
@@ -620,7 +620,7 @@ static int test_plan_native_png() {
 	Project project("opennova_editor_plan_native_png");
 	const std::string art = project.dir.file("art");
 	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("STATIC", "LOGO", image("logo.png")))) &&
-	            editor_test::write_bytes(art + "/logo.png", editor_test::gradient_png(4, 4)));
+	            editor_test::write_bytes(art + "/logo.png", test_png::gradient_png(4, 4)));
 	const ImportPlan plan = project.plan({{art + "/a.mnu", {}}});
 	const ImportPlanRow *logo = row_named(plan, "logo.png");
 	TEST_EXPECT(logo && logo->state == State::Found && logo->kind == AssetKind::Texture && logo->source.native);
@@ -633,7 +633,7 @@ static int test_plan_native_png() {
 	const AssetEntry *png = view.project.scan->find("logo.png");
 	TEST_EXPECT(png && png->kind == AssetKind::Texture && !fs::exists(fs::path(root) / (png->relative_path + kImportSidecarSuffix)));
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::MenuTexture, "logo.png") == ReferenceStatus::Present);
-	TEST_EXPECT(editor_test::write_bytes(art + "/badge.png", editor_test::gradient_png(4, 4, 7)));
+	TEST_EXPECT(editor_test::write_bytes(art + "/badge.png", test_png::gradient_png(4, 4, 7)));
 	const ImportResult authored = import_assets({{art + "/badge.png", {}}}, ProjectPaths::for_root(root), *view.project.document, false);
 	TEST_EXPECT(authored.imported.size() == 1 && fs::exists(fs::path(root) / (authored.imported[0] + kImportSidecarSuffix)));
 	return 0;
