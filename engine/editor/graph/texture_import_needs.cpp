@@ -11,7 +11,7 @@ namespace opennova::editor {
 
 namespace {
 
-using R = TextureRoleId;
+using R = renderer::TextureRoleId;
 
 // What one use asks of an option, and why.
 struct Ask {
@@ -126,10 +126,10 @@ TextureImportNeeds texture_import_needs(const std::vector<TextureUse> &uses, con
 		stems.push_back({stem_of(use.name_written), "it names " + basename_of(use.name_written), &use});
 		if (!use.known()) continue;
 		const TextureRoleRow &role = texture_role_row(use.role);
-		if (role.size == TextureSizeRule::Exact)
+		if (role.size == renderer::TextureSizeRule::Exact)
 			sizes.push_back({std::to_string(role.width) + "x" + std::to_string(role.height),
 			                 "the game reads it at " + texture_size_words(role), &use});
-		else if (role.size == TextureSizeRule::PowerOfTwo)
+		else if (role.size == renderer::TextureSizeRule::PowerOfTwo)
 			sizes.push_back({"pow2_down", "the game asks " + texture_size_words(role), &use});
 	}
 	if (formats.empty()) return out;

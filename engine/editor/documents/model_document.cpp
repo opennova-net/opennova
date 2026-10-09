@@ -166,7 +166,7 @@ void ModelDocument::refine_field(const NodeAddress &address, FieldUse &use) cons
 			const ThreediMaterial &material = at.step().owner.as<ThreediMaterial>();
 			// The alpha test as it falls on this row: the one whose alpha the material's technique cuts out by.
 			context.material_flags =
-					texture_row_material_flags(material.shader_name, material.material_flags, texture.type, texture.slot);
+					renderer::texture_row_material_flags(material.shader_name, material.material_flags, texture.type, texture.slot);
 			context.alpha_ref = material.alpha_test_value_byte;
 		}
 		use.use_context = pack_texture_row_context(context);

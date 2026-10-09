@@ -6,7 +6,9 @@
 #include <sstream>
 
 #include <runtime/renderer/texture_dxt.h>
+#include <formats/til/til.h>
 #include <formats/trn/trn_io.h>
+#include <runtime/renderer/material_classify.h>
 #include <runtime/renderer/texture_load_rules.h>
 
 #include <editor/assets/asset_registry.h>
@@ -169,26 +171,26 @@ TextureShownUse texture_shown_use(const TextureUse &use, int index) {
 	// A material that cuts out by alpha keeps a texel above its reference, or at or below it inverted
 	// [orig: CRenderBatchQueue_FlushBatches @ 0x5DA3A9..0x5DA401].
 	// The row the material's technique cuts out by (TextureRowContext: a diffuse's, or the normal map's).
-	if ((use.role == TextureRoleId::ModelDiffuse || use.role == TextureRoleId::ModelFlipFrame ||
-	     use.role == TextureRoleId::ModelNormalMap) &&
+	if ((use.role == renderer::TextureRoleId::ModelDiffuse || use.role == renderer::TextureRoleId::ModelFlipFrame ||
+	     use.role == renderer::TextureRoleId::ModelNormalMap) &&
 	    use.context.alpha_test()) {
 		out.cutout = use.context.alpha_ref;
 		out.inverted = use.context.alpha_test_inverted();
 	}
-	// A tile atlas is cut in 64-texel cells [orig: Terrain_LoadTileSetAtlas @ 0x604B7C].
-	if (use.role == TextureRoleId::TerrainTileAtlas) out.cells = 64;
+	// A tile atlas is cut in 64-texel cells [orig: Terrain_LoadTileSetAtlas @ 0x604B7C] (TIL_ATLAS_TILE_PIXELS).
+	if (use.role == renderer::TextureRoleId::TerrainTileAtlas) out.cells = uint32_t(TIL_ATLAS_TILE_PIXELS);
 	// What its alpha is to the game: a model row's by its material's technique, else its role's.
-	TextureBudgetLoader loader = TextureBudgetLoader::Stage;
+	renderer::TextureLoader loader = renderer::TextureLoader::Stage;
 	if (use.context.material >= 0 && texture_role_budget_loader(use.role, loader)) {
 		out.model_row = true;
-		out.alpha = texture_row_alpha_meaning(use.context.shader, use.context.material_flags, use.context.type, use.context.slot,
+		out.alpha = renderer::texture_row_alpha_meaning(use.context.shader, use.context.material_flags, use.context.type, use.context.slot,
 		                                      use.name_written);
 		out.alpha_words = texture_alpha_meaning_words(out.alpha, use.context.shader, use.context.alpha_ref,
 		                                              use.context.alpha_test_inverted());
 	} else if (use.known()) {
 		out.alpha_words = texture_role_row(use.role).alpha;
 	}
-	if (use.role == TextureRoleId::ParticleGraphic) out.blend_mode = use.context.blend_mode;
+	if (use.role == renderer::TextureRoleId::ParticleGraphic) out.blend_mode = use.context.blend_mode;
 	return out;
 }
 
@@ -213,12 +215,7 @@ std::vector<TextureLevel> texture_game_chain(const TextureLevel &first, uint32_t
 
 TextureLevel texture_halved(const TextureLevel &level, uint32_t halvings) {
 	TextureLevel out = level;
-	for (uint32_t i = 0; i < halvings && out.width > 1 && out.height > 1; ++i) {
-		// One halving: the cap at half the larger side halves both once.
-		renderer::halve_rgba_to_cap(out.rgba, out.width, out.height, std::max(out.width, out.height) / 2);
-		out.width = std::max(1u, out.width);
-		out.height = std::max(1u, out.height);
-	}
+	renderer::halve_rgba_times(out.rgba, out.width, out.height, halvings);
 	return out;
 }
 
@@ -249,8 +246,8 @@ std::shared_ptr<const TextureImage> texture_as_used(const std::shared_ptr<const 
 	std::shared_ptr<const TextureImage> made =
 	        use.transform == TextureLoadTransform::None ? image : apply_load_transform(*image, use.transform);
 	made = texture_role_texels(made, use.role, use.blend_mode);
-	if (made && use.model_row && use.cutout < 0 && !texture_alpha_is_transparency(use.alpha) &&
-	    use.alpha != TextureAlphaMeaning::Height) {
+	if (made && use.model_row && use.cutout < 0 && !renderer::texture_alpha_is_transparency(use.alpha) &&
+	    use.alpha != renderer::TextureAlphaMeaning::Height) {
 		// The game draws it opaque: whatever its alpha holds is no transparency here.
 		auto opaque = std::make_shared<TextureImage>(*made);
 		for (TextureLevel &level : opaque->levels)
@@ -262,7 +259,7 @@ std::shared_ptr<const TextureImage> texture_as_used(const std::shared_ptr<const 
 	auto out = std::make_shared<TextureImage>(*made);
 	for (TextureLevel &level : out->levels)
 		for (size_t i = 3; i < level.rgba.size(); i += 4) {
-			const bool kept = use.inverted ? level.rgba[i] <= use.cutout : level.rgba[i] > use.cutout;
+			const bool kept = renderer::alpha_test_passes(level.rgba[i], float(use.cutout), use.inverted);
 			level.rgba[i] = kept ? 255 : 0;
 		}
 	return out;
@@ -501,7 +498,7 @@ ViewportAction TextureViewport::follow_(const ViewportInput &input, PreviewClock
 			const TextureUse &shown = uses[size_t(options_.as_used)];
 			use = texture_shown_use(shown, options_.as_used);
 			if (shown.budget.known) budget = &shown.budget;
-			if (shown.role == TextureRoleId::TerrainBlendMap || shown.role == TextureRoleId::TerrainFoliageMap)
+			if (shown.role == renderer::TextureRoleId::TerrainBlendMap || shown.role == renderer::TextureRoleId::TerrainFoliageMap)
 				terrain_path = shown.referrer;
 		}
 		for (size_t i = 0; i < uses.size() && !budget; ++i)
@@ -698,7 +695,7 @@ io::JsonValue TextureViewport::body_json(const ViewportInput &) const {
 		as_used = JsonValue::make_object();
 		as_used.set("index", json_number(use_.index));
 		as_used.set("words", json_string(use_.words));
-		as_used.set("role", json_string(use_.role == TextureRoleId::kCount ? "" : texture_role_row(use_.role).token));
+		as_used.set("role", json_string(use_.role == renderer::TextureRoleId::kCount ? "" : texture_role_row(use_.role).token));
 		as_used.set("transform", json_string(texture_load_transform_token(use_.transform)));
 		as_used.set("cutout", json_number(use_.cutout));
 		as_used.set("inverted", JsonValue::make_bool(use_.inverted));
