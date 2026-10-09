@@ -1,6 +1,7 @@
 // The texture roles (renderer/texture_roles.h): a row per role in the enum's order, each with the
 // loader that opens its file, the formats that loader takes, its size rule and whether it reads the
-// alpha, the research's table pinned here; the def texture fields' roles; which row's alpha the
+// alpha, the research's table pinned here; the def texture fields' roles, a .trn's and a .env's keys'
+// roles and a model row's; which row's alpha the
 // material's alpha test falls on, and what a model row's alpha is to its material's technique.
 
 #include <runtime/renderer/texture_roles.h>
@@ -100,6 +101,55 @@ void test_def_fields() {
 			"a field whose loader is not witnessed: none");
 }
 
+// The roles a terrain's and an environment's keys open their files in, the two maps that abort the mission, and the
+// sky maps made .pcx [orig: PolyTrn_InitTextures @ 0x60AAA0; sub_520AA0 @ 0x520B4E; TimeOfDay_ParseProperty
+// @ 0x57CC41..0x57CC4B].
+void test_config_keys() {
+	TextureRoleId role = TextureRoleId::kCount;
+	bool aborts = false;
+	CHECK(trn_key_texture_role("polytrn_colormap", role, &aborts) && role == TextureRoleId::TerrainColourMap && aborts,
+			"the colour map aborts the mission");
+	CHECK(trn_key_texture_role("polytrn_detailblendmap", role, &aborts) && role == TextureRoleId::TerrainBlendMap && aborts,
+			"the blend map aborts the mission");
+	CHECK(trn_key_texture_role("polytrn_detailmap", role, &aborts) && role == TextureRoleId::TerrainDetailCoefficient &&
+			!aborts, "the detail map: the coefficient");
+	CHECK(trn_key_texture_role("polytrn_detailmap_c2", role) && role == TextureRoleId::TerrainSplatDetail &&
+			trn_key_texture_role("polytrn_detailmapdist2", role) && role == TextureRoleId::TerrainFarDetail &&
+			trn_key_texture_role("polytrn_detailmap2", role) && role == TextureRoleId::TerrainSecondDetail,
+			"the splat, far and second details");
+	CHECK(trn_key_texture_role("polytrn_tilestrip", role) && role == TextureRoleId::TerrainTileAtlas &&
+			trn_key_texture_role("polytrn_charmap", role) && role == TextureRoleId::TerrainCharMap &&
+			trn_key_texture_role("polytrn_foliagemap", role) && role == TextureRoleId::TerrainFoliageMap,
+			"the atlas, the char map, the foliage map");
+	CHECK(!trn_key_texture_role("polytrn_polydata", role) && !trn_key_texture_role("polytrn_tileinfo", role) &&
+			!trn_key_texture_role("POLYTRN_COLORMAP", role), "keys of no texture, and a key not lower case");
+	bool pcx = false;
+	CHECK(env_key_texture_role("sky_map1", role, &pcx) && role == TextureRoleId::SkyCloud && pcx &&
+			env_key_texture_role("sky_map2", role) && role == TextureRoleId::SkyCloud, "the sky maps: clouds, made .pcx");
+	CHECK(!env_key_texture_role("sun_3di", role) && !env_key_texture_role("polytrn_colormap", role),
+			"no other environment keyword");
+}
+
+// A model row's role by its runtime type, slot, flipbook bit and name [orig: Material_LoadStageTexture @ 0x5B1737].
+void test_model_rows() {
+	CHECK(model_row_texture_role(0, 1, 0, "a.tga") == TextureRoleId::ModelDiffuse, "a diffuse row");
+	CHECK(model_row_texture_role(0, 2, 0, "a.tga") == TextureRoleId::ModelDetail, "slot 2: a detail");
+	CHECK(model_row_texture_role(2, 1, 0x01, "a.tga") == TextureRoleId::ModelFlipFrame, "the flipbook bit: a flip frame");
+	CHECK(model_row_texture_role(8, 2, 0x01, "a.tga") == TextureRoleId::ModelDetail, "slot 2 before the flipbook bit");
+	CHECK(model_row_texture_role(1, 1, 0, "a.tga") == TextureRoleId::ModelPlain, "a plain row");
+	CHECK(model_row_texture_role(4, 1, 0, "skin.mdt") == TextureRoleId::ModelNormalMap &&
+			model_row_texture_role(5, 1, 0, "SKIN.MDT") == TextureRoleId::ModelNormalMap, "an .mdt normal map as it is");
+	CHECK(model_row_texture_role(4, 1, 0, "skin.tga") == TextureRoleId::ModelHeightNormal, "a .tga's height made a normal map");
+	CHECK(model_row_texture_role(6, 1, 0, "h.tga") == TextureRoleId::ModelHorizon &&
+			model_row_texture_role(7, 1, 0, "o.tga") == TextureRoleId::ModelOcclusion, "the horizon and the occlusion");
+	CHECK(model_row_texture_role(16, 1, 0, "c") == TextureRoleId::ModelChunk &&
+			model_row_texture_role(18, 1, 0, "c") == TextureRoleId::ModelChunk, "the chunks");
+	CHECK(model_row_texture_role(3, 1, 0, "a.tga") == TextureRoleId::ModelDiffuse &&
+			model_row_texture_role(12, 2, 0, "a.tga") == TextureRoleId::ModelDetail &&
+			model_row_texture_role(40, 1, 0x01, "a.tga") == TextureRoleId::ModelFlipFrame,
+			"a type the loader does not copy: a diffuse-class row");
+}
+
 void test_alpha() {
 	using M = TextureAlphaMeaning;
 	// What a model row's alpha is: VS_PHONGT's diffuse the specular brightness; a blended material's the
@@ -128,6 +178,8 @@ int main() {
 	test_catalog();
 	test_loaders();
 	test_def_fields();
+	test_config_keys();
+	test_model_rows();
 	test_alpha();
 	if (failures != 0) {
 		std::fprintf(stderr, "texture_roles: %d failure(s)\n", failures);

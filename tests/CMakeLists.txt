@@ -1039,6 +1039,14 @@ target_link_libraries(resource_index_test PRIVATE opennova_base)
 target_include_directories(resource_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME resource_index COMMAND resource_index_test)
 
+# The typed kinds and their loader facts (base/resource_index/file_kind.h): every runtime format and
+# required file has a kind and a place, and the table agrees with master's other copies of its facts.
+add_executable(file_kind_test resource_index/file_kind_test.cpp)
+target_link_libraries(file_kind_test PRIVATE opennova_base)
+target_include_directories(file_kind_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(file_kind_test PRIVATE cxx_std_17)
+add_test(NAME file_kind COMMAND file_kind_test)
+
 # Launch flags + the boot resource-dir ladder (base/resource_index/boot_policy.h).
 add_executable(boot_policy_test resource_index/boot_policy_test.cpp)
 target_link_libraries(boot_policy_test PRIVATE opennova_base)
@@ -1307,6 +1315,20 @@ target_link_libraries(trn_key_lines_test PRIVATE opennova_formats)
 target_include_directories(trn_key_lines_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME trn_key_lines COMMAND trn_key_lines_test)
 
+# The .trn readers' report of the lines they read otherwise than TrnConfig holds
+# (formats/trn trn_source_issues, the .env's env_source_issue twin).
+add_executable(trn_source_issue_test trn/trn_source_issue_test.cpp)
+target_link_libraries(trn_source_issue_test PRIVATE opennova_formats)
+target_include_directories(trn_source_issue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME trn_source_issue COMMAND trn_source_issue_test)
+
+# The writer's and the gate's shared pieces: the sector grid's extension and a
+# foliage definition's block (formats/trn trn_io.h).
+add_executable(trn_helpers_test trn/trn_helpers_test.cpp)
+target_link_libraries(trn_helpers_test PRIVATE opennova_formats)
+target_include_directories(trn_helpers_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME trn_helpers COMMAND trn_helpers_test)
+
 add_executable(cpt_roundtrip_test cpt/cpt_roundtrip_test.cpp)
 target_link_libraries(cpt_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(cpt_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1319,6 +1341,13 @@ add_executable(cpt_trngen_bake_test cpt/trngen_bake_test.cpp)
 target_link_libraries(cpt_trngen_bake_test PRIVATE opennova_formats)
 target_include_directories(cpt_trngen_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME cpt_trngen_bake COMMAND cpt_trngen_bake_test)
+
+# A heightmap image (a PNG at any depth, TrnGen's .raw, the game's raw16) made
+# into the depth the bake takes (formats/cpt/trngen heightmap_depth.h).
+add_executable(cpt_trngen_heightmap_depth_test cpt/trngen_heightmap_depth_test.cpp)
+target_link_libraries(cpt_trngen_heightmap_depth_test PRIVATE opennova_formats)
+target_include_directories(cpt_trngen_heightmap_depth_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cpt_trngen_heightmap_depth COMMAND cpt_trngen_heightmap_depth_test)
 
 # ENV environment/time-of-day format tests
 add_executable(env_unit_test env/env_unit_test.cpp)
@@ -1478,6 +1507,13 @@ add_executable(terrain_texture_preprocess_test terrain/terrain_texture_preproces
 target_link_libraries(terrain_texture_preprocess_test PRIVATE opennova_runtime)
 target_include_directories(terrain_texture_preprocess_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_texture_preprocess COMMAND terrain_texture_preprocess_test)
+
+# A terrain's char map and foliage map made from a picture (runtime/terrain
+# terrain_map_source); the _retail row reads JO:CA's Dvxi5_m.pcx and Dvxi5_f.pcx.
+add_executable(terrain_map_source_test terrain/terrain_map_source_test.cpp)
+target_link_libraries(terrain_map_source_test PRIVATE opennova_runtime)
+target_include_directories(terrain_map_source_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(terrain_map_source COMMAND terrain_map_source_test)
 
 add_executable(terrain_lod_family_test terrain/terrain_lod_family_test.cpp)
 target_link_libraries(terrain_lod_family_test PRIVATE opennova_runtime)
@@ -1988,6 +2024,13 @@ add_executable(terrain_field_store_test terrain_query/terrain_field_store_test.c
 target_link_libraries(terrain_field_store_test PRIVATE opennova_runtime)
 target_include_directories(terrain_field_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_field_store COMMAND terrain_field_store_test)
+
+# The foliage map as the game's load keeps it (its codes and their slot masks)
+# and its sampler over a terrain's grid (terrain_query/foliage_mask_raster).
+add_executable(foliage_mask_raster_test terrain_query/foliage_mask_raster_test.cpp)
+target_link_libraries(foliage_mask_raster_test PRIVATE opennova_runtime)
+target_include_directories(foliage_mask_raster_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME foliage_mask_raster COMMAND foliage_mask_raster_test)
 
 # fixtures/particle/synth_*.ptl: the five synthetic particle files the focused
 # tests read, written by save_particles from integer data (the shipped corpus

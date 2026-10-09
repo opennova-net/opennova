@@ -180,6 +180,16 @@ bool parse(const uint8_t *data, size_t size, File &out, std::string &error) {
 	return true;
 }
 
+std::string texture_load_name(const std::string &written, const char *extension) {
+	// [orig: Shadow_DecalLoadTextures @ 0x588040: PathStripPathA, PathRemoveExtensionA, PathAddExtensionA]
+	std::string stem = written;
+	const size_t slash = stem.find_last_of("/\\");
+	if (slash != std::string::npos) stem.erase(0, slash + 1);
+	const size_t dot = stem.find_last_of('.');
+	if (dot != std::string::npos) stem.erase(dot);
+	return stem + extension;
+}
+
 bool write(const File &file, std::vector<uint8_t> &out, std::string &error) {
 	error.clear();
 	if (!valid(file, error)) return false;

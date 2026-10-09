@@ -381,10 +381,7 @@ void FoliageDispatcher::configure_slots(const Array &p_defs,
 
   // Pixel 0 never matches and a slot with an empty graphic is skipped; the
   // engine remap owns both gates and the OR-of-four code compare.
-  for (int pixel = 0; pixel < 256; ++pixel) {
-    palette_masks_[static_cast<size_t>(pixel)] =
-        opennova::foliage_remap_pixel_to_def_mask(mask_defs, pixel);
-  }
+  palette_masks_ = opennova::foliage_pixel_masks(mask_defs);
 
   compiler_.configure_slots(runtime_slots_, source_geometry_);
   reset();

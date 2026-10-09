@@ -223,6 +223,73 @@ bool def_texture_field_role(std::string_view field, TextureRoleId &out) {
 	return false;
 }
 
+namespace {
+
+// What PolyTrn_InitTextures does with each key's file [orig: PolyTrn_InitTextures @ 0x60AAA0]; the colour map
+// and the blend map abort the mission's load when they do not load (the header's comment carries the witness).
+struct TrnKeyRole {
+	const char *key;
+	TextureRoleId role;
+	bool aborts_mission;
+};
+constexpr TrnKeyRole kTrnKeyRoles[] = {
+	{"polytrn_colormap", R::TerrainColourMap, true},
+	{"polytrn_detailmap", R::TerrainDetailCoefficient, false},
+	{"polytrn_detailmap_c1", R::TerrainSplatDetail, false},
+	{"polytrn_detailmap_c2", R::TerrainSplatDetail, false},
+	{"polytrn_detailmap_c3", R::TerrainSplatDetail, false},
+	{"polytrn_detailmap2", R::TerrainSecondDetail, false},
+	{"polytrn_detailmapdist", R::TerrainFarDetail, false},
+	{"polytrn_detailmapdist2", R::TerrainFarDetail, false},
+	{"polytrn_detailblendmap", R::TerrainBlendMap, true},
+	{"polytrn_tilestrip", R::TerrainTileAtlas, false},
+	{"polytrn_charmap", R::TerrainCharMap, false},
+	{"polytrn_foliagemap", R::TerrainFoliageMap, false},
+};
+
+} // namespace
+
+bool trn_key_texture_role(std::string_view key, TextureRoleId &out, bool *aborts_mission) {
+	for (const TrnKeyRole &row : kTrnKeyRoles)
+		if (key == row.key) {
+			out = row.role;
+			if (aborts_mission) *aborts_mission = row.aborts_mission;
+			return true;
+		}
+	return false;
+}
+
+bool env_key_texture_role(std::string_view key, TextureRoleId &out, bool *made_pcx) {
+	// [orig: Terrain_InitRenderingResources @ 0x578A97; TimeOfDay_ParseProperty @ 0x57CC41..0x57CC4B, @ 0x57CC83..0x57CC8D]
+	if (key != "sky_map1" && key != "sky_map2") return false;
+	out = R::SkyCloud;
+	if (made_pcx) *made_pcx = true;
+	return true;
+}
+
+TextureRoleId model_row_texture_role(uint8_t row_type, uint8_t slot, uint8_t row_flags, const std::string &name) {
+	// [orig: Material_LoadStageTexture @ 0x5B16F0, the switch @ 0x5B1737]
+	switch (material_texture_runtime_type(row_type)) {
+	case 0:
+	case 2:
+	case 8:
+		if (slot == 2) return R::ModelDetail;
+		return (row_flags & 0x01) ? R::ModelFlipFrame : R::ModelDiffuse;
+	case 1: return R::ModelPlain;
+	case 4:
+	case 5:
+		// The .mdt as it is; a .tga converted from its height [orig: Texture_LoadAsNormalMap @ 0x58C480].
+		return strutil::to_upper(name).find(".MDT") != std::string::npos ? R::ModelNormalMap : R::ModelHeightNormal;
+	case 6: return R::ModelHorizon;
+	case 7: return R::ModelOcclusion;
+	case 16:
+	case 17:
+	case 18: return R::ModelChunk;
+	default: break;
+	}
+	return R::ModelDiffuse;
+}
+
 uint8_t texture_row_material_flags(const std::string &shader, uint8_t material_flags, uint8_t row_type, uint8_t slot) {
 	constexpr uint8_t kTestBits = uint8_t(threedi::THREEDI_MATERIAL_FLAG_ALPHA_TEST | threedi::THREEDI_MATERIAL_FLAG_ALPHA_INVERT);
 	if ((material_flags & threedi::THREEDI_MATERIAL_FLAG_ALPHA_TEST) == 0) return material_flags;

@@ -30,7 +30,7 @@ namespace opennova::env {
 struct WaterHeightRungs {
 	bool has_mission_override = false;
 	float mission_override = 0.0f;
-	// The map's terrain water height in world units (raw * 0.5); 0 for a
+	// The map's terrain water height in world units (raw * kWaterHeightUnit); 0 for a
 	// .trn with no water_height line or one of 0, either of which leaves
 	// the parse's 0 [orig: Environment_InitDefaults @ 0x57c01e].
 	float terrain_height = 0.0f;
