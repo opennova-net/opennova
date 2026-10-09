@@ -31,8 +31,7 @@ std::string base_project_root(const std::string &project_root, const ProjectExpa
 bool base_project_game_dir(const std::string &project_root, const ProjectExpansion &expansion,
                            const std::string &target_game, std::string &out, Diagnostic &error);
 
-// Whether `dir` holds a base game an expansion can play over: one of the boot table's archives
-// [orig: the name table @ 0x829f90] (the export's three; an install's).
-bool base_game_exported(const std::string &dir);
+// Whether the folder holds a base game an expansion can play over (the export's three boot archives, an
+// install's) is base/vfs's vfs_has_boot_archive.
 
 } // namespace opennova::editor
