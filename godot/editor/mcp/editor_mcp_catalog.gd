@@ -8,7 +8,6 @@ extends RefCounted
 ## table cannot carry (how a request answers, how a query pages, which viewport op is a read and
 ## which a request, the build, Play, a picture, the transport's log) is written here, once each.
 
-const SCREENSHOT_TIMEOUT_MS := 60_000
 ## Play builds first, and editor_build waits for its operation.
 const BUILD_TIMEOUT_MS := 300_000
 ## The most entries a query's page holds when the catalog does not say (its page_max).
@@ -195,11 +194,7 @@ static func definitions(app: Node) -> Array[McpToolDef]:
 		McpToolDef.make("editor_screenshot",
 			"Capture the editor window (its ImGui workspace, the Preview window's picture and the Document tab's); "
 			+ "a headless editor refuses.",
-			{
-				"max_dim": {"type": "integer", "minimum": 64, "maximum": 4096, "default": 1280},
-				"format": {"type": "string", "enum": ["webp", "png"], "default": "webp"},
-				"quality": {"type": "number", "minimum": 0.1, "maximum": 1.0, "default": 0.8},
-			}, [], true, SCREENSHOT_TIMEOUT_MS),
+			McpScreenshot.tool_schema(), [], true, McpScreenshot.CAPTURE_TIMEOUT_MS),
 		McpToolDef.make("editor_logs",
 			"The editor MCP's own log (sources server and script); the editor's output lines (the build log, the "
 			+ "running game's log) are editor_query output.",
