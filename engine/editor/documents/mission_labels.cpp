@@ -17,7 +17,9 @@
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_params.h>
+#include <runtime/hud/game_text_lookup.h>
 #include <runtime/mission/mission_sidecars.h>
+#include <runtime/world/trigger_relations.h>
 
 namespace opennova::editor {
 
@@ -28,13 +30,10 @@ namespace {
 using K = MissionKind;
 constexpr NodeKind k(K kind) { return node_kind(kind); }
 
-// The groups the game's tables hold [bms-event-runtime-re.md 7.2].
-constexpr int64_t kGroupCount = 64;
-// A waypoint number from 1 to 122 names a path; 0 none, 123..127 a command.
-constexpr int64_t kLastPathNumber = 122;
-// The characters of its STRWPNAME string a waypoint's name keeps: a longer one is cut in the table
-// itself [orig: Entity_SpawnFromBMSRecord @0x40f102 `cmp ecx, 0Fh`, @0x40f107 `mov [ebp+0Fh], dl`].
-constexpr size_t kWaypointNameChars = 15;
+// The groups the game's tables hold (bms::kGroupRecordCount) [bms-event-runtime-re.md 7.2].
+constexpr int64_t kGroupCount = bms::kGroupRecordCount;
+// A waypoint number from 1 to 122 names a path; 0 none, 123..127 a command (kFirstPathCommand on).
+constexpr int64_t kLastPathNumber = kFirstPathCommand - 1;
 
 // The waypoint list's commands by what the game does with them (mission_sentence's path_command_words;
 // the original editor's names in the tooltip, path_command_editor_name).
@@ -138,8 +137,8 @@ int32_t param_of(const bms::Action &action, int slot) {
 enum class StopUse { Start, Visited, Redirect };
 
 // The most stop numbers a waypoint trigger's visited word records: the bit is the stop's number, below
-// 32 [bms-event-runtime-re.md 3a, 7.4].
-constexpr int64_t kVisitedStops = 32;
+// 32 (world::TriggerRelations::kWaypointBits) [bms-event-runtime-re.md 3a, 7.4].
+constexpr int64_t kVisitedStops = world::TriggerRelations::kWaypointBits;
 
 // A stop of a path by its number, the game's own (0 the first), and the marker it visits: a Redirect's
 // -1 the nearest [orig: Entity_SetWaypointByTeam @0x43CD20, only node -1 requests the nearest]; a
@@ -361,21 +360,14 @@ bool mission_value_label(const Document &base, const NodeAddress &address, const
 			return *number != 0 && text("");
 		} else if (id == "ttool_index") {
 			// A type-6005 waypoint's name: its STRWPNAME string as the spawn keeps it, the first 15
-			// characters [orig: Entity_SpawnFromBMSRecord @0x40f102..0x40f107, the string cut in place].
+			// characters (hud::waypoint_name_as_spawned) [orig: Entity_SpawnFromBMSRecord
+			// @0x40f102..0x40f107, the string cut in place].
 			if (!text("")) return false;
 			if (!out.dangling && out.text.size() > 2) {
-				// The words are UTF-8, a character of the game's code page each: cut by characters.
 				const std::string whole = out.text.substr(1, out.text.size() - 2);
-				size_t characters = 0, cut = whole.size();
-				for (size_t at = 0; at < whole.size(); ++at) {
-					if ((static_cast<unsigned char>(whole[at]) & 0xC0) == 0x80) continue;
-					if (characters++ == kWaypointNameChars) {
-						cut = at;
-						break;
-					}
-				}
-				if (cut < whole.size())
-					out.text = "\"" + whole.substr(0, cut) + "\" (the game keeps " + std::to_string(kWaypointNameChars) +
+				const std::string kept = hud::waypoint_name_as_spawned(whole);
+				if (kept.size() < whole.size())
+					out.text = "\"" + kept + "\" (the game keeps " + std::to_string(hud::kWaypointNameChars) +
 					           " characters of \"" + whole + "\")";
 			}
 		} else {

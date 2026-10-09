@@ -14,6 +14,7 @@
 #include <formats/def/def_hudpos_text.h>
 #include <runtime/hud/hud_elements.h>
 #include <runtime/hud/hud_layout_from_hudpos.h>
+#include <runtime/world/player_view.h>
 
 namespace opennova::editor {
 
@@ -75,7 +76,9 @@ struct HudViewportOptions {
 	bool operator==(const HudViewportOptions &other) const;
 	bool operator!=(const HudViewportOptions &other) const { return !(*this == other); }
 };
-inline constexpr int kHudDamageMost = 192;
+// The most red a hit flashes the screen with as the HUD draws it (world::kScreenFlashRedDrawCap, the red quad's alpha
+// ceiling).
+inline constexpr int kHudDamageMost = world::kScreenFlashRedDrawCap;
 // The JSON of `options` (options_json's), and the change a SetViewport makes to set them.
 io::JsonValue hud_options_json(const HudViewportOptions &options);
 std::string hud_options_change(const HudViewportOptions &options);
