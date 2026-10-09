@@ -405,15 +405,15 @@ int test_source_issues() {
 		// polytrn_depthmap: an arm reads it (formats/trn trn_parser_key), the record does not hold it.
 		auto depth = load(head + "polytrn_depthmap d.raw\r\n");
 		TEST_EXPECT(depth && depth->blocked() && has_issue(*depth, 4, true, "polytrn_depthmap"));
-		// horizon: no arm reads it, the record keeps it (save_trn writes it): no issue.
+		// horizon: no arm reads it and the record does not keep it (D-TERRAIN-20): skipped, as any unknown key.
 		auto horizon = load(head + "horizon 0\r\n");
-		TEST_EXPECT(horizon && !horizon->blocked() && horizon->issues().empty());
+		TEST_EXPECT(horizon && !horizon->blocked() && has_issue(*horizon, 4, false, "skip 'horizon'"));
 		auto tod = load(head + "tod_begin 0600\r\n");
 		TEST_EXPECT(tod && tod->blocked());
 	}
 	std::printf("source issues: a row before the width, short, wide; a key skipped, written again; a murk past 0.99; a "
 	            "block's codes past four, a line no arm reads; a fifth block; a cut last line; LF line ends restored; an "
-	            "environment keyword, polytrn_scale, polytrn_depthmap; horizon kept\n");
+	            "environment keyword, polytrn_scale, polytrn_depthmap; horizon skipped\n");
 	return 0;
 }
 
