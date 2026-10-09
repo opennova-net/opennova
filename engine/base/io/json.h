@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -168,6 +169,45 @@ inline bool json_whole_in(const JsonValue &json, double lo, double hi, int64_t &
 	const double whole = std::trunc(json.number);
 	if (!(whole >= lo && whole <= hi)) return false;
 	out = static_cast<int64_t>(whole);
+	return true;
+}
+
+// A number that is exactly a whole number, 0 or more and no more than 2^53 (every whole number
+// a double holds without a gap: an identity, a count); false for anything else, a fraction
+// refused rather than dropped (json_whole_in drops it).
+inline bool json_exact_whole(const JsonValue &json) {
+	return json.is_number() && json.number >= 0.0 && json.number == std::floor(json.number) &&
+	       json.number <= 9007199254740992.0;
+}
+inline bool json_exact_whole(const JsonValue &json, uint64_t &out) {
+	if (!json_exact_whole(json)) return false;
+	out = static_cast<uint64_t>(json.number);
+	return true;
+}
+
+// Texts as a JSON array of strings, in their order.
+inline JsonValue json_string_array(const std::vector<std::string> &values) {
+	JsonValue out = JsonValue::make_array();
+	for (const std::string &value : values) out.push(json_string(value));
+	return out;
+}
+
+// Whether every member of `object` is one of `known`; else false with `error` naming the first
+// other one ("Unknown <what> member "<key>".").
+inline bool json_members_known(const JsonValue &object, std::initializer_list<const char *> known, const char *what,
+                               std::string &error) {
+	for (const JsonMember &member : object.object) {
+		bool found = false;
+		for (const char *key : known)
+			if (member.key == key) {
+				found = true;
+				break;
+			}
+		if (!found) {
+			error = std::string("Unknown ") + what + " member \"" + member.key + "\".";
+			return false;
+		}
+	}
 	return true;
 }
 

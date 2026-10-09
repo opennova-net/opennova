@@ -48,27 +48,7 @@ const TableDef *ParticleFile::find_table(std::string_view id) const noexcept {
 namespace {
 
 bool icontains(std::string_view haystack, std::string_view needle) noexcept {
-	if (needle.empty()) {
-		return true;
-	}
-	if (needle.size() > haystack.size()) {
-		return false;
-	}
-	for (std::size_t i = 0; i + needle.size() <= haystack.size(); ++i) {
-		bool ok = true;
-		for (std::size_t j = 0; j < needle.size(); ++j) {
-			const unsigned char a = static_cast<unsigned char>(haystack[i + j]);
-			const unsigned char b = static_cast<unsigned char>(needle[j]);
-			if (std::tolower(a) != std::tolower(b)) {
-				ok = false;
-				break;
-			}
-		}
-		if (ok) {
-			return true;
-		}
-	}
-	return false;
+	return strutil::ifind(haystack, needle) != std::string_view::npos;
 }
 
 // [orig: g_ParticleFlagTable @ 0x5ba500 (ParticleEdit_v1_1.exe, cnt dword_5BC2E8=29); JO @ 0x846A18]
