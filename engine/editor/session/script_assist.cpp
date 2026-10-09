@@ -22,6 +22,7 @@
 #include <editor/session/view/session_view.h>
 #include <formats/mission/mission_params.h>
 #include <formats/wac/command.h>
+#include <runtime/hud/game_text_lookup.h>
 #include <runtime/mission/mission_sidecars.h>
 
 namespace opennova::editor {
@@ -222,7 +223,7 @@ std::string entity_words(const SessionView &view, const TextDocument &script, in
 		if (graph) names.emplace(*graph);
 		return mission_ssn_display(*mission, ssn, names ? &*names : nullptr).text;
 	}
-	if (ssn == 10000) return "The player"; // the player's SSN, which names no record
+	if (ssn == mission::kPlayerSsn) return "The player"; // the player's SSN, which names no record
 	const GraphSymbol *symbol = graph ? graph->resolve_symbol(ReferenceKind::MissionEntity, std::to_string(ssn), mission_scope_of(script)) : nullptr;
 	if (!symbol) return "No entity has SSN " + std::to_string(ssn);
 	const GraphSymbol *item = symbol->value.empty() ? nullptr : graph->resolve_symbol(ReferenceKind::Item, symbol->value);
@@ -441,8 +442,10 @@ void names_for(const SessionView &view, const TextDocument &script, ParamType ty
 	const auto prefixed = [&](const char *prefix) { return starts_with_nocase(typed, prefix); };
 	// The mission's table is its own <stem>.bin, else medmssn.bin, never both [orig:
 	// TextResource_LoadMissionTextBin @0x51ed90], then gametext.bin: the keys of the one it reads.
-	const bool own_table = view.project.scan && view.project.scan->find(stem + ".BIN") != nullptr;
-	const std::vector<std::string> text_scopes = {own_table ? stem + ".BIN/" : std::string("MEDMSSN.BIN/"), "GAMETEXT.BIN/"};
+	const mission::Sidecar &table = *mission::sidecar_for_role("text");
+	const std::string own = upper(mission::sidecar_name(stem, table));
+	const bool own_table = view.project.scan && view.project.scan->find(own) != nullptr;
+	const std::vector<std::string> text_scopes = {(own_table ? own : upper(table.fallback)) + "/", upper(hud::kGameTextTable) + "/"};
 	if (prefixed("SSN_")) return entities(view, script, "SSN_", typed, out);
 	if (prefixed("FX_")) return symbols(view, ReferenceKind::Particle, "effect", "FX_", typed, {}, out);
 	if (prefixed("TT_")) return symbols(view, ReferenceKind::TextId, "text key", "TT_", typed, text_scopes, out);
