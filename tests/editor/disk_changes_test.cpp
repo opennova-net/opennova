@@ -4,11 +4,14 @@
 // write already settled is read at the first look, one gone too, one that moved back forgotten; the
 // folders the walk went into, each with its stamp, listed again only when it moved (a new file, a gone
 // one, a new folder, a gone folder; a dot-folder and the export folder never); the sweep over every file,
-// a step at a time. The session: an open catalog written from outside read again within the hold, its
-// selection kept by its place, with no Rescan; a file not open found by the focus-in sweep; a new file
+// a step at a time; a file the scan read within its stamp's tick (FAT and exFAT stamp two seconds apart)
+// compared by its content once the stamp settles. The session: an open catalog written from outside read
+// again within the hold, its selection kept by its place, with no Rescan; a file not open found by the
+// checks' round and by the focus-in sweep; a new file
 // and a gone one found by the folders, Output naming each; an open document with unsaved edits raising
 // its conflict at once with its two fixes, Keep my edits behind a confirmation, Save refused until then;
 // a PNG the import round trip watches keeping S18's two-second rule.
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -180,8 +183,35 @@ int test_looks() {
 	}
 	TEST_EXPECT(steps == every.size() && every.size() == 3);
 	TEST_EXPECT(sweep.take_ready() == std::vector<std::string>({"made/d.def"}));
+
+	// A file the scan read within its stamp's tick: a rewrite of the same size that keeps the stamp (FAT and
+	// exFAT stamp two seconds apart) is found by its content once the stamp has settled, never before; one
+	// whose content is as the scan read it is not.
+	TEST_EXPECT(editor_test::write_text(root + "/racy.def", items_text(1)) &&
+	            editor_test::write_text(root + "/kept.def", items_text(1)));
+	const AssetScan racy_scan = scan_project_assets(paths, doc);
+	const auto racy_visit = racy_scan.visits().find("racy.def");
+	TEST_EXPECT(racy_visit != racy_scan.visits().end() && racy_visit->second.racy);
+	const int64_t racy_stamp = scanned_stamp(racy_scan, "racy.def").modified_ticks;
+	std::string rewritten = items_text(1);
+	rewritten.replace(rewritten.find("hp 10"), 5, "hp 11");
+	TEST_EXPECT(editor_test::write_text(root + "/racy.def", rewritten));
+	{
+		std::error_code ec;
+		fs::last_write_time(system_path(root + "/racy.def"), fs::file_time_type(fs::file_time_type::duration(racy_stamp)), ec);
+	}
+	TEST_EXPECT(disk_stamp(paths, "racy.def") == scanned_stamp(racy_scan, "racy.def"));
+	const int64_t settle =
+	        std::chrono::duration_cast<fs::file_time_type::duration>(io::kFileStampSettle).count();
+	DiskChanges racy;
+	racy.look_at(paths, racy_scan, {"racy.def", "kept.def"}, 6000, racy_stamp + 1);
+	TEST_EXPECT(racy.waiting() == 0 && racy.ready() == 0);
+	const int64_t kept_stamp = scanned_stamp(racy_scan, "kept.def").modified_ticks;
+	racy.look_at(paths, racy_scan, {"racy.def", "kept.def"}, 6100, std::max(racy_stamp, kept_stamp) + settle);
+	TEST_EXPECT(racy.take_ready() == std::vector<std::string>({"racy.def"}));
 	std::printf("looks: a file read once it holds still or settled, gone, moved back; the folders' made and gone "
-	            "files, a dot-folder and the export folder passed over; the sweep a step at a time\n");
+	            "files, a dot-folder and the export folder passed over; the sweep a step at a time; a racy stamp "
+	            "compared by content\n");
 	return 0;
 }
 
@@ -251,14 +281,19 @@ int test_session() {
 		TEST_EXPECT(session.outcome().operation == 0 && view.project.outside_waiting == 0);
 	}
 
-	// A file no document shows changes: the checks pass it by; the sweep a focus-in begins finds it (its last
-	// write settled: ready at once), and the next check reads it again.
+	// A file no document shows changes: the checks' round finds it (its last write settled: ready at once), and
+	// reads it again.
 	TEST_EXPECT(editor_test::write_text(root + "/defs/other.def", items_text(4)) &&
 	            editor_test::backdate(root + "/defs/other.def", std::chrono::seconds(30)));
-	session.handle(request::refresh_changed_sources());
-	TEST_EXPECT(session.outcome().operation == 0 && view.project.outside_waiting == 0);
+	editor_test::handle_to_end(session, request::refresh_changed_sources());
+	TEST_EXPECT(session.outcome().operation != 0 && view.project.outside_waiting == 0);
+	TEST_EXPECT(output_says(view, "Read defs/other.def again: it changed outside the editor."));
+	// The sweep a focus-in begins looks at every file too, a few a poll: one changed after the check finds it
+	// at its step, and the next check reads it again.
 	session.handle(request::refresh_changed_sources(true));
 	TEST_EXPECT(view.project.outside_sweeping);
+	TEST_EXPECT(editor_test::write_text(root + "/defs/other.def", items_text(6)) &&
+	            editor_test::backdate(root + "/defs/other.def", std::chrono::seconds(20)));
 	session.set_poll_budget(PollBudget{0, kWalkEntryCost});
 	size_t polls = 0;
 	while (view.project.outside_sweeping && polls < 10000) {

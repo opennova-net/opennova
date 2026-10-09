@@ -60,6 +60,12 @@ struct AssetScan {
 		std::vector<Diagnostic> findings;
 		uint64_t size_bytes = 0;
 		int64_t modified_ticks = 0; // the file system's own ticks (0 = unknown)
+		// A last write within io::kFileStampSettle of the visit's own clock (a file system that stamps two
+		// seconds apart, FAT or exFAT, can keep that stamp through a rewrite of the same size): the content
+		// the visit read, its 64-bit FNV-1a, which a look compares once the stamp settles.
+		bool racy = false;
+		int64_t read_ticks = 0;
+		uint64_t racy_fingerprint = 0;
 		// An import record's inputs (S20), project-relative: the files at them are ImportInputs.
 		std::vector<std::string> inputs;
 	};

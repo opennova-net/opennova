@@ -4,7 +4,9 @@
 #include <iterator>
 #include <system_error>
 
+#include <base/io/file_io.h>
 #include <base/io/file_time.h>
+#include <base/io/hash.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_kind.h>
 #include <editor/assets/asset_type_registry.h>
@@ -96,6 +98,17 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 	const auto own_size = fs::file_size(path, ec);
 	if (!ec) out.size_bytes = static_cast<uint64_t>(own_size);
 	out.modified_ticks = io::file_modified_ticks(path);
+	// A stamp within the file system's tick of now may outlast a rewrite of the same size (FAT and exFAT
+	// stamp two seconds apart): the content read now, for a look to compare once the stamp settles.
+	out.read_ticks = io::file_clock_now_ticks();
+	if (out.modified_ticks != 0 && !io::file_stamp_settled(out.modified_ticks, out.read_ticks)) {
+		std::vector<uint8_t> bytes;
+		std::string unread;
+		if (io::read_file_bytes(utf8_of(path), bytes, unread)) {
+			out.racy = true;
+			out.racy_fingerprint = io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size());
+		}
+	}
 	if (strutil::ends_with_icase(filename, sidecar_suffix)) {
 		// An import record: its outputs are project files that live under the cache.
 		const std::string source_relative = key.substr(0, key.size() - sidecar_suffix.size());
