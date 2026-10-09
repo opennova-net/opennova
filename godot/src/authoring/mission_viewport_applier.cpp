@@ -27,6 +27,7 @@
 #include <editor/preview/viewport_device.h>
 #include <editor/session/view/session_view.h>
 #include <formats/env/env.h>
+#include <formats/env/env_weather.h>
 #include <runtime/world/infantry.h>
 #include <runtime/environment/environment_state.h>
 #include <runtime/environment/weather_runtime.h>
@@ -618,7 +619,7 @@ void MissionViewportApplier::run_environment_(const MissionScene &scene) {
 			header.fog_override, header.fog_color, header.water_color, header.water_murk));
 	env->apply_mission_overrides_or_clear(overrides);
 	// The fog as the mission's start settles it, which no weather tick here does (the editor's helper).
-	env->set_fog_level(opennova::editor::mission_settled_fog_level(env->get_fog_level()));
+	env->set_fog_level(opennova::env::EnvScalarChannels::settled_fog_level(env->get_fog_level()));
 	environment_->set_environment_data(env);
 	env_file_ = env;
 	water_->set_mission_water_height_override(overrides->get_water_height_world_or_nan());
