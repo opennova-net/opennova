@@ -10,6 +10,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -31,40 +32,13 @@ constexpr NodeKind k(K kind) { return node_kind(kind); }
 constexpr const char *kClipHeader = "opennova-mission-clip";
 
 // The payload's lines: the header, what it holds ("rows", or a nested kind's token), for rows the
-// original indexes of the copied events ("events=3,5"), then the fragment's bytes in hex.
+// original indexes of the copied events ("events=3,5"), then the fragment's bytes in hex
+// (strutil::bytes_to_hex, read back by strutil::hex_to_bytes).
 struct Clip {
 	std::string holds;
 	std::vector<size_t> events;
 	bms::File fragment;
 };
-
-std::string hex_of(const std::vector<uint8_t> &bytes) {
-	static const char digits[] = "0123456789abcdef";
-	std::string out;
-	out.reserve(bytes.size() * 2);
-	for (const uint8_t byte : bytes) {
-		out += digits[byte >> 4];
-		out += digits[byte & 15];
-	}
-	return out;
-}
-
-bool bytes_of_hex(const std::string &text, size_t from, std::vector<uint8_t> &out) {
-	const auto digit = [](char c) -> int {
-		if (c >= '0' && c <= '9') return c - '0';
-		if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-		if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-		return -1;
-	};
-	if (from > text.size() || (text.size() - from) % 2) return false;
-	out.reserve((text.size() - from) / 2);
-	for (size_t i = from; i + 1 < text.size(); i += 2) {
-		const int hi = digit(text[i]), lo = digit(text[i + 1]);
-		if (hi < 0 || lo < 0) return false;
-		out.push_back(static_cast<uint8_t>(hi * 16 + lo));
-	}
-	return true;
-}
 
 bool read_clip(const std::string &payload, Clip &clip) {
 	size_t at = 0;
@@ -89,7 +63,8 @@ bool read_clip(const std::string &payload, Clip &clip) {
 	}
 	std::vector<uint8_t> bytes;
 	std::string error;
-	return bytes_of_hex(payload, at, bytes) && bms::parse(bytes.data(), bytes.size(), clip.fragment, error);
+	return at <= payload.size() && strutil::hex_to_bytes(std::string_view(payload).substr(at), bytes) &&
+	       bms::parse(bytes.data(), bytes.size(), clip.fragment, error);
 }
 
 std::string write_clip(const std::string &holds, const std::vector<size_t> &events, bms::File &fragment) {
@@ -105,7 +80,7 @@ std::string write_clip(const std::string &holds, const std::vector<size_t> &even
 		return std::string();
 	std::string out = std::string(kClipHeader) + "\n" + holds + "\nevents=";
 	for (size_t i = 0; i < events.size(); ++i) out += (i ? "," : "") + std::to_string(events[i]);
-	out += "\n" + hex_of(bytes);
+	out += "\n" + strutil::bytes_to_hex(bytes);
 	return out;
 }
 

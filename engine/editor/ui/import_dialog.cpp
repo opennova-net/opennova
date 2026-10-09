@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include <base/io/strutil.h>
 #include <editor/assets/asset_kind.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/graph/asset_graph.h>
@@ -412,7 +413,7 @@ void ImportDialog::draw_choices(Workspace &workspace, const DialogsView::ImportP
 		for (size_t k = 0; k < kAssetKindCount; ++k) {
 			if (!counts[k]) continue;
 			const AssetKind kind = static_cast<AssetKind>(k);
-			const std::string label = std::string(asset_kind_label(kind)) + " (" + grouped(counts[k]) + ")###" + asset_kind_token(kind);
+			const std::string label = std::string(asset_kind_label(kind)) + " (" + strutil::grouped(counts[k]) + ")###" + asset_kind_token(kind);
 			if (ImGui::Selectable(label.c_str(), choice_kind_ == kind)) choice_kind_ = kind;
 		}
 		ImGui::EndCombo();
@@ -439,8 +440,8 @@ void ImportDialog::draw_choices(Workspace &workspace, const DialogsView::ImportP
 	size_t picked = 0;
 	for (const bool chosen : chosen_) picked += chosen ? 1 : 0;
 	const std::string shown = (visible.size() == preview.choices.size() ? counted(visible.size(), "file")
-	                                                                    : grouped(visible.size()) + " of " + counted(preview.choices.size(), "file")) +
-	                          " shown, " + grouped(picked) + " chosen";
+	                                                                    : strutil::grouped(visible.size()) + " of " + counted(preview.choices.size(), "file")) +
+	                          " shown, " + strutil::grouped(picked) + " chosen";
 	controls.next(ui_kit::text_width(shown.c_str()));
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextDisabled("%s", shown.c_str());
@@ -488,7 +489,7 @@ void ImportDialog::draw_choices(Workspace &workspace, const DialogsView::ImportP
 		ImGui::TableNextColumn();
 		ui_kit::clipped_text(asset_kind_label(fact(index).kind));
 		ImGui::TableNextColumn();
-		ui_kit::clipped_text(ui_kit::size_text(fact(index).size), grouped(size_t(fact(index).size)) + " bytes as stored");
+		ui_kit::clipped_text(strutil::byte_size_text(fact(index).size), strutil::grouped(size_t(fact(index).size)) + " bytes as stored");
 		if (mixed) {
 			ImGui::TableNextColumn();
 			ui_kit::clipped_text(source.install ? "game data" : basename_of(source.path), source.path);
@@ -556,7 +557,7 @@ void ImportDialog::draw_row(const ImportPlan &plan, size_t index, size_t depth, 
 	ImGui::TableNextColumn();
 	ui_kit::clipped_text(asset_kind_label(row.kind));
 	ImGui::TableNextColumn();
-	ui_kit::clipped_text(ui_kit::size_text(row.size), grouped(size_t(row.size)) + " bytes as stored");
+	ui_kit::clipped_text(strutil::byte_size_text(row.size), strutil::grouped(size_t(row.size)) + " bytes as stored");
 	ImGui::TableNextColumn();
 	if (also) {
 		const std::string words = "named here too; it comes with " + row.needed_by.file;
@@ -642,12 +643,12 @@ void ImportDialog::draw_group(const ImportPlan &plan, size_t g) {
 	// Its own files, and with those under it where they bring more ("Sound bank (1 file, 50 in all)"); those
 	// another file brings first, listed here too.
 	std::string label = std::string(asset_kind_label(group.kind)) + " (" + counted(group.rows.size(), "file");
-	if (group.files > group.rows.size()) label += ", " + grouped(group.files) + " in all";
-	if (!group.also.empty()) label += ", " + grouped(group.also.size()) + " more another file brings";
+	if (group.files > group.rows.size()) label += ", " + strutil::grouped(group.files) + " in all";
+	if (!group.also.empty()) label += ", " + strutil::grouped(group.also.size()) + " more another file brings";
 	ui_kit::clipped_text(label + ")");
 	ImGui::TableNextColumn();
 	ImGui::TableNextColumn();
-	ui_kit::clipped_text(ui_kit::size_text(group.bytes), grouped(size_t(group.bytes)) + " bytes as stored");
+	ui_kit::clipped_text(strutil::byte_size_text(group.bytes), strutil::grouped(size_t(group.bytes)) + " bytes as stored");
 	ImGui::TableNextColumn();
 	// What names its files: the chosen file, or the files of the group above.
 	if (group.parent != Group::kNone) {
@@ -678,7 +679,7 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 	}
 	// The check box's label cut to the dialog's width (whole in its tooltip).
 	bool with = preview.with_dependencies;
-	const std::string include = "Include the files these need" + (with ? " (" + grouped(found) + " found)" : std::string());
+	const std::string include = "Include the files these need" + (with ? " (" + strutil::grouped(found) + " found)" : std::string());
 	const float room = ImGui::GetContentRegionAvail().x - ImGui::GetFrameHeight() - ImGui::GetStyle().ItemInnerSpacing.x;
 	const std::string shown = ui_kit::fit(include, room);
 	// The setting plans the open dialog again (a plan_import through the gate): held back while
@@ -698,7 +699,7 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 	if (preview.planning) {
 		const OperationStatus &operation = workspace.view().activity.operation;
 		const std::string far = operation.running() && operation.total > 0
-		                                ? grouped(size_t(operation.done)) + " of " + counted(size_t(operation.total), "file") + " looked at."
+		                                ? strutil::grouped(size_t(operation.done)) + " of " + counted(size_t(operation.total), "file") + " looked at."
 		                                : std::string();
 		ui_kit::empty_state("Planning the import...", far.empty() ? nullptr : far.c_str());
 		return;
@@ -710,13 +711,13 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 	}
 	// The plan in short: its files and bytes, then each kind with its count and size, a toggle that
 	// shows that kind's rows alone (the videos of a mission's closure unchecked in two clicks).
-	ImGui::TextWrapped("%s", (counted(plan.file_count(), "file") + ", " + ui_kit::size_text(plan.total_bytes()) + ":").c_str());
+	ImGui::TextWrapped("%s", (counted(plan.file_count(), "file") + ", " + strutil::byte_size_text(plan.total_bytes()) + ":").c_str());
 	ui_kit::WrapRow kinds;
 	float kind_width = ui_kit::text_width("Kind"); // the Kind column as wide as the longest the plan has
 	for (const ImportPlanKind &entry : plan.by_kind()) {
 		kind_width = std::max(kind_width, ui_kit::text_width(asset_kind_label(entry.kind)));
-		const std::string label = std::string(asset_kind_label(entry.kind)) + " " + grouped(entry.files) + " (" +
-		                          ui_kit::size_text(entry.bytes) + ")";
+		const std::string label = std::string(asset_kind_label(entry.kind)) + " " + strutil::grouped(entry.files) + " (" +
+		                          strutil::byte_size_text(entry.bytes) + ")";
 		const std::string id = label + "###kind_" + asset_kind_token(entry.kind);
 		const float width = ui_kit::text_width(label.c_str()) + ImGui::GetStyle().FramePadding.x * 2.0f;
 		kinds.next(width);
@@ -796,7 +797,7 @@ void ImportDialog::draw_notes(const DialogsView::ImportPreview &preview) {
 	for (const ImportPlanRow &row : plan.rows)
 		if (row.state == State::NotFound) missing.push_back(&row);
 	// Open by default while they are few; a mission's closure names dozens the install itself lacks.
-	const std::string header = "Not found (" + grouped(missing.size()) + ")###not_found";
+	const std::string header = "Not found (" + strutil::grouped(missing.size()) + ")###not_found";
 	const ImGuiTreeNodeFlags open_by_default = missing.size() <= 20 ? ImGuiTreeNodeFlags_DefaultOpen : ImGuiTreeNodeFlags_None;
 	if (!missing.empty() && ImGui::CollapsingHeader(header.c_str(), open_by_default) &&
 	    ImGui::BeginTable("import_missing", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable)) {
@@ -829,7 +830,7 @@ void ImportDialog::draw_notes(const DialogsView::ImportPreview &preview) {
 	if (plan.truncated) {
 		ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::severity_color(DiagnosticSeverity::Warning));
 		ImGui::TextWrapped("The plan stopped at %s files: the files past them are not listed and not imported.",
-		                   grouped(kImportPlanFileCap).c_str());
+		                   strutil::grouped(kImportPlanFileCap).c_str());
 		ImGui::PopStyleColor();
 	}
 	for (const Diagnostic &d : plan.diagnostics) {

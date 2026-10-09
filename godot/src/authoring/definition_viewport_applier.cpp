@@ -112,7 +112,7 @@ void DefinitionViewportApplier::rebuild(const opennova::editor::ViewportModel &v
 	}
 	// The model built again over the project's files, each texture read noted (one that moves builds it again), a
 	// person's or a first-person gun's meshes skinned for its rig.
-	auto files = std::make_shared<opennova::editor::StampedFiles>(view.findings.assets);
+	auto files = std::make_shared<opennova::StampedFiles>(view.findings.assets);
 	if (model.model()) model_->begin(model.model(), model.drawn().file, files, model.skeleton());
 	else model_->clear();
 	// A weapon's first-person arms on the gun's rig, their camo the character's (DI-22, DI-13's recipe).

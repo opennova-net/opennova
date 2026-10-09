@@ -173,14 +173,14 @@ TextureSourcePlan plan_texture_replace(const ProjectPaths &paths, const AssetSca
 		if (load_import_sidecar(join_path(paths.root, plan.old_source + kImportSidecarSuffix), record, error)) options = record.options;
 		options.erase("name");
 		std::string message;
-		read_file_bytes(join_path(paths.root, entry->relative_path), current, message);
+		io::read_file_bytes(join_path(paths.root, entry->relative_path), current, message);
 		current_name = entry->logical_name;
 		plan.changes.push_back(plan.texture + " is made as its import makes it now (" + plan.old_source + "'s options), from " + image + ".");
 	} else if (entry && entry->kind == AssetKind::Texture) {
 		plan.texture = entry->logical_name;
 		plan.replaced = entry->relative_path;
 		std::string message;
-		read_file_bytes(join_path(paths.root, entry->relative_path), current, message);
+		io::read_file_bytes(join_path(paths.root, entry->relative_path), current, message);
 		current_name = entry->logical_name;
 		options = texture_reproducing_options(entry->logical_name, current, image, decoded.indexed);
 		options.erase("name");
@@ -314,7 +314,7 @@ TextureSourcePlan plan_texture_source(const ProjectPaths &paths, const AssetScan
 	}
 	std::vector<uint8_t> bytes;
 	std::string message;
-	if (!read_file_bytes(join_path(paths.root, entry->relative_path), bytes, message)) {
+	if (!io::read_file_bytes(join_path(paths.root, entry->relative_path), bytes, message)) {
 		plan.refusals.push_back(refused(message, entry->relative_path));
 		return plan;
 	}
@@ -401,7 +401,7 @@ TextureSourcePlan plan_texture_dds(const ProjectPaths &paths, const AssetScan &s
 		              entry->relative_path);
 	std::vector<uint8_t> bytes;
 	std::string message;
-	if (!read_file_bytes(join_path(paths.root, entry->relative_path), bytes, message)) return refuse(message, entry->relative_path);
+	if (!io::read_file_bytes(join_path(paths.root, entry->relative_path), bytes, message)) return refuse(message, entry->relative_path);
 	const std::shared_ptr<const TextureImage> image = decode_texture(entry->logical_name, bytes);
 	if (!image || !image->loads || !image->decoded || image->levels.empty())
 		return refuse(entry->logical_name + " does not read" + (image && !image->refusal.empty() ? ": " + image->refusal : std::string()) + ".",
@@ -482,7 +482,7 @@ struct SetAside {
 		if (relative.empty() || !fs::exists(at(relative), ec)) return true;
 		const fs::path to = at(join_path(folder, relative));
 		fs::create_directories(to.parent_path(), ec);
-		if (!ec && rename_with_retry(at(relative), to, ec)) {
+		if (!ec && io::rename_with_retry(at(relative), to, ec)) {
 			moved.emplace_back(at(relative), to);
 			return true;
 		}
@@ -492,7 +492,7 @@ struct SetAside {
 	// Every file moved put back where it was.
 	void put_back() {
 		std::error_code ec;
-		for (auto it = moved.rbegin(); it != moved.rend(); ++it) rename_with_retry(it->second, it->first, ec);
+		for (auto it = moved.rbegin(); it != moved.rend(); ++it) io::rename_with_retry(it->second, it->first, ec);
 		moved.clear();
 	}
 };
@@ -521,7 +521,7 @@ bool apply_texture_source(const ProjectPaths &paths, const TextureSourcePlan &pl
 		std::error_code ec;
 		std::string message;
 		if (wrote_source) {
-			if (had_source) write_file_atomic(join_path(paths.root, plan.source), overwritten.data(), overwritten.size(), message);
+			if (had_source) io::write_file_atomic(join_path(paths.root, plan.source), overwritten.data(), overwritten.size(), message);
 			else fs::remove(at(plan.source), ec);
 		}
 		set_aside.put_back();
@@ -531,7 +531,7 @@ bool apply_texture_source(const ProjectPaths &paths, const TextureSourcePlan &pl
 	if (ok) {
 		std::error_code ec;
 		std::string message;
-		if (fs::exists(at(plan.source), ec) && read_file_bytes(join_path(paths.root, plan.source), overwritten, message)) {
+		if (fs::exists(at(plan.source), ec) && io::read_file_bytes(join_path(paths.root, plan.source), overwritten, message)) {
 			had_source = true;
 			const fs::path to = at(join_path(aside, plan.source));
 			fs::create_directories(to.parent_path(), ec);
@@ -543,7 +543,7 @@ bool apply_texture_source(const ProjectPaths &paths, const TextureSourcePlan &pl
 		std::error_code ec;
 		fs::create_directories(at(plan.source).parent_path(), ec);
 		wrote_source = true;
-		ok = write_file_atomic(join_path(paths.root, plan.source), plan.bytes.data(), plan.bytes.size(), message);
+		ok = io::write_file_atomic(join_path(paths.root, plan.source), plan.bytes.data(), plan.bytes.size(), message);
 		if (!ok) findings.push_back(refused("Could not write " + plan.source + ": " + message + ".", plan.source));
 	}
 	if (ok) {

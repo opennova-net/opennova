@@ -29,7 +29,7 @@ Diagnostic export_error(CoreFinding code, const std::string &message) {
 bool export_record_of(const fs::path &dir, const std::string &project_id, io::JsonValue &record) {
 	std::string text, error;
 	io::JsonValue json;
-	if (!read_file_text(utf8_of(dir / kExportRecordFileName), text, error) || !io::json_parse(text, json, error) ||
+	if (!io::read_file_text(utf8_of(dir / kExportRecordFileName), text, error) || !io::json_parse(text, json, error) ||
 	    !json.is_object() || project_id.empty() || json.get_string("project_id", "") != project_id)
 		return false;
 	record = std::move(json);
@@ -255,10 +255,10 @@ void ExportRun::check() {
 	// project's.
 	staged_ = true;
 	fs::remove_all(staging, ec);
-	if (ec || !ensure_directory(staging_, error))
+	if (ec || !io::ensure_directory(staging_, error))
 		return fail(CoreFinding::ExportWrite,
 		            "cannot stage the export in " + staging_ + ": " + (ec ? ec.message() : error));
-	if (!write_file_atomic(join_path(staging_, kExportRecordFileName), io::json_write(export_record(request_, {})), error))
+	if (!io::write_file_atomic(join_path(staging_, kExportRecordFileName), io::json_write(export_record(request_, {})), error))
 		return fail(CoreFinding::ExportWrite, error);
 	phase_ = Phase::Copy;
 }
@@ -270,7 +270,7 @@ void ExportRun::copy(uint64_t budget) {
 		const std::string target = join_path(staging_, file.to);
 		if (!streams_->in.is_open()) {
 			std::string error;
-			if (!ensure_directory(utf8_of(path_of(target).parent_path()), error)) return fail(CoreFinding::ExportWrite, error);
+			if (!io::ensure_directory(utf8_of(path_of(target).parent_path()), error)) return fail(CoreFinding::ExportWrite, error);
 			streams_->in.open(system_path(file.from), std::ios::binary);
 			streams_->out.open(system_path(target), std::ios::binary | std::ios::trunc);
 			if (!streams_->in || !streams_->out)
@@ -303,7 +303,7 @@ void ExportRun::copy(uint64_t budget) {
 void ExportRun::swap() {
 	std::sort(report_.files.begin(), report_.files.end());
 	std::string error;
-	if (!write_file_atomic(join_path(staging_, kExportRecordFileName), io::json_write(export_record(request_, report_.files)),
+	if (!io::write_file_atomic(join_path(staging_, kExportRecordFileName), io::json_write(export_record(request_, report_.files)),
 	                       error))
 		return fail(CoreFinding::ExportWrite, error);
 	// In place: the folder's last export (this project's, or an empty folder) set aside, the new one
@@ -314,14 +314,14 @@ void ExportRun::swap() {
 	std::error_code ec;
 	fs::remove_all(previous, ec);
 	if (ec) return fail(CoreFinding::ExportWrite, "cannot replace " + request_.export_dir + ": " + ec.message());
-	if (!ensure_directory(utf8_of(path_of(request_.export_dir).parent_path()), error))
+	if (!io::ensure_directory(utf8_of(path_of(request_.export_dir).parent_path()), error))
 		return fail(CoreFinding::ExportWrite, error);
 	const bool had = fs::exists(target, ec);
-	if (had && !rename_with_retry(target, previous, ec))
+	if (had && !io::rename_with_retry(target, previous, ec))
 		return fail(CoreFinding::ExportWrite, "cannot replace " + request_.export_dir + ": " + ec.message());
-	if (!rename_with_retry(staging, target, ec)) {
+	if (!io::rename_with_retry(staging, target, ec)) {
 		const std::string reason = ec.message();
-		if (had) rename_with_retry(previous, target, ec);
+		if (had) io::rename_with_retry(previous, target, ec);
 		return fail(CoreFinding::ExportWrite, "cannot put the export in place: " + reason);
 	}
 	std::string reason;

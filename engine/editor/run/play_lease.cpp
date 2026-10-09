@@ -51,7 +51,7 @@ bool parse_lease_name(const fs::path &path, std::string &build_id, int64_t &pid)
 // the creation time it records.
 bool read_lease(const fs::path &path, const std::string &build_id, int64_t pid, std::string &created) {
 	std::string text, error;
-	if (!read_file_text(utf8_of(path), text, error)) return false;
+	if (!io::read_file_text(utf8_of(path), text, error)) return false;
 	io::JsonValue json;
 	if (!io::json_parse(text, json, error) || !json.is_object()) return false;
 	if (json.get_int("schema_version", -1) != kPlayLeaseSchemaVersion) return false;
@@ -78,7 +78,7 @@ bool write_play_lease(const PlayLease &lease, std::string &error) {
 	json.set("image", io::JsonValue::make_string(lease.image));
 	// A string: a creation time (a FILETIME's 100 ns count) passes a JSON number's exact range.
 	json.set("created", io::JsonValue::make_string(lease.created));
-	return write_file_atomic(utf8_of(path), io::json_write(json), error);
+	return io::write_file_atomic(utf8_of(path), io::json_write(json), error);
 }
 
 void remove_play_lease(const std::string &build_dir, int64_t pid) {

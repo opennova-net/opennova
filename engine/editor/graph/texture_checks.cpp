@@ -87,7 +87,7 @@ const TextureHeader *kept_header(const std::string &root, const AssetEntry *entr
 	Kept kept;
 	kept.size = entry->size_bytes;
 	kept.modified = entry->modified_ticks;
-	if (read_file_bytes(key.first, bytes, error)) kept.header = texture_header_as(reader, bytes);
+	if (io::read_file_bytes(key.first, bytes, error)) kept.header = texture_header_as(reader, bytes);
 	else kept.header.refusal = error;
 	return &(g_headers[key] = std::move(kept)).header;
 }

@@ -192,14 +192,6 @@ void HeldPopup::close() {
 	ImGui::CloseCurrentPopup();
 }
 
-std::string size_text(uint64_t bytes) {
-	char text[32];
-	if (bytes < 1024) std::snprintf(text, sizeof(text), "%llu B", static_cast<unsigned long long>(bytes));
-	else if (bytes < 1024 * 1024) std::snprintf(text, sizeof(text), "%.1f KB", static_cast<double>(bytes) / 1024.0);
-	else std::snprintf(text, sizeof(text), "%.1f MB", static_cast<double>(bytes) / (1024.0 * 1024.0));
-	return text;
-}
-
 std::string fit(const std::string &text, float width) {
 	const size_t end = text.find('\n');
 	const std::string line = text.substr(0, end);

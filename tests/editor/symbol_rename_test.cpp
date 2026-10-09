@@ -603,13 +603,13 @@ static int test_written_together() {
 	const std::string weapons_before = project.read(weapons), items_before = project.read(items);
 	const ProjectPaths paths = ProjectPaths::for_root(project.root());
 	std::vector<std::string> replaced;
-	const FileReplace refuse_weapons = [&](const std::string &from, const std::string &to, std::string &error) {
+	const opennova::io::FileReplace refuse_weapons = [&](const std::string &from, const std::string &to, std::string &error) {
 		replaced.push_back(fs::path(to).filename().string());
 		if (replaced.back() == "weapon.def") {
 			error = "cannot replace " + to + ": write-protected";
 			return false;
 		}
-		return replace_file(from, to, error);
+		return opennova::io::replace_file(from, to, error);
 	};
 	std::vector<Diagnostic> findings;
 	TEST_EXPECT(!apply_symbol_rename(paths, *project.view().project.document, *project.view().project.scan, project.graph(), plan, findings,
