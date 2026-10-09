@@ -1007,13 +1007,21 @@ std::vector<Diagnostic> validate_terrain_file(const DocumentBase &document) {
 			             " at the grid's end, each the row the game's extension reads there (" +
 			             (config.wrap_y ? "the grid's rows again from the first" : "the last row again") +
 			             "), so the grid's rows are a power of two and the game takes the terrain; nothing it draws moves.";
-			for (int r = rows; r < target; ++r) {
+			// Each a copy of the row of the grid as it stands that the extension reads at that index, the rows
+			// past the grid's count by its count (r % rows where it wraps): a Duplicate of that row to the end,
+			// never the insert's own choice, which reads the grid as each Add of the batch has grown it.
+			// The grid's rows are the terrain's first list (terrain_table).
+			const std::vector<RecordIds> *grid = row->ids.lists.empty() ? nullptr : &row->ids.lists[0];
+			for (int r = rows; r < target && grid; ++r) {
+				const size_t from = size_t(trn_grid_extension_source(rows, config.wrap_y, r));
+				if (from >= grid->size()) break;
 				Edit edit;
-				edit.operation = EditOperation::Add;
-				edit.address = {row->id, kSectorRow, 0};
+				edit.operation = EditOperation::Duplicate;
+				edit.address = {row->id, kSectorRow, (*grid)[from].id};
+				edit.position = size_t(r); // the end as the edits before it leave the grid
 				fix.edits.push_back(std::move(edit));
 			}
-			d.planned.push_back(std::move(fix));
+			if (fix.edits.size() == size_t(target - rows)) d.planned.push_back(std::move(fix));
 		} else if (std::string(field) == "polytrn_sectorcount" && config.sector_count > 0) {
 			const int target = next_power_of_two(config.sector_count);
 			d.planned.push_back({"Set the width to " + std::to_string(target),
