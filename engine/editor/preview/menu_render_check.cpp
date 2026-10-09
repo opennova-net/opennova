@@ -11,6 +11,7 @@
 #include <editor/model/diagnostic.h>
 #include <editor/preview/make_menu_render_check.h>
 #include <editor/project/project_files.h>
+#include <formats/mns/mns.h>
 
 namespace opennova::editor {
 
@@ -256,7 +257,7 @@ bool MenuRenderCheck::step(const ProjectCheckInput &input, uint64_t budget, bool
 		style_.dependencies(stamps);
 		if (!same_stamps(stamps, style_stamps_)) {
 			style_stamps_ = std::move(stamps);
-			for (const std::string &name : changed_menu_variables(vars_, cursor_.vars)) changed_.push_back(name);
+			for (const std::string &name : mns::changed_variables(vars_, cursor_.vars)) changed_.push_back(name);
 			std::sort(changed_.begin(), changed_.end());
 			changed_.erase(std::unique(changed_.begin(), changed_.end()), changed_.end());
 			vars_ = cursor_.vars;
@@ -355,7 +356,7 @@ void MenuRenderCheck::render_menu_(Menu &menu, const MnuDocument &document, cons
 	menu.dependencies.clear();
 	menu.findings.clear();
 	// The variables the menu names: every %NAME% in the text its Save would write.
-	menu.variables = menu_variables_named(document.saved_serialization().text);
+	menu.variables = mns::variables_named(document.saved_serialization().text);
 	for (const auto &row : document.rows()) {
 		Screen screen;
 		screen.row = row->id;
