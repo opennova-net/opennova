@@ -16,6 +16,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/source_issue_findings.h>
 #include <editor/project/project_files.h>
+#include <runtime/audio/sound_selector.h>
 
 namespace opennova::editor {
 namespace {
@@ -24,14 +25,6 @@ constexpr NodeKind kWave = node_kind(SoundBankKind::Wave);
 constexpr NodeKind kSet = node_kind(SoundBankKind::Set);
 constexpr NodeKind kLayer = node_kind(SoundBankKind::Layer);
 constexpr NodeKind kMember = node_kind(SoundBankKind::Member);
-
-// The bytes the format keeps a name in, its terminator among them: a wave's 32 [orig: the 52-byte
-// entry, the name at +0, stricmp'd whole by SoundBank_FindEntryByName @ 0x75bba0], a set's 24 [orig:
-// SoundBank_LoadTriggerSets @ 0x75c43e..0x75c461 copies six dwords of name; the in-memory record's
-// pitch follows at +28], a wave's file 256 [orig: the 256-byte filename slots, @ 0x75c688].
-constexpr size_t kWaveNameBytes = 32;
-constexpr size_t kSetNameBytes = 24;
-constexpr size_t kWaveFileBytes = 256;
 
 const BankWave &wave_of(const RecordHandle &r) { return r.as<BankWave>(); }
 const BankSet &set_of(const RecordHandle &r) { return r.as<BankSet>(); }
@@ -152,22 +145,22 @@ RecordTable make_table() {
 		FieldSchema name = schema_of("name", FieldType::Text, "Name",
 				"What the bank's members, and a mission's dialog lines, name this wave by; the bank finds the "
 				"first wave of a name, without case [orig: SoundBank_FindEntryByName @ 0x75bba0].");
-		name.width = kWaveNameBytes;
+		name.width = lwf::kSingleNameBytes;
 		name.defines = ReferenceKind::BankWave;
 		wave.field(RF{name,
 		              {[](const RecordHandle &r, Value &out) { return out = wave_of(r).name, true; },
 		               [](const RecordHandle &r, const Value &v, std::string &e) {
-			               return set_name(r.as<BankWave>().name, kWaveNameBytes, "A wave's name", v, e);
+			               return set_name(r.as<BankWave>().name, lwf::kSingleNameBytes, "A wave's name", v, e);
 		               }}});
 		FieldSchema file = schema_of("file", FieldType::Text, "File",
 				"The .wav the game loads for this wave, by its name, from the archives the first time a member "
 				"plays it [orig: sub_75BC20 @ 0x75bc20].");
-		file.width = kWaveFileBytes;
+		file.width = lwf::kPathSlotBytes;
 		file.reference = ReferenceKind::Wave;
 		wave.field(RF{file,
 		              {[](const RecordHandle &r, Value &out) { return out = wave_of(r).file, true; },
 		               [](const RecordHandle &r, const Value &v, std::string &e) {
-			               return set_name(r.as<BankWave>().file, kWaveFileBytes, "A wave's file", v, e);
+			               return set_name(r.as<BankWave>().file, lwf::kPathSlotBytes, "A wave's file", v, e);
 		               }}});
 		wave.field(RF{ranged(schema_of("volume", FieldType::Integer, "Dialog volume",
 		                               "The volume, 0 to 255, a mission's dialog line plays this wave at when it names "
@@ -187,12 +180,12 @@ RecordTable make_table() {
 				"What items, ammo, scripts, sound profiles and the game itself play this set by; the game "
 				"searches its banks in order for the first set of the name, without case [orig: "
 				"SoundBank_FindTriggerByName @ 0x75be90].");
-		name.width = kSetNameBytes;
+		name.width = lwf::kMultiNameBytes;
 		name.defines = ReferenceKind::Sound;
 		set.field(RF{name,
 		             {[](const RecordHandle &r, Value &out) { return out = set_of(r).name, true; },
 		              [](const RecordHandle &r, const Value &v, std::string &e) {
-			              return set_name(r.as<BankSet>().name, kSetNameBytes, "A set's name", v, e);
+			              return set_name(r.as<BankSet>().name, lwf::kMultiNameBytes, "A set's name", v, e);
 		              }}});
 		set.field(RF{ranged(schema_of("pitch", FieldType::Real, "Pitch",
 		                              "Multiplies every member's pitch: 1 plays a wave as recorded [orig: "
@@ -232,7 +225,8 @@ RecordTable make_table() {
 			              return set_whole(r.as<BankSet>().flags, v, UINT32_MAX >> 1, "The flags", e);
 		              }}});
 		TableList layers;
-		layers.spec = Document::CollectionSpec{kLayer, "Layers", "", false, Applicability::Reads, 8};
+		layers.spec = Document::CollectionSpec{kLayer, "Layers", "", false, Applicability::Reads,
+		                                         lwf::kMaxPlaylistsPerMulti};
 		layers.ops = vector_list<BankSet, BankLayer>(kLayer, [](BankSet &s) -> std::vector<BankLayer> & { return s.layers; });
 		set.list(std::move(layers));
 	}
@@ -285,7 +279,8 @@ RecordTable make_table() {
 			              return out = std::string(layer_selection_words(layer_of(r).flags)), true;
 		              }}});
 		TableList members;
-		members.spec = Document::CollectionSpec{kMember, "Members", "wave", false, Applicability::Reads, 8};
+		members.spec = Document::CollectionSpec{kMember, "Members", "wave", false, Applicability::Reads,
+		                                          lwf::kMaxSndparmsPerPlaylist};
 		members.ops = vector_list<BankLayer, BankMember>(kMember,
 				[](BankLayer &l) -> std::vector<BankMember> & { return l.members; });
 		layer.list(std::move(members));
@@ -295,12 +290,12 @@ RecordTable make_table() {
 	{
 		FieldSchema wave_name = schema_of("wave", FieldType::Text, "Wave",
 				"The wave of this bank the member plays, by its name.");
-		wave_name.width = kWaveNameBytes;
+		wave_name.width = lwf::kSingleNameBytes;
 		wave_name.reference = ReferenceKind::BankWave;
 		member.field(RF{wave_name,
 		                {[](const RecordHandle &r, Value &out) { return out = member_of(r).wave, true; },
 		                 [](const RecordHandle &r, const Value &v, std::string &e) {
-			                 return set_name(r.as<BankMember>().wave, kWaveNameBytes, "A wave's name", v, e);
+			                 return set_name(r.as<BankMember>().wave, lwf::kSingleNameBytes, "A wave's name", v, e);
 		                 }}});
 		member.field(RF{ranged(schema_of("pitch", FieldType::Real, "Pitch",
 		                                 "1 plays the wave as recorded; the set's pitch multiplies it [orig: "
@@ -370,8 +365,12 @@ bool is_sound_bank_kind(AssetKind kind) { return asset_kind_row(kind).document =
 std::string sound_bank_scope(const std::string &path) { return strutil::to_upper(basename_of(path)); }
 
 const char *layer_selection_words(uint32_t flags) {
-	if (flags & lwf::kFlagSequential) return "in order";
-	if (flags & lwf::kFlagRandomSequential) return "a random start, then in order";
+	// The member selection the game's player runs for the flags (audio::selection_mode_for_flags).
+	switch (audio::selection_mode_for_flags(flags)) {
+	case audio::kSequential: return "in order";
+	case audio::kRandomSeq: return "a random start, then in order";
+	default: break;
+	}
 	return "at random";
 }
 
@@ -588,9 +587,9 @@ std::shared_ptr<Node> SoundBankDocument::make_node(NodeKind kind, NodeId, const 
 	}
 	auto row = std::make_shared<SoundBankRow>(kind);
 	if (kind == kWave) {
-		row->wave.name = free_name(rows, kWave, "NEWWAVE", kWaveNameBytes);
+		row->wave.name = free_name(rows, kWave, "NEWWAVE", lwf::kSingleNameBytes);
 	} else {
-		row->set.name = free_name(rows, kSet, "NEW_SET", kSetNameBytes);
+		row->set.name = free_name(rows, kSet, "NEW_SET", lwf::kMultiNameBytes);
 	}
 	shape(*row);
 	return row;
@@ -611,8 +610,8 @@ size_t SoundBankDocument::row_position(const Node &row, const std::vector<std::s
 void SoundBankDocument::prepare_duplicate(Node &copy, const Node &original,
                                           const std::vector<std::shared_ptr<const Node>> &rows) const {
 	SoundBankRow &r = static_cast<SoundBankRow &>(copy);
-	if (r.kind == kWave) r.wave.name = free_name(rows, kWave, bank_row(original).wave.name, kWaveNameBytes, &copy);
-	else r.set.name = free_name(rows, kSet, bank_row(original).set.name, kSetNameBytes, &copy);
+	if (r.kind == kWave) r.wave.name = free_name(rows, kWave, bank_row(original).wave.name, lwf::kSingleNameBytes, &copy);
+	else r.set.name = free_name(rows, kSet, bank_row(original).set.name, lwf::kMultiNameBytes, &copy);
 }
 
 void SoundBankDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
@@ -666,7 +665,7 @@ FindingTable sound_bank_finding_codes() { return { kFindingRows.data(), kFinding
 // layer yet, so it plays nothing until one is given, as nothing plays for the name now.
 bool define_sound_set(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out) {
 	const auto *bank = dynamic_cast<const SoundBankDocument *>(&document);
-	if (!bank || missing.kind != ReferenceKind::Sound || missing.target.empty() || missing.target.size() >= kSetNameBytes)
+	if (!bank || missing.kind != ReferenceKind::Sound || missing.target.empty() || missing.target.size() >= lwf::kMultiNameBytes)
 		return false;
 	const std::string file = basename_of(document.path());
 	// A menu SOUND's set is looked up in the bank its SOUND names alone.
