@@ -370,8 +370,8 @@ static int test_effects_playback() {
 	            config.documents[0].file.effects.size() == 2 && config.documents[0].file.particles.size() == 2);
 	DefinitionEffects effects;
 	std::vector<DefinitionSpawn> spawns = {
-		{"Effect_Smoke", effect_forward_pose({0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}), 0, "particle_slot", "Smoke"},
-		{"Effect_Fire", effect_descriptor_pose({0.0f, 0.5f, 0.0f}, {0.0f, 0.0f, 0.0f}), 10, "fire", "Fire 1"},
+		{"Effect_Smoke", particle::forward_pose({0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}), 0, "particle_slot", "Smoke"},
+		{"Effect_Fire", particle::descriptor_pose({0.0f, 0.5f, 0.0f}, {0.0f, 0.0f, 0.0f}), 10, "fire", "Fire 1"},
 	};
 	TEST_EXPECT(effects.plan(catalog, catalog.serial(), spawns) && effects.scene() && effects.opens() == 1);
 	// The same spawns over the same catalog: kept.
