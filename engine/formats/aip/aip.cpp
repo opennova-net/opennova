@@ -109,6 +109,34 @@ uint32_t flags_of(const std::vector<FlagWord> &table, const std::vector<std::str
 // The writer's word for a GROUND speed: the raw integer the resolver probes is its whole part.
 std::string first_word(const std::vector<std::string> &words) { return words.empty() ? std::string() : words[0]; }
 
+std::string shortest(int32_t value, double scale, int32_t (*convert)(const std::string &), bool wraps = false);
+
+// The two speeds are a HELO profile's parsed members and a GROUND profile's (with the raw whole number the boot
+// resolver probes, the whole part of the word the writer puts down for it).
+int32_t patrol_speed_of(const Profile &p) { return p.type == kTypeHelo ? p.helo_patrol_speed : p.ground_patrol_speed; }
+int32_t combat_speed_of(const Profile &p) { return p.type == kTypeHelo ? p.helo_combat_speed : p.ground_combat_speed; }
+int32_t ground_speed_raw(int32_t fixed) {
+	return whole(shortest(fixed, 1000.0 * 4.444444444444444e-06 * 65536.0, &speed_fixed));
+}
+void set_patrol_speed(Profile &p, int32_t v) {
+	if (p.type == kTypeHelo) {
+		p.helo_patrol_speed = v;
+		return;
+	}
+	p.ground_patrol_speed = v;
+	p.patrol_speed = ground_speed_raw(v);
+	p.has_ground_patrol_speed = true;
+}
+void set_combat_speed(Profile &p, int32_t v) {
+	if (p.type == kTypeHelo) {
+		p.helo_combat_speed = v;
+		return;
+	}
+	p.ground_combat_speed = v;
+	p.combat_speed = ground_speed_raw(v);
+	p.has_ground_combat_speed = true;
+}
+
 // The rows, `type` first, then the order the shipped profiles write their keys in [orig: AIProfile_ParseProperty
 // @ 0x45DE70; each arm's store cited at the parse below].
 const std::vector<KeyRow> &rows() {
@@ -189,12 +217,12 @@ const std::vector<KeyRow> &rows() {
 		// @0x45f803..0x45f817], use_waypoint_z -> +56 [orig: AIProfile_ParseProperty @0x45f941..0x45f952], min_agl ->
 		// +232 [orig: AIProfile_ParseProperty @0x45f975..0x45f991], min_speed -> +236 [orig: AIProfile_ParseProperty
 		// @0x45f9b7..0x45f9df]. The two speeds are a HELO profile's and a GROUND profile's members of the same keys
-		// (key_value below picks by the type).
-		t.push_back({"patrol_speed", nullptr, both, Unit::Speed, nullptr, nullptr});
+		// (their accessors pick by the type).
+		t.push_back({"patrol_speed", nullptr, both, Unit::Speed, &patrol_speed_of, &set_patrol_speed});
 		t.push_back({"patrol_altitude", nullptr, kHeloKeys, Unit::Metres, AIP_GET(helo_patrol_altitude),
 		             AIP_SET(helo_patrol_altitude, int32_t)});
 		t.push_back({"patrol_climb", nullptr, kHeloKeys, Unit::Climb, AIP_GET(helo_patrol_climb), AIP_SET(helo_patrol_climb, int32_t)});
-		t.push_back({"combat_speed", nullptr, both, Unit::Speed, nullptr, nullptr});
+		t.push_back({"combat_speed", nullptr, both, Unit::Speed, &combat_speed_of, &set_combat_speed});
 		t.push_back({"combat_altitude", nullptr, kHeloKeys, Unit::Metres, AIP_GET(helo_combat_altitude),
 		             AIP_SET(helo_combat_altitude, int32_t)});
 		t.push_back({"combat_climb", nullptr, kHeloKeys, Unit::Climb, AIP_GET(helo_combat_climb), AIP_SET(helo_combat_climb, int32_t)});
@@ -217,13 +245,6 @@ const std::vector<KeyRow> &rows() {
 #undef AIP_GET
 #undef AIP_SET
 
-// A key's value on a profile (the two speeds by its type: a HELO's parsed member, a GROUND's).
-int32_t key_value(const KeyRow &row, const Profile &p) {
-	if (row.get) return row.get(p);
-	const bool patrol = std::strcmp(row.key, "patrol_speed") == 0;
-	if (p.type == kTypeHelo) return patrol ? p.helo_patrol_speed : p.helo_combat_speed;
-	return patrol ? p.ground_patrol_speed : p.ground_combat_speed;
-}
 
 // What one line does to the profile: the arm its key takes for the profile's type, as AIProfile_ParseProperty
 // @ 0x45DE70 dispatches (`type` for every type; HELO and GROUND their sets; ORGANIC and no type nothing more).
@@ -244,7 +265,7 @@ const KeyRow *apply_line(Profile &prof, const std::vector<std::string> &toks) {
 		(prof.*(row->block)).*(row->name) = value;
 		return row;
 	}
-	if (!row->get) {
+	if (std::strcmp(row->key, "patrol_speed") == 0 || std::strcmp(row->key, "combat_speed") == 0) {
 		const bool patrol = std::strcmp(row->key, "patrol_speed") == 0;
 		const int32_t speed = speed_fixed(value);
 		if (prof.type == kTypeHelo) {
@@ -284,7 +305,8 @@ bool records_of(const Profile &profile, textlayout::OutRecord &now, std::string 
 		} else {
 			const int32_t value = key_value(row, profile);
 			// A GROUND speed is put down when the profile read one, 0 or not: the boot resolver probes the read.
-			const bool ground_speed = !row.get && profile.type == kTypeGround &&
+			const bool ground_speed = row.unit == Unit::Speed && std::strcmp(row.key, "min_speed") != 0 &&
+			                          profile.type == kTypeGround &&
 			                          (std::strcmp(row.key, "patrol_speed") == 0 ? profile.has_ground_patrol_speed
 			                                                                     : profile.has_ground_combat_speed);
 			if (value == 0 && !ground_speed) continue;
@@ -361,7 +383,7 @@ Profile parse(const uint8_t *text, size_t size, textlayout::Notes *notes, std::v
 // over the scale and its neighbours a step away. A conversion that keeps the low 32 bits of a 64-bit chop
 // (`wraps`: a degree, a rate's seconds) reads a number past the 32 bits' range to it too: 360 degrees is the
 // BAM -256.
-std::string shortest(int32_t value, double scale, int32_t (*convert)(const std::string &), bool wraps = false) {
+std::string shortest(int32_t value, double scale, int32_t (*convert)(const std::string &), bool wraps) {
 	std::vector<double> targets = {double(value) / scale};
 	if (wraps) {
 		targets.push_back((double(value) + 4294967296.0) / scale);
@@ -403,6 +425,8 @@ const std::vector<FlagWord> &combat_flag_words() { return kCombatFlags; }
 const std::vector<FlagWord> &hunt_flag_words() { return kHuntFlags; }
 const std::vector<StateName> &state_names() { return kStates; }
 const std::vector<KeyRow> &key_rows() { return rows(); }
+
+int32_t key_value(const KeyRow &row, const Profile &p) { return row.get ? row.get(p) : 0; }
 
 const KeyRow *key_row(const std::string &key) {
 	for (const KeyRow &row : rows())

@@ -187,8 +187,9 @@ struct KeyRow {
 	const char *alias;
 	uint8_t types;
 	Unit unit;
-	// The value the arm stores, as a whole number (a mask, a state id, a BAM, ...); the weapon's name for a
-	// Weapon key.
+	// The value the arm stores, as a whole number (a mask, a state id, a BAM, ...), and its store: the two
+	// speeds a HELO profile's member or a GROUND profile's by the profile's type (a GROUND speed's store also
+	// sets its raw whole number and that it was read). Null for a Weapon key (its name is `block`'s `name`).
 	int32_t (*get)(const Profile &);
 	void (*set)(Profile &, int32_t);
 	std::string WeaponBlock::*name = nullptr; // a Weapon key's block member (with `block`)
@@ -202,6 +203,8 @@ inline constexpr uint8_t kGroundKeys = 1u << kTypeGround;
 const std::vector<KeyRow> &key_rows();
 // The key row of `key` (any case, an alias included), null for none.
 const KeyRow *key_row(const std::string &key);
+// The value a key holds on a profile (0 for a Weapon key).
+int32_t key_value(const KeyRow &row, const Profile &profile);
 // Whether a profile of `type` reads `row`.
 inline bool reads(const KeyRow &row, int32_t type) { return type >= 0 && type < 8 && (row.types & (1u << type)) != 0; }
 

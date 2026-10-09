@@ -101,6 +101,14 @@ int minted() {
 	helo.helo_patrol_climb = int32_t(5 * 0.016 * 65536.0);
 	TEST_EXPECT(aip::write_profile(helo, nullptr, text, error));
 	TEST_EXPECT(text == "type\tHELO\r\npatrol_altitude\t25\r\npatrol_climb\t5\r\nflight_skill\t3\r\n");
+	// A GROUND speed set through its key's store: the parsed value, the raw whole number, the read.
+	aip::Profile ground;
+	ground.type = aip::kTypeGround;
+	const aip::KeyRow *patrol = aip::key_row("patrol_speed");
+	TEST_EXPECT(patrol && patrol->set);
+	patrol->set(ground, aip::read_value(*patrol, ground.type, {"40.5"}, 0));
+	TEST_EXPECT(ground.patrol_speed == 40 && ground.has_ground_patrol_speed && aip::key_value(*patrol, ground) != 0);
+	TEST_EXPECT(aip::write_profile(ground, nullptr, text, error) && text == "type\tGROUND\r\npatrol_speed\t40.5\r\n");
 	// A value no word reads back to is refused, saying which.
 	aip::Profile odd;
 	odd.type = aip::kTypeGround;
