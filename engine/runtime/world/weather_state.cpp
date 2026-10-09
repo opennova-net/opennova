@@ -487,7 +487,7 @@ size_t rain_ambient_emitters(const WeatherState &weather, const RainAmbientBody 
         ev.lifetime_ticks = kLifetimeTicks;
         ev.pitch_q16 = 0x10000;
         ev.volume_q8_8 = volume_word;
-        ev.set_name = side == 0 ? "LPNV_RAIN_L" : "LPNV_RAIN_R";
+        ev.set_name = kRainAmbientSets[side];
     }
     return 2;
 }

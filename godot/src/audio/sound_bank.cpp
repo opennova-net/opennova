@@ -143,11 +143,7 @@ void SoundBank::configure_ambient_player(AudioStreamPlayer3D *p_player,
 	if (p_player == nullptr || p_stream.is_null()) {
 		return;
 	}
-	Ref<AudioStreamWAV> loop_stream = p_stream->duplicate();
-	loop_stream->set_loop_mode(AudioStreamWAV::LOOP_FORWARD);
-	loop_stream->set_loop_begin(0);
-	loop_stream->set_loop_end(_stream_frames(loop_stream));
-	p_player->set_stream(loop_stream);
+	p_player->set_stream(loop_copy(p_stream));
 	p_player->set_attenuation_model(AudioStreamPlayer3D::ATTENUATION_DISABLED);
 	if (p_bus != StringName() && AudioServer::get_singleton()->get_bus_index(p_bus) >= 0) {
 		p_player->set_bus(p_bus);
@@ -315,7 +311,7 @@ bool SoundBank::_play_oneshot_plan(Node *p_parent, const Vector3 &p_world_pos,
 		if (p_interface) {
 			auto *player = memnew(AudioStreamPlayer);
 			player->set_stream(stream);
-			player->set_pitch_scale(effective_base_pitch(pitch));
+			player->set_pitch_scale(pitch_scale_from_q16(voice.pitch_q16));
 			player->set_volume_db(volume_db_from_255(voice.vol255));
 			if (p_bus != StringName() && AudioServer::get_singleton()->get_bus_index(p_bus) >= 0)
 				player->set_bus(p_bus);
@@ -439,17 +435,7 @@ AudioStreamPlayer3D *SoundBank::_make_player(const Ref<AudioStreamWAV> &p_stream
 	AudioStreamPlayer3D *player = memnew(AudioStreamPlayer3D);
 	// Loop the stream copy (not the cached one's loop flag for one-shots): duplicate
 	// so the looping ambient flag never leaks into a shared cached one-shot.
-	Ref<AudioStreamWAV> stream = p_stream;
-	if (p_loop) {
-		stream = p_stream->duplicate();
-		stream->set_loop_mode(AudioStreamWAV::LOOP_FORWARD);
-		stream->set_loop_begin(0);
-		// loop_end is an absolute frame index and playback wraps the moment it is
-		// reached -- 0 does NOT mean "whole stream", it pins the voice at sample 0
-		// forever (constant DC = silence). Loop the full decoded buffer.
-		stream->set_loop_end(_stream_frames(stream));
-	}
-	player->set_stream(stream);
+	player->set_stream(p_loop ? loop_copy(p_stream) : p_stream);
 	// The witnessed distance model owns volume (the engine computes a 0..255
 	// channel volume from the two layer radii; Godot must not attenuate on top
 	// of it -- its inverse-distance curve AMPLIFIES inside unit_size, which is
@@ -468,6 +454,33 @@ AudioStreamPlayer3D *SoundBank::_make_player(const Ref<AudioStreamWAV> &p_stream
 
 double SoundBank::effective_base_pitch(double p_base_pitch) {
 	return p_base_pitch > 0.01 ? p_base_pitch : 1.0;
+}
+
+double SoundBank::pitch_scale_from_q16(uint32_t p_pitch_q16) {
+	return effective_base_pitch(opennova::lwf::pitch_from_q16(p_pitch_q16));
+}
+
+Ref<AudioStreamWAV> SoundBank::loop_copy(const Ref<AudioStreamWAV> &p_stream) {
+	if (p_stream.is_null()) {
+		return p_stream;
+	}
+	Ref<AudioStreamWAV> loop = p_stream->duplicate();
+	loop->set_loop_mode(AudioStreamWAV::LOOP_FORWARD);
+	loop->set_loop_begin(0);
+	// loop_end is an absolute frame index and playback wraps the moment it is
+	// reached -- 0 does NOT mean "whole stream", it pins the voice at sample 0
+	// forever (constant DC = silence). Loop the full decoded buffer.
+	loop->set_loop_end(_stream_frames(loop));
+	return loop;
+}
+
+void SoundBank::configure_unattenuated_3d(AudioStreamPlayer3D *p_player) {
+	if (p_player == nullptr) {
+		return;
+	}
+	p_player->set_attenuation_model(AudioStreamPlayer3D::ATTENUATION_DISABLED);
+	p_player->set_max_distance(0.0);
+	p_player->set_doppler_tracking(AudioStreamPlayer3D::DOPPLER_TRACKING_DISABLED);
 }
 
 double SoundBank::volume_db_from_255(int p_vol255) {
