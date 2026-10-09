@@ -13,6 +13,7 @@
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/project/project_files.h>
+#include <formats/mission/mission_params.h>
 #include <formats/trn/trn.h>
 #include <runtime/anim/rig_files.h>
 #include <runtime/menu/menu_assets.h>
@@ -418,15 +419,8 @@ std::string avatar_part_missing(const AssetGraph &, const GraphEdge &edge) {
 // field's use, ModelDocument's). Any value past the byte names none too.
 bool frame_none(int64_t value) { return value <= 0 || value > 127; }
 
-// A mission's group 0 names none: every witnessed consumer exits or reads false for it [orig:
-// Entity_KillAllByNetId @0x43C8F2, Entity_IsTeamInTriggerBounds @0x43c730, Entity_HandleAlertCommand
-// @0x43CF10, Entity_TeleportAllByNetId @0x43D5D0].
-bool group_none(int64_t value) { return value == 0; }
-
-// A waypoint list's number names a path from 1 to 122; 0 is none and 123 to 127 are commands (go to an
-// SSN, a group, the player) [orig editor: dfx2med Med_ParamWaypointList @0x449c60;
-// docs/world/world-wac-ai-re.md section 11].
-bool path_none(int64_t value) { return value == 0 || (value >= 123 && value <= 127); }
+// A mission's group 0 names none, and a waypoint list's 0 and its commands 123..127: the engine's
+// mission::group_names_none and mission::path_names_none (formats/mission/mission_params.h).
 
 // --- the table -------------------------------------------------------------------------------
 
@@ -689,9 +683,9 @@ constexpr ReferenceKindRow kRows[] = {
 	Row(ReferenceKind::MissionEvent, "mission_event", "the event", "event").record("event").row,
 	// A group by its index in the file's 64, a path by its number among its 128: fixed tables, which no
 	// edit renumbers.
-	Row(ReferenceKind::MissionGroup, "mission_group", "the group", "group").record("group", group_none).row,
+	Row(ReferenceKind::MissionGroup, "mission_group", "the group", "group").record("group", mission::group_names_none).row,
 	Row(ReferenceKind::MissionPath, "mission_path", "the waypoint path", "waypoint path")
-	        .record("waypoint_path", path_none)
+	        .record("waypoint_path", mission::path_names_none)
 	        .row,
 	// An entity by its SSN and an area trigger by its zone id, each found in its own mission by the id
 	// its record carries, never by an index [orig: EntityPool_FindByNetId @0x4f0a20;

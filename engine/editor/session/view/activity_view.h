@@ -84,7 +84,7 @@ struct ActivityView {
 	// Where the running (or last) game's player starts (Play from here, DI-26: play's start, unset for a Play
 	// at the mission's own starts) and how the run directory's copy of its mission was given it
 	// (run/play_start.h: the start marker type, how many stand there, whether one was added, the archive).
-	PlayStart play_start;
+	mission::PlayerStart play_start;
 	PlayStartPlaced play_start_placed;
 	// The mode the running (or last) game was started in, its run directory's (kRunMode*: runtime, install,
 	// or strict, Strict Play's: the build and the install's program alone, no /d; "" before a Play): the

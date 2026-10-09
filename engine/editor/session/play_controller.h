@@ -115,7 +115,7 @@ private:
 	// Play from here's start placed in the run directory's copy of `mission` (staged already in
 	// `run_dir`); false, reported, when it could not be.
 	bool stage_start(const std::string &run_dir, const std::string &expansion, const std::string &mission,
-	                 const PlayStart &start);
+	                 const mission::PlayerStart &start);
 	// What a line of the game's log reports, each marker's to its absorber (the boot report, the launch
 	// mission's): the one place a new report the game logs is read (DI-27's misses).
 	void absorb_report(const std::string &line);

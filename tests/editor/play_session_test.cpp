@@ -906,74 +906,16 @@ static int test_expansion_staging() {
 	return 0;
 }
 
-// DI-26: Play from here's start in a mission. The single player deploys at the first start marker type
-// its mode's chain holds (world::start_marker_types, team 1): every marker of that type moves to the point,
-// facing the heading, a team-2 marker made team 1 (no queued mount), every other marker as it was; none of
-// either type, one of the primary is added; a point past the 16.16 positions is refused.
-static int test_place_player_start() {
-	using namespace opennova;
-	const auto markers_at = [](bms::File &file, int item_id, int count) {
-		mission::EntityTransform at;
-		at.x = 10.0f;
-		at.y = 20.0f;
-		at.z = 3.0f;
-		at.yaw = 45;
-		for (int i = 0; i < count; ++i) mission::add_entity(file, mission::EntityKind::Marker, item_id, at);
-	};
-	PlayStart start;
+// DI-26: Play from here's start in words, for Output. Where the start is placed in the mission is the
+// engine's (runtime/mission/player_start.h, tests/mission/player_start_test.cpp).
+static int test_play_start_words() {
+	opennova::mission::PlayerStart start;
 	start.set = true;
 	start.at[0] = 412.5;
 	start.at[1] = -88.25;
 	start.at[2] = 36.0;
 	start.yaw = -90.0;
-	const auto at_start = [&start](const bms::Entity &marker) {
-		return marker.x == bms::to_fixed_16_16(start.at[0]) && marker.y == bms::to_fixed_16_16(start.at[1]) &&
-		       marker.z == bms::to_fixed_16_16(start.at[2]) && marker.yaw == 270 && marker.pitch == 0 && marker.roll == 0;
-	};
-	PlayStartPlaced placed;
-	std::string error;
-
-	// Co-op (no mode bit, as single player): the insertion points 6094, both; the fallback and a waypoint stay.
-	bms::File coop;
-	mission::make_default(coop);
-	markers_at(coop, 106094, 2);
-	markers_at(coop, 106001, 1);
-	markers_at(coop, 106000, 1);
-	coop.markers[1].team = 2;
-	TEST_EXPECT(place_player_start(coop, start, placed, error));
-	TEST_EXPECT(placed.type == 6094 && placed.moved == 2 && !placed.added && coop.markers.size() == 4);
-	TEST_EXPECT(at_start(coop.markers[0]) && at_start(coop.markers[1]) && coop.markers[1].team == 1);
-	TEST_EXPECT(!at_start(coop.markers[2]) && coop.markers[2].x == bms::to_fixed_16_16(10.0) && !at_start(coop.markers[3]));
 	TEST_EXPECT(play_start_words(start) == "(412.5, -88.2, 36.0) facing 270");
-
-	// Only the fallback: the 6001s.
-	bms::File fallback;
-	mission::make_default(fallback);
-	markers_at(fallback, 106001, 2);
-	TEST_EXPECT(place_player_start(fallback, start, placed, error));
-	TEST_EXPECT(placed.type == 6001 && placed.moved == 2 && !placed.added && at_start(fallback.markers[1]));
-
-	// None: an insertion point added at the point, its SSN the next.
-	bms::File none;
-	mission::make_default(none);
-	const int ssn = mission::next_entity_ssn(none);
-	TEST_EXPECT(place_player_start(none, start, placed, error));
-	TEST_EXPECT(placed.type == 6094 && placed.moved == 1 && placed.added && none.markers.size() == 1 &&
-	            none.markers[0].type_id == 6094 && none.markers[0].id == ssn && at_start(none.markers[0]));
-
-	// Deathmatch: its chain's 6095, the Co-op starts left.
-	bms::File deathmatch;
-	mission::make_default(deathmatch);
-	deathmatch.header.attrib_flags = bms::AttribFlags::Deathmatch;
-	markers_at(deathmatch, 106094, 1);
-	markers_at(deathmatch, 106095, 1);
-	TEST_EXPECT(place_player_start(deathmatch, start, placed, error));
-	TEST_EXPECT(placed.type == 6095 && placed.moved == 1 && !at_start(deathmatch.markers[0]) && at_start(deathmatch.markers[1]));
-
-	// Past what a position holds.
-	PlayStart far = start;
-	far.at[0] = 40000.0;
-	TEST_EXPECT(!place_player_start(coop, far, placed, error) && error.find("32,768") != std::string::npos);
 	return 0;
 }
 
@@ -1028,7 +970,7 @@ static int test_stage_play_start() {
 	            std::find(mounted.args.begin(), mounted.args.end(), mounted.working_dir) != mounted.args.end());
 	TEST_EXPECT(make_play_launch_plan("opennova", build, run, "jo", 0).resource_dir == utf8_of(path_of(build)));
 
-	PlayStart start;
+	mission::PlayerStart start;
 	start.set = true;
 	start.at[0] = 100.0;
 	start.at[1] = 200.0;
@@ -1085,7 +1027,7 @@ static int test_stage_play_start() {
 
 int main() {
 	int failures = 0;
-	failures += test_place_player_start();
+	failures += test_play_start_words();
 	failures += test_stage_play_start();
 	failures += test_behind_starts();
 	failures += test_launch_plans();

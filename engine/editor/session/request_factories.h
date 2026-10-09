@@ -283,7 +283,7 @@ inline EditorRequest play(std::string mission = std::string(), bool behind = fal
 	return request;
 }
 // Play from here (DI-26): the game started in `mission` with its player at `start` (run/play_start.h).
-inline EditorRequest play_from(std::string mission, const PlayStart &start) {
+inline EditorRequest play_from(std::string mission, const mission::PlayerStart &start) {
 	EditorRequest request = play(std::move(mission));
 	request.start = start;
 	request.start.set = true;

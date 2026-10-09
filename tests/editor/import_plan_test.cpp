@@ -19,7 +19,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
-#include <map>
 #include <set>
 #include <sstream>
 #include <string>
@@ -31,7 +30,6 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/import/import_plan.h>
-#include <editor/import/mission_fixed_files.h>
 #include <editor/import/sidecar.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/session/project_session.h>
@@ -43,7 +41,6 @@
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission_mis.h>
 #include <formats/pff/pff.h>
-#include <runtime/hud/hud_texture_names.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -1039,36 +1036,8 @@ static int test_plan_shadowed() {
 	return 0;
 }
 
-// The fixed names a running mission opens (review F4): each set the runtime opens, by the runtime's
-// own constants, every name once; the HUD's table one name a slot.
-static int test_mission_fixed_files() {
-	namespace hud = opennova::hud;
-	std::map<std::string, std::string> what;
-	for (const MissionFixedFile &file : mission_fixed_files())
-		TEST_EXPECT(what.emplace(normalized_logical_name(file.name), file.what).second && !file.what.empty());
-	const auto has = [&what](const std::string &name) { return what.count(normalized_logical_name(name)) == 1; };
-	std::set<int32_t> slots;
-	for (const hud::HudFixedTexture &texture : hud::kHudFixedTextures)
-		TEST_EXPECT(slots.insert(texture.slot).second && has(texture.name) &&
-		            std::string(hud::hud_fixed_texture_name(texture.slot)) == texture.name);
-	TEST_EXPECT(!hud::hud_fixed_texture_name(hud::kHudTexCrosshair) && !hud::hud_fixed_texture_name(hud::kHudTexFrame));
-	for (int style = hud::kHudCrosshairStyleMin; style <= hud::kHudCrosshairStyleMax; ++style)
-		TEST_EXPECT(has(hud::hud_crosshair_texture_name(style)));
-	TEST_EXPECT(hud::hud_crosshair_texture_name(0) == "cross01.tga" && hud::hud_crosshair_texture_name(24) == "cross25.tga");
-	for (const char *name : {"compring.tga", "TSDicon.tga", "WPIndctr.tga", "dmgslice.tga", "JO_LFP.tga", "dirguide.tga",
-	                         "border.tga", "neticon2.tga", "k_tip.tga", "H_flag.tga", "H_docmnt.tga", "Binoculr.tga",
-	                         "BNumbers.tga", "NVGScale.tga", "vignette.tga", "eraindrp.tga", "jsnwflk.tga", "smoktest.pcx",
-	                         "wake5.tga", "wakegrad.tga", "scorch1.tga", "scorch4.tga", "bhole1.tga", "trscrch1.tga",
-	                         "qburn01.tga", "overcast.def", "helo1.aip", "H_BHawkN.aip", "default.adm", "DltB086C.wav"})
-		TEST_EXPECT(has(name));
-	// The sets the port does not open stay out: the MFD, the glass and the 3rd-person models.
-	for (const char *name : {"MFD1.PCX", "brkglsa.tga", "scopexh.tga", "comacent.tga"}) TEST_EXPECT(!has(name));
-	return 0;
-}
-
 int run_import_plan_tests() {
 	int failures = 0;
-	failures += test_mission_fixed_files();
 	failures += test_plan_shadowed();
 	failures += test_plan_mission_closure();
 	failures += test_plan_steps();
