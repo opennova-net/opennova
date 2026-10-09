@@ -1,5 +1,6 @@
 #include <net/napi/session.h>
 
+#include <base/io/cp1252.h> // cp1252_isspace
 #include <base/io/strutil.h>
 
 #include <cstdlib>
@@ -406,14 +407,17 @@ const char *server_command_target_name(ServerCommandTarget target) {
 	return "";
 }
 
-// [orig: String_TokenizeQuotedToArray @0x616d60]
+// [orig: String_TokenizeQuotedToArray @0x616d60 — the byte zero-extended (`movzx` @0x616da2)
+//  into the locale-aware isspace @0x616da6, the in-quote test @0x616db2, the token start
+//  @0x616dc7, the quote toggle @0x616ddc, the backslash copied @0x616def]
 std::vector<std::string> tokenize_quoted(std::string_view text) {
 	std::vector<std::string> tokens;
 	bool in_token = false;
 	bool in_quote = false;
 	for (const char c : text) {
-		// The retail isspace set (C locale), spelled out so the process locale never matters.
-		const bool space = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f';
+		// The CRT isspace under the game's ".ACP" LC_CTYPE, pinned to cp1252 (0xA0 splits too) so
+		// the process locale never matters (docs/net/novaworld-net-re.md D-NET-381, D-NET-382).
+		const bool space = cp1252_isspace(static_cast<uint8_t>(c));
 		if (!space || in_quote) {
 			if (!in_token) {
 				in_token = true;
@@ -530,16 +534,17 @@ std::string server_command_text(ServerCommandVerb verb, ServerCommandTarget targ
 	if (args.size() < row->min_args) return {};
 	// The tokenizer's isspace runs in the host's ANSI code page, not the C locale: WinMain's
 	// System_InitTimerAndLocale sets LC_ALL to ".ACP" and only LC_NUMERIC back to "C", so on a
-	// cp1252 host 0xA0 splits a token too. Quote an arg holding one of the six C-locale spaces or
-	// any byte >= 0x80; a quoted run's bytes are copied as they are, so a quote never changes the
-	// token. [orig: the tokenizer's isspace call @0x616da6 -> the locale-aware CRT isspace
-	// @0x76b964; System_InitTimerAndLocale @0x762a00 — setlocale(LC_ALL, ".ACP") @0x762a6e,
-	// setlocale(LC_NUMERIC, "C") @0x762a7a]
+	// cp1252 host 0xA0 splits a token too, as tokenize_quoted does. Quote an arg holding one of
+	// those seven spaces, and any other byte >= 0x80 besides, since a host on a double-byte code
+	// page classes its high bytes otherwise (D-NET-382); a quoted run's bytes are copied as they
+	// are, so a quote never changes the token. [orig: the tokenizer's isspace call @0x616da6 ->
+	// the locale-aware CRT isspace @0x76b964; System_InitTimerAndLocale @0x762a00 —
+	// setlocale(LC_ALL, ".ACP") @0x762a6e, setlocale(LC_NUMERIC, "C") @0x762a7a]
 	auto needs_quotes = [](const std::string &arg) {
 		if (arg.empty()) return true;
 		for (const char c : arg) {
-			if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f') return true;
-			if (static_cast<unsigned char>(c) >= 0x80) return true;
+			const uint8_t byte = static_cast<uint8_t>(c);
+			if (cp1252_isspace(byte) || byte >= 0x80) return true;
 		}
 		return false;
 	};

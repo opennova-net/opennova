@@ -184,14 +184,45 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		std::string_view verb, std::string_view target_suffix,
 		const std::vector<std::string> &args) {
 	ServerCommandOutcome outcome;
-	// The common gates: the player table exists, the receiver is the
-	// authority and in a session [orig: dword_24C0CA0 / is_authority /
-	// ctx+0x68 @0x4D23C0..0x4D23E7 and each verb's copy].
-	const bool gated = world != nullptr && ctx.is_authority != 0 && ctx.is_in_session != 0;
-	if (!gated) return outcome;
+	// The gates are per verb, each arm testing its own copy, and any failed
+	// gate is the no-op tail [orig: @0x4D3365] (docs/net/novaworld-net-re.md
+	// D-NET-383):
+	// - the hosting gate, every verb but SetMPReset: the receiver is the
+	//   authority with its hosted session up (is_authority and ctx+0x68, the
+	//   latch CNapiGameSession_CreateSession sets; is_in_session stands in for
+	//   it here: a ServerCommand reaches only a hosting process, where both
+	//   are set);
+	// - the player table (dword_24C0CA0; the World here), only the
+	//   player-targeted verbs and ChangeTeam / SwapTeam;
+	// - the token count, every verb that reads an argument it cannot default.
+	// SetMPReset tests the token count alone, so it runs on any receiver.
+	// The verbs that act on the World without retail's player-table gate
+	// (Cycle / EndMission / GameOver, Earthquake, Lightning, TimeOfDay) need
+	// one to act on here: retail's globals they write always exist.
+	// [orig: PuntPlayer @0x4D23C0..0x4D23E7, TextChatPlayer @0x4D263E..0x4D2665,
+	//  CmdEchoPlayer @0x4D2785..0x4D27AC, KillPlayer @0x4D28CC..0x4D28F3,
+	//  ReloadPlayer @0x4D2E65..0x4D2E8C, DisarmPlayer @0x4D2FAF..0x4D2FD6,
+	//  ChangeTeam / SwapTeam @0x4D31EA..0x4D3211 (all four gates);
+	//  TextChatServer @0x4D2584..0x4D259F, SetServerName @0x4D2CD4..0x4D2CEF,
+	//  SetServerMsg @0x4D2D69..0x4D2D84 (tokens, authority, ctx+0x68);
+	//  Earthquake @0x4D2AAA..0x4D2ABC, Lightning @0x4D2B45..0x4D2B57,
+	//  TimeOfDay @0x4D2BCB..0x4D2BDD, Cycle / EndMission / GameOver
+	//  @0x4D30DE..0x4D30F0 (authority, ctx+0x68); SetMPReset @0x4D2E12 (tokens)]
+	const bool hosting = ctx.is_authority != 0 && ctx.is_in_session != 0;
+	if (ieq(verb, "SetMPReset")) {
+		// atol of the argument into the config, then Game_SaveConfig
+		// [orig: @0x4D2E1B..0x4D2E2D].
+		if (args.empty()) return outcome;
+		outcome.handled = true;
+		outcome.config_changed = true;
+		ctx.config.multiplayer_reset = atol_token(args[0]);
+		return outcome;
+	}
+	if (!hosting) return outcome;
 	const bool targeted = ieq(verb, "PuntPlayer") || ieq(verb, "TextChatPlayer") ||
 	                      ieq(verb, "CmdEchoPlayer") || ieq(verb, "KillPlayer");
 	if (targeted) {
+		if (world == nullptr) return outcome;
 		const size_t needed = (ieq(verb, "TextChatPlayer") || ieq(verb, "CmdEchoPlayer")) ? 2 : 1;
 		if (args.size() < needed) return outcome;
 		NapiNPConnection *target = resolve_target(ctx, target_suffix, args[0]);
@@ -256,7 +287,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		//  the suffixes @0x4D321C..0x4D32D4, state 6 @0x4D32E6, entity @0x4D32EC,
 		//  the swap @0x4D32F2..0x4D330E, Server_ChangeEntityTeam @0x518D70 (the
 		//  call @0x4D3314), the chat @0x4D3319..0x4D3360]
-		if (args.empty()) return outcome;
+		if (world == nullptr || args.empty()) return outcome;
 		NapiNPConnection *target = resolve_target(ctx, target_suffix, args[0]);
 		if (target == nullptr || !slot_in_game(*target)) return outcome;
 		const world::Entity *entity = world->registry.get(target->link.owned_entity);
@@ -272,6 +303,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 	if (ieq(verb, "Cycle") || ieq(verb, "EndMission") || ieq(verb, "GameOver")) {
 		// The round end with the parsed winner, then the 620-tick linger in
 		// place of the 2790 Server_ProcessRoundEnd stored [orig: @0x4D31BF..0x4D31CA].
+		if (world == nullptr) return outcome;
 		outcome.handled = true;
 		world->process_round_end(parse_winner_team(args));
 		ctx.round_end_linger_override_ticks = 0x26C;
@@ -280,6 +312,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 	if (ieq(verb, "Earthquake")) {
 		// g_EnvQuakeTicks = 6 * seconds; the argument is clamped 0..40 and
 		// defaults to 30 [orig: @0x4D2AC2..0x4D2B13].
+		if (world == nullptr) return outcome;
 		outcome.handled = true;
 		int32_t seconds = 30;
 		if (!args.empty()) {
@@ -294,6 +327,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		// Timer A = 16 locally and the "SETFLASH1 16" text command to every
 		// in-game player [orig: @0x4D2B5D..0x4D2BAC, the S2C 0x24 via
 		// NetBuffer_WriteString2 @0x5079C0 and SendFiltered(0x24, 1, 0x136)].
+		if (world == nullptr) return outcome;
 		outcome.handled = true;
 		world->weather.command_flash();
 		std::vector<uint8_t> body;
@@ -307,6 +341,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		// minutes = the remainder, packed as a minute of day
 		// [orig: @0x4D2BE3..0x4D2C94 -> Environment_SetCurrentTime @0x57C4B0;
 		//  the lighting caches reset @0x4D2C9C/@0x4D2CA1 ride env.generation here].
+		if (world == nullptr) return outcome;
 		outcome.handled = true;
 		int32_t hhmm = 1200;
 		if (!args.empty()) {
@@ -336,13 +371,6 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		outcome.handled = true;
 		outcome.config_changed = true;
 		ctx.config.custom_text = args[0].substr(0, 127);
-		return outcome;
-	}
-	if (ieq(verb, "SetMPReset")) {
-		if (args.empty()) return outcome;
-		outcome.handled = true;
-		outcome.config_changed = true;
-		ctx.config.multiplayer_reset = atol_token(args[0]);
 		return outcome;
 	}
 	// ReloadPlayer (Entity_UpdateWeaponOverlayFrameState @0x4DC340 over the
