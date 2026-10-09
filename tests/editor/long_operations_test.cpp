@@ -62,7 +62,7 @@
 #include "common/thread_cpu_clock.h"
 #include "editor/editor_test_support.h"
 #include "editor/fixture_projects.h"
-#include "editor/png_test_support.h"
+#include "common/png_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -70,7 +70,7 @@ using fixture_projects::Files;
 using fixture_projects::row_of;
 namespace fs = std::filesystem;
 using editor_test::NoProcess;
-using editor_test::gradient_png;
+using test_png::gradient_png;
 
 namespace {
 

@@ -51,7 +51,7 @@
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
 #include "editor/import_test_support.h"
-#include "editor/png_test_support.h"
+#include "common/png_test_support.h"
 
 using namespace opennova::editor;
 using namespace import_test;
@@ -505,7 +505,7 @@ static int test_apply_record_with_its_file() {
 	Project project("opennova_editor_apply_record");
 	const std::string root = project.root();
 	const std::string art = project.dir.file("art");
-	TEST_EXPECT(editor_test::write_bytes(art + "/logo.png", editor_test::gradient_png(4, 4)) &&
+	TEST_EXPECT(editor_test::write_bytes(art + "/logo.png", test_png::gradient_png(4, 4)) &&
 	            editor_test::write_text(art + "/extra.mnu", screen("EXTRA", window("STATIC", "GO", ""))));
 	std::error_code ec;
 	fs::create_directories(root + "/textures/logo.png.import", ec);
