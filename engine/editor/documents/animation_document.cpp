@@ -12,6 +12,7 @@
 #include <formats/bad/bad_build.h>
 #include <formats/bad/bad_write.h>
 #include <runtime/anim/anim_event_bits.h>
+#include <runtime/anim/clip_timeline.h>
 
 namespace opennova::editor {
 namespace {
@@ -100,12 +101,6 @@ bad::BadBuildVec3 mission_velocity(const bad::BadEvent &e) {
 	return bad::bad_mission_from_clip(bad::BadBuildVec3{e.velocity[0], e.velocity[1], e.velocity[2]});
 }
 
-uint32_t known_trigger_bits() {
-	uint32_t mask = 0;
-	for (const anim::AnimEventBit &bit : anim::kAnimEventBits) mask |= bit.mask;
-	return mask;
-}
-
 } // namespace
 
 size_t ClipRow::footprint() const {
@@ -153,14 +148,11 @@ std::string AnimationDocument::record_title(const NodeAddress &address) const {
 	return "Frame " + std::to_string(i) + (words.empty() ? std::string() : ": " + words);
 }
 
-// A clip's records are its frame count and one more, the end pose; the game samples a frame by
-// (int)(frames * t) with t below 1 and reads that frame's trigger, so it plays frames 0 to
-// frames - 1 (the end pose reached by the blend of the last frame into it) and never reads the end
-// pose's trigger: a one-shot holds just short of it, a loop wraps before it [orig:
-// AnimChannel_InterpolateKeyframe @ 0x40B230; AnimChannel_AdvancePlayback @ 0x40B140].
+// A clip's records are its frame count and one more, the end pose, whose trigger the game never
+// reads (anim::clip_record_is_end_pose); the frame count is the clip's own, else its records less one.
 bool animation_end_pose(const ClipRow &row, size_t record) {
 	const size_t frames = row.base ? row.base->frame_count : (row.events.empty() ? 0 : row.events.size() - 1);
-	return frames > 0 && record == frames;
+	return anim::clip_record_is_end_pose(static_cast<uint32_t>(frames), static_cast<uint32_t>(record));
 }
 
 const std::vector<RecordKindRow> &AnimationDocument::kinds() const {
@@ -458,7 +450,7 @@ FindingTable animation_finding_codes() { return { kFindingRows.data(), kFindingR
 
 std::vector<Diagnostic> validate_animation_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
-	const uint32_t known = known_trigger_bits();
+	const uint32_t known = anim::kAnimEventKnownMask;
 	const auto *clip_document = dynamic_cast<const AnimationDocument *>(&document);
 	const ClipRow *row = clip_document ? clip_document->clip() : nullptr;
 	if (!row) return findings;
