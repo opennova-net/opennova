@@ -41,18 +41,18 @@ void sidecar_notes(const AssetScan &scan, const AssetGraph &graph, std::vector<D
 	// mission "op.v2.bms" opens "op.wac").
 	std::set<std::string> missions;
 	for (const AssetEntry &entry : scan.entries)
-		if (entry.kind == AssetKind::Mission) missions.insert(normalized_logical_name(mission::mission_base_name(entry.logical_name)));
+		if (entry.kind == AssetKind::Mission) missions.insert(pff::normalized_logical_name(mission::mission_base_name(entry.logical_name)));
 	for (const AssetEntry &entry : scan.entries) {
 		if (entry.kind != AssetKind::Script && entry.kind != AssetKind::TileInfo && entry.kind != AssetKind::DialogBank)
 			continue;
 		if (gameprofile::gameprofile_required_resource_find(entry.logical_name.c_str()) != nullptr) continue;
 		const std::string base = mission::mission_base_name(entry.logical_name);
 		const std::string mission = base + ".bms";
-		const std::string wanted = normalized_logical_name(entry.logical_name);
+		const std::string wanted = pff::normalized_logical_name(entry.logical_name);
 		bool by_name = false;
 		for (const mission::Sidecar &sidecar : mission::sidecars())
-			by_name = by_name || normalized_logical_name(mission::sidecar_name(mission, sidecar)) == wanted;
-		if (!by_name || missions.count(normalized_logical_name(base)) || !graph.referrers_of_file(entry.relative_path).empty())
+			by_name = by_name || pff::normalized_logical_name(mission::sidecar_name(mission, sidecar)) == wanted;
+		if (!by_name || missions.count(pff::normalized_logical_name(base)) || !graph.referrers_of_file(entry.relative_path).empty())
 			continue;
 		rows.push_back(make_finding(CoreFinding::MissionSidecarUnused, DiagnosticSeverity::Info,
 		                            "The game opens " + entry.logical_name + " with the mission " + mission +

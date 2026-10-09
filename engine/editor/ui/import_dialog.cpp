@@ -335,7 +335,7 @@ void ImportDialog::group(const DialogsView::ImportPreview &preview) {
 	row_of_.clear();
 	for (size_t i = 0; i < preview.plan->rows.size(); ++i)
 		if (preview.plan->rows[i].state != State::NotFound)
-			row_of_.emplace(normalized_logical_name(preview.plan->rows[i].name), i);
+			row_of_.emplace(pff::normalized_logical_name(preview.plan->rows[i].name), i);
 	for (size_t g = 0; g < groups_.size(); ++g)
 		if (groups_[g].parent == Group::kNone) walk(walk, g);
 	// The chosen files that bring others, by row: their arrows.
@@ -369,7 +369,7 @@ void ImportDialog::lay_out(size_t g) {
 // the files above it (whose want of it is what leaving the branch out declines): it stays checked then.
 bool ImportDialog::needed_outside(const ImportPlan &plan, size_t row, const std::set<size_t> &excluded) const {
 	for (const std::string &file : plan.rows[row].wanted_by) {
-		const auto other = row_of_.find(normalized_logical_name(file));
+		const auto other = row_of_.find(pff::normalized_logical_name(file));
 		if (other != row_of_.end() && !excluded.count(other->second) && other->second < checked_.size() && checked_[other->second])
 			return true;
 	}
@@ -421,12 +421,12 @@ void ImportDialog::draw_choices(Workspace &workspace, const DialogsView::ImportP
 	ui_kit::tooltip(choice_kind_ == AssetKind::kCount ? "Only the files of one kind." : "Only the " + kind_label + " files: Every kind lists them all.");
 	// The files the filter and the kind show: a name holding the text, or a file of the kind it names.
 	std::vector<size_t> visible;
-	const std::string filter = normalized_logical_name(filter_.text);
+	const std::string filter = pff::normalized_logical_name(filter_.text);
 	bool kind_only = false;
 	const AssetKind named = filter.empty() ? AssetKind::kCount : asset_kind_named_by(filter_.text, &kind_only);
 	for (size_t i = 0; i < preview.choices.size(); ++i) {
 		if (choice_kind_ != AssetKind::kCount && fact(i).kind != choice_kind_) continue;
-		const bool by_name = !kind_only && normalized_logical_name(preview.choices[i].name()).find(filter) != std::string::npos;
+		const bool by_name = !kind_only && pff::normalized_logical_name(preview.choices[i].name()).find(filter) != std::string::npos;
 		if (filter.empty() || by_name || (named != AssetKind::kCount && fact(i).kind == named)) visible.push_back(i);
 	}
 	if (ui_kit::tool(controls, "Select shown", !visible.empty(), "Choose every file the list shows.")) {
@@ -668,13 +668,13 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 	const ImportPlan &plan = *preview.plan;
 	size_t found = 0;
 	std::vector<size_t> rows;
-	const std::string wanted = normalized_logical_name(rows_filter_.text);
+	const std::string wanted = pff::normalized_logical_name(rows_filter_.text);
 	const bool narrowed = !wanted.empty() || kind_shown_ != AssetKind::kCount;
 	for (size_t i = 0; i < plan.rows.size(); ++i) {
 		if (plan.rows[i].state == State::NotFound) continue;
 		if (plan.rows[i].state == State::Found) ++found;
 		if (kind_shown_ != AssetKind::kCount && plan.rows[i].kind != kind_shown_) continue;
-		if (!wanted.empty() && normalized_logical_name(plan.rows[i].name).find(wanted) == std::string::npos) continue;
+		if (!wanted.empty() && pff::normalized_logical_name(plan.rows[i].name).find(wanted) == std::string::npos) continue;
 		rows.push_back(i);
 	}
 	// The check box's label cut to the dialog's width (whole in its tooltip).
