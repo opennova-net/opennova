@@ -45,14 +45,6 @@ struct Reader {
 	std::string where() const { return names ? names->path() : std::string("the document"); }
 };
 
-bool whole(const JsonValue &json, uint64_t &out) {
-	if (!json.is_number() || json.number < 0.0 || json.number != std::floor(json.number) ||
-			json.number > 9007199254740992.0)
-		return false;
-	out = static_cast<uint64_t>(json.number);
-	return true;
-}
-
 using F = RecordBatchForm;
 constexpr uint8_t kEdits = batch_form_bit(F::Edits), kFields = batch_form_bit(F::Fields),
 		kSpans = batch_form_bit(F::Spans);
@@ -167,7 +159,7 @@ bool record_of(const JsonValue &json, const char *what, Reader &reader, NodeAddr
 		return true;
 	}
 	uint64_t id = 0;
-	if (!whole(json, id) || id == 0)
+	if (!io::json_exact_whole(json, id) || id == 0)
 		return reader.refuse(std::string("\"") + what + "\" must be a record identity or a label.");
 	// Read before the document opens: an identity as it is, looked for once it is open.
 	if (!reader.resolve) {
@@ -318,7 +310,7 @@ bool read_edit(const JsonValue &json, Reader &reader, RecordBatch &out) {
 		return false;
 	if (!replaces_list && (json.get("list") || json.get("records")))
 		return reader.refuse("only a replace_list takes a \"list\" and its \"records\".");
-	if (const JsonValue *gesture = json.get("gesture"); gesture && !whole(*gesture, edit.gesture))
+	if (const JsonValue *gesture = json.get("gesture"); gesture && !io::json_exact_whole(*gesture, edit.gesture))
 		return reader.refuse("\"gesture\" must be a whole number.");
 	if (replaces_list) {
 		for (const char *member :
@@ -387,7 +379,7 @@ bool read_edit(const JsonValue &json, Reader &reader, RecordBatch &out) {
 				edit.operation != EditOperation::Move)
 			return reader.refuse(
 					"only add, duplicate, move and set_file_value take a \"position\".");
-		if (!whole(*position, at))
+		if (!io::json_exact_whole(*position, at))
 			return reader.refuse("\"position\" must be a whole number.");
 		edit.position = size_t(at);
 	} else if (edit.operation == EditOperation::Move) {
@@ -437,11 +429,11 @@ bool read_span(const JsonValue &json, Reader &reader, RecordBatch &out) {
 	uint64_t line = 0, column = 0, length = 0;
 	const JsonValue *line_json = json.get("line");
 	const JsonValue *column_json = json.get("column");
-	if (!line_json || !whole(*line_json, line) || line == 0)
+	if (!line_json || !io::json_exact_whole(*line_json, line) || line == 0)
 		return reader.refuse("\"line\" is the span's line, 1 or more.");
-	if (!column_json || !whole(*column_json, column) || column == 0)
+	if (!column_json || !io::json_exact_whole(*column_json, column) || column == 0)
 		return reader.refuse("\"column\" is the span's column, 1 or more.");
-	if (const JsonValue *length_json = json.get("length"); length_json && !whole(*length_json, length))
+	if (const JsonValue *length_json = json.get("length"); length_json && !io::json_exact_whole(*length_json, length))
 		return reader.refuse("\"length\" is how many characters the span replaces, 0 or more.");
 	std::string stored;
 	if (const JsonValue *text = json.get("text")) {
@@ -458,7 +450,7 @@ bool read_span(const JsonValue &json, Reader &reader, RecordBatch &out) {
 		coalesce = value->boolean;
 	}
 	uint64_t gesture = 0;
-	if (const JsonValue *value = json.get("gesture"); value && !whole(*value, gesture))
+	if (const JsonValue *value = json.get("gesture"); value && !io::json_exact_whole(*value, gesture))
 		return reader.refuse("\"gesture\" must be a whole number.");
 	TextSpan span;
 	span.line = size_t(line);

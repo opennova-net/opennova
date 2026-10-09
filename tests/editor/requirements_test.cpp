@@ -239,10 +239,10 @@ static int test_expansion_rows() {
 	TEST_EXPECT(row_named(after, "jxm.bin")->state == RequirementState::Present &&
 	            row_named(after, "version.txt")->state == RequirementState::Present);
 	std::string text, io_error;
-	TEST_EXPECT(read_file_text(paths.root + "/" + row_named(after, "version.txt")->asset_path, text, io_error) &&
+	TEST_EXPECT(opennova::io::read_file_text(paths.root + "/" + row_named(after, "version.txt")->asset_path, text, io_error) &&
 	            text == "Escalation Two\r\n");
 	std::vector<uint8_t> table;
-	TEST_EXPECT(read_file_bytes(paths.root + "/" + row_named(after, "jxm.bin")->asset_path, table, io_error));
+	TEST_EXPECT(opennova::io::read_file_bytes(paths.root + "/" + row_named(after, "jxm.bin")->asset_path, table, io_error));
 	opennova::rtxt::File parsed;
 	std::string parse_error;
 	TEST_EXPECT(opennova::rtxt::parse(table.data(), table.size(), parsed, parse_error));
@@ -263,7 +263,7 @@ static int test_expansion_rows() {
 	TEST_EXPECT(long_made.diagnostics.empty() && long_made.created.size() == 1);
 	const RequirementReport cut = evaluate_requirements(doc, scan_project_assets(paths, doc));
 	opennova::rtxt::File reparsed;
-	TEST_EXPECT(read_file_bytes(paths.root + "/" + row_named(cut, "jxm.bin")->asset_path, table, io_error) &&
+	TEST_EXPECT(opennova::io::read_file_bytes(paths.root + "/" + row_named(cut, "jxm.bin")->asset_path, table, io_error) &&
 	            opennova::rtxt::parse(table.data(), table.size(), reparsed, parse_error));
 	bool clamped = false;
 	for (const opennova::rtxt::Entry &entry : reparsed.entries)

@@ -23,12 +23,6 @@ using io::JsonValue;
 using io::json_number;
 using io::json_string;
 
-JsonValue strings_json(const std::vector<std::string> &list) {
-	JsonValue out = JsonValue::make_array();
-	for (const std::string &each : list) out.push(json_string(each));
-	return out;
-}
-
 JsonValue options_json(const ImportOptions &options) {
 	JsonValue out = JsonValue::make_object();
 	for (const auto &[key, value] : options) out.set(key, json_string(value));
@@ -215,13 +209,13 @@ JsonValue texture_import_state_json(const TextureImportState &state) {
 				values.push(std::move(item));
 			}
 			entry.set("values", std::move(values));
-			entry.set("forms", strings_json(row.forms));
+			entry.set("forms", io::json_string_array(row.forms));
 			entry.set("fallback", json_string(row.fallback));
 			JsonValue applies = JsonValue::make_null();
 			if (!row.applies_to.empty()) {
 				applies = JsonValue::make_object();
 				applies.set("option", json_string(row.applies_to));
-				applies.set("values", strings_json(row.applies_values));
+				applies.set("values", io::json_string_array(row.applies_values));
 			}
 			entry.set("applies", std::move(applies));
 			entry.set("applies_now", JsonValue::make_bool(import_option_applies_now(state, row)));
@@ -229,12 +223,12 @@ JsonValue texture_import_state_json(const TextureImportState &state) {
 		}
 	out.set("effective", std::move(effective));
 	out.set("rows", std::move(rows));
-	out.set("outputs", strings_json(state.outputs));
+	out.set("outputs", io::json_string_array(state.outputs));
 	JsonValue needs = JsonValue::make_object();
 	needs.set("options", options_json(state.needs.options));
-	needs.set("reasons", strings_json(state.needs.reasons));
-	needs.set("conflicts", strings_json(state.needs.conflicts));
-	needs.set("split_referrers", strings_json(state.needs.split_referrers));
+	needs.set("reasons", io::json_string_array(state.needs.reasons));
+	needs.set("conflicts", io::json_string_array(state.needs.conflicts));
+	needs.set("split_referrers", io::json_string_array(state.needs.split_referrers));
 	needs.set("uses", json_number(double(state.needs.uses)));
 	out.set("needs", std::move(needs));
 	return out;

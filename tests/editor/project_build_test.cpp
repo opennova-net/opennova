@@ -65,7 +65,7 @@ static bool write_table(const std::string &path, const char *text) {
 	table.entries.push_back(entry);
 	std::vector<uint8_t> bytes;
 	std::string error;
-	return opennova::rtxt::write(table, bytes, error) && write_file_atomic(path, bytes.data(), bytes.size(), error);
+	return opennova::rtxt::write(table, bytes, error) && opennova::io::write_file_atomic(path, bytes.data(), bytes.size(), error);
 }
 
 static AssetEntry entry_of(const char *name, AssetKind kind) {
@@ -486,7 +486,7 @@ static std::vector<uint8_t> bytes_of(const std::string &text) {
 static std::vector<uint8_t> file_bytes(const std::string &path) {
 	std::vector<uint8_t> bytes;
 	std::string error;
-	read_file_bytes(path, bytes, error);
+	opennova::io::read_file_bytes(path, bytes, error);
 	return bytes;
 }
 
@@ -536,7 +536,7 @@ static BaseInstall make_base(const std::string &root, const Files &language, con
 		for (const auto &[name, bytes] : *files) out.names.push_back(name);
 	for (const auto &[name, bytes] : loose) {
 		std::string error;
-		out.written = out.written && write_file_atomic(root + "/" + name, bytes.data(), bytes.size(), error);
+		out.written = out.written && opennova::io::write_file_atomic(root + "/" + name, bytes.data(), bytes.size(), error);
 	}
 	std::sort(out.names.begin(), out.names.end(), [](const std::string &a, const std::string &b) {
 		return normalized_logical_name(a) < normalized_logical_name(b);
@@ -823,7 +823,7 @@ static bool write_exp_info(const std::string &path, const std::string &name, con
 	std::vector<uint8_t> bytes;
 	std::string error;
 	fs::create_directories(fs::path(path).parent_path());
-	return opennova::rtxt::write(table, bytes, error) && write_file_atomic(path, bytes.data(), bytes.size(), error);
+	return opennova::rtxt::write(table, bytes, error) && opennova::io::write_file_atomic(path, bytes.data(), bytes.size(), error);
 }
 
 // ADR 0046 S16 (IDA item 3): the Mods list copies EXP_NAME whole into a 64-byte name, after the folder
@@ -978,7 +978,7 @@ static int test_export() {
 	TEST_EXPECT(files_under(request.export_dir) == expected);
 	std::string text, error;
 	opennova::io::JsonValue record;
-	TEST_EXPECT(read_file_text(request.export_dir + "/" + kExportRecordFileName, text, error) &&
+	TEST_EXPECT(opennova::io::read_file_text(request.export_dir + "/" + kExportRecordFileName, text, error) &&
 	            opennova::io::json_parse(text, record, error) && record.get_string("project_id", "") == p.doc.project_id &&
 	            record.get_string("build_id", "") == build.build_id);
 	std::error_code ec;
@@ -995,16 +995,16 @@ static int test_export() {
 	with_notes.push_back("notes.txt");
 	std::sort(with_notes.begin(), with_notes.end());
 	TEST_EXPECT(shipped.ok && files_under(request.export_dir) == with_notes && shipped.files == expected_files(expected));
-	TEST_EXPECT(read_file_text(request.export_dir + "/notes.txt", text, error) && text == "mine" &&
-	            read_file_text(request.export_dir + "/intro.bik", text, error) && text == "BIKi");
+	TEST_EXPECT(opennova::io::read_file_text(request.export_dir + "/notes.txt", text, error) && text == "mine" &&
+	            opennova::io::read_file_text(request.export_dir + "/intro.bik", text, error) && text == "BIKi");
 	TEST_EXPECT(shipped.kept == std::vector<std::string>{"notes.txt"} &&
 	            shipped.replaced == std::vector<std::string>{"intro.bik"} && shipped.removed.empty());
 	TEST_EXPECT(count_code(shipped.diagnostics, "export.replaced") == 1 && shipped.diagnostics.back().severity == DiagnosticSeverity::Info &&
 	            shipped.diagnostics.back().message.find("notes.txt") != std::string::npos);
-	TEST_EXPECT(read_file_text(request.export_dir + "/" + kExportRecordFileName, text, error) &&
+	TEST_EXPECT(opennova::io::read_file_text(request.export_dir + "/" + kExportRecordFileName, text, error) &&
 	            text.find("notes.txt") == std::string::npos);
 	// A cut-short export's staging folder, and a set-aside one an export could not remove, go first.
-	TEST_EXPECT(read_file_text(request.export_dir + "/" + kExportRecordFileName, text, error));
+	TEST_EXPECT(opennova::io::read_file_text(request.export_dir + "/" + kExportRecordFileName, text, error));
 	TEST_EXPECT(editor_test::write_text(request.export_dir + kExportStagingSuffix + "/" + kExportRecordFileName, text) &&
 	            editor_test::write_text(request.export_dir + kExportPreviousSuffix + "/" + kExportRecordFileName, text) &&
 	            editor_test::write_text(request.export_dir + kExportPreviousSuffix + "/language.pff", "old"));
@@ -1127,7 +1127,7 @@ static int test_export() {
 	TEST_EXPECT(fs::is_regular_file(mod.export_dir + "/expansion/jxm/jxm.pff") &&
 	            fs::is_regular_file(mod.export_dir + "/expansion/jxm/jxmL.pff") &&
 	            fs::is_regular_file(mod.export_dir + "/expansion/jxm/intro.bik") && !fs::exists(mod.export_dir + "/language.pff"));
-	TEST_EXPECT(read_file_text(mod.export_dir + "/" + kExportRecordFileName, text, error) &&
+	TEST_EXPECT(opennova::io::read_file_text(mod.export_dir + "/" + kExportRecordFileName, text, error) &&
 	            opennova::io::json_parse(text, record, error) && record.get_string("expansion", "") == "jxm");
 	// The expansion over the standalone game's export: the earlier export's files the build no longer
 	// holds removed (and said), the person's kept.
@@ -1147,7 +1147,7 @@ static bool write_filler(const std::string &path, size_t size) {
 	for (size_t i = 0; i < size; ++i) bytes[i] = uint8_t((i * 2654435761u) >> 24);
 	std::string error;
 	fs::create_directories(fs::path(path).parent_path());
-	return write_file_atomic(path, bytes.data(), bytes.size(), error);
+	return opennova::io::write_file_atomic(path, bytes.data(), bytes.size(), error);
 }
 
 // The staging directories under an output root (`<id>.tmp`).
@@ -1327,7 +1327,7 @@ static int test_archives_match_the_single_call_writer() {
 			std::vector<opennova::pff::PffWriteEntry> entries;
 			std::string error;
 			for (size_t i = 0; i < archive.entries.size(); ++i)
-				TEST_EXPECT(read_file_bytes(archive.entries[i].source_path, payloads[i], error));
+				TEST_EXPECT(opennova::io::read_file_bytes(archive.entries[i].source_path, payloads[i], error));
 			for (size_t i = 0; i < archive.entries.size(); ++i)
 				entries.push_back({archive.entries[i].logical_name.c_str(), payloads[i].empty() ? nullptr : payloads[i].data(),
 				                   uint32_t(payloads[i].size()), 0, opennova::pff::PFF_NEW_ENTRY_TIMESTAMP, 0});
@@ -1336,8 +1336,8 @@ static int test_archives_match_the_single_call_writer() {
 			                                             entries.empty() ? nullptr : entries.data(),
 			                                             uint32_t(entries.size())) == opennova::pff::PFF_WRITE_OK);
 			std::vector<uint8_t> built, expected;
-			TEST_EXPECT(read_file_bytes((fs::path(run.report().build_dir) / archive.file_name).generic_string(), built, error));
-			TEST_EXPECT(read_file_bytes(single, expected, error));
+			TEST_EXPECT(opennova::io::read_file_bytes((fs::path(run.report().build_dir) / archive.file_name).generic_string(), built, error));
+			TEST_EXPECT(opennova::io::read_file_bytes(single, expected, error));
 			TEST_EXPECT(!built.empty() && built == expected);
 			// D-VFS-12: no entry stamped 0, which the game's effect loaders skip.
 			opennova::pff::PffArchive opened{};
@@ -1508,14 +1508,14 @@ static int test_hash_cache() {
 	for (const BuildArchive &archive : plan.archives) {
 		std::vector<uint8_t> built;
 		std::string error;
-		TEST_EXPECT(read_file_bytes(changed.build_dir + "/" + archive.file_name, built, error) && !built.empty());
+		TEST_EXPECT(opennova::io::read_file_bytes(changed.build_dir + "/" + archive.file_name, built, error) && !built.empty());
 	}
 
 	// The same bytes written again: read again, the same build.
 	std::vector<uint8_t> table;
 	std::string error;
-	TEST_EXPECT(read_file_bytes(p.root + "/strings/menutxt.bin", table, error) &&
-	            write_file_atomic(p.root + "/strings/menutxt.bin", table.data(), table.size(), error) &&
+	TEST_EXPECT(opennova::io::read_file_bytes(p.root + "/strings/menutxt.bin", table, error) &&
+	            opennova::io::write_file_atomic(p.root + "/strings/menutxt.bin", table.data(), table.size(), error) &&
 	            editor_test::backdate(p.root + "/strings/menutxt.bin", std::chrono::minutes(40)));
 	const BuildReport touched = run_build(p.plan(), p.output_root());
 	TEST_EXPECT(touched.ok && touched.reused_existing && touched.files_hashed == 1 && touched.build_id == changed.build_id);
@@ -1539,7 +1539,7 @@ static int test_hash_cache() {
 	fs::remove(p.root + "/music/extra.sbf");
 	const BuildReport fewer = run_build(p.plan(), p.output_root());
 	std::string text;
-	TEST_EXPECT(fewer.ok && fewer.files_hashed == 0 && read_file_text(p.paths.build_cache_file, text, error));
+	TEST_EXPECT(fewer.ok && fewer.files_hashed == 0 && opennova::io::read_file_text(p.paths.build_cache_file, text, error));
 	TEST_EXPECT(text.find("extra.sbf") == std::string::npos && text.find("menutxt.bin") != std::string::npos);
 
 	// No cache: every file read, the same build. A rehash reads every file as well, the cache set
@@ -1642,9 +1642,9 @@ static int test_held_archives_are_never_written_through() {
 	const std::string held_path = first.build_dir + "/localres.pff";
 	std::vector<uint8_t> before;
 	std::string error;
-	TEST_EXPECT(read_file_bytes(held_path, before, error) && !before.empty());
+	TEST_EXPECT(opennova::io::read_file_bytes(held_path, before, error) && !before.empty());
 	std::string record;
-	TEST_EXPECT(read_file_text(first.build_dir + "/" + kBuildRecordFileName, record, error));
+	TEST_EXPECT(opennova::io::read_file_text(first.build_dir + "/" + kBuildRecordFileName, record, error));
 	TEST_EXPECT(record.find("\"size\"") != std::string::npos);
 	{
 		HeldFile game(held_path);
@@ -1669,12 +1669,12 @@ static int test_held_archives_are_never_written_through() {
 		// The game's archive, read through the game's own handle: every byte kept.
 		TEST_EXPECT(game.bytes() == before);
 		std::vector<uint8_t> linked;
-		TEST_EXPECT(read_file_bytes(rebuilt.build_dir + "/localres.pff", linked, error) && linked == before);
+		TEST_EXPECT(opennova::io::read_file_bytes(rebuilt.build_dir + "/localres.pff", linked, error) && linked == before);
 #ifdef _WIN32
 		// Held, the last good build is not pruned (a file that will not go keeps its directory, its
 		// record last): its archive reads as it did by its name too.
 		std::vector<uint8_t> after;
-		TEST_EXPECT(read_file_bytes(held_path, after, error) && after == before);
+		TEST_EXPECT(opennova::io::read_file_bytes(held_path, after, error) && after == before);
 #endif
 		TEST_EXPECT(last_good_build_dir(p.output_root()) == rebuilt.build_dir);
 	}

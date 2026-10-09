@@ -61,7 +61,7 @@ bool ImportContext::read(const std::string &path, std::vector<uint8_t> &out) {
 	stamp.size = static_cast<uint64_t>(fs::file_size(on_disk, ec));
 	stamp.modified = io::file_modified_ticks(on_disk);
 	std::string error;
-	if (!read_file_bytes(file, out, error)) return refuse("which cannot be read: " + error + ".");
+	if (!io::read_file_bytes(file, out, error)) return refuse("which cannot be read: " + error + ".");
 	bytes_read_ += out.size();
 	const std::string key = strutil::to_lower(relative);
 	for (const ImportInputStamp &known : stamps_)

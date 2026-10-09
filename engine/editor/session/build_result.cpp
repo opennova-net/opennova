@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 
+#include <base/io/strutil.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/field_text.h>
 #include <editor/project_build/build_plan.h>
@@ -67,7 +68,7 @@ BuildResult build_result(const BuildReport &report, bool in_project) {
 	for (const BuiltFile &file : report.built) {
 		std::string words = size_words(file.bytes);
 		if (file.archive) {
-			words += ", " + grouped(file.files) + (file.files == 1 ? " file" : " files");
+			words += ", " + strutil::grouped(file.files) + (file.files == 1 ? " file" : " files");
 			if (!report.reused_existing) words += file.reused ? ", kept from the last build" : ", written";
 		}
 		out.files.push_back({file.name, words});

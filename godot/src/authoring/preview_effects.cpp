@@ -47,7 +47,7 @@ void PreviewEffects::mount(const std::shared_ptr<const opennova::editor::Project
 		return;
 	}
 	// A fresh record of what is read, the root mounted over it (its caches dropped).
-	stamped_ = std::make_shared<opennova::editor::StampedFiles>(files);
+	stamped_ = std::make_shared<opennova::StampedFiles>(files);
 	root_->mount_files(stamped_);
 	if (ParticleRenderer *renderer = this->renderer())
 		renderer->set_texture_provider(
@@ -85,8 +85,8 @@ void PreviewEffects::clear() {
 	root_->clear();
 }
 
-opennova::editor::FileStamps PreviewEffects::stamps() const {
-	return stamped_ ? stamped_->stamps() : opennova::editor::FileStamps();
+opennova::FileStamps PreviewEffects::stamps() const {
+	return stamped_ ? stamped_->stamps() : opennova::FileStamps();
 }
 
 std::vector<std::string> PreviewEffects::missing() const {

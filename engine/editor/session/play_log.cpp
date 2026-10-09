@@ -6,6 +6,7 @@
 #include <set>
 #include <utility>
 
+#include <base/gameprofile/graphics_log.h>
 #include <base/gameprofile/required_resources.h>
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
@@ -140,27 +141,6 @@ std::vector<Diagnostic> resource_miss_findings(const gameprofile::ResourceMiss &
 	return rows;
 }
 
-std::vector<GraphicsLogMission> graphics_log_missions(const std::string &text) {
-	std::vector<GraphicsLogMission> out;
-	static const std::string kMission = "Mission:\"";
-	static const std::string kComplete = "Mission loading complete";
-	size_t start = 0;
-	while (start < text.size()) {
-		size_t end = text.find('\n', start);
-		if (end == std::string::npos) end = text.size();
-		std::string line = text.substr(start, end - start);
-		if (!line.empty() && line.back() == '\r') line.pop_back();
-		start = end + 1;
-		if (line.compare(0, kMission.size(), kMission) == 0) {
-			const size_t close = line.find('"', kMission.size());
-			if (close != std::string::npos) out.push_back({line.substr(kMission.size(), close - kMission.size()), false});
-		} else if (line.compare(0, kComplete.size(), kComplete) == 0 && !out.empty()) {
-			out.back().complete = true;
-		}
-	}
-	return out;
-}
-
 std::vector<Diagnostic> install_log_findings(const InstallLogs &logs, const PlayGame &game, const SessionView &view) {
 	std::vector<Diagnostic> rows;
 	if (!view.project.open || !view.project.scan) return rows;
@@ -206,12 +186,12 @@ std::vector<Diagnostic> install_log_findings(const InstallLogs &logs, const Play
 			                               " in its last Play, and the build holds no " + reference_row(edge->kind).label +
 			                               " of that name."));
 		}
-	for (const GraphicsLogMission &mission : graphics_log_missions(logs.graphics_log)) {
+	for (const gameprofile::GraphicsLogMission &mission : gameprofile::graphics_log_missions(logs.graphics_log)) {
 		if (mission.complete) continue;
 		const AssetEntry *file = scan.find(basename_of(mission.file));
 		add_once(rows, make_finding(CoreFinding::PlayMissionUnfinished, DiagnosticSeverity::Warning,
 		                            named + " began loading " + (file ? file->logical_name : mission.file) +
-		                                    " in its last Play and never finished (its " + kInstallGraphicsLogName +
+		                                    " in its last Play and never finished (its " + gameprofile::kGraphicsLogName +
 		                                    " has no \"Mission loading complete\" after it): it crashed, hung or was "
 		                                    "stopped while the mission loaded.",
 		                            file ? file->relative_path : std::string()));
