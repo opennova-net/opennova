@@ -2,6 +2,7 @@
 
 #include <base/io/bam.h>
 #include <base/io/log.h>
+#include <runtime/audio/oneshot_play.h> // listener view flags
 #include <runtime/world/angle.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/mount_controls.h>
@@ -824,7 +825,7 @@ void LocalPlayer::reset_for_new_round() {
         view.tp_anchor_q16[axis] = to_fixed(pos);
         view.lookahead_q16[axis] = 0;
     }
-    world_.cached.sound_listener_view_flags = 2;
+    world_.cached.sound_listener_view_flags = audio::kListenerViewFirstPerson;
     world_.script.waypoints.reset_selection(world_.registry, *local,
             world_.waypoint_context().game_type);
     // The look yaw takes the player's +0x10 word, the heading the deploy just

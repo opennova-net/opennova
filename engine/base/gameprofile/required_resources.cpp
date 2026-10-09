@@ -398,4 +398,16 @@ bool gameprofile_expansion_names_fit_archive(const std::string &expansion) {
     return true;
 }
 
+bool gameprofile_replaced_under_expansion(const std::string &name) {
+    // [orig: Expansion_LoadAssets @ 0x4a4906..0x4a494a: M<n>.sbf/.bin and G<n>.sbf/.bin opened in
+    // the place of MENUMUS.SBF/.BIN and GAMEMUS.SBF/.BIN]
+    for (int i = 0; i < k_required_resource_count; ++i) {
+        const RequiredResource &row = k_required_resources[i];
+        if ((row.flags & RES_F_EXPANSION) && row.replaces && strutil::iequals(row.replaces, name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace opennova::gameprofile

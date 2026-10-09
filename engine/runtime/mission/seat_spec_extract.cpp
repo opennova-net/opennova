@@ -87,6 +87,14 @@ world::SeatType seat_type_for_user_point(std::string_view name) {
 	return world::SeatType::None;
 }
 
+uint32_t user_point_uses(std::string_view name) {
+	uint32_t uses = 0;
+	for (const UserPointName &row : kUserPointNames)
+		if (row.prefix ? strutil::starts_with_icase(name, row.name) : strutil::iequals(name, row.name))
+			uses |= row.uses;
+	return uses;
+}
+
 // The authored 16.16 model point into the mission-local seat frame. The shell
 // chain was: decode swizzle (-y, z, x)/65536 -> the render X-mirror ->
 // the vehicle yaw-zero basis (RotY 180) -> godot_to_bms (x, -z, y); the

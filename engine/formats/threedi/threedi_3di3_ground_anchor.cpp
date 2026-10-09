@@ -27,7 +27,7 @@ int threedi_3di3_ground_anchor(const Threedi3di3 *model, float out[3]) {
     }
 
     // 1. "ground" userpoint. Userpoints are model-global, so the LOD is irrelevant here.
-    const int ground = threedi_3di3_find_user_point(model, "ground");
+    const int ground = threedi_3di3_find_user_point(model, THREEDI_USER_POINT_GROUND);
     if (ground >= 0) {
         threedi_user_point_position(&model->user_points[ground], out);
         return 1;

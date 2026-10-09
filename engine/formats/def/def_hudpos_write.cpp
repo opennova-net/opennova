@@ -140,12 +140,10 @@ bool authored(const DefHudPosDef &hud, const Row &row) {
 	return std::memcmp(bytes_of(hud, row), bytes_of(unauthored(), row), row.size) != 0;
 }
 
-// A name as one token: quoted where a separator or a comment start would cut it.
+// A name field as one token (hudpos_name_token), to its NUL or its capacity.
 std::string name_token(const char *name, size_t capacity) {
 	const auto *end = static_cast<const char *>(std::memchr(name, 0, capacity));
-	const std::string text(name, end ? end : name + capacity);
-	const bool quoted = text.find_first_of(" ,\t;") != std::string::npos || text.find("//") != std::string::npos;
-	return quoted ? "\"" + text + "\"" : text;
+	return hudpos_name_token(std::string_view(name, size_t((end ? end : name + capacity) - name)));
 }
 
 void row_values(const DefHudPosDef &hud, const Row &row, std::vector<std::string> &out) {
@@ -269,6 +267,17 @@ const DefHudPosDef &hudpos_unauthored() {
 		return f;
 	}();
 	return file.hud;
+}
+
+std::string hudpos_name_token(std::string_view name) {
+	const bool quoted = name.find_first_of(" ,\t;") != std::string_view::npos || name.find("//") != std::string_view::npos;
+	return quoted ? "\"" + std::string(name) + "\"" : std::string(name);
+}
+
+int hudpos_color_channels(const std::string &key) {
+	const Row *row = row_of(key);
+	if (!row) return 0;
+	return row->form == Form::Rgb ? 3 : row->form == Form::Argb ? 4 : 0;
 }
 
 std::string hudpos_number(int value) {

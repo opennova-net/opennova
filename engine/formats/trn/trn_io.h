@@ -21,6 +21,23 @@ namespace opennova {
 bool load_trn(std::istream &input, TrnConfig &out, std::string &error);
 bool save_trn(std::ostream &output, const TrnConfig &cfg, std::string &error);
 
+// One foliage definition's block as save_trn writes it, from `foliage` to `end`, CR LF lines: the definition
+// normalized (foliage_normalize_def), its graphic where it names one, its two colour modes, its codes on one `match`
+// line where it has any, in the parser's argument order, and its known attrib words (shadow, then forceon) where it
+// has any [orig: Terrain_ParseConfigCallback @0x60f330, the block's arms; "forceon" @0x60f58b].
+std::string trn_foliage_block_text(const FoliageDef &def);
+
+// The cell the game's grid extension copies into place `index` of an axis, `index` at or past `count` (the grid's
+// rows read, or its width; at least 1): with the axis's wrap the cells again from the first (`index % count`), else
+// the last cell again (`count - 1`) [orig: Terrain_ShiftHeightmapRows @0x60F2A5..0x60F317].
+int trn_grid_extension_source(int count, int wrap, int index);
+
+// The sector grid extended to 16 x 16 as the admission gate's last leg extends it, never refusing: each row read out
+// to 16 columns past the width, then the rows past the ones read, each axis by trn_grid_extension_source under its
+// wrap (a width or a row count of 0 taken as 1) [orig: Terrain_ShiftHeightmapRows @0x60f190, @0x60F2A5..0x60F317,
+// @0x60F31A].
+void trn_extend_sector_grid(TrnConfig &config);
+
 // What the admission gate refuses a configuration for, in the gate's order (None: it takes it) [orig:
 // Terrain_LoadEnvironmentConfig @0x610940 tail]: an empty colormap (+256), detailmap (+512) or polydata (+3072)
 // name, then a `polytrn_sectors` row count (+5960) or a `polytrn_sectorcount` (+5956) past kTerrainGridSide or not a

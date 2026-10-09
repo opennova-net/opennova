@@ -24,6 +24,8 @@ namespace opennova::trngen {
 // neighbours into 32 times their sum (so a grey level is half a world unit, 0 to 127.5); a 16-bit
 // one is taken as the raw16 heights it is, unsmoothed (TrnGen's raw16 path).
 inline constexpr int kDepthSide = 1024;
+// An 8-bit depth map's white after TrnGen's smoothing, in world units: 32 x 4 x 255 / 256.
+inline constexpr double kDepth8Top = 127.5;
 
 struct TerrainBakeInput {
 	// Exactly one of them, kDepthSide * kDepthSide texels, the top row first.

@@ -108,6 +108,24 @@ int main() {
     CHECK(seat_type_for_user_point("xdrvrx") == world::SeatType::None);
     CHECK(seat_type_for_user_point("") == world::SeatType::None);
 
+    // ---- the other names the game looks up, standalone ----
+    // Prefix rows from byte zero in any case, whole-name rows whole; bullet02
+    // is both muzzles; no trim. [orig: Entity_InitVehicleAI @0x460200;
+    // Entity_SetupGunnerAttachments @0x4681AA; ModelGPM_FindUserpointByName @0x5B2170]
+    CHECK(user_point_uses("prim01") == kUserPointPrimaryMuzzle);
+    CHECK(user_point_uses("BULLET01") == kUserPointPrimaryMuzzle);
+    CHECK(user_point_uses("Bullet02x") == (kUserPointPrimaryMuzzle | kUserPointSecondaryMuzzle));
+    CHECK(user_point_uses("sec") == kUserPointSecondaryMuzzle);
+    CHECK(user_point_uses("FLARE03") == kUserPointFlare);
+    CHECK(user_point_uses("agun1") == kUserPointGunnerAttachment);
+    CHECK(user_point_uses("target") == kUserPointAimOrigin);
+    CHECK(user_point_uses("Look") == kUserPointLineOfSight);
+    CHECK(user_point_uses("camera") == kUserPointCamera);
+    CHECK(user_point_uses("GROUND") == kUserPointGround);
+    CHECK(user_point_uses("TARGET2") == 0u && user_point_uses("cameras") == 0u);
+    CHECK(user_point_uses(" flare") == 0u && user_point_uses("pri") == 0u && user_point_uses("bullet0") == 0u);
+    CHECK(user_point_uses("sitex01") == 0u && user_point_uses("") == 0u);
+
     // ---- the conversions, standalone ----
     // Raw (1, 2, 3) world-units authored -> mission local (-2, 1, 3).
     const ThreediUserPoint probe = up("sitex", 1, 2, 3);

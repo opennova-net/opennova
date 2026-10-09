@@ -20,6 +20,8 @@ int main() {
 	TEST_EXPECT(mask == anim::kAnimEventKnownMask);
 	TEST_EXPECT((anim::kAnimEventKnownMask & (anim::kAnimEventFoley1 << (anim::kAnimEventFoleyCount - 1))) != 0);
 	TEST_EXPECT((anim::kAnimEventKnownMask & 0x800u) == 0);
+	// The fire block's three bits.
+	static_assert(anim::kAnimEventFireMask == 0x1Cu, "fire primary, secondary and marker3");
 
 	// A clip of three frames has four records: 0..2 play, 3 is the end pose; a clip of no frame has none.
 	TEST_EXPECT(!anim::clip_record_is_end_pose(3, 0) && !anim::clip_record_is_end_pose(3, 2));

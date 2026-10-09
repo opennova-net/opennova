@@ -149,10 +149,8 @@ inline opennova::fnt::fnt_error_t build_font_pages(opennova::fnt::fnt_font_t *fo
 
 		opennova::fnt::fnt_glyph_t &g = font->glyphs[i];
 		g.page = page_index;
-		g.uv.u0 = static_cast<float>(cell_x) / opennova::fnt::FNT_TEXTURE_WIDTH;
-		g.uv.v0 = static_cast<float>(cell_y) / opennova::fnt::FNT_TEXTURE_HEIGHT;
-		g.uv.u1 = static_cast<float>(cell_x + kGlyphUvWidth) / opennova::fnt::FNT_TEXTURE_WIDTH;
-		g.uv.v1 = static_cast<float>(cell_y + kCellSize) / opennova::fnt::FNT_TEXTURE_HEIGHT;
+		opennova::fnt::fnt_pixels_to_uv(int(cell_x), int(cell_y), int(cell_x + kGlyphUvWidth), int(cell_y + kCellSize),
+		                                &g.uv);
 	}
 	return opennova::fnt::FNT_OK;
 }

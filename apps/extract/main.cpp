@@ -9,14 +9,13 @@
 // (retail's /d), `/game <code>` the game profile's SCR policy. Each named entry is
 // resolved through that mount — so the bytes written are the EFFECTIVE bytes the
 // runtime serves (base + expansion override), decoded as its loader is served them
-// (a shader as stored: its loader unwraps its own SCR form, vfs_loader_takes_stored)
+// (vfs_read_served: a shader as stored, its loader unwrapping its own SCR form)
 // — and written to <out>/<basename>.
 // Exit 0 when every entry was written, 1 when any entry was missing, 2 on a usage
 // or mount error.
 #include <base/io/strutil.h>
 #include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
-#include <base/vfs/vfs_decode.h>
 
 #include <cstdio>
 #include <cstring>
@@ -109,9 +108,7 @@ int main(int argc, char **argv) {
 	int missing = 0;
 	for (const std::string &name : names) {
 		std::vector<uint8_t> bytes;
-		const bool read = opennova::vfs_loader_takes_stored(name) ? vfs.read_file_raw(name, bytes)
-				: vfs.read_file(name, bytes);
-		if (!read) {
+		if (!opennova::vfs_read_served(vfs, name, bytes)) {
 			std::fprintf(stderr, "opennova-extract: %s is not on the mount\n", name.c_str());
 			++missing;
 			continue;

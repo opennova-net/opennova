@@ -34,7 +34,7 @@ public:
 	bool get_has_water_height() const { return value_.has_water_height; }
 	float get_water_height() const { return value_.water_height; }
 	void set_water_height(float p_value);
-	float get_water_height_world() const { return value_.water_height * 0.5f; }
+	float get_water_height_world() const { return value_.water_height * opennova::env::kWaterHeightUnit; }
 	// The height Water's mission rung takes (Water::set_mission_water_height_override):
 	// the world-unit height where the layer arms one, else NAN (the rung
 	// falls through to the environment's and the terrain's).

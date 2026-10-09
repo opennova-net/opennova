@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -31,6 +32,16 @@ struct Area {
     // (mission::zone_box_flat): no zone parameter resolves to it [orig: the
     // load-time resolvers' box tests @0x453093/@0x45317e].
     bool flat = false;
+};
+
+// The seven default script groups, in their fixed slots 0..6: the names the
+// mode's default definitions create [orig: GameMode_CreateDefaultDefs @0x4F9060,
+// the strcpys @0x4F9087..0x4F91DE]; their members are rebuilt from pool 0
+// (EntityRegistry::script_groups) [orig: Server_BuildEntitySlotLists @0x4F97A0].
+// A mission's own WAC groups intern after them.
+inline constexpr int kDefaultScriptGroupCount = 7;
+inline constexpr const char *kDefaultScriptGroupNames[kDefaultScriptGroupCount] = {
+    "emptygroup", "humans", "blueplayers", "redplayers", "ai", "blueai", "redai"
 };
 
 struct LocationVolume {
@@ -156,11 +167,9 @@ private:
     uint64_t next_spawn_id_ = 1; // zero means "identity not recorded"
     std::vector<Area> areas_;
     std::vector<LocationVolume> locations_;
-    // [orig: GameMode_CreateDefaultDefs @0x4F9060]
-    std::vector<std::string> group_names_ = {
-        "emptygroup", "humans", "blueplayers", "redplayers", "ai", "blueai", "redai"
-    };
-    std::vector<std::vector<EntityHandle>> group_members_{7};
+    std::vector<std::string> group_names_{std::begin(kDefaultScriptGroupNames),
+                                          std::end(kDefaultScriptGroupNames)};
+    std::vector<std::vector<EntityHandle>> group_members_{kDefaultScriptGroupCount};
 };
 
 } // namespace opennova::world

@@ -58,6 +58,16 @@ struct File {
 // instead of accessing beyond the original arrays (D-GRM-1).
 bool parse(const uint8_t *data, size_t size, File &out, std::string &error);
 
+// The texture file the game opens for a name the file writes (the base texture, an eye texture): the name with its
+// path stripped and its extension, from the last '.', removed, then `extension` added: kTextureExtension for each
+// texture, kTextureTwinExtension for the base texture's twin, each through the stage loader [orig:
+// Shadow_DecalLoadTextures @ 0x588040: PathStripPathA, PathRemoveExtensionA, then PathAddExtensionA ".TGA"
+// @ 0x5880EA, ".MDT" @ 0x588117, the eyes @ 0x58814A (+520), @ 0x588180 (+260), each through
+// Texture_LoadByNameWithChannel].
+inline constexpr const char *kTextureExtension = ".TGA";
+inline constexpr const char *kTextureTwinExtension = ".MDT";
+std::string texture_load_name(const std::string &written, const char *extension);
+
 // Reconstructs the retail writer's CRLF output, field order, spacing and four
 // decimal places. Canonical writer output round-trips byte-for-byte; arbitrary
 // input comments/layout and excess float precision are not echoed.

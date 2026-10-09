@@ -102,6 +102,38 @@ int test_fade_defaults() {
 	return 0;
 }
 
+// The fade's clock: with no delay the death tick; with one, nothing until it runs out, then the
+// restamp on the first husked evaluation at or past it. The closed form a preview reads agrees with
+// the game's step over every tick. [orig: Entity_PublishSwapFadePhases @0x5C3F40]
+int test_fade_clock() {
+	world::DestroyFadeClock clock = world::destroy_fade_clock(7, 0);
+	TEST_EXPECT(clock.publish && !clock.restamp && clock.elapsed == 7);
+	clock = world::destroy_fade_clock(30, 31);
+	TEST_EXPECT(!clock.publish && !clock.restamp);
+	clock = world::destroy_fade_clock(31, 31);
+	TEST_EXPECT(clock.publish && clock.restamp && clock.elapsed == 0);
+	TEST_EXPECT(world::destroy_fade_origin_tick(0, 4) == 0 && world::destroy_fade_origin_tick(31, 4) == 31 &&
+	            world::destroy_fade_origin_tick(31, 40) == 40);
+	for (const int32_t delay : {0, 3, 31}) {
+		for (const int32_t husked_at : {0, 4, 32, 40}) {
+			// Step the game's clock every tick from the husk on.
+			int32_t death = 0, timer = delay;
+			for (int32_t now = husked_at; now < 120; ++now) {
+				const world::DestroyFadeClock step = world::destroy_fade_clock(now - death, timer);
+				if (step.restamp) {
+					timer = 0;
+					death = now;
+				}
+				const int32_t origin = world::destroy_fade_origin_tick(delay, husked_at);
+				TEST_EXPECT(step.publish == (now >= origin));
+				if (step.publish) TEST_EXPECT(step.elapsed == now - origin);
+			}
+		}
+	}
+	std::printf("fade clock: the delay, the restamp, the closed form over every tick\n");
+	return 0;
+}
+
 int test_schedule_names() {
 	TEST_EXPECT(world::kGnrcDeathThinkTicks == 4 && world::kGnl2DeathThinkTicks == 32);
 	TEST_EXPECT(!world::unit_type_is_boat(4) && world::unit_type_is_boat(5) && world::unit_type_is_boat(8) &&
@@ -120,6 +152,7 @@ int test_schedule_names() {
 int main() {
 	if (test_traits_from_def() != 0) return 1;
 	if (test_fade_defaults() != 0) return 1;
+	if (test_fade_clock() != 0) return 1;
 	if (test_schedule_names() != 0) return 1;
 	return 0;
 }

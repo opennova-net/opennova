@@ -214,10 +214,8 @@ Error FntResource::set_glyph_rect(int p_char_code, int p_page, const Rect2i &p_r
 
 	fnt_glyph_t &glyph = font_.glyphs[index];
 	glyph.page = static_cast<uint32_t>(p_page);
-	glyph.uv.u0 = static_cast<float>(p_rect.position.x) / static_cast<float>(FNT_TEXTURE_WIDTH);
-	glyph.uv.v0 = static_cast<float>(p_rect.position.y) / static_cast<float>(FNT_TEXTURE_HEIGHT);
-	glyph.uv.u1 = static_cast<float>(p_rect.position.x + p_rect.size.x) / static_cast<float>(FNT_TEXTURE_WIDTH);
-	glyph.uv.v1 = static_cast<float>(p_rect.position.y + p_rect.size.y) / static_cast<float>(FNT_TEXTURE_HEIGHT);
+	fnt_pixels_to_uv(p_rect.position.x, p_rect.position.y, p_rect.position.x + p_rect.size.x,
+	                 p_rect.position.y + p_rect.size.y, &glyph.uv);
 	emit_changed();
 	return OK;
 }

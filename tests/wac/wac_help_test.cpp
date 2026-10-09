@@ -8,6 +8,7 @@
 #include <string>
 
 #include <formats/wac/command.h>
+#include <formats/wac/help.h>
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/vm.h>
 #include <runtime/world/world.h>
@@ -80,6 +81,11 @@ int main() {
     CHECK(text.find("//   AddExp (ssn, number)\n") != std::string::npos);
     CHECK(text.find("//   Help ()\n") != std::string::npos);
     CHECK(text.find("//   ssnturn (ssn, heading)\n") != std::string::npos);
+    // Each listed line is the command's signature (command_signature, the help file's form).
+    CHECK(command_signature(*wac_find_command("AddExp")) == "AddExp (ssn, number)");
+    CHECK(command_signature(*wac_find_command("help")) == "Help ()");
+    for (int i = 0; i < wac_command_count(); ++i)
+        CHECK(text.find("//   " + command_signature(wac_commands()[i]) + "\n") != std::string::npos);
     CHECK(text.find("// WAC Triggers") < text.find("// WAC Actions"));
     CHECK(text.find("// WAC Actions") < text.find("// WAC Debug Commands"));
     // The actions list is the commands cmd_is_action holds (the help's mask 2).

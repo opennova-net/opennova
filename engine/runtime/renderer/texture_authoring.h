@@ -86,8 +86,17 @@ void flip_image_green(RgbaImage &image);
 // use. What an import writes, and what a texture's compare reads an import's output against.
 bool image_import_texels(RgbaImage &image, const ImageImportSettings &settings, std::string &why, std::string &field);
 // The image written as `settings` say (format, palette, dds, mips): its bytes, or false with `why`; a
-// warning (a PCX dropping a translucent source's alpha) in `note`.
+// warning (a PCX dropping a translucent source's alpha) in `note`. Not `palette indices`, whose
+// indices these texels do not carry: encode_image_indices writes it.
 bool encode_image(const RgbaImage &image, const ImageImportSettings &settings, std::vector<uint8_t> &out,
                   std::string &why, std::string &note);
+// Whether `settings` ask for the `palette indices` leg: a pcx written from the source's own indices.
+bool image_keeps_source_indices(const ImageImportSettings &settings);
+// That leg: an 8-bit PCX source's indices and palette written as an 8-bit PCX as they are, never
+// quantized (a foliage or char map's indices are data the game reads), at the source's own size.
+// False, with `why` and the option at fault in `field`, for a source of colours ("palette") or a
+// `size` that asks for other sides ("size"); with `why` alone for a write that fails.
+bool encode_image_indices(const ImageSource &source, const ImageImportSettings &settings, std::vector<uint8_t> &out,
+                          std::string &why, std::string &field);
 
 } // namespace opennova::renderer

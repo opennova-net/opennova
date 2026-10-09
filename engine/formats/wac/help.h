@@ -1,7 +1,17 @@
 // Retail WAC quick-reference and event-description exports.
 #pragma once
 
+#include <string>
+
 namespace opennova::wac {
+
+struct CommandDef;
+
+// A command as the help file lists it, "name (type, type)": its name, a space, then its parameter
+// slots' type names in parentheses, an empty slot skipped, ", " before every slot but the first
+// [orig: WacScript_DumpActionDefsToFile @0x4F0400; the same form behind the compiler's parameter
+// error, WacScript_FormatActionParameters @0x4EFC20].
+std::string command_signature(const CommandDef &command);
 
 struct HelpExportResult {
     bool help_written = false;

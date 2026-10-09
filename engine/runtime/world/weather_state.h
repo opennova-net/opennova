@@ -83,6 +83,7 @@ enum class WeatherColorTarget : uint8_t {
 // distance, 0} into SoundBank_PlayTriggerEntries @ 0x75ccd0 on the THUNDER
 // bank dword_24E0914; A = 1 m centred (@ 0x57ecfb), B = 10 m from behind,
 // bearing 128 (@ 0x57edc4)].
+inline constexpr const char *kThunderSoundSet = "THUNDER";
 struct WeatherSoundEvent {
     int32_t distance_q16 = 0x10000;
     uint8_t bearing = 0;

@@ -1,7 +1,7 @@
 // opennova::io unit tests: LE primitives, fixed-point, bounds-checked byte
 // cursors, LSB-first bit streams, the ASCII string helpers and the text chores
-// beside them, the 64-bit FNV-1a hash with its hex spelling, the checked cp1252
-// encoder, base64 and the version 4 UUID.
+// beside them, the 64-bit FNV-1a hash with its hex spelling and splitmix64, the path
+// chores beside os_path, the checked cp1252 encoder, base64 and the version 4 UUID.
 
 #include <atomic>
 #include <chrono>
@@ -29,6 +29,7 @@
 #include <base/io/fixed.h>
 #include <base/io/hash.h>
 #include <base/io/le.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/io/uuid.h>
 
@@ -318,6 +319,19 @@ static int test_strutil_text_chores()
     TEST_EXPECT(strutil::with_crlf_line_ends("a\nb\r\nc\rd\n") == "a\r\nb\r\nc\rd\r\n");
     TEST_EXPECT(strutil::with_crlf_line_ends("\n\n") == "\r\n\r\n");
     TEST_EXPECT(strutil::with_crlf_line_ends("") == "");
+    // From scratch: every CR dropped (a lone one too), then every LF written CR LF.
+    TEST_EXPECT(strutil::normalized_crlf_line_ends("a\nb\r\nc\rd\n") == "a\r\nb\r\ncd\r\n");
+    TEST_EXPECT(strutil::normalized_crlf_line_ends("x\r\r\n") == "x\r\n");
+    TEST_EXPECT(strutil::normalized_crlf_line_ends("") == "" && strutil::normalized_crlf_line_ends("ab") == "ab");
+
+    // A cut moved back to a character's start: "Jos" then the two bytes of e-acute, then a
+    // four-byte emoji.
+    const std::string jose = "Jos\xC3\xA9\xF0\x9F\x98\x80!";
+    TEST_EXPECT(strutil::utf8_cut(jose, 3) == 3 && strutil::utf8_cut(jose, 4) == 3 && strutil::utf8_cut(jose, 5) == 5);
+    TEST_EXPECT(strutil::utf8_cut(jose, 6) == 5 && strutil::utf8_cut(jose, 8) == 5 && strutil::utf8_cut(jose, 9) == 9);
+    TEST_EXPECT(strutil::utf8_cut(jose, 10) == jose.size() && strutil::utf8_cut(jose, 99) == jose.size());
+    TEST_EXPECT(strutil::utf8_cut("", 0) == 0 && strutil::utf8_cut("abc", 0) == 0);
+    TEST_EXPECT(jose.substr(0, strutil::utf8_cut(jose, 4)) == "Jos");
 
     const std::vector<uint8_t> bytes = {0x00, 0x0F, 0xA5, 0xFF};
     TEST_EXPECT(strutil::bytes_to_hex(bytes) == "000fa5ff");
@@ -695,6 +709,36 @@ static int test_fnv1a64()
     TEST_EXPECT(io::hex64(UINT64_C(0x85944171f73967e8)) == "85944171f73967e8");
     uint64_t parsed = 0;
     TEST_EXPECT(io::parse_hex64("85944171F73967E8", parsed) && parsed == UINT64_C(0x85944171f73967e8));
+    // splitmix64's reference outputs: seeded 0, its state stepping by the gamma, the first three.
+    TEST_EXPECT(io::splitmix64(0) == UINT64_C(0xe220a8397b1dcdaf));
+    TEST_EXPECT(io::splitmix64(io::kSplitmix64Gamma) == UINT64_C(0x6e789e6aa1b965f4));
+    TEST_EXPECT(io::splitmix64(2 * io::kSplitmix64Gamma) == UINT64_C(0x06c45d188009454f));
+    TEST_EXPECT(io::splitmix64_finalize(0) == 0 && io::splitmix64(5) == io::splitmix64_finalize(5 + io::kSplitmix64Gamma));
+    return 0;
+}
+
+// The path chores beside os_path: a folder without its trailing separators (a root kept), Windows'
+// device names, and the lexical containment test.
+static int test_path_chores()
+{
+    TEST_EXPECT(io::without_trailing_separator("C:/game/") == "C:/game");
+    TEST_EXPECT(io::without_trailing_separator("C:\\game\\\\") == "C:\\game");
+    TEST_EXPECT(io::without_trailing_separator("C:/") == "C:/" && io::without_trailing_separator("C:\\") == "C:\\");
+    TEST_EXPECT(io::without_trailing_separator("/") == "/" && io::without_trailing_separator("") == "");
+    TEST_EXPECT(io::without_trailing_separator("/srv/x//") == "/srv/x" && io::without_trailing_separator("a") == "a");
+
+    for (const char *device : {"CON", "con", "Prn", "AUX", "nul", "COM1", "com9", "LPT1", "lpt9", "nul.txt", "Con.tar.gz"})
+        TEST_EXPECT(io::is_windows_device_name(device));
+    for (const char *name : {"", "CONS", "CO", "COM0", "COM10", "LPT", "LPTX", "mycon", "a.con", ".con", "console"})
+        TEST_EXPECT(!io::is_windows_device_name(name));
+
+    namespace fs = std::filesystem;
+    TEST_EXPECT(io::path_lexically_within(fs::path("out/build"), fs::path("out")));
+    TEST_EXPECT(io::path_lexically_within(fs::path("out"), fs::path("out")));
+    TEST_EXPECT(io::path_lexically_within(fs::path("out/x/../build"), fs::path("out")));
+    TEST_EXPECT(!io::path_lexically_within(fs::path("outer"), fs::path("out")));
+    TEST_EXPECT(!io::path_lexically_within(fs::path("out/.."), fs::path("out")));
+    TEST_EXPECT(!io::path_lexically_within(fs::path("other/out"), fs::path("out")));
     return 0;
 }
 
@@ -741,6 +785,7 @@ int main()
     if (test_file_stamp_settled()) return 1;
     if (test_cp1252_checked()) return 1;
     if (test_fnv1a64()) return 1;
+    if (test_path_chores()) return 1;
     if (test_bam_wrap_arithmetic()) return 1;
     if (test_fixed_point()) return 1;
     if (test_byte_reader_bounds()) return 1;

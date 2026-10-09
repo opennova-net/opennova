@@ -80,5 +80,12 @@ int main() {
 		TEST_EXPECT(!error.empty());
 		TEST_EXPECT(second.base_texture == "unchanged");
 	}
+
+	// The texture files the game opens for the names written: path stripped, the extension from the last '.'
+	// made .TGA (the base's twin .MDT) [orig: Shadow_DecalLoadTextures @ 0x588040].
+	TEST_EXPECT(grm::texture_load_name("face.bmp", grm::kTextureExtension) == "face.TGA");
+	TEST_EXPECT(grm::texture_load_name("face.bmp", grm::kTextureTwinExtension) == "face.MDT");
+	TEST_EXPECT(grm::texture_load_name("chars\\faces/old.face.tga", grm::kTextureExtension) == "old.face.TGA");
+	TEST_EXPECT(grm::texture_load_name("eye1", grm::kTextureExtension) == "eye1.TGA");
 	return 0;
 }

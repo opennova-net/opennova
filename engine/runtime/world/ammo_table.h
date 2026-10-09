@@ -43,12 +43,26 @@ inline const char *const kImpactEffectTagWords[kImpactEffectTagCount] = {
     "Shallow water", "Water surface",
 };
 
+// A surface class's row in the tag table: the class plus 4, so surfaces 0..23 (a bullet face's
+// poly_type, the terrain's class) play rows 4..27.
+inline constexpr int kSurfaceImpactTagOffset = 4;
+// The row a round plays where it strikes a building's or an item's bullet face: the face's surface
+// byte shifted into the tag table, a byte past it the obj row (4) [orig: Weapon_RaycastAndSpawnImpact
+// @0x4e8867, plain material + 4 for hit types 1 and 2; AmmoDef_ProcessImpactEffect @ 0x40a170 clamps a
+// tag of 28 or more to 4 @ 0x40a1bf]. The person leg's flesh remap is the caller's.
+inline int surface_impact_effect_tag(int32_t surface) {
+    return (surface >= 0 && surface + kSurfaceImpactTagOffset < kImpactEffectTagCount)
+            ? surface + kSurfaceImpactTagOffset
+            : 4;
+}
 // The row a round plays where it strikes the terrain: the surface class the char map (or a placed
 // tile) gives there, shifted into the tag table, a class past it the dirt row (no char map reads 1 ->
 // 5 dirt; an unmapped sector 7 -> 11 water) [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510 result
 // + 4; the terrain leg of the @ 0x4ea6a7 hit switch in Projectile_UpdatePhysics @ 0x4e9d70].
 inline int terrain_impact_effect_tag(int32_t surface) {
-    return (surface >= 0 && surface + 4 < kImpactEffectTagCount) ? surface + 4 : 5;
+    return (surface >= 0 && surface + kSurfaceImpactTagOffset < kImpactEffectTagCount)
+            ? surface + kSurfaceImpactTagOffset
+            : 5;
 }
 // The row a round plays where it crosses the water plane first (the water handler's)
 // [orig: the water impact handler @ 0x4e9b80].

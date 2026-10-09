@@ -152,6 +152,9 @@ inline constexpr int kFogLevelStoreShift = 16;
 inline constexpr int kSkyHeightStoreShift = 16;
 inline constexpr int kWaterHeightStoreShift = 15;
 inline constexpr int kSkySpeedStoreShift = 10;
+// A water_height step in world units: half of one, the `<< 15` into the 16.16 store [@ 0x57cb6a]. A line's value
+// (the .trn's, the .env's, the mission header's override) times this is the plane's height in world units.
+inline constexpr float kWaterHeightUnit = 0.5f;
 // The whole numbers a keyword stored by `shift` holds without wrapping.
 constexpr int64_t env_store_min(int shift) { return int64_t(INT32_MIN) >> shift; }
 constexpr int64_t env_store_max(int shift) { return int64_t(INT32_MAX) >> shift; }

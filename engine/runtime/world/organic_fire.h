@@ -12,6 +12,9 @@ struct Threedi3di3;
 namespace opennova::world {
 
 struct AmmoTable;
+struct EntityHandle;
+struct FixedVec3;
+class World;
 
 // An NPC body's clip fire: the item's four ammo bytes and three launch points, and the shots one pass of the
 // body's fire block takes from an anim event word. The rules the game's org1 think runs (AiSystem's
@@ -100,5 +103,15 @@ inline OrganicFirePass organic_fire_pass(uint32_t events, bool read_tick, bool l
 	}
 	return pass;
 }
+
+// One shot the block takes [orig: Entity_UpdateInfantryAI @0x4BF345..0x4BF4AD]: the firing byte
+// (`equipped_adm_index`) rides the shooter while its ammo fires and returns to zero;
+// a zero byte fires nothing; a shot fired marks the shooter a priority target. The round spawns
+// through the NPC fire entry, which presents its launch [orig: WeaponSlot_FireAndSpawnEffects
+// @0x53F440], unless `spawn_round` is false (that entry's session gate: a joiner spawns none).
+// `at` is the launch point in world 16.16, `yaw`/`pitch` BAM. The org1 think's fire pass and the
+// editor's weapon range share it.
+void organic_fire_shot(World &world, EntityHandle shooter, const FixedVec3 &at, int32_t yaw, int32_t pitch,
+                       uint8_t ammo, bool spawn_round = true);
 
 } // namespace opennova::world

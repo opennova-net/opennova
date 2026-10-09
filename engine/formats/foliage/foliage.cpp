@@ -140,6 +140,14 @@ uint32_t foliage_remap_pixel_to_def_mask(const std::vector<FoliageDef> &defs, in
 	return mask;
 }
 
+// [orig: Foliage_LoadFoliageMapPCX @0x605B73..0x605B8A — every texel through Foliage_RemapPixelToDefMask]
+std::array<uint8_t, 256> foliage_pixel_masks(const std::vector<FoliageDef> &defs) {
+	std::array<uint8_t, 256> masks{};
+	for (int code = 0; code < 256; ++code)
+		masks[static_cast<size_t>(code)] = static_cast<uint8_t>(foliage_remap_pixel_to_def_mask(defs, code));
+	return masks;
+}
+
 FoliageMap foliage_make_default_map(int width, int height, uint8_t fill_index) {
 	FoliageMap map;
 	if (width <= 0 || height <= 0) {

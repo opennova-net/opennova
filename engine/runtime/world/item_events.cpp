@@ -648,12 +648,11 @@ void update_item_destroy_fade(World &world, Entity &entity) {
     if ((entity.engine_flags & kEntityFlagHusk) == 0) return;
     const auto *traits=world.tables.item_death_traits.get(entity.item_id);
     if (!traits) return;
-    int32_t elapsed=int32_t(world.logic_tick-entity.death_tick);
-    if (entity.destroy_timer) {
-        if (elapsed < entity.destroy_timer) return;
-        entity.destroy_timer=0; entity.death_tick=world.logic_tick; elapsed=0;
-    }
-    const DestroyFade fade=destroy_fade_phases(elapsed,traits->destroy_timing_ticks);
+    const DestroyFadeClock clock=destroy_fade_clock(int32_t(world.logic_tick-entity.death_tick),
+            entity.destroy_timer);
+    if (!clock.publish) return;
+    if (clock.restamp) { entity.destroy_timer=0; entity.death_tick=world.logic_tick; }
+    const DestroyFade fade=destroy_fade_phases(clock.elapsed,traits->destroy_timing_ticks);
     entity.destroy_progress=fade.progress;
     entity.destroy_phases_q16=fade.phases_q16;
 }

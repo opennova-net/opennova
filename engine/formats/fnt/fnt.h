@@ -124,6 +124,15 @@ static inline void fnt_uv_to_pixels(const fnt_uv_t *uv,
 	*y1 = (int)(uv->v1 * (float)FNT_TEXTURE_HEIGHT);
 }
 
+/* The inverse: a glyph's UV rect from its texel rect [x0, x1) x [y0, y1) on a page,
+   each edge its texel over the page's side. A writer places a glyph by it. */
+static inline void fnt_pixels_to_uv(int x0, int y0, int x1, int y1, fnt_uv_t *uv) {
+	uv->u0 = (float)x0 / (float)FNT_TEXTURE_WIDTH;
+	uv->v0 = (float)y0 / (float)FNT_TEXTURE_HEIGHT;
+	uv->u1 = (float)x1 / (float)FNT_TEXTURE_WIDTH;
+	uv->v1 = (float)y1 / (float)FNT_TEXTURE_HEIGHT;
+}
+
 static inline void fnt_get_glyph_size(const fnt_glyph_t *glyph,
                                       int *width, int *height) {
 	int x0, y0, x1, y1;

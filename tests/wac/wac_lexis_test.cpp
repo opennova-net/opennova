@@ -105,7 +105,17 @@ static void keywords() {
 	}
 }
 
+static void token_ends() {
+	CHECK(std::string(kWacOperatorSet) == "{}()[]+-*/|&^%<>=!~" && sizeof(kWacOperatorSet) == 20);
+	for (const char op : std::string_view(kWacOperatorSet)) CHECK(wac_in_operator_set(op) && wac_token_ends(op));
+	CHECK(!wac_in_operator_set(0) && !wac_in_operator_set('"') && !wac_in_operator_set('_'));
+	// A blank or control byte, ';' and ',' end a word; a letter, a digit, '_', '.', '"' and a high byte do not.
+	for (const char c : {' ', '\t', '\r', '\n', char(0), char(0x1F), ';', ','}) CHECK(wac_token_ends(c));
+	for (const char c : {'A', 'z', '0', '_', '.', '"', '$', char(0x80), char(0xE9)}) CHECK(!wac_token_ends(c));
+}
+
 int main() {
+	token_ends();
 	comments();
 	prefixes();
 	keywords();
