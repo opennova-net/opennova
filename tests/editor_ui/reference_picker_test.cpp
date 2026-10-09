@@ -17,7 +17,7 @@
 #include <editor/assets/asset_import.h>
 #include <editor/documents/mission_document.h>
 #include <editor/graph/reference_queries.h>
-#include <editor/import/png_encode.h>
+#include <formats/png/png_encode.h>
 #include <editor/preview/texture_thumbnails.h>
 #include <formats/dds/dds.h>
 #include <formats/pcx/pcx.h>
@@ -29,6 +29,8 @@
 
 #include <imgui.h>
 #include <imgui_internal.h>
+
+using opennova::png::encode_png_rgba;
 
 namespace editor_ui_test {
 
