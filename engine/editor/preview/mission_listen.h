@@ -2,7 +2,6 @@
 
 #include <array>
 #include <cstdint>
-#include <deque>
 #include <map>
 #include <memory>
 #include <string>
@@ -103,13 +102,16 @@ struct MissionSoundChannel {
 // - The thunder and the script's sounds are one-shots (fire_sounds): the set found in the game's bank order and
 //   planned at its distance (the thunder, a script's `sound`) or at its point (a script's sound at an entity),
 //   through the session's sound selector, played by the Shell's clip voices (DI-02's player).
-// - The mission's dialogs (DI-32): each Play dialog its events fire queues its dialog on the one dialog channel, as
-//   the game's does [orig: Dialog_Register @ 0x44d980 behind Dialog_UpdatePlayback @ 0x44e470's channel gate]: a
-//   dialog's lines, each the wave of its name in the mission's dialog bank's sounds at its dialog volume
-//   (preview/dialog_preview, the runtime's dialog_queue lookups), come due one after another, the next once the one
-//   before has ended and after its wait, a dialog queued while another plays after that one; each line handed to the
-//   Shell's clip voices on its tick, its subtitle in its words. A script's voice wave (SSNwave, SSNradio) plays at
-//   the scripted voice's volume [orig: Wac_PlayScriptedVoiceWave @ 0x4ed688, 210 of 255].
+// - The mission's dialogs (DI-32): each Play dialog its events fire registers its dialog on the one dialog channel,
+//   which runs the game's own queue once a tick after the tick's events (preview/dialog_preview's DialogChannel over
+//   audio::DialogQueue [orig: Dialog_Register @ 0x44d980; Dialog_UpdatePlayback @ 0x44e470]): a dialog's lines, each
+//   the wave of its name in the mission's dialog bank's sounds at its dialog volume (audio::resolve_dialog_lines),
+//   load one after another, each once the one before has held about twice its wave's length, the channel is free and
+//   its own delay has run, the dialogs interleaving in slot order; each line handed to the Shell's clip voices on the
+//   tick it loads, its subtitle in its words. A script's voice wave (SSNwave, SSNradio) plays at the scripted voice
+//   channel's volume at the listener (world::kScriptVoiceVolume through the distance curve, as
+//   world::ScriptVoiceChannel::frame plays it [orig: Wac_PlayScriptedVoiceWave @ 0x4ed688; Audio_UpdateAmbientStream
+//   @ 0x4edb22]).
 // The listener is the camera's eye, standing in for the player's ears (the rain's body has the eye's height, no
 // building over it); the hour the picture's (the options' time, else the mission's start time). Not heard: the
 // occlusion the game inflates a distance by (no world stands between them in the picture: DI-04's rule), the music
@@ -154,15 +156,9 @@ public:
 	// What the last play cost (microseconds).
 	int64_t step_us() const { return step_us_; }
 
-	// The dialog lines queued on the dialog channel and not yet due, and the tick the channel frees.
-	struct DialogLineDue {
-		int32_t tick = 0;
-		int32_t number = 0;
-		std::string dialog;
-		DialogPlayLine line;
-	};
-	const std::deque<DialogLineDue> &dialog_due() const { return dialog_due_; }
-	int32_t dialog_free() const { return dialog_free_; }
+	// The dialog channel (the game's queue: its slots, the lines they hold, the voices) and the next tick it runs.
+	const DialogChannel &dialog_channel() const { return dialog_; }
+	int32_t dialog_tick() const { return dialog_tick_; }
 	const std::string &dialog_bank() const { return dialog_bank_; }
 
 	// What a source does in words, a line each (the hover's): what it is, its sets for the hours, what plays now.
@@ -201,12 +197,15 @@ private:
 	// The mixer made again over the sources (each resolved one a marker), its clock at the start.
 	void remix_();
 	void apply_plan_(const audio::AmbientChannelPlan &plan);
-	// The dialog `number` (dlg%03i) a Play dialog queued on `tick`: its lines due one after another from where the
-	// channel frees (DI-32).
-	void queue_dialog_(int32_t number, int32_t tick);
+	// The dialog `number` (dlg%03i) a Play dialog registers: the dialog of the name in the mission's dialog bank, its
+	// lines with their waves (audio::resolve_dialog_lines), onto the channel (DI-32) [orig: Dialog_PlayByIndex
+	// @ 0x527ae0 -> Dialog_PlayByName @ 0x44d9f0 -> Dialog_Register @ 0x44d980].
+	void register_dialog_(int32_t number);
+	// The channel run on through the ticks before `end`, the lines it loads appended to `out`.
+	void run_dialog_to_(int32_t end, std::vector<DialogChannel::Loaded> &out);
 	// The mission's dialog bank, its sounds and its text, read again where a stamp moved.
 	const DialogSources &dialog_sources_now_();
-	double wave_seconds_(const std::string &file);
+	DialogWave dialog_wave_(const std::string &file);
 
 	bool opened_ = false;
 	// The music pair the game opens at a mission's start, and whether the project holds each half.
@@ -239,14 +238,14 @@ private:
 	uint64_t started_ = 0;
 	int64_t step_us_ = 0;
 	// The dialog channel (DI-32): the project's files as the game reads them, the mission's dialog bank and its text,
-	// what was read of them and at which stamps, the waves' lengths, the lines due and when the channel frees.
+	// what was read of them and at which stamps, the waves as the device loads them, the channel and its next tick.
 	std::shared_ptr<const ProjectAssetSource> files_;
 	std::string dialog_bank_, dialog_mission_base_;
 	DialogSources dialog_sources_;
 	std::string dialog_stamps_;
-	std::map<std::string, std::pair<uint64_t, double>> wave_seconds_cache_;
-	std::deque<DialogLineDue> dialog_due_;
-	int32_t dialog_free_ = 0;
+	std::map<std::string, std::pair<uint64_t, DialogWave>> dialog_waves_;
+	DialogChannel dialog_;
+	int32_t dialog_tick_ = 0;
 };
 
 // The Listen's marks over the picture (the overlay, while Listen is on): each source's set ringed on the ground at its

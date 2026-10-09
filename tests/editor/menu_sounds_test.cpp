@@ -5,9 +5,9 @@
 // through lwf::encode_lwf and a short wave.
 //
 // Pinned: MOUSEIN as the mouse comes onto a window (the last row of the state, at the menu's master volume, the
-// row's own bank alone), nothing more while it stays or while the button is down, SELECTED on the click and
-// MOUSEIN again on the next sample there (the Shell's next frame), MOUSEOUT as it leaves; a press begun on a
-// window that takes no capture and let go over a button clicks it (the game's click rule, menu_click.h); a
+// row's own bank alone, played as menu::plan_menu_sound plays it: no listener-view filter), nothing more while it
+// stays or while the button is down, SELECTED on the click and MOUSEIN again on the next sample there (the Shell's
+// next frame), MOUSEOUT as it leaves; a press begun on a window that takes no capture and let go over a button clicks it (the game's click rule, menu_click.h); a
 // disabled window and
 // a window with no row play nothing; a bank the project lacks (no_bank) and a set the bank lacks (missing);
 // Mute (fired and listed, nothing handed to the Shell); the canvas's mouse over the picture the game's while it
@@ -52,7 +52,8 @@ namespace {
 std::string repo() { return test_paths_repo_root(__FILE__); }
 
 // A menu bank of one set per name, each one layer (no falloff, as every shipped menu layer) playing its one
-// wave (the name lower case), the member's volume 200.
+// wave (the name lower case), the member's volume 200. The layers carry no listener-view bits: the menu's play
+// reads none (menu::plan_menu_sound), where a world play's view filter would drop every layer.
 std::vector<uint8_t> menu_bank(const std::vector<std::string> &sets) {
 	lwf::File bank;
 	for (size_t i = 0; i < sets.size(); ++i) {
@@ -67,7 +68,7 @@ std::vector<uint8_t> menu_bank(const std::vector<std::string> &sets) {
 		set.playlist_indices.push_back(uint32_t(i));
 		bank.multis.push_back(set);
 		lwf::Playlist layer;
-		layer.flags = lwf::kFlagInternal | lwf::kFlagExternal;
+		layer.flags = 0;
 		layer.sndparm_indices.push_back(uint32_t(i));
 		bank.playlists.push_back(layer);
 		lwf::Sndparm member;

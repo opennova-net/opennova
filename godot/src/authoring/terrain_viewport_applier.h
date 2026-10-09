@@ -161,6 +161,7 @@ private:
 	Ref<TerrainData> loading_;
 	Ref<TerrainData> foliage_data_; // the terrain its foliage is configured over
 	bool environment_built_ = false, terrain_built_ = false;
+	bool tiles_own_ = false; // the placed tiles the load took are the terrain's own (read_mission_placed_tiles)
 	TerrainKey terrain_key_;
 	EnvironmentKey environment_key_;
 	std::unique_ptr<Build> build_;

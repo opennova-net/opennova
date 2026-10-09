@@ -1,5 +1,7 @@
 #include "authoring/terrain_viewport_applier.h"
 
+#include "authoring/mission_placed_tiles.h"
+
 #include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/viewport.hpp>
@@ -375,18 +377,11 @@ void TerrainViewportApplier::run_terrain_file_(Build &build) {
 	}
 	terrain_data_ = loading_;
 	loading_.unref();
-	// The mission's .til first, as the game reads it before the build (forced loose first); with none the
-	// terrain's own polytrn_tileinfo, which TerrainData reads where no override is set (the order
-	// MissionGround::tiles_file reads, cited in preview/mission_ground_facts).
-	Ref<TerrainTileInfo> tile_info;
-	const String til = opennova::to_gd(build.terrain_key.mission) + ".til";
-	if (!build.terrain_key.mission.empty() && root_files_->has_file(til, ResourceRoot::LOOKUP_FORCE_LOOSE_FIRST)) {
-		const PackedByteArray bytes = root_files_->read_file(til, ResourceRoot::LOOKUP_FORCE_LOOSE_FIRST);
-		Ref<TerrainTileInfo> read;
-		read.instantiate();
-		if (!bytes.is_empty() && read->load_from_bytes(bytes) == OK) tile_info = read;
-	}
-	terrain_->set_tile_info_override(tile_info);
+	// The tiles the mission places, read as the game's load reads them before the build (read_mission_placed_tiles:
+	// <mission>.til first, else the terrain's own polytrn_tileinfo, each where the game's loader takes it; the order
+	// MissionGround::tiles_file reads).
+	terrain_->set_tile_info_override(read_mission_placed_tiles(root_files_, build.terrain_key.mission,
+			build.terrain_key.terrain, build.terrain_key.environment, &tiles_own_));
 	terrain_->set_terrain_data(terrain_data_);
 	water_->set_terrain_data(terrain_data_);
 	terrain_built_ = false;
@@ -426,11 +421,9 @@ void TerrainViewportApplier::configure_foliage_() {
 		foliage_->set_terrain_data(Ref<TerrainData>());
 		return;
 	}
-	// GameWorld::configure_foliage: the terrain data, the placed tiles as the candidate blocker (the mission's, else
-	// the terrain's own), each definition's model and :fd texture through the root.
-	Ref<TerrainTileInfo> tiles = terrain_->get_tile_info_override();
-	if (tiles.is_null()) tiles = terrain_data_->get_tileinfo_resource();
-	foliage_->configure_for_terrain(root_files_, terrain_data_, tiles);
+	// GameWorld::configure_foliage: the terrain data, the placed tiles as the candidate blocker (the tiles the load
+	// took: the mission's, else the terrain's own), each definition's model and :fd texture through the root.
+	foliage_->configure_for_terrain(root_files_, terrain_data_, terrain_->get_tile_info_override());
 	const Array diagnostics = foliage_->get_slot_diagnostics();
 	for (int64_t i = 0; i < diagnostics.size(); ++i) {
 		const Dictionary diagnostic = diagnostics[i];
@@ -553,10 +546,14 @@ opennova::io::JsonValue TerrainViewportApplier::drawn_json_() const {
 	foliage.set("instances", json_number(double(foliage_->get_total_instances())));
 	foliage.set("vertices", json_number(double(stats.is_valid() ? stats->get_detail_vertices() : 0)));
 	out.set("foliage", std::move(foliage));
-	// The placed tiles the terrain draws: the mission's .til, else the terrain's own.
+	// The placed tiles the terrain draws: the tiles the load took (the mission's .til, else the terrain's own), and
+	// with none the terrain's own its data reads.
 	Ref<TerrainTileInfo> tiles = terrain_->get_tile_info_override();
-	const bool own = tiles.is_null() && terrain_data_.is_valid();
-	if (own) tiles = terrain_data_->get_tileinfo_resource();
+	bool own = tiles_own_;
+	if (tiles.is_null() && terrain_data_.is_valid()) {
+		tiles = terrain_data_->get_tileinfo_resource();
+		own = true;
+	}
 	JsonValue placed = JsonValue::make_object();
 	placed.set("count", json_number(double(tiles.is_valid() ? tiles->get_entry_count() : 0)));
 	placed.set("from", opennova::io::json_string(tiles.is_null() ? "none" : own ? "terrain" : "mission"));

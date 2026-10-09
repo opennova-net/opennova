@@ -1,5 +1,7 @@
 #include "authoring/environment_viewport_applier.h"
 
+#include "authoring/mission_placed_tiles.h"
+
 #include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/object.hpp>
@@ -399,16 +401,10 @@ void EnvironmentViewportApplier::run_terrain_file_(Build &build) {
 	}
 	terrain_data_ = loading_;
 	loading_.unref();
-	// The mission's .til, as the game reads it before the build (forced loose first): the tiles it places.
-	Ref<TerrainTileInfo> tile_info;
-	const String til = opennova::to_gd(build.terrain_key.mission) + ".til";
-	if (!build.terrain_key.mission.empty() && root_files_->has_file(til, ResourceRoot::LOOKUP_FORCE_LOOSE_FIRST)) {
-		const PackedByteArray bytes = root_files_->read_file(til, ResourceRoot::LOOKUP_FORCE_LOOSE_FIRST);
-		Ref<TerrainTileInfo> read;
-		read.instantiate();
-		if (!bytes.is_empty() && read->load_from_bytes(bytes) == OK) tile_info = read;
-	}
-	terrain_->set_tile_info_override(tile_info);
+	// The tiles the mission places, read as the game's load reads them before the build (read_mission_placed_tiles:
+	// <mission>.til, else the terrain's own polytrn_tileinfo, each where the game's loader takes it).
+	terrain_->set_tile_info_override(read_mission_placed_tiles(root_files_, build.terrain_key.mission,
+			build.terrain_key.terrain, build.terrain_key.environment));
 	terrain_->set_terrain_data(terrain_data_);
 	water_->set_terrain_data(terrain_data_);
 	terrain_built_ = false;

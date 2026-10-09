@@ -1,6 +1,8 @@
 // The dialog preview (dialog_preview.h, ADR 0046 DI-32).
 #include <editor/preview/dialog_preview.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <optional>
 
@@ -8,6 +10,7 @@
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
 #include <base/vfs/file_source.h>
+#include <formats/lwf/wav_pcm.h>
 #include <runtime/audio/dialog_queue.h>
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/runtime_boot.h>
@@ -16,8 +19,8 @@ namespace opennova::editor {
 
 namespace {
 
-// How long a line with no wave holds the dialog: the game's 12 ticks (audio::kDialogMissingHold).
-constexpr double kNoWaveSeconds = double(audio::kDialogMissingHold) / io::kTickHz;
+// The most ticks a dialog's play is run for (an hour of the clock): a guard, no game rule.
+constexpr int32_t kDialogTicksMost = int32_t(io::kTickHz * 3600.0);
 
 std::string seconds_words(double seconds) {
 	char text[32];
@@ -72,8 +75,69 @@ std::string dialog_name_given(const std::string &value) {
 	return value;
 }
 
+DialogWave dialog_wave(const std::vector<uint8_t> &bytes) {
+	DialogWave out;
+	lwf::WavPcm pcm;
+	std::string error;
+	if (bytes.empty() || !lwf::wav_decode_pcm16(bytes.data(), bytes.size(), pcm, error)) return out;
+	out.loaded = true;
+	out.samples = pcm.loader_samples;
+	out.pitch_q16 = pcm.loader_pitch_q16;
+	const size_t frames = pcm.channels ? pcm.pcm16.size() / (size_t(2) * pcm.channels) : 0;
+	out.seconds = pcm.sample_rate ? double(frames) / double(pcm.sample_rate) : 0.0;
+	return out;
+}
+
+// --- DialogChannel ----------------------------------------------------------------------------------
+
+bool DialogChannel::enqueue(const std::string &dialog, std::vector<audio::DialogLineRef> lines) {
+	return queue_.enqueue(dialog, std::move(lines));
+}
+
+void DialogChannel::tick(int32_t tick, const WaveOf &wave_of, std::vector<Loaded> &out) {
+	// The device's half of Dialog_LoadAudioClip: the line's wave loaded and its voice started on the channel, a
+	// wave that does not load no voice (audio::DialogQueue::LoadLine).
+	const auto load = [&](const audio::DialogLineRef &line) {
+		Loaded loaded;
+		loaded.tick = tick;
+		loaded.line = line;
+		if (!line.file.empty() && wave_of) loaded.wave = wave_of(io::utf8_file_name(line.file));
+		audio::DialogClip clip;
+		clip.loaded = loaded.wave.loaded;
+		clip.samples = loaded.wave.samples;
+		clip.pitch_q16 = loaded.wave.pitch_q16;
+		if (clip.loaded) {
+			clip.voice = next_voice_++;
+			const int32_t length = std::max(1, int32_t(std::ceil(loaded.wave.seconds * io::kTickHz)));
+			voices_.push_back({clip.voice, tick + length});
+		}
+		loaded.hold = audio::dialog_clip_hold(clip);
+		out.push_back(std::move(loaded));
+		return clip;
+	};
+	// AudioChannel_ValidateHandle: the voice plays until its wave's length has run.
+	const auto playing = [&](uint64_t voice) {
+		for (const auto &[held, ends] : voices_)
+			if (held == voice) return tick < ends;
+		return false;
+	};
+	// A frame drawn before every tick: a fresh hold counts from the tick after it loaded.
+	queue_.tick(true, load, playing);
+	const std::vector<uint64_t> &kept = queue_.voices();
+	voices_.erase(std::remove_if(voices_.begin(), voices_.end(),
+	                             [&](const std::pair<uint64_t, int32_t> &voice) {
+		                             return std::find(kept.begin(), kept.end(), voice.first) == kept.end();
+	                             }),
+	              voices_.end());
+}
+
+void DialogChannel::clear() {
+	queue_.clear();
+	voices_.clear();
+}
+
 DialogPlay plan_dialog_play(const DialogSources &sources, const std::string &dialog, int line,
-                            const std::function<double(const std::string &file)> &seconds_of) {
+                            const DialogChannel::WaveOf &wave_of) {
 	DialogPlay out;
 	out.dialog = dialog_name_given(dialog);
 	out.bank = sources.bank_name;
@@ -93,31 +157,46 @@ DialogPlay plan_dialog_play(const DialogSources &sources, const std::string &dia
 	out.found = true;
 	const lwf::File *sounds = sources.sounds_read ? &sources.sounds : nullptr;
 	const rtxt::File *text = sources.text_read ? &sources.text : nullptr;
-	double at = 0.0;
-	std::string said;
+	// Its lines as the game's register takes them, each with the wave the bank's sounds give it (the one line alone
+	// where one is asked); the game's queue run on an idle channel until the dialog leaves its slot.
+	std::vector<audio::DialogLineRef> refs;
 	for (size_t i = 0; i < group->lines.size(); ++i) {
 		if (line >= 0 && size_t(line) != i) continue;
 		const dbf::Line &entry = group->lines[i];
-		DialogPlayLine played;
-		played.index = int(i);
-		played.wave = entry.def_id_name;
+		audio::DialogLineRef ref;
+		ref.wave = entry.def_id_name;
+		ref.delay = entry.delay;
+		ref.dialog_name = group->group_name;
+		ref.line = int(i);
 		if (const lwf::Single *wave = sounds ? audio::find_dialog_wave(*sounds, entry.def_id_name) : nullptr) {
-			played.file = wave->path;
-			played.volume = audio::dialog_wave_volume(*wave);
+			ref.file = wave->path;
+			ref.volume = audio::dialog_wave_volume(*wave);
 		}
+		refs.push_back(std::move(ref));
+	}
+	DialogChannel channel;
+	channel.enqueue(group->group_name, refs);
+	std::vector<DialogChannel::Loaded> loaded;
+	for (int32_t tick = 0; tick < kDialogTicksMost && !channel.idle(); ++tick) channel.tick(tick, wave_of, loaded);
+	std::string said;
+	for (const DialogChannel::Loaded &each : loaded) {
+		const dbf::Line &entry = group->lines[size_t(each.line.line)];
+		DialogPlayLine played;
+		played.index = each.line.line;
+		played.wave = each.line.wave;
+		played.file = each.line.file;
+		played.volume = each.line.volume;
 		played.text = audio::dialog_line_text(text, entry);
-		// A line after the first waits its delay once the one before has ended [orig: @ 0x44e585]; a line played
-		// alone starts at once.
-		played.wait_s = (line < 0 && i > 0) ? double(entry.delay) / 10.0 : 0.0;
-		at += played.wait_s;
-		played.start_s = at;
-		const double length = played.file.empty() || !seconds_of ? 0.0 : seconds_of(io::utf8_file_name(played.file));
-		played.seconds = played.file.empty() ? kNoWaveSeconds : length;
-		at += played.seconds;
+		played.wait_s = (line < 0 && each.line.line > 0) ? double(each.line.delay) / 10.0 : 0.0;
+		played.start_tick = each.tick;
+		played.start_s = double(each.tick) / io::kTickHz;
+		played.hold_ticks = each.hold;
+		played.seconds = each.wave.loaded ? each.wave.seconds : 0.0;
 		std::string words = played.wave.empty() ? std::string("(no wave)") : played.wave;
 		if (played.file.empty()) words += " (the sounds have no wave of the name: \"EX Cannot load audio\")";
 		else words += " (" + io::utf8_file_name(played.file) + (played.volume != 255 ? ", volume " + std::to_string(played.volume) : "") + ")";
-		if (played.wait_s > 0.0) words += " after " + seconds_words(played.wait_s);
+		if (played.start_tick > 0) words += " at " + seconds_words(played.start_s);
+		if (played.wait_s > 0.0) words += " (after " + seconds_words(played.wait_s) + ")";
 		if (!played.text.empty()) words += " \"" + played.text + "\"";
 		said += (said.empty() ? "" : "; ") + words;
 		out.lines.push_back(std::move(played));

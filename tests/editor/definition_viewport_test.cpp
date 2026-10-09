@@ -625,6 +625,12 @@ static int test_wire_and_canvas() {
 	TEST_EXPECT(effects && effects->is_array() && effects->array.size() == 2 &&
 	            effects->array[0].get_string("status", "") == "spawned" && effects->array[0].get_bool("spawns", false) &&
 	            effects->array[0].get_string("defined_in", "") == "particles/fx.ptl");
+	// The statuses in the receipt's words, one table for every preview (a spawn not yet made is the receipt's
+	// invalid_handle, as the effect preview says it); the effects off, disabled.
+	TEST_EXPECT(std::string(effect_spawn_status_token(particle::EffectSpawnStatus::InvalidHandle)) == "invalid_handle" &&
+	            std::string(effect_spawn_status_token(particle::EffectSpawnStatus::Disabled)) == "disabled" &&
+	            std::string(effect_spawn_status_token(particle::EffectSpawnStatus::GroupCapacityReached)) ==
+	                    "group_capacity_reached");
 	TEST_EXPECT(body->get("particle_slot") && body->get("particle_slot")->get_bool("admitted", false));
 	TEST_EXPECT(body->get("death") && body->get("death")->get("legs") && !body->get("death")->get("legs")->array.empty());
 	const JsonValue *items = shown.get("items");

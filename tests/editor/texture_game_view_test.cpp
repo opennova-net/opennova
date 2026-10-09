@@ -20,6 +20,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/tga/tga.h>
+#include <runtime/renderer/texture_dxt.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -47,6 +48,23 @@ int test_pieces() {
 	const std::vector<TextureLevel> chain = texture_game_chain(level_of(8, 8, rgba), 2);
 	TEST_EXPECT(chain.size() == 2 && chain[1].width == 4 && chain[1].height == 4 && chain[1].rgba[0] == 150 && chain[1].rgba[3] == 255);
 	TEST_EXPECT(texture_game_chain(level_of(8, 8, rgba), 0).size() == 4);
+	// Each level the box filter of the bytes the level before was stored as, as D3DXFilterTexture filters
+	// (renderer::extend_box_chain), not of the filter's floats carried down: on this texture the two part
+	// at some level.
+	std::vector<uint8_t> noise(16 * 16 * 4);
+	uint32_t seed = 12345u;
+	for (uint8_t &byte : noise) seed = seed * 1103515245u + 12345u, byte = uint8_t(seed >> 16);
+	const std::vector<TextureLevel> stored = texture_game_chain(level_of(16, 16, noise), 0);
+	TEST_EXPECT(stored.size() == 5);
+	std::vector<renderer::DxtColor> carried = renderer::decode_rgba8(noise.data(), 16, 16);
+	bool parted = false;
+	for (size_t i = 1; i < stored.size(); ++i) {
+		const TextureLevel &above = stored[i - 1];
+		TEST_EXPECT(stored[i].rgba == renderer::box_filter_half_rgba8(above.rgba.data(), above.width, above.height));
+		carried = renderer::box_filter_half(carried, above.width, above.height);
+		parted = parted || renderer::encode_rgba8(carried) != stored[i].rgba;
+	}
+	TEST_EXPECT(parted);
 	// A halving as the game's: the truncated mean of each 2 x 2 block (101 and 102 make 101).
 	std::vector<uint8_t> odd(4 * 4 * 4, 255);
 	for (size_t i = 0; i < odd.size(); i += 4) odd[i] = uint8_t((i / 4) % 2 ? 102 : 101);

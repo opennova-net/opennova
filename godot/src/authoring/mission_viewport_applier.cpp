@@ -1,5 +1,7 @@
 #include "authoring/mission_viewport_applier.h"
 
+#include "authoring/mission_placed_tiles.h"
+
 #include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/mesh.hpp>
@@ -33,6 +35,7 @@
 #include <runtime/environment/weather_runtime.h>
 #include <runtime/renderer/render_order.h>
 
+#include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/placement_traits.h>
 #include <godot_cpp/variant/packed_vector4_array.hpp>
 
@@ -122,8 +125,9 @@ MissionViewportApplier::TerrainKey MissionViewportApplier::terrain_key_of_(const
 	TerrainKey key;
 	key.terrain = header.terrain;
 	key.tile_set = header.tile_set;
-	// The mission's own name: the game reads <mission>.til beside its terrain.
-	key.mission = opennova::to_std(opennova::to_gd(mission.path()).get_file().get_basename());
+	// The mission's own name: the game reads <mission>.til beside its terrain, the name cut at its first dot
+	// (mission::mission_base_name).
+	key.mission = opennova::mission::mission_base_name(mission.path());
 	// Its .env, which the terrain's load reads after the .trn (D-TERRAIN-18).
 	key.environment = header.environment.empty() ? std::string() : header.environment + ".env";
 	if (!key.terrain.empty() && stamped_)
@@ -677,18 +681,12 @@ void MissionViewportApplier::run_terrain_file_(Build &build, const MissionViewpo
 	}
 	terrain_data_ = loading_;
 	loading_.unref();
-	// The mission's .til, as the game reads it before the build (forced loose first, [orig:
-	// Terrain_LoadTileInfoFile @ 0x60a740]; GameWorld::load_mission_tile_info): the tiles it places.
-	Ref<TerrainTileInfo> tile_info;
-	const String til = opennova::to_gd(build.terrain_key.mission) + ".til";
-	if (!build.terrain_key.mission.empty() && root_files_->has_file(til, ResourceRoot::LOOKUP_FORCE_LOOSE_FIRST)) {
-		const PackedByteArray bytes = root_files_->read_file(til, ResourceRoot::LOOKUP_FORCE_LOOSE_FIRST);
-		Ref<TerrainTileInfo> read;
-		read.instantiate();
-		if (!bytes.is_empty() && read->load_from_bytes(bytes) == OK) tile_info = read;
-	}
+	// The tiles the mission places, read as the game's load reads them before the build (read_mission_placed_tiles,
+	// the rule GameWorld::load_mission_tile_info reads through: <mission>.til, else the terrain's own
+	// polytrn_tileinfo, each where the game's loader takes it).
 	(void)mission;
-	terrain_->set_tile_info_override(tile_info);
+	terrain_->set_tile_info_override(read_mission_placed_tiles(root_files_, build.terrain_key.mission,
+			build.terrain_key.terrain, build.terrain_key.environment));
 	terrain_->set_terrain_data(terrain_data_);
 	water_->set_terrain_data(terrain_data_);
 	terrain_built_ = false;

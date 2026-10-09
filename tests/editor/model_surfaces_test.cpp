@@ -308,8 +308,14 @@ int words() {
 	TEST_EXPECT(moves.rfind("PN", 0) == 0);
 	std::printf("words: %s; %s\n", lod.c_str(), moves.c_str());
 	TEST_EXPECT(model_user_point_role("sitex00A") == "passenger seat" && model_user_point_role("ctrlx05") == "control seat" &&
-	            model_user_point_role("FLARE01") == "flare launch point" && model_user_point_role("ground ") == "ground anchor" &&
+	            model_user_point_role("FLARE01") == "flare launch point" && model_user_point_role("ground") == "ground anchor" &&
 	            model_user_point_role("Fastrope").empty());
+	// The game compares the name from byte zero with no trim (Entity_GetBoneSlotType's strnicmp and stricmp): a space
+	// before or after it plays no role; the field's NUL ends it.
+	TEST_EXPECT(model_user_point_role(" sitex00").empty() && model_user_point_role("UseGun ").empty() &&
+	            model_user_point_role("ground ").empty() && model_user_point_role("UseGun") == "gunner's seat" &&
+	            model_user_point_role(std::string("drvrx01\0ab", 10)) == "driver's seat" &&
+	            model_user_point_role(std::string("UseGun\0ab", 9)) == "gunner's seat");
 
 	// A LOD past one whose threshold is 0 is never drawn by distance.
 	ModelRow levels = *row;
