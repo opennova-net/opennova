@@ -565,9 +565,7 @@ bool DocumentMissionNames::zone_resolves(int64_t id) const {
 	// resolve [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000, the scan @0x453077, the box test
 	// @0x453093; section 7.3].
 	const Node *row = document_.row(document_.zone_holder(id));
-	if (!row) return false;
-	const bms::AreaTrigger &area = static_cast<const AreaRow &>(*row).native;
-	return area.x_min != area.x_max && area.y_min != area.y_max;
+	return row && !mission::zone_box_flat(static_cast<const AreaRow &>(*row).native);
 }
 
 std::string DocumentMissionNames::entity(int64_t ssn) const {

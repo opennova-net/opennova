@@ -5,12 +5,14 @@
 // File_ParseASCIIFile @ 0x53D810, the skip @ 0x53D908..0x53D91E], or the ConfigFile reader (the credits).
 #include "blank_makers.h"
 
+#include <cstdio>
 #include <sstream>
 
 #include <editor/project/project_files.h>
 #include <formats/avatars/avatars.h>
 #include <formats/def/def_hudpos_write.h>
 #include <formats/particle/parser.h>
+#include <runtime/menu/menu_credits.h>
 
 namespace opennova::editor {
 
@@ -41,18 +43,18 @@ bool make_blank_particles(const BlankRequest &request, std::vector<uint8_t> &out
 }
 
 // A credits roll of one line: the ConfigFile text the marquee reads [orig: CMarqueeWnd_LoadCreditsFromIni @
-// 0x65c5a0 -> ConfigFile_LoadGlobal @ 0x760ad0]: its [ENV] keys at the values a load resets them to (a scroll rate
-// of 1, the centre at 400, no space between lines [orig: @ 0x65c627..0x65c645]; an [ENV] that lacks one reads it
-// as 0), then one [TEXT] line, the project's title in the shell's bold 14-point font, which the menus require
-// (Arial14b.fnt), a space drawn as '_' as the game draws it. Not empty: the ConfigFile reader takes no file of no
-// byte [orig: ConfigFile_LoadFromFile @ 0x760a74]. The text form, which the credits document holds as it is: the
+// 0x65c5a0 -> ConfigFile_LoadGlobal @ 0x760ad0]: its [ENV] keys at the values a load resets them to
+// (menu::kMarqueeScrollRate, kMarqueeCenterX, kMarqueeVerticalSpace; an [ENV] that lacks one reads it as 0), then
+// one [TEXT] line, the project's title in the shell's bold 14-point font, which the menus require (Arial14b.fnt),
+// marked as a load's marks draw it (menu::marquee_marked_line). Not empty: the ConfigFile reader takes no file of
+// no byte [orig: ConfigFile_LoadFromFile @ 0x760a74]. The text form, which the credits document holds as it is: the
 // CBIN writer would write an empty section's terminator the game does not read.
 bool make_blank_credits(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &) {
-	std::string line = title_of(request);
-	for (char &c : line)
-		if (c == ' ') c = '_';
-		else if (c == ',') c = '@';
-	blank_text_to_bytes("[ENV]\nSCROLL_RATE = 1.0\nCENTER_X = 400\nVERTICAL_SPACE = 0\n\n[TEXT]\nTEXT = " + line + ", Arial14b\n",
+	char env[128];
+	std::snprintf(env, sizeof(env), "[ENV]\nSCROLL_RATE = %.1f\nCENTER_X = %d\nVERTICAL_SPACE = %d\n\n",
+	              double(menu::kMarqueeScrollRate), menu::kMarqueeCenterX, menu::kMarqueeVerticalSpace);
+	blank_text_to_bytes(std::string(env) + "[TEXT]\nTEXT = " + menu::marquee_marked_line(title_of(request)) +
+	                            ", Arial14b\n",
 	                    out);
 	return true;
 }
