@@ -15,7 +15,7 @@ namespace opennova::editor {
 // naming the images beside it, each an input of the import (import_context.h), so a change to any of
 // them imports the terrain again; its record's options are the terrain's numbers in world units. The
 // outputs are the files the game reads for a terrain, each named after the set's stem:
-// - `<stem>.cpt`: the heights and the ground mesh, made by TrnGen.exe's own bake (editor/terrain,
+// - `<stem>.cpt`: the heights and the ground mesh, made by TrnGen.exe's own bake (formats/cpt/trngen,
 //   terrain_bake.h), its depth section CDEP (the game loads no other [orig: Terrain_LoadLodStorage @
 //   0x6037B2]);
 // - `<stem>_c.tga`: the colour map, 1024 x 1024, 24-bit (the game's colour map is exactly that size
