@@ -1,8 +1,8 @@
 // Pins the Play launch plan and the one managed child (ADR 0046 d8/d10) over a fake
 // platform: the argument vector, where a packaged editor finds its runtime, the run directory the
 // game works in and what the game install's game finds there (S13 A8; Strict Play's: the build and the
-// program alone, no /d), the game install's file log and Strict Play's first-run start again, one child at a
-// time, the stop request, the deadline kill, exit on its own with the code it exited with,
+// program alone, no /d; the game install's file log is formats/filelog's), Strict Play's first-run start
+// again, one child at a time, the stop request, the deadline kill, exit on its own with the code it exited with,
 // and the build directory the session protects while alive.
 #include <algorithm>
 #include <chrono>
@@ -402,32 +402,6 @@ static int test_strict_expansion_staging() {
 	            error.code() == "play.install_missing" && files_in(run2).empty());
 	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run2, "other", plan, error, opennova::io::link_file, base) &&
 	            error.code() == "play.install_copy" && files_in(run2).empty());
-	return 0;
-}
-
-// The game install's file log, as /FRISK writes it [orig: File_LogFileAccess @ 0x75a480]: an archive's
-// entry "PFF LOADED FILE: <name>", a file from disk "LOADED FILE: <path>", an archive itself among those,
-// lines ended "\n" (the game's) or "\r\n"; each name once (compared without case, the first spelling
-// kept), in first-open order; a line of neither form counted alone.
-static int test_file_access_log() {
-	const FileAccessLog log = parse_file_access_log("LOADED FILE: language.pff\n"
-	                                                "LOADED FILE: localres.pff\r\n"
-	                                                "LOADED FILE: RESOURCE.PFF\n"
-	                                                "PFF LOADED FILE: gameerr.bin\n"
-	                                                "PFF LOADED FILE: weapon.def\n"
-	                                                "PFF LOADED FILE: WEAPON.DEF\n"
-	                                                "LOADED FILE: player.sav\n"
-	                                                "LOADED FILE: expansion\\jxm\\jxm.bin\n"
-	                                                "something else\n"
-	                                                "PFF LOADED FILE: main.mnu");
-	TEST_EXPECT(log.lines == 10);
-	TEST_EXPECT(log.archives == std::vector<std::string>({"language.pff", "localres.pff", "RESOURCE.PFF"}));
-	TEST_EXPECT(log.from_archives == std::vector<std::string>({"gameerr.bin", "weapon.def", "main.mnu"}));
-	TEST_EXPECT(log.from_disk == std::vector<std::string>({"player.sav", "expansion\\jxm\\jxm.bin"}));
-	TEST_EXPECT(parse_file_access_log("") == FileAccessLog());
-	FileAccessLog one;
-	add_file_access_line(one, "PFF LOADED FILE: keyhelp.bin");
-	TEST_EXPECT(one.lines == 1 && one.from_archives == std::vector<std::string>({"keyhelp.bin"}) && one.archives.empty());
 	return 0;
 }
 
@@ -1093,7 +1067,6 @@ int main() {
 	failures += test_install_staging();
 	failures += test_strict_install_staging();
 	failures += test_strict_expansion_staging();
-	failures += test_file_access_log();
 	failures += test_strict_first_run_decision();
 	failures += test_run_directory_keeps_game_state();
 	failures += test_run_directories_per_mode();

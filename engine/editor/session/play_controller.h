@@ -13,6 +13,7 @@
 #include <editor/run/play_start.h>
 #include <editor/session/build_operation.h>
 #include <editor/session/play_log.h>
+#include <formats/filelog/file_access_log.h>
 
 namespace opennova::editor {
 
@@ -165,7 +166,7 @@ private:
 	bool start_again_pending_ = false; // waiting for the game before to let its gate go
 	int64_t start_again_since_ = 0;
 	int64_t started_ms_ = 0;
-	FileAccessLog file_log_;
+	filelog::FileAccessLog file_log_;
 	// The game's one Output line (its log folded under it): its index, what runs ("OpenNova", "the game
 	// install"), the lines its log held and how many of them were shown; game_words is its text.
 	std::string game_words() const;
