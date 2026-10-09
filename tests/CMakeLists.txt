@@ -159,6 +159,11 @@ set_tests_properties(opennova_3di_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
 add_executable(threedi_o3d_commands_test threedi/o3d_commands_test.cpp)
 target_link_libraries(threedi_o3d_commands_test PRIVATE opennova_3di_commands)
 add_test(NAME threedi_o3d_commands COMMAND threedi_o3d_commands_test ${CMAKE_CURRENT_BINARY_DIR})
+# `texture`: an image written as a model's .dds, .tga or .mdt through the
+# runtime's image import and its authoring DXT encoder.
+add_executable(threedi_texture_command_test threedi/texture_command_test.cpp)
+target_link_libraries(threedi_texture_command_test PRIVATE opennova_3di_commands)
+add_test(NAME threedi_texture_command COMMAND threedi_texture_command_test ${CMAKE_CURRENT_BINARY_DIR})
 # build -> scene -> build over small scenes, and the records build refuses
 # (the executable too, where a refusal must say why).
 add_executable(threedi_o3d_build_test threedi/o3d_build_test.cpp)
