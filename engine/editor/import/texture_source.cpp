@@ -9,11 +9,11 @@
 #include <base/io/strutil.h>
 #include <editor/documents/texture_image.h>
 #include <editor/import/importer.h>
-#include <editor/import/png_encode.h>
 #include <editor/import/sidecar.h>
 #include <editor/import/texture_import.h>
 #include <editor/project/project_document.h>
 #include <formats/pff/pff.h>
+#include <formats/png/png_encode.h>
 
 namespace fs = std::filesystem;
 
@@ -134,7 +134,7 @@ ImportOptions texture_reproducing_options(const std::string &name, const std::ve
 		out["format"] = "png";
 	}
 	const auto format = out.find("format");
-	const std::string made = stem_of(source_name) + image_format_extension(format == out.end() ? "tga" : format->second);
+	const std::string made = stem_of(source_name) + renderer::image_format_extension(format == out.end() ? "tga" : format->second);
 	if (normalized_logical_name(made) != normalized_logical_name(basename_of(name))) out["name"] = basename_of(name);
 	return out;
 }
@@ -149,9 +149,9 @@ TextureSourcePlan plan_texture_replace(const ProjectPaths &paths, const AssetSca
 		plan.refusals.push_back(refused(image + " is no image the importer reads: a PNG, a TGA or a PCX.", texture));
 		return plan;
 	}
-	ImageSource decoded;
+	renderer::ImageSource decoded;
 	std::string why;
-	if (!decode_image_source(image, image_bytes, decoded, why)) {
+	if (!renderer::decode_image_source(image, image_bytes, decoded, why)) {
 		plan.refusals.push_back(refused(image + " does not read: " + why + ".", texture));
 		return plan;
 	}
@@ -249,14 +249,14 @@ TextureSourcePlan plan_texture_replace(const ProjectPaths &paths, const AssetSca
 		plan.source = "art/" + name;
 	}
 	if (as_png) {
-		plan.bytes = encode_png_rgba(decoded.image.pixels.data(), uint32_t(decoded.image.width), uint32_t(decoded.image.height));
+		plan.bytes = png::encode_png_rgba(decoded.image.pixels.data(), uint32_t(decoded.image.width), uint32_t(decoded.image.height));
 		plan.changes.push_back(image + " is kept in " + plan.source + " as a PNG of its texels.");
 	} else {
 		plan.bytes = image_bytes;
 	}
 	// The output takes the texture's name.
 	const auto format = options.find("format");
-	const std::string made = stem_of(plan.source) + image_format_extension(format == options.end() ? "tga" : format->second);
+	const std::string made = stem_of(plan.source) + renderer::image_format_extension(format == options.end() ? "tga" : format->second);
 	if (normalized_logical_name(made) != normalized_logical_name(plan.texture)) options["name"] = plan.texture;
 	else options.erase("name");
 	plan.options = std::move(options);
@@ -339,15 +339,15 @@ TextureSourcePlan plan_texture_source(const ProjectPaths &paths, const AssetScan
 	} else if (extension == ".tga" || extension == ".mdt") {
 		// A PNG of its texels (an .mdt's bytes are a TGA's), read as an image program reads the TGA (its origin
 		// honoured), which a paint program opens: the same texels in a fraction of the bytes.
-		ImageSource source;
+		renderer::ImageSource source;
 		std::string why;
-		if (!decode_image_source(stem_of(entry->logical_name) + ".tga", bytes, source, why)) {
+		if (!renderer::decode_image_source(stem_of(entry->logical_name) + ".tga", bytes, source, why)) {
 			plan.refusals.push_back(refused(entry->logical_name + " does not read as an image program reads a TGA: " + why + ".",
 			                                entry->relative_path));
 			return plan;
 		}
 		wanted = stem_of(entry->logical_name) + ".png";
-		plan.bytes = encode_png_rgba(source.image.pixels.data(), uint32_t(source.image.width), uint32_t(source.image.height));
+		plan.bytes = png::encode_png_rgba(source.image.pixels.data(), uint32_t(source.image.width), uint32_t(source.image.height));
 		if (header.reader == TextureReader::Tga && (header.tga_descriptor & 0x20))
 			plan.changes.push_back(entry->logical_name + "'s rows are stored top first, so the game draws it upside down now; made from "
 			                                             "its source, it is stored bottom first and drawn as its program shows it.");
@@ -355,7 +355,7 @@ TextureSourcePlan plan_texture_source(const ProjectPaths &paths, const AssetScan
 		// A DDS's first level as its reader decodes it, a PNG.
 		wanted = stem_of(entry->logical_name) + ".png";
 		const TextureLevel &level = image->levels.front();
-		plan.bytes = encode_png_rgba(level.rgba.data(), level.width, level.height);
+		plan.bytes = png::encode_png_rgba(level.rgba.data(), level.width, level.height);
 		plan.changes.push_back(entry->logical_name + " is made again from a PNG of its first level: its " +
 		                       (header.dds_format.empty() ? std::string("DDS") : header.dds_format) + " texels are encoded again" +
 		                       (header.dds_levels > 1 ? " and its " + std::to_string(header.dds_levels) + " levels made anew from the first"
