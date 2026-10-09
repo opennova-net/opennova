@@ -62,8 +62,8 @@ std::array<std::string, kHudFxSlots> hudfx_slot_names(const HudFxFile &file);
 // modeled layout where the file has one (each line as the file had it but for a changed tag's or model's
 // words; a line put down anew after the one before it, in the writer's form; the lines in the file's model's
 // order). The text is read again: one that would not read back as the file is written in the writer's form,
-// `rewritten` set. False with the reason for a model the walk reads otherwise (empty, or holding a blank, a
-// comma, a quote, `;` or `//`).
+// `rewritten` set. A line of no model is its tag alone (the game loads nothing for it). False with the reason for
+// a model the walk reads otherwise (holding a blank, a comma, a quote, `;` or `//`).
 bool hudfx_write(const HudFxFile &file, const textlayout::Notes *notes, std::string &text, std::string &error,
                  bool *rewritten = nullptr);
 

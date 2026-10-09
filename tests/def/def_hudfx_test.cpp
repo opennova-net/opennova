@@ -45,6 +45,12 @@ int written() {
 	TEST_EXPECT(hudfx_write(minted, nullptr, text, error) && text == "3DIHud\thud.3di\r\n3DIPower3\tp3.3di\r\n");
 	HudFxFile again = parsed(text);
 	TEST_EXPECT(again.lines.size() == 2 && again.lines[1].slot == 3 && again.lines[1].model == "p3.3di");
+	// A line of no model is its tag alone, read back so.
+	HudFxFile bare;
+	bare.lines.push_back({5, "", 0});
+	TEST_EXPECT(hudfx_write(bare, nullptr, text, error) && text == "3DIPower5\r\n");
+	again = parsed(text);
+	TEST_EXPECT(again.lines.size() == 1 && again.lines[0].slot == 5 && again.lines[0].model.empty());
 	minted.lines[0].model = "two words";
 	TEST_EXPECT(!hudfx_write(minted, nullptr, text, error) && error.find("two words") != std::string::npos);
 

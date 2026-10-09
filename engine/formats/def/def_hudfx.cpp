@@ -38,9 +38,9 @@ HudFxFile parse(const uint8_t *data, size_t size, textlayout::Notes *notes) {
 	return file;
 }
 
-// A model's name as one token of the walk.
+// A model's name as one token of the walk (or none: the line's tag alone).
 bool one_token(const std::string &name) {
-	return !name.empty() && name.find_first_of(" \t,\";\r\n") == std::string::npos && name.find("//") == std::string::npos;
+	return name.find_first_of(" \t,\";\r\n") == std::string::npos && name.find("//") == std::string::npos;
 }
 
 textlayout::OutRecord records_of(const HudFxFile &file) {
@@ -51,7 +51,8 @@ textlayout::OutRecord records_of(const HudFxFile &file) {
 		record.note = line.note;
 		record.kind = "line";
 		const char *tag = hudfx_tag(line.slot);
-		record.lines.push_back({"tag", std::string(tag ? tag : "") + "\t" + line.model});
+		// A line of no model is its tag alone: the slot's name the reset token's "", nothing loaded.
+		record.lines.push_back({"tag", std::string(tag ? tag : "") + (line.model.empty() ? "" : "\t" + line.model)});
 		root.lines.push_back({"", "", int(root.children.size())});
 		root.children.push_back(std::move(record));
 	}
