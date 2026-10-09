@@ -92,19 +92,4 @@ void EffectPlayback::play_to(int32_t tick, const EffectPlayOptions &options) {
 	tick_ = tick;
 }
 
-const char *effect_spawn_status_token(particle::EffectSpawnStatus status) {
-	switch (status) {
-	case particle::EffectSpawnStatus::Spawned: return "spawned";
-	case particle::EffectSpawnStatus::Suppressed: return "suppressed";
-	case particle::EffectSpawnStatus::InvalidHandle: return "invalid_handle";
-	case particle::EffectSpawnStatus::EmptyEffect: return "empty_effect";
-	case particle::EffectSpawnStatus::MissingSlot: return "missing_slot";
-	case particle::EffectSpawnStatus::MissingOwner: return "missing_owner";
-	case particle::EffectSpawnStatus::GroupCapacityReached: return "group_capacity_reached";
-	case particle::EffectSpawnStatus::EmitterCapacityReached: return "emitter_capacity_reached";
-	case particle::EffectSpawnStatus::Disabled: return "disabled";
-	}
-	return "unknown";
-}
-
 } // namespace opennova::editor
