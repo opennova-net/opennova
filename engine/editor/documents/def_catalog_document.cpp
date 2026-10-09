@@ -26,22 +26,13 @@ std::vector<SourceIssue> source_issues(const DefParseReport &report) {
 
 const ItemsFileState *items_state(const FileState *state) { return dynamic_cast<const ItemsFileState *>(state); }
 
-// A def's texture field's role (ADR 0046 S18, documents/texture_roles.h), by the field: HUD art alpha
-// only for a weapon's HUD icon, its clip and round graphics, its two crosshairs, its commander reticle,
-// its slot bar icon and an item's HUD image [orig: HUD_LoadAllTextures @ 0x59E248..0x59E26A, the ItemDef's
-// +0xA74 in mode 1; WeaponDefs_ParseLineCallback @ 0x544966, @ 0x5449A6, @ 0x544A0B, @ 0x544A52;
-// interface/hud-re.md, the alpha mode's loads]; a menu image for a weapon's loadout icon [orig:
-// CTextureManager_LoadOrFindTexture @ 0x654980]; a sight card for a sight's texture (render-material-re.md
-// "The game's texture loaders", the role table). None (-1) for a field whose loader the game is not
-// witnessed using: the name as written. (An item's shadow_texture the game never loads: refine_field marks
-// it ignored.)
+// A def's texture field's loader argument (ADR 0046 S18, documents/texture_roles.h): its role by the field
+// (renderer::def_texture_field_role, its witnesses); none (-1) for a field whose loader the game is not
+// witnessed using: the name as written. (An item's shadow_texture the game never loads: refine_field marks it
+// ignored.)
 int32_t def_texture_role_arg(const std::string &field) {
-	if (field == "hudicon" || field == "hudclipgfx_texture" || field == "hudrndgfx_texture" || field == "crosshair" ||
-	    field == "crosshair_secondary" || field == "commanders_x" || field == "hud_loadout_select" || field == "hud_image")
-		return texture_role_arg(TextureRoleId::HudAlphaOnly);
-	if (field == "loadout_menu_icon") return texture_role_arg(TextureRoleId::MenuImage);
-	if (field == "texture") return texture_role_arg(TextureRoleId::SightCard);
-	return -1;
+	renderer::TextureRoleId role = renderer::TextureRoleId::kCount;
+	return renderer::def_texture_field_role(field, role) ? texture_role_arg(role) : -1;
 }
 
 } // namespace

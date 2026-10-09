@@ -80,6 +80,7 @@
 
 using namespace opennova::editor;
 using opennova::pff::normalized_logical_name;
+namespace renderer = opennova::renderer;
 namespace fs = std::filesystem;
 
 namespace {
@@ -428,7 +429,7 @@ static int test_native_extractors() {
 	// else the name itself, no other extension. Its edge carries its role (ADR 0046 S18), whose loader
 	// that is.
 	const int32_t sky_loader = texture_loader_arg(opennova::renderer::TextureLoader::ArchiveSelfAlpha);
-	TEST_EXPECT(sky && sky->loader_arg == texture_role_arg(TextureRoleId::SkyCloud, kTextureArgPcx));
+	TEST_EXPECT(sky && sky->loader_arg == texture_role_arg(renderer::TextureRoleId::SkyCloud, kTextureArgPcx));
 	TEST_EXPECT(graph.resolve(ReferenceKind::Texture, "sky_a.pcx", "", nullptr, sky_loader) == ReferenceStatus::Missing);
 	TEST_EXPECT(editor_test::write_text(root + "/sky_a.pcx", "x"));
 	editor_test::handle_to_end(session, request::rescan());
@@ -1700,14 +1701,13 @@ static int test_reference_file_candidates() {
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "wall", -1, none) == Names({"wall"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "wall.png", -1, has({"wall.dds"})) ==
 	            Names({"wall.png"}));
-	using opennova::renderer::TextureLoader;
-	const int32_t sky = texture_loader_arg(TextureLoader::ArchiveSelfAlpha);
+	const int32_t sky = texture_loader_arg(renderer::TextureLoader::ArchiveSelfAlpha);
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "sky.tga", sky, has({"sky.tga", "sky.dds"})) ==
 	            Names({"sky.dds"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "sky.tga", sky, none) == Names({"sky.tga"}));
-	const int32_t particle = texture_loader_arg(TextureLoader::Particle);
+	const int32_t particle = texture_loader_arg(renderer::TextureLoader::Particle);
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "fx\\puff.tga", particle, none) == Names({"puff.tga"}));
-	const int32_t hud = texture_loader_arg(TextureLoader::HudAlpha);
+	const int32_t hud = texture_loader_arg(renderer::TextureLoader::HudAlpha);
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "art.tga.alpha", hud, none) == Names({"art.tga"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "icon.pcx", hud, none) == Names({"icon.pcx"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "icon.bmp", hud, has({"icon.bmp"})).empty());
@@ -1715,15 +1715,15 @@ static int test_reference_file_candidates() {
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "jtt01.til", kTileSetTextureArg, none) ==
 	            Names({"jtt01.TGA"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "jtt01", kTileSetTextureArg, none) == Names({"jtt01.TGA"}));
-	TextureLoader loader = TextureLoader::Stage;
-	TEST_EXPECT(texture_loader_of(sky, loader) && loader == TextureLoader::ArchiveSelfAlpha &&
+	renderer::TextureLoader loader = renderer::TextureLoader::Stage;
+	TEST_EXPECT(texture_loader_of(sky, loader) && loader == renderer::TextureLoader::ArchiveSelfAlpha &&
 	            !texture_loader_of(-1, loader) && !texture_loader_of(0, loader) &&
-	            !texture_loader_of(texture_loader_arg(TextureLoader::Particle) - 1, loader));
+	            !texture_loader_of(texture_loader_arg(renderer::TextureLoader::Particle) - 1, loader));
 	// One of a role, by its role's loader (ADR 0046 S18): a sky map's archive loader, the .dds beside it
 	// first; a colour map's TGA reader, the name alone.
-	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "sky.pcx", texture_role_arg(TextureRoleId::SkyCloud),
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "sky.pcx", texture_role_arg(renderer::TextureRoleId::SkyCloud),
 	                                      has({"sky.dds"})) == Names({"sky.dds"}));
-	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "map.tga", texture_role_arg(TextureRoleId::TerrainColourMap),
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "map.tga", texture_role_arg(renderer::TextureRoleId::TerrainColourMap),
 	                                      has({"map.dds"})) == Names({"map.tga"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Font, "Arial99.fnt", -1, none) == Names({"Arial99.fnt"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Font, "arial12b", -1, none) == Names({"arial12b.fnt"}));
@@ -1801,16 +1801,17 @@ static int test_terrain_and_bank_extractors() {
 	// Each map by its role (ADR 0046 S18) and so its game loader: the colour map and the atlas through
 	// the TGA reader, a near detail map through the stage loader (its .dds sibling first), the
 	// character map by its name.
-	using opennova::renderer::TextureLoader;
-	const auto loader_of_map = [&](const char *map, TextureLoader &loader) {
-		TextureRoleId role = TextureRoleId::kCount;
+	const auto loader_of_map = [&](const char *map, renderer::TextureLoader &loader) {
+		renderer::TextureRoleId role = renderer::TextureRoleId::kCount;
 		const GraphEdge *edge = edge_to(graph, "isle.trn", ReferenceKind::Texture, map);
-		return edge && texture_arg_role(edge->loader_arg, role) && texture_role_renderer_loader(role, loader);
+		if (!edge || !texture_arg_role(edge->loader_arg, role)) return false;
+		loader = renderer::texture_role(role).loader;
+		return renderer::texture_loader_has_attempts(loader);
 	};
-	TextureLoader loader = TextureLoader::Stage;
-	TEST_EXPECT(loader_of_map("isle_c.tga", loader) && loader == TextureLoader::Tga);
-	TEST_EXPECT(loader_of_map("tiles.tga", loader) && loader == TextureLoader::Tga);
-	TEST_EXPECT(loader_of_map("det.tga", loader) && loader == TextureLoader::Stage);
+	renderer::TextureLoader loader = renderer::TextureLoader::Stage;
+	TEST_EXPECT(loader_of_map("isle_c.tga", loader) && loader == renderer::TextureLoader::Tga);
+	TEST_EXPECT(loader_of_map("tiles.tga", loader) && loader == renderer::TextureLoader::Tga);
+	TEST_EXPECT(loader_of_map("det.tga", loader) && loader == renderer::TextureLoader::Stage);
 	TEST_EXPECT(!loader_of_map("isle_m.pcx", loader));
 	const GraphEdge *palm = edge_to(graph, "isle.trn", ReferenceKind::Model, "palm");
 	TEST_EXPECT(palm && palm->record == "Terrain/Foliage 1" && palm->field == "graphic");
@@ -1983,7 +1984,7 @@ static int test_model_texture_references() {
 	textures({"puff.tga"});
 	const GraphEdge *puff =
 			edge_to(*view.findings.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
-	TEST_EXPECT(puff && puff->loader_arg == texture_role_arg(TextureRoleId::ParticleGraphic) &&
+	TEST_EXPECT(puff && puff->loader_arg == texture_role_arg(renderer::TextureRoleId::ParticleGraphic) &&
 			view.findings.graph->resolve(*puff, &file) == ReferenceStatus::Present &&
 			file == "textures/puff.tga" &&
 			graph_edge_to_json(*view.findings.graph, *puff).get_string("texture_role", "") == "particle_graphic");
