@@ -18,12 +18,12 @@
 #include <base/io/file_time.h>
 #include <editor/documents/texture_document.h>
 #include <editor/import/import_run.h>
-#include <editor/import/png_encode.h>
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/png/png_encode.h>
 #include <formats/tga/tga.h>
 
 #include "common/test_expect.h"
@@ -33,6 +33,7 @@
 using namespace opennova;
 using namespace opennova::editor;
 namespace fs = std::filesystem;
+using opennova::png::encode_png_rgba;
 
 namespace {
 

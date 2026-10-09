@@ -11,7 +11,6 @@
 #include <editor/documents/texture_document.h>
 #include <editor/documents/texture_image.h>
 #include <editor/documents/texture_operations.h>
-#include <editor/import/png_encode.h>
 #include <editor/import/sidecar.h>
 #include <editor/import/texture_import.h>
 #include <editor/project/project_document.h>
@@ -23,6 +22,7 @@
 #include <editor/session/view/session_view.h>
 #include <formats/dds/dds.h>
 #include <formats/pcx/pcx_io.h>
+#include <formats/png/png_encode.h>
 #include <formats/tga/tga.h>
 
 #include "common/test_expect.h"
@@ -31,6 +31,7 @@
 
 using namespace opennova;
 using namespace opennova::editor;
+using opennova::png::encode_png_rgba;
 
 namespace {
 

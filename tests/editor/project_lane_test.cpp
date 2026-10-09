@@ -38,7 +38,7 @@
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "editor/import_test_support.h"
-#include "editor/png_test_support.h"
+#include "common/png_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -683,14 +683,14 @@ int test_import_findings_kept() {
 	Diagnostic error;
 	TEST_EXPECT(create_project(root, "Kept", "jo", doc, error));
 	const ProjectPaths paths = ProjectPaths::for_root(root);
-	editor_test::PngSpec spec;
+	test_png::PngSpec spec;
 	spec.width = spec.height = 2;
 	for (uint32_t y = 0; y < 2; ++y) {
 		spec.rows.push_back(0);
 		for (uint32_t x = 0; x < 2; ++x)
 			for (const uint32_t channel : {x * 90, y * 120, 33u, 40u + x * 100}) spec.rows.push_back(uint8_t(channel));
 	}
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/glow.png", editor_test::make_png(spec)));
+	TEST_EXPECT(editor_test::write_bytes(root + "/art/glow.png", test_png::make_png(spec)));
 	const Importer *importer = importer_for("glow.png");
 	TEST_EXPECT(importer != nullptr);
 	if (!importer) return 1;
