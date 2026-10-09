@@ -623,7 +623,7 @@ naming its heightmap (a 1024 x 1024 PNG at any depth, or TrnGen's own `.raw`), i
 (1024 x 1024) and, if wanted, a detail, a tile set and a surface map, each an import input; its import
 record's options are the terrain's numbers in world units (the heightmap white's height, the water
 level, the layout). The terrain importer bakes it with TrnGen.exe's own bake (the port in
-`engine/editor/terrain`) into the files the game reads for a terrain, each named after the set:
+`engine/formats/cpt/trngen`) into the files the game reads for a terrain, each named after the set:
 `<name>.trn`, `.cpt`, `.til`, the colour, detail, blend and tile-set textures, and `<name>_m.pcx`, the
 **surface map** (the `.trn`'s char map: each texel's index the surface class the game reads there,
 painted as indices or in the char map legend's colours, `formats/trn/charmap_legend.h`), and
