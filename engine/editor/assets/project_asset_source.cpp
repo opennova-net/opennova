@@ -26,7 +26,7 @@ uint64_t text_hash(const std::string &text) {
 // The flat name a lookup names, however the caller spelled a path.
 std::string flat_name(const std::string &name) {
 	const size_t slash = name.find_last_of("/\\");
-	return normalized_logical_name(slash == std::string::npos ? name : name.substr(slash + 1));
+	return pff::normalized_logical_name(slash == std::string::npos ? name : name.substr(slash + 1));
 }
 
 } // namespace
@@ -40,7 +40,7 @@ void ProjectAssetSource::set_scan(const std::string &root, const AssetScan &scan
 		// are in the scan), and so do an archive (the build refuses one) and a file of no kind the
 		// game knows (S13 A8), as in plan_build.
 		if (!asset_kind_packed(asset.kind)) continue;
-		files_.emplace(normalized_logical_name(asset.logical_name), Entry{asset.relative_path, asset.size_bytes, asset.modified_ticks});
+		files_.emplace(pff::normalized_logical_name(asset.logical_name), Entry{asset.relative_path, asset.size_bytes, asset.modified_ticks});
 	}
 	++generation_;
 }
