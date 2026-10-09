@@ -30,12 +30,10 @@ namespace {
 
 bool ieq(std::string_view a, std::string_view b) { return opennova::strutil::iequals(a, b); }
 
-constexpr uint32_t hash4(char a, char b, char c, char d) {
-	return (uint32_t(uint8_t(a)) << 24) | (uint32_t(uint8_t(b)) << 16) |
-			(uint32_t(uint8_t(c)) << 8) | uint32_t(uint8_t(d));
-}
+// The constants' spelling (wac_lexis.h's wac_hash4).
+constexpr uint32_t hash4(char a, char b, char c, char d) { return wac_hash4(a, b, c, d); }
 
-// A token's hash is its first four bytes padded with ';', big-endian.
+// A token's hash is its first four bytes padded with ';', big-endian (wac_hash_bytes).
 constexpr uint32_t kHashUnset = hash4(';', ';', ';', ';');
 constexpr uint32_t kHashLParen = hash4('(', ';', ';', ';');
 constexpr uint32_t kHashRParen = hash4(')', ';', ';', ';');
@@ -46,7 +44,6 @@ constexpr uint32_t kHashIf = hash4('I', 'F', ';', ';');
 constexpr uint32_t kHashThen = hash4('T', 'H', 'E', 'N');
 constexpr uint32_t kHashElse = hash4('E', 'L', 'S', 'E');
 constexpr uint32_t kHashElseIf = hash4('E', 'L', 'S', 'I');
-constexpr uint32_t kHashEnd = hash4('E', 'N', 'D', ';');
 constexpr uint32_t kHashEnter = hash4('E', 'N', 'T', 'E');
 constexpr uint32_t kHashLeave = hash4('L', 'E', 'A', 'V');
 constexpr uint32_t kHashDoSeq = hash4('D', 'O', 'S', 'E');
@@ -59,14 +56,6 @@ constexpr uint32_t kHashVar = hash4('V', 'A', 'R', ';');
 constexpr uint32_t kHashRun = hash4('R', 'U', 'N', ';');
 constexpr uint32_t kHashOpenBracket = hash4('[', ';', ';', ';');
 constexpr uint32_t kHashCloseBracket = hash4(']', ';', ';', ';');
-
-// END, and every word starting ENDD, ENDI, ENDL or ENDP (ENDDO, ENDIF,
-// ENDLOOP...). [orig: Script_Compile @0x4F4065 (END;), the switch
-// @0x4F461E..0x4F4634 (cases 0/5/8/12 -> @0x4F463B)]
-bool is_end_hash(uint32_t h) {
-	return h == kHashEnd || h == hash4('E', 'N', 'D', 'D') || h == hash4('E', 'N', 'D', 'I') ||
-			h == hash4('E', 'N', 'D', 'L') || h == hash4('E', 'N', 'D', 'P');
-}
 
 // [orig: Script_GetOperatorPrecedence @0x4EE540] 18 {hash, level} rows.
 uint8_t operator_precedence(uint32_t h) {
@@ -412,7 +401,7 @@ private:
 			// blank, ';', ',' or an operator byte, or after 64 bytes (the
 			// next byte is consumed and dropped). [orig: @0x4F3412..0x4F345A]
 			while (f.cursor <= f.end) {
-				if (bl > 0x60) bl = static_cast<uint8_t>(bl - 0x20);
+				bl = wac_word_byte(bl);
 				t[length] = bl;
 				bl = at(f, f.cursor);
 				++length;
@@ -424,15 +413,14 @@ private:
 		f.last = bl;
 		f.token_length = length;
 		// ';' padding, the first four bytes hashed as signed chars, then the
-		// terminator; ELSEIF alone is renamed so ELSE keeps its own hash.
-		// [orig: @0x4F3464..0x4F34C9]
+		// terminator; ELSEIF alone is renamed so ELSE keeps its own hash
+		// (wac_hash_bytes, wac_token_hash). [orig: @0x4F3464..0x4F34C9]
 		t[length] = ';';
 		t[length + 1] = ';';
 		t[length + 2] = ';';
-		uint32_t h = static_cast<uint32_t>(int32_t(int8_t(t[0])));
-		for (size_t i = 1; i < 4; ++i) h = (h << 8) + static_cast<uint32_t>(int32_t(int8_t(t[i])));
+		const uint32_t h = wac_hash_bytes(t[0], t[1], t[2], t[3]);
 		t[length] = 0;
-		f.token_hash = ieq(token_view(f), "ELSEIF") ? kHashElseIf : h;
+		f.token_hash = wac_token_hash(token_view(f), h);
 	}
 
 	// The operator after the token, for the auto-paren, drain and '=' tests.
@@ -899,7 +887,7 @@ private:
 		}
 		if (h == kHashCloseBracket) return true;
 		const bool drains = h == kHashIf || h == kHashThen || h == kHashElse || h == kHashElseIf ||
-				is_end_hash(h) || h == kHashEnter || h == kHashLeave || h == kHashDoSeq ||
+				wac_is_end_hash(h) || h == kHashEnter || h == kHashLeave || h == kHashDoSeq ||
 				h == kHashDoRnd || h == kHashNext || h == kHashGloop || h == kHashPloop ||
 				h == kHashOpenBracket;
 		if (!drains) return false;
@@ -932,7 +920,7 @@ private:
 			open_alternative(f, false);
 		} else if (h == kHashElseIf) {
 			if (open_alternative(f, true)) open_event(f, f.depth);
-		} else if (is_end_hash(h)) {
+		} else if (wac_is_end_hash(h)) {
 			close_block(f);
 		} else if (h == kHashDoSeq) {
 			open_do(f, 4, "Unexpected DOSEQ");
