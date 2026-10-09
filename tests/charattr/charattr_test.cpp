@@ -245,6 +245,27 @@ void synthetic_writer() {
 	            "text would overrun the reader's pool, refused\n");
 }
 
+// A class's camouflage items by their property [orig: CharAttr_GetCammoTypeId @ 0x4127b0], and the property a
+// mission's camouflage selector picks [orig: Entity_SpawnFromAnimSlotProperty @ 0x43c399..0x43c3be]: 1 jungle,
+// 2 arctic, any other desert.
+void synthetic_cammo() {
+	charattr::ClassRow row;
+	row.jungle_cammo = 10;
+	row.desert_cammo = 11;
+	row.arctic_cammo = 12;
+	row.run_modifier = 13;
+	CHECK(charattr::cammo_of(row, charattr::kJungleCammo) == 10 && charattr::cammo_of(row, charattr::kDesertCammo) == 11 &&
+	      charattr::cammo_of(row, charattr::kArcticCammo) == 12);
+	CHECK(charattr::cammo_of(row, charattr::kRunModifier) == 0 && charattr::cammo_of(row, charattr::kStealth) == 0 &&
+	      charattr::cammo_of(row, static_cast<charattr::Property>(1)) == 0);
+	CHECK(charattr::cammo_property_for_camouflage(1) == charattr::kJungleCammo &&
+	      charattr::cammo_property_for_camouflage(2) == charattr::kArcticCammo &&
+	      charattr::cammo_property_for_camouflage(0) == charattr::kDesertCammo &&
+	      charattr::cammo_property_for_camouflage(3) == charattr::kDesertCammo &&
+	      charattr::cammo_property_for_camouflage(-1) == charattr::kDesertCammo);
+	std::printf("cammo: each property's item, none for another; the selector 1 jungle, 2 arctic, else desert\n");
+}
+
 int retail_legs() {
 	int ran = 0;
 	auto leg = [&](const std::vector<uint8_t> &bytes, const std::string &what) {
@@ -318,6 +339,7 @@ int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	synthetic_loader();
 	synthetic_writer();
+	synthetic_cammo();
 	retail_legs();
 	if (failures == 0) std::printf("charattr: all passed\n");
 	return failures == 0 ? 0 : 1;

@@ -1,0 +1,81 @@
+; The ConfigFile text reader's data-strings pool, one value past it: 65 values, the text ones (the six
+; ATTRIBUTES words) 60 bytes, each its length and one. The pool is 64 bytes (60 rounded up to 64), and
+; the clear writes one byte per value: 65, one past it into the next heap block's header
+; (ConfigFile_ParseText @ 0x7609e8). It is pool_at_line.def and CHARACTER5's RUN_MODIFIER at 0, which the
+; game reads the same with the line gone (the table is cleared first): the editor's fix comments it out.
+[CHARACTER1]
+STEALTH = 25
+HPBONUS = 2
+RECOIL_MUTE = 0.75
+XHAIR_MUTE = 2.5
+XHAIRDX_MUTE = 2.5
+RELOAD_MUTE = 0.5
+JUNGLE_CAMMO = 5310
+DESERT_CAMMO = 5310
+ARCTIC_CAMMO = 5310
+RUN_MODIFIER = 1
+ATTRIBUTES = AutoScope
+
+[CHARACTER2]
+STEALTH = 25
+HPBONUS = 2
+RECOIL_MUTE = 0.75
+XHAIR_MUTE = 2.5
+XHAIRDX_MUTE = 2.5
+RELOAD_MUTE = 0.5
+JUNGLE_CAMMO = 5305
+DESERT_CAMMO = 5305
+ARCTIC_CAMMO = 5305
+RUN_MODIFIER = -1
+ATTRIBUTES = Medic
+
+[CHARACTER3]
+STEALTH = 25
+HPBONUS = 2
+RECOIL_MUTE = 0.75
+XHAIR_MUTE = 2.5
+XHAIRDX_MUTE = 2.5
+RELOAD_MUTE = 0.5
+JUNGLE_CAMMO = 5305
+DESERT_CAMMO = 5305
+ARCTIC_CAMMO = 5305
+RUN_MODIFIER = 1
+ATTRIBUTES = AutoScope
+
+[CHARACTER4]
+STEALTH = 25
+HPBONUS = 2
+RECOIL_MUTE = 0.75
+XHAIR_MUTE = 2.5
+XHAIRDX_MUTE = 2.5
+RELOAD_MUTE = 0.5
+JUNGLE_CAMMO = 5305
+DESERT_CAMMO = 5305
+ARCTIC_CAMMO = 5305
+RUN_MODIFIER = -1
+ATTRIBUTES = SpreadBonus
+
+[CHARACTER5]
+STEALTH = 25
+HPBONUS = 2
+RECOIL_MUTE = 0.75
+XHAIR_MUTE = 2.5
+XHAIRDX_MUTE = 2.5
+RELOAD_MUTE = 0.5
+JUNGLE_CAMMO = 5305
+DESERT_CAMMO = 5305
+ARCTIC_CAMMO = 5305
+RUN_MODIFIER = 0
+ATTRIBUTES = KnifeBonus
+
+[CHARACTER6]
+STEALTH = 25
+HPBONUS = 2
+RECOIL_MUTE = 0.75
+XHAIR_MUTE = 2.5
+XHAIRDX_MUTE = 2.5
+RELOAD_MUTE = 0.5
+JUNGLE_CAMMO = 5305
+DESERT_CAMMO = 5305
+ARCTIC_CAMMO = 5305
+ATTRIBUTES = KnifeBonus

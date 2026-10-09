@@ -9,6 +9,7 @@
   "authored": [
     "fixtures/README.md",
     "fixtures/anim/*",
+    "fixtures/configfile/*.def",
     "fixtures/def/items.def",
     "fixtures/grm/person.grm",
     "fixtures/mnu/widgets.mnu",

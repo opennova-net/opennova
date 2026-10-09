@@ -112,6 +112,19 @@ std::array<uint8_t, kRowBytes> row_bytes(const ClassRow &row) {
 	return out;
 }
 
+int32_t cammo_of(const ClassRow &row, Property property) {
+	switch (property) {
+		case kJungleCammo: return row.jungle_cammo;
+		case kDesertCammo: return row.desert_cammo;
+		case kArcticCammo: return row.arctic_cammo;
+		default: return 0;
+	}
+}
+
+Property cammo_property_for_camouflage(int camouflage) {
+	return camouflage == 1 ? kJungleCammo : camouflage == 2 ? kArcticCammo : kDesertCammo;
+}
+
 bool same_rows(const Table &a, const Table &b) {
 	for (size_t i = 0; i < kClassCount; ++i)
 		if (row_bytes(a.rows[i]) != row_bytes(b.rows[i])) return false;

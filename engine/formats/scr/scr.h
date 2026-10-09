@@ -3,6 +3,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <string>
+#include <vector>
+
 
 namespace opennova::scr {
 
@@ -32,8 +35,8 @@ void scr_decrypt(uint8_t *data, size_t size, uint32_t key);
 
 /* Encrypt payload in-place: scr_decrypt's inverse (the keystream XOR, then the bytes
    reversed), so scr_decrypt of what it writes gives the payload back. The game has no
-   writer of its own: this is what a tool writes a file in the SCR form with (the editor's
-   shaders, which the shader loader takes in that form alone). */
+   writer of its own: this is what a tool writes a file in the SCR form with (a shader,
+   which the shader loader takes in that form alone: scr_shader_encode). */
 void scr_encrypt(uint8_t *data, size_t size, uint32_t key);
 
 /* Strip SCR header and decrypt into caller-provided buffer.
@@ -44,5 +47,21 @@ void scr_encrypt(uint8_t *data, size_t size, uint32_t key);
            -2 if output buffer is too small. */
 int scr_decrypt_buf(const uint8_t *data, size_t size,
                     uint8_t *out, size_t *out_size, uint32_t key);
+
+/* The HLSL shader loader's form: "SCR", version 1 alone, then the text and one NUL after it under
+   SCR_KEY_SHADERS [orig: ScriptFile_LoadAndDecrypt @ 0x5AE060: the sniff for 'S','C','R',1 @ 0x5AE0A9,
+   the key 0xA55B1EED at 0x5AE0C0, one trailing NUL dropped]. The loader rejects anything else, the
+   version-detected key table's version 2 included (D-SCR-1/2: scr_is_scr's superset and the vfs
+   payload decode's version map serve the other readers and titles). */
+inline constexpr uint8_t SCR_SHADER_VERSION = 1;
+
+/* A shader file's text as the shader loader reads it: false for bytes not in its form (not SCR, or a
+   version other than 1). `nul`, when given, says whether one trailing NUL was dropped. */
+bool scr_shader_decode(const uint8_t *data, size_t size, std::string &text, bool *nul = nullptr);
+
+/* The file in the shader loader's form holding `text`, the NUL after it where `nul` (every shipped
+   shader ends its text with one). The game has no writer of its own: scr_shader_decode reads back
+   `text` and `nul`. */
+std::vector<uint8_t> scr_shader_encode(const std::string &text, bool nul = true);
 
 } // namespace opennova::scr

@@ -5,8 +5,9 @@
 // sections and each section's entries, a key and its values each an integer, a float or a string; the
 // accessors read them back as the engine's do, a section found by its label and a key from the section's
 // read cursor. A marquee's credits read it (runtime/menu/menu_credits.h), charattr.def is one
-// (formats/charattr/charattr.h), and the editor's credits document writes a CBIN file's text form so that
-// this reader reads it back as the file holds it. The binary form (CBIN) is formats/cbin/binary_config.h.
+// (formats/charattr/charattr.h), and a CBIN file's text form is written so that this reader reads it back
+// as the file holds it (formats/cbin/binary_config_text.h). The binary form (CBIN) is
+// formats/cbin/binary_config.h.
 // Witness records: docs/mnu/menu-re.md ("Marquee credits"), docs/net/novaworld-net-re.md (charattr.def).
 
 #include <cstddef>
@@ -111,5 +112,14 @@ uint32_t fastmem_block_bytes(uint32_t size);
 // The pool and its clear for a file of these bytes, as ConfigFile_LoadFromFile -> ConfigFile_ParseText sizes
 // and clears it.
 DataStringsPool data_strings_pool(const uint8_t *data, size_t size);
+// Where the clear first writes past the pool: the byte offset into the text of the value whose byte of the
+// clear is the first past it, value pool_bytes + 1 in the reader's order (each section's entries, each
+// entry's values, as parse_config_text gives them); 0 for a pool no value runs past.
+size_t data_strings_overrun_offset(const std::vector<ConfigSection> &sections, const DataStringsPool &pool);
+
+// `text` with the reader's comment, ';', put before each line that starts at one of `line_starts` (each a
+// byte offset into the text; one past it, or one given twice, puts none): a line opening with ';' is no
+// entry to the reader [orig: ini_parse_section_entries @ 0x75dc04, its key "%[^;\n\r=]" of no character].
+std::string config_commented(const std::string &text, std::vector<size_t> line_starts);
 
 } // namespace opennova::configfile
