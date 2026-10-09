@@ -39,7 +39,9 @@
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
+namespace renderer = opennova::renderer;
 using opennova::io::JsonValue;
+using opennova::renderer::DdsSource;
 using opennova::renderer::DeviceTextureFormat;
 
 namespace {
@@ -72,14 +74,16 @@ std::vector<uint8_t> dxt5(uint32_t side, uint8_t alpha) {
 }
 
 int test_budget() {
-	// The base game's crate diffuse: a 2048 x 2048 32-bit TGA in slot 1.
+	// The base game's crate diffuse: a 2048 x 2048 32-bit TGA in slot 1, each detail level's device texture the
+	// engine's (renderer::model_row_device_texture, which renderer_device_texture pins).
 	const TextureHeader crate = texture_header("oncrate1_0.tga", tga(2048, 2048));
-	const TextureBudget budget = texture_budget(crate, "oncrate1_0.tga", TextureBudgetLoader::Stage, 1);
-	TEST_EXPECT(budget.known && budget.full().format == DeviceTextureFormat::A8R8G8B8 && budget.full().width == 2048 &&
-	            budget.full().levels == 10);
-	TEST_EXPECT(budget.full().bytes > 21 * kMB && budget.full().bytes < 22 * kMB);
-	// Halved twice at the lowest detail, once at 1, kept at 2 (slot 1).
-	TEST_EXPECT(budget.detail[0].width == 512 && budget.detail[1].width == 1024 && budget.detail[2].width == 2048);
+	const TextureBudget budget = texture_budget(crate, "oncrate1_0.tga", renderer::TextureLoader::Stage, 1);
+	DdsSource crate_file;
+	crate_file.width = crate_file.height = 2048;
+	TEST_EXPECT(budget.known && budget.full().bytes ==
+	                                    renderer::model_row_device_texture(renderer::TextureLoader::Stage, 1, 3, crate_file, false).bytes &&
+	            budget.detail[0].width ==
+	                    renderer::model_row_device_texture(renderer::TextureLoader::Stage, 1, 0, crate_file, false).width);
 	// Its .dds: DXT5 (it holds an alpha), a quarter of the bytes.
 	TEST_EXPECT(budget.offers_dds && budget.as_dds.format == DeviceTextureFormat::Dxt5 && budget.as_dds.levels == 12 &&
 	            budget.as_dds.bytes > 5 * kMB && budget.as_dds.bytes < 6 * kMB);
@@ -87,33 +91,30 @@ int test_budget() {
 	            "21.3 MB in the game (2048 x 2048, A8R8G8B8 (uncompressed), 10 levels: 21.3 MB); 5.3 MB as a DXT5 .dds");
 	// A 24-bit one's .dds is DXT1.
 	const TextureBudget opaque =
-			texture_budget(texture_header("wall.tga", tga(256, 256, false)), "wall.tga", TextureBudgetLoader::Stage, 1);
+			texture_budget(texture_header("wall.tga", tga(256, 256, false)), "wall.tga", renderer::TextureLoader::Stage, 1);
 	TEST_EXPECT(opaque.as_dds.format == DeviceTextureFormat::Dxt1);
-	// A slot-3 normal map read by the normal-map loader: capped at 512, the detail never halving it.
+	// A slot-3 normal map read by the normal-map loader offers no .dds; the same row read by the diffuse loader does.
 	const TextureHeader arm = texture_header("arm.mdt", tga(4096, 64));
-	const TextureBudget normal = texture_budget(arm, "arm.mdt", TextureBudgetLoader::Normal, 3);
-	TEST_EXPECT(normal.full().width == 512 && normal.full().height == 8 && normal.detail[0].width == 512 && !normal.offers_dds);
-	// The same row read by the diffuse loader in slot 3: whole, its .dds offered.
-	const TextureBudget as_diffuse = texture_budget(arm, "arm.mdt", TextureBudgetLoader::Stage, 3);
-	TEST_EXPECT(as_diffuse.full().width == 4096 && as_diffuse.detail[0].width == 4096 && as_diffuse.offers_dds);
-	// A DDS: an opaque DXT5 counted as the DXT1 the game stores it as; its levels skipped at the lowest detail.
+	const TextureBudget normal = texture_budget(arm, "arm.mdt", renderer::TextureLoader::Normal, 3);
+	TEST_EXPECT(normal.known && normal.full().width == 512 && !normal.offers_dds);
+	TEST_EXPECT(texture_budget(arm, "arm.mdt", renderer::TextureLoader::Stage, 3).offers_dds);
+	// A DDS's header as the budget reads it: an opaque DXT5 counted as the DXT1 the game stores it as.
 	const TextureHeader solid = texture_header("solid.dds", dxt5(256, 255));
 	TEST_EXPECT(solid.read && solid.dds_dxt5_opaque && solid.dds_levels == 9);
-	const TextureBudget dds = texture_budget(solid, "solid.dds", TextureBudgetLoader::Stage, 1);
+	const TextureBudget dds = texture_budget(solid, "solid.dds", renderer::TextureLoader::Stage, 1);
 	TEST_EXPECT(dds.full().format == DeviceTextureFormat::Dxt1 && dds.full().dxt5_as_dxt1 && !dds.offers_dds);
-	TEST_EXPECT(dds.detail[0].width == 64 && dds.detail[0].levels == 7);
 	const TextureHeader clear = texture_header("clear.dds", dxt5(256, 0));
 	TEST_EXPECT(clear.read && !clear.dds_dxt5_opaque);
-	TEST_EXPECT(texture_budget(clear, "clear.dds", TextureBudgetLoader::Stage, 1).full().format == DeviceTextureFormat::Dxt5);
+	TEST_EXPECT(texture_budget(clear, "clear.dds", renderer::TextureLoader::Stage, 1).full().format == DeviceTextureFormat::Dxt5);
 	// The words of bytes.
 	TEST_EXPECT(texture_bytes_words(96) == "96 bytes" && texture_bytes_words(340 * 1024) == "340 KB" &&
 	            texture_bytes_words(uint64_t(21.3 * kMB)) == "21.3 MB");
 	// The roles costed: a model row's.
-	TextureBudgetLoader loader = TextureBudgetLoader::Stage;
-	TEST_EXPECT(texture_role_budget_loader(TextureRoleId::ModelHeightNormal, loader) && loader == TextureBudgetLoader::Normal);
-	TEST_EXPECT(texture_role_budget_loader(TextureRoleId::ModelPlain, loader) && loader == TextureBudgetLoader::Plain);
-	TEST_EXPECT(!texture_role_budget_loader(TextureRoleId::TerrainColourMap, loader));
-	std::printf("budget: the device texture of each loader, its .dds, an opaque DXT5 as DXT1\n");
+	renderer::TextureLoader loader = renderer::TextureLoader::Stage;
+	TEST_EXPECT(texture_role_budget_loader(renderer::TextureRoleId::ModelHeightNormal, loader) && loader == renderer::TextureLoader::Normal);
+	TEST_EXPECT(texture_role_budget_loader(renderer::TextureRoleId::ModelPlain, loader) && loader == renderer::TextureLoader::Plain);
+	TEST_EXPECT(!texture_role_budget_loader(renderer::TextureRoleId::TerrainColourMap, loader));
+	std::printf("budget: the engine's device texture of each loader, its .dds, an opaque DXT5's header\n");
 	return 0;
 }
 
@@ -300,14 +301,14 @@ int test_retail() {
 				const opennova::threedi::ThreediMaterialTexture &row = material.textures[r];
 				if (row.name[0] == 0) continue;
 				++rows;
-				TextureRoleId role = TextureRoleId::kCount;
+				renderer::TextureRoleId role = renderer::TextureRoleId::kCount;
 				const uint8_t runtime = opennova::renderer::material_texture_runtime_type(row.type);
-				if (runtime == 4 || runtime == 5) role = TextureRoleId::ModelNormalMap;
-				else if (runtime == 1) role = TextureRoleId::ModelPlain;
-				else if (runtime == 0 || runtime == 2 || runtime == 8) role = TextureRoleId::ModelDiffuse;
-				TextureBudgetLoader loader = TextureBudgetLoader::Stage;
+				if (runtime == 4 || runtime == 5) role = renderer::TextureRoleId::ModelNormalMap;
+				else if (runtime == 1) role = renderer::TextureRoleId::ModelPlain;
+				else if (runtime == 0 || runtime == 2 || runtime == 8) role = renderer::TextureRoleId::ModelDiffuse;
+				renderer::TextureLoader loader = renderer::TextureLoader::Stage;
 				if (!texture_role_budget_loader(role, loader)) continue;
-				if ((row.slot == 3 || row.slot == 4) && loader != TextureBudgetLoader::Normal) {
+				if ((row.slot == 3 || row.slot == 4) && loader != renderer::TextureLoader::Normal) {
 					++normal_slot;
 					std::fprintf(stderr, "retail: %s row %s slot %u type %u\n", name.c_str(), row.name, unsigned(row.slot),
 					             unsigned(row.type));

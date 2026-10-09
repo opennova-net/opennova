@@ -53,6 +53,7 @@
 
 using namespace opennova::editor;
 using opennova::pff::normalized_logical_name;
+namespace renderer = opennova::renderer;
 namespace fs = std::filesystem;
 
 namespace {
@@ -382,7 +383,7 @@ static int test_fixes() {
 	TEST_EXPECT(labels_of(fixes_for(skin, v)) == std::vector<std::string>({"Create a placeholder logo.tga"}));
 	editor_test::own_reference(skin).loader_arg = -1;
 	TEST_EXPECT(labels_of(fixes_for(skin, v)) == std::vector<std::string>({"Create a placeholder logo.tga"}));
-	editor_test::own_reference(skin).loader_arg = texture_role_arg(TextureRoleId::SkyCloud);
+	editor_test::own_reference(skin).loader_arg = texture_role_arg(renderer::TextureRoleId::SkyCloud);
 	TEST_EXPECT(labels_of(fixes_for(skin, v)) ==
 	            std::vector<std::string>({"Import logo.dds from the game data...", "Create a placeholder logo.tga"}));
 	editor_test::own_reference(skin).loader_arg = -1;
@@ -761,7 +762,7 @@ static int test_placeholders() {
 	const Diagnostic *logo = missing(ReferenceKind::MenuTexture, "logo.tga");
 	const Diagnostic *puff = missing(ReferenceKind::Texture, "puff.tga");
 	TEST_EXPECT(skin && editor_test::reference_of(*skin).loader_arg == 0 && logo && puff &&
-	            editor_test::reference_of(*puff).loader_arg == texture_role_arg(TextureRoleId::ParticleGraphic));
+	            editor_test::reference_of(*puff).loader_arg == texture_role_arg(renderer::TextureRoleId::ParticleGraphic));
 	if (!skin || !logo || !puff) return 1;
 	std::vector<ProblemFix> firsts;
 	for (const auto &expected : {std::make_pair(skin, "armry.tga"), std::make_pair(logo, "logo.tga"), std::make_pair(puff, "puff.tga")}) {
