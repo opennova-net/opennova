@@ -57,8 +57,8 @@ func _tool_game_entities(args: Dictionary, _ctx: McpToolContext) -> Variant:
 	var op := String(args.get("op", ""))
 	match op:
 		"list":
-			var offset: Variant = _integer_number(args.get("offset", 0))
-			var limit: Variant = _integer_number(args.get("limit", 64))
+			var offset: Variant = McpToolArgs.integer_number(args.get("offset", 0))
+			var limit: Variant = McpToolArgs.integer_number(args.get("limit", 64))
 			if offset == null or int(offset) < 0 \
 					or limit == null or int(limit) < 1 or int(limit) > 128:
 				return McpToolResult.error(
@@ -74,7 +74,7 @@ func _tool_game_entities(args: Dictionary, _ctx: McpToolContext) -> Variant:
 						"Start a playable mission before listing entities.")
 			return page
 		"inspect":
-			var index: Variant = _integer_number(args.get("index"))
+			var index: Variant = McpToolArgs.integer_number(args.get("index"))
 			if index == null or int(index) < 0:
 				return McpToolResult.error(
 						"game_entities op=inspect requires a non-negative integer index.")
@@ -110,7 +110,7 @@ func _tool_game_capture_bundle(
 	if adapter == null:
 		return McpToolResult.error("The game's render capture is unavailable.")
 	var label: Variant = args.get("label", "render")
-	var settle_frames: Variant = _integer_number(args.get("settle_frames", 2))
+	var settle_frames: Variant = McpToolArgs.integer_number(args.get("settle_frames", 2))
 	var world_only: Variant = args.get("world_only", true)
 	var include_image: Variant = args.get("include_image", true)
 	if typeof(label) != TYPE_STRING or String(label).length() > 80 \
@@ -245,34 +245,8 @@ func _tool_game_menu(args: Dictionary, _ctx: McpToolContext) -> Variant:
 func _tool_game_screenshot(args: Dictionary, ctx: McpToolContext) -> Variant:
 	if adapter == null:
 		return McpToolResult.error("The game shell is not ready.")
-	# Validate argument types up front: int()/float() on a non-numeric Variant
-	# is a script error that would abort the handler mid-capture.
-	var max_dim: Variant = _integer_number(
-			args.get("max_dim", McpScreenshot.DEFAULT_MAX_DIM))
-	var format: Variant = args.get("format", "webp")
-	var quality: Variant = _finite_number(
-			args.get("quality", McpScreenshot.DEFAULT_QUALITY))
-	if max_dim == null or typeof(format) != TYPE_STRING or quality == null:
-		return McpToolResult.error(
-				"game_screenshot requires an integer max_dim, a string format, "
-				+ "and a numeric quality.")
-	var viewport := adapter.get_viewport()
-	var outcome: Dictionary = await McpScreenshot.capture(viewport, {
-		"max_dim": int(max_dim),
-		"format": String(format),
-		"quality": float(quality),
-	}, func() -> bool: return ctx.cancelled)
-	if ctx.cancelled:
-		return McpToolResult.error(
-				"Game screenshot was cancelled after its request timed out.")
-	if not bool(outcome.get("ok", false)):
-		return McpToolResult.error(String(outcome.get(
-				"error", "Game screenshot failed.")))
-	var caption := "OpenNova game (%dx%d)" % [
-		int(outcome["width"]), int(outcome["height"])]
-	if outcome.has("warning"):
-		caption += " — " + String(outcome["warning"])
-	return McpToolResult.image(outcome["bytes"], outcome["mime"], caption)
+	return await McpScreenshot.tool_capture(adapter.get_viewport(), args, ctx,
+			"game_screenshot", "Game screenshot", "OpenNova game")
 
 
 func _tool_game_logs(args: Dictionary, ctx: McpToolContext) -> Variant:
@@ -281,21 +255,13 @@ func _tool_game_logs(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var hub: McpLogHub = service.log_hub
 	hub.ingest_engine()
 	hub.ingest_godot_log()
-	var session: Dictionary = service.server.session(
-			String(ctx.args.get("_session_id", "")))
-	var cursor := int(args.get("cursor", -1))
-	if cursor < 0:
-		cursor = int(session.get("log_cursor", 0)) \
-				if not session.is_empty() else 0
 	var sources := PackedStringArray()
 	for source in args.get("sources", []) \
 			if args.get("sources") is Array else []:
 		sources.append(String(source))
-	var page := hub.get_entries(
-			cursor, int(args.get("limit", 200)), sources)
-	if not session.is_empty():
-		session["log_cursor"] = page["next_cursor"]
-	return page
+	return hub.session_page(
+			service.server.session(String(ctx.args.get("_session_id", ""))),
+			int(args.get("cursor", -1)), int(args.get("limit", 200)), sources)
 
 
 func _tool_game_probe(args: Dictionary, _ctx: McpToolContext) -> Variant:
@@ -323,8 +289,8 @@ func _tool_game_probe(args: Dictionary, _ctx: McpToolContext) -> Variant:
 				return McpToolResult.error(String(started["refused"]), started.get("details"))
 			return started
 		"status":
-			var cursor: Variant = _integer_number(args.get("cursor", 0))
-			var wait_ms: Variant = _integer_number(args.get("wait_ms", 0))
+			var cursor: Variant = McpToolArgs.integer_number(args.get("cursor", 0))
+			var wait_ms: Variant = McpToolArgs.integer_number(args.get("wait_ms", 0))
 			if cursor == null or int(cursor) < 0 or wait_ms == null or int(wait_ms) < 0 \
 					or int(wait_ms) > GameMcpCatalog.PROBE_STATUS_WAIT_MAX_MS:
 				return McpToolResult.error(
@@ -380,17 +346,3 @@ static func _automation_confirmation_required(
 	return row != null and (
 			row.requires_confirm
 			or row.authority == DebugControlRow.HOST_ONLY)
-
-
-static func _finite_number(value: Variant) -> Variant:
-	if typeof(value) != TYPE_INT and typeof(value) != TYPE_FLOAT:
-		return null
-	var number := float(value)
-	return number if is_finite(number) else null
-
-
-static func _integer_number(value: Variant) -> Variant:
-	var number: Variant = _finite_number(value)
-	if number == null or float(number) != floorf(float(number)):
-		return null
-	return int(number)

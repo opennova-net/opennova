@@ -9,6 +9,9 @@ extends RefCounted
 ##  - encode(): the pure-CPU part — optional crop, downscale, WebP encode with
 ##    PNG fallback, and an oversize retry — kept separate so headless tests
 ##    exercise it with constructed images.
+##
+## tool_schema() and tool_capture() are the screenshot tool itself, the
+## arguments and the call every endpoint's screenshot tool shares.
 
 const DRAW_TIMEOUT_FRAMES := 90
 const DEFAULT_MAX_DIM := 1280
@@ -16,6 +19,49 @@ const DEFAULT_QUALITY := 0.8
 const SIZE_RETRY_BYTES := 2 * 1024 * 1024
 const MIN_DIM := 64
 const MAX_DIM := 4096
+## How long a capture tool's call may run (the screenshot tools, the capture
+## bundle).
+const CAPTURE_TIMEOUT_MS := 60_000
+
+
+## The screenshot tool's arguments, as every endpoint's catalog lists them.
+static func tool_schema() -> Dictionary:
+	return {
+		"max_dim": {"type": "integer", "minimum": MIN_DIM, "maximum": MAX_DIM, "default": DEFAULT_MAX_DIM},
+		"format": {"type": "string", "enum": ["webp", "png"], "default": "webp"},
+		"quality": {"type": "number", "minimum": 0.1, "maximum": 1.0, "default": DEFAULT_QUALITY},
+	}
+
+
+## The screenshot tool's call: its arguments validated up front (an integer
+## max_dim, a string format and a numeric quality: int()/float() on a
+## non-numeric Variant is a script error that would abort the call
+## mid-capture), one drawn frame of `viewport` captured and encoded
+## (capture()), the image returned captioned "`title` (WxH)" and any warning.
+## `tool` names the tool in the argument refusal, `what` the capture in the
+## cancel and failure errors.
+static func tool_capture(viewport: Viewport, args: Dictionary, ctx: McpToolContext,
+		tool: String, what: String, title: String) -> McpToolResult:
+	var max_dim: Variant = McpToolArgs.integer_number(args.get("max_dim", DEFAULT_MAX_DIM))
+	var format: Variant = args.get("format", "webp")
+	var quality: Variant = McpToolArgs.finite_number(args.get("quality", DEFAULT_QUALITY))
+	if max_dim == null or typeof(format) != TYPE_STRING or quality == null:
+		return McpToolResult.error(
+				"%s requires an integer max_dim, a string format, " % tool
+				+ "and a numeric quality.")
+	var outcome: Dictionary = await capture(viewport, {
+		"max_dim": int(max_dim),
+		"format": String(format),
+		"quality": float(quality),
+	}, func() -> bool: return ctx.cancelled)
+	if ctx.cancelled:
+		return McpToolResult.error("%s was cancelled after its request timed out." % what)
+	if not bool(outcome.get("ok", false)):
+		return McpToolResult.error(String(outcome.get("error", "%s failed." % what)))
+	var caption := "%s (%dx%d)" % [title, int(outcome["width"]), int(outcome["height"])]
+	if outcome.has("warning"):
+		caption += " — " + String(outcome["warning"])
+	return McpToolResult.image(outcome["bytes"], outcome["mime"], caption)
 
 
 ## Grab one drawn frame from `viewport` and encode it. opts: region (Rect2i,

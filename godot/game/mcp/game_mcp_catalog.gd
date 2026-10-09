@@ -3,7 +3,6 @@ extends RefCounted
 
 ## Stable tool definitions for the game-side runtime handlers.
 
-const SCREENSHOT_TIMEOUT_MS := 60_000
 ## game_probe op=status may long-poll up to PROBE_STATUS_WAIT_MAX_MS; its
 ## budget stays clear of that.
 const PROBE_STATUS_WAIT_MAX_MS := 30_000
@@ -136,7 +135,7 @@ static func definitions() -> Array[McpToolDef]:
 				},
 				"world_only": {"type": "boolean", "default": true},
 				"include_image": {"type": "boolean", "default": true},
-			}, [], true, SCREENSHOT_TIMEOUT_MS),
+			}, [], true, McpScreenshot.CAPTURE_TIMEOUT_MS),
 		McpToolDef.make("game_menu",
 			"Drive the compiled menu. op=state returns the current file/screen + widget rows "
 			+ "(design-space rects); press activates a named widget through the real mouse pump "
@@ -169,11 +168,7 @@ static func definitions() -> Array[McpToolDef]:
 		McpToolDef.make("game_screenshot",
 			"Capture the real game window, including F3 when it is open and any "
 			+ "debug views that are toggled on.",
-			{
-				"max_dim": {"type": "integer", "minimum": 64, "maximum": 4096, "default": 1280},
-				"format": {"type": "string", "enum": ["webp", "png"], "default": "webp"},
-				"quality": {"type": "number", "minimum": 0.1, "maximum": 1.0, "default": 0.8},
-			}, [], true, SCREENSHOT_TIMEOUT_MS),
+			McpScreenshot.tool_schema(), [], true, McpScreenshot.CAPTURE_TIMEOUT_MS),
 		McpToolDef.make("game_logs",
 			"Read runtime MCP, probe, engine (the native io::log ring) and godot "
 			+ "(the tailed Godot log file) log entries from the launched game.",

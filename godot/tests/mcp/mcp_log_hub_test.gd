@@ -63,6 +63,31 @@ func test_cursor_zero_returns_tail() -> void:
 	assert_eq(int(page["dropped"]), 0)
 
 
+func test_session_page_resumes_where_the_sessions_last_page_ended() -> void:
+	for i in range(3):
+		hub.note("server", "info", "entry %d" % i)
+	var session := {"id": "s"}
+	var first := hub.session_page(session, -1, 200)
+	assert_eq(first["entries"].size(), 3)
+	assert_eq(int(session["log_cursor"]), int(first["next_cursor"]),
+			"the session's cursor moves to the page's end")
+	hub.note("server", "info", "entry 3")
+	var next := hub.session_page(session, -1, 200)
+	assert_eq(next["entries"].size(), 1, "the next page holds only what came after")
+	assert_eq(String(next["entries"][0]["text"]), "entry 3")
+	var named := hub.session_page(session, 1, 200)
+	assert_eq(String(named["entries"][0]["text"]), "entry 1", "a named cursor wins")
+
+
+func test_session_page_without_a_session_keeps_nothing() -> void:
+	hub.note("script", "info", "a")
+	hub.note("server", "info", "b")
+	var none := {}
+	var page := hub.session_page(none, -1, 200, PackedStringArray(["script"]))
+	assert_eq(page["entries"].size(), 1, "the sources filter applies")
+	assert_true(none.is_empty(), "no session, no cursor kept")
+
+
 func test_ring_overflow_counts_dropped() -> void:
 	for i in range(McpLogHub.RING_CAP + 10):
 		hub.note("server", "info", "entry %d" % i)
