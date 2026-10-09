@@ -13,6 +13,7 @@
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/project/project_files.h>
+#include <formats/threedi/threedi_panm.h>
 #include <formats/trn/trn.h>
 #include <runtime/anim/rig_files.h>
 #include <runtime/menu/menu_assets.h>
@@ -415,9 +416,11 @@ std::string avatar_part_missing(const AssetGraph &, const GraphEdge &edge) {
 // A part animation's frame byte (the field holds 0 to 255) names no MTRX row at 0 and at 128 to
 // 255: the load sign-extends it [orig: GPM_LoadRenderModel @ 0x5B5698 (movsx)] and the pose reads
 // a row only above zero [orig: Model_TransformBoneMatrices @ 0x58E3FE], so row 0 is never read
-// (threedi_panm_frame_row, the pose's rule; whether a row turns through a frame at all is its
+// (threedi_panm_frame_selector, the pose's rule; whether a row turns through a frame at all is its
 // field's use, ModelDocument's). Any value past the byte names none too.
-bool frame_none(int64_t value) { return value <= 0 || value > 127; }
+bool frame_none(int64_t value) {
+	return value < 0 || value > 255 || threedi::threedi_panm_frame_selector(static_cast<uint8_t>(value)) == 0;
+}
 
 // A mission's group 0 names none: every witnessed consumer exits or reads false for it [orig:
 // Entity_KillAllByNetId @0x43C8F2, Entity_IsTeamInTriggerBounds @0x43c730, Entity_HandleAlertCommand
