@@ -69,8 +69,8 @@ public:
 	int node_count() const { return static_cast<int>(nodes_.size()); }
 	const Node *node(int id) const;
 	const mnu::Window *window(int id) const;
-	// The id of one of the document's windows (what mnu::find_window finds); -1 for null or
-	// a window the walk did not number (a part's).
+	// The id of one of the document's windows (what mnu::find_window finds, a part's window and
+	// the windows a part holds among them); -1 for null or a window of no document.
 	int id_of(const mnu::Window *window) const;
 	// The screen container ids, in document order.
 	const std::vector<int> &screen_ids() const { return screen_ids_; }

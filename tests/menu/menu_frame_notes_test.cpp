@@ -235,8 +235,7 @@ static int test_tokens() {
 		const std::string token = opennova::menu::menu_frame_note_token(code);
 		TEST_EXPECT(!token.empty() && tokens.insert(token).second);
 		const MenuFrameNoteBasis basis = opennova::menu::menu_frame_note_basis(code);
-		const bool deferred = code == Code::TypeInteriorDeferred || code == Code::ItemKindNotDrawn ||
-		                      code == Code::TableCellsDeferred;
+		const bool deferred = code == Code::TableCellsDeferred;
 		TEST_EXPECT((basis == MenuFrameNoteBasis::Deferred) == deferred);
 		TEST_EXPECT((basis == MenuFrameNoteBasis::PortPolicy) == (code == Code::MarqueeRuntimeContent));
 	}
@@ -335,8 +334,9 @@ static int test_configure_notes() {
 		rig.configure(root);
 		const std::vector<MenuFrameNote> &notes = rig.compiler.build_notes();
 		TEST_EXPECT(is(find(notes, Code::TypeUnknown), 0, "", -1, "type", "SLIDER"));
-		TEST_EXPECT(is(find(notes, Code::TypeInteriorDeferred), 1, "", -1, "type"));
-		TEST_EXPECT(is(find(notes, Code::ItemKindNotDrawn), 2, "items.item", 1, "type", "IMAGE"));
+		// A RADIOEDIT is drawn (its radio part): no note.
+		TEST_EXPECT(count(notes, Code::ItemKindAsText) == 1);
+		TEST_EXPECT(is(find(notes, Code::ItemKindAsText), 2, "items.item", 1, "type", "IMAGE"));
 		TEST_EXPECT(count(notes, Code::TableCellsDeferred) == 1);
 		TEST_EXPECT(is(find(notes, Code::TableCellsDeferred), 3, "items.appearance", 0, "type", "IMAGEROW"));
 		TEST_EXPECT(count(notes, Code::TableCellsCustom) == 1);

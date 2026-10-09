@@ -486,8 +486,14 @@ void MenuFrameCompiler::resolve_node_(int index) {
 	};
 	node.row_layout = row_layout(w.items);
 	node.popup_row_layout = w.list_box ? row_layout(w.list_box->items) : WidgetNode::RowLayout();
+	// A spin list's ITEM of TYPE IMAGE draws its texture and one of TYPE COLOR its colour [orig:
+	// CUISpinList_ParseXMLDefinition @ 0x64c253..0x64c2de]; a list's (a LIST, a LAN_LIST, a combo's
+	// LIST_BOX) compares its TYPE with ID alone and takes any other's text as written for the row's
+	// label, an image's file name or a colour's digits [orig: CListWnd_ParseXMLDefinition
+	// @ 0x645b0f..0x645b26, the literal row @ 0x645c1b..0x645c6f]: its rows draw no image and no colour
+	// (CListWnd_InsertRow @ 0x644f20 keeps none).
 	auto build_items = [&](const std::vector<mnu::Item> &rows, const std::string *table,
-								const WidgetNode::RowLayout &list_layout,
+								const WidgetNode::RowLayout &list_layout, bool spin,
 								std::vector<WidgetNode::ItemVisual> &out) {
 		out.clear();
 		for (const mnu::Item &item : rows) {
@@ -495,10 +501,10 @@ void MenuFrameCompiler::resolve_node_(int index) {
 			visual.layout = list_layout;
 			list_row_justify(item.justify, item.vjustify, &visual.layout.justify,
 					&visual.layout.vjustify, &visual.layout.x, &visual.layout.y);
-			if (iequals(item.type, "image")) {
+			if (spin && iequals(item.type, "image")) {
 				visual.kind = WidgetNode::ItemVisual::kImage;
 				visual.texture = intern_texture(item.text);
-			} else if (iequals(item.type, "color")) {
+			} else if (spin && iequals(item.type, "color")) {
 				visual.kind = WidgetNode::ItemVisual::kColor;
 				// [orig: CSpinListWnd_Render @ 0x64b220 — forced opaque]
 				visual.color = mnu::item_color_argb(resolve_var(item.text));
@@ -509,13 +515,14 @@ void MenuFrameCompiler::resolve_node_(int index) {
 			out.push_back(visual);
 		}
 	};
-	build_items(w.items.items, node.text_table, node.row_layout, node.items);
+	build_items(w.items.items, node.text_table, node.row_layout, w.type == mnu::WindowType::SpinList,
+			node.items);
 	// A combo's LIST_BOX list is attached before its parse: its own TEXT_RSRC,
 	// else the root's, never the combo's [orig: CComboWnd_ParseXMLDefinition
 	// @ 0x65c0d0 -> CWnd_SetParentAndAttach].
 	if (w.list_box) {
 		build_items(w.list_box->items.items, window_text_rsrc(*w.list_box, root.window),
-				node.popup_row_layout, node.popup_items);
+				node.popup_row_layout, false, node.popup_items);
 	} else {
 		node.popup_items.clear();
 	}
@@ -1342,10 +1349,21 @@ void MenuFrameCompiler::emit_checkbox_label(const WidgetNode &node,
 	emit_glyph_run(node, text, x, y, s, node.colors[state], -1);
 }
 
-// The selected-item cell (spinlist; the combo closed cell shares it)
-// [orig: CSpinListWnd_Render @ 0x64b220 — text / native-size image aligned
-// per the ITEMS justify (spinlist default centre/centre) / full-rect opaque
-// color swatch].
+// The current item of a spin list [orig: CSpinListWnd_Render @ 0x64b220]: none for an item flagged
+// hidden (@ 0x64b334); laid out from the widget rect (@ 0x64b311) by the item's own alignment word and
+// offsets, the ITEMS block's where the ITEM sets none (WidgetNode::ItemVisual::layout, as
+// CUISpinList_ParseXMLDefinition @ 0x64bd10 stores them @ 0x64c237..0x64c24f): vertically first, then
+// horizontally, then its left and top moved by the item's x and y offsets (@ 0x64b4d8, @ 0x64b4df).
+// - An image moves the whole rect by deltas made of its texture's HEIGHT on both axes (retail's own,
+//   CTextureManager_GetTextureHeight @ 0x64b3b6 / 0x64b3e5 / 0x64b455 / 0x64b486): centred by half the
+//   rect less half that height, a bottom or right one by the rect's bottom (less the height) or right
+//   (less half of it) taken as the delta itself; then it stretches the texture into the rect
+//   (CUIElement_DrawTextureNative @ 0x64b509, which draws the texture over the rect it is given).
+// - A colour fills the whole widget rect, forced opaque (@ 0x64b52c..0x64b539).
+// - A text measures itself and lays out by its own extent (@ 0x64b3cd..0x64b41a, @ 0x64b46c..0x64b4b9),
+//   then draws through CFontCache_DrawTextWithCursor @ 0x64b5a7 with the item's alignment word, which
+//   moves a word of exactly 1 left by half the text's width again and of exactly 2 by all of it [orig:
+//   CFontCache_DrawTextWithCursor @ 0x65341f..0x653436].
 void MenuFrameCompiler::emit_item_cell(const WidgetNode &node,
 		const mnu::RectEdges &rect, const WalkScale &s, int color_state,
 		const MenuWidgetState *ws) {
@@ -1356,66 +1374,74 @@ void MenuFrameCompiler::emit_item_cell(const WidgetNode &node,
 	if (selected < 0 || selected >= row_count) {
 		return;
 	}
-	// Runtime-seeded rows are text-only (the Control-tree set_items shape).
+	// A row the game added is text, laid out by the ITEMS block's alignment.
 	WidgetNode::ItemVisual runtime_item;
 	if (runtime_rows) {
 		runtime_item.kind = WidgetNode::ItemVisual::kText;
 		runtime_item.text = ws->items[static_cast<size_t>(selected)];
+		runtime_item.layout = node.row_layout;
 	}
 	const WidgetNode::ItemVisual &item = runtime_rows
 			? runtime_item
 			: node.items[static_cast<size_t>(selected)];
-	const mnu::Window &w = *node.window;
-	const std::string &jh = w.items.justify;
-	const std::string &jv = w.items.vjustify;
+	const int justify = item.layout.justify;
+	const int vjustify = item.layout.vjustify;
+	mnu::RectEdges rc = rect;
+	const int w = rc.right - rc.left;
+	const int h = rc.bottom - rc.top;
 	switch (item.kind) {
 		case WidgetNode::ItemVisual::kColor: {
-			emit_rect_quad(rect, s, item.color, kMenuTexNone, false, 1.0f,
-					1.0f);
+			emit_rect_quad(rect, s, item.color, kMenuTexNone, false, 1.0f, 1.0f);
 			break;
 		}
 		case WidgetNode::ItemVisual::kImage: {
 			if (item.texture < 0) {
 				break;
 			}
-			const auto &size =
-					texture_sizes_[static_cast<size_t>(item.texture)];
-			const int iw = size.first;
-			const int ih = size.second;
-			int x = rect.left;
-			int y = rect.top;
-			if (jh.empty() || iequals(jh, "center")) {
-				x = rect.left + ((rect.right - rect.left) - iw) / 2;
-			} else if (iequals(jh, "right")) {
-				x = rect.right - iw;
+			const int tex_h = texture_sizes_[static_cast<size_t>(item.texture)].second;
+			const int half_tex_h = static_cast<int>(static_cast<unsigned>(tex_h) >> 1);
+			int dy = 0;
+			if (vjustify == 0x10) {
+				dy = (h >> 1) - half_tex_h;
+			} else if (vjustify == 0x20) {
+				dy = rc.bottom - tex_h;
 			}
-			if (jv.empty() || iequals(jv, "center")) {
-				y = rect.top + ((rect.bottom - rect.top) - ih) / 2;
-			} else if (iequals(jv, "bottom")) {
-				y = rect.bottom - ih;
+			int dx = 0;
+			if (justify == 1) {
+				dx = (w >> 1) - half_tex_h;
+			} else if (justify == 2) {
+				dx = rc.right - half_tex_h;
 			}
-			emit_rect_quad({x, y, x + iw, y + ih}, s, 0xFFFFFFFFu,
-					item.texture, false, 1.0f, 1.0f);
+			rc = {rc.left + dx, rc.top + dy, rc.right + dx, rc.bottom + dy};
+			rc.left += item.layout.x;
+			rc.top += item.layout.y;
+			emit_rect_quad(rc, s, 0xFFFFFFFFu, item.texture, false, 1.0f, 1.0f);
 			break;
 		}
 		case WidgetNode::ItemVisual::kText: {
+			if (item.text.empty()) {
+				break;
+			}
 			int tw = 0;
 			int th = 0;
 			measure_text(node, item.text, &tw, &th);
-			int x = rect.left;
-			int y = rect.top;
-			if (iequals(jh, "center")) {
-				x = rect.left + ((rect.right - rect.left) - tw) / 2;
-			} else if (iequals(jh, "right")) {
-				x = rect.right - tw;
+			if (vjustify == 0x10) {
+				rc.top += (h >> 1) - (th >> 1);
+			} else if (vjustify == 0x20) {
+				rc.top = rc.bottom - th;
 			}
-			if (iequals(jv, "center")) {
-				y = rect.top + ((rect.bottom - rect.top) - th) / 2;
-			} else if (iequals(jv, "bottom")) {
-				y = rect.bottom - th;
+			if (justify == 1) {
+				rc.left += (w >> 1) - (tw >> 1);
+			} else if (justify == 2) {
+				rc.left = rc.right - tw;
 			}
-			const int state =
-					color_state >= 0 && color_state < 4 ? color_state : 0;
+			int x = rc.left + item.layout.x;
+			const int y = rc.top + item.layout.y;
+			const int align = justify | vjustify;
+			if (align == 1 || align == 2) {
+				x -= align == 1 ? tw >> 1 : tw;
+			}
+			const int state = color_state >= 0 && color_state < 4 ? color_state : 0;
 			emit_glyph_run(node, item.text, x, y, s, node.colors[state], -1);
 			break;
 		}
@@ -1914,6 +1940,13 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 			emit_widget_text(node, rect, s, color_state, ws, -1);
 			break;
 		}
+		// A RADIOEDIT draws nothing of its own: its render draws its parts [orig: 0x65d310, the
+		// RADIOEDIT's render (IDB CEffect_SetParamFromTypedData), its children alone], a RADIOEDIT_EDIT
+		// made hidden and a RADIOEDIT_RADIO made shown, each parsed from the RADIOEDIT's own element at
+		// its origin [orig: sub_65D210 @ 0x65d210, the edit @ 0x65d259 / 0x65d25f, the radio @ 0x65d29f
+		// / 0x65d2aa], so at rest it is the radio of its element (the swap to the edit on a second
+		// activation, CRadioEditWnd_HandleEvent @ 0x65d589, is not drawn: D-MNU-13).
+		case mnu::WindowType::RadioEdit:
 		case mnu::WindowType::Radio: {
 			// [orig: CRadioWnd_Render @ 0x656e20 — checked forces +236 = 3
 			//  around the WHOLE static render (@ 0x656e33), with no availability

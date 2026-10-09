@@ -385,8 +385,7 @@ enum class MenuFrameNoteCode : uint16_t {
 	ColorTransparent,       // a COLOR or OUTLINE of fewer than eight digits: it reads alpha 0
 	StyleVarUnresolved,     // a whole-value %VAR% the shell's list lacks: kept literal
 	TypeUnknown,            // a TYPE token the factory does not match: a generic window
-	TypeInteriorDeferred,   // RADIOEDIT: drawn as a generic window (D-MNU-13)
-	ItemKindNotDrawn,       // a list or combo row of TYPE IMAGE or COLOR (D-MNU-5)
+	ItemKindAsText,         // a list or combo row of TYPE IMAGE or COLOR: its text drawn as the row's label
 	TableCellsDeferred,     // a table's ITEMS IMAGEROW row, not drawn (D-MNU-13)
 	TableCellsCustom,       // a CUSTOM_DRAW column: the menu's code draws its cells; the compile, none
 	ScrollExtentDefault,    // a SCROLL with no HEIGHT or WIDTH: its arrows are the default 20 long

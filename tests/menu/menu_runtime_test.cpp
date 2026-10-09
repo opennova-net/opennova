@@ -351,7 +351,8 @@ void test_index_and_frameless() {
 	CHECK(!rt.open_document(nullptr, "main.mnu", ""));
 	CHECK(rt.open_document(&doc, "main.mnu", "nope"));
 	CHECK(rt.current_screen() == "MAIN");
-	CHECK(rt.index().node_count() == 20);
+	// The 20 windows and screens, then the three parts (the combo's LIST_BOX, the spin list's arrows).
+	CHECK(rt.index().node_count() == 23);
 	CHECK(rt.index().screen_ids() == (std::vector<int>{ 1, 17 }));
 	CHECK(rt.index().screen_root_id(17) == 18);
 	// The tree the document binding reads through: a screen container has no
@@ -363,7 +364,14 @@ void test_index_and_frameless() {
 			rt.index().node(2)->child_ids.size() == 14 && rt.index().node(2)->child_ids[1] == 4);
 	CHECK(rt.index().screen(1) != nullptr && rt.index().screen(2) == nullptr &&
 			rt.index().screen_root_id(2) == -1 && rt.index().node(0) == nullptr &&
-			rt.index().node(21) == nullptr);
+			rt.index().node(24) == nullptr);
+	// A part is numbered after every window, its owner's and no child the frame walks, found by its
+	// fixed NAME [orig: CWnd_FindChildByName @ 0x646850; sub_65BF60 @ 0x65bf8f;
+	// CSpinListWnd_CreateUpDownChildren @ 0x64b8fe].
+	CHECK(rt.index().node(21)->parent_id == 8 && rt.index().window(21) == rt.index().window(8)->list_box.get() &&
+			rt.index().node(8)->child_ids.empty());
+	CHECK(rt.find_control("", "listbox_wnd") == 21 && rt.find_control("", "SPINLISTWND_DOWN") == 23 &&
+			rt.index().node(23)->parent_id == 9);
 	// The name seam: the current screen's control first (case-insensitive), else
 	// the first screen holding one.
 	CHECK(rt.widget_id("play") == 3 && rt.widget_id("PLAY") == 3);

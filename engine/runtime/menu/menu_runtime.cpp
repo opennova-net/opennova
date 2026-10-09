@@ -173,6 +173,18 @@ void MenuDocIndex::build(const mnu::Document &doc) {
 			roots.push_back(add_window_(root, screen_id, static_cast<int>(i)));
 		nodes_[static_cast<size_t>(screen_id - 1)].child_ids = std::move(roots);
 	}
+	// The parts after every window the screens hold, so no window's id moves: each part a window
+	// of its owner's, and what it holds, its children and its own parts (mnu::part_windows), which a
+	// by-name lookup reaches through the part [orig: CWnd_FindChildByName @ 0x646850]. A part is no
+	// child the frame walks (its owner draws it), so no child_ids lists it.
+	for (size_t at = 0; at < nodes_.size(); ++at) {
+		const mnu::Window *owner = nodes_[at].window;
+		if (owner == nullptr) continue;
+		const int owner_id = nodes_[at].id;
+		const int screen_index = nodes_[at].screen_index;
+		for (const mnu::PartWindow &part : mnu::part_windows(*owner))
+			add_window_(*part.window, owner_id, screen_index);
+	}
 }
 
 const MenuDocIndex::Node *MenuDocIndex::node(int id) const {

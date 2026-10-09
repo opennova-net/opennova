@@ -2377,6 +2377,85 @@ void test_combo_face_shows_list_box_selection(const fnt_font_t *font) {
 			"the closed combo face draws the LIST_BOX selection (NORMAL)");
 }
 
+// The items as the game draws them (D-MNU-5): a list's row of TYPE IMAGE or COLOR is the text written
+// for it, drawn as the row's label [orig: CListWnd_ParseXMLDefinition @ 0x645b0f..0x645c6f]; a closed
+// combo with no selected row shows its first row [orig: sub_644590 @ 0x644590]; a spin list's image
+// moves the widget rect by its texture's height on both axes and stretches into it, and its colour fills
+// the rect forced opaque [orig: CSpinListWnd_Render @ 0x64b3b6..0x64b509]; a RADIOEDIT draws as the
+// radio its element makes [orig: sub_65D210 @ 0x65d210].
+void test_items_as_the_game_draws_them(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>ITEMS</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
+    <WINDOW type="list" name="L">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>200</RIGHT><BOTTOM>40</BOTTOM></POSITION>
+      <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+      <ITEMS justify="LEFT" vjustify="TOP">
+        <ITEM type="IMAGE">ab.tga</ITEM>
+        <ITEM type="COLOR">FF0000</ITEM>
+      </ITEMS>
+    </WINDOW>
+    <WINDOW type="combobox" name="C">
+      <POSITION><LEFT>0</LEFT><TOP>100</TOP><RIGHT>200</RIGHT><BOTTOM>120</BOTTOM></POSITION>
+      <LIST_BOX>
+        <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>200</RIGHT><BOTTOM>60</BOTTOM></POSITION>
+        <ITEMS><ITEM type="IMAGE">xyz.tga</ITEM><ITEM>LONGER</ITEM></ITEMS>
+      </LIST_BOX>
+    </WINDOW>
+    <WINDOW type="spinlist" name="S">
+      <POSITION><LEFT>300</LEFT><TOP>0</TOP><RIGHT>400</RIGHT><BOTTOM>50</BOTTOM></POSITION>
+      <ITEMS><ITEM type="IMAGE">wide.tga</ITEM></ITEMS>
+    </WINDOW>
+    <WINDOW type="radioedit" name="RE">
+      <POSITION><LEFT>500</LEFT><TOP>0</TOP><RIGHT>540</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+      <APPEARANCE type="color" state="default">FF123456</APPEARANCE>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	opennova::mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	configure_with(c, doc.first_screen(), font);
+	CHECK(slot_of(c, "ab.tga") == kMenuTexNone && slot_of(c, "xyz.tga") == kMenuTexNone,
+			"a list's image rows load no texture");
+	const int32_t wide = slot_of(c, "wide.tga");
+	CHECK(wide >= 0, "a spin list's image row loads its texture");
+	c.set_texture_size(wide, 32, 16);
+	MenuWidgetState combo;
+	combo.index = 2;
+	combo.selected_item = -1;
+	MenuFrameState state;
+	state.widgets.push_back(combo);
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	// The list's two rows draw "ab.tga" and "FF0000" (6 glyphs each); the closed combo its first row,
+	// "xyz.tga" (7).
+	int list_glyphs = 0, face_glyphs = 0;
+	for (const auto &g : dl.glyphs) {
+		if (g.y_top > -1.0f && g.y_bottom < 41.0f && g.x_top_left < 200.0f) ++list_glyphs;
+		if (g.y_top > 99.0f && g.y_bottom < 121.0f) ++face_glyphs;
+	}
+	CHECK(list_glyphs == 12, "a list's image and colour rows draw their text");
+	CHECK(face_glyphs == 7, "a closed combo with no selection shows its first row");
+	bool red = false;
+	for (const MenuQuad &q : dl.quads) red = red || (q.color & 0xFFFFFFu) == 0xFF0000u;
+	CHECK(!red, "a list's colour row fills nothing");
+	// The spin list's image, centred by the rect's halves less half its texture's height (16): the
+	// widget rect moved by (50 - 8, 25 - 8), stretched to the widget's 100 x 50.
+	bool stretched = false;
+	for (const MenuQuad &q : dl.quads)
+		if (q.texture == wide)
+			stretched = q.x0 == 342.0f && q.y0 == 17.0f && q.x1 == 442.0f && q.y1 == 67.0f;
+	CHECK(stretched, "the spin list's image is the widget rect moved by its height and stretched into it");
+	// The RADIOEDIT's radio draws the element's appearance over its rect.
+	bool radio = false;
+	for (const MenuQuad &q : dl.quads)
+		radio = radio || (q.color == 0xFF123456u && q.x0 == 500.0f && q.x1 == 540.0f);
+	CHECK(radio, "a RADIOEDIT draws the radio of its element");
+}
+
 // The open dropdown draws OVER later widgets: shipped options.mnu authors
 // WATERQUALITY before SHADOWQUALITY/PARTICLES, yet its open popup covers
 // them — the scene draw defers the registered open popup to the end of the
@@ -3046,6 +3125,7 @@ int main() {
 	test_degenerate_list_draws_no_dead_scrollbar(&font);
 	test_table_embedded_scrollbar_scrolls_rows(&font);
 	test_combo_face_shows_list_box_selection(&font);
+	test_items_as_the_game_draws_them(&font);
 	test_open_combo_popup_draws_over_later_widgets(&font);
 	test_multiple_roots(&font);
 	test_cursor_follows_the_claim(&font);

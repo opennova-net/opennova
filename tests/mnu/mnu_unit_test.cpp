@@ -940,7 +940,7 @@ bool test_keyword_tokens() {
 }
 
 // [orig: CWnd_FindChildByName @ 0x646850; UI_FindScreenControl @ 0x63ae80] The by-name window
-// lookup: pre-order, a window before its children, the first match; a nameless window ends its
+// lookup: pre-order, a window before its children, its parts after them, the first match; a nameless window ends its
 // branch; the roots in order.
 bool test_find_window() {
   const auto named = [](const char *name) {
@@ -973,7 +973,13 @@ bool test_find_window() {
   CHECK(mnu::find_window(s, "root") == &s.roots[0], "a window's own name, without case");
   CHECK(mnu::find_window(s, "b") == &s.roots[0].children[1].children[0], "a child before a later sibling");
   CHECK(!mnu::find_window(s, "UNDER"), "a nameless window ends its branch");
-  CHECK(!mnu::find_window(s, "UP") && !mnu::find_window(s, "IN"), "a part and its windows are not walked");
+  // A part is a child behind the authored ones, by the fixed NAME its create gives it, its block's
+  // NAME never matching, and searched through [orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8d6].
+  const mnu::Window *part = s.roots[0].children[3].spinup.get();
+  CHECK(!mnu::find_window(s, "UP"), "a part's written NAME is not its name");
+  CHECK(mnu::find_window(s, "spinlistwnd_up") == part, "a part by its fixed NAME");
+  CHECK(mnu::find_window(s, "IN") == &part->children[0], "a window a part holds");
+  CHECK(mnu::part_windows(s.roots[0].children[3]).size() == 1, "the written parts alone");
   CHECK(mnu::find_window(s, "C") == &s.roots[1].children[0], "every root in order");
   CHECK(mnu::find_window(s, "A") == &s.roots[0].children[1], "the first root that finds it");
   CHECK(mnu::find_window(s.roots[1], "a") == &s.roots[1].children[1], "under one window");

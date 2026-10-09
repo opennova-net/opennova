@@ -536,12 +536,28 @@ struct Document {
   const Screen *first_screen() const;
 };
 
-// The window a by-name lookup finds under `window` [orig: CWnd_FindChildByName @ 0x646850]:
-// an empty name, or a window with no NAME, finds nothing (its children unsearched); a match
-// without case is the window itself; else each child in order, recursively. Only
-// `children` are walked, the windows the menu runtime's id tree numbers: a part (list_box,
-// spinup, spindown, scrollbar) and the windows it holds are not reached, though retail's
-// walk reaches a part's windows through the part (docs/mnu/menu-re.md D-MNU-37, open).
+// A part a window's type creates once its parse is done, an ordinary child of the window behind
+// its authored children, and the fixed NAME the create gives it, which replaces the NAME its block
+// wrote: a combo's LIST_BOX is LISTBOX_WND [orig: sub_65BF60 @ 0x65bf8f], a spin list's arrows
+// SPINLISTWND_UP and SPINLISTWND_DOWN [orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8d6,
+// @ 0x64b8fe], the SCROLLBAR of a LIST LISTWND_SCROLL [orig: CListWnd_CreateScrollChild @ 0x644512,
+// from CListWnd_Init @ 0x644d7d], of a TABLE TABLEWND_SCROLL [orig: CTableWnd_Init @ 0x6408a6] and of a
+// MULTILINE_EDIT MEDITWND_SCROLL [orig: CMEditWnd_CreateScrollChild @ 0x6612b2]; a LAN_LIST's create
+// makes no scroll part [orig: 0x65bd60, its create, calls neither]. The parts the model holds, those
+// written, in the order they attach. (The windows the creates make that the model holds none of, a
+// combo's DROPBTN_WND, a scroll's SCROLLWND_SHUTTLE / _UP / _DOWN, a LAN_LIST's LANJOIN and LANSEARCH, a
+// RADIOEDIT's two, are not among them.)
+struct PartWindow {
+  const Window *window = nullptr;
+  const char *name = "";
+};
+std::vector<PartWindow> part_windows(const Window &window);
+
+// The window a by-name lookup finds under `window` [orig: CWnd_FindChildByName @ 0x646850,
+// depth first]: an empty name, or a window with no NAME, finds nothing (nothing under it
+// searched, @ 0x646855..0x646864); a match without case is the window itself (@ 0x646868); else
+// each child in order (@ 0x646886..0x6468a2), the parts after the authored ones (part_windows),
+// each part by its fixed NAME and searched through.
 const Window *find_window(const Window &window, const std::string &name);
 // The same over a screen's root windows in document order: the first root that finds one
 // [orig: UI_FindScreenControl @ 0x63ae80, the walk over the section's roots].
