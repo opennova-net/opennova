@@ -2967,7 +2967,7 @@ static int test_play_from_here() {
 	launcher.executable = runtime;
 	launcher.mcp_port = 8999;
 	session.set_launcher_source(editor_test::fixed_launcher(launcher));
-	PlayStart start;
+	mission::PlayerStart start;
 	start.set = true;
 	start.at[0] = 120.5;
 	start.at[1] = -40.25;

@@ -148,7 +148,6 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_plan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_plan_groups.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_run.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/import/mission_fixed_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/sidecar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/terrain_import.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/texture_import.cpp

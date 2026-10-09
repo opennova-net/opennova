@@ -9,6 +9,7 @@
 #include <base/io/strutil.h>
 #include <editor/documents/text_types.h>
 #include <formats/wac/param_type.h>
+#include <runtime/hud/game_text_lookup.h>
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/wac/compiler.h>
 
@@ -234,10 +235,12 @@ void script_references(const TextDocument &document, std::vector<TextReference> 
 		if (kind == ReferenceKind::Ammo) reference.fallback = "ammo_" + reference.value;
 		if (kind == ReferenceKind::TextId) {
 			if (missions_own) {
-				reference.scope = stem + ".BIN";
-				reference.scope_alternate = "MEDMSSN.BIN";
+				// The by-name table's text row (<stem>.bin, else medmssn.bin), then the boot's gametext.bin.
+				const mission::Sidecar &table = *mission::sidecar_for_role("text");
+				reference.scope = strutil::to_upper(mission::sidecar_name(stem, table));
+				reference.scope_alternate = strutil::to_upper(table.fallback);
 				reference.scope_owner = stem + ".BMS";
-				reference.scopes_after = { "GAMETEXT.BIN" };
+				reference.scopes_after = { strutil::to_upper(hud::kGameTextTable) };
 			} else {
 				reference.rewritable = false;
 			}
