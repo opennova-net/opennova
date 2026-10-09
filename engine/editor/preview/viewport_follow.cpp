@@ -1,52 +1,6 @@
 #include <editor/preview/viewport_follow.h>
 
-#include <base/io/strutil.h>
-
 namespace opennova::editor {
-
-bool FileStamps::note(const std::string &name, uint64_t stamp) {
-	for (const FileStamp &seen : files_)
-		if (strutil::iequals(seen.name, name)) return false;
-	files_.push_back({name, stamp});
-	return true;
-}
-
-bool FileStamps::add(const FileStamps &other) {
-	bool added = false;
-	for (const FileStamp &file : other.files_) added = note(file.name, file.stamp) || added;
-	return added;
-}
-
-bool FileStamps::moved(const FileSource &files) const {
-	for (const FileStamp &file : files_)
-		if (files.stamp(file.name) != file.stamp) return true;
-	return false;
-}
-
-bool FileStamps::moved_but(const FileSource &files, const std::vector<std::string> &except) const {
-	for (const FileStamp &file : files_) {
-		bool excepted = false;
-		for (const std::string &name : except) excepted = excepted || strutil::iequals(name, file.name);
-		if (!excepted && files.stamp(file.name) != file.stamp) return true;
-	}
-	return false;
-}
-
-void FileStamps::restamp(const FileSource &files) {
-	for (FileStamp &file : files_) file.stamp = files.stamp(file.name);
-}
-
-bool StampedFiles::read(const std::string &name, std::vector<uint8_t> &out) const {
-	const bool found = files_ && files_->read(name, out);
-	stamps_.note(name, files_ ? files_->stamp(name) : 0);
-	return found;
-}
-
-uint64_t StampedFiles::stamp(const std::string &name) const {
-	const uint64_t stamp = files_ ? files_->stamp(name) : 0;
-	stamps_.note(name, stamp);
-	return stamp;
-}
 
 const char *viewport_action_token(ViewportAction action) {
 	switch (action) {

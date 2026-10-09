@@ -321,7 +321,7 @@ int test_session() {
 	editor_test::handle_to_end(session, request::apply_confirmation());
 	TEST_EXPECT(!items->dirty() && finding_at(view, "document.conflict", "defs/items.def") == SIZE_MAX);
 	std::string text, error;
-	TEST_EXPECT(read_file_text(root + "/defs/items.def", text, error) && text.find("hp 77") != std::string::npos &&
+	TEST_EXPECT(io::read_file_text(root + "/defs/items.def", text, error) && text.find("hp 77") != std::string::npos &&
 	            text.find("Crate 4") == std::string::npos);
 	TEST_EXPECT(output_says(view, "Saved defs/items.def over what changed outside the editor"));
 

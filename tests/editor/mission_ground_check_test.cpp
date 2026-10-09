@@ -310,7 +310,7 @@ static int test_rules() {
 	scene.read(*source);
 	ground.follow(files, 2, scene.header(), "ground");
 	MissionGroundReads reads;
-	const auto stamped = std::make_shared<StampedFiles>(files);
+	const auto stamped = std::make_shared<opennova::StampedFiles>(files);
 	const std::vector<MissionGroundVerdict> verdicts = mission_ground_verdicts(scene, ground, reads, stamped);
 	TEST_EXPECT(verdicts.size() == placed.size());
 	// Each verdict by its record, found again by the record's item and position.
@@ -548,7 +548,7 @@ static int test_retail() {
 		if (!source) continue;
 		MissionScene scene;
 		scene.read(*source);
-		const auto stamped = std::make_shared<StampedFiles>(files);
+		const auto stamped = std::make_shared<opennova::StampedFiles>(files);
 		ground.follow(stamped, ++generation, scene.header(), name.substr(0, name.find_last_of('.')));
 		grounded_missions += ground.terrain() ? 1 : 0;
 		if (g_list && !ground.terrain()) std::printf("  %s: no terrain (%s)\n", name.c_str(), ground.error().c_str());

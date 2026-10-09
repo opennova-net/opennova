@@ -68,13 +68,13 @@ static int history_and_save() {
 	// A same-size external rewrite, even with the old timestamp, must conflict.
 	const auto stamp = std::filesystem::last_write_time(dir.file("items.def"));
 	std::string external, message;
-	TEST_EXPECT(read_file_text(dir.file("items.def"), external, message));
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("items.def"), external, message));
 	const auto hp = external.find("hp 25"); TEST_EXPECT(hp != std::string::npos);
 	external.replace(hp, 5, "hp 99");
 	TEST_EXPECT(editor_test::write_text(dir.file("items.def"), external));
 	std::filesystem::last_write_time(dir.file("items.def"), stamp);
 	TEST_EXPECT(!document.save(error) && error.code() == "document.conflict");
-	std::string retained; TEST_EXPECT(read_file_text(dir.file("items.def"), retained, message));
+	std::string retained; TEST_EXPECT(opennova::io::read_file_text(dir.file("items.def"), retained, message));
 	TEST_EXPECT(retained == external && document.dirty());
 
 	DefCatalogDocument reloaded;
@@ -83,7 +83,7 @@ static int history_and_save() {
 	TEST_EXPECT(reloaded.apply(field(row, "hp", int64_t(7)), error));
 	std::filesystem::create_directory(dir.file("items.def.tmp"));
 	TEST_EXPECT(!reloaded.save(error) && error.code() == "document.write" && reloaded.dirty());
-	TEST_EXPECT(read_file_text(dir.file("items.def"), retained, message) && retained == external);
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("items.def"), retained, message) && retained == external);
 	return 0;
 }
 // Two items added in one batch (S13 D7): each new item takes an id no row of the batch has, the
@@ -268,7 +268,7 @@ static int ignored_input() {
 	// The findings are the written text's from then on: the kept lines are reported still.
 	TEST_EXPECT(document.ignored_lines() == 2 && document.issues().size() == 2 && document.can_undo());
 	std::string saved, message;
-	TEST_EXPECT(read_file_text(dir.file("items.def"), saved, message));
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("items.def"), saved, message));
 	// (the new line after the record's lines, indented as they are)
 	TEST_EXPECT(saved == editor_test::crlf("begin \"One\"\nid 100001\ntype marker\nsubtype Ruins\nattrib: good nodie\nhp 20\nend\n"));
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
@@ -291,7 +291,7 @@ static int replaced_action_block() {
 	TEST_EXPECT(document.apply(field(weapon, "weaponweight", 1.5), error));
 	TEST_EXPECT(document.save(error));
 	std::string saved, message;
-	TEST_EXPECT(read_file_text(dir.file("weapon.def"), saved, message));
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("weapon.def"), saved, message));
 	TEST_EXPECT(saved == editor_test::crlf("weapon \"WPN_TWICE\"\naction \"FIRE\"\ndelayend nope\nend\naction \"FIRE\"\ndelayend 2\nend\n"
 	                                       "\tweaponweight 1.5\nend\n"));
 	TEST_EXPECT(document.issues().size() == 1 && !document.blocked());

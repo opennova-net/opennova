@@ -108,7 +108,7 @@ bool ProjectAssetSource::read(const std::string &name, std::vector<uint8_t> &out
 		}
 	}
 	std::string error;
-	if (!read_file_bytes(join_path(root_, entry->relative), out, error)) return false;
+	if (!io::read_file_bytes(join_path(root_, entry->relative), out, error)) return false;
 	return vfs_decode_payload(out, scr_policy_);
 }
 
