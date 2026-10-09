@@ -5,7 +5,6 @@
 
 #include <base/io/strutil.h>
 #include <editor/documents/model_document.h>
-#include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm_pose.h>
 
 namespace opennova::editor {
@@ -58,14 +57,6 @@ const char *model_overlay_kind_token(ModelOverlayKind kind) {
 	case ModelOverlayKind::Pivot: return "pivot";
 	}
 	return "user_point";
-}
-
-void model_preview_ctrl_bus(const std::map<std::string, int64_t> &held, int32_t bus[96]) {
-	std::fill(bus, bus + threedi::THREEDI_CTRL_REGISTER_COUNT, 0);
-	for (const auto &entry : held) {
-		const int ordinal = threedi::threedi_ctrl_register_ordinal(entry.first.c_str());
-		if (ordinal >= 0 && ordinal < threedi::THREEDI_CTRL_REGISTER_COUNT) bus[ordinal] = static_cast<int32_t>(entry.second);
-	}
 }
 
 std::vector<ModelOverlay> model_overlays(const threedi::Threedi3di3 &model, int lod, uint32_t time_ms,
