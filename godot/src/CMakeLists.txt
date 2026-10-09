@@ -404,6 +404,7 @@ if(OPENNOVA_EDITOR)
         authoring/environment_viewport_applier.cpp
         authoring/hud_viewport_applier.cpp
         authoring/menu_viewport_applier.cpp
+        authoring/mission_placed_tiles.cpp
         authoring/mission_viewport_applier.cpp
         authoring/model_viewport_applier.cpp
         authoring/preview_backdrop.cpp

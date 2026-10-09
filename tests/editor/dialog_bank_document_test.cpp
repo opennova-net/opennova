@@ -410,9 +410,9 @@ int test_rename_and_add_there() {
 	return 0;
 }
 
-// The session's play_sound of a dialog: from the bank, its lines one after another (the second once the first has
-// ended, after its half second), each the project's wave at its dialog volume, the subtitles said; from the mission,
-// the same bank by the mission's name; a line alone; the refusals.
+// The session's play_sound of a dialog: from the bank, its lines timed by the game's queue (the second once the first
+// has held its dialog and its half second has run), each the project's wave at its dialog volume, the subtitles said;
+// from the mission, the same bank by the mission's name; a line alone; the refusals.
 int test_session_play() {
 	TalkProject project;
 	TEST_EXPECT(project.made);
@@ -423,9 +423,11 @@ int test_session_play() {
 	            sound.voices.size() == 2);
 	if (sound.voices.size() == 2) {
 		TEST_EXPECT(sound.voices[0].path == "sounds/z01r100.wav" && sound.voices[0].volume == 210 && sound.voices[0].start_ms == 0);
-		// The tone's length, then the second line's half second.
+		// The tone (8320 samples at 22050 Hz) holds its dialog 2 * ((62 * 8320 + 22050) / 22050) = 48 ticks from the
+		// tick after it loads (audio::dialog_clip_hold), then the second line's 62 * 5 / 10 = 31-tick delay is set and
+		// runs: it loads on tick 82, 1312 ms in (not the tone's length and the half second, 877 ms).
 		TEST_EXPECT(sound.voices[1].path == "sounds/z01r101.wav" && sound.voices[1].volume == 255 &&
-		            sound.voices[1].start_ms > 500);
+		            sound.voices[1].start_ms == 1312);
 	}
 	TEST_EXPECT(sound.words.find("\"Move out.\"") != std::string::npos && sound.words.find("\"Hold the gate.\"") != std::string::npos);
 	const uint64_t serial = sound.serial;

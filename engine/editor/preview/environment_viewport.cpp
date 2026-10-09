@@ -18,6 +18,7 @@
 #include <runtime/environment/environment_state.h>
 #include <runtime/environment/precipitation.h>
 #include <runtime/environment/weather_seed.h>
+#include <runtime/mission/mission_sidecars.h>
 #include <runtime/terrain_query/height_field.h>
 
 namespace opennova::editor {
@@ -396,7 +397,10 @@ bool EnvironmentViewport::place_(const SessionView &view) {
 				header.water_color[i] = use->water_color[i];
 			}
 		}
-		name = stem_of(use->mission);
+		// The mission's own name, whose <mission>.til the ground reads: cut at its first dot as the game's extension
+		// swap cuts it (mission::mission_base_name) [orig: Path_ReplaceOrAppendExtension @ 0x53c780, the scan
+		// @ 0x53c7c4].
+		name = mission::mission_base_name(use->mission);
 	}
 	const std::string drawn = use ? use->mission : std::string();
 	const bool moved = header != header_ || name != mission_name_ || drawn != mission_path_;
