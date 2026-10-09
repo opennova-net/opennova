@@ -6,8 +6,9 @@
 # consumes pff/scr/bfc1, so this group PUBLIC-links opennova_formats.
 
 add_library(opennova_base STATIC
-    # gameprofile — game identity + required-resource tables
+    # gameprofile — game identity, required-resource tables, the graphics log
     ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/gameprofile.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/graphics_log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/required_resources.cpp
     # pcapio — pcap/pcapng reading (shared by capture-driven tests and tools)
     ${CMAKE_CURRENT_SOURCE_DIR}/pcapio/pcap_reader.cpp

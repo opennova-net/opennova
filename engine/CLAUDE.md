@@ -224,7 +224,9 @@
   streaming encoder wants), `io/fixed.h` (16.16 / 2.14), `io/log.h` (the diagnostic
   sink), `io/strutil.h` ASCII case-insensitive helpers, `io/os_path.h` (a UTF-8 path
   string at an OS file call: `os_path`, `fopen_utf8`, `utf8_path`; Windows reads a
-  narrow path in the ANSI code page and fails one past MAX_PATH without `\\?\`). Do not hand-roll a new byte
+  narrow path in the ANSI code page and fails one past MAX_PATH without `\\?\`),
+  `io/file_io.h` (whole-file reads and the atomic `.tmp`-then-rename write over
+  `os_path`, the rename's bounded retry). Do not hand-roll a new byte
   reader; migrate existing per-lib copies on-touch (delegate the
   body, keep the local signature, gated on that lib's byte-exact roundtrip tests).
   The 16.16 / 2.14 scales are `io/fixed.h`'s `kFp16One` (float), `kFp16OneD`

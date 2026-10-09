@@ -1,5 +1,7 @@
 // Pins the strict JSON reader/writer behind the editor's project files (ADR 0046 d6):
-// round trips, the deterministic writer, and every strictness rule the reader enforces.
+// round trips, the deterministic writer, every strictness rule the reader enforces, and
+// the member readers a request form takes.
+#include <cstdint>
 #include <cstdio>
 #include <string>
 
@@ -135,6 +137,35 @@ static int test_strictness() {
 	return 0;
 }
 
+// The member readers a request form takes: a whole number exactly (a fraction, a negative
+// or one past 2^53 refused, where json_whole_in drops a fraction), texts as an array, and
+// an object whose every member is a known one.
+static int test_exact_whole_strings_and_known_members() {
+	uint64_t id = 7;
+	TEST_EXPECT(json_exact_whole(json_number(0.0), id) && id == 0);
+	TEST_EXPECT(json_exact_whole(json_number(42.0), id) && id == 42);
+	TEST_EXPECT(json_exact_whole(json_number(9007199254740992.0), id) && id == 9007199254740992ull);
+	TEST_EXPECT(!json_exact_whole(json_number(9007199254740994.0), id) && id == 9007199254740992ull);
+	TEST_EXPECT(!json_exact_whole(json_number(1.5)) && !json_exact_whole(json_number(-1.0)));
+	TEST_EXPECT(!json_exact_whole(json_string("3")) && !json_exact_whole(JsonValue::make_null()));
+	int64_t truncated = 0;
+	TEST_EXPECT(json_whole_in(json_number(1.5), 0.0, 9.0, truncated) && truncated == 1);
+
+	const JsonValue array = json_string_array({"a", "", "b c"});
+	TEST_EXPECT(array.is_array() && array.array.size() == 3 && array.array[0].string == "a" &&
+	            array.array[1].string.empty() && array.array[2].string == "b c");
+	TEST_EXPECT(json_string_array({}).is_array() && json_string_array({}).array.empty());
+
+	JsonValue object;
+	std::string error;
+	TEST_EXPECT(json_parse(R"({"file": "a", "line": 3})", object, error));
+	TEST_EXPECT(json_members_known(object, {"line", "file", "column"}, "edit", error));
+	TEST_EXPECT(!json_members_known(object, {"file"}, "edit", error));
+	TEST_EXPECT(error == "Unknown edit member \"line\".");
+	TEST_EXPECT(json_members_known(JsonValue::make_object(), {}, "edit", error));
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_parse_and_typed_reads();
@@ -142,6 +173,7 @@ int main() {
 	failures += test_round_trip_preserves_values();
 	failures += test_escapes_and_surrogates();
 	failures += test_strictness();
+	failures += test_exact_whole_strings_and_known_members();
 	if (failures == 0) std::printf("json: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

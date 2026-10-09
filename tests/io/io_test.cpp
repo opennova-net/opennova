@@ -1,6 +1,7 @@
 // opennova::io unit tests: LE primitives, fixed-point, bounds-checked byte
-// cursors, LSB-first bit streams, the ASCII string helpers, the 64-bit
-// FNV-1a hash with its hex spelling, and the checked cp1252 encoder.
+// cursors, LSB-first bit streams, the ASCII string helpers and the text chores
+// beside them, the 64-bit FNV-1a hash with its hex spelling, the checked cp1252
+// encoder, base64 and the version 4 UUID.
 
 #include <atomic>
 #include <chrono>
@@ -15,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include <base/io/base64.h>
 #include <base/io/bit_stream.h>
 #include <base/io/byte_reader.h>
 #include <base/io/byte_writer.h>
@@ -28,6 +30,7 @@
 #include <base/io/hash.h>
 #include <base/io/le.h>
 #include <base/io/strutil.h>
+#include <base/io/uuid.h>
 
 #include "common/test_expect.h"
 
@@ -263,6 +266,106 @@ static int test_strutil_parse_numbers()
     TEST_EXPECT(strutil::all_digits("0123"));
     TEST_EXPECT(!strutil::all_digits("") && !strutil::all_digits("+1") && !strutil::all_digits(" 1") &&
                 !strutil::all_digits("1x") && !strutil::all_digits("-1"));
+    return 0;
+}
+
+// The text chores beside the case helpers: a substring found without case, a count
+// grouped by thousands, the code points of a UTF-8 text, the inverse of the engine's
+// "%s%03i" key, lone LFs found and written CR LF, bytes as hex and back, and a byte
+// count in words.
+static int test_strutil_text_chores()
+{
+    TEST_EXPECT(strutil::ifind("Explosion_ADDITIVE", "additive") == 10);
+    TEST_EXPECT(strutil::ifind("additive", "ADD") == 0);
+    TEST_EXPECT(strutil::ifind("abc", "") == 0 && strutil::ifind("", "") == 0);
+    TEST_EXPECT(strutil::ifind("abc", "abcd") == std::string_view::npos);
+    TEST_EXPECT(strutil::ifind("mod", "mod2x") == std::string_view::npos);
+    // ASCII only: a cp1252 or UTF-8 letter keeps its case.
+    TEST_EXPECT(strutil::ifind("Caf\xC9", "caf\xE9") == std::string_view::npos);
+
+    TEST_EXPECT(strutil::grouped(size_t(0)) == "0");
+    TEST_EXPECT(strutil::grouped(size_t(999)) == "999");
+    TEST_EXPECT(strutil::grouped(size_t(1000)) == "1,000");
+    TEST_EXPECT(strutil::grouped(size_t(65535)) == "65,535");
+    TEST_EXPECT(strutil::grouped(16777215u) == "16,777,215");
+    TEST_EXPECT(strutil::grouped(-65536LL) == "-65,536");
+    TEST_EXPECT(strutil::grouped(-1) == "-1");
+    TEST_EXPECT(strutil::grouped(LLONG_MIN) == "-9,223,372,036,854,775,808");
+    TEST_EXPECT(strutil::grouped(ULLONG_MAX) == "18,446,744,073,709,551,615");
+
+    TEST_EXPECT(strutil::utf8_length("") == 0);
+    TEST_EXPECT(strutil::utf8_length("abc") == 3);
+    TEST_EXPECT(strutil::utf8_length("Jos\xC3\xA9") == 4);
+    TEST_EXPECT(strutil::utf8_length("\xE3\x83\xA2\xF0\x9F\x98\x80") == 2);
+
+    int64_t number = -1;
+    TEST_EXPECT(strutil::key_number("STRNAME005", "STRNAME", false, number) && number == 5);
+    TEST_EXPECT(strutil::key_number("strname1234", "STRNAME", false, number) && number == 1234);
+    TEST_EXPECT(strutil::key_number("dlg012", "dlg", true, number) && number == 12);
+    TEST_EXPECT(!strutil::key_number("DLG012", "dlg", true, number));
+    TEST_EXPECT(!strutil::key_number("STRNAME5", "STRNAME", false, number) &&
+                !strutil::key_number("STRNAME0005", "STRNAME", false, number) &&
+                !strutil::key_number("STRNAME", "STRNAME", false, number) &&
+                !strutil::key_number("LOCATION001", "STRNAME", false, number) &&
+                !strutil::key_number("STRNAME00x", "STRNAME", false, number) &&
+                !strutil::key_number("STRNAME005", nullptr, false, number));
+    TEST_EXPECT(number == 12);
+
+    size_t lone = 99;
+    TEST_EXPECT(strutil::first_lone_lf("a\r\nb\r\n", &lone) == std::string_view::npos && lone == 0);
+    TEST_EXPECT(strutil::first_lone_lf("a\r\nb\nc\n", &lone) == 4 && lone == 2);
+    TEST_EXPECT(strutil::first_lone_lf("\nx") == 0);
+    TEST_EXPECT(strutil::with_crlf_line_ends("a\nb\r\nc\rd\n") == "a\r\nb\r\nc\rd\r\n");
+    TEST_EXPECT(strutil::with_crlf_line_ends("\n\n") == "\r\n\r\n");
+    TEST_EXPECT(strutil::with_crlf_line_ends("") == "");
+
+    const std::vector<uint8_t> bytes = {0x00, 0x0F, 0xA5, 0xFF};
+    TEST_EXPECT(strutil::bytes_to_hex(bytes) == "000fa5ff");
+    TEST_EXPECT(strutil::bytes_to_hex(std::vector<uint8_t>()).empty());
+    std::vector<uint8_t> back;
+    TEST_EXPECT(strutil::hex_to_bytes(strutil::bytes_to_hex(bytes), back) && back == bytes);
+
+    TEST_EXPECT(strutil::byte_size_text(0) == "0 B");
+    TEST_EXPECT(strutil::byte_size_text(1023) == "1023 B");
+    TEST_EXPECT(strutil::byte_size_text(1024) == "1.0 KB");
+    TEST_EXPECT(strutil::byte_size_text(3482) == "3.4 KB");
+    TEST_EXPECT(strutil::byte_size_text(1024 * 1024) == "1.0 MB");
+    TEST_EXPECT(strutil::byte_size_text(uint64_t(5) << 30) == "5120.0 MB");
+    return 0;
+}
+
+// Base64 by the RFC 4648 section 10 test vectors, and every byte value through the
+// alphabet's last two digits.
+static int test_base64()
+{
+    const auto encode = [](const char *text) {
+        return io::base64_encode(reinterpret_cast<const uint8_t *>(text), std::strlen(text));
+    };
+    TEST_EXPECT(encode("") == "");
+    TEST_EXPECT(encode("f") == "Zg==");
+    TEST_EXPECT(encode("fo") == "Zm8=");
+    TEST_EXPECT(encode("foo") == "Zm9v");
+    TEST_EXPECT(encode("foob") == "Zm9vYg==");
+    TEST_EXPECT(encode("fooba") == "Zm9vYmE=");
+    TEST_EXPECT(encode("foobar") == "Zm9vYmFy");
+    TEST_EXPECT(io::base64_encode(std::vector<uint8_t>{0xFB, 0xFF, 0xBF}) == "+/+/");
+    return 0;
+}
+
+// A version 4 UUID: its text form, its version and variant digits, and two never the same.
+static int test_uuid_v4()
+{
+    const std::string a = io::make_uuid_v4(), b = io::make_uuid_v4();
+    TEST_EXPECT(a.size() == 36 && a != b);
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (i == 8 || i == 13 || i == 18 || i == 23) {
+            TEST_EXPECT(a[i] == '-');
+        } else {
+            TEST_EXPECT((a[i] >= '0' && a[i] <= '9') || (a[i] >= 'a' && a[i] <= 'f'));
+        }
+    }
+    TEST_EXPECT(a[14] == '4');
+    TEST_EXPECT(a[19] == '8' || a[19] == '9' || a[19] == 'a' || a[19] == 'b');
     return 0;
 }
 
@@ -635,6 +738,9 @@ int main()
     if (test_bit_stream_unaligned_golden()) return 1;
     if (test_strutil()) return 1;
     if (test_strutil_parse_numbers()) return 1;
+    if (test_strutil_text_chores()) return 1;
+    if (test_base64()) return 1;
+    if (test_uuid_v4()) return 1;
     if (test_append_writers()) return 1;
     if (test_byte_reader_truncation_latch()) return 1;
     if (test_byte_reader_cstr_and_skip_if_available()) return 1;

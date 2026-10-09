@@ -11,6 +11,8 @@
 #include <map>
 #include <set>
 
+#include <base/io/strutil.h>
+
 namespace opennova::threedi {
 
 // Degrees to radians as the exporter converts a light's cone, the D3DX
@@ -1366,16 +1368,6 @@ namespace {
 // its normal so (ThreediCollisionFace).
 constexpr size_t kSignedIndexReach = 32768;
 
-// A count with thousands separators, for messages: 65,535.
-std::string grouped(size_t n) {
-	std::string digits = std::to_string(n), out;
-	for (size_t i = 0; i < digits.size(); ++i) {
-		if (i > 0 && (digits.size() - i) % 3 == 0) out += ',';
-		out += digits[i];
-	}
-	return out;
-}
-
 } // namespace
 
 bool threedi_build_check(const ThreediBuildModel &m, std::string &why) {
@@ -1397,18 +1389,18 @@ bool threedi_build_check(const ThreediBuildModel &m, std::string &why) {
 				const ThreediBuildStrip &strip = lod.parts[pi].strips[si];
 				const std::string where = at + " part " + std::to_string(pi) + " strip " + std::to_string(si);
 				if (strip.indices.size() > 65535)
-					return refuse(where + " holds " + grouped(strip.indices.size()) +
+					return refuse(where + " holds " + strutil::grouped(strip.indices.size()) +
 							" indices: STRP counts them in a u16 (at most 65,535)");
 				if (strip.indices.size() % 3 != 0)
-					return refuse(where + " holds " + grouped(strip.indices.size()) +
+					return refuse(where + " holds " + strutil::grouped(strip.indices.size()) +
 							" indices: a strip is a triangle list, three per triangle");
 				if (strip.vertices.size() > 65536)
-					return refuse(where + " holds " + grouped(strip.vertices.size()) +
+					return refuse(where + " holds " + strutil::grouped(strip.vertices.size()) +
 							" vertices: its u16 indices reach 65,536");
 				for (const uint16_t i : strip.indices)
 					if (i >= strip.vertices.size())
 						return refuse(where + " indexes vertex " + std::to_string(i) + " of its " +
-								grouped(strip.vertices.size()));
+								strutil::grouped(strip.vertices.size()));
 				if (!m.skinned) continue;
 				if (strip.bone_table.size() > static_cast<size_t>(kThreediStripBoneTableMax))
 					return refuse(where + "'s bone table holds " + std::to_string(strip.bone_table.size()) +
@@ -1434,19 +1426,19 @@ bool threedi_build_check(const ThreediBuildModel &m, std::string &why) {
 		const ThreediBuildCollisionObject &o = m.collision[oi];
 		const std::string at = "collision section " + std::to_string(oi);
 		if (o.vertices.size() > kSignedIndexReach)
-			return refuse(at + " holds " + grouped(o.vertices.size()) +
+			return refuse(at + " holds " + strutil::grouped(o.vertices.size()) +
 					" vertices: a bullet face names its corners by signed 16-bit indices (32,768)");
 		if (o.normals.size() > kSignedIndexReach)
-			return refuse(at + " holds " + grouped(o.normals.size()) +
+			return refuse(at + " holds " + strutil::grouped(o.normals.size()) +
 					" bullet-face normals: a face names its normal by a signed 16-bit index (32,768)");
 		for (const ThreediCollisionFace &f : o.faces) {
 			for (const int16_t corner : f.vert_index)
 				if (corner < 0 || static_cast<size_t>(corner) >= o.vertices.size())
 					return refuse(at + " has a bullet face naming vertex " + std::to_string(corner) + " of its " +
-							grouped(o.vertices.size()));
+							strutil::grouped(o.vertices.size()));
 			if (f.normal_index < 0 || static_cast<size_t>(f.normal_index) >= o.normals.size())
 				return refuse(at + " has a bullet face naming normal " + std::to_string(f.normal_index) + " of its " +
-						grouped(o.normals.size()));
+						strutil::grouped(o.normals.size()));
 		}
 	}
 	return true;
@@ -1466,7 +1458,7 @@ bool threedi_build_mint(const ThreediBuildModel &m, std::vector<uint8_t> &out, T
 		refusal->overflow = overflow;
 		refusal->what = overflow.chunk[0] != '\0'
 				? "the model is too large to write: its " + std::string(overflow.chunk) + " chunk holds " +
-						grouped(overflow.bytes) + " bytes, past the " + grouped(THREEDI_3DI3_LENGTH_MASK) +
+						strutil::grouped(overflow.bytes) + " bytes, past the " + strutil::grouped(THREEDI_3DI3_LENGTH_MASK) +
 						" a 3DI3 chunk's 24-bit length can say (ROOT holds the whole model and each RLOD one LOD: "
 						"use fewer vertices, triangles, LODs or collision faces)"
 				: "the writer refused the model";
