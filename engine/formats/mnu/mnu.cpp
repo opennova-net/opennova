@@ -1,9 +1,12 @@
 // MNU menu file parser implementation: the typed layer over mnu_xml's retail
-// reader, and the writer. docs/mnu/menu-re.md ("The reader", "The writer") has the
+// reader, which names each record's element for the text layout (mnu_text_layout.h);
+// the writer is mnu_write.cpp. docs/mnu/menu-re.md ("The reader", "The writer") has the
 // rules with their witnesses.
 #include <formats/mnu/mnu.h>
 
 #include <formats/mns/mns.h>
+#include <formats/mnu/mnu_text_layout.h>
+#include <formats/mnu/mnu_write.h>
 #include <formats/mnu/mnu_xml.h>
 #include <formats/rtxt/rtxt.h>
 
@@ -177,7 +180,7 @@ struct ReadScope {
 
 class TreeReader {
 public:
-  explicit TreeReader(SourceEncoding encoding) : encoding_(encoding) {}
+  TreeReader(SourceEncoding encoding, TextLayoutCapture &capture) : encoding_(encoding), capture_(capture) {}
 
   void read_document(const mnu_xml::Document &xml, Document &out);
   void sweep(const mnu_xml::Document &xml, std::vector<ParseNote> &notes) const;
@@ -244,7 +247,7 @@ private:
   bool read_screen(const Node &node, Screen &out);
   bool read_created_window(const Node &node, Window &out);
   void read_window_body(const Node &node, Window &w, ReadScope &frame);
-  void read_part(const Node &node, WindowPart &part, WindowType type, ReadScope &owner);
+  void read_part(const Node &node, WindowPart &part, WindowType type, ReadScope &owner, const char *key);
   bool read_appearance(const Node &node, Appearance &out, const char *const *types);
   bool read_sound(const Node &node, Sound &out);
   void read_position(const Node &node, Position &pos);
@@ -263,6 +266,9 @@ private:
   void unread_rest(const Node &parent, size_t from, const char *const *tags, const std::string &why);
 
   SourceEncoding encoding_;
+  // Told which element each record and singleton was read from, and which elements are read
+  // for nothing only as their element stands (the text layout's Tied tokens).
+  TextLayoutCapture &capture_;
   std::map<const void *, std::string> reasons_;
   std::set<const void *> fatal_;
   bool reads_ = true; // retail reads what is being read now
@@ -406,6 +412,7 @@ bool TreeReader::singleton(ReadScope &frame, const Node &node, const char *tag, 
   it->second->read = false;
   fatal_.erase(it->second);
   because(it->second, std::string("A later ") + tag + " replaces this one (retail keeps the last); it is left out.");
+  capture_.tie(*it->second);
   it->second = &node;
   return false;
 }
@@ -417,6 +424,7 @@ void TreeReader::unread_rest(const Node &parent, size_t from, const char *const 
     if (tags && !tag_in(child, tags)) continue;
     child.read = false;
     because(&child, why);
+    capture_.tie(child);
   }
 }
 
@@ -429,6 +437,7 @@ void TreeReader::read_document(const mnu_xml::Document &xml, Document &out) {
       continue;
     }
     Screen screen;
+    screen.source = capture_.record(*root);
     read_screen(*root, screen);
     out.screens.push_back(std::move(screen));
   }
@@ -447,6 +456,7 @@ bool TreeReader::read_screen(const Node &node, Screen &out) {
     const Node &child = *child_ptr;
     if (tag_is(child, "NAME")) {
       singleton(frame, child, "NAME", false);
+      capture_.keep(child, "NAME");
       out.name = text_of(child);
     } else if (tag_is(child, "MUSICVAR")) {
       // wcstok(text, L"\"") then wcstol: an empty one faults.
@@ -459,6 +469,7 @@ bool TreeReader::read_screen(const Node &node, Screen &out) {
         continue;
       }
       singleton(frame, child, "MUSICVAR", false);
+      capture_.keep(child, "MUSICVAR");
       child.read = true;
       variable_number(child, nullptr, tok);
       out.music_var = static_cast<int>(mnu_xml::wcstol(tok, 10));
@@ -497,6 +508,7 @@ bool TreeReader::read_created_window(const Node &node, Window &out) {
   }
   out.type = parse_window_type(token_text);
   out.type_token = token_text;
+  out.source = capture_.record(node);
   ReadScope frame;
   read_window_body(node, out, frame);
   return true;
@@ -505,7 +517,7 @@ bool TreeReader::read_created_window(const Node &node, Window &out) {
 // A part's own embedded widget parses the element's children with its own chain
 // (the attributes are the element's); an empty one hands the parse no node, which
 // faults. A repeated part element parses into the same widget.
-void TreeReader::read_part(const Node &node, WindowPart &part, WindowType type, ReadScope &owner) {
+void TreeReader::read_part(const Node &node, WindowPart &part, WindowType type, ReadScope &owner, const char *key) {
   if (node.children.empty()) {
     if (reads_)
       fatal_because(&node, "An empty " + mnu_xml::ascii(node.tag) +
@@ -516,6 +528,7 @@ void TreeReader::read_part(const Node &node, WindowPart &part, WindowType type, 
   }
   const bool first_time = !part.present();
   Window &w = part.author(type);
+  capture_.keep(node, key);
   if (!first_time) {
     because(&node, "A repeated " + mnu_xml::ascii(node.tag) + ": retail parses it into the same widget; "
                        "it is saved as one.");
@@ -587,11 +600,13 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
         because(&child, "An APPEARANCE with no attributes or no STATE retail knows (DEFAULT, DISABLED, "
                         "MOUSEOVER, SELECTED) stops this window's parse in retail: it, the elements after it "
                         "and the child windows are left out.");
+        capture_.tie(child);
         unread_rest(node, i + 1, kBaseTags,
                     "Not read: an earlier APPEARANCE or SOUND stopped this window's parse in retail.");
         continue;
       }
       child.read = true;
+      appearance.source = capture_.record(child);
       w.appearances.push_back(std::move(appearance));
     } else if (tag_is(child, "SOUND")) {
       Sound sound;
@@ -601,34 +616,42 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
         because(&child, "A SOUND with no STATE retail knows (MOUSEIN, MOUSEOUT, SELECTED) or no TRIGGER stops "
                         "this window's parse in retail: it, the elements after it and the child windows are "
                         "left out.");
+        capture_.tie(child);
         unread_rest(node, i + 1, kBaseTags,
                     "Not read: an earlier APPEARANCE or SOUND stopped this window's parse in retail.");
         continue;
       }
       child.read = true;
+      sound.source = capture_.record(child);
       w.sounds.push_back(std::move(sound));
     } else if (tag_is(child, "FRAME")) {
       const bool first_one = singleton(frame, child, "FRAME", true);
+      capture_.keep(child, "FRAME");
       read_frame(child, w.frame);
       if (!first_one) child.read = false;
     } else if (tag_is(child, "POSITION")) {
       const bool first_one = singleton(frame, child, "POSITION", true);
+      capture_.keep(child, "POSITION");
       read_position(child, w.position);
       if (!first_one) child.read = false;
     } else if (tag_is(child, "FONT")) {
       const bool first_one = singleton(frame, child, "FONT", true);
+      capture_.keep(child, "FONT");
       read_font(child, w.font);
       if (!first_one) child.read = false;
     } else if (tag_is(child, "TEXT_RSRC")) {
       singleton(frame, child, "TEXT_RSRC", false);
+      capture_.keep(child, "TEXT_RSRC");
       w.text_rsrc = text_of(child);
       w.has_text_rsrc = true;
     } else if (tag_is(child, "ACTION")) {
       Action action;
       read_action(child, action);
+      action.source = capture_.record(child);
       w.actions.push_back(std::move(action));
     } else if (tag_is(child, "CURSOR")) {
       const bool first_one = singleton(frame, child, "CURSOR", true);
+      capture_.keep(child, "CURSOR");
       read_cursor(child, w.cursor);
       if (!first_one) child.read = false;
     } else if (tag_is(child, "HOTKEY")) {
@@ -636,9 +659,11 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       Hotkey hotkey;
       hotkey.virtual_key = flag(child, "VIRTUAL");
       hotkey.value = text_of(child);
+      hotkey.source = capture_.record(child);
       w.hotkeys.push_back(std::move(hotkey));
     } else if (tag_is(child, "PRIVATE_DATA")) {
       singleton(frame, child, "PRIVATE_DATA", false);
+      capture_.keep(child, "PRIVATE_DATA");
       w.private_data = text_of(child);
     } else if (tag_is(child, "WINDOW")) {
       windows.push_back(&child);
@@ -650,6 +675,7 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       if (tag_is(*child, "WINDOW")) {
         child->read = false;
         because(child.get(), "Not created: an APPEARANCE or SOUND stopped this window's parse in retail.");
+        capture_.tie(*child);
       }
   for (const Node *child : windows) {
     Window window;
@@ -670,18 +696,22 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
     Reads reads(*this, type_reads(w.type, child));
     if (tag_is(child, "STRING")) {
       const bool first_one = singleton(frame, child, "STRING", true);
+      capture_.keep(child, "STRING");
       read_string(child, w.string_data, !first_one);
     } else if (tag_is(child, "TOGGLE_STRING")) {
       singleton(frame, child, "TOGGLE_STRING", false);
+      capture_.keep(child, "TOGGLE_STRING");
       w.toggle_string.present = true;
       w.toggle_string.type = keyword(child, "TYPE", kStringTypes);
       w.toggle_string.value = text_of(child);
     } else if (tag_is(child, "GROUP")) {
       singleton(frame, child, "GROUP", false);
+      capture_.keep(child, "GROUP");
       w.group = number_text(child);
       w.has_group = true;
     } else if (tag_is(child, "ITEMS")) {
       const bool first_one = singleton(frame, child, "ITEMS", true);
+      capture_.keep(child, "ITEMS");
       if (!read_items(child, w.items, list_rule, table_rule)) {
         own_stopped = true;
         unread_rest(node, i + 1, list_rule ? kListTags : kTableTags,
@@ -689,9 +719,9 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       }
       if (!first_one) child.read = false;
     } else if (tag_is(child, "SPINUP")) {
-      read_part(child, w.spinup, WindowType::Button, frame);
+      read_part(child, w.spinup, WindowType::Button, frame, "SPINUP");
     } else if (tag_is(child, "SPINDOWN")) {
-      read_part(child, w.spindown, WindowType::Button, frame);
+      read_part(child, w.spindown, WindowType::Button, frame, "SPINDOWN");
     } else if (tag_is(child, "LIST_BOX")) {
       // [orig: CComboWnd_ParseXMLDefinition @ 0x65c0d0] sb_edge_pad is the combo's;
       // every other attribute and the content are the embedded list's.
@@ -699,24 +729,28 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
         w.sb_edge_pad = number;
         w.has_sb_edge_pad = true;
       }
-      read_part(child, w.list_box, WindowType::List, frame);
+      read_part(child, w.list_box, WindowType::List, frame, "LIST_BOX");
     } else if (tag_is(child, "SCROLLBAR")) {
-      read_part(child, w.scrollbar, WindowType::Scroll, frame);
+      read_part(child, w.scrollbar, WindowType::Scroll, frame, "SCROLLBAR");
     } else if (tag_is(child, "MIN_ITEM_HEIGHT")) {
       singleton(frame, child, "MIN_ITEM_HEIGHT", false);
+      capture_.keep(child, "MIN_ITEM_HEIGHT");
       w.table_data.min_item_height = number_text(child);
       w.table_data.has_min_item_height = true;
     } else if (tag_is(child, "FIXED_HEADER_HEIGHT")) {
       singleton(frame, child, "FIXED_HEADER_HEIGHT", false);
+      capture_.keep(child, "FIXED_HEADER_HEIGHT");
       w.table_data.fixed_header_height = number_text(child);
       w.table_data.has_fixed_header_height = true;
     } else if (tag_is(child, "COLUMN")) {
       if (frame.seen.count("COLUMN")) {
         because(&child, "A repeated COLUMN: retail's result depends on the COUNTs (docs/mnu/menu-re.md); "
                         "only the first COLUMN is kept.");
+        capture_.tie(child);
         continue;
       }
       frame.seen["COLUMN"] = &child;
+      capture_.keep(child, "COLUMN");
       read_column(child, w.table_data.column);
     } else if (tag_is(child, "ORIENTATION")) {
       // Only a HORIZONTAL text sets anything and nothing resets it [orig: @ 0x64c745 /
@@ -724,21 +758,26 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       const auto seen = frame.seen.find("ORIENTATION");
       if (seen == frame.seen.end()) {
         frame.seen["ORIENTATION"] = &child;
+        capture_.keep(child, "ORIENTATION");
         w.orientation = text_of(child);
       } else if (mnu_xml::iequals(child.text, kHorizontalOrientation) &&
                  !mnu_xml::iequals(seen->second->text, kHorizontalOrientation)) {
         seen->second->read = false;
         because(seen->second, "A later HORIZONTAL ORIENTATION decides (retail never resets it to vertical); "
                               "this one is left out.");
+        capture_.tie(*seen->second);
         seen->second = &child;
+        capture_.keep(child, "ORIENTATION");
         w.orientation = text_of(child);
       } else {
         because(&child, "A repeated ORIENTATION changes nothing in retail (only a HORIZONTAL one sets anything, "
                         "and nothing resets it); it is left out.");
+        capture_.tie(child);
       }
     } else if (tag_is(child, "HEIGHT") || tag_is(child, "WIDTH")) {
       // One slot: the last authored of either [orig: @ 0x64c766 / 0x64c77e].
       singleton(frame, child, "HEIGHT", false);
+      capture_.keep(child, "SCROLL_EXTENT");
       w.scroll_extent = number_text(child);
       w.has_scroll_extent = true;
       w.scroll_extent_is_width = tag_is(child, "WIDTH");
@@ -749,17 +788,20 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
         scroll_stopped = true;
         because(&child, mnu_xml::ascii(child.tag) + " with no STATE retail knows stops the scroll parse in "
                                                    "retail: it and the scroll elements after it are left out.");
+        capture_.tie(child);
         unread_rest(node, i + 1, kScrollTags,
                     "Not read: an earlier scroll part stopped the scroll parse in retail.");
         continue;
       }
       // (Not a SCROLL: retail reads none of these; the row is kept as authored.)
       child.read = true;
+      row.source = capture_.record(child);
       if (tag_is(child, "SHUTTLE")) w.shuttle.push_back(std::move(row));
       else if (tag_is(child, "SCROLLUP") || tag_is(child, "SCROLLLEFT")) w.scrollup.push_back(std::move(row));
       else w.scrolldown.push_back(std::move(row));
     } else if (tag_is(child, "DATASOURCE")) {
       // Every one loads and appends its credits [orig: @ 0x65ceeb -> CMarqueeWnd_LoadCreditsFromIni].
+      capture_.keep(child, "DATASOURCE#" + std::to_string(w.datasources.size()));
       w.datasources.push_back(text_of(child));
     } else if (tag_in(child, kExtraTags)) {
       w.extras.push_back(read_extra(child));
@@ -807,21 +849,27 @@ void TreeReader::read_position(const Node &node, Position &pos) {
     if (tag_is(c, "LEFT") || tag_is(c, "ULX")) {
       pos.left = number_text(c);
       pos.has_left = true;
+      capture_.keep(c, "LEFT");
     } else if (tag_is(c, "RIGHT")) {
       pos.right = number_text(c);
       pos.has_right = true;
+      capture_.keep(c, "RIGHT");
     } else if (tag_is(c, "TOP") || tag_is(c, "ULY")) {
       pos.top = number_text(c);
       pos.has_top = true;
+      capture_.keep(c, "TOP");
     } else if (tag_is(c, "BOTTOM")) {
       pos.bottom = number_text(c);
       pos.has_bottom = true;
+      capture_.keep(c, "BOTTOM");
     } else if (tag_is(c, "WIDTH")) {
       pos.right = pos.left + number_text(c);
       pos.has_right = true;
+      capture_.keep(c, "RIGHT");
     } else if (tag_is(c, "HEIGHT")) {
       pos.bottom = pos.top + number_text(c);
       pos.has_bottom = true;
+      capture_.keep(c, "BOTTOM");
     }
   }
 }
@@ -845,7 +893,10 @@ void TreeReader::read_font(const Node &node, Font &font) {
     else if (tag_is(c, "SELECTED_BG")) slot = &font.selected_bg;
     else if (tag_is(c, "MOUSEOVER_FG")) slot = &font.mouseover_fg;
     else if (tag_is(c, "MOUSEOVER_BG")) slot = &font.mouseover_bg;
-    if (slot) *slot = text_of(c);
+    if (slot) {
+      *slot = text_of(c);
+      capture_.keep(c, strutil::to_upper(mnu_xml::ascii(c.tag)));
+    }
   }
 }
 
@@ -863,10 +914,13 @@ void TreeReader::read_frame(const Node &node, mnu::Frame &frame) {
       if (number_attr(c, "INSETX", number)) { frame.insetx = number; frame.has_insetx = true; }
       if (number_attr(c, "INSETY", number)) { frame.insety = number; frame.has_insety = true; }
       frame.stencil = text_of(c);
+      capture_.keep(c, "STENCIL");
     } else if (tag_is(c, "BRUSH")) {
       frame.brush = text_of(c);
+      capture_.keep(c, "BRUSH");
     } else if (tag_is(c, "MONOGRAM")) {
       frame.monogram = text_of(c);
+      capture_.keep(c, "MONOGRAM");
     }
   }
 }
@@ -909,8 +963,13 @@ void TreeReader::read_cursor(const Node &node, Cursor &cursor) {
                     mnu_xml::ascii(a.name) + " is left out.");
   for (const auto &child_ptr : node.children) {
     const Node &c = *child_ptr;
-    if (tag_is(c, "FILE")) cursor.file = text_of(c);
-    else if (tag_is(c, "FLAGS")) cursor.flags = text_of(c);
+    if (tag_is(c, "FILE")) {
+      cursor.file = text_of(c);
+      capture_.keep(c, "FILE");
+    } else if (tag_is(c, "FLAGS")) {
+      cursor.flags = text_of(c);
+      capture_.keep(c, "FLAGS");
+    }
   }
 }
 
@@ -963,15 +1022,18 @@ bool TreeReader::read_items(const Node &node, Items &items, bool list_rule, bool
       Reads reads(*this, !table_rule);
       Item item;
       read_item(c, item, false);
+      item.source = capture_.record(c);
       items.items.push_back(std::move(item));
     } else if (tag_is(c, "ROW")) {
       Reads reads(*this, table_rule);
       c.read = true;
       TableRow row;
+      row.source = capture_.record(c);
       for (const auto &cell_ptr : c.children) {
         if (!tag_is(*cell_ptr, "ITEM")) continue;
         Item cell;
         read_item(*cell_ptr, cell, true);
+        cell.source = capture_.record(*cell_ptr);
         row.cells.push_back(std::move(cell));
       }
       items.rows.push_back(std::move(row));
@@ -982,11 +1044,13 @@ bool TreeReader::read_items(const Node &node, Items &items, bool list_rule, bool
       if (!ok && (list_rule || table_rule)) {
         because(&c, "An ITEMS APPEARANCE with no STATE retail knows ends this widget's list parse in retail: "
                     "it and what follows are left out.");
+        capture_.tie(c);
         unread_rest(node, i + 1, nullptr, "Not read: an earlier ITEMS APPEARANCE ended the list parse.");
         return false;
       }
       // (Another type reads no ITEMS APPEARANCE: the row is kept as authored.)
       c.read = true;
+      appearance.source = capture_.record(c);
       items.appearances.push_back(std::move(appearance));
     }
   }
@@ -1093,6 +1157,7 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
                     "without a COUNT of 1 or more) is not set up by retail.");
         c.read = false;
       }
+      header.source = capture_.record(c);
       column.headers.push_back(std::move(header));
     } else if (tag_is(c, "BODY")) {
       c.read = true;
@@ -1114,6 +1179,7 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
       }
       body.scale_bitmap = flag(c, "SCALE_BITMAP");
       body.bitmap_flags = string_attr(c, "BITMAP_FLAGS");
+      body.source = capture_.record(c);
       column.bodies.push_back(std::move(body));
     } else if (tag_is(c, "SUBST")) {
       c.read = true;
@@ -1123,6 +1189,7 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
       subst.is_url = flag(c, "URL");
       subst.is_file = flag(c, "FILE");
       subst.file = text_of(c);
+      subst.source = capture_.record(c);
       column.substitutions.push_back(std::move(subst));
     }
   }
@@ -1140,6 +1207,7 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
 Element TreeReader::read_extra(const Node &node) {
   node.read = true;
   Element element;
+  element.source = capture_.record(node);
   element.tag = strutil::to_upper(mnu_xml::ascii(node.tag));
   element.text = narrow(node.text);
   for (const Attribute &a : node.attributes) {
@@ -1349,13 +1417,21 @@ bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
     out.screens.clear();
     return false;
   }
-  TreeReader reader(out.source_encoding);
+  TextLayoutCapture capture(out.source_encoding);
+  TreeReader reader(out.source_encoding, capture);
   reader.read_document(xml, out);
   if (notes) {
     // The reader's own notes are all retail hangs or overruns.
     for (const mnu_xml::Note &n : xml.notes) notes->push_back({n.line, std::string(), n.message, true});
     reader.sweep(xml, *notes);
   }
+  // The file's look, modeled against the writer's words for the records as read; the bytes the
+  // loader skips before the text (the byte order mark) are the layout's.
+  const size_t skipped = out.source_encoding == SourceEncoding::Utf16LE ? std::min<size_t>(size, 2)
+                         : out.source_encoding == SourceEncoding::Utf8Bom ? 3
+                                                                          : 0;
+  out.text_layout = capture.finish(text, xml, written_screens(out),
+                                   std::string(reinterpret_cast<const char *>(data), skipped));
   return true;
 }
 
@@ -1393,564 +1469,6 @@ std::string strip_hotkey_marker(const std::string &text,
     *out_hotkey = std::string(1, result[static_cast<size_t>(marker)]);
   }
   return result;
-}
-
-// --- the writer --------------------------------------------------------------
-
-// Element text: retail's reader turns '<' into a tag and '&' into an entity; both
-// are written as the two entities it decodes back [orig: XML_ParseCharEntity
-// @ 0x769cc0, table @ 0x85a628]. Everything else is written as it is (no trim or
-// collapse reads it back unchanged).
-std::string escape_text(const std::string &text) {
-  std::string out;
-  out.reserve(text.size());
-  for (char c : text) {
-    if (c == '<') out += "&lt;";
-    else if (c == '&') out += "&amp;";
-    else out.push_back(c);
-  }
-  return out;
-}
-
-namespace {
-
-// Where the writer puts a table sort key so that retail's HEADER walk sets it to the
-// model's index: on the first HEADER whose index is that value, before its COLUMN
-// (`own`), else after the COLUMN of the first HEADER the running index reaches it
-// before (the HEADERs are written first in the COLUMN element, so the index starts at
-// 0). `placed` is false when no HEADER reaches the value.
-struct SortKeyPlace {
-  bool slot = false;   // the key is set
-  bool placed = false;
-  size_t header = 0;
-  bool own = true;
-};
-
-std::vector<SortKeyPlace> sort_key_places(const TableColumn &c) {
-  std::vector<int> index(c.headers.size()), before(c.headers.size());
-  int running = 0;
-  for (size_t i = 0; i < c.headers.size(); ++i) {
-    before[i] = running;
-    if (c.headers[i].has_column) running = c.headers[i].column;
-    index[i] = running;
-  }
-  std::vector<SortKeyPlace> places(3);
-  const int values[] = {c.primary_sort, c.secondary_sort, c.tertiary_sort};
-  for (int k = 0; k < 3; ++k) {
-    SortKeyPlace &place = places[static_cast<size_t>(k)];
-    place.slot = values[k] >= 0;
-    if (!place.slot) continue;
-    for (size_t i = 0; i < c.headers.size() && !place.placed; ++i)
-      if (index[i] == values[k]) place = {true, true, i, true};
-    for (size_t i = 0; i < c.headers.size() && !place.placed; ++i)
-      if (before[i] == values[k] && c.headers[i].has_column) place = {true, true, i, false};
-  }
-  return places;
-}
-
-class Writer {
-public:
-  Writer(bool pretty, int indent_size) : pretty_(pretty), indent_(indent_size) {}
-  std::string out;
-
-  void screen(const Screen &s);
-
-private:
-  void line(int depth, const std::string &text) {
-    if (pretty_) out.append(static_cast<size_t>(depth * indent_), ' ');
-    out += text;
-    if (pretty_) out.push_back('\n');
-  }
-  // An element with text only, never self-closed.
-  void leaf(int depth, const std::string &tag, const std::string &attrs, const std::string &text) {
-    line(depth, "<" + tag + attrs + ">" + escape_text(text) + "</" + tag + ">");
-  }
-  static std::string attr(const char *name, const std::string &value) {
-    if (value.empty()) return "";
-    return std::string(" ") + name + "=\"" + value + "\"";
-  }
-  static std::string attr_int(const char *name, bool has, int value) {
-    return has ? std::string(" ") + name + "=\"" + std::to_string(value) + "\"" : std::string();
-  }
-  static std::string bare(const char *name, bool on) { return on ? std::string(" ") + name : std::string(); }
-
-  void window(const Window &w, int depth, const char *tag, bool part, const std::string &extra = std::string());
-
-public:
-  void window_elements(const Window &w, int depth);
-
-private:
-  void position(const Position &pos, int depth);
-  void appearance(const Appearance &a, const char *tag, int depth);
-  void items(const Items &items, int depth);
-  void item(const Item &item, int depth);
-  void column(const TableColumn &column, int depth);
-  void element(const Element &e, int depth);
-
-  bool pretty_;
-  int indent_;
-};
-
-void Writer::position(const Position &pos, int depth) {
-  if (!pos.has_left && !pos.has_top && !pos.has_right && !pos.has_bottom) return;
-  line(depth, "<POSITION>");
-  if (pos.has_left) leaf(depth + 1, "LEFT", "", std::to_string(pos.left));
-  if (pos.has_top) leaf(depth + 1, "TOP", "", std::to_string(pos.top));
-  if (pos.has_right) leaf(depth + 1, "RIGHT", "", std::to_string(pos.right));
-  if (pos.has_bottom) leaf(depth + 1, "BOTTOM", "", std::to_string(pos.bottom));
-  line(depth, "</POSITION>");
-}
-
-bool empty_row(const Appearance &a) {
-  return a.state.empty() && a.type.empty() && a.value.empty() && !a.has_map_state && !a.has_height && a.flags.empty();
-}
-
-void Writer::appearance(const Appearance &a, const char *tag, int depth) {
-  if (empty_row(a)) return; // nothing to write (an element with no attributes stops the parse)
-  std::string attrs = attr("type", a.type) + attr("state", a.state);
-  attrs += attr_int("map_state", a.has_map_state, a.map_state);
-  attrs += attr_int("height", a.has_height, a.height);
-  attrs += attr("flags", a.flags);
-  leaf(depth, tag, attrs, a.value);
-}
-
-void Writer::item(const Item &i, int depth) {
-  std::string attrs = attr("type", i.type) + attr("value", i.value) + attr("justify", i.justify) +
-                      attr("vjustify", i.vjustify) + bare("PAIRS_LIST", i.pairs_list) +
-                      attr_int("column", i.has_column, i.column);
-  leaf(depth, "ITEM", attrs, i.text);
-}
-
-void Writer::items(const Items &items, int depth) {
-  if (!items.present) return;
-  line(depth, "<ITEMS" + attr("justify", items.justify) + attr("vjustify", items.vjustify) +
-                  bare("MULTISELECT", items.multiselect) + ">");
-  for (const Appearance &a : items.appearances) appearance(a, "APPEARANCE", depth + 1);
-  for (const Item &i : items.items) item(i, depth + 1);
-  for (const TableRow &row : items.rows) {
-    line(depth + 1, "<ROW>");
-    for (const Item &cell : row.cells) item(cell, depth + 2);
-    line(depth + 1, "</ROW>");
-  }
-  line(depth, "</ITEMS>");
-}
-
-void Writer::column(const TableColumn &c, int depth) {
-  const std::vector<SortKeyPlace> places = sort_key_places(c);
-  const bool keys = places[0].slot || places[1].slot || places[2].slot;
-  if (!c.has_count && !c.has_spacing && c.headers.empty() && c.bodies.empty() && c.substitutions.empty() && !keys)
-    return;
-  line(depth, "<COLUMN" + attr_int("count", c.has_count, c.count) + attr_int("spacing", c.has_spacing, c.spacing) +
-                  ">");
-  const char *const key_tokens[] = {c.primary_sort_token.empty() ? kPrimarySortTokens[0] : c.primary_sort_token.c_str(),
-                                    "SECONDARY_SORT", "TERTIARY_SORT"};
-  for (size_t i = 0; i < c.headers.size(); ++i) {
-    const TableHeader &h = c.headers[i];
-    // A sort key written before COLUMN takes this HEADER's index, one written after it
-    // the index before (the walk runs last authored first).
-    std::string before, after;
-    for (int k = 0; k < 3; ++k)
-      if (places[k].slot && places[k].placed && places[k].header == i)
-        (places[k].own ? before : after) += std::string(" ") + key_tokens[k];
-    std::string attrs = attr("justify", h.justify) + attr("vjustify", h.vjustify) + before +
-                        attr_int("column", h.has_column, h.column) + after + attr("sort", h.sort) +
-                        attr_int("width", h.has_width, h.width) + attr("type", h.type);
-    leaf(depth + 1, "HEADER", attrs, h.text);
-  }
-  for (const TableBody &b : c.bodies) {
-    std::string attrs = attr("justify", b.justify) + attr("vjustify", b.vjustify) +
-                        attr_int("column", b.has_column, b.column);
-    // The draw kind retail keeps is the first authored of the three: written first.
-    const bool on[] = {b.custom_draw, b.bitmap_draw, b.bitmap_text};
-    for (int k = 0; k < 3; ++k)
-      if (on[k] && iequals(b.display, kBodyDisplays[k])) attrs += std::string(" ") + kBodyDisplays[k];
-    for (int k = 0; k < 3; ++k)
-      if (on[k] && !iequals(b.display, kBodyDisplays[k])) attrs += std::string(" ") + kBodyDisplays[k];
-    attrs += attr("BITMAP_FLAGS", b.bitmap_flags) + bare("SCALE_BITMAP", b.scale_bitmap);
-    line(depth + 1, "<BODY" + attrs + "></BODY>");
-  }
-  for (const TableSubst &s : c.substitutions)
-    leaf(depth + 1, "SUBST",
-         attr_int("column", s.has_column, s.column) + attr("value", s.value) + bare("URL", s.is_url) +
-             bare("FILE", s.is_file),
-         s.file);
-  line(depth, "</COLUMN>");
-}
-
-bool is_space_text(const std::string &text) {
-  return std::all_of(text.begin(), text.end(), [](char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f';
-  });
-}
-
-void Writer::element(const Element &e, int depth) {
-  std::string attrs;
-  for (const ElementAttribute &a : e.attributes)
-    attrs += a.has_value ? " " + a.name + "=\"" + a.value + "\"" : " " + a.name;
-  if (e.children.empty()) {
-    leaf(depth, e.tag, attrs, e.text);
-    return;
-  }
-  if (!is_space_text(e.text)) {
-    // Text beside child elements: written compact, so no layout whitespace joins it.
-    Writer inner(false, 0);
-    for (const Element &child : e.children) inner.element(child, 0);
-    line(depth, "<" + e.tag + attrs + ">" + escape_text(e.text) + inner.out + "</" + e.tag + ">");
-    return;
-  }
-  line(depth, "<" + e.tag + attrs + ">");
-  for (const Element &child : e.children) element(child, depth + 1);
-  line(depth, "</" + e.tag + ">");
-}
-
-void Writer::window(const Window &w, int depth, const char *tag, bool part, const std::string &extra) {
-  std::string attrs = extra;
-  if (!part)
-    attrs += attr("type", w.type_token.empty() ? window_type_name(w.type) : w.type_token);
-  attrs += attr("name", w.name);
-  attrs += bare("DRAW_FRAME", w.draw_frame) + bare("HIDDEN", w.hidden) + bare("MODAL", w.modal) +
-           bare("READONLY", w.readonly) + bare("DISABLE", w.disabled) + bare("CHECKED", w.checked) +
-           bare("AS_BUTTON", w.as_button) + bare("NUMBER", w.number);
-  attrs += attr_int("MINVAL", w.has_minval, w.minval) + attr_int("MAXVAL", w.has_maxval, w.maxval) +
-           attr_int("MAXCHAR", w.has_maxchar, w.maxchar);
-  attrs += bare("GLOBAL_VAR", w.global_var) + bare("PASSWORD", w.password) +
-           attr_int("FORM", w.has_form, w.form);
-  for (const ElementAttribute &a : w.extra_attributes)
-    attrs += a.has_value ? " " + a.name + "=\"" + a.value + "\"" : " " + a.name;
-  line(depth, "<" + std::string(tag) + attrs + ">");
-  window_elements(w, depth + 1);
-  line(depth, "</" + std::string(tag) + ">");
-}
-
-void Writer::window_elements(const Window &w, int depth) {
-  if (w.has_group) leaf(depth, "GROUP", "", std::to_string(w.group));
-  for (const Hotkey &h : w.hotkeys) leaf(depth, "HOTKEY", bare("VIRTUAL", h.virtual_key), h.value);
-  for (const Action &a : w.actions) {
-    std::string attrs = attr("type", a.type) + attr("state", a.state) + attr("file", a.file);
-    if (!a.field.empty())
-      attrs += " " + (a.field_attr.empty() ? std::string(kActionFieldAttributes[0]) : a.field_attr) + "=\"" + a.field + "\"";
-    attrs += attr_int("target_form", a.has_target_form, a.target_form) + bare("TOGGLE", a.toggle) +
-             attr("test", a.test) + bare("EXTERNAL_BROWSER", a.external_browser);
-    leaf(depth, "ACTION", attrs, a.target);
-  }
-  const Frame &f = w.frame;
-  const bool has_stencil = !f.stencil.empty() || f.has_stencil_size || f.has_insetx || f.has_insety;
-  if (has_stencil || !f.brush.empty() || !f.monogram.empty()) {
-    line(depth, "<FRAME>");
-    if (has_stencil)
-      leaf(depth + 1, "STENCIL",
-           attr_int("size", f.has_stencil_size, f.stencil_size) + attr_int("insetx", f.has_insetx, f.insetx) +
-               attr_int("insety", f.has_insety, f.insety),
-           f.stencil);
-    if (!f.brush.empty()) leaf(depth + 1, "BRUSH", "", f.brush);
-    if (!f.monogram.empty()) leaf(depth + 1, "MONOGRAM", "", f.monogram);
-    line(depth, "</FRAME>");
-  }
-  position(w.position, depth);
-  if (w.has_scroll_extent)
-    leaf(depth, w.scroll_extent_is_width ? "WIDTH" : "HEIGHT", "", std::to_string(w.scroll_extent));
-  if (!w.orientation.empty()) leaf(depth, "ORIENTATION", "", w.orientation);
-  for (const Appearance &a : w.appearances) appearance(a, "APPEARANCE", depth);
-  for (const Appearance &a : w.shuttle) appearance(a, "SHUTTLE", depth);
-  for (const Appearance &a : w.scrollup) appearance(a, "SCROLLUP", depth);
-  for (const Appearance &a : w.scrolldown) appearance(a, "SCROLLDOWN", depth);
-  if (w.has_text_rsrc) leaf(depth, "TEXT_RSRC", "", w.text_rsrc);
-  for (const std::string &source : w.datasources) leaf(depth, "DATASOURCE", "", source);
-  if (!w.private_data.empty()) leaf(depth, "PRIVATE_DATA", "", w.private_data);
-  if (!w.cursor.file.empty() || !w.cursor.flags.empty()) {
-    line(depth, "<CURSOR>");
-    if (!w.cursor.file.empty()) leaf(depth + 1, "FILE", "", w.cursor.file);
-    if (!w.cursor.flags.empty()) leaf(depth + 1, "FLAGS", "", w.cursor.flags);
-    line(depth, "</CURSOR>");
-  }
-  const Font &font = w.font;
-  if (!font.empty()) {
-    line(depth, "<FONT>");
-    const std::pair<const char *, const std::string *> slots[] = {
-        {"NAME", &font.name},
-        {"DEFAULT_FG", &font.default_fg},
-        {"DEFAULT_BG", &font.default_bg},
-        {"MOUSEOVER_FG", &font.mouseover_fg},
-        {"MOUSEOVER_BG", &font.mouseover_bg},
-        {"SELECTED_FG", &font.selected_fg},
-        {"SELECTED_BG", &font.selected_bg},
-        {"DISABLED_FG", &font.disabled_fg},
-        {"DISABLED_BG", &font.disabled_bg},
-    };
-    for (const auto &slot : slots)
-      if (!slot.second->empty()) leaf(depth + 1, slot.first, "", *slot.second);
-    line(depth, "</FONT>");
-  }
-  const String &s = w.string_data;
-  if (s.present)
-    leaf(depth, "STRING",
-         attr("type", s.type) + attr("justify", s.justify) + attr("vjustify", s.vjustify) +
-             attr_int("edge", s.has_edge, s.edge) + bare("WRAP", s.wrap),
-         s.value);
-  if (w.toggle_string.present) leaf(depth, "TOGGLE_STRING", attr("type", w.toggle_string.type), w.toggle_string.value);
-  for (const Sound &snd : w.sounds)
-    leaf(depth, "SOUND", attr("state", snd.state) + attr("trigger", snd.trigger), snd.file);
-  items(w.items, depth);
-  // The combo's sb_edge_pad rides on the LIST_BOX element with the list's own attributes.
-  if (w.list_box)
-    window(*w.list_box, depth, "LIST_BOX", true, attr_int("sb_edge_pad", w.has_sb_edge_pad, w.sb_edge_pad));
-  if (w.spinup) window(*w.spinup, depth, "SPINUP", true);
-  if (w.spindown) window(*w.spindown, depth, "SPINDOWN", true);
-  column(w.table_data.column, depth);
-  if (w.table_data.has_min_item_height) leaf(depth, "MIN_ITEM_HEIGHT", "", std::to_string(w.table_data.min_item_height));
-  if (w.table_data.has_fixed_header_height)
-    leaf(depth, "FIXED_HEADER_HEIGHT", "", std::to_string(w.table_data.fixed_header_height));
-  if (w.scrollbar) window(*w.scrollbar, depth, "SCROLLBAR", true);
-  for (const Element &e : w.extras) element(e, depth);
-  for (const Window &child : w.children) window(child, depth, "WINDOW", false);
-}
-
-void Writer::screen(const Screen &s) {
-  line(0, "<SCREEN>");
-  if (!s.name.empty()) leaf(1, "NAME", "", s.name);
-  if (s.has_music_var) leaf(1, "MUSICVAR", "", std::to_string(s.music_var));
-  for (const Window &root : s.roots) window(root, 1, "WINDOW", false);
-  line(0, "</SCREEN>");
-}
-
-// --- write issues ------------------------------------------------------------
-
-bool has_quote(const std::string &value) {
-  return value.find('"') != std::string::npos || value.find('\'') != std::string::npos;
-}
-
-bool known(const std::string &value, const char *const *tokens) { return known_token(value, tokens); }
-
-// Whether the writer puts any child element in a window (retail creates no WINDOW
-// without one; a part without one crashes it).
-bool writes_elements(const Window &w) {
-  Writer probe(false, 0);
-  probe.window_elements(w, 0);
-  return !probe.out.empty();
-}
-
-// Each issue names the record that holds the value by its lists' element paths and the
-// field by its element path (WriteIssue::locator; the names the editor's menu table
-// gives them), so the editor shows it on the field that causes it.
-class IssueCheck {
-public:
-  explicit IssueCheck(std::vector<WriteIssue> &out) : out_(out) {}
-  void screen(const Screen &s, size_t index);
-
-private:
-  void add(const std::string &window, const std::string &locator, const std::string &field,
-           const std::string &message) {
-    out_.push_back({screen_, window, locator, field, message});
-  }
-  void value(const std::string &window, const std::string &locator, const std::string &field, const std::string &v) {
-    if (has_quote(v))
-      add(window, locator, field,
-          field + " holds a quote: retail's reader ends a value at a quote of either kind, so it cannot be saved.");
-  }
-  // The rows' values; `read` when retail's parse reads (and so stops at) this list.
-  void rows(const std::string &window, const std::string &owner, const char *list, const char *tag,
-            const std::vector<Appearance> &rows, bool read);
-  void window(const Window &w, const std::string &locator, const char *tag, bool part);
-  void element(const std::string &window, const std::string &locator, const Element &e);
-  static std::string at(const std::string &owner, const char *list, size_t index) {
-    return owner + "/" + list + ":" + std::to_string(index);
-  }
-
-  std::vector<WriteIssue> &out_;
-  std::string screen_;
-};
-
-void IssueCheck::rows(const std::string &window, const std::string &owner, const char *list, const char *tag,
-                      const std::vector<Appearance> &list_rows, bool read) {
-  for (size_t i = 0; i < list_rows.size(); ++i) {
-    const Appearance &a = list_rows[i];
-    if (empty_row(a)) continue;
-    const std::string locator = at(owner, list, i);
-    value(window, locator, "type", a.type);
-    value(window, locator, "state", a.state);
-    value(window, locator, "flags", a.flags);
-    if (read && !known(a.state, kAppearanceStates))
-      add(window, locator, "state",
-          std::string("An ") + tag + " with no STATE retail knows (DEFAULT, DISABLED, MOUSEOVER, SELECTED) stops "
-                                     "this window's parse in retail: what follows it and its child windows are lost.");
-  }
-}
-
-void IssueCheck::element(const std::string &window, const std::string &locator, const Element &e) {
-  for (size_t i = 0; i < e.attributes.size(); ++i) value(window, at(locator, "attribute", i), "value", e.attributes[i].value);
-  for (size_t i = 0; i < e.children.size(); ++i) element(window, at(locator, "element", i), e.children[i]);
-}
-
-void IssueCheck::window(const Window &w, const std::string &locator, const char *tag, bool part) {
-  const std::string &name = w.name;
-  if (!part) value(name, locator, "type", w.type_token);
-  value(name, locator, "name", w.name);
-  if (!writes_elements(w)) {
-    if (part)
-      add(name, locator, "", std::string("An empty ") + tag + " crashes retail (its widget parses no element).");
-    else
-      add(name, locator, "", "Retail creates no WINDOW without a child element: this window would be lost.");
-  }
-  const bool scroll = w.type == WindowType::Scroll;
-  const bool list = w.type == WindowType::List || w.type == WindowType::LanList || w.type == WindowType::Table;
-  rows(name, locator, "appearance", "APPEARANCE", w.appearances, true);
-  rows(name, locator, "shuttle", "SHUTTLE", w.shuttle, scroll);
-  rows(name, locator, "scrollup", "SCROLLUP", w.scrollup, scroll);
-  rows(name, locator, "scrolldown", "SCROLLDOWN", w.scrolldown, scroll);
-  if (w.items.present) rows(name, locator, "items.appearance", "ITEMS APPEARANCE", w.items.appearances, list);
-  for (size_t i = 0; i < w.sounds.size(); ++i) {
-    const Sound &s = w.sounds[i];
-    const std::string row = at(locator, "sound", i);
-    value(name, row, "state", s.state);
-    value(name, row, "trigger", s.trigger);
-    if (!known(s.state, kSoundStates) || s.trigger.empty())
-      add(name, row, known(s.state, kSoundStates) ? "trigger" : "state",
-          "A SOUND needs a STATE retail knows (MOUSEIN, MOUSEOUT, SELECTED) and a TRIGGER; without them it stops "
-          "this window's parse in retail.");
-  }
-  for (size_t i = 0; i < w.actions.size(); ++i) {
-    const Action &a = w.actions[i];
-    const std::string row = at(locator, "action", i);
-    value(name, row, "type", a.type);
-    value(name, row, "state", a.state);
-    value(name, row, "file", a.file);
-    value(name, row, "field", a.field);
-    value(name, row, "test", a.test);
-    if (iequals(a.type, "SCREEN") && a.file.empty())
-      add(name, row, "file", "A SCREEN action with no FILE crashes retail when it is activated.");
-  }
-  if (w.string_data.present) {
-    value(name, locator, "string.justify", w.string_data.justify);
-    value(name, locator, "string.vjustify", w.string_data.vjustify);
-    value(name, locator, "string.type", w.string_data.type);
-  }
-  if (w.toggle_string.present) value(name, locator, "toggle_string.type", w.toggle_string.type);
-  if (w.items.present) {
-    value(name, locator, "items.justify", w.items.justify);
-    value(name, locator, "items.vjustify", w.items.vjustify);
-    auto item = [&](const std::string &row, const Item &i) {
-      value(name, row, "type", i.type);
-      value(name, row, "value", i.value);
-      value(name, row, "justify", i.justify);
-      value(name, row, "vjustify", i.vjustify);
-    };
-    for (size_t i = 0; i < w.items.items.size(); ++i) item(at(locator, "items.item", i), w.items.items[i]);
-    for (size_t r = 0; r < w.items.rows.size(); ++r)
-      for (size_t c = 0; c < w.items.rows[r].cells.size(); ++c)
-        item(at(at(locator, "items.row", r), "item", c), w.items.rows[r].cells[c]);
-  }
-  const TableColumn &column = w.table_data.column;
-  for (size_t i = 0; i < column.headers.size(); ++i) {
-    const TableHeader &h = column.headers[i];
-    const std::string row = at(locator, "column.header", i);
-    value(name, row, "justify", h.justify);
-    value(name, row, "vjustify", h.vjustify);
-    value(name, row, "sort", h.sort);
-    value(name, row, "type", h.type);
-  }
-  for (size_t i = 0; i < column.bodies.size(); ++i) {
-    const TableBody &b = column.bodies[i];
-    const std::string row = at(locator, "column.body", i);
-    value(name, row, "justify", b.justify);
-    value(name, row, "vjustify", b.vjustify);
-    value(name, row, "bitmap_flags", b.bitmap_flags);
-  }
-  for (size_t i = 0; i < column.substitutions.size(); ++i)
-    value(name, at(locator, "column.subst", i), "value", column.substitutions[i].value);
-  const std::vector<SortKeyPlace> places = sort_key_places(column);
-  const char *const keys[] = {"column.primary_sort", "column.secondary_sort", "column.tertiary_sort"};
-  for (size_t k = 0; k < places.size(); ++k)
-    if (places[k].slot && !places[k].placed)
-      add(name, locator, keys[k],
-          "A table sort key names a column no HEADER's index reaches, so no HEADER can carry it: it cannot be "
-          "saved.");
-  for (size_t i = 0; i < w.extra_attributes.size(); ++i)
-    value(name, at(locator, "attribute", i), "value", w.extra_attributes[i].value);
-  for (size_t i = 0; i < w.extras.size(); ++i) element(name, at(locator, "element", i), w.extras[i]);
-  // [orig: CTableWnd_RecalcLayout @ 0x63f1a0, idiv @ 0x63f26b]
-  if (w.type == WindowType::Table && w.table_data.has_min_item_height && w.table_data.min_item_height == 0)
-    add(name, locator, "min_item_height", "MIN_ITEM_HEIGHT 0 divides by zero when retail creates the table.");
-  // [orig: CEditWnd_ParseXMLProperties @ 0x661e5f; CCheckWnd_ParseXMLDefinition @ 0x64ae05]
-  const bool edit = w.type == WindowType::Edit || w.type == WindowType::MultilineEdit ||
-                    w.type == WindowType::RadioEdit;
-  if (w.global_var && (edit || (w.type == WindowType::CheckBox && w.checked)))
-    add(name, locator, "global_var",
-        edit ? "GLOBAL_VAR on an edit window faults when retail parses it (the scene is not set yet)."
-             : "GLOBAL_VAR on a CHECKED checkbox faults when retail parses it (the scene is not set yet).");
-  if (w.list_box) window(*w.list_box, at(locator, "list_box", 0), "LIST_BOX", true);
-  if (w.spinup) window(*w.spinup, at(locator, "spinup", 0), "SPINUP", true);
-  if (w.spindown) window(*w.spindown, at(locator, "spindown", 0), "SPINDOWN", true);
-  if (w.scrollbar) window(*w.scrollbar, at(locator, "scrollbar", 0), "SCROLLBAR", true);
-  for (size_t i = 0; i < w.children.size(); ++i) window(w.children[i], at(locator, "window", i), "WINDOW", false);
-}
-
-void IssueCheck::screen(const Screen &s, size_t index) {
-  screen_ = s.name;
-  const std::string locator = std::to_string(index);
-  if (s.name.empty() && !s.roots.empty())
-    add("", locator, "name", "A SCREEN with no NAME crashes retail as it creates the screen's first window.");
-  for (size_t i = 0; i < s.roots.size(); ++i) window(s.roots[i], at(locator, "window", i), "WINDOW", false);
-}
-
-}  // namespace
-
-std::vector<WriteIssue> write_issues(const Document &doc) {
-  std::vector<WriteIssue> issues;
-  IssueCheck check(issues);
-  for (size_t i = 0; i < doc.screens.size(); ++i) check.screen(doc.screens[i], i);
-  return issues;
-}
-
-std::string serialize(const Document &doc, bool pretty, int indent_size) {
-  Writer writer(pretty, indent_size);
-  for (const auto &screen : doc.screens) writer.screen(screen);
-  return writer.out;
-}
-
-bool serialize_bytes(const Document &doc, std::vector<uint8_t> &out,
-                     std::string &error, bool pretty, int indent_size) {
-  out.clear();
-  error.clear();
-  const std::vector<WriteIssue> issues = write_issues(doc);
-  if (!issues.empty()) {
-    error = issues.front().message;
-    return false;
-  }
-  const std::string text = serialize(doc, pretty, indent_size);
-  if (doc.source_encoding != SourceEncoding::Utf16LE) {
-    if (doc.source_encoding == SourceEncoding::Utf8Bom) out.insert(out.end(), {0xEF, 0xBB, 0xBF});
-    out.insert(out.end(), text.begin(), text.end());
-    return true;
-  }
-  // The model's UTF-8 as little-endian UTF-16 after the byte order mark.
-  out.insert(out.end(), {0xFF, 0xFE});
-  auto unit = [&](uint32_t u) {
-    out.push_back(static_cast<uint8_t>(u & 0xFF));
-    out.push_back(static_cast<uint8_t>(u >> 8));
-  };
-  for (size_t i = 0; i < text.size();) {
-    const uint8_t lead = static_cast<uint8_t>(text[i]);
-    uint32_t cp = lead;
-    size_t count = 1;
-    if (lead >= 0xF0) { cp = lead & 0x07u; count = 4; }
-    else if (lead >= 0xE0) { cp = lead & 0x0Fu; count = 3; }
-    else if (lead >= 0xC0) { cp = lead & 0x1Fu; count = 2; }
-    if (i + count > text.size()) {
-      error = "MNU text ends in an incomplete UTF-8 sequence";
-      out.clear();
-      return false;
-    }
-    for (size_t k = 1; k < count; ++k) cp = (cp << 6) | (static_cast<uint8_t>(text[i + k]) & 0x3Fu);
-    i += count;
-    if (cp > 0xFFFF) {
-      cp -= 0x10000;
-      unit(0xD800 | (cp >> 10));
-      unit(0xDC00 | (cp & 0x3FF));
-    } else {
-      unit(cp);
-    }
-  }
-  return true;
 }
 
 }  // namespace opennova::mnu

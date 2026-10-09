@@ -100,7 +100,22 @@ private:
 	bool fail(std::string &error, const std::string &why) {
 		error = why;
 		out_.roots.clear();
+		out_.spans.clear();
 		return false;
+	}
+	// The spans (Document::spans): a tag or a block from `begin` to where the reader stands,
+	// and the text before it since the last one.
+	void text_until(size_t at_index) {
+		at_index = at_index < n_ ? at_index : n_;
+		if (at_index <= spanned_) return;
+		out_.spans.push_back({Span::Kind::Text, spanned_, at_index, current_});
+		spanned_ = at_index;
+	}
+	void span(Span::Kind kind, size_t begin, const Node *node) {
+		text_until(begin);
+		const size_t end = pos_ < n_ ? pos_ : n_;
+		out_.spans.push_back({kind, begin, end, node});
+		spanned_ = end;
 	}
 	void note(const std::string &message) { out_.notes.push_back({line_at(pos_), message}); }
 	size_t line_at(size_t index) {
@@ -125,6 +140,7 @@ private:
 	Node *current_ = nullptr; // where text and children go
 	Node *created_ = nullptr; // where attributes go: the element created last
 	int screens_ = 0;         // top-level SCREENs so far
+	size_t spanned_ = 0;      // where the spans so far end
 };
 
 // [orig: XML_ParseCharEntity @ 0x769cc0] at the '&': the scan end is the first ';',
@@ -164,10 +180,13 @@ char32_t Reader::entity() {
 
 bool Reader::attributes() {
 	while (at(pos_) != '>') {
+		const size_t blanks = pos_;
 		while (at(pos_) && is_space(at(pos_))) ++pos_;
 		const size_t name_start = pos_;
 		while (at(pos_) && !is_space(at(pos_)) && at(pos_) != '=' && at(pos_) != '>') ++pos_;
 		Attribute attr;
+		attr.at = blanks;
+		attr.name_at = name_start;
 		attr.name.assign(s_, name_start, pos_ - name_start);
 		if (at(pos_) == '=') {
 			++pos_;
@@ -191,10 +210,11 @@ bool Reader::attributes() {
 			}
 			attr.has_value = true;
 		}
+		while (at(pos_) && !is_space(at(pos_)) && at(pos_) != '>') ++pos_;
+		attr.end = pos_;
 		// Retail prepends to the element created last (before any element, into the
 		// text buffer it was handed: nothing a menu can hold).
 		if (created_) created_->attributes.push_back(std::move(attr));
-		while (at(pos_) && !is_space(at(pos_)) && at(pos_) != '>') ++pos_;
 		if (!at(pos_)) {
 			// Retail keeps adding empty attributes at the end of the text forever.
 			note("The file ends inside a tag: retail hangs here.");
@@ -206,11 +226,14 @@ bool Reader::attributes() {
 }
 
 bool Reader::run(std::string &error) {
+	out_.end = n_;
 	if (!at(0)) return true;
 	for (;;) {
 		const char32_t ch = at(pos_);
 		if (ch == '<') {
 			const size_t open = pos_;
+			Span::Kind kind = Span::Kind::Open;
+			const Node *spanned = current_;
 			++pos_;
 			while (at(pos_) && is_space(at(pos_))) ++pos_;
 			const size_t tag_start = pos_;
@@ -223,10 +246,12 @@ bool Reader::run(std::string &error) {
 				// Any close tag pops one level; its name is never compared.
 				if (!current_)
 					return fail(error, "A close tag at the top level: retail crashes loading this file.");
+				kind = Span::Kind::Close;
 				current_ = current_->parent;
 			} else if (starts_with(tag_start, "!--")) {
 				// The terminator search starts where the tag name stopped, so <!--x-->
 				// with no whitespace runs on to the next "-->".
+				kind = Span::Kind::Comment;
 				while (at(pos_)) {
 					while (at(pos_) && at(pos_) != '-') ++pos_;
 					if (starts_with(pos_, "-->")) {
@@ -237,12 +262,14 @@ bool Reader::run(std::string &error) {
 				}
 				if (!at(pos_)) {
 					note("The file ends inside a comment: retail's comment scan reads past the end of the text.");
+					span(kind, open, spanned);
 					return true;
 				}
 			} else if (at(tag_start) == 'R' && starts_with(tag_start, "RAW_TEXT")) {
 				// Case-sensitive, a prefix: the body up to </RAW_TEXT goes verbatim into
 				// the current element's text, its first character before the check.
 				if (!current_) return fail(error, "RAW_TEXT outside any element.");
+				kind = Span::Kind::RawText;
 				++pos_;
 				if (!at(pos_)) return fail(error, "The file ends inside RAW_TEXT.");
 				for (;;) {
@@ -265,8 +292,11 @@ bool Reader::run(std::string &error) {
 				(current_ ? current_->children : out_.roots).push_back(std::move(node));
 				current_ = raw;
 				created_ = raw;
+				spanned = raw;
 			}
-			if (!attributes()) return true;
+			const bool whole = attributes();
+			span(kind, open, spanned);
+			if (!whole) return true;
 		} else if (ch == '&') {
 			const size_t at_amp = pos_;
 			const char32_t decoded = entity();
@@ -279,6 +309,7 @@ bool Reader::run(std::string &error) {
 			}
 			if (pos_ > n_) {
 				note("The file ends inside an entity: retail reads past the end of the text.");
+				text_until(n_);
 				return true;
 			}
 		} else if (!current_) {
@@ -288,7 +319,10 @@ bool Reader::run(std::string &error) {
 			current_->text.push_back(ch);
 			++pos_;
 		}
-		if (!at(pos_)) return true;
+		if (!at(pos_)) {
+			text_until(n_);
+			return true;
+		}
 	}
 }
 
@@ -320,6 +354,8 @@ const Attribute *Node::last_attr(const char *name) const {
 bool parse(const Text &text, Document &out, std::string &error) {
 	out.roots.clear();
 	out.notes.clear();
+	out.spans.clear();
+	out.end = 0;
 	Reader reader(text, out);
 	return reader.run(error);
 }
