@@ -49,31 +49,20 @@ std::shared_ptr<const TextureImage> blend_weights(const std::shared_ptr<const Te
 	return out;
 }
 
-// A particle graphic as its atlas page holds it: registered alone and built as the game builds its pages, then cut
-// from the page where the build places it (an additive one's alpha cleared, a bump's or a distortion's page made a
-// normal map of its blue) [orig: CParticleManager_BuildTextureAtlases @ 0x5E8DB0; renderer::ParticleAtlasBuilder].
+// A particle graphic as its atlas page holds it (renderer::particle_atlas_paged_frame: an additive one's alpha
+// cleared, a bump's or a distortion's page made a normal map of its blue); the image itself where no page holds it.
 std::shared_ptr<const TextureImage> particle_page_texels(const std::shared_ptr<const TextureImage> &image, int mode) {
 	const TextureLevel &first = image->levels.front();
 	renderer::ParticleRgbaImage frame;
 	frame.width = int(first.width);
 	frame.height = int(first.height);
 	frame.rgba = first.rgba;
-	renderer::ParticleAtlasBuilder builder;
-	builder.register_frame("graphic", uint8_t(mode), std::move(frame));
-	const renderer::ParticleAtlasBuild build = builder.build();
-	if (build.entries.empty() || !build.entries.front().placement.valid) return image;
-	const renderer::ParticleAtlasPlacement &placed = build.entries.front().placement;
-	if (placed.page >= build.pages.size()) return image;
-	const renderer::ParticleRgbaImage &page = build.pages[placed.page].image;
+	const renderer::ParticleRgbaImage paged = renderer::particle_atlas_paged_frame(frame, uint8_t(mode));
+	if (!paged.valid()) return image;
 	TextureLevel level;
-	level.width = uint32_t(placed.width);
-	level.height = uint32_t(placed.height);
-	level.rgba.resize(size_t(level.width) * level.height * 4);
-	for (int y = 0; y < placed.height; ++y)
-		for (int x = 0; x < placed.width; ++x)
-			for (int c = 0; c < 4; ++c)
-				level.rgba[(size_t(y) * level.width + size_t(x)) * 4 + size_t(c)] =
-				        page.rgba[(size_t(placed.y + y) * size_t(page.width) + size_t(placed.x + x)) * 4 + size_t(c)];
+	level.width = uint32_t(paged.width);
+	level.height = uint32_t(paged.height);
+	level.rgba = paged.rgba;
 	auto out = std::make_shared<TextureImage>(*image);
 	out->levels.assign(1, std::move(level));
 	out->indices.clear();
@@ -185,21 +174,21 @@ bool TextureRoleView::operator==(const TextureRoleView &other) const {
 	return true;
 }
 
-std::shared_ptr<const TextureImage> texture_role_texels(const std::shared_ptr<const TextureImage> &image, TextureRoleId role,
+std::shared_ptr<const TextureImage> texture_role_texels(const std::shared_ptr<const TextureImage> &image, renderer::TextureRoleId role,
                                                         int blend_mode) {
 	if (!image || !image->decoded || image->levels.empty() || !level_whole(image->levels.front())) return image;
-	if (role == TextureRoleId::TerrainBlendMap) return blend_weights(image);
-	if (role == TextureRoleId::ParticleGraphic && blend_mode >= 0 && blend_mode < kParticleModes)
+	if (role == renderer::TextureRoleId::TerrainBlendMap) return blend_weights(image);
+	if (role == renderer::TextureRoleId::ParticleGraphic && blend_mode >= 0 && blend_mode < kParticleModes)
 		return particle_page_texels(image, blend_mode);
 	return image;
 }
 
-TextureRoleView texture_role_view(const TextureImage &source, const TextureImage &used, TextureRoleId role, int blend_mode,
+TextureRoleView texture_role_view(const TextureImage &source, const TextureImage &used, renderer::TextureRoleId role, int blend_mode,
                                   const TrnConfig *terrain) {
 	if (!source.decoded || source.levels.empty() || used.levels.empty() || !level_whole(used.levels.front())) return {};
-	if (role == TextureRoleId::TerrainBlendMap) return blend_legend(used, terrain);
-	if (role == TextureRoleId::TerrainFoliageMap && !source.indices.empty()) return foliage_legend(source, terrain);
-	if (role == TextureRoleId::ParticleGraphic && blend_mode >= 0 && blend_mode < kParticleModes)
+	if (role == renderer::TextureRoleId::TerrainBlendMap) return blend_legend(used, terrain);
+	if (role == renderer::TextureRoleId::TerrainFoliageMap && !source.indices.empty()) return foliage_legend(source, terrain);
+	if (role == renderer::TextureRoleId::ParticleGraphic && blend_mode >= 0 && blend_mode < kParticleModes)
 		return particle_page(source, blend_mode);
 	return {};
 }

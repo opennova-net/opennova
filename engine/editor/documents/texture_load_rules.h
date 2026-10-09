@@ -13,7 +13,7 @@ namespace opennova::editor {
 // The file a texture loader opens for a name, the reader that decodes it, and what the loader makes of
 // the texels after (ADR 0046 S18), as the editor's checks, uses and previews read them: the game's own
 // rules (runtime/renderer/texture_load_rules.h, its witnesses: renderer::texture_load_attempts by the
-// loader a role goes through, texture_roles.h texture_role_renderer_loader; a model row's
+// loader a role goes through, renderer::texture_role; a model row's
 // renderer::material_texture_source and material_texture_load) in the editor's words, and the texels a
 // use makes for its picture. The project's files are packed as the game mounts them, so no loose-first
 // search applies, and the particle manager's loose tga\ folder is no project file.
@@ -46,14 +46,13 @@ struct TextureLoad {
 
 using TextureNameTest = std::function<bool(const std::string &name)>;
 
-// The load of `name` by `loader` for a use of `role` (kCount: none known): `exists` answers whether the
-// project's files hold a name (the loaders probe a .dds sibling and test the file); `row_type` a model
-// texture row's authored type (the STAGE, PLAIN, NORMAL, producer and chunk loaders pick by its runtime
-// type, renderer::material_texture_source); `alpha_mode` the HUD caller's mode (1 alpha only, 0 colour,
-// -1 the role's), which a .FULL or .ALPHA suffix overrides. Of a loader's tries the first the files hold,
-// else its first: the file it would open.
-TextureLoad texture_load(TextureLoader loader, std::string_view name, const TextureNameTest &exists,
-                         uint8_t row_type = 0, int alpha_mode = -1, TextureRoleId role = TextureRoleId::kCount);
+// The load of `name` by `loader`: `exists` answers whether the project's files hold a name (the loaders
+// probe a .dds sibling and test the file); `row_type` a model texture row's authored type (the STAGE,
+// PLAIN, NORMAL, producer and chunk loaders pick by its runtime type, renderer::material_texture_source);
+// `alpha_mode` the HUD caller's mode (1 alpha only, 0 colour, -1 the loader's), which a .FULL or .ALPHA
+// suffix overrides. Of a loader's tries the first the files hold, else its first: the file it would open.
+TextureLoad texture_load(renderer::TextureLoader loader, std::string_view name, const TextureNameTest &exists,
+                         uint8_t row_type = 0, int alpha_mode = -1);
 
 // The load a texture reference makes by its loader argument (texture_roles.h): a model row's by the row's
 // type; a role's by its loader (a mission's tile set named with TGA for its extension first, the HUD's

@@ -36,14 +36,14 @@ struct TextureRoleView {
 // The texels a role's consumer takes of `image` (the loader's): a terrain blend map's weights as the terrain
 // normalizes them; a particle graphic as its atlas page holds it, alone on an empty page of its mode
 // (`blend_mode`, formats/particle BlendMode); `image` itself for every other role.
-std::shared_ptr<const TextureImage> texture_role_texels(const std::shared_ptr<const TextureImage> &image, TextureRoleId role,
+std::shared_ptr<const TextureImage> texture_role_texels(const std::shared_ptr<const TextureImage> &image, renderer::TextureRoleId role,
                                                         int blend_mode);
 
 // What the role reads of `source` (the file as its reader decodes it) and `used` (texture_role_texels' of it): a
 // blend map's three channels, each its mean weight and the splat detail the terrain names for it; a foliage map's
 // codes, each its texels and the definitions of `terrain` it selects; a particle graphic's share of an atlas page
 // of its mode. `terrain` is the use's .trn (null where it did not read). None for any other role.
-TextureRoleView texture_role_view(const TextureImage &source, const TextureImage &used, TextureRoleId role, int blend_mode,
+TextureRoleView texture_role_view(const TextureImage &source, const TextureImage &used, renderer::TextureRoleId role, int blend_mode,
                                   const TrnConfig *terrain);
 
 // On the wire: {title, legend: [{key, rgb, share, words}], words}.
