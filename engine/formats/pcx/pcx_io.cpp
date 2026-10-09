@@ -26,23 +26,15 @@ bool parse_header(const uint8_t *data,
                   int &planes,
                   int &bytes_per_line,
                   std::string &error) {
-	if (size < 128) {
-		error = "PCX header truncated";
+	PcxHeader header;
+	if (!pcx_read_header(data, size, header)) {
+		error = size < 128 ? "PCX header truncated" : "Bad PCX manufacturer byte";
 		return false;
 	}
-	if (data[0] != 0x0A) {
-		error = "Bad PCX manufacturer byte";
-		return false;
-	}
-
-	const int xmin = data[4] | (data[5] << 8);
-	const int ymin = data[6] | (data[7] << 8);
-	const int xmax = data[8] | (data[9] << 8);
-	const int ymax = data[10] | (data[11] << 8);
-	width = xmax - xmin + 1;
-	height = ymax - ymin + 1;
-	planes = data[65];
-	bytes_per_line = data[66] | (data[67] << 8);
+	width = header.width;
+	height = header.height;
+	planes = header.planes;
+	bytes_per_line = header.bytes_per_line;
 
 	if (width <= 0 || height <= 0 || width > 4096 || height > 4096) {
 		error = "PCX dimensions out of range";
@@ -87,6 +79,36 @@ bool decode_scanline_rle(const uint8_t *data,
 }
 
 } // namespace
+
+bool pcx_read_header(const uint8_t *data, size_t size, PcxHeader &out) {
+	out = PcxHeader{};
+	if (data == nullptr || size < 128 || data[0] != 0x0A) {
+		return false;
+	}
+	const int xmin = data[4] | (data[5] << 8);
+	const int ymin = data[6] | (data[7] << 8);
+	const int xmax = data[8] | (data[9] << 8);
+	const int ymax = data[10] | (data[11] << 8);
+	out.bits = data[3];
+	out.width = xmax - xmin + 1;
+	out.height = ymax - ymin + 1;
+	out.planes = data[65];
+	out.bytes_per_line = static_cast<uint16_t>(data[66] | (data[67] << 8));
+	return true;
+}
+
+// [orig: Texture_LoadPCXFromPFF32 @ 0x56EA30 — the 24-bit path @ 0x56EB31, the indexed
+//  rows to BytesPerLine at a stride of the width @ 0x56ED70..0x56EDFC]
+PcxRowFit pcx_row_fit(const PcxHeader &header) {
+	if (header.planes == 3) {
+		return PcxRowFit::Exact;
+	}
+	const uint32_t width = static_cast<uint32_t>(header.width);
+	if (header.bytes_per_line > width) {
+		return PcxRowFit::Overrun;
+	}
+	return header.bytes_per_line < width ? PcxRowFit::Short : PcxRowFit::Exact;
+}
 
 bool decode_pcx_indexed(const uint8_t *data, size_t size, IndexedImage8 &out, std::string &error) {
 	out = IndexedImage8{};

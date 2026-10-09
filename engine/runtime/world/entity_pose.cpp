@@ -36,12 +36,6 @@ namespace opennova::world {
 
 namespace {
 
-// Retail's final special row clips BN17 R Hand (model bone 16) after channel
-// composition, overlay, and parent-pivot re-anchor.
-// [orig: Entity_BuildBoneTransformMatrices @0x4b1290 special row;
-//  world-wac-ai-re.md §14.1.5]
-constexpr int kRightHandBoneIndex = 16;
-
 constexpr double kHalfPi = 1.57079632679489661923;
 
 anim::Quat quat_axis_x(double angle) {
@@ -482,30 +476,15 @@ bool EntityPoseProvider::build_skeletal_bone_matrix(world::World &world,
 	// Accumulate only the muzzle bone's ancestor prefix. This is the same
 	// parent-local FK and bind-rest division build_skeletal() uses for every
 	// collision section, without constructing or publishing an entire matrix
-	// array for a single attachment-point query.
-	std::vector<anim::SkeletalClips::RestTransform> pose_global(
-			static_cast<size_t>(bone_index) + 1);
+	// array for a single attachment-point query. The same collapsed row
+	// build_skeletal() keeps for COBJ 16: the zero-scale local (origin kept)
+	// is the row itself, not composed onto its parent, so a muzzle below it
+	// lands where the collision pose does. [orig: special row @0x4b1290]
+	std::vector<anim::SkeletalClips::RestTransform> pose_global;
 	const bool collapse_right_hand =
 			mount_collapses_right_hand_row(*posed_entity);
-	for (int32_t i = 0; i <= bone_index; ++i) {
-		anim::SkeletalClips::RestTransform local;
-		anim::quat_to_mat3_rows(pose[static_cast<size_t>(i)].rotation,
-				local.rows);
-		local.origin = pose[static_cast<size_t>(i)].origin;
-		// The same collapsed row build_skeletal() keeps for COBJ 16: the
-		// zero-scale local (origin kept) is the row itself, not composed onto
-		// its parent, so a muzzle below it lands where the collision pose does.
-		// [orig: special row @0x4b1290]
-		if (collapse_right_hand && i == kRightHandBoneIndex) {
-			std::memset(local.rows, 0, sizeof(local.rows));
-			pose_global[static_cast<size_t>(i)] = local;
-			continue;
-		}
-		const int parent = rig->parents()[static_cast<size_t>(i)];
-		pose_global[static_cast<size_t>(i)] = parent >= 0
-				? anim::rest_mul(pose_global[static_cast<size_t>(parent)], local)
-				: local;
-	}
+	anim::pose_globals(pose, rig->parents(), static_cast<size_t>(bone_index) + 1,
+			collapse_right_hand ? anim::kCollapsedRightHandBone : -1, pose_global);
 	const anim::SkeletalClips::RestTransform deformation = anim::rest_mul(
 			pose_global[static_cast<size_t>(bone_index)],
 			rig->rest_global_inverse()[static_cast<size_t>(bone_index)]);
@@ -684,28 +663,21 @@ bool EntityPoseProvider::build_skeletal(world::World &world,
 	const world::CollisionMatrix body_world = world::collision_matrix_from_euler(
 			angles[anim::kOverlayBody].yaw, angles[anim::kOverlayBody].pitch,
 			angles[anim::kOverlayBody].roll, position);
-	std::vector<anim::SkeletalClips::RestTransform> pose_global(section_count);
+	// Retail zeroes the FINAL collision row after overlay/re-anchor.
+	// Preserve that literal collision result for COBJ 16: composing
+	// body_world here would incorrectly reintroduce the entity
+	// translation; the zero-scale local (origin kept) still FK-chains any
+	// children exactly like the binding's collapsed pose.
+	// [orig: special row @0x4b1290]
+	std::vector<anim::SkeletalClips::RestTransform> pose_global;
+	anim::pose_globals(pose, rig->parents(), section_count,
+			collapse_right_hand ? anim::kCollapsedRightHandBone : -1, pose_global);
 	out.resize(section_count);
 	for (size_t i = 0; i < section_count; ++i) {
-		anim::SkeletalClips::RestTransform local;
-		anim::quat_to_mat3_rows(pose[i].rotation, local.rows);
-		local.origin = pose[i].origin;
-		// Retail zeroes the FINAL collision row after overlay/re-anchor.
-		// Preserve that literal collision result for COBJ 16: composing
-		// body_world here would incorrectly reintroduce the entity
-		// translation; the zero-scale local (origin kept) still FK-chains any
-		// children exactly like the binding's collapsed pose.
-		// [orig: special row @0x4b1290]
-		if (collapse_right_hand && i == kRightHandBoneIndex) {
-			std::memset(local.rows, 0, sizeof(local.rows));
-			pose_global[i] = local;
+		if (collapse_right_hand && i == anim::kCollapsedRightHandBone) {
 			out[i] = world::CollisionMatrix{};
 			continue;
 		}
-		const int parent = rig->parents()[i];
-		pose_global[i] = parent >= 0
-				? anim::rest_mul(pose_global[static_cast<size_t>(parent)], local)
-				: local;
 		const anim::SkeletalClips::RestTransform deformation =
 				anim::rest_mul(pose_global[i], rig->rest_global_inverse()[i]);
 		float render_pose[16];

@@ -154,6 +154,11 @@ int round_icon_count(int clip, int reserve, int capacity, int divisor);
 
 int folded_reserve(int clip, int reserve, int capacity);
 
+// The displayed clip [orig: HUD_BuildEntityInfo @0x4b8573..0x4b85fa]: the
+// weapon's live clip, except that an infinite-capacity weapon (clipsize -1)
+// reads clip -1.
+int displayed_clip(int clip, int capacity);
+
 // ---------------------------------------------------------------------------
 // The waypoint distance label [orig: HUD_DrawWaypointNameAndDistance
 // @0x5947e5..0x594836]: horizontal-only (the mission X/Y plane), fixed sqrt

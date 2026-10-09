@@ -1,7 +1,9 @@
 #pragma once
 
+#include <formats/def/def.h>
 #include <formats/mission/bms.h>
 #include <runtime/mission/promote.h> // PromoteOptions::AiProfileRow (the install row)
+#include <runtime/world/ammo_table.h>
 
 #include <cstdint>
 #include <functional>
@@ -47,6 +49,25 @@ struct BootFileSource {
 
 // The index must outlive the returned readers.
 BootFileSource boot_files_from_index(const ResourceIndex &index);
+
+// How a def table's file read: no file of the name, a file the game's parser stops in, or read.
+enum class DefTableRead { Missing, Unreadable, Read };
+
+// weapon.def (`name`) through the game's parser as the mission load reads it: a SIGHTS row whose
+// texture the mount lacks is no row [orig: the sights arm's FileSystem_FileExists @0x544AE2], and a
+// zero-length file is an empty table (def_parse_weapons_memory). On Read `out` holds the parsed file
+// (the caller builds its table, world::build_weapon_table, and frees it, def_free_weapons); the
+// parser has zeroed it otherwise.
+DefTableRead read_weapon_defs(const BootFileSource &files, const std::string &name,
+		def::DefWeaponsFile &out);
+
+// ammo.def (`name`) as the mission load reads it, into the dense file-order table
+// (world::build_ammo_table) [orig: AmmoDef_LoadAll @ 0x40B0B0]; `out` is untouched unless Read.
+// What the load binds to it afterwards is the caller's: the weapons' round types
+// (world::resolve_weapon_round_types) and the whiz radii over the loaded sound sets
+// (world::resolve_ammo_whiz_radii).
+DefTableRead read_ammo_table(const BootFileSource &files, const std::string &name,
+		world::AmmoTable &out);
 
 // The infantry clip-set default when the embedder authors none.
 inline constexpr char kDefaultInfantryAdm[] = "E_STAND.adm";

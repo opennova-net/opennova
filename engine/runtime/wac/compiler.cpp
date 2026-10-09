@@ -1,4 +1,5 @@
 #include <runtime/wac/compiler.h>
+#include <runtime/wac/wac_lexis.h>
 #include <base/io/crt_ftol.h>
 #include <runtime/anim/adm_clip_index.h>
 #include <runtime/particle/effect_catalog_names.h>
@@ -475,7 +476,7 @@ private:
 				continue;
 			}
 			if (c <= ' ' || c == ',') continue;
-			if (c == ';' || (c == '/' && at(f, f.cursor) == '/')) {
+			if (wac_comment_starts(char(c), char(at(f, f.cursor)))) {
 				// A comment runs to the next CR, which the loop then counts.
 				// [orig: @0x4F54BA..0x4F54D9]
 				while (f.cursor < f.end && at(f, f.cursor) != '\r') ++f.cursor;
@@ -1168,13 +1169,15 @@ private:
 		}
 		if (expected == int(ParamType::Variable)) return std::nullopt; // [orig: @0x4F2B7B]
 
-		// The prefix legs, each also taken by its slot type; the name is what
-		// follows the prefix. [orig: @0x4F2B84..0x4F2CE9]
+		// The prefix legs (wac_lexis.h kWacOperandPrefixes), each also taken by
+		// its slot type; the name is what follows the prefix.
+		// [orig: @0x4F2B84..0x4F2CE9]
 		auto prefix = [&](const char *p) {
 			const size_t n = std::strlen(p);
 			return std::strncmp(s, p, n) == 0 ? n : size_t(0);
 		};
-		if (const size_t p = prefix("G_"); p || expected == int(ParamType::Group)) {
+		if (const size_t p = prefix(wac_operand_prefix(ParamType::Group));
+				p || expected == int(ParamType::Group)) {
 			// [orig: @0x4F30A0..0x4F3104] An unknown group stores 0.
 			const std::string_view group_name = name.substr(p);
 			int group = env_.registry ? env_.registry->script_group_index(group_name)
@@ -1185,7 +1188,8 @@ private:
 			}
 			return pooled(f, group, int(ParamType::Group), expected);
 		}
-		if (const size_t p = prefix("FX_"); p || expected == int(ParamType::Fx)) {
+		if (const size_t p = prefix(wac_operand_prefix(ParamType::Fx));
+				p || expected == int(ParamType::Fx)) {
 			// [orig: @0x4F305F..0x4F30FC -> CEffectWorld_InternEffectHandle @0x5F7310]
 			const std::string effect(name.substr(p));
 			const particle::EffectHandle handle = env_.effects ? env_.effects->intern(effect)
@@ -1197,7 +1201,8 @@ private:
 			}
 			return pooled(f, int32_t(handle.value), int(ParamType::Fx), expected, "FX:" + effect);
 		}
-		if (const size_t p = prefix("FACE_"); p || expected == int(ParamType::Face)) {
+		if (const size_t p = prefix(wac_operand_prefix(ParamType::Face));
+				p || expected == int(ParamType::Face)) {
 			// [orig: @0x4F3015..0x4F305A -> AnimState_FindByName @0x5800B0]
 			int index = world::facial_expression_index(std::string(name.substr(p)));
 			if (index < 0) {
@@ -1206,7 +1211,8 @@ private:
 			}
 			return pooled(f, index, int(ParamType::Face), expected);
 		}
-		if (const size_t p = prefix("SS_"); p || expected == int(ParamType::SoundSet)) {
+		if (const size_t p = prefix(wac_operand_prefix(ParamType::SoundSet));
+				p || expected == int(ParamType::SoundSet)) {
 			// [orig: @0x4F2FDA..0x4F3010 -> SoundBank_FindSetByNameAnyBank @0x5274F0]
 			const std::string set(name.substr(p));
 			int32_t handle = 0;
@@ -1226,7 +1232,8 @@ private:
 			}
 			return pooled(f, handle, int(ParamType::SoundSet), expected, "SS:" + set);
 		}
-		if (const size_t p = prefix("TT_"); p || expected == int(ParamType::TextToken)) {
+		if (const size_t p = prefix(wac_operand_prefix(ParamType::TextToken));
+				p || expected == int(ParamType::TextToken)) {
 			// The lookup answers "" for a missing key, so the leg's "Unknown
 			// TextTool Token" never fires. [orig: @0x4F2F96..0x4F2FD5 ->
 			// MissionText_GetStringByKeyOrGameText @0x51ECD0]
@@ -1236,7 +1243,8 @@ private:
 			note_lookup(f, ParamType::TextToken, p, found);
 			return pooled(f, index, int(ParamType::TextToken), expected, symbol);
 		}
-		if (const size_t p = prefix("ANIM_"); p || expected == int(ParamType::Anim)) {
+		if (const size_t p = prefix(wac_operand_prefix(ParamType::Anim));
+				p || expected == int(ParamType::Anim)) {
 			// Every token in an Anim slot, a number too, is looked up as
 			// "anim_" + name through the slot lookup (anim::adm_slot_index:
 			// the same compare past the key's first five bytes).
@@ -1248,7 +1256,8 @@ private:
 			}
 			return pooled(f, index, int(ParamType::Anim), expected);
 		}
-		if (const size_t p = prefix("SSN_"); p || expected == int(ParamType::Ssn)) {
+		if (const size_t p = prefix(wac_operand_prefix(ParamType::Ssn));
+				p || expected == int(ParamType::Ssn)) {
 			// atol (0 for a name or a quoted token) then the 16-bit net-id
 			// lookup; the leg never answers NULL. The port binds the net id
 			// when the VM first meets its world, and the embedder's registry
@@ -1262,7 +1271,8 @@ private:
 				error(f, f.line, "Unknown SSN");
 			return Operand{encode_operand(OperandKind::EntitySsn, pool(f, net, int(ParamType::Ssn), expected)), {}};
 		}
-		if (const size_t p = prefix("AMMO_"); p || expected == int(ParamType::Ammo)) {
+		if (const size_t p = prefix(wac_operand_prefix(ParamType::Ammo));
+				p || expected == int(ParamType::Ammo)) {
 			// The name, then "ammo_" + name; row 0 is a miss too.
 			// [orig: @0x4F2E21..0x4F2E92 -> AmmoDef_LookupByName @0x409870]
 			std::string ammo(name.substr(p));

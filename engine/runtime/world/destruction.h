@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include <base/io/bam.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 
@@ -602,6 +603,37 @@ public:
 // husk), null @0x406FF0 (never dies). Phase mirrors the witnessed callback
 // param (1 bullet hit, 2 explosion hit, 4 net kill); the authority legs run
 // under rules.logic_authority, a client acts on phase 4 only.
+// The death schedule's witnessed names and numbers, which the class callbacks and the death
+// dispatch read (and a death's description, the OpenNova Editor's, names).
+// The gnrc callback's first authority kill marks the item dead and arms a four-tick think whose
+// expiry runs the death transforms [orig: sub_407020 @0x4070b2..0x4070e2 (+0x2AC = 4), the expiry
+// @0x40706e].
+inline constexpr int32_t kGnrcDeathThinkTicks = 4;
+// The gnl2 callback's think (+0x2AC = 0x20): its first authority kill arms it, and its expiry (the
+// explosion and the husk) re-arms it [orig: Entity_HandleDeathEvent @0x407279..0x4072dd (the kill),
+// @0x40725f (the expiry)].
+inline constexpr int32_t kGnl2DeathThinkTicks = 32;
+// An item explosion (gnl2's expiry, a vehicle's): Effect_AirExp at the raised point and one
+// kz_M406HE blast there [orig: Entity_SpawnExplosionEffects @0x4399C0 — the effect @0x4399e3, the
+// blast @0x439a06].
+inline constexpr const char *kItemExplosionEffect = "Effect_AirExp";
+inline constexpr const char *kItemExplosionAmmo = "kz_M406HE";
+// The interned kz ammo names the death blasts queue [orig: WeaponDef_ResolveAllReferences
+// @ 0x540270 — g_AmmoKzOrganicBlast @ 0x24E7DBC etc.], resolved per queue push against the
+// world's ammo table; a husk KZ user point's blast is kz_OrganicBlast at radius 5.0
+// [orig: Entity_QueueKzBlastAtUserPoints @ 0x4eabf0, the 5.0 at @ 0x4eace7].
+inline constexpr const char *kAmmoKzOrganicBlast = "kz_OrganicBlast";
+inline constexpr const char *kAmmoKzMItemBlast = "kz_MItemBlast";
+inline constexpr float kKzPointBlastRadius = 5.0f;
+// The death dispatch's boat rows (unitType 5..8, the vehicle class's boats) play the ship
+// explosion where a husk model loaded [orig: Entity_ProcessBuildingDeath @ 0x494420; the boat class
+// Entity_GetVehicleClass @0x4f9e27], and the bridge row (11) shocks the water under each of the
+// first husk's DEAD points [orig: Entity_SpawnDeathEffectsAtBones @0x4944c0].
+inline constexpr bool unit_type_is_boat(int32_t unit_type) { return unit_type >= 5 && unit_type <= 8; }
+inline constexpr int32_t kUnitTypeBridge = 11;
+inline constexpr const char *kShipExplosionSound = "EXPLO_SHIP_TINY";
+inline constexpr const char *kBridgeWaterShockEffect = "Effect_ShockWaterBrdg";
+
 struct ItemExplosionEvent {
     uint16_t source = 0xFFFF;
     uint8_t count = 0;
@@ -629,6 +661,20 @@ struct DestroyFade {
     double progress = 0.0;
 };
 DestroyFade destroy_fade_phases(int32_t elapsed, const int32_t destroy_timing_ticks[3]);
+// A destroy_timing's fade duration ([1]) and stagger ([2]), 0 taking 50 and 25 ticks, and the
+// whole fade's length, duration + 4 x stagger (the OBJECT_DESTROY register's span, the five
+// staggered sub-phases ending with it), wrapping as retail's adds do. [orig:
+// Entity_PublishSwapFadePhases @0x5C3F40]
+inline int32_t destroy_fade_duration_ticks(const int32_t destroy_timing_ticks[3]) {
+    return destroy_timing_ticks[1] ? destroy_timing_ticks[1] : 50;
+}
+inline int32_t destroy_fade_stagger_ticks(const int32_t destroy_timing_ticks[3]) {
+    return destroy_timing_ticks[2] ? destroy_timing_ticks[2] : 25;
+}
+inline int32_t destroy_fade_total_ticks(const int32_t destroy_timing_ticks[3]) {
+    return io::bam_add(destroy_fade_duration_ticks(destroy_timing_ticks),
+            int32_t(uint32_t(destroy_fade_stagger_ticks(destroy_timing_ticks)) * 4u));
+}
 void update_item_destroy_fade(World &world, Entity &entity);
 void update_item_ambient_sound(World &world, const Entity &entity);
 void squib_event(World &world, Entity &entity, int phase);

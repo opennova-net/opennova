@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <vector>
+
 
 namespace opennova::bfc1 {
 
@@ -24,5 +26,12 @@ int bfc1_decompress(const uint8_t *data, size_t size,
    Returns 0 on success (writes to *out_size), non-zero if not BFC1. */
 int bfc1_uncompressed_size(const uint8_t *data, size_t size,
                            uint32_t *out_size);
+
+/* `data` unpacked in place when it is BFC1, left as it is when it is not: the
+   mounted-file decode's second layer, and the models' TGA reader's unpack of a
+   BFC1 file [orig: CTerrainTileData_LoadTGAFromArchive @ 0x56E570,
+   AudioFile_DecompressBFC_Aligned @ 0x75AFB0]. False, `data` unchanged, when a
+   BFC1 file does not unpack. */
+bool bfc1_unpack(std::vector<uint8_t> &data);
 
 } // namespace opennova::bfc1

@@ -35,18 +35,7 @@ Ref<Image> rgba_page_image(std::vector<opennova::renderer::ParticleRgbaImage> p_
 		return Ref<Image>();
 	const int width = p_levels.front().width;
 	const int height = p_levels.front().height;
-	while (p_levels.back().width > 1 || p_levels.back().height > 1) {
-		const opennova::renderer::ParticleRgbaImage &above = p_levels.back();
-		const std::uint32_t above_w = static_cast<std::uint32_t>(above.width);
-		const std::uint32_t above_h = static_cast<std::uint32_t>(above.height);
-		opennova::renderer::ParticleRgbaImage below;
-		below.width = static_cast<int>(std::max(1u, above_w / 2));
-		below.height = static_cast<int>(std::max(1u, above_h / 2));
-		below.rgba = opennova::renderer::encode_rgba8(opennova::renderer::box_filter_half(
-				opennova::renderer::decode_rgba8(above.rgba.data(), above_w, above_h), above_w,
-				above_h));
-		p_levels.push_back(std::move(below));
-	}
+	opennova::renderer::extend_box_chain(p_levels, 0);
 	return Image::create_from_data(width, height, true, Image::FORMAT_RGBA8,
 			packed_rgba_levels(p_levels));
 }

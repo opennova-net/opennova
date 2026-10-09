@@ -463,6 +463,65 @@ int test_emitter_layers_read_member_zero() {
 	return failed;
 }
 
+// The first set of a name in one bank, without case (the per-bank rule the
+// index keeps over the chain), and a set fired as the editor's previews fire one:
+// distance-flat at each member's own volume, at a point (culled past the set's
+// range), or at a distance; each voice with the wave and the file its member
+// names, a member that names no single none.
+int test_bank_set_and_set_fire() {
+	BankBuilder b;
+	lwf::Single second;
+	second.name = "TONE2";
+	second.path = "sfx\\tone2.wav";
+	b.file.singles.push_back(second);
+	const uint32_t m0 = b.member(200, 255);
+	const uint32_t m1 = b.member(180, 255);
+	b.file.sndparms[m1].single_index = 1;
+	const uint32_t orphan = b.member(255, 255);
+	b.file.sndparms[orphan].single_index = 99;
+	const uint32_t step = b.layer(100, 0, lwf::kFlagSequential | 6u, { m0, m1 });
+	const uint32_t loud = b.member(255, 255);
+	const uint32_t wide = b.layer(100, 0, 6, { loud });
+	const uint32_t lost = b.layer(100, 0, 6, { orphan });
+	b.set("STEP", 500, { step });
+	b.set("step", 0, {});
+	b.set("WIDE", 500, { wide, lost });
+	TEST_EXPECT(find_bank_set(b.file, "Step") == 0);
+	TEST_EXPECT(find_bank_set(b.file, "wide") == 2);
+	TEST_EXPECT(find_bank_set(b.file, "nope") == -1 && find_bank_set(b.file, "") == -1);
+
+	SoundSelector selector;
+	const SetLocation steps{ 0, 0, 500 };
+	const SetFire one = plan_set_fire(b.file, steps, selector, 6);
+	TEST_EXPECT(one.in_range && one.voices.size() == 1);
+	TEST_EXPECT(one.voices.size() == 1 && one.voices[0].wave == "tone" && one.voices[0].path == "tone.wav" &&
+			one.voices[0].voice.vol255 == 200 && one.voices[0].voice.sndparm == m0);
+	const SetFire two = plan_set_fire(b.file, steps, selector, 6);
+	TEST_EXPECT(two.voices.size() == 1 && two.voices[0].wave == "TONE2" &&
+			two.voices[0].path == "sfx\\tone2.wav" && two.voices[0].voice.vol255 == 180);
+
+	SetHearing past;
+	past.source[0] = 501.0f;
+	const SetFire culled = plan_set_fire(b.file, steps, selector, 6, &past);
+	TEST_EXPECT(!culled.in_range && culled.voices.empty());
+
+	const SetLocation wides{ 0, 2, 500 };
+	SetHearing half;
+	half.source[0] = 50.0f;
+	const SetFire at_point = plan_set_fire(b.file, wides, selector, 6, &half);
+	TEST_EXPECT(at_point.in_range && at_point.voices.size() == 1 && at_point.voices[0].voice.vol255 == 63);
+	SetHearing distance;
+	distance.at_distance = true;
+	distance.distance_q16 = 50LL << 16;
+	distance.source[0] = 9999.0f; // a direct play reads the distance alone: no cull
+	const SetFire direct = plan_set_fire(b.file, wides, selector, 6, &distance);
+	TEST_EXPECT(direct.in_range && direct.voices.size() == 1 && direct.voices[0].voice.vol255 == 63);
+	const SetFire flat = plan_set_fire(b.file, wides, selector, 6);
+	TEST_EXPECT(flat.voices.size() == 1 && flat.voices[0].voice.vol255 == 255 &&
+			flat.voices[0].voice.playlist == wide);
+	return 0;
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
 	int failed = test_radio_selection_keeps_unity_pitch_and_gates_view_layers();
@@ -481,6 +540,7 @@ int main(int argc, char **argv) {
 	failed |= test_member_pick_skips_dangling_indices();
     failed |= test_direct_distance_skips_set_cull_but_retains_layer_gain_and_selection();
 	failed |= test_emitter_layers_read_member_zero();
+	failed |= test_bank_set_and_set_fire();
 	if (failed) {
 		return 1;
 	}

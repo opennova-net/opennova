@@ -86,6 +86,23 @@ int main() {
 	huge[9] = huge[11] = 0x7F;
 	TEST_EXPECT(!decode_pcx_menu_rgba(huge.data(), huge.size(), menu, error, &game) &&
 	            error.find("more pixels") != std::string::npos && game.indices.empty());
+	// The header as the file states it, no field range-checked; how its rows fit the reader's buffer.
+	PcxHeader header;
+	TEST_EXPECT(pcx_read_header(file.data(), file.size(), header) && header.bits == 8 && header.width == 2 &&
+	            header.height == 2 && header.planes == 1 && header.bytes_per_line == 2);
+	TEST_EXPECT(pcx_row_fit(header) == PcxRowFit::Exact);
+	header.bytes_per_line = 3;
+	TEST_EXPECT(pcx_row_fit(header) == PcxRowFit::Overrun);
+	header.bytes_per_line = 1;
+	TEST_EXPECT(pcx_row_fit(header) == PcxRowFit::Short);
+	header.planes = 3;
+	TEST_EXPECT(pcx_row_fit(header) == PcxRowFit::Exact);
+	TEST_EXPECT(pcx_read_header(four.data(), four.size(), header) && header.bits == 4);
+	TEST_EXPECT(pcx_read_header(huge.data(), huge.size(), header) && header.width == 0x7FFF);
+	TEST_EXPECT(!pcx_read_header(file.data(), 127, header));
+	std::vector<uint8_t> marked = file;
+	marked[0] = 0x0B;
+	TEST_EXPECT(!pcx_read_header(marked.data(), marked.size(), header));
 	std::printf("pcx_game_decode: the writer's indices and palette as the game reads them beside its colours, a row's "
 	            "pad on the next, a 24-bit image's none, an odd width's rows of its width, the refusals\n");
 	return 0;

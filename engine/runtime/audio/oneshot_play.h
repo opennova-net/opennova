@@ -37,6 +37,14 @@ struct SetLocation {
 	bool valid() const { return bank >= 0; }
 };
 
+// The first set of `name` in one bank, without case [orig:
+// SoundBank_FindTriggerByName @ 0x75be90 stricmp's the bank's sets in order]:
+// its index, -1 for none or an empty name. A search across banks takes the
+// first bank in its order that holds one [orig: SoundBank_FindSetByNameAnyBank
+// @ 0x5274f0]; SoundSetIndex below keeps that rule as an index over the loaded
+// chain, and the editor's previews walk their own bank lists through this.
+int32_t find_bank_set(const lwf::File &bank, const std::string &name);
+
 // The name -> set index over every loaded bank. Sets already indexed under a
 // name win (banks added first take precedence), matching "load mission bank,
 // then global" -- the file header carries the witness.
@@ -208,5 +216,44 @@ OneshotPlan plan_oneshot_3d(const lwf::File &bank, const SetLocation &loc,
 		const float world_pos[3], const float listener_pos[3], bool has_listener,
 		int64_t source_bms_id, uint32_t sound_id, OcclusionFn occl, void *occl_ctx,
 		SoundSelector &selector, uint8_t listener_view_flags);
+
+// Where a set fire is heard (plan_set_fire): at a world point from the
+// listener's, a 3D one-shot culled past the set's range and each layer
+// attenuated by its falloff, with no occlusion between them [orig:
+// Sound_Play3DPositional @ 0x527cb0 -> SoundBank_PlayTriggerEntries
+// @ 0x75ccd0; plan_oneshot_3d]; or, `at_distance`, at `distance_q16` from the
+// listener, a direct play of the set with no range cull, each layer attenuated
+// at that distance [orig: Sound_PlayTriggerSetScaled @ 0x527b90;
+// plan_oneshot_at_distance]. Positions in one frame, whole units.
+struct SetHearing {
+	float source[3] = { 0.0f, 0.0f, 0.0f };
+	float listener[3] = { 0.0f, 0.0f, 0.0f };
+	bool at_distance = false;
+	int64_t distance_q16 = 0;
+};
+
+// One voice of a set fire: the planned layer voice (OneshotVoice: its layer,
+// playlist, member, volume and composed pitch) and the wave the member names,
+// the bank's single (its name and its file as the bank records it).
+struct SetFireVoice {
+	OneshotVoice voice;
+	std::string wave;
+	std::string path;
+};
+struct SetFire {
+	// False: heard past the set's range, nothing fires.
+	bool in_range = false;
+	std::vector<SetFireVoice> voices;
+};
+
+// The fire of the set at `loc` as the game plays it: each layer the listener's
+// view admits picks its member through `selector` and composes the set's and the
+// member's pitch [orig: SoundBank_PlayTriggerEntries @ 0x75ccd0], heard where
+// `heard` says, or with none distance-flat, each layer at its member's own
+// volume (plan_oneshot_at_distance's flat arm). A member that names no single
+// of the bank is no voice. No occlusion and no own-channel key: a fire with
+// neither (the editor's previews).
+SetFire plan_set_fire(const lwf::File &bank, const SetLocation &loc, SoundSelector &selector,
+		uint8_t listener_view_flags, const SetHearing *heard = nullptr);
 
 } // namespace opennova::audio

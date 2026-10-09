@@ -298,33 +298,21 @@ int64_t EffectWorld::_owner_token_for(const Variant &p_key) {
 	return token;
 }
 
-// A descriptor spawn (transient or owned) with a zero orientation is retail's
-// "no orientation" case: CEffectWorld_SpawnEmitterAtPosition @ 0x5f6e52..0x5f6e5c
-// hands the group a zero vector, CEffectEmitter_SetOrientationFromDirection
-// @ 0x5e5d51 leaves every EMITVECTOR member's emission axis zero, and the
-// direction helper then emits around world +Y. A pose always carries a basis,
-// so that case aims the forward at +Y, which the engine's cone helper resolves
-// to the identical world-axis frame. Attached spawns keep their identity local
-// frame: their orientation comes from the owner transform they compose with.
+// The engine's spawn poses (runtime/particle/effect_scene.h): a descriptor
+// spawn (transient or owned) with a zero orientation is retail's "no
+// orientation" case and aims at +Y (particle::descriptor_pose); an attached
+// spawn keeps its identity local frame on a zero forward, its orientation
+// coming from the owner transform it composes with (particle::forward_pose).
 Transform3D EffectWorld::descriptor_pose(const Vector3 &p_position, const Vector3 &p_orientation) {
-	if (p_orientation.length_squared() <= 0.000001f) {
-		return forward_pose(p_position, Vector3(0.0f, 1.0f, 0.0f));
-	}
-	return forward_pose(p_position, p_orientation);
+	return godot_pose(opennova::particle::descriptor_pose(
+			{ p_position.x, p_position.y, p_position.z },
+			{ p_orientation.x, p_orientation.y, p_orientation.z }));
 }
 
 Transform3D EffectWorld::forward_pose(const Vector3 &p_position, const Vector3 &p_forward) {
-	if (p_forward.length_squared() <= 0.000001f) {
-		return Transform3D(Basis(), p_position);
-	}
-	const Vector3 forward = p_forward.normalized();
-	Vector3 up_hint = Vector3(0, 1, 0);
-	if (Math::abs(forward.dot(up_hint)) > 0.999f) {
-		up_hint = Vector3(1, 0, 0);
-	}
-	const Vector3 right = up_hint.cross(forward).normalized();
-	const Vector3 up = forward.cross(right).normalized();
-	return Transform3D(Basis(right, up, forward), p_position);
+	return godot_pose(opennova::particle::forward_pose(
+			{ p_position.x, p_position.y, p_position.z },
+			{ p_forward.x, p_forward.y, p_forward.z }));
 }
 
 void EffectWorld::_seed_owner_pose(int64_t p_owner_token, const Transform3D &p_transform) {

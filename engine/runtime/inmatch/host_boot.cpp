@@ -38,34 +38,28 @@ namespace {
 void load_environment_and_water(const mission::BootFileSource &files,
 		mission::MissionKernel &kernel, HostBoot &boot) {
 	const mission::MissionInfo info = mission::mission_info(kernel.mission);
-	// The time-of-day load's three files; a .env that is not there is skipped
-	// and the mission starts on the earlier passes' globals (env::load_mission_env
-	// carries the witness).
+	// The time-of-day load's three files under the header's override layer; a
+	// .env that is not there is skipped and the mission starts on the earlier
+	// passes' globals (env::load_mission_env_config carries the witness).
 	const env::EnvTextReader read = [&files](const std::string &name, std::string &text) {
 		std::vector<uint8_t> bytes;
 		if (!files.valid() || !files.read_file(name, bytes)) return false;
 		text.assign(bytes.begin(), bytes.end());
 		return true;
 	};
-	env::MissionEnv loaded;
-	const bool env_loaded = env::read_mission_env(read, info.terrain.empty() ? std::string() : info.terrain + ".trn",
-			info.environment.empty() ? std::string() : info.environment + ".env", loaded);
-	boot.env_config = std::move(loaded.config);
-	// [orig: Game_LoadTerrainDuringConnect @0x520710 -- the attrib-gated
-	//  water / fog / fog-colour overrides over the loaded .env]
 	const env::BmsEnvOverrides overrides = env::bms_env_overrides_from_header(
 			static_cast<uint32_t>(info.attrib_flags), info.water_override, info.fog_override,
 			info.fog_color, info.water_color, info.water_murk);
-	env::apply_bms_overrides(boot.env_config, overrides);
+	env::MissionEnv loaded;
+	const bool env_loaded =
+			env::load_mission_env_config(read, info.terrain, info.environment, overrides, loaded);
+	boot.env_config = std::move(loaded.config);
 	boot.environment.set_config(&boot.env_config, env_loaded);
 	// The occupant clamp, the vehicle grounding and the footstep water pick
 	// read the plane [orig: g_EnvWaterHeightFixed @0x26C6454]; the rungs and
 	// their witnesses are env::resolve_water_height's.
-	env::WaterHeightRungs rungs;
-	rungs.has_mission_override = overrides.has_water_height;
-	rungs.mission_override = overrides.water_height * 0.5f;
-	rungs.terrain_height = kernel.terrain_store.terrain_water_height();
-	rungs.has_loaded_terrain = kernel.terrain_store.valid();
+	const env::WaterHeightRungs rungs = env::mission_water_rungs(overrides,
+			kernel.terrain_store.terrain_water_height(), kernel.terrain_store.valid());
 	const float water = env::resolve_water_height(rungs, &boot.environment, 0.0f);
 	boot.water_z_q16 = static_cast<int32_t>(water * io::kFp16One);
 	kernel.world.env.water_z = boot.water_z_q16;

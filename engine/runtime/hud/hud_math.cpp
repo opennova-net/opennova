@@ -154,6 +154,12 @@ int folded_reserve(int clip, int reserve, int capacity) {
 	return reserve;
 }
 
+// [orig: HUD_BuildEntityInfo @0x4b8573..0x4b85fa -- the clipsize -1 weapon's
+// clip word is -1]
+int displayed_clip(int clip, int capacity) {
+	return capacity == -1 ? -1 : clip;
+}
+
 // [orig: HUD_DrawWaypointNameAndDistance @0x5947e5..0x594836 — 2D fixed sqrt,
 // the >>16 truncation to whole meters]
 int waypoint_distance_m(double dx, double dz) {

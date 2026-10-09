@@ -69,6 +69,31 @@ struct EffectPose {
 	Vec3 forward = {0.0f, 0.0f, 1.0f};
 };
 
+// The pose of a spawn aimed along `forward`, at `at`: the forward normalized,
+// the up hint +Y (+X where the forward is within 0.999 of vertical), right =
+// hint x forward and up = forward x right, each normalized; a forward whose
+// squared length is at most 1e-6 keeps the identity basis (an attached spawn's
+// local frame, whose orientation the owner pose it composes with supplies).
+// EffectPose carries the forward in its third column, the frame every spawn
+// producer (a user point's direction, a trail's travel, a script effect's
+// direction) hands the scene.
+EffectPose forward_pose(Vec3 at, Vec3 forward) noexcept;
+
+// A descriptor spawn's pose (a death bank's effect, a terrain or water
+// impact): a zero orientation is retail's "no orientation" case, which aims
+// every EMITVECTOR member around world +Y, so the pose aims its forward at +Y
+// (the identical world-axis frame through the cone helper); any other
+// orientation is forward_pose's.
+// [orig: CEffectWorld_SpawnEmitterAtPosition @ 0x5F6E52..0x5F6E5C hands the
+//  group a zero vector; CEffectEmitter_SetOrientationFromDirection @ 0x5E5D51
+//  leaves the emission axis zero]
+EffectPose descriptor_pose(Vec3 at, Vec3 orientation) noexcept;
+
+// A local pose under its owner's (the owner's axes over the local position and
+// basis, then its position added): how the scene places an attached group on
+// its owner each owner-pose update.
+EffectPose compose_pose(const EffectPose &parent, const EffectPose &local) noexcept;
+
 enum class EffectAdmission : std::uint8_t {
 	// Every event creates a distinct group. Direct/recoil, casing, impact,
 	// explosion, and other transient presentation events use this policy.

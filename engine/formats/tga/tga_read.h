@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include <formats/tga/tga.h>
+
 namespace opennova::tga {
 
 // A decoded image: `rgba` holds width x height pixels, R, G, B, A each, the top row
@@ -63,5 +65,29 @@ bool tga_decode_retail_into(const uint8_t *data, size_t size, uint8_t *rgba, std
 // tga_retail_size, then tga_decode_retail_into a vector.
 bool tga_decode_retail(const uint8_t *data, size_t size, TgaImage &out, std::string &error,
 		TgaReaderForm form = TgaReaderForm::Archive);
+
+// What the reader makes of a file's texels by its header's image type and depth: it decodes
+// the forms tga_decode_retail_into reads (Decoded); it zeroes types 9 and 11, a true-colour
+// file (2, 10) of a depth other than 24 or 32 and a colour-mapped one (1) whose map entries are
+// not 24 bits (Zeroed: transparent black); it leaves the texels of a grey file (3) of a depth
+// other than 8 and of any type it has no case for as its buffer held them (Unset: whatever
+// memory held, which the port reads as zeros) [orig: CTerrainTileData_LoadTGAFromArchive
+// @ 0x56E570, the switch @ 0x56E6C2], whose decode the menus' reader repeats [orig:
+// CUIImage_LoadTGA @ 0x6647D0].
+enum class TgaRetailForm : uint8_t { Decoded, Zeroed, Unset };
+TgaRetailForm tga_retail_form(const TgaHeader &header);
+
+// Whether the file ends before the texels the reader copies or decodes from the byte after
+// the header and the image ID with no bound on the file: its 24- and 32-bit true colour, its
+// 8-bit grey, a 24-bit map and its indices, or its run-length packets (a raw packet's copy
+// stopping at the image's end, a run reading one pixel), which it reads past the end [orig:
+// the 32-bit copy @ 0x56E796..0x56E7A5, the 24-bit expansion @ 0x56E74F, the run-length
+// decode @ 0x56E7FB, @ 0x56E8B6]. A form it zeroes or leaves unset reads nothing.
+bool tga_reads_past_end(const TgaHeader &header, const uint8_t *data, size_t size);
+
+// Whether a true-colour or grey file (2, 3, 10) carries a colour map, which the reader does not
+// skip: it reads the texels from byte 18 plus the image ID's length, the map's start, so they
+// come out shifted [orig: @ 0x56E6BA].
+bool tga_colour_map_misread(const TgaHeader &header);
 
 } // namespace opennova::tga

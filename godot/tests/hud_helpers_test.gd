@@ -173,6 +173,13 @@ func test_folded_reserve() -> void:
 	assert_eq(HudPos.folded_reserve(-1, 4, 1), 4, "The -1 sentinels never fold.")
 
 
+func test_displayed_clip() -> void:
+	# The clip the presenter feeds the HUD: an infinite-capacity weapon reads -1
+	# (hud_math.displayed_clip carries the witness).
+	assert_eq(HudPos.displayed_clip(12, 30), 12)
+	assert_eq(HudPos.displayed_clip(12, -1), -1, "A clipsize -1 weapon reads clip -1.")
+
+
 func test_scoped_view_overlay_fork() -> void:
 	# retail: the scene frame's overlay fork tests binoculars, then the Sighted
 	# card byte, then the Scoped card byte; only the Scoped arm chains the

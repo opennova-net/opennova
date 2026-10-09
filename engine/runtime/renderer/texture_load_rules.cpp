@@ -86,6 +86,10 @@ TextureReader menu_reader(menu::MenuTextureFormat format) {
 
 } // namespace
 
+bool texture_loader_has_attempts(TextureLoader loader) {
+	return static_cast<uint8_t>(loader) <= static_cast<uint8_t>(TextureLoader::Particle);
+}
+
 std::vector<TextureLoad> texture_load_attempts(TextureLoader loader, std::string_view name,
 		const TextureFileQuery &files) {
 	const std::string whole(name);
@@ -132,6 +136,13 @@ std::vector<TextureLoad> texture_load_attempts(TextureLoader loader, std::string
 		case TextureLoader::Particle:
 			if (name.empty()) return {};
 			return particle_attempts(name);
+		case TextureLoader::Normal:
+		case TextureLoader::Producer:
+		case TextureLoader::Chunk:
+		case TextureLoader::Pcx8:
+		case TextureLoader::Cube:
+		case TextureLoader::kCount:
+			return {};
 	}
 	if (load.reader == TextureReader::None || load.file.empty()) return {};
 	return {load};
@@ -341,6 +352,10 @@ void halve_rgba(std::vector<uint8_t> &rgba, uint32_t &width, uint32_t &height) {
 	rgba = std::move(out);
 	width = w;
 	height = h;
+}
+
+void halve_rgba_times(std::vector<uint8_t> &rgba, uint32_t &width, uint32_t &height, uint32_t halvings) {
+	for (uint32_t i = 0; i < halvings && width > 1 && height > 1; ++i) halve_rgba(rgba, width, height);
 }
 
 // [orig: GTexture_DownsampleToLimits @ 0x687170 — the cap (flag 0x1000 -> 512, 0x2000 ->

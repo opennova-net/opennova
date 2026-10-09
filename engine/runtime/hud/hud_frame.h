@@ -182,6 +182,14 @@ inline int hud_static_frame_index(int authored_count) {
 // the forceDefaultPos arms @0x4c325d / @0x4c332e / @0x4c345c].
 inline constexpr std::array<int, 6> kNetIndicatorResetPos = {4, 4, 20, 4, 52, 4};
 
+// The SP pause word's anchor: hudpos.def's PAUSEDPOS as authored, or (1000, 4)
+// when either field is zero [orig: HUD_DrawPausedText @0x59d650 -- the fallback
+// @0x59d65c..0x59d670].
+inline std::array<int, 2> paused_text_pos(int x, int y) {
+	if (x == 0 || y == 0) return {1000, 4};
+	return {x, y};
+}
+
 struct HudQuad {
 	float x0 = 0.0f;
 	float y0 = 0.0f;

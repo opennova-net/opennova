@@ -978,11 +978,7 @@ MissionObjectPlacer::_get_static_batches(const String &p_graphic,
 		}
 		if (data->has_document()) {
 			const Threedi3di3 &native_model = data->native_model();
-			const int lod_count = MAX(1, static_cast<int>(native_model.lod_count));
-			for (int lod = 0; lod < lod_count; ++lod) {
-				profile.thresholds_q16.push_back(opennova::renderer::rlod_threshold_q16_from_rmdl(
-						native_model.lods[lod].lod_threshold));
-			}
+			profile.thresholds_q16 = opennova::renderer::model_lod_thresholds_q16(native_model);
 			profile.projection_sphere =
 					opennova::world::collision_projection_sphere_from_3di(native_model);
 			profile.zero_center_projection_sphere =

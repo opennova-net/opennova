@@ -1299,6 +1299,21 @@ mnu::Document flow_document(bool options = false) {
 	return doc;
 }
 
+// A catalog row's choice: the file, the list text with the loose marker, the briefing and the
+// session code word the catalog stamps.
+void test_mission_choice() {
+	mission_catalog::Row row;
+	row.file = "coop.bms";
+	row.title = "Co-op title";
+	row.briefing = "Briefing";
+	row.loose = true;
+	row.game_mode = 0;
+	const MissionChoice choice = mission_choice(row);
+	CHECK(choice.file == "coop.bms" && choice.text == mission_catalog::display_text(row));
+	CHECK(choice.briefing == "Briefing" && choice.game_type == mission_catalog::game_type_of(row));
+	CHECK(choice.game_type == game_type::kCoop);
+}
+
 void test_shell_flow() {
 	auto doc = flow_document();
 	MenuRuntime menu;
@@ -1901,6 +1916,7 @@ int main() {
 	test_keys();
 	test_two_root_keys();
 	test_duplicate_screens();
+	test_mission_choice();
 	test_shell_flow();
 	test_host_dialog();
 	test_host_dialog_multiselect();

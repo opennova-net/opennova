@@ -160,6 +160,21 @@ int main() {
 						audio::envs_stagger_slot(17) == 1,
 				"stagger: the place's low nibble");
 	}
+	// The marker's registered sets: its slots' sets once each in slot order (two slots naming one set share it, the
+	// same-set suppress; names compare exactly), an empty slot none; then each slot's key into the sets the embedder
+	// registered (-1: an empty slot, or a set it could not play).
+	{
+		const std::array<std::string, 4> slots = { "DAY", "", "DAY", "NIGHT" };
+		const std::vector<std::string> distinct = audio::envs_distinct_sets(slots);
+		ok &= expect(distinct == std::vector<std::string>({ "DAY", "NIGHT" }), "distinct: once each, slot order");
+		ok &= expect(audio::envs_distinct_sets({ "a", "A", "", "a" }) == std::vector<std::string>({ "a", "A" }),
+				"distinct: exact names");
+		ok &= expect(audio::envs_distinct_sets({ "", "", "", "" }).empty(), "distinct: none of empty slots");
+		const std::array<int32_t, 4> keys = audio::envs_slot_keys(slots, distinct);
+		ok &= expect(keys == std::array<int32_t, 4>({ 0, -1, 0, 1 }), "keys: into the registered sets");
+		const std::array<int32_t, 4> only_night = audio::envs_slot_keys(slots, { "NIGHT" });
+		ok &= expect(only_night == std::array<int32_t, 4>({ -1, -1, -1, 0 }), "keys: an unregistered set is silent");
+	}
 	def_free_items(&items);
 	if (!ok) return 1;
 	std::printf("envs_markers_test: OK\n");

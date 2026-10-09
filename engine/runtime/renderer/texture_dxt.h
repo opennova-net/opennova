@@ -1,9 +1,12 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+
+#include <formats/dds/dds.h>
 
 namespace opennova::renderer {
 
@@ -111,6 +114,41 @@ std::vector<DxtColor> decode_dxt_surface(const DxtSurface &surface);
 // [orig: D3DXTex::CBlt::BltBox2D @ 0x6E1100, generic path @ 0x6E13C4..0x6E1448]
 std::vector<DxtColor> box_filter_half(const std::vector<DxtColor> &colors,
 		uint32_t width, uint32_t height);
+
+// One D3DX_FILTER_BOX level of RGBA8 texels: the level below `width` x `height` (each side
+// halved, at least 1), box_filter_half of the A8R8G8B8 codec's read of the texels, stored back
+// through it (decode_rgba8, encode_rgba8).
+std::vector<uint8_t> box_filter_half_rgba8(const uint8_t *rgba, uint32_t width, uint32_t height);
+
+// D3DXFilterTexture's chain of an A8R8G8B8 texture, D3DX_FILTER_BOX, each level the box filter of
+// the bytes the level before was stored as: `levels` (its first the texture's top level, a level
+// its sides in `width` and `height`, int or unsigned, and its RGBA8 texels in `rgba`) grown by
+// box_filter_half_rgba8 of its last level until it holds `count` levels or its last is 1 x 1
+// (`count` 0: on to 1 x 1).
+// [orig: GTexture_CreateFromPixelData_0 @ 0x6878B5..0x6878BE (D3DXFilterTexture, filter 5);
+// D3DXFilterTexture @ 0x6910C9 (each level from the previous one @ 0x6912AD..0x6912F9)]
+template <typename Level>
+void extend_box_chain(std::vector<Level> &levels, size_t count) {
+	while (!levels.empty() && (count == 0 || levels.size() < count)) {
+		const uint32_t width = static_cast<uint32_t>(levels.back().width);
+		const uint32_t height = static_cast<uint32_t>(levels.back().height);
+		if (width <= 1 && height <= 1)
+			break;
+		Level below;
+		below.width = static_cast<decltype(below.width)>(std::max(1u, width / 2));
+		below.height = static_cast<decltype(below.height)>(std::max(1u, height / 2));
+		below.rgba = box_filter_half_rgba8(levels.back().rgba.data(), width, height);
+		levels.push_back(std::move(below));
+	}
+}
+
+// A DDS's levels as D3DX reads them, RGBA8: `image` is dds_read's of the file's `bytes`, which
+// decodes the masked, luminance, alpha and palette forms itself and leaves a DXT's blocks to the
+// D3DX codec's port; each DXT1, DXT4 or DXT5 level's blocks are decoded here (decode_dxt_surface;
+// DXT4 is DXT5's blocks over colour premultiplied by alpha). `max_levels`, when not 0, decodes the
+// chain's first levels alone, the rest left coded. True when the format's texels are known:
+// dds_read decoded them, or this did.
+bool decode_dds_levels(const uint8_t *bytes, size_t size, dds::DdsImage &image, size_t max_levels = 0);
 
 // The full level set of a pixel-data texture created in `format`: level 0 is
 // the source loaded through D3DXLoadSurfaceFromMemory with D3DX_FILTER_NONE,

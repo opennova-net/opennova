@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 
+#include <formats/wac/command.h>
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/vm.h>
 #include <runtime/world/world.h>
@@ -81,6 +82,19 @@ int main() {
     CHECK(text.find("//   ssnturn (ssn, heading)\n") != std::string::npos);
     CHECK(text.find("// WAC Triggers") < text.find("// WAC Actions"));
     CHECK(text.find("// WAC Actions") < text.find("// WAC Debug Commands"));
+    // The actions list is the commands cmd_is_action holds (the help's mask 2).
+    {
+        const size_t from = text.find("// WAC Actions");
+        const std::string actions = text.substr(from, text.find("// WAC Debug Commands") - from);
+        size_t listed = 0;
+        for (int i = 0; i < wac_command_count(); ++i) {
+            const CommandDef &command = wac_commands()[i];
+            const bool in = actions.find(std::string("//   ") + command.name + " (") != std::string::npos;
+            CHECK(in == cmd_is_action(command));
+            if (cmd_is_action(command)) ++listed;
+        }
+        CHECK(count(actions, "//   ") == listed);
+    }
     // Fixed IDs/counts recovered from the retail 165x44-byte registry and
     // the XML helper's hash instructions; these are not bytecode opcodes.
     CHECK(count(xml, "<CONDITION id=") == 31);

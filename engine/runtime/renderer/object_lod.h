@@ -5,6 +5,10 @@
 #include <cstdint>
 #include <vector>
 
+namespace opennova::threedi {
+struct Threedi3di3;
+}
+
 namespace opennova::renderer {
 
 // Retail's sub-pixel floor: the sector-entity draw returns before the RLOD
@@ -105,6 +109,11 @@ ObjectProjectionSphere person_projection_sphere_q16(
 inline constexpr int32_t rlod_threshold_q16_from_rmdl(int32_t rmdl_threshold_pixels) {
   return static_cast<int32_t>(static_cast<uint32_t>(rmdl_threshold_pixels) << 16);
 }
+
+// A model's RLOD threshold table, one Q16.16 slot per level of its RMDL chunks in
+// level order (rlod_threshold_q16_from_rmdl): what select_object_lod and
+// death_piece_lod_level walk. Empty for a model with no level.
+std::vector<int32_t> model_lod_thresholds_q16(const threedi::Threedi3di3 &model);
 
 struct ObjectLodSelection {
   int lod_index = -1;

@@ -388,11 +388,8 @@ bool MissionObjectPlacer::register_resolved_static_graphic(
 			profile.thresholds_q16.push_back(thresholds[i]);
 		}
 	} else if (p_data->has_document()) {
-		const Threedi3di3 &native_model = p_data->native_model();
-		for (std::size_t lod = 0; lod < native_model.lod_count; ++lod) {
-			profile.thresholds_q16.push_back(opennova::renderer::rlod_threshold_q16_from_rmdl(
-					native_model.lods[lod].lod_threshold));
-		}
+		profile.thresholds_q16 =
+				opennova::renderer::model_lod_thresholds_q16(p_data->native_model());
 	}
 	if (p_lod_profile.has("sphere_radius")) {
 		const auto q16 = opennova::io::float_to_fp16_16_round_sat;
