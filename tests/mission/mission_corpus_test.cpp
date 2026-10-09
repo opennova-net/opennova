@@ -227,14 +227,18 @@ void check_mission(const std::string &name, const std::vector<uint8_t> &original
 	if (!bms::equal(parsed, reparsed)) return fail("bms::equal(parsed, reparsed) is false");
 }
 
-// What a new record holds is what the shipped records most often hold (bms_edit's new_entity and
-// make_blank, which cite this leg): every member of a new entity but those an author always sets
-// (its item, its SSN, its position and yaw, its team) is the most common value of that member over
-// the shipped item records, over the building records, over the marker records and over the organic
-// records (each pool its own: bms_edit's new_entity by its kind); every member of a
-// blank mission's header but those that are the mission's own (its name and designer, its terrain,
-// tile set and environment, its game mode and option bits, the fog distance those gate) is the most
-// common value over the shipped missions. Returns the members that are not.
+// What a new record holds is what the original editor's initializer gives an item it places (bms_edit's
+// new_entity, D-MIS-10), and a blank mission's header what the shipped missions most often hold
+// (make_blank). Every member of a new entity but those an author always sets (its item, its SSN, its
+// position and yaw, its team) is the most common value of that member over the shipped item records,
+// over the building records, over the marker records and over the organic records, but for the members
+// the original editor's properties dialog writes on its OK: the map symbol, its combo's selection (-1
+// with none, 255 in the record [orig: JOTACmed.exe sub_4096D0, CB_GETCURSEL of 4045]), in every pool,
+// and an organic's engagement and attack distances (the person's AI distances, its dialog's), which the
+// shipped records hold otherwise. Every member of a blank mission's header but those that are the
+// mission's own (its name and designer, its terrain, tile set and environment, its game mode and option
+// bits, the fog distance those gate) is the most common value over the shipped missions. Returns the
+// members that are not.
 int check_new_records(const Tally &tally) {
 	namespace mission = opennova::mission;
 	int failures = 0;
@@ -242,7 +246,11 @@ int check_new_records(const Tally &tally) {
 	const char *const pool_names[4] = {"items", "buildings", "markers", "organics"};
 	const mission::EntityKind kinds[4] = {mission::EntityKind::Item, mission::EntityKind::Building,
 	                                      mission::EntityKind::Marker, mission::EntityKind::Organic};
-	size_t members = 0;
+	const auto dialog_written = [](int pool, const std::string &key) {
+		if (key == "map_symbol") return true;
+		return pool == 3 && (key == "max_engagement_distance" || key == "max_attack_distance");
+	};
+	size_t members = 0, dialog = 0;
 	double least = 100.0;
 	for (int pool = 0; pool < 4; ++pool) {
 		if (!tally.records[pool]) continue;
@@ -256,6 +264,16 @@ int check_new_records(const Tally &tally) {
 			if (found == tally.pools[pool].end()) continue;
 			const std::pair<std::string, size_t> best = Tally::most(found->second);
 			const double share = 100.0 * double(best.second) / double(tally.records[pool]);
+			if (dialog_written(pool, field.key)) {
+				// The shipped records hold what the dialog wrote, not what the initializer gives.
+				if (Tally::text(value) == best.first) {
+					std::fprintf(stderr, "  FAIL the shipped %s most often hold a new entity's %s '%s': the dialog no longer "
+					             "explains it\n", pool_names[pool], field.key, best.first.c_str());
+					++failures;
+				}
+				++dialog;
+				continue;
+			}
 			if (Tally::text(value) != best.first) {
 				std::fprintf(stderr, "  FAIL a new entity's %s is '%s'; the shipped %s most often hold '%s' (%.1f%%)\n",
 				             field.key, Tally::text(value).c_str(), pool_names[pool], best.first.c_str(), share);
@@ -292,9 +310,10 @@ int check_new_records(const Tally &tally) {
 		fewest = std::min(fewest, best.second);
 	}
 	std::printf("new records: %zu members of a new entity hold the shipped items', buildings', markers' and organics' most common "
-	            "value (the least common of them the value of %.1f%% of its pool); %zu members of a blank mission's "
-	            "header the shipped missions' (the least common in %zu of %zu)\n",
-	            members, least, header_members, fewest, tally.missions);
+	            "value (the least common of them the value of %.1f%% of its pool), %zu what the original editor's dialog "
+	            "writes otherwise; %zu members of a blank mission's header the shipped missions' (the least common in %zu "
+	            "of %zu)\n",
+	            members, least, dialog, header_members, fewest, tally.missions);
 	return failures;
 }
 

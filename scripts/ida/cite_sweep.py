@@ -85,12 +85,12 @@ MARKER_LINE = re.compile(r"\[orig:|\(retail:")
 PAIR = re.compile(r"(?<![\w.}])(?:([A-Za-z_][A-Za-z0-9_]*(?:::~?[A-Za-z_][A-Za-z0-9_]*)*)\s*)?@\s*(0x[0-9A-Fa-f]{4,8})\b")
 CAMEL = re.compile(r"^[A-Z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+$")
 QUALIFIER = re.compile(
-    r"dfx2med|ModSuperOed|modsuperoed|misldr|binkw32|bink\.dll|jodemo|dfvas|Dflw|ParticleEdit|TrnGen|\(\s*demo\s*\)|\.dll\b",
+    r"dfx2med|JOTACmed|jomed|ModSuperOed|modsuperoed|misldr|binkw32|bink\.dll|jodemo|dfvas|Dflw|ParticleEdit|TrnGen|\(\s*demo\s*\)|\.dll\b",
     re.I,
 )
 RETAIL_TAG = re.compile(r"^\s*\(\s*(?:retail|Jointops(?:\.exe)?)\s*\)")
 # a record that states another image in its preamble (docs/threedi/3di-gp-format-re.md: ModSuperOed / dfvas)
-DOC_IMAGE = re.compile(r"(ModSuperOed|Dflw|dfvas|dfx2med|jodemo|ParticleEdit|TrnGen)[\s\S]{0,160}?(?:imagebase|IDB|\.i64|addresses)", re.I)
+DOC_IMAGE = re.compile(r"(ModSuperOed|Dflw|dfvas|dfx2med|JOTACmed|jodemo|ParticleEdit|TrnGen)[\s\S]{0,160}?(?:imagebase|IDB|\.i64|addresses)", re.I)
 AUTO_PREFIXES = (
     "sub_", "loc_", "locret_", "dword_", "word_", "byte_", "unk_", "off_", "flt_",
     "dbl_", "stru_", "asc_", "nullsub_", "j_", "def_", "algn_", "qword_", "xmmword_",

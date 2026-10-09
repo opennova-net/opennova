@@ -75,11 +75,12 @@ bool set_entity_property_string(bms::File &file, EntityKind kind, size_t index,
 		const std::string &name, const std::string &value, std::string &error);
 bool set_entity_transform(bms::File &file, EntityKind kind, size_t index,
 		const EntityTransform &transform, std::string &error);
-// A new record of `kind` naming `item_id`, with the SSN `id`: every member zero but those the shipped
-// missions' records most often hold another value for [corpus, bms_edit.cpp]; its position the origin.
+// A new record of `kind` naming `item_id`, with the SSN `id`: what the original editor's initializer
+// gives an item it places (bms_edit.cpp, D-MIS-10); its position the origin.
 bms::Entity new_entity(EntityKind kind, int item_id, int id);
 // The SSN a new entity takes beside the file's: one past the largest any holds, the player's 10000
-// skipped (mission_params.h ssn_after). (The original editor's allocator is not witnessed, D-MIS-3.)
+// skipped (mission_params.h ssn_after; the original editor's allocator takes one past the largest with
+// no skip, D-MIS-10).
 int next_entity_ssn(const bms::File &file);
 // Append new_entity for `item_id` at `transform`, its SSN the next; returns its index.
 size_t add_entity(bms::File &file, EntityKind kind, int item_id, const EntityTransform &transform);
@@ -101,9 +102,12 @@ bool add_waypoint_marker(bms::File &file, size_t path_index, int marker_item_id,
 // A path's stops one at a time (ADR 0046 S13 D10, the editor's mission table): a stop naming marker
 // `marker` put in at `index` (the end past it; the path's 128-byte slot region holds 32), or the one at
 // `index` taken out. Either changes how many stops the path has, so the count the path stores is
-// written as its slots, its slot bytes past them zero (D-MIS-6: the original editor's count for an
-// edited path is not witnessed); which marker a stop names is the editor's to check (a Record
-// reference), the runtime reading any word [orig: Pool_GetEntryUnchecked @0x441FC0].
+// written as its slots, its slot bytes past them zero; which marker a stop names is the editor's to
+// check (a Record reference), the runtime reading any word [orig: Pool_GetEntryUnchecked @0x441FC0].
+// A 33rd stop is refused: the original editor counts every waypoint marker its own document puts on a
+// path and writes that count with the first 32 as the slots [orig: JOTACmed.exe sub_44CFD0 @ 0x44cfd0,
+// the append with no bound; sub_44F920 @ 0x44f920, the count @ 0x4508a6 and the 32 slots @ 0x4508c1],
+// so a stop past 32 is in no .bms and the game reads the next record's words for it (D-MIS-6).
 bool insert_waypoint_stop(bms::WaypointRecord &path, size_t index, uint32_t marker, std::string &error);
 bool erase_waypoint_stop(bms::WaypointRecord &path, size_t index);
 

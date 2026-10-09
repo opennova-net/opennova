@@ -154,8 +154,8 @@ bool build(std::vector<uint8_t> &bytes, std::string &err) {
 	}
 
 	// Every record's authored members as this fixture has always held them (a new record's values are
-	// the shipped missions' most common ones, bms_edit's new_entity, which this dense mission is not a
-	// sample of): the ranges and accuracies below, every other optional member zero.
+	// the original editor's initializer's, bms_edit's new_entity, which this dense mission predates):
+	// the ranges and accuracies below, every other optional member zero.
 	opennova::bms::File file = doc;
 	std::vector<opennova::bms::Entity> *pools[4] = {&file.items, &file.buildings, &file.markers, &file.organics};
 	uint8_t team = 0;

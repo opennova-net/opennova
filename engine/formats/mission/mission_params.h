@@ -124,9 +124,11 @@ constexpr bool group_names_none(int64_t group) { return group == 0; }
 // the slot byte, the key EntityPool_FindByNetId @0x4f0a20 matches; 04TR's watchdog
 // SingleIsWithinArea(10000, zone 6), docs/mission/bms-event-runtime-re.md 7.3].
 inline constexpr int32_t kPlayerSsn = 10000;
-// The SSN a new entity takes after the largest the mission's records hold: one past it, the player's
-// skipped, since a parameter naming kPlayerSsn names the player and never a record. A tool's rule:
-// the game assigns no SSN, and the original editor's allocator is not witnessed (D-MIS-3).
+// The SSN a new entity takes after the largest the mission's records hold: one past it, as the original
+// editor gives an item it places one past the largest its items hold [orig: JOTACmed.exe
+// MissionItem_NextUniqueId @ 0x44db70, written as the record's +8 by sub_44C8E0 @ 0x44c8e0], the
+// player's skipped, which the original's does not: the game stamps kPlayerSsn on the single player
+// (above), so an entity holding it would answer the player's lookups (D-MIS-10, PERMANENT).
 constexpr int32_t ssn_after(int32_t largest) {
 	return largest + 1 == kPlayerSsn ? kPlayerSsn + 1 : largest + 1;
 }

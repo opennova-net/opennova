@@ -337,13 +337,23 @@ bool set_entity_transform(bms::File &file, EntityKind kind, size_t index,
 	return true;
 }
 
-// What the original editor's new record holds is not witnessed (dfx2med's initializer, D-MIS-3). The
-// values here are the ones the shipped missions' records of the kind's pool hold most often [corpus:
-// mission_corpus's retail leg tallies every member of every shipped item, building, marker and
-// organic record and holds each member of a new record of that pool to its pool's most common value;
-// a member not set here is zero in most]. The map symbol is 255, the more common of the two values the
-// shipped records hold (255 and 0). An organic's two distances are its pool's own, and the weakest of
-// the modes (13.2% of the shipped organics each; the people's distances spread wide).
+// A new record holds what the original editor's holds when it places an item: the item zeroed, then its
+// initializer's values, as its BMS writer lays them into the record [orig: JOTACmed.exe
+// MissionItem_AppendByTypeId @ 0x455900 (the memset, then MissionItem_InitFromDefinition @ 0x44dbf0,
+// whose bytes jomed.exe and dfx2med.exe carry too); the record's layout sub_44C8E0 @ 0x44c8e0]: the
+// waypoint distance 10 (+28), perception and perfectionist 100 (+32, +36), both accuracies 100 (+52, +54),
+// the obliqueness 15, the crouch timer 3, the shoot timer 5 and the attention 30, the waypoint advance
+// trigger -1 (+68) and the generic string "null" (+120) [orig: JOTACmed.exe @ 0x44dc29..0x44dca6,
+// @ 0x44dd30..0x44dd7a]. The engagement and attack distances and the advance timer are the item's
+// items.def min_engagement_dist, max_engagement_dist, max_attack_dist and fire_timer [orig: JOTACmed.exe
+// @ 0x44dc46..0x44dcc2], which its parse seeds with 16, 320, 16 and 10 at an item's begin [orig:
+// JOTACmed.exe ItemsDef_ParseToken @ 0x4310d0] and no shipped item sets but one (to 0): those seeds. The
+// map symbol (+81) stays 0; the properties dialog writes its combo's selection there on its OK, -1 with
+// none, which the shipped records most often hold [orig: JOTACmed.exe sub_4096D0 @ 0x4096d0]. The team, the
+// AI class (name1) and the AI profile (name2) are the item's: its items.def good or evil attribute, its
+// sid, its default_aip where that profile exists [orig: JOTACmed.exe @ 0x44dd51..0x44dd86, @ 0x44dcdc..
+// 0x44dd2e, sub_44C8E0's name1 copy]; zero and empty here, as an item without them leaves them (D-MIS-10,
+// docs/mission/mis-format-re.md).
 bms::Entity new_entity(EntityKind kind, int item_id, int id) {
 	bms::Entity entity = {};
 	entity.type = to_bms_type(kind);
@@ -361,13 +371,8 @@ bms::Entity new_entity(EntityKind kind, int item_id, int id) {
 	entity.wp_adv_trigger = -1;
 	entity.attention = 30;
 	entity.obliqueness = 15;
-	entity.map_symbol = 255;
 	entity.advancetimer = 10;
 	entity.max_attack_distance = 16;
-	if (kind == EntityKind::Organic) {
-		entity.max_engagement_distance = 100;
-		entity.max_attack_distance = 150;
-	}
 	copy_fixed_field(entity.gen_string, sizeof(entity.gen_string), "null");
 	// Editor-authored entities are placed at absolute z (BMS semantics), so a .mis export must
 	// declare the height locked, same as the .bms parse path (see bms.cpp parse_entity)
@@ -477,7 +482,7 @@ bool add_waypoint_marker(bms::File &file, size_t path_index, int marker_item_id,
 bool insert_waypoint_stop(bms::WaypointRecord &path, size_t index, uint32_t marker, std::string &error) {
 	std::vector<uint32_t> &stops = path.waypoint_numbers;
 	if (stops.size() >= kMaxWaypointPathMarkers) {
-		error = "Waypoint path marker count exceeds 32";
+		error = "A path holds 32 stops: a stop past them is in no .bms, and the game reads the next path's words for it.";
 		return false;
 	}
 	stops.insert(stops.begin() + static_cast<std::ptrdiff_t>(std::min(index, stops.size())), marker);

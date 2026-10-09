@@ -293,8 +293,8 @@ int main() {
 	TEST_EXPECT(entity_count(document, EntityKind::Item) == original_item_count + 1);
 	TEST_EXPECT(entity_item_id(document.items[added]) == 101291);
 	TEST_EXPECT(document.items[added].type_id == 1291);
-	// A new record holds what the shipped records most often hold (new_entity; mission_corpus's
-	// retail leg holds each to the corpus), its SSN one past the file's largest.
+	// A new record holds what the original editor's initializer gives a placed item (new_entity, D-MIS-10;
+	// mission_corpus's retail leg holds each to the corpus), its SSN one past the file's largest.
 	{
 		const opennova::bms::Entity &made = document.items[added];
 		int largest = 0;
@@ -307,7 +307,7 @@ int main() {
 		            made.max_attack_distance == 16);
 		TEST_EXPECT(made.w_accuracy1 == 100 && made.w_accuracy2 == 100 && made.spawns == 0 && made.no_more_than == 0);
 		TEST_EXPECT(made.crouch_timer == 3 && made.unk15a == 0 && made.shoot_timer == 5 && made.wp_adv_trigger == -1);
-		TEST_EXPECT(made.attention == 30 && made.obliqueness == 15 && made.advancetimer == 10 && made.map_symbol == 255);
+		TEST_EXPECT(made.attention == 30 && made.obliqueness == 15 && made.advancetimer == 10 && made.map_symbol == 0);
 		TEST_EXPECT(std::string(made.gen_string) == "null" && made.name1[0] == 0 && made.name2[0] == 0);
 		TEST_EXPECT(made.mis_height_lock == 1 && made.get_x() == 1.0f && made.yaw == 90);
 		const opennova::bms::Entity marker = new_entity(EntityKind::Marker, 100001, 77);
