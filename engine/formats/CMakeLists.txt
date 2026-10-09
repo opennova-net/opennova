@@ -70,6 +70,7 @@ add_library(opennova_formats STATIC
     # env — environment/time-of-day
     ${CMAKE_CURRENT_SOURCE_DIR}/env/env.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/env/env_render.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/env/env_source_issue.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/env/env_weather_core.cpp
     # fnt — bitmap fonts
     ${CMAKE_CURRENT_SOURCE_DIR}/fnt/fnt.cpp

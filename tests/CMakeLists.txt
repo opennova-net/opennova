@@ -1228,6 +1228,11 @@ target_link_libraries(env_render_unit_test PRIVATE opennova_formats)
 target_include_directories(env_render_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME env_render_unit COMMAND env_render_unit_test)
 
+add_executable(env_source_issue_test env/env_source_issue_test.cpp)
+target_link_libraries(env_source_issue_test PRIVATE opennova_formats)
+target_include_directories(env_source_issue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME env_source_issue COMMAND env_source_issue_test)
+
 # The environment runtime (engine/runtime/environment): the TOD state owner +
 # weather embedding ported from the shell scripts (ADR 0034 d6 de-scripting).
 add_executable(environment_state_test environment/environment_state_test.cpp)
