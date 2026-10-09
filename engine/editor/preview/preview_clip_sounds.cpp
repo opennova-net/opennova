@@ -37,8 +37,7 @@ std::string slot_keyword(int slot) {
 // name [orig: SoundBank_FindSetByNameAnyBank @ 0x5274f0]); null for none.
 const PreviewBank *bank_holding(const ClipSoundSources &sources, const std::string &set) {
 	for (const PreviewBank *bank : chain_banks(sources.banks(), sources.expansion()))
-		for (const lwf::Multi &multi : bank->file.multis)
-			if (strutil::iequals(multi.name, set)) return bank;
+		if (audio::find_bank_set(bank->file, set) >= 0) return bank;
 	return nullptr;
 }
 
@@ -305,12 +304,12 @@ std::vector<ClipSoundFired> plan_clip_event(const ClipEventDue &due, const ClipS
                                             const ClipSoundBinding &binding, const ClipSoundSources &sources,
                                             const PreviewVec3 &listener, audio::SoundSelector &selector) {
 	std::vector<ClipSoundFired> out;
-	const FootState under = foot_state_on(options.surface);
+	const audio::FootState under = audio::foot_state_on(options.surface);
 	world::AnimEventSound sounds[world::kAnimEventSoundMax];
 	const int count = world::anim_event_sounds(due.word, under.feet_z, under.water_z, under.on_entity,
 	                                           under.surface_type, sounds);
 	const audio::SoundProfile *profile =
-			binding.profile.empty() ? nullptr : preview_profile(sources.profiles(), binding.profile);
+			binding.profile.empty() ? nullptr : audio::find_sound_profile(sources.profiles(), binding.profile.c_str());
 	for (int i = 0; i < count; ++i) {
 		ClipSoundFired fired;
 		fired.tick = due.tick;
@@ -329,7 +328,7 @@ std::vector<ClipSoundFired> plan_clip_event(const ClipEventDue &due, const ClipS
 		fired.set = profile->set_names[size_t(fired.slot)];
 		// A foley sound plays at the body's origin, a footstep at its feet, the frame's capsule bottom
 		// below it [orig: the dip @0x4b77d3]; the preview's body stands at the origin, y up.
-		PreviewHearing heard;
+		audio::SetHearing heard;
 		heard.source[1] = sounds[i].foot < 0 ? 0.0f : -due.bottom;
 		heard.listener[0] = listener.x;
 		heard.listener[1] = listener.y;
@@ -369,7 +368,7 @@ void find_clip_sound_waves(ClipSoundFired &fired, const AssetScan &scan) {
 }
 
 ClipSoundFired plan_set_heard(const std::string &set, int32_t tick, const std::string &what,
-                              const ClipSoundSources &sources, const PreviewHearing &heard,
+                              const ClipSoundSources &sources, const audio::SetHearing &heard,
                               audio::SoundSelector &selector, uint8_t view_flags) {
 	ClipSoundFired fired;
 	fired.tick = tick;
@@ -389,7 +388,7 @@ ClipSoundFired plan_set_at_origin(const std::string &set, int32_t tick, const st
                                   const ClipSoundSources &sources, const PreviewVec3 &listener,
                                   audio::SoundSelector &selector) {
 	// Played at the item, the preview's origin, as the camera hears it.
-	PreviewHearing heard;
+	audio::SetHearing heard;
 	heard.listener[0] = listener.x;
 	heard.listener[1] = listener.y;
 	heard.listener[2] = listener.z;
@@ -399,12 +398,12 @@ ClipSoundFired plan_set_at_origin(const std::string &set, int32_t tick, const st
 std::vector<std::string> clip_event_sound_words(uint32_t word, const ClipSoundOptions &options,
                                                 const ClipSoundBinding &binding, const ClipSoundSources &sources) {
 	std::vector<std::string> out;
-	const FootState under = foot_state_on(options.surface);
+	const audio::FootState under = audio::foot_state_on(options.surface);
 	world::AnimEventSound sounds[world::kAnimEventSoundMax];
 	const int count = world::anim_event_sounds(word, under.feet_z, under.water_z, under.on_entity,
 	                                           under.surface_type, sounds);
 	const audio::SoundProfile *profile =
-			binding.profile.empty() ? nullptr : preview_profile(sources.profiles(), binding.profile);
+			binding.profile.empty() ? nullptr : audio::find_sound_profile(sources.profiles(), binding.profile.c_str());
 	for (int i = 0; i < count; ++i) {
 		const std::string keyword = slot_keyword(sounds[i].slot);
 		const std::string what = sound_words(sounds[i]) + " plays ";
