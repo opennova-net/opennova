@@ -65,6 +65,11 @@ const RecordTable &mission_table();
 // the items, buildings, markers, organics, paths, area triggers and events); -1 for a nested kind.
 int mission_band(NodeKind kind);
 
+// What a bounding box's value is to the game by its type (bms::BoundingBoxType): "Health per tick",
+// "Mana per tick", "Reverb preset", "Location", "Music variable 4"; null where its value word is read as
+// no number (a Mission box's words are its mission's name, any other type's are read by nothing).
+const char *box_value_label(int32_t type);
+
 // The most records an event holds of each of its two lists, a path of its stops.
 inline constexpr size_t kMaxEventRecords = mission::kMaxEventChainEntries;
 

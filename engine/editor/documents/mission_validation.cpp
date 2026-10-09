@@ -20,6 +20,7 @@
 
 #include <base/gameprofile/game_type.h>
 #include <editor/documents/mission_document.h>
+#include <formats/def/reserved_items.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_params.h>
@@ -309,6 +310,20 @@ struct Checker {
 			on(address, MissionFinding::GroupRange, DiagnosticSeverity::Error,
 			   "Group " + std::to_string(index) + " is past the 64 groups the game's tables hold.", field);
 		};
+		// A waypoint marker's advance trigger naming no event of the mission: no event of that index fires,
+		// and a waypoint linked to one never advances by proximity either [orig: Player_UpdatePerFrame
+		// @0x4de649; EventTrigger_MarkLinkedSpawnPoints @0x452ce0].
+		for (const K pool : {K::Item, K::Building, K::Marker, K::Organic})
+			for (const Node *row : document.rows_of(pool)) {
+				const bms::Entity &marker = static_cast<const EntityRow &>(*row).native;
+				if (marker.type_id != def::DEF_TYPE_WAYPOINT || marker.wp_adv_trigger <= 0 ||
+				    size_t(marker.wp_adv_trigger) < events.size())
+					continue;
+				on({row->id, row->kind, 0}, MissionFinding::EventMissing, DiagnosticSeverity::Warning,
+				   "The waypoint advances on event " + std::to_string(marker.wp_adv_trigger + 1) + ", and the mission has " +
+				           std::to_string(events.size()) + ": no event of it fires, so the waypoint never advances.",
+				   "wp_adv_trigger");
+			}
 		for (const Node *row : events) {
 			const EventRow &event = static_cast<const EventRow &>(*row);
 			if (event.ids.lists.size() < 2) continue;
@@ -382,23 +397,50 @@ struct Checker {
 			on(address, MissionFinding::GameMode, DiagnosticSeverity::Warning,
 			   "More than one game mode bit is set: the game plays " + name + ", the first in its decode order.", "attrib_flags");
 		}
-		// A mission of no game mode bit plays as Co-op 0x10020, the single-player family [orig:
-		// Game_StartMission @0x524ce1..0x524d01; SinglePlayer_PopulateMissionList @0x5618b3]: its player
-		// starts at a marker of type 6094 (until the team's first death), else at one of type 6001, else
-		// stays at the map's origin [orig: Server_PositionPlayerForSpawn @0x50CF60, the lookups @0x50D202 and
-		// @0x50D2DB over pool 3, the origin @0x50D3A7..0x50D46F; runtime/world/spawn_select.cpp].
-		if (!modes) {
-			const world::StartMarkerTypes starts = world::start_marker_types(game_type::for_mission_attribs(0u), 1);
-			bool start = false;
-			for (const Node *row : document.rows_of(K::Marker)) {
-				const int32_t type = static_cast<const EntityRow &>(*row).native.type_id;
-				start = start || type == starts.primary || type == starts.fallback;
-			}
-			if (!start)
+		// Where a player starts with no deploy pick (the no-pick arm, world::start_marker_types): a marker of
+		// its mode's and team's start type, else of the fallback type [orig: Server_PositionPlayerForSpawn
+		// @0x50CF60, the waypoint family @0x50D202 / @0x50D2DB, a solo mode @0x50D234 / @0x50D310, a team
+		// mode @0x50D266..0x50D2B7 / @0x50D320..0x50D371]. A mission of no game mode bit plays as Co-op
+		// 0x10020, the single-player family [orig: Game_StartMission @0x524ce1..0x524d01;
+		// SinglePlayer_PopulateMissionList @0x5618b3], whose player with neither stays at the map's origin
+		// [orig: @0x50D3A7..0x50D46F]; any other mode's finds no marker of the type and is not moved [orig:
+		// Entity_FindBestSpawnPoint @0x50CCC0, the count @0x50cd20]. A team mode is checked for the two teams
+		// every session of it plays; a third and a fourth are a host's four-team option.
+		const uint32_t game_type = game_type::for_mission_attribs(uint32_t(mission->native.header.attrib_flags));
+		std::set<int32_t> types;
+		for (const Node *row : document.rows_of(K::Marker)) types.insert(static_cast<const EntityRow &>(*row).native.type_id);
+		const auto starts_at = [&](const world::StartMarkerTypes &starts) {
+			return types.count(starts.primary) || types.count(starts.fallback);
+		};
+		const auto item = [](int32_t type) { return std::to_string(type + kItemIdOffset); };
+		if (game_type::is_waypoint_family(game_type)) {
+			// Co-op proper (the Coop bit, the objective family) falls back to a spawn vehicle of the player's
+			// team [orig: @0x50D46F..0x50D55D], which its item's items.def attribute makes one: not this file's
+			// to say, so only the single-player family is checked here.
+			const world::StartMarkerTypes starts = world::start_marker_types(game_type, 1);
+			if (!game_type::is_objective(game_type) && !starts_at(starts))
 				on(address, MissionFinding::NoStart, DiagnosticSeverity::Warning,
-				   "No marker is a start (item 106094, the insertion point, or 106001): the mission has no game mode, so the "
-				   "game plays it as single player, and its player starts at the map's origin.",
+				   "No marker is a start (item " + item(starts.primary) + ", the insertion point, or " + item(starts.fallback) +
+				           "): the mission has no game mode, so the game plays it as single player, and its player starts at "
+				           "the map's origin.",
 				   "attrib_flags");
+		} else if (!game_type::is_team(game_type)) {
+			const world::StartMarkerTypes starts = world::start_marker_types(game_type, 0);
+			if (!starts_at(starts))
+				on(address, MissionFinding::NoStart, DiagnosticSeverity::Warning,
+				   "No marker is a start of the mission's mode (item " + item(starts.primary) + ", else " + item(starts.fallback) +
+				           "): the game moves no player to one, so each starts where its body is.",
+				   "attrib_flags");
+		} else {
+			for (uint8_t team = 1; team <= game_type::active_team_count(game_type, 2); ++team) {
+				const world::StartMarkerTypes starts = world::start_marker_types(game_type, team);
+				if (!starts_at(starts))
+					on(address, MissionFinding::NoStart, DiagnosticSeverity::Warning,
+					   "No marker is a start of team " + std::to_string(team) + " (item " + item(starts.primary) + ", else " +
+					           item(starts.fallback) + "): the game moves none of its players to one, so each starts where its "
+					           "body is.",
+					   "attrib_flags");
+			}
 		}
 		const RecordIds &ids = mission->ids;
 		const size_t boxes = mission_table().kind(k(K::Mission))->lists().size() - 1; // the last list: the bounding boxes

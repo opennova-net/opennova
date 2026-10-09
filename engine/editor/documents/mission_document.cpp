@@ -425,20 +425,10 @@ void MissionDocument::prepare_duplicate(Node &copy, const Node &original,
 	// With none free the copy keeps the id, and accept_step refuses the step.
 	if (copy.kind == k(K::Area))
 		if (const int id = free_zone_id(rows)) static_cast<AreaRow &>(copy).native.id = id;
-	if (copy.kind == k(K::Event)) {
-		// A parameter naming the event it is in (a ResetEvent that re-arms its own event) names the
-		// copy: the one event the step puts in. One naming another event names that event still.
-		EventRow &event = static_cast<EventRow &>(copy);
-		const size_t self = index_among(rows, &original);
-		for (size_t i = 0; i < event.native.triggers.size(); ++i)
-			if (trigger_param_kind(event.native.triggers[i], 0) == ParamKind::Event &&
-			    size_t(event.native.triggers[i].param1) == self)
-				event.links.push_back({0, uint32_t(i), 0});
-		for (size_t i = 0; i < event.native.actions.size(); ++i)
-			if (action_param_kind(event.native.actions[i], 0) == ParamKind::Event &&
-			    size_t(event.native.actions[i].param1) == self)
-				event.links.push_back({1, uint32_t(i), 0});
-	}
+	// A duplicated event's parameters keep naming the events they named, its original included: the
+	// original editor's paste of a copied event renumbers every event index at or past where the copy goes,
+	// the copy's own with the rest [orig: JOTACmed.exe sub_44D460 @ 0x44d460, the Event triggers
+	// @ 0x44d521 and the ResetEvent actions @ 0x44d550] (renumber_references, D-MIS-9).
 }
 
 bool MissionDocument::accept_list_edit(const Node &row, const ListChange &change, std::string &error) const {
@@ -561,10 +551,14 @@ void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 	if (!address.child && is_entity_kind(address.kind) && id == "ttool_index") {
 		const Node *node = row(address.row);
 		const int32_t type = node && is_entity_kind(node->kind) ? static_cast<const EntityRow &>(*node).native.type_id : 0;
-		if (type == def::DEF_TYPE_WAYPOINT || type == def::DEF_TYPE_KOTH_CENTRE) {
-			use.applies = Applicability::Reads;
-			keyed(hud::kWaypointNameKey, 0, INT32_MAX);
-		}
+		if (type == def::DEF_TYPE_WAYPOINT || type == def::DEF_TYPE_KOTH_CENTRE) keyed(hud::kWaypointNameKey, 0, INT32_MAX);
+	}
+	// A bounding box's value by what its type makes of it (box_value_label).
+	if (address.kind == k(K::BoundingBox) && id == "ref_id") {
+		const Node *node = row(address.row);
+		const RecordHandle record = node ? record_in(*node, address) : RecordHandle();
+		if (record)
+			if (const char *label = box_value_label(record.as<bms::BoundingBox>().type)) use.label = label;
 	}
 	if (!address.child && address.kind == k(K::Mission) && id.compare(0, 15, "win_conditions[") == 0)
 		keyed(hud::kWinConditionKey, 1, 254);
@@ -720,22 +714,6 @@ bool MissionDocument::renumber_references(const StagedRows &rows, const RecordSh
 		edit.value = int64_t(now);
 		sites.push_back(std::move(edit));
 	};
-	// The events the edit put in, by the index each stands at now, in order (the copies of a paste,
-	// a duplicate): what an EventLink of one of them names.
-	std::vector<size_t> put;
-	std::vector<bool> fresh;
-	if (!markers) {
-		std::vector<bool> found(shift.after, false);
-		for (const size_t to : shift.to)
-			if (to != RecordShift::kRemoved && to < shift.after) found[to] = true;
-		fresh.assign(shift.after, false);
-		for (size_t i = 0; i < shift.after; ++i)
-			if (!found[i]) {
-				put.push_back(i);
-				fresh[i] = true;
-			}
-	}
-	size_t event_index = 0;
 	for (const std::shared_ptr<const Node> &node : rows.rows()) {
 		if (markers && node->kind == k(K::WaypointPath)) {
 			const PathRow &path = static_cast<const PathRow &>(*node);
@@ -753,17 +731,28 @@ bool MissionDocument::renumber_references(const StagedRows &rows, const RecordSh
 				set({node->id, k(K::Stop), ids[i].id}, "marker", now);
 			}
 		}
+		// A type-6005 marker's advance trigger, an event by its index (none at 0 or below) [orig:
+		// Entity_SpawnFromBMSRecord @0x40f0b3; EventTrigger_MarkLinkedSpawnPoints @0x452ce0], moves with its
+		// event as the original editor moves it [orig: JOTACmed.exe sub_44D460 @ 0x44d460, sub_411C90
+		// @ 0x411c90]; a removal sets it to -1 first (removal_edits).
+		if (!markers && is_entity_kind(node->kind)) {
+			const bms::Entity &marker = static_cast<const EntityRow &>(*node).native;
+			if (marker.type_id != def::DEF_TYPE_WAYPOINT || marker.wp_adv_trigger <= 0) continue;
+			const size_t now = shift.now(marker.wp_adv_trigger);
+			if (now == size_t(marker.wp_adv_trigger)) continue;
+			if (now == RecordShift::kRemoved) {
+				error = record_title({node->id, node->kind, 0}) + " advances on this event: clear its waypoint advance trigger first.";
+				return false;
+			}
+			set({node->id, node->kind, 0}, "wp_adv_trigger", now);
+		}
 		if (!markers && node->kind == k(K::Event)) {
 			const EventRow &event = static_cast<const EventRow &>(*node);
-			// Its links are read only by the step that put it in.
-			const bool linked = event_index < fresh.size() && fresh[event_index] && !event.links.empty();
-			++event_index;
 			if (event.ids.lists.size() < 2) continue;
+			// Every event's, the ones the step put in included: a copy keeps naming the event its record names
+			// wherever that event now stands (D-MIS-9).
 			const auto renumber = [&](NodeKind kind, size_t list, size_t i, int32_t held, const char *what) {
-				size_t now = shift.now(held);
-				if (linked)
-					for (const EventLink &link : event.links)
-						if (link.list == list && link.index == i) now = link.put < put.size() ? put[link.put] : RecordShift::kRemoved;
+				const size_t now = shift.now(held);
 				if (now == size_t(held)) return true;
 				if (now == RecordShift::kRemoved) {
 					error = "Event " + std::to_string(index_among(rows.rows(), node.get()) + 1) + "'s " + what + " " +
@@ -796,7 +785,7 @@ bool MissionDocument::removal_edits(const std::vector<NodeAddress> &records, std
 		edit.address = address;
 		return edit;
 	};
-	std::vector<Edit> namers;
+	std::vector<Edit> namers, cleared;
 	for (const NodeAddress &record : records) {
 		const Node *node = row(record.row);
 		if (!node) {
@@ -817,6 +806,19 @@ bool MissionDocument::removal_edits(const std::vector<NodeAddress> &records, std
 			}
 		}
 		if (node->kind == k(K::Event)) {
+			// A waypoint marker advancing on the event advances on none: the original editor's delete of an
+			// event sets such a marker's advance trigger to -1 and says so [orig: JOTACmed.exe sub_455B20
+			// @ 0x455b20, WP_EVENT_DELETED].
+			for (const auto &other : rows()) {
+				if (!is_entity_kind(other->kind) || removed.count(other->id)) continue;
+				const bms::Entity &marker = static_cast<const EntityRow &>(*other).native;
+				if (marker.type_id != def::DEF_TYPE_WAYPOINT || marker.wp_adv_trigger != int32_t(index)) continue;
+				Edit clear;
+				clear.address = {other->id, other->kind, 0};
+				clear.field = "wp_adv_trigger";
+				clear.value = int64_t(-1);
+				cleared.push_back(std::move(clear));
+			}
 			// What names the event by its index goes first where the removal takes it too, itself or
 			// with its event, whatever the order the records were named in; a namer the removal leaves
 			// refuses it with its site (S13 D8's convention).
@@ -845,7 +847,9 @@ bool MissionDocument::removal_edits(const std::vector<NodeAddress> &records, std
 			}
 		}
 	}
-	// The namers, each once, before the records themselves (one the removal names too goes once).
+	// The cleared advance triggers, then the namers, each once, before the records themselves (one the
+	// removal names too goes once).
+	for (Edit &edit : cleared) out.push_back(std::move(edit));
 	std::set<NodeId> listed;
 	for (const Edit &edit : namers)
 		if (listed.insert(edit.address.child).second) out.push_back(edit);

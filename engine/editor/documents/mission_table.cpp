@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <base/io/strutil.h>
+#include <formats/def/reserved_items.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_field.h>
@@ -207,7 +208,8 @@ constexpr FieldLabel kLabels[] = {
 	{MissionRecord::BoundingBox, "max_x", "Max X", "max", ""},
 	{MissionRecord::BoundingBox, "max_y", "Max Y", "max", ""},
 	{MissionRecord::BoundingBox, "max_z", "Max Z", "max", ""},
-	{MissionRecord::BoundingBox, "ref_id", "Refers to", "", ""},
+	// A box's value, worded by its type (MissionDocument::refine_field, box_value_label).
+	{MissionRecord::BoundingBox, "ref_id", "Value", "", ""},
 };
 
 const FieldLabel *label_of(MissionRecord record, const char *key) {
@@ -312,7 +314,8 @@ constexpr AppliesRow kApplies[] = {
 	{MissionRecord::Header, "default_str", Applicability::Unverified},
 	{MissionRecord::Header, "tt_file", Applicability::Unverified},
 	{MissionRecord::Header, "music", Applicability::Unverified},
-	{MissionRecord::Header, "reverb", Applicability::Unverified},
+	// (The header's reverb is read: the player body's reverb preset where no indoor building's or Reverb
+	// box's is [orig: Entity_UpdateInfantryPlayerBody @0x4b5f9e, the select @0x4b633f].)
 	// The loader keeps a group's words 0, 2 and 3 [orig: Mission_LoadBMSFile]; what reads them is open
 	// (docs/mission/bms-event-runtime-re.md section 3a).
 	{MissionRecord::Group, "flags", Applicability::Unverified},
@@ -320,8 +323,13 @@ constexpr AppliesRow kApplies[] = {
 	// Read and discarded [orig editor: Med_WriteBmsFile @0x44f920 writes the layer's name].
 	{MissionRecord::Layer, "name", Applicability::Unverified},
 	{MissionRecord::Entity, "next_ssn", Applicability::Unverified},
-	// Read on a waypoint marker alone (type 6005 or 6006, MissionDocument::refine_field).
-	{MissionRecord::Entity, "ttool_index", Applicability::Unverified},
+	// Read on a waypoint marker alone, a type-6005 or 6006 one: the spawn reads the record's +0x60 in
+	// those two types' arms and nowhere else [orig: Entity_SpawnFromBMSRecord @0x40f05a, @0x40f0aa,
+	// @0x40f157..0x40f173] (labelled's applies hook, MissionDocument::refine_field's key).
+	{MissionRecord::Entity, "ttool_index", Applicability::Ignored},
+	// Read on a type-6005 marker alone, the event its waypoint advances on [orig: Entity_SpawnFromBMSRecord
+	// @0x40f0b3] (labelled's hooks).
+	{MissionRecord::Entity, "wp_adv_trigger", Applicability::Ignored},
 	{MissionRecord::Entity, "color_override", Applicability::Unverified},
 	{MissionRecord::Entity, "team_budget", Applicability::Unverified},
 	// The spawn never reads the record's bytes 84..87 [orig: Entity_SpawnFromBMSRecord @0x40e9f0;
@@ -330,9 +338,8 @@ constexpr AppliesRow kApplies[] = {
 	{MissionRecord::Entity, "blink_parent_b", Applicability::Ignored},
 	{MissionRecord::Entity, "blink_group_a", Applicability::Ignored},
 	{MissionRecord::Entity, "blink_group_b", Applicability::Ignored},
-	// What a bounding box's type and the id it refers to are to the game is not witnessed (D-MIS-8).
-	{MissionRecord::BoundingBox, "type", Applicability::Unverified},
-	{MissionRecord::BoundingBox, "ref_id", Applicability::Unverified},
+	// A bounding box's value is read by its type (bms::BoundingBoxType; labelled's applies hook).
+	{MissionRecord::BoundingBox, "ref_id", Applicability::Ignored},
 };
 
 Applicability applies_of(MissionRecord record, const char *key) {
@@ -578,9 +585,59 @@ LabelledField labelled(const KindRow &kind, const MissionField &field) {
 				return path_command_names_entity(record.as<bms::Entity>().waypoint_id) ? ReferenceKind::MissionEntity
 				                                                                       : ReferenceKind::None;
 			};
+		// A waypoint name is read on the two waypoint marker types alone [orig: Entity_SpawnFromBMSRecord
+		// @0x40f0aa, @0x40f173].
+		if (same_text(field.key, "ttool_index"))
+			out.applies = [](const RecordHandle &record, const RecordOwners &) {
+				const int32_t type = record.as<bms::Entity>().type_id;
+				return type == def::DEF_TYPE_WAYPOINT || type == def::DEF_TYPE_KOTH_CENTRE ? Applicability::Reads
+				                                                                          : Applicability::Ignored;
+			};
+		// A type-6005 marker's advance trigger is an event by its index: the spawn keeps it as the waypoint's
+		// linked event [orig: Entity_SpawnFromBMSRecord @0x40f0b3 -> entity+0x210], an event of that index
+		// completing the waypoint when it fires and none above 0 naming none [orig:
+		// EventTrigger_MarkLinkedSpawnPoints @0x452ce0; Player_UpdatePerFrame @0x4de649], and the original
+		// editor renumbers it with the events [orig: JOTACmed.exe sub_44D460 @ 0x44d460, the paste;
+		// sub_455B20 @ 0x455b20, the delete (-1, WP_EVENT_DELETED); sub_411C90 @ 0x411c90, the move].
+		if (same_text(field.key, "wp_adv_trigger")) {
+			out.reference = [](const RecordHandle &record, const RecordOwners &) {
+				const bms::Entity &entity = record.as<bms::Entity>();
+				return entity.type_id == def::DEF_TYPE_WAYPOINT && entity.wp_adv_trigger > 0 ? ReferenceKind::MissionEvent
+				                                                                            : ReferenceKind::None;
+			};
+			out.applies = [](const RecordHandle &record, const RecordOwners &) {
+				return record.as<bms::Entity>().type_id == def::DEF_TYPE_WAYPOINT ? Applicability::Reads
+				                                                                 : Applicability::Ignored;
+			};
+		}
 	}
+	// A bounding box's value is read as its type says: a Health, Mana, Reverb, Location or Music4 box's
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4b6094, @0x4b609d, @0x4b612a, @0x4b6133, @0x4b613c]; a
+	// Mission box's two words are its mission's name (@0x4b60b6) and any other type's are read by nothing
+	// (the switch's default @0x4b6087).
+	if (field.record == MissionRecord::BoundingBox && same_text(field.key, "ref_id"))
+		out.applies = [](const RecordHandle &record, const RecordOwners &) {
+			return box_value_label(record.as<bms::BoundingBox>().type) ? Applicability::Reads : Applicability::Ignored;
+		};
 	return out;
 }
+
+} // namespace
+
+// [orig: Entity_UpdateInfantryPlayerBody's switch over the box's type @0x4b607e..0x4b608d: 1 @0x4b6094,
+// 2 @0x4b609d, 3 @0x4b60aa, 4 @0x4b612a, 5 @0x4b6133, 6 @0x4b613c]
+const char *box_value_label(int32_t type) {
+	switch (type) {
+	case 1: return "Health per tick";
+	case 2: return "Mana per tick";
+	case 4: return "Reverb preset";
+	case 5: return "Location";
+	case 6: return "Music variable 4";
+	default: return nullptr;
+	}
+}
+
+namespace {
 
 // --- the lists ---------------------------------------------------------------------------------------
 
@@ -664,12 +721,12 @@ bool fresh_availability(bms::ItemAvailabilityEntry &, std::string &error) {
 	error = "An item availability rule needs a weapon's name: duplicate or paste one.";
 	return false;
 }
-// A bounding box holds a type (1 or 5 in the shipped missions) and the id of what it refers to, and
-// what the game makes of either is not witnessed (D-MIS-8): a new one would be a record nothing says
-// how to fill, so one comes in as a copy.
-bool fresh_box(bms::BoundingBox &, std::string &error) {
-	error = "What a bounding box's type and the id it refers to mean is not known yet: duplicate or paste one.";
-	return false;
+// A new bounding box holds nothing: a box of type 0, which neither the player body's walk (its switch's
+// default) nor SSNloc reads [orig: Entity_UpdateInfantryPlayerBody @0x4b6087; WacCmd_SsnLoc @0x4f0efc],
+// its corners at the origin, until its type and corners are set.
+bool fresh_box(bms::BoundingBox &box, std::string &) {
+	box = bms::BoundingBox{};
+	return true;
 }
 
 // A fixed table of the file (its 64 groups, 32 layers): its records set, never added or removed (the

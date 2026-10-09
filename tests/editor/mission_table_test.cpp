@@ -15,7 +15,7 @@
 // units, an entity's item is set by its items.def id; the lists: the fixed tables take nothing in or
 // out, a path holds 32 stops and a stop put in or taken out writes the path's count as its slots where
 // a flags edit leaves a stored count past them as it was read, an event's chain holds 20 of each, a
-// new bounding box is refused, and the file reparses after every edit. With the game install (a
+// new bounding box is a type-0 box no reader reads, and the file reparses after every edit. With the game install (a
 // SKIP-LEG without OPENNOVA_JO_DIR), every mission it ships reads through the table and a Set of every
 // field to the value it reads writes the same file but the bytes it names, each a fixed text slot's
 // past its text in a slot the game is witnessed to read to its first NUL alone (the shipped missions'
@@ -574,9 +574,9 @@ int test_lists() {
 	bms::File &native = top.as<bms::File>();
 	(void)own;
 
-	// A loadout entry and an availability rule come in as copies (a new one would have no name); a
-	// bounding box too (what a new one would hold is not known); each keeps the header's lengths and
-	// counts.
+	// A loadout entry and an availability rule come in as copies (a new one would have no name); a new
+	// bounding box is a box of type 0, which neither the player body's walk nor SSNloc reads (D-MIS-8);
+	// each keeps the header's lengths and counts.
 	const ListOps &loadout = list_of(MissionKind::Mission, MissionKind::Loadout).ops;
 	TEST_EXPECT(!loadout.insert(top, 0, nullptr, error));
 	const DetachedRecord kit = loadout.copy(top, 1);
@@ -591,7 +591,9 @@ int test_lists() {
 	TEST_EXPECT(availability.erase(top, 0) && native.header.secondary_chunk_len == 0);
 	const ListOps &boxes = list_of(MissionKind::Mission, MissionKind::BoundingBox).ops;
 	const size_t box_count = boxes.size(top);
-	TEST_EXPECT(!boxes.insert(top, box_count, nullptr, error) && !error.empty());
+	TEST_EXPECT(boxes.insert(top, box_count, nullptr, error) && native.bounding_box_count == int32_t(box_count + 1) &&
+	            native.bounding_boxes.back().type == 0 && native.bounding_boxes.back().max_x == 0 && reparses(m));
+	TEST_EXPECT(boxes.erase(top, box_count) && native.bounding_box_count == int32_t(box_count));
 	DetachedRecord box;
 	box.kind = k(MissionKind::BoundingBox);
 	box.data = std::make_shared<bms::BoundingBox>(bms::BoundingBox{1, 2, 3, 4, 5, 6, 5, -1, 0});

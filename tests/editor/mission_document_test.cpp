@@ -538,8 +538,8 @@ int test_clipboard() {
 	const std::string trigger_payload = document->copy({first_child(*document, event0, MissionKind::Trigger)});
 	TEST_EXPECT(!trigger_payload.empty() && !document->pastes_rows(trigger_payload));
 	// Pasted at the end: the organic after the organics with the next SSN, the area with the lowest
-	// free zone id, the events after the events; the copies' parameters follow the fresh ids and the
-	// copied events' places.
+	// free zone id, the events after the events; the copies' parameters follow the fresh ids, and their
+	// event indexes name the events they named (the original editor's paste, D-MIS-9).
 	Edit paste = edit_of(EditOperation::Paste, {0, 0, 0}, "", rows_payload);
 	paste.position = SIZE_MAX;
 	TEST_EXPECT(document->apply(paste, error));
@@ -552,16 +552,17 @@ int test_clipboard() {
 		const EventRow &second = static_cast<const EventRow &>(*m.rows_of(MissionKind::Event)[3]);
 		TEST_EXPECT(copy.native.id == 13 && mission::entity_item_id(copy.native) == 106102 && area.native.id == 1);
 		TEST_EXPECT(first.native.triggers.size() == 1 && first.native.triggers[0].param1 == 13 && first.native.triggers[0].param2 == 1);
-		TEST_EXPECT(first.native.actions.size() == 1 && first.native.actions[0].param1 == 3);
-		TEST_EXPECT(second.native.triggers.size() == 1 && second.native.triggers[0].param1 == 2);
+		TEST_EXPECT(first.native.actions.size() == 1 && first.native.actions[0].param1 == 1);
+		TEST_EXPECT(second.native.triggers.size() == 1 && second.native.triggers[0].param1 == 0);
 		bms::File composed;
 		TEST_EXPECT(m.compose(composed) && composed.organics.size() == 3 && composed.area_triggers.size() == 3 &&
 		            composed.events.size() == 4 && composed.triggers.size() == 4);
 	}
 	document->undo();
 	TEST_EXPECT(bytes_of(*document) == original);
-	// Pasted before the second event: the copies land between the two, naming each other where they
-	// landed, and the first event's ResetEvent follows the second event to its new place.
+	// Pasted before the second event: the copies land between the two, and every index at or past the
+	// paste moves by the two, the copies' with the rest: the first event's ResetEvent and its copy's
+	// follow the second event to its new place, the second's trigger and its copy's name the first.
 	paste.position = document->rows().size() - 1;
 	TEST_EXPECT(document->apply(paste, error));
 	{
@@ -572,13 +573,14 @@ int test_clipboard() {
 		const EventRow &second = static_cast<const EventRow &>(*events[2]);
 		const EventRow &kept1 = static_cast<const EventRow &>(*events[3]);
 		TEST_EXPECT(kept0.native.actions[0].param1 == 3 && kept1.native.triggers[0].param1 == 0);
-		TEST_EXPECT(first.native.actions[0].param1 == 2 && second.native.triggers[0].param1 == 1);
+		TEST_EXPECT(first.native.actions[0].param1 == 3 && second.native.triggers[0].param1 == 0);
 	}
 	document->undo();
 	TEST_EXPECT(bytes_of(*document) == original);
 	// Pasted with an item selected (the session's Paste asks for the place after it, in the items'
 	// band): each row lands in its band nearest that place, the copies of a band in their order, so
-	// the events go first among the events, the first copy before the second, each naming the other.
+	// the events go first among the events, the first copy before the second, each naming the event its
+	// original named where that event went.
 	paste.position = 2; // after the mission row and the first item
 	TEST_EXPECT(document->apply(paste, error));
 	{
@@ -588,7 +590,7 @@ int test_clipboard() {
 		const EventRow &second = static_cast<const EventRow &>(*events[1]);
 		const EventRow &kept0 = static_cast<const EventRow &>(*events[2]);
 		const EventRow &kept1 = static_cast<const EventRow &>(*events[3]);
-		TEST_EXPECT(first.native.actions[0].param1 == 1 && second.native.triggers[0].param1 == 0);
+		TEST_EXPECT(first.native.actions[0].param1 == 3 && second.native.triggers[0].param1 == 2);
 		TEST_EXPECT(kept0.native.actions[0].param1 == 3 && kept1.native.triggers[0].param1 == 2);
 		const std::vector<const Node *> organics = m.rows_of(MissionKind::Organic);
 		TEST_EXPECT(organics.size() == 3 && static_cast<const EntityRow &>(*organics[0]).native.id == 13);
@@ -647,7 +649,8 @@ int test_clipboard() {
 	while (document->can_undo()) document->undo();
 	TEST_EXPECT(bytes_of(*document) == original);
 
-	// A Duplicate of an event that re-arms itself: the copy re-arms the copy, the original itself,
+	// A Duplicate of an event that re-arms itself: the copy re-arms the original, as the original
+	// editor's paste leaves a copy naming the event its original named (D-MIS-9), the original itself,
 	// and the second event's trigger names the first where it is.
 	const NodeAddress reset = first_child(*document, event0, MissionKind::Action);
 	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, reset, "param1", int64_t(0)), error));
@@ -656,7 +659,7 @@ int test_clipboard() {
 		const std::vector<const Node *> events = m.rows_of(MissionKind::Event);
 		TEST_EXPECT(events.size() == 3 && events[0]->id == event0.row && events[2]->id == event1.row);
 		TEST_EXPECT(static_cast<const EventRow &>(*events[0]).native.actions[0].param1 == 0 &&
-		            static_cast<const EventRow &>(*events[1]).native.actions[0].param1 == 1 &&
+		            static_cast<const EventRow &>(*events[1]).native.actions[0].param1 == 0 &&
 		            static_cast<const EventRow &>(*events[2]).native.triggers[0].param1 == 0);
 	}
 	while (document->can_undo()) document->undo();
@@ -1223,6 +1226,107 @@ int test_mission_first_dot() {
 // mission, the zone parameters and those naming no zone, the event references and those past the
 // table, the stops and those past the markers, the text keys by key; and the findings the validator
 // makes over the install, by code.
+// ADR 0046 S23 D, the rules the witnesses settled: a bounding box made from nothing is a type-0 box, its
+// value worded and read by its type (D-MIS-8); a waypoint name read on the two waypoint marker types
+// alone; a type-6005 marker's advance trigger an event of the mission (its edge, renumbered with the
+// events, cleared when its event goes, one past the events a finding); and where a player of the
+// single-player, a solo and a team mode starts (mission.no_start).
+int test_witnessed_rules() {
+	const DocumentType &type = *document_type_for(AssetKind::Mission);
+	std::unique_ptr<Document> document = open(fixture_bytes());
+	TEST_EXPECT(document != nullptr);
+	if (!document) return 1;
+	const MissionDocument &m = as_mission(*document);
+	const std::string original = bytes_of(*document);
+	Diagnostic error;
+	const auto use = [&](const NodeAddress &record, const char *id) {
+		for (const FieldSchema &schema : document->fields(record.kind))
+			if (schema.id == id) return document->field_on(record, schema);
+		return FieldUse();
+	};
+	const auto codes = [&]() {
+		std::map<std::string, size_t> out;
+		for (const Diagnostic &d : type.validate_file(*document)) ++out[d.code()];
+		return out;
+	};
+
+	// A box from nothing, of type 0: its value read by nothing until its type is one the walk reads.
+	const NodeAddress mission_row = row_at(*document, MissionKind::Mission, 0);
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Add, {mission_row.row, k(MissionKind::BoundingBox), 0}), error));
+	const NodeAddress box = first_child(*document, mission_row, MissionKind::BoundingBox);
+	TEST_EXPECT(box.child != 0 && use(box, "type").applies == Applicability::Reads &&
+	            use(box, "ref_id").applies == Applicability::Ignored);
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, box, "type", int64_t(1)), error) &&
+	            use(box, "ref_id").applies == Applicability::Reads && use(box, "ref_id").label &&
+	            std::string(use(box, "ref_id").label) == "Health per tick");
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, box, "type", int64_t(5)), error) &&
+	            std::string(use(box, "ref_id").label) == "Location");
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, box, "type", int64_t(3)), error) &&
+	            use(box, "ref_id").applies == Applicability::Ignored);
+	while (document->can_undo()) document->undo();
+	TEST_EXPECT(bytes_of(*document) == original);
+
+	// A waypoint marker (item 106005): its name and its advance trigger read; another marker's not.
+	const NodeAddress marker0 = row_at(*document, MissionKind::Marker, 0), navpoint = row_at(*document, MissionKind::Marker, 4);
+	TEST_EXPECT(use(marker0, "ttool_index").applies == Applicability::Ignored &&
+	            use(marker0, "wp_adv_trigger").applies == Applicability::Ignored);
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, marker0, "item", int64_t(106005)), error));
+	TEST_EXPECT(use(marker0, "ttool_index").applies == Applicability::Reads &&
+	            use(marker0, "wp_adv_trigger").applies == Applicability::Reads &&
+	            use(navpoint, "ttool_index").applies == Applicability::Ignored);
+	// -1 (a new record's) and 0 name no event; 1 names the second.
+	TEST_EXPECT(use(marker0, "wp_adv_trigger").reference == ReferenceKind::None);
+	Extracted before;
+	extract_from_document(*document, before);
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, marker0, "wp_adv_trigger", int64_t(1)), error) &&
+	            use(marker0, "wp_adv_trigger").reference == ReferenceKind::MissionEvent);
+	Extracted after;
+	extract_from_document(*document, after);
+	TEST_EXPECT(count_edges(after, ReferenceKind::MissionEvent) == count_edges(before, ReferenceKind::MissionEvent) + 1);
+	const auto advance = [&]() { return static_cast<const EntityRow &>(*m.rows_of(MissionKind::Marker)[0]).native.wp_adv_trigger; };
+	// A Duplicate of the first event puts the copy before the second: the marker follows its event.
+	const NodeAddress event0 = row_at(*document, MissionKind::Event, 0), event1 = row_at(*document, MissionKind::Event, 1);
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Duplicate, event0), error) && advance() == 2);
+	document->undo();
+	TEST_EXPECT(advance() == 1);
+	// A removal of its event clears it first, as the original editor's delete does (WP_EVENT_DELETED).
+	std::vector<Edit> removal;
+	std::string why;
+	TEST_EXPECT(document->removal_edits({event0, event1}, removal, why) && !removal.empty() &&
+	            removal[0].operation == EditOperation::Set && removal[0].address.row == marker0.row &&
+	            removal[0].field == "wp_adv_trigger" && removal[0].value == Value(int64_t(-1)));
+	// One past the events: no event of it fires, a warning on the marker.
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, marker0, "wp_adv_trigger", int64_t(7)), error));
+	{
+		const std::vector<Diagnostic> findings = type.validate_file(*document);
+		TEST_EXPECT(findings.size() == 1 && findings[0].code() == "mission.event_missing" &&
+		            findings[0].severity == DiagnosticSeverity::Warning && findings[0].row_id == marker0.row &&
+		            findings[0].field == "wp_adv_trigger");
+	}
+	while (document->can_undo()) document->undo();
+	TEST_EXPECT(bytes_of(*document) == original);
+
+	// The starts: the minted mission is co-op (a spawn vehicle may start its players: unchecked here); with
+	// no game mode its player starts at a 6094 or a 6001 marker, which it lacks; a deathmatch's at a 6095 or
+	// a 6002; a team deathmatch's team 1 at a 6096 or a 6003, team 2 at a 6097 or a 6004.
+	const auto mode = [&](uint32_t bits) {
+		return document->apply(edit_of(EditOperation::Set, mission_row, "attrib_flags", int64_t(bits)), error);
+	};
+	TEST_EXPECT(codes().empty());
+	TEST_EXPECT(mode(0) && codes() == (std::map<std::string, size_t>{{"mission.no_start", 1}}));
+	TEST_EXPECT(mode(uint32_t(bms::AttribFlags::Deathmatch)) && codes() == (std::map<std::string, size_t>{{"mission.no_start", 1}}));
+	TEST_EXPECT(mode(uint32_t(bms::AttribFlags::TeamDeathmatch)) &&
+	            codes() == (std::map<std::string, size_t>{{"mission.no_start", 2}}));
+	// A team 1 start: team 2's alone.
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, marker0, "item", int64_t(106003)), error) &&
+	            codes() == (std::map<std::string, size_t>{{"mission.no_start", 1}}));
+	while (document->can_undo()) document->undo();
+	TEST_EXPECT(bytes_of(*document) == original);
+	std::printf("witnessed rules: a box from nothing worded by its type, a waypoint's name and advance trigger, the "
+	            "starts of each mode\n");
+	return 0;
+}
+
 int test_retail() {
 	const std::string root = retail::install();
 	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every shipped mission as a document)");
@@ -1319,7 +1423,9 @@ int test_retail() {
 	// (CP13's SSN 2072), every mission with an entity on an empty path.
 	TEST_EXPECT(missions == 115 && differing == 5);
 	TEST_EXPECT(entity_refs == 4561 && entity_missing == 162 && zone_refs == 879 && zone_missing == 53);
-	TEST_EXPECT(event_refs == 841 && event_past == 0 && stops == 11235 && stops_past == 0 && text_refs == 12824);
+	// The event references: 841 Event triggers' and ResetEvent actions' and 73 type-6005 waypoints' advance
+	// triggers.
+	TEST_EXPECT(event_refs == 914 && event_past == 0 && stops == 11235 && stops_past == 0 && text_refs == 12824);
 	// The text keys by key: no shipped action outputs a triggered text; each of the 11,250 type-6005 waypoints
 	// forms its name's, 822 of them of id -1 ("STRWPNAME-01", the key the spawn forms of it).
 	const std::map<std::string, size_t> keys = {{"LOCATION", 581},     {"STRLOSEDIRECTIVE", 17}, {"STRLOSEMSG", 29},
@@ -1350,6 +1456,7 @@ int main(int argc, char **argv) {
 	if (test_pool_check() != 0) return 1;
 	if (test_rename_companions() != 0) return 1;
 	if (test_mission_named_like_a_bank() != 0) return 1;
+	if (test_witnessed_rules() != 0) return 1;
 	if (test_mission_first_dot() != 0) return 1;
 	return test_retail();
 }

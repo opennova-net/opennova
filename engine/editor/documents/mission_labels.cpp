@@ -14,6 +14,7 @@
 #include <base/io/strutil.h>
 #include <editor/documents/mission_sentence.h>
 #include <editor/project/project_files.h>
+#include <formats/def/reserved_items.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_params.h>
@@ -356,6 +357,17 @@ bool mission_value_label(const Document &base, const NodeAddress &address, const
 			else if (entity.waypoint_id >= 1 && entity.waypoint_id <= kLastPathNumber)
 				out = stop_display(*document, entity.waypoint_id, *number, StopUse::Start, names);
 			else return false;
+		} else if (id == "wp_adv_trigger") {
+			// A waypoint's advance trigger: the event it completes on, by its index (none at 0 or below)
+			// [orig: Entity_SpawnFromBMSRecord @0x40f0b3; EventTrigger_MarkLinkedSpawnPoints @0x452ce0].
+			if (entity.type_id != def::DEF_TYPE_WAYPOINT) return false;
+			if (*number <= 0) {
+				out = DisplayName();
+				out.raw = std::to_string(*number);
+				out.text = "No event (the waypoint advances when the player reaches it)";
+				return true;
+			}
+			out = mission_event_display(*document, *number, names);
 		} else if (id == "name_index") {
 			return *number != 0 && text("");
 		} else if (id == "ttool_index") {
