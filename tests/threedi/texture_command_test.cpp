@@ -2,6 +2,7 @@
 // model's .dds (auto DXT1 or DXT5, the full chain to 1 x 1 or one level, A8R8G8B8), .tga or .mdt, halved
 // to a cap; a .dds whose sides are not powers of two refused, and the flags a .tga does not take; the
 // authoring encoder's blocks kept at least as close to the source as the D3DX codec's port keeps them.
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -9,9 +10,9 @@
 #include <string>
 #include <vector>
 
-#include <editor/import/dxt_encode.h>
 #include <formats/dds/dds.h>
 #include <formats/tga/tga.h>
+#include <runtime/renderer/dxt_encode.h>
 #include <runtime/renderer/texture_dxt.h>
 
 #include "../../apps/3di/threedi_cli.h"
@@ -147,7 +148,7 @@ int main(int argc, char **argv) {
 	// The authoring encoder against the D3DX codec's port, level 0 of the same picture: at least as close.
 	{
 		const std::vector<uint8_t> source = picture(128, 128, 255);
-		const auto chain = opennova::editor::encode_dxt_levels(source.data(), 128, 128, false, true);
+		const auto chain = renderer::encode_dxt_levels(source.data(), 128, 128, false, true);
 		check(chain.size() == 8, "a 128 x 128 chain has eight levels");
 		const renderer::DxtSurface port = renderer::encode_dxt_surface(renderer::decode_rgba8(source.data(), 128, 128), 128, 128,
 		                                                               renderer::TextureDxtFormat::Dxt1);
@@ -156,7 +157,7 @@ int main(int argc, char **argv) {
 		std::printf("DXT1 level 0: authoring encoder %.2f dB, the D3DX codec's port %.2f dB\n", ours, theirs);
 		check(ours >= theirs && ours > 32.0, "the authoring encoder keeps DXT1 at least as close as the port");
 		const std::vector<uint8_t> alpha = picture(128, 128, -1);
-		const auto five = opennova::editor::encode_dxt_levels(alpha.data(), 128, 128, true, false);
+		const auto five = renderer::encode_dxt_levels(alpha.data(), 128, 128, true, false);
 		const renderer::DxtSurface port5 = renderer::encode_dxt_surface(renderer::decode_rgba8(alpha.data(), 128, 128), 128, 128,
 		                                                                renderer::TextureDxtFormat::Dxt5);
 		const double ours5 = psnr_rgb(alpha, decoded(five[0], 128, 128, renderer::TextureDxtFormat::Dxt5));
@@ -169,7 +170,7 @@ int main(int argc, char **argv) {
 	{
 		std::vector<uint8_t> keyed = picture(8, 8, 255);
 		for (size_t i = 0; i < 8; ++i) keyed[i * 4 + 3] = 0; // the first row clear
-		const auto chain = opennova::editor::encode_dxt_levels(keyed.data(), 8, 8, false, false);
+		const auto chain = renderer::encode_dxt_levels(keyed.data(), 8, 8, false, false);
 		const std::vector<uint8_t> back = decoded(chain[0], 8, 8, renderer::TextureDxtFormat::Dxt1);
 		bool clear = true, solid = true;
 		for (size_t i = 0; i < 64; ++i) (i < 8 ? clear : solid) = (i < 8 ? clear : solid) && back[i * 4 + 3] == (i < 8 ? 0 : 255);

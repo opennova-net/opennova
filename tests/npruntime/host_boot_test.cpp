@@ -275,6 +275,34 @@ int main() {
 		CHECK(host.boot.water_z_q16 == (12 << 16));
 	}
 
+	// --- the authority's tile fallback: no <mission>.til, so the terrain's own
+	// polytrn_tileinfo, its extension forced from the first '.', and the
+	// mission's name cut at its FIRST '.' for its own -----------------------
+	// [orig: PolyTrn_LoadTerrainConfig @0x60E6C9..0x60E6E5; Terrain_Init
+	//  @0x60FCFD; Path_ReplaceOrAppendExtension @0x53C7C4]
+	{
+		Host host;
+		host.files["synth.trn"] = "terrain_name \"synth\"\r\npolytrn_tileinfo synthown.v1.dat\r\n";
+		host.files["synthown.til"] = host.files["synth.til"];
+		host.files.erase("synth.til");
+		inmatch::HostBootRequest request = host.request(/*trn_water_raw=*/0);
+		std::snprintf(request.mission.header.terrain, sizeof(request.mission.header.terrain), "synth");
+		std::string error;
+		CHECK(inmatch::boot_host_mission(std::move(request), host.boot, error));
+		CHECK(bytes_string(host.boot.terrain_til) == host.files["synthown.til"]);
+		CHECK(host.kernel && host.kernel->terrain_store.placed_tiles().size() == 1);
+
+		// A first-dot base finds its own .til ahead of the terrain's.
+		Host dotted;
+		dotted.files["synth.trn"] = host.files["synth.trn"];
+		dotted.files["synthown.til"] = std::string(16, '\0'); // refused: no magic
+		inmatch::HostBootRequest r = dotted.request(0);
+		r.mission_basename = "synth.v2";
+		std::snprintf(r.mission.header.terrain, sizeof(r.mission.header.terrain), "synth");
+		CHECK(inmatch::boot_host_mission(std::move(r), dotted.boot, error));
+		CHECK(bytes_string(dotted.boot.terrain_til) == dotted.files["synth.til"]);
+	}
+
 	// --- D-NET-374: the session's mp_No* words restrict the class table ------
 	// Each mission start on the authority zeroes and disables the property each
 	// set word names; the table and its latches are the boot's, kept for the

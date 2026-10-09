@@ -45,7 +45,7 @@ bool run_items_def_catalog() {
 			// Wire callback and physical mover deliberately differ.
 			make_item(101291, DEF_ITEM_TYPE_VEHICLE, "chel", "cveh",
 					DEF_ITEM_ATTRIB_PLAYERCONTROL, 1),
-			make_item(101400, DEF_ITEM_TYPE_VEHICLE, "cveh", "cbik", 0, 1),
+			make_item(101400, DEF_ITEM_TYPE_VEHICLE, "cveh", "cbike", 0, 1),
 			// Pool-1 emplacements are not vehicle compact records.
 			make_item(101419, DEF_ITEM_TYPE_OBJECT, "ewep", "cveh",
 					DEF_ITEM_ATTRIB_EWEAP),
@@ -154,10 +154,11 @@ bool run_items_def_catalog() {
 }
 
 // The shipped JOX corpus authors these families as 5-char and mixed-case
-// tokens (`cbike`, `ctank`, `catv`, `CHel`, `ENVS`); the retail table keys
-// are 4-byte fourccs the loader resolves them onto (vehicle-client-movers-re
-// family table). Exact-string matching stranded every one of them — the
-// Motorcycle ran the Ground motor and the tanks/ATVs came back Unresolved.
+// tokens (`cbike`, `ctank`, `catv`, `CHel`, `ENVS`). The physics table stores
+// those rows whole (`ctank`, `cbike`) and `CHel` mixed-case, and binds the row
+// whose name equals the WHOLE token ignoring case. [orig:
+// EntityDef_LookupPhysicsCallback @0x4a9240, stricmp @0x4a9262 over
+// g_EntityClassPhysicsTable @0x82abc8]
 bool run_retail_corpus_tokens() {
 	DefItemDef entries[] = {
 			make_item(101100, DEF_ITEM_TYPE_VEHICLE, "cbik", "cbike",
@@ -178,15 +179,15 @@ bool run_retail_corpus_tokens() {
 	const ns::ItemReplicationProfile *bike = catalog.by_wire_type(1100);
 	if (!expect(bike != nullptr &&
 	                    bike->motion_family == ns::MotionFamily::LightVehicle,
-	            "cbike resolves the bike fourcc row, not Ground")) return false;
+	            "cbike resolves the cbike row, not Ground")) return false;
 	const ns::ItemReplicationProfile *tank = catalog.by_wire_type(1101);
 	if (!expect(tank != nullptr &&
 	                    tank->motion_family == ns::MotionFamily::GroundVehicle,
-	            "ctank resolves the ground fourcc row")) return false;
+	            "ctank resolves the ctank row")) return false;
 	const ns::ItemReplicationProfile *atv = catalog.by_wire_type(1102);
 	if (!expect(atv != nullptr &&
 	                    atv->motion_family == ns::MotionFamily::GroundVehicle,
-	            "catv resolves the ground fourcc row")) return false;
+	            "catv resolves the catv row")) return false;
 	const ns::ItemReplicationProfile *heli = catalog.by_wire_type(1103);
 	if (!expect(heli != nullptr &&
 	                    heli->motion_family == ns::MotionFamily::Aircraft &&
@@ -198,6 +199,30 @@ bool run_retail_corpus_tokens() {
 	                              EntityClass::NoNetworkCallback,
 	              "uppercase ENVS is the witnessed null-callback class, "
 	              "not a fail-closed Unknown");
+}
+
+// A token that only starts with a row's name, or names no row (`plyr` is an
+// event row, not a physics row), binds the null row: Static, never a prefix's
+// family. [orig: EntityDef_LookupPhysicsCallback @0x4a9240, row 0 @0x4a9272]
+bool run_prefix_tokens_bind_null() {
+	DefItemDef entries[] = {
+			make_item(101110, DEF_ITEM_TYPE_VEHICLE, "cveh", "ctan", 0, 1),
+			make_item(101111, DEF_ITEM_TYPE_VEHICLE, "cveh", "cbik", 0, 1),
+			make_item(101112, DEF_ITEM_TYPE_VEHICLE, "cveh", "cvehicle", 0, 1),
+			make_item(101113, DEF_ITEM_TYPE_PERSON, "plyr", "plyr"),
+			make_item(101114, DEF_ITEM_TYPE_VEHICLE, "CHel", "CHelScout"),
+	};
+	DefItemsFile items{entries, sizeof(entries) / sizeof(entries[0])};
+	const ns::ItemReplicationCatalog catalog =
+			ns::ItemReplicationCatalog::from_items_def(items);
+	for (uint16_t wire = 1110; wire <= 1114; ++wire) {
+		const ns::ItemReplicationProfile *profile = catalog.by_wire_type(wire);
+		if (!expect(profile != nullptr &&
+		                    profile->motion_family == ns::MotionFamily::Static,
+		            "a prefix or non-row move_function binds the null row"))
+			return false;
+	}
+	return true;
 }
 
 // A repeated id resolves to its FIRST definition on both keys, the row retail's
@@ -231,7 +256,7 @@ bool run_duplicate_ids_resolve_first() {
 
 int main() {
 	const bool ok = run_items_def_catalog() && run_retail_corpus_tokens() &&
-			run_duplicate_ids_resolve_first();
+			run_prefix_tokens_bind_null() && run_duplicate_ids_resolve_first();
 	if (ok) std::printf("item_replication_catalog: OK\n");
 	return ok ? 0 : 1;
 }

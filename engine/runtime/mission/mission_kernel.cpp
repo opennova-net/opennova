@@ -42,15 +42,6 @@ namespace opennova::mission {
 
 namespace w = opennova::world;
 
-namespace {
-
-std::string basename_of(const std::string &name) {
-	const size_t dot = name.rfind('.');
-	return dot == std::string::npos ? name : name.substr(0, dot);
-}
-
-} // namespace
-
 MissionKernel::MissionKernel() : local(world) {
 	world.local_player_state = &local;
 	world.teammate_spawner = this;
@@ -107,7 +98,9 @@ bool MissionKernel::open(const std::string &root, const std::string &name,
 		return false;
 	}
 	BootFileSource files = boot_files_from_index(index);
-	open_document(std::move(parsed), basename_of(name), std::move(files));
+	// The by-name readers' base: the name cut at its first '.'
+	// (mission_sidecars.h mission_base_name).
+	open_document(std::move(parsed), mission_base_name(name), std::move(files));
 	mission_name = name;
 	return true;
 }

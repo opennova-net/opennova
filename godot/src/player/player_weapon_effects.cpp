@@ -369,19 +369,19 @@ PlayerWeaponEffects::ActionPoint PlayerWeaponEffects::mounted_action_particle(
 	if (data.is_null()) {
 		return out;
 	}
-	for (int i = 0; i < data->get_user_point_count(); ++i) {
-		const Ref<ModelUserPoint> point = data->get_user_point_info(i);
-		if (point.is_null() || point->get_name().nocasecmp_to(p_userpoint) != 0) {
-			continue;
-		}
-		const Transform3D pose = action_particle_model_to_world(gun, point);
-		const Vector3 direction = pose.basis.xform(point->get_rotation());
-		out.pos = pose.xform(point->get_position());
-		out.dir = direction.length_squared() > 0.000001f
-				? direction.normalized() : -pose.basis.get_column(2).normalized();
-		out.valid = true;
+	// The first user point of the name, case aside (the model's by-name lookup).
+	const int index = opennova::threedi::threedi_3di3_find_user_point(
+			&data->native_model(), p_userpoint.utf8().get_data());
+	const Ref<ModelUserPoint> point = index >= 0 ? data->get_user_point_info(index) : Ref<ModelUserPoint>();
+	if (point.is_null()) {
 		return out;
 	}
+	const Transform3D pose = action_particle_model_to_world(gun, point);
+	const Vector3 direction = pose.basis.xform(point->get_rotation());
+	out.pos = pose.xform(point->get_position());
+	out.dir = direction.length_squared() > 0.000001f
+			? direction.normalized() : -pose.basis.get_column(2).normalized();
+	out.valid = true;
 	return out;
 }
 
@@ -418,19 +418,18 @@ PlayerWeaponEffects::ActionPoint PlayerWeaponEffects::third_person_action_partic
 		return out;
 	}
 	const Transform3D xform = held_weapon->get_global_transform();
-	const int count = data->get_user_point_count();
-	for (int i = 0; i < count; ++i) {
-		const Ref<ModelUserPoint> info = data->get_user_point_info(i);
-		if (info.is_null() || info->get_name().nocasecmp_to(p_userpoint) != 0) {
-			continue;
-		}
-		const Vector3 direction = xform.basis.xform(info->get_rotation());
-		out.pos = xform.xform(info->get_position());
-		out.dir = direction.length_squared() > 0.000001f ? direction.normalized()
-														  : -xform.basis.get_column(2).normalized();
-		out.valid = true;
+	// The first user point of the name, case aside (the model's by-name lookup).
+	const int index = opennova::threedi::threedi_3di3_find_user_point(
+			&data->native_model(), p_userpoint.utf8().get_data());
+	const Ref<ModelUserPoint> info = index >= 0 ? data->get_user_point_info(index) : Ref<ModelUserPoint>();
+	if (info.is_null()) {
 		return out;
 	}
+	const Vector3 direction = xform.basis.xform(info->get_rotation());
+	out.pos = xform.xform(info->get_position());
+	out.dir = direction.length_squared() > 0.000001f ? direction.normalized()
+													  : -xform.basis.get_column(2).normalized();
+	out.valid = true;
 	return out;
 }
 

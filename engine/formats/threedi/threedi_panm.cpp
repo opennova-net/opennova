@@ -98,6 +98,33 @@ bool threedi_generator_names_register(int style) {
     return style > THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD;
 }
 
+uint8_t threedi_generator_param_byte(int style, float phase, int32_t reg) {
+    if (threedi_generator_names_register(style)) {
+        return (uint8_t)reg;
+    }
+    // The phase in 1/256, rounded half away from zero and clamped to a byte
+    // (the writer's byte rule for every scaled byte it stores).
+    const double scaled = (double)phase * 256.0;
+    long v = (long)(scaled >= 0.0 ? (int64_t)(scaled + 0.5) : (int64_t)(scaled - 0.5));
+    if (v < 0) {
+        v = 0;
+    }
+    if (v > 255) {
+        v = 255;
+    }
+    return (uint8_t)v;
+}
+
+void threedi_generator_split_param_byte(int style, uint8_t byte, float *phase, int32_t *reg) {
+    if (!threedi_generator_names_register(style)) {
+        *phase = (float)byte / 256.0f;
+        *reg = -1;
+    } else {
+        *reg = byte;
+        *phase = 0.0f;
+    }
+}
+
 bool threedi_generator_reads_register(ThreediGeneratorConsumer consumer, int style) {
     // [orig: Material_ComputeUVTransformMatrix @ 0x5B1990; RgbGen_EvaluateColor
     //  @ 0x5B23D0; AlphaGen_EvaluateValue @ 0x5B2320; PANM_SampleTrack @ 0x5B2270]

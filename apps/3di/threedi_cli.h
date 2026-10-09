@@ -69,7 +69,7 @@ int cmd_compare(const char *expected_path, const char *actual_path, bool strict 
 // when every texel is opaque, else DXT5; `mips` full or none, "" full), a .tga
 // or an .mdt; halved while a side exceeds `max_size` (0: no cap); its alpha
 // made as `alpha` says ("" the source's: opaque, luminance, threshold:<n>,
-// key:#RRGGBB as the editor's import takes them).
+// key:#RRGGBB as the image import takes them: renderer::apply_image_alpha).
 struct TextureCommand {
 	std::string input, output;
 	std::string format, mips, alpha;

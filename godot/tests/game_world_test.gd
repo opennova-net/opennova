@@ -2197,6 +2197,41 @@ func test_mission_til_is_shared_by_terrain_foliage_and_cleared_without_file() ->
 	await get_tree().process_frame
 
 
+# A mission with no co-named TIL takes the terrain's own: the .trn's
+# polytrn_tileinfo, its extension forced to TIL from its first '.' (the engine
+# rule, runtime/mission read_placed_tiles).
+# [orig: PolyTrn_LoadTerrainConfig @0x60e6dc..0x60e6e5; Terrain_Init @0x60fcfd]
+func test_terrain_tileinfo_supplies_the_tiles_without_a_mission_til() -> void:
+	var root_dir := _make_fixture_root("terrain_tileinfo")
+	var source_dir := ProjectSettings.globalize_path(RuntimeFixture.directory())
+	for file_name in DirAccess.get_files_at(source_dir):
+		assert_eq(DirAccess.copy_absolute(
+			source_dir.path_join(file_name), root_dir.path_join(file_name)), OK)
+	assert_false(FileAccess.file_exists(root_dir.path_join("mnml.til")),
+		"the fixture ships no co-named TIL")
+	var trn := FileAccess.get_file_as_string(root_dir.path_join("mnml.trn"))
+	TestFs.write_text(self, root_dir.path_join("mnml.trn"),
+		trn + "\r\npolytrn_tileinfo         mnml_own.v1.dat\r\n")
+	TestFs.write_bytes(self, root_dir.path_join("mnml_own.til"), TilFixture.bytes_for_cell(4))
+
+	var resource_root := ResourceRoot.new()
+	assert_eq(resource_root.set_root_dir(root_dir), OK)
+	var world := WorldFixture.make_world(self)
+	await get_tree().process_frame
+	world.set_playable(false)
+	world.set_resource_root(resource_root)
+	assert_eq(world.load_mission("mnml.bms"), OK)
+
+	var terrain := world.get_node("Terrain") as Terrain
+	var tile_info := terrain.tile_info_override as TerrainTileInfo
+	assert_not_null(tile_info, "the terrain's tile info stands in for the missing mission TIL")
+	if tile_info != null:
+		assert_true(tile_info.blocks_foliage(72.0, 8.0, 2.0),
+			"the blocker at cell 4 comes from mnml_own.til")
+	world.unload()
+	await get_tree().process_frame
+
+
 func test_unload_forgets_the_viewmodel_def_memo() -> void:
 	var world := WorldFixture.make_world(self)
 	var root := ResourceRoot.new()

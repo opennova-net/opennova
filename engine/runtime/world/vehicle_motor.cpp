@@ -514,9 +514,9 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 	// the airborne/in-water flags for rows with resolved model boxes on a
 	// terrain-backed world; every other row (boxless lib-embedder rows,
 	// terrain-less unit worlds) keeps the 5-tap terrain-clamp stand-in below. Retail keys the same
-	// split on graphicModel presence [orig: the @0x47C49F bail]. The family routing is the class
-	// table's [orig: @0x82ABC0]: cveh/ctrn/catv -> the tracked solve @0x47C1C0; ctan -> the wheeled
-	// solve @0x475DE0 (call @0x48a9ef); cbik -> the light solve @0x479600 (call @0x486672).
+	// split on graphicModel presence [orig: the @0x47C49F bail]. The family routing is the physics
+	// table's [orig: @0x82abc8]: cveh/ctrn/catv -> the tracked solve @0x47C1C0; ctank -> the wheeled
+	// solve @0x475DE0 (call @0x48a9ef); cbike -> the light solve @0x479600 (call @0x486672).
 	enum class ContactSolveKind : uint8_t { None, Tracked, Wheeled, Light };
 	ContactSolveKind solve_kind = ContactSolveKind::None;
 	{

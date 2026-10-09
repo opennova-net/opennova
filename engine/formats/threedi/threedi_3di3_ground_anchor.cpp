@@ -19,32 +19,7 @@
 
 #include <formats/threedi/threedi_3di3.h>
 
-#include <stddef.h>
-
 namespace opennova::threedi {
-
-// ASCII case fold. Avoids strcasecmp (POSIX) / _stricmp (MSVC), neither of which
-// is portable across the toolchains this library builds on.
-static char ground_to_lower(char c) {
-    return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
-}
-
-// Compare a fixed-capacity, null-terminated name against a lowercase literal,
-// case-insensitively. Stops at the literal's terminator, so it never reads past
-// either buffer. Returns 1 on match.
-static int name_matches_ignore_case(const char *name, size_t name_cap, const char *lower) {
-    for (size_t i = 0; i < name_cap; ++i) {
-        const char a = ground_to_lower(name[i]);
-        const char b = lower[i];
-        if (a != b) {
-            return 0;
-        }
-        if (b == '\0') {
-            return 1; // both terminated at the same position
-        }
-    }
-    return 0; // name ran its full capacity without terminating: not a match
-}
 
 int threedi_3di3_ground_anchor(const Threedi3di3 *model, float out[3]) {
     if (!model || !out) {
@@ -52,12 +27,10 @@ int threedi_3di3_ground_anchor(const Threedi3di3 *model, float out[3]) {
     }
 
     // 1. "ground" userpoint. Userpoints are model-global, so the LOD is irrelevant here.
-    for (size_t i = 0; i < model->user_point_count; ++i) {
-        const ThreediUserPoint *up = &model->user_points[i];
-        if (name_matches_ignore_case(up->name, sizeof(up->name), "ground")) {
-            threedi_user_point_position(up, out);
-            return 1;
-        }
+    const int ground = threedi_3di3_find_user_point(model, "ground");
+    if (ground >= 0) {
+        threedi_user_point_position(&model->user_points[ground], out);
+        return 1;
     }
 
     // 2. Fallback: the model origin — what the original tool grounds when no
