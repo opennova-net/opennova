@@ -362,7 +362,7 @@ ViewportAction HudViewport::stop_(HudViewStatus reason) {
 
 void HudViewport::read_layout_(const TextDocument &text) {
 	text_ = text.text();
-	lines_ = hud_layout_lines(text_);
+	lines_ = def::hud_layout_lines(text_);
 	// The names the layout hands the HUD's loader, through the engine's own fill over the game's parse
 	// of the text as Save writes it (each line CR LF).
 	auto model = std::make_shared<HudLayoutModel>();
@@ -441,7 +441,7 @@ void HudViewport::make_elements_() {
 			if (!key) break;
 			const std::string stance = std::to_string(options_.stance);
 			const bool by_stance = strutil::iequals(key, "HUDSTANCE");
-			const HudLayoutLine *line = hud_layout_line(lines_, key, by_stance ? stance.c_str() : nullptr);
+			const def::HudLayoutLine *line = def::hud_layout_line(lines_, key, by_stance ? stance.c_str() : nullptr);
 			if (!line) continue;
 			HudPreviewElement::Line at;
 			at.key = key;
