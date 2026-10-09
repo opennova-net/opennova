@@ -61,16 +61,25 @@ struct Entry {
 
 mnu::Window &W(void *r) { return *static_cast<mnu::Window *>(r); }
 
+// The choices of a token list the parse compares (formats/mnu's nullptr-ended k* lists), after
+// `choices` (the empty choice where the field may be left unset): each token's code its index +
+// `first`.
+std::vector<Choice> token_choices(const char *const *tokens, std::vector<Choice> choices = {{"", 0}},
+                                  int64_t first = 1) {
+	for (int i = 0; tokens[i]; ++i) choices.push_back({tokens[i], first + i});
+	return choices;
+}
+
 const std::vector<Choice> &justify_choices() {
-	static const std::vector<Choice> c = {{"", 0}, {"LEFT", 1}, {"CENTER", 2}, {"RIGHT", 3}};
+	static const std::vector<Choice> c = token_choices(mnu::kJustify);
 	return c;
 }
 const std::vector<Choice> &vjustify_choices() {
-	static const std::vector<Choice> c = {{"", 0}, {"TOP", 1}, {"CENTER", 2}, {"BOTTOM", 3}};
+	static const std::vector<Choice> c = token_choices(mnu::kVJustify);
 	return c;
 }
 const std::vector<Choice> &id_choices() {
-	static const std::vector<Choice> c = {{"", 0}, {"ID", 1}};
+	static const std::vector<Choice> c = token_choices(mnu::kStringTypes);
 	return c;
 }
 
@@ -183,7 +192,7 @@ bool name_token(const std::vector<Choice> &choices, const Value &value, std::str
 }
 
 const std::vector<Choice> &sort_token_choices() {
-	static const std::vector<Choice> c = {{"", 0}, {"PRIMARY_SORT", 1}, {"DEFAULT_SORT", 2}};
+	static const std::vector<Choice> c = token_choices(mnu::kPrimarySortTokens);
 	return c;
 }
 bool sort_token_set(void *r, const Value &value, std::string &error) {
@@ -253,7 +262,7 @@ std::vector<Entry> window_entries() {
 	                     [](void *r) { return &W(r).has_scroll_extent; }));
 	out.push_back(flag("scroll_extent_width", [](void *r) { return &W(r).scroll_extent_is_width; }));
 	out.push_back(text("orientation", 32, [](void *r) { return &W(r).orientation; }, Presence::NonEmpty,
-	                   {{"", 0}, {"HORIZONTAL", 1}, {"VERTICAL", 2}}));
+	                   {{"", 0}, {mnu::kHorizontalOrientation, 1}, {"VERTICAL", 2}}));
 	{
 		Entry rsrc = text("text_rsrc", 64, [](void *r) { return &W(r).text_rsrc; }, Presence::Bit);
 		rsrc.bit = [](void *r) { return &W(r).has_text_rsrc; };
@@ -334,12 +343,20 @@ std::vector<Entry> screen_entries() {
 }
 
 mnu::Appearance &AP(void *r) { return *static_cast<mnu::Appearance *>(r); }
+// An APPEARANCE row's TYPE: the plain types, then the one a TABLE's ITEMS rows also know (IMAGEROW).
+std::vector<Choice> appearance_type_choices() {
+	std::vector<Choice> c = token_choices(mnu::kAppearanceTypes);
+	for (int i = 0; mnu::kTableAppearanceTypes[i]; ++i)
+		if (!mnu::known_token(mnu::kTableAppearanceTypes[i], mnu::kAppearanceTypes))
+			c.push_back({mnu::kTableAppearanceTypes[i], int64_t(c.size())});
+	return c;
+}
 std::vector<Entry> appearance_entries() {
 	return {
 	        text("state", 16, [](void *r) { return &AP(r).state; }, Presence::NonEmpty,
-	             {{"DEFAULT", 0}, {"DISABLED", 1}, {"MOUSEOVER", 2}, {"SELECTED", 3}}),
+	             token_choices(mnu::kAppearanceStates, {}, 0)),
 	        text("type", 16, [](void *r) { return &AP(r).type; }, Presence::NonEmpty,
-	             {{"", 0}, {"IMAGE", 1}, {"COLOR", 2}, {"CUSTOM", 3}, {"OUTLINE", 4}, {"IMAGEROW", 5}}),
+	             appearance_type_choices()),
 	        text("value", 128, [](void *r) { return &AP(r).value; }, Presence::Always),
 	        number("map_state", [](void *r) { return &AP(r).map_state; }, [](void *r) { return &AP(r).has_map_state; }),
 	        number("height", [](void *r) { return &AP(r).height; }, [](void *r) { return &AP(r).has_height; }),
@@ -351,7 +368,7 @@ mnu::Sound &SO(void *r) { return *static_cast<mnu::Sound *>(r); }
 std::vector<Entry> sound_entries() {
 	return {
 	        text("state", 16, [](void *r) { return &SO(r).state; }, Presence::NonEmpty,
-	             {{"MOUSEIN", 0}, {"MOUSEOUT", 1}, {"SELECTED", 2}}),
+	             token_choices(mnu::kSoundStates, {}, 0)),
 	        text("trigger", 32, [](void *r) { return &SO(r).trigger; }),
 	        // The bank the text names, opened by that name [orig: SoundBank_CollectionAddOrRef @ 0x652b40 ->
 	        // SoundBank_OpenFile @ 0x75caa0]; the parse ignores a bank that does not open (no sound plays for
@@ -362,7 +379,7 @@ std::vector<Entry> sound_entries() {
 
 mnu::Action &AC(void *r) { return *static_cast<mnu::Action *>(r); }
 const std::vector<Choice> &field_attr_choices() {
-	static const std::vector<Choice> c = {{"", 0}, {"FIELD", 1}, {"SOURCE", 2}, {"NAME", 3}};
+	static const std::vector<Choice> c = token_choices(mnu::kActionFieldAttributes);
 	return c;
 }
 bool field_attr_set(void *r, const Value &value, std::string &error) {
@@ -371,15 +388,11 @@ bool field_attr_set(void *r, const Value &value, std::string &error) {
 }
 std::vector<Entry> action_entries() {
 	// A token's code is its index + 1; the empty choice is code 0.
-	const auto codes = [](const char *const *tokens, std::vector<Choice> choices) {
-		for (int i = 0; tokens[i]; ++i) choices.push_back({tokens[i], i + 1});
-		return choices;
-	};
 	std::vector<Entry> out;
 	out.push_back(text("type", 32, [](void *r) { return &AC(r).type; }, Presence::NonEmpty,
-	                   codes(mnu::kActionTypes, {})));
+	                   token_choices(mnu::kActionTypes, {})));
 	out.push_back(text("state", 16, [](void *r) { return &AC(r).state; }, Presence::NonEmpty,
-	                   codes(mnu::kActionStates, {{"", 0}})));
+	                   token_choices(mnu::kActionStates)));
 	out.push_back(text("file", 128, [](void *r) { return &AC(r).file; }, Presence::NonEmpty));
 	out.push_back(text("field", 128, [](void *r) { return &AC(r).field; }, Presence::NonEmpty));
 	{
@@ -392,7 +405,7 @@ std::vector<Entry> action_entries() {
 	                     [](void *r) { return &AC(r).has_target_form; }));
 	out.push_back(flag("toggle", [](void *r) { return &AC(r).toggle; }));
 	out.push_back(text("test", 8, [](void *r) { return &AC(r).test; }, Presence::NonEmpty,
-	                   {{"", 0}, {"LT", 1}, {"LE", 2}, {"EQ", 3}, {"GE", 4}, {"GT", 5}}));
+	                   token_choices(mnu::kActionTests)));
 	out.push_back(text("target", 128, [](void *r) { return &AC(r).target; }, Presence::Always));
 	out.push_back(flag("external_browser", [](void *r) { return &AC(r).external_browser; }));
 	return out;
@@ -419,7 +432,7 @@ mnu::Item &IT(void *r) { return *static_cast<mnu::Item *>(r); }
 std::vector<Entry> item_entries() {
 	return {
 	        text("type", 16, [](void *r) { return &IT(r).type; }, Presence::NonEmpty,
-	             {{"", 0}, {"ID", 1}, {"IMAGE", 2}, {"COLOR", 3}, {"BITMAP", 4}}),
+	             token_choices(mnu::kItemTypes)),
 	        text("value", 64, [](void *r) { return &IT(r).value; }),
 	        text("text", 1024, [](void *r) { return &IT(r).text; }, Presence::Always),
 	        text("justify", 64, [](void *r) { return &IT(r).justify; }, Presence::NonEmpty, justify_choices()),
@@ -448,15 +461,14 @@ std::vector<Entry> header_entries() {
 // first); the kind and the three flags stay in step: a kind sets its flag, a flag set with no kind becomes
 // the kind, and a flag cleared under the kind hands it to the next one still set.
 mnu::TableBody &BD(void *r) { return *static_cast<mnu::TableBody *>(r); }
-const char *const kDrawKinds[] = {"CUSTOM_DRAW", "BITMAP_DRAW", "BITMAP_TEXT"};
 bool *draw_flag(mnu::TableBody &b, int k) { return k == 0 ? &b.custom_draw : k == 1 ? &b.bitmap_draw : &b.bitmap_text; }
 void draw_kind_after_clear(mnu::TableBody &b) {
 	for (int k = 0; k < 3; ++k)
-		if (iequals(b.display, kDrawKinds[k]) && *draw_flag(b, k)) return;
+		if (iequals(b.display, mnu::kBodyDisplays[k]) && *draw_flag(b, k)) return;
 	b.display.clear();
 	for (int k = 0; k < 3; ++k)
 		if (*draw_flag(b, k)) {
-			b.display = kDrawKinds[k];
+			b.display = mnu::kBodyDisplays[k];
 			return;
 		}
 }
@@ -469,9 +481,9 @@ bool display_set(void *r, const Value &value, std::string &error) {
 		return true;
 	}
 	for (int k = 0; k < 3; ++k) {
-		if (!iequals(token, kDrawKinds[k])) continue;
+		if (!iequals(token, mnu::kBodyDisplays[k])) continue;
 		*draw_flag(b, k) = true;
-		b.display = kDrawKinds[k];
+		b.display = mnu::kBodyDisplays[k];
 		return true;
 	}
 	error = "The draw kind is CUSTOM_DRAW, BITMAP_DRAW, BITMAP_TEXT or none.";
@@ -480,7 +492,7 @@ bool display_set(void *r, const Value &value, std::string &error) {
 template <int K> bool draw_flag_set(void *r, const Value &value, std::string &) {
 	mnu::TableBody &b = BD(r);
 	*draw_flag(b, K) = std::get<int64_t>(value) != 0;
-	if (*draw_flag(b, K) && b.display.empty()) b.display = kDrawKinds[K];
+	if (*draw_flag(b, K) && b.display.empty()) b.display = mnu::kBodyDisplays[K];
 	else draw_kind_after_clear(b);
 	return true;
 }
@@ -497,7 +509,7 @@ std::vector<Entry> body_entries() {
 	                   vjustify_choices()));
 	out.push_back(number("column", [](void *r) { return &BD(r).column; }, [](void *r) { return &BD(r).has_column; }));
 	Entry display = text("display", 16, [](void *r) { return &BD(r).display; }, Presence::NonEmpty,
-	                     {{"", 0}, {"CUSTOM_DRAW", 1}, {"BITMAP_DRAW", 2}, {"BITMAP_TEXT", 3}});
+	                     token_choices(mnu::kBodyDisplays));
 	display.custom_set = &display_set;
 	out.push_back(display);
 	out.push_back(draw_flag_entry<0>("custom_draw"));
