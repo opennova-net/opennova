@@ -207,8 +207,8 @@ bool stage_install_file(const fs::path &install, const std::string &name, const 
 		// Copied beside its place, then put there: a cache a copy was cut short in holds no torn file.
 		const std::string partial = cached + ".tmp";
 		fs::remove(system_path(partial), ec);
-		if (!ensure_directory(copies.dir, reason) || !copy_to(path_of(from), path_of(partial), reason) ||
-		    !replace_file(partial, cached, reason))
+		if (!io::ensure_directory(copies.dir, reason) || !copy_to(path_of(from), path_of(partial), reason) ||
+		    !io::replace_file(partial, cached, reason))
 			return false;
 		io::JsonValue entry = io::JsonValue::make_object();
 		entry.set("size", io::JsonValue::make_number(double(size)));
@@ -326,7 +326,7 @@ bool stage_expansion_folder(const fs::path &build, const fs::path &run, const st
 	};
 	std::string reason;
 	const fs::path into = run / path_of(folder);
-	if (!staged(ensure_directory(utf8_of(into), reason), utf8_of(built), reason)) return false;
+	if (!staged(io::ensure_directory(utf8_of(into), reason), utf8_of(built), reason)) return false;
 	for (const fs::directory_entry &entry : fs::directory_iterator(system_path(utf8_of(built)), ec)) {
 		std::error_code kind;
 		if (!entry.is_regular_file(kind)) continue;
@@ -372,7 +372,7 @@ bool prepare_expansion_run(const std::string &install, const std::string &build_
 		copies.dir = install_copy_dir(copy_cache, install);
 		std::string text, message;
 		io::JsonValue record;
-		if (read_file_text(join_path(copies.dir, kInstallCopyRecordFileName), text, message) &&
+		if (io::read_file_text(join_path(copies.dir, kInstallCopyRecordFileName), text, message) &&
 		    io::json_parse(text, record, message) && record.is_object())
 			copies.record = std::move(record);
 	}
@@ -434,7 +434,7 @@ bool prepare_expansion_run(const std::string &install, const std::string &build_
 	if (ok && !copy_cache.empty()) prune_install_copies(copy_cache, copies);
 	if (copies.changed) {
 		std::string message;
-		write_file_atomic(join_path(copies.dir, kInstallCopyRecordFileName), io::json_write(copies.record), message);
+		io::write_file_atomic(join_path(copies.dir, kInstallCopyRecordFileName), io::json_write(copies.record), message);
 	}
 	if (!ok) return false;
 	// The expansion's folder, a directory of the run's own (the game writes its weapon.sav there, which

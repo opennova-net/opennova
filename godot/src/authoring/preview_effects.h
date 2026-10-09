@@ -56,7 +56,7 @@ public:
 	void clear();
 
 	// The graphics read for the picture, each with its stamp, and the names that loaded nothing.
-	opennova::editor::FileStamps stamps() const;
+	opennova::FileStamps stamps() const;
 	std::vector<std::string> missing() const;
 	// The root the graphics are read through (null before a mount): a device's other readers of the project's
 	// files share it (DI-22: the scars' textures, the tracers' smoke).
@@ -70,7 +70,7 @@ private:
 	Ref<EffectScene> scene_; // the renderer's wrapper over the shown scene
 	Ref<ResourceRoot> root_;
 	std::shared_ptr<const opennova::editor::ProjectAssetSource> mounted_;
-	std::shared_ptr<opennova::editor::StampedFiles> stamped_;
+	std::shared_ptr<opennova::StampedFiles> stamped_;
 	std::shared_ptr<opennova::particle::EffectScene> shown_;
 };
 

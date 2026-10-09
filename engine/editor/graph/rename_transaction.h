@@ -219,7 +219,7 @@ bool check_symbol_rename(const ProjectPaths &paths, const ProjectDocument &proje
 // must be reloaded by the caller.
 bool apply_symbol_rename(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
                          const AssetGraph &graph, const SymbolRenamePlan &plan, std::vector<Diagnostic> &findings,
-                         const FileReplace &replace = replace_file);
+                         const io::FileReplace &replace = io::replace_file);
 
 // A rename's commit a file at a time (ADR 0046 S13 A3): apply_rename's or apply_symbol_rename's
 // work as a cursor, so the session runs it as an operation's steps. Each step before the commit
@@ -239,7 +239,7 @@ public:
 	RenameTransaction(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
 			const AssetGraph &graph, RenamePlan plan);
 	RenameTransaction(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
-			const AssetGraph &graph, SymbolRenamePlan plan, FileReplace replace = replace_file);
+			const AssetGraph &graph, SymbolRenamePlan plan, io::FileReplace replace = io::replace_file);
 	~RenameTransaction();
 	RenameTransaction(const RenameTransaction &) = delete;
 	RenameTransaction &operator=(const RenameTransaction &) = delete;
@@ -279,7 +279,7 @@ private:
 	bool symbol_ = false;
 	RenamePlan file_plan_;
 	SymbolRenamePlan symbol_plan_;
-	FileReplace replace_;
+	io::FileReplace replace_;
 	// The sites by file, in the order of the files' paths.
 	std::map<std::string, std::vector<const RenameSite *>> files_;
 	std::map<std::string, std::vector<const RenameSite *>>::const_iterator at_;

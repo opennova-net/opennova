@@ -47,7 +47,7 @@ std::vector<uint8_t> tga_bytes() {
 
 std::string read_text(const std::string &path) {
 	std::string text, error;
-	read_file_text(path, text, error);
+	opennova::io::read_file_text(path, text, error);
 	return text;
 }
 

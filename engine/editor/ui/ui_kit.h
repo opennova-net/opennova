@@ -138,8 +138,6 @@ private:
 	uint64_t closed_at_ = 0; // ... when the close was made
 };
 
-// A number of bytes as a list's cell says it: "512 B", "3.4 KB", "12.0 MB".
-std::string size_text(uint64_t bytes);
 // The first line of `text`, cut to `width` with "..." where it is cut (narrower than the
 // "...", what fits of the text alone).
 std::string fit(const std::string &text, float width);

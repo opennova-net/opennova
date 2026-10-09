@@ -33,6 +33,7 @@
 #include <string>
 #include <vector>
 
+#include <base/io/strutil.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mission_document.h>
@@ -1685,7 +1686,7 @@ void test_import_dialog() {
 	ImGui::SetWindowSize("Import files", ImVec2(1700.0f, 1000.0f));
 	ui.frames(2);
 	std::string text = logged_frame(ui);
-	const std::string stopped = "The plan stopped at " + grouped(kImportPlanFileCap) + " files";
+	const std::string stopped = "The plan stopped at " + opennova::strutil::grouped(kImportPlanFileCap) + " files";
 	// S14: the plan in short first, its files and bytes, then each kind with its count and size, the
 	// largest first (alike: by token), each a toggle; then the rows, each with its size, by what they
 	// come for (the UX round's project lane): each chosen file, the kinds of the files it brings under it.

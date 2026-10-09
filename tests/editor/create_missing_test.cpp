@@ -92,7 +92,7 @@ static int test_default_project_fills_and_validates() {
 	// is never made here, and a label looked up in a missing table draws its raw key).
 	std::vector<uint8_t> menu_bytes;
 	std::string io_error;
-	TEST_EXPECT(read_file_bytes(root + "/menus/main.mnu", menu_bytes, io_error));
+	TEST_EXPECT(opennova::io::read_file_bytes(root + "/menus/main.mnu", menu_bytes, io_error));
 	opennova::mnu::Document menu;
 	std::string parse_error;
 	TEST_EXPECT(opennova::mnu::parse(menu_bytes.data(), menu_bytes.size(), menu, parse_error));
@@ -135,13 +135,13 @@ static int test_single_role_and_wrong_kind() {
 	            one.diagnostics.empty());
 	std::vector<uint8_t> made, kept;
 	std::string text, io_error;
-	TEST_EXPECT(read_file_bytes(root + "/menus/main.mnu", made, io_error));
+	TEST_EXPECT(opennova::io::read_file_bytes(root + "/menus/main.mnu", made, io_error));
 	// The report it was made from, asked again: the file is on disk now, refused, untouched.
 	TEST_EXPECT(editor_test::write_text(root + "/menus/main.mnu", "edited since"));
 	const CreateMissingResult stale = create_missing_requirements(paths, doc, before.scan, before.report, {"main_menu"});
 	TEST_EXPECT(stale.created.empty() && stale.diagnostics.size() == 1 &&
 	            stale.diagnostics[0].code() == "create_missing.exists");
-	TEST_EXPECT(read_file_text(root + "/menus/main.mnu", text, io_error) && text == "edited since");
+	TEST_EXPECT(opennova::io::read_file_text(root + "/menus/main.mnu", text, io_error) && text == "edited since");
 	// A report that lists it, in another folder: refused the same way, nothing made beside it.
 	TEST_EXPECT(editor_test::write_bytes(root + "/elsewhere/main.mnu", made));
 	fs::remove(root + "/menus/main.mnu");
@@ -150,7 +150,7 @@ static int test_single_role_and_wrong_kind() {
 	TEST_EXPECT(present.created.empty() && present.diagnostics.size() == 1 &&
 	            present.diagnostics[0].code() == "create_missing.exists");
 	TEST_EXPECT(!fs::exists(root + "/menus/main.mnu"));
-	TEST_EXPECT(read_file_bytes(root + "/elsewhere/main.mnu", kept, io_error) && kept == made);
+	TEST_EXPECT(opennova::io::read_file_bytes(root + "/elsewhere/main.mnu", kept, io_error) && kept == made);
 	// An optional row asked for by name is created too.
 	const CreateMissingResult optional = create_missing_requirements(paths, doc, before.scan, before.report, {"brand_style"});
 	TEST_EXPECT(optional.created.size() == 1 && optional.unavailable.empty());
@@ -170,7 +170,7 @@ static int test_single_role_and_wrong_kind() {
 	const CreateMissingResult refused = create_missing_requirements(paths, doc, wrong.scan, wrong.report, {"gametext"});
 	TEST_EXPECT(refused.created.empty());
 	TEST_EXPECT(refused.diagnostics.size() == 1 && refused.diagnostics[0].code() == "create_missing.wrong_kind");
-	TEST_EXPECT(read_file_text(root + "/gametext.bin", text, io_error) && text == "not a string table");
+	TEST_EXPECT(opennova::io::read_file_text(root + "/gametext.bin", text, io_error) && text == "not a string table");
 	return 0;
 }
 
@@ -258,7 +258,7 @@ static int test_the_pointer_comes_with_the_menu_once() {
 	TEST_EXPECT(!fs::exists(root + "/textures/newarow1.tga"));
 	std::vector<uint8_t> read;
 	std::string io_error;
-	TEST_EXPECT(read_file_bytes(root + "/art/newarow1.tga", read, io_error) && read == own);
+	TEST_EXPECT(opennova::io::read_file_bytes(root + "/art/newarow1.tga", read, io_error) && read == own);
 
 	// None in the project and none on disk: made under textures/, the game's pointer form.
 	fs::remove(root + "/menus/main.mnu");
@@ -266,7 +266,7 @@ static int test_the_pointer_comes_with_the_menu_once() {
 	const Evaluated bare = evaluate(paths, doc);
 	const CreateMissingResult made = create_missing_requirements(paths, doc, bare.scan, bare.report, {"main_menu"});
 	TEST_EXPECT(made.created.size() == 2 && made.created[1] == "textures/newarow1.tga" && made.diagnostics.empty());
-	TEST_EXPECT(read_file_bytes(root + "/textures/newarow1.tga", read, io_error) && read.size() == 18u + 32u * 32u * 4u &&
+	TEST_EXPECT(opennova::io::read_file_bytes(root + "/textures/newarow1.tga", read, io_error) && read.size() == 18u + 32u * 32u * 4u &&
 	            read[2] == 2 && read[16] == 32 && read[17] == 8);
 
 	// The scan older than the tree (the pointer on disk since): left as it is, no finding.
@@ -274,7 +274,7 @@ static int test_the_pointer_comes_with_the_menu_once() {
 	TEST_EXPECT(editor_test::write_bytes(root + "/textures/newarow1.tga", own));
 	const CreateMissingResult stale = create_missing_requirements(paths, doc, bare.scan, bare.report, {"main_menu"});
 	TEST_EXPECT(stale.created.size() == 1 && stale.diagnostics.empty());
-	TEST_EXPECT(read_file_bytes(root + "/textures/newarow1.tga", read, io_error) && read == own);
+	TEST_EXPECT(opennova::io::read_file_bytes(root + "/textures/newarow1.tga", read, io_error) && read == own);
 
 	// An expansion's menu takes its base game's pointer.
 	fs::remove(root + "/menus/main.mnu");

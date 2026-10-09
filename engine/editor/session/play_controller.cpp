@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include <base/gameprofile/graphics_log.h>
 #include <base/gameprofile/required_resources.h>
 #include <base/gameprofile/resource_missing.h>
 #include <base/io/strutil.h>
@@ -350,9 +351,9 @@ void PlayController::start(const PlayIntent &intent) {
 	if (in_install) {
 		const bool staged =
 		        strict ? prepare_strict_install_launch_plan(core_.game_install(), build_dir, run_dir, expansion, plan, error,
-		                                                    link_file, core_.base_game())
+		                                                    io::link_file, core_.base_game())
 		               : prepare_retail_launch_plan(core_.game_install(), build_dir, run_dir, plan, error, expansion,
-		                                            copy_cache, link_file, core_.base_game());
+		                                            copy_cache, io::link_file, core_.base_game());
 		record_staging(plan.staged);
 		if (!staged) {
 			core_.report(error);
@@ -372,7 +373,7 @@ void PlayController::start(const PlayIntent &intent) {
 		std::vector<std::string> staged;
 		const bool prepared = expansion.empty()
 		        ? !on_run_dir || prepare_runtime_run(build_dir, run_dir, error, &staged)
-		        : prepare_expansion_run(core_.base_game(), build_dir, expansion, run_dir, copy_cache, error, link_file,
+		        : prepare_expansion_run(core_.base_game(), build_dir, expansion, run_dir, copy_cache, error, io::link_file,
 		                                &staged);
 		record_staging(staged);
 		if (!prepared) {
@@ -427,7 +428,7 @@ bool PlayController::launch(const LaunchPlan &plan, Diagnostic &error) {
 	graphics_log_time_ = 0;
 	{
 		std::error_code ec;
-		const fs::path graphics = system_path(join_path(plan.working_dir, kInstallGraphicsLogName));
+		const fs::path graphics = system_path(join_path(plan.working_dir, gameprofile::kGraphicsLogName));
 		if (fs::is_regular_file(graphics, ec)) {
 			graphics_log_size_ = static_cast<int64_t>(fs::file_size(graphics, ec));
 			graphics_log_time_ = static_cast<int64_t>(fs::last_write_time(graphics, ec).time_since_epoch().count());
@@ -731,7 +732,7 @@ void PlayController::absorb_install_logs(bool read) {
 	logs.exited_on_its_own = view_.activity.play_exited_on_its_own;
 	// The graphics log this run wrote: one there as the game was started, as it was, is a run before's.
 	std::error_code ec;
-	const fs::path graphics = system_path(join_path(plan_.working_dir, kInstallGraphicsLogName));
+	const fs::path graphics = system_path(join_path(plan_.working_dir, gameprofile::kGraphicsLogName));
 	if (fs::is_regular_file(graphics, ec)) {
 		const int64_t size = static_cast<int64_t>(fs::file_size(graphics, ec));
 		const int64_t time = static_cast<int64_t>(fs::last_write_time(graphics, ec).time_since_epoch().count());
