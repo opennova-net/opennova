@@ -1,21 +1,15 @@
 #include "document_search.h"
 
+#include <base/io/strutil.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/field_text.h>
-
-#include <algorithm>
-#include <cctype>
 
 namespace opennova::editor {
 
 size_t find_text(const std::string &in, const std::string &text, const SearchOptions &options) {
 	if (text.empty()) return std::string::npos;
 	if (options.match_case) return in.find(text);
-	const auto same = [](char a, char b) {
-		return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
-	};
-	const auto found = std::search(in.begin(), in.end(), text.begin(), text.end(), same);
-	return found == in.end() ? std::string::npos : size_t(found - in.begin());
+	return strutil::ifind(in, text);
 }
 
 std::vector<DocumentHit> find_in_document(const Document &document, const std::string &text, const SearchOptions &options) {

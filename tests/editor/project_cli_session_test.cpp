@@ -569,19 +569,19 @@ static int test_request_and_query_verbs() {
 	// An edit, then the save that writes it, in one run; the edit alone writes nothing.
 	const std::string menu = root + "/menus/main.mnu";
 	std::string before, after, io_error;
-	TEST_EXPECT(editor::read_file_text(menu, before, io_error) && before.find("STARTUP2") == std::string::npos);
+	TEST_EXPECT(opennova::io::read_file_text(menu, before, io_error) && before.find("STARTUP2") == std::string::npos);
 	const std::string edit =
 	        "{\"kind\": \"edit_record\", \"path\": \"menus/main.mnu\", \"open_first\": true, \"edits\": "
 	        "[{\"op\": \"set\", \"id\": 1, \"field\": \"name\", \"value\": \"STARTUP2\"}]}";
 	ran = run(scratch, { "request", root, edit });
 	TEST_EXPECT(ran.code == 0 && parsed(ran.out).get("outcome")->get_bool("done", false));
 	TEST_EXPECT(ran.err.find("menus/main.mnu's unsaved edits end with this run") != std::string::npos);
-	TEST_EXPECT(editor::read_file_text(menu, after, io_error) && after == before);
+	TEST_EXPECT(opennova::io::read_file_text(menu, after, io_error) && after == before);
 	ran = run(scratch, { "request", root, "[" + edit + ", {\"kind\": \"save\", \"path\": \"menus/main.mnu\"}]" });
 	answer = parsed(ran.out);
 	TEST_EXPECT(ran.code == 0 && answer.is_array() && answer.array.size() == 2 && ran.err.empty());
 	for (const JsonValue &one : answer.array) TEST_EXPECT(one.get("outcome")->get_bool("done", false));
-	TEST_EXPECT(editor::read_file_text(menu, after, io_error) && after.find("STARTUP2") != std::string::npos);
+	TEST_EXPECT(opennova::io::read_file_text(menu, after, io_error) && after.find("STARTUP2") != std::string::npos);
 	// The first that is not done ends the array: the save after a refused request is never sent.
 	ran = run(scratch, { "request", root,
 	                     "[{\"kind\": \"create_missing\", \"roles\": [\"main_menu\"]}, {\"kind\": \"save_all\"}]" });
@@ -603,7 +603,7 @@ static int test_request_and_query_verbs() {
 	TEST_EXPECT(answer.array.size() == 3 && answer.array[1].get("outcome")->get_bool("unsaved_prompt", false) &&
 	            answer.array[2].get("outcome")->get_bool("done", false) &&
 	            answer.array[2].get("outcome")->get_number("operation", 0) > 0);
-	TEST_EXPECT(editor::read_file_text(menu, after, io_error) && after.find("STARTUP2") == std::string::npos);
+	TEST_EXPECT(opennova::io::read_file_text(menu, after, io_error) && after.find("STARTUP2") == std::string::npos);
 	TEST_EXPECT(!editor::last_good_build_dir(played).empty());
 
 	// Args a query refuses are the session's answer, {error}.

@@ -196,7 +196,7 @@ int expect_surface_sampled(const opennova::terrain::SurfaceTypeMap &map, int sid
 std::vector<uint8_t> read(const std::string &path) {
 	std::vector<uint8_t> bytes;
 	std::string message;
-	read_file_bytes(path, bytes, message);
+	opennova::io::read_file_bytes(path, bytes, message);
 	return bytes;
 }
 

@@ -10,8 +10,8 @@
 // import that finds its plan stale refusing without writing, stepped; a Rescan, an import and a
 // rename stepped coming to the view they come to run to their end; a validation started again
 // mid-way composing what the one it replaced had moved; a rename keeping the selection the modder
-// made while it ran; a file rewritten at its size moving its stamp however soon after its last
-// write. Retail leg (OPENNOVA_JO_DIR): a project of the JO install's files opened a
+// made while it ran (a file rewritten at its size moving its stamp, and a rename tried again
+// while another holds the file, are tests/io/file_io_test's now). Retail leg (OPENNOVA_JO_DIR): a project of the JO install's files opened a
 // step at a time at the editor's budget (its polls, its steps, its longest poll, bounded, and its
 // wall time), and the base layer a dependency mount of the install would build.
 #include <algorithm>
@@ -19,14 +19,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
-#include <fstream>
 #include <functional>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include <base/io/file_time.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_import.h>
@@ -169,7 +167,7 @@ std::vector<std::pair<std::string, std::string>> snapshot(const std::string &roo
 		if (ec) break;
 		if (!it->is_regular_file(ec)) continue;
 		std::string text, error;
-		read_file_text(it->path().generic_string(), text, error);
+		opennova::io::read_file_text(it->path().generic_string(), text, error);
 		files.push_back({fs::relative(it->path(), root, ec).generic_string(), text});
 	}
 	std::sort(files.begin(), files.end());
@@ -246,50 +244,6 @@ Stepped open_stepped(ProjectSession &session, const std::string &root, const Pol
 }
 
 } // namespace
-
-// A file rewritten at its size moves its stamp however soon after its last write (S13 A3: the scan,
-// the graph and the caches tell a change by the size and the last write, and a file system's clock
-// can stand still for milliseconds, Linux's above all): ten back-to-back rewrites of one size
-// through write_file_atomic, and ten through write_files_together, each leave a later last write.
-static int test_rewrite_moves_the_stamp() {
-	editor_test::TempProjectDir dir("opennova_long_ops_stamp");
-	const std::string path = dir.file("same.def");
-	std::string error;
-	TEST_EXPECT(write_file_atomic(path, std::string("weapon \"GUN_A\"\nend\n"), error));
-	int64_t last = opennova::io::file_modified_ticks(path);
-	for (int i = 0; i < 20; ++i) {
-		const std::string text = std::string("weapon \"GUN_") + char('B' + i) + "\"\nend\n";
-		std::vector<std::string> problems;
-		TEST_EXPECT(i < 10 ? write_file_atomic(path, text, error) : write_files_together({{path, text}}, problems));
-		const int64_t now = opennova::io::file_modified_ticks(path);
-		TEST_EXPECT(now > last && fs::file_size(path) == text.size());
-		last = now;
-	}
-	return 0;
-}
-
-// A rename the system refuses while another holds the file (on Windows a reader that does not share
-// delete: an indexer, a scanner) is tried again a bounded few times and then refused with the refusal
-// that may pass, never waited on; with the file let go it renames (rename_with_retry, which the save's
-// replace, the build's publish and a case-only Rename take).
-static int test_rename_retry_is_bounded() {
-	editor_test::TempProjectDir dir("opennova_long_ops_rename_retry");
-	const std::string from = dir.file("held.txt"), to = dir.file("HELD2.txt");
-	std::string error;
-	TEST_EXPECT(write_file_atomic(from, std::string("held"), error));
-	std::error_code ec;
-#ifdef _WIN32
-	{
-		std::ifstream holder(system_path(from), std::ios::binary);
-		TEST_EXPECT(holder.is_open());
-		const auto began = std::chrono::steady_clock::now();
-		TEST_EXPECT(!rename_with_retry(system_path(from), system_path(to), ec) && rename_refusal_passes(ec));
-		TEST_EXPECT(std::chrono::steady_clock::now() - began < std::chrono::seconds(2));
-	}
-#endif
-	TEST_EXPECT(rename_with_retry(system_path(from), system_path(to), ec) && fs::is_regular_file(to) && !fs::exists(from));
-	return 0;
-}
 
 // The scan a step at a time: at a budget of one byte (a file a step), of 64 KB and whole, over the
 // four fixture projects and one with import sources (a PNG with its record and its output, one
@@ -381,8 +335,8 @@ static int test_import_pass_steps() {
 	TEST_EXPECT(stepped.sources[0].source == "art/b/icon.png" && stepped.sources[1].source == "art/logo.png" &&
 	            stepped.sources[2].source == "art/typo.png" && !stepped.sources[2].ok);
 	std::string a, b, error;
-	TEST_EXPECT(read_file_text(roots[0] + "/" + stepped.sources[1].outputs[0], a, error) &&
-	            read_file_text(roots[1] + "/" + whole.sources[1].outputs[0], b, error) && a == b && !a.empty());
+	TEST_EXPECT(opennova::io::read_file_text(roots[0] + "/" + stepped.sources[1].outputs[0], a, error) &&
+	            opennova::io::read_file_text(roots[1] + "/" + whole.sources[1].outputs[0], b, error) && a == b && !a.empty());
 	return 0;
 }
 
@@ -1191,8 +1145,6 @@ int main(int argc, char **argv) {
 	failures += test_stepped_equals_whole();
 	failures += test_validation_started_again();
 	failures += test_rename_keeps_the_selection();
-	failures += test_rewrite_moves_the_stamp();
-	failures += test_rename_retry_is_bounded();
 	failures += test_retail_open();
 	return failures == 0 ? 0 : 1;
 }

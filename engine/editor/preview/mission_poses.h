@@ -19,11 +19,14 @@ namespace opennova::terrain {
 struct TerrainHeightField;
 }
 
+namespace opennova {
+class StampedFiles;
+}
+
 namespace opennova::editor {
 
 class MissionScene;
 class ProjectAssetSource;
-class StampedFiles;
 struct SessionView;
 
 // A placed person's body as the game spawns it (DI-38; docs/world/world-wac-ai-re.md section

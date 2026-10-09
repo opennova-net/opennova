@@ -186,7 +186,7 @@ bool stage_play_start(const std::string &run_dir, const std::string &expansion, 
 	// Its name in the run directory, a link to the build's archive, removed (never written through), and
 	// the new archive put in its place.
 	fs::remove(system_path(target), ec);
-	if (ec || !replace_file(written, target, reason)) {
+	if (ec || !io::replace_file(written, target, reason)) {
 		fs::remove(system_path(written), ec);
 		error = start_error("Play from here: " + target + " could not be replaced: " + (reason.empty() ? ec.message() : reason));
 		return false;

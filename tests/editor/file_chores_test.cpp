@@ -57,7 +57,7 @@ bool on_disk(const std::string &root, const std::string &relative) {
 std::vector<uint8_t> bytes_of(const std::string &root, const std::string &relative) {
 	std::vector<uint8_t> out;
 	std::string error;
-	read_file_bytes(join_path(root, relative), out, error);
+	opennova::io::read_file_bytes(join_path(root, relative), out, error);
 	return out;
 }
 

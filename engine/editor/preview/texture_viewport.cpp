@@ -434,7 +434,7 @@ std::shared_ptr<const TextureCompression> TextureViewport::compare(const Viewpor
 		std::vector<uint8_t> bytes;
 		ImageSource decoded;
 		std::string field;
-		if (!read_file_bytes(join_path(input.view.project.root, state.source), bytes, error) ||
+		if (!io::read_file_bytes(join_path(input.view.project.root, state.source), bytes, error) ||
 		    !decode_image_source(state.source, bytes, decoded, error) ||
 		    !image_import_texels(decoded.image, image_import_settings(state.sidecar.options), error, field))
 			made->why = "Its import's source " + state.source + " does not read as its import reads it: " + error;
@@ -518,7 +518,7 @@ ViewportAction TextureViewport::follow_(const ViewportInput &input, PreviewClock
 		terrain_modified_ = terrain_entry ? terrain_entry->modified_ticks : 0;
 		terrain_.reset();
 		std::string text, error;
-		if (terrain_entry && read_file_text(join_path(input.view.project.root, terrain_path), text, error)) {
+		if (terrain_entry && io::read_file_text(join_path(input.view.project.root, terrain_path), text, error)) {
 			std::istringstream file(text);
 			auto config = std::make_shared<TrnConfig>();
 			if (load_trn(file, *config, error)) terrain_ = std::move(config);

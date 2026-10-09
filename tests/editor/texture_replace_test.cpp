@@ -67,7 +67,7 @@ std::vector<uint8_t> png(const std::vector<uint8_t> &rgba, int w, int h) { retur
 std::vector<uint8_t> read_bytes(const std::string &path) {
 	std::vector<uint8_t> out;
 	std::string error;
-	read_file_bytes(path, out, error);
+	io::read_file_bytes(path, out, error);
 	return out;
 }
 
@@ -473,8 +473,8 @@ int test_split() {
 	session.run_operations();
 	TEST_EXPECT(fs::exists(root + "/textures/cloud.tga") && fs::exists(root + "/textures/cloud_2.tga"));
 	std::string text, error;
-	TEST_EXPECT(read_file_text(root + "/fx/b.ptl", text, error) && text == particles("b", {"cloud_2.tga", "cloud_2.tga"}));
-	TEST_EXPECT(read_file_text(root + "/fx/a.ptl", text, error) && text == particles("a", {"cloud.tga"}));
+	TEST_EXPECT(io::read_file_text(root + "/fx/b.ptl", text, error) && text == particles("b", {"cloud_2.tga", "cloud_2.tga"}));
+	TEST_EXPECT(io::read_file_text(root + "/fx/a.ptl", text, error) && text == particles("a", {"cloud.tga"}));
 	// An import's output: its source copied beside it, the copy's record naming the new file.
 	TEST_EXPECT(editor_test::write_bytes(root + "/art/haze.png", png(solid(4, 4, 7, 7, 7), 4, 4)));
 	ImportSidecar record;
@@ -494,8 +494,8 @@ int test_split() {
 	const AssetEntry *copy = view.project.scan->find("haze_2.tga");
 	TEST_EXPECT(copy && copy->imported_from == "art/haze_2.png" &&
 	            record_of(root, "art/haze_2.png") == ImportOptions({{"format", "tga"}, {"name", "haze_2.tga"}}));
-	TEST_EXPECT(read_file_text(root + "/fx/d.ptl", text, error) && text == particles("d", {"haze_2.tga"}));
-	TEST_EXPECT(read_file_text(root + "/fx/c.ptl", text, error) && text == particles("c", {"haze.tga"}));
+	TEST_EXPECT(io::read_file_text(root + "/fx/d.ptl", text, error) && text == particles("d", {"haze_2.tga"}));
+	TEST_EXPECT(io::read_file_text(root + "/fx/c.ptl", text, error) && text == particles("c", {"haze.tga"}));
 	// Refused: no referrer named, one that does not use it, a name taken.
 	session.handle(request::split_texture("textures/cloud.tga", "cloud_3.tga", {}));
 	session.run_operations();
@@ -505,7 +505,7 @@ int test_split() {
 	TEST_EXPECT(!fs::exists(root + "/textures/cloud_3.tga"));
 	session.handle(request::split_texture("textures/cloud.tga", "haze.tga", {"fx/a.ptl"}));
 	session.run_operations();
-	TEST_EXPECT(read_file_text(root + "/fx/a.ptl", text, error) && text == particles("a", {"cloud.tga"}));
+	TEST_EXPECT(io::read_file_text(root + "/fx/a.ptl", text, error) && text == particles("a", {"cloud.tga"}));
 	// In an expansion, a name the base game serves is taken too (a copy of it would stand in for the base's
 	// file for every use): refused, and the copy's name the editor offers passes over it.
 	const std::vector<std::string> base_files = {"CLOUD_3.TGA"};

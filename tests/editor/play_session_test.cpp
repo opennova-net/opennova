@@ -218,30 +218,30 @@ static int test_install_staging() {
 	std::string text, io_error;
 	std::error_code ec;
 	for (const char *name : {"language.pff", "localres.pff", "resource.pff", "intro.bik", "menumus.sbf"}) {
-		TEST_EXPECT(read_file_text(run + "/" + name, text, io_error) && read_file_text(build + "/" + name, io_error, io_error));
+		TEST_EXPECT(opennova::io::read_file_text(run + "/" + name, text, io_error) && opennova::io::read_file_text(build + "/" + name, io_error, io_error));
 		TEST_EXPECT(fs::equivalent(run + "/" + name, build + "/" + name, ec)); // linked: the game only reads it
 	}
-	TEST_EXPECT(read_file_text(run + "/intro.bik", text, io_error) && text == "video");
+	TEST_EXPECT(opennova::io::read_file_text(run + "/intro.bik", text, io_error) && text == "video");
 	for (const char *name : {"filter.txt", "weapon.sav"})
 		TEST_EXPECT(!fs::equivalent(run + "/" + name, build + "/" + name, ec)); // copied: the game may write it
-	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "project settings");
-	TEST_EXPECT(read_file_text(run + "/weapon.sav", text, io_error) && text == "project weapon"); // the project's own
-	TEST_EXPECT(read_file_text(run + "/player.sav", text, io_error) && text == "install player"); // the install's
-	TEST_EXPECT(read_file_text(run + "/binkw32.dll", text, io_error) && text == "bink");
+	TEST_EXPECT(opennova::io::read_file_text(run + "/game.cfg", text, io_error) && text == "project settings");
+	TEST_EXPECT(opennova::io::read_file_text(run + "/weapon.sav", text, io_error) && text == "project weapon"); // the project's own
+	TEST_EXPECT(opennova::io::read_file_text(run + "/player.sav", text, io_error) && text == "install player"); // the install's
+	TEST_EXPECT(opennova::io::read_file_text(run + "/binkw32.dll", text, io_error) && text == "bink");
 	// The files the game reads from its folder by name: the project's own, else the install's, copied.
-	TEST_EXPECT(read_file_text(run + "/Score.ini", text, io_error) && text == "project scores" &&
+	TEST_EXPECT(opennova::io::read_file_text(run + "/Score.ini", text, io_error) && text == "project scores" &&
 	            !fs::equivalent(run + "/Score.ini", build + "/Score.ini", ec));
-	TEST_EXPECT(read_file_text(run + "/EARLYERR.TXT", text, io_error) && text == "install early" &&
+	TEST_EXPECT(opennova::io::read_file_text(run + "/EARLYERR.TXT", text, io_error) && text == "install early" &&
 	            !fs::equivalent(run + "/EARLYERR.TXT", install + "/EARLYERR.TXT", ec));
 	TEST_EXPECT(!fs::exists(run + "/build.json") && editor_test::tree_digest(build) == tree);
-	TEST_EXPECT(read_file_text(install + "/game.cfg", text, io_error) && text == "install settings");
+	TEST_EXPECT(opennova::io::read_file_text(install + "/game.cfg", text, io_error) && text == "install settings");
 	// The files the game writes in its run directory leave the build's and the install's as they were.
 	TEST_EXPECT(editor_test::write_text(run + "/game.cfg", "rewritten") && editor_test::write_text(run + "/weapon.sav", "saved") &&
 	            editor_test::write_text(run + "/player.sav", "saved") && editor_test::write_text(run + "/filter.txt", "edited") &&
 	            editor_test::tree_digest(build) == tree);
-	TEST_EXPECT(read_file_text(install + "/player.sav", text, io_error) && text == "install player");
+	TEST_EXPECT(opennova::io::read_file_text(install + "/player.sav", text, io_error) && text == "install player");
 	TEST_EXPECT(editor_test::write_text(run + "/EARLYERR.TXT", "edited") && editor_test::write_text(run + "/Score.ini", "edited") &&
-	            read_file_text(install + "/EARLYERR.TXT", text, io_error) && text == "install early" &&
+	            opennova::io::read_file_text(install + "/EARLYERR.TXT", text, io_error) && text == "install early" &&
 	            editor_test::tree_digest(build) == tree);
 
 	const std::string squat = dir.file("not a folder");
@@ -295,7 +295,7 @@ static int test_strict_install_staging() {
 	                                              "nw_cdata.coo", "resource.pff"}));
 	std::string text, io_error;
 	std::error_code ec;
-	TEST_EXPECT(read_file_text(run + "/binkw32.dll", text, io_error) && text == "bink"); // JOTAC's real Bink over the shim
+	TEST_EXPECT(opennova::io::read_file_text(run + "/binkw32.dll", text, io_error) && text == "bink"); // JOTAC's real Bink over the shim
 	for (const char *name : {"language.pff", "localres.pff", "resource.pff", "intro.bik"})
 		TEST_EXPECT(fs::equivalent(run + "/" + name, build + "/" + name, ec)); // linked: the game only reads it
 	TEST_EXPECT(!fs::equivalent(run + "/nw_cdata.coo", build + "/nw_cdata.coo", ec)); // copied: the game rewrites it
@@ -316,7 +316,7 @@ static int test_strict_install_staging() {
 	const std::string run2 = dir.file("run/2");
 	fs::create_directories(run2);
 	TEST_EXPECT(prepare_strict_install_launch_plan(install, build, run2, "", plan, error, across));
-	TEST_EXPECT(read_file_text(run2 + "/game.cfg", text, io_error) && text == "project settings" &&
+	TEST_EXPECT(opennova::io::read_file_text(run2 + "/game.cfg", text, io_error) && text == "project settings" &&
 	            !fs::equivalent(run2 + "/game.cfg", build + "/game.cfg", ec));
 	TEST_EXPECT(!fs::equivalent(run2 + "/language.pff", build + "/language.pff", ec) && fs::is_regular_file(run2 + "/language.pff"));
 	TEST_EXPECT(!fs::exists(run2 + "/player.sav") && !fs::exists(run2 + "/score.ini") && !fs::exists(run2 + "/build.json"));
@@ -330,7 +330,7 @@ static int test_strict_install_staging() {
 	                               "expansion jxm") == 0 &&
 	            files_in(run3).empty());
 	// An expansion whose base game is the install itself: refused the same.
-	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run3, "jxm", plan, error, link_file, install) &&
+	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run3, "jxm", plan, error, opennova::io::link_file, install) &&
 	            error.code() == "play.strict_expansion" && files_in(run3).empty());
 	TEST_EXPECT(!prepare_strict_install_launch_plan("", build, run3, "", plan, error) && error.code() == "play.install_missing");
 	fs::remove(install + "/Jointops.exe");
@@ -370,7 +370,7 @@ static int test_strict_expansion_staging() {
 	fs::create_directories(run);
 	LaunchPlan plan;
 	Diagnostic error;
-	TEST_EXPECT(prepare_strict_install_launch_plan(install, build, run, "onx", plan, error, link_file, base));
+	TEST_EXPECT(prepare_strict_install_launch_plan(install, build, run, "onx", plan, error, opennova::io::link_file, base));
 	TEST_EXPECT(plan.args == std::vector<std::string>({"/w", "/exp", "onx", "/FRISK"}));
 	TEST_EXPECT(plan.executable == run + "/Jointops.exe" && plan.working_dir == run && plan.resource_dir == run &&
 	            plan.expansion == "onx" && plan.log_file == run + "/_filelog.txt");
@@ -392,15 +392,15 @@ static int test_strict_expansion_staging() {
 	// Refused, nothing staged.
 	const std::string run2 = dir.file("run/2");
 	fs::create_directories(run2);
-	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run2, "onx", plan, error, link_file,
+	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run2, "onx", plan, error, opennova::io::link_file,
 	                                                dir.file("nobase/build/export")) &&
 	            error.code() == "play.install_missing" && error.message.find("export the base game's project") != std::string::npos &&
 	            files_in(run2).empty());
 	const std::string empty_base = dir.file("empty/build/export");
 	TEST_EXPECT(editor_test::write_text(empty_base + "/export.json", "{}"));
-	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run2, "onx", plan, error, link_file, empty_base) &&
+	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run2, "onx", plan, error, opennova::io::link_file, empty_base) &&
 	            error.code() == "play.install_missing" && files_in(run2).empty());
-	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run2, "other", plan, error, link_file, base) &&
+	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run2, "other", plan, error, opennova::io::link_file, base) &&
 	            error.code() == "play.install_copy" && files_in(run2).empty());
 	return 0;
 }
@@ -515,9 +515,9 @@ static int test_run_directory_keeps_game_state() {
 	TEST_EXPECT(files_in(run) == std::vector<std::string>({"Jointops.exe", "binkw32.dll", "filter.txt", "game.cfg", "ghw.txt",
 	                                                       "hiscore.txt", "language.pff", "localres.pff", "nw_cdata.coo",
 	                                                       "player.sav", "resource.pff", "staging.json", "weapon.sav"}));
-	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "names the adapter");
-	TEST_EXPECT(read_file_text(run + "/player.sav", text, io_error) && text == "the game's player"); // never the install's
-	TEST_EXPECT(read_file_text(run + "/nw_cdata.coo", text, io_error) && text == "cookies" &&
+	TEST_EXPECT(opennova::io::read_file_text(run + "/game.cfg", text, io_error) && text == "names the adapter");
+	TEST_EXPECT(opennova::io::read_file_text(run + "/player.sav", text, io_error) && text == "the game's player"); // never the install's
+	TEST_EXPECT(opennova::io::read_file_text(run + "/nw_cdata.coo", text, io_error) && text == "cookies" &&
 	            !fs::equivalent(run + "/nw_cdata.coo", build + "/nw_cdata.coo", ec));
 	TEST_EXPECT(fs::equivalent(run + "/language.pff", build + "/language.pff", ec));
 	TEST_EXPECT(!fs::exists(run + "/intro.bik") && !fs::exists(run + "/score.ini") && !fs::exists(run + "/_filelog.txt"));
@@ -527,9 +527,9 @@ static int test_run_directory_keeps_game_state() {
 	TEST_EXPECT(take_run_directory(runs, gone, strict, run, kept, run_error) && kept == game_state);
 	TEST_EXPECT(prepare_strict_install_launch_plan(install, build, run, "", plan, error));
 	TEST_EXPECT(record_run_staging(run, RunStaging{kRunModeStrict, plan.staged}, run_error));
-	TEST_EXPECT(read_file_text(run + "/player.sav", text, io_error) && text == "project player" &&
+	TEST_EXPECT(opennova::io::read_file_text(run + "/player.sav", text, io_error) && text == "project player" &&
 	            !fs::equivalent(run + "/player.sav", build + "/player.sav", ec));
-	TEST_EXPECT(editor_test::write_text(run + "/player.sav", "rewritten") && read_file_text(build + "/player.sav", text, io_error) &&
+	TEST_EXPECT(editor_test::write_text(run + "/player.sav", "rewritten") && opennova::io::read_file_text(build + "/player.sav", text, io_error) &&
 	            text == "project player");
 	fs::remove(build + "/player.sav");
 	TEST_EXPECT(editor_test::tree_digest(install) == install_tree);
@@ -545,12 +545,12 @@ static int test_run_directory_keeps_game_state() {
 	// game wrote it; it seeds the install's game.cfg and saves there, and names none of them as staged.
 	TEST_EXPECT(take_run_directory(runs, gone, lenient, run, kept, run_error) && run == runs + "/install/1" &&
 	            kept.empty() && files_in(run).empty());
-	TEST_EXPECT(read_file_text(runs + "/strict/1/game.cfg", text, io_error) && text == "names the adapter");
+	TEST_EXPECT(opennova::io::read_file_text(runs + "/strict/1/game.cfg", text, io_error) && text == "names the adapter");
 	TEST_EXPECT(prepare_retail_launch_plan(install, build, run, plan, error));
 	TEST_EXPECT(record_run_staging(run, RunStaging{kRunModeInstall, plan.staged}, run_error));
 	for (const char *seed : {"game.cfg", "player.sav", "score.ini"})
 		TEST_EXPECT(std::find(plan.staged.begin(), plan.staged.end(), seed) == plan.staged.end());
-	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "install settings");
+	TEST_EXPECT(opennova::io::read_file_text(run + "/game.cfg", text, io_error) && text == "install settings");
 	// The game rewrites its game.cfg, and the install's is played since: the run's own is kept, newer or not.
 	TEST_EXPECT(editor_test::write_text(run + "/game.cfg", "adjusted in the run") &&
 	            editor_test::write_text(install + "/game.cfg", "install settings, played since"));
@@ -558,13 +558,13 @@ static int test_run_directory_keeps_game_state() {
 	            kept == std::vector<std::string>({"game.cfg", "player.sav", "score.ini"}));
 	TEST_EXPECT(prepare_retail_launch_plan(install, build, run, plan, error));
 	TEST_EXPECT(record_run_staging(run, RunStaging{kRunModeInstall, plan.staged}, run_error));
-	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "adjusted in the run");
+	TEST_EXPECT(opennova::io::read_file_text(run + "/game.cfg", text, io_error) && text == "adjusted in the run");
 	// An install with no game.cfg: a run that holds its own plays all the same.
 	fs::remove(install + "/game.cfg");
 	TEST_EXPECT(take_run_directory(runs, gone, lenient, run, kept, run_error) &&
 	            kept == std::vector<std::string>({"game.cfg", "player.sav", "score.ini"}));
 	TEST_EXPECT(prepare_retail_launch_plan(install, build, run, plan, error));
-	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "adjusted in the run");
+	TEST_EXPECT(opennova::io::read_file_text(run + "/game.cfg", text, io_error) && text == "adjusted in the run");
 
 	// A directory with no staging record (an older editor's, one whose record could not be written: none is
 	// written above) is emptied; a record naming a path outside the directory removes nothing there.
@@ -617,15 +617,15 @@ static int test_run_directories_per_mode() {
 	// The next strict Play keeps the game.cfg the first wrote.
 	TEST_EXPECT(take_run_directory(runs, liveness, strict, run, kept, run_error) && run == runs + "/strict/1" &&
 	            kept == std::vector<std::string>({"game.cfg"}));
-	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "names the adapter");
+	TEST_EXPECT(opennova::io::read_file_text(run + "/game.cfg", text, io_error) && text == "names the adapter");
 	TEST_EXPECT(stage(run, kRunModeStrict));
 	// Lenient Play's beside both: three modes' runs side by side, each its own.
 	TEST_EXPECT(take_run_directory(runs, liveness, lenient, run, kept, run_error) && run == runs + "/install/1" &&
 	            kept.empty() && files_in(run).empty());
 	TEST_EXPECT(stage(run, kRunModeInstall) && editor_test::write_text(run + "/game.cfg", "lenient's own"));
 	TEST_EXPECT(files_in(runs) == std::vector<std::string>({"1", "install", "runtime", "strict"}));
-	TEST_EXPECT(read_file_text(runs + "/strict/1/game.cfg", text, io_error) && text == "names the adapter");
-	TEST_EXPECT(read_file_text(runs + "/runtime/1/weapon.sav", text, io_error) && text == "the runtime's weapons");
+	TEST_EXPECT(opennova::io::read_file_text(runs + "/strict/1/game.cfg", text, io_error) && text == "names the adapter");
+	TEST_EXPECT(opennova::io::read_file_text(runs + "/runtime/1/weapon.sav", text, io_error) && text == "the runtime's weapons");
 
 	// A runtime game may still run in runtime/1: the next runtime Play takes runtime/2. Every game gone, a
 	// strict Play leaves both runtime runs alone; the next runtime Play takes runtime/1 again and removes
@@ -654,7 +654,7 @@ static int test_run_directories_per_mode() {
 	            kept.empty() && files_in(run).empty());
 	TEST_EXPECT(editor_test::tree_digest(runs + "/runtime") == runtime_tree &&
 	            editor_test::tree_digest(runs + "/install") == install_tree);
-	TEST_EXPECT(read_file_text(runs + "/install/1/game.cfg", text, io_error) && text == "lenient's own");
+	TEST_EXPECT(opennova::io::read_file_text(runs + "/install/1/game.cfg", text, io_error) && text == "lenient's own");
 
 	// Another mode's record in strict's directory (edited by hand): emptied all the same.
 	TEST_EXPECT(stage(run, kRunModeInstall) && editor_test::write_text(run + "/game.cfg", "names the adapter"));
@@ -667,7 +667,7 @@ static int test_run_directories_per_mode() {
 	            !run_error.empty() && !fs::exists(dir.file("elsewhere")));
 	TEST_EXPECT(!take_run_directory(runs, liveness, RunTake{"", false}, run, kept, run_error));
 	// The flat run an older editor left is left alone.
-	TEST_EXPECT(read_file_text(runs + "/1/game.cfg", text, io_error) && text == "an older editor's");
+	TEST_EXPECT(opennova::io::read_file_text(runs + "/1/game.cfg", text, io_error) && text == "an older editor's");
 	return 0;
 }
 
@@ -771,7 +771,7 @@ static int test_expansion_staging() {
 	        {"cc.bin", "us"}, {"nw_cdata.coo", "cookies"}, {"SCORE.INI", "scores"}, {"earlyerr.txt", "early"}};
 	for (const auto &[name, held] : copied)
 		TEST_EXPECT(fs::exists(run + "/" + name) && !fs::equivalent(run + "/" + name, install + "/" + name, ec) &&
-		            read_file_text(run + "/" + name, text, io_error) && text == held); // copied: the game may write it
+		            opennova::io::read_file_text(run + "/" + name, text, io_error) && text == held); // copied: the game may write it
 	TEST_EXPECT(!fs::exists(run + "/nwmain.mnx")); // the expansion packs its own: /d would read this one over it
 	TEST_EXPECT(!fs::exists(run + "/Readme.txt") && !fs::exists(run + "/expansion/jox01") && !fs::exists(run + "/build.json"));
 	TEST_EXPECT(fs::is_directory(run + "/expansion/jxm") && !fs::is_symlink(run + "/expansion/jxm"));
@@ -805,16 +805,16 @@ static int test_expansion_staging() {
 	// run directory.
 	{
 		std::vector<std::string> staged;
-		TEST_EXPECT(prepare_expansion_run(install, build, "jxm", run, cache, error, link_file, &staged));
+		TEST_EXPECT(prepare_expansion_run(install, build, "jxm", run, cache, error, opennova::io::link_file, &staged));
 		const auto named = [&staged](const char *path) { return std::find(staged.begin(), staged.end(), path) != staged.end(); };
 		TEST_EXPECT(named("language.pff") && named("intro.bik") && named("nw_cdata.coo") && named("cc.bin") &&
 		            named("expansion/jxm/jxm.pff") && named("expansion/jxm/version.txt"));
 		TEST_EXPECT(!named("SCORE.INI") && !named("earlyerr.txt") && !named("expansion/jxm/weapon.sav") && !named("nwmain.mnx"));
-		TEST_EXPECT(read_file_text(run + "/nw_cdata.coo", text, io_error) && text == "cookies");
-		TEST_EXPECT(read_file_text(run + "/expansion/jxm/version.txt", text, io_error) && text == "1.0");
-		TEST_EXPECT(read_file_text(run + "/SCORE.INI", text, io_error) && text == "written by the game");
-		TEST_EXPECT(read_file_text(run + "/earlyerr.txt", text, io_error) && text == "written by the game");
-		TEST_EXPECT(read_file_text(run + "/expansion/jxm/weapon.sav", text, io_error) && text == "saved");
+		TEST_EXPECT(opennova::io::read_file_text(run + "/nw_cdata.coo", text, io_error) && text == "cookies");
+		TEST_EXPECT(opennova::io::read_file_text(run + "/expansion/jxm/version.txt", text, io_error) && text == "1.0");
+		TEST_EXPECT(opennova::io::read_file_text(run + "/SCORE.INI", text, io_error) && text == "written by the game");
+		TEST_EXPECT(opennova::io::read_file_text(run + "/earlyerr.txt", text, io_error) && text == "written by the game");
+		TEST_EXPECT(opennova::io::read_file_text(run + "/expansion/jxm/weapon.sav", text, io_error) && text == "saved");
 		TEST_EXPECT(fs::equivalent(run + "/expansion/jxm/jxm.pff", build + "/expansion/jxm/jxm.pff", ec));
 		TEST_EXPECT(editor_test::tree_digest(build) == build_tree && editor_test::tree_digest(install) == install_tree);
 	}
@@ -826,9 +826,9 @@ static int test_expansion_staging() {
 	TEST_EXPECT(prepare_retail_launch_plan(install, build, run2, plan, error, "jxm", cache));
 	TEST_EXPECT(plan.args == std::vector<std::string>({"/w", "/d", "/exp", "jxm", "/FRISK"}));
 	TEST_EXPECT(plan.executable == run2 + "/Jointops.exe" && plan.resource_dir == run2 && plan.expansion == "jxm");
-	TEST_EXPECT(read_file_text(run2 + "/game.cfg", text, io_error) && text == "install settings");
-	TEST_EXPECT(read_file_text(run2 + "/player.sav", text, io_error) && text == "install player");
-	TEST_EXPECT(read_file_text(run2 + "/nw_cdata.coo", text, io_error) && text == "cookies"); // a fresh copy each run
+	TEST_EXPECT(opennova::io::read_file_text(run2 + "/game.cfg", text, io_error) && text == "install settings");
+	TEST_EXPECT(opennova::io::read_file_text(run2 + "/player.sav", text, io_error) && text == "install player");
+	TEST_EXPECT(opennova::io::read_file_text(run2 + "/nw_cdata.coo", text, io_error) && text == "cookies"); // a fresh copy each run
 	TEST_EXPECT(fs::equivalent(run2 + "/expansion/jxm/jxm.pff", build + "/expansion/jxm/jxm.pff", ec));
 	TEST_EXPECT(!fs::exists(run2 + "/nwmain.mnx"));
 	for (const char *name : {"game.cfg", "player.sav", "nw_cdata.coo", "cc.bin", "SCORE.INI"})
@@ -842,7 +842,7 @@ static int test_expansion_staging() {
 			reason = "another volume";
 			return false;
 		}
-		return link_file(from, to, reason);
+		return opennova::io::link_file(from, to, reason);
 	};
 	std::vector<std::string> install_files;
 	for (const fs::directory_entry &file : fs::directory_iterator(install, ec))
@@ -854,7 +854,7 @@ static int test_expansion_staging() {
 	fs::create_directories(run4);
 	TEST_EXPECT(prepare_expansion_run(install, build, "jxm", run3, cache, error, across));
 	TEST_EXPECT(!fs::equivalent(run3 + "/intro.bik", install + "/intro.bik", ec));
-	TEST_EXPECT(read_file_text(run3 + "/intro.bik", text, io_error) && text == "video");
+	TEST_EXPECT(opennova::io::read_file_text(run3 + "/intro.bik", text, io_error) && text == "video");
 	TEST_EXPECT(files_in(cache).size() == 1);
 	const std::string key = cache + "/" + files_in(cache).front();
 	TEST_EXPECT(files_in(key) == std::vector<std::string>({"install_copy.json", "intro.bik", "language.pff", "localres.pff",
@@ -880,19 +880,19 @@ static int test_expansion_staging() {
 	fs::create_directories(run5);
 	fs::create_directories(run6);
 	TEST_EXPECT(prepare_expansion_run(install, build, "jxm", run5, cache, error, across));
-	TEST_EXPECT(read_file_text(run5 + "/intro.bik", text, io_error) && text == "a new video");
-	TEST_EXPECT(read_file_text(run4 + "/intro.bik", text, io_error) && text == "video"); // the earlier run keeps its own
+	TEST_EXPECT(opennova::io::read_file_text(run5 + "/intro.bik", text, io_error) && text == "a new video");
+	TEST_EXPECT(opennova::io::read_file_text(run4 + "/intro.bik", text, io_error) && text == "video"); // the earlier run keeps its own
 	// The cache keeps the current install's files a run used: another install's folder and a file the
 	// install no longer has go.
 	TEST_EXPECT(editor_test::write_text(cache + "/0000000000000000/resource.pff", "another install's"));
 	fs::remove(install + "/nwother.mnx", ec);
 	TEST_EXPECT(prepare_expansion_run(install, build, "jxm", run6, cache, error, across));
 	TEST_EXPECT(!fs::equivalent(run6 + "/intro.bik", run5 + "/intro.bik", ec) && // racy: copied again
-	            read_file_text(run6 + "/intro.bik", text, io_error) && text == "a new video");
+	            opennova::io::read_file_text(run6 + "/intro.bik", text, io_error) && text == "a new video");
 	TEST_EXPECT(fs::equivalent(run6 + "/language.pff", run3 + "/language.pff", ec));
 	TEST_EXPECT(files_in(cache).size() == 1 && !fs::exists(cache + "/0000000000000000") &&
 	            !fs::exists(key + "/nwother.mnx") && !fs::exists(run6 + "/nwother.mnx"));
-	TEST_EXPECT(read_file_text(key + "/install_copy.json", text, io_error) && text.find("nwother") == std::string::npos &&
+	TEST_EXPECT(opennova::io::read_file_text(key + "/install_copy.json", text, io_error) && text.find("nwother") == std::string::npos &&
 	            text.find("language.pff") != std::string::npos);
 
 	// Refused: no install, one with none of the game's archives, a build without the folder.
@@ -1012,7 +1012,7 @@ static int test_stage_play_start() {
 	            editor_test::write_text(build + "/build.json", "{}"));
 	std::vector<uint8_t> built_before;
 	std::string io_error;
-	TEST_EXPECT(read_file_bytes(build + "/localres.pff", built_before, io_error));
+	TEST_EXPECT(opennova::io::read_file_bytes(build + "/localres.pff", built_before, io_error));
 
 	// The runtime's run directory (Play takes it, made): the build staged (linked; the build's record left out),
 	// mounted there.
@@ -1065,7 +1065,7 @@ static int test_stage_play_start() {
 	}
 	pff::pff_close(&archive);
 	std::vector<uint8_t> built_after;
-	TEST_EXPECT(read_file_bytes(build + "/localres.pff", built_after, io_error) && built_after == built_before);
+	TEST_EXPECT(opennova::io::read_file_bytes(build + "/localres.pff", built_after, io_error) && built_after == built_before);
 	TEST_EXPECT(!fs::exists(run + "/localres.pff.start"));
 
 	// An expansion's archive serves before the boot table's.
