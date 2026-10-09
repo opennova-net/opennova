@@ -123,6 +123,22 @@ bool check_quoted_response() {
 	return true;
 }
 
+// The tokenizer's whitespace is the CRT isspace under the game's ".ACP" LC_CTYPE, pinned to
+// cp1252 (D-NET-381): an unquoted 0xA0 separates the tokens as a space does, and a quoted one
+// stays in its value. [orig: CNapiFileReader_ReadAndTokenizeLine @0x6336E0 ->
+// String_TokenizeQuotedToArray @0x616d60 — isspace @0x616da6]
+bool check_nbsp_separates_tokens() {
+	const std::string body =
+			"VAR\xA0" "POSTIPADDRESS\xA0" "10.0.0.9\r\n"
+			"VAR \"LOBBYNAME\"\xA0\"jop\xA0" "2\"\r\n";
+	opennova::GateResponse r;
+	if (!expect(opennova::gate_response_parse(body, r), "an 0xA0-separated response parses")) return false;
+	if (!expect(r.var_count == 2, "both 0xA0-separated VAR lines absorbed")) return false;
+	if (!expect((r.post_ip == std::array<uint8_t, 4>{10, 0, 0, 9}), "0xA0 splits the VAR line's tokens"))
+		return false;
+	return expect(r.lobby_name == "jop\xA0" "2", "a quoted 0xA0 stays in the value");
+}
+
 bool check_retail_loose_numeric_and_ipv4_edges() {
 	const std::string body =
 			"VAR POSTIPADDRESS 300.513.999.256trailing\n"
@@ -174,6 +190,7 @@ int main() {
 	if (!check_all_known_keys()) return 1;
 	if (!check_case_insensitive_keys()) return 1;
 	if (!check_quoted_response()) return 1;
+	if (!check_nbsp_separates_tokens()) return 1;
 	if (!check_retail_loose_numeric_and_ipv4_edges()) return 1;
 	if (!check_retail_port_literal_radixes()) return 1;
 	if (!check_ignores_unknown_and_malformed()) return 1;
