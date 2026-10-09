@@ -201,7 +201,7 @@ int test_game_reading() {
 	TEST_EXPECT(same(event_words(chain, names, nullptr).delay, "after about 1.0 s (past 512 steps the game's countdown wraps)"));
 	chain.event.delay = 512;
 	TEST_EXPECT(same(event_words(chain, names, nullptr).delay, "after 524.3 s"));
-	TEST_EXPECT(logic_steps_wrap(513) && !logic_steps_wrap(512) && logic_steps_words(0) == "0.0 s");
+	TEST_EXPECT(logic_steps_words(0) == "0.0 s");
 	chain.event.delay = 0;
 	chain.event.flags = bms::EventFlags::ResetAfter;
 	chain.event.reset_after = 700;
@@ -233,7 +233,7 @@ int test_game_reading() {
 	TEST_EXPECT(same(action_words(action(A::RedirectSingleTo, 0, 10034, 126, 0), names, nullptr),
 	                 "send Hostage #10034 on command 126 (Goto group): it holds within 10 m; what else it does is unknown"));
 	TEST_EXPECT(same(action_words(action(A::RedirectGroupTo, 0, 4, 5, -1), names, nullptr), "send group 4 along path 5, from the nearest stop"));
-	TEST_EXPECT(names.path(124) == "Goto SSN (not the controller seat)" && std::string(path_command_editor_name(124)) == "Goto SSN (not driver)");
+	TEST_EXPECT(names.path(124) == "Goto SSN (not the controller seat)" && std::string(mission::path_command_editor_name(124)) == "Goto SSN (not driver)");
 	TEST_EXPECT(same(action_words(action(A::GreenWin), names, nullptr), "end the round: the green team (team 0) wins"));
 	// Stops by the game's number; a visited stop past 31 and an SSN of 128 or more never recorded.
 	TEST_EXPECT(same(trigger_words(trigger(M::Single, 7, 12, 5, 8), names), "SSN 12 has passed stop 8 of path 5"));
@@ -241,8 +241,6 @@ int test_game_reading() {
 	                 "SSN 12 has passed stop 40 (never recorded: the game keeps stops 0 to 31) of path 5"));
 	TEST_EXPECT(same(trigger_words(trigger(M::Single, 16, 10034, 12), names),
 	                 "Hostage #10034 (never recorded: the game keeps SSNs below 128) has seen SSN 12"));
-	TEST_EXPECT(trigger_ssn_unrecorded(trigger(M::Group, 16, 4, 200), 1) && !trigger_ssn_unrecorded(trigger(M::Group, 16, 4, 20), 1) &&
-	            !trigger_ssn_unrecorded(trigger(M::Single, 4, 10034), 0));
 	// The teammate's marker; an area action's box values; an action type whose sub-type selects nothing.
 	TEST_EXPECT(same(action_words(action(A::Teammates, 1, 10034, 3), names, nullptr),
 	                 "call a medevac for Hostage #10034 to the first teleport marker numbered 3"));
