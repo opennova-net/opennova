@@ -491,7 +491,7 @@ io::JsonValue EffectViewport::body_json(const ViewportInput &) const {
 	play.set("age", json_number(playback_.age()));
 	play.set("pre_aged", json_number(playback_.pre_aged()));
 	play.set("spawns", json_number(double(playback_.spawns())));
-	play.set("last_spawn", json_string(effect_spawn_status_token(playback_.last_status())));
+	play.set("last_spawn", json_string(particle::spawn_status_name(playback_.last_status())));
 	play.set("alive", JsonValue::make_bool(playback_.alive()));
 	if (const std::shared_ptr<particle::EffectScene> &scene = playback_.scene()) {
 		const particle::EffectLiveCounts counts = scene->live_counts();

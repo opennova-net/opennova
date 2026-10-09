@@ -1195,7 +1195,7 @@ io::JsonValue DefinitionViewport::body_json(const ViewportInput &input) const {
 		row.set("tick", json_number(spawn.tick));
 		row.set("at", vec3(spawn.pose.position));
 		row.set("forward", vec3(spawn.pose.forward));
-		row.set("status", json_string(effect_spawn_status_token(effects_.status(i))));
+		row.set("status", json_string(particle::spawn_status_name(effects_.status(i))));
 		row.set("alive", JsonValue::make_bool(effects_.alive(i)));
 		if (const particle::EffectClosure *closure = effects_.closure_of(spawn.effect)) {
 			row.set("spawns", JsonValue::make_bool(closure->spawns()));
