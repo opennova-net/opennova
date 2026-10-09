@@ -45,7 +45,8 @@ public:
 	// draws to ask, given a device for what the workspace would show: S13 V10's script device of the
 	// active text document among them), or only the one of the kind the Preview window shows (false,
 	// the workspace: DocumentsView::preview_shown, so a kind it does not show holds no device until a
-	// view asks for one as it draws, a Main viewport's on show).
+	// view asks for one as it draws, a Main viewport's on show; nor one shown beside its document's own
+	// picture, viewport_kind_beside_picture: a mission's map, S23 C).
 	void set_pin_all_targets(bool all) { pin_all_ = all; }
 	// One pump (the Shell's, after the session's poll): a device whose viewport went (its document
 	// closed) or is not the one it was attached to (the document closed and opened again between two

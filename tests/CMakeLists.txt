@@ -5290,6 +5290,11 @@ target_link_libraries(editor_mission_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_mission_viewport COMMAND editor_mission_viewport_test)
 
+add_executable(editor_mission_map_test editor/mission_map_test.cpp)
+target_link_libraries(editor_mission_map_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_map_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_mission_map COMMAND editor_mission_map_test)
+
 # A mission's items' effects as its start attaches them (ADR 0046 DI-31, editor/preview/mission_effects) over
 # a real session: each placed entity's particle slot by the start's pool gates and its model's points, the
 # emitters under the entity's transform and the item's scale, played on the preview clock and spawned again

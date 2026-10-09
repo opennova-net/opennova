@@ -109,8 +109,9 @@ std::unique_ptr<DocumentBase> document_of(AssetKind kind, const std::string &tex
 
 int test_kind_table() {
 	// The menu's, the model's, the script's, the mission's (S14), the texture's (S18), the effect's (DI-14),
-	// the HUD's (DI-20), the definition's (DI-21), the environment's (DI-19b), the terrain's (DI-30b), the font's (S23).
-	TEST_EXPECT(kViewportKindCount == 11);
+	// the HUD's (DI-20), the definition's (DI-21), the environment's (DI-19b), the terrain's (DI-30b), the font's (S23),
+	// the mission's 2D map (S23 C).
+	TEST_EXPECT(kViewportKindCount == 12);
 	TEST_EXPECT(std::string(viewport_kind_token(ViewportKind::Script)) == "script");
 	ViewportKind named = ViewportKind::kCount;
 	TEST_EXPECT(viewport_kind_from_token("script", named) && named == ViewportKind::Script);

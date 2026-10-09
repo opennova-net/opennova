@@ -1791,3 +1791,120 @@ func test_the_listen_plays_the_mixs_channels() -> void:
 		await get_tree().process_frame
 	assert_eq(_state().get("body", {}).get("listen"), null, "off: no listen")
 	assert_eq(device.find_children("ListenChannel", "AudioStreamPlayer3D", true, false).size(), 0, "off: no voice")
+
+
+## S23 C: the mission's 2D map (kind "map"), the Preview window's beside the 3D view, the state of it.
+func _map_state() -> Dictionary:
+	return _viewport("state", {"limit": 200, "kind": "map"})
+
+
+func _await_map() -> Dictionary:
+	var state := _map_state()
+	for _frame in 900:
+		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
+				and int(state.get("builds", 0)) > 0:
+			break
+		await get_tree().process_frame
+		state = _map_state()
+	_app.pump()
+	return _map_state()
+
+
+## S23 C: the map's device draws the game's commander map pass over the project's files: the runtime's HudOverlay
+## holds its state (the terrain read, the project's HUD layout), the pass's terrain triangles drawn into the
+## SubViewport's canvas; a pin per entity and area, each where the CMAP's projection puts it (its scale the CMAP's
+## law, zoom x 65536 over the picture's width x 200 metres a pixel, north up about the picture's middle).
+func test_the_map_draws_the_commander_map() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_map()
+	assert_eq(String(state.get("kind", "")), "map", str(state))
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	assert_eq(state.get("items", []).size(), 14, "a pin per entity and area")
+	var body: Dictionary = state.get("body", {})
+	assert_true(bool(body.get("surface", false)), "the terrain read: %s" % str(body))
+	var drawn: Dictionary = body.get("drawn", {})
+	assert_true(bool(drawn.get("visible", false)), str(drawn))
+	assert_gt(int(drawn.get("terrain_tris", 0)), 0, "the commander map's terrain drawn")
+	var device := _device(state)
+	assert_not_null(device, "the map's device")
+	if device == null:
+		return
+	var overlay := device.find_child("MapState", true, false) as HudOverlay
+	assert_not_null(overlay, "the HUD overlay holding the map's state")
+	assert_not_null(device.find_child("Map", true, false) as Control, "the canvas the pass draws under")
+	var width := float(state.get("device", {}).get("width", 0))
+	var height := float(state.get("device", {}).get("height", 0))
+	assert_gt(width, 1.0)
+	var camera: Dictionary = state.get("camera", {})
+	var zoom := float(camera.get("zoom", 0))
+	var scale := zoom * 65536.0 / (width * 200.0)
+	assert_almost_eq(float(body.get("scale", 0)), scale, scale * 1e-3, "the CMAP's scale")
+	var center: Array = camera.get("center", [0, 0])
+	for row: Variant in state.get("items", []):
+		var pin: Dictionary = row
+		var at: Array = pin.get("at", [0, 0])
+		var screen: Array = pin.get("screen", [0, 0])
+		var x := width * 0.5 + (float(at[0]) - float(center[0])) / scale
+		var y := height * 0.5 - (float(at[1]) - float(center[1])) / scale
+		assert_almost_eq(float(screen[0]), x, 1.0, "pin %s x" % pin.get("name"))
+		assert_almost_eq(float(screen[1]), y, 1.0, "pin %s y" % pin.get("name"))
+	# The zoom on the wire: the CMAP's ZOOMIN step, the pass drawn again at it.
+	var tris := int(drawn.get("terrain_tris", 0))
+	assert_true(bool(_ask({"kind": "edit_in_viewport", "command": {"name": "zoom_in", "kind": "map"}})
+			.get("outcome", {}).get("done", false)))
+	_app.pump()
+	state = _map_state()
+	assert_lt(float(state.get("camera", {}).get("zoom", 0)), zoom, "zoomed in: fewer metres across")
+	assert_gt(int(state.get("body", {}).get("drawn", {}).get("terrain_tris", 0)), 0, "drawn again (%d before)" % tris)
+
+
+## S23 C: the map and the 3D view are one document's: a pin hit on the map, selected, is the selection both ring; a
+## drag of a pin over the wire is the 3D view's move to the point under the pointer (stick: its height over the map
+## device's ground kept), one undo step, the 3D view's mark moved with it.
+func test_the_map_and_the_3d_view_share_a_selection_and_a_drag() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var mission := await _await_ready()
+	assert_eq(String(mission.get("status", "")), "ready", str(mission))
+	var state := await _await_map()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var terrain: Terrain = _device_node(mission, "Terrain")
+	assert_not_null(terrain)
+	if terrain == null:
+		return
+	var data: TerrainData = terrain.get_terrain_data()
+	var pin := _first_item(state)
+	assert_false(pin.is_empty())
+	if pin.is_empty():
+		return
+	var id := int(pin["id"])
+	var hit := _viewport("hit", {"x": float(pin["screen"][0]), "y": float(pin["screen"][1]), "kind": "map"})
+	assert_eq(int(hit.get("id", 0)), id, str(hit))
+	assert_true(_seam.select_record(id))
+	_app.pump()
+	assert_true(bool(_mark_of(_map_state(), id).get("selected", false)), "the map rings it")
+	assert_true(bool(_mark_of(_state(), id).get("selected", false)), "the 3D view rings it")
+	assert_eq(_map_state().get("body", {}).get("selected", []), [id])
+	# The drag: 30 pixels east, 20 north.
+	var before := _vector(_mark_of(_state(), id).get("at"))
+	var clearance := before.z - _ground(data, before.x, before.y)
+	var scale := float(state.get("body", {}).get("scale", 1))
+	var moved: Dictionary = _ask({"kind": "edit_in_viewport",
+			"drag": {"id": id, "handle": "move", "by": [30, -20], "kind": "map"}})
+	assert_true(bool(moved.get("outcome", {}).get("done", false)), str(moved))
+	var after := _vector(_mark_of(_state(), id).get("at"))
+	assert_almost_eq(after.x, before.x + 30.0 * scale, 0.01, "east by the pixels")
+	assert_almost_eq(after.y, before.y + 20.0 * scale, 0.01, "north by the pixels")
+	assert_almost_eq(after.z, _ground(data, after.x, after.y) + clearance, 0.002, "stick: its height over the ground")
+	var on_map: Dictionary = _mark_of(_map_state(), id)
+	assert_almost_eq(float(on_map.get("at", [0, 0])[0]), after.x, 0.001, "the map's pin moved with it")
+	_seam.undo()
+	_app.pump()
+	assert_true(_vector(_mark_of(_state(), id).get("at")).is_equal_approx(before), "undone in one step")
+	# A handle the map has not: refused, naming the 3D view.
+	var refused: Dictionary = _ask({"kind": "edit_in_viewport",
+			"drag": {"id": id, "handle": "yaw", "by": [30, 0], "kind": "map"}})
+	assert_false(bool(refused.get("outcome", {}).get("done", true)), str(refused))
