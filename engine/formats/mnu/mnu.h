@@ -541,8 +541,7 @@ struct Document {
 // without case is the window itself; else each child in order, recursively. Only
 // `children` are walked, the windows the menu runtime's id tree numbers: a part (list_box,
 // spinup, spindown, scrollbar) and the windows it holds are not reached, though retail's
-// walk reaches a part's windows through the part (docs/mnu/menu-re.md, "Which type reads
-// what"); that gap is open.
+// walk reaches a part's windows through the part (docs/mnu/menu-re.md D-MNU-37, open).
 const Window *find_window(const Window &window, const std::string &name);
 // The same over a screen's root windows in document order: the first root that finds one
 // [orig: UI_FindScreenControl @ 0x63ae80, the walk over the section's roots].
