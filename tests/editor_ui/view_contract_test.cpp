@@ -130,6 +130,14 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Wave, "tone.wav", file("lwf/tone.wav")},
 	        // A face animation (round S23 lane A): its face, vertices, triangles and gestures a tree.
 	        {AssetKind::FaceAnimation, "person.grm", file("grm/person.grm")},
+	        // An AI profile and the HUD effects (S23 B): their rows as a tree.
+	        {AssetKind::AiProfile, "g_test.aip", text_bytes("type\tGROUND\r\nview_dist\t500\r\n")},
+	        {AssetKind::HudFxDefs, "hudfx.def", text_bytes("3DIPower2 p2.3di\r\n")},
+	        // The score table and the avatars table (S23 B): their rows as a tree, each block's or nationality's
+	        // records under it.
+	        {AssetKind::Score, "score.ini", text_bytes("VERSION 40\r\nGAMETYPE \"TDM\"\r\nVAR \"ENEMYKILL\" 5\r\n")},
+	        {AssetKind::AvatarDefs, "Avatars.def",
+	         text_bytes("define head HEAD_A\r\n{\r\n\tgraphic\thead_a.3di\r\n}\r\nnationality N00 AV_NAT\r\n{\r\n}\r\n")},
 	        // A texture (S18): a TGA our writer mints, its picture the tab's main view beside its facts.
 	        {AssetKind::Texture, "brick.tga", minted_tga()},
 	        // The sound lane: the minted bank, its sets and waves a tree with a Play heading the Inspector, and a

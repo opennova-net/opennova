@@ -57,6 +57,10 @@ enum class DocumentTypeId {
 	Font,          // a .fnt: its header, its 224 glyphs' pages and rects, its pages' texels (round S23 lane A)
 	MusicBank,     // a .sbf: its header and its streams of byte-paired stereo (round S23 lane A)
 	Wave,          // a .wav: its bytes as the game's loader reads them, trimmed and normalised whole (round S23 lane A)
+	AiProfile,   // an .aip: the profile's keys as the game's reader reads them (ADR 0046 S23 B)
+	HudFx,       // hudfx.def: the HUD's 3D models, the first line the one the game reads (ADR 0046 S23 B)
+	ScoreTable,  // score.ini: each game type's scoreboard columns and points (ADR 0046 S23 B)
+	Avatars,     // Avatars.def: the player characters' parts, nationalities, divisions and combinations (ADR 0046 S23 B)
 	kCount, // the number of values, None among them
 };
 

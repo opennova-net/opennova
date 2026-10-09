@@ -196,6 +196,14 @@ constexpr DocumentViewRow kViews[] = {
 	// A wave's picture, its facts and whether the game plays it, a Play, a trim and a normalise (S23 A,
 	// ui/wave_inspector).
 	{DocumentTypeId::Wave, DocumentViewRole::Records, nullptr, make_wave_view},
+	// An AI profile's one row: its keys in the Inspector under their sections (S23 B).
+	{DocumentTypeId::AiProfile, DocumentViewRole::Records, &kTreeOutline, nullptr},
+	// hudfx.def's model lines as a list (S23 B).
+	{DocumentTypeId::HudFx, DocumentViewRole::Records, &kTreeOutline, nullptr},
+	// score.ini's game type blocks, each its columns and points under it (S23 B).
+	{DocumentTypeId::ScoreTable, DocumentViewRole::Records, &kTreeOutline, nullptr},
+	// Avatars.def's parts and nationalities, each nationality its divisions and their combinations under it (S23 B).
+	{DocumentTypeId::Avatars, DocumentViewRole::Records, &kTreeOutline, nullptr},
 };
 
 // One view per DocumentTypeId past None, in its order, each an outline or a view its make makes.

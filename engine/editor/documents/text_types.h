@@ -37,35 +37,16 @@ std::string reader_sentence(std::string message);
 // key chain [orig: Mission_LoadEncryptedConfig @ 0x4cdcd0]: the document shows the tag decoded and
 // Save writes it back encoded, as the game's own codec does (net/novacrypto/pubcrypto.h,
 // encode_key_chain, kGateTagFile and kGateTagKeys). Every text kind no structured type edits yet is held by it (the deep-integration
-// plan's DI-06, "every text file opens in the editor": a configuration, a text, an AI profile, the
-// HUD effects, the avatars, the character attributes, the other defs, the score table, a NovaWorld
+// plan's DI-06, "every text file opens in the editor": a configuration, a text, the other defs, a NovaWorld
 // screen; a kind the build leaves out, a mission text, is none of its: every kind a type edits packs,
 // assets/asset_kinds; a kind a structured type edits is that type's, as the environment is the
-// environment type's, DI-19a, a particle file the particle type's, DI-14, and the HUD layout the HUD
-// layout type's, DI-20). Where the engine has a reader of the kind, its validate_file is that reader's
-// findings of the text (text_reader_findings); a kind the asset graph reads through the engine's reader
-// (graph/extractors.cpp, a native kind: the avatars) has its open document read by that same reader, so
-// its names follow its edits. A kind with no reader the editor models makes no finding.
+// environment type's, DI-19a, a particle file the particle type's, DI-14, the HUD layout the HUD
+// layout type's, DI-20, and the AI profile, the HUD effects, the score table and the avatars their own types',
+// S23 B). None of its kinds has a reader the editor ports, so it makes no finding (its findings table holds
+// none).
 std::unique_ptr<DocumentBase> make_text_document();
 std::vector<Diagnostic> validate_text_file(const DocumentBase &document);
 FindingTable text_finding_codes();
-
-// Both listed (they refuse no build).
-enum class TextFinding {
-	// The engine's own reader of a kind whose names the asset graph reads through it does not read the
-	// file, at the place it stops where it says one: a warning, the file's names unchecked, as the
-	// graph's graph.unreadable said of such a file before it opened as a text.
-	Unreadable,
-	// What the engine's reader makes of a line it reads past (an avatar's unknown property), at its own
-	// severity; a reader's refusal where nothing the editor checks rides on it (the score table), a warning.
-	Reader,
-	kCount
-};
-const FindingCodeRow &finding_code(TextFinding code);
-// The findings the engine's reader of `document`'s kind makes of its text (validate_text_file's):
-// the avatars' (avatars::avatars_parse_memory, each diagnostic at its
-// line) and the score table's (score::parse); none for any other kind.
-std::vector<Diagnostic> text_reader_findings(const TextDocument &document);
 
 // The shader type: the game's shader loader reads a file in the SCR form alone, version 1 under
 // its own key, and drops one NUL after the text [orig: ScriptFile_LoadAndDecrypt @ 0x5AE060, the

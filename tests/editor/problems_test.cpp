@@ -434,7 +434,7 @@ static int test_fixes() {
 			if (row.fixes == FindingFix::Rewrite) rewrites.push_back(&row);
 			if (row.blocks_save) blockers.push_back(&row);
 		}
-	TEST_EXPECT(blockers.size() == 27);
+	TEST_EXPECT(blockers.size() == 29);
 	std::vector<std::string> rewrite_tokens;
 	for (const FindingCodeRow *row : rewrites) rewrite_tokens.push_back(row->token);
 	std::sort(rewrite_tokens.begin(), rewrite_tokens.end());

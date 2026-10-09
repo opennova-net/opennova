@@ -6,9 +6,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/project/project_files.h>
-#include <formats/avatars/avatars.h>
 #include <formats/scr/scr.h>
-#include <formats/score/score.h>
 #include <net/novacrypto/pubcrypto.h>
 #include <runtime/renderer/shader_effect_info.h>
 
@@ -97,30 +95,6 @@ bool decode_config(const std::string &path, const std::vector<uint8_t> &stored, 
 	return true;
 }
 
-// The text type's findings (DI-06), listed: a reader's refusal is a warning, its file's names unchecked, as
-// graph.unreadable said of such a file before it opened as a text; what a reader made of a line is its
-// own severity's.
-constexpr FindingCodeEntry<TextFinding> kTextEntries[] = {
-	{ TextFinding::Unreadable, listed_code("text.unreadable") },
-	{ TextFinding::Reader, listed_code("text.reader") },
-};
-static_assert(std::size(kTextEntries) == static_cast<size_t>(TextFinding::kCount),
-		"every TextFinding has exactly one row");
-static_assert(finding_entries_well_formed(kTextEntries),
-		"the text type's rows follow TextFinding's order, each token its own");
-constexpr auto kTextRows = finding_rows(kTextEntries, FindingGroup::Texts);
-static_assert(finding_rows_well_formed(kTextRows), "every row of the table takes its group");
-
-// A finding of the text type's at a reader's place.
-Diagnostic reader_finding(TextFinding code, DiagnosticSeverity severity, std::string message,
-		const TextDocument &document, size_t line, size_t column) {
-	return text_finding_at(kTextRows[static_cast<size_t>(code)], severity, std::move(message), document, line, column);
-}
-
-std::string sentence(std::string message) {
-	return reader_sentence(std::move(message));
-}
-
 // A shader the loader rejects is one it does not load, as a missing one, and the game runs: listed
 // (the gate follows retail, ADR 0046 S14); Save writes the form.
 constexpr FindingCodeEntry<ShaderFinding> kShaderEntries[] = {
@@ -169,61 +143,12 @@ std::unique_ptr<DocumentBase> make_text_document() {
 	return std::make_unique<TextDocument>(decode_config);
 }
 
-std::vector<Diagnostic> text_reader_findings(const TextDocument &document) {
-	std::vector<Diagnostic> findings;
-	const std::string &text = document.text();
-	const auto *bytes = reinterpret_cast<const uint8_t *>(text.data());
-	const char *unchecked = " The editor cannot check what the file names until it reads.";
-	switch (document.kind()) {
-	case AssetKind::AvatarDefs: {
-		avatars::AvatarsFile file{};
-		const bool read = avatars::avatars_parse_memory(text.data(), text.size(), &file) == 0;
-		bool refused = false;
-		for (size_t i = 0; i < file.diagnostics_count; ++i) {
-			const avatars::AvatarDiagnostic &note = file.diagnostics[i];
-			const bool error = note.severity == avatars::AVATAR_DIAG_ERROR;
-			// The reader's refusal at the first error it names; its other notes listed.
-			if (!read && error && !refused) {
-				refused = true;
-				findings.push_back(reader_finding(TextFinding::Unreadable, DiagnosticSeverity::Warning,
-						"The game's avatar reader does not read it: " + sentence(note.message) + unchecked, document,
-						note.line, 0));
-				continue;
-			}
-			findings.push_back(reader_finding(TextFinding::Reader,
-					error ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning,
-					"The game's avatar reader: " + sentence(note.message), document, note.line, 0));
-		}
-		if (!read && !refused)
-			findings.push_back(reader_finding(TextFinding::Unreadable, DiagnosticSeverity::Warning,
-					std::string("The game's avatar reader does not read it.") + unchecked, document, 0, 0));
-		avatars::avatars_free(&file);
-		break;
-	}
-	case AssetKind::Score: {
-		score::File file;
-		std::string error;
-		if (!score::parse(bytes, text.size(), file, error))
-			findings.push_back(reader_finding(TextFinding::Reader, DiagnosticSeverity::Warning,
-					"The score table's reader does not read it: " + sentence(error), document, 0, 0));
-		break;
-	}
-	default: break;
-	}
-	return findings;
-}
-
-std::vector<Diagnostic> validate_text_file(const DocumentBase &document) {
-	const TextDocument *text = text_of(document);
-	return text ? text_reader_findings(*text) : std::vector<Diagnostic>();
+std::vector<Diagnostic> validate_text_file(const DocumentBase &) {
+	return std::vector<Diagnostic>();
 }
 
 FindingTable text_finding_codes() {
-	return { kTextRows.data(), kTextRows.size() };
-}
-
-const FindingCodeRow &finding_code(TextFinding code) {
-	return kTextRows[static_cast<size_t>(code)];
+	return { nullptr, 0 };
 }
 
 std::unique_ptr<DocumentBase> make_shader_document() {

@@ -94,6 +94,10 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_profile_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/charattr_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/dialog_bank_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/ai_profile_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/hudfx_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/score_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/avatars_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/hud_layout_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/line_ends.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/config_overrun.cpp

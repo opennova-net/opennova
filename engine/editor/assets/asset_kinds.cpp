@@ -71,7 +71,7 @@ constexpr AssetKindRow kRows[] = {
 	        .new_name("newface.grm")
 	        .row,
 	Kind(AssetKind::AiProfile, "ai_profile", "AI profile")
-	        .edited_by(DocumentTypeId::Text)
+	        .edited_by(DocumentTypeId::AiProfile)
 	        .folder("ai")
 	        .new_name("newprofile.aip")
 	        .row,
@@ -217,12 +217,12 @@ constexpr AssetKindRow kRows[] = {
 	        .folder("defs")
 	        .row,
 	Kind(AssetKind::HudFxDefs, "hudfx_defs", "HUD effects")
-	        .edited_by(DocumentTypeId::Text)
+	        .edited_by(DocumentTypeId::HudFx)
 	        .names_files()
 	        .folder("defs")
 	        .row,
 	Kind(AssetKind::AvatarDefs, "avatar_defs", "Avatars")
-	        .edited_by(DocumentTypeId::Text)
+	        .edited_by(DocumentTypeId::Avatars)
 	        .names_files()
 	        .folder("defs")
 	        .row,
@@ -274,7 +274,7 @@ constexpr AssetKindRow kRows[] = {
 	        .edited_by(DocumentTypeId::Text)
 	        .row,
 	Kind(AssetKind::Score, "score", "Score table")
-	        .edited_by(DocumentTypeId::Text)
+	        .edited_by(DocumentTypeId::ScoreTable)
 	        .row,
 	// An expansion's version.txt is its own row of the expansion's files (route_for_expansion).
 	Kind(AssetKind::Text, "text", "Text")

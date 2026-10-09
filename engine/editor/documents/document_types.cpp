@@ -1,7 +1,9 @@
 #include "document_types.h"
 
+#include <editor/documents/ai_profile_document.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
+#include <editor/documents/avatars_document.h>
 #include <editor/documents/catalog_labels.h>
 #include <editor/documents/catalog_validation.h>
 #include <editor/documents/menu_labels.h>
@@ -15,6 +17,7 @@
 #include <editor/documents/music_bank_document.h>
 #include <editor/documents/wave_document.h>
 #include <editor/documents/hud_layout_type.h>
+#include <editor/documents/hudfx_document.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_labels.h>
 #include <editor/documents/mission_validation.h>
@@ -24,6 +27,7 @@
 #include <editor/documents/model_labels.h>
 #include <editor/documents/music_script_type.h>
 #include <editor/documents/particle_type.h>
+#include <editor/documents/score_document.h>
 #include <editor/documents/script_type.h>
 #include <editor/documents/sound_bank_document.h>
 #include <editor/documents/sound_profile_document.h>
@@ -63,6 +67,10 @@ std::unique_ptr<DocumentBase> make_dialog_bank() { return std::make_unique<Dialo
 std::unique_ptr<DocumentBase> make_face_animation() { return std::make_unique<FaceAnimationDocument>(); }
 std::unique_ptr<DocumentBase> make_font() { return std::make_unique<FontDocument>(); }
 std::unique_ptr<DocumentBase> make_music_bank() { return std::make_unique<MusicBankDocument>(); }
+std::unique_ptr<DocumentBase> make_ai_profile() { return std::make_unique<AiProfileDocument>(); }
+std::unique_ptr<DocumentBase> make_hudfx() { return std::make_unique<HudFxDocument>(); }
+std::unique_ptr<DocumentBase> make_score() { return std::make_unique<ScoreDocument>(); }
+std::unique_ptr<DocumentBase> make_avatars() { return std::make_unique<AvatarsDocument>(); }
 
 constexpr DocumentType kTypes[] = {
 	// The catalogs: a weapon, an ammo, a mounted gun by the names the player sees (the plain-words lane).
@@ -173,6 +181,19 @@ constexpr DocumentType kTypes[] = {
 	// wire, the one place a wave the loader refuses is found (asset.wave_unplayable); trimmed and normalised whole.
 	{ DocumentTypeId::Wave, "wave", make_wave_document, validate_wave_file, wave_fields, wave_finding_codes, nullptr,
 			nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, wave_content_json },
+	// The AI profile (S23 B): an .aip's one profile, its keys the reader's in the units the file writes them, each
+	// read by its type's key set; a weapon an ammo's name.
+	{ DocumentTypeId::AiProfile, "ai_profile", make_ai_profile, validate_ai_profile_file, AiProfileDocument::schema,
+			ai_profile_finding_codes },
+	// The HUD effects (S23 B): hudfx.def's model lines, the first the one the game reads, a model by its file.
+	{ DocumentTypeId::HudFx, "hudfx", make_hudfx, validate_hudfx_file, HudFxDocument::schema, hudfx_finding_codes },
+	// The score table (S23 B): score.ini's game type blocks, each its scoreboard columns and the points each event
+	// scores, written in ScoreConfig_SaveFile's form.
+	{ DocumentTypeId::ScoreTable, "score", make_score, validate_score_file, ScoreDocument::schema, score_finding_codes },
+	// The avatars table (S23 B): Avatars.def's parts and nationalities, a part's name what a combination after it
+	// names, its shown name a key of Game.bin's Avatars section, its models files.
+	{ DocumentTypeId::Avatars, "avatars", make_avatars, validate_avatars_file, AvatarsDocument::schema,
+			avatars_finding_codes },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its
