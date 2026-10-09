@@ -314,6 +314,32 @@ static int test_commands_and_wire() {
 	return 0;
 }
 
+// The grid's origin: the first marker whose record's type is 2043 (the Map Centerpoint), as the game's HUD init scans
+// for it; none in the minted mission, a marker of that item added gives the map its place.
+static int test_grid_origin() {
+	Rig rig("opennova_editor_mission_map_grid");
+	TEST_EXPECT(rig.open());
+	if (!rig.map()) return 1;
+	TEST_EXPECT(!rig.map()->ground().grid_origin && rig.map()->ground().terrain == rig.map()->scene().header().terrain);
+	Edit add;
+	add.operation = EditOperation::Add;
+	add.address = NodeAddress{ 0, node_kind(MissionKind::Marker), 0 };
+	add.field = "item";
+	add.value = int64_t(102043);
+	rig.session.handle(request::edit_record(kMission, add));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	const MissionEntityMark *centre = nullptr;
+	for (const MissionEntityMark &entity : rig.map()->scene().entities())
+		if (entity.item == 102043) centre = &entity;
+	TEST_EXPECT(centre != nullptr);
+	if (!centre) return 1;
+	TEST_EXPECT(rig.map()->ground().grid_origin && rig.map()->ground().grid_x == centre->x &&
+	            rig.map()->ground().grid_y == centre->y);
+	std::printf("test_grid_origin passed\n");
+	return 0;
+}
+
 int main() {
 	int failed = 0;
 	failed += test_kind_row();
@@ -322,5 +348,6 @@ int main() {
 	failed += test_marks_hit_box();
 	failed += test_drag();
 	failed += test_commands_and_wire();
+	failed += test_grid_origin();
 	return failed == 0 ? 0 : 1;
 }

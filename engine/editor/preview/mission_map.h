@@ -8,7 +8,6 @@
 #include <base/io/json.h>
 #include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/mission_handle_edit.h>
-#include <editor/preview/mission_items.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
@@ -109,8 +108,8 @@ std::vector<NodeAddress> mission_map_box_records(const std::vector<MissionMapMar
 int mission_map_route(const MissionScene &scene);
 
 // What the device draws the map from beside the camera and the options: the mission's terrain and water plane (as the
-// game resolves it, DI-07's MissionGround), and the commander map grid's origin, the first marker of TYPE 2043 (Map
-// centerpoint) [orig: HUD_InitOverlaySystem @0x5a4999, the scan of entity+80 == 2043].
+// game resolves it, DI-07's MissionGround), and the commander map grid's origin, the first marker whose record's type
+// is 2043 (Map Centerpoint) [orig: HUD_InitOverlaySystem @0x5a4999, the scan of entity+80 == 2043].
 struct MissionMapGround {
 	std::string terrain;
 	bool water = false;
@@ -193,12 +192,9 @@ private:
 	bool framed_ = false;
 	bool moved_ = false; // what the device draws moved since the last follow (an Update)
 	MissionGround reader_; // the terrain and water as the game reads them (DI-07)
-	MissionItemCache items_;
 	MissionMapGround ground_;
 	bool surface_ = false; // the device read the terrain
 	io::JsonValue drawn_; // what the device's last pass drew (its report)
-	uint64_t types_graph_ = 0; // the graph generation the grid origin was read under
-	uint64_t types_scene_ = 0;
 };
 
 } // namespace opennova::editor

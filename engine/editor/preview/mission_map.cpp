@@ -15,6 +15,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/mission/bms.h>
+#include <formats/mission/mission.h>
 #include <runtime/hud/hud_map_view.h>
 #include <runtime/hud/hud_math.h>
 #include <runtime/mission/mission_sidecars.h>
@@ -26,6 +27,9 @@ namespace {
 using io::JsonValue;
 using io::json_number;
 using io::json_string;
+
+// The record type of the commander map grid's origin marker (Map Centerpoint, items.def 102043).
+constexpr int64_t kMapCenterpointType = 2043;
 
 const Document *document_of(const ViewportInput &input) {
 	return input.document ? records_of(*input.document) : nullptr;
@@ -451,25 +455,16 @@ void MissionMapViewport::follow_ground_(const SessionView &view) {
 	ground.terrain = scene_.header().terrain;
 	ground.water = reader_.water();
 	ground.water_height = ground.water ? reader_.water_height() : 0.0;
-	// The grid's origin: the first marker whose item's TYPE is 2043, read again where the graph or the scene moved.
-	const uint64_t graph = view.findings.graph ? view.findings.graph->generation() : 0;
-	if (graph != types_graph_ || scene_.serial() != types_scene_) {
-		types_graph_ = graph;
-		types_scene_ = scene_.serial();
-		for (const MissionEntityMark &entity : scene_.entities()) {
-			if (entity.pool != MissionPool::Marker) continue;
-			MissionItemFacts facts;
-			std::string ignored;
-			if (!items_.facts(view, entity.item, facts, ignored) || facts.type != 2043) continue;
-			ground.grid_origin = true;
-			ground.grid_x = entity.x;
-			ground.grid_y = entity.y;
-			break;
-		}
-	} else {
-		ground.grid_origin = ground_.grid_origin;
-		ground.grid_x = ground_.grid_x;
-		ground.grid_y = ground_.grid_y;
+	// The grid's origin: the first marker whose record's type is 2043 (the Map Centerpoint, items.def 102043), as
+	// the game's HUD init scans its pool-3 entities [orig: HUD_InitOverlaySystem @0x5a4999, entity+80 == 2043; the
+	// runtime's promote, mission::kItemIdOffset]. Every record stands in the editor: the game's scan is over the ones
+	// its mode admits, which the map does not know.
+	for (const MissionEntityMark &entity : scene_.entities()) {
+		if (entity.pool != MissionPool::Marker || entity.item != mission::kItemIdOffset + kMapCenterpointType) continue;
+		ground.grid_origin = true;
+		ground.grid_x = entity.x;
+		ground.grid_y = entity.y;
+		break;
 	}
 	if (ground.terrain != ground_.terrain || ground.water != ground_.water || ground.water_height != ground_.water_height ||
 			ground.grid_origin != ground_.grid_origin || ground.grid_x != ground_.grid_x || ground.grid_y != ground_.grid_y)
