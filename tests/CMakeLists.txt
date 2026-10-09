@@ -55,6 +55,14 @@ target_compile_features(file_io_test PRIVATE cxx_std_17)
 target_include_directories(file_io_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME file_io COMMAND file_io_test)
 
+# SHA-256 (base/io/sha256.h): the FIPS 180-4 vectors one-shot and streamed in odd-sized
+# chunks, the padding boundaries, reset, and the lowercase hex spelling.
+add_executable(sha256_test io/sha256_test.cpp)
+target_link_libraries(sha256_test PRIVATE opennova_io)
+target_compile_features(sha256_test PRIVATE cxx_std_17)
+target_include_directories(sha256_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME sha256 COMMAND sha256_test)
+
 # Roundtrip test
 add_executable(threedi_roundtrip_test threedi/roundtrip_test.cpp)
 target_link_libraries(threedi_roundtrip_test PRIVATE opennova_formats)

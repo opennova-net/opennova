@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include <base/io/sha256.h>
 #include <formats/lwf/lwf.h>
 #include <formats/particle/particle.h>
 #include <formats/wac/bytecode.h>
@@ -26,7 +27,6 @@
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/world.h>
 
-#include "common/sha256.h"
 #include "wac_listing.h"
 
 using namespace opennova;
@@ -160,8 +160,7 @@ void test_compile_vectors() {
 		const std::string listing = wac_listing::document(program);
 		const std::string expected = vector.listing;
 		const bool same = expected.rfind("sha256:", 0) == 0
-				? expected.substr(7) == testhash::sha256_hex(
-						reinterpret_cast<const uint8_t *>(listing.data()), listing.size())
+				? expected.substr(7) == io::sha256_hex(listing.data(), listing.size())
 				: expected == listing;
 		if (!same) {
 			++failures;
