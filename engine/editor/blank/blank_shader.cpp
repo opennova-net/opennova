@@ -52,6 +52,8 @@
 #include <base/io/strutil.h>
 #include <editor/documents/text_types.h>
 #include <editor/project/project_files.h>
+#include <formats/scr/scr.h>
+#include <runtime/renderer/shader_effect_info.h>
 
 namespace opennova::editor {
 
@@ -812,8 +814,8 @@ std::string object_text(const ObjectEffect &effect, const std::string &file) {
 }
 
 bool shader_bytes(const std::string &text, std::vector<uint8_t> &out) {
-	// The shader loader's form, the text CR LF as every shipped effect's (documents/text_types.h).
-	out = shader_file_bytes(blank_crlf(text));
+	// The shader loader's form, the text CR LF as every shipped effect's (formats/scr scr_shader_encode).
+	out = scr::scr_shader_encode(blank_crlf(text));
 	return true;
 }
 
@@ -829,20 +831,20 @@ const std::vector<std::string> &blank_shader_tags() {
 }
 
 std::string blank_shader_text(const std::string &tag, const std::string &file) {
-	if (strutil::iequals(basename_of(file), kFixedFunctionShaderFile))
+	if (strutil::iequals(basename_of(file), renderer::kFixedFunctionShaderFile))
 		return fill(kFfp, {{"SHARED", kShared}, {"FILTERS", kFilters}, {"CLIP_SAMPLER", kClipSampler}});
 	const ObjectEffect *effect = object_effect(tag);
 	return effect ? object_text(*effect, basename_of(file)) : std::string();
 }
 
 bool make_blank_ffp_shader(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &) {
-	return shader_bytes(blank_shader_text(std::string(), kFixedFunctionShaderFile), out);
+	return shader_bytes(blank_shader_text(std::string(), renderer::kFixedFunctionShaderFile), out);
 }
 
 bool make_blank_shader(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
 	const std::string &tag = request.value("tag");
 	const std::string name = basename_of(request.logical_name);
-	if (strutil::iequals(name, kFixedFunctionShaderFile)) return make_blank_ffp_shader(request, out, error);
+	if (strutil::iequals(name, renderer::kFixedFunctionShaderFile)) return make_blank_ffp_shader(request, out, error);
 	// The archive walk skips a name starting with '_' [orig: HLSLEffect_LoadAllFromPFFArchive @ 0x5AFF6E].
 	if (!name.empty() && name[0] == '_') {
 		error = make_finding(CoreFinding::BlankShader, DiagnosticSeverity::Error,
