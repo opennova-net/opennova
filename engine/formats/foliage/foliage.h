@@ -73,6 +73,10 @@ int foliage_def_match_count(const FoliageDef &def);
 // slot; entries past `FOLIAGE_MAX_DEFS` are ignored.
 bool foliage_def_matches_pixel(const FoliageDef &def, int pixel);
 uint32_t foliage_remap_pixel_to_def_mask(const std::vector<FoliageDef> &defs, int pixel);
+// The remap the foliage map's load applies to every texel, as a table over the 256 codes: each code's
+// definition-slot mask (foliage_remap_pixel_to_def_mask over `defs`) [orig: Foliage_LoadFoliageMapPCX @0x605AD0,
+// the remap @0x605B73..0x605B8A].
+std::array<uint8_t, 256> foliage_pixel_masks(const std::vector<FoliageDef> &defs);
 
 FoliageMap foliage_make_default_map(int width, int height, uint8_t fill_index = 0);
 bool foliage_has_size(const FoliageMap &map);

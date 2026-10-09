@@ -209,6 +209,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/lighting.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/quadtree.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_map_source.cpp # a char map and a foliage map made from a picture
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_alpha.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_geometry.cpp
@@ -223,6 +224,7 @@ add_library(opennova_runtime STATIC
     # the retail segment raycast (format-free), plus the placed-tile surface
     # resolvers (surface_tiles.cpp — the one TU with .til format access,
     # D-SND-15; the seam headers themselves stay format-free)
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/foliage_mask_raster.cpp # the foliage map as the load keeps it
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/height_field.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/surface_tiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/terrain_field_store.cpp

@@ -47,6 +47,7 @@ add_library(opennova_formats STATIC
     # cpt/trngen — TrnGen.exe's terrain bake ported (a depth map to the .cpt's depth atlas and its
     # ground mesh: the quadtree, the mesh simplifier, the strips, the TPM1 tile files kept in
     # memory); a quadtree level's nodes run on the embedder's thread count (Threads, below)
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/heightmap_depth.cpp # a heightmap image made into the bake's depth
     ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/lod_mesh_data.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/mesh_data.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/mesh_simp.cpp
@@ -189,6 +190,7 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/til/til_tsd.cpp
     # trn — terrain config
     ${CMAKE_CURRENT_SOURCE_DIR}/trn/trn_io.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/trn/trn_source_issue.cpp # the lines the readers read otherwise than TrnConfig holds
     # wac — the WAC scripting language's command table (names + param types),
     # bytecode encoding and compiled Program model. The single-pass compiler
     # (binds names/vars against the live world) and the VM are engine/runtime/wac.

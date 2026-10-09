@@ -1073,7 +1073,7 @@ Ref<ImageTexture> TerrainData::build_minimap_water_mask(
 		return Ref<ImageTexture>();
 	}
 	const float water_wu = std::isnan(p_water_height_wu)
-			? static_cast<float>(water_height) * 0.5f
+			? static_cast<float>(water_height) * opennova::env::kWaterHeightUnit
 			: p_water_height_wu;
 	if (!std::isfinite(water_wu)) {
 		return Ref<ImageTexture>();

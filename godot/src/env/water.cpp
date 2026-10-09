@@ -429,7 +429,7 @@ void Water::_recompute_terrain_water_fallback() {
 	if (terrain_data_.is_valid() && terrain_data_->is_loaded()) {
 		const float raw = terrain_data_->get_water_height();
 		if (raw != 0.0f) {
-			terrain_water_height_ = raw * 0.5f;
+			terrain_water_height_ = raw * opennova::env::kWaterHeightUnit;
 		}
 	}
 }
