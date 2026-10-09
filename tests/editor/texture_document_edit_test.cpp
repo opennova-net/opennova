@@ -235,7 +235,7 @@ int test_session() {
 		std::vector<uint8_t> saved;
 		std::string error;
 		uint32_t w = 0, h = 0;
-		TEST_EXPECT(read_file_bytes(root + "/textures/a.tga", saved, error) && !first_level("a.tga", saved, w, h).empty() && w == 4);
+		TEST_EXPECT(io::read_file_bytes(root + "/textures/a.tga", saved, error) && !first_level("a.tga", saved, w, h).empty() && w == 4);
 	}
 	// A file an import makes: its import's options make it, never an edit.
 	editor_test::handle_to_end(session, request::texture_operation("src.tga", "alpha", {{"alpha", "opaque"}}, true));

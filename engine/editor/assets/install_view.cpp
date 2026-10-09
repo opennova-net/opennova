@@ -167,7 +167,7 @@ bool InstallView::read(const InstallFile &file, std::vector<uint8_t> &out) const
 	if (!open_) return false;
 	if (file.loose_path.empty()) return read_served(vfs_, file.member, out);
 	std::string error;
-	return read_file_bytes(file.loose_path, out, error);
+	return io::read_file_bytes(file.loose_path, out, error);
 }
 
 uint64_t InstallView::size(const InstallFile &file) const {

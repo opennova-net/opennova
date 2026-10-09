@@ -105,7 +105,7 @@ bool BaseMatch::root_copy(const std::string &name, BaseCopy &out, uint64_t &read
 	if (cached(key, stamp, out)) return true;
 	std::vector<uint8_t> bytes;
 	std::string error;
-	if (!read_file_bytes(found->second, bytes, error)) return false;
+	if (!io::read_file_bytes(found->second, bytes, error)) return false;
 	read_bytes += bytes.size();
 	out.size = out.served_size = bytes.size();
 	out.raw = out.served = hash_of(bytes);

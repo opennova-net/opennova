@@ -16,11 +16,14 @@ namespace opennova::terrain {
 struct TerrainHeightField;
 }
 
+namespace opennova {
+class StampedFiles;
+}
+
 namespace opennova::editor {
 
 class MissionGround;
 class MissionScene;
-class StampedFiles;
 
 // The ground the game puts a mission's entities on, entity class by entity class (the deep-integration
 // plan's DI-28): where the game leaves each one standing, against what lies under it there. The rules,

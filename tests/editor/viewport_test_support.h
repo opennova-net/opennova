@@ -169,7 +169,7 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 		}
 		drawn = false;
 		if (!reads.empty() && view.findings.assets) {
-			opennova::editor::StampedFiles files(view.findings.assets);
+			opennova::StampedFiles files(view.findings.assets);
 			std::vector<uint8_t> bytes;
 			for (const std::string &name : reads) files.read(name, bytes);
 			report.files = files.stamps();
