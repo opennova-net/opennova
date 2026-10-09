@@ -15,6 +15,7 @@
 #include <formats/env/tod_clock.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
+#include <formats/mission/mission.h>
 #include <formats/trn/trn_io.h>
 #include <runtime/environment/environment_state.h>
 #include <runtime/environment/water_frame.h>
@@ -236,11 +237,12 @@ std::vector<EnvironmentOverride> environment_overrides(const EnvironmentMissionU
 }
 
 std::string mission_clock_words(const EnvironmentMissionUse &use) {
-	// The header's Q8.8 start hour into the clock [orig: Game_StartMission @ 0x5253ca..0x5253d5], its day
-	// length into the advance, none for 0 [orig: Environment_SetTodAdvanceRate @ 0x57d170].
-	const int32_t fixed = env::tod_start_fixed24(use.start_time);
-	const int hours = fixed >> 24;
-	const int minutes = int((int64_t(fixed & 0xFFFFFF) * 60) >> 24);
+	// The header's Q8.8 start hour into the clock, the day wrapped [orig: Game_StartMission @ 0x5253ca..0x5253d5],
+	// shown as HHMM with its minutes rounded (formats/mission header_time_to_hhmm); its day length into the
+	// advance, none for 0 [orig: Environment_SetTodAdvanceRate @ 0x57d170].
+	const int hhmm = opennova::mission::header_time_to_hhmm(uint16_t(use.start_time & 0xFFFF));
+	const int hours = (hhmm / 100) % env::kTodHoursPerDay;
+	const int minutes = hhmm % 100;
 	char text[96];
 	if (use.minutes_per_day == 0)
 		std::snprintf(text, sizeof(text), "starts at %02d:%02d, the clock standing", hours, minutes);
