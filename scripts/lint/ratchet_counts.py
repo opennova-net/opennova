@@ -66,7 +66,8 @@ in maturity_baseline.json:
                         Binding methods declared to return Dictionary or
                         TypedArray<Dictionary> in godot/src/**/*.h -- the seams
                         still handing GDScript untyped records instead of a
-                        RefCounted row (ADR 0042 d5).
+                        RefCounted row (ADR 0042 d5). A comment exempts no
+                        line.
 
 Modes:
   (default)         report counts vs baseline; exit 0 regardless (soft mode)
@@ -481,7 +482,8 @@ def count_godot_src_dictionary_returns() -> int:
     in godot/src/**/*.h: the seams that still hand GDScript an untyped record
     where ADR 0042 d5 wants a RefCounted row (EntityRow, FeedRow, ...). A
     to_json_value() converter is not counted (it returns to the MCP edge);
-    only method declarations whose return TYPE is the Dictionary."""
+    only method declarations whose return TYPE is the Dictionary. A line is
+    read without its `//` comment: what a comment says exempts nothing."""
     count = 0
     for path in (REPO / "godot" / "src").rglob("*.h"):
         parts = path.relative_to(REPO).parts
@@ -492,7 +494,8 @@ def count_godot_src_dictionary_returns() -> int:
         except OSError:
             continue
         for line in text.splitlines():
-            if GODOT_SRC_DICTIONARY_RETURN.match(line) and "to_json_value" not in line:
+            code = line.split("//", 1)[0]
+            if GODOT_SRC_DICTIONARY_RETURN.match(code) and "to_json_value" not in code:
                 count += 1
     return count
 
