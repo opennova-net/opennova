@@ -305,7 +305,7 @@ inline std::string tree_digest(const std::string &dir) {
 		if (fs::is_regular_file(path, kind)) {
 			std::vector<uint8_t> bytes;
 			std::string error;
-			opennova::editor::read_file_bytes(opennova::io::utf8_path(path), bytes, error);
+			opennova::io::read_file_bytes(opennova::io::utf8_path(path), bytes, error);
 			digest += " " + std::to_string(bytes.size()) + " " +
 			          opennova::io::hex64(opennova::io::fnv1a64_bytes(opennova::io::kFnv1a64Offset, bytes.data(), bytes.size()));
 		}

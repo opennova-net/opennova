@@ -5,6 +5,7 @@
 #include <cstring>
 #include <utility>
 
+#include <base/io/strutil.h>
 #include <editor/model/document.h>
 #include <editor/ui/editor_requests.h>
 
@@ -33,9 +34,7 @@ int grow(ImGuiInputTextCallbackData *data) {
 // The characters of a UTF-8 text: the bytes its stored form takes in the game's code page, one a
 // character (a character the code page has no byte for is the document's to refuse, in its words).
 size_t characters(const char *text, size_t length) {
-	size_t count = 0;
-	for (size_t i = 0; i < length; ++i) count += (static_cast<unsigned char>(text[i]) & 0xC0) != 0x80;
-	return count;
+	return strutil::utf8_length(std::string_view(text, length));
 }
 
 // A code-page box's text as the frame began (the caller's value, which the box's buffer still holds

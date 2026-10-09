@@ -9,6 +9,7 @@
 #include <memory>
 
 #include <base/gameprofile/required_resources.h>
+#include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/project_layout.h>
 #include <editor/blank/blank_factory.h>
@@ -46,8 +47,6 @@ namespace {
 // An open document's name in Files.
 const ImVec4 kOpenColor(0.55f, 0.78f, 1.0f, 1.0f);
 const ImVec4 kRefusalColor(0.95f, 0.55f, 0.45f, 1.0f);
-
-using ui_kit::size_text;
 
 const AssetEntry *entry_at(const SessionView &view, const std::string &path) {
 	for (const AssetEntry &entry : view.project.scan->entries)
@@ -410,7 +409,7 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const std::vector<size_t> &matches = matching(v);
 	const bool narrowed = filter_.text[0] != '\0' || kind_shown_ != AssetKind::kCount;
 	const size_t count = narrowed ? matches.size() : v.project.scan->entries.size();
-	const std::string files = (narrowed ? grouped(count) + " of " + grouped(v.project.scan->entries.size()) : grouped(count)) +
+	const std::string files = (narrowed ? strutil::grouped(count) + " of " + strutil::grouped(v.project.scan->entries.size()) : strutil::grouped(count)) +
 	                          (v.project.scan->entries.size() == 1 ? " file" : " files") +
 	                          (narrowed && by_cost_ ? ", " + texture_bytes_words(matched_cost_) + " in the game" : "");
 	// By cost, offered while the list shows textures (and while it is on, to turn it off).
@@ -524,7 +523,7 @@ void FilesWindow::draw_kind_filter(const SessionView &view, float width) {
 		for (size_t i = 0; i < kAssetKindCount; ++i) {
 			if (!counts[i]) continue;
 			const AssetKind kind = static_cast<AssetKind>(i);
-			const std::string label = std::string(asset_kind_label(kind)) + " (" + grouped(counts[i]) + ")###" + asset_kind_token(kind);
+			const std::string label = std::string(asset_kind_label(kind)) + " (" + strutil::grouped(counts[i]) + ")###" + asset_kind_token(kind);
 			if (ImGui::Selectable(label.c_str(), kind_shown_ == kind)) kind_shown_ = kind;
 		}
 		ImGui::EndCombo();
@@ -683,7 +682,7 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 	// Its path, kind and size, made only while its tooltip shows; a texture's picture above them (S18).
 	const auto tip = [&] {
 		std::string tip = entry.relative_path + "\n" + asset_kind_label(entry.kind) + ", " +
-		                  size_text(entry.size_bytes);
+		                  strutil::byte_size_text(entry.size_bytes);
 		if (!entry.imported_from.empty()) tip += "\nImported from " + entry.imported_from;
 		if (dirty) tip += "\nUnsaved changes";
 		const auto said = [](size_t errors, size_t warnings) {
@@ -737,7 +736,7 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 	if (ImGui::TableNextColumn()) ui_kit::clipped_text(asset_kind_label(entry.kind));
 	// The size, right-aligned; listed by cost, what the game's textures of it take (none: blank).
 	ImGui::TableNextColumn();
-	std::string shown_size = size_text(entry.size_bytes);
+	std::string shown_size = strutil::byte_size_text(entry.size_bytes);
 	if (by_cost_ && !in_tree) {
 		const auto cost = costs_.find(entry.relative_path);
 		shown_size = cost == costs_.end() ? std::string() : texture_bytes_words(cost->second);
@@ -986,7 +985,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 		return;
 	}
 	ImGui::PushTextWrapPos(0.0f);
-	ImGui::Text("%s, %s", card.kind_label.c_str(), size_text(card.size).c_str());
+	ImGui::Text("%s, %s", card.kind_label.c_str(), strutil::byte_size_text(card.size).c_str());
 	ImGui::TextDisabled("%s", card.path.c_str());
 	ImGui::Spacing();
 	ImGui::TextWrapped("%s", card.about.c_str());
@@ -999,7 +998,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 		if (card.sound.decoded) {
 			char words[96];
 			std::snprintf(words, sizeof(words), "%s, %s Hz, %.1f s", card.sound.channels == 1 ? "Mono" : "Stereo",
-			              grouped(card.sound.rate).c_str(), card.sound.seconds);
+			              strutil::grouped(card.sound.rate).c_str(), card.sound.seconds);
 			ImGui::AlignTextToFramePadding();
 			ImGui::TextUnformatted(words);
 			ImGui::SameLine();
@@ -1068,7 +1067,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 	ImGui::EndDisabled();
 	// What it names: a click goes to the file it resolves to; a wave it names plays. While the project's
 	// references are being read, the counts say so (the lists are the graph's as far as it has read).
-	const auto count = [&card](size_t n) { return card.reading ? std::string("being read") : grouped(n); };
+	const auto count = [&card](size_t n) { return card.reading ? std::string("being read") : strutil::grouped(n); };
 	const std::string names = "It names (" + count(card.names.size()) + ")###names";
 	// A kind whose files name none (a wave, a texture) says nothing of it.
 	const bool names_any = !card.names.empty() || asset_kind_row(card.kind).names_files;

@@ -152,7 +152,7 @@ bool DocumentBase::load(const std::string &absolute, const std::string &relative
 	if (snapshot_) return fail(error, relative, CoreFinding::DocumentSnapshot, "A snapshot is never loaded.");
 	std::vector<uint8_t> bytes;
 	std::string message;
-	if (!read_file_bytes(absolute, bytes, message)) return fail(error, relative, CoreFinding::DocumentRead, message);
+	if (!io::read_file_bytes(absolute, bytes, message)) return fail(error, relative, CoreFinding::DocumentRead, message);
 	if (!load_bytes(bytes, relative, kind, game, error)) return false;
 	absolute_path_ = absolute;
 	return true;
@@ -204,7 +204,7 @@ bool DocumentBase::save(Diagnostic &error, bool over) {
 		return fail(error, path(), CoreFinding::DocumentConflict,
 		            "This file changed outside the editor: reload it, or keep your edits and save over it.");
 	std::string message;
-	if (!write_file_atomic(absolute_path_, output.text, message)) return fail(error, path(), CoreFinding::DocumentWrite, message);
+	if (!io::write_file_atomic(absolute_path_, output.text, message)) return fail(error, path(), CoreFinding::DocumentWrite, message);
 	file_fingerprint_ = fingerprint(output.text);
 	wrote_file_ = true;
 	save_notes_ = output.notes;
@@ -247,7 +247,7 @@ DocumentBase::RewriteNeed DocumentBase::rewrite_need() const {
 bool DocumentBase::matches_file() const {
 	std::vector<uint8_t> current;
 	std::string message;
-	return read_file_bytes(absolute_path_, current, message) && fingerprint(current) == file_fingerprint_;
+	return io::read_file_bytes(absolute_path_, current, message) && fingerprint(current) == file_fingerprint_;
 }
 
 } // namespace opennova::editor
