@@ -36,22 +36,11 @@ static_assert(kModelSurfaceCount + kTagOffset == world::kImpactEffectTagCount, "
 // compares @ 0x4e823f..0x4e8266], and the impact charges the table's cost against the round's v^2 * mass,
 // releasing it when that runs out [orig: the cost table @ 0x82d034 {19: 10, 16: 4, 15: 10, 17: 8, 7: 4};
 // Entity_ClampKineticEnergy @ 0x4e9070 from Projectile_HandleEntityImpact @ 0x4e9643;
-// docs/world/world-wac-ai-re.md section 15.8, the continuation correction].
-struct PassThrough {
-	int64_t surface;
-	int32_t cost_q16;
-};
-constexpr PassThrough kPassThrough[] = {{19, 0xA0000}, {16, 0x40000}, {15, 0xA0000}, {17, 0x80000}, {7, 0x40000}};
-
-const PassThrough *pass_through(int64_t poly_type) {
-	for (const PassThrough &p : kPassThrough)
-		if (p.surface == poly_type) return &p;
-	return nullptr;
-}
-
-std::string passes_words(const PassThrough &p) {
+// docs/world/world-wac-ai-re.md section 15.8, the continuation correction]: world::material_energy_cost,
+// nonzero for exactly these five.
+std::string passes_words(int32_t cost_q16) {
 	char cost[16];
-	std::snprintf(cost, sizeof(cost), "%g", p.cost_q16 / 65536.0);
+	std::snprintf(cost, sizeof(cost), "%g", cost_q16 / 65536.0);
 	return std::string("Rounds go on through it, paying ") + cost +
 	       " of their energy (a round left with none stops in it).";
 }
@@ -71,10 +60,10 @@ ModelSurfaceWords model_surface_words(int64_t poly_type) {
 	}
 	out.name = surface_name(poly_type);
 	out.tag = world::kImpactEffectTagNames[tag];
-	if (const PassThrough *p = pass_through(poly_type)) {
+	if (const int32_t cost_q16 = world::material_energy_cost(static_cast<uint8_t>(poly_type))) {
 		out.passes = true;
-		out.energy_cost = p->cost_q16 / 65536.0;
-		out.note = passes_words(*p);
+		out.energy_cost = cost_q16 / 65536.0;
+		out.note = passes_words(cost_q16);
 	}
 	const auto also = [&](const char *words) { out.note += (out.note.empty() ? "" : " ") + std::string(words); };
 	switch (poly_type) {
