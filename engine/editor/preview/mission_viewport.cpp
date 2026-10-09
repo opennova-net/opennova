@@ -940,26 +940,28 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 	}
 	// Where the point meets the ground (the device's terrain, else the plane through the camera's
 	// target); on the terrain, the model's ground anchor baked in (the stored position is the ground
-	// point less the anchor: docs/world/world-wac-ai-re.md section 12).
+	// point less the anchor: docs/world/world-wac-ai-re.md section 12), the anchor where the game draws it
+	// from the entity at the heading it is placed with and its item's scale (mission_anchor_offset).
 	double at[3];
 	bool on_terrain = false;
 	if (!ground_of_(context, drop.x, drop.y, at, &on_terrain)) {
 		error = "The point is not over the ground (or too far out): drop it nearer.";
 		return false;
 	}
-	if (on_terrain)
-		for (int i = 0; i < 3; ++i) at[i] -= facts.anchor[i];
+	// Facing the way the camera looks (S15): its heading, a compass heading as a yaw is.
+	const int yaw = mission::wrapped_yaw(mission_camera_heading(camera_));
+	double anchor[3] = { 0.0, 0.0, 0.0 };
+	if (on_terrain) mission_anchor_offset(facts.anchor, facts.scale_q16, 0.0, double(yaw), 0.0, anchor);
+	for (int i = 0; i < 3; ++i) at[i] -= anchor[i];
 	// Snapped: the stored origin's x and y on the grid, the point a move and a copy snap, so the first
 	// drag of what was placed never jumps it by its anchor; its height then the ground's under its
 	// ground point there (else the plane's).
 	if (drop.snap > 0.0f) {
 		for (int axis = 0; axis < 2; ++axis) at[axis] = std::round(at[axis] / double(drop.snap)) * double(drop.snap);
 		double ground = 0.0;
-		if (on_terrain && context.device && context.device->ground_at(at[0] + facts.anchor[0], at[1] + facts.anchor[1], ground))
-			at[2] = ground - facts.anchor[2];
+		if (on_terrain && context.device && context.device->ground_at(at[0] + anchor[0], at[1] + anchor[1], ground))
+			at[2] = ground - anchor[2];
 	}
-	// Facing the way the camera looks (S15): its heading, a compass heading as a yaw is.
-	const int yaw = mission::wrapped_yaw(mission_camera_heading(camera_));
 	std::vector<Edit> edits;
 	if (path) {
 		if (!mission_stop_edits(mission, path, item, facts.pool, at, yaw, edits, error)) return false;
@@ -1192,7 +1194,8 @@ bool MissionViewport::command(const ViewportContext &context, const std::string 
 	if (name == "ground") {
 		// Each named entity (else each selected one) set down on the ground under it: its height the
 		// ground's less its model's anchor height (the game's vertical terrain conform: only the
-		// height, docs/world/world-wac-ai-re.md section 12), one batch.
+		// height, docs/world/world-wac-ai-re.md section 12), the anchor's height as the game draws it from
+		// the entity at its angles and its item's scale (mission_anchor_offset), one batch.
 		const Document *document = planned_(context, error);
 		if (!document) return false;
 		if (!context.editable()) {
@@ -1209,8 +1212,8 @@ bool MissionViewport::command(const ViewportContext &context, const std::string 
 			return false;
 		}
 		std::vector<Edit> edits;
-		// Each item's anchor read once (its model parsed once), however many entities draw it.
-		std::unordered_map<int64_t, double> anchors;
+		// Each item's facts read once (its model parsed once), however many entities draw it.
+		std::unordered_map<int64_t, MissionItemFacts> items;
 		for (const NodeId row : rows) {
 			const MissionEntityMark *entity = scene_.entity(row);
 			if (!entity) {
@@ -1222,14 +1225,16 @@ bool MissionViewport::command(const ViewportContext &context, const std::string 
 				error = "The picture has no ground under record " + std::to_string(row) + " (no terrain built there).";
 				return false;
 			}
-			auto anchor = anchors.find(entity->item);
-			if (anchor == anchors.end()) {
-				MissionItemFacts facts;
+			auto facts = items.find(entity->item);
+			if (facts == items.end()) {
 				std::string ignored;
-				items_.facts(context.input.view, entity->item, facts, ignored);
-				anchor = anchors.emplace(entity->item, facts.anchor[2]).first;
+				facts = items.emplace(entity->item, MissionItemFacts()).first;
+				items_.facts(context.input.view, entity->item, facts->second, ignored);
 			}
-			const double z = ground - anchor->second;
+			double anchor[3];
+			mission_anchor_offset(facts->second.anchor, facts->second.scale_q16, double(entity->pitch), double(entity->yaw),
+					double(entity->roll), anchor);
+			const double z = ground - anchor[2];
 			// Where its 16.16 word moves.
 			if (bms::to_fixed_16_16(z) != bms::to_fixed_16_16(entity->z))
 				edits.push_back(set_of(NodeAddress{ row, entity->kind, 0 }, "z", z));

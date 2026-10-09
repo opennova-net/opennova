@@ -10,6 +10,7 @@
 #include <editor/preview/mission_label_picks.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_overlay.h>
+#include <runtime/hud/hud_minimap.h>
 
 namespace opennova::editor {
 
@@ -38,11 +39,17 @@ inline constexpr uint32_t kMissionBuildingRgb = 0xC0C0C0;
 inline constexpr uint32_t kMissionMarkerRgb = 0x6EDCFF;
 inline constexpr uint32_t kMissionOrganicRgb = 0x7CD67C;
 inline constexpr uint32_t kMissionAreaRgb = 0xFFA028;
-inline constexpr uint32_t kMissionBlueRgb = 0x5A8CFF;
-inline constexpr uint32_t kMissionRedRgb = 0xFF5A5A;
+// A team's colour as the game's map draws it (S23 C, witnessed in the game: the original editor's own
+// ring colours stay unread, no dfx2med database being open): a team-1 marker or person in the HUD
+// palette's light blue, a team-2 one in its salmon, its third and fifth entries [orig:
+// HUD_InitTeamColorTable @ 0x51f245..0x51f2b3; Render_MinimapSlotBlip @ 0x5be4c5..0x5be4e1], the map's
+// own (runtime/hud/hud_minimap.h).
+inline constexpr uint32_t kMissionBlueRgb = hud::kHudPaletteLightBlue & 0xFFFFFFu;
+inline constexpr uint32_t kMissionRedRgb = hud::kHudPaletteSalmon & 0xFFFFFFu;
 inline constexpr uint32_t kMissionPathRgb = 0xC8C8C8;
 
-// The colour of a team (1 blue, 2 red; 0 none, kMissionPathRgb for the rest).
+// The colour of a team as the game's map draws it (1 light blue, 2 salmon; kMissionPathRgb for the
+// rest, which the overlay rings in no team's colour).
 uint32_t mission_team_rgb(int team);
 
 // The direction an entity faces in the presentation frame (its yaw a compass heading, 0 north, 90

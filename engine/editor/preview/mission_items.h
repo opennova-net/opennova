@@ -21,16 +21,20 @@ struct SessionView;
 // value, data commit 6), the pool its TYPE puts a record in as the game's editor places it
 // (formats/mission/authoring.h, entity_kind_for_item_type), the model its `graphic` loads, and that
 // model's ground anchor (threedi_3di3_ground_anchor: its `ground` user point, else its origin) in
-// the mission's frame. The anchor is an author-time bake (docs/world/world-wac-ai-re.md section 12):
-// an entity dropped on the terrain is stored at the ground point less the anchor, and stored
-// positions render as they are.
+// the model's own axes, and the item's SCALE. The anchor is an author-time bake
+// (docs/world/world-wac-ai-re.md section 12): an entity dropped on the terrain is stored at the ground
+// point less the anchor as the game draws it there (mission_anchor_offset), and stored positions
+// render as they are.
 struct MissionItemFacts {
 	int64_t item = 0;
 	std::string name; // the catalog's name of it ("" none)
 	int type = -1; // its TYPE (-1: not known)
 	MissionKind pool = MissionKind::Item;
 	std::string model; // the project's model file its graphic loads ("": none found)
-	double anchor[3] = { 0.0, 0.0, 0.0 }; // mission x east, y north, z up
+	// Its ground anchor in the model's own axes as the game's placement matrix takes them (the file's
+	// words, metres: mission_model_words), and the item's SCALE (16.16; 0 unscaled).
+	double anchor[3] = { 0.0, 0.0, 0.0 };
+	int32_t scale_q16 = 0;
 	// Its entity's bound radius, metres (mission_item_bound_radius: what a pick of its mark tests); 0
 	// for none (no model, or a model with no collision block).
 	double radius = 0.0;
@@ -96,7 +100,7 @@ private:
 		bool read = false;
 		bool collision = false;
 		int32_t radius_q16 = 0;
-		double anchor[3] = { 0.0, 0.0, 0.0 }; // its ground anchor in the mission's frame
+		double anchor[3] = { 0.0, 0.0, 0.0 }; // its ground anchor in the model's own axes (mission_model_words)
 	};
 	struct Catalog {
 		uint64_t stamp = 0;
@@ -157,9 +161,21 @@ std::shared_ptr<const MissionItemClasses> mission_item_classes(const SessionView
 // the catalogs' order, each once.
 std::vector<int64_t> mission_items_of_model(const SessionView &view, const std::string &file);
 
-// A model-space point (threedi_user_point_position's axes) in the mission's frame: the model's x, y,
-// z are the presentation frame's -x, y, z (the placer's godot_vec3), which is the mission's
-// (-x, -z, y).
-void mission_model_point(const float model[3], double out[3]);
+// A model-space point (threedi_user_point_position's axes) as the game's placement matrix takes it: the
+// file's words (forward, left, up, metres), which threedi_user_point_position hands back as (-left,
+// up, forward). Its z is the point's height over the model's origin whatever the entity's heading.
+void mission_model_words(const float model[3], double out[3]);
+
+// Where a model's point `words` (mission_model_words) of an entity at the angles `pitch`, `yaw`, `roll`
+// (the record's degrees) stands from the entity's position, in the mission's frame, as the game draws
+// it: the placement matrix Rz(90 - yaw) x Ry(-pitch) x Rx(roll) over the point scaled by the item's
+// SCALE (`scale_q16`, 0 unscaled) [orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40, its
+// userpoint carried by Entity_GetAttachmentWorldPosition @ 0x4B2670], through the engine's own placement
+// basis (mission::bms_to_presentation_basis, which the device places the item's model by). A drop on
+// the terrain stores the ground point less this offset at the yaw it places (S23 C: the original
+// editor subtracts the words unrotated, @ 0x401f6e in dfx2med.exe, read where no database of it is open
+// only through world-wac-ai-re.md section 12; the game's drawing at the placed heading is what the
+// editor bakes against).
+void mission_anchor_offset(const double words[3], int32_t scale_q16, double pitch, double yaw, double roll, double out[3]);
 
 } // namespace opennova::editor

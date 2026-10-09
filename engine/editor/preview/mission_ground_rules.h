@@ -148,7 +148,7 @@ public:
 	};
 	struct Model {
 		bool read = false;
-		double anchor[3] = { 0.0, 0.0, 0.0 }; // its ground anchor, mission frame
+		double anchor[3] = { 0.0, 0.0, 0.0 }; // its ground anchor, the model's own axes (mission_model_words)
 		bool bounds = false; // a collision block: its CMDL box (model frame, mission axes, 16.16)
 		int32_t box[6] = { 0, 0, 0, 0, 0, 0 };
 		// Its collision volumes (null: none), and whether one is a type-1 solid, which the ground probe
