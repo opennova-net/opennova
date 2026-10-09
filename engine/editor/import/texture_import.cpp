@@ -9,7 +9,6 @@
 #include <editor/import/import_context.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
-#include <formats/pcx/pcx_io.h>
 
 namespace opennova::editor {
 
@@ -186,21 +185,16 @@ bool run_image_import(ImportContext &context, ImportProduct &out) {
 		return refuse(CoreFinding::ImportOption, "The image importer cannot use " + error + ".", "size");
 	ImportOutput output;
 	output.name = name;
-	if (settings.format == "pcx" && settings.palette == "indices") {
-		// The source's own indices and palette, written as they are.
-		if (!source.indexed)
-			return refuse(CoreFinding::ImportOption,
-			              "The palette indices keeps an 8-bit PCX source's indices, and " + source_name + " holds colours.",
-			              "palette");
-		if (width != uint32_t(image.width) || height != uint32_t(image.height))
-			return refuse(CoreFinding::ImportOption,
-			              "The palette indices keeps every texel's index, so the size stays the source's.", "size");
-		if (!encode_pcx_indexed(source.indices, output.bytes, error))
-			return refuse(CoreFinding::ImportEncode, "Could not write " + name + ": " + error + ".");
+	std::string field;
+	if (renderer::image_keeps_source_indices(settings)) {
+		// The source's own indices and palette, written as they are (renderer::encode_image_indices).
+		if (!renderer::encode_image_indices(source, settings, output.bytes, error, field)) {
+			if (field.empty()) return refuse(CoreFinding::ImportEncode, "Could not write " + name + ": " + error + ".");
+			return refuse(CoreFinding::ImportOption, source_name + ": " + error + ".", field);
+		}
 		out.outputs.push_back(std::move(output));
 		return true;
 	}
-	std::string field;
 	if (!renderer::image_import_texels(image, settings, error, field))
 		return refuse(CoreFinding::ImportOption, "The image importer cannot use " + error + ".", field);
 	std::string note;
