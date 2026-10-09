@@ -525,7 +525,7 @@ std::string redirect_words(const bms::Action &action, const MissionNames &names,
 // --- the names ------------------------------------------------------------------------------------
 
 std::string MissionNames::entity(int64_t ssn) const {
-	if (ssn == 10000) return "the player";
+	if (ssn == mission::kPlayerSsn) return "the player";
 	return "SSN " + number(ssn);
 }
 
@@ -542,18 +542,6 @@ const char *path_command_words(int64_t number_) {
 	case 123: return "Goto SSN (passenger seat only)";
 	case 124: return "Goto SSN (not the controller seat)";
 	case 125: return "Goto SSN (any seat)";
-	case 126: return "Goto group";
-	case 127: return "Goto player";
-	default: return nullptr;
-	}
-}
-
-const char *path_command_editor_name(int64_t number_) {
-	// [orig editor: dfx2med Med_ParamWaypointList @0x449c60 names the commands]
-	switch (number_) {
-	case 123: return "Goto SSN (not driver, gunner)";
-	case 124: return "Goto SSN (not driver)";
-	case 125: return "Goto SSN (any)";
 	case 126: return "Goto group";
 	case 127: return "Goto player";
 	default: return nullptr;
@@ -584,7 +572,7 @@ bool DocumentMissionNames::zone_resolves(int64_t id) const {
 
 std::string DocumentMissionNames::entity(int64_t ssn) const {
 	// The player's SSN names no record of the file [bms-event-runtime-re.md 7.3].
-	if (ssn == 10000) return MissionNames::entity(ssn);
+	if (ssn == mission::kPlayerSsn) return MissionNames::entity(ssn);
 	const NodeId holder = document_.entity_holder(ssn);
 	const Node *row = holder ? document_.row(holder) : nullptr;
 	if (!row) return "SSN " + number(ssn) + " (no entity has it)";
@@ -628,21 +616,6 @@ const char *logic_join_words(LogicJoin join) {
 	return "and";
 }
 
-bool trigger_ssn_unrecorded(const bms::Trigger &trigger, int slot) {
-	// The sees, targeted and shot records and the visited words keyed by an SSN hold rows 0 to 127: the
-	// setters skip any other [orig: the row bound-checks @0x452b60, @0x452bf0; section 3a]: the single's
-	// subs 1, 2, 13 (its p1) and 7 (the visited A word, its p1), 15 to 17 (both); the group's 15 to 17
-	// (the entity, p2).
-	const int32_t main = int32_t(trigger.main_type), sub = trigger.sub_type;
-	const bool relation = sub == 15 || sub == 16 || sub == 17;
-	bool keyed = false;
-	if (main == kGroup) keyed = relation && slot == 1;
-	if (main == kSingle) keyed = (relation && (slot == 0 || slot == 1)) || ((sub == 1 || sub == 2 || sub == 13 || sub == 7) && slot == 0);
-	if (!keyed) return false;
-	const int64_t ssn = param_of(trigger, slot);
-	return ssn < 0 || ssn >= 128;
-}
-
 std::string trigger_words(const bms::Trigger &trigger, const MissionNames &names) {
 	const int32_t main = int32_t(trigger.main_type);
 	const bool negated = trigger.is_negated();
@@ -655,7 +628,7 @@ std::string trigger_words(const bms::Trigger &trigger, const MissionNames &names
 			return std::string(text);
 		}
 		std::string out = param_word(mission::trigger_param_kind(trigger, slot), param_of(trigger, slot), names);
-		if (trigger_ssn_unrecorded(trigger, slot)) out += " (never recorded: the game keeps SSNs below 128)";
+		if (mission::trigger_ssn_unrecorded(trigger, slot)) out += " (never recorded: the game keeps SSNs below 128)";
 		return out;
 	};
 	if (const TriggerRow *row = trigger_row(main, sub)) {
@@ -770,7 +743,7 @@ std::string action_words(const bms::Action &action, const MissionNames &names, c
 	return "an action of unknown type " + number(type) + " (does nothing)";
 }
 
-double logic_units_seconds(int64_t units) { return double(units) * 64.0 / io::kTickHz; }
+double logic_units_seconds(int64_t units) { return double(units) * bms::kEventStepTicks / io::kTickHz; }
 
 namespace {
 
@@ -782,13 +755,11 @@ std::string seconds_words(int64_t units) {
 
 } // namespace
 
-bool logic_steps_wrap(int64_t steps) { return steps > kLogicStepsUnwrapped; }
-
 std::string logic_steps_words(int64_t steps) {
 	// The countdown is the steps << 6 in a word the game tests as signed after each 64-tick decrement:
 	// past 512 steps it is negative after the first one, so it ends on the next pass [orig:
 	// EventTrigger_UpdateEntry @0x454cef, @0x454d40; bms-event-runtime-re.md 1.2].
-	if (logic_steps_wrap(steps)) return "about " + seconds_words(1) + " (past 512 steps the game's countdown wraps)";
+	if (bms::event_steps_wrap(steps)) return "about " + seconds_words(1) + " (past 512 steps the game's countdown wraps)";
 	return seconds_words(steps);
 }
 
@@ -864,7 +835,7 @@ EventWords event_words(const mission::EventChain &chain, const MissionNames &nam
 	// cooldown is never counted down: it is never checked again by it.
 	if (repeats && !once) {
 		const int64_t reset = chain.event.reset_after;
-		const bool wraps = logic_steps_wrap(reset);
+		const bool wraps = bms::event_steps_wrap(reset);
 		if (reset == 0) out.repeat = "Checked again each pass after its triggers held.";
 		else
 			out.repeat = "Checked again about " + seconds_words((wraps ? 1 : reset) + 1) + " after its triggers held" +

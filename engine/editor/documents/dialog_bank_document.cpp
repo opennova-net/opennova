@@ -13,6 +13,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
 #include <editor/project/project_files.h>
+#include <runtime/audio/dialog_queue.h>
 #include <runtime/mission/mission_sidecars.h>
 
 namespace opennova::editor {
@@ -93,7 +94,7 @@ RecordTable make_table() {
 				"number its name's dlg%03i forms; -1 where no number forms it.");
 		number.read_only = true;
 		dialog.field(RF{number, {[](const RecordHandle &r, Value &out) {
-			                return out = dialog_number(dialog_of(r).name), true;
+			                return out = audio::dialog_index_of(dialog_of(r).name), true;
 		                }}});
 		TableList lines;
 		lines.spec = Document::CollectionSpec{kLine, "Lines", "wave", false, Applicability::Reads, 0};
@@ -160,8 +161,7 @@ std::string free_dialog_name(const std::vector<std::shared_ptr<const Node>> &row
 		return false;
 	};
 	for (int n = 1; n < 1000000; ++n) {
-		char name[32];
-		std::snprintf(name, sizeof(name), "dlg%03i", n);
+		const std::string name = audio::dialog_name_of(n);
 		if (!taken(name)) return name;
 	}
 	return "dlg001";
@@ -186,18 +186,6 @@ std::string dialog_sounds_alternate(const std::string &path) {
 	return strutil::to_upper(mission::dialog_sounds_name(basename_of(path), true));
 }
 
-int64_t dialog_number(const std::string &name) {
-	if (name.size() < 6 || name.compare(0, 3, "dlg") != 0) return -1;
-	const std::string digits = name.substr(3);
-	if (!strutil::all_digits(digits)) return -1;
-	const std::optional<int> number = strutil::parse_int(digits);
-	if (!number) return -1;
-	// The name the game forms from the number ("dlg%03i") is this one, or no number forms it.
-	char formed[32];
-	std::snprintf(formed, sizeof(formed), "%03i", *number);
-	return digits == formed ? int64_t(*number) : -1;
-}
-
 size_t DialogBankRow::footprint() const {
 	size_t bytes = sizeof(DialogBankRow) + footprint_of(dialog.name) + footprint_of(dialog.def_id_indices) +
 	               footprint_of(dialog.lines) + ids_footprint();
@@ -215,9 +203,14 @@ std::vector<const DialogBankRow *> DialogBankDocument::dialogs() const {
 }
 
 const DialogBankRow *DialogBankDocument::find_dialog(const std::string &name) const {
-	for (const DialogBankRow *row : dialogs())
-		if (row->dialog.name == name) return row;
-	return nullptr;
+	// The game's lookup over the bank's dialogs in their order: the first of the name, matched exactly
+	// (audio::find_dialog [orig: Dialog_PlayByName @ 0x44d9f0]).
+	const std::vector<const DialogBankRow *> rows = dialogs();
+	dbf::File names;
+	names.groups.resize(rows.size());
+	for (size_t i = 0; i < rows.size(); ++i) names.groups[i].group_name = rows[i]->dialog.name;
+	const dbf::Group *found = audio::find_dialog(names, name);
+	return found ? rows[size_t(found - names.groups.data())] : nullptr;
 }
 
 std::string DialogBankDocument::record_title(const NodeAddress &address) const {
@@ -435,7 +428,7 @@ std::vector<Diagnostic> validate_dialog_bank_file(const DocumentBase &document) 
 		if (!seen.emplace(d.name, true).second)
 			add(at, d.name, DiagnosticSeverity::Warning, DialogBankFinding::NameRepeated, "name",
 			    "An earlier dialog of the bank is named '" + d.name + "': the game plays the first of a name, never this one.");
-		else if (dialog_number(d.name) < 1)
+		else if (audio::dialog_index_of(d.name) < 1)
 			add(at, d.name, DiagnosticSeverity::Warning, DialogBankFinding::NameUnplayed, "name",
 			    "'" + d.name + "' is no name a Play dialog action plays: a mission names a dialog by the number that forms "
 			    "dlg%03i from 1 (dlg001 is dialog 1), matched exactly.");
