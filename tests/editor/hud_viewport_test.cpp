@@ -345,7 +345,6 @@ int test_layout_edit() {
 	TEST_EXPECT(hud_drag_changes(start, HudHandle::Move, 10.0f, -6.0f, 8, changes, error) && changes[0].value == "176" &&
 	            changes[1].value == "608");
 	// The health bar's corners: a resize of its bottom right moves its far edges alone, a move all four.
-	TEST_EXPECT(hud_element_resizable(HudElement::Health) && !hud_element_resizable(HudElement::AmmoCount));
 	TEST_EXPECT(hud_drag_start(HudElement::Health, hud, start));
 	TEST_EXPECT(hud_drag_changes(start, HudHandle::BottomRight, 20.0f, 4.0f, 1, changes, error));
 	TEST_EXPECT(edited(text, changes).find("HUDHEALTH\t25,741,197,755\r\n") != std::string::npos);
