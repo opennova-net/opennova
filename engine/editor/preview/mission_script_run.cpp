@@ -14,6 +14,7 @@
 #include <runtime/mission/item_traits.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/destruction.h>
+#include <runtime/world/weather_state.h>
 
 namespace opennova::editor {
 
@@ -154,10 +155,9 @@ void MissionScriptRun::boot_(const std::shared_ptr<const ProjectAssetSource> &fi
 		failed_ = true;
 		return;
 	}
-	// The mission's environment under the header's overrides, as the game loads it with the terrain [orig:
-	// Game_LoadTerrainDuringConnect @ 0x520710 -> Terrain_LoadEnvironmentConfig @ 0x52073b]: its .trn, overcast.def,
-	// then its .env over them; a mission naming none, or one the project lacks, starts on the earlier passes over the
-	// engine's defaults (env::load_mission_env).
+	// The mission's environment under the header's overrides, as the game loads it with the terrain
+	// (env::load_mission_env_config): its .trn, overcast.def, then its .env over them; a mission naming none, or one
+	// the project lacks, starts on the earlier passes over the engine's defaults.
 	const env::EnvTextReader read_env = [&source](const std::string &name, std::string &text) {
 		std::vector<uint8_t> bytes;
 		if (!source.read_file(name, bytes)) return false;
@@ -165,11 +165,10 @@ void MissionScriptRun::boot_(const std::shared_ptr<const ProjectAssetSource> &fi
 		return true;
 	};
 	env::MissionEnv mission_env;
-	env::read_mission_env(read_env, header.terrain.empty() ? std::string() : header.terrain + ".trn",
-	                      header.environment.empty() ? std::string() : header.environment + ".env", mission_env);
-	env::Config config = std::move(mission_env.config);
-	env::apply_bms_overrides(config, env::bms_env_overrides_from_header(header.attrib_flags, header.water_override,
-			header.fog_override, header.fog_color, header.water_color, header.water_murk));
+	env::load_mission_env_config(read_env, header.terrain, header.environment,
+			env::bms_env_overrides_from_header(header.attrib_flags, header.water_override, header.fog_override,
+					header.fog_color, header.water_color, header.water_murk),
+			mission_env);
 	auto kernel = std::make_unique<mission::MissionKernel>();
 	kernel->open_document(std::move(composed), basename, source);
 	// The start as a headless host boots it, beside the picture's own choices: no player of its own (the listener
@@ -194,7 +193,7 @@ void MissionScriptRun::boot_(const std::shared_ptr<const ProjectAssetSource> &fi
 	// The seed from the .env and the header's clock, then the start's boundary: the script's first execution, the
 	// initializer and the 255-tick settle [orig: Environment_SnapStateToTargets @ 0x57d1e0; Game_StartMission
 	// @ 0x525cb8 -> Environment_MissionStartInit @ 0x57f878].
-	kernel->world.weather.seed(env::weather_seed_from_config(config, kernel->mission.header));
+	kernel->world.weather.seed(env::weather_seed_from_config(mission_env.config, kernel->mission.header));
 	kernel->complete_mission_start();
 	// What the settle raised is the start's own, never heard: the mission has not begun. The dialogs the pre-mission
 	// pass queued play once it has [docs/audio/lwf-dbf-sound-re.md: a PreMission PlayWavList is registered at the
@@ -271,8 +270,8 @@ void MissionScriptRun::step_() {
 }
 
 void MissionScriptRun::set_hours(double hours) {
-	const double day = std::fmod(std::max(hours, 0.0), 24.0);
-	clock_fixed24_ = uint32_t(std::llround(day * double(1u << 24))) % (24u << 24);
+	// The hour on the 8.24 clock, as the game's dev scrub sets it (world::WeatherState::tod_fixed24_from_minutes).
+	clock_fixed24_ = world::WeatherState::tod_fixed24_from_minutes(hours * 60.0);
 }
 
 bool MissionScriptRun::run_to(int32_t tick) {
