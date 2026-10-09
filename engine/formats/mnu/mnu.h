@@ -118,6 +118,35 @@ inline constexpr const char *kActionTypes[] = {
     "GLB_PING", "GLB_JOIN", "TAB", "POP_SCREEN", "APPMSG", "LAN_SEARCH", "LAN_JOIN", "MNX", nullptr};
 inline constexpr const char *kActionStates[] = {"HIDE", "SHOW", "ENABLE", "DISABLE", nullptr};
 
+// The tokens each keyword attribute's parse recognizes, nullptr-ended, in the order the
+// reader compares them; any other token is left out of the model (a ParseNote says so).
+// An APPEARANCE's STATE and TYPE [orig: @ 0x648226], a TABLE's ITEMS rows also knowing
+// IMAGEROW [orig: @ 0x642816]; a SOUND's STATE, its sound state the index + 1
+// (runtime/menu/menu_sound.h) [orig: @ 0x648909]; an ACTION's TEST, and the three
+// attribute names that write its one FIELD slot, the first authored kept [orig: @ 0x648ee2];
+// the JUSTIFY and VJUSTIFY of a STRING, an ITEMS, an ITEM, a HEADER and a BODY; the TYPE of
+// a STRING, a TOGGLE_STRING and a HEADER [orig: CUIButtonWidget_ParseXMLAttributes
+// @ 0x657c30] and of an ITEM [orig: @ 0x6457b6, 0x64bd57, 0x642816].
+inline constexpr const char *kAppearanceStates[] = {"DEFAULT", "DISABLED", "MOUSEOVER", "SELECTED", nullptr};
+inline constexpr const char *kAppearanceTypes[] = {"IMAGE", "COLOR", "CUSTOM", "OUTLINE", nullptr};
+inline constexpr const char *kTableAppearanceTypes[] = {"IMAGE", "IMAGEROW", "COLOR", "CUSTOM", "OUTLINE", nullptr};
+inline constexpr const char *kSoundStates[] = {"MOUSEIN", "MOUSEOUT", "SELECTED", nullptr};
+inline constexpr const char *kActionTests[] = {"LT", "LE", "EQ", "GE", "GT", nullptr};
+inline constexpr const char *kActionFieldAttributes[] = {"FIELD", "SOURCE", "NAME", nullptr};
+inline constexpr const char *kJustify[] = {"LEFT", "CENTER", "RIGHT", nullptr};
+inline constexpr const char *kVJustify[] = {"TOP", "CENTER", "BOTTOM", nullptr};
+inline constexpr const char *kStringTypes[] = {"ID", nullptr};
+inline constexpr const char *kItemTypes[] = {"ID", "IMAGE", "COLOR", "BITMAP", nullptr};
+// A HEADER's primary sort key, one slot under either name [orig: @ 0x6431f2 / 0x643228];
+// the writer puts the first down when the model holds no spelling
+// (TableColumn::primary_sort_token).
+inline constexpr const char *kPrimarySortTokens[] = {"PRIMARY_SORT", "DEFAULT_SORT", nullptr};
+// A BODY's draw kinds (TableBody::display), in the order the writer puts them down.
+inline constexpr const char *kBodyDisplays[] = {"CUSTOM_DRAW", "BITMAP_DRAW", "BITMAP_TEXT", nullptr};
+// The one ORIENTATION text that sets anything: the whole text HORIZONTAL sets the flag and
+// nothing clears it, so any other text reads as vertical [orig: @ 0x64c745 / 0x64c755].
+inline constexpr const char *kHorizontalOrientation = "HORIZONTAL";
+
 // Whether `token` is one of the nullptr-ended `tokens`, ignoring case (the parses' compare).
 bool known_token(const std::string &token, const char *const *tokens);
 
@@ -506,6 +535,16 @@ struct Document {
   // Get the first/default screen. Returns nullptr if document is empty.
   const Screen *first_screen() const;
 };
+
+// The window a by-name lookup finds under `window` [orig: CWnd_FindChildByName @ 0x646850]:
+// an empty name, or a window with no NAME, finds nothing (its children unsearched); a match
+// without case is the window itself; else each child in order, recursively. Only
+// `children` are walked: a part (list_box, spinup, spindown, scrollbar) and the windows it
+// holds are not reached.
+const Window *find_window(const Window &window, const std::string &name);
+// The same over a screen's root windows in document order: the first root that finds one
+// [orig: UI_FindScreenControl @ 0x63ae80, the walk over the section's roots].
+const Window *find_window(const Screen &screen, const std::string &name);
 
 // What the reader left out: an element or attribute retail's parse does not read
 // (or that a later one replaces), a window retail does not create, a retail crash
