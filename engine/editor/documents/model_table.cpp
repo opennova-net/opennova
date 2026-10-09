@@ -928,8 +928,9 @@ std::vector<Entry> face_entries() {
 		// docs/threedi/o3d-scene-format.md `cf` [orig: Physics_RaycastAgainstBoneCollision
 		// @ 0x4e4cb0, the test @ 0x4e5139].
 		{integer("flags", 0, UINT32_MAX, "Flags",
-				 {{"both_sides", 0x1, "Both sides"}, {"bullets_pass", 0x100, "Bullets pass"},
-						 {"front_only", 0x800, "Front only"}},
+				 {{"both_sides", THREEDI_CFAC_FLAG_BOTH_SIDES, "Both sides"},
+						 {"bullets_pass", THREEDI_CFAC_FLAG_BULLETS_PASS, "Bullets pass"},
+						 {"front_only", THREEDI_CFAC_FLAG_FRONT_ONLY, "Front only"}},
 				 true),
 				[](const void *d, int) -> Value { return int64_t(as<ThreediCollisionFace>(d).material_flags); },
 				[](void *d, const Value &v, int, std::string &) {
