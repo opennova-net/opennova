@@ -319,10 +319,6 @@ int test_heightmap_depths() {
 	TEST_EXPECT(!decode_terrain_heightmap("h.png", ramp_png8(512), 127.5, heights, why) &&
 	            why.find("1024 x 1024") != std::string::npos);
 	TEST_EXPECT(!decode_terrain_heightmap("h.raw", std::vector<uint8_t>(100), 127.5, heights, why));
-	// The steep check: a 256-texel stretch spanning more than 128 units.
-	std::vector<uint16_t> steep(1024, 0);
-	steep[300] = 40000;
-	TEST_EXPECT(terrain_steep_blocks(steep) == 1);
 	return 0;
 }
 

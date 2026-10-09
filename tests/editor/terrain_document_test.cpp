@@ -192,7 +192,7 @@ std::string config_difference(const TrnConfig &a, const TrnConfig &b) {
 	if (a.water_murk_set != b.water_murk_set || (a.water_murk_set && a.water_murk != b.water_murk)) return "water_murk";
 	// The grid as the file writes it (the rows, each the width's cells): the rest the game's extension derives.
 	for (int r = 0; r < std::max(1, a.sector_rows); ++r)
-		for (int c = 0; c < std::min(a.sector_count, kTerrainGridSide); ++c)
+		for (int c = 0; c < std::min(a.sector_count, opennova::kTerrainGridSide); ++c)
 			if (a.sector_grid[r][c] != b.sector_grid[r][c]) return "sector " + std::to_string(r) + "," + std::to_string(c);
 	if (a.foliage_defs.size() != b.foliage_defs.size()) return "foliage count";
 	for (size_t i = 0; i < a.foliage_defs.size(); ++i)
@@ -400,12 +400,18 @@ int test_source_issues() {
 		            blocking[0].severity == DiagnosticSeverity::Error);
 		auto scale = load(head + "polytrn_scale 128\r\n");
 		TEST_EXPECT(scale && scale->blocked() && has_issue(*scale, 4, true, "multiplayer"));
+		// polytrn_depthmap: an arm reads it (formats/trn trn_parser_key), the record does not hold it.
+		auto depth = load(head + "polytrn_depthmap d.raw\r\n");
+		TEST_EXPECT(depth && depth->blocked() && has_issue(*depth, 4, true, "polytrn_depthmap"));
+		// horizon: no arm reads it, the record keeps it (save_trn writes it): no issue.
+		auto horizon = load(head + "horizon 0\r\n");
+		TEST_EXPECT(horizon && !horizon->blocked() && horizon->issues().empty());
 		auto tod = load(head + "tod_begin 0600\r\n");
 		TEST_EXPECT(tod && tod->blocked());
 	}
 	std::printf("source issues: a row before the width, short, wide; a key skipped, written again; a murk past 0.99; a "
 	            "block's codes past four, a line no arm reads; a fifth block; a cut last line; LF line ends restored; an "
-	            "environment keyword, polytrn_scale\n");
+	            "environment keyword, polytrn_scale, polytrn_depthmap; horizon kept\n");
 	return 0;
 }
 

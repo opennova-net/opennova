@@ -123,7 +123,8 @@ void day_track(Workspace &workspace, const EnvironmentViewport &model) {
 	draw->AddLine(ImVec2(now, at.y), ImVec2(now, at.y + height), ImGui::GetColorU32(ImGuiCol_Text), 2.0f);
 	const double pointed = std::clamp(double(ImGui::GetIO().MousePos.x - at.x) / double(width) * 24.0, 0.0, 24.0 - 1.0 / 60.0);
 	if (hovered && !active) {
-		std::string tip = environment_clock_words(pointed) + ": click or drag to run the clock from here.";
+		// The whole minute a click sets (below).
+		std::string tip = environment_clock_words(std::floor(pointed * 60.0) / 60.0) + ": click or drag to run the clock from here.";
 		for (size_t i = 0; i < times.size(); ++i)
 			if (std::fabs(x_of(hours_of(times[i])) - ImGui::GetIO().MousePos.x) < ImGui::GetFontSize() * 0.4f)
 				tip += "\nThe keyframe at " + environment_clock_words(hours_of(times[i])) +
