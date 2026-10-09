@@ -15,6 +15,16 @@ std::string kept_key(const std::string &file, uint64_t stamp) {
 	return strutil::to_lower(file) + '#' + std::to_string(stamp);
 }
 
+bool listed(const std::vector<std::string> &names, const std::string &name) {
+	for (const std::string &kept : names)
+		if (strutil::iequals(kept, name)) return true;
+	return false;
+}
+
+void add_once(std::vector<std::string> &names, const std::string &name) {
+	if (!listed(names, name)) names.push_back(name);
+}
+
 // What retail's dispatch reads for a texture name now (menu_texture_source): the file and its
 // format; whether that file is not the name (a missing .tga's .dds, or no file at all for an
 // extension the dispatch reads nothing for), with the name's own stamp then; and the file's stamp
@@ -270,6 +280,17 @@ bool MenuFrameAssets::font_alive(uint64_t serial) const {
 	for (const auto &entry : fonts_)
 		if (entry.second->font.serial == serial) return true;
 	return false;
+}
+
+void split_unloaded(const MenuFrameAssets &assets, std::vector<std::string> &missing,
+		std::vector<std::string> &unreadable) {
+	missing.clear();
+	unreadable.clear();
+	for (const std::string &name : assets.unreadable()) add_once(unreadable, name);
+	for (const std::string &name : assets.unreadable_tables()) add_once(unreadable, name);
+	for (const std::string &name : assets.unresolved())
+		if (!listed(assets.unreadable(), name)) add_once(missing, name);
+	for (const std::string &name : assets.missing_tables()) add_once(missing, name);
 }
 
 } // namespace opennova::menu
