@@ -5,6 +5,8 @@
 #include <vector>
 
 #include <formats/lwf/lwf.h>
+#include <runtime/audio/footstep_slot.h>
+#include <runtime/audio/oneshot_play.h>
 #include <runtime/audio/sound_profile.h>
 #include <runtime/audio/sound_selector.h>
 
@@ -45,7 +47,7 @@ struct PreviewVoice {
 
 // What a play comes to: the set and the bank it was found in (none: `found` false, `words` why), the
 // voices, and what it plays in words ("FSP_DIRT_L in game.lwf: fs_dirt2.wav at pitch 1.02, volume
-// 230"). A play heard at a distance (PreviewHearing) past the set's range is found but out of range:
+// 230"). A play heard at a distance (audio::SetHearing) past the set's range is found but out of range:
 // no voice.
 struct PreviewPlay {
 	bool found = false;
@@ -57,20 +59,6 @@ struct PreviewPlay {
 	std::string words;
 };
 
-// Where a play is heard (DI-04: a clip's event in the model preview): the sound's place and the
-// listener's (the preview camera's eye), in one frame, metres. The set then plays as the game plays a
-// body's slot sound, a 3D one-shot at their distance: culled past the set's range, each layer's volume
-// by its falloff [orig: Sound_Play3DPositional @ 0x527cb0 -> SoundBank_PlayTriggerEntries @ 0x75ccd0;
-// audio::plan_oneshot_3d, no occlusion: the preview has no world between them].
-struct PreviewHearing {
-	float source[3] = {0.0f, 0.0f, 0.0f};
-	float listener[3] = {0.0f, 0.0f, 0.0f};
-	// Heard instead at a distance from the listener (DI-36: the weather's thunder, a script's `sound`), a direct play
-	// of the set: no range cull, each layer attenuated at `distance_q16` [orig: Sound_PlayTriggerSetScaled @ 0x527b90
-	// -> SoundBank_PlayTriggerEntries @ 0x75ccd0; audio::plan_oneshot_at_distance].
-	bool at_distance = false;
-	int64_t distance_q16 = 0;
-};
 
 // The set named `set`, in the bank named `only` when it is given (a menu's SOUND plays from its own
 // bank [orig: Sound_CollectionPlayTrigger @ 0x652de0]), else in the chain's order; each layer the
@@ -84,43 +72,26 @@ struct PreviewHearing {
 // member's own volume.
 PreviewPlay plan_set_play(const std::vector<PreviewBank> &banks, const std::string &expansion, const std::string &set,
                           const std::string &only, audio::SoundSelector &selector, uint8_t view_flags = 6,
-                          const PreviewHearing *heard = nullptr, int menu_master = -1);
+                          const audio::SetHearing *heard = nullptr, int menu_master = -1);
 
-// The profile the game binds `name` to: the first of the name without case, else the first profile
-// [orig: SoundProfile_FindSlotByName @ 0x526e30]; null with none.
-const audio::SoundProfile *preview_profile(const std::vector<audio::SoundProfile> &profiles, const std::string &name);
-
-// A profile's slot played: the set the slot names, through plan_set_play's search [orig:
+// A profile's slot played (the profile the game binds `profile` to, audio::find_sound_profile): the set
+// the slot names, through plan_set_play's search [orig:
 // SoundProfile_ResolveAllTriggers @ 0x528210 resolves each slot's name across the loaded banks]. An
 // empty slot plays nothing, said in words ("default's SSRFootGND is empty: the game plays nothing").
 PreviewPlay plan_slot_play(const std::vector<audio::SoundProfile> &profiles, const std::string &profile, int slot,
                            const std::vector<PreviewBank> &banks, const std::string &expansion,
                            audio::SoundSelector &selector, uint8_t view_flags = 6,
-                           const PreviewHearing *heard = nullptr);
+                           const audio::SetHearing *heard = nullptr);
 
-// The ground a foot lands on, as the game tests it (audio::footstep_slot's order: water over a
-// nonzero plane, then standing on an entity, then snow, then the ground) [orig: org2
-// @0x4b77c6-0x4b78a8].
-enum class FootSurface { Ground, Snow, Object, Water };
-// The surface a word names ("ground", "snow", "object", "water"); false for none.
-bool foot_surface_of(const std::string &word, FootSurface &out);
-const char *foot_surface_word(FootSurface surface);
-// The state under the feet the game's test reads that comes to `surface`: feet under a water plane, a
-// ground entity, the charmap's surface 3, else none of them (what audio::footstep_slot takes).
-struct FootState {
-	int32_t feet_z = 0;
-	int32_t water_z = 0;
-	bool on_entity = false;
-	int32_t surface_type = 0;
-};
-FootState foot_state_on(FootSurface surface);
-// The profile slot a footstep of `foot` (0 left, 1 right) plays on `surface`, through audio::footstep_slot.
-int footstep_slot_on(FootSurface surface, int foot);
+// The surface a word names ("ground", "snow", "object", "water": audio::FootSurface, the ground a foot
+// lands on as the game tests it); false for none.
+bool foot_surface_of(const std::string &word, audio::FootSurface &out);
+const char *foot_surface_word(audio::FootSurface surface);
 
-// A footstep played as the game plays one (DI-04's seam): the slot footstep_slot_on picks, then
+// A footstep played as the game plays one (DI-04's seam): the slot audio::footstep_slot_on picks, then
 // plan_slot_play.
 PreviewPlay plan_footstep_play(const std::vector<audio::SoundProfile> &profiles, const std::string &profile,
-                               FootSurface surface, int foot, const std::vector<PreviewBank> &banks,
+                               audio::FootSurface surface, int foot, const std::vector<PreviewBank> &banks,
                                const std::string &expansion, audio::SoundSelector &selector);
 
 } // namespace opennova::editor
