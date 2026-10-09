@@ -63,6 +63,18 @@ target_compile_features(sha256_test PRIVATE cxx_std_17)
 target_include_directories(sha256_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME sha256 COMMAND sha256_test)
 
+# The OS CSPRNG (base/os_random): buffers of many sizes filled to the byte, draws that differ,
+# no all-zero fill, the nonzero draw, make_uuid_v4's spelling with no repeat, the OsRandom
+# generator under <random>, and 32 threads drawing at once with
+# no zero runs and no repeats past the birthday bound (the RDSEED failure std::random_device
+# shows under libstdc++ on a CPU with AMD's RDSEED erratum).
+find_package(Threads REQUIRED)
+add_executable(os_random_test os_random/os_random_test.cpp)
+target_link_libraries(os_random_test PRIVATE opennova_base Threads::Threads)
+target_compile_features(os_random_test PRIVATE cxx_std_17)
+target_include_directories(os_random_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME os_random COMMAND os_random_test)
+
 # Roundtrip test
 add_executable(threedi_roundtrip_test threedi/roundtrip_test.cpp)
 target_link_libraries(threedi_roundtrip_test PRIVATE opennova_formats)
@@ -4312,6 +4324,11 @@ add_test(NAME serve_registration_parity COMMAND serve_registration_parity_test)
 add_executable(nwu_demux_test novaworld/nwu_demux_test.cpp)
 target_link_libraries(nwu_demux_test PRIVATE opennova_net)
 add_test(NAME nwu_demux COMMAND nwu_demux_test)
+# The NWU lobby driver's own draws (no Environment::random_u32, as opennova-nw-lister runs):
+# 32 sessions opened on 32 threads at once share no client index or key.
+add_executable(nwu_lobby_draws_test novaworld/nwu_lobby_draws_test.cpp)
+target_link_libraries(nwu_lobby_draws_test PRIVATE opennova_net Threads::Threads)
+add_test(NAME nwu_lobby_draws COMMAND nwu_lobby_draws_test)
 
 # opennova-serve's status console (ADR 0051 PR7): the page as text over a synthetic feed (a
 # text snapshot) and its print rule; the client-less host's CHAT ring and console chat; the

@@ -9,11 +9,11 @@
 #include <ctime>
 #include <initializer_list>
 #include <iomanip>
-#include <random>
 #include <sstream>
 #include <utility>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
+#include <base/os_random/os_random.h>
 
 namespace opennova {
 
@@ -67,11 +67,10 @@ std::string find_app_id_recursive(const NapiMessage &msg) {
 }
 
 std::string default_sess_id() {
-	// 32-char hex token (policy: the service mints the SessIdString).
-	static thread_local std::mt19937_64 gen{std::random_device{}()};
-	std::uniform_int_distribution<uint64_t> pick;
-	uint64_t a = pick(gen);
-	uint64_t b = pick(gen);
+	// 32-char hex token (policy: the service mints the SessIdString), from the
+	// OS CSPRNG (base/os_random).
+	const uint64_t a = os_random_u64();
+	const uint64_t b = os_random_u64();
 	std::ostringstream os;
 	os << std::hex << std::setfill('0') << std::setw(16) << a << std::setw(16) << b;
 	return os.str();
@@ -93,8 +92,7 @@ std::string default_gsid(const std::string &app_id) {
 	// A non-numeric AppId keeps the GSID's app field 0.
 	const uint32_t app_int = static_cast<uint32_t>(strutil::parse_ulong(app_id).value_or(0));
 
-	static thread_local std::mt19937_64 gen{std::random_device{}()};
-	const uint64_t r = std::uniform_int_distribution<uint64_t>{}(gen);
+	const uint64_t r = os_random_u64(); // the OS CSPRNG (base/os_random)
 
 	char buf[80];
 	std::snprintf(buf, sizeof(buf),

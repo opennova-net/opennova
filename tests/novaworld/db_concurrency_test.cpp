@@ -14,6 +14,10 @@
 //     shared-handle bug itself is the HTTP route harness's concurrent case);
 //   * racing registrations of one username leave one account and answer the
 //     rest username_exists, never a UNIQUE-violation db_error;
+//   * every stored password hash carries its own bcrypt salt, though every
+//     racer hashes the same password: the salts draw from the OS CSPRNG
+//     (base/os_random), where a libstdc++ std::random_device serves RDSEED,
+//     which AMD's erratum answers with 0 under concurrent use;
 //   * a read snapshot never holds a host's roster partial, empty or mixed, or
 //     beside a row whose server name or player count belongs to another
 //     write: every write replaces the whole roster and those columns with one
@@ -406,6 +410,19 @@ int run(const std::filesystem::path &db_path) {
 		TEST_EXPECT(ids.insert(r.id).second);
 		const auto user = get_user_by_id(*check, r.id);
 		TEST_EXPECT(user && user->username == r.username);
+	}
+
+	// Every account's hash ($2b$<cost>$<22-char salt><31-char hash>) has a salt
+	// of its own, and none is the all-zero salt (22 '.' in bcrypt's base64).
+	std::set<std::string> salts;
+	const auto hashes = check->query("SELECT password_hash FROM players;");
+	TEST_EXPECT(hashes.size() == registered.size() + 1); // + the contested account
+	for (const auto &row : hashes) {
+		const std::string hash = row.as_text(0).value_or("");
+		TEST_EXPECT(hash.size() == 60 && hash.compare(0, 4, "$2b$") == 0);
+		const std::string salt = hash.substr(7, 22);
+		TEST_EXPECT(salt != std::string(22, '.'));
+		TEST_EXPECT(salts.insert(salt).second);
 	}
 
 	// Each host ends on one writer's last generation, complete, and on the UDP

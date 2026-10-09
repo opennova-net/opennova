@@ -77,7 +77,7 @@
   leaf directly) — `opennova_formats`
   (every formats/ lib; the mission FORMAT lib's membership here is the fold that keeps
   the four-group partition acyclic), `opennova_base` (vfs, resource_index, gameprofile,
-  pcapio), `opennova_net` (novacrypto, napi, npwire, admin + novaworld session/gate —
+  pcapio, os_random), `opennova_net` (novacrypto, napi, npwire, admin + novaworld session/gate —
   the wire), `opennova_runtime` (the rest of runtime/, including `inmatch` and
   `replication`), and `opennova_novaworld_service` (the service alone — the ONLY
   target linking `opennova_sqlite`; the Godot layer (`godot/src`) links
@@ -102,7 +102,16 @@
   `io/file_io.h` (whole-file reads and the atomic `.tmp`-then-rename write over
   `os_path`, the rename's bounded retry), `io/sha256.h` (FIPS 180-4 SHA-256: the
   streaming `Sha256` and the one-shot `sha256` / `sha256_hex`; infrastructure, not a
-  port). Do not hand-roll a new byte reader; migrate existing per-lib copies on-touch
+  port). A secret or one-of-a-kind value (a salt, a session tag or key, an id, a UUID)
+  draws from `base/os_random` (the OS CSPRNG: `os_random_bytes`, `os_random_u32` /
+  `os_random_u64` / `os_random_nonzero_u32`, `make_uuid_v4`, the `OsRandom` generator),
+  never `std::random_device`, which libstdc++ serves from RDSEED (AMD's erratum answers
+  concurrent draws with 0); it is a compiled lib in `opennova_base`, not `io`, because
+  its Windows call needs `<windows.h>`. The one `std::random_device` left in `engine/`
+  is the narrow exception: the CBIN writer's fresh XOR key (`formats/cbin`, a credits
+  file with no preserved key) is written in the clear in the file's own header, so it
+  only obfuscates and is neither a secret nor an id, and formats cannot link base. Do
+  not hand-roll a new byte reader; migrate existing per-lib copies on-touch
   (delegate the body, keep the local signature, gated on that lib's byte-exact roundtrip tests).
   The 16.16 / 2.14 scales are `io/fixed.h`'s `kFp16One` (float), `kFp16OneD`
   (double), `kFp16OneInt`, `kInvFp16One` and `kFp14One`, and the logic clock is

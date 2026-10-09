@@ -1,10 +1,11 @@
 #include "auth.h"
 
+#include <base/os_random/os_random.h>
+
 #include <array>
 #include <cstdio>
 #include <cstring>
 #include <optional>
-#include <random>
 #include <stdexcept>
 
 extern "C" {
@@ -286,11 +287,10 @@ std::size_t evict_active_user_sessions_older_than(opennova::db::Database &db,
 
 std::string hash_password(const std::string &plain, int cost) {
 	if (cost < 4 || cost > 31) cost = 10;
-	// 16 random bytes via std::random_device → bcrypt's modified-base64
+	// 16 bytes from the OS CSPRNG (base/os_random) → bcrypt's modified-base64
 	// → assembled as $2b$<cost>$<22-char-salt> for hand-off to bcrypt_hashpass.
 	std::array<uint8_t, 16> raw{};
-	std::random_device rd;
-	for (auto &b : raw) b = static_cast<uint8_t>(rd());
+	os_random_bytes(raw.data(), raw.size());
 	char salt_b64[64] = {0};
 	if (encode_base64(salt_b64, raw.data(), raw.size()) != 0) {
 		throw std::runtime_error("hash_password: encode_base64 failed");

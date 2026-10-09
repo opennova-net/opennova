@@ -19,7 +19,6 @@
 #include <cstdint>
 #include <future>
 #include <memory>
-#include <random>
 #include <string>
 #include <vector>
 
@@ -107,7 +106,6 @@ private:
 	uint32_t now_ms_ = 0;      // the session's clock: the embedder's, from the first pass
 	uint32_t clock_origin_ = 0;
 	bool clock_started_ = false;
-	std::mt19937 rng_;
 
 	net::ScopedSocket gate_udp_;
 	net::ScopedSocket session_udp_;

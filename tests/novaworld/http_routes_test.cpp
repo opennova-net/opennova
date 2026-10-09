@@ -62,6 +62,7 @@ constexpr const char *kJson = "Content-Type: application/json";
 
 struct Harness {
 	ConnectionPool &pool;
+	nws::SessionStore &sessions; // the listener's, for what a reply only names by its tag
 	uint16_t port = 0;
 	std::string registered_pcid; // what the register case's reply carried
 
@@ -99,6 +100,25 @@ bool is_lower_hex8(const std::string &s) {
 	return s.size() == 8 && std::all_of(s.begin(), s.end(), [](char c) {
 		       return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
 	       });
+}
+
+// The value a reply's Set-Cookie gives `name`, "" when no Set-Cookie names it.
+std::string set_cookie_value(const net::HttpReply &reply, const std::string &name) {
+	static const std::string kSetCookie = "set-cookie";
+	for (const std::string &line : reply.headers) {
+		const auto colon = line.find(':');
+		if (colon != kSetCookie.size()) continue;
+		std::string header = line.substr(0, colon);
+		for (char &c : header) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		if (header != kSetCookie) continue;
+		const auto start = line.find_first_not_of(' ', colon + 1);
+		if (start == std::string::npos || line.compare(start, name.size() + 1, name + "=") != 0) {
+			continue;
+		}
+		const auto value = start + name.size() + 1;
+		return line.substr(value, line.find(';', value) - value);
+	}
+	return {};
 }
 
 // GET /api/health, the readiness probe: the listener binds on its own thread
@@ -442,6 +462,37 @@ int test_concurrent_requests(Harness &h) {
 	return 0;
 }
 
+// GET /NWHost.dll, the first call: a fresh session tag
+// (NWServer:NWHost.dll:SESSIONTAG:<0..99999>:<8 hex>) whose stored HOSTKEY is 48
+// letters A-P (24 random bytes, a nibble each, from the OS CSPRNG); two first
+// calls share neither.
+int test_nwhost_first_call_mints_hostkey(Harness &h) {
+	static const std::string kTagPrefix = "NWServer:NWHost.dll:SESSIONTAG:";
+	std::string tags[2];
+	std::string keys[2];
+	for (int i = 0; i < 2; ++i) {
+		const auto reply = h.send("GET", "/NWHost.dll?success=jop_2_host2.htm&pfid=28");
+		TEST_EXPECT(reply.transport_ok && reply.code == 200);
+		tags[i] = set_cookie_value(reply, "NWJOINSESSIONTAG");
+		TEST_EXPECT(tags[i].compare(0, kTagPrefix.size(), kTagPrefix) == 0);
+		const std::string tail = tags[i].substr(kTagPrefix.size());
+		const auto colon = tail.find(':');
+		TEST_EXPECT(colon != std::string::npos && colon >= 1 && colon <= 5);
+		TEST_EXPECT(std::all_of(tail.begin(), tail.begin() + colon,
+		                        [](char c) { return c >= '0' && c <= '9'; }));
+		TEST_EXPECT(is_lower_hex8(tail.substr(colon + 1)));
+		const auto session = h.sessions.get_host(tags[i]);
+		TEST_EXPECT(session.has_value());
+		keys[i] = session->host_key;
+		TEST_EXPECT(keys[i].size() == 48);
+		TEST_EXPECT(std::all_of(keys[i].begin(), keys[i].end(),
+		                        [](char c) { return c >= 'A' && c <= 'P'; }));
+	}
+	TEST_EXPECT(tags[0] != tags[1]);
+	TEST_EXPECT(keys[0] != keys[1]);
+	return 0;
+}
+
 // The static/catch-all family answers a path no root holds with 404.
 int test_unknown_path_404(Harness &h) {
 	const auto reply = h.send("GET", "/definitely/missing.txt");
@@ -458,6 +509,7 @@ int run(Harness &h) {
 		{"register_duplicate", test_register_duplicate},
 		{"admin_server_status_requires_token", test_admin_server_status_requires_token},
 		{"admin_users_list", test_admin_users_list},
+		{"nwhost_first_call_mints_hostkey", test_nwhost_first_call_mints_hostkey},
 		{"unknown_path_404", test_unknown_path_404},
 		{"concurrent_requests", test_concurrent_requests},
 	};
@@ -513,7 +565,7 @@ int main() {
 		nws::HttpListener http(manager, pool, sessions);
 		TEST_EXPECT(http.start(config));
 
-		Harness harness{pool, port, {}};
+		Harness harness{pool, sessions, port, {}};
 		rc = run(harness);
 		http.stop(); // joins the Crow thread before the pool and the TempDir go
 	}

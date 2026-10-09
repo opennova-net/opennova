@@ -77,7 +77,6 @@ Lister::Lister(ListerOptions options, std::unique_ptr<ListingSource> owned, List
       owned_source_(std::move(owned)),
       source_(source != nullptr ? source : owned_source_.get()),
       shared_session_socket_(session_socket),
-      rng_(std::random_device{}()),
       lobby_(
           [this]() {
 	          NwuLobbySession::Hooks hooks;
@@ -96,8 +95,7 @@ Lister::Lister(ListerOptions options, std::unique_ptr<ListingSource> owned, List
 	          return hooks;
           }(),
           [this]() {
-	          NwuLobbySession::Environment env;
-	          env.random_u32 = [this]() { return static_cast<uint32_t>(rng_()); };
+	          NwuLobbySession::Environment env; // random_u32 unset: the OS CSPRNG
 	          env.resolve_ipv4 = [this](const std::string &host, PeerAddr &out) {
 		          net::Endpoint endpoint;
 		          if (!resolve_destination(host, endpoint, options_.destinations, options_.allow_public, "NovaWorld host"))
