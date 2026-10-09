@@ -245,11 +245,48 @@ int test_named_values() {
 	return 0;
 }
 
+// The SSN a new entity takes skips the player's; the pools load and scan organics, items,
+// buildings, markers; a zone id resolves to the first area of the id unless its box is flat.
+int test_ssns_pools_and_zones() {
+	TEST_EXPECT(ssn_after(0) == 1 && ssn_after(41) == 42);
+	TEST_EXPECT(ssn_after(kPlayerSsn - 1) == kPlayerSsn + 1 && ssn_after(kPlayerSsn) == kPlayerSsn + 1);
+
+	using opennova::mission::EntityKind;
+	TEST_EXPECT(entity_pool(EntityKind::Organic) == 0 && entity_pool(EntityKind::Item) == 1 &&
+	            entity_pool(EntityKind::Building) == 2 && entity_pool(EntityKind::Marker) == 3);
+	TEST_EXPECT(kOrganicPool == 1u << entity_pool(EntityKind::Organic) && kItemPool == 1u << entity_pool(EntityKind::Item) &&
+	            kBuildingPool == 1u << entity_pool(EntityKind::Building) &&
+	            kMarkerPool == 1u << entity_pool(EntityKind::Marker));
+
+	const auto area = [](int32_t id, int32_t x_min, int32_t x_max, int32_t y_min, int32_t y_max) {
+		bms::AreaTrigger a{};
+		a.id = id;
+		a.x_min = x_min;
+		a.x_max = x_max;
+		a.y_min = y_min;
+		a.y_max = y_max;
+		return a;
+	};
+	// Zone 6 twice (the first is the one found), zone 7 flat on x, zone 8 flat on y; the words
+	// compare raw, so two corners one 16.16 step apart are no flat box.
+	const std::vector<bms::AreaTrigger> areas = {
+			area(6, 0, 65536, 0, 65536), area(6, 0, 0, 0, 65536), area(7, 1 << 24, 1 << 24, 0, 65536),
+			area(8, 0, 65536, -65536, -65536), area(9, 300 << 16, (300 << 16) + 1, 0, 1),
+	};
+	TEST_EXPECT(zone_area_index(areas, 6) == 0 && zone_area_index(areas, 9) == 4 && zone_area_index(areas, 5) == -1);
+	TEST_EXPECT(!zone_box_flat(areas[0]) && zone_box_flat(areas[1]) && zone_box_flat(areas[2]) &&
+	            zone_box_flat(areas[3]) && !zone_box_flat(areas[4]));
+	TEST_EXPECT(zone_resolves(areas, 6) && !zone_resolves(areas, 7) && !zone_resolves(areas, 8) &&
+	            zone_resolves(areas, 9) && !zone_resolves(areas, 5));
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	if (test_triggers() != 0) return 1;
 	if (test_actions() != 0) return 1;
 	if (test_named_values() != 0) return 1;
+	if (test_ssns_pools_and_zones() != 0) return 1;
 	return test_names_and_domains();
 }

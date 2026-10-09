@@ -8,6 +8,7 @@
 
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission_field.h>
+#include <formats/mission/mission_params.h>
 
 #include <algorithm>
 #include <cstring>
@@ -211,12 +212,8 @@ void add_trigger_area_reference(const MissionTriggerRecord &trigger,
 	}
 	const int slot = within_area ? 2 : 1;
 	const int id = within_area ? trigger.param2 : trigger.param1;
-	int area_index = -1;
-	for (size_t i = 0; i < areas.size() && area_index < 0; ++i) {
-		if (areas[i].id == id) area_index = static_cast<int>(i);
-	}
-	const bool flat = area_index >= 0 && (areas[static_cast<size_t>(area_index)].x_min == areas[static_cast<size_t>(area_index)].x_max ||
-	                                      areas[static_cast<size_t>(area_index)].y_min == areas[static_cast<size_t>(area_index)].y_max);
+	const int area_index = zone_area_index(areas, id);
+	const bool flat = area_index >= 0 && zone_box_flat(areas[static_cast<size_t>(area_index)]);
 	const bool valid = area_index >= 0 && !flat;
 	chain.references.push_back(logic_reference("trigger", static_cast<int>(trigger.index), "area_trigger", area_index, slot, id, "area", valid));
 	if (!valid) {
@@ -240,7 +237,7 @@ int next_entity_id(const bms::File &file) {
 	scan(file.buildings);
 	scan(file.markers);
 	scan(file.organics);
-	return max_id + 1;
+	return ssn_after(max_id);
 }
 
 void apply_transform(bms::Entity &entity, const EntityTransform &transform) {

@@ -166,9 +166,10 @@ void EntityRegistry::by_group(uint8_t group, std::vector<EntityHandle> &out) con
 }
 
 int EntityRegistry::register_area(std::string name, const Aabb &bounds, bool active,
-                                  int32_t zone_id, std::optional<Aabb> script_bounds) {
+                                  int32_t zone_id, std::optional<Aabb> script_bounds,
+                                  bool flat) {
     areas_.push_back(Area{std::move(name), bounds, active, zone_id,
-                         script_bounds.value_or(bounds)});
+                         script_bounds.value_or(bounds), flat});
     return static_cast<int>(areas_.size() - 1);
 }
 

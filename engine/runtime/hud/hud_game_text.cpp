@@ -37,7 +37,9 @@ std::string waypoint_display_name(const WaypointNameKey &key, bool in_session,
 			if (!special.empty()) return special;
 		}
 	}
-	const std::string name = game_text(mission, kWaypointNameKey, id, ""); // [orig: @0x59473D]
+	// The mission's string as the spawn left it in the table, cut to 15 characters
+	// (game_text_lookup.h kWaypointNameChars) [orig: @0x59473D].
+	const std::string name = waypoint_name_as_spawned(game_text(mission, kWaypointNameKey, id, ""));
 	// Empty or the literal "null" falls back to the gametext default
 	// [orig: @0x59476F..0x59477B].
 	if (name.empty() || strutil::iequals(name.c_str(), "null"))

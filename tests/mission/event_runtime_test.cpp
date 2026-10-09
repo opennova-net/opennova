@@ -2089,6 +2089,46 @@ static void test_dangling_zone_ref_neuters_trigger() {
     CHECK(w.out.effects.count("text") == 0); // neutered trigger evaluates false
 }
 
+// A zone whose record's box is flat (world::Area::flat, the record's 16.16 words
+// through mission::zone_box_flat at promotion) neuters the trigger naming it like a
+// dangling id; a box only one 16.16 step wide on an axis resolves, however the
+// float bounds round [orig: the box test @0x453093].
+static void test_flat_zone_box_neuters_trigger() {
+    const auto run = [](bool flat) {
+        World w;
+        w.cached.humans = 1;
+        w.registry.configure_pool(0, 4);
+        world::Aabb box;
+        box.min = {300.0f, 0.0f, -16384.0f};
+        box.max = {300.0f, 100.0f, 16384.0f}; // the float bounds of a one-step-wide box
+        w.registry.register_area("", box, true, /*zone_id=*/5, std::nullopt, flat);
+        world::Entity seed{};
+        seed.alive = true;
+        seed.net_id = 10000;
+        seed.position = {300.0f, 50.0f, 0.0f};
+        w.cached.local_player = w.registry.spawn(0, seed);
+        bms::Event e = simple_event(bms::EventFlags::None, 0);
+        e.trigger_count = 1;
+        e.action_count = 1;
+        bms::Trigger t{};
+        t.main_type = bms::TriggerMainType::Single;
+        t.sub_type = static_cast<int32_t>(bms::SingleTriggerType::SingleIsWithinArea);
+        t.param1 = 10000;
+        t.param2 = 5;
+        bms::Action act{};
+        act.action_type = bms::ActionType::OutputText;
+        act.param1 = 7;
+        mission::BmsEventSystem sys;
+        sys.load({e}, {t}, {act});
+        w.add_system(&sys);
+        w.load_systems();
+        tick_n(w, kPass);
+        return w.out.effects.count("text") != 0;
+    };
+    CHECK(run(false)); // resolved: the player stands on the box's edge
+    CHECK(!run(true)); // flat: neutered, reads false
+}
+
 // The BMS win actions end the round through the SAME entry the WAC win/lose
 // handlers use [orig: EventAction_Dispatch @0x4542e0, the BlueWin case @0x45447b ->
 // Server_ProcessRoundEnd(1), one shared round end for both script front-ends].
@@ -2603,6 +2643,7 @@ int main() {
     test_zone_refs_resolve_by_id();
     test_area_trigger_pool_and_identity_rules();
     test_dangling_zone_ref_neuters_trigger();
+    test_flat_zone_box_neuters_trigger();
     test_bluewin_ends_round();
     std::printf(failures ? "EVENT RUNTIME TESTS FAILED (%d)\n" : "event runtime tests passed\n", failures);
     // --- BMS action 27, PARTICLE_EFFECT [orig: EventAction_Dispatch case 0x1B

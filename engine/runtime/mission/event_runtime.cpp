@@ -56,10 +56,11 @@ void BmsEventSystem::load(const std::vector<bms::Event> &events,
 }
 
 void BmsEventSystem::resolve_zone_refs(World &w) {
+    // A flat box resolves nothing (world::Area::flat, the record's words through
+    // mission::zone_box_flat at promotion) [orig: @0x453093/@0x45317e].
     auto area_degenerate = [&](int idx) {
         const opennova::world::Area *a = w.registry.area(idx);
-        return a == nullptr || a->bounds.min.x == a->bounds.max.x ||
-               a->bounds.min.y == a->bounds.max.y;
+        return a == nullptr || a->flat;
     };
     // Both walks read the event's count byte signed: 128..255 resolve nothing
     // [orig: the trigger walk @0x453022/@0x4530C8; the action walk
