@@ -50,7 +50,7 @@ std::set<std::string> OriginalBytes::identical(const std::string &install, const
 			std::vector<uint8_t> theirs, ours;
 			std::string error;
 			++reads_;
-			same = view->read(*served, theirs) && theirs.size() == size && read_file_bytes(path, ours, error) &&
+			same = view->read(*served, theirs) && theirs.size() == size && io::read_file_bytes(path, ours, error) &&
 			       ours == theirs;
 		}
 		if (io::file_stamp_settled(written, asked_at)) known_[file] = Known{size, written, same};

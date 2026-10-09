@@ -50,7 +50,7 @@ ImportChoice loose(std::string path) {
 bool read_dds(const std::string &path, dds::DdsImage &image) {
 	std::vector<uint8_t> bytes;
 	std::string error;
-	return read_file_bytes(path, bytes, error) && dds::dds_read(bytes.data(), bytes.size(), image, error) && image.loads;
+	return io::read_file_bytes(path, bytes, error) && dds::dds_read(bytes.data(), bytes.size(), image, error) && image.loads;
 }
 
 } // namespace

@@ -126,21 +126,7 @@ FieldUse picked_as(const FieldUse &field) {
 }
 
 bool key_number(ReferenceKind kind, const std::string &key, const char *prefix, int64_t &out) {
-	if (!prefix) return false;
-	const size_t length = std::strlen(prefix);
-	if (key.size() <= length) return false;
-	const bool exact = reference_row(kind).name_case == NameCase::Exact;
-	if (exact ? key.compare(0, length, prefix) != 0 : !strutil::iequals(key.substr(0, length), prefix)) return false;
-	const std::string digits = key.substr(length);
-	if (!strutil::all_digits(digits)) return false;
-	const std::optional<int> number = strutil::parse_int(digits);
-	if (!number) return false;
-	// The key the game forms from the number ("%s%03i") is this one, or no number forms it.
-	char formed[32];
-	std::snprintf(formed, sizeof(formed), "%03i", *number);
-	if (digits != formed) return false;
-	out = int64_t(*number);
-	return true;
+	return strutil::key_number(key, prefix, reference_row(kind).name_case == NameCase::Exact, out);
 }
 
 bool text_key_number(const std::string &key, const char *prefix, int64_t &out) {
@@ -237,12 +223,6 @@ std::vector<ReferenceChoice> picker_choices(const AssetGraph *graph, const Docum
 	return choices;
 }
 
-size_t name_characters(const std::string &name) {
-	size_t count = 0;
-	for (const char c : name) count += (static_cast<unsigned char>(c) & 0xC0) != 0x80 ? 1 : 0;
-	return count;
-}
-
 size_t field_name_limit(const FieldUse &field) {
 	if (!field.schema || field.schema->type != FieldType::Text || field.schema->width < 2) return 0;
 	return field.schema->width - 1;
@@ -264,7 +244,7 @@ std::vector<ReferenceCompletion> complete_reference(const std::vector<ReferenceC
 		const std::string name = spelled(choice.name);
 		completion.prefix = name.compare(0, wanted.size(), wanted) == 0;
 		completion.exact = completion.prefix && name.size() == wanted.size();
-		completion.fits = !limit || name_characters(choice.name) <= limit;
+		completion.fits = !limit || strutil::utf8_length(choice.name) <= limit;
 		const bool holds = completion.prefix || name.find(wanted) != std::string::npos ||
 		                   (!choice.label.empty() && strutil::to_upper(choice.label).find(strutil::to_upper(typed)) != std::string::npos);
 		if (!holds) continue;

@@ -74,7 +74,7 @@ public:
 	// A build of `model` (named `path`) begun, its textures read through `files`, its meshes skinned for and bound
 	// to `rig` (null: none); a null model clears what it drew.
 	void begin(const opennova::assets::Model &model, const std::string &path,
-			std::shared_ptr<const opennova::editor::StampedFiles> files, std::shared_ptr<const opennova::anim::SkeletalClips> rig);
+			std::shared_ptr<const opennova::StampedFiles> files, std::shared_ptr<const opennova::anim::SkeletalClips> rig);
 	bool building() const { return build_ != nullptr; }
 	// One unit of the build: true when it was the last (the scene assembled).
 	bool step();
@@ -106,13 +106,13 @@ public:
 	void tick(int64_t ms);
 
 	// The files the scene read (its textures), or the build in flight so far.
-	opennova::editor::FileStamps stamps() const;
+	opennova::FileStamps stamps() const;
 	ObjectModel *object() const { return object_; }
 
 private:
 	// A build in flight: its data's units, then the scene.
 	struct Build {
-		std::shared_ptr<const opennova::editor::StampedFiles> files;
+		std::shared_ptr<const opennova::StampedFiles> files;
 		Ref<SkeletalAnim> skeletal;
 		std::unique_ptr<ModelDataBuild> data;
 	};
@@ -122,7 +122,7 @@ private:
 	Ref<ObjectData> data_;
 	Ref<PanmClock> clock_;
 	int64_t frame_ = 0;
-	std::shared_ptr<const opennova::editor::StampedFiles> files_;
+	std::shared_ptr<const opennova::StampedFiles> files_;
 	std::map<std::string, int64_t> applied_ctrl_;
 	uint32_t applied_hidden_ = 0;
 	bool arms_ = false;

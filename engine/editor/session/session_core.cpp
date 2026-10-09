@@ -12,6 +12,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/file_time.h>
 #include <base/io/json.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/install_check.h>
@@ -61,18 +62,6 @@ namespace {
 bool same_finding(const Diagnostic &a, const Diagnostic &b) {
 	return a.severity == b.severity && a.row() == b.row() && a.message == b.message && a.asset == b.asset &&
 	       a.field == b.field && a.record == b.record && a.line == b.line;
-}
-
-// Whether `path` is the folder `dir` or under it, symbolic links resolved (weakly_canonical, which
-// also gives a folder that exists its own spelling).
-bool inside(const fs::path &path, const fs::path &dir) {
-	std::error_code ec;
-	const fs::path base = fs::weakly_canonical(dir, ec);
-	if (ec) return false;
-	const fs::path full = fs::weakly_canonical(path, ec);
-	if (ec) return false;
-	const fs::path relative = full.lexically_relative(base);
-	return !relative.empty() && !relative.is_absolute() && *relative.begin() != "..";
 }
 
 } // namespace
@@ -896,7 +885,7 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 		failures.push_back(make_finding(CoreFinding::ProjectNone, DiagnosticSeverity::Error,
 		                                "Open a project to keep a folder to build it into."));
 	} else if (change.build_folder && !change.build_folder->empty() &&
-	           inside(path_of(*change.build_folder).lexically_normal(), path_of(paths_.root))) {
+	           io::path_within(path_of(*change.build_folder).lexically_normal(), path_of(paths_.root))) {
 		failures.push_back(make_finding(CoreFinding::BuildOutDirInProject, DiagnosticSeverity::Error,
 		                                "A folder to build into for players lies outside the project: " +
 		                                        *change.build_folder + " is inside it."));
@@ -1577,7 +1566,7 @@ std::string SessionCore::export_folder(const std::string &to) {
 	fs::path out = path_of(to);
 	if (out.is_relative()) out = path_of(paths_.root) / out;
 	out = out.lexically_normal();
-	if (inside(out, path_of(paths_.root)) && !inside(out, path_of(own))) {
+	if (io::path_within(out, path_of(paths_.root)) && !io::path_within(out, path_of(own))) {
 		view_.activity.status = "The export was refused: its folder is inside the project.";
 		report(make_finding(CoreFinding::ExportFolder, DiagnosticSeverity::Error,
 		                    "An export cannot land in " + utf8_of(out) +
@@ -1631,8 +1620,8 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 		fs::path out = path_of(out_dir);
 		if (out.is_relative()) out = path_of(paths_.root) / out;
 		out = out.lexically_normal();
-		if (inside(out, path_of(paths_.root)) && !inside(out, path_of(paths_.cache_dir)) &&
-		    !inside(out, path_of(paths_.export_dir(*view_.project.document)))) {
+		if (io::path_within(out, path_of(paths_.root)) && !io::path_within(out, path_of(paths_.cache_dir)) &&
+		    !io::path_within(out, path_of(paths_.export_dir(*view_.project.document)))) {
 			view_.activity.status = "The build was refused: its folder is inside the project.";
 			report(make_finding(CoreFinding::BuildOutDirInProject, DiagnosticSeverity::Error,
 			                    "A build cannot land in " + utf8_of(out) +
@@ -1658,7 +1647,7 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	// and replaces only its own. Inside the project (its default folder, its cache, its export folder) every
 	// build there is its own.
 	plan.project = view_.project.document->project_id;
-	plan.own_folder = inside(path_of(output_root), path_of(paths_.root));
+	plan.own_folder = io::path_within(path_of(output_root), path_of(paths_.root));
 	// No directory a game runs from is pruned, asked when the build publishes (a game started
 	// while it packed counts): this editor's game's, and every one whose lease names a process
 	// that may still run (a game left running across an editor restart; one the platform cannot
