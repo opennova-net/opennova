@@ -14,7 +14,7 @@ namespace opennova::editor {
 class PreviewEffectCatalog;
 
 // One effect a definition's picture spawns (ADR 0046 DI-21): the effect's name, the pose the game's spawn
-// hands the scene (the preview's space: effect_forward_pose for an item's particle slot, effect_descriptor_pose
+// hands the scene (the preview's space: particle::forward_pose for an item's particle slot, particle::descriptor_pose
 // for a death's effect), the clock tick it spawns on, and what spawns it: its source ("particle_slot", the
 // death banks' "dead", "fire" and "other", "death" for a class's one effect at the item) and the user point
 // it spawns at ("" the item's origin).
