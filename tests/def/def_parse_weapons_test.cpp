@@ -60,6 +60,30 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
+    // A name two blocks define is its last block in the game's weapon table: the second `weapon`
+    // line takes the first's entry back and resets it before its keys parse [orig:
+    // WeaponDefs_ParseLineCallback @ 0x5436e1..0x543722]; "null" names no entry [orig:
+    // AvatarDef_FindIndexByName @ 0x53fd8b]. The parse keeps both blocks, as the file has them.
+    {
+        static const char kTwice[] =
+            "weapon \"WPN_TWICE\"\r\nclipsize 10\r\nend\r\n"
+            "weapon \"WPN_OTHER\"\r\nclipsize 5\r\nend\r\n"
+            "weapon \"wpn_twice\"\r\nclipsize 30\r\nend\r\n";
+        DefWeaponsFile parsed{};
+        if (def_parse_weapons_memory(reinterpret_cast<const unsigned char *>(kTwice), sizeof(kTwice) - 1, &parsed) != 0 ||
+            parsed.count != 3) return 1;
+        const int twice = def_weapon_index_by_name(parsed.entries, parsed.count, "Wpn_Twice");
+        const bool last = twice == 2 && parsed.entries[twice].clipsize == 30 &&
+                          def_weapon_index_by_name(parsed.entries, parsed.count, "WPN_OTHER") == 1 &&
+                          def_weapon_index_by_name(parsed.entries, parsed.count, "WPN_NONE") == -1 &&
+                          def_weapon_index_by_name(parsed.entries, parsed.count, "null") == -1 &&
+                          def_weapon_index_by_name(nullptr, 0, "WPN_TWICE") == -1;
+        def_free_weapons(&parsed);
+        if (!last) {
+            fprintf(stderr, "FAIL: a name's last block is the weapon table's entry\n");
+            return 1;
+        }
+    }
 
     /* A weapon.def with no weapon rows is an empty table, never a failure: a
        comment-only file and a zero-length one both parse to zero rows

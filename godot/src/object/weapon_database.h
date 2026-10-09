@@ -120,7 +120,9 @@ public:
 	// One weapon by table index as a WeaponDef record; null out of range.
 	Ref<WeaponDef> get_weapon(int index) const;
 	// Table index of the weapon named `name` (the raw weapon "<id>" token,
-	// case-insensitive like every def lookup), or -1 when absent.
+	// case-insensitive like every def lookup), or -1 when absent. A name two
+	// blocks define is its last block's, the one the game's weapon table holds
+	// (engine: formats/def def_weapon_index_by_name).
 	int find_weapon(const String &name) const;
 	// The encumbrance band for a weight (ENCUMBRANCE_*)
 	// (engine: formats/def/def.cpp).

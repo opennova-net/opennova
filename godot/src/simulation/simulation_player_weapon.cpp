@@ -299,15 +299,12 @@ namespace wa = opennova::world::weapon_action;
 // The retained weapon.def ACTION row bound to a slot, matched the way the bake
 // itself binds it: by the slot's suffix name, case-insensitively (the witnessed
 // rule and its citation live on weapon_fsm_bake, engine/runtime/world/weapon_fsm.h).
-// The retained weapon.def entry for a weapon name, or null.
+// The retained weapon.def entry for a weapon name, or null: the entry the weapon
+// table holds, a name's last block (def_weapon_index_by_name).
 DefWeaponDef *find_weapon_row(DefWeaponsFile &file, const std::string &name) {
 	if (name.empty()) return nullptr;
-	for (size_t i = 0; i < file.count; ++i) {
-		if (opennova::strutil::iequals(file.entries[i].weapon_name, name)) {
-			return &file.entries[i];
-		}
-	}
-	return nullptr;
+	const int index = def_weapon_index_by_name(file.entries, file.count, name.c_str());
+	return index < 0 ? nullptr : &file.entries[index];
 }
 
 DefWeaponAction *find_action_row(DefWeaponDef *row, int action_id) {

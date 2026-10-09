@@ -1554,4 +1554,18 @@ DefEncumbrance def_encumbrance_class(double weight);
 int def_subclass_weapon_index(const DefWeaponDef *weapons, size_t n,
                                          size_t parent_index);
 
+/* The entry the game's weapon table holds for a weapon name, as an index into
+   the parsed weapon.def: the LAST block naming it (ASCII case-insensitive). The
+   table keeps one entry per name: a later `weapon` line naming an existing entry
+   takes that entry back and resets it to defaults before its own keys parse
+   [orig: WeaponDefs_ParseLineCallback @ 0x5436e1..0x543722: AvatarDef_FindIndexByName
+   @ 0x53fd80, AdmDef_GetEntryByIndex @ 0x5436f3, AdmDef_InitEntryDefaults
+   @ 0x543722], so the last block's fields are the ones the game mounts, draws and
+   fires. "null" names no entry (the lookup's own refusal @ 0x53fd8b). Returns -1
+   when no block names it. The menus' roster is another table, a row per `end`
+   whose lookup takes the first [orig: WeaponDef_FindIndexByName @ 0x54dd60];
+   world::weapon_slot_indices serves that one row by row.
+   docs/net/novaworld-net-re.md §5.57 (D-WPN-44). */
+int def_weapon_index_by_name(const DefWeaponDef *weapons, size_t n, const char *name);
+
 } // namespace opennova::def

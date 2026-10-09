@@ -1065,14 +1065,11 @@ bool MissionKernel::restore_baseline() {
 bool MissionKernel::install_weapon(const std::string &weapon_name, bool preserve_slot_state,
 		bool allow_same_weapon_rebake) {
 	if (!weapon_defs_ok || weapon_name.empty()) return false;
-	const DefWeaponDef *row = nullptr;
-	for (size_t i = 0; i < weapon_defs.count; ++i) {
-		if (strutil::iequals(weapon_defs.entries[i].weapon_name, weapon_name)) {
-			row = &weapon_defs.entries[i];
-			break;
-		}
-	}
-	if (row == nullptr) return false;
+	// The entry the weapon table holds for the name: a name's last block
+	// (def_weapon_index_by_name), the one whose descriptors the table baked.
+	const int index = def_weapon_index_by_name(weapon_defs.entries, weapon_defs.count, weapon_name.c_str());
+	if (index < 0) return false;
+	const DefWeaponDef *row = &weapon_defs.entries[index];
 	// The mount runs the descriptors the weapon table baked as it loaded, and
 	// its channel plays from the table's shared ANIMADM rings. A same-weapon
 	// re-bake (the dev tools' live ACTION edits) bakes the retained row as

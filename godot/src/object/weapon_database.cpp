@@ -16,7 +16,6 @@
 #include <runtime/menu/player_info_kit.h> // the PLAYER_INFO voice list + kit page order
 #include <runtime/world/player_loadout.h> // armory class policy (ADR 0016: one impl)
 
-#include <base/io/strutil.h>
 
 #include <algorithm>
 #include <vector>
@@ -182,13 +181,10 @@ int WeaponDatabase::get_count() const {
 }
 
 int WeaponDatabase::find_weapon(const String &p_name) const {
+	// The entry the weapon table holds for the name: its last block
+	// (def_weapon_index_by_name).
 	const CharString wanted = p_name.utf8();
-	for (size_t i = 0; i < weapons_file_.count; ++i) {
-		if (opennova::strutil::iequals(weapons_file_.entries[i].weapon_name, wanted.get_data())) {
-			return static_cast<int>(i);
-		}
-	}
-	return -1;
+	return opennova::def::def_weapon_index_by_name(weapons_file_.entries, weapons_file_.count, wanted.get_data());
 }
 
 TypedArray<WeaponDef> WeaponDatabase::get_slot_weapons(int slot, int class_mask, int team_mask) const {
