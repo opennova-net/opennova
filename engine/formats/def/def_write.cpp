@@ -41,9 +41,10 @@ void check_count(DefRecordWriter &writer, size_t before, size_t after, const std
 }
 
 // `capacity`: the characters the family's reader copies of the name, its terminator included
-// (an item's 46 [orig: ItemDef_ParseProperty @0x49EBFB], a weapon's 32 [orig:
-// WeaponDefs_ParseLineCallback @0x543737], an ammo's 31 [orig: AmmoDef_AllocateSlot
-// @0x409B01..0x409B24], a powerup's 16 [orig: PowerUpDef_ParseProperty @0x442F3F]).
+// (an item's 46 [orig: ItemDef_ParseProperty @0x49EBFB], a weapon's 32, or 31 in a block with
+// `sameas` (put_weapon) [orig: WeaponDefs_ParseLineCallback @0x543737], an ammo's 31 [orig:
+// AmmoDef_AllocateSlot @0x409B01..0x409B24], a powerup's 16 [orig: PowerUpDef_ParseProperty
+// @0x442F3F]).
 bool header(DefRecordWriter &writer, const char *key, const char *name, size_t capacity, bool quoted,
             const std::string &margin = std::string()) {
 	const auto *end = static_cast<const char *>(std::memchr(name, 0, capacity));
@@ -307,7 +308,12 @@ void put_weapon(DefRecordWriter &writer, const DefWeaponsFile &file, const Write
 	const auto &weapon = file.entries[i];
 	order_record(writer, order, i, weapon.line_order, weapon.weapon_name);
 	writer.begin_record(weapon.note, DefRecordKind::Weapon, 0, order.plain(i));
-	if (!header(writer, "weapon", weapon.weapon_name, 33, true)) {
+	// The name is copied 32 bytes into def+0x14 [orig: WeaponDefs_ParseLineCallback,
+	// strncpy(def+0x14, tokens[2], 0x20) @0x543737], right ahead of `sameas` at def+0x34 [orig:
+	// strncpy(def+0x34, value, 0x20) @0x544056..0x544072]: a 32-character name keeps no terminator,
+	// so it reads back as itself only while `sameas` is empty and runs on into it otherwise
+	// (D-ITEMDEF-10). A block with `sameas` holds 31.
+	if (!header(writer, "weapon", weapon.weapon_name, weapon.sameas[0] ? 32 : 33, true)) {
 		writer.end_record();
 		return;
 	}
