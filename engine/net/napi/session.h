@@ -297,7 +297,7 @@ NapiMessage make_client_glsvss_request(const std::string &request,
 //
 // The msginfo entry for "ServerCommand" reads the statement's "Cmd" param (512-char cap),
 // tokenizes it (double-quoted runs are one token, quotes stripped) and dispatches the first
-// token against nineteen verbs. Player-targeted verbs match by PREFIX and take one of four
+// token against eighteen verbs. Player-targeted verbs match by PREFIX and take one of four
 // target suffixes selecting the lookup: ByIndex (atol -> slot index), ByIpAndPort ("host:port"),
 // ByName (a callsign, or "*NN" for a slot) or ByPCID (the entity type name). Every verb is
 // gated on the receiver being the authority (`is_authority`) and in a session; TextChatServer /
@@ -352,7 +352,7 @@ const char *server_command_target_name(ServerCommandTarget target);
 // run and are dropped, a backslash is copied verbatim. [orig: String_TokenizeQuotedToArray @0x616d60]
 std::vector<std::string> tokenize_quoted(std::string_view text);
 // Parse a "ServerCommand" container into `out`; false when it carries no Cmd param or the
-// verb is none of the nineteen (retail falls through to the no-op tail).
+// verb is none of the eighteen (retail falls through to the no-op tail).
 bool parse_server_command(const NapiMessage &container, ServerCommand &out);
 
 // ---- The service side: the statements NovaWorld pushes to a hosting session ----
@@ -363,12 +363,20 @@ bool parse_server_command(const NapiMessage &container, ServerCommand &out);
 // The reader's Cmd buffer: Napi_CopyString(buf, value, 0x200) keeps at most 511 characters.
 // [orig: CNapiGameSession_HandleServerCommand @0x4d2345..0x4d2356]
 inline constexpr size_t SERVER_COMMAND_CMD_CAP = 512;
+// True for the player-targeted verbs, which the reader matches by prefix and then requires one
+// of the four target suffixes; false for the verbs it compares as a whole token.
+// [orig: CNapiGameSession_HandleServerCommand — StrStartsWithNoCase vs Napi_StrCaseEqual per verb]
+bool server_command_verb_takes_target(ServerCommandVerb verb);
 // Compose a Cmd line as the exact inverse of the reader's tokenizer: the verb name plus the
 // target suffix, then each arg space-separated, an empty or whitespace-bearing arg wrapped in
 // double quotes. Empty when `verb` is None, when an arg holds a '"' (the tokenizer has no escape;
-// a quote only toggles) or when the text would not fit SERVER_COMMAND_CMD_CAP (the reader would
-// clip it). The verb/target pairing is the caller's, as parse_server_command does not police it.
-// [orig: String_TokenizeQuotedToArray @0x616d60]
+// a quote only toggles) or a NUL (Napi_CopyString stops there, so the reader would see a clipped
+// line), when the text would not fit SERVER_COMMAND_CMD_CAP (the reader would clip it), or when
+// the verb/target pairing is one the reader drops: a player-targeted verb with no suffix falls
+// through the suffix chain to the no-op tail, and a whole-token verb with a suffix never equals
+// its name.
+// [orig: String_TokenizeQuotedToArray @0x616d60; Napi_CopyString @0x4d2356; the suffix chain's
+//  no-op exit @0x4d24e3; Cycle's whole-token compare @0x4d2a46]
 std::string server_command_text(ServerCommandVerb verb, ServerCommandTarget target,
                                 const std::vector<std::string> &args);
 // The "ServerCommand" statement: exactly one "Cmd" param carrying `cmd` verbatim (never clipped;

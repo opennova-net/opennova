@@ -481,7 +481,7 @@ bool parse_server_command(const NapiMessage &container, ServerCommand &out) {
 	bool have_cmd = false;
 	for (const NapiField &f : container.fields) {
 		if (strutil::iequals(f.name, "Cmd")) {
-			cmd = copy_capped(field_to_string(f), 512);
+			cmd = copy_capped(field_to_string(f), SERVER_COMMAND_CMD_CAP);
 			have_cmd = true;
 		}
 	}
@@ -503,10 +503,20 @@ bool parse_server_command(const NapiMessage &container, ServerCommand &out) {
 
 // ---- The service side ---------------------------------------------------------
 
+bool server_command_verb_takes_target(ServerCommandVerb verb) {
+	for (const VerbRow &row : kVerbs) {
+		if (row.verb == verb) return row.prefix_match;
+	}
+	return false;
+}
+
 // [orig: String_TokenizeQuotedToArray @0x616d60] — inverted: a quoted run is one token.
 std::string server_command_text(ServerCommandVerb verb, ServerCommandTarget target,
                                 const std::vector<std::string> &args) {
 	if (verb == ServerCommandVerb::None) return {};
+	// A pairing the reader drops: no suffix on a player-targeted verb (@0x4d24e3), or one on a
+	// whole-token verb (Napi_StrCaseEqual, e.g. Cycle @0x4d2a46).
+	if ((target != ServerCommandTarget::None) != server_command_verb_takes_target(verb)) return {};
 	// The tokenizer's whitespace set (tokenize_quoted spells out the same six characters).
 	auto needs_quotes = [](const std::string &arg) {
 		if (arg.empty()) return true;
@@ -518,7 +528,7 @@ std::string server_command_text(ServerCommandVerb verb, ServerCommandTarget targ
 	std::string text = server_command_verb_name(verb);
 	text += server_command_target_name(target);
 	for (const std::string &arg : args) {
-		if (arg.find('"') != std::string::npos) return {};
+		if (arg.find_first_of(std::string_view("\"\0", 2)) != std::string::npos) return {};
 		text.push_back(' ');
 		if (needs_quotes(arg)) {
 			text.push_back('"');

@@ -210,7 +210,8 @@ bool check_server_statement_builders() {
 	                    out.target == ServerCommandTarget::None && out.args.empty(),
 	            "the built Cycle parses back")) return false;
 
-	// Every verb in the enum, so a verb added later fails here rather than slipping by.
+	// Every verb in the enum, so a verb added later fails here rather than slipping by (the
+	// unnamed-value check after the walk catches one appended past DisarmPlayer).
 	const ServerCommandTarget kTargets[] = {ServerCommandTarget::ByIndex, ServerCommandTarget::ByIpAndPort,
 	                                        ServerCommandTarget::ByName, ServerCommandTarget::ByPCID};
 	auto player_targeted = [](ServerCommandVerb v) {
@@ -251,9 +252,17 @@ bool check_server_statement_builders() {
 			std::fprintf(stderr, "  verb %s\n", server_command_verb_name(v));
 			return false;
 		}
+		if (!expect(server_command_verb_takes_target(v) == player_targeted(v),
+		            "server_command_verb_takes_target agrees with the witnessed prefix verbs")) {
+			std::fprintf(stderr, "  verb %s\n", server_command_verb_name(v));
+			return false;
+		}
 		++covered;
 	}
 	if (!expect(covered == 18, "all eighteen verbs walked")) return false;
+	// An unnamed value past DisarmPlayer: a verb appended to the enum gets a name and fails here.
+	if (!expect(std::string(server_command_verb_name(static_cast<ServerCommandVerb>(covered + 1))).empty(),
+	            "no verb past DisarmPlayer")) return false;
 
 	// Quoting is the tokenizer's inverse: the empty token and an embedded tab survive.
 	const std::vector<std::string> odd = {"Some Guy", "", "x\ty"};
@@ -266,12 +275,21 @@ bool check_server_statement_builders() {
 	                    "PuntPlayerByIndex 42",
 	            "a plain arg is not quoted")) return false;
 
-	// Refusals: no verb, an unrepresentable quote, a text the reader would clip.
+	// Refusals: no verb, a pairing the reader drops, an unrepresentable quote or NUL, a text the
+	// reader would clip.
 	if (!expect(server_command_text(ServerCommandVerb::None, ServerCommandTarget::None, {}).empty(),
 	            "verb None composes nothing")) return false;
+	if (!expect(server_command_text(ServerCommandVerb::PuntPlayer, ServerCommandTarget::None, {"42"}).empty(),
+	            "a player-targeted verb with no suffix composes nothing")) return false;
+	if (!expect(server_command_text(ServerCommandVerb::Cycle, ServerCommandTarget::ByName, {}).empty(),
+	            "a whole-token verb with a suffix composes nothing")) return false;
 	if (!expect(server_command_text(ServerCommandVerb::TextChatServer, ServerCommandTarget::None, {"say \"hi\""})
 	                    .empty(),
 	            "an arg holding a quote composes nothing")) return false;
+	if (!expect(server_command_text(ServerCommandVerb::PuntPlayer, ServerCommandTarget::ByName,
+	                                {std::string("a\0b", 3)})
+	                    .empty(),
+	            "an arg holding a NUL composes nothing")) return false;
 	const std::string too_long =
 		server_command_text(ServerCommandVerb::Cycle, ServerCommandTarget::None, {std::string(506, 'a')});
 	if (!expect(too_long.empty(), "a 512-char text is refused (the reader keeps 511)")) return false;
