@@ -287,6 +287,55 @@ static int test_resource_missing_lines(void) {
     return 1;
 }
 
+/* The boot report's line and the launch mission's: the name after the marker (a launched mission's
+ * name whole however many blanks it holds), the reason after it without its trailing dot. */
+static int test_boot_and_mission_report_lines(void) {
+    std::string name = "kept";
+    CHECK(parse_boot_resource_missing(std::string("BootRootMount: ") + kBootResourceMissingMarker + "gametext.bin (fatal)\r\n", name) &&
+          name == "gametext.bin", "the name to the first blank, after a prefix");
+    CHECK(parse_boot_resource_missing(std::string(kBootResourceMissingMarker) + "main.mnu", name) && name == "main.mnu",
+          "the name to the line's end");
+    name = "kept";
+    CHECK(!parse_boot_resource_missing("BootRootMount: nothing to see", name) && name == "kept", "no marker");
+    CHECK(!parse_boot_resource_missing(std::string(kBootResourceMissingMarker) + " gametext.bin", name) && name == "kept",
+          "no name after the marker");
+
+    std::string mission, reason;
+    const std::string marker = kLaunchMissionFailedMarker;
+    CHECK(parse_launch_mission_failed("MainGame: " + marker + "My Map.bms  the terrain did not load.\n", "my map.bms", mission,
+                                      reason) &&
+          mission == "My Map.bms" && reason == "the terrain did not load", "a launched name with a blank, the reason");
+    CHECK(parse_launch_mission_failed(marker + "c01.bms no terrain", "other.bms", mission, reason) && mission == "c01.bms" &&
+          reason == "no terrain", "another name: to the first blank");
+    CHECK(parse_launch_mission_failed(marker + "c01.bms", "", mission, reason) && mission == "c01.bms" && reason.empty(),
+          "no reason");
+    CHECK(parse_launch_mission_failed(marker + "c01.bmsx why", "c01.bms", mission, reason) && mission == "c01.bmsx" &&
+          reason == "why", "the launched name only when a blank or the end follows it");
+    CHECK(!parse_launch_mission_failed("MainGame: loaded", "c01.bms", mission, reason), "no marker");
+    CHECK(!parse_launch_mission_failed(marker + " why", "", mission, reason), "no name");
+    return 1;
+}
+
+/* Under /exp the game reads M<n>.* and G<n>.* in the place of the base music pairs, and nothing
+ * else of the base game's. */
+static int test_replaced_under_expansion(void) {
+    for (const char *name : {"MENUMUS.SBF", "menumus.bin", "GAMEMUS.SBF", "gamemus.BIN"})
+        CHECK(gameprofile_replaced_under_expansion(name), "a base music pair");
+    for (const char *name : {"", "gametext.bin", "resource.pff", "M<n>.sbf", "localres.pff"})
+        CHECK(!gameprofile_replaced_under_expansion(name), "no other file");
+    /* The boot text tables are manifest rows, in the boot's order, the first a dialog's. */
+    int last = -1;
+    for (const char *table : kBootTextTables) {
+        const RequiredResource *row = gameprofile_required_resource_find(table);
+        CHECK(row != NULL && row->phase == BOOT_PHASE_BOOT, "a boot row");
+        const int index = int(row - gameprofile_required_resource_at(0));
+        CHECK(index > last, "in the manifest's order");
+        last = index;
+        CHECK(row->severity == (strcmp(table, "gameerr.bin") == 0 ? RES_DIALOG : RES_FATAL), "gameerr's a dialog, the rest fatal");
+    }
+    return 1;
+}
+
 int main(void) {
     RUN_TEST(test_bounds);
     RUN_TEST(test_every_row_is_complete_and_phase_ordered);
@@ -297,6 +346,8 @@ int main(void) {
     RUN_TEST(test_expansion_file_names);
     RUN_TEST(test_expansion_names_fit_archive);
     RUN_TEST(test_resource_missing_lines);
+    RUN_TEST(test_boot_and_mission_report_lines);
+    RUN_TEST(test_replaced_under_expansion);
     printf("%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

@@ -115,6 +115,18 @@ bool gameprofile_expansion_file_formed(const RequiredResource *row);
    writer that put a nonzero checksum there would break these names' lookups. */
 bool gameprofile_expansion_names_fit_archive(const std::string &expansion);
 
+/* Whether the game, launched with `/exp <n>`, reads an expansion's own file in the place of the
+   base game's file `name` (case aside): a RES_F_EXPANSION row's `replaces` (MENUMUS.SBF/.BIN,
+   GAMEMUS.SBF/.BIN, whose M<n>.* and G<n>.* take their place [orig: Expansion_LoadAssets
+   @ 0x4a4906..0x4a494a]), so a stock launch under /exp never reads `name` itself. */
+bool gameprofile_replaced_under_expansion(const std::string &name);
+
+/* The boot's text tables, in the order Game_InitSubsystems loads them right after the boot
+   archives open (each a manifest row, gameprofile_required_resource_find): gameerr.bin's lack
+   shows earlyerr.txt's line 4 and the boot goes on (RES_DIALOG); any other's ends the boot
+   (RES_FATAL) [orig: Game_InitSubsystems @ 0x4a6fc8, @ 0x4a6fed, @ 0x4a702f, @ 0x4a7072]. */
+inline constexpr const char *kBootTextTables[] = {"gameerr.bin", "gametext.bin", "vmacros.bin", "keyhelp.bin"};
+
 /* The boot report's marker: the game names each missing fatal-set file on a line of its
    log where the file's name follows this text (godot/game/boot_root_mount.gd writes it
    through ResourceRoot.boot_resource_missing_marker()), and the editor's Play reads the

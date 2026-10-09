@@ -1,8 +1,13 @@
 #pragma once
 
+#include <cctype>
 #include <cstddef>
 #include <string>
+#include <string_view>
 #include <utility>
+
+#include <base/gameprofile/required_resources.h>
+#include <base/io/strutil.h>
 
 namespace opennova::gameprofile {
 
@@ -92,6 +97,49 @@ inline bool parse_resource_missing(const std::string &line, ResourceMiss &out) {
 	}
 	if (text.compare(rest, 2, ": ") == 0) miss.words = text.substr(rest + 2);
 	out = std::move(miss);
+	return true;
+}
+
+// The boot-required file a line of the runtime's log names missing (`<kBootResourceMissingMarker><name>
+// ...`, godot/game/boot_root_mount.gd over the witnessed manifest): the marker anywhere in the line, the
+// name its text up to the first blank. False for a line with no marker or no name after it.
+inline bool parse_boot_resource_missing(const std::string &line, std::string &name) {
+	const std::string marker = kBootResourceMissingMarker;
+	const size_t at = line.find(marker);
+	if (at == std::string::npos) return false;
+	const size_t start = at + marker.size();
+	size_t end = start;
+	while (end < line.size() && !std::isspace(static_cast<unsigned char>(line[end]))) ++end;
+	if (end == start) return false;
+	name = line.substr(start, end - start);
+	return true;
+}
+
+// The mission a line of the runtime's log says did not load, and why (`<kLaunchMissionFailedMarker>
+// <mission> <reason>`, godot/game/main_game.gd). The mission's name may hold a blank ("my map.bms"):
+// `launched`, the mission the game was started in, where the line names it (case aside) and a blank
+// or the line's end follows it, else the text up to the first blank. The reason is the rest after the
+// blanks that follow the name, its trailing dots and blanks dropped ("" for none). False for a line
+// with no marker or no name after it.
+inline bool parse_launch_mission_failed(const std::string &line, const std::string &launched, std::string &mission,
+                                        std::string &reason) {
+	const std::string marker = kLaunchMissionFailedMarker;
+	const size_t at = line.find(marker);
+	if (at == std::string::npos) return false;
+	const size_t start = at + marker.size();
+	size_t end = start;
+	if (!launched.empty() && line.size() >= start + launched.size() &&
+	    strutil::iequals(std::string_view(line).substr(start, launched.size()), launched) &&
+	    (line.size() == start + launched.size() || std::isspace(static_cast<unsigned char>(line[start + launched.size()]))))
+		end = start + launched.size();
+	else
+		while (end < line.size() && !std::isspace(static_cast<unsigned char>(line[end]))) ++end;
+	if (end == start) return false;
+	mission = line.substr(start, end - start);
+	while (end < line.size() && std::isspace(static_cast<unsigned char>(line[end]))) ++end;
+	reason = line.substr(end);
+	while (!reason.empty() && (reason.back() == '.' || std::isspace(static_cast<unsigned char>(reason.back()))))
+		reason.pop_back();
 	return true;
 }
 

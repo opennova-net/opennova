@@ -740,16 +740,27 @@ const std::string &Vfs::mounted_expansion() const { return impl_->mounted_expans
 const std::string &Vfs::last_error() const { return impl_->last_error; }
 
 bool vfs_has_boot_archive(const std::string &dir) {
-    if (dir.empty()) return false;
+    for (const std::string &name : vfs_boot_archive_slots(dir))
+        if (!name.empty()) return true;
+    return false;
+}
+
+std::vector<std::string> vfs_boot_archive_slots(const std::string &dir) {
+    std::vector<std::string> slots(std::size(kBootArchiveTable));
+    if (dir.empty()) return slots;
     std::error_code ec;
     for (const fs::directory_entry &entry : fs::directory_iterator(io::os_path(dir), ec)) {
         std::error_code kind;
         if (!entry.is_regular_file(kind)) continue;
         const std::string name = io::utf8_path(entry.path().filename());
-        for (const char *slot : kBootArchiveTable)
-            if (strutil::iequals(name, slot)) return true;
+        for (size_t slot = 0; slot < slots.size(); ++slot)
+            if (slots[slot].empty() && strutil::iequals(name, kBootArchiveTable[slot])) slots[slot] = name;
     }
-    return false;
+    return slots;
+}
+
+bool vfs_read_served(const Vfs &vfs, const std::string &name, std::vector<uint8_t> &out) {
+    return vfs_loader_takes_stored(name) ? vfs.read_file_raw(name, out) : vfs.read_file(name, out);
 }
 
 std::string vfs_expansion_dir(const std::string &game_root, const std::string &expansion) {
@@ -856,9 +867,9 @@ ExpansionInfo expansion_info_from_bin(const std::vector<uint8_t> &bytes) {
     rtxt::File file;
     std::string error;
     if (bytes.empty() || !rtxt::parse(bytes.data(), bytes.size(), file, error)) return info;
-    if (const rtxt::Entry *e = find_in_section(file, "exp_info", "EXP_NAME"))  // @ 0x4a4578
+    if (const rtxt::Entry *e = find_in_section(file, kExpansionInfoSection, kExpansionNameKey))  // @ 0x4a4578
         info.name = e->text;
-    if (const rtxt::Entry *e = find_in_section(file, "exp_info", "EXP_DESC"))  // @ 0x4a45ef
+    if (const rtxt::Entry *e = find_in_section(file, kExpansionInfoSection, kExpansionDescriptionKey))  // @ 0x4a45ef
         info.description = e->text;
     return info;
 }
