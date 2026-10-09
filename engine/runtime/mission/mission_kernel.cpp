@@ -883,8 +883,7 @@ bool MissionKernel::complete_mission_start() {
 	// first vehicle callback captures the respawn pose.
 	// [orig: Game_StartMission @0x525CB8..0x526095]
 	if (world.rules.projectile_authority) wac.execute_initial(world);
-	world.weather.mission_start_init();
-	for (int i = 0; i < 255; ++i) tick_weather();
+	world.weather.settle_mission_start([this] { tick_weather(); });
 	w::count_mission_units(world);
 	// The mission start's cine legs, after the unit census: every node gone,
 	// the end screen down, and on a first SP start the intro-cine leg

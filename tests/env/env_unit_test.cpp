@@ -54,6 +54,11 @@ int main() {
 	clock_ok &= expect(opennova::env::tod_rate_advance_per_tick(0) ==
 					opennova::env::tod_advance_per_tick(60),
 			"an .env tod_rate of 0 takes the 60-minute floor");
+	clock_ok &= expect(opennova::env::tod_floored_minutes_per_day(10) == 60 &&
+					opennova::env::tod_floored_minutes_per_day(0) == 60 &&
+					opennova::env::tod_floored_minutes_per_day(60) == 60 &&
+					opennova::env::tod_floored_minutes_per_day(90) == 90,
+			"a day under 60 minutes runs as 60");
 	clock_ok &= expect(opennova::env::kTodDefaultAdvancePerTick == 75,
 			"the engine's default advance is 75");
 	// Q8.8 12.00 -> 12h in 8.24; 25.5h wraps to 1.5h.
