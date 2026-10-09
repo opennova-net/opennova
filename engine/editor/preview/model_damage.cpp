@@ -10,6 +10,7 @@
 #include <editor/graph/graph_edge.h>
 #include <formats/def/def.h>
 #include <formats/threedi/threedi_3di3.h>
+#include <runtime/mission/item_traits.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/present_passes.h>
 
@@ -154,11 +155,12 @@ void death_sounds_legs(int32_t tick, const DamageItem &item, const DamageModels 
 		plan.legs.back().bank = int(&bank - rows) + 1;
 	}
 	const bool husk_kz = !item.husk.empty() && models.kz_points > 0;
-	plan.legs.push_back(leg(tick, "blast", "kz_OrganicBlast",
-	                        husk_kz ? "The death blast: kz_OrganicBlast, radius 5, at each of the husk's " +
+	const std::string blast = world::kAmmoKzOrganicBlast;
+	plan.legs.push_back(leg(tick, "blast", blast,
+	                        husk_kz ? "The death blast: " + blast + ", radius 5, at each of the husk's " +
 	                                          plural(models.kz_points, "KZ point", "KZ points") + "."
-	                                : std::string("The death blast: one kz_OrganicBlast at the item, its radius the "
-	                                              "item's kz else its bound radius (the husk names no KZ point)."),
+	                                : "The death blast: one " + blast + " at the item, its radius the item's kz else its "
+	                                  "bound radius (the husk names no KZ point).",
 	                        "[orig: Entity_QueueKzBlastAtUserPoints @ 0x4EABF0]", "named"));
 }
 
@@ -221,21 +223,23 @@ DamageItem damage_item_of(const def::DefItemDef &def, const std::string &catalog
 	out.graphic_enemy = strutil::fixed_string(def.graphic_enemy, sizeof(def.graphic_enemy));
 	out.husk = def.husk;
 	out.huskfinal = def.huskfinal;
-	std::copy(std::begin(def.destroy_timing_ticks), std::end(def.destroy_timing_ticks),
-	          std::begin(out.destroy_timing_ticks));
 	out.ai_function = strutil::fixed_string(def.ai_function, sizeof(def.ai_function));
-	out.death_class = world::item_death_class_from_tag(out.ai_function.c_str());
 	out.ai_class = (def.attrib & world::kItemAttribAIData) != 0;
-	out.decoration = def.type == def::DEF_ITEM_TYPE_DECORATION;
-	out.unit_type = def.unit_type;
-	out.sounddeath = def.sounddeath;
-	out.particledeath = def.particledeath;
-	out.particleh2odeath = def.particleh2odeath;
-	out.particlefire = def.particlefire;
-	out.particleother = def.particleother;
-	std::copy(std::begin(def.husk_sub_part_types), std::end(def.husk_sub_part_types), out.piece_types);
+	// What the death reads of the row, as the mission load fills it (mission::item_death_traits_from_def).
+	const world::ItemDeathTraits traits = mission::item_death_traits_from_def(def);
+	std::copy(std::begin(traits.destroy_timing_ticks), std::end(traits.destroy_timing_ticks),
+	          std::begin(out.destroy_timing_ticks));
+	out.death_class = traits.death_class;
+	out.decoration = traits.is_decoration;
+	out.unit_type = traits.unit_type;
+	out.sounddeath = traits.sound_death;
+	out.particledeath = traits.particledeath;
+	out.particleh2odeath = traits.particleh2odeath;
+	out.particlefire = traits.particlefire;
+	out.particleother = traits.particleother;
+	std::copy(std::begin(traits.husk_sub_part_types), std::end(traits.husk_sub_part_types), out.piece_types);
 	out.husk_sub_parts = def.husk_sub_parts;
-	out.kz = def.kz;
+	out.kz = traits.kz;
 	return out;
 }
 
@@ -301,7 +305,7 @@ DamagePlan damage_plan(const DamageItem &item, const DamageModels &models) {
 		// [orig: sub_407020 @ 0x4070B2..0x4070E2, the expiry @ 0x407072..0x4070A6].
 		const bool gnrc = !item.ai_class;
 		plan.swaps = true;
-		plan.swap_tick = gnrc ? 4 : 0;
+		plan.swap_tick = gnrc ? world::kGnrcDeathThinkTicks : 0;
 		plan.class_words = gnrc ? "gnrc (" + item.ai_function +
 		                                  "): dead at once, the husk, its pieces and its death sounds four ticks on, "
 		                                  "when its think runs out (a cohort's pool can hold it longer)."
@@ -313,15 +317,16 @@ DamagePlan damage_plan(const DamageItem &item, const DamageModels &models) {
 		                          "@ 0x494660]";
 		// The unitType row's callback, then Flags |= 6 [orig: Entity_DispatchDeathCallback @ 0x493EF0].
 		plan.legs.push_back(swap_leg(plan.swap_tick, plan, cite));
-		const bool boat = item.unit_type >= 5 && item.unit_type <= 8;
+		const bool boat = world::unit_type_is_boat(item.unit_type);
 		if (!boat || models.husk_read || models.piece_read) pieces_legs(plan.swap_tick, item, models, plan);
 		if (boat && (models.husk_read || models.piece_read))
-			plan.legs.push_back(leg(plan.swap_tick, "sound", "EXPLO_SHIP_TINY", "The boat's explosion, EXPLO_SHIP_TINY.",
+			plan.legs.push_back(leg(plan.swap_tick, "sound", world::kShipExplosionSound,
+			                        "The boat's explosion, " + std::string(world::kShipExplosionSound) + ".",
 			                        "[orig: Entity_ProcessBuildingDeath @ 0x494420]", "played"));
-		if (item.unit_type == 11)
-			plan.legs.push_back(leg(plan.swap_tick, "effect", "Effect_ShockWaterBrdg",
-			                        "The bridge's water shock: Effect_ShockWaterBrdg at each of the husk's DEAD points, "
-			                        "on the water plane.",
+		if (item.unit_type == world::kUnitTypeBridge)
+			plan.legs.push_back(leg(plan.swap_tick, "effect", world::kBridgeWaterShockEffect,
+			                        "The bridge's water shock: " + std::string(world::kBridgeWaterShockEffect) +
+			                                " at each of the husk's DEAD points, on the water plane.",
 			                        "[orig: Entity_SpawnDeathEffectsAtBones @ 0x4944C0]", kEffectNamed));
 		death_sounds_legs(plan.swap_tick, item, models, plan);
 	} else if (item.death_class == ItemDeathClass::kGnrl || item.death_class == ItemDeathClass::kEwep ||
@@ -333,7 +338,7 @@ DamagePlan damage_plan(const DamageItem &item, const DamageModels &models) {
 		                           ? "[orig: Entity_UpdateChildAttachment @ 0x440C23..0x440C87]"
 		                           : "[orig: Entity_HandleDeathEvent @ 0x407279..0x4072DD]";
 		plan.swaps = true;
-		plan.swap_tick = gnl2 ? 32 : 0;
+		plan.swap_tick = gnl2 ? world::kGnl2DeathThinkTicks : 0;
 		plan.class_words =
 				gnl2 ? "gnl2: dead at once with its death sound and effect; 32 ticks on it explodes and the husk lands."
 				     : tag + ": the husk lands at once, with the item's death sound and one death effect.";
@@ -347,13 +352,17 @@ DamagePlan damage_plan(const DamageItem &item, const DamageModels &models) {
 		if (gnl2) {
 			const char *expiry = "[orig: Entity_HandleDeathEvent @ 0x4071EF..0x40725F; Entity_SpawnExplosionEffects @ "
 			                     "0x4399C0]";
-			plan.legs.push_back(leg(32, "effect", "Effect_AirExp", "The explosion: Effect_AirExp a unit above the item.",
+			const int32_t at = world::kGnl2DeathThinkTicks;
+			plan.legs.push_back(leg(at, "effect", world::kItemExplosionEffect,
+			                        "The explosion: " + std::string(world::kItemExplosionEffect) + " a unit above the item.",
 			                        expiry, kEffectNamed));
 			plan.legs.back().at_item = true;
 			plan.legs.back().above = 1.0f;
-			plan.legs.push_back(leg(32, "blast", "kz_M406HE", "The explosion's blast: kz_M406HE a unit above the item.",
+			plan.legs.push_back(leg(at, "blast", world::kItemExplosionAmmo,
+			                        "The explosion's blast: " + std::string(world::kItemExplosionAmmo) +
+			                                " a unit above the item.",
 			                        expiry, "named"));
-			plan.legs.push_back(swap_leg(32, plan, expiry));
+			plan.legs.push_back(swap_leg(at, plan, expiry));
 		}
 	} else if (item.death_class == ItemDeathClass::kBuilding || item.death_class == ItemDeathClass::kCollapsingBuilding ||
 	           item.death_class == ItemDeathClass::kTree) {
@@ -380,12 +389,13 @@ DamagePlan damage_plan(const DamageItem &item, const DamageModels &models) {
 	// The fade: published from the death tick once the item is husked.
 	if (plan.swaps && !plan.husk.empty()) {
 		const int32_t delay = item.destroy_timing_ticks[0];
-		const int32_t duration = item.destroy_timing_ticks[1] ? item.destroy_timing_ticks[1] : 50;
-		const int32_t step = item.destroy_timing_ticks[2] ? item.destroy_timing_ticks[2] : 25;
+		const int32_t duration = world::destroy_fade_duration_ticks(item.destroy_timing_ticks);
+		const int32_t step = world::destroy_fade_stagger_ticks(item.destroy_timing_ticks);
 		const int32_t start = delay ? std::max(delay, plan.swap_tick) : plan.swap_tick;
 		plan.legs.push_back(leg(start, "fade", plan.husk,
 		                        "The destroy fade on " + plan.husk + ": OBJECT_DESTROY over " +
-		                                seconds(duration + 4 * step) + ", OBJECT_DESTROY01..05 each over " +
+		                                seconds(world::destroy_fade_total_ticks(item.destroy_timing_ticks)) +
+		                                ", OBJECT_DESTROY01..05 each over " +
 		                                seconds(duration) + ", " + seconds(step) + " apart" +
 		                                (delay ? ", after a delay of " + seconds(delay) : std::string()) +
 		                                " (the item's destroy_timing; 0 takes 50 and 25 ticks).",
@@ -413,10 +423,8 @@ DamageFrame damage_frame(const DamagePlan &plan, const DamageItem &item, int32_t
 
 int32_t damage_fade_end_tick(const DamagePlan &plan, const DamageItem &item) {
 	const int32_t delay = item.destroy_timing_ticks[0];
-	const int32_t duration = item.destroy_timing_ticks[1] ? item.destroy_timing_ticks[1] : 50;
-	const int32_t step = item.destroy_timing_ticks[2] ? item.destroy_timing_ticks[2] : 25;
 	const int32_t origin = delay ? std::max(delay, plan.swap_tick) : 0;
-	return std::max(origin + duration + 4 * step, plan.swap_tick);
+	return std::max(origin + world::destroy_fade_total_ticks(item.destroy_timing_ticks), plan.swap_tick);
 }
 
 } // namespace opennova::editor

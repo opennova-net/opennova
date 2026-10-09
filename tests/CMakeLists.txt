@@ -5030,7 +5030,7 @@ add_test(NAME editor_symbol_rename COMMAND editor_symbol_rename_test)
 add_executable(editor_effect_viewport_test editor/effect_viewport_test.cpp)
 target_link_libraries(editor_effect_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_effect_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(editor_effect_viewport COMMAND editor_effect_viewport_test)
+add_test(NAME editor_effect_viewport COMMAND editor_effect_viewport_test)
 
 add_executable(editor_texture_document_test editor/texture_document_test.cpp)
 target_link_libraries(editor_texture_document_test PRIVATE opennova_editor)
