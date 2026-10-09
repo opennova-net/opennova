@@ -333,4 +333,12 @@ BmsEnvOverrides bms_env_overrides_from_header(uint32_t attrib_flags, int water_o
                                               int fog_override, const int fog_color[3],
                                               const int water_color[3], int water_murk);
 
+// A mission's environment as its load makes it with the terrain [orig: Game_LoadTerrainDuringConnect
+// @ 0x520710 -> Terrain_LoadEnvironmentConfig @ 0x52073b]: the header's `terrain` and `environment`
+// names (empty: none) as <terrain>.trn and <environment>.env, read with overcast.def by read_mission_env,
+// then the header's override layer over what that load made (apply_bms_overrides), the .env skipped or
+// not. False when the .env was skipped.
+bool load_mission_env_config(const EnvTextReader &read, const std::string &terrain,
+		const std::string &environment, const BmsEnvOverrides &overrides, MissionEnv &out);
+
 } // namespace opennova::env

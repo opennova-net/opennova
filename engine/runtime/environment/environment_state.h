@@ -36,6 +36,11 @@ namespace opennova::env {
 // False when the .env was skipped.
 bool read_mission_env(const FileSource &files, const std::string &terrain_file,
 		const std::string &environment_file, MissionEnv &out);
+// The mission's environment with its header's override layer (env::load_mission_env_config) over
+// the same file set: the header's `terrain` and `environment` names, extensions forced. False when the
+// .env was skipped.
+bool load_mission_env_config(const FileSource &files, const std::string &terrain,
+		const std::string &environment, const BmsEnvOverrides &overrides, MissionEnv &out);
 
 // The world lighting/fog record stamped onto lit materials — the engine
 // mirror of the shell's EnvLightValues (ADR 0017 typed record)
