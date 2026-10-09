@@ -1960,12 +1960,15 @@ foreach(name smallest minimal_effect multi_section multi_layer table_handles
         add_test(NAME particle_${name} COMMAND particle_${name}_test)
     endif()
 endforeach()
-foreach(name emitter emit_shape translate effect_scene_contract)
+# effect_pose pins the spawn poses every producer hands the scene; effect_closure
+# (mixed) one effect's closure and several folded, the retail leg every effect
+# of the install's catalog alike from its closure (OPENNOVA_JO_DIR).
+foreach(name emitter emit_shape translate effect_scene_contract effect_pose effect_closure)
     add_executable(particle_${name}_test particle/particle_${name}_test.cpp)
     target_link_libraries(particle_${name}_test PRIVATE opennova_runtime)
     target_include_directories(particle_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(particle_${name}_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-    if(name STREQUAL "smoke_all_fixtures")
+    if(name STREQUAL "effect_closure")
         opennova_add_mixed_test(particle_${name} COMMAND particle_${name}_test)
     else()
         add_test(NAME particle_${name} COMMAND particle_${name}_test)

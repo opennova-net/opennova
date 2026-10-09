@@ -1,5 +1,6 @@
 #include <runtime/wac/wac_layered_load.h>
 
+#include <base/resource_index/resource_index.h>
 #include <formats/mus/mus.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/wac/bytecode.h>
@@ -44,9 +45,9 @@ void load_script_effect_catalog(const mission::BootFileSource &files,
     effects.clear();
     if (scene != nullptr) scene->documents.clear();
     if (!files.valid() || !files.list_files) return;
-    // The effect world's mounted PTL + regional table load order.
-    // [orig: CEffectSystem_Init @0x5F6070]
-    const std::string regional = files.has_file("fgn2.bin") ? ".ptg" : ".ptu";
+    // The effect world's mounted PTL + regional table load order (the gore set
+    // gore_particle_extension picks). [orig: CEffectSystem_Init @0x5F6070]
+    const std::string regional = gore_particle_extension(files.has_file(kGoreContentMarker));
     for (const std::string &extension : {std::string(".ptl"), regional}) {
         for (const std::string &name : files.list_files(extension)) {
             std::vector<uint8_t> bytes;
