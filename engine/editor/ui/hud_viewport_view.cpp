@@ -16,6 +16,7 @@
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/workspace.h>
 #include <runtime/hud/hud_texture_names.h>
+#include <runtime/hud/hud_math.h>
 
 namespace opennova::editor {
 
@@ -33,7 +34,7 @@ constexpr const char *kDetailNames[] = { "Detail 0: all", "Detail 1", "Detail 2"
 
 std::string screen_words(int width, int height) {
 	std::string out = std::to_string(width) + " x " + std::to_string(height);
-	if (width == 1024 && height == 768) out += " (the design size)";
+	if (width == int(hud::kDesignWidth) && height == int(hud::kDesignHeight)) out += " (the design size)";
 	return out;
 }
 
