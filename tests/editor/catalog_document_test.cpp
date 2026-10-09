@@ -16,6 +16,7 @@
 #include "common/file_io.h"
 #include "common/test_expect.h"
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 
 using namespace opennova::editor;
@@ -651,6 +652,15 @@ static int duplicates_apart() {
 	const DefWeaponDef &gun = row_at(weapons, 2).native.as<DefWeaponDef>();
 	TEST_EXPECT(gun.actions_count == 1 && std::string(gun.actions[0].name) == "FIRE");
 	TEST_EXPECT(copy_name("WPN_ABCDEFGHIJKLMNOPQRSTUVWXYZ0", CopyName::Token, 31, {}) == "WPN_ABCDEFGHIJKLMNOPQRSTUVWXY_2");
+	// A weapon's copy keeps the 32 characters the game's reader keeps in a block with no sameas, 31 in one with it
+	// (weapon_name_chars: the reader's 0x20-byte strncpy runs a 32-character name on into sameas).
+	DefWeaponDef bare{}, based{};
+	std::snprintf(based.sameas, sizeof(based.sameas), "WPN_M16");
+	TEST_EXPECT(weapon_name_chars(&bare) == 32 && weapon_name_chars(&based) == 31);
+	const NodeKind weapon_kind = node_kind(DefRecordKind::Weapon);
+	const std::string weapon_name = "WPN_ABCDEFGHIJKLMNOPQRSTUVWXYZ01"; // 32 characters
+	TEST_EXPECT(catalog_copy_name(weapon_kind, weapon_name, {}, &bare) == "WPN_ABCDEFGHIJKLMNOPQRSTUVWXYZ_2");
+	TEST_EXPECT(catalog_copy_name(weapon_kind, weapon_name, {}, &based) == "WPN_ABCDEFGHIJKLMNOPQRSTUVWXY_2");
 
 	// A name of the game's code page cut by whole characters (the review's W2: by bytes it could end inside
 	// one, the name then refused and the copy keeping its original's): 45 characters, two of them two

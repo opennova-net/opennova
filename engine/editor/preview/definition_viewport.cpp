@@ -102,21 +102,6 @@ const char *weapon_view_token(DefinitionWeaponView view) {
 	return view == DefinitionWeaponView::First ? "first" : "third";
 }
 
-const char *spawn_status_token(particle::EffectSpawnStatus status) {
-	switch (status) {
-	case particle::EffectSpawnStatus::Spawned: return "spawned";
-	case particle::EffectSpawnStatus::Suppressed: return "suppressed";
-	case particle::EffectSpawnStatus::InvalidHandle: return "not_spawned";
-	case particle::EffectSpawnStatus::EmptyEffect: return "empty_effect";
-	case particle::EffectSpawnStatus::MissingSlot: return "missing_slot";
-	case particle::EffectSpawnStatus::MissingOwner: return "missing_owner";
-	case particle::EffectSpawnStatus::GroupCapacityReached: return "group_capacity_reached";
-	case particle::EffectSpawnStatus::EmitterCapacityReached: return "emitter_capacity_reached";
-	case particle::EffectSpawnStatus::Disabled: return "disabled";
-	}
-	return "not_spawned";
-}
-
 bool state_from_token(const std::string &token, DefinitionState &out) {
 	for (const DefinitionState state :
 			{DefinitionState::Alive, DefinitionState::Destroying, DefinitionState::Husk, DefinitionState::HuskFinal})
@@ -1210,7 +1195,7 @@ io::JsonValue DefinitionViewport::body_json(const ViewportInput &input) const {
 		row.set("tick", json_number(spawn.tick));
 		row.set("at", vec3(spawn.pose.position));
 		row.set("forward", vec3(spawn.pose.forward));
-		row.set("status", json_string(spawn_status_token(effects_.status(i))));
+		row.set("status", json_string(effect_spawn_status_token(effects_.status(i))));
 		row.set("alive", JsonValue::make_bool(effects_.alive(i)));
 		if (const particle::EffectClosure *closure = effects_.closure_of(spawn.effect)) {
 			row.set("spawns", JsonValue::make_bool(closure->spawns()));
