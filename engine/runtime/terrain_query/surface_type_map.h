@@ -91,6 +91,17 @@ inline int32_t surface_sample_shift(int32_t width) {
 }
 } // namespace detail
 
+// The rows (and columns) a map `width` wide is sampled over, the char map's and the foliage
+// map's lookups alike: each reads (c & 1023) >> surface_sample_shift on both axes, so a map up to
+// 1024 wide is read over its width's power of two below it (a map shorter than that is read past
+// its last row), and one wider reads its first texel alone, the negative shift taken modulo 32
+// [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510; Terrain_GetSurfaceTypeAtFixedPoint
+// @ 0x6066D0, the foliage map's log2 @ 0x605B4B..0x605B5B; Foliage_SampleFoliageMapMask
+// @ 0x606620].
+inline int32_t surface_sample_extent(int32_t width) {
+	return (1023 >> detail::surface_sample_shift(width)) + 1;
+}
+
 // Surface type at a fixed-point (16.16) mission-frame position. Matches the
 // original including its defaults: 1 with no charmap loaded, 7 (ocean) on an
 // unmapped sector cell. [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510]

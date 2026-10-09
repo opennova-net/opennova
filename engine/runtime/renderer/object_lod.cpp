@@ -1,4 +1,5 @@
 #include <runtime/renderer/object_lod.h>
+#include <formats/threedi/threedi_3di3.h>
 #include <runtime/world/entity.h>
 
 #include <algorithm>
@@ -73,6 +74,15 @@ ObjectProjectionSphere person_projection_sphere_q16(
   sphere.radius_q16 = parachute_deployed
                          ? parachute_model_radius_q16 : entity_bound_radius_q16;
   return sphere;
+}
+
+std::vector<int32_t> model_lod_thresholds_q16(const threedi::Threedi3di3 &model) {
+  std::vector<int32_t> thresholds;
+  if (model.lods == nullptr) return thresholds;
+  thresholds.reserve(model.lod_count);
+  for (size_t lod = 0; lod < model.lod_count; ++lod)
+    thresholds.push_back(rlod_threshold_q16_from_rmdl(model.lods[lod].lod_threshold));
+  return thresholds;
 }
 
 // [orig: Model_SelectRlodLevel @ 0x5c3b20 — the threshold walk and the

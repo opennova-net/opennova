@@ -18,13 +18,18 @@
 // @ 0x652b40, @ 0x652c95..0x652caf], so the one play site finds no bank and
 // plays nothing [orig: CWnd_ProcessMouseEvent @ 0x647c59 -> Sound_CollectionPlayTrigger
 // @ 0x652de0 -> SoundBank_FindTriggerAndPlay @ 0x75d010]; the embedder plays
-// a row's trigger from that bank alone (godot/src/mnu/menu_audio).
+// a row's trigger from that bank alone (MenuBankCollection, plan_menu_sound;
+// godot/src/mnu/menu_audio is the device).
 
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <map>
 #include <string>
 #include <vector>
+
+#include <formats/lwf/lwf.h>
+#include <runtime/audio/sound_selector.h>
 
 namespace opennova::mnu {
 struct Sound;
@@ -64,6 +69,57 @@ inline double menu_effective_pitch(double member_pitch, double set_pitch) {
 	const double pitch = member_pitch * set_pitch;
 	return pitch <= 0.01 ? 1.0 : pitch;
 }
+
+// The menu's bank collection: one entry per bank a SOUND row names, the names
+// compared without case [orig: SoundBank_CollectionAddOrRef @ 0x652b40,
+// stricmp], each opened the first time a row names it [orig:
+// CUIElement_ParseXMLDefinition @ 0x648ada -> SoundBank_OpenFile @ 0x75caa0].
+// A name with no file, or a file that is not a bank, holds no bank: the open's
+// failure frees the entry and writes the row no index, so its trigger plays
+// nothing and no other bank stands in [orig: @ 0x652c95..0x652caf]; the answer
+// stands, the name is not opened again.
+class MenuBankCollection {
+public:
+	// The embedder's open of the bank a name names: false for none.
+	using Open = std::function<bool(const std::string &name, lwf::File &out)>;
+	// The bank `name` names, opened through `open` the first time it is named;
+	// null for an empty name or a bank that did not open. `key` (optional) takes
+	// the bank's selection key (SoundSelector::make_key's bank): 1, 2, ... in the
+	// order the banks opened, 0 for none.
+	const lwf::File *bank(const std::string &name, const Open &open, int32_t *key = nullptr);
+	// Every bank forgotten (a new resource root: its files are others).
+	void clear();
+
+private:
+	struct Entry {
+		std::string name;
+		bool opened = false;
+		int32_t key = 0;
+		lwf::File file;
+	};
+	std::deque<Entry> entries_;
+	int32_t next_key_ = 1;
+};
+
+// One voice of a SOUND row's play: the member's wave file as the bank records
+// it ("" where the member names no single: nothing plays), its channel volume
+// (menu_channel_volume) and its pitch scale (menu_effective_pitch).
+struct MenuSoundVoice {
+	std::string path;
+	int volume = 0;
+	double pitch = 1.0;
+};
+
+// What a SOUND row's TRIGGER plays from the row's bank (`bank_key` its
+// collection key): the bank's first set of the name, without case [orig:
+// SoundBank_FindTriggerByName @ 0x75be90]; each of its layers with a member
+// picks one through `selector` by the layer's flags under the (bank, set, layer)
+// key (audio::pick_layer_member), at menu_channel_volume of `master_volume` and
+// the member's volume, clamp and the layer's falloff, its pitch
+// menu_effective_pitch of the member's and the set's (no jitter draws: the
+// accepted divergence above). None for a set the bank lacks or an empty trigger.
+std::vector<MenuSoundVoice> plan_menu_sound(const lwf::File &bank, int32_t bank_key,
+		const std::string &trigger, int master_volume, audio::SoundSelector &selector);
 
 // The pump's sound states, a <SOUND> row's STATE by number, and the per-state
 // slot the parse stores it in [orig: CUIElement_ParseXMLDefinition @ 0x648120,

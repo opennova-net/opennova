@@ -37,6 +37,23 @@ struct WaterHeightRungs {
 	bool has_loaded_terrain = false;
 };
 
+// The rungs a mission's load fills [orig: Game_LoadTerrainDuringConnect
+// @ 0x520710]: the header's attrib-gated override (half world units, as the
+// header writes it) and the terrain's water height in world units, the
+// terrain loaded or not.
+WaterHeightRungs mission_water_rungs(const BmsEnvOverrides &overrides,
+		float terrain_height, bool has_loaded_terrain);
+
+// Which rung gave the plane its height: the header's override, the
+// environment's water_height, the terrain's, or none (0 under a loaded
+// terrain or environment, else `current` kept).
+enum class WaterRung : uint8_t { Mission, Environment, Terrain, None };
+struct ResolvedWaterHeight {
+	float height = 0.0f;
+	WaterRung rung = WaterRung::None;
+};
+ResolvedWaterHeight resolve_water_rung(const WaterHeightRungs &rungs,
+		const EnvironmentState *env, float current);
 float resolve_water_height(const WaterHeightRungs &rungs,
 		const EnvironmentState *env, float current);
 

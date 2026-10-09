@@ -142,6 +142,17 @@ public:
 	// An LWF member's / layer descriptor's base pitch as the player plays it: an
 	// unauthored or degenerate value (<= 0.01) plays at unity.
 	static double effective_base_pitch(double p_base_pitch);
+	// The same of a Q16 pitch (lwf::pitch_from_q16, 0x10000 = 1.0): a voice's
+	// pitch scale.
+	static double pitch_scale_from_q16(uint32_t p_pitch_q16);
+	// A looping copy of a decoded one-shot stream, the whole buffer forward
+	// (the cached stream stays a one-shot's): loop_end is an absolute frame
+	// index that playback wraps at, so 0 would pin the voice at sample 0.
+	static Ref<AudioStreamWAV> loop_copy(const Ref<AudioStreamWAV> &p_stream);
+	// A positional voice the engine's own volume law drives: no attenuation on
+	// top, no distance cap and no doppler, Godot keeping only the panner (the
+	// script voice's channel; the editor's Listen channels).
+	static void configure_unattenuated_3d(AudioStreamPlayer3D *p_player);
 	// dB for a 0..255 engine channel volume; 0 -> hard silent (the engine's law).
 	static double volume_db_from_255(int p_vol255);
 	// The witnessed distance volume curve [orig: SoundBank_CalcDistanceVolPan

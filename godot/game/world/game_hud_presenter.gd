@@ -512,14 +512,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	var weapon_name := weapon.weapon_name if weapon != null else ""
 	if weapon_name != _hud_weapon_name:
 		_hud_weapon_name = weapon_name
-		if weapon != null:
-			_game_hud.set_weapon(weapon.weapon_name,
-					_resolve_weapon_display_name(weapon_name),
-					weapon.clipsize, weapon.rounds_per_icon,
-					weapon.clipgfx_texture, weapon.clipgfx_offset,
-					weapon.rndgfx_texture, weapon.rndgfx_offset, weapon.rndgfx_step)
-		else:
-			_game_hud.clear_weapon()
+		_game_hud.install_weapon(weapon, Strings.get_table(Strings.TABLE_GAMETEXT))
 		if _sights_card != null:
 			var sights: Array[WeaponSightRow] = weapon.sights if weapon != null else []
 			_sight_slide_multiplier = weapon.sight_slide_multiplier if weapon != null else 0
@@ -529,15 +522,15 @@ func tick(gameplay_input_active: bool = false) -> void:
 					_session_texcompression_level())
 
 	# Live weapon/view state (the FSM clip/reserve + ADS + fov), mirroring the info
-	# struct's ammo fields; an infinite-capacity weapon reads clip -1.
-	# [orig: HUD_BuildEntityInfo @0x4b8573..0x4b85fa]
+	# struct's ammo fields; an infinite-capacity weapon reads clip -1
+	# (hud_math.displayed_clip carries the witness).
 	var clip := -1
 	var reserve := -1
 	var weapon_active := false
 	var wv: PlayerWeaponView = _world.local_player_weapon_view()
 	if wv != null and wv.active:
 		weapon_active = true
-		clip = wv.clip if weapon == null or weapon.clipsize != -1 else -1
+		clip = HudPos.displayed_clip(wv.clip, weapon.clipsize) if weapon != null else wv.clip
 		# Capacity-1 weapons fold the chambered round into the displayed reserve
 		# (hud_math.folded_reserve carries the witness).
 		# [orig: HUD_BuildEntityInfo @0x4b85ef — hudInfo+52 += clip when def+88 == 1]
@@ -938,12 +931,6 @@ func _apply_friendly_tags() -> void:
 	_game_hud.set_friendly_tags(true, camera.global_transform, hud_view_projection(camera),
 			fog_distance, sim)
 	_game_hud.set_radio_request_icon_viewer(sim.local_player_radio_request_icon_viewer())
-
-
-# The weapon's HUD display name (the engine's WepDes rule with its miss;
-# hud_game_text.h).
-func _resolve_weapon_display_name(weapon_name: String) -> String:
-	return HudPos.weapon_display_name(Strings.get_table(Strings.TABLE_GAMETEXT), weapon_name)
 
 
 # Mission effects feed the HUD's text surfaces. Drained effects carry

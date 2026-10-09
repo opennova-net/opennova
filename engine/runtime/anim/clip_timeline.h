@@ -15,6 +15,18 @@ namespace opennova::anim {
 inline constexpr int32_t kWrapFadeTicks = 8;
 inline constexpr float kWrapFadeStep = 1.0f / kWrapFadeTicks; // 0.125 exactly
 
+// A clip's records are its frame count and one more, the end pose. The channel
+// samples a frame by (int)(frames * t) with t below 1 and reads that frame's
+// trigger, so it plays frames 0 to frames - 1 (the end pose reached by the last
+// frame's blend into it) and never reads the end pose's trigger: a one-shot
+// holds just short of it, a loop wraps before it. True for that record of a
+// clip of `frames` frames (none for a clip with no frame).
+// [orig: AnimChannel_InterpolateKeyframe @ 0x40B230; AnimChannel_AdvancePlayback
+//  @ 0x40B140]
+inline constexpr bool clip_record_is_end_pose(uint32_t frames, uint32_t record) {
+	return frames > 0 && record == frames;
+}
+
 // Retail's float channel clock, addressed by elapsed simulation ticks.
 // Sparse checkpoints let shared clips answer independent entity playheads and
 // seeks without replacing repeated float addition with a different rounding law.

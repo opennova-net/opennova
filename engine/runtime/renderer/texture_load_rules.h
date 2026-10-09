@@ -104,7 +104,27 @@ enum class TextureLoader : uint8_t {
 	// CTextureData_LoadTGA: particle graphics, the loose "tga\" folder first, then the
 	// mounted name.
 	Particle,
+	// The loaders below name no file of their own (texture_load_attempts tries none for
+	// them): a model texture row's type picks what Normal, Producer and Chunk open
+	// (material_texture_source over material_texture_runtime_type), Pcx8 reads a map by its
+	// own name, and Cube a DDS cube map.
+	// Texture_LoadAsNormalMap: a model row's normal map, an .MDT as it is, a .TGA (or its
+	// .dds) converted from its height.
+	Normal,
+	// sub_58A430: a .TGA (or its .dds) height made a horizon volume or an occlusion map.
+	Producer,
+	// The NQ8B, HRZ8 and AOC8 chunk loaders (@ 0x58F350, @ 0x58F470, @ 0x58F590): a chunk
+	// container under any name.
+	Chunk,
+	// Texture_LoadPCXFromPFF8Bit: an 8-bit PCX's indices and palette (a terrain's foliage and
+	// char maps).
+	Pcx8,
+	// sub_58A690: the player preview's reflection cube, a DDS through D3DX's cube load.
+	Cube,
+	kCount,
 };
+// Whether texture_load_attempts names files for `loader`: every loader from Stage to Particle.
+bool texture_loader_has_attempts(TextureLoader loader);
 
 // What the embedder answers about the mounted file set.
 struct TextureFileQuery {
@@ -117,7 +137,7 @@ struct TextureFileQuery {
 
 // The files `loader` tries for `name`, in order; the first that reads and decodes
 // is the texture, none is a failed load. CineFade and Particle try two, every other
-// loader one.
+// loader one (none past Particle: texture_loader_has_attempts).
 std::vector<TextureLoad> texture_load_attempts(TextureLoader loader, std::string_view name,
 		const TextureFileQuery &files);
 
@@ -211,6 +231,10 @@ uint32_t hud_color_material_argb(uint32_t texel, uint32_t diffuse);
 // channel the truncated mean. `rgba` holds width x height RGBA8 pixels; width and
 // height are updated.
 void halve_rgba(std::vector<uint8_t> &rgba, uint32_t &width, uint32_t &height);
+
+// `halvings` of them while both sides exceed 1 (the halvings pixel_texture_halvings counts,
+// before the game makes its device texture).
+void halve_rgba_times(std::vector<uint8_t> &rgba, uint32_t &width, uint32_t &height, uint32_t halvings);
 
 // GTexture_DownsampleToLimits's cap halving: while either side exceeds `cap`, both
 // sides halve with a 2x2 box (halve_rgba).

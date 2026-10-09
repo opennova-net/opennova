@@ -122,6 +122,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_declutter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_elements.cpp      # which element of the walk drew each run (a tool's record)
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_element_layout.cpp # which hudpos.def values place each element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_layout_from_hudpos.cpp    # the hudpos.def parse applied to the layout globals
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_game_text.cpp    # the HUD's game-text key compositions and fallbacks
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/squad_feed.cpp       # the command map squad feed lines
@@ -180,6 +181,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_load_rules.cpp   # the game's texture loaders as rules
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_registry.cpp   # the key the game keeps a loaded texture under
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/device_texture.cpp   # the device texture a texture file becomes
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_roles.cpp   # every way the game uses a texture file
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/fixed_texture_names.cpp   # the textures the game opens by its own names
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/d3dx_image_codecs.cpp   # D3DX's PPM/PFM/HDR/DIB codecs (D-RMAT-17)
     renderer/material_texture_producers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_classify.cpp

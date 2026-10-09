@@ -870,6 +870,34 @@ std::vector<DxtColor> box_filter_half(const std::vector<DxtColor> &colors,
 	return result;
 }
 
+std::vector<uint8_t> box_filter_half_rgba8(const uint8_t *rgba, uint32_t width, uint32_t height) {
+	return encode_rgba8(box_filter_half(decode_rgba8(rgba, width, height), width, height));
+}
+
+bool decode_dds_levels(const uint8_t *bytes, size_t size, dds::DdsImage &image, size_t max_levels) {
+	const dds::DdsFormat &format = image.format;
+	const bool dxt1 = format.d3d == dds::dds_fourcc('D', 'X', 'T', '1');
+	const bool dxt5 = format.d3d == dds::dds_fourcc('D', 'X', 'T', '4') ||
+			format.d3d == dds::dds_fourcc('D', 'X', 'T', '5');
+	if (!dxt1 && !dxt5)
+		return format.decoded;
+	size_t decoded = 0;
+	for (dds::DdsLevel &level : image.levels) {
+		if (max_levels != 0 && decoded >= max_levels)
+			break;
+		++decoded;
+		if (bytes == nullptr || level.offset > size || level.bytes > size - level.offset)
+			continue;
+		DxtSurface surface;
+		surface.format = dxt1 ? TextureDxtFormat::Dxt1 : TextureDxtFormat::Dxt5;
+		surface.width = level.width;
+		surface.height = level.height;
+		surface.blocks.assign(bytes + level.offset, bytes + level.offset + level.bytes);
+		level.rgba = encode_rgba8(decode_dxt_surface(surface));
+	}
+	return true;
+}
+
 std::vector<DxtSurface> build_dxt_texture_levels(const uint8_t *rgba,
 		uint32_t width, uint32_t height, TextureDxtFormat format,
 		uint32_t level_count) {

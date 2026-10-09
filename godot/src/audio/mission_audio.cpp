@@ -37,8 +37,11 @@
 #include <runtime/mission/placement_traits.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <string>
 #include <utility>
+#include <vector>
 
 using namespace godot;
 
@@ -307,6 +310,7 @@ void MissionAudio::_add_envs_markers(const std::vector<opennova::audio::EnvsMark
 		// Authored slot names -> playable slots: only sets the loaded bank chain
 		// actually carries participate; an empty slot stays SILENT in its region.
 		const auto &authored = row.slot_sets;
+		std::array<std::string, 4> playable;
 		PackedStringArray slot_sets;
 		slot_sets.resize(4);
 		for (int i = 0; i < 4; ++i) {
@@ -315,17 +319,13 @@ void MissionAudio::_add_envs_markers(const std::vector<opennova::audio::EnvsMark
 				const String n(authored[i].c_str());
 				if (!n.is_empty() && bank_->has_set(n)) {
 					slot_sets[i] = n;
+					playable[static_cast<size_t>(i)] = authored[i];
 				}
 			}
 		}
-		PackedStringArray distinct;
-		for (int i = 0; i < slot_sets.size(); ++i) {
-			const String s = slot_sets[i];
-			if (!s.is_empty() && !distinct.has(s)) {
-				distinct.push_back(s);
-			}
-		}
-		if (distinct.is_empty()) {
+		// Each set once, in slot order (audio/envs_markers.h).
+		const std::vector<std::string> distinct = opennova::audio::envs_distinct_sets(playable);
+		if (distinct.empty()) {
 			continue;
 		}
 		const opennova::mission::PlacementVec3 placed = opennova::mission::bms_to_presentation_position(
@@ -337,8 +337,8 @@ void MissionAudio::_add_envs_markers(const std::vector<opennova::audio::EnvsMark
 		Ref<MissionAudioMarker> marker;
 		marker.instantiate();
 		int candidate_count = 0;
-		for (int i = 0; i < distinct.size(); ++i) {
-			const String set_name = distinct[i];
+		for (const std::string &distinct_name : distinct) {
+			const String set_name(distinct_name.c_str());
 			const TypedArray<AmbientLayer> described = bank_->describe_ambient(set_name);
 			if (described.is_empty()) {
 				continue;
@@ -1044,7 +1044,7 @@ void MissionAudio::_feed_mixer() {
 	world_driven_ticks_ = false;
 	world_driven_tick_offset_ = 0;
 	for (const Ref<MissionAudioMarker> &marker : markers_) {
-		Vector<String> set_names;
+		std::vector<std::string> set_names;
 		Array sets;
 		for (int si = 0; si < marker->set_count(); ++si) {
 			PackedInt32Array packed;
@@ -1065,17 +1065,20 @@ void MissionAudio::_feed_mixer() {
 			if (packed.is_empty()) {
 				continue;
 			}
-			set_names.push_back(marker->set_name_at(si));
+			set_names.push_back(opennova::to_std(marker->set_name_at(si)));
 			sets.push_back(packed);
 		}
+		// Each region's slot keyed into the sets registered (audio/envs_markers.h).
+		std::array<std::string, 4> marker_slots;
+		const PackedStringArray slot_sets = marker->get_slot_sets();
+		for (int r = 0; r < 4 && r < slot_sets.size(); ++r) {
+			marker_slots[static_cast<size_t>(r)] = opennova::to_std(slot_sets[r]);
+		}
+		const std::array<int32_t, 4> keys = opennova::audio::envs_slot_keys(marker_slots, set_names);
 		PackedInt32Array slot_keys;
 		slot_keys.resize(4);
-		const PackedStringArray slot_sets = marker->get_slot_sets();
 		for (int r = 0; r < 4; ++r) {
-			slot_keys[r] = -1;
-			if (r < slot_sets.size()) {
-				slot_keys[r] = set_names.find(slot_sets[r]);
-			}
+			slot_keys[r] = keys[static_cast<size_t>(r)];
 		}
 		mixer_->add_marker(marker->get_pos(), marker->get_source_bms_id(), marker->get_stagger_slot(), 0,
 				slot_keys, sets);

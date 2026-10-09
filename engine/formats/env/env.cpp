@@ -805,4 +805,14 @@ bool read_mission_env(const EnvTextReader &read, const std::string &terrain_file
 	return load_mission_env(texts, out);
 }
 
+bool load_mission_env_config(const EnvTextReader &read, const std::string &terrain,
+		const std::string &environment, const BmsEnvOverrides &overrides, MissionEnv &out) {
+	const bool loaded = read_mission_env(read, terrain.empty() ? std::string() : terrain + ".trn",
+			environment.empty() ? std::string() : environment + ".env", out);
+	// [orig: Game_LoadTerrainDuringConnect @0x520710 -- the attrib-gated
+	//  water / fog / fog-colour overrides over the loaded .env]
+	apply_bms_overrides(out.config, overrides);
+	return loaded;
+}
+
 } // namespace opennova::env

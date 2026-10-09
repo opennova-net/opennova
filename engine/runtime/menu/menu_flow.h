@@ -2,6 +2,7 @@
 
 #include "menu_runtime.h"
 #include <runtime/hud/game_text_lookup.h>
+#include <runtime/mission/mission_catalog.h>
 
 namespace opennova::menu {
 
@@ -10,6 +11,10 @@ struct MissionChoice {
 	std::string file, text, briefing;
 	uint32_t game_type = 0;
 };
+
+// A catalog row's choice: its file, its list text (mission_catalog::display_text), its briefing and
+// its session game type (mission_catalog::game_type_of).
+MissionChoice mission_choice(const mission_catalog::Row &row);
 
 // The SP list's model and deferred expansion request survive screen switches
 // on the shell's one driver; document swaps invalidate only the row mappings.

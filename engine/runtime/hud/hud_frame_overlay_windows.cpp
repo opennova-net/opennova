@@ -467,12 +467,9 @@ void HudFrameCompiler::element_voice_macro_menu(const HudFrameState &state,
 // @0x59d699].
 void HudFrameCompiler::element_paused_text(const HudFrameState &state, float w, float h) {
 	if (!state.paused) return;
-	int x = layout_.paused_x;
-	int y = layout_.paused_y;
-	if (x == 0 || y == 0) {
-		x = 1000;
-		y = 4;
-	}
+	const std::array<int, 2> pos = paused_text_pos(layout_.paused_x, layout_.paused_y);
+	const int x = pos[0];
+	const int y = pos[1];
 	// The Impact38 slot falls back like the end-round overlay's.
 	const bool have_impact = label_font_impact38_.font() != nullptr;
 	const bool have_large = label_font_large_.font() != nullptr;

@@ -165,6 +165,28 @@ void test_mission_start_init_snaps_currents_and_installs_the_clamps() {
 	CHECK(ws.core.sun_block.render_color == 0x00A0B0C0u && ws.core.sun_block.max_rate[0] == 0x02800000);
 }
 
+// The start's settle: the initializer, then 255 whole weather ticks, each the embedder's own
+// [orig: Environment_MissionStartInit @ 0x57f878..0x57f880]; the same state as the loop by hand.
+void test_settle_mission_start_runs_the_initializer_and_255_ticks() {
+	w::WeatherState by_hand;
+	by_hand.seed(seed_800());
+	by_hand.command_rain(100, 1);
+	w::WeatherState settled = by_hand;
+	w::WeatherTickEvents events;
+	by_hand.mission_start_init();
+	for (int i = 0; i < 255; ++i) by_hand.tick_sim(nullptr, events);
+	int ticks = 0;
+	settled.settle_mission_start([&] {
+		++ticks;
+		settled.tick_sim(nullptr, events);
+	});
+	CHECK(ticks == 255 && w::WeatherState::kMissionStartSettleTicks == 255);
+	CHECK(settled.tod_fixed24 == by_hand.tod_fixed24);
+	CHECK(settled.rain_pct_current_q16() == by_hand.rain_pct_current_q16());
+	CHECK(settled.core.scalar_channels.rain_max_fp == 0xFFFF); // the initializer ran first
+	CHECK(settled.core.oscillator.prng == by_hand.core.oscillator.prng);
+}
+
 void test_tick_advances_the_clock_and_fires_thunder() {
 	w::WeatherState ws;
 	ws.seed(seed_800());
@@ -450,6 +472,11 @@ void test_debug_scrub_is_exact_while_the_wac_tod_truncates() {
 	CHECK(ws.tod_fixed24 == (9u << 24)); // the dev-tool scrub lands exactly
 	ws.debug_set_time_of_day_minutes(22.0 * 60.0 + 7.0);
 	CHECK(ws.tod_hhmm() > 2206.9999 && ws.tod_hhmm() < 2207.0001);
+	// The scrub's clock alone: under 0 is 0, past a day wraps, to the nearest 8.24 unit.
+	CHECK(w::WeatherState::tod_fixed24_from_minutes(-5.0) == 0u);
+	CHECK(w::WeatherState::tod_fixed24_from_minutes(25.0 * 60.0) == (1u << 24));
+	CHECK(w::WeatherState::tod_fixed24_from_minutes(90.0) == (3u << 23));
+	CHECK(w::WeatherState::tod_fixed24_from_minutes(1.0) == 279620u); // 2^24 / 60 = 279620.27
 }
 
 // The rain's two loops beside a body (the local player's, the editor's listener, DI-36): none while the rain
@@ -510,6 +537,7 @@ int main() {
 	test_entity_update_falls_the_drops_on_gameplay_ticks_only();
 	test_wac_arguments_land_raw();
 	test_mission_start_init_zeroes_the_lightning_additives();
+	test_settle_mission_start_runs_the_initializer_and_255_ticks();
 	test_keyframe_snap_writes_channels_render_and_target_only();
 	test_negative_color_fade_pins_a_static_block_to_plus_rate_and_wraps();
 	test_sun_fade_extreme_argument_keeps_the_spring_defined();

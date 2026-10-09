@@ -1,8 +1,8 @@
 #include "mnu/menu_audio.h"
 
-#include "lwf/lwf_data.h"
 #include "lwf/wav_loader.h"
 #include "resource_index/resource_root.h"
+#include "util/string_convert.h"
 
 #include <godot_cpp/classes/audio_stream_wav.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -21,10 +21,9 @@ void MenuAudio::set_resource_root(const Ref<ResourceRoot> &p_root) {
 		return;
 	}
 	resource_root_ = p_root;
-	// A new root invalidates the bank cache and the per-set selection state
-	// (the same reset the Control-tree owner performed on root swaps).
-	lwf_banks_.clear();
-	next_lwf_bank_id_ = 1;
+	// A new root invalidates the bank collection and the per-set selection
+	// state (the same reset the Control-tree owner performed on root swaps).
+	banks_.clear();
 	sound_selector_.reset();
 }
 
@@ -49,92 +48,56 @@ bool MenuAudio::play_widget_sound(const String &p_trigger,
 	// set inside it (menu/menu_sound.h carries the witnessed play path).
 	// A bank that did not open (or a file-less element) leaves the element no
 	// bank, so its trigger plays nothing: no other bank stands in.
-	int bank_id = 0;
-	const Ref<LwfData> bank = resolve_sound_bank_(p_file, bank_id);
-	return play_lwf_set_(bank, bank_id, p_trigger);
-}
-
-Ref<LwfData> MenuAudio::resolve_sound_bank_(const String &p_file,
-		int &r_bank_id) {
-	r_bank_id = 0;
-	if (p_file.is_empty() || resource_root_.is_null()) {
-		return Ref<LwfData>();
-	}
-	// The original collection dedups bank entries case-insensitively;
-	// lowercase keys give the same fold, and a failed open caches the null
-	// bank so a bad name is tried once (menu/menu_sound.h witness block).
-	const String key = p_file.to_lower();
-	if (const LwfBankEntry *cached = lwf_banks_.getptr(key)) {
-		r_bank_id = cached->id;
-		return cached->bank;
-	}
-	LwfBankEntry entry;
-	Ref<LwfData> bank;
-	bank.instantiate();
-	if (bank->open_from_resource_root(resource_root_, p_file) == OK &&
-			bank->is_loaded()) {
-		entry.bank = bank;
-		entry.id = next_lwf_bank_id_++;
-	}
-	lwf_banks_.insert(key, entry);
-	r_bank_id = entry.id;
-	return entry.bank;
-}
-
-bool MenuAudio::play_lwf_set_(const Ref<LwfData> &p_bank, int p_bank_id,
-		const String &p_trigger) {
-	if (p_bank.is_null() || resource_root_.is_null() || p_trigger.is_empty()) {
+	int32_t bank_key = 0;
+	const opennova::lwf::File *bank = resolve_sound_bank_(p_file, bank_key);
+	if (bank == nullptr || resource_root_.is_null() || p_trigger.is_empty()) {
 		return false;
 	}
-	const String want = p_trigger.to_upper();
-	const int set_count = p_bank->get_set_count();
-	for (int si = 0; si < set_count; ++si) {
-		const Dictionary set_d = p_bank->get_set(si);
-		if (String(set_d.get("name", "")).to_upper() != want) {
-			continue;
-		}
-		const double set_pitch = opennova::lwf::pitch_from_q16(static_cast<uint32_t>(
-				(int64_t)set_d.get("pitch_base",
-						static_cast<int64_t>(opennova::lwf::kAuthoredSetPitchBase))));
-		const Array layers = set_d.get("layers", Array());
-		bool played = false;
-		for (int li = 0; li < layers.size(); ++li) {
-			const Dictionary layer_d = layers[li];
-			const Array members = layer_d.get("members", Array());
-			if (members.is_empty()) {
-				continue;
-			}
-			const int mode = (int)layer_d.get("selection_mode",
-					(int)LwfData::SELECTION_RANDOM);
-			const int idx = sound_selector_.select(
-					opennova::audio::SoundSelector::make_key(p_bank_id, si, li),
-					members.size(), mode);
-			if (idx < 0) {
-				continue;
-			}
-			const Dictionary member = members[idx];
-			const int vol255 = opennova::menu::menu_channel_volume(
-					master_volume_, (int)member.get("volume", 255),
-					(int)member.get("clamp_volume", 255),
-					(int)layer_d.get("falloff_radius", 0));
-			const double pitch = opennova::menu::menu_effective_pitch(
-					double(member.get("base_pitch", 1.0)), set_pitch);
-			played = play_member_sound_(member, vol255, pitch) || played;
-		}
-		return played;
+	bool played = false;
+	for (const opennova::menu::MenuSoundVoice &voice : opennova::menu::plan_menu_sound(*bank,
+				 bank_key, opennova::to_std(p_trigger), master_volume_, sound_selector_)) {
+		played = play_member_sound_(opennova::to_gd(voice.path), voice.volume, voice.pitch) || played;
 	}
-	return false;
+	return played;
 }
 
-bool MenuAudio::play_member_sound_(const Dictionary &p_member, int p_vol255,
+const opennova::lwf::File *MenuAudio::resolve_sound_bank_(const String &p_file,
+		int32_t &r_bank_key) {
+	r_bank_key = 0;
+	if (p_file.is_empty() || resource_root_.is_null()) {
+		return nullptr;
+	}
+	// The bank as the VFS holds it, by its file name; a failed open stays in
+	// the collection as no bank, so a bad name is tried once.
+	const Ref<ResourceRoot> root = resource_root_;
+	return banks_.bank(opennova::to_std(p_file),
+			[&root](const std::string &p_name, opennova::lwf::File &r_bank) {
+				if (root->get_root_dir().is_empty()) {
+					return false;
+				}
+				const String file = opennova::to_gd(p_name).get_file();
+				if (file.is_empty()) {
+					return false;
+				}
+				const PackedByteArray bytes = root->read_file(file);
+				if (bytes.is_empty()) {
+					return false;
+				}
+				std::string error;
+				return opennova::lwf::parse_lwf_buffer(bytes.ptr(),
+						static_cast<size_t>(bytes.size()), r_bank, error);
+			},
+			&r_bank_key);
+}
+
+bool MenuAudio::play_member_sound_(const String &p_wav_path, int p_vol255,
 		double p_pitch_scale) {
-	const String wav_path = p_member.get("wav_path", "");
-	if (wav_path.is_empty()) {
+	if (p_wav_path.is_empty()) {
 		return false;
 	}
 	// LWF paths are Windows-style (e.g. "SFX\\MENU\\MSOVR_2.wav"); the
 	// resource root resolves the loose .wav by basename.
-	const String name = wav_path.replace("\\", "/").get_file();
+	const String name = p_wav_path.replace("\\", "/").get_file();
 	if (name.is_empty()) {
 		return false;
 	}

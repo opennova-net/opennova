@@ -54,6 +54,11 @@ int main() {
 	clock_ok &= expect(opennova::env::tod_rate_advance_per_tick(0) ==
 					opennova::env::tod_advance_per_tick(60),
 			"an .env tod_rate of 0 takes the 60-minute floor");
+	clock_ok &= expect(opennova::env::tod_floored_minutes_per_day(10) == 60 &&
+					opennova::env::tod_floored_minutes_per_day(0) == 60 &&
+					opennova::env::tod_floored_minutes_per_day(60) == 60 &&
+					opennova::env::tod_floored_minutes_per_day(90) == 90,
+			"a day under 60 minutes runs as 60");
 	clock_ok &= expect(opennova::env::kTodDefaultAdvancePerTick == 75,
 			"the engine's default advance is 75");
 	// Q8.8 12.00 -> 12h in 8.24; 25.5h wraps to 1.5h.
@@ -198,6 +203,34 @@ int main() {
 		if (!expect(!opennova::env::read_mission_env(read, "", "", loaded) && asked.size() == 1 &&
 		                    near(loaded.config.water_murk, 0.8f),
 		            "no names: overcast.def alone, the defaults standing"))
+			return 1;
+		// The mission's config: the header's names with their extensions, then its override layer
+		// over what the load made, the .env read or skipped [orig: Game_LoadTerrainDuringConnect
+		// @ 0x520710].
+		const int fog_color[3] = {10, 20, 30};
+		const int water_color[3] = {0, 0, 0};
+		const opennova::env::BmsEnvOverrides overrides =
+				opennova::env::bms_env_overrides_from_header(0x1 | 0x2, 40, 300, fog_color, water_color, 0);
+		asked.clear();
+		if (!expect(opennova::env::load_mission_env_config(read, "Dvxi5", "full_00", overrides, loaded) &&
+		                    asked.size() == 3 && asked[0] == "Dvxi5.trn" && asked[2] == "full_00.env" &&
+		                    loaded.environment && near(loaded.config.fog_level, 300.0f) &&
+		                    loaded.config.water_height_set && near(loaded.config.water_height, 40.0f) &&
+		                    near(loaded.config.water_murk, 0.3f),
+		            "the mission's config reads <terrain>.trn and <environment>.env under the header's overrides"))
+			return 1;
+		asked.clear();
+		if (!expect(!opennova::env::load_mission_env_config(read, "Dvxi5", "gone", overrides, loaded) &&
+		                    asked.size() == 3 && asked[2] == "gone.env" && !loaded.environment &&
+		                    near(loaded.config.fog_level, 300.0f) && near(loaded.config.water_height, 40.0f) &&
+		                    near(loaded.config.water_murk, 0.3f),
+		            "a skipped .env still takes the header's overrides over the earlier passes"))
+			return 1;
+		asked.clear();
+		if (!expect(!opennova::env::load_mission_env_config(read, "", "", opennova::env::BmsEnvOverrides{}, loaded) &&
+		                    asked.size() == 1 && asked[0] == opennova::env::kOvercastFile &&
+		                    near(loaded.config.fog_level, 1024.0f),
+		            "a header naming neither reads overcast.def alone"))
 			return 1;
 	}
 

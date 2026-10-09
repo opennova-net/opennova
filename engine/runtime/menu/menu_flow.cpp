@@ -9,6 +9,10 @@
 
 namespace opennova::menu {
 
+MissionChoice mission_choice(const mission_catalog::Row &row) {
+	return { row.file, mission_catalog::display_text(row), row.briefing, mission_catalog::game_type_of(row) };
+}
+
 void MenuFlow::set_mission_controls(std::vector<std::string> lists,
 		std::vector<std::string> briefings, std::vector<std::string> accepts) {
 	sp_lists_ = std::move(lists);

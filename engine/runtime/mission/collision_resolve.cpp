@@ -74,6 +74,14 @@ const DefItemDef *find_item_def(const DefItemsFile &items, int item_id) {
 	return nullptr;
 }
 
+std::unordered_map<int, const DefItemDef *> item_defs_by_id(const DefItemsFile &items) {
+	// emplace keeps the first row of an id: find_item_def's scan from row 0.
+	std::unordered_map<int, const DefItemDef *> rows;
+	rows.reserve(items.count);
+	for (size_t i = 0; i < items.count; ++i) rows.emplace(items.entries[i].id, &items.entries[i]);
+	return rows;
+}
+
 int visual_item_id_for_runtime_type(int item_id, const DefItemsFile &items) {
 	// The policy lives in mission/placement_traits.h; this overload only
 	// answers the catalog probe against the retained DefItemsFile.
@@ -759,13 +767,10 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					// +4*i / the level mesh's +0x34 [orig:
 					// DeathPiece_RenderVisible @ 0x57b882..0x57b8ba;
 					// DeathPiece_RenderSection @ 0x57b6d1]).
-					for (size_t li = 0; li < piece_m3->lod_count; ++li) {
-						info.model.lod_threshold_q16.push_back(
-								renderer::rlod_threshold_q16_from_rmdl(
-										piece_m3->lods[li].lod_threshold));
+					info.model.lod_threshold_q16 = renderer::model_lod_thresholds_q16(*piece_m3);
+					for (size_t li = 0; li < piece_m3->lod_count; ++li)
 						info.model.lod_section_count.push_back(static_cast<int32_t>(
 								piece_m3->lods[li].render_object_count));
-					}
 					// The COBJ section centres (the runtime row's +0x38..+0x40)
 					// [orig: the +0x6C array @ 0x4938bf, the centre
 					// @ 0x4938c2..0x4938d0; @ 0x57b6f6..0x57b70b].

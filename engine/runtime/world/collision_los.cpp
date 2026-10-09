@@ -239,12 +239,24 @@ bool terrain_clip_segment(const terrain::TerrainHeightField &field, const int32_
     return terrain::terrain_raycast_refined(sampler, a, b, out_hit);
 }
 
+bool terrain_column_height(const terrain::TerrainHeightField *field, int32_t x, int32_t y,
+                           int32_t &height) {
+    if (field == nullptr) return false;
+    const int32_t start[3] = {x, y, 0x7FFF0000};
+    int32_t end[3] = {x, y, -0x7FFF0000};
+    const int32_t before = end[2];
+    terrain_clip_segment(*field, start, end, end);
+    if (end[2] == before) return false;
+    height = end[2];
+    return true;
+}
+
 int32_t terrain_settle_clearance(const terrain::TerrainHeightField *field, const int32_t pos[3],
                                  int32_t capsule_bottom, bool indoors) {
     // [orig: Entity_MovementCollisionResolver @0x4B3D6E..0x4B3DA9; the probe
     // Entity_RaycastGroundHeightAndObject @0x4B3D95 over no candidates]
     const int32_t feet_z = pos[2] - capsule_bottom;
-    const int32_t start[3] = {pos[0], pos[1], (pos[2] + 6143) & ~0x17FF};
+    const int32_t start[3] = {pos[0], pos[1], ground_probe_origin_z(pos[2])};
     int32_t end[3] = {start[0], start[1], start[2] - 0x20000};
     if (field != nullptr && field->valid() && !indoors) (void)terrain_clip_segment(*field, start, end, end);
     return feet_z - end[2];

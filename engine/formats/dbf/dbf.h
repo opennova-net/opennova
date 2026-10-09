@@ -14,6 +14,7 @@
 // reference a dialog id by its number. See docs/audio/lwf-dbf-sound-re.md.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -23,6 +24,12 @@ namespace dbf {
 
 // Magic number "DLG0" in little-endian.
 constexpr uint32_t kMagic = 0x30474C44;  // 'DLG0'
+
+// The bytes the format keeps a name in, its terminator among them: a dialog's
+// 24 [orig: the 52-byte record's name at +4, the strcmp of Dialog_PlayByName
+// @ 0x44da8b], a line's wave 24 and its sequence 24 [orig: the 68-byte line's
+// +4 and +28, Dialog_LoadAudioClip @ 0x44dcf7 / @ 0x44ddec].
+inline constexpr size_t kNameBytes = 24;
 
 // 28-byte file header [orig: DialogManager_LoadFromFile reads 0x1C @ 0x44e699;
 // magic check 'DLG0' @ 0x44e6f7; version/header_size are never checked].
@@ -41,7 +48,7 @@ static_assert(sizeof(Header) == 28, "Header must be 28 bytes");
 // 52-byte group record (raw on-disk).
 struct RawGroupRecord {
 	uint32_t record_size;        // 0x00: always 52
-	char group_name[24];         // 0x04: DLG_ID (null-terminated)
+	char group_name[kNameBytes]; // 0x04: DLG_ID (null-terminated)
 	uint32_t line_count;         // 0x1C
 	uint32_t idlist_count;       // 0x20
 	uint8_t def_id_indices[16];  // 0x24
@@ -52,8 +59,8 @@ static_assert(sizeof(RawGroupRecord) == 52, "RawGroupRecord must be 52 bytes");
 // 68-byte line record (raw on-disk).
 struct RawLineRecord {
 	uint32_t line_flags;   // 0x00
-	char def_id_name[24];  // 0x04: the wave of the dialog bank's sounds it plays, by name (null-terminated)
-	char sequence[24];     // 0x1C: the subtitle entry: digits after the last '_' index the mission text ("_00003"; "##" none)
+	char def_id_name[kNameBytes]; // 0x04: the wave of the dialog bank's sounds it plays, by name (null-terminated)
+	char sequence[kNameBytes];    // 0x1C: the subtitle entry: digits after the last '_' index the mission text ("_00003"; "##" none)
 	uint8_t def_id_index;  // 0x34
 	uint8_t delay;         // 0x35: DELAY (low byte)
 	uint16_t padding;      // 0x36
