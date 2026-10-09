@@ -40,17 +40,19 @@ void HudOverlay::configure_combat_(const opennova::hud::HudLayoutAssets &assets)
 	using namespace opennova::hud;
 	auto &l = layout_.combat;
 	// HUD_LoadAllTextures loads the fixed art in colour mode and the hudpos
-	// parachute and armor icons in alpha mode (docs/interface/hud-re.md
-	// "The HUD texture loader"); the names are the engine's (hud_texture_names.h).
+	// parachute and armor icons in the modes HudLayoutAssets names
+	// (docs/interface/hud-re.md "The HUD texture loader"); the names are the
+	// engine's (hud_texture_names.h).
 	constexpr ResourceRoot::TextureLoader colour = ResourceRoot::TEXTURE_LOADER_HUD_COLOR;
-	constexpr ResourceRoot::TextureLoader alpha = ResourceRoot::TEXTURE_LOADER_HUD_ALPHA;
 	combat_texture_(kHudTexVehicleFixed, hud_fixed_texture_name(kHudTexVehicleFixed), colour, l.vehicle_fixed);
 	combat_texture_(kHudTexVehicleLag, hud_fixed_texture_name(kHudTexVehicleLag), colour, l.vehicle_lag);
 	combat_texture_(kHudTexDriverCrosshair, hud_fixed_texture_name(kHudTexDriverCrosshair), colour, l.driver_crosshair);
 	combat_texture_(kHudTexTarget, hud_fixed_texture_name(kHudTexTarget), colour, l.target);
 	combat_texture_(kHudTexTargetFriendly, hud_fixed_texture_name(kHudTexTargetFriendly), colour, l.target_friendly);
-	combat_texture_(kHudTexParachute, opennova::to_gd(assets.parachute_icon), alpha, l.parachute);
-	combat_texture_(kHudTexArmor, opennova::to_gd(assets.armor_icon), alpha, l.armor);
+	combat_texture_(kHudTexParachute, opennova::to_gd(assets.parachute_icon),
+			ResourceRoot::loader_of(HudLayoutAssets::kParachuteIconRole), l.parachute);
+	combat_texture_(kHudTexArmor, opennova::to_gd(assets.armor_icon),
+			ResourceRoot::loader_of(HudLayoutAssets::kArmorIconRole), l.armor);
 	combat_texture_(kHudTexLogoHelo, hud_fixed_texture_name(kHudTexLogoHelo), colour, l.logo_helo);
 	combat_texture_(kHudTexLogoHumm, hud_fixed_texture_name(kHudTexLogoHumm), colour, l.logo_humm);
 	combat_texture_(kHudTexLogoBoat, hud_fixed_texture_name(kHudTexLogoBoat), colour, l.logo_boat);

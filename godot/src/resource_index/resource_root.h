@@ -22,6 +22,7 @@
 #include <runtime/assets/asset_store.h>
 #include <runtime/renderer/texture_load_rules.h>
 #include <runtime/renderer/texture_registry.h>
+#include <runtime/renderer/texture_roles.h>
 
 #include <vector>
 
@@ -55,6 +56,9 @@ public:
 		TEXTURE_LOADER_CINE_FADE,
 		TEXTURE_LOADER_PARTICLE,
 	};
+	// The bound loader a texture role's file goes through (renderer::texture_role's
+	// loader; the two enums agree value for value).
+	static TextureLoader loader_of(opennova::renderer::TextureRoleId p_role);
 
 private:
 	enum class MountKind {
