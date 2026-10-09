@@ -5,7 +5,7 @@
 #include <vector>
 
 #include <editor/import/importer.h>
-#include <formats/pcx/pcx.h>
+#include <runtime/renderer/texture_authoring.h>
 
 namespace opennova::editor {
 
@@ -13,7 +13,8 @@ namespace opennova::editor {
 // options its import record holds, each a row of image_import_option_rows (the import_options query
 // answers them, set_import_options sets them). A TGA or a PCX is a source too where a record makes it one
 // (Replace, Edit externally: importer.h's record_extensions), read as the game's reader reads it
-// (decode_image_source). The options:
+// (renderer::decode_image_source). The options, each read and applied by the engine's image import
+// (runtime/renderer/texture_authoring.h, which `opennova-3di texture` writes through too):
 // - `format`, what it writes: `tga` (32-bit, its alpha kept: the form every TGA loader reads), `tga24`
 //   (24-bit, no alpha: a terrain colour map's form), `pcx` (8-bit indexed, 256 colours, no alpha: the
 //   loading screens', sky clouds' and foliage maps' reader), `dds` (DXT5 or DXT1 with its mip chain, or
@@ -35,69 +36,21 @@ namespace opennova::editor {
 //   the map's alpha [orig: Texture_LoadAsNormalMap @0x58C985..0x58CAED]);
 // - `dds` (dds): `dxt5`, `dxt1` or `argb`; `mips` (a DXT dds): `full` (every level to 1 x 1, as every DXT
 //   DDS the game ships carries its chain, each the D3DX box filter of the level before over the source's
-//   texels, its blocks the authoring encoder's: import/dxt_encode.h) or `none`;
+//   texels, its blocks the authoring encoder's: runtime/renderer/dxt_encode.h) or `none`;
 // - `green`: `game` or `flip` (a normal map drawn with the other green: the game's tangent frame runs
 //   down the texture, ADR 0047).
-// A resize is editor tooling, not a port: halving by 2 x 2 boxes, any other size by the average of the
-// texels each output texel covers.
-
-// 3: a DDS's blocks the authoring encoder's, each level filtered from the source's (import/dxt_encode.h).
+// 3: a DDS's blocks the authoring encoder's, each level filtered from the source's
+// (runtime/renderer/dxt_encode.h).
 inline constexpr int kImageImporterVersion = 3;
 
 const std::vector<ImportOptionRow> &image_import_option_rows();
 
-// The options as an import reads them, every one left out its fallback.
-struct ImageImportSettings {
-	std::string format, name, alpha, size, palette, dds, mips, green, normal;
-};
-
-// A source as the import reads it: its texels (RGBA, the top row first) and, for an 8-bit PCX, its
-// indices and palette. A source is the modder's picture, read as an image program reads it, never through
-// the game's readers' faults (ADR 0046 S18): a PNG's through the PNG reader; a TGA's by the format
-// (import/tga_source.h decode_tga_source: its origin honoured, every depth and colour map); a PCX's by the format
-// (formats/pcx decode_pcx_indexed and decode_pcx_rgb: each row's first `width` bytes of its bytes a line,
-// an 8-bit file's texel the palette entry of its index, opaque). The import then writes the file the game
-// reads. False, with `error`, for a file its reader refuses or a name of another extension.
-struct ImageSource {
-	RgbaImage image;
-	bool indexed = false;
-	IndexedImage8 indices;
-};
-bool decode_image_source(const std::string &name, const std::vector<uint8_t> &bytes, ImageSource &out,
-                         std::string &error);
-// Whether a source holds an alpha, by its first bytes alone (`head`: its header, a PNG's chunks up to its
-// first image data): a PNG of grey or colour with alpha, or with a transparency chunk; a TGA with alpha bits
-// or a colour map of 32 bits; never a PCX. What a use's needs weigh without decoding it (a sky's clouds).
-bool image_source_has_alpha(const std::string &name, const std::vector<uint8_t> &head);
-// `normal height` applied: each texel's brightness into its alpha, its alpha into its blue.
-void height_into_alpha(RgbaImage &image);
-ImageImportSettings image_import_settings(const ImportOptions &options);
-// The extension a format writes, with its dot (".tga" for tga24, ".mdt" for mdt).
-std::string image_format_extension(const std::string &format);
 // The file an import of `source_name` writes: the name option, else the source's stem and the format's
 // extension.
-std::string image_import_output_name(const std::string &source_name, const ImageImportSettings &settings);
-
-// The pieces, each on its own (a test reads them): the sides `size` asks of an image of `width` x
-// `height` (false, with `why`, for a value no row takes); an image resized; `alpha` applied (false, with
-// `why`); green flipped.
-bool image_target_size(const std::string &size, uint32_t width, uint32_t height, uint32_t &out_width,
-                       uint32_t &out_height, std::string &why);
-RgbaImage resize_image(const RgbaImage &image, uint32_t width, uint32_t height);
-bool apply_image_alpha(RgbaImage &image, const std::string &alpha, std::string &why);
-void flip_image_green(RgbaImage &image);
-// The texels an import of `settings` encodes from a decoded source (an 8-bit PCX's indices kept aside):
-// resized to the size it asks for, its green flipped, its height into its alpha (`normal height` of a TGA)
-// or its alpha made as asked; false, with `why` and the option at fault in `field`, for a value it cannot
-// use. What run_image_import writes, and what a texture's compare reads an import's output against.
-bool image_import_texels(RgbaImage &image, const ImageImportSettings &settings, std::string &why, std::string &field);
-// The image written as `settings` say (format, palette, dds, mips): its bytes, or false with `why`; a
-// warning (a PCX dropping a translucent source's alpha) in `note`.
-bool encode_image(const RgbaImage &image, const ImageImportSettings &settings, std::vector<uint8_t> &out,
-                  std::string &why, std::string &note);
+std::string image_import_output_name(const std::string &source_name, const renderer::ImageImportSettings &settings);
 
 // The importer's run (importers.cpp's row): the source decoded, then resized, its green and alpha, then
-// written.
+// written (renderer::decode_image_source, image_import_texels, encode_image).
 bool run_image_import(ImportContext &context, ImportProduct &out);
 
 } // namespace opennova::editor

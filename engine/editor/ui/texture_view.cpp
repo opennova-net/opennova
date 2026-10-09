@@ -299,7 +299,7 @@ void TextureView::draw_import(Workspace &workspace, const DocumentBase &document
 				std::string &draft = import_.drafts[row.key];
 				char buffer[64];
 				std::snprintf(buffer, sizeof(buffer), "%s", draft.c_str());
-				const std::string hint = image_import_output_name(state.source, image_import_settings(state.sidecar.options));
+				const std::string hint = image_import_output_name(state.source, renderer::image_import_settings(state.sidecar.options));
 				if (ImGui::InputTextWithHint("##free", hint.c_str(), buffer, sizeof(buffer))) draft = buffer;
 				if (ImGui::IsItemDeactivatedAfterEdit() && draft != value) set(row.key, draft);
 				ui_kit::tooltip(row.words + "\nTakes " + import_option_takes(row) + ".");

@@ -1,8 +1,8 @@
 #include <editor/preview/texture_header.h>
 
-#include <editor/import/png_decode.h>
 #include <formats/dds/dds.h>
 #include <formats/pcx/pcx_io.h>
+#include <formats/png/png_decode.h>
 #include <formats/tga/tga.h>
 
 namespace opennova::editor {
@@ -18,7 +18,7 @@ bool texture_header_size(menu::MenuTextureFormat format, const std::vector<uint8
 		if (!dds::dds_header_size(bytes.data(), bytes.size(), w, h)) return false;
 		break;
 	case menu::MenuTextureFormat::Png:
-		if (!png_header_size(bytes, w, h)) return false;
+		if (!png::png_header_size(bytes, w, h)) return false;
 		break;
 	case menu::MenuTextureFormat::Pcx: {
 		RgbaImage image;

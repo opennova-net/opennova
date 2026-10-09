@@ -1,10 +1,10 @@
 // ADR 0046 S18, the image importer's options as data (import/texture_import) and what a texture's uses ask
 // of an import (graph/texture_import_needs, session/texture_import_state): the option rows and the values
-// each takes; the pieces (the sizes asked, a halving by 2 x 2 boxes, an area average, each alpha, a green
-// flipped); every format written and read back by the reader the game picks (a 24-bit TGA, a PCX, a DXT5
-// DDS with its whole chain each level the ported codec's, a DXT1, an A8R8G8B8, an MDT, a PNG); a TGA and a
-// PCX as sources (read as the game reads them, a PCX's indices kept, a height map's brightness into the
-// alpha); an author's TGA copied with no record, a record beside it making it a source; over a
+// each takes, the output's name (the pieces, every format written and read back, and a source's decode are
+// the engine's image import's: tests/renderer/texture_authoring_test.cpp); a TGA and a PCX imported as
+// sources (a TGA's origin kept, a PCX's indices kept, refused from colours or at another size, a height
+// map's brightness into the alpha); an author's TGA copied with no record, a record beside it making it a
+// source; over a
 // minted project, a PNG imported to a TGA by default, what its uses ask (a model row's DDS, a colour
 // map's 24-bit 1024 x 1024 TGA, a loading screen's PCX, a conflict), set_import_options writing the
 // record and importing again under the new name, the old file gone, a value no row takes refused; the
@@ -20,9 +20,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/texture_image.h>
 #include <editor/graph/texture_import_needs.h>
-#include <editor/import/dxt_encode.h>
 #include <editor/import/importer.h>
-#include <editor/import/png_encode.h>
 #include <editor/import/sidecar.h>
 #include <editor/import/texture_import.h>
 #include <editor/project/project_files.h>
@@ -35,6 +33,7 @@
 #include <formats/dds/dds.h>
 #include <formats/env/env.h>
 #include <formats/pcx/pcx_io.h>
+#include <formats/png/png_encode.h>
 #include <formats/tga/tga.h>
 
 #include "common/test_expect.h"
@@ -45,6 +44,11 @@ using namespace opennova;
 using namespace opennova::editor;
 using io::JsonValue;
 namespace fs = std::filesystem;
+using opennova::renderer::ImageImportSettings;
+using opennova::renderer::ImageSource;
+using opennova::renderer::decode_image_source;
+using opennova::png::encode_png_rgba;
+using opennova::renderer::image_import_settings;
 
 namespace {
 
@@ -98,147 +102,28 @@ int test_rows() {
 	TEST_EXPECT(importer_for("map.TGA") == importer && importer_for("sky.pcx") == importer && !importer_for("a.dds") &&
 	            authored_importer_for("logo.png") == importer && !authored_importer_for("map.tga") &&
 	            !authored_importer_for("sky.pcx"));
-	std::printf("rows: nine options, each its values and forms\n");
-	return 0;
-}
-
-int test_pieces() {
-	uint32_t w = 0, h = 0;
-	std::string why;
-	TEST_EXPECT(image_target_size("pow2_down", 300, 129, w, h, why) && w == 256 && h == 128);
-	TEST_EXPECT(image_target_size("pow2_up", 300, 129, w, h, why) && w == 512 && h == 256);
-	TEST_EXPECT(image_target_size("fit:512x512", 1024, 256, w, h, why) && w == 512 && h == 128);
-	TEST_EXPECT(image_target_size("fit:2048x2048", 100, 50, w, h, why) && w == 100 && h == 50);
-	TEST_EXPECT(image_target_size("64x32", 7, 7, w, h, why) && w == 64 && h == 32);
-	TEST_EXPECT(!image_target_size("huge", 7, 7, w, h, why) && !why.empty());
-	// Halved: each texel the 2 x 2 box's sum shifted by two.
-	const RgbaImage source = graded(4, 4);
-	const RgbaImage half = resize_image(source, 2, 2);
-	TEST_EXPECT(half.width == 2 && half.height == 2);
-	for (int c = 0; c < 4; ++c) {
-		const uint32_t sum = uint32_t(source.pixels[size_t(c)]) + source.pixels[size_t(4 + c)] + source.pixels[size_t(16 + c)] +
-		                     source.pixels[size_t(20 + c)];
-		TEST_EXPECT(half.pixels[size_t(c)] == uint8_t(sum >> 2));
-	}
-	// A third: each texel the average of what it covers; a size up repeats texels.
-	RgbaImage flat;
-	flat.width = 3;
-	flat.height = 1;
-	flat.pixels = {0, 0, 0, 255, 90, 90, 90, 255, 180, 180, 180, 255};
-	const RgbaImage one = resize_image(flat, 1, 1);
-	TEST_EXPECT(one.pixels == std::vector<uint8_t>({90, 90, 90, 255}));
-	const RgbaImage up = resize_image(flat, 6, 1);
-	TEST_EXPECT(up.pixels[0] == 0 && up.pixels[4] == 0 && up.pixels[8] == 90 && up.pixels[20] == 180);
-	// The alphas.
-	RgbaImage image = graded(4, 1);
-	TEST_EXPECT(apply_image_alpha(image, "opaque", why) && image.pixels[3] == 255 && image.pixels[15] == 255);
-	image = graded(4, 1);
-	TEST_EXPECT(apply_image_alpha(image, "threshold:128", why) && image.pixels[3] == 255 && image.pixels[15] == 0);
-	image = graded(4, 1);
-	TEST_EXPECT(apply_image_alpha(image, "luminance", why) &&
-	            image.pixels[7] == uint8_t((85u * (uint32_t(image.pixels[4]) + image.pixels[5] + image.pixels[6])) >> 8));
-	image = graded(4, 1);
-	const uint8_t key[3] = {image.pixels[4], image.pixels[5], image.pixels[6]};
-	char hex[16];
-	std::snprintf(hex, sizeof(hex), "key:#%02X%02X%02X", key[0], key[1], key[2]);
-	TEST_EXPECT(apply_image_alpha(image, hex, why) && image.pixels[7] == 0 && image.pixels[3] == 255);
-	TEST_EXPECT(!apply_image_alpha(image, "glow", why) && !why.empty());
-	image = graded(2, 1);
-	const uint8_t green = image.pixels[1];
-	flip_image_green(image);
-	TEST_EXPECT(image.pixels[1] == uint8_t(255 - green));
-	std::printf("pieces: the sizes, a halving, an average, the alphas, the green\n");
-	return 0;
-}
-
-int test_formats() {
-	const RgbaImage image = graded(8, 8);
-	std::vector<uint8_t> bytes;
-	std::string why, note;
-	// A 24-bit TGA: three bytes a texel, bottom row first, read opaque.
-	TEST_EXPECT(encode_image(image, settings_of({{"format", "tga24"}}), bytes, why, note));
-	tga::TgaHeader header;
-	TEST_EXPECT(tga::tga_read_header(bytes.data(), bytes.size(), header) && header.image_type == 2 && header.bits == 24 &&
-	            header.descriptor == 0 && bytes.size() == 18 + 8 * 8 * 3);
-	std::shared_ptr<const TextureImage> read = read_back("map.tga", bytes);
-	TEST_EXPECT(read && read->loads && read->width() == 8 && read->alpha == TextureAlpha::None);
-	if (read && read->loads)
-		TEST_EXPECT(read->levels[0].rgba[0] == image.pixels[0] && read->levels[0].rgba[1] == image.pixels[1] &&
-		            read->levels[0].rgba[3] == 255);
-	// Its alpha dropped is said (the image is translucent).
-	TEST_EXPECT(note.find("24-bit TGA carries no alpha") != std::string::npos);
-	// A 24-bit PCX: three planes of the colours as they are, read so; the alpha dropped and said.
-	note.clear();
-	TEST_EXPECT(encode_image(image, settings_of({{"format", "pcx24"}}), bytes, why, note) && bytes.size() > 128 && bytes[65] == 3 &&
-	            note.find("carries no alpha") != std::string::npos);
-	read = read_back("planes.pcx", bytes);
-	TEST_EXPECT(read && read->loads && read->width() == 8);
-	if (read && read->loads)
-		for (size_t i = 0; i < image.pixels.size(); i += 4)
-			TEST_EXPECT(read->levels[0].rgba[i] == image.pixels[i] && read->levels[0].rgba[i + 1] == image.pixels[i + 1] &&
-			            read->levels[0].rgba[i + 2] == image.pixels[i + 2]);
-	TEST_EXPECT(image_import_output_name("art/logo.png", settings_of({{"format", "pcx24"}})) == "logo.pcx");
-	// A 32-bit TGA keeps the alpha; an MDT is its bytes.
-	TEST_EXPECT(encode_image(image, settings_of({}), bytes, why, note));
-	read = read_back("a.tga", bytes);
-	TEST_EXPECT(read && read->loads && read->levels[0].rgba == image.pixels);
-	std::vector<uint8_t> mdt;
-	TEST_EXPECT(encode_image(image, settings_of({{"format", "mdt"}}), mdt, why, note) && mdt == bytes);
-	// A PCX: the colours kept (64 here), the alpha dropped and said; exact refused past 256 colours.
-	TEST_EXPECT(encode_image(image, settings_of({{"format", "pcx"}}), bytes, why, note) && !note.empty());
-	read = read_back("a.pcx", bytes);
-	TEST_EXPECT(read && read->loads && read->levels[0].rgba[0] == image.pixels[0] && read->levels[0].rgba[3] == 255);
-	TEST_EXPECT(!encode_image(graded(32, 32), settings_of({{"format", "pcx"}, {"palette", "exact"}}), bytes, why, note) &&
-	            why.find("256") != std::string::npos);
-	// A DXT5 DDS of every level to 1 x 1, each the authoring encoder's (import/dxt_encode.h: the D3DX box
-	// filter of the level before over the source's texels, rgbcx's blocks): what D3DX reads of it, and the
-	// game's decode of the first level.
-	TEST_EXPECT(encode_image(image, settings_of({{"format", "dds"}}), bytes, why, note));
-	dds::DdsImage dds;
-	TEST_EXPECT(dds::dds_read(bytes.data(), bytes.size(), dds, why) && dds.loads && std::string(dds.format.name) == "DXT5" &&
-	            dds.levels.size() == 4);
-	const std::vector<std::vector<uint8_t>> chain = encode_dxt_levels(image.pixels.data(), 8, 8, true, true);
-	TEST_EXPECT(chain.size() == 4 && dxt_full_chain_levels(8, 8) == 4 && dxt_full_chain_levels(256, 32) == 9);
-	for (size_t i = 0; i < chain.size() && i < dds.levels.size(); ++i)
-		TEST_EXPECT(std::vector<uint8_t>(bytes.begin() + long(dds.levels[i].offset),
-		                                 bytes.begin() + long(dds.levels[i].offset + dds.levels[i].bytes)) == chain[i]);
-	read = read_back("a.dds", bytes);
-	TEST_EXPECT(read && read->loads && read->levels.size() == 4);
-	// DXT1, one level; A8R8G8B8.
-	TEST_EXPECT(encode_image(image, settings_of({{"format", "dds"}, {"dds", "dxt1"}, {"mips", "none"}}), bytes, why, note) &&
-	            dds::dds_read(bytes.data(), bytes.size(), dds, why) && std::string(dds.format.name) == "DXT1" &&
-	            dds.levels.size() == 1);
-	TEST_EXPECT(encode_image(image, settings_of({{"format", "dds"}, {"dds", "argb"}}), bytes, why, note) &&
-	            dds::dds_read(bytes.data(), bytes.size(), dds, why) && std::string(dds.format.name) == "A8R8G8B8" &&
-	            dds.levels.size() == 1 && dds.levels[0].rgba == image.pixels);
-	// A PNG.
-	TEST_EXPECT(encode_image(image, settings_of({{"format", "png"}}), bytes, why, note));
-	read = read_back("a.png", bytes);
-	TEST_EXPECT(read && read->loads && read->levels[0].rgba == image.pixels);
-	TEST_EXPECT(image_import_output_name("art/logo.png", settings_of({{"format", "tga24"}})) == "logo.tga" &&
+	// The output's name: the name option, else the source's stem and the format's extension.
+	TEST_EXPECT(image_import_output_name("art/logo.png", settings_of({{"format", "pcx24"}})) == "logo.pcx" &&
+	            image_import_output_name("art/logo.png", settings_of({{"format", "tga24"}})) == "logo.tga" &&
 	            image_import_output_name("art/logo.png", settings_of({{"name", "Sky.pcx"}})) == "Sky.pcx");
-	std::printf("formats: a 24-bit and a 32-bit TGA, an MDT, a PCX, DXT5 with its chain, DXT1, A8R8G8B8, a PNG\n");
+	std::printf("rows: nine options, each its values and forms; the output's name\n");
 	return 0;
 }
 
 std::string png_of(const RgbaImage &image);
 
-// A TGA and a PCX as sources (a record makes them one): read as an image program reads them, never through
-// the game's readers' faults; an 8-bit PCX's indices kept by palette indices, refused from a source of
-// colours or at another size; normal height.
+// A TGA and a PCX imported as sources (a record makes them one; each read as an image program reads it,
+// renderer::decode_image_source): a top-first TGA written as the picture it shows; an 8-bit PCX's indices
+// kept by palette indices, refused from a source of colours or at another size; normal height.
 int test_sources() {
-	ImageSource source;
 	std::string why;
-	// A TGA read by its format: bottom first as its header says, and top first where its origin bit says so
-	// (the game's reader would draw that one upside down).
+	// A TGA whose origin bit says its first row is the top one (the game's reader would draw it upside down).
 	const RgbaImage image = graded(4, 2);
 	std::vector<uint8_t> tga;
 	TEST_EXPECT(tga::tga_write_rgba32(image.pixels.data(), 4, 2, tga, why));
-	TEST_EXPECT(decode_image_source("art/a.tga", tga, source, why) && !source.indexed && source.image.pixels == image.pixels);
 	tga[17] |= 0x20;
 	std::vector<uint8_t> flipped(image.pixels.begin() + 16, image.pixels.end());
 	flipped.insert(flipped.end(), image.pixels.begin(), image.pixels.begin() + 16);
-	TEST_EXPECT(decode_image_source("a.TGA", tga, source, why) && source.image.pixels == flipped);
 	// Imported, the file the game reads holds the picture the source shows: stored bottom first, read so.
 	{
 		const ImportOptions options{{"format", "tga"}, {"name", "made.tga"}};
@@ -250,30 +135,7 @@ int test_sources() {
 			TEST_EXPECT(made && made->loads && !made->upside_down && made->levels[0].rgba == flipped);
 		}
 	}
-	// A 16-bit TGA's colours (the game's reader zeroes that form).
-	{
-		std::vector<uint8_t> sixteen = {0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 16, 0x20, 0x00, 0x7C};
-		TEST_EXPECT(decode_image_source("red.tga", sixteen, source, why) && source.image.pixels == std::vector<uint8_t>({255, 0, 0, 255}));
-	}
-	// An odd-width 8-bit PCX whose rows carry a pad byte (a paint program's): each row's first `width` bytes,
-	// unsheared (the game's reader would carry each pad into the next row).
-	{
-		std::vector<uint8_t> padded(128, 0);
-		padded[0] = 0x0A;
-		padded[1] = 5;
-		padded[2] = 1;
-		padded[3] = 8;
-		padded[8] = 2; // 3 wide
-		padded[10] = 1; // 2 tall
-		padded[65] = 1;
-		padded[66] = 4; // a pad byte a row
-		padded.insert(padded.end(), {1, 2, 3, 0, 4, 5, 6, 0});
-		padded.push_back(0x0C);
-		for (int i = 0; i < 256; ++i) padded.insert(padded.end(), {uint8_t(i), uint8_t(i), uint8_t(i)});
-		TEST_EXPECT(decode_image_source("odd.pcx", padded, source, why) && source.indexed &&
-		            source.indices.indices == std::vector<uint8_t>({1, 2, 3, 4, 5, 6}));
-	}
-	// An 8-bit PCX: its indices and palette kept, each texel its entry's colour, opaque.
+	// An 8-bit PCX.
 	IndexedImage8 indexed;
 	indexed.width = 3;
 	indexed.height = 2;
@@ -285,10 +147,6 @@ int test_sources() {
 	}
 	std::vector<uint8_t> pcx;
 	TEST_EXPECT(encode_pcx_indexed(indexed, pcx, why));
-	TEST_EXPECT(decode_image_source("map.pcx", pcx, source, why) && source.indexed && source.indices.indices == indexed.indices &&
-	            source.image.pixels[4] == 5 && source.image.pixels[5] == 250 && source.image.pixels[6] == 7 &&
-	            source.image.pixels[7] == 255);
-	TEST_EXPECT(!decode_image_source("map.bmp", pcx, source, why) && !why.empty());
 	// Imported with palette indices: the PCX written from them as they are, never quantized.
 	const ImportOptions keep{{"format", "pcx"}, {"palette", "indices"}};
 	{
@@ -327,8 +185,7 @@ int test_sources() {
 		TEST_EXPECT(now[3] == uint8_t((85u * (uint32_t(was[0]) + was[1] + was[2])) >> 8) && now[2] == was[3] &&
 		            now[0] == now[3]);
 	}
-	std::printf("sources: a TGA by its format (its origin, 16 bits), an odd PCX unsheared, a PCX's indices kept, refusals, a "
-	            "height map\n");
+	std::printf("sources: a top-first TGA imported upright, a PCX's indices kept, refusals, a height map\n");
 	return 0;
 }
 
@@ -573,19 +430,6 @@ int test_needs_conflict() {
 	TEST_EXPECT(needs.options == ImportOptions({{"format", "pcx"}}));
 	needs = texture_import_needs({cloud}, "cloud.png", true);
 	TEST_EXPECT(needs.options == ImportOptions({{"format", "dds"}}));
-	// A source's alpha by its header: a PNG with one, a PNG without, a 32-bit TGA, a PCX.
-	const std::string with_alpha = png_of(graded(2, 2));
-	TEST_EXPECT(image_source_has_alpha("a.png", std::vector<uint8_t>(with_alpha.begin(), with_alpha.end())));
-	const RgbaImage opaque = graded(2, 2);
-	// Its header saying a colour PNG (type 2): the alpha-less form.
-	std::vector<uint8_t> rgb_png(with_alpha.begin(), with_alpha.end());
-	rgb_png[25] = 2;
-	TEST_EXPECT(!image_source_has_alpha("a.png", rgb_png));
-	std::vector<uint8_t> tga;
-	std::string why;
-	TEST_EXPECT(tga::tga_write_rgba32(opaque.pixels.data(), 2, 2, tga, why) && image_source_has_alpha("a.tga", tga));
-	TEST_EXPECT(tga::tga_write_rgb24(opaque.pixels.data(), 2, 2, tga, why) && !image_source_has_alpha("a.tga", tga));
-	TEST_EXPECT(!image_source_has_alpha("a.pcx", tga));
 	std::printf("needs: a loading screen's PCX, two uses no one file serves, a foliage map from colours and from a "
 	            "PCX, a height map, another stem, a sky's clouds by the source's alpha\n");
 	return 0;
@@ -656,8 +500,6 @@ int test_fit_weighs_every_use() {
 int main() {
 	int failures = 0;
 	failures += test_rows();
-	failures += test_pieces();
-	failures += test_formats();
 	failures += test_sources();
 	failures += test_needs_conflict();
 	failures += test_project();
