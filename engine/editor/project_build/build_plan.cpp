@@ -185,11 +185,6 @@ BuildPlaceWords build_place_words(const AssetEntry &asset, const std::string &ex
 	return out;
 }
 
-bool lists_as_mission(const std::string &name) {
-	return strutil::ends_with_icase(name, ".bms") || strutil::ends_with_icase(name, ".npj") ||
-	       strutil::ends_with_icase(name, ".npz");
-}
-
 std::string base_missing_words(const BuildTarget &target) {
 	if (!target.base_project.empty())
 		return "The project builds as the expansion " + target.expansion + ", which plays over the base game's project " +
