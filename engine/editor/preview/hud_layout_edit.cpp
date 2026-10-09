@@ -13,13 +13,20 @@
 #include <editor/model/text_document.h>
 #include <formats/def/def_hudpos_text.h>
 #include <formats/def/def_hudpos_write.h>
-#include <runtime/hud/hud_frame.h>
+#include <runtime/hud/hud_math.h>
 
 namespace opennova::editor {
 
 namespace {
 
+using opennova::hud::HudAxis;
+using opennova::hud::HudCoordinate;
+using opennova::hud::HudEdge;
 using opennova::hud::HudElement;
+using opennova::hud::HudElementLayout;
+using opennova::hud::hud_coordinate_authored;
+using opennova::hud::hud_coordinate_value;
+using opennova::hud::hud_whole_value;
 
 constexpr HudAxis X = HudAxis::X;
 constexpr HudAxis Y = HudAxis::Y;
@@ -28,9 +35,9 @@ constexpr HudEdge Near = HudEdge::Near;
 constexpr HudEdge Far = HudEdge::Far;
 constexpr HudEdge Extent = HudEdge::Extent;
 
-// The design space the HUD's positions are authored in [orig: Viewport_ScaleToVirtualCoords @ 0x5D2B20].
-constexpr int kDesignWidth = 1024;
-constexpr int kDesignHeight = 768;
+// The design space the HUD's positions are authored in (hud_math.h).
+constexpr int kDesignWidth = static_cast<int>(opennova::hud::kDesignWidth);
+constexpr int kDesignHeight = static_cast<int>(opennova::hud::kDesignHeight);
 
 // Where the parser reads each key an element's fields name [orig: HUD_ParseHudposToken @ 0x59F370, the
 // arm's _stricmp].
@@ -99,145 +106,24 @@ std::string witness_of(const std::string &key) {
 	return "[orig: HUD_ParseHudposToken @ 0x59F370]";
 }
 
-// The keys whose third value hides what they place and whose fourth is its alignment (the positioned
-// texts), and those whose third is the alignment (no hidden value).
-struct TextKey {
+// What a positioned text's hidden value does, in words (its index and witness: hud::hud_text_key).
+struct HiddenWords {
 	const char *key;
-	int hidden; // its index, -1 none
-	int align;
-	const char *hidden_words;
-	const char *hidden_cite;
+	const char *words;
 };
-constexpr TextKey kTextKeys[] = {
-	{ "AMMOCOUNTPOS", 2, 3, "0 draws the ammo count; another value hides it",
-	  "[orig: HUD_DrawWeaponAmmoAndName @ 0x5939D0, its gate on the hidden value @ 0x5939F3]" },
-	{ "HUDWEAPONNAME", 2, 3, "0 draws the weapon's name; another value hides it",
-	  "[orig: HUD_DrawWeaponAmmoAndName @ 0x5939D0, its gate on the hidden value]" },
-	{ "GAMEINFO", 2, 3, "0 draws the game info; another value ends its drawer",
-	  "[orig: HUD_DrawGameTimerOverlay @ 0x59CC80, its gate @ 0x59CC94 / @ 0x59CCD5]" },
-	{ "HUDPLAYERCOUNT", 2, 3, "0 draws the player count; another value hides it",
-	  "[orig: HUD_DrawScoreOverlay @ 0x593E50, `cmp dword_272366C, 0` @ 0x593E64]" },
-	{ "HUDTEAMXY", 2, 3, "0 draws the team line; another value hides it",
-	  "[orig: HUD_DrawTeamIdLine @ 0x59AA30, `cmp dword_2723834, 0` @ 0x59AA44]" },
-	{ "HUDWPDINFO", 2, 3, "0 draws the box around the distance; another value hides the box alone",
-	  "[orig: HUD_DrawWaypointNameAndDistance @ 0x5947A0; HUD_ParseHudposToken @ 0x5A02C3]" },
-	{ "BREATHTIME", -1, 2, "", "" },
-	{ "ZONEINFO", -1, 2, "", "" },
+constexpr HiddenWords kHiddenWords[] = {
+	{ "AMMOCOUNTPOS", "0 draws the ammo count; another value hides it" },
+	{ "HUDWEAPONNAME", "0 draws the weapon's name; another value hides it" },
+	{ "GAMEINFO", "0 draws the game info; another value ends its drawer" },
+	{ "HUDPLAYERCOUNT", "0 draws the player count; another value hides it" },
+	{ "HUDTEAMXY", "0 draws the team line; another value hides it" },
+	{ "HUDWPDINFO", "0 draws the box around the distance; another value hides the box alone" },
 };
 
-const TextKey *text_key(const std::string &key) {
-	for (const TextKey &row : kTextKeys)
-		if (strutil::iequals(key, row.key)) return &row;
-	return nullptr;
-}
-
-// An element: its coordinates, the HUDDECLUT row that shows it and its gate, the keys of the colours it
-// draws in, and whether it writes in the HUD's own font (hudpos.def's FONTHUD1).
-struct ElementRow {
-	HudElement element;
-	std::vector<HudCoordinate> coordinates;
-	const char *detail;
-	const char *detail_cite;
-	std::vector<const char *> colours;
-	bool fonts;
-};
-
-HudCoordinate at(const char *key, uint8_t index, HudAxis axis, HudEdge edge, bool primary = true, const char *first = "") {
-	HudCoordinate out;
-	out.key = key;
-	out.first = first;
-	out.index = index;
-	out.axis = axis;
-	out.edge = edge;
-	out.primary = primary;
-	return out;
-}
-
-std::vector<HudCoordinate> point(const char *key, uint8_t x = 0, bool primary = true) {
-	return { at(key, x, X, Point, primary), at(key, uint8_t(x + 1), Y, Point, primary) };
-}
-
-std::vector<HudCoordinate> joined(std::initializer_list<std::vector<HudCoordinate>> parts) {
-	std::vector<HudCoordinate> out;
-	for (const std::vector<HudCoordinate> &part : parts) out.insert(out.end(), part.begin(), part.end());
-	return out;
-}
-
-std::vector<HudCoordinate> corners(const char *key) {
-	return { at(key, 0, X, Near), at(key, 1, Y, Near), at(key, 2, X, Far), at(key, 3, Y, Far) };
-}
-
-std::vector<HudCoordinate> extents(const char *key) {
-	return { at(key, 0, X, Near), at(key, 1, Y, Near), at(key, 2, X, Extent), at(key, 3, Y, Extent) };
-}
-
-std::vector<HudCoordinate> slots() {
-	static const char *const kSlots[] = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "10" };
-	std::vector<HudCoordinate> out;
-	for (const char *slot : kSlots) {
-		out.push_back(at("HUDLS_SLOT", 1, X, Point, false, slot));
-		out.push_back(at("HUDLS_SLOT", 2, Y, Point, false, slot));
-	}
-	return out;
-}
-
-const std::vector<ElementRow> &element_rows() {
-	static const std::vector<ElementRow> rows = {
-		{ HudElement::BreathBar, point("BREATHTIME"), "BREATHTIME", "[orig: the BREATHTIME slot's cmp @ 0x59D6F3]", {}, false },
-		{ HudElement::GameInfo, joined({ point("GAMEINFO"), point("ZONEINFO", 0, false) }), "", "", { "HUD_TEXTCOLOR" }, false },
-		{ HudElement::Frame, point("STATICFRAME", 1), "", "", {}, false },
-		{ HudElement::Health, corners("HUDHEALTH"), "DMGBAR", "[orig: the slot-7 cmp @ 0x5A7C99]", { "HUDHEALTHBORDER" },
-		  false },
-		{ HudElement::Instruments,
-		  joined({ point("HUDWPNICON"), point("HUDGEARTEXT", 0, false), point("CARGOPOS", 0, false),
-		           point("PARACHUTEICON", 1, false), point("ARMORICON", 1, false) }),
-		  "", "", {}, false },
-		{ HudElement::OpticalCues, point("SHOWIMPACTDISTPOS"), "", "", {}, true },
-		{ HudElement::Stance, point("HUDSTANCEPOS"), "WPNGRP", "[orig: HUD_RenderOverlays @ 0x5A7CBE..0x5A7D55]",
-		  { "STANCEICON_COLOR" }, false },
-		{ HudElement::AmmoCount, point("AMMOCOUNTPOS"), "WPNGRP", "[orig: the slot-8 cmp @ 0x5A7CC8]",
-		  { "WEAPON_TEXTCOLOR" }, true },
-		{ HudElement::WeaponName, point("HUDWEAPONNAME"), "WPNGRP", "[orig: the slot-8 cmp @ 0x5A7D04]",
-		  { "WEAPON_TEXTCOLOR" }, true },
-		{ HudElement::ClipIndicator, point("HUDCLIP"), "WPNGRP", "[orig: the slot-8 cmp @ 0x5A7D42]", { "STANCEICON_COLOR" },
-		  false },
-		{ HudElement::Crosshair, {}, "XHAIRS", "[orig: the slot-13 cmp in HUD_DrawCrosshair @ 0x592757]", {}, false },
-		{ HudElement::Heat, corners("HUDHEAT"), "", "", { "HUDHEATBORDER" }, false },
-		{ HudElement::Clock, joined({ point("HUDTIMECLOCK"), point("HUDPLAYERCOUNT", 0, false) }), "CLOCK",
-		  "[orig: HUD_RenderOverlays, the slot-21 cmp @ 0x5A7D75]", {}, false },
-		{ HudElement::Power, extents("HUDPOWERBAR"), "PWRBAR", "[orig: the slot-20 cmp @ 0x5A7DD2]", {}, false },
-		{ HudElement::Waypoint, point("HUDWPDINFO"), "WAYPOINT", "[orig: the slot-3 cmp @ 0x5A7DB8]", { "HUD_TEXTCOLOR" },
-		  false },
-		{ HudElement::TeamIdLine, point("HUDTEAMXY"), "TEAMID", "[orig: HUD_DrawTeamIdLine's slot-19 gate @ 0x5A7DE7]",
-		  { "HUD_TEXTCOLOR" }, false },
-		{ HudElement::WeaponSlotBar, slots(), "HUDLS", "[orig: the HUDLS slot's gate @ 0x5A7DF7]", {}, false },
-		{ HudElement::ScopeDetails,
-		  joined({ point("HUDSCOPERANGEXY"), point("HUDSCOPEZEROXY", 0, false), point("HUDSCOPEMAGXY", 0, false) }), "", "",
-		  {}, false },
-		{ HudElement::LfpPanel, point("LFP_FLAGS"), "", "", {}, false },
-		{ HudElement::Spinmap,
-		  { at("HUDSPINMAPX1", 0, X, Near), at("HUDSPINMAPY1", 0, Y, Near), at("HUDSPINMAPX2", 0, X, Far),
-		    at("HUDSPINMAPY2", 0, Y, Far), at("MAPCOORDS", 0, X, Point, false), at("MAPCOORDS", 1, Y, Point, false) },
-		  "SPINMAP", "[orig: the slot-17 cmp @ 0x5A86E8]", {}, false },
-		{ HudElement::VehiclePanel, point("HUDVEHSTANCEPOS"), "", "", {}, false },
-		{ HudElement::Feed, joined({ point("HUDSYSTEXT"), point("HUDCHATTEXT", 0, false) }), "CHAT",
-		  "[orig: the slot bit @ 0x59AD33]", {}, false },
-		{ HudElement::SquadOrders, point("HUDORDERS"), "", "", {}, false },
-		{ HudElement::Tip, extents("MRCLIPPYNORMAL"), "", "", {}, false },
-		{ HudElement::PausedText, point("PAUSEDPOS"), "", "", {}, false },
-		{ HudElement::TipAlternate, extents("MRCLIPPYALTERNATE"), "", "", {}, false },
-		{ HudElement::NetQuality,
-		  { at("NETWORKINDICATOR", 0, X, Point), at("NETWORKINDICATOR", 1, Y, Point), at("NETWORKINDICATOR", 2, X, Point),
-		    at("NETWORKINDICATOR", 3, Y, Point), at("NETWORKINDICATOR", 4, X, Point), at("NETWORKINDICATOR", 5, Y, Point) },
-		  "", "", {}, false },
-	};
-	return rows;
-}
-
-const ElementRow *row_of(HudElement element) {
-	for (const ElementRow &row : element_rows())
-		if (row.element == element) return &row;
-	return nullptr;
+const char *hidden_words(const char *key) {
+	for (const HiddenWords &row : kHiddenWords)
+		if (strutil::iequals(key, row.key)) return row.words;
+	return "";
 }
 
 std::string lower(std::string text) {
@@ -246,7 +132,7 @@ std::string lower(std::string text) {
 }
 
 // Whether the coordinate's key reads a size on its axis.
-bool sized(const ElementRow &row, const HudCoordinate &coordinate) {
+bool sized(const HudElementLayout &row, const HudCoordinate &coordinate) {
 	for (const HudCoordinate &each : row.coordinates)
 		if (strutil::iequals(each.key, coordinate.key) && each.axis == coordinate.axis && each.edge == Extent) return true;
 	return false;
@@ -254,7 +140,7 @@ bool sized(const ElementRow &row, const HudCoordinate &coordinate) {
 
 // A coordinate's field name: x / y for a point (numbered past the first of its key and axis), left / top /
 // right / bottom for a rect's edges, x / y / width / height for a place and its size.
-std::string coordinate_name(const ElementRow &row, const HudCoordinate &coordinate) {
+std::string coordinate_name(const HudElementLayout &row, const HudCoordinate &coordinate) {
 	const bool horizontal = coordinate.axis == X;
 	switch (coordinate.edge) {
 	case Near:
@@ -281,15 +167,6 @@ std::string field_id(const char *key, const char *first, const std::string &name
 	std::string id = lower(key);
 	if (first && first[0]) id += std::string("_") + first;
 	return id + "." + name;
-}
-
-bool number_of(const std::string &text, int &out) {
-	if (text.empty()) return false;
-	char *end = nullptr;
-	const double value = std::strtod(text.c_str(), &end);
-	if (!end || *end != '\0' || !std::isfinite(value) || value != std::floor(value)) return false;
-	out = io::retail_ftol_sse2(value);
-	return true;
 }
 
 int snapped(double value, int grid) {
@@ -326,7 +203,7 @@ bool reads_as(const std::string &written, const std::string &value) {
 	if (strutil::iequals(written, value)) return true;
 	int a = 0, b = 0;
 	const bool numeric = !value.empty() && (std::isdigit(static_cast<unsigned char>(value[0])) || value[0] == '-');
-	if (!numeric || !number_of(value, b)) return false;
+	if (!numeric || !hud_whole_value(value, b)) return false;
 	a = io::retail_ftol_sse2(io::retail_atof_n(written.c_str(), written.size()));
 	return a == b && io::retail_atof_n(written.c_str(), written.size()) == double(b);
 }
@@ -342,54 +219,11 @@ struct Splice {
 	std::string text;
 };
 
-// Whether the layout says anything of the coordinate's line: its values are not those of a file without it.
-bool key_authored(const def::DefHudPosDef &hud, const HudCoordinate &coordinate) {
-	std::vector<std::string> values, none;
-	if (!def::hudpos_key_values(hud, coordinate.key, coordinate.first, values)) return false;
-	def::hudpos_key_values(def::hudpos_unauthored(), coordinate.key, coordinate.first, none);
-	return values != none;
-}
-
 } // namespace
-
-const std::vector<HudCoordinate> &hud_element_coordinates(HudElement element) {
-	static const std::vector<HudCoordinate> none;
-	const ElementRow *row = row_of(element);
-	return row ? row->coordinates : none;
-}
-
-bool hud_element_resizable(HudElement element) {
-	bool x = false, y = false;
-	for (const HudCoordinate &coordinate : hud_element_coordinates(element)) {
-		if (coordinate.edge != Far && coordinate.edge != Extent) continue;
-		(coordinate.axis == X ? x : y) = true;
-	}
-	return x && y;
-}
-
-const char *hud_element_detail_row(HudElement element) {
-	const ElementRow *row = row_of(element);
-	return row ? row->detail : "";
-}
-
-bool hud_coordinate_value(const def::DefHudPosDef &hud, const HudCoordinate &coordinate, int &out) {
-	if (strutil::iequals(coordinate.key, "NETWORKINDICATOR") && !hud.network_indicator_present) {
-		out = opennova::hud::kNetIndicatorResetPos[coordinate.index];
-		return true;
-	}
-	if (strutil::iequals(coordinate.key, "PAUSEDPOS") && (hud.paused_pos[0] == 0 || hud.paused_pos[1] == 0)) {
-		out = coordinate.index == 0 ? 1000 : 4;
-		return true;
-	}
-	std::vector<std::string> values;
-	if (!def::hudpos_key_values(hud, coordinate.key, coordinate.first, values) || coordinate.index >= values.size())
-		return false;
-	return number_of(values[coordinate.index], out);
-}
 
 std::vector<HudField> hud_element_fields(HudElement element, const def::DefHudPosDef &hud) {
 	std::vector<HudField> out;
-	const ElementRow *row = row_of(element);
+	const HudElementLayout *row = opennova::hud::hud_element_layout(element);
 	if (!row) return out;
 	const std::string design = "the 1024 x 768 design space the HUD scales to the screen [orig: "
 	                           "Viewport_ScaleToVirtualCoords @ 0x5D2B20]";
@@ -397,7 +231,7 @@ std::vector<HudField> hud_element_fields(HudElement element, const def::DefHudPo
 	std::vector<std::string> seen_keys;
 	for (const HudCoordinate &coordinate : row->coordinates) {
 		int value = 0;
-		if ((!coordinate.primary && !key_authored(hud, coordinate)) || !hud_coordinate_value(hud, coordinate, value))
+		if ((!coordinate.primary && !hud_coordinate_authored(hud, coordinate)) || !hud_coordinate_value(hud, coordinate, value))
 			continue;
 		HudField field;
 		const std::string name = coordinate_name(*row, coordinate);
@@ -420,7 +254,7 @@ std::vector<HudField> hud_element_fields(HudElement element, const def::DefHudPo
 	}
 	// The positioned texts' hidden value and alignment.
 	for (const std::string &key : seen_keys) {
-		const TextKey *text = text_key(key);
+		const opennova::hud::HudTextKey *text = opennova::hud::hud_text_key(key);
 		std::vector<std::string> values;
 		if (!text || !def::hudpos_key_values(hud, key, "", values)) continue;
 		if (text->hidden >= 0 && size_t(text->hidden) < values.size()) {
@@ -432,7 +266,7 @@ std::vector<HudField> hud_element_fields(HudElement element, const def::DefHudPo
 			field.least = 0;
 			field.most = 1;
 			field.words = std::string(text->key) + " hidden";
-			field.range = std::string("0 or 1: ") + text->hidden_words;
+			field.range = std::string("0 or 1: ") + hidden_words(text->key);
 			field.cite = text->hidden_cite;
 			field.value = values[size_t(text->hidden)];
 			out.push_back(std::move(field));
@@ -520,9 +354,9 @@ std::vector<HudField> hud_element_fields(HudElement element, const def::DefHudPo
 bool hud_drag_start(HudElement element, const def::DefHudPosDef &hud, HudDragStart &out) {
 	out = HudDragStart();
 	out.element = element;
-	for (const HudCoordinate &coordinate : hud_element_coordinates(element)) {
+	for (const HudCoordinate &coordinate : opennova::hud::hud_element_coordinates(element)) {
 		int value = 0;
-		if ((!coordinate.primary && !key_authored(hud, coordinate)) || !hud_coordinate_value(hud, coordinate, value)) continue;
+		if ((!coordinate.primary && !hud_coordinate_authored(hud, coordinate)) || !hud_coordinate_value(hud, coordinate, value)) continue;
 		out.coordinates.push_back(coordinate);
 		out.values.push_back(value);
 	}
@@ -577,7 +411,7 @@ bool hud_drag_changes(const HudDragStart &start, HudHandle handle, float dx, flo
 		}
 		return true;
 	}
-	if (!hud_element_resizable(start.element)) {
+	if (!opennova::hud::hud_element_resizable(start.element)) {
 		error = std::string("The game reads no size for the ") + opennova::hud::hud_element_token(start.element) +
 		        ": it is moved, never resized.";
 		return false;
@@ -704,7 +538,7 @@ bool hud_field_change(HudElement element, const def::DefHudPosDef &hud, const st
 	switch (found->kind) {
 	case HudFieldKind::Number: {
 		int number = 0;
-		if (!number_of(value, number) || number < found->least || number > found->most) {
+		if (!hud_whole_value(value, number) || number < found->least || number > found->most) {
 			error = field + " is a whole number, " + found->range + ".";
 			return false;
 		}

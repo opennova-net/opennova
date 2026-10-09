@@ -434,7 +434,7 @@ void HudViewport::make_elements_() {
 		element.y1 = float(box.bottom);
 		HudDragStart start;
 		element.movable = model_ && hud_drag_start(element.element, model_->file.hud, start);
-		element.resizable = element.movable && hud_element_resizable(element.element);
+		element.resizable = element.movable && hud::hud_element_resizable(element.element);
 		// The lines that place it: each key's the game takes (a HUDSTANCE's of the stance shown).
 		const HudElementWords &words = hud_element_words(element.element);
 		for (const char *key : words.keys) {
@@ -681,9 +681,9 @@ bool HudViewport::command_of(const ViewportContext &context, const ViewportComma
 			// Its lead place on each axis (its first point or near edge) to the point.
 			bool led[2] = { false, false };
 			for (size_t i = 0; i < start.coordinates.size(); ++i) {
-				const HudCoordinate &coordinate = start.coordinates[i];
-				const int axis = coordinate.axis == HudAxis::X ? 0 : 1;
-				if (led[axis] || coordinate.edge == HudEdge::Extent) continue;
+				const hud::HudCoordinate &coordinate = start.coordinates[i];
+				const int axis = coordinate.axis == hud::HudAxis::X ? 0 : 1;
+				if (led[axis] || coordinate.edge == hud::HudEdge::Extent) continue;
 				led[axis] = true;
 				(axis == 0 ? dx : dy) = (axis == 0 ? command.at_x : command.at_y) - float(start.values[i]);
 			}
