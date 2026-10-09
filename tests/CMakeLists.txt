@@ -47,6 +47,14 @@ target_compile_features(io_test PRIVATE cxx_std_17)
 target_include_directories(io_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME io COMMAND io_test)
 
+# Whole-file reads, the atomic write and the rename it takes (base/io/file_io.h), through
+# UTF-8 paths past MAX_PATH; and base/io/os_path.h's path_within.
+add_executable(file_io_test io/file_io_test.cpp)
+target_link_libraries(file_io_test PRIVATE opennova_io)
+target_compile_features(file_io_test PRIVATE cxx_std_17)
+target_include_directories(file_io_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME file_io COMMAND file_io_test)
+
 # Roundtrip test
 add_executable(threedi_roundtrip_test threedi/roundtrip_test.cpp)
 target_link_libraries(threedi_roundtrip_test PRIVATE opennova_formats)
@@ -710,6 +718,12 @@ add_executable(required_resources_test gameprofile/required_resources_test.cpp)
 target_link_libraries(required_resources_test PRIVATE opennova_base)
 add_test(NAME required_resources COMMAND required_resources_test)
 
+# The game's graphics log (ghw.txt): the missions it began and finished loading.
+add_executable(graphics_log_test gameprofile/graphics_log_test.cpp)
+target_link_libraries(graphics_log_test PRIVATE opennova_base)
+target_include_directories(graphics_log_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME graphics_log COMMAND graphics_log_test)
+
 # SBF tests
 add_executable(sbf_header_test sbf/sbf_header_test.cpp)
 target_link_libraries(sbf_header_test PRIVATE opennova_formats)
@@ -884,6 +898,13 @@ target_link_libraries(vfs_test PRIVATE opennova_base opennova_formats)
 target_include_directories(vfs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(vfs_test PRIVATE cxx_std_17)
 add_test(NAME vfs COMMAND vfs_test)
+
+# The files a build read from a FileSource, by stamp (base/vfs/file_stamps.h).
+add_executable(file_stamps_test vfs/file_stamps_test.cpp)
+target_link_libraries(file_stamps_test PRIVATE opennova_base)
+target_include_directories(file_stamps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(file_stamps_test PRIVATE cxx_std_17)
+add_test(NAME file_stamps COMMAND file_stamps_test)
 
 # An install root deeper than MAX_PATH under a non-ASCII name: the VFS, the resource
 # index and the session's _NSTMOUT.TXT read through base/io/os_path.h.

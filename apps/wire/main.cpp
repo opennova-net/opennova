@@ -79,6 +79,7 @@ struct Datagram {
 	std::vector<uint8_t> bytes;
 };
 
+using opennova::strutil::bytes_to_hex;
 using opennova::strutil::hex_to_bytes;
 
 using opennova::strutil::ends_with_icase;
@@ -148,17 +149,6 @@ static_assert(parity_body_is_material('C', 0x10C));
 static_assert(!parity_body_is_material('C', 0x0C));
 static_assert(!parity_body_is_material('S', 0x0A));
 
-std::string compact_hex(const std::vector<uint8_t> &bytes) {
-	static constexpr char kHex[] = "0123456789abcdef";
-	std::string out;
-	out.resize(bytes.size() * 2);
-	for (size_t i = 0; i < bytes.size(); ++i) {
-		out[i * 2] = kHex[bytes[i] >> 4];
-		out[i * 2 + 1] = kHex[bytes[i] & 0x0F];
-	}
-	return out;
-}
-
 void print_parity_handshake(int frame_index, uint64_t ts_nanos, int src_port,
                             int dst_port, const std::vector<uint8_t> &raw) {
 	std::vector<uint8_t> stripped(raw.size());
@@ -201,7 +191,7 @@ void print_parity_handshake(int frame_index, uint64_t ts_nanos, int src_port,
 	}
 	const char direction = client ? 'C' : 'S';
 	const int session = client ? src_port : dst_port;
-	const std::string body_hex = compact_hex(body);
+	const std::string body_hex = bytes_to_hex(body);
 	std::printf(
 			"PARITY_HANDSHAKE frame=%d ts_ns=%llu dir=%c session=%d "
 			"opcode=0x%02x decode=%u len=%zu body=%s\n",
@@ -274,7 +264,7 @@ void print_parity_packet(const CapturedSessionPacket &packet, uint64_t ts_nanos)
 			if (i != 0) std::printf(",");
 			const CapturedProtocolRecord &record = packet.records[i];
 			const std::string skip = record.skip_bytes.empty()
-					? std::string("-") : compact_hex(record.skip_bytes);
+					? std::string("-") : bytes_to_hex(record.skip_bytes);
 			std::printf("0x%03x:0x%02x:%u:%s",
 			            static_cast<unsigned>(record.full_tag),
 			            static_cast<unsigned>(record.raw_flags),
@@ -287,7 +277,7 @@ void print_parity_packet(const CapturedSessionPacket &packet, uint64_t ts_nanos)
 void print_parity_event(const InGameMessage &message, uint64_t ts_nanos) {
 	const uint8_t tag = static_cast<uint8_t>(message.tag & 0xFFu);
 	const std::string body = parity_body_is_material(message.dir, message.tag)
-			? compact_hex(message.payload) : std::string("-");
+			? bytes_to_hex(message.payload) : std::string("-");
 	std::printf(
 			"PARITY_EVENT frame=%d ts_ns=%llu dir=%c session=%d participant=%d tag=0x%02x "
 			"settings=%u len=%zu body=%s\n",

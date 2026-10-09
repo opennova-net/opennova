@@ -11,6 +11,7 @@
 // back for a path the system enumerated (std::filesystem::path::string() would throw
 // on a name the code page cannot hold). No exceptions, no <windows.h>; on other
 // systems they are plain pass-throughs (paths there are bytes and PATH_MAX is large).
+// The whole-file reads and writes built on them are base/io/file_io.h.
 //
 // Platform file I/O, not a port: nothing here is witnessed engine behaviour.
 #pragma once
@@ -25,9 +26,9 @@ namespace opennova::io {
 
 #ifdef _WIN32
 
-namespace os_path_detail {
-
-// UTF-8 to UTF-16; an invalid or truncated sequence becomes U+FFFD.
+// UTF-8 to UTF-16; an invalid or truncated sequence becomes U+FFFD, one for each byte that
+// starts no whole sequence. What every conversion here widens with, and what any other Win32
+// call taking a UTF-8 string can widen with.
 inline std::wstring widen_utf8(std::string_view in) {
 	std::wstring out;
 	out.reserve(in.size());
@@ -66,7 +67,7 @@ inline std::wstring widen_utf8(std::string_view in) {
 	return out;
 }
 
-// UTF-16 to UTF-8; a lone surrogate becomes U+FFFD.
+// UTF-16 to UTF-8; a lone surrogate becomes U+FFFD. The way back from a Win32 call.
 inline std::string narrow_utf8(std::wstring_view in) {
 	std::string out;
 	out.reserve(in.size());
@@ -96,6 +97,8 @@ inline std::string narrow_utf8(std::wstring_view in) {
 	}
 	return out;
 }
+
+namespace os_path_detail {
 
 inline bool is_separator(wchar_t c) { return c == L'\\' || c == L'/'; }
 
@@ -158,17 +161,17 @@ inline std::filesystem::path os_path(const std::filesystem::path &native) {
 
 // A UTF-8 path string as the OS path to open it by.
 inline std::filesystem::path os_path(std::string_view utf8) {
-	return os_path(std::filesystem::path(os_path_detail::widen_utf8(utf8)));
+	return os_path(std::filesystem::path(widen_utf8(utf8)));
 }
 
 // A path back as UTF-8 (native separators), without a \\?\ prefix.
 inline std::string utf8_path(const std::filesystem::path &path) {
 	std::wstring_view text = path.native();
 	if (text.size() >= 8 && text.compare(0, 8, L"\\\\?\\UNC\\") == 0) {
-		return "\\\\" + os_path_detail::narrow_utf8(text.substr(8));
+		return "\\\\" + narrow_utf8(text.substr(8));
 	}
 	if (text.size() >= 4 && text.compare(0, 4, L"\\\\?\\") == 0) text.remove_prefix(4);
-	return os_path_detail::narrow_utf8(text);
+	return narrow_utf8(text);
 }
 
 // fopen of a UTF-8 path. `mode` is ASCII ("rb", "wb", ...).
@@ -218,6 +221,18 @@ inline std::string utf8_join(std::string_view dir, std::string_view name) {
 	if (out.back() != '/' && out.back() != '\\') out.push_back('/');
 	out.append(name);
 	return out;
+}
+
+// Whether `path` is the folder `dir` or under it, symbolic links resolved (weakly_canonical, which
+// also gives a folder that exists its own spelling). False when either cannot be resolved.
+inline bool path_within(const std::filesystem::path &path, const std::filesystem::path &dir) {
+	std::error_code ec;
+	const std::filesystem::path base = std::filesystem::weakly_canonical(dir, ec);
+	if (ec) return false;
+	const std::filesystem::path full = std::filesystem::weakly_canonical(path, ec);
+	if (ec) return false;
+	const std::filesystem::path relative = full.lexically_relative(base);
+	return !relative.empty() && !relative.is_absolute() && *relative.begin() != "..";
 }
 
 } // namespace opennova::io
