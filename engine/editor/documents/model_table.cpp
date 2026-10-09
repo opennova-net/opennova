@@ -189,20 +189,12 @@ Generator generator(ThreediMaterial &m, int g) {
 }
 Generator generator(const void *d, int g) { return generator(const_cast<ThreediMaterial &>(as<ThreediMaterial>(d)), g); }
 
-// The parameter byte as the writer stores it (append_*_gen).
-int64_t generator_param(const Generator &g) {
-	if (threedi_generator_names_register(*g.style)) return static_cast<uint8_t>(*g.reg);
-	const long v = std::lround(static_cast<double>(*g.phase) * 256.0);
-	return v < 0 ? 0 : v > 255 ? 255 : v;
-}
+// The parameter byte as the writer stores it, and the byte split back as the reader keeps it
+// (threedi_generator_param_byte, threedi_generator_split_param_byte; the field's range keeps a set
+// to a byte).
+int64_t generator_param(const Generator &g) { return threedi_generator_param_byte(*g.style, *g.phase, *g.reg); }
 void store_generator_param(const Generator &g, int64_t byte) {
-	if (threedi_generator_names_register(*g.style)) {
-		*g.reg = static_cast<int32_t>(byte);
-		*g.phase = 0.0f;
-	} else {
-		*g.phase = static_cast<float>(byte) / 256.0f;
-		*g.reg = -1;
-	}
+	threedi_generator_split_param_byte(*g.style, static_cast<uint8_t>(byte), g.phase, g.reg);
 }
 
 // --- light derivations ----------------------------------------------------------------
