@@ -380,7 +380,7 @@ static int test_unused_variable() {
 	const std::string path = style->relative_path;
 	std::string text;
 	std::string read_error;
-	TEST_EXPECT(opennova::editor::read_file_text(f.root + "/" + path, text, read_error));
+	TEST_EXPECT(opennova::io::read_file_text(f.root + "/" + path, text, read_error));
 	text += "DI11_UNUSED\tFF00FF00\r\nDI11_INSIDE\tthere\r\n";
 	TEST_EXPECT(editor_test::write_text(f.root + "/" + path, text));
 	TEST_EXPECT(editor_test::write_text(f.root + "/menus/inside.mnu",

@@ -40,7 +40,7 @@ bool load_import_sidecar(const std::string &path, ImportSidecar &out, Diagnostic
 	std::error_code ec;
 	if (!std::filesystem::exists(system_path(path), ec)) return false;
 	std::string text, message;
-	if (!read_file_text(path, text, message)) {
+	if (!io::read_file_text(path, text, message)) {
 		error = make_finding(CoreFinding::ImportSidecar, DiagnosticSeverity::Error, message, path);
 		return false;
 	}
@@ -79,7 +79,7 @@ bool load_import_sidecar(const std::string &path, ImportSidecar &out, Diagnostic
 
 bool save_import_sidecar(const std::string &path, const ImportSidecar &sidecar, Diagnostic &error) {
 	std::string message;
-	if (!write_file_atomic(path, sidecar_text(sidecar), message)) {
+	if (!io::write_file_atomic(path, sidecar_text(sidecar), message)) {
 		error = make_finding(CoreFinding::ImportSidecar, DiagnosticSeverity::Error, message, path);
 		return false;
 	}

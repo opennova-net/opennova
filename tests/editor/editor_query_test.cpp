@@ -380,7 +380,7 @@ static int test_build_gate() {
 		const std::string file = dir.file("project") + "/" + entry->relative_path;
 		std::vector<uint8_t> kept;
 		std::string error;
-		TEST_EXPECT(read_file_bytes(file, kept, error));
+		TEST_EXPECT(opennova::io::read_file_bytes(file, kept, error));
 		std::error_code removed;
 		std::filesystem::remove(file, removed);
 		session.handle(request::rescan());
@@ -392,7 +392,7 @@ static int test_build_gate() {
 		const bool fatal = std::string(name) == "gametext.bin";
 		TEST_EXPECT(listed == 1 && gate.get_bool("blocked", !fatal) == fatal &&
 				gate.get_number("count", -1.0) == (fatal ? 1.0 : 0.0));
-		TEST_EXPECT(write_file_atomic(file, kept.data(), kept.size(), error));
+		TEST_EXPECT(opennova::io::write_file_atomic(file, kept.data(), kept.size(), error));
 		session.handle(request::rescan());
 		session.run_operations();
 	}

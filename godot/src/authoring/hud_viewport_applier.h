@@ -15,7 +15,7 @@
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
 
-namespace opennova::editor {
+namespace opennova {
 class StampedFiles;
 }
 
@@ -71,7 +71,7 @@ private:
 	uint64_t overlay_id_ = 0;
 	uint64_t effects_id_ = 0;
 	Ref<ResourceRoot> root_;
-	std::shared_ptr<opennova::editor::StampedFiles> stamped_; // what the root was asked for
+	std::shared_ptr<opennova::StampedFiles> stamped_; // what the root was asked for
 	Ref<WeaponDatabase> weapons_;
 	Ref<RtxtStringFile> gametext_;
 	bool configured_ = false;

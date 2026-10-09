@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include <base/io/ascii_config.h>
+#include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/text_types.h>
@@ -40,7 +41,7 @@ size_t lfs_in(std::string_view text) { return size_t(std::count(text.begin(), te
 
 Reading read_lines(std::string_view text) {
 	Reading r;
-	r.first = first_lone_lf(text, &r.lone);
+	r.first = strutil::first_lone_lf(text, &r.lone);
 	if (r.first == npos) return r;
 	r.lines =lfs_in(text) + (text.empty() || text.back() != '\n' ? 1 : 0);
 	r.whole = text.find("\r\n") == npos;
@@ -135,7 +136,7 @@ std::vector<Diagnostic> line_end_findings(const DocumentBase &document, const st
 	std::string words = reading_words(r, reader);
 	// What the editor reads, as the game does, against what it reads with CR LF line ends.
 	size_t restored = 0;
-	const bool reads = records_read(document, with_crlf_line_ends(*source->odd_lines), game, restored);
+	const bool reads = records_read(document, strutil::with_crlf_line_ends(*source->odd_lines), game, restored);
 	const size_t now = records->rows().size();
 	if (reads && restored != now)
 		words += " Read so, the file defines " + count_of(now, "record", "records") + "; with CR LF line ends it defines " +

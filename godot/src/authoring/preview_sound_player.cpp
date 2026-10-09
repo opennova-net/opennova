@@ -32,7 +32,7 @@ void PreviewSoundPlayer::play(const std::string &p_root, const std::vector<openn
 		made.job = std::async(std::launch::async, [file]() {
 			Decode out;
 			std::vector<uint8_t> bytes;
-			if (!opennova::editor::read_file_bytes(file, bytes, out.error)) return out;
+			if (!opennova::io::read_file_bytes(file, bytes, out.error)) return out;
 			out.decoded = opennova::lwf::wav_decode_pcm16(bytes.data(), bytes.size(), out.pcm, out.error);
 			return out;
 		});
