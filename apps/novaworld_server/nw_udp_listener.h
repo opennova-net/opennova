@@ -4,12 +4,14 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
+#include <net/novaworld/db/sqlite.h>
 #include <net/npwire/cs_config.h>
 #include <net/novaworld/connection/registry.h>  // PeerAddr / PeerAddrHash
 #include <net/novaworld/lobby_session.h>
@@ -19,7 +21,6 @@
 namespace opennova {
 class ConnectionManager;
 class UnknownTracker;
-namespace db { class ConnectionPool; }
 namespace bms { struct File; }
 namespace world {
 class World;
@@ -109,11 +110,12 @@ public:
 	explicit NwUdpListener(ConnectionManager &manager);
 	~NwUdpListener();
 
-	// Optional DB pool. When set, the receive thread leases one connection for
-	// its lifetime and hands it to the lobby session, which persists host
-	// state to active_hosts / host_players (Phase I.2/I.3); erase_lobby_state
-	// leases its own, since it also runs on the main thread (the
-	// ConnectionManager's on_lost from tick(), and stop()).
+	// Optional DB pool. When set, start() leases one connection (returning
+	// false when it cannot be opened) and hands it to the receive thread for
+	// its lifetime, which gives it to the lobby session to persist host state
+	// to active_hosts / host_players (Phase I.2/I.3); erase_lobby_state leases
+	// its own, since it also runs on the main thread (the ConnectionManager's
+	// on_lost from tick(), and stop()).
 	void set_db_pool(opennova::db::ConnectionPool *pool) { db_pool_ = pool; }
 
 	// Forward the reflect-endpoint override (the client's NovaWorld session
@@ -160,7 +162,7 @@ public:
 	void erase_lobby_state(const PeerAddr &peer, const char *reason);
 
 private:
-	void run_loop();
+	void run_loop(std::optional<db::ConnectionPool::Lease> db_conn);
 	void initialize_jo_host();
 	void reset_per_run_state(const char *reason);
 	static void observe_jo_event(void *context, const inmatch::HostAcceptEvent &event);

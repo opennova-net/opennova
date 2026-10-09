@@ -273,10 +273,25 @@ bool NwUdpListener::start(const ServerConfig &config) {
 	web_domain_ = config.public_host + ":" + std::to_string(config.http_port);
 	lobby_session_.set_glsvss_results(config.glsvss_results);
 
+	// The receive thread's own connection (Database is single-threaded): the
+	// lobby session's host persistence and the maintenance lookup run on it.
+	// Leased here so a database that cannot be opened stops the boot.
+	std::optional<db::ConnectionPool::Lease> db_conn;
+	if (db_pool_) {
+		try {
+			db_conn.emplace(db_pool_->acquire());
+		} catch (const db::SqliteError &e) {
+			std::fprintf(stderr, "[nwudp] db open failed: %s\n", e.what());
+			return false;
+		}
+	}
+
 	stop_requested_.store(false);
 	initialize_jo_host();
 	running_.store(true);
-	worker_ = std::thread([this] { run_loop(); });
+	worker_ = std::thread([this, db_conn = std::move(db_conn)]() mutable {
+		run_loop(std::move(db_conn));
+	});
 	std::printf("[nwudp] listening on UDP :%u\n",
 	            static_cast<unsigned>(bound_port_));
 	return true;
@@ -356,23 +371,12 @@ std::vector<NwUdpListener::HostedSnapshot> NwUdpListener::snapshot_hosted() cons
 	return out;
 }
 
-void NwUdpListener::run_loop() {
+void NwUdpListener::run_loop(std::optional<db::ConnectionPool::Lease> db_conn) {
 	opennova::net::ScopedSocket socket(opennova::net::udp_bind(bound_port_));
 	if (!socket.is_valid()) {
 		std::fprintf(stderr, "[nwudp] re-bind failed; aborting loop\n");
 		running_.store(false);
 		return;
-	}
-	// This thread's own connection (Database is single-threaded): the lobby
-	// session's host persistence and the maintenance lookup run on it. A failed
-	// open leaves the lobby serving from memory alone.
-	std::optional<db::ConnectionPool::Lease> db_conn;
-	if (db_pool_) {
-		try {
-			db_conn.emplace(db_pool_->acquire());
-		} catch (const db::SqliteError &e) {
-			std::fprintf(stderr, "[nwudp] WARN db open: %s\n", e.what());
-		}
 	}
 	lobby_session_.set_database(db_conn ? db_conn->get() : nullptr);
 

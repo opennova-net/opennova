@@ -18,13 +18,13 @@ namespace opennova {
 // the calling thread's own connection (the standalone server leases one per
 // thread from a db::ConnectionPool); a write that spans several statements
 // (clear_all, replace_roster, apply_status_blob) is one db::Transaction on it,
-// so readers on other connections see it whole. upsert_host's INSERT OR
-// REPLACE deletes the old row, cascading its roster and players away, so a
-// caller that writes a host row and its roster puts both in one Transaction
-// (replace_roster's own then nests as a savepoint).
+// so readers on other connections see it whole. A caller that writes a host
+// row and its roster puts both in one Transaction (replace_roster's own then
+// nests as a savepoint), so the row's player count and its roster agree; a
+// read that spans the two takes a db::ReadSnapshot.
 //
 // Lifecycle (the lobby-session dispatch):
-//   ClientHostRequest  -> upsert_host() (INSERT OR REPLACE) + replace_roster()
+//   ClientHostRequest  -> upsert_host() (insert, or update in place) + replace_roster()
 //   ClientHostUpdate   -> update_host() (refresh the Host columns) + replace_roster()
 //   POST status blob   -> apply_status_blob() (the Host columns, keyed by HostKey)
 //   GOODBYE / timeout  -> remove_host_by_rid() (lobby_session's teardown)

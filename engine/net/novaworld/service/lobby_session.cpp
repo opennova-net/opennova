@@ -212,11 +212,11 @@ HostRosterSlot roster_slot_from_statement(const NapiMessage &msg) {
 
 enum class HostRowWrite { Upsert, Update };
 
-// The host row and its roster in one transaction, so a reader on another
-// connection never sees the row without its roster (upsert_host's INSERT OR
-// REPLACE cascades the old roster away) or beside a roster its player count
-// disagrees with. A failure is logged and rolls back both; the lobby keeps
-// serving from its in-memory state.
+// The host row and its roster in one transaction, so a reader's snapshot
+// (db::ReadSnapshot, as /api/hosts and the GSB feed take) never holds the row
+// beside a roster its player count disagrees with, or a roster caught between
+// replace_roster's delete and its last insert. A failure is logged and rolls
+// back both; the lobby keeps serving from its in-memory state.
 void persist_host(opennova::db::Database &db, HostRowWrite write,
                   const hostdb::HostRow &row, const LobbyState &state, const char *what) {
 	try {

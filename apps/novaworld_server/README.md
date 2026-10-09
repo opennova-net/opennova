@@ -27,13 +27,16 @@ session handshake, the browser/host/play container services, and the legacy
   thread at a time: its last insert id, its error text and any open transaction
   belong to the connection. `main()` owns one `db::ConnectionPool` on
   `DATABASE_PATH`; the main thread and the gate and NW UDP receive threads each
-  lease a connection for their lifetime, each HTTP request leases one for the
-  handler, and `erase_lobby_state` (run from the NW UDP thread and from the main
-  thread's `on_lost`) leases one per call. The database is WAL, so connections read
-  while one writes, and the 5 s busy timeout makes a second writer wait. A write
-  that spans statements (`clear_all`, `replace_roster`, `apply_status_blob`, the
-  lobby's host row with its roster, a registration's checks and insert) is one
-  `db::Transaction`, so readers see a host's roster whole.
+  hold a connection for their lifetime (the listeners lease theirs in `start()`,
+  so a database that cannot be opened stops the boot), each HTTP request leases
+  one for the handler, and `erase_lobby_state` (run from the NW UDP thread and
+  from the main thread's `on_lost`) leases one per call. The database is WAL, so
+  connections read while one writes, and the 5 s busy timeout makes a second
+  writer wait. A write that spans statements (`clear_all`, `replace_roster`,
+  `apply_status_blob`, the lobby's host row with its roster, a registration's
+  checks and insert) is one `db::Transaction`, and a read that spans them
+  (`/api/hosts` and the `.gsb` feeds: the rows, then each roster) is one
+  `db::ReadSnapshot`, so a host never goes out beside another write's roster.
 - **The `UnknownTracker` records from listener threads** into an in-memory,
   mutex-guarded accumulator and is flushed to the DB only on the main tick — never
   per packet.

@@ -197,15 +197,60 @@ int test_connection_pool() {
 		TEST_EXPECT(count_rows(*c) == 1);
 	}
 
-	// A pool over a plain ":memory:" would hand every holder its own empty
-	// database; it is refused.
-	bool refused = false;
-	try {
-		ConnectionPool private_pool(":memory:");
-	} catch (const SqliteError &) {
-		refused = true;
+	// A pool over a path that opens a private database per connection would
+	// hand every holder its own empty one; each spelling of that is refused.
+	auto refused = [](const char *path) {
+		try {
+			ConnectionPool private_pool(path);
+		} catch (const SqliteError &) {
+			return true;
+		}
+		return false;
+	};
+	TEST_EXPECT(refused(":memory:"));
+	TEST_EXPECT(refused(""));
+	TEST_EXPECT(refused("file::memory:"));
+	TEST_EXPECT(refused("file:db_sqlite_private?mode=memory"));
+	TEST_EXPECT(refused("file:db_sqlite_private?mode=memory&cache=private"));
+	TEST_EXPECT(refused("file:?mode=memory&cache=shared"));
+	TEST_EXPECT(!refused("file::memory:?cache=shared"));
+	TEST_EXPECT(!refused("file:db_sqlite_named?cache=shared&mode=memory"));
+	TEST_EXPECT(!refused("file:state.db"));
+	TEST_EXPECT(!refused("state.db"));
+	return 0;
+}
+
+int test_read_snapshot() {
+	// A WAL file: one connection's snapshot holds still while another commits.
+	auto dir = scratch_dir();
+	{
+		Database reader(dir / "state.db");
+		Database writer(dir / "state.db");
+		writer.exec("CREATE TABLE t (id INTEGER PRIMARY KEY);");
+		writer.exec("INSERT INTO t VALUES (1);");
+		{
+			opennova::db::ReadSnapshot snapshot(reader);
+			TEST_EXPECT(reader.in_transaction());
+			TEST_EXPECT(count_rows(reader) == 1);
+			writer.exec("INSERT INTO t VALUES (2);"); // takes no lock the snapshot holds
+			TEST_EXPECT(count_rows(reader) == 1);
+		}
+		TEST_EXPECT(!reader.in_transaction());
+		TEST_EXPECT(count_rows(reader) == 2);
+
+		// Inside an open transaction it leaves that transaction to end it.
+		{
+			Transaction tx(reader);
+			{
+				opennova::db::ReadSnapshot snapshot(reader);
+				TEST_EXPECT(count_rows(reader) == 2);
+			}
+			TEST_EXPECT(reader.in_transaction());
+			tx.commit();
+		}
+		TEST_EXPECT(!reader.in_transaction());
 	}
-	TEST_EXPECT(refused);
+	std::filesystem::remove_all(dir);
 	return 0;
 }
 
@@ -313,9 +358,10 @@ int main() {
 	if (test_transaction_guard() != 0) return 1;
 	if (test_shared_memory_uri_spans_connections() != 0) return 1;
 	if (test_connection_pool() != 0) return 1;
+	if (test_read_snapshot() != 0) return 1;
 	if (test_migrations_apply_then_skip() != 0) return 1;
 	if (test_migrations_rollback_on_error() != 0) return 1;
 	if (test_migrations_no_dir_is_not_an_error() != 0) return 1;
-	std::printf("OK: SQLite wrapper, transactions, connection pool + migration runner\n");
+	std::printf("OK: SQLite wrapper, transactions, read snapshots, connection pool + migration runner\n");
 	return 0;
 }

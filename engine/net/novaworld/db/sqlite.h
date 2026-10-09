@@ -135,6 +135,25 @@ private:
 	bool open_ = true;
 };
 
+// Scoped read snapshot: a deferred BEGIN, so the first read pins one WAL
+// snapshot and every later read on this connection sees that same commit
+// while other connections write; destroying the guard ends it. It takes no
+// write lock (a Transaction does), so it never waits on a writer. A read
+// that spans statements and must agree with itself (host rows and their
+// rosters) takes one. Inside an open transaction it does nothing: that
+// transaction already reads one snapshot.
+class ReadSnapshot {
+public:
+	explicit ReadSnapshot(Database &db);
+	~ReadSnapshot();
+	ReadSnapshot(const ReadSnapshot &) = delete;
+	ReadSnapshot &operator=(const ReadSnapshot &) = delete;
+
+private:
+	Database &db_;
+	bool open_;
+};
+
 // Connections to one database, each checked out by one thread at a time. A
 // lease owns its connection exclusively until it is destroyed, which puts the
 // connection back for the next acquire() (rolling back any transaction left
@@ -165,9 +184,11 @@ public:
 		std::unique_ptr<Database> db_;
 	};
 
-	// `path` as Database takes it. A plain ":memory:" (or an empty path) is
-	// refused with SqliteError: every connection would open a private, empty
-	// database. Use the shared-cache URI instead.
+	// `path` as Database takes it. A path every connection would open as its
+	// own private database is refused with SqliteError: ":memory:", an empty
+	// path or file: URI name (a private temporary file), and an in-memory
+	// file: URI (":memory:" as the name, or mode=memory) without
+	// cache=shared. Use "file:<name>?mode=memory&cache=shared" instead.
 	explicit ConnectionPool(std::filesystem::path path);
 	ConnectionPool(const ConnectionPool &) = delete;
 	ConnectionPool &operator=(const ConnectionPool &) = delete;

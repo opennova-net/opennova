@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <ctime>
 #include <cstdlib>
 #include <random>
@@ -28,6 +29,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -45,6 +47,32 @@ bool has_relay_first_call_query(const crow::request &req) {
 		if (req.url_params.get(name) != nullptr) return true;
 	}
 	return false;
+}
+
+// A random 8-hex-char PCID for /api/register. One generator for the process,
+// behind a mutex, seeded from random_device and the clock: per-worker
+// generators seeded by one random_device draw each started several Crow
+// workers on the same sequence wherever random_device repeats a value across
+// threads (seen on a CPU whose RDSEED hands back 0 under concurrent use), and
+// every registration on a trailing worker then spent its retries on PCIDs the
+// leading one had just taken.
+std::string next_pcid() {
+	static std::mutex mu;
+	static std::mt19937 gen = [] {
+		std::random_device rd;
+		const auto now = static_cast<uint64_t>(
+				std::chrono::system_clock::now().time_since_epoch().count());
+		std::seed_seq seed{rd(), rd(), static_cast<uint32_t>(now),
+		                   static_cast<uint32_t>(now >> 32)};
+		return std::mt19937(seed);
+	}();
+	std::uniform_int_distribution<uint32_t> dist;
+	char pcid[16];
+	{
+		std::lock_guard<std::mutex> lock(mu);
+		std::snprintf(pcid, sizeof(pcid), "%08x", dist(gen));
+	}
+	return pcid;
 }
 
 std::string read_file_text(const std::filesystem::path &p) {
@@ -819,12 +847,9 @@ void HttpListener::register_public_api_routes() {
 		}
 		auto db_conn = db_pool_.acquire();
 		// Try up to 5 random PCIDs to avoid the rare collision.
-		static thread_local std::mt19937 gen{std::random_device{}()};
-		std::uniform_int_distribution<uint32_t> dist;
 		MutationResult result;
 		for (int attempt = 0; attempt < 5; ++attempt) {
-			char pcid[16];
-			std::snprintf(pcid, sizeof(pcid), "%08x", dist(gen));
+			const std::string pcid = next_pcid();
 			CreateUserParams p;
 			p.username = username;
 			p.password = password;
@@ -881,6 +906,9 @@ void HttpListener::register_public_api_routes() {
 		std::vector<crow::json::wvalue> entries;
 		try {
 			auto db_conn = db_pool_.acquire();
+			// One snapshot for the rows and every roster and player list read
+			// below, so no host goes out beside a roster from another commit.
+			db::ReadSnapshot snapshot(*db_conn);
 			auto rows = hostdb::list_hosts(*db_conn);
 			entries.reserve(rows.size());
 			for (const auto &h : rows) {
@@ -1601,6 +1629,9 @@ void HttpListener::register_legacy_host_join_routes(
 		std::vector<opennova::GsbServerEntry> entries;
 		try {
 			auto db_conn = db_pool_.acquire();
+			// One snapshot for the rows and their rosters: a row's player count
+			// and the names in its tail come from the same commit.
+			db::ReadSnapshot snapshot(*db_conn);
 			auto rows = hostdb::list_hosts_by_game(*db_conn, game_slug);
 			entries.reserve(rows.size());
 			for (const auto &h : rows) {

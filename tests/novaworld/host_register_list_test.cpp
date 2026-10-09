@@ -228,11 +228,36 @@ int main() {
 		TEST_EXPECT(opennova::hostdb::list_roster(db, a.rid).size() == 4);
 	}
 
-	// Removing the host cascades the roster.
+	// A re-sent ClientHostRequest updates the row in place: the player /NWJoin.dll
+	// recorded stays in host_players (a delete-and-reinsert cascaded it away),
+	// and the columns and the roster are the new ones.
+	{
+		opennova::hostdb::PlayerRow joined;
+		joined.host_rid = a.rid;
+		joined.nwhandle = "joiner";
+		joined.peer_ip = "10.0.0.9";
+		opennova::hostdb::add_player(db, joined);
+		TEST_EXPECT(opennova::hostdb::list_players(db, a.rid).size() == 1);
+
+		std::vector<test_novaworld::IndexedVar> resent;
+		for (const auto &v : player_slot_vars(0, "carol", "10.0.0.9:40000", "00000004", "1", "0")) resent.push_back(v);
+		auto rr = sess.dispatch(make_host_request("1000", "Resent Srv", "HK-A", resent), a, "10.0.0.7", 40000);
+		TEST_EXPECT(rr.label == "ClientHostRequest");
+		const auto players = opennova::hostdb::list_players(db, a.rid);
+		TEST_EXPECT(players.size() == 1 && players[0].nwhandle == "joiner");
+		TEST_EXPECT(opennova::hostdb::list_hosts(db).size() == 2);
+		const auto row = opennova::hostdb::find_host_by_rid(db, a.rid);
+		TEST_EXPECT(row.has_value() && row->server_name == "Resent Srv");
+		const auto roster = opennova::hostdb::list_roster(db, a.rid);
+		TEST_EXPECT(roster.size() == 1 && roster[0].player_name == "carol");
+	}
+
+	// Removing the host cascades the roster and the joined players.
 	opennova::hostdb::remove_host_by_rid(db, a.rid);
 	TEST_EXPECT(opennova::hostdb::list_roster(db, a.rid).empty());
+	TEST_EXPECT(opennova::hostdb::list_players(db, a.rid).empty());
 	TEST_EXPECT(opennova::hostdb::list_hosts(db).size() == 1);
 
-	std::printf("OK: host register -> list round-trip (rid minting, roster, GSB projection, status blob)\n");
+	std::printf("OK: host register -> list round-trip (rid minting, roster, GSB projection, status blob, re-send)\n");
 	return 0;
 }

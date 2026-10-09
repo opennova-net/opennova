@@ -155,9 +155,23 @@ bool GateListener::start(const ServerConfig &config) {
 	glsvss_rims_    = config.glsvss_rims;
 	glsvss_agrms_   = config.glsvss_agrms;
 
+	// The receive thread's own connection (Database is single-threaded),
+	// leased here so a database that cannot be opened stops the boot.
+	std::optional<db::ConnectionPool::Lease> db_conn;
+	if (db_pool_) {
+		try {
+			db_conn.emplace(db_pool_->acquire());
+		} catch (const db::SqliteError &e) {
+			std::fprintf(stderr, "[gate] db open failed: %s\n", e.what());
+			return false;
+		}
+	}
+
 	stop_requested_.store(false);
 	running_.store(true);
-	worker_ = std::thread([this] { run_loop(); });
+	worker_ = std::thread([this, db_conn = std::move(db_conn)]() mutable {
+		run_loop(std::move(db_conn));
+	});
 	std::printf("[gate] listening on UDP :%u (also the POSTIPPORT status sink)\n",
 	            static_cast<unsigned>(bound_port_));
 	return true;
@@ -171,23 +185,12 @@ void GateListener::stop() {
 	running_.store(false);
 }
 
-void GateListener::run_loop() {
+void GateListener::run_loop(std::optional<db::ConnectionPool::Lease> db_conn) {
 	opennova::net::ScopedSocket socket(opennova::net::udp_bind(bound_port_));
 	if (!socket.is_valid()) {
 		std::fprintf(stderr, "[gate] re-bind failed; aborting loop\n");
 		running_.store(false);
 		return;
-	}
-
-	// This thread's own connection (Database is single-threaded). A failed
-	// open leaves the gate answering probes with status blobs unapplied.
-	std::optional<db::ConnectionPool::Lease> db_conn;
-	if (db_pool_) {
-		try {
-			db_conn.emplace(db_pool_->acquire());
-		} catch (const db::SqliteError &e) {
-			std::fprintf(stderr, "[gate] WARN db open: %s\n", e.what());
-		}
 	}
 
 	uint8_t rx[65535];

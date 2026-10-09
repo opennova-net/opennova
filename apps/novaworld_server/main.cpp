@@ -123,9 +123,10 @@ int main() {
 	}
 	// Every thread that touches the database owns its connection (Database is
 	// single-threaded): this thread, the gate's and the NW UDP listener's
-	// receive threads each lease one for their lifetime; each HTTP request and
-	// each erase_lobby_state call leases one for the call. The pool outlives
-	// every listener (declared first, destroyed last).
+	// receive threads each hold one for their lifetime (the listeners lease
+	// theirs in start(), which fails the boot when the open does); each HTTP
+	// request and each erase_lobby_state call leases one for the call. The pool
+	// outlives every listener (declared first, destroyed last).
 	std::unique_ptr<db::ConnectionPool> db_pool;
 	std::optional<db::ConnectionPool::Lease> main_lease;
 	try {
