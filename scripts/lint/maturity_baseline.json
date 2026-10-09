@@ -56,6 +56,7 @@
     "player_profile.gd|static func load_character_profile(",
     "mcp_tool_def.gd|var input_schema",
     "mcp_tool_def.gd|func to_list_entry()",
+    "mcp_screenshot.gd|static func tool_schema()",
     "game_render_diagnostics.gd|func to_json_value()",
     "game_mcp_adapter.gd|func runtime_status()",
     "probe_def.gd|var input_schema",
