@@ -138,11 +138,10 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/texture_import_needs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/texture_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/use_checks.cpp
-    # import — the importers (a PNG to the texture file its uses read, S18, a DDS's blocks and chain through
-    # the authoring DXT encoder; a font set's glyph sheet to a .fnt) and what they read (the import context),
-    # the sidecars, the import pass, and the plan of an import with the files it needs
+    # import — the importers (a PNG to the texture file its uses read, S18, through the engine's image import,
+    # runtime/renderer/texture_authoring; a font set's glyph sheet to a .fnt) and what they read (the import
+    # context), the sidecars, the import pass, and the plan of an import with the files it needs
     ${CMAKE_CURRENT_SOURCE_DIR}/import/converter.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/import/dxt_encode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/font_import.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_context.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/importers.cpp
@@ -151,15 +150,11 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_plan_groups.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_run.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/mission_fixed_files.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/import/png_decode.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/import/png_encode.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/import/quantize.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/sidecar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/terrain_import.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/texture_import.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/wave_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/texture_source.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/import/tga_source.cpp
     # terrain — TrnGen.exe's terrain bake ported (a depth map to the .cpt's depth atlas and its
     # ground mesh: the quadtree, the mesh simplifier, the strips, the TPM1 tile files kept in memory)
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/lod_mesh_data.cpp
@@ -447,11 +442,6 @@ target_include_directories(opennova_editor
 
 # The chain: editor -> runtime -> net -> base -> formats -> io (all PUBLIC).
 target_link_libraries(opennova_editor PUBLIC opennova_runtime)
-# The image importer inflates PNG data, and the PNG writer (the thumbnails' wire
-# form) deflates it, through the vendored miniz (private: no consumer of the
-# editor sees miniz.h); its DXT textures' blocks are rgbcx's (import/dxt_encode,
-# private alike).
-target_link_libraries(opennova_editor PRIVATE opennova_miniz opennova_rgbcx)
 
 target_compile_features(opennova_editor PUBLIC cxx_std_17)
 
