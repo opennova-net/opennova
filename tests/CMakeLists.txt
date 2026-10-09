@@ -396,6 +396,13 @@ endforeach()
 # The powerup retail leg reads powerup.def off the packed install through the Vfs.
 target_link_libraries(def_parse_powerup_test PRIVATE opennova_base)
 
+# hudfx.def (docs/interface/hud-re.md "hudfx.def"): the tagged lines, the one the game reads, the slots'
+# names, the writer's form and an authored file written again over its layout. JO ships none.
+add_executable(def_hudfx_test def/def_hudfx_test.cpp)
+target_link_libraries(def_hudfx_test PRIVATE opennova_formats)
+target_include_directories(def_hudfx_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME def_hudfx COMMAND def_hudfx_test)
+
 # PLAYER_INFO loadout weight + encumbrance math (D-PLAYERINFO-11 weight readout).
 add_executable(def_loadout_weight_test def/def_loadout_weight_test.cpp)
 target_link_libraries(def_loadout_weight_test PRIVATE opennova_formats)
