@@ -74,6 +74,14 @@ const DefItemDef *find_item_def(const DefItemsFile &items, int item_id) {
 	return nullptr;
 }
 
+std::unordered_map<int, const DefItemDef *> item_defs_by_id(const DefItemsFile &items) {
+	// emplace keeps the first row of an id: find_item_def's scan from row 0.
+	std::unordered_map<int, const DefItemDef *> rows;
+	rows.reserve(items.count);
+	for (size_t i = 0; i < items.count; ++i) rows.emplace(items.entries[i].id, &items.entries[i]);
+	return rows;
+}
+
 int visual_item_id_for_runtime_type(int item_id, const DefItemsFile &items) {
 	// The policy lives in mission/placement_traits.h; this overload only
 	// answers the catalog probe against the retained DefItemsFile.

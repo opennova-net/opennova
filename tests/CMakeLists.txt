@@ -1146,6 +1146,13 @@ target_link_libraries(mission_seat_spec_extract_test PRIVATE opennova_runtime)
 target_include_directories(mission_seat_spec_extract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_seat_spec_extract COMMAND mission_seat_spec_extract_test)
 
+# The def tables through an embedder's files (runtime_boot: weapon.def with the
+# mount's SIGHTS test, ammo.def) and items.def's per-id first-row index.
+add_executable(mission_def_table_read_test mission/def_table_read_test.cpp)
+target_link_libraries(mission_def_table_read_test PRIVATE opennova_runtime)
+target_include_directories(mission_def_table_read_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_def_table_read COMMAND mission_def_table_read_test)
+
 # Object renderer/shader tests
 foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_wind light_runtime light_scene light_terrain_pass material_classify material_eval material_texture
         particle_atlas_contract particle_frame_compiler_contract render_order
