@@ -5,10 +5,10 @@
 #include <cstdio>
 
 #ifdef _WIN32
-#include <cwchar>
 #include <string>
-#include <utility>
 #include <vector>
+
+#include <base/io/os_path.h>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -24,13 +24,7 @@ int main(int argc, char **argv) {
 	wchar_t **wide = CommandLineToArgvW(GetCommandLineW(), &count);
 	if (wide != nullptr && count >= 1) {
 		std::vector<std::string> args;
-		for (int i = 0; i < count; ++i) {
-			const int length = static_cast<int>(wcslen(wide[i]));
-			const int needed = WideCharToMultiByte(CP_UTF8, 0, wide[i], length, nullptr, 0, nullptr, nullptr);
-			std::string arg(static_cast<size_t>(needed > 0 ? needed : 0), '\0');
-			if (needed > 0) WideCharToMultiByte(CP_UTF8, 0, wide[i], length, arg.data(), needed, nullptr, nullptr);
-			args.push_back(std::move(arg));
-		}
+		for (int i = 0; i < count; ++i) args.push_back(opennova::io::narrow_utf8(wide[i]));
 		LocalFree(wide);
 		std::vector<const char *> pointers;
 		for (const std::string &arg : args) pointers.push_back(arg.c_str());

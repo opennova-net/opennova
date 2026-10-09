@@ -47,10 +47,10 @@ bool BaseMatch::open(const std::string &install, const std::string &game, std::s
 	}
 	opened_at_ = io::file_clock_now_ticks();
 	archives_settled_ = true;
-	for (const char *archive : kBootArchiveTable) {
-		const auto found = loose_.find(pff::normalized_logical_name(archive));
-		archives_stamp_ += (found == loose_.end() ? std::string("-") : stamp_of(found->second)) + ";";
-		if (found != loose_.end()) archives_settled_ = archives_settled_ && settled(found->second);
+	for (const std::string &archive : vfs_boot_archive_slots(install)) {
+		const std::string path = archive.empty() ? std::string() : join_path(install, archive);
+		archives_stamp_ += (archive.empty() ? std::string("-") : stamp_of(path)) + ";";
+		if (!archive.empty()) archives_settled_ = archives_settled_ && settled(path);
 	}
 	return true;
 }
@@ -84,7 +84,7 @@ bool BaseMatch::archive_copy(const std::string &name, BaseCopy &out, uint64_t &r
 	read_bytes += bytes.size();
 	out.size = bytes.size();
 	out.raw = hash_of(bytes);
-	// As served: the loaders' decode of the stored bytes (InstallView::read's, read_served), in memory.
+	// As served: the loaders' decode of the stored bytes (InstallView::read's, vfs_read_served), in memory.
 	if (!vfs_loader_takes_stored(file->member) &&
 	    vfs_decode_payload(bytes, view_.vfs().scr_policy())) {
 		out.served = hash_of(bytes);

@@ -87,12 +87,7 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 			// A file the game reads in place of the base's under /exp (MENUMUS.SBF/.BIN, GAMEMUS.SBF/.BIN:
 			// M<n>.* and G<n>.* take their place [orig: Expansion_LoadAssets @ 0x4a4906..0x4a494a]) is no
 			// row of an expansion's checklist: the game never reads it there.
-			bool replaced = false;
-			for (size_t role = 0; role < kExpansionFileRoleCount; ++role) {
-				const ExpansionFileRow &own = expansion_file_row(static_cast<ExpansionFileRole>(role));
-				replaced = replaced || (own.replaces() && strutil::iequals(own.replaces(), resource->name));
-			}
-			if (replaced) continue;
+			if (gameprofile::gameprofile_replaced_under_expansion(resource->name)) continue;
 		}
 		if (!requirement_phase_enabled(doc, resource->phase)) continue;
 

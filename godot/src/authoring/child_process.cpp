@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <string>
 #include <vector>
+
+#include <base/io/os_path.h>
 #endif
 
 namespace godot {
@@ -46,24 +48,11 @@ std::wstring quote_arg(const std::wstring &arg) {
 	return out;
 }
 
-std::wstring to_wide(const std::string &utf8) {
-	if (utf8.empty()) {
-		return std::wstring();
-	}
-	const int needed = MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
-	if (needed <= 0) {
-		return std::wstring();
-	}
-	std::wstring out(static_cast<size_t>(needed), L'\0');
-	MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), out.data(), needed);
-	return out;
-}
-
 std::wstring native_path(std::string path) {
 	for (char &c : path) {
 		if (c == '/') c = '\\';
 	}
-	return to_wide(path);
+	return opennova::io::widen_utf8(path);
 }
 
 // A path CreateProcessW takes: one past `limit` characters (the system's current directory holds
@@ -98,21 +87,6 @@ std::wstring within(const std::wstring &path, size_t limit) {
 
 bool has_exited(HANDLE handle) {
 	return WaitForSingleObject(handle, 0) == WAIT_OBJECT_0;
-}
-
-std::string from_wide(const std::wstring &wide) {
-	if (wide.empty()) {
-		return std::string();
-	}
-	const int needed = WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), nullptr, 0,
-			nullptr, nullptr);
-	if (needed <= 0) {
-		return std::string();
-	}
-	std::string out(static_cast<size_t>(needed), '\0');
-	WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), out.data(), needed, nullptr,
-			nullptr);
-	return out;
 }
 
 // The process's creation time as the OS keeps it (a FILETIME's 100 ns count), in decimal: equal
@@ -198,7 +172,7 @@ int64_t ChildProcessPlatform::spawn(const opennova::editor::LaunchPlan &plan) {
 	std::wstring command = quote_arg(exe);
 	for (const std::string &arg : plan.args) {
 		command.push_back(L' ');
-		command.append(quote_arg(to_wide(arg)));
+		command.append(quote_arg(opennova::io::widen_utf8(arg)));
 	}
 	STARTUPINFOW startup{};
 	startup.cb = sizeof(startup);
@@ -337,7 +311,7 @@ bool ChildProcessPlatform::process_identity(int64_t pid, opennova::editor::Proce
 	DWORD length = static_cast<DWORD>(image.size());
 	if (QueryFullProcessImageNameW(handle, 0, image.data(), &length) != 0) {
 		image.resize(length);
-		std::string path = from_wide(image);
+		std::string path = opennova::io::narrow_utf8(image);
 		std::replace(path.begin(), path.end(), '\\', '/');
 		out.image = path;
 	}
@@ -386,7 +360,7 @@ opennova::editor::ProcessLiveness ChildProcessPlatform::semaphore_held(const std
 	// Opened by its name in this session's namespace, where the game makes it (CreateSemaphoreA with no
 	// Global\ prefix), for SYNCHRONIZE alone, and let go at once: one that will not be opened for that
 	// right is there all the same.
-	HANDLE handle = OpenSemaphoreW(SYNCHRONIZE, FALSE, to_wide(name).c_str());
+	HANDLE handle = OpenSemaphoreW(SYNCHRONIZE, FALSE, opennova::io::widen_utf8(name).c_str());
 	if (handle != nullptr) {
 		CloseHandle(handle);
 		return ProcessLiveness::Alive;

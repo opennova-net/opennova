@@ -6,6 +6,8 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <base/io/strutil.h>
+
 namespace opennova::editor::ui_kit {
 
 namespace {
@@ -213,8 +215,7 @@ std::string fit_middle(const std::string &text, float width) {
 	const float room = width - dots;
 	size_t tail = text.size();
 	while (tail > 0) {
-		size_t back = tail - 1;
-		while (back > 0 && (static_cast<unsigned char>(text[back]) & 0xC0) == 0x80) --back;
+		const size_t back = strutil::utf8_cut(text, tail - 1);
 		if (ImGui::CalcTextSize(text.c_str() + back, text.c_str() + text.size()).x > room * 0.6f) break;
 		tail = back;
 	}

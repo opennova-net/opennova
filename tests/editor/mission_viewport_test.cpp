@@ -43,6 +43,7 @@
 #include <editor/preview/mission_viewport.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
+#include <formats/env/env_weather.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/mission.h>
 #include <formats/pcx/pcx_io.h>
@@ -1617,7 +1618,7 @@ struct NamedFiles : opennova::FileSource {
 // framing stands within (half the fog's end, under the header's override; none with no .env), and a
 // framing of the rig's mission whose .env fogs at 60 m standing within 30 m.
 static int test_fog_reach() {
-	TEST_EXPECT(near(mission_settled_fog_level(1500.0f), 1000.0) && near(mission_settled_fog_level(325.0f), 325.0));
+	TEST_EXPECT(near(opennova::env::EnvScalarChannels::settled_fog_level(1500.0f), 1000.0) && near(opennova::env::EnvScalarChannels::settled_fog_level(325.0f), 325.0));
 	NamedFiles files;
 	MissionSceneHeader header;
 	header.environment = "fogged";

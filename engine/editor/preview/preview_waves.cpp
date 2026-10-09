@@ -5,6 +5,7 @@
 #include <system_error>
 #include <utility>
 
+#include <base/io/file_time.h>
 #include <editor/project/project_files.h>
 
 namespace opennova::editor {
@@ -16,11 +17,11 @@ PreviewWaves::DiskStamp PreviewWaves::stamp_of(const std::string &file) {
 	if (!std::filesystem::is_regular_file(path, ec) || ec) return stamp;
 	const uint64_t size = std::filesystem::file_size(path, ec);
 	if (ec) return stamp;
-	const std::filesystem::file_time_type written = std::filesystem::last_write_time(path, ec);
-	if (ec) return stamp;
+	const int64_t written = io::file_modified_ticks(path);
+	if (written == 0) return stamp; // its last write unread
 	stamp.exists = true;
 	stamp.size = size;
-	stamp.written = int64_t(written.time_since_epoch().count());
+	stamp.written = written;
 	return stamp;
 }
 
