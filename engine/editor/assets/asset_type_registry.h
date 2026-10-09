@@ -8,15 +8,15 @@
 
 namespace opennova::editor {
 
-// The editor's file classifier (ADR 0046 d7/d9). It asks the runtime catalog's shared
-// classifier first (engine/base/resource_index/resource_kind.h), a kind it gives being the
-// row of asset_kinds that names its catalog token, and only then the rows' own names: the
-// name-keyed .def family and score.ini by their whole names, then the extensions (scripts,
-// textures with a model's .mdt normal map, waves, banks, videos, plain text). `bytes` is
-// the file's content when the caller has it (null otherwise): it decides a `.bin` name (RTXT
-// vs SCR0 vs raw), and a name no extension types is a material chunk when it holds a material
-// chunk container (renderer::is_material_chunk_container), and a name with no extension at all (a
-// LICENSE) the project's notes when it holds text (strutil::looks_like_text).
+// The editor's file classifier (ADR 0046 d7/d9): the engine's (base/resource_index/file_kind.h,
+// file_kind_for_file: the runtime catalog's shared classifier first, a kind it gives being the
+// kind whose facts name its catalog token, and only then the facts' own names: the name-keyed .def
+// family and score.ini by their whole names, then the extensions (scripts, textures with a model's
+// .mdt normal map, waves, banks, videos, plain text)). `bytes` is the file's content when the
+// caller has it (null otherwise): it decides a `.bin` name (RTXT vs SCR0 vs raw), and a name no
+// extension types is a material chunk when it holds a material chunk container
+// (renderer::is_material_chunk_container), and a name with no extension at all (a LICENSE) the
+// project's notes when it holds text (strutil::looks_like_text).
 AssetKind classify_asset(const std::string &logical_name, const std::vector<uint8_t> *bytes);
 
 // strutil::looks_like_text's answer for the file at `path`, read by its first
@@ -37,9 +37,7 @@ bool asset_classification_needs_bytes(const std::string &logical_name);
 // with no extension the project's notes too (a text, by its content).
 bool asset_name_fits_kind(const std::string &logical_name, AssetKind kind);
 
-// The kind a required-resource row's file name implies without reading anything:
-// the `.bin` rows are string tables except the music scripts and the raw markers,
-// which are named. This is what a requirement compares a scanned file against.
-AssetKind expected_asset_kind_for_required_name(const std::string &name);
+// The kind a required-resource row's file name implies without reading anything, what a
+// requirement compares a scanned file against, is the engine's (file_kind_for_required_name).
 
 } // namespace opennova::editor

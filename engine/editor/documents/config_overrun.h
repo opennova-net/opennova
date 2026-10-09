@@ -10,7 +10,7 @@
 namespace opennova::editor {
 
 // The ConfigFile pool rule: the one rule for every kind the game reads through the ConfigFile text reader
-// (assets/asset_kinds.h, LineReader::ConfigFile: the credits and the character attributes). That reader
+// (base/resource_index/file_kind.h, LineReader::ConfigFile: the credits and the character attributes). That reader
 // sizes its pool of text values by their bytes (each its length and one, rounded up to the allocator's 64)
 // and then clears it one byte per value [orig: ConfigFile_ParseText @ 0x7609e8], so a file holding more
 // values than that pool's bytes writes zeros past it into the game's heap, which crashes the game later (a

@@ -7,13 +7,10 @@
 
 namespace opennova::editor {
 
-// Where a project asset lands in a Play or Export build (ADR 0046 d8): the slot its kind's row
-// names (ArchiveSlot, assets/asset_kinds.h).
+// Where a project asset lands in a Play or Export build (ADR 0046 d8): the slot its kind's facts
+// name (ArchiveSlot, base/resource_index/file_kind.h), whose archive is archive_slot_file_name's.
 
-// "language.pff", "localres.pff", "resource.pff"; "" for Loose and None.
-const char *archive_slot_file_name(ArchiveSlot slot);
-
-// The slot for an asset, which its kind decides (AssetKindRow::archive_slot). Three kinds have
+// The slot for an asset, which its kind decides (FileKindFacts::archive_slot). Three kinds have
 // none, so no build packs them (asset_kind_packed): an Archive-kind file (a .pff inside the
 // project), which the build reports and leaves out; an import source, which never packs itself,
 // its outputs, named after it, landing where their own kinds' rows say; and a file of no kind the
@@ -29,7 +26,7 @@ ArchiveSlot route_asset(const AssetEntry &asset);
 // [orig: MissionList_ScanAndBuildFromFiles @ 0x563170, @ 0x5635a5..0x5635bb], so the kinds of the
 // language slot go to `<b>L.pff` and those of the localres and resource slots to `<b>.pff`, as JO:CA's
 // jox01 keeps them. A loose kind goes into the expansion's folder where its reader looks there, and
-// nowhere where the game reads it only from the install's folder (AssetKindRow::expansion_loose).
+// nowhere where the game reads it only from the install's folder (FileKindFacts::expansion_loose).
 enum class ExpansionPlace {
 	LanguageArchive, // <b>L.pff
 	Archive,         // <b>.pff

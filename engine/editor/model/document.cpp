@@ -603,7 +603,7 @@ std::shared_ptr<const SourceState> Document::source_of(const std::vector<uint8_t
 	auto source = std::make_shared<SourceState>();
 	source->issues = std::move(issues);
 	const std::string_view text(reinterpret_cast<const char *>(decoded.data()), decoded.size());
-	if (asset_kind_row(kind()).line_reader != LineReader::None && strutil::first_lone_lf(text) != std::string_view::npos)
+	if (file_kind_facts(kind()).line_reader != LineReader::None && strutil::first_lone_lf(text) != std::string_view::npos)
 		source->odd_lines = std::make_shared<const std::string>(text);
 	return source;
 }

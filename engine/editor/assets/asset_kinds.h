@@ -8,37 +8,22 @@ namespace opennova::editor {
 
 // What each kind of project file is to the editor (ADR 0046 S13 D5): one row per AssetKind,
 // which everything that asks what a kind is reads instead of switching on it (the classifier,
-// the build's routing, the name rules, the document registry, the import plan). A new kind is
-// one AssetKind value and one row in asset_kinds.cpp, which does not build without it.
+// the build's routing, the name rules, the document registry, the import plan). What the game's
+// loaders know of a kind (the names that give it, its archive slot, its place under an expansion,
+// its line reader) is the engine's row of facts (base/resource_index/file_kind.h, FileKindFacts),
+// which a row reads (AssetKindRow::facts). A new kind is one FileKind value, one row of facts and
+// one row in asset_kinds.cpp, which does not build without it.
 
-// Where a build puts a file of a kind (ADR 0046 d8): one of the three boot-table archives the
-// engine opens by fixed name, loose beside them, or nowhere. The boot gate counts only
-// archives opened from that table [orig: PFF_OpenAllArchives @ 0x4a4310 over the name table @
-// 0x829f90; fatal check @ 0x4a6f44]: an arbitrary-named .pff never mounts
-// (docs/vfs/vfs-pff-mount-re.md D-VFS-2), so every packed file goes into language.pff,
-// localres.pff or resource.pff. The placement by kind mirrors retail's (witnessed against the
-// shipped JO install: the boot text bins in language, menus / defs / missions / fonts / music
-// scripts in localres, terrain / env / art in resource), which keeps the output
-// retail-bootable; the OpenNova runtime resolves a name from any slot. Two families never
-// pack: `.sbf` music banks stream by path and never resolve through the archives [orig:
-// AudioVM_InitMenuMusicStreaming @ 0x56aa60], and `earlyerr.txt` is the pre-archive error text
-// read before any mount [orig: Game_ShowEarlyError @ 0x4a68a0]; retail's own loose files
-// (videos, configs, saves, the machine-keyed NovaWorld cache) stay loose with them. None: an
-// archive (a build output, which the build refuses in a project), an import source (its
+// Where a build puts a file of a kind (ADR 0046 d8) is its facts' slot (FileKindFacts::archive_slot,
+// ArchiveSlot): the boot table's archives, loose, or nowhere; an expansion build's loose places are
+// its facts' too (FileKindFacts::expansion_loose, ExpansionLoose). A build leaves out a kind of slot
+// None: an archive (a build output, which the build refuses in a project), an import source (its
 // outputs, named after it, pack by their own kinds), the project's notes, which the game never
 // reads, and a file of no kind the game knows, which the game never asks for (S13 A8: the build
 // leaves it out, and says so).
-enum class ArchiveSlot { Language, Localres, Resource, Loose, None };
-
-// Where the game reads a loose file of a kind when it runs an expansion (`/exp <name>`, ADR 0046
-// S16): from the expansion's own folder, `expansion\<name>\`, which an expansion build ships; or only
-// from the install's folder, which an expansion cannot change (the build leaves such a file out and
-// says so, build.expansion.root_only). None for a kind that is not loose (an archive's, or one no
-// build packs). A file the game reads through the file system's front door is no loose kind: the
-// front door reads the archives alone unless `/d` [orig: FileSystem_OpenFile @ 0x75b1c0, the loose
-// search only when searchLooseFirst @ 0x75b1e5; its one setter for the session, the /d gate
-// Game_InitSubsystems @ 0x4a6fa9..0x4a6fac], so such a kind packs (the NovaWorld screens).
-enum class ExpansionLoose { None, Folder, RootOnly };
+using opennova::ArchiveSlot;
+using opennova::ExpansionLoose;
+using opennova::LineReader;
 
 // The document types the editor opens a kind with (ADR 0046 d9): documents/document_types holds
 // one DocumentType per value past None, in this order. None: a kind the build packs as it is.
@@ -73,45 +58,10 @@ enum class DocumentTypeId {
 
 inline constexpr size_t kDocumentTypeCount = static_cast<size_t>(DocumentTypeId::kCount) - 1;
 
-// How the game's loader of a kind takes a file in the SCR form (formats/scr): as the game's text
-// readers do, the form optional and unwrapped under the game's key [orig: File_ParseASCIIFile @
-// 0x53D860, its sniff for "SCR" and version 1], which a document's load undoes before its type reads
-// the file; or as the shader loader does, the form required and unwrapped under a key of its own
-// [orig: ScriptFile_LoadAndDecrypt @ 0x5AE060, the key at 0x5AE0C0], which the type reads itself
-// from the bytes as stored (a file not in the form is one the loader rejects).
-enum class ScrForm { Optional, Shader };
-
-// How the game's reader of a kind cuts its text into lines where it ends a line at CR LF and nowhere
-// else, an LF alone or a CR alone a byte of the line: the kinds the line-ends rule reads
-// (documents/line_ends.h). AsciiWalk: the shared ASCII walk, which ends a line only where a CR is
-// followed by an LF [orig: File_ParseASCIIFile @ 0x53D810, the test @ 0x53D8DE], tokenizes the
-// line's first 1000 characters and skips a line with no word or whose first word starts with '/'
-// [orig: @ 0x53D908..0x53D91E; Terrain_TokenizeConfigLine @ 0x53CB60, the clamp @ 0x53CBBB].
-// ConfigFile: the ConfigFile text reader, where CR LF ends a line and a lone CR or LF does not [orig:
-// ConfigFile_LoadFromFile @ 0x760a10 -> ConfigFile_ParseText @ 0x7608a0], whose pool of text values the
-// ConfigFile pool rule reads such a kind's files against (documents/config_overrun.h). None: any other kind, among
-// them two whose readers end lines otherwise and whose types say so themselves: a stylesheet's
-// reader, which stops at a line end other than CR LF (style.line_ending), and a script's, which ends
-// a line at a CR (script.line_ending).
-enum class LineReader { None, AsciiWalk, ConfigFile };
-
 struct AssetKindRow {
 	AssetKind kind = AssetKind::Unknown;
 	const char *token = ""; // the wire form (session JSON, the editor MCP, opennova-project)
 	const char *label = ""; // the windows' words ("Item definitions")
-	// A kind the runtime's catalog browses is named by its catalog token ("object_model"): the
-	// runtime's classifier types such a file (resource_kind_for_name_and_magic), the one
-	// implementation of that fact; "" for any other kind.
-	const char *runtime = "";
-	// What else names a file of the kind: its whole name, lower case ("items.def"), or the whole
-	// names it has (null-ended: the texts the game reads, "earlyerr.txt"), which are looked for
-	// before any extension; its extensions, lower case with the dot (null-ended).
-	const char *file_name = nullptr;
-	const char *const *file_names = nullptr;
-	const char *const *extensions = nullptr;
-	ArchiveSlot archive_slot = ArchiveSlot::Resource;
-	// A loose kind's place in an expansion build (ExpansionLoose): set exactly on the Loose rows.
-	ExpansionLoose expansion_loose = ExpansionLoose::None;
 	DocumentTypeId document = DocumentTypeId::None; // the type that edits it; None: packed as it is
 	// Its files name other files, or names other files define, that an import brings with them
 	// (import_plan's references_unread: those of a kind the graph does not read are not followed).
@@ -126,25 +76,18 @@ struct AssetKindRow {
 	// The name Files offers a new file of the kind (New > Menu...: "newmenu.mnu"); "" for a kind
 	// no New makes (its free-form blank factory's, blank_factory.cpp).
 	const char *new_name = "";
-	// How its loader takes the SCR form (ScrForm).
-	ScrForm scr = ScrForm::Optional;
-	// How the game's reader of it ends a line, where at CR LF alone (LineReader): each such row cites
-	// its reader.
-	LineReader line_reader = LineReader::None;
 	// What a file of the kind is to the game, in a modder's words, a sentence (Files' card for a file,
 	// the UX round's project lane): what reads it and how it is found, as the row's own witnesses say.
 	const char *about = "";
+	// What the game's loaders know of the kind: its names, archive slot, place under an expansion and
+	// line reader (base/resource_index/file_kind.h).
+	const FileKindFacts &facts() const { return file_kind_facts(kind); }
 };
 
 // A kind's row (asset_kinds.cpp holds one per kind, in the enum's order; static_asserts there
-// check that, and that no two rows share a token, a runtime token, a file name or an extension).
-// The Unknown row for a value past the last kind.
+// check that, and that no two rows share a token). The Unknown row for a value past the last kind.
+// The kind a name gives is the engine's (file_kind_for_name, file_kind_for_file; classify_asset).
 const AssetKindRow &asset_kind_row(AssetKind kind);
-// The kind the runtime catalog's token names; Unknown for none.
-AssetKind asset_kind_for_runtime(const std::string &runtime_kind);
-// The kind a file name gives by the rows' own names: its whole name (without case), else its
-// extension; Unknown for none. The runtime's classifier is asked first (classify_asset).
-AssetKind asset_kind_for_name(const std::string &logical_name);
 // Whether a build puts a file of the kind in the build (in an archive, or loose): false for an
 // archive, an import source and its inputs, a mission's interchange text, the project's notes and a
 // file of no kind the game knows.
