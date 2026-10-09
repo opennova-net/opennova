@@ -998,7 +998,7 @@ bool check_symbol_rename(const ProjectPaths &paths, const ProjectDocument &proje
 
 bool apply_symbol_rename(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
                          const AssetGraph &graph, const SymbolRenamePlan &plan, std::vector<Diagnostic> &findings,
-                         const FileReplace &replace) {
+                         const io::FileReplace &replace) {
 	RenameTransaction transaction(paths, project, scan, graph, plan, replace);
 	while (!transaction.step()) {
 	}
@@ -1033,7 +1033,7 @@ RenameTransaction::RenameTransaction(const ProjectPaths &paths, const ProjectDoc
 }
 
 RenameTransaction::RenameTransaction(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
-                                     const AssetGraph &graph, SymbolRenamePlan plan, FileReplace replace) :
+                                     const AssetGraph &graph, SymbolRenamePlan plan, io::FileReplace replace) :
 		paths_(paths),
 		project_(project),
 		scan_(scan),
@@ -1168,7 +1168,7 @@ void RenameTransaction::stage_native(const AssetEntry &asset, const std::vector<
 	staged.native = true;
 	std::vector<uint8_t> bytes;
 	std::string message;
-	if (!read_file_bytes(join_path(paths_.root, asset.relative_path), bytes, message)) {
+	if (!io::read_file_bytes(join_path(paths_.root, asset.relative_path), bytes, message)) {
 		staged.findings.push_back(refusal(CoreFinding::RenameSite, asset.relative_path + " could not be read: " + message, asset.relative_path));
 		staged_ok_ = false;
 		return;
@@ -1236,11 +1236,11 @@ bool RenameTransaction::save_staged() {
 			const std::string absolute = join_path(paths_.root, staged->file);
 			std::vector<uint8_t> now;
 			std::string message;
-			if (!read_file_bytes(absolute, now, message) || std::string(now.begin(), now.end()) != staged->read) {
+			if (!io::read_file_bytes(absolute, now, message) || std::string(now.begin(), now.end()) != staged->read) {
 				findings_.push_back(refusal(CoreFinding::RenameConflict, staged->file + " changed outside the editor while it was renamed in.",
 				                            staged->file));
 				ok = false;
-			} else if (!write_file_atomic(absolute, staged->text, message)) {
+			} else if (!io::write_file_atomic(absolute, staged->text, message)) {
 				findings_.push_back(refusal(CoreFinding::RenameWrite, staged->file + " could not be written: " + message, staged->file));
 				ok = false;
 			}
@@ -1272,7 +1272,7 @@ void RenameTransaction::commit_split() {
 	}
 	fs::copy_file(at(from), at(copy), ec);
 	std::string dated;
-	if (ec || !refresh_last_write(utf8_of(at(copy)), dated)) {
+	if (ec || !io::refresh_last_write(utf8_of(at(copy)), dated)) {
 		findings_.push_back(refusal(CoreFinding::RenameCopy, "The copy could not be made: " + (ec ? ec.message() : dated), plan.path));
 		std::error_code ignored;
 		fs::remove(at(copy), ignored);
@@ -1330,7 +1330,7 @@ void RenameTransaction::commit_file_rename() {
 		// size and last write (the build's, the import's) would take it for the file that held the
 		// name before (two of a size swapping names): it is dated now (S13 A8).
 		std::string dated;
-		if (!refresh_last_write(utf8_of(new_path), dated)) {
+		if (!io::refresh_last_write(utf8_of(new_path), dated)) {
 			findings_.push_back(refusal(CoreFinding::RenameCopy, "The file could not be copied to its new name: " + dated, plan.path));
 			std::error_code ignored;
 			fs::remove(new_path, ignored);
@@ -1356,7 +1356,7 @@ void RenameTransaction::commit_file_rename() {
 			const fs::path to = at(companion_path(companion));
 			std::string dated;
 			fs::copy_file(at(companion.path), to, ec);
-			if (!ec && !refresh_last_write(utf8_of(to), dated)) ec = std::make_error_code(std::errc::io_error);
+			if (!ec && !io::refresh_last_write(utf8_of(to), dated)) ec = std::make_error_code(std::errc::io_error);
 			if (ec) {
 				findings_.push_back(refusal(CoreFinding::RenameCopy, companion.old_name + " could not be copied to its new name: " +
 				                                    (dated.empty() ? ec.message() : dated), companion.path));
@@ -1386,13 +1386,13 @@ void RenameTransaction::commit_file_rename() {
 	} else {
 		// A rename an indexer or a scanner holding the file refuses for a moment is tried again
 		// (rename_with_retry: a bounded few ms), as a save's replace and the build's publish are.
-		if (!rename_with_retry(old_path, new_path, ec)) {
+		if (!io::rename_with_retry(old_path, new_path, ec)) {
 			findings_.push_back(refusal(CoreFinding::RenameMove, "The file could not be renamed: " + ec.message(), plan.path));
 			return;
 		}
-		if (!plan.sidecar.empty()) rename_with_retry(at(plan.sidecar), at(plan.new_sidecar), ec);
+		if (!plan.sidecar.empty()) io::rename_with_retry(at(plan.sidecar), at(plan.new_sidecar), ec);
 		for (const RenameOutput &companion : plan.companions)
-			rename_with_retry(at(companion.path), at(companion_path(companion)), ec);
+			io::rename_with_retry(at(companion.path), at(companion_path(companion)), ec);
 	}
 	// The old outputs are disposable: the next import pass makes the new ones. (A rename
 	// that only changes the case keeps its output directory, which is keyed case-blind.)
@@ -1421,7 +1421,7 @@ void RenameTransaction::commit_move() {
 		made.push_back(dir);
 	std::string io_error;
 	const std::string into = folder_of_path(plan.new_path);
-	if (!into.empty() && !ensure_directory(join_path(paths_.root, into), io_error)) {
+	if (!into.empty() && !io::ensure_directory(join_path(paths_.root, into), io_error)) {
 		findings_.push_back(refusal(CoreFinding::RenameMove, "The folder " + into + " could not be made: " + io_error, plan.path));
 		return;
 	}
@@ -1429,17 +1429,17 @@ void RenameTransaction::commit_move() {
 		std::error_code ignored;
 		for (const std::string &dir : made) fs::remove(at(dir), ignored);
 	};
-	if (!rename_with_retry(from, to, ec)) {
+	if (!io::rename_with_retry(from, to, ec)) {
 		findings_.push_back(refusal(CoreFinding::RenameMove, "The file could not be moved: " + ec.message(), plan.path));
 		unmake();
 		return;
 	}
-	if (!plan.sidecar.empty() && !rename_with_retry(at(plan.sidecar), at(plan.new_sidecar), ec)) {
+	if (!plan.sidecar.empty() && !io::rename_with_retry(at(plan.sidecar), at(plan.new_sidecar), ec)) {
 		findings_.push_back(refusal(CoreFinding::RenameMove, "The import record could not be moved with it: " + ec.message() +
 		                                    ". The file stays where it was.",
 		                            plan.sidecar));
 		std::error_code back;
-		rename_with_retry(to, from, back);
+		io::rename_with_retry(to, from, back);
 		unmake();
 		return;
 	}
@@ -1456,7 +1456,7 @@ void RenameTransaction::commit_move() {
 // (write-protected) puts back the ones replaced before.
 void RenameTransaction::commit_symbol_rename() {
 	if (!staged_ok_) return;
-	std::vector<FileText> writes;
+	std::vector<io::FileText> writes;
 	for (const auto &staged : staged_) {
 		if (!staged->document->matches_file()) {
 			findings_.push_back(refusal(CoreFinding::RenameConflict,
@@ -1468,7 +1468,7 @@ void RenameTransaction::commit_symbol_rename() {
 		                  staged->document->serialize().text});
 	}
 	std::vector<std::string> problems;
-	if (write_files_together(writes, problems, replace_)) {
+	if (io::write_files_together(writes, problems, replace_)) {
 		ok_ = true;
 		return;
 	}

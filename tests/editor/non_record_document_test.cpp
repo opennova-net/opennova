@@ -59,7 +59,7 @@ bool has_finding(const ActionOutcome &outcome, const char *code) {
 std::string file_text(const std::string &path) {
 	std::vector<uint8_t> bytes;
 	std::string message;
-	if (!read_file_bytes(path, bytes, message)) return "<unread>";
+	if (!opennova::io::read_file_bytes(path, bytes, message)) return "<unread>";
 	return std::string(bytes.begin(), bytes.end());
 }
 

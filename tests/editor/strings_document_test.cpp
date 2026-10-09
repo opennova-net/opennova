@@ -66,7 +66,7 @@ int load_edit_save() {
 	const std::vector<uint8_t> bytes = minted_table();
 	TEST_EXPECT(!bytes.empty());
 	std::string error;
-	TEST_EXPECT(write_file_atomic(dir.file("gametext.bin"), bytes.data(), bytes.size(), error));
+	TEST_EXPECT(opennova::io::write_file_atomic(dir.file("gametext.bin"), bytes.data(), bytes.size(), error));
 	StringsDocument document;
 	Diagnostic diagnostic;
 	TEST_EXPECT(document.load(dir.file("gametext.bin"), "gametext.bin", AssetKind::Strings, "jo", diagnostic));
@@ -83,7 +83,7 @@ int load_edit_save() {
 	// An untouched save rewrites the same bytes.
 	TEST_EXPECT(document.save(diagnostic));
 	std::vector<uint8_t> after;
-	TEST_EXPECT(read_file_bytes(dir.file("gametext.bin"), after, error) && after == bytes);
+	TEST_EXPECT(opennova::io::read_file_bytes(dir.file("gametext.bin"), after, error) && after == bytes);
 	// Edits: a UTF-8 edit is stored as cp1252; one holding a character cp1252 has no byte for is
 	// refused, on its field, naming the character (never stored as UTF-8 bytes).
 	TEST_EXPECT(document.apply(set(cafe, "text", std::string("Na\xC3\xAFve")), diagnostic));
@@ -160,7 +160,7 @@ int load_edit_save() {
 	TEST_EXPECT(document.rows()[0]->id == custom);
 	TEST_EXPECT(document.save(diagnostic) && !document.dirty());
 	rtxt::File reparsed;
-	TEST_EXPECT(read_file_bytes(dir.file("gametext.bin"), after, error) && rtxt::parse(after.data(), after.size(), reparsed, error));
+	TEST_EXPECT(opennova::io::read_file_bytes(dir.file("gametext.bin"), after, error) && rtxt::parse(after.data(), after.size(), reparsed, error));
 	TEST_EXPECT(reparsed.is_grouped() && reparsed.sections.size() == 3 && reparsed.sections[0].name == "Custom");
 	TEST_EXPECT(reparsed.get_in_section("Custom", "HELLO") == "Hello there");
 	TEST_EXPECT(reparsed.find_in_section("Custom", "HELLO")->position.y == 7);
@@ -176,7 +176,7 @@ int load_edit_save() {
 	TEST_EXPECT(find_definition(AssetGraph(), document, "wepdes", found) && found.kind == kSection);
 	TEST_EXPECT(!find_definition(AssetGraph(), document, "nowhere", found));
 	// A string named in a section the table lacks blocks; an ungrouped table only warns.
-	TEST_EXPECT(write_file_atomic(dir.file("ungrouped.bin"), minted_table(false).data(), minted_table(false).size(), error));
+	TEST_EXPECT(opennova::io::write_file_atomic(dir.file("ungrouped.bin"), minted_table(false).data(), minted_table(false).size(), error));
 	StringsDocument ungrouped;
 	TEST_EXPECT(ungrouped.load(dir.file("ungrouped.bin"), "ungrouped.bin", AssetKind::Strings, "jo", diagnostic));
 	TEST_EXPECT(!ungrouped.blocked() && ungrouped.ignored_lines() == 1 && ungrouped.rows().size() == 2);
@@ -198,7 +198,7 @@ int moved_string_reads_itself() {
 	editor_test::create_missing_files(session);
 	const std::vector<uint8_t> bytes = minted_table();
 	std::string error;
-	TEST_EXPECT(write_file_atomic(session.view().project.root + "/strings/moved.bin", bytes.data(), bytes.size(), error));
+	TEST_EXPECT(opennova::io::write_file_atomic(session.view().project.root + "/strings/moved.bin", bytes.data(), bytes.size(), error));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("moved.bin"));
 	auto *document = dynamic_cast<StringsDocument *>(session.document_for("moved.bin"));
@@ -358,7 +358,7 @@ int changes_since_save() {
 	editor_test::TempProjectDir dir("opennova_strings_changes_test");
 	std::string error;
 	const std::vector<uint8_t> bytes = minted_table();
-	TEST_EXPECT(write_file_atomic(dir.file("gametext.bin"), bytes.data(), bytes.size(), error));
+	TEST_EXPECT(opennova::io::write_file_atomic(dir.file("gametext.bin"), bytes.data(), bytes.size(), error));
 	StringsDocument document;
 	Diagnostic diagnostic;
 	TEST_EXPECT(document.load(dir.file("gametext.bin"), "gametext.bin", AssetKind::Strings, "jo", diagnostic));
@@ -379,7 +379,7 @@ int changes_since_save() {
 	            document.record_change(section) == Document::RecordChange::Changed);
 
 	const std::vector<uint8_t> ungrouped = minted_table(false);
-	TEST_EXPECT(write_file_atomic(dir.file("ungrouped.bin"), ungrouped.data(), ungrouped.size(), error));
+	TEST_EXPECT(opennova::io::write_file_atomic(dir.file("ungrouped.bin"), ungrouped.data(), ungrouped.size(), error));
 	StringsDocument table;
 	TEST_EXPECT(table.load(dir.file("ungrouped.bin"), "ungrouped.bin", AssetKind::Strings, "jo", diagnostic));
 	TEST_EXPECT(!table.dirty() && table.ignored_lines() == 1 && table.rewrite_need() == Document::RewriteNeed::Rewrite);
@@ -388,7 +388,7 @@ int changes_since_save() {
 	TEST_EXPECT(table.save(diagnostic) && table.issues().empty() && table.rewrite_need() == Document::RewriteNeed::None && table.can_redo());
 	std::vector<uint8_t> written;
 	rtxt::File reparsed;
-	TEST_EXPECT(read_file_bytes(dir.file("ungrouped.bin"), written, error) &&
+	TEST_EXPECT(opennova::io::read_file_bytes(dir.file("ungrouped.bin"), written, error) &&
 	            rtxt::parse(written.data(), written.size(), reparsed, error) && reparsed.is_grouped());
 	return 0;
 }
@@ -409,7 +409,7 @@ int section_names_and_moves() {
 	editor_test::create_missing_files(session);
 	const std::vector<uint8_t> bytes = minted_table();
 	std::string error;
-	TEST_EXPECT(write_file_atomic(session.view().project.root + "/strings/table.bin", bytes.data(), bytes.size(), error));
+	TEST_EXPECT(opennova::io::write_file_atomic(session.view().project.root + "/strings/table.bin", bytes.data(), bytes.size(), error));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("table.bin"));
 	auto *document = dynamic_cast<StringsDocument *>(session.document_for("table.bin"));

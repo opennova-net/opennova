@@ -32,7 +32,7 @@ FileCard::Sound decode_sound(const std::string &file, const AssetEntry &entry) {
 		return sound;
 	}
 	std::vector<uint8_t> bytes;
-	if (!read_file_bytes(file, bytes, sound.error)) return sound;
+	if (!io::read_file_bytes(file, bytes, sound.error)) return sound;
 	// What the game's loader makes of it, and what it holds (the sound lane: import/wave_source.h).
 	const WaveFacts facts = wave_facts(bytes, kWaveCardBins);
 	sound.plays = facts.retail.plays;

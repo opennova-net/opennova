@@ -137,7 +137,7 @@ static int test_byte_identity() {
 
 static int test_the_shipped_sheet(const std::string &fixture) {
 	std::string src, message;
-	TEST_EXPECT(read_file_text(fixture, src, message));
+	TEST_EXPECT(opennova::io::read_file_text(fixture, src, message));
 	editor_test::TempProjectDir dir("opennova_styles_retail");
 	MnsDocument document;
 	TEST_EXPECT(load(document, dir, src));
@@ -379,7 +379,7 @@ static int test_validation() {
 	TEST_EXPECT(!styles->dirty() && styles->wrote_file());
 	TEST_EXPECT(!has_code(view.findings.diagnostics, "style.line_ending"));
 	std::string written, message;
-	TEST_EXPECT(read_file_text(dir.file("project") + "/" + brand_path, written, message) && written == "A x\\ y\r\nB 3\r\n");
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("project") + "/" + brand_path, written, message) && written == "A x\\ y\r\nB 3\r\n");
 	const opennova::mns::EvaluationResult evaluated = styles->native().evaluate();
 	TEST_EXPECT(evaluated.success && !evaluated.hangs && evaluated.sheet.get("B") == "3");
 	TEST_EXPECT(opennova::mns::Document::parse(written).evaluate().sheet.variables == evaluated.sheet.variables);
@@ -410,7 +410,7 @@ static int test_validation() {
 	TEST_EXPECT(session.document_for(note_path) && !session.document_for(note_path)->dirty());
 	editor_test::handle_to_end(session, request::save(note_path));
 	TEST_EXPECT(session.outcome().done() && !line_ending_on(note_path));
-	TEST_EXPECT(read_file_text(dir.file("project") + "/" + note_path, written, message) && written == "N 1\r\nM 2\r\n");
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("project") + "/" + note_path, written, message) && written == "N 1\r\nM 2\r\n");
 	editor_test::handle_to_end(session, request::save(note_path));
 	TEST_EXPECT(session.outcome().done() &&
 			view.activity.status == note_path + " has no changes to save.");
@@ -462,7 +462,7 @@ static int test_style_value_use() {
 	const std::string path = style->relative_path;
 	const std::string sheet = dir.file("project") + "/" + path;
 	std::string text, message;
-	TEST_EXPECT(read_file_text(sheet, text, message));
+	TEST_EXPECT(opennova::io::read_file_text(sheet, text, message));
 	TEST_EXPECT(editor_test::write_text(sheet, text + "ID_ONLY ADD\r\nTEXT_ONLY FACE\r\nPAINT FF102030\r\nSPARE 30\r\n"));
 	const std::string window = "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM></POSITION>\r\n";
 	TEST_EXPECT(editor_test::write_text(

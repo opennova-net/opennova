@@ -2092,19 +2092,19 @@ static int test_follow_reads() {
 	const PreviewFollow::Key key;
 	PreviewFollow follow;
 	follow.show(key, 7);
-	follow.built(FileStamps());
+	follow.built(opennova::FileStamps());
 	TEST_EXPECT(follow.follow(key, false, files, 7) == PreviewFollow::Found::Same);
 	// The texture read at stamp 1 by a unit, then written again (2), the generation moving to 8 before
 	// the device reported its read: compared once reported, though the generation stands at 8.
 	files.stamps[0].second = 2;
 	TEST_EXPECT(follow.follow(key, false, files, 8) == PreviewFollow::Found::Same);
-	FileStamps read;
+	opennova::FileStamps read;
 	read.note("wall.tga", 1);
 	follow.read(read);
 	TEST_EXPECT(follow.files_moved(files, 8));
 	TEST_EXPECT(follow.follow(key, false, files, 8) == PreviewFollow::Found::Files);
 	// Made again over the file as it stands: read at 2, compared once, then nothing until it moves.
-	follow.built(FileStamps());
+	follow.built(opennova::FileStamps());
 	read.clear();
 	read.note("wall.tga", 2);
 	follow.read(read);
