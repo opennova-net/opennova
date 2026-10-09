@@ -38,6 +38,7 @@
 #include <editor/session/view/view_events.h>
 #include <editor/session/workspace_parts.h>
 #include <formats/cpt/trngen/heightmap_depth.h>
+#include <runtime/renderer/material_texture.h>
 #include <runtime/terrain/terrain_map_source.h>
 
 namespace fs = std::filesystem;
@@ -505,7 +506,7 @@ void ImportController::store_as_dds(const EditorRequest &request) {
 	const AssetEntry *entry = view_.project.scan->at_path(request.path);
 	if (!entry) entry = view_.project.scan->find(basename_of(request.path));
 	if (entry && view_.documents.texture_uses) {
-		const std::string dds = utf8_of(path_of(entry->logical_name).stem()) + ".dds";
+		const std::string dds = renderer::material_dds_sibling(entry->logical_name);
 		for (const TextureUse &use : view_.documents.texture_uses->uses_of(view_, entry->relative_path))
 			if (!use.known() || !texture_use_opens(use, dds))
 				reads_tga.push_back(use.words.empty() ? std::string("A use of it") : use.words);

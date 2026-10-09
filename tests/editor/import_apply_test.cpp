@@ -1158,7 +1158,7 @@ static int test_apply_retail_expansion() {
 		            (row.source.as.empty() ? row.name == file->member : row.source.as == row.name));
 		if (!file || !file->loose_path.empty()) continue;
 		std::vector<uint8_t> planned, served;
-		TEST_EXPECT(origin.read(*file, planned) && read_served(game, file->member, served) && planned == served);
+		TEST_EXPECT(origin.read(*file, planned) && vfs_read_served(game, file->member, served) && planned == served);
 		++checked;
 		own += row.source.as.empty() ? 0 : 1;
 		expansion_layer += file->layer == InstallFile::Layer::Expansion ? 1 : 0;

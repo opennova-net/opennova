@@ -13,6 +13,7 @@
 #include <imgui.h>
 
 #include <base/io/json.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
 #include <editor/documents/animation_document.h>
@@ -871,12 +872,12 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 			ui_kit::tooltip("The animation maps the items using this model play on it. Open one to play its clips here.");
 			if (ImGui::BeginPopup("animations")) {
 				for (const ModelAnimation &played : maps) {
-					const std::string name = played.map.substr(played.map.find_last_of('/') + 1);
+					const std::string name = io::utf8_file_name(played.map);
 					const std::string line = name + "  (" + played.record + (played.via.empty() ? "" : ", " + played.via) + ")";
 					if (ImGui::Selectable(line.c_str())) {
 						window_requests::go_to_file(workspace, played.map);
 						// On this model: chosen where the map's own pairing takes another item's model.
-						const std::string here = model.path().substr(model.path().find_last_of('/') + 1);
+						const std::string here = io::utf8_file_name(model.path());
 						const PreviewRig paired = resolve_preview_rig(*view.findings.graph, *view.project.scan, name,
 						                                              AssetKind::AnimationMap, std::string());
 						if (!strutil::iequals(paired.model, here)) {
@@ -971,7 +972,7 @@ void ModelViewportView::Tools::damage(Workspace &workspace, const ModelViewport 
 		if (ImGui::RadioButton("##play", is_chosen)) options.damage.item = use.item;
 		ui_kit::tooltip("Play this item's death.");
 		ImGui::SameLine();
-		const std::string line = use.item + " (" + use.file.substr(use.file.find_last_of('/') + 1) + ") " + as;
+		const std::string line = use.item + " (" + io::utf8_file_name(use.file) + ") " + as;
 		if (ImGui::Selectable((ui_kit::fit(line, ImGui::GetContentRegionAvail().x) + "###use").c_str()) && use.edge &&
 		    view.project.scan)
 			window_requests::go_to(workspace, usage_target(*view.project.scan, *use.edge));
