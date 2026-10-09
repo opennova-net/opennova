@@ -1008,6 +1008,28 @@ bool check_server_command_gates() {
 	if (!expect(!out.handled && !out.config_changed && peer.ctx.config.multiplayer_reset == 7,
 			"SetMPReset without its argument is the no-op tail"))
 		return false;
+	// The numbers are the CRT atol's, 32-bit on every host: a value past the int32 range
+	// saturates (an LP64 strtol narrowed "4294967298" to slot 2 and "4294967296" to 0), and an
+	// index past the slot capacity is no slot rather than a byte that wraps onto one.
+	// [orig: _atol @0x76AB0A; PlayerState_GetByIndex @0x500850..0x500861]
+	HostFixture wide(2, 1);
+	out = inmatch::Server_ExecuteServerCommand(wide.ctx, &wide.world, "PuntPlayer", "ByIndex",
+			{"4294967298"});
+	if (!expect(!out.handled && !wide.conn(0).host_disconnect_sent && !wide.conn(1).host_disconnect_sent,
+			"PuntPlayerByIndex 4294967298 saturates to INT32_MAX and punts nobody"))
+		return false;
+	out = inmatch::Server_ExecuteServerCommand(wide.ctx, &wide.world, "PuntPlayer", "ByIndex", {"258"});
+	if (!expect(!out.handled && !wide.conn(1).host_disconnect_sent,
+			"PuntPlayerByIndex 258 is past the slot capacity and does not wrap onto slot 2"))
+		return false;
+	out = inmatch::Server_ExecuteServerCommand(wide.ctx, &wide.world, "SetMPReset", "", {"4294967296"});
+	if (!expect(out.handled && wide.ctx.config.multiplayer_reset == INT32_MAX,
+			"SetMPReset 4294967296 saturates to INT32_MAX, a nonzero mpreset"))
+		return false;
+	out = inmatch::Server_ExecuteServerCommand(wide.ctx, &wide.world, "SetMPReset", "", {"-4294967296"});
+	if (!expect(out.handled && wide.ctx.config.multiplayer_reset == INT32_MIN,
+			"SetMPReset -4294967296 saturates to INT32_MIN"))
+		return false;
 	// The string verbs' token gate holds under the hosting gate too.
 	HostFixture host(2, 1);
 	out = inmatch::Server_ExecuteServerCommand(host.ctx, &host.world, "SetServerName", "", {});

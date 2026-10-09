@@ -25,10 +25,16 @@ namespace opennova::inmatch {
 // is_authority and ctx+0x68; is_in_session here); the player-targeted verbs
 // and ChangeTeam / SwapTeam also need the player table (a World here); a verb
 // that reads an argument it cannot default needs its token; SetMPReset needs
-// only its argument, so it runs on any receiver. The World-acting verbs
+// only its argument, so it runs on any receiver this executor is handed. The
+// shells hand it only a hosting context, which stays a residual: the game's
+// Simulation::execute_server_command needs a host context and opennova-serve's
+// ServeListing::on_command drops a command before its match binds, where
+// retail would still store and save a SetMPReset. The World-acting verbs
 // retail leaves off the player-table gate (Cycle / EndMission / GameOver,
 // Earthquake, Lightning, TimeOfDay) still need a World to act on
-// (docs/net/novaworld-net-re.md D-NET-383). A targeted verb
+// (docs/net/novaworld-net-re.md D-NET-383). Numbers are the CRT atol's, 32-bit
+// saturating on every host, and an index past the slot capacity is no slot
+// (D-NET-387). A targeted verb
 // resolves its slot ByIndex (atol -> roster slot), ByIpAndPort ("a.b.c.d:port"
 // against the connection's UDP source), ByName ("*NN" -> slot NN, else the
 // unique case-insensitive callsign) or ByPCID (the slot's entity type name —
@@ -43,8 +49,10 @@ namespace opennova::inmatch {
 // Lightning (the flash + the S2C 0x24 "SETFLASH1 16" text command),
 // TimeOfDay (HHMM), SetServerName / SetServerMsg / SetMPReset (config;
 // config_changed asks the shell to save game.cfg and republish the NovaWorld
-// HostSetup / Host vars), ChangeTeam / SwapTeam (the team 1 <-> 2 swap through
-// Server_ChangeEntityTeam, then the "Changing team...." chat to the slot).
+// HostSetup / Host vars; retail's next session create exits the process on a
+// nonzero mpreset, which nothing here reads yet, D-NET-385), ChangeTeam /
+// SwapTeam (the team 1 <-> 2 swap through Server_ChangeEntityTeam, then the
+// "Changing team...." chat to the slot).
 // ReloadPlayer (Entity_UpdateWeaponOverlayFrameState) and DisarmPlayer are
 // not modeled on this host and return handled = false.
 // [orig: the ServerCommand handler CNapiGameSession_HandleServerCommand @0x4D22F0 —

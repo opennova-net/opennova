@@ -1,5 +1,6 @@
 #include <runtime/inmatch/server_admin_command.h>
 
+#include <base/io/crt_ftol.h>        // retail_atol
 #include <base/io/strutil.h>
 #include <net/npwire/ingame_decode.h>   // ChatBroadcast
 #include <net/npwire/ingame_encode.h>   // encode_chat_broadcast
@@ -17,7 +18,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstdlib>
 #include <string>
 #include <string_view>
 
@@ -33,9 +33,13 @@ constexpr uint8_t kNoSenderSlot = 0xFF;
 
 bool ieq(std::string_view a, std::string_view b) { return strutil::iequals(a, b); }
 
-// The CRT atol: base 10, leading whitespace and sign, 0 when nothing parses.
+// The CRT atol as the game links it: base 10, leading whitespace and sign, 0
+// when nothing parses, and a value past the int32 range saturating on every
+// host (an LP64 strtol read 64 bits and the narrowing cast wrapped, so
+// "4294967298" was 2; docs/net/novaworld-net-re.md D-NET-387).
+// [orig: _atol @0x76AB0A = strtol(s, NULL, 10) on a 32-bit long]
 int32_t atol_token(const std::string &token) {
-	return static_cast<int32_t>(std::strtol(token.c_str(), nullptr, 10));
+	return io::retail_atol(token.c_str());
 }
 
 // Player-slot state 6: an added player still in the match with its entity.
@@ -51,8 +55,12 @@ bool slot_is_local(const NapiNPConnection &conn) {
 	       conn.link.mode == replication::TransportMode::Loopback;
 }
 
+// PlayerState_GetByIndex: an index outside [0, capacity) is no slot, so a
+// large one never wraps onto a low slot through the byte compare below
+// (D-NET-387) [orig: @0x500850..0x500861].
 NapiNPConnection *slot_by_index(NapiNPServerCtx &ctx, int32_t index) {
-	if (index < 0) return nullptr;
+	if (index < 0 || index >= static_cast<int32_t>(ctx.config.total_player_slot_capacity()))
+		return nullptr;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.phase < ConnectionPhase::PlayerAdded || conn.phase >= ConnectionPhase::Goodbye)
 			continue;
@@ -195,10 +203,12 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 	// - the player table (dword_24C0CA0; the World here), only the
 	//   player-targeted verbs and ChangeTeam / SwapTeam;
 	// - the token count, every verb that reads an argument it cannot default.
-	// SetMPReset tests the token count alone, so it runs on any receiver.
-	// The verbs that act on the World without retail's player-table gate
-	// (Cycle / EndMission / GameOver, Earthquake, Lightning, TimeOfDay) need
-	// one to act on here: retail's globals they write always exist.
+	// SetMPReset tests the token count alone, so it runs on any receiver this
+	// executor is handed (the shells hand it only a hosting context: a
+	// residual of D-NET-383). The verbs that act on the World without
+	// retail's player-table gate (Cycle / EndMission / GameOver, Earthquake,
+	// Lightning, TimeOfDay) need one to act on here: retail's globals they
+	// write always exist.
 	// [orig: PuntPlayer @0x4D23C0..0x4D23E7, TextChatPlayer @0x4D263E..0x4D2665,
 	//  CmdEchoPlayer @0x4D2785..0x4D27AC, KillPlayer @0x4D28CC..0x4D28F3,
 	//  ReloadPlayer @0x4D2E65..0x4D2E8C, DisarmPlayer @0x4D2FAF..0x4D2FD6,
@@ -211,7 +221,10 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 	const bool hosting = ctx.is_authority != 0 && ctx.is_in_session != 0;
 	if (ieq(verb, "SetMPReset")) {
 		// atol of the argument into the config, then Game_SaveConfig
-		// [orig: @0x4D2E1B..0x4D2E2D].
+		// [orig: @0x4D2E1B..0x4D2E2D]. Retail's one reader of the word exits
+		// the process at the next session create when it is nonzero, which
+		// this host does not port yet: nothing reads multiplayer_reset
+		// (D-NET-385) [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0].
 		if (args.empty()) return outcome;
 		outcome.handled = true;
 		outcome.config_changed = true;
