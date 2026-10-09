@@ -2,6 +2,7 @@
 
 #include <filesystem>
 
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <editor/project/project_files.h>
 
@@ -22,7 +23,7 @@ std::string base_project_root(const std::string &project_root, const ProjectExpa
 	if (!expansion.on_base_project()) return std::string();
 	fs::path base = path_of(expansion.base_project);
 	if (base.is_relative()) base = path_of(project_root) / base;
-	return without_trailing_separator(utf8_of(base.lexically_normal()));
+	return io::without_trailing_separator(utf8_of(base.lexically_normal()));
 }
 
 bool base_project_game_dir(const std::string &project_root, const ProjectExpansion &expansion,

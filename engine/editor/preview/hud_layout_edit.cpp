@@ -305,7 +305,7 @@ std::vector<HudField> hud_element_fields(HudElement element, const def::DefHudPo
 	for (const char *key : row->colours) {
 		std::vector<std::string> values;
 		if (!def::hudpos_key_values(hud, key, "", values)) continue;
-		const bool argb = !strutil::iequals(key, "HUD_TEXTCOLOR") && !strutil::iequals(key, "WEAPON_TEXTCOLOR");
+		const bool argb = def::hudpos_color_channels(key) == 4;
 		static const char *const kArgb[] = { "a", "r", "g", "b" };
 		static const char *const kRgb[] = { "r", "g", "b" };
 		const size_t channels = argb ? 4 : 3;
@@ -560,8 +560,7 @@ bool hud_field_change(HudElement element, const def::DefHudPosDef &hud, const st
 			error = field + " is a file's name, one the tokenizer reads whole (no quote, no line end).";
 			return false;
 		}
-		const bool quoted = value.find_first_of(" ,\t;") != std::string::npos || value.find("//") != std::string::npos;
-		out.value = quoted ? "\"" + value + "\"" : value;
+		out.value = def::hudpos_name_token(value);
 		return true;
 	}
 	}

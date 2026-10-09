@@ -112,9 +112,6 @@ struct ProjectPaths {
 inline constexpr const char *kExportStagingSuffix = ".tmp";
 inline constexpr const char *kExportPreviousSuffix = ".old";
 
-// A folder path with no trailing separator (`C:/x/mod/` is `C:/x/mod`), a root kept whole.
-std::string without_trailing_separator(const std::string &dir);
-
 // The cache directory with its self-ignore file (`.opennova/.gitignore` = `*`). The
 // file ignores itself too, so a clone never has it: whatever writes under the cache
 // (project creation, the import pass, the build) comes through here first, and the

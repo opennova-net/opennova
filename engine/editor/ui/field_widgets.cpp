@@ -263,10 +263,8 @@ Edited swatch(FieldColor color, Value &value) {
 		                 float(word & 0xFF) / 255.0f, float((word >> 24) & 0xFF) / 255.0f};
 		if (ImGui::ColorEdit4("##swatch", rgba,
 		                      ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_AlphaPreviewHalf)) {
-			char text[16];
-			std::snprintf(text, sizeof(text), "%02X%02X%02X%02X", channel(rgba[3]), channel(rgba[0]), channel(rgba[1]),
-			              channel(rgba[2]));
-			value = std::string(text);
+			value = mnu::color_text((uint32_t(channel(rgba[3])) << 24) | (uint32_t(channel(rgba[0])) << 16) |
+			                        (uint32_t(channel(rgba[1])) << 8) | uint32_t(channel(rgba[2])));
 			out.changed = true;
 		}
 	} else {
