@@ -26,15 +26,10 @@ struct EffectPlayOptions {
 // The spawn pose of an effect played alone: at the origin with no orientation, which the game's
 // descriptor spawn hands its group as a zero vector, so every EMITVECTOR member emits around world +Y
 // (a terrain or water impact's case [orig: CEffectWorld_SpawnEmitterAtPosition @ 0x5F6E52..0x5F6E5C ->
-// CEffectEmitter_SetOrientationFromDirection @ 0x5E5D51]; the device's EffectWorld::descriptor_pose).
+// CEffectEmitter_SetOrientationFromDirection @ 0x5E5D51]; particle::descriptor_pose at the origin). The
+// other spawns' poses are the engine's own (runtime/particle/effect_scene.h): particle::forward_pose, an
+// attached spawn's, and particle::descriptor_pose, a descriptor's, each in the preview's space.
 particle::EffectPose effect_play_pose();
-// The poses the game's spawns hand the effect scene, as the device's EffectWorld makes them (ADR 0046
-// DI-21, a definition's picture): `forward_pose`, an attached spawn's (an item's particle slot at its user
-// point, along the point's direction; a zero direction keeps the identity basis), and `descriptor_pose`, a
-// descriptor's (a death bank's effect; a zero orientation emits around +Y, effect_play_pose's case). Both at
-// `at`, in the preview's space (the device's).
-particle::EffectPose effect_forward_pose(const particle::Vec3 &at, const particle::Vec3 &forward);
-particle::EffectPose effect_descriptor_pose(const particle::Vec3 &at, const particle::Vec3 &orientation);
 
 // One effect played on the preview clock through the engine's own effect scene (ADR 0046 DI-14): the
 // scene opened over the effect's closure (particle::effect_closure), the effect spawned at tick 0 of

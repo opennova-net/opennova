@@ -1,8 +1,7 @@
 // DI-14 (ADR 0046, the deep-integration plan's particle effect preview): a particle file's effect played
 // through the engine's own effect scene (the reader's places, each effect's block and its id's place, are
-// formats/particle's: tests/particle/particle_effect_places_test). The closure (runtime/particle/effect_closure): the effect the catalog registers first,
-// its members all or nothing, its child chains, every table, and a scene over it alone spawning what the
-// whole catalog spawns, particle for particle; the stock effect for an unknown name. The playback
+// formats/particle's: tests/particle/particle_effect_places_test; the closure's, runtime/particle/effect_closure,
+// tests/particle/particle_effect_closure_test, with its retail leg over the install's catalog). The playback
 // (preview/effect_playback): spawned at tick 0, stepped a tick at a time (one call or many alike), spawned
 // again at the tick it dies while it loops and left dead when it does not, a jump spawning it pre-aged
 // (bounded by the engine's catch-up), the wind. The particle type (documents/particle_type): the
@@ -15,9 +14,7 @@
 // the file lacks, a Go to of an effect's name opening the text at its id (the graph's symbol, read from
 // the open document too) and the preview following it, an edit reopening the scene with its age kept, a
 // file the reader stops in, and a graphic the device read moving. The canvas: an orbit, a pan, the
-// wheel and F each one SetViewport of its camera; the frame and replay commands. The retail leg
-// (OPENNOVA_JO_DIR): every effect the install's catalog defines spawns from its closure exactly as from
-// the whole catalog.
+// wheel and F each one SetViewport of its camera; the frame and replay commands.
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -26,8 +23,6 @@
 #include <vector>
 
 #include <base/io/json.h>
-#include <base/resource_index/resource_index.h>
-#include <editor/assets/install_view.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/particle_type.h>
 #include <editor/graph/asset_graph.h>
@@ -49,7 +44,6 @@
 #include <runtime/particle/effect_closure.h>
 #include <runtime/particle/effect_scene.h>
 
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
@@ -101,92 +95,6 @@ particle::EffectCatalogDocument document(const std::string &source, const std::s
 	out.source = source;
 	out.file = parsed(text);
 	return out;
-}
-
-// What a scene holds after `effect` spawned at the play pose and ran `ticks` game ticks: its particles'
-// positions, flattened, and its live counts.
-struct Ran {
-	std::vector<float> positions;
-	particle::EffectLiveCounts counts;
-	particle::EffectSpawnStatus status = particle::EffectSpawnStatus::InvalidHandle;
-};
-Ran run(particle::EffectScene &scene, const std::string &effect, int ticks) {
-	Ran out;
-	scene.reset_runtime_state();
-	particle::EffectSpawnRequest request;
-	request.effect = scene.intern(effect);
-	request.pose = effect_play_pose();
-	out.status = scene.spawn(request).status;
-	particle::EffectAdvanceRequest step;
-	step.delta_seconds = 1.0f / 62.5f;
-	for (int i = 0; i < ticks; ++i) scene.advance_simulation(step);
-	particle::ParticleFrameSnapshot snapshot;
-	scene.write_snapshot(snapshot);
-	for (const particle::Particle &p : snapshot.particles) {
-		out.positions.push_back(p.position.x);
-		out.positions.push_back(p.position.y);
-		out.positions.push_back(p.position.z);
-	}
-	out.counts = scene.live_counts();
-	return out;
-}
-
-bool same_run(const Ran &a, const Ran &b) {
-	return a.status == b.status && a.positions == b.positions && a.counts.group_count == b.counts.group_count &&
-	       a.counts.emitter_count == b.counts.emitter_count && a.counts.particle_count == b.counts.particle_count;
-}
-
-// --- the closure ---------------------------------------------------------------------------------------
-
-int test_closure() {
-	// Two documents in load order: the first defines Burst (two members, the first with a child) and a
-	// table; the second defines Burst again (passed over), the members and the child, a table of the same
-	// name (the first wins for a plain curve), and a particle nothing names.
-	const std::vector<particle::EffectCatalogDocument> documents = {
-	        document("a.ptl", effect_text("Burst", "Spark, Smoke") + particle_text("Spark", 0.2f, 40.0f, 0.4f, "", "Ember") +
-	                                  table_text("grow", 200)),
-	        document("b.ptl", effect_text("burst", "Smoke") + particle_text("SMOKE", 0.3f, 20.0f, 0.6f) +
-	                                  particle_text("Ember", 0.1f, 10.0f, 0.2f) + particle_text("Unused", 1.0f, 1.0f, 1.0f) +
-	                                  table_text("grow", 100) + effect_text("Broken", "Spark, Missing") +
-	                                  effect_text("stockeffect", "Smoke")),
-	};
-	const particle::EffectClosure burst = particle::effect_closure(documents, "BURST");
-	TEST_EXPECT(burst.found && !burst.stock && burst.effect == "Burst" && burst.source == "a.ptl" && burst.shadowed == 1 &&
-	            burst.members == std::vector<std::string>({"Spark", "Smoke"}) && burst.unresolved_member == 2 && burst.spawns());
-	TEST_EXPECT(burst.definitions.size() == 3 && burst.definitions[0].id == "Spark" && burst.definitions[1].id == "Ember" &&
-	            burst.definitions[1].child && burst.definitions[1].member == 0 && burst.definitions[2].id == "SMOKE" &&
-	            burst.definitions[2].source == "b.ptl" && !burst.definitions[2].child);
-	TEST_EXPECT(burst.config.documents.size() == 1 && burst.config.documents[0].file.particles.size() == 3 &&
-	            burst.config.documents[0].file.tables.size() == 2 && burst.config.documents[0].file.effects.size() == 1);
-	// A scene over the closure spawns what the whole catalog spawns, particle for particle.
-	particle::EffectSceneConfig whole;
-	whole.documents = documents;
-	particle::EffectScene full, alone;
-	full.open(whole);
-	alone.open(burst.config);
-	for (const int ticks : {0, 1, 7, 30, 90}) {
-		const Ran a = run(full, "Burst", ticks), b = run(alone, "Burst", ticks);
-		TEST_EXPECT(a.status == particle::EffectSpawnStatus::Spawned && same_run(a, b));
-		if (ticks == 7) TEST_EXPECT(a.counts.emitter_count == 3 && a.counts.particle_count > 0);
-	}
-	// One member no particle registers: all or nothing, nothing spawns from either.
-	const particle::EffectClosure broken = particle::effect_closure(documents, "Broken");
-	TEST_EXPECT(broken.found && broken.unresolved_member == 1 && !broken.spawns() && broken.definitions.empty());
-	particle::EffectScene broken_scene;
-	broken_scene.open(broken.config);
-	TEST_EXPECT(run(full, "Broken", 5).status == particle::EffectSpawnStatus::EmptyEffect &&
-	            run(broken_scene, "Broken", 5).status == particle::EffectSpawnStatus::EmptyEffect);
-	// An unknown name: the stock effect stands in, as the intern clones it.
-	const particle::EffectClosure unknown = particle::effect_closure(documents, "Effect_NoSuch");
-	TEST_EXPECT(!unknown.found && unknown.stock && unknown.effect == "stockeffect" && unknown.spawns());
-	particle::EffectScene stock_scene;
-	stock_scene.open(unknown.config);
-	TEST_EXPECT(same_run(run(full, "Effect_NoSuch", 20), run(stock_scene, "Effect_NoSuch", 20)));
-	// No stockeffect either: nothing at all.
-	const particle::EffectClosure none = particle::effect_closure({documents[0]}, "Effect_NoSuch");
-	TEST_EXPECT(!none.found && !none.stock && !none.spawns() && none.config.documents.empty());
-	std::printf("closure: Burst from a.ptl (one shadowed), 3 definitions, alike to the whole catalog at 5 ticks\n");
-	return 0;
 }
 
 // --- the playback --------------------------------------------------------------------------------------
@@ -518,78 +426,14 @@ int test_canvas() {
 	return 0;
 }
 
-// --- the retail leg ----------------------------------------------------------------------------------------------
-
-// Every effect the install's catalog defines spawns from its closure exactly as from the whole catalog.
-int test_retail() {
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (the install's particle files)");
-		return 0;
-	}
-	ProjectDocument project;
-	project.target_game = "jo";
-	InstallView install_view;
-	std::string why;
-	TEST_EXPECT(install_view.open(install_spec(install, project), why));
-	const opennova::Vfs &mount = install_view.vfs();
-	std::vector<std::string> names;
-	bool german = false;
-	for (const opennova::VfsFileLocation &location : mount.list_files()) {
-		names.push_back(location.logical_name);
-		german = german || opennova::strutil::iequals(location.logical_name, "fgn2.bin");
-	}
-	const std::vector<std::string> order = opennova::effect_file_order(names, german ? ".ptg" : ".ptu");
-	std::vector<particle::EffectCatalogDocument> documents;
-	for (const std::string &name : order) {
-		std::vector<uint8_t> bytes;
-		TEST_EXPECT(mount.read_file(name, bytes));
-		particle::EffectCatalogDocument read;
-		read.source = name;
-		particle::ParseError error;
-		if (!particle::load_particles_from_buffer(reinterpret_cast<const char *>(bytes.data()), bytes.size(), read.file, error)) {
-			std::printf("retail: %s does not read (%s, line %d)\n", name.c_str(), error.message.c_str(), error.line);
-			continue;
-		}
-		documents.push_back(std::move(read));
-	}
-	particle::EffectSceneConfig whole;
-	whole.documents = documents;
-	particle::EffectScene full;
-	full.open(whole);
-	size_t effects = 0, spawned = 0;
-	std::vector<std::string> seen;
-	for (const particle::EffectCatalogDocument &read : documents)
-		for (const particle::EffectDef &effect : read.file.effects) {
-			const std::string key = opennova::strutil::to_lower(effect.id);
-			if (effect.id.empty() || std::find(seen.begin(), seen.end(), key) != seen.end()) continue;
-			seen.push_back(key);
-			const particle::EffectClosure closure = particle::effect_closure(documents, effect.id);
-			particle::EffectScene alone;
-			alone.open(closure.config);
-			const Ran a = run(full, effect.id, 25), b = run(alone, effect.id, 25);
-			if (!same_run(a, b)) std::fprintf(stderr, "retail: %s differs alone\n", effect.id.c_str());
-			TEST_EXPECT(same_run(a, b) && closure.spawns() == (a.status == particle::EffectSpawnStatus::Spawned));
-			++effects;
-			spawned += a.status == particle::EffectSpawnStatus::Spawned;
-		}
-	TEST_EXPECT(documents.size() > 50 && effects > 100);
-	std::printf("retail: %zu particle files, %zu effects, %zu spawn, each alike from its closure\n", documents.size(),
-	            effects, spawned);
-	return 0;
-}
-
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
-	if (test_closure() != 0) return 1;
+int main() {
 	if (test_playback() != 0) return 1;
 	if (test_particle_type() != 0) return 1;
 	if (test_kind() != 0) return 1;
 	if (test_session() != 0) return 1;
 	if (test_canvas() != 0) return 1;
-	if (test_retail() != 0) return 1;
 	std::printf("effect_viewport: ok\n");
 	return 0;
 }
