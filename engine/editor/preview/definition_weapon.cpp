@@ -58,11 +58,8 @@ const char *tag_name(int tag) {
 // it [orig: AnimMap_LoadAdmFile @0x40CC40]); "" none.
 std::string adm_file(const AssetScan *scan, const std::string &name) {
 	if (!scan || name.empty()) return std::string();
-	std::string base = file_of(name);
-	const size_t dot = base.find_last_of('.');
-	if (dot != std::string::npos) base.resize(dot);
-	const AssetEntry *entry = scan->find(base + ".adm");
-	if (!entry) entry = scan->find(anim::adm_name_or_default(base + ".adm", false));
+	const std::string file = anim::adm_load_name(file_of(name), [&](const std::string &adm) { return scan->find(adm) != nullptr; });
+	const AssetEntry *entry = scan->find(file);
 	return entry ? entry->logical_name : std::string();
 }
 
