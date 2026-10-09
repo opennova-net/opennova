@@ -635,8 +635,7 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 		// A weapon's first-person clip (DI-13): nothing reads its events, so a press plays nothing.
 		const bool audible = !plays.empty() && !model.first_person().active();
 		const bool shoots = model.clip_fire().armed() && !model.first_person().active() &&
-		                    (under->trigger & (anim::kAnimEventFirePrimary | anim::kAnimEventFireSecondary |
-		                                       anim::kAnimEventFireMarker3)) != 0;
+		                    (under->trigger & anim::kAnimEventFireMask) != 0;
 		ui_kit::tooltip("Frame " + std::to_string(under->frame) + " (" + seconds_text(under->tick / io::kTickHz) +
 		                "): " + animation_trigger_words(under->trigger) + "." + plays + fires +
 		                (shoots    ? "\nClick to go there and fire it once."
@@ -693,8 +692,7 @@ void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewpor
 	// The clip's fire events (DI-24): how many shots the run fired to the clock, or why none fires.
 	bool fire_marks = false;
 	for (const PreviewClipEvent &event : model.clip_events())
-		fire_marks = fire_marks || (event.trigger & (anim::kAnimEventFirePrimary | anim::kAnimEventFireSecondary |
-		                                             anim::kAnimEventFireMarker3)) != 0;
+		fire_marks = fire_marks || (event.trigger & anim::kAnimEventFireMask) != 0;
 	if (fire_marks && !model.first_person().active()) {
 		const ClipFire &clip_fire = model.clip_fire();
 		const std::string shots = clip_fire.armed()
@@ -738,9 +736,9 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 			const size_t parts = shown.lods[i].render_object_count;
 			const std::string text = "LOD " + std::to_string(i) + ": " + model_lod_range(thresholds, i) + ", " +
 			                         (parts ? std::to_string(parts) + (parts == 1 ? " part" : " parts") : std::string("no parts"));
-			if (!model_lod_drawn(thresholds, i)) ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+			if (!renderer::object_lod_reachable(thresholds, i)) ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
 			if (ImGui::Selectable(text.c_str(), options.lod == int(i))) options.lod = int(i);
-			if (!model_lod_drawn(thresholds, i)) ImGui::PopStyleColor();
+			if (!renderer::object_lod_reachable(thresholds, i)) ImGui::PopStyleColor();
 		}
 		ImGui::EndCombo();
 	}
