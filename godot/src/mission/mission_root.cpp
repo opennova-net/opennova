@@ -1,5 +1,7 @@
 #include "mission/mission_root.h"
 
+#include <runtime/mission/mission_sidecars.h>
+
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
@@ -15,6 +17,7 @@
 #include "particle/effect_world.h"
 #include "resource_index/launch_flags.h"
 #include "simulation/present_event_records.h"
+#include "util/string_convert.h"
 #include "world/item_effect_director.h"
 
 namespace godot {
@@ -301,7 +304,8 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 			options->get_terrain_til(),
 			options->get_wac_basename(),
 			String(),
-			mission_file_.get_file().get_basename(),
+			// The by-name readers' base: the name cut at its first '.'.
+			opennova::to_gd(opennova::mission::mission_base_name(opennova::to_std(mission_file_))),
 			playable);
 	if (boot_err != OK) {
 		setup_error_ = ERR_CANT_OPEN;

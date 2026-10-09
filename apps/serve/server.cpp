@@ -19,6 +19,7 @@
 #include <runtime/inmatch/map_change.h>
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/server_ban_lists.h>
+#include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/runtime_boot.h>
 
 #include <chrono>
@@ -390,9 +391,10 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 		error = "the mission '" + map_file + "' did not parse: " + parse_error;
 		return false;
 	}
-	std::string basename = map_file;
-	const size_t dot = basename.rfind('.');
-	if (dot != std::string::npos) basename.resize(dot);
+	// The mission's base name as every by-name reader takes it: cut at its
+	// FIRST '.' [orig: Path_ReplaceOrAppendExtension @0x53C780, the scan
+	// @0x53C7C4].
+	const std::string basename = mission::mission_base_name(map_file);
 
 	// The session config: the cfg block's (the published player cap with the
 	// dedicated slot among it), the session game type from the rotation's row

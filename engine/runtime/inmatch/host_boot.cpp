@@ -121,14 +121,17 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	}
 
 	// The mission's placed tiles: one shared array serving the S2C 0x45
-	// stream, the render overlay and the surface walk, read loose-first. A
-	// joiner's are the host's stream, never a same-named local file.
-	// [orig: Terrain_LoadTileInfoFile @0x60A740, the policy force @0x60A74E;
+	// stream, the render overlay and the surface walk. The authority (every
+	// role but a joiner) loads <mission>.til, else the terrain's
+	// polytrn_tileinfo, loose first (mission::read_placed_tiles); a joiner's
+	// are the host's stream, never a same-named local file.
+	// [orig: PolyTrn_LoadTerrainConfig @0x60E6C9..0x60E6E5;
+	//  Terrain_LoadTileInfoFile @0x60A740, the policy force @0x60A74E;
 	//  Terrain_SerializeTiles @0x6080F0]
 	if (request.terrain_til) {
 		boot.terrain_til = std::move(*request.terrain_til);
-	} else if (!basename.empty()) {
-		(void)files.read_loose(basename + ".til", boot.terrain_til);
+	} else if (request.role->kind() != RoleKind::Joiner) {
+		(void)mission::read_placed_tiles(files, basename, request.mission, boot.terrain_til);
 	}
 
 	// The mission text ahead of the kernel: the briefings and location names

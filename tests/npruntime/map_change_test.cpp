@@ -19,6 +19,7 @@
 #include <runtime/inmatch/mission_rotation.h>
 #include <runtime/inmatch/server_admin_command.h>
 #include <runtime/inmatch/session.h>
+#include <runtime/mission/mission_sidecars.h>
 #include <runtime/world/world.h>
 
 #include "common/boot_file_source.h"
@@ -106,7 +107,7 @@ struct Host {
 		const std::string map_file = rotation.list.map_file;
 		inmatch::HostBootRequest r;
 		r.mission = team_mission(map_file == "MAPA.BMS" ? "Map A" : "Map B");
-		r.mission_basename = map_file.substr(0, map_file.rfind('.'));
+		r.mission_basename = mission::mission_base_name(map_file);
 		r.files = test_boot::source_over(&files);
 		r.session = &session;
 		r.role = &role;
