@@ -33,7 +33,7 @@ namespace opennova::editor {
 // expansion's own name are listed under the project's (expansion_files.h): the installed expansion's
 // (<e>.bin, M<e>.*, G<e>.*, <e>L.lwf, <e>.lwf) as <b>.bin, M<b>.*, ...; on the base game its music pairs
 // as M<b>.* and G<b>.*, which the game reads in their place under /exp <b>. The expansion's version
-// text is never listed (a build makes its own), nor the player's own files (assets/player_files.h).
+// text is never listed (a build makes its own), nor the player's own files (gameprofile/player_files.h).
 struct InstallSpec {
 	std::string root;              // the install's folder
 	std::string game;              // the gameprofile code its archives are keyed by

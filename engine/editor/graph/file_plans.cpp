@@ -81,7 +81,7 @@ bool copy_name_free(const ProjectPaths *paths, const AssetScan &scan, const Asse
 			const std::string renamed = renamed_import_output(output.logical_name, file.logical_name, name);
 			// An output its import names whatever the source is called follows no name: plan_duplicate refuses it.
 			if (strutil::iequals(renamed, output.logical_name)) continue;
-			if (!logical_name_fits_archive(renamed)) {
+			if (!pff::logical_name_fits_archive(renamed)) {
 				if (why) *why = "The copy's import output " + renamed + " would not fit the game's archives.";
 				return false;
 			}

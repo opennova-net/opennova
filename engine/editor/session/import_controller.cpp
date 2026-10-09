@@ -120,9 +120,9 @@ void ImportController::preview_install(const EditorRequest &request) {
 	std::vector<ImportChoice> named;
 	std::map<std::string, size_t> by_name; // the install's files by name, the first of each, once (review F7)
 	if (!request.names.empty())
-		for (size_t i = 0; i < sources.size(); ++i) by_name.emplace(normalized_logical_name(sources[i].name()), i);
+		for (size_t i = 0; i < sources.size(); ++i) by_name.emplace(pff::normalized_logical_name(sources[i].name()), i);
 	for (const std::string &name : request.names) {
-		const auto found = by_name.find(normalized_logical_name(name));
+		const auto found = by_name.find(pff::normalized_logical_name(name));
 		if (found == by_name.end()) {
 			if (diagnostics.empty())
 				diagnostics.push_back(make_finding(CoreFinding::ImportNotFound, DiagnosticSeverity::Error,

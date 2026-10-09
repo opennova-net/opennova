@@ -1,7 +1,6 @@
 {
   "_comment": "scripts/lint/orphan_header_check.py: engine/godot-src headers included by nothing outside tests/ and their own unit that are NOT staged policy code. Each entry names why it has no include consumer. The 2026-08-25 census debt was burned down on 2026-08-27 (threedi_compare moved to tests/threedi/, terrain/types.h deleted, serializing_sink.h STAGED with its owner named); never grow this list without a reason that names the consumer.",
   "allow": {
-    "engine/base/gameprofile/player_files.h": "The player's and this machine's own files, which the editor's import never takes and its build never packs (engine/editor/import/import_plan.cpp, assets/asset_import.cpp, assets/install_view.cpp, project_build/build_plan.cpp). Its include consumers are the OpenNova Editor's, on the editor trunk (PR #665); delete this entry when the editor lands.",
     "godot/src/register_types.h": "The GDExtension entry-point declaration: consumed by its own register_types.cpp plus the .gdextension config's entry_symbol resolution at load time - the linker/loader is the consumer, not an #include."
   }
 }
