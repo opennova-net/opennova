@@ -17,6 +17,7 @@
 // preview/definition_viewport) spawns them: the legs of kind "effect" name each effect, where it spawns
 // and its tick.
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -112,7 +113,9 @@ struct DamageModels {
 	bool husk_read = false;  // the husk the game draws read
 	bool piece_read = false; // the piece model read
 	int piece_sections = -1;
-	int dead_points = 0, fire_points = 0, other_points = 0;
+	// The piece model's Dead, Fire and Other bank points, as the mission load reads them
+	// (world::death_effect_banks_of).
+	std::array<world::DeathEffectBank, 3> banks;
 	int kz_points = 0;
 };
 void note_damage_husk(const threedi::Threedi3di3 &husk, DamageModels &models);
