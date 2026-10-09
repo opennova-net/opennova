@@ -129,6 +129,17 @@ int noted() {
 	textlayout::Notes notes;
 	aip::Profile profile = read(text, notes);
 	TEST_EXPECT(profile.type == aip::kTypeGround && profile.rank == 0 && profile.primary.rate_ticks == 15);
+	// The lines the reader reads nothing of, and why.
+	{
+		textlayout::Notes again;
+		std::vector<aip::UnreadLine> unread;
+		aip::parse_profile(reinterpret_cast<const uint8_t *>(text.data()), text.size(), again, &unread);
+		TEST_EXPECT(unread.size() == 3);
+		TEST_EXPECT(unread[0].why == aip::UnreadLine::Why::NoType && unread[0].key == "rank");
+		TEST_EXPECT(unread[1].why == aip::UnreadLine::Why::NoType && unread[1].key == "description");
+		TEST_EXPECT(unread[2].why == aip::UnreadLine::Why::OtherType && unread[2].key == "min_speed" &&
+		            text.compare(unread[2].offset, 9, "min_speed") == 0);
+	}
 	std::string out, error;
 	bool rewritten = true;
 	TEST_EXPECT(aip::write_profile(profile, &notes, out, error, &rewritten) && !rewritten);

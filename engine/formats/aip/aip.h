@@ -142,9 +142,20 @@ struct Profile {
 
 // Line-oriented, whitespace-tokenized, case-insensitive property parser.
 Profile parse_profile(const uint8_t *text, size_t size);
+// A line the reader reads nothing of (none of the walk's skipped lines: no token, or opening '/'): before any
+// `type` (the profile of no type takes no key), under ORGANIC (which takes none), a key only the other type's set
+// holds, or a key no arm has (every shipped file's `description`).
+struct UnreadLine {
+	enum class Why : uint8_t { NoType, Organic, OtherType, Unknown };
+	Why why = Why::Unknown;
+	size_t offset = 0; // the line's first byte
+	std::string key;   // its first token
+};
 // The same parse with the file's layout modeled (`notes` filled: each line the arm that read it, as the
-// writer's entry of its key, or none; the profile's note the file's own record).
-Profile parse_profile(const uint8_t *text, size_t size, textlayout::Notes &notes);
+// writer's entry of its key, or none; the profile's note the file's own record), and, with `unread`, the lines
+// it reads nothing of.
+Profile parse_profile(const uint8_t *text, size_t size, textlayout::Notes &notes,
+                      std::vector<UnreadLine> *unread = nullptr);
 
 // What a key's value is in the file, the unit its arm reads it in [orig: AIProfile_ParseProperty @
 // 0x45DE70's arms, cited per key in aip.cpp].

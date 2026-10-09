@@ -306,7 +306,7 @@ bool records_of(const Profile &profile, textlayout::OutRecord &now, std::string 
 	return true;
 }
 
-Profile parse(const uint8_t *text, size_t size, textlayout::Notes *notes) {
+Profile parse(const uint8_t *text, size_t size, textlayout::Notes *notes, std::vector<UnreadLine> *unread) {
 	// AIProfile_LoadOrFind reads the .aip through File_ParseASCIIFile
 	// (@ 0x45FE45), so the lines and tokens are the shared walk's
 	// (io::for_each_config_line_span: CR LF only, the tokenizer's quotes, commas and
@@ -327,7 +327,21 @@ Profile parse(const uint8_t *text, size_t size, textlayout::Notes *notes) {
 		for (int index = 0; index < line.count; ++index) toks.emplace_back(line.tokens[index]);
 		// A value past the line's count reads the reset token's "".
 		if (toks.size() < 2) toks.emplace_back(line.token(1));
-		if (const KeyRow *row = apply_line(prof, toks)) noter.entry(noter.root(), row->key);
+		const int32_t type = prof.type;
+		if (const KeyRow *row = apply_line(prof, toks)) {
+			noter.entry(noter.root(), row->key);
+			return;
+		}
+		if (!unread) return;
+		UnreadLine line_read;
+		line_read.offset = span.begin;
+		line_read.key = toks[0];
+		const KeyRow *row = key_row(toks[0]);
+		line_read.why = type == 0 ? UnreadLine::Why::NoType
+		                : !row    ? UnreadLine::Why::Unknown
+		                : type == kTypeOrganic ? UnreadLine::Why::Organic
+		                                       : UnreadLine::Why::OtherType;
+		unread->push_back(std::move(line_read));
 	});
 	noter.finish();
 	if (notes) {
@@ -507,9 +521,11 @@ std::vector<std::string> value_words(const KeyRow &row, int32_t type, int32_t va
 	return {word};
 }
 
-Profile parse_profile(const uint8_t *text, size_t size) { return parse(text, size, nullptr); }
+Profile parse_profile(const uint8_t *text, size_t size) { return parse(text, size, nullptr, nullptr); }
 
-Profile parse_profile(const uint8_t *text, size_t size, textlayout::Notes &notes) { return parse(text, size, &notes); }
+Profile parse_profile(const uint8_t *text, size_t size, textlayout::Notes &notes, std::vector<UnreadLine> *unread) {
+	return parse(text, size, &notes, unread);
+}
 
 bool same_profile(const Profile &a, const Profile &b) {
 	const auto same_block = [](const WeaponBlock &x, const WeaponBlock &y) {
