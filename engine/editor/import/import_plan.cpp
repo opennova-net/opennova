@@ -608,7 +608,7 @@ private:
 				                      ReferenceKind::None, resource->name, -1};
 				if (bring(own, resource->name, need)) continue;
 				if (plan_.truncated) return;
-				if (resource->severity != RES_OPTIONAL) not_found(need, expected_asset_kind_for_required_name(resource->name));
+				if (resource->severity != RES_OPTIONAL) not_found(need, file_kind_for_required_name(resource->name));
 			}
 			for (const assets::MissionFixedFile &fixed : assets::mission_fixed_files()) {
 				const ImportNeed need{file, std::string(), "the game, " + fixed.what, ReferenceKind::None, fixed.name, -1};
