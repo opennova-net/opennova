@@ -15,7 +15,7 @@ using io::JsonValue;
 using io::json_number;
 using io::json_string;
 
-constexpr int kParticleModes = 8; // formats/particle BlendMode, Blend to Distort
+constexpr int kParticleModes = particle::kBlendModeCount; // Blend to Distort
 
 std::string percent_words(double share) {
 	char text[32];
