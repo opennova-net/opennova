@@ -252,6 +252,13 @@ target_link_libraries(threedi_collision_3di_test PRIVATE opennova_formats)
 target_include_directories(threedi_collision_3di_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_collision_3di COMMAND threedi_collision_3di_test)
 
+# A collision volume's planes -> its convex solid (threedi_volume_solid.h), on synthetic planes.
+add_executable(threedi_volume_solid_test threedi/volume_solid_test.cpp)
+target_link_libraries(threedi_volume_solid_test PRIVATE opennova_formats)
+target_include_directories(threedi_volume_solid_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(threedi_volume_solid_test PRIVATE cxx_std_17)
+add_test(NAME threedi_volume_solid COMMAND threedi_volume_solid_test)
+
 # The synthetic 3DI model set fixtures/threedi/synth (eleven base models plus
 # the one-edit variants the GUT suite loads), minted through the parity
 # writer from tests/fixtures/minimal_3di_builder.h and byte-compared every run
@@ -2289,6 +2296,14 @@ target_link_libraries(ai_los_test PRIVATE opennova_runtime)
 target_include_directories(ai_los_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(ai_los_test PRIVATE cxx_std_17)
 add_test(NAME ai_los COMMAND ai_los_test)
+
+# The ammo table's shared lookups: the entity-face material cost a round pays
+# to go on through a face (runtime/world/ammo_table.h).
+add_executable(ammo_table_test world/ammo_table_test.cpp)
+target_link_libraries(ammo_table_test PRIVATE opennova_runtime)
+target_include_directories(ammo_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ammo_table_test PRIVATE cxx_std_17)
+add_test(NAME ammo_table COMMAND ammo_table_test)
 
 # The global hit record and the script kills that read it: the BMS kills keep
 # the last recorded round, WAC killSSN zeroes it, items read its section and

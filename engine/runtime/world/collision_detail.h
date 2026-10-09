@@ -84,17 +84,6 @@ inline uint64_t int32_magnitude(int32_t value) {
                      : static_cast<uint64_t>(value);
 }
 
-inline int32_t person_effective_radius(int32_t section, int32_t authored_radius,
-                                int32_t extra_radius) {
-    const int32_t scale = section == 14 ? 65 : 45;
-    int32_t effective =
-            extra_radius + 0xCCC +
-            static_cast<int32_t>(static_cast<int64_t>(scale) * authored_radius / 100);
-    if ((section == 15 || section == 16) && effective > 0x3000)
-        effective = 0x3000;
-    return effective;
-}
-
 // [orig: Math_TransformPointWithTranslation22 @ 0x412f60 — translate THEN rotate:
 // used with the inverse matrix (t = -t_fwd) so local = R^T * (p - t_fwd).]
 inline void transform_translate_then_rotate(const int32_t m[16], const int32_t in[3],

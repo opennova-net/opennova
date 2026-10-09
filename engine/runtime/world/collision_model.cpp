@@ -27,7 +27,7 @@ using namespace detail; // the shared fixed-point helpers, unqualified as before
 void CollisionModel::finalize_sections() {
     has_solid_volume = false;
     for (const CollisionVolume &volume : volumes) {
-        if (volume.type == 1) {
+        if (volume.type == bvol_type::kSolidCB) {
             has_solid_volume = true;
             break;
         }

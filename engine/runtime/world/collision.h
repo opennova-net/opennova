@@ -373,6 +373,7 @@ inline constexpr uint32_t kBlinkWaterOffBit = 0x8; // authored water letter — 
 // docs/world/world-wac-ai-re.md §15.4].
 namespace bvol_type {
 enum : int32_t {
+    kSolidCB = 1,         // the solid lines of sight stop at [orig: @0x413298]
     kContactMarker = 5,   // contact, no force
     kLadderCL = 4,
     kArmoryCA = 6,        // gates weapon.mnu on action 218
@@ -386,6 +387,7 @@ enum : int32_t {
     kDamageHighDH = 16,
     kDamageMediumDM = 17,
     kDamageLowDL = 18,
+    kPlayerCP = 19,       // solid for players, not AI (mask 0x2) [orig: @0x4ae543]
 };
 } // namespace bvol_type
 
@@ -529,6 +531,21 @@ struct RayFaceHit {
 };
 bool collision_raycast_faces(const CollisionTargetView &target, const int32_t start[3],
                              const int32_t end[3], uint32_t ammo_flags, RayFaceHit &out);
+
+// A person section's hit radius (Q16) about its bone: 45 percent of the
+// authored COBJ radius (65 for section 14, the head) plus the fixed 0xCCC floor
+// and the round's own extra radius, sections 15 and 16 capped at 0x3000.
+// [orig: Physics_RaycastAgainstBoneSections @ 0x4e4670]
+inline int32_t person_effective_radius(int32_t section, int32_t authored_radius,
+                                int32_t extra_radius) {
+    const int32_t scale = section == 14 ? 65 : 45;
+    int32_t effective =
+            extra_radius + 0xCCC +
+            static_cast<int32_t>(static_cast<int64_t>(scale) * authored_radius / 100);
+    if ((section == 15 || section == 16) && effective > 0x3000)
+        effective = 0x3000;
+    return effective;
+}
 
 // Person/organic projectile narrow phase: one authored COBJ bound sphere per
 // skeletal section (radius zero still receives retail's fixed 0xCCC floor),

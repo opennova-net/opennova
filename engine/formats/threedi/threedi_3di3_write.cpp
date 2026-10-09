@@ -471,12 +471,7 @@ static int append_material_texture(BufferBuilder *buf, const ThreediMaterialText
 
 static int append_alpha_gen(BufferBuilder *buf, const ThreediAlphaGen *alpha)
 {
-    uint8_t phase_or_reg = 0;
-    if (!threedi_generator_names_register(alpha->style)) {
-        phase_or_reg = float_to_byte(alpha->phase, 256.0f);
-    } else {
-        phase_or_reg = (uint8_t)alpha->reg;
-    }
+    const uint8_t phase_or_reg = threedi_generator_param_byte(alpha->style, alpha->phase, alpha->reg);
     if (buffer_append_u8(buf, alpha->style) != 0 ||
         buffer_append_u8(buf, phase_or_reg) != 0 ||
         buffer_append_scaled_s16(buf, alpha->rate, 256.0f) != 0 ||
@@ -491,7 +486,7 @@ static int append_rgb_gen(BufferBuilder *buf, const ThreediRgbGen *rgb)
 {
     uint8_t block[12] = {0};
     block[0] = rgb->style;
-    block[1] = !threedi_generator_names_register(rgb->style) ? float_to_byte(rgb->phase, 256.0f) : (uint8_t)rgb->reg;
+    block[1] = threedi_generator_param_byte(rgb->style, rgb->phase, rgb->reg);
     uint16_t rate_raw = (uint16_t)round_nearest((double)rgb->rate * 256.0);
     block[2] = (uint8_t)(rate_raw & 0xFFu);
     block[3] = (uint8_t)((rate_raw >> 8) & 0xFFu);
@@ -511,7 +506,7 @@ static int append_rgb_gen(BufferBuilder *buf, const ThreediRgbGen *rgb)
 
 static int append_uv_params(BufferBuilder *buf, const ThreediUvParams *uv)
 {
-    uint8_t phase_or_reg = !threedi_generator_names_register(uv->style) ? float_to_byte(uv->phase, 256.0f) : (uint8_t)uv->reg;
+    const uint8_t phase_or_reg = threedi_generator_param_byte(uv->style, uv->phase, uv->reg);
     if (buffer_append_u8(buf, uv->style) != 0 ||
         buffer_append_u8(buf, phase_or_reg) != 0 ||
         buffer_append_scaled_s16(buf, uv->gen_rate, 256.0f) != 0 ||
