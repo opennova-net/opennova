@@ -189,8 +189,8 @@ void walk_trn(const std::string &text, TrnConfig &out, TrnWalk &walk, bool own, 
 			// counted, not stored [orig: the polytrn_sectors arm @0x60f330,
 			// dword_31BCB30].
 			++walk.seen_sector_rows;
-			if (out.sector_rows < 16) {
-				for (int col = 0; col < 16 && col < out.sector_count; ++col)
+			if (out.sector_rows < kTerrainGridSide) {
+				for (int col = 0; col < kTerrainGridSide && col < out.sector_count; ++col)
 					out.sector_grid[out.sector_rows][col] = io::retail_atol(tokens.token(1 + col));
 				out.sector_rows++;
 			}
@@ -232,34 +232,21 @@ bool finish_trn(TrnConfig &out, TrnWalk &walk, std::string &error) {
 	// Dvxi4_c.trn end on such a block.
 	if (walk.in_foliage && walk.foliage_closed < 4) out.foliage_defs.push_back(foliage_normalize_def(walk.def));
 
-	// The admission gate [orig: Terrain_LoadEnvironmentConfig @0x610940 tail]:
-	// the config is rejected (returns 0) when the colormap (+256), detailmap
-	// (+512) or polydata (+3072) name is empty, when the `polytrn_sectors` row
-	// count (+5960) or `polytrn_sectorcount` (+5956) exceeds 16, or when either
-	// is not a power of two (`((n - 1) & n) != 0`). Its last leg,
+	// The admission gate over the row lines the walk read (trn_refusal). Its last leg,
 	// `Terrain_ShiftHeightmapRows @0x60f190`, never rejects: it extends the
 	// parsed grid to 16 columns and rows (periodically under wrap, else the
 	// last column and row copied outward) and returns 0 on every path
 	// [orig: @0x60F2A5..0x60F317, @0x60F31A]; the extension below is it.
-	if (out.colormap.empty()) {
-		error = "TRN rejected: polytrn_colormap is empty";
-		return false;
-	}
-	if (out.detailmap.empty()) {
-		error = "TRN rejected: polytrn_detailmap is empty";
-		return false;
-	}
-	if (out.polydata.empty()) {
-		error = "TRN rejected: polytrn_polydata is empty";
-		return false;
-	}
-	const auto power_of_two_or_zero = [](int n) { return ((n - 1) & n) == 0; };
-	if (walk.seen_sector_rows > 16 || !power_of_two_or_zero(walk.seen_sector_rows)) {
+	switch (trn_refusal(out, walk.seen_sector_rows)) {
+	case TrnRefusal::None: break;
+	case TrnRefusal::NoColormap: error = "TRN rejected: polytrn_colormap is empty"; return false;
+	case TrnRefusal::NoDetailmap: error = "TRN rejected: polytrn_detailmap is empty"; return false;
+	case TrnRefusal::NoPolydata: error = "TRN rejected: polytrn_polydata is empty"; return false;
+	case TrnRefusal::SectorRows:
 		error = "TRN rejected: polytrn_sectors row count " + std::to_string(walk.seen_sector_rows) +
 			" is not a power of two <= 16";
 		return false;
-	}
-	if (out.sector_count > 16 || !power_of_two_or_zero(out.sector_count)) {
+	case TrnRefusal::SectorCount:
 		error = "TRN rejected: polytrn_sectorcount " + std::to_string(out.sector_count) +
 			" is not a power of two <= 16";
 		return false;
@@ -269,12 +256,12 @@ bool finish_trn(TrnConfig &out, TrnWalk &walk, std::string &error) {
 	const int cols = std::max(out.sector_count, 1);
 
 	for (int r = 0; r < rows; ++r) {
-		for (int c = cols; c < 16; ++c) {
+		for (int c = cols; c < kTerrainGridSide; ++c) {
 			out.sector_grid[r][c] = out.wrap_x ? out.sector_grid[r][c % cols] : out.sector_grid[r][cols - 1];
 		}
 	}
-	for (int r = rows; r < 16; ++r) {
-		for (int c = 0; c < 16; ++c) {
+	for (int r = rows; r < kTerrainGridSide; ++r) {
+		for (int c = 0; c < kTerrainGridSide; ++c) {
 			out.sector_grid[r][c] = out.wrap_y ? out.sector_grid[r % rows][c] : out.sector_grid[rows - 1][c];
 		}
 	}
@@ -282,6 +269,25 @@ bool finish_trn(TrnConfig &out, TrnWalk &walk, std::string &error) {
 }
 
 } // namespace
+
+TrnRefusal trn_refusal(const TrnConfig &config, int sector_rows) {
+	// The admission gate [orig: Terrain_LoadEnvironmentConfig @0x610940 tail]:
+	// the config is rejected (returns 0) when the colormap (+256), detailmap
+	// (+512) or polydata (+3072) name is empty, when the `polytrn_sectors` row
+	// count (+5960) or `polytrn_sectorcount` (+5956) exceeds 16, or when either
+	// is not a power of two (`((n - 1) & n) != 0`).
+	if (config.colormap.empty()) return TrnRefusal::NoColormap;
+	if (config.detailmap.empty()) return TrnRefusal::NoDetailmap;
+	if (config.polydata.empty()) return TrnRefusal::NoPolydata;
+	const auto power_of_two_or_zero = [](int n) {
+		const uint32_t u = static_cast<uint32_t>(n); // the 32-bit wrap of the original's `n - 1`
+		return ((u - 1u) & u) == 0u;
+	};
+	if (sector_rows > kTerrainGridSide || !power_of_two_or_zero(sector_rows)) return TrnRefusal::SectorRows;
+	if (config.sector_count > kTerrainGridSide || !power_of_two_or_zero(config.sector_count))
+		return TrnRefusal::SectorCount;
+	return TrnRefusal::None;
+}
 
 bool load_trn(std::istream &f, TrnConfig &out, std::string &error) {
 	const std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
@@ -384,14 +390,58 @@ std::vector<TrnKeyLine> read_trn_key_lines(const std::string &text, std::vector<
 	return out;
 }
 
-namespace {
-
-// What the tokenizer ends a token or a line at outside quotes [orig: Terrain_TokenizeConfigLine @0x53CC16..0x53CC4C].
-bool needs_quotes(const std::string &value) {
-	return value.find_first_of(" ,\t;") != std::string::npos || value.find("//") != std::string::npos;
+std::vector<std::string> trn_key_readings(const std::vector<TrnKeyLine> &keys) {
+	// The terrain's parser's block state over the file's own lines: inside a block every line is the block's, the
+	// first four blocks read their keys, `end` closes one, and from the fifth on nothing closes it [orig:
+	// Terrain_ParseConfigCallback @ 0x60F330, its block test of dword_31BC904, `dword_31BC900 < 4` around every block
+	// key, the block's arms @ 0x60F36C..0x60F5F0]. A terrain may close blocks before the file, or leave one open into
+	// it; what the file alone shows is said.
+	std::vector<std::string> out(keys.size());
+	bool in_block = false;
+	int closed = 0;
+	for (size_t i = 0; i < keys.size(); ++i) {
+		const std::string &key = keys[i].key;
+		const bool block_key = trn_parser_key(key, true) && !trn_parser_key(key);
+		if (in_block) {
+			if (closed >= 4) {
+				out[i] = "This line is inside a fifth foliage block, which the terrain's reader opens but reads nothing of: "
+				         "no end closes it, so no arm reads a line after it [orig: Terrain_ParseConfigCallback @ 0x60F330, "
+				         "`dword_31BC900 < 4` around every block key].";
+			} else if (key == "end") {
+				in_block = false;
+				++closed;
+			} else if (!block_key) {
+				out[i] = "This line is inside the foliage block a foliage line above opens: the terrain's reader reads a "
+				         "block's lines as the block's, so it skips this one until an end closes the block [orig: "
+				         "Terrain_ParseConfigCallback @ 0x60F330, its block test of dword_31BC904].";
+			}
+			continue;
+		}
+		if (key == "foliage") {
+			in_block = true;
+			if (closed >= 4)
+				out[i] = "A fifth foliage block: the terrain's reader opens it but reads none of its lines, and nothing "
+				         "closes it, so no arm reads a line after it [orig: Terrain_ParseConfigCallback @ 0x60F330, "
+				         "`dword_31BC900 < 4` around every block key].";
+		} else if (block_key) {
+			out[i] = "'" + key +
+			         "' is a foliage block's keyword: the terrain's reader reads it only inside a block, and no foliage "
+			         "line above opens one in this file, so the game takes it only on a terrain whose .trn ends inside "
+			         "a block [orig: Terrain_ParseConfigCallback @ 0x60F330, its block test of dword_31BC904].";
+		} else if (key == "polytrn_sectors") {
+			out[i] = "A grid row here is a row after the terrain's own, not in place of one: the terrain's reader counts "
+			         "every polytrn_sectors line of the load, the .trn's first, and refuses the terrain where the count "
+			         "is past 16 or not a power of two [orig: Terrain_ParseConfigCallback @ 0x60F330, its row count "
+			         "dword_31BCB30, which no pass resets; Terrain_LoadEnvironmentConfig @ 0x610A24..0x610A77].";
+		}
+	}
+	return out;
 }
 
-} // namespace
+bool trn_value_needs_quotes(const std::string &value) {
+	// What the tokenizer ends a token or a line at outside quotes [orig: Terrain_TokenizeConfigLine @0x53CC16..0x53CC4C].
+	return value.find_first_of(" ,\t;") != std::string::npos || value.find("//") != std::string::npos;
+}
 
 bool trn_value_writable(const std::string &value, std::string &error) {
 	if (value.empty()) {
@@ -410,7 +460,7 @@ std::string trn_values_text(const std::vector<std::string> &values, size_t from)
 	std::string out;
 	for (size_t i = from; i < values.size(); ++i) {
 		if (i > from) out += ' ';
-		out += needs_quotes(values[i]) ? "\"" + values[i] + "\"" : values[i];
+		out += trn_value_needs_quotes(values[i]) ? "\"" + values[i] + "\"" : values[i];
 	}
 	return out;
 }

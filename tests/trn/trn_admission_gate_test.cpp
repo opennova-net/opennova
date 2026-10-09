@@ -154,6 +154,37 @@ int main() {
 				"more than 16 polytrn_sectors lines are rejected")) return 1;
 	}
 
+	// The gate itself over a record (trn_refusal), in its order, the row count the caller's: what load_trn's
+	// walk passes (every line read) or what a record's writer writes (max(1, sector_rows)).
+	{
+		using opennova::TrnRefusal;
+		using opennova::trn_refusal;
+		const opennova::TrnConfig valid = valid_config();
+		if (!expect(trn_refusal(valid, valid.sector_rows) == TrnRefusal::None, "the gate takes a complete record")) return 1;
+		opennova::TrnConfig none = valid;
+		none.colormap.clear();
+		none.detailmap.clear();
+		none.polydata.clear();
+		none.sector_count = 3;
+		if (!expect(trn_refusal(none, 3) == TrnRefusal::NoColormap, "the colour map is the gate's first leg")) return 1;
+		none.colormap = "c.tga";
+		if (!expect(trn_refusal(none, 3) == TrnRefusal::NoDetailmap, "the detail map its second")) return 1;
+		none.detailmap = "d.tga";
+		if (!expect(trn_refusal(none, 3) == TrnRefusal::NoPolydata, "the height data its third")) return 1;
+		none.polydata = "p.cpt";
+		if (!expect(trn_refusal(none, 3) == TrnRefusal::SectorRows, "the row count before the width")) return 1;
+		if (!expect(trn_refusal(none, 4) == TrnRefusal::SectorCount, "then the width")) return 1;
+		none.sector_count = 16;
+		if (!expect(trn_refusal(none, 0) == TrnRefusal::None && trn_refusal(none, 16) == TrnRefusal::None &&
+				trn_refusal(none, 17) == TrnRefusal::SectorRows && trn_refusal(none, 32) == TrnRefusal::SectorRows,
+				"rows: zero and the powers of two to 16")) return 1;
+		none.sector_count = 32;
+		if (!expect(trn_refusal(none, 1) == TrnRefusal::SectorCount, "a width past the grid's side")) return 1;
+		none.sector_count = -4;
+		if (!expect(trn_refusal(none, 1) == TrnRefusal::SectorCount, "a negative width is no power of two")) return 1;
+		if (!expect(opennova::kTerrainGridSide == 16, "the grid is 16 sectors a side")) return 1;
+	}
+
 	std::printf("OK: load_trn admits only configs the retail loader admits\n");
 	return 0;
 }

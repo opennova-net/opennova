@@ -98,28 +98,13 @@ void EnvironmentState::update_tod() {
 	light_dir_ = is_night_ ? moon_dir_ : sun_dir_;
 	tod_valid_ = !config_->keyframes.empty();
 	if (tod_valid_) {
-		tod_ = interpolate_tod(config_->keyframes,
-				static_cast<float>(time_of_day_), config_->envscale);
 		// The overcast cross-fade (env #16): both tables interpolate, then the
 		// weather's overcast blend (read BEFORE its spring stepped this tick)
-		// lerps the .env colors toward the overcast table's
-		// [orig: Environment_ComputeTimeOfDayColors @ 0x57de40 ->
-		//  Environment_LerpKeyframeSet @ 0x57c3b0].
-		// With no overcast table (no overcast.def and a .trn without tod
-		// blocks) the lerp still runs, toward black: the empty table's search
-		// writes no index and the lerp reads the snapshot Environment_InitDefaults
-		// zeroed (env #41) [orig: Environment_FindKeyframeSegment @ 0x57ddbd,
-		// the count gate; the calls @ 0x57dffb / @ 0x57e029 have none;
-		// Environment_InitDefaults @ 0x57c01e, memset over g_EnvTrnSnapshotTable
-		// @ 0x26c7414].
-		if (weather_live() && weather_->overcast_for_tod_q16 > 0) {
-			const bool has_table = overcast_config_ != nullptr && !overcast_config_->keyframes.empty();
-			const TodState overcast = has_table
-					? interpolate_tod(overcast_config_->keyframes,
-							  static_cast<float>(time_of_day_), overcast_config_->envscale)
-					: TodState{};
-			tod_ = blend_tod_states(tod_, overcast, weather_->overcast_for_tod_q16);
-		}
+		// lerps the .env colors toward the overcast table's, toward black with
+		// none (env #41) [orig: Environment_ComputeTimeOfDayColors @ 0x57de40 ->
+		//  Environment_LerpKeyframeSet @ 0x57c3b0]. No live weather, no blend.
+		tod_ = tod_colors(*config_, overcast_config_, static_cast<float>(time_of_day_),
+				weather_live() ? weather_->overcast_for_tod_q16 : 0);
 	}
 	if (!weather_driven_ && tod_valid_) {
 		// Standalone (no weather tick): this state owns the current render

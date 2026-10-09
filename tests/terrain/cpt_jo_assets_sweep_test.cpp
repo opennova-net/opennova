@@ -2,13 +2,22 @@
 // through the CDEP/DPTH/POLY reader into the 1024x1024 depth atlas with at
 // least one tile, and the Dvxi5 bake carries the header facts the reader's
 // contract was grilled on (terrain_name "Dvxi5", creator "Brophy", CDEP).
-// Reports Skipped without OPENNOVA_JO_ASSETS.
+// The re-encode leg: each file read by load_cpt and written again by
+// CptFile::write_bytes is the same bytes, the retail-corpus byte diff the CPT
+// encoder answers to (engine/CLAUDE.md). Reports Skipped without
+// OPENNOVA_JO_ASSETS.
 
 #include <formats/cpt/cpt.h>
+#include <formats/cpt/cpt_io.h>
 
+#include <algorithm>
+#include <cstdint>
 #include <cstdio>
+#include <exception>
 #include <filesystem>
 #include <string>
+#include <vector>
+#include "common/file_io.h"
 #include "common/retail_paths.h"
 
 namespace {
@@ -19,6 +28,32 @@ bool is_cpt(const std::filesystem::path &path) {
 	return ext == ".cpt";
 }
 
+// The file read and written again, compared byte for byte: true when the same.
+bool reencodes(const std::filesystem::path &path, const std::string &name) {
+	const std::vector<uint8_t> bytes = test_io::read_file(path.string());
+	opennova::CptFile cpt;
+	std::string error;
+	std::vector<uint8_t> again;
+	if (!opennova::load_cpt(bytes.data(), bytes.size(), cpt, error)) {
+		std::printf("FAIL: %s: load_cpt: %s\n", name.c_str(), error.c_str());
+		return false;
+	}
+	try {
+		again = cpt.write_bytes();
+	} catch (const std::exception &e) {
+		std::printf("FAIL: %s: write_bytes: %s\n", name.c_str(), e.what());
+		return false;
+	}
+	size_t differ = 0, first = 0;
+	for (size_t i = 0; i < std::min(bytes.size(), again.size()); ++i)
+		if (bytes[i] != again[i] && differ++ == 0) first = i;
+	const bool equal = !again.empty() && again.size() == bytes.size() && differ == 0;
+	if (!equal)
+		std::printf("FAIL: %s written again differs (%zu bytes, written %zu, %zu differ from 0x%zx)\n", name.c_str(),
+		            bytes.size(), again.size(), differ, first);
+	return equal;
+}
+
 } // namespace
 
 int main() {
@@ -27,6 +62,7 @@ int main() {
 		return retail::skip("OPENNOVA_JO_ASSETS (the extracted retail tree with its loose .cpt polydata)");
 	int failures = 0;
 	int swept = 0;
+	int identical = 0;
 	bool saw_dvxi5 = false;
 	for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(assets)) {
 		if (!entry.is_regular_file() || !is_cpt(entry.path())) continue;
@@ -45,6 +81,8 @@ int main() {
 			            cpt.depth_buffer.size(), cpt.tiles.size());
 			++failures;
 		}
+		if (reencodes(entry.path(), name)) ++identical;
+		else ++failures;
 		std::string lower = name;
 		for (char &c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 		if (lower == "dvxi5.cpt") {
@@ -67,6 +105,7 @@ int main() {
 		std::printf("FAIL: the extract carries no Dvxi5.cpt\n");
 		++failures;
 	}
-	std::printf("cpt_jo_assets_sweep: %d polydata files, %d failures\n", swept, failures);
+	std::printf("cpt_jo_assets_sweep: %d polydata files, %d written again byte-identical, %d failures\n", swept,
+	            identical, failures);
 	return failures == 0 ? 0 : 1;
 }

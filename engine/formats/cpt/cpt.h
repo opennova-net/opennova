@@ -51,4 +51,13 @@ struct CptFile {
 	void write(const std::string &path) const;
 };
 
+// The widest range a CDEP block holds: its width, that of the range plus one, fits the 4-bit field's 15 [orig:
+// Terrain_LoadLodStorage @ 0x603635..0x6037A8, the 4-bit width]. The writer clamps a block that spans more.
+inline constexpr int kCdepMaxRange = 32766;
+
+// The stretches of 256 texels along a row (the CDEP section's blocks over the 1024 x 1024 atlas) whose heights span
+// more than a block holds: 32,766 raw (just under 128 world units), its width that of the range plus one within the
+// field's 15 bits, as the shipped files write it. CptFile::write_bytes clamps each (kCdepMaxRange).
+int cpt_steep_blocks(const std::vector<uint16_t> &raw16);
+
 } // namespace opennova

@@ -1261,6 +1261,11 @@ target_link_libraries(trn_admission_gate_test PRIVATE opennova_formats)
 target_include_directories(trn_admission_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME trn_admission_gate COMMAND trn_admission_gate_test)
 
+add_executable(trn_key_lines_test trn/trn_key_lines_test.cpp)
+target_link_libraries(trn_key_lines_test PRIVATE opennova_formats)
+target_include_directories(trn_key_lines_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME trn_key_lines COMMAND trn_key_lines_test)
+
 add_executable(cpt_roundtrip_test cpt/cpt_roundtrip_test.cpp)
 target_link_libraries(cpt_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(cpt_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1277,6 +1282,11 @@ add_executable(env_render_unit_test env/env_render_unit_test.cpp)
 target_link_libraries(env_render_unit_test PRIVATE opennova_formats)
 target_include_directories(env_render_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME env_render_unit COMMAND env_render_unit_test)
+
+add_executable(env_source_issue_test env/env_source_issue_test.cpp)
+target_link_libraries(env_source_issue_test PRIVATE opennova_formats)
+target_include_directories(env_source_issue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME env_source_issue COMMAND env_source_issue_test)
 
 # The environment runtime (engine/runtime/environment): the TOD state owner +
 # weather embedding ported from the shell scripts (ADR 0034 d6 de-scripting).
