@@ -1,5 +1,7 @@
 #include <runtime/mission/mission_sidecars.h>
 
+#include <formats/pff/pff.h>
+
 namespace opennova::mission {
 
 const std::vector<Sidecar> &sidecars() {
@@ -56,6 +58,42 @@ std::string dialog_sounds_name(const std::string &dialog_bank, bool alternate) {
 	// [orig: DialogManager_LoadFromFile @ 0x44e7bb strtok(filename, "."), "%s.lwf" @ 0x44e7d4, "%s.pwf"
 	//  @ 0x44e7f5 when the first does not exist]
 	return mission_base_name(dialog_bank) + (alternate ? ".pwf" : ".lwf");
+}
+
+SidecarNames sidecar_names(const std::string &mission_file, const Sidecar &sidecar,
+		const std::string &header_slot) {
+	SidecarNames out;
+	const std::string role = sidecar.role;
+	const std::string bank = dialog_bank_name(mission_file, header_slot);
+	if (role == "dialog") {
+		out.name = bank;
+	} else if (role == "dialog_sounds") {
+		out.name = dialog_sounds_name(bank);
+		out.alternate = dialog_sounds_name(bank, true);
+	} else {
+		out.name = sidecar_name(mission_file, sidecar);
+		out.alternate = sidecar_alternate_name(mission_file, sidecar);
+	}
+	if (const Sidecar *needed = sidecar.needs ? sidecar_for_role(sidecar.needs) : nullptr)
+		out.needs = std::string(needed->role) == "dialog" ? bank : sidecar_name(mission_file, *needed);
+	return out;
+}
+
+bool sidecar_reads(const SidecarNames &names, const std::function<bool(const std::string &)> &has_file) {
+	return names.needs.empty() || (has_file && has_file(names.needs));
+}
+
+const Sidecar *sidecar_naming(const std::string &mission_file, const std::string &file,
+		const std::function<bool(const std::string &)> &has_file, const std::string &header_slot) {
+	const std::string wanted = pff::normalized_logical_name(file);
+	for (const Sidecar &sidecar : sidecars()) {
+		const SidecarNames names = sidecar_names(mission_file, sidecar, header_slot);
+		if (!sidecar_reads(names, has_file)) continue;
+		if (pff::normalized_logical_name(names.name) == wanted ||
+				(!names.alternate.empty() && pff::normalized_logical_name(names.alternate) == wanted))
+			return &sidecar;
+	}
+	return nullptr;
 }
 
 } // namespace opennova::mission

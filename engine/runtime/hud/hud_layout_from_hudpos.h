@@ -11,6 +11,7 @@
 //  HUD_InitOverlaySystem @0x5a4620, see docs/interface/hud-re.md]
 
 #include <runtime/hud/hud_frame.h>
+#include <runtime/renderer/texture_roles.h>
 
 #include <array>
 #include <cstdint>
@@ -42,7 +43,25 @@ struct HudLayoutAssets {
 	// when named [orig: HUD_LoadAllTextures @0x59DEEE..0x59DF3E].
 	std::string hudls_bracket;
 	std::string hudls_moreav;
+
+	// The mode the HUD's loader loads each name above in, as its texture role
+	// (sub_591750's alpha mode: HudColour mode 0, HudAlphaOnly mode 1; docs/
+	// interface/hud-re.md "The HUD texture loader"): the static frame and the
+	// HUDLS bar's two in colour [orig: HUD_LoadAllTextures @0x59DF69, @0x59DF0F /
+	// @0x59DF39], each HUDSTANCE frame and the parachute and armor icons alpha
+	// only [orig: the HUDSTANCE loop @0x59DED8, @0x59DF99, @0x59DFC9].
+	static constexpr renderer::TextureRoleId kStaticFrameRole = renderer::TextureRoleId::HudColour;
+	static constexpr renderer::TextureRoleId kStanceRole = renderer::TextureRoleId::HudAlphaOnly;
+	static constexpr renderer::TextureRoleId kParachuteIconRole = renderer::TextureRoleId::HudAlphaOnly;
+	static constexpr renderer::TextureRoleId kArmorIconRole = renderer::TextureRoleId::HudAlphaOnly;
+	static constexpr renderer::TextureRoleId kHudlsRole = renderer::TextureRoleId::HudColour;
 };
+
+// The mode a VEHICLE_HUD block's interface art loads in: an item def's HUD
+// image, alpha only [orig: HUD_LoadAllTextures @0x59E26A, the name at the item
+// record's +0xA74 whose texture the mounted panel's gate reads at
+// itemDef+0x960; docs/interface/hud-re.md "The HUD texture loader"].
+inline constexpr renderer::TextureRoleId kVehicleHudInterfaceRole = renderer::TextureRoleId::HudAlphaOnly;
 
 // A parsed hudpos colour as the packed 0xAARRGGBB the layout carries (each
 // channel clamped to a byte).

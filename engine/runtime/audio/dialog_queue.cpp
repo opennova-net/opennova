@@ -77,15 +77,14 @@ std::vector<DialogLineRef> lines_of(const dbf::Group &group, const lwf::File *di
 	return out;
 }
 
-// The name a PLYRDIALOG trigger looks its number up by [orig: Dialog_ExistsByIndex
-// "dlg%.3d" @ 0x44e190; sub_44E220 @ 0x44e23f].
+} // namespace
+
+// [orig: Dialog_ExistsByIndex "dlg%.3d" @ 0x44e190; sub_44E220 @ 0x44e23f]
 std::string trigger_dialog_name(int32_t dialog_index) {
 	char name[32];
 	std::snprintf(name, sizeof(name), "dlg%.3d", int(dialog_index));
 	return name;
 }
-
-} // namespace
 
 std::vector<DialogLineRef> resolve_dialog_lines(const dbf::File *dialog_bank,
 		const lwf::File *dialog_sounds, int32_t dialog_index) {
