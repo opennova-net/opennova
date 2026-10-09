@@ -536,7 +536,7 @@ void RenameController::rename_unsaved(const std::string &file, const std::string
 uint64_t RenameController::hash_of(const std::string &file) const {
 	std::vector<uint8_t> bytes;
 	std::string error;
-	if (!read_file_bytes(join_path(paths_.root, file), bytes, error)) return 0;
+	if (!io::read_file_bytes(join_path(paths_.root, file), bytes, error)) return 0;
 	return io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size());
 }
 

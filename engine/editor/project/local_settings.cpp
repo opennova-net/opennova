@@ -61,7 +61,7 @@ bool load_local_settings(const ProjectPaths &paths, LocalSettings &out, Diagnost
 	}
 	std::string text;
 	std::string io_error;
-	if (!read_file_text(path, text, io_error)) {
+	if (!io::read_file_text(path, text, io_error)) {
 		finding = make_finding(CoreFinding::LocalSettingsUnreadable, DiagnosticSeverity::Error, io_error);
 		return false;
 	}
@@ -123,7 +123,7 @@ bool save_local_settings(const ProjectPaths &paths, const LocalSettings &setting
 	}
 	std::string io_error;
 	if (!ensure_project_cache_dir(paths, io_error) ||
-	    !write_file_atomic(paths.local_settings_file, io::json_write(json), io_error)) {
+	    !io::write_file_atomic(paths.local_settings_file, io::json_write(json), io_error)) {
 		error = make_finding(CoreFinding::LocalSettingsWrite, DiagnosticSeverity::Error, io_error);
 		return false;
 	}

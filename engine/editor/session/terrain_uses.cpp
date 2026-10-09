@@ -75,7 +75,7 @@ void read_import(const SessionView &view, const AssetEntry &entry, TerrainImport
 	std::vector<uint8_t> bytes;
 	std::string why;
 	TerrainSet set;
-	if (!read_file_bytes(join_path(view.project.root, out.source), bytes, why) || !parse_terrain_set(bytes, set, why)) {
+	if (!io::read_file_bytes(join_path(view.project.root, out.source), bytes, why) || !parse_terrain_set(bytes, set, why)) {
 		if (out.error.empty()) out.error = out.source + " does not read: " + why;
 		return;
 	}

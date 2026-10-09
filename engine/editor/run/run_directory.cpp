@@ -39,7 +39,7 @@ bool run_number(const std::string &name, unsigned long &out) {
 // started its game, or one whose game stopped) and for a game the platform says is gone.
 bool held(const fs::path &dir, const LeaseLiveness &liveness) {
 	std::string text, error;
-	if (!read_file_text(utf8_of(dir / kRunRecordFileName), text, error)) return false;
+	if (!io::read_file_text(utf8_of(dir / kRunRecordFileName), text, error)) return false;
 	io::JsonValue json;
 	if (!io::json_parse(text, json, error) || !json.is_object() ||
 	    json.get_int("schema_version", -1) != kRunRecordSchemaVersion)
@@ -65,7 +65,7 @@ fs::path staged_path(const std::string &name) {
 // The staging record `dir` holds; false for none, one that cannot be read, or another schema's.
 bool read_run_staging(const fs::path &dir, RunStaging &out) {
 	std::string text, error;
-	if (!read_file_text(utf8_of(dir / kRunStagingFileName), text, error)) return false;
+	if (!io::read_file_text(utf8_of(dir / kRunStagingFileName), text, error)) return false;
 	io::JsonValue json;
 	if (!io::json_parse(text, json, error) || !json.is_object() ||
 	    json.get_int("schema_version", -1) != kRunStagingSchemaVersion)
@@ -139,7 +139,7 @@ bool take_run_directory(const std::string &runs_root, const LeaseLiveness &liven
 	}
 	// The mode's own directory: what a Play takes, empties and removes is its mode's alone.
 	const std::string mode_root = join_path(runs_root, take.mode);
-	if (!ensure_directory(mode_root, error)) return false;
+	if (!io::ensure_directory(mode_root, error)) return false;
 	// The numbered directories there, each with whether its game may still run.
 	std::map<unsigned long, bool> runs;
 	std::error_code ec;
@@ -165,7 +165,7 @@ bool take_run_directory(const std::string &runs_root, const LeaseLiveness &liven
 		fs::remove_all(system_path(join_path(mode_root, std::to_string(number))), removed);
 	}
 	out = join_path(mode_root, std::to_string(taken));
-	return ensure_directory(out, error);
+	return io::ensure_directory(out, error);
 }
 
 bool record_run_staging(const std::string &dir, const RunStaging &staging, std::string &error) {
@@ -175,7 +175,7 @@ bool record_run_staging(const std::string &dir, const RunStaging &staging, std::
 	io::JsonValue files = io::JsonValue::make_array();
 	for (const std::string &file : staging.files) files.push(io::JsonValue::make_string(file));
 	json.set("files", std::move(files));
-	return write_file_atomic(join_path(dir, kRunStagingFileName), io::json_write(json), error);
+	return io::write_file_atomic(join_path(dir, kRunStagingFileName), io::json_write(json), error);
 }
 
 bool claim_run_directory(const std::string &dir, int64_t pid, const ProcessIdentity &identity, std::string &error) {
@@ -185,7 +185,7 @@ bool claim_run_directory(const std::string &dir, int64_t pid, const ProcessIdent
 	json.set("image", io::JsonValue::make_string(identity.image));
 	// A string, as a lease writes it: a creation time passes a JSON number's exact range.
 	json.set("created", io::JsonValue::make_string(identity.created));
-	return write_file_atomic(join_path(dir, kRunRecordFileName), io::json_write(json), error);
+	return io::write_file_atomic(join_path(dir, kRunRecordFileName), io::json_write(json), error);
 }
 
 void release_run_directory(const std::string &dir) {
