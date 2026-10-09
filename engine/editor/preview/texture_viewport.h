@@ -129,8 +129,9 @@ struct TexturePlacement {
 };
 
 // The chain the game builds of a texture made from pixels: `first` and each level after it the D3DX box filter of
-// the one before, `levels` in all (0: to 1 x 1) [orig: GTexture_CreateFromPixelData_0 @ 0x6878BE, D3DXFilterTexture
-// BOX, each level from the one before; renderer::box_filter_half, encode_rgba8].
+// the bytes the one before was stored as, `levels` in all (0: to 1 x 1) [orig: GTexture_CreateFromPixelData_0
+// @ 0x6878BE, D3DXFilterTexture BOX; D3DXFilterTexture @ 0x6910C9, each level from the previous one
+// @ 0x6912AD..0x6912F9]: renderer::extend_box_chain, the game's own chain.
 std::vector<TextureLevel> texture_game_chain(const TextureLevel &first, uint32_t levels);
 // `level` halved `halvings` times as the game halves a texture before it makes its device texture: each texel
 // the truncated mean of a 2 x 2 block (renderer::halve_rgba_times, GTexture_Downsample2x2_RGBA8).
