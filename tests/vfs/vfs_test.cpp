@@ -663,6 +663,47 @@ static int test_expansion_override_table() {
     return 1;
 }
 
+// An expansion's folder and archives by name [orig: Expansion_LoadAssets @ 0x4a4730; PFF_OpenAllArchives
+// @ 0x4a4310], the files the game reads from its folder by path, the folders the Mods list
+// registers, and a folder that holds a base game (one of the boot table's archives).
+static int test_expansion_paths_and_names() {
+    using namespace opennova;
+    CHECK(vfs_expansion_dir("", "jxm") == "expansion/jxm", "an install's layout, relative");
+    CHECK(vfs_expansion_dir("C:/JO", "jxm") == "C:/JO/expansion/jxm" &&
+              vfs_expansion_dir("C:/JO/", "jxm") == "C:/JO/expansion/jxm",
+          "under a root, its separator not doubled");
+    CHECK(vfs_expansion_archive_name("jxm", true) == "jxmL.pff" && vfs_expansion_archive_name("jxm", false) == "jxm.pff",
+          "<n>L.pff the language archive, <n>.pff the other");
+    CHECK(vfs_expansion_archive_path("", "jxm", true) == "expansion/jxm/jxmL.pff" &&
+              vfs_expansion_archive_path("", "jxm", false) == "expansion/jxm/jxm.pff",
+          "the archives' paths in the folder");
+    CHECK(vfs_expansion_archive_path("root", "x1", false) == "root/expansion/x1/x1.pff", "under a root");
+
+    // Read from the folder by path: the table, the music banks, the five videos, gt.ssc (any case).
+    for (const char *name : {"jxm.bin", "JXM.BIN", "Mjxm.sbf", "Gjxm.sbf", "main.bik", "HEADER.BIK", "footer.bik",
+                             "prolog.bik", "intro.bik", "gt.ssc"})
+        CHECK(vfs_read_from_expansion_folder(name, "jxm"), "a file the game reads from the expansion's folder");
+    // Not the version text, a player's file, the music scripts (read through the archives) nor another
+    // expansion's table or a video the game never plays.
+    for (const char *name : {"version.txt", "weapon.sav", "Mjxm.bin", "Gjxm.bin", "x1.bin", "trailer.bik", "jxmL.lwf"})
+        CHECK(!vfs_read_from_expansion_folder(name, "jxm"), "a file the game reads elsewhere, or never");
+
+    CHECK(vfs_expansion_folder_listed("jox01") && vfs_expansion_folder_listed("a.b"), "a folder the Mods list registers");
+    CHECK(!vfs_expansion_folder_listed(".mod") && !vfs_expansion_folder_listed(".") && !vfs_expansion_folder_listed(""),
+          "a leading dot: never registered [orig: @ 0x4a444b]");
+    CHECK(kExpansionRecordNameBytes == 64 && kExpansionRecordDescriptionBytes == 272, "the record's two text fields");
+
+    const fs::path dir = fresh_dir("boot_archive_dir");
+    CHECK(!vfs_has_boot_archive(dir.string()) && !vfs_has_boot_archive(""), "an empty folder holds no base game");
+    write_loose(dir / "extra.pff", "x");
+    fs::create_directories(dir / "resource.pff");
+    CHECK(!vfs_has_boot_archive(dir.string()), "another archive, or a folder of the name, is none");
+    write_loose(dir / "LocalRes.PFF", "x");
+    CHECK(vfs_has_boot_archive(dir.string()), "one of the boot table's archives, in any case");
+    CHECK(!vfs_has_boot_archive((dir / "missing").string()), "a folder that is not there");
+    return 1;
+}
+
 int main() {
     std::error_code ec;
     g_root = (fs::temp_directory_path(ec) / test_paths_unique("opennova_vfs_test")).string();
@@ -688,6 +729,7 @@ int main() {
     RUN_TEST(test_expansion_info);
     RUN_TEST(test_expansion_records);
     RUN_TEST(test_expansion_override_table);
+    RUN_TEST(test_expansion_paths_and_names);
 
     fs::remove_all(g_root, ec);
     printf("\n%d passed, %d failed\n", passed, failed);
