@@ -2398,6 +2398,14 @@ target_include_directories(item_death_traits_resolve_test PRIVATE ${CMAKE_CURREN
 target_compile_features(item_death_traits_resolve_test PRIVATE cxx_std_17)
 add_test(NAME item_death_traits_resolve COMMAND item_death_traits_resolve_test)
 
+# The death schedule's def-side half: the death traits a def row carries, the
+# destroy fade's defaults, the class callbacks' numbers and names.
+add_executable(item_death_schedule_test world/item_death_schedule_test.cpp)
+target_link_libraries(item_death_schedule_test PRIVATE opennova_runtime)
+target_include_directories(item_death_schedule_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(item_death_schedule_test PRIVATE cxx_std_17)
+add_test(NAME item_death_schedule COMMAND item_death_schedule_test)
+
 # The collectors' render model, stamped where the model resolves (placed
 # entities) and carried on the decoded wire row's resolved shape.
 add_executable(render_model_resolve_test world/render_model_resolve_test.cpp)

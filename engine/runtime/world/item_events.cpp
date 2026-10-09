@@ -269,7 +269,7 @@ void gnrc_death_event(World &world, Entity &target, int phase, int32_t section,
 	world.out.scars.clear_entity(target.handle);
 	mark_class_dead(target);
 	target.death_tick = world.logic_tick;
-    target.class_think_ticks = 4;
+    target.class_think_ticks = kGnrcDeathThinkTicks;
     emit_item_death_state(world, target);
 }
 
@@ -283,7 +283,7 @@ void gnrc_death_event(World &world, Entity &target, int phase, int32_t section,
 // Server_SendEntityStatePacket(entity, hitRecord[14]) @0x40723d, Flags |= 4
 // @0x407242, death tick if unset @0x407258, +0x2AC = 0x20 @0x40725f.
 void gnl2_death_expiry(World &world, Entity &target, int32_t section) {
-	target.class_think_ticks = 32;
+	target.class_think_ticks = kGnl2DeathThinkTicks;
 	const Vec3 raised{target.position.x, target.position.y, target.position.z + 1.0f};
     spawn_item_explosion(world, world.registry.get(target.last_attacker),
             {to_fixed(raised.x),to_fixed(raised.y),to_fixed(raised.z)},
@@ -326,7 +326,7 @@ void gnl2_death_event(World &world, Entity &target, int phase, int32_t section) 
 	world.out.scars.clear_entity(target.handle);
 	mark_class_dead(target);
 	target.death_tick = world.logic_tick;
-    target.class_think_ticks = 32;
+    target.class_think_ticks = kGnl2DeathThinkTicks;
     emit_item_death_state(world, target);
 	emit_class_death_sound_and_effect(world, target);
 }
@@ -559,8 +559,8 @@ void collapsing_building_event(World &world, Entity &entity, int phase, bool cra
             entity.class_think_ticks = crane ? 1860 : 1920;
         } else {
             death_sound();
-            queue_class_blast(world, entity, "kz_OrganicBlast", traits->kz);
-            queue_class_blast(world, entity, "kz_MItemBlast", traits->kz);
+            queue_class_blast(world, entity, kAmmoKzOrganicBlast, traits->kz);
+            queue_class_blast(world, entity, kAmmoKzMItemBlast, traits->kz);
             world.out.scars.clear_entity(entity.handle);
             emit_item_state(world, entity, 0);
             // The direct send is followed by sub_50C840's second send.
@@ -628,9 +628,9 @@ void emit_item_state(World &world, Entity &target, int32_t section) {
 // [orig: Entity_PublishSwapFadePhases @0x5C3F40]
 DestroyFade destroy_fade_phases(int32_t elapsed, const int32_t destroy_timing_ticks[3]) {
     DestroyFade fade;
-    const int32_t duration=destroy_timing_ticks[1] ? destroy_timing_ticks[1] : 50;
-    const int32_t step=destroy_timing_ticks[2] ? destroy_timing_ticks[2] : 25;
-    const int32_t total=io::bam_add(duration,int32_t(uint32_t(step)*4u));
+    const int32_t duration=destroy_fade_duration_ticks(destroy_timing_ticks);
+    const int32_t step=destroy_fade_stagger_ticks(destroy_timing_ticks);
+    const int32_t total=destroy_fade_total_ticks(destroy_timing_ticks);
     // Zero denominators are malformed authored data; preserve finite render values.
     fade.progress=total ? double(elapsed)/total : 0;
     const auto phase=[](double value) { return int32_t(std::clamp(value,0.0,1.0)*65536.0); };
@@ -841,8 +841,8 @@ bool tick_item_class_motion(World &world, Entity &entity,
     if ((!traits->primary_husk_loaded || progress >= 1.0) &&
             world.rules.logic_authority && (entity.sub_type & 0x80) == 0 && entity.item_type == 5) {
         entity.sub_type |= 0x80;
-        queue_class_blast(world, entity, "kz_OrganicBlast", traits->kz);
-        queue_class_blast(world, entity, "kz_MItemBlast", traits->kz);
+        queue_class_blast(world, entity, kAmmoKzOrganicBlast, traits->kz);
+        queue_class_blast(world, entity, kAmmoKzMItemBlast, traits->kz);
     }
     return true;
 }

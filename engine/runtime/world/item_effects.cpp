@@ -224,8 +224,8 @@ void spawn_item_explosion(World &world, const Entity *source, const FixedVec3 &p
         world.out.entity_events.push_back(ItemExplosionEvent{source ? source->handle.packed : uint16_t(0xFFFF),
                 uint8_t(count),position,heading});
     const Vec3 pos{position.x/65536.0f,position.y/65536.0f,position.z/65536.0f};
-    world.out.destruction.effects.push_back({"Effect_AirExp",pos,{}});
-    const int index=world.tables.ammo.index_of("kz_M406HE");
+    world.out.destruction.effects.push_back({kItemExplosionEffect,pos,{}});
+    const int index=world.tables.ammo.index_of(kItemExplosionAmmo);
     if (world.rules.logic_authority) if (const auto *ammo=world.tables.ammo.by_index(index)) {
         ExplosionEntry blast;
         blast.pos=pos; blast.ammo_index=index; blast.type=ammo->kztype; blast.hit_word=1;
