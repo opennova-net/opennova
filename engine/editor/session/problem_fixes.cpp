@@ -311,7 +311,7 @@ bool missing_definer(const ReferenceSubject &missing, const SessionView &view, s
 			return true;
 		}
 	const AssetKindRow &kind_row = asset_kind_row(kind);
-	if (kind_row.file_name && *kind_row.file_name) name = kind_row.file_name;
+	if (kind_row.facts().file_name && *kind_row.facts().file_name) name = kind_row.facts().file_name;
 	else name = kind_row.new_name;
 	return !name.empty();
 }

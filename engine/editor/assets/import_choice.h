@@ -51,7 +51,7 @@ inline bool operator<(const ImportChoice &a, const ImportChoice &b) {
 }
 
 // What a list of choices says of each beside its name (the UX round's project lane: the import
-// dialog's chooser, the wire's choices): its kind by its name alone (expected_asset_kind_for_required_name:
+// dialog's chooser, the wire's choices): its kind by its name alone (file_kind_for_required_name:
 // a .bin a string table unless its name says otherwise, nothing read) and its size as stored where it is.
 struct ImportChoiceFacts {
 	AssetKind kind = AssetKind::Unknown;
