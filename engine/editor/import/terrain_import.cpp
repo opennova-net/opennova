@@ -1,6 +1,6 @@
 // The terrain importer (ADR 0046 S20): a terrain set's images made into the files the game reads for a
-// terrain (terrain_import.h). Tooling, not a port, but for the bake (editor/terrain: TrnGen.exe's) and
-// the rules the files are made to (each cited where it binds).
+// terrain (terrain_import.h). Tooling, not a port, but for the bake (formats/cpt/trngen: TrnGen.exe's)
+// and the rules the files are made to (each cited where it binds).
 #include <editor/import/terrain_import.h>
 
 #include <algorithm>
@@ -8,7 +8,6 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <exception>
 #include <optional>
 #include <sstream>
 #include <utility>
@@ -16,8 +15,9 @@
 #include <base/io/strutil.h>
 #include <editor/import/texture_import.h>
 #include <editor/project/project_files.h>
-#include <editor/terrain/terrain_bake.h>
 #include <formats/cpt/cpt.h>
+#include <formats/cpt/cpt_io.h>
+#include <formats/cpt/trngen/terrain_bake.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/png/png_decode.h>
 #include <formats/tga/tga.h>
@@ -732,17 +732,15 @@ bool run_terrain_import(ImportContext &context, ImportProduct &out) {
 	bake.creator = "OpenNova";
 	bake.version = "opennova";
 	bake.depth_format = DepthFormat::CDEP;
+	bake.threads = trngen::TerrainBakeInput::for_hardware(); // the editor's count: the desktop sizing
 	CptFile cpt;
 	if (!trngen::bake_terrain(bake, cpt, why)) return refuse(source_name + ": " + why + ".");
 	// The blocks the CPT writer clamps (formats/cpt cpt_steep_blocks).
 	const int steep = cpt_steep_blocks(cpt.depth_buffer);
 	ImportOutput cpt_out;
 	cpt_out.name = stem + ".cpt";
-	try {
-		cpt_out.bytes = cpt.write_bytes();
-	} catch (const std::exception &e) {
-		return refuse(source_name + ": the .cpt cannot be written: " + e.what() + ".", CoreFinding::ImportEncode);
-	}
+	if (!save_cpt(cpt, cpt_out.bytes, why))
+		return refuse(source_name + ": the .cpt cannot be written: " + why + ".", CoreFinding::ImportEncode);
 	if (steep > 0)
 		out.diagnostics.push_back(make_finding(
 		        CoreFinding::ImportTerrain, DiagnosticSeverity::Warning,
