@@ -2562,7 +2562,7 @@ static int test_incremental_equals_fresh() {
 	// A closed file's reference edited: a model the project lacks, then an item added naming it.
 	std::string items_text;
 	std::string problem;
-	TEST_EXPECT(read_file_text(items_file, items_text, problem));
+	TEST_EXPECT(opennova::io::read_file_text(items_file, items_text, problem));
 	TEST_EXPECT(rewrite(items_file,
 			items_text + "\nbegin \"D3\"\nid 100399\ntype building\ngraphic d3_model\nend\n"));
 	TEST_EXPECT(step("an item added", true));
@@ -2588,7 +2588,7 @@ static int test_incremental_equals_fresh() {
 	// ammo the first names renamed to the name the second names; the weapons' labels, a string id
 	// the table defines nowhere and one it will.
 	std::string weapons_text;
-	TEST_EXPECT(read_file_text(weapons_file, weapons_text, problem));
+	TEST_EXPECT(opennova::io::read_file_text(weapons_file, weapons_text, problem));
 	TEST_EXPECT(rewrite(weapons_file,
 			weapons_text +
 					"\nweapon \"D3_A\"\nround_type AMMO_OLD\nloadout_menu_textid WEP_D3\nend\n"
@@ -3455,7 +3455,7 @@ static int test_retail_incremental() {
 	TEST_EXPECT(style != nullptr);
 	if (style) {
 		std::string text, problem;
-		TEST_EXPECT(read_file_text(project.file(style->relative_path), text, problem));
+		TEST_EXPECT(opennova::io::read_file_text(project.file(style->relative_path), text, problem));
 		const size_t fnt = text.find(".fnt");
 		if (fnt != std::string::npos) text.replace(fnt, 4, "_x.fnt");
 		TEST_EXPECT(rewrite(project.file(style->relative_path), text));
@@ -3479,7 +3479,7 @@ static int test_retail_incremental() {
 	}
 	if (const AssetEntry *items = project.scan.find("items.def")) {
 		std::string text, problem;
-		TEST_EXPECT(read_file_text(project.file(items->relative_path), text, problem));
+		TEST_EXPECT(opennova::io::read_file_text(project.file(items->relative_path), text, problem));
 		TEST_EXPECT(rewrite(project.file(items->relative_path),
 				text +
 						"\r\nbegin \"D3 RETAIL\"\r\nid 199999\r\ntype building\r\ngraphic "

@@ -209,14 +209,6 @@ JsonValue address_to_json(const NodeAddress &address) {
 
 namespace {
 
-// A whole, non-negative JSON number as an identity; false for anything else.
-bool read_id(const JsonValue &json, uint64_t &out) {
-	if (!json.is_number() || json.number < 0.0 || json.number != std::floor(json.number) ||
-	    json.number > 9007199254740992.0) return false;
-	out = static_cast<uint64_t>(json.number);
-	return true;
-}
-
 // A record kind: a whole JSON number that fits a NodeKind; false for anything else.
 bool read_kind(const JsonValue &json, NodeKind &out) {
 	if (!json.is_number() || json.number != std::floor(json.number) ||
@@ -241,26 +233,6 @@ bool read_bool(const JsonValue &object, const char *key, bool &out, std::string 
 	return true;
 }
 
-JsonValue strings_to_json(const std::vector<std::string> &values) {
-	JsonValue out = JsonValue::make_array();
-	for (const std::string &value : values) out.push(json_string(value));
-	return out;
-}
-
-bool members_known(const JsonValue &object, std::initializer_list<const char *> known, const char *what,
-                   std::string &error) {
-	for (const io::JsonMember &member : object.object) {
-		bool found = false;
-		for (const char *key : known)
-			if (member.key == key) { found = true; break; }
-		if (!found) {
-			error = std::string("Unknown ") + what + " member \"" + member.key + "\".";
-			return false;
-		}
-	}
-	return true;
-}
-
 // A play mode that is none (not a string, or a token no PlayMode has), refused naming `where` and the
 // tokens.
 std::string play_mode_error(const char *where, const JsonValue &value) {
@@ -274,12 +246,12 @@ std::string play_mode_error(const char *where, const JsonValue &value) {
 // type checked.
 bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::string &error) {
 	if (!json.is_object()) { error = "\"settings\" must be an object."; return false; }
-	if (!members_known(json, {"serial", "title", "mission", "multiplayer", "expansion", "builds_on", "base_project",
+	if (!io::json_members_known(json, {"serial", "title", "mission", "multiplayer", "expansion", "builds_on", "base_project",
 	                          "game_install",
 	                          "runtime_executable", "play_mode", "save_before_play", "build_folder"},
 	                   "settings", error)) return false;
 	ProjectSettingsChange change;
-	if (const JsonValue *serial = json.get("serial"); serial && !read_id(*serial, change.serial)) {
+	if (const JsonValue *serial = json.get("serial"); serial && !io::json_exact_whole(*serial, change.serial)) {
 		error = "\"serial\" must be a whole number, 0 or more.";
 		return false;
 	}
@@ -490,18 +462,18 @@ bool address_from_json(const JsonValue &json, NodeAddress &out, std::string &err
 		error = "\"" + what + "\" must be an object {row, kind, child}.";
 		return false;
 	}
-	if (!members_known(json, {"row", "kind", "child"}, what.c_str(), error)) return false;
+	if (!io::json_members_known(json, {"row", "kind", "child"}, what.c_str(), error)) return false;
 	// A member's value refused by its place ("address.row", "records[1].child").
 	const auto refuse = [&](const char *member, const char *must) {
 		error = "\"" + what + "." + member + "\" must be " + must + ".";
 		return false;
 	};
 	NodeAddress address;
-	if (const JsonValue *row = json.get("row"); row && !read_id(*row, address.row))
+	if (const JsonValue *row = json.get("row"); row && !io::json_exact_whole(*row, address.row))
 		return refuse("row", "a record identity");
 	if (const JsonValue *kind = json.get("kind"); kind && !read_kind(*kind, address.kind))
 		return refuse("kind", "a whole number");
-	if (const JsonValue *child = json.get("child"); child && !read_id(*child, address.child))
+	if (const JsonValue *child = json.get("child"); child && !io::json_exact_whole(*child, address.child))
 		return refuse("child", "a record identity");
 	out = address;
 	return true;
@@ -521,19 +493,19 @@ bool paste_at_from_json(const JsonValue &json, PasteAt &out, std::string &error)
 		error = "\"paste_at\" must be an object {row, parent, position}.";
 		return false;
 	}
-	if (!members_known(json, {"row", "parent", "position"}, "paste_at", error)) return false;
+	if (!io::json_members_known(json, {"row", "parent", "position"}, "paste_at", error)) return false;
 	PasteAt at;
-	if (const JsonValue *row = json.get("row"); row && !read_id(*row, at.row)) {
+	if (const JsonValue *row = json.get("row"); row && !io::json_exact_whole(*row, at.row)) {
 		error = "\"row\" must be a record identity.";
 		return false;
 	}
-	if (const JsonValue *parent = json.get("parent"); parent && !read_id(*parent, at.parent)) {
+	if (const JsonValue *parent = json.get("parent"); parent && !io::json_exact_whole(*parent, at.parent)) {
 		error = "\"parent\" must be a record identity.";
 		return false;
 	}
 	if (const JsonValue *position = json.get("position")) {
 		uint64_t index = 0;
-		if (!read_id(*position, index)) {
+		if (!io::json_exact_whole(*position, index)) {
 			error = "\"position\" must be a whole number.";
 			return false;
 		}
@@ -558,7 +530,7 @@ bool play_start_from_json(const JsonValue &json, PlayStart &out, std::string &er
 		error = "\"start\" must be an object {at: [x, y, z], yaw?}.";
 		return false;
 	}
-	if (!members_known(json, {"at", "yaw"}, "start", error)) return false;
+	if (!io::json_members_known(json, {"at", "yaw"}, "start", error)) return false;
 	PlayStart start;
 	const JsonValue *at = json.get("at");
 	if (!at || !at->is_array() || at->array.size() != 3) {
@@ -600,7 +572,7 @@ bool define_from_json(const JsonValue &json, ReferenceSubject &out, std::string 
 		error = shape;
 		return false;
 	}
-	if (!members_known(json, {"kind", "name", "scope"}, "define", error)) return false;
+	if (!io::json_members_known(json, {"kind", "name", "scope"}, "define", error)) return false;
 	const JsonValue *kind = json.get("kind");
 	const JsonValue *name = json.get("name");
 	const JsonValue *scope = json.get("scope");
@@ -658,7 +630,7 @@ bool drag_from_json(const JsonValue &json, ViewportDrag &out, std::string &error
 		error = "\"drag\" must be an object {id, handle, by | to, snap, gesture, end, kind}.";
 		return false;
 	}
-	if (!members_known(json, {"id", "handle", "by", "to", "snap", "gesture", "end", "kind"}, "drag", error))
+	if (!io::json_members_known(json, {"id", "handle", "by", "to", "snap", "gesture", "end", "kind"}, "drag", error))
 		return false;
 	const auto refuse = [&error](const char *member, const char *must) {
 		error = std::string("\"drag.") + member + "\" must be " + must + ".";
@@ -666,7 +638,7 @@ bool drag_from_json(const JsonValue &json, ViewportDrag &out, std::string &error
 	};
 	ViewportDrag drag;
 	const JsonValue *id = json.get("id");
-	if (!id || !read_id(*id, drag.id) || drag.id == 0) return refuse("id", "a record identity");
+	if (!id || !io::json_exact_whole(*id, drag.id) || drag.id == 0) return refuse("id", "a record identity");
 	const JsonValue *handle = json.get("handle");
 	if (!handle || !handle->is_string() || handle->string.empty()) return refuse("handle", "a handle's token");
 	drag.handle = handle->string;
@@ -683,7 +655,7 @@ bool drag_from_json(const JsonValue &json, ViewportDrag &out, std::string &error
 	drag.by = by != nullptr;
 	if (const JsonValue *snap = json.get("snap"); snap && (!io::json_float(*snap, drag.snap) || drag.snap < 0.0f))
 		return refuse("snap", "a number, 0 or more");
-	if (const JsonValue *gesture = json.get("gesture"); gesture && !read_id(*gesture, drag.gesture))
+	if (const JsonValue *gesture = json.get("gesture"); gesture && !io::json_exact_whole(*gesture, drag.gesture))
 		return refuse("gesture", "a gesture's token, a whole number");
 	if (const JsonValue *end = json.get("end")) {
 		if (!end->is_bool()) return refuse("end", "true or false");
@@ -729,7 +701,7 @@ bool command_from_json(const JsonValue &json, ViewportCommand &out, std::string 
 		error = "\"command\" must be an object {name, ids, kind, by, at, mode, item, handle, field, value}.";
 		return false;
 	}
-	if (!members_known(json, {"name", "ids", "kind", "by", "at", "mode", "item", "handle", "field", "value"}, "command",
+	if (!io::json_members_known(json, {"name", "ids", "kind", "by", "at", "mode", "item", "handle", "field", "value"}, "command",
 			error))
 		return false;
 	ViewportCommand command;
@@ -747,7 +719,7 @@ bool command_from_json(const JsonValue &json, ViewportCommand &out, std::string 
 		}
 		for (size_t i = 0; i < ids->array.size(); ++i) {
 			NodeId id = 0;
-			if (!read_id(ids->array[i], id) || id == 0) {
+			if (!io::json_exact_whole(ids->array[i], id) || id == 0) {
 				error = "\"command.ids[" + std::to_string(i) + "]\" must be a record identity.";
 				return false;
 			}
@@ -834,7 +806,7 @@ bool drop_from_json(const JsonValue &json, ViewportDrop &out, std::string &error
 		error = "\"drop\" must be an object {file | reference + name, at, to, snap, kind}.";
 		return false;
 	}
-	if (!members_known(json, {"file", "reference", "name", "at", "to", "snap", "kind"}, "drop", error)) return false;
+	if (!io::json_members_known(json, {"file", "reference", "name", "at", "to", "snap", "kind"}, "drop", error)) return false;
 	const auto text = [&](const char *member, std::string &into) {
 		const JsonValue *value = json.get(member);
 		if (!value) return true;
@@ -888,7 +860,7 @@ bool import_choice_from_json(const JsonValue &json, ImportChoice &out, std::stri
 		error = kImportsShape;
 		return false;
 	}
-	if (!members_known(json, {"path", "entry", "install", "native", "as"}, "import", error)) return false;
+	if (!io::json_members_known(json, {"path", "entry", "install", "native", "as"}, "import", error)) return false;
 	ImportChoice import;
 	if (!read_string(json, "path", import.path, error) ||
 	    !read_string(json, "entry", import.entry, error) ||
@@ -1036,10 +1008,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::Behind: return flag_of(json, token, request.behind, error);
 	case F::Fresh: return flag_of(json, token, request.fresh, error);
 	case F::Plan:
-		if (json.is_number() && json.number >= 0.0 && json.number == std::floor(json.number) && json.number <= 9007199254740992.0) {
-			request.plan = uint64_t(json.number);
-			return true;
-		}
+		if (io::json_exact_whole(json, request.plan)) return true;
 		error = std::string("\"") + token + "\" must be a whole number, 0 or more.";
 		return false;
 	case F::Report: return flag_of(json, token, request.report, error);
@@ -1113,9 +1082,9 @@ bool field_to_json(
 		out = JsonValue::make_object();
 		for (const auto &entry : request.values) out.set(entry.first, json_string(entry.second));
 		return !request.values.empty();
-	case F::Roles: out = strings_to_json(request.roles); return !request.roles.empty();
-	case F::Names: out = strings_to_json(request.names); return !request.names.empty();
-	case F::Paths: out = strings_to_json(request.paths); return !request.paths.empty();
+	case F::Roles: out = io::json_string_array(request.roles); return !request.roles.empty();
+	case F::Names: out = io::json_string_array(request.names); return !request.names.empty();
+	case F::Paths: out = io::json_string_array(request.paths); return !request.paths.empty();
 	case F::Imports:
 		out = JsonValue::make_array();
 		for (const ImportChoice &source : request.imports) out.push(import_choice_to_json(source));
@@ -1963,7 +1932,7 @@ JsonValue reference_completion_to_json(const Document &document, const NodeAddre
 		JsonValue typed_json = JsonValue::make_object();
 		typed_json.set("status", json_string(reference_status_token(status)));
 		const size_t limit = field_name_limit(picking);
-		typed_json.set("fits", boolean(!limit || name_characters(typed) <= limit));
+		typed_json.set("fits", boolean(!limit || strutil::utf8_length(typed) <= limit));
 		std::vector<ReferenceTarget> targets =
 		        graph && view.project.scan ? reference_targets(*graph, *view.project.scan, picking, as_typed)
 		                                   : std::vector<ReferenceTarget>();

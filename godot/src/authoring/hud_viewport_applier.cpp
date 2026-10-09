@@ -94,7 +94,7 @@ void HudViewportApplier::rebuild(const opennova::editor::ViewportModel &model, c
 	HudOverlay *hud = overlay();
 	if (!hud || !view.findings.assets) return;
 	// The project's files, the open documents standing in for theirs, each read noted with its stamp.
-	stamped_ = std::make_shared<opennova::editor::StampedFiles>(view.findings.assets);
+	stamped_ = std::make_shared<opennova::StampedFiles>(view.findings.assets);
 	root_->mount_files(stamped_);
 	Ref<HudPos> layout;
 	layout.instantiate();
