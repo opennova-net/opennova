@@ -71,11 +71,6 @@ struct MissionPose {
 	uint32_t stamp = 0; // moves when anything above does
 };
 
-// Whether an item's ai_function names a person class whose definition callback is the organic init
-// (org0, org1): the init that poses its spawn and resolves its ammo bytes and launch points
-// (world::resolve_organic_weapons).
-bool person_class(const std::string &ai_function);
-
 // What a person's spawn reads of its definition (its item's first row: its class, its .adm, its
 // attributes) and of its record (its SSN, its route, its attributes).
 struct PersonDefinition {
@@ -117,8 +112,6 @@ void mission_pose_people(const std::vector<MissionPoseInput> &inputs,
 // Entity_WarmUpOrganicAnimation @0x4B8BD8..0x4B8BF5]). INT32_MAX with no terrain read.
 int32_t mission_pose_clearance(const MissionPose &pose, double x, double y, double z,
 		const terrain::TerrainHeightField *terrain);
-// The clearance under which the warmup sets a body down: one unit [orig: `cmp eax, 10000h` @0x4B8BE7].
-inline constexpr int32_t kMissionPoseSettle = 65536;
 
 // The poses of a mission's people (MissionViewport's, ADR 0046 S14's device draws them): every
 // organic of the scene posed again where its records, the project's graph or a file the poses
