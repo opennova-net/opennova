@@ -1,8 +1,8 @@
 // A model's collision shown in its viewport (ADR 0046 S17, Models: "we should be able to see the
 // collisions").
 //
-// Synthetic: a box's six planes make the box's solid (six facets, its eight corners); every synthetic
-// model's collision becomes shapes: a shape per bullet face whose corners lie on a triangle of the
+// Synthetic (a volume's solid itself is tests/threedi/volume_solid_test.cpp's): every synthetic model's
+// collision becomes shapes: a shape per bullet face whose corners lie on a triangle of the
 // collision LOD as the preview draws it (the mission axes taken to the preview's space as the render
 // vertices are), a solid per volume inside its stored box, a sphere per section that stores one (a
 // person's hit spheres at the game's radius), the bounds; each record's shape maps to its record and
@@ -33,6 +33,8 @@
 #include <formats/threedi/threedi_panm_pose.h>
 #include <runtime/assets/asset_store.h>
 #include <formats/threedi/threedi_strip_decode.h>
+#include <formats/threedi/threedi_volume_solid.h>
+#include <runtime/world/collision.h>
 
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
@@ -82,43 +84,6 @@ bool inside_box(const std::vector<std::vector<ThreediBuildVec3>> &polygons, cons
 	return past_box(polygons, v) <= 0.002;
 }
 
-int box_planes_make_the_box() {
-	// The six planes of the box -1..2 x 0..1 x 0..3 (n . p + d <= 0 inside).
-	ThreediBoundingPlane planes[6] = {};
-	const float n[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
-	const float d[6] = {-2, -1, -1, 0, -3, 0};
-	for (int i = 0; i < 6; ++i) {
-		std::copy(n[i], n[i] + 3, planes[i].normal);
-		planes[i].radius = d[i];
-	}
-	const auto polygons = model_volume_polygons(planes, 6, false);
-	TEST_EXPECT(polygons.size() == 6);
-	std::set<std::string> corners;
-	for (const auto &polygon : polygons) {
-		TEST_EXPECT(polygon.size() == 4);
-		for (const ThreediBuildVec3 &p : polygon) {
-			char key[64];
-			// Rounded to the millimetre, + 0.0: a -0 prints as "-0.000".
-			const auto mm = [](double v) { return std::round(v * 1000.0) / 1000.0 + 0.0; };
-			std::snprintf(key, sizeof(key), "%.3f %.3f %.3f", mm(p.x), mm(p.y), mm(p.z));
-			corners.insert(key);
-		}
-	}
-	TEST_EXPECT(corners.size() == 8 && corners.count("-1.000 0.000 0.000") && corners.count("2.000 1.000 3.000"));
-	// Five planes bound no solid; a ladder of them keeps its facing (plane 0) when it has a polygon.
-	TEST_EXPECT(model_volume_polygons(planes, 5, false).empty());
-	// Planes reaching past the volume's box: its solid is the part within the box (the quick test).
-	ThreediBoundingVolume within{};
-	within.collidable_type = 1;
-	within.plane_count = 6;
-	within.max_x_fp16 = within.max_y_fp16 = within.max_z_fp16 = 0x10000;
-	const auto clipped = model_volume_solid(within, planes);
-	TEST_EXPECT(!clipped.empty() && inside_box(clipped, within));
-	TEST_EXPECT(model_volume_solid(within, planes).size() >= 6);
-	std::printf("volumes: a box's planes make the box (6 facets, 8 corners)\n");
-	return 0;
-}
-
 int synthetic_shapes() {
 	int models = 0;
 	size_t frames_checked = 0;
@@ -161,7 +126,7 @@ int synthetic_shapes() {
 		size_t plane_cursor = 0;
 		for (size_t v = 0; v < model.collision->volume_count; ++v) {
 			const ThreediBoundingVolume &bv = model.collision->volumes[v];
-			const auto polygons = model_volume_solid(bv, model.collision->planes + plane_cursor);
+			const auto polygons = threedi_volume_solid(bv, model.collision->planes + plane_cursor);
 			TEST_EXPECT(inside_box(polygons, bv));
 			plane_cursor += size_t(bv.plane_count);
 		}
@@ -313,13 +278,10 @@ int a_person_and_a_live_part() {
 		if (s.legend != "Hit spheres") continue;
 		++hits;
 		const ThreediCollisionObject &object = person.model_row()->base->collision->objects[size_t(s.index)];
-		TEST_EXPECT(std::fabs(s.radius - model_person_hit_radius_q16(s.index, object.radius) / 65536.0f) < 1e-6f);
+		TEST_EXPECT(std::fabs(s.radius - opennova::world::person_effective_radius(s.index, object.radius, 0) / 65536.0f) < 1e-6f);
 		TEST_EXPECT(s.name.rfind("Hit sphere of BN", 0) == 0);
 	}
 	TEST_EXPECT(hits > 0);
-	TEST_EXPECT(model_person_hit_radius_q16(0, 0x10000) == 0xCCC + 0x10000 * 45 / 100);
-	TEST_EXPECT(model_person_hit_radius_q16(14, 0x10000) == 0xCCC + 0x10000 * 65 / 100);
-	TEST_EXPECT(model_person_hit_radius_q16(15, 0x10000) == 0x3000);
 
 	// A volume type in the game's words; a type the game lists nothing for is solid.
 	TEST_EXPECT(std::string(model_volume_type(4).words) == "ladder" && model_volume_type(4).family == ModelVolumeFamily::Ladder);
@@ -458,9 +420,9 @@ int retail_collision() {
 				const size_t planes = bv.plane_count > 0 ? size_t(bv.plane_count) : 0;
 				if (plane_cursor + planes > c.plane_count) break;
 				// The planes' own solid, then within the box (the game's quick test): how many reach past it.
-				const bool reaches = !inside_box(model_volume_polygons(c.planes + plane_cursor, planes, bv.collidable_type == 4), bv);
+				const bool reaches = !inside_box(threedi_volume_polygons(c.planes + plane_cursor, planes, bv.collidable_type == 4), bv);
 				clipped += reaches ? 1 : 0;
-				const auto polygons = model_volume_solid(bv, c.planes + plane_cursor);
+				const auto polygons = threedi_volume_solid(bv, c.planes + plane_cursor);
 				plane_cursor += planes;
 				++volumes;
 				if (polygons.empty()) ++boxes;
@@ -521,7 +483,6 @@ int retail_collision() {
 
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
-	if (box_planes_make_the_box() != 0) return 1;
 	if (synthetic_shapes() != 0) return 1;
 	if (a_person_and_a_live_part() != 0) return 1;
 	if (a_part_no_node_drives() != 0) return 1;
