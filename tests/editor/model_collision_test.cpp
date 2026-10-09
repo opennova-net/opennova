@@ -35,6 +35,7 @@
 #include <formats/threedi/threedi_strip_decode.h>
 #include <formats/threedi/threedi_volume_solid.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/model_geometry.h>
 
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
@@ -452,7 +453,7 @@ int retail_collision() {
 				bool bones = false, person = false;
 				for (size_t o = 0; o < c.object_count; ++o) {
 					bones = bones || (c.objects[o].num_faces == 0 && c.objects[o].num_bounding_volumes == 0 && c.objects[o].radius > 0);
-					person = person || model_section_is_person(*row->base, o);
+					person = person || opennova::world::model_section_is_person_sphere(*row->base, o);
 				}
 				if (bones) {
 					(person ? persons : not_persons) += 1;

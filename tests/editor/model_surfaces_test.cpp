@@ -36,6 +36,7 @@
 #include <formats/threedi/threedi_o3d_lower.h>
 #include <formats/threedi/threedi_strip_decode.h>
 #include <runtime/renderer/model_target.h>
+#include <runtime/renderer/object_lod.h>
 
 #include "common/file_io.h"
 #include "common/retail_paths.h"
@@ -317,7 +318,8 @@ int words() {
 	levels.lods[1].lod.lod_threshold = 0;
 	levels.lods[2].lod.lod_threshold = 0;
 	TEST_EXPECT(model_lod_range(levels, 0) == "above 160 px" && model_lod_range(levels, 1) == "below 160 px");
-	TEST_EXPECT(!model_lod_drawn(levels, 2) && model_lod_range(levels, 2).rfind("never", 0) == 0);
+	TEST_EXPECT(!opennova::renderer::object_lod_reachable(model_lod_thresholds(levels), 2) &&
+	            model_lod_range(levels, 2).rfind("never", 0) == 0);
 	// The last LOD draws at every size below the one before it whatever its own threshold (the walk past
 	// the last draws the last, @ 0x5c3b58), and a single LOD at any size (18 retail models end on a
 	// positive threshold; Wcrate3X's one LOD is 30).

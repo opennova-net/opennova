@@ -12,6 +12,7 @@
 #include <formats/def/def.h>
 #include <runtime/anim/adm_clip_index.h>
 #include <runtime/anim/adm_fallback.h>
+#include <runtime/assets/asset_store.h>
 #include <runtime/inmatch/character_registry.h>
 #include <runtime/world/player_view.h>
 #include <runtime/world/weapon_table_build.h>
@@ -338,13 +339,11 @@ void FirstPersonSources::read_characters_(const FileSource &files) {
 }
 
 bool FirstPersonSources::read_arms_(const FileSource &files, const AssetScan *scan) {
-	// The arms graphic as the game's model store names its file: its base name with .3di.
+	// The arms graphic as the game's model store names its file: its base name with .3di (the store's own
+	// rule, assets::asset_file_name).
 	std::string file;
 	if (spec_.show_arms && scan) {
-		std::string base = file_of(spec_.arms);
-		const size_t dot = base.find_last_of('.');
-		if (dot != std::string::npos) base.resize(dot);
-		const AssetEntry *entry = scan->find(base + ".3di");
+		const AssetEntry *entry = scan->find(assets::asset_file_name(spec_.arms, ".3di", true));
 		if (entry && entry->kind == AssetKind::Model) file = entry->logical_name;
 	}
 	const uint64_t stamp = file.empty() ? 0 : files.stamp(file);
