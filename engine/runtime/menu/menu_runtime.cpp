@@ -1454,22 +1454,9 @@ void MenuRuntime::process_mouse(float x, float y, bool button_down, uint32_t now
 	}
 
 	// The press first: its message reaches the windows under the mouse ahead of the frame's pump
-	// [orig: Input_DispatchMouseEvent -> UI_DispatchMouseEvent @ 0x63ab00 on WM_LBUTTONDOWN; the
-	// pump, CUIScene_EndFrame @ 0x63e600, at the frame's end]: the frame runs the scrollbar windows'
-	// own (a value they change arrives through on_frame_scroll_value), the widgets' are ours, front
-	// to back (MenuFrameCompiler::press_reach, D-MNU-33). One may show another screen.
+	// (press_reach_).
 	if (down_edge) {
-		const uint32_t pressed_on = open_generation_;
-		const std::string pressed_screen = current_screen_;
-		const std::vector<MenuPumpWindow> reach = frame_->press_mouse(x, y);
-		for (size_t i = 0; i < reach.size(); ++i) {
-			if (reach[i].part != 0) continue; // a spin arrow, a scrollbar's window: the frame's
-			const bool again = std::find(reach.begin(), reach.begin() + static_cast<std::ptrdiff_t>(i),
-									   reach[i]) != reach.begin() + static_cast<std::ptrdiff_t>(i);
-			press_(reach[i].index, x, y, now_ms, again);
-			if (frame_ == nullptr || open_generation_ != pressed_on || current_screen_ != pressed_screen)
-				break;
-		}
+		press_reach_(x, y, now_ms);
 		if (frame_ == nullptr) return;
 	}
 	// A click inside the frame's pump (on_widget_clicked) may show another screen or open another
@@ -1485,6 +1472,35 @@ void MenuRuntime::process_mouse(float x, float y, bool button_down, uint32_t now
 		last_claim_ = claim;
 	}
 	if (frame_ != nullptr) frame_->apply_claim_cursor();
+}
+
+bool MenuRuntime::press_mouse(float x, float y, uint32_t now_ms) {
+	if (frame_ == nullptr || !frame_->is_configured()) return false;
+	sync_popup_();
+	// An open dropdown's press is its sample's (process_mouse); a held button is no press.
+	if (open_combo_id_ >= 0 || mouse_down_) return false;
+	mouse_down_ = true;
+	press_reach_(x, y, now_ms);
+	return true;
+}
+
+void MenuRuntime::press_reach_(float x, float y, uint32_t now_ms) {
+	// Its message reaches the windows under the mouse ahead of the frame's pump [orig:
+	// Input_DispatchMouseEvent -> UI_DispatchMouseEvent @ 0x63ab00 on WM_LBUTTONDOWN; the pump,
+	// CUIScene_EndFrame @ 0x63e600, at the frame's end]: the frame runs the scrollbar windows' own (a
+	// value they change arrives through on_frame_scroll_value), the widgets' are ours, front to back
+	// (MenuFrameCompiler::press_reach, D-MNU-33). One may show another screen.
+	const uint32_t pressed_on = open_generation_;
+	const std::string pressed_screen = current_screen_;
+	const std::vector<MenuPumpWindow> reach = frame_->press_mouse(x, y);
+	for (size_t i = 0; i < reach.size(); ++i) {
+		if (reach[i].part != 0) continue; // a spin arrow, a scrollbar's window: the frame's
+		const bool again = std::find(reach.begin(), reach.begin() + static_cast<std::ptrdiff_t>(i),
+								   reach[i]) != reach.begin() + static_cast<std::ptrdiff_t>(i);
+		press_(reach[i].index, x, y, now_ms, again);
+		if (frame_ == nullptr || open_generation_ != pressed_on || current_screen_ != pressed_screen)
+			break;
+	}
 }
 
 bool MenuRuntime::process_wheel(float x, float y, int steps) {

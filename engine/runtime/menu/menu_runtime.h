@@ -546,6 +546,14 @@ public:
 	// an edit takes the focus; a list, a table and a spin list's body are
 	// activated and then pick (a row, or the spin's next value).
 	void process_mouse(float x, float y, bool button_down, uint32_t now_ms);
+	// The press alone, as its message arrives: the left button's down message is dispatched to the
+	// windows under the mouse when it comes [orig: Menu_ShellMouseCallback @ 0x54b8f0 ->
+	// UI_DispatchMouseEvent @ 0x63ab00], and the pump (process_mouse: hover, the click, the sounds)
+	// runs once a frame after the messages [orig: Menu_UpdateFrame @ 0x5528a0, Game_PumpWindowMessages
+	// @ 0x5528d3 then CUIScene_EndFrame @ 0x5528de]. The next process_mouse with the button down then
+	// takes no second press. False, and nothing done, while a dropdown is open (its sample takes its
+	// press) or the button is held.
+	bool press_mouse(float x, float y, uint32_t now_ms);
 	// One wheel tick (+1 rows-down, -1 rows-up); true when a target claimed it.
 	bool process_wheel(float x, float y, int steps);
 	// The frame reported a click on widget `index` (the claim let go over that
@@ -626,6 +634,8 @@ private:
 	// CUIScene_EndFrame @ 0x63e600 pumps the popup alone].
 	void sample_sounds_(int claim, bool button_down);
 	bool sound_reached_(int id) const;
+	// The press's reach at (x, y): the windows its message reaches, front to back.
+	void press_reach_(float x, float y, uint32_t now_ms);
 	// The press (WM_LBUTTONDOWN) of the widget at `index`.
 	// A widget's own press; `again` the captured window's press a root behind its own hands it
 	// (MenuFrameCompiler::press_reach), the same message: a double click's form is the first's.

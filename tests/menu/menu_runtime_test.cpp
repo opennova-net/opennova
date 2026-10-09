@@ -165,7 +165,9 @@ struct FakeFrame : MenuFrameSeam {
 		sx = 2.0f;
 		sy = 2.0f;
 	}
+	int press_calls = 0;
 	std::vector<MenuPumpWindow> press_mouse(float, float) override {
+		++press_calls;
 		if (!reach.empty()) return reach;
 		if (claim < 0) return {};
 		return { MenuPumpWindow{ claim, scroll_owned ? kMenuPumpPartScroll : 0 } };
@@ -841,6 +843,15 @@ void test_sound_edges() {
 	frame.claim = 1;
 	rt.process_mouse(6, 5, false, 0);
 	CHECK(sounds() == "OVER_B CLICK_B OVER_B OUT_B");
+	// The press as its message arrives, the pump at the frame (press_mouse): the frame's sample with
+	// the button down then takes no second press; a held button takes none.
+	const int pressed = frame.press_calls;
+	CHECK(rt.press_mouse(6, 5, 0) && frame.press_calls == pressed + 1);
+	CHECK(!rt.press_mouse(6, 5, 0) && frame.press_calls == pressed + 1);
+	rt.process_mouse(6, 5, true, 0);
+	CHECK(frame.press_calls == pressed + 1);
+	rt.process_mouse(6, 5, false, 0);
+	CHECK(rt.press_mouse(6, 5, 0) && frame.press_calls == pressed + 2);
 }
 
 void test_mouse() {

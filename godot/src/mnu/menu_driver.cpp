@@ -766,6 +766,11 @@ void MenuDriver::process_mouse(const Vector2 &p_position, bool p_button_down) {
 			static_cast<uint32_t>(Time::get_singleton()->get_ticks_msec()));
 }
 
+bool MenuDriver::press_mouse(const Vector2 &p_position) {
+	return runtime_.press_mouse(p_position.x, p_position.y,
+			static_cast<uint32_t>(Time::get_singleton()->get_ticks_msec()));
+}
+
 bool MenuDriver::process_wheel(const Vector2 &p_position, int p_steps) {
 	return runtime_.process_wheel(p_position.x, p_position.y, p_steps);
 }
@@ -1164,6 +1169,7 @@ void MenuDriver::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("process_mouse", "position", "button_down"),
 			&MenuDriver::process_mouse);
+	ClassDB::bind_method(D_METHOD("press_mouse", "position"), &MenuDriver::press_mouse);
 	ClassDB::bind_method(D_METHOD("process_wheel", "position", "steps"),
 			&MenuDriver::process_wheel);
 	ClassDB::bind_method(D_METHOD("handle_key_input", "event"), &MenuDriver::handle_key_input);

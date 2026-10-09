@@ -335,6 +335,9 @@ public:
 
 	// --- input (the shell's _gui_input owners forward here) ---
 	void process_mouse(const Vector2 &p_position, bool p_button_down);
+	// The left button's press as its event arrives (MenuRuntime::press_mouse); the shell's
+	// per-frame process_mouse then pumps.
+	bool press_mouse(const Vector2 &p_position);
 	bool process_wheel(const Vector2 &p_position, int p_steps);
 	bool handle_key_input(const Ref<InputEventKey> &p_event);
 	void close_active_combo_popup();

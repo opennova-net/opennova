@@ -157,6 +157,13 @@ var _companions: Array = []
 # The companion wired to the current document (null when the shell's generic
 # wiring runs); the next document swap releases it if it loses ownership.
 var _wired_companion: MenuCompanion = null
+# The mouse as the frame's pump samples it (update_menu_frame): its last frame-local position
+# and the left button, which the input events keep; the press goes to the windows as its
+# event arrives (MenuDriver.press_mouse), the pump once a frame after the events, as the
+# original's menu frame does (engine/runtime/menu/menu_runtime.h, press_mouse).
+var _mouse_local := Vector2.ZERO
+var _mouse_left := false
+var _mouse_seen := false
 
 
 
@@ -180,6 +187,10 @@ func _process(delta: float) -> void:
 ## tick the way the mode loop does.
 ## retail: Menu_UpdateFrame @ 0x5528a0 (the mode struct's update slot @ 0x83b404).
 func update_menu_frame(delta: float = 0.0) -> void:
+	# The pump, once a frame after the input events: hover, the click and the
+	# window sounds of the mouse as the events left it.
+	if _driver != null and _mouse_seen and is_visible_in_tree():
+		_driver.process_mouse(_mouse_local, _mouse_left)
 	# The blink/marquee clock rides the OS tick like the original's
 	# GetTickCount gate.
 	if _driver != null:
@@ -375,12 +386,17 @@ func _gui_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion:
 		var motion := event as InputEventMouseMotion
-		_driver.process_mouse(motion.position,
-				(motion.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0)
+		_mouse_local = motion.position
+		_mouse_left = (motion.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0
+		_mouse_seen = true
 	elif event is InputEventMouseButton:
 		var button := event as InputEventMouseButton
 		if button.button_index == MOUSE_BUTTON_LEFT:
-			_driver.process_mouse(button.position, button.pressed)
+			_mouse_local = button.position
+			if button.pressed and not _mouse_left:
+				_driver.press_mouse(button.position)
+			_mouse_left = button.pressed
+			_mouse_seen = true
 			accept_event()
 		elif button.pressed and (button.button_index == MOUSE_BUTTON_WHEEL_DOWN \
 				or button.button_index == MOUSE_BUTTON_WHEEL_UP):

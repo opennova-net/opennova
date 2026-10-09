@@ -251,8 +251,11 @@ func test_right_button_never_clicks() -> void:
 			Input.parse_input_event(event)
 			await get_tree().process_frame
 		if button == MOUSE_BUTTON_RIGHT:
+			await get_tree().process_frame
 			assert_signal_not_emitted(shell, "exit_to_desktop_requested",
 					"the right button never clicks a window")
+	# The click is the frame pump's, once a frame after the events (update_menu_frame).
+	await get_tree().process_frame
 	assert_signal_emitted(shell, "exit_to_desktop_requested", "the left button's click reaches EXIT")
 	_cleanup(dir)
 
