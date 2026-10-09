@@ -172,13 +172,13 @@ bool TextDocument::apply_edits(const std::vector<Edit> &edits, Diagnostic &error
 		if (is_line_ends_restore(edit)) {
 			// Each LF that ends a line alone written CR LF: the span from the first to the last.
 			size_t count = 0;
-			const size_t first = first_lone_lf(text_, &count);
+			const size_t first = strutil::first_lone_lf(text_, &count);
 			if (first == std::string::npos) continue;
 			size_t last = text_.size();
 			while (last-- > first)
 				if (text_[last] == '\n' && (last == 0 || text_[last - 1] != '\r')) break;
 			const std::string removed = text_.substr(first, last + 1 - first);
-			TextReplacement replacement{first, removed, with_crlf_line_ends(removed)};
+			TextReplacement replacement{first, removed, strutil::with_crlf_line_ends(removed)};
 			replace_at(first, replacement.removed.size(), replacement.inserted);
 			batch.push_back(std::move(replacement));
 			continue;

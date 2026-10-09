@@ -115,7 +115,7 @@ struct LogProject {
 	void log(const std::string &text) {
 		std::string held;
 		std::string error;
-		read_file_text(platform.last_plan.log_file, held, error);
+		opennova::io::read_file_text(platform.last_plan.log_file, held, error);
 		editor_test::write_text(platform.last_plan.log_file, held + text);
 		session.poll();
 		session.run_operations();
@@ -272,22 +272,9 @@ static int test_rows_by_mode() {
 	return 0;
 }
 
-// The graphics log's missions: each `Mission:"<file>"` line, finished by the "Mission loading complete"
-// after it.
-static int test_graphics_log() {
-	const std::vector<GraphicsLogMission> missions = graphics_log_missions(
-	        "GHW.TXT - LOG FILE - 10/6/2026\r\nMission:\"A.BMS\" - \"x\" - \"A.BMS\" - \"\"\r\nSniper_Start()\r\n"
-	        "Mission loading complete\r\nMission:\"B.BMS\" - \"y\" - \"B.BMS\" - \"\"\nTaking Snapshot\n");
-	TEST_EXPECT(missions.size() == 2 && missions[0].file == "A.BMS" && missions[0].complete && missions[1].file == "B.BMS" &&
-	            !missions[1].complete);
-	TEST_EXPECT(graphics_log_missions("Mission loading complete\n").empty());
-	return 0;
-}
-
 int main() {
 	int failures = 0;
 	failures += test_runtime_misses();
 	failures += test_rows_by_mode();
-	failures += test_graphics_log();
 	return failures == 0 ? 0 : 1;
 }

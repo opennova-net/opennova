@@ -191,7 +191,7 @@ std::vector<ImportSourceInput> import_source_inputs(const std::string &source_na
 			                " reads it at " + input.destination + ".";
 		} else {
 			std::string error;
-			if (!read_file_bytes(join_path(beside, path), input.bytes, error))
+			if (!io::read_file_bytes(join_path(beside, path), input.bytes, error))
 				input.problem = source_name + " reads " + path + ", which is not beside it: " + error;
 		}
 		out.push_back(std::move(input));
@@ -390,7 +390,7 @@ private:
 				return false;
 			}
 		} else if (source.entry.empty()) {
-			if (!read_file_bytes(source.path, bytes, io_error)) {
+			if (!io::read_file_bytes(source.path, bytes, io_error)) {
 				refuse(CoreFinding::ImportRead, io_error, name);
 				return false;
 			}
@@ -515,7 +515,7 @@ private:
 			const AssetEntry *prior = existing_.find(output.name);
 			if (prior && !replace_existing_) {
 				std::vector<uint8_t> held;
-				if (read_file_bytes(join_path(paths_.root, prior->relative_path), held, io_error) &&
+				if (io::read_file_bytes(join_path(paths_.root, prior->relative_path), held, io_error) &&
 				    held == output.bytes)
 					continue;
 				refuse(CoreFinding::ImportExists, output.name + " already exists; select Replace existing files to replace it.",
@@ -584,14 +584,14 @@ private:
 				return false;
 			}
 			stage_ = path_of(paths_.staging_dir) / std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
-			if (!ensure_directory(utf8_of(stage_), io_error))
+			if (!io::ensure_directory(utf8_of(stage_), io_error))
 				return stage_failed(utf8_of(stage_), io_error, std::string());
 		}
 		const fs::path destination = path_of(paths_.root) / path_of(output.relative);
 		for (fs::path &folder : missing_folders(destination.parent_path())) folders_.push_back(std::move(folder));
 		const std::string file = utf8_of(stage_ / std::to_string(outputs_.size()));
-		if (!ensure_directory(utf8_of(destination.parent_path()), io_error) ||
-		    !write_file_atomic(file, bytes.data(), bytes.size(), io_error))
+		if (!io::ensure_directory(utf8_of(destination.parent_path()), io_error) ||
+		    !io::write_file_atomic(file, bytes.data(), bytes.size(), io_error))
 			return stage_failed(output.relative, io_error, output.name);
 		cost_ += bytes.size();
 		output.staged = file;
@@ -619,9 +619,9 @@ private:
 		const fs::path destination = path_of(paths_.root) / path_of(output.relative);
 		const fs::path record = path_of(utf8_of(destination) + kImportSidecarSuffix);
 		std::string failed, why;
-		if (!output.staged_record.empty() && !replace_file(output.staged_record, utf8_of(record), why))
+		if (!output.staged_record.empty() && !io::replace_file(output.staged_record, utf8_of(record), why))
 			failed = output.relative + kImportSidecarSuffix;
-		if (failed.empty() && !replace_file(output.staged, utf8_of(destination), why)) {
+		if (failed.empty() && !io::replace_file(output.staged, utf8_of(destination), why)) {
 			failed = output.relative;
 			std::error_code ignored;
 			if (!output.staged_record.empty()) fs::remove(record, ignored);
