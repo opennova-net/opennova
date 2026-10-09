@@ -137,12 +137,15 @@ int count_bit_width(int value) {
 	return result;
 }
 
-void write_depth_section(BitWriter &bits,
+// False, with `error`, for a depth buffer the section cannot carry.
+bool write_depth_section(BitWriter &bits,
                          DepthFormat depth_format,
-                         const std::vector<uint16_t> &depth_buffer) {
+                         const std::vector<uint16_t> &depth_buffer,
+                         std::string &error) {
 	if (depth_format == DepthFormat::CDEP && !depth_buffer.empty()) {
 		if (depth_buffer.size() % 4096u != 0u) {
-			throw std::runtime_error("CDEP depth buffer must divide evenly into 4096 blocks");
+			error = "CDEP depth buffer must divide evenly into 4096 blocks";
+			return false;
 		}
 
 		bits.write_bytes("CDEP", 4);
@@ -177,7 +180,8 @@ void write_depth_section(BitWriter &bits,
 
 			const int width = count_bit_width(range + 1);
 			if (width > 15) {
-				throw std::runtime_error("CDEP block range exceeds 15-bit delta limit");
+				error = "CDEP block range exceeds 15-bit delta limit";
+				return false;
 			}
 
 			bits.write_field(4, static_cast<uint32_t>(width));
@@ -197,26 +201,30 @@ void write_depth_section(BitWriter &bits,
 			opennova::io::logf(opennova::io::LogLevel::kWarn,
 		"CDEP: clamped %d block(s) to 15-bit delta limit", clamped_blocks);
 		}
-		return;
+		return true;
 	}
 
 	bits.write_bytes("DPTH", 4);
 	if (!depth_buffer.empty()) {
 		bits.write_bytes(depth_buffer.data(), depth_buffer.size() * sizeof(uint16_t));
 	}
+	return true;
 }
 
-void write_poly_section(BitWriter &bits, const std::vector<CptTile> &tiles) {
+// False, with `error`, for a tile the section cannot carry.
+bool write_poly_section(BitWriter &bits, const std::vector<CptTile> &tiles, std::string &error) {
 	bits.align_dword();
 	bits.write_bytes("POLY", 4);
 
 	for (const CptTile &tile : tiles) {
 		const int bit_width = count_bit_width(static_cast<int>(tile.tile_size));
 		if (bit_width <= 0) {
-			throw std::runtime_error("CPT tile_size must be positive");
+			error = "CPT tile_size must be positive";
+			return false;
 		}
 		if (tile.vertex_indices.size() < static_cast<size_t>(tile.vertex_count) * 2u) {
-			throw std::runtime_error("CPT tile vertex index payload is truncated");
+			error = "CPT tile vertex index payload is truncated";
+			return false;
 		}
 
 		bits.align_dword();
@@ -268,6 +276,7 @@ void write_poly_section(BitWriter &bits, const std::vector<CptTile> &tiles) {
 			}
 		}
 	}
+	return true;
 }
 
 } // namespace
@@ -458,17 +467,25 @@ CptFile CptFile::read(const std::string &path) {
 	return cpt;
 }
 
-std::vector<uint8_t> CptFile::write_bytes() const {
+bool save_cpt(const CptFile &cpt, std::vector<uint8_t> &out, std::string &error) {
 	BitWriter bits;
 
-	Header raw_header = header;
-	raw_header.magic = MAGIC;
+	CptFile::Header raw_header = cpt.header;
+	raw_header.magic = CptFile::MAGIC;
 
-	bits.write_bytes(&raw_header, sizeof(Header));
+	bits.write_bytes(&raw_header, sizeof(CptFile::Header));
 	bits.align_dword();
-	write_depth_section(bits, depth_format, depth_buffer);
-	write_poly_section(bits, tiles);
-	return bits.bytes();
+	if (!write_depth_section(bits, cpt.depth_format, cpt.depth_buffer, error)) return false;
+	if (!write_poly_section(bits, cpt.tiles, error)) return false;
+	out = bits.bytes();
+	return true;
+}
+
+std::vector<uint8_t> CptFile::write_bytes() const {
+	std::vector<uint8_t> bytes;
+	std::string error;
+	if (!save_cpt(*this, bytes, error)) throw std::runtime_error(error);
+	return bytes;
 }
 
 void CptFile::write(const std::string &path) const {

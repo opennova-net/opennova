@@ -772,6 +772,32 @@ public:
 	// The window a press's reach leaves holding the capture (none: no window it
 	// reached captures) [orig: CButtonWnd_HandleNamedEvent @ 0x65839c].
 	MenuPumpWindow press_capture(const std::vector<MenuPumpWindow> &reach) const;
+	// The press through an embedder's click latch (menu_click.h): the windows it
+	// reaches (press_reach), and the capture `click` takes from them
+	// (press_capture). An embedder that pumps hands each window reached its own
+	// scrollbar press next (press_scroll_window).
+	std::vector<MenuPumpWindow> press_mouse(MenuClickLatch &click, const MenuFrameState &state,
+			float mouse_x, float mouse_y, float scale_x, float scale_y) const;
+	// One sample of the mouse through an embedder's click latch, as the game's
+	// frame takes it: the claim honors a press's capture, which the release lets
+	// go first (MenuClickLatch::capture_for); then the click, the claim let go
+	// over that was held the sample before (MenuClickLatch::sample) [orig:
+	// CWnd_ProcessMouseEvent @ 0x647b14, the click event 0x3000001 after the
+	// child pump]. A clicked scrollbar window's click is the scrollbar's own,
+	// which an embedder that pumps runs next (click_scroll_window).
+	struct MouseSample {
+		MouseClaim claim;
+		MenuPumpWindow clicked; // none: no click
+	};
+	// The game's frame: pump_mouse's claim with its state writes, and the
+	// cursor's point (MenuFrameState::cursor_x / cursor_y).
+	MouseSample sample_mouse(MenuClickLatch &click, MenuFrameState &io_state, float mouse_x,
+			float mouse_y, bool button_down, float scale_x, float scale_y);
+	// A frame that never pumps (a picture of the menu): claim_at's claim, the
+	// state unwritten. `over` false: the mouse is off the frame, and nothing
+	// takes the claim.
+	MouseSample peek_mouse(MenuClickLatch &click, const MenuFrameState &state, bool over,
+			float mouse_x, float mouse_y, bool button_down, float scale_x, float scale_y) const;
 	// A scrollbar window's own press, one window of a press's reach: the track
 	// pages toward the point and holds nothing; the shuttle anchors its drag; an
 	// arrow does nothing until its click. A value it changes rides `claim`.

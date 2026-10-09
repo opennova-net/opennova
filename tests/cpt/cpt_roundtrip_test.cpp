@@ -229,11 +229,39 @@ bool check_steep_blocks() {
 	return true;
 }
 
+// save_cpt is write_bytes without the throw: the same bytes for a file it encodes, and false with the
+// writer's words, `out` untouched, for one it cannot (a CDEP buffer not 4096 whole blocks, a tile of no size).
+bool check_save_cpt() {
+	opennova::CptFile cpt;
+	cpt.depth_format = opennova::DepthFormat::CDEP;
+	cpt.depth_buffer.assign(1024u * 1024u, 0);
+	for (size_t i = 0; i < cpt.depth_buffer.size(); ++i) cpt.depth_buffer[i] = static_cast<uint16_t>((i * 37u) % 5000u);
+	std::vector<uint8_t> bytes;
+	std::string error;
+	if (!expect(opennova::save_cpt(cpt, bytes, error) && !bytes.empty() && bytes == cpt.write_bytes(),
+	            "save_cpt writes write_bytes' bytes"))
+		return false;
+
+	const std::vector<uint8_t> kept = bytes;
+	cpt.depth_buffer.resize(4095);
+	if (!expect(!opennova::save_cpt(cpt, bytes, error) && error.find("4096") != std::string::npos && bytes == kept,
+	            "a CDEP buffer of no whole blocks is refused in words, the output untouched"))
+		return false;
+	cpt.depth_format = opennova::DepthFormat::DPTH;
+	cpt.tiles.emplace_back(); // tile_size 0
+	error.clear();
+	if (!expect(!opennova::save_cpt(cpt, bytes, error) && error.find("tile_size") != std::string::npos,
+	            "a tile of no size is refused in words"))
+		return false;
+	return true;
+}
+
 int main() {
 	const std::filesystem::path out_path = std::filesystem::temp_directory_path() / test_paths_unique("opennova_cpt_roundtrip_test", ".cpt");
 
 	if (!check_malformed_guards()) return 1;
 	if (!check_steep_blocks()) return 1;
+	if (!check_save_cpt()) return 1;
 	if (!check_poly_roundtrip(out_path)) return 1;
 
 	opennova::CptFile saved;

@@ -106,17 +106,6 @@ void decode_bytes(const uint8_t *data, size_t size, SourceEncoding &encoding,
 
 // --- the typed read ---------------------------------------------------------
 
-// The recognized tokens of each keyword attribute (the element parses' compares).
-const char *const kAppearanceStates[] = {"DEFAULT", "DISABLED", "MOUSEOVER", "SELECTED", nullptr};
-const char *const kAppearanceTypes[] = {"IMAGE", "COLOR", "CUSTOM", "OUTLINE", nullptr};
-const char *const kTableAppearanceTypes[] = {"IMAGE", "IMAGEROW", "COLOR", "CUSTOM", "OUTLINE", nullptr};
-const char *const kSoundStates[] = {"MOUSEIN", "MOUSEOUT", "SELECTED", nullptr};
-const char *const kActionTests[] = {"LT", "LE", "EQ", "GE", "GT", nullptr};
-const char *const kJustify[] = {"LEFT", "CENTER", "RIGHT", nullptr};
-const char *const kVJustify[] = {"TOP", "CENTER", "BOTTOM", nullptr};
-const char *const kStringTypes[] = {"ID", nullptr};
-const char *const kItemTypes[] = {"ID", "IMAGE", "COLOR", "BITMAP", nullptr};
-
 bool in(const Text &token, const char *const *tokens) {
   for (size_t i = 0; tokens[i]; ++i)
     if (mnu_xml::iequals(token, tokens[i])) return true;
@@ -736,7 +725,8 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       if (seen == frame.seen.end()) {
         frame.seen["ORIENTATION"] = &child;
         w.orientation = text_of(child);
-      } else if (mnu_xml::iequals(child.text, "HORIZONTAL") && !mnu_xml::iequals(seen->second->text, "HORIZONTAL")) {
+      } else if (mnu_xml::iequals(child.text, kHorizontalOrientation) &&
+                 !mnu_xml::iequals(seen->second->text, kHorizontalOrientation)) {
         seen->second->read = false;
         because(seen->second, "A later HORIZONTAL ORIENTATION decides (retail never resets it to vertical); "
                               "this one is left out.");
@@ -889,9 +879,7 @@ void TreeReader::read_action(const Node &node, Action &out) {
   out.file = string_attr(node, "FILE");
   const Attribute *slot = nullptr;
   for (const Attribute &a : node.attributes) {
-    const bool shares = mnu_xml::iequals(a.name, "FIELD") || mnu_xml::iequals(a.name, "SOURCE") ||
-                        mnu_xml::iequals(a.name, "NAME");
-    if (!shares) continue;
+    if (!in(a.name, kActionFieldAttributes)) continue;
     if (!slot) { slot = &a; continue; }
     Text tok;
     if (!a.token(tok)) empty_value(node, a); // the walk copies every one of them
@@ -1069,10 +1057,10 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
           walk_index = static_cast<int>(mnu_xml::wcstol(tok, 10));
           walk_column = &a;
         }
-        const int slot = mnu_xml::iequals(a.name, "DEFAULT_SORT") || mnu_xml::iequals(a.name, "PRIMARY_SORT") ? 0
-                         : mnu_xml::iequals(a.name, "SECONDARY_SORT")                                         ? 1
-                         : mnu_xml::iequals(a.name, "TERTIARY_SORT")                                          ? 2
-                                                                                                              : -1;
+        const int slot = in(a.name, kPrimarySortTokens)                ? 0
+                         : mnu_xml::iequals(a.name, "SECONDARY_SORT") ? 1
+                         : mnu_xml::iequals(a.name, "TERTIARY_SORT")  ? 2
+                                                                      : -1;
         if (slot < 0) continue;
         a.read = true;
         if (sort_keys[slot]) {
@@ -1114,12 +1102,12 @@ void TreeReader::read_column(const Node &node, TableColumn &column) {
       body.vjustify = keyword(c, "VJUSTIFY", kVJustify);
       // The draw kind: the walk's last write, the first authored of the three.
       for (const Attribute &a : c.attributes) {
-        const bool custom = mnu_xml::iequals(a.name, "CUSTOM_DRAW");
-        const bool bitmap = mnu_xml::iequals(a.name, "BITMAP_DRAW");
-        const bool bitmap_text = mnu_xml::iequals(a.name, "BITMAP_TEXT");
+        const bool custom = mnu_xml::iequals(a.name, kBodyDisplays[0]);
+        const bool bitmap = mnu_xml::iequals(a.name, kBodyDisplays[1]);
+        const bool bitmap_text = mnu_xml::iequals(a.name, kBodyDisplays[2]);
         if (!custom && !bitmap && !bitmap_text) continue;
         a.read = true;
-        if (body.display.empty()) body.display = custom ? "CUSTOM_DRAW" : bitmap ? "BITMAP_DRAW" : "BITMAP_TEXT";
+        if (body.display.empty()) body.display = kBodyDisplays[custom ? 0 : bitmap ? 1 : 2];
         body.custom_draw = body.custom_draw || custom;
         body.bitmap_draw = body.bitmap_draw || bitmap;
         body.bitmap_text = body.bitmap_text || bitmap_text;
@@ -1322,6 +1310,22 @@ const Screen *Document::find_screen(const std::string &name) const {
 
 const Screen *Document::first_screen() const {
   return screens.empty() ? nullptr : &screens[0];
+}
+
+const Window *find_window(const Window &window, const std::string &name) {
+  // `!name || !window->name` returns before the children are searched; a stricmp match is
+  // the window; else each child in order [orig: CWnd_FindChildByName @ 0x646850].
+  if (name.empty() || window.name.empty()) return nullptr;
+  if (iequals(name, window.name)) return &window;
+  for (const Window &child : window.children)
+    if (const Window *found = find_window(child, name)) return found;
+  return nullptr;
+}
+
+const Window *find_window(const Screen &screen, const std::string &name) {
+  for (const Window &root : screen.roots)
+    if (const Window *found = find_window(root, name)) return found;
+  return nullptr;
 }
 
 bool parse(const std::string &content, Document &out, std::string &error,
@@ -1538,7 +1542,7 @@ void Writer::column(const TableColumn &c, int depth) {
     return;
   line(depth, "<COLUMN" + attr_int("count", c.has_count, c.count) + attr_int("spacing", c.has_spacing, c.spacing) +
                   ">");
-  const char *const key_tokens[] = {c.primary_sort_token.empty() ? "PRIMARY_SORT" : c.primary_sort_token.c_str(),
+  const char *const key_tokens[] = {c.primary_sort_token.empty() ? kPrimarySortTokens[0] : c.primary_sort_token.c_str(),
                                     "SECONDARY_SORT", "TERTIARY_SORT"};
   for (size_t i = 0; i < c.headers.size(); ++i) {
     const TableHeader &h = c.headers[i];
@@ -1557,12 +1561,11 @@ void Writer::column(const TableColumn &c, int depth) {
     std::string attrs = attr("justify", b.justify) + attr("vjustify", b.vjustify) +
                         attr_int("column", b.has_column, b.column);
     // The draw kind retail keeps is the first authored of the three: written first.
-    const char *kinds[] = {"CUSTOM_DRAW", "BITMAP_DRAW", "BITMAP_TEXT"};
     const bool on[] = {b.custom_draw, b.bitmap_draw, b.bitmap_text};
     for (int k = 0; k < 3; ++k)
-      if (on[k] && iequals(b.display, kinds[k])) attrs += std::string(" ") + kinds[k];
+      if (on[k] && iequals(b.display, kBodyDisplays[k])) attrs += std::string(" ") + kBodyDisplays[k];
     for (int k = 0; k < 3; ++k)
-      if (on[k] && !iequals(b.display, kinds[k])) attrs += std::string(" ") + kinds[k];
+      if (on[k] && !iequals(b.display, kBodyDisplays[k])) attrs += std::string(" ") + kBodyDisplays[k];
     attrs += attr("BITMAP_FLAGS", b.bitmap_flags) + bare("SCALE_BITMAP", b.scale_bitmap);
     line(depth + 1, "<BODY" + attrs + "></BODY>");
   }
@@ -1625,7 +1628,7 @@ void Writer::window_elements(const Window &w, int depth) {
   for (const Action &a : w.actions) {
     std::string attrs = attr("type", a.type) + attr("state", a.state) + attr("file", a.file);
     if (!a.field.empty())
-      attrs += " " + (a.field_attr.empty() ? std::string("FIELD") : a.field_attr) + "=\"" + a.field + "\"";
+      attrs += " " + (a.field_attr.empty() ? std::string(kActionFieldAttributes[0]) : a.field_attr) + "=\"" + a.field + "\"";
     attrs += attr_int("target_form", a.has_target_form, a.target_form) + bare("TOGGLE", a.toggle) +
              attr("test", a.test) + bare("EXTERNAL_BROWSER", a.external_browser);
     leaf(depth, "ACTION", attrs, a.target);
