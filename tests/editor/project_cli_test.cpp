@@ -34,7 +34,7 @@
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
-#include "editor/png_test_support.h"
+#include "common/png_test_support.h"
 
 using opennova::project::run_project_command;
 namespace fs = std::filesystem;
@@ -303,7 +303,7 @@ static int test_imports() {
 	// A project made in a folder that holds a source imports none of it: new opens it without the
 	// import pass, and the first verb that reads it imports.
 	const std::string holder = dir.file("Holder");
-	TEST_EXPECT(editor_test::write_bytes(holder + "/art/logo.png", editor_test::gradient_png(8, 8)));
+	TEST_EXPECT(editor_test::write_bytes(holder + "/art/logo.png", test_png::gradient_png(8, 8)));
 	TEST_EXPECT(mark_for_import(holder + "/art/logo.png"));
 	TEST_EXPECT(run({"new", holder}) == 0);
 	TEST_EXPECT(!fs::exists(holder + "/.opennova/imported"));
@@ -313,14 +313,14 @@ static int test_imports() {
 	TEST_EXPECT(run({"new", root}) == 0);
 	TEST_EXPECT(run({"create-missing", root}) == 0);
 	// A PNG with no record is a texture the build packs as it is.
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/plain.png", editor_test::gradient_png(4, 4, 3)));
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", editor_test::gradient_png(8, 8)));
+	TEST_EXPECT(editor_test::write_bytes(root + "/art/plain.png", test_png::gradient_png(4, 4, 3)));
+	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", test_png::gradient_png(8, 8)));
 	TEST_EXPECT(mark_for_import(root + "/art/logo.png"));
 	TEST_EXPECT(run_capture(capture, {"status", root}, text) == 0);
 	TEST_EXPECT(text.find("imports: 1 source, 1 imported now, 0 failed") != std::string::npos);
 	TEST_EXPECT(fs::is_regular_file(root + "/art/logo.png.import"));
 	// A PNG brought in by `import` is imported at once, as the editor's rescan does.
-	TEST_EXPECT(editor_test::write_bytes(dir.file("splash.png"), editor_test::gradient_png(4, 4, 5)));
+	TEST_EXPECT(editor_test::write_bytes(dir.file("splash.png"), test_png::gradient_png(4, 4, 5)));
 	TEST_EXPECT(run_capture(capture, {"import", root, dir.file("splash.png")}, text) == 0);
 	TEST_EXPECT(text.find("-> 1 output") != std::string::npos);
 	// It lands where the project keeps its textures (DI-03: beside art/plain.png and art/logo.png's, not in a
@@ -450,10 +450,10 @@ static int test_dry_run_writes_nothing() {
 	editor_test::TempProjectDir dir("opennova_editor_project_cli_dry_run");
 	const std::string root = dir.file("game");
 	TEST_EXPECT(run({"new", root}) == 0);
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", editor_test::gradient_png(8, 8)));
+	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", test_png::gradient_png(8, 8)));
 	TEST_EXPECT(mark_for_import(root + "/art/logo.png"));
 	TEST_EXPECT(run({"status", root}) == 0);
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", editor_test::gradient_png(8, 8, 9))); // changed since
+	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", test_png::gradient_png(8, 8, 9))); // changed since
 	// Dated past the import, as a later edit is: the import cache vouches for a source's hash while
 	// its size and last write hold, and a file system's clock can stand still for milliseconds
 	// (some 4 ms on Linux), so a rewrite at the same size this soon after the import would read

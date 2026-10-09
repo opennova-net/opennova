@@ -5,10 +5,10 @@
 #include <cstdio>
 
 #include <base/io/strutil.h>
-#include <editor/import/png_decode.h>
 #include <formats/bfc1/bfc1.h>
 #include <formats/dds/dds.h>
 #include <formats/pcx/pcx_io.h>
+#include <formats/png/png_decode.h>
 #include <formats/tga/tga.h>
 #include <formats/tga/tga_read.h>
 #include <runtime/renderer/device_texture.h>
@@ -246,7 +246,7 @@ void read_png(TextureImage &image, const std::vector<uint8_t> &bytes, const char
 	fact(image, "reader", "Read by", reader);
 	RgbaImage rgba;
 	std::string error;
-	if (!decode_png(bytes, rgba, error)) {
+	if (!png::decode_png(bytes, rgba, error)) {
 		image.refusal = error;
 		return;
 	}
@@ -483,9 +483,9 @@ TextureHeader texture_header_as(TextureReader reader, const std::vector<uint8_t>
 	case TextureReader::Dds: {
 		dds::DdsImage image;
 		std::string error;
-		if (is_png(bytes)) {
+		if (png::is_png(bytes)) {
 			// D3DX reads a PNG under a .dds name as the PNG (read_dds).
-			out.read = png_header_size(bytes, out.width, out.height);
+			out.read = png::png_header_size(bytes, out.width, out.height);
 			out.alpha = bytes.size() > 25 && (bytes[25] == 4 || bytes[25] == 6);
 			return out;
 		}
@@ -514,7 +514,7 @@ TextureHeader texture_header_as(TextureReader reader, const std::vector<uint8_t>
 		return out;
 	}
 	case TextureReader::Png:
-		out.read = png_header_size(bytes, out.width, out.height);
+		out.read = png::png_header_size(bytes, out.width, out.height);
 		if (!out.read) out.refusal = "The PNG header is cut short or is not one.";
 		out.alpha = bytes.size() > 25 && (bytes[25] == 4 || bytes[25] == 6);
 		return out;
