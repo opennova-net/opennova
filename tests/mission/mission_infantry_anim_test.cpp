@@ -36,7 +36,8 @@ struct Assets {
 	ResourceIndex index;
 	assets::AssetStore store{&index};
 
-	Assets() {
+	// `with_default`: the root also carries a default.adm (soldier.adm's rows).
+	explicit Assets(bool with_default = false) {
 		const fs::path parent = test_paths_temp_dir();
 		const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
 		directory = parent / ("opennova-mission-infantry-" + std::to_string(stamp));
@@ -44,6 +45,7 @@ struct Assets {
 		const fs::path fixtures = fs::path(test_paths_repo_root(__FILE__)) / "fixtures/anim";
 		for (const char *name : {"idle.bad", "walk.bad", "soldier.adm", "US01.adm"})
 			CHECK(fs::copy_file(fixtures / name, directory / name));
+		if (with_default) CHECK(fs::copy_file(fixtures / "soldier.adm", directory / "default.adm"));
 		{
 			std::ofstream file(directory / "unusable.adm", std::ios::binary);
 			file << "anim_reset\t\"missing.bad\"\r\n";
@@ -331,6 +333,22 @@ void joiner_resolves_empty_registry(Assets &assets) {
 	CHECK(role.runtime->state().entities.front().rm_adm_id == -1);
 }
 
+// An item's map is the spawn's one .adm load: the name cut at its last '.'
+// with ".adm" appended, default.adm where the roots lack that file, ahead of
+// the kernel's configured infantry map [orig: Entity_SpawnFromItemDef
+// @0x45257c -> AnimMap_LoadAdmFile @0x40ccb9..0x40cd25].
+void missing_map_loads_default_adm() {
+	Assets assets(true);
+	Harness h(assets);
+	h.map(2, "soldier.txt"); // any extension is swapped: soldier.adm
+	h.boot();
+	const int swapped = h.kernel->adm_id_for_runtime_type(43);
+	CHECK(swapped >= 0 && h.kernel->root_motion.adm_name(swapped) == "soldier.adm");
+	const int missing = h.kernel->adm_id_for_runtime_type(44); // "missing.adm"
+	CHECK(missing >= 0 && h.kernel->root_motion.adm_name(missing) == "default.adm");
+	CHECK(h.kernel->adm_id_for_runtime_type(46) == -1); // no map: none
+}
+
 } // namespace
 
 int main() {
@@ -342,6 +360,7 @@ int main() {
 		no_clips_then_rearm(assets);
 		late_spawn_and_type_resolution(assets);
 		joiner_resolves_empty_registry(assets);
+		missing_map_loads_default_adm();
 	} catch (const std::exception &error) {
 		std::fprintf(stderr, "FAIL: %s\n", error.what());
 		return 1;
