@@ -9,6 +9,7 @@
 #include <base/resource_index/resource_index.h>
 #include <formats/def/def.h>
 #include <runtime/assets/asset_store.h>
+#include <runtime/mission/runtime_boot.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/ammo_table_build.h>
 #include <runtime/world/collision.h>
@@ -169,42 +170,35 @@ bool WeaponRange::configure(const WeaponRangeSetup &setup) {
 		if (!setup.files) {
 			why_ = "No project is open.";
 		} else {
-			// The project's files as the game's mission load reads them: weapon.def through the game's parser (a
-			// SIGHTS row whose texture the mount lacks is no row [orig: the sights arm's FileSystem_FileExists
-			// @0x544AE2]), its table built with the clips its actions read from their maps [orig: Anim_InitActions
-			// @0x541FA0], then ammo.def and the round types linked [orig: AmmoDef_LoadAll @ 0x40B0B0].
+			// The project's files as the game's mission load reads them (the engine's own reads,
+			// mission::read_weapon_defs and read_ammo_table): weapon.def through the game's parser, a SIGHTS row
+			// whose texture the mount lacks no row, its table built with the clips its actions read from their
+			// maps [orig: Anim_InitActions @0x541FA0], then ammo.def and the round types linked.
 			auto stamped = std::make_shared<StampedFiles>(setup.files);
 			ResourceIndex index;
 			index.mount_source(stamped);
 			assets::AssetStore store(&index);
-			std::vector<uint8_t> bytes;
+			mission::BootFileSource boot;
+			boot.has_file = [&index](const std::string &name) { return index.has_file(name); };
+			boot.read_file = [&stamped](const std::string &name, std::vector<uint8_t> &out) {
+				return stamped->read(name, out);
+			};
 			def::DefWeaponsFile weapons{};
-			const def::DefFileProbe probe = {[](const void *ctx, const char *name) {
-				                                 return static_cast<const ResourceIndex *>(ctx)->has_file(name);
-			                                 },
-			                                 &index};
 			// A soldier's shots alone (no weapon in hand, DI-24): the tables read as the load reads them all the same,
 			// whatever weapon.def is (an NPC's round spawn looks its byte up in the weapon table [orig:
 			// RoundData_SpawnRound @ 0x4EC0D0]).
 			const bool soldier = setup.weapon.empty();
-			bool weapons_read = false;
-			if (!stamped->read(setup.catalog, bytes) || bytes.empty()) {
+			const mission::DefTableRead weapons_read = mission::read_weapon_defs(boot, setup.catalog, weapons);
+			if (weapons_read == mission::DefTableRead::Missing) {
 				if (!soldier) why_ = "The project has no " + setup.catalog + ".";
-			} else if (def::def_parse_weapons_memory(bytes.data(), bytes.size(), &weapons, nullptr, &probe) != 0) {
+			} else if (weapons_read == mission::DefTableRead::Unreadable) {
 				if (!soldier) why_ = setup.catalog + " does not read as the game's weapon table.";
-			} else {
-				weapons_read = true;
 			}
 			if (why_.empty()) {
 				tables_ = std::make_unique<Tables>();
-				if (weapons_read) tables_->weapons = world::build_weapon_table(weapons, &store);
-				std::vector<uint8_t> ammo_bytes;
-				def::DefAmmoFile ammo{};
-				if (stamped->read("ammo.def", ammo_bytes) && !ammo_bytes.empty() &&
-				    def::def_parse_ammo_memory(ammo_bytes.data(), ammo_bytes.size(), &ammo) == 0) {
-					tables_->ammo = world::build_ammo_table(ammo);
-					def::def_free_ammo(&ammo);
-				}
+				if (weapons_read == mission::DefTableRead::Read)
+					tables_->weapons = world::build_weapon_table(weapons, &store);
+				mission::read_ammo_table(boot, "ammo.def", tables_->ammo);
 				world::resolve_weapon_round_types(tables_->weapons, tables_->ammo);
 				if (soldier) {
 					ready_ = !tables_->ammo.entries.empty();
@@ -219,11 +213,10 @@ bool WeaponRange::configure(const WeaponRangeSetup &setup) {
 					}
 				} else {
 					weapon_index_ = tables_->weapons.index_of(setup.weapon.c_str());
-					// The weapon's row as the game's mount reads it: the last block of the name [orig:
-					// WeaponDefs_ParseLineCallback @0x5436e1].
-					const def::DefWeaponDef *row = nullptr;
-					for (size_t i = 0; i < weapons.count; ++i)
-						if (strutil::iequals(weapons.entries[i].weapon_name, setup.weapon)) row = &weapons.entries[i];
+					// The weapon's row as the game's mount reads it: the last block of the name
+					// (def::def_weapon_index_by_name).
+					const int row_index = def::def_weapon_index_by_name(weapons.entries, weapons.count, setup.weapon.c_str());
+					const def::DefWeaponDef *row = row_index >= 0 ? &weapons.entries[row_index] : nullptr;
 					if (weapon_index_ < 0 || !row) {
 						why_ = setup.weapon + " is not in " + setup.catalog + ".";
 					} else {
