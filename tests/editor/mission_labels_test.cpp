@@ -629,7 +629,7 @@ int test_retail() {
 			if (extension != ".def" && extension != ".bin") continue;
 			// A .bin's kind needs its bytes (a string table or another table): read as one, skipped
 			// where it does not load as one.
-			const AssetKind kind = extension == ".bin" ? AssetKind::Strings : asset_kind_for_name(file.logical_name);
+			const AssetKind kind = extension == ".bin" ? AssetKind::Strings : opennova::file_kind_for_name(file.logical_name);
 			std::vector<uint8_t> bytes;
 			const DocumentType *type = document_type_for(kind);
 			std::unique_ptr<Document> table = type ? records_of(type->make()) : nullptr;

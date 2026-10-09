@@ -102,7 +102,7 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	// Mission_BuildMapListFromPFF @ 0x562c2d, PFF_FileExists(bin, textArchive)]; the game runs it: listed.
 	{ C::BuildExpansionMissionUntitled, listed(about_the_file("build.expansion.mission_untitled", G::Build, F::None)) },
 	// A file an expansion's build leaves out because the game reads its kind only from the install's
-	// folder (ADR 0046 S16, AssetKindRow::expansion_loose): said, refusing nothing.
+	// folder (ADR 0046 S16, FileKindFacts::expansion_loose): said, refusing nothing.
 	{ C::BuildExpansionRootOnly, listed(about_the_file("build.expansion.root_only", G::Build, F::None)) },
 	{ C::BuildNameUnstorable, about_the_file("build.name_unstorable", G::Build, F::Rename) },
 	{ C::BuildOutDirInProject, code("build.out_dir_in_project", G::Build) },

@@ -9,7 +9,7 @@
 namespace opennova::editor {
 
 // The line-ends rule: the one rule for every kind whose game reader ends a line at CR LF and nowhere
-// else (assets/asset_kinds.h, LineReader: the defs, the AI profiles, the animation maps, the
+// else (base/resource_index/file_kind.h, LineReader: the defs, the AI profiles, the animation maps, the
 // environments, the terrains, the particle files, the credits and the character attributes). An LF that ends a
 // line alone is a byte of the line to that reader, so the game reads the line it ends and the lines
 // after it, up to the next CR LF, as one line [orig: File_ParseASCIIFile @ 0x53D8DE; ConfigFile_ParseText
