@@ -67,8 +67,9 @@
 - Web-portable (ADR 0049 d5): the web build links this code into a wasm32 side module
   whose templates abort on any throw, so nothing uses exceptions as control flow
   (`strutil::parse_int` / `parse_ulong` / `parse_float`, never `try { std::stoi }`);
-  thread counts are the embedder's (the terrain composer's `Threads` budget,
-  `Threads::for_hardware()` being the desktop sizing); layout guards hold on ILP32.
+  thread counts are the embedder's (the terrain composer's `Threads` budget and the
+  TrnGen bake's `TerrainBakeInput::threads`, each `for_hardware()` being the desktop
+  sizing); layout guards hold on ILP32.
 - Group targets (ADR 0029): FIVE STATIC targets, no per-lib ones (single ratified
   exception: the `opennova_crt` STATIC leaf under `base/crt` — the one mutable
   thread-local CRT rand stream; formats cannot link `opennova_base`, which sits
@@ -122,10 +123,13 @@
   migration needing a CPT-corpus byte diff, not a swap. That byte diff is the
   re-encode leg of the gated `tests/terrain/cpt_jo_assets_sweep_test` (ctest
   `cpt_jo_assets_sweep`, `--suite retail`: every retail .cpt read by `load_cpt` and
-  written again by `CptFile::write_bytes`, byte for byte); `tests/cpt/cpt_roundtrip_test`
+  written again by `save_cpt`, the writer behind `CptFile::write_bytes` and the TrnGen
+  bake in `formats/cpt/trngen`, byte for byte); `tests/cpt/cpt_roundtrip_test`
   (ctest `cpt_roundtrip`) pins the bit codec and the DPTH/CDEP/POLY round-trips on
-  synthetic buffers in core, so run the retail suite whenever you touch the CPT
-  encoder. Three more stay
+  synthetic buffers in core and `tests/cpt/trngen_bake_test` (ctest `cpt_trngen_bake`)
+  the bake's output, so run the retail suite whenever you touch the CPT
+  encoder; `cpt_trngen_bake_test <dir>` bakes the retired TrnGen corpus (`git show
+  d57608b3d^:fixtures/terrain`) against TrnGen's own `.cpt` files. Three more stay
   by design: `formats/bink`'s
   `BitReader` is a fail-latching decoder contract (`peek`, `align32`, the first short
   read poisons it), the `wire_cursor` posture rather than `io::BitReader`'s lenient
