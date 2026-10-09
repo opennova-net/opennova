@@ -11,17 +11,20 @@
 // mission.pool), which reads the item through the graph.
 #include "mission_validation.h"
 
-#include <initializer_list>
 #include <iterator>
 #include <map>
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
+#include <base/gameprofile/game_type.h>
 #include <editor/documents/mission_document.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_params.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/spawn_select.h>
 
 namespace opennova::editor {
 
@@ -76,13 +79,11 @@ DiagnosticSeverity source_severity(MissionFinding code) {
 	return code == MissionFinding::InvalidInput ? DiagnosticSeverity::Error : DiagnosticSeverity::Info;
 }
 
-// The single-player family's starts: the insertion point, then its fallback [orig:
-// Server_PositionPlayerForSpawn @0x50D202, @0x50D2DB; formats/def/reserved_items.cpp's 6094 and 6001].
-constexpr int32_t kPrimaryStartType = 6094, kFallbackStartType = 6001;
-
 // The pools' limits, past which the game warns (fatal if dismissed) and loads on [orig:
-// BMS_LoadAndValidateHeader @0x40e326].
-constexpr size_t kMaxItems = 1200, kMaxBuildings = 1200, kMaxMarkers = 768, kMaxOrganics = 256;
+// BMS_LoadAndValidateHeader @0x40e326]: the pools' capacities (runtime/world/entity.h
+// retail_pool_capacity: organics 0, items 1, buildings 2, markers 3).
+const size_t kMaxItems = world::retail_pool_capacity(1), kMaxBuildings = world::retail_pool_capacity(2),
+             kMaxMarkers = world::retail_pool_capacity(3), kMaxOrganics = world::retail_pool_capacity(0);
 // The group tables hold 64 [orig: docs/mission/bms-event-runtime-re.md 7.2].
 constexpr int64_t kLastGroup = 63;
 // The zone ids the original editor offers [orig editor: dfx2med Med_AreaTriggerDialogProc @0x40f400].
@@ -92,9 +93,6 @@ constexpr int32_t kLastPathNumber = 122;
 // The trigger main types the evaluator has a case for [orig: EventTrigger_EvaluateCondition
 // @0x453620's jump table, 1..7].
 constexpr int32_t kFirstMainType = 1, kLastMainType = 7;
-// The player's SSN, which no record takes (next_free_ssn's rule; bms-event-runtime-re.md 7.3).
-constexpr int32_t kPlayerSsn = 10000;
-
 // The order the game's lookups scan the pools in: organics, items, buildings, markers [orig:
 // Entity_KillByNetId @0x43DBD0].
 int lookup_order(NodeKind kind) {
@@ -113,10 +111,15 @@ struct Checker {
 	// Each SSN's rows, in the file's order (entities(), before events()).
 	std::map<int32_t, std::vector<const Node *>> by_ssn;
 
-	// A lookup of an SSN that scans some pools alone (`pools`): where the SSN's rows are all of other
-	// pools, it finds none, which `outcome` says.
-	void unscanned(const NodeAddress &address, int32_t ssn, std::initializer_list<K> pools, const char *what,
+	// A lookup of an SSN that scans some pools alone (`scanned_pools`, mission::kOrganicPool..kMarkerPool):
+	// where the SSN's rows are all of other pools, it finds none, which `outcome` says.
+	void unscanned(const NodeAddress &address, int32_t ssn, uint8_t scanned_pools, const char *what,
 	               const char *outcome) {
+		std::vector<K> pools;
+		const std::pair<uint8_t, K> bits[] = {{kOrganicPool, K::Organic}, {kItemPool, K::Item},
+		                                      {kBuildingPool, K::Building}, {kMarkerPool, K::Marker}};
+		for (const auto &[bit, pool] : bits)
+			if (scanned_pools & bit) pools.push_back(pool);
 		const auto rows = by_ssn.find(ssn);
 		// SSN 0 names none; no row at all is the reference's own finding (reference.missing).
 		if (ssn == 0 || rows == by_ssn.end()) return;
@@ -126,7 +129,7 @@ struct Checker {
 		const Node *first = rows->second.front();
 		std::string scanned;
 		for (const K pool : pools) {
-			if (!scanned.empty()) scanned += pool == *(pools.end() - 1) ? " and " : ", ";
+			if (!scanned.empty()) scanned += pool == pools.back() ? " and " : ", ";
 			scanned += pool == K::Organic ? "organics" : pool == K::Item ? "items" : pool == K::Building ? "buildings" : "markers";
 		}
 		on(address, MissionFinding::SsnUnscanned, DiagnosticSeverity::Warning,
@@ -338,36 +341,15 @@ struct Checker {
 						           std::to_string(main) + ": the trigger reads false.",
 						   "sub_type");
 				}
-				// The Single tests whose SSN lookup scans fewer pools than the lookups by SSN do
-				// (docs/mission/bms-event-runtime-re.md 3b, 7.2a, 7.4): the alive test the organics, items
-				// and buildings, a marker's SSN reading not alive [orig: cat 2 subs 4, 5 @0x453985 /
-				// @0x45399D -> Entity_IsAliveByBmsRef @0x43e640, pools 0/1/2]; the alert, health and area
-				// tests the organics and items [orig: Entity_IsSsnAtAlertLevel @0x43e780,
-				// Entity_HasDamageCapacity @0x43e3d0, Entity_HasFullHealth @0x43e470,
-				// Entity_HasHealthAboveThreshold @0x43e350, Entity_IsBmsRefInTriggerBounds @0x43e510: pools
-				// 0-1]; the holding test the organics [orig: Entity_IsSsnHoldingItemGroup @0x43e2f0, pool
-				// 0]; each false for an SSN it finds no row of.
-				if (trigger.main_type == bms::TriggerMainType::Single) {
+				// The Single tests whose SSN lookup scans fewer pools than the lookups by SSN do, each false
+				// for an SSN it finds no row of: the engine's table (mission::trigger_ssn_pools, its
+				// witnesses there); the alive test (SingleDestroyed, SingleAlive) reads a marker's SSN as not
+				// alive.
+				if (const uint8_t pools = trigger_ssn_pools(trigger)) {
 					using S = bms::SingleTriggerType;
-					switch (static_cast<S>(trigger.sub_type)) {
-					case S::SingleDestroyed:
-					case S::SingleAlive:
-						unscanned(address, trigger.param1, {K::Organic, K::Item, K::Building}, "the alive test",
-						          "SingleAlive reads false and SingleDestroyed true for it.");
-						break;
-					case S::SingleAtRedAlert:
-					case S::SingleAtYellowAlert:
-					case S::SingleHasLostMoreUnits:
-					case S::SingleIntact:
-					case S::SingleHasMoreUnits:
-					case S::SingleIsWithinArea:
-						unscanned(address, trigger.param1, {K::Organic, K::Item}, "the test", "it reads false.");
-						break;
-					case S::SingleHoldingGroup:
-						unscanned(address, trigger.param1, {K::Organic}, "the test", "it reads false.");
-						break;
-					default: break;
-					}
+					const bool alive = trigger.sub_type == int32_t(S::SingleDestroyed) || trigger.sub_type == int32_t(S::SingleAlive);
+					unscanned(address, trigger.param1, pools, alive ? "the alive test" : "the test",
+					          alive ? "SingleAlive reads false and SingleDestroyed true for it." : "it reads false.");
 				}
 				for (int slot = 0; slot < 4; ++slot) {
 					const int32_t value = slot == 0 ? trigger.param1 : slot == 1 ? trigger.param2 : slot == 2 ? trigger.param3 : trigger.param4;
@@ -379,27 +361,13 @@ struct Checker {
 			for (size_t i = 0; i < event.native.actions.size() && i < event.ids.lists[1].size(); ++i) {
 				const bms::Action &action = event.native.actions[i];
 				const NodeAddress address{row->id, k(K::Action), event.ids.lists[1][i].id};
-				// The actions whose SSN lookup scans fewer pools than the lookups by SSN do
-				// (docs/mission/bms-event-runtime-re.md 7.5, 10): ChangeSingleAI, ChangeSteam, SingleChangeGroup
-				// and SingleTeleport the organics, items and buildings [orig: Entity_HandleAlertStateEvent
-				// @0x43DEE0, pools 0, 1, 2 @0x43DF20 / @0x43DF41 / @0x43DF69; Entity_FindByDCBAndSetFlag
-				// @0x43DB30; Entity_SetNetIdByParentRef @0x43D6C0; EventAction_TeleportEntityToSpawn
-				// @0x43DFC0, @0x43E02D / @0x43E0DD / @0x43E180]; a medevac or a pickup its patient among the
-				// organics [orig: HeliLift_SpawnPickup @0x4525E0; docs/world/world-wac-ai-re.md 33.32].
-				switch (action.action_type) {
-				case bms::ActionType::ChangeSingleAI:
-				case bms::ActionType::ChangeSteamAction:
-				case bms::ActionType::SingleChangeGroup:
-				case bms::ActionType::SingleTeleportAction:
-					unscanned(address, action.param1, {K::Organic, K::Item, K::Building}, "the action",
-					          "it finds no record and does nothing.");
-					break;
-				case bms::ActionType::Teammates:
-					if (action_param_kind(action, 0) == ParamKind::Entity)
-						unscanned(address, action.param1, {K::Organic}, "the operation's patient lookup",
-						          "it finds no patient and starts no operation.");
-					break;
-				default: break;
+				// The actions whose SSN lookup scans fewer pools than the lookups by SSN do: the engine's
+				// table (mission::action_ssn_pools, its witnesses there); a medevac's or a flyover's patient
+				// lookup starts no operation when it finds none.
+				if (const uint8_t pools = action_ssn_pools(action)) {
+					const bool patient = action.action_type == bms::ActionType::Teammates;
+					unscanned(address, action.param1, pools, patient ? "the operation's patient lookup" : "the action",
+					          patient ? "it finds no patient and starts no operation." : "it finds no record and does nothing.");
 				}
 				for (int slot = 0; slot < 4; ++slot) {
 					const int32_t value = slot == 0 ? action.param1 : slot == 1 ? action.param2 : slot == 2 ? action.param3 : action.param4;
@@ -430,10 +398,11 @@ struct Checker {
 		// stays at the map's origin [orig: Server_PositionPlayerForSpawn @0x50CF60, the lookups @0x50D202 and
 		// @0x50D2DB over pool 3, the origin @0x50D3A7..0x50D46F; runtime/world/spawn_select.cpp].
 		if (!modes) {
+			const world::StartMarkerTypes starts = world::start_marker_types(game_type::for_mission_attribs(0u), 1);
 			bool start = false;
 			for (const Node *row : document.rows_of(K::Marker)) {
 				const int32_t type = static_cast<const EntityRow &>(*row).native.type_id;
-				start = start || type == kPrimaryStartType || type == kFallbackStartType;
+				start = start || type == starts.primary || type == starts.fallback;
 			}
 			if (!start)
 				on(address, MissionFinding::NoStart, DiagnosticSeverity::Warning,

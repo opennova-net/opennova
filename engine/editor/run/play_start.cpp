@@ -1,38 +1,22 @@
 #include <editor/run/play_start.h>
 
-#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <system_error>
 #include <vector>
 
-#include <base/gameprofile/game_type.h>
 #include <base/vfs/vfs.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/archive_routing.h>
 #include <formats/mission/bms.h>
-#include <formats/mission/bms_edit.h>
-#include <formats/mission/mission.h>
 #include <formats/pff/pff.h>
-#include <runtime/world/spawn_select.h>
 
 namespace fs = std::filesystem;
 
 namespace opennova::editor {
 
 namespace {
-
-// Degrees in 0..359, as the file stores a yaw.
-int16_t wrapped_yaw(double degrees) {
-	const long whole = std::lround(degrees);
-	const long turn = whole % 360;
-	return int16_t(turn < 0 ? turn + 360 : turn);
-}
-
-bool holds(double metres) {
-	return metres >= bms::kFixed16Min && metres <= bms::kFixed16Max;
-}
 
 // The 16-byte entry name as a string (it may fill all sixteen, no NUL after it).
 std::string entry_name(const pff::PffEntry &entry) {
@@ -70,57 +54,8 @@ Diagnostic start_error(const std::string &words) {
 
 } // namespace
 
-bool place_player_start(bms::File &file, const PlayStart &start, PlayStartPlaced &out, std::string &error) {
-	out = PlayStartPlaced();
-	for (const double metres : start.at)
-		if (!holds(metres)) {
-			error = "The point is past what a mission's positions hold (32,768 m from its origin).";
-			return false;
-		}
-	// The single player's chain under the mission's mode: the spawn joins it as team 1 [orig:
-	// Server_PositionPlayerForSpawn @ 0x50CF60; runtime/mission's spawn_local_player_at_start].
-	const uint32_t mode = game_type::for_mission_attribs(file.header.attrib_flags);
-	const world::StartMarkerTypes types = world::start_marker_types(mode, 1);
-	if (types.primary == 0) {
-		error = "The mission's mode places its single player at no start marker.";
-		return false;
-	}
-	const auto count_of = [&file](int32_t type) {
-		size_t n = 0;
-		for (const bms::Entity &marker : file.markers)
-			if (marker.type_id == type) ++n;
-		return n;
-	};
-	out.type = count_of(types.primary) != 0 || count_of(types.fallback) == 0 ? types.primary : types.fallback;
-	const int16_t yaw = wrapped_yaw(start.yaw);
-	const auto place = [&](bms::Entity &marker) {
-		marker.x = bms::to_fixed_16_16(start.at[0]);
-		marker.y = bms::to_fixed_16_16(start.at[1]);
-		marker.z = bms::to_fixed_16_16(start.at[2]);
-		marker.yaw = yaw;
-		marker.pitch = 0;
-		marker.roll = 0;
-		// A team-2 start queues a mount onto its carrier as the player deploys [orig:
-		// Server_PositionPlayerForSpawn @ 0x50D42E..0x50D45A]: the start of its own stands on foot.
-		if (marker.team == 2) marker.team = 1;
-	};
-	for (bms::Entity &marker : file.markers)
-		if (marker.type_id == out.type) {
-			place(marker);
-			++out.moved;
-		}
-	if (out.moved != 0) return true;
-	// None of either: one of the primary type, at the point (bms_edit's new record, its SSN the next).
-	mission::EntityTransform at;
-	const size_t index = mission::add_entity(file, mission::EntityKind::Marker, out.type + mission::kItemIdOffset, at);
-	place(file.markers[index]);
-	out.moved = 1;
-	out.added = true;
-	return true;
-}
-
 bool stage_play_start(const std::string &run_dir, const std::string &expansion, const std::string &mission,
-		const PlayStart &start, PlayStartPlaced &out, Diagnostic &error) {
+		const mission::PlayerStart &start, PlayStartPlaced &out, Diagnostic &error) {
 	out = PlayStartPlaced();
 	// The boot table in its slot order, an expansion's pair first [orig: PFF_OpenAllArchives @ 0x4a4310]:
 	// the first that holds the mission serves it.
@@ -154,7 +89,7 @@ bool stage_play_start(const std::string &run_dir, const std::string &expansion, 
 	std::string reason;
 	const bool read = pff::pff_extract(&archive, found, bytes.data(), bytes.size()) == 0 &&
 	                  bms::parse(bytes.data(), bytes.size(), file, reason);
-	if (!read || !place_player_start(file, start, out, reason) || !bms::write(file, bytes, reason)) {
+	if (!read || !mission::place_player_start(file, start, out, reason) || !bms::write(file, bytes, reason)) {
 		pff::pff_close(&archive);
 		error = start_error("Play from here: " + mission + "'s start could not be placed" +
 		                    (reason.empty() ? std::string(".") : ": " + reason));
@@ -195,10 +130,10 @@ bool stage_play_start(const std::string &run_dir, const std::string &expansion, 
 	return true;
 }
 
-std::string play_start_words(const PlayStart &start) {
+std::string play_start_words(const mission::PlayerStart &start) {
 	char words[96];
 	std::snprintf(words, sizeof(words), "(%.1f, %.1f, %.1f) facing %d", start.at[0], start.at[1], start.at[2],
-	              int(wrapped_yaw(start.yaw)));
+	              int(mission::wrapped_yaw(start.yaw)));
 	return words;
 }
 

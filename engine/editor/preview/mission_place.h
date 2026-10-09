@@ -61,7 +61,5 @@ int64_t mission_stop_item(const MissionScene &scene, int path);
 // Every entity of the scene whose item is the item of one of `records`, in the scene's order.
 std::vector<NodeAddress> mission_same_item(const MissionScene &scene, const std::vector<NodeAddress> &records);
 
-// Degrees in 0..359, as the file stores a yaw.
-int mission_wrapped_yaw(double degrees);
 
 } // namespace opennova::editor

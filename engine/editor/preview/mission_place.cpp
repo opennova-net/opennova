@@ -11,6 +11,7 @@
 #include <formats/mission/bms.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_params.h>
+#include <runtime/mission/player_start.h>
 
 namespace opennova::editor {
 
@@ -29,12 +30,6 @@ double snapped(double value, float snap) {
 }
 
 } // namespace
-
-int mission_wrapped_yaw(double degrees) {
-	const long whole = std::lround(degrees);
-	const long turn = whole % 360;
-	return int(turn < 0 ? turn + 360 : turn);
-}
 
 bool mission_duplicate_edits(const Document &document, const MissionScene &scene, const std::vector<NodeAddress> &records,
 		const NodeAddress &primary, double east, double north, bool stick, const ViewportDevice *device,
@@ -157,7 +152,7 @@ bool mission_stop_edits(const MissionDocument &document, int path, int64_t item,
 	out.push_back(set_of(made, mission_field_ids::kX, at[0]));
 	out.push_back(set_of(made, mission_field_ids::kY, at[1]));
 	out.push_back(set_of(made, mission_field_ids::kZ, at[2]));
-	out.push_back(set_of(made, mission_field_ids::kYaw, int64_t(mission_wrapped_yaw(double(yaw)))));
+	out.push_back(set_of(made, mission_field_ids::kYaw, int64_t(mission::wrapped_yaw(double(yaw)))));
 	// The stop, after the path's last.
 	Edit stop;
 	stop.operation = EditOperation::Add;
