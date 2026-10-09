@@ -11,11 +11,9 @@
 
 #include <editor/preview/viewport_follow.h>
 #include <runtime/particle/effect_scene.h>
-#include <runtime/renderer/scar_draw_list.h>
 
 #include "particle/effect_scene.h"
 #include "resource_index/resource_root.h"
-#include "world/scar_draw_list.h"
 
 namespace opennova::editor {
 class ProjectAssetSource;
@@ -73,10 +71,5 @@ private:
 	std::shared_ptr<opennova::StampedFiles> stamped_;
 	std::shared_ptr<opennova::particle::EffectScene> shown_;
 };
-
-// A scar draw list an editor run compiled (in the device's space: a range's shared ring, or every ring a mission's
-// shots wrote, made world-space) as the record the game's ScarPresenter uploads: the quads as they stand, the strip
-// table (the TGA name and the mode word each strip's effect is built from [orig: Scar_LoadTextures @0x5CC2E0]).
-Ref<ScarDrawList> preview_scar_record(const opennova::renderer::ScarDrawList &list);
 
 } // namespace godot
