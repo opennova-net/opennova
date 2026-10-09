@@ -13,13 +13,8 @@
 #include <editor/model/document.h>
 #include <editor/project/project_files.h>
 #include <formats/particle/particle.h>
-#include <runtime/hud/hud_texture_names.h>
+#include <runtime/renderer/fixed_texture_names.h>
 #include <runtime/renderer/material_texture.h>
-#include <runtime/renderer/precipitation_frame.h>
-#include <runtime/renderer/tracer_frame.h>
-#include <runtime/renderer/water_wake_frame.h>
-#include <runtime/terrain/terrain_scorch.h>
-#include <runtime/world/impact_scar.h>
 
 namespace opennova::editor {
 
@@ -28,7 +23,7 @@ namespace {
 using io::JsonValue;
 using io::json_number;
 using io::json_string;
-using R = TextureRoleId;
+using R = renderer::TextureRoleId;
 
 int64_t whole(const Value &value) {
 	if (const int64_t *i = std::get_if<int64_t>(&value)) return *i;
@@ -45,7 +40,7 @@ std::string text(const Value &value) {
 // model document's texture and material records, model_table's fields), and the role the dispatcher's
 // loader makes it by its runtime type [orig: Material_LoadStageTexture @ 0x5B16F0, the switch @
 // 0x5B1737; the type the loader copies, Material_ConvertDefinition @ 0x5B045B..0x5B04A0].
-TextureRoleId model_role(const GraphEdge &edge, const Document *model, TextureUseContext &context) {
+renderer::TextureRoleId model_role(const GraphEdge &edge, const Document *model, TextureUseContext &context) {
 	context.type = texture_arg_is_row_type(edge.loader_arg) ? uint8_t(edge.loader_arg) : 0;
 	// What the edge carries of the row (TextureRowContext); the document, where it reads, adds the
 	// material's place and shader.
@@ -65,7 +60,7 @@ TextureRoleId model_role(const GraphEdge &edge, const Document *model, TextureUs
 			if (model->get(at.owner, "shader", value)) context.shader = text(value);
 			// The alpha test as it falls on this row (texture_roles.h texture_row_material_flags).
 			if (model->get(at.owner, "flags", value))
-				context.material_flags = texture_row_material_flags(context.shader, uint8_t(whole(value)), context.type, context.slot);
+				context.material_flags = renderer::texture_row_material_flags(context.shader, uint8_t(whole(value)), context.type, context.slot);
 			if (model->get(at.owner, "alpha_test", value)) context.alpha_ref = uint8_t(whole(value));
 			Document::Placement material;
 			if (model->placement(at.owner, material)) context.material = int(material.index);
@@ -92,82 +87,63 @@ TextureRoleId model_role(const GraphEdge &edge, const Document *model, TextureUs
 	return R::ModelDiffuse;
 }
 
+// What the game opens a fixed name for, and the witness, in words (renderer::FixedTextureUse).
+struct FixedUseWords {
+	const char *what;
+	const char *witness;
+};
+FixedUseWords fixed_use_words(renderer::FixedTextureUse use) {
+	using U = renderer::FixedTextureUse;
+	switch (use) {
+	case U::BoardBox: return {"for the scoreboard's box", "BoxTexture_LoadAndSetupUVRegions @ 0x56ACD0"};
+	case U::BoardMonogram:
+		return {"for the scoreboard's box", "Game_StartMission @ 0x525AA3 (BoxTexture_LoadAndSetupUVRegions @ 0x56ACD0)"};
+	case U::NetIcon: return {"for the connection indicators", "CNetworkIcons_LoadTextures @ 0x4C2CF0"};
+	case U::TipBox: return {"for the tip panel's box", "CTipSystem_Init @ 0x5B6970 (BoxTexture_LoadAndSetupUVRegions @ 0x56ACD0)"};
+	case U::TipArt: return {"for the tip panel", "CTipSystem_Init @ 0x5B6970"};
+	case U::HudMap: return {"for the HUD's map", "HUD_LoadAllTextures @ 0x59E060..0x59E0F3"};
+	case U::HudArt: return {"for the HUD", "HUD_LoadAllTextures @ 0x59DDA0"};
+	case U::HudCargoFlag: return {"for the HUD's carried flag", "HUD_LoadAllTextures @ 0x59DE53"};
+	case U::HudCargoItem: return {"for the HUD's carried item", "HUD_LoadAllTextures @ 0x59DE64"};
+	case U::Crosshair: return {"for a crosshair style", "HUD_LoadAllTextures @ 0x59E3D6"};
+	case U::ScopeCrosshair: return {"for the scope's crosshair", "HUD_LoadAllTextures @ 0x59DDA0"};
+	case U::BinocularMask: return {"for the binoculars", "ViewFx_InitShadersAndTextures @ 0x5CFDB8"};
+	case U::BinocularCrosshair: return {"for the binoculars", "ViewFx_InitShadersAndTextures @ 0x5CFDF3"};
+	case U::BinocularDigits: return {"for the binoculars' range digits", "HUD_LoadAllTextures @ 0x59E109"};
+	case U::NvgMask: return {"for the night vision", "ViewFx_InitShadersAndTextures @ 0x5CFE18"};
+	case U::NvgScale: return {"for the night vision's scale", "ViewFx_InitShadersAndTextures @ 0x5CFE4A"};
+	case U::Vignette: return {"for the damage vignette", "sub_5C36B0 @ 0x5C36BC"};
+	case U::Rain: return {"for rain", "WeatherParticle_LoadTextures @ 0x5DE840"};
+	case U::Snow: return {"for snow", "WeatherParticle_LoadTextures @ 0x5DE88E"};
+	case U::SmokeTrail: return {"for smoke trails", "CEffectEmitterPool_CreateShaders @ 0x5DC8F0"};
+	case U::WaterRing: return {"for the water rings", "WaterRing_LoadResources @ 0x5DDC90"};
+	case U::ImpactScar: return {"for an impact scar", "Scar_LoadTextures @ 0x5CC2E0"};
+	case U::Scorch: return {"for a scorch mark", "Terrain_LoadScorchTextures @ 0x604CE0"};
+	case U::SplashCursor: return {"for the start-mission cursor", "Game_ShowStartMissionSplash @ 0x520820"};
+	case U::PreviewCube: return {"for the player preview's reflection", "PlayerInfo_InitPreviewModel @ 0x56010C"};
+	case U::BootSplash: return {"for the boot splash", "Game_ShowLoadingScreen @ 0x4A5420"};
+	case U::LoadingFallback: return {"for a mission with no loading screen of its own", "Render_LoadingScreen @ 0x521D10"};
+	case U::Mfd: return {"for the vehicles' MFD", "sub_59B120 @ 0x59B120"};
+	case U::kCount: break;
+	}
+	return {"", ""};
+}
+
 std::vector<FixedTextureName> collect_fixed() {
 	std::vector<FixedTextureName> out;
-	std::set<std::string> seen;
-	const auto add = [&](const std::string &name, R role, const char *what, const char *witness,
-	                     TextureLoader loader = TextureLoader::kCount, int hud_mode = -1) {
-		if (name.empty() || !seen.insert(pff::normalized_logical_name(name)).second) return;
+	for (const renderer::FixedTextureName &fixed : renderer::fixed_texture_names()) {
+		const FixedUseWords words = fixed_use_words(fixed.use);
 		FixedTextureName row;
-		row.name = name;
-		row.role = role;
-		row.what = what;
-		row.witness = witness;
-		row.loader = loader;
-		row.hud_mode = hud_mode;
+		row.name = fixed.name;
+		row.role = fixed.role;
+		row.what = words.what;
+		row.witness = words.witness;
+		row.loader = fixed.loader;
+		row.hud_mode = fixed.loader == renderer::TextureLoader::HudAlpha   ? 1
+		               : fixed.loader == renderer::TextureLoader::HudColor ? 0
+		                                                                   : -1;
 		out.push_back(std::move(row));
-	};
-	// The HUD's own art [orig: HUD_LoadAllTextures @ 0x59DDA0] (runtime/hud/hud_texture_names.h): the
-	// scoreboard's box, the connection indicators, the tip panel, the map's art through FILE, the rest
-	// the HUD's colour art.
-	const std::string map_icons[] = {"TSDicon.tga", "WPIndctr.tga", "JO_LFP.tga", "R_LFP.tga", "N_LFP.tga"};
-	for (const hud::HudFixedTexture &texture : hud::kHudFixedTextures) {
-		const std::string name = texture.name;
-		const bool map = std::find(std::begin(map_icons), std::end(map_icons), name) != std::end(map_icons);
-		const std::string lower = strutil::to_lower(name);
-		if (lower == "border.tga" || lower == "boxtile.tga")
-			add(name, R::BoardBox, "for the scoreboard's box", "BoxTexture_LoadAndSetupUVRegions @ 0x56ACD0");
-		else if (lower.rfind("neticon", 0) == 0)
-			add(name, R::NetIcon, "for the connection indicators", "CNetworkIcons_LoadTextures @ 0x4C2CF0");
-		// The tip panel's box through the box loader (the TGA reader, no .dds tried); its two pictures by STAGE.
-		else if (lower == "border3.tga")
-			add(name, R::BoardBox, "for the tip panel's box", "CTipSystem_Init @ 0x5B6970 (BoxTexture_LoadAndSetupUVRegions @ 0x56ACD0)");
-		else if (lower == "k_tip.tga" || lower == "g_tip.tga")
-			add(name, R::TipArt, "for the tip panel", "CTipSystem_Init @ 0x5B6970");
-		else if (map)
-			add(name, R::HudFileArt, "for the HUD's map", "HUD_LoadAllTextures @ 0x59E060..0x59E0F3");
-		else
-			add(name, R::HudColour, "for the HUD", "HUD_LoadAllTextures @ 0x59DDA0", TextureLoader::kCount, 0);
 	}
-	// The scoreboard box's third texture [orig: Game_StartMission @ 0x525AA3, through sub_56AB00 and the box
-	// loader].
-	add("monogram.tga", R::BoardBox, "for the scoreboard's box", "Game_StartMission @ 0x525AA3 (BoxTexture_LoadAndSetupUVRegions @ 0x56ACD0)");
-	add(hud::kHudCargoFlagTexture, R::HudColour, "for the HUD's carried flag", "HUD_LoadAllTextures @ 0x59DE53",
-	    TextureLoader::kCount, 0);
-	add(hud::kHudCargoDocumentTexture, R::HudColour, "for the HUD's carried item", "HUD_LoadAllTextures @ 0x59DE64",
-	    TextureLoader::kCount, 0);
-	for (int style = hud::kHudCrosshairStyleMin; style <= hud::kHudCrosshairStyleMax; ++style)
-		add(hud::hud_crosshair_texture_name(style), R::HudColour, "for a crosshair style", "HUD_LoadAllTextures @ 0x59E3D6",
-		    TextureLoader::kCount, 0);
-	add("scopexh.tga", R::HudAlphaOnly, "for the scope's crosshair", "HUD_LoadAllTextures @ 0x59DDA0",
-	    TextureLoader::kCount, 1);
-	add(hud::kViewEffectTextureNames[hud::kViewTexBinocularMask], R::ViewEffect, "for the binoculars",
-	    "ViewFx_InitShadersAndTextures @ 0x5CFDB8");
-	add(hud::kViewEffectTextureNames[hud::kViewTexBinocularCrosshair], R::ViewEffect, "for the binoculars",
-	    "ViewFx_InitShadersAndTextures @ 0x5CFDF3");
-	add(hud::kViewEffectTextureNames[hud::kViewTexBinocularDigits], R::HudFileArt, "for the binoculars' range digits",
-	    "HUD_LoadAllTextures @ 0x59E109");
-	add(hud::kViewEffectTextureNames[hud::kViewTexNvgMask], R::ViewEffect, "for the night vision",
-	    "ViewFx_InitShadersAndTextures @ 0x5CFE18");
-	add(hud::kViewEffectTextureNames[hud::kViewTexNvgScale], R::ViewEffect, "for the night vision's scale",
-	    "ViewFx_InitShadersAndTextures @ 0x5CFE4A", TextureLoader::File);
-	add(hud::kViewEffectTextureNames[hud::kViewTexVignette], R::ViewEffect, "for the damage vignette", "sub_5C36B0 @ 0x5C36BC",
-	    TextureLoader::Archive);
-	add(renderer::kRainTexture, R::WeatherDrop, "for rain", "WeatherParticle_LoadTextures @ 0x5DE840");
-	add(renderer::kSnowTexture, R::WeatherDrop, "for snow", "WeatherParticle_LoadTextures @ 0x5DE88E");
-	add(renderer::kEmitterPoolTexture, R::TracerSmoke, "for smoke trails", "CEffectEmitterPool_CreateShaders @ 0x5DC8F0");
-	add(renderer::kWakeTexture, R::WaterWake, "for the water rings", "WaterRing_LoadResources @ 0x5DDC90");
-	add(renderer::kWakeGradientTexture, R::WaterWake, "for the water rings", "WaterRing_LoadResources @ 0x5DDC90");
-	for (int strip = 0; strip < world::kScarTextureStripCount; ++strip)
-		add(world::scar_texture_strip_name(strip), R::ImpactScar, "for an impact scar", "Scar_LoadTextures @ 0x5CC2E0");
-	for (int index = 0; index <= 255; ++index)
-		add(std::string(terrain::terrain_scorch_texture_name(static_cast<uint8_t>(index))), R::TerrainScorch,
-		    "for a scorch mark", "Terrain_LoadScorchTextures @ 0x604CE0");
-	add("newarow1.tga", R::SplashCursor, "for the start-mission cursor", "Game_ShowStartMissionSplash @ 0x520820");
-	add("HwmCube.dds", R::PreviewCube, "for the player preview's reflection", "PlayerInfo_InitPreviewModel @ 0x56010C");
-	add("loading.pcx", R::BootSplash, "for the boot splash", "Game_ShowLoadingScreen @ 0x4A5420");
-	add("loadscrn.pcx", R::LoadingScreen, "for a mission with no loading screen of its own", "Render_LoadingScreen @ 0x521D10");
-	add("MFD1.PCX", R::HudMfd, "for the vehicles' MFD", "sub_59B120 @ 0x59B120");
 	return out;
 }
 
@@ -204,7 +180,7 @@ const std::vector<FixedTextureName> &fixed_texture_names() {
 	return names;
 }
 
-TextureRoleId texture_role_of_edge(const GraphEdge &edge, const Document *model, TextureUseContext &context) {
+renderer::TextureRoleId texture_role_of_edge(const GraphEdge &edge, const Document *model, TextureUseContext &context) {
 	context.key = edge.field;
 	if (edge.kind == ReferenceKind::MenuTexture) {
 		if (edge.field == "frame.stencil") return R::MenuFrameStencil;
@@ -214,7 +190,7 @@ TextureRoleId texture_role_of_edge(const GraphEdge &edge, const Document *model,
 	}
 	if (edge.kind == ReferenceKind::LoadingImage) return R::LoadingScreen;
 	if (edge.kind != ReferenceKind::Texture) return R::kCount;
-	TextureRoleId role = R::kCount;
+	renderer::TextureRoleId role = R::kCount;
 	if (texture_arg_role(edge.loader_arg, role)) {
 		if (role == R::HudAlphaOnly) context.hud_mode = 1;
 		else if (role == R::HudColour) context.hud_mode = 0;
@@ -269,9 +245,8 @@ TextureUse fixed_use(const AssetScan &scan, const FixedTextureName &fixed, const
 	use.fixed_witness = fixed.witness;
 	use.name_written = fixed.name;
 	use.context.hud_mode = fixed.hud_mode;
-	const TextureLoader loader = fixed.loader != TextureLoader::kCount ? fixed.loader : texture_role_row(fixed.role).loader;
-	use.loader = loader;
-	use.load = texture_load(loader, fixed.name, exists, 0, fixed.hud_mode, fixed.role);
+	use.loader = fixed.loader;
+	use.load = texture_load(fixed.loader, fixed.name, exists, 0, fixed.hud_mode);
 	if (const AssetEntry *opened = use.load.file.empty() ? nullptr : scan.find(basename_of(use.load.file)))
 		use.served = opened->relative_path;
 	return use;
@@ -303,7 +278,7 @@ std::vector<TextureUse> texture_uses(const AssetGraph &graph, const AssetScan &s
 		TextureUse use = edge_use(graph, scan, *edge, models, exists, read);
 		// A terrain detail is read by its own name too (texture_role_read_by_name): the file of the name
 		// as written is read whatever its loader's .dds.
-		use.reads_file = use.served == file || (texture_role_read_by_name(use.role) &&
+		use.reads_file = use.served == file || (renderer::texture_role_read_by_name(use.role) &&
 		                                        pff::normalized_logical_name(basename_of(use.name_written)) == key);
 		use.words = use_words(use);
 		out.push_back(std::move(use));
@@ -328,12 +303,12 @@ bool texture_use_opens(const TextureUse &use, const std::string &file) {
 	if (wanted.empty() || use.name_written.empty()) return false;
 	const TextureNameTest only = [&wanted](const std::string &name) { return pff::normalized_logical_name(basename_of(name)) == wanted; };
 	TextureLoad load;
-	if (use.loader != TextureLoader::kCount)
-		load = texture_load(use.loader, use.name_written, only, 0, use.context.hud_mode, use.role);
+	if (use.loader != renderer::TextureLoader::kCount)
+		load = texture_load(use.loader, use.name_written, only, 0, use.context.hud_mode);
 	else if (use.loader_arg >= 0)
 		load = texture_reference_load(use.name_written, use.loader_arg, only);
 	else if (use.known())
-		load = texture_load(texture_role_row(use.role).loader, use.name_written, only, 0, use.context.hud_mode, use.role);
+		load = texture_load(texture_role_row(use.role).loader, use.name_written, only, 0, use.context.hud_mode);
 	else
 		return pff::normalized_logical_name(basename_of(use.name_written)) == wanted;
 	return !load.file.empty() && pff::normalized_logical_name(basename_of(load.file)) == wanted;
@@ -395,7 +370,7 @@ JsonValue texture_use_json(const TextureUse &use) {
 		context.set("alpha_test", JsonValue::make_bool(use.context.alpha_test()));
 		context.set("alpha_ref", json_number(use.context.alpha_ref));
 		// What its alpha is to the game, by its material's technique (texture_row_alpha_meaning).
-		const TextureAlphaMeaning alpha = texture_row_alpha_meaning(use.context.shader, use.context.material_flags,
+		const renderer::TextureAlphaMeaning alpha = renderer::texture_row_alpha_meaning(use.context.shader, use.context.material_flags,
 		                                                            use.context.type, use.context.slot, use.name_written);
 		context.set("alpha", json_string(texture_alpha_meaning_token(alpha)));
 		context.set("alpha_words", json_string(texture_alpha_meaning_words(alpha, use.context.shader, use.context.alpha_ref,
@@ -411,7 +386,7 @@ JsonValue texture_use_json(const TextureUse &use) {
 }
 
 TextureBudget texture_use_budget(const TextureUse &use, const TextureHeader &header) {
-	TextureBudgetLoader loader = TextureBudgetLoader::Stage;
+	renderer::TextureLoader loader = renderer::TextureLoader::Stage;
 	if (!use.known() || use.fixed || use.served.empty() || !texture_role_budget_loader(use.role, loader)) return TextureBudget();
 	return texture_budget(header, basename_of(use.served), loader, use.context.slot);
 }

@@ -61,7 +61,7 @@ GraphEdge edge_of(const std::string &source, const std::string &record, const st
 // the file writes is a site a rename rewrites in its text (graph/native_text_sites.h); one it derives
 // (a flipbook's frame) is not.
 GraphEdge texture_edge(const std::string &source, const std::string &record, const std::string &field,
-                       const std::string &value, TextureRoleId role, int32_t flags = 0, bool written = true) {
+                       const std::string &value, renderer::TextureRoleId role, int32_t flags = 0, bool written = true) {
 	GraphEdge edge = edge_of(source, record, field, ReferenceKind::Texture, value, std::string(), written);
 	edge.loader_arg = texture_role_arg(role, flags);
 	return edge;
@@ -194,7 +194,7 @@ bool extract_hudpos(const std::string &name, const std::vector<uint8_t> &bytes, 
 	// icon and the parachute and armour icons alpha only, the static frame and the loadout's two in
 	// colour [orig: HUD_LoadAllTextures @ 0x59DDA0, HUD_LoadImageAsTexture @ 0x591550; record
 	// interface/hud-re].
-	auto texture = [&](const std::string &record, const char *field, TextureRoleId role, const char *value) {
+	auto texture = [&](const std::string &record, const char *field, renderer::TextureRoleId role, const char *value) {
 		if (value && *value) out.edges.push_back(texture_edge(name, record, field, value, role));
 	};
 	edge(std::string(), "fonthud1_hi", ReferenceKind::Font, hud.font_hi);
@@ -205,14 +205,14 @@ bool extract_hudpos(const std::string &name, const std::vector<uint8_t> &bytes, 
 		const def::DefHudStance *read = nullptr;
 		for (size_t i = 0; i < hud.stances_count; ++i)
 			if (hud.stances[i].id == id) read = &hud.stances[i];
-		if (read) texture("HUDSTANCE " + std::to_string(id), "texture", TextureRoleId::HudAlphaOnly, read->texture);
+		if (read) texture("HUDSTANCE " + std::to_string(id), "texture", renderer::TextureRoleId::HudAlphaOnly, read->texture);
 	}
 	if (hud.static_frames_count > 0)
-		texture("StaticFrame", "texture", TextureRoleId::HudColour, hud.static_frames[hud.static_frames_count - 1].texture);
-	texture(std::string(), "parachute_icon", TextureRoleId::HudAlphaOnly, hud.parachute_icon.texture);
-	texture(std::string(), "armor_icon", TextureRoleId::HudAlphaOnly, hud.armor_icon.texture);
-	texture(std::string(), "hudls_bracket", TextureRoleId::HudColour, hud.hudls_bracket);
-	texture(std::string(), "hudls_moreav", TextureRoleId::HudColour, hud.hudls_moreav);
+		texture("StaticFrame", "texture", renderer::TextureRoleId::HudColour, hud.static_frames[hud.static_frames_count - 1].texture);
+	texture(std::string(), "parachute_icon", renderer::TextureRoleId::HudAlphaOnly, hud.parachute_icon.texture);
+	texture(std::string(), "armor_icon", renderer::TextureRoleId::HudAlphaOnly, hud.armor_icon.texture);
+	texture(std::string(), "hudls_bracket", renderer::TextureRoleId::HudColour, hud.hudls_bracket);
+	texture(std::string(), "hudls_moreav", renderer::TextureRoleId::HudColour, hud.hudls_moreav);
 	// A vehicle panel's interface art through the HUD loader in alpha mode (render-material-re.md "The
 	// game's texture loaders"); its icon and static texture: no load of either is witnessed, the name as
 	// written.
@@ -224,7 +224,7 @@ bool extract_hudpos(const std::string &name, const std::vector<uint8_t> &bytes, 
 		// rewrites (native_text_sites).
 		if (vehicle.sid[0]) out.edges.push_back(edge_of(name, record, "sid", ReferenceKind::ItemAlias, vehicle.sid));
 		edge(record, "icon", ReferenceKind::Texture, vehicle.icon);
-		texture(record, "interface", TextureRoleId::HudAlphaOnly, vehicle.interface_texture);
+		texture(record, "interface", renderer::TextureRoleId::HudAlphaOnly, vehicle.interface_texture);
 		edge(record, "statictexture", ReferenceKind::Texture, vehicle.static_texture);
 	}
 	def::def_free_hudpos(&file);
@@ -325,14 +325,14 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 			// picks (the edge carries the mode, GraphEdge::use_context: renderer::particle_atlas_page_side).
 			const uint32_t mode = uint32_t(layer.blend_mode);
 			if (frames <= 1) {
-				out.edges.push_back(texture_edge(name, definition.id, field, layer.texture, TextureRoleId::ParticleGraphic));
+				out.edges.push_back(texture_edge(name, definition.id, field, layer.texture, renderer::TextureRoleId::ParticleGraphic));
 				out.edges.back().use_context = mode;
 				continue;
 			}
 			for (int frame = 1; frame <= frames; ++frame) {
 				out.edges.push_back(texture_edge(name, definition.id, field + "[" + std::to_string(frame) + "]",
 				                                 renderer::retail_particle_frame_name(layer.texture, frames, frame),
-				                                 TextureRoleId::ParticleGraphic, 0, false));
+				                                 renderer::TextureRoleId::ParticleGraphic, 0, false));
 				out.edges.back().use_context = mode;
 			}
 		}
@@ -363,7 +363,7 @@ bool extract_face_animation(const std::string &name, const std::vector<uint8_t> 
 		if (written.empty()) return;
 		const std::string opened = loaded(written, extension);
 		const bool as_written = strutil::iequals(opened, written);
-		out.edges.push_back(texture_edge(name, record, field, as_written ? written : opened, TextureRoleId::FaceTexture, 0,
+		out.edges.push_back(texture_edge(name, record, field, as_written ? written : opened, renderer::TextureRoleId::FaceTexture, 0,
 		                                 as_written));
 	};
 	texture(std::string(), "basetexture", file.base_texture, ".TGA");

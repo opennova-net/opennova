@@ -53,7 +53,7 @@ const std::vector<TextureUse> &TextureUseIndex::uses_of(const SessionView &view,
 		// What each model row's texture costs the game, from the header of the file its loader opens (the use
 		// check's read of it, kept by its stamp).
 		for (TextureUse &use : uses) {
-			TextureBudgetLoader loader = TextureBudgetLoader::Stage;
+			renderer::TextureLoader loader = renderer::TextureLoader::Stage;
 			if (!use.known() || use.served.empty() || !texture_role_budget_loader(use.role, loader)) continue;
 			const AssetEntry *served = view.project.scan->at_path(use.served);
 			if (served) use.budget = texture_use_budget(use, texture_file_header(view.project.root, *served, texture_reader_for(use.served)));
