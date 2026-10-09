@@ -94,6 +94,29 @@ int main() {
 		CHECK(waypoint_display_name(wp(1), true, 0x10020u, trg, gametext) == "Alley Corner");
 		CHECK(waypoint_display_name(wp(1), true, 0x30020u, trg, gametext) == "Marketplace");
 	}
+	// The mission's string reads as the spawn left it in the table: its first 15
+	// characters, counted as the code page's one byte a character (UTF-8 here)
+	// [orig: Entity_SpawnFromBMSRecord @0x40f102..0x40f107]; the special keys
+	// are gametext's and stay whole.
+	{
+		CHECK(kWaypointNameChars == 15);
+		CHECK(waypoint_name_as_spawned("Checkpoint Bravo North") == "Checkpoint Brav");
+		CHECK(waypoint_name_as_spawned("Exactly fifteen") == "Exactly fifteen");
+		CHECK(waypoint_name_as_spawned("") == "");
+		// "Ü" is two UTF-8 bytes, one character of the game's code page.
+		CHECK(waypoint_name_as_spawned("\xC3\x9C" "berlandstrasse Ost") == "\xC3\x9C" "berlandstrasse");
+		const GameTextLookup longer = table_of({
+				{ "WPNames/STRWPNAME001", "The Northern Marketplace" },
+		});
+		const GameTextLookup long_specials = table_of({
+				{ "WPNames/STRWPNAMEARMORY", "The Forward Armory Depot" },
+		});
+		CHECK(waypoint_display_name(wp(1), false, 0x10020u, longer, gametext) == "The Northern Ma");
+		WaypointNameKey k = wp(0);
+		k.has_def = true;
+		k.def_attrib = 0x80000u;
+		CHECK(waypoint_display_name(k, true, 0x10004u, longer, long_specials) == "The Forward Armory Depot");
+	}
 	// The in-session def specials [orig: @0x594688..0x59470D]: ARMORY beats
 	// TARGET beats the type lists; a special's miss (and no special at all)
 	// falls back to the mission name of the REMAPPED id.
