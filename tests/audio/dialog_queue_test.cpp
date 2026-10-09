@@ -1,13 +1,15 @@
 // runtime/audio/dialog_queue: the PlayWavList dialog-number resolution (the
 // dialog bank's dialog "dlg%03i", each line the wave of its name in the dialog
-// bank's sounds), the one-channel serialized dialog queue and the joiner's line,
-// over synthetic dbf/lwf documents.
+// bank's sounds), the dialog slots' timers on the one dialog channel and the
+// joiner's line, over synthetic dbf/lwf documents and a scripted device.
 
 #include <runtime/audio/dialog_queue.h>
 
 #include "common/test_expect.h"
 
 #include <cstring>
+#include <initializer_list>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -38,9 +40,12 @@ dbf::File dialog_bank() {
 	dbf::File file;
 	dbf::Group dlg001;
 	dlg001.group_name = "dlg001";
+	const uint8_t delays[] = { 3, 0, 7 };
+	int at = 0;
 	for (const char *def : { "SynR100", "MISSING", "SynR101" }) {
 		dbf::Line line;
 		line.def_id_name = def;
+		line.delay = delays[at++];
 		dlg001.lines.push_back(line);
 	}
 	file.groups.push_back(dlg001);
@@ -67,11 +72,51 @@ std::vector<std::string> files(const std::vector<DialogLineRef> &lines) {
 	return out;
 }
 
-DialogLineRef ref(const char *file, const char *dialog = "", int line = -1) {
+DialogLineRef ref(const char *file, const char *dialog = "", int line = -1, uint8_t delay = 0) {
 	DialogLineRef out;
 	out.file = file;
 	out.dialog_name = dialog;
 	out.line = line;
+	out.delay = delay;
+	return out;
+}
+
+// The shell's half, scripted: a line with a file loads on a new voice that
+// plays until the test stops it, its wave tone.wav's (8320 samples at 22050
+// Hz, a hold of 48 ticks); one without loads nothing. Every load is logged as
+// "<dialog>:<line>", the co-op report's order.
+struct Device {
+	std::vector<std::string> loads;
+	std::set<uint64_t> live;
+	uint64_t next_voice = 1;
+
+	DialogQueue::LoadLine load() {
+		return [this](const DialogLineRef &line) {
+			loads.push_back(line.dialog_name + ":" + std::to_string(line.line));
+			DialogClip clip;
+			if (line.file.empty()) return clip;
+			clip.loaded = true;
+			clip.samples = 8320;
+			clip.pitch_q16 = 32768;
+			clip.voice = next_voice++;
+			live.insert(clip.voice);
+			return clip;
+		};
+	}
+	DialogQueue::VoicePlaying playing() {
+		return [this](uint64_t voice) { return live.count(voice) != 0; };
+	}
+	void stop(uint64_t voice) { live.erase(voice); }
+};
+
+// `ticks` playback ticks, a frame rendered before each unless told otherwise.
+void run(DialogQueue &queue, Device &device, int ticks, bool rendered = true) {
+	for (int i = 0; i < ticks; ++i) queue.tick(rendered, device.load(), device.playing());
+}
+
+std::vector<std::string> names(std::initializer_list<const char *> list) {
+	std::vector<std::string> out;
+	for (const char *each : list) out.emplace_back(each);
 	return out;
 }
 
@@ -92,6 +137,8 @@ int test_a_number_plays_its_dialog_s_waves() {
 			first[1].line == 1 && first[2].line == 2 && first[1].wave == "MISSING");
 	// The wave's byte +33 is the line's volume, 0 playing at full [orig: sub_527560 @0x527598].
 	TEST_EXPECT(first.size() == 3 && first[0].volume == 210 && first[2].volume == 255);
+	// Each line carries its DELAY byte (dbf line +0x35) [orig: Dialog_UpdatePlayback @0x44e563].
+	TEST_EXPECT(first.size() == 3 && first[0].delay == 3 && first[1].delay == 0 && first[2].delay == 7);
 	// A dialog whose line names no wave: the line, no clip; no sound set stands in.
 	const std::vector<DialogLineRef> second = resolve_dialog_lines(&dialogs, &sounds, 2);
 	TEST_EXPECT(second.size() == 1 && second[0].file.empty() && second[0].wave == "MISSING");
@@ -123,38 +170,195 @@ int test_a_wave_found_as_the_bank_finds_it() {
 	return 0;
 }
 
-int test_queue_advances_only_when_the_channel_frees() {
+// The hold: 2 * ((62 * samples + rate) / rate), the rate rounded back from the
+// pitch ratio; 12 for no wave or a rate of 0 [orig: Dialog_LoadAudioClip
+// @0x44dd7c, @0x44dd87..0x44ddbf].
+int test_a_line_holds_about_twice_its_wave() {
+	DialogClip clip;
+	TEST_EXPECT(dialog_clip_hold(clip) == 12);
+	clip.loaded = true;
+	clip.samples = 8320;
+	clip.pitch_q16 = 32768;  // tone.wav: 22050 Hz, 0.377 s, 23.4 ticks long
+	TEST_EXPECT(dialog_clip_hold(clip) == 48);
+	clip.samples = 44100;
+	clip.pitch_q16 = 65536;  // one second at 44100 Hz
+	TEST_EXPECT(dialog_clip_hold(clip) == 126);
+	clip.samples = 8000;
+	clip.pitch_q16 = 11889;  // one second at 8000 Hz: the ratio's rate rounds back to 8000
+	TEST_EXPECT(dialog_clip_hold(clip) == 126);
+	clip.samples = 1;
+	clip.pitch_q16 = 32768;
+	TEST_EXPECT(dialog_clip_hold(clip) == 2);
+	clip.pitch_q16 = 0;
+	TEST_EXPECT(dialog_clip_hold(clip) == 12);
+	return 0;
+}
+
+// A dialog's first line loads on the first tick; the next waits out the hold
+// (counting from the tick after a rendered frame), then the free channel, then
+// its own delay, 62 * 12 / 10 = 74 ticks [orig: Dialog_UpdatePlayback
+// @0x44e470: @0x44e5f1..0x44e60e, @0x44e525..0x44e544, @0x44e585].
+int test_the_next_line_waits_hold_channel_delay() {
 	DialogQueue queue;
-	DialogLineRef next;
-	TEST_EXPECT(!queue.take_next(next));
-	queue.enqueue({ ref("SynR100.wav", "dlg001", 0), ref("SynR101.wav", "dlg001", 1) });
-	TEST_EXPECT(queue.pending() == 2);
-	TEST_EXPECT(queue.take_next(next) && next.file == "SynR100.wav" &&
-			next.dialog_name == "dlg001" && next.line == 0);
-	queue.line_started();
-	TEST_EXPECT(queue.line_active());
-	TEST_EXPECT(!queue.take_next(next));
-	TEST_EXPECT(queue.pending() == 1);
-	// A second play_dialog while a line plays queues behind it.
-	queue.enqueue({ ref("SynR102.wav") });
-	TEST_EXPECT(queue.pending() == 2);
-	queue.line_finished();
-	TEST_EXPECT(queue.take_next(next) && next.file == "SynR101.wav" && next.line == 1);
-	// A line that fails to spawn is skipped by asking again (no line was
-	// started), so the queue never stalls.
-	TEST_EXPECT(queue.take_next(next) && next.file == "SynR102.wav");
-	TEST_EXPECT(!queue.take_next(next));
-	queue.line_started();
-	queue.enqueue({ ref("SynR103.wav") });
+	Device device;
+	TEST_EXPECT(queue.enqueue("dlg002", { ref("a.wav", "dlg002", 0, 5), ref("b.wav", "dlg002", 1, 12) }));
+	TEST_EXPECT(device.loads.empty());
+	run(queue, device, 1);
+	// The first line's own delay is never waited: the slot's wait flag is clear.
+	TEST_EXPECT(device.loads == names({ "dlg002:0" }) && queue.voices().size() == 1);
+	TEST_EXPECT(queue.slots().size() == 1 && queue.slots()[0].timer == 48 && !queue.slots()[0].counting);
+	run(queue, device, 1);  // tick 2: the countdown starts
+	TEST_EXPECT(queue.slots()[0].timer == 48 && queue.slots()[0].counting);
+	run(queue, device, 48);  // ticks 3..50
+	TEST_EXPECT(queue.slots()[0].timer == 0);
+	run(queue, device, 9);  // ticks 51..59: the line's voice still plays
+	TEST_EXPECT(device.loads.size() == 1 && queue.slots()[0].timer == 0);
+	device.stop(1);
+	run(queue, device, 1);  // tick 60: the channel is free, the delay starts
+	TEST_EXPECT(queue.slots()[0].timer == (0x80000000u | 74u) && queue.voices().empty());
+	run(queue, device, 74);  // ticks 61..134
+	TEST_EXPECT(device.loads.size() == 1 && queue.slots()[0].timer == 0x80000000u);
+	run(queue, device, 1);  // tick 135
+	TEST_EXPECT(device.loads == names({ "dlg002:0", "dlg002:1" }));
+	return 0;
+}
+
+// The hold counts only once a frame has rendered after the line loaded; the
+// countdown itself needs no frame [orig: @0x44e5fe..0x44e60e; the flag
+// GameLoop_RenderFrame sets @0x521cff].
+int test_the_hold_starts_after_a_rendered_frame() {
+	DialogQueue queue;
+	Device device;
+	queue.enqueue("dlg001", { ref("a.wav", "dlg001", 0), ref("b.wav", "dlg001", 1) });
+	run(queue, device, 1, false);
+	run(queue, device, 9, false);  // ticks 2..10, no frame
+	TEST_EXPECT(queue.slots()[0].timer == 48 && !queue.slots()[0].counting);
+	run(queue, device, 1);  // tick 11
+	run(queue, device, 47, false);  // ticks 12..58
+	TEST_EXPECT(queue.slots()[0].timer == 1);
+	device.stop(1);
+	run(queue, device, 1, false);  // tick 59: the hold runs out
+	TEST_EXPECT(device.loads.size() == 1);
+	run(queue, device, 1, false);  // tick 60: a delay of 0 loads at once
+	TEST_EXPECT(device.loads == names({ "dlg001:0", "dlg001:1" }));
+	return 0;
+}
+
+// A line without a wave still loads (the co-op report) and holds 12 ticks; it
+// starts no voice, so the channel stays free [orig: Dialog_LoadAudioClip
+// @0x44dd74..0x44dd7c].
+int test_a_missing_wave_holds_twelve_ticks() {
+	DialogQueue queue;
+	Device device;
+	queue.enqueue("dlg002", { ref("", "dlg002", 0), ref("b.wav", "dlg002", 1) });
+	run(queue, device, 1);
+	TEST_EXPECT(device.loads == names({ "dlg002:0" }) && queue.voices().empty());
+	TEST_EXPECT(queue.slots()[0].timer == 12);
+	run(queue, device, 13);  // ticks 2..14
+	TEST_EXPECT(device.loads.size() == 1 && queue.slots()[0].timer == 0);
+	run(queue, device, 1);  // tick 15
+	TEST_EXPECT(device.loads == names({ "dlg002:0", "dlg002:1" }));
+	return 0;
+}
+
+// Separate dialogs share only the channel: B's line takes the channel once A's
+// first wave ends, A's second waits for it, so they run A0, B0, A1 [orig:
+// Dialog_UpdatePlayback @0x44e4d8..0x44e634, the slots walked in order].
+int test_dialogs_interleave_in_slot_order() {
+	DialogQueue queue;
+	Device device;
+	queue.enqueue("dlgA", { ref("a0.wav", "dlgA", 0), ref("a1.wav", "dlgA", 1) });
+	queue.enqueue("dlgB", { ref("b0.wav", "dlgB", 0) });
+	run(queue, device, 1);
+	TEST_EXPECT(device.loads == names({ "dlgA:0" }));
+	run(queue, device, 19);  // ticks 2..20: A0 plays
+	TEST_EXPECT(device.loads.size() == 1);
+	device.stop(1);
+	run(queue, device, 1);  // tick 21: A0's wave ended, A still holds
+	TEST_EXPECT(device.loads == names({ "dlgA:0", "dlgB:0" }));
+	run(queue, device, 49);  // ticks 22..70: A's hold ran out at 50; B0 plays
+	TEST_EXPECT(device.loads.size() == 2);
+	device.stop(2);
+	run(queue, device, 1);  // tick 71
+	TEST_EXPECT(device.loads == names({ "dlgA:0", "dlgB:0", "dlgA:1" }));
+	// B held its last line and waits for A1's channel before it leaves its slot.
+	TEST_EXPECT(queue.slots().size() == 2 && queue.slots()[1].dialog == "dlgB");
+	device.stop(3);
+	run(queue, device, 1);
+	TEST_EXPECT(queue.slots().size() == 1 && queue.slots()[0].dialog == "dlgA");
+	return 0;
+}
+
+// A run-out delay loads even while another dialog's voice plays, so two voices
+// overlap; the channel test reads only the last voice on the stack, which drops
+// stopped voices by moving the last into their place [orig: @0x44e52e..0x44e530;
+// AudioChannel_CleanupInvalid @0x44d840].
+int test_the_delay_ignores_the_channel() {
+	DialogQueue queue;
+	Device device;
+	queue.enqueue("dlgA", { ref("a0.wav", "dlgA", 0), ref("a1.wav", "dlgA", 1, 10) });
+	run(queue, device, 10);
+	device.stop(1);
+	run(queue, device, 41);  // ticks 11..51: the hold ran out at 50, the delay (62) started at 51
+	TEST_EXPECT(queue.slots()[0].timer == (0x80000000u | 62u));
+	queue.enqueue("dlgB", { ref("b0.wav", "dlgB", 0) });
+	run(queue, device, 1);  // tick 52: B0 on the free channel
+	TEST_EXPECT(device.loads == names({ "dlgA:0", "dlgB:0" }));
+	run(queue, device, 62);  // ticks 53..114: A1 loads at 114 over B0
+	TEST_EXPECT(device.loads == names({ "dlgA:0", "dlgB:0", "dlgA:1" }));
+	TEST_EXPECT(queue.voices() == std::vector<uint64_t>({ 2, 3 }));
+	queue.enqueue("dlgC", { ref("c0.wav", "dlgC", 0) });
+	run(queue, device, 1);
+	TEST_EXPECT(device.loads.size() == 3);  // A1, the last voice, plays
+	device.stop(3);
+	run(queue, device, 1);  // B0 still plays, but the last voice stopped
+	TEST_EXPECT(device.loads.back() == "dlgC:0");
+	TEST_EXPECT(queue.voices() == std::vector<uint64_t>({ 2, 4 }));
+	return 0;
+}
+
+// Sixteen dialogs at once; a seventeenth is dropped [orig: Dialog_Register
+// @0x44d9c3]. A dialog leaves its slot once its last line has held and the
+// channel is free, and the slots behind it close up [orig: Dialog_FreeByName
+// @0x44db40 -> sub_44DAF0 @0x44daf0].
+int test_sixteen_slots_and_the_free() {
+	DialogQueue queue;
+	Device device;
+	for (int i = 0; i < 16; ++i) {
+		const std::string dialog = "dlg" + std::to_string(i);
+		TEST_EXPECT(queue.enqueue(dialog, { ref("", dialog.c_str(), 0) }));
+	}
+	TEST_EXPECT(!queue.enqueue("dlgX", { ref("x.wav") }));
+	TEST_EXPECT(queue.slots().size() == 16);
+	// Each missing line holds 12 (counting from tick 2), so the dialogs leave on tick 15.
+	run(queue, device, 14);
+	TEST_EXPECT(queue.slots().size() == 16 && device.loads.size() == 16);
+	run(queue, device, 1);
+	TEST_EXPECT(queue.slots().empty());
+	TEST_EXPECT(queue.enqueue("dlgY", { ref("y.wav", "dlgY", 0) }));
+	run(queue, device, 1);
+	TEST_EXPECT(device.loads.back() == "dlgY:0");
+	return 0;
+}
+
+// Dialog_ResetAll empties the slots and leaves the voices playing, so a dialog
+// played after it waits for the channel; a teardown forgets both [orig:
+// Dialog_ResetAll @0x44dc90].
+int test_reset_and_clear() {
+	DialogQueue queue;
+	Device device;
+	queue.enqueue("dlgA", { ref("a0.wav", "dlgA", 0), ref("a1.wav", "dlgA", 1) });
+	run(queue, device, 1);
 	queue.discard_pending();
-	TEST_EXPECT(queue.line_active() && queue.pending() == 0);
-	queue.enqueue({ ref("after respawn") });
-	TEST_EXPECT(!queue.take_next(next));
-	queue.line_finished();
-	TEST_EXPECT(queue.take_next(next) && next.file == "after respawn");
+	TEST_EXPECT(queue.slots().empty() && queue.voices().size() == 1);
+	queue.enqueue("dlgB", { ref("b0.wav", "dlgB", 0) });
+	run(queue, device, 5);
+	TEST_EXPECT(device.loads == names({ "dlgA:0" }));
+	device.stop(1);
+	run(queue, device, 1);
+	TEST_EXPECT(device.loads == names({ "dlgA:0", "dlgB:0" }));
 	queue.clear();
-	TEST_EXPECT(!queue.line_active() && queue.pending() == 0);
-	TEST_EXPECT(!queue.take_next(next));
+	TEST_EXPECT(queue.slots().empty() && queue.voices().empty());
 	return 0;
 }
 
@@ -219,7 +423,14 @@ int main() {
 	int failed = 0;
 	failed |= test_a_number_plays_its_dialog_s_waves();
 	failed |= test_a_wave_found_as_the_bank_finds_it();
-	failed |= test_queue_advances_only_when_the_channel_frees();
+	failed |= test_a_line_holds_about_twice_its_wave();
+	failed |= test_the_next_line_waits_hold_channel_delay();
+	failed |= test_the_hold_starts_after_a_rendered_frame();
+	failed |= test_a_missing_wave_holds_twelve_ticks();
+	failed |= test_dialogs_interleave_in_slot_order();
+	failed |= test_the_delay_ignores_the_channel();
+	failed |= test_sixteen_slots_and_the_free();
+	failed |= test_reset_and_clear();
 	failed |= test_client_line_resolution();
 	if (failed) {
 		return 1;

@@ -15,6 +15,7 @@
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/fire_sound.h> // play_round_impact_sound
+#include <runtime/world/physics_class_table.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
@@ -102,6 +103,18 @@ ThrowClass throw_class_from_tag(const char *tag) {
     if (eq("vmne")) return ThrowClass::kAVMine;
     if (eq("lndm")) return ThrowClass::kLandmine;
     return ThrowClass::kNone;
+}
+
+ThrowClass throw_motor_from_move_function(const char *move_function) {
+    switch (physics_class_from_move_function(move_function != nullptr ? move_function : "")) {
+    case PhysicsClass::Stng: return ThrowClass::kStinger;
+    case PhysicsClass::Hlfr: return ThrowClass::kHellfire;
+    case PhysicsClass::Jvln: return ThrowClass::kJavelin;
+    case PhysicsClass::Nade: return ThrowClass::kNade;
+    case PhysicsClass::Schl: return ThrowClass::kSatchel;
+    case PhysicsClass::Clym: return ThrowClass::kClaymore;
+    default: return ThrowClass::kNone;
+    }
 }
 
 // [orig: the release leg of the fire binding @ 0x4e07e9 — held < 0x1F ticks ->

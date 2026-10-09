@@ -67,7 +67,7 @@ const char kItemsDef[] = "begin \"S5 Player\"\r\n"
     "  sid s5helo\r\n"
     "  ai_function CHel\r\n"
     "  render_function CHel\r\n"
-    "  move_function CHelScout\r\n"
+    "  move_function CHel\r\n"
     "  attrib: AIData PlayerControl\r\n"
     "  hp 2000\r\n"
     "end\r\n"
@@ -213,6 +213,37 @@ const char kItemsDef[] = "begin \"S5 Player\"\r\n"
     "  sid s5typo\r\n"
     "  ai_function gnr1\r\n"
     "  hp 10\r\n"
+    "end\r\n"
+    "\r\n"
+    // Tokens that only START with a physics row's name bind the null row
+    // [orig: EntityDef_LookupPhysicsCallback @0x4a9240, whole-name stricmp].
+    "begin \"S5 Prefix Tank\"\r\n"
+    "  id 100504\r\n"
+    "  type vehicle\r\n"
+    "  graphic ptank\r\n"
+    "  sid s5ptank\r\n"
+    "  ai_function cvehX\r\n"
+    "  render_function cvehX\r\n"
+    "  move_function ctan\r\n"
+    "  physics 2\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Prefix Helo\"\r\n"
+    "  id 100505\r\n"
+    "  type vehicle\r\n"
+    "  graphic phelo\r\n"
+    "  sid s5phelo\r\n"
+    "  move_function CHelScout\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Mine Motor\"\r\n"
+    "  id 100603\r\n"
+    "  type powerup\r\n"
+    "  graphic mmotor\r\n"
+    "  sid s5mmotor\r\n"
+    "  ai_function vmne\r\n"
+    "  move_function vmne\r\n"
+    "  hp 10\r\n"
     "end\r\n";
 
 // The minimal SndProf shape ("default" first, so a real profile lands at
@@ -253,7 +284,7 @@ int main() {
     CHECK(def_parse_items_memory(
                   reinterpret_cast<const uint8_t *>(kItemsDef),
                   sizeof(kItemsDef) - 1, &file) == 0);
-    CHECK(file.count == 19);
+    CHECK(file.count == 22);
 
     // Stamp the fields whose authored-token spellings are the def parser's own
     // test surface: distinct sentinels per vehicle-physics slot so any
@@ -339,12 +370,14 @@ int main() {
 
     World w;
     w.registry.configure_pool(0, 8);  // organics
-    w.registry.configure_pool(1, 8);  // items/vehicles
+    w.registry.configure_pool(1, 10); // items/vehicles
     w.registry.configure_pool(2, 16); // buildings (bunker, bush, unknown + the 7 class rows)
     const EntityHandle tank_h = spawn(w, 1, 500, EntityKind::Item);
     const EntityHandle apc_h = spawn(w, 1, 501, EntityKind::Item);
     const EntityHandle helo_h = spawn(w, 1, 502, EntityKind::Item);
     const EntityHandle truck_h = spawn(w, 1, 503, EntityKind::Item);
+    const EntityHandle prefix_tank_h = spawn(w, 1, 504, EntityKind::Item);
+    const EntityHandle prefix_helo_h = spawn(w, 1, 505, EntityKind::Item);
     const EntityHandle dup_h = spawn(w, 1, 602, EntityKind::Item); // "S5 Dup A" then "S5 Dup B"
     const EntityHandle rifle_h = spawn(w, 0, 510, EntityKind::Organic);
     const EntityHandle player_h = spawn(w, 0, 5305, EntityKind::Organic);
@@ -574,7 +607,8 @@ int main() {
         CHECK(vt->pitch_lift_vel == 218);
         CHECK(vt->bob == 219);
         CHECK(vt->flip == 220);
-        // ctank keys the 4-byte ctan row -> the tank mover [orig: @0x82ABC0].
+        // ctank is the table's own 5-character row -> the tank mover
+        // [orig: row @0x82acac ctank -> @0x48f000].
         CHECK(vt->family == VehicleFamily::Tank);
 		CHECK(vt->render_family == VehicleRenderFamily::Ground); // render cveh, move ctank
 		CHECK(vt->player_control);
@@ -596,13 +630,39 @@ int main() {
         CHECK(!apc_vt->attrib_parent);
     }
     // CHel rows legitimately omit the ground physics selector and still land
-    // (direct air mover); the case-folded fourcc accepts mixed-case CHelScout.
+    // (direct air mover).
     const VehicleTraits *helo_vt = w.vehicles.traits.get(502);
     CHECK(helo_vt != nullptr);
     if (helo_vt != nullptr) {
         CHECK(helo_vt->family == VehicleFamily::Helicopter);
         CHECK(helo_vt->physics == 0);
+        // The ai_function binds the CHel event row in any case; the render
+        // tag compares exactly, so `CHel` is not the lowercase chel bone row.
+        // [orig: Entity_LookupRenderCallbacks stricmp @0x407de2;
+        //  BoneCallback_LookupByTag @0x4e32c6, row 'chel' @0x82cfd0]
+        CHECK(helo_vt->brain_class == VehicleBrainClass::Air);
+        CHECK(helo_vt->render_family == VehicleRenderFamily::None);
     }
+    // A token that only starts with a row's name binds the null row: `ctan`
+    // keeps its physics selector's ground mover, never the tank's, and
+    // `CHelScout` without a selector is no vehicle at all.
+    // [orig: EntityDef_LookupPhysicsCallback @0x4a9240, stricmp @0x4a9262,
+    //  row 0 @0x4a9272]
+    const VehicleTraits *prefix_tank_vt = w.vehicles.traits.get(504);
+    CHECK(prefix_tank_vt != nullptr);
+    if (prefix_tank_vt != nullptr) {
+        CHECK(prefix_tank_vt->family == VehicleFamily::Ground);
+        CHECK(!prefix_tank_vt->amphibian);
+        // `cvehX`: the event row is whole-name (no brain), while the render
+        // tag is the first four characters (the cveh bone row).
+        // [orig: Entity_LookupRenderCallbacks stricmp @0x407de2; the tag
+        //  packed from def+0x13C..0x13F @0x4a5ace..0x4a5af1]
+        CHECK(prefix_tank_vt->brain_class == VehicleBrainClass::Unset);
+        CHECK(prefix_tank_vt->render_family == VehicleRenderFamily::Ground);
+    }
+    CHECK(w.vehicles.traits.get(505) == nullptr);
+    (void)prefix_tank_h;
+    (void)prefix_helo_h;
 	// Ground selector zero is a real motor, as used by the shipped LCAC.
 	const VehicleTraits *simple_vt = w.vehicles.traits.get(503);
 	CHECK(simple_vt != nullptr);
@@ -630,6 +690,15 @@ int main() {
     if (mine != nullptr) {
         CHECK(mine->think == ThrowClass::kAVMine);
         CHECK(mine->motor == ThrowClass::kSatchel);
+    }
+    // vmne is an event row only: as a move_function it binds the physics
+    // table's null row, so the device has its think and no motor.
+    // [orig: EntityDef_LookupPhysicsCallback @0x4a9240 over @0x82abc8]
+    const ThrowableClassRow *mine_motor = w.throwables.classes.get(603);
+    CHECK(mine_motor != nullptr);
+    if (mine_motor != nullptr) {
+        CHECK(mine_motor->think == ThrowClass::kAVMine);
+        CHECK(mine_motor->motor == ThrowClass::kNone);
     }
     // A duplicate definition id resolves to its FIRST row (the earlier clym
     // block), for the class tables and for a placed entity alike: the later

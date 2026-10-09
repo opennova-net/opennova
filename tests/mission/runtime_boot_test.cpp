@@ -1,11 +1,15 @@
 // S9 (ADR 0028): the mission boot's file-resolution rules — the mission-text
-// fallback rule and the .aip profile-speed resolution (parse, dedup order,
-// trim/lowercase, unauthored-row exclusion). The boot ORDER itself is pinned
+// fallback rule, the .aip profile-speed resolution (parse, dedup order,
+// trim/lowercase, unauthored-row exclusion) and the authority's placed tiles
+// (<mission>.til, else the terrain's polytrn_tileinfo). The boot ORDER itself is pinned
 // through MissionKernel::boot_trace in mission_kernel_test (ADR 0043 slice E9).
 
 #include <runtime/mission/runtime_boot.h>
+#include <runtime/terrain_query/terrain_field_build.h>
 
 #include <formats/aip/aip.h>
+#include <formats/mission/bms.h>
+#include <formats/til/til_io.h>
 
 #include "../common/boot_file_source.h"
 
@@ -308,6 +312,109 @@ bool run_aip_fallback() {
 	return expect(bare.empty(), "fallback: no class answer -> no fallback rows");
 }
 
+// A .til of `count` placed tiles, each at a distinct cell.
+std::string til_of(int count) {
+	TilFile til;
+	for (int i = 0; i < count; ++i) {
+		TilOverlayEntry tile;
+		tile.x_fixed = (4 + 8 * i) << 16;
+		tile.z_fixed = -(4 << 16);
+		tile.tile_index = static_cast<uint8_t>(i);
+		til.entries.push_back(tile);
+	}
+	std::vector<uint8_t> out;
+	std::string error;
+	if (!save_til(til, out, error)) std::fprintf(stderr, "save_til: %s\n", error.c_str());
+	return std::string(out.begin(), out.end());
+}
+
+std::string bytes_string(const std::vector<uint8_t> &bytes) {
+	return std::string(bytes.begin(), bytes.end());
+}
+
+// The authority's placed tiles: <mission>.til by the name cut at its FIRST '.',
+// else the terrain configuration's polytrn_tileinfo, its extension forced from
+// its first '.', each taken only when the load takes it (16 bytes or more that
+// open with the til0 magic). [orig: PolyTrn_LoadTerrainConfig @0x60e6c9..0x60e6e5;
+// Terrain_LoadTileInfoFile @0x60a740 (-1 @0x60a78b, @0x60a7ba); Terrain_Init
+// @0x60fcfd/@0x60fd0c; Path_ReplaceOrAppendExtension's first-dot scan @0x53c7c4]
+bool run_placed_tiles() {
+	bms::File mission;
+	std::snprintf(mission.header.terrain, 16, "%s", "synthtrn");
+	std::snprintf(mission.header.environment, sizeof(mission.header.environment), "%s", "synthenv");
+	const std::string trn =
+			"polytrn_colormap synth_c.tga\r\n"
+			"polytrn_detailmap synth_d.tga\r\n"
+			"polytrn_polydata synth.cpt\r\n"
+			"polytrn_tileinfo Own.v1.dat\r\n";
+	std::map<std::string, std::string> files;
+	files["op.til"] = til_of(1);
+	files["op.v2.til"] = til_of(2);
+	files["synthtrn.trn"] = trn;
+	files["Own.til"] = til_of(3);
+	const ms::BootFileSource src = source_over(&files);
+	std::vector<uint8_t> out;
+	bool ok = true;
+
+	// The mission's own, by its first-dot base: op.v2.bms reads op.til.
+	ok &= expect(ms::read_placed_tiles(src, "op.v2.bms", mission, out) == "op.til" &&
+					bytes_string(out) == files["op.til"],
+			"tiles: <mission>.til by the first-dot base");
+
+	// None of the mission's: the terrain's own, Own.v1.dat read as Own.til.
+	ok &= expect(ms::read_placed_tiles(src, "other.bms", mission, out) == "Own.til" &&
+					bytes_string(out) == files["Own.til"],
+			"tiles: the terrain's polytrn_tileinfo when the mission has none");
+
+	// A mission .til the load refuses sends it on: under 16 bytes, or no magic.
+	files["short.til"] = files["op.til"].substr(0, 15);
+	ok &= expect(ms::read_placed_tiles(src, "short.bms", mission, out) == "Own.til",
+			"tiles: a short mission .til falls back");
+	files["nomagic.til"] = std::string(16, '\0');
+	ok &= expect(ms::read_placed_tiles(src, "nomagic.bms", mission, out) == "Own.til",
+			"tiles: a bad-magic mission .til falls back");
+
+	// The magic and 16 bytes are all the load checks: a header whose count runs
+	// past the file is still the mission's.
+	std::string truncated = files["op.til"].substr(0, 16);
+	truncated[4] = 5;
+	files["truncated.til"] = truncated;
+	ok &= expect(ms::read_placed_tiles(src, "truncated.bms", mission, out) == "truncated.til" &&
+					out.size() == 16,
+			"tiles: a truncated body with the magic is taken");
+
+	// The mission's .env reaches the terrain's parser after the .trn, so its
+	// polytrn_tileinfo is the one the load forces.
+	files["synthenv.env"] = "polytrn_tileinfo EnvOwn.dat\r\n";
+	files["EnvOwn.til"] = til_of(4);
+	ok &= expect(ms::read_placed_tiles(src, "other.bms", mission, out) == "EnvOwn.til" &&
+					bytes_string(out) == files["EnvOwn.til"],
+			"tiles: the .env's polytrn_tileinfo over the .trn's");
+	files.erase("synthenv.env");
+
+	// Neither loads: no tiles, no name.
+	files.erase("Own.til");
+	ok &= expect(ms::read_placed_tiles(src, "other.bms", mission, out).empty() && out.empty(),
+			"tiles: neither file loads -> no tiles");
+	files["Own.til"] = std::string(16, '\0');
+	ok &= expect(ms::read_placed_tiles(src, "other.bms", mission, out).empty() && out.empty(),
+			"tiles: a refused terrain tile info -> no tiles");
+
+	// A terrain naming no tile info has no fallback.
+	files["synthtrn.trn"] =
+			"polytrn_colormap synth_c.tga\r\n"
+			"polytrn_detailmap synth_d.tga\r\n"
+			"polytrn_polydata synth.cpt\r\n";
+	ok &= expect(ms::read_placed_tiles(src, "other.bms", mission, out).empty() && out.empty(),
+			"tiles: no polytrn_tileinfo -> no fallback");
+	ok &= expect(terrain::terrain_tileinfo_name("Own.v1.dat") == "Own.til" &&
+					terrain::terrain_tileinfo_name("maps.v2/own.dat") == "maps.til" &&
+					terrain::terrain_tileinfo_name("own") == "own.til" &&
+					terrain::terrain_tileinfo_name("").empty(),
+			"tiles: the extension forced from the value's first '.'");
+	return ok;
+}
+
 } // namespace
 
 int main() {
@@ -317,6 +424,7 @@ int main() {
 	ok &= run_aip_walk();
 	ok &= run_aip_resolve();
 	ok &= run_aip_fallback();
+	ok &= run_placed_tiles();
 	if (!ok) return 1;
 	std::printf("runtime_boot_test: OK\n");
 	return 0;

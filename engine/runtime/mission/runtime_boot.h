@@ -60,6 +60,22 @@ enum class MissionTextSource { kNone, kMission, kFallback };
 MissionTextSource resolve_mission_text(const BootFileSource &files,
 		const std::string &mission_file_basename, std::vector<uint8_t> &out);
 
+// The placed tiles the authority loads at mission start, the one .til the S2C 0x45
+// stream, the render overlay and the surface walk share: <mission>.til (mission_sidecars'
+// tiles row, the name cut at its FIRST '.'), else the terrain's own, the polytrn_tileinfo the
+// mission's terrain configuration holds (its .trn, overcast.def and its .env through the
+// terrain's parser) with its extension forced from its first '.'. Both read loose first, and
+// each is taken only where the game's load takes it: a missing, short or bad-magic file sends
+// the load on to the next (the reads and the checks are terrain_query's
+// read_placed_tile_bytes, behind the ADR 0020 seam). A joiner calls none of this: its tiles
+// are the host's stream. Returns the name it took, "" (with `out` empty) when neither loaded.
+// [orig: PolyTrn_LoadTerrainConfig @ 0x60e3d0, the authority test @ 0x60e6c9:
+//  Terrain_LoadTileInfoFile(<map>.TIL) @ 0x60e6d2, and on -1 @ 0x60e6dc
+//  Terrain_LoadTileInfoFile(polytrn_tileinfo) @ 0x60e6e5; the names Terrain_Init
+//  @ 0x60fcfd / @ 0x60fd0c; the loose-first force @ 0x60a74e]
+std::string read_placed_tiles(const BootFileSource &files, const std::string &mission_file,
+		const bms::File &mission, std::vector<uint8_t> &out);
+
 // The .aip PARSE lives in engine/formats/aip (aip::parse_profile: every
 // GROUND, HELO and ORGANIC key AIProfile_ParseProperty stores). This resolver
 // keeps the profile walk and the install row. An unauthored key is the zeroed

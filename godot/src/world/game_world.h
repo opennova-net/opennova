@@ -720,8 +720,9 @@ private:
 	void prepare_world_driven_weather();
 	void prepare_autonomous_weather();
 	void run_mission_start_environment_boundary();
-	void load_mission_tile_info(const String &p_bms_name, const Ref<ResourceRoot> &p_resource_root,
-			const PackedByteArray &p_wire_til_bytes, bool p_wire_is_authoritative);
+	void load_mission_tile_info(const String &p_bms_name, const Ref<MissionData> &p_mission,
+			const Ref<ResourceRoot> &p_resource_root, const PackedByteArray &p_wire_til_bytes,
+			bool p_wire_is_authoritative);
 	bool apply_join_wire_til_if_ready();
 	void place_streamed_mission_objects(const Ref<Simulation> &p_sim);
 	void clear_mission_tile_info();

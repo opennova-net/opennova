@@ -9,9 +9,13 @@
 #include "world/game_world.h"
 
 #include <cmath>
+#include <cstring>
+#include <vector>
 
 #include <base/gameprofile/resource_missing.h>
 #include <runtime/environment/environment_state.h>
+#include <runtime/mission/mission_sidecars.h>
+#include <runtime/mission/runtime_boot.h>
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
@@ -31,6 +35,7 @@
 #include "resource_index/launch_flags.h"
 #include "simulation/entity_presenter.h"
 #include "terrain/terrain_tile_info.h"
+#include "util/string_convert.h"
 
 using namespace godot;
 
@@ -277,7 +282,8 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	// its models from load_environment, and foliage loaded by terrain must
 	// remain present-but-excluded in the same generation.
 	ObjectData::reset_network_challenge_model_registry();
-	load_mission_tile_info(p_bms_name, p_resource_root, PackedByteArray(), p_mission->is_wire_header_only());
+	load_mission_tile_info(p_bms_name, p_mission, p_resource_root, PackedByteArray(),
+			p_mission->is_wire_header_only());
 	// Each stage below presents the plan's anchor when it starts.
 	emit_signal(kSignalLoadProgress,
 			MissionData::load_progress_percent(MissionData::LOAD_STAGE_ENVIRONMENT));
@@ -701,15 +707,16 @@ void GameWorld::run_mission_start_environment_boundary() {
 
 // --- the tile info + join-wire assets ------------------------------------------------
 
-// Retail loads <mission>.til into one shared g_TerrainTileArray used by
-// terrain overlays/surface overrides, network initial state, and both foliage
-// generators' radius-2 blocker.
-// Its file probe/read force loose-first around this one load.
+// Retail loads <mission>.til (else the terrain's polytrn_tileinfo) into one
+// shared g_TerrainTileArray used by terrain overlays/surface overrides, network
+// initial state, and both foliage generators' radius-2 blocker. The file rule
+// is the engine's (mission::read_placed_tiles carries its witness).
 // [orig: Terrain_LoadTileInfoFile @ 0x60a740, policy force @ 0x60a74e;
 // Terrain_GetSurfaceTypeAtPosition @ 0x606510;
 // Foliage_PathBlockedByPlacedTile @ 0x606490]
-void GameWorld::load_mission_tile_info(const String &p_bms_name, const Ref<ResourceRoot> &p_resource_root,
-		const PackedByteArray &p_wire_til_bytes, bool p_wire_is_authoritative) {
+void GameWorld::load_mission_tile_info(const String &p_bms_name, const Ref<MissionData> &p_mission,
+		const Ref<ResourceRoot> &p_resource_root, const PackedByteArray &p_wire_til_bytes,
+		bool p_wire_is_authoritative) {
 	clear_mission_tile_info();
 	if (p_resource_root.is_null()) {
 		return;
@@ -731,18 +738,19 @@ void GameWorld::load_mission_tile_info(const String &p_bms_name, const Ref<Resou
 		mission_til_bytes_ = p_wire_til_bytes;
 		return;
 	}
-	String mission_name = p_bms_name.get_file();
-	if (mission_name.is_empty()) {
-		mission_name = p_bms_name;
-	}
-	const String til_name = mission_name.get_basename() + ".til";
-	if (!p_resource_root->has_file(til_name, ResourceRoot::LOOKUP_FORCE_LOOSE_FIRST)) {
+	if (p_mission.is_null()) {
 		return;
 	}
-	const PackedByteArray til_bytes = p_resource_root->read_file(til_name, ResourceRoot::LOOKUP_FORCE_LOOSE_FIRST);
-	if (til_bytes.is_empty()) {
+	std::vector<uint8_t> bytes;
+	const String til_name = opennova::to_gd(opennova::mission::read_placed_tiles(
+			opennova::mission::boot_files_from_index(p_resource_root->native_index()),
+			opennova::to_std(p_bms_name), p_mission->native_file(), bytes));
+	if (til_name.is_empty()) {
 		return;
 	}
+	PackedByteArray til_bytes;
+	til_bytes.resize(static_cast<int64_t>(bytes.size()));
+	std::memcpy(til_bytes.ptrw(), bytes.data(), bytes.size());
 	Ref<TerrainTileInfo> tile_info;
 	tile_info.instantiate();
 	if (tile_info->load_from_bytes(til_bytes) != OK) {
@@ -1015,7 +1023,9 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	opts.instantiate();
 	opts->set_terrain(terrain_data_);
 	opts->set_resource_root(resource_root_);
-	opts->set_wac_basename(p_bms_name.get_basename());
+	// The by-name readers' base: the mission's name cut at its first '.'
+	// (runtime/mission/mission_sidecars.h mission_base_name).
+	opts->set_wac_basename(opennova::to_gd(opennova::mission::mission_base_name(opennova::to_std(p_bms_name))));
 	opts->set_music_director(get_music_director());
 	opts->set_mission_file(mission_file);
 	opts->set_mission_name(mission_label);

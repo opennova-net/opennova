@@ -1,6 +1,7 @@
 // lwf::wav_decode_pcm16 — the RIFF walk, the PCM8/PCM16 normalizations, and
 // the IMA-ADPCM block decode (hand-computed against the IMA step/index
-// tables), moved from the shell adapter's WavLoader.
+// tables), moved from the shell adapter's WavLoader; and the sample count and
+// pitch ratio the game's wave loader records (a dialog line's hold reads them).
 #include <formats/lwf/wav_pcm.h>
 
 #include <cstdint>
@@ -63,6 +64,22 @@ std::vector<uint8_t> make_wav(uint16_t format, uint16_t channels,
 	return v;
 }
 
+// The same wave with a `fact` chunk of `samples` ahead of its data (after the
+// 16-byte fmt chunk).
+std::vector<uint8_t> with_fact(std::vector<uint8_t> wav, uint32_t samples) {
+	std::vector<uint8_t> fact;
+	push_tag(fact, "fact");
+	push_u32(fact, 4);
+	push_u32(fact, samples);
+	wav.insert(wav.begin() + 36, fact.begin(), fact.end());
+	const uint32_t riff_size = static_cast<uint32_t>(wav.size() - 8);
+	wav[4] = static_cast<uint8_t>(riff_size & 0xFF);
+	wav[5] = static_cast<uint8_t>((riff_size >> 8) & 0xFF);
+	wav[6] = static_cast<uint8_t>((riff_size >> 16) & 0xFF);
+	wav[7] = static_cast<uint8_t>((riff_size >> 24) & 0xFF);
+	return wav;
+}
+
 int16_t sample_at(const opennova::lwf::WavPcm &pcm, size_t frame) {
 	return static_cast<int16_t>(pcm.pcm16[frame * 2] |
 			(pcm.pcm16[frame * 2 + 1] << 8));
@@ -88,6 +105,10 @@ int main() {
 		if (!expect(out.sample_rate == 22050 && out.channels == 1,
 				"PCM16 rate/channels")) return 1;
 		if (!expect(out.pcm16 == data, "PCM16 is a passthrough")) return 1;
+		// The loader's record: half the data's bytes, ((22050 << 16) + 22050) / 44100
+		// [orig: Audio_LoadWavFileFromArchive @ 0x76670e, @ 0x766735].
+		if (!expect(out.loader_samples == 2 && out.loader_pitch_q16 == 32768,
+				"PCM16 loader samples/pitch")) return 1;
 	}
 
 	// PCM8 is UNSIGNED with 128 = center; upconverts (v - 128) << 8.
@@ -101,6 +122,9 @@ int main() {
 		if (!expect(sample_at(out, 0) == 0, "128 maps to center 0")) return 1;
 		if (!expect(sample_at(out, 1) == (255 - 128) << 8, "255 maps to +32512")) return 1;
 		if (!expect(sample_at(out, 2) == -32768, "0 maps to -32768")) return 1;
+		// 8-bit: the data's bytes; 11025 Hz rounds down to a quarter [orig: @ 0x766609, @ 0x76662d].
+		if (!expect(out.loader_samples == 3 && out.loader_pitch_q16 == 16384,
+				"PCM8 loader samples/pitch")) return 1;
 	}
 
 	// IMA-ADPCM mono, one 8-byte block: header {pred=100, idx=0, pad} + one
@@ -141,6 +165,15 @@ int main() {
 						"zero nibbles add step>>3 while the index decays")) return 1;
 			}
 		}
+		// IMA ADPCM: the fact chunk's count, not the block's decoded frames; 8000 Hz
+		// is (524288000 + 22050) / 44100 = 11889 [orig: @ 0x76678a..0x7667ba, @ 0x7667e1].
+		const std::vector<uint8_t> facted_wav = with_fact(wav, 5);
+		WavPcm facted;
+		if (!expect(wav_decode_pcm16(facted_wav.data(), facted_wav.size(), facted, error),
+				"ADPCM with a fact chunk decodes")) return 1;
+		if (!expect(facted.loader_samples == 5 && facted.loader_pitch_q16 == 11889 &&
+				facted.pcm16.size() == 9 * 2, "ADPCM loader samples are the fact count")) return 1;
+		if (!expect(out.loader_samples == 9, "no fact chunk: the decoded frames")) return 1;
 	}
 
 	// A truncated data chunk clamps to the bytes present.
@@ -171,6 +204,8 @@ int main() {
 				"AOA1 mono count/rate excludes mixer padding")) return 1;
 		if (!expect(sample_at(out, 0) == -32768 && sample_at(out, 1) == 0 &&
 				sample_at(out, 2) == 32512, "AOA1 signed sample extrema")) return 1;
+		if (!expect(out.loader_samples == 3 && out.loader_pitch_q16 == 32768,
+				"AOA1 loader samples/pitch are its header's")) return 1;
 		aoa.resize(payload_end);
 		if (!expect(wav_decode_pcm16(aoa.data(), aoa.size(), out, error),
 				"on-disk AOA1 does not require generated mixer padding")) return 1;
