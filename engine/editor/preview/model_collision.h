@@ -123,19 +123,4 @@ void model_collision_bounds(const ModelCollisionShape &shape, PreviewVec3 &cente
 NodeAddress model_collision_record(const ModelDocument &document, const ModelCollisionShape &shape);
 bool model_collision_of(const ModelDocument &document, const NodeAddress &record, ModelCollisionPick &out);
 
-// The convex solid of a volume's planes (n . p + d <= 0 inside, d the plane's stored radius: the game's
-// test [orig: Entity_ComputeBoneCollisionForce @ 0x4ae150, (n . p >> 14) + d - r < 0]), as polygons in
-// mission axes, one per plane it has a face on: the add-on's rule (tools/blender/opennova_3di/importer.py
-// volume_facets), corners kept within 1 mm of the solid. Empty when the planes bound no solid (a flat
-// ladder keeps its facing's polygon).
-std::vector<std::vector<threedi::ThreediBuildVec3>> model_volume_polygons(const threedi::ThreediBoundingPlane *planes,
-                                                                          size_t count, bool ladder);
-// The solid the game tests a volume as: its planes' solid within its stored box, the box being the quick
-// test a point outside of is never inside (docs/world/world-wac-ai-re.md section 15.2). The box's planes
-// join the volume's own only where those reach past it (two of the install's 14,811 volumes, I_LFP2's and
-// I_LFPB's, by 8 cm), so a volume within its box keeps its own facets alone; a box stored inside out (four
-// more, z above z) clips nothing: its planes' solid is shown as the author made it.
-std::vector<std::vector<threedi::ThreediBuildVec3>> model_volume_solid(const threedi::ThreediBoundingVolume &volume,
-                                                                       const threedi::ThreediBoundingPlane *planes);
-
 } // namespace opennova::editor
