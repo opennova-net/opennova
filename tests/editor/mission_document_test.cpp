@@ -57,7 +57,7 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
-#include "editor/png_test_support.h"
+#include "common/png_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -1114,7 +1114,7 @@ int test_rename_companions() {
 	// A companion the import pass makes (the loading image, out of a PNG source) refuses the rename:
 	// the next import would make it again under the old name; its source is the file to rename.
 	{
-		TEST_EXPECT(editor_test::write_bytes(root + "/art/run.png", editor_test::gradient_png(8, 8)));
+		TEST_EXPECT(editor_test::write_bytes(root + "/art/run.png", test_png::gradient_png(8, 8)));
 		const Importer *importer = importer_for(root + "/art/run.png");
 		TEST_EXPECT(importer);
 		if (!importer) return 1;

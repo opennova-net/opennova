@@ -38,7 +38,7 @@
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
-#include "editor/png_test_support.h"
+#include "common/png_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -89,7 +89,7 @@ RgbaImage test_sheet() {
 
 // The sheet as a PNG (RGBA, 8 bits).
 std::vector<uint8_t> sheet_png(const RgbaImage &sheet) {
-	editor_test::PngSpec spec;
+	test_png::PngSpec spec;
 	spec.width = uint32_t(sheet.width);
 	spec.height = uint32_t(sheet.height);
 	for (int y = 0; y < sheet.height; ++y) {
@@ -97,7 +97,7 @@ std::vector<uint8_t> sheet_png(const RgbaImage &sheet) {
 		const auto row = sheet.pixels.begin() + std::ptrdiff_t(size_t(y) * size_t(sheet.width) * 4);
 		spec.rows.insert(spec.rows.end(), row, row + std::ptrdiff_t(sheet.width) * 4);
 	}
-	return editor_test::make_png(spec);
+	return test_png::make_png(spec);
 }
 
 std::vector<uint8_t> text_bytes(const std::string &text) { return std::vector<uint8_t>(text.begin(), text.end()); }

@@ -43,7 +43,7 @@
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
-#include "editor/png_test_support.h"
+#include "common/png_test_support.h"
 
 namespace fs = std::filesystem;
 
@@ -327,7 +327,7 @@ static int test_verbs_answer_as_the_session() {
 	TEST_EXPECT(run(scratch, { "create-missing", root }).code == 0);
 	// A menu the render check notes, an import source, and a menu naming a font beside it outside.
 	TEST_EXPECT(editor_test::write_text(root + "/menus/extra.mnu", kTitleMenu));
-	TEST_EXPECT(editor_test::write_bytes(dir.file("logo.png"), editor_test::gradient_png(8, 8)));
+	TEST_EXPECT(editor_test::write_bytes(dir.file("logo.png"), test_png::gradient_png(8, 8)));
 	TEST_EXPECT(run(scratch, { "import", root, dir.file("logo.png") }).code == 0);
 	TEST_EXPECT(editor_test::write_text(dir.file("art/a.mnu"), kFontMenu));
 	TEST_EXPECT(editor_test::write_text(dir.file("art/arial99.fnt"), "fnt"));
@@ -505,7 +505,7 @@ static int test_request_and_query_verbs() {
 	TEST_EXPECT(run(scratch, { "create-missing", root }).code == 0);
 
 	// A source the next open's import pass would import: none of the refusals below runs it.
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", editor_test::gradient_png(8, 8)));
+	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", test_png::gradient_png(8, 8)));
 	TEST_EXPECT(mark_for_import(root + "/art/logo.png"));
 	const std::string imported_dir = root + "/.opennova/imported";
 	TEST_EXPECT(!fs::exists(imported_dir));

@@ -61,13 +61,13 @@ bool compress(const TextureLevel &first, const std::string &dds, TextureCompress
 	image.width = int(first.width);
 	image.height = int(first.height);
 	image.pixels = first.rgba;
-	ImageImportSettings settings;
+	renderer::ImageImportSettings settings;
 	settings.format = "dds";
 	settings.dds = dds;
 	settings.mips = "full";
 	std::vector<uint8_t> bytes;
 	std::string why, note;
-	if (!encode_image(image, settings, bytes, why, note)) {
+	if (!renderer::encode_image(image, settings, bytes, why, note)) {
 		out.why = "It does not write as a " + dds + " .dds: " + why;
 		return false;
 	}
