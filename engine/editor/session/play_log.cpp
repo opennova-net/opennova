@@ -22,7 +22,7 @@ namespace opennova::editor {
 namespace {
 
 bool same_name(const std::string &a, const std::string &b) {
-	return normalized_logical_name(basename_of(a)) == normalized_logical_name(basename_of(b));
+	return pff::normalized_logical_name(basename_of(a)) == pff::normalized_logical_name(basename_of(b));
 }
 
 std::string capitalized(std::string text) {
@@ -148,10 +148,10 @@ std::vector<Diagnostic> install_log_findings(const InstallLogs &logs, const Play
 	const std::string named = capitalized(game.name);
 	std::set<std::string> opened;
 	if (logs.file_log) {
-		for (const std::string &name : logs.file_log->from_archives) opened.insert(normalized_logical_name(basename_of(name)));
-		for (const std::string &name : logs.file_log->from_disk) opened.insert(normalized_logical_name(basename_of(name)));
+		for (const std::string &name : logs.file_log->from_archives) opened.insert(pff::normalized_logical_name(basename_of(name)));
+		for (const std::string &name : logs.file_log->from_disk) opened.insert(pff::normalized_logical_name(basename_of(name)));
 	}
-	const auto was_opened = [&](const std::string &name) { return opened.count(normalized_logical_name(basename_of(name))) != 0; };
+	const auto was_opened = [&](const std::string &name) { return opened.count(pff::normalized_logical_name(basename_of(name))) != 0; };
 	if (logs.exited_on_its_own && logs.file_log && !logs.file_log->archives.empty()) {
 		// The boot's text tables, right after the archives, in this order: gameerr.bin's lack shows earlyerr.txt's
 		// line 4 and the boot goes on; any other's ends it.

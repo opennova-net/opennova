@@ -39,9 +39,9 @@ namespace {
 void unread_expansion_files(const ProjectDocument &doc, const AssetScan &scan, std::vector<Diagnostic> &out) {
 	const bool expansion = !doc.expansion.standalone();
 	const std::string menu = expansion ? expansion_file_name(expansion_file_row(ExpansionFileRole::MenuMusicBank), doc.expansion.name)
-	                                   : expansion_file_row(ExpansionFileRole::MenuMusicBank).replaces;
+	                                   : expansion_file_row(ExpansionFileRole::MenuMusicBank).replaces();
 	const std::string game = expansion ? expansion_file_name(expansion_file_row(ExpansionFileRole::GameMusicBank), doc.expansion.name)
-	                                   : expansion_file_row(ExpansionFileRole::GameMusicBank).replaces;
+	                                   : expansion_file_row(ExpansionFileRole::GameMusicBank).replaces();
 	for (const AssetEntry &entry : scan.entries) {
 		std::string read_instead;
 		if (entry.kind == AssetKind::MusicBank && !strutil::iequals(entry.logical_name, menu) &&
@@ -50,7 +50,7 @@ void unread_expansion_files(const ProjectDocument &doc, const AssetScan &scan, s
 		else if (expansion && entry.kind == AssetKind::MusicScript)
 			for (const ExpansionFileRole role : { ExpansionFileRole::MenuMusicScript, ExpansionFileRole::GameMusicScript }) {
 				const ExpansionFileRow &row = expansion_file_row(role);
-				if (strutil::iequals(entry.logical_name, row.replaces))
+				if (strutil::iequals(entry.logical_name, row.replaces()))
 					read_instead = "under /exp " + doc.expansion.name + " the game reads " +
 					               expansion_file_name(row, doc.expansion.name) + " in its place";
 			}
@@ -90,7 +90,7 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 			bool replaced = false;
 			for (size_t role = 0; role < kExpansionFileRoleCount; ++role) {
 				const ExpansionFileRow &own = expansion_file_row(static_cast<ExpansionFileRole>(role));
-				replaced = replaced || (own.replaces && strutil::iequals(own.replaces, resource->name));
+				replaced = replaced || (own.replaces() && strutil::iequals(own.replaces(), resource->name));
 			}
 			if (replaced) continue;
 		}

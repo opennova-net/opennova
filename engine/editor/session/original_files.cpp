@@ -193,7 +193,7 @@ bool OriginalFiles::step(uint64_t bytes) {
 		run_->paths.files = run_->files;
 		for (const InstallFile &file : run_->files->view().files()) run_->names.push_back(file.name);
 		std::sort(run_->names.begin(), run_->names.end(), [](const std::string &a, const std::string &b) {
-			return normalized_logical_name(a) < normalized_logical_name(b);
+			return pff::normalized_logical_name(a) < pff::normalized_logical_name(b);
 		});
 		phase_ = Phase::Scan;
 		spent();
@@ -262,7 +262,7 @@ bool OriginalFiles::step(uint64_t bytes) {
 		OriginalData data;
 		data.ready = true;
 		for (const Diagnostic &d : rows)
-			if (!d.asset.empty()) ++data.findings[normalized_logical_name(basename_of(d.asset))][original_finding_key(d)];
+			if (!d.asset.empty()) ++data.findings[pff::normalized_logical_name(basename_of(d.asset))][original_finding_key(d)];
 		spent();
 		files_ = run_->scan->entries.size();
 		last_ms_ = std::chrono::duration<double, std::milli>(run_->spent).count();

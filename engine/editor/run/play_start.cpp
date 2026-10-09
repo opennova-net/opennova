@@ -61,8 +61,8 @@ bool stage_play_start(const std::string &run_dir, const std::string &expansion, 
 	// the first that holds the mission serves it.
 	std::vector<std::string> slots;
 	if (!expansion.empty()) {
-		slots.push_back(expansion_archive_path(expansion, true));
-		slots.push_back(expansion_archive_path(expansion, false));
+		slots.push_back(vfs_expansion_archive_path(std::string(), expansion, true));
+		slots.push_back(vfs_expansion_archive_path(std::string(), expansion, false));
 	}
 	for (const char *name : kBootArchiveTable) slots.push_back(name);
 	pff::PffArchive archive{};

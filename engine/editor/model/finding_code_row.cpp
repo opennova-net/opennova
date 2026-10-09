@@ -107,7 +107,7 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::BuildNameUnstorable, about_the_file("build.name_unstorable", G::Build, F::Rename) },
 	{ C::BuildOutDirInProject, code("build.out_dir_in_project", G::Build) },
 	// A player's or this machine's file the project holds, which a build leaves out (ADR 0046 S14,
-	// assets/player_files.h).
+	// gameprofile/player_files.h).
 	{ C::BuildPlayerFile, code("build.player_file", G::Build) },
 	{ C::BuildRead, code("build.read", G::Build) },
 	// A file the game could never read as the build would ship it (a NovaWorld screen, read through the
