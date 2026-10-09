@@ -6,6 +6,7 @@
 #include <base/io/json.h>
 #include <formats/env/env.h>
 #include <formats/trn/trn_io.h>
+#include <runtime/environment/water_frame.h>
 
 namespace opennova::mission {
 struct MissionInfo;
@@ -22,9 +23,8 @@ struct SessionView;
 bool read_mission_header(const SessionView &view, const std::string &path, mission::MissionInfo &out);
 
 // Which of the game's rungs gives a mission its water plane (runtime/environment/water_frame.h's
-// ladder): the mission header's override, the terrain's water height, the environment's, or none.
-enum class WaterFrom { Mission, Terrain, Environment, None };
-const char *water_from_token(WaterFrom from);
+// ladder, env::resolve_water_rung): "mission", "environment", "terrain", "none".
+const char *water_from_token(env::WaterRung from);
 
 // A line of an environment its mission's terrain takes after its .trn's and overcast.def's (D-TERRAIN-18,
 // formats/trn load_mission_trn): the line (`line` in the environment's text as the game reads it now, the open
@@ -66,7 +66,7 @@ struct EnvironmentMissionUse {
 	uint32_t attrib_flags = 0;
 	int water_override = 0, fog_override = 0, water_murk = 0;
 	int fog_color[3] = { 0, 0, 0 }, water_color[3] = { 0, 0, 0 };
-	WaterFrom water_from = WaterFrom::None;
+	env::WaterRung water_from = env::WaterRung::None;
 	float water_height = 0.0f;        // metres
 	// The lines of this environment the mission's terrain's parser takes after its .trn's and overcast.def's
 	// (D-TERRAIN-18, formats/trn load_mission_trn): each key the terrain's, over theirs.
