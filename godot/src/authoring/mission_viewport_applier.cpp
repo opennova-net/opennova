@@ -616,14 +616,12 @@ void MissionViewportApplier::run_environment_(const MissionScene &scene) {
 	overrides.instantiate();
 	overrides->assign(opennova::env::bms_env_overrides_from_header(header.attrib_flags, header.water_override,
 			header.fog_override, header.fog_color, header.water_color, header.water_murk));
-	if (overrides->is_empty()) env->clear_mission_overrides();
-	else env->apply_mission_overrides(overrides);
+	env->apply_mission_overrides_or_clear(overrides);
 	// The fog as the mission's start settles it, which no weather tick here does (the editor's helper).
 	env->set_fog_level(opennova::editor::mission_settled_fog_level(env->get_fog_level()));
 	environment_->set_environment_data(env);
 	env_file_ = env;
-	water_->set_mission_water_height_override(
-			overrides->get_has_water_height() ? overrides->get_water_height_world() : NAN);
+	water_->set_mission_water_height_override(overrides->get_water_height_world_or_nan());
 	environment_->set_overcast_data(overcast);
 	// The texts the load read are the environment's whatever unit read one first (the .trn its terrain's units
 	// stamped already): an edit of one builds the environment again.
@@ -734,9 +732,7 @@ void MissionViewportApplier::configure_foliage_() {
 	}
 	// GameWorld::configure_foliage: the terrain data (its height, its foliage map, its colour map), the
 	// mission's tiles (the candidate blocker), each definition's model and :fd texture through the root.
-	foliage_->set_terrain_data(terrain_data_);
-	foliage_->set_tile_info(terrain_->get_tile_info_override());
-	foliage_->configure_slots_from_defs(root_files_, terrain_data_->get_foliage_defs());
+	foliage_->configure_for_terrain(root_files_, terrain_data_, terrain_->get_tile_info_override());
 	// A definition whose model the project lacks: a note, its slot drawing nothing.
 	const Array diagnostics = foliage_->get_slot_diagnostics();
 	for (int64_t i = 0; i < diagnostics.size(); ++i) {
@@ -1190,8 +1186,7 @@ void MissionViewportApplier::place_camera_(const opennova::editor::ViewportModel
 	camera.axes(right, up, back);
 	camera_->set_transform(Transform3D(Basis(to_godot(right), to_godot(up), to_godot(back)), to_godot(camera.eye())));
 	// The world pass's planes: the game's near, its far from the environment's fog.
-	camera_->set_near(opennova::renderer::kScenePassNearZ);
-	camera_->set_far(opennova::renderer::scene_far_plane(environment_->get_fog_distance()));
+	environment_->apply_scene_pass_planes(*camera_);
 }
 
 void MissionViewportApplier::clear() {
@@ -1342,7 +1337,10 @@ void MissionViewportApplier::apply_shots_(const opennova::editor::MissionViewpor
 	if (mission.shots().serial() == shot_scars_shown_) return;
 	shot_scars_shown_ = mission.shots().serial();
 	shot_scars_->set_resource_root(effects_->root());
-	if (mission.shots().scar_count() > 0) shot_scars_->present(preview_scar_record(mission.shot_scars()), Dictionary());
+	// Every ring the shots wrote, made world-space by the run: the device's space, no entity rings to resolve.
+	ScarDrawList::CompiledFrame scar_frame;
+	scar_frame.mission_space = false;
+	if (mission.shots().scar_count() > 0) shot_scars_->present(ScarDrawList::from_compiled(mission.shot_scars(), scar_frame), Dictionary());
 	else shot_scars_->clear();
 }
 
