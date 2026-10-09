@@ -58,7 +58,8 @@ boots the server probes the gate, verifies its session (logging in and fetching 
 when `--credentials` names an account) and hosts; a listing that does not host stops the
 start (exit code 1), as retail's does. While it serves, the listing carries the session's
 name, message and rules, the starting map, the time left and every joiner, and the service's
-commands (`PuntPlayer`, `SetServerName`, ...) run on the match. LAN browsers still find the
+commands (`PuntPlayer`, `SetServerName`, ...) run on the match, a changed name or message
+saved to `game.cfg` as retail saves it, so the next map keeps it. LAN browsers still find the
 server on the same socket.
 
 Loopback and any host outside NovaLogic's domain, an OpenNova NovaWorld service wherever it

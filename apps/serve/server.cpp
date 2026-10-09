@@ -593,7 +593,12 @@ HostRegistration Server::listing_columns() const {
 bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *cancel) {
 	if (!novaworld_) return true;
 	demux_->set_game_attached(false);
-	listing_ = std::make_unique<ServeListing>(listing_columns());
+	// The admin console's save seam (bind_admin_console), for the service's SetServerName /
+	// SetServerMsg / SetMPReset.
+	ServeListing::Seams seams;
+	seams.config_block = &cfg_;
+	seams.save_config = [this] { (void)save_config(); };
+	listing_ = std::make_unique<ServeListing>(listing_columns(), std::move(seams));
 	nw_lister::ListerOptions lister_options;
 	lister_options.master_host = options_.master_host;
 	lister_options.master_gate_port = options_.master_gate_port;
@@ -721,7 +726,9 @@ void Server::stop() {
 
 bool Server::save_config() {
 	// [orig: Game_SaveConfig @0x54C490: fopen("game.cfg", "w"); a file that
-	//  does not open writes nothing, @0x54C4AF..0x54C4BB]
+	//  does not open writes nothing, @0x54C4AF..0x54C4BB. The NovaWorld
+	//  ServerCommand calls it @0x4D2DDF (SetServerName / SetServerMsg) and
+	//  @0x4D2E2D (SetMPReset), through ServeListing's seam]
 	std::string error;
 	if (gamecfg::save_file(gamecfg::kFileName, cfg_, roster_, error)) return true;
 	io::logf(io::LogLevel::kWarn, "opennova-serve: %s", error.c_str());

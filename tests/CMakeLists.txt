@@ -4226,7 +4226,8 @@ target_include_directories(opennova_serve_game_cfg_test PRIVATE ${CMAKE_CURRENT_
 add_test(NAME opennova_serve_game_cfg COMMAND opennova_serve_game_cfg_test)
 # opennova-serve listed on NovaWorld (ADR 0051 d6) against the real NwUdpListener and an in-test
 # gate over loopback: it hosts on the game socket before the boot, lists the Serve Only columns
-# with no slot 0, the advertised endpoint is the game socket a joiner plays on, and the stop
+# with no slot 0, the advertised endpoint is the game socket a joiner plays on, a NovaWorld
+# rename / message change is saved to game.cfg and survives the map change, and the stop
 # deregisters.
 add_executable(opennova_serve_novaworld_test
     serve/opennova_serve_novaworld_test.cpp
