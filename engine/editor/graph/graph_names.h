@@ -14,7 +14,7 @@
 namespace opennova::editor::graph_names {
 
 // A file name as the scan keys it (normalized_logical_name).
-inline std::string key(const std::string &value) { return normalized_logical_name(value); }
+inline std::string key(const std::string &value) { return pff::normalized_logical_name(value); }
 // A symbol as string ids and style variables compare it.
 inline std::string upper(const std::string &value) { return strutil::to_upper(value); }
 // A value that names a style variable (the whole value one "%NAME%", mns::is_variable_reference)

@@ -37,7 +37,7 @@ std::string free_source_name(const AssetScan &scan, const std::string &wanted, c
 	const std::string extension = utf8_of(path_of(wanted).extension());
 	const std::string stem = stem_of(wanted);
 	const auto free = [&](const std::string &name) {
-		if (name.size() > size_t(pff::PFF_NAME_SIZE) || normalized_logical_name(name) == normalized_logical_name(texture))
+		if (name.size() > size_t(pff::PFF_NAME_SIZE) || pff::normalized_logical_name(name) == pff::normalized_logical_name(texture))
 			return false;
 		const AssetEntry *taken = scan.find(name);
 		return !taken || taken->relative_path == allowed_path;
@@ -135,7 +135,7 @@ ImportOptions texture_reproducing_options(const std::string &name, const std::ve
 	}
 	const auto format = out.find("format");
 	const std::string made = stem_of(source_name) + renderer::image_format_extension(format == out.end() ? "tga" : format->second);
-	if (normalized_logical_name(made) != normalized_logical_name(basename_of(name))) out["name"] = basename_of(name);
+	if (pff::normalized_logical_name(made) != pff::normalized_logical_name(basename_of(name))) out["name"] = basename_of(name);
 	return out;
 }
 
@@ -257,7 +257,7 @@ TextureSourcePlan plan_texture_replace(const ProjectPaths &paths, const AssetSca
 	// The output takes the texture's name.
 	const auto format = options.find("format");
 	const std::string made = stem_of(plan.source) + renderer::image_format_extension(format == options.end() ? "tga" : format->second);
-	if (normalized_logical_name(made) != normalized_logical_name(plan.texture)) options["name"] = plan.texture;
+	if (pff::normalized_logical_name(made) != pff::normalized_logical_name(plan.texture)) options["name"] = plan.texture;
 	else options.erase("name");
 	plan.options = std::move(options);
 	if (!make_output(paths, plan, basename_of(plan.source))) return plan;
@@ -440,7 +440,7 @@ TextureSourcePlan plan_texture_dds(const ProjectPaths &paths, const AssetScan &s
 	plan.replaced = entry->relative_path;
 	plan.bytes = std::move(bytes);
 	plan.source = "art/" + name;
-	if (normalized_logical_name(stem_of(name) + ".dds") != normalized_logical_name(dds)) options["name"] = dds;
+	if (pff::normalized_logical_name(stem_of(name) + ".dds") != pff::normalized_logical_name(dds)) options["name"] = dds;
 	plan.options = std::move(options);
 	if (!make_output(paths, plan, name)) return plan;
 	plan.changes.push_back(entry->logical_name + " is stored as " + dds + " (" + plan.after_words + "), which every use of it reads first: "

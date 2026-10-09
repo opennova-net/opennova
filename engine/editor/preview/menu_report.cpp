@@ -36,7 +36,7 @@ JsonValue edges(const mnu::RectEdges &rect) {
 
 bool names_menu(const DocumentBase &document, const std::string &path) {
 	return document.path() == path ||
-	       normalized_logical_name(basename_of(document.path())) == normalized_logical_name(path);
+	       pff::normalized_logical_name(basename_of(document.path())) == pff::normalized_logical_name(path);
 }
 
 // The menu's project-relative path: an open document's, else the scan's entry for it. A pathless
@@ -50,7 +50,7 @@ std::string menu_path(const SessionView &view, const std::string &path) {
 		if (open && is_menu_kind(open->kind()) && names_menu(*open, wanted)) return open->path();
 	for (const AssetEntry &entry : view.project.scan->entries) {
 		if (!is_menu_kind(entry.kind)) continue;
-		if (entry.relative_path == wanted || normalized_logical_name(entry.logical_name) == normalized_logical_name(wanted))
+		if (entry.relative_path == wanted || pff::normalized_logical_name(entry.logical_name) == pff::normalized_logical_name(wanted))
 			return entry.relative_path;
 	}
 	return std::string();

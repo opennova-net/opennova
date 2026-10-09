@@ -712,7 +712,7 @@ std::vector<Diagnostic> validate_sound_bank_file(const DocumentBase &document) {
 		if (wave.file.empty())
 			add(at, wave.name, DiagnosticSeverity::Warning, SoundBankFinding::WaveNoFile, "file",
 			    "The wave names no file: a member that plays it plays nothing.");
-		else if (const std::string flat = io::utf8_file_name(wave.file); !logical_name_fits_archive(flat))
+		else if (const std::string flat = io::utf8_file_name(wave.file); !pff::logical_name_fits_archive(flat))
 			// The name the archives are searched by, cut at either separator on every host (a shipped bank's
 			// files are "SFX\\MENU\\SELECTA1.wav"; the graph's wave_files reads the same name).
 			add(at, wave.name, DiagnosticSeverity::Warning, SoundBankFinding::WaveFileName, "file",
