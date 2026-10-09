@@ -13,6 +13,7 @@
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/anim/anim_event_bits.h>
 #include <runtime/world/ammo_table.h>
+#include <runtime/world/entity_spawn.h>
 #include <runtime/world/impact_scar.h>
 
 namespace opennova::editor {
@@ -156,7 +157,7 @@ void ClipFire::refresh(const SessionView &view, const ClipSoundItem &item, const
 	reads_ = !binding.player;
 	bool fire_bits = false;
 	for (uint32_t word : track.triggers) fire_bits = fire_bits || (word & kFireBits) != 0;
-	const bool person = item.found && person_class(item.ai_function);
+	const bool person = item.found && world::organic_init_class(item.ai_function.c_str());
 	// The range, read only where a shot could fire (a clip of fire bits on an NPC's body of a person class): a
 	// soldier's shots alone, over the project's ammo.def and weapon.def as the load reads them.
 	if (has_clip_ && fire_bits && reads_ && person) {
@@ -398,7 +399,7 @@ void ClipFire::plan_spawns_() {
 		DefinitionSpawn spawn;
 		spawn.effect = event.effect;
 		spawn.tick = event.tick;
-		spawn.pose = effect_descriptor_pose(particle_of(to_preview(event.at)),
+		spawn.pose = particle::descriptor_pose(particle_of(to_preview(event.at)),
 		                                    particle_of(direction_to_preview(event.direction)));
 		spawn.source = event.kind == Kind::Launch ? "launch" : "impact";
 		spawn.point = event.kind == Kind::Impact ? tag_name(event.tag) : std::string();
@@ -527,7 +528,7 @@ io::JsonValue ClipFire::to_json(const ClipFireOptions &options) const {
 	out.set("item", json_string(item_.name));
 	out.set("ai_function", json_string(item_.ai_function));
 	out.set("move_function", json_string(item_.move_function));
-	out.set("person", JsonValue::make_bool(item_.found && person_class(item_.ai_function)));
+	out.set("person", JsonValue::make_bool(item_.found && world::organic_init_class(item_.ai_function.c_str())));
 	// The item's slots as the init resolves them.
 	const world::AmmoTable *table = range_.ammo_table();
 	JsonValue ammo = JsonValue::make_array();

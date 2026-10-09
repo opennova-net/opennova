@@ -565,12 +565,12 @@ void DefinitionViewport::particle_slot_(const assets::Model &intact) {
 		threedi::threedi_user_point_position(&point, at);
 		threedi::threedi_user_point_direction(&point, direction);
 		slot_spawns_.push_back({slot_.effect,
-		                        effect_forward_pose(vec_of(preview_from_model(at)), vec_of(preview_from_model(direction))), 0,
+		                        particle::forward_pose(vec_of(preview_from_model(at)), vec_of(preview_from_model(direction))), 0,
 		                        "particle_slot", strutil::fixed_string(point.name, sizeof(point.name))});
 	}
 	if (plan.origin_fallback)
 		slot_spawns_.push_back(
-				{slot_.effect, effect_forward_pose({0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}), 0, "particle_slot", std::string()});
+				{slot_.effect, particle::forward_pose({0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}), 0, "particle_slot", std::string()});
 }
 
 std::vector<DefinitionSpawn> DefinitionViewport::spawns_() const {
@@ -598,7 +598,7 @@ std::vector<DefinitionSpawn> DefinitionViewport::spawns_() const {
 			                                                   " " + std::to_string(spawn.slot + 1)
 			                                         : std::string();
 			out.push_back({spawn.effect,
-			               effect_descriptor_pose(from_mission(spawn.point.local_pos), from_mission(spawn.point.local_dir)),
+			               particle::descriptor_pose(from_mission(spawn.point.local_pos), from_mission(spawn.point.local_dir)),
 			               tick, kSources[family], point});
 		}
 	};
@@ -612,7 +612,7 @@ std::vector<DefinitionSpawn> DefinitionViewport::spawns_() const {
 		if (leg.kind != "effect") continue;
 		if (leg.bank > 0) bank(leg.bank, leg.tick);
 		else if (leg.at_item)
-			out.push_back({leg.name, effect_descriptor_pose({0.0f, leg.above, 0.0f}, {0.0f, 0.0f, 0.0f}), leg.tick, "death",
+			out.push_back({leg.name, particle::descriptor_pose({0.0f, leg.above, 0.0f}, {0.0f, 0.0f, 0.0f}), leg.tick, "death",
 			               std::string()});
 	}
 	return out;
