@@ -21,23 +21,21 @@
 #include <editor/graph/texture_uses.h>
 #include <editor/project/project_files.h>
 #include <formats/particle/particle.h>
+#include <formats/til/til.h>
+#include <runtime/hud/hud_texture_names.h>
 #include <runtime/renderer/material_texture.h>
 #include <runtime/renderer/particle_atlas.h>
+#include <runtime/terrain/terrain_tile_composer.h>
+#include <runtime/terrain_query/surface_type_map.h>
 
 namespace opennova::editor {
 
 namespace {
 
-using R = TextureRoleId;
+using R = renderer::TextureRoleId;
 using F = CoreFinding;
 
 bool power_of_two(uint32_t side) { return side != 0 && (side & (side - 1)) == 0; }
-
-uint32_t power_of_two_floor(uint32_t side) {
-	uint32_t out = 1;
-	while (out * 2 <= side && out < 0x80000000u) out *= 2;
-	return out;
-}
 
 std::string sides(uint32_t width, uint32_t height) { return std::to_string(width) + " x " + std::to_string(height); }
 
@@ -115,12 +113,6 @@ Diagnostic on_use(const GraphEdge &edge, F code, DiagnosticSeverity severity, co
 	return d;
 }
 
-// Whether the quadrant split of a map `w` wide and `h` tall reads and writes past it: the game splits a
-// map at its width, copying (w & ~1) x (w & ~1) texels from rows of `w` into a buffer of w x h [orig:
-// Terrain_SplitTileIntoQuadrants @ 0x604E60, called with the width], so a map wider than tall overruns
-// both.
-bool split_overruns(uint32_t w, uint32_t h) { return h < (w & ~1u); }
-
 // What a role asks of the file its use's loader opens, by its header: the findings on the use (`at`),
 // or, for a name the game opens itself (no edge), on the file. `context` what the use says of itself (a
 // particle graphic's mode).
@@ -133,9 +125,10 @@ void check_sizes(R role, const std::string &file, const TextureHeader &header, c
 		// Checksummed and premultiplied over exactly 0x400000 bytes [orig: PolyTrn_InitTextures @ 0x60B3BE,
 		// @ 0x60B5A9..0x60B6FD], its quadrants split at its own width into a buffer of its texels [orig: the
 		// split @ 0x60B510].
-		if (w == 1024 && h == 1024) break;
-		const bool short_read = uint64_t(w) * h < uint64_t(1024) * 1024;
-		const bool split = split_overruns(w, h);
+		constexpr uint32_t side = terrain::kTerrainColourMapSide;
+		if (w == side && h == side) break;
+		const bool short_read = uint64_t(w) * h < uint64_t(side) * side;
+		const bool split = terrain::terrain_map_split_overruns(w, h);
 		if (short_read || split)
 			add(F::TextureColourMapSize, DiagnosticSeverity::Error,
 			    is + ": " + (short_read ? "the game reads 1024 x 1024 texels (4 MB) from it" : std::string()) +
@@ -153,17 +146,17 @@ void check_sizes(R role, const std::string &file, const TextureHeader &header, c
 	case R::TerrainBlendMap:
 		// Loaded whole, then split at its width into a buffer of its texels [orig: PolyTrn_InitTextures @
 		// 0x60B1B8 (the load), @ 0x60B29C (the buffer), @ 0x60B2C1 (the split)].
-		if (split_overruns(w, h))
+		if (terrain::terrain_map_split_overruns(w, h))
 			add(F::TextureBlendMapSize, DiagnosticSeverity::Error,
 			    is + ": the game splits it in quadrants of half its width, copying " + sides(w & ~1u, w & ~1u) +
 			            " texels out of it and into a buffer of its own size: past the end of both. Make it at least as "
 			            "tall as it is wide.");
 		break;
 	case R::TerrainFoliageMap: {
-		// Sampled at (c & 1023) >> (10 - log2(width)) on both axes [orig: Terrain_GetSurfaceTypeAtFixedPoint @
-		// 0x6066D0, the log2 @ 0x605B4B..0x605B5B]. Past 1024 the shift is negative, which the processor takes
-		// modulo 32, so every sample reads the first texel [orig: Foliage_SampleFoliageMapMask @ 0x606620].
-		const uint32_t side = power_of_two_floor(w);
+		// Sampled at (c & 1023) >> (10 - log2(width)) on both axes; past 1024 the shift is negative, which the
+		// processor takes modulo 32, so every sample reads the first texel (terrain::surface_sample_extent, its
+		// witnesses).
+		const uint32_t side = uint32_t(terrain::surface_sample_extent(int32_t(std::min<uint32_t>(w, 0x7FFFFFFF))));
 		if (w <= 1024 && h < side)
 			add(F::TextureFoliageMapOverrun, DiagnosticSeverity::Error,
 			    is + ": the game's foliage lookup reads " + std::to_string(side) + " rows of it, past its last.");
@@ -177,14 +170,16 @@ void check_sizes(R role, const std::string &file, const TextureHeader &header, c
 			         "its codes land on the wrong ground.");
 		break;
 	}
-	case R::TerrainTileAtlas:
-		// Cut in 64-texel cells [orig: Terrain_LoadTileSetAtlas @ 0x604B7C].
-		if (w % 64 || h % 64)
+	case R::TerrainTileAtlas: {
+		// Cut in 64-texel cells [orig: Terrain_LoadTileSetAtlas @ 0x604B7C] (TIL_ATLAS_TILE_PIXELS).
+		constexpr uint32_t cell = uint32_t(TIL_ATLAS_TILE_PIXELS);
+		if (w % cell || h % cell)
 			add(F::TextureTileAtlasCells, DiagnosticSeverity::Warning,
-			    is + ": the game cuts it in 64-texel cells, so its last " +
-			            (w % 64 ? std::to_string(w % 64) + " columns" : std::string()) + (w % 64 && h % 64 ? " and " : "") +
-			            (h % 64 ? std::to_string(h % 64) + " rows" : std::string()) + " are never drawn.");
+			    is + ": the game cuts it in " + std::to_string(cell) + "-texel cells, so its last " +
+			            (w % cell ? std::to_string(w % cell) + " columns" : std::string()) + (w % cell && h % cell ? " and " : "") +
+			            (h % cell ? std::to_string(h % cell) + " rows" : std::string()) + " are never drawn.");
 		break;
+	}
 	case R::ModelNormalMap:
 	case R::ModelHeightNormal:
 		// Halved to fit 512 a side [orig: Material_LoadStageTexture @ 0x5B1782, flag 0x1000].
@@ -219,7 +214,7 @@ void check_sizes(R role, const std::string &file, const TextureHeader &header, c
 		break;
 	}
 	case R::HudMfd:
-		if (!power_of_two(w) || !power_of_two(h))
+		if (!hud::hud_mfd_texture_takes(w, h))
 			add(F::TextureMfdNotPowerOfTwo, DiagnosticSeverity::Warning,
 			    is + ": the game makes no material of an MFD texture whose sides are not powers of two [orig: sub_59B120 @ "
 			         "0x59B19F..0x59B1BD].");
@@ -244,13 +239,13 @@ void check_sizes(R role, const std::string &file, const TextureHeader &header, c
 void check_budget(R role, const std::string &served, const TextureHeader &header, const std::string &where,
                   const TextureUseContext &context, std::set<std::string> &costed,
                   const std::function<void(F, DiagnosticSeverity, const std::string &)> &add) {
-	TextureBudgetLoader loader = TextureBudgetLoader::Stage;
+	renderer::TextureLoader loader = renderer::TextureLoader::Stage;
 	if (!texture_role_budget_loader(role, loader)) return;
 	const std::string file = basename_of(served);
 	const TextureBudget budget = texture_budget(header, file, loader, context.slot);
 	if (!budget.known) return;
 	const renderer::DeviceTexture &full = budget.full();
-	const bool normal_slot = (context.slot == 3 || context.slot == 4) && loader != TextureBudgetLoader::Normal;
+	const bool normal_slot = (context.slot == 3 || context.slot == 4) && loader != renderer::TextureLoader::Normal;
 	if (normal_slot) {
 		const bool mdt = strutil::to_lower(utf8_of(path_of(file).extension())) == ".mdt";
 		const renderer::DeviceTexture capped = renderer::pixel_device_texture(header.width, header.height, renderer::kTextureFlagCap512);
@@ -262,7 +257,7 @@ void check_budget(R role, const std::string &served, const TextureHeader &header
 		                 : "Store a finished normal map as an .mdt with type 4 (" + texture_bytes_words(capped.bytes) +
 		                           "); type 4 or 5 over a .tga makes the normal map from its alpha as a height."));
 	}
-	if (full.bytes <= kTextureMemoryWarnBytes || !costed.insert(served + "\x01" + texture_budget_loader_token(loader) + "\x01" +
+	if (full.bytes <= kTextureMemoryWarnBytes || !costed.insert(served + "\x01" + texture_loader_token(loader) + "\x01" +
 	                                                             std::to_string(context.slot)).second)
 		return;
 	std::string message = file + ", " + where + ", takes " + texture_bytes_words(full.bytes) + " of the game's memory: " +
@@ -270,7 +265,7 @@ void check_budget(R role, const std::string &served, const TextureHeader &header
 	if (budget.offers_dds)
 		message += " As a " + std::string(renderer::device_texture_format_name(budget.as_dds.format)) + " .dds beside it, which " +
 		           "its loader reads first, it would take " + texture_bytes_words(budget.as_dds.bytes) + ".";
-	else if (loader != TextureBudgetLoader::Normal && header.reader == TextureReader::Dds)
+	else if (loader != renderer::TextureLoader::Normal && header.reader == TextureReader::Dds)
 		message += " Make it smaller.";
 	const renderer::DeviceTexture &lowest = budget.detail[0];
 	if (lowest.bytes < full.bytes)
@@ -290,13 +285,13 @@ void check_use(const AssetGraph &graph, const ValidationInput &input, const Grap
 	if (graph.resolve(edge, &served) != ReferenceStatus::Present || served.empty()) return;
 	const TextureNameTest exists = [&graph](const std::string &name) { return graph.has_file(name); };
 	const TextureLoad load = edge.kind == ReferenceKind::Texture ? texture_reference_load(edge.value, edge.loader_arg, exists)
-	                                                             : texture_load(row.loader, edge.value, exists, 0, -1, role);
+	                                                             : texture_load(row.loader, edge.value, exists);
 	const std::string where = use_words(row, edge);
 	// A file of the name written that the loader passes over for another (a .tga beside the .dds a model
 	// row loads) [orig: Texture_LoadByNameWithChannel @ 0x58B53C..0x58B5C0]: on that file, once. Not a
 	// terrain detail's, which the game reads by its own name too (texture_role_read_by_name).
 	const AssetEntry *written = input.scan.find(basename_of(edge.value));
-	if (written && written->kind == AssetKind::Texture && written->relative_path != served && !texture_role_read_by_name(role) &&
+	if (written && written->kind == AssetKind::Texture && written->relative_path != served && !renderer::texture_role_read_by_name(role) &&
 	    passed_over.insert({written->relative_path, served}).second)
 		out.push_back(make_finding(finding_code(TextureFinding::NotRead), DiagnosticSeverity::Warning,
 		                           "The game never reads " + written->logical_name + " for " + where + ": its loader opens " +
@@ -333,9 +328,9 @@ void check_use(const AssetGraph &graph, const ValidationInput &input, const Grap
 	// that is no TGA, a loading screen that is no PCX: roles.md's loaders).
 	const size_t dot = served.find_last_of('.');
 	const std::string extension = dot == std::string::npos ? std::string() : served.substr(dot);
-	if (row.formats != 0 && !texture_role_takes(row, extension)) {
+	if (row.formats != 0 && !renderer::texture_role_takes(row, extension)) {
 		std::string formats;
-		for (const std::string &each : texture_role_extensions(row)) formats += (formats.empty() ? "" : ", ") + each;
+		for (const std::string &each : renderer::texture_role_extensions(row)) formats += (formats.empty() ? "" : ", ") + each;
 		add(F::TextureWrongReader, reader_severity,
 		    basename_of(served) + ", " + where + ", is read by the game's " + reader_words(reader) + " reader, which takes " +
 		            (formats.empty() ? std::string("no texture file") : formats) + " files" +
@@ -382,7 +377,7 @@ TextureHeader texture_file_header(const std::string &root, const AssetEntry &ent
 	return header ? *header : TextureHeader();
 }
 
-void check_texture_role(TextureRoleId role, const std::string &file, const TextureHeader &header, const std::string &where,
+void check_texture_role(renderer::TextureRoleId role, const std::string &file, const TextureHeader &header, const std::string &where,
                         const TextureFindingSink &add, const TextureUseContext &context) {
 	check_sizes(role, file, header, where, context, add);
 }

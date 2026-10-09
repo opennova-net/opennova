@@ -169,7 +169,7 @@ JsonValue boolean(bool value) { return JsonValue::make_bool(value); }
 // A texture reference's use, by the role its loader argument names (ADR 0046 S18, texture_roles.h):
 // texture_role its token, texture_gates whether the game refuses the mission without it.
 void set_texture_role(JsonValue &out, ReferenceKind kind, int32_t loader_arg) {
-	TextureRoleId role = TextureRoleId::kCount;
+	renderer::TextureRoleId role = renderer::TextureRoleId::kCount;
 	if (kind != ReferenceKind::Texture || !texture_arg_role(loader_arg, role)) return;
 	out.set("texture_role", json_string(texture_role_row(role).token));
 	if (texture_arg_gates(loader_arg)) out.set("texture_gates", boolean(true));

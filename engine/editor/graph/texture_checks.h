@@ -41,7 +41,7 @@ TextureHeader texture_file_header(const std::string &root, const AssetEntry &ent
 // a particle graphic's mode): each finding handed to `add`, the code, its severity and its words. The
 // check above makes one finding of each; a test or a retail leg asks it of a file directly.
 using TextureFindingSink = std::function<void(CoreFinding, DiagnosticSeverity, const std::string &message)>;
-void check_texture_role(TextureRoleId role, const std::string &file, const TextureHeader &header, const std::string &where,
+void check_texture_role(renderer::TextureRoleId role, const std::string &file, const TextureHeader &header, const std::string &where,
                         const TextureFindingSink &add, const TextureUseContext &context = TextureUseContext());
 
 } // namespace opennova::editor
