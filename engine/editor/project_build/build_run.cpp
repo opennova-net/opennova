@@ -8,6 +8,7 @@
 #include <system_error>
 #include <utility>
 
+#include <base/gameprofile/gameprofile.h>
 #include <base/io/file_time.h>
 #include <base/io/hash.h>
 #include <base/io/json.h>
@@ -27,10 +28,10 @@ namespace opennova::editor {
 
 namespace {
 
-// The archive flavour the target game ships: every JO-family title reads PFF3
-// [orig: PFF_Open @ 0x7682e0]; the profile keys the SCR policy only, so the format
-// rides here until a profile row carries it.
-constexpr pff::PffFormat kBuildArchiveFormat = pff::PFF_FORMAT_PFF3;
+// The archive flavour a build writes: a new archive's, every profile's
+// (gameprofile::GAMEPROFILE_PFF_NEW_ARCHIVE_FORMAT, PFF3).
+constexpr pff::PffFormat kBuildArchiveFormat =
+		static_cast<pff::PffFormat>(gameprofile::GAMEPROFILE_PFF_NEW_ARCHIVE_FORMAT);
 
 // The largest single read, write or copy inside a step: a budget spans several.
 constexpr uint64_t kChunkBytes = uint64_t(1) << 20;
@@ -603,7 +604,7 @@ void BuildRun::save_cache() const {
 }
 
 void BuildRun::fold(const BuildEntry &entry, uint64_t size, uint64_t content) {
-	const std::string key = normalized_logical_name(entry.logical_name);
+	const std::string key = pff::normalized_logical_name(entry.logical_name);
 	group_hash_ = io::fnv1a64_bytes(group_hash_, key.data(), key.size());
 	group_hash_ = io::fnv1a64_byte(group_hash_, 0);
 	group_hash_ = io::fnv1a64_value(group_hash_, size);
@@ -741,13 +742,13 @@ void BuildRun::drop_same_as_base() {
 		for (size_t e = 0; e < plan_.archives[a].entries.size(); ++e) {
 			const BuildEntry &entry = plan_.archives[a].entries[e];
 			if (!same_[stamp_index(a, e)] && lists_as_mission(entry.logical_name))
-				kept_tables[normalized_logical_name(mission::mission_base_name(entry.logical_name) + ".bin")] = true;
+				kept_tables[pff::normalized_logical_name(mission::mission_base_name(entry.logical_name) + ".bin")] = true;
 		}
 	std::map<std::string, bool> tables; // the text tables the expansion's pair holds
 	for (size_t a = 0; a < plan_.archives.size(); ++a)
 		if (plan_.archives[a].slot == ArchiveSlot::Language)
 			for (size_t e = 0; e < plan_.archives[a].entries.size(); ++e) {
-				const std::string name = normalized_logical_name(plan_.archives[a].entries[e].logical_name);
+				const std::string name = pff::normalized_logical_name(plan_.archives[a].entries[e].logical_name);
 				tables[name] = true;
 				if (kept_tables.count(name)) same_[stamp_index(a, e)] = false;
 			}
@@ -759,7 +760,7 @@ void BuildRun::drop_same_as_base() {
 			const BuildEntry &entry = plan_.archives[a].entries[e];
 			if (same_[stamp_index(a, e)] || !lists_as_mission(entry.logical_name)) continue;
 			const std::string table = mission::mission_base_name(entry.logical_name) + ".bin";
-			if (!tables.count(normalized_logical_name(table)))
+			if (!tables.count(pff::normalized_logical_name(table)))
 				report_.diagnostics.push_back(make_finding(
 				        CoreFinding::BuildExpansionMissionUntitled, DiagnosticSeverity::Warning,
 				        entry.logical_name + " has no text table " + table + " of its own in the expansion: the game's "

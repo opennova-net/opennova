@@ -16,7 +16,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/assets/install_view.h>
-#include <editor/assets/player_files.h>
+#include <base/gameprofile/player_files.h>
 #include <editor/assets/project_layout.h>
 #include <editor/assets/project_scan.h>
 #include <editor/graph/asset_graph.h>
@@ -92,10 +92,10 @@ std::vector<std::string> list_install_loose_files(const std::string &retail_root
 		// Its name as UTF-8, whatever the code page (project_files.h, utf8_of).
 		const std::string name = utf8_of(it->path().filename());
 		// The kinds the game ships loose, never a player's own file beside them.
-		if (install_loose_kind(classify_asset(name, nullptr)) && !is_player_file(name)) names.push_back(name);
+		if (install_loose_kind(classify_asset(name, nullptr)) && !gameprofile::is_player_file(name)) names.push_back(name);
 	}
 	std::sort(names.begin(), names.end(), [](const std::string &a, const std::string &b) {
-		return normalized_logical_name(a) < normalized_logical_name(b);
+		return pff::normalized_logical_name(a) < pff::normalized_logical_name(b);
 	});
 	return names;
 }
@@ -135,7 +135,7 @@ std::vector<std::string> view_names(const InstallSpec &spec) {
 	names.reserve(view.files().size());
 	for (const InstallFile &file : view.files()) names.push_back(file.name);
 	std::sort(names.begin(), names.end(), [](const std::string &a, const std::string &b) {
-		return normalized_logical_name(a) < normalized_logical_name(b);
+		return pff::normalized_logical_name(a) < pff::normalized_logical_name(b);
 	});
 	return names;
 }
@@ -250,19 +250,19 @@ void remove_stage(const fs::path &stage, const std::vector<fs::path> &folders) {
 void report_textures_left(const std::vector<Output> &outputs, const AssetScan &existing, std::vector<Diagnostic> &out) {
 	// The import's own files by name: what it brings.
 	std::map<std::string, AssetKind> brought;
-	for (const Output &output : outputs) brought.emplace(normalized_logical_name(output.name), output.kind);
+	for (const Output &output : outputs) brought.emplace(pff::normalized_logical_name(output.name), output.kind);
 	for (const Output &output : outputs) {
 		std::set<std::string> told;
 		for (const GraphEdge &edge : output.textures) {
 			const auto exists = [&](const std::string &name) {
 				const AssetEntry *held = existing.find(name);
 				if (held && file_serves_reference(held->kind, edge.kind, edge.loader_arg)) return true;
-				const auto other = brought.find(normalized_logical_name(name));
+				const auto other = brought.find(pff::normalized_logical_name(name));
 				return other != brought.end() && file_serves_reference(other->second, edge.kind, edge.loader_arg);
 			};
 			const std::vector<std::string> candidates = reference_file_candidates(edge.kind, edge.value, edge.loader_arg, exists);
 			if (candidates.empty() || std::any_of(candidates.begin(), candidates.end(), exists)) continue;
-			if (!told.insert(normalized_logical_name(edge.value)).second) continue;
+			if (!told.insert(pff::normalized_logical_name(edge.value)).second) continue;
 			Diagnostic d = make_finding(
 			        CoreFinding::ImportTextureNotImported, DiagnosticSeverity::Warning,
 			        output.name + " names the texture " + edge.value +
@@ -422,11 +422,11 @@ private:
 		std::string message, io_error;
 		if (!check_project_file_name(paths_.root, std::string(), name, AssetKind::Unknown, problem, message))
 			return refuse(name_refused(problem), message, name);
-		// The player's or this machine's own file is never the project's (assets/player_files.h).
-		if (is_player_file(name))
+		// The player's or this machine's own file is never the project's (gameprofile/player_files.h).
+		if (gameprofile::is_player_file(name))
 			return refuse(CoreFinding::ImportPlayerFile,
-			              name + " is " + player_file_words(name) + ": an import never takes the player's own files.", name);
-		if (!selected_names_.insert(normalized_logical_name(name)).second)
+			              name + " is " + gameprofile::player_file_words(name) + ": an import never takes the player's own files.", name);
+		if (!selected_names_.insert(pff::normalized_logical_name(name)).second)
 			return refuse(CoreFinding::ImportDuplicate, "More than one selected file has the name " + name + ".", name);
 		// A file of a name the project holds is decided once the source is read: the same bytes are
 		// left as they are, other bytes refused unless the import replaces (below, for each file the
@@ -495,7 +495,7 @@ private:
 					refuse(name_refused(problem), message, output.name);
 					continue;
 				}
-				if (!selected_names_.insert(normalized_logical_name(output.name)).second) {
+				if (!selected_names_.insert(pff::normalized_logical_name(output.name)).second) {
 					refuse(CoreFinding::ImportDuplicate, "More than one selected file makes " + output.name + ".", output.name);
 					continue;
 				}

@@ -1,10 +1,8 @@
 #include <editor/project/base_project.h>
 
 #include <filesystem>
-#include <system_error>
 
 #include <base/io/strutil.h>
-#include <base/vfs/vfs.h>
 #include <editor/project/project_files.h>
 
 namespace fs = std::filesystem;
@@ -46,19 +44,6 @@ bool base_project_game_dir(const std::string &project_root, const ProjectExpansi
 		return fail(error, "The base game's project " + expansion.base_project + " is a project of \"" +
 		                           base.target_game + "\", and this one of \"" + target_game + "\".");
 	return true;
-}
-
-bool base_game_exported(const std::string &dir) {
-	if (dir.empty()) return false;
-	std::error_code ec;
-	for (const fs::directory_entry &entry : fs::directory_iterator(system_path(dir), ec)) {
-		std::error_code kind;
-		if (!entry.is_regular_file(kind)) continue;
-		const std::string name = utf8_of(entry.path().filename());
-		for (const char *slot : kBootArchiveTable)
-			if (strutil::iequals(name, slot)) return true;
-	}
-	return false;
 }
 
 } // namespace opennova::editor
