@@ -201,6 +201,11 @@ bool write_table(const Table &table, std::string &text, std::string &error);
 // down where the section's cursor would not find it) is written in the writer's form, `rewritten` set.
 bool write_table(const Table &table, const textlayout::Notes *notes, std::string &text, std::string &error,
                  bool *rewritten = nullptr);
+// The text write_table makes, the ConfigFile pool left unchecked: what a file of the table holds where its values
+// would overrun that pool (configfile::data_strings_pool says by how much). False with the reason for a table no
+// file loads as, as write_table.
+bool compose_table(const Table &table, const textlayout::Notes *notes, std::string &text, std::string &error,
+                   bool *rewritten = nullptr);
 // The notes' lines modeled against what the writer puts down for the table as read (textlayout::model; the
 // noted read_table runs it last).
 void model_layout(const Table &table, textlayout::Notes &notes);

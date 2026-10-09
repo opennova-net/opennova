@@ -186,6 +186,16 @@ void model_layout(const Table &table, textlayout::Notes &notes) {
 
 bool write_table(const Table &table, const textlayout::Notes *notes, std::string &text, std::string &error,
                  bool *rewritten) {
+	if (!compose_table(table, notes, text, error, rewritten)) return false;
+	if (!pool_fits(text, error)) {
+		text.clear();
+		return false;
+	}
+	return true;
+}
+
+bool compose_table(const Table &table, const textlayout::Notes *notes, std::string &text, std::string &error,
+                   bool *rewritten) {
 	text.clear();
 	error.clear();
 	if (rewritten != nullptr) *rewritten = false;
@@ -204,10 +214,6 @@ bool write_table(const Table &table, const textlayout::Notes *notes, std::string
 			text = textlayout::compose(nullptr, root, configfile::cut_config_line, "\r\n");
 			if (rewritten != nullptr) *rewritten = true;
 		}
-	}
-	if (!pool_fits(text, error)) {
-		text.clear();
-		return false;
 	}
 	return true;
 }

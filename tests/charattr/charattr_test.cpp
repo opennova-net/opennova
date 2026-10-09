@@ -310,8 +310,11 @@ void synthetic_writer() {
 	full.rows[5].class_id = 6;
 	CHECK(!charattr::write_table(full, text, error) && text.empty() && error.find("72 values") != std::string::npos &&
 	      error.find("8 bytes past") != std::string::npos && error.find("0x7609e8") != std::string::npos);
+	// The same text, the pool unchecked: what the file would hold.
+	CHECK(charattr::compose_table(full, nullptr, text, error) &&
+	      configfile::data_strings_pool(reinterpret_cast<const uint8_t *>(text.data()), text.size()).overrun() == 8);
 	std::printf("writer: every key away from 0, CR LF, the floats by their bits; a table no file loads as, or whose "
-	            "text would overrun the reader's pool, refused\n");
+	            "text would overrun the reader's pool, refused (composed all the same)\n");
 }
 
 // A class's camouflage items by their property [orig: CharAttr_GetCammoTypeId @ 0x4127b0], and the property a
