@@ -297,16 +297,19 @@ world::WeaponTable build_weapon_table(
 			            sizeof(dst.particleuserpoint));
 		}
 		// The first weapon naming an ANIMADM loads it and every later one gets
-		// the same rings back; a named file the mounted roots lack loads
-		// default.adm in its place, the table keyed on that name. No animadm,
-		// or one that does not load, leaves no anim object and every 'auto'
-		// field collapses to zero ("Error, need to define a anim adm"). The
-		// name is the block's own: the parse buffer is cleared at each weapon's
-		// END. [orig: AnimMap_LoadAdmFile @0x40CC40, the extension swap
+		// the same rings back. The load opens the name cut at its last '.'
+		// with ".adm" appended, or default.adm where the mounted roots lack
+		// that file, and keys the table on the name it opened, which the entry
+		// keeps (anim/adm_fallback.h). No animadm, or one that does not load,
+		// leaves no anim object and every 'auto' field collapses to zero
+		// ("Error, need to define a anim adm"). The name is the block's own:
+		// the parse buffer is cleared at each weapon's END. [orig:
+		// AnimMap_LoadAdmFile @0x40CC40, the extension swap
 		// @0x40CCB9..0x40CCF8, the FileExists miss @0x40CD00 -> default.adm
-		// @0x40CD0C..0x40CD25, the cached entry @0x40CD45..0x40CD5C;
+		// @0x40CD0C..0x40CD25, the cache keyed on the resolved name
+		// @0x40CD2F, the cached entry @0x40CD45..0x40CD5C;
 		// Anim_InitActions @0x542180..0x542198, the load @0x541FEF;
-		// WeaponDefs_ResetParseState @0x53ff90; anim/adm_fallback.h]
+		// WeaponDefs_ResetParseState @0x53ff90]
 		// Only an entry's `end` runs this bind: an entry no `end` closed keeps
 		// its slot with no anim object and its actions unbound
 		// (DefWeaponDef::unclosed) [orig: WeaponDefs_ParseLineCallback, `end`
@@ -314,12 +317,9 @@ world::WeaponTable build_weapon_table(
 		if (d.unclosed == 0) {
 			std::string animadm = d.animadm;
 			const ResourceIndex *index = resources != nullptr ? resources->index() : nullptr;
-			if (index != nullptr && !animadm.empty()) {
-				std::string file = animadm;
-				const size_t dot = file.find_last_of('.');
-				if (dot != std::string::npos) file.resize(dot);
-				animadm = anim::adm_name_or_default(animadm, index->has_file(file + ".adm"));
-			}
+			if (index != nullptr)
+				animadm = anim::adm_load_name(animadm,
+						[index](const std::string &file) { return index->has_file(file); });
 			const bool has_adm = resources != nullptr && !animadm.empty() &&
 					table.rings.load(resources, animadm);
 			WeaponTableRingContext ring_ctx{&table.rings, animadm};

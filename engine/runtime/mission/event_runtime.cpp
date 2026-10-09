@@ -134,8 +134,10 @@ void BmsEventSystem::on_load(World &w) {
     // [orig: EventSystem_FreeAll @ 0x453210; Mission_ResetBmsState
     //  @0x40DB80 (the load reset; the 0xA33F90 x 0xC00 memset @0x40DBAE)]
     w.script.relations.clear();
-    // Round init clears both dialog tables the PLYRDIALOG subs read [orig:
-    // Game_InitNewRound @0x422741/@0x4227ac -> Dialog_ResetAll @0x44dc90].
+    // A mission load starts the dialog table empty: the dialog bank's load
+    // zeroes the history count, and round init clears the slots and the
+    // history [orig: DialogManager_LoadFromFile @0x44e81b; Game_InitNewRound
+    // @0x422741/@0x4227ac -> Dialog_ResetAll @0x44dc90].
     // The input-action word and its mirror are BSS words with no load-time
     // writer; they keep whatever the producers left.
     w.script.dialog.reset();
@@ -404,16 +406,14 @@ int32_t BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                 case bms::PlayerTriggerType::PlayerLookByteBit0Set:
                     return 0;
                 case bms::PlayerTriggerType::PlayerDialogDone:
-                    // [orig: @0x453d1b Dialog_ExistsByIndex(p1) == 0 -- absent
-                    //  from the 16-slot active table]
-                    return !w.script.dialog.active_exists(t.param1);
+                    // No slot of the dialog table holds the dialog
+                    // [orig: case 34 @0x453d04: Dialog_ExistsByIndex(p1) @0x453d08,
+                    //  negated @0x453d10..0x453d14, returned @0x453d1b].
+                    return !w.script.dialog.active(t.param1);
                 case bms::PlayerTriggerType::PlayerDialogFinished:
-                    // [orig: @0x453d20 sub_44E220(p1): in the registered-history
-                    //  list (@0x44e253..0x44e28e, miss -> 0 @0x44e291) AND absent
-                    //  from the active table (found -> 0 @0x44e313, else 1
-                    //  @0x44e2f5)]
-                    return w.script.dialog.registered(t.param1) &&
-                           !w.script.dialog.active_exists(t.param1);
+                    // The table's history holds the dialog and no slot does
+                    // [orig: case 35 @0x453d1c: sub_44E220(p1) @0x453d20].
+                    return w.script.dialog.finished(t.param1);
                 case bms::PlayerTriggerType::PlayerAwol:
                     // AWOL quanta (once per 64 ticks, ~1.02 s each) vs the authored
                     // threshold. [orig: @0x453d40 — getter @0x439de0 >= param1] (D-EVT-2)
@@ -607,13 +607,17 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
         // Presentation effects: the engine hands these to the embedder's audio/HUD/overlay.
         case bms::ActionType::PlayWavList:
             // Dialog param1 plays only on a client, and once the round-over
-            // latch holds only when param2 == 1 forces it; a skipped play never
-            // reaches the dialog registry the PLYRDIALOG subs read.
+            // latch holds only when param2 == 1 forces it; the play registers
+            // the dialog in the world's dialog table at once, so the PLYRDIALOG
+            // triggers later in this pass already see it, and a skipped play
+            // never reaches it. The effect stays as the presentation log.
             // [orig: EventAction_Dispatch @0x4542E0 case 7 — the is_mp_session_peer
             //  test @0x45443d, param2 == 1 @0x45444a, the g_SpawnSuccessGate test
             //  @0x454450, the Dialog_PlayByIndex call @0x454461]
-            if (w.rules.mp_session_peer && (a.param2 == 1 || !w.match.outcome().ended))
+            if (w.rules.mp_session_peer && (a.param2 == 1 || !w.match.outcome().ended)) {
+                w.script.dialog.play(w.tables.dialog_bank, w.tables.dialog_sounds, a.param1);
                 w.out.effects.push({"dialog", a.param1, a.param2, 0, 0, std::string()});
+            }
             break;
         case bms::ActionType::ShowWaypoints:
             // The engine flag the waypoint HUD label + SP cycle key gate on

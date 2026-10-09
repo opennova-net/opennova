@@ -370,6 +370,10 @@ int main() {
 		write_file(gore / "fgn2.bin", "german content marker");
 		TEST_EXPECT(gore_index.scan(gore.string()));
 		TEST_EXPECT(gore_index.particle_extension() == ".ptg");
+		// The same pick for a file set no index holds (a mission's boot files, a project).
+		TEST_EXPECT(std::string(opennova::gore_particle_extension(true)) == ".ptg" &&
+		            std::string(opennova::gore_particle_extension(false)) == ".ptu" &&
+		            std::string(opennova::kGoreContentMarker) == "fgn2.bin");
 
 		gore_index.clear();
 		fs::remove_all(gore);

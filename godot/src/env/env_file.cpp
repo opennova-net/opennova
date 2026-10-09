@@ -743,6 +743,14 @@ void EnvFile::clear_mission_overrides() {
 	emit_changed();
 }
 
+void EnvFile::apply_mission_overrides_or_clear(const Ref<MissionEnvironmentOverrides> &p_overrides) {
+	if (p_overrides.is_null() || p_overrides->is_empty()) {
+		clear_mission_overrides();
+	} else {
+		apply_mission_overrides(p_overrides);
+	}
+}
+
 bool EnvFile::has_mission_overrides() const {
 	return mission_overrides_active;
 }

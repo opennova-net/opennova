@@ -18,7 +18,7 @@
 #include <godot_cpp/core/object.hpp>
 
 #include <base/gameprofile/resource_missing.h>
-#include <runtime/anim/adm_fallback.h> // the default.adm substitution every spawn applies
+#include <runtime/anim/adm_fallback.h> // the .adm name every spawn loads (default.adm for a missing one)
 #include <runtime/renderer/object_lod.h>
 #include <base/io/fixed.h>
 #include <runtime/world/model_geometry.h>
@@ -671,11 +671,8 @@ ObjectModel *MissionObjectPlacer::build_model_from_graphic(
 		const PackedInt32Array skel_parents = skel_model.is_valid()
 				? skel_model->get_bone_parents()
 				: PackedInt32Array();
-		const String adm_name = p_adm_name.to_lower().ends_with(".adm")
-				? p_adm_name
-				: p_adm_name + String(".adm");
 		const Ref<SkeletalAnim> skeletal =
-				_skeletal_from_adm(adm_name, skel_origins, skel_parents);
+				_skeletal_from_adm(p_adm_name, skel_origins, skel_parents);
 		if (skeletal.is_valid()) {
 			model->set_skeletal_anim(skeletal);
 		}
@@ -890,14 +887,19 @@ void MissionObjectPlacer::_configure_item_lighting(ObjectModel *p_model,
 Ref<SkeletalAnim> MissionObjectPlacer::_skeletal_from_adm(
 		const String &p_adm_name, const PackedVector3Array &p_bone_origins,
 		const PackedInt32Array &p_bone_parents) {
-	// A def-named .adm the mounted roots do not carry loads default.adm in its
-	// place, and the cache keys the RESOLVED name (AnimMap_LoadAdmFile's
-	// FileSystem_FileExists miss -> "default.adm" substitution ahead of
-	// AnimMap_FindByName; engine anim/adm_fallback.h). A present-but-broken
-	// file still fails below, as retail's parse error path does.
-	const String adm_name = opennova::to_gd(
-			opennova::anim::adm_name_or_default(opennova::to_std(p_adm_name),
-					resource_root_.is_valid() && resource_root_->has_file(p_adm_name)));
+	// The def's name as authored opens <stem>.adm, or default.adm where the
+	// mounted roots do not carry that file, and the cache keys the RESOLVED name
+	// (AnimMap_LoadAdmFile's extension swap and FileSystem_FileExists miss ahead
+	// of AnimMap_FindByName; engine anim/adm_fallback.h). An empty name loads
+	// no map. A present-but-broken file still fails below, as retail's parse
+	// error path does.
+	const String adm_name = opennova::to_gd(opennova::anim::adm_load_name(
+			opennova::to_std(p_adm_name), [this](const std::string &p_file) {
+				return resource_root_.is_valid() && resource_root_->has_file(opennova::to_gd(p_file));
+			}));
+	if (adm_name.is_empty()) {
+		return Ref<SkeletalAnim>();
+	}
 	const String cache_key = adm_name + String("#") +
 			String::num_int64(Variant(p_bone_origins).hash()) + String("#") +
 			String::num_int64(Variant(p_bone_parents).hash());
@@ -925,11 +927,8 @@ void MissionObjectPlacer::_apply_skeletal_anim(ObjectModel *p_model,
 	if (anim_def.is_empty()) {
 		return;
 	}
-	const String adm_name = anim_def.to_lower().ends_with(".adm")
-			? anim_def
-			: anim_def + String(".adm");
 	const Ref<SkeletalAnim> skeletal =
-			_skeletal_from_adm(adm_name, p_bone_origins, p_bone_parents);
+			_skeletal_from_adm(anim_def, p_bone_origins, p_bone_parents);
 	if (skeletal.is_valid()) {
 		p_model->set_skeletal_anim(skeletal);
 	}
@@ -979,11 +978,7 @@ MissionObjectPlacer::_get_static_batches(const String &p_graphic,
 		}
 		if (data->has_document()) {
 			const Threedi3di3 &native_model = data->native_model();
-			const int lod_count = MAX(1, static_cast<int>(native_model.lod_count));
-			for (int lod = 0; lod < lod_count; ++lod) {
-				profile.thresholds_q16.push_back(opennova::renderer::rlod_threshold_q16_from_rmdl(
-						native_model.lods[lod].lod_threshold));
-			}
+			profile.thresholds_q16 = opennova::renderer::model_lod_thresholds_q16(native_model);
 			profile.projection_sphere =
 					opennova::world::collision_projection_sphere_from_3di(native_model);
 			profile.zero_center_projection_sphere =

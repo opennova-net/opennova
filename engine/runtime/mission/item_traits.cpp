@@ -110,6 +110,47 @@ std::string render_tag(const char *render_function) {
 
 } // namespace
 
+world::ItemDeathTraits item_death_traits_from_def(const DefItemDef &def) {
+    world::ItemDeathTraits t;
+    t.death_class = world::item_death_class_from_tag(def.ai_function);
+    std::copy(std::begin(def.destroy_timing_ticks), std::end(def.destroy_timing_ticks),
+            std::begin(t.destroy_timing_ticks));
+    t.physics = def.physics;
+    t.squib_distance_q16 = def.clipsize;
+    t.squib_ammo = def.ammo_marker3;
+    t.particlefx = def.particlefx.effect;
+    t.unit_type = def.unit_type;
+    t.kz = def.kz;
+    // An hp-0 def's armor words already read 0xFFFF here: its entity's
+    // init overwrote them [orig: Entity_InitFromModel @0x40DC95 / @0x40DC9F].
+    const bool hp_zero = world::retail_signed_i16(def.hp) == 0;
+    t.armor_impact = hp_zero ? -1 : def.armor_impact;
+    t.armor_blast = hp_zero ? -1 : def.armor_blast;
+    // The S&D/A&D objective target's same-team blast immunity [orig: the
+    // blast applier's same-team gate, jo-c 261654: attacker team == target
+    // team && itemDef->attrib & 0x8000 -> return].
+    t.team_protect = (def.attrib & DEF_ITEM_ATTRIB_SD) != 0;
+    t.no_die = (def.attrib & DEF_ITEM_ATTRIB_NODIE) != 0;
+    t.static_death = (def.attrib2 & DEF_ITEM_ATTRIB2_STATICDEATH) != 0;
+    t.has_husk = def.husk[0] != '\0' || def.huskfinal[0] != '\0';
+    t.is_decoration = def.type == DEF_ITEM_TYPE_DECORATION;
+    t.husk_sub_part_count = static_cast<uint8_t>(std::clamp(def.husk_sub_parts, 0, 255));
+    // The def's 16 authored slots; slot 16, the piece loop's clamp target,
+    // stays 0 (WHEEL) as an unauthored slot reads (destruction.h).
+    for (int s = 0; s < 16; ++s)
+        t.husk_sub_part_types[s] = def.husk_sub_part_types[s];
+    t.debris_scale = def.debris_scale;
+    t.sound_profile = def.sound_profile;
+    t.sound_death = def.sounddeath;
+    t.particlespawn = def.particlespawn;
+    t.particledeath = def.particledeath;
+    t.particleh2odeath = def.particleh2odeath;
+    t.particlefire = def.particlefire;
+    t.particleother = def.particleother;
+    t.particlefinale = def.particlefinale;
+    return t;
+}
+
 // Stamp every live entity's items.def-derived wire traits from the parsed def rows:
 // - Entity::is_ai_capable from ItemDefAttrib & 0x100000 (AIData): the host's pool-1 0x0D stream
 //   emits its AI-trailer iff AI-capable, matching the stock 0x0D decoder's own gate exactly
@@ -432,44 +473,8 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         e->item_score = def != nullptr ? def->score : 0;
         if (world.tables.item_death_traits.get(e->item_id) == nullptr &&
                 def != nullptr) {
-            world::ItemDeathTraits t;
-            t.death_class = world::item_death_class_from_tag(def->ai_function);
+            world::ItemDeathTraits t = item_death_traits_from_def(*def);
             bind_regional_sounds(world, *def, t);
-            std::copy(std::begin(def->destroy_timing_ticks), std::end(def->destroy_timing_ticks),
-                    std::begin(t.destroy_timing_ticks));
-            t.physics = def->physics;
-            t.squib_distance_q16 = def->clipsize;
-            t.squib_ammo = def->ammo_marker3;
-            t.particlefx = def->particlefx.effect;
-            t.unit_type = def->unit_type;
-            t.kz = def->kz;
-            // An hp-0 def's armor words already read 0xFFFF here: its entity's
-            // init overwrote them [orig: Entity_InitFromModel @0x40DC95 / @0x40DC9F].
-            const bool hp_zero = world::retail_signed_i16(def->hp) == 0;
-            t.armor_impact = hp_zero ? -1 : def->armor_impact;
-            t.armor_blast = hp_zero ? -1 : def->armor_blast;
-            // The S&D/A&D objective target's same-team blast immunity [orig: the
-            // blast applier's same-team gate, jo-c 261654: attacker team == target
-            // team && itemDef->attrib & 0x8000 -> return].
-            t.team_protect = (attrib & DEF_ITEM_ATTRIB_SD) != 0;
-            t.no_die = (attrib & DEF_ITEM_ATTRIB_NODIE) != 0;
-            t.static_death =
-                    (def->attrib2 & DEF_ITEM_ATTRIB2_STATICDEATH) != 0;
-            t.has_husk = def->husk[0] != '\0' || def->huskfinal[0] != '\0';
-            t.is_decoration = def->type == DEF_ITEM_TYPE_DECORATION;
-            t.husk_sub_part_count = static_cast<uint8_t>(
-                    std::clamp(def->husk_sub_parts, 0, 255));
-            for (int s = 0; s < 16; ++s)
-                t.husk_sub_part_types[s] = def->husk_sub_part_types[s];
-            t.debris_scale = def->debris_scale;
-			t.sound_profile = def->sound_profile;
-			t.sound_death = def->sounddeath;
-			t.particlespawn = def->particlespawn;
-			t.particledeath = def->particledeath;
-			t.particleh2odeath = def->particleh2odeath;
-            t.particlefire = def->particlefire;
-            t.particleother = def->particleother;
-            t.particlefinale = def->particlefinale;
             // The collision-instance sweep enriches this row with live
             // husk-model state and the active first-stage husk's KZ user points.
             world.tables.item_death_traits.set(e->item_id, std::move(t));

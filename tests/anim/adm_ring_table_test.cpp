@@ -22,6 +22,7 @@
 #include <base/resource_index/resource_index.h>
 #include <formats/bad/bad_build.h>
 #include <formats/def/def.h>
+#include <runtime/anim/adm_fallback.h>
 #include <runtime/anim/adm_ring_table.h>
 #include <runtime/assets/asset_store.h>
 #include <runtime/world/entity.h>
@@ -78,6 +79,23 @@ int main() {
 	ResourceIndex index;
 	TEST_EXPECT(index.scan(dir.string()));
 	assets::AssetStore assets{&index};
+
+	// --- the name the load opens, one rule for every entity and weapon: the
+	// authored name cut at its LAST '.' with ".adm" appended, default.adm where
+	// the roots lack that file, no map for no name [orig: AnimMap_LoadAdmFile
+	// @0x40CCA1, the swap @0x40CCB9..0x40CCF8, the miss @0x40CD00..0x40CD25] ---
+	{
+		const auto exists = [&index](const std::string &file) { return index.has_file(file); };
+		TEST_EXPECT(anim::adm_file_name("").empty());
+		TEST_EXPECT(anim::adm_load_name("", exists).empty());
+		TEST_EXPECT(anim::adm_file_name("ak47_1st") == "ak47_1st.adm");
+		TEST_EXPECT(anim::adm_load_name("g", exists) == "g.adm");
+		TEST_EXPECT(anim::adm_load_name("G.ADM", exists) == "G.adm");
+		TEST_EXPECT(anim::adm_load_name("g.txt", exists) == "g.adm"); // any extension is swapped
+		TEST_EXPECT(anim::adm_load_name("g.adm.bak", exists) == "default.adm"); // opens g.adm.adm
+		TEST_EXPECT(anim::adm_load_name("absent", exists) == "default.adm");
+		TEST_EXPECT(anim::adm_file_name(".") == ".adm");
+	}
 
 	// --- the table: last first, shared, the reset slot and the backfill ---
 	{
@@ -145,7 +163,8 @@ int main() {
 					bi.delay_start, bi.delay_end);
 			TEST_EXPECT(ai.delay_start == 0 && ai.delay_end == 9);
 			TEST_EXPECT(bi.delay_start == 9 && bi.delay_end == 5);
-			TEST_EXPECT(a->animadm == "g");
+			// Each entry keeps the name its load opened and keyed the table on.
+			TEST_EXPECT(a->animadm == "g.adm" && b->animadm == "G.adm");
 		}
 		// Seven serves so far (A's read and END, B's two reads and END, the two
 		// after the file): the first play in the match serves i1.

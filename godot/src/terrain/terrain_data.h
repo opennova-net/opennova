@@ -74,7 +74,6 @@ private:
 	int water_height = 0;
 	bool wrap_x = false;
 	bool wrap_y = false;
-	double horizon = 0.0;
 	PackedInt32Array sector_grid;
 
 	// Parsed data (not exposed)
@@ -222,8 +221,6 @@ public:
 	void set_water_height(int p_val);
 	int get_water_height() const;
 	PackedInt32Array get_quadrant_locks() const;
-	void set_horizon(double p_val);
-	double get_horizon() const;
 
 	Error load();
 	Error load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);

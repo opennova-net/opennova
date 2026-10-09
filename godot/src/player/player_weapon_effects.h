@@ -108,7 +108,6 @@ private:
 	MissionAudio *mission_audio() const;
 	Ref<ItemEffectDirector> effect_anchors() const;
 	void unregister_effect_anchors();
-	static Transform3D weapon_effect_transform(const Vector3 &p_position, const Vector3 &p_forward);
 	void fire_action_effects(const Ref<PlayerWeaponEvent> &p_event);
 	void fire_direct_action_effect(const Ref<PlayerWeaponEvent> &p_event);
 	static Transform3D action_particle_model_to_world(ObjectModel *p_part, const Ref<ModelUserPoint> &p_info);

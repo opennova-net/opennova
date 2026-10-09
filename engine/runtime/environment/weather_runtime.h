@@ -42,7 +42,7 @@ public:
 	// Retail settles the newly initialized environment through 255 complete
 	// weather ticks before gameplay/network publication
 	// [orig: Environment_MissionStartInit @ 0x57f878..0x57f880].
-	static constexpr int kMissionStartPrewarmTicks = 255;
+	static constexpr int kMissionStartPrewarmTicks = world::WeatherState::kMissionStartSettleTicks;
 
 	WeatherRuntime();
 

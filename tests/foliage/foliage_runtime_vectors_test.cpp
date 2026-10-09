@@ -798,6 +798,12 @@ bool model_path_blocker_gate_and_force_on_bypass() {
 	}
 	if (!expect(blocked_calls == 0,
 	            "FORCE_ON never calls the path sampler")) return false;
+	// The same rule as a predicate and a reach, for a caller asking of a point.
+	if (!expect(near(opennova::foliage::kPlacedTileReach, 2.0f) &&
+	                opennova::foliage::placed_tiles_keep_off(0) &&
+	                !opennova::foliage::placed_tiles_keep_off(FOLIAGE_ATTRIB_FORCE_ON) &&
+	                opennova::foliage::placed_tiles_keep_off(opennova::FOLIAGE_ATTRIB_SHADOW),
+	            "only forceon grows through a placed tile, 2 units each way of the candidate")) return false;
 	return true;
 }
 

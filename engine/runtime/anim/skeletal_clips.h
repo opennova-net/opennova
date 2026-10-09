@@ -226,4 +226,34 @@ SkeletalClips::RestTransform rest_mul(
 SkeletalClips::RestTransform rest_affine_inverse(
 		const SkeletalClips::RestTransform &t);
 
+// A point carried by a transform (rows x point + origin), and a direction
+// (rows x direction, no origin): a model point riding a bone through its
+// deformation.
+anim::Vec3 rest_transform_point(const SkeletalClips::RestTransform &t,
+		const anim::Vec3 &point);
+anim::Vec3 rest_transform_direction(const SkeletalClips::RestTransform &t,
+		const anim::Vec3 &direction);
+
+// The bone the collision pose collapses for a mounted entity (pose_globals'
+// `collapse_bone`): retail's final special row clips BN17 R Hand (model bone
+// 16, COBJ 16) after channel composition, overlay, and parent-pivot re-anchor.
+// [orig: Entity_BuildBoneTransformMatrices @0x4b1290 special row;
+//  world-wac-ai-re.md §14.1.5]
+inline constexpr int kCollapsedRightHandBone = 16;
+
+// A pose's model-space globals by the parent-local FK the skin poses by, for
+// its first `count` bones (clamped to the pose's and the parents' sizes): each
+// bone's local (its pose rotation as rows, its pose origin) on its parent's
+// global, a bone whose parent is -1 (or not an earlier bone, which an
+// fk_valid() rig never has) its own global. The deformation that carries a
+// rest point of the model riding bone i to the pose is then
+// rest_mul(globals[i], rest_global_inverse()[i]). `collapse_bone` (-1: none):
+// that bone's local rows zeroed with its origin kept, standing as its own
+// global, not composed onto its parent, while its children still chain on it
+// — the collapsed right-hand row a mounted entity's collision pose keeps
+// (kCollapsedRightHandBone) [orig: special row @0x4b1290].
+void pose_globals(const std::vector<anim::PoseBone> &pose,
+		const std::vector<int> &parents, size_t count, int collapse_bone,
+		std::vector<SkeletalClips::RestTransform> &globals);
+
 } // namespace opennova::anim

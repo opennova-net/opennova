@@ -48,6 +48,27 @@ struct OrganicSpawnFacts {
     int parent_phrase_set = 0;
 };
 
+// Whether an item's ai_function class runs that init: the event-callback table's org0 and org1
+// rows (found by the table walk's whole-tag stricmp) name Entity_InitOrganicAI as their second
+// function, and no other row does [orig: g_EntityClassEventCallbackTable @0x813018 / @0x813030;
+// the lookup Entity_LookupRenderCallbacks @0x407dc0, stricmp @0x407de2].
+bool organic_init_class(const char *ai_function);
+
+// The facts a placed record hands the init through its spawn, before any mount, parent or rotor's
+// wash: on a definition with `aidata` (attrib 0x100000, the AI slot) the record's waypoint_id is
+// the slot's has-route word and route channel, and its Guarding attribute (2) folds to Flags 0x40
+// (kEntityFlagMounted); a body with no AI slot has neither [orig: Entity_SpawnFromBMSRecord
+// `test [eax+54h],100000h` @0x40ED4E; the fold 2 -> Flags 0x40 @0x40ED9F; slot+140/+148 from the
+// record's waypoint_id]. The world's spawn reaches the same facts through the slot and the
+// entity's flags (promote's init_ai_slot / fold_ai_entity_flags).
+OrganicSpawnFacts organic_spawn_facts_from_record(bool ai_slot, int32_t waypoint_id,
+                                                  uint32_t bmsi_attributes);
+
+// The warmup's final ground solve sets a body down when its feet stand under one unit (16.16) over
+// what lies under them, a positive clearance included [orig: Entity_WarmUpOrganicAnimation
+// @0x4B8BD8..0x4B8BF5, the cmp 10000h @0x4B8BE7].
+inline constexpr int32_t kOrganicWarmupSettleQ16 = 0x10000;
+
 // The primary state the init requests, against `source`'s clips for `adm_id` (a state is there
 // when its .adm authors its row): 43 idle, or walk 1 on a route; sit 76 under Flags 0x200 and
 // guard 140 under Flags 0x40 where authored; route 126 idle_2 44, route 127 idle 43; near a

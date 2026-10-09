@@ -55,10 +55,11 @@ class Simulation;
 // crossfades, and an eight-player physical channel pool [orig:
 // SoundEmitter_UpdateAndMixTop8 @ 0x5284a0]. Also exposes the PlayWavList
 // action seam and the music/reverb bed. The dialog slots and their line
-// timers, the dialog-id resolution and the WAC voice channel rule are the
-// engine's runtime/audio/dialog_queue (this node is their device: it plays the
-// wave a line loads and says how long it is and whether its voice still plays);
-// the one-shot fires ride the sound bank's oneshot_play plan.
+// timers and the dialog-id resolution are the engine's
+// runtime/audio/dialog_queue, the one table the world owns (this node is its
+// device: it runs the table's playback tick, plays the wave a line loads and
+// says how long it is and whether its voice still plays); the one-shot fires
+// ride the sound bank's oneshot_play plan.
 //
 // The bank chain is the original's: Game_StartMission walks six global name
 // slots in order [<exp>L.lwf, <exp>.lwf, gamelocl.lwf, game.lwf, game3.lwf,
@@ -165,25 +166,25 @@ public:
 	// shares the finite one-shot pool with the other positional triggers.
 	bool slot_soundset(const String &p_name, const Vector3 &p_world_pos,
 			int p_source_bms_id = 0, int p_sound_id = 0);
-	// Play a mission dialog by its PlayWavList id (param1): the engine's
-	// resolution (runtime/audio/dialog_queue resolve_dialog_lines: the dialog
-	// bank's dialog, each line the wave of its name in the bank's sounds) takes
-	// a dialog slot; its lines load on the dialog ticks (advance_dialog_tick).
-	// Returns true if the id resolved to a dialog of the bank and a slot took it.
+	// Play a mission dialog by its PlayWavList id (param1) in the simulation's
+	// dialog table, as the BMS action does (Simulation::play_dialog: the dialog
+	// bank's dialog registers, each line the wave of its name in the bank's
+	// sounds); its lines load on the dialog ticks (advance_dialog_tick). For
+	// probes and tools. Returns true if the id resolved to a dialog of the bank
+	// and a slot took it; false without a simulation.
 	bool play_dialog(int p_wav_id);
 	// One dialog playback tick, which the world runs once a logic tick after
-	// that tick's PlayWavList dialogs reached play_dialog: the engine queue
-	// decides which lines load (runtime/audio/dialog_queue DialogQueue::tick),
-	// this node plays them and reports each to the co-op broadcast. A frame
-	// rendered since the previous dialog tick (tick() marks one) starts a fresh
-	// line's hold.
+	// that tick's PlayWavList dialogs registered: the simulation's dialog
+	// table decides which lines load (runtime/audio/dialog_queue
+	// DialogQueue::tick), this node plays them and reports each to the co-op
+	// broadcast. A frame rendered since the previous dialog tick (tick() marks
+	// one) starts a fresh line's hold. Nothing without a simulation.
 	void advance_dialog_tick();
 	// A co-op dialog line the host sent (the "dialog_line" effect): the
 	// engine's resolution (runtime/audio/dialog_queue resolve_dialog_line)
 	// picks the clip, which plays at once on a voice of its own, outside the
 	// queue. Returns true when a clip spawned.
 	bool play_dialog_line(const String &p_dialog_name, int p_line, int p_player_class);
-    void reset_dialog_queue() { dialog_queue_.discard_pending(); }
 	// Resolve-only (no playback) for tests/diagnostics: the wave file the first
 	// line of a dialog id plays that the dialog bank's sounds hold, or "" if none.
 	String resolve_dialog_wave(int p_wav_id);
@@ -327,10 +328,9 @@ private:
 	Ref<MissionAudioStats> stats_;
 	double time_of_day_hhmm_ = 1200.0; // HHMM like MissionEnvironment.time_of_day; noon default
 	Vector3 last_camera_pos_; // listener at the last tick; INF until first tick
-	// The dialog slots and channel (engine: runtime/audio/dialog_queue.h), the
-	// voice the last loaded line plays on, and whether a frame has rendered
-	// since the last dialog tick.
-	opennova::audio::DialogQueue dialog_queue_;
+	// The voice the last loaded line plays on, and whether a frame has
+	// rendered since the last dialog tick (the dialog table is the
+	// simulation's world's: runtime/audio/dialog_queue.h).
 	ObjectID dialog_voice_id_;
 	bool dialog_frame_rendered_ = false;
 	// Standalone preview player; mission script ownership lives in World.

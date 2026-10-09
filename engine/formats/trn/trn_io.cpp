@@ -108,10 +108,6 @@ void walk_trn(const std::string &text, TrnConfig &out, TrnWalk &walk, bool own, 
 				out.creator = value;
 				return;
 			}
-			if (key == "horizon") {
-				out.horizon = io::retail_atof(value);
-				return;
-			}
 			if (key == "water_height") {
 				out.water_height = io::retail_atol(value);
 				return;
@@ -602,7 +598,6 @@ bool save_trn(std::ostream &f, const TrnConfig &cfg, std::string &error) {
 		}
 		f << "water_murk       " << murk << nl;
 	}
-	f << "horizon          " << cfg.horizon << nl;
 	f << nl;
 
 	if (!cfg.colormap.empty()) {

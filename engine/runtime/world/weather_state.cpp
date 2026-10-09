@@ -281,9 +281,13 @@ void WeatherState::command_time_of_day_minutes(int32_t minute_of_day) {
 }
 
 void WeatherState::debug_set_time_of_day_minutes(double minute_of_day) {
-    const double units = std::max(0.0, minute_of_day) / 60.0 * 16777216.0;
-    tod_fixed24 = static_cast<uint32_t>(std::llround(units)) % kTodDayFixed24;
+    tod_fixed24 = tod_fixed24_from_minutes(minute_of_day);
     bump_command();
+}
+
+uint32_t WeatherState::tod_fixed24_from_minutes(double minute_of_day) {
+    const double units = std::max(0.0, minute_of_day) / 60.0 * 16777216.0;
+    return static_cast<uint32_t>(std::llround(units)) % kTodDayFixed24;
 }
 
 void WeatherState::command_fog_type(int32_t type) {

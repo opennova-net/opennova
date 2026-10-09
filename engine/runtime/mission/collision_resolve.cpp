@@ -7,7 +7,9 @@
 #include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
 
 #include <base/io/strutil.h>
+#include <base/resource_index/resource_index.h>
 #include <formats/mission/mission.h> // kItemIdOffset
+#include <runtime/anim/adm_fallback.h>
 #include <runtime/world/player_spawn.h> // kPlayerInfantryTypeId
 #include <runtime/world/person_overlays.h> // kParachuteItemTypeId
 
@@ -20,12 +22,6 @@ using namespace opennova::threedi;
 namespace opennova::mission {
 
 namespace {
-
-bool iends_with_adm(const std::string &name) {
-	static const char kExt[] = ".adm";
-	if (name.size() < 4) return false;
-	return strutil::iequals(name.c_str() + (name.size() - 4), kExt);
-}
 
 const char *glass_userpoint_for_graphic(const std::string &graphic) {
 	struct GlassSurfaceRow {
@@ -72,6 +68,14 @@ const DefItemDef *find_item_def(const DefItemsFile &items, int item_id) {
 	for (size_t i = 0; i < items.count; ++i)
 		if (items.entries[i].id == item_id) return &items.entries[i];
 	return nullptr;
+}
+
+std::unordered_map<int, const DefItemDef *> item_defs_by_id(const DefItemsFile &items) {
+	// emplace keeps the first row of an id: find_item_def's scan from row 0.
+	std::unordered_map<int, const DefItemDef *> rows;
+	rows.reserve(items.count);
+	for (size_t i = 0; i < items.count; ++i) rows.emplace(items.entries[i].id, &items.entries[i]);
+	return rows;
 }
 
 int visual_item_id_for_runtime_type(int item_id, const DefItemsFile &items) {
@@ -606,9 +610,14 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				// the retained def rows + the shared native model; the
 				// provider validates rig/FK and declines at query time
 				// exactly like the unregistered legacy leg when it cannot.
+				// The rig's map is the spawn's one .adm load: <stem>.adm,
+				// default.adm where that file is not mounted
+				// [orig: Entity_SpawnFromItemDef @0x45257c -> AnimMap_LoadAdmFile
+				//  @0x40cc40; anim/adm_fallback.h].
 				if (deps.models.has_source() && def->anim_def[0] != '\0') {
-					std::string adm(def->anim_def);
-					if (!iends_with_adm(adm)) adm += ".adm";
+					const ResourceIndex *index = deps.models.index();
+					const std::string adm = anim::adm_load_name(def->anim_def,
+							[index](const std::string &file) { return index->has_file(file); });
 					deps.pose.register_skeletal_entity(
 							h, e->registry_spawn_id, resolved_model,
 							adm, deps.models.model(key),
@@ -759,13 +768,10 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					// +4*i / the level mesh's +0x34 [orig:
 					// DeathPiece_RenderVisible @ 0x57b882..0x57b8ba;
 					// DeathPiece_RenderSection @ 0x57b6d1]).
-					for (size_t li = 0; li < piece_m3->lod_count; ++li) {
-						info.model.lod_threshold_q16.push_back(
-								renderer::rlod_threshold_q16_from_rmdl(
-										piece_m3->lods[li].lod_threshold));
+					info.model.lod_threshold_q16 = renderer::model_lod_thresholds_q16(*piece_m3);
+					for (size_t li = 0; li < piece_m3->lod_count; ++li)
 						info.model.lod_section_count.push_back(static_cast<int32_t>(
 								piece_m3->lods[li].render_object_count));
-					}
 					// The COBJ section centres (the runtime row's +0x38..+0x40)
 					// [orig: the +0x6C array @ 0x4938bf, the centre
 					// @ 0x4938c2..0x4938d0; @ 0x57b6f6..0x57b70b].

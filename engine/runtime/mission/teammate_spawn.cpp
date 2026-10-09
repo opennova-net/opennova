@@ -5,7 +5,8 @@
 #include <runtime/mission/seat_spec_extract.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/entity_spawn.h>
-#include <base/io/strutil.h>
+#include <base/resource_index/resource_index.h>
+#include <runtime/anim/adm_fallback.h>
 
 #include <algorithm>
 #include <cstring>
@@ -127,9 +128,12 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
         ai.inf.active = true;
         int adm_id = adm_id_for_runtime_type(request.item_type);
         if (adm_id == -2 && item->anim_def[0]) {
-            std::string name = item->anim_def;
-            if (!strutil::ends_with_icase(name, ".adm")) name += ".adm";
-            adm_id = root_motion.register_adm(adm_assets_ ? adm_assets_ : &assets(), name);
+            // The spawn's one .adm load (anim/adm_fallback.h) [orig:
+            // AnimMap_LoadAdmFile @0x40cc40].
+            const assets::AssetStore *files = adm_assets_ ? adm_assets_ : &assets();
+            const ResourceIndex *index = files->index();
+            adm_id = root_motion.register_adm(files, anim::adm_load_name(item->anim_def,
+                    [index](const std::string &file) { return index != nullptr && index->has_file(file); }));
         }
         ai.inf.adm_id = adm_id;
         world.ai.root_motion = root_motion.empty() ? nullptr : &root_motion;
