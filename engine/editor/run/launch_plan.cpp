@@ -499,7 +499,7 @@ bool prepare_retail_launch_plan(const std::string &retail_directory, const std::
 	const fs::path run = path_of(run_dir);
 	// The build's files, but its record: a game.cfg among them is the project's own, as a save is. An
 	// expansion's build holds its folder alone (a configuration is no file of an expansion:
-	// AssetKindRow::expansion_loose), which prepare_expansion_run stages.
+	// FileKindFacts::expansion_loose), which prepare_expansion_run stages.
 	std::vector<std::string> built;
 	fs::path config; // the build's own game.cfg ("" for none)
 	for (const fs::directory_entry &entry : fs::directory_iterator(system_path(build_dir), ec)) {
