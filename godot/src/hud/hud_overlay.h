@@ -48,6 +48,7 @@ class HudMapOverlays;
 class VehicleHudBlock;
 
 class HudPos;
+class PlayerHudWeaponDef;
 class ResourceRoot;
 class TerrainData;
 
@@ -117,6 +118,10 @@ public:
 			const String &p_clipgfx_texture, const Vector2i &p_clipgfx_offset,
 			const String &p_rndgfx_texture, const Vector2i &p_rndgfx_offset,
 			const Vector2i &p_rndgfx_step);
+	// set_weapon over the equipped weapon's HUD slice, its name in the
+	// player's words (gametext's WepDes, HudPos.weapon_display_name);
+	// clear_weapon for none (null).
+	void install_weapon(const Ref<PlayerHudWeaponDef> &p_weapon, const Ref<RtxtStringFile> &p_gametext);
 	void clear_weapon();
 
 	// A mission triggered-text line for the message feed, stamped at the last

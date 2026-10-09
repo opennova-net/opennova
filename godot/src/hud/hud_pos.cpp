@@ -98,6 +98,7 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("format_ammo", "clip", "reserve", "capacity"), &HudPos::format_ammo);
 	ClassDB::bind_static_method("HudPos", D_METHOD("round_icon_count", "clip", "reserve", "capacity", "divisor"), &HudPos::round_icon_count);
 	ClassDB::bind_static_method("HudPos", D_METHOD("folded_reserve", "clip", "reserve", "capacity"), &HudPos::folded_reserve);
+	ClassDB::bind_static_method("HudPos", D_METHOD("displayed_clip", "clip", "capacity"), &HudPos::displayed_clip);
 	ClassDB::bind_static_method("HudPos", D_METHOD("waypoint_distance_m", "ground_delta"), &HudPos::waypoint_distance_m);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_fill_span", "x", "w", "displayed"), &HudPos::loading_bar_fill_span);
 	ClassDB::bind_static_method("HudPos", D_METHOD("crosshair_spread_px_fp16", "spread_fp16", "fov_deg", "screen_w"), &HudPos::crosshair_spread_px_fp16);
@@ -397,6 +398,10 @@ int HudPos::round_icon_count(int p_clip, int p_reserve, int p_capacity, int p_di
 
 int HudPos::folded_reserve(int p_clip, int p_reserve, int p_capacity) {
 	return opennova::hud::folded_reserve(p_clip, p_reserve, p_capacity);
+}
+
+int HudPos::displayed_clip(int p_clip, int p_capacity) {
+	return opennova::hud::displayed_clip(p_clip, p_capacity);
 }
 
 int HudPos::waypoint_distance_m(const Vector2 &p_ground_delta) {
