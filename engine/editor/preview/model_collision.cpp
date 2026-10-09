@@ -49,9 +49,9 @@ struct SectionGeometry {
 	bool sphere = false; // a bound sphere is stored (radius 0 or more, min below max)
 	ThreediBuildVec3 center, min, max;
 	double radius = 0.0;
-	bool person = false; // a person's bone section: its hit sphere (model_section_is_person)
+	bool person = false; // a person's bone section: its hit sphere (world::model_section_is_person_sphere)
 	bool bone = false;   // a bone section of a skinned model no person wears
-	bool breaks = false; // a blast breaks it off (model_section_breaks)
+	bool breaks = false; // a blast breaks it off (world::collision_section_breaks)
 	int32_t radius_q16 = 0;
 };
 
@@ -80,7 +80,8 @@ std::shared_ptr<const Geometry> make_geometry(const threedi::Threedi3di3 &model)
 	if (c) {
 		std::vector<threedi::ThreediCollisionObjectRun> runs(c->object_count);
 		const bool linked = threedi::threedi_collision_object_runs(c, runs.data()) != 0;
-		const bool skinned = model.header.mesh_type == threedi::THREEDI_MESH_SKINNED;
+		// Skinned as the person test reads it (world::model_is_skinned at LOD 0).
+		const bool skinned = world::model_is_skinned(model, 0);
 		// The faces of each section's run, their corners in its vertex run (the loader's prefix sums).
 		out->faces.resize(c->face_count);
 		if (linked && threedi::threedi_3di3_collision_faces_runtime_safe(c)) {
@@ -130,9 +131,9 @@ std::shared_ptr<const Geometry> make_geometry(const threedi::Threedi3di3 &model)
 			g.max = ThreediBuildVec3{q16(object.max[0]), q16(object.max[1]), q16(object.max[2])};
 			g.radius_q16 = object.radius;
 			g.radius = q16(object.radius);
-			g.person = model_section_is_person(model, o);
+			g.person = world::model_section_is_person_sphere(model, o);
 			g.bone = !g.person && skinned && object.num_faces == 0 && object.num_bounding_volumes == 0;
-			g.breaks = model_section_breaks(object);
+			g.breaks = world::collision_section_breaks(uint32_t(object.unk0));
 		}
 		// The collision block's box and the sphere the game projects (world::collision_projection_sphere_
 		// from_3di, the runtime's own); the bound radius the entity takes from the header, stamped only
@@ -188,9 +189,8 @@ struct Poser {
 		float p[3] = {float(m.x), float(m.y), float(m.z)};
 		if (parts && driven && part >= 0 && size_t(part) < parts->size() && size_t(part) < driven->size() &&
 		    (*driven)[size_t(part)]) {
-			const ThreediMatrix4x4 &t = (*parts)[size_t(part)];
 			float q[3];
-			for (int c = 0; c < 3; ++c) q[c] = p[0] * t.m[c] + p[1] * t.m[4 + c] + p[2] * t.m[8 + c] + t.m[12 + c];
+			threedi::threedi_mat4_apply_point(&(*parts)[size_t(part)], p, q);
 			std::copy(q, q + 3, p);
 		}
 		return preview_from_model(p);
@@ -199,8 +199,7 @@ struct Poser {
 
 PreviewVec3 model_point(const float p[3], const ThreediMatrix4x4 *pose) {
 	float q[3] = {p[0], p[1], p[2]};
-	if (pose)
-		for (int c = 0; c < 3; ++c) q[c] = p[0] * pose->m[c] + p[1] * pose->m[4 + c] + p[2] * pose->m[8 + c] + pose->m[12 + c];
+	if (pose) threedi::threedi_mat4_apply_point(pose, p, q);
 	return preview_from_model(q);
 }
 
@@ -432,7 +431,7 @@ std::vector<ModelCollisionShape> model_collision_shapes(const assets::Model &sho
 			s.name = "Hit sphere of " + part_word(o) + (o == 14 ? " (the head)" : "");
 		} else if (section.bone) {
 			// A skinned model no person wears (a first-person view's arms): its stored sphere, which no round
-			// tests (model_section_is_person).
+			// tests (world::model_section_is_person_sphere).
 			s.rgb = section_rgb;
 			s.legend = "Bone spheres (no round tests them)";
 			s.radius = float(section.radius);
