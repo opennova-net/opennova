@@ -1206,6 +1206,11 @@ target_link_libraries(trn_admission_gate_test PRIVATE opennova_formats)
 target_include_directories(trn_admission_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME trn_admission_gate COMMAND trn_admission_gate_test)
 
+add_executable(trn_key_lines_test trn/trn_key_lines_test.cpp)
+target_link_libraries(trn_key_lines_test PRIVATE opennova_formats)
+target_include_directories(trn_key_lines_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME trn_key_lines COMMAND trn_key_lines_test)
+
 add_executable(cpt_roundtrip_test cpt/cpt_roundtrip_test.cpp)
 target_link_libraries(cpt_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(cpt_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -1,6 +1,7 @@
 #include <formats/cpt/cpt_io.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
@@ -24,8 +25,6 @@ static constexpr uint32_t DPTH_MAGIC = 0x48545044; // "DPTH"
 static constexpr uint32_t CDEP_MAGIC = 0x50454443; // "CDEP"
 static constexpr uint32_t POLY_MAGIC = 0x594C4F50; // "POLY"
 
-// The widest range a CDEP block holds: its width, that of the range plus one, fits the 4-bit field's 15.
-static constexpr int kCdepMaxRange = 32766;
 
 // The CDEP/POLY bit reader is the shared io::BitReader (engine/base/io/bit_stream.h).
 using io::BitReader;
@@ -479,6 +478,16 @@ void CptFile::write(const std::string &path) const {
 		throw std::runtime_error("Failed to create file: " + path);
 	}
 	out.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+}
+
+int cpt_steep_blocks(const std::vector<uint16_t> &raw16) {
+	int steep = 0;
+	for (size_t start = 0; start + 256 <= raw16.size(); start += 256) {
+		const auto [low, high] = std::minmax_element(raw16.begin() + static_cast<std::ptrdiff_t>(start),
+		                                             raw16.begin() + static_cast<std::ptrdiff_t>(start + 256));
+		if (int(*high) - int(*low) > kCdepMaxRange) ++steep; // a width of range + 1 holds 32,766 in 15 bits
+	}
+	return steep;
 }
 
 } // namespace opennova

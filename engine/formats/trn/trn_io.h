@@ -21,6 +21,17 @@ namespace opennova {
 bool load_trn(std::istream &input, TrnConfig &out, std::string &error);
 bool save_trn(std::ostream &output, const TrnConfig &cfg, std::string &error);
 
+// What the admission gate refuses a configuration for, in the gate's order (None: it takes it) [orig:
+// Terrain_LoadEnvironmentConfig @0x610940 tail]: an empty colormap (+256), detailmap (+512) or polydata (+3072)
+// name, then a `polytrn_sectors` row count (+5960) or a `polytrn_sectorcount` (+5956) past kTerrainGridSide or not a
+// power of two (`((n - 1) & n) != 0`, so 0 passes).
+enum class TrnRefusal : uint8_t { None, NoColormap, NoDetailmap, NoPolydata, SectorRows, SectorCount };
+
+// The gate over `config` with `sector_rows` row lines: the load passes the lines it read (every one counts, past the
+// grid's 16 too), a record whose writer writes them passes max(1, sector_rows) (save_trn writes one row where the
+// record holds none). load_trn, load_mission_trn and read_mission_trn refuse what it refuses.
+TrnRefusal trn_refusal(const TrnConfig &config, int sector_rows);
+
 // The files a mission's terrain configuration reads after its .trn (D-TERRAIN-18), each null where it is not
 // there: overcast.def (env::kOvercastFile) and the mission's <environment>.env, neither when the mission names
 // no environment [orig: Environment_LoadTimeOfDayConfig @ 0x57dc23, @ 0x57dc6a, @ 0x57dca3].
@@ -95,10 +106,21 @@ struct TrnKeyLine {
 // lines (every CR LF line counted, as load_mission_trn's TrnLaterLine counts them).
 std::vector<TrnKeyLine> read_trn_key_lines(const std::string &text, std::vector<int> *lines = nullptr);
 
+// What the terrain's parser makes of each of a later file's key lines (read_trn_key_lines), from that file alone (the
+// foliage blocks its own lines open): "" where an arm reads the line as it is written, else why not, cited (a grid row
+// adds a row after the terrain's; a block's key with no block open in the file is read only inside one the terrain
+// leaves open; a line inside a block the file opens is the block's; from a fifth block on no arm reads a line)
+// [orig: Terrain_ParseConfigCallback @ 0x60F330]. One reading per line, in order.
+std::vector<std::string> trn_key_readings(const std::vector<TrnKeyLine> &keys);
+
 // Whether a value can be written on a line for the tokenizer to read back whole: not empty, no '"' and no control
 // character (a quoted run holds any other) [orig: Terrain_TokenizeConfigLine @0x53CB60, the quote
 // @0x53CC4E..0x53CC70]. `error` says why not.
 bool trn_value_writable(const std::string &value, std::string &error);
+
+// Whether a value holds what the tokenizer ends a token or a line at outside quotes (a space, a comma, a tab, a ';',
+// "//"), so a line writes it quoted to read it back whole [orig: Terrain_TokenizeConfigLine @0x53CC16..0x53CC4C].
+bool trn_value_needs_quotes(const std::string &value);
 
 // The values from `from` on as a line writes them after its keyword: a space apart, each quoted where it holds a
 // separator (space, comma, tab) or a comment's start (';', "//"), so the tokenizer reads each back whole.
