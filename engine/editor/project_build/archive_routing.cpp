@@ -1,6 +1,6 @@
 #include <editor/project_build/archive_routing.h>
 
-#include <base/io/strutil.h>
+#include <base/vfs/vfs.h>
 #include <editor/project/expansion_files.h>
 
 namespace opennova::editor {
@@ -38,7 +38,9 @@ ExpansionPlace route_for_expansion(const AssetEntry &asset, const std::string &e
 	// and the music banks loose in the folder, the rest by kind).
 	if (const ExpansionFileRow *row = expansion_file_for(expansion, asset.logical_name))
 		if (row->placement == ExpansionPlacement::Folder) return ExpansionPlace::Folder;
-	if (strutil::iequals(asset.logical_name, "gt.ssc")) return ExpansionPlace::Folder;
+	// What the game reads from the expansion's folder by path (gt.ssc, the videos: base/vfs
+	// vfs_read_from_expansion_folder).
+	if (vfs_read_from_expansion_folder(asset.logical_name, expansion)) return ExpansionPlace::Folder;
 	return by_kind;
 }
 

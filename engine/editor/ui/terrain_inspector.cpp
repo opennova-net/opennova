@@ -5,6 +5,7 @@
 
 #include <imgui.h>
 
+#include <base/io/os_path.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/environment_document.h>
 #include <editor/documents/terrain_document.h>
@@ -36,8 +37,6 @@ void jump_line(Workspace &workspace, const ReferenceTarget &target, const std::s
 	ui_kit::tooltip(line + "\nClick to go there.");
 	ImGui::PopID();
 }
-
-std::string base_name(const std::string &path) { return path.substr(path.find_last_of('/') + 1); }
 
 // The uses, made again only when what they read moves (the graph, the files, the open documents).
 const TerrainUses &uses_of(const SessionView &view, const std::string &path) {
@@ -73,7 +72,7 @@ void row_words(const TerrainDocument &document, const NodeAddress &record) {
 }
 
 void draw_import(Workspace &workspace, const AssetScan &scan, const TerrainImport &made) {
-	ImGui::TextWrapped("Made by the import of %s.", base_name(made.source).c_str());
+	ImGui::TextWrapped("Made by the import of %s.", io::utf8_file_name(made.source).c_str());
 	note("The terrain set's images and the import's options make this terrain: the editor takes no edit of it here, "
 	     "which the next import would make again. Change an image or an option, then Reimport.");
 	if (!made.error.empty()) note(made.error);
@@ -121,12 +120,12 @@ bool draw_terrain_inspector(Workspace &workspace, const Document &document, cons
 	int id = 0;
 	for (const TerrainMissionUse &use : uses.missions) {
 		const std::string tag = std::to_string(id++);
-		const std::string title = use.title.empty() ? base_name(use.mission) : base_name(use.mission) + " (" + use.title + ")";
+		const std::string title = use.title.empty() ? io::utf8_file_name(use.mission) : io::utf8_file_name(use.mission) + " (" + use.title + ")";
 		jump_line(workspace, use.edge ? usage_target(scan, *use.edge) : file_target(scan, use.mission), title, "m" + tag);
 		ImGui::Indent();
 		if (!use.environment_file.empty())
 			jump_line(workspace, file_target(scan, use.environment_file),
-			          "Under the environment " + base_name(use.environment_file), "e" + tag);
+			          "Under the environment " + io::utf8_file_name(use.environment_file), "e" + tag);
 		else if (!use.environment.empty())
 			note("Under the environment " + use.environment + ", which the project does not have.");
 		if (!use.tile_set.empty()) note("Its tiles from the tile set " + use.tile_set + ", not the terrain's own.");
@@ -141,7 +140,7 @@ bool draw_terrain_inspector(Workspace &workspace, const Document &document, cons
 			target.locator = environment ? terrain_key_locator(line.index) : TextDocument::locator(size_t(line.line), 1);
 			if (environment) target.field = "value";
 			jump_line(workspace, target,
-			          "Its " + line.key + " " + line.value + " from " + base_name(file) + " (line " +
+			          "Its " + line.key + " " + line.value + " from " + io::utf8_file_name(file) + " (line " +
 			                  std::to_string(line.line) + "), read after this file",
 			          "k" + tag + "." + std::to_string(int(line.file)) + "." + std::to_string(line.line));
 		}

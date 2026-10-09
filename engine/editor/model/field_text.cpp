@@ -61,10 +61,9 @@ std::string shown_value(const FieldSchema &field, const std::vector<FieldChoice>
 	if (!std::holds_alternative<std::string>(value) || choice_of(choices, value)) return text;
 	if (text.empty()) return "(empty)";
 	const std::string line = text.substr(0, text.find('\n'));
-	size_t cut = 80; // a line of a tooltip, never inside a character
-	if (line.size() <= cut) return line.size() < text.size() ? line + "..." : line;
-	while (cut > 0 && (static_cast<unsigned char>(line[cut]) & 0xC0) == 0x80) --cut;
-	return line.substr(0, cut) + "...";
+	constexpr size_t kTooltipLine = 80; // a line of a tooltip, never cut inside a character
+	if (line.size() <= kTooltipLine) return line.size() < text.size() ? line + "..." : line;
+	return line.substr(0, strutil::utf8_cut(line, kTooltipLine)) + "...";
 }
 
 std::string shown_value(const FieldSchema &field, const Value &value) {

@@ -8,6 +8,7 @@
 #include <imgui.h>
 
 #include <base/io/json.h>
+#include <base/io/os_path.h>
 #include <base/io/tick_rate.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
@@ -42,10 +43,6 @@ void issue(Workspace &workspace, const EnvironmentViewport &model, const char *n
 	JsonValue options = JsonValue::make_object();
 	options.set(name, std::move(value));
 	set_viewport(workspace, model, "options", std::move(options));
-}
-
-std::string base_of(const std::string &path) {
-	return path.substr(path.find_last_of("/\\") + 1);
 }
 
 std::string day_words(int seconds) {
@@ -220,9 +217,9 @@ void EnvironmentViewportView::draw_ready(Workspace &workspace, const ViewportMod
 		const float width = ImGui::GetFontSize() * 10.0f;
 		row.next(width);
 		ImGui::SetNextItemWidth(width);
-		if (ImGui::BeginCombo("##mission", drawn ? base_of(drawn->mission).c_str() : "")) {
+		if (ImGui::BeginCombo("##mission", drawn ? io::utf8_file_name(drawn->mission).c_str() : "")) {
 			for (const EnvironmentMissionUse &use : uses.missions)
-				if (ImGui::Selectable(base_of(use.mission).c_str(), drawn && use.mission == drawn->mission)) {
+				if (ImGui::Selectable(io::utf8_file_name(use.mission).c_str(), drawn && use.mission == drawn->mission)) {
 					JsonValue change = JsonValue::make_object();
 					change.set("mission", io::json_string(use.mission));
 					set_viewport(workspace, model, "options", std::move(change));
@@ -231,7 +228,7 @@ void EnvironmentViewportView::draw_ready(Workspace &workspace, const ViewportMod
 		}
 		ui_kit::tooltip("The mission whose terrain, tiles and clock the sky is drawn with.");
 	} else if (drawn) {
-		const std::string over = "Over " + base_of(drawn->mission);
+		const std::string over = "Over " + io::utf8_file_name(drawn->mission);
 		row.next(ui_kit::text_width(over.c_str()));
 		ImGui::AlignTextToFramePadding();
 		ImGui::TextDisabled("%s", over.c_str());

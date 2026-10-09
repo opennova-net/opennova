@@ -28,11 +28,6 @@ struct ImportResult {
 std::vector<ImportChoice> list_import_choices(const std::vector<std::string> &paths,
                                              std::vector<Diagnostic> &diagnostics,
                                              std::vector<ImportChoiceFacts> *facts = nullptr);
-// A file of a mounted install or archive as its game loader is served it (S13 D9): decoded as the
-// game's text readers decode a stored file (Vfs::read_file), or, for a kind whose loader takes the
-// SCR form under a key of its own and unwraps it itself (a shader: base/vfs vfs_loader_takes_stored),
-// the bytes as stored. What an import copies into the project and what its plan reads.
-bool read_served(const Vfs &game, const std::string &name, std::vector<uint8_t> &out);
 // The kinds the game ships loose in its install root and reads from there, never through the
 // archives (ArchiveSlot::Loose; ADR 0046 S14): a music bank, a video, the country code, the
 // NovaWorld string table and its screens. What an import of the game install may take beside its

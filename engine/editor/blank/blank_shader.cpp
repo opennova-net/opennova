@@ -815,7 +815,7 @@ std::string object_text(const ObjectEffect &effect, const std::string &file) {
 
 bool shader_bytes(const std::string &text, std::vector<uint8_t> &out) {
 	// The shader loader's form, the text CR LF as every shipped effect's (formats/scr scr_shader_encode).
-	out = scr::scr_shader_encode(blank_crlf(text));
+	out = scr::scr_shader_encode(strutil::normalized_crlf_line_ends(text));
 	return true;
 }
 
@@ -845,8 +845,8 @@ bool make_blank_shader(const BlankRequest &request, std::vector<uint8_t> &out, D
 	const std::string &tag = request.value("tag");
 	const std::string name = basename_of(request.logical_name);
 	if (strutil::iequals(name, renderer::kFixedFunctionShaderFile)) return make_blank_ffp_shader(request, out, error);
-	// The archive walk skips a name starting with '_' [orig: HLSLEffect_LoadAllFromPFFArchive @ 0x5AFF6E].
-	if (!name.empty() && name[0] == '_') {
+	// The archive walk skips an include, a name starting with '_' (renderer::shader_file_is_include).
+	if (renderer::shader_file_is_include(name)) {
 		error = make_finding(CoreFinding::BlankShader, DiagnosticSeverity::Error,
 				"The game loads no effect whose file name starts with '_' (but _ffp.fx, by its name): name it "
 				"otherwise.", request.logical_name);
