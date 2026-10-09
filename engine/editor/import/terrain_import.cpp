@@ -6,8 +6,6 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <cstdio>
-#include <cstring>
 #include <optional>
 #include <sstream>
 #include <utility>
@@ -17,13 +15,14 @@
 #include <editor/project/project_files.h>
 #include <formats/cpt/cpt.h>
 #include <formats/cpt/cpt_io.h>
+#include <formats/cpt/trngen/heightmap_depth.h>
 #include <formats/cpt/trngen/terrain_bake.h>
+#include <formats/env/env.h>
 #include <formats/pcx/pcx_io.h>
-#include <formats/png/png_decode.h>
 #include <formats/tga/tga.h>
 #include <formats/til/til_io.h>
-#include <formats/trn/charmap_legend.h>
 #include <formats/trn/trn_io.h>
+#include <runtime/terrain/terrain_map_source.h>
 
 namespace opennova::editor {
 
@@ -31,9 +30,7 @@ namespace {
 
 constexpr int kSide = trngen::kDepthSide; // 1024: the colour map's and the heightmap's side
 constexpr int kDetailSide = 512;          // a made detail's side (the shipped Det_*.tga's)
-constexpr int kSurfaceSideMin = 256;      // a surface map's least side (JO ships 512)
 constexpr uint8_t kNeutralGrey = 128;     // the detail's modulate x2 leaves a colour as it is at 128
-constexpr double kTrnGenTop = 127.5;      // an 8-bit map's white after TrnGen's smoothing: 32 x 4 x 255 / 256
 
 const char *const kSetKeys[] = {"heightmap", "colormap", "detail", "tiles", "surface", "foliagemap"};
 constexpr size_t kSetKeyCount = sizeof(kSetKeys) / sizeof(kSetKeys[0]);
@@ -166,7 +163,7 @@ TrnConfig make_trn(const std::string &stem, const TerrainImportSettings &setting
 	if (foliage) trn.foliagemap = stem + "_f.pcx";
 	// The .trn's water_height is half world units [orig: TimeOfDay_ParseProperty @ 0x57CB48..0x57CB6A,
 	// atol << 15 into 16.16]; 0 draws no water [orig: render_water_surface @ 0x5C32E0..0x5C32E7].
-	trn.water_height = static_cast<int>(std::lround(settings.water * 2.0));
+	trn.water_height = static_cast<int>(std::lround(settings.water / env::kWaterHeightUnit));
 	// An 8 x 8 grid of 512-unit sectors from (-4, -4), as the shipped maps lay theirs out: `island` the
 	// four quadrants of the 1024 atlas in the middle, the world's origin at the heightmap's centre and
 	// every other sector the flat ground at height 0 (Dvxi5.trn's grid); `tiled` the four repeated over
@@ -286,21 +283,8 @@ std::vector<uint8_t> write_terrain_set(const TerrainSet &set) {
 	static_assert(sizeof(values) / sizeof(values[0]) == kSetKeyCount, "a value per set key");
 	for (size_t i = 0; i < kSetKeyCount; ++i)
 		if (!values[i]->empty()) text += std::string(kSetKeys[i]) + " " + *values[i] + "\r\n";
-	// Each definition as the .trn writes its block.
-	for (const FoliageDef &def : set.foliage) {
-		text += "foliage\r\n  graphic " + def.graphic + "\r\n  match";
-		for (const int code : def.match)
-			if (code >= 0) text += " " + std::to_string(code);
-		text += "\r\n  color_lower " + std::to_string(def.color_lower) + "\r\n  color_upper " +
-		        std::to_string(def.color_upper) + "\r\n";
-		if (def.attrib_flags & FOLIAGE_ATTRIB_KNOWN_MASK) {
-			text += "  attrib";
-			if (def.attrib_flags & FOLIAGE_ATTRIB_FORCE_ON) text += " forceon";
-			if (def.attrib_flags & FOLIAGE_ATTRIB_SHADOW) text += " shadow";
-			text += "\r\n";
-		}
-		text += "end\r\n";
-	}
+	// Each definition as the .trn writes its block (formats/trn trn_foliage_block_text).
+	for (const FoliageDef &def : set.foliage) text += trn_foliage_block_text(def);
 	return text_bytes(text);
 }
 
@@ -436,60 +420,6 @@ std::vector<std::string> terrain_output_names(const std::string &stem, bool tile
 	return names;
 }
 
-bool decode_terrain_heightmap(const std::string &name, const std::vector<uint8_t> &bytes, double top,
-                              TerrainHeights &out, std::string &why) {
-	out = TerrainHeights();
-	const size_t texels = size_t(kSide) * kSide;
-	const auto scaled16 = [&](const std::vector<uint16_t> &raw16) {
-		// A raw16 height scaled by top / 127.5, rounded, kept within the format's 16 bits.
-		const double scale = top / kTrnGenTop;
-		out.depth16.resize(raw16.size());
-		for (size_t i = 0; i < raw16.size(); ++i)
-			out.depth16[i] = static_cast<uint16_t>(std::min(65535.0, std::floor(raw16[i] * scale + 0.5)));
-	};
-	const auto from8 = [&](std::vector<uint8_t> depth8) {
-		// TrnGen's input as it is at its own scale; else smoothed as TrnGen smooths it, then scaled.
-		if (top == kTrnGenTop) out.depth8 = std::move(depth8);
-		else scaled16(trngen::smooth_depthmap(depth8));
-	};
-	if (strutil::ends_with_icase(name, ".raw")) {
-		if (bytes.size() == texels) {
-			from8(bytes);
-			return true;
-		}
-		if (bytes.size() == texels * 2) {
-			out.depth16.resize(texels);
-			for (size_t i = 0; i < texels; ++i) out.depth16[i] = static_cast<uint16_t>(bytes[i * 2] | (bytes[i * 2 + 1] << 8));
-			return true;
-		}
-		why = name + " is " + std::to_string(bytes.size()) + " bytes: a .raw heightmap is 1024 x 1024 texels, 1 MiB of 8-bit "
-		      "heights or 2 MiB of 16-bit";
-		return false;
-	}
-	png::GrayImage grey;
-	if (!png::decode_png_gray(bytes, grey, why)) {
-		why = name + ": " + why + " (a heightmap is a PNG or a .raw)";
-		return false;
-	}
-	if (grey.width != kSide || grey.height != kSide) {
-		why = name + " is " + std::to_string(grey.width) + " x " + std::to_string(grey.height) +
-		      ": a heightmap is 1024 x 1024 texels, one a world unit";
-		return false;
-	}
-	if (grey.max_value == 255) {
-		std::vector<uint8_t> depth8(grey.samples.size());
-		for (size_t i = 0; i < depth8.size(); ++i) depth8[i] = static_cast<uint8_t>(grey.samples[i]);
-		from8(std::move(depth8));
-		return true;
-	}
-	// 16 bits: 0 to 65535 over 0 to top world units, 256 raw a unit.
-	out.depth16.resize(texels);
-	const double scale = top * 256.0 / 65535.0;
-	for (size_t i = 0; i < texels; ++i)
-		out.depth16[i] = static_cast<uint16_t>(std::min(65535.0, std::floor(grey.samples[i] * scale + 0.5)));
-	return true;
-}
-
 bool decode_terrain_image(const std::string &key, const std::string &name, const std::vector<uint8_t> &bytes,
                           RgbaImage &out, std::string &why) {
 	renderer::ImageSource source;
@@ -512,128 +442,6 @@ bool decode_terrain_image(const std::string &key, const std::string &name, const
 		return false;
 	}
 	out = std::move(source.image);
-	return true;
-}
-
-bool decode_terrain_surface(const std::string &name, const std::vector<uint8_t> &bytes, IndexedImage8 &out,
-                            std::string &why) {
-	out = IndexedImage8();
-	// The texels as an image program shows them, an indexed image's indices beside its colours.
-	RgbaImage colours;
-	IndexedImage8 indices;
-	if (strutil::ends_with_icase(name, ".png")) {
-		if (!png::decode_png(bytes, colours, why, &indices)) {
-			why = name + ": " + why;
-			return false;
-		}
-	} else {
-		renderer::ImageSource source;
-		if (!renderer::decode_image_source(name, bytes, source, why)) {
-			why = name + ": " + why;
-			return false;
-		}
-		colours = std::move(source.image);
-		if (source.indexed) indices = std::move(source.indices);
-	}
-	// The game keeps the side alone, the rows' length and the power of two it samples the 1024-unit
-	// heightmap by, so the map is square and a power of two no wider than the heightmap [orig: sub_605A10 @
-	// 0x605A82..0x605AA0; Terrain_GetSurfaceTypeAtPosition @ 0x6065C6].
-	const int w = colours.width, h = colours.height;
-	if (w != h || !power_of_two(w) || w < kSurfaceSideMin || w > kSide) {
-		why = name + " is " + std::to_string(w) + " x " + std::to_string(h) +
-		      ": a surface map is square, 256, 512 or 1024 texels a side, laid over the heightmap";
-		return false;
-	}
-	const bool indexed = !indices.empty();
-	const size_t texels = size_t(w) * size_t(h);
-	out.width = w;
-	out.height = h;
-	out.indices.assign(texels, 0);
-	// The legend its palette, every entry past it white as the shipped legend leaves its own.
-	for (int i = 0; i < 256; ++i) {
-		const CharmapLegendColour &c = i < kCharmapLegendCount ? kCharmapLegend[i] : kCharmapLegendRest;
-		out.palette[i][0] = c.r;
-		out.palette[i][1] = c.g;
-		out.palette[i][2] = c.b;
-	}
-	size_t strays = 0, first = 0;
-	for (size_t i = 0; i < texels; ++i) {
-		const uint8_t *p = &colours.pixels[i * 4];
-		const int surface = indexed ? int(indices.indices[i]) : charmap_legend_class(p[0], p[1], p[2]);
-		if (surface < 0 || surface >= kCharmapLegendCount) {
-			if (strays++ == 0) first = i;
-			continue;
-		}
-		out.indices[i] = uint8_t(surface);
-	}
-	if (strays == 0) return true;
-	const std::string at = "(" + std::to_string(first % size_t(w)) + ", " + std::to_string(first / size_t(w)) + ")";
-	const std::string more = strays > 1 ? " (" + std::to_string(strays) + " texels in all)" : std::string();
-	if (indexed) {
-		why = name + "'s texel " + at + " holds index " + std::to_string(indices.indices[first]) + more +
-		      ": an indexed surface map's indices are the surface classes, 0 to 19";
-	} else {
-		const uint8_t *p = &colours.pixels[first * 4];
-		char colour[8];
-		std::snprintf(colour, sizeof(colour), "#%02X%02X%02X", p[0], p[1], p[2]);
-		why = name + "'s texel " + at + " is " + colour + more +
-		      ", the colour of no surface class: a colour surface map paints each class in its legend colour exactly";
-	}
-	out = IndexedImage8();
-	return false;
-}
-
-bool decode_terrain_foliage(const std::string &name, const std::vector<uint8_t> &bytes, IndexedImage8 &out,
-                            std::string &why) {
-	out = IndexedImage8();
-	RgbaImage colours;
-	IndexedImage8 indices;
-	if (strutil::ends_with_icase(name, ".png")) {
-		if (!png::decode_png(bytes, colours, why, &indices)) {
-			why = name + ": " + why;
-			return false;
-		}
-	} else {
-		renderer::ImageSource source;
-		if (!renderer::decode_image_source(name, bytes, source, why)) {
-			why = name + ": " + why;
-			return false;
-		}
-		colours = std::move(source.image);
-		if (source.indexed) indices = std::move(source.indices);
-	}
-	// The game keeps the width alone, the rows' length and the power of two it shifts the atlas position by
-	// [orig: Foliage_LoadFoliageMapPCX @ 0x605B44..0x605B60; Foliage_SampleFoliageMapMask @ 0x60662D]: a
-	// map shorter than that is read past its last row, one wider than 1024 at its first texel alone.
-	const int w = colours.width, h = colours.height;
-	if (w != h || !power_of_two(w) || w > kSide) {
-		why = name + " is " + std::to_string(w) + " x " + std::to_string(h) +
-		      ": a foliage map is square, a power of two at most 1024 texels a side, laid over the heightmap";
-		return false;
-	}
-	const size_t texels = size_t(w) * size_t(h);
-	out.width = w;
-	out.height = h;
-	if (!indices.empty()) {
-		out.indices = std::move(indices.indices);
-		std::memcpy(out.palette, indices.palette, sizeof(out.palette));
-		return true;
-	}
-	// A grey image: its levels the codes, a grey ramp the palette.
-	out.indices.assign(texels, 0);
-	for (size_t i = 0; i < texels; ++i) {
-		const uint8_t *p = &colours.pixels[i * 4];
-		if (p[0] != p[1] || p[1] != p[2]) {
-			char colour[8];
-			std::snprintf(colour, sizeof(colour), "#%02X%02X%02X", p[0], p[1], p[2]);
-			why = name + "'s texel (" + std::to_string(i % size_t(w)) + ", " + std::to_string(i / size_t(w)) + ") is " +
-			      colour + ": a foliage map's texels are codes, an indexed image's indices or a grey image's levels";
-			out = IndexedImage8();
-			return false;
-		}
-		out.indices[i] = p[0];
-	}
-	for (int i = 0; i < 256; ++i) out.palette[i][0] = out.palette[i][1] = out.palette[i][2] = uint8_t(i);
 	return true;
 }
 
@@ -681,8 +489,8 @@ bool run_terrain_import(ImportContext &context, ImportProduct &out) {
 	// Every image read through the context: each an input, a change to it importing the terrain again.
 	std::vector<uint8_t> bytes;
 	if (!context.read(set.heightmap, bytes)) return false;
-	TerrainHeights heights;
-	if (!decode_terrain_heightmap(set.heightmap, bytes, settings.top, heights, why)) return refuse(why + ".");
+	trngen::HeightmapDepth heights;
+	if (!trngen::decode_heightmap_depth(set.heightmap, bytes, settings.top, heights, why)) return refuse(why + ".");
 
 	RgbaImage colour;
 	if (!context.read(set.colormap, bytes)) return false;
@@ -703,13 +511,13 @@ bool run_terrain_import(ImportContext &context, ImportProduct &out) {
 	IndexedImage8 surface;
 	if (!set.surface.empty()) {
 		if (!context.read(set.surface, bytes)) return false;
-		if (!decode_terrain_surface(set.surface, bytes, surface, why)) return refuse(why + ".");
+		if (!terrain::decode_charmap_source(set.surface, bytes, surface, why)) return refuse(why + ".");
 	}
 
 	IndexedImage8 foliage;
 	if (!set.foliagemap.empty()) {
 		if (!context.read(set.foliagemap, bytes)) return false;
-		if (!decode_terrain_foliage(set.foliagemap, bytes, foliage, why)) return refuse(why + ".");
+		if (!terrain::decode_foliage_map_source(set.foliagemap, bytes, foliage, why)) return refuse(why + ".");
 	}
 	// What the foliage map grows by the definitions, as the game remaps it at load [orig:
 	// Foliage_LoadFoliageMapPCX @ 0x605B73..0x605B8A; Foliage_RemapPixelToDefMask @ 0x5FF4E0].
