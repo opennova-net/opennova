@@ -3,6 +3,10 @@
 #include <iterator>
 #include <utility>
 
+#include <formats/pcx/pcx_io.h>
+#include <formats/tga/tga_read.h>
+#include <runtime/renderer/device_texture.h>
+
 namespace opennova::editor {
 
 namespace {
@@ -11,6 +15,29 @@ using io::JsonValue;
 using io::json_number;
 using io::json_string;
 using F = TextureFinding;
+
+// The TGA header fields a file's header holds, as the reader's rules read them.
+tga::TgaHeader tga_fields(const TextureHeader &header) {
+	tga::TgaHeader out;
+	out.image_type = header.tga_type;
+	out.bits = header.tga_bits;
+	out.descriptor = header.tga_descriptor;
+	out.colour_map_type = header.tga_map_type;
+	out.map_length = header.tga_map_length;
+	out.map_entry_bits = header.tga_map_entry_bits;
+	return out;
+}
+
+// The PCX header fields a file's header holds.
+PcxHeader pcx_fields(const TextureHeader &header) {
+	PcxHeader out;
+	out.bits = header.pcx_bits;
+	out.width = int(header.width);
+	out.height = int(header.height);
+	out.planes = header.pcx_planes;
+	out.bytes_per_line = header.pcx_bytes_per_line;
+	return out;
+}
 
 constexpr FindingCodeRow code(const char *token, FindingFix fixes = FindingFix::None) {
 	FindingCodeRow row;
@@ -156,19 +183,16 @@ std::vector<Diagnostic> validate_texture_file(const DocumentBase &document) {
 	}
 	switch (header.reader) {
 	case TextureReader::Tga: {
-		// What the game's TGA reader makes of each image type [orig: CTerrainTileData_LoadTGAFromArchive @
-		// 0x56E570, the switch @ 0x56E6C2], whose decode the menus' reader repeats [orig: CUIImage_LoadTGA @
-		// 0x6647D0].
+		// What the game's TGA reader makes of each image type (tga::tga_retail_form, its witnesses).
 		const uint8_t type = header.tga_type, bits = header.tga_bits;
 		const std::string form = "image type " + std::to_string(type) + " at " + std::to_string(bits) + " bits";
-		const bool known = type == 1 || type == 2 || type == 3 || type == 9 || type == 10 || type == 11;
-		if (!known || (type == 3 && bits != 8)) {
+		const tga::TgaRetailForm read = tga::tga_retail_form(tga_fields(header));
+		if (read == tga::TgaRetailForm::Unset) {
 			add(F::TgaUnfilled, DiagnosticSeverity::Error,
 			    "The game's TGA reader has no case for " + form +
 			            ": it leaves the texels as the buffer held them, so the game draws whatever memory held. Save "
 			            "it as a 24- or 32-bit true-colour TGA.");
-		} else if (type == 9 || type == 11 || ((type == 2 || type == 10) && bits != 24 && bits != 32) ||
-		           (type == 1 && header.tga_map_entry_bits != 24)) {
+		} else if (read == tga::TgaRetailForm::Zeroed) {
 			add(F::TgaZeroed, DiagnosticSeverity::Warning,
 			    "The game's TGA reader zeroes " +
 			            (type == 1 ? "a colour-mapped TGA whose map is not of 24-bit entries" : form) +
@@ -180,14 +204,14 @@ std::vector<Diagnostic> validate_texture_file(const DocumentBase &document) {
 			add(F::TgaUpsideDown, DiagnosticSeverity::Warning,
 			    "Its rows are stored top first (its header's origin bit), but the game's TGA reader takes every file "
 			    "bottom up: the game draws it upside down. Save it with the bottom row first.");
-		// The texels read from byte 18 plus the ID's length whatever the colour map holds [orig: @ 0x56E6BA].
-		if ((type == 2 || type == 3 || type == 10) && header.tga_map_type != 0 && header.tga_map_length > 0)
+		// The texels read from byte 18 plus the ID's length whatever the colour map holds
+		// (tga::tga_colour_map_misread).
+		if (tga::tga_colour_map_misread(tga_fields(header)))
 			add(F::TgaColourMapSkipped, DiagnosticSeverity::Warning,
 			    "It carries a colour map of " + std::to_string(header.tga_map_length) +
 			            " entries, which the game's TGA reader does not skip: it reads the texels from the map's start, "
 			            "shifted. Save it without a colour map.");
-		// The reader copies every texel its header names with no bound on the file [orig: the 32-bit copy @
-		// 0x56E796..0x56E7A5, the 24-bit expansion @ 0x56E74F, the run-length decode @ 0x56E7FB, @ 0x56E8B6].
+		// The reader copies every texel its header names with no bound on the file (tga::tga_reads_past_end).
 		if (header.tga_short)
 			add(F::TgaTruncated, DiagnosticSeverity::Error,
 			    std::string("It ends before its texels do: the game's TGA reader ") +
@@ -199,13 +223,12 @@ std::vector<Diagnostic> validate_texture_file(const DocumentBase &document) {
 	case TextureReader::Pcx:
 		// The game's PCX reader takes 8 bits a plane alone (any other depth fails the load), reads three
 		// planes as 24-bit colour and any other count as 8-bit indices, and writes each decoded row of an
-		// indexed image's bytes-a-line into a buffer of the image's width [orig: Texture_LoadPCXFromPFF32 @
-		// 0x56EA30, the depth test @ 0x56EABC, the 24-bit path @ 0x56EB31, the rows @ 0x56ED70..0x56EDFC].
+		// indexed image's bytes-a-line into a buffer of the image's width (pcx_row_fit, its witnesses).
 		if (header.pcx_bits != 8) {
 			add(F::Unloadable, DiagnosticSeverity::Warning,
 			    "The game cannot load it: its PCX reader takes 8 bits a plane alone (this one is " +
 			            std::to_string(header.pcx_bits) + " bits a plane).");
-		} else if (header.pcx_planes != 3 && header.pcx_bytes_per_line > header.width) {
+		} else if (pcx_row_fit(pcx_fields(header)) == PcxRowFit::Overrun) {
 			const uint32_t extra = header.pcx_bytes_per_line - header.width;
 			add(F::PcxOverrun, DiagnosticSeverity::Error,
 			    "Its rows hold " + std::to_string(header.pcx_bytes_per_line) + " bytes for " + std::to_string(header.width) +
@@ -213,7 +236,7 @@ std::vector<Diagnostic> validate_texture_file(const DocumentBase &document) {
 			            (extra == 1 ? " extra byte" : " extra bytes") +
 			            " into the next row and the last row's past its buffer. Save it with rows of exactly its width (its "
 			            "bytes a line " + std::to_string(header.width) + ").");
-		} else if (header.pcx_planes != 3 && header.pcx_bytes_per_line < header.width) {
+		} else if (pcx_row_fit(pcx_fields(header)) == PcxRowFit::Short) {
 			add(F::PcxShortRows, DiagnosticSeverity::Warning,
 			    "Its rows hold " + std::to_string(header.pcx_bytes_per_line) + " bytes for " + std::to_string(header.width) +
 			            " texels: the game's PCX reader writes " + std::to_string(header.pcx_bytes_per_line) +
@@ -222,17 +245,11 @@ std::vector<Diagnostic> validate_texture_file(const DocumentBase &document) {
 		}
 		break;
 	case TextureReader::Dds: {
-		// The DDS reader asks D3DX for a texture of D3DX_DEFAULT sides [orig: GTexture_InitFromMemory @
-		// 0x68830E..0x688310], which rounds each of the image's up to a power of two
-		// [orig: D3DXCreateTextureFromFileInMemoryEx_Internal @ 0x6914D9..0x6914EE, @ 0x69150B..0x691520] and,
-		// under Filter NONE, copies the image to its top-left corner, transparent black past it [orig:
-		// CBlt::BltNone @ 0x6E0D57] (render-material-re D-RMAT-18).
-		const auto next = [](uint32_t side) {
-			uint32_t out = 1;
-			while (out < side && out < 0x80000000u) out <<= 1;
-			return out;
-		};
-		const uint32_t width = next(header.width), height = next(header.height);
+		// The DDS reader's texture is made at D3DX_DEFAULT sides, each the image's rounded up to a power of
+		// two, the image in its top-left corner, transparent black past it (renderer::d3dx_default_texture_side,
+		// its witnesses; render-material-re D-RMAT-18).
+		const uint32_t width = renderer::d3dx_default_texture_side(header.width);
+		const uint32_t height = renderer::d3dx_default_texture_side(header.height);
 		if (width != header.width || height != header.height)
 			add(F::DdsNotPowerOfTwo, DiagnosticSeverity::Warning,
 			    "Its sides, " + std::to_string(header.width) + " x " + std::to_string(header.height) +
