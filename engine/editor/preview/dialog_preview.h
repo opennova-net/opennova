@@ -35,10 +35,10 @@ struct DialogSources {
 	bool text_read = false;
 };
 // Reads the dialog bank `bank_name` and what the game opens with it: its sounds, the .lwf of its own name and
-// else the .pwf [orig: DialogManager_LoadFromFile @ 0x44e7d4..0x44e807], and the mission's text `text_name` and
-// else medmssn.bin [orig: TextResource_LoadMissionTextBin @ 0x51ed90]. False, with `error`, where the bank
-// does not read.
-bool read_dialog_sources(const FileSource &files, const std::string &bank_name, const std::string &text_name,
+// else the .pwf [orig: DialogManager_LoadFromFile @ 0x44e7d4..0x44e807], and the text of the mission whose base
+// name is `mission_base` ("" none), <base>.bin and else medmssn.bin (mission::resolve_mission_text) [orig:
+// TextResource_LoadMissionTextBin @ 0x51ed90]. False, with `error`, where the bank does not read.
+bool read_dialog_sources(const FileSource &files, const std::string &bank_name, const std::string &mission_base,
                          DialogSources &out, std::string &error);
 
 // One line of a dialog as it plays: its index, the wave it names, the file the bank's sounds give that wave

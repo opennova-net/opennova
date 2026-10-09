@@ -5,6 +5,7 @@
 #include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
 #include <editor/project/expansion_files.h>
+#include <runtime/mission/mission_catalog.h>
 #include <runtime/mission/mission_sidecars.h>
 
 namespace opennova::editor {
@@ -88,10 +89,9 @@ std::string expansion_name_mission_problem(std::string_view name, const std::vec
 	if (name.empty()) return std::string();
 	const std::vector<ExpansionFile> formed = expansion_files(std::string(name));
 	for (const std::string &file : files) {
-		// The mission list's files [orig: Mission_BuildMapListFromPFF @ 0x562910: .bms, .npj and .npz].
-		if (!strutil::ends_with_icase(file, ".bms") && !strutil::ends_with_icase(file, ".npj") &&
-		    !strutil::ends_with_icase(file, ".npz"))
-			continue;
+		// The mission list's files (mission_catalog::lists_as_mission: .bms, .npj and .npz from the first dot)
+		// [orig: Mission_BuildMapListFromPFF @ 0x562910].
+		if (!mission_catalog::lists_as_mission(file)) continue;
 		for (const mission::Sidecar &sidecar : mission::sidecars()) {
 			const std::string by_mission = mission::sidecar_name(file, sidecar);
 			const std::string alternate = mission::sidecar_alternate_name(file, sidecar);
