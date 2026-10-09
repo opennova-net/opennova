@@ -61,7 +61,7 @@ bool trash_paths(const ProjectPaths &paths, const std::vector<std::string> &rela
 	// Each path moved in turn; one that does not go puts the ones before it back.
 	for (const std::string &path : relative) {
 		const fs::path to = on_disk(dir, path);
-		if (ensure_directory(utf8_of(to.parent_path()), error) && rename_with_retry(on_disk(paths.root, path), to, ec)) {
+		if (io::ensure_directory(utf8_of(to.parent_path()), error) && io::rename_with_retry(on_disk(paths.root, path), to, ec)) {
 			batch.paths.push_back(path);
 			continue;
 		}
@@ -69,7 +69,7 @@ bool trash_paths(const ProjectPaths &paths, const std::vector<std::string> &rela
 		else error = path + " could not go to the trash: " + error;
 		for (const std::string &moved : batch.paths) {
 			std::error_code back;
-			if (rename_with_retry(on_disk(dir, moved), on_disk(paths.root, moved), back))
+			if (io::rename_with_retry(on_disk(dir, moved), on_disk(paths.root, moved), back))
 				remove_empty_up(on_disk(dir, moved), system_path(dir));
 		}
 		batch = TrashBatch();
@@ -94,7 +94,7 @@ bool restore_trash(const ProjectPaths &paths, const TrashBatch &batch, std::stri
 	std::vector<std::string> restored;
 	for (const std::string &path : batch.paths) {
 		const fs::path to = on_disk(paths.root, path);
-		if (ensure_directory(utf8_of(to.parent_path()), error) && rename_with_retry(on_disk(dir, path), to, ec)) {
+		if (io::ensure_directory(utf8_of(to.parent_path()), error) && io::rename_with_retry(on_disk(dir, path), to, ec)) {
 			restored.push_back(path);
 			continue;
 		}
@@ -102,7 +102,7 @@ bool restore_trash(const ProjectPaths &paths, const TrashBatch &batch, std::stri
 		else error = path + " could not come back from the trash: " + error;
 		for (const std::string &back : restored) {
 			std::error_code ignored;
-			rename_with_retry(on_disk(paths.root, back), on_disk(dir, back), ignored);
+			io::rename_with_retry(on_disk(paths.root, back), on_disk(dir, back), ignored);
 		}
 		return false;
 	}

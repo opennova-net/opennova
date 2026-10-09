@@ -97,7 +97,7 @@ private:
 		Ref<ObjectData> arms;
 		Ref<SkeletalAnim> arms_skeletal;
 		std::array<int, 3> arms_camo{};
-		std::shared_ptr<const opennova::editor::StampedFiles> files;
+		std::shared_ptr<const opennova::StampedFiles> files;
 		Ref<SkeletalAnim> skeletal;
 		int bone_count = 0;
 		uint64_t skeleton_serial = UINT64_MAX;
@@ -144,7 +144,7 @@ private:
 	Ref<PanmClock> clock_;
 	int64_t frame_ = 0;
 	// The files the built scene read (its textures), noted as they are read.
-	std::shared_ptr<const opennova::editor::StampedFiles> files_;
+	std::shared_ptr<const opennova::StampedFiles> files_;
 	std::map<std::string, int64_t> applied_ctrl_; // the registers the model holds now
 	uint32_t applied_hidden_ = 0; // the destroyed-section mask the model holds now
 	int applied_lod_ = -1;
