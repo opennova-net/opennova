@@ -197,19 +197,7 @@ TextureShownUse texture_shown_use(const TextureUse &use, int index) {
 std::vector<TextureLevel> texture_game_chain(const TextureLevel &first, uint32_t levels) {
 	std::vector<TextureLevel> out{first};
 	if (first.width == 0 || first.height == 0 || first.rgba.size() != size_t(first.width) * first.height * 4) return out;
-	const uint32_t count = levels ? levels : renderer::full_chain_levels(first.width, first.height);
-	std::vector<renderer::DxtColor> colours = renderer::decode_rgba8(first.rgba.data(), first.width, first.height);
-	uint32_t w = first.width, h = first.height;
-	while (out.size() < count && (w > 1 || h > 1)) {
-		colours = renderer::box_filter_half(colours, w, h);
-		w = std::max(1u, w / 2);
-		h = std::max(1u, h / 2);
-		TextureLevel level;
-		level.width = w;
-		level.height = h;
-		level.rgba = renderer::encode_rgba8(colours);
-		out.push_back(std::move(level));
-	}
+	renderer::extend_box_chain(out, levels);
 	return out;
 }
 

@@ -5,7 +5,6 @@
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <runtime/audio/bank_chain.h>
-#include <runtime/menu/menu_sound.h>
 
 namespace opennova::editor {
 
@@ -32,7 +31,7 @@ std::vector<const PreviewBank *> chain_banks(const std::vector<PreviewBank> &ban
 
 PreviewPlay plan_set_play(const std::vector<PreviewBank> &banks, const std::string &expansion, const std::string &set,
                           const std::string &only, audio::SoundSelector &selector, uint8_t view_flags,
-                          const audio::SetHearing *heard, int menu_master) {
+                          const audio::SetHearing *heard) {
 	PreviewPlay play;
 	play.set = set;
 	if (set.empty()) {
@@ -86,16 +85,12 @@ PreviewPlay plan_set_play(const std::vector<PreviewBank> &banks, const std::stri
 	std::string words;
 	for (const audio::SetFireVoice &fired : plan.voices) {
 		const audio::OneshotVoice &voice = fired.voice;
-		const lwf::Sndparm &member = bank->file.sndparms[voice.sndparm];
 		PreviewVoice out;
 		out.layer = voice.layer;
 		out.wave = fired.wave;
 		out.file = io::utf8_file_name(fired.path);
 		out.pitch_q16 = voice.pitch_q16;
 		out.volume = voice.vol255;
-		if (menu_master >= 0)
-			out.volume = menu::menu_channel_volume(menu_master, int(member.volume), int(member.clamp_volume),
-			                                       int(bank->file.playlists[voice.playlist].falloff_radius));
 		words += (words.empty() ? "" : "; ") + (out.file.empty() ? out.wave + " (no file)" : out.file) + " at pitch " +
 		         pitch_words(out.pitch_q16) + ", volume " + std::to_string(out.volume);
 		play.voices.push_back(std::move(out));

@@ -30,6 +30,7 @@
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 #include <runtime/audio/ambient_channel_pool.h>
+#include <runtime/audio/dialog_queue.h>
 
 #include "common/file_io.h"
 #include "common/test_expect.h"
@@ -482,11 +483,14 @@ static int test_the_wire_and_the_overlay() {
 	return 0;
 }
 
-// The mission's dialogs heard as the game plays them (DI-32): the pre-mission event's Play dialog 1 queues its two lines
-// at the start, the second once the first has ended and after its half second; the second event's dialog 2, fired on
-// the first event pass, waits behind dialog 1 on the one dialog channel [orig: Dialog_UpdatePlayback @ 0x44e470]; each
-// line reaches the Shell's clip voices on its tick at its wave's dialog volume (210, the Listen's half of it here), the
-// body's `dialog` says the bank and its sounds; a seek back empties the channel and the start queues dialog 1 again.
+// The mission's dialogs heard as the game plays them (DI-32), on the game's own queue (audio::DialogQueue): the
+// pre-mission event's Play dialog 1 registers its two lines at the start and loads the first at once; the second
+// event's dialog 2, fired on the first event pass, takes the next slot and loads its line at once, the channel free;
+// dialog 1's second line loads once its first has held (audio::dialog_clip_hold), the channel is free of dialog 2's
+// voice and its half second has run, so the dialogs interleave in slot order [orig: Dialog_UpdatePlayback
+// @ 0x44e470]; each line reaches the Shell's clip voices on its tick at its wave's dialog volume (210, the Listen's
+// half of it here), the body's `dialog` says the bank, its sounds and the queue's slots; a seek back empties the
+// channel and the start registers dialog 1 again.
 static int test_the_dialogs() {
 	Rig rig;
 	TEST_EXPECT(rig.open(true, true));
@@ -504,7 +508,17 @@ static int test_the_dialogs() {
 		if (fired.voices[0].wave == "D1B") d1b = fired.tick;
 		if (fired.voices[0].wave == "D2A") d2a = fired.tick;
 	}
-	TEST_EXPECT(d1a == 0 && d1b >= d1a + 31 && d2a >= d1b);
+	// The tone: 8320 samples at 22050 Hz, 0.377 s, its voice over on the 24th tick after it loads; it holds its dialog
+	// 2 * ((62 * 8320 + 22050) / 22050) = 48 ticks, counted from the tick after it loads. D1A on tick 0, its voice over
+	// by 24; D2A on the first event pass, tick 32, its voice over on 56; D1A's hold runs out on tick 49 (its countdown
+	// starting on 1), the channel is D2A's until 56, where D1B's 62 * 5 / 10 = 31-tick delay is set, run out on 87:
+	// D1B on tick 88 (not after D1A's length and its half second, with dialog 2 behind it).
+	audio::DialogClip tone;
+	tone.loaded = true;
+	tone.samples = 8320;
+	tone.pitch_q16 = 32768;
+	TEST_EXPECT(audio::dialog_clip_hold(tone) == 48);
+	TEST_EXPECT(d1a == 0 && d2a == 32 && d1b == 88);
 	bool handed = false;
 	for (const ClipSoundPlay &play : rig.session.clip_sounds_since(0))
 		for (const WorkspaceView::Voice &voice : play.voices) handed = handed || voice.path == "sounds/d1b.wav";
@@ -514,7 +528,7 @@ static int test_the_dialogs() {
 	const JsonValue *heard = body ? body->get("listen") : nullptr;
 	const JsonValue *dialog = heard ? heard->get("dialog") : nullptr;
 	TEST_EXPECT(dialog && dialog->get_string("bank", "") == "listen.dbf" && dialog->get_bool("bank_found", false) &&
-			dialog->get_string("sounds", "") == "listen.lwf");
+			dialog->get_string("sounds", "") == "listen.lwf" && dialog->get("slots") && dialog->get("slots")->is_array());
 	// Back to the start: the channel empties, and the start's dialog 1 is heard again.
 	TEST_EXPECT(rig.set(R"({"clock": {"ticks": 0, "playing": false}})"));
 	rig.viewport();
