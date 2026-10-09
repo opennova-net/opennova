@@ -40,6 +40,7 @@
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
+using opennova::pff::normalized_logical_name;
 
 namespace {
 
@@ -198,10 +199,10 @@ static int test_base_project_dir() {
 	TEST_EXPECT(base_project_root(mod, ProjectExpansion{ "onx" }).empty());
 	std::string out;
 	TEST_EXPECT(base_project_game_dir(mod, ProjectExpansion{ "onx", "", "../../assets" }, "jo", out, error) &&
-	            out == dir.file("game/assets/build/export") && !base_game_exported(out));
+	            out == dir.file("game/assets/build/export") && !opennova::vfs_has_boot_archive(out));
 	std::error_code made_dir;
 	std::filesystem::create_directories(opennova::io::os_path(out), made_dir);
-	TEST_EXPECT(write_archive(out + "/resource.pff", { { "baseonly.txt", "base" } }) && base_game_exported(out));
+	TEST_EXPECT(write_archive(out + "/resource.pff", { { "baseonly.txt", "base" } }) && opennova::vfs_has_boot_archive(out));
 	TEST_EXPECT(!base_project_game_dir(mod, ProjectExpansion{ "onx", "", "../../nowhere" }, "jo", out, error) &&
 	            error.code() == "project.base_project" && error.message.find("does not open") != std::string::npos &&
 	            out.empty());
@@ -236,8 +237,11 @@ static int test_install_findings() {
 	return 0;
 }
 
-// The files an expansion's name forms [orig: Expansion_LoadAssets @ 0x4a4730]: one row per role, each
-// with its manifest row, named as the game names it; the music pairs by the runtime's own naming.
+// The editor's rows of the files an expansion's name forms (the manifest's RES_F_EXPANSION rows name
+// them; tests/gameprofile/required_resources_test pins the names): one row per role and per manifest
+// row, in the roles' order, each placed where its manifest row's path says (loose in the folder for a
+// pattern under expansion\<n>\, by kind otherwise), its name, fixedness and replaced file the
+// manifest's.
 static int test_files_table() {
 	const std::vector<ExpansionFile> files = expansion_files("jxm");
 	std::vector<std::string> names;
@@ -245,23 +249,23 @@ static int test_files_table() {
 	TEST_EXPECT((names == std::vector<std::string>{ "jxm.bin", "version.txt", "Mjxm.sbf", "Mjxm.bin", "Gjxm.sbf",
 	                                                  "Gjxm.bin", "jxmL.lwf", "jxm.lwf" }));
 	TEST_EXPECT(expansion_files("").empty());
+	int manifest_rows = 0;
+	for (int i = 0; i < opennova::gameprofile::gameprofile_required_resource_count(); ++i)
+		manifest_rows += (opennova::gameprofile::gameprofile_required_resource_at(i)->flags &
+		                  opennova::gameprofile::RES_F_EXPANSION) != 0;
+	TEST_EXPECT(files.size() == static_cast<size_t>(manifest_rows));
 	for (const ExpansionFile &file : files) {
-		const opennova::gameprofile::RequiredResource *row =
-				opennova::gameprofile::gameprofile_required_resource_by_role(file.row->manifest_role);
-		TEST_EXPECT(row && (row->flags & opennova::gameprofile::RES_F_EXPANSION));
+		const opennova::gameprofile::RequiredResource *row = file.row->resource();
+		TEST_EXPECT(row && (row->flags & opennova::gameprofile::RES_F_EXPANSION) &&
+		            row == opennova::gameprofile::gameprofile_required_resource_by_role(file.row->manifest_role));
 		TEST_EXPECT(expansion_file_row_for_manifest_role(file.row->manifest_role) == file.row);
-		TEST_EXPECT(file.row->orig && *file.row->orig && file.row->what && *file.row->what);
+		TEST_EXPECT(file.row->what && *file.row->what);
+		const bool in_folder = std::string(row->name).rfind("expansion\\<n>\\", 0) == 0;
+		TEST_EXPECT((file.row->placement == ExpansionPlacement::Folder) == in_folder);
+		TEST_EXPECT(file.row->fixed() == !opennova::gameprofile::gameprofile_expansion_file_formed(row) &&
+		            file.row->replaces() == row->replaces);
 	}
-	// Loose in the expansion's folder: the table, the version text, the music banks; the rest by kind.
-	const auto placed = [](ExpansionFileRole role) { return expansion_file_row(role).placement; };
-	TEST_EXPECT(placed(ExpansionFileRole::Table) == ExpansionPlacement::Folder &&
-	            placed(ExpansionFileRole::Version) == ExpansionPlacement::Folder &&
-	            placed(ExpansionFileRole::MenuMusicBank) == ExpansionPlacement::Folder &&
-	            placed(ExpansionFileRole::GameMusicBank) == ExpansionPlacement::Folder &&
-	            placed(ExpansionFileRole::MenuMusicScript) == ExpansionPlacement::ByKind &&
-	            placed(ExpansionFileRole::LocalBank) == ExpansionPlacement::ByKind);
-	TEST_EXPECT(std::string(expansion_file_row(ExpansionFileRole::MenuMusicBank).replaces) == "MENUMUS.SBF" &&
-	            !expansion_file_row(ExpansionFileRole::Table).replaces);
+	TEST_EXPECT(expansion_file_row(ExpansionFileRole::Version).fixed() && !expansion_file_row(ExpansionFileRole::Table).fixed());
 	// Looked up without case, as the game compares names.
 	TEST_EXPECT(expansion_file_for("jxm", "MJXM.SBF") == &expansion_file_row(ExpansionFileRole::MenuMusicBank));
 	TEST_EXPECT(expansion_file_for("jxm", "VERSION.TXT") == &expansion_file_row(ExpansionFileRole::Version));

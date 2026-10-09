@@ -38,6 +38,7 @@
 #include "editor/rig_model.h"
 
 using namespace opennova::editor;
+using opennova::pff::normalized_logical_name;
 using namespace opennova::threedi;
 namespace fs = std::filesystem;
 

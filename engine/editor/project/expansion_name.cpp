@@ -2,7 +2,8 @@
 
 #include <base/gameprofile/required_resources.h>
 #include <base/io/strutil.h>
-#include <editor/assets/asset_registry.h>
+#include <base/resource_index/boot_policy.h>
+#include <base/vfs/vfs.h>
 #include <editor/project/expansion_files.h>
 #include <runtime/mission/mission_sidecars.h>
 
@@ -43,18 +44,16 @@ std::string expansion_name_problem(std::string_view name, ExpansionNameUse use) 
 		if (name == "." || name == "..") return quoted(name) + " names no folder of expansion\\ of its own.";
 		return std::string();
 	}
-	// The Mods list registers no folder whose name starts with a dot [orig: Expansion_ScanAndRegister
-	// @ 0x4a444b..0x4a4450, `cmp cFileName[0], '.'`]: the expansion would mount with /exp alone.
-	if (name.front() == '.')
+	// The Mods list registers no folder whose name starts with a dot (vfs_expansion_folder_listed): the
+	// expansion would mount with /exp alone.
+	if (!vfs_expansion_folder_listed(std::string(name)))
 		return quoted(name) + " starts with a dot: the game's Mods list never lists such a folder, so players could "
 		                      "not choose it there.";
 	for (const char c : name) {
-		// One /exp token [orig: Terrain_TokenizeConfigLine @ 0x53cb60: ' ', '\t' and ',' split outside
-		// quotes @ 0x53cc44, '"' toggles quoting and is never kept @ 0x53cc51, ';' ends the line
-		// @ 0x53cc31]. Stricter than the game, by choice: a quoted `/exp "my mod"` mounts, but every
-		// launch line, shortcut and server configuration that names the expansion unquoted would split
-		// it, so the project's own name keeps to one bare token.
-		if (c == ' ' || c == '\t' || c == ',' || c == '"' || c == ';')
+		// One /exp token (launch_token_breaks_at). Stricter than the game, by choice: a quoted
+		// `/exp "my mod"` mounts, but every launch line, shortcut and server configuration that names the
+		// expansion unquoted would split it, so the project's own name keeps to one bare token.
+		if (launch_token_breaks_at(c))
 			return quoted(name) +
 			       " has a space, a tab, a comma, a quote or a semicolon: the game takes an expansion's name from its "
 			       "command line as one word, which those end.";
@@ -67,9 +66,8 @@ std::string expansion_name_problem(std::string_view name, ExpansionNameUse use) 
 	}
 	if (name.back() == '.') return quoted(name) + " ends with a dot, which Windows drops from a folder's name.";
 	if (device_name(name)) return quoted(name) + " is a name Windows keeps for a device: no folder can have it.";
-	// The project's own expansion's files the archives hold by its name [orig: Expansion_LoadAssets:
-	// "M%s.bin" @ 0x4a491d (and "G%s.bin" @ 0x4a494a), "%sL.lwf" @ 0x4a4989].
-	if (!logical_name_fits_archive("M" + std::string(name) + ".bin") || !logical_name_fits_archive(std::string(name) + "L.lwf"))
+	// The project's own expansion's files the archives hold by its name (gameprofile_expansion_names_fit_archive).
+	if (!gameprofile::gameprofile_expansion_names_fit_archive(std::string(name)))
 		return quoted(name) + " is " + std::to_string(name.size()) +
 		       " characters: the expansion's music script M" + std::string(name) + ".bin and its sound bank " +
 		       std::string(name) + "L.lwf must fit the archives' 16-character names, so its name holds 11.";
@@ -77,7 +75,7 @@ std::string expansion_name_problem(std::string_view name, ExpansionNameUse use) 
 	// names for its own (the manifest's): the project holds one file of a name, and the game would read
 	// it as both (a name "game" makes game.bin, which the game reads as its menu's table).
 	for (const ExpansionFile &file : expansion_files(std::string(name))) {
-		if (file.row->fixed) continue;
+		if (file.row->fixed()) continue;
 		const gameprofile::RequiredResource *own = gameprofile::gameprofile_required_resource_find(file.name.c_str());
 		if (own && !(own->flags & gameprofile::RES_F_PATTERN))
 			return quoted(name) + " would name " + file.row->what + " " + file.name + ", a file the game reads as " +
@@ -98,7 +96,7 @@ std::string expansion_name_mission_problem(std::string_view name, const std::vec
 			const std::string by_mission = mission::sidecar_name(file, sidecar);
 			const std::string alternate = mission::sidecar_alternate_name(file, sidecar);
 			for (const ExpansionFile &own : formed) {
-				if (own.row->fixed) continue;
+				if (own.row->fixed()) continue;
 				if (!strutil::iequals(own.name, by_mission) && (alternate.empty() || !strutil::iequals(own.name, alternate)))
 					continue;
 				return quoted(name) + " would name " + own.row->what + " " + own.name + ", the file the game reads by the "

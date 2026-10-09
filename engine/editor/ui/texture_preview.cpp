@@ -190,7 +190,7 @@ void reference_field(Workspace &workspace, const FieldUse &field, const Value &v
 		                   picture->refusal.c_str());
 	} else {
 		// The file the loader opens, said where it is not the name written (a .tga's .dds).
-		ImGui::TextUnformatted(normalized_logical_name(name) == normalized_logical_name(load.name)
+		ImGui::TextUnformatted(pff::normalized_logical_name(name) == pff::normalized_logical_name(load.name)
 		                               ? name.c_str()
 		                               : (name + " (the game loads it for " + load.name + ")").c_str());
 		ImGui::TextDisabled("%s", facts(*picture).c_str());
