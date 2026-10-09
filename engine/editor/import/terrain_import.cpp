@@ -37,30 +37,10 @@ constexpr double kTrnGenTop = 127.5;      // an 8-bit map's white after TrnGen's
 
 const char *const kSetKeys[] = {"heightmap", "colormap", "detail", "tiles", "surface", "foliagemap"};
 constexpr size_t kSetKeyCount = sizeof(kSetKeys) / sizeof(kSetKeys[0]);
-// A foliage block's keys, the .trn's own [orig: Terrain_ParseConfigCallback @ 0x60F330].
-const char *const kFoliageKeys[] = {"graphic", "match", "color_lower", "color_upper", "attrib"};
-
-bool foliage_key(const std::string &key) {
-	for (const char *k : kFoliageKeys)
-		if (key == k) return true;
-	return false;
-}
-
-// The words a value splits into: spaces, tabs and commas apart, as the .trn's walk splits a line.
-std::vector<std::string> words_of(const std::string &text) {
-	std::vector<std::string> out;
-	std::string word;
-	for (const char c : text) {
-		if (c == ' ' || c == '\t' || c == ',') {
-			if (!word.empty()) out.push_back(std::move(word));
-			word.clear();
-		} else {
-			word += c;
-		}
-	}
-	if (!word.empty()) out.push_back(std::move(word));
-	return out;
-}
+// A foliage block's keys, the .trn's own (formats/trn trn_parser_key's block arms, `end` aside) [orig:
+// Terrain_ParseConfigCallback @ 0x60F330]. A definition holds graphic, match, color_lower, color_upper and
+// attrib (set_foliage_key); the stampdown_* arms no port reads are keys it refuses.
+bool foliage_key(const std::string &key) { return key != "end" && trn_parser_key(key, true) && !trn_parser_key(key); }
 
 // One key of a foliage definition and its values set on `def`; false, with `why`, for values the game would
 // not read as given.
@@ -241,16 +221,20 @@ bool parse_terrain_set(const std::vector<uint8_t> &bytes, TerrainSet &out, std::
 			} else if (key == "foliage") {
 				why = at + " opens a foliage block inside the one of line " + std::to_string(block) + ", which has no end";
 				return false;
-			} else if (!set_foliage_key(key, words_of(value), def, why)) {
-				why = at + ": " + why;
-				return false;
+			} else {
+				// The values as the .trn's walk cuts a line (formats/trn trn_values_of_text).
+				std::vector<std::string> values;
+				if (!trn_values_of_text(value, values, why) || !set_foliage_key(key, values, def, why)) {
+					why = at + ": " + why;
+					return false;
+				}
 			}
 			continue;
 		}
 		if (key == "foliage") {
 			// The game reads four blocks; a fifth reads the rest of its file into nothing [orig:
 			// Terrain_ParseConfigCallback @ 0x60F330, `dword_31BC900 < 4`].
-			if (out.foliage.size() >= kTerrainFoliageDefs) {
+			if (out.foliage.size() >= size_t(FOLIAGE_MAX_DEFS)) {
 				why = at + " opens a fifth foliage block: a terrain holds four foliage definitions";
 				return false;
 			}
@@ -328,13 +312,17 @@ bool parse_foliage_definitions(const std::string &text, std::vector<FoliageDef> 
 		const std::string one = strutil::trim(text.substr(start, bar == std::string::npos ? std::string::npos : bar - start));
 		start = bar == std::string::npos ? text.size() + 1 : bar + 1;
 		if (one.empty()) continue;
-		if (out.size() >= kTerrainFoliageDefs) {
+		if (out.size() >= size_t(FOLIAGE_MAX_DEFS)) {
 			why = "a terrain holds four foliage definitions";
 			return false;
 		}
 		const std::string number = "definition " + std::to_string(out.size() + 1);
 		// A key, then its values up to the next key.
-		const std::vector<std::string> words = words_of(one);
+		std::vector<std::string> words;
+		if (!trn_values_of_text(one, words, why)) {
+			why = number + ": " + why;
+			return false;
+		}
 		FoliageDef def;
 		for (size_t i = 0; i < words.size();) {
 			const std::string key = strutil::to_lower(words[i]);
@@ -663,7 +651,7 @@ std::vector<std::string> terrain_foliage_notes(const IndexedImage8 &map, const s
 	if (!loose.empty())
 		notes.push_back("codes " + loose + " (" + std::to_string(loose_texels) + " texels) match no foliage definition: " +
 		                "nothing grows there");
-	for (size_t slot = 0; slot < defs.size() && slot < kTerrainFoliageDefs; ++slot) {
+	for (size_t slot = 0; slot < defs.size() && slot < size_t(FOLIAGE_MAX_DEFS); ++slot) {
 		bool held = false;
 		for (const int code : defs[slot].match)
 			if (code > 0 && code < 256 && counts[code]) held = true;
@@ -672,16 +660,6 @@ std::vector<std::string> terrain_foliage_notes(const IndexedImage8 &map, const s
 			                ") matches no code the foliage map holds: it grows nowhere");
 	}
 	return notes;
-}
-
-int terrain_steep_blocks(const std::vector<uint16_t> &raw16) {
-	int steep = 0;
-	for (size_t start = 0; start + 256 <= raw16.size(); start += 256) {
-		const auto [low, high] = std::minmax_element(raw16.begin() + static_cast<std::ptrdiff_t>(start),
-		                                             raw16.begin() + static_cast<std::ptrdiff_t>(start + 256));
-		if (int(*high) - int(*low) > 32766) ++steep; // a width of range + 1 holds 32,766 in 15 bits
-	}
-	return steep;
 }
 
 bool run_terrain_import(ImportContext &context, ImportProduct &out) {
@@ -756,7 +734,8 @@ bool run_terrain_import(ImportContext &context, ImportProduct &out) {
 	bake.depth_format = DepthFormat::CDEP;
 	CptFile cpt;
 	if (!trngen::bake_terrain(bake, cpt, why)) return refuse(source_name + ": " + why + ".");
-	const int steep = terrain_steep_blocks(cpt.depth_buffer);
+	// The blocks the CPT writer clamps (formats/cpt cpt_steep_blocks).
+	const int steep = cpt_steep_blocks(cpt.depth_buffer);
 	ImportOutput cpt_out;
 	cpt_out.name = stem + ".cpt";
 	try {
