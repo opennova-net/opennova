@@ -3,6 +3,7 @@
 #include <formats/trn/trn_io.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/cpt/cpt_io.h>
+#include <formats/til/til_io.h>
 #include <base/io/log.h>
 #include <runtime/terrain_query/surface_tiles.h>
 #include <runtime/terrain_query/terrain_field_store.h>
@@ -138,6 +139,43 @@ void terrain_field_store_build(TerrainFieldStore &store, const CptFile &cpt,
 	if (store.valid())
 		store.set_trn_facts(trn.water_height != 0 ? static_cast<float>(trn.water_height) * 0.5f : 0.0f,
 				trn.tilestrip);
+}
+
+std::string terrain_tileinfo_name(const std::string &tileinfo) {
+	if (tileinfo.empty()) return std::string();
+	return tileinfo.substr(0, tileinfo.find('.')) + ".til";
+}
+
+std::string read_placed_tile_bytes(const TerrainFileReader &read_loose_first,
+		const TerrainFileReader &read_file, const std::string &mission_til,
+		const std::string &terrain_name, const std::string &environment,
+		std::vector<uint8_t> &out) {
+	out.clear();
+	const auto load = [&read_loose_first, &out](const std::string &name) {
+		if (name.empty() || !read_loose_first || !read_loose_first(name, out) ||
+				!til_load_accepts(out.data(), out.size())) {
+			out.clear();
+			return false;
+		}
+		return true;
+	};
+	if (load(mission_til)) return mission_til;
+	// The terrain configuration as the terrain's load parses it; a .trn that
+	// is not there names no tile info, and one the admission gate refuses
+	// still carries the value its parser stored.
+	if (!read_file || terrain_name.empty()) return std::string();
+	const TrnTextReader read_text = [&read_file](const std::string &name, std::string &text) {
+		std::vector<uint8_t> bytes;
+		if (!read_file(name, bytes)) return false;
+		text.assign(bytes.begin(), bytes.end());
+		return true;
+	};
+	TrnConfig trn;
+	std::string error;
+	(void)read_mission_trn(read_text, terrain_name + ".trn",
+			environment.empty() ? std::string() : environment + ".env", trn, error);
+	const std::string own = terrain_tileinfo_name(trn.tileinfo);
+	return load(own) ? own : std::string();
 }
 
 void terrain_field_store_set_placed_tiles(TerrainFieldStore &store,

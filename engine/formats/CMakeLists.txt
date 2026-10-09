@@ -114,8 +114,9 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_decompile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_compile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_vm.cpp
-    # pcx — image
+    # pcx — image (+ the 256-colour quantizer an import writes an 8-bit PCX through)
     ${CMAKE_CURRENT_SOURCE_DIR}/pcx/pcx_io.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/pcx/pcx_quantize.cpp
     # pff — the archive format
     ${CMAKE_CURRENT_SOURCE_DIR}/pff/pff.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pff/pff_stream_writer.cpp
@@ -123,6 +124,11 @@ add_library(opennova_formats STATIC
     # playersav — the player profile: player.sav and weapon.sav
     ${CMAKE_CURRENT_SOURCE_DIR}/playersav/player_sav.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/playersav/weapon_sav.cpp
+    # png — the PNG reader and writer the tools' images go through (a public format, though the
+    # menus' loader reads one too: an import's source, a thumbnail; zlib through the vendored
+    # miniz, linked below)
+    ${CMAKE_CURRENT_SOURCE_DIR}/png/png_decode.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/png/png_encode.cpp
     # ptl — particle effects (.ptl): model + parser + writer + enum/field tables;
     # historical include prefix particle/ (the emitter/effect-scene sim stays in
     # engine/runtime/particle — disjoint header sets, ADR 0030 decision 2)
@@ -140,10 +146,12 @@ add_library(opennova_formats STATIC
     # sph — the /PROFILE server-log FOURCC chunk container (payload records:
     # engine/net/npwire serverlog_decode)
     ${CMAKE_CURRENT_SOURCE_DIR}/sph/sph.cpp
-    # tga — the game's TGA reader (the decode every texture loader runs on a .tga)
-    # and the true-colour image writer (32-bit) the editor's textures go through
+    # tga — the game's TGA reader (the decode every texture loader runs on a .tga),
+    # the true-colour image writer (32-bit) the editor's textures go through, and
+    # the format's own decode an import source is read by (tga_source)
     ${CMAKE_CURRENT_SOURCE_DIR}/tga/tga_read.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/tga/tga.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/tga/tga_source.cpp
     # threedi — the .3di model format (3DI3 first-class, ADR 0027)
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_3di3_read.cpp   # 3DI3 -> Threedi3di3
@@ -182,8 +190,8 @@ target_include_directories(opennova_formats
 )
 
 target_link_libraries(opennova_formats PUBLIC opennova_io opennova_crt)
-# The BFC1 decoder inflates through miniz (the editor's PNG reader is the other
-# consumer); the vendored leaf stays private
+# The BFC1 decoder inflates through miniz (the PNG reader and writer, formats/png,
+# are the other consumers); the vendored leaf stays private
 # to this group (a STATIC library's PRIVATE deps still ride every downstream
 # link line, so nothing else needs to name it).
 target_link_libraries(opennova_formats PRIVATE opennova_miniz)

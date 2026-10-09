@@ -1,4 +1,5 @@
-// ASCII case-insensitive string helpers.
+// ASCII case-insensitive string helpers, and the small text chores beside them
+// (non-throwing number parses, hex, line ends, counts in words).
 //
 // The shared home for the to_lower/iequals helpers the format libraries used
 // to inline per-file. ASCII-only on purpose: NovaLogic asset names and keys
@@ -9,10 +10,13 @@
 #include <cerrno>
 #include <climits>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace opennova {
@@ -101,6 +105,18 @@ inline bool starts_with_icase(std::string_view s, std::string_view prefix)
     return iequals(s.substr(0, prefix.size()), prefix);
 }
 
+// The offset of the first place `text` occurs in `in`, case ignored (ASCII); npos for
+// none, 0 for an empty `text`.
+inline size_t ifind(std::string_view in, std::string_view text)
+{
+    if (text.size() > in.size())
+        return std::string_view::npos;
+    for (size_t i = 0; i + text.size() <= in.size(); ++i)
+        if (iequals(in.substr(i, text.size()), text))
+            return i;
+    return std::string_view::npos;
+}
+
 // The text inside one pair of surrounding double quotes; anything else (no
 // quotes, a quote on one side only, a lone '"') comes back unchanged. The
 // .env and .trn value readers strip a quoted value this way.
@@ -145,6 +161,24 @@ inline bool hex_to_bytes(std::string_view hex, std::vector<uint8_t> &out)
         out.push_back(static_cast<uint8_t>((hi << 4) | lo));
     }
     return true;
+}
+
+// Bytes as lower-case hex digits, two a byte: what hex_to_bytes reads back.
+inline std::string bytes_to_hex(const uint8_t *data, size_t size)
+{
+    static constexpr char kDigits[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(size * 2);
+    for (size_t i = 0; i < size; ++i) {
+        out += kDigits[data[i] >> 4];
+        out += kDigits[data[i] & 15];
+    }
+    return out;
+}
+
+inline std::string bytes_to_hex(const std::vector<uint8_t> &bytes)
+{
+    return bytes_to_hex(bytes.data(), bytes.size());
 }
 
 // Non-throwing std::stoi / std::stoul / std::stoull / std::stof: the same
@@ -231,6 +265,111 @@ inline bool all_digits(std::string_view s)
         if (c < '0' || c > '9')
             return false;
     return true;
+}
+
+// The number that forms `key` from `prefix` as the engine forms such a name, sprintf's
+// "%s%03i" (STRNAME005 is 5, STRNAME1234 is 1234, dlg012 is 12): the prefix compared
+// exactly or without ASCII case (`exact_case`), then decimal digits that are the number's
+// own "%03i" spelling. False for a key of another prefix and one no number forms
+// (STRNAME5, STRNAME0005, STRNAME), which no lookup of the game reads.
+inline bool key_number(std::string_view key, const char *prefix, bool exact_case, int64_t &out)
+{
+    if (!prefix)
+        return false;
+    const size_t length = std::strlen(prefix);
+    if (key.size() <= length)
+        return false;
+    if (exact_case ? key.compare(0, length, prefix) != 0 : !iequals(key.substr(0, length), prefix))
+        return false;
+    const std::string digits(key.substr(length));
+    if (!all_digits(digits))
+        return false;
+    const std::optional<int> number = parse_int(digits);
+    if (!number)
+        return false;
+    // The key the engine forms from the number ("%s%03i") is this one, or no number forms it.
+    char formed[32];
+    std::snprintf(formed, sizeof(formed), "%03i", *number);
+    if (digits != formed)
+        return false;
+    out = int64_t(*number);
+    return true;
+}
+
+// The characters (code points) a UTF-8 text holds: its bytes that do not continue a
+// sequence (10xxxxxx). For a name the game keeps in its code page, one byte a character,
+// the bytes it takes there.
+inline size_t utf8_length(std::string_view text)
+{
+    size_t count = 0;
+    for (const char c : text)
+        count += (static_cast<unsigned char>(c) & 0xC0) != 0x80 ? 1 : 0;
+    return count;
+}
+
+// The offset of the first LF in `text` that no CR comes before, and how many there are;
+// npos and 0 for none.
+inline size_t first_lone_lf(std::string_view text, size_t *count = nullptr)
+{
+    size_t first = std::string_view::npos, found = 0;
+    for (size_t i = 0; i < text.size(); ++i)
+        if (text[i] == '\n' && (i == 0 || text[i - 1] != '\r') && !found++)
+            first = i;
+    if (count)
+        *count = found;
+    return first;
+}
+
+// `text` with every LF that no CR comes before written CR LF, each other byte as it was
+// (a CR alone too): the line end a retail line reader that ends a line at CR LF alone
+// needs.
+inline std::string with_crlf_line_ends(std::string_view text)
+{
+    std::string out;
+    out.reserve(text.size() + text.size() / 16 + 1);
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '\n' && (i == 0 || text[i - 1] != '\r'))
+            out += '\r';
+        out += text[i];
+    }
+    return out;
+}
+
+// A whole number with its thousands grouped by commas, as a message writes a count
+// ("9,290", "-65,536").
+template <typename Int>
+inline std::string grouped(Int n)
+{
+    static_assert(std::is_integral_v<Int>, "grouped takes a whole number");
+    std::string out;
+    unsigned long long magnitude = 0;
+    if constexpr (std::is_signed_v<Int>) {
+        if (n < 0)
+            out = "-";
+        magnitude = n < 0 ? 0ull - static_cast<unsigned long long>(n) : static_cast<unsigned long long>(n);
+    } else {
+        magnitude = n;
+    }
+    const std::string digits = std::to_string(magnitude);
+    for (size_t i = 0; i < digits.size(); ++i) {
+        if (i > 0 && (digits.size() - i) % 3 == 0)
+            out += ',';
+        out += digits[i];
+    }
+    return out;
+}
+
+// A count of bytes in words, 1024 to a K: "512 B", "3.4 KB", "12.0 MB".
+inline std::string byte_size_text(uint64_t bytes)
+{
+    char text[32];
+    if (bytes < 1024)
+        std::snprintf(text, sizeof(text), "%llu B", static_cast<unsigned long long>(bytes));
+    else if (bytes < 1024 * 1024)
+        std::snprintf(text, sizeof(text), "%.1f KB", static_cast<double>(bytes) / 1024.0);
+    else
+        std::snprintf(text, sizeof(text), "%.1f MB", static_cast<double>(bytes) / (1024.0 * 1024.0));
+    return text;
 }
 
 } // namespace strutil

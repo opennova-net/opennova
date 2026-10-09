@@ -77,6 +77,10 @@ bool load_til(const uint8_t *data, size_t size, TilFile &out, std::string &error
 	return true;
 }
 
+bool til_load_accepts(const uint8_t *data, size_t size) {
+	return data != nullptr && size >= TIL_HEADER_SIZE && read_u32_le(data) == TIL_MAGIC;
+}
+
 bool save_til(const TilFile &til, std::vector<uint8_t> &out, std::string &error) {
 	error.clear();
 	out.clear();

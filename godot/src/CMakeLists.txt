@@ -38,6 +38,9 @@ add_subdirectory(../../third_party/godot-cpp godot-cpp)
 add_subdirectory(../../third_party/sqlite opennova_sqlite)
 # Vendored miniz: the BFC1 container decoder's inflate (engine/formats/bfc1).
 add_subdirectory(../../third_party/miniz opennova_miniz)
+# rgbcx: the authoring DXT encoder (engine/runtime/renderer/dxt_encode), which the
+# runtime links privately.
+add_subdirectory(../../third_party/rgbcx opennova_rgbcx)
 option(OPENNOVA_DEVTOOLS "Build the game's in-engine dev-tool windows (Dear ImGui)" ON)
 # The imgui-godot addon ships no web binaries, so the web build has no host
 # for the dev-tool windows either.

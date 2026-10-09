@@ -73,6 +73,36 @@ bool terrain_field_store_load(TerrainFieldStore &store, const FileSource &files,
 		const std::string &terrain_name, const std::string &tile_set, const std::string &environment,
 		std::string &error, TrnConfig *trn = nullptr);
 
+// The terrain's own tile info file: a terrain configuration's polytrn_tileinfo
+// with its extension forced to TIL from its FIRST '.' (the whole value
+// scanned, a directory's dot included); "" for a configuration that names none
+// (retail forces ".TIL" there, a name no file has). Lookups fold case, so the
+// name carries the lower-case ".til" every other tile info name does.
+// [orig: Terrain_Init @ 0x60fcfd, Path_ReplaceOrAppendExtension(+0xF00, "TIL")
+//  over the value Terrain_ParseConfigCallback stores @ 0x60f910..0x60f930; the
+//  first-dot scan @ 0x53c7c4]
+std::string terrain_tileinfo_name(const std::string &tileinfo);
+
+// The placed-tile bytes the authority loads at mission start: `mission_til`
+// (the mission's own .til, mission_sidecars' tiles row), else the terrain's
+// own (terrain_tileinfo_name of the polytrn_tileinfo the mission's terrain
+// configuration holds: `terrain_name`.trn, overcast.def and the mission's
+// `environment`.env through the terrain's parser, as terrain_field_store_load
+// reads them). Each reads through `read_loose_first` and is taken only where
+// the game's load takes it (formats/til til_load_accepts): a missing, short or
+// bad-magic file sends the load on to the next. Returns the name it took, ""
+// (with `out` empty) when neither loaded. The authority alone calls this; a
+// joiner's tiles are the host's stream.
+// [orig: PolyTrn_LoadTerrainConfig @ 0x60e3d0, the authority test @ 0x60e6c9:
+//  Terrain_LoadTileInfoFile(<map>.TIL) @ 0x60e6d2, and on -1 @ 0x60e6dc
+//  Terrain_LoadTileInfoFile(polytrn_tileinfo) @ 0x60e6e5; the loose-first
+//  force @ 0x60a74e]
+using TerrainFileReader = std::function<bool(const std::string &name, std::vector<uint8_t> &out)>;
+std::string read_placed_tile_bytes(const TerrainFileReader &read_loose_first,
+		const TerrainFileReader &read_file, const std::string &mission_til,
+		const std::string &terrain_name, const std::string &environment,
+		std::vector<uint8_t> &out);
+
 // The mission .til placements onto the store's placed-tile overlay: the S2C
 // 0x45 stream's til0 bytes folded to the surface walk's rows (unparseable or
 // empty bytes = no tiles) [orig: Terrain_LoadTileInfoFile @ 0x60a740 ->

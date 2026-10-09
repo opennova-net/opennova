@@ -24,24 +24,26 @@ struct AiEntity;
 // player_speed km/h*293 (16.16 u/tick), turn rates deg/s*192426 (BAM/tick),
 // accel/decel token*4. The host's item-traits sweep fills the table from the item db
 // (Simulation::resolve_item_traits); tests stamp it directly.
-// The items.def move_function family tag, the per-class mover selector (the
-// update-callback table keys on it [orig: the [tag,flags,callback] rows
-// @0x82ABC0; net-re §5.38e]). Ground covers cveh/ctan/ctrn/catv;
-// Bike covers cbik.
+// The items.def move_function family, the per-class mover selector: the
+// physics row the whole token binds (physics_class_table.h) [orig:
+// g_EntityClassPhysicsTable @0x82abc8; net-re §5.38e]. Ground covers the
+// cveh/ctrn/catv rows (and any physics-selector row outside the families);
+// Bike is the cbike row, Tank the ctank row. The movers' comments call those
+// two families cbik and ctan.
 enum class VehicleFamily : uint8_t {
     Ground = 0,
     Watercraft, // cbot -> Entity_UpdateWatercraftPhysics @0x48D480
     Helicopter, // chel/CHel -> Entity_UpdateAircraftPhysics @0x490310
     Plane,      // cpln
-    Bike,       // cbik -> Entity_UpdateLightVehiclePhysics @0x483FE0. Shares the
+    Bike,       // cbike -> Entity_UpdateLightVehiclePhysics @0x483FE0. Shares the
                 // ground template; the witnessed family deltas gate on this tag
                 // inside the core (gravity 250, vZ up-cap, airborne
                 // throttle/integration, yaw always-applied >>2 in water)
                 // [cbik grill 2026-07-31], and the contact solve is the light
                 // variant [orig: Entity_ProcessLightVehiclePhysics @0x479600,
                 // call @0x486672].
-    Tank,       // ctan -> Entity_UpdateTankVehiclePhysics @0x488AB0 (its own
-                // class-table row @0x82ABC0). The ground template with the
+    Tank,       // ctank -> Entity_UpdateTankVehiclePhysics @0x488AB0 (its own
+                // physics row @0x82acac). The ground template with the
                 // witnessed tank deltas (gravity 250, contact-gated speed
                 // integration with the ±2·deceleration reversal clamps,
                 // full-basis drive velocity, yaw applied unless parked with the

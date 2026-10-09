@@ -207,6 +207,9 @@ func _play_line(audio: MissionAudio, id: int, ambient: bool, voice_bus: int,
 	if not audio.play_dialog(id):
 		_fail("dlg%03d (%s): play_dialog returned false" % [id, set_name])
 		return line
+	# The dialog's first line loads on the next dialog tick, which the world runs
+	# once a logic tick; the probe has no world, so it runs that tick itself.
+	audio.advance_dialog_tick()
 	var voice: AudioStreamPlayer = audio.dialog_voice()
 	if voice == null:
 		_fail("dlg%03d (%s): queued but no voice spawned" % [id, set_name])

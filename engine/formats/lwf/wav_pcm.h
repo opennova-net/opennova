@@ -18,6 +18,14 @@ struct WavPcm {
 	std::vector<uint8_t> pcm16;  // interleaved signed 16-bit LE frames
 	uint32_t sample_rate = 0;
 	uint16_t channels = 0;  // 1 or 2
+	// What the game's wave loader records for the wave, its AOA1 buffer's +4 and +8 (a dialog line's
+	// hold reads both, audio::dialog_clip_hold): the sample count, the data's bytes for 8-bit samples,
+	// half of them for 16-bit, the `fact` chunk's count for IMA ADPCM (the decoded frames where a wave
+	// has none, which the loader refuses), an AOA1's own; and the pitch ratio,
+	// ((rate << 16) + 22050) / 44100, an AOA1's own [orig: Audio_LoadWavFileFromArchive @ 0x766480,
+	// the count @ 0x766609 / @ 0x76670e / @ 0x7667ba, the ratio @ 0x76662d / @ 0x766735 / @ 0x7667e1].
+	uint32_t loader_samples = 0;
+	uint32_t loader_pitch_q16 = 0;
 };
 
 // Decode RIFF/WAVE or AOA1 to 16-bit PCM. AOA1 stores mono signed PCM8/16,
