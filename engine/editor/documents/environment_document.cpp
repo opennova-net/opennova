@@ -872,7 +872,7 @@ void EnvironmentDocument::refine_field(const NodeAddress &address, FieldUse &use
 	// .pcx as the parser stores it [orig: TimeOfDay_ParseProperty @ 0x57CC41..0x57CC4B, sky_map2's
 	// @ 0x57CC83..0x57CC8D] (kTextureArgPcx).
 	if (use.reference == ReferenceKind::Texture && (use.schema->id == "sky_map1" || use.schema->id == "sky_map2"))
-		use.loader_arg = texture_role_arg(TextureRoleId::SkyCloud, kTextureArgPcx);
+		use.loader_arg = texture_role_arg(renderer::TextureRoleId::SkyCloud, kTextureArgPcx);
 	// A terrain key's value is the terrain's field of its keyword: its words, and the loader of a map's role (the
 	// terrain's own PolyTrn_InitTextures opens a map an environment names as it opens the .trn's).
 	if (address.kind == kTerrainKey && use.schema && use.schema->id == "value")

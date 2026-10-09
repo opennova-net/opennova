@@ -23,6 +23,7 @@
 #include "editor/viewport_test_support.h"
 
 using namespace opennova::editor;
+namespace renderer = opennova::renderer;
 using opennova::io::JsonValue;
 
 namespace {
@@ -74,19 +75,19 @@ int test_pieces() {
 	// A blend map's weights: (100, 50, 0) scaled by 65535 / 150 = 436, then >> 8: (170, 85, 0); a texel of none red;
 	// its alpha kept.
 	const auto blend = image_of(2, 1, {100, 50, 0, 77, 0, 0, 0, 9});
-	const auto weights = texture_role_texels(blend, TextureRoleId::TerrainBlendMap, -1);
+	const auto weights = texture_role_texels(blend, renderer::TextureRoleId::TerrainBlendMap, -1);
 	TEST_EXPECT(weights != blend && weights->levels[0].rgba == std::vector<uint8_t>({170, 85, 0, 77, 255, 0, 0, 9}));
 	opennova::TrnConfig terrain;
 	terrain.detailmap_c1 = "grass.tga";
 	terrain.detailmap_c2 = "rock.tga";
-	TextureRoleView view = texture_role_view(*blend, *weights, TextureRoleId::TerrainBlendMap, -1, &terrain);
+	TextureRoleView view = texture_role_view(*blend, *weights, renderer::TextureRoleId::TerrainBlendMap, -1, &terrain);
 	TEST_EXPECT(view.legend.size() == 3 && view.legend[0].key == "red" && view.legend[0].rgb[0] == 255 &&
 	            view.legend[0].words == "weighs polytrn_detailmap_c1, grass.tga" &&
 	            view.legend[2].words == "weighs polytrn_detailmap_c3, which the terrain does not name" && view.words.empty());
 	// Red's mean weight: (170 + 255) / (2 x 255).
 	TEST_EXPECT(view.legend.size() == 3 && std::abs(view.legend[0].share - 425.0 / 510.0) < 1e-9);
 	terrain.detailmap_c1.clear();
-	view = texture_role_view(*blend, *weights, TextureRoleId::TerrainBlendMap, -1, &terrain);
+	view = texture_role_view(*blend, *weights, renderer::TextureRoleId::TerrainBlendMap, -1, &terrain);
 	TEST_EXPECT(view.words.find("names no polytrn_detailmap_c1: the game draws no splat") != std::string::npos);
 	// A foliage map's codes: 5 selects both definitions (the second's second code), 7 the second, 9 none, 0 never.
 	auto foliage = std::make_shared<TextureImage>(*image_of(2, 2, std::vector<uint8_t>(16, 0)));
@@ -100,29 +101,30 @@ int test_pieces() {
 	bush.match[0] = 7;
 	bush.match[1] = 5;
 	terrain.foliage_defs = {grass, bush};
-	view = texture_role_view(*foliage, *foliage, TextureRoleId::TerrainFoliageMap, -1, &terrain);
+	view = texture_role_view(*foliage, *foliage, renderer::TextureRoleId::TerrainFoliageMap, -1, &terrain);
 	TEST_EXPECT(view.legend.size() == 3 && view.legend[0].key == "0" && view.legend[0].words.find("code 0 matches no") != std::string::npos &&
 	            view.legend[1].key == "5" && view.legend[1].rgb[0] == 50 && view.legend[1].share == 0.5 &&
 	            view.legend[1].words == "grows foliage 1 (grass.3di), foliage 2 (bush.3di)" && view.legend[2].key == "9" &&
 	            view.legend[2].words.find("no definition of the terrain matches it") != std::string::npos);
-	// A particle graphic: an additive one's alpha cleared on its page, a quarter of a percent of a 1024 page; a bump's
-	// page made a normal map of its blue (flat: blue up); one as wide as its page held by none.
+	// A particle graphic as its page holds it (renderer::particle_atlas_paged_frame, which
+	// renderer_particle_atlas_contract pins): a quarter of a percent of a 1024 page, its alpha cleared for an additive
+	// one; a bump's page a normal map of its blue; one as wide as its page held by none.
 	const auto spark = image_of(32, 32, std::vector<uint8_t>(32 * 32 * 4, 200));
-	const auto paged = texture_role_texels(spark, TextureRoleId::ParticleGraphic, 1);
-	TEST_EXPECT(paged != spark && paged->width() == 32 && paged->levels[0].rgba[0] == 200 && paged->levels[0].rgba[3] == 0);
-	view = texture_role_view(*spark, *paged, TextureRoleId::ParticleGraphic, 1, nullptr);
+	const auto paged = texture_role_texels(spark, renderer::TextureRoleId::ParticleGraphic, 1);
+	TEST_EXPECT(paged != spark && paged->width() == 32 && paged->levels.size() == 1);
+	view = texture_role_view(*spark, *paged, renderer::TextureRoleId::ParticleGraphic, 1, nullptr);
 	TEST_EXPECT(view.title.empty() && view.words.find("Alone on a 1024 x 1024 atlas page of its mode") != std::string::npos &&
 	            view.words.find("it takes 0.1% of the page; the page holds it with its alpha cleared") != std::string::npos);
-	const auto bump = texture_role_texels(spark, TextureRoleId::ParticleGraphic, 3);
-	TEST_EXPECT(bump->levels[0].rgba[5 * 4 * 32 + 5 * 4 + 2] == 255 && bump->levels[0].rgba[5 * 4 * 32 + 5 * 4 + 0] == 127);
-	view = texture_role_view(*spark, *bump, TextureRoleId::ParticleGraphic, 3, nullptr);
+	const auto bump = texture_role_texels(spark, renderer::TextureRoleId::ParticleGraphic, 3);
+	TEST_EXPECT(bump != spark);
+	view = texture_role_view(*spark, *bump, renderer::TextureRoleId::ParticleGraphic, 3, nullptr);
 	TEST_EXPECT(view.words.find("256 x 256") != std::string::npos && view.words.find("normal map of its blue") != std::string::npos);
 	const auto wide = image_of(1024, 1, std::vector<uint8_t>(1024 * 4, 9));
-	view = texture_role_view(*wide, *wide, TextureRoleId::ParticleGraphic, 1, nullptr);
+	view = texture_role_view(*wide, *wide, renderer::TextureRoleId::ParticleGraphic, 1, nullptr);
 	TEST_EXPECT(view.words.find("No 1024 x 1024 atlas page of its mode") != std::string::npos);
 	// Any other role: nothing.
-	TEST_EXPECT(texture_role_texels(blend, TextureRoleId::ModelDiffuse, -1) == blend &&
-	            texture_role_view(*blend, *blend, TextureRoleId::ModelDiffuse, -1, nullptr).empty());
+	TEST_EXPECT(texture_role_texels(blend, renderer::TextureRoleId::ModelDiffuse, -1) == blend &&
+	            texture_role_view(*blend, *blend, renderer::TextureRoleId::ModelDiffuse, -1, nullptr).empty());
 	std::printf("pieces: a blend map's weights and details, a foliage map's codes, a particle graphic's page\n");
 	return 0;
 }
@@ -182,7 +184,7 @@ int test_session() {
 	// The blend map as its terrain's splat reads it: its weights, each naming the detail it weighs.
 	TEST_EXPECT(rig.show_use("textures/blend.tga"));
 	const TextureViewport *viewport = rig.viewport("textures/blend.tga");
-	TEST_EXPECT(viewport && viewport->shown_use().role == TextureRoleId::TerrainBlendMap && viewport->image() &&
+	TEST_EXPECT(viewport && viewport->shown_use().role == renderer::TextureRoleId::TerrainBlendMap && viewport->image() &&
 	            viewport->image()->levels[0].rgba == std::vector<uint8_t>({170, 85, 0, 255, 255, 0, 0, 255}));
 	JsonValue view = rig.role_view("textures/blend.tga");
 	const JsonValue *legend = view.get("legend");

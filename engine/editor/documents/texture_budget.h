@@ -15,14 +15,11 @@ namespace opennova::editor {
 // cost as the `.dds` that loader reads first. The rules are the game's (runtime/renderer/device_texture.h,
 // render-material-re.md "The device texture"); this reads them for a use, from the file's header alone.
 
-// How a model texture row's loader makes its device texture: the stage loader (a diffuse, a detail map, a
-// flipbook frame: the `.dds` beside the name first, else the pixels), the plain loader (the pixels of the
-// whole name) or the normal-map loader (always the pixels, a `.dds` decoded first, capped at 512).
-enum class TextureBudgetLoader : uint8_t { Stage, Plain, Normal };
-const char *texture_budget_loader_token(TextureBudgetLoader loader);
-// The loader a role's file is costed by; false for a role whose device texture is not witnessed yet (a
-// terrain's, the HUD's, a menu's, a producer's volume).
-bool texture_role_budget_loader(TextureRoleId role, TextureBudgetLoader &out);
+// The model texture row loader a role's file is costed by (renderer::model_row_device_texture: the stage
+// loader for a diffuse, a detail map or a flipbook frame, the plain loader, the normal-map loader); false
+// for a role whose device texture is not witnessed yet (a terrain's, the HUD's, a menu's, a producer's
+// volume).
+bool texture_role_budget_loader(renderer::TextureRoleId role, renderer::TextureLoader &out);
 
 // The cost a model texture holds past which the use check says so (texture.memory): 16 MB with its chain, a
 // 2048 x 2048 texture uncompressed; no model texture the shipped game loads holds more than 1.3 MB (a 512 x
@@ -31,7 +28,7 @@ inline constexpr uint64_t kTextureMemoryWarnBytes = uint64_t(16) * 1024 * 1024;
 
 struct TextureBudget {
 	bool known = false;
-	TextureBudgetLoader loader = TextureBudgetLoader::Stage;
+	renderer::TextureLoader loader = renderer::TextureLoader::Stage;
 	uint8_t slot = 0;
 	// The file the loader opens, by its logical name.
 	std::string file;
@@ -45,8 +42,8 @@ struct TextureBudget {
 };
 
 // The budget of the file `file` (its header as the loader's reader reads it) for a model row of `slot`
-// loaded by `loader`; unknown where the header does not read.
-TextureBudget texture_budget(const TextureHeader &header, const std::string &file, TextureBudgetLoader loader, uint8_t slot);
+// loaded by `loader` (Stage, Plain or Normal); unknown where the header does not read.
+TextureBudget texture_budget(const TextureHeader &header, const std::string &file, renderer::TextureLoader loader, uint8_t slot);
 
 // Bytes in words: "21.3 MB", "340 KB", "96 bytes".
 std::string texture_bytes_words(uint64_t bytes);
