@@ -10,6 +10,7 @@
 #include <base/vfs/file_source.h>
 #include <runtime/audio/dialog_queue.h>
 #include <runtime/mission/mission_sidecars.h>
+#include <runtime/mission/runtime_boot.h>
 
 namespace opennova::editor {
 
@@ -26,7 +27,7 @@ std::string seconds_words(double seconds) {
 
 } // namespace
 
-bool read_dialog_sources(const FileSource &files, const std::string &bank_name, const std::string &text_name,
+bool read_dialog_sources(const FileSource &files, const std::string &bank_name, const std::string &mission_base,
                          DialogSources &out, std::string &error) {
 	out = DialogSources();
 	out.bank_name = bank_name;
@@ -50,13 +51,17 @@ bool read_dialog_sources(const FileSource &files, const std::string &bank_name, 
 		                  lwf::parse_lwf_buffer(lwf_bytes.data(), lwf_bytes.size(), out.sounds, lwf_error);
 		break;
 	}
-	for (const std::string &name : {text_name, std::string("medmssn.bin")}) {
-		if (name.empty() || files.stamp(name) == 0) continue;
-		out.text_name = name;
-		std::vector<uint8_t> text_bytes;
+	// The mission's text as the game resolves it: <base>.bin where it is, else medmssn.bin.
+	mission::BootFileSource source;
+	source.has_file = [&](const std::string &name) { return files.stamp(name) != 0; };
+	source.read_file = [&](const std::string &name, std::vector<uint8_t> &bytes) { return files.read(name, bytes); };
+	std::vector<uint8_t> text_bytes;
+	const mission::MissionTextSource text = mission::resolve_mission_text(source, mission_base, text_bytes);
+	if (text != mission::MissionTextSource::kNone) {
+		const mission::Sidecar &row = *mission::sidecar_for_role("text");
+		out.text_name = text == mission::MissionTextSource::kMission ? mission_base + row.extension : row.fallback;
 		std::string text_error;
-		out.text_read = files.read(name, text_bytes) && rtxt::parse(text_bytes.data(), text_bytes.size(), out.text, text_error);
-		break;
+		out.text_read = rtxt::parse(text_bytes.data(), text_bytes.size(), out.text, text_error);
 	}
 	return true;
 }
