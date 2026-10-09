@@ -105,8 +105,7 @@ std::string dialog_bank_scope(const std::string &path);
 // its place where it has none, <base>.PWF [orig: DialogManager_LoadFromFile @ 0x44e7d4..0x44e7f5].
 std::string dialog_sounds_scope(const std::string &path);
 std::string dialog_sounds_alternate(const std::string &path);
-// The number a dialog's name answers to, dlg%03i of it (dlg012: 12); -1 where no number forms the name.
-int64_t dialog_number(const std::string &name);
+// The number a dialog's name answers to is the engine's audio::dialog_index_of (runtime/audio/dialog_queue.h).
 
 // The dialog bank type's validator over one bank (DocumentType::validate_file): its source findings; a dialog of
 // a name an earlier one has (the game plays the first); one whose name no number forms (no Play dialog plays it);

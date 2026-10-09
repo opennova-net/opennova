@@ -17,10 +17,13 @@
 #include <editor/model/diagnostic.h>
 #include <editor/model/staged_rows.h>
 #include <editor/project/project_files.h>
+#include <formats/def/reserved_items.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_params.h>
+#include <runtime/hud/game_text_lookup.h>
 #include <runtime/mission/mission_sidecars.h>
+#include <runtime/mission/mission_text.h>
 
 namespace opennova::editor {
 
@@ -53,28 +56,13 @@ int lookup_order(NodeKind kind) {
 	}
 }
 
-// The SSN a parameter holds for the player [orig: 04TR's watchdog SingleIsWithinArea(10000, zone 6),
-// docs/mission/bms-event-runtime-re.md 7.3]: no record of the file carries it (where the engine gives
-// the player that SSN is not in the records read), so it names none of them.
-constexpr int64_t kPlayerSsn = 10000;
-
-// The waypoint markers whose record +0x60 the spawn keeps as the waypoint's name id (entity+672): type
-// 6005, which also looks the name up, and type 6006 [orig: Entity_SpawnFromBMSRecord @0x40f05a
-// `cmp [edi], 1775h`, @0x40f0ad; @0x40f157 `cmp [edi], 1776h`, @0x40f176].
-constexpr int32_t kWaypointType = 6005, kWaypointRepeatType = 6006;
-
-// The waypoint list's commands [orig editor: dfx2med Med_ParamWaypointList @0x449c60 names them;
-// docs/world/world-wac-ai-re.md section 11].
-const char *path_command_name(int number) {
-	switch (number) {
-	case 123: return "Goto SSN (not driver, gunner)";
-	case 124: return "Goto SSN (not driver)";
-	case 125: return "Goto SSN (any)";
-	case 126: return "Goto group";
-	case 127: return "Goto player";
-	default: return nullptr;
-	}
+// The mission's own text table as the graph scopes it ("<BASE>.BIN"), and the one the game loads in
+// its place where the mission has none ("MEDMSSN.BIN"): the by-name table's text row [orig:
+// TextResource_LoadMissionTextBin @0x51ed90; runtime/mission/mission_sidecars.h].
+std::string mission_text_table(const std::string &path) {
+	return strutil::to_upper(mission::sidecar_name(basename_of(path), *mission::sidecar_for_role("text")));
 }
+std::string mission_text_fallback() { return strutil::to_upper(mission::sidecar_for_role("text")->fallback); }
 
 // The lowest zone id in 1..99 no area trigger row holds [orig editor: dfx2med
 // Med_AreaTriggerDialogProc @0x40f400 lists zones 1..99]; 0 with none free.
@@ -112,49 +100,6 @@ size_t index_among(const std::vector<std::shared_ptr<const Node>> &rows, const N
 	return SIZE_MAX;
 }
 
-// The sections of a written mission in the loader's order [orig: Mission_LoadBMSFile @0x40f7b6], as
-// the bytes read lay them out (the two chunks by the lengths the file's header holds, bytes 578 and
-// 582, which the parse derives again from the records it kept; the tables by the records parsed):
-// the first whose bytes differ between the bytes read and the writer's (the header's count and
-// chunk length words apart, which the chunks' own difference explains); "" for none.
-std::string first_differing_section(const bms::File &file, const std::vector<uint8_t> &a, const std::vector<uint8_t> &b) {
-	struct Section {
-		const char *name;
-		size_t size;
-	};
-	const auto word = [&a](size_t at) { return at + 1 < a.size() ? size_t(a[at]) | (size_t(a[at + 1]) << 8) : size_t(0); };
-	const Section sections[] = {
-		{"header", bms::kHeaderSize},
-		{"loadout chunk", word(578)},
-		{"availability chunk", word(582)},
-		{"items", file.items.size() * bms::kEntitySize},
-		{"buildings", file.buildings.size() * bms::kEntitySize},
-		{"markers", file.markers.size() * bms::kEntitySize},
-		{"organics", file.organics.size() * bms::kEntitySize},
-		{"waypoint paths", size_t(bms::kWaypointRecordCount) * bms::kWaypointRecordSize},
-		{"groups", size_t(bms::kGroupRecordCount) * bms::kGroupRecordSize},
-		{"layers", size_t(bms::kLayerRecordCount) * bms::kLayerRecordSize},
-		{"area triggers", file.area_triggers.size() * bms::kAreaTriggerSize},
-		{"event counts", 12},
-		{"events", file.events.size() * bms::kEventSize},
-		{"triggers", file.triggers.size() * bms::kTriggerSize},
-		{"actions", file.actions.size() * bms::kActionSize},
-		{"bounding box count", 4},
-		{"bounding boxes", file.bounding_boxes.size() * bms::kBoundingBoxSize},
-	};
-	// The header's words the chunks' and the tables' sizes decide (its count and chunk lengths, bytes
-	// 576..579 and 582..583: bms.cpp's write).
-	const auto derived = [](size_t offset) { return (offset >= 576 && offset < 580) || (offset >= 582 && offset < 584); };
-	size_t at = 0;
-	for (const Section &section : sections) {
-		if (at + section.size > a.size() || at + section.size > b.size()) return section.name;
-		for (size_t i = 0; i < section.size; ++i)
-			if (a[at + i] != b[at + i] && !(at == 0 && derived(i))) return section.name;
-		at += section.size;
-	}
-	return a.size() == b.size() ? std::string() : std::string("length");
-}
-
 } // namespace
 
 // --- the rows ----------------------------------------------------------------------------------------
@@ -163,7 +108,7 @@ template <> std::string MissionRow::name() const { return native.get_mission_nam
 template <> std::string EntityRow::name() const { return std::to_string(native.id); }
 template <> std::string PathRow::name() const {
 	if (native.number == 0) return "None";
-	if (const char *command = path_command_name(native.number)) return command;
+	if (const char *command = path_command_editor_name(native.number)) return command;
 	return std::to_string(native.number);
 }
 template <> std::string AreaRow::name() const { return "Zone " + std::to_string(native.id); }
@@ -196,7 +141,7 @@ int32_t next_free_ssn(const std::vector<std::shared_ptr<const Node>> &rows) {
 	for (const auto &row : rows)
 		if (is_entity_kind(row->kind)) largest = std::max(largest, static_cast<const EntityRow &>(*row).native.id);
 	const int32_t next = largest + 1;
-	return next == int32_t(kPlayerSsn) ? next + 1 : next;
+	return next == kPlayerSsn ? next + 1 : next;
 }
 
 std::string mission_scope(const DocumentBase &document) { return strutil::to_upper(basename_of(document.path())); }
@@ -382,7 +327,7 @@ bool MissionDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 	// loadout chunk the game's sanitizer repairs, bytes past a table's records).
 	std::vector<uint8_t> written;
 	if (split && report.canonical() && bms::write(file, written, message) && written != bytes) {
-		const std::string section = first_differing_section(file, bytes, written);
+		const std::string section = bms::first_differing_section(file, bytes, written);
 		note(MissionFinding::RewriteDiffers, false,
 		     section == "length" ? std::string("The file holds bytes past what the writer writes: Save drops them.")
 		                         : "The file's " + section + " holds bytes the writer writes otherwise: Save writes " +
@@ -587,7 +532,7 @@ void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 	// SSN names no record of it, yet another entity is picked by name there (S15).
 	if (use.reference == ReferenceKind::MissionEntity) {
 		Value value;
-		if (get(address, id, value) && value == Value(kPlayerSsn)) {
+		if (get(address, id, value) && value == Value(int64_t(kPlayerSsn))) {
 			use.reference = ReferenceKind::None;
 			use.picks = ReferenceKind::MissionEntity;
 		}
@@ -603,15 +548,15 @@ void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 	// in the mission's own table, else medmssn.bin [orig: TextResource_LoadMissionTextBin @0x51ed90].
 	// The numbers the game looks a key up by: a nonzero name index (the spawn names no entity by 0), a
 	// win slot that is not empty (0 and 255 end the panel, mission_labels' mission_value_label).
-	const auto keyed = [&](const char *section, const char *prefix, int64_t first, int64_t last) {
+	const auto keyed = [&](const hud::TextKeyForm &form, int64_t first, int64_t last) {
 		use.picks = ReferenceKind::TextId;
-		use.scope = strutil::to_upper(mission_base_name(basename_of(path()))) + ".BIN/" + section;
-		use.scope_alternate = "MEDMSSN.BIN";
-		use.key_prefix = prefix;
+		use.scope = mission_text_table(path()) + "/" + form.section;
+		use.scope_alternate = mission_text_fallback();
+		use.key_prefix = form.prefix;
 		use.key_first = first;
 		use.key_last = last;
 	};
-	if (!address.child && is_entity_kind(address.kind) && id == "name_index") keyed("PeopleNames", "STRNAME", 1, INT32_MAX);
+	if (!address.child && is_entity_kind(address.kind) && id == "name_index") keyed(hud::kPeopleNameKey, 1, INT32_MAX);
 	// A waypoint's name id (record +0x60), which a type-6005 or 6006 marker's spawn keeps for the waypoint
 	// HUD, keying STRWPNAME%03i in WPNames, any number [orig: Entity_SpawnFromBMSRecord @0x40f0ad,
 	// @0x40f176: entity+672; HUD_GetWaypointName @0x59473d]; the type-6005 spawn looks the name up
@@ -619,13 +564,13 @@ void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 	if (!address.child && is_entity_kind(address.kind) && id == "ttool_index") {
 		const Node *node = row(address.row);
 		const int32_t type = node && is_entity_kind(node->kind) ? static_cast<const EntityRow &>(*node).native.type_id : 0;
-		if (type == kWaypointType || type == kWaypointRepeatType) {
+		if (type == def::DEF_TYPE_WAYPOINT || type == def::DEF_TYPE_KOTH_CENTRE) {
 			use.applies = Applicability::Reads;
-			keyed("WPNames", "STRWPNAME", 0, INT32_MAX);
+			keyed(hud::kWaypointNameKey, 0, INT32_MAX);
 		}
 	}
 	if (!address.child && address.kind == k(K::Mission) && id.compare(0, 15, "win_conditions[") == 0)
-		keyed("WinConditions", "STRWINCOND", 1, 254);
+		keyed(hud::kWinConditionKey, 1, 254);
 	// A Play dialog's or a Dialog trigger's number forms the dialog's name, dlg%03i, which the game finds in the
 	// mission's dialog bank (mission_references' Dialog edge): picked by the bank's dialogs, the number written; an
 	// action's dialog from 1 (0 plays none [orig: Dialog_PlayByIndex @ 0x527af4]), a trigger's any.
@@ -717,7 +662,6 @@ const MissionDocument::Lookups &MissionDocument::lookups() const {
 	made.by_kind.resize(kMissionKindCount);
 	made.groups.assign(256, 0);
 	std::unordered_map<int32_t, int> order; // the pool order of each SSN's first holder so far
-	int location = 0;
 	for (const auto &row : rows()) {
 		if (!row || row->kind < 0 || size_t(row->kind) >= kMissionKindCount) continue;
 		std::vector<const Node *> &of_kind = made.by_kind[size_t(row->kind)];
@@ -732,20 +676,28 @@ const MissionDocument::Lookups &MissionDocument::lookups() const {
 				made.ssns[entity.id] = row->id;
 			}
 			++made.groups[entity.group_id];
-			// [orig: Entity_SpawnFromBMSRecord @0x40f182..0x40f221: each def-type 2044 marker registers the
-			// next location name, in spawn order] (mission_references' LOCATION keys).
-			if (row->kind == k(K::Marker) && entity.type_id == 2044) made.locations.emplace(row->id, ++location);
 		} else if (row->kind == k(K::Area)) {
 			made.zones.emplace(static_cast<const AreaRow &>(*row).native.id, row->id);
 		}
 	}
-	// The player's route: the first path with the flag, its stops by their marker's index [orig:
-	// NetPacket_WriteWorldStateLoad0x0F @0x502e50, the count capped at 128 @0x502efc].
+	// The markers' location numbers, in spawn order (mission_references' LOCATION keys) [orig:
+	// Entity_SpawnFromBMSRecord @0x40f182..0x40f221: each def-type 2044 marker registers the next
+	// location name; runtime/mission/mission_text.h location_numbers].
 	const std::vector<const Node *> &markers = made.by_kind[size_t(K::Marker)];
+	std::vector<bms::Entity> marker_records;
+	marker_records.reserve(markers.size());
+	for (const Node *row : markers) marker_records.push_back(static_cast<const EntityRow &>(*row).native);
+	const std::vector<int32_t> locations = mission::location_numbers(marker_records);
+	for (size_t i = 0; i < markers.size(); ++i)
+		if (locations[i]) made.locations.emplace(markers[i]->id, int(locations[i]));
+	// The player's route: the first path with the flag, its stops by their marker's index [orig:
+	// NetPacket_WriteWorldStateLoad0x0F @0x502e50, the count capped at 128 @0x502efc]. The count stays
+	// this document's own unsigned min: bms::player_route_stop_count keeps promotion's signed compare,
+	// which walks no stop for a count of 2^31 or more (left for the IDA pass).
 	for (const Node *row : made.by_kind[size_t(K::WaypointPath)]) {
 		const bms::WaypointRecord &path = static_cast<const PathRow &>(*row).native.record;
-		if (!(uint32_t(path.flags) & uint32_t(bms::WaypointFlags::PlayerRoute))) continue;
-		const size_t count = std::min<size_t>({size_t(path.marker_count), path.waypoint_numbers.size(), size_t(128)});
+		if (!bms::is_player_route(path)) continue;
+		const size_t count = std::min<size_t>({size_t(path.marker_count), path.waypoint_numbers.size(), bms::kPlayerRouteMaxStops});
 		for (size_t i = 0; i < count; ++i)
 			if (path.waypoint_numbers[i] < markers.size()) made.route.insert(markers[path.waypoint_numbers[i]]->id);
 		break;
@@ -919,10 +871,8 @@ void mission_text_edges(const MissionDocument &document, const NodeAddress &addr
 	// The mission's own table, else the one the game loads in its place where the mission has none,
 	// never both [orig: TextResource_LoadMissionTextBin @0x51ed90]: the edge's alternate, which the
 	// graph reads only where the project has no table of the mission's name.
-	const std::string table = strutil::to_upper(mission_base_name(basename_of(document.path()))) + ".BIN";
-	const auto text = [&](const std::string &field, const char *section, const char *key, int64_t number) {
-		char name[32];
-		std::snprintf(name, sizeof(name), "%s%03i", key, int(number));
+	const std::string table = mission_text_table(document.path());
+	const auto text = [&](const std::string &field, const hud::TextKeyForm &form, int64_t number) {
 		GraphEdge edge;
 		edge.source = document.path();
 		if (placed) {
@@ -932,9 +882,9 @@ void mission_text_edges(const MissionDocument &document, const NodeAddress &addr
 		edge.address = address;
 		edge.field = field;
 		edge.kind = ReferenceKind::TextId;
-		edge.value = name;
-		edge.scope = table + "/" + section;
-		edge.scope_alternate = "MEDMSSN.BIN";
+		edge.value = hud::text_key(form, int(number));
+		edge.scope = table + "/" + form.section;
+		edge.scope_alternate = mission_text_fallback();
 		out.push_back(std::move(edge));
 	};
 	const bms::Header &head = header->native.header;
@@ -942,14 +892,14 @@ void mission_text_edges(const MissionDocument &document, const NodeAddress &addr
 		const bms::Entity &entity = static_cast<const EntityRow &>(*row).native;
 		// [orig: Entity_SpawnFromBMSRecord @0x40f182..0x40f221: each def-type 2044 marker registers the
 		// next location name, in spawn order]
-		if (const int location = document.location_of(*row)) text(std::string(), "Locations", "LOCATION", location);
+		if (const int location = document.location_of(*row)) text(std::string(), hud::kLocationKey, location);
 		// [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a: sprintf("STRNAME%03i", rec+4), gated
 		// on the index being nonzero]
-		if (const int64_t name = number_of("name_index", entity.name_index)) text("name_index", "PeopleNames", "STRNAME", name);
+		if (const int64_t name = number_of("name_index", entity.name_index)) text("name_index", hud::kPeopleNameKey, name);
 		// [orig: Entity_SpawnFromBMSRecord @0x40f0be..0x40f0e0: a type-6005 record's sprintf("STRWPNAME%03i",
 		// rec+0x60) looked up in WPNames for the waypoint's name, any number]
-		if (entity.type_id == kWaypointType) {
-			text("ttool_index", "WPNames", "STRWPNAME", number_of("ttool_index", entity.ttool_index));
+		if (entity.type_id == def::DEF_TYPE_WAYPOINT) {
+			text("ttool_index", hud::kWaypointNameKey, number_of("ttool_index", entity.ttool_index));
 			// Where the name is witnessed shown, a stop of the player's route (the waypoint HUD, which
 			// shows gametext's STRWPNAMEDEFAULT for a missing one [orig: HUD_GetWaypointName @0x59476f..
 			// 0x59477b]), a key the table lacks is a finding; any other waypoint's (the shipped missions'
@@ -965,7 +915,7 @@ void mission_text_edges(const MissionDocument &document, const NodeAddress &addr
 			const std::string field = "win_conditions[" + std::to_string(slot) + "]";
 			const int64_t win = number_of(field, head.win_conditions[slot]);
 			if (win == 0 || win == 255) break;
-			text(field, "WinConditions", "STRWINCOND", win);
+			text(field, hud::kWinConditionKey, win);
 		}
 		return;
 	}
@@ -983,20 +933,20 @@ void mission_text_edges(const MissionDocument &document, const NodeAddress &addr
 	// Text's ID%03i [orig: HUD_DisplayTriggeredText @0x51F190]. A slot past the eight reads a byte
 	// outside the header's tables, which the port does not model (runtime/world World::
 	// show_objective_notification): no edge.
-	const auto slot_text = [&](const uint8_t *ids, int64_t slot, const char *section, const char *key) {
-		if (slot >= 1 && slot <= 8) text("param1", section, key, ids[slot - 1]);
+	const auto slot_text = [&](const uint8_t *ids, int64_t slot, const hud::TextKeyForm &form) {
+		if (slot >= 1 && slot <= 8) text("param1", form, ids[slot - 1]);
 	};
 	const int64_t param1 = number_of("param1", action.param1), param2 = number_of("param2", action.param2);
 	switch (action.action_type) {
-	case bms::ActionType::SubGoalWon: slot_text(head.win_conditions, param1, "WinConditions", "STRWINMSG"); break;
-	case bms::ActionType::SubGoalLost: slot_text(head.lose_conditions, param1, "LoseConditions", "STRLOSEMSG"); break;
+	case bms::ActionType::SubGoalWon: slot_text(head.win_conditions, param1, hud::kWinMessageKey); break;
+	case bms::ActionType::SubGoalLost: slot_text(head.lose_conditions, param1, hud::kLoseMessageKey); break;
 	case bms::ActionType::ShowWinSubgoal:
-		if (param2 != 0) slot_text(head.win_conditions, param1, "WinConditions", "STRWINDIRECTIVE");
+		if (param2 != 0) slot_text(head.win_conditions, param1, hud::kWinDirectiveKey);
 		break;
 	case bms::ActionType::ShowLoseSubgoal:
-		if (param2 != 0) slot_text(head.lose_conditions, param1, "LoseConditions", "STRLOSEDIRECTIVE");
+		if (param2 != 0) slot_text(head.lose_conditions, param1, hud::kLoseDirectiveKey);
 		break;
-	case bms::ActionType::OutputText: text("param1", "Triggered Text", "ID", param1); break;
+	case bms::ActionType::OutputText: text("param1", hud::kTriggeredTextKey, param1); break;
 	default: break;
 	}
 }
