@@ -167,6 +167,11 @@ set_tests_properties(opennova_3di_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
 add_executable(threedi_o3d_commands_test threedi/o3d_commands_test.cpp)
 target_link_libraries(threedi_o3d_commands_test PRIVATE opennova_3di_commands)
 add_test(NAME threedi_o3d_commands COMMAND threedi_o3d_commands_test ${CMAKE_CURRENT_BINARY_DIR})
+# `texture`: an image written as a model's .dds, .tga or .mdt through the
+# runtime's image import and its authoring DXT encoder.
+add_executable(threedi_texture_command_test threedi/texture_command_test.cpp)
+target_link_libraries(threedi_texture_command_test PRIVATE opennova_3di_commands)
+add_test(NAME threedi_texture_command COMMAND threedi_texture_command_test ${CMAKE_CURRENT_BINARY_DIR})
 # build -> scene -> build over small scenes, and the records build refuses
 # (the executable too, where a refusal must say why).
 add_executable(threedi_o3d_build_test threedi/o3d_build_test.cpp)
@@ -1115,7 +1120,7 @@ foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_win
         particle_atlas_contract particle_frame_compiler_contract render_order
         frame_fx_effects nvg_scope_lens q3_frame render_slot_shadow
         scene_overlay state_vectors tracer_frame precipitation_frame texture_dxt texture_load_rules
-        d3dx_image_codecs device_texture texture_filter d3d9_raster)
+        texture_authoring d3dx_image_codecs device_texture texture_filter d3d9_raster)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
     target_link_libraries(renderer_${test}_test PRIVATE opennova_runtime opennova_formats)
     target_include_directories(renderer_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1148,12 +1153,33 @@ target_link_libraries(pcx_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(pcx_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pcx_roundtrip COMMAND pcx_roundtrip_test)
 
+# The 256-colour quantizer an 8-bit PCX is written through (formats/pcx/pcx_quantize.h).
+add_executable(pcx_quantize_test pcx/pcx_quantize_test.cpp)
+target_link_libraries(pcx_quantize_test PRIVATE opennova_formats)
+target_include_directories(pcx_quantize_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME pcx_quantize COMMAND pcx_quantize_test)
+
+# The PNG reader and writer (formats/png): every color type and depth, the filters,
+# the refusals, a palette image's indices, grey at its depth, the IHDR size, a round trip.
+add_executable(png_codec_test png/png_codec_test.cpp)
+target_link_libraries(png_codec_test PRIVATE opennova_formats)
+target_include_directories(png_codec_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME png_codec COMMAND png_codec_test)
+
 # The game's TGA reader (formats/tga/tga_read.h): the unconditional flip, the
 # pixel start, the forms it reads and the ones it zero-fills.
 add_executable(tga_read_test tga/tga_read_test.cpp)
 target_link_libraries(tga_read_test PRIVATE opennova_formats)
 target_include_directories(tga_read_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME tga_read COMMAND tga_read_test)
+
+# The TGA an import source is read by (formats/tga/tga_source.h), the format's own
+# decode: every origin, depth, colour map and run-length form decoded upright, and what
+# it refuses.
+add_executable(tga_source_test tga/tga_source_test.cpp)
+target_link_libraries(tga_source_test PRIVATE opennova_formats)
+target_include_directories(tga_source_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tga_source COMMAND tga_source_test)
 
 # The texture writers the editor's placeholder textures go through (S11h): every header
 # byte and the pixels' order, each read back as the game's readers read the file; and the

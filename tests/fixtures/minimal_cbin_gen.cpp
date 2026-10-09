@@ -5,9 +5,10 @@
 //    carries the top_y/bottom_y bounds); a fixed XOR key per file keeps the
 //    bytes reproducible. The shipped trio is cbin_roundtrip's reference-tree leg.
 //  * credits_image.png — the 8x8 RGB image the credits tests stage beside a
-//    .kda under the name its ~F image row references (a self-contained PNG
-//    writer with one stored zlib block, so no compressor is involved and every
-//    platform mints the same bytes; the pixels are an integer gradient).
+//    .kda under the name its ~F image row references (the tests' PNG writer,
+//    common/png_test_support.h, with one stored zlib block, so no compressor is
+//    involved and every platform mints the same bytes; the pixels are an
+//    integer gradient).
 //  * particle_dot.tga — the 8x8 BGRA sprite the effect-world test's synthetic
 //    particle file names as its layer texture (a soft white dot on transparent).
 // No retail file is carried.
@@ -26,6 +27,7 @@
 #include <vector>
 
 #include "common/file_io.h"
+#include "common/png_test_support.h"
 
 namespace {
 
@@ -37,74 +39,22 @@ bool expect(bool cond, const char *msg) {
 	return cond;
 }
 
-uint32_t crc32_of(const uint8_t *data, size_t size) {
-	static uint32_t table[256];
-	static bool built = false;
-	if (!built) {
-		for (uint32_t n = 0; n < 256; ++n) {
-			uint32_t c = n;
-			for (int k = 0; k < 8; ++k) c = (c & 1) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
-			table[n] = c;
-		}
-		built = true;
-	}
-	uint32_t c = 0xFFFFFFFFu;
-	for (size_t i = 0; i < size; ++i) c = table[(c ^ data[i]) & 0xFFu] ^ (c >> 8);
-	return c ^ 0xFFFFFFFFu;
-}
-
-void put_be32(std::vector<uint8_t> &out, uint32_t v) {
-	out.push_back(static_cast<uint8_t>(v >> 24));
-	out.push_back(static_cast<uint8_t>(v >> 16));
-	out.push_back(static_cast<uint8_t>(v >> 8));
-	out.push_back(static_cast<uint8_t>(v));
-}
-
-void put_chunk(std::vector<uint8_t> &out, const char *type, const std::vector<uint8_t> &data) {
-	put_be32(out, static_cast<uint32_t>(data.size()));
-	std::vector<uint8_t> crc_input(type, type + 4);
-	crc_input.insert(crc_input.end(), data.begin(), data.end());
-	out.insert(out.end(), type, type + 4);
-	out.insert(out.end(), data.begin(), data.end());
-	put_be32(out, crc32_of(crc_input.data(), crc_input.size()));
-}
-
+// The credits image: 8-bit RGB, no interlace, each row behind filter 0, its pixels an
+// integer gradient, written by the shared stored-deflate PNG writer.
 std::vector<uint8_t> make_png() {
-	std::vector<uint8_t> out = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
-
-	std::vector<uint8_t> ihdr;
-	put_be32(ihdr, kWidth);
-	put_be32(ihdr, kHeight);
-	ihdr.insert(ihdr.end(), {8, 2, 0, 0, 0});  // 8-bit RGB, no interlace
-	put_chunk(out, "IHDR", ihdr);
-
-	// Raw scanlines: filter byte 0 + RGB per pixel; an integer gradient.
-	std::vector<uint8_t> raw;
+	test_png::PngSpec spec;
+	spec.width = kWidth;
+	spec.height = kHeight;
+	spec.color_type = 2; // RGB
 	for (uint32_t y = 0; y < kHeight; ++y) {
-		raw.push_back(0);
+		spec.rows.push_back(0);
 		for (uint32_t x = 0; x < kWidth; ++x) {
-			raw.push_back(static_cast<uint8_t>(x * 32));
-			raw.push_back(static_cast<uint8_t>(y * 32));
-			raw.push_back(static_cast<uint8_t>(255 - (x + y) * 16));
+			spec.rows.push_back(static_cast<uint8_t>(x * 32));
+			spec.rows.push_back(static_cast<uint8_t>(y * 32));
+			spec.rows.push_back(static_cast<uint8_t>(255 - (x + y) * 16));
 		}
 	}
-	// zlib: header, one final stored block, adler32.
-	std::vector<uint8_t> idat = {0x78, 0x01, 0x01};
-	const uint16_t len = static_cast<uint16_t>(raw.size());
-	idat.push_back(static_cast<uint8_t>(len & 0xFF));
-	idat.push_back(static_cast<uint8_t>(len >> 8));
-	idat.push_back(static_cast<uint8_t>(~len & 0xFF));
-	idat.push_back(static_cast<uint8_t>((~len >> 8) & 0xFF));
-	idat.insert(idat.end(), raw.begin(), raw.end());
-	uint32_t a = 1, b = 0;
-	for (uint8_t byte : raw) {
-		a = (a + byte) % 65521u;
-		b = (b + a) % 65521u;
-	}
-	put_be32(idat, (b << 16) | a);
-	put_chunk(out, "IDAT", idat);
-	put_chunk(out, "IEND", {});
-	return out;
+	return test_png::make_png(spec);
 }
 
 // An uncompressed 32-bit true-color TGA (image type 2, bottom-left origin,
