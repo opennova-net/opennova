@@ -12,6 +12,7 @@
 #include <editor/project/project_files.h>
 #include <runtime/audio/volume_law.h>
 
+#include "audio/sound_bank.h"
 #include "lwf/wav_loader.h"
 
 namespace godot {
@@ -75,8 +76,7 @@ PreviewSoundPlayer::State PreviewSoundPlayer::pump(std::string &r_error) {
 			// Each its own name, in the voices' order (a dialog's lines, DI-32): PreviewSound, PreviewSound2, ...
 			voice.player->set_name(made ? String("PreviewSound") + String::num_int64(int64_t(made) + 1) : String("PreviewSound"));
 			voice.player->set_stream(stream);
-			const double pitch = double(voice.voice.pitch_q16) / 65536.0;
-			voice.player->set_pitch_scale(pitch > 0.01 ? pitch : 1.0);
+			voice.player->set_pitch_scale(SoundBank::pitch_scale_from_q16(voice.voice.pitch_q16));
 			voice.player->set_volume_db(opennova::audio::volume_db_from_byte(voice.voice.volume));
 			parent_->add_child(voice.player);
 			++made;
@@ -102,19 +102,16 @@ PreviewSoundPlayer::State PreviewSoundPlayer::pump(std::string &r_error) {
 
 // --- PreviewWaveStreams ------------------------------------------------------------------------------
 
-Ref<AudioStreamWAV> PreviewWaveStreams::stream(const std::string &p_file, bool &r_failed, int64_t *r_frames) {
+Ref<AudioStreamWAV> PreviewWaveStreams::stream(const std::string &p_file, bool &r_failed) {
 	const opennova::editor::PreviewWaves::Wave wave = waves_.wave(p_file);
 	r_failed = wave.state == opennova::editor::PreviewWaves::State::Failed;
-	if (r_frames) *r_frames = 0;
 	if (wave.state != opennova::editor::PreviewWaves::State::Decoded) return Ref<AudioStreamWAV>();
 	Boxed &boxed = streams_[p_file];
 	if (boxed.serial != wave.serial) {
 		boxed.serial = wave.serial;
 		boxed.stream = WavLoader::from_pcm(*wave.pcm);
-		boxed.frames = wave.pcm->channels > 0 ? int64_t(wave.pcm->pcm16.size() / (2u * wave.pcm->channels)) : 0;
 	}
 	r_failed = boxed.stream.is_null();
-	if (r_frames) *r_frames = r_failed ? 0 : boxed.frames;
 	return boxed.stream;
 }
 
@@ -147,8 +144,7 @@ void PreviewSoundVoices::pump() {
 		AudioStreamPlayer *player = memnew(AudioStreamPlayer);
 		player->set_name("ClipSound");
 		player->set_stream(stream);
-		const double pitch = double(ready.voice.pitch_q16) / 65536.0;
-		player->set_pitch_scale(pitch > 0.01 ? pitch : 1.0);
+		player->set_pitch_scale(SoundBank::pitch_scale_from_q16(ready.voice.pitch_q16));
 		player->set_volume_db(opennova::audio::volume_db_from_byte(ready.voice.volume));
 		parent_->add_child(player);
 		player->play();
@@ -222,23 +218,16 @@ void PreviewSoundLoops::follow(const std::string &p_root, const std::vector<Chan
 		if (file.empty() || voice.failed) continue;
 		if (voice.player == nullptr) {
 			bool failed = false;
-			int64_t frames = 0;
-			const Ref<AudioStreamWAV> decoded = waves_.stream(file, failed, &frames);
+			const Ref<AudioStreamWAV> decoded = waves_.stream(file, failed);
 			voice.failed = failed;
 			if (decoded.is_null()) continue;
-			// Its own looping copy of the whole wave (the cached stream stays a one-shot's) [the native ambient loop,
-			// D-SND-6: a channel's descriptor loops].
-			Ref<AudioStreamWAV> loop = decoded->duplicate();
-			loop->set_loop_mode(AudioStreamWAV::LOOP_FORWARD);
-			loop->set_loop_begin(0);
-			loop->set_loop_end(frames);
 			AudioStreamPlayer3D *player = memnew(AudioStreamPlayer3D);
 			player->set_name(String("ListenChannel") + String::num_int64(int64_t(i)));
-			player->set_stream(loop);
+			// Its own looping copy of the whole wave (the cached stream stays a one-shot's) [the native ambient loop,
+			// D-SND-6: a channel's descriptor loops].
+			player->set_stream(SoundBank::loop_copy(decoded));
 			// The mix owns the volume: no attenuation on top, only the panner (the game's ambient channels, D-SND-8).
-			player->set_attenuation_model(AudioStreamPlayer3D::ATTENUATION_DISABLED);
-			player->set_max_distance(0.0);
-			player->set_doppler_tracking(AudioStreamPlayer3D::DOPPLER_TRACKING_DISABLED);
+			SoundBank::configure_unattenuated_3d(player);
 			parent_->add_child(player);
 			voice.player = player;
 			// Started once from its wave's beginning; held and let go by the pause alone after.
@@ -251,8 +240,7 @@ void PreviewSoundLoops::follow(const std::string &p_root, const std::vector<Chan
 		const double linear = double(std::max(channel.volume, 0)) / double(opennova::audio::kVolumeByteMax) * master;
 		player->set_volume_db(float(linear > 0.0 ? opennova::audio::volume_db_from_byte(int32_t(std::lround(linear * 255.0)))
 		                                         : opennova::audio::kVolumeSilentDb));
-		const double pitch = double(channel.pitch_q16) / 65536.0;
-		player->set_pitch_scale(float(pitch > 0.01 ? pitch : 1.0));
+		player->set_pitch_scale(float(SoundBank::pitch_scale_from_q16(channel.pitch_q16)));
 		// Held or let go each frame: a 3D player's playback starts at its next physics step, and a pause asked of one
 		// not started yet is not kept.
 		player->set_stream_paused(!p_audible);
