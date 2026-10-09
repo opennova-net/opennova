@@ -1,6 +1,8 @@
 #include <net/napi/session.h>
 #include <net/napi/tlv.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -195,6 +197,194 @@ bool check_server_command_parse() {
 	return true;
 }
 
+// The service side: ServerCommand composed and built, then read back by the host's parser for
+// every verb and target form; ServerStopHosting read back by the result-field parser.
+bool check_server_statement_builders() {
+	using namespace opennova;
+	const NapiMessage cycle = make_server_command("Cycle");
+	ServerCommand out;
+	if (!expect(cycle.name == "ServerCommand" && cycle.fields.size() == 1 && cycle.fields[0].name == "Cmd" &&
+	                    field_str(cycle, "Cmd") == "Cycle",
+	            "ServerCommand carries exactly one Cmd param")) return false;
+	if (!expect(parse_server_command(cycle, out) && out.verb == ServerCommandVerb::Cycle &&
+	                    out.target == ServerCommandTarget::None && out.args.empty(),
+	            "the built Cycle parses back")) return false;
+
+	// Every verb in the enum, so a verb added later fails here rather than slipping by (the
+	// unnamed-value check after the walk catches one appended past DisarmPlayer).
+	const ServerCommandTarget kTargets[] = {ServerCommandTarget::ByIndex, ServerCommandTarget::ByIpAndPort,
+	                                        ServerCommandTarget::ByName, ServerCommandTarget::ByPCID};
+	auto player_targeted = [](ServerCommandVerb v) {
+		switch (v) {
+			case ServerCommandVerb::PuntPlayer:
+			case ServerCommandVerb::TextChatPlayer:
+			case ServerCommandVerb::CmdEchoPlayer:
+			case ServerCommandVerb::KillPlayer:
+			case ServerCommandVerb::ChangeTeam:
+			case ServerCommandVerb::SwapTeam:
+			case ServerCommandVerb::ReloadPlayer:
+			case ServerCommandVerb::DisarmPlayer: return true;
+			default: return false;
+		}
+	};
+	// The witnessed token-count gates, as args after the verb (`cmp edi, N; jle` to the no-op tail;
+	// 0 where every arg is optional or none is read).
+	auto min_args = [](ServerCommandVerb v) -> size_t {
+		switch (v) {
+			case ServerCommandVerb::TextChatPlayer:
+			case ServerCommandVerb::CmdEchoPlayer: return 2;
+			case ServerCommandVerb::Cycle:
+			case ServerCommandVerb::EndMission:
+			case ServerCommandVerb::GameOver:
+			case ServerCommandVerb::Earthquake:
+			case ServerCommandVerb::Lightning:
+			case ServerCommandVerb::TimeOfDay: return 0;
+			default: return 1;
+		}
+	};
+	auto round_trip = [&](ServerCommandVerb v, ServerCommandTarget t, const std::vector<std::string> &args) {
+		const std::string text = server_command_text(v, t, args);
+		ServerCommand parsed;
+		return !text.empty() && parse_server_command(make_server_command(text), parsed) && parsed.verb == v &&
+		       parsed.target == t &&
+		       parsed.command == std::string(server_command_verb_name(v)) + server_command_target_name(t) &&
+		       parsed.args == args;
+	};
+	int covered = 0;
+	for (int i = 1; i <= static_cast<int>(ServerCommandVerb::DisarmPlayer); ++i) {
+		const auto v = static_cast<ServerCommandVerb>(i);
+		if (player_targeted(v)) {
+			for (const ServerCommandTarget t : kTargets) {
+				if (!expect(round_trip(v, t, {"Some Guy", "42"}),
+				            "a player-targeted verb round-trips every target form")) {
+					std::fprintf(stderr, "  verb %s target %s\n", server_command_verb_name(v),
+					             server_command_target_name(t));
+					return false;
+				}
+			}
+		} else if (!expect(round_trip(v, ServerCommandTarget::None, {"hello all"}),
+		                   "a whole-token verb round-trips its quoted arg")) {
+			std::fprintf(stderr, "  verb %s\n", server_command_verb_name(v));
+			return false;
+		}
+		if (!expect(server_command_verb_takes_target(v) == player_targeted(v),
+		            "server_command_verb_takes_target agrees with the witnessed prefix verbs")) {
+			std::fprintf(stderr, "  verb %s\n", server_command_verb_name(v));
+			return false;
+		}
+		// The arity gate: exactly the verb's minimum composes and parses back; one short is refused.
+		const ServerCommandTarget t0 = player_targeted(v) ? ServerCommandTarget::ByName : ServerCommandTarget::None;
+		const size_t need = min_args(v);
+		if (!expect(round_trip(v, t0, std::vector<std::string>(need, "7")), "the verb's minimum args compose") ||
+		    !expect(need == 0 || server_command_text(v, t0, std::vector<std::string>(need - 1, "7")).empty(),
+		            "one arg short of the verb's token-count gate composes nothing")) {
+			std::fprintf(stderr, "  verb %s\n", server_command_verb_name(v));
+			return false;
+		}
+		++covered;
+	}
+	if (!expect(covered == 18, "all eighteen verbs walked")) return false;
+	// An unnamed value past DisarmPlayer: a verb appended to the enum gets a name and fails here.
+	if (!expect(std::string(server_command_verb_name(static_cast<ServerCommandVerb>(covered + 1))).empty(),
+	            "no verb past DisarmPlayer")) return false;
+
+	// Quoting is the tokenizer's inverse: the empty token and an embedded tab survive.
+	const std::vector<std::string> odd = {"Some Guy", "", "x\ty"};
+	const std::string quoted = server_command_text(ServerCommandVerb::PuntPlayer, ServerCommandTarget::ByName, odd);
+	if (!expect(quoted == "PuntPlayerByName \"Some Guy\" \"\" \"x\ty\"", "empty and whitespace-bearing args quoted"))
+		return false;
+	if (!expect(parse_server_command(make_server_command(quoted), out) && out.args == odd,
+	            "the quoted args parse back as three tokens")) return false;
+	if (!expect(server_command_text(ServerCommandVerb::PuntPlayer, ServerCommandTarget::ByIndex, {"42"}) ==
+	                    "PuntPlayerByIndex 42",
+	            "a plain arg is not quoted")) return false;
+	// A byte >= 0x80 is quoted: the host's tokenizer runs isspace in its ANSI code page (0xA0 is a
+	// space on cp1252), and a quoted run is copied as it is.
+	const std::vector<std::string> high = {"Some\xA0Guy", "caf\xE9"};
+	const std::string high_text =
+		server_command_text(ServerCommandVerb::TextChatPlayer, ServerCommandTarget::ByName, high);
+	if (!expect(high_text == "TextChatPlayerByName \"Some\xA0Guy\" \"caf\xE9\"",
+	            "a high-byte arg is quoted")) return false;
+	if (!expect(parse_server_command(make_server_command(high_text), out) && out.args == high,
+	            "the high-byte args parse back whole")) return false;
+
+	// Refusals: no verb, a pairing the reader drops, too few args, an unrepresentable quote or NUL,
+	// a text the reader would clip.
+	if (!expect(server_command_text(ServerCommandVerb::None, ServerCommandTarget::None, {}).empty(),
+	            "verb None composes nothing")) return false;
+	if (!expect(server_command_text(ServerCommandVerb::PuntPlayer, ServerCommandTarget::None, {"42"}).empty(),
+	            "a player-targeted verb with no suffix composes nothing")) return false;
+	if (!expect(server_command_text(ServerCommandVerb::Cycle, ServerCommandTarget::ByName, {}).empty(),
+	            "a whole-token verb with a suffix composes nothing")) return false;
+	if (!expect(server_command_text(ServerCommandVerb::TextChatPlayer, ServerCommandTarget::ByName, {"Some Guy"})
+	                    .empty(),
+	            "TextChatPlayer with no message composes nothing")) return false;
+	if (!expect(server_command_text(ServerCommandVerb::TextChatServer, ServerCommandTarget::None, {"say \"hi\""})
+	                    .empty(),
+	            "an arg holding a quote composes nothing")) return false;
+	if (!expect(server_command_text(ServerCommandVerb::PuntPlayer, ServerCommandTarget::ByName,
+	                                {std::string("a\0b", 3)})
+	                    .empty(),
+	            "an arg holding a NUL composes nothing")) return false;
+	const std::string too_long =
+		server_command_text(ServerCommandVerb::Cycle, ServerCommandTarget::None, {std::string(506, 'a')});
+	if (!expect(too_long.empty(), "a 512-char text is refused (the reader keeps 511)")) return false;
+	const std::string fits =
+		server_command_text(ServerCommandVerb::Cycle, ServerCommandTarget::None, {std::string(505, 'a')});
+	if (!expect(fits.size() == SERVER_COMMAND_CMD_CAP - 1 && parse_server_command(make_server_command(fits), out) &&
+	                    out.verb == ServerCommandVerb::Cycle && out.args.size() == 1 && out.args[0].size() == 505,
+	            "a 511-char text round-trips whole")) return false;
+	const std::string raw = "TextChatServer " + std::string(585, 'b');
+	const NapiMessage raw_cmd = make_server_command(raw);
+	if (!expect(raw_cmd.fields[0].data.size() == 600, "make_server_command never clips")) return false;
+	if (!expect(parse_server_command(raw_cmd, out) && out.args.size() == 1 &&
+	                    out.command.size() + 1 + out.args[0].size() == SERVER_COMMAND_CMD_CAP - 1,
+	            "the reader clips the raw Cmd to 511 characters")) return false;
+
+	// ServerStopHosting: the three params HandleServerMessage reads, no Success.
+	const NapiMessage stop = make_server_stop_hosting(7, 1, 2);
+	if (!expect(stop.name == "ServerStopHosting" && stop.fields.size() == 3 && stop.fields[0].name == "MsgCode" &&
+	                    stop.fields[1].name == "MsgParam1" && stop.fields[2].name == "MsgParam2" &&
+	                    field_str(stop, "MsgCode") == "7" && field_str(stop, "MsgParam1") == "1" &&
+	                    field_str(stop, "MsgParam2") == "2",
+	            "ServerStopHosting carries MsgCode/MsgParam1/MsgParam2 in order, no Success")) return false;
+	const ServerResultFields fields = parse_server_result_fields(stop);
+	if (!expect(fields.msg_code == 7 && fields.msg_param1 == 1 && fields.msg_param2 == 2 && fields.success == 0,
+	            "the result-field parser reads the triple back")) return false;
+	if (!expect(novaworld_server_msg_code_key(fields.msg_code) == "NWUSERVERMSGCODE_NOVAWORLDSYSOPPUNT",
+	            "MsgCode 7 maps to the sysop punt key")) return false;
+	const NapiMessage stop_default = make_server_stop_hosting(4000);
+	if (!expect(field_str(stop_default, "MsgCode") == "4000" && field_str(stop_default, "MsgParam1") == "0" &&
+	                    field_str(stop_default, "MsgParam2") == "0",
+	            "the params default to 0")) return false;
+
+	// The wire leg: both statements survive the TLV stream encode/decode.
+	const NapiMessage punt = make_server_command(
+		server_command_text(ServerCommandVerb::PuntPlayer, ServerCommandTarget::ByName, {"Some Guy", "42"}));
+	const std::vector<NapiMessage> stream = {punt, make_server_stop_hosting(3)};
+	std::vector<uint8_t> buf(napi_stream_size(stream) + 16, 0);
+	size_t enc_size = 0;
+	if (!expect(napi_stream_encode(stream, buf.data(), buf.size(), &enc_size) == 0, "encode the service statements"))
+		return false;
+	std::vector<NapiMessage> decoded;
+	size_t consumed = 0;
+	if (!expect(napi_stream_decode(buf.data(), enc_size, decoded, &consumed) == 0 && decoded.size() == 2,
+	            "decode the service statements")) return false;
+	for (size_t i = 0; i < stream.size(); ++i) {
+		bool same = decoded[i].name == stream[i].name && decoded[i].fields.size() == stream[i].fields.size();
+		for (size_t f = 0; same && f < stream[i].fields.size(); ++f) {
+			same = decoded[i].fields[f].name == stream[i].fields[f].name &&
+			       decoded[i].fields[f].data == stream[i].fields[f].data;
+		}
+		if (!expect(same, "a service statement round-trips the TLV stream")) return false;
+	}
+	if (!expect(parse_server_command(decoded[0], out) && out.verb == ServerCommandVerb::PuntPlayer &&
+	                    out.target == ServerCommandTarget::ByName &&
+	                    out.args == std::vector<std::string>{"Some Guy", "42"},
+	            "the decoded ServerCommand parses to the composed command")) return false;
+	return true;
+}
+
 // The host-side and client-side statement builders added for the registration/play legs.
 bool check_leg_builders() {
 	using namespace opennova;
@@ -359,10 +549,11 @@ int main() {
 	if (!check_host_and_gate_error_maps()) return 1;
 	if (!check_server_result_parsers()) return 1;
 	if (!check_server_command_parse()) return 1;
+	if (!check_server_statement_builders()) return 1;
 	if (!check_leg_builders()) return 1;
 	if (!check_state_values()) return 1;
 	if (!check_handshake_names()) return 1;
 	if (!check_handshake_wire_roundtrip()) return 1;
-	std::printf("OK: session state + NWEC map + handshake builders + wire roundtrip\n");
+	std::printf("OK: session state + NWEC map + handshake builders + wire roundtrip + service statement builders\n");
 	return 0;
 }
