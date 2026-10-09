@@ -1,10 +1,14 @@
 #include <editor/preview/menu_sounds.h>
 
+#include <cstdio>
+
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/mnu_document.h>
 #include <formats/lwf/lwf.h>
 #include <formats/mnu/mnu.h>
+#include <runtime/audio/oneshot_play.h>
 #include <runtime/menu/menu_sound.h>
 
 namespace opennova::editor {
@@ -56,7 +60,8 @@ bool read_menu_sound_options(const io::JsonValue &json, MenuSoundOptions &held, 
 
 // --- MenuSoundBanks ----------------------------------------------------------------------------------
 
-const PreviewBank *MenuSoundBanks::bank(const ProjectAssetSource &files, const std::string &name) {
+const PreviewBank *MenuSoundBanks::bank(const ProjectAssetSource &files, const std::string &name, int32_t *key) {
+	if (key) *key = 0;
 	if (name.empty()) return nullptr;
 	// The menu's collection holds a bank once, its names compared without case [orig:
 	// SoundBank_CollectionAddOrRef @ 0x652b40, stricmp].
@@ -64,7 +69,10 @@ const PreviewBank *MenuSoundBanks::bank(const ProjectAssetSource &files, const s
 	for (Held &each : held_)
 		if (strutil::iequals(each.name, name)) held = &each;
 	const uint64_t stamp = files.stamp(name);
-	if (held && held->stamp == stamp) return held->read ? &banks_[held->index] : nullptr;
+	if (held && held->stamp == stamp) {
+		if (key && held->read) *key = int32_t(held->index + 1);
+		return held->read ? &banks_[held->index] : nullptr;
+	}
 	if (!held) {
 		held_.push_back(Held());
 		held = &held_.back();
@@ -83,6 +91,7 @@ const PreviewBank *MenuSoundBanks::bank(const ProjectAssetSource &files, const s
 	held->read = files.read(name, bytes) && !bytes.empty() &&
 	             lwf::parse_lwf_buffer(bytes.data(), bytes.size(), bank.file, error);
 	if (!held->read) bank.file = lwf::File();
+	if (key && held->read) *key = int32_t(held->index + 1);
 	return held->read ? &bank : nullptr;
 }
 
@@ -113,7 +122,9 @@ MenuSoundFired plan_menu_sound(const mnu::Sound &row, MenuSoundBanks &banks, con
 	sound.set = row.trigger;
 	sound.bank = row.file;
 	// Its own bank alone [orig: sound_collection_play_trigger @ 0x652de0 plays from the row's bank entry].
-	if (!banks.bank(files, row.file)) {
+	int32_t key = 0;
+	const PreviewBank *bank = banks.bank(files, row.file, &key);
+	if (!bank) {
 		sound.state = "no_bank";
 		sound.words = row.trigger + ": " +
 		              (row.file.empty() ? std::string("the SOUND names no bank")
@@ -121,13 +132,38 @@ MenuSoundFired plan_menu_sound(const mnu::Sound &row, MenuSoundBanks &banks, con
 		              ", so the game plays nothing.";
 		return fired;
 	}
-	const PreviewPlay play = plan_set_play(banks.banks(), std::string(), row.trigger, row.file, selector, 6, nullptr,
-	                                       menu::kMenuMasterVolumeDefault);
-	sound.words = play.words;
-	if (play.found) sound.set = play.set;
-	sound.state = !play.found ? "missing" : play.voices.empty() ? "silent" : mute ? "muted" : "played";
-	for (const PreviewVoice &voice : play.voices)
-		sound.voices.push_back({voice.wave, voice.file, std::string(), voice.pitch_q16, voice.volume});
+	// The bank's first set of the name, without case [orig: SoundBank_FindTriggerByName @ 0x75be90], played as
+	// the menu plays it: menu::plan_menu_sound, the game's own (no listener view filters its layers, no jitter
+	// draws) [orig: SoundBank_PlayTriggerEntries @ 0x75ccd0].
+	const int32_t index = row.trigger.empty() ? -1 : audio::find_bank_set(bank->file, row.trigger);
+	if (index < 0) {
+		sound.state = "missing";
+		sound.words = row.trigger.empty() ? std::string("No set is named: the game plays nothing.")
+		                                  : row.file + " has no set named " + row.trigger + ": the game plays nothing.";
+		return fired;
+	}
+	sound.set = bank->file.multis[size_t(index)].name;
+	std::string words;
+	for (const menu::MenuSoundVoice &voice :
+	     menu::plan_menu_sound(bank->file, key, row.trigger, menu::kMenuMasterVolumeDefault, selector)) {
+		if (voice.path.empty()) continue; // a member naming no wave: nothing plays
+		ClipSoundFired::Voice out;
+		for (const lwf::Single &single : bank->file.singles)
+			if (single.path == voice.path) {
+				out.wave = single.name;
+				break;
+			}
+		out.file = io::utf8_file_name(voice.path);
+		out.pitch_q16 = lwf::pitch_to_q16(voice.pitch);
+		out.volume = voice.volume;
+		char pitch[32];
+		std::snprintf(pitch, sizeof(pitch), "%.2f", voice.pitch);
+		words += (words.empty() ? "" : "; ") + out.file + " at pitch " + pitch + ", volume " + std::to_string(out.volume);
+		sound.voices.push_back(std::move(out));
+	}
+	sound.words = sound.set + " in " + bank->name +
+	              (words.empty() ? std::string(": no layer has a member to play.") : ": " + words + ".");
+	sound.state = sound.voices.empty() ? "silent" : mute ? "muted" : "played";
 	if (scan) find_clip_sound_waves(sound, *scan);
 	return fired;
 }

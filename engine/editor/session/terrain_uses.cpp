@@ -42,13 +42,6 @@ bool read_text(const SessionView &view, const std::string &path, std::string &ou
 	return true;
 }
 
-std::string stem_of(const std::string &path) {
-	std::string name = basename_of(path);
-	const size_t dot = name.find_last_of('.');
-	if (dot != std::string::npos) name.erase(dot);
-	return name;
-}
-
 // The import an output comes from: its set read, the images it names, its record's options (S20).
 void read_import(const SessionView &view, const AssetEntry &entry, TerrainImport &out) {
 	if (entry.imported_from.empty()) return;
@@ -123,7 +116,9 @@ TerrainUses terrain_uses(const SessionView &view, const std::string &path) {
 		TerrainMissionUse use;
 		use.edge = edge;
 		use.mission = edge->source;
-		use.name = stem_of(source->logical_name);
+		// What <mission>.til is named by: the name cut at its first dot, as the game's extension swap cuts it
+		// (mission::mission_base_name).
+		use.name = mission::mission_base_name(source->logical_name);
 		// The environment the same header names, and the file it finds.
 		for (const GraphEdge *reference : graph->references_of(edge->source)) {
 			if (reference->kind != ReferenceKind::Environment) continue;
