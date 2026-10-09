@@ -1,5 +1,6 @@
 #include "radio_call.h"
 #include "world.h"
+#include <formats/def/reserved_items.h>
 #include <runtime/audio/sound_profile.h>
 #include <base/io/strutil.h>
 #include <cmath>
@@ -27,7 +28,7 @@ int32_t capture_zone_max_coverage(const World &world, const Entity &entity) {
     int32_t best = -1;
     for (size_t i = 0; i < world.registry.pool_capacity(3); ++i) {
         const Entity *e = world.registry.get(EntityHandle::make(3, static_cast<int>(i)));
-        if (!e || !e->has_item_def || e->item_id != 6006 || e->team != 0) continue;
+        if (!e || !e->has_item_def || e->item_id != def::DEF_TYPE_KOTH_CENTRE || e->team != 0) continue;
         const int32_t radius = to_fixed(e->bound_radius);
         if (radius <= 0) continue;
         const auto abs_delta = [](int32_t a, int32_t b) {

@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include <formats/def/reserved_items.h>
 #include <net/npwire/ingame_encode.h>   // encode_chat_broadcast / encode_player_downed_state / encode_play_sound
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/audio/sound_profile.h> // compose_entity_sound_set — the 0x2E MEDIC_REQUEST composite
@@ -59,7 +60,7 @@ const std::string *location_label(const NapiNPServerCtx &ctx, const world::World
 	fallback.clear();
 	int walk = 0;
 	world.registry.for_each([&](const world::Entity &e) {
-		if (e.handle.pool() != 3 || e.item_id != 2044) return;
+		if (e.handle.pool() != 3 || e.item_id != def::DEF_TYPE_NAMED_LOCATION) return;
 		if (walk++ == index) fallback = e.name;
 	});
 	return fallback.empty() ? nullptr : &fallback;
@@ -72,7 +73,7 @@ int nearest_location_index(const world::World &world, const world::Entity &sende
 	int index = 0;
 	float best_distance = 0.0f;
 	world.registry.for_each([&](const world::Entity &e) {
-		if (e.handle.pool() != 3 || e.item_id != 2044) return;
+		if (e.handle.pool() != 3 || e.item_id != def::DEF_TYPE_NAMED_LOCATION) return;
 		const int my_index = index++;
 		const float dx = sender.position.x - e.position.x;
 		const float dy = sender.position.y - e.position.y;

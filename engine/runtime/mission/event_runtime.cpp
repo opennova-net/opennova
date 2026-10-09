@@ -1,9 +1,9 @@
 #include <runtime/mission/event_runtime.h>
 
 #include <algorithm>
-#include <cstdio>
 
 #include <base/io/strutil.h>
+#include <runtime/hud/game_text_lookup.h>
 #include <runtime/world/world.h>
 
 namespace opennova::mission {
@@ -39,8 +39,8 @@ void BmsEventSystem::load(const std::vector<bms::Event> &events,
         // halves of the file dwords at +12/+16, which carry the authored
         // value << 22: the value << 6 [orig: event +14 / +18; the raw record
         // read EventTrigger_LoadAllData @0x453f87].
-        se.repeat_reload = static_cast<uint16_t>(static_cast<uint32_t>(e.reset_after) << 6);
-        se.activate_reload = static_cast<uint16_t>(static_cast<uint32_t>(e.delay) << 6);
+        se.repeat_reload = static_cast<uint16_t>(static_cast<uint32_t>(e.reset_after) << bms::kEventStepShift);
+        se.activate_reload = static_cast<uint16_t>(static_cast<uint32_t>(e.delay) << bms::kEventStepShift);
         // Resolve trigger/action slices by index+count (EventTrigger_LoadAllData
         // fixes up the relative pointers; here we copy the slices).
         for (int i = 0; i < e.trigger_count; ++i) {
@@ -703,9 +703,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             const int32_t announce = w.match.outcome().ended ? 0 : 1;
             w.out.effects.push({"subgoal_won", a.param1, text_id, announce, 0, std::string()});
             if (announce != 0) {
-                char key[32];
-                std::snprintf(key, sizeof(key), "STRWINMSG%03d", text_id);
-                w.relay_mission_text_chat(1, key);
+                w.relay_mission_text_chat(1, hud::text_key(hud::kWinMessageKey, text_id));
             }
             break;
         }
@@ -725,9 +723,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             const int32_t announce = w.match.outcome().ended ? 0 : 1;
             w.out.effects.push({"subgoal_lost", a.param1, text_id, announce, 0, std::string()});
             if (announce != 0) {
-                char key[32];
-                std::snprintf(key, sizeof(key), "STRLOSEMSG%03d", text_id);
-                w.relay_mission_text_chat(0, key);
+                w.relay_mission_text_chat(0, hud::text_key(hud::kLoseMessageKey, text_id));
             }
             break;
         }
@@ -870,11 +866,12 @@ void BmsEventSystem::fire(World &w, ScriptedEvent &se) {
 void BmsEventSystem::update_entry(World &w, ScriptedEvent &se) {
     // Faithful port of EventTrigger_UpdateEntry @0x454c30. Timer words are read
     // unsigned and the decremented value is tested as SIGNED 16-bit
-    // (@0x454cef/@0x454d40): reload values >= (513 << 6) wrap negative on the
-    // first decrement and expire immediately — replicated, not "fixed".
+    // (@0x454cef/@0x454d40): reload values >= (513 << 6), past
+    // bms::kEventStepsUnwrapped steps, wrap negative on the first decrement
+    // and expire immediately — replicated, not "fixed".
     if (se.activate_countdown != 0) {
         // Activation delay counting down; on expiry the actions run.
-        const int16_t nv = static_cast<int16_t>(se.activate_countdown - 64);
+        const int16_t nv = static_cast<int16_t>(se.activate_countdown - bms::kEventStepTicks);
         se.activate_countdown = static_cast<uint16_t>(nv);
         if (nv <= 0) {
             se.activate_countdown = 0;
@@ -908,7 +905,7 @@ void BmsEventSystem::update_entry(World &w, ScriptedEvent &se) {
         return; // fire-once stays latched forever (only ResetEvent clears it)
     }
     if (se.repeat_countdown != 0) {
-        const int16_t nv = static_cast<int16_t>(se.repeat_countdown - 64);
+        const int16_t nv = static_cast<int16_t>(se.repeat_countdown - bms::kEventStepTicks);
         se.repeat_countdown = static_cast<uint16_t>(nv);
         if (nv <= 0) {
             se.repeat_countdown = 0;

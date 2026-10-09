@@ -17,6 +17,13 @@ std::string dialog_name_of(int32_t dialog_index) {
 	return name;
 }
 
+int64_t dialog_index_of(const std::string &name) {
+	// The name the game forms from the number ("dlg%03i", the prefix matched exactly) is this one, or
+	// no number forms it.
+	int64_t number = -1;
+	return strutil::key_number(name, "dlg", true, number) ? number : -1;
+}
+
 const dbf::Group *find_dialog(const dbf::File &bank, const std::string &name) {
 	for (const dbf::Group &group : bank.groups)
 		if (group.group_name == name) return &group;

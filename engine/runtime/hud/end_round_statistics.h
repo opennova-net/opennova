@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include <runtime/hud/game_text_lookup.h>
+
 namespace opennova::hud {
 
 // THE TOGGLED END-ROUND STATISTICS PANEL — retail's SP "Show Score" screen.
@@ -93,19 +95,19 @@ inline std::array<EndRoundStatisticsRow, 4> end_round_statistics_rows(
 		const EndRoundStatisticsInput &in) {
 	char buf[32];
 	std::array<EndRoundStatisticsRow, 4> rows;
-	rows[0].label_key = "STREPILOG_OBJECTIVEBONUS";
+	rows[0].label_key = kGameTextEpilogObjectiveBonus.key;
 	std::snprintf(buf, sizeof buf, "%d/%d", in.subgoals_won,
 			in.subgoals_defined);
 	rows[0].value = buf;
 	// Enemy kills clamp to [0, total] before the draw [orig: @0x5b7721..0x5b772b].
-	rows[1].label_key = "STREPILOG_ENEMYUNITS";
+	rows[1].label_key = kGameTextEpilogEnemyUnits.key;
 	std::snprintf(buf, sizeof buf, "%d/%d", end_round_enemy_units(in),
 			in.enemy_unit_total);
 	rows[1].value = buf;
-	rows[2].label_key = "STREPILOG_TEAMUNITS";
+	rows[2].label_key = kGameTextEpilogTeamUnits.key;
 	std::snprintf(buf, sizeof buf, "%d", in.team_unit_kills);
 	rows[2].value = buf;
-	rows[3].label_key = "STREPILOG_FRIENDLYUNITS";
+	rows[3].label_key = kGameTextEpilogFriendlyUnits.key;
 	std::snprintf(buf, sizeof buf, "%d", in.friendly_unit_kills);
 	rows[3].value = buf;
 	return rows;
@@ -141,14 +143,14 @@ inline std::string epilog_counter_value_text(int32_t value, int32_t max) {
 inline std::array<EndRoundStatisticsRow, 4> epilog_score_lines(
 		const EndRoundStatisticsInput &in) {
 	std::array<EndRoundStatisticsRow, 4> rows;
-	rows[0].label_key = "STREPILOG_OBJECTIVEBONUS";
+	rows[0].label_key = kGameTextEpilogObjectiveBonus.key;
 	rows[0].value = epilog_counter_value_text(in.subgoals_won, in.subgoals_defined);
-	rows[1].label_key = "STREPILOG_ENEMYUNITS";
+	rows[1].label_key = kGameTextEpilogEnemyUnits.key;
 	rows[1].value = epilog_counter_value_text(end_round_enemy_units(in),
 			in.enemy_unit_total);
-	rows[2].label_key = "STREPILOG_TEAMUNITS";
+	rows[2].label_key = kGameTextEpilogTeamUnits.key;
 	rows[2].value = epilog_counter_value_text(in.team_unit_kills, -1);
-	rows[3].label_key = "STREPILOG_FRIENDLYUNITS";
+	rows[3].label_key = kGameTextEpilogFriendlyUnits.key;
 	rows[3].value = epilog_counter_value_text(in.friendly_unit_kills, -1);
 	return rows;
 }
