@@ -79,3 +79,18 @@ for a docker bridge or NAT (leave unset in production): `ONNET_CLIENT_REFLECT_IP
 Seeding: `SEED_DEV_USERS=1` applies the dev-only `0002_dev_users.sql` (the
 `test`/`foo` accounts) — leave unset in production. Build + run via Docker:
 [`Dockerfile`](Dockerfile) and the compose files under [`deploy/`](../../deploy/).
+
+## Build layout and tests
+
+Every source but `main.cpp` builds as the static library
+`opennova_novaworld_server_core` (mirroring `opennova_serve_core`); the exe is
+`main.cpp` over it. The HTTP sources (`http_listener`, `template_engine`,
+`session_store`, `auth`, `catalog_repository`) join the core only under
+`BUILD_NOVAWORLD_HTTP`, which also defines `OPENNOVA_HTTP_ENABLED` PUBLIC so
+`main.cpp` starts the listener. The route harness, ctest
+`opennova_novaworld_server_http_routes`
+([`tests/novaworld/http_routes_test.cpp`](../../tests/novaworld/http_routes_test.cpp)),
+drives the Crow listener in-process on a loopback port over a `db::ConnectionPool`
+on a SQLite file under `backend/migrations`, with `apps/common`'s `http_exchange`. It exists only
+with `BUILD_NOVAWORLD_HTTP=ON` and runs in `net-linux.yml` and `ci.yml`'s
+test-linux.

@@ -282,9 +282,10 @@ void Lister::ship(const HttpRequestSpec &spec) {
 	}
 	const bool allow_public = options_.allow_public;
 	const DestinationPolicy destinations = options_.destinations;
-	io::logf(LogLevel::kDebug, "[http] %s %s", spec.method == HttpMethod::Post ? "POST" : "GET", spec.url.c_str());
-	http_ = std::async(std::launch::async, [spec, allow_public, destinations]() {
-		return net::http_exchange(spec.method == HttpMethod::Post, spec.url, spec.headers, spec.body, kHttpTimeoutMs,
+	const char *method = spec.method == HttpMethod::Post ? "POST" : "GET";
+	io::logf(LogLevel::kDebug, "[http] %s %s", method, spec.url.c_str());
+	http_ = std::async(std::launch::async, [spec, method, allow_public, destinations]() {
+		return net::http_exchange(method, spec.url, spec.headers, spec.body, kHttpTimeoutMs,
 		                          [allow_public, destinations](const std::string &host, net::Endpoint &out) {
 			                          return resolve_destination(host, out, destinations, allow_public, "web host");
 		                          });

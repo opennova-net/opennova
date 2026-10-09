@@ -5,7 +5,8 @@ export interface StatsResponse {
     games: number;
     lobbies: number;
     players: number;
-    updatedAt: string;
+    // Milliseconds since the Unix epoch, as /api/stats sends it.
+    updatedAtMs: number;
   };
 }
 

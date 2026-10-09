@@ -9,8 +9,8 @@
 // data set); an extracted OPENNOVA_JO_ASSETS tree carrying the same 00TRg pair
 // serves too.
 #include "common/retail_paths.h"
-#include "common/sha256.h"
 
+#include <base/io/sha256.h>
 #include <base/resource_index/resource_index.h>
 #include <base/vfs/vfs.h>
 #include <formats/mission/bms.h>
@@ -95,7 +95,7 @@ int main() {
 	std::vector<uint8_t> body;
 	put_cstr(body, briefing3);
 	put_cstr(body, briefing2);
-	const std::string digest = testhash::sha256_hex(body);
+	const std::string digest = opennova::io::sha256_hex(body.data(), body.size());
 	std::printf("authored_payload: briefing first_len=%zu second_len=%zu body_len=%zu sha256=%s\n",
 			briefing3.size(), briefing2.size(), body.size(), digest.c_str());
 	expect(briefing3.size() == kBriefing3Len, "briefing3 length matches the retail 0x7E witness");

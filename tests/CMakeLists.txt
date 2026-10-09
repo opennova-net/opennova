@@ -55,6 +55,14 @@ target_compile_features(file_io_test PRIVATE cxx_std_17)
 target_include_directories(file_io_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME file_io COMMAND file_io_test)
 
+# SHA-256 (base/io/sha256.h): the FIPS 180-4 vectors one-shot and streamed in odd-sized
+# chunks, the padding boundaries, reset, and the lowercase hex spelling.
+add_executable(sha256_test io/sha256_test.cpp)
+target_link_libraries(sha256_test PRIVATE opennova_io)
+target_compile_features(sha256_test PRIVATE cxx_std_17)
+target_include_directories(sha256_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME sha256 COMMAND sha256_test)
+
 # Roundtrip test
 add_executable(threedi_roundtrip_test threedi/roundtrip_test.cpp)
 target_link_libraries(threedi_roundtrip_test PRIVATE opennova_formats)
@@ -3426,8 +3434,9 @@ add_test(NAME db_sqlite COMMAND db_sqlite_test)
 
 # One connection per thread under load (issue #981): registrations race host
 # writes and roster readers on one WAL file, each thread on its own pooled
-# connection. Compiles the server's auth.cpp (create_user) directly; it lives in
-# the server exe, not a lib.
+# connection. Compiles the server's auth.cpp (create_user) directly: it joins
+# opennova_novaworld_server_core only under BUILD_NOVAWORLD_HTTP, and this test
+# runs on every build.
 add_executable(db_concurrency_test
     novaworld/db_concurrency_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/auth.cpp)
@@ -3715,6 +3724,20 @@ target_link_libraries(backend_schema_test PRIVATE opennova_novaworld_service)
 target_include_directories(backend_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(backend_schema_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME backend_schema COMMAND backend_schema_test)
+
+# The service's HTTP route harness (hosted servers, PR A): the Crow listener from
+# opennova_novaworld_server_core on a loopback port over a pooled SQLite file under
+# the backend migrations, driven with apps/common's http_exchange. Only with the
+# HTTP layer (BUILD_NOVAWORLD_HTTP); the service edge is direct for the
+# sqlite-containment lint.
+if(BUILD_NOVAWORLD_HTTP)
+    add_executable(opennova_novaworld_server_http_routes_test novaworld/http_routes_test.cpp)
+    target_link_libraries(opennova_novaworld_server_http_routes_test PRIVATE
+        opennova_novaworld_server_core opennova_novaworld_service)
+    target_include_directories(opennova_novaworld_server_http_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(opennova_novaworld_server_http_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    add_test(NAME opennova_novaworld_server_http_routes COMMAND opennova_novaworld_server_http_routes_test)
+endif()
 
 # Unknown-message tracker: record/dedup, sample cap, flush/upsert against the
 # real 0004 migration (OPENNOVA_SOURCE_DIR for the SQL on disk), snapshot.
@@ -4241,7 +4264,8 @@ target_include_directories(opennova_serve_game_cfg_test PRIVATE ${CMAKE_CURRENT_
 add_test(NAME opennova_serve_game_cfg COMMAND opennova_serve_game_cfg_test)
 # opennova-serve listed on NovaWorld (ADR 0051 d6) against the real NwUdpListener and an in-test
 # gate over loopback: it hosts on the game socket before the boot, lists the Serve Only columns
-# with no slot 0, the advertised endpoint is the game socket a joiner plays on, and the stop
+# with no slot 0, the advertised endpoint is the game socket a joiner plays on, a NovaWorld
+# rename / message change is saved to game.cfg and survives the map change, and the stop
 # deregisters.
 add_executable(opennova_serve_novaworld_test
     serve/opennova_serve_novaworld_test.cpp

@@ -23,7 +23,8 @@ easier to relay than to rediscover.
   `opennova-<name>` (kebab case; DEVELOPING.md "Naming an app"): `3di/` (`opennova-3di`,
   ADR 0047), `extract/` (`opennova-extract`, ADR 0040), `lan_probe/`
   (`opennova-lan-probe`), `novaworld_server/` (`opennova-novaworld-server`, the NovaWorld
-  service), `nw_lister/` (`opennova-nw-lister`: lists one server on a NovaWorld master
+  service; its sources build as `opennova_novaworld_server_core`, mirroring
+  `opennova_serve_core`, and the exe is `main.cpp` alone), `nw_lister/` (`opennova-nw-lister`: lists one server on a NovaWorld master
   without the game), `serve/` (`opennova-serve`, the headless game server with retail's
   remote admin, ADR 0051; its files live in its working directory), `wire/`
   (`opennova-wire`, the capture decoder), and `common/` (shared socket helpers and the
