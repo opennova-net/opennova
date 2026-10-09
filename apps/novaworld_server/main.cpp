@@ -39,6 +39,9 @@ void on_signal(int) {
 	g_shutdown.store(true);
 }
 
+// main() alone owns SIGINT and SIGTERM (Ctrl+C; `docker stop` sends SIGTERM):
+// the handler only raises g_shutdown, and the tick loop then runs the orderly
+// shutdown. The HTTP listener keeps Crow's own signal handling off both.
 void install_signal_handlers() {
 	std::signal(SIGINT,  on_signal);
 	std::signal(SIGTERM, on_signal);
@@ -264,6 +267,10 @@ int main() {
 		}
 	}
 
+	// The HTTP listener first (Crow's threads joined: no request still holds a
+	// lease), then the gate and NW UDP receive threads (each returns its lease
+	// as it exits), then the connections. main_lease and the pool go last, as
+	// main() returns (declaration order); the last close checkpoints the WAL.
 	std::printf("[shutdown] stopping listeners\n");
 #ifdef OPENNOVA_HTTP_ENABLED
 	http.stop();

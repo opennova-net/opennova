@@ -355,7 +355,15 @@ bool HttpListener::start(const ServerConfig &config) {
 	// already exists", so the static family always closes registration.
 	register_static_routes(web_dist, static_dir, templates_dir);
 
+	// The embedder owns SIGINT/SIGTERM (main()'s handler starts the orderly
+	// shutdown, which ends in stop()). Crow would otherwise take both through
+	// its own signal_set and stop just this listener, leaving the process up.
+	app.signal_clear();
+
 	const uint16_t port = config.http_port;
+	// Set before the thread exists, so a run() that throws at once (the port
+	// taken) cannot have its false overwritten.
+	running_.store(true);
 	worker_ = std::thread([this, port] {
 		std::printf("[http] listening on :%u\n", static_cast<unsigned>(port));
 		try {
@@ -366,7 +374,6 @@ bool HttpListener::start(const ServerConfig &config) {
 		running_.store(false);
 		std::printf("[http] loop exiting\n");
 	});
-	running_.store(true);
 	return true;
 }
 
@@ -2191,6 +2198,12 @@ void HttpListener::register_static_routes(const std::filesystem::path &web_dist,
 
 void HttpListener::stop() {
 	if (running_.load()) {
+		// run() starts on the worker thread after start() returns, and Crow's
+		// stop() before it built its server is a no-op that leaves run() to
+		// serve on forever; wait until it serves, then stop it. The stop
+		// closes every io_context, so a held-open connection does not keep
+		// run() up.
+		impl_->app.wait_for_server_start();
 		impl_->app.stop();
 	}
 	if (worker_.joinable()) {
