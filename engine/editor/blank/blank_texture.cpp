@@ -3,9 +3,9 @@
 #include <utility>
 
 #include <base/resource_index/resource_kind.h>
-#include <editor/import/quantize.h>
 #include <formats/dds/dds.h>
 #include <formats/pcx/pcx_io.h>
+#include <formats/pcx/pcx_quantize.h>
 #include <formats/tga/tga.h>
 #include <runtime/hud/loading_screen.h>
 #include <runtime/renderer/material_texture.h>

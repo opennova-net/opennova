@@ -48,7 +48,7 @@
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
-#include "editor/png_test_support.h"
+#include "common/png_test_support.h"
 #include "editor/test_platform.h"
 #include "editor/viewport_test_support.h"
 
@@ -182,7 +182,7 @@ int test_decode() {
 	image = decode_texture("cube.dds", argb);
 	TEST_EXPECT(image->loads && image->decoded && image->levels[0].rgba == rgba && image->alpha == TextureAlpha::Graded);
 	// A PNG under a .dds name: D3DX reads it as a PNG.
-	image = decode_texture("odd.dds", editor_test::gradient_png(5, 3));
+	image = decode_texture("odd.dds", test_png::gradient_png(5, 3));
 	TEST_EXPECT(image->loads && image->decoded && image->width() == 5 && fact(*image, "reader").find("D3DX") == 0 &&
 	            fact(*image, "format").find("PNG") == 0);
 	// A name no reader takes.
