@@ -203,22 +203,22 @@ LabelledField pair_field(const std::string &id, const char *label, const char *s
 // mission [orig: sub_520AA0 @ 0x520B4E]: kTextureArgGates.
 struct MapRole {
 	const char *id;
-	TextureRoleId role;
+	renderer::TextureRoleId role;
 	int32_t flags;
 };
 constexpr MapRole kMapRoles[] = {
-	{"polytrn_colormap", TextureRoleId::TerrainColourMap, kTextureArgGates},
-	{"polytrn_detailmap", TextureRoleId::TerrainDetailCoefficient, 0},
-	{"polytrn_detailmap_c1", TextureRoleId::TerrainSplatDetail, 0},
-	{"polytrn_detailmap_c2", TextureRoleId::TerrainSplatDetail, 0},
-	{"polytrn_detailmap_c3", TextureRoleId::TerrainSplatDetail, 0},
-	{"polytrn_detailmap2", TextureRoleId::TerrainSecondDetail, 0},
-	{"polytrn_detailmapdist", TextureRoleId::TerrainFarDetail, 0},
-	{"polytrn_detailmapdist2", TextureRoleId::TerrainFarDetail, 0},
-	{"polytrn_detailblendmap", TextureRoleId::TerrainBlendMap, kTextureArgGates},
-	{"polytrn_tilestrip", TextureRoleId::TerrainTileAtlas, 0},
-	{"polytrn_charmap", TextureRoleId::TerrainCharMap, 0},
-	{"polytrn_foliagemap", TextureRoleId::TerrainFoliageMap, 0},
+	{"polytrn_colormap", renderer::TextureRoleId::TerrainColourMap, kTextureArgGates},
+	{"polytrn_detailmap", renderer::TextureRoleId::TerrainDetailCoefficient, 0},
+	{"polytrn_detailmap_c1", renderer::TextureRoleId::TerrainSplatDetail, 0},
+	{"polytrn_detailmap_c2", renderer::TextureRoleId::TerrainSplatDetail, 0},
+	{"polytrn_detailmap_c3", renderer::TextureRoleId::TerrainSplatDetail, 0},
+	{"polytrn_detailmap2", renderer::TextureRoleId::TerrainSecondDetail, 0},
+	{"polytrn_detailmapdist", renderer::TextureRoleId::TerrainFarDetail, 0},
+	{"polytrn_detailmapdist2", renderer::TextureRoleId::TerrainFarDetail, 0},
+	{"polytrn_detailblendmap", renderer::TextureRoleId::TerrainBlendMap, kTextureArgGates},
+	{"polytrn_tilestrip", renderer::TextureRoleId::TerrainTileAtlas, 0},
+	{"polytrn_charmap", renderer::TextureRoleId::TerrainCharMap, 0},
+	{"polytrn_foliagemap", renderer::TextureRoleId::TerrainFoliageMap, 0},
 };
 
 const char *const kRequiredWords = " An empty name refuses the mission [orig: Terrain_LoadEnvironmentConfig @ 0x610A2A..0x610A3E].";

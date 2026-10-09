@@ -46,16 +46,17 @@ std::vector<std::string> one(const std::string &file) {
 // of the game's there (the particle manager's tga\ leg); a use whose loader is not witnessed yet, the
 // name as written alone. No loader reads another extension's twin or an _O name.
 std::vector<std::string> texture_files(const std::string &name, int32_t loader_arg, const Exists &exists) {
-	// A role (ADR 0046 S18): the game's loader for it (texture_role_renderer_loader), a mission's tile set
-	// its TGA, a role read by its own name (a foliage map) or whose loader is not witnessed the name alone.
-	TextureRoleId role = TextureRoleId::kCount;
+	// A role (ADR 0046 S18): the game's loader for it (renderer::texture_role), a mission's tile set its
+	// TGA, a role no named-file loader reads (a foliage map read by its own name, a model row's normal map)
+	// the name alone.
+	renderer::TextureRoleId role = renderer::TextureRoleId::kCount;
 	if (texture_arg_role(loader_arg, role)) {
 		if (loader_arg & kTextureArgTileSet) return texture_files(name, kTileSetTextureArg, exists);
 		// A sky map: its extension made PCX first (kTextureArgPcx).
 		if (loader_arg & kTextureArgPcx)
 			return texture_files(menu::replace_or_append_extension(name, "pcx"), loader_arg & ~kTextureArgPcx, exists);
-		renderer::TextureLoader by;
-		return texture_role_renderer_loader(role, by) ? texture_files(name, texture_loader_arg(by), exists) : one(name);
+		const renderer::TextureLoader by = renderer::texture_role(role).loader;
+		return renderer::texture_loader_has_attempts(by) ? texture_files(name, texture_loader_arg(by), exists) : one(name);
 	}
 	if (loader_arg >= 0) {
 		const uint8_t type = renderer::material_texture_runtime_type(static_cast<uint8_t>(loader_arg));
@@ -89,7 +90,7 @@ const char *texture_gates(int32_t loader_arg) {
 // name as written, that the loader opens other files for it (a HUD name written .dds, a sky map's name made
 // .pcx), and which.
 std::string texture_missing(const AssetGraph &graph, const GraphEdge &edge) {
-	TextureRoleId role = TextureRoleId::kCount;
+	renderer::TextureRoleId role = renderer::TextureRoleId::kCount;
 	const bool has_role = texture_arg_role(edge.loader_arg, role);
 	const std::string then = has_role && *texture_role_row(role).missing ? ": " + std::string(texture_role_row(role).missing) + "." : ".";
 	const std::string name = basename_of(edge.value);

@@ -36,6 +36,7 @@
 #include "editor/viewport_test_support.h"
 
 using namespace opennova::editor;
+namespace renderer = opennova::renderer;
 using opennova::io::JsonValue;
 
 namespace {
@@ -64,7 +65,7 @@ ImportChoice loose(std::string path) {
 	return choice;
 }
 
-const TextureUse *use_of(const std::vector<TextureUse> &uses, TextureRoleId role) {
+const TextureUse *use_of(const std::vector<TextureUse> &uses, renderer::TextureRoleId role) {
 	for (const TextureUse &use : uses)
 		if (use.role == role) return &use;
 	return nullptr;
@@ -119,7 +120,7 @@ int test_uses() {
 
 	// The .tga a model row names: its loader opens the .dds beside it, so the .tga reads for neither row.
 	const std::vector<TextureUse> &tga = index.uses_of(view, "textures/body.tga");
-	const TextureUse *diffuse = use_of(tga, TextureRoleId::ModelDiffuse);
+	const TextureUse *diffuse = use_of(tga, renderer::TextureRoleId::ModelDiffuse);
 	TEST_EXPECT(diffuse && !diffuse->reads_file && diffuse->served == "textures/body.dds" && diffuse->referrer == "models/thing.3di");
 	TEST_EXPECT(diffuse && diffuse->context.material == 0 && diffuse->context.alpha_test() && diffuse->context.alpha_ref == 128 &&
 	            diffuse->context.shader == "VS_SKBASIC");
@@ -138,27 +139,27 @@ int test_uses() {
 	TEST_EXPECT(made_dds && made_missing);
 	// The .dds: the same use, read.
 	const std::vector<TextureUse> &dds = index.uses_of(view, "textures/body.dds");
-	diffuse = use_of(dds, TextureRoleId::ModelDiffuse);
+	diffuse = use_of(dds, renderer::TextureRoleId::ModelDiffuse);
 	TEST_EXPECT(dds.size() == 1 && diffuse && diffuse->reads_file && diffuse->load.reader == TextureFileReader::Dds);
 	// The detail row's grain.tga, which the terrain's coefficient detail names too; the normal map.
 	const std::vector<TextureUse> &grain = index.uses_of(view, "textures/grain.tga");
-	TEST_EXPECT(grain.size() == 2 && use_of(grain, TextureRoleId::ModelDetail) &&
-	            use_of(grain, TextureRoleId::TerrainDetailCoefficient));
+	TEST_EXPECT(grain.size() == 2 && use_of(grain, renderer::TextureRoleId::ModelDetail) &&
+	            use_of(grain, renderer::TextureRoleId::TerrainDetailCoefficient));
 	const std::vector<TextureUse> &skin = index.uses_of(view, "textures/skin.mdt");
-	TEST_EXPECT(skin.size() == 1 && skin[0].role == TextureRoleId::ModelNormalMap && skin[0].context.material == 1);
+	TEST_EXPECT(skin.size() == 1 && skin[0].role == renderer::TextureRoleId::ModelNormalMap && skin[0].context.material == 1);
 	// A terrain's colour map; a sky's two cloud layers (ARCHIVE: a PCX's alpha from its palette).
 	const std::vector<TextureUse> &map = index.uses_of(view, "textures/map.tga");
-	TEST_EXPECT(map.size() == 1 && map[0].role == TextureRoleId::TerrainColourMap && map[0].field == "polytrn_colormap" &&
+	TEST_EXPECT(map.size() == 1 && map[0].role == renderer::TextureRoleId::TerrainColourMap && map[0].field == "polytrn_colormap" &&
 	            map[0].words == "Terrain colour map: Terrain in isle.trn (polytrn_colormap)");
 	const std::vector<TextureUse> &cloud = index.uses_of(view, "textures/cloud.pcx");
-	TEST_EXPECT(cloud.size() == 2 && cloud[0].role == TextureRoleId::SkyCloud &&
+	TEST_EXPECT(cloud.size() == 2 && cloud[0].role == renderer::TextureRoleId::SkyCloud &&
 	            cloud[0].load.transform == TextureLoadTransform::LuminanceAlpha);
 	// An item's HUD image, alpha only; the scope's crosshair, a name the game opens itself.
 	const std::vector<TextureUse> &stance = index.uses_of(view, "textures/stance.tga");
-	TEST_EXPECT(stance.size() == 1 && stance[0].role == TextureRoleId::HudAlphaOnly && stance[0].context.hud_mode == 1 &&
+	TEST_EXPECT(stance.size() == 1 && stance[0].role == renderer::TextureRoleId::HudAlphaOnly && stance[0].context.hud_mode == 1 &&
 	            stance[0].load.transform == TextureLoadTransform::AlphaOnly);
 	const std::vector<TextureUse> &scope = index.uses_of(view, "textures/scopexh.tga");
-	TEST_EXPECT(scope.size() == 1 && scope[0].fixed && scope[0].role == TextureRoleId::HudAlphaOnly &&
+	TEST_EXPECT(scope.size() == 1 && scope[0].fixed && scope[0].role == renderer::TextureRoleId::HudAlphaOnly &&
 	            scope[0].fixed_for == "for the scope's crosshair" && scope[0].reads_file);
 	// An alpha-only HUD image that is a PCX: its blue the alpha, alone.
 	const std::vector<TextureUse> &pip = index.uses_of(view, "textures/pip.pcx");
@@ -169,14 +170,14 @@ int test_uses() {
 	// The scoreboard box's monogram and the tip panel's box, through the box loader.
 	const std::vector<TextureUse> &monogram = index.uses_of(view, "textures/monogram.tga");
 	const std::vector<TextureUse> &border3 = index.uses_of(view, "textures/border3.tga");
-	TEST_EXPECT(monogram.size() == 1 && monogram[0].role == TextureRoleId::BoardBox && border3.size() == 1 &&
-	            border3[0].role == TextureRoleId::BoardBox && border3[0].fixed_for == "for the tip panel's box");
+	TEST_EXPECT(monogram.size() == 1 && monogram[0].role == renderer::TextureRoleId::BoardBox && border3.size() == 1 &&
+	            border3[0].role == renderer::TextureRoleId::BoardBox && border3[0].fixed_for == "for the tip panel's box");
 	// A face animation's textures: the base by its name made .TGA (no site of the file: the file writes
 	// face.bmp), its .MDT twin, each eye.
 	const std::vector<TextureUse> &face = index.uses_of(view, "textures/face.tga");
 	const std::vector<TextureUse> &twin = index.uses_of(view, "textures/face.mdt");
 	const std::vector<TextureUse> &eye = index.uses_of(view, "textures/eye2.tga");
-	TEST_EXPECT(face.size() == 1 && face[0].role == TextureRoleId::FaceTexture && face[0].referrer == "chars/face.grm" &&
+	TEST_EXPECT(face.size() == 1 && face[0].role == renderer::TextureRoleId::FaceTexture && face[0].referrer == "chars/face.grm" &&
 	            face[0].field == "basetexture" && face[0].name_written == "face.TGA" && face[0].reads_file);
 	TEST_EXPECT(twin.size() == 1 && twin[0].field == "basetexture.mdt" && twin[0].reads_file);
 	TEST_EXPECT(eye.size() == 1 && eye[0].record == "eye 2" && eye[0].field == "eyetexture");
