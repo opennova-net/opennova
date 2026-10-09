@@ -374,6 +374,12 @@ add_executable(def_loadout_weight_test def/def_loadout_weight_test.cpp)
 target_link_libraries(def_loadout_weight_test PRIVATE opennova_formats)
 add_test(NAME def_loadout_weight COMMAND def_loadout_weight_test)
 
+# The weapon.def name cap: 32 characters only in a block with no `sameas`, which a 32-character
+# name runs on into otherwise (D-ITEMDEF-10): the writer's cap and the parser's finding.
+add_executable(def_weapon_name_cap_test def/def_weapon_name_cap_test.cpp)
+target_link_libraries(def_weapon_name_cap_test PRIVATE opennova_formats)
+add_test(NAME def_weapon_name_cap COMMAND def_weapon_name_cap_test)
+
 # The items.def ids and rows the engine fixes (docs/world/itemdef-re.md, "The ids and rows the
 # engine fixes"): the table, its lookups and rules, and the runtime's constants for the same ids.
 add_executable(def_reserved_items_test def/def_reserved_items_test.cpp)
@@ -1097,7 +1103,7 @@ foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_win
         particle_atlas_contract particle_frame_compiler_contract render_order
         frame_fx_effects nvg_scope_lens q3_frame render_slot_shadow
         scene_overlay state_vectors tracer_frame precipitation_frame texture_dxt texture_load_rules
-        d3dx_image_codecs device_texture texture_filter d3d9_raster)
+        texture_registry d3dx_image_codecs device_texture texture_filter d3d9_raster)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
     target_link_libraries(renderer_${test}_test PRIVATE opennova_runtime opennova_formats)
     target_include_directories(renderer_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

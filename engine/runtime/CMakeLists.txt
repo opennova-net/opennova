@@ -174,6 +174,7 @@ add_library(opennova_runtime STATIC
     renderer/model_panm_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_texture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_load_rules.cpp   # the game's texture loaders as rules
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_registry.cpp   # the key the game keeps a loaded texture under
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/device_texture.cpp   # the device texture a texture file becomes
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/d3dx_image_codecs.cpp   # D3DX's PPM/PFM/HDR/DIB codecs (D-RMAT-17)
     renderer/material_texture_producers.cpp
