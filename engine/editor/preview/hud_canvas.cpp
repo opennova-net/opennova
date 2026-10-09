@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include <runtime/hud/hud_elements.h>
+#include <runtime/hud/hud_math.h>
 
 #include <editor/preview/hud_viewport.h>
 #include <editor/session/request_factories.h>
@@ -11,9 +12,9 @@ namespace opennova::editor {
 
 namespace {
 
-// The design space hudpos.def's places are in [orig: Viewport_ScaleToVirtualCoords @ 0x5D2B20].
-constexpr float kDesignWidth = 1024.0f;
-constexpr float kDesignHeight = 768.0f;
+// The design space hudpos.def's places are in (hud_math.h).
+constexpr float kDesignWidth = static_cast<float>(hud::kDesignWidth);
+constexpr float kDesignHeight = static_cast<float>(hud::kDesignHeight);
 
 // A box of the screen as the picture shows it.
 void picture_box(const HudPreviewElement &element, int width, int height, int screen_width, int screen_height,
