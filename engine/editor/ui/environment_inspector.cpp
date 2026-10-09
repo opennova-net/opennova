@@ -70,8 +70,12 @@ void keyframe_words(const EnvironmentDocument &document, const NodeAddress &reco
 	std::vector<int> times;
 	for (const env::Keyframe &keyframe : config->keyframes) times.push_back(keyframe.time);
 	std::stable_sort(times.begin(), times.end());
-	const auto after = std::upper_bound(times.begin(), times.end(), at);
-	const int next = after != times.end() ? *after : times.front();
+	// The game's search (formats/env find_keyframe_segment) in 16.16 hours.
+	std::vector<int> hours;
+	for (const int time : times) hours.push_back(env::hhmm_to_hours_fp(float(time)));
+	const env::KeyframeSegment segment = env::find_keyframe_segment(hours, env::hhmm_to_hours_fp(float(at)));
+	if (segment.hi < 0) return;
+	const int next = times[size_t(segment.hi)];
 	if (times.size() < 2)
 		note("The only keyframe: its colours hold all day.");
 	else
