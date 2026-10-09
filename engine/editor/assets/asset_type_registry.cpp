@@ -1,9 +1,7 @@
 #include <editor/assets/asset_type_registry.h>
 
 #include <algorithm>
-#include <filesystem>
 #include <fstream>
-#include <system_error>
 
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_kind.h>
@@ -11,8 +9,6 @@
 #include <editor/import/importer.h>
 #include <editor/project/project_files.h>
 #include <runtime/renderer/material_texture.h>
-
-namespace fs = std::filesystem;
 
 namespace opennova::editor {
 
@@ -45,54 +41,14 @@ bool asset_name_fits_kind(const std::string &logical_name, AssetKind kind) {
 	       (named == AssetKind::Unknown && kind == AssetKind::Notes && resource_extension_for_name(logical_name).empty());
 }
 
-bool looks_like_text(const uint8_t *data, size_t size) {
-	for (size_t i = 0; i < size; ++i) {
-		const uint8_t c = data[i];
-		if (c >= 0x20 || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == 0x1A) continue;
-		return false;
-	}
-	return true;
-}
-
 bool is_text_file(const std::string &path, uint64_t &read) {
 	std::ifstream in(system_path(path), std::ios::binary);
 	if (!in) return false;
-	char head[kTextSniffBytes];
+	char head[strutil::kTextSniffBytes];
 	in.read(head, static_cast<std::streamsize>(sizeof(head)));
 	const size_t got = static_cast<size_t>(in.gcount());
 	read += got;
-	return looks_like_text(reinterpret_cast<const uint8_t *>(head), got);
-}
-
-bool is_material_chunk_container(const std::vector<uint8_t> &bytes) {
-	for (const uint8_t type : {uint8_t(16), uint8_t(17), uint8_t(18)})
-		if (renderer::load_material_chunk(bytes.data(), bytes.size(), type)) return true;
-	return false;
-}
-
-bool is_material_chunk_file(const std::string &path, uint64_t &read) {
-	std::error_code ec;
-	const fs::path file = system_path(path);
-	const uint64_t size = fs::file_size(file, ec);
-	if (ec) return false;
-	std::ifstream in(file, std::ios::binary);
-	if (!in) return false;
-	size_t reads = 0;
-	const renderer::MaterialChunkReader chunk = [&](uint64_t at, uint8_t *out, size_t n) {
-		// A container walked past kChunkHeaderReads headers is not taken for one: a file of another
-		// kind whose bytes read as many empty chunks costs no more than that.
-		if (++reads > kChunkHeaderReads || at > size || n > size - at) return false;
-		in.clear();
-		in.seekg(static_cast<std::streamoff>(at));
-		in.read(reinterpret_cast<char *>(out), static_cast<std::streamsize>(n));
-		read += static_cast<uint64_t>(in.gcount());
-		return static_cast<size_t>(in.gcount()) == n;
-	};
-	for (const uint8_t type : {uint8_t(16), uint8_t(17), uint8_t(18)}) {
-		reads = 0;
-		if (renderer::material_chunk_loads(size, chunk, type)) return true;
-	}
-	return false;
+	return strutil::looks_like_text(reinterpret_cast<const uint8_t *>(head), got);
 }
 
 AssetKind classify_asset(const std::string &logical_name, const std::vector<uint8_t> *bytes) {
@@ -100,10 +56,10 @@ AssetKind classify_asset(const std::string &logical_name, const std::vector<uint
 	const std::string shared = resource_kind_for_file(logical_name, bytes);
 	if (!shared.empty()) return asset_kind_for_runtime(shared);
 	const AssetKind named = asset_kind_for_name(logical_name);
-	if (named == AssetKind::Unknown && bytes && is_material_chunk_container(*bytes)) return AssetKind::MaterialChunk;
+	if (named == AssetKind::Unknown && bytes && renderer::is_material_chunk_container(*bytes)) return AssetKind::MaterialChunk;
 	// A name with no extension that holds text is a note (a LICENSE): the Notes row's comment.
 	if (named == AssetKind::Unknown && bytes && resource_extension_for_name(logical_name).empty() &&
-	    looks_like_text(bytes->data(), std::min(bytes->size(), kTextSniffBytes)))
+	    strutil::looks_like_text(bytes->data(), std::min(bytes->size(), strutil::kTextSniffBytes)))
 		return AssetKind::Notes;
 	return named;
 }

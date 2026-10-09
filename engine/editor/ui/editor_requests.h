@@ -161,7 +161,7 @@ inline void focus(Workspace &workspace, const char *window) {
 
 // True when `name` contains `filter`, compared as the game compares names.
 inline bool matches(const std::string &name, const char *filter) {
-	return normalized_logical_name(name).find(normalized_logical_name(filter)) != std::string::npos;
+	return pff::normalized_logical_name(name).find(pff::normalized_logical_name(filter)) != std::string::npos;
 }
 
 } // namespace opennova::editor::window_requests
