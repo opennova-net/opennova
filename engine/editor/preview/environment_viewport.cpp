@@ -17,7 +17,6 @@
 #include <formats/mission/bms.h>
 #include <runtime/environment/environment_state.h>
 #include <runtime/environment/precipitation.h>
-#include <runtime/environment/weather_runtime.h>
 #include <runtime/environment/weather_seed.h>
 #include <runtime/terrain_query/height_field.h>
 
@@ -422,7 +421,7 @@ void EnvironmentViewport::clock_() {
 	// hour [orig: Game_StartMission @ 0x5253ca..0x5253d5]; else the file's curtime, 16.16 hours << 8
 	// [orig: TimeOfDay_ParseProperty @ 0x57d0d0] (a preview with no mission clock keeps it).
 	if (options_.time >= 0.0) {
-		start_fixed24_ = uint32_t(std::llround(options_.time * kFixed24PerHour)) % uint32_t(env::kTodDayFixed24);
+		start_fixed24_ = world::WeatherState::tod_fixed24_from_minutes(options_.time * 60.0);
 		start_from_ = EnvironmentClockFrom::Option;
 	} else if (from_mission) {
 		start_fixed24_ = uint32_t(env::tod_start_fixed24(use->start_time));
@@ -460,11 +459,10 @@ void EnvironmentViewport::seed_(const PreviewClock &clock) {
 	seed.tod_fixed24 = start_fixed24_;
 	seed.tod_advance_per_tick = advance_;
 	weather_.seed(seed);
-	weather_.mission_start_init();
-	// The start's settle: its 255 whole ticks before the mission runs [orig: Environment_MissionStartInit
-	// @ 0x57f878..0x57f880], the sim legs of each.
+	// The start's initializer and its settle, its 255 whole ticks before the mission runs
+	// (world::WeatherState::settle_mission_start), the sim legs of each.
 	world::WeatherTickEvents settle;
-	for (int i = 0; i < env::WeatherRuntime::kMissionStartPrewarmTicks; ++i) weather_.tick_sim(nullptr, settle);
+	weather_.settle_mission_start([&] { weather_.tick_sim(nullptr, settle); });
 	// The script's weather as the options last set it, there at once.
 	weather_.command_rain(options_.rain.percent, 0);
 	weather_.command_overcast(options_.overcast.percent, 0);
