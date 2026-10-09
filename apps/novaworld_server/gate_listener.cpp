@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cstdio>
 #include <exception>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -178,6 +179,17 @@ void GateListener::run_loop() {
 		return;
 	}
 
+	// This thread's own connection (Database is single-threaded). A failed
+	// open leaves the gate answering probes with status blobs unapplied.
+	std::optional<db::ConnectionPool::Lease> db_conn;
+	if (db_pool_) {
+		try {
+			db_conn.emplace(db_pool_->acquire());
+		} catch (const db::SqliteError &e) {
+			std::fprintf(stderr, "[gate] WARN db open: %s\n", e.what());
+		}
+	}
+
 	uint8_t rx[65535];
 	while (!stop_requested_.load()) {
 		opennova::net::Endpoint from{};
@@ -215,9 +227,9 @@ void GateListener::run_loop() {
 			                            plain.size());
 			if (lobby_update_parse(text, blob)) {
 				bool applied = false;
-				if (db_) {
+				if (db_conn) {
 					try {
-						applied = hostdb::apply_status_blob(*db_, blob);
+						applied = hostdb::apply_status_blob(**db_conn, blob);
 					} catch (const std::exception &e) {
 						std::fprintf(stderr, "[gate] WARN status blob apply: %s\n", e.what());
 					}

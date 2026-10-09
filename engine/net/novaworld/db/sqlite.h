@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -46,15 +47,24 @@ struct Row {
 // Bound parameter for exec/query. Use std::monostate to bind NULL.
 using BindValue = std::variant<std::monostate, int64_t, double, std::string, std::vector<uint8_t>>;
 
-// RAII handle to a sqlite3* connection. NOT thread-safe — each thread that
-// touches the DB should own its own Database (sqlite is configured with
-// THREADSAFE=1 so the underlying engine handles internal locking, but the
-// prepared-statement cache + transaction semantics on a single handle are
-// caller-owned).
+// RAII handle to a sqlite3* connection. NOT thread-safe: one thread uses a
+// Database at a time. sqlite (THREADSAFE=1, serialized) keeps a shared handle
+// from crashing, but last_insert_rowid(), changes(), the error text a
+// SqliteError carries and any open transaction all belong to the connection,
+// so two threads on one handle read each other's results and commit or roll
+// back each other's writes. A multi-threaded process gives every thread its
+// own connection (ConnectionPool below); the file is WAL, so connections read
+// concurrently while one writes, and the busy timeout makes a second writer
+// wait rather than fail.
 class Database {
 public:
-	// Open or create the database file at `path`. Pass ":memory:" for an
-	// in-memory database (handy for tests). Throws SqliteError on failure.
+	// Open or create the database at `path`, with foreign keys on, WAL
+	// journaling and a 5 s busy timeout. ":memory:" is an in-memory database
+	// private to this connection (handy for tests); a database several
+	// connections share in memory takes a shared-cache URI,
+	// "file:<name>?mode=memory&cache=shared". Shared cache locks per table
+	// and its SQLITE_LOCKED skips the busy timeout, so a test that writes
+	// from several threads at once uses a file. Throws SqliteError on failure.
 	explicit Database(const std::filesystem::path &path);
 
 	~Database();
@@ -87,15 +97,93 @@ public:
 	// rows changed by the last DML (sqlite3_changes).
 	int changes() const;
 
-	// Begin/commit/rollback. Caller is responsible for pairing — no scope
-	// guard yet (intentional; transactions over multiple migration files
-	// are explicit in the runner).
+	// Begin/commit/rollback. Caller is responsible for pairing; a write that
+	// spans several statements takes the Transaction guard below instead.
 	void begin();
 	void commit();
 	void rollback();
 
+	// True while a transaction is open on this connection
+	// (!sqlite3_get_autocommit).
+	bool in_transaction() const;
+
 private:
 	sqlite3 *handle_ = nullptr;
+};
+
+// Scoped write transaction: BEGIN IMMEDIATE on construction, COMMIT on
+// commit(), ROLLBACK when destroyed uncommitted (an exception unwinding past
+// it). IMMEDIATE takes the write lock up front, so a concurrent writer is
+// waited out by the busy timeout here; a deferred transaction that reads and
+// then writes fails SQLITE_BUSY with no retry when another connection
+// committed in between. Concurrent readers on other connections see the whole
+// transaction or none of it. Opened inside another transaction on the same
+// connection it is a SAVEPOINT: commit() releases it into the outer
+// transaction, and destroying it uncommitted undoes only its own writes.
+class Transaction {
+public:
+	explicit Transaction(Database &db);
+	~Transaction();
+	Transaction(const Transaction &) = delete;
+	Transaction &operator=(const Transaction &) = delete;
+
+	void commit();
+
+private:
+	Database &db_;
+	bool nested_;
+	bool open_ = true;
+};
+
+// Connections to one database, each checked out by one thread at a time. A
+// lease owns its connection exclusively until it is destroyed, which puts the
+// connection back for the next acquire() (rolling back any transaction left
+// open on it); a thread that runs for the life of the process holds one lease
+// for its lifetime, a request handler holds one for the request. acquire()
+// opens a new connection when none is idle, so the pool grows to the peak
+// number of concurrent leases and keeps them open. Thread-safe. Must outlive
+// every lease it hands out.
+class ConnectionPool {
+public:
+	class Lease {
+	public:
+		Lease(Lease &&other) noexcept = default;
+		Lease &operator=(Lease &&other) = delete;
+		Lease(const Lease &) = delete;
+		Lease &operator=(const Lease &) = delete;
+		~Lease();
+
+		Database &operator*() const { return *db_; }
+		Database *operator->() const { return db_.get(); }
+		Database *get() const { return db_.get(); }
+
+	private:
+		friend class ConnectionPool;
+		Lease(ConnectionPool &pool, std::unique_ptr<Database> db);
+
+		ConnectionPool *pool_;
+		std::unique_ptr<Database> db_;
+	};
+
+	// `path` as Database takes it. A plain ":memory:" (or an empty path) is
+	// refused with SqliteError: every connection would open a private, empty
+	// database. Use the shared-cache URI instead.
+	explicit ConnectionPool(std::filesystem::path path);
+	ConnectionPool(const ConnectionPool &) = delete;
+	ConnectionPool &operator=(const ConnectionPool &) = delete;
+
+	// An idle connection, or a newly opened one. Throws SqliteError when the
+	// open fails.
+	Lease acquire();
+
+	const std::filesystem::path &path() const { return path_; }
+
+private:
+	void release(std::unique_ptr<Database> db);
+
+	std::filesystem::path path_;
+	std::mutex mu_;
+	std::vector<std::unique_ptr<Database>> idle_;
 };
 
 // ----------------------------------------------------------------------------

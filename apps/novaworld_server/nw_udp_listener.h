@@ -19,7 +19,7 @@
 namespace opennova {
 class ConnectionManager;
 class UnknownTracker;
-namespace db { class Database; }
+namespace db { class ConnectionPool; }
 namespace bms { struct File; }
 namespace world {
 class World;
@@ -109,10 +109,12 @@ public:
 	explicit NwUdpListener(ConnectionManager &manager);
 	~NwUdpListener();
 
-	// Optional DB handle. When set, the lobby session persists host state
-	// to active_hosts / host_players (Phase I.2/I.3) and erase_lobby_state
-	// removes the corresponding rows.
-	void set_database(opennova::db::Database *db) { db_ = db; lobby_session_.set_database(db); }
+	// Optional DB pool. When set, the receive thread leases one connection for
+	// its lifetime and hands it to the lobby session, which persists host
+	// state to active_hosts / host_players (Phase I.2/I.3); erase_lobby_state
+	// leases its own, since it also runs on the main thread (the
+	// ConnectionManager's on_lost from tick(), and stop()).
+	void set_db_pool(opennova::db::ConnectionPool *pool) { db_pool_ = pool; }
 
 	// Forward the reflect-endpoint override (the client's NovaWorld session
 	// IP:port we advertise to joiners) to the lobby session.
@@ -203,7 +205,7 @@ private:
 		uint64_t parked_ms = 0;
 	};
 	std::unordered_map<PeerAddr, ParkedLobbyState, PeerAddrHash> parked_lobby_states_;
-	opennova::db::Database *db_ = nullptr;
+	opennova::db::ConnectionPool *db_pool_ = nullptr;
 	opennova::UnknownTracker *tracker_ = nullptr;
 };
 

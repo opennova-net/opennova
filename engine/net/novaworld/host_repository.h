@@ -14,11 +14,14 @@ namespace opennova {
 
 // Thin SQL wrapper around the `active_hosts`, `host_players` and
 // `host_roster` tables. All methods take a Database& and call into the same
-// prepared-statement path as the rest of engine/net/novaworld —
-// single-threaded ownership of the handle is the caller's responsibility
-// (the standalone server's UDP thread + Crow worker threads share a single
-// Database, so all of host_repository.* sits behind the listener-side mutex
-// that wraps the sqlite handle).
+// prepared-statement path as the rest of engine/net/novaworld. The handle is
+// the calling thread's own connection (the standalone server leases one per
+// thread from a db::ConnectionPool); a write that spans several statements
+// (clear_all, replace_roster, apply_status_blob) is one db::Transaction on it,
+// so readers on other connections see it whole. upsert_host's INSERT OR
+// REPLACE deletes the old row, cascading its roster and players away, so a
+// caller that writes a host row and its roster puts both in one Transaction
+// (replace_roster's own then nests as a savepoint).
 //
 // Lifecycle (the lobby-session dispatch):
 //   ClientHostRequest  -> upsert_host() (INSERT OR REPLACE) + replace_roster()

@@ -108,9 +108,11 @@ std::vector<HostRow> query_hosts(opennova::db::Database &db, const std::string &
 } // namespace
 
 void clear_all(opennova::db::Database &db) {
+	opennova::db::Transaction tx(db);
 	db.exec("DELETE FROM host_roster;");
 	db.exec("DELETE FROM host_players;");
 	db.exec("DELETE FROM active_hosts;");
+	tx.commit();
 }
 
 void upsert_host(opennova::db::Database &db, const HostRow &h) {
@@ -181,6 +183,9 @@ void remove_player_by_peer(opennova::db::Database &db,
 
 void replace_roster(opennova::db::Database &db, uint32_t host_rid,
                     const std::vector<HostRosterSlot> &roster) {
+	// One transaction, so a reader on another connection never sees the
+	// roster between the delete and the last insert (partial or empty).
+	opennova::db::Transaction tx(db);
 	db.exec("DELETE FROM host_roster WHERE host_rid=?;", {i64(host_rid)});
 	for (const auto &s : roster) {
 		db.exec(
@@ -190,6 +195,7 @@ void replace_roster(opennova::db::Database &db, uint32_t host_rid,
 			{i64(host_rid), i64(s.slot), str(s.player_name), str(s.ip_and_port),
 			 str(s.pcid), str(s.team), str(s.type)});
 	}
+	tx.commit();
 }
 
 std::vector<HostRosterSlot> list_roster(opennova::db::Database &db, uint32_t host_rid) {
@@ -214,6 +220,10 @@ std::vector<HostRosterSlot> list_roster(opennova::db::Database &db, uint32_t hos
 
 bool apply_status_blob(opennova::db::Database &db, const LobbyStatusBlob &blob) {
 	if (blob.host_key.empty()) return false;
+	// One transaction for the read-modify-write: the row and its roster change
+	// together, and no ClientHostUpdate can commit between this read and this
+	// write (and be overwritten with the columns the read saw).
+	opennova::db::Transaction tx(db);
 	auto host = find_host_by_key(db, blob.host_key);
 	if (!host) return false;
 	HostRow h = *host;
@@ -257,6 +267,7 @@ bool apply_status_blob(opennova::db::Database &db, const LobbyStatusBlob &blob) 
 		}
 		replace_roster(db, h.rid, roster);
 	}
+	tx.commit();
 	return true;
 }
 

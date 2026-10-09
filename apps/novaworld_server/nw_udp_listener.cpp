@@ -319,18 +319,21 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason) 
 
 	// Phase I.2: drop the matching row(s) from active_hosts +
 	// host_players. Hosting peer is keyed by RID (drops the host row);
-	// joining peer's own host_players entry is keyed by peer addr.
-	if (db_) {
+	// joining peer's own host_players entry is keyed by peer addr. The
+	// connection is leased here, not the receive thread's: this runs on that
+	// thread and on the main thread alike.
+	if (db_pool_) {
 		try {
+			auto db_conn = db_pool_->acquire();
 			// The DB key MUST be the same spelling add_player stored, or
 			// remove_player_by_peer stops matching and host_players rows leak
 			// until the host row cascades. Both sides now render through
 			// peer_addr_ip_to_string, so they cannot drift apart.
 			const std::string ip_key = peer_addr_ip_to_string(peer);
 			if (was_hosting && rid != 0) {
-				hostdb::remove_host_by_rid(*db_, rid);
+				hostdb::remove_host_by_rid(*db_conn, rid);
 			}
-			hostdb::remove_player_by_peer(*db_, ip_key, peer.port);
+			hostdb::remove_player_by_peer(*db_conn, ip_key, peer.port);
 		} catch (const std::exception &e) {
 			std::fprintf(stderr, "[lobby] WARN db cleanup on erase_lobby_state: %s\n", e.what());
 		}
@@ -360,6 +363,19 @@ void NwUdpListener::run_loop() {
 		running_.store(false);
 		return;
 	}
+	// This thread's own connection (Database is single-threaded): the lobby
+	// session's host persistence and the maintenance lookup run on it. A failed
+	// open leaves the lobby serving from memory alone.
+	std::optional<db::ConnectionPool::Lease> db_conn;
+	if (db_pool_) {
+		try {
+			db_conn.emplace(db_pool_->acquire());
+		} catch (const db::SqliteError &e) {
+			std::fprintf(stderr, "[nwudp] WARN db open: %s\n", e.what());
+		}
+	}
+	lobby_session_.set_database(db_conn ? db_conn->get() : nullptr);
+
 	QueuedJoSocket jo_socket(socket.get());
 	using PumpClock = std::chrono::steady_clock;
 	const auto pump_period =
@@ -818,7 +834,8 @@ void NwUdpListener::run_loop() {
 						// (its name is the message kind).
 						LobbyDispatchResult result;
 						if (outer.name == "ClientRequestVerifyResult") {
-							const auto maintenance = load_maintenance_status(db_);
+							const auto maintenance =
+									load_maintenance_status(db_conn ? db_conn->get() : nullptr);
 							if (maintenance.enabled) {
 								result.label = "ClientRequestVerifyResult:maintenance";
 								result.reply_containers.push_back(
@@ -1013,6 +1030,7 @@ void NwUdpListener::run_loop() {
 		}
 	}
 
+	lobby_session_.set_database(nullptr);
 	std::printf("[nwudp] loop exiting\n");
 }
 

@@ -7,7 +7,7 @@
 
 namespace opennova {
 class UnknownTracker;
-namespace db { class Database; }
+namespace db { class ConnectionPool; }
 }
 
 namespace opennova::novaworld_server {
@@ -39,9 +39,10 @@ public:
 	// recorded (deduped) for /api/unknowns. Null is safe.
 	void set_unknown_tracker(opennova::UnknownTracker *tracker) { tracker_ = tracker; }
 
-	// Optional DB handle. When set, a received host-status blob refreshes the
-	// active_hosts row that owns its HostKey (hostdb::apply_status_blob).
-	void set_database(opennova::db::Database *db) { db_ = db; }
+	// Optional DB pool. When set, the receive thread leases one connection for
+	// its lifetime, and a received host-status blob refreshes the active_hosts
+	// row that owns its HostKey on it (hostdb::apply_status_blob).
+	void set_db_pool(opennova::db::ConnectionPool *pool) { db_pool_ = pool; }
 
 	// Bind the UDP socket and spawn the receive loop. Returns false if
 	// the socket couldn't be bound (port in use, perms, etc.) — main()
@@ -75,7 +76,7 @@ private:
 	int         glsvss_rims_  = 0;
 	int         glsvss_agrms_ = 0;
 	opennova::UnknownTracker *tracker_ = nullptr;
-	opennova::db::Database *db_ = nullptr;
+	opennova::db::ConnectionPool *db_pool_ = nullptr;
 };
 
 } // namespace opennova::novaworld_server

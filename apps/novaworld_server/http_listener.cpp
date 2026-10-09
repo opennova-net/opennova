@@ -283,9 +283,9 @@ struct HttpListener::Impl {
 	crow::SimpleApp app;
 };
 
-HttpListener::HttpListener(ConnectionManager &manager, db::Database &db,
+HttpListener::HttpListener(ConnectionManager &manager, db::ConnectionPool &db_pool,
                            SessionStore &sessions)
-	: impl_(std::make_unique<Impl>()), manager_(manager), db_(db),
+	: impl_(std::make_unique<Impl>()), manager_(manager), db_pool_(db_pool),
 	  sessions_(sessions) {
 	// A bundle that did not converge stays the zero one, which every client
 	// refuses (the modexp gate), so the login leg fails rather than the service.
@@ -385,7 +385,8 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
 			return res;
 		}
-		auto status = get_server_status(db_);
+		auto db_conn = db_pool_.acquire();
+		auto status = get_server_status(*db_conn);
 		crow::json::wvalue out;
 		out["maintenance_enabled"] = status.maintenance_enabled;
 		out["message"] = status.message;
@@ -416,7 +417,8 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 		const std::string message = body.has("message")
 			? std::string(body["message"].s())
 			: std::string();
-		auto result = update_server_status(db_, maintenance, message);
+		auto db_conn = db_pool_.acquire();
+		auto result = update_server_status(*db_conn, maintenance, message);
 		crow::json::wvalue out;
 		if (!result.ok) {
 			out["error"] = result.error_code;
@@ -426,7 +428,7 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 			res.set_header("Content-Type", "application/json");
 			return res;
 		}
-		auto status = get_server_status(db_);
+		auto status = get_server_status(*db_conn);
 		out["maintenance_enabled"] = status.maintenance_enabled;
 		out["message"] = status.message;
 		crow::response res(200);
@@ -482,7 +484,8 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 		row.peer_port    = row.host_port;
 
 		try {
-			hostdb::upsert_host(db_, row);
+			auto db_conn = db_pool_.acquire();
+			hostdb::upsert_host(*db_conn, row);
 		} catch (const std::exception &e) {
 			crow::response res(500);
 			crow::json::wvalue out;
@@ -549,8 +552,9 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
 			return res;
 		}
+		auto db_conn = db_pool_.acquire();
 		std::vector<crow::json::wvalue> arr;
-		for (const auto &u : list_users(db_)) arr.push_back(user_to_json(u));
+		for (const auto &u : list_users(*db_conn)) arr.push_back(user_to_json(u));
 		crow::json::wvalue out;
 		out["users"] = std::move(arr);
 		crow::response res(200);
@@ -586,7 +590,8 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 		p.pcid     = js("pcid",     "");
 		p.nwh      = js("nwh",      "1");
 		p.nwhandle = js("nwhandle", "");
-		auto result = create_user(db_, p);
+		auto db_conn = db_pool_.acquire();
+		auto result = create_user(*db_conn, p);
 		crow::json::wvalue out;
 		if (!result.ok) {
 			out["error"]   = result.error_code;
@@ -596,7 +601,7 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 			res.set_header("Content-Type", "application/json");
 			return res;
 		}
-		auto created = get_user_by_id(db_, result.id);
+		auto created = get_user_by_id(*db_conn, result.id);
 		out["user"] = created ? user_to_json(*created) : crow::json::wvalue{};
 		crow::response res(201);
 		res.body = out.dump();
@@ -613,7 +618,8 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
 			return res;
 		}
-		auto result = delete_user(db_, id);
+		auto db_conn = db_pool_.acquire();
+		auto result = delete_user(*db_conn, id);
 		crow::response res(result.ok ? 204 :
 		                   result.error_code == "not_found" ? 404 : 500);
 		if (!result.ok) {
@@ -650,7 +656,8 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 		if (body.has("nwh"))      p.nwh                = std::string(body["nwh"].s());
 		if (body.has("nwhandle")) p.nwhandle           = std::string(body["nwhandle"].s());
 		if (body.has("account_status")) p.account_status = std::string(body["account_status"].s());
-		auto result = update_user(db_, id, p);
+		auto db_conn = db_pool_.acquire();
+		auto result = update_user(*db_conn, id, p);
 		crow::json::wvalue out;
 		if (!result.ok) {
 			out["error"]   = result.error_code;
@@ -662,7 +669,7 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 			res.set_header("Content-Type", "application/json");
 			return res;
 		}
-		auto updated = get_user_by_id(db_, id);
+		auto updated = get_user_by_id(*db_conn, id);
 		out["user"] = updated ? user_to_json(*updated) : crow::json::wvalue{};
 		crow::response res(200);
 		res.body = out.dump();
@@ -690,7 +697,8 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 		p.game_slug = body.has("game_slug") ? std::string(body["game_slug"].s()) : "";
 		p.status    = body.has("status")    ? std::string(body["status"].s())    : "active";
 		p.exp_bits  = body.has("exp_bits")  ? std::string(body["exp_bits"].s())  : "";
-		auto result = update_game_access(db_, id, p);
+		auto db_conn = db_pool_.acquire();
+		auto result = update_game_access(*db_conn, id, p);
 		crow::json::wvalue out;
 		if (!result.ok) {
 			out["error"] = result.error_code;
@@ -701,7 +709,7 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 			res.set_header("Content-Type", "application/json");
 			return res;
 		}
-		auto access = get_game_access(db_, id, p.game_slug);
+		auto access = get_game_access(*db_conn, id, p.game_slug);
 		if (access) {
 			out["game_slug"] = access->game_slug;
 			out["status"] = access->status;
@@ -725,8 +733,9 @@ void HttpListener::register_public_api_routes() {
 		// Vue lobby browser keys off this exact shape.
 		std::vector<crow::json::wvalue> games_json;
 		try {
-			auto games     = catalog::list_games(db_);
-			auto host_rows = hostdb::list_hosts(db_);
+			auto db_conn   = db_pool_.acquire();
+			auto games     = catalog::list_games(*db_conn);
+			auto host_rows = hostdb::list_hosts(*db_conn);
 			games_json.reserve(games.size());
 			for (const auto &g : games) {
 				crow::json::wvalue game;
@@ -764,7 +773,8 @@ void HttpListener::register_public_api_routes() {
 	CROW_ROUTE(app, "/api/stats")([this]() {
 		crow::json::wvalue out;
 		try {
-			auto agg = hostdb::aggregate(db_);
+			auto db_conn = db_pool_.acquire();
+			auto agg = hostdb::aggregate(*db_conn);
 			crow::json::wvalue stats;
 			stats["games"]    = agg.games;
 			stats["lobbies"]  = agg.lobbies;
@@ -807,6 +817,7 @@ void HttpListener::register_public_api_routes() {
 			res.set_header("Content-Type", "application/json");
 			return res;
 		}
+		auto db_conn = db_pool_.acquire();
 		// Try up to 5 random PCIDs to avoid the rare collision.
 		static thread_local std::mt19937 gen{std::random_device{}()};
 		std::uniform_int_distribution<uint32_t> dist;
@@ -820,7 +831,7 @@ void HttpListener::register_public_api_routes() {
 			p.pcid     = pcid;
 			p.nwh      = "1";
 			p.nwhandle = nwhandle;
-			result = create_user(db_, p);
+			result = create_user(*db_conn, p);
 			if (result.ok || result.error_code != "pcid_exists") break;
 		}
 		crow::json::wvalue out;
@@ -832,7 +843,7 @@ void HttpListener::register_public_api_routes() {
 			res.set_header("Content-Type", "application/json");
 			return res;
 		}
-		auto created = get_user_by_id(db_, result.id);
+		auto created = get_user_by_id(*db_conn, result.id);
 		out["user"] = created ? user_to_json(*created) : crow::json::wvalue{};
 		std::printf("[http] /api/register -> created user '%s' (id=%lld)\n",
 		            username.c_str(), static_cast<long long>(result.id));
@@ -846,7 +857,8 @@ void HttpListener::register_public_api_routes() {
 		crow::json::wvalue out;
 		try {
 			std::vector<crow::json::wvalue> arr;
-			for (const auto &g : catalog::list_games(db_)) {
+			auto db_conn = db_pool_.acquire();
+			for (const auto &g : catalog::list_games(*db_conn)) {
 				crow::json::wvalue e;
 				// camelCase, mirroring the /api/lobbies casing.
 				e["slug"]        = g.slug;
@@ -868,7 +880,8 @@ void HttpListener::register_public_api_routes() {
 		// Phase I.2/I.3: backed by active_hosts + host_players.
 		std::vector<crow::json::wvalue> entries;
 		try {
-			auto rows = hostdb::list_hosts(db_);
+			auto db_conn = db_pool_.acquire();
+			auto rows = hostdb::list_hosts(*db_conn);
 			entries.reserve(rows.size());
 			for (const auto &h : rows) {
 				crow::json::wvalue e;
@@ -897,7 +910,7 @@ void HttpListener::register_public_api_routes() {
 				// The host-reported PlayerList (one entry per slot).
 				std::vector<crow::json::wvalue> roster_entries;
 				try {
-					auto roster = hostdb::list_roster(db_, h.rid);
+					auto roster = hostdb::list_roster(*db_conn, h.rid);
 					roster_entries.reserve(roster.size());
 					for (const auto &s : roster) {
 						crow::json::wvalue re;
@@ -911,7 +924,7 @@ void HttpListener::register_public_api_routes() {
 				e["roster"] = std::move(roster_entries);
 				std::vector<crow::json::wvalue> player_entries;
 				try {
-					auto players = hostdb::list_players(db_, h.rid);
+					auto players = hostdb::list_players(*db_conn, h.rid);
 					player_entries.reserve(players.size());
 					for (const auto &p : players) {
 						crow::json::wvalue pe;
@@ -1051,6 +1064,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 
 	// POST /NWLogin.dll
 	auto handle_login_post = [this, templates_dir](const crow::request &req) {
+		auto db_conn = db_pool_.acquire();
 		// Periodic TTL sweep on the LoginSession map (5-min max age) so
 		// the in-memory tag dicts don't grow unbounded over uptime. Runs
 		// every 64th POST so it doesn't dominate request latency.
@@ -1061,7 +1075,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			}
 			try {
 				const auto active_dropped =
-					evict_active_user_sessions_older_than(db_, 2 * 60 * 60);
+					evict_active_user_sessions_older_than(*db_conn, 2 * 60 * 60);
 				if (active_dropped > 0) {
 					std::printf("[http] active-session TTL sweep dropped %zu stale entries\n",
 					            active_dropped);
@@ -1131,7 +1145,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			                             req.remote_ip_address, host_url_, gsb_url_);
 		};
 
-		const auto server_status = get_server_status(db_);
+		const auto server_status = get_server_status(*db_conn);
 		if (server_status.maintenance_enabled) {
 			std::printf("[http] POST /NWLogin.dll rejected: maintenance\n");
 			return render_login_message(server_status.message.empty()
@@ -1158,7 +1172,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		std::optional<UserRecord> user;
 		const char *resolution = nullptr;
 		if (!login_name.empty() && !login_password.empty()) {
-			user = authenticate_user(db_, login_name, login_password);
+			user = authenticate_user(*db_conn, login_name, login_password);
 			if (user) {
 				resolution = "epask-auth";
 			} else {
@@ -1178,7 +1192,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 				if (pin_it != persistent_to_user_id_.end()) pinned_id = pin_it->second;
 			}
 			if (pinned_id != 0) {
-				user = get_user_by_id(db_, pinned_id);
+				user = get_user_by_id(*db_conn, pinned_id);
 				if (user) resolution = "persist-pin";
 			}
 		}
@@ -1207,7 +1221,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 				return render_login_message("This NovaWorld account is restricted. NWEC12");
 			}
 
-			const auto access = get_game_access(db_, user->id, game_slug);
+			const auto access = get_game_access(*db_conn, user->id, game_slug);
 			if (!access) {
 				std::printf("[http] POST /NWLogin.dll rejected: user %lld no access to %s\n",
 				            static_cast<long long>(user->id), game_slug.c_str());
@@ -1271,7 +1285,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		sessions_.put_login(tag, std::move(s));
 		if (user_id_for_active != 0) {
 			try {
-				register_active_user_session(db_, user_id_for_active, username_for_active, tag,
+				register_active_user_session(*db_conn, user_id_for_active, username_for_active, tag,
 				                             persist_cookie, req.remote_ip_address,
 				                             req.get_header_value("User-Agent"));
 			} catch (const std::exception &e) {
@@ -1368,7 +1382,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		            req.url.c_str(), tag.c_str(),
 		            session->username.c_str(), session->pcid.c_str());
 		if (session->user_id != 0) {
-			try { touch_active_user_session(db_, session->user_id); }
+			try { touch_active_user_session(*db_pool_.acquire(), session->user_id); }
 			catch (const std::exception &e) {
 				std::fprintf(stderr, "[http] WARN active_user_sessions touch failed: %s\n",
 				             e.what());
@@ -1433,7 +1447,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		}
 		if (!tag.empty()) {
 			sessions_.erase_login(tag);
-			try { clear_active_user_session_by_tag(db_, tag); }
+			try { clear_active_user_session_by_tag(*db_pool_.acquire(), tag); }
 			catch (const std::exception &e) {
 				std::fprintf(stderr, "[http] WARN active_user_sessions clear by tag failed: %s\n",
 				             e.what());
@@ -1448,7 +1462,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			if (pin_it != persistent_to_user_id_.end()) pinned_id = pin_it->second;
 			persistent_to_user_id_.erase(persist_it->second);
 			if (pinned_id != 0) {
-				try { clear_active_user_session(db_, pinned_id); }
+				try { clear_active_user_session(*db_pool_.acquire(), pinned_id); }
 				catch (const std::exception &e) {
 					std::fprintf(stderr, "[http] WARN active_user_sessions clear failed: %s\n",
 					             e.what());
@@ -1513,9 +1527,10 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		// just render with empty identity vars (the template can still
 		// be served for unauthenticated paths).
 		const auto cookies = parse_cookie_header(request_cookie_header(req));
+		auto db_conn = db_pool_.acquire();
 		std::optional<UserRecord> user;
 		if (auto it = cookies.find("NWHANDLE"); it != cookies.end() && !it->second.empty()) {
-			user = get_user_by_username(db_, it->second);
+			user = get_user_by_username(*db_conn, it->second);
 		}
 		if (!user) {
 			if (auto it = cookies.find("PERSISTENTEXPRESSLOGINDATA"); it != cookies.end()) {
@@ -1525,7 +1540,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 					auto pin_it = persistent_to_user_id_.find(it->second);
 					if (pin_it != persistent_to_user_id_.end()) pinned_id = pin_it->second;
 				}
-				if (pinned_id != 0) user = get_user_by_id(db_, pinned_id);
+				if (pinned_id != 0) user = get_user_by_id(*db_conn, pinned_id);
 			}
 		}
 		std::printf("[http] %s -> %s%s user=%s\n",
@@ -1585,13 +1600,14 @@ void HttpListener::register_legacy_host_join_routes(
 		// a DFX2 host would leak into the JO browser and vice versa).
 		std::vector<opennova::GsbServerEntry> entries;
 		try {
-			auto rows = hostdb::list_hosts_by_game(db_, game_slug);
+			auto db_conn = db_pool_.acquire();
+			auto rows = hostdb::list_hosts_by_game(*db_conn, game_slug);
 			entries.reserve(rows.size());
 			for (const auto &h : rows) {
 				// Every FLDS column carries the host-reported value and the row
 				// tail carries the host's roster names (hostdb::gsb_entry_from_host).
 				entries.push_back(hostdb::gsb_entry_from_host(
-						h, hostdb::list_roster(db_, h.rid)));
+						h, hostdb::list_roster(*db_conn, h.rid)));
 			}
 		} catch (const db::SqliteError &e) {
 			std::fprintf(stderr, "[http] GSB list failed: %s\n", e.what());
@@ -1713,7 +1729,8 @@ void HttpListener::register_legacy_host_join_routes(
 		const uint32_t rid_value = static_cast<uint32_t>(*rid_parsed);
 
 		// Look up the hosted entry from active_hosts (Phase I.2 — DB-backed).
-		auto host_row = hostdb::find_host_by_rid(db_, rid_value);
+		auto db_conn = db_pool_.acquire();
+		auto host_row = hostdb::find_host_by_rid(*db_conn, rid_value);
 		if (!host_row) {
 			std::fprintf(stderr, "[http] /NWJoin.dll RID %u not in active_hosts\n",
 			             static_cast<unsigned>(rid_value));
@@ -1791,7 +1808,7 @@ void HttpListener::register_legacy_host_join_routes(
 			                                    ? std::string()
 			                                    : nwhandle_it->second;
 			if (!joiner_handle.empty()) {
-				if (auto u = get_user_by_username(db_, joiner_handle)) {
+				if (auto u = get_user_by_username(*db_conn, joiner_handle)) {
 					joiner_user_id  = u->id;
 					joiner_pcid     = u->pcid;
 					joiner_nwhandle = u->nwhandle;
@@ -1808,7 +1825,7 @@ void HttpListener::register_legacy_host_join_routes(
 						if (pin_it != persistent_to_user_id_.end()) pinned_id = pin_it->second;
 					}
 					if (pinned_id != 0) {
-						if (auto u = get_user_by_id(db_, pinned_id)) {
+						if (auto u = get_user_by_id(*db_conn, pinned_id)) {
 							joiner_user_id  = u->id;
 							joiner_pcid     = u->pcid;
 							joiner_nwhandle = u->nwhandle;
@@ -1824,7 +1841,7 @@ void HttpListener::register_legacy_host_join_routes(
 				const std::string required_exp_bits = host.exp_bits.empty()
 					? (host_game == "dfx2_consumer" ? std::string("1") : std::string("3"))
 					: host.exp_bits;
-				const auto access = get_game_access(db_, joiner_user_id, host_game);
+				const auto access = get_game_access(*db_conn, joiner_user_id, host_game);
 				const bool access_ok = access && access->status == "active" &&
 					expansion_bits_compatible(access->exp_bits, required_exp_bits);
 				if (!access_ok) {
@@ -1894,7 +1911,7 @@ void HttpListener::register_legacy_host_join_routes(
 					                : joiner_nwhandle;
 					p.peer_ip   = req.remote_ip_address;
 					p.peer_port = 0;
-					hostdb::add_player(db_, p);
+					hostdb::add_player(*db_conn, p);
 				} catch (const std::exception &e) {
 					std::fprintf(stderr, "[http] /NWJoin.dll WARN host_players add: %s\n", e.what());
 				}
