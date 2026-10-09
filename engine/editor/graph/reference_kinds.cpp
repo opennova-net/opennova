@@ -388,7 +388,7 @@ std::string shader_missing(const AssetGraph &graph, const GraphEdge &) {
 // [orig: Entity_SpawnFromAnimSlotProperty @ 0x43c3cf -> ItemList_FindIndexByTypeId @ 0x49e100, its 0 for no
 // match @ 0x49e12f].
 bool named_by_class_cammo(const GraphEdge &edge) {
-	return edge.name_offset && (edge.field == "JUNGLE_CAMMO" || edge.field == "DESERT_CAMMO" || edge.field == "ARCTIC_CAMMO");
+	return edge.name_offset && (edge.field == "jungle_cammo" || edge.field == "desert_cammo" || edge.field == "arctic_cammo");
 }
 
 std::string item_missing(const AssetGraph &graph, const GraphEdge &edge) {

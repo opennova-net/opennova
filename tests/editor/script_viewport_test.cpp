@@ -117,7 +117,7 @@ int test_kind_table() {
 	TEST_EXPECT(viewport_kind_from_token("script", named) && named == ViewportKind::Script);
 	const ViewportKindRow &row = viewport_kind_row(ViewportKind::Script);
 	TEST_EXPECT(row.kind == ViewportKind::Script && row.role == ViewportRole::Main && !row.as_saved && !row.part &&
-	            row.feed_count == 8 && row.make && !row.canvas);
+	            row.feed_count == 7 && row.make && !row.canvas);
 	// Whether a kind has a canvas is what its viewport makes of one: the script's none, the others' one.
 	for (size_t i = 0; i < kViewportKindCount; ++i) {
 		const ViewportKindRow &kind_row = viewport_kind_row(static_cast<ViewportKind>(i));
@@ -128,7 +128,7 @@ int test_kind_table() {
 	// HUD the Preview window shows (DI-20).
 	const DocumentTypeId texts[] = {DocumentTypeId::Script, DocumentTypeId::MusicScript, DocumentTypeId::Credits,
 	                                DocumentTypeId::Shader, DocumentTypeId::Text, DocumentTypeId::Particles,
-	                                DocumentTypeId::HudLayout, DocumentTypeId::CharAttrs};
+	                                DocumentTypeId::HudLayout};
 	size_t shown = 0, mains = 0;
 	for (const DocumentTypeId type : texts) {
 		shown += viewport_kind_shows(ViewportKind::Script, type) ? 1 : 0;
@@ -145,9 +145,9 @@ int test_kind_table() {
 		            (i == size_t(ViewportKind::Script) || i == size_t(ViewportKind::Mission) || i == size_t(ViewportKind::Texture) ||
 		             i == size_t(ViewportKind::Environment) || i == size_t(ViewportKind::Terrain) ||
 		             i == size_t(ViewportKind::Font)));
-	// The eight text types (the character attributes among them), the mission (S14), the texture (S18), the environment
-	// (DI-19b), the terrain (DI-30b) and the font (S23) have a Main-role kind.
-	TEST_EXPECT(shown == 8 && mains == 13);
+	// The seven text types, the mission (S14), the texture (S18), the environment (DI-19b), the terrain (DI-30b) and the
+	// font (S23) have a Main-role kind (the character attributes, rows since S23 B, none).
+	TEST_EXPECT(shown == 7 && mains == 12 && main_viewport_kind(DocumentTypeId::CharAttrs) == ViewportKind::kCount);
 	// Its viewport: one option, assist (the MCP gaps lane: none asked), no camera, no canvas; the empty one's
 	// reason.
 	std::unique_ptr<ViewportModel> made = row.make("t.wac");

@@ -7,7 +7,7 @@
 #include <editor/documents/catalog_labels.h>
 #include <editor/documents/catalog_validation.h>
 #include <editor/documents/menu_labels.h>
-#include <editor/documents/charattr_type.h>
+#include <editor/documents/charattr_document.h>
 #include <editor/documents/credits_type.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/dialog_bank_document.h>
@@ -69,6 +69,7 @@ std::unique_ptr<DocumentBase> make_font() { return std::make_unique<FontDocument
 std::unique_ptr<DocumentBase> make_music_bank() { return std::make_unique<MusicBankDocument>(); }
 std::unique_ptr<DocumentBase> make_ai_profile() { return std::make_unique<AiProfileDocument>(); }
 std::unique_ptr<DocumentBase> make_hudfx() { return std::make_unique<HudFxDocument>(); }
+std::unique_ptr<DocumentBase> make_charattr() { return std::make_unique<CharAttrDocument>(); }
 std::unique_ptr<DocumentBase> make_score() { return std::make_unique<ScoreDocument>(); }
 std::unique_ptr<DocumentBase> make_avatars() { return std::make_unique<AvatarsDocument>(); }
 
@@ -159,12 +160,11 @@ constexpr DocumentType kTypes[] = {
 	{ DocumentTypeId::DialogBank, "dialog_bank", make_dialog_bank, validate_dialog_bank_file, DialogBankDocument::schema,
 			dialog_bank_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
 			nullptr, define_dialog },
-	// The character attributes (DI-09's charattr follow-up): charattr.def held as its text, its line ends the
-	// ConfigFile reader's; its references each class's camouflage items, as the game's loader reads them; the
-	// lines that loader reads the same without, which the ConfigFile pool rule's fix comments out.
-	{ DocumentTypeId::CharAttrs, "charattr", make_charattr_document, validate_charattr_file, text_fields,
-			charattr_finding_codes, nullptr, charattr_references, nullptr, nullptr, nullptr, nullptr,
-			nullptr, nullptr, nullptr, nullptr, charattr_idle_lines },
+	// The character attributes (DI-09's charattr follow-up; S23 B its rows): charattr.def's classes, each its keys
+	// as the loader reads them, a camouflage item an items.def item by its id less 100000; the ConfigFile pool rule's
+	// finding its validator's, over the text its save writes.
+	{ DocumentTypeId::CharAttrs, "charattr", make_charattr, validate_charattr_file, CharAttrDocument::schema,
+			charattr_finding_codes },
 	// The face animation (round S23 lane A): a .grm's face over grm::File, its references its texture fields' (each
 	// name made .TGA by the stage loader) and the base's .MDT twin; a triangle names its vertices by index.
 	{ DocumentTypeId::FaceAnimation, "face_animation", make_face_animation, validate_face_animation_file,

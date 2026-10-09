@@ -183,8 +183,8 @@ constexpr DocumentViewRow kViews[] = {
 	// A dialog bank's dialogs as a tree, each holding its lines; a dialog or a line heads the Inspector with a Play
 	// of it as the game plays it and what the last play said (DI-32, ui/sound_inspector).
 	{DocumentTypeId::DialogBank, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_dialog_bank_inspector},
-	// The character attributes' text in the script device (DI-09's charattr follow-up).
-	{DocumentTypeId::CharAttrs, DocumentViewRole::MainViewport, nullptr, make_script_view},
+	// The character attributes' classes as a list, each class's keys in the Inspector (S23 B).
+	{DocumentTypeId::CharAttrs, DocumentViewRole::Records, &kTreeOutline, nullptr},
 	// A face animation's face as a tree: its vertices, triangles and gestures, each gesture its parameters (S23 A).
 	{DocumentTypeId::FaceAnimation, DocumentViewRole::Records, &kTreeOutline, nullptr},
 	// A font's glyphs as a tree beside its picture (S23 A: the Main role, ui/main_viewport_view over the Font viewport

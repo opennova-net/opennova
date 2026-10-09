@@ -94,6 +94,7 @@
 #include <editor/documents/ai_profile_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/avatars_document.h>
+#include <editor/documents/charattr_document.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/environment_document.h>
@@ -204,12 +205,13 @@ const RowObject kRowObjects[] = {
         {&typeid(AiProfileRow), sizeof(AiProfileRow)}, {&typeid(HudFxRow), sizeof(HudFxRow)},
         {&typeid(ScoreHeaderRow), sizeof(ScoreHeaderRow)}, {&typeid(ScoreBlockRow), sizeof(ScoreBlockRow)},
         {&typeid(AvatarPartRow), sizeof(AvatarPartRow)}, {&typeid(AvatarNationalityRow), sizeof(AvatarNationalityRow)},
+        {&typeid(CharAttrRow), sizeof(CharAttrRow)},
 };
 // The document types whose rows keep their text in fixed-length records (a model's 3DI records, a
-// clip's bone table, a def catalog's records, a mission's header and entity slots): a longer text
-// grows no row of theirs. Every other type's rows hold their text as strings, which a longer text
-// makes longer.
-const char *const kFixedText[] = {"model", "animation", "catalog", "mission"};
+// clip's bone table, a def catalog's records, a mission's header and entity slots), or hold none (the
+// character attributes' numbers): a longer text grows no row of theirs. Every other type's rows hold
+// their text as strings, which a longer text makes longer.
+const char *const kFixedText[] = {"model", "animation", "catalog", "mission", "charattr"};
 bool fixed_text(const DocumentType &type) {
 	for (const char *name : kFixedText)
 		if (std::string(name) == type.name) return true;

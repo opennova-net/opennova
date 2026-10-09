@@ -4943,13 +4943,15 @@ add_test(NAME editor_add_it_there COMMAND editor_add_it_there_test)
 # Definition fields complete their references (ADR 0046 DI-09): every def field the game resolves by name a
 # reference of its kind in the scope its reader reads (user points by the lookup that scans them, an action's
 # slot in its weapon's map, an ammo's tracer items by type id), and the complete query over them.
-# The character attributes type (ADR 0046 DI-09's charattr follow-up): charattr.def's read classes'
-# camouflage items as references at their numbers, the game's words for a missing one, a rename writing
-# the type id back, the unread sections and the type's other findings.
-add_executable(editor_charattr_type_test editor/charattr_type_test.cpp)
-target_link_libraries(editor_charattr_type_test PRIVATE opennova_editor)
-target_include_directories(editor_charattr_type_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME editor_charattr_type COMMAND editor_charattr_type_test)
+# The character attributes document (ADR 0046 DI-09's charattr follow-up; S23 B its rows): charattr.def's read
+# classes as rows over the game's loader with the file's layout, a value's own line, a class added and the last
+# removed, the camouflage items as references, the game's words for a missing one, a rename writing the type id
+# back, the unread sections and the type's other findings; --retail: the install's charattr.def (base and each
+# expansion) through the document byte for byte.
+add_executable(editor_charattr_test editor/charattr_document_test.cpp)
+target_link_libraries(editor_charattr_test PRIVATE opennova_editor)
+target_include_directories(editor_charattr_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_charattr COMMAND editor_charattr_test)
 
 add_executable(editor_def_references_test editor/def_references_test.cpp)
 target_link_libraries(editor_def_references_test PRIVATE opennova_editor)

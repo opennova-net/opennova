@@ -92,7 +92,7 @@ add_library(opennova_editor STATIC
     # the sound lane: a bank's waves and sets, SndProf.def's profiles
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_bank_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_profile_document.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/documents/charattr_type.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/charattr_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/dialog_bank_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/ai_profile_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/hudfx_document.cpp
