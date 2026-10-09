@@ -11,6 +11,7 @@
 #include <base/io/strutil.h>
 #include <editor/project/project_files.h>
 #include <editor/run/launch_plan.h>
+#include <formats/filelog/file_access_log.h>
 
 namespace fs = std::filesystem;
 
@@ -109,7 +110,7 @@ bool ready_run_directory(const fs::path &dir, const RunTake &take, std::vector<s
 		return !fs::exists(system, ec);
 	}
 	std::vector<std::string> going = before.files;
-	for (const char *own : {kRunStagingFileName, kRunRecordFileName, kRunLogFileName, kInstallFileLogName})
+	for (const char *own : {kRunStagingFileName, kRunRecordFileName, kRunLogFileName, filelog::kInstallFileLogName})
 		going.push_back(own);
 	bool gone = true;
 	for (const std::string &name : going) {
