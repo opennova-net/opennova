@@ -1018,7 +1018,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 				ImGui::SameLine();
 				ImGui::TextDisabled("%s", said.c_str());
 			}
-			// What it is and how loud (the sound lane: import/wave_source.h), its picture a bar a bin, and
+			// What it is and how loud (the sound lane: formats/lwf/wav_source.h), its picture a bar a bin, and
 			// whether the game's loader takes it.
 			if (!card.sound.format.empty()) {
 				char loud[96];

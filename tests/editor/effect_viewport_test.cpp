@@ -1,12 +1,12 @@
 // DI-14 (ADR 0046, the deep-integration plan's particle effect preview): a particle file's effect played
-// through the engine's own effect scene. The reader's places (formats/particle: each effect's block and
-// its id's place). The closure (runtime/particle/effect_closure): the effect the catalog registers first,
+// through the engine's own effect scene (the reader's places, each effect's block and its id's place, are
+// formats/particle's: tests/particle/particle_effect_places_test). The closure (runtime/particle/effect_closure): the effect the catalog registers first,
 // its members all or nothing, its child chains, every table, and a scene over it alone spawning what the
 // whole catalog spawns, particle for particle; the stock effect for an unknown name. The playback
 // (preview/effect_playback): spawned at tick 0, stepped a tick at a time (one call or many alike), spawned
 // again at the tick it dies while it loops and left dead when it does not, a jump spawning it pre-aged
 // (bounded by the engine's catch-up), the wind. The particle type (documents/particle_type): the
-// reader's stop and a duplicate effect as findings at their places, the effect a line is in. The kinds'
+// reader's stop and a duplicate effect as findings at their places. The kinds'
 // table (ViewportKind::Effect, the particle type's Preview kind; the script device its Main). Through a
 // real session over a project: the catalog in the effect system's order (a .ptl before another, the
 // gore set the project picks), the viewport made as the file opens and its device given the scene, its
@@ -134,25 +134,6 @@ Ran run(particle::EffectScene &scene, const std::string &effect, int ticks) {
 bool same_run(const Ran &a, const Ran &b) {
 	return a.status == b.status && a.positions == b.positions && a.counts.group_count == b.counts.group_count &&
 	       a.counts.emitter_count == b.counts.emitter_count && a.counts.particle_count == b.counts.particle_count;
-}
-
-// --- the reader's places -------------------------------------------------------------------------------
-
-int test_places() {
-	const std::string text = "; a line the reader passes over\r\n[effectdef]\r\n{\r\n\tid =   First;\r\n\tpdefs = a;\r\n}\r\n"
-	                         "\r\n[effectdef]\r\n{\r\nid=Second;\r\npdefs = b;\r\nid = Second again;\r\n};\r\n";
-	const particle::ParticleFile file = parsed(text);
-	TEST_EXPECT(file.effects.size() == 2);
-	const particle::EffectDef &first = file.effects[0], &second = file.effects[1];
-	TEST_EXPECT(first.first_line == 2 && first.last_line == 6 && first.id_line == 4 && first.id_column == 9);
-	// The last id read names the effect, and its place is the one recorded.
-	TEST_EXPECT(second.id == "Second again" && second.first_line == 8 && second.last_line == 13 && second.id_line == 12 &&
-	            second.id_column == 6);
-	TEST_EXPECT(particle_effect_at(file, 4) == 0 && particle_effect_at(file, 6) == 0 && particle_effect_at(file, 7) == std::string::npos &&
-	            particle_effect_at(file, 10) == 1 && particle_effect_at(file, 1) == std::string::npos);
-	// The writer writes none of them: a file written and read again places its effects by its own lines.
-	std::printf("places: First's id at 4:9, the block 2..6; Second's last id at 12:6\n");
-	return 0;
 }
 
 // --- the closure ---------------------------------------------------------------------------------------
@@ -602,7 +583,6 @@ int test_retail() {
 
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
-	if (test_places() != 0) return 1;
 	if (test_closure() != 0) return 1;
 	if (test_playback() != 0) return 1;
 	if (test_particle_type() != 0) return 1;

@@ -11,7 +11,6 @@
 
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
-#include <editor/import/wave_source.h>
 #include <editor/project/project_document.h>
 #include <formats/adm/adm.h>
 #include <formats/aip/aip.h>
@@ -22,6 +21,7 @@
 #include <formats/def/def.h>
 #include <formats/def/def_hudpos_write.h>
 #include <formats/lwf/wav_pcm.h>
+#include <formats/lwf/wav_source.h>
 #include <formats/mus/mus.h>
 #include <formats/particle/parser.h>
 #include <formats/sbf/sbf.h>
@@ -127,7 +127,7 @@ static int test_sound() {
 	std::string error;
 	TEST_EXPECT(wave.size() == 46 && lwf::wav_decode_pcm16(wave.data(), wave.size(), pcm, error));
 	TEST_EXPECT(pcm.channels == 1 && pcm.sample_rate == 22050 && pcm.pcm16.size() == 2);
-	TEST_EXPECT(wave_retail_check(wave).plays);
+	TEST_EXPECT(lwf::wave_retail_check(wave).plays);
 	std::vector<uint8_t> none;
 	const uint8_t sample[2] = {0, 0};
 	TEST_EXPECT(!lwf::wav_write_pcm_mono(sample, 0, 22050, 16, none, error) && !lwf::wav_write_pcm_mono(sample, 1, 22050, 16, none, error) &&

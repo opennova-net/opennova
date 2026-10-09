@@ -48,16 +48,6 @@ bool read_particle_text(const TextDocument &document, particle::ParticleFile &ou
 	return particle::load_particles_from_buffer(text.data(), text.size(), out, error);
 }
 
-size_t particle_effect_at(const particle::ParticleFile &file, size_t line) {
-	for (size_t i = 0; i < file.effects.size(); ++i) {
-		const particle::EffectDef &effect = file.effects[i];
-		if (effect.first_line > 0 && line >= size_t(effect.first_line) &&
-				(effect.last_line <= 0 || line <= size_t(effect.last_line)))
-			return i;
-	}
-	return std::string::npos;
-}
-
 std::vector<Diagnostic> validate_particle_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const TextDocument *text = text_of(document);
