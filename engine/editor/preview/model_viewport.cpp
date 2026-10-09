@@ -363,7 +363,7 @@ int ModelViewport::lod() const {
 std::vector<ModelOverlay> ModelViewport::overlays(const PreviewClock &clock) const {
 	if (!model_) return {};
 	int32_t bus[96];
-	model_preview_ctrl_bus(ctrl_at(clock), bus);
+	threedi::threedi_ctrl_bus_from_names(ctrl_at(clock), bus);
 	std::vector<ModelOverlay> out = model_overlays(*model_, lod(), clock.ms(), bus, options_.overlays);
 	// A clip playing (S17): a user point on a bone rides it as the skin carries the mesh there, as
 	// the game's attachment resolve poses a point on its bone [orig: Entity_GetAttachmentWorldPosition
@@ -402,7 +402,7 @@ ModelCollisionShapesPtr ModelViewport::collision(const PreviewClock &clock, Mode
 	    cache.ctrl == ctrl && cache.also == also && cache.time_ms == time_ms)
 		return cache.shapes;
 	int32_t bus[96];
-	model_preview_ctrl_bus(ctrl, bus);
+	threedi::threedi_ctrl_bus_from_names(ctrl, bus);
 	cache.shapes = std::make_shared<const std::vector<ModelCollisionShape>>(
 			model_collision_shapes(model_, level, time_ms, bus, options_.overlays, also));
 	cache.model = model_.get();
@@ -454,7 +454,7 @@ bool ModelViewport::handle_edits(const ModelDocument &document, const ModelOverl
 	PreviewVec3 to;
 	if (!camera().on_view_plane(x, y, width, height, through, to)) return false;
 	int32_t bus[96];
-	model_preview_ctrl_bus(ctrl_at(clock), bus);
+	threedi::threedi_ctrl_bus_from_names(ctrl_at(clock), bus);
 	if (!model_handle_edits(document, *model_, overlay, lod(), clock.ms(), bus, handle, to, snap, gesture, out))
 		return false;
 	if (handle != ModelHandle::Place || !others) return true;
