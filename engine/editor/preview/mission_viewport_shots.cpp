@@ -101,7 +101,7 @@ std::vector<DefinitionSpawn> MissionViewport::shot_spawns_() const {
 	// terrain's and the water's with none), in the presentation frame the effect scene runs in.
 	std::vector<DefinitionSpawn> spawns;
 	for (const MissionShotSpawn &spawn : shots_.spawns())
-		spawns.push_back({spawn.effect, effect_descriptor_pose(presented(spawn.at), presented_direction(spawn.direction)),
+		spawns.push_back({spawn.effect, particle::descriptor_pose(presented(spawn.at), presented_direction(spawn.direction)),
 		                  spawn.tick, spawn.source, std::string()});
 	return spawns;
 }

@@ -18,7 +18,10 @@
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/anim/adm_root_motion.h>
 #include <runtime/assets/asset_store.h>
+#include <runtime/mission/collision_resolve.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/entity_spawn.h>
 #include <runtime/world/model_geometry.h>
 
 namespace opennova::editor {
@@ -77,49 +80,12 @@ std::string height_words(double value) {
 }
 
 // The placement matrix of a record (16.16 position, its eulers whole degrees) at an item's scale, as the
-// game's collision places an entity [the matrix CollisionWorld::target_view builds: orig: the entity
-// orientation matrix @0x613f40; BoneCallback_Simple @0x4e2600 copies it into every section].
+// game's collision places an entity (world::collision_matrix_from_placement, the matrix
+// CollisionWorld::target_view builds; BoneCallback_Simple @0x4e2600 copies it into every section).
 world::CollisionMatrix placement(const MissionEntityMark &entity, int32_t scale_q16) {
 	const int32_t at[3] = { fixed(entity.x), fixed(entity.y), fixed(entity.z) };
-	const int32_t heading = world::bam_heading_from_mission_yaw_deg(double(entity.yaw));
-	world::CollisionMatrix matrix = (entity.pitch != 0 || entity.roll != 0)
-			? world::collision_matrix_from_euler(heading, world::bam_from_degrees_wrapped(double(entity.pitch)),
-					  world::bam_from_degrees_wrapped(double(entity.roll)), at)
-			: world::collision_matrix_from_heading(heading, at);
-	if (scale_q16 != 0)
-		for (const int index : { 0, 1, 2, 4, 5, 6, 8, 9, 10 })
-			matrix.m[index] = int32_t((int64_t(matrix.m[index]) * scale_q16) >> 16);
-	return matrix;
-}
-
-// A local box (min x, y, z, max x, y, z; 16.16) as `matrix` places it: its world box.
-void placed_box(const int32_t local[6], const world::CollisionMatrix &matrix, int32_t min[3], int32_t max[3]) {
-	for (int axis = 0; axis < 3; ++axis) {
-		min[axis] = INT32_MAX;
-		max[axis] = INT32_MIN;
-	}
-	for (int corner = 0; corner < 8; ++corner) {
-		const int32_t point[3] = { local[(corner & 1) ? 3 : 0], local[(corner & 2) ? 4 : 1], local[(corner & 4) ? 5 : 2] };
-		int32_t world_point[3];
-		matrix.transform_point(point, world_point);
-		for (int axis = 0; axis < 3; ++axis) {
-			min[axis] = std::min(min[axis], world_point[axis]);
-			max[axis] = std::max(max[axis], world_point[axis]);
-		}
-	}
-}
-
-// The terrain's height at (x, y), the column the game's probe writes whatever the ray's span [orig:
-// Terrain_RaycastHeightmapLoRes @0x60cc12..0x60cc2d]; false with no terrain there.
-bool terrain_at(const terrain::TerrainHeightField *field, int32_t x, int32_t y, int32_t &height) {
-	if (field == nullptr) return false;
-	const int32_t start[3] = { x, y, 0x7FFF0000 };
-	int32_t end[3] = { x, y, -0x7FFF0000 };
-	const int32_t before = end[2];
-	world::terrain_clip_segment(*field, start, end, end);
-	if (end[2] == before) return false;
-	height = end[2];
-	return true;
+	return world::collision_matrix_from_placement(double(entity.yaw), double(entity.pitch), double(entity.roll), at,
+			scale_q16);
 }
 
 // The mission's drawn items and buildings, each placed by its record: the type-1 solids the ground probe
@@ -151,7 +117,7 @@ public:
 				volume.max_z };
 			Box box;
 			box.entry = index;
-			placed_box(local, matrix, box.min, box.max);
+			world::collision_matrix_box_bounds(matrix, local, box.min, box.max);
 			const size_t at = boxes_.size();
 			boxes_.push_back(box);
 			for (int32_t cx = box.min[0] >> kCellShift; cx <= (box.max[0] >> kCellShift); ++cx)
@@ -304,10 +270,9 @@ const MissionGroundReads::Item *MissionGroundReads::item(const FileSource &files
 			++parsed_;
 			def::DefItemsFile parsed{};
 			if (def::def_parse_items_memory(bytes.data(), bytes.size(), &parsed) == 0) {
-				for (size_t i = 0; i < parsed.count; ++i) {
-					const def::DefItemDef &row = parsed.entries[i];
-					// A type id resolves to its first row [orig: ItemList_FindIndexByTypeId @0x49e100].
-					if (items_.count(int64_t(row.id))) continue;
+				// A type id resolves to its first row (mission::item_defs_by_id).
+				for (const auto &entry : mission::item_defs_by_id(parsed)) {
+					const def::DefItemDef &row = *entry.second;
 					Item item;
 					item.name = row.display_name;
 					item.graphic = row.graphic;
@@ -460,7 +425,7 @@ std::vector<MissionGroundVerdict> mission_ground_verdicts(const MissionScene &sc
 		}
 		const std::string row = move_row(r.item->move_function);
 		int32_t terrain = 0;
-		const bool has_terrain = terrain_at(field, x, y, terrain);
+		const bool has_terrain = world::terrain_column_height(field, x, y, terrain);
 		verdict.terrain = has_terrain ? units(terrain) : 0.0;
 
 		if (entity.pool == MissionPool::Organic) {
@@ -492,7 +457,7 @@ std::vector<MissionGroundVerdict> mission_ground_verdicts(const MissionScene &sc
 			verdict.base = units(feet);
 			verdict.support = units(terrain);
 			verdict.on = MissionSupport::Terrain;
-			if (clearance < kMissionPoseSettle) {
+			if (clearance < world::kOrganicWarmupSettleQ16) {
 				verdict.why = "settled";
 				out.push_back(std::move(verdict));
 				continue;
@@ -503,7 +468,7 @@ std::vector<MissionGroundVerdict> mission_ground_verdicts(const MissionScene &sc
 			int32_t support = terrain;
 			const Placed::Entry *on = nullptr;
 			int32_t hit = 0;
-			if (placed.probe(x, y, (origin + 6143) & ~0x17FF, terrain, entity.row, hit, on) && hit > support) {
+			if (placed.probe(x, y, world::ground_probe_origin_z(origin), terrain, entity.row, hit, on) && hit > support) {
 				support = hit;
 				stood_on(verdict, on);
 			}
@@ -515,7 +480,7 @@ std::vector<MissionGroundVerdict> mission_ground_verdicts(const MissionScene &sc
 			}
 			verdict.support = units(support);
 			const int32_t drop = io::bam_sub(feet, support);
-			if (drop < kMissionPoseSettle) {
+			if (drop < world::kOrganicWarmupSettleQ16) {
 				verdict.why = "standing";
 				out.push_back(std::move(verdict));
 				continue;
@@ -552,7 +517,7 @@ std::vector<MissionGroundVerdict> mission_ground_verdicts(const MissionScene &sc
 		const double anchor = r.model->anchor[2];
 		const int32_t base = fixed(entity.z + anchor);
 		int32_t box_min[3] = { x, y, base }, box_max[3] = { x, y, base };
-		if (r.model->bounds) placed_box(r.model->box, r.matrix, box_min, box_max);
+		if (r.model->bounds) world::collision_matrix_box_bounds(r.matrix, r.model->box, box_min, box_max);
 		const int32_t bottom = box_min[2], top = box_max[2];
 		verdict.base = units(base);
 		verdict.bottom = units(bottom);
