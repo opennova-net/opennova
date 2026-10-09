@@ -71,10 +71,6 @@ inline constexpr const char *kTerrainSetExtension = ".tset";
 // characters.
 inline constexpr size_t kTerrainStemMax = 9;
 
-// The foliage definitions a terrain holds at most: the game's four slots [orig: Terrain_ParseConfigCallback
-// @ 0x60F330, `dword_31BC900 < 4`].
-inline constexpr size_t kTerrainFoliageDefs = FOLIAGE_MAX_DEFS;
-
 struct TerrainSet {
 	std::string heightmap;
 	std::string colormap;
@@ -154,12 +150,6 @@ bool decode_terrain_foliage(const std::string &name, const std::vector<uint8_t> 
 // no definition selects (code 0 aside), and the definitions none of whose codes it holds, each a line for
 // the import's warnings ("" none).
 std::vector<std::string> terrain_foliage_notes(const IndexedImage8 &map, const std::vector<FoliageDef> &defs);
-
-// The stretches of 256 texels along a row (the CDEP section's blocks) whose heights span more than a
-// block holds: 32,766 raw (just under 128 world units), its width that of the range plus one within the
-// field's 15 bits, as the shipped files write it. The CPT writer clamps each [orig:
-// Terrain_LoadLodStorage @ 0x603635..0x6037A8, the 4-bit width].
-int terrain_steep_blocks(const std::vector<uint16_t> &raw16);
 
 bool run_terrain_import(ImportContext &context, ImportProduct &out);
 
