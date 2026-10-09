@@ -18,6 +18,7 @@
 #include <formats/env/env.h>
 #include <formats/mission/mission.h>
 #include <formats/trn/trn_io.h>
+#include <runtime/mission/mission_sidecars.h>
 
 namespace opennova::editor {
 
@@ -39,13 +40,6 @@ bool read_text(const SessionView &view, const std::string &path, std::string &ou
 	if (!entry || !view.findings.assets || !view.findings.assets->read(entry->logical_name, bytes)) return false;
 	out.assign(bytes.begin(), bytes.end());
 	return true;
-}
-
-std::string stem_of(const std::string &path) {
-	std::string name = basename_of(path);
-	const size_t dot = name.find_last_of('.');
-	if (dot != std::string::npos) name.erase(dot);
-	return name;
 }
 
 // The import an output comes from: its set read, the images it names, its record's options (S20).
@@ -122,7 +116,9 @@ TerrainUses terrain_uses(const SessionView &view, const std::string &path) {
 		TerrainMissionUse use;
 		use.edge = edge;
 		use.mission = edge->source;
-		use.name = stem_of(source->logical_name);
+		// What <mission>.til is named by: the name cut at its first dot, as the game's extension swap cuts it
+		// (mission::mission_base_name).
+		use.name = mission::mission_base_name(source->logical_name);
 		// The environment the same header names, and the file it finds.
 		for (const GraphEdge *reference : graph->references_of(edge->source)) {
 			if (reference->kind != ReferenceKind::Environment) continue;

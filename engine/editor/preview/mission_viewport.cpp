@@ -34,6 +34,7 @@
 #include <formats/env/tod_clock.h>
 #include <formats/mission/bms.h>
 #include <runtime/environment/environment_state.h>
+#include <runtime/mission/mission_sidecars.h>
 #include <runtime/terrain_query/height_field.h>
 
 namespace opennova::editor {
@@ -321,12 +322,11 @@ void MissionViewport::bound_items_(const SessionView &view) {
 }
 
 void MissionViewport::follow_ground_(const SessionView &view) const {
-	// The mission's own name: the game reads <mission>.til.
-	std::string mission = path();
-	if (const size_t slash = mission.find_last_of("/\\"); slash != std::string::npos) mission.erase(0, slash + 1);
-	if (const size_t dot = mission.find_last_of('.'); dot != std::string::npos) mission.erase(dot);
+	// The mission's own name: the game reads <mission>.til, the name cut at its first dot as the game's extension
+	// swap cuts it (mission::mission_base_name) [orig: Path_ReplaceOrAppendExtension @ 0x53c780, the scan
+	// @ 0x53c7c4].
 	terrain_ground_.follow(view.findings.assets, view.findings.assets ? view.findings.assets->generation() : 0,
-			scene_.header(), mission);
+			scene_.header(), mission::mission_base_name(path()));
 }
 
 bool MissionViewport::follow_overlay_(const SessionView &view) {

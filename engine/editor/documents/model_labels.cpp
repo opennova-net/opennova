@@ -146,9 +146,11 @@ bool model_lod_drawn(const ModelRow &row, size_t lod) { return model_lod_drawn(m
 
 std::string model_lod_range(const ModelRow &row, size_t lod) { return model_lod_range(model_lod_thresholds(row), lod); }
 std::string model_user_point_role(const std::string &raw) {
-	const std::string name = strutil::trim(raw);
-	// The seats, in the game's classes (mission::seat_type_for_user_point). The game compares the raw name
-	// from byte zero with no trim; the words here read the trimmed name.
+	// The name as the game compares it: the field's bytes up to its NUL, from byte zero, with no trim [orig:
+	// Entity_GetBoneSlotType @ 0x434ed0: strnicmp "sitex", "ctrlx", "drvrx" 5 @ 0x434f16, @ 0x434f34, @ 0x434f52;
+	// stricmp "UseGun" @ 0x434f6e], so a name with a space before or after it plays no role.
+	const std::string name = raw.substr(0, raw.find('\0'));
+	// The seats, in the game's classes (mission::seat_type_for_user_point).
 	switch (mission::seat_type_for_user_point(name)) {
 	case world::SeatType::Passenger: return "passenger seat";
 	case world::SeatType::Controller: return "control seat";

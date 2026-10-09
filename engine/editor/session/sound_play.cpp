@@ -9,7 +9,6 @@
 #include <editor/documents/sound_bank_document.h>
 #include <editor/preview/dialog_preview.h>
 #include <editor/assets/project_asset_source.h>
-#include <formats/lwf/wav_source.h>
 #include <runtime/mission/mission_sidecars.h>
 #include <editor/documents/sound_profile_document.h>
 #include <editor/model/finding_code_row.h>
@@ -186,12 +185,12 @@ void play_dialog(SessionCore &core, const EditorRequest &request) {
 	DialogSources sources;
 	std::string error;
 	if (!read_dialog_sources(*files, bank, text, sources, error)) return refuse(core, error, entry->relative_path);
-	// A wave's length as the game decodes it, its file the project's.
-	const auto seconds_of = [&](const std::string &file) {
+	// A wave as the game's device loads it, its file the project's.
+	const auto wave_of = [&](const std::string &file) {
 		std::vector<uint8_t> bytes;
-		return files->read(file, bytes) ? lwf::wave_seconds(bytes) : 0.0;
+		return files->read(file, bytes) ? dialog_wave(bytes) : DialogWave();
 	};
-	const DialogPlay play = plan_dialog_play(sources, value_of(request, "dialog"), line, seconds_of);
+	const DialogPlay play = plan_dialog_play(sources, value_of(request, "dialog"), line, wave_of);
 	if (!play.found) return refuse(core, play.words, entry->relative_path);
 	std::vector<WorkspaceView::Voice> voices;
 	std::string missing;

@@ -81,8 +81,9 @@ int test_assist() {
 	ScriptCompletions completions = script_completions(view, *script, 2, 7);
 	TEST_EXPECT(completions.column == 4 && same(completions.typed, "ssn") && completions.expected.find("trigger") != std::string::npos);
 	const ScriptCompletion *dead = item(completions, "SSNdead");
-	TEST_EXPECT(dead && dead->kind == "command" && same(dead->label, "SSNdead(SSN)") &&
-	            same(dead->detail, "SSNdead(SSN): a trigger (after IF). It takes an entity, by its SSN."));
+	// Written as the help file writes it (WacScript_DumpActionDefsToFile): "name (", the types as the table names them.
+	TEST_EXPECT(dead && dead->kind == "command" && same(dead->label, "SSNdead (ssn)") &&
+	            same(dead->detail, "SSNdead (ssn): a trigger (after IF). It takes an entity, by its SSN."));
 	// After IF the triggers come before the actions.
 	size_t first_action = SIZE_MAX, last_trigger = 0;
 	for (size_t i = 0; i < completions.items.size(); ++i) {
@@ -235,9 +236,28 @@ int test_report_words() {
 	return 0;
 }
 
+// The words as the compiler reads them: a keyword by the token's first four bytes (ENDIF is END, ENTERS is
+// ENTER, ELSEIF its own, ELSEX ELSE's), and a word ended by any byte of the compiler's operator set, '{' among them.
+int test_compiler_words() {
+	TextDocument script(nullptr, TextLineEnds::Cr);
+	Diagnostic error;
+	const std::string text = "ENDIF\r\nENTERS\r\nELSEIF\r\nELSEX\r\nIF{SSNdead\r\n";
+	TEST_EXPECT(script.load_bytes(std::vector<uint8_t>(text.begin(), text.end()), "missions/y.wac", AssetKind::Script, "jo", error));
+	const SessionView view{};
+	ScriptHover hover;
+	TEST_EXPECT(script_hover(view, script, 1, 1, hover) && same(hover.text, "Ends an IF, a DOSEQ, a DORND or a loop."));
+	TEST_EXPECT(script_hover(view, script, 2, 1, hover) && hover.text.rfind("IF triggers ENTER actions", 0) == 0);
+	TEST_EXPECT(script_hover(view, script, 3, 1, hover) && hover.text.rfind("ELSEIF triggers", 0) == 0);
+	TEST_EXPECT(script_hover(view, script, 4, 1, hover) &&
+	            same(hover.text, "Starts the actions that run while an IF's triggers do not hold."));
+	TEST_EXPECT(script_hover(view, script, 5, 5, hover) && same(hover.word, "SSNdead") && hover.column == 4);
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	if (test_report_words() != 0) return 1;
+	if (test_compiler_words() != 0) return 1;
 	return test_assist();
 }

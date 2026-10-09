@@ -35,10 +35,14 @@ using wac::ParamType;
 
 // --- the text ------------------------------------------------------------------------------------
 
-// The characters that end a token [orig: Script_Compile's tokenizer @0x4F3412..0x4F345A: a blank, ';',
-// ',' or an operator]; a '"' opens a string.
+// The compiler's operator set (runtime/wac/compiler.cpp's kOperatorSet) [orig: @0x7CE2E8, 20 bytes, copied into
+// Script_Compile's frame @0x4F320F].
+constexpr char kOperatorSet[] = "{}()[]+-*/|&^%<>=!~";
+
+// The characters that end a token, as the compiler's tokenizer ends a word: a blank, ';', ',' or a byte of its
+// operator set [orig: Script_Compile @0x4F3412..0x4F345A]; a '"' opens a string only where a token starts.
 bool ends_token(char c) {
-	return static_cast<unsigned char>(c) <= ' ' || std::strchr(";,()+-*/%^=!<>&|~\"[]", c) != nullptr;
+	return static_cast<unsigned char>(c) <= ' ' || c == ';' || c == ',' || std::strchr(kOperatorSet, c) != nullptr;
 }
 
 struct Token {
@@ -113,9 +117,33 @@ struct Keyword {
 	const char *word, *words;
 };
 
+// A token's hash as the compiler takes it: its first four bytes, each above 0x60 folded down by 0x20, padded with
+// ';', hashed as signed chars; ELSEIF alone renamed so ELSE keeps its own [orig: Script_Compile @0x4F3412..0x4F345A
+// (the fold), @0x4F3464..0x4F34C9 (the hash)] (runtime/wac/compiler.cpp's tokenize).
+uint32_t token_hash(std::string_view word) {
+	if (strutil::iequals(word, "ELSEIF")) word = "ELSI";
+	const auto byte = [&word](size_t i) {
+		if (i >= word.size()) return int32_t(';');
+		uint8_t c = static_cast<uint8_t>(word[i]);
+		if (c > 0x60) c = static_cast<uint8_t>(c - 0x20);
+		return int32_t(int8_t(c));
+	};
+	uint32_t h = static_cast<uint32_t>(byte(0));
+	for (size_t i = 1; i < 4; ++i) h = (h << 8) + static_cast<uint32_t>(byte(i));
+	return h;
+}
+
+// The keyword a word reads as: the compiler matches its keywords on the token's hash, the first four bytes, so a
+// longer word sharing them is the same keyword (ENTERS is ENTER), and END is also every word starting ENDD, ENDI,
+// ENDL or ENDP (ENDIF, ENDDO, ENDLOOP) [orig: Script_Compile @0x4F4053..0x4F50E7, the END switch
+// @0x4F461E..0x4F4634] (wac::kWacKeywords; compiler.cpp's keyword and is_end_hash).
 std::optional<Keyword> keyword_of(const std::string &word) {
+	if (word.empty()) return std::nullopt;
+	uint32_t h = token_hash(word);
+	for (const char *end : {"ENDD", "ENDI", "ENDL", "ENDP"})
+		if (h == token_hash(end)) h = token_hash("END");
 	for (size_t i = 0; i < std::size(wac::kWacKeywords); ++i)
-		if (strutil::iequals(word, wac::kWacKeywords[i])) return Keyword{wac::kWacKeywords[i], kKeywordWords[i]};
+		if (h == token_hash(wac::kWacKeywords[i])) return Keyword{wac::kWacKeywords[i], kKeywordWords[i]};
 	return std::nullopt;
 }
 
@@ -154,13 +182,15 @@ const char *param_words(ParamType type) {
 	return "nothing";
 }
 
-// A command as the help file writes it, "SSNarea(SSN, AREA)" [orig: WacScript_DumpActionDefsToFile
-// @0x4F0400], and what kind of command it is.
+// A command as the help file writes it, "SSNarea (ssn, area)": its name, " (", each parameter slot's type as the
+// table names it with ", " before every slot but the first, ")" [orig: WacScript_DumpActionDefsToFile @0x4F0400]
+// (formats/wac/help.cpp's text list); and what kind of command it is.
 std::string signature(const wac::CommandDef &command) {
-	std::string out = std::string(command.name) + "(";
+	std::string out = std::string(command.name) + " (";
 	for (int i = 0; i < 4; ++i) {
 		if (command.params[i] == ParamType::Null) continue;
-		out += std::string(i ? ", " : "") + strutil::to_upper(wac::param_type_name(command.params[i]));
+		if (i != 0) out += ", ";
+		out += wac::param_type_name(command.params[i]);
 	}
 	return out + ")";
 }
@@ -178,8 +208,8 @@ std::string command_words(const wac::CommandDef &command) {
 	return out + ".";
 }
 
-// The seven default script groups [orig: Server_BuildEntitySlotLists @0x4F97A0; runtime/world
-// EntityRegistry::script_groups].
+// The seven default script groups [orig: GameMode_CreateDefaultDefs @0x4F9060] (runtime/world EntityRegistry's
+// group names).
 struct GroupRow {
 	const char *name, *words;
 };
@@ -521,12 +551,13 @@ bool script_hover(const SessionView &view, const TextDocument &script, size_t li
 	out.column = word.from + 1;
 	out.length = word.to - word.from;
 	out.word = word.text;
-	if (const wac::CommandDef *command = wac::wac_find_command(word.text)) {
-		out.text = command_words(*command);
-		return true;
-	}
+	// A keyword first, as the compiler tests its keywords before it looks a command up.
 	if (const std::optional<Keyword> keyword = keyword_of(word.text)) {
 		out.text = keyword->words;
+		return true;
+	}
+	if (const wac::CommandDef *command = wac::wac_find_command(word.text)) {
+		out.text = command_words(*command);
 		return true;
 	}
 	const Context context = context_at(text, word.from + 1);

@@ -72,13 +72,14 @@ using R = DefRecordKind;
 using N = CopyName;
 // The characters of a name the game keeps: an item's 46 [orig: ItemDef_ParseProperty @ 0x49eb00, the
 // begin arm's `cmp ecx, 2Eh` @0x49ebd9 and, for a longer name, `mov byte ptr [edx+2Eh], 0` @0x49ebfb
-// cutting it to 46], a weapon's 31 of its 0x20-byte
-// strncpy [orig: WeaponDefs_ParseLineCallback @ 0x543680, @0x543737], an ammo's 31 [orig:
+// cutting it to 46], a weapon's 32 of its 0x20-byte strncpy, 31 in a block with `sameas` (weapon_name_chars)
+// [orig: WeaponDefs_ParseLineCallback @ 0x543680, @0x543737], an ammo's 31 [orig:
 // AmmoDef_AllocateSlot @ 0x409a20, @0x409afc]; 0 for the field's own width.
 constexpr CatalogKindRow kKinds[] = {
 	{C::Item, R::Item, "item", "Item", "Add record", true, "display_name", made_item, attachment_slots, duplicated_item,
 	 N::Words, 46},
-	{C::Weapon, R::Weapon, "weapon", "Weapon", "Add record", true, "weapon_name", nullptr, nullptr, nullptr, N::Token, 31},
+	{C::Weapon, R::Weapon, "weapon", "Weapon", "Add record", true, "weapon_name", nullptr, nullptr, nullptr, N::Token, 31,
+	 weapon_name_chars},
 	{C::Ammo, R::Ammo, "ammo", "Ammo", "Add record", true, "name", nullptr, nullptr, nullptr, N::Token, 31},
 	{C::Action, R::Action, "action", "Action", "", false, "name"},
 	{C::Sight, R::Sight, "sight", "Sight", "", false, "texture"},
@@ -747,13 +748,21 @@ const CatalogFamily *catalog_family(AssetKind kind) {
 	return nullptr;
 }
 
-std::string catalog_copy_name(NodeKind kind, const std::string &name, const std::vector<std::string> &taken) {
+size_t weapon_name_chars(const void *record) {
+	return static_cast<const DefWeaponDef *>(record)->sameas[0] ? 31 : 32;
+}
+
+std::string catalog_copy_name(NodeKind kind, const std::string &name, const std::vector<std::string> &taken,
+                              const void *record) {
 	const CatalogKindRow &rules = catalog_kind_row(kind);
 	const TableKind *own = catalog_table().kind(kind);
 	const size_t place = own ? own->find(catalog_name_field(kind)) : TableKind::npos;
 	if (place == TableKind::npos || rules.copy_name == CopyName::None) return std::string();
 	const FieldSchema &schema = own->fields()[place];
-	const size_t limit = rules.name_chars ? rules.name_chars : schema.width ? schema.width - 1 : 0;
+	const size_t limit = rules.name_chars_of && record ? rules.name_chars_of(record)
+	                     : rules.name_chars            ? rules.name_chars
+	                     : schema.width                ? schema.width - 1
+	                                                   : 0;
 	return copy_name(name, rules.copy_name, limit, taken);
 }
 
