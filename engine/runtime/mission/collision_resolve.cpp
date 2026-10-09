@@ -767,13 +767,10 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					// +4*i / the level mesh's +0x34 [orig:
 					// DeathPiece_RenderVisible @ 0x57b882..0x57b8ba;
 					// DeathPiece_RenderSection @ 0x57b6d1]).
-					for (size_t li = 0; li < piece_m3->lod_count; ++li) {
-						info.model.lod_threshold_q16.push_back(
-								renderer::rlod_threshold_q16_from_rmdl(
-										piece_m3->lods[li].lod_threshold));
+					info.model.lod_threshold_q16 = renderer::model_lod_thresholds_q16(*piece_m3);
+					for (size_t li = 0; li < piece_m3->lod_count; ++li)
 						info.model.lod_section_count.push_back(static_cast<int32_t>(
 								piece_m3->lods[li].render_object_count));
-					}
 					// The COBJ section centres (the runtime row's +0x38..+0x40)
 					// [orig: the +0x6C array @ 0x4938bf, the centre
 					// @ 0x4938c2..0x4938d0; @ 0x57b6f6..0x57b70b].
