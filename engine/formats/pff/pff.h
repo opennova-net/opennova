@@ -89,6 +89,10 @@ int pff_extract_raw(const PffArchive *archive, const PffEntry *entry,
 /* Check if raw data starts with a valid PFF header. */
 int pff_is_pff(const uint8_t *data, size_t size);
 
+/* An entry's 16-byte name as the directory stores it: to its first NUL, all sixteen bytes when it
+   fills the field with none after it; no case change, no trim (pff_norm_name makes the lookup's form). */
+std::string pff_entry_stored_name(const PffEntry &entry);
+
 /* Normalize a PFF name into an uppercase, trailing-space-trimmed C string (the engine's
    strupr + 0x20-trim used for sort/lookup; PFF_SortEntries @ 0x768280 / PFF_FindEntry
    @ 0x7685d0). Reads up to raw_cap bytes or until a NUL; result capped to out_sz - 1 chars.
@@ -121,6 +125,12 @@ typedef enum PffFormat {
     PFF_FORMAT_BHD  = 2     /* BHD variant  */
 } PffFormat;
 
+/* The magic an archive of `format` is written with (PFF3 for a value of no format), and its inverse:
+   the format an archive that carries `magic` is written again in (PFF3 for a magic of neither PFF4
+   nor BHD). */
+uint32_t pff_magic_for_format(PffFormat format);
+PffFormat pff_format_for_magic(uint32_t magic);
+
 /* The +12 word a writer stamps a NEW entry with (a retained entry keeps its source's): never 0, since
    the game's effect loaders walk each archive's directory and skip an entry whose +12 word is 0
    [orig: CEffectSystem_Init @ 0x5f64c0; HLSLEffect_LoadAllFromPFFArchive @ 0x5aff26], so a .ptl,
@@ -151,6 +161,10 @@ inline constexpr int PFF_WRITE_ERR_NAME_EMPTY = -3;  /* a name normalizes to emp
 inline constexpr int PFF_WRITE_ERR_DUP_NAME = -4;  /* two entries share a normalized (uppercased) name         */
 inline constexpr int PFF_WRITE_ERR_TOO_LARGE = -5;  /* total payload size overflows the uint32 offset space     */
 
+/* A PFF_WRITE_* code in words, for a message ("a name is too long for an archive"); an unknown code
+   reads as PFF_WRITE_ERR_IO's. */
+const char *pff_write_error_string(int code);
+
 /* Write a modern archive: header(20) | payloads | directory(36 each). Entries are emitted sorted
    by normalized name (uppercase + trailing-space trim), matching the engine's on-disk convention
    so naive readers that bsearch without re-sorting still resolve; our pff_open and the retail
@@ -180,6 +194,16 @@ typedef struct PffWriteStreamEntry {
 int pff_write_archive_streamed(const char *path, PffFormat format,
                                           const PffWriteStreamEntry *entries, uint32_t n,
                                           PffReadEntryFn read_entry, void *ctx);
+
+/* The archive `source` written again to `path` with one entry's bytes replaced: every other entry's
+   stored bytes as the source holds them (an encrypted one still encrypted, its flags, time and
+   checksum kept, pff_extract_raw), the entry at `index` (into source->entries) `size` bytes of
+   `data`, stored plain (flags 0) under its own name, time and checksum; in the source's format
+   (pff_format_for_magic of its magic). The write is pff_write_archive_streamed's (temp file, then the
+   rename onto `path`), so `path` is never the source's own file while it is open. Returns
+   PFF_WRITE_OK or a PFF_WRITE_ERR_* code (PFF_WRITE_ERR_IO for an index past the entries). */
+int pff_rewrite_with_entry(const PffArchive *source, uint32_t index, const uint8_t *data, uint32_t size,
+                           const char *path);
 
 /* Optional progress callback for the streaming writer: invoked once per entry as payloads are
    written, with `done` running 1..n and `total` == n (fires for zero-size entries too, so `done`

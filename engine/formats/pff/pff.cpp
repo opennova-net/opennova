@@ -324,4 +324,11 @@ int pff_is_pff(const uint8_t *data, size_t size)
     return pff_valid_magic(hdr->magic) ? 1 : 0;
 }
 
+std::string pff_entry_stored_name(const PffEntry &entry)
+{
+    size_t len = 0;
+    while (len < PFF_NAME_SIZE && entry.filename[len] != '\0') ++len;
+    return std::string(entry.filename, entry.filename + len);
+}
+
 } // namespace opennova::pff

@@ -43,10 +43,9 @@ std::string flat_key(const std::string &name) {
 }
 
 std::string pff_entry_name(const PffEntry &e) {
-    size_t len = 0;
-    while (len < PFF_NAME_SIZE && e.filename[len] != '\0') ++len;
-    while (len > 0 && e.filename[len - 1] == ' ') --len;
-    return std::string(e.filename, e.filename + len);
+    std::string name = pff_entry_stored_name(e);
+    while (!name.empty() && name.back() == ' ') name.pop_back();
+    return name;
 }
 
 // Retail copies the query into a 32-byte local buffer, uppercases it, and compares it
@@ -63,11 +62,7 @@ bool retail_archive_query_key(const std::string &name, std::string &key) {
 }
 
 std::string retail_archive_entry_key(const PffEntry &entry) {
-    size_t len = 0;
-    while (len < PFF_NAME_SIZE && entry.filename[len] != '\0') ++len;
-    std::string key(entry.filename, entry.filename + len);
-    for (char &c : key) c = strutil::ascii_toupper(c);
-    return key;
+    return strutil::to_upper(pff_entry_stored_name(entry));
 }
 
 // Validate once before either loose or archive resolution. Both slash styles are separators

@@ -37,15 +37,6 @@ bool rename_file(const std::string &from, const std::string &to) {
 // The largest chunk one read asks the caller for: a budget spans several.
 constexpr uint32_t kChunkBytes = 1u << 20;
 
-uint32_t magic_for_format(PffFormat format) {
-	switch (format) {
-	case PFF_FORMAT_PFF4: return PFF_MAGIC_PFF4;
-	case PFF_FORMAT_BHD: return PFF_MAGIC_BHD;
-	case PFF_FORMAT_PFF3:
-	default: return PFF_MAGIC_PFF3;
-	}
-}
-
 void put_u32_le(uint8_t *out, uint32_t value) {
 	out[0] = uint8_t(value);
 	out[1] = uint8_t(value >> 8);
@@ -124,7 +115,7 @@ int PffStreamWriter::open(const char *path, PffFormat format, const PffWriteStre
 	// The header, its directory offset patched by finish().
 	uint8_t header[PFF_HEADER_SIZE];
 	put_u32_le(header + 0, PFF_HEADER_SIZE);
-	put_u32_le(header + 4, magic_for_format(format_));
+	put_u32_le(header + 4, pff_magic_for_format(format_));
 	put_u32_le(header + 8, n);
 	put_u32_le(header + 12, PFF_ENTRY_SIZE);
 	put_u32_le(header + 16, 0);
