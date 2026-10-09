@@ -2,27 +2,30 @@
 
 #include <algorithm>
 #include <map>
+#include <string>
 #include <utility>
 
-#include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/graph/texture_uses.h>
 #include <editor/session/texture_use_index.h>
 #include <editor/session/view/session_view.h>
+#include <runtime/renderer/material_texture.h>
+#include <runtime/renderer/texture_registry.h>
 
 namespace opennova::editor {
 
 TextureBudgetList texture_budget_list(const SessionView &view) {
 	TextureBudgetList out;
 	if (!view.project.scan || !view.documents.texture_uses) return out;
-	// Each use costed once, through the file its loader opens; keyed as the game keeps the texture: the name
-	// written, any case, and whether the normal-map loader made it.
-	std::map<std::pair<std::string, bool>, size_t> made;
+	// Each use costed once, through the file its loader opens; keyed as the game keeps the texture
+	// (renderer::texture_registry_key over the row's runtime type).
+	std::map<std::string, size_t> made;
 	for (const AssetEntry &entry : view.project.scan->entries) {
 		if (entry.kind != AssetKind::Texture) continue;
 		for (const TextureUse &use : view.documents.texture_uses->uses_of(view, entry.relative_path)) {
 			if (!use.budget.known || !use.reads_file || use.served != entry.relative_path) continue;
-			const auto key = std::make_pair(strutil::to_lower(use.name_written), use.budget.loader == TextureBudgetLoader::Normal);
+			const std::string key = renderer::texture_registry_key(
+					use.name_written, renderer::material_texture_runtime_type(use.context.type));
 			const auto found = made.find(key);
 			if (found != made.end()) {
 				++out.rows[found->second].uses;
