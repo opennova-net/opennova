@@ -18,6 +18,7 @@
 #include "authoring/preview_backdrop.h"
 #include "env/mission_environment.h"
 #include "object/avatar_database.h"
+#include "player/player_viewmodel_rig.h"
 #include "render/frame_fx.h"
 #include "util/string_convert.h"
 #include "util/texture_files.h"
@@ -173,14 +174,14 @@ opennova::editor::OperationProgress ModelViewportApplier::progress() const {
 	progress.unit = opennova::editor::OperationUnit::Steps;
 	if (!build_) return progress;
 	// Each part's units, then the scene and the pose.
-	for (const ModelDataBuild &part : build_->parts) {
+	for (const ObjectDataBuild &part : build_->parts) {
 		progress.done += part.done();
 		progress.total += part.total();
 	}
 	progress.done += build_->assembled ? 1 : 0;
 	progress.total += 2;
 	// What the next unit makes.
-	for (const ModelDataBuild &part : build_->parts)
+	for (const ObjectDataBuild &part : build_->parts)
 		if (!part.finished()) {
 			progress.label = part.label();
 			return progress;
@@ -207,7 +208,7 @@ void ModelViewportApplier::assemble_(Build &build) {
 		arms_->set_graphic_name(build.arms->get_source_path());
 		// The arms' own camo triplet, as the game's per-submit writer stores it before each arms submit.
 		AvatarDatabase::apply_part_camo(arms_, Vector3i(build.arms_camo[0], build.arms_camo[1], build.arms_camo[2]),
-				"first_person:arms_camo");
+				PlayerViewmodelRig::kCtrlOwnerFpArmsCamo);
 	}
 	arms_data_ = build.arms;
 	files_ = build.files;
@@ -238,14 +239,12 @@ void ModelViewportApplier::apply_first_person_registers_(const opennova::editor:
 	const int team = first_person.active() ? opennova::renderer::viewmodel_team_byte(first_person.team()) : INT32_MIN;
 	if (team == applied_team_) return;
 	applied_team_ = team;
-	static const String kOwner("first_person:team");
 	for (ObjectModel *part : { object_, arms_ }) {
 		const bool arms = part == arms_;
 		const opennova::world::FpCtrlRegisterWrites writes =
 				opennova::world::fp_ctrl_register_writes(first_person.active(), true, false, arms);
 		part->begin_ctrl_update();
-		if (writes.team && team != INT32_MIN) part->set_ctrl_override(kOwner, "TEX_TEAM", team);
-		else part->clear_ctrl_override(kOwner, "TEX_TEAM");
+		PlayerViewmodelRig::write_fp_team(*part, writes.team && team != INT32_MIN, team);
 		part->end_ctrl_update();
 	}
 }
