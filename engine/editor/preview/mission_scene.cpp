@@ -7,7 +7,6 @@
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_options.h>
 #include <editor/preview/viewport_device.h>
-#include <runtime/environment/environment_state.h>
 #include <base/vfs/file_source.h>
 #include <formats/env/env.h>
 #include <formats/trn/trn_io.h>
@@ -50,13 +49,6 @@ bool operator==(const MissionSceneHeader &a, const MissionSceneHeader &b) {
 			a.wind_speed == b.wind_speed && a.wind_direction == b.wind_direction &&
 			std::equal(std::begin(a.fog_color), std::end(a.fog_color), std::begin(b.fog_color)) &&
 			std::equal(std::begin(a.water_color), std::end(a.water_color), std::begin(b.water_color));
-}
-
-bool mission_environment(const FileSource &files, const MissionSceneHeader &header, env::MissionEnv &out) {
-	// The map's .trn and the .env by the header's names, extension forced [orig: Environment_LoadTimeOfDayConfig
-	// @ 0x57dbb6, @ 0x57dc99 (Path_ReplaceOrAppendExtension)].
-	return env::read_mission_env(files, header.terrain.empty() ? std::string() : header.terrain + ".trn",
-	                             header.environment.empty() ? std::string() : header.environment + ".env", out);
 }
 
 std::string mission_terrain_later_lines(const FileSource &files, const std::string &environment_file) {
