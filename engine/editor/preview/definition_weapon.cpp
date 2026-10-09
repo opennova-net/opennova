@@ -514,7 +514,7 @@ std::vector<ClipSoundFired> DefinitionWeapon::sounds_between(int32_t from, int32
 		} else {
 			// Where it plays, heard at the camera: a 3D one-shot at their distance [orig: Sound_Play3DPositional
 			// @0x527CB0], in the view the camera is in.
-			PreviewHearing heard;
+			audio::SetHearing heard;
 			const PreviewVec3 at = to_preview(event.at);
 			heard.source[0] = at.x;
 			heard.source[1] = at.y;

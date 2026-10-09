@@ -319,7 +319,7 @@ void ModelViewportView::Tools::sound(Workspace &workspace, ui_kit::WrapRow &row,
 		static const char *const kSurfaces[] = {"Ground", "Snow", "On an object", "In water"};
 		int surface = int(sound.surface);
 		ImGui::SetNextItemWidth(unit * 8.0f);
-		if (ImGui::Combo("Surface", &surface, kSurfaces, IM_ARRAYSIZE(kSurfaces))) sound.surface = FootSurface(surface);
+		if (ImGui::Combo("Surface", &surface, kSurfaces, IM_ARRAYSIZE(kSurfaces))) sound.surface = audio::FootSurface(surface);
 		ui_kit::tooltip("What is under the feet, as the game tests it for each footstep, in this order: feet under "
 		                "the water plane play SSFootWater (both feet); standing on an object, SSLFootOBJ or "
 		                "SSRFootOBJ; on snow (the terrain's surface class 3), SSLFootSnow or SSRFootSnow; else the "
