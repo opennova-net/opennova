@@ -151,7 +151,20 @@ OrganicSpawnBody organic_spawn_pose(const OrganicSpawnFacts &facts, uint32_t net
         out.capsule_top = frame.capsule_top;
     }
     out.pose = infantry_body_pose(inf);
+    out.channels = inf;
     return out;
+}
+
+uint32_t organic_body_tick(InfantryState &inf, IRootMotionSource *source, AnimVariantRings &rings,
+                           RootMotionFrame &frame) {
+    // [orig: Entity_UpdateInfantryAI @0x4B9A14..0x4B9A48; copy @0x4B9A28]
+    inf.request_weapon_animation(inf.anim_state);
+    inf.wpn_deferred = inf.anim_pending;
+    // [orig: AnimMap_UpdateDualChannels @0x40B8C0 from Entity_UpdateInfantryAI @0x4B9A48]
+    frame = RootMotionFrame{};
+    const bool have = infantry_dual_update(inf, source, rings, frame);
+    inf.last_events = have ? frame.events : 0;
+    return inf.last_events;
 }
 
 // Initial org1 callback, after definition/ADM/collision resources are bound.

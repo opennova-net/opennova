@@ -99,9 +99,22 @@ struct OrganicSpawnBody {
     // ground spawns its origin lifted by about that much.
     int32_t rise = 0;
     int32_t capsule_bottom = 0, capsule_top = 0;
+    // The body's channels as the init and the warmup leave them, for a caller that ticks it on
+    // (organic_body_tick).
+    InfantryState channels;
 };
 OrganicSpawnBody organic_spawn_pose(const OrganicSpawnFacts &facts, uint32_t net_id, IRootMotionSource *source,
                                     AnimVariantRings &rings, int adm_id);
+
+// One logic tick of an NPC body's animation as the org1 motor head runs it before its think: the
+// primary's state and its pending target copied into the secondary's request, then the AnimMap
+// dual update, its root output in `frame`. Returns the tick's event word, the body's last_events
+// (what its sound block and its fire pass read that tick; 0 with no clip). A body whose think
+// requests nothing new plays its state on: its channels wrap and serve `rings` as the game's do.
+// [orig: Entity_UpdateInfantryAI @0x4B9A14..0x4B9A48, the copy @0x4B9A28; the dual update
+//  AnimMap_UpdateDualChannels @0x40B8C0 from @0x4B9A48]
+uint32_t organic_body_tick(InfantryState &inf, IRootMotionSource *source, AnimVariantRings &rings,
+                           RootMotionFrame &frame);
 
 enum class NpcCorpseStep { Kept, Respawned, Removed };
 bool npc_respawn_unhide(World &world, const AiSystem &ai, Entity &e);

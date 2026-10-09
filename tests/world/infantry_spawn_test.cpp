@@ -1,6 +1,7 @@
 // Fresh org1 initialization and the native dual-channel spawn settle.
 // [orig: Entity_InitOrganicAI @0x4BFCC0; Entity_WarmUpOrganicAnimation @0x4B8B20]
 #include <runtime/world/entity_spawn.h>
+#include <runtime/world/infantry_internal.h>
 #include <runtime/world/world.h>
 #include <runtime/terrain_query/height_field.h>
 
@@ -261,6 +262,47 @@ void world_free_pose_matches_the_world() {
     CHECK(bare.rise == 0);
 }
 
+// A spawned body ticked on as the org1 motor head runs it before its think (the editor's mission view
+// plays its people's clips so): the same channels as the world's org1 motor head leaves an idle body
+// whose think requests nothing, each tick's event word the clip's, the variants re-served at a wrap.
+void body_ticks_on_as_the_motor_head() {
+    for (const int id : {13, 0, 7}) {
+        AnimVariantRings rings;
+        RingSource clips;
+        OrganicSpawnBody spawned = organic_spawn_pose({}, uint32_t(id), &clips, rings, 0);
+        CHECK(same_pose(spawned.pose, infantry_body_pose(spawned.channels)));
+        // The world's copy of the same body, its motor head's copy and dual update run by hand.
+        InfantryState world_body = spawned.channels;
+        AnimVariantRings world_rings = rings;
+        RingSource world_clips;
+        int wraps = 0;
+        int32_t last_phase = spawned.channels.clip_phase;
+        for (int tick = 0; tick < 300; ++tick) {
+            RootMotionFrame frame;
+            const uint32_t events = organic_body_tick(spawned.channels, &clips, rings, frame);
+            CHECK(events == spawned.channels.last_events);
+            CHECK(spawned.channels.wpn_state == spawned.channels.anim_state);
+            world_body.request_weapon_animation(world_body.anim_state);
+            world_body.wpn_deferred = world_body.anim_pending;
+            RootMotionFrame world_frame;
+            CHECK(infantry_dual_update(world_body, &world_clips, world_rings, world_frame));
+            CHECK(same_pose(infantry_body_pose(spawned.channels), infantry_body_pose(world_body)));
+            if (spawned.channels.clip_phase < last_phase) ++wraps;
+            last_phase = spawned.channels.clip_phase;
+        }
+        CHECK(wraps > 0); // the idle wrapped and played on
+    }
+    // A clip's event word reaches the tick; no clip, none.
+    Source events;
+    AnimVariantRings rings;
+    OrganicSpawnBody spawned = organic_spawn_pose({}, 0, &events, rings, 0);
+    RootMotionFrame frame;
+    CHECK(organic_body_tick(spawned.channels, &events, rings, frame) == 0xFF);
+    AnimVariantRings none;
+    OrganicSpawnBody bare = organic_spawn_pose({}, 13, nullptr, none, -1);
+    CHECK(organic_body_tick(bare.channels, nullptr, none, frame) == 0);
+}
+
 void control_point_pool_precedence() {
     Rig r;
     r.zone(1, 7, 2, false); // absent definition is not a candidate
@@ -310,6 +352,7 @@ int main() {
     warmup_permutation_and_root_motion();
     postures_mounts_and_wash();
     world_free_pose_matches_the_world();
+    body_ticks_on_as_the_motor_head();
     control_point_pool_precedence();
     grounding_strict_one_unit_limit();
     std::printf("infantry_spawn: %s\n", failures ? "FAIL" : "PASS");
