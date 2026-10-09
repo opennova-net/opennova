@@ -2,8 +2,6 @@
 
 #include <algorithm>
 
-#include <runtime/renderer/texture_load_rules.h>
-
 namespace opennova::renderer {
 
 namespace {
@@ -155,9 +153,7 @@ std::vector<DeviceTextureLevel> pixel_device_texture_levels(const uint8_t *rgba,
 	if (rgba == nullptr || width == 0 || height == 0)
 		return levels;
 	std::vector<uint8_t> base(rgba, rgba + static_cast<size_t>(width) * height * 4);
-	const uint32_t halvings = pixel_texture_halvings(width, height, flags, max_side);
-	for (uint32_t i = 0; i < halvings && width > 1 && height > 1; ++i)
-		halve_rgba(base, width, height);
+	halve_rgba_times(base, width, height, pixel_texture_halvings(width, height, flags, max_side));
 	uint32_t count = texture_level_count(width, height, flags);
 	if (level_limit != 0)
 		count = std::min(count, level_limit);
@@ -177,17 +173,7 @@ std::vector<DeviceTextureLevel> pixel_device_texture_levels(const uint8_t *rgba,
 	level0.height = height;
 	level0.rgba = std::move(base);
 	levels.push_back(std::move(level0));
-	while (levels.size() < count) {
-		const DeviceTextureLevel &above = levels.back();
-		if (above.width <= 1 && above.height <= 1)
-			break;
-		DeviceTextureLevel level;
-		level.width = std::max(1u, above.width / 2);
-		level.height = std::max(1u, above.height / 2);
-		level.rgba = encode_rgba8(box_filter_half(decode_rgba8(above.rgba.data(), above.width, above.height),
-				above.width, above.height));
-		levels.push_back(std::move(level));
-	}
+	extend_box_chain(levels, count);
 	return levels;
 }
 
@@ -257,6 +243,40 @@ DeviceTexture dds_device_texture(const DdsSource &source, uint32_t flags, const 
 	const uint32_t shift = std::min(skip, 31u);
 	out.stat_bytes = texture_stat_bytes(std::max(1u, source.width >> shift), std::max(1u, source.height >> shift), out.format, out.bits);
 	return out;
+}
+
+DeviceTextureFormat dds_device_format(std::string_view format_name) {
+	if (format_name == "DXT1") return DeviceTextureFormat::Dxt1;
+	if (format_name == "DXT2" || format_name == "DXT3") return DeviceTextureFormat::Dxt3;
+	if (format_name == "DXT4" || format_name == "DXT5") return DeviceTextureFormat::Dxt5;
+	if (format_name == "A8R8G8B8" || format_name.empty()) return DeviceTextureFormat::A8R8G8B8;
+	return DeviceTextureFormat::Uncompressed;
+}
+
+// [orig: GTexture_InitFromMemory @ 0x68830E..0x688310 (D3DX_DEFAULT sides);
+// D3DXCreateTextureFromFileInMemoryEx_Internal @ 0x6914D9..0x6914EE, @ 0x69150B..0x691520 (each
+// rounded up to a power of two); CBlt::BltNone @ 0x6E0D57]
+uint32_t d3dx_default_texture_side(uint32_t side) {
+	uint32_t out = 1;
+	while (out < side && out < 0x80000000u) out <<= 1;
+	return out;
+}
+
+// [orig: Material_LoadStageTexture @ 0x5B173E..0x5B1742 (stage), @ 0x5B174F..0x5B1758 (plain),
+// @ 0x5B1782..0x5B1790 (normal: or eax, 1000h)]
+uint32_t model_row_texture_flags(TextureLoader loader, uint8_t slot, int level) {
+	uint32_t flags = object_texdetail_flags(level, slot);
+	if (loader == TextureLoader::Normal) flags |= kTextureFlagCap512;
+	return flags;
+}
+
+// [orig: Texture_LoadByNameWithChannel @ 0x58B616 (a .dds through GTexture_InitFromMemory), @ 0x58B74D
+// (pixels); Texture_LoadAndRegister @ 0x58B920; Texture_LoadAsNormalMap @ 0x58C6CB]
+DeviceTexture model_row_device_texture(TextureLoader loader, uint8_t slot, int level, const DdsSource &file,
+		bool dds) {
+	const uint32_t flags = model_row_texture_flags(loader, slot, level);
+	if (dds && loader == TextureLoader::Stage) return dds_device_texture(file, flags);
+	return pixel_device_texture(file.width, file.height, flags);
 }
 
 // [orig: convert_dxt_alpha_blocks @ 0x687AC0 — the blocks counted @ 0x687B28..0x687B44 (each side over 4, at

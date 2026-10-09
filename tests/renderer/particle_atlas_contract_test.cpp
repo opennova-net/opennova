@@ -410,7 +410,25 @@ bool page_dxt5_contract() {
 
 } // namespace
 
+// A graphic as its atlas page holds it: an additive one's alpha cleared on its 1024 page, a bump's 256 page
+// made a normal map of its blue (flat: blue up, red 127), one as wide as its page held by none.
+bool paged_frame_contract() {
+	const r::ParticleRgbaImage spark = solid_image(32, 32, {200, 200, 200, 200});
+	const r::ParticleRgbaImage paged = r::particle_atlas_paged_frame(spark, 1);
+	if (!check(paged.valid() && paged.width == 32 && paged.height == 32 && paged.rgba[0] == 200 && paged.rgba[3] == 0,
+				"an additive graphic's page clears its alpha"))
+		return false;
+	const r::ParticleRgbaImage bump = r::particle_atlas_paged_frame(spark, 3);
+	const std::size_t texel = static_cast<std::size_t>(5 * 32 + 5) * 4;
+	if (!check(bump.valid() && bump.rgba[texel + 2] == 255 && bump.rgba[texel] == 127,
+				"a bump graphic's page is a normal map of its blue"))
+		return false;
+	return check(!r::particle_atlas_paged_frame(solid_image(1024, 1, {9, 9, 9, 9}), 1).valid(),
+			"a graphic no page holds: none");
+}
+
 int main() {
+	if (!paged_frame_contract()) return 1;
 	if (!frame_registrar_contract()) return 1;
 	if (!page_family_contract()) return 1;
 	if (!stable_width_order_and_uv_contract()) return 1;

@@ -752,16 +752,7 @@ Ref<Texture2D> ResourceRoot::load_texture_created(const String &name, TextureLoa
 				opennova::renderer::pixel_device_texture_levels(data.ptr(),
 						static_cast<uint32_t>(image->get_width()),
 						static_cast<uint32_t>(image->get_height()), creation);
-		while (!levels.empty() && (levels.back().width > 1 || levels.back().height > 1)) {
-			const opennova::renderer::DeviceTextureLevel &above = levels.back();
-			opennova::renderer::DeviceTextureLevel below;
-			below.width = std::max(1u, above.width / 2);
-			below.height = std::max(1u, above.height / 2);
-			below.rgba = opennova::renderer::encode_rgba8(opennova::renderer::box_filter_half(
-					opennova::renderer::decode_rgba8(above.rgba.data(), above.width, above.height),
-					above.width, above.height));
-			levels.push_back(std::move(below));
-		}
+		opennova::renderer::extend_box_chain(levels, 0);
 		if (!levels.empty()) {
 			PackedByteArray bytes;
 			for (const opennova::renderer::DeviceTextureLevel &level : levels) {

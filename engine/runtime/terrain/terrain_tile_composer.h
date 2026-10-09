@@ -23,6 +23,21 @@
 
 namespace opennova::terrain {
 
+// The colour map's side: the terrain checksums and premultiplies exactly 1024 x 1024 texels of it
+// (0x400000 bytes) whatever its header says [orig: PolyTrn_InitTextures @ 0x60B3BE,
+// @ 0x60B5A9..0x60B6FD].
+inline constexpr uint32_t kTerrainColourMapSide = 1024;
+
+// Whether the game's quadrant split of a terrain map `width` x `height` (the colour map, the
+// detail blend map) reads and writes past it: the split takes the map's width as its side,
+// copying (width & ~1) x (width & ~1) texels from rows of `width` into a buffer of width x height,
+// so a map shorter than its even width overruns both [orig: Terrain_SplitTileIntoQuadrants
+// @ 0x604E60, called with the width; PolyTrn_InitTextures @ 0x60B510 (the colour map),
+// @ 0x60B2C1 (the blend map)].
+inline constexpr bool terrain_map_split_overruns(uint32_t width, uint32_t height) {
+	return height < (width & ~1u);
+}
+
 // One 1024-unit source atlas (colormap or heightfield normal) split into the
 // four 512-unit quadrant textures retail samples, each carrying the levels its
 // texture creation builds, as their texels read back
