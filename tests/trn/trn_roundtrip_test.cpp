@@ -2,7 +2,6 @@
 #include <formats/trn/trn_io.h>
 
 #include <array>
-#include <cmath>
 #include <cstdio>
 #include <sstream>
 #include <string>
@@ -46,7 +45,6 @@ int main() {
 	saved.lock_topright = {1, 0};
 	saved.lock_bottomleft = {2, 3};
 	saved.lock_bottomright = {4, 5};
-	saved.horizon = 1234.5;
 	saved.charmap = "roundtrip_char.pcx";
 	saved.foliagemap = "roundtrip_foliage.pcx";
 	saved.tilestrip = "roundtrip_tilestrip.tga";
@@ -104,7 +102,6 @@ int main() {
 			"lock_bottomleft should round-trip")) return 1;
 	if (!expect(loaded.lock_bottomright.x == 4 && loaded.lock_bottomright.y == 5,
 			"lock_bottomright should round-trip")) return 1;
-	if (!expect(std::abs(loaded.horizon - saved.horizon) < 0.0001, "horizon should round-trip")) return 1;
 	if (!expect(loaded.charmap == saved.charmap, "charmap should round-trip")) return 1;
 	if (!expect(loaded.foliagemap == saved.foliagemap, "foliagemap should round-trip")) return 1;
 	if (!expect(loaded.tilestrip == saved.tilestrip, "tilestrip should round-trip")) return 1;
@@ -235,6 +232,34 @@ int main() {
 			"TRN with default locks should save")) return 1;
 	if (!expect(defaults_output.str().find("lock_") == std::string::npos,
 			"default lock keys should remain omitted when saving")) return 1;
+
+	// No arm of either reader compares `horizon` (the image's only "horizon" is inside "TexHorizon")
+	// and no shipped .trn writes one: the walk skips the line as it skips any unknown key, and the
+	// writer emits no such key. [orig: Terrain_ParseConfigCallback @0x60f330, its final no-arm
+	// return; TimeOfDay_ParseProperty @0x57c590]
+	{
+		const std::string base =
+				"terrain_name \"h\"\r\nwater_height 3\r\npolytrn_colormap c.tga\r\npolytrn_detailmap d.tga\r\n"
+				"polytrn_polydata p.cpt\r\npolytrn_sectorcount 1\r\npolytrn_sectors 0\r\n";
+		opennova::TrnConfig without_line;
+		opennova::TrnConfig with_line;
+		std::istringstream without_input(base);
+		std::istringstream with_input("horizon 1234.5\r\n" + base + "HORIZON 9\r\n");
+		error.clear();
+		if (!expect(opennova::load_trn(without_input, without_line, error) &&
+						opennova::load_trn(with_input, with_line, error),
+				"a .trn with horizon lines parses")) return 1;
+		std::ostringstream without_output;
+		std::ostringstream with_output;
+		if (!expect(opennova::save_trn(without_output, without_line, error) &&
+						opennova::save_trn(with_output, with_line, error),
+				"both configs save")) return 1;
+		if (!expect(with_output.str() == without_output.str(),
+				"a horizon line changes nothing the reader keeps")) return 1;
+		if (!expect(with_output.str().find("horizon") == std::string::npos &&
+						output.str().find("horizon") == std::string::npos,
+				"save_trn writes no horizon key")) return 1;
+	}
 
 	std::printf("OK: trn round-trip preserved terrain metadata\n");
 	return 0;

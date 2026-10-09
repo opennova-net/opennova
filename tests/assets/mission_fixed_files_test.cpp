@@ -15,21 +15,15 @@
 
 using opennova::assets::MissionFixedFile;
 using opennova::assets::mission_fixed_files;
-
-// The name as an archive keys it (pff_norm_name: upper case, trailing spaces trimmed).
-static std::string archive_key(const std::string &name) {
-	std::string key(name.size() + 1, '\0');
-	opennova::pff::pff_norm_name(name.data(), name.size(), &key[0], key.size());
-	key.resize(std::char_traits<char>::length(key.c_str()));
-	return key;
-}
+// The name as an archive keys it (upper case, trailing spaces trimmed).
+using opennova::pff::normalized_logical_name;
 
 static int test_mission_fixed_files() {
 	namespace hud = opennova::hud;
 	std::map<std::string, std::string> what;
 	for (const MissionFixedFile &file : mission_fixed_files())
-		TEST_EXPECT(what.emplace(archive_key(file.name), file.what).second && !file.what.empty());
-	const auto has = [&what](const std::string &name) { return what.count(archive_key(name)) == 1; };
+		TEST_EXPECT(what.emplace(normalized_logical_name(file.name), file.what).second && !file.what.empty());
+	const auto has = [&what](const std::string &name) { return what.count(normalized_logical_name(name)) == 1; };
 	std::set<int32_t> slots;
 	for (const hud::HudFixedTexture &texture : hud::kHudFixedTextures)
 		TEST_EXPECT(slots.insert(texture.slot).second && has(texture.name) &&

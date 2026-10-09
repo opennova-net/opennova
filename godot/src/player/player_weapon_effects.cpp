@@ -212,23 +212,6 @@ void PlayerWeaponEffects::consume(const Ref<PlayerWeaponView> &p_view,
 	weapon_play_serial_ = plan.play_serial;
 }
 
-// EffectPose carries forward in basis column 2 (rather than Godot's camera
-// -Z convention). Build a complete orthonormal frame so every generic
-// producer reaches the same portable spawn contract.
-Transform3D PlayerWeaponEffects::weapon_effect_transform(const Vector3 &p_position, const Vector3 &p_forward) {
-	if (p_forward.length_squared() <= 0.0001f) {
-		return Transform3D(Basis(), p_position);
-	}
-	const Vector3 z_axis = p_forward.normalized();
-	Vector3 seed_up(0.0f, 1.0f, 0.0f);
-	if (Math::abs(z_axis.dot(seed_up)) > 0.999f) {
-		seed_up = Vector3(0.0f, 0.0f, -1.0f);
-	}
-	const Vector3 x_axis = seed_up.cross(z_axis).normalized();
-	const Vector3 y_axis = z_axis.cross(x_axis).normalized();
-	return Transform3D(Basis(x_axis, y_axis, z_axis), p_position);
-}
-
 // The action-begin SOUND + MUZZLE legs: play the started ACTION's soundset
 // 3D-positional at the firing entity and spawn its particle effect at the
 // weapon model's user point [orig: ActionSlot_ExecuteActionWithEffect
@@ -266,7 +249,12 @@ void PlayerWeaponEffects::fire_action_effects(const Ref<PlayerWeaponEvent> &p_ev
 	// setup-to-teardown with the presenter.)
 	const String slot_key = vformat("%d:%d:%d", static_cast<int64_t>(get_instance_id()),
 			viewmodel_generation_, p_event->get_action_started());
-	const Transform3D anchor_transform = weapon_effect_transform(pos, forward);
+	// Retail hands the group the userpoint's direction alone (the spawn
+	// descriptor's orientation, which an EMITVECTOR emitter takes as its axis),
+	// and the effect scene reads the pose's forward alone, so the anchor is
+	// the one forward pose every effect spawn shares (ptl-format-re.md,
+	// ActionSlot_SpawnEffect).
+	const Transform3D anchor_transform = EffectWorld::forward_pose(pos, forward);
 	// The owner-bound group re-reads the live userpoint pose through its
 	// anchor resolver for its whole life (the engine's
 	// kActionEffectSpawnPolicy: one live handle per action slot, follow the
@@ -328,14 +316,14 @@ Variant PlayerWeaponEffects::resolve_anchor(const String &p_userpoint) {
 	}
 	const ActionPoint mounted = mounted_action_particle(p_userpoint);
 	if (mounted.valid) {
-		return weapon_effect_transform(mounted.pos, mounted.dir);
+		return EffectWorld::forward_pose(mounted.pos, mounted.dir);
 	}
 	if (owner->viewmodel() == nullptr) {
 		return Variant();
 	}
 	const Vector3 pos = action_particle_world_position(p_userpoint);
 	const Vector3 forward = action_particle_world_forward(p_userpoint);
-	return weapon_effect_transform(pos, forward);
+	return EffectWorld::forward_pose(pos, forward);
 }
 
 // Map a model-space action userpoint through the live fake-skinned weapon

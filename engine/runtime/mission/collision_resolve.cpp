@@ -7,7 +7,9 @@
 #include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
 
 #include <base/io/strutil.h>
+#include <base/resource_index/resource_index.h>
 #include <formats/mission/mission.h> // kItemIdOffset
+#include <runtime/anim/adm_fallback.h>
 #include <runtime/world/player_spawn.h> // kPlayerInfantryTypeId
 #include <runtime/world/person_overlays.h> // kParachuteItemTypeId
 
@@ -20,12 +22,6 @@ using namespace opennova::threedi;
 namespace opennova::mission {
 
 namespace {
-
-bool iends_with_adm(const std::string &name) {
-	static const char kExt[] = ".adm";
-	if (name.size() < 4) return false;
-	return strutil::iequals(name.c_str() + (name.size() - 4), kExt);
-}
 
 const char *glass_userpoint_for_graphic(const std::string &graphic) {
 	struct GlassSurfaceRow {
@@ -614,9 +610,14 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				// the retained def rows + the shared native model; the
 				// provider validates rig/FK and declines at query time
 				// exactly like the unregistered legacy leg when it cannot.
+				// The rig's map is the spawn's one .adm load: <stem>.adm,
+				// default.adm where that file is not mounted
+				// [orig: Entity_SpawnFromItemDef @0x45257c -> AnimMap_LoadAdmFile
+				//  @0x40cc40; anim/adm_fallback.h].
 				if (deps.models.has_source() && def->anim_def[0] != '\0') {
-					std::string adm(def->anim_def);
-					if (!iends_with_adm(adm)) adm += ".adm";
+					const ResourceIndex *index = deps.models.index();
+					const std::string adm = anim::adm_load_name(def->anim_def,
+							[index](const std::string &file) { return index->has_file(file); });
 					deps.pose.register_skeletal_entity(
 							h, e->registry_spawn_id, resolved_model,
 							adm, deps.models.model(key),

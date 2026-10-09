@@ -359,9 +359,6 @@ void TerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_water_height", "value"), &TerrainData::set_water_height);
 	ClassDB::bind_method(D_METHOD("get_water_height"), &TerrainData::get_water_height);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "water_height"), "set_water_height", "get_water_height");
-	ClassDB::bind_method(D_METHOD("set_horizon", "value"), &TerrainData::set_horizon);
-	ClassDB::bind_method(D_METHOD("get_horizon"), &TerrainData::get_horizon);
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "horizon"), "set_horizon", "get_horizon");
 
 	// Sector/atlas layout constants (single-sourced from engine/runtime/terrain_query
 	// terrain_query/coords.h; see the header declarations).
@@ -511,8 +508,6 @@ PackedInt32Array TerrainData::get_quadrant_locks() const {
 	}
 	return locks;
 }
-void TerrainData::set_horizon(double p_val) { horizon = p_val; _notify_terrain_changed(); }
-double TerrainData::get_horizon() const { return horizon; }
 void TerrainData::set_sector_grid(const PackedInt32Array &p_grid) {
 	sector_grid.resize(256);
 	for (int i = 0; i < 256; i++) {
@@ -554,7 +549,6 @@ void TerrainData::_sync_trn_scalars_from_properties() {
 	trn.water_height = water_height;
 	trn.wrap_x = wrap_x ? 1 : 0;
 	trn.wrap_y = wrap_y ? 1 : 0;
-	trn.horizon = horizon;
 	for (int gz = 0; gz < SECTOR_GRID_DIM; gz++) {
 		for (int gx = 0; gx < SECTOR_GRID_DIM; gx++) {
 			const int idx = gz * SECTOR_GRID_DIM + gx;
@@ -734,7 +728,6 @@ Error TerrainData::_begin_load_from_trn_text(const std::string &trn_content, con
 	water_height = trn.water_height;
 	wrap_x = trn.wrap_x != 0;
 	wrap_y = trn.wrap_y != 0;
-	horizon = trn.horizon;
 	sector_grid.resize(256);
 	for (int gz = 0; gz < SECTOR_GRID_DIM; gz++) {
 		for (int gx = 0; gx < SECTOR_GRID_DIM; gx++) {

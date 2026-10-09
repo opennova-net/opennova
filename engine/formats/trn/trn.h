@@ -26,6 +26,9 @@ inline constexpr int kTerrainGridSide = 16;
 struct TrnConfig {
 	// `terrain_name` and `terrain_creator`: read by no arm of either reader (neither word is in the
 	// binary but inside "TexHorizon"), kept for whoever edits the file (every shipped .trn opens on them).
+	// There is no `horizon`: no arm of either reader compares one (the image's only "horizon" is inside
+	// "TexHorizon" [orig: Terrain_ParseConfigCallback @ 0x60f330; TimeOfDay_ParseProperty @ 0x57c590]) and
+	// no shipped .trn writes one, so a `horizon` line is skipped as any unknown key is.
 	std::string name;
 	std::string creator;
 	std::string colormap;
@@ -66,7 +69,6 @@ struct TrnConfig {
 	TerrainLockCoord lock_topright;
 	TerrainLockCoord lock_bottomleft;
 	TerrainLockCoord lock_bottomright;
-	double horizon = 0.0;
 	int sector_grid[kTerrainGridSide][kTerrainGridSide] = {};
 	int sector_rows = 0;
 	std::string foliagemap;

@@ -333,6 +333,13 @@ func test_03tr_minigun_flash_follows_the_mounted_muzzle() -> void:
 					"the flash starts at the end of the rendered barrel")
 			assert_lt(group.transform.origin.distance_to(expected), 0.002,
 					"the live flash follows the mounted gun's posed muzzle")
+			# The weapon action effect's frame is the one forward pose every
+			# effect spawn shares: retail hands the group the direction alone.
+			var frame: Basis = group.transform.basis
+			var shared: Basis = EffectWorld.forward_pose(group.transform.origin, frame.z).basis
+			assert_lt((frame.x - shared.x).length() + (frame.y - shared.y).length()
+					+ (frame.z - shared.z).length(), 0.0003,
+					"the flash's frame is EffectWorld.forward_pose of its forward")
 			for emitter in group.emitters:
 				live_particles += emitter.alive
 				assert_lt(emitter.position.distance_to(expected), 0.002)
