@@ -90,14 +90,19 @@ MissionTextSource resolve_mission_text(const BootFileSource &files,
 
 std::string read_placed_tiles(const BootFileSource &files, const std::string &mission_file,
 		const bms::File &mission, std::vector<uint8_t> &out) {
+	const MissionInfo info = mission_info(mission);
+	return read_placed_tiles(files, mission_file, info.terrain, info.environment, out);
+}
+
+std::string read_placed_tiles(const BootFileSource &files, const std::string &mission_file,
+		const std::string &terrain_name, const std::string &environment, std::vector<uint8_t> &out) {
 	const std::string own = mission_file.empty()
 			? std::string()
 			: sidecar_name(mission_file, *sidecar_for_role("tiles"));
-	const MissionInfo info = mission_info(mission);
 	const terrain::TerrainFileReader read_loose = [&files](const std::string &name,
 				std::vector<uint8_t> &bytes) { return files.read_loose(name, bytes); };
-	return terrain::read_placed_tile_bytes(read_loose, files.read_file, own, info.terrain,
-			info.environment, out);
+	return terrain::read_placed_tile_bytes(read_loose, files.read_file, own, terrain_name,
+			environment, out);
 }
 
 std::vector<PromoteOptions::AiProfileRow> resolve_ai_profiles(

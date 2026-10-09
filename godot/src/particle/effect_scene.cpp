@@ -27,7 +27,6 @@ namespace {
 
 using opennova::particle::CurveRef;
 using opennova::particle::EffectPose;
-using opennova::particle::EffectSpawnStatus;
 using opennova::particle::GraphicLayer;
 using opennova::particle::ParticleDef;
 using opennova::particle::Vec3;
@@ -75,27 +74,11 @@ std::size_t capacity_from_option(const Dictionary &options,
 	return value > 0 ? static_cast<std::size_t>(value) : 0;
 }
 
-String spawn_status_name(EffectSpawnStatus status) {
-	switch (status) {
-		case EffectSpawnStatus::Spawned: return "spawned";
-		case EffectSpawnStatus::Suppressed: return "suppressed";
-		case EffectSpawnStatus::InvalidHandle: return "invalid_handle";
-		case EffectSpawnStatus::EmptyEffect: return "empty_effect";
-		case EffectSpawnStatus::MissingSlot: return "missing_slot";
-		case EffectSpawnStatus::MissingOwner: return "missing_owner";
-		case EffectSpawnStatus::GroupCapacityReached:
-			return "group_capacity_reached";
-		case EffectSpawnStatus::EmitterCapacityReached:
-			return "emitter_capacity_reached";
-	}
-	return "unknown";
-}
-
 Ref<EffectSpawnReceipt> spawn_receipt_record(const opennova::particle::EffectSpawnReceipt &receipt) {
 	Ref<EffectSpawnReceipt> result;
 	result.instantiate();
 	result->set_status(static_cast<int>(receipt.status));
-	result->set_status_name(spawn_status_name(receipt.status));
+	result->set_status_name(opennova::particle::spawn_status_name(receipt.status));
 	result->set_effect_handle(static_cast<int64_t>(receipt.effect.value));
 	result->set_group_id(token_to_godot(receipt.group.value));
 	result->set_replaced_group_id(token_to_godot(receipt.replaced_group.value));

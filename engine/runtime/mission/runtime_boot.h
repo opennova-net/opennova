@@ -97,6 +97,13 @@ MissionTextSource resolve_mission_text(const BootFileSource &files,
 std::string read_placed_tiles(const BootFileSource &files, const std::string &mission_file,
 		const bms::File &mission, std::vector<uint8_t> &out);
 
+// The same read over the two names it takes from the mission's header: `terrain_name`, its
+// .trn's base name, and `environment`, its .env's ("" none), each without its extension as
+// mission_info (formats/mission/bms_edit.h) gives them. The bms::File form reads them from there
+// and calls this; a caller holding the header's names (the editor's previews) calls it directly.
+std::string read_placed_tiles(const BootFileSource &files, const std::string &mission_file,
+		const std::string &terrain_name, const std::string &environment, std::vector<uint8_t> &out);
+
 // The .aip PARSE lives in engine/formats/aip (aip::parse_profile: every
 // GROUND, HELO and ORGANIC key AIProfile_ParseProperty stores). This resolver
 // keeps the profile walk and the install row. An unauthored key is the zeroed

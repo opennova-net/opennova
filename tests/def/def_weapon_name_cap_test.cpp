@@ -2,12 +2,13 @@
 // WeaponDefs_ParseLineCallback, strncpy(def+0x14, tokens[2], 0x20) @0x543737], right ahead of
 // `sameas` at def+0x34 [orig: strncpy(def+0x34, value, 0x20) @0x544056..0x544072]. A 32-character
 // name keeps no terminator, so it reads back as itself only while the block has no `sameas`, and
-// runs on into it otherwise (D-ITEMDEF-10). Pinned here: the writer puts down a 32-character name
-// only in a block with no `sameas` (31 otherwise; a longer one is refused, as a name past the cap
-// always was); the parser keeps 32 characters either way, as the game's copy does, reports a
-// 32-character name in a block with `sameas` as one a save cannot give back (blocking, on the
-// `weapon` line, among that line's findings), and leaves a name past 32 in a block with no `sameas`
-// a reinterpretation, never a blocker.
+// runs on into it otherwise (D-ITEMDEF-10). Pinned here: def_weapon_name_chars says so (32, 31 in
+// a block with `sameas`); the writer puts down a 32-character name only in a block with no `sameas`
+// (31 otherwise; a longer one is refused, as a name past the cap always was); the parser keeps 32
+// characters either way, as the game's copy does, reports a 32-character name in a block with
+// `sameas` as one a save cannot give back (blocking, on the `weapon` line, among that line's
+// findings), and leaves a name past 32 in a block with no `sameas` a reinterpretation, never a
+// blocker.
 #include <formats/def/def_notes.h>
 #include <formats/def/def_write.h>
 
@@ -73,6 +74,16 @@ bool reads_back(const DefWriteResult &written, const std::string &name, const ch
 } // namespace
 
 int main() {
+	// The characters of a name the reader keeps as that name: 32 with no `sameas`, 31 with one.
+	{
+		DefWeaponDef bare;
+		def_init_weapon(bare);
+		DefWeaponDef based = bare;
+		std::snprintf(based.sameas, sizeof(based.sameas), "%s", "WPN_M16");
+		CHECK(def_weapon_name_chars(bare) == 32 && def_weapon_name_chars(based) == 31,
+		      "def_weapon_name_chars is 32 with no sameas, 31 with one");
+	}
+
 	// The writer's own form: 32 characters with no `sameas`, 31 with one.
 	{
 		const DefWriteResult full = write_minted(kName32, "");
