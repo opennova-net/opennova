@@ -377,6 +377,95 @@ static int test_format_preservation(void) {
     return 1;
 }
 
+/* The format a magic is written again in, the inverse of the magic a format is written with; any
+   other magic writes as PFF3. */
+static int test_format_for_magic(void) {
+    PffFormat fmts[3] = { PFF_FORMAT_PFF3, PFF_FORMAT_PFF4, PFF_FORMAT_BHD };
+    uint32_t  mags[3] = { PFF_MAGIC_PFF3,  PFF_MAGIC_PFF4,  PFF_MAGIC_BHD  };
+    for (int i = 0; i < 3; ++i) {
+        CHECK(pff_magic_for_format(fmts[i]) == mags[i], "magic of a format");
+        CHECK(pff_format_for_magic(mags[i]) == fmts[i], "format of a magic");
+    }
+    CHECK(pff_format_for_magic(0x35464650u) == PFF_FORMAT_PFF3, "an unknown magic writes as PFF3");
+    CHECK(pff_magic_for_format((PffFormat)7) == PFF_MAGIC_PFF3, "an unknown format writes PFF3");
+    return 1;
+}
+
+/* The stored name: to its first NUL, all sixteen bytes when the field is full; no trim, no case. */
+static int test_entry_stored_name(void) {
+    PffEntry e;
+    memset(&e, 0, sizeof(e));
+    memcpy(e.filename, "Mixed.Case ", 11);
+    CHECK(pff_entry_stored_name(e) == "Mixed.Case ", "to the NUL, spaces and case kept");
+    memcpy(e.filename, "sixteen_chars.pf", 16);
+    CHECK(pff_entry_stored_name(e) == "sixteen_chars.pf", "a full field, no NUL after it");
+    memset(e.filename, 0, sizeof(e.filename));
+    CHECK(pff_entry_stored_name(e).empty(), "an empty name");
+    return 1;
+}
+
+/* Each write code in words; an unknown one the I/O failure's. */
+static int test_write_error_string(void) {
+    CHECK(strcmp(pff_write_error_string(PFF_WRITE_ERR_NAME_LEN), "a name is too long for an archive") == 0, "name length");
+    CHECK(strcmp(pff_write_error_string(PFF_WRITE_ERR_NAME_EMPTY), "a name is blank") == 0, "blank name");
+    CHECK(strcmp(pff_write_error_string(PFF_WRITE_ERR_DUP_NAME), "two files share a name") == 0, "duplicate");
+    CHECK(strcmp(pff_write_error_string(PFF_WRITE_ERR_TOO_LARGE), "the archive would exceed 4 GB") == 0, "too large");
+    CHECK(strcmp(pff_write_error_string(PFF_WRITE_ERR_IO), "the archive could not be written") == 0, "I/O");
+    CHECK(strcmp(pff_write_error_string(-99), pff_write_error_string(PFF_WRITE_ERR_IO)) == 0, "unknown reads as I/O");
+    return 1;
+}
+
+/* An archive written again with one entry replaced: the replaced entry's new bytes stored plain
+   under its own name, time and checksum; every other entry's stored bytes and metadata verbatim
+   (an encrypted one still encrypted); the source's own format kept. */
+static int test_rewrite_with_entry(void) {
+    const uint8_t a[] = {1, 2, 3, 4, 5};
+    const uint8_t c_plain[] = "encrypted payload contents";
+    const uint8_t mission_old[] = {9, 9};
+    const uint8_t mission_new[] = {'B', 'M', 'S', 0, 42, 43, 44};
+    uint8_t c_cipher[sizeof(c_plain)], m_cipher[sizeof(mission_old)];
+    memcpy(c_cipher, c_plain, sizeof(c_plain));
+    pff_container_xor(c_cipher, sizeof(c_cipher), 0x0312A4CEu);
+    memcpy(m_cipher, mission_old, sizeof(mission_old));
+    pff_container_xor(m_cipher, sizeof(m_cipher), 0x0312A4CEu);
+    PffWriteEntry ents[3] = {
+        { "alpha.txt",  a,        (uint32_t)sizeof(a),        0,                  0x01020304, 0 },
+        { "secret.bin", c_cipher, (uint32_t)sizeof(c_cipher), PFF_FLAG_ENCRYPTED, 0x11223344, 0x55667788 },
+        { "Mission.BMS", m_cipher, (uint32_t)sizeof(m_cipher), PFF_FLAG_ENCRYPTED, 0x0A0B0C0D, 0x77 },
+    };
+    const char *src = "pff_rw_src.pff", *dst = "pff_rw_dst.pff";
+    PffArchive ar, br;
+    CHECK(pff_write_archive(src, PFF_FORMAT_PFF4, ents, 3) == PFF_WRITE_OK, "write source");
+    CHECK(pff_open(&ar, src) == 0, "open source");
+    const PffEntry *mission = pff_find(&ar, "mission.bms");
+    CHECK(mission != NULL, "find the replaced entry");
+    const uint32_t index = (uint32_t)(mission - ar.entries);
+    CHECK(pff_rewrite_with_entry(&ar, ar.entry_count, mission_new, sizeof(mission_new), dst) == PFF_WRITE_ERR_IO,
+          "an index past the entries refused");
+    CHECK(pff_rewrite_with_entry(&ar, index, mission_new, sizeof(mission_new), dst) == PFF_WRITE_OK, "rewrite");
+    pff_close(&ar);
+
+    CHECK(pff_open(&br, dst) == 0, "open rewrite");
+    CHECK(br.header.magic == PFF_MAGIC_PFF4 && br.entry_count == 3, "format and count kept");
+    const PffEntry *m2 = pff_find(&br, "mission.bms");
+    CHECK(m2 != NULL && m2->flags == 0 && m2->size == sizeof(mission_new) && m2->timestamp == 0x0A0B0C0D &&
+          m2->checksum == 0x77 && pff_entry_stored_name(*m2) == "Mission.BMS",
+          "the replaced entry plain, its name, time and checksum kept");
+    CHECK(entry_bytes_equal(&br, "mission.bms", mission_new, sizeof(mission_new)), "the new bytes");
+    const PffEntry *s2 = pff_find(&br, "secret.bin");
+    uint8_t raw[64];
+    CHECK(s2 != NULL && s2->flags == PFF_FLAG_ENCRYPTED && s2->timestamp == 0x11223344 && s2->checksum == 0x55667788,
+          "a kept entry's metadata verbatim");
+    CHECK(pff_extract_raw(&br, s2, raw, sizeof(raw)) == 0 && memcmp(raw, c_cipher, sizeof(c_cipher)) == 0,
+          "a kept entry's ciphertext verbatim");
+    CHECK(entry_bytes_equal(&br, "secret.bin", c_plain, sizeof(c_plain)), "and still decrypts");
+    CHECK(entry_bytes_equal(&br, "alpha.txt", a, sizeof(a)), "a plain entry kept");
+    pff_close(&br);
+    remove(src);
+    remove(dst);
+    return 1;
+}
+
 /* F6a: zero-entry archive is valid. */
 static int test_write_zero_entries(void) {
     const char *path = "pff_zero.pff";
@@ -525,6 +614,10 @@ int main(void) {
     RUN_TEST(test_container_xor_roundtrip);
     RUN_TEST(test_add_delete_resave);
     RUN_TEST(test_format_preservation);
+    RUN_TEST(test_format_for_magic);
+    RUN_TEST(test_entry_stored_name);
+    RUN_TEST(test_write_error_string);
+    RUN_TEST(test_rewrite_with_entry);
     RUN_TEST(test_write_zero_entries);
     RUN_TEST(test_write_rejects_overlong_name);
     RUN_TEST(test_write_rejects_duplicate_names);

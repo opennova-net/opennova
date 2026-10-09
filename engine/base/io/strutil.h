@@ -307,6 +307,19 @@ inline size_t utf8_length(std::string_view text)
     return count;
 }
 
+// The offset `at` moved back to a character's start, where a cut keeps every character whole: `at`
+// when a character starts there, the start of the character whose continuation byte (10xxxxxx) it
+// is otherwise, and text.size() for an `at` at or past the end. `text.substr(0, utf8_cut(text, n))`
+// is its first n bytes or fewer, never half a character.
+inline size_t utf8_cut(std::string_view text, size_t at)
+{
+    if (at >= text.size())
+        return text.size();
+    while (at > 0 && (static_cast<unsigned char>(text[at]) & 0xC0) == 0x80)
+        --at;
+    return at;
+}
+
 // The offset of the first LF in `text` that no CR comes before, and how many there are;
 // npos and 0 for none.
 inline size_t first_lone_lf(std::string_view text, size_t *count = nullptr)
@@ -331,6 +344,25 @@ inline std::string with_crlf_line_ends(std::string_view text)
         if (text[i] == '\n' && (i == 0 || text[i - 1] != '\r'))
             out += '\r';
         out += text[i];
+    }
+    return out;
+}
+
+// `text` with its line ends made CR LF from scratch: every CR dropped first, then every LF
+// written CR LF. Unlike with_crlf_line_ends, a CR that ends no line (a lone CR, a CR CR LF's
+// first) is gone: the text a from-scratch writer emits from authored text whatever line ends
+// it was typed with.
+inline std::string normalized_crlf_line_ends(std::string_view text)
+{
+    std::string out;
+    out.reserve(text.size() + text.size() / 16);
+    for (const char c : text) {
+        if (c == '\r')
+            continue;
+        if (c == '\n')
+            out += "\r\n";
+        else
+            out.push_back(c);
     }
     return out;
 }
