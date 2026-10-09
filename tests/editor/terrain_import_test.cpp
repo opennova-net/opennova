@@ -32,8 +32,6 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/project_validation.h>
 #include <editor/import/import_run.h>
-#include <editor/import/png_decode.h>
-#include <editor/import/png_encode.h>
 #include <editor/import/sidecar.h>
 #include <editor/import/terrain_import.h>
 #include <editor/project/project_files.h>
@@ -46,6 +44,8 @@
 #include <formats/cpt/cpt_io.h>
 #include <formats/env/env.h>
 #include <formats/pcx/pcx_io.h>
+#include <formats/png/png_decode.h>
+#include <formats/png/png_encode.h>
 #include <formats/tga/tga.h>
 #include <formats/til/til_io.h>
 #include <formats/til/til_tsd.h>
@@ -60,7 +60,7 @@
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
-#include "editor/png_test_support.h"
+#include "common/png_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -72,8 +72,10 @@ using opennova::FoliageDef;
 using opennova::IndexedImage8;
 using opennova::RgbaImage;
 using editor_test::NoProcess;
-using editor_test::PngSpec;
-using editor_test::make_png;
+using test_png::PngSpec;
+using test_png::make_png;
+using opennova::png::decode_png;
+using opennova::png::encode_png_rgba;
 
 namespace {
 

@@ -14,12 +14,12 @@
 #include <utility>
 
 #include <base/io/strutil.h>
-#include <editor/import/png_decode.h>
 #include <editor/import/texture_import.h>
 #include <editor/project/project_files.h>
 #include <editor/terrain/terrain_bake.h>
 #include <formats/cpt/cpt.h>
 #include <formats/pcx/pcx_io.h>
+#include <formats/png/png_decode.h>
 #include <formats/tga/tga.h>
 #include <formats/til/til_io.h>
 #include <formats/trn/charmap_legend.h>
@@ -478,8 +478,8 @@ bool decode_terrain_heightmap(const std::string &name, const std::vector<uint8_t
 		      "heights or 2 MiB of 16-bit";
 		return false;
 	}
-	GrayImage grey;
-	if (!decode_png_gray(bytes, grey, why)) {
+	png::GrayImage grey;
+	if (!png::decode_png_gray(bytes, grey, why)) {
 		why = name + ": " + why + " (a heightmap is a PNG or a .raw)";
 		return false;
 	}
@@ -504,8 +504,8 @@ bool decode_terrain_heightmap(const std::string &name, const std::vector<uint8_t
 
 bool decode_terrain_image(const std::string &key, const std::string &name, const std::vector<uint8_t> &bytes,
                           RgbaImage &out, std::string &why) {
-	ImageSource source;
-	if (!decode_image_source(name, bytes, source, why)) {
+	renderer::ImageSource source;
+	if (!renderer::decode_image_source(name, bytes, source, why)) {
 		why = name + ": " + why;
 		return false;
 	}
@@ -534,13 +534,13 @@ bool decode_terrain_surface(const std::string &name, const std::vector<uint8_t> 
 	RgbaImage colours;
 	IndexedImage8 indices;
 	if (strutil::ends_with_icase(name, ".png")) {
-		if (!decode_png(bytes, colours, why, &indices)) {
+		if (!png::decode_png(bytes, colours, why, &indices)) {
 			why = name + ": " + why;
 			return false;
 		}
 	} else {
-		ImageSource source;
-		if (!decode_image_source(name, bytes, source, why)) {
+		renderer::ImageSource source;
+		if (!renderer::decode_image_source(name, bytes, source, why)) {
 			why = name + ": " + why;
 			return false;
 		}
@@ -601,13 +601,13 @@ bool decode_terrain_foliage(const std::string &name, const std::vector<uint8_t> 
 	RgbaImage colours;
 	IndexedImage8 indices;
 	if (strutil::ends_with_icase(name, ".png")) {
-		if (!decode_png(bytes, colours, why, &indices)) {
+		if (!png::decode_png(bytes, colours, why, &indices)) {
 			why = name + ": " + why;
 			return false;
 		}
 	} else {
-		ImageSource source;
-		if (!decode_image_source(name, bytes, source, why)) {
+		renderer::ImageSource source;
+		if (!renderer::decode_image_source(name, bytes, source, why)) {
 			why = name + ": " + why;
 			return false;
 		}

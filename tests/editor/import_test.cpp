@@ -1,6 +1,5 @@
-// The imports (ADR 0046 d6/d10, S8): the PNG reader over every color type and depth
-// with the five filters and its refusals; the quantizer (an exact small palette, a
-// median cut past 256 colors, a PCX round trip); the import pass (a sidecar written
+// The imports (ADR 0046 d6/d10, S8; the PNG reader's and the quantizer's own cases are
+// formats/png's and formats/pcx's, tests/png and tests/pcx): the import pass (a sidecar written
 // with the importer's defaults, outputs under the cache, nothing redone for an
 // unchanged source, a changed source or a missing output imported again, a bad option
 // a finding); the scan listing the outputs as project files the graph resolves and the
@@ -36,8 +35,7 @@
 #include <editor/import/import_pass.h>
 #include <editor/import/import_plan.h>
 #include <editor/import/import_run.h>
-#include <editor/import/png_decode.h>
-#include <editor/import/quantize.h>
+#include <formats/png/png_decode.h>
 #include <editor/import/sidecar.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_plan.h>
@@ -58,7 +56,7 @@
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 #include "editor/menu_test_support.h"
-#include "editor/png_test_support.h"
+#include "common/png_test_support.h"
 
 using namespace opennova::editor;
 using opennova::IndexedImage8;
@@ -67,9 +65,10 @@ using opennova::decode_pcx_indexed;
 using opennova::encode_pcx_indexed;
 namespace fs = std::filesystem;
 namespace io = opennova::io;
-using editor_test::PngSpec;
-using editor_test::gradient_png;
-using editor_test::make_png;
+using test_png::PngSpec;
+using test_png::gradient_png;
+using test_png::make_png;
+using opennova::png::decode_png;
 
 namespace {
 
@@ -90,8 +89,6 @@ bool mark_for_import(const std::string &source) {
 
 using editor_test::NoProcess;
 
-const uint8_t *pixel(const RgbaImage &image, int x, int y) { return &image.pixels[size_t((y * image.width + x) * 4)]; }
-
 size_t count_code(const std::vector<Diagnostic> &diagnostics, const std::string &code) {
 	size_t n = 0;
 	for (const Diagnostic &d : diagnostics) n += d.code() == code ? 1 : 0;
@@ -110,116 +107,6 @@ const ImportedSource *imported_source(const SessionView &view, const std::string
 }
 
 } // namespace
-
-static int test_png_decode() {
-	// RGBA 8-bit, two rows, the second filtered with Sub (each byte adds the one bpp back).
-	PngSpec rgba;
-	rgba.width = 2;
-	rgba.height = 2;
-	rgba.rows = {0, 10, 20, 30, 255, 40, 50, 60, 128,
-	             1, 1, 2, 3, 4, 1, 1, 1, 1};
-	RgbaImage image;
-	std::string error;
-	TEST_EXPECT(decode_png(make_png(rgba), image, error));
-	TEST_EXPECT(image.width == 2 && image.height == 2);
-	TEST_EXPECT(pixel(image, 0, 0)[0] == 10 && pixel(image, 0, 0)[3] == 255 && pixel(image, 1, 0)[3] == 128);
-	TEST_EXPECT(pixel(image, 0, 1)[0] == 1 && pixel(image, 0, 1)[1] == 2 && pixel(image, 1, 1)[0] == 2 && pixel(image, 1, 1)[3] == 5);
-	// RGB 8-bit with Up (row 2 adds row 1) and Average and Paeth rows.
-	PngSpec rgb;
-	rgb.width = 1;
-	rgb.height = 4;
-	rgb.color_type = 2;
-	rgb.rows = {0, 100, 110, 120, 2, 1, 1, 1, 3, 2, 2, 2, 4, 3, 3, 3};
-	TEST_EXPECT(decode_png(make_png(rgb), image, error));
-	TEST_EXPECT(pixel(image, 0, 1)[0] == 101 && pixel(image, 0, 2)[0] == 52 && pixel(image, 0, 3)[0] == 55 && pixel(image, 0, 3)[3] == 255);
-	// A 2-bit palette image with transparency.
-	PngSpec paletted;
-	paletted.width = 4;
-	paletted.height = 1;
-	paletted.depth = 2;
-	paletted.color_type = 3;
-	paletted.palette = {255, 0, 0, 0, 255, 0, 0, 0, 255, 9, 9, 9};
-	paletted.palette_alpha = {255, 128};
-	paletted.rows = {0, 0x1B}; // indices 0,1,2,3
-	TEST_EXPECT(decode_png(make_png(paletted), image, error));
-	TEST_EXPECT(image.width == 4 && pixel(image, 0, 0)[0] == 255 && pixel(image, 1, 0)[1] == 255 && pixel(image, 1, 0)[3] == 128 &&
-	            pixel(image, 2, 0)[2] == 255 && pixel(image, 3, 0)[0] == 9 && pixel(image, 3, 0)[3] == 255);
-	// 1-bit grayscale, 16-bit grayscale + alpha.
-	PngSpec gray;
-	gray.width = 8;
-	gray.height = 1;
-	gray.depth = 1;
-	gray.color_type = 0;
-	gray.rows = {0, 0xA5};
-	TEST_EXPECT(decode_png(make_png(gray), image, error));
-	TEST_EXPECT(pixel(image, 0, 0)[0] == 255 && pixel(image, 1, 0)[0] == 0 && pixel(image, 7, 0)[0] == 255);
-	PngSpec deep;
-	deep.width = 1;
-	deep.height = 1;
-	deep.depth = 16;
-	deep.color_type = 4;
-	deep.rows = {0, 0x12, 0x34, 0xAB, 0xCD};
-	TEST_EXPECT(decode_png(make_png(deep), image, error));
-	TEST_EXPECT(pixel(image, 0, 0)[0] == 0x12 && pixel(image, 0, 0)[3] == 0xAB);
-	// Refusals name the reason.
-	PngSpec interlaced = rgba;
-	interlaced.interlace = 1;
-	TEST_EXPECT(!decode_png(make_png(interlaced), image, error) && error.find("interlaced") != std::string::npos);
-	PngSpec bad_crc = rgba;
-	bad_crc.corrupt_crc = true;
-	TEST_EXPECT(!decode_png(make_png(bad_crc), image, error) && error.find("CRC") != std::string::npos);
-	PngSpec bad_depth = paletted;
-	bad_depth.depth = 16;
-	TEST_EXPECT(!decode_png(make_png(bad_depth), image, error) && error.find("Unsupported") != std::string::npos);
-	std::vector<uint8_t> truncated = make_png(rgba);
-	truncated.resize(truncated.size() - 20);
-	TEST_EXPECT(!decode_png(truncated, image, error));
-	TEST_EXPECT(!decode_png({1, 2, 3}, image, error) && error.find("Not a PNG") != std::string::npos);
-	return 0;
-}
-
-static int test_quantize() {
-	// Three colors: the palette is exact and sorted, and the PCX round trip keeps every pixel.
-	RgbaImage small;
-	small.width = 3;
-	small.height = 1;
-	small.pixels = {200, 0, 0, 255, 0, 200, 0, 255, 0, 0, 200, 255};
-	IndexedImage8 indexed = quantize_to_256(small);
-	TEST_EXPECT(indexed.width == 3 && indexed.indices.size() == 3);
-	TEST_EXPECT(indexed.palette[indexed.indices[0]][0] == 200 && indexed.palette[indexed.indices[1]][1] == 200 &&
-	            indexed.palette[indexed.indices[2]][2] == 200);
-	std::vector<uint8_t> pcx;
-	std::string error;
-	TEST_EXPECT(encode_pcx_indexed(indexed, pcx, error));
-	IndexedImage8 back;
-	TEST_EXPECT(decode_pcx_indexed(pcx.data(), pcx.size(), back, error) && back.width == 3 && back.indices == indexed.indices);
-	// Past 256 colors: at most 256 entries, every index valid, nearby colors map close.
-	RgbaImage many;
-	many.width = 64;
-	many.height = 64;
-	for (int y = 0; y < 64; ++y)
-		for (int x = 0; x < 64; ++x) {
-			many.pixels.push_back(uint8_t(x * 4));
-			many.pixels.push_back(uint8_t(y * 4));
-			many.pixels.push_back(uint8_t((x + y) * 2));
-			many.pixels.push_back(255);
-		}
-	IndexedImage8 reduced = quantize_to_256(many);
-	TEST_EXPECT(reduced.indices.size() == 64 * 64);
-	int used = 0;
-	bool seen[256] = {};
-	for (const uint8_t index : reduced.indices) if (!seen[index]) { seen[index] = true; ++used; }
-	TEST_EXPECT(used > 64 && used <= 256);
-	long worst = 0;
-	for (size_t i = 0; i < reduced.indices.size(); ++i)
-		for (int c = 0; c < 3; ++c)
-			worst = std::max(worst, std::labs(long(many.pixels[i * 4 + size_t(c)]) - long(reduced.palette[reduced.indices[i]][c])));
-	TEST_EXPECT(worst < 40);
-	// Deterministic.
-	const IndexedImage8 again = quantize_to_256(many);
-	TEST_EXPECT(again.indices == reduced.indices);
-	return 0;
-}
 
 static int test_import_pass() {
 	editor_test::TempProjectDir dir("opennova_editor_import_pass");
@@ -1098,8 +985,6 @@ int run_import_apply_tests();
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	int failures = 0;
-	failures += test_png_decode();
-	failures += test_quantize();
 	failures += test_import_pass();
 	failures += test_import_inputs();
 	failures += test_image_tga_output();
