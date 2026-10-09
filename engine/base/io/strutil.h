@@ -335,6 +335,21 @@ inline std::string with_crlf_line_ends(std::string_view text)
     return out;
 }
 
+// Whether bytes read as text a person wrote: no NUL and no control character but a tab, a line
+// end, a form feed or the DOS end-of-file mark (UTF-8 or a code page alike). A file's first
+// kTextSniffBytes decide it.
+inline constexpr size_t kTextSniffBytes = 4096;
+inline bool looks_like_text(const uint8_t *data, size_t size)
+{
+    for (size_t i = 0; i < size; ++i) {
+        const uint8_t c = data[i];
+        if (c >= 0x20 || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == 0x1A)
+            continue;
+        return false;
+    }
+    return true;
+}
+
 // A whole number with its thousands grouped by commas, as a message writes a count
 // ("9,290", "-65,536").
 template <typename Int>
