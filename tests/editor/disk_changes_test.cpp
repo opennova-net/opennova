@@ -18,7 +18,6 @@
 #include <base/io/file_time.h>
 #include <editor/assets/disk_changes.h>
 #include <editor/assets/project_scan.h>
-#include <editor/import/png_encode.h>
 #include <editor/model/document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
@@ -27,6 +26,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/png/png_encode.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -35,6 +35,7 @@
 using namespace opennova;
 using namespace opennova::editor;
 namespace fs = std::filesystem;
+using opennova::png::encode_png_rgba;
 
 namespace {
 
