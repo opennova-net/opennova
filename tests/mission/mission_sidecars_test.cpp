@@ -6,6 +6,7 @@
 #include <string>
 
 #include "common/test_expect.h"
+#include <formats/pff/pff.h>
 #include <runtime/mission/mission_sidecars.h>
 
 int main() {
@@ -60,5 +61,34 @@ int main() {
 	TEST_EXPECT(sidecar_name("00TRa.bms", *sounds) == "00TRa.lwf");
 	TEST_EXPECT(sidecar_alternate_name("00TRa.bms", *sounds) == "00TRa.pwf");
 	TEST_EXPECT(sidecar_alternate_name("00TRa.bms", *text).empty());
+
+	// The names each reader opens, the dialog rows by the bank the header picks, and the file a
+	// row needs beside it.
+	{
+		const SidecarNames own = sidecar_names("maps/00TRa.bms", *sounds);
+		TEST_EXPECT(own.name == "00TRa.lwf" && own.alternate == "00TRa.pwf" && own.needs == "00TRa.dbf");
+		const SidecarNames slotted = sidecar_names("00TRa.bms", *sounds, "talk.cnv");
+		TEST_EXPECT(slotted.name == "talk.lwf" && slotted.alternate == "talk.pwf" && slotted.needs == "talk.dbf");
+		TEST_EXPECT(sidecar_names("00TRa.bms", *dialog, "talk.cnv").name == "talk.dbf");
+		const SidecarNames bin = sidecar_names("00TRa.bms", *text);
+		TEST_EXPECT(bin.name == "00TRa.bin" && bin.alternate.empty() && bin.needs.empty());
+	}
+	// A row that needs another's file reads only where that file is [orig: DialogSystem_Init
+	// @ 0x527648]; the row a file is to a mission, its name compared as the archives compare.
+	{
+		const std::set<std::string> project = {"00TRA.DBF", "00TRA.PWF", "00TRA.WAC"};
+		const auto has = [&](const std::string &name) { return project.count(opennova::pff::normalized_logical_name(name)) != 0; };
+		const auto none = [](const std::string &) { return false; };
+		TEST_EXPECT(sidecar_reads(sidecar_names("00TRa.bms", *sounds), has));
+		TEST_EXPECT(!sidecar_reads(sidecar_names("00TRa.bms", *sounds), none));
+		TEST_EXPECT(sidecar_reads(sidecar_names("00TRa.bms", *script), none));
+		TEST_EXPECT(sidecar_naming("00TRa.bms", "00tra.wac", has) == script);
+		TEST_EXPECT(sidecar_naming("00TRa.bms", "00TRA.PWF", has) == sounds);
+		TEST_EXPECT(sidecar_naming("00TRa.bms", "00TRa.pwf", none) == nullptr);
+		TEST_EXPECT(sidecar_naming("00TRa.bms", "00TRa.dbf", none) == dialog);
+		TEST_EXPECT(sidecar_naming("op.v2.bms", "op.wac", none) == script);
+		TEST_EXPECT(sidecar_naming("00TRa.bms", "medmssn.bin", has) == nullptr);
+		TEST_EXPECT(sidecar_naming("00TRa.bms", "01TR.wac", has) == nullptr);
+	}
 	return 0;
 }

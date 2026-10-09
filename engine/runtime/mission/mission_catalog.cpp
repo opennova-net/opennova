@@ -99,9 +99,9 @@ void fill_row(Row &row, const bms::Header &header, bool header_ok, const rtxt::F
 	// game_type::for_mission_mode, game_type_of).
 	row.game_mode = header_ok ? bms::selected_game_mode(header.attrib_flags) : 0u;
 	if (text != nullptr) {
-		if (const rtxt::Entry *title = text->find_in_section("Info", "TITLE"))
+		if (const rtxt::Entry *title = text->find_in_section(kTextInfoSection, kTextTitleKey))
 			row.title = title->text;
-		if (const rtxt::Entry *briefing = text->find_in_section("Info", "BRIEFING"))
+		if (const rtxt::Entry *briefing = text->find_in_section(kTextInfoSection, kTextBriefingKey))
 			row.briefing = briefing->text;
 	} else {
 		row.title = header_cstr(header.mission_name, sizeof(header.mission_name));
@@ -121,8 +121,8 @@ bool load_text(const ResourceIndex &index, const std::string &name, rtxt::File &
 // One archive pair: every `.bms` entry of the mission archive, its header read by name
 // from the archives (the lowest slot holding it), titled only when the pair's own text
 // archive holds its `.bin`, which then reads by name like any table. A missing mission
-// archive lists nothing. `.npj`/`.npz` map projects are not listed (D-MNU-25: OpenNova
-// cannot load one).
+// archive lists nothing. The `.npj`/`.npz` map projects lists_as_mission takes are not
+// listed (D-MNU-25: OpenNova cannot load one).
 // [orig: Mission_BuildMapListFromPFF @ 0x562910 — the entry walk @ 0x56295f..0x562d51,
 //  File_HasExtension(".bms"/".npj"/".npz") @ 0x5629a0/@ 0x5629bc/@ 0x5629d8,
 //  Mission_LoadBMSFromPFF
@@ -132,7 +132,8 @@ bool load_text(const ResourceIndex &index, const std::string &name, rtxt::File &
 void walk_pair(const ResourceIndex &index, int mission_slot, int text_slot,
 		std::vector<Row> &rows) {
 	for (const VfsArchiveEntry &entry : index.archive_slot_entries(mission_slot)) {
-		if (!has_extension(entry.name, ".bms")) continue;
+		if (!lists_as_mission(entry.name)) continue;
+		if (!has_extension(entry.name, ".bms")) continue; // a map project (D-MNU-25)
 		Row row;
 		row.file = entry.name;
 		row.loose = false;
@@ -219,6 +220,10 @@ uint32_t game_type_of(const Row &row) {
 
 std::string text_table_name(const std::string &file) {
 	return bin_sibling_name(file);
+}
+
+bool lists_as_mission(const std::string &name) {
+	return has_extension(name, ".bms") || has_extension(name, ".npj") || has_extension(name, ".npz");
 }
 
 std::string display_text(const Row &row) {
