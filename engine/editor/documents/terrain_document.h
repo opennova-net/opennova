@@ -33,10 +33,6 @@ namespace opennova::editor {
 enum class TerrainKind : NodeKind { Terrain = 0, SectorRow = 1, Foliage = 2 };
 constexpr NodeKind node_kind(TerrainKind kind) { return static_cast<NodeKind>(kind); }
 
-// The sector grid's sides: 16 sectors at most each way [orig: Terrain_LoadEnvironmentConfig @ 0x610940, the
-// gate's `> 16`; the 16 x 16 grid Terrain_ShiftHeightmapRows @ 0x60F190 extends to].
-inline constexpr int kTerrainGridSide = 16;
-
 // The terrain row: the engine's record. Its grid's `polytrn_sectors` lines (TrnConfig::sector_grid's first
 // sector_rows rows) are a list of sector rows, each its sixteen cells (the sector a grid cell places: 0
 // none, 1 to 4 the heightmap's quadrants), of which the file writes polytrn_sectorcount.
@@ -102,8 +98,8 @@ protected:
 
 bool is_terrain_kind(AssetKind kind);
 
-// The admission gate over a record [orig: Terrain_LoadEnvironmentConfig @ 0x610940, its tail]: "" where the
-// game takes it, else its words.
+// The admission gate over a record (formats/trn trn_refusal, the rows the writer writes: max(1, sector_rows))
+// [orig: Terrain_LoadEnvironmentConfig @ 0x610940, its tail]: "" where the game takes it, else its words.
 std::string terrain_refusal(const TrnConfig &config);
 
 // The terrain type's validator (DocumentType::validate_file), an open document standing in for its file:
