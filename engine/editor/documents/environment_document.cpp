@@ -21,6 +21,7 @@
 #include <editor/documents/terrain_document.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/model/staged_rows.h>
+#include <formats/env/env_source_issue.h>
 #include <formats/trn/trn_io.h>
 
 namespace opennova::editor {
@@ -198,12 +199,10 @@ LabelledField name_field(const char *id, const char *label, const char *section,
 	return field;
 }
 
-// The whole numbers an atol keyword holds once the parser shifts it into the engine's 32-bit store:
-// fog_level and sky_height `<< 16` [orig: TimeOfDay_ParseProperty @ 0x57ccbf, @ 0x57cbdf],
-// water_height `<< 15` [@ 0x57cb6a], sky_speed `<< 10` [@ 0x57cc0d]. Past them the shift wraps.
-constexpr int kShift16 = 16, kShift15 = 15, kShift10 = 10;
-constexpr int64_t stored_min(int shift) { return int64_t(INT32_MIN) >> shift; }
-constexpr int64_t stored_max(int shift) { return int64_t(INT32_MAX) >> shift; }
+// The whole numbers an atol keyword holds once the parser shifts it into the engine's 32-bit store
+// (formats/env's store shifts: env::kFogLevelStoreShift and the rest). Past them the shift wraps.
+constexpr int64_t stored_min(int shift) { return env::env_store_min(shift); }
+constexpr int64_t stored_max(int shift) { return env::env_store_max(shift); }
 // "-32768 to 32767 m: <why>": a refusal's words for a stored range.
 std::string stored_range_words(int shift, const char *unit, const char *why) {
 	return std::to_string(stored_min(shift)) + " to " + std::to_string(stored_max(shift)) + unit + ": " + why;
@@ -382,16 +381,17 @@ void environment_fields(TableKind &kind) {
 		                      "metre: a dome flat on the camera.");
 		field.schema.unit = "m";
 		field.schema.optional = true;
-		ranged(field.schema, double(stored_min(kShift16)), double(stored_max(kShift16)));
+		ranged(field.schema, double(stored_min(env::kSkyHeightStoreShift)), double(stored_max(env::kSkyHeightStoreShift)));
 		field.value.get = [](const RecordHandle &record, Value &out) {
 			out = static_cast<int64_t>(row_of(record).sky_height_latent);
 			return true;
 		};
-		const std::string words = stored_range_words(kShift16, " m", "the game keeps the height in 16.16.");
+		const std::string words = stored_range_words(env::kSkyHeightStoreShift, " m", "the game keeps the height in 16.16.");
 		field.value.set = [words](const RecordHandle &record, const Value &value, std::string &error) {
 			int64_t whole = 0;
 			if (!whole_of(value, whole, error) ||
-			    !in_range(whole, stored_min(kShift16), stored_max(kShift16), words.c_str(), error))
+			    !in_range(whole, stored_min(env::kSkyHeightStoreShift), stored_max(env::kSkyHeightStoreShift), words.c_str(),
+			              error))
 				return false;
 			EnvironmentRow &row = row_of(record);
 			// A Set of another value writes the line; one of the value it holds changes nothing.
@@ -411,7 +411,7 @@ void environment_fields(TableKind &kind) {
 	kind.field(whole_field("sky_speed", "Cloud speed", "Sky", "",
 	                       "How fast the clouds drift: the game adds it (x 1024) to the cloud layers' offsets every "
 	                       "tick, the layers at 1, 1, 2/3 and 4/3 of it.",
-	                       &Config::sky_speed, kShift10, "the game keeps the speed times 1024 in 32 bits."));
+	                       &Config::sky_speed, env::kSkySpeedStoreShift, "the game keeps the speed times 1024 in 32 bits."));
 	{
 		LabelledField field = int_field("advanced_clouds", "Cloud pass", "Sky",
 		                                "Flat (0): the dome is one pass in the cloud colour below, no texture. Layered (any "
@@ -442,7 +442,7 @@ void environment_fields(TableKind &kind) {
 	// Render_SetFogState @ 0x58a950]
 	kind.field(whole_field("fog_level", "Fog distance", "Fog", "m",
 	                       "Where the fog is whole: nothing past it is drawn. Overcast weather brings it in by up to half.",
-	                       &Config::fog_level, kShift16, "the game keeps the distance in 16.16."));
+	                       &Config::fog_level, env::kFogLevelStoreShift, "the game keeps the distance in 16.16."));
 	{
 		LabelledField field = int_field("fog_type", "Fog type", "Fog",
 		                                "How the fog thickens toward its distance. Any other number fogs as 1 does.",
@@ -464,7 +464,7 @@ void environment_fields(TableKind &kind) {
 				"water_height", "Water height", "Water", "half m",
 				"The water plane's height in half metres (60 is 30 m). A mission's header or its terrain's water height "
 				"comes before it.",
-				&Config::water_height, kShift15, "the game keeps half metres in 16.16.");
+				&Config::water_height, env::kWaterHeightStoreShift, "the game keeps half metres in 16.16.");
 		field.schema.optional = true;
 		const auto set = field.value.set;
 		field.value.set = [set](const RecordHandle &record, const Value &value, std::string &error) {
@@ -786,178 +786,7 @@ RecordTable make_table() {
 	return RecordTable({std::move(environment), std::move(keyframe), std::move(terrain_key)});
 }
 
-// --- the source issues ------------------------------------------------------------------------------
-
-// The keywords the terrain's reader compares, a foliage block's included (formats/trn's reader, trn_parser_key): its
-// hook stays on for the .env pass, so it reads an environment's lines too, and the mission's terrain takes them after
-// its .trn's (D-TERRAIN-18) [orig: Terrain_LoadEnvironmentConfig @ 0x6109AD pushes Terrain_ParseConfigCallback;
-// Environment_LoadTimeOfDayConfig @ 0x57DB44 keeps it as g_EnvParseHook for every pass]: the row's terrain keys.
-// terrain_name and horizon are read by no arm of either reader: a line the game skips.
-bool terrain_key(const std::string &key) { return trn_parser_key(key, true); }
-
 } // namespace
-
-void environment_source_issues(const std::string &text, std::vector<SourceIssue> &issues) {
-	// The walk the reader takes (io::for_each_config_line_span: its lines and tokens, the callback's gate),
-	// numbering every line it cuts.
-	int keyframes = 0;
-	bool on_slot = false;
-	float envscale = 1.0f;
-	// The colour lines a later envscale would scale otherwise than the record does (env.h divergence
-	// #8): a keyframe's and the scaled global colours', each with the envscale it was read under.
-	struct Scaled {
-		size_t line;
-		std::string key;
-		float envscale;
-	};
-	std::vector<Scaled> scaled;
-	std::map<std::string, size_t> first_line; // a keyword outside the blocks: where it was first read
-	const auto issue = [&](bool blocks, size_t line, const std::string &field, const std::string &message) {
-		SourceIssue out;
-		out.blocks = blocks;
-		out.line = line;
-		out.field = field;
-		out.message = message;
-		issues.push_back(std::move(out));
-	};
-	size_t line = 0;
-	// A last line no CR LF ends loses its final byte to the walk [orig: File_ParseASCIIFile
-	// @ 0x53D8C7..0x53D8F5] (shipped FULL_03.ENV and FULL_05.ENV end on such a "tod_end").
-	const bool ends_cut = text.size() < 2 || text.compare(text.size() - 2, 2, "\r\n") != 0;
-	io::for_each_config_line_span(text.data(), text.size(), [&](io::ConfigTokens &tokens, const io::ConfigLineSpan &span) {
-		++line;
-		if (tokens.count == 0 || tokens.tokens[0][0] == '/') return;
-		const std::string key = strutil::to_lower(tokens.tokens[0]);
-		const char *value = tokens.token(1);
-		const bool last_cut = ends_cut && !text.empty() && span.end + 1 >= text.size();
-		if (last_cut)
-			issue(false, line, key,
-			      "The file's last line has no line end, so the game's reader loses its last character ('" +
-			              std::string(1, text.back()) + "') and reads the line short: a save writes the line as the "
-			              "game read it, ended.");
-		if (!env::is_env_key(key)) {
-			if (terrain_key(key)) {
-				// A terrain key: the row keeps it, and a save writes it again, from scratch, after the environment's
-				// keywords. One whose line reads back otherwise (a quote, a control character, past the 30 tokens)
-				// the row cannot keep.
-				TrnKeyLine kept;
-				kept.key = key;
-				for (int i = 1; i < tokens.count; ++i) kept.values.emplace_back(tokens.tokens[i]);
-				std::string written, why;
-				if (!write_trn_key_line(written, kept, why))
-					issue(true, line, key,
-					      "This terrain key's line cannot be written again as the game's reader reads it: " + why +
-					              " Correct the line in the file.");
-			} else {
-				issue(false, line, key,
-				      "The game's environment reader skips '" + std::string(tokens.tokens[0]) +
-				              "': a save leaves the line out.");
-			}
-			return;
-		}
-		if (key == "tod_begin") {
-			if (keyframes >= env::kMaxTodKeyframes) {
-				issue(false, line, "time",
-				      std::string("The game reads 16 keyframes: this tod_begin takes no slot and its time is not read, so "
-				                  "its colours land on ") +
-				              (on_slot ? "the 16th keyframe." : "the colours with no keyframe.") +
-				              " A save writes them there.");
-				return;
-			}
-			++keyframes;
-			on_slot = true;
-		} else if (key == "tod_end") {
-			on_slot = false;
-			return;
-		}
-		// A time that reads as another clock time (a short token, an hour past 23, a minute past 59).
-		if (key == "tod_begin" || key == "curtime") {
-			const int read = env::parse_tod_time(value);
-			if (read != io::retail_atol(value))
-				issue(false, line, key == "curtime" ? "curtime" : "time",
-				      "The game reads '" + std::string(value) + "' as " + clock_words(read) + ": a save writes " +
-				              clock_words(read).substr(0, 2) + clock_words(read).substr(3) + ".");
-			return;
-		}
-		const bool colour_line = key.size() > 4 && key.compare(key.size() - 4, 4, "_rgb") == 0;
-		if (colour_line && tokens.count < 4)
-			issue(false, line, key,
-			      "This colour line has " + std::to_string(tokens.count - 1) +
-			              " of its three values: the game reads the missing ones from where earlier, longer lines left "
-			              "them, and a save writes the three it read.");
-		if (key == "envscale") envscale = static_cast<float>(io::retail_atof(value));
-		// The scaled colours the record scales by the last envscale: a keyframe's, and the global ones.
-		if (env::is_envscaled_key(key) && (on_slot || !env::is_tod_color_key(key)))
-			scaled.push_back({line, key, envscale});
-		// A keyword read again outside the blocks: the last line wins.
-		if (!on_slot) {
-			const auto first = first_line.emplace(key, line);
-			if (!first.second) {
-				issue(false, first.first->second, key,
-				      "'" + key + "' is written again on line " + std::to_string(line) +
-				              ": the game reads the last, and a save writes that one alone.");
-				first.first->second = line;
-			}
-		}
-	});
-	for (const Scaled &each : scaled)
-		if (each.envscale != envscale) {
-			issue(true, each.line, each.key,
-			      "An envscale after this colour line scales it otherwise: the game scales each colour line by the "
-			      "envscale read before it, and the editor's environment holds one for every colour. Move the envscale "
-			      "line above the colours.");
-			break;
-		}
-	std::stable_sort(issues.begin(), issues.end(), [](const SourceIssue &a, const SourceIssue &b) { return a.line < b.line; });
-}
-
-std::vector<std::string> terrain_key_readings(const std::vector<TrnKeyLine> &keys) {
-	// The terrain's parser's block state over the file's own lines: inside a block every line is the block's, the
-	// first four blocks read their keys, `end` closes one, and from the fifth on nothing closes it [orig:
-	// Terrain_ParseConfigCallback @ 0x60F330, its block test of dword_31BC904, `dword_31BC900 < 4` around every block
-	// key, the block's arms @ 0x60F36C..0x60F5F0]. A terrain may close blocks before the file, or leave one open into
-	// it; what the file alone shows is said.
-	std::vector<std::string> out(keys.size());
-	bool in_block = false;
-	int closed = 0;
-	for (size_t i = 0; i < keys.size(); ++i) {
-		const std::string &key = keys[i].key;
-		const bool block_key = trn_parser_key(key, true) && !trn_parser_key(key);
-		if (in_block) {
-			if (closed >= 4) {
-				out[i] = "This line is inside a fifth foliage block, which the terrain's reader opens but reads nothing of: "
-				         "no end closes it, so no arm reads a line after it [orig: Terrain_ParseConfigCallback @ 0x60F330, "
-				         "`dword_31BC900 < 4` around every block key].";
-			} else if (key == "end") {
-				in_block = false;
-				++closed;
-			} else if (!block_key) {
-				out[i] = "This line is inside the foliage block a foliage line above opens: the terrain's reader reads a "
-				         "block's lines as the block's, so it skips this one until an end closes the block [orig: "
-				         "Terrain_ParseConfigCallback @ 0x60F330, its block test of dword_31BC904].";
-			}
-			continue;
-		}
-		if (key == "foliage") {
-			in_block = true;
-			if (closed >= 4)
-				out[i] = "A fifth foliage block: the terrain's reader opens it but reads none of its lines, and nothing "
-				         "closes it, so no arm reads a line after it [orig: Terrain_ParseConfigCallback @ 0x60F330, "
-				         "`dword_31BC900 < 4` around every block key].";
-		} else if (block_key) {
-			out[i] = "'" + key +
-			         "' is a foliage block's keyword: the terrain's reader reads it only inside a block, and no foliage "
-			         "line above opens one in this file, so the game takes it only on a terrain whose .trn ends inside "
-			         "a block [orig: Terrain_ParseConfigCallback @ 0x60F330, its block test of dword_31BC904].";
-		} else if (key == "polytrn_sectors") {
-			out[i] = "A grid row here is a row after the terrain's own, not in place of one: the terrain's reader counts "
-			         "every polytrn_sectors line of the load, the .trn's first, and refuses the terrain where the count "
-			         "is past 16 or not a power of two [orig: Terrain_ParseConfigCallback @ 0x60F330, its row count "
-			         "dword_31BCB30, which no pass resets; Terrain_LoadEnvironmentConfig @ 0x610A24..0x610A77].";
-		}
-	}
-	return out;
-}
 
 std::string terrain_key_locator(size_t index) {
 	// The one row (0), then the terrain keys' list by its kind's token (Document::locator).
@@ -1077,7 +906,9 @@ bool EnvironmentDocument::parse(const std::vector<uint8_t> &bytes, std::vector<s
 	row->sky_height_latent = row->sky_height_written() ? static_cast<int>(row->config.sky_height) : 0;
 	// The lines the terrain's parser takes after the mission's .trn and overcast.def (D-TERRAIN-18), in their order.
 	row->terrain_keys = read_trn_key_lines(text);
-	environment_source_issues(text, issues);
+	// What the reader reads otherwise than the record holds (formats/env env_source_issues), each a source issue.
+	for (env::EnvSourceIssue &read : env::env_source_issues(text))
+		issues.push_back({read.blocks, read.line, "", std::move(read.field), std::move(read.message)});
 	shape(*row);
 	rows.push_back(row);
 	return true;
@@ -1188,7 +1019,7 @@ std::vector<Diagnostic> validate_environment_file(const DocumentBase &document) 
 	}
 	// A terrain key the terrain's parser reads otherwise than its line says, on its record.
 	if (row) {
-		const std::vector<std::string> readings = terrain_key_readings(row->terrain_keys);
+		const std::vector<std::string> readings = trn_key_readings(row->terrain_keys);
 		for (size_t i = 0; i < readings.size(); ++i) {
 			if (readings[i].empty()) continue;
 			const NodeAddress record = environment->terrain_key_address(i);
