@@ -47,6 +47,14 @@ target_compile_features(io_test PRIVATE cxx_std_17)
 target_include_directories(io_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME io COMMAND io_test)
 
+# Whole-file reads, the atomic write and the rename it takes (base/io/file_io.h), through
+# UTF-8 paths past MAX_PATH; and base/io/os_path.h's path_within.
+add_executable(file_io_test io/file_io_test.cpp)
+target_link_libraries(file_io_test PRIVATE opennova_io)
+target_compile_features(file_io_test PRIVATE cxx_std_17)
+target_include_directories(file_io_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME file_io COMMAND file_io_test)
+
 # Roundtrip test
 add_executable(threedi_roundtrip_test threedi/roundtrip_test.cpp)
 target_link_libraries(threedi_roundtrip_test PRIVATE opennova_formats)
