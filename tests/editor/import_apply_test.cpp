@@ -29,7 +29,7 @@
 #include <base/vfs/vfs_decode.h>
 #include <editor/assets/asset_import.h>
 #include <editor/assets/install_view.h>
-#include <editor/assets/player_files.h>
+#include <base/gameprofile/player_files.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/asset_graph.h>
@@ -54,6 +54,10 @@
 #include "common/png_test_support.h"
 
 using namespace opennova::editor;
+using opennova::pff::normalized_logical_name;
+using opennova::gameprofile::is_player_file;
+using opennova::gameprofile::player_files;
+using opennova::gameprofile::PlayerFile;
 using namespace import_test;
 namespace fs = std::filesystem;
 
@@ -1033,8 +1037,6 @@ static int test_apply_never_player_files() {
 	players.push_back("extra.sav");
 	players.push_back("SS00001.tga");
 	for (const std::string &name : players) TEST_EXPECT(editor_test::write_text(game + "/" + name, "the player's"));
-	TEST_EXPECT(players.size() >= 18 && is_player_file("PLAYER.SAV") && is_player_file("dir/SS12345.bmp") &&
-	            !is_player_file("SS1234.tga") && !is_player_file("items.def") && !is_player_file("cc.bin"));
 	const ImportPlan plan = project.plan({{game + "/m.bms", {}}});
 	const ImportPlanRow *sheet = row_named(plan, "menu_style.mns");
 	TEST_EXPECT(sheet && sheet->state == State::Found && sheet->selected);

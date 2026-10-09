@@ -179,7 +179,7 @@ void ProblemsService::want_originals() {
 	originals_needed_ = false;
 	const std::vector<std::string> &served = view_.project.retail_files;
 	const auto by_name = [](const std::string &a, const std::string &b) {
-		return normalized_logical_name(a) < normalized_logical_name(b);
+		return pff::normalized_logical_name(a) < pff::normalized_logical_name(b);
 	};
 	for (const Diagnostic &d : view_.findings.diagnostics) {
 		if (d.asset.empty() || blocks_build(d)) continue;

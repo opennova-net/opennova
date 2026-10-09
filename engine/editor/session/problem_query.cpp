@@ -83,7 +83,7 @@ namespace {
 // the install's findings are kept by.
 std::string served_name(const Diagnostic &d) {
 	const size_t slash = d.asset.find_last_of('/');
-	return normalized_logical_name(slash == std::string::npos ? d.asset : d.asset.substr(slash + 1));
+	return pff::normalized_logical_name(slash == std::string::npos ? d.asset : d.asset.substr(slash + 1));
 }
 
 // Whether a row is the game's own (mark_findings' rule): the install, as a whole, makes the same finding in

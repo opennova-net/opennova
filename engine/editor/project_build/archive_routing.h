@@ -39,10 +39,9 @@ enum class ExpansionPlace {
 };
 ExpansionPlace route_for_expansion(AssetKind kind);
 
-// The expansion's folder in an install, or in its build: "expansion/<b>".
-std::string expansion_folder(const std::string &expansion);
-// Its archives' paths there: "expansion/<b>/<b>L.pff" (language) or "expansion/<b>/<b>.pff".
-std::string expansion_archive_path(const std::string &expansion, bool language);
+// The expansion's folder in an install, or in its build, and its archives' paths there, are base/vfs's
+// (vfs_expansion_dir and vfs_expansion_archive_path with an empty root: "expansion/<b>",
+// "expansion/<b>/<b>L.pff" and "expansion/<b>/<b>.pff").
 
 // Where a build puts a file of the expansion `<b>`: its kind's place; and the
 // files the game reads by their path in the expansion's folder, whatever their kind would say, loose
