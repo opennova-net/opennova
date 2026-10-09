@@ -65,7 +65,8 @@ the reference fixture set the gated tests read (`retail::reference_fixture`,
 workflow runs),
 `configfile/pool_at_line.def` and `configfile/pool_past_line.def` (two
 charattr-shaped ConfigFile texts on either side of the text reader's data-strings
-pool: 64 values and 65 over a 64-byte pool, the `editor_config_overrun` ctest's),
+pool: 64 values and 65 over a 64-byte pool, the `configfile_data_strings_pool` and
+`editor_config_overrun` ctests'),
 `particle/gorehit.ptu` (the gore-set half of the effect catalog, written in the
 retail `.ptu` grammar with our own effect), `grm/person.grm` (an authored facial
 rig; `grm_roundtrip` pins it byte-for-byte through the writer),

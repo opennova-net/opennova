@@ -374,6 +374,12 @@ add_executable(def_loadout_weight_test def/def_loadout_weight_test.cpp)
 target_link_libraries(def_loadout_weight_test PRIVATE opennova_formats)
 add_test(NAME def_loadout_weight COMMAND def_loadout_weight_test)
 
+# The weapon.def name cap: 32 characters only in a block with no `sameas`, which a 32-character
+# name runs on into otherwise (D-ITEMDEF-10): the writer's cap and the parser's finding.
+add_executable(def_weapon_name_cap_test def/def_weapon_name_cap_test.cpp)
+target_link_libraries(def_weapon_name_cap_test PRIVATE opennova_formats)
+add_test(NAME def_weapon_name_cap COMMAND def_weapon_name_cap_test)
+
 # The items.def ids and rows the engine fixes (docs/world/itemdef-re.md, "The ids and rows the
 # engine fixes"): the table, its lookups and rules, and the runtime's constants for the same ids.
 add_executable(def_reserved_items_test def/def_reserved_items_test.cpp)
@@ -522,6 +528,14 @@ opennova_add_gated_test(lwf_jo_assets_sweep COMMAND lwf_jo_assets_sweep_test)
 add_executable(wav_pcm_test lwf/wav_pcm_test.cpp)
 target_link_libraries(wav_pcm_test PRIVATE opennova_formats)
 add_test(NAME wav_pcm COMMAND wav_pcm_test)
+
+# A wave as the game's loader takes it (formats/lwf/wav_source.h): its acceptance walk
+# [orig: Audio_LoadWavFileFromArchive @ 0x766480], a source wave read and converted into the
+# form it takes; the retail leg every shipped wave through the walk (OPENNOVA_JO_ASSETS).
+add_executable(wav_source_test lwf/wav_source_test.cpp)
+target_link_libraries(wav_source_test PRIVATE opennova_formats)
+target_include_directories(wav_source_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(wav_source COMMAND wav_source_test)
 
 add_executable(inmatch_session_test frame/inmatch_session_test.cpp)
 target_link_libraries(inmatch_session_test PRIVATE opennova_runtime)
@@ -927,7 +941,7 @@ target_compile_definitions(minimal_rtxt_gen_test PRIVATE
 add_test(NAME minimal_rtxt_gen COMMAND minimal_rtxt_gen_test)
 
 # Synthetic fonts: validity, byte-stable round trips and drawable glyphs.
-# The builder mints
+# The stroke font (formats/fnt/fnt_stroke_font.h) mints
 # assets/opennova.fnt and fixtures/fnt/synth_{1,3}page.fnt, byte-compared every
 # run (--write regenerates).
 add_executable(minimal_fnt_gen_test fixtures/minimal_fnt_gen.cpp)
@@ -1097,7 +1111,7 @@ foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_win
         particle_atlas_contract particle_frame_compiler_contract render_order
         frame_fx_effects nvg_scope_lens q3_frame render_slot_shadow
         scene_overlay state_vectors tracer_frame precipitation_frame texture_dxt texture_load_rules
-        d3dx_image_codecs device_texture texture_filter d3d9_raster)
+        d3dx_image_codecs device_texture texture_filter d3d9_raster shader_effect_info)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
     target_link_libraries(renderer_${test}_test PRIVATE opennova_runtime opennova_formats)
     target_include_directories(renderer_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1880,7 +1894,7 @@ add_test(NAME minimal_particle_gen COMMAND minimal_particle_gen_test)
 # Jointops.exe IDB).
 foreach(name smallest minimal_effect multi_section multi_layer table_handles
         smoke_all_fixtures enum_parse writer_roundtrip curve_lut
-        lenient_lines)
+        lenient_lines effect_places)
     add_executable(particle_${name}_test particle/particle_${name}_test.cpp)
     target_link_libraries(particle_${name}_test PRIVATE opennova_formats)
     target_include_directories(particle_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1923,6 +1937,28 @@ target_link_libraries(cbin_display_view_test PRIVATE opennova_formats)
 target_include_directories(cbin_display_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(cbin_display_view_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME cbin_display_view COMMAND cbin_display_view_test)
+
+# The CBIN form and its ConfigFile text form, each into the other (formats/cbin/binary_config_text.h):
+# a credits-shaped CBIN through its text and back byte for byte, what the text form cannot carry, and
+# the lines the text reader does not read whole, each refused at its line.
+add_executable(cbin_binary_config_text_test cbin/binary_config_text_test.cpp)
+target_link_libraries(cbin_binary_config_text_test PRIVATE opennova_formats)
+target_include_directories(cbin_binary_config_text_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cbin_binary_config_text COMMAND cbin_binary_config_text_test)
+
+# The ConfigFile text reader's data-strings pool and its clear (formats/configfile DataStringsPool,
+# ConfigFile_ParseText @ 0x7609e8): the allocator's rounding, fixtures/configfile/pool_*.def on either
+# side of the line, the reader's own count, the first value past the pool, the reader's comment.
+add_executable(configfile_data_strings_pool_test configfile/data_strings_pool_test.cpp)
+target_link_libraries(configfile_data_strings_pool_test PRIVATE opennova_formats)
+target_include_directories(configfile_data_strings_pool_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME configfile_data_strings_pool COMMAND configfile_data_strings_pool_test)
+
+# The original game's /FRISK file log, _filelog.txt (formats/filelog/file_access_log.h).
+add_executable(filelog_file_access_log_test filelog/file_access_log_test.cpp)
+target_link_libraries(filelog_file_access_log_test PRIVATE opennova_formats)
+target_include_directories(filelog_file_access_log_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME filelog_file_access_log COMMAND filelog_file_access_log_test)
 
 # MNU menu UI tests (forgiving XML parser, MNU AST + serialize roundtrip, MNS stylesheet)
 add_executable(mnu_xml_unit_test mnu/mnu_xml_unit_test.cpp)
@@ -5168,6 +5204,13 @@ add_executable(charattr_test charattr/charattr_test.cpp)
 target_link_libraries(charattr_test PRIVATE opennova_base opennova_formats)
 target_include_directories(charattr_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(charattr COMMAND charattr_test)
+
+# hudpos.def's lines as the game's parser is handed them (formats/def/def_hudpos_text.h): the line the
+# game takes a key from is the key's last.
+add_executable(def_hudpos_text_test def/def_hudpos_text_test.cpp)
+target_link_libraries(def_hudpos_text_test PRIVATE opennova_formats)
+target_include_directories(def_hudpos_text_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME def_hudpos_text COMMAND def_hudpos_text_test)
 
 add_executable(def_write_hudpos_test def/def_write_hudpos_test.cpp)
 target_link_libraries(def_write_hudpos_test PRIVATE opennova_base opennova_formats)

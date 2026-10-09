@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include <utility>
+
 namespace opennova::scr {
 
 /* Original codec: Scr_DecryptBuffer @ 0x53D090 in Jointops.exe (byte-reverse,
@@ -80,6 +82,26 @@ int scr_decrypt_buf(const uint8_t *data, size_t size,
     scr_decrypt(out, payload, key);
     *out_size = payload;
     return 0;
+}
+
+bool scr_shader_decode(const uint8_t *data, size_t size, std::string &text, bool *nul) {
+    if (!scr_is_scr(data, size) || data[3] != SCR_SHADER_VERSION) return false;
+    std::string payload(reinterpret_cast<const char *>(data) + SCR_HEADER_SIZE, size - SCR_HEADER_SIZE);
+    scr_decrypt(reinterpret_cast<uint8_t *>(payload.data()), payload.size(), SCR_KEY_SHADERS);
+    const bool dropped = !payload.empty() && payload.back() == '\0';
+    if (dropped) payload.pop_back();
+    if (nul) *nul = dropped;
+    text = std::move(payload);
+    return true;
+}
+
+std::vector<uint8_t> scr_shader_encode(const std::string &text, bool nul) {
+    std::string payload = text;
+    if (nul) payload.push_back('\0');
+    scr_encrypt(reinterpret_cast<uint8_t *>(payload.data()), payload.size(), SCR_KEY_SHADERS);
+    std::vector<uint8_t> out = {'S', 'C', 'R', SCR_SHADER_VERSION};
+    out.insert(out.end(), payload.begin(), payload.end());
+    return out;
 }
 
 } // namespace opennova::scr

@@ -179,6 +179,7 @@ add_library(opennova_runtime STATIC
     renderer/material_texture_producers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_classify.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/object_shader_template.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/shader_effect_info.cpp # the tags a shader file registers
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/object_lod.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/foliage_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_atlas.cpp
