@@ -34,14 +34,14 @@ void last_play(const Workspace &workspace, const std::string &set) {
 	note("Last played: " + sound.words);
 }
 
-constexpr FootSurface kSurfaces[] = {FootSurface::Ground, FootSurface::Snow, FootSurface::Object, FootSurface::Water};
+constexpr audio::FootSurface kSurfaces[] = {audio::FootSurface::Ground, audio::FootSurface::Snow, audio::FootSurface::Object, audio::FootSurface::Water};
 
-const char *surface_label(FootSurface surface) {
+const char *surface_label(audio::FootSurface surface) {
 	switch (surface) {
-	case FootSurface::Snow: return "Snow";
-	case FootSurface::Object: return "Object";
-	case FootSurface::Water: return "Water";
-	case FootSurface::Ground: break;
+	case audio::FootSurface::Snow: return "Snow";
+	case audio::FootSurface::Object: return "Object";
+	case audio::FootSurface::Water: return "Water";
+	case audio::FootSurface::Ground: break;
 	}
 	return "Ground";
 }
@@ -49,8 +49,8 @@ const char *surface_label(FootSurface surface) {
 // A footstep's Play on each surface: the slot the game's test picks there [orig: org2 @0x4b77c6-0x4b78a8].
 void footstep_tools(Workspace &workspace, const std::string &profile, int foot) {
 	ui_kit::WrapRow row;
-	for (const FootSurface surface : kSurfaces) {
-		const int slot = footstep_slot_on(surface, foot);
+	for (const audio::FootSurface surface : kSurfaces) {
+		const int slot = audio::footstep_slot_on(surface, foot);
 		const std::string tip = std::string("Plays ") + audio::sound_profile_slot_keyword(slot) + ", the " +
 		                        (foot == 0 ? "left" : "right") + " foot on " + foot_surface_word(surface) +
 		                        ": the game tests water over a plane first, then standing on an object, then snow, then the "
