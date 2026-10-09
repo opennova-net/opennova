@@ -185,6 +185,23 @@ inline bool json_exact_whole(const JsonValue &json, uint64_t &out) {
 	return true;
 }
 
+// The widest whole number on each side of 0 a double holds with its neighbours (2^53 - 1): a
+// json_exact_whole_in range of ids and counts that a cast to int64_t keeps.
+inline constexpr double kJsonSafeWholeMax = 9007199254740991.0;
+
+// A number that is exactly a whole number in [lo, hi], signed; false for anything else (not a
+// number, a fraction, NaN, an infinity or a whole number outside the range), a fraction refused
+// rather than dropped (json_whole_in drops it). [lo, hi] within +-kJsonSafeWholeMax keeps the cast
+// to int64_t exact.
+inline bool json_exact_whole_in(const JsonValue &json, double lo, double hi) {
+	return json.is_number() && json.number == std::floor(json.number) && json.number >= lo && json.number <= hi;
+}
+inline bool json_exact_whole_in(const JsonValue &json, double lo, double hi, int64_t &out) {
+	if (!json_exact_whole_in(json, lo, hi)) return false;
+	out = static_cast<int64_t>(json.number);
+	return true;
+}
+
 // Texts as a JSON array of strings, in their order.
 inline JsonValue json_string_array(const std::vector<std::string> &values) {
 	JsonValue out = JsonValue::make_array();
