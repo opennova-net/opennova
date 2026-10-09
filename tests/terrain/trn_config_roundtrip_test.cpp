@@ -3,7 +3,6 @@
 #include <formats/foliage/foliage.h>
 #include <formats/mission/bms.h>
 
-#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -109,7 +108,6 @@ int main(int argc, char **argv) {
     saved.lock_topright = {1, 0};
     saved.lock_bottomleft = {0, 1};
     saved.lock_bottomright = {1, 1};
-    saved.horizon = 1234.5;
     saved.charmap = "roundtrip_char.tga";
     saved.foliagemap = "roundtrip_foliage.tga";
     saved.tilestrip = "roundtrip_tilestrip.tga";
@@ -163,7 +161,6 @@ int main(int argc, char **argv) {
     if (!expect(loaded.lock_bottomright.x == saved.lock_bottomright.x &&
                loaded.lock_bottomright.y == saved.lock_bottomright.y,
                "lock_bottomright should round-trip")) return 1;
-    if (!expect(std::abs(loaded.horizon - saved.horizon) < 0.0001, "horizon should round-trip")) return 1;
     if (!expect(loaded.charmap == saved.charmap, "charmap should round-trip")) return 1;
     if (!expect(loaded.foliagemap == saved.foliagemap, "foliagemap should round-trip")) return 1;
     if (!expect(loaded.tilestrip == saved.tilestrip, "tilestrip should round-trip")) return 1;

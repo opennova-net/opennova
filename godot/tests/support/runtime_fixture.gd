@@ -492,7 +492,6 @@ DEF_IMAGE_DEFAULT_BG FF000000
 	"mnml.trn": """terrain_name     "mnml"
 
 water_height     0
-horizon          0
 
 polytrn_colormap         mnml_c.tga
 polytrn_detailmap        mnml_dm.tga

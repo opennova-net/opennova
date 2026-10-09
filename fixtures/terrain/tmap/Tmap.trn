@@ -1,7 +1,6 @@
 terrain_name     "Tmap"
 
 water_height     21
-horizon          0
 
 polytrn_colormap         mnml_c.tga
 polytrn_detailmap        mnml_dm.tga

@@ -61,7 +61,7 @@ struct TrnLaterLine {
 // (overcast.def's over the .trn's, the .env's over both), a `polytrn_sectors` line there adds a row after the
 // .trn's [orig: dword_31BCB30 not reset between the passes], and a foliage block the .trn leaves open reads the
 // next file's lines [orig: dword_31BC904, dword_31BC900]. The environment's keywords and the editor's that the .trn
-// holds (TrnConfig's water_*, horizon, terrain_name, terrain_creator) are the .trn's as written: no arm of the
+// holds (TrnConfig's water_*, terrain_name, terrain_creator) are the .trn's as written: no arm of the
 // terrain's parser reads them (the environment's load reads them, env::load_mission_env). `taken`, where given,
 // lists the later files' lines the parser took. False (with `error`) where the gate refuses the result.
 bool load_mission_trn(const std::string &terrain, const TrnLaterTexts &later, TrnConfig &out, std::string &error,

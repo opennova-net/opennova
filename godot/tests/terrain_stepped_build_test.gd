@@ -101,7 +101,6 @@ func test_a_load_stepped_is_the_load_whole() -> void:
 	assert_eq(stepped.get_origin_x(), whole.get_origin_x())
 	assert_eq(stepped.get_origin_y(), whole.get_origin_y())
 	assert_eq(stepped.get_water_height(), whole.get_water_height())
-	assert_eq(stepped.get_horizon(), whole.get_horizon())
 	assert_eq(stepped.get_detail_density(), whole.get_detail_density())
 	assert_eq(stepped.get_tileinfo_filename(), whole.get_tileinfo_filename())
 	assert_eq(stepped.get_foliage_map() != null, whole.get_foliage_map() != null, "the foliage map resolved alike")
