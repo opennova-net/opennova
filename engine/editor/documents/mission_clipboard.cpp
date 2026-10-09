@@ -303,7 +303,7 @@ bool MissionDocument::paste_rows(const Edit &edit, const std::vector<std::shared
 	for (std::vector<bms::Entity> *pool : {&fragment.items, &fragment.buildings, &fragment.markers, &fragment.organics})
 		for (bms::Entity &entity : *pool) {
 			if (ssns.insert(entity.id).second) continue;
-			while (ssns.count(next_ssn) || held.count(next_ssn) || next_ssn == 10000) ++next_ssn;
+			while (ssns.count(next_ssn) || held.count(next_ssn) || next_ssn == kPlayerSsn) ++next_ssn;
 			const int32_t fresh = next_ssn++;
 			follow_id(fragment, ParamKind::Entity, entity.id, fresh);
 			entity.id = fresh;

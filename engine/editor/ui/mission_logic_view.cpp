@@ -171,7 +171,7 @@ void steps_field(Workspace &workspace, const MissionDocument &mission, const Nod
 	ImGui::SameLine();
 	// What the steps come to in the game: past 512 the countdown wraps and ends on the next pass (S15).
 	const std::string seconds = "steps = " + logic_steps_words(steps) + " (0 to " + std::to_string(most) + ")";
-	if (logic_steps_wrap(steps))
+	if (bms::event_steps_wrap(steps))
 		ImGui::TextColored(ui_kit::severity_color(DiagnosticSeverity::Warning), "%s", seconds.c_str());
 	else
 		ImGui::TextDisabled("%s", seconds.c_str());
