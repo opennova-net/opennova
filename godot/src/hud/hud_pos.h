@@ -135,6 +135,7 @@ public:
 	static int weapon_name_x_nudge(bool p_narrow_surface, int p_align);
 	static int round_icon_count(int p_clip, int p_reserve, int p_capacity, int p_divisor);
 	static int folded_reserve(int p_clip, int p_reserve, int p_capacity);
+	static int displayed_clip(int p_clip, int p_capacity);
 	static int waypoint_distance_m(const Vector2 &p_ground_delta);
 	static int heat_fill_span(int p_extent_px, int p_heat);
 	static bool heat_bar_is_horizontal(const Vector2 &p_bar_size);

@@ -1379,6 +1379,13 @@ add_executable(hud_math_test hud/hud_math_test.cpp)
 target_link_libraries(hud_math_test PRIVATE opennova_runtime)
 add_test(NAME hud_math COMMAND hud_math_test)
 
+# Which hudpos.def values place each HUD element (hud/hud_element_layout.h): the element -> key
+# table, its HUDDECLUT rows, the positioned texts' hidden / alignment indices and a coordinate's
+# value as the game reads it (the NETWORKINDICATOR reset corners, PAUSEDPOS's fallback).
+add_executable(hud_element_layout_test hud/hud_element_layout_test.cpp)
+target_link_libraries(hud_element_layout_test PRIVATE opennova_runtime)
+add_test(NAME hud_element_layout COMMAND hud_element_layout_test)
+
 add_executable(hud_medic_cross_test hud/hud_medic_cross_test.cpp)
 target_link_libraries(hud_medic_cross_test PRIVATE opennova_runtime)
 target_include_directories(hud_medic_cross_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -2922,7 +2929,7 @@ target_include_directories(wac_registry_oracle_test PRIVATE ${CMAKE_CURRENT_SOUR
 target_compile_features(wac_registry_oracle_test PRIVATE cxx_std_17)
 add_test(NAME wac_registry_oracle COMMAND wac_registry_oracle_test)
 
-foreach(test behavior corpus weapon_input voice actors projectiles effects sounds state players help dispatch_sweep)
+foreach(test behavior corpus weapon_input voice actors projectiles effects sounds state players help dispatch_sweep lexis)
     add_executable(wac_${test}_test wac/wac_${test}_test.cpp)
     target_link_libraries(wac_${test}_test PRIVATE opennova_runtime)
     target_include_directories(wac_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -2939,6 +2946,9 @@ add_test(NAME wac_state COMMAND wac_state_test)
 add_test(NAME wac_players COMMAND wac_players_test)
 add_test(NAME wac_help COMMAND wac_help_test)
 add_test(NAME wac_dispatch_sweep COMMAND wac_dispatch_sweep_test)
+# The WAC language's words (runtime/wac/wac_lexis.h): the keywords, the comment start and the
+# operand prefixes, checked against what the compiler reads.
+add_test(NAME wac_lexis COMMAND wac_lexis_test)
 # The corpus sweep walks OPENNOVA_JO_ASSETS (argv dirs override); it reports
 # Skipped without it.
 opennova_add_gated_test(wac_corpus COMMAND wac_corpus_test)

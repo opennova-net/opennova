@@ -8,6 +8,7 @@
 #include <system_error>
 #include <unordered_set>
 
+#include <base/gameprofile/game_type.h>
 #include <base/io/log.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
@@ -95,7 +96,7 @@ std::unordered_set<std::string> root_file_names(const std::string &root) {
 //  Mission_BuildMapListFromPFF @ 0x562910 the same @ 0x562b4b.. and @ 0x562c55..0x562d1f]
 void fill_row(Row &row, const bms::Header &header, bool header_ok, const rtxt::File *text) {
 	// The single-select mode bit the code-word derivation consumes (the switch itself is
-	// game_type::for_mission_mode at the net-linking consumer).
+	// game_type::for_mission_mode, game_type_of).
 	row.game_mode = header_ok ? bms::selected_game_mode(header.attrib_flags) : 0u;
 	if (text != nullptr) {
 		if (const rtxt::Entry *title = text->find_in_section("Info", "TITLE"))
@@ -158,17 +159,17 @@ std::vector<Row> build(const ResourceIndex &index) {
 	//  @ 0x563353, File_CheckExists(bin) @ 0x563461 before TextResource_LoadFromArchive
 	//  @ 0x56347b]
 	std::optional<std::unordered_set<std::string>> root_names; // listed on first need
-	for (const ResourceFileEntry &entry : index.resource_files("*")) {
-		if (entry.source_type != "file" || !strutil::ends_with_icase(entry.logical_name, ".bms"))
-			continue;
-		std::vector<uint8_t> bytes;
-		if (!index.read_file(entry.logical_name, bytes, VfsLookupPolicy::ForceLooseFirst)) bytes.clear();
-		const std::string bin = bin_sibling_name(entry.logical_name);
-		if (!root_names) root_names = root_file_names(index.root_dir());
-		rtxt::File text;
-		const bool text_ok = root_names->count(strutil::to_lower(bin)) != 0 && load_text(index, bin, text);
-		rows.push_back(loose_row(entry.logical_name, bytes, text_ok ? &text : nullptr));
-	}
+	std::vector<std::string> loose;
+	for (const ResourceFileEntry &entry : index.resource_files("*"))
+		if (entry.source_type == "file") loose.push_back(entry.logical_name);
+	rows = loose_rows(loose,
+			[&](const std::string &name, std::vector<uint8_t> &bytes) {
+				return index.read_file(name, bytes, VfsLookupPolicy::ForceLooseFirst);
+			},
+			[&](const std::string &bin, rtxt::File &text) {
+				if (!root_names) root_names = root_file_names(index.root_dir());
+				return root_names->count(strutil::to_lower(bin)) != 0 && load_text(index, bin, text);
+			});
 	// Then the two archive pairs: the expansion's <n>.pff with <n>L.pff, then
 	// localres.pff with language.pff. Slot 4 (resource.pff) is never walked, a `.bms` in
 	// <n>L.pff never listed, and a name both pairs carry lists once per pair.
@@ -180,7 +181,7 @@ std::vector<Row> build(const ResourceIndex &index) {
 	// The CRT's qsort is a platform primitive the port does not reproduce, and it is not
 	// stable: two rows with the same name (a loose copy of an archived mission, or one
 	// name in both pairs) come out in its order in retail, in walk order here.
-	std::stable_sort(rows.begin(), rows.end(), file_less);
+	sort_rows(rows);
 	return rows;
 }
 
@@ -192,6 +193,28 @@ Row loose_row(const std::string &file, const std::vector<uint8_t> &bms, const rt
 	const bool header_ok = read_header(bms, header);
 	fill_row(row, header, header_ok, text);
 	return row;
+}
+
+std::vector<Row> loose_rows(const std::vector<std::string> &names, const ReadBms &read_bms,
+		const ReadText &read_text) {
+	std::vector<Row> rows;
+	for (const std::string &name : names) {
+		if (!strutil::ends_with_icase(name, ".bms")) continue;
+		std::vector<uint8_t> bytes;
+		if (!read_bms || !read_bms(name, bytes)) bytes.clear();
+		rtxt::File text;
+		const bool text_ok = read_text && read_text(bin_sibling_name(name), text);
+		rows.push_back(loose_row(name, bytes, text_ok ? &text : nullptr));
+	}
+	return rows;
+}
+
+void sort_rows(std::vector<Row> &rows) {
+	std::stable_sort(rows.begin(), rows.end(), file_less);
+}
+
+uint32_t game_type_of(const Row &row) {
+	return game_type::for_mission_mode(row.game_mode);
 }
 
 std::string text_table_name(const std::string &file) {
