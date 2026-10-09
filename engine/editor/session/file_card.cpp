@@ -12,9 +12,9 @@
 #include <editor/project/project_files.h>
 #include <editor/project_build/archive_routing.h>
 #include <editor/project_build/build_plan.h>
-#include <editor/import/wave_source.h>
 #include <editor/session/view/session_view.h>
 #include <formats/lwf/wav_pcm.h>
+#include <formats/lwf/wav_source.h>
 
 namespace opennova::editor {
 
@@ -33,12 +33,12 @@ FileCard::Sound decode_sound(const std::string &file, const AssetEntry &entry) {
 	}
 	std::vector<uint8_t> bytes;
 	if (!read_file_bytes(file, bytes, sound.error)) return sound;
-	// What the game's loader makes of it, and what it holds (the sound lane: import/wave_source.h).
-	const WaveFacts facts = wave_facts(bytes, kWaveCardBins);
+	// What the game's loader makes of it, and what it holds (the sound lane: formats/lwf/wav_source.h).
+	const lwf::WaveFacts facts = lwf::wave_facts(bytes, kWaveCardBins);
 	sound.plays = facts.retail.plays;
 	sound.refusal = facts.retail.why;
 	if (facts.read) {
-		sound.format = wave_format_words(facts.format);
+		sound.format = lwf::wave_format_words(facts.format);
 		sound.peak = facts.peak;
 		sound.rms = facts.rms;
 		sound.envelope = facts.envelope;

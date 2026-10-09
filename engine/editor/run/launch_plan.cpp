@@ -14,6 +14,7 @@
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/model/diagnostic.h>
+#include <formats/filelog/file_access_log.h>
 #include <formats/pff/pff.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/archive_routing.h>
@@ -277,18 +278,6 @@ bool stage_build_files(const fs::path &build, const fs::path &run, const std::ve
 		return false;
 	}
 	return true;
-}
-
-// The two forms of a file log's line [orig: File_LogFileAccess @ 0x75a510 "PFF LOADED FILE: %s\n", the
-// other "LOADED FILE: %s\n"].
-constexpr const char *kLoadedFromArchive = "PFF LOADED FILE: ";
-constexpr const char *kLoadedFromDisk = "LOADED FILE: ";
-
-// `name` added to `names` unless they hold it (compared without case).
-void add_name_once(std::vector<std::string> &names, const std::string &name) {
-	if (name.empty()) return;
-	if (std::none_of(names.begin(), names.end(), [&name](const std::string &held) { return strutil::iequals(held, name); }))
-		names.push_back(name);
 }
 
 // The install's boot archives, as its root spells them (the boot table's names, found without case
@@ -590,7 +579,7 @@ bool prepare_retail_launch_plan(const std::string &retail_directory, const std::
 	out.working_dir = utf8_of(run);
 	out.resource_dir = out.working_dir; // the game opens what it mounts from its working directory
 	out.expansion = expansion;
-	out.log_file = utf8_of(run / kInstallFileLogName);
+	out.log_file = utf8_of(run / filelog::kInstallFileLogName);
 	out.args = {"/w", "/d"};
 	if (!expansion.empty()) {
 		out.args.push_back(kLaunchFlagExpansion);
@@ -687,7 +676,7 @@ bool prepare_strict_install_launch_plan(const std::string &install, const std::s
 	out.build_dir = utf8_of(build);
 	out.working_dir = utf8_of(run);
 	out.resource_dir = out.working_dir;
-	out.log_file = utf8_of(run / kInstallFileLogName);
+	out.log_file = utf8_of(run / filelog::kInstallFileLogName);
 	out.expansion = expansion;
 	out.args = {"/w"};
 	if (!expansion.empty()) {
@@ -702,32 +691,6 @@ bool strict_first_run_starts_again(bool had_config, bool has_config, bool exited
                                    int64_t ran_ms, bool started_again) {
 	return !started_again && !had_config && has_config && exited_on_its_own && exit_code == 0 && ran_ms >= 0 &&
 	       ran_ms <= kStrictFirstRunWindowMs;
-}
-
-void add_file_access_line(FileAccessLog &log, const std::string &line) {
-	++log.lines;
-	const size_t archive_prefix = std::char_traits<char>::length(kLoadedFromArchive);
-	const size_t disk_prefix = std::char_traits<char>::length(kLoadedFromDisk);
-	if (line.compare(0, archive_prefix, kLoadedFromArchive) == 0) {
-		add_name_once(log.from_archives, line.substr(archive_prefix));
-	} else if (line.compare(0, disk_prefix, kLoadedFromDisk) == 0) {
-		const std::string name = line.substr(disk_prefix);
-		add_name_once(strutil::ends_with_icase(name, ".pff") ? log.archives : log.from_disk, name);
-	}
-}
-
-FileAccessLog parse_file_access_log(const std::string &text) {
-	FileAccessLog log;
-	size_t start = 0;
-	while (start < text.size()) {
-		size_t end = text.find('\n', start);
-		if (end == std::string::npos) end = text.size();
-		std::string line = text.substr(start, end - start);
-		if (!line.empty() && line.back() == '\r') line.pop_back();
-		add_file_access_line(log, line);
-		start = end + 1;
-	}
-	return log;
 }
 
 PlayLauncher make_play_launcher(bool source_run, const std::string &editor_executable,

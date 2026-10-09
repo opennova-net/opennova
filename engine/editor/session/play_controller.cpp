@@ -418,9 +418,9 @@ bool PlayController::launch(const LaunchPlan &plan, Diagnostic &error) {
 	game_log_file_ = plan.log_file;
 	game_log_offset_ = 0;
 	game_log_partial_.clear();
-	file_log_ = FileAccessLog();
+	file_log_ = filelog::FileAccessLog();
 	view_.activity.play_file_log_read = false;
-	view_.activity.play_file_log = FileAccessLog();
+	view_.activity.play_file_log = filelog::FileAccessLog();
 	// The graphics log a run before left in the run directory (the game install's: made anew by the first
 	// line a run writes), as it stands: one the game leaves as it was is not this run's (DI-27).
 	graphics_log_size_ = -1;
@@ -501,7 +501,7 @@ void PlayController::poll() {
 	const PlayState now = play_.poll();
 	// The game install's log is read once its game has exited, never while it runs: the game appends to it
 	// through an exclusive open and makes it anew, empty, when that open fails, so a read while it runs cuts
-	// it (kInstallFileLogName, run/launch_plan.h). OpenNova's own log is tailed as it comes.
+	// it (formats/filelog/file_access_log.h, kInstallFileLogName). OpenNova's own log is tailed as it comes.
 	if (now != PlayState::Stopped && !install_run_) tail_game_log();
 	if (before != now) {
 		if (now == PlayState::Stopped) {
@@ -529,7 +529,7 @@ void PlayController::report_file_log(bool read) {
 	view_.activity.play_file_log = file_log_;
 	core_.touch(ViewConcern::Run);
 	if (!read) {
-		std::string line = std::string("The game left no file log (") + kInstallFileLogName +
+		std::string line = std::string("The game left no file log (") + filelog::kInstallFileLogName +
 		                   "): it opened no archive and no file.";
 		// A game that quit at once on its own: the game runs one at a time (kInstallInstanceSemaphore).
 		if (view_.activity.play_exited_on_its_own && view_.activity.play_exit_code == 0)
@@ -537,7 +537,7 @@ void PlayController::report_file_log(bool read) {
 		core_.note(line);
 		return;
 	}
-	const FileAccessLog &log = file_log_;
+	const filelog::FileAccessLog &log = file_log_;
 	std::vector<std::string> folded;
 	for (const std::string &name : log.archives) folded.push_back("archive: " + name);
 	for (const std::string &name : log.from_archives) folded.push_back("from the archives: " + name);
@@ -667,7 +667,7 @@ bool PlayController::tail_game_log() {
 			++game_shown_;
 			core_.note("game: " + line);
 		}
-		if (install_run_) add_file_access_line(file_log_, line);
+		if (install_run_) filelog::add_file_access_line(file_log_, line);
 		folded.push_back(line);
 		absorb_report(line);
 		start = nl + 1;
@@ -722,7 +722,7 @@ void PlayController::absorb_resource_miss(const std::string &line) {
 
 // The game install's game names nothing it did not find: its file log names each open that succeeded, its
 // graphics log the mission it began loading and whether it finished. Read once it exited (the file log
-// never while it runs, kInstallFileLogName), they make rows of what they show it lacked
+// never while it runs, filelog::kInstallFileLogName), they make rows of what they show it lacked
 // (install_log_findings) among this mode's until its next Play; never for a project closed since.
 void PlayController::absorb_install_logs(bool read) {
 	if (!view_.project.open || view_.project.root != boot_project_) return;
