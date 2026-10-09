@@ -15,6 +15,7 @@
 #include <runtime/anim/adm_fallback.h>
 #include <runtime/anim/adm_root_motion.h>
 #include <runtime/assets/asset_store.h>
+#include <runtime/mission/collision_resolve.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/entity_spawn.h>
@@ -54,13 +55,6 @@ bool same_pose(const MissionPose &a, const MissionPose &b) {
 
 } // namespace
 
-// The person classes whose definition callback is the organic init: the event-callback table's
-// org0 and org1 rows, found by a whole-tag stricmp [orig: g_EntityClassEventCallbackTable
-// @0x813018 / @0x813030, second function Entity_InitOrganicAI @0x4BFCC0; the lookup
-// Entity_LookupRenderCallbacks @0x407dc0, stricmp @0x407de2].
-bool person_class(const std::string &ai_function) {
-	return strutil::iequals(ai_function, "org0") || strutil::iequals(ai_function, "org1");
-}
 
 MissionPoses::MissionPoses() = default;
 MissionPoses::~MissionPoses() = default;
@@ -102,10 +96,9 @@ const MissionPoses::Catalog &MissionPoses::catalog_(const std::string &file) {
 	++files_read_;
 	def::DefItemsFile items{};
 	if (def::def_parse_items_memory(bytes.data(), bytes.size(), &items) == 0) {
-		for (size_t i = 0; i < items.count; ++i) {
-			const def::DefItemDef &row = items.entries[i];
-			// A type id resolves to its first row [docs/world/itemdef-re.md, 2026-09-23].
-			if (catalog.items.count(int64_t(row.id))) continue;
+		// A type id resolves to its first row (mission::item_defs_by_id).
+		for (const auto &entry : mission::item_defs_by_id(items)) {
+			const def::DefItemDef &row = *entry.second;
 			PersonDefinition definition;
 			definition.ai_function = row.ai_function;
 			definition.anim_def = row.anim_def;
@@ -196,7 +189,7 @@ bool MissionPoses::stand(const MissionScene &scene, const terrain::TerrainHeight
 		bool settled = false;
 		// The clearance below one unit taken off, a positive one included.
 		const int32_t clearance = mission_pose_clearance(pose, entity->x, entity->y, entity->z, terrain);
-		if (clearance < kMissionPoseSettle) {
+		if (clearance < world::kOrganicWarmupSettleQ16) {
 			lift = double(io::bam_sub(rise, clearance)) / io::kFp16OneD;
 			settled = true;
 		}
@@ -259,7 +252,7 @@ void pose_person(const PersonDefinition &definition, const PersonRecord &record,
 		MissionPose &pose) {
 	pose.ai_function = definition.ai_function;
 	pose.ai_slot = (definition.attrib & world::kItemAttribAIData) != 0;
-	if (!person_class(definition.ai_function)) {
+	if (!world::organic_init_class(definition.ai_function.c_str())) {
 		pose.status = "class";
 		return;
 	}
@@ -285,12 +278,8 @@ void pose_person(const PersonDefinition &definition, const PersonRecord &record,
 	// @0x40ED4E; the fold 2 -> Flags 0x40 @0x40ED9F; slot+140/+148 from the record's waypoint_id].
 	// A placed record has no parent and no rotor's wash about it at the load: the mounts and the
 	// helicopters' wash zones come after.
-	world::OrganicSpawnFacts facts;
-	if (pose.ai_slot) {
-		facts.route = record.route != 0;
-		facts.route_channel = record.route;
-		if ((record.attributes & 0x2u) != 0) facts.flags |= 0x40u;
-	}
+	const world::OrganicSpawnFacts facts =
+			world::organic_spawn_facts_from_record(pose.ai_slot, record.route, record.attributes);
 	pose.status = "posed";
 	pose.state = world::organic_spawn_state(facts, &motion, adm_id);
 	pose.because = because_of(facts, pose.state);
