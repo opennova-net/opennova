@@ -341,11 +341,10 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 }
 
 // A face animation (.grm, ADR 0046 S18): its base texture, the base's .MDT twin and its two eye textures,
-// each by STAGE under its name with its path stripped and its extension (from the last '.') made .TGA, the
-// twin's .MDT [orig: Shadow_DecalLoadTextures @ 0x588040: PathStripPathA, PathRemoveExtensionA, then
-// PathAddExtensionA ".TGA" @ 0x5880EA, ".MDT" @ 0x588117, the eyes @ 0x58814A (+520), @ 0x588180 (+260),
-// each through Texture_LoadByNameWithChannel]. A name the file writes so is a site a rename rewrites; one
-// the loader derives (another extension, the twin) is not.
+// each by STAGE under the file the game opens for its name (formats/grm texture_load_name: its path stripped,
+// its extension from the last '.' made .TGA, the twin's .MDT) [orig: Shadow_DecalLoadTextures @ 0x588040]. A
+// name the file writes so is a site a rename rewrites; one the loader derives (another extension, the twin) is
+// not.
 bool extract_face_animation(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
 	grm::File file;
 	std::string message;
@@ -353,23 +352,17 @@ bool extract_face_animation(const std::string &name, const std::vector<uint8_t> 
 		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, message, name);
 		return false;
 	}
-	const auto loaded = [](const std::string &written, const char *extension) {
-		std::string stem = basename_of(written);
-		const size_t dot = stem.find_last_of('.');
-		if (dot != std::string::npos) stem.erase(dot);
-		return stem + extension;
-	};
 	const auto texture = [&](const std::string &record, const char *field, const std::string &written, const char *extension) {
 		if (written.empty()) return;
-		const std::string opened = loaded(written, extension);
+		const std::string opened = grm::texture_load_name(written, extension);
 		const bool as_written = strutil::iequals(opened, written);
 		out.edges.push_back(texture_edge(name, record, field, as_written ? written : opened, renderer::TextureRoleId::FaceTexture, 0,
 		                                 as_written));
 	};
-	texture(std::string(), "basetexture", file.base_texture, ".TGA");
-	texture(std::string(), "basetexture.mdt", file.base_texture, ".MDT");
-	texture("eye 1", "eyetexture", file.eye_textures[0], ".TGA");
-	texture("eye 2", "eyetexture", file.eye_textures[1], ".TGA");
+	texture(std::string(), "basetexture", file.base_texture, grm::kTextureExtension);
+	texture(std::string(), "basetexture.mdt", file.base_texture, grm::kTextureTwinExtension);
+	texture("eye 1", "eyetexture", file.eye_textures[0], grm::kTextureExtension);
+	texture("eye 2", "eyetexture", file.eye_textures[1], grm::kTextureExtension);
 	return true;
 }
 
