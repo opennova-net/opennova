@@ -47,19 +47,26 @@ int dialog_wave_volume(const lwf::Single &wave) {
 	return byte == 0 ? 255 : byte;
 }
 
-std::vector<DialogLineRef> resolve_dialog_lines(const dbf::File *dialog_bank,
-		const lwf::File *dialog_sounds, int32_t dialog_index) {
-	std::vector<DialogLineRef> out;
+namespace {
+
+// The dialog a PlayWavList number names in the bank, null for 0, no bank or
+// none of the name.
+const dbf::Group *dialog_of(const dbf::File *dialog_bank, int32_t dialog_index) {
 	const std::string name = dialog_name_of(dialog_index);
-	if (dialog_bank == nullptr || name.empty()) return out;
-	const dbf::Group *group = find_dialog(*dialog_bank, name);
-	if (group == nullptr) return out;
-	for (size_t i = 0; i < group->lines.size(); ++i) {
-		const dbf::Line &line = group->lines[i];
+	if (dialog_bank == nullptr || name.empty()) return nullptr;
+	return find_dialog(*dialog_bank, name);
+}
+
+// Every line of the dialog, in order, each with the wave the bank's sounds
+// give it.
+std::vector<DialogLineRef> lines_of(const dbf::Group &group, const lwf::File *dialog_sounds) {
+	std::vector<DialogLineRef> out;
+	for (size_t i = 0; i < group.lines.size(); ++i) {
+		const dbf::Line &line = group.lines[i];
 		DialogLineRef ref;
 		ref.wave = line.def_id_name;
 		ref.delay = line.delay;
-		ref.dialog_name = group->group_name;
+		ref.dialog_name = group.group_name;
 		ref.line = static_cast<int>(i);
 		if (const lwf::Single *wave = dialog_sounds ? find_dialog_wave(*dialog_sounds, line.def_id_name) : nullptr) {
 			ref.file = wave->path;
@@ -68,6 +75,22 @@ std::vector<DialogLineRef> resolve_dialog_lines(const dbf::File *dialog_bank,
 		out.push_back(std::move(ref));
 	}
 	return out;
+}
+
+// The name a PLYRDIALOG trigger looks its number up by [orig: Dialog_ExistsByIndex
+// "dlg%.3d" @ 0x44e190; sub_44E220 @ 0x44e23f].
+std::string trigger_dialog_name(int32_t dialog_index) {
+	char name[32];
+	std::snprintf(name, sizeof(name), "dlg%.3d", int(dialog_index));
+	return name;
+}
+
+} // namespace
+
+std::vector<DialogLineRef> resolve_dialog_lines(const dbf::File *dialog_bank,
+		const lwf::File *dialog_sounds, int32_t dialog_index) {
+	const dbf::Group *group = dialog_of(dialog_bank, dialog_index);
+	return group != nullptr ? lines_of(*group, dialog_sounds) : std::vector<DialogLineRef>();
 }
 
 std::string dialog_line_text(const rtxt::File *mission_text, const dbf::Line &line) {
@@ -125,11 +148,26 @@ uint32_t dialog_clip_hold(const DialogClip &clip) {
 	return 2u * ((clip.samples * kDialogTickRate + rate) / rate);
 }
 
-// The first free of the 16 slots (the table stays packed, so the one after the
-// last held), the dialog at line 0 with timer 0; its wait flag is the cleared
-// slot's 0 [orig: Dialog_Register @ 0x44d980, the walk @ 0x44d9b1..0x44d9c8,
-// @ 0x44d9cc..0x44d9de].
+// The play finds the dialog by its exact name, the first in the bank's order,
+// and registers it whatever its line count; JO's locale pass (under a local
+// player) formats the name with a plain "%s", so it matches the same dialog the
+// exact pass does [orig: Dialog_PlayByIndex @ 0x527ae0 (0 plays none
+// @ 0x527af4); Dialog_PlayByName @ 0x44d9f0, the locale pass @ 0x44da0c..0x44da67,
+// the exact pass @ 0x44da70..0x44dac1, no match -> 0 @ 0x44dad0].
+bool DialogQueue::play(const dbf::File *dialog_bank, const lwf::File *dialog_sounds,
+		int32_t dialog_index) {
+	const dbf::Group *group = dialog_of(dialog_bank, dialog_index);
+	if (group == nullptr) return false;
+	return enqueue(group->group_name, lines_of(*group, dialog_sounds));
+}
+
+// The history takes the dialog first, whatever the slots hold, its count
+// saturating at 255 [orig: Dialog_Register @ 0x44d98d, @ 0x44d99c..0x44d9a3].
+// Then the first free of the 16 slots (the table stays packed, so the one after
+// the last held), the dialog at line 0 with timer 0; its wait flag is the
+// cleared slot's 0 [orig: the walk @ 0x44d9b1..0x44d9c8, @ 0x44d9cc..0x44d9de].
 bool DialogQueue::enqueue(const std::string &dialog, std::vector<DialogLineRef> lines) {
+	if (history_.size() < kDialogHistory - 1) history_.push_back(dialog);
 	if (slots_.size() >= kDialogSlots) return false;
 	Slot slot;
 	slot.dialog = dialog;
@@ -176,7 +214,8 @@ void DialogQueue::tick(bool frame_rendered, const LoadLine &load, const VoicePla
 			// The last line has held and the channel is free: the dialog goes,
 			// the first slot of its name, and the table closes up behind it, so
 			// this index is walked again [orig: @ 0x44e5c8..0x44e5ef ->
-			// Dialog_FreeByName @ 0x44db40 -> sub_44DAF0 @ 0x44daf0].
+			// Dialog_FreeByName @ 0x44db40, the slot clear @ 0x44dc07..0x44dc18
+			// -> sub_44DAF0 @ 0x44daf0].
 			if ((slot.timer & kCount) == 0) {
 				const std::string dialog = slot.dialog;
 				for (size_t f = 0; f < slots_.size(); ++f) {
@@ -214,8 +253,38 @@ void DialogQueue::tick(bool frame_rendered, const LoadLine &load, const VoicePla
 	}
 }
 
+// The slot scan over [0, count) by name [orig: Dialog_ExistsByIndex @ 0x44e170,
+// the walk @ 0x44e1a4..0x44e1f1: found -> 1 @ 0x44e1f3].
+bool DialogQueue::active(int32_t dialog_index) const {
+	const std::string name = trigger_dialog_name(dialog_index);
+	for (const Slot &slot : slots_)
+		if (slot.dialog == name) return true;
+	return false;
+}
+
+// The history scan first, a miss -> 0, then the slot scan, a hit -> 0, else 1
+// [orig: sub_44E220 @ 0x44e220: the history walk @ 0x44e253..0x44e28e, miss ->
+// 0 @ 0x44e291; the slot walk @ 0x44e2b5..0x44e2f1, hit -> 0 @ 0x44e313;
+// 1 @ 0x44e2f5].
+bool DialogQueue::finished(int32_t dialog_index) const {
+	const std::string name = trigger_dialog_name(dialog_index);
+	bool registered = false;
+	for (const std::string &entry : history_)
+		if (entry == name) {
+			registered = true;
+			break;
+		}
+	return registered && !active(dialog_index);
+}
+
+void DialogQueue::reset() {
+	slots_.clear();
+	history_.clear();
+}
+
 void DialogQueue::clear() {
 	slots_.clear();
+	history_.clear();
 	voices_.clear();
 }
 

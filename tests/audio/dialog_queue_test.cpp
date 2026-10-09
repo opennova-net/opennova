@@ -1,7 +1,8 @@
 // runtime/audio/dialog_queue: the PlayWavList dialog-number resolution (the
 // dialog bank's dialog "dlg%03i", each line the wave of its name in the dialog
-// bank's sounds), the dialog slots' timers on the one dialog channel and the
-// joiner's line, over synthetic dbf/lwf documents and a scripted device.
+// bank's sounds), the dialog table's registration and its PLYRDIALOG readers,
+// the dialog slots' timers on the one dialog channel and the joiner's line,
+// over synthetic dbf/lwf documents and a scripted device.
 
 #include <runtime/audio/dialog_queue.h>
 
@@ -347,16 +348,16 @@ int test_sixteen_slots_and_the_free() {
 	return 0;
 }
 
-// Dialog_ResetAll empties the slots and leaves the voices playing, so a dialog
-// played after it waits for the channel; a teardown forgets both [orig:
-// Dialog_ResetAll @0x44dc90].
+// Dialog_ResetAll empties the slots and the history and leaves the voices
+// playing, so a dialog played after it waits for the channel; a teardown
+// forgets all three [orig: Dialog_ResetAll @0x44dc90].
 int test_reset_and_clear() {
 	DialogQueue queue;
 	Device device;
 	queue.enqueue("dlgA", { ref("a0.wav", "dlgA", 0), ref("a1.wav", "dlgA", 1) });
 	run(queue, device, 1);
-	queue.discard_pending();
-	TEST_EXPECT(queue.slots().empty() && queue.voices().size() == 1);
+	queue.reset();
+	TEST_EXPECT(queue.slots().empty() && queue.history().empty() && queue.voices().size() == 1);
 	queue.enqueue("dlgB", { ref("b0.wav", "dlgB", 0) });
 	run(queue, device, 5);
 	TEST_EXPECT(device.loads == names({ "dlgA:0" }));
@@ -364,7 +365,113 @@ int test_reset_and_clear() {
 	run(queue, device, 1);
 	TEST_EXPECT(device.loads == names({ "dlgA:0", "dlgB:0" }));
 	queue.clear();
-	TEST_EXPECT(queue.slots().empty() && queue.voices().empty());
+	TEST_EXPECT(queue.slots().empty() && queue.history().empty() && queue.voices().empty());
+	return 0;
+}
+
+// The PlayWavList play registers the bank's dialog of the number, the first of
+// its exact name, whatever its line count; a number the bank lacks, 0 and no
+// bank register nothing. A seventeenth dialog still enters the history
+// [orig: Dialog_PlayByIndex @0x527ae0 -> Dialog_PlayByName @0x44d9f0 ->
+//  Dialog_Register @0x44d980: the history @0x44d98d before the slot walk
+//  @0x44d9b1..0x44d9c8].
+int test_a_play_registers_the_dialog() {
+	const lwf::File sounds = sounds_with({ { "SynR100", 210 } });
+	dbf::File dialogs = dialog_bank();
+	dbf::Group empty;
+	empty.group_name = "dlg004";
+	dialogs.groups.push_back(empty);
+	DialogQueue queue;
+	TEST_EXPECT(!queue.play(&dialogs, &sounds, 0));
+	TEST_EXPECT(!queue.play(&dialogs, &sounds, 3));  // DLG003 is no dlg003
+	TEST_EXPECT(!queue.play(&dialogs, &sounds, 5));
+	TEST_EXPECT(!queue.play(nullptr, &sounds, 1));
+	TEST_EXPECT(queue.history().empty() && queue.slots().empty());
+	TEST_EXPECT(queue.play(&dialogs, &sounds, 1));
+	TEST_EXPECT(queue.history() == names({ "dlg001" }) && queue.slots().size() == 1);
+	TEST_EXPECT(queue.slots()[0].dialog == "dlg001" && files(queue.slots()[0].lines) ==
+			std::vector<std::string>({ "SynR100.wav", "", "" }));
+	// A dialog of no lines registers all the same.
+	TEST_EXPECT(queue.play(&dialogs, &sounds, 4));
+	TEST_EXPECT(queue.slots().size() == 2 && queue.slots()[1].lines.empty());
+	for (int i = 0; i < 14; ++i) TEST_EXPECT(queue.play(&dialogs, &sounds, 2));
+	TEST_EXPECT(queue.slots().size() == 16 && queue.history().size() == 16);
+	TEST_EXPECT(!queue.play(&dialogs, &sounds, 1));
+	TEST_EXPECT(queue.slots().size() == 16 && queue.history().size() == 17);
+	return 0;
+}
+
+// The PLYRDIALOG readers over a dialog's life: registered, holding its line,
+// waiting on the channel, then gone from its slot. active = a slot holds it
+// [orig: Dialog_ExistsByIndex @0x44e170]; finished = the history holds it and
+// no slot does [orig: sub_44E220 @0x44e220: history miss -> 0 @0x44e291, slot
+// hit -> 0 @0x44e313, 1 @0x44e2f5].
+int test_the_plyrdialog_readers_over_a_dialog_s_life() {
+	DialogQueue queue;
+	Device device;
+	TEST_EXPECT(!queue.active(7) && !queue.finished(7));
+	queue.enqueue("dlg007", { ref("a.wav", "dlg007", 0) });
+	queue.enqueue("dlg008", { ref("", "dlg008", 0) });
+	TEST_EXPECT(queue.active(7) && !queue.finished(7));
+	run(queue, device, 1);  // tick 1: the line loads and holds 48 ticks
+	TEST_EXPECT(queue.active(7) && !queue.finished(7));
+	run(queue, device, 50);  // ticks 2..51: the hold ran out at 50, the voice still plays
+	TEST_EXPECT(queue.slots()[0].timer == 0 && queue.voices().size() == 1);
+	TEST_EXPECT(queue.active(7) && !queue.finished(7));
+	device.stop(1);
+	run(queue, device, 1);  // the channel is free: dlg007 leaves its slot
+	TEST_EXPECT(!queue.active(7) && queue.finished(7));
+	// The slots closed up behind it: dlg008 still holds one, so it is not finished.
+	TEST_EXPECT(queue.active(8) && !queue.finished(8));
+	// A dialog played again is active again until it leaves again.
+	queue.enqueue("dlg007", { ref("", "dlg007", 0) });
+	TEST_EXPECT(queue.active(7) && !queue.finished(7));
+	// Dialog_ResetAll forgets the history too: nothing reads finished.
+	queue.reset();
+	TEST_EXPECT(!queue.active(7) && !queue.finished(7) && !queue.finished(8));
+	return 0;
+}
+
+// The readers form "dlg%.3d" of the trigger's number, the play "dlg%03i": the
+// two agree but for -99..-1, so a dialog "dlg-05" that PlayWavList -5 plays is
+// never found by the number -5, which looks for "dlg-005" [orig:
+// Dialog_PlayByIndex @0x527b01 "dlg%03i"; Dialog_ExistsByIndex @0x44e190 and
+// sub_44E220 @0x44e23f "dlg%.3d"].
+int test_the_readers_name_their_number_dlg_dot3d() {
+	dbf::File dialogs;
+	for (const char *name : { "dlg-05", "dlg000", "dlg1234" }) {
+		dbf::Group group;
+		group.group_name = name;
+		dialogs.groups.push_back(group);
+	}
+	DialogQueue queue;
+	TEST_EXPECT(dialog_name_of(-5) == "dlg-05");
+	TEST_EXPECT(queue.play(&dialogs, nullptr, -5));
+	TEST_EXPECT(queue.play(&dialogs, nullptr, 1234));
+	TEST_EXPECT(!queue.active(-5) && !queue.finished(-5));
+	TEST_EXPECT(queue.active(1234));
+	// 0 plays nothing, yet a registered "dlg000" is the reader's 0.
+	TEST_EXPECT(!queue.play(&dialogs, nullptr, 0));
+	queue.enqueue("dlg000", {});
+	TEST_EXPECT(queue.active(0));
+	return 0;
+}
+
+// The history count saturates at 255: registration 256 and every one after it
+// overwrite entry 255, which the scan never reaches, so those dialogs never
+// read finished [orig: Dialog_Register @0x44d99c..0x44d9a3; sub_44E220's scan
+// bound @0x44e28e].
+int test_the_history_saturates_at_255() {
+	DialogQueue queue;
+	for (int i = 1; i <= 255; ++i) queue.enqueue(dialog_name_of(1000 + i), {});
+	TEST_EXPECT(queue.history().size() == 255 && queue.slots().size() == 16);
+	// The 255th holds no slot (the slots filled at the 16th): finished.
+	TEST_EXPECT(queue.finished(1255) && !queue.active(1255));
+	queue.enqueue(dialog_name_of(2000), {});
+	TEST_EXPECT(queue.history().size() == 255 && !queue.finished(2000) && !queue.active(2000));
+	queue.reset();
+	queue.enqueue(dialog_name_of(2000), {});
+	TEST_EXPECT(queue.history() == names({ "dlg2000" }));
 	return 0;
 }
 
@@ -437,6 +544,10 @@ int main() {
 	failed |= test_the_delay_ignores_the_channel();
 	failed |= test_sixteen_slots_and_the_free();
 	failed |= test_reset_and_clear();
+	failed |= test_a_play_registers_the_dialog();
+	failed |= test_the_plyrdialog_readers_over_a_dialog_s_life();
+	failed |= test_the_readers_name_their_number_dlg_dot3d();
+	failed |= test_the_history_saturates_at_255();
 	failed |= test_client_line_resolution();
 	if (failed) {
 		return 1;

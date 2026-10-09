@@ -9,7 +9,10 @@
 // executes every 62nd tick [orig: WacScript_AdvanceTick @0x4f81b1].
 #include <cstdio>
 #include <array>
+#include <string>
+#include <vector>
 
+#include <runtime/audio/dialog_queue.h>
 #include <runtime/mission/event_runtime.h>
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/wac_system.h>
@@ -1317,13 +1320,36 @@ static void test_player_berserk_trigger() {
     CHECK(!sys.evaluate_trigger_for_test(w, berserk));
 }
 
-// Subs 34/35 over the dialog registry: DONE = absent from the active table
-// [orig: Dialog_ExistsByIndex @0x44e170 == 0], FINISHED = in the registered
-// history AND absent from the active table [orig: sub_44E220 @0x44e220].
+// Subs 34/35 over a dialog's life in the world's one dialog table: the BMS
+// PlayWavList registers the dialog at its dispatch (so a later trigger of the
+// same pass sees it), the dialog holds its line, waits on the channel its
+// voice holds, and leaves its slot; a dedicated host's play never registers,
+// and Dialog_ResetAll and a mission load clear the table. DONE = no slot holds
+// the dialog [orig: case 34 @0x453d04 -> Dialog_ExistsByIndex @0x44e170];
+// FINISHED = the history holds it and no slot does [orig: case 35 @0x453d1c ->
+// sub_44E220 @0x44e220].
 static void test_player_dialog_triggers() {
     World w;
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
+    // The mission's dialog bank: dlg007 (one line, its wave in the bank's
+    // sounds) and dlg008 (one line without a wave).
+    dbf::File bank;
+    for (const char *name : {"dlg007", "dlg008"}) {
+        dbf::Group group;
+        group.group_name = name;
+        dbf::Line line;
+        line.def_id_name = std::string(name) == "dlg007" ? "W007" : "W008";
+        group.lines.push_back(line);
+        bank.groups.push_back(group);
+    }
+    lwf::File sounds;
+    lwf::Single wave;
+    wave.name = "W007";
+    wave.path = "w007.wav";
+    sounds.singles.push_back(wave);
+    w.tables.dialog_bank = &bank;
+    w.tables.dialog_sounds = &sounds;
     mission::BmsEventSystem sys;
     sys.load({}, {}, {});
     w.add_system(&sys);
@@ -1332,30 +1358,77 @@ static void test_player_dialog_triggers() {
             static_cast<int>(bms::PlayerTriggerType::PlayerDialogDone), 7);
     const bms::Trigger finished = make_trigger(bms::TriggerMainType::Player,
             static_cast<int>(bms::PlayerTriggerType::PlayerDialogFinished), 7);
-    CHECK(sys.evaluate_trigger_for_test(w, done));      // never played: not active
+    const auto play = [&](int dialog) {
+        bms::Action a{};
+        a.action_type = bms::ActionType::PlayWavList;
+        a.param1 = dialog;
+        sys.dispatch_action_for_test(w, a);
+    };
+    // The shell's dialog device, scripted: a line with a wave plays on a voice
+    // until the test stops it (tone.wav's 8320 samples at 22050 Hz: a hold of
+    // 48 ticks); one without loads none.
+    std::vector<uint64_t> live;
+    uint64_t next_voice = 1;
+    const auto load = [&](const audio::DialogLineRef &line) {
+        audio::DialogClip clip;
+        if (line.file.empty()) return clip;
+        clip.loaded = true;
+        clip.samples = 8320;
+        clip.pitch_q16 = 32768;
+        clip.voice = next_voice++;
+        live.push_back(clip.voice);
+        return clip;
+    };
+    const auto playing = [&](uint64_t voice) {
+        for (const uint64_t each : live)
+            if (each == voice) return true;
+        return false;
+    };
+    const auto dialog_ticks = [&](int n) {
+        for (int i = 0; i < n; ++i) w.script.dialog.tick(true, load, playing);
+    };
+
+    CHECK(sys.evaluate_trigger_for_test(w, done));      // never played: no slot
     CHECK(!sys.evaluate_trigger_for_test(w, finished)); // never registered
-    w.script.dialog.register_started(7);                // Dialog_Register
+    play(9);                                            // the bank holds no dlg009
+    CHECK(w.script.dialog.history().empty());
+    // Registered at the dispatch, before any dialog tick.
+    play(7);
     CHECK(!sys.evaluate_trigger_for_test(w, done));
     CHECK(!sys.evaluate_trigger_for_test(w, finished));
-    w.script.dialog.register_started(8);                // another dialog behind it
-    w.script.dialog.finished(7);                        // Dialog_FreeByName
+    play(8);                                            // another dialog behind it
+    dialog_ticks(1);                                    // dlg007's line loads and holds
+    CHECK(!sys.evaluate_trigger_for_test(w, done));
+    CHECK(!sys.evaluate_trigger_for_test(w, finished));
+    dialog_ticks(50);                                   // the hold ran out; its voice still plays
+    CHECK(w.script.dialog.slots().size() == 2 && w.script.dialog.slots()[0].timer == 0);
+    CHECK(!sys.evaluate_trigger_for_test(w, done));
+    CHECK(!sys.evaluate_trigger_for_test(w, finished));
+    live.clear();                                       // the wave ends: the channel frees
+    dialog_ticks(1);                                    // dlg007 leaves its slot
     CHECK(sys.evaluate_trigger_for_test(w, done));
     CHECK(sys.evaluate_trigger_for_test(w, finished));
-    CHECK(w.script.dialog.active_exists(8));            // compaction kept the other
-    w.script.dialog.reset();                            // Dialog_ResetAll
+    CHECK(w.script.dialog.active(8));                   // the slots closed up behind it
+    // Dialog_ResetAll clears the slots and the history.
+    w.script.dialog.reset();
     CHECK(sys.evaluate_trigger_for_test(w, done));
     CHECK(!sys.evaluate_trigger_for_test(w, finished));
-    // The history count saturates at 255: registration 256 lands in slot 255,
-    // which the scan never reaches [orig: @0x44d99c/@0x44d9a3, scan @0x44e28e].
-    for (int i = 1; i <= 255; ++i) w.script.dialog.register_started(1000 + i);
-    CHECK(w.script.dialog.registered(1255));
-    w.script.dialog.register_started(2000);
-    CHECK(!w.script.dialog.registered(2000));
-    CHECK(w.script.dialog.active_count == world::ScriptDialogRegistry::kActiveCapacity);
-    // A mission load clears both tables [orig: Game_InitNewRound -> Dialog_ResetAll].
-    w.load_systems();
+    // A dedicated host plays no dialog, so its table stays empty [orig:
+    // EventAction_Dispatch @0x45443d].
+    w.rules.mp_session_peer = false;
+    play(7);
+    CHECK(w.script.dialog.history().empty() && w.script.dialog.slots().empty());
+    CHECK(sys.evaluate_trigger_for_test(w, done));
     CHECK(!sys.evaluate_trigger_for_test(w, finished));
-    CHECK(w.script.dialog.history_count == 0 && w.script.dialog.active_count == 0);
+    w.rules.mp_session_peer = true;
+    // A mission load starts the table empty [orig: DialogManager_LoadFromFile
+    // @0x44e81b; Game_InitNewRound -> Dialog_ResetAll @0x44dc90].
+    play(7);
+    CHECK(!sys.evaluate_trigger_for_test(w, done));
+    w.load_systems();
+    CHECK(w.script.dialog.history().empty() && w.script.dialog.slots().empty());
+    CHECK(sys.evaluate_trigger_for_test(w, done));
+    CHECK(!sys.evaluate_trigger_for_test(w, finished));
 }
 
 // Sub 37: any placed device with satchel ammo whose registry position lies

@@ -1,13 +1,14 @@
-// The mission-dialog playback and the PlayWavList dialog-id resolution, pushed
-// down from the Godot mission audio (godot/src/audio/mission_audio). The engine
-// gives each played dialog one of 16 slots and walks them once a 62 Hz tick:
-// a slot loads its next line once the line before it has held for about twice
-// its wave's length, the dialog channel is free and the line's own delay has
-// run out, so separate dialogs interleave on the one channel in slot order
-// (Dialog_Register / Dialog_UpdatePlayback / Dialog_LoadAudioClip; the
-// witnesses sit on DialogQueue's legs in dialog_queue.cpp). The shell is the
-// device: it plays the wave a line loads, says how long it is and whether its
-// voice still plays.
+// The mission-dialog playback and the PlayWavList dialog-id resolution. The
+// world owns the one dialog table (world::ScriptState::dialog): the BMS
+// PlayWavList action registers a dialog in it, the PLYRDIALOG triggers read it,
+// and the round resets clear it. Each played dialog takes one of 16 slots,
+// walked once a 62 Hz tick: a slot loads its next line once the line before it
+// has held for about twice its wave's length, the dialog channel is free and
+// the line's own delay has run out, so separate dialogs interleave on the one
+// channel in slot order (Dialog_Register / Dialog_UpdatePlayback /
+// Dialog_LoadAudioClip; the witnesses sit on DialogQueue's legs in
+// dialog_queue.cpp). The shell is the device: it runs the tick, plays the wave
+// a line loads, says how long it is and whether its voice still plays.
 //
 // A dialog line names a WAVE of the dialog bank's sounds (<bank>.lwf, else
 // <bank>.pwf), an entry of the bank's singles found by its name, never a sound
@@ -30,9 +31,9 @@
 namespace opennova::audio {
 
 // The dialog a PlayWavList number plays: "dlg%03i" of it, 0 playing none
-// [orig: Dialog_PlayByIndex @ 0x527ae0, the zero test @ 0x527af4, the sprintf @ 0x527b01];
-// the PLYRDIALOG triggers form the same name from any number [orig:
-// Dialog_ExistsByIndex @ 0x44e170 "dlg%.3d" @ 0x44e190]. "" for 0.
+// [orig: Dialog_PlayByIndex @ 0x527ae0, the zero test @ 0x527af4, the sprintf @ 0x527b01].
+// "" for 0. (The PLYRDIALOG triggers form "dlg%.3d" of any number instead,
+// which differs for -99..-1: DialogQueue::active / finished.)
 std::string dialog_name_of(int32_t dialog_index);
 // The number whose "dlg%03i" forms `name` (dlg012: 12, dlg1234: 1234), the
 // inverse of the formation above, matched exactly; -1 where no number forms the
@@ -128,6 +129,11 @@ inline constexpr uint32_t kDialogMissingHold = 12;
 // The dialogs that play at once: Dialog_Register drops a seventeenth [orig:
 // Dialog_Register @ 0x44d9c3].
 inline constexpr size_t kDialogSlots = 16;
+// The registered-dialog history: 256 entries whose count saturates at 255, so
+// the 256th registration and every one after it overwrite entry 255, which no
+// scan reaches [orig: dword_A89600 / count dword_A895F8; Dialog_Register
+// @ 0x44d98d, @ 0x44d99c..0x44d9a3; its only reader sub_44E220 @ 0x44e253].
+inline constexpr size_t kDialogHistory = 256;
 
 // What the device loaded for a line, Dialog_LoadAudioClip's clip: whether its
 // wave loaded (the bank's sounds hold one of the line's name and it decoded),
@@ -147,9 +153,11 @@ struct DialogClip {
 // rate of 0 [orig: Dialog_LoadAudioClip @ 0x44dd87..0x44ddbf].
 uint32_t dialog_clip_hold(const DialogClip &clip);
 
-// The dialog slots and the dialog channel's voices: Dialog_Register,
-// Dialog_UpdatePlayback and the dialog channel stack, the shell supplying the
-// device (the wave a line loads, whether a voice still plays).
+// The dialog table and the dialog channel's voices: the registered history and
+// the 16 slots (Dialog_Register, Dialog_UpdatePlayback, Dialog_ResetAll, the
+// PLYRDIALOG readers) and the dialog channel stack, the shell supplying the
+// device (the wave a line loads, whether a voice still plays). The world owns
+// the one instance (world::ScriptState::dialog).
 class DialogQueue {
 public:
 	// One slot's dialog: its lines, the next to load, the timer (a line's hold,
@@ -167,24 +175,46 @@ public:
 	// AudioChannel_ValidateHandle: the voice still plays.
 	using VoicePlaying = std::function<bool(uint64_t)>;
 
-	// Dialog_Register: the dialog takes the next free slot, its first line due
-	// at once; false (the dialog is dropped) when all 16 slots hold a dialog.
+	// The PlayWavList play: the dialog "dlg%03i" of the number names in the
+	// mission's dialog bank registers with its lines (each with the wave the
+	// bank's sounds give it); nothing for 0, no bank or no dialog of the name.
+	// Dialog_Register's result: false also when all 16 slots hold a dialog.
+	// [orig: Dialog_PlayByIndex @ 0x527ae0 -> Dialog_PlayByName @ 0x44d9f0 ->
+	//  Dialog_Register @ 0x44d980]
+	bool play(const dbf::File *dialog_bank, const lwf::File *dialog_sounds,
+			int32_t dialog_index);
+	// Dialog_Register: the history takes the dialog, then the dialog takes the
+	// next free slot, its first line due at once; false (the slot insert is
+	// dropped, the history entry stays) when all 16 slots hold a dialog.
 	bool enqueue(const std::string &dialog, std::vector<DialogLineRef> lines);
 	// One Dialog_UpdatePlayback tick. `frame_rendered`: a frame has rendered
 	// since the tick before, which starts a fresh hold's countdown.
 	void tick(bool frame_rendered, const LoadLine &load, const VoicePlaying &playing);
+	// The PLYRDIALOG readers, keyed by the trigger's number, whose name is
+	// "dlg%.3d" of it. active: a slot holds the dialog (trigger sub 34
+	// PlayerDialogDone is its negation) [orig: Dialog_ExistsByIndex
+	// @ 0x44e170]. finished: the history holds it and no slot does (sub 35
+	// PlayerDialogFinished) [orig: sub_44E220 @ 0x44e220].
+	bool active(int32_t dialog_index) const;
+	bool finished(int32_t dialog_index) const;
 	const std::vector<Slot> &slots() const { return slots_; }
+	// The registered dialogs the scans reach, oldest first.
+	const std::vector<std::string> &history() const { return history_; }
 	// The dialog channel's voices, oldest first save for the removals' swaps.
 	const std::vector<uint64_t> &voices() const { return voices_; }
-	// Mission teardown / repeated setup: nothing queued or playing crosses
+	// Mission teardown: nothing registered, queued or playing crosses
 	// missions.
 	void clear();
-	// Dialog_ResetAll: every slot cleared; the channel's voices play on
-	// [orig: Dialog_ResetAll @ 0x44dc90].
-	void discard_pending() { slots_.clear(); }
+	// Dialog_ResetAll: every slot and the history cleared; the channel's
+	// voices play on [orig: Dialog_ResetAll @ 0x44dc90, the slot memset
+	// @ 0x44dc9c, the counts @ 0x44dca4 / @ 0x44dcae].
+	void reset();
 
 private:
 	std::vector<Slot> slots_;
+	// The history's [0, count): entry 255, the saturated writes' target, has
+	// no reader, so it is not kept.
+	std::vector<std::string> history_;
 	std::vector<uint64_t> voices_;
 };
 

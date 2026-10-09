@@ -736,8 +736,8 @@ void GameWorld::_bind_methods() {
 	// Presentation side effects drained from the mission runtime's EffectLog
 	// each tick (kind: "text"/"debug_text"/"win"/"subgoal_*"/"show_waypoints"/
 	// "set_light"/"dialog"). Player text is consumed by the HUD; debug_text
-	// remains a distinct unrouted channel. "dialog" is also routed straight
-	// to mission audio.
+	// remains a distinct unrouted channel. "dialog" is a log: the play itself
+	// registered in the world's dialog table, which mission audio plays.
 	ADD_SIGNAL(MethodInfo(kSignalMissionEffects, PropertyInfo(Variant::ARRAY, "effects")));
 	// The CPU-built gameplay-map depthspin water mask changed.
 	ADD_SIGNAL(MethodInfo(kSignalMinimapWaterChanged,

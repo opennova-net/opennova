@@ -15,6 +15,7 @@
 #include <vector>
 #include <variant>
 
+#include <runtime/audio/dialog_queue.h>
 #include <runtime/audio/sound_profile.h>
 #include <base/io/crt_rand.h>
 #include <runtime/terrain_query/surface_type_map.h>
@@ -363,64 +364,6 @@ struct SubgoalState {
     uint8_t lose_text_ids[9] = {};
 };
 
-// The mission-dialog registry the two PLYRDIALOG trigger subs read: the
-// registered-history list (every Dialog_Register appends the dialog; the
-// count saturates at 255, so slot 255 is overwritten and never scanned) and
-// the 16-slot active table (inserted at register, removed when the dialog's
-// last line finishes, both cleared by Dialog_ResetAll). Keyed by the dialog
-// index the "dlg%.3d" name encodes. The producer is the dialog playback
-// owner (the shell's mission audio): register on a resolved play, finished
-// when that dialog's last line ends, reset at round init.
-// [orig: Dialog_PlayByIndex @0x527ae0 -> Dialog_PlayByName @0x44d9f0 ->
-//  Dialog_Register @0x44d980 (history @0x44d98d..0x44d9a3, active table
-//  @0x44d9b1..0x44d9de); Dialog_UpdatePlayback @0x44e470 -> Dialog_FreeByName
-//  @0x44db40 (slot clear @0x44dc07..0x44dc18); Dialog_ResetAll @0x44dc90;
-//  readers Dialog_ExistsByIndex @0x44e170 and sub_44E220 @0x44e220]
-struct ScriptDialogRegistry {
-    static constexpr int kHistoryCapacity = 256; // [orig: dword_A89600]
-    static constexpr int kActiveCapacity = 16;   // [orig: dword_A8A248, 16-byte slots]
-
-    // Dialog_Register: the history append (count saturates at 255), then the
-    // first free active slot; a full active table skips the insert.
-    void register_started(int32_t index) {
-        history[history_count] = index;                                    // @0x44d98d
-        history_count = history_count == 255 ? 255 : history_count + 1;    // @0x44d99c/@0x44d9a3
-        if (active_count < kActiveCapacity) active[active_count++] = index; // @0x44d9b1..0x44d9de
-    }
-    // Dialog_FreeByName: drop the first active entry naming the dialog and
-    // compact the table [orig: @0x44dc07..0x44dc18 -> sub_44DAF0].
-    void finished(int32_t index) {
-        for (int i = 0; i < active_count; ++i) {
-            if (active[i] != index) continue;
-            for (int j = i + 1; j < active_count; ++j) active[j - 1] = active[j];
-            --active_count;
-            return;
-        }
-    }
-    // Dialog_ResetAll @0x44dc90: both tables.
-    void reset() {
-        history_count = 0;
-        active_count = 0;
-    }
-    // Dialog_ExistsByIndex @0x44e170: the active-table scan.
-    bool active_exists(int32_t index) const {
-        for (int i = 0; i < active_count; ++i)
-            if (active[i] == index) return true;
-        return false;
-    }
-    // sub_44E220's first scan @0x44e253..0x44e28e over [0, history_count).
-    bool registered(int32_t index) const {
-        for (int i = 0; i < history_count; ++i)
-            if (history[i] == index) return true;
-        return false;
-    }
-
-    std::array<int32_t, kHistoryCapacity> history{};
-    int history_count = 0; // [orig: dword_A895F8]
-    std::array<int32_t, kActiveCapacity> active{};
-    int active_count = 0;  // [orig: dword_A8A244]
-};
-
 // What the mission script (WAC + BMS) reads and writes beyond the entity rows.
 // vars, named values and input/voice state ride the snapshot; the rest is re-initialised by
 // the systems' on_load.
@@ -443,7 +386,17 @@ struct ScriptState {
     // mirror back to the word only when the event fires (event_runtime.cpp).
     uint32_t input_action_bits = 0;
     uint32_t input_action_mirror = 0;
-    ScriptDialogRegistry dialog;
+    // The one mission-dialog table (runtime/audio/dialog_queue.h): the BMS
+    // PlayWavList action registers a dialog (history and slot), the two
+    // PLYRDIALOG trigger subs read it, the round resets clear it, and the
+    // shell's dialog device runs its playback tick once a logic tick, which
+    // frees a dialog from its slot once its last line has held.
+    // [orig: Dialog_PlayByIndex @0x527ae0 -> Dialog_PlayByName @0x44d9f0 ->
+    //  Dialog_Register @0x44d980 (history dword_A89600 / dword_A895F8, slots
+    //  dword_A8A248 / dword_A8A244); Dialog_UpdatePlayback @0x44e470 ->
+    //  Dialog_FreeByName @0x44db40; Dialog_ResetAll @0x44dc90; readers
+    //  Dialog_ExistsByIndex @0x44e170 and sub_44E220 @0x44e220]
+    audio::DialogQueue dialog;
     WacNamedValues wac_values; // writable named engine values (the @0x82EEF0 table)
     ScriptWeaponInput weapon_input;
     ScriptVoiceChannel voice;

@@ -381,9 +381,9 @@ void EpilogCine::update_lose(World &world) {
 		if (!frame_drawn) break;
 		build_lose_screen();
 		++lose_state; // [orig: @0x5747D4]
-		// Then the dialog reset (its registry half; the waiting lines are the
-		// shell's queue) and the audio channel shutdown, a device leg the port
-		// does not run (D-HUD-46) [orig: Dialog_ResetAll @0x5747DA,
+		// Then the dialog reset (the world's dialog table, its waiting lines
+		// with it) and the audio channel shutdown, a device leg the port does
+		// not run (D-HUD-46) [orig: Dialog_ResetAll @0x5747DA,
 		// Audio_ShutdownChannelsAndDeviceTable @0x5747E6].
 		world.script.dialog.reset();
 		break;
