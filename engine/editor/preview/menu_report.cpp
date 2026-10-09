@@ -320,7 +320,7 @@ io::JsonValue menu_render_to_json(
 			render->revision() == document->revision();
 	out.set("current", JsonValue::make_bool(current));
 	std::vector<std::string> missing, unreadable;
-	if (render) split_unloaded(render->assets(), missing, unreadable);
+	if (render) menu::split_unloaded(render->assets(), missing, unreadable);
 	JsonValue lacked = JsonValue::make_array();
 	for (const std::string &name : missing) lacked.push(json_string(name));
 	out.set("missing", std::move(lacked));
