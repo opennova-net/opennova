@@ -392,7 +392,7 @@ struct EditorRequest {
 	std::string folder;
 	// Where Play starts the game's player (DI-26, Play from here: a point of `mission` and a heading), as a
 	// start marker the game honours in the staged build's copy of the mission (run/play_start.h).
-	PlayStart start;
+	mission::PlayerStart start;
 	// How this Play runs, and whether it saves the unsaved files first instead of asking, for this Play
 	// alone (left out, the project's own: LocalSettings::play_mode, save_before_play, which stay as they
 	// are): a client names the mode it means, whatever the project was last set to.

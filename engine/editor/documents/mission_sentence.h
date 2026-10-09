@@ -77,15 +77,13 @@ LogicJoin trigger_join(const bms::Trigger &trigger);
 // "and", "or", "or else" (exclusive: one of the two, not both).
 const char *logic_join_words(LogicJoin join);
 
-// One trigger in words, its negation in them ("Hostage #10034 is not destroyed").
+// One trigger in words, its negation in them ("Hostage #10034 is not destroyed"). Whether an SSN slot keys
+// a relation record the game never writes for it is the engine's (mission::trigger_ssn_unrecorded).
 std::string trigger_words(const bms::Trigger &trigger, const MissionNames &names);
-// Whether a trigger's SSN parameter at `slot` keys a sees, targeted, shot or visited record the game never
-// writes for it: those hold SSNs 0 to 127 alone [section 3a] (the player's 10000 among those never kept).
-bool trigger_ssn_unrecorded(const bms::Trigger &trigger, int slot);
 // A waypoint list's command (123..127) by what the game does with it [docs/world/world-wac-ai-re.md 3.2,
-// 9.1], and its name in the original editor (dfx2med), for a tooltip; null for any other number.
+// 9.1]; null for any other number. Its name in the original editor (dfx2med), for a tooltip, is the
+// engine's (mission::path_command_editor_name).
 const char *path_command_words(int64_t number);
-const char *path_command_editor_name(int64_t number);
 // One action in words ("show text 4: 'Mission failed'"). `header` gives a sub-goal's text keys, the
 // slots' ids (null: no text quoted).
 std::string action_words(const bms::Action &action, const MissionNames &names, const bms::Header *header);
@@ -109,15 +107,11 @@ inline std::string event_sentence(const mission::EventChain &chain, const Missio
 	return event_words(chain, names, header).sentence;
 }
 
-// A delay or a repeat's authored units in seconds: each unit is 64 ticks of the 62.5 Hz clock, the
-// quarter pass's period [orig: EventTrigger_UpdateEntry @0x454c30 counts the reload << 6 down by 64 a
-// pass; docs/mission/bms-event-runtime-re.md 1.6].
+// A delay or a repeat's authored units in seconds: each unit is bms::kEventStepTicks (64) ticks of the
+// 62.5 Hz clock, the quarter pass's period [orig: EventTrigger_UpdateEntry @0x454c30 counts the reload
+// << 6 down by 64 a pass; docs/mission/bms-event-runtime-re.md 1.6]. Past bms::kEventStepsUnwrapped
+// steps the countdown wraps (bms::event_steps_wrap).
 double logic_units_seconds(int64_t units);
-// The most steps a delay or a repeat counts down as written: past it the countdown (the steps << 6 in a
-// word the game tests as signed after each 64-tick decrement) is negative after the first decrement, so
-// it ends on the next pass [orig: EventTrigger_UpdateEntry @0x454cef, @0x454d40; section 1.2].
-inline constexpr int64_t kLogicStepsUnwrapped = 512;
-bool logic_steps_wrap(int64_t steps);
 // What a count of steps comes to in the game: "614.4 s", or past 512 steps "about 1.0 s (past 512 steps
 // the game's countdown wraps)".
 std::string logic_steps_words(int64_t steps);

@@ -148,7 +148,7 @@ PlayIntent PlayController::intent_of(const EditorRequest &request) const {
 
 bool PlayController::refused(const PlayIntent &intent) {
 	const std::string &mission = intent.mission;
-	const PlayStart &start = intent.start;
+	const mission::PlayerStart &start = intent.start;
 	if (!core_.platform().can_spawn()) {
 		// The platform says why (an OS the editor cannot spawn on yet, a session with no process seam).
 		core_.report(make_finding(CoreFinding::PlayUnsupported, DiagnosticSeverity::Error,
@@ -237,7 +237,7 @@ PlayGame PlayController::play_game() const {
 void PlayController::start(const PlayIntent &intent) {
 	const std::string &mission = intent.mission;
 	const bool behind = intent.behind, fresh = intent.fresh;
-	const PlayStart &start = intent.start;
+	const mission::PlayerStart &start = intent.start;
 	const std::string &build_dir = view_.activity.last_build->build_dir;
 	LaunchPlan plan;
 	Diagnostic error;
@@ -253,7 +253,7 @@ void PlayController::start(const PlayIntent &intent) {
 	// mode's stay until the next Play of that mode); the game started now reports on this project.
 	view_.activity.boot_missing.clear();
 	view_.activity.play_mission.clear();
-	view_.activity.play_start = PlayStart();
+	view_.activity.play_start = mission::PlayerStart();
 	view_.activity.play_start_placed = PlayStartPlaced();
 	start_again_pending_ = false;
 	findings_.clear();
@@ -555,7 +555,7 @@ void PlayController::report_file_log(bool read) {
 // own spawn selection. Said in Output and the run section; one that cannot be placed is reported and the
 // game is not started.
 bool PlayController::stage_start(const std::string &run_dir, const std::string &expansion, const std::string &mission,
-                                 const PlayStart &start) {
+                                 const mission::PlayerStart &start) {
 	PlayStartPlaced placed;
 	Diagnostic error;
 	if (!stage_play_start(run_dir, expansion, mission, start, placed, error)) {
