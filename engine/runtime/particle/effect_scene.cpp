@@ -12,6 +12,8 @@
 #include <unordered_set>
 #include <utility>
 
+#include <base/io/hash.h>
+
 namespace opennova::particle {
 
 namespace {
@@ -129,14 +131,9 @@ bool emitter_finished(const Emitter &emitter) noexcept {
 
 std::uint32_t seed_for(std::uint32_t base, std::uint64_t group_id,
 		std::size_t emitter_ordinal) noexcept {
-	std::uint64_t value = static_cast<std::uint64_t>(base) ^
-			(group_id + 0x9E3779B97F4A7C15ull +
-					(static_cast<std::uint64_t>(emitter_ordinal) << 6u));
-	value ^= value >> 30u;
-	value *= 0xBF58476D1CE4E5B9ull;
-	value ^= value >> 27u;
-	value *= 0x94D049BB133111EBull;
-	value ^= value >> 31u;
+	const std::uint64_t value = io::splitmix64_finalize(static_cast<std::uint64_t>(base) ^
+			(group_id + io::kSplitmix64Gamma +
+					(static_cast<std::uint64_t>(emitter_ordinal) << 6u)));
 	const std::uint32_t seed = static_cast<std::uint32_t>(value);
 	return seed != 0 ? seed : 1u;
 }

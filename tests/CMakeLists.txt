@@ -1039,6 +1039,14 @@ target_link_libraries(resource_index_test PRIVATE opennova_base)
 target_include_directories(resource_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME resource_index COMMAND resource_index_test)
 
+# The typed kinds and their loader facts (base/resource_index/file_kind.h): every runtime format and
+# required file has a kind and a place, and the table agrees with master's other copies of its facts.
+add_executable(file_kind_test resource_index/file_kind_test.cpp)
+target_link_libraries(file_kind_test PRIVATE opennova_base)
+target_include_directories(file_kind_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(file_kind_test PRIVATE cxx_std_17)
+add_test(NAME file_kind COMMAND file_kind_test)
+
 # Launch flags + the boot resource-dir ladder (base/resource_index/boot_policy.h).
 add_executable(boot_policy_test resource_index/boot_policy_test.cpp)
 target_link_libraries(boot_policy_test PRIVATE opennova_base)
@@ -1196,6 +1204,12 @@ add_test(NAME fnt_roundtrip COMMAND fnt_roundtrip_test)
 add_executable(fnt_pack_test fnt/fnt_pack_test.cpp)
 target_link_libraries(fnt_pack_test PRIVATE opennova_formats)
 add_test(NAME fnt_pack COMMAND fnt_pack_test)
+
+# A glyph sheet made into a font (formats/fnt/fnt_sheet.h), and the glyph UV from a pixel rect.
+add_executable(fnt_sheet_test fnt/fnt_sheet_test.cpp)
+target_link_libraries(fnt_sheet_test PRIVATE opennova_formats)
+target_include_directories(fnt_sheet_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME fnt_sheet COMMAND fnt_sheet_test)
 
 add_executable(pcx_roundtrip_test pcx/pcx_roundtrip_test.cpp)
 target_link_libraries(pcx_roundtrip_test PRIVATE opennova_formats)

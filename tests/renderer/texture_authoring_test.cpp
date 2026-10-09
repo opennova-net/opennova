@@ -259,6 +259,31 @@ int test_sources() {
 	            source.image.pixels[4] == 5 && source.image.pixels[5] == 250 && source.image.pixels[6] == 7 &&
 	            source.image.pixels[7] == 255);
 	TEST_EXPECT(!decode_image_source("map.bmp", pcx, source, why) && !why.empty());
+	// palette indices: the PCX written from the source's indices and palette as they are, never
+	// quantized; refused from a source of colours and at another size, and by encode_image.
+	{
+		const ImageImportSettings keep = settings_of({{"format", "pcx"}, {"palette", "indices"}});
+		TEST_EXPECT(image_keeps_source_indices(keep) && !image_keeps_source_indices(settings_of({{"format", "pcx"}})) &&
+		            !image_keeps_source_indices(settings_of({{"format", "tga"}, {"palette", "indices"}})));
+		ImageSource indexed_source;
+		TEST_EXPECT(decode_image_source("map.pcx", pcx, indexed_source, why));
+		std::vector<uint8_t> written;
+		std::string field = "x";
+		TEST_EXPECT(encode_image_indices(indexed_source, keep, written, why, field) && field.empty());
+		ImageSource back;
+		TEST_EXPECT(decode_image_source("map.pcx", written, back, why) && back.indexed &&
+		            back.indices.indices == indexed.indices && back.indices.palette[9][1] == 246);
+		TEST_EXPECT(encode_image_indices(indexed_source, settings_of({{"format", "pcx"}, {"palette", "indices"}, {"size", "3x2"}}),
+		                                 written, why, field));
+		TEST_EXPECT(!encode_image_indices(indexed_source, settings_of({{"format", "pcx"}, {"palette", "indices"}, {"size", "6x4"}}),
+		                                  written, why, field) &&
+		            field == "size");
+		ImageSource colours;
+		colours.image = image;
+		TEST_EXPECT(!encode_image_indices(colours, keep, written, why, field) && field == "palette");
+		std::string note;
+		TEST_EXPECT(!encode_image(indexed_source.image, keep, written, why, note) && why.find("indices") != std::string::npos);
+	}
 	// A PNG through the PNG reader.
 	const std::vector<uint8_t> png = png::encode_png_rgba(image.pixels.data(), 4, 2);
 	TEST_EXPECT(decode_image_source("art/a.png", png, source, why) && !source.indexed && source.image.pixels == image.pixels);

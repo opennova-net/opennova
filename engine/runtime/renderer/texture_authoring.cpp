@@ -331,6 +331,10 @@ bool encode_image(const RgbaImage &image, const ImageImportSettings &settings, s
 		return !out.empty();
 	}
 	if (format == "pcx") {
+		if (image_keeps_source_indices(settings)) {
+			why = "the palette indices writes a source's own indices (encode_image_indices), which these texels do not carry";
+			return false;
+		}
 		if (settings.palette != "median_cut" && settings.palette != "exact") {
 			why = "the palette '" + settings.palette + "' is neither median_cut nor exact";
 			return false;
@@ -366,6 +370,32 @@ bool encode_image(const RgbaImage &image, const ImageImportSettings &settings, s
 	}
 	why = "the format '" + format + "' is none of tga, tga24, pcx, pcx24, dds, mdt or png";
 	return false;
+}
+
+bool image_keeps_source_indices(const ImageImportSettings &settings) {
+	return settings.format == "pcx" && settings.palette == "indices";
+}
+
+bool encode_image_indices(const ImageSource &source, const ImageImportSettings &settings, std::vector<uint8_t> &out,
+                          std::string &why, std::string &field) {
+	field.clear();
+	if (!source.indexed) {
+		why = "the palette indices keeps an 8-bit PCX source's indices, and the source holds colours";
+		field = "palette";
+		return false;
+	}
+	const uint32_t source_width = uint32_t(source.indices.width), source_height = uint32_t(source.indices.height);
+	uint32_t width = 0, height = 0;
+	if (!image_target_size(settings.size, source_width, source_height, width, height, why)) {
+		field = "size";
+		return false;
+	}
+	if (width != source_width || height != source_height) {
+		why = "the palette indices keeps every texel's index, so the size stays the source's";
+		field = "size";
+		return false;
+	}
+	return encode_pcx_indexed(source.indices, out, why);
 }
 
 bool image_import_texels(RgbaImage &image, const ImageImportSettings &settings, std::string &why, std::string &field) {

@@ -106,6 +106,10 @@ std::uint32_t color_value(const std::string &text);
 // given, is how many hex digits the read took.
 bool color_reads_whole(const std::string &text, size_t *digits_read = nullptr);
 
+// The 0xAARRGGBB word as the text color_value reads back whole: eight upper-case hex digits, no
+// prefix ("FF808080"). What a writer puts in a COLOR / OUTLINE / FONT colour.
+std::string color_text(std::uint32_t word);
+
 // type="color" on a spin ITEM: the same word forced opaque [orig:
 // CSpinListWnd_Render @ 0x64b220 (color | 0xFF000000)].
 std::uint32_t item_color_argb(const std::string &hex_text);
