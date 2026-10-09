@@ -58,13 +58,19 @@ Vec3 transform_vector(const EffectPose &pose, Vec3 local) noexcept {
 	};
 }
 
-EffectPose compose_pose(const EffectPose &parent, const EffectPose &local) noexcept {
-	EffectPose result;
-	result.position = add(parent.position, transform_vector(parent, local.position));
-	result.right = transform_vector(parent, local.right);
-	result.up = transform_vector(parent, local.up);
-	result.forward = transform_vector(parent, local.forward);
-	return result;
+Vec3 cross(Vec3 a, Vec3 b) noexcept {
+	return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+
+// A zero vector stays zero; any other is each component over its length (the
+// division, not a reciprocal multiply).
+Vec3 normalized(Vec3 value) noexcept {
+	const float magnitude_squared = length_squared(value);
+	if (magnitude_squared == 0.0f) {
+		return {0.0f, 0.0f, 0.0f};
+	}
+	const float magnitude = std::sqrt(magnitude_squared);
+	return {value.x / magnitude, value.y / magnitude, value.z / magnitude};
 }
 
 void include_point(EffectBounds &bounds, Vec3 point, float radius) noexcept {
@@ -136,6 +142,37 @@ std::uint32_t seed_for(std::uint32_t base, std::uint64_t group_id,
 }
 
 } // namespace
+
+EffectPose forward_pose(Vec3 at, Vec3 forward) noexcept {
+	EffectPose pose;
+	pose.position = at;
+	if (length_squared(forward) <= 0.000001f) {
+		return pose;
+	}
+	const Vec3 unit_forward = normalized(forward);
+	const Vec3 up_hint = std::fabs(unit_forward.y) > 0.999f ? Vec3{1.0f, 0.0f, 0.0f}
+															 : Vec3{0.0f, 1.0f, 0.0f};
+	pose.right = normalized(cross(up_hint, unit_forward));
+	pose.up = normalized(cross(unit_forward, pose.right));
+	pose.forward = unit_forward;
+	return pose;
+}
+
+EffectPose descriptor_pose(Vec3 at, Vec3 orientation) noexcept {
+	if (length_squared(orientation) <= 0.000001f) {
+		return forward_pose(at, {0.0f, 1.0f, 0.0f});
+	}
+	return forward_pose(at, orientation);
+}
+
+EffectPose compose_pose(const EffectPose &parent, const EffectPose &local) noexcept {
+	EffectPose result;
+	result.position = add(parent.position, transform_vector(parent, local.position));
+	result.right = transform_vector(parent, local.right);
+	result.up = transform_vector(parent, local.up);
+	result.forward = transform_vector(parent, local.forward);
+	return result;
+}
 
 struct EffectScene::Impl {
 	struct CatalogEffect {

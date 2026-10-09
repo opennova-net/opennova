@@ -102,11 +102,6 @@ const DeathPieceType kDeathPieceTypes[kDeathPieceTypeCount] = {
     {"CHUNKSF_M",  0.4f, 0.5f,  1.5f,  4.0f,  1.0f,  6,  0.25f, "Effect_VexpSL",  "Effect_DustBounceS", "IMP_DEBMED_LAND", "Effect_MedSplash",  "IMP_DEBMED_WATER", nullptr,          nullptr,  0},
 };
 
-// The interned kz ammo names [orig: WeaponDef_ResolveAllReferences @ 0x540270 —
-// g_AmmoKzOrganicBlast @ 0x24E7DBC etc.]. Resolved per queue push against
-// World::ammo (the host loads ammo.def before missions run).
-constexpr const char *kAmmoKzOrganicBlast = "kz_OrganicBlast";
-constexpr const char *kAmmoKzMItemBlast = "kz_MItemBlast";
 constexpr int32_t kPiecePhysicsGravityQ16 = 334;
 constexpr int32_t kPiecePhysicsWaterFallFloorQ16 = -2048;
 constexpr int32_t kPiecePhysicsProbeLiftQ16 = 0x4000;
@@ -1123,7 +1118,7 @@ void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
                 blast.pos = Vec3{target.position.x + offset.x,
                                  target.position.y + offset.y,
                                  target.position.z + offset.z};
-                blast.radius_override = 5.0f; // [orig: the 5.0 at @ 0x4eace7]
+                blast.radius_override = kKzPointBlastRadius; // [orig: the 5.0 at @ 0x4eace7]
                 world.explosions.queue_explosion(world, blast);
             }
         }
@@ -1436,7 +1431,7 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
         if (target.death_motion == DeathMotionMode::Generic)
             target.death_motion = DeathMotionMode::PiecePhysics;
         break;
-    case 5: case 6: case 7: case 8:
+    case 5: case 6: case 7: case 8: // unit_type_is_boat
         // The boat callback no-ops without a husk model, but the dispatch
         // still ORs the death flags after it [orig: the huskFinal||husk gate
         // @ 0x49442c wraps ONLY the callback body; Flags |= table flagBits
@@ -1447,10 +1442,10 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
             target.motor_suspended = false;
             target.death_motion = DeathMotionMode::Static;
             world.out.destruction.sounds.push_back(
-                    DestructionSoundEvent{"EXPLO_SHIP_TINY", target.position});
+                    DestructionSoundEvent{kShipExplosionSound, target.position});
         }
         break;
-    case 11:
+    case kUnitTypeBridge:
         mask = spawn_death_pieces(world, target, silent);
         // The callback emits directly in world space: transform every FIRST-
         // husk DEAD point through the complete authored pose, retain x/y, and
@@ -1468,7 +1463,7 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
             for (const Vec3 &point : traits->bridge_dead_points) {
                 const Vec3 offset = rotate_authored_point(orientation, point);
                 DestructionEffectEvent shock{
-                        "Effect_ShockWaterBrdg",
+                        kBridgeWaterShockEffect,
                         Vec3{target.position.x + offset.x,
                              target.position.y + offset.y, water_z},
                         Vec3{}};

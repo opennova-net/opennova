@@ -94,4 +94,35 @@ EffectClosure effect_closure(const std::vector<EffectCatalogDocument> &documents
 	return out;
 }
 
+EffectSceneConfig effect_closures(const std::vector<EffectCatalogDocument> &documents,
+		const std::vector<std::string> &names, const EffectSceneConfig &limits,
+		std::vector<EffectClosure> &each) {
+	EffectSceneConfig out;
+	out.simulation_tick_seconds = limits.simulation_tick_seconds;
+	out.max_live_groups = limits.max_live_groups;
+	out.max_live_emitters = limits.max_live_emitters;
+	out.random_seed = limits.random_seed;
+	each.clear();
+	EffectCatalogDocument merged;
+	std::unordered_set<std::string> effects, definitions;
+	bool tables = false;
+	for (const std::string &name : names) {
+		each.push_back(effect_closure(documents, name, limits));
+		const EffectClosure &one = each.back();
+		if (one.config.documents.empty()) continue;
+		const EffectCatalogDocument &document = one.config.documents.front();
+		if (merged.source.empty()) merged.source = document.source;
+		for (const EffectDef &effect : document.file.effects)
+			if (effects.insert(fold(effect.id)).second) merged.file.effects.push_back(effect);
+		for (const ParticleDef &definition : document.file.particles)
+			if (definitions.insert(fold(definition.id)).second) merged.file.particles.push_back(definition);
+		if (!tables) {
+			merged.file.tables = document.file.tables;
+			tables = true;
+		}
+	}
+	if (!merged.file.effects.empty()) out.documents.push_back(std::move(merged));
+	return out;
+}
+
 } // namespace opennova::particle

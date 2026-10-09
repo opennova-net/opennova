@@ -145,4 +145,18 @@ private:
 // the archive walk's extension test @ 0x5f64cd..0x5f64f3].
 std::vector<std::string> effect_file_order(const std::vector<std::string> &names, const std::string &gore_extension);
 
+// The German content marker whose mere presence in the mount picks the gore set.
+inline constexpr const char *kGoreContentMarker = "fgn2.bin";
+
+// The gore set's extension the effect catalog loads alongside every `.ptl`: ".ptg" where the mount
+// carries kGoreContentMarker, else ".ptu". Retail picks it once at config time from the file's
+// PRESENCE and never re-reads it [orig: Game_LoadConfig @ 0x551480 sets byte_24D4DF9 =
+// FileSystem_FileExists("fgn2.bin") != 0 @0x5514e8..0x5514fa; CEffectSystem_Init @ 0x5f6070 reads it
+// to pick ".ptg" over the ".ptu" default @0x5f608b..0x5f6095]. ResourceIndex::particle_extension is
+// this over its own mount; an embedder with its own file set (a mission's boot files, the OpenNova
+// Editor's project) asks its own.
+inline const char *gore_particle_extension(bool has_gore_content_marker) {
+	return has_gore_content_marker ? ".ptg" : ".ptu";
+}
+
 } // namespace opennova

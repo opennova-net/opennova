@@ -8,6 +8,7 @@
 
 #include <formats/aip/aip.h>
 #include <formats/mission/bms_edit.h>
+#include <runtime/world/ammo_table_build.h>
 #include <runtime/terrain_query/terrain_field_build.h> // the tile info load behind the ADR 0020 seam
 
 namespace opennova::mission {
@@ -34,6 +35,34 @@ BootFileSource boot_files_from_index(const ResourceIndex &index) {
         return result;
     };
     return files;
+}
+
+DefTableRead read_weapon_defs(const BootFileSource &files, const std::string &name,
+		def::DefWeaponsFile &out) {
+	std::vector<uint8_t> bytes;
+	if (!files.valid() || !files.read_file(name, bytes)) return DefTableRead::Missing;
+	// A SIGHTS row whose texture the mount lacks is no row [orig: the sights
+	// arm's FileSystem_FileExists @0x544AE2].
+	const def::DefFileProbe probe = {
+			[](const void *ctx, const char *file) {
+				return static_cast<const BootFileSource *>(ctx)->has_file(file);
+			},
+			&files};
+	if (def::def_parse_weapons_memory(bytes.data(), bytes.size(), &out, nullptr, &probe) != 0)
+		return DefTableRead::Unreadable;
+	return DefTableRead::Read;
+}
+
+DefTableRead read_ammo_table(const BootFileSource &files, const std::string &name,
+		world::AmmoTable &out) {
+	std::vector<uint8_t> bytes;
+	if (!files.valid() || !files.read_file(name, bytes)) return DefTableRead::Missing;
+	def::DefAmmoFile file = {};
+	if (def::def_parse_ammo_memory(bytes.data(), bytes.size(), &file) != 0)
+		return DefTableRead::Unreadable;
+	out = world::build_ammo_table(file);
+	def::def_free_ammo(&file);
+	return DefTableRead::Read;
 }
 
 MissionTextSource resolve_mission_text(const BootFileSource &files,

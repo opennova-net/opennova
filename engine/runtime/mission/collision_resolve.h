@@ -27,6 +27,10 @@ namespace opennova::mission {
 // order; a later duplicate is never reached.
 // [orig: ItemList_FindIndexByTypeId @0x49E100]
 const opennova::def::DefItemDef *find_item_def(const opennova::def::DefItemsFile &items, int item_id);
+// Every id's row as find_item_def resolves it, at once (each id's first row):
+// an index for a caller looking many ids up in one parse.
+std::unordered_map<int, const opennova::def::DefItemDef *> item_defs_by_id(
+		const opennova::def::DefItemsFile &items);
 
 // Runtime item type -> items.def id, with the player's visual stand-in.
 int visual_item_id_for_runtime_type(int item_id, const opennova::def::DefItemsFile &items);

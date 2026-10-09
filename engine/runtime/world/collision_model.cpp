@@ -268,16 +268,47 @@ CollisionMatrix entity_placement_matrix(const Entity &e) {
     int32_t euler[3];
     entity_live_euler_bam(e, euler);
 	CollisionMatrix m = collision_matrix_from_euler(euler[0], euler[1], euler[2], position);
-	if (e.uniform_scale_q16 != 0) {
-		// Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale @0x614210:
-        // the scale rides the rotation diagonal.
-        constexpr int rotation_indices[] = {0, 1, 2, 4, 5, 6, 8, 9, 10};
-        for (int index : rotation_indices) {
-            m.m[index] = static_cast<int32_t>(
-                    (static_cast<int64_t>(m.m[index]) * e.uniform_scale_q16) >> 16);
-        }
-	}
+	collision_matrix_scale_rotation(m, e.uniform_scale_q16);
 	return m;
+}
+
+void collision_matrix_scale_rotation(CollisionMatrix &m, int32_t scale_q16) {
+    if (scale_q16 == 0) return;
+    constexpr int rotation_indices[] = {0, 1, 2, 4, 5, 6, 8, 9, 10};
+    for (int index : rotation_indices) {
+        m.m[index] = static_cast<int32_t>(
+                (static_cast<int64_t>(m.m[index]) * scale_q16) >> 16);
+    }
+}
+
+CollisionMatrix collision_matrix_from_placement(double yaw_deg, double pitch_deg,
+                                                double roll_deg, const int32_t pos[3],
+                                                int32_t scale_q16) {
+    const int32_t heading = bam_heading_from_mission_yaw_deg(yaw_deg);
+    CollisionMatrix m = (pitch_deg != 0.0 || roll_deg != 0.0)
+            ? collision_matrix_from_euler(heading, bam_from_degrees_wrapped(pitch_deg),
+                                          bam_from_degrees_wrapped(roll_deg), pos)
+            : collision_matrix_from_heading(heading, pos);
+    collision_matrix_scale_rotation(m, scale_q16);
+    return m;
+}
+
+void collision_matrix_box_bounds(const CollisionMatrix &matrix, const int32_t local_box[6],
+                                 int32_t min_out[3], int32_t max_out[3]) {
+    for (int axis = 0; axis < 3; ++axis) {
+        min_out[axis] = INT32_MAX;
+        max_out[axis] = INT32_MIN;
+    }
+    for (int corner = 0; corner < 8; ++corner) {
+        const int32_t point[3] = {local_box[(corner & 1) ? 3 : 0], local_box[(corner & 2) ? 4 : 1],
+                                  local_box[(corner & 4) ? 5 : 2]};
+        int32_t world_point[3];
+        matrix.transform_point(point, world_point);
+        for (int axis = 0; axis < 3; ++axis) {
+            min_out[axis] = std::min(min_out[axis], world_point[axis]);
+            max_out[axis] = std::max(max_out[axis], world_point[axis]);
+        }
+    }
 }
 
 bool collision_matrix_apply_render_pose(const CollisionMatrix &entity_world,

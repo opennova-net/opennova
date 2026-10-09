@@ -1,29 +1,15 @@
 #include <runtime/particle/script_effects.h>
 
-#include <cmath>
-
 namespace opennova::particle {
 namespace {
-Vec3 cross(Vec3 a, Vec3 b) {
-    return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
-}
-Vec3 normalized(Vec3 v) {
-    const float scale = 1.0f / std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-    return {v.x * scale, v.y * scale, v.z * scale};
-}
+// The event's mission position and direction in the scene's frame (x, z, -y);
+// a zero direction keeps the identity basis (forward_pose).
 EffectPose pose(const world::ScriptEffectEvent &event) {
-    EffectPose result;
-    result.position = {float(event.position[0]) / 65536.0f,
-                       float(event.position[2]) / 65536.0f,
-                      -float(event.position[1]) / 65536.0f};
-    if (event.direction[0] || event.direction[1] || event.direction[2]) {
-        result.forward = normalized({float(event.direction[0]), float(event.direction[2]),
-                                    -float(event.direction[1])});
-        const Vec3 hint = std::abs(result.forward.y) > 0.999f ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
-        result.right = normalized(cross(hint, result.forward));
-        result.up = normalized(cross(result.forward, result.right));
-    }
-    return result;
+    const Vec3 at{float(event.position[0]) / 65536.0f,
+                  float(event.position[2]) / 65536.0f,
+                 -float(event.position[1]) / 65536.0f};
+    return forward_pose(at, {float(event.direction[0]), float(event.direction[2]),
+                             -float(event.direction[1])});
 }
 } // namespace
 

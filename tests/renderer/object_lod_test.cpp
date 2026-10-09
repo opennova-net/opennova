@@ -1,5 +1,7 @@
 #include <runtime/renderer/object_lod.h>
 
+#include <formats/threedi/threedi_3di3.h>
+
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -290,6 +292,27 @@ int main() {
   CHECK(project_bound_sphere_radius_q16(1 << 15, 1000 << 16, 342) == 11115);
   CHECK(project_bound_sphere_radius_q16(1 << 15, 1000 << 16, 342) <=
         kObjectLodSubPixelCullQ16);
+
+  // A model's threshold table: each RMDL pixel count in level order, shifted
+  // to Q16.16 (Armry01's 200, 60, 20, 0); none for a model with no level.
+  {
+    using opennova::renderer::model_lod_thresholds_q16;
+    opennova::threedi::ThreediLod lods[4] = {};
+    lods[0].lod_threshold = 200;
+    lods[1].lod_threshold = 60;
+    lods[2].lod_threshold = 20;
+    lods[3].lod_threshold = 0;
+    opennova::threedi::Threedi3di3 model = {};
+    model.lods = lods;
+    model.lod_count = 4;
+    CHECK(model_lod_thresholds_q16(model) ==
+          std::vector<int32_t>({200 << 16, 60 << 16, 20 << 16, 0}));
+    model.lod_count = 0;
+    CHECK(model_lod_thresholds_q16(model).empty());
+    model.lods = nullptr;
+    model.lod_count = 2;
+    CHECK(model_lod_thresholds_q16(model).empty());
+  }
 
   return failures == 0 ? 0 : 1;
 }
