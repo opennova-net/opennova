@@ -42,6 +42,7 @@
 #include <editor/project_build/archive_routing.h>
 #include <formats/pff/pff.h>
 #include <formats/rtxt/rtxt.h>
+#include <runtime/renderer/material_texture.h>
 #include <base/io/json.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/project_build/build_run.h>
@@ -52,6 +53,7 @@
 #include "editor/editor_test_support.h"
 
 using namespace opennova::editor;
+using opennova::pff::normalized_logical_name;
 namespace fs = std::filesystem;
 
 // A valid one-string table whose content differs per `text`: the strings validator
@@ -463,8 +465,6 @@ static int test_expansion_routing() {
 	TEST_EXPECT(route_for_expansion(AssetKind::Video) == ExpansionPlace::Folder);
 	TEST_EXPECT(route_for_expansion(AssetKind::MusicBank) == ExpansionPlace::Folder);
 	TEST_EXPECT(route_for_expansion(AssetKind::CountryCode) == ExpansionPlace::RootOnly);
-	TEST_EXPECT(expansion_archive_path("jxm", true) == "expansion/jxm/jxmL.pff");
-	TEST_EXPECT(expansion_archive_path("jxm", false) == "expansion/jxm/jxm.pff");
 	TEST_EXPECT(route_for_expansion(AssetKind::StringTableCoo) == ExpansionPlace::RootOnly);
 	TEST_EXPECT(route_for_expansion(AssetKind::NovaWorldScreen) == ExpansionPlace::Archive);
 	TEST_EXPECT(route_for_expansion(entry_of("JXM.bin", AssetKind::Strings), "jxm") == ExpansionPlace::Folder);
@@ -1401,7 +1401,7 @@ static int test_unknown_kinds_are_left_out() {
 	AssetScan::Visit visit;
 	uint64_t read = 0;
 	TEST_EXPECT(scan_project_file(p.paths, p.doc, "art/sketch.blend", key, visit, &read));
-	TEST_EXPECT(read > 0 && read <= 3 * (kChunkHeaderReads * 8 + 28));
+	TEST_EXPECT(read > 0 && read <= 3 * (opennova::renderer::kChunkHeaderReads * 8 + 28));
 	std::printf("editor_project_build: a 4 MB file no rule names: %llu bytes read to tell it holds no material chunk\n",
 	            static_cast<unsigned long long>(read));
 	const BuildPlan plan = p.plan();

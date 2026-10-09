@@ -30,6 +30,7 @@
 #include "common/test_paths.h"
 
 using namespace opennova::editor;
+using opennova::pff::normalized_logical_name;
 using namespace opennova::threedi;
 namespace fs = std::filesystem;
 

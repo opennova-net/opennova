@@ -20,6 +20,7 @@
 #include "editor/editor_test_support.h"
 
 using namespace opennova::editor;
+using opennova::pff::normalized_logical_name;
 
 static std::vector<uint8_t> bytes_of(const char *text) {
 	return std::vector<uint8_t>(text, text + std::char_traits<char>::length(text));
@@ -102,7 +103,6 @@ static int test_classification() {
 	const std::vector<uint8_t> licence = bytes_of("MIT License\r\n\r\nCopyright (c)\tthe authors\n\f\x1a");
 	TEST_EXPECT(classify_asset("LICENSE", &licence) == AssetKind::Notes && classify_asset("LICENSE", nullptr) == AssetKind::Unknown);
 	TEST_EXPECT(classify_asset("blob", &raw) == AssetKind::Unknown && classify_asset("x.docx", &licence) == AssetKind::Unknown);
-	TEST_EXPECT(looks_like_text(licence.data(), licence.size()) && !looks_like_text(raw.data(), raw.size()));
 	TEST_EXPECT(asset_name_fits_kind("LICENSE", AssetKind::Notes) && asset_name_fits_kind("README.md", AssetKind::Notes) &&
 	            !asset_name_fits_kind("earlyerr.txt", AssetKind::Notes) && !asset_name_fits_kind("todo.txt", AssetKind::Text));
 	TEST_EXPECT(std::string(asset_kind_token(AssetKind::Notes)) == "notes" &&
@@ -122,8 +122,8 @@ static int test_classification() {
 	chunk[8] = 'N', chunk[9] = 'Q', chunk[10] = '8', chunk[11] = 'B';
 	chunk[12] = uint8_t(chunk.size() - 16);
 	chunk[28] = 2, chunk[32] = 2;
-	TEST_EXPECT(is_material_chunk_container(chunk) && classify_asset("field.nq8", &chunk) == AssetKind::MaterialChunk);
-	TEST_EXPECT(!is_material_chunk_container(raw) && classify_asset("field.nq8", &raw) == AssetKind::Unknown);
+	TEST_EXPECT(classify_asset("field.nq8", &chunk) == AssetKind::MaterialChunk);
+	TEST_EXPECT(classify_asset("field.nq8", &raw) == AssetKind::Unknown);
 	TEST_EXPECT(classify_asset("field.nq8", nullptr) == AssetKind::Unknown && !asset_classification_needs_bytes("field.nq8"));
 	TEST_EXPECT(asset_name_fits_kind("field.nq8", AssetKind::MaterialChunk) && !asset_name_fits_kind("field.nq8", AssetKind::Texture) &&
 	            !asset_name_fits_kind("field.nq8", AssetKind::Model));
@@ -168,21 +168,6 @@ static int test_classification() {
 	for (size_t i = 0; i < kAssetKindCount; ++i)
 		TEST_EXPECT(asset_kind_from_token(asset_kind_token(AssetKind(i))) == AssetKind(i));
 	TEST_EXPECT(std::string(asset_kind_token(AssetKind::kCount)) == "unknown");
-	return 0;
-}
-
-static int test_name_rules() {
-	TEST_EXPECT(normalized_logical_name("main.mnu") == "MAIN.MNU");
-	TEST_EXPECT(normalized_logical_name("Main.MNU  ") == "MAIN.MNU");
-	// The whole text, however long: a filter compares a record's text by it, so a word past its 255th
-	// byte is found (it stopped there before).
-	const std::string long_text = std::string(300, 'x') + " needle";
-	TEST_EXPECT(normalized_logical_name(long_text) == std::string(300, 'X') + " NEEDLE");
-	TEST_EXPECT(normalized_logical_name(long_text).find(normalized_logical_name("needle")) != std::string::npos);
-	TEST_EXPECT(normalized_logical_name(std::string("ab\0cd", 5)) == "AB");
-	TEST_EXPECT(logical_name_fits_archive("sixteen_chars.pf"));
-	TEST_EXPECT(!logical_name_fits_archive("seventeen_char.pff"));
-	TEST_EXPECT(!logical_name_fits_archive("   "));
 	return 0;
 }
 
@@ -373,7 +358,6 @@ static int test_empty_project_scans_clean() {
 int main() {
 	int failures = 0;
 	failures += test_classification();
-	failures += test_name_rules();
 	failures += test_scan_exclusions_and_diagnostics();
 	failures += test_lookups();
 	failures += test_named();

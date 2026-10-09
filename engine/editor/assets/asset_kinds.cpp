@@ -488,7 +488,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	// An expansion's weapon.sav is the game's beside the expansion's files [orig:
 	// PlayerProfile_LoadAllFromDisk @ 0x54f6b7; the save @ 0x54becd]; a build packs no save
-	// (assets/player_files.h).
+	// (gameprofile/player_files.h).
 	Kind(AssetKind::PlayerSave, "player_save", "Player save", ArchiveSlot::Loose)
 	        .extensions(kPlayerSave)
 	        .expansion(ExpansionLoose::Folder)
