@@ -573,22 +573,23 @@ bool MissionAudio::slot_soundset(const String &p_name, const Vector3 &p_world_po
 }
 
 bool MissionAudio::play_dialog(int p_wav_id) {
-	if (bank_.is_null() || !root_attached_) {
+	const Ref<Simulation> sim = _simulation();
+	if (sim.is_null() || !sim->play_dialog(p_wav_id)) {
+		UtilityFunctions::push_warning(vformat("MissionAudio: dialog id %d did not play", p_wav_id));
 		return false;
 	}
-	std::vector<opennova::audio::DialogLineRef> lines = _resolve_dialog_lines(p_wav_id);
-	if (lines.empty()) {
-		UtilityFunctions::push_warning(vformat("MissionAudio: unresolved dialog id %d", p_wav_id));
-		return false;
-	}
-	const std::string dialog = lines.front().dialog_name;
-	return dialog_queue_.enqueue(dialog, std::move(lines));
+	return true;
 }
 
 void MissionAudio::advance_dialog_tick() {
 	const bool rendered = dialog_frame_rendered_;
 	dialog_frame_rendered_ = false;
-	dialog_queue_.tick(rendered,
+	const Ref<Simulation> sim = _simulation();
+	opennova::audio::DialogQueue *queue = sim.is_valid() ? sim->dialog_queue() : nullptr;
+	if (queue == nullptr) {
+		return;
+	}
+	queue->tick(rendered,
 			[this](const opennova::audio::DialogLineRef &p_line) { return _load_dialog_line(p_line); },
 			[this](uint64_t p_voice) { return _dialog_voice_playing(p_voice); });
 }
@@ -973,12 +974,16 @@ void MissionAudio::_stop_all_ambient_channels() {
 void MissionAudio::_reset_mission_playback_state() {
 	_stop_script_voice(true);
 	// Dialog and WAC voices are mission-owned even though they use separate
-	// physical players from ambience. Stop them before replacing/queuing their
-	// audio root so neither playback nor a queued dialog can cross missions.
-	for (const uint64_t voice : dialog_queue_.voices()) {
-		if (AudioStreamPlayer *dialog = Object::cast_to<AudioStreamPlayer>(
-					ObjectDB::get_instance(ObjectID(voice)))) {
-			dialog->stop();
+	// physical players from ambience. Stop them before replacing their audio
+	// root so no playback crosses missions; the dialog table is the world's,
+	// which the next mission's boot starts empty.
+	const Ref<Simulation> sim = _simulation();
+	if (opennova::audio::DialogQueue *queue = sim.is_valid() ? sim->dialog_queue() : nullptr) {
+		for (const uint64_t voice : queue->voices()) {
+			if (AudioStreamPlayer *dialog = Object::cast_to<AudioStreamPlayer>(
+						ObjectDB::get_instance(ObjectID(voice)))) {
+				dialog->stop();
+			}
 		}
 	}
 	if (AudioStreamPlayer *dialog = _dialog_voice_node()) {
@@ -987,7 +992,6 @@ void MissionAudio::_reset_mission_playback_state() {
 	if (AudioStreamPlayer *wac = _wac_voice_node()) {
 		wac->stop();
 	}
-	dialog_queue_.clear();
 	dialog_voice_id_ = ObjectID();
 	dialog_frame_rendered_ = false;
 	wac_voice_id_ = ObjectID();

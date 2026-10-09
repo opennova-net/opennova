@@ -15,6 +15,7 @@
 //  @0x577950; Cine_EpilogStateMachineUpdate @0x576240; Input_HandleSpecialKeys
 //  @0x49C5C0 round-over arm; UI_IngameRestartCommand @0x555410;
 //  Game_ProcessMainFrame @0x526806..0x526867; Game_RestartRoundSP @0x5263A0]
+#include <runtime/audio/dialog_queue.h>
 #include <runtime/hud/hud_toggles.h>
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/mission_exit.h>
@@ -22,6 +23,7 @@
 #include <runtime/inmatch/session.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/epilog_cine.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/objectives_feed.h>
 #include <base/gameprofile/game_type.h>
 
@@ -347,17 +349,13 @@ int main() {
 		m.frames(4);
 		w::World &world = m.world();
 		w::EpilogCine &cine = world.epilog;
-		world.script.dialog.register_started(5);
+		world.script.dialog.enqueue(audio::dialog_name_of(5), {});
 		world.out.effects.clear();
 		world.process_round_end(2);
-		// The SP tail's Dialog_ResetAll clears the dialog registry, and the
-		// round_end effect carries the SP word (the shell's queue reset)
-		// [orig: Server_ProcessRoundEnd @0x516953].
-		CHECK(!world.script.dialog.registered(5) && !world.script.dialog.active_exists(5));
-		bool sp_word = false;
-		for (const w::Effect &e : world.out.effects.entries())
-			if (e.kind == "round_end") sp_word = e.c == 1;
-		CHECK(sp_word);
+		// The SP tail's Dialog_ResetAll clears the world's dialog table, its
+		// waiting lines with it [orig: Server_ProcessRoundEnd @0x516953].
+		CHECK(world.script.dialog.history().empty() && world.script.dialog.slots().empty());
+		CHECK(world.out.effects.count("round_end") == 1);
 		// Cine_StartPlayback: the 100-frame letterbox and the edit fade.
 		CHECK(cine.mode == w::EpilogCineMode::Lose && cine.lose_state == 0);
 		CHECK(cine.events.size() == 2);
@@ -367,8 +365,12 @@ int main() {
 		(void)m.frame();
 		CHECK(cine.lose_state == 1 && !cine.screen_active && cine.frame_drawn);
 		CHECK(world.script_may_advance());
+		// The build's Dialog_ResetAll clears the table again [orig:
+		// Cinematic_EpilogUpdate @0x5747DA].
+		world.script.dialog.enqueue(audio::dialog_name_of(6), {});
 		(void)m.frame();
 		CHECK(cine.screen_active && cine.lose_state == 2);
+		CHECK(world.script.dialog.history().empty() && world.script.dialog.slots().empty());
 		CHECK(cine.frame == 2 && cine.lose_age == 1);
 		CHECK(!world.script_may_advance());
 		// MISSION FAILED, the banner line and the key help: 249 frames past
@@ -399,6 +401,21 @@ int main() {
 		// The session reports the exit on its next frame.
 		const im::FrameOutcome out = m.frame();
 		CHECK(out.status == im::FrameStatus::SessionLost);
+	}
+
+	// --- the round init's dialog reset -----------------------------------------
+	{
+		// The local player's (re)deploy runs round init, which clears the
+		// world's dialog table [orig: Server_ProcessPlayerDeath @0x5178aa ->
+		// Game_InitNewRound @0x422741 / @0x4227ac -> Dialog_ResetAll @0x44dc90].
+		SpMission m;
+		CHECK(m.boot(files, false));
+		w::World &world = m.world();
+		CHECK(world.local_player_state != nullptr);
+		world.script.dialog.enqueue(audio::dialog_name_of(5), {});
+		CHECK(world.script.dialog.active(5));
+		world.local_player_state->reset_for_new_round();
+		CHECK(world.script.dialog.history().empty() && world.script.dialog.slots().empty());
 	}
 
 	// --- the round-over leg's gates and the ESC exit ---------------------------

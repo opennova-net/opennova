@@ -737,12 +737,10 @@ void World::process_round_end(int32_t winning_team) {
     // @0x672e95; retail gamemus.bin dispatches 1 -> Missionwin, 2 ->
     // Missionlose); the gamemus context is open in SP (Game_StartMission
     // @0x525581 opens it on the is_client bit, which mode 3 single player
-    // carries). The dialog and music legs are host presentation: the effect
-    // carries the winner (a) and the end track (b); the shell, in SP only,
-    // resets the dialog and signals the track.
-    // The registry half of Dialog_ResetAll is the world's; the effect's c word
-    // tells the shell the SP tail ran (its dialog queue's waiting lines go the
-    // same way; the playing line's stop is D-HUD-46).
+    // carries). The music leg is host presentation: the effect carries the
+    // winner (a) and the end track (b); the shell, in SP only, signals the
+    // track. Dialog_ResetAll clears the world's dialog table, its waiting lines
+    // with it (the playing line's stop is D-HUD-46).
     if (!rules.mp_session) {
         script.dialog.reset(); // [orig: Dialog_ResetAll @0x516953 -> @0x44dc90]
         if (winning_team == 1)
@@ -751,8 +749,7 @@ void World::process_round_end(int32_t winning_team) {
             epilog.begin_lose(); // [orig: @0x51697b]
     }
     const int32_t end_track = winning_team == 1 ? 1 : 2;
-    out.effects.push({"round_end", winning_team, end_track, rules.mp_session ? 0 : 1, 0,
-                      std::string()});
+    out.effects.push({"round_end", winning_team, end_track, 0, 0, std::string()});
 }
 
 void World::round_over_restart() {

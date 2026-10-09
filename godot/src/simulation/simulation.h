@@ -1908,6 +1908,9 @@ public:
 	void finish_script_voice(uint64_t p_serial, const opennova::lwf::WavPcm *p_clip);
 	void set_script_voice_resolver(opennova::world::ScriptVoiceChannel::SetResolver p_resolver);
 	bool play_script_wave(const String &p_filename);
+	// The world's one dialog table, which mission audio plays (runtime/audio/dialog_queue.h).
+	opennova::audio::DialogQueue *dialog_queue();
+	bool play_dialog(int p_dialog_index); // the PlayWavList play by number (probes, tools)
 	TypedArray<SoundEmitterRow> drain_sound_emitters();
 
 	// The live tracer TRAIL channels — the per-round point rings behind every streak,

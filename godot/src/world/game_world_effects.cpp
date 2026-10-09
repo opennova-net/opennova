@@ -18,12 +18,12 @@
 
 using namespace godot;
 
-// Fire mission audio + particle effects for presentation. PlayWavList actions
-// surface as "dialog" effects carrying the dialog/wav id in `a`; route them to
-// the mission audio (which resolves the id through the co-named .DBF and plays
-// the LWF set). Typed WAC/BMS particle descriptors use route_script_effects.
-// Other kinds are still emitted via mission_effects
-// for downstream consumers (HUD, etc.).
+// Fire mission audio for presentation. A BMS PlayWavList ("dialog" effect)
+// has already registered its dialog in the world's dialog table, whose lines
+// the mission audio plays on the dialog ticks (on_runtime_fixed_tick); the
+// effect stays a presentation log. Typed WAC/BMS particle descriptors use
+// route_script_effects. Every kind is still emitted via mission_effects for
+// downstream consumers (HUD, etc.).
 void GameWorld::route_mission_effects(const Array &p_effects) {
 	MissionAudio *audio = get_mission_audio();
 	for (int64_t i = 0; i < p_effects.size(); ++i) {
@@ -32,18 +32,7 @@ void GameWorld::route_mission_effects(const Array &p_effects) {
 			continue;
 		}
 		const String kind = eff->get_kind();
-        if (kind == "local_round_reset") {
-            if (audio != nullptr) audio->reset_dialog_queue();
-        } else if (kind == "round_end" && eff->get_c() != 0) {
-            // The SP round end's dialog reset reaches the queue's waiting lines
-            // (engine World::process_round_end carries the witness).
-            if (audio != nullptr) audio->reset_dialog_queue();
-        } else if (kind == "dialog") {
-			// BMS PlayWavList: dialog id resolved through the co-named .DBF (queued).
-			if (audio != nullptr) {
-				audio->play_dialog(eff->get_a());
-			}
-		} else if (kind == "dialog_line") {
+		if (kind == "dialog_line") {
 			// A co-op host's dialog line: name in the text, line in a, the local
 			// player's class in b (engine: client_effects / resolve_dialog_line).
 			if (audio != nullptr) {
@@ -139,9 +128,9 @@ void GameWorld::route_terrain_scorches() {
 	}
 }
 
-// Consume render-internal lifecycle effects first, route "dialog" actions to
-// mission audio (resolved through the co-named .DBF + LWF set), then expose only
-// the remaining downstream effects to HUD consumers.
+// Consume render-internal lifecycle effects first, route the dialog-line and
+// script-voice effects to mission audio, then expose only the remaining
+// downstream effects to HUD consumers.
 void GameWorld::on_runtime_effects(const Array &p_effects) {
 	Array routed;
 	for (int64_t i = 0; i < p_effects.size(); ++i) {
@@ -181,8 +170,8 @@ void GameWorld::on_runtime_fixed_tick(int p_logic_tick) {
 	route_round_impacts();
     route_script_effects();
 	// The dialog channel's playback tick, once a logic tick, after this tick's
-	// PlayWavList dialogs reached the queue (on_runtime_effects): the engine's
-	// dialog slots load their lines on their timers (runtime/audio/dialog_queue).
+	// PlayWavList dialogs registered in the world's dialog table: its slots
+	// load their lines on their timers (runtime/audio/dialog_queue).
 	if (MissionAudio *audio = get_mission_audio()) {
 		audio->advance_dialog_tick();
 	}

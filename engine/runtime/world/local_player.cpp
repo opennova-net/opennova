@@ -781,6 +781,10 @@ void LocalPlayer::tick_view() {
 }
 
 void LocalPlayer::reset_for_new_round() {
+    // Round init clears the world's dialog table, its first statement and again
+    // after the overlay reset; the second finds it empty
+    // [orig: Game_InitNewRound @0x422741 / @0x4227ac -> Dialog_ResetAll @0x44dc90].
+    world_.script.dialog.reset();
     // The overlay-buffer reset is unconditional in retail's round init; the
     // local-player gate below covers only the view state
     // [orig: Game_InitNewRound @0x4227a7 -> HUD_ResetAllOverlayBuffers @0x59dd40].
@@ -829,8 +833,8 @@ void LocalPlayer::reset_for_new_round() {
     const w::AiEntity *motor = player_ai();
     input.look_heading = motor != nullptr ? motor->heading
                                           : bam_heading_from_mission_yaw_deg(local->yaw);
-    // Dialog and HUD buffers belong to the presenting device; one ordered
-    // effect carries the reset without discarding unrelated mission events.
+    // The HUD buffers belong to the presenting device; one ordered effect
+    // carries the reset without discarding unrelated mission events.
     Effect reset;
     reset.kind = "local_round_reset";
     world_.out.effects.push(std::move(reset));
