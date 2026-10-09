@@ -12,6 +12,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
+#include <base/vfs/vfs_decode.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/asset_type_registry.h>
@@ -51,7 +52,7 @@ std::vector<ImportChoice> list_import_choices(const std::vector<std::string> &pa
 				sources.push_back({path, file.logical_name});
 				if (!facts) continue;
 				uint64_t stored = 0;
-				facts->push_back({expected_asset_kind_for_required_name(file.logical_name),
+				facts->push_back({file_kind_for_required_name(file.logical_name),
 				                  archive.file_size(file.logical_name, stored) ? stored : 0});
 			}
 		} else {
@@ -59,7 +60,7 @@ std::vector<ImportChoice> list_import_choices(const std::vector<std::string> &pa
 			if (!facts) continue;
 			std::error_code size_error;
 			const auto bytes = fs::file_size(system_path(path), size_error);
-			facts->push_back({expected_asset_kind_for_required_name(utf8_of(path_of(path).filename())),
+			facts->push_back({file_kind_for_required_name(utf8_of(path_of(path).filename())),
 			                  size_error ? 0 : uint64_t(bytes)});
 		}
 	}
@@ -67,7 +68,7 @@ std::vector<ImportChoice> list_import_choices(const std::vector<std::string> &pa
 }
 
 bool read_served(const Vfs &game, const std::string &name, std::vector<uint8_t> &out) {
-	if (asset_kind_row(classify_asset(name, nullptr)).scr == ScrForm::Shader) return game.read_file_raw(name, out);
+	if (vfs_loader_takes_stored(name)) return game.read_file_raw(name, out);
 	return game.read_file(name, out);
 }
 
@@ -118,7 +119,7 @@ std::vector<ImportChoice> list_retail_import_choices(const std::string &retail_r
 	sources.reserve(view.files().size());
 	for (const InstallFile &file : view.files()) {
 		sources.push_back(install_choice(retail_root, file));
-		if (facts) facts->push_back({expected_asset_kind_for_required_name(file.name), view.size(file)});
+		if (facts) facts->push_back({file_kind_for_required_name(file.name), view.size(file)});
 	}
 	return sources;
 }
@@ -157,7 +158,7 @@ std::string import_destination(const AssetScan &existing, const std::string &nam
 	// else the top level of a flat project or the kind's folder); an import source with the files of the
 	// kind its name gives (a PNG with the textures it makes), or, where its name gives none, in its
 	// importer's folder (a font set with the fonts it makes).
-	if (kind == AssetKind::ImportSource && asset_kind_for_name(name) == AssetKind::Unknown)
+	if (kind == AssetKind::ImportSource && file_kind_for_name(name) == AssetKind::Unknown)
 		if (const Importer *importer = authored_importer_for(name)) return join_path(importer->folder, name);
 	return placement_path(existing, name, kind);
 }
@@ -480,7 +481,7 @@ private:
 			// An author's wave comes in as the game plays it (the sound lane, import/wave_source.h): as it is
 			// where the game's loader takes it, else written in the form it takes, said; one that reads as no
 			// wave is refused.
-			if (authored && asset_kind_for_name(output.name) == AssetKind::Wave) {
+			if (authored && file_kind_for_name(output.name) == AssetKind::Wave) {
 				std::string note, why;
 				if (!prepare_authored_wave(output.name, output.bytes, note, why)) {
 					refuse(CoreFinding::ImportWave, why, output.name);
