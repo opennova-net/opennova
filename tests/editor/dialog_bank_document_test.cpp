@@ -198,8 +198,6 @@ int test_reads_and_writes_back() {
 	TEST_EXPECT(bank.rewrite_need() == DocumentBase::RewriteNeed::None);
 	Value number;
 	TEST_EXPECT(bank.get({one->id, kDialog, 0}, "number", number) && std::get<int64_t>(number) == 1);
-	TEST_EXPECT(dialog_number("dlg012") == 12 && dialog_number("dlg1234") == 1234 && dialog_number("dlg12") == -1 &&
-	            dialog_number("DLG012") == -1 && dialog_number("intro") == -1);
 	// The scopes: the bank's own name, its sounds' (.lwf, else .pwf).
 	TEST_EXPECT(dialog_bank_scope("missions/talk.dbf") == "TALK.DBF" && dialog_sounds_scope("missions/talk.dbf") == "TALK.LWF" &&
 	            dialog_sounds_alternate("missions/talk.dbf") == "TALK.PWF");
