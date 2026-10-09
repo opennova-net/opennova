@@ -94,6 +94,17 @@ static int test_row_set_follows_the_manifest_and_features() {
 	TEST_EXPECT(row_named(with_missions, "failsafe.bad") != nullptr && !row_named(with_missions, "failsafe.bad")->required);
 	TEST_EXPECT(row_named(with_missions, "ammo.def")->required);
 	TEST_EXPECT(requirement_phase_enabled(doc, BOOT_PHASE_MISSION));
+	// The files the game reads for multiplayer alone join the checklist with the Multiplayer feature: the
+	// NovaWorld screens (required) and the multiplayer missions' music (optional).
+	TEST_EXPECT(row_named(with_missions, "mp.mnu") == nullptr && row_named(with_missions, "GAMEMUS.SBF") == nullptr);
+	doc.features.multiplayer = true;
+	const RequirementReport with_multiplayer = evaluate_requirements(doc, empty);
+	TEST_EXPECT(row_named(with_multiplayer, "mp.mnu") && row_named(with_multiplayer, "mp.mnu")->required);
+	TEST_EXPECT(row_named(with_multiplayer, "GAMEMUS.SBF") && !row_named(with_multiplayer, "GAMEMUS.SBF")->required);
+	TEST_EXPECT(with_multiplayer.required_total == with_missions.required_total + 1);
+	doc.features.mission = false;
+	TEST_EXPECT(row_named(evaluate_requirements(doc, empty), "mp.mnu") == nullptr); // a mission's phase still
+	doc.features.multiplayer = false;
 	doc.features.mission = false;
 	TEST_EXPECT(!requirement_phase_enabled(doc, BOOT_PHASE_MISSION));
 	TEST_EXPECT(requirement_phase_enabled(doc, BOOT_PHASE_BOOT));
@@ -219,8 +230,15 @@ static int test_expansion_rows() {
 	TEST_EXPECT(!row_named(menu_only, "Gjxm.sbf") && !row_named(menu_only, "jxmL.lwf"));
 	doc.features.mission = true;
 	const RequirementReport with_missions = evaluate_requirements(doc, empty);
-	for (const char *name : {"Gjxm.sbf", "Gjxm.bin", "jxmL.lwf", "jxm.lwf"})
+	for (const char *name : {"jxmL.lwf", "jxm.lwf"})
 		TEST_EXPECT(row_named(with_missions, name) && !row_named(with_missions, name)->required);
+	// The game music a multiplayer mission alone opens, with the Multiplayer feature.
+	TEST_EXPECT(!row_named(with_missions, "Gjxm.sbf") && !row_named(with_missions, "Gjxm.bin"));
+	doc.features.multiplayer = true;
+	const RequirementReport with_multiplayer = evaluate_requirements(doc, empty);
+	for (const char *name : {"Gjxm.sbf", "Gjxm.bin"})
+		TEST_EXPECT(row_named(with_multiplayer, name) && !row_named(with_multiplayer, name)->required);
+	doc.features.multiplayer = false;
 	int last_phase = BOOT_PHASE_BOOT;
 	for (const RequirementRow &row : with_missions.rows) {
 		TEST_EXPECT(row.phase >= last_phase);

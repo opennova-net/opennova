@@ -48,6 +48,16 @@ struct RequirementReport {
 };
 
 bool requirement_phase_enabled(const ProjectDocument &doc, int phase);
+// Whether the manifest's row of `role` is a file the game reads for multiplayer alone, which the project's
+// Multiplayer feature puts on the checklist: mp.mnu, the NovaWorld screens the game loads as a player enters
+// NovaWorld or comes back to it from a game [orig: UI_EnterNovaWorldMenu @ 0x5588fa, from
+// Menu_InitShellResources @ 0x5526c2 and UI_NWMultiPlayer_OnBack @ 0x558cf9]; the mission music GAMEMUS (and
+// an expansion's G<n> in its place), which a mission opens only in a multiplayer session (a single-player
+// mission stops the music context) [orig: Game_StartMission @ 0x525581..0x5255ae].
+bool requirement_multiplayer_only(const std::string &role);
+// Whether the project's checklist has the manifest's row: its phase on (requirement_phase_enabled), and a
+// multiplayer-only row's Multiplayer feature on.
+bool requirement_row_enabled(const ProjectDocument &doc, const gameprofile::RequiredResource &resource);
 const char *requirement_phase_label(int phase);
 
 // Beside the rows, a project's expansion (ADR 0046 S16): weighed against `install_expansions` (the

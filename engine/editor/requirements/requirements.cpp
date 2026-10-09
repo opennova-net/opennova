@@ -21,6 +21,17 @@ bool requirement_phase_enabled(const ProjectDocument &doc, int phase) {
 	}
 }
 
+bool requirement_multiplayer_only(const std::string &role) {
+	for (const char *only : { "mp_menu", "gamemus_sbf", "gamemus_bin", "expansion_gamemus_sbf", "expansion_gamemus_bin" })
+		if (role == only) return true;
+	return false;
+}
+
+bool requirement_row_enabled(const ProjectDocument &doc, const RequiredResource &resource) {
+	if (!requirement_phase_enabled(doc, resource.phase)) return false;
+	return doc.features.multiplayer || !requirement_multiplayer_only(resource.role ? resource.role : "");
+}
+
 const char *requirement_phase_label(int phase) {
 	switch (phase) {
 	// When the game reads it, not that it cannot go on without it: what it does then is the row's
@@ -89,7 +100,7 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 			// row of an expansion's checklist: the game never reads it there.
 			if (gameprofile::gameprofile_replaced_under_expansion(resource->name)) continue;
 		}
-		if (!requirement_phase_enabled(doc, resource->phase)) continue;
+		if (!requirement_row_enabled(doc, *resource)) continue;
 
 		RequirementRow row;
 		row.resource = resource;

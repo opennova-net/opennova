@@ -138,10 +138,10 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	                "of the game, so File > Import the whole game install... is the way to bring them in.");
 	bool multiplayer = held.multiplayer;
 	if (ImGui::Checkbox("Multiplayer", &multiplayer)) set("multiplayer", io::JsonValue::make_bool(multiplayer));
-	// What it does today, in the game's terms (the UX round's project lane): the requirements have no
-	// multiplayer phase (requirement_phase_enabled), so it changes no check.
-	ui_kit::tooltip("Kept with the project; no check reads it yet. A multiplayer game reads the menus' files and a "
-	                "mission's: Missions brings the files a mission needs into Problems.");
+	// What it does, in the game's terms: the files the game reads for multiplayer alone join the checklist
+	// (requirement_multiplayer_only).
+	ui_kit::tooltip("The game then needs the files it reads for multiplayer alone: the NovaWorld screens (mp.mnu) and, "
+	                "with Missions, the multiplayer missions' music. Problems lists the missing ones.");
 	ImGui::SeparatorText("Expansion");
 	ExpansionChoice choice{ held.builds_on, held.as_expansion, held.expansion, held.base_project };
 	bool changed = false;

@@ -311,6 +311,7 @@ static int test_mission_project_builds_clean() {
 	Project p("opennova_editor_build_mission_test");
 	TEST_EXPECT(p.create());
 	p.doc.features.mission = true;
+	p.doc.features.multiplayer = true; // mp.mnu, the NovaWorld screens, with it
 	TEST_EXPECT(p.fill());
 	{
 		const AssetScan scan = scan_project_assets(p.paths, p.doc);
