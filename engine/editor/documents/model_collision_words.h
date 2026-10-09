@@ -39,12 +39,6 @@ const char *model_volume_family_words(ModelVolumeFamily family);
 const char *model_occlusion_type_words(int64_t type);
 const char *model_occlusion_type_what(int64_t type);
 
-// The radius a round meets a person's hit sphere at (16.16): the authored radius scaled to 45 percent
-// (65 for the head, section 14) plus 0xCCC (1/20 m), sections 15 and 16 capped at 0x3000, for a round
-// of no extra radius [orig: Physics_RaycastAgainstBoneSections @ 0x4e4670; docs/world/world-wac-ai-re.md
-// section 15.8b].
-int32_t model_person_hit_radius_q16(int section, int32_t authored_q16);
-
 // Whether a section is a person's hit sphere: a bone section (no faces, no volumes) of a skinned model
 // whose whole-body row holds the face mesh, as every person model's does (docs/world/world-wac-ai-re.md
 // section 15.8b, person-model subobjects); a skinned model with no face at all (a first-person view's
