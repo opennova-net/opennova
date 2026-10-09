@@ -435,7 +435,7 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 			renamed.new_name = renamed_import_output(output.logical_name, asset->logical_name, new_name);
 			if (renamed.new_name != renamed.old_name) {
 				const AssetEntry *taken = scan.find(renamed.new_name);
-				if (!logical_name_fits_archive(renamed.new_name)) {
+				if (!pff::logical_name_fits_archive(renamed.new_name)) {
 					plan.refusals.push_back(refusal(CoreFinding::RenameName, "The import output " + renamed.new_name +
 					                                " would not fit the game's archives: names are up to 16 characters.",
 					                                asset->relative_path));

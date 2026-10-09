@@ -769,7 +769,7 @@ static int test_retail_play() {
 
 	// Ordinary installs use the plain Bink DLL. A game.cfg the project holds is this machine's
 	// configuration, never the project's: the build leaves it out and says so (ADR 0046 S14,
-	// assets/player_files.h). The run directory, its game gone, is taken again: what the Play before
+	// gameprofile/player_files.h). The run directory, its game gone, is taken again: what the Play before
 	// staged goes and is staged again (the Bink DLL now the plain one), its file log goes, and what the
 	// game wrote there stays: the game.cfg it adjusted, which the install's seed never replaces, newer or
 	// not (run/run_directory.h). The run section and Output name what it kept.

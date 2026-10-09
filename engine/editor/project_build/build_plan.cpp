@@ -2,10 +2,10 @@
 
 #include <algorithm>
 
+#include <base/gameprofile/player_files.h>
 #include <base/gameprofile/required_resources.h>
 #include <base/io/strutil.h>
-
-#include <editor/assets/player_files.h>
+#include <base/vfs/vfs.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
@@ -39,7 +39,7 @@ Placement place(const AssetEntry &asset, const BuildTarget &target) {
 	case ExpansionPlace::Archive: out.slot = ArchiveSlot::Localres; break; // <b>.pff, the plan's Localres archive
 	case ExpansionPlace::Folder:
 		out.slot = ArchiveSlot::Loose;
-		out.loose_path = expansion_folder(target.expansion) + "/" + asset.logical_name;
+		out.loose_path = vfs_expansion_dir(std::string(), target.expansion) + "/" + asset.logical_name;
 		break;
 	case ExpansionPlace::RootOnly: out.root_only = true; break;
 	case ExpansionPlace::None: break;
@@ -51,7 +51,7 @@ Placement place(const AssetEntry &asset, const BuildTarget &target) {
 // The plan's own finding about a file of the scan, false for one it packs or leaves out without a word: an
 // archive (the build packs the project's files itself); the player's or this machine's own file (a save, a
 // configuration, the stored credentials, what the game writes: never packed, ADR 0046 S14,
-// assets/player_files.h); a NovaWorld screen of a name no archive holds, which the game never reads (left
+// gameprofile/player_files.h); a NovaWorld screen of a name no archive holds, which the game never reads (left
 // out); a file an archive packs whose name no archive can store (where `target` places it: the standalone
 // game's archives, or an expansion's, ADR 0046 S16).
 bool own_finding(const AssetEntry &asset, const BuildTarget &target, Diagnostic &out) {
@@ -62,9 +62,9 @@ bool own_finding(const AssetEntry &asset, const BuildTarget &target, Diagnostic 
 		                   asset.relative_path);
 		return true;
 	}
-	if (is_player_file(asset.logical_name)) {
+	if (gameprofile::is_player_file(asset.logical_name)) {
 		out = make_finding(CoreFinding::BuildPlayerFile, DiagnosticSeverity::Warning,
-		                   asset.logical_name + " is " + player_file_words(asset.logical_name) +
+		                   asset.logical_name + " is " + gameprofile::player_file_words(asset.logical_name) +
 		                           ": a build never packs the player's own files, so it is left out.",
 		                   asset.relative_path);
 		return true;
@@ -74,7 +74,7 @@ bool own_finding(const AssetEntry &asset, const BuildTarget &target, Diagnostic 
 	// the page an ACTION of type MNX names [orig: CUIWidget_HandleScriptedAction @ 0x649bb2]. A name no
 	// archive can store is one the game never reads: such a page (a template, a backup) is left out and
 	// said, never gating the build as an archived kind's name would (ADR 0046 S16).
-	if (asset.kind == AssetKind::NovaWorldScreen && !logical_name_fits_archive(asset.logical_name)) {
+	if (asset.kind == AssetKind::NovaWorldScreen && !pff::logical_name_fits_archive(asset.logical_name)) {
 		out = make_finding(CoreFinding::BuildUnread, DiagnosticSeverity::Warning,
 		                   "The game reads a NovaWorld screen through its archives alone, and no archive can hold the "
 		                   "name " + asset.logical_name + " (it is too long): the build leaves it out.",
@@ -83,7 +83,7 @@ bool own_finding(const AssetEntry &asset, const BuildTarget &target, Diagnostic 
 	}
 	const Placement placement = asset_kind_packed(asset.kind) ? place(asset, target) : Placement();
 	if (placement.slot != ArchiveSlot::None && placement.slot != ArchiveSlot::Loose &&
-	    !logical_name_fits_archive(asset.logical_name)) {
+	    !pff::logical_name_fits_archive(asset.logical_name)) {
 		out = make_finding(CoreFinding::BuildNameUnstorable, DiagnosticSeverity::Error,
 		                   "The game cannot store " + asset.logical_name + " in an archive (the name is too long).",
 		                   asset.relative_path);
@@ -91,13 +91,6 @@ bool own_finding(const AssetEntry &asset, const BuildTarget &target, Diagnostic 
 	}
 	return false;
 }
-
-// What the Mods list copies an expansion's [exp_info] EXP_NAME and EXP_DESC into: the 64-byte name and
-// the 272-byte description of its ExpansionRecord (stride 596: the name @+0, the folder's name @+0x40,
-// the description @+0x144), each copied whole with no bound [orig: Expansion_ScanAndRegister @ 0x4a4598,
-// @ 0x4a4612].
-constexpr size_t kExpansionRecordName = 64;
-constexpr size_t kExpansionRecordDescription = 272;
 
 // The expansion's table (<b>.bin, its row of project/expansion_files) read as the Mods list reads it:
 // a name of 64 bytes or more runs over the record's folder name, which choosing the expansion there
@@ -112,7 +105,7 @@ void check_expansion_table(const ProjectPaths &paths, const AssetScan &scan, con
 		std::string error;
 		if (!rtxt::parse_file(join_path(paths.root, asset.relative_path), table, error)) return;
 		const rtxt::Entry *name = table.find_in_section("exp_info", "EXP_NAME");
-		if (name && name->text.size() >= kExpansionRecordName)
+		if (name && name->text.size() >= kExpansionRecordNameBytes)
 			out.push_back(make_finding(
 			        CoreFinding::BuildExpansionExpName, DiagnosticSeverity::Error,
 			        "The expansion's name in the Mods list, EXP_NAME, is " + std::to_string(name->text.size()) +
@@ -120,7 +113,7 @@ void check_expansion_table(const ProjectPaths &paths, const AssetScan &scan, con
 			                "loads the base game. Shorten it to 63 bytes or fewer.",
 			        asset.relative_path));
 		const rtxt::Entry *description = table.find_in_section("exp_info", "EXP_DESC");
-		if (description && description->text.size() >= kExpansionRecordDescription)
+		if (description && description->text.size() >= kExpansionRecordDescriptionBytes)
 			out.push_back(make_finding(
 			        CoreFinding::BuildExpansionExpDesc, DiagnosticSeverity::Warning,
 			        "The expansion's description in the Mods list, EXP_DESC, is " +
@@ -176,7 +169,7 @@ BuildPlaceWords build_place_words(const AssetEntry &asset, const std::string &ex
 	case ArchiveSlot::Localres:
 	case ArchiveSlot::Resource:
 		out.words = "Packed into " +
-		            (target.is_expansion() ? expansion_archive_path(expansion, placement.slot == ArchiveSlot::Language)
+		            (target.is_expansion() ? vfs_expansion_archive_path(std::string(), expansion, placement.slot == ArchiveSlot::Language)
 		                                   : std::string(archive_slot_file_name(placement.slot))) +
 		            ".";
 		out.packed = true;
@@ -232,7 +225,7 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 		for (const bool language : {true, false}) {
 			BuildArchive archive;
 			archive.slot = language ? ArchiveSlot::Language : ArchiveSlot::Localres;
-			archive.file_name = expansion_archive_path(target.expansion, language);
+			archive.file_name = vfs_expansion_archive_path(std::string(), target.expansion, language);
 			plan.archives.push_back(std::move(archive));
 		}
 	} else {
@@ -298,7 +291,7 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 	}
 	for (BuildArchive &archive : plan.archives) {
 		std::sort(archive.entries.begin(), archive.entries.end(), [](const BuildEntry &a, const BuildEntry &b) {
-			return normalized_logical_name(a.logical_name) < normalized_logical_name(b.logical_name);
+			return pff::normalized_logical_name(a.logical_name) < pff::normalized_logical_name(b.logical_name);
 		});
 	}
 	// An error whose code gates refuses the build (blocks_build): a missing reference is listed
