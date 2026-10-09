@@ -43,12 +43,12 @@ bool BaseMatch::open(const std::string &install, const std::string &game, std::s
 	}
 	for (const fs::directory_entry &entry : fs::directory_iterator(system_path(install), ec)) {
 		std::error_code kind;
-		if (entry.is_regular_file(kind)) loose_[normalized_logical_name(utf8_of(entry.path().filename()))] = utf8_of(entry.path());
+		if (entry.is_regular_file(kind)) loose_[pff::normalized_logical_name(utf8_of(entry.path().filename()))] = utf8_of(entry.path());
 	}
 	opened_at_ = io::file_clock_now_ticks();
 	archives_settled_ = true;
 	for (const char *archive : kBootArchiveTable) {
-		const auto found = loose_.find(normalized_logical_name(archive));
+		const auto found = loose_.find(pff::normalized_logical_name(archive));
 		archives_stamp_ += (found == loose_.end() ? std::string("-") : stamp_of(found->second)) + ";";
 		if (found != loose_.end()) archives_settled_ = archives_settled_ && settled(found->second);
 	}
@@ -77,7 +77,7 @@ bool BaseMatch::cached(const std::string &key, const std::string &stamp, BaseCop
 bool BaseMatch::archive_copy(const std::string &name, BaseCopy &out, uint64_t &read_bytes) {
 	const InstallFile *file = view_.find(name);
 	if (!file || !file->loose_path.empty()) return false;
-	const std::string key = "archive:" + normalized_logical_name(name);
+	const std::string key = "archive:" + pff::normalized_logical_name(name);
 	if (cached(key, archives_stamp_, out)) return true;
 	std::vector<uint8_t> bytes;
 	if (!view_.vfs().read_file_raw(file->member, bytes)) return false;
@@ -98,9 +98,9 @@ bool BaseMatch::archive_copy(const std::string &name, BaseCopy &out, uint64_t &r
 }
 
 bool BaseMatch::root_copy(const std::string &name, BaseCopy &out, uint64_t &read_bytes) {
-	const auto found = loose_.find(normalized_logical_name(name));
+	const auto found = loose_.find(pff::normalized_logical_name(name));
 	if (found == loose_.end()) return false;
-	const std::string key = "loose:" + normalized_logical_name(name);
+	const std::string key = "loose:" + pff::normalized_logical_name(name);
 	const std::string stamp = stamp_of(found->second);
 	if (cached(key, stamp, out)) return true;
 	std::vector<uint8_t> bytes;

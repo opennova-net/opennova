@@ -86,18 +86,18 @@ bool texture_import_state(const SessionView &view, const std::string &path, Text
 				if (texture_use_opens(use, output)) take(use);
 		if (uses.empty() && !named.empty()) {
 			std::map<std::string, size_t> writes;
-			for (const TextureUse &use : named) ++writes[normalized_logical_name(basename_of(use.name_written))];
+			for (const TextureUse &use : named) ++writes[pff::normalized_logical_name(basename_of(use.name_written))];
 			std::string most;
 			size_t count = 0;
 			for (const TextureUse &use : named) {
-				const std::string name = normalized_logical_name(basename_of(use.name_written));
+				const std::string name = pff::normalized_logical_name(basename_of(use.name_written));
 				if (writes[name] > count) {
 					most = name;
 					count = writes[name];
 				}
 			}
 			for (const TextureUse &use : named)
-				if (normalized_logical_name(basename_of(use.name_written)) == most) take(use);
+				if (pff::normalized_logical_name(basename_of(use.name_written)) == most) take(use);
 		}
 	}
 	// Whether the source holds an alpha, read from its header alone, where a use weighs it (a sky's clouds).

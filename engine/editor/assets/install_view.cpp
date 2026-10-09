@@ -13,7 +13,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/asset_type_registry.h>
-#include <editor/assets/player_files.h>
+#include <base/gameprofile/player_files.h>
 #include <editor/project/expansion_files.h>
 #include <editor/project/project_files.h>
 
@@ -22,22 +22,6 @@ namespace fs = std::filesystem;
 namespace opennova::editor {
 
 namespace {
-
-// The files the game reads from the folder of the expansion `expansion` by path, before any archive
-// and before the root's copy: its text override table, read from the loose file alone (the query is
-// path-qualified, so no archive entry serves it) [orig: TextResource_LoadOverrideTable @ 0x4a49de], which
-// the Mods list also reads loose first [orig: Expansion_ScanAndRegister @ 0x4a4492, @ 0x4a455b]; the
-// menu and intro videos by their names [orig: UI_CreateMenuBinkVideos @ 0x54b5ff..0x54b74a;
-// Game_PlayIntroVideos @ 0x5637d7..0x563848]; its music banks [orig: Expansion_LoadAssets @ 0x4a4906,
-// @ 0x4a4936]; and the encrypted configuration, read loose first [orig: Mission_LoadEncryptedConfig
-// @ 0x4cdcf4]. The version text is the project's own (made at its creation, never imported) and the
-// player's weapon.sav is no file of the game's.
-bool read_from_expansion_folder(const std::string &name, const std::string &expansion) {
-	for (const char *video : {"main.bik", "header.bik", "footer.bik", "prolog.bik", "intro.bik"})
-		if (strutil::iequals(name, video)) return true;
-	return strutil::iequals(name, expansion + ".bin") || strutil::iequals(name, "M" + expansion + ".sbf") ||
-	       strutil::iequals(name, "G" + expansion + ".sbf") || strutil::iequals(name, "gt.ssc");
-}
 
 // The version text, which has one reader, the CRC a joiner must match: the project makes its own, so
 // the view never offers the install's, wherever it lies (S16).
@@ -54,10 +38,10 @@ std::map<std::string, std::string> renames_for(const std::string &installed, con
 	if (project.empty()) return out;
 	for (size_t i = 0; i < kExpansionFileRoleCount; ++i) {
 		const ExpansionFileRow &row = expansion_file_row(static_cast<ExpansionFileRole>(i));
-		if (row.fixed) continue;
-		const std::string from = installed.empty() ? (row.replaces ? row.replaces : "") : expansion_file_name(row, installed);
+		if (row.fixed()) continue;
+		const std::string from = installed.empty() ? (row.replaces() ? row.replaces() : "") : expansion_file_name(row, installed);
 		if (from.empty()) continue;
-		out[normalized_logical_name(from)] = expansion_file_name(row, project);
+		out[pff::normalized_logical_name(from)] = expansion_file_name(row, project);
 	}
 	return out;
 }
@@ -66,7 +50,7 @@ std::map<std::string, std::string> renames_for(const std::string &installed, con
 bool base_music(const std::string &name) {
 	for (size_t i = 0; i < kExpansionFileRoleCount; ++i) {
 		const ExpansionFileRow &row = expansion_file_row(static_cast<ExpansionFileRole>(i));
-		if (row.replaces && strutil::iequals(row.replaces, name)) return true;
+		if (row.replaces() && strutil::iequals(row.replaces(), name)) return true;
 	}
 	return false;
 }
@@ -110,14 +94,14 @@ bool InstallView::open(const InstallSpec &spec, std::string &error) {
 			spec.expansion.empty() ? std::string() : join_path(join_path(spec.root, "expansion"), spec.expansion);
 	const std::map<std::string, std::string> renames = renames_for(spec.expansion, spec.project_expansion);
 	std::set<std::string> targets; // the names the renamed files take, which no other file of the view has
-	for (const auto &entry : renames) targets.insert(normalized_logical_name(entry.second));
+	for (const auto &entry : renames) targets.insert(pff::normalized_logical_name(entry.second));
 	const auto add = [&](InstallFile file) {
 		if (version_text(file.member)) return;
-		const auto renamed = renames.find(normalized_logical_name(file.member));
+		const auto renamed = renames.find(pff::normalized_logical_name(file.member));
 		if (renamed != renames.end()) file.name = renamed->second;
-		else if (targets.count(normalized_logical_name(file.name))) return;
+		else if (targets.count(pff::normalized_logical_name(file.name))) return;
 		if (!spec.expansion.empty() && base_music(file.member)) return;
-		if (!by_name_.emplace(normalized_logical_name(file.name), files_.size()).second) return;
+		if (!by_name_.emplace(pff::normalized_logical_name(file.name), files_.size()).second) return;
 		files_.push_back(std::move(file));
 	};
 	// The files the game reads from the expansion's folder first: each the copy `/exp` serves, so it
@@ -128,10 +112,10 @@ bool InstallView::open(const InstallSpec &spec, std::string &error) {
 		for (const fs::directory_entry &entry : fs::directory_iterator(system_path(expansion_dir), ec)) {
 			std::error_code kind;
 			const std::string name = utf8_of(entry.path().filename());
-			if (entry.is_regular_file(kind) && read_from_expansion_folder(name, spec.expansion)) folder.push_back(name);
+			if (entry.is_regular_file(kind) && vfs_read_from_expansion_folder(name, spec.expansion)) folder.push_back(name);
 		}
 		std::sort(folder.begin(), folder.end(), [](const std::string &a, const std::string &b) {
-			return normalized_logical_name(a) < normalized_logical_name(b);
+			return pff::normalized_logical_name(a) < pff::normalized_logical_name(b);
 		});
 		for (const std::string &loose : folder)
 			add({ loose, loose, InstallFile::Layer::Expansion, join_path(expansion_dir, loose) });
@@ -144,7 +128,7 @@ bool InstallView::open(const InstallSpec &spec, std::string &error) {
 		       (strutil::iequals(archive, spec.expansion + ".pff") || strutil::iequals(archive, spec.expansion + "L.pff"));
 	};
 	for (const VfsFileLocation &location : vfs_.list_files()) {
-		if (strutil::ends_with_icase(location.logical_name, ".pff") || is_player_file(location.logical_name)) continue;
+		if (strutil::ends_with_icase(location.logical_name, ".pff") || gameprofile::is_player_file(location.logical_name)) continue;
 		InstallFile file;
 		file.name = location.logical_name;
 		file.member = location.logical_name;
@@ -159,7 +143,7 @@ bool InstallView::open(const InstallSpec &spec, std::string &error) {
 }
 
 const InstallFile *InstallView::find(const std::string &project_name) const {
-	const auto found = by_name_.find(normalized_logical_name(project_name));
+	const auto found = by_name_.find(pff::normalized_logical_name(project_name));
 	return found == by_name_.end() ? nullptr : &files_[found->second];
 }
 
