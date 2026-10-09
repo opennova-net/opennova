@@ -38,9 +38,8 @@ using io::JsonValue;
 // The listener's own source in the mixer's dynamic table (the rain beside it), standing in for the local player's
 // registry serial.
 constexpr uint64_t kListenerSource = 1;
-// The listener's view as the player hears the game: first person [the listener's view flags: 2 first person, 4 the
-// external modes; audio::layer_matches_listener_view].
-constexpr uint8_t kListenView = 2;
+// The listener's view as the player hears the game: first person (audio::kListenerViewFirstPerson).
+constexpr uint8_t kListenView = audio::kListenerViewFirstPerson;
 // The hours' names, by the region the game's time-of-day test returns (audio::time_of_day_region), and an item's
 // shot of each (items.def's dawnshot .. nightshot).
 constexpr const char *kHours[4] = { "morning", "day", "evening", "night" };

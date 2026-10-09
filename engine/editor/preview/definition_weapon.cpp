@@ -11,6 +11,7 @@
 #include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
 #include <formats/threedi/threedi_3di3.h>
+#include <runtime/audio/oneshot_play.h>
 #include <runtime/anim/adm_fallback.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/weapon_fsm.h>
@@ -205,7 +206,7 @@ bool DefinitionWeapon::refresh(const SessionView &view, const std::string &catal
 		if (rig_moved && files && gun) {
 			auto stamped = std::make_shared<StampedFiles>(files);
 			const PreviewRigFiles rig_files(stamped);
-			rig_ = rig.table.empty() ? nullptr : load_preview_rig(rig, *gun, rig_files);
+			rig_ = rig.table.empty() ? nullptr : load_preview_rig(rig, *gun, rig_files.store);
 			rig_read_ = stamped->stamps();
 			++rig_serial_;
 			moved = true;
@@ -505,9 +506,9 @@ std::vector<ClipSoundFired> DefinitionWeapon::sounds_between(int32_t from, int32
 		if (own) {
 			// As the player hears their own weapon: a one-shot at the player, in first person [orig:
 			// ActionSlot_ExecuteActionWithEffect @0x541860 / ActionSlot_FinishActivePhase @0x53f7b0 -> the set at the
-			// owner; the listener's first-person view, audio::layer_matches_listener_view].
-			constexpr uint8_t kFirstPersonView = 2;
-			play = plan_set_play(sources.banks(), sources.expansion(), event.set, std::string(), selector, kFirstPersonView);
+			// owner; the listener's first-person view, audio::kListenerViewFirstPerson].
+			play = plan_set_play(sources.banks(), sources.expansion(), event.set, std::string(), selector,
+			                     audio::kListenerViewFirstPerson);
 		} else {
 			// Where it plays, heard at the camera: a 3D one-shot at their distance [orig: Sound_Play3DPositional
 			// @0x527CB0], in the view the camera is in.

@@ -6,6 +6,7 @@
 
 #include <imgui.h>
 
+#include <base/io/tick_rate.h>
 #include <editor/preview/effect_viewport.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
@@ -127,7 +128,7 @@ void EffectViewportView::draw_ready(Workspace &workspace, const ViewportModel &v
 	if (play.scene()) particles = play.scene()->live_counts().particle_count;
 	char readout[128];
 	std::snprintf(readout, sizeof(readout), "Tick %d, age %d (%.2f s), %zu particles", play.tick(), play.age(),
-	              play.age() / 62.5, particles);
+	              play.age() / io::kTickHz, particles);
 	row.next(ui_kit::text_width(readout));
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextDisabled("%s", readout);
