@@ -151,8 +151,7 @@ ClipLoads project_clip_loads(const AssetScan &scan) {
 	if (scan.find(anim::kFailsafeClip)) return [](const std::string &clip) { return !clip.empty(); };
 	return [&scan](const std::string &clip) {
 		if (clip.empty()) return false;
-		const size_t dot = clip.find_last_of('.');
-		const AssetEntry *entry = scan.find((dot == std::string::npos ? clip : clip.substr(0, dot)) + ".bad");
+		const AssetEntry *entry = scan.find(anim::bad_file_name(clip));
 		return entry && entry->kind == AssetKind::Animation;
 	};
 }

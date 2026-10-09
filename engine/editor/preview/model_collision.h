@@ -79,8 +79,8 @@ struct ModelCollisionShape {
 	// occlusion polygon); a sphere by its disc.
 	std::vector<PreviewVec3> triangles;
 	bool pickable = false; // it is a record a click selects
-	// A section's: a person's hit sphere (model_section_is_person), and one a blast breaks off
-	// (model_section_breaks).
+	// A section's: a person's hit sphere (world::model_section_is_person_sphere), and one a blast
+	// breaks off (world::collision_section_breaks).
 	bool person = false;
 	bool breaks = false;
 };

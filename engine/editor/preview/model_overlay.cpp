@@ -15,8 +15,8 @@ using threedi::ThreediMatrix4x4;
 
 // p * M (the row-vector convention of the part matrices), a point or a direction.
 void transform(const ThreediMatrix4x4 &m, const float in[3], bool point, float out[3]) {
-	for (int c = 0; c < 3; ++c)
-		out[c] = in[0] * m.m[c] + in[1] * m.m[4 + c] + in[2] * m.m[8 + c] + (point ? m.m[12 + c] : 0.0f);
+	if (point) threedi::threedi_mat4_apply_point(&m, in, out);
+	else threedi::threedi_mat4_apply_vec3(&m, in, out);
 }
 
 PreviewVec3 normalized(PreviewVec3 v) {
