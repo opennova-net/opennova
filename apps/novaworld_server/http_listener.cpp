@@ -264,19 +264,6 @@ const char *connection_state_name(ConnectionState s) {
 	return "unknown";
 }
 
-// Lowercase hex of a byte buffer (for /api/unknowns sample_hex). Empty in,
-// empty out.
-std::string bytes_to_hex(const std::vector<uint8_t> &bytes) {
-	static constexpr char kHex[] = "0123456789abcdef";
-	std::string out;
-	out.reserve(bytes.size() * 2);
-	for (uint8_t b : bytes) {
-		out.push_back(kHex[(b >> 4) & 0xf]);
-		out.push_back(kHex[b & 0xf]);
-	}
-	return out;
-}
-
 // Serialize a user row to JSON (no password_hash). Shared by the
 // public /api/register response and the admin user CRUD routes.
 crow::json::wvalue user_to_json(const UserRecord &u) {
@@ -971,7 +958,7 @@ void HttpListener::register_public_api_routes() {
 				e["first_seen_ms"] = static_cast<int64_t>(s.first_seen_ms);
 				e["last_seen_ms"]  = static_cast<int64_t>(s.last_seen_ms);
 				e["sample_meta"]   = s.sample_meta;
-				e["sample_hex"]    = bytes_to_hex(s.sample);
+				e["sample_hex"]    = strutil::bytes_to_hex(s.sample);
 				arr.push_back(std::move(e));
 			}
 		}

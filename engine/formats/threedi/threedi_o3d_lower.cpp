@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <base/io/strutil.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_o3d_read.h>
@@ -129,16 +130,6 @@ ThreediTargetLimits threedi_retail_limits() {
 
 namespace {
 
-// A count with thousands separators, for messages: 16,777,215.
-std::string grouped(long long n) {
-	std::string digits = std::to_string(n < 0 ? -n : n), out = n < 0 ? "-" : "";
-	for (size_t i = 0; i < digits.size(); ++i) {
-		if (i > 0 && (digits.size() - i) % 3 == 0) out += ',';
-		out += digits[i];
-	}
-	return out;
-}
-
 std::string format_metres(double v) {
 	char buf[32];
 	std::snprintf(buf, sizeof(buf), "%.3f", v);
@@ -187,13 +178,13 @@ struct Lowering {
 	// false. `what` says what holds `value`, `why` what imposes the limit.
 	bool within(const ThreediLimit &limit, long long value, int line, const std::string &what, const std::string &why) {
 		if (value <= limit.max) return true;
-		error_at(line, what + ": " + why + " (at most " + grouped(limit.max) + ")");
+		error_at(line, what + ": " + why + " (at most " + strutil::grouped(limit.max) + ")");
 		return false;
 	}
 	// A value its fixed-point word must hold: finite, |v| < `limit`.
 	bool extent(const ThreediLimit &limit, double v, int line, const std::string &what, const std::string &word) {
 		if (std::fabs(v) < static_cast<double>(limit.max)) return true;
-		error_at(line, what + " is " + f9(v) + ": " + word + " holds a number under " + grouped(limit.max) + " either way");
+		error_at(line, what + " is " + f9(v) + ": " + word + " holds a number under " + strutil::grouped(limit.max) + " either way");
 		return false;
 	}
 	bool extents(const ThreediLimit &limit, const double *v, int n, int line, const std::string &what,
@@ -400,7 +391,7 @@ void lower_mesh(Lowering &lw, const ThreediO3dMesh &mesh, ThreediBuildPart &part
 		span[vi][1] = static_cast<uint32_t>(influences.size()) - span[vi][0];
 	}
 	if (reduced > 0)
-		lw.note_at(mesh.line, grouped(static_cast<long long>(reduced)) + " vertices blend more than " +
+		lw.note_at(mesh.line, strutil::grouped(static_cast<long long>(reduced)) + " vertices blend more than " +
 				std::to_string(keep) + " influences: each keeps its first (the bone it is lit by) and its " +
 				std::to_string(keep - 1) + " heaviest others, renormalized (the game blends " + std::to_string(keep) + ")");
 
@@ -458,7 +449,7 @@ void lower_mesh(Lowering &lw, const ThreediO3dMesh &mesh, ThreediBuildPart &part
 			if (!fits(*into)) {
 				lw.error_at(mesh.vertices[tri[0]].line, "a triangle of the mesh at line " + std::to_string(mesh.line) +
 						" names " + std::to_string(fresh_bones(*into)) + " parts: a strip's palette holds " +
-						grouped(lim.strip_palette.max));
+						strutil::grouped(lim.strip_palette.max));
 				return;
 			}
 		}
@@ -495,8 +486,8 @@ void lower_mesh(Lowering &lw, const ThreediO3dMesh &mesh, ThreediBuildPart &part
 					"a strip's palette holds that many"))
 			return;
 	} else if (strips.empty()) {
-		lw.error_at(mesh.line, "the mesh holds " + grouped(static_cast<long long>(vertex_count)) +
-				" vertices and no triangle: a strip's indices reach " + grouped(lim.strip_vertices.max));
+		lw.error_at(mesh.line, "the mesh holds " + strutil::grouped(static_cast<long long>(vertex_count)) +
+				" vertices and no triangle: a strip's indices reach " + strutil::grouped(lim.strip_vertices.max));
 		return;
 	} else {
 		std::vector<bool> used(vertex_count, false);
@@ -504,7 +495,7 @@ void lower_mesh(Lowering &lw, const ThreediO3dMesh &mesh, ThreediBuildPart &part
 			for (const uint32_t v : s.window) used[v] = true;
 		const long long dropped = static_cast<long long>(std::count(used.begin(), used.end(), false));
 		if (dropped > 0)
-			lw.note_at(mesh.line, grouped(dropped) + " vertices no triangle uses are left out: the mesh splits into " +
+			lw.note_at(mesh.line, strutil::grouped(dropped) + " vertices no triangle uses are left out: the mesh splits into " +
 					std::to_string(strips.size()) + " strips, each holding the vertices its triangles use");
 	}
 
@@ -606,11 +597,11 @@ void lower_lods(Lowering &lw) {
 			}
 		}
 		lw.within(lw.lim.lod_vertex_bytes, lod_vertices * stride, src.line,
-				"the LOD's vertex buffer takes " + grouped(lod_vertices * stride) + " bytes (" + grouped(lod_vertices) +
+				"the LOD's vertex buffer takes " + strutil::grouped(lod_vertices * stride) + " bytes (" + strutil::grouped(lod_vertices) +
 						" vertices of " + std::to_string(stride) + ")",
 				"the game uploads it whole into one GPU pool buffer");
 		lw.within(lw.lim.lod_index_bytes, lod_indices * 2, src.line,
-				"the LOD's index buffer takes " + grouped(lod_indices * 2) + " bytes (" + grouped(lod_indices) + " indices)",
+				"the LOD's index buffer takes " + strutil::grouped(lod_indices * 2) + " bytes (" + strutil::grouped(lod_indices) + " indices)",
 				"the game uploads it whole into one GPU pool buffer");
 		for (const ThreediO3dPanm &pa : src.panm) {
 			if (!lw.part_byte(pa.parent < 0 ? 0 : pa.parent, pa.line, "panm's parent")) continue;
@@ -767,7 +758,7 @@ void lower_collision(Lowering &lw) {
 		// section addresses at most 32,768 vertices (ThreediCollisionFace).
 		if (!s.vertices.empty() &&
 				!lw.within(lw.lim.section_vertices, static_cast<long long>(s.vertices.size()), s.vertices.back().line,
-						at + " holds " + grouped(static_cast<long long>(s.vertices.size())) + " vertices",
+						at + " holds " + strutil::grouped(static_cast<long long>(s.vertices.size())) + " vertices",
 						"retail reads a bullet face's corners as signed 16-bit indices (simplify its collision mesh, or "
 						"split it over more parts)"))
 			continue;
@@ -799,7 +790,7 @@ void lower_collision(Lowering &lw) {
 		// Physics_RaycastAgainstBoneCollision @ 0x4E5079]; section i pairs
 		// with part i of the collision LOD.
 		lw.within(lw.lim.section_normals, static_cast<long long>(o.normals.size()), s.line,
-				at + " (part " + std::to_string(si) + ") has " + grouped(static_cast<long long>(o.normals.size())) +
+				at + " (part " + std::to_string(si) + ") has " + strutil::grouped(static_cast<long long>(o.normals.size())) +
 						" distinct bullet-face normals",
 				"a face names its normal by a signed 16-bit index (simplify its bullet faces: faces in one plane "
 				"share a normal; split them over more parts, or give the part none)");
