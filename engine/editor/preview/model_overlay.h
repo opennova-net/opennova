@@ -56,10 +56,6 @@ struct ModelOverlayOptions {
 	bool operator!=(const ModelOverlayOptions &o) const { return !(*this == o); }
 };
 
-// The 96-slot CTRL register bus with the held registers written by name (an unknown name
-// is dropped, as the game's catalog drops it).
-void model_preview_ctrl_bus(const std::map<std::string, int64_t> &held, int32_t bus[96]);
-
 // Every marker of `model` posed at `time_ms` with the register bus: a user point rides its
 // part's PANM matrix of the first level while that level animates, else it is where it is
 // authored (the attachment resolve [orig: the record transform @ 0x56c4f2..0x56c513, as

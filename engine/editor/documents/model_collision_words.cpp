@@ -4,6 +4,8 @@
 
 #include <algorithm>
 
+#include <runtime/world/collision.h>
+
 namespace opennova::editor {
 
 namespace {
@@ -12,41 +14,41 @@ namespace {
 // witness in docs/world/world-wac-ai-re.md section 15.4], with the Super OED manual's names (section
 // 1.1.3.4) and the add-on's codes (VOLUME_CODES).
 const ModelVolumeType kTypes[] = {
-	{1, "CB", "solid",
+	{world::bvol_type::kSolidCB, "CB", "solid",
 	 "Solid for everyone: what touches it is pushed out. The one type lines of sight, the ground probe and "
 	 "generic rays stop at [orig: @ 0x413298, @ 0x4aebdd].",
 	 ModelVolumeFamily::Solid},
-	{4, "CL", "ladder",
+	{world::bvol_type::kLadderCL, "CL", "ladder",
 	 "A ladder: touching it starts the climb, its first plane the face climbed [orig: @ 0x4ae894..0x4aea30].",
 	 ModelVolumeFamily::Ladder},
-	{5, "CV", "touch, no push", "Marks a contact and pushes nothing [orig: @ 0x4ae874].", ModelVolumeFamily::Zone},
-	{6, "CA", "armory zone",
+	{world::bvol_type::kContactMarker, "CV", "touch, no push", "Marks a contact and pushes nothing [orig: @ 0x4ae874].", ModelVolumeFamily::Zone},
+	{world::bvol_type::kArmoryCA, "CA", "armory zone",
 	 "Inside it the armory opens on its key (weapon.mnu) [orig: @ 0x4aea45; Input_HandleActionBinding @ 0x49b848].",
 	 ModelVolumeFamily::Zone},
-	{7, "VC", "vehicle wall", "Solid for vehicles alone (the vehicle contact mask) [orig: @ 0x4ae558].",
+	{world::bvol_type::kVehicleVC, "VC", "vehicle wall", "Solid for vehicles alone (the vehicle contact mask) [orig: @ 0x4ae558].",
 	 ModelVolumeFamily::SolidFor},
-	{8, "BB", "blink box",
+	{world::bvol_type::kBlinkBB, "BB", "blink box",
 	 "A building's inside: standing in it accumulates its flags into the frame's blink state, whose bits the "
 	 "draw reads as indoors (0x2), the sky off (0x4) and the water off (0x8) [orig: @ 0x4aea68; "
 	 "Entity_TestCollisionSections @ 0x4aef90]. The manual's letters (V, S, W keeping the voxels, sky and "
 	 "water; L and O) each clear a bit; how they meet those bits is unknown (render-occlusion-re D-OCC-8).",
 	 ModelVolumeFamily::Blink},
-	{9, "CD", "door", "Touching it opens the door section it belongs to [orig: @ 0x4aeb0f..0x4aeb22].",
+	{world::bvol_type::kDoorCD, "CD", "door", "Touching it opens the door section it belongs to [orig: @ 0x4aeb0f..0x4aeb22].",
 	 ModelVolumeFamily::Zone},
-	{10, "CT", "change-team box", "Touching it asks to capture or change team [orig: @ 0x4aeb7b, @ 0x4b31e3].",
+	{world::bvol_type::kChangeTeamCT, "CT", "change-team box", "Touching it asks to capture or change team [orig: @ 0x4aeb7b, @ 0x4b31e3].",
 	 ModelVolumeFamily::Zone},
-	{11, "CM", "vehicle loadout zone",
+	{world::bvol_type::kVehicleLoadout, "CM", "vehicle loadout zone",
 	 "Inside it the vehicle menu opens on its key (vehicle.mnu) [orig: @ 0x4aeb92, @ 0x49b858].",
 	 ModelVolumeFamily::Zone},
-	{12, "VK", "masked wall", "Solid on the masked contact path (mask 0x10) alone [orig: @ 0x4ae568].",
+	{world::bvol_type::kVehicleExt, "VK", "masked wall", "Solid on the masked contact path (mask 0x10) alone [orig: @ 0x4ae568].",
 	 ModelVolumeFamily::SolidFor},
-	{13, "CF", "special function",
+	{world::bvol_type::kFlagCF, "CF", "special function",
 	 "Standing on it sets off a special function (a FARP), only while grounded on it [orig: @ 0x4aebb3].",
 	 ModelVolumeFamily::Zone},
-	{16, "DH", "damage, high", "Each touch costs 50 health [orig: @ 0x4aeb39].", ModelVolumeFamily::Damage},
-	{17, "DM", "damage, medium", "Each touch costs 6 health [orig: @ 0x4aeb50].", ModelVolumeFamily::Damage},
-	{18, "DL", "damage, low", "Each touch costs 1 health [orig: @ 0x4aeb67].", ModelVolumeFamily::Damage},
-	{19, "CP", "player wall", "Solid for players alone: AI walks through [orig: @ 0x4ae543].",
+	{world::bvol_type::kDamageHighDH, "DH", "damage, high", "Each touch costs 50 health [orig: @ 0x4aeb39].", ModelVolumeFamily::Damage},
+	{world::bvol_type::kDamageMediumDM, "DM", "damage, medium", "Each touch costs 6 health [orig: @ 0x4aeb50].", ModelVolumeFamily::Damage},
+	{world::bvol_type::kDamageLowDL, "DL", "damage, low", "Each touch costs 1 health [orig: @ 0x4aeb67].", ModelVolumeFamily::Damage},
+	{world::bvol_type::kPlayerCP, "CP", "player wall", "Solid for players alone: AI walks through [orig: @ 0x4ae543].",
 	 ModelVolumeFamily::SolidFor},
 };
 
@@ -130,13 +132,6 @@ bool model_section_is_person(const threedi::Threedi3di3 &model, size_t section) 
 	for (size_t o = 0; o < c->object_count; ++o)
 		if (c->objects[o].num_faces > 0) return true;
 	return false;
-}
-
-int32_t model_person_hit_radius_q16(int section, int32_t authored_q16) {
-	const int64_t scale = section == 14 ? 65 : 45;
-	int64_t radius = 0xCCC + int64_t(authored_q16) * scale / 100;
-	if (section == 15 || section == 16) radius = std::min<int64_t>(radius, 0x3000);
-	return int32_t(radius);
 }
 
 const char *const kModelCollisionWords =
