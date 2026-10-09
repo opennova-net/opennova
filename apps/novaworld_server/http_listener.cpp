@@ -16,15 +16,16 @@
 #include <net/novaworld/unknown_tracker.h>
 
 #include <base/io/strutil.h>
+#include <base/os_random/os_random.h>
 
 #include <crow.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <ctime>
 #include <cstdlib>
-#include <random>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -49,29 +50,16 @@ bool has_relay_first_call_query(const crow::request &req) {
 	return false;
 }
 
-// A random 8-hex-char PCID for /api/register. One generator for the process,
-// behind a mutex, seeded from random_device and the clock: per-worker
-// generators seeded by one random_device draw each started several Crow
-// workers on the same sequence wherever random_device repeats a value across
-// threads (seen on a CPU whose RDSEED hands back 0 under concurrent use), and
+// A random 8-hex-char PCID for /api/register, drawn from the OS CSPRNG
+// (base/os_random) with no generator of its own: per-worker generators seeded
+// by one random_device draw each started several Crow workers on the same
+// sequence wherever random_device repeats a value across threads (libstdc++
+// reads RDSEED, which AMD's erratum answers with 0 under concurrent use), and
 // every registration on a trailing worker then spent its retries on PCIDs the
 // leading one had just taken.
 std::string next_pcid() {
-	static std::mutex mu;
-	static std::mt19937 gen = [] {
-		std::random_device rd;
-		const auto now = static_cast<uint64_t>(
-				std::chrono::system_clock::now().time_since_epoch().count());
-		std::seed_seq seed{rd(), rd(), static_cast<uint32_t>(now),
-		                   static_cast<uint32_t>(now >> 32)};
-		return std::mt19937(seed);
-	}();
-	std::uniform_int_distribution<uint32_t> dist;
 	char pcid[16];
-	{
-		std::lock_guard<std::mutex> lock(mu);
-		std::snprintf(pcid, sizeof(pcid), "%08x", dist(gen));
-	}
+	std::snprintf(pcid, sizeof(pcid), "%08x", static_cast<unsigned>(os_random_u32()));
 	return pcid;
 }
 
@@ -2015,13 +2003,12 @@ void HttpListener::register_legacy_host_join_routes(
 			// First call — generate session.
 			HostSession s;
 			s.session_tag = sessions_.generate_tag("NWHost.dll");
-			// 48-char A-P encoded host_key from 24 random bytes.
-			static thread_local std::mt19937 gen{std::random_device{}()};
-			std::uniform_int_distribution<int> rb(0, 255);
+			// 48-char A-P encoded host_key from 24 OS CSPRNG bytes (base/os_random).
+			std::array<uint8_t, 24> raw{};
+			os_random_bytes(raw.data(), raw.size());
 			std::string hk;
 			hk.reserve(48);
-			for (int i = 0; i < 24; ++i) {
-				const int b = rb(gen);
+			for (const uint8_t b : raw) {
 				hk.push_back(static_cast<char>('A' + ((b >> 4) & 0x0F)));
 				hk.push_back(static_cast<char>('A' + (b & 0x0F)));
 			}

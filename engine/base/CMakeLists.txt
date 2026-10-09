@@ -1,6 +1,6 @@
 # opennova_base — the engine base services (vfs, resource_index, gameprofile,
-# pcapio), one STATIC group target (Shape A). The header-only base/io leaf
-# keeps its own INTERFACE target in its subdirectory.
+# pcapio, os_random), one STATIC group target (Shape A). The header-only
+# base/io leaf keeps its own INTERFACE target in its subdirectory.
 #
 # base sits ABOVE formats in the Shape A chain (the deliberate inversion): vfs
 # consumes pff/scr/bfc1, so this group PUBLIC-links opennova_formats.
@@ -11,6 +11,8 @@ add_library(opennova_base STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/graphics_log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/player_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/required_resources.cpp
+    # os_random — the operating system's CSPRNG (the NovaWorld service's secrets and ids)
+    ${CMAKE_CURRENT_SOURCE_DIR}/os_random/os_random.cpp
     # pcapio — pcap/pcapng reading (shared by capture-driven tests and tools)
     ${CMAKE_CURRENT_SOURCE_DIR}/pcapio/pcap_reader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pcapio/pcap_writer.cpp
@@ -32,6 +34,11 @@ target_include_directories(opennova_base
 )
 
 target_link_libraries(opennova_base PUBLIC opennova_io opennova_formats)
+if(WIN32)
+    # os_random.cpp: BCryptGenRandom. `bcrypt` names the system import library;
+    # the vendored password-hash library is the distinct opennova_bcrypt target.
+    target_link_libraries(opennova_base PRIVATE bcrypt)
+endif()
 
 target_compile_features(opennova_base PUBLIC cxx_std_17)
 

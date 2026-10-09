@@ -3,6 +3,8 @@
 #include <net/novacrypto/ap_alphabet.h>
 #include <net/novacrypto/nwu.h>
 
+#include <base/os_random/os_random.h>
+
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -136,8 +138,9 @@ uint32_t atoi64_u32(std::string_view s) {
 bool generate_epask(EpaskParams &out) {
 	// Modulus must satisfy 200_000 < p*q < 300_000. With p, q in
 	// [sqrt(200_000), sqrt(300_000)] ≈ [448, 547], product is in the
-	// right range when p ≠ q. Sample primes by rejection.
-	static thread_local std::mt19937_64 gen{std::random_device{}()};
+	// right range when p ≠ q. Sample primes by rejection, drawing from the OS
+	// CSPRNG (base/os_random).
+	OsRandom gen;
 	std::uniform_int_distribution<uint32_t> prime_pick(448, 547);
 	std::uniform_int_distribution<uint32_t> exp_pick(10000, 49999);
 

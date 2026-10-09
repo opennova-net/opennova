@@ -63,6 +63,17 @@ target_compile_features(sha256_test PRIVATE cxx_std_17)
 target_include_directories(sha256_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME sha256 COMMAND sha256_test)
 
+# The OS CSPRNG (base/os_random): buffers of many sizes filled to the byte, draws that differ,
+# no all-zero fill, the OsRandom generator under <random>, and 32 threads drawing at once with
+# no zero runs and no repeats past the birthday bound (the RDSEED failure std::random_device
+# shows under libstdc++ on a CPU with AMD's RDSEED erratum).
+find_package(Threads REQUIRED)
+add_executable(os_random_test os_random/os_random_test.cpp)
+target_link_libraries(os_random_test PRIVATE opennova_base Threads::Threads)
+target_compile_features(os_random_test PRIVATE cxx_std_17)
+target_include_directories(os_random_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME os_random COMMAND os_random_test)
+
 # Roundtrip test
 add_executable(threedi_roundtrip_test threedi/roundtrip_test.cpp)
 target_link_libraries(threedi_roundtrip_test PRIVATE opennova_formats)
