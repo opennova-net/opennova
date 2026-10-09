@@ -10,6 +10,7 @@
 #include <editor/documents/model_document.h>
 #include <editor/documents/model_surfaces.h>
 #include <formats/threedi/threedi_panm.h>
+#include <runtime/mission/seat_spec_extract.h>
 
 namespace opennova::editor {
 
@@ -146,10 +147,15 @@ bool model_lod_drawn(const ModelRow &row, size_t lod) { return model_lod_drawn(m
 std::string model_lod_range(const ModelRow &row, size_t lod) { return model_lod_range(model_lod_thresholds(row), lod); }
 std::string model_user_point_role(const std::string &raw) {
 	const std::string name = strutil::trim(raw);
-	if (threedi_user_point_is_sitex(name)) return "passenger seat";
-	if (strutil::starts_with_icase(name, "ctrlx")) return "control seat";
-	if (strutil::starts_with_icase(name, "drvrx")) return "driver's seat";
-	if (strutil::iequals(name, "UseGun")) return "gunner's seat";
+	// The seats, in the game's classes (mission::seat_type_for_user_point). The game compares the raw name
+	// from byte zero with no trim; the words here read the trimmed name.
+	switch (mission::seat_type_for_user_point(name)) {
+	case world::SeatType::Passenger: return "passenger seat";
+	case world::SeatType::Controller: return "control seat";
+	case world::SeatType::Driver: return "driver's seat";
+	case world::SeatType::Gunner: return "gunner's seat";
+	default: break;
+	}
 	if (strutil::starts_with_icase(name, "flare")) return "flare launch point";
 	if (strutil::starts_with_icase(name, "bullet01")) return "weapon muzzle (primary)";
 	if (strutil::starts_with_icase(name, "bullet02")) return "weapon muzzle (primary and secondary)";
