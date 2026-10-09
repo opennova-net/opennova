@@ -1264,10 +1264,8 @@ static int test_shader_definitions() {
 			"// string EffectTag = \"COMMENTED\";\r\n/* string EffectInfo < string EffectTag = \"BLOCK\"; > */\r\n"
 			"string EffectInfo <\r\n\tstring EffectName = \"x > y\";\r\n\tstring EffectTag = \"VS_TEST\";\r\n"
 			"\tbool EffectAlt_UV = true;\r\n>;\r\n";
+	// The renderer's reading of the EffectInfo is runtime/renderer's (tests/renderer/shader_effect_info_test).
 	TEST_EXPECT(shader_tags_of(scr_shader(source), "shaders/test.fx") == Names({"VS_TEST", "VS_TEST#UV"}));
-	const ShaderEffectInfo info = read_shader_effect_info(source);
-	TEST_EXPECT(info.found && info.tag == "VS_TEST" && info.alt_uv &&
-	            source.substr(info.tag_offset, info.tag_length) == "VS_TEST");
 	// The definition sits on the tag as written.
 	const DocumentType *type = document_type_for(AssetKind::Shader);
 	std::unique_ptr<DocumentBase> document = type->make();
@@ -1280,14 +1278,13 @@ static int test_shader_definitions() {
 	TEST_EXPECT(shader_tags_of(scr_shader("string EffectInfo < string EffectTag = \"VS_ONE\"; bool EffectAlt_UV = false; >;"),
 	                           "one.fx") == Names({"VS_ONE"}));
 	TEST_EXPECT(shader_tags_of(scr_shader(source), "_vsinc.fx").empty());
-	TEST_EXPECT(shader_tags_of(scr_shader("float4 main() : COLOR { return 0; }"), "none.fx").empty() &&
-	            !read_shader_effect_info("float4 main() : COLOR { return 0; }").found);
+	TEST_EXPECT(shader_tags_of(scr_shader("float4 main() : COLOR { return 0; }"), "none.fx").empty());
 	// _ffp.fx: the fixed-function tags, whatever its own tag says.
 	const Names ff = shader_tags_of(scr_shader(source), "shaders/_FFP.FX");
 	const auto has = [](const Names &names, const char *name) {
 		return std::find(names.begin(), names.end(), name) != names.end();
 	};
-	TEST_EXPECT(fixed_function_shader_tags().size() == 12 && ff.size() == 24 && has(ff, "FF_ST_OP") &&
+	TEST_EXPECT(ff.size() == 24 && has(ff, "FF_ST_OP") &&
 	            has(ff, "FF_MT_AD_LUM#UV") && has(ff, "FF_ST_AB_LUM") && !has(ff, "VS_TEST"));
 	// The editor's own.
 	std::vector<uint8_t> bytes;
