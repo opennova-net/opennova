@@ -18,6 +18,7 @@
 #include <formats/env/env.h>
 #include <formats/mission/mission.h>
 #include <formats/trn/trn_io.h>
+#include <runtime/mission/mission_sidecars.h>
 
 namespace opennova::editor {
 
@@ -148,7 +149,10 @@ TerrainUses terrain_uses(const SessionView &view, const std::string &path) {
 			use.start_time = info.start_time;
 			use.minutes_per_day = info.minutes_per_day;
 		}
-		use.tiles = view.project.scan->find(use.name + ".til") != nullptr;
+		// The mission's own tile placement, <mission base>.til, its base the name to the first dot as the game's
+		// reader builds it (mission::sidecar_name's tiles row).
+		const mission::Sidecar *tiles = mission::sidecar_for_role("tiles");
+		use.tiles = tiles && view.project.scan->find(mission::sidecar_name(source->logical_name, *tiles)) != nullptr;
 		if (terrain_read) {
 			std::string environment;
 			TrnLaterTexts later;
