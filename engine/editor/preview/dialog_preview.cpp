@@ -15,8 +15,8 @@ namespace opennova::editor {
 
 namespace {
 
-// How long a line with no wave holds the dialog: the game's 12 ticks [orig: Dialog_LoadAudioClip @ 0x44dd7c].
-constexpr double kNoWaveSeconds = 12.0 / io::kTickHz;
+// How long a line with no wave holds the dialog: the game's 12 ticks (audio::kDialogMissingHold).
+constexpr double kNoWaveSeconds = double(audio::kDialogMissingHold) / io::kTickHz;
 
 std::string seconds_words(double seconds) {
 	char text[32];

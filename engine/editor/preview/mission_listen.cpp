@@ -40,9 +40,6 @@ constexpr uint64_t kListenerSource = 1;
 // The listener's view as the player hears the game: first person [the listener's view flags: 2 first person, 4 the
 // external modes; audio::layer_matches_listener_view].
 constexpr uint8_t kListenView = 2;
-// The sets the rain's two loops play [orig: the registry rows LPNV_RAIN_L / LPNV_RAIN_R @ 0x82F590, read
-// @ 0x4b47df / @ 0x4b4894].
-constexpr const char *kRainSets[2] = { "LPNV_RAIN_L", "LPNV_RAIN_R" };
 // The hours' names, by the region the game's time-of-day test returns (audio::time_of_day_region), and an item's
 // shot of each (items.def's dawnshot .. nightshot).
 constexpr const char *kHours[4] = { "morning", "day", "evening", "night" };
@@ -114,11 +111,8 @@ const PreviewBank *MissionListen::find_set_(const std::string &name, int32_t &in
 	// The game's search: the global chain in its order, the first bank's first set of the name [orig:
 	// SoundBank_FindSetByNameAnyBank @ 0x5274f0].
 	for (const PreviewBank *bank : chain_banks(banks_.banks(), banks_.expansion()))
-		for (size_t i = 0; i < bank->file.multis.size(); ++i)
-			if (strutil::iequals(bank->file.multis[i].name, name)) {
-				index = int32_t(i);
-				return bank;
-			}
+		if ((index = audio::find_bank_set(bank->file, name)) >= 0) return bank;
+	index = -1;
 	return nullptr;
 }
 
@@ -223,11 +217,10 @@ bool MissionListen::refresh(const SessionView &view, const MissionScene &scene, 
 			source.slots = item->second.slots;
 			source.at = entity.at;
 			const int index = int(sources_.size());
-			// Its slots' sets, each once (its slots naming the same set share it: the crossfade's same-set suppress
-			// compares them [orig: @ 0x4a819d]), each with its layers that take a channel.
-			std::vector<std::string> names;
-			std::vector<std::vector<audio::AmbientMixer::LayerDesc>> sets;
-			std::array<int32_t, 4> keys = { -1, -1, -1, -1 };
+			// Its slots' sets a bank holds, each once (audio::envs_distinct_sets: its slots naming the same set share
+			// it, the crossfade's same-set suppress), each with its layers that take a channel, and its slots keyed into
+			// those (audio::envs_slot_keys), as MissionAudio registers a marker.
+			std::array<std::string, 4> held;
 			bool any_set = false;
 			for (size_t slot = 0; slot < 4; ++slot) {
 				int32_t at = -1;
@@ -235,22 +228,22 @@ bool MissionListen::refresh(const SessionView &view, const MissionScene &scene, 
 				source.banks[slot] = bank ? bank->name : std::string();
 				if (!bank) continue;
 				any_set = true;
+				held[slot] = source.slots[slot];
 				for (const audio::EmitterLayer &layer : audio::emitter_layers(bank->file, bank->file.multis[size_t(at)])) {
 					source.reach[slot] = std::max(source.reach[slot], float(layer.falloff_u));
 					if (layer.min_u > 0 && (source.near[slot] <= 0.0f || float(layer.min_u) < source.near[slot]))
 						source.near[slot] = float(layer.min_u);
 				}
-				const auto named = std::find(names.begin(), names.end(), source.slots[slot]);
-				if (named != names.end()) {
-					keys[slot] = int32_t(named - names.begin());
-					continue;
-				}
-				std::vector<audio::AmbientMixer::LayerDesc> layers = describe_(source.slots[slot], index, "marker", view);
+			}
+			std::vector<std::string> names;
+			std::vector<std::vector<audio::AmbientMixer::LayerDesc>> sets;
+			for (const std::string &name : audio::envs_distinct_sets(held)) {
+				std::vector<audio::AmbientMixer::LayerDesc> layers = describe_(name, index, "marker", view);
 				if (layers.empty()) continue;
-				keys[slot] = int32_t(names.size());
-				names.push_back(source.slots[slot]);
+				names.push_back(name);
 				sets.push_back(std::move(layers));
 			}
+			const std::array<int32_t, 4> keys = audio::envs_slot_keys(held, names);
 			bool any_named = false;
 			for (const std::string &slot : source.slots) any_named = any_named || !slot.empty();
 			// Its slots name nothing (a source of timed shots alone), a set no bank holds, or waves the project lacks.
@@ -271,7 +264,7 @@ bool MissionListen::refresh(const SessionView &view, const MissionScene &scene, 
 		}
 	}
 	// The rain's two loops, beside the listener.
-	for (int side = 0; side < 2; ++side) rain_layers_[side] = describe_(kRainSets[side], -1, "rain", view);
+	for (int side = 0; side < 2; ++side) rain_layers_[side] = describe_(world::kRainAmbientSets[side], -1, "rain", view);
 	// Other candidates than before (a source added, removed or given other sets, a wave found or lost): the channels
 	// start again.
 	bool same = before.size() == candidates_.size();
@@ -480,7 +473,7 @@ std::vector<ClipSoundFired> MissionListen::fire_sounds(const AssetScan *scan, au
 			out.push_back(std::move(fired));
 			continue;
 		}
-		PreviewHearing heard;
+		audio::SetHearing heard;
 		std::string what;
 		if (sound.kind == MissionScriptSound::Kind::Positional) {
 			// A full-volume positional one-shot at its point, heard at the listener [orig: Entity_PlaySound3D_FullVolume
