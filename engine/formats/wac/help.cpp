@@ -36,13 +36,7 @@ void write_text_definitions(std::ostream &out, uint8_t mask) {
     for (int i = 0; i < wac_command_count(); ++i) {
         const CommandDef &command = wac_commands()[i];
         if ((command.flags & mask) == 0) continue;
-        out << "//   " << command.name << " (";
-        for (int param = 0; param < 4; ++param) {
-            if (command.params[param] == ParamType::Null) continue;
-            if (param != 0) out << ", ";
-            out << param_type_name(command.params[param]);
-        }
-        out << ")\n";
+        out << "//   " << command_signature(command) << "\n";
     }
 }
 
@@ -71,6 +65,18 @@ void write_xml_definitions(std::ostream &out, uint8_t type) {
 }
 
 } // namespace
+
+std::string command_signature(const CommandDef &command) {
+    std::string text = command.name;
+    text += " (";
+    for (int param = 0; param < 4; ++param) {
+        if (command.params[param] == ParamType::Null) continue;
+        if (param != 0) text += ", ";
+        text += param_type_name(command.params[param]);
+    }
+    text += ")";
+    return text;
+}
 
 // File I/O follows the original open/close ordering. Failure after opening is
 // not separately reported by retail's handler; only each fopen result gates it.
