@@ -4,25 +4,40 @@
 
 namespace opennova::env {
 
-float resolve_water_height(const WaterHeightRungs &rungs,
+WaterHeightRungs mission_water_rungs(const BmsEnvOverrides &overrides,
+		float terrain_height, bool has_loaded_terrain) {
+	WaterHeightRungs rungs;
+	rungs.has_mission_override = overrides.has_water_height;
+	rungs.mission_override = overrides.has_water_height ? overrides.water_height * 0.5f : 0.0f;
+	rungs.terrain_height = terrain_height;
+	rungs.has_loaded_terrain = has_loaded_terrain;
+	return rungs;
+}
+
+ResolvedWaterHeight resolve_water_rung(const WaterHeightRungs &rungs,
 		const EnvironmentState *env, float current) {
 	if (rungs.has_mission_override) {
-		return rungs.mission_override;
+		return {rungs.mission_override, WaterRung::Mission};
 	}
 	if (env != nullptr && env->has_water_height()) {
 		// .env water_height is stored <<15 by the engine — half world units,
 		// same convention as the terrain value; the .env's line writes after
 		// the .trn's [orig: TimeOfDay_ParseProperty @ 0x57cb4e].
-		return env->water_height() * 0.5f;
+		return {env->water_height() * 0.5f, WaterRung::Environment};
 	}
 	if (rungs.terrain_height != 0.0f) {
-		return rungs.terrain_height;
+		return {rungs.terrain_height, WaterRung::Terrain};
 	}
 	const bool has_loaded_env = env != nullptr && env->is_loaded();
 	if (rungs.has_loaded_terrain || has_loaded_env) {
-		return 0.0f;
+		return {0.0f, WaterRung::None};
 	}
-	return current;
+	return {current, WaterRung::None};
+}
+
+float resolve_water_height(const WaterHeightRungs &rungs,
+		const EnvironmentState *env, float current) {
+	return resolve_water_rung(rungs, env, current).height;
 }
 
 WaterFrameInputs build_water_frame_inputs(const EnvironmentState *env,

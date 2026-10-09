@@ -6,6 +6,7 @@
 // world block, 0x808080 fog/clear, flat terrain ramps), generation
 // discipline, the reset/prewarm epoch, the network wire units, and the
 // shader-global publication policy. RE record: docs/env/env-tod-re.md.
+#include <base/vfs/file_source.h>
 #include <runtime/environment/celestial_frame.h>
 #include <runtime/environment/environment_state.h>
 #include <runtime/environment/sky_frame.h>
@@ -24,6 +25,7 @@
 #include <cstdio>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -1330,6 +1332,78 @@ int main() {
 		rungs.mission_override = 0.0f;
 		ok &= expect(near(opennova::env::resolve_water_height(rungs, &state, 7.0f), 0.0f),
 				"the header's flagged override, zero included, over both");
+	}
+
+	// The rung that gave the plane its height (resolve_water_rung, the ladder resolve_water_height
+	// answers the height of), and the rungs a mission's load fills from its header's overrides and
+	// its terrain (mission_water_rungs) [orig: Game_LoadTerrainDuringConnect @ 0x520710].
+	{
+		using opennova::env::ResolvedWaterHeight;
+		using opennova::env::WaterRung;
+		const int no_colour[3] = {0, 0, 0};
+		const opennova::env::BmsEnvOverrides none;
+		const opennova::env::BmsEnvOverrides flagged =
+				opennova::env::bms_env_overrides_from_header(0x1, 24, 0, no_colour, no_colour, 0);
+		opennova::env::WaterHeightRungs rungs = opennova::env::mission_water_rungs(flagged, 10.5f, true);
+		ok &= expect(rungs.has_mission_override && near(rungs.mission_override, 12.0f) &&
+						near(rungs.terrain_height, 10.5f) && rungs.has_loaded_terrain,
+				"the header's flagged override in half units, the terrain's height as given");
+		rungs = opennova::env::mission_water_rungs(none, 0.0f, false);
+		ok &= expect(!rungs.has_mission_override && rungs.mission_override == 0.0f && !rungs.has_loaded_terrain,
+				"an unflagged header sets no override");
+
+		opennova::env::Config with_height;
+		with_height.water_height = 30.0f;
+		with_height.water_height_set = true;
+		EnvironmentState env_height;
+		env_height.set_config(&with_height, true);
+		opennova::env::Config without_height;
+		EnvironmentState env_none;
+		env_none.set_config(&without_height, true);
+		ResolvedWaterHeight resolved =
+				opennova::env::resolve_water_rung(opennova::env::mission_water_rungs(flagged, 10.5f, true), &env_height, 0.0f);
+		ok &= expect(resolved.rung == WaterRung::Mission && near(resolved.height, 12.0f), "the header's rung first");
+		resolved = opennova::env::resolve_water_rung(opennova::env::mission_water_rungs(none, 10.5f, true), &env_height, 0.0f);
+		ok &= expect(resolved.rung == WaterRung::Environment && near(resolved.height, 15.0f),
+				"the environment's water_height next");
+		resolved = opennova::env::resolve_water_rung(opennova::env::mission_water_rungs(none, 10.5f, true), &env_none, 0.0f);
+		ok &= expect(resolved.rung == WaterRung::Terrain && near(resolved.height, 10.5f), "then the terrain's");
+		resolved = opennova::env::resolve_water_rung(opennova::env::mission_water_rungs(none, 0.0f, true), nullptr, 7.0f);
+		ok &= expect(resolved.rung == WaterRung::None && resolved.height == 0.0f,
+				"a loaded terrain with no height clears the plane");
+		resolved = opennova::env::resolve_water_rung(opennova::env::mission_water_rungs(none, 0.0f, false), nullptr, 7.0f);
+		ok &= expect(resolved.rung == WaterRung::None && near(resolved.height, 7.0f),
+				"with no source the current plane stands");
+	}
+
+	// The mission's config over a file set by name (load_mission_env_config): the header's terrain
+	// and environment names with their extensions, its overrides over what the load made.
+	{
+		class Files : public opennova::FileSource {
+		public:
+			std::string trn = "water_height 21\r\nwater_murk .3\r\n";
+			std::string env = "fog_level 640\r\n";
+			bool read(const std::string &name, std::vector<uint8_t> &out) const override {
+				const std::string *text = name == "dvxi5.trn" ? &trn : name == "dvxi5.env" ? &env : nullptr;
+				if (text == nullptr) return false;
+				out.assign(text->begin(), text->end());
+				return true;
+			}
+			uint64_t stamp(const std::string &name) const override {
+				return name == "dvxi5.trn" || name == "dvxi5.env" ? 1 : 0;
+			}
+		} files;
+		const int fog_colour[3] = {0, 0, 0};
+		const opennova::env::BmsEnvOverrides overrides =
+				opennova::env::bms_env_overrides_from_header(0x2, 0, 300, fog_colour, fog_colour, 0);
+		opennova::env::MissionEnv loaded;
+		ok &= expect(opennova::env::load_mission_env_config(files, "dvxi5", "dvxi5", overrides, loaded) &&
+						loaded.environment && near(loaded.config.fog_level, 300.0f) &&
+						near(loaded.config.water_height, 21.0f) && near(loaded.config.water_murk, 0.3f),
+				"the file set's .trn and .env under the header's fog override");
+		ok &= expect(!opennova::env::load_mission_env_config(files, "dvxi5", "gone", overrides, loaded) &&
+						!loaded.environment && near(loaded.config.fog_level, 300.0f),
+				"a missing .env is skipped, the overrides still over the earlier passes");
 	}
 
 	if (!ok) {
