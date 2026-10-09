@@ -263,11 +263,16 @@ double EnvironmentState::hhmm_to_minute_of_day(double hhmm) {
 	return hour * kMinutesPerHour + (wrapped - hour * kHhmmHourScale);
 }
 
+// The curtime parse: the truncating 16.16 hours, widened by a shift. The
+// minute part truncates (`(m << 16) / 60`), so every minute that is not a
+// quarter hour lands below the exact 8.24 hour; the hour and minute clamps
+// keep the result under one day.
+// [orig: TimeOfDay_ParseProperty curtime arm @0x57d0b6..0x57d0d2,
+//  g_EnvCurTimeFixed24 = Environment_ParseTimeString(token) << 8;
+//  Environment_ParseTimeString @0x57c500 (clamps @0x57c552/@0x57c55c,
+//  the truncating divide @0x57c566..0x57c57c)]
 uint32_t EnvironmentState::hhmm_to_fixed24(double hhmm) {
-	const double hours = hhmm_to_minute_of_day(hhmm) / kMinutesPerHour;
-	const double units = hours * static_cast<double>(kFixed24OneHour);
-	return static_cast<uint32_t>(std::llround(units)) %
-			static_cast<uint32_t>(kTodDayFixed24);
+	return static_cast<uint32_t>(hhmm_to_hours_fp(static_cast<float>(hhmm))) << 8;
 }
 
 void EnvironmentState::ensure_standalone_weather_seeded(int wind_scale) {

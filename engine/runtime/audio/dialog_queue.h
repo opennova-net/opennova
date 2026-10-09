@@ -1,11 +1,13 @@
-// The serialized mission-dialog queue and the PlayWavList dialog-id resolution,
-// pushed down from the Godot mission audio (godot/src/audio/mission_audio). The
-// engine plays one dialog audio channel at a time (Dialog_Register queues,
-// Dialog_UpdatePlayback only loads the next clip once the active channel
-// frees -- the witnesses sit on the two DialogQueue legs in dialog_queue.cpp),
-// so resolved lines queue and play one after another instead of every
-// PlayWavList firing at once. The shell spawns the voices and reports their
-// channel edges here.
+// The mission-dialog playback and the PlayWavList dialog-id resolution, pushed
+// down from the Godot mission audio (godot/src/audio/mission_audio). The engine
+// gives each played dialog one of 16 slots and walks them once a 62 Hz tick:
+// a slot loads its next line once the line before it has held for about twice
+// its wave's length, the dialog channel is free and the line's own delay has
+// run out, so separate dialogs interleave on the one channel in slot order
+// (Dialog_Register / Dialog_UpdatePlayback / Dialog_LoadAudioClip; the
+// witnesses sit on DialogQueue's legs in dialog_queue.cpp). The shell is the
+// device: it plays the wave a line loads, says how long it is and whether its
+// voice still plays.
 //
 // A dialog line names a WAVE of the dialog bank's sounds (<bank>.lwf, else
 // <bank>.pwf), an entry of the bank's singles found by its name, never a sound
@@ -16,10 +18,11 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <deque>
+#include <functional>
 #include <string>
 #include <vector>
 
+#include <base/io/tick_rate.h>
 #include <formats/dbf/dbf.h>
 #include <formats/lwf/lwf.h>
 #include <formats/rtxt/rtxt.h>
@@ -48,15 +51,18 @@ const lwf::Single *find_dialog_wave(const lwf::File &sounds, const std::string &
 // and takes 255 for 0]. 0..255.
 int dialog_wave_volume(const lwf::Single &wave);
 
-// One queued dialog line: the wave it names, the file the dialog bank's sounds
-// give that wave (empty when they have no wave of the name: the game shows "EX
-// Cannot load audio" and plays nothing), its volume, and its dialog's name and
-// its index in the dialog, which the authority reports on the wire as the line
-// loads.
+// One dialog line: the wave it names, the file the dialog bank's sounds give
+// that wave (empty when they have no wave of the name: the game shows "EX
+// Cannot load audio" and plays nothing), its volume, the line's DELAY byte
+// (how long it waits, in tenths of a second, once the line before it has held
+// and the channel is free: 62 * DELAY / 10 ticks), and its dialog's name and
+// its index in the dialog, which the authority reports on the wire as the
+// line loads.
 struct DialogLineRef {
 	std::string wave;
 	std::string file;
 	int volume = 255;
+	uint8_t delay = 0;
 	std::string dialog_name;
 	int line = -1;
 };
@@ -66,10 +72,10 @@ struct DialogLineRef {
 // the bank's sounds hold for it. Empty when the number is 0, the mission has no
 // dialog bank or no dialog of the name.
 // [orig: Dialog_PlayByIndex @ 0x527ae0 -> Dialog_PlayByName @ 0x44d9f0 ->
-//  Dialog_Register @ 0x44d980 queue; Dialog_UpdatePlayback @ 0x44e470
-//  advances only when the active channel frees, and reports each line it
-//  loads (Server_SendEntityStateToAll @0x44e5a5); Dialog_LoadAudioClip
-//  @ 0x44dcc0 the line's wave @ 0x44dcf7..0x44dd15]
+//  Dialog_Register @ 0x44d980; Dialog_UpdatePlayback @ 0x44e470 reports each
+//  line it loads (Server_SendEntityStateToAll @0x44e5a5) and reads its delay
+//  (line byte +0x35 @ 0x44e563); Dialog_LoadAudioClip @ 0x44dcc0 the line's
+//  wave @ 0x44dcf7..0x44dd15]
 std::vector<DialogLineRef> resolve_dialog_lines(const dbf::File *dialog_bank,
 		const lwf::File *dialog_sounds, int32_t dialog_index);
 
@@ -108,33 +114,74 @@ DialogLinePlayback resolve_dialog_line(const dbf::File *dialog_bank, const lwf::
 		const rtxt::File *mission_text, const std::string &dialog_name, int line,
 		int player_class);
 
-// The one-channel dialog playback state machine: a FIFO of resolved lines
-// behind the line the shell's channel is playing.
+// The dialog clock: Dialog_UpdatePlayback runs once a logic tick and its rate
+// word is 62 [orig: Game_ProcessMainFrame @ 0x5265af; DialogSystem_Init
+// @ 0x52765e..0x527660 -> sub_44DC60 @ 0x44dc60 into dword_A8A238].
+inline constexpr uint32_t kDialogTickRate = static_cast<uint32_t>(io::kTicksPerSecondInt);
+// The hold of a line whose wave did not load, or whose rate is 0 [orig:
+// Dialog_LoadAudioClip @ 0x44dd7c, @ 0x44ddbf].
+inline constexpr uint32_t kDialogMissingHold = 12;
+// The dialogs that play at once: Dialog_Register drops a seventeenth [orig:
+// Dialog_Register @ 0x44d9c3].
+inline constexpr size_t kDialogSlots = 16;
+
+// What the device loaded for a line, Dialog_LoadAudioClip's clip: whether its
+// wave loaded (the bank's sounds hold one of the line's name and it decoded),
+// the sample count and pitch ratio the game's wave loader records for it
+// (lwf::WavPcm::loader_samples / loader_pitch_q16) and the voice it plays on,
+// 0 for none (no wave, or nothing played).
+struct DialogClip {
+	bool loaded = false;
+	uint32_t samples = 0;
+	uint32_t pitch_q16 = 0;
+	uint64_t voice = 0;
+};
+
+// How long a loaded line holds its dialog before the next line may load, in
+// ticks: 2 * ((62 * samples + rate) / rate) with rate = (44100 * pitch + 0x8000)
+// >> 16, about twice the wave's length; 12 for a wave that did not load or a
+// rate of 0 [orig: Dialog_LoadAudioClip @ 0x44dd87..0x44ddbf].
+uint32_t dialog_clip_hold(const DialogClip &clip);
+
+// The dialog slots and the dialog channel's voices: Dialog_Register,
+// Dialog_UpdatePlayback and the dialog channel stack, the shell supplying the
+// device (the wave a line loads, whether a voice still plays).
 class DialogQueue {
 public:
-	// Queue resolved lines behind whatever plays (the Dialog_Register leg).
-	void enqueue(const std::vector<DialogLineRef> &lines);
-	// The Dialog_UpdatePlayback advance: while no line is active, hand out the
-	// next queued line for the shell to start (a line without a clip, or one
-	// that fails to spawn, is simply skipped by asking again, so the queue
-	// never stalls). False when a line is still playing or nothing is queued.
-	bool take_next(DialogLineRef &r_line);
-	// The shell's channel took the line it was handed.
-	void line_started();
-	// The active channel freed.
-	void line_finished();
-	bool line_active() const { return line_active_; }
-	size_t pending() const { return pending_.size(); }
-	// Mission teardown / repeated setup: nothing queued or active crosses
+	// One slot's dialog: its lines, the next to load, the timer (a line's hold,
+	// or with bit 31 its delay) and whether the timer counts down yet.
+	struct Slot {
+		std::string dialog;
+		std::vector<DialogLineRef> lines;
+		uint32_t index = 0;
+		uint32_t timer = 0;
+		bool counting = false;
+	};
+	// The device's half of Dialog_LoadAudioClip: start the line's wave on a new
+	// voice of the dialog channel and say what loaded.
+	using LoadLine = std::function<DialogClip(const DialogLineRef &)>;
+	// AudioChannel_ValidateHandle: the voice still plays.
+	using VoicePlaying = std::function<bool(uint64_t)>;
+
+	// Dialog_Register: the dialog takes the next free slot, its first line due
+	// at once; false (the dialog is dropped) when all 16 slots hold a dialog.
+	bool enqueue(const std::string &dialog, std::vector<DialogLineRef> lines);
+	// One Dialog_UpdatePlayback tick. `frame_rendered`: a frame has rendered
+	// since the tick before, which starts a fresh hold's countdown.
+	void tick(bool frame_rendered, const LoadLine &load, const VoicePlaying &playing);
+	const std::vector<Slot> &slots() const { return slots_; }
+	// The dialog channel's voices, oldest first save for the removals' swaps.
+	const std::vector<uint64_t> &voices() const { return voices_; }
+	// Mission teardown / repeated setup: nothing queued or playing crosses
 	// missions.
 	void clear();
-    // Dialog_ResetAll clears waiting lines; the physical voice keeps playing.
-    // [orig: @0x44dc90]
-    void discard_pending() { pending_.clear(); }
+	// Dialog_ResetAll: every slot cleared; the channel's voices play on
+	// [orig: Dialog_ResetAll @ 0x44dc90].
+	void discard_pending() { slots_.clear(); }
 
 private:
-	std::deque<DialogLineRef> pending_;
-	bool line_active_ = false;
+	std::vector<Slot> slots_;
+	std::vector<uint64_t> voices_;
 };
 
 } // namespace opennova::audio

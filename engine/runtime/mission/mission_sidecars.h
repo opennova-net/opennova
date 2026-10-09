@@ -6,10 +6,10 @@
 // [orig: Game_StartMission @ 0x524360, docs/required-resources.md "Mission start"].
 //
 // The rows are data for whoever needs the set (the editor's mission file set, its rename and
-// its import; a packer). Of the runtime's own loaders the mission text's reads its row
-// (runtime_boot's resolve_mission_text); the others still spell their names at their port
-// sites (wac_layered_load, the loading screen, the tile info load, the dialog bank) and come
-// to read a row on touch.
+// its import; a packer). Of the runtime's own loaders the mission text's and the tile info's
+// read their rows (runtime_boot's resolve_mission_text and read_placed_tiles); the others still
+// spell their names at their port sites (wac_layered_load, the loading screen, the dialog bank)
+// and come to read a row on touch.
 
 #include <string>
 #include <vector>
@@ -41,9 +41,11 @@ struct Sidecar {
 //                  [orig: WacScript_InitAndLoad @ 0x4f91f0, the name @ 0x4f953a].
 //   loading_image  <base>.pcx, else loadscrn.pcx [orig: Render_LoadingScreen @ 0x521d10,
 //                  the sidecar probe @ 0x521db5, the fallback @ 0x521e20].
-//   tiles          <base>.til, the per-mission tile info, read loose first
-//                  [orig: Terrain_Init @ 0x60fbe0, the name @ 0x60fd0c; Terrain_LoadTileInfoFile
-//                  @ 0x60a740, the policy force @ 0x60a74e].
+//   tiles          <base>.til, the per-mission tile info, read loose first, on the authority
+//                  alone, else the terrain's own (runtime_boot's read_placed_tiles)
+//                  [orig: Terrain_Init @ 0x60fbe0, the name @ 0x60fd0c;
+//                  Terrain_LoadTileInfoFile @ 0x60a740, the policy force @ 0x60a74e;
+//                  PolyTrn_LoadTerrainConfig @ 0x60e6c9..0x60e6e5].
 //   dialog         <base>.dbf, the dialog bank [orig: DialogSystem_Init @ 0x5275e0, the name
 //                  @ 0x52763e].
 //   dialog_sounds  <base>.lwf, else <base>.pwf, the dialog bank's sounds, read only when the

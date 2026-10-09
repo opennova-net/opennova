@@ -116,14 +116,17 @@ inline constexpr const char *kLoadingServerMessageLabelFallback =
 		"Message from Game Server";
 
 // <mission>.bms -> <mission>.pcx: the sidecar image name for a mission file
-// — the file part with its extension replaced (or appended) [orig:
-// Path_RemoveExtension + Path_ReplaceOrAppendExtension(path, "pcx")
-// @ 0x521d66/0x521dab; resolution is case-insensitive through the VFS].
+// — the file part cut at its FIRST '.', then "pcx" appended: the extension is
+// removed from the last '.', and the replace that follows swaps from the
+// first one left ("op.v2.bms" -> "op.v2" -> "op.pcx") [orig:
+// Path_RemoveExtension @ 0x521d66 + Path_ReplaceOrAppendExtension(path, "pcx")
+// @ 0x521dab, its first-dot scan @ 0x53c7c4; resolution is case-insensitive
+// through the VFS].
 inline std::string loading_sidecar_image_name(const std::string &mission_file) {
 	const size_t slash = mission_file.find_last_of("/\\");
 	std::string base = slash == std::string::npos ? mission_file
 													: mission_file.substr(slash + 1);
-	const size_t dot = base.rfind('.');
+	const size_t dot = base.find('.');
 	if (dot != std::string::npos) base.erase(dot);
 	return base + ".pcx";
 }

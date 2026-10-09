@@ -24,12 +24,10 @@ class MenuAudio : public Node {
 
 public:
 	void set_resource_root(const Ref<ResourceRoot> &p_root);
-	// Authoring fallback bank for file-less or unresolved <SOUND> elements
-	// (the original fails the element parse / stays silent).
-	void set_sound_profile(const Ref<LwfData> &p_profile);
 
-	// Play `trigger` from the .lwf bank named by `file`. Returns true when at
-	// least one member played.
+	// Play `trigger` from the .lwf bank named by `file`, that bank alone: a
+	// bank that does not open plays nothing (menu/menu_sound.h carries the
+	// witness). Returns true when at least one member played.
 	bool play_widget_sound(const String &p_trigger, const String &p_file);
 
 protected:
@@ -49,7 +47,6 @@ private:
 	void ensure_sound_pool_();
 
 	Ref<ResourceRoot> resource_root_;
-	Ref<LwfData> sound_profile_;
 	HashMap<String, LwfBankEntry> lwf_banks_;
 	int next_lwf_bank_id_ = 1;
 	int master_volume_ = -1; // set from the engine default in the ctor

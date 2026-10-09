@@ -47,9 +47,6 @@ extends Control
 # resolution (see resolve_menu_music_pair / resolve_game_music_pair); an
 # explicit value wins (loose dev override).
 @export var menu_sound_bank_file := ""   # "" -> MENUMUS.SBF (M<n>.sbf under an expansion)
-# Menu SFX profile: the .lwf the widgets' <SOUND> elements reference (hover/click).
-# "" -> a .lwf whose name contains "menu" (i.e. menu.lwf), else the first .lwf found.
-@export var menu_sound_profile_file := ""
 @export var menu_music_file := ""        # "" -> MENUMUS.BIN (M<n>.bin under an expansion)
 
 # The well-known control names the shell binds Commands to (ADR 0001): the engine's table
@@ -133,7 +130,6 @@ var _audio: MenuAudio
 var _root: ResourceRoot
 var _text: RtxtStringFile
 var _style: MnsStyleSheet
-var _sound_profile: LwfData
 var _frame_stats: FrameStats = null
 var _player_options: PlayerOptions = null
 var _options_controller: OptionsMenuController = null
@@ -344,7 +340,8 @@ func _assemble_assets() -> void:
 
 
 # Everything the shell reads from its resource root: the cached documents, the
-# text tables, the stylesheet and the menu SFX profile.
+# text tables and the stylesheet. A widget's <SOUND> plays from the bank it names
+# (MenuAudio), so the shell loads no sound bank of its own.
 func _load_root_assets() -> void:
 	_menu_cache.clear()
 	_text = _load_text(menu_text_file)
@@ -365,9 +362,7 @@ func _load_root_assets() -> void:
 	# and its witnesses: engine/runtime/menu/menu_style.h); null when neither is
 	# there, so every %VAR% stays literal.
 	_style = MnsStyleSheet.load_shell(_root) if _root != null else null
-	_sound_profile = _load_sound_profile(_discover_name(menu_sound_profile_file, ".lwf", "menu"))
 	_audio.set_resource_root(_root)
-	_audio.set_sound_profile(_sound_profile)
 
 
 # --- Input routing (the frame is a passive surface; the shell samples) --------
@@ -799,27 +794,6 @@ func _enter_menu_music() -> void:
 	MusicService.open_menu_context(_root, menu_music_file, menu_sound_bank_file)
 
 
-# --- Asset resolution helpers (all best-effort, degrade to null) --------------
-
-# Resolve an explicit file, else discover one by extension (preferring a name
-# containing `prefer`). Returns the winning entry's logical basename (loadable
-# through the VFS by name via _root.read_file) rather than a loose disk path, so
-# discovery works for PFF-archived assets too.
-func _discover_name(explicit: String, suffix: String, prefer: String) -> String:
-	if not explicit.is_empty():
-		return explicit
-	if _root == null:
-		return ""
-	var files := _root.list_files(suffix)
-	if files.is_empty():
-		return ""
-	if not prefer.is_empty():
-		for f in files:
-			if String(f).get_file().to_lower().contains(prefer):
-				return String(f).get_file()
-	return String(files[0]).get_file()
-
-
 # The witnessed music-pair resolution (engine-derived names via
 # MusicDirector.resolve_*_music_pair + the VFS/loose fallback orchestration)
 # lives on MusicService; these seams keep it queryable against the
@@ -855,18 +829,6 @@ func _load_text(file: String) -> RtxtStringFile:
 	if file.is_empty():
 		return null
 	return Strings.load_rtxt(_root, file)
-
-
-# The menu SFX profile (menu.lwf) loads by name through the VFS so it resolves
-# from PFF archives too; its members point at loose .wav files resolved on
-# demand. Degrades to null (silent menu SFX) when absent.
-func _load_sound_profile(name: String) -> LwfData:
-	if _root == null or name.is_empty():
-		return null
-	var d := LwfData.new()
-	if d.open_from_resource_root(_root, name) != OK:
-		return null
-	return d if d.is_loaded() and d.get_set_count() > 0 else null
 
 
 # --- Misc helpers / accessors -------------------------------------------------
