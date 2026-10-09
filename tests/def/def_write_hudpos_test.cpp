@@ -200,6 +200,23 @@ int synthetic_key_values() {
 	return 0;
 }
 
+// A name as one token (quoted where a blank, a tab, a comma, ';' or "//" would cut it) and the
+// channels of a colour key by its arm (any case; 0 for a key that is no colour).
+int name_tokens_and_colour_channels() {
+	CHECK(hudpos_name_token("HudFont.fnt") == "HudFont.fnt");
+	CHECK(hudpos_name_token("my font.fnt") == "\"my font.fnt\"");
+	CHECK(hudpos_name_token("a,b") == "\"a,b\"" && hudpos_name_token("a;b") == "\"a;b\"" &&
+	      hudpos_name_token("a\tb") == "\"a\tb\"" && hudpos_name_token("a//b") == "\"a//b\"");
+	CHECK(hudpos_name_token("a/b") == "a/b" && hudpos_name_token("").empty());
+	for (const char *rgb : { "hud_textcolor", "WEAPON_TEXTCOLOR", "tagcolor_blueteam", "TagColor_Bad" })
+		CHECK(hudpos_color_channels(rgb) == 3);
+	for (const char *argb : { "STANCEICON_COLOR", "stancecolor_good", "HUDHEALTHBORDER", "AGLCOLOR", "destaglcolor" })
+		CHECK(hudpos_color_channels(argb) == 4);
+	for (const char *other : { "HUDHEALTH", "fonthud1_hi", "ALPHAFADE", "nonsense", "" })
+		CHECK(hudpos_color_channels(other) == 0);
+	return 0;
+}
+
 int retail_legs() {
 	int ran = 0;
 	auto leg = [&](const std::vector<uint8_t> &bytes, const std::string &what) {
@@ -253,6 +270,7 @@ int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	synthetic_every_key();
 	synthetic_key_values();
+	name_tokens_and_colour_channels();
 	retail_legs();
 	if (failures == 0) std::printf("def_write_hudpos: all passed\n");
 	return failures == 0 ? 0 : 1;

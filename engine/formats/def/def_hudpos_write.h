@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <formats/def/def.h>
@@ -64,5 +65,17 @@ std::string hudpos_number(int value);
 std::string hudpos_number(double value);
 // An alignment's word: "left" (0), "right" (1), "center" (2) [orig: HUD_ParseTextAlignment @ 0x59D6B0].
 const char *hudpos_align_word(int align);
+// A name as the writer writes it, one token: quoted where a separator (a blank, a tab, a comma, ';')
+// or a comment start ("//") would cut it, as the tokenizer keeps a quoted token whole [orig:
+// Terrain_TokenizeConfigLine @ 0x53CB60, the delimiters @ 0x53CC33..0x53CC4C], as it is otherwise. A
+// name holding a quote or a line end is one no token carries.
+std::string hudpos_name_token(std::string_view name);
+// The channels a colour key's values are, in its arm's order (the key compared without case, as the
+// parser's _stricmp): 3 (r, g, b) for hud_textcolor, weapon_textcolor and the tag colours (a fourth
+// value, where a file has one, is read as the alpha: def_scan's parse_hud_color), 4 (a, r, g, b) for
+// the stance colours, the border colours and the AGL colours; 0 for a key that is no colour [orig:
+// HUD_ParseHudposToken @ 0x59F370, hud_textcolor @0x5A0F3D, the tag colours @0x5A1000..0x5A117C, the
+// stance colours @0x5A0D65.., HUDHEALTHBORDER @0x5A13D9, AGLCOLOR @0x5A00AF].
+int hudpos_color_channels(const std::string &key);
 
 } // namespace opennova::def

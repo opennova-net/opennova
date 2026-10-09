@@ -116,6 +116,13 @@ void color_contract() {
 	check(opennova::mnu::color_value("123456789") == 0xFFFFFFFFu, "past 32 bits saturates");
 	check(opennova::mnu::color_value("-1") == 0xFFFFFFFFu, "'-' negates");
 	check(opennova::mnu::color_value("") == 0u, "nothing reads 0");
+	// The word written back as the text the reader takes whole.
+	check(opennova::mnu::color_text(0xFF102030u) == "FF102030", "eight upper-case digits");
+	check(opennova::mnu::color_text(0x0000ABCDu) == "0000ABCD", "zero-padded, alpha 0 kept");
+	for (const std::uint32_t word : {0u, 0x80FF00FFu, 0xFFFFFFFFu})
+		check(opennova::mnu::color_reads_whole(opennova::mnu::color_text(word)) &&
+		              opennova::mnu::color_value(opennova::mnu::color_text(word)) == word,
+		      "read back whole as the word");
 
 	// [orig: wcstoul base 16 @ 0x64bd10, forced opaque @ 0x64b220].
 	check(opennova::mnu::item_color_argb("C08040") == 0xFFC08040u,
