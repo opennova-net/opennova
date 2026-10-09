@@ -122,6 +122,21 @@ public:
 	float get_player_viewmodel_renderfov_h_deg() const { return renderfov_h_deg_; }
 	void set_player_viewmodel_renderfov_h_deg(float p_value) { renderfov_h_deg_ = p_value; }
 
+	// The CTRL override owners the first-person writers store under
+	// (ObjectModel::set_ctrl_override): one per writer, so a writer that does
+	// not execute clears only its own registers.
+	static constexpr const char *kCtrlOwnerFpHeat = "first_person:heat";
+	static constexpr const char *kCtrlOwnerFpEmplaced = "first_person:emplaced";
+	static constexpr const char *kCtrlOwnerFpTeam = "first_person:team";
+	static constexpr const char *kCtrlOwnerFpArmsCamo = "first_person:arms_camo";
+	// The TEX_TEAM writer on one first-person part, inside the part's
+	// begin/end_ctrl_update: `p_team_byte` (renderer::viewmodel_team_byte)
+	// when the writer executes (`p_write`: world::fp_ctrl_register_writes'
+	// team, which carries the witness), else its register cleared. The rig's
+	// per-frame writers run it on every part, and the editor's first-person
+	// previews on theirs.
+	static void write_fp_team(ObjectModel &p_part, bool p_write, int p_team_byte);
+
 	// The showhud bit-0 FP-gun gate (GameHudPresenter cycles the flags and
 	// pushes the bit through LocalPlayerPresenter.set_fp_gun_visible). Default
 	// on = the boot flags value 3. [orig: g_FpWeaponViewFlags bit 0, tested by

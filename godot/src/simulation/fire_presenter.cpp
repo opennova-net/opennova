@@ -291,15 +291,8 @@ void FirePresenter::draw_tracer_rows(const PackedFloat32Array &p_rows) {
 		publish_distortion(false);
 		return;
 	}
-	const Transform3D eye = camera->get_global_transform();
-	const Vector3 forward = -eye.basis.get_column(2);
-	opennova::renderer::TracerView view;
-	view.camera = {static_cast<float>(eye.origin.x), static_cast<float>(eye.origin.y),
-			static_cast<float>(eye.origin.z)};
-	view.forward = {static_cast<float>(forward.x), static_cast<float>(forward.y),
-			static_cast<float>(forward.z)};
-	view.projection_x_scale = static_cast<float>(camera->get_camera_projection()[0][0]);
-	view.tick_ms = static_cast<std::uint32_t>(GameWorld::current_frame_clock_ms());
+	const opennova::renderer::TracerView view = tracer_view_from_camera(
+			*camera, static_cast<std::uint32_t>(GameWorld::current_frame_clock_ms()));
 	channels_.clear();
 	const float *r = p_rows.ptr();
 	const int64_t size = p_rows.size();

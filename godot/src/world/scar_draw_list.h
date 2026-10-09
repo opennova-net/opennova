@@ -1,5 +1,6 @@
 #pragma once
 
+#include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
@@ -8,6 +9,13 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
+
+#include <cstdint>
+#include <functional>
+
+namespace opennova::renderer {
+struct ScarDrawList;
+} // namespace opennova::renderer
 
 namespace godot {
 
@@ -62,6 +70,29 @@ public:
 
 	// Entity-local batch flag bits (batch_flags).
 	enum { FLAG_ENTITY_LOCAL = 1, FLAG_BUILDING = 2 };
+
+	// Where a compiled list's vertices stand and who owns its entity rings (from_compiled).
+	struct CompiledFrame {
+		// The compile ran in mission space: the shared ring (and the entity rings' world-space form)
+		// takes the world fold to Godot, an entity ring's section-local slots the model fold. False:
+		// the compile ran in the device's own space already (a preview's range), every vertex as it
+		// stands.
+		bool mission_space = true;
+		// An entity-ring owner's mission identity (bms_id, spawn_origin) for the shell's node
+		// resolution, left at (0, world::kSpawnOriginNone) where the owner is gone. Null: the run has
+		// no entity rings to resolve (a preview's range, a mission's shots made world-space), and its
+		// entity-ring batches are left out of the record.
+		std::function<void(uint16_t p_owner_packed, int32_t &r_bms_id, int64_t &r_spawn_origin)>
+				owner_identity;
+		// The pool's leased-ring counter, as the run reports it.
+		int rings_leased = 0;
+	};
+	// The record ScarPresenter uploads, packed from the engine's compiled list
+	// (renderer::compile_scar_draws): the triangle stream in the Godot frame, one row per batch,
+	// the strip table and the pool counters. Simulation::get_scar_draw_list packs the world's
+	// scars through it.
+	static Ref<ScarDrawList> from_compiled(const opennova::renderer::ScarDrawList &p_list,
+			const CompiledFrame &p_frame);
 };
 
 } // namespace godot

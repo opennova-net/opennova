@@ -114,6 +114,17 @@ public:
   // parallel arrays.
   void configure_slots_from_defs(const Ref<ResourceRoot> &p_resource_root,
                                  const Array &p_defs);
+  // A terrain's foliage set up as a mission's load sets it: `p_data` as the
+  // runtime source (height, detail/model foliage indices, colormap and change
+  // invalidation at once), `p_tiles` as the placed tiles retail's candidate
+  // blocker reads, then every one of the terrain's foliage defs' mesh and :fd
+  // texture through `p_resource_root` (configure_slots_from_defs);
+  // get_slot_diagnostics reports each slot after. A null `p_data` binds no
+  // terrain and configures nothing. GameWorld's load and the editor's terrain
+  // and mission previews set their dispatchers up through here.
+  void configure_for_terrain(const Ref<ResourceRoot> &p_resource_root,
+                             const Ref<TerrainData> &p_data,
+                             const Ref<TerrainTileInfo> &p_tiles);
   void clear_asset_cache();
   // Lifecycle diagnostic: the shell can prove that every retained renderer
   // registry was emptied without exposing any cache for mutation (a cache

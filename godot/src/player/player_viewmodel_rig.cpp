@@ -23,10 +23,6 @@ using namespace godot;
 
 namespace {
 
-constexpr const char *kCtrlOwnerFpHeat = "first_person:heat";
-constexpr const char *kCtrlOwnerFpEmplaced = "first_person:emplaced";
-constexpr const char *kCtrlOwnerFpTeam = "first_person:team";
-constexpr const char *kCtrlOwnerFpArmsCamo = "first_person:arms_camo";
 constexpr const char *kViewmodelProjectionGlobal = "opennova_viewmodel_projection";
 
 } // namespace
@@ -340,6 +336,14 @@ void PlayerViewmodelRig::restamp_at_camera() {
 	update_viewmodel_projection();
 }
 
+void PlayerViewmodelRig::write_fp_team(ObjectModel &p_part, bool p_write, int p_team_byte) {
+	if (p_write) {
+		p_part.set_ctrl_override(kCtrlOwnerFpTeam, "TEX_TEAM", p_team_byte);
+	} else {
+		p_part.clear_ctrl_override(kCtrlOwnerFpTeam, "TEX_TEAM");
+	}
+}
+
 // The FP CTRL writers, per part and per frame: which of them execute is the
 // engine's fp_ctrl_register_writes (world/player_present.h carries the
 // TEX_TEAM / HEAT_GLOW / arms-camo witnesses); a writer that does not execute
@@ -359,12 +363,9 @@ void PlayerViewmodelRig::apply_viewmodel_control_registers(bool p_submit_viewmod
 				p_submit_viewmodel, p_weapon_view.is_valid(),
 				p_weapon_view.is_valid() && p_weapon_view->get_emplaced_controls_valid(), arms_part);
 		visual->begin_ctrl_update();
-		if (writes.team && ctrl_sim.is_valid()) {
-			visual->set_ctrl_override(kCtrlOwnerFpTeam, "TEX_TEAM",
-					Simulation::viewmodel_team_byte(ctrl_sim->get_local_player_team()));
-		} else {
-			visual->clear_ctrl_override(kCtrlOwnerFpTeam, "TEX_TEAM");
-		}
+		const bool team = writes.team && ctrl_sim.is_valid();
+		write_fp_team(*visual, team,
+				team ? Simulation::viewmodel_team_byte(ctrl_sim->get_local_player_team()) : 0);
 		if (writes.heat) {
 			visual->set_ctrl_override(kCtrlOwnerFpHeat, "HEAT_GLOW", p_weapon_view->get_heat_glow());
 		} else {

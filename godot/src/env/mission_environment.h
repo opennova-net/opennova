@@ -15,6 +15,8 @@
 
 namespace godot {
 
+class Camera3D;
+
 // The runtime TOD environment owner — the ADR 0033 device leg over the
 // engine's env::EnvironmentState (engine/runtime/environment), which owns the
 // witnessed state: the mission TOD clock, the keyframe-TARGET vs smoothed-
@@ -93,6 +95,13 @@ public:
 	void set_underwater_view(bool p_underwater);
 	void apply_render_eye(float p_eye_y, float p_water_height,
 			bool p_water_active);
+	// The world pass's planes on `p_camera`: the far plane the fog distance
+	// sets (renderer::scene_far_plane) and the scene pass's near plane, every
+	// view and camera mode (renderer::kScenePassNearZ; retail
+	// Render_ProcessMainSceneFrame @ 0x5ca4d7..0x5ca4e0). GameWorld's scene
+	// environment leg sets them on the render camera, and the editor's
+	// environment, terrain and mission previews on theirs.
+	void apply_scene_pass_planes(Camera3D &p_camera) const;
 	bool is_underwater_view() const { return underwater_view_; }
 	// The later full-frame murk scissor has an independently witnessed side
 	// test: camera <= water, while device fog above stays strict camera < water.

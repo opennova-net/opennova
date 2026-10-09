@@ -194,12 +194,9 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index,
 	Ref<Texture2D> detail;
 	Ref<Texture2D> normal;
 	if (object_data_.is_valid() && p_array_index >= 0) {
-		diffuse = object_data_->load_material_slot_texture(p_array_index, 1);
-		detail = object_data_->load_material_slot_texture(p_array_index, 2);
-		normal = object_data_->load_material_slot_texture(p_array_index, 3);
-		if (normal.is_null()) {
-			normal = object_data_->load_material_slot_texture(p_array_index, 4);
-		}
+		diffuse = object_data_->load_material_stage_texture(p_array_index, 1);
+		detail = object_data_->load_material_stage_texture(p_array_index, 2);
+		normal = object_data_->load_material_stage_texture(p_array_index, 3);
 	}
 
 	int32_t key = shader_cache->classify(shader_tag, material_flags, emissive_type,

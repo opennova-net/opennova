@@ -149,6 +149,21 @@ func get_entries(cursor := 0, limit := 200, sources := PackedStringArray()) -> D
 	}
 
 
+## One page for an MCP session (McpServer.session): from `cursor` when the
+## call names one (>= 0), else from where the session's last page ended; the
+## session's cursor then moves to this page's end. An empty session (none by
+## that id) pages from the start and keeps nothing.
+func session_page(session: Dictionary, cursor: int, limit: int,
+		sources := PackedStringArray()) -> Dictionary:
+	if cursor < 0:
+		cursor = int(session.get("log_cursor", 0)) \
+				if not session.is_empty() else 0
+	var page := get_entries(cursor, limit, sources)
+	if not session.is_empty():
+		session["log_cursor"] = page["next_cursor"]
+	return page
+
+
 ## Test seam: replace the native ring drain (DevTools.engine_log_after) with
 ## a canned column supplier.
 func set_engine_drain(drain: Callable) -> void:

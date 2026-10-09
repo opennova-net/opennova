@@ -7,7 +7,9 @@
 
 #include <formats/env/env_weather.h>
 #include <runtime/environment/water_frame.h>
+#include <runtime/renderer/render_order.h>
 
+#include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -675,6 +677,13 @@ void MissionEnvironment::apply_render_eye(float p_eye_y,
 					p_eye_y, p_water_height, p_water_active);
 	set_underwater_view(eye.underwater_view);
 	set_underwater_overlay_view(eye.underwater_overlay_view);
+}
+
+void MissionEnvironment::apply_scene_pass_planes(Camera3D &p_camera) const {
+	p_camera.set_far(opennova::renderer::scene_far_plane(get_fog_distance()));
+	// The world pass's near plane, every view and camera mode (retail
+	// Render_ProcessMainSceneFrame @ 0x5ca4d7..0x5ca4e0).
+	p_camera.set_near(opennova::renderer::kScenePassNearZ);
 }
 
 void MissionEnvironment::set_underwater_overlay_view(bool p_underwater) {
