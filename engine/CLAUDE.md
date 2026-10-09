@@ -128,7 +128,8 @@
   (ctest `cpt_roundtrip`) pins the bit codec and the DPTH/CDEP/POLY round-trips on
   synthetic buffers in core and `tests/cpt/trngen_bake_test` (ctest `cpt_trngen_bake`)
   the bake's output, so run the retail suite whenever you touch the CPT
-  encoder. Three more stay
+  encoder; `cpt_trngen_bake_test <dir>` bakes the retired TrnGen corpus (`git show
+  d57608b3d^:fixtures/terrain`) against TrnGen's own `.cpt` files. Three more stay
   by design: `formats/bink`'s
   `BitReader` is a fail-latching decoder contract (`peek`, `align32`, the first short
   read poisons it), the `wire_cursor` posture rather than `io::BitReader`'s lenient
