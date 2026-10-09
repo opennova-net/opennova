@@ -46,24 +46,13 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     // Statics authored with pitch/roll (rocks seated on slopes) take the full
     // euler matrix so the shell leans with the visual [orig: the entity
     // orientation matrix @ 0x613f40 serves every collision query]; pure-yaw
-    // placements keep the quantized-table heading path bit-for-bit.
-    CollisionMatrix world_mat =
-            (e->pitch != 0 || e->roll != 0)
-                    ? collision_matrix_from_euler(
-                              heading,
-                              bam_from_degrees_wrapped(static_cast<double>(e->pitch)),
-                              bam_from_degrees_wrapped(static_cast<double>(e->roll)), p)
-                    : collision_matrix_from_heading(heading, p);
-    // Entity/item scale is already present in retail's placement/pose matrices;
-    // preserve it before either publication path so the matching scaled inverse
-    // can be selected by the polygon walker.
-    if (e->uniform_scale_q16 != 0) {
-        constexpr int rotation_indices[] = {0, 1, 2, 4, 5, 6, 8, 9, 10};
-        for (int index : rotation_indices) {
-            world_mat.m[index] = static_cast<int32_t>(
-                (static_cast<int64_t>(world_mat.m[index]) * e->uniform_scale_q16) >> 16);
-        }
-    }
+    // placements keep the quantized-table heading path bit-for-bit. Entity/item
+    // scale is already present in retail's placement/pose matrices; preserve it
+    // before either publication path so the matching scaled inverse can be
+    // selected by the polygon walker.
+    CollisionMatrix world_mat = collision_matrix_from_placement(
+            static_cast<double>(e->yaw), static_cast<double>(e->pitch),
+            static_cast<double>(e->roll), p, e->uniform_scale_q16);
 
     // Explicitly published matrices and the host callback both own the FINAL
     // world-space slot array for animated models. Slots pair with COBJ sections
@@ -906,15 +895,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                                                       proxy.pitch_bam,
                                                       proxy.roll_bam, pos)
                         : collision_matrix_from_heading(proxy.heading_bam, pos);
-                if (proxy.uniform_scale_q16 != 0) {
-                    constexpr int rotation_indices[] = {
-                        0, 1, 2, 4, 5, 6, 8, 9, 10};
-                    for (int index : rotation_indices) {
-                        world_mat.m[index] = static_cast<int32_t>(
-                            (static_cast<int64_t>(world_mat.m[index]) *
-                             proxy.uniform_scale_q16) >> 16);
-                    }
-                }
+                collision_matrix_scale_rotation(world_mat, proxy.uniform_scale_q16);
                 std::vector<CollisionMatrix> proxy_matrices(
                     proxy_model->sections.size(), world_mat);
                 CollisionTargetView view;

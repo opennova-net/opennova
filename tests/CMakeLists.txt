@@ -2551,6 +2551,15 @@ if(MSVC)
 endif()
 add_test(NAME collision COMMAND collision_test)
 
+# The collision placement and probe helpers: the item scale, the placement from
+# mission eulers, a placed box, the ground-settle probe origin, the terrain
+# height under a column.
+add_executable(collision_placement_test world/collision_placement_test.cpp)
+target_link_libraries(collision_placement_test PRIVATE opennova_runtime)
+target_include_directories(collision_placement_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(collision_placement_test PRIVATE cxx_std_17)
+add_test(NAME collision_placement COMMAND collision_placement_test)
+
 add_executable(collision_vertical_test world/collision_vertical_test.cpp)
 target_link_libraries(collision_vertical_test PRIVATE opennova_runtime)
 target_compile_features(collision_vertical_test PRIVATE cxx_std_17)
