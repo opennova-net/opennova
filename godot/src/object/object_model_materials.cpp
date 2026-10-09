@@ -251,7 +251,7 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index,
 	// (texture_max_lod): pixel-built textures stop at 4x4.
 	const Ref<Texture> bound_diffuse = diffuse.is_valid()
 			? Ref<Texture>(diffuse)
-			: opennova::prepare_material_texture({}, {}, 0);
+			: opennova::missing_material_texture();
 	set_material_and_auxiliary_parameter(material, r_postmultiply, "u_diffuse", bound_diffuse);
 	set_material_and_auxiliary_parameter(material, r_postmultiply, "u_diffuse_max_lod",
 			opennova::texture_max_lod(bound_diffuse));
