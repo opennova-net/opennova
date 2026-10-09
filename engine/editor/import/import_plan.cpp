@@ -22,7 +22,7 @@
 #include <editor/graph/graph_names.h>
 #include <editor/import/converter.h>
 #include <editor/import/importer.h>
-#include <editor/import/mission_fixed_files.h>
+#include <runtime/assets/mission_fixed_files.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
 #include <editor/project/expansion_files.h>
@@ -610,7 +610,7 @@ private:
 				if (plan_.truncated) return;
 				if (resource->severity != RES_OPTIONAL) not_found(need, expected_asset_kind_for_required_name(resource->name));
 			}
-			for (const MissionFixedFile &fixed : mission_fixed_files()) {
+			for (const assets::MissionFixedFile &fixed : assets::mission_fixed_files()) {
 				const ImportNeed need{file, std::string(), "the game, " + fixed.what, ReferenceKind::None, fixed.name, -1};
 				bring(own, fixed.name, need);
 				if (plan_.truncated) return;

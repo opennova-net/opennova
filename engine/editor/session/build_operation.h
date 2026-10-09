@@ -25,7 +25,7 @@ struct PlayIntent {
 	// The run directory emptied first of what the runs before wrote there (play's fresh: RunTake::fresh).
 	bool fresh = false;
 	// Where the game's player starts (play's start, DI-26: Play from here).
-	PlayStart start;
+	mission::PlayerStart start;
 	// How it runs, resolved as the Play was asked (play's play_mode, else the project's own then:
 	// PlayController::intent_of), so a setting changed while the build packs does not change the Play.
 	PlayMode mode = PlayMode::Runtime;

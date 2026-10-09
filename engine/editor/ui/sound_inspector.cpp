@@ -14,6 +14,7 @@
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
+#include <runtime/audio/dialog_queue.h>
 
 namespace opennova::editor {
 
@@ -94,7 +95,7 @@ bool draw_dialog_bank_inspector(Workspace &workspace, const Document &document, 
 	if (!node) return false;
 	const auto &row = static_cast<const DialogBankRow &>(*node);
 	const std::string &name = row.dialog.name;
-	const int64_t number = dialog_number(name);
+	const int64_t number = audio::dialog_index_of(name);
 	note(number >= 1 ? "A mission plays this dialog as dialog " + std::to_string(number) + " (its Play dialog action, its "
 	                   "Dialog triggers): each line the wave of its name in " + dialog_sounds_scope(document.path()) +
 	                   ", one after another, its subtitle in the chat."
