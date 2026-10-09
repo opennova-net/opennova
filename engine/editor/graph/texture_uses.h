@@ -40,7 +40,7 @@ struct TextureUseContext {
 // for that name (`load`) and the project file that is (`served`, "" for none), and whether the file the
 // uses were asked of is that file (`reads_file`: false where the loader takes another, a .tga's .dds).
 struct TextureUse {
-	TextureRoleId role = TextureRoleId::kCount;
+	renderer::TextureRoleId role = renderer::TextureRoleId::kCount;
 	std::string referrer, record, locator, field;
 	std::string words;
 	std::string name_written;
@@ -54,11 +54,11 @@ struct TextureUse {
 	// How its loader is asked again (texture_use_opens): a texture reference's loader argument (texture_roles.h;
 	// -1 for a menu's or a mission's, which its role's loader takes), a fixed name's loader.
 	int32_t loader_arg = -1;
-	TextureLoader loader = TextureLoader::kCount;
+	renderer::TextureLoader loader = renderer::TextureLoader::kCount;
 	// What the use's texture costs the game (documents/texture_budget): a model row's, of the file its loader
 	// opens; unknown for another use, or until the session reads that file's header (TextureUseIndex).
 	TextureBudget budget;
-	bool known() const { return role != TextureRoleId::kCount; }
+	bool known() const { return role != renderer::TextureRoleId::kCount; }
 };
 
 // The budget of a use whose loader opens the file `header` is of (its `served` file): a model row's, by its
@@ -72,15 +72,17 @@ TextureBudget texture_use_budget(const TextureUse &use, const TextureHeader &hea
 bool texture_use_opens(const TextureUse &use, const std::string &file);
 
 // A name the game opens itself, its role and what for (the HUD's art, the scars, the weather, the view
-// effects, the screens): the fixed-names table, from the runtime's own name constants where it has them.
+// effects, the screens): the engine's fixed-names table (renderer::fixed_texture_names, each name's role,
+// loader and use) with what each use is for and its witness in words.
 struct FixedTextureName {
 	std::string name;
-	TextureRoleId role = TextureRoleId::kCount;
+	renderer::TextureRoleId role = renderer::TextureRoleId::kCount;
 	const char *what = "";
 	const char *witness = "";
-	// The loader where it is not the role's (the night vision's scale through FILE, the vignette through
-	// ARCHIVE); kCount the role's.
-	TextureLoader loader = TextureLoader::kCount;
+	// The loader that opens it: its role's, or another (the night vision's scale through FILE, the vignette
+	// through ARCHIVE).
+	renderer::TextureLoader loader = renderer::TextureLoader::kCount;
+	// The HUD loader's mode: 0 colour, 1 alpha only; -1 not a HUD loader's.
 	int hud_mode = -1;
 };
 const std::vector<FixedTextureName> &fixed_texture_names();
@@ -89,7 +91,7 @@ const std::vector<FixedTextureName> &fixed_texture_names();
 // by its row (its slot, its runtime type, its flipbook flag, read from `model`, the model document the
 // edge is in, null where it does not read: the row's type alone then); a menu's image, frame stencil
 // or brush, or cursor by its field; a mission's loading screen; kCount for a use not witnessed.
-TextureRoleId texture_role_of_edge(const GraphEdge &edge, const Document *model, TextureUseContext &context);
+renderer::TextureRoleId texture_role_of_edge(const GraphEdge &edge, const Document *model, TextureUseContext &context);
 
 // What reads a referring model: its document at a project-relative path (open, or read from its file;
 // null when it does not read).

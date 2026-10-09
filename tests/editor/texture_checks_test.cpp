@@ -41,6 +41,7 @@
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
+namespace renderer = opennova::renderer;
 
 namespace {
 
@@ -335,7 +336,7 @@ int test_retail() {
 			std::vector<uint8_t> map;
 			if (!opennova::load_trn(input, config, message) || !mount.read_file_raw(config.colormap, map)) continue;
 			++maps;
-			check_texture_role(TextureRoleId::TerrainColourMap, config.colormap, texture_header_as(TextureReader::Tga, map), name,
+			check_texture_role(renderer::TextureRoleId::TerrainColourMap, config.colormap, texture_header_as(TextureReader::Tga, map), name,
 			                   [&](CoreFinding, DiagnosticSeverity, const std::string &words) {
 				                   std::fprintf(stderr, "retail: %s\n", words.c_str());
 				                   ++gating;
