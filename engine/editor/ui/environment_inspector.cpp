@@ -145,8 +145,8 @@ bool draw_environment_inspector(Workspace &workspace, const Document &document, 
 		          "c" + tag);
 		// Where its water plane comes from: the header's, the terrain's or this environment's.
 		ReferenceTarget water;
-		if (use.water_from == WaterFrom::Mission) water = header("water_override");
-		else if (use.water_from == WaterFrom::Terrain) water = file_target(scan, use.terrain_file);
+		if (use.water_from == env::WaterRung::Mission) water = header("water_override");
+		else if (use.water_from == env::WaterRung::Terrain) water = file_target(scan, use.terrain_file);
 		else if (const EnvironmentRow *row = environment->environment_row()) {
 			water.file = environment->path();
 			water.locator = environment->locator({row->id, row->kind, 0});
