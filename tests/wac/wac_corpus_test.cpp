@@ -14,10 +14,10 @@
 #include <string>
 #include <vector>
 
+#include <base/io/sha256.h>
 #include <runtime/wac/compiler.h>
 #include "common/file_io.h"
 #include "common/retail_paths.h"
-#include "common/sha256.h"
 #include "wac_listing.h"
 
 namespace fs = std::filesystem;
@@ -39,7 +39,7 @@ std::string upper(std::string text) {
 }
 
 std::string sha256(const std::string &bytes) {
-	return testhash::sha256_hex(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size());
+	return opennova::io::sha256_hex(bytes.data(), bytes.size());
 }
 
 } // namespace
