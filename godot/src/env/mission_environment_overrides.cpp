@@ -1,6 +1,8 @@
 #include "env/mission_environment_overrides.h"
 #include "util/color_convert.h"
 
+#include <cmath>
+
 using namespace godot;
 
 namespace {
@@ -10,6 +12,10 @@ namespace {
 bool MissionEnvironmentOverrides::is_empty() const {
 	return !value_.has_water_height && !value_.has_fog_level && !value_.has_fog_color &&
 			!value_.has_water_color && !value_.has_water_murk && !value_.has_start_time;
+}
+
+float MissionEnvironmentOverrides::get_water_height_world_or_nan() const {
+	return value_.has_water_height ? get_water_height_world() : NAN;
 }
 
 void MissionEnvironmentOverrides::set_water_height(float p_value) {

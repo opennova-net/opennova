@@ -32,6 +32,42 @@ func test_capture_honors_a_pre_cancelled_request() -> void:
 	assert_true(String(outcome["error"]).contains("cancelled"))
 
 
+func test_tool_schema_lists_the_capture_arguments() -> void:
+	var schema := McpScreenshot.tool_schema()
+	assert_eq(schema.keys(), ["max_dim", "format", "quality"])
+	assert_eq(int(schema["max_dim"]["minimum"]), McpScreenshot.MIN_DIM)
+	assert_eq(int(schema["max_dim"]["maximum"]), McpScreenshot.MAX_DIM)
+	assert_eq(int(schema["max_dim"]["default"]), McpScreenshot.DEFAULT_MAX_DIM)
+	assert_eq(float(schema["quality"]["default"]), McpScreenshot.DEFAULT_QUALITY)
+
+
+func test_tool_capture_refuses_wrong_typed_arguments_by_the_tools_name() -> void:
+	var ctx := McpToolContext.new()
+	for args in [{"max_dim": "wide"}, {"max_dim": 12.5}, {"quality": [0.8]}, {"format": 3}]:
+		var result: McpToolResult = await McpScreenshot.tool_capture(
+				get_tree().root, args, ctx, "some_screenshot", "Some screenshot", "Some")
+		assert_true(result.is_error, "wrong-typed %s refused" % [args])
+		assert_true(JSON.stringify(result.content).contains("some_screenshot requires"),
+				"the refusal names the tool")
+
+
+func test_tool_capture_reports_the_capture_failure_headless() -> void:
+	var result: McpToolResult = await McpScreenshot.tool_capture(
+			get_tree().root, {}, McpToolContext.new(), "some_screenshot", "Some screenshot", "Some")
+	assert_true(result.is_error)
+	assert_true(JSON.stringify(result.content).contains("headless"),
+			"the capture's own error reaches the caller")
+
+
+func test_tool_capture_reports_a_cancelled_request() -> void:
+	var ctx := McpToolContext.new()
+	ctx.cancelled = true
+	var result: McpToolResult = await McpScreenshot.tool_capture(
+			get_tree().root, {}, ctx, "some_screenshot", "Some screenshot", "Some")
+	assert_true(result.is_error)
+	assert_true(JSON.stringify(result.content).contains("Some screenshot was cancelled"))
+
+
 func test_encode_webp_with_dimensions() -> void:
 	var outcome := McpScreenshot.encode(_gradient(64, 32))
 	assert_true(outcome["ok"])

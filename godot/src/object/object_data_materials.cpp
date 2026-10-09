@@ -53,6 +53,14 @@ Ref<Texture2D> ObjectData::load_material_slot_texture(int p_array_index, int p_s
 	return Ref<Texture2D>();
 }
 
+Ref<Texture2D> ObjectData::load_material_stage_texture(int p_array_index, int p_slot) const {
+	const Ref<Texture2D> loaded = load_material_slot_texture(p_array_index, p_slot);
+	if (loaded.is_null() && p_slot == THREEDI_TEX_SLOT_NORMAL) {
+		return load_material_slot_texture(p_array_index, THREEDI_TEX_SLOT_NORMAL_B);
+	}
+	return loaded;
+}
+
 bool ObjectData::get_material_info(int p_index, MaterialInfo &r_info) const {
 	if (!source_model_ || p_index < 0 || static_cast<size_t>(p_index) >= native_model().material_count) {
 		return false;

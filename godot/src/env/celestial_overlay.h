@@ -9,9 +9,15 @@ class SceneOverlayModelSurfaces;
 class Water;
 struct SceneOverlaySubmission;
 
-// The celestial draws of the post-particle overlay tail (renderer/scene_overlay.h), one function each,
-// the game's frame (GameWorld's scene_overlay leg) and the editor's environment preview
-// (authoring/environment_viewport_applier) alike.
+// The celestial draws of the post-particle overlay tail (renderer/scene_overlay.h), and the underwater
+// murk beside them, one function each, the game's frame (GameWorld's scene_overlay leg) and the editor's
+// environment preview (authoring/environment_viewport_applier) alike.
+
+// The underwater murk's full-frame draw at `p_water`'s height, in the environment's lit underwater colour
+// and alpha byte (renderer::append_underwater_murk_overlay carries the slot and its witness). The caller asks
+// it only while the water renders.
+void append_underwater_murk_overlay(const MissionEnvironment &p_env, const Water &p_water,
+		SceneOverlaySubmission &r_submission);
 
 // The water glint and the sun glare of the main view through `camera`: Celestial places both models and
 // drives their UPL_INTENSITY submit value (the SelfLumColor their SELFLUM materials evaluate) and keeps

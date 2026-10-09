@@ -639,18 +639,10 @@ void GameWorld::apply_mission_environment_overrides(const Ref<MissionData> &p_mi
 	if (env_ != nullptr) {
 		Ref<EnvFile> env_data = env_->get_environment_data();
 		if (env_data.is_valid()) {
-			if (overrides->is_empty()) {
-				env_data->clear_mission_overrides();
-			} else {
-				env_data->apply_mission_overrides(overrides);
-			}
+			env_data->apply_mission_overrides_or_clear(overrides);
 		}
 	}
-	float mission_water = NAN;
-	if (overrides->get_has_water_height()) {
-		mission_water = overrides->get_water_height_world();
-	}
-	set_mission_water_height_override(mission_water);
+	set_mission_water_height_override(overrides->get_water_height_world_or_nan());
 }
 
 void GameWorld::set_mission_water_height_override(float p_world_height) {
@@ -967,16 +959,7 @@ void GameWorld::configure_foliage() {
 	if (dispatcher_ == nullptr || terrain_data_.is_null()) {
 		return;
 	}
-	// The runtime source already supplies height, detail/model foliage indices,
-	// colormap, and change invalidation. Binding the same TerrainData again as
-	// the fallback colormap source attempts a duplicate terrain_changed connection
-	// in Godot and makes mission reloads report ERR_INVALID_PARAMETER.
-	dispatcher_->set_terrain_data(terrain_data_);
-	dispatcher_->set_tile_info(terrain_->get_tile_info_override());
-	const Array defs = terrain_data_->get_foliage_defs();
-	// The dispatcher resolves every def's mesh and :fd texture through its own
-	// per-root asset caches, then configures the four retail slots.
-	dispatcher_->configure_slots_from_defs(resource_root_, defs);
+	dispatcher_->configure_for_terrain(resource_root_, terrain_data_, terrain_->get_tile_info_override());
 	const Array diagnostics = dispatcher_->get_slot_diagnostics();
 	for (int64_t i = 0; i < diagnostics.size(); ++i) {
 		const Dictionary diagnostic = diagnostics[i];

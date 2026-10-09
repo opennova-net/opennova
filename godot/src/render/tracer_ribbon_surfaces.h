@@ -1,18 +1,26 @@
 #pragma once
 
 #include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 
 #include <runtime/renderer/tracer_frame.h>
 
 #include "resource_index/resource_root.h"
 
 namespace godot {
+
+// The view a ribbon frame is built against (renderer::compile_tracer_ribbons): `p_camera`'s eye and its
+// -Z forward from its global transform, its projection's x scale, and the frame clock `p_tick_ms`. The game's
+// fire presenter builds its trails against the frame's camera through it, and the editor's weapon preview
+// against the device's.
+opennova::renderer::TracerView tracer_view_from_camera(const Camera3D &p_camera, std::uint32_t p_tick_ms);
 
 // The tracer ribbons' device half: the witnessed normal-pass materials, one per (shader, fog) pair
 // (godot/shaders/tracer_ribbon_{stock,smoke,nvg}.gdshader, each fogged per its style's +0 word), the pool's one

@@ -7,6 +7,8 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
+#include <godot_cpp/variant/projection.hpp>
+#include <godot_cpp/variant/transform3d.hpp>
 
 #include "util/color_convert.h"
 #include "util/texture_path_resolver.h"
@@ -32,6 +34,19 @@ const char *ribbon_shader_path(TracerShader p_shader) {
 }
 
 } // namespace
+
+opennova::renderer::TracerView tracer_view_from_camera(const Camera3D &p_camera, std::uint32_t p_tick_ms) {
+	const Transform3D eye = p_camera.get_global_transform();
+	const Vector3 forward = -eye.basis.get_column(2);
+	opennova::renderer::TracerView view;
+	view.camera = {static_cast<float>(eye.origin.x), static_cast<float>(eye.origin.y),
+			static_cast<float>(eye.origin.z)};
+	view.forward = {static_cast<float>(forward.x), static_cast<float>(forward.y),
+			static_cast<float>(forward.z)};
+	view.projection_x_scale = static_cast<float>(p_camera.get_camera_projection()[0][0]);
+	view.tick_ms = p_tick_ms;
+	return view;
+}
 
 void TracerRibbonSurfaces::set_resource_root(const Ref<ResourceRoot> &p_root) {
 	if (resource_root_ == p_root) {

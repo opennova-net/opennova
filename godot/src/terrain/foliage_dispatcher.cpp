@@ -599,6 +599,24 @@ void FoliageDispatcher::configure_slots_from_defs(
                   resolve_slot_fd_textures(p_resource_root, p_defs));
 }
 
+void FoliageDispatcher::configure_for_terrain(
+    const Ref<ResourceRoot> &p_resource_root, const Ref<TerrainData> &p_data,
+    const Ref<TerrainTileInfo> &p_tiles) {
+  // The runtime source already supplies height, detail/model foliage indices,
+  // colormap, and change invalidation. Binding the same TerrainData again as
+  // the fallback colormap source attempts a duplicate terrain_changed
+  // connection in Godot and makes mission reloads report
+  // ERR_INVALID_PARAMETER.
+  set_terrain_data(p_data);
+  if (p_data.is_null()) {
+    return;
+  }
+  set_tile_info(p_tiles);
+  // Every def's mesh and :fd texture resolve through this dispatcher's own
+  // per-root asset caches, then the four retail slots configure.
+  configure_slots_from_defs(p_resource_root, p_data->get_foliage_defs());
+}
+
 void FoliageDispatcher::clear_asset_cache() {
   asset_mesh_cache_.clear();
   asset_fd_texture_cache_.clear();

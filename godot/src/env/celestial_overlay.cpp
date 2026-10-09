@@ -23,6 +23,16 @@ Ref<EnvLightValues> light_values_of(const MissionEnvironment &p_env) {
 
 } // namespace
 
+void append_underwater_murk_overlay(const MissionEnvironment &p_env, const Water &p_water,
+		SceneOverlaySubmission &r_submission) {
+	const Vector3 lit = p_env.get_underwater_overlay_color();
+	const float rgb[3] = { static_cast<float>(lit.x), static_cast<float>(lit.y),
+		static_cast<float>(lit.z) };
+	opennova::renderer::append_underwater_murk_overlay(rgb,
+			static_cast<uint8_t>(p_env.get_underwater_overlay_alpha_byte()),
+			p_water.get_water_height(), r_submission.frame);
+}
+
 void append_celestial_overlays(SceneOverlayModelSurfaces &r_bodies, Celestial &p_celestial,
 		MissionEnvironment &p_env, const Water *p_water, Camera3D &p_camera, SceneOverlaySubmission &r_submission) {
 	const Ref<EnvLightValues> light = light_values_of(p_env);

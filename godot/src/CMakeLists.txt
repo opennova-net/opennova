@@ -171,6 +171,7 @@ add_library(opennova_bindings OBJECT
     object/object_data_materials.cpp
     object/object_data_geometry.cpp
     object/object_data_runtime_eval.cpp
+    object/object_data_build.cpp
     object/object_shader_cache.cpp
     object/item_database.cpp
     object/model_light.cpp
