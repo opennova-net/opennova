@@ -90,57 +90,17 @@ void size_fact(TextureImage &image) {
 	     sides(w, h) + (power_of_two(w) && power_of_two(h) ? " (sides are powers of two)" : " (a side is no power of two)"));
 }
 
-// Whether the file ends before the texels the game's TGA reader copies: the forms it reads (formats/tga
-// tga_read.cpp, its witnesses), from the byte after the header and the image ID; a form it zeroes or
-// leaves unset reads nothing.
-bool tga_ends_short(const tga::TgaHeader &h, const std::vector<uint8_t> &bytes) {
-	const uint64_t pixels = uint64_t(h.width) * h.height;
-	const uint64_t start = 18u + h.id_length;
-	const auto beyond = [&](uint64_t need) { return start + need > bytes.size(); };
-	switch (h.image_type) {
-	case 1: return h.map_entry_bits == 24 && beyond(3ull * h.map_length + pixels);
-	case 2: return (h.bits == 24 || h.bits == 32) && beyond(pixels * (h.bits / 8u));
-	case 3: return h.bits == 8 && beyond(pixels);
-	case 10: {
-		if (h.bits != 24 && h.bits != 32) return false;
-		const uint64_t per = h.bits / 8u;
-		uint64_t at = start, pixel = 0;
-		while (pixel < pixels) {
-			if (at >= bytes.size()) return true;
-			const uint8_t packet = bytes[size_t(at++)];
-			// A raw packet's copy stops at the image's end; a run reads one pixel.
-			const uint64_t count = std::min<uint64_t>((packet & 0x7Fu) + 1u, pixels - pixel);
-			at += (packet & 0x80u) ? per : per * count;
-			pixel += count;
-			if (at > bytes.size()) return true;
-		}
-		return false;
-	}
-	default: return false;
-	}
-}
-
 void read_tga(TextureImage &image, const std::vector<uint8_t> &stored) {
 	fact(image, "format", "File format", "TGA image");
 	fact(image, "reader", "Read by", "the game's TGA reader");
 	std::vector<uint8_t> bytes = stored;
-	// The models' archive reader unpacks a BFC1 file first [orig: CTerrainTileData_LoadTGAFromArchive
-	// @ 0x56E570, AudioFile_DecompressBFC_Aligned @ 0x75AFB0].
+	// The models' archive reader unpacks a BFC1 file first (bfc1::bfc1_unpack, its witnesses).
 	if (bfc1::bfc1_is_bfc1(stored.data(), stored.size())) {
-		uint32_t unpacked = 0;
-		if (bfc1::bfc1_uncompressed_size(stored.data(), stored.size(), &unpacked) == 0) {
-			std::vector<uint8_t> out(unpacked);
-			size_t size = out.size();
-			if (bfc1::bfc1_decompress(stored.data(), stored.size(), out.data(), &size) == 0) {
-				out.resize(size);
-				bytes = std::move(out);
-				image.bfc1 = true;
-			}
-		}
-		if (!image.bfc1) {
+		if (!bfc1::bfc1_unpack(bytes)) {
 			image.refusal = "Its BFC1 packing does not unpack.";
 			return;
 		}
+		image.bfc1 = true;
 	}
 	// The texels as the game's TGA reader decodes them (formats/tga/tga_read.h, its witnesses); the
 	// header's fields say what form the file is and what the reader makes of it.
@@ -152,12 +112,10 @@ void read_tga(TextureImage &image, const std::vector<uint8_t> &stored) {
 		return;
 	}
 	// The forms the reader zeroes, and those it leaves unwritten (which the port reads as zeros too)
-	// [orig: CTerrainTileData_LoadTGAFromArchive @ 0x56E570, the switch @ 0x56E6C2].
-	const uint8_t type = h.image_type;
-	const bool known = type == 1 || type == 2 || type == 3 || type == 9 || type == 10 || type == 11;
-	const bool unset = !known || (type == 3 && h.bits != 8);
-	const bool zeroed = !unset && (type == 9 || type == 11 || ((type == 2 || type == 10) && h.bits != 24 && h.bits != 32) ||
-	                               (type == 1 && h.map_entry_bits != 24));
+	// (tga::tga_retail_form, its witnesses).
+	const tga::TgaRetailForm form = tga::tga_retail_form(h);
+	const bool unset = form == tga::TgaRetailForm::Unset;
+	const bool zeroed = form == tga::TgaRetailForm::Zeroed;
 	image.loads = true;
 	image.decoded = true;
 	image.blank = unset || zeroed;
@@ -316,25 +274,15 @@ void read_dds(TextureImage &image, const std::vector<uint8_t> &bytes, bool first
 		fact(image, "loads", "In the game", "cannot load it: " + dds.refusal);
 		return;
 	}
-	// A DXT1, DXT4 or DXT5 level's blocks through the port of the D3DX codec the game links (its DXT4 is
-	// DXT5's blocks over colour premultiplied by alpha); the other forms dds_read decoded.
-	const bool dxt1 = format.d3d == dds::dds_fourcc('D', 'X', 'T', '1');
-	const bool dxt5 = format.d3d == dds::dds_fourcc('D', 'X', 'T', '4') || format.d3d == dds::dds_fourcc('D', 'X', 'T', '5');
+	// The levels as D3DX reads them (renderer::decode_dds_levels: a DXT1, DXT4 or DXT5 level's blocks through
+	// the port of the D3DX codec the game links; the other forms dds_read decoded). A thumbnail's: the chain's
+	// first level alone, the others left coded.
+	image.decoded = renderer::decode_dds_levels(bytes.data(), bytes.size(), dds, first_level_only ? 1 : 0);
 	for (dds::DdsLevel &level : dds.levels) {
-		if (first_level_only && !image.levels.empty()) break; // a thumbnail's: the chain's other levels left coded
-		if (dxt1 || dxt5) {
-			renderer::DxtSurface surface;
-			surface.format = dxt1 ? renderer::TextureDxtFormat::Dxt1 : renderer::TextureDxtFormat::Dxt5;
-			surface.width = level.width;
-			surface.height = level.height;
-			surface.blocks.assign(bytes.begin() + std::ptrdiff_t(level.offset),
-			                      bytes.begin() + std::ptrdiff_t(level.offset + level.bytes));
-			level.rgba = renderer::encode_rgba8(renderer::decode_dxt_surface(surface));
-		}
+		if (first_level_only && !image.levels.empty()) break;
 		image.levels.push_back({level.width, level.height, std::move(level.rgba)});
 	}
 	image.game_levels = uint32_t(dds.levels.size());
-	image.decoded = format.decoded || dxt1 || dxt5;
 	if (!image.decoded) image.undecoded = std::string("its ") + format.name + " texels, which the editor does not decode yet";
 	size_fact(image);
 	fact(image, "loads", "In the game", "loads it");
@@ -433,20 +381,13 @@ TextureHeader texture_header_as(TextureReader reader, const std::vector<uint8_t>
 		std::vector<uint8_t> unpacked;
 		const std::vector<uint8_t> *data = &bytes;
 		if (bfc1::bfc1_is_bfc1(bytes.data(), bytes.size())) {
-			uint32_t size = 0;
-			if (bfc1::bfc1_uncompressed_size(bytes.data(), bytes.size(), &size) == 0) {
-				unpacked.resize(size);
-				size_t made = unpacked.size();
-				if (bfc1::bfc1_decompress(bytes.data(), bytes.size(), unpacked.data(), &made) == 0) {
-					unpacked.resize(made);
-					data = &unpacked;
-					out.bfc1 = true;
-				}
-			}
-			if (!out.bfc1) {
+			unpacked = bytes;
+			if (!bfc1::bfc1_unpack(unpacked)) {
 				out.refusal = "Its BFC1 packing does not unpack.";
 				return out;
 			}
+			data = &unpacked;
+			out.bfc1 = true;
 		}
 		tga::TgaHeader header;
 		if (!tga::tga_read_header(data->data(), data->size(), header)) {
@@ -463,23 +404,24 @@ TextureHeader texture_header_as(TextureReader reader, const std::vector<uint8_t>
 		out.tga_map_length = header.map_length;
 		out.tga_map_entry_bits = header.map_entry_bits;
 		out.alpha = (header.image_type == 2 || header.image_type == 10) && header.bits == 32;
-		out.tga_short = tga_ends_short(header, *data);
+		out.tga_short = tga::tga_reads_past_end(header, data->data(), data->size());
 		return out;
 	}
-	case TextureReader::Pcx:
-		// The header's fields (the 128 bytes before the texels): bits a plane @ 3, the window @ 4..11,
-		// the planes @ 65, the bytes a line @ 66.
-		if (bytes.size() < 128 || bytes[0] != 0x0A) {
+	case TextureReader::Pcx: {
+		// The header's fields (the 128 bytes before the texels: pcx_read_header).
+		PcxHeader header;
+		if (!pcx_read_header(bytes.data(), bytes.size(), header)) {
 			out.refusal = "The PCX header is cut short or is not one.";
 			return out;
 		}
 		out.read = true;
-		out.pcx_bits = bytes[3];
-		out.pcx_planes = bytes[65];
-		out.pcx_bytes_per_line = uint16_t(bytes[66] | bytes[67] << 8);
-		out.width = uint32_t((bytes[8] | bytes[9] << 8) - (bytes[4] | bytes[5] << 8) + 1);
-		out.height = uint32_t((bytes[10] | bytes[11] << 8) - (bytes[6] | bytes[7] << 8) + 1);
+		out.pcx_bits = header.bits;
+		out.pcx_planes = header.planes;
+		out.pcx_bytes_per_line = header.bytes_per_line;
+		out.width = uint32_t(header.width);
+		out.height = uint32_t(header.height);
 		return out;
+	}
 	case TextureReader::Dds: {
 		dds::DdsImage image;
 		std::string error;

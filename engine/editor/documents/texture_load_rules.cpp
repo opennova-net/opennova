@@ -127,41 +127,46 @@ const char *texture_load_transform_words(TextureLoadTransform transform) {
 	return "";
 }
 
-TextureLoad texture_load(TextureLoader loader, std::string_view written, const TextureNameTest &exists, uint8_t row_type,
-                         int alpha_mode, TextureRoleId role) {
+TextureLoad texture_load(renderer::TextureLoader loader, std::string_view written, const TextureNameTest &exists,
+                         uint8_t row_type, int alpha_mode) {
+	using L = renderer::TextureLoader;
 	const std::string name(written);
 	TextureLoad out;
 	if (name.empty()) return out;
 	switch (loader) {
-	case TextureLoader::Stage:
-	case TextureLoader::Plain:
-	case TextureLoader::Normal:
-	case TextureLoader::Producer:
-	case TextureLoader::Chunk:
+	case L::Stage:
+	case L::Plain:
+	case L::Normal:
+	case L::Producer:
+	case L::Chunk:
 		// The model row's dispatcher by the row's runtime type; a role named without a row (a terrain's
 		// detail, a weather drop) passes the STAGE type 0, PLAIN its type 1.
-		return row_load(name, loader == TextureLoader::Plain ? uint8_t(1) : row_type, exists);
-	case TextureLoader::Pcx8:
+		return row_load(name, loader == L::Plain ? uint8_t(1) : row_type, exists);
+	case L::Pcx8:
 		// Read by its own name as 8-bit indices (a foliage or char map): no texture loader.
 		out.file = name;
 		out.reader = TextureFileReader::Pcx8;
 		return out;
-	case TextureLoader::Cube:
+	case L::Cube:
 		out.file = name;
 		out.reader = TextureFileReader::Dds;
 		return out;
-	case TextureLoader::kCount: return out;
+	case L::HudColor:
+	case L::HudAlpha:
+		// The HUD loader in the caller's mode, else the loader's own.
+		if (alpha_mode >= 0) loader = alpha_mode == 1 ? L::HudAlpha : L::HudColor;
+		break;
+	case L::kCount: return out;
 	default: break;
 	}
-	renderer::TextureLoader by;
-	if (!texture_role_renderer_loader(role, by, loader, alpha_mode)) return out;
-	return attempts_load(by, name, exists);
+	if (!renderer::texture_loader_has_attempts(loader)) return out;
+	return attempts_load(loader, name, exists);
 }
 
 TextureLoad texture_reference_load(std::string_view written, int32_t loader_arg, const TextureNameTest &exists) {
 	if (texture_arg_is_row_type(loader_arg))
-		return texture_load(TextureLoader::Stage, written, exists, static_cast<uint8_t>(loader_arg));
-	TextureRoleId role = TextureRoleId::kCount;
+		return texture_load(renderer::TextureLoader::Stage, written, exists, static_cast<uint8_t>(loader_arg));
+	renderer::TextureRoleId role = renderer::TextureRoleId::kCount;
 	if (!texture_arg_role(loader_arg, role)) {
 		TextureLoad out;
 		out.file = std::string(written);
@@ -175,7 +180,7 @@ TextureLoad texture_reference_load(std::string_view written, int32_t loader_arg,
 	// A sky map: its extension made PCX first, the archive loader then trying its .dds and the .pcx
 	// (kTextureArgPcx).
 	if (loader_arg & kTextureArgPcx) name = menu::replace_or_append_extension(name, "pcx");
-	return texture_load(texture_role_row(role).loader, name, exists, 0, -1, role);
+	return texture_load(renderer::texture_role(role).loader, name, exists);
 }
 
 std::shared_ptr<const TextureImage> apply_load_transform(const TextureImage &image, TextureLoadTransform transform,
