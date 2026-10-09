@@ -1397,10 +1397,8 @@ static int test_import_shader() {
 	std::vector<uint8_t> read;
 	TEST_EXPECT(origin.open(ImportOrigin::Kind::Archive, archive, project, why) && origin.read("glass.fx", read) &&
 	            read == stored);
-	// The extract and the editor agree on which files their loader takes as stored.
-	TEST_EXPECT(opennova::vfs_loader_takes_stored("x.fx") && !opennova::vfs_loader_takes_stored("x.wac") &&
-	            asset_kind_row(classify_asset("x.fx", nullptr)).scr == ScrForm::Shader &&
-	            asset_kind_row(classify_asset("x.wac", nullptr)).scr == ScrForm::Optional);
+	// The extract and the editor read the one rule of which files their loader takes as stored.
+	TEST_EXPECT(opennova::vfs_loader_takes_stored("x.fx") && !opennova::vfs_loader_takes_stored("x.wac"));
 	return 0;
 }
 

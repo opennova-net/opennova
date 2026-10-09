@@ -108,7 +108,7 @@ bool records_read(const DocumentBase &document, const std::string &bytes, const 
 
 std::vector<Diagnostic> line_end_findings(const DocumentBase &document, const std::string &game) {
 	std::vector<Diagnostic> findings;
-	const LineReader reader = asset_kind_row(document.kind()).line_reader;
+	const LineReader reader = file_kind_facts(document.kind()).line_reader;
 	if (reader == LineReader::None) return findings;
 	const std::string file = basename_of(document.path());
 	PlannedFix fix;

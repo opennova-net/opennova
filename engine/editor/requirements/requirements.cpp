@@ -103,7 +103,7 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 		row.phase = resource->phase;
 		row.severity = resource->severity;
 		row.required = resource->severity != RES_OPTIONAL;
-		row.expected_kind = expansion_file ? expansion_file->kind : expected_asset_kind_for_required_name(row.name);
+		row.expected_kind = expansion_file ? expansion_file->kind : file_kind_for_required_name(row.name);
 		if (const AssetEntry *asset = scan.find(row.name)) {
 			row.asset_path = asset->relative_path;
 			row.found_kind = asset->kind;
