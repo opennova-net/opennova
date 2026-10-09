@@ -31,6 +31,7 @@
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/viewport_canvas.h>
+#include <formats/mission/mission.h>
 #include <formats/trn/charmap_legend.h>
 
 namespace opennova::editor {
@@ -824,9 +825,10 @@ void MissionViewportView::Tools::time_popup(MissionViewportOptions &options, con
 	bool own = options.time < 0.0;
 	// The header's start time is hours in 8.8 fixed point (the game shifts it into its 8.24 clock
 	// [orig: Game_StartMission @ 0x525371]): 0x0C80 is 12:30.
-	const int start = mission.scene().header().start_time;
+	// As HHMM, its minutes rounded (formats/mission header_time_to_hhmm).
+	const int start = opennova::mission::header_time_to_hhmm(uint16_t(mission.scene().header().start_time & 0xFFFF));
 	char label[64];
-	std::snprintf(label, sizeof(label), "The mission's start time (%02d:%02d)", (start >> 8) & 0xFF, ((start & 0xFF) * 60) >> 8);
+	std::snprintf(label, sizeof(label), "The mission's start time (%02d:%02d)", start / 100, start % 100);
 	if (ImGui::Checkbox(label, &own)) options.time = own ? -1.0 : 12.0;
 	ImGui::BeginDisabled(own);
 	float hour = options.time < 0.0 ? 12.0f : float(options.time);
