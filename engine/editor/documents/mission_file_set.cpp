@@ -56,12 +56,10 @@ std::vector<MissionFileSetMember> mission_file_set_members(const AssetScan &scan
 		if (!sidecar) continue;
 		// A row the reader reads only beside another's file (the dialog's sounds, beside its .dbf
 		// [orig: DialogSystem_Init @ 0x5275e0, the exists check @ 0x527648]): without that file a file
-		// of its name is no member (a game bank a mission is named like).
-		if (sidecar->needs) {
-			const mission::Sidecar *needed = mission::sidecar_for_role(sidecar->needs);
-			if (!needed || !scan.find(mission::sidecar_name(mission, *needed))) continue;
-		}
-		for (const std::string &name : {mission::sidecar_name(mission, *sidecar), mission::sidecar_alternate_name(mission, *sidecar)}) {
+		// of its name is no member (a game bank a mission is named like; mission::sidecar_reads).
+		const mission::SidecarNames names = mission::sidecar_names(mission, *sidecar);
+		if (!mission::sidecar_reads(names, [&](const std::string &file) { return scan.find(file) != nullptr; })) continue;
+		for (const std::string &name : {names.name, names.alternate}) {
 			if (name.empty()) continue;
 			const AssetEntry *entry = scan.find(name);
 			if (!entry) continue;

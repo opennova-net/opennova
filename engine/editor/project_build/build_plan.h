@@ -98,9 +98,6 @@ struct BuildPlan {
 // build (build.expansion.base_missing), and over which its gate reads (blocks_build); `shipped`, the
 // files packed as the game ships them, whose findings that they do not serialize gate nothing (null:
 // every such finding gates).
-// Whether the game's mission list lists a file of this name: a mission (.bms) or a map project (.npj,
-// .npz) [orig: Mission_BuildMapListFromPFF @ 0x562910].
-bool lists_as_mission(const std::string &name);
 
 BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const RequirementReport &requirements,
                      const std::vector<Diagnostic> &document_findings, const BuildTarget &target = BuildTarget(),
