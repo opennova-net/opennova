@@ -113,38 +113,15 @@ bool terrain_stem_fits(const std::string &stem, std::string &why);
 // `tiles`, the surface map only when `surface`, the foliage map only when `foliage`).
 std::vector<std::string> terrain_output_names(const std::string &stem, bool tiles, bool surface, bool foliage);
 
-// A heightmap as the bake takes it, from the file `name` holds: an 8-bit map's texels (TrnGen's
-// input) or 16-bit heights (raw16, 1/256 world unit a step), scaled by `top`. False, with `why`, for a
-// file of another size or one that does not read.
-struct TerrainHeights {
-	std::vector<uint8_t> depth8;
-	std::vector<uint16_t> depth16;
-};
-bool decode_terrain_heightmap(const std::string &name, const std::vector<uint8_t> &bytes, double top,
-                              TerrainHeights &out, std::string &why);
+// The set's heightmap is read by the engine's codec (formats/cpt/trngen heightmap_depth.h
+// decode_heightmap_depth), its surface map and foliage map by the engine's map codecs (runtime/terrain
+// terrain_map_source.h decode_charmap_source, decode_foliage_map_source).
 
 // One of the set's images as the import reads it (`key`: colormap, detail or tiles), checked as the
 // game takes it: a colour map exactly 1024 x 1024, a detail's sides powers of two, a tile set's
 // multiples of 64. False, with `why` naming the file, for one that does not read or does not fit.
 bool decode_terrain_image(const std::string &key, const std::string &name, const std::vector<uint8_t> &bytes,
                           RgbaImage &out, std::string &why);
-
-// The set's surface map as the import writes it: its classes as indices, the legend its palette. An
-// indexed image (an 8-bit PCX, a palette PNG) is read by its indices, a colour image by its colours, each
-// looked up in the legend exactly (no nearest colour). False, with `why` naming the file, for one that does
-// not read, is not square with a side of 256, 512 or 1024, or holds a texel of no class (an index past 19,
-// a colour the legend lacks: the first named by its place, column and row from the top left).
-bool decode_terrain_surface(const std::string &name, const std::vector<uint8_t> &bytes, IndexedImage8 &out,
-                            std::string &why);
-
-// The set's foliage map as the import writes it: its codes as indices, an indexed image's palette kept (the
-// game reads none of it: a viewer shows the map as it was painted), a grey image's a grey ramp. An indexed
-// image (an 8-bit PCX, a palette PNG) is read by its indices, an image whose every texel is grey by its
-// levels. False, with `why` naming the file, for one that does not read, holds colour, or is not square with
-// a side a power of two at most 1024 [orig: Foliage_LoadFoliageMapPCX @ 0x605B44..0x605B60, the width's
-// log2; Foliage_SampleFoliageMapMask @ 0x60669C..0x60662D, the sample shifted by 10 less it].
-bool decode_terrain_foliage(const std::string &name, const std::vector<uint8_t> &bytes, IndexedImage8 &out,
-                            std::string &why);
 
 // What a foliage map grows by the definitions (`map` the codes, `defs` the slots): the codes it holds that
 // no definition selects (code 0 aside), and the definitions none of whose codes it holds, each a line for

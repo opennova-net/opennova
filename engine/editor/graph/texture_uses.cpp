@@ -6,7 +6,6 @@
 #include <map>
 #include <set>
 
-#include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/graph/asset_graph.h>
@@ -14,7 +13,6 @@
 #include <editor/project/project_files.h>
 #include <formats/particle/particle.h>
 #include <runtime/renderer/fixed_texture_names.h>
-#include <runtime/renderer/material_texture.h>
 
 namespace opennova::editor {
 
@@ -38,8 +36,8 @@ std::string text(const Value &value) {
 
 // A model row's use: its record's slot, type and flags, its material's shader, flags and reference (the
 // model document's texture and material records, model_table's fields), and the role the dispatcher's
-// loader makes it by its runtime type [orig: Material_LoadStageTexture @ 0x5B16F0, the switch @
-// 0x5B1737; the type the loader copies, Material_ConvertDefinition @ 0x5B045B..0x5B04A0].
+// loader makes it by its runtime type (renderer::model_row_texture_role) [orig: Material_LoadStageTexture @
+// 0x5B16F0, the switch @ 0x5B1737].
 renderer::TextureRoleId model_role(const GraphEdge &edge, const Document *model, TextureUseContext &context) {
 	context.type = texture_arg_is_row_type(edge.loader_arg) ? uint8_t(edge.loader_arg) : 0;
 	// What the edge carries of the row (TextureRowContext); the document, where it reads, adds the
@@ -66,25 +64,7 @@ renderer::TextureRoleId model_role(const GraphEdge &edge, const Document *model,
 			if (model->placement(at.owner, material)) context.material = int(material.index);
 		}
 	}
-	switch (renderer::material_texture_runtime_type(context.type)) {
-	case 0:
-	case 2:
-	case 8:
-		if (context.slot == 2) return R::ModelDetail;
-		return (context.row_flags & 0x01) ? R::ModelFlipFrame : R::ModelDiffuse;
-	case 1: return R::ModelPlain;
-	case 4:
-	case 5:
-		// The .mdt as it is; a .tga converted from its height [orig: Texture_LoadAsNormalMap @ 0x58C480].
-		return strutil::to_upper(edge.value).find(".MDT") != std::string::npos ? R::ModelNormalMap : R::ModelHeightNormal;
-	case 6: return R::ModelHorizon;
-	case 7: return R::ModelOcclusion;
-	case 16:
-	case 17:
-	case 18: return R::ModelChunk;
-	default: break;
-	}
-	return R::ModelDiffuse;
+	return renderer::model_row_texture_role(context.type, context.slot, context.row_flags, edge.value);
 }
 
 // What the game opens a fixed name for, and the witness, in words (renderer::FixedTextureUse).
