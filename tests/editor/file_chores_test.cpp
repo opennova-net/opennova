@@ -2,8 +2,10 @@
 // asked first, its uses left naming nothing only when asked, an import source with its outputs or alone), a
 // file duplicated under a name the project's rules give (graph/file_plans.h duplicate_name: the stem's number
 // counted on, 15 characters where the build packs the kind, a model's stem of 8, no name taken in any case), a
-// new file made in a folder, a folder made, renamed (each file through the rename transaction) and deleted,
-// and each of them one step of the file history that undo_file and redo_file take back and do again.
+// new file made in a folder, a folder made, renamed (each file through the rename transaction) and deleted (an
+// empty one, or with what it holds), several files deleted, duplicated and moved at once, a mission moved with
+// the companions beside it, each of them one step of the file history that undo_file and redo_file take back and
+// do again; the trash emptied, the history with it; and the command line's verbs for each.
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -23,6 +25,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 
+#include "cli_verbs.h"
 #include "common/file_io.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
@@ -347,6 +350,168 @@ int test_trash() {
 	return 0;
 }
 
+// Several rows at once (Files' selection): duplicated, each copy named beside the copies before it; moved to a
+// folder together; deleted together; each one step that Undo file takes back.
+int test_several() {
+	Project p;
+	TEST_EXPECT(p.made);
+	if (!p.made) return 1;
+	ProjectSession &session = p.session;
+	const SessionView &v = p.view();
+	const AssetEntry *menu = v.project.scan->find("main.mnu");
+	TEST_EXPECT(menu != nullptr);
+	if (!menu) return 1;
+	const std::string folder = folder_of_path(menu->relative_path);
+	TEST_EXPECT(editor_test::handle_to_end(session, request::duplicate_asset("main.mnu")).done());
+	const std::string second = join_path(folder, "main2.mnu");
+	TEST_EXPECT(on_disk(p.root, second));
+	// main2's copy is main3; main's would be main2, then main3, both taken: main4.
+	TEST_EXPECT(editor_test::handle_to_end(session, request::duplicate_asset(second, std::string(), false, {"main.mnu"})).done());
+	const std::string third = join_path(folder, "main3.mnu"), fourth = join_path(folder, "main4.mnu");
+	TEST_EXPECT(on_disk(p.root, third) && on_disk(p.root, fourth));
+	TEST_EXPECT(v.activity.file_history.undo == "Duplicate main2.mnu and 1 other file");
+	TEST_EXPECT(v.documents.file_selected.path == third);
+	TEST_EXPECT(editor_test::handle_to_end(session, request::undo_file()).done());
+	TEST_EXPECT(!on_disk(p.root, third) && !on_disk(p.root, fourth));
+	TEST_EXPECT(editor_test::handle_to_end(session, request::redo_file()).done() && on_disk(p.root, third) && on_disk(p.root, fourth));
+	// A refusal of one refuses them all, nothing copied.
+	TEST_EXPECT(has_code(editor_test::handle_to_end(session, request::duplicate_asset(third, std::string(), false, {"nothing.mnu"})).findings,
+	                     "file.unknown"));
+	TEST_EXPECT(!on_disk(p.root, join_path(folder, "main5.mnu")));
+
+	// Moved together: one step, Undo file moves them back and the folder made goes once empty.
+	TEST_EXPECT(editor_test::handle_to_end(session, request::move_assets(third, {fourth}, "spare")).done());
+	TEST_EXPECT(on_disk(p.root, "spare/main3.mnu") && on_disk(p.root, "spare/main4.mnu") && !on_disk(p.root, third));
+	TEST_EXPECT(v.project.scan->at_path("spare/main3.mnu") && v.project.scan->folders().count("spare"));
+	TEST_EXPECT(v.activity.file_history.undo == "Move main3.mnu and 1 other file to spare/");
+	TEST_EXPECT(editor_test::handle_to_end(session, request::undo_file()).done());
+	TEST_EXPECT(on_disk(p.root, third) && on_disk(p.root, fourth) && !on_disk(p.root, "spare"));
+	TEST_EXPECT(editor_test::handle_to_end(session, request::redo_file()).done() && on_disk(p.root, "spare/main4.mnu"));
+	// One already in the folder stays; the other goes.
+	TEST_EXPECT(editor_test::handle_to_end(session, request::move_assets("spare/main3.mnu", {second}, "spare")).done());
+	TEST_EXPECT(on_disk(p.root, "spare/main2.mnu") && on_disk(p.root, "spare/main3.mnu"));
+
+	// Deleted together: one batch in the trash, one step.
+	TEST_EXPECT(editor_test::handle_to_end(session, request::delete_asset("spare/main3.mnu", false, false, {"spare/main4.mnu"})).done());
+	TEST_EXPECT(!on_disk(p.root, "spare/main3.mnu") && !on_disk(p.root, "spare/main4.mnu"));
+	TEST_EXPECT(!v.project.scan->at_path("spare/main3.mnu") && !v.project.scan->at_path("spare/main4.mnu"));
+	TEST_EXPECT(v.activity.file_history.undo == "Delete main3.mnu and 1 other file");
+	TEST_EXPECT(editor_test::handle_to_end(session, request::undo_file()).done());
+	TEST_EXPECT(on_disk(p.root, "spare/main3.mnu") && on_disk(p.root, "spare/main4.mnu"));
+	return 0;
+}
+
+// A folder deleted with what it holds: refused without asking, then whole to the trash, its files gone from the
+// scan and its documents closed; Undo file brings it back whole.
+int test_folder_with_files() {
+	Project p;
+	TEST_EXPECT(p.made);
+	if (!p.made) return 1;
+	ProjectSession &session = p.session;
+	const SessionView &v = p.view();
+	TEST_EXPECT(editor_test::handle_to_end(session, request::create_file_in("box/inner", "x.mnu", asset_kind_token(AssetKind::Menu))).done());
+	TEST_EXPECT(editor_test::handle_to_end(session, request::create_file_in("box", "y.mnu", asset_kind_token(AssetKind::Menu))).done());
+	TEST_EXPECT(session.document_for("box/y.mnu") != nullptr);
+	TEST_EXPECT(has_code(editor_test::handle_to_end(session, request::delete_folder("box")).findings, "file.folder"));
+	TEST_EXPECT(on_disk(p.root, "box/inner/x.mnu"));
+	TEST_EXPECT(editor_test::handle_to_end(session, request::delete_folder("box", true)).done());
+	TEST_EXPECT(!on_disk(p.root, "box") && !v.project.scan->at_path("box/y.mnu") && !v.project.scan->at_path("box/inner/x.mnu"));
+	TEST_EXPECT(!v.project.scan->folders().count("box") && !v.project.scan->folders().count("box/inner"));
+	TEST_EXPECT(!session.document_for("box/y.mnu"));
+	TEST_EXPECT(v.activity.file_history.undo == "Delete folder box with 2 files");
+	TEST_EXPECT(editor_test::handle_to_end(session, request::undo_file()).done());
+	TEST_EXPECT(on_disk(p.root, "box/inner/x.mnu") && on_disk(p.root, "box/y.mnu"));
+	TEST_EXPECT(v.project.scan->at_path("box/y.mnu") && v.project.scan->at_path("box/inner/x.mnu"));
+	TEST_EXPECT(v.project.scan->folders().count("box/inner"));
+	TEST_EXPECT(editor_test::handle_to_end(session, request::redo_file()).done() && !on_disk(p.root, "box"));
+	return 0;
+}
+
+// A mission moved: the companions beside it go with it (one kept elsewhere stays), as one move or within a
+// folder's rename, and back with Edit > Move back.
+int test_mission_moves() {
+	Project p;
+	TEST_EXPECT(p.made);
+	if (!p.made) return 1;
+	ProjectSession &session = p.session;
+	const SessionView &v = p.view();
+	const std::vector<uint8_t> bms = test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms");
+	TEST_EXPECT(!bms.empty());
+	TEST_EXPECT(editor_test::write_bytes(join_path(p.root, "missions/logic1.bms"), bms));
+	TEST_EXPECT(editor_test::write_text(join_path(p.root, "missions/logic1.wac"), "// the mission's script\n"));
+	TEST_EXPECT(editor_test::handle_to_end(session, request::rescan()).done());
+	TEST_EXPECT(editor_test::handle_to_end(session, request::move_asset("logic1.bms", "maps")).done());
+	TEST_EXPECT(on_disk(p.root, "maps/logic1.bms") && on_disk(p.root, "maps/logic1.wac") && !on_disk(p.root, "missions"));
+	TEST_EXPECT(v.project.scan->at_path("maps/logic1.wac"));
+	// The folder's rename moves the mission once, its companion with it.
+	TEST_EXPECT(editor_test::handle_to_end(session, request::rename_folder("maps", "levels")).done());
+	TEST_EXPECT(on_disk(p.root, "levels/logic1.bms") && on_disk(p.root, "levels/logic1.wac"));
+	// Both rows chosen: the companion goes with its mission, no move of its own.
+	TEST_EXPECT(editor_test::handle_to_end(session, request::move_assets("levels/logic1.bms", {"levels/logic1.wac"}, "")).done());
+	TEST_EXPECT(on_disk(p.root, "logic1.bms") && on_disk(p.root, "logic1.wac") && !on_disk(p.root, "levels"));
+	TEST_EXPECT(editor_test::handle_to_end(session, request::undo_file()).done());
+	TEST_EXPECT(on_disk(p.root, "levels/logic1.bms") && on_disk(p.root, "levels/logic1.wac"));
+	// One kept in another folder stays there.
+	TEST_EXPECT(editor_test::handle_to_end(session, request::move_asset("levels/logic1.wac", "scripts")).done());
+	TEST_EXPECT(editor_test::handle_to_end(session, request::move_asset("levels/logic1.bms", "")).done());
+	TEST_EXPECT(on_disk(p.root, "logic1.bms") && on_disk(p.root, "scripts/logic1.wac"));
+	return 0;
+}
+
+// The trash emptied: what it holds removed for good, the file history with it.
+int test_empty_trash() {
+	Project p;
+	TEST_EXPECT(p.made);
+	if (!p.made) return 1;
+	ProjectSession &session = p.session;
+	const SessionView &v = p.view();
+	TEST_EXPECT(editor_test::handle_to_end(session, request::duplicate_asset("main.mnu")).done());
+	const std::string copy = v.documents.file_selected.path;
+	TEST_EXPECT(editor_test::handle_to_end(session, request::delete_asset(copy)).done());
+	const ProjectPaths paths = ProjectPaths::for_root(p.root);
+	TEST_EXPECT(trash_file_count(paths) == 1 && v.activity.file_history.undo_steps == 2);
+	TEST_EXPECT(editor_test::handle_to_end(session, request::empty_trash()).done());
+	TEST_EXPECT(trash_file_count(paths) == 0 && !on_disk(p.root, ".opennova/trash"));
+	TEST_EXPECT(v.activity.file_history.undo_steps == 0 && v.activity.file_history.redo_steps == 0);
+	TEST_EXPECT(v.activity.status == "Emptied the trash (1 file).");
+	TEST_EXPECT(has_code(editor_test::handle_to_end(session, request::undo_file()).findings, "file.history"));
+	TEST_EXPECT(editor_test::handle_to_end(session, request::empty_trash()).done() && v.activity.status == "The trash was empty.");
+	return 0;
+}
+
+// The command line's verbs for the chores: each the session's request; a refusal exits 1, a missing argument 2.
+int test_command_line() {
+	Project p;
+	TEST_EXPECT(p.made);
+	if (!p.made) return 1;
+	const std::string root = p.root;
+	const AssetEntry *menu = p.view().project.scan->find("main.mnu");
+	TEST_EXPECT(menu != nullptr);
+	if (!menu) return 1;
+	const std::string folder = folder_of_path(menu->relative_path);
+	p.session.handle(request::close_project());
+	const auto run = [](std::initializer_list<std::string> args) {
+		std::vector<const char *> argv;
+		for (const std::string &a : args) argv.push_back(a.c_str());
+		return opennova::project::run_project_command(static_cast<int>(argv.size()), argv.data(), stdout, stderr);
+	};
+	TEST_EXPECT(run({"cp", root, "main.mnu"}) == 0 && on_disk(root, join_path(folder, "main2.mnu")));
+	TEST_EXPECT(run({"cp", root, "main.mnu", "--as", "spare.mnu"}) == 0 && on_disk(root, join_path(folder, "spare.mnu")));
+	TEST_EXPECT(run({"cp", root, "main.mnu", "main2.mnu", "--as", "x.mnu"}) == 2);
+	TEST_EXPECT(run({"mkdir", root, "kept"}) == 0 && fs::is_directory(system_path(join_path(root, "kept"))));
+	TEST_EXPECT(run({"mv", root, "main2.mnu", "spare.mnu", "kept"}) == 0);
+	TEST_EXPECT(on_disk(root, "kept/main2.mnu") && on_disk(root, "kept/spare.mnu"));
+	TEST_EXPECT(run({"rename-folder", root, "kept", "held"}) == 0 && on_disk(root, "held/spare.mnu"));
+	TEST_EXPECT(run({"rmdir", root, "held"}) == 1 && on_disk(root, "held/spare.mnu"));
+	TEST_EXPECT(run({"rmdir", root, "held", "--all"}) == 0 && !on_disk(root, "held"));
+	TEST_EXPECT(trash_file_count(ProjectPaths::for_root(root)) == 2);
+	TEST_EXPECT(run({"cp", root, "main.mnu"}) == 0 && run({"rm", root, "main2.mnu"}) == 0 && !on_disk(root, join_path(folder, "main2.mnu")));
+	TEST_EXPECT(run({"rm", root, "nothing.mnu"}) == 1);
+	TEST_EXPECT(run({"rm", root}) == 2);
+	TEST_EXPECT(run({"empty-trash", root}) == 0 && trash_file_count(ProjectPaths::for_root(root)) == 0);
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -357,6 +522,11 @@ int main() {
 	failed += test_duplicate();
 	failed += test_import_source();
 	failed += test_folders();
+	failed += test_several();
+	failed += test_folder_with_files();
+	failed += test_mission_moves();
+	failed += test_empty_trash();
+	failed += test_command_line();
 	if (failed == 0) std::printf("editor_file_chores: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }

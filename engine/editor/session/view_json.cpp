@@ -606,7 +606,7 @@ constexpr ViewSectionRow kSections[] = {
 			"(build_result {open}), the new-project form (new_project {open: File > New project...'s modal, title, "
 			"dir, game_install as the form shows it, install_named, builds_on, as_expansion, expansion}), Project "
 			"settings (settings {open, and while open its fields}), the New file prompt (new_file {kind, \"\" "
-			"closed, name, values, folder}), Rename... (file_rename {path, name}), Delete... (file_delete {path, alone}, DI-25), "
+			"closed, name, values, folder}), Rename... (file_rename {path, name}), Delete... (file_delete {path, alone, paths}, DI-25), "
 			"Rename everywhere (rename {open, path, "
 			"locator, field, old_name, kind, name}) and Rename back (rename_back {open}), the find bar (find {open, "
 			"text, match_case}), the project's finder (project_find {open, text, scope: all for Find in project, files "

@@ -1,7 +1,8 @@
 // Files' chores (DI-25, the deep-integration plan): New here, a folder's menu (a new folder, its rename, its
-// delete while empty), a file's Duplicate and Delete..., and Delete...'s dialog, which lists who names the file
-// before anything goes. Each raises a request of the session's (session/file_chores.h), one step of the file
-// history that Edit > Undo file takes back.
+// delete, with what it holds once asked), the top level's Empty the trash..., a file's Duplicate and Delete...
+// over every row selected with it, and Delete...'s dialog, which lists who names the files before anything goes.
+// Each raises a request of the session's (session/file_chores.h), one step of the file history that Edit > Undo
+// file takes back, but for the trash's emptying, which takes the history with it.
 #include <editor/ui/files_window.h>
 
 #include <algorithm>
@@ -10,6 +11,7 @@
 #include <vector>
 
 #include <base/gameprofile/required_resources.h>
+#include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/project_layout.h>
 #include <editor/blank/blank_factory.h>
@@ -18,6 +20,7 @@
 #include <editor/model/field_text.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
+#include <editor/project/project_trash.h>
 #include <editor/session/file_chores.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
@@ -45,7 +48,66 @@ std::string folder_words(const std::string &folder) {
 	return folder.empty() || folder == "/" ? std::string("the top level") : folder + "/";
 }
 
+// Whether `path` lies in `folder`.
+bool in_folder(const std::string &path, const std::string &folder) {
+	return path.size() > folder.size() && path[folder.size()] == '/' && strutil::iequals(path.substr(0, folder.size()), folder);
+}
+
 } // namespace
+
+// --- the selection -----------------------------------------------------------------------------
+
+bool FilesWindow::chosen(const std::string &path) const {
+	return path == selected_ || std::find(also_.begin(), also_.end(), path) != also_.end();
+}
+
+std::vector<std::string> FilesWindow::others_of(const std::string &path) const {
+	if (!chosen(path)) return {};
+	std::vector<std::string> out;
+	if (selected_ != path && !selected_.empty()) out.push_back(selected_);
+	for (const std::string &other : also_)
+		if (other != path) out.push_back(other);
+	return out;
+}
+
+void FilesWindow::choose(const std::string &path) {
+	const ImGuiIO &io = ImGui::GetIO();
+	if (io.KeyShift && !selected_.empty() && selected_ != path) {
+		// The run of rows from the one selected to this one, as they were last drawn.
+		const auto from = std::find(rows_.begin(), rows_.end(), selected_);
+		const auto to = std::find(rows_.begin(), rows_.end(), path);
+		if (from != rows_.end() && to != rows_.end()) {
+			also_.clear();
+			const auto first = std::min(from, to), last = std::max(from, to);
+			for (auto it = first; it <= last; ++it)
+				if (*it != path) also_.push_back(*it);
+			selected_ = path;
+			return;
+		}
+	}
+	if (io.KeyCtrl && !selected_.empty()) {
+		if (path == selected_) {
+			// Taken out: the last one added is the selected row now.
+			if (!also_.empty()) {
+				selected_ = also_.back();
+				also_.pop_back();
+			}
+			return;
+		}
+		const auto held = std::find(also_.begin(), also_.end(), path);
+		if (held != also_.end()) {
+			also_.erase(held);
+			return;
+		}
+		also_.push_back(selected_);
+		selected_ = path;
+		return;
+	}
+	also_.clear();
+	selected_ = path;
+}
+
+// --- New here and a folder's menu ---------------------------------------------------------------
 
 void FilesWindow::draw_new_entries(const SessionView &view, const std::string &folder) {
 	const bool creates = view.allows(EditorRequestKind::CreateFile);
@@ -110,8 +172,20 @@ void FilesWindow::draw_folder_menu(const SessionView &view, const std::string &f
 		workspace_.request(request::new_folder(made));
 		ImGui::CloseCurrentPopup();
 	}
-	if (folder.empty()) return;
-	// This folder: renamed (each file of it moved, so what names them follows), deleted while empty.
+	if (folder.empty()) {
+		// The top level's: the trash emptied, asked first.
+		ImGui::Separator();
+		const bool empties = view.allows(EditorRequestKind::EmptyTrash);
+		if (ImGui::MenuItem("Empty the trash...", nullptr, false, empties) && empties) {
+			trash_asked_ = true;
+			trash_files_ = trash_file_count(ProjectPaths::for_root(view.project.root));
+		}
+		ui_kit::tooltip("Removes for good what the project's deletes put in .opennova/trash/, once asked. The file "
+		                "history goes with it.");
+		return;
+	}
+	// This folder: renamed (each file of it moved, so what names them follows), deleted (with what it holds,
+	// asked first).
 	ImGui::SeparatorText(("Folder " + basename_of(folder)).c_str());
 	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 12.0f);
 	const bool rename_enter = ImGui::InputText("##folder_rename", folder_rename_, sizeof(folder_rename_),
@@ -131,36 +205,54 @@ void FilesWindow::draw_folder_menu(const SessionView &view, const std::string &f
 	bool empty = true;
 	for (const Folder &node : folders_)
 		if (node.path == folder) empty = node.files.empty() && node.folders.empty();
-	if (ImGui::MenuItem("Delete folder", nullptr, false, empty && view.allows(EditorRequestKind::DeleteFolder)))
-		workspace_.request(request::delete_folder(folder));
+	const bool deletes = view.allows(EditorRequestKind::DeleteFolder);
+	if (ImGui::MenuItem(empty ? "Delete folder" : "Delete folder...", nullptr, false, deletes) && deletes) {
+		if (empty) workspace_.request(request::delete_folder(folder));
+		else folder_delete_ = folder;
+	}
 	ui_kit::tooltip(empty ? std::string("It holds nothing. Edit > Undo file makes it again.")
-	                      : std::string("Only an empty folder is deleted: move or delete what it holds first."));
+	                      : std::string("With what it holds, to the project's trash, once who names it is shown. Edit > "
+	                                    "Undo file brings it back."));
 	if (ImGui::MenuItem("Show in folder", nullptr, false, view.allows(EditorRequestKind::RevealPath)))
 		workspace_.request(request::reveal_path(join_path(view.project.root, folder)));
 }
 
+// --- a file's chores ---------------------------------------------------------------------------
+
 void FilesWindow::draw_chore_entries(const SessionView &view, const AssetEntry &entry) {
 	const bool output = !entry.imported_from.empty();
 	const bool source = entry.kind == AssetKind::ImportSource;
+	// Every row selected with it, but an import's outputs (their sources make them).
+	std::vector<std::string> others;
+	for (const std::string &other : others_of(entry.relative_path))
+		if (const AssetEntry *file = chore_entry_at(view, other); file && file->imported_from.empty()) others.push_back(other);
+	const std::string several = others.empty() ? std::string() : " " + counted(others.size() + 1, "file");
 	const bool copies = !output && view.allows(EditorRequestKind::DuplicateAsset);
-	if (ImGui::MenuItem("Duplicate", nullptr, false, copies)) workspace_.request(request::duplicate_asset(entry.relative_path));
+	if (ImGui::MenuItem(("Duplicate" + several).c_str(), nullptr, false, copies))
+		workspace_.request(request::duplicate_asset(entry.relative_path, std::string(), false, others));
 	ui_kit::tooltip(output ? "Made by the import of " + entry.imported_from + ": duplicate the source."
+	                : !others.empty() ? std::string("A copy of each beside it, named by the project's rules, as one step.")
 	                : source ? std::string("A copy beside it with its import record: the import makes the copy's own outputs.")
 	                         : std::string("A copy beside it, named by the project's rules (oncrate1.3di makes oncrate2.3di); a "
 	                                       "mission's copy comes with its own companions."));
-	if (source) {
+	if (source && others.empty()) {
 		if (ImGui::MenuItem("Duplicate source alone", nullptr, false, copies))
 			workspace_.request(request::duplicate_asset(entry.relative_path, std::string(), true));
 		ui_kit::tooltip("A copy of the source alone, without its import record: no import makes outputs of it.");
 	}
 	const bool deletes = !output && view.allows(EditorRequestKind::DeleteAsset);
-	if (ImGui::MenuItem("Delete...", "Del", false, deletes)) start_delete(entry);
+	if (ImGui::MenuItem(("Delete" + several + "...").c_str(), "Del", false, deletes)) start_delete(entry, others);
 	ui_kit::tooltip(output ? "Made by the import of " + entry.imported_from + ": delete the source."
 	                       : std::string("To the project's trash, once who names it is shown. Edit > Undo file brings it back."));
 }
 
-void FilesWindow::start_delete(const AssetEntry &entry) {
-	window_requests::set_workspace(workspace_, "file_delete", "path", io::JsonValue::make_string(entry.relative_path));
+void FilesWindow::start_delete(const AssetEntry &entry, const std::vector<std::string> &others) {
+	io::JsonValue part = io::JsonValue::make_object();
+	part.set("path", io::JsonValue::make_string(entry.relative_path));
+	io::JsonValue paths = io::JsonValue::make_array();
+	for (const std::string &other : others) paths.push(io::JsonValue::make_string(other));
+	part.set("paths", std::move(paths));
+	window_requests::set_workspace(workspace_, "file_delete", std::move(part));
 }
 
 void FilesWindow::draw_delete(const SessionView &view) {
@@ -172,40 +264,57 @@ void FilesWindow::draw_delete(const SessionView &view) {
 		if (delete_popup_.dismissed()) close();
 		return;
 	}
-	// What it lists, made again as the file, its choice, the files or the graph move.
+	// What it lists, made again as the files, their choice, the files or the graph move.
 	const RevisionKey key = revision_key(view.revisions, {ViewConcern::Files, ViewConcern::Graph});
-	const std::string asked = held.path + (held.alone ? "\nalone" : "");
+	std::string asked = held.path + (held.alone ? "\nalone" : "");
+	for (const std::string &other : held.paths) asked += "\n" + other;
+	bool sources = entry->kind == AssetKind::ImportSource;
 	if (asked != delete_for_ || key != delete_key_) {
 		delete_for_ = asked;
 		delete_key_ = key;
-		const DeletePlan plan = plan_delete(ProjectPaths::for_root(view.project.root), *view.project.scan, held.path, held.alone);
+		EditorRequest request = request::delete_asset(held.path, false, held.alone, held.paths);
+		std::vector<Diagnostic> refusals;
+		const std::vector<DeletePlan> plans =
+		        plan_deletes(ProjectPaths::for_root(view.project.root), *view.project.scan, request, refusals);
 		delete_refusals_.clear();
-		for (const Diagnostic &refusal : plan.refusals) delete_refusals_.push_back(refusal.message);
+		for (const Diagnostic &refusal : refusals) delete_refusals_.push_back(refusal.message);
 		delete_with_.clear();
-		for (size_t i = 1; i < plan.files.size(); ++i) delete_with_.push_back(plan.files[i]);
-		if (!plan.outputs.empty()) delete_with_.push_back(counted(plan.outputs.size(), "output") + " of its import");
 		delete_kept_.clear();
-		for (const auto &[from, to] : plan.kept) delete_kept_.push_back(to);
+		size_t outputs = 0;
+		for (const DeletePlan &plan : plans) {
+			for (size_t i = 1; i < plan.files.size(); ++i) delete_with_.push_back(plan.files[i]);
+			if (!plan.alone) outputs += plan.outputs.size();
+			for (const auto &[from, to] : plan.kept) delete_kept_.push_back(to);
+		}
+		if (outputs) delete_with_.push_back(counted(outputs, "output") + " of " + (plans.size() == 1 ? "its" : "their") + " import");
 		delete_uses_.clear();
-		delete_use_count_ = plan.ok() ? deleted_uses(view, plan, delete_uses_, 12) : 0;
+		delete_use_count_ = refusals.empty() ? deleted_uses(view, plans, delete_uses_, 12) : 0;
 	}
-	ImGui::Text("Delete %s?", entry->logical_name.c_str());
+	for (const std::string &other : held.paths)
+		if (const AssetEntry *file = chore_entry_at(view, other)) sources = sources || file->kind == AssetKind::ImportSource;
+	if (held.paths.empty()) ImGui::Text("Delete %s?", entry->logical_name.c_str());
+	else ImGui::Text("Delete %s?", counted(held.paths.size() + 1, "file").c_str());
 	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
+	if (!held.paths.empty()) {
+		std::string names = entry->logical_name;
+		for (const std::string &other : held.paths) names += ", " + basename_of(other);
+		ImGui::TextWrapped("%s.", names.c_str());
+	}
 	for (const std::string &refusal : delete_refusals_) ImGui::TextColored(kChoreRefusalColor, "%s", refusal.c_str());
 	// An import source: with its outputs, or alone, its outputs kept as files of the project.
-	if (entry->kind == AssetKind::ImportSource) {
+	if (sources) {
 		bool alone = held.alone;
-		if (ImGui::RadioButton("With its outputs", !alone)) alone = false;
+		if (ImGui::RadioButton("With the outputs", !alone)) alone = false;
 		ImGui::SameLine();
-		if (ImGui::RadioButton("Alone: keep its outputs", alone)) alone = true;
-		ui_kit::tooltip("Its outputs stay as files of the project, where a file of their kind goes, and nothing naming "
-		                "them is left without them.");
+		if (ImGui::RadioButton("Alone: keep the outputs", alone)) alone = true;
+		ui_kit::tooltip("An import source's outputs stay as files of the project, where a file of their kind goes, and "
+		                "nothing naming them is left without them.");
 		if (alone != held.alone) window_requests::set_workspace(workspace_, "file_delete", "alone", io::JsonValue::make_bool(alone));
 	}
 	if (!delete_with_.empty()) {
 		std::string with;
 		for (const std::string &file : delete_with_) with += (with.empty() ? "" : ", ") + file;
-		ImGui::TextWrapped("With it: %s.", with.c_str());
+		ImGui::TextWrapped("With %s: %s.", held.paths.empty() ? "it" : "them", with.c_str());
 	}
 	if (!delete_kept_.empty()) {
 		std::string kept;
@@ -219,7 +328,7 @@ void FilesWindow::draw_delete(const SessionView &view) {
 		if (delete_use_count_ > delete_uses_.size()) ImGui::TextDisabled("and %zu more", delete_use_count_ - delete_uses_.size());
 		ImGui::TextWrapped("Deleted, they name nothing: Problems rows until they are changed, or Undo file brings it back.");
 	} else if (delete_refusals_.empty()) {
-		ImGui::TextDisabled("Nothing names it.");
+		ImGui::TextDisabled("Nothing names %s.", held.paths.empty() ? "it" : "them");
 	}
 	ImGui::TextDisabled("It goes to the project's trash (.opennova/trash/): Edit > Undo file brings it back.");
 	ImGui::PopTextWrapPos();
@@ -230,7 +339,7 @@ void FilesWindow::draw_delete(const SessionView &view) {
 	if (remove && allowed) {
 		// The session closes Delete... as it takes the delete (delete_asset alone, over the wire); its button closes
 		// it too.
-		workspace_.request(request::delete_asset(entry->relative_path, delete_use_count_ > 0, held.alone));
+		workspace_.request(request::delete_asset(entry->relative_path, delete_use_count_ > 0, held.alone, held.paths));
 		close();
 		delete_popup_.close();
 	}
@@ -238,6 +347,91 @@ void FilesWindow::draw_delete(const SessionView &view) {
 	if (ImGui::Button("Cancel")) {
 		close();
 		delete_popup_.close();
+	}
+	ImGui::EndPopup();
+}
+
+// --- a folder with what it holds, and the trash ------------------------------------------------
+
+void FilesWindow::draw_folder_delete(const SessionView &view) {
+	const bool there = !folder_delete_.empty() && view.project.open &&
+	                   std::any_of(folders_.begin(), folders_.end(), [&](const Folder &node) { return node.path == folder_delete_; });
+	if (!folder_delete_popup_.begin("Delete folder", there, true, ImGuiWindowFlags_AlwaysAutoResize)) {
+		if (folder_delete_popup_.dismissed() || !there) folder_delete_.clear();
+		return;
+	}
+	const RevisionKey key = revision_key(view.revisions, {ViewConcern::Files, ViewConcern::Graph});
+	if (key != folder_delete_key_) {
+		folder_delete_key_ = key;
+		std::vector<Diagnostic> refusals;
+		const std::vector<DeletePlan> plans =
+		        plan_folder_deletes(ProjectPaths::for_root(view.project.root), *view.project.scan, folder_delete_, refusals);
+		folder_delete_refusals_.clear();
+		for (const Diagnostic &refusal : refusals) folder_delete_refusals_.push_back(refusal.message);
+		folder_delete_files_ = 0;
+		for (const AssetEntry &file : view.project.scan->entries)
+			if (file.imported_from.empty() && in_folder(file.relative_path, folder_delete_)) ++folder_delete_files_;
+		folder_delete_uses_.clear();
+		folder_delete_use_count_ = refusals.empty() ? deleted_uses(view, plans, folder_delete_uses_, 12) : 0;
+	}
+	ImGui::Text("Delete %s with what it holds (%s)?", folder_words(folder_delete_).c_str(),
+	            counted(folder_delete_files_, "file").c_str());
+	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
+	for (const std::string &refusal : folder_delete_refusals_) ImGui::TextColored(kChoreRefusalColor, "%s", refusal.c_str());
+	if (folder_delete_use_count_) {
+		ImGui::TextColored(kChoreWarningColor, "What it holds is named by %s:", counted(folder_delete_use_count_, "use").c_str());
+		for (const std::string &place : folder_delete_uses_) ImGui::BulletText("%s", place.c_str());
+		if (folder_delete_use_count_ > folder_delete_uses_.size())
+			ImGui::TextDisabled("and %zu more", folder_delete_use_count_ - folder_delete_uses_.size());
+		ImGui::TextWrapped("Deleted, they name nothing: Problems rows until they are changed, or Undo file brings it back.");
+	} else if (folder_delete_refusals_.empty()) {
+		ImGui::TextDisabled("Nothing outside it names what it holds.");
+	}
+	ImGui::TextDisabled("It goes to the project's trash (.opennova/trash/) whole: Edit > Undo file brings it back.");
+	ImGui::PopTextWrapPos();
+	const bool allowed = folder_delete_refusals_.empty() && view.allows(EditorRequestKind::DeleteFolder);
+	ImGui::BeginDisabled(!allowed);
+	const bool remove = ImGui::Button(folder_delete_use_count_ ? "Delete anyway" : "Delete");
+	ImGui::EndDisabled();
+	if (remove && allowed) {
+		workspace_.request(request::delete_folder(folder_delete_, true, folder_delete_use_count_ > 0));
+		folder_delete_.clear();
+		folder_delete_popup_.close();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Cancel")) {
+		folder_delete_.clear();
+		folder_delete_popup_.close();
+	}
+	ImGui::EndPopup();
+}
+
+void FilesWindow::draw_empty_trash(const SessionView &view) {
+	if (!trash_popup_.begin("Empty the trash", trash_asked_ && view.project.open, true, ImGuiWindowFlags_AlwaysAutoResize)) {
+		if (trash_popup_.dismissed() || !view.project.open) trash_asked_ = false;
+		return;
+	}
+	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
+	if (trash_files_) ImGui::TextWrapped("Remove the %s the project's trash holds for good?", counted(trash_files_, "file").c_str());
+	else ImGui::TextWrapped("The project's trash holds nothing.");
+	const size_t steps = view.activity.file_history.undo_steps + view.activity.file_history.redo_steps;
+	if (steps)
+		ImGui::TextColored(kChoreWarningColor, "The file history goes with it (%s): Undo file brings nothing back after.",
+		                   counted(steps, "step").c_str());
+	ImGui::PopTextWrapPos();
+	const bool allowed = (trash_files_ || steps) && view.allows(EditorRequestKind::EmptyTrash);
+	ImGui::BeginDisabled(!allowed);
+	const bool empty = ImGui::Button("Empty the trash");
+	ImGui::EndDisabled();
+	if (empty && allowed) {
+		workspace_.request(request::empty_trash());
+		trash_asked_ = false;
+		trash_popup_.close();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Cancel")) {
+		trash_asked_ = false;
+		trash_popup_.close();
 	}
 	ImGui::EndPopup();
 }

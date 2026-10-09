@@ -4911,8 +4911,10 @@ static int test_prompt_words_from_the_table() {
 		// DI-25: a delete takes the file to the trash and a duplicate copies it as saved; a folder's rename moves
 		// its files' documents, and the file history's steps take files away.
 		{EditorRequestKind::DeleteAsset, "Delete main.mnu", "Save all and delete"},
-		{EditorRequestKind::DuplicateAsset, "Duplicate main.mnu", "Save"},
+		{EditorRequestKind::DuplicateAsset, "Duplicate main.mnu", "Save all and duplicate"},
 		{EditorRequestKind::RenameFolder, "Rename the folder", "Save all and rename"},
+		// A folder deleted with what it holds takes its files' documents away.
+		{EditorRequestKind::DeleteFolder, "Delete the folder", "Save all and delete"},
 		{EditorRequestKind::UndoFile, "Undo file", "Save all and undo"},
 		{EditorRequestKind::RedoFile, "Redo file", "Save all and redo"},
 	};

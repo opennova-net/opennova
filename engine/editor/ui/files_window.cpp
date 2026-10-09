@@ -289,6 +289,9 @@ void FilesWindow::refresh(const SessionView &view) {
 		else if (d.severity == DiagnosticSeverity::Warning) ++(original ? counts.original_warnings : counts.warnings);
 	}
 	if (!entry_at(view, selected_)) selected_.clear();
+	also_.erase(std::remove_if(also_.begin(), also_.end(),
+	                           [&](const std::string &path) { return selected_.empty() || !entry_at(view, path); }),
+	            also_.end());
 }
 
 void FilesWindow::follow_filter(const SessionView &view) {
@@ -400,6 +403,7 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	if (v.project.root != shown_root_) {
 		shown_root_ = v.project.root;
 		selected_.clear();
+		also_.clear();
 	}
 	follow_filter(v);
 	refresh(v);
@@ -411,6 +415,9 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	if (v.documents.file_selected.path != followed_) {
 		followed_ = v.documents.file_selected.path;
 		if (const AssetEntry *entry = followed_.empty() ? nullptr : entry_at(v, followed_)) {
+			// Another's selection (a select_file over the wire) is that file alone; this window's click came back
+			// with its own.
+			if (entry->relative_path != selected_ && !chosen(entry->relative_path)) also_.clear();
 			selected_ = entry->relative_path;
 			scroll_to_ = entry->relative_path;
 			open_to_ = entry->imported_from.empty() ? entry->relative_path : entry->imported_from;
@@ -495,9 +502,13 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 			while (clipper.Step())
 				for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
 					draw_file(v, v.project.scan->entries[matches[size_t(i)]], false);
+			rows_.clear();
+			for (const size_t index : matches) rows_.push_back(v.project.scan->entries[index].relative_path);
 		} else {
+			rows_drawing_.clear();
 			draw_top_level_drop(v);
 			draw_folder(v, folders_.front());
+			rows_.swap(rows_drawing_);
 		}
 		ImGui::EndTable();
 	}
@@ -509,9 +520,12 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	}
 	if (!selected_.empty() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
 	    ImGui::IsKeyPressed(ImGuiKey_Delete, false) && v.allows(EditorRequestKind::DeleteAsset))
-		if (const AssetEntry *entry = entry_at(v, selected_); entry && entry->imported_from.empty()) start_delete(*entry);
+		if (const AssetEntry *entry = entry_at(v, selected_); entry && entry->imported_from.empty())
+			start_delete(*entry, others_of(entry->relative_path));
 	draw_rename(v);
 	draw_delete(v);
+	draw_folder_delete(v);
+	draw_empty_trash(v);
 }
 
 void FilesWindow::draw_card_window() {
@@ -659,10 +673,11 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 	const bool dirty = open && open->dirty();
 	const auto found = counts_.find(entry.relative_path);
 	const Counts counts = found != counts_.end() ? found->second : Counts();
-	if (ImGui::Selectable("##row", entry.relative_path == selected_,
+	if (in_tree) rows_drawing_.push_back(entry.relative_path);
+	if (ImGui::Selectable("##row", chosen(entry.relative_path),
 	                      ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick |
 	                              ImGuiSelectableFlags_AllowOverlap)) {
-		selected_ = entry.relative_path;
+		choose(entry.relative_path);
 		// The selection is the session's too (S18): a texture so selected shows in the Preview window
 		// (again, once another document was made active since).
 		const bool previews = file_preview_kind(asset_kind_row(entry.kind).document) != ViewportKind::kCount;
@@ -765,6 +780,11 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 	// The file the menu is of is the one selected, the session's too (a right click selects it, as a click
 	// does).
 	if (ImGui::IsWindowAppearing()) {
+		if (!chosen(entry.relative_path)) also_.clear();
+		else if (entry.relative_path != selected_) {
+			also_.erase(std::remove(also_.begin(), also_.end(), entry.relative_path), also_.end());
+			also_.push_back(selected_);
+		}
 		selected_ = entry.relative_path;
 		if (view.documents.file_selected.path != entry.relative_path && view.allows(EditorRequestKind::SelectFile))
 			workspace_.request(request::select_file(entry.relative_path));
@@ -814,10 +834,14 @@ void FilesWindow::draw_move_menu(const SessionView &view, const AssetEntry &entr
 	}
 	if (ImGui::IsWindowAppearing()) new_folder_[0] = '\0';
 	const std::string here = folder_of_path(entry.relative_path);
+	const std::vector<std::string> others = others_of(entry.relative_path);
 	const auto move_to = [&](const std::string &folder) {
-		workspace_.request(request::move_asset(entry.relative_path, folder));
+		// Several rows go together, one step of the file history (DI-25).
+		workspace_.request(others.empty() ? request::move_asset(entry.relative_path, folder)
+		                                  : request::move_assets(entry.relative_path, others, folder));
 		ImGui::CloseCurrentPopup();
 	};
+	if (!others.empty()) ImGui::TextDisabled("%s", (counted(others.size() + 1, "file") + " selected").c_str());
 	if (ImGui::MenuItem("Top level", nullptr, false, !here.empty())) move_to(std::string());
 	std::vector<std::string> folders;
 	for (size_t i = 1; i < folders_.size(); ++i) folders.push_back(folders_[i].path);
@@ -851,8 +875,12 @@ void FilesWindow::accept_move(const SessionView &view, const std::string &folder
 		const AssetEntry *entry = entry_at(view, static_cast<const char *>(dragged->Data));
 		const bool takes = entry && entry->imported_from.empty() && folder_of_path(entry->relative_path) != folder &&
 		                   view.allows(EditorRequestKind::MoveAsset);
-		if (takes && ImGui::AcceptDragDropPayload(kFileDragPayload))
-			workspace_.request(request::move_asset(entry->relative_path, folder));
+		// A row of several selected takes them with it.
+		if (takes && ImGui::AcceptDragDropPayload(kFileDragPayload)) {
+			const std::vector<std::string> others = others_of(entry->relative_path);
+			workspace_.request(others.empty() ? request::move_asset(entry->relative_path, folder)
+			                                  : request::move_assets(entry->relative_path, others, folder));
+		}
 	}
 	ImGui::EndDragDropTarget();
 }

@@ -690,18 +690,29 @@ inline EditorRequest move_asset(std::string path, std::string folder) {
 // source keeping its outputs), duplicated beside itself (`new_name` "" the name the rules give; `alone` a source
 // without its record), a new file made in `folder` ("/" the top level), a folder made, renamed or deleted, and
 // the file history's step taken back or done again.
-inline EditorRequest delete_asset(std::string path, bool force = false, bool alone = false) {
+inline EditorRequest delete_asset(std::string path, bool force = false, bool alone = false,
+		std::vector<std::string> others = {}) {
 	EditorRequest request = of(EditorRequestKind::DeleteAsset);
 	request.path = std::move(path);
+	request.paths = std::move(others);
 	request.force = force;
 	request.alone = alone;
 	return request;
 }
-inline EditorRequest duplicate_asset(std::string path, std::string new_name = std::string(), bool alone = false) {
+inline EditorRequest duplicate_asset(std::string path, std::string new_name = std::string(), bool alone = false,
+		std::vector<std::string> others = {}) {
 	EditorRequest request = of(EditorRequestKind::DuplicateAsset);
 	request.path = std::move(path);
+	request.paths = std::move(others);
 	request.new_name = std::move(new_name);
 	request.alone = alone;
+	return request;
+}
+// Several files moved to `folder` together, one step of the file history (DI-25): the first `path`, the rest
+// `others`.
+inline EditorRequest move_assets(std::string path, std::vector<std::string> others, std::string folder) {
+	EditorRequest request = move_asset(std::move(path), std::move(folder));
+	request.paths = std::move(others);
 	return request;
 }
 inline EditorRequest create_file_in(std::string folder, std::string name, std::string file_kind = std::string(),
@@ -721,9 +732,12 @@ inline EditorRequest rename_folder(std::string folder, std::string new_name) {
 	request.new_name = std::move(new_name);
 	return request;
 }
-inline EditorRequest delete_folder(std::string folder) {
+// `all`: with what it holds; `force` over the uses naming it.
+inline EditorRequest delete_folder(std::string folder, bool all = false, bool force = false) {
 	EditorRequest request = of(EditorRequestKind::DeleteFolder);
 	request.folder = std::move(folder);
+	request.all = all;
+	request.force = force;
 	return request;
 }
 inline EditorRequest undo_file() {
@@ -731,6 +745,9 @@ inline EditorRequest undo_file() {
 }
 inline EditorRequest redo_file() {
 	return of(EditorRequestKind::RedoFile);
+}
+inline EditorRequest empty_trash() {
+	return of(EditorRequestKind::EmptyTrash);
 }
 
 // --- the shell's -------------------------------------------------------------------------------

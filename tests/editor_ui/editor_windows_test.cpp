@@ -121,7 +121,8 @@ void test_frame_bracket_follows_the_table() {
 	                              K::ResolveUnsaved, K::RenameAsset, K::AssignRequirement, K::RenameSymbol, K::RenameBack,
 	                              K::SplitTexture, K::Quit, K::MoveAsset,
 	                              // DI-25: Files' chores act on the files as saved.
-	                              K::DeleteAsset, K::DuplicateAsset, K::RenameFolder, K::UndoFile, K::RedoFile};
+	                              K::DeleteAsset, K::DuplicateAsset, K::RenameFolder, K::DeleteFolder, K::UndoFile,
+	                              K::RedoFile};
 	// S13 V7: a viewport's change and an edit in a viewport name the active document's, as every
 	// pathless request does.
 	// S18: a texture's whole-image edit names the active one, as an edit_record does.

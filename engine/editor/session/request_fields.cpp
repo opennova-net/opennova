@@ -76,7 +76,8 @@ constexpr RequestField kFields[] = {
 	{ F::Names, "names", J::Strings, "Files of the game install, by logical name." },
 	{ F::Paths, "paths", J::Strings,
 			"replace_texture: the image a texture is made from; split_texture: the project files whose uses "
-			"the copy takes. Otherwise files on disk to import: a loose file is chosen, an archive's members are listed to "
+			"the copy takes; delete_asset, duplicate_asset and move_asset: the other files it acts on with path, "
+			"together (DI-25: Files' selection of several rows). Otherwise files on disk to import: a loose file is chosen, an archive's members are listed to "
 			"choose "
 			"from." },
 	{ F::Imports, "imports", J::Objects,
@@ -198,7 +199,7 @@ constexpr RequestField kFields[] = {
 	{ F::Force, "force", J::Boolean,
 			"A source imports again even when it did not change; a save writes over a file changed outside "
 			"the editor (DI-01: document.conflict's Keep my edits); a delete goes ahead over the uses naming "
-			"what it deletes, which then name nothing (Problems rows, DI-25)." },
+			"what it deletes, which then name nothing (Problems rows, DI-25; a delete_folder's, what it holds)." },
 	{ F::AskName, "ask_name", J::Boolean,
 			"And asks the new name (Files' Rename..., the Rename everywhere dialog)." },
 	{ F::OpenFirst, "open_first", J::Boolean,
@@ -213,7 +214,7 @@ constexpr RequestField kFields[] = {
 			"Every file of the game install chosen (its archives' and the loose files the game ships "
 			"beside them: the music banks, the videos, the NovaWorld table), with no walk: the closure "
 			"of everything is everything; a refresh_changed_sources looks at every file of the project "
-			"(DI-01: the editor gaining the focus)." },
+			"(DI-01: the editor gaining the focus); a delete_folder takes the folder with what it holds (DI-25)." },
 	{ F::Planned, "planned", J::Boolean,
 			"An import takes the open import preview's checked rows as the dialog's Import takes them (the "
 			"workspace's import checks: a new plan's own, then what was checked and unchecked; each the project "

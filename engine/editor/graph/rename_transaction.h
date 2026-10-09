@@ -53,6 +53,9 @@ struct RenameOutput {
 	std::string path;     // project-relative, under the source's old output directory
 	std::string old_name; // its logical name
 	std::string new_name;
+	// A moved mission's companion (plan_move): where it goes, project-relative, the mission's new folder; ""
+	// for one renamed beside itself under `new_name`.
+	std::string new_path;
 };
 
 struct RenamePlan {
@@ -109,7 +112,8 @@ struct RenamePlan {
 // instead).
 RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const AssetGraph &graph, const std::string &file,
                        const std::string &new_name);
-// Where a companion renamed with its mission goes: its own folder, its new name.
+// Where a companion renamed with its mission goes: its own folder, its new name; a moved mission's, its
+// `new_path`.
 std::string companion_path(const RenameOutput &companion);
 
 // A move (DI-03): the file `file` put in the project's folder `folder` (as a person writes it:
@@ -119,13 +123,16 @@ std::string companion_path(const RenameOutput &companion);
 // [orig: FileSystem_OpenFile @ 0x75b1c0; PFF_FindEntry @ 0x7685d0]; vfs/vfs-pff-mount-re.md "Resolution
 // order"), and a build packs and copies a file by its name alone (ADR 0046 d6), so no reference is
 // rewritten and the plan has no site. An import source takes its record with it, and its outputs are
-// made again under the new place by the import pass that follows (as a rename's are). Refused when:
+// made again under the new place by the import pass that follows (as a rename's are). A mission takes
+// the companions it keeps beside it (`companions`: the files the game finds by its name, ADR 0046 S14,
+// that sit in its folder), so its set stays together; one the project keeps elsewhere (in its kind's
+// folder) stays there, the game finding it by its name wherever it sits. Refused when:
 // the file is unknown or an import's output (move its source); the folder is not one of the project's
 // (outside it, a dot-folder such as the cache, the export folder or one an export keeps beside it), or
 // is the file's own; a file sits where it would go; the file is an import source whose record lists the
 // files its import read beside it (they are found from its folder: moved alone, it would no longer
 // find them), or a file another source's import reads from its place (`imports`, the import pass's
-// sources: moved, that import would no longer find it).
+// sources: moved, that import would no longer find it); each of these of a companion it takes too.
 RenamePlan plan_move(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
                      const std::string &file, const std::string &folder,
                      const std::vector<ImportedSource> *imports = nullptr);

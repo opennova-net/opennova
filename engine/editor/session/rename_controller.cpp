@@ -223,7 +223,10 @@ OperationOutcome RenameController::absorb_rename(RenameOperation &operation) {
 		// A move: the file in its new folder, nothing rewritten (the game finds a file by its name alone).
 		const RenamePlan &plan = operation.file_plan();
 		const std::string left = folder_of_path(plan.path), went = folder_of_path(plan.new_path);
-		core_.note("Moved " + plan.old_name + (back ? " back" : "") + " from " + folder_words(left) + " to " +
+		std::string companions;
+		for (const RenameOutput &companion : plan.companions)
+			companions += (companions.empty() ? " with " : ", ") + companion.old_name;
+		core_.note("Moved " + plan.old_name + companions + (back ? " back" : "") + " from " + folder_words(left) + " to " +
 		           folder_words(went) + ", no reference rewritten: the game finds a file by its name alone. Undo "
 		           "does not take it back: Edit > Move " + plan.old_name + " back to " + folder_words(left) + " does.");
 		view_.activity.status = "Moved " + plan.old_name + (back ? " back" : "") + " to " + folder_words(went) + ".";
@@ -455,6 +458,10 @@ void RenameController::unsaved_files(const EditorRequest &request, std::vector<s
 		                                  request.folder, view_.project.imports.get());
 		if (!plan.ok()) return;
 		if (const DocumentBase *open = documents.document_for(plan.path); open && open->dirty()) files.push_back(plan.path);
+		// A mission's companions beside it move with it.
+		for (const RenameOutput &companion : plan.companions)
+			if (const DocumentBase *open = documents.document_for(companion.path); open && open->dirty())
+				files.push_back(companion.path);
 		return;
 	}
 	case EditorRequestKind::SplitTexture: {

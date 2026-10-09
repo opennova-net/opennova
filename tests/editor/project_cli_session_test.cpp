@@ -304,7 +304,8 @@ static int test_verb_table() {
 		TEST_EXPECT(error.empty() && (args.is_null() || args.is_object()));
 		++queries;
 	}
-	TEST_EXPECT(kCliVerbCount == 12 && queries == 9 && requests >= 2 * kCliVerbCount); // new-terrain (S20), mv (DI-03)
+	// new-terrain (S20), mv (DI-03), and the chores' rm, cp, mkdir, rename-folder, rmdir and empty-trash (DI-25).
+	TEST_EXPECT(kCliVerbCount == 18 && queries == 9 && requests >= 2 * kCliVerbCount);
 	TEST_EXPECT(cli_verb_row(CliVerb::Request).answer == CliAnswer::Request &&
 	            cli_verb_row(CliVerb::Query).answer == CliAnswer::NamedQuery);
 	const Ran usage = run(dir.root(), { "--help" });
