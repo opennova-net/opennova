@@ -37,6 +37,23 @@ inline uint64_t fnv1a64_value(uint64_t hash, const T &value) noexcept {
 	return fnv1a64_bytes(hash, &value, sizeof(value));
 }
 
+// splitmix64 (Vigna's splitmix64.c, after Steele, Lea and Flood): the golden-ratio step, and the
+// finalizer that scrambles a 64-bit value bijectively, every input bit reaching every output bit.
+// The particle seeds (effect_scene seed_for) and the editor's change stamps mix with it. Not a
+// port: no NovaLogic code hashes this way.
+inline constexpr uint64_t kSplitmix64Gamma = UINT64_C(0x9E3779B97F4A7C15);
+
+inline constexpr uint64_t splitmix64_finalize(uint64_t value) noexcept {
+	value = (value ^ (value >> 30)) * UINT64_C(0xBF58476D1CE4E5B9);
+	value = (value ^ (value >> 27)) * UINT64_C(0x94D049BB133111EB);
+	return value ^ (value >> 31);
+}
+
+// One splitmix64 output for the state `value`: the step added, then the finalizer.
+inline constexpr uint64_t splitmix64(uint64_t value) noexcept {
+	return splitmix64_finalize(value + kSplitmix64Gamma);
+}
+
 // The spelling a 64-bit hash takes in a text record (the editor's build ids, an
 // import record's content hash): 16 lower-case hex digits, zero-padded.
 inline std::string hex64(uint64_t value) {

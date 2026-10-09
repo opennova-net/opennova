@@ -1,6 +1,7 @@
 // Pins the strict JSON reader/writer behind the editor's project files (ADR 0046 d6):
 // round trips, the deterministic writer, every strictness rule the reader enforces, and
 // the member readers a request form takes.
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -150,6 +151,20 @@ static int test_exact_whole_strings_and_known_members() {
 	TEST_EXPECT(!json_exact_whole(json_string("3")) && !json_exact_whole(JsonValue::make_null()));
 	int64_t truncated = 0;
 	TEST_EXPECT(json_whole_in(json_number(1.5), 0.0, 9.0, truncated) && truncated == 1);
+	// The signed exact form: a whole number in [lo, hi], its ends included; a fraction, NaN, an
+	// infinity, a number outside or a value of another type refused, `out` then kept.
+	int64_t whole = 5;
+	TEST_EXPECT(json_exact_whole_in(json_number(-3.0), -10.0, 10.0, whole) && whole == -3);
+	TEST_EXPECT(json_exact_whole_in(json_number(-2147483648.0), -2147483648.0, 2147483647.0, whole) && whole == INT32_MIN);
+	TEST_EXPECT(json_exact_whole_in(json_number(kJsonSafeWholeMax), -kJsonSafeWholeMax, kJsonSafeWholeMax, whole) &&
+	            whole == 9007199254740991ll);
+	TEST_EXPECT(!json_exact_whole_in(json_number(9007199254740992.0), -kJsonSafeWholeMax, kJsonSafeWholeMax, whole) &&
+	            whole == 9007199254740991ll);
+	TEST_EXPECT(!json_exact_whole_in(json_number(-1.5), -10.0, 10.0) && !json_exact_whole_in(json_number(11.0), -10.0, 10.0));
+	TEST_EXPECT(!json_exact_whole_in(json_number(0.0), 1.0, 4294967295.0) && json_exact_whole_in(json_number(4294967295.0), 1.0, 4294967295.0));
+	TEST_EXPECT(!json_exact_whole_in(json_number(std::nan("")), -10.0, 10.0));
+	TEST_EXPECT(!json_exact_whole_in(json_number(HUGE_VAL), -kJsonSafeWholeMax, kJsonSafeWholeMax));
+	TEST_EXPECT(!json_exact_whole_in(json_string("3"), -10.0, 10.0) && !json_exact_whole_in(JsonValue::make_null(), -10.0, 10.0));
 
 	const JsonValue array = json_string_array({"a", "", "b c"});
 	TEST_EXPECT(array.is_array() && array.array.size() == 3 && array.array[0].string == "a" &&

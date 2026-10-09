@@ -190,6 +190,16 @@ private:
 // folder and an exported game's do. The game mounts an expansion's two archives over whatever
 // boot archives its working directory holds [orig: PFF_OpenAllArchives @ 0x4a4310].
 bool vfs_has_boot_archive(const std::string &dir);
+// The boot table's archives `dir` holds, slot by slot: one entry for each of kBootArchiveTable's
+// names, in its order, the file's name as the folder spells it (found without case, as the game's
+// _lopen finds it on its file system [orig: PFF_OpenAllArchives @ 0x4a4310]), "" for a name the
+// folder lacks. vfs_has_boot_archive is whether any entry is not "".
+std::vector<std::string> vfs_boot_archive_slots(const std::string &dir);
+
+// A file as its game loader is served it: decoded as the game's text readers decode a stored file
+// (Vfs::read_file), or as stored where the file's loader takes its stored form and unwraps it
+// itself (vfs_loader_takes_stored: a shader). What an extract writes and an import copies.
+bool vfs_read_served(const Vfs &vfs, const std::string &name, std::vector<uint8_t> &out);
 
 // An expansion's folder under a game's root: "<game_root>/expansion/<name>", or the relative
 // "expansion/<name>" for an empty root (an install's layout, which a build of an expansion
@@ -237,6 +247,12 @@ struct ExpansionInfo {
     std::string name;
     std::string description;
 };
+// The section and keys the scan reads them by [orig: Expansion_ScanAndRegister:
+// TextResource_FindEntryBySectionAndKey ("exp_info", "EXP_NAME") @ 0x4a4578, ("exp_info",
+// "EXP_DESC") @ 0x4a45ef].
+inline constexpr const char *kExpansionInfoSection = "exp_info";
+inline constexpr const char *kExpansionNameKey = "EXP_NAME";
+inline constexpr const char *kExpansionDescriptionKey = "EXP_DESC";
 inline constexpr const char *kExpansionUnnamed = "Unnamed Expansion";
 inline constexpr const char *kExpansionNoDescription = "This expansion lacks a description.";
 ExpansionInfo vfs_expansion_info(const std::string &game_root, const std::string &expansion);

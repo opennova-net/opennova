@@ -17,6 +17,7 @@
 #include <formats/wac/bytecode.h>
 #include <formats/mission/mission_params.h>
 #include <formats/wac/command.h>
+#include <formats/wac/help.h>
 #include <runtime/world/entity_commands.h>
 #include <runtime/world/entity_registry.h>
 #include <runtime/world/infantry.h>
@@ -165,7 +166,7 @@ constexpr size_t kOpnegAt = 0x58;
 constexpr size_t kAutoAt = 0x68;
 constexpr size_t kOpSetAt = 0x78;
 constexpr size_t kLocalsSize = 0xB8;
-constexpr char kOperatorSet[] = "{}()[]+-*/|&^%<>=!~"; // [orig: @0x7CE2E8, 20 bytes]
+static_assert(sizeof(kWacOperatorSet) == 20, "the operator set and its terminator"); // [orig: @0x7CE2E8, 20 bytes]
 
 // An IF/DO/LOOP nesting level. [orig: Script_Compile's 0x120-byte block
 // records @var_49BC: type +0, start line +4, DO id +8, loop jump-back word
@@ -209,7 +210,7 @@ public:
 		f.text.assign(text.begin(), text.end());
 		f.end = text.size();
 		f.text.push_back('\0');
-		std::memcpy(&f.locals[kOpSetAt], kOperatorSet, sizeof(kOperatorSet));
+		std::memcpy(&f.locals[kOpSetAt], kWacOperatorSet, sizeof(kWacOperatorSet));
 		run(f);
 	}
 
@@ -330,17 +331,7 @@ private:
 
 	// [orig: WacScript_FormatActionParameters @0x4EFC20] "  name (type, type)".
 	static std::string action_signature(int index) {
-		const CommandDef &def = wac_commands()[index];
-		std::string text = "  ";
-		text += def.name;
-		text += " (";
-		for (int i = 0; i < 4; ++i) {
-			if (def.params[i] == ParamType::Null) continue;
-			if (i) text += ", ";
-			text += param_type_name(def.params[i]);
-		}
-		text += ")";
-		return text;
+		return "  " + command_signature(wac_commands()[index]);
 	}
 
 	// ---- the token buffer and the paren frames ----

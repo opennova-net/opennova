@@ -1201,6 +1201,12 @@ add_executable(fnt_pack_test fnt/fnt_pack_test.cpp)
 target_link_libraries(fnt_pack_test PRIVATE opennova_formats)
 add_test(NAME fnt_pack COMMAND fnt_pack_test)
 
+# A glyph sheet made into a font (formats/fnt/fnt_sheet.h), and the glyph UV from a pixel rect.
+add_executable(fnt_sheet_test fnt/fnt_sheet_test.cpp)
+target_link_libraries(fnt_sheet_test PRIVATE opennova_formats)
+target_include_directories(fnt_sheet_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME fnt_sheet COMMAND fnt_sheet_test)
+
 add_executable(pcx_roundtrip_test pcx/pcx_roundtrip_test.cpp)
 target_link_libraries(pcx_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(pcx_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

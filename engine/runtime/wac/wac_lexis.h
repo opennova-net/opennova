@@ -25,6 +25,26 @@ inline constexpr bool wac_comment_starts(char c, char next) {
 	return c == ';' || (c == '/' && next == '/');
 }
 
+// The operator set: the bytes Script_Compile reads as an operator token, each alone or as one of the
+// two-byte operators, and that end a word [orig: @0x7CE2E8, 20 bytes, copied into the compile frame
+// @0x4F320F]. The compiler keeps its own copy in its frame, where a paren frame past the sixteenth
+// overwrites it as retail's does; this is the set as the binary holds it.
+inline constexpr char kWacOperatorSet[] = "{}()[]+-*/|&^%<>=!~";
+
+// Whether `c` is in the operator set (never the terminator).
+inline constexpr bool wac_in_operator_set(char c) {
+	for (const char *op = kWacOperatorSet; *op != '\0'; ++op)
+		if (*op == c) return true;
+	return false;
+}
+
+// Whether the byte `c` ends a word the tokenizer reads: a blank or a control byte (<= ' '), ';', ','
+// or an operator byte [orig: Script_Compile @0x4F3412..0x4F345A]. A '"' does not: it opens a string
+// only where a token starts.
+inline constexpr bool wac_token_ends(char c) {
+	return static_cast<unsigned char>(c) <= ' ' || c == ';' || c == ',' || wac_in_operator_set(c);
+}
+
 // The operand prefixes, in the order the parameter resolver tests them: a token starting with one
 // (the compiler has upper-cased it) names the prefix's slot type's table whatever slot it fills, the
 // name being what follows the prefix [orig: WacScript_ResolveParameter @0x4F2920, the prefix legs

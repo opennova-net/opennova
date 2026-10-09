@@ -223,6 +223,36 @@ inline std::string utf8_join(std::string_view dir, std::string_view name) {
 	return out;
 }
 
+// `dir` without the '/' or '\' separators it ends in, a root's kept ("/" and "C:/" stay as they are):
+// the one spelling of a folder whatever the text it was typed or joined as.
+inline std::string without_trailing_separator(std::string_view dir) {
+	std::string out(dir);
+	while (out.size() > 1 && (out.back() == '/' || out.back() == '\\') && out[out.size() - 2] != ':') out.pop_back();
+	return out;
+}
+
+// Whether `name` is one of Windows' device names, which a file or folder of the name (or of the
+// name before its first dot, any case) opens instead: CON, PRN, AUX, NUL, COM1..COM9, LPT1..LPT9.
+inline bool is_windows_device_name(std::string_view name) {
+	std::string stem(name.substr(0, name.find('.')));
+	for (char &c : stem) {
+		if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+	}
+	static constexpr const char *kDevices[] = {"CON", "PRN", "AUX", "NUL"};
+	for (const char *device : kDevices) {
+		if (stem == device) return true;
+	}
+	return stem.size() == 4 && (stem.compare(0, 3, "COM") == 0 || stem.compare(0, 3, "LPT") == 0) && stem[3] >= '1' &&
+	       stem[3] <= '9';
+}
+
+// Whether `inner` is `outer` or under it, by their spelling alone (each lexically normal, no link
+// resolved and nothing read from the disk; path_within resolves them). A path on another root is not.
+inline bool path_lexically_within(const std::filesystem::path &inner, const std::filesystem::path &outer) {
+	const std::filesystem::path relative = inner.lexically_normal().lexically_relative(outer.lexically_normal());
+	return !relative.empty() && *relative.begin() != "..";
+}
+
 // Whether `path` is the folder `dir` or under it, symbolic links resolved (weakly_canonical, which
 // also gives a folder that exists its own spelling). False when either cannot be resolved.
 inline bool path_within(const std::filesystem::path &path, const std::filesystem::path &dir) {

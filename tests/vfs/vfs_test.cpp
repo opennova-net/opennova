@@ -417,6 +417,26 @@ static int test_scr_decode_on_read() {
     return 1;
 }
 
+// vfs_read_served: a shader (.fx) as stored, its loader unwrapping its own SCR form; any other
+// file as read_file decodes it.
+static int test_read_served() {
+    fs::path d = fresh_dir("read_served");
+    std::string scr = "SCR";
+    scr.push_back('\0');
+    scr += "ABCDEFGH";
+    write_loose(d / "enc.dat", scr);
+    write_loose(d / "glass.FX", scr);
+    Vfs v;
+    v.add_search_path(d.string());
+    std::vector<uint8_t> served, decoded, raw;
+    CHECK(opennova::vfs_read_served(v, "enc.dat", served) && v.read_file("enc.dat", decoded) && served == decoded &&
+          served.size() == scr.size() - 4, "a text file decoded");
+    CHECK(opennova::vfs_read_served(v, "glass.fx", served) && v.read_file_raw("glass.fx", raw) && served == raw &&
+          served.size() == scr.size(), "a shader as stored");
+    CHECK(!opennova::vfs_read_served(v, "missing.fx", served), "a file that is not there");
+    return 1;
+}
+
 // The SCR key follows the decode policy, not just the version byte. The JO Demo stamps version 1
 // on files keyed with the DEFAULT key, while retail JO/DFX2 version-1 files use the JO_DFX2 key
 // (which the version byte selects). So decoding a demo-style file needs FORCE_DEFAULT; plain
@@ -701,6 +721,14 @@ static int test_expansion_paths_and_names() {
     write_loose(dir / "LocalRes.PFF", "x");
     CHECK(vfs_has_boot_archive(dir.string()), "one of the boot table's archives, in any case");
     CHECK(!vfs_has_boot_archive((dir / "missing").string()), "a folder that is not there");
+    // Slot by slot: the folder's spelling where it holds the name, "" where it lacks it.
+    const std::vector<std::string> slots = vfs_boot_archive_slots(dir.string());
+    CHECK(slots.size() == 3 && slots[0].empty() && slots[1] == "LocalRes.PFF" && slots[2].empty(),
+          "the boot table's slots, the folder's spelling");
+    write_loose(dir / "language.pff", "x");
+    CHECK(vfs_boot_archive_slots(dir.string()) == std::vector<std::string>({"language.pff", "LocalRes.PFF", ""}),
+          "two slots held");
+    CHECK(vfs_boot_archive_slots("") == std::vector<std::string>(3), "no folder: every slot empty");
     return 1;
 }
 
@@ -722,6 +750,7 @@ int main() {
     RUN_TEST(test_archive_names_keep_trailing_spaces);
     RUN_TEST(test_mount_game_retail_table);
     RUN_TEST(test_scr_decode_on_read);
+    RUN_TEST(test_read_served);
     RUN_TEST(test_scr_decode_policy);
     RUN_TEST(test_vfs_scr_policy);
     RUN_TEST(test_list_files);

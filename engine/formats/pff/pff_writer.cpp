@@ -20,6 +20,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <string>
 #include <vector>
 
 namespace opennova::pff {
@@ -62,7 +63,56 @@ int read_array_chunk(void *ctx, uint32_t index, uint32_t offset, uint8_t *out, u
 	return 0;
 }
 
+/* pff_rewrite_with_entry's payloads: each entry's stored bytes from the open source, the replaced
+   entry's from the caller. */
+struct Rewrite {
+	const PffArchive *source;
+	uint32_t replaced;
+	const uint8_t *data;
+	uint32_t size;
+};
+
+int read_rewrite_entry(void *ctx, uint32_t index, uint8_t *out, uint32_t size) {
+	const Rewrite &rewrite = *static_cast<const Rewrite *>(ctx);
+	if (index == rewrite.replaced) {
+		if (size != rewrite.size) return 1;
+		if (size) memcpy(out, rewrite.data, size);
+		return 0;
+	}
+	return pff_extract_raw(rewrite.source, &rewrite.source->entries[index], out, size);
+}
+
 } // namespace
+
+uint32_t pff_magic_for_format(PffFormat format)
+{
+	switch (format) {
+	case PFF_FORMAT_PFF4: return PFF_MAGIC_PFF4;
+	case PFF_FORMAT_BHD: return PFF_MAGIC_BHD;
+	case PFF_FORMAT_PFF3:
+	default: return PFF_MAGIC_PFF3;
+	}
+}
+
+PffFormat pff_format_for_magic(uint32_t magic)
+{
+	if (magic == PFF_MAGIC_PFF4) return PFF_FORMAT_PFF4;
+	if (magic == PFF_MAGIC_BHD) return PFF_FORMAT_BHD;
+	return PFF_FORMAT_PFF3;
+}
+
+const char *pff_write_error_string(int code)
+{
+	switch (code) {
+	case PFF_WRITE_OK: return "written";
+	case PFF_WRITE_ERR_NAME_LEN: return "a name is too long for an archive";
+	case PFF_WRITE_ERR_NAME_EMPTY: return "a name is blank";
+	case PFF_WRITE_ERR_DUP_NAME: return "two files share a name";
+	case PFF_WRITE_ERR_TOO_LARGE: return "the archive would exceed 4 GB";
+	case PFF_WRITE_ERR_IO:
+	default: return "the archive could not be written";
+	}
+}
 
 int pff_write_archive_streamed_progress(const char *path, PffFormat format,
                                         const PffWriteStreamEntry *entries, uint32_t n,
@@ -94,6 +144,27 @@ int pff_write_archive_streamed(const char *path, PffFormat format,
 {
 	return pff_write_archive_streamed_progress(path, format, entries, n, read_entry, ctx,
 	                                           NULL, NULL);
+}
+
+int pff_rewrite_with_entry(const PffArchive *source, uint32_t index, const uint8_t *data, uint32_t size,
+                           const char *path)
+{
+	if (source == NULL || path == NULL || index >= source->entry_count || (size != 0 && data == NULL))
+		return PFF_WRITE_ERR_IO;
+	std::vector<PffWriteStreamEntry> entries(source->entry_count);
+	std::vector<std::string> names(source->entry_count);
+	for (uint32_t i = 0; i < source->entry_count; ++i) {
+		const PffEntry &entry = source->entries[i];
+		names[i] = pff_entry_stored_name(entry);
+		entries[i].name = names[i].c_str();
+		entries[i].size = i == index ? size : entry.size;
+		entries[i].flags = i == index ? 0u : entry.flags;
+		entries[i].timestamp = entry.timestamp;
+		entries[i].checksum = entry.checksum;
+	}
+	Rewrite rewrite{source, index, data, size};
+	return pff_write_archive_streamed(path, pff_format_for_magic(source->header.magic), entries.data(),
+	                                  uint32_t(entries.size()), read_rewrite_entry, &rewrite);
 }
 
 int pff_write_archive(const char *path, PffFormat format,

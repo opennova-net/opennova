@@ -89,6 +89,7 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/filelog/file_access_log.cpp
     # fnt — bitmap fonts
     ${CMAKE_CURRENT_SOURCE_DIR}/fnt/fnt.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fnt/fnt_sheet.cpp # a glyph sheet made into a font (the editor's font import)
     # foliage — foliage defs + placement map
     ${CMAKE_CURRENT_SOURCE_DIR}/foliage/foliage.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/foliage/runtime.cpp

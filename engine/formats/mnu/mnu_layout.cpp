@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 
 namespace opennova::mnu {
 
@@ -142,6 +143,12 @@ bool color_reads_whole(const std::string &text, size_t *digits_read) {
 	if (digits_read) *digits_read = digits;
 	while (i < text.size() && blank(i)) ++i;
 	return digits > 0 && i == text.size();
+}
+
+std::string color_text(std::uint32_t word) {
+	char text[9];
+	std::snprintf(text, sizeof(text), "%08X", static_cast<unsigned>(word));
+	return text;
 }
 
 // [orig: wcstoul base 16 @ 0x64bd10; forced opaque @ 0x64b220]
