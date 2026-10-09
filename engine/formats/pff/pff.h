@@ -3,6 +3,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <string>
+#include <string_view>
+
 
 namespace opennova::pff {
 
@@ -89,9 +92,19 @@ int pff_is_pff(const uint8_t *data, size_t size);
 /* Normalize a PFF name into an uppercase, trailing-space-trimmed C string (the engine's
    strupr + 0x20-trim used for sort/lookup; PFF_SortEntries @ 0x768280 / PFF_FindEntry
    @ 0x7685d0). Reads up to raw_cap bytes or until a NUL; result capped to out_sz - 1 chars.
-   The reader's lookup, the writer's directory sort + duplicate detection and the editor's
-   asset registry (ADR 0046 d6: one flat identity per logical name) all key on it. */
+   The reader's lookup, the writer's directory sort + duplicate detection and
+   normalized_logical_name (ADR 0046 d6: one flat identity per logical name) all key on it. */
 void pff_norm_name(const char *raw, size_t raw_cap, char *out, size_t out_sz);
+
+/* The engine's identity for a logical name: the PFF normalization (uppercase, trailing spaces
+   trimmed) that the reader's lookup and the writer's directory share, of the whole name to its
+   first NUL however long (a filter compares a record's text by it, which may run past any name's
+   length). */
+std::string normalized_logical_name(std::string_view name);
+
+/* The output-name rules a build must satisfy: at most PFF_NAME_SIZE bytes and not empty after
+   normalization (the writer's PFF_WRITE_ERR_NAME_LEN and PFF_WRITE_ERR_NAME_EMPTY). */
+bool logical_name_fits_archive(std::string_view name);
 
 /* --- Write API --- */
 

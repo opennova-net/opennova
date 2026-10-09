@@ -331,6 +331,17 @@ static int test_strutil_text_chores()
     TEST_EXPECT(strutil::byte_size_text(3482) == "3.4 KB");
     TEST_EXPECT(strutil::byte_size_text(1024 * 1024) == "1.0 MB");
     TEST_EXPECT(strutil::byte_size_text(uint64_t(5) << 30) == "5120.0 MB");
+
+    // Text a person wrote: tabs, line ends, a form feed and the DOS end-of-file mark pass, UTF-8
+    // and code-page bytes too; a NUL or any other control character does not.
+    const std::string licence = "MIT License\r\n\r\nCopyright (c)\tthe authors\n\f\x1a Jos\xC3\xA9 \xE9";
+    TEST_EXPECT(strutil::looks_like_text(reinterpret_cast<const uint8_t *>(licence.data()), licence.size()));
+    TEST_EXPECT(strutil::looks_like_text(nullptr, 0));
+    for (const uint8_t control : {uint8_t(0x00), uint8_t(0x01), uint8_t(0x08), uint8_t(0x0B), uint8_t(0x1B), uint8_t(0x1F)}) {
+        const uint8_t raw[] = {'a', control, 'b'};
+        TEST_EXPECT(!strutil::looks_like_text(raw, sizeof(raw)));
+    }
+    TEST_EXPECT(strutil::kTextSniffBytes == 4096);
     return 0;
 }
 

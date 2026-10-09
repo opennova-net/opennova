@@ -3,8 +3,12 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
+
+#include <base/io/os_path.h>
 
 using namespace opennova::renderer;
 
@@ -292,6 +296,30 @@ int main() {
         put(nested,12,uint32_t(bytes.size()-8)|0x80000000u);
         expect(load_material_chunk(nested.data(),nested.size(),type).rgba==pixels.rgba,"nested producer chunk");
         expect(!load_material_chunk(bytes.data(),bytes.size()-1,type), "truncated chunk is a failed load");
+        // A container of any of the three chunks, whatever its name; read whole or by its headers.
+        expect(is_material_chunk_container(bytes) && is_material_chunk_container(nested), "a chunk container");
+        const std::vector<uint8_t> truncated(bytes.begin(), bytes.end()-1);
+        expect(!is_material_chunk_container(truncated), "a truncated chunk is no container");
+        const std::filesystem::path file = std::filesystem::temp_directory_path() /
+            ("opennova_material_chunk_" + std::to_string(type) + ".bin");
+        { std::ofstream out(file, std::ios::binary); out.write(reinterpret_cast<const char *>(bytes.data()), std::streamsize(bytes.size())); }
+        uint64_t read = 0;
+        expect(is_material_chunk_file(opennova::io::utf8_path(file), read) && read > 0 && read <= 3 * 8 + 28,
+            "a chunk container file, read by its headers");
+        std::filesystem::remove(file);
+    }
+    {
+        // A large file of another kind: a megabyte of zeros reads as empty chunks, walked no further
+        // than kChunkHeaderReads headers for each chunk type.
+        const std::filesystem::path file = std::filesystem::temp_directory_path() / "opennova_material_chunk_filler.bin";
+        { std::ofstream out(file, std::ios::binary); const std::vector<char> zeros(1 << 20, 0); out.write(zeros.data(), std::streamsize(zeros.size())); }
+        uint64_t read = 0;
+        expect(!is_material_chunk_file(opennova::io::utf8_path(file), read) && read > 0 &&
+            read <= 3 * (kChunkHeaderReads * 8 + 28), "a file of no chunk costs a few small reads");
+        std::filesystem::remove(file);
+        read = 0;
+        expect(!is_material_chunk_file(opennova::io::utf8_path(file), read) && read == 0, "no file, nothing read");
+        expect(!is_material_chunk_container({}), "no bytes, no container");
     }
 	const auto checker = missing_material_texture_rgba();
 	expect(checker.size() == 128 * 128 * 4, "fallback dimensions");

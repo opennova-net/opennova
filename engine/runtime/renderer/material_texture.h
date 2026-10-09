@@ -164,6 +164,17 @@ using MaterialChunkReader = std::function<bool(uint64_t position, uint8_t *out, 
 // its pixels left unread, so a file's few header bytes answer for the whole of it (the editor's
 // scan types a file no name types by this).
 bool material_chunk_loads(uint64_t size, const MaterialChunkReader &read, uint8_t type);
+// Bytes a model's chunk row reads (runtime types 16 to 18): the runtime's own chunk
+// loader takes them as one of its three chunks [orig: NQ8B @ 0x58F350; HRZ8 @ 0x58F470;
+// AOC8 @ 0x58F590] (load_material_chunk), whatever the file is named.
+bool is_material_chunk_container(const std::vector<uint8_t> &bytes);
+// The same answer for the file at `path` (UTF-8), read by its chunk headers alone
+// (material_chunk_loads: the 8-byte header, each chunk's tag and size, the found chunk's
+// first 28 bytes), so a large file of another kind costs a few small reads, kChunkHeaderReads at
+// most for each of the three chunks (a file whose bytes read as more empty chunks than that is not
+// taken for a container); `read` grows by the bytes read.
+inline constexpr size_t kChunkHeaderReads = 1024;
+bool is_material_chunk_file(const std::string &path, uint64_t &read);
 
 inline constexpr uint32_t kMissingMaterialTextureSide = 128;
 // Opaque gray 0x30 / 0x50 squares, four pixels wide.

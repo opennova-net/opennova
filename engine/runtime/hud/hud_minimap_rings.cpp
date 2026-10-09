@@ -13,6 +13,7 @@
 
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
+#include <formats/def/reserved_items.h>
 
 namespace opennova::hud::minimap_detail {
 
@@ -199,7 +200,7 @@ void draw_pool3_walk(MapCompile &c) {
 	const HudMinimapOverlays *ov = c.input.overlays;
 	if (ov == nullptr) return;
 	for (const HudMinimapPoolEntity &e : ov->pool3) {
-		if (e.def_id == 6006) {
+		if (e.def_id == def::DEF_TYPE_KOTH_CENTRE) {
 			if ((c.flags & 0x10u) == 0) continue;
 			// The KOTH zone ring over the score delta: ahead blue with a
 			// 0x60 fill, behind red with a 0x60 fill, level the active HUD
@@ -217,7 +218,7 @@ void draw_pool3_walk(MapCompile &c) {
 			}
 			continue;
 		}
-		if (e.def_id == 2044) {
+		if (e.def_id == def::DEF_TYPE_NAMED_LOCATION) {
 			if ((c.flags & 0x800u) == 0) continue;
 			// The location label: the g_LocationNames entry at the entity's
 			// int16 +0x280 index, bold, centred on the UNROTATED projection,

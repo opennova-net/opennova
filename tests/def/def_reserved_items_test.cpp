@@ -83,6 +83,13 @@ static int test_runtime_constants() {
 	TEST_EXPECT(reserved_item_by_type(kParachuteItemTypeId) && reserved_item_by_type(kNightVisionGogglesItemTypeId) &&
 	            reserved_item_by_type(kBinocularsItemTypeId) && reserved_item_by_type(kPlayerInfantryTypeId));
 	TEST_EXPECT(reserved_item_by_type(kPlayerInfantryTypeId)->kind == DEF_ITEM_TYPE_PERSON);
+	// The marker types the spawn reads its waypoint fields for: a named location, a waypoint, the KOTH
+	// centre, each a marker row.
+	for (const int type : {DEF_TYPE_NAMED_LOCATION, DEF_TYPE_WAYPOINT, DEF_TYPE_KOTH_CENTRE})
+		TEST_EXPECT(reserved_item_by_type(type) && reserved_item_by_type(type)->kind == DEF_ITEM_TYPE_MARKER);
+	TEST_EXPECT(std::strcmp(reserved_item_by_type(DEF_TYPE_NAMED_LOCATION)->label, "Map named location") == 0 &&
+	            std::strcmp(reserved_item_by_type(DEF_TYPE_WAYPOINT)->label, "Waypoint") == 0 &&
+	            std::strcmp(reserved_item_by_type(DEF_TYPE_KOTH_CENTRE)->label, "KOTH centre") == 0);
 	return 0;
 }
 

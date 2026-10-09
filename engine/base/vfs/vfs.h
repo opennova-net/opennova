@@ -185,6 +185,39 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+// Whether `dir` holds a base game an expansion can play over: one of the boot table's archives
+// (kBootArchiveTable, its name in any case) [orig: the name table @ 0x829f90], as an install's
+// folder and an exported game's do. The game mounts an expansion's two archives over whatever
+// boot archives its working directory holds [orig: PFF_OpenAllArchives @ 0x4a4310].
+bool vfs_has_boot_archive(const std::string &dir);
+
+// An expansion's folder under a game's root: "<game_root>/expansion/<name>", or the relative
+// "expansion/<name>" for an empty root (an install's layout, which a build of an expansion
+// makes) [orig: Expansion_LoadAssets @ 0x4a4730, its "expansion\%s\..." paths].
+std::string vfs_expansion_dir(const std::string &game_root, const std::string &expansion);
+// Its two archives, which `/exp <name>` opens in the archive table's first two slots before the
+// base game's: "<name>L.pff" (`language`: kArchiveSlotExpansionText) and "<name>.pff"
+// (kArchiveSlotExpansion) [orig: PFF_OpenAllArchives @ 0x4a4310, the name table @ 0x829f90;
+// Expansion_LoadAssets @ 0x4a48ed / @ 0x4a48d6].
+std::string vfs_expansion_archive_name(const std::string &expansion, bool language);
+// The archive's path in its folder: vfs_expansion_dir joined with vfs_expansion_archive_name
+// ("expansion/<name>/<name>L.pff" for an empty root).
+std::string vfs_expansion_archive_path(const std::string &game_root, const std::string &expansion,
+                                       bool language);
+
+// The files the game reads from the folder of the expansion `expansion` by path, before any
+// archive and before the root's copy: its text override table, read from the loose file alone
+// (the query is path-qualified, so no archive entry serves it) [orig:
+// TextResource_LoadOverrideTable @ 0x4a49de], which the Mods list also reads loose first [orig:
+// Expansion_ScanAndRegister @ 0x4a4492, @ 0x4a455b]; the menu and intro videos by their names
+// [orig: UI_CreateMenuBinkVideos @ 0x54b5ff..0x54b74a; Game_PlayIntroVideos @ 0x5637d7..0x563848];
+// its music banks [orig: Expansion_LoadAssets @ 0x4a4906, @ 0x4a4936]; and the encrypted
+// configuration, read loose first [orig: Mission_LoadEncryptedConfig @ 0x4cdcf4]. Names compare
+// without case. The version text, read there too (vfs_expansion_version_checksum), is each
+// build's own, and the player's weapon.sav is no file of the game's (gameprofile/player_files.h):
+// neither is one of these.
+bool vfs_read_from_expansion_folder(const std::string &name, const std::string &expansion);
+
 // List expansion subdirectories under <game_root>/expansion that contain a <name>.pff
 // (i.e. the expansions mount_game accepts). Returns the bare expansion names.
 std::vector<std::string> vfs_list_expansions(const std::string &game_root);
@@ -222,11 +255,23 @@ struct ExpansionRecord {
 // The scan registers no more than this many [orig: Expansion_ScanAndRegister @ 0x4a445d,
 // the count's compare with 0x10].
 inline constexpr size_t kExpansionRecordsMax = 16;
-// Every directory under <game_root>/expansion whose name does not start with '.', whether
-// or not its <name>.pff opens, in the order FindFirstFile walks `expansion\*.*` (an NTFS
-// directory's: the names upper-cased and compared by code unit, ASCII here), the first
-// kExpansionRecordsMax, each read as vfs_expansion_info reads it. Retail scans once, at boot,
-// and copies EXP_NAME and EXP_DESC unbounded into 64 and 272 bytes; the records here keep each
+// What the scan copies an expansion's [exp_info] EXP_NAME and EXP_DESC into: the 64-byte name
+// and the 272-byte description of its record (stride 596: the name @+0, the folder's name
+// @+0x40, the description @+0x144), each copied whole with no bound [orig:
+// Expansion_ScanAndRegister @ 0x4a4598, @ 0x4a4612]: a name of 64 bytes or more runs over the
+// record's folder name, a description of 272 or more into the next record.
+inline constexpr size_t kExpansionRecordNameBytes = 64;
+inline constexpr size_t kExpansionRecordDescriptionBytes = 272;
+// Whether the scan registers a folder of this name under expansion\: not one whose name starts
+// with '.' [orig: Expansion_ScanAndRegister @ 0x4a444b..0x4a4450, `cmp cFileName[0], '.'`]. An
+// expansion whose folder it skips mounts with `/exp` alone; the Mods list never lists it.
+bool vfs_expansion_folder_listed(const std::string &name);
+// Every directory under <game_root>/expansion whose name does not start with '.'
+// (vfs_expansion_folder_listed), whether or not its <name>.pff opens, in the order
+// FindFirstFile walks `expansion\*.*` (an NTFS directory's: the names upper-cased and compared
+// by code unit, ASCII here), the first kExpansionRecordsMax, each read as vfs_expansion_info
+// reads it. Retail scans once, at boot, and copies EXP_NAME and EXP_DESC unbounded into
+// kExpansionRecordNameBytes and kExpansionRecordDescriptionBytes; the records here keep each
 // whole (vfs-pff-mount-re.md "Expansions", item 3).
 // [orig: Expansion_ScanAndRegister @ 0x4a43d0 — FindFirstFileA("expansion\\*.*") @ 0x4a4426,
 //  the directory, '.' and count gate @ 0x4a445d, the directory copied @ 0x4a4532,
