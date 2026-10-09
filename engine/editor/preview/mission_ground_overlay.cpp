@@ -56,15 +56,8 @@ Extent mapped_cells(const terrain::FoliageMaskMap &grid) {
 
 // The grid as the samplers route it, whichever map is read.
 terrain::FoliageMaskMap grid_of(const MissionGround &ground) {
-	terrain::FoliageMaskMap grid;
 	const terrain::TerrainHeightField *field = ground.height_field();
-	if (!field) return grid;
-	grid.sector_grid = field->layout.sector_grid;
-	grid.origin_x = field->layout.origin_x;
-	grid.origin_y = field->layout.origin_y;
-	grid.wrap_x = field->wrap_x;
-	grid.wrap_z = field->wrap_z;
-	return grid;
+	return field ? terrain::foliage_mask_grid(*field) : terrain::FoliageMaskMap();
 }
 
 // The picture laid out over the extent at the map's own texel (1024 / its side), made coarser by powers of

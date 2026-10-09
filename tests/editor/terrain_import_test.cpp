@@ -1,21 +1,16 @@
-// A terrain made from images (ADR 0046 S20): the terrain set's text; a heightmap read at every depth
-// it takes (an 8-bit PNG TrnGen's way, a 16-bit one scaled by `top`, TrnGen's own .raw and the game's
-// raw16) and refused at any other size; the new_terrain request over a project (the images copied
-// into art/terrain/ as the set's inputs, the set and its record written, the import making the
-// terrain's files under the cache, which the scan types and the build packs while the images are
-// never packed); the outputs read back through the engine's readers as the game reads them (the .trn
-// past the admission gate, the .cpt's CDEP and 341 tiles, the colour map 1024 x 1024, the blend map,
-// the empty .til); the runtime's own terrain load over them (the field store's heights, the frame
-// compiler's patches from afar, and near an eye standing on the slope the finest tile under it drawn
-// at the ground's height whichever way it looks); the import rerun-stable (forced again, the same bytes); the blank environment
-// a mission can be made under, and a blank mission made on the new terrain; and the refusals that
-// write nothing (a name taken, a colour map of another size, a value of no key). The surface map: read
-// from an indexed image's indices (an 8-bit PCX, a palette PNG) or a colour image's legend colours,
-// refused at another size and for a texel of no class (named by its place); written as <stem>_m.pcx,
-// 8-bit with the legend its palette, the .trn's polytrn_charmap naming it; and the runtime's surface
-// sampler reading the classes painted at known mission positions over the island, at 512 and at 1024.
-// With --retail, a shipped char map (JO:CA's Dvxi5_m.pcx) through the same read: its palette the legend,
-// its indices kept.
+// A terrain made from images (ADR 0046 S20): the terrain set's text; the new_terrain request over a project (the
+// images copied into art/terrain/ as the set's inputs, the set and its record written, the import making the
+// terrain's files under the cache, which the scan types and the build packs while the images are never packed);
+// the outputs read back through the engine's readers as the game reads them (the .trn past the admission gate, the
+// .cpt's CDEP and 341 tiles, the colour map 1024 x 1024, the blend map, the empty .til); the runtime's own terrain
+// load over them (the field store's heights, the frame compiler's patches from afar, and near an eye standing on the
+// slope the finest tile under it drawn at the ground's height whichever way it looks); the import rerun-stable
+// (forced again, the same bytes); the blank environment a mission can be made under, and a blank mission made on
+// the new terrain; and the refusals that write nothing (a name taken, a colour map of another size, a value of no
+// key). The surface map: written as <stem>_m.pcx, 8-bit with the legend its palette, the .trn's polytrn_charmap
+// naming it; and the runtime's surface sampler reading the classes painted at known mission positions over the
+// island, at 512 and at 1024. The heightmap, surface map and foliage map reads are the engine's codecs, with their
+// own ctests (cpt_trngen_heightmap_depth, terrain_map_source); with --retail, what a shipped foliage map grows.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -52,6 +47,7 @@
 #include <formats/trn/charmap_legend.h>
 #include <formats/trn/trn_io.h>
 #include <runtime/terrain/terrain_frame.h>
+#include <runtime/terrain/terrain_map_source.h>
 #include <runtime/terrain_query/foliage_mask_map.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/terrain_query/surface_type_map.h>
@@ -74,7 +70,6 @@ using opennova::RgbaImage;
 using editor_test::NoProcess;
 using test_png::PngSpec;
 using test_png::make_png;
-using opennova::png::decode_png;
 using opennova::png::encode_png_rgba;
 
 namespace {
@@ -96,20 +91,6 @@ std::vector<uint8_t> island_png16(double peak = 0.5) {
 			spec.rows.push_back(uint8_t(v >> 8));
 			spec.rows.push_back(uint8_t(v & 0xFF));
 		}
-	}
-	return make_png(spec);
-}
-
-// An 8-bit grey PNG of `side` texels, a ramp.
-std::vector<uint8_t> ramp_png8(int side) {
-	PngSpec spec;
-	spec.width = side;
-	spec.height = side;
-	spec.depth = 8;
-	spec.color_type = 0;
-	for (int y = 0; y < side; ++y) {
-		spec.rows.push_back(0);
-		for (int x = 0; x < side; ++x) spec.rows.push_back(uint8_t(x * 255 / std::max(1, side - 1)));
 	}
 	return make_png(spec);
 }
@@ -296,46 +277,11 @@ int test_set_text() {
 	return 0;
 }
 
-int test_heightmap_depths() {
-	TerrainHeights heights;
-	std::string why;
-	// 16 bits: 0..65535 over 0..top, 256 raw a world unit.
-	TEST_EXPECT(decode_terrain_heightmap("h.png", island_png16(1.0), 127.5, heights, why));
-	TEST_EXPECT(heights.depth8.empty() && heights.depth16.size() == size_t(kSide) * kSide);
-	TEST_EXPECT(heights.depth16[512 * kSide + 512] == 32640 && heights.depth16[0] == 0);
-	TEST_EXPECT(decode_terrain_heightmap("h.png", island_png16(1.0), 200.0, heights, why) &&
-	            heights.depth16[512 * kSide + 512] == 51200);
-	// 8 bits at TrnGen's own scale go to the bake as they are; at another, TrnGen's smoothing then the scale.
-	TEST_EXPECT(decode_terrain_heightmap("h.png", ramp_png8(kSide), 127.5, heights, why) && heights.depth16.empty() &&
-	            heights.depth8.size() == size_t(kSide) * kSide && heights.depth8[kSide - 1] == 255);
-	TEST_EXPECT(decode_terrain_heightmap("h.png", ramp_png8(kSide), 63.75, heights, why) && heights.depth8.empty() &&
-	            heights.depth16.size() == size_t(kSide) * kSide);
-	// TrnGen's .raw (1 MiB, 8 bits) and the game's raw16 (2 MiB), taken as they are.
-	TEST_EXPECT(decode_terrain_heightmap("h.raw", std::vector<uint8_t>(size_t(kSide) * kSide, 7), 127.5, heights, why) &&
-	            heights.depth8[0] == 7);
-	std::vector<uint8_t> raw16(size_t(kSide) * kSide * 2, 0);
-	raw16[0] = 0x34;
-	raw16[1] = 0x12;
-	TEST_EXPECT(decode_terrain_heightmap("h.raw", raw16, 10.0, heights, why) && heights.depth16[0] == 0x1234);
-	// Any other size refused in words.
-	TEST_EXPECT(!decode_terrain_heightmap("h.png", ramp_png8(512), 127.5, heights, why) &&
-	            why.find("1024 x 1024") != std::string::npos);
-	TEST_EXPECT(!decode_terrain_heightmap("h.raw", std::vector<uint8_t>(100), 127.5, heights, why));
-	return 0;
-}
-
-// The surface map: the legend itself (twenty colours, none twice, 15 and up unlike the shipped legend's
-// white); each form it is read from; the sizes and the texels refused; the PCX it is written as.
-int test_surface_reads() {
+// The surface map's legend in the new_terrain request's words: each class by its name and colour (the legend and
+// the map's reads are the engine's: runtime/terrain terrain_map_source, its ctest terrain_map_source).
+int test_surface_legend_words() {
 	using opennova::kCharmapLegend;
 	using opennova::kCharmapLegendCount;
-	for (int i = 0; i < kCharmapLegendCount; ++i) {
-		TEST_EXPECT(opennova::charmap_legend_class(kCharmapLegend[i].r, kCharmapLegend[i].g, kCharmapLegend[i].b) == i);
-		const opennova::CharmapLegendColour &white = opennova::kCharmapLegendRest;
-		TEST_EXPECT(kCharmapLegend[i].r != white.r || kCharmapLegend[i].g != white.g || kCharmapLegend[i].b != white.b);
-	}
-	TEST_EXPECT(opennova::charmap_legend_class(255, 255, 255) == -1 && opennova::charmap_legend_class(153, 118, 62) == -1);
-	// The new_terrain request's words list the legend, each class by its name and colour.
 	const std::string doc = request_kind_row(EditorRequestKind::NewTerrain).doc;
 	for (int i = 0; i < kCharmapLegendCount; ++i) {
 		char entry[48];
@@ -343,115 +289,6 @@ int test_surface_reads() {
 		              kCharmapLegend[i].g, kCharmapLegend[i].b);
 		TEST_EXPECT(doc.find(entry) != std::string::npos);
 	}
-
-	IndexedImage8 out;
-	std::string why;
-	const auto same = [](const IndexedImage8 &image, const std::vector<uint8_t> &classes) {
-		return image.indices == classes;
-	};
-	const auto legend_palette = [](const IndexedImage8 &image) {
-		for (int i = 0; i < 256; ++i) {
-			const opennova::CharmapLegendColour &c = i < kCharmapLegendCount ? kCharmapLegend[i] : opennova::kCharmapLegendRest;
-			if (image.palette[i][0] != c.r || image.palette[i][1] != c.g || image.palette[i][2] != c.b) return false;
-		}
-		return true;
-	};
-	// A colour PNG in the legend's colours, its alpha ignored; a palette PNG by its indices alone.
-	const std::vector<uint8_t> c256 = surface_classes(256);
-	TEST_EXPECT(decode_terrain_surface("m.png", surface_colour_png(256, c256), out, why) && out.width == 256 &&
-	            out.height == 256 && same(out, c256) && legend_palette(out));
-	TEST_EXPECT(decode_terrain_surface("m.png", surface_palette_png(256, c256), out, why) && same(out, c256) && legend_palette(out));
-	// An 8-bit PCX by its indices (its palette any), a 24-bit TGA by its colours.
-	const std::vector<uint8_t> c512 = surface_classes(512);
-	{
-		IndexedImage8 pcx;
-		pcx.width = pcx.height = 512;
-		pcx.indices = c512;
-		std::vector<uint8_t> bytes;
-		TEST_EXPECT(opennova::encode_pcx_indexed(pcx, bytes, why));
-		TEST_EXPECT(decode_terrain_surface("m.pcx", bytes, out, why) && same(out, c512) && legend_palette(out));
-		std::vector<uint8_t> rgb(size_t(512) * 512 * 4), tga;
-		for (size_t i = 0; i < c512.size(); ++i) {
-			rgb[i * 4] = kCharmapLegend[c512[i]].r;
-			rgb[i * 4 + 1] = kCharmapLegend[c512[i]].g;
-			rgb[i * 4 + 2] = kCharmapLegend[c512[i]].b;
-			rgb[i * 4 + 3] = 255;
-		}
-		TEST_EXPECT(opennova::tga::tga_write_rgb24(rgb.data(), 512, 512, tga, why));
-		TEST_EXPECT(decode_terrain_surface("m.tga", tga, out, why) && same(out, c512));
-	}
-	// The sides: square, 256 to 1024, a power of two.
-	TEST_EXPECT(decode_terrain_surface("m.png", surface_colour_png(1024, surface_classes(1024)), out, why) && out.width == 1024);
-	for (const auto &[w, h] : std::vector<std::pair<int, int>>{{128, 128}, {384, 384}, {2048, 2048}, {512, 256}}) {
-		std::vector<uint8_t> rgba(size_t(w) * h * 4, 0);
-		TEST_EXPECT(!decode_terrain_surface("m.png", encode_png_rgba(rgba.data(), uint32_t(w), uint32_t(h)), out, why) &&
-		            why.find("256, 512 or 1024") != std::string::npos && out.empty());
-	}
-	// A colour of no class: refused, the first named by its column and row, and how many there are.
-	{
-		std::vector<uint8_t> classes = c256;
-		std::vector<uint8_t> png = surface_colour_png(256, classes);
-		RgbaImage image;
-		TEST_EXPECT(decode_png(png, image, why));
-		uint8_t *p = &image.pixels[(size_t(5) * 256 + 37) * 4];
-		p[0] = 0x12, p[1] = 0x34, p[2] = 0x56;
-		TEST_EXPECT(!decode_terrain_surface("m.png", encode_png_rgba(image.pixels.data(), 256, 256), out, why) && out.empty());
-		TEST_EXPECT(why.find("m.png's texel (37, 5) is #123456") != std::string::npos && why.find("texels in all") == std::string::npos);
-		// The legend's colour one step off is no class either: no nearest colour.
-		p = &image.pixels[(size_t(200) * 256 + 3) * 4];
-		p[0] = 154, p[1] = 118, p[2] = 61;
-		TEST_EXPECT(!decode_terrain_surface("m.png", encode_png_rgba(image.pixels.data(), 256, 256), out, why) &&
-		            why.find("(37, 5) is #123456 (2 texels in all)") != std::string::npos);
-	}
-	// An index past the classes: refused, by its place.
-	{
-		std::vector<uint8_t> classes = c256;
-		classes[size_t(2) * 256 + 3] = 20;
-		TEST_EXPECT(!decode_terrain_surface("m.png", surface_palette_png(256, classes), out, why) &&
-		            why.find("texel (3, 2) holds index 20") != std::string::npos && why.find("0 to 19") != std::string::npos);
-	}
-	// What the import writes of it: an 8-bit PCX of the map's side, the legend its palette, the classes
-	// its indices, as the runtime's reader reads it.
-	{
-		TEST_EXPECT(decode_terrain_surface("m.png", surface_colour_png(512, c512), out, why));
-		std::vector<uint8_t> bytes;
-		TEST_EXPECT(opennova::encode_pcx_indexed(out, bytes, why));
-		TEST_EXPECT(bytes[3] == 8 && bytes[65] == 1 && (bytes[66] | (bytes[67] << 8)) == 512 && bytes[bytes.size() - 769] == 0x0C);
-		IndexedImage8 back;
-		TEST_EXPECT(opennova::decode_pcx_indexed(bytes.data(), bytes.size(), back, why) && back.width == 512 && back.height == 512 &&
-		            same(back, c512) && legend_palette(back));
-		// The game's own 8-bit reader (the port of Texture_LoadPCXFromPFF8Bit, the char map's) reads each texel
-		// as its class's index: here its legend colour, every one distinct.
-		RgbaImage game;
-		TEST_EXPECT(opennova::decode_pcx_luminance_alpha(bytes.data(), bytes.size(), game, why) && game.width == 512 &&
-		            game.height == 512);
-		bool classes = game.pixels.size() == c512.size() * 4;
-		for (size_t i = 0; classes && i < c512.size(); ++i) {
-			const opennova::CharmapLegendColour &c = kCharmapLegend[c512[i]];
-			classes = game.pixels[i * 4] == c.r && game.pixels[i * 4 + 1] == c.g && game.pixels[i * 4 + 2] == c.b;
-		}
-		TEST_EXPECT(classes);
-	}
-	return 0;
-}
-
-// With --retail: a shipped char map read as the importer reads a surface map. JO:CA's are 512 x 512, 8-bit,
-// their palette the legend's first fifteen colours and white past them; their indices kept as they are.
-int test_retail_charmap() {
-	const std::string install = retail::install();
-	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (a shipped char map, Dvxi5_m.pcx)");
-	opennova::ResourceIndex index;
-	std::vector<uint8_t> bytes;
-	TEST_EXPECT(index.scan(install) && index.read_file("Dvxi5_m.pcx", bytes));
-	std::string why;
-	IndexedImage8 shipped, out;
-	TEST_EXPECT(opennova::decode_pcx_indexed(bytes.data(), bytes.size(), shipped, why) && shipped.width == 512 &&
-	            shipped.height == 512);
-	for (int i = 0; i < 256; ++i) {
-		const opennova::CharmapLegendColour &c = i < 15 ? opennova::kCharmapLegend[i] : opennova::kCharmapLegendRest;
-		TEST_EXPECT(shipped.palette[i][0] == c.r && shipped.palette[i][1] == c.g && shipped.palette[i][2] == c.b);
-	}
-	TEST_EXPECT(decode_terrain_surface("Dvxi5_m.pcx", bytes, out, why) && out.indices == shipped.indices);
 	return 0;
 }
 
@@ -845,8 +682,10 @@ int test_foliage_set_text() {
 	const std::vector<uint8_t> written = write_terrain_set(set);
 	const std::string text(written.begin(), written.end());
 	TEST_EXPECT(text.find("\r\nfoliagemap isle_foliage.png\r\n") != std::string::npos);
-	TEST_EXPECT(text.find("foliage\r\n  graphic shrub.3di\r\n  match 254 253\r\n  color_lower 0\r\n  color_upper 0\r\n"
-	                      "  attrib forceon shadow\r\nend\r\n") != std::string::npos);
+	// Each definition's block as the .trn writes it (formats/trn trn_foliage_block_text).
+	TEST_EXPECT(text.find(opennova::trn_foliage_block_text(shrub)) != std::string::npos &&
+	            text.find("foliage\r\n  graphic         shrub.3di\r\n  color_lower     0\r\n  color_upper     0\r\n"
+	                      "  match           254 253\r\n  attrib          shadow forceon\r\nend\r\n") != std::string::npos);
 	TerrainSet back;
 	std::string why;
 	TEST_EXPECT(parse_terrain_set(written, back, why) && back.foliagemap == "isle_foliage.png" && back.foliage.size() == 2);
@@ -907,60 +746,19 @@ int test_foliage_set_text() {
 	return 0;
 }
 
-// A foliage map read as the import reads it: an indexed image by its indices (its palette kept), a grey one by
-// its levels; refused holding colour (the texel named) or at a side the game does not sample whole; what it
-// grows by the definitions (codes no definition matches, definitions whose codes it lacks).
-int test_foliage_reads() {
+// What a foliage map grows by the definitions (codes no definition matches, definitions whose codes it lacks), the
+// map read by the engine's codec (runtime/terrain decode_foliage_map_source, its ctest terrain_map_source).
+int test_foliage_notes() {
 	const std::vector<uint8_t> c256 = foliage_codes(256);
 	IndexedImage8 out;
 	std::string why;
-	TEST_EXPECT(decode_terrain_foliage("f.png", foliage_palette_png(256, c256), out, why) && out.width == 256 &&
-	            out.height == 256 && out.indices == c256);
-	TEST_EXPECT(out.palette[253][0] == 253 && out.palette[253][1] == 2 && out.palette[253][2] == 126);
-	TEST_EXPECT(decode_terrain_foliage("f.png", foliage_grey_png(256, c256), out, why) && out.indices == c256 &&
-	            out.palette[77][0] == 77 && out.palette[77][2] == 77);
-	{
-		IndexedImage8 pcx;
-		pcx.width = pcx.height = 256;
-		pcx.indices = c256;
-		pcx.palette[254][0] = 150, pcx.palette[254][1] = 120, pcx.palette[254][2] = 60;
-		std::vector<uint8_t> bytes;
-		TEST_EXPECT(opennova::encode_pcx_indexed(pcx, bytes, why));
-		TEST_EXPECT(decode_terrain_foliage("f.pcx", bytes, out, why) && out.indices == c256 && out.palette[254][0] == 150);
-	}
-	// The sides the game samples whole: square, a power of two, at most 1024.
-	for (const int side : {64, 1024}) {
-		const std::vector<uint8_t> codes = foliage_codes(side);
-		TEST_EXPECT(decode_terrain_foliage("f.png", foliage_grey_png(side, codes), out, why) && out.width == side);
-	}
-	for (const auto &[w, h] : std::vector<std::pair<int, int>>{{384, 384}, {2048, 2048}, {512, 256}}) {
-		const std::vector<uint8_t> codes(size_t(w) * h, 1);
-		PngSpec spec;
-		spec.width = uint32_t(w);
-		spec.height = uint32_t(h);
-		spec.depth = 8;
-		spec.color_type = 0;
-		for (int y = 0; y < h; ++y) {
-			spec.rows.push_back(0);
-			spec.rows.insert(spec.rows.end(), codes.begin() + long(y) * w, codes.begin() + long(y + 1) * w);
-		}
-		TEST_EXPECT(!decode_terrain_foliage("f.png", make_png(spec), out, why) &&
-		            why.find("power of two at most 1024") != std::string::npos && out.empty());
-	}
-	// Colour: refused, by its place.
-	{
-		std::vector<uint8_t> rgba(size_t(64) * 64 * 4, 200);
-		rgba[(size_t(3) * 64 + 9) * 4] = 10;
-		TEST_EXPECT(!decode_terrain_foliage("f.png", encode_png_rgba(rgba.data(), 64, 64), out, why) &&
-		            why.find("texel (9, 3) is #0AC8C8") != std::string::npos);
-	}
-	// What it grows: 77 matched by none; a definition of codes the map lacks; 0 never listed.
+	// 77 matched by none; a definition of codes the map lacks; 0 never listed.
 	FoliageDef grass, ghost;
 	grass.graphic = "grass.3di";
 	grass.match[0] = 253;
 	ghost.graphic = "ghost.3di";
 	ghost.match[0] = 9;
-	TEST_EXPECT(decode_terrain_foliage("f.png", foliage_grey_png(256, c256), out, why));
+	TEST_EXPECT(opennova::terrain::decode_foliage_map_source("f.png", foliage_grey_png(256, c256), out, why));
 	const std::vector<std::string> notes = terrain_foliage_notes(out, {grass, ghost});
 	TEST_EXPECT(notes.size() == 2 && notes[0].find("codes 77, 254 (8192 texels) match no foliage definition") == 0 &&
 	            notes[1].find("foliage 2 (ghost.3di) matches no code") == 0);
@@ -1062,21 +860,18 @@ int test_new_terrain_foliage() {
 	return 0;
 }
 
-// With --retail: a shipped foliage map read as the importer reads one. JO:CA's are 256 x 256, 8-bit, their codes
-// 252 to 255 kept as they are, their palette kept; Dvxi5's definitions match 254 and 253, so its 255s grow
+// With --retail: what a shipped foliage map grows by its terrain's definitions (the map read by the engine's codec,
+// whose own retail leg is terrain_map_source_retail): Dvxi5's definitions match 254 and 253, so its 255s grow
 // nothing.
-int test_retail_foliage_map() {
+int test_retail_foliage_notes() {
 	const std::string install = retail::install();
 	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (a shipped foliage map, Dvxi5_f.pcx)");
 	opennova::ResourceIndex index;
 	std::vector<uint8_t> bytes, text;
 	TEST_EXPECT(index.scan(install) && index.read_file("Dvxi5_f.pcx", bytes) && index.read_file("Dvxi5.trn", text));
 	std::string why;
-	IndexedImage8 shipped, out;
-	TEST_EXPECT(opennova::decode_pcx_indexed(bytes.data(), bytes.size(), shipped, why) && shipped.width == 256 &&
-	            shipped.height == 256);
-	TEST_EXPECT(decode_terrain_foliage("Dvxi5_f.pcx", bytes, out, why) && out.indices == shipped.indices &&
-	            std::equal(&out.palette[0][0], &out.palette[0][0] + 768, &shipped.palette[0][0]));
+	IndexedImage8 out;
+	TEST_EXPECT(opennova::terrain::decode_foliage_map_source("Dvxi5_f.pcx", bytes, out, why));
 	opennova::TrnConfig trn;
 	std::istringstream in(std::string(text.begin(), text.end()));
 	TEST_EXPECT(opennova::load_trn(in, trn, why) && trn.foliagemap == "Dvxi5_f.pcx" && trn.foliage_defs.size() == 2);
@@ -1104,16 +899,14 @@ int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	int failures = 0;
 	failures += test_set_text();
-	failures += test_heightmap_depths();
-	failures += test_surface_reads();
-	failures += test_retail_charmap();
+	failures += test_surface_legend_words();
 	failures += test_blank_environment();
 	failures += test_new_terrain();
 	failures += test_new_terrain_surface();
 	failures += test_foliage_set_text();
-	failures += test_foliage_reads();
+	failures += test_foliage_notes();
 	failures += test_new_terrain_foliage();
-	failures += test_retail_foliage_map();
+	failures += test_retail_foliage_notes();
 	if (failures == 0) std::printf("editor_terrain_import: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }
