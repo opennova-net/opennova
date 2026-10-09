@@ -22,11 +22,6 @@ namespace {
 constexpr NodeKind kDialog = node_kind(DialogBankKind::Dialog);
 constexpr NodeKind kLine = node_kind(DialogBankKind::Line);
 
-// The bytes the format keeps a name in, its terminator among them: a dialog's 24 [orig: the 52-byte
-// record's name at +4, the strcmp of Dialog_PlayByName @ 0x44da8b], a line's wave 24 and its sequence 24
-// [orig: the 68-byte line's +4 and +28, Dialog_LoadAudioClip @ 0x44dcf7 / @ 0x44ddec].
-constexpr size_t kNameBytes = 24;
-
 const BankDialog &dialog_of(const RecordHandle &r) { return r.as<BankDialog>(); }
 const BankLine &line_of(const RecordHandle &r) { return r.as<BankLine>(); }
 
@@ -54,9 +49,9 @@ bool set_name(std::string &field, const char *what, const Value &value, std::str
 			error = std::string(what) + " is plain ASCII: the game compares it byte for byte.";
 			return false;
 		}
-	if (text->size() >= kNameBytes) {
-		error = std::string(what) + " holds at most " + std::to_string(kNameBytes - 1) + " characters: the file keeps " +
-		        std::to_string(kNameBytes) + " bytes for it, its terminator among them.";
+	if (text->size() >= dbf::kNameBytes) {
+		error = std::string(what) + " holds at most " + std::to_string(dbf::kNameBytes - 1) + " characters: the file keeps " +
+		        std::to_string(dbf::kNameBytes) + " bytes for it, its terminator among them.";
 		return false;
 	}
 	field = *text;
@@ -82,7 +77,7 @@ RecordTable make_table() {
 				"Dialog_PlayByName @ 0x44d9f0]. A mission's Play dialog action and its Dialog triggers name it by the "
 				"number that forms dlg%03i (dlg012 is dialog 12) [orig: Dialog_PlayByIndex @ 0x527ae0; "
 				"Dialog_ExistsByIndex @ 0x44e170], so a name no number forms is never played.");
-		name.width = kNameBytes;
+		name.width = dbf::kNameBytes;
 		name.defines = ReferenceKind::Dialog;
 		dialog.field(RF{name,
 		                {[](const RecordHandle &r, Value &out) { return out = dialog_of(r).name, true; },
@@ -110,7 +105,7 @@ RecordTable make_table() {
 				"@ 0x44dcf7..0x44dd15 -> SoundBank_FindEntryByName @ 0x75bba0]. A name the sounds lack shows \"EX "
 				"Cannot load audio\" in the chat and plays nothing. The mission text's [Mission Dialog] entry of this "
 				"name is the line's subtitle [orig: @ 0x44ddd6].");
-		wave.width = kNameBytes;
+		wave.width = dbf::kNameBytes;
 		wave.reference = ReferenceKind::BankWave;
 		line.field(RF{wave,
 		              {[](const RecordHandle &r, Value &out) { return out = line_of(r).wave, true; },
@@ -122,7 +117,7 @@ RecordTable make_table() {
 				"entry whose number follows the last '_' here, counting every entry of the table from 0 (_00003 the "
 				"fourth); none without a '_' (##) [orig: Dialog_LoadAudioClip @ 0x44ddec..0x44de3c; "
 				"IniSection_GetEntryByIndex @ 0x75d130].");
-		sequence.width = kNameBytes;
+		sequence.width = dbf::kNameBytes;
 		line.field(RF{sequence,
 		              {[](const RecordHandle &r, Value &out) { return out = line_of(r).sequence, true; },
 		               [](const RecordHandle &r, const Value &v, std::string &e) {
@@ -386,7 +381,7 @@ FindingTable dialog_bank_finding_codes() { return { kFindingRows.data(), kFindin
 // yet, so it plays nothing until one is given, as nothing plays for the name now.
 bool define_dialog(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out) {
 	const auto *bank = dynamic_cast<const DialogBankDocument *>(&document);
-	if (!bank || missing.kind != ReferenceKind::Dialog || missing.target.empty() || missing.target.size() >= kNameBytes)
+	if (!bank || missing.kind != ReferenceKind::Dialog || missing.target.empty() || missing.target.size() >= dbf::kNameBytes)
 		return false;
 	// The dialog goes in the bank its scope names alone.
 	const std::string file = basename_of(document.path());

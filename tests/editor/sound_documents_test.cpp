@@ -314,7 +314,6 @@ int test_profiles() {
 	add.operation = EditOperation::Add;
 	add.address = {0, kProfile, 0};
 	TEST_EXPECT(profiles.apply(add, error) && profiles.rows().back()->name() == "default");
-	TEST_EXPECT(sound_profile_slot_of("ssrfootgnd") == audio::kSlotFootRGround && sound_profile_slot_of("nope") == -1);
 	return 0;
 }
 
@@ -362,16 +361,12 @@ int test_preview_picks() {
 	TEST_EXPECT(random.found && random.voices.size() == 1 &&
 	            random.voices[0].file == "r" + std::to_string(expected + 1) + ".wav" && random.voices[0].pitch_q16 == 0x8000 &&
 	            random.voices[0].volume == 200);
-	// The footstep slots by surface, and a profile's slot through the chain.
-	TEST_EXPECT(footstep_slot_on(FootSurface::Ground, 0) == audio::kSlotFootLGround &&
-	            footstep_slot_on(FootSurface::Snow, 1) == audio::kSlotFootRSnow &&
-	            footstep_slot_on(FootSurface::Object, 0) == audio::kSlotFootLObject &&
-	            footstep_slot_on(FootSurface::Water, 1) == audio::kSlotFootWater);
+	// A profile's footstep slot through the chain (the slot by surface is audio::footstep_slot_on's).
 	audio::SoundProfileTable table;
 	table.parse("begin \"default\"\r\n\tSSLFootGND STEP 0 0 0\r\nend\r\n", 44);
-	const PreviewPlay footstep = plan_footstep_play(table.entries(), "SP_Unknown", FootSurface::Ground, 0, banks, "", selector);
+	const PreviewPlay footstep = plan_footstep_play(table.entries(), "SP_Unknown", audio::FootSurface::Ground, 0, banks, "", selector);
 	TEST_EXPECT(footstep.found && footstep.set == "STEP" && footstep.words.find("default's SSLFootGND") == 0);
-	const PreviewPlay empty = plan_footstep_play(table.entries(), "default", FootSurface::Snow, 0, banks, "", selector);
+	const PreviewPlay empty = plan_footstep_play(table.entries(), "default", audio::FootSurface::Snow, 0, banks, "", selector);
 	TEST_EXPECT(!empty.found && empty.words == "default's SSLFootSnow is empty: the game plays nothing.");
 	// An expansion's own bank comes first.
 	const std::vector<PreviewBank> expansion = preview_banks({
