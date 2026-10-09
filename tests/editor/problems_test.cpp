@@ -52,6 +52,7 @@
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
+using opennova::pff::normalized_logical_name;
 namespace fs = std::filesystem;
 
 namespace {
