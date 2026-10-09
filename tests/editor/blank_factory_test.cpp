@@ -13,7 +13,6 @@
 
 #include <editor/assets/asset_kinds.h>
 #include <editor/blank/blank_factory.h>
-#include <editor/preview/texture_header.h>
 #include <formats/dds/dds.h>
 #include <formats/def/def.h>
 #include <formats/fnt/fnt.h>
@@ -32,6 +31,7 @@
 #include <runtime/menu/menu_assets.h>
 #include <runtime/menu/menu_frame.h>
 #include <runtime/menu/menu_runtime.h>
+#include <runtime/menu/menu_texture_header.h>
 #include <runtime/renderer/material_texture.h>
 #include <runtime/wac/compiler.h>
 
@@ -82,10 +82,10 @@ static std::string lower(std::string text) {
 	return text;
 }
 
-static const opennova::mnu::Window *find_window(const opennova::mnu::Window &window, const std::string &name) {
+static const opennova::mnu::Window *window_named(const opennova::mnu::Window &window, const std::string &name) {
 	if (window.name == name) return &window;
 	for (const opennova::mnu::Window &child : window.children) {
-		if (const opennova::mnu::Window *found = find_window(child, name)) return found;
+		if (const opennova::mnu::Window *found = window_named(child, name)) return found;
 	}
 	return nullptr;
 }
@@ -189,10 +189,10 @@ static int test_startup_menu_compiles() {
 	TEST_EXPECT(startup != nullptr && startup->roots.size() == 1);
 	if (!startup || startup->roots.size() != 1) return 1;
 	const opennova::mnu::Window &main_window = startup->roots.front();
-	const opennova::mnu::Window *exit_button = find_window(main_window, "EXIT");
+	const opennova::mnu::Window *exit_button = window_named(main_window, "EXIT");
 	TEST_EXPECT(exit_button != nullptr && exit_button->type == opennova::mnu::WindowType::Button);
 	TEST_EXPECT(exit_button->actions.empty()); // bound by name, the shell's exit command
-	const opennova::mnu::Window *title = find_window(main_window, "TITLE");
+	const opennova::mnu::Window *title = window_named(main_window, "TITLE");
 	TEST_EXPECT(title != nullptr && title->string_data.value == "Blank & Co");
 
 	// The screen stands on the Required files alone: no text table of its own and no
@@ -345,33 +345,33 @@ static int test_mission_menus() {
 		TEST_EXPECT(main_window.cursor.file == blank_pointer_name() &&
 		            main_window.cursor.flags == "STANDARD_TRANSPARENT");
 		for (const LeaveControl &control : menu.controls) {
-			const opennova::mnu::Window *window = find_window(main_window, control.name);
+			const opennova::mnu::Window *window = window_named(main_window, control.name);
 			TEST_EXPECT(window != nullptr && window->type == control.type && !window->hidden);
 			if (window && control.hotkey[0]) TEST_EXPECT(has_hotkey(*window, control.hotkey));
 		}
-		const opennova::mnu::Window *confirm = find_window(main_window, "CONFIRM_EXIT");
+		const opennova::mnu::Window *confirm = window_named(main_window, "CONFIRM_EXIT");
 		TEST_EXPECT((confirm != nullptr) == menu.confirm_exit);
 		if (confirm) {
 			// Hidden until the leave button's actions raise it, the button hiding its own panel.
 			TEST_EXPECT(confirm->hidden);
-			const opennova::mnu::Window *yes = find_window(*confirm, "CONFIRM_YES");
-			const opennova::mnu::Window *no = find_window(*confirm, "CONFIRM_NO");
+			const opennova::mnu::Window *yes = window_named(*confirm, "CONFIRM_YES");
+			const opennova::mnu::Window *no = window_named(*confirm, "CONFIRM_NO");
 			TEST_EXPECT(yes && yes->type == WindowType::Button && has_hotkey(*yes, "VK_RETURN"));
 			TEST_EXPECT(no && no->type == WindowType::Button && has_hotkey(*no, "VK_ESCAPE"));
 			const char *leave = menu.screen == std::string("INGAME") ? "ABORT" : "HIDDEN_BACK";
-			const opennova::mnu::Window *button = find_window(main_window, leave);
+			const opennova::mnu::Window *button = window_named(main_window, leave);
 			const std::string wrapper = menu.controls.front().name;
 			TEST_EXPECT(button && has_action(*button, "SHOW", "CONFIRM_EXIT") && has_action(*button, "HIDE", wrapper.c_str()));
 			TEST_EXPECT(no && has_action(*no, "SHOW", wrapper.c_str()) && has_action(*no, "HIDE", "CONFIRM_EXIT"));
 		}
 		// The commander key closes the map it opened; Back pops its screen.
-		if (menu.screen == std::string("CMAP")) TEST_EXPECT(has_hotkey(*find_window(main_window, "OK"), "V"));
+		if (menu.screen == std::string("CMAP")) TEST_EXPECT(has_hotkey(*window_named(main_window, "OK"), "V"));
 		if (menu.screen == std::string("NW_MULTI_PLAYER")) {
-			const opennova::mnu::Window *back = find_window(main_window, "BACK");
+			const opennova::mnu::Window *back = window_named(main_window, "BACK");
 			TEST_EXPECT(back && back->actions.size() == 1 && back->actions[0].type == "POP_SCREEN");
 		}
 		// No ACCEPT where accepting would apply slots the screen does not hold.
-		TEST_EXPECT(find_window(main_window, "ACCEPT") == nullptr);
+		TEST_EXPECT(window_named(main_window, "ACCEPT") == nullptr);
 
 		std::vector<std::string> ids;
 		collect_string_ids(main_window, ids);
@@ -607,7 +607,7 @@ static int test_mission_start_files() {
 	                             Sized{"border_tga", "border.tga", 128, 128}}) {
 		const std::vector<uint8_t> bytes = make(texture.role, texture.name);
 		int width = 0, height = 0;
-		TEST_EXPECT(texture_header_size(opennova::menu::MenuTextureFormat::Tga, bytes, &width, &height) &&
+		TEST_EXPECT(opennova::menu::menu_texture_header_size(opennova::menu::MenuTextureFormat::Tga, bytes, &width, &height) &&
 		            width == texture.width && height == texture.height);
 		TEST_EXPECT(find_blank_factory_for_role(texture.role)->kind == AssetKind::Texture);
 	}
@@ -700,7 +700,7 @@ static int test_free_form_menu() {
 	TEST_EXPECT(main.cursor.file == blank_pointer_name() && main.cursor.flags == "STANDARD_TRANSPARENT");
 	TEST_EXPECT(main.position.has_left && main.position.left == 0 && main.position.has_top && main.position.top == 0);
 	TEST_EXPECT(main.position.width() == 800 && main.position.height() == 600);
-	TEST_EXPECT(find_window(main, "EXIT") == nullptr && find_window(main, "TITLE") == nullptr);
+	TEST_EXPECT(window_named(main, "EXIT") == nullptr && window_named(main, "TITLE") == nullptr);
 	TEST_EXPECT(text_of(bytes).find("Blank & Co") == std::string::npos);
 	request.logical_name = "Options2.mnu";
 	TEST_EXPECT(make_blank(request, AssetKind::Menu, bytes, error));
@@ -830,7 +830,7 @@ static int test_placeholder_texture() {
 		request.logical_name = name;
 		TEST_EXPECT(can_make_blank_texture(name, reason) && make_blank(request, AssetKind::Texture, bytes, error));
 		TEST_EXPECT(opennova::tga::tga_write_rgba32(pixels.data(), side, side, expected, reason) && bytes == expected);
-		TEST_EXPECT(texture_header_size(MenuTextureFormat::Tga, bytes, &width, &height) && width == 128 && height == 128);
+		TEST_EXPECT(opennova::menu::menu_texture_header_size(MenuTextureFormat::Tga, bytes, &width, &height) && width == 128 && height == 128);
 		// The block B, G, R, A from the bottom row up, turned upright as the game reads it.
 		for (size_t y = 0; y < side; ++y)
 			for (size_t x = 0; x < side; ++x) {
@@ -842,7 +842,7 @@ static int test_placeholder_texture() {
 	request.logical_name = "skin.dds";
 	TEST_EXPECT(make_blank(request, AssetKind::Texture, bytes, error));
 	TEST_EXPECT(opennova::dds::dds_write_a8r8g8b8(pixels.data(), side, side, expected, reason) && bytes == expected);
-	TEST_EXPECT(texture_header_size(MenuTextureFormat::Dds, bytes, &width, &height) && width == 128 && height == 128);
+	TEST_EXPECT(opennova::menu::menu_texture_header_size(MenuTextureFormat::Dds, bytes, &width, &height) && width == 128 && height == 128);
 	for (size_t i = 0; i < size_t(side) * side; ++i) {
 		const uint8_t *file = &bytes[opennova::dds::DDS_HEADER_SIZE + i * 4];
 		TEST_EXPECT(file[0] == pixels[i * 4 + 2] && file[1] == pixels[i * 4 + 1] && file[2] == pixels[i * 4] &&
@@ -853,7 +853,7 @@ static int test_placeholder_texture() {
 	opennova::RgbaImage decoded;
 	TEST_EXPECT(opennova::decode_pcx_menu_rgba(bytes.data(), bytes.size(), decoded, reason));
 	TEST_EXPECT(decoded.width == 128 && decoded.height == 128 && decoded.pixels == pixels);
-	TEST_EXPECT(texture_header_size(MenuTextureFormat::Pcx, bytes, &width, &height) && width == 128 && height == 128);
+	TEST_EXPECT(opennova::menu::menu_texture_header_size(MenuTextureFormat::Pcx, bytes, &width, &height) && width == 128 && height == 128);
 	// No placeholder for another kind of name (a .png, a chunk container, a name with no extension).
 	for (const char *name : {"skin.png", "skin", "chunk.aoc"}) {
 		request.logical_name = name;
