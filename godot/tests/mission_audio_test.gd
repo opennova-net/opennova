@@ -431,7 +431,7 @@ end
 	lwf.set_layer_field(si, li, "falloff_radius", 200)
 	var mi := lwf.add_member(si, li)
 	lwf.set_member_field(si, li, mi, "wav_path", "tone.wav")
-	assert_eq(lwf.save_file(fixture_dir.path_join("probe.LWF")), OK)
+	assert_eq(lwf.save_file(fixture_dir.path_join("game.LWF")), OK)
 
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(fixture_dir), OK)
@@ -499,7 +499,7 @@ end
 	lwf.create_empty()
 	_add_lwf_set(lwf, "BAD_AMB", "bad.wav", 2000)
 	_add_lwf_set(lwf, "GOOD_AMB", "good.wav", 2000)
-	assert_eq(lwf.save_file(fixture_dir.path_join("probe.LWF")), OK)
+	assert_eq(lwf.save_file(fixture_dir.path_join("game.LWF")), OK)
 
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(fixture_dir), OK)
@@ -607,6 +607,41 @@ func test_mission_reverb_does_not_install_an_unwitnessed_bus_effect() -> void:
 	audio.teardown()
 	assert_eq(_reverb_count(ambient_bus), 0,
 		"unloading the mission cannot leave its global bus effect in the menu/next world")
+	TestFs.remove_dir_recursive(fixture_dir)
+
+
+# A set is searched for in the six global slots alone [orig: SoundBank_FindSetByNameAnyBank
+# @ 0x5274f0 over g_SoundBanks @ 0x24D6168]: the mission's own <mission>.LWF is its dialog
+# bank's sounds and names no set its ambience or a script plays (D-SND-1 fixed).
+func test_the_mission_own_bank_is_not_searched_for_a_set() -> void:
+	var fixture_dir := OS.get_cache_dir().path_join(
+		"mission_audio_own_bank_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(fixture_dir)
+	TestFs.write_bytes(self, fixture_dir.path_join("tone.wav"),
+		FileAccess.get_file_as_bytes(
+			ProjectSettings.globalize_path("res://../fixtures/lwf/tone.wav")))
+	var own := LwfData.new()
+	own.create_empty()
+	_add_lwf_set(own, "OWN_ONLY", "tone.wav", 200)
+	_add_lwf_set(own, "SHARED", "tone.wav", 200)
+	assert_eq(own.save_file(fixture_dir.path_join("solo.LWF")), OK)
+	var global := LwfData.new()
+	global.create_empty()
+	_add_lwf_set(global, "SHARED", "tone.wav", 900)
+	assert_eq(global.save_file(fixture_dir.path_join("game.LWF")), OK)
+
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture_dir), OK)
+	var mission := MissionData.new()
+	mission.create_default()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var audio = MissionAudio.create(root, null)
+	var stats := audio.setup(mission, "solo.bms", container)
+	assert_eq(int(stats.banks_loaded), 1, "game.LWF is the one slot the root holds")
+	assert_false(audio.get_bank().has_set("OWN_ONLY"), "the mission's own bank is no slot")
+	assert_true(audio.get_bank().has_set("SHARED"), "game.LWF's set is found")
+	audio.teardown()
 	TestFs.remove_dir_recursive(fixture_dir)
 
 

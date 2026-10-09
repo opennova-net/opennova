@@ -75,11 +75,13 @@ static func stage_effects(root_dir: String) -> PackedStringArray:
 	return names
 
 
-## Author a sound bank in the root (`bank_name`, the mission's co-named .LWF)
-## whose sets all play the fixture tone at `falloff_radius`, so a real
-## MissionAudio fires them (the minimal pack's mnml.lwf is an empty stub).
+## Author a sound bank in the root (`bank_name`, a global slot the set search
+## walks: game.lwf by default) whose sets all play the fixture tone at
+## `falloff_radius`, so a real MissionAudio fires them. A mission's own .lwf is
+## its dialog bank's sounds, never searched for a set (the minimal pack's
+## mnml.lwf is that, an empty stub).
 static func stage_sound_bank(root_dir: String, set_names: PackedStringArray,
-		bank_name := "mnml.lwf", falloff_radius := 2000) -> void:
+		bank_name := "game.lwf", falloff_radius := 2000) -> void:
 	var tone := FileAccess.get_file_as_bytes(
 			ProjectSettings.globalize_path(LWF_FIXTURE_DIR).path_join("tone.wav"))
 	assert(not tone.is_empty(), "the LWF tone fixture is available")

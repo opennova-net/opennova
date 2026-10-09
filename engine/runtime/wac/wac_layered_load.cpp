@@ -21,12 +21,14 @@
 
 namespace opennova::wac {
 
-void load_script_sound_sets(const mission::BootFileSource &files,
-        const std::string &mission_basename, audio::SoundSetIndex &sounds) {
+void load_script_sound_sets(const mission::BootFileSource &files, audio::SoundSetIndex &sounds) {
     sounds.clear();
     if (!files.valid()) return;
-    std::vector<std::string> chain = audio::global_bank_chain(files.expansion_name);
-    if (!mission_basename.empty()) chain.insert(chain.begin(), mission_basename + ".lwf");
+    // The six global slots alone: a SOUNDSET literal binds in them [orig:
+    // SoundBank_FindSetByNameAnyBank @0x5274f0 over g_SoundBanks @0x24D6168];
+    // the mission's own <mission>.lwf is its dialog bank's sounds
+    // (docs/audio/lwf-dbf-sound-re.md, D-SND-1 fixed).
+    const std::vector<std::string> chain = audio::global_bank_chain(files.expansion_name);
     int bank_index = 0;
     for (const auto &name : chain) {
         std::vector<uint8_t> bytes;
@@ -126,7 +128,7 @@ WacLayeredLoadStatus wac_layered_load(WacSystem &system,
     }
     env.ammo = &ammo;
     audio::SoundSetIndex temporary_sounds;
-    if (!sound_catalog) load_script_sound_sets(files, mission_basename, temporary_sounds);
+    if (!sound_catalog) load_script_sound_sets(files, temporary_sounds);
     env.sounds = sound_catalog ? sound_catalog : &temporary_sounds;
     particle::EffectCatalogNames temporary_effects;
     if (!effect_catalog) load_script_effect_catalog(files, temporary_effects);

@@ -23,13 +23,13 @@ func test_script_sound_distance_and_target_paths_reach_audio_and_retry() -> void
 	var items := FileAccess.get_file_as_string(root_dir.path_join("items.def"))
 	WorldFixture.write_file(root_dir.path_join("items.def"), items +
 			"\nbegin \"Script Target\"\n id 106088\n type marker\nend\n")
-	WorldFixture.stage_sound_bank(root_dir, ["TONE"], "mnml.lwf", 200)
+	WorldFixture.stage_sound_bank(root_dir, ["TONE"], "game.lwf", 200)
 	var bank := LwfData.new()
-	assert_true(bank.load_bytes(FileAccess.get_file_as_bytes(root_dir.path_join("mnml.lwf"))))
+	assert_true(bank.load_bytes(FileAccess.get_file_as_bytes(root_dir.path_join("game.lwf"))))
 	bank.set_set_field(0, "target_id", 1) # positional fires cull beyond one unit
 	bank.set_member_field(0, 0, 0, "volume", 255)
 	bank.set_member_field(0, 0, 0, "clamp_volume", 255)
-	assert_eq(bank.save_file(root_dir.path_join("mnml.lwf")), OK)
+	assert_eq(bank.save_file(root_dir.path_join("game.lwf")), OK)
 	var world := WorldFixture.make_world(self)
 	var target_ids: Array[int] = []
 	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",

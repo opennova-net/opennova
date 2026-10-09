@@ -213,12 +213,14 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 	bank_->set_occlusion_provider(_simulation());
 	bank_->set_occlusion_override(occlusion_override_);
 	const String mission_base = p_mission_name.get_file().get_basename();
-	_load_bank(mission_base + String(".LWF"));
 	// The global slots in the engine's order -- expansion pair (when one is
 	// mounted) ahead of the statics [orig: slot table @ 0x82A5B0, walk
 	// @ 0x525443; expansion fill @ 0x4a4989 / @ 0x4a495e]. The witnessed table
 	// lives native (audio/bank_chain.h); missing files skip like retail's
-	// SoundBank_LoadIfExists (D-SND-2 closed).
+	// SoundBank_LoadIfExists (D-SND-2 closed). A set is searched for in these
+	// slots alone [orig: SoundBank_FindSetByNameAnyBank @ 0x5274f0 over
+	// g_SoundBanks @ 0x24D6168]: the mission's own <mission>.lwf is its dialog
+	// bank's sounds, loaded below (docs/audio/lwf-dbf-sound-re.md, D-SND-1 fixed).
 	const std::vector<std::string> global_chain = opennova::audio::global_bank_chain(
 			opennova::to_std(resource_root_->get_expansion()));
 	String global_chain_text;
@@ -278,13 +280,12 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 	// the two states that mean "no ambience will play" so they surface in logs.
 	if (stats_->get_banks_loaded() == 0) {
 		UtilityFunctions::push_warning(vformat(
-				"MissionAudio: no sound banks loaded (probed %s.LWF, %s) — mission ambience will be silent",
-				mission_base, global_chain_text));
+				"MissionAudio: no sound banks loaded (probed %s) — mission ambience will be silent",
+				global_chain_text));
 		// The log line the editor's Play reads back into a Problems row (ADR 0046 DI-27): game.lwf, the
 		// global chain's bank the game's own sets live in, which a project makes or imports to be heard.
 		ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kFile, "game.lwf", String(),
-				vformat("no sound bank loaded (probed %s.LWF, %s), so the mission is silent", mission_base,
-						global_chain_text));
+				vformat("no sound bank loaded (probed %s), so the mission is silent", global_chain_text));
 	} else if (stats_->get_markers_total() > 0 && stats_->get_markers_resolved() == 0) {
 		UtilityFunctions::push_warning(vformat(
 				"MissionAudio: 0/%d sound markers resolved (item db %s) — mission ambience will be silent",

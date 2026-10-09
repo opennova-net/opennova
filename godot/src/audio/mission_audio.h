@@ -45,8 +45,8 @@ class Simulation;
 // Runtime mission audio orchestrator (the former mission_audio.gd, ADR 0043
 // d9) -- and the mission's audio root: setup() parents this node under the
 // container, and the physical ambient channels, the one-shot voices, the
-// dialog voice and the WAC voice are its children. Loads the mission's
-// co-named .LWF + the global banks into a SoundBank, resolves each placed
+// dialog voice and the WAC voice are its children. Loads the global banks
+// into a SoundBank, resolves each placed
 // envs-class entity's time-of-day slot sets BY NAME (items.def soundloop_1..4
 // = morning/day/evening/night [orig: Entity_UpdateEnvSoundEmitter @ 0x4a8080];
 // the engine is name-keyed -- see docs/audio/lwf-dbf-sound-re.md), and
@@ -59,15 +59,15 @@ class Simulation;
 // runtime/audio/dialog_queue; the one-shot fires ride the sound bank's
 // oneshot_play plan.
 //
-// Bank chain vs the original: Game_StartMission walks six global name slots in
-// order [<exp>L.lwf, <exp>.lwf, gamelocl.lwf, game.lwf, game3.lwf, game2.lwf]
-// (name table @ 0x82A5B0, walk @ 0x525443; expansion slots filled by
-// Expansion_LoadAssets @ 0x4a495e), and the mission co-named .lwf is loaded
-// separately as the DIALOG bank (DialogManager_LoadFromFile @ 0x44e7d4, only
-// when the .dbf exists, with a .pwf fallback). We load one merged chain with
-// the co-named bank first (it carries the dialog voices) then the global
-// slots in the engine's order -- the slot table lives in engine/runtime/audio
-// (audio/bank_chain.h).
+// The bank chain is the original's: Game_StartMission walks six global name
+// slots in order [<exp>L.lwf, <exp>.lwf, gamelocl.lwf, game.lwf, game3.lwf,
+// game2.lwf] (name table @ 0x82A5B0, walk @ 0x525443; expansion slots filled
+// by Expansion_LoadAssets @ 0x4a495e), and a set name is searched for in
+// those slots alone (SoundBank_FindSetByNameAnyBank @ 0x5274f0). The mission
+// co-named .lwf is the DIALOG bank's sounds (DialogManager_LoadFromFile
+// @ 0x44e7d4, only when the .dbf exists, with a .pwf fallback), read into
+// dialog_sounds_ and never searched for a set. The slot table lives in
+// engine/runtime/audio (audio/bank_chain.h).
 class MissionAudio : public Node3D {
 	GDCLASS(MissionAudio, Node3D)
 
@@ -90,7 +90,7 @@ public:
 
 	// Load banks, describe ambient marker candidates, parent this node under
 	// `container`, and apply the reverb bed. `mission_name` is the .bms filename
-	// (its basename selects the co-named .LWF). Returns the setup Stats record.
+	// (its basename selects the dialog bank). Returns the setup Stats record.
 	Ref<MissionAudioStats> setup(const Ref<MissionData> &p_mission, const String &p_mission_name,
 			Node3D *p_container);
 	Ref<MissionAudioStats> get_stats() const { return stats_; }

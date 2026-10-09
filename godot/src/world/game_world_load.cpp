@@ -1122,8 +1122,8 @@ void GameWorld::load_player_weapon_profile() {
 	sim->use_player_profile(player_profiles_);
 }
 
-// Place real ambient sounds at the mission's sound markers: load the co-named
-// .LWF + gamelocl.LWF, resolve each marker to a sound set by name, and spawn
+// Place real ambient sounds at the mission's sound markers: load the global
+// banks, resolve each marker to a sound set by name, and spawn
 // looping 3D voices. Reuses the placer's item database for the item_id ->
 // soundloop_1..4 lookup.
 void GameWorld::start_mission_audio(const Ref<MissionData> &p_mission, const String &p_bms_name) {

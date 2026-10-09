@@ -659,7 +659,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// the boot (Simulation::compile_and_set_wac) binds the same names.
 	if (has_files) {
 		step("script_catalogs");
-		wac::load_script_sound_sets(files_, mission_basename, script_sound_catalog);
+		wac::load_script_sound_sets(files_, script_sound_catalog);
 		world.tables.sound_sets = &script_sound_catalog;
 		// The mission's dialog bank when it exists, <mission>.dbf or the one the
 		// header's slot names, and with it the bank's sounds, <bank>.lwf else
