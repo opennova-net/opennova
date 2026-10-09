@@ -31,12 +31,6 @@ struct EffectPlayOptions {
 // attached spawn's, and particle::descriptor_pose, a descriptor's, each in the preview's space.
 particle::EffectPose effect_play_pose();
 
-// A spawn's status as the game's receipt names it on the wire (godot/src/particle/effect_scene's
-// spawn_status_name: "spawned", "suppressed", "invalid_handle", ...), the one table the previews' bodies write; a
-// spawn refused while the scene's effects are off is "disabled" (particle::EffectSpawnStatus::Disabled, which the
-// receipt's table lacks).
-const char *effect_spawn_status_token(particle::EffectSpawnStatus status);
-
 // One effect played on the preview clock through the engine's own effect scene (ADR 0046 DI-14): the
 // scene opened over the effect's closure (particle::effect_closure), the effect spawned at tick 0 of
 // the clock as the game spawns it (effect_play_pose), stepped a game tick at a time as the clock runs
