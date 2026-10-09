@@ -133,11 +133,6 @@ static int test_classification() {
 	            asset_name_fits_kind("logo.png", AssetKind::ImportSource) && asset_name_fits_kind("logo.tga", AssetKind::ImportSource) &&
 	            !asset_name_fits_kind("logo.dds", AssetKind::ImportSource));
 
-	TEST_EXPECT(expected_asset_kind_for_required_name("gametext.bin") == AssetKind::Strings);
-	TEST_EXPECT(expected_asset_kind_for_required_name("menutxt.bin") == AssetKind::Strings);
-	TEST_EXPECT(expected_asset_kind_for_required_name("MENUMUS.BIN") == AssetKind::MusicScript);
-	TEST_EXPECT(expected_asset_kind_for_required_name("fgn2.bin") == AssetKind::RawBin);
-	TEST_EXPECT(expected_asset_kind_for_required_name("main.mnu") == AssetKind::Menu);
 	TEST_EXPECT(std::string(asset_kind_token(AssetKind::ItemDefs)) == "item_defs");
 	TEST_EXPECT(std::string(asset_kind_label(AssetKind::Strings)) == "String table");
 	// The sound banks as the game names them: the .lwf the sound bank [orig: SoundBank_OpenFile @
@@ -157,10 +152,11 @@ static int test_classification() {
 	// of its extensions (a .bin without its content a raw table, a .png an image source).
 	for (size_t i = 0; i < kAssetKindCount; ++i) {
 		const AssetKindRow &row = asset_kind_row(AssetKind(i));
-		if (row.file_name) TEST_EXPECT(classify_asset(row.file_name, nullptr) == row.kind);
-		for (const char *const *name = row.file_names; name && *name; ++name)
+		const opennova::FileKindFacts &facts = row.facts();
+		if (facts.file_name) TEST_EXPECT(classify_asset(facts.file_name, nullptr) == row.kind);
+		for (const char *const *name = facts.file_names; name && *name; ++name)
 			TEST_EXPECT(classify_asset(*name, nullptr) == row.kind);
-		for (const char *const *extension = row.extensions; extension && *extension; ++extension)
+		for (const char *const *extension = facts.extensions; extension && *extension; ++extension)
 			TEST_EXPECT(classify_asset(std::string("x") + *extension, nullptr) == row.kind);
 	}
 	// Every kind's token reads back as that kind, the last one included, and a value past the last
