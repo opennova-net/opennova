@@ -776,7 +776,8 @@ bool is_player_route(const WaypointRecord& record) {
 
 size_t player_route_stop_count(const WaypointRecord& record) {
     // [orig: NetPacket_WriteWorldStateLoad0x0F, the count capped at 128 @0x502efc], compared as signed
-    // ints: a count of 2^31 or more reads negative and walks no stop.
+    // ints: a count of 2^31 or more reads negative and walks no stop (the cap's `jle` @0x502f01, the
+    // walk's `test eax, eax` / `jle` @0x502f13..0x502f18).
     const int count = std::min<int>({static_cast<int>(record.marker_count),
                                      static_cast<int>(record.waypoint_numbers.size()),
                                      static_cast<int>(kPlayerRouteMaxStops)});

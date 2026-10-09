@@ -314,6 +314,16 @@ int main() {
 		TEST_EXPECT(marker.type == opennova::bms::ItemType::Marker && marker.id == 77 && marker.type_id == 1 &&
 		            marker.x == 0 && marker.attention == 30);
 	}
+	// A new entity never takes the player's SSN: past a largest of 9999 the next is 10001.
+	{
+		opennova::bms::File below_player;
+		make_default(below_player);
+		below_player.organics.push_back(new_entity(EntityKind::Organic, 100001, 9999));
+		sync_counts(below_player);
+		TEST_EXPECT(next_entity_ssn(below_player) == 10001);
+		const size_t at = add_entity(below_player, EntityKind::Item, 101291, placed);
+		TEST_EXPECT(below_player.items[at].id == 10001 && next_entity_ssn(below_player) == 10002);
+	}
 	// A blank mission: named, on its terrain and under its environment, the header values the shipped
 	// missions hold in common, no record of any pool; a name past its slot is refused, the file as it was.
 	{
