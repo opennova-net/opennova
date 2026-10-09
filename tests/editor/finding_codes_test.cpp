@@ -300,13 +300,14 @@ static int test_columns() {
 	// (A catalog's input the game ignores has none: a save keeps it as the file has it, the demo round's bug 3.)
 	TEST_EXPECT(fixed_by(FindingFix::Rewrite) ==
 	            Tokens({ "animation_map.ignored_input", "dialog_bank.ignored_input", "environment.ignored_input",
-	                     "menu.ignored_input", "mission.event_order", "mission.rewrite_differs", "script.line_ending",
+	                     "face_animation.ignored_input", "menu.ignored_input", "mission.event_order", "mission.rewrite_differs", "script.line_ending",
 	                     "shader.form", "sound_bank.ignored_input", "strings.regrouped", "style.line_ending",
 	                     "terrain.ignored_input" }));
 	const std::map<std::string, std::string> rewrites = {
 		{ "animation_map.ignored_input", "without the input the game ignores" },
 		{ "dialog_bank.ignored_input", "without the input the game ignores" },
 		{ "environment.ignored_input", "with each line as the game reads it" },
+		{ "face_animation.ignored_input", "without the input the game ignores" },
 		{ "menu.ignored_input", "without the input the game ignores" },
 		{ "sound_bank.ignored_input", "without the input the game ignores" },
 		{ "mission.event_order", "with each event's triggers and actions where the event stands" },
@@ -324,7 +325,8 @@ static int test_columns() {
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.blocks_save; }) ==
 	            Tokens({ "animation_map.invalid_input", "catalog.invalid_input", "catalog.unserializable",
 	                     "credits.invalid_input", "credits.unserializable", "dialog_bank.invalid_input", "document.unserializable",
-	                     "environment.invalid_input", "menu.invalid_input", "menu.unserializable", "mission.invalid_input",
+	                     "environment.invalid_input", "face_animation.invalid_input", "face_animation.unserializable",
+	                     "menu.invalid_input", "menu.unserializable", "mission.invalid_input",
 	                     "music_script.invalid_input", "music_script.unserializable", "sound_bank.invalid_input",
 	                     "sound_bank.unserializable", "sound_profiles.unserializable", "strings.invalid_input",
 	                     "terrain.invalid_input" }));
@@ -347,7 +349,9 @@ static int test_columns() {
 	                     "dialog_bank.name_repeated", "dialog_bank.name_unplayed", "dialog_bank.silent", "document.line_ends",
 	                     "environment.sky_height_default", "environment.terrain_key",
 	                     "expansion.file.unread", "export.cancelled",
-	                     "export.cleanup", "export.replaced",
+	                     "export.cleanup", "export.replaced", "face_animation.eye_texture_alone",
+	                     "face_animation.gesture_repeated", "face_animation.gesture_unplayed",
+	                     "face_animation.parameter_repeated", "face_animation.parameter_unmatched",
 	                     "mission.event_missing",
 	                     "mission.group_range", "model.frame_missing", "model.light_part", "model.register_missing",
 	                     "particle.duplicate_effect", "particle.unreadable",

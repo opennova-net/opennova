@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include <base/io/strutil.h>
+#include <formats/grm/grm.h>
 #include <formats/trn/trn.h>
 #include <runtime/menu/menu_assets.h>
 #include <runtime/renderer/material_texture.h>
@@ -180,6 +181,8 @@ TextureLoad texture_reference_load(std::string_view written, int32_t loader_arg,
 	// A sky map: its extension made PCX first, the archive loader then trying its .dds and the .pcx
 	// (kTextureArgPcx).
 	if (loader_arg & kTextureArgPcx) name = menu::replace_or_append_extension(name, "pcx");
+	// A face animation's texture: its path stripped and its extension made .TGA (kTextureArgFaceTga).
+	if (loader_arg & kTextureArgFaceTga) name = grm::texture_load_name(name, grm::kTextureExtension);
 	return texture_load(renderer::texture_role(role).loader, name, exists);
 }
 

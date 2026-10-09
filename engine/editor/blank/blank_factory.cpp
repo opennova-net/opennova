@@ -207,6 +207,9 @@ const BlankFactory k_factories[] = {
 	{ "", AssetKind::Particles, make_blank_particles, "a particle file with no effect yet", true },
 	{ "", AssetKind::Credits, make_blank_credits, "a credits roll of one line, the project's title", true },
 	{ "", AssetKind::AiProfile, make_blank_ai_profile, "an AI profile of no type yet, its grammar in a comment", true },
+	// Round S23 lane A: a face animation, which no file names (the game opens <model>.GRM for a person).
+	{ "", AssetKind::FaceAnimation, make_blank_face_animation,
+	  "a face of no texture, mesh or gesture yet, its eyes where the game puts them with none", true },
 };
 
 const size_t k_factory_count = sizeof(k_factories) / sizeof(k_factories[0]);

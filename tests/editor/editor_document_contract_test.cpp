@@ -104,6 +104,7 @@
 #include <editor/documents/model_document.h>
 #include <editor/documents/project_check.h>
 #include <editor/documents/dialog_bank_document.h>
+#include <editor/documents/face_animation_document.h>
 #include <editor/documents/sound_bank_document.h>
 #include <editor/documents/sound_profile_document.h>
 #include <editor/documents/strings_document.h>
@@ -190,6 +191,7 @@ const RowObject kRowObjects[] = {
         {&typeid(TerrainRow), sizeof(TerrainRow)},
         {&typeid(SoundBankRow), sizeof(SoundBankRow)}, {&typeid(SoundProfileRow), sizeof(SoundProfileRow)},
         {&typeid(DialogBankRow), sizeof(DialogBankRow)},
+        {&typeid(FaceAnimationRow), sizeof(FaceAnimationRow)},
 };
 // The document types whose rows keep their text in fixed-length records (a model's 3DI records, a
 // clip's bone table, a def catalog's records, a mission's header and entity slots): a longer text
@@ -381,6 +383,8 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::CharAttrDefs, "charattr.def",
 	         text_bytes("[CHARACTER1]\r\nSTEALTH = 25\r\nJUNGLE_CAMMO = 5310\r\nDESERT_CAMMO = 5310\r\n"
 	                    "ARCTIC_CAMMO = 5310\r\nATTRIBUTES = AutoScope\r\n")},
+	        // The face animation (round S23 lane A): the authored face, four vertices, two triangles, three gestures.
+	        {AssetKind::FaceAnimation, "person.grm", file("grm/person.grm")},
 	};
 }
 
@@ -536,6 +540,8 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        {AssetKind::CharAttrDefs, "charattr.def",
 	         text_bytes("[CHARACTER1]\r\nJUNGLE_CAMMO = 5310\r\nDESERT_CAMMO = 5310\r\nARCTIC_CAMMO = 5310\r\n"
 	                    "ATTRIBUTES = Medick\r\n[CHARACTER3]\r\nATTRIBUTES = Medic\r\n")},
+	        // A face animation of a gesture no expression is named (face_animation.gesture_unplayed).
+	        {AssetKind::FaceAnimation, "blink.grm", text_bytes("basetexture face.tga\r\ngestures 1\r\ngesture 0 BLINK\r\n")},
 	};
 }
 

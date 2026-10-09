@@ -183,6 +183,8 @@ constexpr DocumentViewRow kViews[] = {
 	{DocumentTypeId::DialogBank, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_dialog_bank_inspector},
 	// The character attributes' text in the script device (DI-09's charattr follow-up).
 	{DocumentTypeId::CharAttrs, DocumentViewRole::MainViewport, nullptr, make_script_view},
+	// A face animation's face as a tree: its vertices, triangles and gestures, each gesture its parameters (S23 A).
+	{DocumentTypeId::FaceAnimation, DocumentViewRole::Records, &kTreeOutline, nullptr},
 };
 
 // One view per DocumentTypeId past None, in its order, each an outline or a view its make makes.

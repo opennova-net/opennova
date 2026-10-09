@@ -124,6 +124,8 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::HudPosDefs, "hudpos.def", text_bytes("// soldier panel\r\nHUDHEALTH 25,741,177,751\r\n")},
 	        // The character attributes (DI-09's charattr follow-up): its text in the script view.
 	        {AssetKind::CharAttrDefs, "charattr.def", text_bytes("// classes\r\n[CHARACTER1]\r\nJUNGLE_CAMMO = 5310\r\n")},
+	        // A face animation (round S23 lane A): its face, vertices, triangles and gestures a tree.
+	        {AssetKind::FaceAnimation, "person.grm", file("grm/person.grm")},
 	        // A texture (S18): a TGA our writer mints, its picture the tab's main view beside its facts.
 	        {AssetKind::Texture, "brick.tga", minted_tga()},
 	        // The sound lane: the minted bank, its sets and waves a tree with a Play heading the Inspector, and a

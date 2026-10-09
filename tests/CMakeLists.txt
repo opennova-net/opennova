@@ -5539,6 +5539,14 @@ target_link_libraries(editor_dialog_bank_test PRIVATE opennova_editor)
 target_include_directories(editor_dialog_bank_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_dialog_bank COMMAND editor_dialog_bank_test)
 
+# Face animations (ADR 0046, round S23 lane A): a .grm as a document over the engine's reader and writer, its
+# triangles' corners following their vertices, its findings, its references and its blank; a SKIP-LEG without
+# OPENNOVA_JO_DIR (the install's archives scanned for .grm files: JO ships none).
+add_executable(editor_face_animation_test editor/face_animation_document_test.cpp)
+target_link_libraries(editor_face_animation_test PRIVATE opennova_editor)
+target_include_directories(editor_face_animation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_face_animation COMMAND editor_face_animation_test)
+
 add_executable(editor_strings_test editor/strings_document_test.cpp)
 target_link_libraries(editor_strings_test PRIVATE opennova_editor)
 target_include_directories(editor_strings_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

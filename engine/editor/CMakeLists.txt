@@ -94,6 +94,8 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_profile_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/charattr_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/dialog_bank_document.cpp
+    # round S23 lane A: the binary formats
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/face_animation_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/wave_check.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/hud_layout_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/line_ends.cpp

@@ -406,9 +406,8 @@ std::vector<std::string> marked_lines(const FilePage &page) {
 	return out;
 }
 
-// DI-17, a Go to always lands: a file the editor has no editor for lands on its page, the record it names
-// marked (a face animation's base texture, from the texture it names), a place of its own with its mark (another line
-// of the same page a step, Back and Forward marking each again); a wave's page, whose user is a sound bank,
+// DI-17, a Go to always lands: a face animation (a record document since round S23) at its face's field, from the
+// texture it names; a wave's page, whose user is a sound bank,
 // a document of its own (S22: the specific document wins), there opened at the single; a native text held as
 // a text (DI-06: an avatar table, whose parser keeps no places) at the line that writes the record's name (of
 // two records naming one model each its own line, a record named alone its first, the text already open),
@@ -432,39 +431,26 @@ int test_go_to_lands() {
 	editor_test::handle_to_end(n.session, request::rescan());
 	const std::string bank = "sounds/menu.lwf", wave = "sounds/tone.wav", face = "faces/head.grm";
 
-	// The face animation's page, from the texture it names as its base: that line marked, the page's tab forward.
+	// The face animation, a record document since round S23, from the texture it names as its base: the face opened,
+	// its row selected at the base texture's field, a step from where the person was.
 	ReferenceTarget base;
 	for (const FilePageLine &line : file_page(v, "textures/map.tga").used_by)
 		if (line.target.file == face) base = line.target;
-	TEST_EXPECT(base.locator.empty() && base.field == "basetexture" && !base.editable);
-	uint64_t seq = v.events.next_seq() - 1;
-	TEST_EXPECT(n.go(request::open_document(base.file, base.locator, base.field)) && v.documents.page == face &&
-	            v.documents.page_locator.empty() && v.documents.page_field == "basetexture");
-	std::vector<ViewEvent> shown = editor_test::events_after(v, seq, ViewEventKind::ShowDocument);
-	TEST_EXPECT(shown.size() == 1 && shown[0].path == face && shown[0].flag);
-	TEST_EXPECT(v.activity.status.find("at basetexture") != std::string::npos);
-	const FilePage face_page = shown_file_page(v, face);
-	const std::vector<std::string> marked = marked_lines(face_page);
-	TEST_EXPECT(marked.size() == 1 && marked[0].rfind("basetexture: ", 0) == 0 &&
-	            marked[0].find("map.tga") != std::string::npos);
+	TEST_EXPECT(!base.locator.empty() && base.field == "base_texture" && base.editable);
+	TEST_EXPECT(n.go(request::open_document(base.file, base.locator, base.field)) && v.documents.active == face &&
+	            n.showing(face, base.locator.c_str()));
 	TEST_EXPECT(v.navigation.back.front().pane == Pane::Document && v.navigation.back.front().path == n.extra);
-	// Its missing normal-map twin (map.MDT, a name its loader makes): no file to go to (its finding in Problems
-	// holds the fixes); the page alone marks nothing.
+	// Its missing normal-map twin (map.MDT, a name its loader makes): no file to go to (its finding in Problems holds
+	// the fixes); the face's page lists it, marking nothing.
 	size_t missing = 0;
-	for (const FilePageLine &line : face_page.names)
+	for (const FilePageLine &line : file_page(v, face).names)
 		if (line.missing) missing += line.target.file.empty() && line.name == "map.MDT" ? 1 : 100;
 	TEST_EXPECT(missing == 1);
 	TEST_EXPECT(marked_lines(file_page(v, face)).empty());
-
-	// Another line of the same page: a step of its own, the place left the page at the base texture.
-	TEST_EXPECT(n.go(request::open_document(face, "", "eyetexture")) && v.documents.page_field == "eyetexture");
-	TEST_EXPECT(v.navigation.back.front().pane == Pane::Page && v.navigation.back.front().path == face &&
-	            v.navigation.back.front().locator.empty() && v.navigation.back.front().field == "basetexture" &&
-	            v.navigation.back.front().label == "About head.grm: basetexture");
-	TEST_EXPECT(n.back() && v.documents.page == face && v.documents.page_field == "basetexture" &&
-	            marked_lines(shown_file_page(v, face)) == marked);
 	TEST_EXPECT(n.back() && v.documents.active == n.extra);
-	TEST_EXPECT(n.forward(2) && v.documents.page == face && v.documents.page_field == "eyetexture");
+	TEST_EXPECT(n.forward() && v.documents.active == face);
+	uint64_t seq = 0;
+	std::vector<ViewEvent> shown;
 
 	// A wave's page, its Play; its user, the bank, is a document of its own: opened at the single.
 	TEST_EXPECT(n.go(request::open_document(wave)) && v.documents.page == wave && v.documents.page_locator.empty());
@@ -523,17 +509,15 @@ int test_go_to_lands() {
 	TEST_EXPECT(n.go(request::open_document(gametext)) && v.documents.active == gametext &&
 	            v.navigation.back.front().path == avatars);
 
-	// The wire: the page showing with its mark, what it names going where, the wave's Play.
-	TEST_EXPECT(n.go(request::open_document(face, "", "basetexture")));
+	// The wire: a file's page asked by its path, what it names going where (the face's base texture), the wave's Play.
 	std::string error;
-	JsonValue page = n.session.query("file_page", JsonValue(), error);
-	TEST_EXPECT(page.get_string("path", "") == face && !page.get("at_locator") &&
-	            page.get_string("at_field", "") == "basetexture" && page.get("defines") && !page.get("wave"));
-	bool at_map = false;
+	JsonValue page = n.session.query("file_page", parsed(R"({"path": "faces/head.grm"})"), error);
+	TEST_EXPECT(page.get_string("path", "") == face && !page.get("at_locator") && !page.get("at_field") && !page.get("wave"));
+	bool to_map = false;
 	if (const JsonValue *names = page.get("names"))
 		for (const JsonValue &line : names->array)
-			at_map |= line.get_bool("at", false) && line.get_string("file", "") == "textures/map.tga";
-	TEST_EXPECT(at_map);
+			to_map |= line.get_string("file", "") == "textures/map.tga";
+	TEST_EXPECT(to_map);
 	page = n.session.query("file_page", parsed(R"({"path": "sounds/tone.wav"})"), error);
 	bool to_bank = false;
 	if (const JsonValue *users = page.get("used_by"))
@@ -542,8 +526,9 @@ int test_go_to_lands() {
 	TEST_EXPECT(page.get_bool("wave", false) && to_bank && !page.get("at_field"));
 	const JsonValue state = n.session.query("state", parsed(R"({"sections": ["documents", "navigation"]})"), error);
 	const JsonValue *documents = state.get("documents");
-	TEST_EXPECT(documents && documents->get_string("page", "") == face && !documents->get("page_locator") &&
-	            documents->get_string("page_field", "") == "basetexture");
+	// The page last shown, the wave's, at no line.
+	TEST_EXPECT(documents && documents->get_string("page", "") == wave && !documents->get("page_locator") &&
+	            documents->get_string("page_field", "").empty());
 	return 0;
 }
 

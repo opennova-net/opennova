@@ -31,7 +31,6 @@
 #include <editor/project/project_files.h>
 #include <formats/avatars/avatars.h>
 #include <formats/def/def.h>
-#include <formats/grm/grm.h>
 #include <formats/particle/parser.h>
 #include <runtime/hud/hud_layout_from_hudpos.h>
 #include <runtime/renderer/particle_atlas.h>
@@ -338,32 +337,6 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 	return true;
 }
 
-// A face animation (.grm, ADR 0046 S18): its base texture, the base's .MDT twin and its two eye textures,
-// each by STAGE under the file the game opens for its name (formats/grm texture_load_name: its path stripped,
-// its extension from the last '.' made .TGA, the twin's .MDT) [orig: Shadow_DecalLoadTextures @ 0x588040]. A
-// name the file writes so is a site a rename rewrites; one the loader derives (another extension, the twin) is
-// not.
-bool extract_face_animation(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
-	grm::File file;
-	std::string message;
-	if (!grm::parse(bytes.data(), bytes.size(), file, message)) {
-		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, message, name);
-		return false;
-	}
-	const auto texture = [&](const std::string &record, const char *field, const std::string &written, const char *extension) {
-		if (written.empty()) return;
-		const std::string opened = grm::texture_load_name(written, extension);
-		const bool as_written = strutil::iequals(opened, written);
-		out.edges.push_back(texture_edge(name, record, field, as_written ? written : opened, renderer::TextureRoleId::FaceTexture, 0,
-		                                 as_written));
-	};
-	texture(std::string(), "basetexture", file.base_texture, grm::kTextureExtension);
-	texture(std::string(), "basetexture.mdt", file.base_texture, grm::kTextureTwinExtension);
-	texture("eye 1", "eyetexture", file.eye_textures[0], grm::kTextureExtension);
-	texture("eye 2", "eyetexture", file.eye_textures[1], grm::kTextureExtension);
-	return true;
-}
-
 // The kinds the graph reads through the engine's own parser, not a document type.
 using NativeExtractor = bool (*)(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out,
                                  Diagnostic &error);
@@ -375,7 +348,6 @@ constexpr NativeKind kNativeKinds[] = {
 	{AssetKind::HudPosDefs, extract_hudpos},
 	{AssetKind::AvatarDefs, extract_avatars},
 	{AssetKind::Particles, extract_particles},
-	{AssetKind::FaceAnimation, extract_face_animation},
 };
 
 NativeExtractor native_extractor(AssetKind kind) {

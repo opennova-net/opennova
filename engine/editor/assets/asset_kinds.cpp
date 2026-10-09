@@ -73,10 +73,12 @@ constexpr AssetKindRow kRows[] = {
 	        .new_name("newmap.adm")
 	        .about("An animation map: which clip a soldier or a vehicle plays for each move.")
 	        .row,
-	// Its base and eye textures by name (formats/grm).
+	// Its base and eye textures by name (documents/face_animation_document: each a field's reference).
 	Kind(AssetKind::FaceAnimation, "face_animation", "Face animation")
+	        .edited_by(DocumentTypeId::FaceAnimation)
 	        .names_files()
 	        .folder("anims")
+	        .new_name("newface.grm")
 	        .about("A face's animation, with the base and eye textures it names.")
 	        .row,
 	Kind(AssetKind::AiProfile, "ai_profile", "AI profile")

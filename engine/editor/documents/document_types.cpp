@@ -10,6 +10,7 @@
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/dialog_bank_document.h>
 #include <editor/documents/environment_document.h>
+#include <editor/documents/face_animation_document.h>
 #include <editor/documents/hud_layout_type.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_labels.h>
@@ -57,6 +58,7 @@ std::unique_ptr<DocumentBase> make_sound_profiles() { return std::make_unique<So
 std::unique_ptr<DocumentBase> make_environment() { return std::make_unique<EnvironmentDocument>(); }
 std::unique_ptr<DocumentBase> make_terrain() { return std::make_unique<TerrainDocument>(); }
 std::unique_ptr<DocumentBase> make_dialog_bank() { return std::make_unique<DialogBankDocument>(); }
+std::unique_ptr<DocumentBase> make_face_animation() { return std::make_unique<FaceAnimationDocument>(); }
 
 constexpr DocumentType kTypes[] = {
 	// The catalogs: a weapon, an ammo, a mounted gun by the names the player sees (the plain-words lane).
@@ -105,8 +107,9 @@ constexpr DocumentType kTypes[] = {
 			shader_definitions },
 	{ DocumentTypeId::Text, "text", make_text_document, validate_text_file, text_fields,
 			text_finding_codes },
-	// The texture (S18): its texels as the game reads them, read only for now; no findings yet (what
-	// the game makes of a texture is its role's), its content on the wire.
+	// The texture (S18): its texels as the game reads them, edited by the whole-image operations
+	// (documents/texture_operations), its findings what the game's reader makes of its file (a PCX's short
+	// rows, a DDS's sides), its content on the wire.
 	{ DocumentTypeId::Texture, "texture", make_texture_document, validate_texture_file, texture_fields,
 			texture_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
 			texture_content_json },
@@ -150,6 +153,11 @@ constexpr DocumentType kTypes[] = {
 	{ DocumentTypeId::CharAttrs, "charattr", make_charattr_document, validate_charattr_file, text_fields,
 			charattr_finding_codes, nullptr, charattr_references, nullptr, nullptr, nullptr, nullptr, nullptr,
 			nullptr, nullptr, nullptr, nullptr, charattr_idle_lines },
+	// The face animation (round S23 lane A): a .grm's face over grm::File, its references its texture fields' (each
+	// name made .TGA by the stage loader) and the base's .MDT twin; a triangle names its vertices by index.
+	{ DocumentTypeId::FaceAnimation, "face_animation", make_face_animation, validate_face_animation_file,
+			FaceAnimationDocument::schema, face_animation_finding_codes, nullptr, nullptr, nullptr,
+			face_animation_references },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its
