@@ -334,7 +334,7 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 	if (expansion.on_base_project()) {
 		Diagnostic why;
 		if (!base_project_game_dir(dir, expansion, target_game, install_root, why)) return refused(why);
-		if (!base_game_exported(install_root)) install_root.clear();
+		if (!vfs_has_boot_archive(install_root)) install_root.clear();
 	}
 	if (!install_root.empty() && !expansion.standalone()) {
 		std::vector<Diagnostic> install;
@@ -763,7 +763,7 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 		if (on_base) {
 			if (!base_project_game_dir(paths_.root, expansion, project.target_game, install_after, base_refusal))
 				install_after.clear();
-			else if (!base_game_exported(install_after))
+			else if (!vfs_has_boot_archive(install_after))
 				install_after.clear();
 		}
 		if (!install_after.empty())
@@ -1442,7 +1442,7 @@ RequirementReport SessionCore::requirements_of(const ProjectDocument &doc, const
 	std::string dir;
 	Diagnostic why;
 	const bool resolved = base_project_game_dir(paths_.root, doc.expansion, doc.target_game, dir, why);
-	const bool exported = resolved && base_game_exported(dir);
+	const bool exported = resolved && vfs_has_boot_archive(dir);
 	RequirementReport report =
 	        evaluate_requirements(doc, scan, exported ? &install_expansion_names_ : nullptr, &view_.project.base_files);
 	if (!resolved) {
@@ -1471,7 +1471,7 @@ bool SessionCore::rename_expansion_files(const std::string &from, const std::str
 	std::vector<Move> moves;
 	std::vector<Diagnostic> refusals;
 	for (const ExpansionFile &file : expansion_files(from)) {
-		if (file.row->fixed) continue;
+		if (file.row->fixed()) continue;
 		const AssetEntry *held = view_.project.scan->find(file.name);
 		if (!held) continue;
 		const std::string name = expansion_file_name(*file.row, to);
