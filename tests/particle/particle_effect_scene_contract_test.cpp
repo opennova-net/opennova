@@ -423,6 +423,28 @@ bool capacity_rejection_contract() {
 			"emitter rejection allocates no partial group and is counted");
 }
 
+// A receipt's status in words (spawn_status_name): every status named, a spawn refused while the
+// scene's spawning is off "disabled", and a value outside the enum "unknown".
+bool spawn_status_name_contract() {
+	p::EffectScene scene;
+	scene.open(one_effect());
+	const auto effect = scene.intern("flash");
+	scene.set_spawn_enabled(false);
+	const auto refused = scene.spawn(spawn_request(effect));
+	if (!check(refused.status == p::EffectSpawnStatus::Disabled &&
+			std::string(p::spawn_status_name(refused.status)) == "disabled",
+			"a spawn with spawning off is disabled")) return false;
+	const char *const names[] = {"spawned", "suppressed", "invalid_handle", "empty_effect",
+			"missing_slot", "missing_owner", "group_capacity_reached",
+			"emitter_capacity_reached", "disabled"};
+	for (std::size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+		if (!check(std::string(p::spawn_status_name(static_cast<p::EffectSpawnStatus>(i))) ==
+				names[i], "each status has its name")) return false;
+	}
+	return check(std::string(p::spawn_status_name(static_cast<p::EffectSpawnStatus>(9))) ==
+			"unknown", "a value outside the enum is unknown");
+}
+
 bool lightweight_debug_contract() {
 	p::EffectScene scene;
 	auto config = one_effect();
@@ -958,6 +980,7 @@ int main() {
 	if (!live_group_parameters_contract()) return 1;
 	if (!fixed_age_and_order_contract()) return 1;
 	if (!capacity_rejection_contract()) return 1;
+	if (!spawn_status_name_contract()) return 1;
 	if (!lightweight_debug_contract()) return 1;
 	if (!deferred_snapshot_contract()) return 1;
 	if (!initial_age_is_bounded_contract()) return 1;
