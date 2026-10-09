@@ -68,6 +68,13 @@ enum class ThrowClass : uint8_t {
 
 ThrowClass throw_class_from_tag(const char *tag);
 
+// The motor class of the physics row a move_function binds
+// (physics_class_table.h): the stng/hlfr/jvln/nade/schl/clym rows. Every other
+// row binds none, and so does a name the table lacks: vmne and lndm are event
+// rows only, so a move_function naming them binds the null row.
+// [orig: EntityDef_LookupPhysicsCallback @0x4a9240 over @0x82abc8]
+ThrowClass throw_motor_from_move_function(const char *move_function);
+
 // Select the TrcrID item for a viewer. Retail uses the foe item only when the
 // teams differ AND a foe id is authored; otherwise it falls back to friendly
 // [orig: RoundData_SpawnRound @ 0x4ec787..0x4ec79d].

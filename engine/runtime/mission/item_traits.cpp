@@ -19,6 +19,7 @@
 #include <unordered_map>
 
 #include <runtime/world/ai.h>
+#include <runtime/world/physics_class_table.h>
 #include <runtime/world/player_spawn.h>
 
 #include <string>
@@ -93,11 +94,9 @@ const DefItemDef *find_item(
     return it == by_id.end() ? nullptr : it->second;
 }
 
-// The case-folded fourcc prefix of an items.def class tag: the retail
-// callback table keys 4-byte tags and items.def authors longer tokens onto
-// them (`cbike`, `ctank`, `catv`, mixed-case `CHel`) — whole-string matching
-// sent the shipped Motorcycle down the Ground motor. Same rule as replication's
-// motion_family_from_tag; the two classifiers must agree (ADR 0026 §4).
+// The case-folded fourcc prefix of an items.def ai_function/render_function
+// tag. (The move_function's physics row is world/physics_class_table.h's
+// whole-name lookup.)
 std::string fourcc_prefix(const char *tag) {
     std::string out;
     for (int i = 0; i < 4 && tag[i] != '\0'; ++i)
@@ -179,6 +178,12 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 static_cast<int>(e->item_id) + mission::kItemIdOffset;
         const DefItemDef *def = find_item(by_id, def_id);
         e->has_item_def = def != nullptr;
+        // The physics row the def's move_function binds, by whole name (an
+        // unresolved def reads the null row).
+        // [orig: EntityDef_LookupPhysicsCallback @0x4a9240]
+        const world::PhysicsClass move_row = def != nullptr
+                ? world::physics_class_from_move_function(def->move_function)
+                : world::PhysicsClass::Null;
         // The resolved row's load-order ordinal, 0 when no row matches (the
         // "Null" row is ordinal 0 too): each `begin` appends the next row.
         // [orig: entity+0x1C = ItemList_FindIndexByTypeId(type) @0x40EBFC; the
@@ -221,7 +226,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 				e->kind != world::EntityKind::Marker;
 		// The physics callback table's ewep row selects the gun update.
 		// [orig: g_EntityClassPhysicsTable row @0x82ABE0 -> Entity_UpdateTransformAndTurret @0x440CA0]
-		e->emplaced_update = def != nullptr && strutil::iequals(def->move_function, "ewep");
+		e->emplaced_update = move_row == world::PhysicsClass::Ewep;
 		// The render tag picks the def+0x144 CTRL callback; the ewep row's
 		// publishes the gun words (world/mount_controls.h).
 		// [orig: EntityDef_InitAllCallbacks @0x4A5AEA..0x4A5B03 ->
@@ -331,8 +336,8 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             e->destroy_timer_initialized = true;
             // The move-function row selects only the update callback, the
             // squib motor [orig: the "squib" row @0x82AC88 of the 12-byte move
-            // table @0x82AC40 -> Entity_ProcessProjectileTravel @0x448D50].
-            if (strutil::iequals(def->move_function, "squib")) e->squib.motor = true;
+            // table @0x82abc8 -> Entity_ProcessProjectileTravel @0x448D50].
+            if (move_row == world::PhysicsClass::Squib) e->squib.motor = true;
             // The +0x160/+0x26C/+0x2B0/+0x2C8 init is the ai_function class
             // row's second slot, run through def+0x148 whatever the move
             // function [orig: sub_448CE0 @0x448CE0, row @0x813120 +12;
@@ -347,9 +352,9 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                             std::max(0, int(weapon->ammo_index));
                 }
             }
-            if (strutil::iequals(def->move_function, "upfx"))
+            if (move_row == world::PhysicsClass::Upfx)
                 e->death_motion = world::DeathMotionMode::BuildingEffects;
-            else if (strutil::iequals(def->move_function, "psec"))
+            else if (move_row == world::PhysicsClass::Psec)
                 e->death_motion = world::DeathMotionMode::PalmPiece;
             // The model init builds the entity matrix once and marks it built
             // for a def no mover will rebuild: a decoration, building or
@@ -372,9 +377,9 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         //  (update @0x82AD5C); the tests @0x503F4C..0x503F65, @0x504554..0x50456D]
         e->palm_state_streamed = def != nullptr &&
                 (strutil::iequals(def->ai_function, "palm") ||
-                 strutil::iequals(def->move_function, "psec"));
+                 move_row == world::PhysicsClass::Psec);
         e->door_event = def != nullptr && fourcc_prefix(def->ai_function) == "door";
-        e->door_motion = def != nullptr && fourcc_prefix(def->move_function) == "door";
+        e->door_motion = move_row == world::PhysicsClass::Door;
         // Every def carries its two +0x6F3/+0x70B sound names; the door
         // commands play them, and so does the drop of a carried object off
         // its carrier (world::drop_object_from_carrier).
@@ -472,10 +477,13 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         if (e->handle.pool() == 1 &&
                 world.vehicles.traits.get(e->item_id) == nullptr &&
                 def != nullptr) {
-            const std::string fam = fourcc_prefix(def->move_function);
-            const bool direct_air_mover = fam == "chel" || fam == "cpln";
-			if (def->physics != 0 || direct_air_mover || fam == "cveh" || fam == "ctan" ||
-					fam == "cbik" || fam == "cbot" || fam == "catv" || fam == "ctrn") {
+            using world::PhysicsClass;
+            const bool direct_air_mover =
+                    move_row == PhysicsClass::Chel || move_row == PhysicsClass::Cpln;
+			if (def->physics != 0 || direct_air_mover || move_row == PhysicsClass::Cveh ||
+					move_row == PhysicsClass::Ctank || move_row == PhysicsClass::Cbike ||
+					move_row == PhysicsClass::Cbot || move_row == PhysicsClass::Catv ||
+					move_row == PhysicsClass::Ctrn) {
 				world::VehicleTraits vt;
 				vt.physics = def->physics;
 				vt.player_speed = def->player_speed;
@@ -540,20 +548,19 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 // selects the event/brain callback through its own lookup (the
                 // brain_class below). [orig: EntityDef_LookupPhysicsCallback
                 // @0x4a9240; §5.38e movers]
-                if (fam == "cbot") {
+                if (move_row == PhysicsClass::Cbot) {
                     vt.family = world::VehicleFamily::Watercraft;
-                } else if (fam == "chel") {
+                } else if (move_row == PhysicsClass::Chel) {
                     vt.family = world::VehicleFamily::Helicopter;
-                } else if (fam == "cpln") {
+                } else if (move_row == PhysicsClass::Cpln) {
                     vt.family = world::VehicleFamily::Plane;
-                } else if (fam == "cbik") {
+                } else if (move_row == PhysicsClass::Cbike) {
                     vt.family = world::VehicleFamily::Bike;
-                } else if (fam == "ctan") {
-                    // The shipped M1A1/T80 author `ctank`; the 4-byte key
-                    // is ctan — its own class-table row routes the tank
-                    // mover + the wheeled contact solve [orig: @0x82ABC0
-                    // ctan -> @0x48f000 ->
-                    // Entity_UpdateTankVehiclePhysics @0x488AB0].
+                } else if (move_row == PhysicsClass::Ctank) {
+                    // The shipped M1A1/T80 author `ctank`, the table's own
+                    // 5-character row: it routes the tank mover + the
+                    // wheeled contact solve [orig: row @0x82acac ctank ->
+                    // @0x48f000 -> Entity_UpdateTankVehiclePhysics @0x488AB0].
                     vt.family = world::VehicleFamily::Tank;
                 } else {
                     vt.family = world::VehicleFamily::Ground;
@@ -562,7 +569,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                     // contact solve's pad water-support forces (the
                     // Stryker/BTR-80 are catv) [orig: @0x48f010 push 2 vs
                     // the cveh/ctrn dispatchers' push 0 @0x48efce/@0x48f06e].
-                    vt.amphibian = fam == "catv";
+                    vt.amphibian = move_row == PhysicsClass::Catv;
                 }
 				const std::string render = fourcc_prefix(def->render_function);
 				vt.render_family = render == "cveh" ? world::VehicleRenderFamily::Ground
@@ -596,8 +603,9 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 		}
 	}
 	if (only.valid()) return; // runtime allocation must not reset active zones
-	// Throwable class bindings: every items.def entry whose ai_function /
-    // move_function names a throwable class (nade/schl/clym/vmne/lndm) lands a
+	// Throwable class bindings: every items.def entry whose ai_function names
+    // a throwable class (nade/schl/clym/vmne/lndm), or whose move_function
+    // binds a throwable physics row (nade/schl/clym), lands a
     // row keyed by type id (id - 100000, the ammo TrcrID space), with the def
     // hp/armor the placed device spawns at. [orig: EntityDef_InitAllCallbacks
     // @ 0x4a5a70 resolves the class tables into every item def at load;
@@ -609,7 +617,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         const world::ThrowClass think =
                 world::throw_class_from_tag(def->ai_function);
         const world::ThrowClass motor =
-                world::throw_class_from_tag(def->move_function);
+                world::throw_motor_from_move_function(def->move_function);
         if (think == world::ThrowClass::kNone &&
                 motor == world::ThrowClass::kNone)
             continue;
