@@ -350,7 +350,7 @@ private:
 	MenuScreenRender render_;
 	menu::MenuStyleSource style_;
 	std::map<std::string, std::string> style_vars_;
-	// The variables the text of the screens up to the shown one names (menu_variables_named of them as
+	// The variables the text of the screens up to the shown one names (mns::variables_named of them as
 	// the menu's writer writes them: a screen before it makes first loads its textures take), sorted:
 	// made when a stylesheet first moves after a configure.
 	std::vector<std::string> screen_variables_;
