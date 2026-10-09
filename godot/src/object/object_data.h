@@ -178,6 +178,11 @@ public:
 	// MTRL row at `array_index` that resolves through the resource root or the
 	// loose source dir; null when none does.
 	Ref<Texture2D> load_material_slot_texture(int p_array_index, int p_slot) const;
+	// A material stage's texture as ObjectModel::create_material binds it:
+	// the first of `slot` that resolves (load_material_slot_texture), the
+	// normal stage (3) falling back to the second normal slot (4) when its own
+	// resolves nothing; null when neither does.
+	Ref<Texture2D> load_material_stage_texture(int p_array_index, int p_slot) const;
 	PackedStringArray get_material_anim_frames(int p_index, int p_slot) const;
 	// The texture of one flipbook frame row (slot, frame), dispatched by the
 	// row's runtime type; null when the material has no row for that frame.
