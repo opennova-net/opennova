@@ -143,9 +143,10 @@ bool parse(const uint8_t *data, size_t size, File &out, std::string &error, text
 // (File_WriteLineToHandle @ 0x437010). Over the file's modeled layout where the file has one (each line as the
 // file had it but for a changed value's; an entry put down anew after the one before it in the writer's order;
 // the blocks and their FIELD lines in the document's order). The text is read again: one that would not read
-// back as the file is written in the writer's form, `rewritten` set. False with the reason for a block or an
-// entry no line of the reader's reads (a name the tables lack, a name holding a quote, a block of more than 34
-// FIELD lines).
+// back as the file is written in the writer's form, `rewritten` set. A block of more than 34 FIELD lines is
+// written whole: the reader drops the lines past its row's 34 (sub_52CD70 @ 0x52CD70), which a file may hold.
+// False with the reason for a block or an entry no line of the reader's reads (a name the tables lack, a name
+// holding a quote).
 bool write(const File &file, std::vector<uint8_t> &out, std::string &error);
 bool write(const File &file, const textlayout::Notes *notes, std::vector<uint8_t> &out, std::string &error,
            bool *rewritten = nullptr);

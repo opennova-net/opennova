@@ -257,11 +257,6 @@ bool records_of(const File &file, textlayout::OutRecord &root, std::string &erro
 			error = "A GAMETYPE's name \"" + block.name + "\" is none the reader reads back as one token.";
 			return false;
 		}
-		if (block.fields.size() > kMaxFields) {
-			error = "GAMETYPE \"" + block.name + "\" holds " + std::to_string(block.fields.size()) +
-			        " FIELD lines: a row's list holds 34 (sub_52CD70 @ 0x52CD70), and the reader drops the rest.";
-			return false;
-		}
 		textlayout::OutRecord record;
 		record.note = block.note;
 		record.kind = "block";
