@@ -1,13 +1,15 @@
 // Shared scaffolding for the dev-tools ctests (devtools_test,
 // devtools_windows_test, devtools_overlay_test): the failure counter and
-// CHECK macro, a null ImGui backend (a display size and a built font atlas,
-// no platform or renderer), a fake Game viewport, the allocator hooks the
-// pass hand-off takes, and the control-request id compare.
+// CHECK macro, the null ImGui backend and the allocator hooks the pass
+// hand-off takes (imgui_null_backend.h), a fake Game viewport, and
+// the control-request id compare.
 #pragma once
 
 #include <runtime/devtools/control_request.h>
 #include <runtime/devtools/game_dev_tools.h>
 #include <runtime/devtools/game_window.h>
+
+#include "imgui_null_backend.h"
 
 #include <imgui.h>
 
@@ -27,24 +29,9 @@ inline int g_failures = 0;
 		}                                                                             \
 	} while (0)
 
-// A headless ImGui frame: the null example's setup (a display size and a
-// built font atlas), no platform or renderer backend.
-struct NullBackend {
-	ImGuiContext *context = nullptr;
-
-	NullBackend() {
-		context = ImGui::CreateContext();
-		ImGuiIO &io = ImGui::GetIO();
-		io.IniFilename = nullptr;
-		io.DisplaySize = ImVec2(1280.0f, 720.0f);
-		io.DeltaTime = 1.0f / 60.0f;
-		unsigned char *pixels = nullptr;
-		int width = 0;
-		int height = 0;
-		io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
-	}
-	~NullBackend() { ImGui::DestroyContext(context); }
-};
+using imgui_test::NullBackend;
+using imgui_test::test_alloc;
+using imgui_test::test_free;
 
 struct FakeGameViewport : opennova::devtools::GameViewport {
 	int width = 0;
@@ -62,9 +49,6 @@ struct FakeGameViewport : opennova::devtools::GameViewport {
 		return true;
 	}
 };
-
-inline void *test_alloc(size_t size, void *) { return std::malloc(size); }
-inline void test_free(void *ptr, void *) { std::free(ptr); }
 
 // A drained control request names a row by its wire id (the constants are
 // string literals, so the check compares text, never addresses).
