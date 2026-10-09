@@ -26,7 +26,6 @@ constexpr float kJitterScale = 1.8f / 65536.0f;
 // nearest 2*pi/65536 (0x38C90FDB). [orig: Foliage_GenerateInstances_0
 // @ 0x5fff7a; Foliage_GenerateModelTileInstances @ 0x600aeb]
 constexpr float kYawScale = 0x1.921FA0p-14f;
-constexpr float kPathRange = 2.0f;
 constexpr float kDetailFadeStart = 20.0f;
 constexpr float kDetailPassSwitch = 33.0f;
 constexpr float kDetailLimit = 42.0f;
@@ -210,11 +209,11 @@ float sampled_height(const WorldSamplers &world, int32_t x, int32_t z) {
 bool candidate_is_blocked(const RuntimeSlot &slot,
                           const WorldSamplers &world,
                           const Candidate &candidate) {
-	if ((slot.attrib_flags & FOLIAGE_ATTRIB_FORCE_ON) != 0u) return false;
+	if (!placed_tiles_keep_off(slot.attrib_flags)) return false;
 	return world.path_blocked &&
 	       world.path_blocked(from_fixed(candidate.x_fixed),
 	                          from_fixed(candidate.z_fixed),
-	                          kPathRange);
+	                          kPlacedTileReach);
 }
 
 uint8_t silhouette_alpha_reference(float camera_distance) {
