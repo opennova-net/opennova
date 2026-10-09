@@ -516,7 +516,7 @@ bool paste_at_from_json(const JsonValue &json, PasteAt &out, std::string &error)
 }
 
 // Where Play starts the player (DI-26): {at: [x, y, z], yaw?}, mission metres and compass degrees.
-JsonValue play_start_to_json(const PlayStart &start) {
+JsonValue play_start_to_json(const mission::PlayerStart &start) {
 	JsonValue out = JsonValue::make_object();
 	JsonValue at = JsonValue::make_array();
 	for (const double each : start.at) at.push(json_number(each));
@@ -525,13 +525,13 @@ JsonValue play_start_to_json(const PlayStart &start) {
 	return out;
 }
 
-bool play_start_from_json(const JsonValue &json, PlayStart &out, std::string &error) {
+bool play_start_from_json(const JsonValue &json, mission::PlayerStart &out, std::string &error) {
 	if (!json.is_object()) {
 		error = "\"start\" must be an object {at: [x, y, z], yaw?}.";
 		return false;
 	}
 	if (!io::json_members_known(json, {"at", "yaw"}, "start", error)) return false;
-	PlayStart start;
+	mission::PlayerStart start;
 	const JsonValue *at = json.get("at");
 	if (!at || !at->is_array() || at->array.size() != 3) {
 		error = "\"start\"'s at must be [x, y, z], mission metres (x east, y north, z up).";
