@@ -580,7 +580,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// StaticFrame line, hud_static_frame_index); absent, nothing is loaded.
 	if (layout_.frame_pos.present) {
 		const Ref<Texture2D> tex = load_hud_texture_(opennova::to_gd(assets.static_frame),
-				ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+				ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kStaticFrameRole));
 		textures_[opennova::hud::kHudTexFrame] = tex;
 		layout_.frame_texture_valid = tex.is_valid();
 		layout_.frame_tex_w = tex.is_valid() ? tex->get_width() : 0;
@@ -668,9 +668,9 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	{
 		// The HUDLS bar's bracket and more-available marker, named by hudpos.
 		const Ref<Texture2D> bracket = load_hud_texture_(opennova::to_gd(assets.hudls_bracket),
-				ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+				ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kHudlsRole));
 		const Ref<Texture2D> moreav = load_hud_texture_(opennova::to_gd(assets.hudls_moreav),
-				ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+				ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kHudlsRole));
 		textures_[opennova::hud::kHudTexSlotBarBracket] = bracket;
 		textures_[opennova::hud::kHudTexSlotBarMoreAv] = moreav;
 		layout_.hudls.bracket_texture_valid = bracket.is_valid();
@@ -686,7 +686,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	for (int i = 0; i < 6; ++i) {
 		const Ref<Texture2D> tex =
 				load_hud_texture_(opennova::to_gd(assets.stance_textures[static_cast<size_t>(i)]),
-						ResourceRoot::TEXTURE_LOADER_HUD_ALPHA);
+						ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kStanceRole));
 		textures_[opennova::hud::kHudTexStance0 + i] = tex;
 		layout_.stance_texture_valid[static_cast<size_t>(i)] = tex.is_valid();
 	}
@@ -1121,7 +1121,7 @@ void HudOverlay::set_vehicle_panel(bool p_shown, const Ref<VehicleHudBlock> &p_b
 	if (sid != vehicle_panel_sid_ || textures_[opennova::hud::kHudTexVehiclePanel].is_null()) {
 		textures_[opennova::hud::kHudTexVehiclePanel] =
 				load_hud_texture_(p_block->get_interface_texture(),
-						ResourceRoot::TEXTURE_LOADER_HUD_ALPHA);
+						ResourceRoot::loader_of(opennova::hud::kVehicleHudInterfaceRole));
 		vehicle_panel_sid_ = sid;
 	}
 	const Ref<Texture2D> silhouette = textures_[opennova::hud::kHudTexVehiclePanel];
