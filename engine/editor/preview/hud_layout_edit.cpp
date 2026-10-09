@@ -10,8 +10,8 @@
 #include <base/io/ascii_config.h>
 #include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
-#include <editor/documents/hud_layout_type.h>
 #include <editor/model/text_document.h>
+#include <formats/def/def_hudpos_text.h>
 #include <formats/def/def_hudpos_write.h>
 #include <runtime/hud/hud_frame.h>
 
@@ -617,7 +617,7 @@ bool hud_layout_edits(const TextDocument &text, const def::DefHudPosDef &hud, co
 		uint64_t gesture, std::vector<Edit> &out, std::string &error) {
 	out.clear();
 	const std::string &source = text.text();
-	const std::vector<HudLayoutLine> lines = hud_layout_lines(source);
+	const std::vector<def::HudLayoutLine> lines = def::hud_layout_lines(source);
 	// The changes by line, in the order they come, each line's key as its first change spells it.
 	std::vector<std::pair<std::string, std::string>> order;
 	std::map<std::pair<std::string, std::string>, std::map<int, std::string>> by_line;
@@ -651,7 +651,7 @@ bool hud_layout_edits(const TextDocument &text, const def::DefHudPosDef &hud, co
 			values[size_t(each.first)] = each.second;
 			last = std::max(last, each.first);
 		}
-		const HudLayoutLine *found = hud_layout_line(lines, key.c_str(), first.empty() ? nullptr : first.c_str());
+		const def::HudLayoutLine *found = def::hud_layout_line(lines, key.c_str(), first.empty() ? nullptr : first.c_str());
 		if (!found) {
 			// A line of its own at the end of the text, as the writer writes it.
 			def::HudposLine written;

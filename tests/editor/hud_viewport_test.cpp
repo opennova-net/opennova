@@ -1,7 +1,6 @@
 // The HUD preview over hudpos.def (the editor deep-integration plan's DI-20): the HUD layout type
-// (hudpos.def held as its text, its line ends the game's reader's, the lines its parser is handed and
-// the one the game takes of each key), and the HUD viewport through a session: hudpos.def opened shows
-// its HUD in the Preview window, its device asked to make the picture and made to again when the text
+// (hudpos.def held as its text, its line ends the game's reader's), and the HUD viewport through a
+// session: hudpos.def opened shows its HUD in the Preview window, its device asked to make the picture and made to again when the text
 // changes; the viewport query's state (the screen, the HUD font at its width, the weapons weapon.def
 // holds, the stances' names); a SetViewport of its options and a refused one; the elements the device
 // said it drew named by a point (the smallest box first), each with the hudpos.def lines that place it
@@ -16,7 +15,6 @@
 
 #include <base/io/json.h>
 #include <editor/documents/document_types.h>
-#include <editor/documents/hud_layout_type.h>
 #include <editor/documents/line_ends.h>
 #include <editor/model/text_document.h>
 #include <editor/preview/hud_canvas.h>
@@ -71,17 +69,9 @@ const char *const kWeapons =
 int test_layout_type() {
 	const DocumentType *type = document_type_for(AssetKind::HudPosDefs);
 	TEST_EXPECT(type && type->id == DocumentTypeId::HudLayout && document_content(*type) == DocumentContent::Text);
-	// Its lines as the parser is handed them: the comment none, each key's line where it starts.
+	// Its lines as the parser is handed them, and the line the game takes of a key, are the engine's
+	// (formats/def/def_hudpos_text.h, tests/def/def_hudpos_text_test).
 	const std::string text = kLayout;
-	const std::vector<HudLayoutLine> lines = hud_layout_lines(text);
-	TEST_EXPECT(lines.size() == 11 && lines[0].key == "fonthud1_hi" && lines[0].first == "onhudb18.fnt");
-	// The game takes a key's last line (two StaticFrames: the second), a HUDSTANCE by its id.
-	const HudLayoutLine *frame = hud_layout_line(lines, "STATICFRAME");
-	TEST_EXPECT(frame && frame->first == "onhframe.tga" && text.compare(frame->offset, 11, "StaticFrame") == 0);
-	const HudLayoutLine *crouch = hud_layout_line(lines, "hudstance", "1");
-	TEST_EXPECT(crouch && text.compare(crouch->offset, crouch->length, "HUDSTANCE 1\t0 0 onhstnc1.tga CROUCH") == 0);
-	TEST_EXPECT(hud_layout_line(lines, "HUDSTANCE", "4") == nullptr && hud_layout_line(lines, "HUDHEAT") == nullptr);
-
 	// The document: its text as the file holds it, no finding; an LF alone the line-ends rule's warning.
 	std::unique_ptr<DocumentBase> document = type->make();
 	Diagnostic error;
@@ -99,7 +89,7 @@ int test_layout_type() {
 	// Save writes it CR LF.
 	const SerializeResult written = lf->serialize();
 	TEST_EXPECT(written.ok() && written.text == "HUDHEALTH 25,741,177,751\r\nHUDCLIP 14,648\r\n");
-	std::printf("layout type: its lines, the line the game takes, an LF alone a finding\n");
+	std::printf("layout type: its text as the file holds it, an LF alone a finding\n");
 	return 0;
 }
 

@@ -42,22 +42,6 @@ std::string overrun_words(const std::string &file, const configfile::DataStrings
 
 } // namespace
 
-std::string config_commented(const std::string &text, std::vector<size_t> line_starts) {
-	std::sort(line_starts.begin(), line_starts.end());
-	line_starts.erase(std::unique(line_starts.begin(), line_starts.end()), line_starts.end());
-	std::string out;
-	out.reserve(text.size() + line_starts.size());
-	size_t from = 0;
-	for (const size_t at : line_starts) {
-		if (at > text.size()) break;
-		out.append(text, from, at - from);
-		out += ';';
-		from = at;
-	}
-	out.append(text, from, std::string::npos);
-	return out;
-}
-
 std::vector<Diagnostic> config_overrun_findings(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	if (asset_kind_row(document.kind()).line_reader != LineReader::ConfigFile) return findings;
@@ -71,12 +55,7 @@ std::vector<Diagnostic> config_overrun_findings(const DocumentBase &document) {
 	const std::vector<configfile::ConfigSection> sections =
 			configfile::parse_config_text(reinterpret_cast<const uint8_t *>(written.data()), written.size());
 	// The value whose byte of the clear is the first past the pool, in the reader's order.
-	size_t offset = 0;
-	size_t seen = 0;
-	for (const configfile::ConfigSection &section : sections)
-		for (const configfile::ConfigEntry &entry : section.entries)
-			for (const configfile::ConfigValue &value : entry.values)
-				if (seen++ == pool.pool_bytes) offset = value.offset;
+	const size_t offset = configfile::data_strings_overrun_offset(sections, pool);
 	Diagnostic d = text_finding(finding_code(CoreFinding::DocumentConfigOverrun), DiagnosticSeverity::Error,
 	                            overrun_words(file, pool), *text, offset);
 	// The fix: the lines the kind's loader reads the same without that hold numbers alone, commented out,
@@ -94,7 +73,7 @@ std::vector<Diagnostic> config_overrun_findings(const DocumentBase &document) {
 			if (numbers) starts.push_back(entry.offset);
 		}
 	if (!starts.empty()) {
-		const configfile::DataStringsPool fixed = pool_of(config_commented(written, starts));
+		const configfile::DataStringsPool fixed = pool_of(configfile::config_commented(written, starts));
 		if (!fixed.binary && fixed.overrun() == 0) {
 			PlannedFix fix;
 			fix.label = "Comment out the " + count_of(starts.size(), "line", "lines") + " the game loads the same without";
