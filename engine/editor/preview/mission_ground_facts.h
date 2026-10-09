@@ -13,7 +13,7 @@
 #include <formats/foliage/foliage.h>
 #include <formats/pcx/pcx.h>
 #include <formats/til/til.h>
-#include <runtime/terrain_query/foliage_mask_map.h>
+#include <runtime/terrain_query/foliage_mask_raster.h>
 #include <runtime/terrain_query/surface_type_map.h>
 #include <runtime/terrain_query/terrain_field_store.h>
 
@@ -123,7 +123,7 @@ public:
 	// palette), and the .trn's foliage definitions (its slots).
 	int surface_side() const { return store_.valid() ? store_.surface_map().width : 0; }
 	const std::string &foliage_map() const { return foliage_map_; }
-	const IndexedImage8 &foliage_codes() const { return foliage_codes_; }
+	const IndexedImage8 &foliage_codes() const { return foliage_.codes; }
 	const std::vector<FoliageDef> &foliage_defs() const { return foliage_defs_; }
 	// The placed tiles' squares, as the game keeps them (x and z 16.16, z the negated mission y).
 	const std::vector<terrain::SurfaceTileEntry> &placed_tiles() const { return tiles_; }
@@ -163,8 +163,7 @@ private:
 	// The foliage map as read (its indices the codes) and as the game keeps it (each texel the definition
 	// slots it selects), and the definitions.
 	std::string foliage_map_;
-	IndexedImage8 foliage_codes_;
-	std::vector<uint8_t> foliage_masks_;
+	terrain::FoliageMaskRaster foliage_;
 	std::vector<FoliageDef> foliage_defs_;
 	int reads_ = 0;
 };
