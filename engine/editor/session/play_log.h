@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include <base/gameprofile/graphics_log.h>
 #include <base/gameprofile/resource_missing.h>
 #include <editor/model/diagnostic.h>
 #include <editor/run/launch_plan.h>
@@ -38,27 +39,14 @@ std::vector<Diagnostic> resource_miss_findings(const gameprofile::ResourceMiss &
                                                const SessionView &view);
 
 // The game install's own logs, read once its game exited (never while it runs: run/launch_plan.h's
-// kInstallFileLogName): its file log (null when it left none), the graphics log this run wrote (ghw.txt,
-// "" when the run wrote none), and whether the game exited on its own.
+// kInstallFileLogName): its file log (null when it left none), the graphics log this run wrote
+// (gameprofile::kGraphicsLogName, ghw.txt, "" when the run wrote none; its missions read by
+// gameprofile::graphics_log_missions), and whether the game exited on its own.
 struct InstallLogs {
 	const FileAccessLog *file_log = nullptr;
 	std::string graphics_log;
 	bool exited_on_its_own = false;
 };
-
-// The graphics log the game install writes in its working directory, made anew by the first line a
-// process writes and appended to after, never read by the game [orig: CGfxDevice_WriteLogEntry @ 0x67cc80,
-// "wt+" @ 0x67cca3, "a" @ 0x67cda6].
-inline constexpr const char *kInstallGraphicsLogName = "ghw.txt";
-
-// The missions a graphics log says the game began loading, each with whether it says the load finished:
-// a `Mission:"<file>" - ...` line as Game_StartMission begins [orig: Game_StartMission @ 0x5252fb, the
-// format @ 0x7d0460], and "Mission loading complete" as it ends [orig: @ 0x5262fd, the text @ 0x7d0314].
-struct GraphicsLogMission {
-	std::string file;
-	bool complete = false;
-};
-std::vector<GraphicsLogMission> graphics_log_missions(const std::string &text);
 
 // The rows the game install's logs make, the file log naming only what the game opened (each open that
 // succeeded, never a file it did not find):
