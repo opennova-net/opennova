@@ -232,7 +232,7 @@ bool finish_trn(TrnConfig &out, TrnWalk &walk, std::string &error) {
 	// `Terrain_ShiftHeightmapRows @0x60f190`, never rejects: it extends the
 	// parsed grid to 16 columns and rows (periodically under wrap, else the
 	// last column and row copied outward) and returns 0 on every path
-	// [orig: @0x60F2A5..0x60F317, @0x60F31A]; the extension below is it.
+	// [orig: @0x60F2A5..0x60F317, @0x60F31A]; trn_extend_sector_grid below is it.
 	switch (trn_refusal(out, walk.seen_sector_rows)) {
 	case TrnRefusal::None: break;
 	case TrnRefusal::NoColormap: error = "TRN rejected: polytrn_colormap is empty"; return false;
@@ -248,23 +248,31 @@ bool finish_trn(TrnConfig &out, TrnWalk &walk, std::string &error) {
 		return false;
 	}
 
-	const int rows = std::max(out.sector_rows, 1);
-	const int cols = std::max(out.sector_count, 1);
-
-	for (int r = 0; r < rows; ++r) {
-		for (int c = cols; c < kTerrainGridSide; ++c) {
-			out.sector_grid[r][c] = out.wrap_x ? out.sector_grid[r][c % cols] : out.sector_grid[r][cols - 1];
-		}
-	}
-	for (int r = rows; r < kTerrainGridSide; ++r) {
-		for (int c = 0; c < kTerrainGridSide; ++c) {
-			out.sector_grid[r][c] = out.wrap_y ? out.sector_grid[r % rows][c] : out.sector_grid[rows - 1][c];
-		}
-	}
+	trn_extend_sector_grid(out);
 	return true;
 }
 
 } // namespace
+
+int trn_grid_extension_source(int count, int wrap, int index) {
+	return wrap ? index % count : count - 1;
+}
+
+void trn_extend_sector_grid(TrnConfig &config) {
+	const int rows = std::max(config.sector_rows, 1);
+	const int cols = std::max(config.sector_count, 1);
+
+	for (int r = 0; r < rows; ++r) {
+		for (int c = cols; c < kTerrainGridSide; ++c) {
+			config.sector_grid[r][c] = config.sector_grid[r][trn_grid_extension_source(cols, config.wrap_x, c)];
+		}
+	}
+	for (int r = rows; r < kTerrainGridSide; ++r) {
+		for (int c = 0; c < kTerrainGridSide; ++c) {
+			config.sector_grid[r][c] = config.sector_grid[trn_grid_extension_source(rows, config.wrap_y, r)][c];
+		}
+	}
+}
 
 TrnRefusal trn_refusal(const TrnConfig &config, int sector_rows) {
 	// The admission gate [orig: Terrain_LoadEnvironmentConfig @0x610940 tail]:
@@ -578,6 +586,51 @@ bool trn_parser_reads_one_value(const std::string &key) {
 	return std::any_of(std::begin(kOne), std::end(kOne), [&key](const char *k) { return key == k; });
 }
 
+std::string trn_foliage_block_text(const FoliageDef &def) {
+	const char *nl = "\r\n";
+	const FoliageDef normalized = foliage_normalize_def(def);
+	std::ostringstream f;
+	f << "foliage" << nl;
+	if (!normalized.graphic.empty()) {
+		f << "  graphic         " << normalized.graphic << nl;
+	}
+	f << "  color_lower     " << normalized.color_lower << nl;
+	f << "  color_upper     " << normalized.color_upper << nl;
+	if (foliage_def_match_count(normalized) > 0) {
+		// Every authored code on the one `match` line, in retail's arg order.
+		f << "  match           ";
+		bool wrote = false;
+		for (int code : normalized.match) {
+			if (code < 0) {
+				continue;
+			}
+			if (wrote) {
+				f << " ";
+			}
+			f << code;
+			wrote = true;
+		}
+		f << nl;
+	}
+	if (normalized.attrib_flags != 0) {
+		f << "  attrib          ";
+		bool wrote = false;
+		if ((normalized.attrib_flags & FOLIAGE_ATTRIB_SHADOW) != 0) {
+			f << "shadow";
+			wrote = true;
+		}
+		if ((normalized.attrib_flags & FOLIAGE_ATTRIB_FORCE_ON) != 0) {
+			if (wrote) {
+				f << " ";
+			}
+			f << "forceon";
+		}
+		f << nl;
+	}
+	f << "end" << nl;
+	return f.str();
+}
+
 bool save_trn(std::ostream &f, const TrnConfig &cfg, std::string &error) {
 	const char *nl = "\r\n";
 
@@ -678,45 +731,7 @@ bool save_trn(std::ostream &f, const TrnConfig &cfg, std::string &error) {
 	}
 
 	for (const auto &def : cfg.foliage_defs) {
-		const FoliageDef normalized = foliage_normalize_def(def);
-		f << nl << "foliage" << nl;
-		if (!normalized.graphic.empty()) {
-			f << "  graphic         " << normalized.graphic << nl;
-		}
-		f << "  color_lower     " << normalized.color_lower << nl;
-		f << "  color_upper     " << normalized.color_upper << nl;
-		if (foliage_def_match_count(normalized) > 0) {
-			// Every authored code on the one `match` line, in retail's arg order.
-			f << "  match           ";
-			bool wrote = false;
-			for (int code : normalized.match) {
-				if (code < 0) {
-					continue;
-				}
-				if (wrote) {
-					f << " ";
-				}
-				f << code;
-				wrote = true;
-			}
-			f << nl;
-		}
-		if (normalized.attrib_flags != 0) {
-			f << "  attrib          ";
-			bool wrote = false;
-			if ((normalized.attrib_flags & FOLIAGE_ATTRIB_SHADOW) != 0) {
-				f << "shadow";
-				wrote = true;
-			}
-			if ((normalized.attrib_flags & FOLIAGE_ATTRIB_FORCE_ON) != 0) {
-				if (wrote) {
-					f << " ";
-				}
-				f << "forceon";
-			}
-			f << nl;
-		}
-		f << "end" << nl;
+		f << nl << trn_foliage_block_text(def);
 	}
 
 	if (!f.good()) {

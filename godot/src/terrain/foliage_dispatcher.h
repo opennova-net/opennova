@@ -354,8 +354,8 @@ private:
       source_geometry_{};
   std::array<Ref<Texture2D>, opennova::FOLIAGE_MAX_DEFS> fd_textures_{};
   // Foliagemap pixel -> slot mask, the engine remap evaluated for every
-  // pixel value once per configure_slots (foliage_remap_pixel_to_def_mask).
-  std::array<uint32_t, 256> palette_masks_{};
+  // pixel value once per configure_slots (foliage_pixel_masks).
+  std::array<uint8_t, 256> palette_masks_{};
   Array slot_diagnostics_;
   int authored_slot_count_ = 0;
   int enabled_slot_count_ = 0;

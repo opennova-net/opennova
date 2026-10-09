@@ -8,7 +8,7 @@ WaterHeightRungs mission_water_rungs(const BmsEnvOverrides &overrides,
 		float terrain_height, bool has_loaded_terrain) {
 	WaterHeightRungs rungs;
 	rungs.has_mission_override = overrides.has_water_height;
-	rungs.mission_override = overrides.has_water_height ? overrides.water_height * 0.5f : 0.0f;
+	rungs.mission_override = overrides.has_water_height ? overrides.water_height * kWaterHeightUnit : 0.0f;
 	rungs.terrain_height = terrain_height;
 	rungs.has_loaded_terrain = has_loaded_terrain;
 	return rungs;
@@ -23,7 +23,7 @@ ResolvedWaterHeight resolve_water_rung(const WaterHeightRungs &rungs,
 		// .env water_height is stored <<15 by the engine — half world units,
 		// same convention as the terrain value; the .env's line writes after
 		// the .trn's [orig: TimeOfDay_ParseProperty @ 0x57cb4e].
-		return {env->water_height() * 0.5f, WaterRung::Environment};
+		return {env->water_height() * kWaterHeightUnit, WaterRung::Environment};
 	}
 	if (rungs.terrain_height != 0.0f) {
 		return {rungs.terrain_height, WaterRung::Terrain};

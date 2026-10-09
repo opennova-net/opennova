@@ -137,7 +137,7 @@ void terrain_field_store_build(TerrainFieldStore &store, const CptFile &cpt,
 			trn.sector_count, trn.sector_rows, trn.wrap_x != 0, trn.wrap_y != 0,
 			coords_locks_from(trn), charmap, charmap_width, charmap_height);
 	if (store.valid())
-		store.set_trn_facts(trn.water_height != 0 ? static_cast<float>(trn.water_height) * 0.5f : 0.0f,
+		store.set_trn_facts(trn.water_height != 0 ? static_cast<float>(trn.water_height) * env::kWaterHeightUnit : 0.0f,
 				trn.tilestrip);
 }
 

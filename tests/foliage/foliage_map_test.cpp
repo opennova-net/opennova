@@ -1,5 +1,7 @@
 #include <formats/foliage/foliage.h>
 
+#include <array>
+#include <cstdint>
 #include <cstdio>
 #include <vector>
 
@@ -95,6 +97,13 @@ int main() {
 				"an unmatched pixel selects nothing")) return 1;
 		if (!expect(!opennova::foliage_def_matches_pixel(defs[2], 254),
 				"a slot with an empty graphic (header byte 0) is skipped")) return 1;
+		// The load's remap as a table over the 256 codes [orig: Foliage_LoadFoliageMapPCX @0x605B73..0x605B8A].
+		const std::array<uint8_t, 256> masks = opennova::foliage_pixel_masks(defs);
+		bool table = true;
+		for (int code = 0; code < 256; ++code)
+			table = table && masks[static_cast<size_t>(code)] == opennova::foliage_remap_pixel_to_def_mask(defs, code);
+		if (!expect(table && masks[30] == 0x3 && masks[0] == 0 && masks[99] == 0,
+				"the remap table holds each code's slot mask")) return 1;
 		std::vector<opennova::FoliageDef> five(5, defs[0]);
 		five[4].graphic = "extra.3di";
 		five[4].match = {77, -1, -1, -1};

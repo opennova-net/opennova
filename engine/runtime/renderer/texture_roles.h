@@ -134,6 +134,31 @@ bool texture_role_read_by_name(TextureRoleId role);
 // shadow_texture the game never loads).
 bool def_texture_field_role(std::string_view field, TextureRoleId &out);
 
+// The role a terrain configuration key's file is opened in (`key` lower case, a .trn's or a later file's: the
+// terrain's own PolyTrn_InitTextures opens a map a later file names as it opens the .trn's) [orig:
+// PolyTrn_InitTextures @ 0x60AAA0]; false for a key that names no texture. `aborts_mission`, where given: the
+// mission's load aborts without the file, the colour map's ("colormap" logged @ 0x60B389) and, once the key names
+// one at all, the blend map's (the key alone sets the blend on [orig: Terrain_ParseConfigCallback @ 0x60F7D0], and
+// every card with pixel shaders takes it, PolyTrn_InitTextures @ 0x60B15D..0x60B176; "blendermap" logged
+// @ 0x60B19A), either error aborting it [orig: sub_520AA0 @ 0x520B4E].
+bool trn_key_texture_role(std::string_view key, TextureRoleId &out, bool *aborts_mission = nullptr);
+
+// The role an environment keyword's file is opened in (`key` lower case): the cloud layers' sky_map1 and sky_map2
+// through ARCHIVE [orig: Terrain_InitRenderingResources @ 0x578A97]; false for any other keyword. `made_pcx`, where
+// given: the name's extension is made .pcx before the loader reads it, as the parser stores it [orig:
+// TimeOfDay_ParseProperty @ 0x57CC41..0x57CC4B, sky_map2's @ 0x57CC83..0x57CC8D; Path_ReplaceOrAppendExtension
+// @ 0x53C780].
+bool env_key_texture_role(std::string_view key, TextureRoleId &out, bool *made_pcx = nullptr);
+
+// The role a model texture row's file is opened in, by the loader its runtime type picks (`row_type` its authored
+// type, material_texture_runtime_type of it), its `slot`, its row flags and the `name` it writes: a diffuse-class
+// row's (runtime types 0, 2 and 8) slot 2 a detail, a flipbook row (flag bit 0) a flip frame, else a diffuse; a
+// plain row (1); a normal row (4, 5) an .mdt normal map as it is or one made from a .tga's height [orig:
+// Texture_LoadAsNormalMap @ 0x58C480]; a horizon (6), an occlusion (7); a chunk (16..18); a type past them a
+// diffuse [orig: Material_LoadStageTexture @ 0x5B16F0, the switch @ 0x5B1737; the type the loader copies,
+// Material_ConvertDefinition @ 0x5B045B..0x5B04A0].
+TextureRoleId model_row_texture_role(uint8_t row_type, uint8_t slot, uint8_t row_flags, const std::string &name);
+
 // The material's flags as they fall on one of its texture rows (`row_type` its authored type,
 // `slot` its slot): the alpha test's bits (cut out, inverted) kept on the row whose alpha the
 // technique its shader selects tests (object_coverage_source: a diffuse row's for most, the normal
