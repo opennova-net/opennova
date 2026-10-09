@@ -15,6 +15,7 @@
 #include <base/io/json.h>
 #include <editor/preview/mission_poses.h>
 #include <editor/preview/mission_scene.h>
+#include <editor/preview/mission_shots.h>
 #include <editor/preview/viewport_follow.h>
 
 #include "authoring/preview_effects.h"
@@ -342,6 +343,23 @@ private:
 
 	// The Shoot tool's scars (DI-23), presented where the shots' run moved, cleared with no shot.
 	void apply_shots_(const opennova::editor::MissionViewport &mission);
+	// S23 C: the husks of the items the shots destroyed, at the clock's tick (the run's deaths through
+	// editor::mission_husk_frame): swapped in as the game's destruction presenter swaps a husk (a placed individual
+	// model's husk built under it, its own parts hidden; a retained static's rows hidden, the husk grafted at its
+	// placed transform with its projection), the destroy fade's registers and the sections the pieces left written
+	// each frame; let go (the item shown again) where the clock steps back past the swap or the shots clear.
+	struct Husk {
+		std::string husk;
+		uint64_t model = 0;  // the husk's ObjectModel
+		uint64_t intact = 0; // the intact individual model it hangs under (0: a static's graft)
+		int key = 0;         // the placer's key the static's rows were hidden under
+		std::vector<std::pair<uint64_t, bool>> hidden_children; // the intact model's parts and how they stood
+		std::map<std::string, int64_t> ctrl;
+		uint32_t sections = 0;
+	};
+	void apply_husks_(const opennova::editor::MissionViewport &mission, int32_t tick);
+	void unhusk_(Husk &husk);
+	std::unordered_map<opennova::editor::NodeId, Husk> husks_;
 	ScarPresenter *shot_scars_ = nullptr;
 	uint64_t shot_scars_shown_ = UINT64_MAX;
 

@@ -1647,6 +1647,83 @@ func test_the_shoot_tool_plays_its_impacts() -> void:
 	assert_true(again, "a shot after the clear stops: %s" % str(_state().get("body", {}).get("shots", {})).left(400))
 
 
+## S23 C: a shot that destroys an item swaps its husk in, as the game's destruction presenter does. The pump made a
+## one-hit-point gnrc with the shed as its husk: shot from above, it dies, and its death's swap tick on (the gnrc's
+## four-tick think) its retained static's rows are hidden and the husk grafted where it stands; Clear shots lets the
+## husk go and shows the pump again.
+func test_a_shot_swaps_in_the_husk() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	var root: String = _seam.get_project_root()
+	var items_path := root.path_join("defs").path_join("items.def")
+	var items := FileAccess.get_file_as_string(items_path)
+	const PUMP := "  id 106100\r\n  type object\r\n  graphic crate\r\n"
+	assert_true(items.contains(PUMP), "the fixture's pump")
+	items = items.replace(PUMP, PUMP + "  husk shed\r\n  ai_function gnrc\r\n  hp 1\r\n")
+	_write(items_path, items.to_utf8_buffer())
+	_write(root.path_join("defs/ammo.def"), TestFs.crlf("ammo AT_NULL\nend\nammo AMMO_T\n\tvelocity 800\n\tmax_age 2\n"
+			+ "\tweight_in_grains 62\n\tscar_type 1\nend\n").to_utf8_buffer())
+	var before := int(state.get("builds", 0))
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps")
+	for _frame in 900:
+		state = _state()
+		if String(state.get("status", "")) == "ready" and int(state.get("builds", 0)) > before:
+			break
+		await get_tree().process_frame
+	assert_eq(String(state.get("status", "")), "ready", str(state).left(300))
+	var pump := {}
+	for row: Variant in state.get("items", []):
+		if int((row as Dictionary).get("item", 0)) == 106100:
+			pump = row
+			break
+	assert_false(pump.is_empty(), "a pump in the mission")
+	if pump.is_empty():
+		return
+	assert_true(bool(_ask({"kind": "edit_in_viewport", "command": {"name": "ground", "kind": "mission",
+			"ids": [int(pump["id"])]}}).get("outcome", {}).get("done", false)))
+	pump = _mark_of(_state(), int(pump["id"]))
+	var at := _vector(pump.get("at"))
+	var placer: MissionObjectPlacer = _app.get_mission_placer(MISSION_PATH)
+	var key := int(_app.get_mission_entity_key(MISSION_PATH, int(pump["id"])))
+	assert_gt(key, 0, "the pump placed")
+	assert_false(placer.is_static_instance_hidden(key), "a retained static, shown")
+	assert_true(_change({"kind": "mission", "shot": {"ammo": "AMMO_T", "at": [at.x, at.y, at.z],
+			"eye": [at.x, at.y, at.z + 60.0]}, "clock": {"playing": true}}))
+	var husk: ObjectModel = null
+	var deaths: Array = []
+	for _frame in 300:
+		_app.pump()
+		await get_tree().process_frame
+		deaths = _state().get("body", {}).get("shots", {}).get("deaths", [])
+		var found := _device(_state()).find_children("HuskModel_%d" % int(pump["id"]), "ObjectModel", true, false)
+		if not found.is_empty():
+			husk = found[0]
+			break
+	assert_eq(deaths.size(), 1, "the pump destroyed: %s" % str(_state().get("body", {}).get("shots", {}).get("events", [])).left(500))
+	if not deaths.is_empty():
+		assert_eq(String((deaths[0] as Dictionary).get("husk", "")), "shed")
+		assert_true(bool((deaths[0] as Dictionary).get("swaps", false)))
+	assert_not_null(husk, "the husk swapped in")
+	if husk == null:
+		return
+	assert_eq(String(husk.get_graphic_name()).to_lower(), "shed")
+	assert_true(placer.is_static_instance_hidden(key), "the pump's rows hidden under the husk")
+	var placed := MissionObjectPlacer.bms_to_godot_position(at)
+	assert_almost_eq(husk.transform.origin, placed, Vector3(0.01, 0.01, 0.01), "the husk where the pump stands")
+	# Clear shots: the husk goes, the pump shows again.
+	assert_true(bool(_ask({"kind": "edit_in_viewport", "command": {"name": "clear_shots", "kind": "mission"}})
+			.get("outcome", {}).get("done", false)))
+	for _frame in 5:
+		_app.pump()
+		await get_tree().process_frame
+	assert_false(placer.is_static_instance_hidden(key), "the pump shown again")
+	assert_true(_device(_state()).find_children("HuskModel_%d" % int(pump["id"]), "ObjectModel", true, false).is_empty()
+			or not is_instance_valid(husk) or husk.is_queued_for_deletion(), "the husk let go")
+
+
 ## DI-36: the Listen. The fixture's four waypoint markers made the game's env-sound emitters of a set the
 ## project's bank holds: listening near one, the viewport's mix binds each marker's layer to one of the game's
 ## channels, and the device plays each looping at its marker (an AudioStreamPlayer3D under its world, no

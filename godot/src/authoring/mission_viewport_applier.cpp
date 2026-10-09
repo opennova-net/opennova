@@ -962,6 +962,11 @@ void MissionViewportApplier::show_(Placed &placed, bool shown) {
 
 void MissionViewportApplier::drop_entities_() {
 	terrain_->set_static_shadow_placer(Ref<MissionObjectPlacer>());
+	// The husks go with what they stood in for (an individual one's with its intact model, a graft here).
+	for (auto &entry : husks_)
+		if (entry.second.intact == 0)
+			if (ObjectModel *model = Object::cast_to<ObjectModel>(ObjectDB::get_instance(ObjectID(entry.second.model)))) model->queue_free();
+	husks_.clear();
 	for (auto &entry : entities_)
 		if (entry.second.lifted)
 			if (ObjectModel *model = model_of_(entry.second)) model->queue_free();
@@ -1344,7 +1349,114 @@ void MissionViewportApplier::tick(const opennova::editor::ViewportModel &viewpor
 	const std::shared_ptr<opennova::particle::EffectScene> &scene = mission_of(viewport).effects().scene();
 	if (effects_mounted_ && scene != effects_->scene()) effects_->show(scene);
 	apply_shots_(mission_of(viewport));
+	if (!build_) apply_husks_(mission_of(viewport), clock.ticks());
 	apply_listen_(mission_of(viewport));
+}
+
+void MissionViewportApplier::unhusk_(Husk &husk) {
+	if (ObjectModel *model = Object::cast_to<ObjectModel>(ObjectDB::get_instance(ObjectID(husk.model)))) {
+		model->set_visible(false);
+		model->queue_free();
+	}
+	for (const auto &child : husk.hidden_children)
+		if (Node3D *node = Object::cast_to<Node3D>(ObjectDB::get_instance(ObjectID(child.first)))) node->set_visible(child.second);
+	if (husk.intact == 0 && husk.key != 0 && placer_.is_valid()) placer_->show_static_instance(husk.key);
+	husk = Husk();
+	relight_pending_ = true;
+	picture_moved_();
+}
+
+void MissionViewportApplier::apply_husks_(const MissionViewport &mission, int32_t tick) {
+	// What the clock's tick husks: each destroyed item past its swap (none with no placement standing).
+	std::unordered_map<NodeId, opennova::editor::MissionHuskFrame> due;
+	if (placed_ && placer_.is_valid() && !mission.shots().shots().empty())
+		for (const opennova::editor::MissionShotDeath &death : mission.shots().deaths()) {
+			opennova::editor::MissionHuskFrame frame = opennova::editor::mission_husk_frame(death, tick);
+			if (frame.husked) due[death.row] = std::move(frame);
+		}
+	// A husk no longer due, or whose entity stands otherwise now (lifted, hidden, placed again): let go.
+	for (auto it = husks_.begin(); it != husks_.end();) {
+		const auto now = due.find(it->first);
+		const auto placed = entities_.find(it->first);
+		const bool stands = now != due.end() && now->second.husk == it->second.husk && placed != entities_.end() &&
+				!placed->second.hidden && placed->second.model == it->second.intact &&
+				(it->second.intact != 0 || placed->second.key == it->second.key) &&
+				ObjectDB::get_instance(ObjectID(it->second.model)) != nullptr;
+		if (stands) {
+			++it;
+			continue;
+		}
+		unhusk_(it->second);
+		it = husks_.erase(it);
+	}
+	for (const auto &entry : due) {
+		const NodeId row = entry.first;
+		const opennova::editor::MissionHuskFrame &frame = entry.second;
+		const auto found = entities_.find(row);
+		if (found == entities_.end() || found->second.hidden) continue;
+		const Placed &placed = found->second;
+		Husk &husk = husks_[row];
+		ObjectModel *model = Object::cast_to<ObjectModel>(ObjectDB::get_instance(ObjectID(husk.model)));
+		if (model == nullptr) {
+			// Swapped in as the game's destruction presenter swaps it (simulation/destruction_presenter.cpp's
+			// apply_husk_swap): an individual model's husk under it, its own parts hidden; a retained static's rows
+			// hidden and the husk grafted at its placed transform, its projection the static's.
+			const String graphic = opennova::to_gd(frame.husk);
+			husk = Husk();
+			husk.husk = frame.husk;
+			if (ObjectModel *intact = model_of_(placed)) {
+				model = placer_->build_model_from_graphic(graphic, String(), intact, String(), String(), true);
+				if (model == nullptr) {
+					husks_.erase(row);
+					continue;
+				}
+				model->set_name("HuskModel");
+				model->set_authored_lod_projection_owner(intact);
+				for (int i = 0; i < intact->get_child_count(); ++i) {
+					Node3D *child = Object::cast_to<Node3D>(intact->get_child(i));
+					if (child == nullptr || child == model) continue;
+					husk.hidden_children.emplace_back(child->get_instance_id(), child->is_visible());
+					child->set_visible(false);
+				}
+				husk.intact = intact->get_instance_id();
+			} else if (placed.key != 0) {
+				const Variant at = placer_->hide_static_instance(placed.key);
+				if (at.get_type() != Variant::TRANSFORM3D) {
+					husks_.erase(row);
+					continue;
+				}
+				model = placer_->build_model_from_graphic(graphic, String(), lifted_root_, String(), String(), true);
+				if (model == nullptr) {
+					placer_->show_static_instance(placed.key);
+					husks_.erase(row);
+					continue;
+				}
+				model->set_name(vformat("HuskModel_%d", int64_t(row)));
+				model->set_transform(Transform3D(at));
+				placer_->inherit_static_entity_projection(placed.key, model);
+				husk.key = placed.key;
+			} else {
+				husks_.erase(row);
+				continue;
+			}
+			husk.model = model->get_instance_id();
+			relight_pending_ = true;
+			picture_moved_();
+		}
+		// The destroy fade's registers and the sections the pieces left, as the game writes them each draw.
+		if (frame.ctrl != husk.ctrl) {
+			model->begin_ctrl_update();
+			for (const auto &held : husk.ctrl)
+				if (frame.ctrl.find(held.first) == frame.ctrl.end()) model->clear_ctrl_value(opennova::to_gd(held.first));
+			for (const auto &now : frame.ctrl) model->set_ctrl_value(opennova::to_gd(now.first), now.second);
+			model->end_ctrl_update();
+			husk.ctrl = frame.ctrl;
+		}
+		if (frame.hidden_sections != husk.sections) {
+			model->set_destroyed_section_mask(int64_t(frame.hidden_sections));
+			husk.sections = frame.hidden_sections;
+		}
+	}
 }
 
 void MissionViewportApplier::apply_shots_(const opennova::editor::MissionViewport &mission) {
