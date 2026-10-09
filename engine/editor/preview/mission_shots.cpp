@@ -17,7 +17,7 @@
 #include <runtime/mission/collision_resolve.h>
 #include <runtime/mission/item_traits.h>
 #include <runtime/mission/promote.h>
-#include <runtime/world/ammo_table_build.h>
+#include <runtime/mission/runtime_boot.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/destruction.h>
 #include <runtime/world/entity_pose.h>
@@ -283,18 +283,15 @@ bool MissionShots::build_(Run &run) {
 	run.index.mount_source(run.stamped);
 	run.store = std::make_unique<assets::AssetStore>(&run.index);
 	world::World &world = run.world;
-	// ammo.def and items.def as the mission load reads them [orig: AmmoDef_LoadAll @ 0x40B0B0; the item list's load].
-	std::vector<uint8_t> bytes;
-	def::DefAmmoFile ammo{};
-	if (!run.stamped->read("ammo.def", bytes) || bytes.empty() ||
-	    def::def_parse_ammo_memory(bytes.data(), bytes.size(), &ammo) != 0) {
+	// ammo.def and items.def as the mission load reads them: ammo.def through the load's own read
+	// (mission::read_ammo_table) [orig: AmmoDef_LoadAll @ 0x40B0B0; the item list's load].
+	if (mission::read_ammo_table(mission::boot_files_from_index(run.index), "ammo.def", world.tables.ammo) !=
+	    mission::DefTableRead::Read) {
 		why_ = "The project has no ammo.def the game reads: no round flies.";
 		reads_ = run.stamped->stamps();
 		return false;
 	}
-	world.tables.ammo = world::build_ammo_table(ammo);
-	def::def_free_ammo(&ammo);
-	bytes.clear();
+	std::vector<uint8_t> bytes;
 	if (run.stamped->read("items.def", bytes) && !bytes.empty() &&
 	    def::def_parse_items_memory(bytes.data(), bytes.size(), &run.items) == 0)
 		run.items_read = true;
@@ -480,7 +477,8 @@ void MissionShots::step_() {
 			// water handler's row where the plane was crossed first.
 			event.ground = setup_.ground->terrain_at(event.at[0], event.at[1], event.at[2]);
 			event.surface = event.ground.surface;
-			event.on = impact.effect_tag == world::kWaterImpactEffectTag && event.ground.surface + 4 != impact.effect_tag
+			event.on = impact.effect_tag == world::kWaterImpactEffectTag &&
+			                           world::terrain_impact_effect_tag(event.ground.surface) != impact.effect_tag
 			                   ? "water"
 			                   : "terrain";
 		}
