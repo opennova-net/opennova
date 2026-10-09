@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <optional>
 #include <random>
 #include <stdexcept>
 
@@ -311,30 +312,43 @@ MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p
 	}
 	std::string nwh = p.nwh.empty() ? std::string("1") : p.nwh;
 
-	// Detect duplicate-by-username / duplicate-by-pcid up front so we can
-	// return a useful error code instead of relying on sqlite's UNIQUE
-	// constraint violation text.
-	if (get_user_by_username(db, p.username)) {
-		return err("username_exists", "username already taken");
-	}
-	try {
+	// Detect duplicate-by-username / duplicate-by-pcid so we can return a
+	// useful error code instead of sqlite's UNIQUE constraint violation text.
+	auto duplicate = [&db, &p]() -> std::optional<MutationResult> {
+		if (get_user_by_username(db, p.username)) {
+			return err("username_exists", "username already taken");
+		}
 		auto rows = db.query(
 			"SELECT id FROM players WHERE pcid = ? LIMIT 1;",
 			{opennova::db::BindValue(p.pcid)});
-		if (!rows.empty()) {
-			return err("pcid_exists", "PCID already in use");
-		}
+		if (!rows.empty()) return err("pcid_exists", "PCID already in use");
+		return std::nullopt;
+	};
+
+	// Checked once before the hash, so a taken name or PCID (and each of
+	// /api/register's PCID retries) costs no bcrypt run.
+	try {
+		if (auto taken = duplicate()) return *taken;
 	} catch (const opennova::db::SqliteError &e) {
 		return err("db_error", e.what());
 	}
 
+	// Hash before the transaction below: bcrypt is slow, and the write lock
+	// the transaction holds stalls every other writer.
 	std::string hashed;
 	try {
 		hashed = hash_password(p.password);
 	} catch (const std::exception &e) {
 		return err("db_error", e.what());
 	}
+
+	// Checked again inside one transaction with the insert and the id read:
+	// a registration of the same username or PCID that raced past the first
+	// check still gets its error code, and last_insert_rowid() is this
+	// insert's.
 	try {
+		opennova::db::Transaction tx(db);
+		if (auto taken = duplicate()) return *taken;
 		db.exec(
 			"INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
 			"VALUES (?, ?, ?, ?, ?);",
@@ -343,13 +357,14 @@ MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p
 			 opennova::db::BindValue(p.pcid),
 			 opennova::db::BindValue(nwh),
 			 opennova::db::BindValue(p.nwhandle)});
+		MutationResult m;
+		m.ok = true;
+		m.id = db.last_insert_rowid();
+		tx.commit();
+		return m;
 	} catch (const opennova::db::SqliteError &e) {
 		return err("db_error", e.what());
 	}
-	MutationResult m;
-	m.ok = true;
-	m.id = db.last_insert_rowid();
-	return m;
 }
 
 MutationResult delete_user(opennova::db::Database &db, int64_t id) {

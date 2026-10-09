@@ -3432,6 +3432,22 @@ target_link_libraries(db_sqlite_test PRIVATE opennova_novaworld_service)
 target_include_directories(db_sqlite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME db_sqlite COMMAND db_sqlite_test)
 
+# One connection per thread under load (issue #981): registrations race host
+# writes and roster readers on one WAL file, each thread on its own pooled
+# connection. Compiles the server's auth.cpp (create_user) directly: it joins
+# opennova_novaworld_server_core only under BUILD_NOVAWORLD_HTTP, and this test
+# runs on every build.
+add_executable(db_concurrency_test
+    novaworld/db_concurrency_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/auth.cpp)
+target_link_libraries(db_concurrency_test
+    PRIVATE opennova_novaworld_service opennova_bcrypt Threads::Threads)
+target_include_directories(db_concurrency_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+target_compile_definitions(db_concurrency_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME db_concurrency COMMAND db_concurrency_test)
+
 # Phase A — ClientHello/ClientAuth serializer roundtrip
 add_executable(session_hello_roundtrip_test novaworld/session_hello_roundtrip_test.cpp)
 target_link_libraries(session_hello_roundtrip_test PRIVATE opennova_net)
@@ -3710,8 +3726,8 @@ target_compile_definitions(backend_schema_test PRIVATE OPENNOVA_SOURCE_DIR="${CM
 add_test(NAME backend_schema COMMAND backend_schema_test)
 
 # The service's HTTP route harness (hosted servers, PR A): the Crow listener from
-# opennova_novaworld_server_core on a loopback port over an in-memory DB under the
-# backend migrations, driven with apps/common's http_exchange. Only with the
+# opennova_novaworld_server_core on a loopback port over a pooled SQLite file under
+# the backend migrations, driven with apps/common's http_exchange. Only with the
 # HTTP layer (BUILD_NOVAWORLD_HTTP); the service edge is direct for the
 # sqlite-containment lint.
 if(BUILD_NOVAWORLD_HTTP)

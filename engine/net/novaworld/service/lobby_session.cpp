@@ -210,13 +210,24 @@ HostRosterSlot roster_slot_from_statement(const NapiMessage &msg) {
 	return s;
 }
 
-void persist_roster(opennova::db::Database *db, const LobbyState &state) {
-	if (!db || state.rid == 0) return;
+enum class HostRowWrite { Upsert, Update };
+
+// The host row and its roster in one transaction, so a reader's snapshot
+// (db::ReadSnapshot, as /api/hosts and the GSB feed take) never holds the row
+// beside a roster its player count disagrees with, or a roster caught between
+// replace_roster's delete and its last insert. A failure is logged and rolls
+// back both; the lobby keeps serving from its in-memory state.
+void persist_host(opennova::db::Database &db, HostRowWrite write,
+                  const hostdb::HostRow &row, const LobbyState &state, const char *what) {
 	try {
-		hostdb::replace_roster(*db, state.rid, state.roster);
+		opennova::db::Transaction tx(db);
+		if (write == HostRowWrite::Upsert) hostdb::upsert_host(db, row);
+		else                               hostdb::update_host(db, row);
+		if (state.rid != 0) hostdb::replace_roster(db, state.rid, state.roster);
+		tx.commit();
 	} catch (const std::exception &e) {
 		opennova::io::logf(opennova::io::LogLevel::kWarn,
-		"[lobby] WARN host_roster replace: %s", e.what());
+		"[lobby] WARN %s: %s", what, e.what());
 	}
 }
 
@@ -387,14 +398,9 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 		            name == "ClientHostPlayerAdded" ? "player_added" : "player_removed",
 		            state.rid, slot.slot, state.player_count, state.max_players);
 		if (db_ && state.rid != 0) {
-			try {
-				hostdb::update_host(*db_,
-					hostdb::row_from_lobby(state, remote_ip, /*peer_port=*/0));
-			} catch (const std::exception &e) {
-				opennova::io::logf(opennova::io::LogLevel::kWarn,
-			"[lobby] WARN active_hosts roster update: %s", e.what());
-			}
-			persist_roster(db_, state);
+			persist_host(*db_, HostRowWrite::Update,
+			             hostdb::row_from_lobby(state, remote_ip, /*peer_port=*/0), state,
+			             "active_hosts roster update");
 		}
 		return {{}, name};
 	}
@@ -549,14 +555,9 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 	// Persist so /jop_2.gsb + /api/hosts query SQL rather than the in-memory
 	// snapshot. db_ is null in tests.
 	if (db_) {
-		try {
-			hostdb::upsert_host(*db_,
-				hostdb::row_from_lobby(state, remote_ip, remote_port));
-		} catch (const std::exception &e) {
-			opennova::io::logf(opennova::io::LogLevel::kWarn,
-		"[lobby] WARN active_hosts upsert: %s", e.what());
-		}
-		persist_roster(db_, state);
+		persist_host(*db_, HostRowWrite::Upsert,
+		             hostdb::row_from_lobby(state, remote_ip, remote_port), state,
+		             "active_hosts upsert");
 	}
 
 	return {{std::move(reply)}, "ClientHostRequest"};
@@ -605,14 +606,9 @@ LobbyDispatchResult LobbySession::handle_client_host_update(
 	// pass 0 — the row already exists from the initial upsert with the right
 	// peer addr, and update_host() doesn't rely on peer_port for the WHERE.
 	if (db_) {
-		try {
-			hostdb::update_host(*db_,
-				hostdb::row_from_lobby(state, remote_ip, /*peer_port=*/0));
-		} catch (const std::exception &e) {
-			opennova::io::logf(opennova::io::LogLevel::kWarn,
-		"[lobby] WARN active_hosts update: %s", e.what());
-		}
-		persist_roster(db_, state);
+		persist_host(*db_, HostRowWrite::Update,
+		             hostdb::row_from_lobby(state, remote_ip, /*peer_port=*/0), state,
+		             "active_hosts update");
 	}
 
 	return {{}, "ClientHostUpdate"};

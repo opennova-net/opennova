@@ -1,10 +1,17 @@
-// The NovaWorld service's HTTP routes, driven in-process: an in-memory SQLite
-// under backend/migrations (plus the games seed), the Crow HttpListener from
-// opennova_novaworld_server_core on a free loopback port, and requests sent
-// through apps/common's http_exchange. Built only with BUILD_NOVAWORLD_HTTP.
-// The cases share one listener and run in order (the admin users case reads
-// the account the register case made); the Database is not thread-safe, so
-// the test thread touches it only between completed replies.
+// The NovaWorld service's HTTP routes, driven in-process: a SQLite file in the
+// run's temp directory under backend/migrations (plus the games seed), the
+// Crow HttpListener from opennova_novaworld_server_core on a free loopback
+// port, and requests sent through apps/common's http_exchange. Built only
+// with BUILD_NOVAWORLD_HTTP. The cases share one listener and run in order
+// (the admin users case reads the account the register case made; the
+// concurrent case runs last, since it adds accounts and a host).
+//
+// The listener and the test share one db::ConnectionPool, the way main() wires
+// the server: each Crow handler leases a connection for its request, and the
+// test thread leases its own for every direct read or write. A file rather
+// than a shared-cache in-memory URI: Crow runs handlers on several threads at
+// once, and shared cache's SQLITE_LOCKED skips the busy timeout a WAL file's
+// writers wait on.
 
 #include "auth.h"
 #include "http_listener.h"
@@ -15,6 +22,7 @@
 
 #include <net/novaworld/connection/manager.h>
 #include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/gsb.h>
 #include <net/novaworld/host_repository.h>
 
 #include <crow/json.h>
@@ -24,13 +32,18 @@
 #include "common/test_expect.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <exception>
 #include <filesystem>
+#include <mutex>
+#include <set>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #ifndef OPENNOVA_SOURCE_DIR
@@ -39,7 +52,7 @@
 
 namespace net = opennova::net;
 namespace nws = opennova::novaworld_server;
-using opennova::db::Database;
+using opennova::db::ConnectionPool;
 
 namespace {
 
@@ -48,7 +61,7 @@ constexpr const char *kBearer = "Authorization: Bearer harness-admin-token";
 constexpr const char *kJson = "Content-Type: application/json";
 
 struct Harness {
-	Database &db;
+	ConnectionPool &pool;
 	uint16_t port = 0;
 	std::string registered_pcid; // what the register case's reply carried
 
@@ -134,7 +147,10 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 	row.player_count = 2;
 	row.max_players = 32;
 	row.region = "us";
-	opennova::hostdb::upsert_host(h.db, row);
+	{
+		auto conn = h.pool.acquire();
+		opennova::hostdb::upsert_host(*conn, row);
+	}
 
 	reply = h.send("GET", "/api/lobbies");
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
@@ -173,12 +189,13 @@ int test_register_ok(Harness &h) {
 	TEST_EXPECT(user["id"].i() > 0);
 	h.registered_pcid = str(user["pcid"]);
 
-	const auto stored = nws::get_user_by_username(h.db, "harness");
+	auto conn = h.pool.acquire();
+	const auto stored = nws::get_user_by_username(*conn, "harness");
 	TEST_EXPECT(stored.has_value());
 	TEST_EXPECT(stored->id == user["id"].i());
 	TEST_EXPECT(stored->pcid == h.registered_pcid);
-	TEST_EXPECT(nws::authenticate_user(h.db, "harness", "pw-harness").has_value());
-	TEST_EXPECT(!nws::authenticate_user(h.db, "harness", "wrong").has_value());
+	TEST_EXPECT(nws::authenticate_user(*conn, "harness", "pw-harness").has_value());
+	TEST_EXPECT(!nws::authenticate_user(*conn, "harness", "wrong").has_value());
 	return 0;
 }
 
@@ -202,7 +219,7 @@ int test_register_duplicate(Harness &h) {
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(json && str(json["error"]) == "invalid_json");
 
-	TEST_EXPECT(nws::list_users(h.db).size() == 1);
+	TEST_EXPECT(nws::list_users(*h.pool.acquire()).size() == 1);
 	return 0;
 }
 
@@ -259,6 +276,172 @@ int test_admin_users_list(Harness &h) {
 	return 0;
 }
 
+// Concurrent requests, the shape that broke when every handler shared one
+// connection (#981): /api/register calls race /api/hosts and /jop_2.gsb reads
+// while the test rewrites one host's row and roster on its own lease, the way
+// the lobby session does (one transaction). Every registration's reply must
+// carry its own new account, and every host read must hold one write's row and
+// roster: the name, the Players count and every roster name from the same
+// generation.
+constexpr uint32_t kConcurrentRid = 2000;
+constexpr int kConcurrentRegistrations = 16;
+constexpr int kHostGenerations = 40;
+
+std::string generation_name(int generation, int slot) {
+	return "c" + std::to_string(generation) + "-s" + std::to_string(slot);
+}
+
+// The generation a "S-<n>" server name or a "c<n>-s<slot>" roster name carries, or -1.
+int generation_in(const std::string &text) {
+	std::size_t at = 0;
+	if (text.compare(0, 2, "S-") == 0) at = 2;
+	else if (text.compare(0, 1, "c") == 0) at = 1;
+	else return -1;
+	int value = 0;
+	bool digits = false;
+	for (; at < text.size() && text[at] >= '0' && text[at] <= '9'; ++at) {
+		value = value * 10 + (text[at] - '0');
+		digits = true;
+	}
+	return digits ? value : -1;
+}
+
+void write_generation(ConnectionPool &pool, int generation) {
+	opennova::hostdb::HostRow row;
+	row.rid = kConcurrentRid;
+	row.game = "jop_2_consumer";
+	row.server_name = "S-" + std::to_string(generation);
+	row.host_ip = "10.0.0.8";
+	row.host_port = 32768;
+	row.player_count = 1 + generation % 4;
+	row.max_players = 16;
+	std::vector<opennova::HostRosterSlot> roster;
+	for (int slot = 0; slot < row.player_count; ++slot) {
+		opennova::HostRosterSlot s;
+		s.slot = slot;
+		s.player_name = generation_name(generation, slot);
+		roster.push_back(std::move(s));
+	}
+	auto conn = pool.acquire();
+	opennova::db::Transaction tx(*conn);
+	opennova::hostdb::upsert_host(*conn, row);
+	opennova::hostdb::replace_roster(*conn, kConcurrentRid, roster);
+	tx.commit();
+}
+
+// One read's verdict: empty when the host it found agrees with itself.
+std::string check_host(const std::string &name, int players,
+                       const std::vector<std::string> &roster) {
+	const int generation = generation_in(name);
+	if (generation < 0) return "server name '" + name + "'";
+	if (players != 1 + generation % 4 || static_cast<int>(roster.size()) != players) {
+		return name + " with Players " + std::to_string(players) + " and " +
+		       std::to_string(roster.size()) + " roster names";
+	}
+	for (int slot = 0; slot < players; ++slot) {
+		if (roster[slot] != generation_name(generation, slot)) {
+			return name + " beside roster name '" + roster[slot] + "'";
+		}
+	}
+	return {};
+}
+
+int test_concurrent_requests(Harness &h) {
+	write_generation(h.pool, 0);
+
+	std::mutex mu;
+	std::vector<std::string> failures;
+	auto fail = [&mu, &failures](std::string line) {
+		std::lock_guard<std::mutex> lock(mu);
+		failures.push_back(std::move(line));
+	};
+	struct Registered {
+		std::string username;
+		int64_t id = 0;
+	};
+	std::vector<Registered> registered(kConcurrentRegistrations);
+	std::atomic<bool> writing{true};
+	std::atomic<int> host_reads{0};
+
+	std::vector<std::thread> threads;
+	for (int i = 0; i < kConcurrentRegistrations; ++i) {
+		threads.emplace_back([&h, &registered, &fail, i] {
+			const std::string username = "conc" + std::to_string(i);
+			const auto reply = h.send("POST", "/api/register", {kJson},
+			                          "{\"username\":\"" + username + "\",\"password\":\"pw\"}");
+			const auto json = crow::json::load(body_text(reply));
+			if (!reply.transport_ok || reply.code != 201 || !json || !json.has("user")) {
+				fail(username + ": HTTP " + std::to_string(reply.code) + " " + body_text(reply));
+				return;
+			}
+			if (str(json["user"]["username"]) != username) {
+				fail(username + ": the reply carried '" + str(json["user"]["username"]) + "'");
+			}
+			registered[i] = {username, json["user"]["id"].i()};
+		});
+	}
+	std::vector<std::thread> readers;
+	for (int r = 0; r < 3; ++r) {
+		readers.emplace_back([&h, &writing, &host_reads, &fail] {
+			while (writing.load()) {
+				const auto hosts = h.send("GET", "/api/hosts");
+				const auto json = crow::json::load(body_text(hosts));
+				if (!hosts.transport_ok || hosts.code != 200 || !json) {
+					fail("/api/hosts: HTTP " + std::to_string(hosts.code));
+					return;
+				}
+				for (const auto &e : json["hosts"]) {
+					if (e["rid"].i() != kConcurrentRid) continue;
+					std::vector<std::string> names;
+					for (const auto &s : e["roster"]) names.push_back(str(s["player_name"]));
+					const auto bad = check_host(str(e["server_name"]),
+					                            static_cast<int>(e["players"].i()), names);
+					if (!bad.empty()) fail("/api/hosts: " + bad);
+				}
+				const auto gsb = h.send("GET", "/jop_2.gsb");
+				opennova::GsbResponse parsed;
+				if (!gsb.transport_ok || gsb.code != 200 ||
+				    !opennova::gsb_parse_response(gsb.body.data(), gsb.body.size(), parsed)) {
+					fail("/jop_2.gsb: HTTP " + std::to_string(gsb.code));
+					return;
+				}
+				for (const auto &s : parsed.servers) {
+					if (s.rid != kConcurrentRid) continue;
+					const auto bad = check_host(s.server_name, s.players, s.player_names);
+					if (!bad.empty()) fail("/jop_2.gsb: " + bad);
+				}
+				host_reads.fetch_add(1);
+			}
+		});
+	}
+	for (int generation = 1; generation <= kHostGenerations; ++generation) {
+		try {
+			write_generation(h.pool, generation);
+		} catch (const std::exception &e) {
+			fail("host write " + std::to_string(generation) + ": " + e.what());
+		}
+	}
+	for (auto &t : threads) t.join();
+	writing.store(false);
+	for (auto &t : readers) t.join();
+
+	for (const auto &line : failures) std::fprintf(stderr, "  %s\n", line.c_str());
+	TEST_EXPECT(failures.empty());
+	TEST_EXPECT(host_reads.load() > 0);
+
+	// Every reply's id is that registration's own account, and no two share one.
+	auto conn = h.pool.acquire();
+	std::set<int64_t> ids;
+	for (const auto &r : registered) {
+		TEST_EXPECT(ids.insert(r.id).second);
+		const auto user = nws::get_user_by_id(*conn, r.id);
+		TEST_EXPECT(user && user->username == r.username);
+	}
+	TEST_EXPECT(nws::list_users(*conn).size() ==
+	            static_cast<std::size_t>(1 + kConcurrentRegistrations));
+	return 0;
+}
+
 // The static/catch-all family answers a path no root holds with 404.
 int test_unknown_path_404(Harness &h) {
 	const auto reply = h.send("GET", "/definitely/missing.txt");
@@ -276,6 +459,7 @@ int run(Harness &h) {
 		{"admin_server_status_requires_token", test_admin_server_status_requires_token},
 		{"admin_users_list", test_admin_users_list},
 		{"unknown_path_404", test_unknown_path_404},
+		{"concurrent_requests", test_concurrent_requests},
 	};
 	for (const Case &c : cases) {
 		std::printf("-- %s\n", c.name);
@@ -294,12 +478,19 @@ int main() {
 	int rc = 1;
 	{
 		const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
-		Database db(":memory:");
-		const auto migrated = opennova::db::run_migrations(db, source_dir / "backend" / "migrations");
-		TEST_EXPECT(!migrated.applied.empty());
-		// The games seed alone: no dev users, so the players table starts empty.
-		db.exec_script(test_io::read_file_text(
-				(source_dir / "backend" / "seed" / "0001_games.sql").string()));
+		// Declared first, so it outlives the pool and the listener: the database
+		// file and its WAL siblings go only once every connection is closed.
+		test_temp::TempDir temp("http_routes");
+		ConnectionPool pool(temp.path / "novaworld.db");
+		{
+			auto boot = pool.acquire();
+			const auto migrated =
+					opennova::db::run_migrations(*boot, source_dir / "backend" / "migrations");
+			TEST_EXPECT(!migrated.applied.empty());
+			// The games seed alone: no dev users, so the players table starts empty.
+			boot->exec_script(test_io::read_file_text(
+					(source_dir / "backend" / "seed" / "0001_games.sql").string()));
+		}
 
 		// A free loopback port: bind an ephemeral one, release it, hand it to Crow.
 		uint16_t port = 0;
@@ -308,7 +499,6 @@ int main() {
 			TEST_EXPECT(probe.is_valid() && port != 0);
 		}
 
-		test_temp::TempDir temp("http_routes");
 		nws::ServerConfig config;
 		config.public_host = "127.0.0.1";
 		config.admin_api_token = kAdminToken;
@@ -320,12 +510,12 @@ int main() {
 
 		opennova::ConnectionManager manager;
 		nws::SessionStore sessions;
-		nws::HttpListener http(manager, db, sessions);
+		nws::HttpListener http(manager, pool, sessions);
 		TEST_EXPECT(http.start(config));
 
-		Harness harness{db, port, {}};
+		Harness harness{pool, port, {}};
 		rc = run(harness);
-		http.stop(); // joins the Crow thread before the Database and the TempDir go
+		http.stop(); // joins the Crow thread before the pool and the TempDir go
 	}
 	net::shutdown();
 	if (rc == 0) std::printf("OK: http routes\n");
