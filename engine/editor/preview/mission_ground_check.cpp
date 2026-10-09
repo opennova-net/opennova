@@ -12,18 +12,11 @@
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/mission_source.h>
 #include <editor/project/project_document.h>
+#include <runtime/mission/mission_sidecars.h>
 
 namespace opennova::editor {
 
 namespace {
-
-// The mission's own name: the game reads <mission>.til beside it (MissionGround).
-std::string mission_name(const std::string &path) {
-	std::string name = path;
-	if (const size_t slash = name.find_last_of("/\\"); slash != std::string::npos) name.erase(0, slash + 1);
-	if (const size_t dot = name.find_last_of('.'); dot != std::string::npos) name.erase(dot);
-	return name;
-}
 
 std::shared_ptr<const MissionDocument> read_mission(const ValidationInput &input, const AssetEntry &asset) {
 	auto document = std::make_shared<MissionDocument>();
@@ -69,7 +62,10 @@ void MissionGroundCheck::check_(Mission &mission, const MissionDocument *documen
 	// Every file the rules read noted with its stamp, the terrain's and the people's clips included.
 	const std::shared_ptr<const FileSource> served(std::shared_ptr<const FileSource>(), &files);
 	const auto stamped = std::make_shared<StampedFiles>(served);
-	ground_->follow(stamped, ++generation_, scene.header(), mission_name(document->path()));
+	// The mission's own name: the game reads <mission>.til beside it (MissionGround), the name cut at its first dot
+	// as the game's extension swap cuts it (mission::mission_base_name) [orig: Path_ReplaceOrAppendExtension
+	// @ 0x53c780, the scan @ 0x53c7c4].
+	ground_->follow(stamped, ++generation_, scene.header(), mission::mission_base_name(document->path()));
 	mission.verdicts = mission_ground_verdicts(scene, *ground_, reads_, stamped);
 	mission.stamps = stamped->stamps();
 	for (const MissionGroundVerdict &verdict : mission.verdicts) {

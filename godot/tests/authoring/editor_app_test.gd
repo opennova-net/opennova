@@ -337,7 +337,10 @@ func test_play_dialog_plays_its_lines_in_turn() -> void:
 	assert_eq(String(voices[0].get("path", "")), "sounds/first.wav")
 	assert_false(voices[0].has("at"), "the first line at once")
 	var at := float(voices[1].get("at", 0.0))
-	assert_almost_eq(at, 0.7, 0.02, "the second after the first's half second and its fifth of a second")
+	# The game's timing (audio::DialogQueue, D-SND-42): the half-second first line holds
+	# 2 * ((62 * samples + rate) / rate) = 64 ticks, then waits for the channel, then the second
+	# line's DELAY 2 runs 62 * 2 / 10 = 12 ticks.
+	assert_almost_eq(at, 1.264, 0.02, "the second after the first's doubled hold and its delay's twelve ticks")
 	var deadline := Time.get_ticks_msec() + 5000
 	while _sound().get("state", "") != "playing" and Time.get_ticks_msec() < deadline:
 		OS.delay_msec(20)
