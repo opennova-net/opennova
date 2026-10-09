@@ -346,11 +346,9 @@ void EnvironmentViewportApplier::run_environment_(const EnvironmentViewport &mod
 		overrides.instantiate();
 		overrides->assign(opennova::env::bms_env_overrides_from_header(header.attrib_flags, header.water_override,
 				header.fog_override, header.fog_color, header.water_color, header.water_murk));
-		if (overrides->is_empty()) env->clear_mission_overrides();
-		else env->apply_mission_overrides(overrides);
+		env->apply_mission_overrides_or_clear(overrides);
 		environment_->set_environment_data(env);
-		water_->set_mission_water_height_override(
-				overrides->get_has_water_height() ? overrides->get_water_height_world() : NAN);
+		water_->set_mission_water_height_override(overrides->get_water_height_world_or_nan());
 	}
 	environment_->set_overcast_data(overcast);
 	// The texts the load read are the environment's whatever unit read one first (the .trn its terrain's units
@@ -597,12 +595,7 @@ void EnvironmentViewportApplier::overlay_frame_() {
 	auto submission = std::make_shared<SceneOverlaySubmission>();
 	submission->frame_id = ++overlay_frame_id_;
 	precipitation_->append_overlay(*submission);
-	if (water_->is_water_render_active() && shown_water_) {
-		const Vector3 lit = environment_->get_underwater_overlay_color();
-		const float rgb[3] = { float(lit.x), float(lit.y), float(lit.z) };
-		opennova::renderer::append_underwater_murk_overlay(rgb, uint8_t(environment_->get_underwater_overlay_alpha_byte()),
-				water_->get_water_height(), submission->frame);
-	}
+	if (water_->is_water_render_active() && shown_water_) append_underwater_murk_overlay(*environment_, *water_, *submission);
 	append_celestial_overlays(overlay_bodies_, *celestial_, *environment_, water_, *camera_, *submission);
 	if (water_->is_water_render_active() && shown_water_)
 		append_water_mirror_overlays(overlay_bodies_, celestial_, environment_, *water_, *submission);
@@ -616,8 +609,7 @@ void EnvironmentViewportApplier::present(double dt) {
 	water_->set_globals_held(false);
 	water_->set_mirror_enabled(shown_water_);
 	// The scene environment leg: the world pass's planes and the render eye's side of the water.
-	camera_->set_near(opennova::renderer::kScenePassNearZ);
-	camera_->set_far(opennova::renderer::scene_far_plane(environment_->get_fog_distance()));
+	environment_->apply_scene_pass_planes(*camera_);
 	const float eye_y = camera_->get_global_transform().origin.y;
 	const bool water_active = water_->is_water_active() && shown_water_;
 	environment_->apply_render_eye(eye_y, water_active ? water_->get_water_height() : 0.0f, water_active);
