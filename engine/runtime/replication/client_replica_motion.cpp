@@ -10,6 +10,7 @@
 
 #include <runtime/audio/sound_profile.h>            // kSlot* (the replica mover legs' profile slots)
 #include <runtime/terrain_query/height_field.h>        // remote-person terrain settle
+#include <runtime/world/collision.h>           // ground_probe_origin_z (the settle tail's probe origin)
 #include <runtime/world/entity.h>              // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 #include <runtime/world/infantry.h>            // IRootMotionSource + the anim flag/state tables
 #include <runtime/world/vehicle_motor.h>       // vehicle_chase_bucket (the vehicle-family interp bucket)
@@ -774,8 +775,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 				terrain::height_field_height_world_bilinear(
 						*terrain, world_x, world_z) *
 				65536.0f);
-		const int32_t probe_start = static_cast<int32_t>(
-				(static_cast<uint32_t>(es.z) + 0x17FFu) & ~0x17FFu);
+		const int32_t probe_start = world::ground_probe_origin_z(es.z);
 		int32_t resolved_ground = static_cast<int32_t>(
 				static_cast<uint32_t>(probe_start) - 0x20000u);
 		if (terrain_ground > resolved_ground &&

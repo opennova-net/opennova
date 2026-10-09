@@ -173,6 +173,52 @@ bool tga_decode_retail_into(const uint8_t *data, size_t size, uint8_t *rgba, std
 	return true;
 }
 
+// [orig: CTerrainTileData_LoadTGAFromArchive @ 0x56E570, the switch @ 0x56E6C2]
+TgaRetailForm tga_retail_form(const TgaHeader &header) {
+	const uint8_t type = header.image_type;
+	const bool known = type == 1 || type == 2 || type == 3 || type == 9 || type == 10 || type == 11;
+	if (!known || (type == 3 && header.bits != 8)) return TgaRetailForm::Unset;
+	if (type == 9 || type == 11 || ((type == 2 || type == 10) && header.bits != 24 && header.bits != 32) ||
+			(type == 1 && header.map_entry_bits != 24))
+		return TgaRetailForm::Zeroed;
+	return TgaRetailForm::Decoded;
+}
+
+// [orig: the 32-bit copy @ 0x56E796..0x56E7A5, the 24-bit expansion @ 0x56E74F, the
+//  run-length decode @ 0x56E7FB, @ 0x56E8B6]
+bool tga_reads_past_end(const TgaHeader &header, const uint8_t *data, size_t size) {
+	const uint64_t pixels = uint64_t(header.width) * header.height;
+	const uint64_t start = 18u + header.id_length;
+	const auto beyond = [&](uint64_t need) { return start + need > size; };
+	switch (header.image_type) {
+		case 1: return header.map_entry_bits == 24 && beyond(3ull * header.map_length + pixels);
+		case 2: return (header.bits == 24 || header.bits == 32) && beyond(pixels * (header.bits / 8u));
+		case 3: return header.bits == 8 && beyond(pixels);
+		case 10: {
+			if (header.bits != 24 && header.bits != 32) return false;
+			const uint64_t per = header.bits / 8u;
+			uint64_t at = start, pixel = 0;
+			while (pixel < pixels) {
+				if (at >= size || data == nullptr) return true;
+				const uint8_t packet = data[size_t(at++)];
+				// A raw packet's copy stops at the image's end; a run reads one pixel.
+				const uint64_t count = std::min<uint64_t>((packet & 0x7Fu) + 1u, pixels - pixel);
+				at += (packet & 0x80u) ? per : per * count;
+				pixel += count;
+				if (at > size) return true;
+			}
+			return false;
+		}
+		default: return false;
+	}
+}
+
+// [orig: @ 0x56E6BA]
+bool tga_colour_map_misread(const TgaHeader &header) {
+	const uint8_t type = header.image_type;
+	return (type == 2 || type == 3 || type == 10) && header.colour_map_type != 0 && header.map_length > 0;
+}
+
 bool tga_decode_retail(const uint8_t *data, size_t size, TgaImage &out, std::string &error,
 		TgaReaderForm form) {
 	out = TgaImage{};

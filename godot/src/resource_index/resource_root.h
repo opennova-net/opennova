@@ -39,7 +39,8 @@ public:
 
 	// The game's texture loaders, by the role that calls them (the engine's
 	// renderer::TextureLoader, same order; renderer/texture_load_rules.h says
-	// which file each opens and how it decodes it).
+	// which file each opens and how it decodes it). The engine's loaders past
+	// Particle name no file of their own and are not bound.
 	enum TextureLoader {
 		TEXTURE_LOADER_STAGE = 0,
 		TEXTURE_LOADER_PLAIN,

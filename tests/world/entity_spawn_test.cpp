@@ -39,6 +39,28 @@ int main() {
         entity_reset_to_spawn_state(e);
         CHECK(e.flags == 0x4u);
     }
+    // The classes whose definition callback is the organic init: the event-callback table's org0
+    // and org1 rows, by a whole-tag stricmp [orig: g_EntityClassEventCallbackTable @0x813018 /
+    // @0x813030].
+    {
+        CHECK(organic_init_class("org0") && organic_init_class("ORG1"));
+        CHECK(!organic_init_class("org2") && !organic_init_class("org") && !organic_init_class("org0 ") &&
+              !organic_init_class("plyr") && !organic_init_class("") && !organic_init_class(nullptr));
+    }
+    // A placed record's init facts: an `aidata` definition takes the waypoint as its route and
+    // channel and folds Guarding (2) to Flags 0x40; without the AI slot, neither [orig:
+    // Entity_SpawnFromBMSRecord @0x40ED4E, @0x40ED9F].
+    {
+        const OrganicSpawnFacts routed = organic_spawn_facts_from_record(true, 126, 0x2u | 0x4000u);
+        CHECK(routed.route && routed.route_channel == 126 && routed.flags == kEntityFlagMounted);
+        CHECK(!routed.rotor_wash && !routed.parented && routed.parent_phrase_set == 0);
+        const OrganicSpawnFacts idle = organic_spawn_facts_from_record(true, 0, 0);
+        CHECK(!idle.route && idle.route_channel == 0 && idle.flags == 0);
+        const OrganicSpawnFacts no_slot = organic_spawn_facts_from_record(false, 126, 0x2u);
+        CHECK(!no_slot.route && no_slot.route_channel == 0 && no_slot.flags == 0);
+    }
+    // The warmup settles a body standing under one unit [orig: @0x4B8BE7 cmp 10000h].
+    CHECK(kOrganicWarmupSettleQ16 == 0x10000);
     std::printf("entity_spawn: %s\n", failures == 0 ? "OK" : "FAILED");
     return failures == 0 ? 0 : 1;
 }

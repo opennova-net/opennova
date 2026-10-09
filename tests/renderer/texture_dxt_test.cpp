@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <vector>
 
 using namespace opennova::renderer;
@@ -238,9 +239,45 @@ void test_box_filter() {
 	CHECK(half.size() == 1 && bits(half[0].r) == bits(r), "the box sum order");
 }
 
+// A DDS's levels as D3DX reads them: a DXT1's and a DXT5's blocks decoded through the codec, a level count
+// leaving the rest coded, a form dds_read decodes itself left as it read it.
+void test_dds_levels() {
+	std::vector<uint8_t> rgba(8 * 8 * 4);
+	for (size_t i = 0; i < rgba.size(); ++i) rgba[i] = static_cast<uint8_t>(i * 7);
+	for (const TextureDxtFormat format : {TextureDxtFormat::Dxt1, TextureDxtFormat::Dxt5}) {
+		const std::vector<DxtSurface> surfaces = build_dxt_texture_levels(rgba.data(), 8, 8, format, 4);
+		std::vector<std::vector<uint8_t>> blocks;
+		for (const DxtSurface &surface : surfaces) blocks.push_back(surface.blocks);
+		const uint32_t fourcc = format == TextureDxtFormat::Dxt1 ? opennova::dds::dds_fourcc('D', 'X', 'T', '1')
+		                                                         : opennova::dds::dds_fourcc('D', 'X', 'T', '5');
+		std::vector<uint8_t> file;
+		std::string error;
+		CHECK(opennova::dds::dds_write_dxt(fourcc, 8, 8, blocks, file, error), "a DXT file written");
+		opennova::dds::DdsImage image;
+		CHECK(opennova::dds::dds_read(file.data(), file.size(), image, error) && image.loads && image.levels.size() == 4,
+				"its chain read");
+		opennova::dds::DdsImage first = image;
+		CHECK(decode_dds_levels(file.data(), file.size(), image), "a DXT's texels decoded");
+		bool same = image.levels.size() == surfaces.size();
+		for (size_t i = 0; same && i < surfaces.size(); ++i)
+			same = image.levels[i].rgba == encode_rgba8(decode_dxt_surface(surfaces[i]));
+		CHECK(same, "each level its blocks decoded");
+		CHECK(decode_dds_levels(file.data(), file.size(), first, 1) && !first.levels[0].rgba.empty() &&
+				first.levels[1].rgba.empty(), "the first level alone");
+	}
+	std::vector<uint8_t> argb;
+	std::string error;
+	CHECK(opennova::dds::dds_write_a8r8g8b8(rgba.data(), 8, 8, argb, error), "an A8R8G8B8 file written");
+	opennova::dds::DdsImage plain;
+	CHECK(opennova::dds::dds_read(argb.data(), argb.size(), plain, error) && plain.format.decoded, "dds_read decodes it");
+	const std::vector<uint8_t> texels = plain.levels[0].rgba;
+	CHECK(decode_dds_levels(argb.data(), argb.size(), plain) && plain.levels[0].rgba == texels, "left as dds_read read it");
+}
+
 } // namespace
 
 int main() {
+	test_dds_levels();
 	test_format_selection();
 	test_level_count();
 	test_dxt1_blocks();

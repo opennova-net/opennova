@@ -35,6 +35,32 @@ bool envs_slot_sets(const DefItemDef &def, std::array<std::string, 4> &out) {
 	return true;
 }
 
+std::vector<std::string> envs_distinct_sets(const std::array<std::string, 4> &slot_sets) {
+	std::vector<std::string> out;
+	for (const std::string &set : slot_sets) {
+		if (set.empty()) continue;
+		bool named = false;
+		for (const std::string &held : out) named = named || held == set;
+		if (!named) out.push_back(set);
+	}
+	return out;
+}
+
+std::array<int32_t, 4> envs_slot_keys(const std::array<std::string, 4> &slot_sets,
+		const std::vector<std::string> &registered) {
+	std::array<int32_t, 4> keys = { -1, -1, -1, -1 };
+	for (size_t slot = 0; slot < slot_sets.size(); ++slot) {
+		if (slot_sets[slot].empty()) continue;
+		for (size_t i = 0; i < registered.size(); ++i) {
+			if (registered[i] == slot_sets[slot]) {
+				keys[slot] = static_cast<int32_t>(i);
+				break;
+			}
+		}
+	}
+	return keys;
+}
+
 std::vector<EnvsMarker> resolve_envs_markers(
 		const bms::File &mission, const DefItemsFile &items) {
 	std::vector<EnvsMarker> out;

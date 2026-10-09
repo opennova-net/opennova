@@ -60,6 +60,22 @@ inline int32_t envs_stagger_slot(size_t resolved_index) {
 	return static_cast<int32_t>(resolved_index & 0xFu);
 }
 
+// The sets a marker registers, each once: its slots' sets in slot order, one set
+// two slots name shared by both (the crossfade's same-set suppress compares the
+// slots' names [orig: Entity_UpdateEnvSoundEmitter @ 0x4a8080, the same-set test
+// @ 0x4a819d]); an empty slot names none. Names compare exactly. The embedder
+// registers those it can play (the sets its bank chain holds, each with a layer
+// whose wave it has) and keys the slots into them (envs_slot_keys); MissionAudio
+// and the editor's Listen assemble their markers through both.
+std::vector<std::string> envs_distinct_sets(const std::array<std::string, 4> &slot_sets);
+
+// Each time-of-day slot's key into `registered`, the sets a marker registered in
+// their order (AmbientMixer::add_marker's slot keys): the index of the set the
+// slot names, -1 for an empty slot or a set not registered, which is silent in
+// its hours.
+std::array<int32_t, 4> envs_slot_keys(const std::array<std::string, 4> &slot_sets,
+		const std::vector<std::string> &registered);
+
 // Every envs-class placed entity across all pools, in the canonical entity
 // walk order (markers, items, buildings, organics), with its four authored
 // time-of-day slot set names.

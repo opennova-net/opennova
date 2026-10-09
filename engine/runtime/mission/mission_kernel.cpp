@@ -472,17 +472,8 @@ int MissionKernel::install_infantry_anim(const std::string &adm_name,
 
 bool MissionKernel::load_weapon_table(const BootFileSource &files,
 		const assets::AssetStore *table_assets, const std::string &name) {
-	std::vector<uint8_t> bytes;
-	if (!files.valid() || !files.read_file(name, bytes)) return false;
 	DefWeaponsFile file = {};
-	// A SIGHTS row whose texture the mount lacks is no row [orig: the sights
-	// arm's FileSystem_FileExists @0x544AE2].
-	const DefFileProbe probe = {
-			[](const void *ctx, const char *name) {
-				return static_cast<const BootFileSource *>(ctx)->has_file(name);
-			},
-			&files};
-	if (def_parse_weapons_memory(bytes.data(), bytes.size(), &file, nullptr, &probe) != 0) return false;
+	if (read_weapon_defs(files, name, file) != DefTableRead::Read) return false;
 	world.tables.weapons = w::build_weapon_table(file,
 			table_assets != nullptr ? table_assets : &assets());
 	if (weapon_defs_ok) def_free_weapons(&weapon_defs);
@@ -519,12 +510,7 @@ bool MissionKernel::load_weapon_table(const BootFileSource &files,
 
 bool MissionKernel::load_ammo_table(const BootFileSource &files,
 		const std::string &name) {
-	std::vector<uint8_t> bytes;
-	if (!files.valid() || !files.read_file(name, bytes)) return false;
-	DefAmmoFile file = {};
-	if (def_parse_ammo_memory(bytes.data(), bytes.size(), &file) != 0) return false;
-	world.tables.ammo = w::build_ammo_table(file);
-	def_free_ammo(&file);
+	if (read_ammo_table(files, name, world.tables.ammo) != DefTableRead::Read) return false;
 	// The whiz radius rides the loaded sound sets (the boot mounts them first).
 	w::resolve_ammo_whiz_radii(world.tables.ammo, world.tables.sound_sets);
 	w::resolve_weapon_round_types(world.tables.weapons, world.tables.ammo);
@@ -883,8 +869,7 @@ bool MissionKernel::complete_mission_start() {
 	// first vehicle callback captures the respawn pose.
 	// [orig: Game_StartMission @0x525CB8..0x526095]
 	if (world.rules.projectile_authority) wac.execute_initial(world);
-	world.weather.mission_start_init();
-	for (int i = 0; i < 255; ++i) tick_weather();
+	world.weather.settle_mission_start([this] { tick_weather(); });
 	w::count_mission_units(world);
 	// The mission start's cine legs, after the unit census: every node gone,
 	// the end screen down, and on a first SP start the intro-cine leg

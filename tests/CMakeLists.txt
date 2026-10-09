@@ -352,6 +352,22 @@ target_include_directories(anim_skeletal_pose_test PRIVATE ${CMAKE_CURRENT_SOURC
 target_compile_features(anim_skeletal_pose_test PRIVATE cxx_std_17)
 add_test(NAME anim_skeletal_pose COMMAND anim_skeletal_pose_test)
 
+# ANIM skeletal FK: the parent-local pose globals (with the collision pose's
+# collapsed right-hand row) and a point or direction carried by a transform.
+add_executable(anim_skeletal_fk_test anim/skeletal_fk_test.cpp)
+target_link_libraries(anim_skeletal_fk_test PRIVATE opennova_runtime)
+target_include_directories(anim_skeletal_fk_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_skeletal_fk_test PRIVATE cxx_std_17)
+add_test(NAME anim_skeletal_fk COMMAND anim_skeletal_fk_test)
+
+# ANIM event bits: the trigger word's known mask and the end-pose record no
+# channel reads.
+add_executable(anim_event_bits_test anim/anim_event_bits_test.cpp)
+target_link_libraries(anim_event_bits_test PRIVATE opennova_runtime)
+target_include_directories(anim_event_bits_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_event_bits_test PRIVATE cxx_std_17)
+add_test(NAME anim_event_bits COMMAND anim_event_bits_test)
+
 # DEF tests
 add_executable(def_comment_strip_test def/def_comment_strip_test.cpp)
 target_link_libraries(def_comment_strip_test PRIVATE opennova_formats)
@@ -1136,12 +1152,20 @@ target_link_libraries(mission_seat_spec_extract_test PRIVATE opennova_runtime)
 target_include_directories(mission_seat_spec_extract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_seat_spec_extract COMMAND mission_seat_spec_extract_test)
 
+# The def tables through an embedder's files (runtime_boot: weapon.def with the
+# mount's SIGHTS test, ammo.def) and items.def's per-id first-row index.
+add_executable(mission_def_table_read_test mission/def_table_read_test.cpp)
+target_link_libraries(mission_def_table_read_test PRIVATE opennova_runtime)
+target_include_directories(mission_def_table_read_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_def_table_read COMMAND mission_def_table_read_test)
+
 # Object renderer/shader tests
 foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_wind light_runtime light_scene light_terrain_pass material_classify material_eval material_texture
         particle_atlas_contract particle_frame_compiler_contract render_order
         frame_fx_effects nvg_scope_lens q3_frame render_slot_shadow
         scene_overlay state_vectors tracer_frame precipitation_frame texture_dxt texture_load_rules
-        texture_registry texture_authoring d3dx_image_codecs device_texture texture_filter d3d9_raster shader_effect_info)
+        texture_registry texture_authoring d3dx_image_codecs device_texture texture_filter d3d9_raster shader_effect_info
+        texture_roles fixed_texture_names)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
     target_link_libraries(renderer_${test}_test PRIVATE opennova_runtime opennova_formats)
     target_include_directories(renderer_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1987,12 +2011,15 @@ foreach(name smallest minimal_effect multi_section multi_layer table_handles
         add_test(NAME particle_${name} COMMAND particle_${name}_test)
     endif()
 endforeach()
-foreach(name emitter emit_shape translate effect_scene_contract)
+# effect_pose pins the spawn poses every producer hands the scene; effect_closure
+# (mixed) one effect's closure and several folded, the retail leg every effect
+# of the install's catalog alike from its closure (OPENNOVA_JO_DIR).
+foreach(name emitter emit_shape translate effect_scene_contract effect_pose effect_closure)
     add_executable(particle_${name}_test particle/particle_${name}_test.cpp)
     target_link_libraries(particle_${name}_test PRIVATE opennova_runtime)
     target_include_directories(particle_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(particle_${name}_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-    if(name STREQUAL "smoke_all_fixtures")
+    if(name STREQUAL "effect_closure")
         opennova_add_mixed_test(particle_${name} COMMAND particle_${name}_test)
     else()
         add_test(NAME particle_${name} COMMAND particle_${name}_test)
@@ -2399,6 +2426,14 @@ target_include_directories(item_death_traits_resolve_test PRIVATE ${CMAKE_CURREN
 target_compile_features(item_death_traits_resolve_test PRIVATE cxx_std_17)
 add_test(NAME item_death_traits_resolve COMMAND item_death_traits_resolve_test)
 
+# The death schedule's def-side half: the death traits a def row carries, the
+# destroy fade's defaults, the class callbacks' numbers and names.
+add_executable(item_death_schedule_test world/item_death_schedule_test.cpp)
+target_link_libraries(item_death_schedule_test PRIVATE opennova_runtime)
+target_include_directories(item_death_schedule_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(item_death_schedule_test PRIVATE cxx_std_17)
+add_test(NAME item_death_schedule COMMAND item_death_schedule_test)
+
 # The collectors' render model, stamped where the model resolves (placed
 # entities) and carried on the decoded wire row's resolved shape.
 add_executable(render_model_resolve_test world/render_model_resolve_test.cpp)
@@ -2543,6 +2578,15 @@ if(MSVC)
     target_link_options(collision_test PRIVATE "/STACK:4194304")
 endif()
 add_test(NAME collision COMMAND collision_test)
+
+# The collision placement and probe helpers: the item scale, the placement from
+# mission eulers, a placed box, the ground-settle probe origin, the terrain
+# height under a column.
+add_executable(collision_placement_test world/collision_placement_test.cpp)
+target_link_libraries(collision_placement_test PRIVATE opennova_runtime)
+target_include_directories(collision_placement_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(collision_placement_test PRIVATE cxx_std_17)
+add_test(NAME collision_placement COMMAND collision_placement_test)
 
 add_executable(collision_vertical_test world/collision_vertical_test.cpp)
 target_link_libraries(collision_vertical_test PRIVATE opennova_runtime)

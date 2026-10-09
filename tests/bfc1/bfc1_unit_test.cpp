@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 #include "common/test_expect.h"
 
@@ -40,6 +41,17 @@ int main() {
     TEST_EXPECT(bfc1_uncompressed_size(invalid, sizeof(invalid), &uncompressed_size) == -1);
     out_size = sizeof(out);
     TEST_EXPECT(bfc1_decompress(invalid, sizeof(invalid), out, &out_size) == -1);
+
+    // Unpacked in place; bytes that are no BFC1 left as they are; a BFC1 that does not unpack
+    // refused, its bytes unchanged.
+    std::vector<uint8_t> packed(blob, blob + sizeof(blob));
+    TEST_EXPECT(bfc1_unpack(packed) && packed.size() == sizeof(expected) - 1 &&
+                std::memcmp(packed.data(), expected, packed.size()) == 0);
+    std::vector<uint8_t> plain(invalid, invalid + sizeof(invalid));
+    TEST_EXPECT(bfc1_unpack(plain) && plain == std::vector<uint8_t>(invalid, invalid + sizeof(invalid)));
+    std::vector<uint8_t> broken(blob, blob + 12);
+    const std::vector<uint8_t> before = broken;
+    TEST_EXPECT(!bfc1_unpack(broken) && broken == before);
 
     return 0;
 }

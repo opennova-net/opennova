@@ -205,9 +205,106 @@ void test_pixel_device_texture_levels() {
 	CHECK(pixel_device_texture_levels(nullptr, 16, 16, 0).empty(), "no pixels, no levels");
 }
 
+void test_model_row_device_texture() {
+	// A 2048 x 2048 32-bit TGA in slot 1 by the stage loader: whole at full detail, ten levels; halved
+	// twice at the lowest detail, once at 1, kept at 2.
+	DdsSource crate;
+	crate.width = crate.height = 2048;
+	const DeviceTexture full = model_row_device_texture(TextureLoader::Stage, 1, kObjectTexDetailFull, crate, false);
+	CHECK(full.format == DeviceTextureFormat::A8R8G8B8 && full.width == 2048 && full.levels == 10, "the crate at full detail");
+	CHECK(full.bytes > 21 * kMB && full.bytes < 22 * kMB, "21.3 MB with its chain");
+	CHECK(model_row_device_texture(TextureLoader::Stage, 1, 0, crate, false).width == 512 &&
+			model_row_device_texture(TextureLoader::Stage, 1, 1, crate, false).width == 1024 &&
+			model_row_device_texture(TextureLoader::Stage, 1, 2, crate, false).width == 2048, "the detail's halvings");
+	// A slot-3 normal map by the normal-map loader: capped at 512, the detail never halving it.
+	DdsSource arm;
+	arm.width = 4096;
+	arm.height = 64;
+	const DeviceTexture normal = model_row_device_texture(TextureLoader::Normal, 3, kObjectTexDetailFull, arm, false);
+	CHECK(normal.width == 512 && normal.height == 8 && model_row_device_texture(TextureLoader::Normal, 3, 0, arm, false).width == 512,
+			"the normal-map loader's 512 cap");
+	CHECK(model_row_texture_flags(TextureLoader::Normal, 3, 0) == kTextureFlagCap512 &&
+			model_row_texture_flags(TextureLoader::Plain, 1, 0) == kTextureFlagHalveTwice, "the loaders' flags");
+	// The same row by the stage loader in slot 3: whole at every level.
+	CHECK(model_row_device_texture(TextureLoader::Stage, 3, kObjectTexDetailFull, arm, false).width == 4096 &&
+			model_row_device_texture(TextureLoader::Stage, 3, 0, arm, false).width == 4096, "slot 3 has no detail word");
+	// A DDS by the stage loader: an opaque DXT5 counted as the DXT1 the game stores it as, its levels skipped
+	// at the lowest detail; a DXT5 holding an alpha stays one.
+	DdsSource solid;
+	solid.width = solid.height = 256;
+	solid.levels = 9;
+	solid.format = DeviceTextureFormat::Dxt5;
+	solid.dxt5_opaque = true;
+	const DeviceTexture dds = model_row_device_texture(TextureLoader::Stage, 1, kObjectTexDetailFull, solid, true);
+	CHECK(dds.format == DeviceTextureFormat::Dxt1 && dds.dxt5_as_dxt1, "an opaque DXT5 stored as DXT1");
+	const DeviceTexture lowest = model_row_device_texture(TextureLoader::Stage, 1, 0, solid, true);
+	CHECK(lowest.width == 64 && lowest.levels == 7, "two levels of its chain skipped");
+	DdsSource clear = solid;
+	clear.dxt5_opaque = false;
+	CHECK(model_row_device_texture(TextureLoader::Stage, 1, kObjectTexDetailFull, clear, true).format == DeviceTextureFormat::Dxt5,
+			"a DXT5 with an alpha stays DXT5");
+	// The plain and normal-map loaders build from pixels whatever the file.
+	CHECK(model_row_device_texture(TextureLoader::Normal, 3, kObjectTexDetailFull, solid, true).format ==
+			DeviceTextureFormat::A8R8G8B8 &&
+			model_row_device_texture(TextureLoader::Plain, 1, kObjectTexDetailFull, solid, true).format ==
+			DeviceTextureFormat::A8R8G8B8, "only the stage loader reads a DDS through D3DX");
+}
+
+void test_dds_format_and_side() {
+	CHECK(dds_device_format("DXT1") == DeviceTextureFormat::Dxt1, "DXT1");
+	CHECK(dds_device_format("DXT2") == DeviceTextureFormat::Dxt3 && dds_device_format("DXT3") == DeviceTextureFormat::Dxt3,
+			"DXT2 by DXT3's blocks");
+	CHECK(dds_device_format("DXT4") == DeviceTextureFormat::Dxt5 && dds_device_format("DXT5") == DeviceTextureFormat::Dxt5,
+			"DXT4 by DXT5's blocks");
+	CHECK(dds_device_format("A8R8G8B8") == DeviceTextureFormat::A8R8G8B8 && dds_device_format("") == DeviceTextureFormat::A8R8G8B8,
+			"A8R8G8B8, or no name");
+	CHECK(dds_device_format("R5G6B5") == DeviceTextureFormat::Uncompressed, "any other uncompressed");
+	// D3DX_DEFAULT's sides: each rounded up to a power of two.
+	CHECK(d3dx_default_texture_side(0) == 1 && d3dx_default_texture_side(1) == 1 && d3dx_default_texture_side(3) == 4 &&
+			d3dx_default_texture_side(256) == 256 && d3dx_default_texture_side(257) == 512, "the next power of two");
+}
+
+void test_box_chain() {
+	// 8 x 8 ends at 4 x 4, its texel the box filter's of the four under it (100 and 200 make 150).
+	std::vector<uint8_t> rgba(8 * 8 * 4, 0);
+	for (size_t i = 0; i < rgba.size(); i += 4) {
+		rgba[i] = static_cast<uint8_t>((i / 4) % 2 ? 200 : 100);
+		rgba[i + 3] = 255;
+	}
+	std::vector<DeviceTextureLevel> levels(1);
+	levels[0].width = levels[0].height = 8;
+	levels[0].rgba = rgba;
+	std::vector<DeviceTextureLevel> two = levels;
+	extend_box_chain(two, 2);
+	CHECK(two.size() == 2 && two[1].width == 4 && two[1].height == 4 && two[1].rgba[0] == 150 && two[1].rgba[3] == 255,
+			"one level of D3DX's box");
+	CHECK(two[1].rgba == box_filter_half_rgba8(rgba.data(), 8, 8), "the box of the level before");
+	std::vector<DeviceTextureLevel> all = levels;
+	extend_box_chain(all, 0);
+	CHECK(all.size() == 4 && all.back().width == 1 && all.back().height == 1, "on to 1 x 1");
+	extend_box_chain(all, 0);
+	CHECK(all.size() == 4, "a chain at 1 x 1 grows no more");
+	// Each level from the bytes the level before was stored as: level 2 is the box of level 1's bytes.
+	CHECK(all[2].rgba == box_filter_half_rgba8(all[1].rgba.data(), 4, 4), "from the stored bytes");
+	// A level type of int sides grows alike.
+	struct IntLevel {
+		int width = 0, height = 0;
+		std::vector<uint8_t> rgba;
+	};
+	std::vector<IntLevel> ints(1);
+	ints[0].width = 8;
+	ints[0].height = 2;
+	ints[0].rgba.assign(8 * 2 * 4, 77);
+	extend_box_chain(ints, 0);
+	CHECK(ints.size() == 4 && ints[1].width == 4 && ints[1].height == 1 && ints[3].width == 1, "a strip ends at 1 x 1");
+}
+
 } // namespace
 
 int main() {
+	test_model_row_device_texture();
+	test_dds_format_and_side();
+	test_box_chain();
 	test_pixel_device_texture_levels();
 	test_object_texdetail_flags();
 	test_pixel_halvings();

@@ -36,6 +36,38 @@ inline int footstep_slot(int32_t feet_z, int32_t water_z, bool on_entity,
 	return foot == 0 ? kSlotFootLGround : kSlotFootRGround;
 }
 
+// The ground a foot lands on, by the test that picks its slot (footstep_slot's
+// order: water over a nonzero plane, then standing on an entity, then snow,
+// then the ground) [orig: org2 @0x4b77c6-0x4b78a8].
+enum class FootSurface { Ground, Snow, Object, Water };
+
+// A state under the feet footstep_slot reads that comes to `surface`: the feet
+// under a water plane, a ground entity, the charmap's surface 3, else none of
+// them. The editor's clip preview steps its footsteps on a chosen surface
+// through it.
+struct FootState {
+	int32_t feet_z = 0;
+	int32_t water_z = 0;
+	bool on_entity = false;
+	int32_t surface_type = 0;
+};
+inline FootState foot_state_on(FootSurface surface) {
+	FootState state;
+	const bool water = surface == FootSurface::Water;
+	state.feet_z = water ? -1 : 0;
+	state.water_z = water ? 1 : 0;
+	state.on_entity = surface == FootSurface::Object;
+	state.surface_type = surface == FootSurface::Snow ? 3 : 0;
+	return state;
+}
+
+// The profile slot a footstep of `foot` (0 left, 1 right) plays on `surface`:
+// footstep_slot over foot_state_on's state.
+inline int footstep_slot_on(FootSurface surface, int foot) {
+	const FootState state = foot_state_on(surface);
+	return footstep_slot(state.feet_z, state.water_z, state.on_entity, state.surface_type, foot);
+}
+
 // Resolve one sound-profile SLOT to its authored set name for a body identified
 // only by its items.def type id — the wire body channel's equivalent of the
 // authority path's bound AiProfile index. Mirrors the witnessed fallback chain

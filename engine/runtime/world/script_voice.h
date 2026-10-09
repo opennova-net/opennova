@@ -16,6 +16,12 @@
 namespace opennova::world {
 class World;
 
+// The scripted voice's gain byte: the channel plays it as (210 * the dialogue
+// volume + 128) >> 8, 209 at full, through the distance curve
+// [orig: Wac_PlayScriptedVoiceWave @ 0x4ed688; Audio_UpdateAmbientStream
+// @ 0x4edb22] (ScriptVoiceChannel::frame).
+inline constexpr int32_t kScriptVoiceVolume = 210;
+
 class ScriptVoiceChannel {
 public:
     using FileReader = std::function<bool(const std::string &, std::vector<uint8_t> &)>;
@@ -33,7 +39,7 @@ public:
         int32_t max_distance = 0;
         bool channel_active = false;
         uint32_t pitch_q16 = 0x10000u;
-        int32_t volume = 210;
+        int32_t volume = kScriptVoiceVolume;
         // The anchor is a decoded remote row the world holds no entity for
         // (a joiner's speaker): its position rides track_row_anchor.
         bool row_anchor = false;
