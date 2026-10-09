@@ -352,6 +352,22 @@ target_include_directories(anim_skeletal_pose_test PRIVATE ${CMAKE_CURRENT_SOURC
 target_compile_features(anim_skeletal_pose_test PRIVATE cxx_std_17)
 add_test(NAME anim_skeletal_pose COMMAND anim_skeletal_pose_test)
 
+# ANIM skeletal FK: the parent-local pose globals (with the collision pose's
+# collapsed right-hand row) and a point or direction carried by a transform.
+add_executable(anim_skeletal_fk_test anim/skeletal_fk_test.cpp)
+target_link_libraries(anim_skeletal_fk_test PRIVATE opennova_runtime)
+target_include_directories(anim_skeletal_fk_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_skeletal_fk_test PRIVATE cxx_std_17)
+add_test(NAME anim_skeletal_fk COMMAND anim_skeletal_fk_test)
+
+# ANIM event bits: the trigger word's known mask and the end-pose record no
+# channel reads.
+add_executable(anim_event_bits_test anim/anim_event_bits_test.cpp)
+target_link_libraries(anim_event_bits_test PRIVATE opennova_runtime)
+target_include_directories(anim_event_bits_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_event_bits_test PRIVATE cxx_std_17)
+add_test(NAME anim_event_bits COMMAND anim_event_bits_test)
+
 # DEF tests
 add_executable(def_comment_strip_test def/def_comment_strip_test.cpp)
 target_link_libraries(def_comment_strip_test PRIVATE opennova_formats)

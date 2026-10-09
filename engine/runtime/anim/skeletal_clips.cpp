@@ -10,6 +10,7 @@
 #include <runtime/world/body_anim.h>
 
 #include <algorithm>
+#include <cstring>
 #include <string_view>
 #include <utility>
 
@@ -38,6 +39,45 @@ SkeletalClips::RestTransform rest_mul(
 	o.origin.z = a.rows[6] * b.origin.x + a.rows[7] * b.origin.y +
 			a.rows[8] * b.origin.z + a.origin.z;
 	return o;
+}
+
+anim::Vec3 rest_transform_point(const SkeletalClips::RestTransform &t,
+		const anim::Vec3 &point) {
+	anim::Vec3 out = rest_transform_direction(t, point);
+	out.x += t.origin.x;
+	out.y += t.origin.y;
+	out.z += t.origin.z;
+	return out;
+}
+
+anim::Vec3 rest_transform_direction(const SkeletalClips::RestTransform &t,
+		const anim::Vec3 &direction) {
+	const float *r = t.rows;
+	return anim::Vec3{
+			r[0] * direction.x + r[1] * direction.y + r[2] * direction.z,
+			r[3] * direction.x + r[4] * direction.y + r[5] * direction.z,
+			r[6] * direction.x + r[7] * direction.y + r[8] * direction.z};
+}
+
+void pose_globals(const std::vector<anim::PoseBone> &pose,
+		const std::vector<int> &parents, size_t count, int collapse_bone,
+		std::vector<SkeletalClips::RestTransform> &globals) {
+	count = std::min({count, pose.size(), parents.size()});
+	globals.assign(count, SkeletalClips::RestTransform{});
+	for (size_t i = 0; i < count; ++i) {
+		SkeletalClips::RestTransform local;
+		quat_to_mat3_rows(pose[i].rotation, local.rows);
+		local.origin = pose[i].origin;
+		if (collapse_bone >= 0 && i == static_cast<size_t>(collapse_bone)) {
+			std::memset(local.rows, 0, sizeof(local.rows));
+			globals[i] = local;
+			continue;
+		}
+		const int parent = parents[i];
+		globals[i] = parent >= 0 && static_cast<size_t>(parent) < i
+				? rest_mul(globals[static_cast<size_t>(parent)], local)
+				: local;
+	}
 }
 
 // Full affine inverse (cofactor basis inverse + rotated-negated origin) — the
