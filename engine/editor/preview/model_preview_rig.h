@@ -9,8 +9,10 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/model/node.h>
 #include <editor/preview/model_preview_camera.h>
+#include <base/resource_index/resource_index.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/anim/rig_files.h>
+#include <runtime/assets/asset_store.h>
 #include <runtime/anim/skeletal_clips.h>
 
 namespace opennova {
@@ -26,17 +28,16 @@ namespace opennova::editor {
 class AssetGraph;
 class Document;
 
-// The files a previewed rig reads (ADR 0046 S10p6): anim::RigFiles over the project's files
-// (the open documents standing in for theirs), looked up by the name the game's store looks
-// them up by (assets::asset_file_name), every read remembered with its stamp.
-class PreviewRigFiles : public anim::RigFiles {
-public:
-	explicit PreviewRigFiles(std::shared_ptr<const StampedFiles> files) : files_(std::move(files)) {}
-	std::shared_ptr<const adm::AdmFile> animation_map(const std::string &name) const override;
-	std::shared_ptr<const bad::BadFile> bone_animation(const std::string &name) const override;
-
-private:
-	std::shared_ptr<const StampedFiles> files_;
+// The files a previewed rig reads (ADR 0046 S10p6): the game's own store (assets::AssetStore,
+// the anim::RigFiles the mission loads through) mounted on the project's files (the open
+// documents standing in for theirs), as the weapon range mounts them: a table and a clip are
+// opened by the names the game's loads open, every read remembered with its stamp.
+struct PreviewRigFiles {
+	explicit PreviewRigFiles(std::shared_ptr<const StampedFiles> files);
+	PreviewRigFiles(const PreviewRigFiles &) = delete;
+	PreviewRigFiles &operator=(const PreviewRigFiles &) = delete;
+	ResourceIndex index;
+	assets::AssetStore store{&index};
 };
 
 // What an animation document plays on: a model and the table whose rig it binds (the
