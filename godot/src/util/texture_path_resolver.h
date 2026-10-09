@@ -74,15 +74,25 @@ godot::Ref<godot::Texture2D> load_material_image_from_bytes(
 inline constexpr float kUnboundedMaxLod = 1000.0f;
 float texture_max_lod(const godot::Ref<godot::Texture> &texture, uint32_t creation_flags = 0);
 
-// Upload the engine's material-specific pixel transform; generated textures
-// share the resolver's epoch and shutdown lifetime. A normal map (type 4 or 5)
-// is halved to renderer::kNormalMapSideCap.
+// The texture a material row's loader makes of its decoded file (`source`):
+// the engine's material-specific pixel transform uploaded (generated textures
+// share the resolver's epoch and shutdown lifetime), a normal map (type 4 or 5)
+// or the occlusion producer halved to renderer::kNormalMapSideCap. Null when
+// the loader makes nothing (no file decoded, a type or name no producer takes),
+// where the dispatcher binds missing_material_texture instead: what a row's
+// loader makes is what the texture registry keeps (renderer/texture_registry.h),
+// the checkerboard never.
 godot::Ref<godot::Texture> prepare_material_texture(
 		const godot::Ref<godot::Texture2D> &source,
 		const godot::String &name, uint8_t type);
 
+// A chunk producer's texture (types 16 to 18); null when the chunk does not load.
 godot::Ref<godot::Texture> prepare_material_chunk(
         const godot::PackedByteArray &bytes, uint8_t type);
+
+// The dispatcher's missing-texture checkerboard, bound where a row's loader made
+// nothing (renderer::missing_material_texture_rgba).
+godot::Ref<godot::Texture> missing_material_texture();
 
 // Case-insensitive lookup of a sidecar file (e.g. a .til) next to `dir`.
 godot::String resolve_sidecar_path(const godot::String &dir, const godot::String &filename, const char *ext);
@@ -92,6 +102,10 @@ godot::String resolve_sidecar_path(const godot::String &dir, const godot::String
 // caller (textures, models, scene files, sidecars) shares — no parallel scans.
 godot::String resolve_file_in_dir(const godot::String &dir, const godot::String &name);
 
+// One material row's texture of runtime `type` from `dir`: the texture registered under
+// the row's key in that directory's registry (renderer::texture_registry_key: the first
+// row of a key to load decides it), else what the row's own loader makes, registered;
+// the checkerboard when that loads nothing.
 godot::Ref<godot::Texture> load_material_texture_from_dir(
         const godot::String &dir, const godot::String &name, uint8_t type);
 
