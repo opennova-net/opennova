@@ -6,6 +6,7 @@
 
 #include <imgui.h>
 
+#include <base/io/os_path.h>
 #include <base/io/tick_rate.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
@@ -97,7 +98,7 @@ bool draw_animation_map_inspector(Workspace &workspace, const Document &document
 				std::string line = player.record + (player.first_person ? " (its first-person view)" : "");
 				if (!player.model.empty()) line += " on " + player.model;
 				if (!player.enemy_model.empty()) line += " (" + player.enemy_model + " as an enemy)";
-				use_line(workspace, player.edge, line + " (" + player.file.substr(player.file.find_last_of('/') + 1) + ")",
+				use_line(workspace, player.edge, line + " (" + io::utf8_file_name(player.file) + ")",
 				         id++);
 			}
 		}

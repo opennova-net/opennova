@@ -64,16 +64,18 @@ InstallCheck check_install(const std::string &root, const std::string &game) {
 	std::error_code ec;
 	out.exists = fs::is_directory(system_path(out.root), ec);
 	if (!out.exists) return out;
-	// The folder's own files by name, any case: the boot table's archives, a build's record.
+	// The folder's own files by name, any case: a build's record.
 	std::set<std::string> names;
 	for (fs::directory_iterator it(system_path(out.root), ec); !ec && it != fs::directory_iterator(); it.increment(ec)) {
 		std::error_code status;
 		if (it->is_regular_file(status)) names.insert(strutil::to_lower(utf8_of(it->path().filename())));
 	}
+	// The boot table's archives, each found without case (vfs_boot_archive_slots).
+	const std::vector<std::string> slots = vfs_boot_archive_slots(out.root);
 	std::vector<std::string> present;
-	for (const char *archive : kBootArchiveTable) {
-		if (names.count(archive)) present.push_back(archive);
-		else out.missing_archives.push_back(archive);
+	for (size_t slot = 0; slot < slots.size(); ++slot) {
+		if (slots[slot].empty()) out.missing_archives.push_back(kBootArchiveTable[slot]);
+		else present.push_back(kBootArchiveTable[slot]);
 	}
 	out.archives_present = !present.empty();
 	// A build the editor made: its record beside its archives, or anywhere inside a project's cache.

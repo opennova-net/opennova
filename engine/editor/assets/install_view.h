@@ -74,7 +74,7 @@ public:
 	// The file the project gets as `project_name` (compared without case, as the game compares
 	// names); null when the view has none.
 	const InstallFile *find(const std::string &project_name) const;
-	// The file as the game's loader is served it: an archive's member decoded (read_served), a loose
+	// The file as the game's loader is served it: an archive's member decoded (vfs_read_served), a loose
 	// file's bytes. False when it cannot be read.
 	bool read(const InstallFile &file, std::vector<uint8_t> &out) const;
 	// Its size as stored (an archive's entry, the file on the disk), without reading it.

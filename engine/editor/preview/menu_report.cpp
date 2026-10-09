@@ -1,7 +1,6 @@
 #include <editor/preview/menu_report.h>
 
 #include <cstddef>
-#include <cstdio>
 #include <map>
 #include <memory>
 #include <variant>
@@ -16,6 +15,7 @@
 #include <editor/session/finding_codes.h>
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
+#include <formats/mnu/mnu_layout.h>
 
 namespace opennova::editor {
 
@@ -75,12 +75,6 @@ const MenuScreenRender *render_of(const SessionView &view, const MnuDocument &do
 
 const char *render_status(const MenuScreenRender *render) {
 	return render ? menu_screen_status_token(render->status()) : "none";
-}
-
-std::string argb(uint32_t color) {
-	char text[9];
-	std::snprintf(text, sizeof(text), "%08X", static_cast<unsigned>(color));
-	return text;
 }
 
 // Where a finding comes from: its row's source (the asset graph's, the render check's, else its
@@ -164,7 +158,7 @@ io::JsonValue menu_widgets_to_json(const MnuDocument &document, const Node &scre
 		uint32_t colors[4] = {};
 		if (compiler.widget_font(index, &font, colors)) {
 			widget.set("font", json_string(font));
-			widget.set("text_color", json_string(argb(colors[menu::kStateDefault])));
+			widget.set("text_color", json_string(mnu::color_text(colors[menu::kStateDefault])));
 		}
 		widgets.push(std::move(widget));
 	}

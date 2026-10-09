@@ -7,6 +7,7 @@
 
 #include <base/io/file_time.h>
 #include <base/io/json.h>
+#include <base/io/os_path.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_run.h>
 
@@ -45,12 +46,6 @@ bool replaceable(const fs::path &dir, const std::string &project_id) {
 	if (fs::directory_iterator(dir, ec) == fs::directory_iterator() && !ec) return true;
 	io::JsonValue record;
 	return export_record_of(dir, project_id, record);
-}
-
-// Whether `inner` lies in `outer` (or is it), lexically.
-bool within(const fs::path &inner, const fs::path &outer) {
-	const fs::path relative = inner.lexically_normal().lexically_relative(outer.lexically_normal());
-	return !relative.empty() && *relative.begin() != "..";
 }
 
 io::JsonValue export_record(const ExportRequest &request, const std::vector<std::string> &files) {
@@ -120,7 +115,7 @@ bool remove_tree(const std::string &dir, std::string &reason) {
 
 ExportRun::ExportRun(ExportRequest request, RemoveTree remove_previous) :
 		request_(std::move(request)), remove_previous_(std::move(remove_previous)), streams_(std::make_unique<Streams>()) {
-	request_.export_dir = without_trailing_separator(request_.export_dir);
+	request_.export_dir = io::without_trailing_separator(request_.export_dir);
 	report_.export_dir = request_.export_dir;
 	staging_ = request_.export_dir + kExportStagingSuffix;
 	previous_ = request_.export_dir + kExportPreviousSuffix;
@@ -183,8 +178,8 @@ void ExportRun::check() {
 	std::error_code ec;
 	if (request_.build_dir.empty() || !fs::is_directory(system_path(request_.build_dir), ec))
 		return fail(CoreFinding::ExportWrite, "There is no build to export: build first.");
-	if (within(path_of(request_.export_dir), path_of(request_.build_dir)) ||
-	    within(path_of(request_.build_dir), path_of(request_.export_dir)))
+	if (io::path_lexically_within(path_of(request_.export_dir), path_of(request_.build_dir)) ||
+	    io::path_lexically_within(path_of(request_.build_dir), path_of(request_.export_dir)))
 		return fail(CoreFinding::ExportFolder,
 		            "An export cannot land in " + request_.export_dir + ", which holds the build or lies in it.");
 	// The person's folders are never written over: the folder, and a staging folder beside it, only
