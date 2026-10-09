@@ -12,8 +12,8 @@ add_library(opennova_formats STATIC
     # admincfg — admin.cfg, the remote-admin console's users and whitelist (read-only:
     # retail never writes it)
     ${CMAKE_CURRENT_SOURCE_DIR}/admincfg/admin_cfg.cpp
-    # aip — AI profile text (PARTIAL PORT: the two witnessed speed keys; the
-    # remainder is the ledgered D-AI-11(h) gap and lands here when witnessed)
+    # aip — AI profile text: every key of AIProfile_ParseProperty read, and the
+    # profile written from scratch over the file's modeled layout (textlayout)
     ${CMAKE_CURRENT_SOURCE_DIR}/aip/aip.cpp
     # avatars — Avatars.def
     ${CMAKE_CURRENT_SOURCE_DIR}/avatars/avatars.cpp
@@ -169,6 +169,10 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/tga/tga_read.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/tga/tga.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/tga/tga_source.cpp
+    # textlayout — the modeled layout of a line-oriented text file, which the
+    # noted writers of Avatars.def, charattr.def, score.ini and the AI profiles
+    # generate every byte from (ADR 0003, "model it, generate it")
+    ${CMAKE_CURRENT_SOURCE_DIR}/textlayout/text_layout.cpp
     # threedi — the .3di model format (3DI3 first-class, ADR 0027)
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_3di3_read.cpp   # 3DI3 -> Threedi3di3

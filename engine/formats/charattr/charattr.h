@@ -22,6 +22,8 @@
 #include <string_view>
 #include <vector>
 
+#include <formats/textlayout/text_layout.h>
+
 namespace opennova::charattr {
 
 inline constexpr size_t kClassCount = 16;
@@ -86,10 +88,14 @@ struct ClassRow {
 	int32_t arctic_cammo = 0;  // +52 ARCTIC_CAMMO
 	int32_t run_modifier = 0;  // +56 RUN_MODIFIER
 	// +60..+123: no key fills them; zero.
+	// The file's modeled layout this class was read with (textlayout: its section's note there); 0 for a class no
+	// file's layout names (written in the writer's form). No byte of the row.
+	uint64_t note = 0;
 };
 
 struct Table {
 	std::array<ClassRow, kClassCount> rows{};
+	uint64_t note = 0; // the file's own record in the layout the table was read with
 };
 
 // A class's camouflage item type id by its property: JUNGLE_CAMMO (10), DESERT_CAMMO (11) or ARCTIC_CAMMO
@@ -173,6 +179,10 @@ struct Reading {
 // does not: no shipped charattr.def is one). `reading`, when given, says where each value came from and
 // which sections are never read.
 bool read_table(const uint8_t *data, size_t size, Table &out, Reading *reading = nullptr);
+// The same read with the file's layout modeled (`notes` filled: each class's section a record, the lines the
+// loader read its values from its entries, every other line, an unread section's among them, read for
+// nothing; each class's note and the table's set).
+bool read_table(const uint8_t *data, size_t size, Table &out, Reading *reading, textlayout::Notes &notes);
 
 // charattr.def's text holding `table` (ADR 0003: from the table, not from any file's bytes), which
 // read_table reads back to the same table: each active class's section (CR LF line ends, the ConfigFile's)
@@ -184,5 +194,15 @@ bool read_table(const uint8_t *data, size_t size, Table &out, Reading *reading =
 // is no number; or for a text whose values the ConfigFile reader's pool of its words cannot take, which
 // would overrun the game's heap (configfile::data_strings_pool, ConfigFile_ParseText @ 0x7609e8).
 bool write_table(const Table &table, std::string &text, std::string &error);
+// The same text over the file's modeled layout where the table has one (the file as it was but for the lines of
+// a changed value: its comments, its spacing, a number's own spelling, the sections and lines the loader reads
+// nothing of; a key set anew after the key before it in the writer's order; a class added after the file's
+// classes in the writer's form). The text is read again: one that would not read back as the table (a key put
+// down where the section's cursor would not find it) is written in the writer's form, `rewritten` set.
+bool write_table(const Table &table, const textlayout::Notes *notes, std::string &text, std::string &error,
+                 bool *rewritten = nullptr);
+// The notes' lines modeled against what the writer puts down for the table as read (textlayout::model; the
+// noted read_table runs it last).
+void model_layout(const Table &table, textlayout::Notes &notes);
 
 } // namespace opennova::charattr

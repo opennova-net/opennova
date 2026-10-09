@@ -1,18 +1,25 @@
-// engine/formats/score — score.ini parse, canonical write, and the witnessed
-// row-index ladder.
+// engine/formats/score — score.ini read as ScoreConfig_LoadFile reads it, written as ScoreConfig_SaveFile
+// writes it, over the file's modeled layout (textlayout), and the witnessed row-index ladder.
 //
 // Committed fixture: fixtures/score/score_sample.ini, AUTHORED for this test
 // (not retail data). It carries three GAMETYPE blocks in the shipped file's
 // index order so the block-order-is-the-row-index rule and the index-0 -> 2
 // remap are both exercised, with the retail Co-op row's witnessed ENEMYKILL 5 /
-// MEDICSAVE 2.
+// MEDICSAVE 2. Read with its layout and written again it is itself, byte for
+// byte (its comments, its blank lines, its LF endings); a value changed changes
+// its one line.
 //
-// The retail sweep is gated the way tests/mission/mission_corpus_test.cpp
-// gates its corpus: with <OPENNOVA_JO_ASSETS>/score.ini extracted from a licensed
-// game installation this test additionally asserts it
-// parses, carries the 12 shipped blocks, and that its Co-op row 2 reads
-// ENEMYKILL 5 -- the value the S2C 0x81 score mirror reproduces in the retail
-// capture (5, 10, 20, ... 220). Unset, that half prints a skip line and passes.
+// The reader's lines: a line whose first or second character is '/' is read for
+// nothing, every other line's tokens split at white space with quotes dropped,
+// FIELD / VAR / EXP_FANFARE taking three tokens and a name of their tables, so a
+// line the game reads nothing of is never an error. A minted file (no source
+// text) is ScoreConfig_SaveFile's form.
+//
+// The retail leg (--retail) reads <OPENNOVA_JO_DIR>/score.ini: its 12 blocks, its
+// Co-op row 2's ENEMYKILL 5 (the value the S2C 0x81 score mirror reproduces in the
+// retail capture: 5, 10, 20, ... 220), and the writer's own form of it IS the
+// shipped file byte for byte (the game wrote it with these defaults), as is the
+// noted write.
 #include <formats/score/score.h>
 
 #include "common/file_io.h"
@@ -30,6 +37,33 @@ namespace {
 
 using namespace opennova;
 
+score::File parsed(const std::string &text) {
+	score::File file;
+	std::string error;
+	score::parse(reinterpret_cast<const uint8_t *>(text.data()), text.size(), file, error);
+	return file;
+}
+
+std::string text_of(const std::vector<uint8_t> &bytes) { return std::string(bytes.begin(), bytes.end()); }
+
+int lines_changed(const std::string &a, const std::string &b) {
+	const auto split = [](const std::string &t) {
+		std::vector<std::string> out;
+		size_t at = 0;
+		while (at < t.size()) {
+			const size_t end = t.find('\n', at);
+			out.push_back(t.substr(at, end == std::string::npos ? std::string::npos : end - at));
+			at = end == std::string::npos ? t.size() : end + 1;
+		}
+		return out;
+	};
+	const std::vector<std::string> x = split(a), y = split(b);
+	if (x.size() != y.size()) return -1;
+	int n = 0;
+	for (size_t i = 0; i < x.size(); ++i) n += x[i] != y[i];
+	return n;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -43,7 +77,7 @@ int main(int argc, char **argv) {
 	std::string error;
 	TEST_EXPECT(score::parse(bytes.data(), bytes.size(), file, error));
 	TEST_EXPECT(file.version == 40);
-	TEST_EXPECT(file.exp_fanfare[0] == 0 && file.exp_fanfare[1] == 0);
+	TEST_EXPECT(file.exp_fanfare[0] == 0 && file.exp_fanfare[1] == 0 && !score::exp_fanfare_kept(file));
 	TEST_EXPECT(file.blocks.size() == 3);
 
 	// Block ORDER is the engine's row index [orig: ScoreConfig_LoadScoringTableForGameType
@@ -51,6 +85,8 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(file.blocks[0].name == "COOP");
 	TEST_EXPECT(file.blocks[1].name == "TDM");
 	TEST_EXPECT(file.blocks[2].name == "COOP");
+	// A GAMETYPE's row is found by its name, the first of the twelve [orig: sub_52D850 @ 0x52D850].
+	TEST_EXPECT(score::game_type_row("coop") == 2 && score::game_type_row("TDM") == 1 && score::game_type_row("XYZ") == -1);
 
 	const score::GameTypeBlock *coop = score::block_at(file, 2);
 	TEST_EXPECT(coop != nullptr);
@@ -61,6 +97,10 @@ int main(int argc, char **argv) {
 		TEST_EXPECT(score::var_value(*coop, "NOPE", -7) == -7);
 		TEST_EXPECT(score::field_value(*coop, "NUMENEMYKILLS", -1) == 1);
 	}
+	// The tables [orig: the FIELD names @ 0x830240, the VAR names @ 0x830348].
+	TEST_EXPECT(score::field_id("NUMSUICIDES") == 1 && score::field_id("NUMLFPTAKEOVERS") == 32);
+	TEST_EXPECT(score::var_id("FIRE") == 0 && score::var_id("ENEMYKILL") == 3 && score::var_id("FRIENDLYKILL") == 2);
+	TEST_EXPECT(score::var_id("ALIVEQUANTUM") == 36 && score::var_id("ZONEQUANTUM") == 12);
 
 	// The witnessed ladder [orig: @0x52D300]. Objective Co-op is 0x30020.
 	TEST_EXPECT(score::row_for_game_type(0x30020) == 2);
@@ -74,9 +114,7 @@ int main(int argc, char **argv) {
 	// g_GameType == 8 selects 12, which the loader's own `<= 11` guard rejects.
 	TEST_EXPECT(score::row_for_game_type(8) == -1);
 
-	// Canonical write: the fixture is authored in canonical form, so the round
-	// trip is byte-exact. write() builds from scratch (ADR 0003) -- comments are
-	// deliberately not preserved, which is why only canonical input matches.
+	// The writer's own form: ScoreConfig_SaveFile's, reading back as the file, and a second write the same.
 	std::vector<uint8_t> encoded;
 	TEST_EXPECT(score::write(file, encoded, error));
 	score::File reparsed;
@@ -85,19 +123,50 @@ int main(int argc, char **argv) {
 	std::vector<uint8_t> encoded2;
 	TEST_EXPECT(score::write(reparsed, encoded2, error));
 	TEST_EXPECT(encoded == encoded2);
+	const std::string form = text_of(encoded);
+	TEST_EXPECT(form.rfind("//---------------------------------------------------\r\n// NovaLogic Score INI file\r\n", 0) == 0);
+	TEST_EXPECT(form.find("\r\nVERSION 40\r\n\r\nEXP_FANFARE 0 0\r\n\r\n// FIELD \"NUMSUICIDES\"\r\n") != std::string::npos);
+	TEST_EXPECT(form.find("\r\n\r\n\r\nGAMETYPE \"COOP\"\r\n\r\nFIELD \"NUMENEMYKILLS\" 1\r\n\r\nVAR \"ENEMYKILL\" 5\r\nVAR \"MEDICSAVE\" 2\r\n") !=
+	            std::string::npos);
 
-	// Malformed input is rejected, never silently dropped.
+	// The fixture read with its layout and written again is itself; one value changed, one line.
 	{
-		score::File bad;
-		const std::string src = "FIELD \"X\" 1\n";
-		TEST_EXPECT(!score::parse(reinterpret_cast<const uint8_t *>(src.data()),
-							  src.size(), bad, error));
-		const std::string src2 = "GAMETYPE \"A\"\nVAR \"X\"\n";
-		TEST_EXPECT(!score::parse(reinterpret_cast<const uint8_t *>(src2.data()),
-							  src2.size(), bad, error));
+		textlayout::Notes notes;
+		score::File noted;
+		TEST_EXPECT(score::parse(bytes.data(), bytes.size(), noted, error, notes));
+		std::vector<uint8_t> out;
+		bool rewritten = true;
+		TEST_EXPECT(score::write(noted, &notes, out, error, &rewritten) && !rewritten);
+		TEST_EXPECT(out == bytes);
+		noted.blocks[2].vars[0].value = 7;
+		TEST_EXPECT(score::write(noted, &notes, out, error, &rewritten));
+		TEST_EXPECT(!rewritten);
+		TEST_EXPECT(lines_changed(text_of(bytes), text_of(out)) == 1);
+		TEST_EXPECT(score::var_value(parsed(text_of(out)).blocks[2], "ENEMYKILL", -1) == 7);
+		// A FIELD added: its line after the block's last FIELD, in the writer's form and the file's ending.
+		noted.blocks[1].fields.push_back({"NUMDEATHS", 1, 0});
+		TEST_EXPECT(score::write(noted, &notes, out, error, &rewritten));
+		TEST_EXPECT(!rewritten);
+		TEST_EXPECT(text_of(out).find("GAMETYPE \"TDM\"\n\nFIELD \"NUMENEMYKILLS\" 1\nFIELD \"NUMDEATHS\" 1\n") != std::string::npos);
+		TEST_EXPECT(score::equal(parsed(text_of(out)), noted));
 	}
 
-	// --- retail sweep: <OPENNOVA_JO_DIR>/score.ini, the score table the install
+	// What the reader reads nothing of is no error: a FIELD outside any GAMETYPE, a VAR of two tokens, a name
+	// its table lacks, a line whose second character is '/'.
+	{
+		const score::File none = parsed("FIELD \"NUMDEATHS\" 1\nGAMETYPE \"A\"\nVAR \"FIRE\"\nVAR \"NOPE\" 3\n /VAR \"FIRE\" 2\n");
+		TEST_EXPECT(none.blocks.size() == 1 && none.blocks[0].name == "A" && none.blocks[0].fields.empty() &&
+		            none.blocks[0].vars.empty());
+		// A VAR read twice keeps its last value; a FIELD of a byte keeps its byte; a fanfare of 1 2 is kept.
+		const score::File twice = parsed("GAMETYPE \"DM\"\r\nVAR \"FIRE\" 1\r\nVAR \"fire\" 4\r\nFIELD \"NUMDEATHS\" 300\r\nEXP_FANFARE 1 2\r\n");
+		TEST_EXPECT(twice.blocks[0].vars.size() == 1 && twice.blocks[0].vars[0].value == 4);
+		TEST_EXPECT(twice.blocks[0].fields[0].value == 44 && score::exp_fanfare_kept(twice));
+		score::File refused = twice;
+		refused.blocks[0].fields.push_back({"NOPE", 1, 0});
+		TEST_EXPECT(!score::write(refused, encoded, error) && error.find("NOPE") != std::string::npos);
+	}
+
+	// --- retail: <OPENNOVA_JO_DIR>/score.ini, the score table the install
 	// ships loose beside its archives (never inside a .pff, so never in an
 	// extracted tree) ---
 	const std::string install = retail::install();
@@ -108,29 +177,35 @@ int main(int argc, char **argv) {
 	} else {
 		const std::vector<uint8_t> rbytes = test_io::read_file(retail_ini.c_str());
 		TEST_EXPECT(!rbytes.empty());
-		{
-			score::File rfile;
-			TEST_EXPECT(score::parse(rbytes.data(), rbytes.size(), rfile, error));
-			TEST_EXPECT(rfile.blocks.size() == 12);
-			const score::GameTypeBlock *rcoop = score::block_at(rfile, 2);
-			TEST_EXPECT(rcoop != nullptr && rcoop->name == "COOP");
-			if (rcoop != nullptr)
-				TEST_EXPECT(score::var_value(*rcoop, "ENEMYKILL", -1) == 5);
-			// The 0 -> 2 remap is only unobservable because the shipped blocks
-			// 0 and 2 agree; assert that rather than assume it.
-			const score::GameTypeBlock *r0 = score::block_at(rfile, 0);
-			if (r0 != nullptr && rcoop != nullptr) {
-				score::File a, b;
-				a.blocks.push_back(*r0);
-				b.blocks.push_back(*rcoop);
-				TEST_EXPECT(score::equal(a, b));
-			}
-			std::vector<uint8_t> renc;
-			score::File rre;
-			TEST_EXPECT(score::write(rfile, renc, error));
-			TEST_EXPECT(score::parse(renc.data(), renc.size(), rre, error));
-			TEST_EXPECT(score::equal(rfile, rre));
+		score::File rfile;
+		TEST_EXPECT(score::parse(rbytes.data(), rbytes.size(), rfile, error));
+		TEST_EXPECT(rfile.blocks.size() == 12);
+		const score::GameTypeBlock *rcoop = score::block_at(rfile, 2);
+		TEST_EXPECT(rcoop != nullptr && rcoop->name == "COOP");
+		if (rcoop != nullptr) TEST_EXPECT(score::var_value(*rcoop, "ENEMYKILL", -1) == 5);
+		// The 0 -> 2 remap is only unobservable because the shipped blocks
+		// 0 and 2 agree; assert that rather than assume it.
+		const score::GameTypeBlock *r0 = score::block_at(rfile, 0);
+		if (r0 != nullptr && rcoop != nullptr) {
+			score::File a, b;
+			a.blocks.push_back(*r0);
+			b.blocks.push_back(*rcoop);
+			TEST_EXPECT(score::equal(a, b));
 		}
+		// The writer's own form is the shipped file, byte for byte: the game wrote it [orig: ScoreConfig_SaveFile @
+		// 0x52CDD0].
+		std::vector<uint8_t> renc;
+		TEST_EXPECT(score::write(rfile, renc, error));
+		TEST_EXPECT(renc == rbytes);
+		textlayout::Notes notes;
+		score::File noted;
+		TEST_EXPECT(score::parse(rbytes.data(), rbytes.size(), noted, error, notes));
+		bool rewritten = true;
+		TEST_EXPECT(score::write(noted, &notes, renc, error, &rewritten) && !rewritten && renc == rbytes);
+		noted.blocks[3].vars[0].value += 1;
+		TEST_EXPECT(score::write(noted, &notes, renc, error, &rewritten) && !rewritten);
+		TEST_EXPECT(lines_changed(text_of(rbytes), text_of(renc)) == 1);
+		std::printf("retail: score.ini is the writer's own form byte for byte, and its noted write too; one VAR one line\n");
 	}
 
 	std::printf("score roundtrip tests passed\n");

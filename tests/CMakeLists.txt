@@ -426,7 +426,7 @@ foreach(test parse roundtrip)
     # The minted fixtures/avatars/synth_avatars.def carries the shape; the shipped
     # table is each test's OPENNOVA_JO_ASSETS reference leg.
     add_executable(avatars_${test}_test avatars/avatars_${test}_test.cpp)
-    target_link_libraries(avatars_${test}_test PRIVATE opennova_formats)
+    target_link_libraries(avatars_${test}_test PRIVATE opennova_base opennova_formats)
     target_include_directories(avatars_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_features(avatars_${test}_test PRIVATE cxx_std_17)
     opennova_add_mixed_test(avatars_${test} COMMAND avatars_${test}_test)
@@ -612,6 +612,21 @@ add_executable(score_roundtrip_test score/score_roundtrip_test.cpp)
 target_link_libraries(score_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(score_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(score_roundtrip COMMAND score_roundtrip_test)
+
+# The modeled layout of a line-oriented text file (formats/textlayout): a line's parts, a file generated
+# over its notes (a value, a set, a key anew, records swapped, gone and added), the writer's form without.
+add_executable(text_layout_test textlayout/text_layout_test.cpp)
+target_link_libraries(text_layout_test PRIVATE opennova_formats)
+target_include_directories(text_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME text_layout COMMAND text_layout_test)
+
+# The AI profiles' writer over the file's modeled layout (formats/aip, textlayout): a minted profile in
+# the writer's form, an authored file written again as it was, one value one line; --retail: every
+# shipped profile byte for byte.
+add_executable(aip_noted_test aip/aip_noted_test.cpp)
+target_link_libraries(aip_noted_test PRIVATE opennova_base opennova_formats)
+target_include_directories(aip_noted_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(aip_noted COMMAND aip_noted_test)
 
 # game.cfg: the minted fixtures/gamecfg/synth_game.cfg (Game_SaveConfig's
 # layout through gamecfg::write), its byte-exact load/write round trip, and the

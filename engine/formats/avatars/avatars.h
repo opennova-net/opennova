@@ -19,6 +19,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <formats/textlayout/text_layout.h>
+
 namespace opennova::avatars {
 
 /* ========================================================================= */
@@ -69,6 +71,7 @@ typedef struct AvatarPart {
     int sex;                  /* AvatarSex                                        [orig @ 0x57acec] */
     char (*raw_lines)[512];   /* unrecognized lines inside the block (superset) */
     size_t raw_lines_count;
+    uint64_t note;            /* its lines in the file's modeled layout (textlayout); 0 none */
 } AvatarPart;
 
 typedef struct AvatarPartSnapshot {
@@ -97,6 +100,7 @@ typedef struct AvatarCombo {
     AvatarPartSnapshot body;
     AvatarPartSnapshot arms;
     int has_arms;
+    uint64_t note;            /* its line in the file's modeled layout; 0 none */
 } AvatarCombo;
 
 /* ========================================================================= */
@@ -112,6 +116,7 @@ typedef struct AvatarDivision {
     size_t combos_count;
     char (*raw_lines)[512];   /* unrecognized lines inside the division block */
     size_t raw_lines_count;
+    uint64_t note;            /* its lines in the file's modeled layout; 0 none */
 } AvatarDivision;
 
 /* ========================================================================= */
@@ -129,6 +134,7 @@ typedef struct AvatarNationality {
     size_t divisions_count;
     char (*raw_lines)[512];   /* unrecognized lines directly in the nationality block (outside divisions) */
     size_t raw_lines_count;
+    uint64_t note;            /* its lines in the file's modeled layout; 0 none */
 } AvatarNationality;
 
 /* ========================================================================= */
@@ -142,6 +148,7 @@ typedef struct AvatarsFile {
     size_t nationalities_count;
     AvatarDiagnostic *diagnostics;
     size_t diagnostics_count;
+    uint64_t note;            /* the file's own record in its modeled layout; 0 none */
 } AvatarsFile;
 
 /* ========================================================================= */
@@ -168,5 +175,23 @@ void avatars_free(AvatarsFile *file);
  * back shifted. */
 int avatars_write(const AvatarsFile *file, char **out_data, size_t *out_size);
 void avatars_free_buffer(char *data);
+
+/* The parse with the file's layout modeled (textlayout, ADR 0003: "model it, generate it"): each record's
+ * lines (a part's, a nationality's, a division's, a combo's) its own, every line the walk reads nothing of
+ * (a comment, a blank, an unrecognized key, a refused block, a combo whose parts are not defined yet) read for
+ * nothing where it stands; each record's note set. */
+int avatars_parse_memory(const void *data, size_t size, AvatarsFile *out, textlayout::Notes &notes);
+
+/* avatars_write over the file's modeled layout: the file as it was but for the lines of a changed value (its
+ * comments, its spacing, a word's own spelling, the lines the walk reads nothing of); a line or a record put
+ * down anew after the one before it in the writer's order, in the writer's form; the records of a kind (the
+ * parts, the nationalities, a nationality's divisions, a division's combos) in the model's order. The text is
+ * read again: one that would not read back as the model is written in the writer's form, `rewritten` set.
+ * Returns as avatars_write. */
+int avatars_write(const AvatarsFile *file, const textlayout::Notes *notes, char **out_data, size_t *out_size,
+                  bool *rewritten);
+
+/* Whether two models read the same (their notes, diagnostics and the parts' resolved snapshots aside). */
+bool avatars_equal(const AvatarsFile &a, const AvatarsFile &b);
 
 } // namespace opennova::avatars
