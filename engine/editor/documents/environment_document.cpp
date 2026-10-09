@@ -868,11 +868,13 @@ NodeAddress EnvironmentDocument::terrain_key_address(size_t index) const {
 
 void EnvironmentDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
 	TableDocument::refine_field(address, use);
-	// The cloud layers through ARCHIVE [orig: Terrain_InitRenderingResources @ 0x578A97], each name made
-	// .pcx as the parser stores it [orig: TimeOfDay_ParseProperty @ 0x57CC41..0x57CC4B, sky_map2's
-	// @ 0x57CC83..0x57CC8D] (kTextureArgPcx).
-	if (use.reference == ReferenceKind::Texture && (use.schema->id == "sky_map1" || use.schema->id == "sky_map2"))
-		use.loader_arg = texture_role_arg(renderer::TextureRoleId::SkyCloud, kTextureArgPcx);
+	// The cloud layers through ARCHIVE, each name made .pcx as the parser stores it (kTextureArgPcx): the
+	// engine's renderer::env_key_texture_role [orig: Terrain_InitRenderingResources @ 0x578A97;
+	// TimeOfDay_ParseProperty @ 0x57CC41..0x57CC4B].
+	renderer::TextureRoleId sky = renderer::TextureRoleId::kCount;
+	bool made_pcx = false;
+	if (use.reference == ReferenceKind::Texture && renderer::env_key_texture_role(use.schema->id, sky, &made_pcx))
+		use.loader_arg = texture_role_arg(sky, made_pcx ? kTextureArgPcx : 0);
 	// A terrain key's value is the terrain's field of its keyword: its words, and the loader of a map's role (the
 	// terrain's own PolyTrn_InitTextures opens a map an environment names as it opens the .trn's).
 	if (address.kind == kTerrainKey && use.schema && use.schema->id == "value")
