@@ -14,6 +14,7 @@
 // FILENAME [orig: Mission_CompareMapNames @ 0x5628e0 — stricmp on entry+0].
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -33,9 +34,7 @@ struct Row {
 	// The header's single-select game-mode attrib bit (0 = none/SP). The
 	// retail table stores the derived session code word instead
 	// [orig: entry+4392 = the AI_GetTaskTypeFromFlags switch @ 0x5631f0..];
-	// that derivation is npwire's game_type::for_mission_mode, which the
-	// net-linking consumer applies — the runtime layer never includes net
-	// headers (the spawn_select.h layering rule).
+	// game_type_of derives it.
 	uint32_t game_mode = 0;
 	bool loose = false; // loose-scanned, not archived [orig: entry+4380]
 };
@@ -67,6 +66,22 @@ std::vector<Row> build(const ResourceIndex &index);
 // it (null: none, the header's embedded mission_name titling it), flagged loose.
 // [orig: MissionList_ScanAndBuildFromFiles @ 0x563170, the loose walk]
 Row loose_row(const std::string &file, const std::vector<uint8_t> &bms, const rtxt::File *text);
+// The loose leg's rows as build() makes them, from what an embedder reads itself: each `.bms` among
+// `names` (the others passed over, in `names`' order), its bytes from `read_bms` (a failed read: none,
+// the header zeroed), titled by the text table `read_text` loads for its text_table_name (false: none;
+// which table counts as lying beside it is the caller's rule: build()'s the install root's).
+// [orig: MissionList_ScanAndBuildFromFiles @ 0x563170, the loose walk]
+using ReadBms = std::function<bool(const std::string &name, std::vector<uint8_t> &out)>;
+using ReadText = std::function<bool(const std::string &bin, rtxt::File &out)>;
+std::vector<Row> loose_rows(const std::vector<std::string> &names, const ReadBms &read_bms,
+		const ReadText &read_text);
+// The catalog's order: by file name without case, rows of the same name in the order they came.
+// [orig: qsort(list, count, 0x11E8, Mission_CompareMapNames) @ 0x5635f0 -- Mission_CompareMapNames
+//  @ 0x5628e0, stricmp on entry+0; build() says why the port's sort is stable]
+void sort_rows(std::vector<Row> &rows);
+// The session game-type code word the retail table stamps per row: game_type::for_mission_mode over
+// the row's mode bit [orig: entry+4392, the AI_GetTaskTypeFromFlags switch @ 0x5631f0..].
+uint32_t game_type_of(const Row &row);
 // The `.bin` text table a mission's name pairs with, as the scan forms it (the extension after the
 // FIRST '.' replaced).
 // [orig: Path_ReplaceOrAppendExtension @ 0x53c780, called with "bin" @ 0x56345b]

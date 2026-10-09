@@ -70,4 +70,13 @@ inline constexpr AnimEventBit kAnimEventBits[] = {
 inline constexpr int kAnimEventBitCount = static_cast<int>(sizeof(kAnimEventBits) /
 		sizeof(kAnimEventBits[0]));
 
+// Every bit a reader tests: the table's masks together. A trigger word's other
+// bits make the body do nothing.
+inline constexpr uint32_t anim_event_known_mask() {
+	uint32_t mask = 0;
+	for (const AnimEventBit &bit : kAnimEventBits) mask |= bit.mask;
+	return mask;
+}
+inline constexpr uint32_t kAnimEventKnownMask = anim_event_known_mask();
+
 } // namespace opennova::anim

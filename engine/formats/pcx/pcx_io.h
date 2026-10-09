@@ -9,6 +9,30 @@
 
 namespace opennova {
 
+// The PCX header's fields as the file states them (the 128 bytes before the texels): the bits a
+// plane (byte 3), the sides from the window (bytes 4..11, xmax - xmin + 1 and ymax - ymin + 1),
+// the planes (byte 65) and the bytes a line (66).
+struct PcxHeader {
+	uint8_t bits = 0;
+	int width = 0;
+	int height = 0;
+	uint8_t planes = 0;
+	uint16_t bytes_per_line = 0;
+};
+// False when `size` is shorter than the 128-byte header or its first byte is not the 0x0A
+// manufacturer mark. No field is range-checked: each decoder applies its own limits.
+bool pcx_read_header(const uint8_t *data, size_t size, PcxHeader &out);
+
+// How an indexed image's rows fit the buffer the game's PCX reader writes them into: it decodes
+// each row to its bytes a line and writes them at a stride of the image's width, so a row longer
+// than the width runs into the next row and the last row's past the buffer (Overrun), and a
+// shorter one leaves the rest of each row as the buffer held it (Short) [orig:
+// Texture_LoadPCXFromPFF32 @ 0x56EA30, the rows @ 0x56ED70..0x56EDFC]. A three-plane image's rows
+// are read a plane at a time [orig: @ 0x56EB31] and fit (Exact). The reader takes 8 bits a plane
+// alone [orig: @ 0x56EABC]; this reads the rows of any depth.
+enum class PcxRowFit : uint8_t { Exact, Overrun, Short };
+PcxRowFit pcx_row_fit(const PcxHeader &header);
+
 bool decode_pcx_rgb(const uint8_t *data, size_t size, RgbImage &out, std::string &error);
 bool decode_pcx_indexed(const uint8_t *data, size_t size, IndexedImage8 &out, std::string &error);
 bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, std::string &error);

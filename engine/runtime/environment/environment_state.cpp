@@ -849,15 +849,27 @@ Rgb EnvironmentState::derive_skyfog_render_color(const Rgb &fog_raw,
 	return double_rgb(blended);
 }
 
-bool read_mission_env(const FileSource &files, const std::string &terrain_file,
-		const std::string &environment_file, MissionEnv &out) {
-	const EnvTextReader read = [&files](const std::string &name, std::string &text) {
+namespace {
+
+EnvTextReader text_reader(const FileSource &files) {
+	return [&files](const std::string &name, std::string &text) {
 		std::vector<uint8_t> bytes;
 		if (!files.read(name, bytes)) return false;
 		text.assign(bytes.begin(), bytes.end());
 		return true;
 	};
-	return read_mission_env(read, terrain_file, environment_file, out);
+}
+
+} // namespace
+
+bool read_mission_env(const FileSource &files, const std::string &terrain_file,
+		const std::string &environment_file, MissionEnv &out) {
+	return read_mission_env(text_reader(files), terrain_file, environment_file, out);
+}
+
+bool load_mission_env_config(const FileSource &files, const std::string &terrain,
+		const std::string &environment, const BmsEnvOverrides &overrides, MissionEnv &out) {
+	return load_mission_env_config(text_reader(files), terrain, environment, overrides, out);
 }
 
 } // namespace opennova::env

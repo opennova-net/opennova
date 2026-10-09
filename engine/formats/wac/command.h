@@ -27,6 +27,10 @@ struct CommandDef {
 // Flag bit semantics (faithful to the original record flags byte).
 inline constexpr bool cmd_is_condition(const CommandDef &c) { return (c.flags & 0xFE) == 0; }
 inline constexpr bool cmd_is_replicated(const CommandDef &c) { return (c.flags & 0x18) != 0; }
+// The help file's three lists test one bit each: 0x01 the triggers, 0x02 the actions, 0x04 the
+// debug commands. [orig: WacCmd_Help @0x4F6DE0 -> WacScript_DumpActionDefsToFile @0x4F0400 with
+// masks 1, 2, 4]
+inline constexpr bool cmd_is_action(const CommandDef &c) { return (c.flags & 0x02) != 0; }
 
 // The registry. 165 entries; index == bytecode command id.
 const CommandDef *wac_commands();

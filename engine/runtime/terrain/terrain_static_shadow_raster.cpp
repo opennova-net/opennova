@@ -1,5 +1,6 @@
 #include <runtime/terrain/terrain_static_shadow_raster.h>
 
+#include <runtime/renderer/material_classify.h>
 #include <runtime/terrain/row_stripes.h>
 
 // [orig: Terrain_CollectAndRenderTileModels @0x60D5BF..0x60DA4F:
@@ -482,10 +483,8 @@ void raster_rows(const PreparedTriangle &prepared, int row_begin, int row_end,
 			}
 			if (triangle.alpha_test_enabled) {
 				const float alpha_byte = source_alpha * 255.0f;
-				const bool admitted = triangle.alpha_test_inverted
-						? alpha_byte <= triangle.alpha_ref
-						: alpha_byte > triangle.alpha_ref;
-				if (!admitted) continue;
+				if (!renderer::alpha_test_passes(alpha_byte, triangle.alpha_ref,
+						triangle.alpha_test_inverted)) continue;
 			}
 			depth_buffer[pixel] = depth;
 			uint8_t &destination = temporary[pixel];

@@ -12,6 +12,8 @@
 #include <runtime/world/world.h>
 #include <base/io/fixed.h>
 #include <base/io/bam.h>
+#include <base/io/strutil.h>
+#include <formats/mission/bms.h>
 
 namespace opennova::world {
 
@@ -82,6 +84,22 @@ int32_t warm_up_channels(InfantryState &inf, uint32_t net_id, bool parented, IRo
 }
 
 } // namespace
+
+bool organic_init_class(const char *ai_function) {
+    return ai_function != nullptr &&
+           (strutil::iequals(ai_function, "org0") || strutil::iequals(ai_function, "org1"));
+}
+
+OrganicSpawnFacts organic_spawn_facts_from_record(bool ai_slot, int32_t waypoint_id,
+                                                  uint32_t bmsi_attributes) {
+    OrganicSpawnFacts facts;
+    if (!ai_slot) return facts;
+    facts.route = waypoint_id != 0;
+    facts.route_channel = waypoint_id;
+    if ((bmsi_attributes & static_cast<uint32_t>(bms::BmsiAttributeFlags::Guarding)) != 0)
+        facts.flags |= kEntityFlagMounted;
+    return facts;
+}
 
 int organic_spawn_state(const OrganicSpawnFacts &facts, const IRootMotionSource *source, int adm_id) {
     const auto available = [&](int state) {
@@ -194,7 +212,8 @@ void initialize_organic_ai(World &world, Entity &entity) {
                         inf.vel, inf.vel[2], frame.capsule_bottom, frame.capsule_top,
                         body->heading, 0, false, ai.is_authority, world.logic_tick,
                         inf.anim_state, infantry_anim_flags(inf.anim_state), body->health);
-                if (clearance < 65536) body->pos[2] = io::bam_sub(body->pos[2], clearance);
+                if (clearance < kOrganicWarmupSettleQ16)
+                    body->pos[2] = io::bam_sub(body->pos[2], clearance);
             }
             body->collide_state.skip_counter = 0;
         }

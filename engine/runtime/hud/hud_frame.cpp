@@ -18,8 +18,9 @@ namespace opennova::hud {
 
 namespace {
 
-constexpr float kDesignW = 1024.0f;
-constexpr float kDesignH = 768.0f;
+// The design space in the compiler's float arithmetic (hud_math.h).
+constexpr float kDesignW = static_cast<float>(kDesignWidth);
+constexpr float kDesignH = static_cast<float>(kDesignHeight);
 constexpr int kStanceFrames = 6;
 constexpr int kMaxCarriedMessages = 40; // [orig: Chat_RebuildDisplayBuffers @ 0x498bd0]
 

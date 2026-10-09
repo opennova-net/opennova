@@ -197,9 +197,7 @@ ParticleAtlasPageTexture particle_atlas_page_texture(const ParticleRgbaImage &pa
 	std::uint32_t width = static_cast<std::uint32_t>(page.width);
 	std::uint32_t height = static_cast<std::uint32_t>(page.height);
 	std::vector<std::uint8_t> base = page.rgba;
-	const std::uint32_t halvings = pixel_texture_halvings(width, height, creation_flags);
-	for (std::uint32_t i = 0; i < halvings && width > 1 && height > 1; ++i)
-		halve_rgba(base, width, height);
+	halve_rgba_times(base, width, height, pixel_texture_halvings(width, height, creation_flags));
 	// [orig: @ 0x6877BA..0x687801 (the count over the halved sides)]
 	const std::uint32_t count = texture_level_count(width, height, creation_flags);
 	if (texture.format != TextureDxtFormat::None) {
@@ -212,21 +210,8 @@ ParticleAtlasPageTexture particle_atlas_page_texture(const ParticleRgbaImage &pa
 	level0.height = static_cast<int>(height);
 	level0.rgba = std::move(base);
 	texture.rgba_levels.push_back(std::move(level0));
-	while (texture.rgba_levels.size() < count) {
-		const ParticleRgbaImage &above = texture.rgba_levels.back();
-		const std::uint32_t above_w = static_cast<std::uint32_t>(above.width);
-		const std::uint32_t above_h = static_cast<std::uint32_t>(above.height);
-		if (above_w <= 1 && above_h <= 1)
-			break;
-		// [orig: D3DXFilterTexture @ 0x6878BE, filter 5 (BOX)]
-		const std::vector<DxtColor> filtered =
-				box_filter_half(decode_rgba8(above.rgba.data(), above_w, above_h), above_w, above_h);
-		ParticleRgbaImage level;
-		level.width = static_cast<int>(std::max(1u, above_w / 2));
-		level.height = static_cast<int>(std::max(1u, above_h / 2));
-		level.rgba = encode_rgba8(filtered);
-		texture.rgba_levels.push_back(std::move(level));
-	}
+	// [orig: D3DXFilterTexture @ 0x6878BE, filter 5 (BOX)]
+	extend_box_chain(texture.rgba_levels, count);
 	return texture;
 }
 
@@ -458,6 +443,31 @@ ParticleAtlasBuild ParticleAtlasBuilder::build() const {
 		result.pages.push_back(std::move(working.page));
 	}
 	return result;
+}
+
+// [orig: CParticleManager_BuildTextureAtlases @ 0x5E8DB0]
+ParticleRgbaImage particle_atlas_paged_frame(const ParticleRgbaImage &frame, std::uint8_t type) {
+	ParticleAtlasBuilder builder;
+	builder.register_frame("graphic", type, frame);
+	const ParticleAtlasBuild build = builder.build();
+	ParticleRgbaImage out;
+	if (build.entries.empty() || !build.entries.front().placement.valid)
+		return out;
+	const ParticleAtlasPlacement &placed = build.entries.front().placement;
+	if (placed.page >= build.pages.size())
+		return out;
+	const ParticleRgbaImage &page = build.pages[placed.page].image;
+	out.width = placed.width;
+	out.height = placed.height;
+	out.rgba.resize(static_cast<std::size_t>(out.width) * static_cast<std::size_t>(out.height) * 4u);
+	for (int y = 0; y < placed.height; ++y)
+		for (int x = 0; x < placed.width; ++x)
+			for (int c = 0; c < 4; ++c)
+				out.rgba[(static_cast<std::size_t>(y) * static_cast<std::size_t>(out.width) +
+						static_cast<std::size_t>(x)) * 4u + static_cast<std::size_t>(c)] =
+						page.rgba[(static_cast<std::size_t>(placed.y + y) * static_cast<std::size_t>(page.width) +
+								static_cast<std::size_t>(placed.x + x)) * 4u + static_cast<std::size_t>(c)];
+	return out;
 }
 
 }  // namespace opennova::renderer

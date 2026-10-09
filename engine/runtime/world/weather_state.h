@@ -144,6 +144,10 @@ struct RainAmbientBody {
 // many it wrote to `out` (0 or 2).
 size_t rain_ambient_emitters(const WeatherState &weather, const RainAmbientBody &body,
                              SoundEmitterEvent out[2]);
+// The sets the rain's two loops play, by side: LPNV_RAIN_L (lane 1, x + 2 m),
+// LPNV_RAIN_R (lane 2, x - 2 m) [orig: the registry rows @ 0x82F590, read
+// @ 0x4b47df / @ 0x4b4894].
+inline constexpr const char *kRainAmbientSets[2] = { "LPNV_RAIN_L", "LPNV_RAIN_R" };
 
 struct WeatherState {
     env::WeatherCore core;
@@ -231,8 +235,18 @@ struct WeatherState {
     // the 0x2800000 step, the scalar + cloud-rate currents <- targets, the
     // recovered clamps (rain/overcast max 0xFFFF, step 0x1000; fog accel
     // 0xFF0000, max 1000 m). The 255 settle ticks that follow are the
-    // embedder's loop of full ticks.
+    // embedder's full ticks (settle_mission_start).
     void mission_start_init();
+    // The mission start's initializer and its settle: mission_start_init, then
+    // the 255 complete weather ticks before the mission runs, each `tick()`
+    // (the embedder's whole weather tick: the sim legs and whatever rides
+    // them) [orig: Environment_MissionStartInit @ 0x57f878..0x57f880].
+    static constexpr int kMissionStartSettleTicks = 255;
+    template <typename Tick>
+    void settle_mission_start(Tick &&tick) {
+        mission_start_init();
+        for (int i = 0; i < kMissionStartSettleTicks; ++i) tick();
+    }
     // A joiner's decoded phase-2 sample -> the TARGET globals
     // [orig: NapiNPClientMsg_0x00A case 2 @ 0x430244..0x43034c].
     void apply_wire_sample(const WeatherWireSample &sample);
@@ -256,6 +270,9 @@ struct WeatherState {
     // minute on the 8.24 clock. Not a witnessed handler — the WAC `tod`
     // math above keeps its 0x44444-per-minute truncation.
     void debug_set_time_of_day_minutes(double minute_of_day);
+    // That scrub's clock: the minute of the day (under 0 taken as 0) to the
+    // nearest 8.24 unit, the day wrapped.
+    static uint32_t tod_fixed24_from_minutes(double minute_of_day);
     void command_fog_type(int32_t type);                        // [orig: WacCmd_FogType @ 0x4eded0]
     void command_sun_fade(int32_t percent, int32_t seconds);    // [orig: WacCmd_SunFade @ 0x4edf10]
     void command_color_fade(int32_t seconds);                   // [orig: WacCmd_ColorFade @ 0x4edcb0]

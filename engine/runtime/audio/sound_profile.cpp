@@ -57,6 +57,12 @@ const char *sound_profile_slot_keyword(int slot) {
     return kSlotKeywords[slot];
 }
 
+int sound_profile_slot_of(std::string_view keyword) {
+    for (int slot = 0; slot < kSoundProfileSlotCount; ++slot)
+        if (strutil::iequals(keyword, kSlotKeywords[slot])) return slot;
+    return -1;
+}
+
 const char *sound_profile_loop_keyword(int index) {
     if (index < 0 || index >= kSoundProfileLoopParamCount) return nullptr;
     return kLoopKeywords[index];
@@ -131,17 +137,18 @@ size_t SoundProfileTable::parse(const char *text, size_t len) {
             // >= 0x40 test @ 0x52703F..0x527043, the terminator stored at [64]
             // @ 0x527045]. Further columns are free comment text, unread.
             const char *name = t.token(1);
-            if (std::strlen(name) >= 64) t.terminate_at(name + 64);
+            if (std::strlen(name) >= kSoundProfileNameBytes)
+                t.terminate_at(name + kSoundProfileNameBytes);
             cur->name.assign(name);
             return;
         }
         if (cur == nullptr) return;
-        for (int slot = 0; slot < kSoundProfileSlotCount; ++slot) {
-            if (!strutil::iequals(key, kSlotKeywords[slot])) continue;
+        if (const int slot = sound_profile_slot_of(key); slot >= 0) {
             // Column 1 = the sound-set name (24-byte engine slot), columns
             // 2/3 floats x65536, column 4 atol [orig: @ 0x5270f0-0x52718b].
             std::string_view set = t.token(1);
-            if (set.size() > 23) set = set.substr(0, 23);
+            if (set.size() >= kSoundProfileSetNameBytes)
+                set = set.substr(0, kSoundProfileSetNameBytes - 1);
             cur->set_names[slot].assign(set);
             cur->param2_q16[slot] = parse_q16(t.token(2));
             cur->param3_q16[slot] = parse_q16(t.token(3));
@@ -191,7 +198,8 @@ bool write_sound_profiles(const std::vector<SoundProfile> &profiles, std::string
     std::string text;
     for (const SoundProfile &profile : profiles) {
         const std::string named = "Sound profile \"" + profile.name + "\"";
-        if (profile.name.empty() || profile.name.size() >= 64 || !tokenizable(profile.name)) {
+        if (profile.name.empty() || profile.name.size() >= kSoundProfileNameBytes ||
+                !tokenizable(profile.name)) {
             error = profile.name.empty() ? "A sound profile has no name."
                                          : named + " cannot be written: a name holds at most 63 "
                                                    "characters and no quote or line break.";
@@ -227,7 +235,7 @@ bool write_sound_profiles(const std::vector<SoundProfile> &profiles, std::string
                 text += std::string("\t") + kSlotKeywords[slot] + "\r\n";
                 continue;
             }
-            if (set.size() > 23 || !tokenizable(set)) {
+            if (set.size() >= kSoundProfileSetNameBytes || !tokenizable(set)) {
                 error = named + "'s " + kSlotKeywords[slot] + " set \"" + set +
                         "\" cannot be written: a set name holds at most 23 characters and no "
                         "quote or line break.";
@@ -255,29 +263,29 @@ bool write_sound_profiles(const std::vector<SoundProfile> &profiles, std::string
     return true;
 }
 
-const SoundProfile *SoundProfileTable::find(const char *name) const {
-    const int i = index_of(name);
-    return i < 0 ? nullptr : &entries_[static_cast<size_t>(i)];
-}
-
-int SoundProfileTable::index_of(const char *name) const {
-    if (entries_.empty()) return -1;
+const SoundProfile *find_sound_profile(const std::vector<SoundProfile> &profiles, const char *name) {
+    if (profiles.empty()) return nullptr;
     if (name != nullptr) {
-        for (size_t i = 0; i < entries_.size(); ++i) {
-            if (strutil::iequals(entries_[i].name, name)) return static_cast<int>(i);
-        }
+        for (const SoundProfile &profile : profiles)
+            if (strutil::iequals(profile.name, name)) return &profile;
     }
     // Miss -> the first profile [orig: SoundProfile_FindSlotByName @ 0x526e30
     // returns the array base when no name matches].
-    return 0;
+    return &profiles.front();
+}
+
+const SoundProfile *SoundProfileTable::find(const char *name) const {
+    return find_sound_profile(entries_, name);
+}
+
+int SoundProfileTable::index_of(const char *name) const {
+    const SoundProfile *profile = find_sound_profile(entries_, name);
+    return profile == nullptr ? -1 : static_cast<int>(profile - entries_.data());
 }
 
 const SoundProfile *item_sound_profile(const std::vector<SoundProfile> &profiles, const char *authored) {
-    if (profiles.empty()) return nullptr;
-    const char *name = authored != nullptr && authored[0] != '\0' ? authored : "default";
-    for (const SoundProfile &profile : profiles)
-        if (strutil::iequals(profile.name, name)) return &profile;
-    return &profiles.front();
+    return find_sound_profile(profiles,
+            authored != nullptr && authored[0] != '\0' ? authored : "default");
 }
 
 } // namespace opennova::audio

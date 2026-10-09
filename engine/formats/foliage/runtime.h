@@ -20,6 +20,15 @@ namespace opennova::foliage {
 // Foliage_GenerateModelTileInstances @ 0x600980;
 // Foliage_UpdateModelTiles @ 0x601f50]
 
+// The placed tiles' keep-off test of a candidate: a definition with forceon
+// grows through them [orig: Foliage_GenerateInstances_0 @ 0x5FFFB6]; any other
+// is kept off where a placed tile's square meets the candidate's, this many
+// world units each way of it [orig: Foliage_PathBlockedByPlacedTile @ 0x606490].
+inline constexpr float kPlacedTileReach = 2.0f;
+inline bool placed_tiles_keep_off(uint8_t attrib_flags) {
+	return (attrib_flags & FOLIAGE_ATTRIB_FORCE_ON) == 0u;
+}
+
 struct Point2 {
 	float x = 0.0f;
 	float z = 0.0f;

@@ -70,6 +70,14 @@ struct ObjectMaterialClassification {
 	ObjectNormalSpace normal_space = ObjectNormalSpace::None;
 };
 
+// The alpha test a material's flag bit 0 turns on, as the device runs it: a texel is kept where
+// its alpha (0..255) is above the material's reference byte, or at or below it under the
+// inverted test (flag bit 1) [orig: CRenderBatchQueue_FlushBatches @ 0x5DA3A9..0x5DA401;
+// CGfxDevice_SetAlphaTestRef @ 0x6770a0].
+inline constexpr bool alpha_test_passes(float alpha, float reference, bool inverted) {
+	return inverted ? alpha <= reference : alpha > reference;
+}
+
 // Classify a material from its shader tag string + binary 3DI flag fields.
 // `material_flags` is the MTRL flags byte (THREEDI_MATERIAL_FLAG_*);
 // `emissive_type` is 2 for *_LUM variants; `is_glass_flag` mirrors the

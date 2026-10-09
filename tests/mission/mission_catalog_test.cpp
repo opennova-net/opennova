@@ -18,6 +18,7 @@
 
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include <base/gameprofile/game_type.h>
 #include <formats/mission/bms.h>
 #include <formats/pff/pff.h>
 #include <runtime/mission/mission_catalog.h>
@@ -302,6 +303,41 @@ int main() {
 	const std::vector<catalog::Row> loose_rows = catalog::build(loose_index);
 	TEST_EXPECT(loose_rows.size() == 5u);
 	for (const catalog::Row &row : loose_rows) TEST_EXPECT(row.loose);
+
+	// The loose leg over an embedder's own reads (loose_rows): each .bms among the names
+	// in their order, its table where the caller's read_text answers, a failed read a
+	// zeroed header; then the catalog's order (sort_rows) and each row's session code word.
+	{
+		const std::vector<uint8_t> bravo = bms_blob("Bravo Header Name",
+				static_cast<uint32_t>(AttribFlags::Coop));
+		const std::vector<uint8_t> bravo_bin = info_bin("Bravo Op", "Read beside it.");
+		const std::vector<std::string> names = { "Bravo.bms", "notes.txt", "Able.BMS", "gone.bms" };
+		std::vector<std::string> asked;
+		std::vector<catalog::Row> own = catalog::loose_rows(names,
+				[&](const std::string &name, std::vector<uint8_t> &bytes) {
+					if (name == "Bravo.bms") bytes = bravo;
+					else if (name == "Able.BMS") bytes = bms_blob("Able Header Name", 0);
+					else return false;
+					return true;
+				},
+				[&](const std::string &bin, opennova::rtxt::File &text) {
+					asked.push_back(bin);
+					std::string error;
+					return bin == "Bravo.bin" && opennova::rtxt::parse(bravo_bin.data(), bravo_bin.size(), text, error);
+				});
+		TEST_EXPECT(own.size() == 3u);
+		TEST_EXPECT((asked == std::vector<std::string>{ "Bravo.bin", "Able.bin", "gone.bin" }));
+		TEST_EXPECT(own[0].file == "Bravo.bms" && own[0].loose && own[0].title == "Bravo Op" &&
+				own[0].briefing == "Read beside it." &&
+				own[0].game_mode == static_cast<uint32_t>(AttribFlags::Coop));
+		TEST_EXPECT(own[1].file == "Able.BMS" && own[1].title == "Able Header Name");
+		TEST_EXPECT(own[2].file == "gone.bms" && own[2].title.empty() && own[2].game_mode == 0u);
+		catalog::sort_rows(own);
+		TEST_EXPECT(own[0].file == "Able.BMS" && own[1].file == "Bravo.bms" && own[2].file == "gone.bms");
+		TEST_EXPECT(catalog::game_type_of(own[1]) ==
+				opennova::game_type::for_mission_mode(static_cast<uint32_t>(AttribFlags::Coop)));
+		TEST_EXPECT(catalog::game_type_of(own[0]) == opennova::game_type::for_mission_mode(0));
+	}
 
 	// Release the mounted archive handles before deleting the fixture tree
 	// (an open .pff makes remove_all throw).

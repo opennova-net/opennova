@@ -1,7 +1,6 @@
 #include "mission/mission_catalog.h"
 
 #include <runtime/mission/mission_catalog.h>
-#include <base/gameprofile/game_type.h>
 
 #include "resource_index/resource_root.h"
 #include "util/string_convert.h"
@@ -61,14 +60,11 @@ TypedArray<MissionCatalogRow> MissionCatalog::rows(const Ref<ResourceRoot> &p_ro
 	}
 	for (const opennova::mission_catalog::Row &row :
 			opennova::mission_catalog::build(p_root->engine_index())) {
-		// The session code-word stamp the retail table carries per row is
-		// game_type::for_mission_mode over the header's mode bit (the engine
-		// catalog stays below the net layer, so the stamp happens here).
+		// The session code-word stamp the retail table carries per row.
 		out.push_back(MissionCatalogRow::create(opennova::to_gd(row.file),
 				opennova::to_gd(row.title),
 				opennova::to_gd(row.briefing),
-				static_cast<int64_t>(
-						opennova::game_type::for_mission_mode(row.game_mode)),
+				static_cast<int64_t>(opennova::mission_catalog::game_type_of(row)),
 				row.loose));
 	}
 	return out;

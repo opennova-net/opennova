@@ -271,6 +271,27 @@ CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_b
 // @0x43b56c..0x43b5bd; Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale
 // @0x614210; Math_BuildFixedPointMatrixFromEulerAngles @0x613f40].
 CollisionMatrix entity_placement_matrix(const Entity &e);
+// The uniform item scale on a placement matrix: each of the nine rotation
+// entries times `scale_q16` (a 64-bit product >> 16), the translation kept;
+// 0 leaves the matrix unscaled. Retail's placement and pose matrices already
+// carry it, so the polygon walker selects the matching scaled inverse.
+// [orig: Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale @0x614210:
+//  the scale rides the rotation diagonal]
+void collision_matrix_scale_rotation(CollisionMatrix &m, int32_t scale_q16);
+// The collision placement of an entity from its mission eulers (degrees; the
+// yaw the mission heading, bam_heading_from_mission_yaw_deg), its 16.16
+// position and its item scale (collision_matrix_scale_rotation): a pure-yaw
+// placement keeps the quantized-table heading path bit-for-bit, and one
+// authored with pitch or roll (a rock seated on a slope) takes the full Euler
+// matrix so the shell leans with the visual. [orig: the entity orientation
+// matrix @ 0x613f40 serves every collision query]
+CollisionMatrix collision_matrix_from_placement(double yaw_deg, double pitch_deg,
+                                                double roll_deg, const int32_t pos[3],
+                                                int32_t scale_q16);
+// A local box (min x, y, z, then max x, y, z; 16.16) as `matrix` places it:
+// the world box its eight corners span.
+void collision_matrix_box_bounds(const CollisionMatrix &matrix, const int32_t local_box[6],
+                                 int32_t min_out[3], int32_t max_out[3]);
 // That matrix's live Euler triple (BAM32 heading, pitch, roll), shared with
 // the render-slot march start (renderer::slot_march_start_offset), which
 // builds the same rotation without the scale.
@@ -327,6 +348,21 @@ bool terrain_clip_segment(const terrain::TerrainHeightField &field, const int32_
 //  terrain leg @0x413760 (no candidates)]
 int32_t terrain_settle_clearance(const terrain::TerrainHeightField *field, const int32_t pos[3],
                                  int32_t capsule_bottom, bool indoors);
+
+// The ground-settle tail's probe origin: Z raised to the 6144 grid,
+// (z + 6143) & ~0x17FF in 32-bit two's complement. Every port of the tail
+// starts its 2.0 u ground column here.
+// [orig: Entity_MovementCollisionResolver @0x4B3D6E..0x4B3DA9]
+inline int32_t ground_probe_origin_z(int32_t z) {
+    return static_cast<int32_t>((static_cast<uint32_t>(z) + 0x17FFu) & ~0x17FFu);
+}
+
+// The terrain's height under (x, y), 16.16: a vertical column through the
+// whole span, which the heightfield clip writes the terrain height into
+// whatever the ray's reach; false with no field or no terrain under it.
+// [orig: Terrain_RaycastHeightmapLoRes @0x60cc12..0x60cc2d]
+bool terrain_column_height(const terrain::TerrainHeightField *field, int32_t x, int32_t y,
+                           int32_t &height);
 
 // ----------------------------------------------------------------------------
 // Per-query blink accumulation. [orig: g_BlinkFlagsAccum @ 0xB57C70,

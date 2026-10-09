@@ -185,4 +185,11 @@ private:
 	std::vector<RegisteredFrame> frames_;
 };
 
+// A graphic as its atlas page holds it: registered alone and built as the game builds its
+// pages, then cut from the page where the build places it (an additive one's alpha cleared, a
+// bump's or a distortion's page made a normal map of its blue) [orig:
+// CParticleManager_BuildTextureAtlases @ 0x5E8DB0]. `type` its graphic's blend mode (formats/
+// particle BlendMode). An empty image where no page of its type holds it (particle_atlas_fits).
+ParticleRgbaImage particle_atlas_paged_frame(const ParticleRgbaImage &frame, std::uint8_t type);
+
 }  // namespace opennova::renderer
