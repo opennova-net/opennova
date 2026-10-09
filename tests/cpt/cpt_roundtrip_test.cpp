@@ -214,10 +214,26 @@ bool check_poly_roundtrip(const std::filesystem::path &out_path) {
 
 } // namespace
 
+// The CDEP blocks the writer clamps (cpt_steep_blocks): a 256-texel stretch whose heights span more than
+// kCdepMaxRange [orig: Terrain_LoadLodStorage @ 0x603635..0x6037A8, the 4-bit width].
+bool check_steep_blocks() {
+	std::vector<uint16_t> steep(1024, 0);
+	steep[300] = 40000;
+	if (!expect(opennova::cpt_steep_blocks(steep) == 1, "one stretch spans more than a block holds")) return false;
+	steep[300] = static_cast<uint16_t>(opennova::kCdepMaxRange);
+	if (!expect(opennova::cpt_steep_blocks(steep) == 0, "a span of kCdepMaxRange fits")) return false;
+	steep[300] = static_cast<uint16_t>(opennova::kCdepMaxRange + 1);
+	steep[700] = 65535;
+	if (!expect(opennova::cpt_steep_blocks(steep) == 2, "each stretch counts once")) return false;
+	if (!expect(opennova::cpt_steep_blocks(std::vector<uint16_t>(255, 0)) == 0, "a short tail is no block")) return false;
+	return true;
+}
+
 int main() {
 	const std::filesystem::path out_path = std::filesystem::temp_directory_path() / test_paths_unique("opennova_cpt_roundtrip_test", ".cpt");
 
 	if (!check_malformed_guards()) return 1;
+	if (!check_steep_blocks()) return 1;
 	if (!check_poly_roundtrip(out_path)) return 1;
 
 	opennova::CptFile saved;

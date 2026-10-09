@@ -802,14 +802,8 @@ static int parse_material(const uint8_t *base, uint32_t record_size, ThreediMate
 
     assert(cursor + 8 <= record_size);
     out->alpha_gen.style = read_u8(base + cursor);
-    uint8_t alpha_phase_or_reg = read_u8(base + cursor + 1);
-    if (!threedi_generator_names_register(out->alpha_gen.style)) {
-        out->alpha_gen.phase = (float)alpha_phase_or_reg / 256.0f;
-        out->alpha_gen.reg = -1;
-    } else {
-        out->alpha_gen.reg = alpha_phase_or_reg;
-        out->alpha_gen.phase = 0.0f;
-    }
+    threedi_generator_split_param_byte(out->alpha_gen.style, read_u8(base + cursor + 1), &out->alpha_gen.phase,
+                                       &out->alpha_gen.reg);
     out->alpha_gen.rate = (float)read_s16_le(base + cursor + 2) / 256.0f;
     out->alpha_gen.start = read_s16_le(base + cursor + 4);
     out->alpha_gen.end = read_s16_le(base + cursor + 6);
@@ -817,14 +811,8 @@ static int parse_material(const uint8_t *base, uint32_t record_size, ThreediMate
 
     assert(cursor + 12 <= record_size);
     out->rgb_gen.style = read_u8(base + cursor);
-    uint8_t rgb_phase_or_reg = read_u8(base + cursor + 1);
-    if (!threedi_generator_names_register(out->rgb_gen.style)) {
-        out->rgb_gen.phase = (float)rgb_phase_or_reg / 256.0f;
-        out->rgb_gen.reg = -1;
-    } else {
-        out->rgb_gen.reg = rgb_phase_or_reg;
-        out->rgb_gen.phase = 0.0f;
-    }
+    threedi_generator_split_param_byte(out->rgb_gen.style, read_u8(base + cursor + 1), &out->rgb_gen.phase,
+                                       &out->rgb_gen.reg);
     out->rgb_gen.rate = (float)read_s16_le(base + cursor + 2) / 256.0f;
     out->rgb_gen.start_color[2] = (float)read_u8(base + cursor + 4) / 255.0f;
     out->rgb_gen.start_color[1] = (float)read_u8(base + cursor + 5) / 255.0f;
@@ -839,14 +827,8 @@ static int parse_material(const uint8_t *base, uint32_t record_size, ThreediMate
     // Second RGB generator (same 12-byte compact format, always zero in practice)
     assert(cursor + 12 <= record_size);
     out->rgb_gen2.style = read_u8(base + cursor);
-    uint8_t rgb2_phase_or_reg = read_u8(base + cursor + 1);
-    if (!threedi_generator_names_register(out->rgb_gen2.style)) {
-        out->rgb_gen2.phase = (float)rgb2_phase_or_reg / 256.0f;
-        out->rgb_gen2.reg = -1;
-    } else {
-        out->rgb_gen2.reg = rgb2_phase_or_reg;
-        out->rgb_gen2.phase = 0.0f;
-    }
+    threedi_generator_split_param_byte(out->rgb_gen2.style, read_u8(base + cursor + 1), &out->rgb_gen2.phase,
+                                       &out->rgb_gen2.reg);
     out->rgb_gen2.rate = (float)read_s16_le(base + cursor + 2) / 256.0f;
     out->rgb_gen2.start_color[2] = (float)read_u8(base + cursor + 4) / 255.0f;
     out->rgb_gen2.start_color[1] = (float)read_u8(base + cursor + 5) / 255.0f;
@@ -860,14 +842,8 @@ static int parse_material(const uint8_t *base, uint32_t record_size, ThreediMate
 
     assert(cursor + 8 <= record_size);
     out->u_params.style = read_u8(base + cursor);
-    uint8_t up_phase_or_reg = read_u8(base + cursor + 1);
-    if (!threedi_generator_names_register(out->u_params.style)) {
-        out->u_params.phase = (float)up_phase_or_reg / 256.0f;
-        out->u_params.reg = -1;
-    } else {
-        out->u_params.reg = up_phase_or_reg;
-        out->u_params.phase = 0.0f;
-    }
+    threedi_generator_split_param_byte(out->u_params.style, read_u8(base + cursor + 1), &out->u_params.phase,
+                                       &out->u_params.reg);
     out->u_params.gen_rate = (float)read_s16_le(base + cursor + 2) / 256.0f;
     out->u_params.start = (float)read_s16_le(base + cursor + 4) / 256.0f;
     out->u_params.end = (float)read_s16_le(base + cursor + 6) / 256.0f;
@@ -875,14 +851,8 @@ static int parse_material(const uint8_t *base, uint32_t record_size, ThreediMate
 
     assert(cursor + 8 <= record_size);
     out->v_params.style = read_u8(base + cursor);
-    uint8_t vp_phase_or_reg = read_u8(base + cursor + 1);
-    if (!threedi_generator_names_register(out->v_params.style)) {
-        out->v_params.phase = (float)vp_phase_or_reg / 256.0f;
-        out->v_params.reg = -1;
-    } else {
-        out->v_params.reg = vp_phase_or_reg;
-        out->v_params.phase = 0.0f;
-    }
+    threedi_generator_split_param_byte(out->v_params.style, read_u8(base + cursor + 1), &out->v_params.phase,
+                                       &out->v_params.reg);
     out->v_params.gen_rate = (float)read_s16_le(base + cursor + 2) / 256.0f;
     out->v_params.start = (float)read_s16_le(base + cursor + 4) / 256.0f;
     out->v_params.end = (float)read_s16_le(base + cursor + 6) / 256.0f;

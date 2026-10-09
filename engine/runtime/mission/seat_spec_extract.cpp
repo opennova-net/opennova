@@ -44,19 +44,6 @@ std::string user_point_name(const ThreediUserPoint &point) {
 	return strutil::fixed_string(point.name, sizeof(point.name));
 }
 
-// The seat class a bone name carries: sitex, ctrlx and drvrx are 5-character
-// case-insensitive prefixes at byte zero, UseGun a case-insensitive
-// whole-name compare, so embedded tokens and suffixed UseGun names are not
-// seats. [orig: Entity_GetBoneSlotType @ 0x434ED0 — the strnicmp legs
-//  @ 0x434F16 / @ 0x434F34 / @ 0x434F52, the _stricmp @ 0x434F6E]
-world::SeatType seat_type_for_user_point(const std::string &name) {
-	if (threedi_user_point_is_sitex(name)) return world::SeatType::Passenger;
-	if (strutil::starts_with_icase(name, "ctrlx")) return world::SeatType::Controller;
-	if (strutil::starts_with_icase(name, "drvrx")) return world::SeatType::Driver;
-	if (strutil::iequals(name, "UseGun")) return world::SeatType::Gunner;
-	return world::SeatType::None;
-}
-
 // sitexNN / ctrlxNN / drvrxNN select the numbered sit pose (0..30); UseGun
 // always poses 0. Leading ASCII digits only, breaking at the first non-digit.
 int seat_pose_index_for_user_point(const std::string &name) {
@@ -86,6 +73,19 @@ bool item_has_runtime_metadata(const mission::ItemSeatSpec &spec) {
 // graphic -> "<basename>.3di" is assets::AssetStore's own name rule; the extractor
 // only needs the graphic key.
 } // namespace
+
+// sitex, ctrlx and drvrx are 5-character case-insensitive prefixes at byte
+// zero, UseGun a case-insensitive whole-name compare, so embedded tokens and
+// suffixed UseGun names are not seats. [orig: Entity_GetBoneSlotType
+//  @ 0x434ED0 — the strnicmp legs @ 0x434F16 / @ 0x434F34 / @ 0x434F52, the
+//  _stricmp @ 0x434F6E]
+world::SeatType seat_type_for_user_point(std::string_view name) {
+	if (threedi_user_point_is_sitex(name)) return world::SeatType::Passenger;
+	if (strutil::starts_with_icase(name, "ctrlx")) return world::SeatType::Controller;
+	if (strutil::starts_with_icase(name, "drvrx")) return world::SeatType::Driver;
+	if (strutil::iequals(name, "UseGun")) return world::SeatType::Gunner;
+	return world::SeatType::None;
+}
 
 // The authored 16.16 model point into the mission-local seat frame. The shell
 // chain was: decode swizzle (-y, z, x)/65536 -> the render X-mirror ->

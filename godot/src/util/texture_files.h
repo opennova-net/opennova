@@ -11,6 +11,7 @@
 
 #include <base/vfs/file_source.h>
 #include <runtime/renderer/texture_load_rules.h>
+#include <runtime/renderer/texture_registry.h>
 
 namespace opennova {
 
@@ -26,17 +27,22 @@ public:
 	// A texture by name as `loader` loads it (ResourceRoot::load_texture's rule): the files
 	// it opens, the first that decodes; null when none does.
 	godot::Ref<godot::Texture2D> load_texture(const godot::String &name, renderer::TextureLoader loader) const;
-	// One material row's texture of runtime `type` (ResourceRoot::load_material_texture's rule).
+	// One material row's texture of runtime `type` (ResourceRoot::load_material_texture's rule:
+	// the texture registered under the row's key, the first row of a key to load deciding it).
 	godot::Ref<godot::Texture> load_material_texture(const godot::String &name, uint8_t type) const;
 
 private:
 	godot::PackedByteArray read_(const godot::String &name) const;
 	bool has_(const std::string &name) const;
+	// What one material row's own loader makes, null when it makes nothing.
+	godot::Ref<godot::Texture> material_row_texture_(const godot::String &name, uint8_t type) const;
 
 	std::shared_ptr<const FileSource> files_;
 	mutable std::unordered_map<std::string, godot::Ref<godot::Texture2D>> cache_;
 	// A material row's chunk textures by type and file ("material-chunk:<type>:<file>").
 	mutable std::unordered_map<std::string, godot::Ref<godot::Texture>> chunks_;
+	// The material rows' texture registry (renderer/texture_registry.h), as a mount's.
+	mutable renderer::TextureRegistry<godot::Ref<godot::Texture>> registry_;
 };
 
 } // namespace opennova

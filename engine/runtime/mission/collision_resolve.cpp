@@ -163,12 +163,9 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 //  Entity_ResolveBoneUserpoints @0x545940; ModelGPM_FindUserpointByName
 //  @0x5b21ef]
 static uint8_t userpoint_index_by_name(const Threedi3di3 &model, const char *name) {
-	if (name == nullptr || name[0] == '\0' || model.user_points == nullptr) return 0;
-	for (size_t i = 0; i < model.user_point_count && i < 255; ++i) {
-		if (strutil::iequals(model.user_points[i].name, name))
-			return static_cast<uint8_t>(i + 1);
-	}
-	return 0;
+	if (name == nullptr || name[0] == '\0') return 0;
+	const int found = threedi_3di3_find_user_point(&model, name);
+	return found >= 0 && found < 255 ? static_cast<uint8_t>(found + 1) : 0;
 }
 
 static void resolve_weapon_userpoint_bytes(const DefItemDef &def,
@@ -385,17 +382,15 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				}
 				// [orig: Entity_InitFromModel @0x40DC30: first SOUND point,
 				// def+0x54A one-based byte; transform consumer @0x408290]
-				for (size_t i = 0; i < model->user_point_count; ++i) {
-					const auto &point = model->user_points[i];
-					if (!strutil::iequals(point.name, "SOUND")) continue;
-					const uint8_t one_based = static_cast<uint8_t>(i + 1);
+				const int sound = threedi_3di3_find_user_point(model, "SOUND");
+				if (sound >= 0) {
+					const uint8_t one_based = static_cast<uint8_t>(sound + 1);
 					if (one_based != 0 && one_based <= 127) {
 						float pos[3];
 						threedi_user_point_position(&model->user_points[one_based - 1], pos);
 						traits->has_sound_point = true;
 						traits->sound_point = {pos[2], -pos[0], pos[1]};
 					}
-					break;
 				}
 			}
 		}
@@ -409,12 +404,12 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					userpoint_name != nullptr && deps.models.has_source()
 					? deps.models.model(key).get()
 					: nullptr;
-			for (size_t up_index = 0;
-					glass_model != nullptr && glass_model->user_points != nullptr &&
-					up_index < glass_model->user_point_count;
-					++up_index) {
+			// Terrain's exact userpoint lookup returns the first match.
+			const int up_index = glass_model != nullptr
+					? threedi_3di3_find_user_point(glass_model, userpoint_name)
+					: -1;
+			if (up_index >= 0) {
 				const ThreediUserPoint &point = glass_model->user_points[up_index];
-				if (!strutil::iequals(point.name, userpoint_name)) continue;
 				float up_pos[3];
 				float up_dir[3];
 				threedi_user_point_position(&point, up_pos);
@@ -422,7 +417,6 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				points.push_back(world::GlassPointTrait{
 						world::Vec3{up_pos[2], -up_pos[0], up_pos[1]},
 						world::Vec3{up_dir[2], -up_dir[0], up_dir[1]}});
-				break; // Terrain's exact userpoint lookup returns the first match.
 			}
 			glass_it = state.glass_points_by_graphic.emplace(
 					key, std::move(points)).first;

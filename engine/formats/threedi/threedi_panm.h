@@ -103,17 +103,24 @@ static inline uint32_t threedi_panm_pack_flags(uint8_t scale_type,
            ((uint32_t)translate_type << 24);
 }
 
-// The MTRX row a part animation turns through, or 0 when it reads none. The
-// loader sign-extends the file's frame byte, the pose reads the table only for
-// a selector above zero, and only the spinner and the Euler tracks (rotation
-// types 1 and 2) turn through the row: 0 and 0x80..0xFF name no frame.
-// [orig: GPM_LoadRenderModel @ 0x5B5698 (movsx) / @ 0x5B569C (store); the
-//  frame gate `<= 0` Model_TransformBoneMatrices @ 0x58E3FE; the row's uses
-//  @ 0x58E648 / @ 0x58E764 (spinner), @ 0x58E8AA / @ 0x58EAA7 (Euler)]
+// The MTRX row a part animation's frame byte selects, or 0 when it selects
+// none: the loader sign-extends the byte and the pose reads the table only for
+// a selector above zero, so 0 and 0x80..0xFF name no frame (and row 0 is never
+// read). [orig: GPM_LoadRenderModel @ 0x5B5698 (movsx) / @ 0x5B569C (store);
+//  the frame gate `<= 0` Model_TransformBoneMatrices @ 0x58E3FE]
+static inline int threedi_panm_frame_selector(uint8_t matrix_index) {
+    const int selector = static_cast<int8_t>(matrix_index);
+    return selector > 0 ? selector : 0;
+}
+
+// The MTRX row a part animation turns through, or 0 when it reads none: its
+// frame byte's selector (threedi_panm_frame_selector), and only the spinner
+// and the Euler tracks (rotation types 1 and 2) turn through the row.
+// [orig: the row's uses Model_TransformBoneMatrices @ 0x58E648 / @ 0x58E764
+//  (spinner), @ 0x58E8AA / @ 0x58EAA7 (Euler)]
 static inline int threedi_panm_frame_row(const ThreediPartAnimation &pa) {
     const uint8_t rotation = threedi_panm_rotation_type(pa.flags);
-    const int selector = static_cast<int8_t>(pa.matrix_index);
-    return (rotation == 1 || rotation == 2) && selector > 0 ? selector : 0;
+    return rotation == 1 || rotation == 2 ? threedi_panm_frame_selector(pa.matrix_index) : 0;
 }
 
 static inline int threedi_panm_track_present(uint32_t flags, ThreediPanmTarget target) {
@@ -201,6 +208,19 @@ const char *threedi_panm_control_name(uint8_t code);
 // (threedi_generator_reads_register).
 inline constexpr int THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD = 0x70;
 bool threedi_generator_names_register(int style);
+
+// A material generator's parameter byte (the alpha, RGB, second RGB, U and V
+// generators each hold one, after the style byte), which the style splits:
+// up to style 0x70 it is the phase in 1/256 of a cycle, above it the
+// model-local CTRL index (threedi_generator_names_register). The parsed
+// generator keeps the split as `phase` and `reg`, the unused half -1 / 0.
+// threedi_generator_param_byte packs it as the writer stores it (the phase
+// times 256, rounded half away from zero and clamped to 0..255; the register's
+// low byte); threedi_generator_split_param_byte splits it back as the reader
+// does (a phase style's byte / 256 with reg -1; a register style's byte as the
+// register with phase 0).
+uint8_t threedi_generator_param_byte(int style, float phase, int32_t reg);
+void threedi_generator_split_param_byte(int style, uint8_t byte, float *phase, int32_t *reg);
 
 // --- Generator-style catalog (all consumers) --------------------------------
 //

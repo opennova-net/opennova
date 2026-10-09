@@ -16,7 +16,7 @@ Models, clips and textures ride Git LFS; everything else is a plain git blob.
 | File | What it is |
 |---|---|
 | `main.mnu` | The placeholder main menu: one `STARTUP` screen with literal text, `PLAY_RETAIL`, `CHANGE_FOLDER` and `EXIT`. Hand-written. |
-| `opennova.fnt` | The menu's one font (uppercase 5x7 stroke art drawn at 2x). Minted by `tests/fixtures/minimal_fnt_builder.h`; `minimal_fnt_gen_test --write` regenerates it and the `minimal_fnt_gen` ctest keeps it byte-identical to the builder. |
+| `opennova.fnt` | The menu's one font (uppercase 5x7 stroke art drawn at 2x). Minted from `engine/formats/fnt/fnt_stroke_font.h`; `minimal_fnt_gen_test --write` regenerates it and the `minimal_fnt_gen` ctest keeps it byte-identical to the builder. |
 | `on_ar15.3di` | A first-person AR-15-pattern carbine, 64 parts on one rig. Exported from `art/on_ar15/on_ar15.blend`, like every `on_ar15*` and `on_arms*` file below. |
 | `on_arms.3di` | The first-person arms skinned to `on_ar15`'s rig (its first 55 parts). |
 | `on_ar15.adm` | `on_ar15`'s animation table: the eight weapon slots and the clip each plays. |

@@ -8,6 +8,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <map>
+#include <string>
+
 namespace opennova::threedi {
 
 enum {
@@ -130,5 +133,11 @@ int threedi_ctrl_register_ordinal(const char *name);
 // always passes a non-NULL inline name buffer. This compatibility behavior is
 // deliberately separate from the unambiguous lookup above.
 uint8_t threedi_ctrl_register_loader_ordinal(const char *name);
+
+// The global register bus with registers written by name: every register zero,
+// then each held name's register its value (an unknown name is dropped, as the
+// lookup above drops it).
+void threedi_ctrl_bus_from_names(const std::map<std::string, int64_t> &held,
+                                 int32_t bus[THREEDI_CTRL_REGISTER_COUNT]);
 
 } // namespace opennova::threedi

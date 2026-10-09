@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -45,6 +46,11 @@ void extract_item_seat_specs(const opennova::def::DefItemsFile &items,
                              const ModelLookupFn &model_for,
                              const std::vector<int> &seed_item_ids,
                              SeatSpecExtraction &out);
+
+// The seat class a userpoint's name carries, compared from byte zero of its
+// raw USRP name with no trim (None for a name that is no seat).
+// [orig: Entity_GetBoneSlotType @ 0x434ED0]
+world::SeatType seat_type_for_user_point(std::string_view name);
 
 // The userpoint-local conversions, exposed for tests: the authored 16.16
 // model point into the mission-local seat frame (the yaw-zero correction
