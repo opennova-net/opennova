@@ -11,7 +11,6 @@
 #include <editor/assets/asset_import.h>
 #include <editor/documents/texture_compare.h>
 #include <editor/documents/texture_image.h>
-#include <editor/import/png_encode.h>
 #include <editor/import/texture_import.h>
 #include <editor/preview/texture_viewport.h>
 #include <editor/preview/viewports.h>
@@ -21,6 +20,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/png/png_encode.h>
 #include <formats/tga/tga.h>
 
 #include "common/test_expect.h"
@@ -30,6 +30,9 @@
 
 using namespace opennova::editor;
 using opennova::io::JsonValue;
+using opennova::renderer::ImageImportSettings;
+using opennova::renderer::encode_image;
+using opennova::png::encode_png_rgba;
 
 namespace {
 

@@ -27,7 +27,7 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
-#include "editor/png_test_support.h"
+#include "common/png_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -209,7 +209,7 @@ int test_import_source() {
 	if (!p.made) return 1;
 	ProjectSession &session = p.session;
 	const SessionView &v = p.view();
-	TEST_EXPECT(editor_test::write_bytes(join_path(p.root, "art/logo.png"), editor_test::gradient_png(8, 8)));
+	TEST_EXPECT(editor_test::write_bytes(join_path(p.root, "art/logo.png"), test_png::gradient_png(8, 8)));
 	const Importer *importer = importer_for("logo.png");
 	TEST_EXPECT(importer != nullptr);
 	if (!importer) return 1;
@@ -254,7 +254,7 @@ int test_import_source() {
 
 	// A record that names its output whatever the source is called (S18's name option): a copy with it would
 	// make a second file of that name, so it is refused, saying so; alone, the source copies.
-	TEST_EXPECT(editor_test::write_bytes(join_path(p.root, "art/sign_src.png"), editor_test::gradient_png(8, 8, 3)));
+	TEST_EXPECT(editor_test::write_bytes(join_path(p.root, "art/sign_src.png"), test_png::gradient_png(8, 8, 3)));
 	ImportSidecar named = sidecar;
 	named.options["name"] = "fixedsign.tga";
 	TEST_EXPECT(save_import_sidecar(join_path(p.root, "art/sign_src.png.import"), named, error));
