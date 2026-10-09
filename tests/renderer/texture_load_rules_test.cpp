@@ -166,6 +166,33 @@ void test_halving() {
 	uint32_t sw = 2, sh = 2;
 	halve_rgba_to_cap(small, sw, sh, kNormalMapSideCap);
 	CHECK(sw == 2 && sh == 2 && small.size() == 16, "under the cap nothing changes");
+	// A count of halvings, each the truncated 2x2 mean (101 and 102 make 101), while both sides exceed 1.
+	std::vector<uint8_t> odd(4 * 4 * 4, 255);
+	for (size_t i = 0; i < odd.size(); i += 4) odd[i] = static_cast<uint8_t>((i / 4) % 2 ? 102 : 101);
+	std::vector<uint8_t> once = odd;
+	uint32_t ow = 4, oh = 4;
+	halve_rgba_times(once, ow, oh, 1);
+	CHECK(ow == 2 && oh == 2 && once.size() == 16 && once[0] == 101, "one halving, the truncated mean");
+	std::vector<uint8_t> twice = odd;
+	uint32_t tw = 4, th = 4;
+	halve_rgba_times(twice, tw, th, 5);
+	CHECK(tw == 1 && th == 1 && twice.size() == 4, "halvings stop at a side of 1");
+	std::vector<uint8_t> strip(8 * 2 * 4, 9);
+	uint32_t pw = 8, ph = 2;
+	halve_rgba_times(strip, pw, ph, 3);
+	CHECK(pw == 4 && ph == 1, "a side of 1 stops the halvings, the other side halved once");
+}
+
+void test_loaders_past_particle() {
+	// The model row's, map and cube loaders name no file of their own.
+	const TextureFileQuery files = mounted({"skin.tga", "skin.dds", "fol.pcx", "HwmCube.dds"});
+	for (TextureLoader loader : {TextureLoader::Normal, TextureLoader::Producer, TextureLoader::Chunk,
+				 TextureLoader::Pcx8, TextureLoader::Cube}) {
+		CHECK(!texture_loader_has_attempts(loader), "no attempts past Particle");
+		CHECK(texture_load_attempts(loader, "skin.tga", files).empty(), "no file tried");
+	}
+	CHECK(texture_loader_has_attempts(TextureLoader::Stage) && texture_loader_has_attempts(TextureLoader::Particle),
+			"Stage to Particle name files");
 }
 
 // A minimal 8-bit PCX: `width` x `height`, BytesPerLine `bpl`, raw (no runs) rows
@@ -373,6 +400,7 @@ int main() {
 	test_menu_and_cine();
 	test_transforms();
 	test_halving();
+	test_loaders_past_particle();
 	test_pcx_reader();
 	if (failures != 0) {
 		std::fprintf(stderr, "texture_load_rules: %d failure(s)\n", failures);

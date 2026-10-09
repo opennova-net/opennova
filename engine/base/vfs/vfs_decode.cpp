@@ -51,30 +51,11 @@ bool decode_scr(std::vector<uint8_t> &data, int scr_policy) {
     return true;
 }
 
-bool decode_bfc1(std::vector<uint8_t> &data) {
-    if (!bfc1_is_bfc1(data.data(), data.size())) {
-        return true; // not BFC1: no-op
-    }
-    uint32_t usize = 0;
-    if (bfc1_uncompressed_size(data.data(), data.size(), &usize) != 0) {
-        return false;
-    }
-    std::vector<uint8_t> out(usize);
-    size_t out_size = out.size();
-    uint8_t *out_ptr = out.empty() ? nullptr : out.data();
-    if (bfc1_decompress(data.data(), data.size(), out_ptr, &out_size) != 0) {
-        return false;
-    }
-    out.resize(out_size);
-    data.swap(out);
-    return true;
-}
-
 } // namespace
 
 bool vfs_decode_payload(std::vector<uint8_t> &data, int scr_policy) {
     if (!decode_scr(data, scr_policy)) return false; // SCR container first
-    if (!decode_bfc1(data)) return false;            // then BFC1 (possibly over the decrypted bytes)
+    if (!bfc1_unpack(data)) return false;            // then BFC1 (possibly over the decrypted bytes)
     return true;
 }
 
