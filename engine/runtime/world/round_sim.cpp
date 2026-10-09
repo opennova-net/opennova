@@ -1033,11 +1033,8 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                         // [orig: Weapon_RaycastAndSpawnImpact @0x4e8880..0x4e8888
                         //  vs @0x4e8867]
                         imp.effect_tag = 23;
-                    } else if (hit.surface_type >= 0 &&
-                               hit.surface_type + 4 < kImpactEffectTagCount) {
-                        imp.effect_tag = hit.surface_type + 4;
                     } else {
-                        imp.effect_tag = 4;
+                        imp.effect_tag = surface_impact_effect_tag(hit.surface_type);
                     }
                     imp.tick = world.logic_tick;
                     imp.source_order = next_impact_order++;
@@ -2222,11 +2219,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     imp.present_sound = false;
                 }
             }
-        } else if (collision.surface_type >= 0 &&
-                   collision.surface_type + 4 < kImpactEffectTagCount) {
-            imp.effect_tag = collision.surface_type + 4;
         } else {
-            imp.effect_tag = 4; // generic object without material data
+            // A generic object without material data plays the obj row.
+            imp.effect_tag = surface_impact_effect_tag(collision.surface_type);
         }
         // The dead-victim gate resolved above with the other face-material legs
         // [orig: `shouldProcessEffect` @0x4e95d6/@0x4e95e0, consumed @0x4e9817].

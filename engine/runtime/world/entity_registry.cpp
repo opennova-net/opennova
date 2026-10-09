@@ -190,9 +190,8 @@ const Area *EntityRegistry::area(int id) const {
 void EntityRegistry::clear_script_tables() {
     areas_.clear();
     locations_.clear();
-    group_names_ = {"emptygroup", "humans", "blueplayers", "redplayers",
-                    "ai", "blueai", "redai"};
-    group_members_.assign(7, {});
+    group_names_.assign(std::begin(kDefaultScriptGroupNames), std::end(kDefaultScriptGroupNames));
+    group_members_.assign(kDefaultScriptGroupCount, {});
 }
 
 void EntityRegistry::register_location(const Aabb &bounds, int32_t id) {
@@ -222,10 +221,8 @@ int EntityRegistry::intern_group(std::string_view name) {
 }
 
 int EntityRegistry::default_script_group_index(std::string_view name) {
-    static constexpr const char *names[] = {
-        "emptygroup", "humans", "blueplayers", "redplayers", "ai", "blueai", "redai"
-    };
-    for (int i = 0; i < 7; ++i) if (iequals(name, names[i])) return i;
+    for (int i = 0; i < kDefaultScriptGroupCount; ++i)
+        if (iequals(name, kDefaultScriptGroupNames[i])) return i;
     return -1;
 }
 
@@ -236,7 +233,8 @@ int EntityRegistry::script_group_index(std::string_view name) const {
 }
 
 void EntityRegistry::set_script_group_members(int group, const std::vector<EntityHandle> &members) {
-    if (group >= 7 && size_t(group) < group_members_.size()) group_members_[group] = members;
+    if (group >= kDefaultScriptGroupCount && size_t(group) < group_members_.size())
+        group_members_[group] = members;
 }
 
 // [orig: Server_BuildEntitySlotLists @0x4F97A0] These lists are independent
@@ -248,7 +246,7 @@ void EntityRegistry::set_script_group_members(int group, const std::vector<Entit
 // row. The registry's live-slot walk is that gate; the type id is not tested.
 void EntityRegistry::script_groups(std::vector<std::vector<EntityHandle>> &out) const {
     out = group_members_;
-    for (size_t i = 0; i < 7; ++i) out[i].clear();
+    for (int i = 0; i < kDefaultScriptGroupCount; ++i) out[size_t(i)].clear();
     for_each_in_pool(0, [&](const Entity &e) {
         const uint32_t flags = e.flags | e.engine_flags;
         if ((flags & kEntityFlagPlayer) != 0) {

@@ -66,6 +66,8 @@ int main() {
 		TEST_EXPECT(map && store.animation_map("SOLDIER.ADM") == map);
 		const auto clip = store.bone_animation("idle");
 		TEST_EXPECT(clip && store.bone_animation("IDLE.BAD") == clip);
+		// A .bad load opens the name's stem plus .bad (anim::bad_file_name).
+		TEST_EXPECT(store.bone_animation("idle.txt") == clip && store.bone_animation("clips/Idle.anim") == clip);
 		const auto rig = store.skeletal_rig("soldier");
 		TEST_EXPECT(rig && rig->bone_count() > 0);
 		TEST_EXPECT(store.skeletal_rig("SOLDIER.ADM") == rig);
@@ -118,6 +120,7 @@ int main() {
 		const auto explicit_rig = store.skeletal_rig_from_files("idle", named);
 		TEST_EXPECT(explicit_rig);
 		TEST_EXPECT(store.skeletal_rig_from_files("IDLE.BAD", named) == explicit_rig);
+		TEST_EXPECT(store.skeletal_rig_from_files("idle.txt", {{"Idle", "IDLE.anim"}}) == explicit_rig);
 		TEST_EXPECT(explicit_rig->find_clip("idle")->key == "Idle");
 		const auto renamed_rig = store.skeletal_rig_from_files("idle", {{"IDLE", "idle"}});
 		TEST_EXPECT(renamed_rig && renamed_rig != explicit_rig);

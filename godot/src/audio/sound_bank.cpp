@@ -211,7 +211,7 @@ int64_t SoundBank::occlusion_trampoline(void *p_ctx, const float p_listener[3],
 
 uint8_t SoundBank::listener_view_flags() const {
     const auto *sim = Object::cast_to<Simulation>(ObjectDB::get_instance(occlusion_provider_id_));
-    return sim != nullptr ? sim->sound_listener_view_flags() : 6;
+    return sim != nullptr ? sim->sound_listener_view_flags() : opennova::audio::kListenerViewStartup;
 }
 
 bool SoundBank::play_oneshot_3d(Node3D *p_parent, const Vector3 &p_world_pos, const String &p_name,

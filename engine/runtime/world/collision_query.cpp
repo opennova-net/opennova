@@ -4,6 +4,7 @@
 // projectile face and polygon raycasts, and the contact-force accumulation. Each
 // takes a CollisionTargetView and touches no world state.
 
+#include <formats/threedi/threedi_3di3.h> // THREEDI_CFAC_FLAG_*
 #include <runtime/world/ammo_table.h> // kAmmoFlagIgnorFoilage
 #include <runtime/world/angle.h>
 #include <algorithm>
@@ -618,7 +619,7 @@ bool collision_raycast_polygons(const CollisionTargetView &target,
                 segment_min[1] > face.max[1] || segment_max[1] < face.min[1] ||
                 segment_min[2] > face.max[2] || segment_max[2] < face.min[2])
                 continue;
-            if ((face.material_flags & 0x100u) != 0) continue;
+            if ((face.material_flags & threedi::THREEDI_CFAC_FLAG_BULLETS_PASS) != 0) continue;
             if (face.poly_type == 17 && (ammo_flags & kAmmoFlagIgnorFoilage) != 0) continue;
 
             const int32_t normal_index = sec.normal_start + face.normal_index;
@@ -644,8 +645,8 @@ bool collision_raycast_polygons(const CollisionTargetView &target,
 
             // Projectile callers pass backfaceArg=1. Only a non-two-sided,
             // 0x800 face rejects the negative-to-positive crossing.
-            if ((face.material_flags & 1u) == 0 &&
-                (face.material_flags & 0x800u) != 0 &&
+            if ((face.material_flags & threedi::THREEDI_CFAC_FLAG_BOTH_SIDES) == 0 &&
+                (face.material_flags & threedi::THREEDI_CFAC_FLAG_FRONT_ONLY) != 0 &&
                 !(d0 > 0 && d1 <= 0))
                 continue;
 

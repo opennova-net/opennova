@@ -812,6 +812,11 @@ inline constexpr uint32_t DEF_ITEM_ATTRIB2_ISTURRET = 0x00001000u;
 inline constexpr uint32_t DEF_ITEM_ATTRIB2_FARP = 0x00002000u;
 inline constexpr uint32_t DEF_ITEM_ATTRIB2_LANDMINE = 0x00004000u;
 
+// The game's ItemDef keeps a graphic name in 16 bytes (15 characters and the NUL): the graphic
+// name at +0x60 before the husk name at +0x70 [orig: ItemDef_DumpToFile @ 0x49e250]. DefItemDef's
+// own field is wider; a longer name does not fit the game's.
+inline constexpr size_t DEF_ITEM_GRAPHIC_NAME_BYTES = 16;
+
 typedef struct DefItemDef {
     char graphic_enemy[16]; // [orig: ItemDef_ParseProperty @0x49EB00, graphicenemy -> the 16-byte name at +0x90]
     char text_id[32]; // [orig: ItemDef_ParseProperty @0x49EB00, textid -> +0x526]

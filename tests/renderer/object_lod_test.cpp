@@ -314,5 +314,30 @@ int main() {
     CHECK(model_lod_thresholds_q16(model).empty());
   }
 
+  // The levels the walk can reach: each before it above zero. Armry01's
+  // 200, 60, 20, 0 reaches all four; a zero slot stops the walk there (a
+  // first slot of zero pins level 0), and each level the reachable test admits
+  // is one select_object_lod returns at some radius.
+  {
+    using opennova::renderer::object_lod_reachable;
+    const std::vector<int32_t> armry = {200 << 16, 60 << 16, 20 << 16, 0};
+    for (size_t level = 0; level < 4; ++level) CHECK(object_lod_reachable(armry, level));
+    CHECK(!object_lod_reachable(armry, 4));
+    const std::vector<int32_t> stopped = {160, 0, 30};
+    CHECK(object_lod_reachable(stopped, 0) && object_lod_reachable(stopped, 1));
+    CHECK(!object_lod_reachable(stopped, 2));
+    const std::vector<int32_t> pinned = {0, 60, 20};
+    CHECK(object_lod_reachable(pinned, 0) && !object_lod_reachable(pinned, 1));
+    CHECK(!object_lod_reachable({}, 0));
+    for (const std::vector<int32_t> &table : {armry, std::vector<int32_t>{160 << 16, 0, 30 << 16},
+                                               std::vector<int32_t>{0, 60 << 16}}) {
+      std::vector<bool> selected(table.size(), false);
+      for (int32_t radius = kObjectLodSubPixelCullQ16 + 1; radius < (400 << 16); radius += 1 << 14)
+        selected[static_cast<size_t>(select_object_lod(table, radius).lod_index)] = true;
+      for (size_t level = 0; level < table.size(); ++level)
+        CHECK(selected[level] == object_lod_reachable(table, level));
+    }
+  }
+
   return failures == 0 ? 0 : 1;
 }

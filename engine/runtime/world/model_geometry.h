@@ -12,6 +12,10 @@
 #include <runtime/world/occlusion.h>
 #include <runtime/renderer/object_lod.h>
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
+
 namespace opennova::world {
 
 // Build the runtime collision model from a parsed .3di CDTA block — the exact
@@ -79,5 +83,20 @@ bool model_is_skinned(const opennova::threedi::Threedi3di3 &model, int lod_index
 // gate the collision build consumes for organics. (ObjectData::
 // has_collision delegates here.)
 bool model_has_collision(const opennova::threedi::Threedi3di3 &model);
+
+// Whether a COBJ section is a person's hit sphere: a bone section (no faces,
+// no volumes) of a skinned model (model_is_skinned at LOD 0) whose collision
+// holds a face mesh somewhere, as every person model's whole-body row does;
+// a skinned model with no face at all (a first-person view's arms) is no
+// person's. The person raycast reads such a section by its center and
+// authored radius alone (docs/world/world-wac-ai-re.md 15.8b, the
+// person-model subobject construction) [orig: Physics_RaycastAgainstBoneSections
+// @ 0x4e4670].
+bool model_section_is_person_sphere(const opennova::threedi::Threedi3di3 &model, size_t section);
+
+// The collision block's CMDL box in 16.16, {min x, y, z, max x, y, z}: the
+// exact CMDL words where the block was parsed, else the float box rounded and
+// saturated (a hand-built model).
+std::array<int32_t, 6> collision_bbox_q16(const opennova::threedi::ThreediCollisionModelData &data);
 
 } // namespace opennova::world

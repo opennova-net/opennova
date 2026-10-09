@@ -1,6 +1,7 @@
 // The physics callback table's whole-name lookup (world/physics_class_table.h):
 // an items.def move_function binds the row whose name equals the whole token
-// ignoring case, and anything else binds row 0, null.
+// ignoring case, and anything else binds row 0, null; and the rows whose update
+// keeps the entity's height.
 // [orig: EntityDef_LookupPhysicsCallback @0x4a9240, stricmp @0x4a9262 over the
 //  34 rows of g_EntityClassPhysicsTable @0x82abc8, row 0 @0x4a9272]
 #include <runtime/world/physics_class_table.h>
@@ -45,6 +46,18 @@ int main() {
 	for (const char *other : { "ctan", "cbik", "squi", "towr2", "doorX", "cvehicle",
 				 "CHelScout", "plyr", "vmne", "lndm", "file", "Null", "", " cveh" })
 		CHECK(physics_class_from_move_function(other) == PhysicsClass::Null);
+
+	// Eight rows keep the entity's height; every other row's update moves it, and a
+	// name the table lacks keeps it (row 0, null).
+	int keeping = 0;
+	for (size_t i = 0; i < kPhysicsClassRowCount; ++i)
+		keeping += physics_class_keeps_height(static_cast<PhysicsClass>(i)) ? 1 : 0;
+	CHECK(keeping == 8);
+	for (const char *row : { "null", "envs", "ewep", "door", "genx", "upfx", "org0", "chld" })
+		CHECK(physics_class_keeps_height(physics_class_from_move_function(row)));
+	for (const char *row : { "org1", "org2", "ele0", "towr", "cveh", "CHel", "nade", "psec" })
+		CHECK(!physics_class_keeps_height(physics_class_from_move_function(row)));
+	CHECK(physics_class_keeps_height(physics_class_from_move_function("cvehicle")));
 
 	if (failures == 0) std::printf("physics_class_table: OK\n");
 	return failures == 0 ? 0 : 1;

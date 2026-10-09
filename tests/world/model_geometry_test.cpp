@@ -8,6 +8,7 @@
    sections, 0 BVOL) is the witness the GUT suite pins through the full sim;
    here the builder is pinned directly. */
 
+#include <array>
 #include <cstdio>
 #include <string>
 
@@ -123,6 +124,54 @@ int main() {
         TEST_EXPECT(zeroed_scaled.radius_q16 == 26); // (17 * 0x18000 + 0x8000) >> 16
         TEST_EXPECT(zeroed_scaled.center_q16[0] == 0 && zeroed_scaled.center_q16[1] == 0 &&
                 zeroed_scaled.center_q16[2] == 0);
+    }
+
+    // The CMDL box in 16.16: the exact words where parsed, else the float box
+    // rounded (a hand-built model).
+    {
+        ThreediCollisionModelData data{};
+        const int32_t exact[] = {0x02000001, -3, 10, 0x02000008, 6, 15};
+        for (int i = 0; i < 6; ++i) {
+            data.bbox_fp16[i] = exact[i];
+            data.bbox[i] = float(i) - 2.5f;
+        }
+        data.has_bbox_fp16 = 1;
+        const std::array<int32_t, 6> words = collision_bbox_q16(data);
+        for (int i = 0; i < 6; ++i) TEST_EXPECT(words[i] == exact[i]);
+        data.has_bbox_fp16 = 0;
+        const std::array<int32_t, 6> rounded = collision_bbox_q16(data);
+        TEST_EXPECT(rounded[0] == -0x28000 && rounded[2] == -0x8000 && rounded[5] == 0x28000);
+    }
+
+    // A person's hit spheres: the bone sections (no faces, no volumes) of a
+    // skinned model (model_is_skinned: the header's type, or a LOD-0 strip with
+    // a bone table) whose collision holds a face mesh somewhere.
+    {
+        ThreediCollisionObject objects[3]{};
+        objects[2].num_faces = 4; // the whole-body row
+        objects[1].num_bounding_volumes = 1;
+        ThreediCollisionModel collision{};
+        collision.objects = objects;
+        collision.object_count = 3;
+        ThreediTriangleStrip strip{};
+        ThreediLod lod{};
+        lod.strips = &strip;
+        lod.strip_count = 1;
+        Threedi3di3 model{};
+        model.lods = &lod;
+        model.lod_count = 1;
+        model.collision = &collision;
+        TEST_EXPECT(!model_section_is_person_sphere(model, 0)); // rigid
+        model.header.mesh_type = THREEDI_MESH_SKINNED;
+        TEST_EXPECT(model_section_is_person_sphere(model, 0));
+        TEST_EXPECT(!model_section_is_person_sphere(model, 1)); // volumes
+        TEST_EXPECT(!model_section_is_person_sphere(model, 2)); // faces
+        TEST_EXPECT(!model_section_is_person_sphere(model, 3)); // past the sections
+        model.header.mesh_type = THREEDI_MESH_BASIC;
+        strip.bone_table_length = 2; // skinned by its strips
+        TEST_EXPECT(model_section_is_person_sphere(model, 0));
+        objects[2].num_faces = 0; // no face anywhere: a view's arms
+        TEST_EXPECT(!model_section_is_person_sphere(model, 0));
     }
 
     // --- bird: the face-only witness (18 CFAC over 9 sections, 0 BVOL) ------

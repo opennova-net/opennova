@@ -22,8 +22,21 @@ public:
 // The clip the game plays for a token of an animation table whose own .bad does not load.
 inline constexpr const char *kFailsafeClip = "failsafe.bad";
 
-// The clip a table's token registers: its own .bad, else failsafe.bad in its place when that
-// loads, else none (the token registers nothing). `file`, when given, names the file that
+// The file a .bad load opens for a name: the name to its last '.' (all of it where it has none)
+// with ".bad" appended, so "idle", "IDLE.BAD" and "idle.txt" all open "<stem>.bad". Empty for an
+// empty name, which loads nothing. The game's other .bad loads (failsafe.bad, the player-info
+// preview's two) pass names already ending in ".bad", which the rule leaves as they are.
+// [orig: AnimMap_FindOrLoadBoneFile @0x40c030 -- an empty name returns @0x40c073, the cut at the
+//  last '.' @0x40c08b..0x40c09d, ".bad" appended @0x40c0a6..0x40c0c6, the cache matched and the
+//  file loaded by that name (stricmp @0x40c10c, BoneFile_Load @0x40c208)]
+inline std::string bad_file_name(const std::string &name) {
+	if (name.empty()) return std::string();
+	const size_t dot = name.find_last_of('.');
+	return (dot == std::string::npos ? name : name.substr(0, dot)) + ".bad";
+}
+
+// The clip a table's token registers: its own .bad (the store opens bad_file_name's file), else
+// failsafe.bad in its place when that loads, else none (the token registers nothing). `file`, when given, names the file that
 // loaded. Only a table's tokens take the failsafe: the loader's one caller is the table row
 // parser, and the game's other .bad loads (the player-info preview) take none.
 // [orig: AnimMap_ParseConfigLine @0x40cb60 -> AnimMap_FindOrLoadBoneFile @0x40c030

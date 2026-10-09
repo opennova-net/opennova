@@ -2,6 +2,7 @@
 
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_index.h>
+#include <runtime/anim/rig_files.h>
 #include <runtime/anim/skeletal_clips.h>
 
 #include <unordered_map>
@@ -30,6 +31,12 @@ void rig_bones_key(std::string &key, const std::vector<anim::Vec3> &origins,
 	key_part(key, std::to_string(parents.size()));
 	for (int parent : parents)
 		key.append(reinterpret_cast<const char *>(&parent), sizeof(parent));
+}
+
+// The store's key for a .bad load: the file the game's load opens for the query's file name
+// (anim::bad_file_name), lowercase.
+std::string bad_key(const std::string &name) {
+	return asset_file_name(anim::bad_file_name(name.substr(name.find_last_of("/\\") + 1)), ".bad");
 }
 
 } // namespace
@@ -94,7 +101,7 @@ AnimationMap AssetStore::animation_map(const std::string &name) const {
 
 BoneAnimation AssetStore::bone_animation(const std::string &name) const {
 	sync_source();
-	const std::string key = asset_file_name(name, ".bad");
+	const std::string key = bad_key(name);
 	if (key.empty() || !impl_->index) return {};
 	const auto found = impl_->animations.find(key);
 	if (found != impl_->animations.end()) return found->second;
@@ -126,14 +133,14 @@ SkeletalRig AssetStore::skeletal_rig_from_files(const std::string &skeleton_bad,
 		const std::vector<std::pair<std::string, std::string>> &clips,
 		const std::vector<anim::Vec3> &origins, const std::vector<int> &parents) const {
 	sync_source();
-	const auto name = asset_file_name(skeleton_bad, ".bad");
+	const auto name = bad_key(skeleton_bad);
 	if (name.empty() || !impl_->index) return {};
 	std::string key = "files:";
 	key_part(key, name);
 	key_part(key, std::to_string(clips.size()));
 	for (const auto &clip : clips) {
 		key_part(key, clip.first); // diagnostic keys preserve authored spelling
-		key_part(key, asset_file_name(clip.second, ".bad"));
+		key_part(key, bad_key(clip.second));
 	}
 	rig_bones_key(key, origins, parents);
 	const auto found = impl_->rigs.find(key);

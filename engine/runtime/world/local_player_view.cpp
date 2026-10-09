@@ -14,6 +14,7 @@
 
 #include <formats/def/def.h>        // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
 #include <formats/mission/bms.h>    // bms::AttribFlags::StartWithNVGOn
+#include <runtime/audio/oneshot_play.h> // listener view flags
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
@@ -138,7 +139,7 @@ void local_player_view_refresh(World *world, PlayerViewState &v) {
     const Entity *local = local_entity(world);
     // Camera changes also update layer admission on frames without a body tick.
     // [orig: Camera_SetTrackedEntity @0x4391D0 -> sub_75BE80 @0x75BE80]
-    if (local != nullptr) world->cached.sound_listener_view_flags = v.camera_mode == 0 ? 2 : 4;
+    if (local != nullptr) world->cached.sound_listener_view_flags = audio::listener_view_flags_for_camera(v.camera_mode);
     const bool alive = local != nullptr && local->alive && local->health > 0;
     const bool round_ended = world != nullptr && world->match.outcome().ended;
     player_view_update_effective_modes(v, alive, round_ended);
@@ -544,7 +545,7 @@ void local_player_view_tick(World *world, PlayerViewState &v,
         v.mount = MountedCameraInput();
         player_view_resolve_mode(v);
         if (world != nullptr)
-            world->cached.sound_listener_view_flags = v.camera_mode == 0 ? 2 : 4;
+            world->cached.sound_listener_view_flags = audio::listener_view_flags_for_camera(v.camera_mode);
         player_view_update_effective_modes(v, false,
                                            world != nullptr && world->match.outcome().ended);
         v.tp_anchor_valid = false;

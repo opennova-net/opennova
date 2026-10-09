@@ -21,6 +21,7 @@
 // fired/impacts precedent) — engine/runtime/world stays render-free.
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <string>
@@ -674,6 +675,36 @@ inline int32_t destroy_fade_stagger_ticks(const int32_t destroy_timing_ticks[3])
 inline int32_t destroy_fade_total_ticks(const int32_t destroy_timing_ticks[3]) {
     return io::bam_add(destroy_fade_duration_ticks(destroy_timing_ticks),
             int32_t(uint32_t(destroy_fade_stagger_ticks(destroy_timing_ticks)) * 4u));
+}
+// The destroy fade's clock on one husked evaluation `since_death` ticks past the
+// entity's death tick, `delay` its destroy delay still to run (destroy_timing[0]
+// at the death, 0 once spent): while the delay runs nothing is published; the
+// evaluation that reaches it spends it and restamps the death tick there, the
+// fade then at 0 elapsed; with no delay the fade's elapsed is the ticks since
+// the death. [orig: Entity_PublishSwapFadePhases @0x5C3F40]
+struct DestroyFadeClock {
+    bool publish = false;  // the phases are published this evaluation
+    bool restamp = false;  // the delay is spent: zero it, the death tick to now
+    int32_t elapsed = 0;   // the fade's elapsed ticks (destroy_fade_phases)
+};
+inline DestroyFadeClock destroy_fade_clock(int32_t since_death, int32_t delay) {
+    DestroyFadeClock clock;
+    if (delay == 0) {
+        clock.publish = true;
+        clock.elapsed = since_death;
+    } else if (since_death >= delay) {
+        clock.publish = true;
+        clock.restamp = true;
+    }
+    return clock;
+}
+// The same clock in closed form, for an item husked `husked_at` ticks past its
+// death and evaluated every tick from then on: the tick past the death the
+// fade counts from, the death itself with no delay, else the first husked
+// evaluation at or past the delay (the restamp). A preview scrubbing a death
+// reads it; the game steps destroy_fade_clock.
+inline int32_t destroy_fade_origin_tick(int32_t delay, int32_t husked_at) {
+    return delay ? std::max(delay, husked_at) : 0;
 }
 void update_item_destroy_fade(World &world, Entity &entity);
 void update_item_ambient_sound(World &world, const Entity &entity);
