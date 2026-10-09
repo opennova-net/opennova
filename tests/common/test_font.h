@@ -1,6 +1,6 @@
 // The uniform font the HUD and menu frame-compiler tests measure against. It
 // needs no glyph art, so it stays a test header while the stroke font's art
-// lives with the editor's blank factories (engine/editor/blank/blank_font_art.h).
+// lives in the engine (engine/formats/fnt/fnt_stroke_font.h).
 // Header-only, infrastructure only (no retail counterpart to cite).
 #pragma once
 

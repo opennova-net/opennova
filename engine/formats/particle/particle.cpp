@@ -32,6 +32,16 @@ const ParticleDef *ParticleFile::find_particle(std::string_view id) const noexce
 	return nullptr;
 }
 
+size_t ParticleFile::effect_at_line(size_t line) const noexcept {
+	for (size_t i = 0; i < effects.size(); ++i) {
+		const EffectDef &effect = effects[i];
+		if (effect.first_line > 0 && line >= size_t(effect.first_line) &&
+				(effect.last_line <= 0 || line <= size_t(effect.last_line)))
+			return i;
+	}
+	return std::string::npos;
+}
+
 const TableDef *ParticleFile::find_table(std::string_view id) const noexcept {
 	// Table names resolve case-insensitively: the engine's list walk compares
 	// with _stricmp — shipped data relies on it (ambfx.ptl authors
