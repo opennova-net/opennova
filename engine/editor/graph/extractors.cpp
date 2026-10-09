@@ -611,7 +611,7 @@ bool extract_from_asset(const ProjectPaths &paths, const ProjectDocument &projec
 	std::string message;
 	// A project's files from its folder; a source's (the game install's) by their logical names.
 	const bool read = paths.files ? paths.files->read(asset.logical_name, bytes)
-	                              : read_file_bytes(join_path(paths.root, asset.relative_path), bytes, message);
+	                              : io::read_file_bytes(join_path(paths.root, asset.relative_path), bytes, message);
 	if (!read) {
 		if (message.empty()) message = asset.logical_name + " could not be read.";
 		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, message, asset.relative_path);

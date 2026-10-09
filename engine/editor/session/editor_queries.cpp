@@ -2228,11 +2228,6 @@ std::string params_taken(const EditorQueryRow &row) {
 	return out.empty() ? std::string("nothing") : out;
 }
 
-bool whole(const JsonValue &json) {
-	return json.is_number() && json.number >= 0.0 && json.number == std::floor(json.number) &&
-			json.number <= 9007199254740992.0;
-}
-
 // The args checked once against the row's params (QueryArgs' promise).
 bool check_args(const EditorQueryRow &row, const JsonValue &args, std::string &error) {
 	if (args.is_null()) {
@@ -2261,7 +2256,7 @@ bool check_args(const EditorQueryRow &row, const JsonValue &args, std::string &e
 				typed = value.is_string();
 				break;
 			case J::Integer:
-				typed = whole(value);
+				typed = io::json_exact_whole(value);
 				break;
 			case J::Number: {
 				// One a float holds: a point read as a float is never converted from past its range.

@@ -424,7 +424,7 @@ static int test_apply_guard_reads_the_shown_plan() {
 	project.session.handle(request::resolve_unsaved(UnsavedChoice::Save));
 	project.session.run_operations();
 	std::string text, error;
-	TEST_EXPECT(!items->dirty() && read_file_text(root + "/defs/items.def", text, error) &&
+	TEST_EXPECT(!items->dirty() && opennova::io::read_file_text(root + "/defs/items.def", text, error) &&
 	            text.find("hp 20") != std::string::npos);
 	TEST_EXPECT(view.activity.last_operation.kind == OperationKind::ImportApply &&
 	            view.activity.last_operation.end != OperationEnd::Done && view.dialogs.import_preview.changed);
@@ -830,9 +830,9 @@ static int test_apply_retail_menu() {
 		if (texture.empty() && row.kind == AssetKind::Texture) texture = project.root() + "/" + row.destination;
 	std::vector<uint8_t> bytes;
 	std::string error;
-	TEST_EXPECT(!texture.empty() && read_file_bytes(texture, bytes, error) && bytes.size() > 64);
+	TEST_EXPECT(!texture.empty() && opennova::io::read_file_bytes(texture, bytes, error) && bytes.size() > 64);
 	if (bytes.size() > 64) bytes.back() ^= 0x01; // a pixel's byte: the file reads as it did
-	TEST_EXPECT(write_file_atomic(texture, bytes.data(), bytes.size(), error) &&
+	TEST_EXPECT(opennova::io::write_file_atomic(texture, bytes.data(), bytes.size(), error) &&
 	            editor_test::backdate(texture, std::chrono::minutes(50)));
 	project.session.handle(request::rescan());
 	project.session.run_operations();
@@ -1182,7 +1182,7 @@ static int test_apply_retail_expansion() {
 		if (!file->loose_path.empty()) {
 			std::vector<uint8_t> planned, on_disk;
 			std::string io_error;
-			TEST_EXPECT(origin.read(*file, planned) && read_file_bytes(file->loose_path, on_disk, io_error));
+			TEST_EXPECT(origin.read(*file, planned) && opennova::io::read_file_bytes(file->loose_path, on_disk, io_error));
 			std::vector<uint8_t> decoded = on_disk; // as the game's loaders take it (a scrambled text decoded)
 			opennova::vfs_decode_payload(decoded, origin.vfs().scr_policy());
 			TEST_EXPECT(planned == on_disk || planned == decoded);

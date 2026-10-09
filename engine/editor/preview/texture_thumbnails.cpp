@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include <base/io/base64.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/project/project_files.h>
 #include <editor/session/view/session_view.h>
@@ -114,7 +115,7 @@ std::shared_ptr<const TextureThumbnail> TextureThumbnails::make_(const SessionVi
 	}
 	std::vector<uint8_t> bytes;
 	std::string error;
-	if (!read_file_bytes(join_path(view.project.root, entry->relative_path), bytes, error)) {
+	if (!io::read_file_bytes(join_path(view.project.root, entry->relative_path), bytes, error)) {
 		// Not read while its stamp stands: asked again only once the file moves.
 		Entry &slot = entries_[key];
 		if (slot.picture) held_ -= slot.picture->rgba.size();
@@ -188,25 +189,6 @@ std::vector<uint8_t> thumbnail_png(const TextureThumbnail &thumbnail) {
 	return png::encode_png_rgba(thumbnail.rgba.data(), thumbnail.width, thumbnail.height);
 }
 
-namespace {
-
-std::string base64(const std::vector<uint8_t> &bytes) {
-	static constexpr char kDigits[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-	std::string out;
-	out.reserve((bytes.size() + 2) / 3 * 4);
-	for (size_t i = 0; i < bytes.size(); i += 3) {
-		const uint32_t chunk = uint32_t(bytes[i]) << 16 | (i + 1 < bytes.size() ? uint32_t(bytes[i + 1]) << 8 : 0) |
-		                       (i + 2 < bytes.size() ? uint32_t(bytes[i + 2]) : 0);
-		out.push_back(kDigits[(chunk >> 18) & 63]);
-		out.push_back(kDigits[(chunk >> 12) & 63]);
-		out.push_back(i + 1 < bytes.size() ? kDigits[(chunk >> 6) & 63] : '=');
-		out.push_back(i + 2 < bytes.size() ? kDigits[chunk & 63] : '=');
-	}
-	return out;
-}
-
-} // namespace
-
 io::JsonValue texture_thumbnail_json(const TextureThumbnail &thumbnail, bool png) {
 	using io::json_number;
 	using io::json_string;
@@ -225,7 +207,7 @@ io::JsonValue texture_thumbnail_json(const TextureThumbnail &thumbnail, bool png
 	if (!thumbnail.refusal.empty()) out.set("refusal", json_string(thumbnail.refusal));
 	if (png) {
 		const std::vector<uint8_t> bytes = thumbnail_png(thumbnail);
-		if (!bytes.empty()) out.set("png", json_string(base64(bytes)));
+		if (!bytes.empty()) out.set("png", json_string(io::base64_encode(bytes)));
 	}
 	return out;
 }
