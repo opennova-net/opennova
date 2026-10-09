@@ -52,7 +52,7 @@
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 #include "editor/menu_test_support.h"
-#include "editor/png_test_support.h"
+#include "common/png_test_support.h"
 #include "editor/viewport_test_support.h"
 
 using namespace opennova::editor;
@@ -3392,7 +3392,7 @@ static int test_fixes_apply() {
 	BlankRequest blank;
 	blank.logical_name = "gametext.bin";
 	TEST_EXPECT(make_blank(blank, AssetKind::Strings, table, error));
-	const std::vector<uint8_t> splash = editor_test::gradient_png(4, 4, 7);
+	const std::vector<uint8_t> splash = test_png::gradient_png(4, 4, 7);
 	const opennova::pff::PffWriteEntry entries[] = {{"gametext.bin", table.data(), uint32_t(table.size()), 0, 0, 0},
 	                                                {"splash.png", splash.data(), uint32_t(splash.size()), 0, 0, 0}};
 	TEST_EXPECT(editor_test::write_text(install + "/readme.txt", "an install"));
@@ -3497,7 +3497,7 @@ static int test_fixes_apply() {
 	// the source no longer decoding, the pass cannot make it again and the scan says so; the
 	// source mended, the finding's fix imports it again and the output is back.
 	const std::string authored = dir.file("badge.png");
-	TEST_EXPECT(editor_test::write_bytes(authored, editor_test::gradient_png(8, 8)));
+	TEST_EXPECT(editor_test::write_bytes(authored, test_png::gradient_png(8, 8)));
 	EditorRequest loose = request::of(EditorRequestKind::ImportFiles);
 	loose.imports = {{authored, {}}};
 	session.handle(loose);
