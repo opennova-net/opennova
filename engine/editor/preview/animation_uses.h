@@ -70,7 +70,7 @@ std::vector<std::string> animated_models(const AssetGraph &graph, const AssetSca
 std::string clip_unused_words(const AssetGraph &graph, const std::string &clip_path);
 std::string map_unused_words(const AssetGraph &graph, const std::string &map_path);
 
-// Whether a clip a map's row names registers as the game loads the map: its .bad (the name cut at
+// Whether a clip a map's row names registers as the game loads the map: its .bad (anim::bad_file_name: the name cut at
 // its last '.' and ".bad" appended) is in the project, or failsafe.bad stands in for it [orig:
 // AnimMap_FindOrLoadBoneFile @ 0x40C030, the name @ 0x40C094..0x40C0C6, the failsafe @
 // 0x40C25B..0x40C2A1, none @ 0x40C260]. An empty predicate takes every named clip as registering.
