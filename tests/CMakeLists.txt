@@ -1367,6 +1367,13 @@ add_executable(hud_math_test hud/hud_math_test.cpp)
 target_link_libraries(hud_math_test PRIVATE opennova_runtime)
 add_test(NAME hud_math COMMAND hud_math_test)
 
+# Which hudpos.def values place each HUD element (hud/hud_element_layout.h): the element -> key
+# table, its HUDDECLUT rows, the positioned texts' hidden / alignment indices and a coordinate's
+# value as the game reads it (the NETWORKINDICATOR reset corners, PAUSEDPOS's fallback).
+add_executable(hud_element_layout_test hud/hud_element_layout_test.cpp)
+target_link_libraries(hud_element_layout_test PRIVATE opennova_runtime)
+add_test(NAME hud_element_layout COMMAND hud_element_layout_test)
+
 add_executable(hud_medic_cross_test hud/hud_medic_cross_test.cpp)
 target_link_libraries(hud_medic_cross_test PRIVATE opennova_runtime)
 target_include_directories(hud_medic_cross_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

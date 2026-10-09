@@ -349,6 +349,37 @@ func test_crosshair_requires_active_weapon() -> void:
 		"An armed hip stance emits the five tapered regions (14 triangles).")
 
 
+# install_weapon is set_weapon over a PlayerHudWeaponDef's slice (the
+# presenter's weapon change), and clear_weapon for none: the clip graphic and
+# one round icon per round in the clip draw at the HUDCLIP anchor.
+func test_install_weapon_takes_the_weapon_slice() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"ALPHAFADE 30 50 3",
+		"HUDCLIP 100 600",
+	]), PackedStringArray(["clip.tga", "rnd.tga"]))
+	var weapon := PlayerHudWeaponDef.new()
+	weapon.weapon_name = "TESTGUN"
+	weapon.clipsize = 30
+	weapon.rounds_per_icon = 1
+	weapon.clipgfx_texture = "clip.tga"
+	weapon.rndgfx_texture = "rnd.tga"
+	weapon.rndgfx_step = Vector2i(4, 0)
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, fixture.root)
+	hud.install_weapon(weapon, null)
+	hud.set_weapon_state(true, 5, 90, 0, 0, false, false, false, 0)
+	var installed: int = hud.get_draw_list_stats().quads_textured
+	assert_eq(installed, 6, "The clip graphic and five round icons.")
+	hud.install_weapon(null, null)
+	hud.set_weapon_state(true, 5, 90, 0, 0, false, false, false, 0)
+	assert_eq(hud.get_draw_list_stats().quads_textured, 0, "No weapon draws no clip art.")
+	hud.set_weapon(weapon.weapon_name, "", 30, 1, "clip.tga", Vector2i.ZERO, "rnd.tga",
+			Vector2i.ZERO, Vector2i(4, 0))
+	hud.set_weapon_state(true, 5, 90, 0, 0, false, false, false, 0)
+	assert_eq(hud.get_draw_list_stats().quads_textured, installed,
+			"The same draw as set_weapon over the slice's fields.")
+
+
 # A hudpos.def with no key (no byte, a comment alone, or no file at all) runs the
 # HUD over the globals no arm wrote: the HUDDECLUT mask table stays zero and
 # every gated element hides, the armed crosshair among them, where the overlay

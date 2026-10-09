@@ -122,6 +122,11 @@ int main() {
 	expect(hud::folded_reserve(-1, 5, 1) == 5, "clip sentinel never folds");
 	expect(hud::folded_reserve(1, -1, 1) == -1, "reserve sentinel never folds");
 
+	// The displayed clip [orig: HUD_BuildEntityInfo @0x4b8573..0x4b85fa].
+	expect(hud::displayed_clip(7, 30) == 7, "a magazine weapon shows its clip");
+	expect(hud::displayed_clip(7, -1) == -1, "an infinite weapon reads clip -1");
+	expect(hud::displayed_clip(0, 1) == 0, "an empty single-shot shows 0");
+
 	// The waypoint distance [orig: @0x5947e5..0x594836 — truncated meters].
 	expect(hud::waypoint_distance_m(3.0, 4.0) == 5, "2D hypotenuse");
 	expect(hud::waypoint_distance_m(10.9, 0.0) == 10, "truncates, never rounds");

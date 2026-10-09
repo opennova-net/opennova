@@ -7,6 +7,7 @@
 #include "hud/vehicle_hud_block.h"
 
 #include "hud/hud_pos.h"
+#include "hud/player_hud_weapon_def.h"
 #include "render/d3d9_raster_device.h"
 #include "mnu/controls_model.h" // set_tip's binding (the key display source)
 #include "resource_index/resource_root.h"
@@ -151,6 +152,7 @@ void HudOverlay::_bind_methods() {
 								  "clipsize", "rounds_per_icon", "clipgfx_texture", "clipgfx_offset",
 								  "rndgfx_texture", "rndgfx_offset", "rndgfx_step"),
 			&HudOverlay::set_weapon);
+	ClassDB::bind_method(D_METHOD("install_weapon", "weapon", "gametext"), &HudOverlay::install_weapon);
 	ClassDB::bind_method(D_METHOD("clear_weapon"), &HudOverlay::clear_weapon);
 	ClassDB::bind_method(D_METHOD("push_message", "text"), &HudOverlay::push_message);
 	ClassDB::bind_method(D_METHOD("set_kill_announcement", "text", "tick"), &HudOverlay::set_kill_announcement);
@@ -831,6 +833,19 @@ void HudOverlay::set_weapon(const String &p_weapon_name, const String &p_display
 	wep.round_tex_w = round_tex.is_valid() ? round_tex->get_width() : 0;
 	wep.round_tex_h = round_tex.is_valid() ? round_tex->get_height() : 0;
 	queue_redraw();
+}
+
+void HudOverlay::install_weapon(const Ref<PlayerHudWeaponDef> &p_weapon,
+		const Ref<RtxtStringFile> &p_gametext) {
+	if (p_weapon.is_null()) {
+		clear_weapon();
+		return;
+	}
+	const String name = p_weapon->get_weapon_name();
+	set_weapon(name, HudPos::weapon_display_name(p_gametext, name), p_weapon->get_clipsize(),
+			p_weapon->get_rounds_per_icon(), p_weapon->get_clipgfx_texture(),
+			p_weapon->get_clipgfx_offset(), p_weapon->get_rndgfx_texture(),
+			p_weapon->get_rndgfx_offset(), p_weapon->get_rndgfx_step());
 }
 
 void HudOverlay::clear_weapon() {
