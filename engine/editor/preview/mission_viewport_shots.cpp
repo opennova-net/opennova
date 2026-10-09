@@ -154,7 +154,7 @@ std::vector<ClipSoundFired> MissionViewport::fire_sounds(const PreviewClock &clo
 		if (event.kind != MissionShotEvent::Kind::Sound || event.tick < from || event.tick >= now || event.set.empty())
 			continue;
 		// Where it plays, heard at the camera: a 3D one-shot at its distance [orig: Sound_Play3DPositional @0x527CB0].
-		PreviewHearing heard;
+		audio::SetHearing heard;
 		const PreviewVec3 at = mission_to_preview(event.at);
 		heard.source[0] = at.x;
 		heard.source[1] = at.y;

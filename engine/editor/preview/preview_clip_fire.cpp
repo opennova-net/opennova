@@ -466,7 +466,7 @@ std::vector<ClipSoundFired> ClipFire::press(uint32_t word, int32_t clip_tick, in
 		}
 		// The ammo's ai_launch at the launch point, heard at the camera [orig: WeaponSlot_FireAndSpawnEffects
 		// @0x53f440 -> Sound_PlayWithDistanceAttenuation @0x528E40].
-		PreviewHearing heard;
+		audio::SetHearing heard;
 		heard.source[0] = shot.at.x;
 		heard.source[1] = shot.at.y;
 		heard.source[2] = shot.at.z;
@@ -497,7 +497,7 @@ std::vector<ClipSoundFired> ClipFire::sounds_between(int32_t from, int32_t to, c
 		fired.slot = -1;
 		fired.set = event.set;
 		// Where it plays, heard at the camera: a 3D one-shot at its distance [orig: Sound_Play3DPositional @0x527CB0].
-		PreviewHearing heard;
+		audio::SetHearing heard;
 		const PreviewVec3 at = to_preview(event.at);
 		heard.source[0] = at.x;
 		heard.source[1] = at.y;
