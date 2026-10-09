@@ -580,7 +580,7 @@ void import_fit_fix(const Diagnostic &d, const SessionView &view, std::vector<Pr
 	std::string reasons;
 	for (const std::string &reason : needs.reasons) reasons += (reasons.empty() ? "" : "; ") + reason;
 	// The file it makes then, by the format's extension and the name option.
-	const std::string made = image_import_output_name(state.source, image_import_settings(after));
+	const std::string made = image_import_output_name(state.source, renderer::image_import_settings(after));
 	const bool renamed = normalized_logical_name(made) != normalized_logical_name(file);
 	out.push_back({"Make " + file + "'s import fit " + (needs.uses > 1 ? "its uses" : "this use"),
 	               "Sets the import of " + state.source + " to " + words + " (" + reasons + "), then imports it again, which makes " +
