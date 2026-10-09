@@ -46,7 +46,7 @@ struct MissionEffectSlot {
 // DefinitionEffects for a whole mission): the engine's own effect scene opened over the closures of every
 // effect the slots name (PreviewEffectCatalog::closures, the catalog the game would load), each attached
 // slot's emitters spawned as the game's attached spawn makes them: at its point along its direction
-// (effect_forward_pose, the device's EffectWorld::forward_pose), bound to the entity it follows
+// (particle::forward_pose, the device's EffectWorld::forward_pose), bound to the entity it follows
 // (EffectBinding::FollowOwner; the owner's pose its transform as the placement draws it, the item's scale
 // with it, a posed person lifted where its spawn stands it). The game binds a static's emitters to the world
 // at its placement, never moved; here every slot follows its entity's row, so a move carries its effects as

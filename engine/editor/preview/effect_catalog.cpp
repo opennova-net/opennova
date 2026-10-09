@@ -1,7 +1,6 @@
 #include <editor/preview/effect_catalog.h>
 
 #include <map>
-#include <set>
 #include <utility>
 
 #include <base/io/strutil.h>
@@ -50,7 +49,7 @@ bool PreviewEffectCatalog::follow(const std::shared_ptr<const AssetScan> &scan,
 		if (!first || !entries.emplace(strutil::to_lower(first->logical_name), first).second) continue;
 		names.push_back(first->logical_name);
 	}
-	const std::string gore = scan->find("fgn2.bin") ? ".ptg" : ".ptu";
+	const std::string gore = gore_particle_extension(scan->find(kGoreContentMarker) != nullptr);
 	const std::vector<std::string> order = effect_file_order(names, gore);
 	// What was read stays where its file's name, path and stamp did not move.
 	std::map<std::string, std::pair<File, particle::EffectCatalogDocument>> kept;
@@ -118,35 +117,7 @@ particle::EffectClosure PreviewEffectCatalog::closure(const std::string &name,
 
 particle::EffectSceneConfig PreviewEffectCatalog::closures(const std::vector<std::string> &names,
 		const particle::EffectSceneConfig &limits, std::vector<particle::EffectClosure> &each) const {
-	particle::EffectSceneConfig out;
-	out.simulation_tick_seconds = limits.simulation_tick_seconds;
-	out.max_live_groups = limits.max_live_groups;
-	out.max_live_emitters = limits.max_live_emitters;
-	out.random_seed = limits.random_seed;
-	each.clear();
-	// One document of every effect and definition the closures hold, each once by its name as the catalog
-	// folds names (the closures read the same first registrations, so a name held twice is one definition),
-	// and every table once (each closure carries them all).
-	particle::EffectCatalogDocument merged;
-	std::set<std::string> effects, definitions;
-	bool tables = false;
-	for (const std::string &name : names) {
-		each.push_back(closure(name, limits));
-		const particle::EffectClosure &one = each.back();
-		if (one.config.documents.empty()) continue;
-		const particle::EffectCatalogDocument &document = one.config.documents.front();
-		if (merged.source.empty()) merged.source = document.source;
-		for (const particle::EffectDef &effect : document.file.effects)
-			if (effects.insert(strutil::to_lower(effect.id)).second) merged.file.effects.push_back(effect);
-		for (const particle::ParticleDef &definition : document.file.particles)
-			if (definitions.insert(strutil::to_lower(definition.id)).second) merged.file.particles.push_back(definition);
-		if (!tables) {
-			merged.file.tables = document.file.tables;
-			tables = true;
-		}
-	}
-	if (!merged.file.effects.empty()) out.documents.push_back(std::move(merged));
-	return out;
+	return particle::effect_closures(documents_, names, limits, each);
 }
 
 } // namespace opennova::editor

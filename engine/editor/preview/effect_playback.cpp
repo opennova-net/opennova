@@ -1,42 +1,14 @@
 #include <editor/preview/effect_playback.h>
 
 #include <algorithm>
-#include <cmath>
 
 #include <runtime/particle/emitter.h>
 
 namespace opennova::editor {
 
 particle::EffectPose effect_play_pose() {
-	// EffectWorld::forward_pose of +Y: forward up, its up hint turned to +X as the forward is vertical.
-	return effect_descriptor_pose({0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f});
-}
-
-particle::EffectPose effect_forward_pose(const particle::Vec3 &at, const particle::Vec3 &forward) {
-	// EffectWorld::forward_pose: the forward normalized, the up hint +Y (+X where the forward is vertical),
-	// right = hint x forward, up = forward x right; a zero forward keeps the identity basis.
-	particle::EffectPose pose;
-	pose.position = at;
-	const float length = std::sqrt(forward.x * forward.x + forward.y * forward.y + forward.z * forward.z);
-	if (length * length <= 0.000001f) return pose;
-	const particle::Vec3 f{forward.x / length, forward.y / length, forward.z / length};
-	const particle::Vec3 hint = std::fabs(f.y) > 0.999f ? particle::Vec3{1.0f, 0.0f, 0.0f} : particle::Vec3{0.0f, 1.0f, 0.0f};
-	const auto cross = [](const particle::Vec3 &a, const particle::Vec3 &b) {
-		return particle::Vec3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
-	};
-	const auto unit = [](particle::Vec3 v) {
-		const float n = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-		return n > 0.0f ? particle::Vec3{v.x / n, v.y / n, v.z / n} : v;
-	};
-	pose.right = unit(cross(hint, f));
-	pose.up = unit(cross(f, pose.right));
-	pose.forward = f;
-	return pose;
-}
-
-particle::EffectPose effect_descriptor_pose(const particle::Vec3 &at, const particle::Vec3 &orientation) {
-	const float squared = orientation.x * orientation.x + orientation.y * orientation.y + orientation.z * orientation.z;
-	return effect_forward_pose(at, squared <= 0.000001f ? particle::Vec3{0.0f, 1.0f, 0.0f} : orientation);
+	// Forward up, its up hint turned to +X as the forward is vertical.
+	return particle::descriptor_pose({0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f});
 }
 
 void EffectPlayback::open(const particle::EffectSceneConfig &config, const std::string &effect) {

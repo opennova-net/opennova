@@ -23,6 +23,7 @@
 #include <runtime/audio/music_policy.h>
 #include <runtime/audio/dialog_queue.h>
 #include <runtime/audio/oneshot_play.h>
+#include <runtime/mission/collision_resolve.h>
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/world/weather_state.h>
 
@@ -94,10 +95,9 @@ const MissionListen::Catalog &MissionListen::catalog_(const SessionView &view, c
 	if (!view.findings.assets || !view.findings.assets->read(served_name(file), bytes) || bytes.empty()) return catalog;
 	def::DefItemsFile items{};
 	if (def::def_parse_items_memory(bytes.data(), bytes.size(), &items) == 0) {
-		for (size_t i = 0; i < items.count; ++i) {
-			const def::DefItemDef &row = items.entries[i];
-			// A type id resolves to its first row [docs/world/itemdef-re.md, 2026-09-23].
-			if (catalog.items.count(int64_t(row.id))) continue;
+		// A type id resolves to its first row (mission::item_defs_by_id).
+		for (const auto &entry : mission::item_defs_by_id(items)) {
+			const def::DefItemDef &row = *entry.second;
 			Item item;
 			item.defined = true;
 			item.envs = audio::envs_slot_sets(row, item.slots);
