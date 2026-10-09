@@ -952,10 +952,10 @@ void compare_panm(Diff &d, const std::string &where, const Threedi3di3 &a, const
 			const std::string kx = track_key(a, *tx[t]), ky = track_key(b, *ty[t]);
 			if (kx != ky) d.add(w + " " + threedi_panm_track_label(t) + ": " + kx + " vs " + ky);
 		}
-		// The rotation frame the row selects (a positive matrix_index).
+		// The rotation frame the row's frame byte selects (threedi_panm_frame_selector).
 		const auto frame = [](const Threedi3di3 &m, const ThreediPartAnimation &r) {
 			std::array<double, 9> f{1, 0, 0, 0, 1, 0, 0, 0, 1};
-			const int sel = static_cast<int8_t>(r.matrix_index);
+			const int sel = threedi_panm_frame_selector(r.matrix_index);
 			if (sel > 0 && static_cast<uint32_t>(sel) < m.mtrx.count)
 				for (int i = 0; i < 3; ++i)
 					for (int j = 0; j < 3; ++j) f[i * 3 + j] = m.mtrx.matrices[sel].m[i * 4 + j];

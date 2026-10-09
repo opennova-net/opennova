@@ -550,6 +550,80 @@ int main() {
 	if (!expect(water_saved.str().find("water_height 32\r\n") != std::string::npos,
 	            "writer should preserve authored water_height")) return 1;
 
+	// The keyframe segment search [orig: Environment_FindKeyframeSegment @ 0x57dd80]: the last keyframe at or before
+	// the time, below the first the last (the 24 h wrap), toward the next; the fraction elapsed over the length.
+	{
+		using opennova::env::find_keyframe_segment;
+		using opennova::env::hhmm_to_hours_fp;
+		using opennova::env::KeyframeSegment;
+		const std::vector<int> times = {hhmm_to_hours_fp(600.0f), hhmm_to_hours_fp(1200.0f), hhmm_to_hours_fp(1800.0f)};
+		const KeyframeSegment none = find_keyframe_segment({}, 0);
+		if (!expect(none.lo == -1 && none.hi == -1 && none.fraction_fp == 0, "no keyframe, no segment")) return 1;
+		const KeyframeSegment mid = find_keyframe_segment(times, hhmm_to_hours_fp(900.0f));
+		if (!expect(mid.lo == 0 && mid.hi == 1 && mid.fraction_fp == 0x8000 && mid.elapsed_fp == 3 << 16 &&
+		            mid.length_fp == 6 << 16, "09:00 is halfway from 06:00 to 12:00")) return 1;
+		const KeyframeSegment at = find_keyframe_segment(times, hhmm_to_hours_fp(1200.0f));
+		if (!expect(at.lo == 1 && at.hi == 2 && at.fraction_fp == 0, "a keyframe's own time starts its segment")) return 1;
+		// Past the last toward the first, and below the first from the last: the night's 12 h segment.
+		const KeyframeSegment late = find_keyframe_segment(times, hhmm_to_hours_fp(2100.0f));
+		if (!expect(late.lo == 2 && late.hi == 0 && late.length_fp == 12 << 16 && late.fraction_fp == 0x4000,
+		            "21:00 is a quarter of the way from 18:00 to 06:00")) return 1;
+		const KeyframeSegment early = find_keyframe_segment(times, hhmm_to_hours_fp(300.0f));
+		if (!expect(early.lo == 2 && early.hi == 0 && early.elapsed_fp == 9 << 16 && early.fraction_fp == 0xC000,
+		            "03:00 wraps below the first keyframe")) return 1;
+		// One keyframe, or a segment of no length: no fraction.
+		const KeyframeSegment one = find_keyframe_segment({hhmm_to_hours_fp(1200.0f)}, hhmm_to_hours_fp(1500.0f));
+		if (!expect(one.lo == 0 && one.hi == 0 && one.length_fp == 0 && one.fraction_fp == 0, "one keyframe holds all day"))
+			return 1;
+		// The time taken mod a day.
+		if (!expect(find_keyframe_segment(times, hhmm_to_hours_fp(900.0f) + opennova::env::kTodDayHoursFp).fraction_fp ==
+		                    0x8000, "a time past a day wraps")) return 1;
+	}
+
+	// The tick's colors [orig: Environment_ComputeTimeOfDayColors @ 0x57de40]: the environment's keyframes, cross-faded
+	// by the overcast blend toward the overcast table's, toward black with none (env #41).
+	{
+		opennova::env::Config day;
+		day.keyframes.resize(1);
+		day.keyframes[0].time = 1200;
+		day.keyframes[0].sun = {200.0f / 255.0f, 200.0f / 255.0f, 200.0f / 255.0f};
+		opennova::env::Config grey = day;
+		grey.keyframes[0].sun = {100.0f / 255.0f, 100.0f / 255.0f, 100.0f / 255.0f};
+		const opennova::env::TodState clear = opennova::env::tod_colors(day, &grey, 1200.0f, 0);
+		if (!expect(near(clear.sun.r, 200.0f / 255.0f), "no overcast, the environment's colors")) return 1;
+		const opennova::env::TodState half = opennova::env::tod_colors(day, &grey, 1200.0f, 0x8000);
+		if (!expect(near(half.sun.r, 150.0f / 255.0f), "half overcast, halfway to the overcast table")) return 1;
+		const opennova::env::TodState dark = opennova::env::tod_colors(day, nullptr, 1200.0f, 0x8000);
+		if (!expect(near(dark.sun.r, 100.0f / 255.0f), "no overcast table, halfway to black")) return 1;
+		const opennova::env::TodState same = opennova::env::blend_tod_states(
+				opennova::env::interpolate_tod(day.keyframes, 1200.0f, day.envscale),
+				opennova::env::interpolate_tod(grey.keyframes, 1200.0f, grey.envscale), 0x8000);
+		if (!expect(near(same.sun.r, half.sun.r), "the same as interpolate then blend")) return 1;
+	}
+
+	// The clock a .env's own lines leave: curtime's truncating 16.16 hours << 8 [orig: TimeOfDay_ParseProperty
+	// @ 0x57d0d0], tod_rate's advance, else the engine's default.
+	{
+		opennova::env::Config clock_cfg;
+		clock_cfg.curtime = 1210;
+		const opennova::env::TodFileClock clock = opennova::env::tod_file_clock(clock_cfg);
+		if (!expect(clock.start_fixed24 == 204122624u, "curtime 1210 starts the clock at (12<<16) + 655360/60, << 8"))
+			return 1;
+		if (!expect(clock.advance_per_tick == uint32_t(opennova::env::kTodDefaultAdvancePerTick),
+		            "no tod_rate, the engine's default advance")) return 1;
+		clock_cfg.tod_rate = 30;
+		clock_cfg.tod_rate_set = true;
+		if (!expect(opennova::env::tod_file_clock(clock_cfg).advance_per_tick ==
+		                    uint32_t(opennova::env::tod_rate_advance_per_tick(30)),
+		            "tod_rate's advance, the 60-minute floor")) return 1;
+	}
+
+	// The keyword store shifts and the ranges they leave.
+	if (!expect(opennova::env::env_store_max(opennova::env::kFogLevelStoreShift) == 32767 &&
+	            opennova::env::env_store_min(opennova::env::kWaterHeightStoreShift) == -65536 &&
+	            opennova::env::env_store_max(opennova::env::kSkySpeedStoreShift) == 2097151,
+	            "the store shifts' ranges")) return 1;
+
 	std::printf("OK: env parse/write/interpolation\n");
 	return 0;
 }

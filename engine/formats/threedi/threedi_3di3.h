@@ -1007,5 +1007,43 @@ static inline uint16_t threedi_3di3_user_point_mask(const Threedi3di3 *model,
     return mask;
 }
 
+// A userpoint's name as the USRP field holds it: cut at the first NUL, and
+// never past the field (a full-width name carries no terminator).
+inline std::string_view threedi_user_point_name(const ThreediUserPoint &point) {
+    size_t length = 0;
+    while (length < sizeof(point.name) && point.name[length] != '\0') ++length;
+    return std::string_view(point.name, length);
+}
+
+// The model's by-name userpoint lookup: the FIRST userpoint whose name equals
+// `name` ASCII case-insensitively, walked from row 0 over every userpoint.
+// Returns its 0-based row, or -1 when none matches or the model, its
+// userpoint table or the name is missing. An empty name is compared like any
+// other (callers that treat it as "unnamed" test it first), and the row is
+// returned unpacked: the 1-based byte slots the consumers store add one and
+// apply their own width.
+// [orig: ModelGPM_FindUserpointByName @ 0x5B2170, the stricmp walk
+//  @ 0x5B21E0..0x5B21EF]
+inline int threedi_3di3_find_user_point(const Threedi3di3 *model, const char *name) {
+    if (model == NULL || model->user_points == NULL || name == NULL) return -1;
+    for (size_t i = 0; i < model->user_point_count; ++i)
+        if (opennova::strutil::iequals(threedi_user_point_name(model->user_points[i]), name))
+            return (int)i;
+    return -1;
+}
+
+// The attach-bone lookup, which keeps the LAST case-insensitive name match
+// instead: the same walk over every userpoint, a later match overwriting an
+// earlier one. Same returns as threedi_3di3_find_user_point.
+// [orig: Entity_FindAttachBone @ 0x4B9580]
+inline int threedi_3di3_find_last_user_point(const Threedi3di3 *model, const char *name) {
+    if (model == NULL || model->user_points == NULL || name == NULL) return -1;
+    int found = -1;
+    for (size_t i = 0; i < model->user_point_count; ++i)
+        if (opennova::strutil::iequals(threedi_user_point_name(model->user_points[i]), name))
+            found = (int)i;
+    return found;
+}
+
 } // namespace opennova::threedi
 #pragma pack(pop)

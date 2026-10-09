@@ -119,10 +119,13 @@
   their own clamp semantics. `engine/formats/cpt` reads through the shared
   `io::BitReader` but keeps its own bit WRITER (a normalizing `set_position` and a
   `write_to_file`); `io/bit_stream.h` carries no writer, and replacing cpt's is a real
-  migration needing a CPT-corpus byte diff, not a swap. That byte diff is
-  NOT in ctest today: `tests/cpt/cpt_roundtrip_test` (ctest `cpt_roundtrip`) pins the
-  bit codec and the DPTH/CDEP/POLY round-trips on synthetic buffers only, so run a
-  retail-corpus byte diff by hand whenever you touch the CPT encoder. Three more stay
+  migration needing a CPT-corpus byte diff, not a swap. That byte diff is the
+  re-encode leg of the gated `tests/terrain/cpt_jo_assets_sweep_test` (ctest
+  `cpt_jo_assets_sweep`, `--suite retail`: every retail .cpt read by `load_cpt` and
+  written again by `CptFile::write_bytes`, byte for byte); `tests/cpt/cpt_roundtrip_test`
+  (ctest `cpt_roundtrip`) pins the bit codec and the DPTH/CDEP/POLY round-trips on
+  synthetic buffers in core, so run the retail suite whenever you touch the CPT
+  encoder. Three more stay
   by design: `formats/bink`'s
   `BitReader` is a fail-latching decoder contract (`peek`, `align32`, the first short
   read poisons it), the `wire_cursor` posture rather than `io::BitReader`'s lenient

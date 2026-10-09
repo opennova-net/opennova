@@ -1,4 +1,5 @@
 #include <formats/env/env.h>
+#include <formats/env/tod_clock.h>
 #include <base/io/ascii_config.h>
 #include <base/io/crt_ftol.h>
 #include <base/io/fixed.h>
@@ -625,6 +626,44 @@ TodState blend_tod_states(const TodState &env_state, const TodState &overcast_st
 	return out;
 }
 
+KeyframeSegment find_keyframe_segment(const std::vector<int> &times, int t) {
+	// [orig: Environment_FindKeyframeSegment @ 0x57dd80]: integer bracketing in
+	// 16.16 hours, the 24 h wrap below the first keyframe and past the last.
+	KeyframeSegment out;
+	if (times.empty()) {
+		return out;
+	}
+	t %= kTodDayHoursFp;
+
+	size_t lo = times.size() - 1;
+	size_t hi = 0;
+	if (t >= times.front()) {
+		for (size_t i = 0; i < times.size(); ++i) {
+			if (times[i] <= t) {
+				lo = i;
+				hi = (i + 1) % times.size();
+			}
+		}
+	}
+
+	int duration = times[hi] - times[lo];
+	if (duration < 0) {
+		duration += kTodDayHoursFp;
+	}
+	int elapsed = t - times[lo];
+	if (elapsed < 0) {
+		elapsed += kTodDayHoursFp;
+	}
+	out.lo = static_cast<int>(lo);
+	out.hi = static_cast<int>(hi);
+	out.elapsed_fp = elapsed;
+	out.length_fp = duration;
+	if (duration != 0) {
+		out.fraction_fp = static_cast<int>((static_cast<int64_t>(elapsed) << 16) / duration);
+	}
+	return out;
+}
+
 TodState interpolate_tod(const std::vector<Keyframe> &keyframes, float time, float envscale) {
 	// Engine-faithful per-tick interpolation. Parameter space is 16.16 HOURS
 	// (a day = 0x180000), bracketing and fraction are integer math
@@ -642,46 +681,21 @@ TodState interpolate_tod(const std::vector<Keyframe> &keyframes, float time, flo
 		return a.time < b.time;
 	});
 
-	constexpr int kDay = 0x180000; // 24.0 hours in 16.16
-	int t = hhmm_to_hours_fp(time);
-	t %= kDay;
-
 	std::vector<int> times(sorted.size());
 	for (size_t i = 0; i < sorted.size(); ++i) {
 		times[i] = hhmm_to_hours_fp(static_cast<float>(sorted[i].time));
 	}
 
-	size_t lo = sorted.size() - 1;
-	size_t hi = 0;
-	if (t >= times.front()) {
-		for (size_t i = 0; i < sorted.size(); ++i) {
-			if (times[i] <= t) {
-				lo = i;
-				hi = (i + 1) % sorted.size();
-			}
-		}
-	}
-
-	int duration = times[hi] - times[lo];
-	if (duration < 0) {
-		duration += kDay;
-	}
-	int fraction = 0;
-	if (duration != 0) {
-		int elapsed = t - times[lo];
-		if (elapsed < 0) {
-			elapsed += kDay;
-		}
-		fraction = static_cast<int>((static_cast<int64_t>(elapsed) << 16) / duration);
-	}
+	const KeyframeSegment segment = find_keyframe_segment(times, hhmm_to_hours_fp(time));
+	int fraction = segment.fraction_fp;
 	if (fraction < 0) {
 		fraction = 0;
 	} else if (fraction > 63356) {
 		fraction = 0x10000;
 	}
 
-	const Keyframe &a = sorted[lo];
-	const Keyframe &b = sorted[hi];
+	const Keyframe &a = sorted[static_cast<size_t>(segment.lo)];
+	const Keyframe &b = sorted[static_cast<size_t>(segment.hi)];
 	state.sun = lerp_rgb_quantized(a.sun, b.sun, fraction, envscale);
 	state.ground = lerp_rgb_quantized(a.ground, b.ground, fraction, envscale);
 	state.fog = lerp_rgb_quantized(a.fog, b.fog, fraction, envscale);
@@ -695,6 +709,28 @@ TodState interpolate_tod(const std::vector<Keyframe> &keyframes, float time, flo
 	state.cloudhighlight = lerp_rgb_quantized(a.cloudhighlight, b.cloudhighlight, fraction, envscale);
 	state.cloudedge = lerp_rgb_quantized(a.cloudedge, b.cloudedge, fraction, envscale);
 	return state;
+}
+
+TodState tod_colors(const Config &environment, const Config *overcast, float time, int overcast_blend_fp) {
+	const TodState colors = interpolate_tod(environment.keyframes, time, environment.envscale);
+	if (overcast_blend_fp <= 0) {
+		return colors;
+	}
+	// The overcast table's colors, or black with none [orig: Environment_FindKeyframeSegment @ 0x57ddbd, the count
+	// gate; the calls @ 0x57dffb / @ 0x57e029 have none; Environment_InitDefaults @ 0x57c01e, memset over
+	// g_EnvTrnSnapshotTable @ 0x26c7414].
+	const bool has_table = overcast != nullptr && !overcast->keyframes.empty();
+	const TodState toward = has_table ? interpolate_tod(overcast->keyframes, time, overcast->envscale) : TodState{};
+	return blend_tod_states(colors, toward, overcast_blend_fp);
+}
+
+TodFileClock tod_file_clock(const Config &config) {
+	TodFileClock out;
+	// curtime parses to 16.16 hours widened by 8 [orig: TimeOfDay_ParseProperty @ 0x57d0d0].
+	out.start_fixed24 = static_cast<uint32_t>(hhmm_to_hours_fp(static_cast<float>(config.curtime))) << 8;
+	out.advance_per_tick = static_cast<uint32_t>(config.tod_rate_set ? tod_rate_advance_per_tick(config.tod_rate)
+	                                                                 : kTodDefaultAdvancePerTick);
+	return out;
 }
 
 Vec3 compute_sun_direction(float tod_time) {

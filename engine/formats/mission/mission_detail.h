@@ -80,13 +80,6 @@ inline void write_i32_at(uint8_t *bytes, size_t offset, int32_t value) {
 	bytes[offset + 3] = static_cast<uint8_t>((v >> 24) & 0xFF);
 }
 
-inline int header_time_to_hhmm(uint16_t encoded) {
-	const int hours = (encoded >> 8) & 0xFF;
-	const int frac = encoded & 0xFF;
-	const int minutes = (frac * 60 + 128) / 256;
-	return hours * 100 + minutes;
-}
-
 inline std::string four_digit(int value) {
 	std::ostringstream stream;
 	if (value < 0) {

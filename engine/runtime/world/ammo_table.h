@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include <base/io/fixed.h>
+
 namespace opennova::world {
 
 // The canonical effects_table tag order — the array index IS the impact effect id the
@@ -66,6 +68,21 @@ inline int impact_effect_tag_index(const char *name) {
         if (t[j] == '\0' && name[j] == '\0') return i;
     }
     return -1;
+}
+
+// The energy a round pays to go on through an entity face of `material` (the
+// face byte), in per-tick Q16 units; 0 for every other material, which the
+// round sim reads as an absorbing face. The entity-face material table has its own
+// energy law: the decompiler's "ClampKineticEnergy" name is misleading, the
+// material cost is SUBTRACTED, and a round unable to pay it is released.
+// [orig: table @0x82D034; Entity_ClampKineticEnergy @0x4E9070..0x4E9200]
+inline int32_t material_energy_cost(uint8_t material) {
+    switch (material) {
+        case 19: case 15: return 10 * io::kFp16OneInt;
+        case 16: case 7: return 4 * io::kFp16OneInt;
+        case 17: return 8 * io::kFp16OneInt;
+        default: return 0;
+    }
 }
 
 // One baked per-tag impact row: the .ptl effect + soundset spawned on a hit of that

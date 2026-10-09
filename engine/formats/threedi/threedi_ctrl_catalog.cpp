@@ -2,6 +2,7 @@
 
 #include <base/io/strutil.h>
 
+#include <algorithm>
 #include <cstddef>
 
 namespace opennova::threedi {
@@ -153,6 +154,18 @@ uint8_t threedi_ctrl_register_loader_ordinal(const char *name)
     return ordinal == THREEDI_CTRL_REGISTER_NOT_FOUND
         ? static_cast<uint8_t>(THREEDI_CTRL_LOD_FRAC)
         : static_cast<uint8_t>(ordinal);
+}
+
+void threedi_ctrl_bus_from_names(const std::map<std::string, int64_t> &held,
+                                 int32_t bus[THREEDI_CTRL_REGISTER_COUNT])
+{
+    std::fill(bus, bus + THREEDI_CTRL_REGISTER_COUNT, 0);
+    for (const auto &entry : held) {
+        const int ordinal = threedi_ctrl_register_ordinal(entry.first.c_str());
+        if (ordinal >= 0 && ordinal < THREEDI_CTRL_REGISTER_COUNT) {
+            bus[ordinal] = static_cast<int32_t>(entry.second);
+        }
+    }
 }
 
 } // namespace opennova::threedi

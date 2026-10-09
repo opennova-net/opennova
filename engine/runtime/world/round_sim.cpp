@@ -591,19 +591,6 @@ bool impact_is_critical(const Entity &target, int32_t hit_zone,
         : hit_zone_is_critical(hit_zone);
 }
 
-// The entity-face material table has its own energy law, in per-tick Q16
-// units. The decompiler's "ClampKineticEnergy" name is misleading: the
-// material cost is SUBTRACTED, and a round unable to pay it is released.
-// [orig: table @0x82D034; Entity_ClampKineticEnergy @0x4E9070..0x4E9200]
-int32_t material_energy_cost(uint8_t material) {
-    switch (material) {
-        case 19: case 15: return 10 * io::kFp16OneInt;
-        case 16: case 7: return 4 * io::kFp16OneInt;
-        case 17: return 8 * io::kFp16OneInt;
-        default: return 0;
-    }
-}
-
 // `fild; fsqrt; fistp` under the default round-to-nearest control word, then
 // `shl 8`. A negative operand is an invalid fsqrt whose integer-indefinite
 // result shifts to 0. [orig: @0x4E9142..0x4E9150, @0x4E915B..0x4E9169]

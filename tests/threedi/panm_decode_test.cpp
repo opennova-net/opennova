@@ -182,6 +182,86 @@ static int test_flipbook_register_rule(void) {
     return ok;
 }
 
+// A material generator's parameter byte: up to style 0x70 the phase in 1/256
+// (rounded half away from zero, clamped to a byte), above it the register's low
+// byte; the split back is the reader's (phase byte / 256 with reg -1, or the
+// register with phase 0), so every byte round-trips under either style.
+static int test_generator_param_byte(void) {
+    int ok = 1;
+    static const struct {
+        int style;
+        float phase;
+        int32_t reg;
+        uint8_t byte;
+    } kPacks[] = {
+            {0x32, 0.0f, -1, 0},
+            {0x32, 0.5f, -1, 128},
+            {0x32, 0.25f, 7, 64},             // a phase style ignores the register
+            {0x32, 1.0f / 512.0f, -1, 1},     // half a step rounds away from zero
+            {0x32, 0.99f, -1, 253},
+            {0x32, 1.5f, -1, 255},            // clamped high
+            {0x32, -0.25f, -1, 0},            // clamped low
+            {0x70, 0.5f, -1, 128},            // 0x70 is still a phase style
+            {0x71, 0.5f, 5, 5},               // a register style stores the register
+            {0x75, 0.0f, 0x1FF, 0xFF},        // its low byte
+    };
+    for (const auto &row : kPacks) {
+        const uint8_t got = threedi_generator_param_byte(row.style, row.phase, row.reg);
+        if (got != row.byte) {
+            fprintf(stderr, "param byte: style 0x%02X phase %g reg %d -> %u, expected %u\n", row.style,
+                    row.phase, row.reg, got, row.byte);
+            ok = 0;
+        }
+    }
+    for (const int style : {0x32, 0x71}) {
+        for (int byte = 0; byte < 256; ++byte) {
+            float phase = -2.0f;
+            int32_t reg = -2;
+            threedi_generator_split_param_byte(style, (uint8_t)byte, &phase, &reg);
+            const bool names = threedi_generator_names_register(style);
+            if (names ? (reg != byte || phase != 0.0f) : (reg != -1 || phase != (float)byte / 256.0f)) {
+                fprintf(stderr, "split: style 0x%02X byte %d -> phase %g reg %d\n", style, byte, phase, reg);
+                ok = 0;
+            }
+            if (threedi_generator_param_byte(style, phase, reg) != byte) {
+                fprintf(stderr, "param byte: style 0x%02X byte %d does not round-trip\n", style, byte);
+                ok = 0;
+            }
+        }
+    }
+    return ok;
+}
+
+// A frame byte selects an MTRX row only when it sign-extends above zero, and
+// only the spinner and Euler rotation types (1 and 2) turn through it.
+static int test_frame_selector(void) {
+    int ok = 1;
+    static const struct {
+        uint8_t byte;
+        int selector;
+    } kRows[] = {{0, 0}, {1, 1}, {5, 5}, {127, 127}, {128, 0}, {200, 0}, {255, 0}};
+    for (const auto &row : kRows) {
+        if (threedi_panm_frame_selector(row.byte) != row.selector) {
+            fprintf(stderr, "frame byte %u selects %d, expected %d\n", row.byte,
+                    threedi_panm_frame_selector(row.byte), row.selector);
+            ok = 0;
+        }
+        for (uint8_t rotation = 0; rotation < 4; ++rotation) {
+            ThreediPartAnimation pa;
+            memset(&pa, 0, sizeof(pa));
+            pa.flags = threedi_panm_pack_flags(0, rotation, 0, 0);
+            pa.matrix_index = row.byte;
+            const int expected = rotation == 1 || rotation == 2 ? row.selector : 0;
+            if (threedi_panm_frame_row(pa) != expected) {
+                fprintf(stderr, "rotation type %u frame byte %u: row %d, expected %d\n", rotation, row.byte,
+                        threedi_panm_frame_row(pa), expected);
+                ok = 0;
+            }
+        }
+    }
+    return ok;
+}
+
 int main(void) {
     int ok = 1;
     ok &= test_decode_transform_with_reg();
@@ -189,5 +269,7 @@ int main(void) {
     ok &= test_raw_114_to_117_are_waves_with_ctrl_reference_params();
     ok &= test_generator_register_rules();
     ok &= test_flipbook_register_rule();
+    ok &= test_generator_param_byte();
+    ok &= test_frame_selector();
     return ok ? 0 : 1;
 }

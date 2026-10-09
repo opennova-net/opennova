@@ -145,6 +145,17 @@ struct Config {
 // [orig: TimeOfDay_ParseProperty @ 0x57c65b, tod_end's reset @ 0x57c6a3].
 inline constexpr int kMaxTodKeyframes = 16;
 
+// The shifts that put an atol keyword's whole units into the engine's 32-bit store: fog_level and sky_height
+// `<< 16` [orig: TimeOfDay_ParseProperty @ 0x57ccbf, @ 0x57cbdf], water_height `<< 15` [@ 0x57cb6a], sky_speed
+// `<< 10` [@ 0x57cc0d]. Past the range a shift leaves (env_store_min .. env_store_max) the value wraps.
+inline constexpr int kFogLevelStoreShift = 16;
+inline constexpr int kSkyHeightStoreShift = 16;
+inline constexpr int kWaterHeightStoreShift = 15;
+inline constexpr int kSkySpeedStoreShift = 10;
+// The whole numbers a keyword stored by `shift` holds without wrapping.
+constexpr int64_t env_store_min(int shift) { return int64_t(INT32_MIN) >> shift; }
+constexpr int64_t env_store_max(int shift) { return int64_t(INT32_MAX) >> shift; }
+
 // The HHMM clock's authored range; every time-of-day setter clamps into it.
 inline constexpr int kTodTimeMax = 2359;
 inline int clamp_tod_time(int time) {
@@ -237,6 +248,23 @@ bool read_mission_env(const EnvTextReader &read, const std::string &terrain_file
 // fixed-point hours [orig: Environment_ParseTimeString @ 0x57c500].
 int hhmm_to_hours_fp(float hhmm);
 
+// A day in 16.16 hours (24.0).
+inline constexpr int kTodDayHoursFp = 0x180000;
+
+// The keyframe segment a time falls in [orig: Environment_FindKeyframeSegment @ 0x57dd80]: over keyframe times
+// in 16.16 hours, ascending, the last at or before `t_hours_fp` (taken mod a day), below the first the last (the
+// 24 h wrap), toward the next (past the last the first). `elapsed_fp` and `length_fp` are the time since `lo` and
+// the segment's length, each mod a day; `fraction_fp` is elapsed over length in 16.16, truncating, 0 for a segment
+// of no length (before the lerp's 63356 snap). `lo` and `hi` are -1 with no keyframe.
+struct KeyframeSegment {
+	int lo = -1;
+	int hi = -1;
+	int elapsed_fp = 0;
+	int length_fp = 0;
+	int fraction_fp = 0;
+};
+KeyframeSegment find_keyframe_segment(const std::vector<int> &times_hours_fp, int t_hours_fp);
+
 // Interpolates in 16.16 HOURS space with the engine's integer math: byte
 // quantization (x envscale, truncated, clamped <= 255) before the lerp,
 // per-channel (t*(b-a) + (a<<16) + 0x8000) >> 16 rounding, truncating segment
@@ -251,6 +279,25 @@ TodState interpolate_tod(const std::vector<Keyframe> &keyframes, float time, flo
 // Environment_LerpKeyframeSet @ 0x57c3b0 over (env, trn, clamp(g_EnvOvercastBlend))].
 TodState blend_tod_states(const TodState &env_state, const TodState &overcast_state,
 		int overcast_blend_fp);
+
+// The colors a tick's time-of-day compute makes at `time` (HHMM) [orig: Environment_ComputeTimeOfDayColors
+// @ 0x57de40]: the environment's keyframes interpolated under its envscale, then cross-faded by the overcast blend
+// toward the overcast table's (its keyframes under its own envscale; env #16). With no overcast table (`overcast`
+// null or without keyframes) the cross-fade still runs, toward black: the empty table's search writes no index and
+// the lerp reads the snapshot Environment_InitDefaults zeroed (env #41) [orig: Environment_FindKeyframeSegment
+// @ 0x57ddbd, the count gate; Environment_InitDefaults @ 0x57c01e]. A blend of 0 or less is the environment's
+// colors alone. The caller gates on the environment having keyframes (the compute's own gate, @ 0x57de8a).
+TodState tod_colors(const Config &environment, const Config *overcast, float time, int overcast_blend_fp);
+
+// The clock an environment's own lines leave before a mission sets one: curtime's 16.16 hours widened to the 8.24
+// accumulator [orig: TimeOfDay_ParseProperty @ 0x57d0d0], and the advance a tick its tod_rate parses into [orig:
+// @ 0x57d0fe..0x57d118] (tod_clock.h tod_rate_advance_per_tick), else the engine's default [orig:
+// Environment_InitDefaults @ 0x57c22f] (kTodDefaultAdvancePerTick).
+struct TodFileClock {
+	uint32_t start_fixed24 = 0;
+	uint32_t advance_per_tick = 0;
+};
+TodFileClock tod_file_clock(const Config &config);
 
 Vec3 compute_sun_direction(float tod_time);
 Vec3 compute_moon_direction(float tod_time);

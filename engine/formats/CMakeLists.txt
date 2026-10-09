@@ -72,6 +72,7 @@ add_library(opennova_formats STATIC
     # env — environment/time-of-day
     ${CMAKE_CURRENT_SOURCE_DIR}/env/env.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/env/env_render.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/env/env_source_issue.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/env/env_weather_core.cpp
     # filelog — the original game's /FRISK file-access log (_filelog.txt)
     ${CMAKE_CURRENT_SOURCE_DIR}/filelog/file_access_log.cpp
@@ -171,6 +172,7 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_panm_wave.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_panm_matrices.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_panm_pose.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_volume_solid.cpp   # a collision volume's planes -> its convex solid
     # til — terrain tiles
     ${CMAKE_CURRENT_SOURCE_DIR}/til/til_io.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/til/til_foliage_blocker.cpp

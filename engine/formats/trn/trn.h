@@ -19,6 +19,10 @@ struct TerrainLockCoord {
 // Retail order: top-left, top-right, bottom-left, bottom-right.
 using TerrainQuadrantLocks = std::array<TerrainLockCoord, 4>;
 
+// The sector grid's sides: 16 sectors at most each way [orig: Terrain_LoadEnvironmentConfig @ 0x610940, the
+// gate's `> 16`; the 16 x 16 grid Terrain_ShiftHeightmapRows @ 0x60F190 extends to].
+inline constexpr int kTerrainGridSide = 16;
+
 struct TrnConfig {
 	// `terrain_name` and `terrain_creator`: read by no arm of either reader (neither word is in the
 	// binary but inside "TexHorizon"), kept for whoever edits the file (every shipped .trn opens on them).
@@ -63,7 +67,7 @@ struct TrnConfig {
 	TerrainLockCoord lock_bottomleft;
 	TerrainLockCoord lock_bottomright;
 	double horizon = 0.0;
-	int sector_grid[16][16] = {};
+	int sector_grid[kTerrainGridSide][kTerrainGridSide] = {};
 	int sector_rows = 0;
 	std::string foliagemap;
 	std::vector<FoliageDef> foliage_defs;

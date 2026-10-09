@@ -7,7 +7,6 @@
 
 #include "object/object_model.h"
 #include <base/io/tick_rate.h>
-#include "object/model_user_point.h"
 
 #include <godot_cpp/core/math.hpp>
 
@@ -62,21 +61,13 @@ void ObjectModel::resolve_muzzle_userpoint() {
 			muzzle_point_name_.is_empty()) {
 		return;
 	}
-	const String wanted = muzzle_point_name_.to_lower();
-	const int count = object_data_->get_user_point_count();
-	int best = -1;
-	for (int i = 0; i < count; ++i) {
-		const Ref<ModelUserPoint> info = object_data_->get_user_point_info(i);
-		if (info.is_valid() && info->get_name().to_lower() == wanted) {
-			best = i;
-			break;
-		}
-	}
+	const opennova::threedi::Threedi3di3 &model = object_data_->native_model();
+	const int best = opennova::threedi::threedi_3di3_find_user_point(
+			&model, muzzle_point_name_.utf8().get_data());
 	if (best < 0) {
 		return;
 	}
-	const Ref<ModelUserPoint> info2 = object_data_->get_user_point_info(best);
-	const int bone = info2->get_subobject();
+	const int bone = model.user_points[best].subobject_index;
 	if (bone < 0 || bone >= skeleton_->get_bone_count()) {
 		return;
 	}

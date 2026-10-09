@@ -252,6 +252,13 @@ target_link_libraries(threedi_collision_3di_test PRIVATE opennova_formats)
 target_include_directories(threedi_collision_3di_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_collision_3di COMMAND threedi_collision_3di_test)
 
+# A collision volume's planes -> its convex solid (threedi_volume_solid.h), on synthetic planes.
+add_executable(threedi_volume_solid_test threedi/volume_solid_test.cpp)
+target_link_libraries(threedi_volume_solid_test PRIVATE opennova_formats)
+target_include_directories(threedi_volume_solid_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(threedi_volume_solid_test PRIVATE cxx_std_17)
+add_test(NAME threedi_volume_solid COMMAND threedi_volume_solid_test)
+
 # The synthetic 3DI model set fixtures/threedi/synth (eleven base models plus
 # the one-edit variants the GUT suite loads), minted through the parity
 # writer from tests/fixtures/minimal_3di_builder.h and byte-compared every run
@@ -1261,6 +1268,11 @@ target_link_libraries(trn_admission_gate_test PRIVATE opennova_formats)
 target_include_directories(trn_admission_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME trn_admission_gate COMMAND trn_admission_gate_test)
 
+add_executable(trn_key_lines_test trn/trn_key_lines_test.cpp)
+target_link_libraries(trn_key_lines_test PRIVATE opennova_formats)
+target_include_directories(trn_key_lines_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME trn_key_lines COMMAND trn_key_lines_test)
+
 add_executable(cpt_roundtrip_test cpt/cpt_roundtrip_test.cpp)
 target_link_libraries(cpt_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(cpt_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1277,6 +1289,11 @@ add_executable(env_render_unit_test env/env_render_unit_test.cpp)
 target_link_libraries(env_render_unit_test PRIVATE opennova_formats)
 target_include_directories(env_render_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME env_render_unit COMMAND env_render_unit_test)
+
+add_executable(env_source_issue_test env/env_source_issue_test.cpp)
+target_link_libraries(env_source_issue_test PRIVATE opennova_formats)
+target_include_directories(env_source_issue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME env_source_issue COMMAND env_source_issue_test)
 
 # The environment runtime (engine/runtime/environment): the TOD state owner +
 # weather embedding ported from the shell scripts (ADR 0034 d6 de-scripting).
@@ -2279,6 +2296,14 @@ target_link_libraries(ai_los_test PRIVATE opennova_runtime)
 target_include_directories(ai_los_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(ai_los_test PRIVATE cxx_std_17)
 add_test(NAME ai_los COMMAND ai_los_test)
+
+# The ammo table's shared lookups: the entity-face material cost a round pays
+# to go on through a face (runtime/world/ammo_table.h).
+add_executable(ammo_table_test world/ammo_table_test.cpp)
+target_link_libraries(ammo_table_test PRIVATE opennova_runtime)
+target_include_directories(ammo_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ammo_table_test PRIVATE cxx_std_17)
+add_test(NAME ammo_table COMMAND ammo_table_test)
 
 # The global hit record and the script kills that read it: the BMS kills keep
 # the last recorded round, WAC killSSN zeroes it, items read its section and
