@@ -89,7 +89,7 @@ public:
 private:
 	// A build in flight: the data the scene will hold (and the first-person arms', null: none), the files
 	// its textures are read through, the rig it binds (null: none) and its serial, and its units: each
-	// data's (authoring/preview_model's ModelDataBuild: its materials' stages and flipbook frames, its
+	// data's (object/object_data_build's ObjectDataBuild: its materials' stages and flipbook frames, its
 	// levels), the gun's then the arms', then the scene (the data swapped in, the rig bound) and the pose
 	// (the registers, the level, the camera, the clip at the clock).
 	struct Build {
@@ -101,7 +101,7 @@ private:
 		Ref<SkeletalAnim> skeletal;
 		int bone_count = 0;
 		uint64_t skeleton_serial = UINT64_MAX;
-		std::vector<ModelDataBuild> parts;
+		std::vector<ObjectDataBuild> parts;
 		size_t part = 0; // the part building; parts.size(): the scene, then the pose
 		bool assembled = false;
 	};
