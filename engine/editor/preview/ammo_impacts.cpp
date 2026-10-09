@@ -5,6 +5,7 @@
 #include <editor/preview/mission_ground_facts.h>
 #include <formats/def/def.h>
 #include <formats/til/til_tsd.h>
+#include <runtime/mission/runtime_boot.h>
 #include <runtime/world/ammo_table_build.h>
 #include <runtime/world/impact_scar.h>
 
@@ -192,17 +193,15 @@ bool AmmoTableSource::refresh(const std::shared_ptr<const FileSource> &files) {
 		why_ = "No project is open.";
 		return true;
 	}
-	// ammo.def by the name the game loads it by [orig: AmmoDef_LoadAll @ 0x40B0B0].
+	// ammo.def by the name the game loads it by, as the mission load reads it (mission::read_ammo_table).
 	auto stamped = std::make_shared<StampedFiles>(files);
-	std::vector<uint8_t> bytes;
-	def::DefAmmoFile ammo{};
-	if (!stamped->read("ammo.def", bytes) || bytes.empty()) {
-		why_ = "The project has no ammo.def.";
-	} else if (def::def_parse_ammo_memory(bytes.data(), bytes.size(), &ammo) != 0) {
-		why_ = "ammo.def does not read as the game's ammo table.";
-	} else {
-		table_ = world::build_ammo_table(ammo);
-		def::def_free_ammo(&ammo);
+	mission::BootFileSource boot;
+	boot.has_file = [&stamped](const std::string &name) { return stamped->stamp(name) != 0; };
+	boot.read_file = [&stamped](const std::string &name, std::vector<uint8_t> &out) { return stamped->read(name, out); };
+	switch (mission::read_ammo_table(boot, "ammo.def", table_)) {
+	case mission::DefTableRead::Missing: why_ = "The project has no ammo.def."; break;
+	case mission::DefTableRead::Unreadable: why_ = "ammo.def does not read as the game's ammo table."; break;
+	case mission::DefTableRead::Read: break;
 	}
 	reads_ = stamped->stamps();
 	return true;

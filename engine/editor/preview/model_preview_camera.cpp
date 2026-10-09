@@ -166,11 +166,8 @@ int model_preview_auto_lod(const threedi::Threedi3di3 &model, const OrbitCamera 
 	const int32_t focal = renderer::object_lod_focal_pixels(static_cast<float>(width), tan_half_fov());
 	const int32_t radius = renderer::project_bound_sphere_radius_q16(sphere.radius_q16, static_cast<int32_t>(depth_q16), focal);
 	if (projected_q16) *projected_q16 = radius;
-	std::vector<int32_t> thresholds;
-	for (size_t i = 0; i < model.lod_count; ++i)
-		thresholds.push_back(renderer::rlod_threshold_q16_from_rmdl(model.lods[i].lod_threshold));
 	const renderer::ObjectLodSelection selection = renderer::select_object_lod(
-	    thresholds, radius, renderer::object_lod_frame_scale(renderer::kObjectLodDetailFreshProfile, static_cast<float>(width)));
+	    renderer::model_lod_thresholds_q16(model), radius, renderer::object_lod_frame_scale(renderer::kObjectLodDetailFreshProfile, static_cast<float>(width)));
 	if (selection.lod_index < 0) return static_cast<int>(model.lod_count) - 1;
 	return std::min(selection.lod_index, static_cast<int>(model.lod_count) - 1);
 }

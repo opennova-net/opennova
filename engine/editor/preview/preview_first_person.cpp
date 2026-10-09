@@ -249,11 +249,10 @@ void FirstPersonSources::read_weapon_(const FileSource &files, const std::shared
 		def::def_free_weapons(&file);
 		return;
 	}
-	// The weapon of the record's name: a later block of a name replaces an earlier one [orig:
-	// WeaponDefs_ParseLineCallback @0x5436e1], so the last of the name is the one the game keeps.
-	const def::DefWeaponDef *found = nullptr;
-	for (size_t i = 0; i < file.count; ++i)
-		if (strutil::iequals(file.entries[i].weapon_name, rig.record)) found = &file.entries[i];
+	// The weapon of the record's name: a later block of a name replaces an earlier one, so the last of the
+	// name is the one the game keeps (def::def_weapon_index_by_name).
+	const int found_index = def::def_weapon_index_by_name(file.entries, file.count, rig.record.c_str());
+	const def::DefWeaponDef *found = found_index >= 0 ? &file.entries[found_index] : nullptr;
 	if (found) {
 		const def::DefWeaponDef &row = *found;
 		weapon_ = row.weapon_name;
