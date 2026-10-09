@@ -28,10 +28,6 @@ void MenuAudio::set_resource_root(const Ref<ResourceRoot> &p_root) {
 	sound_selector_.reset();
 }
 
-void MenuAudio::set_sound_profile(const Ref<LwfData> &p_profile) {
-	sound_profile_ = p_profile;
-}
-
 void MenuAudio::ensure_sound_pool_() {
 	if (!sound_players_.is_empty()) {
 		return;
@@ -51,14 +47,10 @@ bool MenuAudio::play_widget_sound(const String &p_trigger,
 		const String &p_file) {
 	// The <SOUND> element text names a .lwf bank; the trigger names a sound
 	// set inside it (menu/menu_sound.h carries the witnessed play path).
+	// A bank that did not open (or a file-less element) leaves the element no
+	// bank, so its trigger plays nothing: no other bank stands in.
 	int bank_id = 0;
-	Ref<LwfData> bank = resolve_sound_bank_(p_file, bank_id);
-	if (bank.is_null() && sound_profile_.is_valid()) {
-		// Authoring fallback: the shell profile services file-less or
-		// unresolved <SOUND> nodes (the original stays silent).
-		bank = sound_profile_;
-		bank_id = 0;
-	}
+	const Ref<LwfData> bank = resolve_sound_bank_(p_file, bank_id);
 	return play_lwf_set_(bank, bank_id, p_trigger);
 }
 
@@ -175,8 +167,6 @@ bool MenuAudio::play_member_sound_(const Dictionary &p_member, int p_vol255,
 void MenuAudio::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_resource_root", "root"),
 			&MenuAudio::set_resource_root);
-	ClassDB::bind_method(D_METHOD("set_sound_profile", "profile"),
-			&MenuAudio::set_sound_profile);
 	ClassDB::bind_method(D_METHOD("play_widget_sound", "trigger", "file"),
 			&MenuAudio::play_widget_sound);
 }

@@ -25,6 +25,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <base/gameprofile/resource_missing.h>
+#include <formats/lwf/wav_pcm.h>
 #include <runtime/audio/ambient_mixer.h>
 #include <runtime/audio/envs_markers.h>
 #include <runtime/audio/bank_chain.h>
@@ -37,6 +38,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 using namespace godot;
 
@@ -99,6 +101,7 @@ void MissionAudio::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("slot_soundset", "name", "world_pos", "source_bms_id", "sound_id"),
 			&MissionAudio::slot_soundset, DEFVAL(0), DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("play_dialog", "wav_id"), &MissionAudio::play_dialog);
+	ClassDB::bind_method(D_METHOD("advance_dialog_tick"), &MissionAudio::advance_dialog_tick);
 	ClassDB::bind_method(D_METHOD("resolve_dialog_wave", "wav_id"), &MissionAudio::resolve_dialog_wave);
 	ClassDB::bind_method(D_METHOD("play_wac_wave", "filename"), &MissionAudio::play_wac_wave);
 	ClassDB::bind_method(D_METHOD("sync_script_voice"), &MissionAudio::sync_script_voice);
@@ -111,7 +114,6 @@ void MissionAudio::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("tick", "camera_pos", "delta"), &MissionAudio::tick, DEFVAL(0.0));
 	ClassDB::bind_method(D_METHOD("teardown"), &MissionAudio::teardown);
 	ClassDB::bind_method(D_METHOD("recent_fired_soundsets"), &MissionAudio::recent_fired_soundsets);
-	ClassDB::bind_method(D_METHOD("_on_dialog_finished"), &MissionAudio::_on_dialog_finished);
 	BIND_CONSTANT(MIX_CHANNELS);
 	BIND_CONSTANT(RECENT_FIRES);
 }
@@ -218,9 +220,8 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 	// @ 0x525443; expansion fill @ 0x4a4989 / @ 0x4a495e]. The witnessed table
 	// lives native (audio/bank_chain.h); missing files skip like retail's
 	// SoundBank_LoadIfExists (D-SND-2 closed). A set is searched for in these
-	// slots alone [orig: SoundBank_FindSetByNameAnyBank @ 0x5274f0 over
-	// g_SoundBanks @ 0x24D6168]: the mission's own <mission>.lwf is its dialog
-	// bank's sounds, loaded below (docs/audio/lwf-dbf-sound-re.md, D-SND-1 fixed).
+	// slots alone: the mission's own <mission>.lwf is its dialog bank's sounds,
+	// loaded below (docs/audio/lwf-dbf-sound-re.md, D-SND-1 fixed).
 	const std::vector<std::string> global_chain = opennova::audio::global_bank_chain(
 			opennova::to_std(resource_root_->get_expansion()));
 	String global_chain_text;
@@ -575,14 +576,21 @@ bool MissionAudio::play_dialog(int p_wav_id) {
 	if (bank_.is_null() || !root_attached_) {
 		return false;
 	}
-	const std::vector<opennova::audio::DialogLineRef> lines = _resolve_dialog_lines(p_wav_id);
+	std::vector<opennova::audio::DialogLineRef> lines = _resolve_dialog_lines(p_wav_id);
 	if (lines.empty()) {
 		UtilityFunctions::push_warning(vformat("MissionAudio: unresolved dialog id %d", p_wav_id));
 		return false;
 	}
-	dialog_queue_.enqueue(lines);
-	_pump_dialog_queue();
-	return true;
+	const std::string dialog = lines.front().dialog_name;
+	return dialog_queue_.enqueue(dialog, std::move(lines));
+}
+
+void MissionAudio::advance_dialog_tick() {
+	const bool rendered = dialog_frame_rendered_;
+	dialog_frame_rendered_ = false;
+	dialog_queue_.tick(rendered,
+			[this](const opennova::audio::DialogLineRef &p_line) { return _load_dialog_line(p_line); },
+			[this](uint64_t p_voice) { return _dialog_voice_playing(p_voice); });
 }
 
 bool MissionAudio::play_dialog_line(const String &p_dialog_name, int p_line,
@@ -598,12 +606,7 @@ bool MissionAudio::play_dialog_line(const String &p_dialog_name, int p_line,
 	if (line.file.empty()) {
 		return false;
 	}
-	AudioStreamPlayer *voice = _spawn_dialog_voice(line.file, line.volume);
-	if (voice == nullptr) {
-		return false;
-	}
-	voice->connect("finished", Callable(voice, "queue_free"));
-	return true;
+	return _spawn_dialog_voice(_resolve_wav(opennova::to_gd(line.file).get_file()), line.volume) != nullptr;
 }
 
 String MissionAudio::resolve_dialog_wave(int p_wav_id) {
@@ -623,9 +626,8 @@ std::vector<opennova::audio::DialogLineRef> MissionAudio::_resolve_dialog_lines(
 			dialog_sounds_loaded_ ? &dialog_sounds_ : nullptr, p_wav_id);
 }
 
-AudioStreamPlayer *MissionAudio::_spawn_dialog_voice(const std::string &p_file, int p_volume) {
-	const Ref<AudioStreamWAV> stream = _resolve_wav(opennova::to_gd(p_file).get_file());
-	if (stream.is_null()) {
+AudioStreamPlayer *MissionAudio::_spawn_dialog_voice(const Ref<AudioStreamWAV> &p_stream, int p_volume) {
+	if (p_stream.is_null()) {
 		return nullptr;
 	}
 	AudioStreamPlayer *voice = memnew(AudioStreamPlayer);
@@ -633,56 +635,55 @@ AudioStreamPlayer *MissionAudio::_spawn_dialog_voice(const std::string &p_file, 
 	if (AudioServer::get_singleton()->get_bus_index(StringName(kVoiceBus)) >= 0) {
 		voice->set_bus(StringName(kVoiceBus));
 	}
-	voice->set_stream(stream);
+	voice->set_stream(p_stream);
 	voice->set_volume_db(opennova::audio::volume_db_from_byte(p_volume));
 	add_child(voice);
 	voice->play();
+	voice->connect("finished", Callable(voice, "queue_free"));
 	return voice;
 }
 
-// Start the next queued dialog line if nothing is currently playing. Every line
-// the queue hands out is reported to the host's co-op broadcast first (engine:
-// Simulation::broadcast_dialog_line -> Server_BroadcastDialogLine), its clip or
-// not; a line without a clip, or one that fails to spawn, is skipped so the
-// queue never stalls.
-void MissionAudio::_pump_dialog_queue() {
-	if (_dialog_voice_node() != nullptr) {
-		return; // a line is still playing; _on_dialog_finished pumps the next
-	}
-	dialog_voice_id_ = ObjectID();
-	dialog_queue_.line_finished();
-	if (bank_.is_null()) {
-		return;
-	}
-	opennova::audio::DialogLineRef line;
-	while (dialog_queue_.take_next(line)) {
-		if (line.line >= 0) {
-			const Ref<Simulation> sim = _simulation();
-			if (sim.is_valid()) {
-				sim->broadcast_dialog_line(line.dialog_name, line.line);
+// A line the dialog queue loads: its wave read and decoded through the VFS (a
+// missing .wav extension tolerated), what the game's wave loader records of it
+// for the line's hold (runtime/audio/dialog_queue dialog_clip_hold), a voice of
+// the dialog channel at the wave's volume byte, then the line's report to the
+// co-op broadcast (engine: Simulation::broadcast_dialog_line ->
+// Server_BroadcastDialogLine), made for every line the queue loads, its wave
+// or none (docs/audio/lwf-dbf-sound-re.md D-SND-42, the dialog line timing).
+opennova::audio::DialogClip MissionAudio::_load_dialog_line(const opennova::audio::DialogLineRef &p_line) {
+	opennova::audio::DialogClip clip;
+	if (!p_line.file.empty() && root_attached_ && resource_root_.is_valid()) {
+		const String name = opennova::to_gd(p_line.file).get_file();
+		PackedByteArray bytes = resource_root_->read_file(name);
+		if (bytes.is_empty() && !name.to_lower().ends_with(".wav")) {
+			bytes = resource_root_->read_file(name + String(".wav"));
+		}
+		opennova::lwf::WavPcm decoded;
+		std::string error;
+		if (!bytes.is_empty() && opennova::lwf::wav_decode_pcm16(bytes.ptr(),
+					static_cast<size_t>(bytes.size()), decoded, error)) {
+			clip.loaded = true;
+			clip.samples = decoded.loader_samples;
+			clip.pitch_q16 = decoded.loader_pitch_q16;
+			if (AudioStreamPlayer *voice = _spawn_dialog_voice(WavLoader::from_pcm(decoded), p_line.volume)) {
+				dialog_voice_id_ = ObjectID(voice->get_instance_id());
+				clip.voice = static_cast<uint64_t>(voice->get_instance_id());
 			}
 		}
-		if (line.file.empty()) {
-			continue;
-		}
-		AudioStreamPlayer *voice = _spawn_dialog_voice(line.file, line.volume);
-		if (voice != nullptr) {
-			dialog_voice_id_ = ObjectID(voice->get_instance_id());
-			dialog_queue_.line_started();
-			voice->connect("finished", Callable(this, "_on_dialog_finished"));
-			return;
+	}
+	if (p_line.line >= 0) {
+		const Ref<Simulation> sim = _simulation();
+		if (sim.is_valid()) {
+			sim->broadcast_dialog_line(p_line.dialog_name, p_line.line);
 		}
 	}
+	return clip;
 }
 
-void MissionAudio::_on_dialog_finished() {
-	AudioStreamPlayer *voice = _dialog_voice_node();
-	if (voice != nullptr) {
-		voice->queue_free();
-	}
-	dialog_voice_id_ = ObjectID();
-	dialog_queue_.line_finished();
-	_pump_dialog_queue();
+bool MissionAudio::_dialog_voice_playing(uint64_t p_voice) const {
+	const AudioStreamPlayer *voice =
+			Object::cast_to<AudioStreamPlayer>(ObjectDB::get_instance(ObjectID(p_voice)));
+	return voice != nullptr && voice->is_playing();
 }
 
 bool MissionAudio::play_wac_wave(const String &p_filename) {
@@ -786,6 +787,9 @@ void MissionAudio::set_occlusion_override(const Callable &p_override) {
 void MissionAudio::tick(const Vector3 &p_camera_pos, double p_delta) {
 	const uint64_t start = Time::get_singleton()->get_ticks_usec();
 	last_camera_pos_ = p_camera_pos;
+	// The frame this pass mixes renders: the next dialog tick starts a fresh
+	// line's hold (runtime/audio/dialog_queue DialogQueue::tick).
+	dialog_frame_rendered_ = true;
 	sync_script_voice();
 	int writes = 0;
 	if (mixer_.is_null()) {
@@ -971,6 +975,12 @@ void MissionAudio::_reset_mission_playback_state() {
 	// Dialog and WAC voices are mission-owned even though they use separate
 	// physical players from ambience. Stop them before replacing/queuing their
 	// audio root so neither playback nor a queued dialog can cross missions.
+	for (const uint64_t voice : dialog_queue_.voices()) {
+		if (AudioStreamPlayer *dialog = Object::cast_to<AudioStreamPlayer>(
+					ObjectDB::get_instance(ObjectID(voice)))) {
+			dialog->stop();
+		}
+	}
 	if (AudioStreamPlayer *dialog = _dialog_voice_node()) {
 		dialog->stop();
 	}
@@ -979,6 +989,7 @@ void MissionAudio::_reset_mission_playback_state() {
 	}
 	dialog_queue_.clear();
 	dialog_voice_id_ = ObjectID();
+	dialog_frame_rendered_ = false;
 	wac_voice_id_ = ObjectID();
 	wac_wav_cache_.clear();
 	dbf_.unref();
@@ -988,8 +999,7 @@ void MissionAudio::_reset_mission_playback_state() {
 
 void MissionAudio::teardown() {
 	// Freeing the voice children drops the dialog + wac voice nodes too; the
-	// ids are cleared so a late `finished` after teardown can't pump a freed
-	// queue.
+	// queue and its voices are cleared so nothing crosses missions.
 	_apply_reverb(0);
 	_stop_all_ambient_channels();
 	_reset_mission_playback_state();
