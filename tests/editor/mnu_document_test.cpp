@@ -1944,7 +1944,7 @@ int retail_sweep() {
 			const std::string path = retail::reference_fixture((std::string("mnu/") + name + ".mnu").c_str());
 			std::vector<uint8_t> decoded;
 			std::string message;
-			if (path.empty() || !read_file_bytes(path, decoded, message)) { sweep_fail(totals, name, "missing fixture"); continue; }
+			if (path.empty() || !opennova::io::read_file_bytes(path, decoded, message)) { sweep_fail(totals, name, "missing fixture"); continue; }
 			opennova::vfs_decode_payload(decoded);
 			sweep_menu(std::string("fixtures/mnu/") + name + ".mnu", path, decoded, scratch.root(), totals);
 		}

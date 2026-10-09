@@ -154,8 +154,8 @@ private:
 	Camera3D *camera_ = nullptr;
 	Ref<ResourceRoot> root_files_;
 	std::shared_ptr<const opennova::editor::ProjectAssetSource> mounted_;
-	std::shared_ptr<opennova::editor::StampedFiles> stamped_;
-	opennova::editor::FileStamps layer_files_[kLayers];
+	std::shared_ptr<opennova::StampedFiles> stamped_;
+	opennova::FileStamps layer_files_[kLayers];
 	std::vector<std::string> layer_missing_[kLayers];
 	Ref<TerrainData> terrain_data_;
 	Ref<TerrainData> loading_;

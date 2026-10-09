@@ -1079,7 +1079,7 @@ static int test_locations_and_fixes() {
 	            std::none_of(v.findings.diagnostics.begin(), v.findings.diagnostics.end(),
 	                         [](const Diagnostic &d) { return d.code() == "rename.partial"; }));
 	std::string c_menu, read_error;
-	TEST_EXPECT(read_file_text(root + "/menus/c.mnu", c_menu, read_error) && c_menu.find(">twin.tga<") != std::string::npos);
+	TEST_EXPECT(opennova::io::read_file_text(root + "/menus/c.mnu", c_menu, read_error) && c_menu.find(">twin.tga<") != std::string::npos);
 	TEST_EXPECT(v.project.scan->find("twin.tga") && !finding_in("asset.name.duplicate", twin) && !finding_in("reference.missing", "menus/c.mnu"));
 
 	// A required name another kind of file holds: Import the game's own, or Rename that file

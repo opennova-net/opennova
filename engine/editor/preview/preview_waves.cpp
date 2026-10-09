@@ -33,7 +33,7 @@ PreviewWaves::Wave PreviewWaves::wave(const std::string &file) {
 		entry.job = std::async(std::launch::async, [file]() {
 			Decode out;
 			std::vector<uint8_t> bytes;
-			if (!read_file_bytes(file, bytes, out.error)) return out;
+			if (!io::read_file_bytes(file, bytes, out.error)) return out;
 			out.decoded = lwf::wav_decode_pcm16(bytes.data(), bytes.size(), out.pcm, out.error);
 			return out;
 		});

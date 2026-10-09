@@ -263,9 +263,9 @@ static int test_new_status_validate() {
 	TEST_EXPECT(run({"import", root, source}) == 0);
 	TEST_EXPECT(editor_test::write_text(source, "changed file"));
 	std::string held_text, held_error;
-	TEST_EXPECT(run({"import", root, source}) == 0 && opennova::editor::read_file_text(root + "/source.txt", held_text, held_error) &&
+	TEST_EXPECT(run({"import", root, source}) == 0 && opennova::io::read_file_text(root + "/source.txt", held_text, held_error) &&
 	            held_text == "imported file");
-	TEST_EXPECT(run({"import", root, source, "--replace"}) == 0 && opennova::editor::read_file_text(root + "/source.txt", held_text, held_error) &&
+	TEST_EXPECT(run({"import", root, source, "--replace"}) == 0 && opennova::io::read_file_text(root + "/source.txt", held_text, held_error) &&
 	            held_text == "changed file");
 
 	// A file with the wrong content behind a required name is an error too.
@@ -466,7 +466,7 @@ static int test_dry_run_writes_nothing() {
 	TEST_EXPECT(editor_test::write_text(dir.file("notes.txt"), "notes"));
 	const std::string record = root + "/art/logo.png.import";
 	std::string stale, now, error;
-	TEST_EXPECT(opennova::editor::read_file_text(record, stale, error));
+	TEST_EXPECT(opennova::io::read_file_text(record, stale, error));
 	const auto before = snapshot(root);
 	std::string text;
 	TEST_EXPECT(run_capture(dir.file("out.txt"), {"import", root, dir.file("notes.txt"), "--with-dependencies", "--dry-run", "--rows"},
@@ -482,7 +482,7 @@ static int test_dry_run_writes_nothing() {
 	TEST_EXPECT(!fs::exists(root + "/.opennova/local.json"));
 	// The import itself: the pass first (the changed source's record written again), then the file.
 	TEST_EXPECT(run_capture(dir.file("out.txt"), {"import", root, dir.file("notes.txt")}, text) == 0);
-	TEST_EXPECT(text.find("imported notes.txt") != std::string::npos && opennova::editor::read_file_text(record, now, error) &&
+	TEST_EXPECT(text.find("imported notes.txt") != std::string::npos && opennova::io::read_file_text(record, now, error) &&
 	            now != stale);
 	return 0;
 }
@@ -704,7 +704,7 @@ static int test_one_game_install() {
 	TEST_EXPECT(run_capture(capture, {"import", root, "--all"}, text) == 0);
 	TEST_EXPECT(has("imported fonts/arial99.fnt") && has("imported ") && fs::is_regular_file(root + "/fonts/arial99.fnt"));
 	std::string music, io_error;
-	TEST_EXPECT(opennova::editor::read_file_text(root + "/music/menumus.sbf", music, io_error) && music == "music");
+	TEST_EXPECT(opennova::io::read_file_text(root + "/music/menumus.sbf", music, io_error) && music == "music");
 
 	// Another project names none: the editor opens it on the install it last chose.
 	const std::string other = dir.file("Other");
@@ -758,7 +758,7 @@ static int test_older_local_settings() {
 	change.game_install = install;
 	session.handle(opennova::editor::request::apply_project_settings(change));
 	std::string written, io_error;
-	TEST_EXPECT(opennova::editor::read_file_text(local, written, io_error) &&
+	TEST_EXPECT(opennova::io::read_file_text(local, written, io_error) &&
 			written.find("\"schema_version\": 2") != std::string::npos &&
 			written.find("\"game_install\": \"" + install + "\"") != std::string::npos &&
 			written.find("retail") == std::string::npos);

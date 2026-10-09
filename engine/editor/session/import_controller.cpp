@@ -58,13 +58,13 @@ std::string ImportController::import_words(const std::vector<std::string> &paths
 	char size[32];
 	if (bytes < (uint64_t(1) << 20)) std::snprintf(size, sizeof(size), "%.1f KB", double(bytes) / 1024.0);
 	else std::snprintf(size, sizeof(size), "%.1f MB", double(bytes) / double(uint64_t(1) << 20));
-	std::string out = "Imported " + grouped(paths.size()) + (paths.size() == 1 ? " file" : " files") + " (" + size + ")";
+	std::string out = "Imported " + strutil::grouped(paths.size()) + (paths.size() == 1 ? " file" : " files") + " (" + size + ")";
 	std::vector<std::pair<size_t, AssetKind>> most;
 	for (const auto &[kind, count] : kinds) most.emplace_back(count, kind);
 	std::sort(most.begin(), most.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
 	constexpr size_t kNamed = 4;
 	for (size_t i = 0; i < most.size() && i < kNamed; ++i)
-		out += (i == 0 ? ": " : ", ") + std::string(asset_kind_label(most[i].second)) + " " + grouped(most[i].first);
+		out += (i == 0 ? ": " : ", ") + std::string(asset_kind_label(most[i].second)) + " " + strutil::grouped(most[i].first);
 	if (most.size() > kNamed) out += " and " + counted(most.size() - kNamed, "more kind");
 	return out + ". Its files are folded under this line.";
 }
@@ -210,7 +210,7 @@ TextureSourcePlan ImportController::replace_plan(const EditorRequest &request) c
 	const std::string file = path_of(image).is_absolute() ? image : join_path(view_.project.root, image);
 	std::vector<uint8_t> bytes;
 	std::string message;
-	if (!read_file_bytes(file, bytes, message)) {
+	if (!io::read_file_bytes(file, bytes, message)) {
 		plan.refusals.push_back(make_finding(CoreFinding::TextureReplace, DiagnosticSeverity::Error,
 		                                     basename_of(image) + " could not be read: " + message, request.path));
 		return plan;
@@ -315,7 +315,7 @@ void ImportController::new_terrain(const EditorRequest &request) {
 		const std::string file = path_of(given->second).is_absolute() ? given->second : join_path(view_.project.root, given->second);
 		std::vector<uint8_t> bytes;
 		std::string message;
-		if (!read_file_bytes(file, bytes, message))
+		if (!io::read_file_bytes(file, bytes, message))
 			return core_.refuse_now(CoreFinding::ImportTerrain, "No terrain made: the " + std::string(key) + " " + given->second +
 			                                                            " could not be read: " + message + ".");
 		const std::string name = basename_of(given->second);
@@ -368,7 +368,7 @@ void ImportController::new_terrain(const EditorRequest &request) {
 	copies.push_back({set_path, set_bytes});
 	for (const Copy &copy : copies) {
 		std::string message;
-		if (!write_file_atomic(join_path(view_.project.root, copy.to), copy.bytes.data(), copy.bytes.size(), message)) {
+		if (!io::write_file_atomic(join_path(view_.project.root, copy.to), copy.bytes.data(), copy.bytes.size(), message)) {
 			put_back();
 			return core_.refuse_now(CoreFinding::ImportTerrain, "No terrain made: " + copy.to + " could not be written: " + message + ".",
 			                        copy.to);
@@ -669,10 +669,10 @@ void ImportController::show_plan(std::shared_ptr<const ImportPlan> plan, const I
 		}
 		view_.activity.status = preview.roots.empty() ? std::string("Choose the files to import.")
 		               : "Import preview: " + counted(files, "file") + " to import" +
-		                         (preview.with_dependencies ? " (" + grouped(found) + " the chosen ones need), " +
-		                                                              grouped(missing) + " not found."
+		                         (preview.with_dependencies ? " (" + strutil::grouped(found) + " the chosen ones need), " +
+		                                                              strutil::grouped(missing) + " not found."
 		                                                    : std::string(".")) +
-		                         (held ? " " + grouped(held) + " the project has already: kept unless replaced." : "");
+		                         (held ? " " + strutil::grouped(held) + " the project has already: kept unless replaced." : "");
 	}
 	core_.touch(ViewConcern::Dialogs);
 	if (preview.open) core_.touch(ViewConcern::Output);
@@ -845,7 +845,7 @@ OperationOutcome ImportController::absorb_import(ImportOperation &operation) {
 	const size_t done = imported.imported.size();
 	if (!imported.not_imported.empty()) outcome.end = OperationEnd::Failed;
 	view_.activity.status = !imported.not_imported.empty()
-	                       ? grouped(done) + " of " + counted(done + imported.not_imported.size(), "file") +
+	                       ? strutil::grouped(done) + " of " + counted(done + imported.not_imported.size(), "file") +
 	                                 " imported: the import stopped at " + imported.not_imported.front() + "."
 	                       : counted(done, "file") + " imported.";
 	core_.touch(ViewConcern::Dialogs); // the preview closed
