@@ -37,6 +37,8 @@
 #include <editor/session/texture_use_index.h>
 #include <editor/session/view/view_events.h>
 #include <editor/session/workspace_parts.h>
+#include <formats/cpt/trngen/heightmap_depth.h>
+#include <runtime/terrain/terrain_map_source.h>
 
 namespace fs = std::filesystem;
 
@@ -321,14 +323,14 @@ void ImportController::new_terrain(const EditorRequest &request) {
 		const std::string name = basename_of(given->second);
 		bool fits = false;
 		if (std::string(key) == "heightmap") {
-			TerrainHeights heights;
-			fits = decode_terrain_heightmap(name, bytes, settings.top, heights, why);
+			trngen::HeightmapDepth heights;
+			fits = trngen::decode_heightmap_depth(name, bytes, settings.top, heights, why);
 		} else if (std::string(key) == "surface") {
 			IndexedImage8 surface;
-			fits = decode_terrain_surface(name, bytes, surface, why);
+			fits = terrain::decode_charmap_source(name, bytes, surface, why);
 		} else if (std::string(key) == "foliagemap") {
 			IndexedImage8 foliage;
-			fits = decode_terrain_foliage(name, bytes, foliage, why);
+			fits = terrain::decode_foliage_map_source(name, bytes, foliage, why);
 		} else {
 			RgbaImage image;
 			fits = decode_terrain_image(key, name, bytes, image, why);
