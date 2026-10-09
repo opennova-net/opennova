@@ -405,7 +405,7 @@ static int test_busy_gate() {
 		TEST_EXPECT(items->dirty() && v.activity.operation.id == build);
 	}
 	std::string text, error;
-	TEST_EXPECT(read_file_text(root + "/defs/items.def", text, error) && text.find("hp 10") != std::string::npos);
+	TEST_EXPECT(opennova::io::read_file_text(root + "/defs/items.def", text, error) && text.find("hp 10") != std::string::npos);
 	// The unsaved prompt's Save writes files too: refused, the prompt kept. Its Discard drops the
 	// document, which the build does not read: it goes on.
 	session.handle(request::close_document(items->path()));
@@ -470,7 +470,7 @@ static int test_busy_gate() {
 	session.handle(edit);
 	session.handle(request::save(items->path()));
 	TEST_EXPECT(session.outcome().done() && !items->dirty());
-	TEST_EXPECT(read_file_text(root + "/defs/items.def", text, error) && text.find("hp 20") != std::string::npos);
+	TEST_EXPECT(opennova::io::read_file_text(root + "/defs/items.def", text, error) && text.find("hp 20") != std::string::npos);
 
 	// A project's close with unsaved edits asks about them first, the build packing on: a Cancel
 	// keeps the build; the prompt's Save cancels it (the close would), writes the file and closes.
@@ -496,7 +496,7 @@ static int test_busy_gate() {
 	TEST_EXPECT(session.outcome().done() && !v.project.open && !v.activity.operation.running());
 	TEST_EXPECT(v.activity.last_operation.id == second &&
 			v.activity.last_operation.end == OperationEnd::Cancelled);
-	TEST_EXPECT(read_file_text(root + "/defs/items.def", text, error) && text.find("hp 30") != std::string::npos);
+	TEST_EXPECT(opennova::io::read_file_text(root + "/defs/items.def", text, error) && text.find("hp 30") != std::string::npos);
 
 	// With nothing unsaved a close cancels the build at once: nothing of it is kept.
 	session.handle(request::open_project(dir.file("project")));
@@ -626,7 +626,7 @@ static int test_uncancellable_operation() {
 		TEST_EXPECT(v.project.open && items->dirty() && v.activity.operation.id == next && !second.cancelled);
 	}
 	std::string text, error;
-	TEST_EXPECT(read_file_text(v.project.root + "/defs/items.def", text, error) && text.find("hp 10") != std::string::npos);
+	TEST_EXPECT(opennova::io::read_file_text(v.project.root + "/defs/items.def", text, error) && text.find("hp 10") != std::string::npos);
 	answer.choice = UnsavedChoice::Cancel;
 	session.handle(answer);
 	held->can_cancel = true;
@@ -658,7 +658,7 @@ static int test_uncancellable_operation() {
 			!v.activity.operation.running());
 	TEST_EXPECT(v.activity.last_operation.id == building &&
 			v.activity.last_operation.end == OperationEnd::Cancelled);
-	TEST_EXPECT(read_file_text(dir.file("project") + "/defs/items.def", text, error) && text.find("hp 10") != std::string::npos);
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("project") + "/defs/items.def", text, error) && text.find("hp 10") != std::string::npos);
 	return 0;
 }
 

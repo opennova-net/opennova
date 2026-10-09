@@ -668,8 +668,7 @@ bool entry_set(const Entry &e, const Entry *block, void *record, const Value &va
 		// character), which the document counts in the encoding its model holds before it sets the
 		// value (MnuDocument::set_value); here the UTF-8 a Unicode menu's model holds is counted by
 		// its characters, never its bytes.
-		size_t characters = 0;
-		for (const char c : *text) characters += (static_cast<unsigned char>(c) & 0xC0) != 0x80;
+		const size_t characters = strutil::utf8_length(*text);
 		if (characters >= e.width) {
 			error = "The text is too long.";
 			return false;

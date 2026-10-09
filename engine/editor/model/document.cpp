@@ -603,7 +603,7 @@ std::shared_ptr<const SourceState> Document::source_of(const std::vector<uint8_t
 	auto source = std::make_shared<SourceState>();
 	source->issues = std::move(issues);
 	const std::string_view text(reinterpret_cast<const char *>(decoded.data()), decoded.size());
-	if (asset_kind_row(kind()).line_reader != LineReader::None && first_lone_lf(text) != std::string_view::npos)
+	if (asset_kind_row(kind()).line_reader != LineReader::None && strutil::first_lone_lf(text) != std::string_view::npos)
 		source->odd_lines = std::make_shared<const std::string>(text);
 	return source;
 }
@@ -642,7 +642,7 @@ bool Document::redoes_while_blocked() const {
 
 bool Document::stage_restore(StagedRows &staged, Diagnostic &error) {
 	if (!source_ || !source_->odd_lines) return true; // its lines end CR LF already: nothing changes
-	const std::string restored = with_crlf_line_ends(*source_->odd_lines);
+	const std::string restored = strutil::with_crlf_line_ends(*source_->odd_lines);
 	std::vector<uint8_t> bytes(restored.begin(), restored.end());
 	if (bytes.empty()) bytes.push_back(0); // the parsers' empty file, as a load reads one
 	std::vector<std::shared_ptr<Node>> rows;

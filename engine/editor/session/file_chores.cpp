@@ -200,14 +200,14 @@ void FileChores::delete_asset(const EditorRequest &request) {
 		for (std::string dir = folder_of_path(to); !dir.empty() && !exists_at(paths_, dir); dir = folder_of_path(dir))
 			if (std::find(folders_made.begin(), folders_made.end(), dir) == folders_made.end())
 				folders_made.insert(folders_made.begin(), dir);
-		if (!ensure_directory(utf8_of(at(paths_, to).parent_path()), error) ||
+		if (!io::ensure_directory(utf8_of(at(paths_, to).parent_path()), error) ||
 		    !fs::copy_file(at(paths_, from), at(paths_, to), fs::copy_options::none, ec)) {
 			unkeep();
 			return refuse(CoreFinding::FileWrite,
 			              basename_of(to) + " could not be kept: " + (error.empty() ? ec.message() : error) + ". Nothing was deleted.",
 			              plan.path);
 		}
-		refresh_last_write(join_path(paths_.root, to), error);
+		io::refresh_last_write(join_path(paths_.root, to), error);
 		kept.push_back(to);
 	}
 	std::vector<std::string> trashed = plan.files;
@@ -258,7 +258,7 @@ void FileChores::duplicate_asset(const EditorRequest &request) {
 	std::string error;
 	for (const auto &[from, to] : plan.copies) {
 		std::error_code ec;
-		if (!ensure_directory(utf8_of(at(paths_, to).parent_path()), error) ||
+		if (!io::ensure_directory(utf8_of(at(paths_, to).parent_path()), error) ||
 		    !fs::copy_file(at(paths_, from), at(paths_, to), fs::copy_options::none, ec)) {
 			std::error_code ignored;
 			for (const std::string &file : made) fs::remove(at(paths_, file), ignored);
@@ -266,7 +266,7 @@ void FileChores::duplicate_asset(const EditorRequest &request) {
 			              to + " could not be made: " + (error.empty() ? ec.message() : error) + ". Nothing was copied.", plan.path);
 		}
 		// A copy keeps its source's last write: as written now, every cache keyed by it reads it afresh.
-		refresh_last_write(join_path(paths_.root, to), error);
+		io::refresh_last_write(join_path(paths_.root, to), error);
 		made.push_back(to);
 	}
 	Step step;
@@ -307,7 +307,7 @@ void FileChores::new_folder(const std::string &text) {
 	std::vector<std::string> made;
 	for (std::string dir = folder; !dir.empty() && !exists_at(paths_, dir); dir = folder_of_path(dir)) made.insert(made.begin(), dir);
 	std::string error;
-	if (!ensure_directory(join_path(paths_.root, folder), error))
+	if (!io::ensure_directory(join_path(paths_.root, folder), error))
 		return refuse(CoreFinding::FileWrite, "The folder " + folder + " could not be made: " + error, folder);
 	Step step;
 	step.words = "New folder " + folder;
@@ -370,7 +370,7 @@ bool FileChores::move_folder(const std::string &folder, const std::string &new_n
 	std::vector<std::string> made;
 	for (const std::string &each : plan.folders) {
 		const std::string there = path_in_renamed(each, plan.from, plan.to);
-		if (!ensure_directory(join_path(paths_.root, there), error)) {
+		if (!io::ensure_directory(join_path(paths_.root, there), error)) {
 			refuse(CoreFinding::FileWrite, "The folder " + there + " could not be made: " + error + ". Nothing was moved.", plan.from);
 			return false;
 		}
@@ -389,8 +389,8 @@ bool FileChores::move_folder(const std::string &folder, const std::string &new_n
 		if (!transaction.ok()) {
 			for (auto it = plan.moves.begin(); it != plan.moves.end() && &*it != &move; ++it) {
 				std::error_code ignored;
-				rename_with_retry(at(paths_, it->new_path), at(paths_, it->path), ignored);
-				if (!it->sidecar.empty()) rename_with_retry(at(paths_, it->new_sidecar), at(paths_, it->sidecar), ignored);
+				io::rename_with_retry(at(paths_, it->new_path), at(paths_, it->path), ignored);
+				if (!it->sidecar.empty()) io::rename_with_retry(at(paths_, it->new_sidecar), at(paths_, it->sidecar), ignored);
 			}
 			for (auto it = made.rbegin(); it != made.rend(); ++it) {
 				std::error_code ignored;
@@ -487,7 +487,7 @@ bool FileChores::take(Step &step, bool back) {
 	coming = TrashBatch();
 	for (const std::string &folder : made) {
 		std::string ignored;
-		ensure_directory(join_path(paths_.root, folder), ignored);
+		io::ensure_directory(join_path(paths_.root, folder), ignored);
 	}
 	// A folder it removes goes once empty: one that holds files now (made in it since) stays, and says so.
 	for (auto it = removed.rbegin(); it != removed.rend(); ++it) {

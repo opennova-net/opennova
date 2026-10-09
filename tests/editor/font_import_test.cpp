@@ -473,7 +473,7 @@ static int test_project() {
 	TEST_EXPECT(run.reimported == 1 && run.sources[0].ok);
 	std::vector<uint8_t> bytes;
 	std::string message;
-	TEST_EXPECT(read_file_bytes(root + "/" + run.sources[0].outputs[0], bytes, message));
+	TEST_EXPECT(opennova::io::read_file_bytes(root + "/" + run.sources[0].outputs[0], bytes, message));
 	fnt_font_t font{};
 	TEST_EXPECT(fnt_parse(bytes.data(), bytes.size(), &font) == FNT_OK);
 	const int a = width_of(font, 'A');

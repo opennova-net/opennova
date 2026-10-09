@@ -17,11 +17,14 @@ namespace opennova {
 class FileSource;
 }
 
+namespace opennova {
+class StampedFiles;
+}
+
 namespace opennova::editor {
 
 class AssetGraph;
 class Document;
-class StampedFiles;
 
 // The files a previewed rig reads (ADR 0046 S10p6): anim::RigFiles over the project's files
 // (the open documents standing in for theirs), looked up by the name the game's store looks
