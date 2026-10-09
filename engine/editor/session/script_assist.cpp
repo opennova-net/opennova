@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <iterator>
 #include <optional>
 #include <string_view>
 #include <unordered_set>
@@ -24,6 +25,7 @@
 #include <formats/wac/command.h>
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/mission/mission_sidecars.h>
+#include <runtime/wac/wac_lexis.h>
 
 namespace opennova::editor {
 
@@ -44,15 +46,15 @@ struct Token {
 	std::string text;
 };
 
-// The line's tokens before `end` (a comment ends the line: ';' or '//' [orig: @0x4F54BA]); `comment`
-// set where `end` lies in one.
+// The line's tokens before `end` (a comment ends the line: wac::wac_comment_starts); `comment` set where
+// `end` lies in one.
 std::vector<Token> tokens_of(std::string_view line, size_t end, bool &comment) {
 	std::vector<Token> out;
 	comment = false;
 	size_t i = 0;
 	while (i < line.size() && i < end) {
 		const char c = line[i];
-		if (c == ';' || (c == '/' && i + 1 < line.size() && line[i + 1] == '/')) {
+		if (wac::wac_comment_starts(c, i + 1 < line.size() ? line[i + 1] : '\0')) {
 			comment = true;
 			return out;
 		}
@@ -77,51 +79,44 @@ std::vector<Token> tokens_of(std::string_view line, size_t end, bool &comment) {
 	return out;
 }
 
-std::string upper(std::string text) {
-	for (char &c : text) c = char(std::toupper(static_cast<unsigned char>(c)));
-	return text;
-}
-
-bool starts_with_nocase(const std::string &text, const std::string &prefix) {
-	return text.size() >= prefix.size() && strutil::iequals(std::string_view(text).substr(0, prefix.size()), prefix);
-}
-
 bool contains_nocase(const std::string &text, const std::string &part) {
-	return part.empty() || upper(text).find(upper(part)) != std::string::npos;
+	return part.empty() || strutil::to_upper(text).find(strutil::to_upper(part)) != std::string::npos;
 }
 
 // --- the language --------------------------------------------------------------------------------
 
-// The block, declaration and expression words [orig: Script_Compile's hashes @0x4F31F0; the WAC help
-// text, WacCmd_Help @0x4F6DE0], each with what it does.
+// What each of the language's keywords does, in wac::kWacKeywords' order [orig: the WAC help text,
+// WacCmd_Help @0x4F6DE0].
+constexpr const char *kKeywordWords[] = {
+	"IF triggers THEN actions END: the actions run while the triggers hold (named: IF [name] ...).", // IF
+	"Starts an IF's actions.", // THEN
+	"Starts the actions that run while an IF's triggers do not hold.", // ELSE
+	"ELSEIF triggers THEN actions: another test after an IF's.", // ELSEIF
+	"Ends an IF, a DOSEQ, a DORND or a loop.", // END
+	"IF triggers ENTER actions END: the actions run when the triggers first hold.", // ENTER
+	"IF triggers LEAVE actions END: the actions run when the triggers stop holding.", // LEAVE
+	"DOSEQ actions NEXT actions ... END: each section in turn.", // DOSEQ
+	"DORND actions NEXT actions ... END: a section at random.", // DORND
+	"Starts a DOSEQ's or a DORND's next section.", // NEXT
+	"GLOOP group actions END: the actions for each of a group's members.", // GLOOP
+	"PLOOP actions END: the actions for each player.", // PLOOP
+	"VAR name: declares a number variable (shown on the script debug screen).", // VAR
+	"CHEAT name: declares a server cheat variable.", // CHEAT
+	"RUN file: compiles another script's text here (at the top level only).", // RUN
+	"Negates the trigger after it.", // NOT
+	"Both triggers must hold.", // AND
+	"Either trigger must hold.", // OR
+};
+static_assert(std::size(kKeywordWords) == std::size(wac::kWacKeywords), "every WAC keyword has its words");
+
 struct Keyword {
 	const char *word, *words;
 };
-constexpr Keyword kKeywords[] = {
-	{"IF", "IF triggers THEN actions END: the actions run while the triggers hold (named: IF [name] ...)."},
-	{"THEN", "Starts an IF's actions."},
-	{"ELSE", "Starts the actions that run while an IF's triggers do not hold."},
-	{"ELSEIF", "ELSEIF triggers THEN actions: another test after an IF's."},
-	{"END", "Ends an IF, a DOSEQ, a DORND or a loop."},
-	{"ENTER", "IF triggers ENTER actions END: the actions run when the triggers first hold."},
-	{"LEAVE", "IF triggers LEAVE actions END: the actions run when the triggers stop holding."},
-	{"DOSEQ", "DOSEQ actions NEXT actions ... END: each section in turn."},
-	{"DORND", "DORND actions NEXT actions ... END: a section at random."},
-	{"NEXT", "Starts a DOSEQ's or a DORND's next section."},
-	{"GLOOP", "GLOOP group actions END: the actions for each of a group's members."},
-	{"PLOOP", "PLOOP actions END: the actions for each player."},
-	{"VAR", "VAR name: declares a number variable (shown on the script debug screen)."},
-	{"CHEAT", "CHEAT name: declares a server cheat variable."},
-	{"RUN", "RUN file: compiles another script's text here (at the top level only)."},
-	{"NOT", "Negates the trigger after it."},
-	{"AND", "Both triggers must hold."},
-	{"OR", "Either trigger must hold."},
-};
 
-const Keyword *keyword_of(const std::string &word) {
-	for (const Keyword &keyword : kKeywords)
-		if (strutil::iequals(word, keyword.word)) return &keyword;
-	return nullptr;
+std::optional<Keyword> keyword_of(const std::string &word) {
+	for (size_t i = 0; i < std::size(wac::kWacKeywords); ++i)
+		if (strutil::iequals(word, wac::kWacKeywords[i])) return Keyword{wac::kWacKeywords[i], kKeywordWords[i]};
+	return std::nullopt;
 }
 
 // A parameter's kind in words.
@@ -165,14 +160,14 @@ std::string signature(const wac::CommandDef &command) {
 	std::string out = std::string(command.name) + "(";
 	for (int i = 0; i < 4; ++i) {
 		if (command.params[i] == ParamType::Null) continue;
-		out += std::string(i ? ", " : "") + upper(wac::param_type_name(command.params[i]));
+		out += std::string(i ? ", " : "") + strutil::to_upper(wac::param_type_name(command.params[i]));
 	}
 	return out + ")";
 }
 
 std::string command_words(const wac::CommandDef &command) {
 	std::string kind = wac::cmd_is_condition(command) ? "a trigger (after IF)"
-	                   : (command.flags & 0x02)       ? "an action (after THEN)"
+	                   : wac::cmd_is_action(command)  ? "an action (after THEN)"
 	                                                  : "a debug command";
 	std::string out = signature(command) + ": " + kind;
 	if (wac::cmd_is_replicated(command)) out += ", sent to the players' games";
@@ -211,7 +206,7 @@ const MissionDocument *mission_open(const SessionView &view, const TextDocument 
 }
 
 std::string mission_scope_of(const TextDocument &script) {
-	return upper(mission::mission_base_name(basename_of(script.path()))) + ".BMS";
+	return strutil::to_upper(mission::mission_base_name(basename_of(script.path()))) + ".BMS";
 }
 
 // An entity in words, the display names' (documents/mission_labels.h, S15 Names): the open mission's
@@ -259,7 +254,7 @@ Context context_at(std::string_view line, size_t at) {
 	std::string keyword;
 	for (const Token &token : tokens) {
 		if (token.to >= at && token.from < at) break; // the word at the place itself
-		if (const Keyword *kw = keyword_of(token.text)) {
+		if (const std::optional<Keyword> kw = keyword_of(token.text)) {
 			out.command = nullptr;
 			keyword = kw->word;
 			out.declaration = keyword == "VAR" || keyword == "CHEAT";
@@ -322,7 +317,7 @@ void add(ScriptCompletions &out, std::string label, std::string insert, const ch
 // Whether a candidate goes in for what is typed: its insert starting with it (without case), or, for
 // a name shown beside a number, its words holding it.
 bool wanted(const std::string &typed, const std::string &insert, const std::string &words = std::string()) {
-	return typed.empty() || starts_with_nocase(insert, typed) || (!words.empty() && contains_nocase(words, typed));
+	return typed.empty() || strutil::starts_with_icase(insert, typed) || (!words.empty() && contains_nocase(words, typed));
 }
 
 // The open mission's entities by SSN with their titles, kept while the document (its identity, load
@@ -363,7 +358,7 @@ void entities(const SessionView &view, const TextDocument &script, const std::st
 	std::vector<std::pair<int64_t, std::string>> found;
 	if (const MissionDocument *mission = mission_open(view, script)) {
 		// The player first: the game resolves SSN 10000 itself (S15).
-		found.emplace_back(10000, "The player");
+		found.emplace_back(mission::kPlayerSsn, "The player");
 		const auto &titles = entity_titles(view, *mission);
 		found.insert(found.end(), titles.begin(), titles.end());
 	} else if (const AssetGraph *graph = view.findings.graph.get()) {
@@ -378,7 +373,7 @@ void entities(const SessionView &view, const TextDocument &script, const std::st
 	for (int pass = 0; pass < 2; ++pass)
 		for (const auto &[ssn, words] : found) {
 			const std::string insert = prefix + std::to_string(ssn);
-			const bool by_number = typed.empty() || starts_with_nocase(insert, typed);
+			const bool by_number = typed.empty() || strutil::starts_with_icase(insert, typed);
 			if (pass == 0 ? by_number : !by_number && wanted(typed, insert, words))
 				add(out, std::to_string(ssn) + "  " + words, insert, "entity", words);
 		}
@@ -424,32 +419,34 @@ void symbols(const SessionView &view, ReferenceKind kind, const char *what, cons
 		if (out.items.size() >= kMostCompletions) break;
 		if (symbol->inert) continue;
 		if (!scopes.empty() && std::none_of(scopes.begin(), scopes.end(), [&](const std::string &scope) {
-			    return starts_with_nocase(symbol->scope, scope);
+			    return strutil::starts_with_icase(symbol->scope, scope);
 		    }))
 			continue;
 		const std::string &name = symbol->display.empty() ? symbol->name : symbol->display;
 		const std::string insert = prefix + name;
-		if (!wanted(typed, insert) || !seen.insert(upper(name)).second) continue;
+		if (!wanted(typed, insert) || !seen.insert(strutil::to_upper(name)).second) continue;
 		add(out, insert, insert, what, std::string(what) + " defined in " + symbol->file + (symbol->scope.empty() ? "" : " (" + symbol->scope + ")"));
 	}
 }
 
-// What a parameter of `type` takes, as typed so far: a prefix form ("SSN_", "FX_", "TT_", "AMMO_",
-// "G_") keeps its prefix.
+// What a parameter of `type` takes, as typed so far: a prefix form (wac::kWacOperandPrefixes: SSN_, FX_,
+// TT_, AMMO_) keeps its prefix.
 void names_for(const SessionView &view, const TextDocument &script, ParamType type, const std::string &typed,
                ScriptCompletions &out) {
-	const std::string stem = upper(mission::mission_base_name(basename_of(script.path())));
-	const auto prefixed = [&](const char *prefix) { return starts_with_nocase(typed, prefix); };
+	const std::string stem = strutil::to_upper(mission::mission_base_name(basename_of(script.path())));
+	const auto prefixed = [&](const char *prefix) { return strutil::starts_with_icase(typed, prefix); };
 	// The mission's table is its own <stem>.bin, else medmssn.bin, never both [orig:
 	// TextResource_LoadMissionTextBin @0x51ed90], then gametext.bin: the keys of the one it reads.
 	const mission::Sidecar &table = *mission::sidecar_for_role("text");
-	const std::string own = upper(mission::sidecar_name(stem, table));
+	const std::string own = strutil::to_upper(mission::sidecar_name(stem, table));
 	const bool own_table = view.project.scan && view.project.scan->find(own) != nullptr;
-	const std::vector<std::string> text_scopes = {(own_table ? own : upper(table.fallback)) + "/", upper(hud::kGameTextTable) + "/"};
-	if (prefixed("SSN_")) return entities(view, script, "SSN_", typed, out);
-	if (prefixed("FX_")) return symbols(view, ReferenceKind::Particle, "effect", "FX_", typed, {}, out);
-	if (prefixed("TT_")) return symbols(view, ReferenceKind::TextId, "text key", "TT_", typed, text_scopes, out);
-	if (prefixed("AMMO_")) return symbols(view, ReferenceKind::Ammo, "ammo", "AMMO_", typed, {}, out);
+	const std::vector<std::string> text_scopes = {(own_table ? own : strutil::to_upper(table.fallback)) + "/", strutil::to_upper(hud::kGameTextTable) + "/"};
+	const char *const ssn = wac::wac_operand_prefix(ParamType::Ssn), *const fx = wac::wac_operand_prefix(ParamType::Fx);
+	const char *const tt = wac::wac_operand_prefix(ParamType::TextToken), *const ammo = wac::wac_operand_prefix(ParamType::Ammo);
+	if (prefixed(ssn)) return entities(view, script, ssn, typed, out);
+	if (prefixed(fx)) return symbols(view, ReferenceKind::Particle, "effect", fx, typed, {}, out);
+	if (prefixed(tt)) return symbols(view, ReferenceKind::TextId, "text key", tt, typed, text_scopes, out);
+	if (prefixed(ammo)) return symbols(view, ReferenceKind::Ammo, "ammo", ammo, typed, {}, out);
 	switch (type) {
 	case ParamType::Ssn: return entities(view, script, "", typed, out);
 	case ParamType::Area: return areas(view, script, typed, out);
@@ -468,8 +465,9 @@ void names_for(const SessionView &view, const TextDocument &script, ParamType ty
 // The commands and keywords where a statement goes: the triggers first after IF, AND, OR, NOT and
 // ELSEIF, the actions first elsewhere.
 void statements(bool conditions, const std::string &typed, ScriptCompletions &out) {
-	for (const Keyword &keyword : kKeywords)
-		if (wanted(typed, keyword.word)) add(out, keyword.word, keyword.word, "keyword", keyword.words);
+	for (size_t i = 0; i < std::size(wac::kWacKeywords); ++i)
+		if (wanted(typed, wac::kWacKeywords[i]))
+			add(out, wac::kWacKeywords[i], wac::kWacKeywords[i], "keyword", kKeywordWords[i]);
 	for (int pass = 0; pass < 2; ++pass)
 		for (int i = 0; i < wac::wac_command_count(); ++i) {
 			const wac::CommandDef &command = wac::wac_commands()[i];
@@ -527,15 +525,17 @@ bool script_hover(const SessionView &view, const TextDocument &script, size_t li
 		out.text = command_words(*command);
 		return true;
 	}
-	if (const Keyword *keyword = keyword_of(word.text)) {
+	if (const std::optional<Keyword> keyword = keyword_of(word.text)) {
 		out.text = keyword->words;
 		return true;
 	}
 	const Context context = context_at(text, word.from + 1);
-	const std::string up = upper(word.text);
+	const std::string up = strutil::to_upper(word.text);
 	const auto number = [&](size_t skip) { return strutil::parse_int(word.text.substr(skip)); };
-	if (up.rfind("SSN_", 0) == 0 || (context.type == ParamType::Ssn && number(0))) {
-		const std::optional<int> ssn = number(up.rfind("SSN_", 0) == 0 ? 4 : 0);
+	const std::string_view ssn_prefix = wac::wac_operand_prefix(ParamType::Ssn);
+	const bool ssn_form = strutil::starts_with_icase(up, ssn_prefix);
+	if (ssn_form || (context.type == ParamType::Ssn && number(0))) {
+		const std::optional<int> ssn = number(ssn_form ? ssn_prefix.size() : 0);
 		if (!ssn) return false;
 		const std::string words = entity_words(view, script, *ssn);
 		out.text = (words.rfind("No ", 0) == 0 ? words : "An entity: " + words) + ".";
@@ -551,7 +551,7 @@ bool script_hover(const SessionView &view, const TextDocument &script, size_t li
 		return true;
 	}
 	for (const GroupRow &group : kGroups)
-		if (strutil::iequals(word.text, group.name) || strutil::iequals(up, "G_" + upper(group.name))) {
+		if (strutil::iequals(word.text, group.name) || strutil::iequals(up, wac::wac_operand_prefix(ParamType::Group) + strutil::to_upper(group.name))) {
 			out.text = std::string("Script group ") + group.name + ": " + group.words + ".";
 			return true;
 		}
@@ -601,12 +601,13 @@ bool script_definition(const SessionView &view, const TextDocument &script, size
 	}
 	// An entity or an area of the mission by the number a parameter takes.
 	const Context context = context_at(text, word.from + 1);
-	const std::string up = upper(word.text);
+	const std::string up = strutil::to_upper(word.text);
 	ReferenceKind kind = ReferenceKind::None;
 	std::string name = word.text;
-	if (up.rfind("SSN_", 0) == 0) {
+	const std::string_view ssn_prefix = wac::wac_operand_prefix(ParamType::Ssn);
+	if (strutil::starts_with_icase(up, ssn_prefix)) {
 		kind = ReferenceKind::MissionEntity;
-		name = word.text.substr(4);
+		name = word.text.substr(ssn_prefix.size());
 	} else if (context.type == ParamType::Ssn) {
 		kind = ReferenceKind::MissionEntity;
 	} else if (context.type == ParamType::Area) {

@@ -18,7 +18,6 @@
 #include <editor/preview/menu_report.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
-#include <base/gameprofile/game_type.h>
 #include <base/io/strutil.h>
 #include <formats/mns/mns.h>
 #include <formats/rtxt/rtxt.h>
@@ -730,30 +729,23 @@ MenuTrySource MenuViewport::try_source_(const SessionView &view, const MnuDocume
 	// The mission catalog as the game builds it from the project's loose files: each `.bms`, titled by
 	// the text table beside it [orig: MissionList_ScanAndBuildFromFiles @ 0x563170, the loose walk],
 	// in file order (Mission_CompareMapNames @ 0x5628e0), each row's session word stamped
-	// (game_type::for_mission_mode, as the game's catalog binding stamps it).
+	// (mission_catalog::game_type_of, as the game's catalog binding stamps it).
 	const std::shared_ptr<const AssetScan> scan = view.project.scan;
 	source.missions = [scan, &files]() {
-		std::vector<mission_catalog::Row> rows;
-		if (!scan) return std::vector<menu::MissionChoice>();
-		for (const AssetEntry &entry : scan->entries) {
-			if (!strutil::ends_with_icase(entry.logical_name, ".bms")) continue;
-			std::vector<uint8_t> bms;
-			if (!files.read(entry.logical_name, bms)) bms.clear();
-			const std::string bin = mission_catalog::text_table_name(entry.logical_name);
-			rtxt::File text;
-			std::vector<uint8_t> bytes;
-			std::string error;
-			const bool has_text = scan->find(bin) && files.read(bin, bytes) &&
-					rtxt::parse(bytes.data(), bytes.size(), text, error);
-			rows.push_back(mission_catalog::loose_row(entry.logical_name, bms, has_text ? &text : nullptr));
-		}
-		std::stable_sort(rows.begin(), rows.end(), [](const mission_catalog::Row &a, const mission_catalog::Row &b) {
-			return strutil::iless(a.file, b.file);
-		});
 		std::vector<menu::MissionChoice> choices;
-		for (const mission_catalog::Row &row : rows)
-			choices.push_back({ row.file, mission_catalog::display_text(row), row.briefing,
-					game_type::for_mission_mode(row.game_mode) });
+		if (!scan) return choices;
+		std::vector<std::string> names;
+		for (const AssetEntry &entry : scan->entries) names.push_back(entry.logical_name);
+		std::vector<mission_catalog::Row> rows = mission_catalog::loose_rows(names,
+				[&files](const std::string &name, std::vector<uint8_t> &bytes) { return files.read(name, bytes); },
+				// The project's own table of the mission's name, wherever the project holds it.
+				[&scan, &files](const std::string &bin, rtxt::File &text) {
+					std::vector<uint8_t> bytes;
+					std::string error;
+					return scan->find(bin) && files.read(bin, bytes) && rtxt::parse(bytes.data(), bytes.size(), text, error);
+				});
+		mission_catalog::sort_rows(rows);
+		for (const mission_catalog::Row &row : rows) choices.push_back(menu::mission_choice(row));
 		return choices;
 	};
 	// The game's Mods list: the records of the folder the project plays over (the session's
