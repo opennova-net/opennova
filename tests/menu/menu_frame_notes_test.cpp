@@ -11,10 +11,10 @@
 #include <runtime/menu/menu_frame.h>
 #include <runtime/menu/menu_frame_assets.h>
 #include <runtime/menu/menu_text_tables.h>
+#include <runtime/menu/menu_texture_header.h>
 
 #include <formats/fnt/fnt.h>
 #include <formats/mnu/mnu.h>
-#include <formats/tga/tga.h>
 
 #include "common/test_expect.h"
 #include "common/test_font.h"
@@ -380,19 +380,7 @@ static int test_loader_notes() {
 	opennova::mnu::Document doc;
 	std::string error;
 	TEST_EXPECT(opennova::mnu::parse(std::string(xml), doc, error));
-	struct Sizes : opennova::menu::MenuTextureDecoder {
-		bool decode(const std::string &, opennova::menu::MenuTextureFormat format, const std::vector<uint8_t> &bytes,
-		            int &w, int &h) override {
-			uint32_t width = 0, height = 0;
-			if (format != opennova::menu::MenuTextureFormat::Tga ||
-			    !opennova::tga::tga_header_size(bytes.data(), bytes.size(), width, height))
-				return false;
-			w = static_cast<int>(width);
-			h = static_cast<int>(height);
-			return true;
-		}
-		void release(const std::string &) override {}
-	} decoder;
+	opennova::menu::MenuTextureHeaderProbe decoder;
 	MenuFrameCompiler compiler;
 	opennova::menu::MenuFrameAssets assets;
 	assets.configure(compiler, &doc, &doc.screens[0], files, decoder, {});

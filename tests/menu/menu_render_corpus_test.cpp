@@ -36,17 +36,15 @@
 
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
-#include <formats/dds/dds.h>
 #include <formats/mnu/mnu.h>
 #include <formats/mns/mns_document.h>
-#include <formats/pcx/pcx_io.h>
 #include <formats/rtxt/rtxt.h>
-#include <formats/tga/tga.h>
 #include <runtime/menu/menu_assets.h>
 #include <runtime/menu/menu_frame.h>
 #include <runtime/menu/menu_frame_assets.h>
 #include <runtime/menu/menu_screen_inputs.h>
 #include <runtime/menu/menu_text_tables.h>
+#include <runtime/menu/menu_texture_header.h>
 
 #include "common/file_io.h"
 #include "common/retail_paths.h"
@@ -61,44 +59,6 @@ using opennova::mnu::Window;
 using opennova::strutil::iequals;
 
 namespace {
-
-uint32_t be32(const std::vector<uint8_t> &b, size_t at) {
-	return at + 3 < b.size() ? (static_cast<uint32_t>(b[at]) << 24) | (static_cast<uint32_t>(b[at + 1]) << 16) |
-					(static_cast<uint32_t>(b[at + 2]) << 8) | b[at + 3]
-							 : 0u;
-}
-
-// A texture's size from its header, by the format the dispatch picked: the TGA and DDS
-// header readers, and a PCX through the port of the game's menu decoder.
-bool texture_size(opennova::menu::MenuTextureFormat format, const std::vector<uint8_t> &b, int *w, int *h) {
-	using F = opennova::menu::MenuTextureFormat;
-	uint32_t width = 0, height = 0;
-	switch (format) {
-		case F::Tga:
-			if (!opennova::tga::tga_header_size(b.data(), b.size(), width, height)) return false;
-			break;
-		case F::Dds:
-			if (!opennova::dds::dds_header_size(b.data(), b.size(), width, height)) return false;
-			break;
-		case F::Pcx: {
-			opennova::RgbaImage image;
-			std::string error;
-			if (!opennova::decode_pcx_menu_rgba(b.data(), b.size(), image, error)) return false;
-			width = static_cast<uint32_t>(image.width);
-			height = static_cast<uint32_t>(image.height);
-			break;
-		}
-		case F::Png:
-			width = be32(b, 16);
-			height = be32(b, 20);
-			break;
-		case F::None:
-			return false;
-	}
-	*w = static_cast<int>(width);
-	*h = static_cast<int>(height);
-	return *w > 0 && *h > 0;
-}
 
 // Where a screen's files come from: the mount, the loose tree, or nothing.
 struct AssetSource {
@@ -133,12 +93,12 @@ private:
 	const AssetSource *assets_;
 };
 
-// A texture's size from its header: what a headless check decodes.
+// A texture's size from its header (menu_texture_header_size): what a headless check decodes.
 class HeaderSizes : public opennova::menu::MenuTextureDecoder {
 public:
 	bool decode(const std::string &key, opennova::menu::MenuTextureFormat format, const std::vector<uint8_t> &bytes,
 			int &width, int &height) override {
-		if (!texture_size(format, bytes, &width, &height)) return false;
+		if (!opennova::menu::menu_texture_header_size(format, bytes, &width, &height)) return false;
 		heights[key] = height;
 		return true;
 	}

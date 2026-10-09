@@ -1864,6 +1864,12 @@ target_link_libraries(menu_frame_assets_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_assets_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME menu_frame_assets COMMAND menu_frame_assets_test)
 
+# A menu texture's size from its header, no pixels decoded (menu/menu_texture_header.h).
+add_executable(menu_texture_header_test menu/menu_texture_header_test.cpp)
+target_link_libraries(menu_texture_header_test PRIVATE opennova_runtime)
+target_include_directories(menu_texture_header_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_texture_header COMMAND menu_texture_header_test)
+
 add_executable(menu_video_test menu/menu_video_test.cpp)
 target_link_libraries(menu_video_test PRIVATE opennova_runtime)
 target_include_directories(menu_video_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

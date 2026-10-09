@@ -1390,6 +1390,47 @@ void test_mouse_pump(const fnt_font_t *font) {
 	CHECK(claim.hovered == 1, "the hit test runs raw mouse against scaled rects");
 }
 
+// The mouse sample through an embedder's click latch (press_mouse, sample_mouse,
+// peek_mouse; menu_click.h): the press captures the button, a release over it
+// clicks it, and the sample that never pumps makes the same claim and click
+// with nothing written [orig: CWnd_ProcessMouseEvent @ 0x647b14].
+void test_mouse_sample_through_the_latch(const fnt_font_t *font) {
+	opennova::mnu::Document doc = parse_or_die(kScreenXml);
+	MenuFrameCompiler c;
+	configure_with(c, doc.first_screen(), font);
+	{
+		MenuFrameState state;
+		MenuClickLatch latch;
+		const std::vector<MenuPumpWindow> reach = c.press_mouse(latch, state, 50.0f, 30.0f, 1.0f, 1.0f);
+		CHECK(!reach.empty() && latch.captured() == (MenuPumpWindow{ 1, 0 }),
+				"the press reaches the button, which takes the capture");
+		MenuFrameCompiler::MouseSample taken =
+				c.sample_mouse(latch, state, 50.0f, 30.0f, true, 1.0f, 1.0f);
+		CHECK(taken.claim.hovered == 1 && !taken.clicked.valid(), "held down: claimed, no click");
+		CHECK(state.cursor_x == 50.0f && state.cursor_y == 30.0f,
+				"the pumped sample holds the cursor's point");
+		taken = c.sample_mouse(latch, state, 50.0f, 30.0f, false, 1.0f, 1.0f);
+		CHECK(taken.clicked == (MenuPumpWindow{ 1, 0 }), "let go over it: its click");
+		CHECK(!latch.captured().valid(), "the release lets the capture go");
+	}
+	{
+		MenuFrameState state;
+		MenuClickLatch latch;
+		c.press_mouse(latch, state, 50.0f, 30.0f, 1.0f, 1.0f);
+		MenuFrameCompiler::MouseSample taken =
+				c.peek_mouse(latch, state, true, 50.0f, 30.0f, true, 1.0f, 1.0f);
+		CHECK(taken.claim.hovered == 1 && !taken.clicked.valid(), "peeked: the same claim");
+		taken = c.peek_mouse(latch, state, true, 50.0f, 30.0f, false, 1.0f, 1.0f);
+		CHECK(taken.clicked == (MenuPumpWindow{ 1, 0 }), "peeked: the same click");
+		CHECK(state.widgets.empty() && state.cursor_claim == -1, "a peek writes nothing");
+		// Off the frame: nothing takes the claim, so a press let go there clicks nothing.
+		c.press_mouse(latch, state, 50.0f, 30.0f, 1.0f, 1.0f);
+		c.peek_mouse(latch, state, true, 50.0f, 30.0f, true, 1.0f, 1.0f);
+		taken = c.peek_mouse(latch, state, false, 50.0f, 30.0f, false, 1.0f, 1.0f);
+		CHECK(taken.claim.hovered == -1 && !taken.clicked.valid(), "off the frame: no claim, no click");
+	}
+}
+
 // The table interior [orig: CUITable_Render @ 0x6411d0]: header labels, the
 // divider in the >16px headroom band (0xFF7F7F7F), seeded data rows from the
 // scroll window, clipped to the rect.
@@ -2429,19 +2470,16 @@ void test_scrollbar_windows_take_the_game_s_rule(const fnt_font_t *font) {
 	MenuFrameState state;
 	state.widgets.push_back(gamma);
 	MenuClickLatch latch;
-	const auto reached = [&](const MenuPumpWindow &w) { return c.pump_window_reached(w, state); };
 	// One sample as an embedder runs it (MenuStateFrame::press_mouse / process_mouse).
 	const auto sample = [&](float x, float y, bool down) {
 		MenuFrameCompiler::MouseClaim pressed;
 		if (down && !latch.button_down()) {
-			const std::vector<MenuPumpWindow> reach = c.press_reach(state, x, y, 1.0f, 1.0f);
-			latch.press(c.press_capture(reach));
-			for (const MenuPumpWindow &w : reach) c.press_scroll_window(state, w, x, y, 1.0f, 1.0f, &pressed);
+			for (const MenuPumpWindow &w : c.press_mouse(latch, state, x, y, 1.0f, 1.0f))
+				c.press_scroll_window(state, w, x, y, 1.0f, 1.0f, &pressed);
 		}
-		MenuFrameCompiler::MouseClaim claim =
-				c.pump_mouse(state, x, y, down, 1.0f, 1.0f, latch.capture_for(down));
-		const MenuPumpWindow clicked = latch.sample(c.click_claim(claim, state), down, reached);
-		if (clicked.valid()) c.click_scroll_window(state, clicked, &claim);
+		MenuFrameCompiler::MouseSample taken = c.sample_mouse(latch, state, x, y, down, 1.0f, 1.0f);
+		MenuFrameCompiler::MouseClaim &claim = taken.claim;
+		if (taken.clicked.valid()) c.click_scroll_window(state, taken.clicked, &claim);
 		if (pressed.scroll_value_changed) {
 			claim.scroll_value_changed = true;
 			claim.scroll_value = pressed.scroll_value;
@@ -2974,6 +3012,7 @@ int main() {
 	test_list_rows_and_item_cell(&font);
 	test_list_row_truncation(&font);
 	test_mouse_pump(&font);
+	test_mouse_sample_through_the_latch(&font);
 	test_table_interior(&font);
 	test_marquee_roll(&font);
 	test_draw_frame_gate(&font);

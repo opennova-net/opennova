@@ -148,4 +148,10 @@ private:
 	std::vector<MenuDependency> dependencies_;
 };
 
+// The names a configure could not load, split into the files the source lacks and the files it
+// has that did not load (a font or string table that does not parse, a texture that does not
+// decode), each once.
+void split_unloaded(const MenuFrameAssets &assets, std::vector<std::string> &missing,
+		std::vector<std::string> &unreadable);
+
 } // namespace opennova::menu
