@@ -54,10 +54,11 @@ class Simulation;
 // witnessed ambient emitter mix: per-voice two-radius distance volumes, region
 // crossfades, and an eight-player physical channel pool [orig:
 // SoundEmitter_UpdateAndMixTop8 @ 0x5284a0]. Also exposes the PlayWavList
-// action seam and the music/reverb bed. The serialized dialog queue, the
-// dialog-id resolution and the WAC voice channel rule are the engine's
-// runtime/audio/dialog_queue; the one-shot fires ride the sound bank's
-// oneshot_play plan.
+// action seam and the music/reverb bed. The dialog slots and their line
+// timers, the dialog-id resolution and the WAC voice channel rule are the
+// engine's runtime/audio/dialog_queue (this node is their device: it plays the
+// wave a line loads and says how long it is and whether its voice still plays);
+// the one-shot fires ride the sound bank's oneshot_play plan.
 //
 // The bank chain is the original's: Game_StartMission walks six global name
 // slots in order [<exp>L.lwf, <exp>.lwf, gamelocl.lwf, game.lwf, game3.lwf,
@@ -111,6 +112,7 @@ public:
 	// The "ambience disabled" arm: banks and the mission .DBF still load, no
 	// ambient marker resolves (the dialog-vs-ambient probe's silent control).
 	void set_ambient_markers_enabled(bool p_enabled);
+	// The voice the dialog channel's last loaded line plays on, while it lives.
 	AudioStreamPlayer *dialog_voice() const;
 	Ref<MissionAudioPerf> get_perf_counters() const;
 	Ref<SoundBank> get_bank() const { return bank_; }
@@ -163,12 +165,19 @@ public:
 	// shares the finite one-shot pool with the other positional triggers.
 	bool slot_soundset(const String &p_name, const Vector3 &p_world_pos,
 			int p_source_bms_id = 0, int p_sound_id = 0);
-	// Enqueue a mission dialog by its PlayWavList id (param1): the engine's
+	// Play a mission dialog by its PlayWavList id (param1): the engine's
 	// resolution (runtime/audio/dialog_queue resolve_dialog_lines: the dialog
-	// bank's dialog, each line the wave of its name in the bank's sounds) then
-	// the serialized queue, pumped here by spawning one voice at a time.
-	// Returns true if the id resolved to a dialog of the bank.
+	// bank's dialog, each line the wave of its name in the bank's sounds) takes
+	// a dialog slot; its lines load on the dialog ticks (advance_dialog_tick).
+	// Returns true if the id resolved to a dialog of the bank and a slot took it.
 	bool play_dialog(int p_wav_id);
+	// One dialog playback tick, which the world runs once a logic tick after
+	// that tick's PlayWavList dialogs reached play_dialog: the engine queue
+	// decides which lines load (runtime/audio/dialog_queue DialogQueue::tick),
+	// this node plays them and reports each to the co-op broadcast. A frame
+	// rendered since the previous dialog tick (tick() marks one) starts a fresh
+	// line's hold.
+	void advance_dialog_tick();
 	// A co-op dialog line the host sent (the "dialog_line" effect): the
 	// engine's resolution (runtime/audio/dialog_queue resolve_dialog_line)
 	// picks the clip, which plays at once on a voice of its own, outside the
@@ -219,9 +228,6 @@ public:
 	// The recent positional one-shots, oldest first (see recent_fires_).
 	TypedArray<FiredSoundset> recent_fired_soundsets() const;
 
-	// The bound signal target: the active dialog voice finished.
-	void _on_dialog_finished();
-
 protected:
 	static void _bind_methods();
 
@@ -235,9 +241,13 @@ private:
 	void _attach_under(Node3D *p_container);
 	void _free_voice_nodes();
 	std::vector<opennova::audio::DialogLineRef> _resolve_dialog_lines(int p_wav_id) const;
-	void _pump_dialog_queue();
+	// The device half of a line's load: its wave on a new voice of the dialog
+	// channel, what the wave loader records of it, and the co-op report.
+	opennova::audio::DialogClip _load_dialog_line(const opennova::audio::DialogLineRef &p_line);
+	// A dialog voice of the queue's still plays.
+	bool _dialog_voice_playing(uint64_t p_voice) const;
 	// A dialog line's wave on a voice of the dialog channel, at the wave's volume byte.
-	AudioStreamPlayer *_spawn_dialog_voice(const std::string &p_file, int p_volume);
+	AudioStreamPlayer *_spawn_dialog_voice(const Ref<AudioStreamWAV> &p_stream, int p_volume);
 	AudioStreamPlayer *_dialog_voice_node() const;
 	AudioStreamPlayer *_wac_voice_node() const;
 	void _on_script_voice_finished(int64_t p_serial, int64_t p_player_id);
@@ -317,10 +327,12 @@ private:
 	Ref<MissionAudioStats> stats_;
 	double time_of_day_hhmm_ = 1200.0; // HHMM like MissionEnvironment.time_of_day; noon default
 	Vector3 last_camera_pos_; // listener at the last tick; INF until first tick
-	// The serialized dialog playback (engine: runtime/audio/dialog_queue.h) and
-	// the voice its active line plays on.
+	// The dialog slots and channel (engine: runtime/audio/dialog_queue.h), the
+	// voice the last loaded line plays on, and whether a frame has rendered
+	// since the last dialog tick.
 	opennova::audio::DialogQueue dialog_queue_;
 	ObjectID dialog_voice_id_;
+	bool dialog_frame_rendered_ = false;
 	// Standalone preview player; mission script ownership lives in World.
 	ObjectID wac_voice_id_;
 	ObjectID script_voice_id_;
