@@ -224,17 +224,15 @@ std::vector<PreviewJoint> preview_posed_joints(const anim::SkeletalClips &rig, c
 	const std::vector<int> &parents = rig.parents();
 	const auto &rest_inverse = rig.rest_global_inverse();
 	const size_t count = std::min({pose.size(), parents.size(), rest_inverse.size()});
-	// The parent-local FK the skin poses by: each bone's global on its parent's (the parents come
-	// first, fk_valid), its deform the global over the rest global's inverse (the matrices
-	// world::EntityPoseProvider::build_skeletal composes, before the render-frame swizzle).
-	std::vector<anim::SkeletalClips::RestTransform> global(count);
+	// The parent-local FK the skin poses by (anim::pose_globals: each bone's global on its parent's, the
+	// parents first, fk_valid; a free model collapses no bone), its deform the global over the rest
+	// global's inverse (the matrices world::EntityPoseProvider::build_skeletal composes, before the
+	// render-frame swizzle).
+	std::vector<anim::SkeletalClips::RestTransform> global;
+	anim::pose_globals(pose, parents, count, -1, global);
 	out.reserve(count);
 	for (size_t i = 0; i < count; ++i) {
-		anim::SkeletalClips::RestTransform local;
-		anim::quat_to_mat3_rows(pose[i].rotation, local.rows);
-		local.origin = pose[i].origin;
 		const int parent = parents[i];
-		global[i] = parent >= 0 && size_t(parent) < i ? anim::rest_mul(global[size_t(parent)], local) : local;
 		PreviewJoint joint;
 		joint.bone = int(i);
 		joint.parent = parent >= 0 && size_t(parent) < i ? parent : -1;
@@ -247,16 +245,10 @@ std::vector<PreviewJoint> preview_posed_joints(const anim::SkeletalClips &rig, c
 }
 
 PreviewVec3 preview_joint_carry(const PreviewJoint &joint, const PreviewVec3 &point, bool direction) {
-	const float *r = joint.deform.rows;
-	const float in[3] = {point.x, point.y, point.z};
-	float o[3];
-	for (int row = 0; row < 3; ++row) o[row] = r[row * 3] * in[0] + r[row * 3 + 1] * in[1] + r[row * 3 + 2] * in[2];
-	if (!direction) {
-		o[0] += joint.deform.origin.x;
-		o[1] += joint.deform.origin.y;
-		o[2] += joint.deform.origin.z;
-	}
-	return PreviewVec3{o[0], o[1], o[2]};
+	const anim::Vec3 in{point.x, point.y, point.z};
+	const anim::Vec3 o = direction ? anim::rest_transform_direction(joint.deform, in)
+	                               : anim::rest_transform_point(joint.deform, in);
+	return PreviewVec3{o.x, o.y, o.z};
 }
 
 const char *preview_event_letter(uint32_t trigger) {
