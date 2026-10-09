@@ -243,7 +243,7 @@ begin "CHel without ground selector B"
   sid chel_without_physics_b
   ai_function CHel
   render_function CHel
-  move_function CHelScout
+  move_function CHEL
   attrib: AIData neutral PlayerControl
   hp 3000
   climb_speed 20
@@ -1002,7 +1002,7 @@ func test_selector_zero_installs_direct_air_and_simple_ground_traits() -> void:
 	assert_eq(air_a_card.get_vehicle_family(), 2,
 			"plain chel installs the Helicopter prediction family without physics")
 	assert_eq(air_b_card.get_vehicle_family(), 2,
-			"case-folded fourcc chel installs the same air prediction family")
+			"the whole token in another case (CHEL) installs the same air prediction family")
 	assert_eq(ground_card.get_vehicle_family(), 0,
 			"zero selects the simpler motor for the ground cveh family")
 	assert_eq(plane_card.get_vehicle_family(), 3,
