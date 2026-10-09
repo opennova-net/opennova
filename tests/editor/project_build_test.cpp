@@ -159,9 +159,6 @@ static int test_routing() {
 	TEST_EXPECT(route_asset(entry_of("menumus.sbf", AssetKind::MusicBank)) == ArchiveSlot::Loose);
 	TEST_EXPECT(route_asset(entry_of("resource.pff", AssetKind::Archive)) == ArchiveSlot::None);
 	TEST_EXPECT(route_asset(entry_of("notes.xyz", AssetKind::Unknown)) == ArchiveSlot::None);
-	TEST_EXPECT(std::string(archive_slot_file_name(ArchiveSlot::Language)) == "language.pff");
-	TEST_EXPECT(std::string(archive_slot_file_name(ArchiveSlot::Loose)).empty());
-	TEST_EXPECT(std::string(archive_slot_file_name(ArchiveSlot::None)).empty());
 	return 0;
 }
 

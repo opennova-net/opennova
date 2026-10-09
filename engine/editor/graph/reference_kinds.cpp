@@ -225,7 +225,7 @@ std::string sound_missing(const AssetGraph &graph, const GraphEdge &edge) {
 // Whether a bank's wave is named by a dialog line (a dialog bank's line, whose wave its mission's dialog
 // bank's sounds hold), not by a member of the bank.
 bool named_by_dialog_line(const GraphEdge &edge) {
-	return asset_kind_for_name(basename_of(edge.source)) == AssetKind::DialogBank;
+	return file_kind_for_name(basename_of(edge.source)) == AssetKind::DialogBank;
 }
 
 // A member names its wave by the wave's place in the bank, which the save finds by the name: a name
