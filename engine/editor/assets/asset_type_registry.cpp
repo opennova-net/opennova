@@ -4,6 +4,7 @@
 #include <fstream>
 
 #include <base/io/strutil.h>
+#include <base/resource_index/file_kind.h>
 #include <base/resource_index/resource_kind.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/import/importer.h>
@@ -11,14 +12,6 @@
 #include <runtime/renderer/material_texture.h>
 
 namespace opennova::editor {
-
-namespace {
-
-std::string lower_basename(const std::string &logical_name) {
-	return strutil::to_lower(basename_of(logical_name));
-}
-
-} // namespace
 
 bool asset_classification_needs_bytes(const std::string &logical_name) {
 	return resource_extension_for_name(logical_name) == ".bin";
@@ -29,7 +22,7 @@ bool asset_name_fits_kind(const std::string &logical_name, AssetKind kind) {
 	// (CC.BIN's).
 	if (asset_classification_needs_bytes(logical_name))
 		return kind == AssetKind::Strings || kind == AssetKind::MusicScript ||
-		       kind == AssetKind::RawBin || kind == asset_kind_for_name(logical_name);
+		       kind == AssetKind::RawBin || kind == file_kind_for_name(logical_name);
 	// A file an importer converts is an import source while its import record is there
 	// (scan_project_assets), whatever its name makes it otherwise (a PNG a texture): its name fits
 	// either.
@@ -52,31 +45,14 @@ bool is_text_file(const std::string &path, uint64_t &read) {
 }
 
 AssetKind classify_asset(const std::string &logical_name, const std::vector<uint8_t> *bytes) {
-	// The runtime catalog's kinds by its own classifier, then the rows' own names (asset_kinds).
-	const std::string shared = resource_kind_for_file(logical_name, bytes);
-	if (!shared.empty()) return asset_kind_for_runtime(shared);
-	const AssetKind named = asset_kind_for_name(logical_name);
+	// The runtime catalog's kinds by its own classifier, then the facts' own names (file_kind).
+	const AssetKind named = file_kind_for_file(logical_name, bytes);
 	if (named == AssetKind::Unknown && bytes && renderer::is_material_chunk_container(*bytes)) return AssetKind::MaterialChunk;
 	// A name with no extension that holds text is a note (a LICENSE): the Notes row's comment.
 	if (named == AssetKind::Unknown && bytes && resource_extension_for_name(logical_name).empty() &&
 	    strutil::looks_like_text(bytes->data(), std::min(bytes->size(), strutil::kTextSniffBytes)))
 		return AssetKind::Notes;
 	return named;
-}
-
-AssetKind expected_asset_kind_for_required_name(const std::string &name) {
-	const std::string extension = resource_extension_for_name(name);
-	if (extension != ".bin") return classify_asset(name, nullptr);
-	// The witnessed `.bin` rows: a kind a row knows by its whole name (CC.BIN, the country
-	// code), the music-script pair (and its expansion forms), the three raw markers/credential
-	// stores, and string tables for everything else.
-	const AssetKind named = asset_kind_for_name(name);
-	if (named != AssetKind::RawBin && named != AssetKind::Unknown) return named;
-	const std::string basename = lower_basename(name);
-	if (basename == "menumus.bin" || basename == "gamemus.bin") return AssetKind::MusicScript;
-	if (basename == "fgn2.bin" || basename == "epass.bin" || basename == "passgen.bin")
-		return AssetKind::RawBin;
-	return AssetKind::Strings;
 }
 
 } // namespace opennova::editor

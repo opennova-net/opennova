@@ -44,7 +44,7 @@ std::string overrun_words(const std::string &file, const configfile::DataStrings
 
 std::vector<Diagnostic> config_overrun_findings(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
-	if (asset_kind_row(document.kind()).line_reader != LineReader::ConfigFile) return findings;
+	if (file_kind_facts(document.kind()).line_reader != LineReader::ConfigFile) return findings;
 	const TextDocument *text = text_of(document);
 	// A file stored in another form (a credits file's CBIN, its encoding) is not read by the text reader.
 	if (!text || document.blocked() || text->encoding()) return findings;
