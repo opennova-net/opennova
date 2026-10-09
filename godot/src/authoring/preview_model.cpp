@@ -100,7 +100,7 @@ const char *ModelDataBuild::label() const {
 // --- PreviewModel ------------------------------------------------------------------------------------------
 
 void PreviewModel::begin(const opennova::assets::Model &model, const std::string &path,
-		std::shared_ptr<const opennova::editor::StampedFiles> files, std::shared_ptr<const opennova::anim::SkeletalClips> rig) {
+		std::shared_ptr<const opennova::StampedFiles> files, std::shared_ptr<const opennova::anim::SkeletalClips> rig) {
 	build_.reset();
 	if (!model || !files) {
 		clear();
@@ -241,9 +241,9 @@ void PreviewModel::tick(int64_t ms) {
 	clock_->sample(ms, ++frame_);
 }
 
-opennova::editor::FileStamps PreviewModel::stamps() const {
+opennova::FileStamps PreviewModel::stamps() const {
 	if (build_ && build_->files) return build_->files->stamps();
-	return files_ ? files_->stamps() : opennova::editor::FileStamps();
+	return files_ ? files_->stamps() : opennova::FileStamps();
 }
 
 } // namespace godot
