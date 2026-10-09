@@ -8,10 +8,10 @@
 
 #include <base/vfs/file_source.h>
 #include <editor/model/node.h>
-#include <editor/preview/texture_header.h>
 #include <formats/mnu/mnu.h>
 #include <runtime/menu/menu_frame.h>
 #include <runtime/menu/menu_frame_assets.h>
+#include <runtime/menu/menu_texture_header.h>
 
 namespace opennova::editor {
 
@@ -33,28 +33,11 @@ const char *menu_screen_status_token(MenuScreenStatus status);
 // name); "" when ready.
 std::string menu_screen_status_message(MenuScreenStatus status, const std::string &detail);
 
-// The names a configure could not load, split into the files the source lacks and the files it
-// has that did not load (a font or string table that does not parse, a texture that does not
-// decode), each once.
-void split_unloaded(const menu::MenuFrameAssets &assets, std::vector<std::string> &missing,
-		std::vector<std::string> &unreadable);
-
-// The variables a menu's text names: every %NAME% the game's expansion finds in it
-// (mns::variable_reference_at, the scan the game runs over a menu's whole text before its parse),
-// upper case as the shell's list keys them, sorted, each once. Every value the frame compiler
-// resolves through the list is one of them, and so is a %NAME% inside a longer text, which the game
-// expands too though no StyleVar edge reads it (a whole value is an edge).
-std::vector<std::string> menu_variables_named(const std::string &text);
-// The variables of two readings of the shell's list that one has and the other lacks, or that hold
-// another value (both keyed as the list keys them, upper case), sorted.
-std::vector<std::string> changed_menu_variables(const std::map<std::string, std::string> &before,
-		const std::map<std::string, std::string> &after);
-
 // One screen of a menu compiled headless the way the game's frame compiles it (ADR 0046
 // S9j2): the menu the game would read were it saved now (MnuDocument::saved_image, the
 // screen by its row's position), the shell's %VAR% list, and the screen's string tables,
 // fonts and textures through a file source (the project's, the open documents standing
-// in), textures measured by their headers (TextureHeaderProbe). The render check keeps
+// in), textures measured by their headers (menu::MenuTextureHeaderProbe). The render check keeps
 // one per screen; the menu viewport keeps its own (S13 V5: the geometry its hit tests, handles
 // and drags read, with its options' frame state); the queries and the tests read its compiler and
 // its notes.
@@ -93,7 +76,7 @@ private:
 	const mnu::Screen *screen_ = nullptr;
 	menu::MenuFrameCompiler compiler_;
 	menu::MenuFrameAssets assets_;
-	TextureHeaderProbe decoder_;
+	menu::MenuTextureHeaderProbe decoder_;
 	menu::MenuFrameState state_;
 	MenuScreenStatus status_ = MenuScreenStatus::NoScreen;
 	std::string detail_;
