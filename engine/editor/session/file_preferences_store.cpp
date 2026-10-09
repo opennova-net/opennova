@@ -1,6 +1,5 @@
 #include <editor/session/file_preferences_store.h>
 
-#include <cmath>
 #include <filesystem>
 #include <system_error>
 #include <utility>
@@ -13,17 +12,6 @@
 namespace fs = std::filesystem;
 
 namespace opennova::editor {
-
-namespace {
-
-// A JSON number that is a whole number a double holds exactly (|n| < 2^53), so its cast to int64_t is
-// defined and keeps it.
-bool whole_number(const io::JsonValue &value) {
-	return value.is_number() && std::isfinite(value.number) && std::floor(value.number) == value.number &&
-	       std::fabs(value.number) < 9007199254740992.0;
-}
-
-} // namespace
 
 bool FilePreferencesStore::load(Preferences &out, Diagnostic &finding) {
 	const std::string &path = path_;
@@ -82,7 +70,7 @@ bool FilePreferencesStore::load(Preferences &out, Diagnostic &finding) {
 			std::vector<int64_t> &items = settings.recent_items[game.key];
 			for (const io::JsonValue &item : game.value.array) {
 				if (items.size() >= kRecentItemsMax) break;
-				if (whole_number(item)) items.push_back(int64_t(item.number));
+				if (int64_t whole = 0; io::json_exact_whole_in(item, -io::kJsonSafeWholeMax, io::kJsonSafeWholeMax, whole)) items.push_back(whole);
 			}
 			if (items.empty()) settings.recent_items.erase(game.key);
 		}
