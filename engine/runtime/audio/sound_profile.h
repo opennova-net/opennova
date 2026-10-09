@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <unordered_map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace opennova::audio {
@@ -86,6 +87,15 @@ enum SoundProfileSlot {
 // The engine's slot keyword for a slot index (the @ 0x82F3B0 table strings,
 // e.g. 17 -> "SSLFootGND"). nullptr for an out-of-range slot.
 const char *sound_profile_slot_keyword(int slot);
+// The slot a keyword names, compared without case, the first in table order as
+// the line parser scans it ("ssrfootgnd" -> 18); -1 for none.
+int sound_profile_slot_of(std::string_view keyword);
+
+// The bytes the game keeps a profile's name in, a name of 64 characters or more
+// cut there [orig: the strlen >= 0x40 cut @ 0x527043], and a slot's set name in,
+// its terminator among them [orig: the 24-byte name24 rows at +928].
+inline constexpr size_t kSoundProfileNameBytes = 64;
+inline constexpr size_t kSoundProfileSetNameBytes = 24;
 
 // The keyword of one of the 12 med/crs loop percents, index == the
 // SoundProfile::loop_params slot (the keyword chain @ 0x5270a9-0x527481, in
@@ -173,6 +183,13 @@ public:
 private:
     std::vector<SoundProfile> entries_;
 };
+
+// The profile the game binds `name` to: the first of the name without case,
+// else the FIRST profile [orig: SoundProfile_FindSlotByName @ 0x526e30 returns
+// the array base when no name matches]; a null name matches none. Null only
+// with no profile loaded. SoundProfileTable::find / index_of, item_sound_profile
+// and the editor's profile pick read it.
+const SoundProfile *find_sound_profile(const std::vector<SoundProfile> &profiles, const char *name);
 
 // The profile an item binds for the profile name it authors (its `sound_profile`, or for a female
 // avatar its `sound_profileFemale`, D-SND-12): "default" where it authors none, both of an item's

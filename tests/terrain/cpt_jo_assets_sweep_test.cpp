@@ -2,10 +2,10 @@
 // through the CDEP/DPTH/POLY reader into the 1024x1024 depth atlas with at
 // least one tile, and the Dvxi5 bake carries the header facts the reader's
 // contract was grilled on (terrain_name "Dvxi5", creator "Brophy", CDEP).
-// The re-encode leg: each file read by load_cpt and written again by
-// CptFile::write_bytes is the same bytes, the retail-corpus byte diff the CPT
-// encoder answers to (engine/CLAUDE.md). Reports Skipped without
-// OPENNOVA_JO_ASSETS.
+// The re-encode leg: each file read by load_cpt and written again by save_cpt
+// (the writer behind CptFile::write_bytes and the TrnGen bake) is the same
+// bytes, the retail-corpus byte diff the CPT encoder answers to
+// (engine/CLAUDE.md). Reports Skipped without OPENNOVA_JO_ASSETS.
 
 #include <formats/cpt/cpt.h>
 #include <formats/cpt/cpt_io.h>
@@ -38,10 +38,8 @@ bool reencodes(const std::filesystem::path &path, const std::string &name) {
 		std::printf("FAIL: %s: load_cpt: %s\n", name.c_str(), error.c_str());
 		return false;
 	}
-	try {
-		again = cpt.write_bytes();
-	} catch (const std::exception &e) {
-		std::printf("FAIL: %s: write_bytes: %s\n", name.c_str(), e.what());
+	if (!opennova::save_cpt(cpt, again, error)) {
+		std::printf("FAIL: %s: save_cpt: %s\n", name.c_str(), error.c_str());
 		return false;
 	}
 	size_t differ = 0, first = 0;

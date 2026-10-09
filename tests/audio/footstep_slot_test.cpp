@@ -57,6 +57,23 @@ void test_zero_water_plane_is_disabled_not_sea_level() {
           kSlotFootLGround);
 }
 
+// The surface a foot lands on, through the same test: each surface's state
+// comes to its own slot (the editor's clip preview steps on a chosen surface).
+void test_surface_states_pick_their_slots() {
+    CHECK(footstep_slot_on(FootSurface::Ground, 0) == kSlotFootLGround);
+    CHECK(footstep_slot_on(FootSurface::Ground, 1) == kSlotFootRGround);
+    CHECK(footstep_slot_on(FootSurface::Snow, 0) == kSlotFootLSnow);
+    CHECK(footstep_slot_on(FootSurface::Snow, 1) == kSlotFootRSnow);
+    CHECK(footstep_slot_on(FootSurface::Object, 0) == kSlotFootLObject);
+    CHECK(footstep_slot_on(FootSurface::Object, 1) == kSlotFootRObject);
+    CHECK(footstep_slot_on(FootSurface::Water, 0) == kSlotFootWater);
+    CHECK(footstep_slot_on(FootSurface::Water, 1) == kSlotFootWater);
+    const FootState water = foot_state_on(FootSurface::Water);
+    CHECK(water.water_z != 0 && water.feet_z < water.water_z && !water.on_entity);
+    const FootState snow = foot_state_on(FootSurface::Snow);
+    CHECK(snow.surface_type == 3 && snow.water_z == 0 && !snow.on_entity);
+}
+
 // organic_slot_set — the wire body channel's profile resolve, mirroring the
 // authority path's fallback chain [orig: Entity_GetProfileSlotSound @0x528300;
 // the "default" seed @0x49e3f5; the find-miss base @0x526e30].
@@ -120,6 +137,7 @@ int main() {
     test_on_entity_beats_snow();
     test_water_beats_everything_and_ignores_foot();
     test_zero_water_plane_is_disabled_not_sea_level();
+    test_surface_states_pick_their_slots();
     test_organic_slot_set_resolve_chain();
     if (failures == 0) std::printf("footstep_slot_test: all passed\n");
     return failures == 0 ? 0 : 1;

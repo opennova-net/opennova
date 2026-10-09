@@ -908,6 +908,79 @@ bool test_helpers() {
   return true;
 }
 
+// The keyword tokens each parse recognizes, public for the tools that offer them: the parse keeps
+// exactly these (without case), and the writer's default spellings are their first.
+bool test_keyword_tokens() {
+  CHECK(mnu::known_token("center", mnu::kJustify) && mnu::known_token("Bottom", mnu::kVJustify) &&
+            !mnu::known_token("MIDDLE", mnu::kJustify),
+        "JUSTIFY / VJUSTIFY");
+  CHECK(mnu::known_token("imagerow", mnu::kTableAppearanceTypes) && !mnu::known_token("IMAGEROW", mnu::kAppearanceTypes),
+        "IMAGEROW is a TABLE ITEMS row's alone");
+  mnu::Document doc;
+  CHECK(parse(screen_of("type=\"static\" name=\"S\"",
+                        std::string(kPos) + "<STRING justify=\"middle\" justify=\"center\">x</STRING>"
+                        "<ACTION type=\"window\" source=\"F\">T</ACTION>"),
+              doc),
+        "parse");
+  const mnu::Window &w = root(doc);
+  CHECK(w.string_data.justify == "center", "of repeated attributes, the first token the parse knows");
+  CHECK(w.actions.size() == 1 && w.actions[0].field == "F" && w.actions[0].field_attr == "SOURCE",
+        "SOURCE writes the FIELD slot");
+  mnu::Window table;
+  table.type = mnu::WindowType::Table;
+  table.table_data.column.headers.resize(1);
+  table.table_data.column.primary_sort = 0;
+  mnu::Document written;
+  written.screens.resize(1);
+  written.screens[0].roots.push_back(table);
+  const std::string text = mnu::serialize(written);
+  CHECK(text.find(std::string(" ") + mnu::kPrimarySortTokens[0]) != std::string::npos,
+        "a primary key with no spelling is written PRIMARY_SORT");
+  return true;
+}
+
+// [orig: CWnd_FindChildByName @ 0x646850; UI_FindScreenControl @ 0x63ae80] The by-name window
+// lookup: pre-order, a window before its children, the first match; a nameless window ends its
+// branch; the roots in order.
+bool test_find_window() {
+  const auto named = [](const char *name) {
+    mnu::Window w;
+    w.name = name;
+    return w;
+  };
+  mnu::Screen screen;
+  mnu::Window root_window = named("ROOT");
+  mnu::Window nameless = named("");
+  nameless.children.push_back(named("UNDER"));
+  root_window.children.push_back(nameless);
+  mnu::Window a = named("A");
+  a.children.push_back(named("B"));
+  root_window.children.push_back(a);
+  root_window.children.push_back(named("b"));
+  mnu::Window spin = named("SP");
+  spin.type = mnu::WindowType::SpinList;
+  mnu::Window &up = spin.spinup.author(mnu::WindowType::Button);
+  up.name = "UP";
+  up.children.push_back(named("IN"));
+  root_window.children.push_back(spin);
+  screen.roots.push_back(root_window);
+  mnu::Window second = named("ROOT2");
+  second.children.push_back(named("C"));
+  second.children.push_back(named("A"));
+  screen.roots.push_back(second);
+
+  const mnu::Screen &s = screen;
+  CHECK(mnu::find_window(s, "root") == &s.roots[0], "a window's own name, without case");
+  CHECK(mnu::find_window(s, "b") == &s.roots[0].children[1].children[0], "a child before a later sibling");
+  CHECK(!mnu::find_window(s, "UNDER"), "a nameless window ends its branch");
+  CHECK(!mnu::find_window(s, "UP") && !mnu::find_window(s, "IN"), "a part and its windows are not walked");
+  CHECK(mnu::find_window(s, "C") == &s.roots[1].children[0], "every root in order");
+  CHECK(mnu::find_window(s, "A") == &s.roots[0].children[1], "the first root that finds it");
+  CHECK(mnu::find_window(s.roots[1], "a") == &s.roots[1].children[1], "under one window");
+  CHECK(!mnu::find_window(s, "") && !mnu::find_window(s, "NONE"), "an empty or unknown name finds nothing");
+  return true;
+}
+
 std::vector<uint8_t> utf16le(const std::u16string &text) {
   std::vector<uint8_t> out{0xFF, 0xFE};
   for (char16_t u : text) {
@@ -990,6 +1063,8 @@ int main() {
   RUN_TEST(test_write_issues);
   RUN_TEST(test_every_element_fixed_point);
   RUN_TEST(test_helpers);
+  RUN_TEST(test_keyword_tokens);
+  RUN_TEST(test_find_window);
   RUN_TEST(test_source_encoding);
 
   if (failed > 0) {

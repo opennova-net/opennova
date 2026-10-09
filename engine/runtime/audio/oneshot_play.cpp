@@ -25,6 +25,18 @@ void OneshotChannelPool::release(size_t channel) {
 	if (channel < channels_.size()) channels_[channel] = {};
 }
 
+int32_t find_bank_set(const lwf::File &bank, const std::string &name) {
+	if (name.empty()) {
+		return -1;
+	}
+	for (size_t si = 0; si < bank.multis.size(); ++si) {
+		if (strutil::iequals(bank.multis[si].name, name)) {
+			return static_cast<int32_t>(si);
+		}
+	}
+	return -1;
+}
+
 void SoundSetIndex::add_bank(int32_t bank_index, const lwf::File &bank) {
 	for (size_t si = 0; si < bank.multis.size(); ++si) {
 		const std::string key = strutil::to_lower(bank.multis[si].name);
@@ -269,6 +281,27 @@ OneshotPlan plan_oneshot_at_distance(const lwf::File &bank, const SetLocation &l
 		plan.voices.push_back(voice);
 	}
 	return plan;
+}
+
+SetFire plan_set_fire(const lwf::File &bank, const SetLocation &loc, SoundSelector &selector,
+		uint8_t listener_view_flags, const SetHearing *heard) {
+	const OneshotPlan plan = heard && heard->at_distance
+			? plan_oneshot_at_distance(bank, loc, heard->distance_q16, selector,
+					listener_view_flags, true)
+			: heard ? plan_oneshot_3d(bank, loc, heard->source, heard->listener, true, 0, 0,
+					nullptr, nullptr, selector, listener_view_flags)
+			: plan_oneshot_at_distance(bank, loc, 0, selector, listener_view_flags, false);
+	SetFire fire;
+	fire.in_range = plan.in_range;
+	for (const OneshotVoice &voice : plan.voices) {
+		const lwf::Sndparm &member = bank.sndparms[voice.sndparm];
+		if (member.single_index >= bank.singles.size()) {
+			continue;
+		}
+		const lwf::Single &single = bank.singles[member.single_index];
+		fire.voices.push_back(SetFireVoice{ voice, single.name, single.path });
+	}
+	return fire;
 }
 
 } // namespace opennova::audio

@@ -1307,6 +1307,14 @@ target_link_libraries(cpt_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(cpt_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME cpt_roundtrip COMMAND cpt_roundtrip_test)
 
+# The TrnGen.exe terrain bake (formats/cpt/trngen): a procedural map baked and read back
+# as the game reads it, the same bytes on one thread and on four. `cpt_trngen_bake_test
+# <dir>` runs the by-hand byte parity with TrnGen's own .cpt (the test's header).
+add_executable(cpt_trngen_bake_test cpt/trngen_bake_test.cpp)
+target_link_libraries(cpt_trngen_bake_test PRIVATE opennova_formats)
+target_include_directories(cpt_trngen_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cpt_trngen_bake COMMAND cpt_trngen_bake_test)
+
 # ENV environment/time-of-day format tests
 add_executable(env_unit_test env/env_unit_test.cpp)
 target_link_libraries(env_unit_test PRIVATE opennova_formats)
@@ -1886,6 +1894,12 @@ add_executable(menu_frame_assets_test menu/menu_frame_assets_test.cpp)
 target_link_libraries(menu_frame_assets_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_assets_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME menu_frame_assets COMMAND menu_frame_assets_test)
+
+# A menu texture's size from its header, no pixels decoded (menu/menu_texture_header.h).
+add_executable(menu_texture_header_test menu/menu_texture_header_test.cpp)
+target_link_libraries(menu_texture_header_test PRIVATE opennova_runtime)
+target_include_directories(menu_texture_header_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_texture_header COMMAND menu_texture_header_test)
 
 add_executable(menu_video_test menu/menu_video_test.cpp)
 target_link_libraries(menu_video_test PRIVATE opennova_runtime)

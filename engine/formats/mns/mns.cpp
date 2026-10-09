@@ -67,6 +67,43 @@ bool holds_variable_reference(const std::string &text) {
 	return false;
 }
 
+std::vector<std::string> variables_named(const std::string &text) {
+	std::vector<std::string> names;
+	for (size_t at = text.find('%'); at != std::string::npos;) {
+		const size_t length = variable_reference_at(text, at);
+		if (length == 0) {
+			at = text.find('%', at + 1);
+			continue;
+		}
+		names.push_back(strutil::to_upper(text.substr(at + 1, length - 2)));
+		at = text.find('%', at + length);
+	}
+	std::sort(names.begin(), names.end());
+	names.erase(std::unique(names.begin(), names.end()), names.end());
+	return names;
+}
+
+std::vector<std::string> changed_variables(const std::map<std::string, std::string> &before,
+                                           const std::map<std::string, std::string> &after) {
+	std::vector<std::string> out;
+	auto was = before.begin();
+	auto now = after.begin();
+	while (was != before.end() || now != after.end()) {
+		if (now == after.end() || (was != before.end() && was->first < now->first)) {
+			out.push_back(was->first);
+			++was;
+		} else if (was == before.end() || now->first < was->first) {
+			out.push_back(now->first);
+			++now;
+		} else {
+			if (was->second != now->second) out.push_back(now->first);
+			++was;
+			++now;
+		}
+	}
+	return out;
+}
+
 std::string StyleSheet::substitute(const std::string &text) const {
 	std::string result;
 	result.reserve(text.size());

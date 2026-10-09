@@ -20,6 +20,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -48,6 +49,21 @@ inline uint32_t pitch_to_q16(double pitch) {
   }
   return static_cast<uint32_t>(pitch * static_cast<double>(kPitchUnityQ16) + 0.5);
 }
+
+// The record widths the format keeps a name or a file in, each terminator among
+// them: a single's name 32 bytes (the 52-byte entry's name at +0, stricmp'd
+// whole [orig: SoundBank_FindEntryByName @ 0x75bba0]), a set's name 24 [orig:
+// SoundBank_LoadTriggerSets @ 0x75c43e..0x75c461 copies six dwords of name; the
+// in-memory record's pitch follows at +28], a single's file one 256-byte slot
+// of the string pool [orig: the 256-byte filename slots, @ 0x75c688].
+inline constexpr size_t kSingleNameBytes = 32;
+inline constexpr size_t kMultiNameBytes = 24;
+inline constexpr size_t kPathSlotBytes = 256;
+// A set names at most eight playlists (layers) and a playlist at most eight
+// sndparms (members): the records' fixed offset slots [orig: @ 0x75c648 /
+// @ 0x75c61b].
+inline constexpr size_t kMaxPlaylistsPerMulti = 8;
+inline constexpr size_t kMaxSndparmsPerPlaylist = 8;
 
 struct Header {
   uint32_t header_size = 0;       // expected 28
@@ -81,7 +97,7 @@ struct Single {
   uint32_t path_offset = 0;       // relative offset into string pool
   std::string path;               // parsed from string pool (256-byte slots); empty in a non-'LWF1' bank
   // Raw bytes for byte-perfect round-trip (includes garbage after null terminator).
-  std::array<char, 32> raw_name{};
+  std::array<char, kSingleNameBytes> raw_name{};
   uint16_t pad0 = 0;
   std::array<uint32_t, 3> reserved0{};
 };
@@ -103,8 +119,8 @@ struct Multi {
   //  @ 0x527cd1..0x527da1]
   uint32_t target_id = 0;
   // Raw bytes for byte-perfect round-trip.
-  std::array<char, 24> raw_name{};
-  std::array<uint32_t, 8> raw_playlist_ids{};  // includes garbage in unused slots
+  std::array<char, kMultiNameBytes> raw_name{};
+  std::array<uint32_t, kMaxPlaylistsPerMulti> raw_playlist_ids{};  // includes garbage in unused slots
   // Playback gate flags; bit0 = also require the layer's flag bit 0x20 to match
   // the listener view state [orig: SoundBank_PlayTriggerEntries @ 0x75cd54].
   uint32_t set_flags = 0;
@@ -148,7 +164,7 @@ struct Playlist {
   // Raw bytes for byte-perfect round-trip. On disk this dword is scratch; the
   // engine overwrites it at runtime with the random-sequential cycle anchor.
   uint32_t reserved0 = 0;
-  std::array<uint32_t, 8> raw_member_offsets{};  // includes garbage in unused slots
+  std::array<uint32_t, kMaxSndparmsPerPlaylist> raw_member_offsets{};  // includes garbage in unused slots
 };
 
 struct Sndparm {
