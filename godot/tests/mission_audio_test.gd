@@ -560,9 +560,10 @@ func test_repeated_setup_clears_dialog_dbf_queue_and_wac_voice() -> void:
 	audio.setup(mission, "first.bms", container)
 	assert_eq(audio.resolve_dialog_wave(1), "tone.wav")
 	assert_true(audio.play_dialog(1))
+	audio.advance_dialog_tick()
 	var old_dialog: AudioStreamPlayer = audio.dialog_voice()
 	assert_not_null(old_dialog)
-	assert_true(audio.play_dialog(1), "a second line is queued behind the active voice")
+	assert_true(audio.play_dialog(1), "a second dialog takes a slot behind the playing line")
 	assert_true(audio.play_wac_wave("tone.wav"))
 	var old_wac: AudioStreamPlayer = null
 	for value in container.find_children("*", "AudioStreamPlayer", true, false):
@@ -579,12 +580,95 @@ func test_repeated_setup_clears_dialog_dbf_queue_and_wac_voice() -> void:
 	if old_dialog != null:
 		assert_false(old_dialog.playing)
 		old_dialog.finished.emit()
+	audio.advance_dialog_tick()
 	assert_null(audio.dialog_voice(),
-		"a late finished signal cannot pump the previous mission's queued dialog")
+		"neither a late finished signal nor a dialog tick plays the previous mission's dialog")
 	if old_wac != null:
 		assert_false(old_wac.playing, "the previous mission's WAC channel is stopped")
 	audio.teardown()
 	TestFs.remove_dir_recursive(fixture_dir)
+
+
+# A mission whose dialog bank is synth_bank.dbf (dlg002: SynR101, then SynR102
+# with DELAY 12) and whose bank's sounds give each named wave tone.wav (8320
+# samples at 22050 Hz: a hold of 2 * ((62 * 8320 + 22050) / 22050) = 48 ticks).
+func _dialog_fixture(waves: PackedStringArray) -> Dictionary:
+	var fixture_dir := OS.get_cache_dir().path_join(
+		"mission_audio_dialog_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(fixture_dir)
+	TestFs.write_bytes(self, fixture_dir.path_join("timed.DBF"),
+		FileAccess.get_file_as_bytes(
+			ProjectSettings.globalize_path("res://../fixtures/dbf/synth_bank.dbf")))
+	TestFs.write_bytes(self, fixture_dir.path_join("tone.wav"),
+		FileAccess.get_file_as_bytes(
+			ProjectSettings.globalize_path("res://../fixtures/lwf/tone.wav")))
+	var lwf := LwfData.new()
+	lwf.create_empty()
+	for i in waves.size():
+		_add_lwf_set(lwf, "SET_%d" % i, "tone.wav", 200)
+		lwf.set_member_field(i, 0, 0, "name", waves[i])
+	assert_eq(lwf.save_file(fixture_dir.path_join("timed.LWF")), OK)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture_dir), OK)
+	var mission := MissionData.new()
+	mission.create_default()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var audio = MissionAudio.create(root, null)
+	audio.setup(mission, "timed.bms", container)
+	return {"dir": fixture_dir, "audio": audio}
+
+
+# Dialog ticks until a voice other than `before` plays the channel's last line;
+# returns the tick it loaded on, counting from `first_tick`, or -1.
+func _tick_until_next_line(audio: MissionAudio, before: AudioStreamPlayer,
+		first_tick: int, last_tick: int) -> int:
+	for tick in range(first_tick, last_tick + 1):
+		audio.advance_dialog_tick()
+		var voice: AudioStreamPlayer = audio.dialog_voice()
+		if voice != null and voice != before:
+			return tick
+	return -1
+
+
+# The dialog's lines load on the engine queue's timers (runtime/audio/dialog_queue):
+# play_dialog only takes a slot, the first line loads on the next dialog tick, and
+# the next waits for the line before it to hold (counting from the tick after a
+# rendered frame), the channel to free and its own delay, 62 * 12 / 10 = 74 ticks:
+# tick 1 + 1 + 48 + 1 + 74 + 1 = 126.
+func test_dialog_lines_load_on_the_queue_s_timers() -> void:
+	var fixture := _dialog_fixture(PackedStringArray(["SynR101", "SynR102"]))
+	var audio: MissionAudio = fixture["audio"]
+	assert_true(audio.play_dialog(2))
+	assert_null(audio.dialog_voice(), "the line waits for the dialog tick")
+	audio.advance_dialog_tick()
+	var first: AudioStreamPlayer = audio.dialog_voice()
+	assert_not_null(first, "the first line loads on the first dialog tick")
+	if first == null:
+		audio.teardown()
+		TestFs.remove_dir_recursive(fixture["dir"])
+		return
+	first.stop()  # its wave ends long before the hold runs out
+	audio.tick(Vector3.ZERO, 0.0)  # a rendered frame: the hold counts from the next tick
+	assert_eq(_tick_until_next_line(audio, first, 2, 200), 126,
+		"the second line loads after the hold, the free channel and its delay")
+	audio.teardown()
+	TestFs.remove_dir_recursive(fixture["dir"])
+
+
+# A line whose wave the bank's sounds lack plays nothing yet still loads and holds
+# 12 ticks before the next line's delay: tick 1 + 1 + 12 + 1 + 74 + 1 = 90.
+func test_a_dialog_line_without_its_wave_holds_twelve_ticks() -> void:
+	var fixture := _dialog_fixture(PackedStringArray(["SynR102"]))
+	var audio: MissionAudio = fixture["audio"]
+	assert_true(audio.play_dialog(2))
+	audio.advance_dialog_tick()
+	assert_null(audio.dialog_voice(), "SynR101 has no wave: no voice")
+	audio.tick(Vector3.ZERO, 0.0)
+	assert_eq(_tick_until_next_line(audio, null, 2, 200), 90,
+		"the missing line holds 12 ticks, then the next line's delay runs")
+	audio.teardown()
+	TestFs.remove_dir_recursive(fixture["dir"])
 
 
 func test_mission_reverb_does_not_install_an_unwitnessed_bus_effect() -> void:

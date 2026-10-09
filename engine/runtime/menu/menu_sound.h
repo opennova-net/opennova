@@ -10,6 +10,15 @@
 // layer rides audio/sound_selector.h; the per-play jitter draws stay an
 // accepted divergence (docs/audio/lwf-dbf-sound-re.md). The game's runtime
 // (MenuRuntime) and the editor's menu preview (DI-34) play through these alone.
+//
+// A row plays from the bank its element names and no other: the parse opens
+// that bank into the menu's collection, and an open that fails (a missing
+// bank, or an element with no name) frees the entry and writes the row no
+// index [orig: CUIElement_ParseXMLDefinition @ 0x648ada -> SoundBank_CollectionAddOrRef
+// @ 0x652b40, @ 0x652c95..0x652caf], so the one play site finds no bank and
+// plays nothing [orig: CWnd_ProcessMouseEvent @ 0x647c59 -> Sound_CollectionPlayTrigger
+// @ 0x652de0 -> SoundBank_FindTriggerAndPlay @ 0x75d010]; the embedder plays
+// a row's trigger from that bank alone (godot/src/mnu/menu_audio).
 
 #include <cstdint>
 #include <functional>
