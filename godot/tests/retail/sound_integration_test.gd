@@ -37,7 +37,7 @@ func test_jo_00tra_sound_marker_resolution() -> void:
 	gut.p("JO 00TRa mission audio: %s" % str(stats.to_json_value()))
 
 	gut.p("bank exposes %d sound sets" % audio.get_bank().get_set_names().size())
-	assert_gt(int(stats.banks_loaded), 0, "the mission .LWF / game.lwf / gamelocl.LWF load")
+	assert_gt(int(stats.banks_loaded), 0, "the global banks (game.lwf, gamelocl.LWF, ...) load")
 	assert_true(audio.get_bank().has_set("LPNV_LIGHT"), "game.lwf ambient-loop sets are loaded")
 	# The payoff: a real JO mission describes ambient layers at its sound markers
 	# without materializing one player per layer. 00TRa resolves ~210 of its 390

@@ -46,7 +46,7 @@ DefEncumbrance def_encumbrance_class(double weight) {
     return DEF_ENCUMBRANCE_LIGHT;
 }
 
-static int round_type_ieq(const char *a, const char *b) {
+static int ascii_ieq(const char *a, const char *b) {
     while (*a && *b) {
         if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return 0;
         ++a; ++b;
@@ -65,9 +65,19 @@ int def_subclass_weapon_index(const DefWeaponDef *weapons, size_t n,
     for (int k = 1; k <= parent->loadout_subclasses; ++k) {
         const size_t cand = parent_index + (size_t)k;
         if (cand >= n) return -1;
-        if (round_type_ieq(weapons[cand].round_type, parent->round_type)) continue;
+        if (ascii_ieq(weapons[cand].round_type, parent->round_type)) continue;
         return (int)cand;
     }
+    return -1;
+}
+
+int def_weapon_index_by_name(const DefWeaponDef *weapons, size_t n, const char *name) {
+    /* [orig: AvatarDef_FindIndexByName @ 0x53fd80 over a table whose re-named
+       entries the parse reset and refilled @ 0x5436e1..0x543722]: the last
+       block of the name is the entry. */
+    if (!weapons || !name || ascii_ieq(name, "null")) return -1;
+    for (size_t i = n; i-- > 0;)
+        if (ascii_ieq(weapons[i].weapon_name, name)) return (int)i;
     return -1;
 }
 

@@ -27,15 +27,15 @@ func after_each() -> void:
 		_root_dir = ""
 
 
-# A REAL MissionAudio set up over a staged root carrying the mission's co-named
-# bank (fire.LWF authors SOUND_SETS), its audio root parented under
+# A REAL MissionAudio set up over a staged root carrying a global bank
+# (game.LWF authors SOUND_SETS), its audio root parented under
 # `container`. No listener is stamped: a one-shot fired before the first tick
 # skips the set-range cull, the way retail's play-before-first-frame does.
 func _staged_audio(container: Node3D) -> MissionAudio:
 	_root_dir = OS.get_cache_dir().path_join(
 			"opennova_fire_present_pass_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(_root_dir), OK)
-	WorldFixture.stage_sound_bank(_root_dir, SOUND_SETS, "fire.LWF")
+	WorldFixture.stage_sound_bank(_root_dir, SOUND_SETS, "game.LWF")
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_root_dir), OK, "the staged root mounts")
 	var mission := MissionData.new()
