@@ -143,7 +143,7 @@ std::string repeated_name(DefRecordKind kind, const Node &earlier) {
 void own_name_fix(Diagnostic &d, const Node &row, const NodeAddress &address, std::vector<std::string> &taken) {
 	const DefRecordKind kind = def_kind(row.kind);
 	if (kind == DefRecordKind::Carry) return;
-	const std::string own = catalog_copy_name(row.kind, row.name(), taken);
+	const std::string own = catalog_copy_name(row.kind, row.name(), taken, catalog_row(row).native.data());
 	if (own.empty() || strutil::to_upper(own) == strutil::to_upper(row.name())) return;
 	taken.push_back(strutil::to_upper(own));
 	const std::string name = row.name();
