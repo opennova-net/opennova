@@ -21,7 +21,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/rename_transaction.h>
-#include <editor/import/png_encode.h>
+#include <formats/png/png_encode.h>
 #include <editor/import/sidecar.h>
 #include <editor/import/texture_import.h>
 #include <editor/import/texture_source.h>
@@ -46,6 +46,9 @@
 using namespace opennova;
 using namespace opennova::editor;
 namespace fs = std::filesystem;
+using opennova::renderer::ImageSource;
+using opennova::renderer::decode_image_source;
+using opennova::png::encode_png_rgba;
 
 namespace {
 

@@ -432,11 +432,11 @@ std::shared_ptr<const TextureCompression> TextureViewport::compare(const Viewpor
 		            "makes compares against its import's source.";
 	} else {
 		std::vector<uint8_t> bytes;
-		ImageSource decoded;
+		renderer::ImageSource decoded;
 		std::string field;
 		if (!read_file_bytes(join_path(input.view.project.root, state.source), bytes, error) ||
-		    !decode_image_source(state.source, bytes, decoded, error) ||
-		    !image_import_texels(decoded.image, image_import_settings(state.sidecar.options), error, field))
+		    !renderer::decode_image_source(state.source, bytes, decoded, error) ||
+		    !renderer::image_import_texels(decoded.image, renderer::image_import_settings(state.sidecar.options), error, field))
 			made->why = "Its import's source " + state.source + " does not read as its import reads it: " + error;
 		else
 			*made = compare_dds(image, decoded.image, state.source + ", its import's source");

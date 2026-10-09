@@ -31,7 +31,7 @@
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
-#include "editor/png_test_support.h"
+#include "common/png_test_support.h"
 
 using namespace opennova::editor;
 
@@ -103,7 +103,7 @@ static int test_names_decode_and_rescan() {
 	TEST_EXPECT(assets.read("SECRET.DEF", read) && std::string(read.begin(), read.end()) == plain);
 
 	// An import output under .opennova/imported/ resolves by its own name.
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", editor_test::gradient_png(8, 8)));
+	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", test_png::gradient_png(8, 8)));
 	const Importer *importer = importer_for(root + "/art/logo.png");
 	TEST_EXPECT(importer != nullptr);
 	ImportSidecar sidecar;
@@ -115,7 +115,7 @@ static int test_names_decode_and_rescan() {
 	Diagnostic error;
 	TEST_EXPECT(save_import_sidecar(root + "/art/logo.png.import", sidecar, error));
 	// A PNG with no .import record is a texture the build packs as it is.
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/plain.png", editor_test::gradient_png(4, 4)));
+	TEST_EXPECT(editor_test::write_bytes(root + "/art/plain.png", test_png::gradient_png(4, 4)));
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(assets.path_of("logo.pcx").find(".opennova/imported/") == 0);
