@@ -60,17 +60,13 @@ void MissionAudio::sync_script_voice() {
         if (frame.local) {
             auto *voice = memnew(AudioStreamPlayer);
             voice->set_stream(stream);
-            voice->set_pitch_scale(SoundBank::effective_base_pitch(
-                    opennova::lwf::pitch_from_q16(frame.state.pitch_q16)));
+            voice->set_pitch_scale(SoundBank::pitch_scale_from_q16(frame.state.pitch_q16));
             node = voice;
         } else {
             auto *voice = memnew(AudioStreamPlayer3D);
             voice->set_stream(stream);
-            voice->set_pitch_scale(SoundBank::effective_base_pitch(
-                    opennova::lwf::pitch_from_q16(frame.state.pitch_q16)));
-            voice->set_attenuation_model(AudioStreamPlayer3D::ATTENUATION_DISABLED);
-            voice->set_max_distance(0.0);
-            voice->set_doppler_tracking(AudioStreamPlayer3D::DOPPLER_TRACKING_DISABLED);
+            voice->set_pitch_scale(SoundBank::pitch_scale_from_q16(frame.state.pitch_q16));
+            SoundBank::configure_unattenuated_3d(voice);
             node = voice;
         }
         add_child(node);

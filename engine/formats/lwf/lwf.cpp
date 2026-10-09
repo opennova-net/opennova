@@ -29,7 +29,7 @@ struct DiskMultiHeader {
 };
 
 struct DiskSingle {
-  char name[32];
+  char name[kSingleNameBytes];
   uint16_t value_hi;
   uint16_t pad0;
   uint32_t reserved0[3];
@@ -39,11 +39,11 @@ struct DiskSingle {
 // [orig: SoundBank_LoadTriggerSets @ 0x75c370 reads this 80-byte record (0x50)]
 struct DiskMulti {
   uint32_t entry_size;
-  char name[24];
+  char name[kMultiNameBytes];
   uint32_t pitch_base;
   uint32_t pitch_random_range;
   uint32_t playlist_count;
-  uint32_t playlist_ids[8];  // offsets to playlists
+  uint32_t playlist_ids[kMaxPlaylistsPerMulti];  // offsets to playlists
   uint32_t target_id;
   uint32_t set_flags;
 };
@@ -55,7 +55,7 @@ struct DiskPlaylist {
   uint16_t min_distance;     // tool "Min distance": proximity fade radius
   uint32_t flags;
   uint32_t reserved0;
-  uint32_t member_offsets[8];  // offsets to sndparms
+  uint32_t member_offsets[kMaxSndparmsPerPlaylist];  // offsets to sndparms
 };
 
 struct DiskSndparm {
@@ -201,7 +201,7 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
 
   // Validate expected string pool size (builder used 0x100 bytes per single); a bank
   // without the filename table is never read for one.
-  const size_t expected_pool = static_cast<size_t>(raw_header.single_count) * 0x100;
+  const size_t expected_pool = static_cast<size_t>(raw_header.single_count) * kPathSlotBytes;
   if (has_filenames && out.string_pool.size() < expected_pool) {
     // Not fatal, but worth noting to the caller.
     error = "string pool shorter than expected 0x100 per single";
@@ -252,7 +252,7 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
     }
     const char *path_ptr = reinterpret_cast<const char *>(buffer.data() + path_abs);
     const size_t remaining = out.string_pool.size() - path_rel;
-    s.path = fixed_string(path_ptr, std::min<size_t>(remaining, 0x100));
+    s.path = fixed_string(path_ptr, std::min<size_t>(remaining, kPathSlotBytes));
 
     out.singles.push_back(std::move(s));
   }
@@ -271,7 +271,7 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
     std::memcpy(m.raw_playlist_ids.data(), dm.playlist_ids, sizeof(dm.playlist_ids));
     m.set_flags = dm.set_flags;
 
-    for (uint32_t j = 0; j < dm.playlist_count && j < 8; ++j) {
+    for (uint32_t j = 0; j < dm.playlist_count && j < kMaxPlaylistsPerMulti; ++j) {
       const uint32_t raw = dm.playlist_ids[j];
       if (raw == 0) continue;
       if (raw < playlists_off || raw >= sndparms_off || (raw - playlists_off) % sizeof(DiskPlaylist) != 0) {
@@ -306,7 +306,7 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
     p.reserved0 = dp.reserved0;
     std::memcpy(p.raw_member_offsets.data(), dp.member_offsets, sizeof(dp.member_offsets));
 
-    for (uint32_t j = 0; j < dp.member_count && j < 8; ++j) {
+    for (uint32_t j = 0; j < dp.member_count && j < kMaxSndparmsPerPlaylist; ++j) {
       const uint32_t raw = dp.member_offsets[j];
       if (raw == 0) continue;
       if (raw < sndparms_off || raw >= string_pool_off || (raw - sndparms_off) % sizeof(DiskSndparm) != 0) {
@@ -398,7 +398,7 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
     // Build string pool (0x100 bytes per single).
     for (const auto &s : file.singles) {
       // Write path (up to 0x100 bytes, null-padded).
-      for (size_t i = 0; i < 0x100; ++i) {
+      for (size_t i = 0; i < kPathSlotBytes; ++i) {
         string_pool.push_back(i < s.path.size() ? static_cast<uint8_t>(s.path[i]) : 0);
       }
     }
@@ -432,7 +432,7 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
     ds.reserved0[0] = s.reserved0[0];
     ds.reserved0[1] = s.reserved0[1];
     ds.reserved0[2] = s.reserved0[2];
-    ds.path_offset = string_pool_off + i * 0x100;
+    ds.path_offset = string_pool_off + i * static_cast<uint32_t>(kPathSlotBytes);
     write_val(out, ds);
   }
 
@@ -467,7 +467,7 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
     // Start with raw playlist_ids (preserves garbage in unused slots).
     std::memcpy(dm.playlist_ids, m.raw_playlist_ids.data(), sizeof(dm.playlist_ids));
     // Overwrite the active slots with recalculated offsets.
-    for (size_t i = 0; i < m.playlist_indices.size() && i < 8; ++i) {
+    for (size_t i = 0; i < m.playlist_indices.size() && i < kMaxPlaylistsPerMulti; ++i) {
       dm.playlist_ids[i] = playlists_off + m.playlist_indices[i] * playlist_entry_size;
     }
     dm.target_id = m.target_id;
@@ -486,7 +486,7 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
     // Start with raw member_offsets (preserves garbage in unused slots).
     std::memcpy(dp.member_offsets, pl.raw_member_offsets.data(), sizeof(dp.member_offsets));
     // Overwrite the active slots with recalculated offsets.
-    for (size_t i = 0; i < pl.sndparm_indices.size() && i < 8; ++i) {
+    for (size_t i = 0; i < pl.sndparm_indices.size() && i < kMaxSndparmsPerPlaylist; ++i) {
       dp.member_offsets[i] = sndparms_off + pl.sndparm_indices[i] * sndparm_entry_size;
     }
     write_val(out, dp);

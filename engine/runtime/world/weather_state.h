@@ -144,6 +144,10 @@ struct RainAmbientBody {
 // many it wrote to `out` (0 or 2).
 size_t rain_ambient_emitters(const WeatherState &weather, const RainAmbientBody &body,
                              SoundEmitterEvent out[2]);
+// The sets the rain's two loops play, by side: LPNV_RAIN_L (lane 1, x + 2 m),
+// LPNV_RAIN_R (lane 2, x - 2 m) [orig: the registry rows @ 0x82F590, read
+// @ 0x4b47df / @ 0x4b4894].
+inline constexpr const char *kRainAmbientSets[2] = { "LPNV_RAIN_L", "LPNV_RAIN_R" };
 
 struct WeatherState {
     env::WeatherCore core;
