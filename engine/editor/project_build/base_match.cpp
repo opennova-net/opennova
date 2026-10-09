@@ -85,7 +85,7 @@ bool BaseMatch::archive_copy(const std::string &name, BaseCopy &out, uint64_t &r
 	out.size = bytes.size();
 	out.raw = hash_of(bytes);
 	// As served: the loaders' decode of the stored bytes (InstallView::read's, read_served), in memory.
-	if (asset_kind_row(classify_asset(file->member, nullptr)).scr != ScrForm::Shader &&
+	if (!vfs_loader_takes_stored(file->member) &&
 	    vfs_decode_payload(bytes, view_.vfs().scr_policy())) {
 		out.served = hash_of(bytes);
 		out.served_size = bytes.size();
