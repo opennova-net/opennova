@@ -10,6 +10,7 @@
 #include <editor/assets/asset_kind.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_document.h>
+#include <formats/pff/pff.h>
 
 namespace opennova::editor {
 
@@ -17,7 +18,7 @@ namespace opennova::editor {
 // the flat logical name (the basename), its path is organization only.
 struct AssetEntry {
 	std::string logical_name;  // basename, original case
-	std::string key;           // normalized_logical_name(logical_name), set by AssetScan::index
+	std::string key;           // pff::normalized_logical_name(logical_name), set by AssetScan::index
 	std::string relative_path; // project-relative, '/'-separated
 	AssetKind kind = AssetKind::Unknown;
 	uint64_t size_bytes = 0;
@@ -95,16 +96,6 @@ private:
 	std::map<std::string, int64_t> folders_; // the walk's folders and their stamps (folders())
 	std::vector<Diagnostic> import_findings_;
 };
-
-// The engine's identity for a logical name: the PFF normalization (uppercase, trailing
-// spaces trimmed) that the reader's lookup and the writer's directory share, of the whole name
-// to its first NUL however long (a filter compares a record's text by it, which may run past any
-// name's length).
-std::string normalized_logical_name(std::string_view name);
-
-// The output-name rules a build must satisfy: at most PFF_NAME_SIZE bytes and not empty
-// after normalization.
-bool logical_name_fits_archive(std::string_view name);
 
 // Walk the project tree to its end (ProjectScan, assets/project_scan.h, steps the same walk by
 // bytes). Skips the project file, `.opennova/`, every dot-directory and the export output

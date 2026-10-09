@@ -46,14 +46,6 @@ ExpansionPlace route_for_expansion(AssetKind kind) {
 	return ExpansionPlace::None;
 }
 
-std::string expansion_folder(const std::string &expansion) {
-	return "expansion/" + expansion;
-}
-
-std::string expansion_archive_path(const std::string &expansion, bool language) {
-	return expansion_folder(expansion) + "/" + expansion + (language ? "L.pff" : ".pff");
-}
-
 ExpansionPlace route_for_expansion(const AssetEntry &asset, const std::string &expansion) {
 	const ExpansionPlace by_kind = route_for_expansion(asset.kind);
 	if (by_kind == ExpansionPlace::None) return by_kind;
