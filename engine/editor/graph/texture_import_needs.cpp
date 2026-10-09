@@ -151,8 +151,8 @@ TextureImportNeeds texture_import_needs(const std::vector<TextureUse> &uses, con
 	if (values_of(stems).size() > 1) {
 		out.conflicts.push_back(conflict("name", stems));
 	} else {
-		const std::string name = stems.front().value + image_format_extension(format);
-		if (strutil::to_lower(name) != strutil::to_lower(stem_of(source_name) + image_format_extension(format)))
+		const std::string name = stems.front().value + renderer::image_format_extension(format);
+		if (strutil::to_lower(name) != strutil::to_lower(stem_of(source_name) + renderer::image_format_extension(format)))
 			choose(out, "name", name, {{name, stems.front().why, stems.front().use}});
 	}
 	if (!sizes.empty()) {
