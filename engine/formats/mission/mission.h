@@ -22,6 +22,21 @@ enum class EntityKind : int {
 	Organic = 3,
 };
 
+// The pool a kind's records load into, the game's pool index: 0 the organics, 1 the items, 2 the
+// buildings, 3 the markers [orig: Mission_LoadBMSFile @0x40F4E0 -- pool 1 @0x40f9bb..0x40f9c6, pool 2
+// @0x40fa28..0x40fa34, pool 3 @0x40fa98..0x40faa4, pool 0 @0x40fb0d..0x40fb19]. The lookups by SSN
+// scan the pools in this order, so of two records of one SSN the lower pool's is the one found
+// (mission_params.h kOrganicPool..kMarkerPool, a bit a pool).
+constexpr int entity_pool(EntityKind kind) {
+	switch (kind) {
+	case EntityKind::Organic: return 0;
+	case EntityKind::Item: return 1;
+	case EntityKind::Building: return 2;
+	case EntityKind::Marker: return 3;
+	}
+	return 0;
+}
+
 // items.def TYPE resolver for the .mis text reader: maps an items.def id
 // (bms type_id + kItemIdOffset) to its items.def TYPE (the DefItemType value —
 // the domain of authoring::entity_kind_for_item_type), or any negative value

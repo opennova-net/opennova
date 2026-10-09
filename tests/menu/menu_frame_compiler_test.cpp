@@ -1518,6 +1518,21 @@ void test_marquee_roll(const fnt_font_t *font) {
 	CHECK(credits.nodes.size() == 2 &&
 					opennova::menu::marquee_node_text(credits, credits.nodes[1]) == "OPEN NOVA",
 			"'_' draws as a space");
+	{
+		// The marked line a file writes draws what it marks, under the values a load
+		// resets (a file of no [ENV] keeps them; its missing keys would read 0).
+		using namespace opennova::menu;
+		CHECK(marquee_marked_line("Open Nova, 100%") == "Open_Nova@_100%%", "the marks and the '%'");
+		const std::string marked = "[TEXT]\r\nTEXT=" + marquee_marked_line("Open Nova, 100%") + "\r\n";
+		MarqueeCredits loaded;
+		CHECK(marquee_load_credits(reinterpret_cast<const uint8_t *>(marked.data()), marked.size(), loaded,
+					  nullptr) &&
+						loaded.scroll_rate == kMarqueeScrollRate && loaded.center_x == kMarqueeCenterX &&
+						loaded.vertical_space == kMarqueeVerticalSpace && loaded.space_mark == kMarqueeSpaceMark &&
+						loaded.comma_mark == kMarqueeCommaMark && loaded.nodes.size() == 1 &&
+						marquee_node_text(loaded, loaded.nodes[0]) == "Open Nova, 100%",
+				"a marked line draws what it marks");
+	}
 	MenuFrameState state;
 	MenuWidgetState roll;
 	roll.index = 1;

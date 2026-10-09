@@ -528,4 +528,16 @@ uint8_t action_ssn_pools(const bms::Action &action) {
 	}
 }
 
+int zone_area_index(const std::vector<bms::AreaTrigger> &areas, int64_t id) {
+	// [orig: the linear scan over record[0] @0x453077 / @0x453162, the first match taken]
+	for (size_t i = 0; i < areas.size(); ++i)
+		if (areas[i].id == id) return static_cast<int>(i);
+	return -1;
+}
+
+bool zone_resolves(const std::vector<bms::AreaTrigger> &areas, int64_t id) {
+	const int index = zone_area_index(areas, id);
+	return index >= 0 && !zone_box_flat(areas[static_cast<size_t>(index)]);
+}
+
 } // namespace opennova::mission

@@ -47,6 +47,28 @@ static void prefixes() {
 	CHECK(sizeof(kWacOperandPrefixes) / sizeof(kWacOperandPrefixes[0]) == 8);
 }
 
+// The hash the compiler matches a token on: a word's bytes folded above 0x60, the first four padded
+// with ';' and hashed as signed chars [orig: Script_Compile @0x4F3412..0x4F34C9], ELSEIF renamed, and
+// END's family [orig: the switch @0x4F461E..0x4F4634].
+static void token_hash() {
+	CHECK(wac_word_byte('a') == 'A' && wac_word_byte('A') == 'A' && wac_word_byte('{') == '[' &&
+	      wac_word_byte(0x85) == 0x65 && wac_word_byte('0') == '0');
+	CHECK(wac_hash_bytes('E', 'N', 'D', ';') == wac_hash4('E', 'N', 'D', ';'));
+	// A byte past 0x7F after the first is sign-extended into the bytes before it.
+	CHECK(wac_hash_bytes('A', 0x80, ';', ';') == 0x40803B3Bu && wac_hash4('A', char(0x80), ';', ';') == 0x41803B3Bu);
+	CHECK(wac_word_hash("end") == wac_hash4('E', 'N', 'D', ';') && wac_word_hash("") == wac_hash4(';', ';', ';', ';'));
+	CHECK(wac_word_hash("ENTERS") == wac_word_hash("enter") && wac_word_hash("ELSEX") == wac_word_hash("ELSE"));
+	CHECK(wac_word_hash("ElseIf") == wac_hash4('E', 'L', 'S', 'I') && wac_word_hash("ELSE") == wac_hash4('E', 'L', 'S', 'E'));
+	CHECK(wac_token_hash("ELSEIF", wac_hash4('E', 'L', 'S', 'E')) == wac_hash4('E', 'L', 'S', 'I') &&
+	      wac_token_hash("ELSE", wac_hash4('E', 'L', 'S', 'E')) == wac_hash4('E', 'L', 'S', 'E'));
+	for (const char *end : {"END", "endif", "ENDDO", "EndLoop", "ENDP"}) CHECK(wac_is_end_hash(wac_word_hash(end)));
+	for (const char *other : {"ENDS", "EN", "ENTER", "ELSE"}) CHECK(!wac_is_end_hash(wac_word_hash(other)));
+	// Every keyword's hash is its own.
+	for (size_t i = 0; i < sizeof(kWacKeywords) / sizeof(kWacKeywords[0]); ++i)
+		for (size_t j = i + 1; j < sizeof(kWacKeywords) / sizeof(kWacKeywords[0]); ++j)
+			CHECK(wac_word_hash(kWacKeywords[i]) != wac_word_hash(kWacKeywords[j]));
+}
+
 static void keywords() {
 	CHECK(sizeof(kWacKeywords) / sizeof(kWacKeywords[0]) == 18);
 	// Every word the compiler reads as a keyword is one of the table's, and the table's words (but
@@ -87,6 +109,7 @@ int main() {
 	comments();
 	prefixes();
 	keywords();
+	token_hash();
 	if (failures) {
 		std::printf("wac_lexis: %d failure(s)\n", failures);
 		return 1;

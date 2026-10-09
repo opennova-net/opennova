@@ -17,6 +17,7 @@ add_library(opennova_base STATIC
     # resource_index — the mounted resource directory index
     ${CMAKE_CURRENT_SOURCE_DIR}/resource_index/resource_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resource_index/resource_kind.cpp # the kind classifier, shared with the editor
+    ${CMAKE_CURRENT_SOURCE_DIR}/resource_index/file_kind.cpp # the typed kinds and their loader facts
     ${CMAKE_CURRENT_SOURCE_DIR}/resource_index/boot_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resource_index/texture_candidates.cpp
     # vfs — the engine-faithful PFF+loose+expansion mount stack

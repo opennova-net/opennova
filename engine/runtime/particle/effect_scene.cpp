@@ -174,6 +174,21 @@ EffectPose compose_pose(const EffectPose &parent, const EffectPose &local) noexc
 	return result;
 }
 
+const char *spawn_status_name(EffectSpawnStatus status) noexcept {
+	switch (status) {
+		case EffectSpawnStatus::Spawned: return "spawned";
+		case EffectSpawnStatus::Suppressed: return "suppressed";
+		case EffectSpawnStatus::InvalidHandle: return "invalid_handle";
+		case EffectSpawnStatus::EmptyEffect: return "empty_effect";
+		case EffectSpawnStatus::MissingSlot: return "missing_slot";
+		case EffectSpawnStatus::MissingOwner: return "missing_owner";
+		case EffectSpawnStatus::GroupCapacityReached: return "group_capacity_reached";
+		case EffectSpawnStatus::EmitterCapacityReached: return "emitter_capacity_reached";
+		case EffectSpawnStatus::Disabled: return "disabled";
+	}
+	return "unknown";
+}
+
 struct EffectScene::Impl {
 	struct CatalogEffect {
 		std::string name;

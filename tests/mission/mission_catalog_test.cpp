@@ -52,18 +52,18 @@ std::vector<uint8_t> info_bin(const std::string &title, const std::string &brief
 		bool include_title = true) {
 	opennova::rtxt::File file;
 	opennova::rtxt::Section info;
-	info.name = "Info";
+	info.name = opennova::mission_catalog::kTextInfoSection;
 	file.sections.push_back(info);
 	if (include_title) {
 		opennova::rtxt::Entry entry;
-		entry.key = "TITLE";
+		entry.key = opennova::mission_catalog::kTextTitleKey;
 		entry.text = title;
 		entry.section_index = 0;
 		file.entries.push_back(entry);
 	}
 	if (!briefing.empty()) {
 		opennova::rtxt::Entry entry;
-		entry.key = "BRIEFING";
+		entry.key = opennova::mission_catalog::kTextBriefingKey;
 		entry.text = briefing;
 		entry.section_index = 0;
 		file.entries.push_back(entry);
@@ -338,6 +338,17 @@ int main() {
 				opennova::game_type::for_mission_mode(static_cast<uint32_t>(AttribFlags::Coop)));
 		TEST_EXPECT(catalog::game_type_of(own[0]) == opennova::game_type::for_mission_mode(0));
 	}
+
+	// What the archive walk lists, from the FIRST '.' as File_HasExtension compares
+	// [orig: Mission_BuildMapListFromPFF @ 0x5629a0 / @ 0x5629bc / @ 0x5629d8]; the
+	// table's section and keys [orig: @ 0x563489..0x56354f].
+	TEST_EXPECT(catalog::lists_as_mission("00TRa.bms") && catalog::lists_as_mission("ASP_G7.NPZ") &&
+			catalog::lists_as_mission("Map.npj"));
+	TEST_EXPECT(!catalog::lists_as_mission("op.v2.bms") && !catalog::lists_as_mission("bms") &&
+			!catalog::lists_as_mission("00TRa.bin") && !catalog::lists_as_mission("x.bms.bak"));
+	TEST_EXPECT(std::string(catalog::kTextInfoSection) == "Info" &&
+			std::string(catalog::kTextTitleKey) == "TITLE" &&
+			std::string(catalog::kTextBriefingKey) == "BRIEFING");
 
 	// Release the mounted archive handles before deleting the fixture tree
 	// (an open .pff makes remove_all throw).

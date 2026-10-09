@@ -446,6 +446,9 @@ int test_the_readers_name_their_number_dlg_dot3d() {
 	}
 	DialogQueue queue;
 	TEST_EXPECT(dialog_name_of(-5) == "dlg-05");
+	// The readers' own form, public for a tool naming what a trigger looks up.
+	TEST_EXPECT(trigger_dialog_name(-5) == "dlg-005" && trigger_dialog_name(0) == "dlg000" &&
+	            trigger_dialog_name(12) == "dlg012" && trigger_dialog_name(1234) == "dlg1234");
 	TEST_EXPECT(queue.play(&dialogs, nullptr, -5));
 	TEST_EXPECT(queue.play(&dialogs, nullptr, 1234));
 	TEST_EXPECT(!queue.active(-5) && !queue.finished(-5));

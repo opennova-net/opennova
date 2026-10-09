@@ -58,6 +58,10 @@ static_assert(static_cast<int>(ResourceRoot::TEXTURE_LOADER_CINE_FADE) ==
 static_assert(static_cast<int>(ResourceRoot::TEXTURE_LOADER_PARTICLE) ==
 		static_cast<int>(opennova::renderer::TextureLoader::Particle));
 
+ResourceRoot::TextureLoader ResourceRoot::loader_of(opennova::renderer::TextureRoleId p_role) {
+	return static_cast<TextureLoader>(opennova::renderer::texture_role(p_role).loader);
+}
+
 namespace {
 
 bool case_insensitive_less(const String &a, const String &b) {

@@ -229,6 +229,13 @@ enum class EffectSpawnStatus : std::uint8_t {
     Disabled = 8,
 };
 
+// A spawn status in the words a receipt carries for it (the Godot binding's EffectSpawnReceipt
+// status_name, a preview's body): "spawned", "suppressed", "invalid_handle", "empty_effect",
+// "missing_slot", "missing_owner", "group_capacity_reached", "emitter_capacity_reached", and
+// "disabled" for a spawn refused while the scene's spawning is off (set_spawn_enabled);
+// "unknown" for a value outside the enum.
+const char *spawn_status_name(EffectSpawnStatus status) noexcept;
+
 struct EffectSpawnReceipt {
 	EffectSpawnStatus status = EffectSpawnStatus::InvalidHandle;
 	EffectHandle effect;
