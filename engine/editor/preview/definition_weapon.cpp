@@ -411,8 +411,8 @@ void DefinitionWeapon::plan_spawns_() {
 			}
 			// The begin leg's group is owner-bound at the action's transform; the direct effect a transient
 			// descriptor [orig: ActionSlot_SpawnEffect @0x401F20; WeaponAction_Recoil @0x542F64].
-			spawn.pose = event.kind == Kind::Begin ? effect_forward_pose(particle_of(at), particle_of(direction))
-			                                       : effect_descriptor_pose(particle_of(at), particle_of(direction));
+			spawn.pose = event.kind == Kind::Begin ? particle::forward_pose(particle_of(at), particle_of(direction))
+			                                       : particle::descriptor_pose(particle_of(at), particle_of(direction));
 			spawn.source = event.kind == Kind::Begin ? "begin" : "direct";
 			break;
 		}
@@ -422,12 +422,12 @@ void DefinitionWeapon::plan_spawns_() {
 				at = to_preview(event.at);
 				direction = direction_to_preview(event.direction);
 			}
-			spawn.pose = effect_descriptor_pose(particle_of(at), particle_of(direction));
+			spawn.pose = particle::descriptor_pose(particle_of(at), particle_of(direction));
 			spawn.source = "launch";
 			break;
 		}
 		case Kind::Impact:
-			spawn.pose = effect_descriptor_pose(particle_of(to_preview(event.at)),
+			spawn.pose = particle::descriptor_pose(particle_of(to_preview(event.at)),
 			                                    particle_of(direction_to_preview(event.direction)));
 			spawn.source = "impact";
 			spawn.point = tag_name(event.tag);

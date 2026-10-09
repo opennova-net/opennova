@@ -16,6 +16,7 @@
 #include <formats/def/def.h>
 #include <formats/mission/mission.h>
 #include <formats/threedi/threedi_3di3.h>
+#include <runtime/mission/collision_resolve.h>
 #include <runtime/mission/placement_traits.h>
 #include <runtime/particle/emitter.h>
 #include <runtime/world/item_effects.h>
@@ -61,26 +62,6 @@ std::string graphic_of(const AssetGraph &graph, const GraphSymbol &item) {
 
 particle::Vec3 times(const particle::Vec3 &v, float s) {
 	return particle::Vec3{ v.x * s, v.y * s, v.z * s };
-}
-
-particle::Vec3 plus(const particle::Vec3 &a, const particle::Vec3 &b) {
-	return particle::Vec3{ a.x + b.x, a.y + b.y, a.z + b.z };
-}
-
-// The pose's axes over a local vector (right x + up y + forward z).
-particle::Vec3 through(const particle::EffectPose &pose, const particle::Vec3 &v) {
-	return plus(plus(times(pose.right, v.x), times(pose.up, v.y)), times(pose.forward, v.z));
-}
-
-// A local pose under its owner's, as the engine composes an attached group's (EffectScene's compose_pose,
-// a Transform3D product).
-particle::EffectPose composed(const particle::EffectPose &owner, const particle::EffectPose &local) {
-	particle::EffectPose out;
-	out.position = plus(owner.position, through(owner, local.position));
-	out.right = through(owner, local.right);
-	out.up = through(owner, local.up);
-	out.forward = through(owner, local.forward);
-	return out;
 }
 
 bool same_vec(const particle::Vec3 &a, const particle::Vec3 &b) {
@@ -158,10 +139,9 @@ const MissionEffects::Catalog &MissionEffects::catalog_(const SessionView &view,
 	if (!view.findings.assets || !view.findings.assets->read(served_name(file), bytes) || bytes.empty()) return catalog;
 	def::DefItemsFile items{};
 	if (def::def_parse_items_memory(bytes.data(), bytes.size(), &items) == 0) {
-		for (size_t i = 0; i < items.count; ++i) {
-			const def::DefItemDef &row = items.entries[i];
-			// A type id resolves to its first row [docs/world/itemdef-re.md, 2026-09-23].
-			if (catalog.items.count(int64_t(row.id))) continue;
+		// A type id resolves to its first row (mission::item_defs_by_id).
+		for (const auto &entry : mission::item_defs_by_id(items)) {
+			const def::DefItemDef &row = *entry.second;
 			ItemSlot slot;
 			slot.defined = true;
 			slot.effect = strutil::fixed_string(row.particlefx.effect, sizeof(row.particlefx.effect));
@@ -222,7 +202,7 @@ void MissionEffects::spawn_(Held &held, int32_t age) {
 		request.binding = particle::EffectBinding::FollowOwner;
 		request.owner = owner;
 		request.owner_relative_pose = local;
-		request.pose = composed(held.owner, local);
+		request.pose = particle::compose_pose(held.owner, local);
 		request.initial_age_ticks = uint32_t(std::max(age, 0));
 		const particle::EffectSpawnReceipt receipt = scene_->spawn(request);
 		++spawns_made_;
@@ -380,7 +360,7 @@ bool MissionEffects::refresh(const SessionView &view, const MissionScene &scene,
 				threedi::threedi_user_point_position(&point, at);
 				threedi::threedi_user_point_direction(&point, direction);
 				// The model's point in the presentation frame (ObjectData's godot_vec3: x mirrored).
-				held.locals.push_back(effect_forward_pose(particle::Vec3{ -at[0], at[1], at[2] },
+				held.locals.push_back(particle::forward_pose(particle::Vec3{ -at[0], at[1], at[2] },
 						particle::Vec3{ -direction[0], direction[1], direction[2] }));
 				slot.points.push_back(strutil::fixed_string(point.name, sizeof(point.name)));
 			}
