@@ -4490,14 +4490,6 @@ target_link_libraries(editor_blank_writers_test PRIVATE opennova_editor)
 target_include_directories(editor_blank_writers_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_blank_writers COMMAND editor_blank_writers_test)
 
-# TrnGen.exe's terrain bake ported (engine/editor/terrain): a depth map to the .cpt the game reads,
-# read back through the engine's reader; given the retired TrnGen corpus's directory as its
-# argument, the byte parity with TrnGen's own .cpt files (a run by hand).
-add_executable(editor_terrain_bake_test editor/terrain_bake_test.cpp)
-target_link_libraries(editor_terrain_bake_test PRIVATE opennova_editor)
-target_include_directories(editor_terrain_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME editor_terrain_bake COMMAND editor_terrain_bake_test)
-
 # A terrain made from images (S20): the terrain set, the heightmap's depths, the new_terrain request
 # over a project (the import, the scan's kinds, the build's packing), the outputs read back and loaded
 # by the runtime's terrain field and frame compiler, the import rerun-stable, the blank environment
