@@ -222,6 +222,8 @@ const char kItemsDef[] = "begin \"S5 Player\"\r\n"
     "  type vehicle\r\n"
     "  graphic ptank\r\n"
     "  sid s5ptank\r\n"
+    "  ai_function cvehX\r\n"
+    "  render_function cvehX\r\n"
     "  move_function ctan\r\n"
     "  physics 2\r\n"
     "end\r\n"
@@ -634,6 +636,12 @@ int main() {
     if (helo_vt != nullptr) {
         CHECK(helo_vt->family == VehicleFamily::Helicopter);
         CHECK(helo_vt->physics == 0);
+        // The ai_function binds the CHel event row in any case; the render
+        // tag compares exactly, so `CHel` is not the lowercase chel bone row.
+        // [orig: Entity_LookupRenderCallbacks stricmp @0x407de2;
+        //  BoneCallback_LookupByTag @0x4e32c6, row 'chel' @0x82cfd0]
+        CHECK(helo_vt->brain_class == VehicleBrainClass::Air);
+        CHECK(helo_vt->render_family == VehicleRenderFamily::None);
     }
     // A token that only starts with a row's name binds the null row: `ctan`
     // keeps its physics selector's ground mover, never the tank's, and
@@ -645,6 +653,12 @@ int main() {
     if (prefix_tank_vt != nullptr) {
         CHECK(prefix_tank_vt->family == VehicleFamily::Ground);
         CHECK(!prefix_tank_vt->amphibian);
+        // `cvehX`: the event row is whole-name (no brain), while the render
+        // tag is the first four characters (the cveh bone row).
+        // [orig: Entity_LookupRenderCallbacks stricmp @0x407de2; the tag
+        //  packed from def+0x13C..0x13F @0x4a5ace..0x4a5af1]
+        CHECK(prefix_tank_vt->brain_class == VehicleBrainClass::Unset);
+        CHECK(prefix_tank_vt->render_family == VehicleRenderFamily::Ground);
     }
     CHECK(w.vehicles.traits.get(505) == nullptr);
     (void)prefix_tank_h;

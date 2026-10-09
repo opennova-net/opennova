@@ -94,13 +94,17 @@ const DefItemDef *find_item(
     return it == by_id.end() ? nullptr : it->second;
 }
 
-// The case-folded fourcc prefix of an items.def ai_function/render_function
-// tag. (The move_function's physics row is world/physics_class_table.h's
-// whole-name lookup.)
-std::string fourcc_prefix(const char *tag) {
+// The render_function's bone-callback tag: its first four characters with
+// their case kept. The load packs those four bytes into one word and the
+// table compares the word exactly, so `EWEP` is not the ewep row and `ewepX`
+// is. (The ai_function's event row and the move_function's physics row are
+// whole-name, case-insensitive lookups instead.)
+// [orig: EntityDef_InitAllCallbacks packs def+0x13C..0x13F @0x4a5ace..0x4a5af1;
+//  BoneCallback_LookupByTag @0x4e32b0 compares `cmp [ecx], esi` @0x4e32c6]
+std::string render_tag(const char *render_function) {
     std::string out;
-    for (int i = 0; i < 4 && tag[i] != '\0'; ++i)
-        out.push_back(strutil::ascii_tolower(tag[i]));
+    for (int i = 0; i < 4 && render_function[i] != '\0'; ++i)
+        out.push_back(render_function[i]);
     return out;
 }
 
@@ -232,8 +236,8 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 		// [orig: EntityDef_InitAllCallbacks @0x4A5AEA..0x4A5B03 ->
 		//  BoneCallback_LookupByTag @0x4E32ED..0x4E3306, row 'ewep' @0x82CFA0]
 		e->emplaced_ctrl_publisher =
-				def != nullptr && fourcc_prefix(def->render_function) == "ewep";
-		e->render_sway = def != nullptr && fourcc_prefix(def->render_function) == "sway";
+				def != nullptr && render_tag(def->render_function) == "ewep";
+		e->render_sway = def != nullptr && render_tag(def->render_function) == "sway";
 		e->light_transfer = def != nullptr ? def->light_transfer : 0.0f;
         e->reverb = def != nullptr ? int16_t(def->reverb) : 0;
 		e->uniform_scale_q16 = def != nullptr ? def->scale_q16 : 0;
@@ -378,7 +382,9 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         e->palm_state_streamed = def != nullptr &&
                 (strutil::iequals(def->ai_function, "palm") ||
                  move_row == world::PhysicsClass::Psec);
-        e->door_event = def != nullptr && fourcc_prefix(def->ai_function) == "door";
+        // The ai_function binds its event row by whole name, ignoring case.
+        // [orig: Entity_LookupRenderCallbacks @0x407dc0, stricmp @0x407de2]
+        e->door_event = def != nullptr && strutil::iequals(def->ai_function, "door");
         e->door_motion = move_row == world::PhysicsClass::Door;
         // Every def carries its two +0x6F3/+0x70B sound names; the door
         // commands play them, and so does the drop of a carried object off
@@ -571,7 +577,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                     // the cveh/ctrn dispatchers' push 0 @0x48efce/@0x48f06e].
                     vt.amphibian = move_row == PhysicsClass::Catv;
                 }
-				const std::string render = fourcc_prefix(def->render_function);
+				const std::string render = render_tag(def->render_function);
 				vt.render_family = render == "cveh" ? world::VehicleRenderFamily::Ground
 						: render == "tank"			? world::VehicleRenderFamily::Tank
 						: render == "chel"			? world::VehicleRenderFamily::Helicopter
@@ -584,11 +590,13 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 				// ctrn @0x8133c0 -> EntityAI_ProcessGroundStateMachine @0x4583c0.
 				// [orig: g_EntityClassEventCallbackTable @0x813000 resolved by
 				// EntityDef_InitAllCallbacks @0x4a5aae -> Entity_LookupRenderCallbacks
-				// @0x407dc0]
-				const std::string brain = fourcc_prefix(def->ai_function);
-				vt.brain_class = brain == "chel" || brain == "cpln"
+				// @0x407dc0, the whole name stricmp'd @0x407de2]
+				const auto brain_is = [def](const char *row) {
+					return strutil::iequals(def->ai_function, row);
+				};
+				vt.brain_class = brain_is("chel") || brain_is("cpln")
 						? world::VehicleBrainClass::Air
-						: brain == "cveh" || brain == "cbot" || brain == "ctrn"
+						: brain_is("cveh") || brain_is("cbot") || brain_is("ctrn")
 						? world::VehicleBrainClass::Ground
 						: world::VehicleBrainClass::Unset;
 				// Vehicle audio belongs to the vehicle ItemDef, not to the
