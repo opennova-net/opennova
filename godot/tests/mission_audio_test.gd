@@ -657,9 +657,14 @@ func test_a_dialog_line_without_its_wave_holds_twelve_ticks() -> void:
 		"the missing line holds 12 ticks, then the next line's delay runs")
 
 
-# A new mission load stops the old mission's dialog voice, and the new world's
-# dialog table starts empty, so no dialog tick plays the old mission's queued
-# dialog.
+# The mission teardown stops the dialog audio and the next mission's dialog
+# table starts empty, so no dialog tick plays the old mission's queued dialog
+# [orig: Game_TeardownMission @0x5225fb -> sub_527930: Dialog_ResetAll
+# @0x527930, AudioChannel_InitAll @0x527935, Dialog_FreeAll @0x527949]. The
+# world's teardown is unload() (MissionAudio::teardown stops the table's
+# voices); a load does not tear down the mission before it
+# (GameWorld::load_mission_internal), so the test unloads first, as the shell
+# does.
 func test_a_new_mission_load_carries_no_dialog() -> void:
 	var fixture := _dialog_fixture(PackedStringArray(["SynR101", "SynR102"]))
 	var world: GameWorld = fixture["world"]
@@ -672,9 +677,12 @@ func test_a_new_mission_load_carries_no_dialog() -> void:
 	var old_dialog: AudioStreamPlayer = audio.dialog_voice()
 	assert_not_null(old_dialog)
 	assert_true(audio.play_dialog(2), "a second dialog takes a slot behind the playing line")
-	assert_eq(WorldFixture.load_mission(world, fixture["dir"]), OK)
+	world.unload()
+	# The stop is the teardown's, not the wave's end: it holds the same frame
+	# (the voice node is only queued for deletion).
 	if old_dialog != null and is_instance_valid(old_dialog):
-		assert_false(old_dialog.playing, "the old mission's dialog voice is stopped")
+		assert_false(old_dialog.playing, "the mission teardown stops its dialog voice")
+	assert_eq(WorldFixture.load_mission(world, fixture["dir"]), OK)
 	var next_audio: MissionAudio = world.get_mission_audio()
 	assert_not_null(next_audio)
 	if next_audio == null:
