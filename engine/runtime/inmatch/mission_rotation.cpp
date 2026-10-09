@@ -11,10 +11,6 @@ bool row_in_catalog(const std::vector<mission_catalog::Row> &catalog, int32_t in
 	return index >= 0 && static_cast<size_t>(index) < catalog.size();
 }
 
-uint32_t row_game_type(const mission_catalog::Row &row) {
-	return game_type::for_mission_mode(row.game_mode);
-}
-
 } // namespace
 
 int32_t &MissionRotation::launch_option(const std::vector<mission_catalog::Row> &catalog,
@@ -49,7 +45,8 @@ void MissionRotation::append(const std::vector<mission_catalog::Row> &catalog,
 	}
 	slots[static_cast<size_t>(count)] = MissionRotationEntry{catalog_index, flag};
 	++count;
-	if (!game_type::host_rotation_default(row_game_type(catalog[static_cast<size_t>(catalog_index)])))
+	if (!game_type::host_rotation_default(
+				mission_catalog::game_type_of(catalog[static_cast<size_t>(catalog_index)])))
 		launch_option(catalog, catalog_index) = 0;
 }
 
@@ -161,7 +158,7 @@ void MissionRotation::take_row(const std::vector<mission_catalog::Row> &catalog,
 	map_file = row.file;
 	map_source_is_loose = row.loose;
 	map_launch_option = static_cast<uint8_t>(launch_option(catalog, catalog_index));
-	map_game_type = row_game_type(row);
+	map_game_type = mission_catalog::game_type_of(row);
 }
 
 // [orig: MissionList_GetCurrentEntry @0x4FC540]
