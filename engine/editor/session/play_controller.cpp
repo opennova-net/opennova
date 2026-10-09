@@ -746,14 +746,8 @@ void PlayController::absorb_install_logs(bool read) {
 // project closes. The report belongs to the project the game was started in: a line read
 // after that project closed, or while another is open, is ignored.
 void PlayController::absorb_boot_report(const std::string &line) {
-	const std::string marker = gameprofile::kBootResourceMissingMarker;
-	const size_t at = line.find(marker);
-	if (at == std::string::npos) return;
-	const size_t start = at + marker.size();
-	size_t end = start;
-	while (end < line.size() && !std::isspace(static_cast<unsigned char>(line[end]))) ++end;
-	const std::string name = line.substr(start, end - start);
-	if (name.empty()) return;
+	std::string name;
+	if (!gameprofile::parse_boot_resource_missing(line, name)) return;
 	if (!view_.project.open || view_.project.root != boot_project_) return;
 	if (view_.activity.missing_at_boot(name)) return;
 	view_.activity.boot_missing.push_back(name);
@@ -767,28 +761,13 @@ void PlayController::absorb_boot_report(const std::string &line) {
 // Play starts again or the project closes. Like the boot report it belongs to the project the game
 // was started in: a line read after that project closed, or while another is open, is ignored.
 void PlayController::absorb_mission_report(const std::string &line) {
-	const std::string marker = gameprofile::kLaunchMissionFailedMarker;
-	const size_t at = line.find(marker);
-	if (at == std::string::npos) return;
-	const size_t start = at + marker.size();
 	// The mission's name, which may hold a space ("my map.bms"): the one Play started the game in,
-	// where the line names it (case aside), else the text to the first space.
-	const std::string &launched = view_.activity.play_mission;
-	size_t end = start;
-	if (!launched.empty() && line.size() >= start + launched.size() &&
-	    strutil::iequals(line.substr(start, launched.size()), launched) &&
-	    (line.size() == start + launched.size() || std::isspace(static_cast<unsigned char>(line[start + launched.size()]))))
-		end = start + launched.size();
-	else
-		while (end < line.size() && !std::isspace(static_cast<unsigned char>(line[end]))) ++end;
-	const std::string name = line.substr(start, end - start);
-	if (name.empty()) return;
+	// where the line names it (case aside), else the text to the first space (parse_launch_mission_failed).
+	std::string name, reason;
+	if (!gameprofile::parse_launch_mission_failed(line, view_.activity.play_mission, name, reason)) return;
 	if (!view_.project.open || view_.project.root != boot_project_) return;
 	for (const Diagnostic &d : findings_)
 		if (d.row() == &finding_code(CoreFinding::PlayMissionFailed)) return;
-	while (end < line.size() && std::isspace(static_cast<unsigned char>(line[end]))) ++end;
-	std::string reason = line.substr(end);
-	while (!reason.empty() && (reason.back() == '.' || std::isspace(static_cast<unsigned char>(reason.back())))) reason.pop_back();
 	const AssetEntry *entry = core_.project_file(name);
 	findings_.push_back(make_finding(CoreFinding::PlayMissionFailed, DiagnosticSeverity::Error,
 	                                 "The game could not load " + name + (reason.empty() ? std::string() : ": " + reason) +

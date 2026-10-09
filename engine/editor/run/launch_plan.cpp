@@ -284,17 +284,8 @@ bool stage_build_files(const fs::path &build, const fs::path &run, const std::ve
 // as the game's _lopen finds them on its file system [orig: PFF_OpenAllArchives @ 0x4a4310]).
 std::vector<std::string> install_archives(const std::string &install) {
 	std::vector<std::string> found;
-	std::error_code ec;
-	for (const char *slot : kBootArchiveTable) {
-		for (const fs::directory_entry &entry : fs::directory_iterator(system_path(install), ec)) {
-			std::error_code kind;
-			const std::string name = utf8_of(entry.path().filename());
-			if (entry.is_regular_file(kind) && strutil::iequals(name, slot)) {
-				found.push_back(name);
-				break;
-			}
-		}
-	}
+	for (const std::string &name : vfs_boot_archive_slots(install))
+		if (!name.empty()) found.push_back(name);
 	return found;
 }
 

@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include <base/resource_index/boot_policy.h>
 #include <editor/assets/asset_kind.h>
 #include <editor/model/value.h>
 #include <editor/project/play_mode.h>
@@ -27,7 +28,7 @@ enum class ProblemGrouping { None, File, Kind };
 inline constexpr size_t kWorkspaceText = 128;
 inline constexpr size_t kWorkspacePath = 512;
 inline constexpr size_t kWorkspaceFileName = 64;
-inline constexpr size_t kWorkspaceExpansion = 32;
+inline constexpr size_t kWorkspaceExpansion = kExpansionNameBytes; // the game's g_ExpansionName (boot_policy.h)
 
 // What the workspace's windows show of their own, held by the session (ADR 0046, the MCP gaps lane; the
 // Workspace concern, CONTEXT.md "Workspace"): each card, panel and dialog open and what its fields hold,
