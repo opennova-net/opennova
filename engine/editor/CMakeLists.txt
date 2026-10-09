@@ -154,15 +154,6 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/import/texture_import.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/wave_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/texture_source.cpp
-    # terrain — TrnGen.exe's terrain bake ported (a depth map to the .cpt's depth atlas and its
-    # ground mesh: the quadtree, the mesh simplifier, the strips, the TPM1 tile files kept in memory)
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/lod_mesh_data.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/mesh_data.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/mesh_simp.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/quadtree_node.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_bake.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_mesh.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/tristrip.cpp
     # preview — the viewports (S13 V5): their kinds' table, the session's viewports and the preview
     # clock, the follow every kind shares (the files a picture read, the action its device takes),
     # the base every kind's viewport derives from, the Shell's devices (an LRU of four keyed by
