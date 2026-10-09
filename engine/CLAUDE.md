@@ -94,11 +94,8 @@
     file its uses read, by the
     record's options, each a row of its importer's (S18), the `.import` sidecars, the import pass
     whose outputs the scan lists; the terrain importer (S20: a terrain set's images to a terrain's files,
-    `terrain_import`); and the
-    one-shot converters: an `.o3d` to a `.3di`, an `.o3a` to its `.adm` and `.bad` files), `terrain`
-    (S20: TrnGen.exe's terrain bake ported, a depth map to the `.cpt`'s depth atlas and ground mesh,
-    its tile files kept in memory, its nodes of one quadtree level made side by side: a port, cited
-    `[orig: TrnGen.exe ...]`), `preview`
+    `terrain_import`, its heights baked by TrnGen.exe's bake, the engine's `formats/cpt/trngen`); and the
+    one-shot converters: an `.o3d` to a `.3di`, an `.o3a` to its `.adm` and `.bad` files), `preview`
     (the viewports, S13 V5: a document's picture as the game would draw it, one per (document,
     kind) from a compiled-in kind table (`viewport_kinds`: the menu's and the model's, each a
     Preview or a Main role), kept by the session (`viewports`, with the one preview clock) and
