@@ -241,7 +241,7 @@ private:
 	// The dialog channel (DI-32): the project's files as the game reads them, the mission's dialog bank and its text,
 	// what was read of them and at which stamps, the waves' lengths, the lines due and when the channel frees.
 	std::shared_ptr<const ProjectAssetSource> files_;
-	std::string dialog_bank_, dialog_text_;
+	std::string dialog_bank_, dialog_mission_base_;
 	DialogSources dialog_sources_;
 	std::string dialog_stamps_;
 	std::map<std::string, std::pair<uint64_t, double>> wave_seconds_cache_;
