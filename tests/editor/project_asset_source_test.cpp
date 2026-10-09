@@ -41,7 +41,7 @@ using editor_test::NoProcess;
 
 bool file_bytes(const std::string &path, std::vector<uint8_t> &out) {
 	std::string error;
-	return read_file_bytes(path, out, error);
+	return opennova::io::read_file_bytes(path, out, error);
 }
 
 // The retail SCR container over `plain` (the codec reverses, then XORs; this is its

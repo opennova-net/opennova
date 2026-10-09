@@ -104,7 +104,7 @@ bool ImportOrigin::read(const std::string &name, std::vector<uint8_t> &out) cons
 	}
 	if (kind_ == Kind::Archive) return read_served(vfs_, name, out);
 	std::string error;
-	return read_file_bytes(join_path(path_, name), out, error);
+	return io::read_file_bytes(join_path(path_, name), out, error);
 }
 
 uint64_t ImportOrigin::size(const std::string &name) const {
@@ -388,7 +388,7 @@ private:
 			found_in = from->words(name);
 		} else {
 			std::string io_error;
-			if (!read_file_bytes(source.path, bytes, io_error)) {
+			if (!io::read_file_bytes(source.path, bytes, io_error)) {
 				fail(CoreFinding::ImportRead, io_error);
 				return;
 			}
@@ -847,7 +847,7 @@ private:
 		const AssetEntry *asset = scan_.find(name);
 		if (!asset || asset->kind != AssetKind::MenuStyle) return false;
 		std::string error;
-		return read_file_bytes(join_path(paths_.root, asset->relative_path), bytes, error);
+		return io::read_file_bytes(join_path(paths_.root, asset->relative_path), bytes, error);
 	}
 
 	// A planned row's bytes as the import writes them.
@@ -861,7 +861,7 @@ private:
 		std::string error;
 		bool read = false;
 		if (!source.install && source.entry.empty()) {
-			read = read_file_bytes(source.path, out, error);
+			read = io::read_file_bytes(source.path, out, error);
 		} else {
 			const ImportOrigin *from = origin(source.install ? ImportOrigin::Kind::GameInstall : ImportOrigin::Kind::Archive,
 			                                  source.path, error);
@@ -1184,7 +1184,7 @@ private:
 		if (own.size_bytes != bytes->size()) return Held::Differs;
 		std::vector<uint8_t> mine;
 		std::string error;
-		if (!read_file_bytes(join_path(paths_.root, own.relative_path), mine, error)) return Held::Unknown;
+		if (!io::read_file_bytes(join_path(paths_.root, own.relative_path), mine, error)) return Held::Unknown;
 		cost_ += mine.size();
 		return mine == *bytes ? Held::Same : Held::Differs;
 	}

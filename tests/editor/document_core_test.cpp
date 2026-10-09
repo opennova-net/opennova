@@ -1817,7 +1817,7 @@ static int test_changes_since_save() {
 	TEST_EXPECT(!spaced.dirty() && spaced.rewrite_need() == Document::RewriteNeed::Rewrite);
 	TEST_EXPECT(spaced.save(error) && spaced.rewrite_need() == Document::RewriteNeed::None);
 	std::string written, message;
-	TEST_EXPECT(read_file_text(fake.dir.file("spaced.txt"), written, message) && written == kFile);
+	TEST_EXPECT(opennova::io::read_file_text(fake.dir.file("spaced.txt"), written, message) && written == kFile);
 	return 0;
 }
 
@@ -2404,7 +2404,7 @@ static int test_document_base() {
 	const auto file_text = [&] {
 		std::vector<uint8_t> bytes;
 		std::string message;
-		if (!read_file_bytes(file, bytes, message)) return std::string("<unread>");
+		if (!opennova::io::read_file_bytes(file, bytes, message)) return std::string("<unread>");
 		return std::string(bytes.begin(), bytes.end());
 	};
 	const std::string original = "one\n# a note\ntwo\n", edited = "one\ntwo\nthree\n";
