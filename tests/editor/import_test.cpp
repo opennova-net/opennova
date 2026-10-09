@@ -97,7 +97,7 @@ size_t count_code(const std::vector<Diagnostic> &diagnostics, const std::string 
 
 std::string read_text(const std::string &path) {
 	std::string text, message;
-	return read_file_text(path, text, message) ? text : std::string();
+	return io::read_file_text(path, text, message) ? text : std::string();
 }
 
 const ImportedSource *imported_source(const SessionView &view, const std::string &source) {
@@ -142,7 +142,7 @@ static int test_import_pass() {
 	// The output decodes to the source's size.
 	std::vector<uint8_t> pcx;
 	std::string message;
-	TEST_EXPECT(read_file_bytes(root + "/" + output, pcx, message));
+	TEST_EXPECT(io::read_file_bytes(root + "/" + output, pcx, message));
 	IndexedImage8 decoded;
 	TEST_EXPECT(decode_pcx_indexed(pcx.data(), pcx.size(), decoded, message) && decoded.width == 8 && decoded.height == 8);
 	// The scan lists the output as a project file from its source; the source is never packed.
@@ -449,7 +449,7 @@ static int test_image_tga_output() {
 	TEST_EXPECT(decode_png(png, decoded, message));
 	std::vector<uint8_t> expected, written;
 	TEST_EXPECT(opennova::tga::tga_write_rgba32(decoded.pixels.data(), 3, 2, expected, message));
-	TEST_EXPECT(read_file_bytes(root + "/" + tga, written, message) && written == expected);
+	TEST_EXPECT(io::read_file_bytes(root + "/" + tga, written, message) && written == expected);
 	const AssetScan scan = scan_project_assets(paths, doc);
 	TEST_EXPECT(scan.find("glow.tga") && scan.find("glow.tga")->kind == AssetKind::Texture &&
 	            scan.find("glow.tga")->imported_from == "art/glow.png");
@@ -547,8 +547,8 @@ static int test_deep_project_files() {
 	const std::vector<uint8_t> png = make_png(spec);
 	std::string write_error;
 	const std::string source = root + "/art/source/glow.png";
-	TEST_EXPECT(source.size() > 259 && ensure_directory(root + "/art/source", write_error) &&
-	            write_file_atomic(source, png.data(), png.size(), write_error) && mark_for_import(source));
+	TEST_EXPECT(source.size() > 259 && io::ensure_directory(root + "/art/source", write_error) &&
+	            io::write_file_atomic(source, png.data(), png.size(), write_error) && mark_for_import(source));
 	editor_test::handle_to_end(session, request::rescan());
 	const AssetEntry *output = view.project.scan->find("glow.pcx");
 	TEST_EXPECT(output && output->imported_from == "art/source/glow.png" && output->size_bytes > 0);
@@ -787,7 +787,7 @@ static int test_retail_source() {
 	for (const RequirementRow &candidate : view.project.requirements->rows) if (candidate.name == "gametext.bin") row = &candidate;
 	TEST_EXPECT(row && row->state == RequirementState::Present);
 	std::string text, message;
-	TEST_EXPECT(view.project.scan->find("note.txt") && read_file_text(view.project.root + "/" + view.project.scan->find("note.txt")->relative_path, text, message) && text == "retail");
+	TEST_EXPECT(view.project.scan->find("note.txt") && io::read_file_text(view.project.root + "/" + view.project.scan->find("note.txt")->relative_path, text, message) && text == "retail");
 	// A name the install does not have.
 	import.imports.clear();
 	source.entry = "absent.txt";
@@ -849,22 +849,22 @@ static int test_retail_source() {
 		            count_code(view.activity.last_operation.findings, "import.exists") == 0);
 		const AssetEntry *music = view.project.scan->find("MENUMUS.SBF");
 		TEST_EXPECT(music && music->kind == AssetKind::MusicBank && !view.project.scan->find("player.sav"));
-		TEST_EXPECT(music && read_file_text(view.project.root + "/" + music->relative_path, text, message) && text == "music");
-		TEST_EXPECT(read_file_text(note_path, text, message) && text == "edited in the project");
+		TEST_EXPECT(music && io::read_file_text(view.project.root + "/" + music->relative_path, text, message) && text == "music");
+		TEST_EXPECT(io::read_file_text(note_path, text, message) && text == "edited in the project");
 		// With replace and the held rows unchecked (the plan's own checks): an unchecked row is never taken, so the
 		// edited file stays as it is (review X1).
 		editor_test::handle_to_end(session, request::import_whole_install());
 		TEST_EXPECT(preview.open && preview.plan->rows.size() == 5);
 		editor_test::handle_to_end(session, request::import_planned(preview.plan_serial, true));
 		TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Done && !preview.open);
-		TEST_EXPECT(read_file_text(note_path, text, message) && text == "edited in the project");
+		TEST_EXPECT(io::read_file_text(note_path, text, message) && text == "edited in the project");
 		// Replace existing files checked (the dialog's checkbox, the workspace's): the held files are written over,
 		// the edited one too, with no replace asked (the checked held rows replace: review X2).
 		editor_test::handle_to_end(session, request::import_whole_install());
 		TEST_EXPECT(session.handle(request::set_workspace(R"({"import": {"replace_existing": true}})")) && session.outcome().done());
 		editor_test::handle_to_end(session, request::import_planned(preview.plan_serial));
 		TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Done && !preview.open);
-		TEST_EXPECT(read_file_text(note_path, text, message) && text == "retail");
+		TEST_EXPECT(io::read_file_text(note_path, text, message) && text == "retail");
 		// The same bytes imported again without Replace: held, not an error (the source is read
 		// before a file of its name is refused).
 		EditorRequest again = request::of(EditorRequestKind::ImportFiles);
@@ -933,7 +933,7 @@ static int test_scene_imports() {
 	TEST_EXPECT(!fs::exists(root + "/spinner.o3d") && !fs::exists(root + "/models/spinner.o3d"));
 	std::vector<uint8_t> model;
 	std::string message;
-	TEST_EXPECT(read_file_bytes(root + "/models/spinner.3di", model, message));
+	TEST_EXPECT(io::read_file_bytes(root + "/models/spinner.3di", model, message));
 	opennova::threedi::Threedi3di3 check{};
 	TEST_EXPECT(opennova::threedi::threedi_3di3_read_memory(model.data(), model.size(), &check) == 0);
 	opennova::threedi::threedi_3di3_free(&check);

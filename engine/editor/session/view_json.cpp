@@ -35,13 +35,6 @@ JsonValue boolean(bool value) {
 	return JsonValue::make_bool(value);
 }
 
-JsonValue strings_to_json(const std::vector<std::string> &values) {
-	JsonValue out = JsonValue::make_array();
-	for (const std::string &value : values)
-		out.push(json_string(value));
-	return out;
-}
-
 const char *requirement_state_token(RequirementState state) {
 	switch (state) {
 		case RequirementState::Present:
@@ -230,7 +223,7 @@ JsonValue run_section(const SessionView &view) {
 	out.set("run_dir", json_string(activity.play_run_dir));
 	out.set("log_file", json_string(activity.play_log_file));
 	out.set("fresh", boolean(activity.play_fresh));
-	out.set("kept", strings_to_json(activity.play_kept));
+	out.set("kept", io::json_string_array(activity.play_kept));
 	// Play from here (DI-26): where the player starts and how the run directory's mission was given it; null
 	// for a Play at the mission's own starts.
 	if (activity.play_start.set) {
@@ -259,7 +252,7 @@ JsonValue run_section(const SessionView &view) {
 	out.set("source_run", boolean(activity.source_run));
 	out.set("runtime_executable", json_string(activity.runtime_executable));
 	out.set("runtime_setting", json_string(view.project.runtime_setting));
-	out.set("boot_missing", strings_to_json(activity.boot_missing));
+	out.set("boot_missing", io::json_string_array(activity.boot_missing));
 	// The mode the game ran in (runtime, install or strict), whether the game install's first run was started
 	// again, and what its file log said it loaded once it exited (null before one was read).
 	out.set("ran_mode", json_string(activity.play_run_mode));
@@ -267,9 +260,9 @@ JsonValue run_section(const SessionView &view) {
 	if (activity.play_file_log_read) {
 		JsonValue log = JsonValue::make_object();
 		log.set("lines", json_number(double(activity.play_file_log.lines)));
-		log.set("archives", strings_to_json(activity.play_file_log.archives));
-		log.set("from_archives", strings_to_json(activity.play_file_log.from_archives));
-		log.set("from_disk", strings_to_json(activity.play_file_log.from_disk));
+		log.set("archives", io::json_string_array(activity.play_file_log.archives));
+		log.set("from_archives", io::json_string_array(activity.play_file_log.from_archives));
+		log.set("from_disk", io::json_string_array(activity.play_file_log.from_disk));
 		out.set("file_log", std::move(log));
 	} else {
 		out.set("file_log", JsonValue::make_null());
@@ -310,8 +303,8 @@ JsonValue import_section(const SessionView &view) {
 		entry.set("importer", json_string(source.importer));
 		entry.set("ok", boolean(source.ok));
 		entry.set("reimported", boolean(source.reimported));
-		entry.set("inputs", strings_to_json(source.inputs));
-		entry.set("outputs", strings_to_json(source.outputs));
+		entry.set("inputs", io::json_string_array(source.inputs));
+		entry.set("outputs", io::json_string_array(source.outputs));
 		imported.push(std::move(entry));
 	}
 	out.set("imported", std::move(imported));
@@ -329,7 +322,7 @@ JsonValue dialogs_section(const SessionView &view) {
 		prompt.set("action", json_string(editor_request_kind_token(unsaved.action)));
 		if (!unsaved.target.empty())
 			prompt.set("target", json_string(unsaved.target));
-		prompt.set("files", strings_to_json(unsaved.files));
+		prompt.set("files", io::json_string_array(unsaved.files));
 		prompt.set("can_discard", boolean(unsaved.can_discard));
 	}
 	out.set("unsaved_prompt", std::move(prompt));
@@ -380,7 +373,7 @@ JsonValue dialogs_section(const SessionView &view) {
 			sites.push(std::move(entry));
 		}
 		preview.set("sites", std::move(sites));
-		preview.set("companions", strings_to_json(rename.companions));
+		preview.set("companions", io::json_string_array(rename.companions));
 		preview.set("refusals", diagnostics_to_json(rename.refusals));
 		preview.set("ok", boolean(rename.refusals.empty()));
 		out.set("rename_preview", std::move(preview));
@@ -396,9 +389,9 @@ JsonValue dialogs_section(const SessionView &view) {
 	if (source.open) {
 		texture_source.set("texture", json_string(source.texture));
 		texture_source.set("image", json_string(source.image));
-		texture_source.set("forms", strings_to_json(source.forms));
+		texture_source.set("forms", io::json_string_array(source.forms));
 		texture_source.set("form", json_string(source.form));
-		texture_source.set("changes", strings_to_json(source.changes));
+		texture_source.set("changes", io::json_string_array(source.changes));
 		texture_source.set("before", json_string(source.before_words));
 		texture_source.set("after", json_string(source.after_words));
 		texture_source.set("refusal", json_string(source.refusal));
@@ -692,7 +685,7 @@ JsonValue plan_row_to_json(const ImportPlanRow &row) {
 		entry.set("needed_by", std::move(need));
 	}
 	// Every planned file that names it, where more than the first does.
-	if (row.wanted_by.size() > 1) entry.set("wanted_by", strings_to_json(row.wanted_by));
+	if (row.wanted_by.size() > 1) entry.set("wanted_by", io::json_string_array(row.wanted_by));
 	if (!found)
 		return entry;
 	entry.set("source", source_to_json(row.source));
@@ -810,8 +803,8 @@ JsonValue operation_outcome_to_json(const OperationOutcome &outcome) {
 	out.set("end", json_string(operation_end_token(outcome.end)));
 	out.set("findings", diagnostics_to_json(outcome.findings));
 	// An import's write: the files it wrote and those it did not reach, each only when it has any.
-	if (!outcome.imported.empty()) out.set("imported", strings_to_json(outcome.imported));
-	if (!outcome.not_imported.empty()) out.set("not_imported", strings_to_json(outcome.not_imported));
+	if (!outcome.imported.empty()) out.set("imported", io::json_string_array(outcome.imported));
+	if (!outcome.not_imported.empty()) out.set("not_imported", io::json_string_array(outcome.not_imported));
 	return out;
 }
 

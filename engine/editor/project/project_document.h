@@ -132,9 +132,6 @@ bool load_project_document(const std::string &project_file, ProjectDocument &out
 bool save_project_document(const std::string &project_file, const ProjectDocument &doc,
                            Diagnostic &error);
 
-// A fresh random UUID (version 4 text form).
-std::string make_project_id();
-
 // Whether a project could be made at `root` for `target_game` (a gameprofile code) as `expansion`
 // (the expansion's rule, check_project_expansion: what an install has is the caller's to weigh,
 // expansion_install_findings): the directory must not already hold a project file. Nothing is

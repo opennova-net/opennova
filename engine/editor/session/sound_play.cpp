@@ -236,7 +236,7 @@ std::vector<PreviewBank> project_banks(const SessionView &view) {
 		} else {
 			std::vector<uint8_t> bytes;
 			std::string error;
-			if (!read_file_bytes(join_path(view.project.root, entry.relative_path), bytes, error) ||
+			if (!io::read_file_bytes(join_path(view.project.root, entry.relative_path), bytes, error) ||
 			    !lwf::parse_lwf_buffer(bytes.data(), bytes.size(), bank.file, error))
 				continue;
 		}

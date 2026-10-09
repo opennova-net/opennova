@@ -371,7 +371,7 @@ bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string
 			// then what it would be when not found, or that the field cannot hold it whole (DI-09: the game's
 			// reader cuts it, and no lookup finds the cut name); a sound's Play (DI-02's player).
 			const bool found = choice.status == ReferenceStatus::Present || choice.status == ReferenceStatus::Unverified;
-			const bool fits = !limit || name_characters(choice.name) <= limit;
+			const bool fits = !limit || strutil::utf8_length(choice.name) <= limit;
 			const char *word = !fits ? "too long" : found ? "" : ui_kit::reference_word(choice.status);
 			const bool plays = choice.kind == ReferenceKind::Sound;
 			const float room = ImGui::GetContentRegionAvail().x -
