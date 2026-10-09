@@ -167,6 +167,22 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
         memset(&ca, 0, sizeof(ca));
     };
 
+    /* A 32-character name keeps no terminator in the record [orig:
+       WeaponDefs_ParseLineCallback, strncpy(def+0x14, tokens[2], 0x20)
+       @0x543737], so a read of it runs on into `sameas` at def+0x34 [orig:
+       strncpy(def+0x34, value, 0x20) @0x544056..0x544072]: it reads as its 32
+       characters while `sameas` is empty, and as more than the record holds
+       once one is set (D-ITEMDEF-10), which a save cannot give back. Checked
+       as the entry closes, the finding placed among its `weapon` line's. */
+    size_t name_findings = 0; // where the open entry's `weapon` line's findings end
+    auto check_name_runs_on = [&] {
+        if (strlen(cw.weapon_name) < 32 || cw.sameas[0] == '\0') return;
+        DefParseReport finding;
+        authoring_issue(cw.unmodeled_count, report ? &finding : nullptr, cw.open_line + 1, cw.weapon_name,
+                        "weapon", 6, DefIssueCode::Unrepresentable);
+        if (report) report->insert(report->begin() + std::ptrdiff_t(name_findings), finding.begin(), finding.end());
+    };
+
     // Every line counts, numbered as the retail walk cuts them at CR LF
     // [orig: File_ParseASCIIFile @0x53D8C7..0x53D8F5]; a finding names the
     // line counting from 1.
@@ -221,13 +237,16 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 def_init_weapon(cw);
                 /* The name is strncpy'd 32 bytes into the record [orig:
                    WeaponDefs_ParseLineCallback, strncpy(def+0x14, tokens[2], 0x20)
-                   @0x543737], so a longer name keeps its first 32 characters. Past
+                   @0x543737], so a longer name keeps its first 32 characters. At
                    32 retail's copy has no terminator and reads on into +0x34; the
-                   port cuts there (D-ITEMDEF-10; no shipped name exceeds 21). */
+                   port cuts there (D-ITEMDEF-10; no shipped name exceeds 21), and
+                   reports the entry whose `sameas` the name would run into
+                   (check_name_runs_on). */
                 safe_copy(cw.weapon_name, 33, v, vl);
                 cw.open_line = line_index;
                 cw.note = noter.open(DefRecordKind::Weapon);
                 validate_header(as_read.c_str(), as_read.size(), 6, 33, cw.unmodeled_count, report, number, cw.weapon_name);
+                name_findings = report ? report->size() : 0;
                 state = ST_WEAPON;
             } else authoring_issue(out->unmodeled_count, report, number, "", as_read.c_str(), as_read.size());
             return false;
@@ -248,6 +267,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             }
 
             if (key_is(key, "end")) {
+                check_name_runs_on();
                 cw.end_line = line_index;
                 noter.close();
                 DA_PUSH(out->entries, out->count, entries_cap, cw);
@@ -846,6 +866,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
         // writer's form of the entry would add (its findings, an action
         // block's included, ahead of the notice).
         if (state == ST_ACTION) commit_action(walk_end);
+        check_name_runs_on();
         authoring_issue(out->unmodeled_count, report, number, cw.weapon_name, "end", 3, DefIssueCode::MalformedBlock);
         cw.end_line = walk_end;
         cw.unclosed = 1;

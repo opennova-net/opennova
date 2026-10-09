@@ -374,6 +374,12 @@ add_executable(def_loadout_weight_test def/def_loadout_weight_test.cpp)
 target_link_libraries(def_loadout_weight_test PRIVATE opennova_formats)
 add_test(NAME def_loadout_weight COMMAND def_loadout_weight_test)
 
+# The weapon.def name cap: 32 characters only in a block with no `sameas`, which a 32-character
+# name runs on into otherwise (D-ITEMDEF-10): the writer's cap and the parser's finding.
+add_executable(def_weapon_name_cap_test def/def_weapon_name_cap_test.cpp)
+target_link_libraries(def_weapon_name_cap_test PRIVATE opennova_formats)
+add_test(NAME def_weapon_name_cap COMMAND def_weapon_name_cap_test)
+
 # The items.def ids and rows the engine fixes (docs/world/itemdef-re.md, "The ids and rows the
 # engine fixes"): the table, its lookups and rules, and the runtime's constants for the same ids.
 add_executable(def_reserved_items_test def/def_reserved_items_test.cpp)
@@ -1209,6 +1215,11 @@ target_link_libraries(trn_admission_gate_test PRIVATE opennova_formats)
 target_include_directories(trn_admission_gate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME trn_admission_gate COMMAND trn_admission_gate_test)
 
+add_executable(trn_key_lines_test trn/trn_key_lines_test.cpp)
+target_link_libraries(trn_key_lines_test PRIVATE opennova_formats)
+target_include_directories(trn_key_lines_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME trn_key_lines COMMAND trn_key_lines_test)
+
 add_executable(cpt_roundtrip_test cpt/cpt_roundtrip_test.cpp)
 target_link_libraries(cpt_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(cpt_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1225,6 +1236,11 @@ add_executable(env_render_unit_test env/env_render_unit_test.cpp)
 target_link_libraries(env_render_unit_test PRIVATE opennova_formats)
 target_include_directories(env_render_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME env_render_unit COMMAND env_render_unit_test)
+
+add_executable(env_source_issue_test env/env_source_issue_test.cpp)
+target_link_libraries(env_source_issue_test PRIVATE opennova_formats)
+target_include_directories(env_source_issue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME env_source_issue COMMAND env_source_issue_test)
 
 # The environment runtime (engine/runtime/environment): the TOD state owner +
 # weather embedding ported from the shell scripts (ADR 0034 d6 de-scripting).
