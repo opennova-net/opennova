@@ -54,8 +54,9 @@ bool parse_head(const std::string &raw, HttpReply &reply, size_t &body_at, long 
 
 } // namespace
 
-HttpReply http_exchange(bool post, const std::string &url, const std::vector<std::string> &headers,
-		const std::string &body, int timeout_ms, const HttpResolver &resolve) {
+HttpReply http_exchange(const std::string &method, const std::string &url,
+		const std::vector<std::string> &headers, const std::string &body, int timeout_ms,
+		const HttpResolver &resolve) {
 	HttpReply reply;
 	constexpr std::string_view kScheme = "http://";
 	if (!strutil::starts_with_icase(url, kScheme)) {
@@ -88,16 +89,17 @@ HttpReply http_exchange(bool post, const std::string &url, const std::vector<std
 		reply.error = "connect to " + endpoint_to_string(to) + " failed";
 		return reply;
 	}
-	std::string request = std::string(post ? "POST " : "GET ") + path + " HTTP/1.0\r\n";
+	const bool has_body = method != "GET";
+	std::string request = method + " " + path + " HTTP/1.0\r\n";
 	request += "Host: " + authority + "\r\n";
 	for (const std::string &line : headers) {
 		request += line + "\r\n";
 	}
-	if (post) {
+	if (has_body) {
 		request += "Content-Length: " + std::to_string(body.size()) + "\r\n";
 	}
 	request += "\r\n";
-	if (post) {
+	if (has_body) {
 		request += body;
 	}
 	if (!tcp_send_all(socket.get(), reinterpret_cast<const uint8_t *>(request.data()), request.size())) {

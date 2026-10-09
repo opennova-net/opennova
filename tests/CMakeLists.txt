@@ -3709,6 +3709,20 @@ target_include_directories(backend_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_compile_definitions(backend_schema_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME backend_schema COMMAND backend_schema_test)
 
+# The service's HTTP route harness (hosted servers, PR A): the Crow listener from
+# opennova_novaworld_server_core on a loopback port over an in-memory DB under the
+# backend migrations, driven with apps/common's http_exchange. Only with the
+# HTTP layer (BUILD_NOVAWORLD_HTTP); the service edge is direct for the
+# sqlite-containment lint.
+if(BUILD_NOVAWORLD_HTTP)
+    add_executable(opennova_novaworld_server_http_routes_test novaworld/http_routes_test.cpp)
+    target_link_libraries(opennova_novaworld_server_http_routes_test PRIVATE
+        opennova_novaworld_server_core opennova_novaworld_service)
+    target_include_directories(opennova_novaworld_server_http_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(opennova_novaworld_server_http_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    add_test(NAME opennova_novaworld_server_http_routes COMMAND opennova_novaworld_server_http_routes_test)
+endif()
+
 # Unknown-message tracker: record/dedup, sample cap, flush/upsert against the
 # real 0004 migration (OPENNOVA_SOURCE_DIR for the SQL on disk), snapshot.
 add_executable(unknown_tracker_test novaworld/unknown_tracker_test.cpp)
