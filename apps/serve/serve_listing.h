@@ -8,15 +8,18 @@
 // slot 0), the GSID / AppId / cookie keys and the join-ticket arm on the
 // server context, the NWU session's facts the authority's NovaWorld exit
 // reads, the round clock the TimeLeft column re-reads, and the service's
-// ServerCommands and ServerPlayerEnterResults run on the match.
+// ServerCommands and ServerPlayerEnterResults run on the match; a changed
+// name, message or mpreset reaches the cfg block and game.cfg.
 
 #include "listing_source.h"
 
+#include <formats/gamecfg/game_cfg.h>
 #include <net/novaworld/lobby_vars.h>
 #include <runtime/inmatch/host_role.h>
 #include <runtime/mission/mission_kernel.h>
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -29,9 +32,16 @@ namespace opennova::serve {
 
 class ServeListing final : public nw_lister::ListingSource {
 public:
+	// The server's game.cfg, which a ServerCommand's SetServerName /
+	// SetServerMsg / SetMPReset writes and saves (the admin console's seam).
+	struct Seams {
+		gamecfg::GameCfg *config_block = nullptr;
+		std::function<void()> save_config;
+	};
+
 	// `base`: the columns the host file and the mount give before the mission
 	// boots (the name, the message, the caps, the rules, the starting map).
-	explicit ServeListing(HostRegistration base) : base_(std::move(base)) {}
+	ServeListing(HostRegistration base, Seams seams) : base_(std::move(base)), seams_(std::move(seams)) {}
 	// A map change's columns: the next map's game type and title.
 	void set_base(HostRegistration base) { base_ = std::move(base); }
 
@@ -54,6 +64,7 @@ public:
 
 private:
 	HostRegistration base_;
+	Seams seams_;
 	inmatch::HostRole *role_ = nullptr;
 	mission::MissionKernel *kernel_ = nullptr;
 	nw_lister::Lister *lister_ = nullptr;
