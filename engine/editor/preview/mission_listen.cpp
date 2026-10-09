@@ -11,7 +11,6 @@
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/mission_document.h>
 #include <editor/graph/asset_graph.h>
-#include <editor/import/wave_source.h>
 #include <editor/project/project_files.h>
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_overlay.h>
@@ -19,6 +18,7 @@
 #include <editor/preview/sound_preview.h>
 #include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
+#include <formats/lwf/wav_source.h>
 #include <runtime/audio/envs_markers.h>
 #include <runtime/audio/music_policy.h>
 #include <runtime/audio/dialog_queue.h>
@@ -562,7 +562,7 @@ double MissionListen::wave_seconds_(const std::string &file) {
 	const auto cached = wave_seconds_cache_.find(file);
 	if (cached != wave_seconds_cache_.end() && cached->second.first == stamp) return cached->second.second;
 	std::vector<uint8_t> bytes;
-	const double seconds = stamp && files_->read(file, bytes) ? wave_seconds(bytes) : 0.0;
+	const double seconds = stamp && files_->read(file, bytes) ? lwf::wave_seconds(bytes) : 0.0;
 	wave_seconds_cache_[file] = {stamp, seconds};
 	return seconds;
 }

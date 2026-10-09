@@ -7,6 +7,7 @@
 #include <base/gameprofile/resource_missing.h>
 #include <editor/model/diagnostic.h>
 #include <editor/run/launch_plan.h>
+#include <formats/filelog/file_access_log.h>
 
 namespace opennova::editor {
 
@@ -38,12 +39,12 @@ struct PlayGame {
 std::vector<Diagnostic> resource_miss_findings(const gameprofile::ResourceMiss &miss, const PlayGame &game,
                                                const SessionView &view);
 
-// The game install's own logs, read once its game exited (never while it runs: run/launch_plan.h's
-// kInstallFileLogName): its file log (null when it left none), the graphics log this run wrote
-// (gameprofile::kGraphicsLogName, ghw.txt, "" when the run wrote none; its missions read by
-// gameprofile::graphics_log_missions), and whether the game exited on its own.
+// The game install's own logs, read once its game exited (never while it runs:
+// formats/filelog/file_access_log.h's kInstallFileLogName): its file log (null when it left none), the
+// graphics log this run wrote (gameprofile::kGraphicsLogName, ghw.txt, "" when the run wrote none; its
+// missions read by gameprofile::graphics_log_missions), and whether the game exited on its own.
 struct InstallLogs {
-	const FileAccessLog *file_log = nullptr;
+	const filelog::FileAccessLog *file_log = nullptr;
 	std::string graphics_log;
 	bool exited_on_its_own = false;
 };
