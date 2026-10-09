@@ -44,11 +44,6 @@ const RecordKindRow *own_kind(const Document &document) {
 	return nullptr;
 }
 
-std::string lower(std::string text) {
-	for (char &c : text) c = char(std::tolower(static_cast<unsigned char>(c)));
-	return text;
-}
-
 // A record's tooltip in a tree: the token its type words where its title words it otherwise
 // ("anim_walk_forward" under "walk forward"), then whether it changed since the last save.
 std::string record_tip(const OutlineLine &line, Document::RecordChange change) {
@@ -292,7 +287,7 @@ void OutlineView::draw_kinds(const Document &document) {
 			if (ImGui::SmallButton(kind.label)) kinds ^= bit;
 			ImGui::PopStyleColor(listed ? 1 : 2);
 			ui_kit::tooltip_lazy([&] {
-				return std::string(listed ? "Listed: " : "Left out: ") + lower(kind.label) +
+				return std::string(listed ? "Listed: " : "Left out: ") + strutil::to_lower(kind.label) +
 				       " records. Click to " + (listed ? "leave them out." : "list them.");
 			});
 		}
@@ -601,8 +596,8 @@ void OutlineView::draw_tree_tools(Workspace &workspace, const Document &document
 void OutlineView::draw_master_detail(Workspace &workspace, const Document &document) {
 	const SessionView &view = workspace.view();
 	const RecordKindRow *rows_kind = own_kind(document);
-	const std::string row_words = rows_kind ? lower(rows_kind->label) : std::string("row");
-	const std::string detail_words = lower(model_.detail_label());
+	const std::string row_words = rows_kind ? strutil::to_lower(rows_kind->label) : std::string("row");
+	const std::string detail_words = strutil::to_lower(model_.detail_label());
 	const std::string every = "Every " + row_words;
 	// The filter, Every beside it where both fit, else under it.
 	const float room = ImGui::GetContentRegionAvail().x - ui_kit::checkbox_width(every.c_str()) -
@@ -634,7 +629,7 @@ void OutlineView::draw_master_detail(Workspace &workspace, const Document &docum
 		draw_masters(workspace, document);
 		ImGui::TableNextColumn();
 		if (!master && !model_.every_row())
-			ui_kit::empty_state(("Select one of the " + lower(spec_.rows) + " to list what it holds.").c_str());
+			ui_kit::empty_state(("Select one of the " + strutil::to_lower(spec_.rows) + " to list what it holds.").c_str());
 		else
 			draw_details(workspace, document, master, revealed);
 		ImGui::EndTable();
@@ -671,7 +666,7 @@ void OutlineView::draw_masters(Workspace &workspace, const Document &document) {
 		}
 	}
 	if (adds && ImGui::BeginPopup("add named")) {
-		const std::string words = lower(adds->label);
+		const std::string words = strutil::to_lower(adds->label);
 		ImGui::TextUnformatted(("The new " + words + "'s name:").c_str());
 		if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
 		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16.0f);
@@ -695,7 +690,7 @@ void OutlineView::draw_masters(Workspace &workspace, const Document &document) {
 		ImGui::EndPopup();
 	}
 	row_tool(workspace, document, tool, address, index);
-	if (rows.empty()) ui_kit::empty_state(("No " + lower(spec_.rows) + " yet.").c_str());
+	if (rows.empty()) ui_kit::empty_state(("No " + strutil::to_lower(spec_.rows) + " yet.").c_str());
 	for (const OutlineLine &line : model_.masters())
 		if (row_line(workspace, document, reveal_, line, "###row", spec_.row_menu, true)) select(workspace, document, line.address);
 	ImGui::PopID();
@@ -733,7 +728,7 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 		// that row, which the type makes an add there and a remove here, one undo step.
 		if (spec_.details_move_between_rows) {
 			const RecordKindRow *rows_kind = own_kind(document);
-			const std::string to = lower(rows_kind ? rows_kind->label : "row");
+			const std::string to = strutil::to_lower(rows_kind ? rows_kind->label : "row");
 			const std::string label = "Move to " + to + "...";
 			const bool can = at < ids.size() && document.rows().size() > 1;
 			if (ui_kit::tool(row, label.c_str(), can,

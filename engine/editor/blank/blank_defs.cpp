@@ -1,4 +1,5 @@
 #include "blank_makers.h"
+#include <base/io/strutil.h>
 #include <formats/def/def_write.h>
 #include <runtime/audio/sound_profile.h>
 #include <cstring>
@@ -56,7 +57,7 @@ bool make_blank_sound_profiles(const BlankRequest &request, std::vector<uint8_t>
 		error = make_finding(CoreFinding::BlankDef, DiagnosticSeverity::Error, why);
 		return false;
 	}
-	const std::string header = blank_crlf(
+	const std::string header = strutil::normalized_crlf_line_ends(
 		"// Sound profiles of " +
 		(request.project_title.empty() ? std::string("the project") : request.project_title) +
 		". An item plays the profile its sound_profile names, else \"default\".\n"
