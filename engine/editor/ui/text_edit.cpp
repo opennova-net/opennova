@@ -56,8 +56,7 @@ int code_page_edit(ImGuiInputTextCallbackData *data) {
 	size_t same = 0;
 	while (same < page->before_length && same < size_t(data->BufTextLen) && data->Buf[same] == page->before[same])
 		++same;
-	while (same > 0 && same < page->before_length && (static_cast<unsigned char>(page->before[same]) & 0xC0) == 0x80)
-		--same;
+	same = strutil::utf8_cut(std::string_view(page->before, page->before_length), same);
 	data->DeleteChars(0, data->BufTextLen);
 	data->InsertChars(0, page->before, page->before + page->before_length);
 	data->CursorPos = data->SelectionStart = data->SelectionEnd = int(same);
