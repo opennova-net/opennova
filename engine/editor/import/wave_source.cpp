@@ -15,7 +15,7 @@ bool rate_form(const std::string &value) {
 
 bool name_form(const std::string &value) {
 	return strutil::ends_with_icase(value, ".wav") && value.find_first_of("/\\:") == std::string::npos &&
-	       logical_name_fits_archive(value);
+	       pff::logical_name_fits_archive(value);
 }
 
 } // namespace

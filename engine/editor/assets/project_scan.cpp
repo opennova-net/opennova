@@ -14,6 +14,7 @@
 #include <editor/import/sidecar.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
+#include <runtime/renderer/material_texture.h>
 
 namespace fs = std::filesystem;
 
@@ -173,7 +174,7 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 		// A name no rule types is a material chunk when the file holds one (a model's chunk row
 		// reads a file of any name as one), asked of its chunk headers alone: the build packs a
 		// material chunk and leaves a file of no kind the game knows out (S13 A8).
-		if (asset.kind == AssetKind::Unknown && is_material_chunk_file(utf8_of(path), read))
+		if (asset.kind == AssetKind::Unknown && renderer::is_material_chunk_file(utf8_of(path), read))
 			asset.kind = AssetKind::MaterialChunk;
 		// A name with no extension that holds text is a note (a LICENSE), asked of its head alone: the
 		// build leaves it out without a word, where a file of no kind is said (classify_asset).
