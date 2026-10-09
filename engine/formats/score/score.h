@@ -138,7 +138,7 @@ bool parse(const uint8_t *data, size_t size, File &out, std::string &error);
 bool parse(const uint8_t *data, size_t size, File &out, std::string &error, textlayout::Notes &notes);
 
 // The file's text as ScoreConfig_SaveFile @ 0x52CDD0 writes it, from scratch (ADR 0003): its header, `VERSION
-// 40`, `EXP_FANFARE a b`, the FIELD names in a comment block, then each block after two blank lines, its
+// 40` (the file's own version: the game's is 40), `EXP_FANFARE a b`, the FIELD names in a comment block, then each block after two blank lines, its
 // FIELD lines and, after a blank one, its VAR lines in the VAR table's order, each line ending CR LF
 // (File_WriteLineToHandle @ 0x437010). Over the file's modeled layout where the file has one (each line as the
 // file had it but for a changed value's; an entry put down anew after the one before it in the writer's order;

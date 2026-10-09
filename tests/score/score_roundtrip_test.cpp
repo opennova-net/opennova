@@ -164,6 +164,10 @@ int main(int argc, char **argv) {
 		score::File refused = twice;
 		refused.blocks[0].fields.push_back({"NOPE", 1, 0});
 		TEST_EXPECT(!score::write(refused, encoded, error) && error.find("NOPE") != std::string::npos);
+		// A file of another version keeps it (the game reads it for nothing, and writes its own over it).
+		score::File old = twice;
+		old.version = 39;
+		TEST_EXPECT(score::write(old, encoded, error) && parsed(text_of(encoded)).version == 39);
 	}
 
 	// --- retail: <OPENNOVA_JO_DIR>/score.ini, the score table the install

@@ -238,7 +238,9 @@ bool records_of(const File &file, textlayout::OutRecord &root, std::string &erro
 	root.lines.push_back({"", "// NovaLogic Score INI file"});
 	root.lines.push_back({"", kSeparator});
 	root.lines.push_back({"", ""});
-	std::snprintf(buffer, sizeof buffer, "VERSION %ld", long(kVersion)); // [orig: @ 0x52CE66, 40 always]
+	// The game writes its own version, 40 [orig: @ 0x52CE66]; a file read at another keeps its own (the reader takes
+	// only 40, so it reads the same).
+	std::snprintf(buffer, sizeof buffer, "VERSION %ld", long(file.version));
 	root.lines.push_back({"VERSION", buffer});
 	root.lines.push_back({"", ""});
 	std::snprintf(buffer, sizeof buffer, "EXP_FANFARE %d %d", file.exp_fanfare[0] & 0xFF, file.exp_fanfare[1] & 0xFF);
