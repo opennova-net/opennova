@@ -92,8 +92,6 @@ bool is_sound_profile_kind(AssetKind kind);
 // heading it stands under ("Footsteps").
 const char *sound_profile_slot_words(int slot);
 const char *sound_profile_slot_family(int slot);
-// The slot a keyword names (without case), -1 for none.
-int sound_profile_slot_of(const std::string &keyword);
 
 // The validator over one SndProf.def: a profile name an earlier profile has (the game binds the
 // first), no profile named "default" (every item without a sound_profile key binds the first

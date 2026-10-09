@@ -2,27 +2,14 @@
 
 #include <cstdio>
 
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <runtime/audio/bank_chain.h>
-#include <runtime/audio/footstep_slot.h>
-#include <runtime/audio/oneshot_play.h>
 #include <runtime/menu/menu_sound.h>
 
 namespace opennova::editor {
 
 namespace {
-
-std::string file_name_of(const std::string &path) {
-	const size_t slash = path.find_last_of("/\\");
-	return slash == std::string::npos ? path : path.substr(slash + 1);
-}
-
-// The first set of the name in a bank, without case [orig: SoundBank_FindTriggerByName @ 0x75be90]; -1 none.
-int32_t set_in(const lwf::File &bank, const std::string &name) {
-	for (size_t i = 0; i < bank.multis.size(); ++i)
-		if (strutil::iequals(bank.multis[i].name, name)) return int32_t(i);
-	return -1;
-}
 
 std::string pitch_words(uint32_t q16) {
 	char text[32];
@@ -45,7 +32,7 @@ std::vector<const PreviewBank *> chain_banks(const std::vector<PreviewBank> &ban
 
 PreviewPlay plan_set_play(const std::vector<PreviewBank> &banks, const std::string &expansion, const std::string &set,
                           const std::string &only, audio::SoundSelector &selector, uint8_t view_flags,
-                          const PreviewHearing *heard, int menu_master) {
+                          const audio::SetHearing *heard, int menu_master) {
 	PreviewPlay play;
 	play.set = set;
 	if (set.empty()) {
@@ -67,7 +54,7 @@ PreviewPlay plan_set_play(const std::vector<PreviewBank> &banks, const std::stri
 	const PreviewBank *bank = nullptr;
 	int32_t index = -1;
 	for (const PreviewBank *candidate : search)
-		if ((index = set_in(candidate->file, set)) >= 0) {
+		if ((index = audio::find_bank_set(candidate->file, set)) >= 0) {
 			bank = candidate;
 			break;
 		}
@@ -89,12 +76,7 @@ PreviewPlay plan_set_play(const std::vector<PreviewBank> &banks, const std::stri
 	location.bank = int32_t(bank - banks.data());
 	location.set = index;
 	location.cull_range = int32_t(bank->file.multis[size_t(index)].target_id);
-	const audio::OneshotPlan plan =
-			heard && heard->at_distance
-					? audio::plan_oneshot_at_distance(bank->file, location, heard->distance_q16, selector, view_flags, true)
-			: heard ? audio::plan_oneshot_3d(bank->file, location, heard->source, heard->listener, true, 0, 0, nullptr,
-			                                 nullptr, selector, view_flags)
-			        : audio::plan_oneshot_at_distance(bank->file, location, 0, selector, view_flags, false);
+	const audio::SetFire plan = audio::plan_set_fire(bank->file, location, selector, view_flags, heard);
 	if (!plan.in_range) {
 		play.in_range = false;
 		play.words = play.set + " in " + play.bank + " is past its range of " +
@@ -102,14 +84,13 @@ PreviewPlay plan_set_play(const std::vector<PreviewBank> &banks, const std::stri
 		return play;
 	}
 	std::string words;
-	for (const audio::OneshotVoice &voice : plan.voices) {
+	for (const audio::SetFireVoice &fired : plan.voices) {
+		const audio::OneshotVoice &voice = fired.voice;
 		const lwf::Sndparm &member = bank->file.sndparms[voice.sndparm];
-		if (member.single_index >= bank->file.singles.size()) continue;
-		const lwf::Single &single = bank->file.singles[member.single_index];
 		PreviewVoice out;
 		out.layer = voice.layer;
-		out.wave = single.name;
-		out.file = file_name_of(single.path);
+		out.wave = fired.wave;
+		out.file = io::utf8_file_name(fired.path);
 		out.pitch_q16 = voice.pitch_q16;
 		out.volume = voice.vol255;
 		if (menu_master >= 0)
@@ -123,23 +104,16 @@ PreviewPlay plan_set_play(const std::vector<PreviewBank> &banks, const std::stri
 	return play;
 }
 
-const audio::SoundProfile *preview_profile(const std::vector<audio::SoundProfile> &profiles, const std::string &name) {
-	if (profiles.empty()) return nullptr;
-	for (const audio::SoundProfile &profile : profiles)
-		if (strutil::iequals(profile.name, name)) return &profile;
-	return &profiles.front();
-}
-
 PreviewPlay plan_slot_play(const std::vector<audio::SoundProfile> &profiles, const std::string &profile, int slot,
                            const std::vector<PreviewBank> &banks, const std::string &expansion,
-                           audio::SoundSelector &selector, uint8_t view_flags, const PreviewHearing *heard) {
+                           audio::SoundSelector &selector, uint8_t view_flags, const audio::SetHearing *heard) {
 	PreviewPlay play;
 	const char *keyword = audio::sound_profile_slot_keyword(slot);
 	if (!keyword) {
 		play.words = "No profile slot " + std::to_string(slot) + ": the slots run 0 to 50.";
 		return play;
 	}
-	const audio::SoundProfile *bound = preview_profile(profiles, profile);
+	const audio::SoundProfile *bound = audio::find_sound_profile(profiles, profile.c_str());
 	if (!bound) {
 		play.words = "SndProf.def has no profile: the game plays nothing.";
 		return play;
@@ -154,45 +128,28 @@ PreviewPlay plan_slot_play(const std::vector<audio::SoundProfile> &profiles, con
 	return play;
 }
 
-bool foot_surface_of(const std::string &word, FootSurface &out) {
-	if (strutil::iequals(word, "ground")) return out = FootSurface::Ground, true;
-	if (strutil::iequals(word, "snow")) return out = FootSurface::Snow, true;
-	if (strutil::iequals(word, "object")) return out = FootSurface::Object, true;
-	if (strutil::iequals(word, "water")) return out = FootSurface::Water, true;
+bool foot_surface_of(const std::string &word, audio::FootSurface &out) {
+	if (strutil::iequals(word, "ground")) return out = audio::FootSurface::Ground, true;
+	if (strutil::iequals(word, "snow")) return out = audio::FootSurface::Snow, true;
+	if (strutil::iequals(word, "object")) return out = audio::FootSurface::Object, true;
+	if (strutil::iequals(word, "water")) return out = audio::FootSurface::Water, true;
 	return false;
 }
 
-const char *foot_surface_word(FootSurface surface) {
+const char *foot_surface_word(audio::FootSurface surface) {
 	switch (surface) {
-	case FootSurface::Snow: return "snow";
-	case FootSurface::Object: return "object";
-	case FootSurface::Water: return "water";
-	case FootSurface::Ground: break;
+	case audio::FootSurface::Snow: return "snow";
+	case audio::FootSurface::Object: return "object";
+	case audio::FootSurface::Water: return "water";
+	case audio::FootSurface::Ground: break;
 	}
 	return "ground";
 }
 
-FootState foot_state_on(FootSurface surface) {
-	FootState state;
-	const bool water = surface == FootSurface::Water;
-	state.feet_z = water ? -1 : 0;
-	state.water_z = water ? 1 : 0;
-	state.on_entity = surface == FootSurface::Object;
-	state.surface_type = surface == FootSurface::Snow ? 3 : 0;
-	return state;
-}
-
-int footstep_slot_on(FootSurface surface, int foot) {
-	// The game's own test over the state that picks the surface: feet under a water plane, a ground
-	// entity, the charmap's surface 3 [orig: org2 @0x4b77c6-0x4b78a8].
-	const FootState state = foot_state_on(surface);
-	return audio::footstep_slot(state.feet_z, state.water_z, state.on_entity, state.surface_type, foot);
-}
-
 PreviewPlay plan_footstep_play(const std::vector<audio::SoundProfile> &profiles, const std::string &profile,
-                               FootSurface surface, int foot, const std::vector<PreviewBank> &banks,
+                               audio::FootSurface surface, int foot, const std::vector<PreviewBank> &banks,
                                const std::string &expansion, audio::SoundSelector &selector) {
-	return plan_slot_play(profiles, profile, footstep_slot_on(surface, foot), banks, expansion, selector);
+	return plan_slot_play(profiles, profile, audio::footstep_slot_on(surface, foot), banks, expansion, selector);
 }
 
 } // namespace opennova::editor
