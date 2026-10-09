@@ -161,7 +161,7 @@ bool MissionListen::refresh(const SessionView &view, const MissionScene &scene, 
 	// The dialog bank the mission loads and the text its subtitles read (DI-32).
 	files_ = view.findings.assets;
 	dialog_bank_ = mission_dialog_bank(document);
-	dialog_text_ = mission::mission_base_name(basename_of(document.path())) + ".bin";
+	dialog_mission_base_ = mission::mission_base_name(basename_of(document.path()));
 	(void)dialog_sources_now_(); // read again only where a stamp moved
 	const AssetGraph *graph = view.findings.graph.get();
 	const uint64_t files = view.findings.assets ? view.findings.assets->generation() : 0;
@@ -539,13 +539,14 @@ const DialogSources &MissionListen::dialog_sources_now_() {
 	}
 	// The stamps of what the read takes (the bank, its sounds either way, the text either way).
 	std::string stamps;
+	const mission::Sidecar &text = *mission::sidecar_for_role("text");
 	for (const std::string &name : {dialog_bank_, mission::dialog_sounds_name(dialog_bank_), mission::dialog_sounds_name(dialog_bank_, true),
-	                                dialog_text_, std::string("medmssn.bin")})
+	                                dialog_mission_base_ + text.extension, std::string(text.fallback)})
 		stamps += name + ":" + std::to_string(files_->stamp(name)) + "|";
 	if (stamps == dialog_stamps_) return dialog_sources_;
 	dialog_stamps_ = stamps;
 	std::string error;
-	if (!read_dialog_sources(*files_, dialog_bank_, dialog_text_, dialog_sources_, error)) dialog_sources_.bank_name = dialog_bank_;
+	if (!read_dialog_sources(*files_, dialog_bank_, dialog_mission_base_, dialog_sources_, error)) dialog_sources_.bank_name = dialog_bank_;
 	return dialog_sources_;
 }
 
