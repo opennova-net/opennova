@@ -11,6 +11,7 @@
 // spell their names at their port sites (wac_layered_load, the loading screen, the dialog bank)
 // and come to read a row on touch.
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -79,5 +80,27 @@ std::string dialog_bank_name(const std::string &mission_file, const std::string 
 // plus .pwf, which the game opens only where no .lwf of the name exists [orig:
 // DialogManager_LoadFromFile @ 0x44e7bb..0x44e807].
 std::string dialog_sounds_name(const std::string &dialog_bank, bool alternate = false);
+
+// The names a row's reader opens for a mission: its own name, then its alternate where it tries one
+// ("" none), and the file it needs beside it before it reads at all ("" none); the dialog rows by the
+// dialog bank the header picks (dialog_bank_name, its sounds dialog_sounds_name's). `header_slot` the
+// header's dialog bank slot as read ("" for none, as every shipped mission).
+struct SidecarNames {
+	std::string name;
+	std::string alternate;
+	std::string needs;
+};
+SidecarNames sidecar_names(const std::string &mission_file, const Sidecar &sidecar,
+		const std::string &header_slot = std::string());
+// Whether a row's reader reads for the mission at all: a row that needs another's file beside it
+// reads only where `has_file` finds that file [orig: DialogSystem_Init @ 0x5275e0, the exists check
+// @ 0x527648 before DialogManager_LoadFromFile @ 0x44e650 opens the sounds].
+bool sidecar_reads(const SidecarNames &names, const std::function<bool(const std::string &)> &has_file);
+// The row whose reader opens `file` for the mission (its name or its alternate, compared as the
+// archives compare names, pff::normalized_logical_name), among the rows that read (sidecar_reads);
+// null where none does.
+const Sidecar *sidecar_naming(const std::string &mission_file, const std::string &file,
+		const std::function<bool(const std::string &)> &has_file,
+		const std::string &header_slot = std::string());
 
 } // namespace opennova::mission

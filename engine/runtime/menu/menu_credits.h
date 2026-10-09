@@ -47,6 +47,16 @@ struct MarqueeCredits {
 	std::vector<MarqueeCreditNode> nodes;
 };
 
+// The [ENV] values and the two marks every credits file that loads starts over
+// from, before its own [ENV] keys are read (a key the [ENV] lacks then reads 0):
+// a scroll rate of 1, the images' centre at 400, no space between lines, a space
+// marked '_' and a comma '@' [orig: CMarqueeWnd_LoadCreditsFromIni @ 0x65c605..0x65c63d].
+inline constexpr float kMarqueeScrollRate = 1.0f;
+inline constexpr int kMarqueeCenterX = 400;
+inline constexpr int kMarqueeVerticalSpace = 0;
+inline constexpr char kMarqueeSpaceMark = '_';
+inline constexpr char kMarqueeCommaMark = '@';
+
 // Load one DATASOURCE and append its credits. `data` is the file's bytes; a CBIN
 // file (the "CBIN" magic) is the binary config form this port does not read here
 // (false, untouched: the embedder's credits scroller serves it). A text file reads
@@ -60,5 +70,10 @@ bool marquee_load_credits(const uint8_t *data, size_t size, MarqueeCredits &io,
 // two marks remapped [orig: CMarqueeWnd_RenderScrollingCredits @ 0x65ca00 — sprintf, then
 // this[185] -> ' ', this[186] -> ','].
 std::string marquee_node_text(const MarqueeCredits &credits, const MarqueeCreditNode &node);
+// The [TEXT] line a credits file writes to draw `shown` once it loads: each '%'
+// doubled, each space the space mark and each comma the comma mark the load sets,
+// marquee_node_text's formatting and remap inverted (a shown '_' or '@' has no
+// spelling: the remap draws it as a space or a comma).
+std::string marquee_marked_line(const std::string &shown);
 
 } // namespace opennova::menu

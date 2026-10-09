@@ -28,6 +28,10 @@ struct Area {
     // [orig: the load-time resolvers @0x453000/@0x453100 match record[0]].
     int32_t zone_id = -1;
     Aabb script_bounds; // raw authored bounds; WAC area3D ignores constrain-Z
+    // The record's box is flat on x or y, compared as its 16.16 words
+    // (mission::zone_box_flat): no zone parameter resolves to it [orig: the
+    // load-time resolvers' box tests @0x453093/@0x45317e].
+    bool flat = false;
 };
 
 // The seven default script groups, in their fixed slots 0..6: the names the
@@ -97,7 +101,8 @@ public:
     // Returns the area INDEX (the id space zone-resolved refs use). zone_id is the
     // authored record id [orig: zone record dword @0].
     int register_area(std::string name, const Aabb &bounds, bool active = true,
-                      int32_t zone_id = -1, std::optional<Aabb> script_bounds = {});
+                      int32_t zone_id = -1, std::optional<Aabb> script_bounds = {},
+                      bool flat = false);
     // The load-time id -> index resolve [orig: the @0x453000/@0x453100 scan over
     // record[0]]; -1 when no record carries the id.
     int area_index_by_zone_id(int32_t zone_id) const;

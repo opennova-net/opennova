@@ -3,6 +3,7 @@
 
 #include <base/io/le.h>
 #include <formats/def/reserved_items.h>
+#include <formats/mission/mission_params.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/vehicle_part_anim.h>
@@ -229,7 +230,8 @@ void initialize_class_brain(AiEntity &ae, const aip::Profile *profile, bool heli
 
 namespace {
 
-// Kind -> g_PoolList index: the BMS loader places each record list in its own pool.
+// Kind -> g_PoolList index: the BMS loader places each record list in its own pool
+// (the world's mirror of formats/mission's entity_pool, over world::EntityKind).
 // [orig: Mission_LoadBMSFile @0x40F4E0 — pool 1 @0x40f9bb..0x40f9c6, pool 2
 //  @0x40fa28..0x40fa34, pool 3 @0x40fa98..0x40faa4, pool 0 @0x40fb0d..0x40fb19]
 int pool_for_kind(EntityKind k) {
@@ -909,11 +911,13 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         else { b.min.z = bms::AreaTrigger::kUnboundedZMin; b.max.z = bms::AreaTrigger::kUnboundedZMax; }
         // The Active flag rides along for the player-AWOL probe, which walks only
         // active zones [orig: Entity_IsLocalPlayerOutOfBounds @0x439d40]. The
-        // authored id (record dword @0) rides along for the load-time zone-ref
-        // resolve [orig: @0x453000/@0x453100 match record[0]].
+        // authored id (record dword @0) and the flat-box test on the record's
+        // words ride along for the load-time zone-ref resolve [orig:
+        // @0x453000/@0x453100 match record[0]; mission::zone_box_flat].
         Aabb raw = b;
         raw.min.z = at.get_z_min(); raw.max.z = at.get_z_max();
-        world.registry.register_area(std::string(), b, at.is_active(), at.id, raw);
+        world.registry.register_area(std::string(), b, at.is_active(), at.id, raw,
+                                     zone_box_flat(at));
     }
 
     // [orig: Mission_LoadBMSFile @0x40FCC3] Normalize each bounding-box axis.

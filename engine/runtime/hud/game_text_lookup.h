@@ -8,6 +8,7 @@
 // presence-aware form (hud/end_round_overlay.h EndRoundTextLookup) because
 // its present-but-empty fold is witnessed.
 
+#include <cstddef>
 #include <cstdio>
 #include <functional>
 #include <string>
@@ -91,6 +92,24 @@ inline std::string text_key(const TextKeyForm &form, int number) {
 	char key[64];
 	std::snprintf(key, sizeof(key), "%s%03i", form.prefix, number);
 	return key;
+}
+
+// The characters of its STRWPNAME string a type-6005 waypoint keeps: the spawn cuts a longer one in
+// the mission's table itself, so every later read of that key reads the cut string [orig:
+// Entity_SpawnFromBMSRecord @0x40f0be..0x40f11e: the WPNames lookup of the record's +0x60 id in
+// g_TextMission, a strlen past 15 (`cmp ecx, 0Fh` @0x40f102) storing the strlen loop's NUL at
+// text[15] (`mov [ebp+0Fh], dl` @0x40f107), the cut text then copied to the entity's name;
+// HUD_GetWaypointName @0x59474c reads the same table through MissionText_GetString @0x51eb50].
+inline constexpr size_t kWaypointNameChars = 15;
+// A waypoint name as the spawn leaves it: its first kWaypointNameChars characters. The text is UTF-8,
+// each character one byte of the game's code page, so the cut counts characters, not bytes.
+inline std::string waypoint_name_as_spawned(const std::string &name) {
+	size_t characters = 0;
+	for (size_t at = 0; at < name.size(); ++at) {
+		if ((static_cast<unsigned char>(name[at]) & 0xC0) == 0x80) continue; // a continuation byte
+		if (characters++ == kWaypointNameChars) return name.substr(0, at);
+	}
+	return name;
 }
 
 // An EMPTY function is the "no string table" binding: every consumer answers
