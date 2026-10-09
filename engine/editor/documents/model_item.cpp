@@ -5,19 +5,16 @@
 #include <set>
 #include <string_view>
 
-#include <base/io/strutil.h>
 #include <formats/def/def.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm.h>
+#include <runtime/mission/seat_spec_extract.h>
+#include <runtime/world/collision.h>
 #include <runtime/world/model_geometry.h>
 
 namespace opennova::editor {
 
 namespace {
-
-// A blink box's collidable type (BB) [orig: Entity_ComputeBoneCollisionForce @ 0x4ae150, the type-8 arm
-// @ 0x4aea68]; editor/documents/model_collision_words.cpp names every type.
-constexpr int32_t kBlinkBox = 8;
 
 std::string counted(size_t count, const char *one, const char *many) {
 	return std::to_string(count) + " " + (count == 1 ? one : many);
@@ -58,11 +55,12 @@ ModelItemFacts model_item_facts(const threedi::Threedi3di3 &model) {
 	out.doors = door_count(model);
 	// A vehicle's seats and its driver's place [orig: EntityDef_LoadModelsAndCallbacks @ 0x439F50: `sitex`
 	// @ 0x43A4BC, `ctrlx` @ 0x43A50B, `drvrx` @ 0x43A549, each a five-character strnicmp]; a mounted gun's
-	// `UseGun`, a whole-name stricmp [orig: @ 0x43A582].
+	// `UseGun`, a whole-name stricmp [orig: @ 0x43A582]: the game's seat classes, mission::seat_type_for_user_point.
 	for (size_t i = 0; i < model.user_point_count; ++i) {
-		const std::string_view name = model.user_points[i].name;
-		if (threedi::threedi_user_point_is_sitex(name) || strutil::starts_with_icase(name, "ctrlx") ||
-		    strutil::starts_with_icase(name, "drvrx")) {
+		const std::string_view name = threedi::threedi_user_point_name(model.user_points[i]);
+		const world::SeatType seat = mission::seat_type_for_user_point(name);
+		if (seat == world::SeatType::Passenger || seat == world::SeatType::Controller ||
+		    seat == world::SeatType::Driver) {
 			out.kind = ModelItemKind::Vehicle;
 			out.type = def::DEF_ITEM_TYPE_VEHICLE;
 			out.makes = false;
@@ -71,7 +69,8 @@ ModelItemFacts model_item_facts(const threedi::Threedi3di3 &model) {
 		}
 	}
 	for (size_t i = 0; i < model.user_point_count; ++i)
-		if (strutil::iequals(model.user_points[i].name, "UseGun")) {
+		if (mission::seat_type_for_user_point(threedi::threedi_user_point_name(model.user_points[i])) ==
+		    world::SeatType::Gunner) {
 			out.kind = ModelItemKind::MountedWeapon;
 			out.type = def::DEF_ITEM_TYPE_OBJECT;
 			out.makes = false;
@@ -88,7 +87,7 @@ ModelItemFacts model_item_facts(const threedi::Threedi3di3 &model) {
 	size_t blink = 0;
 	if (model.collision)
 		for (size_t i = 0; i < model.collision->volume_count; ++i)
-			if (model.collision->volumes[i].collidable_type == kBlinkBox) ++blink;
+			if (model.collision->volumes[i].collidable_type == world::bvol_type::kBlinkBB) ++blink;
 	if (model.occlusion_object_count > 0 || blink > 0) {
 		out.kind = ModelItemKind::Building;
 		out.type = def::DEF_ITEM_TYPE_BUILDING;
