@@ -60,4 +60,15 @@ struct EffectClosure {
 EffectClosure effect_closure(const std::vector<EffectCatalogDocument> &documents, std::string_view name,
 		const EffectSceneConfig &limits = EffectSceneConfig());
 
+// What spawns of several names read of the catalog together (a picture that spawns more than one
+// effect: a definition's particle slot and death banks): each name's closure (`each`, in the order of
+// `names`) and one config holding every effect and definition they instantiate, each once by its
+// name as the catalog folds names (the closures read the same first registrations, so a name held
+// twice is one definition), and every table once (each closure carries them all), over which a scene
+// spawns each name as one opened over its own closure does. Its limits and seed are `limits`'; it
+// holds no document when no name found an effect.
+EffectSceneConfig effect_closures(const std::vector<EffectCatalogDocument> &documents,
+		const std::vector<std::string> &names, const EffectSceneConfig &limits,
+		std::vector<EffectClosure> &each);
+
 } // namespace opennova::particle

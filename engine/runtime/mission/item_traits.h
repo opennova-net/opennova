@@ -41,6 +41,16 @@ using ItemWireClassFn = std::function<uint8_t(int definition_id)>;
 void resolve_item_traits(world::World &world, const opennova::def::DefItemsFile &items,
                          const ItemWireClassFn &wire_class, world::EntityHandle only = {});
 
+// The death traits an items.def row carries itself (world/destruction.h ItemDeathTraits),
+// each from its def field: the event/death callback class from the ai_function tag, the
+// destroy timing, the squib and particlefx fields, unitType, kz, the armor words (an hp-0
+// def's read -1), the S&D/no-die/static-death attribs, the husk names' presence, the debris
+// rows, the death sound and the particle*death family. The fields the load adds are not
+// here: the regional shot and loop sounds (the loaded sound catalogs) and every model-derived
+// field (the collision sweep). [orig: the ItemDef fields Entity_ApplyWeaponDamage, the death
+// dispatch and Entity_InitDeathSounds read]
+world::ItemDeathTraits item_death_traits_from_def(const opennova::def::DefItemDef &def);
+
 // Rebind item SHOT slots after loading the bank/profile catalogs.
 void resolve_item_event_sounds(world::World &world, const def::DefItemsFile &items);
 

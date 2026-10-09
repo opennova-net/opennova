@@ -237,13 +237,8 @@ std::vector<ResourceFileEntry> ResourceIndex::resource_files(const std::string &
 }
 
 std::string ResourceIndex::particle_extension() const {
-	// The gore set the effect catalog loads alongside every `.ptl`. Retail picks it
-	// once at config time from the mere PRESENCE of `fgn2.bin` in the mount stack —
-	// the German content marker — and never re-reads it
-	// [orig: Game_LoadConfig @ 0x551480 sets byte_24D4DF9 = FileSystem_FileExists(
-	// "fgn2.bin") != 0 @0x5514e8..0x5514fa; CEffectSystem_Init @ 0x5f6070 reads it to
-	// pick ".ptg" over the ".ptu" default @0x5f608b..0x5f6095].
-	return has_file("fgn2.bin") ? std::string(".ptg") : std::string(".ptu");
+	// The gore set this mount picks (gore_particle_extension carries the witness).
+	return gore_particle_extension(has_file(kGoreContentMarker));
 }
 
 std::vector<std::string> ResourceIndex::effect_files() const {

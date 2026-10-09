@@ -875,7 +875,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     // clearance; the probe stores the hit entity into groundEntity.]
     const int32_t saved_z = pos[2];
     const int32_t feet_z = pos[2] - capsule_bottom;
-    pos[2] = (pos[2] + 6143) & ~0x17FF;
+    pos[2] = ground_probe_origin_z(pos[2]);
     EntityHandle ground_hit;
     lap.restart();
     const int32_t ground =

@@ -911,7 +911,7 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 		bool clear_airborne = grounded || ent->mounted;
 		bool set_airborne = false;
 		if (!clear_airborne && world.tables.terrain != nullptr && world.tables.terrain->valid()) {
-			const int32_t start[3] = {ae->pos[0], ae->pos[1], (ae->pos[2] + 6143) & ~0x17FF};
+			const int32_t start[3] = {ae->pos[0], ae->pos[1], world::ground_probe_origin_z(ae->pos[2])};
 			int32_t end[3] = {start[0], start[1], start[2] - 0x20000};
 			(void)world::terrain_clip_segment(*world.tables.terrain, start, end, end);
 			const int32_t ground = end[2];
