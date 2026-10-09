@@ -37,7 +37,7 @@
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
-#include "editor/png_test_support.h"
+#include "common/png_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -308,7 +308,7 @@ int test_graph() {
 	                                                                  "polytrn_detailblendmap blend.tga\n") &&
 	            editor_test::write_text(root + "/terrains/b.trn",
 	                                    trn_head + "polytrn_colormap bcol.tga\npolytrn_detailblendmap noblend.tga\n") &&
-	            editor_test::write_bytes(root + "/textures/ground.png", editor_test::gradient_png(2, 2)) &&
+	            editor_test::write_bytes(root + "/textures/ground.png", test_png::gradient_png(2, 2)) &&
 	            editor_test::write_bytes(root + "/textures/detail.tga", tga_bytes()) &&
 	            editor_test::write_bytes(root + "/textures/bcol.tga", tga_bytes()) &&
 	            editor_test::write_bytes(root + "/textures/splat.dds", tga_bytes()) &&
@@ -329,7 +329,7 @@ int test_graph() {
 		env = text.str();
 	}
 	TEST_EXPECT(editor_test::write_text(root + "/envs/sky.env", env) &&
-	            editor_test::write_bytes(root + "/textures/cloud2.png", editor_test::gradient_png(2, 2)));
+	            editor_test::write_bytes(root + "/textures/cloud2.png", test_png::gradient_png(2, 2)));
 	// A sky map's extension made PCX as the game parses it: haze.tga finds haze.pcx; only.tga, which the
 	// project holds as a TGA alone, finds nothing (the game opens only.dds or only.pcx).
 	{

@@ -1,7 +1,7 @@
 // ADR 0046 S18, the texture thumbnails (preview/texture_thumbnails): a texture's bytes as a small
 // picture (its proportions kept, averaged by alpha so a cut-out's hidden colour does not bleed, the DDS
 // level nearest above its size taken, the use's loader's transform applied, a file the game cannot load
-// said so); the PNG writer (import/png_encode) read back by the importer's reader; the session's cache
+// said so); the PNG writer (formats/png png_encode) read back by the PNG reader; the session's cache
 // (a picture asked for is made by a poll, once while the file's stamp stands, again when it moves); the
 // wire: the texture_thumbnail query's facts and base64 PNG, a texture field's record JSON naming the
 // file its loader opens and what that file is, a texture field's choices each the file it would load.
@@ -11,8 +11,6 @@
 #include <vector>
 
 #include <base/io/json.h>
-#include <editor/import/png_decode.h>
-#include <editor/import/png_encode.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/preview/texture_thumbnails.h>
 #include <editor/session/preferences_store.h>
@@ -20,6 +18,8 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/dds/dds.h>
+#include <formats/png/png_decode.h>
+#include <formats/png/png_encode.h>
 #include <formats/tga/tga.h>
 #include <runtime/renderer/texture_dxt.h>
 
@@ -29,6 +29,8 @@
 
 using namespace opennova::editor;
 using opennova::io::JsonValue;
+using opennova::png::decode_png;
+using opennova::png::encode_png_rgba;
 
 namespace {
 

@@ -113,7 +113,7 @@ bool texture_import_state(const SessionView &view, const std::string &path, Text
 		if (std::FILE *file = io::fopen_utf8(join_path(view.project.root, out.source).c_str(), "rb")) {
 			head.resize(std::fread(head.data(), 1, head.size(), file));
 			std::fclose(file);
-			alpha = image_source_has_alpha(out.source, head);
+			alpha = renderer::image_source_has_alpha(out.source, head);
 		}
 	}
 	// What the uses ask is the image importer's to answer, by its format, name, size and palette options; a
