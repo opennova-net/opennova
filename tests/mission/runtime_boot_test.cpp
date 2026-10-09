@@ -390,6 +390,13 @@ bool run_placed_tiles() {
 	ok &= expect(ms::read_placed_tiles(src, "other.bms", mission, out) == "EnvOwn.til" &&
 					bytes_string(out) == files["EnvOwn.til"],
 			"tiles: the .env's polytrn_tileinfo over the .trn's");
+	// The names form, over the header's two names without their extensions, is the same
+	// read (the bms::File form calls it): no environment reads the .trn's alone.
+	ok &= expect(ms::read_placed_tiles(src, "other.bms", "synthtrn", "synthenv", out) == "EnvOwn.til" &&
+					bytes_string(out) == files["EnvOwn.til"] &&
+					ms::read_placed_tiles(src, "other.bms", "synthtrn", "", out) == "Own.til" &&
+					ms::read_placed_tiles(src, "op.v2.bms", "synthtrn", "synthenv", out) == "op.til",
+			"tiles: the names form reads as the header's names");
 	files.erase("synthenv.env");
 
 	// Neither loads: no tiles, no name.
