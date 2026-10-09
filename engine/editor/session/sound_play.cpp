@@ -162,11 +162,12 @@ void play_dialog(SessionCore &core, const EditorRequest &request) {
 	const AssetEntry *entry = request.path.empty() ? nullptr : view.project.scan->named(request.path);
 	if (!entry) return refuse(core, "A dialog plays from the dialog bank or the mission path names: " +
 	                                        (request.path.empty() ? std::string("none is named.") : "the project has no " + request.path + "."));
-	// The bank and the mission text the subtitles read: a dialog bank's own name's, or the mission's.
-	std::string bank, text;
+	// The bank and the mission whose text the subtitles read (its base name): a dialog bank's own name's, or the
+	// mission's.
+	std::string bank, text_mission;
 	if (entry->kind == AssetKind::DialogBank) {
 		bank = entry->logical_name;
-		text = mission::mission_base_name(bank) + ".bin";
+		text_mission = mission::mission_base_name(bank);
 	} else if (entry->kind == AssetKind::Mission) {
 		std::unique_ptr<MissionDocument> loaded;
 		const auto *mission = dynamic_cast<const MissionDocument *>(open_at(view, entry->relative_path));
@@ -179,13 +180,13 @@ void play_dialog(SessionCore &core, const EditorRequest &request) {
 		}
 		if (!mission) return refuse(core, entry->logical_name + " could not be read.", entry->relative_path);
 		bank = mission_dialog_bank(*mission);
-		text = mission::mission_base_name(entry->logical_name) + ".bin";
+		text_mission = mission::mission_base_name(entry->logical_name);
 	} else {
 		return refuse(core, entry->logical_name + " is no dialog bank or mission: a dialog plays from one.", entry->relative_path);
 	}
 	DialogSources sources;
 	std::string error;
-	if (!read_dialog_sources(*files, bank, text, sources, error)) return refuse(core, error, entry->relative_path);
+	if (!read_dialog_sources(*files, bank, text_mission, sources, error)) return refuse(core, error, entry->relative_path);
 	// A wave's length as the game decodes it, its file the project's.
 	const auto seconds_of = [&](const std::string &file) {
 		std::vector<uint8_t> bytes;
