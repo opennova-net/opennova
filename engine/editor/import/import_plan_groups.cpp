@@ -46,7 +46,7 @@ std::vector<ImportPlanGroup> import_plan_groups(const ImportPlan &plan) {
 		std::map<std::string, size_t> by_name;
 		std::vector<size_t> group_of(plan.rows.size(), Group::kNone);
 		for (size_t i = 0; i < plan.rows.size(); ++i)
-			if (plan.rows[i].state != State::NotFound) by_name.emplace(normalized_logical_name(plan.rows[i].name), i);
+			if (plan.rows[i].state != State::NotFound) by_name.emplace(pff::normalized_logical_name(plan.rows[i].name), i);
 		for (size_t i = 0; i < plan.rows.size(); ++i) {
 			const ImportPlanRow &row = plan.rows[i];
 			if (row.state == State::NotFound) continue;
@@ -61,7 +61,7 @@ std::vector<ImportPlanGroup> import_plan_groups(const ImportPlan &plan) {
 			}
 			// Under the group of the file that wanted it (planned before it); a file whose wanting file the
 			// plan lacks, under a top group of its kind.
-			const auto wanting = by_name.find(normalized_logical_name(row.needed_by.file));
+			const auto wanting = by_name.find(pff::normalized_logical_name(row.needed_by.file));
 			const size_t parent = wanting == by_name.end() ? Group::kNone : group_of[wanting->second];
 			const size_t group = kind_group(parent, row.kind, parent == Group::kNone ? Group::kNone : groups[parent].root);
 			groups[group].rows.push_back(i);
@@ -73,7 +73,7 @@ std::vector<ImportPlanGroup> import_plan_groups(const ImportPlan &plan) {
 			const ImportPlanRow &row = plan.rows[i];
 			if (row.state != State::Found || row.wanted_by.size() < 2) continue;
 			for (size_t w = 1; w < row.wanted_by.size(); ++w) {
-				const auto other = by_name.find(normalized_logical_name(row.wanted_by[w]));
+				const auto other = by_name.find(pff::normalized_logical_name(row.wanted_by[w]));
 				if (other == by_name.end() || group_of[other->second] == Group::kNone) continue;
 				const size_t parent = group_of[other->second];
 				const size_t group = kind_group(parent, row.kind, groups[parent].root);

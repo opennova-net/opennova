@@ -97,7 +97,7 @@ std::vector<FixedTextureName> collect_fixed() {
 	std::set<std::string> seen;
 	const auto add = [&](const std::string &name, R role, const char *what, const char *witness,
 	                     TextureLoader loader = TextureLoader::kCount, int hud_mode = -1) {
-		if (name.empty() || !seen.insert(normalized_logical_name(name)).second) return;
+		if (name.empty() || !seen.insert(pff::normalized_logical_name(name)).second) return;
 		FixedTextureName row;
 		row.name = name;
 		row.role = role;
@@ -278,7 +278,7 @@ TextureUse fixed_use(const AssetScan &scan, const FixedTextureName &fixed, const
 }
 
 std::string stem_key(const std::string &name) {
-	return normalized_logical_name(utf8_of(path_of(basename_of(name)).stem()));
+	return pff::normalized_logical_name(utf8_of(path_of(basename_of(name)).stem()));
 }
 
 } // namespace
@@ -288,14 +288,14 @@ std::vector<TextureUse> texture_uses(const AssetGraph &graph, const AssetScan &s
 	std::vector<TextureUse> out;
 	const AssetEntry *entry = scan.at_path(file);
 	if (!entry) return out;
-	const std::string key = normalized_logical_name(entry->logical_name);
+	const std::string key = pff::normalized_logical_name(entry->logical_name);
 	// The graph's edges that resolve to the file, then those whose name is the file's though their loader
 	// opens another (a .tga beside the .dds the loader takes).
 	std::vector<const GraphEdge *> edges;
 	for (const GraphEdge *edge : graph.referrers_of_file(file))
 		if (texture_edge(*edge)) edges.push_back(edge);
 	graph.for_each_edge([&](const GraphEdge &edge) {
-		if (!texture_edge(edge) || normalized_logical_name(basename_of(edge.value)) != key) return;
+		if (!texture_edge(edge) || pff::normalized_logical_name(basename_of(edge.value)) != key) return;
 		if (std::find(edges.begin(), edges.end(), &edge) == edges.end()) edges.push_back(&edge);
 	});
 	std::map<std::string, std::shared_ptr<const Document>> read;
@@ -304,7 +304,7 @@ std::vector<TextureUse> texture_uses(const AssetGraph &graph, const AssetScan &s
 		// A terrain detail is read by its own name too (texture_role_read_by_name): the file of the name
 		// as written is read whatever its loader's .dds.
 		use.reads_file = use.served == file || (texture_role_read_by_name(use.role) &&
-		                                        normalized_logical_name(basename_of(use.name_written)) == key);
+		                                        pff::normalized_logical_name(basename_of(use.name_written)) == key);
 		use.words = use_words(use);
 		out.push_back(std::move(use));
 	}
@@ -312,7 +312,7 @@ std::vector<TextureUse> texture_uses(const AssetGraph &graph, const AssetScan &s
 	// .dds beside the name the game writes).
 	const std::string stem = stem_key(entry->logical_name);
 	for (const FixedTextureName &fixed : fixed_texture_names()) {
-		const bool named = normalized_logical_name(fixed.name) == key;
+		const bool named = pff::normalized_logical_name(fixed.name) == key;
 		if (!named && stem_key(fixed.name) != stem) continue;
 		TextureUse use = fixed_use(scan, fixed, exists);
 		if (!named && use.served != file) continue;
@@ -324,9 +324,9 @@ std::vector<TextureUse> texture_uses(const AssetGraph &graph, const AssetScan &s
 }
 
 bool texture_use_opens(const TextureUse &use, const std::string &file) {
-	const std::string wanted = normalized_logical_name(basename_of(file));
+	const std::string wanted = pff::normalized_logical_name(basename_of(file));
 	if (wanted.empty() || use.name_written.empty()) return false;
-	const TextureNameTest only = [&wanted](const std::string &name) { return normalized_logical_name(basename_of(name)) == wanted; };
+	const TextureNameTest only = [&wanted](const std::string &name) { return pff::normalized_logical_name(basename_of(name)) == wanted; };
 	TextureLoad load;
 	if (use.loader != TextureLoader::kCount)
 		load = texture_load(use.loader, use.name_written, only, 0, use.context.hud_mode, use.role);
@@ -335,14 +335,14 @@ bool texture_use_opens(const TextureUse &use, const std::string &file) {
 	else if (use.known())
 		load = texture_load(texture_role_row(use.role).loader, use.name_written, only, 0, use.context.hud_mode, use.role);
 	else
-		return normalized_logical_name(basename_of(use.name_written)) == wanted;
-	return !load.file.empty() && normalized_logical_name(basename_of(load.file)) == wanted;
+		return pff::normalized_logical_name(basename_of(use.name_written)) == wanted;
+	return !load.file.empty() && pff::normalized_logical_name(basename_of(load.file)) == wanted;
 }
 
 std::vector<TextureUse> texture_uses_named(const AssetGraph &graph, const AssetScan &scan, const std::string &stem,
                                            const TextureModelSource &models, const TextureNameTest &exists) {
 	std::vector<TextureUse> out;
-	const std::string key = normalized_logical_name(stem);
+	const std::string key = pff::normalized_logical_name(stem);
 	if (key.empty()) return out;
 	std::map<std::string, std::shared_ptr<const Document>> read;
 	graph.for_each_edge([&](const GraphEdge &edge) {
