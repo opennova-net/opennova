@@ -90,12 +90,12 @@ std::string number_words(float value) {
 
 } // namespace
 
-const char *water_from_token(WaterFrom from) {
+const char *water_from_token(env::WaterRung from) {
 	switch (from) {
-	case WaterFrom::Mission: return "mission";
-	case WaterFrom::Terrain: return "terrain";
-	case WaterFrom::Environment: return "environment";
-	case WaterFrom::None: break;
+	case env::WaterRung::Mission: return "mission";
+	case env::WaterRung::Terrain: return "terrain";
+	case env::WaterRung::Environment: return "environment";
+	case env::WaterRung::None: break;
 	}
 	return "none";
 }
@@ -206,18 +206,13 @@ EnvironmentUses environment_uses(const SessionView &view, const std::string &pat
 		// where it writes one, then the terrain's, whose line the parse reads first (runtime/environment/
 		// water_frame.h, env #28 and #44) [orig: TimeOfDay_ParseProperty @ 0x57cb4e; Environment_LoadTimeOfDayConfig
 		// @ 0x57dbeb, @ 0x57dcbf; Terrain_Init @ 0x60fcb1..0x60fcba; Game_LoadTerrainDuringConnect @ 0x520710].
-		env::WaterHeightRungs rungs;
-		rungs.has_mission_override = use.overrides.has_water_height;
-		rungs.mission_override = use.overrides.has_water_height ? use.overrides.water_height * 0.5f : 0.0f;
-		rungs.terrain_height = use.terrain_read ? float(use.terrain_water) * 0.5f : 0.0f;
-		rungs.has_loaded_terrain = use.terrain_read;
+		const env::WaterHeightRungs rungs = env::mission_water_rungs(
+				use.overrides, use.terrain_read ? float(use.terrain_water) * 0.5f : 0.0f, use.terrain_read);
 		env::EnvironmentState state;
 		if (environment_read) state.set_config(&environment, true);
-		use.water_height = env::resolve_water_height(rungs, environment_read ? &state : nullptr, 0.0f);
-		use.water_from = rungs.has_mission_override                          ? WaterFrom::Mission
-		                 : environment_read && environment.water_height_set ? WaterFrom::Environment
-		                 : rungs.terrain_height != 0.0f                      ? WaterFrom::Terrain
-		                                                                     : WaterFrom::None;
+		const env::ResolvedWaterHeight water = env::resolve_water_rung(rungs, environment_read ? &state : nullptr, 0.0f);
+		use.water_height = water.height;
+		use.water_from = water.rung;
 		uses.missions.push_back(std::move(use));
 	}
 	return uses;
@@ -248,16 +243,16 @@ std::string mission_clock_words(const EnvironmentMissionUse &use) {
 		std::snprintf(text, sizeof(text), "starts at %02d:%02d, the clock standing", hours, minutes);
 	else
 		std::snprintf(text, sizeof(text), "starts at %02d:%02d, a day of %d min", hours, minutes,
-		              use.minutes_per_day < env::kTodMinMinutesPerDay ? env::kTodMinMinutesPerDay : use.minutes_per_day);
+		              env::tod_floored_minutes_per_day(use.minutes_per_day));
 	return text;
 }
 
 std::string water_words(const EnvironmentMissionUse &use) {
 	switch (use.water_from) {
-	case WaterFrom::Mission: return "at " + number_words(use.water_height) + " m, from the mission's header";
-	case WaterFrom::Terrain: return "at " + number_words(use.water_height) + " m, from the terrain";
-	case WaterFrom::Environment: return "at " + number_words(use.water_height) + " m, from this environment";
-	case WaterFrom::None: break;
+	case env::WaterRung::Mission: return "at " + number_words(use.water_height) + " m, from the mission's header";
+	case env::WaterRung::Terrain: return "at " + number_words(use.water_height) + " m, from the terrain";
+	case env::WaterRung::Environment: return "at " + number_words(use.water_height) + " m, from this environment";
+	case env::WaterRung::None: break;
 	}
 	return "set by none of the mission's header, its terrain and this environment";
 }

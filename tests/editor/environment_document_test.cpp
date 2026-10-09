@@ -595,12 +595,12 @@ int test_session() {
 				            overrides[0].words == "fog distance 800 m");
 				// The environment's water height (4 half metres) writes after the terrain's (25), so it is the
 				// mission's (env #44).
-				TEST_EXPECT(use.water_from == WaterFrom::Environment && use.water_height == 2.0f);
+				TEST_EXPECT(use.water_from == opennova::env::WaterRung::Environment && use.water_height == 2.0f);
 				TEST_EXPECT(mission_clock_words(use) == "starts at 06:00, a day of 60 min");
 			} else {
 				TEST_EXPECT(overrides.size() == 1 && std::string(overrides[0].field) == "water_override" &&
 				            overrides[0].words == "water height 15 m");
-				TEST_EXPECT(use.water_from == WaterFrom::Mission && use.water_height == 15.0f);
+				TEST_EXPECT(use.water_from == opennova::env::WaterRung::Mission && use.water_height == 15.0f);
 			}
 		}
 		opennova::io::JsonValue args = opennova::io::JsonValue::make_object();
