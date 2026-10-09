@@ -19,7 +19,7 @@ std::string folder_of(const std::string &relative) {
 // The kind a file of the project is placed as: an import source as the kind its name gives (a PNG
 // sits with the textures it makes).
 AssetKind placed_kind(const AssetEntry &entry) {
-	return entry.kind == AssetKind::ImportSource ? asset_kind_for_name(entry.logical_name) : entry.kind;
+	return entry.kind == AssetKind::ImportSource ? file_kind_for_name(entry.logical_name) : entry.kind;
 }
 
 } // namespace
@@ -72,7 +72,7 @@ std::string placement_folder(const AssetScan &scan, AssetKind kind) {
 }
 
 std::string placement_path(const AssetScan &scan, const std::string &name, AssetKind kind) {
-	const AssetKind placed = kind == AssetKind::ImportSource ? asset_kind_for_name(name) : kind;
+	const AssetKind placed = kind == AssetKind::ImportSource ? file_kind_for_name(name) : kind;
 	const std::string folder = placement_folder(scan, placed);
 	return folder.empty() ? name : folder + "/" + name;
 }

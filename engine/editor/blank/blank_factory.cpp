@@ -327,7 +327,7 @@ bool make_blank(const BlankRequest &request, AssetKind kind, std::vector<uint8_t
 bool make_from(const BlankFactory &factory, const BlankRequest &request, std::vector<uint8_t> &out,
                Diagnostic &error) {
 	if (!factory.make(request, out, error)) return false;
-	if (asset_kind_row(factory.kind).line_reader != LineReader::ConfigFile) return true;
+	if (file_kind_facts(factory.kind).line_reader != LineReader::ConfigFile) return true;
 	const configfile::DataStringsPool pool = configfile::data_strings_pool(out.data(), out.size());
 	if (pool.overrun() == 0) return true;
 	error = make_finding(CoreFinding::DocumentConfigOverrun, DiagnosticSeverity::Error,
