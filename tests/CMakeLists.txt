@@ -3739,6 +3739,24 @@ if(BUILD_NOVAWORLD_HTTP)
     add_test(NAME opennova_novaworld_server_http_routes COMMAND opennova_novaworld_server_http_routes_test)
 endif()
 
+# The server binary's signal shutdown: SIGINT and SIGTERM each run main()'s
+# orderly stop (exit 0, listeners in order, the WAL closed) with the HTTP layer
+# on or off; with it on, past Crow and a held-open request. POSIX only (fork,
+# kill); TIMEOUT bounds it should the child hang, and the child dies with it.
+if(UNIX)
+    add_executable(opennova_novaworld_server_signal_shutdown_test
+        novaworld/server_signal_shutdown_test.cpp)
+    target_link_libraries(opennova_novaworld_server_signal_shutdown_test PRIVATE opennova_app_common)
+    target_include_directories(opennova_novaworld_server_signal_shutdown_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(opennova_novaworld_server_signal_shutdown_test PRIVATE
+        OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+        $<$<BOOL:${BUILD_NOVAWORLD_HTTP}>:OPENNOVA_HTTP_ENABLED>)
+    add_dependencies(opennova_novaworld_server_signal_shutdown_test opennova_novaworld_server)
+    add_test(NAME opennova_novaworld_server_signal_shutdown
+        COMMAND opennova_novaworld_server_signal_shutdown_test $<TARGET_FILE:opennova_novaworld_server>)
+    set_tests_properties(opennova_novaworld_server_signal_shutdown PROPERTIES TIMEOUT 120)
+endif()
+
 # Unknown-message tracker: record/dedup, sample cap, flush/upsert against the
 # real 0004 migration (OPENNOVA_SOURCE_DIR for the SQL on disk), snapshot.
 add_executable(unknown_tracker_test novaworld/unknown_tracker_test.cpp)

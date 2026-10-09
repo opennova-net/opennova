@@ -40,6 +40,13 @@ session handshake, the browser/host/play container services, and the legacy
 - **The `UnknownTracker` records from listener threads** into an in-memory,
   mutex-guarded accumulator and is flushed to the DB only on the main tick — never
   per packet.
+- **`main()` owns SIGINT and SIGTERM** (Ctrl+C; `docker stop` sends SIGTERM). The
+  handler only raises the shutdown flag; the tick loop sees it within one tick and
+  stops in order: the HTTP listener (Crow's threads joined, a held-open request
+  included), then the gate and NW UDP receive threads (each returns its lease),
+  then the connections (`Shutdown`). The main lease and the pool close last, and the
+  last close checkpoints the WAL. The HTTP listener clears Crow's own signal set
+  (`signal_clear()`), which would otherwise take both signals and stop only Crow.
 
 ## Connection lifecycle
 
@@ -96,4 +103,9 @@ Every source but `main.cpp` builds as the static library
 drives the Crow listener in-process on a loopback port over a `db::ConnectionPool`
 on a SQLite file under `backend/migrations`, with `apps/common`'s `http_exchange`. It exists only
 with `BUILD_NOVAWORLD_HTTP=ON` and runs in `net-linux.yml` and `ci.yml`'s
-test-linux.
+test-linux. The ctest `opennova_novaworld_server_signal_shutdown`
+([`tests/novaworld/server_signal_shutdown_test.cpp`](../../tests/novaworld/server_signal_shutdown_test.cpp),
+POSIX builds) runs the real binary on a temp database, sends SIGINT and then
+SIGTERM to a fresh run, and expects exit 0, the shutdown legs logged in order and
+no WAL file left; with the HTTP layer it holds a half-sent request open across the
+signal.
