@@ -120,20 +120,6 @@ const char *model_occlusion_type_what(int64_t type) {
 	}
 }
 
-bool model_section_breaks(const threedi::ThreediCollisionObject &section) { return (section.unk0 & 2) != 0; }
-
-bool model_section_is_person(const threedi::Threedi3di3 &model, size_t section) {
-	const threedi::ThreediCollisionModel *c = model.collision;
-	if (model.header.mesh_type != threedi::THREEDI_MESH_SKINNED || !c || section >= c->object_count) return false;
-	const threedi::ThreediCollisionObject &object = c->objects[section];
-	if (object.num_faces != 0 || object.num_bounding_volumes != 0) return false;
-	// A person's whole-body row holds the face mesh (docs/world/world-wac-ai-re.md section 15.8b,
-	// person-model subobjects): a skinned model with no face anywhere is no person's.
-	for (size_t o = 0; o < c->object_count; ++o)
-		if (c->objects[o].num_faces > 0) return true;
-	return false;
-}
-
 const char *const kModelCollisionWords =
 		"What the game tests the model against: its volumes for contact and lines of sight, its bullet "
 		"faces for rounds, its sections' spheres and boxes before either.";

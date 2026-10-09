@@ -23,8 +23,8 @@ namespace {
 constexpr NodeKind kMaterial = node_kind(ModelKind::Material);
 constexpr NodeKind kFace = node_kind(ModelKind::Face);
 
-// The game's table plays a face byte's surface as row `byte + 4`.
-constexpr int kTagOffset = 4;
+// The game's table plays a face byte's surface as row `byte + 4` (world::kSurfaceImpactTagOffset).
+constexpr int kTagOffset = world::kSurfaceImpactTagOffset;
 
 // A modder's word for each surface, by its face byte (0 to 23: rows 4 to 27 of the tag table, in the
 // words the tools share, world::kImpactEffectTagWords).
@@ -109,14 +109,14 @@ const std::vector<FieldChoice> &model_surface_choices() {
 // matters only beside 0x800]
 const std::vector<ModelFaceFlag> &model_face_flags() {
 	static const std::vector<ModelFaceFlag> flags = {
-		{0x1, "both_sides", "Both sides",
+		{THREEDI_CFAC_FLAG_BOTH_SIDES, "both_sides", "Both sides",
 		 "Rounds meet the face from either side even where Front only is set. On its own it changes nothing: the "
 		 "game tests every face from both sides."},
-		{0x100, "bullets_pass", "Bullets pass",
+		{THREEDI_CFAC_FLAG_BULLETS_PASS, "bullets_pass", "Bullets pass",
 		 "Every round passes the face with no effect and no energy cost: the game's face test skips it (retail's "
 		 "rotor blades). The soft surfaces (Water, Glass, Cloth, Foliage, Flesh) also let rounds through, at an "
 		 "energy cost and with their effect."},
-		{0x800, "front_only", "Front only",
+		{THREEDI_CFAC_FLAG_FRONT_ONLY, "front_only", "Front only",
 		 "Rounds meet the face only entering it from its front (the side it faces); from behind they pass. Both "
 		 "sides overrides it. No retail face sets it."},
 	};

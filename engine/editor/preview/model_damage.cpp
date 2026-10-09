@@ -24,15 +24,8 @@ std::string file_of(const std::string &path) {
 	return path.substr(path.find_last_of("/\\") + 1);
 }
 
-// The count of a model's user points named `name` (any case), over all of them or the first 16 the
-// death banks scan.
-int points_named(const threedi::Threedi3di3 &model, const char *name, bool first16) {
-	if (first16) {
-		const uint16_t mask = threedi::threedi_3di3_user_point_mask(&model, name);
-		int count = 0;
-		for (uint16_t m = mask; m; m &= uint16_t(m - 1)) ++count;
-		return count;
-	}
+// The count of a model's user points named `name` (any case), over all of them.
+int points_named(const threedi::Threedi3di3 &model, const char *name) {
 	int count = 0;
 	for (size_t i = 0; model.user_points && i < model.user_point_count; ++i)
 		if (strutil::iequals(model.user_points[i].name, name)) ++count;
@@ -132,27 +125,35 @@ void sound_leg(int32_t tick, const std::string &set, const char *cite, DamagePla
 void death_sounds_legs(int32_t tick, const DamageItem &item, const DamageModels &models, DamagePlan &plan) {
 	const char *cite = "[orig: Entity_InitDeathSounds @ 0x4939B0]";
 	sound_leg(tick, item.sounddeath, cite, plan);
-	const bool banks = models.husk_read || models.piece_read; // the banks need a loaded husk model
-	struct Bank {
-		const std::string &effect;
-		int points;
-		const char *bone;
-	};
-	const Bank rows[] = {{item.particledeath, models.dead_points, "Dead"},
-	                     {item.particlefire, models.fire_points, "Fire"},
-	                     {item.particleother, models.other_points, "Other"}};
-	for (const Bank &bank : rows) {
-		if (bank.effect.empty() || !banks) continue;
-		const bool dead = std::string(bank.bone) == "Dead";
-		if (bank.points == 0 && !dead) continue; // a Fire or Other bank with no point spawns nothing
-		std::string where = bank.points ? "at the piece model's " + plural(bank.points, bank.bone, bank.bone) + " point" +
-		                                          (bank.points == 1 ? "" : "s")
-		                                : std::string("once at the item (the husk names no Dead point)");
-		std::string words = std::string("The ") + bank.bone + " bank: " + bank.effect + " " + where;
-		if (dead && !item.particleh2odeath.empty())
+	// The banks as the game spawns them (world::death_bank_spawns): each effect at its bank's points on the
+	// piece model, the Dead bank once at the item where it has none, a Fire or Other bank with none nothing,
+	// and no bank without a loaded husk model. The preview's item is dry.
+	world::ItemDeathTraits traits;
+	traits.husk_model_loaded = models.husk_read || models.piece_read;
+	traits.particledeath = item.particledeath;
+	traits.particleh2odeath = item.particleh2odeath;
+	traits.particlefire = item.particlefire;
+	traits.particleother = item.particleother;
+	traits.effect_banks = models.banks;
+	const std::vector<world::DeathBankSpawn> spawns = world::death_bank_spawns(traits, false);
+	const char *const bones[3] = {"Dead", "Fire", "Other"};
+	for (uint8_t family = 1; family <= 3; ++family) {
+		const world::DeathBankSpawn *first = nullptr;
+		int points = 0;
+		for (const world::DeathBankSpawn &spawn : spawns) {
+			if (spawn.family != family) continue;
+			if (!first) first = &spawn;
+			points += spawn.section_tagged ? 1 : 0;
+		}
+		if (!first) continue;
+		const char *bone = bones[family - 1];
+		std::string where = points ? "at the piece model's " + plural(points, bone, bone) + " point" + (points == 1 ? "" : "s")
+		                           : std::string("once at the item (the husk names no Dead point)");
+		std::string words = std::string("The ") + bone + " bank: " + first->effect + " " + where;
+		if (family == 1 && !item.particleh2odeath.empty())
 			words += " (" + item.particleh2odeath + " in its place for an item under water)";
-		plan.legs.push_back(leg(tick, "effect", bank.effect, words + ".", cite, kEffectNamed));
-		plan.legs.back().bank = int(&bank - rows) + 1;
+		plan.legs.push_back(leg(tick, "effect", first->effect, words + ".", cite, kEffectNamed));
+		plan.legs.back().bank = family;
 	}
 	const bool husk_kz = !item.husk.empty() && models.kz_points > 0;
 	const std::string blast = world::kAmmoKzOrganicBlast;
@@ -280,15 +281,13 @@ bool read_damage_options(const io::JsonValue &json, DamageOptions &held, std::st
 
 void note_damage_husk(const threedi::Threedi3di3 &husk, DamageModels &models) {
 	models.husk_read = true;
-	models.kz_points = points_named(husk, "KZ", false);
+	models.kz_points = points_named(husk, "KZ");
 }
 
 void note_damage_pieces(const threedi::Threedi3di3 &pieces, DamageModels &models) {
 	models.piece_read = true;
 	models.piece_sections = pieces.lod_count > 0 && pieces.lods ? int(pieces.lods[0].render_object_count) : 0;
-	models.dead_points = points_named(pieces, "Dead", true);
-	models.fire_points = points_named(pieces, "Fire", true);
-	models.other_points = points_named(pieces, "Other", true);
+	world::death_effect_banks_of(pieces, models.banks);
 }
 
 DamagePlan damage_plan(const DamageItem &item, const DamageModels &models) {
@@ -391,7 +390,8 @@ DamagePlan damage_plan(const DamageItem &item, const DamageModels &models) {
 		const int32_t delay = item.destroy_timing_ticks[0];
 		const int32_t duration = world::destroy_fade_duration_ticks(item.destroy_timing_ticks);
 		const int32_t step = world::destroy_fade_stagger_ticks(item.destroy_timing_ticks);
-		const int32_t start = delay ? std::max(delay, plan.swap_tick) : plan.swap_tick;
+		// Shown from the husk on, or from the delay's restamp (world::destroy_fade_origin_tick).
+		const int32_t start = delay ? world::destroy_fade_origin_tick(delay, plan.swap_tick) : plan.swap_tick;
 		plan.legs.push_back(leg(start, "fade", plan.husk,
 		                        "The destroy fade on " + plan.husk + ": OBJECT_DESTROY over " +
 		                                seconds(world::destroy_fade_total_ticks(item.destroy_timing_ticks)) +
@@ -415,15 +415,14 @@ DamageFrame damage_frame(const DamagePlan &plan, const DamageItem &item, int32_t
 	// first husked evaluation past it [orig: Entity_PublishSwapFadePhases @ 0x5C3F40; update_item_destroy_fade].
 	const int32_t delay = item.destroy_timing_ticks[0];
 	if (delay && ticks < delay) return frame;
-	const int32_t origin = delay ? std::max(delay, plan.swap_tick) : 0;
+	const int32_t origin = world::destroy_fade_origin_tick(delay, plan.swap_tick);
 	frame.fade_elapsed = ticks - origin;
 	frame.fade = world::destroy_fade_phases(frame.fade_elapsed, item.destroy_timing_ticks);
 	return frame;
 }
 
 int32_t damage_fade_end_tick(const DamagePlan &plan, const DamageItem &item) {
-	const int32_t delay = item.destroy_timing_ticks[0];
-	const int32_t origin = delay ? std::max(delay, plan.swap_tick) : 0;
+	const int32_t origin = world::destroy_fade_origin_tick(item.destroy_timing_ticks[0], plan.swap_tick);
 	return std::max(origin + world::destroy_fade_total_ticks(item.destroy_timing_ticks), plan.swap_tick);
 }
 

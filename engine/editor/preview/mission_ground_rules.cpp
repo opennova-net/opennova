@@ -3,6 +3,7 @@
 #include <editor/preview/mission_ground_rules.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 
@@ -23,6 +24,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/model_geometry.h>
+#include <runtime/world/physics_class_table.h>
 
 namespace opennova::editor {
 
@@ -43,30 +45,13 @@ constexpr int kCellShift = 22;
 int32_t fixed(double units) { return bms::to_fixed_16_16(units); }
 double units(int32_t q16) { return double(q16) / kUnit; }
 
-// The rows of the physics table whose update keeps the entity's height (mission_ground_rules.h); every
-// other row moves it. A name the table lacks takes row 0, null [orig: EntityDef_LookupPhysicsCallback
-// @0x4a9240, stricmp over the rows of g_EntityClassPhysicsTable @0x82abc8].
-constexpr const char *kKeepingRows[] = { "null", "envs", "ewep", "door", "genx", "upfx", "org0", "chld" };
-constexpr const char *kTableRows[] = { "null", "envs", "ewep", "ele0", "door", "towr", "genx", "org0", "org1",
-	"org2", "upfx", "nade", "rock", "schl", "clym", "arti", "squib", "CHel", "cveh", "ctank", "cbike", "cbot", "catv",
-	"cpln", "ctrn", "chld", "aflr", "gflr", "rokt", "stng", "hlfr", "jvln", "arty", "psec" };
-
-// The row a move_function binds ("null" for a name the table lacks).
-std::string move_row(const std::string &move_function) {
-	for (const char *row : kTableRows)
-		if (strutil::iequals(row, move_function)) return row;
-	return "null";
-}
-bool row_keeps_height(const std::string &row) {
-	for (const char *keeping : kKeepingRows)
-		if (strutil::iequals(keeping, row)) return true;
-	return false;
-}
-
 // The volumes a body stands on, leans on or hangs from: the generic solid (CB, 1), the ladder (CL, 4), the
 // vehicles' solid (VC, 7) and the players' (CP, 19) (docs/world/world-wac-ai-re.md 15.4); not the blink,
 // trigger, armory, damage or occlusion boxes.
-bool touch_type(int32_t type) { return type == 1 || type == 4 || type == 7 || type == 19; }
+bool touch_type(int32_t type) {
+	return type == world::bvol_type::kSolidCB || type == world::bvol_type::kLadderCL ||
+	       type == world::bvol_type::kVehicleVC || type == world::bvol_type::kPlayerCP;
+}
 
 std::string metres(double value) {
 	char text[32];
@@ -313,8 +298,8 @@ const MissionGroundReads::Model *MissionGroundReads::model(const FileSource &fil
 		if (parsed.collision != nullptr) {
 			const threedi::ThreediCollisionModelData &data = parsed.collision->model_data;
 			model.bounds = true;
-			for (int i = 0; i < 6; ++i)
-				model.box[i] = data.has_bbox_fp16 ? data.bbox_fp16[i] : io::float_to_fp16_16_round_sat(data.bbox[i]);
+			const std::array<int32_t, 6> box = world::collision_bbox_q16(data);
+			for (int i = 0; i < 6; ++i) model.box[i] = box[i];
 			auto collision = std::make_shared<world::CollisionModel>();
 			if (world::collision_model_from_3di(parsed.collision, *collision) && !collision->volumes.empty()) {
 				collision->finalize_sections();
@@ -322,7 +307,7 @@ const MissionGroundReads::Model *MissionGroundReads::model(const FileSource &fil
 				// The solids' horizontal reach: their type-1 volumes' farthest corner from the origin.
 				double reach = 0.0;
 				for (const world::CollisionVolume &volume : collision->volumes) {
-					if (volume.type != 1) continue;
+					if (volume.type != world::bvol_type::kSolidCB) continue;
 					for (const int32_t vx : { volume.min_x, volume.max_x })
 						for (const int32_t vy : { volume.min_y, volume.max_y })
 							reach = std::max(reach, std::sqrt(double(vx) * vx + double(vy) * vy));
@@ -423,7 +408,11 @@ std::vector<MissionGroundVerdict> mission_ground_verdicts(const MissionScene &sc
 			out.push_back(std::move(verdict));
 			continue;
 		}
-		const std::string row = move_row(r.item->move_function);
+		// The row its move_function binds, a name the table lacks row 0, null [orig:
+		// EntityDef_LookupPhysicsCallback @0x4a9240], and whether that row's update keeps the entity's height
+		// (world::physics_class_keeps_height, mission_ground_rules.h).
+		const world::PhysicsClass physics = world::physics_class_from_move_function(r.item->move_function);
+		const std::string row = world::physics_class_row_name(physics);
 		int32_t terrain = 0;
 		const bool has_terrain = world::terrain_column_height(field, x, y, terrain);
 		verdict.terrain = has_terrain ? units(terrain) : 0.0;
@@ -489,13 +478,15 @@ std::vector<MissionGroundVerdict> mission_ground_verdicts(const MissionScene &sc
 			// Entity_UpdateInfantryPlayerBody @0x4b40e0], landing where the game puts them; another class has
 			// no update and leaves the body in the air.
 			verdict.why = "move:" + row;
-			verdict.state = (row == "org1" || row == "org2") ? MissionGroundState::Falls : MissionGroundState::Hangs;
+			verdict.state = (physics == world::PhysicsClass::Org1 || physics == world::PhysicsClass::Org2)
+			                        ? MissionGroundState::Falls
+			                        : MissionGroundState::Hangs;
 			verdict.fix_z = units(io::bam_sub(z, drop));
 			out.push_back(std::move(verdict));
 			continue;
 		}
 
-		if (!row_keeps_height(row)) {
+		if (!world::physics_class_keeps_height(physics)) {
 			verdict.rule = MissionGroundRule::Mover;
 			verdict.why = "move:" + row;
 			out.push_back(std::move(verdict));

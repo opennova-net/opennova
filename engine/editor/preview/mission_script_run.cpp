@@ -236,7 +236,7 @@ void MissionScriptRun::step_() {
 		MissionScriptSound heard;
 		heard.kind = MissionScriptSound::Kind::Thunder;
 		heard.tick = tick;
-		heard.set = "THUNDER";
+		heard.set = world::kThunderSoundSet;
 		heard.distance_q16 = sound.distance_q16;
 		heard.bearing = sound.bearing;
 		sounds_.push_back(std::move(heard));
