@@ -17,7 +17,7 @@
 #include <base/vfs/vfs_decode.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_type_registry.h>
-#include <editor/assets/player_files.h>
+#include <base/gameprofile/player_files.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/graph_names.h>
 #include <editor/import/converter.h>
@@ -70,7 +70,7 @@ bool ImportOrigin::open(Kind kind, const std::string &path, const ProjectDocumen
 			if (!it->is_regular_file(status)) continue;
 			// Its name as UTF-8, whatever the code page (project_files.h, utf8_of).
 			const std::string name = utf8_of(it->path().filename());
-			names_.emplace(normalized_logical_name(name), name);
+			names_.emplace(pff::normalized_logical_name(name), name);
 		}
 		return true;
 	}
@@ -78,7 +78,7 @@ bool ImportOrigin::open(Kind kind, const std::string &path, const ProjectDocumen
 		// The install as the project imports it (assets/install_view.h): each file by the name the
 		// project gets.
 		if (!install_.open(install_spec(path, document), error)) return false;
-		for (const InstallFile &file : install_.files()) names_.emplace(normalized_logical_name(file.name), file.name);
+		for (const InstallFile &file : install_.files()) names_.emplace(pff::normalized_logical_name(file.name), file.name);
 		return true;
 	}
 	vfs_.set_scr_policy(gameprofile::gameprofile_scr_policy_for_code(document.target_game.c_str()));
@@ -88,12 +88,12 @@ bool ImportOrigin::open(Kind kind, const std::string &path, const ProjectDocumen
 	}
 	for (const VfsFileLocation &file : vfs_.list_files())
 		if (!strutil::ends_with_icase(file.logical_name, ".pff")) // the archives themselves
-			names_.emplace(normalized_logical_name(file.logical_name), file.logical_name);
+			names_.emplace(pff::normalized_logical_name(file.logical_name), file.logical_name);
 	return true;
 }
 
 std::string ImportOrigin::find(const std::string &name) const {
-	const auto found = names_.find(normalized_logical_name(name));
+	const auto found = names_.find(pff::normalized_logical_name(name));
 	return found == names_.end() ? std::string() : found->second;
 }
 
@@ -133,7 +133,7 @@ std::vector<std::string> ImportOrigin::files_of_kind(AssetKind kind) const {
 AssetKind ImportOrigin::file_kind(const std::string &name) const {
 	const std::string spelling = find(name);
 	if (spelling.empty()) return AssetKind::Unknown;
-	const std::string normalized = normalized_logical_name(spelling);
+	const std::string normalized = pff::normalized_logical_name(spelling);
 	const auto cached = kinds_.find(normalized);
 	if (cached != kinds_.end()) return cached->second;
 	AssetKind kind = classify_asset(spelling, nullptr);
@@ -591,7 +591,7 @@ private:
 				if (resource->flags & RES_F_EXPANSION) {
 					const ExpansionFileRow *expansion_file = document_.expansion.standalone()
 					        ? nullptr : expansion_file_row_for_manifest_role(resource->role);
-					if (!expansion_file || expansion_file->fixed) continue;
+					if (!expansion_file || expansion_file->fixed()) continue;
 					const std::string name = expansion_file_name(*expansion_file, document_.expansion.name);
 					bring(own, name, ImportNeed{file, std::string(),
 					                            std::string("the game, ") + requirement_phase_label(resource->phase),
@@ -828,8 +828,8 @@ private:
 		if (!row.problem.empty()) return;
 		FileNameProblem problem = FileNameProblem::None;
 		std::string message;
-		// The player's or this machine's own file is never the project's (assets/player_files.h).
-		const std::string player = player_file_words(row.name);
+		// The player's or this machine's own file is never the project's (gameprofile/player_files.h).
+		const std::string player = gameprofile::player_file_words(row.name);
 		if (!player.empty())
 			row.problem = row.name + " is " + player + ": an import never takes the player's own files.";
 		else if (row.kind == AssetKind::Unknown || row.kind == AssetKind::Archive)

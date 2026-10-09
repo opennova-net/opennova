@@ -33,7 +33,7 @@ OutlineModel::OutlineModel(OutlineMode mode, OutlineFileValuesHook file_values, 
 void OutlineModel::set_filter(const std::string &filter) {
 	if (filter == filter_) return;
 	filter_ = filter;
-	needle_ = filter.empty() ? std::string() : normalized_logical_name(filter);
+	needle_ = filter.empty() ? std::string() : pff::normalized_logical_name(filter);
 }
 
 void OutlineModel::set_sort(bool by_name) { sort_ = by_name; }
@@ -113,7 +113,7 @@ size_t OutlineModel::reveal(const Document &document, const std::vector<NodeAddr
 }
 
 bool OutlineModel::matches(const std::string &text) const {
-	return needle_.empty() || normalized_logical_name(text).find(needle_) != std::string::npos;
+	return needle_.empty() || pff::normalized_logical_name(text).find(needle_) != std::string::npos;
 }
 
 const std::vector<OutlineLine> &OutlineModel::lines(const Document &document, NodeId master, const NameSource *names) {
@@ -317,7 +317,7 @@ void OutlineModel::make_row(const Document &document, size_t index, NodeId maste
 		OutlineLine line = record_line(document, row, 0, index, false);
 		const RecordKindRow *own = own_kind(document);
 		if (own && row.kind != own->kind) line.text = std::string(document.kind_label(row.kind)) + ": " + line.text;
-		if (sort_) out.order = normalized_logical_name(name);
+		if (sort_) out.order = pff::normalized_logical_name(name);
 		out.lines.push_back(std::move(line));
 		break;
 	}
