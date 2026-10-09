@@ -66,14 +66,12 @@ std::string adm_file(const AssetScan *scan, const std::string &name) {
 	return entry ? entry->logical_name : std::string();
 }
 
-// The first user point of `name` on `model` (case aside), the game's lookup by name [orig: ModelGPM_FindUserpointByName
-// @0x5B21E0]; null none.
+// The first user point of `name` on `model` (case aside), the game's lookup by name
+// (threedi_3di3_find_user_point [orig: ModelGPM_FindUserpointByName @0x5B21E0]); null none.
 const threedi::ThreediUserPoint *user_point(const assets::Model &model, const std::string &name) {
-	if (!model || name.empty() || !model->user_points) return nullptr;
-	for (size_t i = 0; i < model->user_point_count; ++i)
-		if (strutil::iequals(strutil::fixed_string(model->user_points[i].name, sizeof(model->user_points[i].name)), name))
-			return &model->user_points[i];
-	return nullptr;
+	if (!model || name.empty()) return nullptr;
+	const int found = threedi::threedi_3di3_find_user_point(model.get(), name.c_str());
+	return found >= 0 ? &model->user_points[found] : nullptr;
 }
 
 } // namespace
