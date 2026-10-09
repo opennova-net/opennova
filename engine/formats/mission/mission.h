@@ -68,6 +68,16 @@ struct MissionInfo {
 	int water_murk = 0;         // 0..255 byte; engine multiplies by 0.01
 };
 
+// The BMS header's start time (an unsigned Q8.8 hour, the game's start clock [orig: Game_StartMission @ 0x525371])
+// as HHMM, its minutes rounded from the fraction: what the .mis writer's start_time writes, and the header's clock
+// as a label shows it.
+inline int header_time_to_hhmm(uint16_t encoded) {
+	const int hours = (encoded >> 8) & 0xFF;
+	const int frac = encoded & 0xFF;
+	const int minutes = (frac * 60 + 128) / 256;
+	return hours * 100 + minutes;
+}
+
 struct EntityTransform {
 	float x = 0.0f;
 	float y = 0.0f;

@@ -55,6 +55,11 @@ int main() {
 	namespace bms = opennova::bms;
 	std::string error;
 
+	// The header's Q8.8 start hour as HHMM, its minutes rounded: 0x0C80 is 12:30, and every authored minute the
+	// .mis reader packs comes back.
+	TEST_EXPECT(header_time_to_hhmm(0x0C80) == 1230 && header_time_to_hhmm(0x0600) == 600 &&
+	            header_time_to_hhmm(0x0604) == 601 && header_time_to_hhmm(0x06FC) == 659);
+
 	bms::File authored;
 	make_default(authored);
 	TEST_EXPECT(set_header_string(authored, "mission_name", "MIS Roundtrip", error));
