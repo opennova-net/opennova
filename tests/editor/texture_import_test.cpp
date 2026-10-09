@@ -383,11 +383,11 @@ int test_project() {
 int test_needs_conflict() {
 	// A loading screen and a particle graphic of one name: no one file serves both.
 	TextureUse screen;
-	screen.role = TextureRoleId::LoadingScreen;
+	screen.role = renderer::TextureRoleId::LoadingScreen;
 	screen.name_written = "m01.pcx";
 	screen.words = "Mission loading screen: m01.bms";
 	TextureUse graphic;
-	graphic.role = TextureRoleId::ParticleGraphic;
+	graphic.role = renderer::TextureRoleId::ParticleGraphic;
 	graphic.name_written = "m01.tga";
 	graphic.words = "Particle graphic: puff in fx.ptl";
 	TextureImportNeeds needs = texture_import_needs({screen}, "m01.png");
@@ -402,7 +402,7 @@ int test_needs_conflict() {
 	TEST_EXPECT(needs.split_referrers == std::vector<std::string>({"effects/fx.ptl"}));
 	// A foliage map's indices: a conflict of its own.
 	TextureUse foliage;
-	foliage.role = TextureRoleId::TerrainFoliageMap;
+	foliage.role = renderer::TextureRoleId::TerrainFoliageMap;
 	foliage.name_written = "isle_f.pcx";
 	foliage.words = "Terrain foliage map: isle.trn";
 	needs = texture_import_needs({foliage}, "isle_f.png");
@@ -412,7 +412,7 @@ int test_needs_conflict() {
 	TEST_EXPECT(needs.conflicts.empty() && needs.options["format"] == "pcx" && needs.options["palette"] == "indices");
 	// A model's normal row naming a .tga: the height in its alpha.
 	TextureUse bump;
-	bump.role = TextureRoleId::ModelHeightNormal;
+	bump.role = renderer::TextureRoleId::ModelHeightNormal;
 	bump.name_written = "bump.tga";
 	bump.words = "Model normal map (height): Stone in rock.3di";
 	needs = texture_import_needs({bump}, "bump.png");
@@ -423,7 +423,7 @@ int test_needs_conflict() {
 	// A sky's clouds: the PCX it names from an opaque source; from one with an alpha, the .dds its loader
 	// reads first.
 	TextureUse cloud;
-	cloud.role = TextureRoleId::SkyCloud;
+	cloud.role = renderer::TextureRoleId::SkyCloud;
 	cloud.name_written = "cloud.pcx";
 	cloud.words = "Sky cloud layer: day.env (sky_map1)";
 	needs = texture_import_needs({cloud}, "cloud.png");

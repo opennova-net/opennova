@@ -39,6 +39,7 @@
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
+namespace renderer = opennova::renderer;
 using opennova::FoliageDef;
 using opennova::TrnConfig;
 using opennova::png::encode_png_rgba;
@@ -281,10 +282,10 @@ int test_document() {
 				if (f.id == id) return document->field_on(row, f).loader_arg;
 			return -2;
 		};
-		TEST_EXPECT(loader("polytrn_colormap") == texture_role_arg(TextureRoleId::TerrainColourMap, kTextureArgGates));
-		TEST_EXPECT(loader("polytrn_detailblendmap") == texture_role_arg(TextureRoleId::TerrainBlendMap, kTextureArgGates));
-		TEST_EXPECT(loader("polytrn_charmap") == texture_role_arg(TextureRoleId::TerrainCharMap));
-		TEST_EXPECT(loader("polytrn_tilestrip") == texture_role_arg(TextureRoleId::TerrainTileAtlas));
+		TEST_EXPECT(loader("polytrn_colormap") == texture_role_arg(renderer::TextureRoleId::TerrainColourMap, kTextureArgGates));
+		TEST_EXPECT(loader("polytrn_detailblendmap") == texture_role_arg(renderer::TextureRoleId::TerrainBlendMap, kTextureArgGates));
+		TEST_EXPECT(loader("polytrn_charmap") == texture_role_arg(renderer::TextureRoleId::TerrainCharMap));
+		TEST_EXPECT(loader("polytrn_tilestrip") == texture_role_arg(renderer::TextureRoleId::TerrainTileAtlas));
 	}
 	// The rules a value keeps.
 	std::string why;
@@ -543,7 +544,7 @@ int test_session() {
 		};
 		const GraphEdge *colour = find("isle_c.tga");
 		TEST_EXPECT(colour && colour->field == "polytrn_colormap" && colour->rewritable && colour->record == "Terrain" &&
-		            colour->loader_arg == texture_role_arg(TextureRoleId::TerrainColourMap, kTextureArgGates) &&
+		            colour->loader_arg == texture_role_arg(renderer::TextureRoleId::TerrainColourMap, kTextureArgGates) &&
 		            graph.resolve(*colour) == ReferenceStatus::Present);
 		const GraphEdge *heights = find("isle.cpt");
 		TEST_EXPECT(heights && heights->kind == ReferenceKind::TerrainData && heights->field == "polytrn_polydata");

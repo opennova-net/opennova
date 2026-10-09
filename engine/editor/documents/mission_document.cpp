@@ -505,7 +505,7 @@ void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 	// .TGA through the TGA reader (ADR 0046 S18, kTextureArgTileSet [orig: Terrain_LoadEnvironmentConfig @
 	// 0x6109C8..0x6109EE; Terrain_LoadTileSetAtlas @ 0x604A90]).
 	if (use.reference == ReferenceKind::Texture && id == "terrain_tile")
-		use.loader_arg = texture_role_arg(TextureRoleId::TerrainTileAtlas, kTextureArgTileSet);
+		use.loader_arg = texture_role_arg(renderer::TextureRoleId::TerrainTileAtlas, kTextureArgTileSet);
 	if (address.kind == k(K::Trigger) && id == "sub_type") use.own_choices = true;
 	if (address.kind == k(K::Action) && id == "action_sub_type") use.own_choices = true;
 	const int slot = param_slot(id);
