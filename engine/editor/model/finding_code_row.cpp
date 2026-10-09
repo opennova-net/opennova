@@ -270,7 +270,6 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	// Play from here (DI-26): the start it was given refused (no mission named, a mission whose mode
 	// places its player at no marker) or not staged in the run directory (run/play_start.h).
 	{ C::PlayStart, code("play.start", G::Play) },
-	{ C::PlayStrictExpansion, code("play.strict_expansion", G::Play) },
 	{ C::PlayUnsupported, code("play.unsupported", G::Play) },
 	// The base game's project an expansion names (ADR 0046 T5, project/base_project.h) that does not serve
 	// as one: no project there, one that does not read, an expansion itself, another game's. Refused where a
