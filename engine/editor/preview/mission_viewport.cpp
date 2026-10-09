@@ -33,6 +33,7 @@
 #include <formats/env/env_weather.h>
 #include <formats/env/tod_clock.h>
 #include <formats/mission/bms.h>
+#include <runtime/environment/environment_state.h>
 #include <runtime/terrain_query/height_field.h>
 
 namespace opennova::editor {
@@ -41,13 +42,15 @@ float mission_settled_fog_level(float level) { return env::EnvScalarChannels::se
 
 float mission_fog_reach(const FileSource &files, const MissionSceneHeader &header) {
 	if (header.environment.empty()) return 0.0f;
-	// The environment as the mission's load makes it: the terrain's .trn, overcast.def, then the .env over them
-	// (env::load_mission_env).
+	// The environment as the mission's load makes it: the terrain's .trn, overcast.def, then the .env over them,
+	// the header's overrides over that (env::load_mission_env_config).
 	env::MissionEnv loaded;
-	if (!mission_environment(files, header, loaded)) return 0.0f;
-	env::Config &config = loaded.config;
-	env::apply_bms_overrides(config, env::bms_env_overrides_from_header(header.attrib_flags, header.water_override,
-	        header.fog_override, header.fog_color, header.water_color, header.water_murk));
+	if (!env::load_mission_env_config(files, header.terrain, header.environment,
+	            env::bms_env_overrides_from_header(header.attrib_flags, header.water_override, header.fog_override,
+	                    header.fog_color, header.water_color, header.water_murk),
+	            loaded))
+		return 0.0f;
+	const env::Config &config = loaded.config;
 	const env::FogParams fog = env::compute_fog_params(config.fog_type, mission_settled_fog_level(config.fog_level), 0.0f);
 	if (!fog.enabled || !(fog.end > 0.0f)) return 0.0f;
 	// Half its end: type 1's linear haze (from the eye) half thick there, type 2's start, type 3's past it.
