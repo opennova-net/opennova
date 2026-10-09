@@ -28,9 +28,6 @@ namespace {
 using K = MissionKind;
 constexpr NodeKind k(K kind) { return node_kind(kind); }
 
-// The SSN a parameter holds for the player [orig: 04TR's watchdog SingleIsWithinArea(10000, zone 6),
-// docs/mission/bms-event-runtime-re.md 7.3]: no record of the file carries it.
-constexpr int64_t kPlayerSsn = 10000;
 // The groups the game's tables hold [bms-event-runtime-re.md 7.2].
 constexpr int64_t kGroupCount = 64;
 // A waypoint number from 1 to 122 names a path; 0 none, 123..127 a command.
@@ -115,8 +112,10 @@ public:
 		edge.source = document_.path();
 		edge.kind = ReferenceKind::TextId;
 		edge.value = key;
-		edge.scope = strutil::to_upper(mission_base_name(basename_of(document_.path()))) + ".BIN/" + section;
-		edge.scope_alternate = "MEDMSSN.BIN";
+		// The mission's own table, else medmssn.bin: the by-name table's text row.
+		const Sidecar &table = *sidecar_for_role("text");
+		edge.scope = strutil::to_upper(sidecar_name(basename_of(document_.path()), table)) + "/" + section;
+		edge.scope_alternate = strutil::to_upper(table.fallback);
 		DisplayName found;
 		return text_of(edge, names_, found) ? found.text : std::string();
 	}
@@ -294,7 +293,7 @@ DisplayName mission_path_display(const MissionDocument &document, int64_t number
 	if (const char *command = path_command_name(number)) {
 		out.text = command;
 		// The original editor's name for it, said beside (the Inspector's tooltip: "From ...").
-		out.source = std::string("the original editor's name: ") + path_command_editor_name(number);
+		out.source = std::string("the original editor's name: ") + mission::path_command_editor_name(number);
 		return out;
 	}
 	const Node *row = number > 0 && number <= kLastPathNumber ? document.row_of(K::WaypointPath, size_t(number)) : nullptr;
@@ -418,7 +417,7 @@ bool mission_value_label(const Document &base, const NodeAddress &address, const
 		                   StopUse::Visited, names, out))
 			return false;
 		// An SSN the sees, targeted, shot and visited records never keep (128 or more, section 3a).
-		if (trigger_ssn_unrecorded(trigger, slot)) {
+		if (mission::trigger_ssn_unrecorded(trigger, slot)) {
 			out.text += " (never recorded: the game keeps SSNs below 128)";
 			out.dangling = true;
 		}
