@@ -385,7 +385,7 @@ int MenuFrameCompiler::build_node(const mnu::Window &w, int parent, int root,
 				w.has_sb_edge_pad ? std::max(w.sb_edge_pad, 0) : 0;
 		if (w.type == mnu::WindowType::Scroll) {
 			node.scrollbar.present = true;
-			node.scrollbar.vertical = !iequals(w.orientation, "HORIZONTAL");
+			node.scrollbar.vertical = !iequals(w.orientation, mnu::kHorizontalOrientation);
 			// HEIGHT and WIDTH write the original's one along-axis child
 			// extent (the last authored wins), ctor default 20.
 			// [orig: CScrollWnd_Construct @ 0x64c450;

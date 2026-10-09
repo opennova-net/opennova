@@ -8,6 +8,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -352,6 +353,24 @@ static int test_variable_references() {
 	return 0;
 }
 
+// The variables a menu's text names (the expansion's scan), keyed as the shell's list keys them,
+// and the names two readings of that list disagree on.
+static int test_variables_named_and_changed() {
+	using opennova::mns::changed_variables;
+	using opennova::mns::variables_named;
+	TEST_EXPECT(variables_named("<A>%def_fg%</A><B>%Bg% and %DEF_FG%</B>") ==
+	            (std::vector<std::string>{"BG", "DEF_FG"}));
+	TEST_EXPECT(variables_named("50% of 100%, %A B%, %%").empty());
+	// The second '%' of "%%" may open one.
+	TEST_EXPECT(variables_named("1%%X%") == std::vector<std::string>{"X"});
+	const std::map<std::string, std::string> before = {{"A", "1"}, {"B", "2"}, {"C", "3"}};
+	const std::map<std::string, std::string> after = {{"B", "2"}, {"C", "4"}, {"D", "5"}};
+	TEST_EXPECT(changed_variables(before, after) == (std::vector<std::string>{"A", "C", "D"}));
+	TEST_EXPECT(changed_variables(before, before).empty());
+	std::printf("test_variables_named_and_changed passed\n");
+	return 0;
+}
+
 static int test_has() {
 	opennova::mns::StyleSheet sheet;
 	sheet.variables["FOO"] = "bar";
@@ -431,6 +450,7 @@ int main() {
 	failures += test_retail_reader_cases();
 	failures += test_substitute();
 	failures += test_variable_references();
+	failures += test_variables_named_and_changed();
 	failures += test_has();
 	failures += test_write();
 	failures += test_menu_style();

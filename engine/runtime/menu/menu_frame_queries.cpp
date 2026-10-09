@@ -670,6 +670,42 @@ MenuPumpWindow MenuFrameCompiler::press_capture(const std::vector<MenuPumpWindow
 	return capture;
 }
 
+std::vector<MenuPumpWindow> MenuFrameCompiler::press_mouse(MenuClickLatch &click,
+		const MenuFrameState &state, float mouse_x, float mouse_y, float scale_x,
+		float scale_y) const {
+	std::vector<MenuPumpWindow> reach = press_reach(state, mouse_x, mouse_y, scale_x, scale_y);
+	click.press(press_capture(reach));
+	return reach;
+}
+
+MenuFrameCompiler::MouseSample MenuFrameCompiler::sample_mouse(MenuClickLatch &click,
+		MenuFrameState &io_state, float mouse_x, float mouse_y, bool button_down, float scale_x,
+		float scale_y) {
+	MouseSample out;
+	const MenuPumpWindow capture = click.capture_for(button_down);
+	out.claim = pump_mouse(io_state, mouse_x, mouse_y, button_down, scale_x, scale_y, capture);
+	io_state.cursor_x = mouse_x;
+	io_state.cursor_y = mouse_y;
+	out.clicked = click.sample(click_claim(out.claim, io_state), button_down,
+			[this, &io_state](const MenuPumpWindow &window) {
+				return pump_window_reached(window, io_state);
+			});
+	return out;
+}
+
+MenuFrameCompiler::MouseSample MenuFrameCompiler::peek_mouse(MenuClickLatch &click,
+		const MenuFrameState &state, bool over, float mouse_x, float mouse_y, bool button_down,
+		float scale_x, float scale_y) const {
+	MouseSample out;
+	const MenuPumpWindow capture = click.capture_for(button_down);
+	if (over) {
+		out.claim = claim_at(state, mouse_x, mouse_y, scale_x, scale_y, capture);
+	}
+	out.clicked = click.sample(click_claim(out.claim, state), button_down,
+			[this, &state](const MenuPumpWindow &window) { return pump_window_reached(window, state); });
+	return out;
+}
+
 bool MenuFrameCompiler::in_subtree_(int index, int root) const {
 	if (root < 0) {
 		return true;

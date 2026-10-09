@@ -61,20 +61,15 @@ std::vector<MenuSoundVoice> plan_menu_sound(const lwf::File &bank, int32_t bank_
 }
 
 int menu_sound_state_of(const std::string &token) {
-	// [orig: CUIElement_ParseXMLDefinition @ 0x648120, the SOUND arm's STATE compares]
-	if (strutil::iequals(token, "MOUSEIN")) return kSoundMouseIn;
-	if (strutil::iequals(token, "MOUSEOUT")) return kSoundMouseOut;
-	if (strutil::iequals(token, "SELECTED")) return kSoundSelected;
+	// [orig: CUIElement_ParseXMLDefinition @ 0x648120, the SOUND arm's STATE compares]: the parse's
+	// tokens in order, MOUSEIN 1, MOUSEOUT 2, SELECTED 3.
+	for (int i = 0; mnu::kSoundStates[i]; ++i)
+		if (strutil::iequals(token, mnu::kSoundStates[i])) return i + 1;
 	return kSoundNone;
 }
 
 const char *menu_sound_state_token(int state) {
-	switch (state) {
-	case kSoundMouseIn: return "MOUSEIN";
-	case kSoundMouseOut: return "MOUSEOUT";
-	case kSoundSelected: return "SELECTED";
-	default: return "";
-	}
+	return state >= kSoundMouseIn && state <= kSoundSelected ? mnu::kSoundStates[state - 1] : "";
 }
 
 const mnu::Sound *menu_window_sound(const mnu::Window &window, int state) {

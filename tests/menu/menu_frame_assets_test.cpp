@@ -225,6 +225,11 @@ static int test_absent_or_unreadable() {
 	// The extension the dispatch reads nothing for is a dependency: were it replaced, the
 	// holder configures again.
 	TEST_EXPECT(has_dependency(assets.dependencies(), "art.bmp", 1));
+	// Split: what the source lacks, and what it has that did not load, each once.
+	std::vector<std::string> missing, unreadable;
+	opennova::menu::split_unloaded(assets, missing, unreadable);
+	TEST_EXPECT(sorted(missing) == (std::vector<std::string>{"absent.bin", "gone.fnt", "gone.tga"}));
+	TEST_EXPECT(sorted(unreadable) == (std::vector<std::string>{"art.bmp", "bad.fnt", "bad.tga", "broken.bin"}));
 
 	// Kept as they are, a second configure reads nothing and says the same.
 	files.reads.clear();
