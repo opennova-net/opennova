@@ -501,4 +501,55 @@ bool parse_server_command(const NapiMessage &container, ServerCommand &out) {
 	return false;
 }
 
+// ---- The service side ---------------------------------------------------------
+
+// [orig: String_TokenizeQuotedToArray @0x616d60] — inverted: a quoted run is one token.
+std::string server_command_text(ServerCommandVerb verb, ServerCommandTarget target,
+                                const std::vector<std::string> &args) {
+	if (verb == ServerCommandVerb::None) return {};
+	// The tokenizer's whitespace set (tokenize_quoted spells out the same six characters).
+	auto needs_quotes = [](const std::string &arg) {
+		if (arg.empty()) return true;
+		for (const char c : arg) {
+			if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f') return true;
+		}
+		return false;
+	};
+	std::string text = server_command_verb_name(verb);
+	text += server_command_target_name(target);
+	for (const std::string &arg : args) {
+		if (arg.find('"') != std::string::npos) return {};
+		text.push_back(' ');
+		if (needs_quotes(arg)) {
+			text.push_back('"');
+			text += arg;
+			text.push_back('"');
+		} else {
+			text += arg;
+		}
+	}
+	if (text.size() >= SERVER_COMMAND_CMD_CAP) return {};
+	return text;
+}
+
+// [orig: CNapiGameSession_HandleServerCommand — the "Cmd" read @0x4d2333, the 0x200 copy
+//  @0x4d2345..0x4d2356]
+NapiMessage make_server_command(const std::string &cmd) {
+	NapiMessage m;
+	m.name = "ServerCommand";
+	m.fields.push_back(str_field("Cmd", cmd));
+	return m;
+}
+
+// [orig: CNapiGameSession_HandleServerMessage @0x4d1c50 — MsgCode @0x4d1c9e, MsgParam1 @0x4d1cbd,
+//  MsgParam2 @0x4d1cde]
+NapiMessage make_server_stop_hosting(int msg_code, int msg_param1, int msg_param2) {
+	NapiMessage m;
+	m.name = "ServerStopHosting";
+	m.fields.push_back(str_field("MsgCode", std::to_string(msg_code)));
+	m.fields.push_back(str_field("MsgParam1", std::to_string(msg_param1)));
+	m.fields.push_back(str_field("MsgParam2", std::to_string(msg_param2)));
+	return m;
+}
+
 } // namespace opennova
