@@ -50,6 +50,14 @@ int main() {
 	// Mirror exactly so corpus parses identically.
 	if (!expect(parse_blend_mode("bumpadd")  == BlendMode::Bump,     "bumpadd resolves to bump (engine quirk)")) return 1;
 	if (!expect(parse_blend_mode("")         == BlendMode::Blend,    "empty string defaults to Blend")) return 1;
+	// The count runs Blend to Distort: every mode's name parses back to it but mod2x's and
+	// bumpadd's, which the chained strstr reads as mod and bump.
+	if (!expect(kBlendModeCount == 8, "eight blend modes")) return 1;
+	for (int mode = 0; mode < kBlendModeCount; ++mode) {
+		const BlendMode m = static_cast<BlendMode>(mode);
+		if (m == BlendMode::Mod2x || m == BlendMode::Bumpadd) continue;
+		if (!expect(parse_blend_mode(blend_mode_name(m)) == m, "a mode's name parses back")) return 1;
+	}
 
 	if (!expect(parse_move_bits("NORMAL")    == move_flag::Normal,    "move NORMAL")) return 1;
 	if (!expect(parse_move_bits("GRAVITATE") == move_flag::Gravitate, "move GRAVITATE")) return 1;

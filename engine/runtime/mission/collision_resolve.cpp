@@ -10,6 +10,7 @@
 #include <base/resource_index/resource_index.h>
 #include <formats/mission/mission.h> // kItemIdOffset
 #include <runtime/anim/adm_fallback.h>
+#include <runtime/mission/seat_spec_extract.h> // the userpoint names
 #include <runtime/world/player_spawn.h> // kPlayerInfantryTypeId
 #include <runtime/world/person_overlays.h> // kParachuteItemTypeId
 
@@ -514,8 +515,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 								i < model->user_point_count && vt->flare_points.size() < 16;
 								++i) {
 							const auto &point = model->user_points[i];
-							const std::string name(point.name);
-							if (name.size() < 5 || !strutil::iequals(name.substr(0, 5), "flare"))
+							if ((user_point_uses(threedi_user_point_name(point)) & kUserPointFlare) == 0)
 								continue;
 							vt->flare_points.push_back({ { point.x, point.y, point.z },
 									{ point.rot_x, point.rot_y, point.rot_z } });
@@ -533,8 +533,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 								i < model->user_point_count && vt->agun_points.size() < 16;
 								++i) {
 							const auto &point = model->user_points[i];
-							const std::string name(point.name);
-							if (name.size() < 4 || !strutil::iequals(name.substr(0, 4), "agun"))
+							if ((user_point_uses(threedi_user_point_name(point)) & kUserPointGunnerAttachment) == 0)
 								continue;
 							vt->agun_points.push_back({ { point.x, point.y, point.z },
 									{ point.rot_x, point.rot_y, point.rot_z } });
@@ -566,8 +565,8 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 			// The aim/LOS origin's TARGET userpoint [orig: Entity_InitFromModel
 			// @0x40dd04 -> def+1350]; 0 when the model has none.
 			if (const Threedi3di3 *m3 = deps.models.model(key).get()) {
-				e->target_userpoint_byte = userpoint_index_by_name(*m3, "TARGET");
-				e->look_userpoint_byte = userpoint_index_by_name(*m3, "LOOK");
+				e->target_userpoint_byte = userpoint_index_by_name(*m3, kUserPointTargetName);
+				e->look_userpoint_byte = userpoint_index_by_name(*m3, kUserPointLookName);
 				// [orig: Entity_InitVehicleAI @0x460200, three bounded prefix scans]
 				if (world::AiEntity *ai = world.ai.for_handle(e->handle)) {
 					if (!ai->inf.active) {
@@ -576,13 +575,10 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 						for (size_t index = 0;
 								m3->user_points != nullptr && index < m3->user_point_count;
 								++index) {
-							const std::string name = strutil::to_lower(m3->user_points[index].name);
-							const bool primary = name.compare(0, 4, "prim") == 0 ||
-									name.compare(0, 8, "bullet01") == 0 ||
-									name.compare(0, 8, "bullet02") == 0;
-							const bool secondary = name.compare(0, 3, "sec") == 0 ||
-									name.compare(0, 8, "bullet02") == 0;
-							const bool flare = name.compare(0, 5, "flare") == 0;
+							const uint32_t uses = user_point_uses(threedi_user_point_name(m3->user_points[index]));
+							const bool primary = (uses & kUserPointPrimaryMuzzle) != 0;
+							const bool secondary = (uses & kUserPointSecondaryMuzzle) != 0;
+							const bool flare = (uses & kUserPointFlare) != 0;
 							for (int bank = 0; bank < 3; ++bank) {
 								const int count = 55 + 17 * bank;
 								if ((bank == 0					? primary
@@ -600,7 +596,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					resolve_weapon_userpoint_bytes(*def, *m3, *e);
 					// The gun's own first-person camera userpoint.
 					// [orig: Entity_InitBoneReferences @0x4414A9..0x4414B4 -> +0x318]
-					e->camera_userpoint_byte = userpoint_index_by_name(*m3, "CAMERA");
+					e->camera_userpoint_byte = userpoint_index_by_name(*m3, kUserPointCameraName);
 				}
 			}
 			resolve_virtual_display_camera(*def, deps, *e);

@@ -522,9 +522,21 @@ int test_bank_set_and_set_fire() {
 	return 0;
 }
 
+// The listener's view flags: first person 2, external 4, both at startup; camera
+// mode 0 is first person. [orig: Camera_SetTrackedEntity @0x4391D0; @0x43924A]
+int test_listener_view_flags() {
+	using namespace opennova::audio;
+	TEST_EXPECT(kListenerViewFirstPerson == 2 && kListenerViewExternal == 4 && kListenerViewStartup == 6);
+	TEST_EXPECT(listener_view_flags_for_camera(0) == kListenerViewFirstPerson);
+	TEST_EXPECT(listener_view_flags_for_camera(1) == kListenerViewExternal &&
+			listener_view_flags_for_camera(3) == kListenerViewExternal);
+	return 0;
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
 	int failed = test_radio_selection_keeps_unity_pitch_and_gates_view_layers();
+	failed |= test_listener_view_flags();
     failed |= test_view_gate_precedes_selection_and_pitch();
     failed |= test_set_view_bit_gate_and_rejected_pitch_rng();
     failed |= test_retail_tank_sets_select_view_layers();

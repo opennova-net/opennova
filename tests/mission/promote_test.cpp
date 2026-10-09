@@ -795,6 +795,16 @@ static void test_script_spatial_tables_are_promoted_and_replaced() {
     CHECK(w->registry.location_at({0, 0, 0}) == 0);
     CHECK(w->registry.script_group_index("old_mission") == -1);
     CHECK(w->registry.script_group_index("humans") == 1);
+    // The seven default groups hold their fixed slots, named as the mode's
+    // defaults create them [orig: GameMode_CreateDefaultDefs @0x4F9060].
+    CHECK(world::kDefaultScriptGroupCount == 7);
+    for (int i = 0; i < world::kDefaultScriptGroupCount; ++i) {
+        CHECK(world::EntityRegistry::default_script_group_index(world::kDefaultScriptGroupNames[i]) == i);
+        CHECK(w->registry.script_group_index(world::kDefaultScriptGroupNames[i]) == i);
+    }
+    CHECK(world::EntityRegistry::default_script_group_index("BlueAI") == 5);
+    CHECK(world::EntityRegistry::default_script_group_index("old_mission") == -1);
+    CHECK(w->registry.intern_group("old_mission") == world::kDefaultScriptGroupCount);
 }
 
 static void test_bms_admission_preserves_holes_and_signed_thresholds() {

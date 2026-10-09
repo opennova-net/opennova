@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -148,6 +149,26 @@ ObjectLodSelection select_object_lod(const std::vector<int32_t> &thresholds_q16,
                                      int32_t projected_radius_q16,
                                      float projection_scale = 1.0f,
                                      const std::vector<bool> &available = {});
+
+// Whether select_object_lod's walk can reach `level` at some size: the level
+// exists and every level before it has a threshold above zero. The walk
+// advances past a level only while the radius is at or below its threshold,
+// and a drawn radius is above zero (the sub-pixel floor culls the rest), so a
+// level of zero or less stops it there and no later level is ever drawn. Any
+// threshold scale (pixels or Q16.16) reads alike.
+// [orig: Model_SelectRlodLevel @ 0x5c3b20, the walk @ 0x5c3b3b..0x5c3b5a;
+//  Render_SectorEntity @ 0x5c42de]
+inline bool object_lod_reachable(const std::vector<int32_t> &thresholds, size_t level) {
+  if (level >= thresholds.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < level; ++i) {
+    if (thresholds[i] <= 0) {
+      return false;
+    }
+  }
+  return true;
+}
 
 // The level an attachment draws at: the parent entity's selected RLOD index,
 // clamped to the attachment's own LOD count. The bone callback receives the

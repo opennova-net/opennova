@@ -492,7 +492,7 @@ void MissionAudio::play_weather_sounds(
 		const std::vector<opennova::world::WeatherSoundEvent> &p_events,
 		const Transform3D &p_camera_xform) {
     for (const auto &event : p_events) {
-        _play_listener_relative("THUNDER", event.distance_q16, event.bearing, p_camera_xform);
+        _play_listener_relative(opennova::world::kThunderSoundSet, event.distance_q16, event.bearing, p_camera_xform);
     }
 }
 

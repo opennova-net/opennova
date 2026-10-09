@@ -348,6 +348,17 @@ typedef struct ThreediCollisionNormal {
 // [orig: Math_PointInTriangle2D @ 0x414071..0x414095 (the corners, shared by
 // every ray path); Physics_RaycastAgainstBoneCollision @ 0x4E5079 (the normal
 // index); Entity_SpawnSectionDebris @ 0x43F5F6..0x43F5FE]
+// A bullet face's flag bits (ThreediCollisionFace::material_flags), as the round's face test reads
+// them [orig: Physics_RaycastAgainstBoneCollision @ 0x4e4cb0: the BULLETS_PASS skip @ 0x4e5055; the
+// direction rule @ 0x4e5115..0x4e5139]: BULLETS_PASS lets every round by with no effect; a face is
+// taken from either side unless FRONT_ONLY, which takes it only entering from its front (the side its
+// normal faces), and BOTH_SIDES overrides FRONT_ONLY. Every caller passes the back-face argument as 1
+// (Projectile_UpdatePhysics @ 0x4ea4ee and Projectile_RaycastProximitySlots' callers), so BOTH_SIDES
+// matters only beside FRONT_ONLY.
+inline constexpr uint32_t THREEDI_CFAC_FLAG_BOTH_SIDES = 0x1u;
+inline constexpr uint32_t THREEDI_CFAC_FLAG_BULLETS_PASS = 0x100u;
+inline constexpr uint32_t THREEDI_CFAC_FLAG_FRONT_ONLY = 0x800u;
+
 typedef struct ThreediCollisionFace {
     int16_t vert_index[3];   // Local subobject vertex indices.
     int16_t normal_index;    // Index into CNRM for this subobject.
@@ -358,7 +369,7 @@ typedef struct ThreediCollisionFace {
     int32_t max_x_fp16;
     int32_t max_y_fp16;
     int32_t max_z_fp16;
-    uint32_t material_flags; // Bitfield derived from material attributes.
+    uint32_t material_flags; // THREEDI_CFAC_FLAG_* bits, derived from material attributes.
     uint8_t poly_type;       // Surface type enum (matches legacy material surface).
     uint8_t pad[3];          // Unused padding bytes.
 } ThreediCollisionFace;
@@ -951,6 +962,8 @@ void threedi_3di3_free(Threedi3di3 *model);
 // axis order, NOT render-swizzled): callers apply their own axis convention
 // (e.g. godot_vec3). Returns 1 unless model/out is NULL (out untouched then).
 int threedi_3di3_ground_anchor(const Threedi3di3 *model, float out[3]);
+// The userpoint name the ground anchor looks up.
+inline constexpr const char *THREEDI_USER_POINT_GROUND = "ground";
 
 // User point kinds as the retail corpus spells them: 71 ('G') for gameplay
 // points (seats, ground, cameras), 83 ('S') for effect/particle points.

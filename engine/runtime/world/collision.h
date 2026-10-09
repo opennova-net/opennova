@@ -133,8 +133,16 @@ struct CollisionFace {
 // = disk parent @0x5B3FCD; read only by Bone_BuildWorldMatrices @0x40C770
 // behind the 'bfst' bone callback (@0x4E33D0, table row @0x82CF90), which no
 // JO/revx02 RMDL selects]
+// The COBJ flags bit a blast breaks the section off by: a blast whose box holds
+// the section box's middle takes a section whose flags carry it [orig:
+// Entity_ApplyWeaponDamage @0x4E6C5E..0x4E6E6B, the bit @0x4E6CD0].
+inline constexpr uint32_t kCollisionSectionBreaks = 0x2u;
+inline constexpr bool collision_section_breaks(uint32_t flags) {
+    return (flags & kCollisionSectionBreaks) != 0;
+}
+
 struct CollisionSection {
-    uint32_t flags = 0; // COBJ+0, bit 1 selects blast breakage [orig: @0x4E6CD0]
+    uint32_t flags = 0; // COBJ+0, kCollisionSectionBreaks selects blast breakage [orig: @0x4E6CD0]
     int32_t vertex_start = 0;
     int32_t vertex_count = 0;
     int32_t normal_start = 0;
