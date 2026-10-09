@@ -1,4 +1,3 @@
-#include "network/random_id.h"
 #include "network/novaworld_client.h"
 
 #include "network/host_session_options.h"
@@ -19,6 +18,7 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <base/os_random/os_random.h>
 #include <net/napi/envelope.h>
 #include <net/napi/session.h>
 #include <net/novaworld/client_session.h>
@@ -434,10 +434,10 @@ opennova::NwuLobbySession::Hooks NovaWorldClient::make_lobby_hooks() {
 }
 
 // The driver's device side: the random draws (ci/ck, the reconnect's CK, the AppId and
-// cookie-key seeds) and the gate / UDPNOVAWORLD host lookup.
+// cookie-key seeds; the OS CSPRNG, never 0) and the gate / UDPNOVAWORLD host lookup.
 opennova::NwuLobbySession::Environment NovaWorldClient::make_lobby_environment() {
 	opennova::NwuLobbySession::Environment env;
-	env.random_u32 = []() { return pick_random_uint32(); };
+	env.random_u32 = []() { return opennova::os_random_nonzero_u32(); };
 	env.resolve_ipv4 = [](const std::string &host, opennova::PeerAddr &out) {
 		IP *ip = IP::get_singleton();
 		if (ip == nullptr) return false;

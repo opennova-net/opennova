@@ -3,6 +3,7 @@
 #include <base/io/log.h>
 
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 
 #if defined(_WIN32)
@@ -117,6 +118,25 @@ uint64_t os_random_u64() {
 	uint64_t value = 0;
 	os_random_bytes(&value, sizeof(value));
 	return value;
+}
+
+uint32_t os_random_nonzero_u32() {
+	uint32_t value = 0;
+	while (value == 0) value = os_random_u32();
+	return value;
+}
+
+std::string make_uuid_v4() {
+	uint64_t hi = os_random_u64();
+	uint64_t lo = os_random_u64();
+	hi = (hi & 0xFFFFFFFFFFFF0FFFull) | 0x0000000000004000ull; // version 4
+	lo = (lo & 0x3FFFFFFFFFFFFFFFull) | 0x8000000000000000ull; // variant 1
+	char buf[40];
+	std::snprintf(buf, sizeof(buf), "%08x-%04x-%04x-%04x-%012llx", static_cast<unsigned>(hi >> 32),
+	              static_cast<unsigned>((hi >> 16) & 0xFFFF), static_cast<unsigned>(hi & 0xFFFF),
+	              static_cast<unsigned>(lo >> 48),
+	              static_cast<unsigned long long>(lo & 0xFFFFFFFFFFFFull));
+	return buf;
 }
 
 } // namespace opennova

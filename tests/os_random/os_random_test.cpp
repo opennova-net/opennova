@@ -1,6 +1,7 @@
 // Pins base/os_random: buffers of many sizes filled to the byte (the guard bytes either side
 // untouched), two draws that differ, no all-zero fill, every byte value over a megabyte, the
-// OsRandom generator under the <random> distributions, and the case std::random_device fails
+// nonzero draw never 0, make_uuid_v4's spelling with no repeat, the OsRandom generator under the
+// <random> distributions, and the case std::random_device fails
 // where libstdc++ serves it from RDSEED on a CPU with AMD's RDSEED erratum: many threads drawing
 // 32-bit values at the same moment, which must show no zero runs and no more repeats than the
 // birthday bound allows.
@@ -10,6 +11,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <random>
+#include <set>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -62,6 +65,39 @@ int test_draws_differ() {
 	bool any_differs = false;
 	for (int i = 0; i < 8 && !any_differs; ++i) any_differs = os_random_u32() != first;
 	TEST_EXPECT(any_differs);
+	return 0;
+}
+
+// The nonzero draw: never 0, and not stuck on one value. A raw 0 is a 1-in-2^32 event, so this
+// pins the contract a caller sees rather than exercising the redraw itself.
+int test_nonzero_draws() {
+	std::set<uint32_t> values;
+	for (int i = 0; i < 4096; ++i) {
+		const uint32_t v = os_random_nonzero_u32();
+		TEST_EXPECT(v != 0);
+		values.insert(v);
+	}
+	TEST_EXPECT(values.size() > 4000); // about 0.002 repeats expected
+	return 0;
+}
+
+// make_uuid_v4: the text form, its version and variant digits; a thousand never repeat.
+int test_uuid_v4() {
+	std::set<std::string> seen;
+	for (int n = 0; n < 1000; ++n) {
+		const std::string a = make_uuid_v4();
+		TEST_EXPECT(a.size() == 36);
+		for (size_t i = 0; i < a.size(); ++i) {
+			if (i == 8 || i == 13 || i == 18 || i == 23) {
+				TEST_EXPECT(a[i] == '-');
+			} else {
+				TEST_EXPECT((a[i] >= '0' && a[i] <= '9') || (a[i] >= 'a' && a[i] <= 'f'));
+			}
+		}
+		TEST_EXPECT(a[14] == '4');
+		TEST_EXPECT(a[19] == '8' || a[19] == '9' || a[19] == 'a' || a[19] == 'b');
+		TEST_EXPECT(seen.insert(a).second);
+	}
 	return 0;
 }
 
@@ -165,6 +201,8 @@ int main() {
 	failures += test_fills_each_size();
 	failures += test_draws_differ();
 	failures += test_never_all_zero();
+	failures += test_nonzero_draws();
+	failures += test_uuid_v4();
 	failures += test_generator();
 	failures += test_concurrent_draws();
 	if (failures == 0) std::printf("os_random_test: all checks passed\n");
