@@ -99,21 +99,6 @@ bool read_camera(const JsonValue &json, OrbitCamera &held, bool &frame, std::str
 	return read_orbit_camera(json, held, frame, error);
 }
 
-const char *spawn_status_token(particle::EffectSpawnStatus status) {
-	switch (status) {
-	case particle::EffectSpawnStatus::Spawned: return "spawned";
-	case particle::EffectSpawnStatus::Suppressed: return "suppressed";
-	case particle::EffectSpawnStatus::InvalidHandle: return "invalid_handle";
-	case particle::EffectSpawnStatus::EmptyEffect: return "empty_effect";
-	case particle::EffectSpawnStatus::MissingSlot: return "missing_slot";
-	case particle::EffectSpawnStatus::MissingOwner: return "missing_owner";
-	case particle::EffectSpawnStatus::GroupCapacityReached: return "group_capacity_reached";
-	case particle::EffectSpawnStatus::EmitterCapacityReached: return "emitter_capacity_reached";
-	case particle::EffectSpawnStatus::Disabled: return "disabled";
-	}
-	return "invalid_handle";
-}
-
 } // namespace
 
 const char *effect_view_status_token(EffectViewStatus status) {
@@ -506,7 +491,7 @@ io::JsonValue EffectViewport::body_json(const ViewportInput &) const {
 	play.set("age", json_number(playback_.age()));
 	play.set("pre_aged", json_number(playback_.pre_aged()));
 	play.set("spawns", json_number(double(playback_.spawns())));
-	play.set("last_spawn", json_string(spawn_status_token(playback_.last_status())));
+	play.set("last_spawn", json_string(effect_spawn_status_token(playback_.last_status())));
 	play.set("alive", JsonValue::make_bool(playback_.alive()));
 	if (const std::shared_ptr<particle::EffectScene> &scene = playback_.scene()) {
 		const particle::EffectLiveCounts counts = scene->live_counts();

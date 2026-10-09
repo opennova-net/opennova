@@ -18,13 +18,14 @@
 #include <editor/preview/sound_preview.h>
 #include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
-#include <formats/lwf/wav_source.h>
 #include <runtime/audio/envs_markers.h>
 #include <runtime/audio/music_policy.h>
+#include <runtime/audio/ambient_mixer.h>
 #include <runtime/audio/dialog_queue.h>
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/mission/collision_resolve.h>
 #include <runtime/mission/mission_sidecars.h>
+#include <runtime/world/script_voice.h>
 #include <runtime/world/weather_state.h>
 
 namespace opennova::editor {
@@ -45,6 +46,13 @@ constexpr uint8_t kListenView = audio::kListenerViewFirstPerson;
 constexpr const char *kHours[4] = { "morning", "day", "evening", "night" };
 constexpr const char *kShots[4] = { "dawnshot", "dayshot", "duskshot", "nightshot" };
 constexpr size_t kFiredKept = 16;
+// The scripted voice's volume at the listener, as the game's voice channel plays it: its gain byte, (210 * the
+// dialogue volume + 128) >> 8 at full, through the distance curve at the local anchor's 100-unit radius, the
+// distance 0 [orig: Wac_PlayScriptedVoiceWave @ 0x4ed688; Audio_Play3DPositionalSound @ 0x4ecc90..0x4ecc96;
+// Audio_UpdateAmbientStream @ 0x4edb22] (world::ScriptVoiceChannel::frame's, the runtime's own).
+int32_t script_voice_volume_at_listener() {
+	return audio::calc_distance_volume(0, int64_t(100) * 65536, (world::kScriptVoiceVolume * 255 + 128) >> 8, 255);
+}
 
 // A project file by its name as the asset source serves it (a path's file name).
 std::string served_name(const std::string &file) {
@@ -351,8 +359,8 @@ void MissionListen::play_to(int32_t tick, const PreviewVec3 &listener, double ho
 	hours_ = hours;
 	// A step back of the clock: the dialog channel starts again with the script.
 	if (tick < tick_) {
-		dialog_due_.clear();
-		dialog_free_ = 0;
+		dialog_.clear();
+		dialog_tick_ = 0;
 	}
 	tick_ = tick;
 	// The script, its weather and the items' shots to the tick (they run on over the frames after a jump), the clock
@@ -449,23 +457,29 @@ std::vector<ClipSoundFired> MissionListen::fire_sounds(const AssetScan *scan, au
 		for (ClipSoundFired::Voice &voice : fired.voices)
 			voice.volume = int32_t(std::lround(double(voice.volume) * double(std::clamp(volume, 0.0f, 1.0f))));
 	};
+	std::vector<DialogChannel::Loaded> loaded;
 	for (const MissionScriptSound &sound : script_.take_sounds()) {
-		// A Play dialog: its dialog queued on the dialog channel, its lines handed over as they come due (below).
+		// A Play dialog: the channel run through the ticks before its own, then its dialog registered, so its tick's
+		// playback, after the tick's events, sees it [orig: Game_ProcessMainFrame @ 0x5265af runs Dialog_UpdatePlayback
+		// once a tick]; its lines handed over as the channel loads them (below).
 		if (sound.kind == MissionScriptSound::Kind::Dialog) {
-			queue_dialog_(sound.dialog, sound.tick);
+			run_dialog_to_(sound.tick, loaded);
+			register_dialog_(sound.dialog);
 			continue;
 		}
 		// A script's voice wave: at the listener (the scripted voice channel's anchor is the local player, a radio's
-		// too), at the voice's volume [orig: Wac_PlayScriptedVoiceWave @ 0x4ed688: (option * 0xD2 + 0x80) >> 8].
+		// too), at the voice channel's volume there (script_voice_volume_at_listener).
 		if (sound.kind == MissionScriptSound::Kind::Voice) {
+			const int32_t voice_volume = script_voice_volume_at_listener();
 			ClipSoundFired fired;
 			fired.tick = sound.tick;
 			fired.slot = -1;
 			fired.seq = ++seq;
 			fired.action = mission_script_sound_kind_token(sound.kind);
 			fired.state = "played";
-			fired.words = "Tick " + std::to_string(sound.tick) + " (the script's voice): " + sound.wave + " at volume 210.";
-			fired.voices.push_back({sound.wave, sound.wave, std::string(), 0x10000u, 210});
+			fired.words = "Tick " + std::to_string(sound.tick) + " (the script's voice): " + sound.wave + " at volume " +
+			              std::to_string(voice_volume) + ".";
+			fired.voices.push_back({sound.wave, sound.wave, std::string(), 0x10000u, voice_volume});
 			scaled(fired);
 			if (scan) find_clip_sound_waves(fired, *scan);
 			fired_.push_back(fired);
@@ -501,25 +515,31 @@ std::vector<ClipSoundFired> MissionListen::fire_sounds(const AssetScan *scan, au
 		fired_.push_back(fired);
 		out.push_back(std::move(fired));
 	}
-	// The dialog lines come due on the clock: each its wave at its dialog volume, its subtitle in its words.
-	while (!dialog_due_.empty() && dialog_due_.front().tick <= tick_) {
-		const DialogLineDue due = std::move(dialog_due_.front());
-		dialog_due_.pop_front();
+	// The dialog channel run through the clock's tick: each line it loads its wave at its dialog volume, its subtitle in
+	// its words.
+	run_dialog_to_(tick_ + 1, loaded);
+	const DialogSources &sources = dialog_sources_now_();
+	for (const DialogChannel::Loaded &each : loaded) {
+		const audio::DialogLineRef &line = each.line;
+		const dbf::Group *group = sources.bank_read ? audio::find_dialog(sources.bank, line.dialog_name) : nullptr;
+		const std::string text = group && line.line >= 0 && size_t(line.line) < group->lines.size()
+				? audio::dialog_line_text(sources.text_read ? &sources.text : nullptr, group->lines[size_t(line.line)])
+				: std::string();
 		ClipSoundFired fired;
-		fired.tick = due.tick;
+		fired.tick = each.tick;
 		fired.slot = -1;
 		fired.seq = ++seq;
 		fired.action = "dialog";
-		fired.set = due.dialog;
+		fired.set = line.dialog_name;
 		fired.bank = dialog_bank_;
-		const DialogPlayLine &line = due.line;
 		fired.state = line.file.empty() ? "no_wave" : "played";
-		fired.words = "Tick " + std::to_string(due.tick) + " (dialog " + std::to_string(due.number) + ", " + due.dialog +
-		              " in " + dialog_bank_ + ", line " + std::to_string(line.index) + "): " +
+		fired.words = "Tick " + std::to_string(each.tick) + " (dialog " +
+		              std::to_string(audio::dialog_index_of(line.dialog_name)) + ", " + line.dialog_name + " in " +
+		              dialog_bank_ + ", line " + std::to_string(line.line) + "): " +
 		              (line.wave.empty() ? std::string("(no wave)") : line.wave) +
 		              (line.file.empty() ? std::string(", which the dialog bank's sounds lack: \"EX Cannot load audio\"")
 		                                 : " (" + served_name(line.file) + ")") +
-		              (line.text.empty() ? std::string() : " \"" + line.text + "\"");
+		              (text.empty() ? std::string() : " \"" + text + "\"");
 		if (!line.file.empty()) fired.voices.push_back({line.wave, served_name(line.file), std::string(), 0x10000u, line.volume});
 		scaled(fired);
 		if (scan) find_clip_sound_waves(fired, *scan);
@@ -549,36 +569,29 @@ const DialogSources &MissionListen::dialog_sources_now_() {
 	return dialog_sources_;
 }
 
-double MissionListen::wave_seconds_(const std::string &file) {
-	if (!files_) return 0.0;
+DialogWave MissionListen::dialog_wave_(const std::string &file) {
+	if (!files_) return DialogWave();
 	const uint64_t stamp = files_->stamp(file);
-	const auto cached = wave_seconds_cache_.find(file);
-	if (cached != wave_seconds_cache_.end() && cached->second.first == stamp) return cached->second.second;
+	const auto cached = dialog_waves_.find(file);
+	if (cached != dialog_waves_.end() && cached->second.first == stamp) return cached->second.second;
 	std::vector<uint8_t> bytes;
-	const double seconds = stamp && files_->read(file, bytes) ? lwf::wave_seconds(bytes) : 0.0;
-	wave_seconds_cache_[file] = {stamp, seconds};
-	return seconds;
+	const DialogWave wave = stamp && files_->read(file, bytes) ? dialog_wave(bytes) : DialogWave();
+	dialog_waves_[file] = {stamp, wave};
+	return wave;
 }
 
-void MissionListen::queue_dialog_(int32_t number, int32_t tick) {
+void MissionListen::register_dialog_(int32_t number) {
 	const DialogSources &sources = dialog_sources_now_();
-	const DialogPlay play = plan_dialog_play(sources, audio::dialog_name_of(number), -1,
-	                                         [this](const std::string &file) { return wave_seconds_(file); });
-	if (!play.found) return;
-	// The dialog starts once the channel frees, each line where the plan times it from there [orig: Dialog_UpdatePlayback
-	// @ 0x44e470: one dialog channel at a time].
-	const int32_t start = std::max(tick, dialog_free_);
-	double end = 0.0;
-	for (const DialogPlayLine &line : play.lines) {
-		DialogLineDue due;
-		due.tick = start + int32_t(std::lround(line.start_s * io::kTickHz));
-		due.number = number;
-		due.dialog = play.dialog;
-		due.line = line;
-		dialog_due_.push_back(std::move(due));
-		end = std::max(end, line.start_s + line.seconds);
-	}
-	dialog_free_ = start + int32_t(std::lround(end * io::kTickHz));
+	const std::string name = audio::dialog_name_of(number);
+	const dbf::Group *group = sources.bank_read && !name.empty() ? audio::find_dialog(sources.bank, name) : nullptr;
+	if (!group) return;
+	dialog_.enqueue(group->group_name,
+	                audio::resolve_dialog_lines(&sources.bank, sources.sounds_read ? &sources.sounds : nullptr, number));
+}
+
+void MissionListen::run_dialog_to_(int32_t end, std::vector<DialogChannel::Loaded> &out) {
+	const DialogChannel::WaveOf wave_of = [this](const std::string &file) { return dialog_wave_(file); };
+	for (; dialog_tick_ < end; ++dialog_tick_) dialog_.tick(dialog_tick_, wave_of, out);
 }
 
 void MissionListen::close() {
@@ -604,9 +617,9 @@ void MissionListen::close() {
 	files_.reset();
 	dialog_sources_ = DialogSources();
 	dialog_stamps_.clear();
-	wave_seconds_cache_.clear();
-	dialog_due_.clear();
-	dialog_free_ = 0;
+	dialog_waves_.clear();
+	dialog_.clear();
+	dialog_tick_ = 0;
 }
 
 std::vector<std::string> MissionListen::source_words(NodeId row) const {
@@ -745,24 +758,24 @@ io::JsonValue MissionListen::to_json(const MissionListenOptions &options) const 
 					: "The project lacks " + (music_bank_found_ ? music_script_ : music_bank_) +
 							   ": the game plays no music in a mission."));
 	out.set("music", std::move(music));
-	// The dialog channel (DI-32): the mission's dialog bank, whether the project has it and its sounds, the lines queued
-	// and not yet due, and the tick the channel frees.
+	// The dialog channel (DI-32): the mission's dialog bank, whether the project has it and its sounds, and the game's
+	// queue: each slot's dialog, the next line it loads of its lines, and its timer (a line's hold, or its delay).
 	JsonValue dialog = JsonValue::make_object();
 	dialog.set("bank", json_string(dialog_bank_));
 	dialog.set("bank_found", JsonValue::make_bool(dialog_sources_.bank_read));
 	dialog.set("sounds", json_string(dialog_sources_.sounds_read ? dialog_sources_.sounds_name : std::string()));
 	dialog.set("text", json_string(dialog_sources_.text_read ? dialog_sources_.text_name : std::string()));
-	JsonValue queued = JsonValue::make_array();
-	for (const DialogLineDue &due : dialog_due_) {
+	JsonValue slots = JsonValue::make_array();
+	for (const audio::DialogQueue::Slot &slot : dialog_.queue().slots()) {
 		JsonValue row = JsonValue::make_object();
-		row.set("tick", json_number(due.tick));
-		row.set("dialog", json_string(due.dialog));
-		row.set("line", json_number(due.line.index));
-		row.set("wave", json_string(due.line.wave));
-		queued.push(std::move(row));
+		row.set("dialog", json_string(slot.dialog));
+		row.set("line", json_number(double(slot.index)));
+		row.set("lines", json_number(double(slot.lines.size())));
+		row.set("timer", json_number(double(slot.timer & 0x7FFFFFFFu)));
+		row.set("waiting", json_string((slot.timer & 0x80000000u) != 0 ? "delay" : "hold"));
+		slots.push(std::move(row));
 	}
-	dialog.set("queued", std::move(queued));
-	dialog.set("free_tick", json_number(dialog_free_));
+	dialog.set("slots", std::move(slots));
 	out.set("dialog", std::move(dialog));
 	JsonValue fired = JsonValue::make_array();
 	for (const ClipSoundFired &sound : fired_) fired.push(clip_sound_fired_to_json(sound));
