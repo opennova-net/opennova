@@ -203,6 +203,13 @@ MissionViewportApplier::MissionViewportApplier(SubViewport &viewport) : scene_st
 	terrain_->set_water_path(NodePath("../Water"));
 	root_->add_child(terrain_);
 	terrain_id_ = terrain_->get_instance_id();
+	// The entities' moving ground shadows (S23 C), as GameWorld sets its SlotShadow up: the highest selectable
+	// shadow profile, the environment's sun; the captures join the clear's compositor (its scope's WorldEnvironment).
+	slot_shadow_ = memnew(SlotShadow);
+	slot_shadow_->set_name("SlotShadow");
+	root_->add_child(slot_shadow_);
+	slot_shadow_->set_shadow_detail(3);
+	slot_shadow_->set_environment_node(environment_);
 	// The foliage beside the terrain, never under it (GameWorld's): the detail cells come off the terrain's
 	// frame, the sway off the weather's oscillator.
 	foliage_ = memnew(FoliageDispatcher);
@@ -652,6 +659,7 @@ void MissionViewportApplier::terrain_empty_(const TerrainKey &key) {
 	// never the last terrain under a note that the new one is missing.
 	terrain_->clear_built();
 	water_->set_terrain_data(Ref<TerrainData>());
+	slot_shadow_->set_terrain_data(Ref<TerrainData>());
 	terrain_data_.unref();
 	terrain_built_ = true;
 	terrain_key_ = key;
@@ -689,6 +697,8 @@ void MissionViewportApplier::run_terrain_file_(Build &build, const MissionViewpo
 			build.terrain_key.terrain, build.terrain_key.environment));
 	terrain_->set_terrain_data(terrain_data_);
 	water_->set_terrain_data(terrain_data_);
+	// The slot shadows' anchor march probes this terrain (GameWorld's load hands its SlotShadow the same data).
+	slot_shadow_->set_terrain_data(terrain_data_);
 	terrain_built_ = false;
 	touch_scene_state_();
 	if (!terrain_->build_begin()) {
@@ -1205,6 +1215,7 @@ void MissionViewportApplier::clear() {
 	terrain_->set_terrain_data(Ref<TerrainData>());
 	terrain_->clear_built(); // nothing it drew stands
 	water_->set_terrain_data(Ref<TerrainData>());
+	slot_shadow_->set_terrain_data(Ref<TerrainData>());
 	terrain_data_.unref();
 	terrain_built_ = false;
 	environment_->set_environment_data(Ref<EnvFile>());
@@ -1279,6 +1290,16 @@ opennova::io::JsonValue MissionViewportApplier::drawn_json_() const {
 	lights.set("lit_static_draws", json_number(double(report.is_valid() ? report->get_lit_static_draws() : 0)));
 	lights.set("coronas", json_number(double(lights_->scene()->last_corona_quads().size())));
 	out.set("lights", std::move(lights));
+	// The entities' moving ground shadows (S23 C): the casters the slot device registered, the slots it bound a
+	// drape to and those it captured, and the captures it armed in the last presented frame.
+	JsonValue shadows = JsonValue::make_object();
+	shadows.set("shown", JsonValue::make_bool(shown_shadows_));
+	const Dictionary slot_report = slot_shadow_->get_report();
+	shadows.set("registered", json_number(double(int64_t(slot_report.get("registered", 0)))));
+	shadows.set("bound", json_number(double(int64_t(slot_report.get("bound", 0)))));
+	shadows.set("captures", json_number(double(int64_t(slot_report.get("captures", 0)))));
+	shadows.set("armed", json_number(double(int64_t(slot_report.get("armed", 0)))));
+	out.set("shadows", std::move(shadows));
 	// The effects' quads the renderer drew.
 	JsonValue effects = JsonValue::make_object();
 	effects.set("shown", JsonValue::make_bool(shown_effects_));
@@ -1445,6 +1466,17 @@ void MissionViewportApplier::present(double dt) {
 	}
 	terrain_->set_light_context(shown_lights_ ? lights_->scene() : Ref<LightScene>(), int(clock_ms_));
 	leg_us_[1] = now_us() - lights_start;
+	// The slot-shadow leg (GameWorld::render_slot_shadow_frame, after the light leg has handed it the pool, as
+	// game_world_frame.cpp's light leg does): the entities' moving ground shadows planned and their captures
+	// published, the drape drawn with the terrain's pass. With the shadows off, or no terrain drawn, the drape
+	// hides and nothing plans.
+	const bool slot_shadows = shown_shadows_ && placed_ && terrain_built_ && terrain_data_.is_valid() && terrain_->is_visible();
+	slot_shadow_->set_terrain_pass_drawn(slot_shadows);
+	if (slot_shadows) {
+		slot_shadow_->set_light_director(lights_);
+		slot_shadow_->set_light_context(lights_->light_gain(), int(clock_ms_), weather_);
+		slot_shadow_->advance_frame();
+	}
 	// The particle leg: the effects' scene as the viewport stepped it, partitioned by the water's plane.
 	const int64_t effects_start = now_us();
 	if (ParticleRenderer *renderer = effects_->renderer())

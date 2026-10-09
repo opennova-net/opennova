@@ -777,7 +777,10 @@ void MissionViewportView::Tools::show_popup(MissionViewportOptions &options) {
 	ImGui::Checkbox("Sky", &options.sky);
 	ImGui::Checkbox("Water", &options.water);
 	ImGui::Checkbox("Models", &options.models);
-	ImGui::Checkbox("Static shadows", &options.shadows);
+	ImGui::Checkbox("Shadows", &options.shadows);
+	ui_kit::tooltip("The shadows as the game casts them, together: the terrain's static shadows under the placed "
+					"models, and the moving ground shadows of the people and the items that cast one (the game's "
+					"render slots).");
 	// DI-31: the game's own foliage, effects and lights.
 	ImGui::Checkbox("Foliage", &options.foliage);
 	ui_kit::tooltip("The terrain's foliage as the game grows it from its foliage map around the camera (its .trn's "

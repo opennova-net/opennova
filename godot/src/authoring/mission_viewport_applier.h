@@ -23,6 +23,7 @@
 #include "env/env_file.h"
 #include "env/mission_environment.h"
 #include "env/sky_dome.h"
+#include "env/slot_shadow.h"
 #include "env/water.h"
 #include "env/weather.h"
 #include "lights/effect_light_director.h"
@@ -101,6 +102,13 @@ namespace godot {
 // end moves what stands. The FLICKER ring and the detail tier's sway read the weather's oscillator, whose
 // wave alone the device runs on the preview clock (the mission's start settle first); no other weather runs.
 //
+// S23 C: the shadows as the game casts them, one layer: the terrain's static shadows (the placer's casters composed
+// into its pages) and the entities' moving ground shadows, the game's render-slot device (SlotShadow) over the
+// picture's casters (the placer flags a person's and a DynamicShadow item's model, as the game's presenter does),
+// its captures on the clear's compositor and its drape over the terrain, planned in the frame's slot-shadow leg
+// (after the lights, before the particles: game_world_frame.cpp's order) with the light director's pool and gain.
+// With the layer off nothing plans and the drape hides with the terrain's pass.
+//
 // DI-36: the Listen. While the options listen, each channel the viewport's MissionListen binds plays its wave looping
 // at its place (PreviewSoundLoops, DI-02's player), the SubViewport's camera the 3D listener, as the game's ambient
 // channels play; heard while the picture is drawn (held paused once it has not been for kListenHeldFrames frames).
@@ -135,6 +143,8 @@ public:
 
 	// Its nodes and its placer, for the parity tests.
 	Camera3D *camera() const { return camera_; }
+	// S23 C: the entities' moving ground shadows, the game's render-slot device over the picture's casters.
+	SlotShadow *slot_shadow() const { return slot_shadow_; }
 	// The Shoot tool's (DI-23): the scars its shots left, drawn by the game's ScarPresenter (their effects play in
 	// the items' effect scene, effects()).
 	ScarPresenter *shot_scars() const { return shot_scars_; }
@@ -342,6 +352,9 @@ private:
 	Water *water_ = nullptr;
 	Terrain *terrain_ = nullptr;
 	uint64_t terrain_id_ = 0;
+	// The entities' moving ground shadows (S23 C): the game's SlotShadow, its silhouette captures on the clear's
+	// compositor and its drape over the terrain, run in the frame's slot-shadow leg while the shadows show.
+	SlotShadow *slot_shadow_ = nullptr;
 	Camera3D *camera_ = nullptr;
 	Node3D *objects_ = nullptr;
 	Node3D *lifted_root_ = nullptr;
