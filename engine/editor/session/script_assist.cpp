@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstring>
 #include <iterator>
 #include <optional>
 #include <string_view>
@@ -23,6 +22,7 @@
 #include <editor/session/view/session_view.h>
 #include <formats/mission/mission_params.h>
 #include <formats/wac/command.h>
+#include <formats/wac/help.h>
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/wac/wac_lexis.h>
@@ -35,10 +35,10 @@ using wac::ParamType;
 
 // --- the text ------------------------------------------------------------------------------------
 
-// The characters that end a token [orig: Script_Compile's tokenizer @0x4F3412..0x4F345A: a blank, ';',
-// ',' or an operator]; a '"' opens a string.
+// The characters that end a token: the compiler's (wac::wac_token_ends: a blank, ';', ',' or an operator
+// byte), and a '"', which opens a string.
 bool ends_token(char c) {
-	return static_cast<unsigned char>(c) <= ' ' || std::strchr(";,()+-*/%^=!<>&|~\"[]", c) != nullptr;
+	return wac::wac_token_ends(c) || c == '"';
 }
 
 struct Token {
@@ -154,22 +154,13 @@ const char *param_words(ParamType type) {
 	return "nothing";
 }
 
-// A command as the help file writes it, "SSNarea(SSN, AREA)" [orig: WacScript_DumpActionDefsToFile
-// @0x4F0400], and what kind of command it is.
-std::string signature(const wac::CommandDef &command) {
-	std::string out = std::string(command.name) + "(";
-	for (int i = 0; i < 4; ++i) {
-		if (command.params[i] == ParamType::Null) continue;
-		out += std::string(i ? ", " : "") + strutil::to_upper(wac::param_type_name(command.params[i]));
-	}
-	return out + ")";
-}
-
+// What a command is in words: its signature as the help file writes it (wac::command_signature), and what
+// kind of command it is.
 std::string command_words(const wac::CommandDef &command) {
 	std::string kind = wac::cmd_is_condition(command) ? "a trigger (after IF)"
 	                   : wac::cmd_is_action(command)  ? "an action (after THEN)"
 	                                                  : "a debug command";
-	std::string out = signature(command) + ": " + kind;
+	std::string out = wac::command_signature(command) + ": " + kind;
 	if (wac::cmd_is_replicated(command)) out += ", sent to the players' games";
 	std::string params;
 	for (int i = 0; i < 4; ++i)
@@ -472,7 +463,7 @@ void statements(bool conditions, const std::string &typed, ScriptCompletions &ou
 		for (int i = 0; i < wac::wac_command_count(); ++i) {
 			const wac::CommandDef &command = wac::wac_commands()[i];
 			if (wac::cmd_is_condition(command) != (pass == 0 ? conditions : !conditions)) continue;
-			if (wanted(typed, command.name)) add(out, signature(command), command.name, "command", command_words(command));
+			if (wanted(typed, command.name)) add(out, wac::command_signature(command), command.name, "command", command_words(command));
 		}
 }
 

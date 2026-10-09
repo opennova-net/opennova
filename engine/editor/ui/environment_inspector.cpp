@@ -7,6 +7,7 @@
 
 #include <imgui.h>
 
+#include <base/io/os_path.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/environment_document.h>
 #include <editor/graph/asset_graph.h>
@@ -35,8 +36,6 @@ void jump_line(Workspace &workspace, const ReferenceTarget &target, const std::s
 	ui_kit::tooltip(line + "\nClick to go there.");
 	ImGui::PopID();
 }
-
-std::string base_name(const std::string &path) { return path.substr(path.find_last_of('/') + 1); }
 
 std::string clock(int hhmm) {
 	char text[8];
@@ -86,12 +85,12 @@ void keyframe_words(const EnvironmentDocument &document, const NodeAddress &reco
 // A terrain key's line of a mission: its terrain takes it after its .trn and overcast.def, over what the keyword held
 // before it (the file and value that set it, else the load's default).
 std::string terrain_key_words(const EnvironmentMissionUse &use, const EnvironmentTerrainKey &key, const std::string &self) {
-	const std::string terrain = use.terrain_file.empty() ? use.terrain : base_name(use.terrain_file);
+	const std::string terrain = use.terrain_file.empty() ? use.terrain : io::utf8_file_name(use.terrain_file);
 	std::string words = "Its terrain's " + key.key + (key.value.empty() ? "" : " " + key.value) + " from this file";
 	if (key.over.empty()) return words + ", read after " + terrain + "'s lines";
 	if (key.over_file.empty()) return words + ", over the default " + key.over;
 	if (key.over_file == self) return words + ", over its own " + key.over + " above";
-	return words + ", over " + base_name(key.over_file) + "'s " + key.over;
+	return words + ", over " + io::utf8_file_name(key.over_file) + "'s " + key.over;
 }
 
 } // namespace
@@ -121,12 +120,12 @@ bool draw_environment_inspector(Workspace &workspace, const Document &document, 
 	int id = 0;
 	for (const EnvironmentMissionUse &use : uses.missions) {
 		const std::string tag = std::to_string(id++);
-		const std::string title = use.title.empty() ? base_name(use.mission) : base_name(use.mission) + " (" + use.title + ")";
+		const std::string title = use.title.empty() ? io::utf8_file_name(use.mission) : io::utf8_file_name(use.mission) + " (" + use.title + ")";
 		jump_line(workspace, use.edge ? usage_target(scan, *use.edge) : file_target(scan, use.mission), title, "m" + tag);
 		ImGui::Indent();
 		// The terrain it pairs with.
 		if (!use.terrain_file.empty())
-			jump_line(workspace, file_target(scan, use.terrain_file), "On the terrain " + base_name(use.terrain_file), "t" + tag);
+			jump_line(workspace, file_target(scan, use.terrain_file), "On the terrain " + io::utf8_file_name(use.terrain_file), "t" + tag);
 		else if (!use.terrain.empty())
 			note("On the terrain " + use.terrain + ", which the project does not have.");
 		// What its header sets over this environment, each on the header's field.

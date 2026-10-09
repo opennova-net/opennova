@@ -12,7 +12,6 @@
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
-#include <base/vfs/vfs_decode.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/asset_type_registry.h>
@@ -65,11 +64,6 @@ std::vector<ImportChoice> list_import_choices(const std::vector<std::string> &pa
 		}
 	}
 	return sources;
-}
-
-bool read_served(const Vfs &game, const std::string &name, std::vector<uint8_t> &out) {
-	if (vfs_loader_takes_stored(name)) return game.read_file_raw(name, out);
-	return game.read_file(name, out);
 }
 
 bool install_loose_kind(AssetKind kind) {
@@ -405,7 +399,7 @@ private:
 				}
 				archive_path_ = source.path;
 			}
-			if (!read_served(archive_, source.entry, bytes)) {
+			if (!vfs_read_served(archive_, source.entry, bytes)) {
 				refuse(CoreFinding::ImportRead, "Could not read " + name + " from " + source.path, name);
 				return false;
 			}
