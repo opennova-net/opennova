@@ -206,5 +206,20 @@ int main()
                        threedi_ctrl_register_loader_ordinal(""),
                        THREEDI_CTRL_LOD_FRAC);
 
+    // The bus written by name: every register zero, then each known name's
+    // register its value (any case); an unknown name is dropped.
+    int32_t bus[THREEDI_CTRL_REGISTER_COUNT];
+    for (int32_t &slot : bus) slot = 7;
+    threedi_ctrl_bus_from_names({{"door_03", 32768}, {"TEX_CAMO3", -5}, {"NOT_A_RETAIL_REGISTER", 9}}, bus);
+    ok &= expect_equal("bus DOOR_03", bus[THREEDI_CTRL_DOOR_03], 32768);
+    ok &= expect_equal("bus TEX_CAMO3 (the last slot)", bus[THREEDI_CTRL_TEX_CAMO3], -5);
+    int written = 0;
+    for (const int32_t slot : bus) written += slot != 0 ? 1 : 0;
+    ok &= expect_equal("bus writes only the known names", written, 2);
+    threedi_ctrl_bus_from_names({}, bus);
+    written = 0;
+    for (const int32_t slot : bus) written += slot != 0 ? 1 : 0;
+    ok &= expect_equal("an empty hold clears the bus", written, 0);
+
     return ok ? 0 : 1;
 }

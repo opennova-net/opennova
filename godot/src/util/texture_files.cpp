@@ -43,10 +43,19 @@ Ref<Texture2D> TextureFiles::load_texture(const String &name, renderer::TextureL
 	return result;
 }
 
-// ResourceRoot::load_material_texture's rule over these files: the one file the row's loader
-// opens and the reader that decodes it (renderer::material_texture_source, as a load:
-// renderer::material_texture_load), a loose file never preferred.
+// ResourceRoot::load_material_texture's rule over these files: the texture registered under
+// the row's key (renderer::texture_registry_key), else the one file the row's loader opens and
+// the reader that decodes it (renderer::material_texture_source, as a load:
+// renderer::material_texture_load), a loose file never preferred, kept under the key; the
+// checkerboard when that loads nothing.
 Ref<Texture> TextureFiles::load_material_texture(const String &name, uint8_t type) const {
+	const Ref<Texture> texture = registry_.find_or_load(renderer::texture_registry_key(to_std(name), type),
+			[&] { return material_row_texture_(name, type); },
+			[](const Ref<Texture> &made) { return made.is_valid(); });
+	return texture.is_valid() ? texture : missing_material_texture();
+}
+
+Ref<Texture> TextureFiles::material_row_texture_(const String &name, uint8_t type) const {
 	renderer::MaterialTextureSource source;
 	if (!name.is_empty())
 		source = renderer::material_texture_source(to_std(name), type, [this](const std::string &file) { return has_(file); });

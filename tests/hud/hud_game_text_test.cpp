@@ -7,11 +7,13 @@
 // [orig: HUD_GetWaypointName @0x594630; HUD_DisplayTriggeredText @0x51f190;
 //  HUD_FormatKillEventMessage @0x422DA0]
 #include <runtime/hud/feed_format.h>
+#include <runtime/hud/game_text_lookup.h>
 #include <runtime/hud/hud_frame.h> // HudSessionText
 #include <runtime/hud/hud_game_text.h>
 
 #include <cstdio>
 #include <map>
+#include <set>
 #include <string>
 
 using namespace opennova::hud;
@@ -286,6 +288,24 @@ int main() {
 	CHECK(service_prompt_text(3, "E", 7, empty).empty());
 	CHECK(service_prompt_text(4, "E", 7, empty).empty());
 	CHECK(service_prompt_text(0, "E", 7, overlays).empty());
+
+	// The keys a number forms ("%s%03i"), each in its section; a named key read through its section.
+	CHECK(text_key(kLocationKey, 1) == "LOCATION001" && text_key(kPeopleNameKey, 5) == "STRNAME005" &&
+	      text_key(kTriggeredTextKey, 1234) == "ID1234" && text_key(kWaypointNameKey, 0) == "STRWPNAME000");
+	CHECK(std::string(kWinMessageKey.section) == "WinConditions" && std::string(kLoseDirectiveKey.section) == "LoseConditions" &&
+	      std::string(kTriggeredTextKey.section) == "Triggered Text" && std::string(kLocationKey.section) == "Locations" &&
+	      std::string(kWaypointNameKey.section) == kGameTextWPNames);
+	CHECK(game_text(mission, kWinMessageKey, 7, "") == "Objective secured" &&
+	      game_text(mission, kTriggeredTextKey, 12, "-") == "Proceed to the beach" && game_text(empty, kTriggeredTextKey, 12, "-") == "-");
+	CHECK(game_text(gametext, kGameTextNewObjective, "") == "New Objective" &&
+	      game_text(gametext, kGameTextWaypointNameDefault, "") == "Waypoint");
+	// The single-player flow's keys, each once, each in a section the game reads.
+	{
+		std::set<std::string> keys;
+		for (const GameTextKey &key : kMissionFlowKeys) CHECK(keys.insert(std::string(key.section) + "/" + key.key).second);
+		CHECK(keys.size() == 10 && keys.count("Misc/STRMISC_NEWOBJECTIVE") && keys.count("hud/mto") &&
+		      keys.count("Overlays/STROVER_MISSIONOBJECTIVES") && keys.count("Epilog/STREPILOG_KEYINFO"));
+	}
 
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

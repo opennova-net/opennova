@@ -465,4 +465,67 @@ MissionChoices action_sub_types(int32_t action_type) {
 
 #undef MISSION_CHOICES
 
+const char *path_command_editor_name(int64_t number) {
+	// [orig editor: dfx2med Med_ParamWaypointList @0x449c60 names the commands]
+	switch (number) {
+	case 123: return "Goto SSN (not driver, gunner)";
+	case 124: return "Goto SSN (not driver)";
+	case 125: return "Goto SSN (any)";
+	case 126: return "Goto group";
+	case 127: return "Goto player";
+	default: return nullptr;
+	}
+}
+
+bool trigger_ssn_unrecorded(const bms::Trigger &trigger, int slot) {
+	// The sees, targeted and shot records and the visited words keyed by an SSN hold rows 0 to 127: the
+	// setters skip any other [orig: the row bound-checks @0x452b60, @0x452bf0; section 3a]: the single's
+	// subs 1, 2, 13 (its p1) and 7 (the visited A word, its p1), 15 to 17 (both); the group's 15 to 17
+	// (the entity, p2).
+	const int32_t main = int32_t(trigger.main_type), sub = trigger.sub_type;
+	const bool relation = sub == 15 || sub == 16 || sub == 17;
+	bool keyed = false;
+	if (main == kGroup) keyed = relation && slot == 1;
+	if (main == kSingle) keyed = (relation && (slot == 0 || slot == 1)) || ((sub == 1 || sub == 2 || sub == 13 || sub == 7) && slot == 0);
+	if (!keyed) return false;
+	const int64_t ssn = slot == 0 ? trigger.param1 : slot == 1 ? trigger.param2 : slot == 2 ? trigger.param3 : trigger.param4;
+	return ssn < 0 || ssn >= kRelationSsnRows;
+}
+
+uint8_t trigger_ssn_pools(const bms::Trigger &trigger) {
+	if (trigger.main_type != bms::TriggerMainType::Single) return 0;
+	using S = bms::SingleTriggerType;
+	switch (static_cast<S>(trigger.sub_type)) {
+	// The alive test [orig: Entity_IsAliveByBmsRef @0x43e640, pools 0/1/2].
+	case S::SingleDestroyed:
+	case S::SingleAlive: return kOrganicPool | kItemPool | kBuildingPool;
+	// The alert, health and area tests [orig: Entity_IsSsnAtAlertLevel @0x43e780, Entity_HasDamageCapacity
+	// @0x43e3d0, Entity_HasFullHealth @0x43e470, Entity_HasHealthAboveThreshold @0x43e350,
+	// Entity_IsBmsRefInTriggerBounds @0x43e510: pools 0-1].
+	case S::SingleAtRedAlert:
+	case S::SingleAtYellowAlert:
+	case S::SingleHasLostMoreUnits:
+	case S::SingleIntact:
+	case S::SingleHasMoreUnits:
+	case S::SingleIsWithinArea: return kOrganicPool | kItemPool;
+	// The holding test [orig: Entity_IsSsnHoldingItemGroup @0x43e2f0, pool 0].
+	case S::SingleHoldingGroup: return kOrganicPool;
+	default: return 0;
+	}
+}
+
+uint8_t action_ssn_pools(const bms::Action &action) {
+	switch (action.action_type) {
+	// [orig: Entity_HandleAlertStateEvent @0x43DEE0, pools 0, 1, 2; Entity_FindByDCBAndSetFlag @0x43DB30;
+	// Entity_SetNetIdByParentRef @0x43D6C0; EventAction_TeleportEntityToSpawn @0x43DFC0]
+	case A::ChangeSingleAI:
+	case A::ChangeSteamAction:
+	case A::SingleChangeGroup:
+	case A::SingleTeleportAction: return kOrganicPool | kItemPool | kBuildingPool;
+	// A medevac's or a flyover's patient [orig: HeliLift_SpawnPickup @0x4525E0].
+	case A::Teammates: return action_param_kind(action, 0) == K::Entity ? kOrganicPool : 0;
+	default: return 0;
+	}
+}
+
 } // namespace opennova::mission

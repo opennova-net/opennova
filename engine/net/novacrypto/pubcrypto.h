@@ -72,4 +72,11 @@ std::string encode_key_chain(const std::vector<uint8_t> &plaintext, const std::s
 bool decode_key_chain(const std::string &encoded, const std::string &key_chain,
                       std::vector<uint8_t> &plaintext);
 
+// gt.ssc, the gate tag the game reads encoded by its name alone, and its key chain
+// [orig: Mission_LoadEncryptedConfig @ 0x4cdcd0: the name @ 0x7cbb50, the file read whole, at most
+// 0x1FFF bytes, and decoded under the key chain @ 0x7cbb44 by NapiNP_DecodeEncryptedString
+// @ 0x4cdd65; one that does not decode is skipped].
+inline constexpr const char *kGateTagFile = "gt.ssc";
+inline constexpr const char *kGateTagKeys = "jop:2:oyez";
+
 } // namespace opennova

@@ -301,6 +301,10 @@ struct ParticleFile {
 	const EffectDef *find_effect(std::string_view id) const noexcept;
 	const ParticleDef *find_particle(std::string_view id) const noexcept;
 	const TableDef *find_table(std::string_view id) const noexcept;
+	// The effect whose block holds `line` (its header to its closing brace, EffectDef::first_line ..
+	// last_line; one with no last line recorded holds every line from its header on), its index; npos
+	// for a line in none, and for every line of a file not read from a text.
+	size_t effect_at_line(size_t line) const noexcept;
 };
 
 // Engine: CEffectDef_ResolveTblDefReference @ 0x5e9630. Flatten `table.rows`

@@ -2,7 +2,12 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <limits>
+#include <system_error>
+
+#include <base/io/os_path.h>
 
 namespace opennova::renderer {
 namespace {
@@ -108,5 +113,34 @@ bool material_chunk_loads(uint64_t size, const MaterialChunkReader &read, uint8_
     uint8_t head[28];
     uint32_t w=0,h=0,d=0;
     return read(offset,head,sizeof(head)) && chunk_holds(head,length,type,w,h,d);
+}
+bool is_material_chunk_container(const std::vector<uint8_t> &bytes) {
+    for (const uint8_t type : {uint8_t(16), uint8_t(17), uint8_t(18)})
+        if (load_material_chunk(bytes.data(), bytes.size(), type)) return true;
+    return false;
+}
+bool is_material_chunk_file(const std::string &path, uint64_t &read) {
+    std::error_code ec;
+    const std::filesystem::path file = io::os_path(path);
+    const uint64_t size = std::filesystem::file_size(file, ec);
+    if (ec) return false;
+    std::ifstream in(file, std::ios::binary);
+    if (!in) return false;
+    size_t reads = 0;
+    const MaterialChunkReader chunk = [&](uint64_t at, uint8_t *out, size_t n) {
+        // A container walked past kChunkHeaderReads headers is not taken for one: a file of another
+        // kind whose bytes read as many empty chunks costs no more than that.
+        if (++reads > kChunkHeaderReads || at > size || n > size - at) return false;
+        in.clear();
+        in.seekg(static_cast<std::streamoff>(at));
+        in.read(reinterpret_cast<char *>(out), static_cast<std::streamsize>(n));
+        read += static_cast<uint64_t>(in.gcount());
+        return static_cast<size_t>(in.gcount()) == n;
+    };
+    for (const uint8_t type : {uint8_t(16), uint8_t(17), uint8_t(18)}) {
+        reads = 0;
+        if (material_chunk_loads(size, chunk, type)) return true;
+    }
+    return false;
 }
 } // namespace opennova::renderer

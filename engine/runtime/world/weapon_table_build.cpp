@@ -270,13 +270,9 @@ world::WeaponTable build_weapon_table(
 		if (resources != nullptr && d.gfx3[0] != '\0') {
 			e.third_person_model_asset = resources->model(d.gfx3);
 			const threedi::Threedi3di3 *gfx3 = e.third_person_model_asset.get();
-			if (gfx3 != nullptr && d.launch_user_point[0] != '\0' && gfx3->user_points != nullptr) {
-				for (size_t i = 0; i < gfx3->user_point_count; ++i) {
-					if (strutil::iequals(gfx3->user_points[i].name, d.launch_user_point)) {
-						e.launch_userpoint = static_cast<uint8_t>(i + 1);
-						break;
-					}
-				}
+			if (d.launch_user_point[0] != '\0') {
+				const int point = threedi::threedi_3di3_find_user_point(gfx3, d.launch_user_point);
+				if (point >= 0) e.launch_userpoint = static_cast<uint8_t>(point + 1);
 			}
 		}
 		// Bind this weapon's ACTION rows into the same 12-state descriptor table

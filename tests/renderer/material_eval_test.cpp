@@ -7,8 +7,8 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 using namespace opennova::crt;
@@ -30,14 +30,9 @@ bool nearly_equal(float a, float b, float epsilon = 0.0001f) {
 }
 
 opennova::renderer::ControlRegisterValues ctrl_bus(
-        const std::unordered_map<std::string, int32_t>& values = {}) {
+        const std::map<std::string, int64_t>& values = {}) {
     opennova::renderer::ControlRegisterValues bus{};
-    for (const auto& [name, value] : values) {
-        const int ordinal = threedi_ctrl_register_ordinal(name.c_str());
-        if (ordinal != THREEDI_CTRL_REGISTER_NOT_FOUND) {
-            bus[static_cast<size_t>(ordinal)] = value;
-        }
-    }
+    threedi_ctrl_bus_from_names(values, bus.data());
     return bus;
 }
 
@@ -45,7 +40,7 @@ opennova::renderer::MaterialRuntime eval_runtime(
         const ThreediMaterial& material,
         uint32_t time_ms,
         const std::vector<std::string>& ctrl_names = {},
-        const std::unordered_map<std::string, int32_t>& ctrl_values = {}) {
+        const std::map<std::string, int64_t>& ctrl_values = {}) {
     return opennova::renderer::eval_material_runtime(
             material, time_ms, ctrl_names, ctrl_bus(ctrl_values));
 }
@@ -220,7 +215,7 @@ int main() {
 
     {
         const std::vector<std::string> names = {"LOD_FADE_IN", "FLICKER"};
-        const std::unordered_map<std::string, int32_t> values = {{"FLICKER", 32768}};
+        const std::map<std::string, int64_t> values = {{"FLICKER", 32768}};
 
         material = tagged("FF_ST_OP#UV");
         material.u_params.style = 113;
@@ -285,7 +280,7 @@ int main() {
         const std::vector<std::string> duplicate_names = {
             "FLICKER", "fLiCkEr",
         };
-        const std::unordered_map<std::string, int32_t> case_aliases = {
+        const std::map<std::string, int64_t> case_aliases = {
             {"FLICKER", 32768},
             {"flicker", 32768},
         };

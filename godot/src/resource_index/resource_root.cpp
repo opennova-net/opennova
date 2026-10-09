@@ -367,6 +367,7 @@ Error ResourceRoot::mount_files(std::shared_ptr<const opennova::FileSource> file
 	// holders keep theirs (the mounting device makes afresh whatever read a moved file).
 	opennova::clear_texture_resolver_caches();
 	texture_cache_.clear();
+	texture_registry_.clear();
 	resolve_memo_built_ = false;
 	assets_.invalidate();
 	if (!index_.mount_source(std::move(files))) {
@@ -438,6 +439,7 @@ void ResourceRoot::clear() {
 	// the next epoch-checked lookup (or this RefCounted's destructor) retains
 	// cached ImageTextures through shutdown and leaks their renderer RIDs.
 	texture_cache_.clear();
+	texture_registry_.clear();
 	texture_cache_epoch_ = 0;
 	resolve_memo_.clear();
 	resolve_memo_epoch_ = 0;
@@ -680,16 +682,21 @@ Ref<Image> ResourceRoot::load_texture_image(const String &name, TextureLoader lo
 	return image;
 }
 
+void ResourceRoot::sync_texture_caches_() const {
+	const uint64_t epoch = opennova::cache_epoch();
+	if (texture_cache_epoch_ != epoch) {
+		texture_cache_.clear();
+		texture_registry_.clear();
+		texture_cache_epoch_ = epoch;
+	}
+}
+
 Ref<Texture2D> ResourceRoot::load_texture(const String &name, TextureLoader loader,
 		LookupPolicy policy) const {
 	if (root_dir_.is_empty() || name.strip_edges().is_empty()) {
 		return Ref<Texture2D>();
 	}
-	const uint64_t epoch = opennova::cache_epoch();
-	if (texture_cache_epoch_ != epoch) {
-		texture_cache_.clear();
-		texture_cache_epoch_ = epoch;
-	}
+	sync_texture_caches_();
 	// The files and readers the loader resolved, under the source policy, are the
 	// texture's identity: one loader's decode never serves another's, a prior
 	// archive/default decode never poisons a later forced-loose lookup, and two names
@@ -721,11 +728,7 @@ Ref<Texture2D> ResourceRoot::load_texture_created(const String &name, TextureLoa
 	if (root_dir_.is_empty() || name.strip_edges().is_empty()) {
 		return Ref<Texture2D>();
 	}
-	const uint64_t epoch = opennova::cache_epoch();
-	if (texture_cache_epoch_ != epoch) {
-		texture_cache_.clear();
-		texture_cache_epoch_ = epoch;
-	}
+	sync_texture_caches_();
 	const std::string cache_key = "created:" + std::to_string(creation) + ":" +
 			opennova::texture_load_key(texture_attempts_(name, loader, LOOKUP_SESSION_DEFAULT));
 	const auto cached = texture_cache_.find(cache_key);
@@ -778,6 +781,15 @@ Ref<Texture2D> ResourceRoot::load_texture_created(const String &name, TextureLoa
 }
 
 Ref<Texture> ResourceRoot::load_material_texture(const String &name, uint8_t type) const {
+	sync_texture_caches_();
+	const Ref<Texture> texture = texture_registry_.find_or_load(
+			opennova::renderer::texture_registry_key(opennova::to_std(name), type),
+			[&] { return material_row_texture_(name, type); },
+			[](const Ref<Texture> &made) { return made.is_valid(); });
+	return texture.is_valid() ? texture : opennova::missing_material_texture();
+}
+
+Ref<Texture> ResourceRoot::material_row_texture_(const String &name, uint8_t type) const {
 	using opennova::renderer::MaterialTextureReader;
 	// The one file the row's loader opens and the reader that decodes it, never an
 	// alternate extension, suffix or reader (renderer::material_texture_source; a type-1
@@ -795,11 +807,6 @@ Ref<Texture> ResourceRoot::load_material_texture(const String &name, uint8_t typ
 	const opennova::renderer::TextureLoad load = opennova::renderer::material_texture_load(source, type);
 	Ref<Texture2D> image;
 	if (load.reader != opennova::renderer::TextureReader::None) {
-		const uint64_t epoch = opennova::cache_epoch();
-		if (texture_cache_epoch_ != epoch) {
-			texture_cache_.clear();
-			texture_cache_epoch_ = epoch;
-		}
 		const std::string key = "material-image:" + std::to_string(static_cast<int>(load.reader)) + ":" +
 				std::to_string(static_cast<int>(load.transform)) + ":" +
 				opennova::to_std(opennova::to_gd(load.file).to_lower());

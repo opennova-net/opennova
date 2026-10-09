@@ -72,10 +72,44 @@ static void test_userpoint_sitex_seats() {
         check(!threedi_user_point_is_sitex(name), name);
 }
 
+// The by-name lookups: the model's walks every userpoint ASCII
+// case-insensitively and returns the FIRST match, the attach-bone lookup the
+// LAST; both return the 0-based row, -1 for a miss or a missing input, and a
+// name never reads past its 17-byte field.
+static void test_userpoint_find_by_name() {
+    ThreediUserPoint points[5];
+    std::memset(points, 0, sizeof(points));
+    std::strcpy(points[0].name, "engine");
+    std::strcpy(points[1].name, "mflash01");
+    std::strcpy(points[2].name, "MFLASH01");
+    std::strcpy(points[3].name, "");
+    std::memset(points[4].name, 'a', sizeof(points[4].name)); // a full field, no terminator
+    Threedi3di3 model;
+    std::memset(&model, 0, sizeof(model));
+    model.user_points = points;
+    model.user_point_count = 5;
+
+    check(threedi_3di3_find_user_point(&model, "MFlash01") == 1, "first case-insensitive match");
+    check(threedi_3di3_find_last_user_point(&model, "MFlash01") == 2, "last case-insensitive match");
+    check(threedi_3di3_find_user_point(&model, "engine") == 0, "a match on row 0");
+    check(threedi_3di3_find_last_user_point(&model, "engine") == 0, "a single match is first and last");
+    check(threedi_3di3_find_user_point(&model, "mflash") == -1, "a prefix is no match");
+    check(threedi_3di3_find_user_point(&model, "mflash01 ") == -1, "no trim");
+    check(threedi_3di3_find_user_point(&model, "") == 3, "an empty name compares like any other");
+    check(threedi_3di3_find_user_point(&model, "aaaaaaaaaaaaaaaaa") == 4, "a full-width name is its 17 bytes");
+    check(threedi_3di3_find_user_point(&model, "aaaaaaaaaaaaaaaaaa") == -1, "never past the field");
+    check(threedi_3di3_find_user_point(&model, nullptr) == -1, "a null name");
+    check(threedi_3di3_find_user_point(nullptr, "engine") == -1, "a null model");
+    model.user_points = nullptr;
+    check(threedi_3di3_find_user_point(&model, "engine") == -1, "no userpoint table");
+    check(threedi_3di3_find_last_user_point(&model, "engine") == -1, "no userpoint table (last)");
+}
+
 int main() {
     test_userpoint_side_axis_is_mirrored();
     test_userpoint_fractional_fixed_point();
     test_userpoint_sitex_seats();
+    test_userpoint_find_by_name();
 
     if (failures == 0) {
         std::printf("userpoint_test: OK\n");

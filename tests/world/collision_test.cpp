@@ -3363,6 +3363,20 @@ struct DemandItemProvider final : IPoseProvider {
     }
 };
 
+// A person section's hit radius: 45 percent of the authored radius (65 for the
+// head, section 14) plus the 0xCCC floor and the round's extra radius; sections
+// 15 and 16 capped at 0x3000. [orig: Physics_RaycastAgainstBoneSections @ 0x4e4670]
+void test_person_effective_radius() {
+    CHECK(person_effective_radius(0, 0x10000, 0) == 0xCCC + 0x10000 * 45 / 100);
+    CHECK(person_effective_radius(14, 0x10000, 0) == 0xCCC + 0x10000 * 65 / 100);
+    CHECK(person_effective_radius(15, 0x10000, 0) == 0x3000);
+    CHECK(person_effective_radius(16, 0x10000, 0) == 0x3000);
+    CHECK(person_effective_radius(17, 0x10000, 0) == 0xCCC + 0x10000 * 45 / 100);
+    CHECK(person_effective_radius(15, 0, 0) == 0xCCC); // under the cap: the floor alone
+    CHECK(person_effective_radius(3, 0, 0) == 0xCCC);  // an authored zero still has the floor
+    CHECK(person_effective_radius(3, 0x10000, 0x800) == 0x800 + 0xCCC + 0x10000 * 45 / 100);
+}
+
 void test_person_section_raycast_uses_posed_bone_matrix() {
     Rig rig(person_section_model());
     rig.cw.assign_entity(rig.soldier, 0);
@@ -6139,6 +6153,7 @@ int main() {
     test_face_raycast_husk_swap();
     test_face_raycast_husk_omits_spawned_piece_sections();
     test_face_raycast_uses_callback_matrix_per_section();
+    test_person_effective_radius();
     test_person_section_raycast_uses_posed_bone_matrix();
     test_ground_and_resolver_prefilter_stale_candidates_before_section_matrices();
     test_vehicle_hull_prefilters_stale_candidates_before_section_matrices();

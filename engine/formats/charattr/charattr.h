@@ -92,6 +92,16 @@ struct Table {
 	std::array<ClassRow, kClassCount> rows{};
 };
 
+// A class's camouflage item type id by its property: JUNGLE_CAMMO (10), DESERT_CAMMO (11) or ARCTIC_CAMMO
+// (12); 0 for any other property [orig: CharAttr_GetCammoTypeId @ 0x4127b0 -- 10/11/12 @ 0x4127d2..0x4127dc,
+// any other id 0 @ 0x4127c9].
+int32_t cammo_of(const ClassRow &row, Property property);
+
+// The camouflage property a mission's camouflage selector (the BMS mission's) picks a class's item by: 1
+// JUNGLE_CAMMO, 2 ARCTIC_CAMMO, any other DESERT_CAMMO
+// [orig: Entity_SpawnFromAnimSlotProperty @ 0x43c399..0x43c3be].
+Property cammo_property_for_camouflage(int camouflage);
+
 // The keys the loader reads, each with the property it fills, in the loader's order [orig:
 // CharAttr_LoadFromDef @ 0x4121e7..0x412353]: a float (ConfigFile type 2) or an integer (type 1); then
 // ATTRIBUTES, its words (@ 0x412381).

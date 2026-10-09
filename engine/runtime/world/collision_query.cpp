@@ -167,7 +167,7 @@ bool collision_raycast_model(const CollisionTargetView &target, CollisionRay &ra
         CollisionModelHit section_hit;
         for (int32_t vi = 0; vi < sec.volume_count; ++vi) {
             const CollisionVolume &vol = model.volumes[sec.volume_start + vi];
-            if (vol.type != 1) continue; // [orig: @ 0x413298 — solid type-1 only]
+            if (vol.type != bvol_type::kSolidCB) continue; // [orig: @ 0x413298 — solid type-1 only]
 
             // Volume bound-sphere reject. [orig: @ 0x4132b6-0x41341c]
             const int32_t hx = (vol.max_x - vol.min_x) >> 1;
@@ -788,7 +788,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                 const CollisionVolume &vol = model.volumes[sec.volume_start + vi];
                 const int32_t type = vol.type;
                 if (vehicle_scoped && type != 7 && type != 12) continue; // [orig: @ 0x4ae52f]
-                if (type == 19) {
+                if (type == bvol_type::kPlayerCP) {
                     if ((q.mask & 2) == 0) continue; // CP: players, not AI [orig: @ 0x4ae543]
                 } else if (type == 7) {
                     if (!vehicle_pass) continue; // [orig: @ 0x4ae558]

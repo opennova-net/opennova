@@ -34,6 +34,7 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/bfc1/bfc1.cpp
     # cbin — credits binary
     ${CMAKE_CURRENT_SOURCE_DIR}/cbin/binary_config.cpp # the CBIN form read and written exactly
+    ${CMAKE_CURRENT_SOURCE_DIR}/cbin/binary_config_text.cpp # the CBIN form <-> its ConfigFile text form
     ${CMAKE_CURRENT_SOURCE_DIR}/cbin/cbin.cpp
     # charattr — charattr.def, the character classes' attributes (read and written)
     ${CMAKE_CURRENT_SOURCE_DIR}/charattr/charattr.cpp
@@ -54,6 +55,7 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_compose.cpp  # a file generated over its modeled layout
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_hudpos.cpp   # HUDPOS.DEF
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_hudpos_write.cpp # HUDPOS.DEF's writer
+    ${CMAKE_CURRENT_SOURCE_DIR}/def/def_hudpos_text.cpp # HUDPOS.DEF's lines as the parser is handed them
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_items.cpp    # ITEMS.DEF
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_layout.cpp   # the order and indentation a file was read with
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_notes.cpp    # what a save needs to put a file back as it was read
@@ -70,7 +72,10 @@ add_library(opennova_formats STATIC
     # env — environment/time-of-day
     ${CMAKE_CURRENT_SOURCE_DIR}/env/env.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/env/env_render.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/env/env_source_issue.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/env/env_weather_core.cpp
+    # filelog — the original game's /FRISK file-access log (_filelog.txt)
+    ${CMAKE_CURRENT_SOURCE_DIR}/filelog/file_access_log.cpp
     # fnt — bitmap fonts
     ${CMAKE_CURRENT_SOURCE_DIR}/fnt/fnt.cpp
     # foliage — foliage defs + placement map
@@ -84,6 +89,7 @@ add_library(opennova_formats STATIC
     # lwf — sound profiles (+ the .wav payload decode the profiles reference)
     ${CMAKE_CURRENT_SOURCE_DIR}/lwf/lwf.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/lwf/wav_pcm.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/lwf/wav_source.cpp # the wave loader's acceptance walk + a source wave read and converted
     # mission — .bms/.mis missions: document model, parsers/writers and edit
     # helpers. Standalone (no world/runtime dependency);
     # the runtime half — event runtime, promotion, boot — lives in
@@ -166,6 +172,7 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_panm_wave.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_panm_matrices.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_panm_pose.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_volume_solid.cpp   # a collision volume's planes -> its convex solid
     # til — terrain tiles
     ${CMAKE_CURRENT_SOURCE_DIR}/til/til_io.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/til/til_foliage_blocker.cpp

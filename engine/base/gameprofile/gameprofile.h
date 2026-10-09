@@ -9,7 +9,7 @@ namespace opennova::gameprofile {
    (container key + SCR payload-codec policy) and how a new/edited archive is written. It is the one
    source of truth for game identity across the whole engine: tools pick a game by id and the
    runtime picks one by short `code` (the `/game <code>` launch flag). Dependency-free by design
-   (no pff.h include): the format field is a plain int whose values mirror PffFormat. */
+   (no pff.h include): the archive format is a plain int whose values mirror PffFormat. */
 
 /* The universal PFF container key: the ROL7 XOR keystream seed for
    PFF_FLAG_ENCRYPTED entries, identical in every reversed NovaLogic title
@@ -17,6 +17,12 @@ namespace opennova::gameprofile {
    title only needs a new table entry; consumers with no resolved profile fall
    back to this named default (never to a raw literal). */
 inline constexpr uint32_t GAMEPROFILE_PFF_CONTAINER_KEY_DEFAULT = 0x0312A4CEu;
+
+/* The container format a NEW archive of any profile is written in, as a PffFormat value (0 =
+   PFF_FORMAT_PFF3): PFF3, ADR 0008's default for a newly created archive, which every JO-family
+   title opens [orig: PFF_Open @ 0x7682e0]. One value for every profile: a title that ships
+   another flavour makes it a GameProfile column. */
+inline constexpr int GAMEPROFILE_PFF_NEW_ARCHIVE_FORMAT = 0;
 
 typedef enum GameId {
     GAME_JO = 0,    /* Joint Operations: Typhoon Rising            */

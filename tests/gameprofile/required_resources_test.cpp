@@ -6,6 +6,7 @@
 
 #include <base/gameprofile/required_resources.h>
 #include <base/gameprofile/resource_missing.h>
+#include <runtime/audio/music_policy.h>
 
 #include <string>
 
@@ -159,6 +160,75 @@ static int test_known_row_lookups(void) {
     return 1;
 }
 
+/* The files an expansion's name forms [orig: Expansion_LoadAssets @ 0x4a4730]: each expansion row
+   named for "jxm" as the game names it (the music pairs as the runtime's own naming,
+   audio::music_pair_names), version.txt the one name no expansion's forms, and the base game's
+   file each music row stands in for, a row of its own. */
+static int test_expansion_file_names(void) {
+    struct Want {
+        const char *role;
+        const char *name;
+        bool formed;
+        const char *replaces;
+    };
+    static const Want wants[] = {
+        {"expansion_table", "jxm.bin", true, NULL},
+        {"expansion_version", "version.txt", false, NULL},
+        {"expansion_menumus_sbf", "Mjxm.sbf", true, "MENUMUS.SBF"},
+        {"expansion_menumus_bin", "Mjxm.bin", true, "MENUMUS.BIN"},
+        {"expansion_gamemus_sbf", "Gjxm.sbf", true, "GAMEMUS.SBF"},
+        {"expansion_gamemus_bin", "Gjxm.bin", true, "GAMEMUS.BIN"},
+        {"expansion_locl_lwf", "jxmL.lwf", true, NULL},
+        {"expansion_lwf", "jxm.lwf", true, NULL},
+    };
+    for (const Want &want : wants) {
+        const RequiredResource *row = gameprofile_required_resource_by_role(want.role);
+        CHECK(row != NULL, "the expansion row");
+        CHECK(gameprofile_expansion_file_name(row, "jxm") == want.name, "named as the game names it");
+        CHECK(gameprofile_expansion_file_formed(row) == want.formed, "formed by the name but version.txt");
+        CHECK((row->replaces == NULL) == (want.replaces == NULL) &&
+                  (want.replaces == NULL || strcmp(row->replaces, want.replaces) == 0),
+              "the base game's file it stands in for");
+        if (row->replaces != NULL) {
+            const RequiredResource *base = gameprofile_required_resource_find(row->replaces);
+            CHECK(base != NULL && (base->flags & (RES_F_PATTERN | RES_F_EXPANSION)) == 0,
+                  "which is a literal row of the base game's");
+        }
+    }
+    const opennova::audio::MusicPairNames menu = opennova::audio::menu_music_pair_names("jxm");
+    const opennova::audio::MusicPairNames game = opennova::audio::game_music_pair_names("jxm");
+    CHECK(gameprofile_expansion_file_name(gameprofile_required_resource_by_role("expansion_menumus_sbf"), "jxm") ==
+                  menu.bank_file &&
+              gameprofile_expansion_file_name(gameprofile_required_resource_by_role("expansion_menumus_bin"), "jxm") ==
+                  menu.script_file &&
+              gameprofile_expansion_file_name(gameprofile_required_resource_by_role("expansion_gamemus_sbf"), "jxm") ==
+                  game.bank_file &&
+              gameprofile_expansion_file_name(gameprofile_required_resource_by_role("expansion_gamemus_bin"), "jxm") ==
+                  game.script_file,
+          "the music pairs as the runtime names them");
+    for (int i = 0; i < gameprofile_required_resource_count(); ++i) {
+        const RequiredResource *row = gameprofile_required_resource_at(i);
+        if (!(row->flags & RES_F_EXPANSION)) CHECK(row->replaces == NULL, "no other row stands in for a file");
+    }
+    CHECK(gameprofile_expansion_file_name(NULL, "jxm").empty() && !gameprofile_expansion_file_formed(NULL), "no row");
+    CHECK(gameprofile_expansion_file_name(gameprofile_required_resource_find("main.mnu"), "jxm") == "main.mnu" &&
+              !gameprofile_expansion_file_formed(gameprofile_required_resource_find("main.mnu")),
+          "a literal row names its own file");
+    CHECK(gameprofile_expansion_file_name(gameprofile_required_resource_by_role("expansion_archive"), "x1") == "x1.pff",
+          "the archive pattern's file too");
+    return 1;
+}
+
+/* The archives' 16-byte names bind an expansion's: its archived M<n>.bin and <n>L.lwf
+   [orig: Expansion_LoadAssets @ 0x4a491d, @ 0x4a4989] fit them up to 11 characters. */
+static int test_expansion_names_fit_archive(void) {
+    CHECK(gameprofile_expansion_names_fit_archive("jxm") && gameprofile_expansion_names_fit_archive("x"),
+          "a short name fits");
+    CHECK(gameprofile_expansion_names_fit_archive(std::string(11, 'a')), "11 characters make 16-character names");
+    CHECK(!gameprofile_expansion_names_fit_archive(std::string(12, 'a')), "12 make 17");
+    return 1;
+}
+
 static int test_roles_are_unique_snake_case_tokens(void) {
     /* The editor keys its requirements checklist on the role token (ADR 0046 d5/d7):
      * one per row, lower-case snake_case, never empty, never shared. */
@@ -224,6 +294,8 @@ int main(void) {
     RUN_TEST(test_the_witnessed_fatal_set);
     RUN_TEST(test_known_row_lookups);
     RUN_TEST(test_roles_are_unique_snake_case_tokens);
+    RUN_TEST(test_expansion_file_names);
+    RUN_TEST(test_expansion_names_fit_archive);
     RUN_TEST(test_resource_missing_lines);
     printf("%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;

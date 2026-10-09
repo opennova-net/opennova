@@ -5,6 +5,8 @@
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -765,6 +767,69 @@ bool loadout_reads_back(const WeaponLoadout& loadout, size_t& first) {
 bool is_bms(const uint8_t* data, size_t size) {
     if (size < 4) return false;
     return data[0] == 'B' && data[1] == 'M' && data[2] == 'S';
+}
+
+bool is_player_route(const WaypointRecord& record) {
+    // [orig: NetPacket_WriteWorldStateLoad0x0F @0x502e50 `test byte ptr [eax], 2`]
+    return (static_cast<uint32_t>(record.flags) & static_cast<uint32_t>(WaypointFlags::PlayerRoute)) != 0;
+}
+
+size_t player_route_stop_count(const WaypointRecord& record) {
+    // [orig: NetPacket_WriteWorldStateLoad0x0F, the count capped at 128 @0x502efc], compared as signed
+    // ints: a count of 2^31 or more reads negative and walks no stop.
+    const int count = std::min<int>({static_cast<int>(record.marker_count),
+                                     static_cast<int>(record.waypoint_numbers.size()),
+                                     static_cast<int>(kPlayerRouteMaxStops)});
+    return count > 0 ? static_cast<size_t>(count) : 0;
+}
+
+std::string first_differing_section(const File& file, const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
+    struct Section {
+        const char* name;
+        size_t size;
+    };
+    const auto word = [&a](size_t at) {
+        return at + 1 < a.size() ? size_t(a[at]) | (size_t(a[at + 1]) << 8) : size_t(0);
+    };
+    const size_t trigger_count_at = offsetof(Header, area_trigger_count);
+    const size_t loadout_length_at = offsetof(Header, weapon_loadout_chunk_len);
+    const size_t availability_length_at = offsetof(Header, secondary_chunk_len);
+    static_assert(offsetof(Header, area_trigger_count) == 576 && offsetof(Header, weapon_loadout_chunk_len) == 578 &&
+                          offsetof(Header, secondary_chunk_len) == 582,
+                  "the header's count and chunk length words sit at bytes 576, 578 and 582");
+    const Section sections[] = {
+        {"header", kHeaderSize},
+        {"loadout chunk", word(loadout_length_at)},
+        {"availability chunk", word(availability_length_at)},
+        {"items", file.items.size() * kEntitySize},
+        {"buildings", file.buildings.size() * kEntitySize},
+        {"markers", file.markers.size() * kEntitySize},
+        {"organics", file.organics.size() * kEntitySize},
+        {"waypoint paths", size_t(kWaypointRecordCount) * kWaypointRecordSize},
+        {"groups", size_t(kGroupRecordCount) * kGroupRecordSize},
+        {"layers", size_t(kLayerRecordCount) * kLayerRecordSize},
+        {"area triggers", file.area_triggers.size() * kAreaTriggerSize},
+        {"event counts", 12},
+        {"events", file.events.size() * kEventSize},
+        {"triggers", file.triggers.size() * kTriggerSize},
+        {"actions", file.actions.size() * kActionSize},
+        {"bounding box count", 4},
+        {"bounding boxes", file.bounding_boxes.size() * kBoundingBoxSize},
+    };
+    // The header's words the chunks' and the tables' sizes decide: its area trigger count and the
+    // loadout chunk's length (bytes 576..579), the availability chunk's (582..583), the write's.
+    const auto derived = [&](size_t offset) {
+        return (offset >= trigger_count_at && offset < loadout_length_at + sizeof(Header::weapon_loadout_chunk_len)) ||
+               (offset >= availability_length_at && offset < availability_length_at + sizeof(Header::secondary_chunk_len));
+    };
+    size_t at = 0;
+    for (const Section& section : sections) {
+        if (at + section.size > a.size() || at + section.size > b.size()) return section.name;
+        for (size_t i = 0; i < section.size; ++i)
+            if (a[at + i] != b[at + i] && !(at == 0 && derived(i))) return section.name;
+        at += section.size;
+    }
+    return a.size() == b.size() ? std::string() : std::string("length");
 }
 
 bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {

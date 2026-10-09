@@ -65,12 +65,7 @@ int32_t charattr_cammo_type_id(const CharAttrTable &state, uint8_t class_id, uin
 	//  any other id 0 @ 0x4127c9]
 	const charattr::ClassRow &row = row_of(state, class_id);
 	if (!row.active) return 0;
-	switch (property) {
-		case charattr::kJungleCammo: return row.jungle_cammo;
-		case charattr::kDesertCammo: return row.desert_cammo;
-		case charattr::kArcticCammo: return row.arctic_cammo;
-		default: return 0;
-	}
+	return charattr::cammo_of(row, static_cast<charattr::Property>(property));
 }
 
 bool charattr_get_int(const CharAttrTable &state, uint8_t class_id, uint8_t property, int32_t &out) {

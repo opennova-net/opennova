@@ -16,7 +16,10 @@
 #include <vector>
 
 #include <formats/charattr/charattr.h>            // the restriction properties (the join's 0x41s)
+#include <formats/def/reserved_items.h>           // DEF_TYPE_NAMED_LOCATION (the 0x0F location names)
 #include <formats/mission/bms.h>                  // bms::File, bms::encode_loaded_header_blob (0x0B body)
+#include <runtime/hud/game_text_lookup.h>         // hud::text_key (a location's LOCATION%03i fallback)
+#include <runtime/mission/mission_text.h>         // mission::location_numbers
 #include <runtime/replication/entity_wire_bridge.h>    // build_pool0_organic_batch / build_pool3_spawn_marker_batch
 #include <base/gameprofile/game_type.h>          // is_waypoint_family (the §5.32 selector)
 #include <net/npwire/ingame_encode.h>      // encode_organic_spawn_batch / encode_pool3_sync_batch
@@ -279,7 +282,7 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	std::vector<std::string> location_names = ctx.mission_location_names;
 	if (location_names.empty() && ctx.world != nullptr) {
 		ctx.world->registry.for_each([&](const world::Entity &e) {
-			if (e.handle.pool() != 3 || e.item_id != 2044) return;
+			if (e.handle.pool() != 3 || e.item_id != def::DEF_TYPE_NAMED_LOCATION) return;
 			location_names.push_back(e.name);
 		});
 	}
@@ -797,25 +800,17 @@ InitialStateStep Server_SendInitialGameStateToPlayer(NapiNPServerCtx &ctx, NapiN
 void install_mission_location_names(NapiNPServerCtx &ctx, const bms::File &mission,
                                     const std::unordered_map<int32_t, std::string> &location_texts) {
 	ctx.mission_location_names.clear();
-	int32_t location_index = 1;
-	for (const bms::Entity &marker : mission.markers) {
-		if (marker.type_id != 2044) continue;
-		// LOCATION001.. follow type-2044 marker spawn order; the BMS ttool_index
-		// is zero for both 00TRg markers and is not the text key.
+	// LOCATION001.. follow type-2044 marker spawn order; the BMS ttool_index
+	// is zero for both 00TRg markers and is not the text key.
+	for (const int32_t location_index : mission::location_numbers(mission.markers)) {
+		if (location_index == 0) continue;
 		const auto found = location_texts.find(location_index);
-		std::string label;
-		if (found != location_texts.end()) {
-			label = found->second;
-		} else {
-			const std::string suffix = std::to_string(location_index);
-			label = "LOCATION";
-			if (suffix.size() < 3) label.append(3 - suffix.size(), '0');
-			label += suffix;
-		}
+		std::string label = found != location_texts.end()
+				? found->second
+				: hud::text_key(hud::kLocationKey, location_index);
 		// Retail stores the resolved text in a 64-byte location-name slot.
 		if (label.size() > 63) label.resize(63);
 		ctx.mission_location_names.push_back(std::move(label));
-		++location_index;
 	}
 }
 

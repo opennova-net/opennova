@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <cstring>
+#include <string>
+#include <vector>
 
 #include "common/test_expect.h"
 
@@ -43,6 +45,30 @@ int main() {
 
     out_size = sizeof(out);
     TEST_EXPECT(scr_decrypt_buf(scr0_plain, sizeof(scr0_plain), out, &out_size, SCR_KEY_DEFAULT) == -1);
+
+    // The shader loader's form [orig: ScriptFile_LoadAndDecrypt @ 0x5AE060]: "SCR", version 1, the text
+    // and a NUL under the shaders' key; read back with the NUL dropped, and byte for byte the payload a
+    // hand-made file holds.
+    const std::string source = "// a shader\r\nfloat4 main() : COLOR { return 0; }\r\n";
+    std::string payload = source + std::string(1, '\0');
+    scr_encrypt(reinterpret_cast<uint8_t *>(&payload[0]), payload.size(), SCR_KEY_SHADERS);
+    const std::string by_hand = std::string("SCR\x01", 4) + payload;
+    const std::vector<uint8_t> shader = scr_shader_encode(source);
+    TEST_EXPECT(std::string(shader.begin(), shader.end()) == by_hand);
+    std::string text;
+    bool nul = false;
+    TEST_EXPECT(scr_shader_decode(shader.data(), shader.size(), text, &nul) && text == source && nul);
+    // Without the NUL: written so, and read back so.
+    const std::vector<uint8_t> bare = scr_shader_encode(source, false);
+    TEST_EXPECT(bare.size() + 1 == shader.size() && scr_shader_decode(bare.data(), bare.size(), text, &nul) &&
+                text == source && !nul);
+    // Another version, the text readers' key, or no SCR at all: not the shader loader's form.
+    std::vector<uint8_t> two = shader;
+    two[3] = 2;
+    TEST_EXPECT(!scr_shader_decode(two.data(), two.size(), text) && !scr_shader_decode(encrypted, sizeof(encrypted), text));
+    TEST_EXPECT(!scr_shader_decode(reinterpret_cast<const uint8_t *>(source.data()), source.size(), text));
+    TEST_EXPECT(!scr_shader_decode(scr0_plain, sizeof(scr0_plain), text));
+    TEST_EXPECT(SCR_SHADER_VERSION == 1);
 
     return 0;
 }

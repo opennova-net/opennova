@@ -3,7 +3,8 @@
 // [orig: @0x506649..0x506660], the [Locations] LOCATION%03i and [PeopleNames]
 // STRNAME%03i numeric-key harvests (case-insensitive section / prefix, the
 // first value per suffix wins, non-numeric suffixes skipped, raw cp1252 bytes
-// kept), the people-name resolve, and a rejected table.
+// kept), the people-name resolve, a rejected table, and the markers' location
+// numbers.
 #include <formats/rtxt/rtxt.h>
 #include <runtime/mission/mission_text.h>
 
@@ -107,6 +108,20 @@ int main() {
 		CHECK(!mission::parse_mission_text(junk, sizeof(junk), text, error));
 		CHECK(!error.empty());
 		CHECK(!text.loaded && text.briefing3.empty());
+	}
+
+	// The location numbers: each named-location marker the next from 1, in the pool's order; any
+	// other marker 0.
+	{
+		std::vector<bms::Entity> markers(5);
+		for (bms::Entity &marker : markers) marker = bms::Entity{};
+		markers[0].type_id = 2044;
+		markers[1].type_id = 6005;
+		markers[2].type_id = 2044;
+		markers[3].type_id = 2043;
+		markers[4].type_id = 2044;
+		CHECK(mission::location_numbers(markers) == std::vector<int32_t>({1, 0, 2, 0, 3}));
+		CHECK(mission::location_numbers({}).empty());
 	}
 
 	if (failures != 0) {

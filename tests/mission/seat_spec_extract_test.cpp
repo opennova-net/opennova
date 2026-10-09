@@ -93,6 +93,21 @@ void fixture_mount() {
 
 int main() {
     fixture_mount();
+    // ---- the seat classifier, standalone ----
+    // sitex/ctrlx/drvrx are 5-character prefixes from byte zero in any case,
+    // UseGun a whole-name compare; no trim, no embedded token.
+    // [orig: Entity_GetBoneSlotType @ 0x434ED0]
+    CHECK(seat_type_for_user_point("sitex06") == world::SeatType::Passenger);
+    CHECK(seat_type_for_user_point("SITEX") == world::SeatType::Passenger);
+    CHECK(seat_type_for_user_point("CtrlX02") == world::SeatType::Controller);
+    CHECK(seat_type_for_user_point("drvrx") == world::SeatType::Driver);
+    CHECK(seat_type_for_user_point("Usegun") == world::SeatType::Gunner);
+    CHECK(seat_type_for_user_point("UseGun07") == world::SeatType::None);
+    CHECK(seat_type_for_user_point(" UseGun") == world::SeatType::None);
+    CHECK(seat_type_for_user_point(" sitex01") == world::SeatType::None);
+    CHECK(seat_type_for_user_point("xdrvrx") == world::SeatType::None);
+    CHECK(seat_type_for_user_point("") == world::SeatType::None);
+
     // ---- the conversions, standalone ----
     // Raw (1, 2, 3) world-units authored -> mission local (-2, 1, 3).
     const ThreediUserPoint probe = up("sitex", 1, 2, 3);

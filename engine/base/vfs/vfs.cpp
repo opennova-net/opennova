@@ -467,8 +467,8 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
     bool have_expansion = false;
     std::string exp_dir;
     if (!expansion.empty()) {
-        exp_dir = io::utf8_join(io::utf8_join(game_root, "expansion"), expansion);
-        if (fs::exists(io::os_path(io::utf8_join(exp_dir, expansion + ".pff")), ec)) {
+        exp_dir = vfs_expansion_dir(game_root, expansion);
+        if (fs::exists(io::os_path(vfs_expansion_archive_path(game_root, expansion, false)), ec)) {
             have_expansion = true;
             // Record what actually mounted so callers can tell a real expansion mount from
             // the fallback below without re-deriving the predicate (D-NET-178).
@@ -481,11 +481,11 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
         retain_loose_probe(exp_dir);                    // loose expansion files: highest
         retain_loose_probe(game_root);                  // engine CWD probe: base loose files
         if (mount_archives) {
-            const std::string local = io::utf8_join(exp_dir, expansion + "L.pff");
+            const std::string local = vfs_expansion_archive_path(game_root, expansion, true);
             if (fs::exists(io::os_path(local), ec) && set_primary_archive(local) &&
                 discovery == VfsArchiveDiscovery::RetailTable)
                 impl_->slots[kArchiveSlotExpansionText] = impl_->primary.get();
-            if (add_secondary_archive(io::utf8_join(exp_dir, expansion + ".pff")) &&
+            if (add_secondary_archive(vfs_expansion_archive_path(game_root, expansion, false)) &&
                 discovery == VfsArchiveDiscovery::RetailTable)
                 impl_->slots[kArchiveSlotExpansion] = impl_->secondaries.back().get();
         }
@@ -744,6 +744,43 @@ const std::string &Vfs::game_root() const { return impl_->game_root; }
 const std::string &Vfs::mounted_expansion() const { return impl_->mounted_expansion; }
 const std::string &Vfs::last_error() const { return impl_->last_error; }
 
+bool vfs_has_boot_archive(const std::string &dir) {
+    if (dir.empty()) return false;
+    std::error_code ec;
+    for (const fs::directory_entry &entry : fs::directory_iterator(io::os_path(dir), ec)) {
+        std::error_code kind;
+        if (!entry.is_regular_file(kind)) continue;
+        const std::string name = io::utf8_path(entry.path().filename());
+        for (const char *slot : kBootArchiveTable)
+            if (strutil::iequals(name, slot)) return true;
+    }
+    return false;
+}
+
+std::string vfs_expansion_dir(const std::string &game_root, const std::string &expansion) {
+    return io::utf8_join(io::utf8_join(game_root, "expansion"), expansion);
+}
+
+std::string vfs_expansion_archive_name(const std::string &expansion, bool language) {
+    return expansion + (language ? "L.pff" : ".pff");
+}
+
+std::string vfs_expansion_archive_path(const std::string &game_root, const std::string &expansion,
+                                       bool language) {
+    return io::utf8_join(vfs_expansion_dir(game_root, expansion), vfs_expansion_archive_name(expansion, language));
+}
+
+bool vfs_read_from_expansion_folder(const std::string &name, const std::string &expansion) {
+    for (const char *video : {"main.bik", "header.bik", "footer.bik", "prolog.bik", "intro.bik"})
+        if (strutil::iequals(name, video)) return true;
+    return strutil::iequals(name, expansion + ".bin") || strutil::iequals(name, "M" + expansion + ".sbf") ||
+           strutil::iequals(name, "G" + expansion + ".sbf") || strutil::iequals(name, "gt.ssc");
+}
+
+bool vfs_expansion_folder_listed(const std::string &name) {
+    return !name.empty() && name[0] != '.';
+}
+
 std::vector<std::string> vfs_list_expansions(const std::string &game_root) {
     std::vector<std::string> out;
     std::error_code ec;
@@ -755,7 +792,7 @@ std::vector<std::string> vfs_list_expansions(const std::string &game_root) {
         if (ec) break;
         if (!de.is_directory(ec)) continue;
         const std::string name = io::utf8_path(de.path().filename());
-        if (fs::exists(io::os_path(io::utf8_join(io::utf8_join(exp_root, name), name + ".pff")), ec))
+        if (fs::exists(io::os_path(vfs_expansion_archive_path(game_root, name, false)), ec))
             out.push_back(name);
     }
     std::sort(out.begin(), out.end());
@@ -775,7 +812,8 @@ bool read_expansion_text_bytes(const std::string &exp_dir, const std::string &ex
         out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
         if (!out.empty()) return true;
     }
-    for (const std::string &archive : {expansion + "L.pff", expansion + ".pff"}) {
+    for (const std::string &archive :
+         {vfs_expansion_archive_name(expansion, true), vfs_expansion_archive_name(expansion, false)}) {
         PffArchive ar{};
         if (pff_open(&ar, io::utf8_join(exp_dir, archive).c_str()) != 0) continue;
         const PffEntry *entry = pff_find(&ar, bin_name.c_str());
@@ -812,7 +850,7 @@ const rtxt::Entry *find_in_section(const rtxt::File &file, const char *section,
 ExpansionInfo vfs_expansion_info(const std::string &game_root, const std::string &expansion) {
     ExpansionInfo info{kExpansionUnnamed, kExpansionNoDescription};
     if (expansion.empty()) return info;
-    const std::string exp_dir = io::utf8_join(io::utf8_join(game_root, "expansion"), expansion);
+    const std::string exp_dir = vfs_expansion_dir(game_root, expansion);
     std::vector<uint8_t> bytes;
     if (!read_expansion_text_bytes(exp_dir, expansion, bytes)) return info;  // @ 0x4a4664
     return expansion_info_from_bin(bytes);
@@ -845,7 +883,7 @@ std::vector<ExpansionRecord> vfs_expansion_records(const std::string &game_root)
             if (ec) break;
             if (!de.is_directory(ec)) continue;  // FILE_ATTRIBUTE_DIRECTORY @ 0x4a445d
             const std::string name = io::utf8_path(de.path().filename());
-            if (name.empty() || name[0] == '.') continue;  // cFileName[0] != '.'
+            if (!vfs_expansion_folder_listed(name)) continue;  // cFileName[0] != '.'
             names.push_back(name);
         }
     }
@@ -870,8 +908,7 @@ int32_t vfs_expansion_version_checksum(const std::string &game_root,
     // [orig: Expansion_LoadAssets — g_ExpansionChecksum = 0 @ 0x4a4781; only a
     //  live expansion probes the loose file @ 0x4a4787..0x4a488a]
     if (game_root.empty() || expansion.empty()) return 0;
-    const std::string path = io::utf8_join(
-            io::utf8_join(io::utf8_join(game_root, "expansion"), expansion), "version.txt");
+    const std::string path = io::utf8_join(vfs_expansion_dir(game_root, expansion), "version.txt");
     std::ifstream file(io::os_path(path), std::ios::binary);
     if (!file) return 0; // [orig: the File_LoadEntireFile -1 gate @ 0x4a487b]
     std::vector<uint8_t> bytes(
@@ -892,7 +929,8 @@ bool vfs_expansion_override_table(const std::string &game_root, const std::strin
     //  the name cleared @ 0x4a4775, TextResource_LoadOverrideTable(NULL) @ 0x4a482a]
     fs::path archive;
     if (game_root.empty() || expansion.empty() ||
-        !resolve_retail_loose_file(game_root, {"expansion", expansion, expansion + ".pff"}, archive))
+        !resolve_retail_loose_file(game_root, {"expansion", expansion, vfs_expansion_archive_name(expansion, false)},
+                                   archive))
         return false;
     // [orig: File_LoadResource @ 0x75b540 — with an archive open and loose-first off only
     //  the archives are walked (@ 0x75b56c..0x75b57c), and none matches the whole query]

@@ -299,11 +299,8 @@ bool EntityPoseProvider::resolve_named_transform(
 	const auto found = userpoint_models_.find(world.collision->entity_model_id(entity));
 	if (found == userpoint_models_.end() || found->second == nullptr)
 		return false;
-	const Threedi3di3 &model = *found->second;
-	for (size_t i = 0; model.user_points && i < model.user_point_count; ++i)
-		if (strutil::iequals(model.user_points[i].name, name))
-			return resolve_userpoint_transform(world, entity, static_cast<int>(i + 1), out);
-	return false;
+	const int point = threedi_3di3_find_user_point(found->second.get(), name);
+	return point >= 0 && resolve_userpoint_transform(world, entity, point + 1, out);
 }
 
 // The model is the husk's while the husk bit is set and one is attached, else
@@ -335,11 +332,8 @@ int EntityPoseProvider::last_named_userpoint(
 	if (name == nullptr || world.collision == nullptr) return 0;
 	const auto found = userpoint_models_.find(world.collision->entity_model_id(entity));
 	if (found == userpoint_models_.end() || found->second == nullptr) return 0;
-	const Threedi3di3 &model = *found->second;
-	int result = 0;
-	for (size_t i = 0; model.user_points && i < model.user_point_count; ++i)
-		if (strutil::iequals(model.user_points[i].name, name)) result = static_cast<int>(i + 1);
-	return result;
+	// The 1-based row; a miss (-1) is 0.
+	return threedi_3di3_find_last_user_point(found->second.get(), name) + 1;
 }
 
 bool EntityPoseProvider::resolve_userpoint_rigid(world::World &world,

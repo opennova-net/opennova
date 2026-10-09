@@ -364,4 +364,31 @@ DataStringsPool data_strings_pool(const uint8_t *data, size_t size) {
 	return pool;
 }
 
+size_t data_strings_overrun_offset(const std::vector<ConfigSection> &sections, const DataStringsPool &pool) {
+	// The value whose byte of the clear is the first past the pool, in the reader's order.
+	size_t offset = 0;
+	size_t seen = 0;
+	for (const ConfigSection &section : sections)
+		for (const ConfigEntry &entry : section.entries)
+			for (const ConfigValue &value : entry.values)
+				if (seen++ == pool.pool_bytes) offset = value.offset;
+	return offset;
+}
+
+std::string config_commented(const std::string &text, std::vector<size_t> line_starts) {
+	std::sort(line_starts.begin(), line_starts.end());
+	line_starts.erase(std::unique(line_starts.begin(), line_starts.end()), line_starts.end());
+	std::string out;
+	out.reserve(text.size() + line_starts.size());
+	size_t from = 0;
+	for (const size_t at : line_starts) {
+		if (at > text.size()) break;
+		out.append(text, from, at - from);
+		out += ';';
+		from = at;
+	}
+	out.append(text, from, std::string::npos);
+	return out;
+}
+
 } // namespace opennova::configfile

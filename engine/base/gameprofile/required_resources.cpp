@@ -4,6 +4,7 @@
 #include <base/gameprofile/required_resources.h>
 
 #include <base/io/strutil.h>
+#include <formats/pff/pff.h>
 
 #include <stddef.h>
 #include <string.h>
@@ -122,10 +123,10 @@ const RequiredResource k_required_resources[] = {
       "[orig: AudioVM_InitMenuMusicStreaming @ 0x56aa60; names set Expansion_LoadAssets @ 0x4a4798]", "menumus_bin" },
     { "expansion\\<n>\\M<n>.sbf", BOOT_PHASE_MENU, RES_OPTIONAL, RES_F_PATTERN | RES_F_EXPANSION,
       "in place of MENUMUS.SBF under /exp, set whether it exists or not: missing -> no menu music; streams loose by path",
-      "[orig: Expansion_LoadAssets @ 0x4a4906; AudioVM_InitMenuMusicStreaming @ 0x56aa60]", "expansion_menumus_sbf" },
+      "[orig: Expansion_LoadAssets @ 0x4a4906; AudioVM_InitMenuMusicStreaming @ 0x56aa60]", "expansion_menumus_sbf", "MENUMUS.SBF" },
     { "M<n>.bin", BOOT_PHASE_MENU, RES_OPTIONAL, RES_F_PATTERN | RES_F_EXPANSION,
       "in place of MENUMUS.BIN under /exp: missing -> no menu music",
-      "[orig: Expansion_LoadAssets @ 0x4a491d; AudioVM_InitMenuMusicStreaming @ 0x56aa60]", "expansion_menumus_bin" },
+      "[orig: Expansion_LoadAssets @ 0x4a491d; AudioVM_InitMenuMusicStreaming @ 0x56aa60]", "expansion_menumus_bin", "MENUMUS.BIN" },
     { "menu_style.mns", BOOT_PHASE_MENU, RES_REQUIRED, 0,
       "silent skip -> unstyled UI (menu fonts/colors come from its KEY set)",
       "[orig: Menu_InitShellResources @ 0x552604 via NapiConfigMap_LoadIncludeFile @ 0x63b970]", "menu_style" },
@@ -240,10 +241,10 @@ const RequiredResource k_required_resources[] = {
       "[orig: Game_StartMission @ 0x525581-0x525598 -> AudioVM_OpenMusicContext @ 0x6722a0; names @ 0x4a47da]", "gamemus_bin" },
     { "expansion\\<n>\\G<n>.sbf", BOOT_PHASE_MISSION, RES_OPTIONAL, RES_F_PATTERN | RES_F_EXPANSION,
       "in place of GAMEMUS.SBF under /exp: missing -> no mission music; streams loose by path",
-      "[orig: Expansion_LoadAssets @ 0x4a4936; @ 0x525581-0x525598]", "expansion_gamemus_sbf" },
+      "[orig: Expansion_LoadAssets @ 0x4a4936; @ 0x525581-0x525598]", "expansion_gamemus_sbf", "GAMEMUS.SBF" },
     { "G<n>.bin", BOOT_PHASE_MISSION, RES_OPTIONAL, RES_F_PATTERN | RES_F_EXPANSION,
       "in place of GAMEMUS.BIN under /exp: missing -> no mission music",
-      "[orig: Expansion_LoadAssets @ 0x4a494a; @ 0x525581-0x525598]", "expansion_gamemus_bin" },
+      "[orig: Expansion_LoadAssets @ 0x4a494a; @ 0x525581-0x525598]", "expansion_gamemus_bin", "GAMEMUS.BIN" },
     { "loadscrn.pcx", BOOT_PHASE_MISSION, RES_OPTIONAL, 0,
       "graceful (mission-load screen art)",
       "[orig: Render_LoadingScreen @ 0x521d10 (@ 0x521dd9)]", "loadscrn_pcx" },
@@ -354,6 +355,47 @@ const RequiredResource *gameprofile_required_resource_by_role(const char *role) 
         }
     }
     return NULL;
+}
+
+namespace {
+
+constexpr const char *kExpansionNamePlaceholder = "<n>";
+
+// The last component of a row's name: what follows its last '\' (the folder the game reads it in).
+std::string file_component(const RequiredResource &row) {
+    const std::string name = row.name;
+    const size_t slash = name.find_last_of('\\');
+    return slash == std::string::npos ? name : name.substr(slash + 1);
+}
+
+} // namespace
+
+std::string gameprofile_expansion_file_name(const RequiredResource *row, const std::string &expansion) {
+    if (!row) {
+        return std::string();
+    }
+    std::string out = file_component(*row);
+    const size_t placeholder = strlen(kExpansionNamePlaceholder);
+    for (size_t at = out.find(kExpansionNamePlaceholder); at != std::string::npos;
+         at = out.find(kExpansionNamePlaceholder, at + expansion.size())) {
+        out.replace(at, placeholder, expansion);
+    }
+    return out;
+}
+
+bool gameprofile_expansion_file_formed(const RequiredResource *row) {
+    return row && file_component(*row).find(kExpansionNamePlaceholder) != std::string::npos;
+}
+
+bool gameprofile_expansion_names_fit_archive(const std::string &expansion) {
+    // [orig: Expansion_LoadAssets: "M%s.bin" @ 0x4a491d (and "G%s.bin" @ 0x4a494a), "%sL.lwf" @ 0x4a4989]
+    for (const char *role : {"expansion_menumus_bin", "expansion_locl_lwf"}) {
+        const std::string file = gameprofile_expansion_file_name(gameprofile_required_resource_by_role(role), expansion);
+        if (!pff::logical_name_fits_archive(file)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 } // namespace opennova::gameprofile
