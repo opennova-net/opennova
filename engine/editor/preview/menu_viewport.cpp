@@ -20,6 +20,7 @@
 #include <editor/session/view/session_view.h>
 #include <base/gameprofile/game_type.h>
 #include <base/io/strutil.h>
+#include <formats/mns/mns.h>
 #include <formats/rtxt/rtxt.h>
 #include <runtime/menu/menu_state_frame.h>
 #include <runtime/mission/mission_catalog.h>
@@ -658,7 +659,7 @@ ViewportAction MenuViewport::follow_(const ViewportInput &input, PreviewClock &)
 	apply_menu_options(options_, forced_index_, render_.compiler(), state);
 	render_.set_state(state);
 	notes_ = render_.notes();
-	split_unloaded(render_.assets(), missing_, unreadable_);
+	menu::split_unloaded(render_.assets(), missing_, unreadable_);
 	device_rects_.clear();
 	reason_ = MenuScreenStatus::Ready;
 	detail_.clear();
@@ -695,10 +696,10 @@ bool MenuViewport::styles_alone_(const FileSource &files) {
 	if (picture_.files().moved_but(files, names) || !render_.image() || !render_.screen()) return false;
 	const std::map<std::string, std::string> vars = style_.vars(files);
 	if (!screen_variables_made_) {
-		screen_variables_ = menu_variables_named(screens_text(*render_.image(), render_.screen()));
+		screen_variables_ = mns::variables_named(screens_text(*render_.image(), render_.screen()));
 		screen_variables_made_ = true;
 	}
-	for (const std::string &name : changed_menu_variables(style_vars_, vars))
+	for (const std::string &name : mns::changed_variables(style_vars_, vars))
 		if (std::binary_search(screen_variables_.begin(), screen_variables_.end(), name)) return false;
 	style_vars_ = vars;
 	return true;
@@ -853,7 +854,7 @@ ViewportAction MenuViewport::follow_try_(const ViewportInput &input, const MnuDo
 	reason_ = MenuScreenStatus::Ready;
 	detail_.clear();
 	notes_.clear();
-	split_unloaded(try_->assets(), missing_, unreadable_);
+	menu::split_unloaded(try_->assets(), missing_, unreadable_);
 	forced_index_ = -1;
 	device_rects_.clear();
 	shown(document);
@@ -1080,13 +1081,12 @@ std::vector<MenuSoundFired> MenuViewport::fire_sounds(const ViewportInput &input
 	const float y = canvas ? canvas_mouse_.y : pointer_.y;
 	const bool down = held && (canvas ? canvas_mouse_.down : pointer_.down);
 	// The press reaches the windows under the mouse ahead of the pump, the one holding the capture last
-	// (MenuFrameCompiler::press_reach).
-	if (held && down && !click_.button_down())
-		click_.press(compiler.press_capture(compiler.press_reach(state, x, y, 1.0f, 1.0f)));
-	const menu::MenuPumpWindow capture = click_.capture_for(down);
-	menu::MenuFrameCompiler::MouseClaim at;
-	if (held) at = compiler.claim_at(state, x, y, 1.0f, 1.0f, capture);
-	const int claim = at.hovered;
+	// (MenuFrameCompiler::press_mouse); the sample is the game's frame's without its state writes (a
+	// picture never pumps: MenuFrameCompiler::peek_mouse).
+	if (held && down && !click_.button_down()) compiler.press_mouse(click_, state, x, y, 1.0f, 1.0f);
+	const menu::MenuFrameCompiler::MouseSample sample =
+			compiler.peek_mouse(click_, state, held, x, y, down, 1.0f, 1.0f);
+	const int claim = sample.claim.hovered;
 	const NodeId id = claim >= 0 ? document->window_at(*screen, size_t(claim)) : 0;
 	const auto play = [&](const mnu::Window &window, NodeId record, int sound_state) {
 		const mnu::Sound *row = menu::menu_window_sound(window, sound_state);
@@ -1106,8 +1106,7 @@ std::vector<MenuSoundFired> MenuViewport::fire_sounds(const ViewportInput &input
 	// menu_click.h), plays SELECTED first: a spin arrow's own row where it is on one, the arrow a button of
 	// its own (MenuRuntime::on_widget_clicked -> arrow_click_; its rows' sounds are its own), else the
 	// window's, its sound state let go [orig: CWnd_ProcessMouseEvent @ 0x647b14..0x647b28].
-	const menu::MenuPumpWindow clicked = click_.sample(compiler.click_claim(at, state), down,
-			[&](const menu::MenuPumpWindow &window) { return compiler.pump_window_reached(window, state); });
+	const menu::MenuPumpWindow clicked = sample.clicked;
 	const mnu::Window *window = clicked.valid() && id ? compiler.widget_window(clicked.index) : nullptr;
 	if (window && clicked.part != 0 && window->type == mnu::WindowType::SpinList) {
 		const mnu::WindowPart &arrow = clicked.part == 1 ? window->spinup : window->spindown;
