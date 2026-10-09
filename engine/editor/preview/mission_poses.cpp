@@ -263,11 +263,10 @@ void pose_person(const PersonDefinition &definition, const PersonRecord &record,
 		pose.status = "no_adm";
 		return;
 	}
-	std::string named = definition.anim_def;
-	if (!strutil::ends_with_icase(named, ".adm")) named += ".adm";
+	const std::string named = anim::adm_file_name(definition.anim_def);
 	const std::string file = assets::asset_file_name(named, ".adm");
 	files.stamp(file); // noted, so the file's coming or going poses again
-	pose.adm = anim::adm_name_or_default(named, has_file(file));
+	pose.adm = has_file(file) ? named : std::string(anim::kDefaultAdmName);
 	const int adm_id = motion.register_adm(&rig_files, pose.adm);
 	if (adm_id < 0) {
 		pose.status = "no_clips";
