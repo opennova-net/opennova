@@ -1410,10 +1410,10 @@ JsonValue answer_script_assist(const QueryContext &context, const QueryArgs &arg
 JsonValue answer_texture_roles(const QueryContext &, const QueryArgs &args, std::string &) {
 	const JsonPage page = page_of(args);
 	JsonValue out = JsonValue::make_object();
-	set_page(out, page, kTextureRoleCount);
+	set_page(out, page, renderer::kTextureRoleCount);
 	JsonValue roles = JsonValue::make_array();
-	for (size_t i = page.first(kTextureRoleCount); i < page.last(kTextureRoleCount); ++i)
-		roles.push(texture_role_json(texture_role_row(static_cast<TextureRoleId>(i))));
+	for (size_t i = page.first(renderer::kTextureRoleCount); i < page.last(renderer::kTextureRoleCount); ++i)
+		roles.push(texture_role_json(texture_role_row(static_cast<renderer::TextureRoleId>(i))));
 	out.set("roles", std::move(roles));
 	return out;
 }

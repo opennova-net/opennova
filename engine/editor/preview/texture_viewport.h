@@ -65,7 +65,7 @@ struct TextureViewportOptions {
 struct TextureShownUse {
 	int index = -1;
 	std::string words;
-	TextureRoleId role = TextureRoleId::kCount;
+	renderer::TextureRoleId role = renderer::TextureRoleId::kCount;
 	TextureLoadTransform transform = TextureLoadTransform::None;
 	int cutout = -1;
 	bool inverted = false;
@@ -73,7 +73,7 @@ struct TextureShownUse {
 	// A model row's: what its alpha is to the game (texture_row_alpha_meaning) and that in words; a use of
 	// another role says its role's (TextureRoleRow::alpha), `model_row` false.
 	bool model_row = false;
-	TextureAlphaMeaning alpha = TextureAlphaMeaning::Unused;
+	renderer::TextureAlphaMeaning alpha = renderer::TextureAlphaMeaning::Unused;
 	std::string alpha_words;
 	// A particle graphic's blend mode (formats/particle BlendMode), whose atlas page the picture shows it as; -1 none.
 	int blend_mode = -1;
@@ -133,7 +133,7 @@ struct TexturePlacement {
 // BOX, each level from the one before; renderer::box_filter_half, encode_rgba8].
 std::vector<TextureLevel> texture_game_chain(const TextureLevel &first, uint32_t levels);
 // `level` halved `halvings` times as the game halves a texture before it makes its device texture: each texel
-// the truncated mean of a 2 x 2 block (renderer::halve_rgba_to_cap, GTexture_Downsample2x2_RGBA8).
+// the truncated mean of a 2 x 2 block (renderer::halve_rgba_times, GTexture_Downsample2x2_RGBA8).
 TextureLevel texture_halved(const TextureLevel &level, uint32_t halvings);
 // A normal map's level lit from `light` degrees round the picture (0 from its right, 90 from its top) and
 // above it: each texel's colour read as a normal ((c / 255) * 2 - 1, red across, green down the texture as the
