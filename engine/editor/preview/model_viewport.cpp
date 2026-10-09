@@ -24,6 +24,7 @@
 #include <editor/session/view/session_view.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm_pose.h>
+#include <runtime/audio/oneshot_play.h>
 #include <runtime/world/present_passes.h>
 
 namespace opennova::editor {
@@ -640,10 +641,9 @@ ClipSoundFired ModelViewport::plan_leg_(const WeaponActionRun &run, const Weapon
 	fired.set = leg.set;
 	// As the player hears their own weapon: a one-shot at the player, in first person [orig:
 	// ActionSlot_ExecuteActionWithEffect @0x541860 / ActionSlot_FinishActivePhase @0x53f7b0 -> the set at
-	// the owner; the listener's first-person view, audio::layer_matches_listener_view].
-	constexpr uint8_t kFirstPersonView = 2;
+	// the owner; the listener's first-person view, audio::kListenerViewFirstPerson].
 	const PreviewPlay play = plan_set_play(sound_sources_.banks(), sound_sources_.expansion(), leg.set, std::string(),
-	                                       selector, kFirstPersonView);
+	                                       selector, audio::kListenerViewFirstPerson);
 	fired.bank = play.bank;
 	std::string upper = run.suffix;
 	for (char &c : upper) c = char(std::toupper(static_cast<unsigned char>(c)));
@@ -1236,7 +1236,7 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 	const PreviewRigFiles rig_files(stamped);
 	const bool rig_moved = rebuild || !same_rig(rig, rig_) || (files_moved && rig_read_.moved(files));
 	if (rig_moved) {
-		skeleton_ = load_preview_rig(rig, *model_, rig_files);
+		skeleton_ = load_preview_rig(rig, *model_, rig_files.store);
 		++skeleton_serial_;
 	}
 	rig_ = rig;
@@ -1272,7 +1272,7 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		clip_file_ = source ? source->file : std::string();
 		clip_events_.clear();
 		clip_track_ = ClipSoundTrack();
-		const auto clip = clip_file_.empty() ? nullptr : rig_files.bone_animation(clip_file_);
+		const auto clip = clip_file_.empty() ? nullptr : rig_files.store.bone_animation(clip_file_);
 		if (clip) {
 			clip_events_ = preview_clip_events(*skeleton_, clip_key_, clip_variant_, *clip);
 			// Every record's event word and capsule bottom, as the body's channel reads them (DI-04).

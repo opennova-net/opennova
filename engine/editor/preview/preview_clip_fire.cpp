@@ -28,9 +28,6 @@ using io::json_string;
 constexpr size_t kShotsShown = 32;
 constexpr size_t kEventsShown = 64;
 
-constexpr uint32_t kFireBits =
-		anim::kAnimEventFirePrimary | anim::kAnimEventFireSecondary | anim::kAnimEventFireMarker3;
-
 JsonValue vec3(const PreviewVec3 &v) {
 	JsonValue out = JsonValue::make_array();
 	out.push(json_number(v.x));
@@ -156,7 +153,7 @@ void ClipFire::refresh(const SessionView &view, const ClipSoundItem &item, const
 	// The body: an NPC's has the fire block, a player's none (DI-04's binding, the item's move_function or chosen).
 	reads_ = !binding.player;
 	bool fire_bits = false;
-	for (uint32_t word : track.triggers) fire_bits = fire_bits || (word & kFireBits) != 0;
+	for (uint32_t word : track.triggers) fire_bits = fire_bits || (word & anim::kAnimEventFireMask) != 0;
 	const bool person = item.found && world::organic_init_class(item.ai_function.c_str());
 	// The range, read only where a shot could fire (a clip of fire bits on an NPC's body of a person class): a
 	// soldier's shots alone, over the project's ammo.def and weapon.def as the load reads them.
@@ -267,7 +264,7 @@ PreviewVec3 ClipFire::launch_point_(int launch_slot, int32_t clip_tick, std::str
 
 std::vector<ClipFireShot> ClipFire::shots_of(uint32_t word, int32_t tick, int32_t clip_tick, int frame) const {
 	std::vector<ClipFireShot> out;
-	if (!reads_ || (word & kFireBits) == 0) return out;
+	if (!reads_ || (word & anim::kAnimEventFireMask) == 0) return out;
 	// One pass of the block on a tick it reads the word, no walking fire raised.
 	const world::OrganicFirePass pass = world::organic_fire_pass(word, true, false, weapons_.ammo);
 	for (int i = 0; i < pass.count; ++i) {
@@ -297,7 +294,7 @@ std::vector<ClipFireShot> ClipFire::shots_of(uint32_t word, int32_t tick, int32_
 
 std::vector<std::string> ClipFire::event_words(uint32_t word) const {
 	std::vector<std::string> out;
-	if ((word & kFireBits) == 0 || !active_) return out;
+	if ((word & anim::kAnimEventFireMask) == 0 || !active_) return out;
 	if (!reads_ || !armed_) {
 		out.push_back("fires nothing: " + words_);
 		return out;
@@ -342,7 +339,7 @@ void ClipFire::schedule_to_(int32_t tick) {
 	for (const ClipFireShot &shot : shots_) number = std::max(number, shot.number);
 	bool grew = false;
 	for (const ClipEventDue &read : due) {
-		if ((read.word & kFireBits) == 0) continue;
+		if ((read.word & anim::kAnimEventFireMask) == 0) continue;
 		for (ClipFireShot &shot : shots_of(read.word, read.tick, read.clip_tick, read.frame)) {
 			if (shot.ammo != 0) {
 				shot.number = ++number;

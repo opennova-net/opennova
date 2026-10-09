@@ -16,6 +16,7 @@
 #include <runtime/world/fire_sound.h>
 #include <runtime/world/impact_scar.h>
 #include <runtime/world/local_player.h>
+#include <runtime/world/organic_fire.h>
 #include <runtime/world/player_present.h>
 #include <runtime/world/present_drains.h>
 #include <runtime/world/round_sim.h>
@@ -400,11 +401,11 @@ void WeaponRange::fire_shot_(const WeaponRangeShot &shot) {
 	const int32_t tick = shot.tick;
 	world::Entity *soldier = world.registry.get(soldier_);
 	if (!soldier) return;
-	// The fire block's shoot: the firing byte rides the soldier while its ammo fires, then returns to zero, and a
-	// shot fired marks the soldier a priority target; a zero byte fires nothing [orig: Entity_UpdateInfantryAI
-	// @0x4BF345..0x4BF4AD]. The game's NPC entry spawns the round and presents its launch (the ammo's ai_launch
-	// through the distance gate, its fire record) [orig: WeaponSlot_FireAndSpawnEffects @0x53F440].
-	soldier->equipped_adm_index = shot.ammo;
+	// The fire block's shoot (world::organic_fire_shot): the firing byte rides the soldier while its ammo fires,
+	// then returns to zero, and a shot fired marks the soldier a priority target; a zero byte fires nothing
+	// [orig: Entity_UpdateInfantryAI @0x4BF345..0x4BF4AD]. The game's NPC entry spawns the round and presents its
+	// launch (the ammo's ai_launch through the distance gate, its fire record) [orig:
+	// WeaponSlot_FireAndSpawnEffects @0x53F440].
 	WeaponRangeEvent fired;
 	fired.tick = tick;
 	fired.kind = WeaponRangeEvent::Kind::Fired;
@@ -414,10 +415,8 @@ void WeaponRange::fire_shot_(const WeaponRangeShot &shot) {
 	if (shot.ammo != 0 && world.tables.ammo.by_index(shot.ammo)) {
 		const world::Vec3 at{shot.at.x + kEye.x, shot.at.y + kEye.y, shot.at.z + kEye.z};
 		const size_t before = world.round_sim.fired.size();
-		world.round_sim.fire_npc_ammo(world, soldier_, world::FixedVec3{q16(at.x), q16(at.y), q16(at.z)},
-		                              shot.yaw_bam, shot.pitch_bam, shot.ammo);
-		soldier->flags |= world::kEntityFlagPriorityTarget;
-		soldier->engine_flags |= world::kEntityFlagPriorityTarget;
+		world::organic_fire_shot(world, soldier_, world::FixedVec3{q16(at.x), q16(at.y), q16(at.z)}, shot.yaw_bam,
+		                         shot.pitch_bam, shot.ammo);
 		++shots_;
 		const double bearing = double(shot.yaw_bam) * io::kRadiansPerBam;
 		const double pitch = double(shot.pitch_bam) * io::kRadiansPerBam;
@@ -431,7 +430,6 @@ void WeaponRange::fire_shot_(const WeaponRangeShot &shot) {
 		fired.words = shot.words + (shot.ammo == 0 ? " Its ammo byte is zero: nothing fires."
 		                                           : " Its ammo byte names no row of ammo.def: nothing fires.");
 	}
-	soldier->equipped_adm_index = 0;
 	events_.push_back(fired);
 }
 

@@ -11,6 +11,8 @@
 #include <editor/documents/model_surfaces.h>
 #include <formats/threedi/threedi_panm.h>
 #include <runtime/mission/seat_spec_extract.h>
+#include <runtime/renderer/object_lod.h>
+#include <runtime/world/model_geometry.h>
 
 namespace opennova::editor {
 
@@ -110,17 +112,9 @@ std::string model_part_name(const ModelRow &row, int64_t part) {
 	       (lod0_parts(row) == 1 ? "" : "s") + ")";
 }
 
-bool model_lod_drawn(const std::vector<int32_t> &thresholds, size_t lod) {
-	// The walk advances while the radius is at or below a level's threshold: a level of 0 stops it, so no
-	// level after one is reached [orig: Model_SelectRlodLevel @ 0x5c3b20, the walk @ 0x5c3b3b..0x5c3b5a].
-	for (size_t i = 0; i < lod && i < thresholds.size(); ++i)
-		if (thresholds[i] <= 0) return false;
-	return lod < thresholds.size();
-}
-
 std::string model_lod_range(const std::vector<int32_t> &thresholds, size_t lod) {
 	if (lod >= thresholds.size()) return "";
-	if (!model_lod_drawn(thresholds, lod)) {
+	if (!renderer::object_lod_reachable(thresholds, lod)) {
 		size_t stop = 0;
 		while (stop < lod && thresholds[stop] > 0) ++stop;
 		return "never (LOD " + std::to_string(stop) + " draws down to 0 px)";
@@ -142,8 +136,6 @@ std::vector<int32_t> model_lod_thresholds(const ModelRow &row) {
 	return out;
 }
 
-bool model_lod_drawn(const ModelRow &row, size_t lod) { return model_lod_drawn(model_lod_thresholds(row), lod); }
-
 std::string model_lod_range(const ModelRow &row, size_t lod) { return model_lod_range(model_lod_thresholds(row), lod); }
 std::string model_user_point_role(const std::string &raw) {
 	const std::string name = strutil::trim(raw);
@@ -156,16 +148,19 @@ std::string model_user_point_role(const std::string &raw) {
 	case world::SeatType::Gunner: return "gunner's seat";
 	default: break;
 	}
-	if (strutil::starts_with_icase(name, "flare")) return "flare launch point";
-	if (strutil::starts_with_icase(name, "bullet01")) return "weapon muzzle (primary)";
-	if (strutil::starts_with_icase(name, "bullet02")) return "weapon muzzle (primary and secondary)";
-	if (strutil::starts_with_icase(name, "prim")) return "weapon muzzle (primary)";
-	if (strutil::starts_with_icase(name, "sec")) return "weapon muzzle (secondary)";
-	if (strutil::starts_with_icase(name, "agun")) return "gunner attachment";
-	if (strutil::iequals(name, "TARGET")) return "weapons' aim origin";
-	if (strutil::iequals(name, "LOOK")) return "line-of-sight origin";
-	if (strutil::iequals(name, "CAMERA")) return "mounted gun's camera";
-	if (strutil::iequals(name, "ground")) return "ground anchor";
+	// The other names the game looks up (mission::kUserPointNames).
+	const uint32_t uses = mission::user_point_uses(name);
+	const bool primary = (uses & mission::kUserPointPrimaryMuzzle) != 0;
+	const bool secondary = (uses & mission::kUserPointSecondaryMuzzle) != 0;
+	if (uses & mission::kUserPointFlare) return "flare launch point";
+	if (primary && secondary) return "weapon muzzle (primary and secondary)";
+	if (primary) return "weapon muzzle (primary)";
+	if (secondary) return "weapon muzzle (secondary)";
+	if (uses & mission::kUserPointGunnerAttachment) return "gunner attachment";
+	if (uses & mission::kUserPointAimOrigin) return "weapons' aim origin";
+	if (uses & mission::kUserPointLineOfSight) return "line-of-sight origin";
+	if (uses & mission::kUserPointCamera) return "mounted gun's camera";
+	if (uses & mission::kUserPointGround) return "ground anchor";
 	return "";
 }
 
@@ -251,11 +246,11 @@ std::string model_record_label(const Document &document, const NodeAddress &addr
 	case ModelKind::Section: {
 		// Section i is part i of the collision LOD (one section per part, WriteCOBJ;
 		// docs/threedi/3di-gp-format-re.md, Retail JO corpus layout); a person's bone section is its hit
-		// sphere (model_collision_words.h).
+		// sphere (world::model_section_is_person_sphere).
 		const CollisionRow *collision = model->collision_row();
 		if (!collision || i >= collision->sections.size()) return "";
 		const ThreediCollisionObject &s = collision->sections[i];
-		if (row->base && model_section_is_person(*row->base, i))
+		if (row->base && world::model_section_is_person_sphere(*row->base, i))
 			return "Section of " + part_word(*row, int64_t(i)) + ": hit sphere" + (i == 14 ? " (the head)" : "");
 		if (row->header.mesh_type == THREEDI_MESH_SKINNED && s.num_faces == 0 && s.num_bounding_volumes == 0)
 			return "Section of " + part_word(*row, int64_t(i)) + ": bone sphere (no round tests it)";

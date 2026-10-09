@@ -27,6 +27,7 @@
 #include <runtime/world/destruction.h>
 #include <runtime/world/item_effects.h>
 #include <runtime/world/present_passes.h>
+#include <runtime/world/throwables.h>
 
 namespace opennova::editor {
 
@@ -423,16 +424,15 @@ bool DefinitionViewport::subject_(const ViewportInput &input, const DefCatalogDo
 	case def::DefRecordKind::Ammo: {
 		drawn_.kind = "ammo";
 		const auto &def = row.native.as<def::DefAmmoDef>();
-		// The item a round becomes: its own side's, the enemy's as the enemy sees it, the friendly one where
-		// it names no enemy item [orig: RoundData_SpawnRound @ 0x4EC79B].
-		int id = def.frndly_trcr_type_id;
-		drawn_.field = "frndly_trcr_type_id";
-		if (options_.enemy && def.foe_trcr_type_id != 0) {
-			id = def.foe_trcr_type_id;
-			drawn_.field = "foe_trcr_type_id";
-		} else if (options_.enemy) {
+		// The item a round becomes as the viewer sees it (world::throwable_item_for_viewer): its own side's, the
+		// enemy's as the enemy sees it, the friendly one where it names no enemy item [orig: RoundData_SpawnRound
+		// @ 0x4EC79B]. The preview's enemy is of the other side (team 2 to the round's 1).
+		const int id = world::throwable_item_for_viewer(def.frndly_trcr_type_id, def.foe_trcr_type_id, 1,
+		                                                options_.enemy ? 2 : 1);
+		const bool foe_item = options_.enemy && def.foe_trcr_type_id != 0 && id == def.foe_trcr_type_id;
+		drawn_.field = foe_item ? "foe_trcr_type_id" : "frndly_trcr_type_id";
+		if (options_.enemy && !foe_item)
 			notes_.push_back(drawn_.record + " names no enemy tracer item: the enemy sees its friendly one.");
-		}
 		// An ammo's picture stands without a round model (DI-23): its impact rows and its range are its own; what the
 		// round would draw is said beside it.
 		if (id == 0) {
@@ -504,7 +504,7 @@ void DefinitionViewport::pose_(const SessionView &view, const std::string &model
 	PersonRecord record;
 	record.ssn = options_.ssn;
 	const auto has_file = [&source](const std::string &name) { return !source->path_of(name).empty(); };
-	pose_person(definition, record, has_file, *stamped, rig_files, motion, rings, person_);
+	pose_person(definition, record, has_file, *stamped, rig_files.store, motion, rings, person_);
 	// An item that is no person (no org0 or org1 class, not of the person type) has no spawn pose to speak of.
 	if (person_.status == "class" && type_ != def::DEF_ITEM_TYPE_PERSON) person_ = MissionPose();
 	if (person_.status == "posed") {
@@ -516,7 +516,7 @@ void DefinitionViewport::pose_(const SessionView &view, const std::string &model
 			PreviewRig rig;
 			rig.model = model_file;
 			rig.table = person_.adm;
-			skeleton_ = load_preview_rig(rig, *model_, rig_files);
+			skeleton_ = load_preview_rig(rig, *model_, rig_files.store);
 			++skeleton_serial_;
 			rig_key_ = rig_key;
 		}
