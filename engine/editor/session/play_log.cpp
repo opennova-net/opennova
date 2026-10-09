@@ -153,12 +153,13 @@ std::vector<Diagnostic> install_log_findings(const InstallLogs &logs, const Play
 	}
 	const auto was_opened = [&](const std::string &name) { return opened.count(pff::normalized_logical_name(basename_of(name))) != 0; };
 	if (logs.exited_on_its_own && logs.file_log && !logs.file_log->archives.empty()) {
-		// The boot's text tables, right after the archives, in this order: gameerr.bin's lack shows earlyerr.txt's
-		// line 4 and the boot goes on; any other's ends it.
-		static const char *const kBootTables[] = {"gameerr.bin", "gametext.bin", "vmacros.bin", "keyhelp.bin"};
-		for (const char *name : kBootTables) {
+		// The boot's text tables, right after the archives, in their order (gameprofile::kBootTextTables):
+		// gameerr.bin's lack shows earlyerr.txt's line 4 and the boot goes on (its row's RES_DIALOG); any
+		// other's ends it.
+		for (const char *name : gameprofile::kBootTextTables) {
 			if (was_opened(name)) continue;
-			const bool dialog = std::string(name) == "gameerr.bin";
+			const gameprofile::RequiredResource *row = gameprofile::gameprofile_required_resource_find(name);
+			const bool dialog = row && row->severity == gameprofile::RES_DIALOG;
 			rows.push_back(file_row(name,
 			                        named + " opened its archives but not " + name + " in its last Play" +
 			                                (dialog ? ": it showed earlyerr.txt's line 4 and went on." : ", and stopped there."),
