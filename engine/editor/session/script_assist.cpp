@@ -36,19 +36,14 @@ using wac::ParamType;
 
 // --- the text ------------------------------------------------------------------------------------
 
-// The characters that end a token: the compiler's (wac::wac_token_ends: a blank, ';', ',' or an operator
-// byte), and a '"', which opens a string.
-bool ends_token(char c) {
-	return wac::wac_token_ends(c) || c == '"';
-}
-
 struct Token {
 	size_t from = 0, to = 0; // offsets in the line, [from, to)
 	std::string text;
 };
 
-// The line's tokens before `end` (a comment ends the line: wac::wac_comment_starts); `comment` set where
-// `end` lies in one.
+// The line's tokens before `end`, each ended where the compiler's tokenizer ends a word (wac::wac_token_ends: a
+// blank, ';', ',' or a byte of its operator set), a '"' opening a string only where a token starts (a comment ends
+// the line: wac::wac_comment_starts); `comment` set where `end` lies in one.
 std::vector<Token> tokens_of(std::string_view line, size_t end, bool &comment) {
 	std::vector<Token> out;
 	comment = false;
@@ -66,13 +61,13 @@ std::vector<Token> tokens_of(std::string_view line, size_t end, bool &comment) {
 			i = close + 1;
 			continue;
 		}
-		if (ends_token(c)) {
+		if (wac::wac_token_ends(c)) {
 			++i;
 			continue;
 		}
 		Token token;
 		token.from = i;
-		while (i < line.size() && !ends_token(line[i])) ++i;
+		while (i < line.size() && !wac::wac_token_ends(line[i])) ++i;
 		token.to = i;
 		token.text = std::string(line.substr(token.from, token.to - token.from));
 		out.push_back(token);
@@ -114,33 +109,16 @@ struct Keyword {
 	const char *word, *words;
 };
 
-// A token's hash as the compiler takes it: its first four bytes, each above 0x60 folded down by 0x20, padded with
-// ';', hashed as signed chars; ELSEIF alone renamed so ELSE keeps its own [orig: Script_Compile @0x4F3412..0x4F345A
-// (the fold), @0x4F3464..0x4F34C9 (the hash)] (runtime/wac/compiler.cpp's tokenize).
-uint32_t token_hash(std::string_view word) {
-	if (strutil::iequals(word, "ELSEIF")) word = "ELSI";
-	const auto byte = [&word](size_t i) {
-		if (i >= word.size()) return int32_t(';');
-		uint8_t c = static_cast<uint8_t>(word[i]);
-		if (c > 0x60) c = static_cast<uint8_t>(c - 0x20);
-		return int32_t(int8_t(c));
-	};
-	uint32_t h = static_cast<uint32_t>(byte(0));
-	for (size_t i = 1; i < 4; ++i) h = (h << 8) + static_cast<uint32_t>(byte(i));
-	return h;
-}
-
-// The keyword a word reads as: the compiler matches its keywords on the token's hash, the first four bytes, so a
-// longer word sharing them is the same keyword (ENTERS is ENTER), and END is also every word starting ENDD, ENDI,
-// ENDL or ENDP (ENDIF, ENDDO, ENDLOOP) [orig: Script_Compile @0x4F4053..0x4F50E7, the END switch
-// @0x4F461E..0x4F4634] (wac::kWacKeywords; compiler.cpp's keyword and is_end_hash).
+// The keyword a word reads as: the compiler matches its keywords on the token's hash (wac::wac_word_hash, the
+// first four bytes), so a longer word sharing them is the same keyword (ENTERS is ENTER), and END is also every
+// word starting ENDD, ENDI, ENDL or ENDP (wac::wac_is_end_hash: ENDIF, ENDDO, ENDLOOP) [orig: Script_Compile
+// @0x4F4053..0x4F50E7] (wac::kWacKeywords).
 std::optional<Keyword> keyword_of(const std::string &word) {
 	if (word.empty()) return std::nullopt;
-	uint32_t h = token_hash(word);
-	for (const char *end : {"ENDD", "ENDI", "ENDL", "ENDP"})
-		if (h == token_hash(end)) h = token_hash("END");
+	uint32_t h = wac::wac_word_hash(word);
+	if (wac::wac_is_end_hash(h)) h = wac::wac_word_hash("END");
 	for (size_t i = 0; i < std::size(wac::kWacKeywords); ++i)
-		if (h == token_hash(wac::kWacKeywords[i])) return Keyword{wac::kWacKeywords[i], kKeywordWords[i]};
+		if (h == wac::wac_word_hash(wac::kWacKeywords[i])) return Keyword{wac::kWacKeywords[i], kKeywordWords[i]};
 	return std::nullopt;
 }
 
@@ -179,8 +157,8 @@ const char *param_words(ParamType type) {
 	return "nothing";
 }
 
-// What a command is in words: its signature as the help file writes it (wac::command_signature), and what
-// kind of command it is.
+// What a command is in words: its signature as the help file writes it, "SSNarea (ssn, area)"
+// (wac::command_signature), and what kind of command it is.
 std::string command_words(const wac::CommandDef &command) {
 	std::string kind = wac::cmd_is_condition(command) ? "a trigger (after IF)"
 	                   : wac::cmd_is_action(command)  ? "an action (after THEN)"
@@ -315,8 +293,8 @@ bool word_at(std::string_view line, size_t column, Token &out, bool touching_end
 	const size_t at = column - 1;
 	if (at > line.size()) return false;
 	size_t from = at, to = at;
-	while (from > 0 && !ends_token(line[from - 1])) --from;
-	while (to < line.size() && !ends_token(line[to])) ++to;
+	while (from > 0 && !wac::wac_token_ends(line[from - 1])) --from;
+	while (to < line.size() && !wac::wac_token_ends(line[to])) ++to;
 	if (from == to && !touching_end) return false;
 	out.from = from;
 	out.to = to;
