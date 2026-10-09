@@ -241,7 +241,7 @@ void mission_pose_people(const std::vector<MissionPoseInput> &inputs,
 			continue;
 		}
 		pose_person(*definition, PersonRecord{ input.ssn, input.route, input.attributes }, has_file, *files,
-				rig_files, motion, rings, pose);
+				rig_files.store, motion, rings, pose);
 		out.push_back(std::move(pose));
 	}
 }
