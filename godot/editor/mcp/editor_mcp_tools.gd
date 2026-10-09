@@ -262,43 +262,20 @@ func _tool_editor_viewport(args: Dictionary, _ctx: McpToolContext) -> Variant:
 	return answer
 
 func _tool_editor_screenshot(args: Dictionary, ctx: McpToolContext) -> Variant:
-	var max_dim: Variant = _integer_number(args.get("max_dim", McpScreenshot.DEFAULT_MAX_DIM))
-	var format: Variant = args.get("format", "webp")
-	var quality: Variant = _finite_number(args.get("quality", McpScreenshot.DEFAULT_QUALITY))
-	if max_dim == null or typeof(format) != TYPE_STRING or quality == null:
-		return McpToolResult.error(
-				"editor_screenshot requires an integer max_dim, a string format, and a numeric quality.")
 	var viewport: Viewport = app.get_viewport() if app.is_inside_tree() else null
-	var outcome: Dictionary = await McpScreenshot.capture(viewport, {
-		"max_dim": int(max_dim),
-		"format": String(format),
-		"quality": float(quality),
-	}, func() -> bool: return ctx.cancelled)
-	if ctx.cancelled:
-		return McpToolResult.error("Editor screenshot was cancelled after its request timed out.")
-	if not bool(outcome.get("ok", false)):
-		return McpToolResult.error(String(outcome.get("error", "Editor screenshot failed.")))
-	var caption := "OpenNova Editor (%dx%d)" % [int(outcome["width"]), int(outcome["height"])]
-	if outcome.has("warning"):
-		caption += " " + String(outcome["warning"])
-	return McpToolResult.image(outcome["bytes"], outcome["mime"], caption)
+	return await McpScreenshot.tool_capture(viewport, args, ctx,
+			"editor_screenshot", "Editor screenshot", "OpenNova Editor")
 
 
 func _tool_editor_logs(args: Dictionary, ctx: McpToolContext) -> Variant:
 	if service == null or service.log_hub == null:
 		return McpToolResult.error("The editor's logs are unavailable.")
-	var hub: McpLogHub = service.log_hub
-	var session: Dictionary = service.server.session(String(ctx.args.get("_session_id", "")))
-	var cursor := int(args.get("cursor", -1))
-	if cursor < 0:
-		cursor = int(session.get("log_cursor", 0)) if not session.is_empty() else 0
-	var limit: Variant = _integer_number(args.get("limit", 200))
+	var limit: Variant = McpToolArgs.integer_number(args.get("limit", 200))
 	if limit == null or int(limit) < 1 or int(limit) > 2000:
 		return McpToolResult.error("editor_logs takes limit from 1 to 2000.")
-	var page := hub.get_entries(cursor, int(limit), PackedStringArray(["server", "script"]))
-	if not session.is_empty():
-		session["log_cursor"] = int(page["next_cursor"])
-	return page
+	return service.log_hub.session_page(
+			service.server.session(String(ctx.args.get("_session_id", ""))),
+			int(args.get("cursor", -1)), int(limit), PackedStringArray(["server", "script"]))
 
 
 ## A query's answer as the tool's result, or the query's refusal as the tool's error.
@@ -401,17 +378,3 @@ func _operation_end(id: int, ctx: McpToolContext, deadline := 0) -> Dictionary:
 				return {}
 		await ctx.frames(1)
 	return {}
-
-
-static func _finite_number(value: Variant) -> Variant:
-	if typeof(value) != TYPE_INT and typeof(value) != TYPE_FLOAT:
-		return null
-	var number := float(value)
-	return number if is_finite(number) else null
-
-
-static func _integer_number(value: Variant) -> Variant:
-	var number: Variant = _finite_number(value)
-	if number == null or float(number) != floorf(float(number)):
-		return null
-	return int(number)
