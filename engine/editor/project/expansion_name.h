@@ -10,21 +10,11 @@
 
 namespace opennova::editor {
 
-// The names a project's expansion (ADR 0046 S16) may take: the game's own limits, each refusal
-// cited (docs/vfs/vfs-pff-mount-re.md § Expansions), and what a folder and an archive can hold.
-
-// The longest name the game mounts: `/exp` copies its token into the 32-byte g_ExpansionName with
-// strncpy, so a longer one is left unterminated, and the version.txt CRC written right after it then
-// runs into every path made from the name, which no longer opens [orig: Game_ParseCommandLineAndInit
-// @ 0x4a76ca; Expansion_LoadAssets @ 0x4a4885, the paths @ 0x4a48a6..0x4a49d4]; the join carries it
-// in 32 bytes too [orig: UI_JoinSelectedSession @ 0x569afa, @ 0x569dc4]. Nothing shorter fails
-// (D-VFS-8's search-path spill is read as one string, vfs-pff-mount-re.md § Expansions item 2).
-inline constexpr size_t kExpansionNameMax = 31;
-// An 11-character own name makes M<n>.bin and <n>L.lwf names of 16 characters, which fill an archive
-// entry's 16-byte name with no NUL inside it. Retail compares a query with `strcmp(query, entry + 16)`
-// [orig: PFF_CompareSearchNameToEntry @ 0x768240], so such a name ends only at the entry's next field, its
-// checksum at +32, which the build writes 0 (build_run.cpp's entries; JO:CA's archives hold no
-// 16-character name). A writer that put a nonzero checksum there would break these names' lookups.
+// The names a project's expansion (ADR 0046 S16) may take: the game's own limits, each the engine's
+// (base/resource_index/boot_policy.h's kExpansionNameMax and launch_token_breaks_at, base/vfs's
+// vfs_expansion_folder_listed, base/gameprofile's gameprofile_expansion_names_fit_archive; each
+// refusal cited there, docs/vfs/vfs-pff-mount-re.md § Expansions), and what a folder and the
+// project, which holds one file of a name, can hold.
 
 // What a name is for: the project's own expansion, whose files the build names after it (its music
 // script M<n>.bin and its sound bank <n>L.lwf go into the archives, so they bind the archives'
@@ -32,21 +22,20 @@ inline constexpr size_t kExpansionNameMax = 31;
 enum class ExpansionNameUse { Own, BuildsOn };
 
 // The first rule `name` breaks, in words ("" when it keeps them all):
-// - 1..31 characters (kExpansionNameMax), and for an installed expansion's name (ExpansionNameUse::
+// - 1..31 characters (opennova::kExpansionNameMax), and for an installed expansion's name (ExpansionNameUse::
 //   BuildsOn) a folder's name of `expansion\` alone (none of `\ / : * ? " < > |` or a control
 //   character, not `.` or `..`): every folder the game mounts by its name, a quoted one with a space
 //   among them, which the editor mounts through the file system and never puts on a command line;
 // the rest bind the project's own (ExpansionNameUse::Own) alone:
-// - no leading dot, which the Mods list skips [orig: Expansion_ScanAndRegister @ 0x4a444b];
+// - no leading dot, which the Mods list skips (vfs_expansion_folder_listed);
 // - one `/exp` token: no space, tab or comma, which split the command line outside quotes, no `"`,
-//   which a token never keeps, no `;`, which ends the line [orig: Terrain_TokenizeConfigLine
-//   @ 0x53cb60 over GetCommandLineA, @ 0x4a73b2];
+//   which a token never keeps, no `;`, which ends the line (launch_token_breaks_at);
 // - printable ASCII (the archives uppercase their names byte by byte [orig: PFF_SortEntries
 //   @ 0x768280], and the game builds its paths in the ANSI code page);
 // - a folder Windows can make: none of `\ / : * ? " < > |`, no trailing dot or space, not a device
 //   name (CON, PRN, AUX, NUL, COM1..9, LPT1..9, alone or before a dot);
-// - M<n>.bin and <n>L.lwf fit the archives' names (logical_name_fits_archive), so 11 characters
-//   [orig: Expansion_LoadAssets @ 0x4a491d, @ 0x4a4989]; and none of the files it forms
+// - M<n>.bin and <n>L.lwf fit the archives' names (gameprofile_expansion_names_fit_archive), so 11
+//   characters; and none of the files it forms
 //   (expansion_files.h) is a file the game reads by that name for its own (a manifest row's literal:
 //   "game" would make game.bin, the menu's table), the project holding one file of a name.
 std::string expansion_name_problem(std::string_view name, ExpansionNameUse use);

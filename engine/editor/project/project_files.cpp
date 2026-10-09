@@ -76,7 +76,7 @@ bool check_file_name(const std::string &name, AssetKind kind, FileNameProblem &p
 	// source, whose outputs take its name: a loose kind (a video, a music bank, a config) is copied
 	// beside the archives under any name, and Unknown (a kind not decided yet, or one the build
 	// leaves out) binds nothing.
-	if (archive_name_limit_binds(kind) && !logical_name_fits_archive(name)) {
+	if (archive_name_limit_binds(kind) && !pff::logical_name_fits_archive(name)) {
 		problem = FileNameProblem::Name;
 		message = "'" + name + "' does not fit the game's archives: names are up to 16 characters.";
 		return false;

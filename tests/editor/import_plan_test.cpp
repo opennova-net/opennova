@@ -48,6 +48,7 @@
 #include "common/png_test_support.h"
 
 using namespace opennova::editor;
+using opennova::pff::normalized_logical_name;
 using namespace import_test;
 namespace fs = std::filesystem;
 
