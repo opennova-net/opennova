@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include <base/gameprofile/required_resources.h>
 #include <base/io/json.h>
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
@@ -21,12 +22,13 @@ namespace opennova::editor {
 
 namespace {
 
-// The HUD layout the game loads by its name [orig: HUD_InitOverlaySystem @ 0x5A4620 (hudpos.def @
-// 0x5A4931)]: the project's file of that name ("" none).
+// The HUD layout the game loads by its name (the required resource of the role hudpos_def) [orig:
+// HUD_InitOverlaySystem @ 0x5A4620 (hudpos.def @ 0x5A4931)]: the project's file of that name ("" none).
 std::string hud_layout_of(const SessionView &view) {
-	if (!view.project.scan) return std::string();
+	const gameprofile::RequiredResource *layout = gameprofile::gameprofile_required_resource_by_role("hudpos_def");
+	if (!view.project.scan || !layout) return std::string();
 	for (const AssetEntry &entry : view.project.scan->entries)
-		if (entry.kind == AssetKind::HudPosDefs && strutil::iequals(entry.logical_name, "hudpos.def"))
+		if (entry.kind == AssetKind::HudPosDefs && strutil::iequals(entry.logical_name, layout->name))
 			return entry.relative_path;
 	return std::string();
 }
