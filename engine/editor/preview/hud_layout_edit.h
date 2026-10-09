@@ -118,7 +118,7 @@ bool hud_drag_changes(const HudDragStart &start, HudHandle handle, float dx, flo
                       std::vector<HudValueChange> &out, std::string &error);
 
 // The edits that set the changes in `text` (the HUD layout's text; `hud` its model as the game reads it):
-// each on the line the game takes of its key (hud_layout_line), the value's token replaced where the line
+// each on the line the game takes of its key (def::hud_layout_line), the value's token replaced where the line
 // holds it and differs, the values it lacks up to the one set added after its last; a key with no line a
 // line of its own at the end of the text, as the writer writes it. Each edit carries `gesture` (0: none).
 // False with `error` for a key the writer does not write alone.

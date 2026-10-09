@@ -1,19 +1,15 @@
-// The ConfigFile text reader's data-strings pool (formats/configfile DataStringsPool) and the editor's rule over it
-// (documents/config_overrun.h). The reader sizes its pool of text values by their bytes (each its length and one),
-// FastMem_Alloc rounds that up to 64, and the parse clears it one byte per value [orig: ConfigFile_ParseText @
-// 0x7609e8]: a file of more values than the rounded pool writes past it into the game's heap. Covered: the
-// allocator's rounding; the two fixtures on either side of the line (64 values and 65 over a 64-byte pool); the
-// three witnessed files' numbers (the earlier base game's 72 values over 58 bytes, 8 past; the first try of
-// classes 1 to 9, 105 over 60, 41 past, which crashed retail's mission start; JO:CA's 278 over 288, under); the
-// reader's own count (a value past a line's first 255 bytes counted as the last one read again; a key written
-// with leading spaces read from the next line of its key; a CBIN file, which the binary reader takes); the rule's
-// finding on a charattr.def and a credits file, its place and words, the fix that comments out the lines the
-// loader reads the same without (applied: no finding, the same classes; Undo: the finding again), none where no
-// such line brings it under, none for a CBIN credits file nor a kind of another reader; the blanks of both kinds
-// under the line and a credits blank over it refused; and through a session, the row over a closed charattr.def,
-// the build it refuses (the game's own failure, cited), and its fix, after which the project builds. The retail leg reads every file JO:CA's game reads through the text reader (charattr.def, base and
-// each expansion and the extracted tree; every DATASOURCE a shipped menu names) and asserts none overruns, and
-// that the editor makes no finding of JO:CA's charattr.def.
+// The editor's rule over the ConfigFile text reader's data-strings pool (documents/config_overrun.h; the pool
+// itself, formats/configfile DataStringsPool, is tests/configfile/data_strings_pool_test's). The reader sizes its
+// pool of text values by their bytes (each its length and one), FastMem_Alloc rounds that up to 64, and the parse
+// clears it one byte per value [orig: ConfigFile_ParseText @ 0x7609e8]: a file of more values than the rounded
+// pool writes past it into the game's heap. Covered: the rule's finding on a charattr.def and a credits file, its
+// place and words, the fix that comments out the lines the loader reads the same without (applied: no finding, the
+// same classes; Undo: the finding again), none where no such line brings it under, none for a CBIN credits file
+// nor a kind of another reader; the blanks of both kinds under the line and a credits blank over it refused; and
+// through a session, the row over a closed charattr.def, the build it refuses (the game's own failure, cited), and
+// its fix, after which the project builds. The retail leg reads every file JO:CA's game reads through the text
+// reader (charattr.def, base and each expansion and the extracted tree; every DATASOURCE a shipped menu names) and
+// asserts none overruns, and that the editor makes no finding of JO:CA's charattr.def.
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -105,74 +101,6 @@ std::string charattr_text(const std::vector<std::string> &words, bool zeros) {
 
 // The first offset of `part` in `text` at or after `from`.
 size_t at(const std::string &text, const std::string &part, size_t from = 0) { return text.find(part, from); }
-
-int test_pool_arithmetic() {
-	// FastMem_Alloc: a size under 1 is 1, rounded up to 64 [orig: FastMem_Alloc @ 0x7697c4..0x7697d7].
-	TEST_EXPECT(configfile::fastmem_block_bytes(0) == 64 && configfile::fastmem_block_bytes(1) == 64 &&
-	            configfile::fastmem_block_bytes(64) == 64 && configfile::fastmem_block_bytes(65) == 128 &&
-	            configfile::fastmem_block_bytes(288) == 320);
-	// The three witnessed files' numbers: values (the clear's length) against the text values' bytes.
-	const auto overrun = [](uint32_t values, uint32_t bytes) {
-		configfile::DataStringsPool pool;
-		pool.values = values;
-		pool.string_bytes = bytes;
-		pool.pool_bytes = configfile::fastmem_block_bytes(bytes);
-		return pool.overrun();
-	};
-	TEST_EXPECT(overrun(72, 58) == 8);   // the base game's earlier charattr.def: it ran, its heap corrupt
-	TEST_EXPECT(overrun(105, 60) == 41); // the first try of classes 1 to 9: retail's mission start crashed
-	TEST_EXPECT(overrun(278, 288) == 0); // JO:CA's own charattr.def
-	TEST_EXPECT(overrun(64, 60) == 0 && overrun(65, 60) == 1 && overrun(64, 0) == 0 && overrun(65, 0) == 1);
-	std::printf("pool: the allocator's 64; 72/58 8 past, 105/60 41 past, 278/288 under\n");
-	return 0;
-}
-
-int test_fixtures_and_examples() {
-	// The fixtures, on either side of the line.
-	const configfile::DataStringsPool at_line = pool_of(fixture_text("pool_at_line.def"));
-	TEST_EXPECT(!at_line.binary && at_line.values == 64 && at_line.string_bytes == 60 && at_line.pool_bytes == 64 &&
-	            at_line.overrun() == 0);
-	const configfile::DataStringsPool past = pool_of(fixture_text("pool_past_line.def"));
-	TEST_EXPECT(past.values == 65 && past.string_bytes == 60 && past.pool_bytes == 64 && past.overrun() == 1);
-	// The examples' files as the reader counts them: the earlier base game's (six classes, AutoScope, Medic,
-	// AutoScope, AutoScope, KnifeBonus, KnifeBonus: 72 values over 58 bytes) and the first try of classes 1 to 9
-	// (2 to 4 with no word: 105 over 60).
-	const configfile::DataStringsPool earlier =
-			pool_of(charattr_text({ "AutoScope", "Medic", "AutoScope", "AutoScope", "KnifeBonus", "KnifeBonus" }, true));
-	TEST_EXPECT(earlier.values == 72 && earlier.string_bytes == 58 && earlier.overrun() == 8);
-	const configfile::DataStringsPool first_try = pool_of(charattr_text(
-			{ "AutoScope", "", "", "", "Medic", "AutoScope", "SpreadBonus", "KnifeBonus", "KnifeBonus" }, false));
-	TEST_EXPECT(first_try.values == 105 && first_try.string_bytes == 60 && first_try.overrun() == 41);
-	std::printf("fixtures: 64/60 at the line, 65/60 one past; the examples' files 8 and 41 past\n");
-	return 0;
-}
-
-int test_reader_count() {
-	// No file, or the CBIN form (the binary reader's): no text pool.
-	TEST_EXPECT(pool_of(std::string()).values == 0 && pool_of(std::string()).overrun() == 0);
-	const configfile::DataStringsPool binary = pool_of(std::string("CBIN\x01\x00\x00\x00", 8));
-	TEST_EXPECT(binary.binary && binary.overrun() == 0);
-	// Words and numbers: a word its length and one, a number nothing; a value outside any section is none.
-	const configfile::DataStringsPool plain = pool_of(std::string("K = 9\r\n[S]\r\nK = ab, 7 1.5 -2 cd\r\n"));
-	TEST_EXPECT(plain.values == 5 && plain.string_bytes == 6);
-	// A value past the line's first 255 bytes [orig: String_CopyN @ 0x75eca0]: the walk cannot read it, so the
-	// last value read is counted again ("abc" twice: 8 bytes, not 4 + 3).
-	const std::string far = "[S]\r\nK = abc" + std::string(260, ',') + "zz\r\n";
-	const configfile::DataStringsPool past_window = pool_of(far);
-	TEST_EXPECT(past_window.values == 2 && past_window.string_bytes == 8);
-	// A token the 255 bytes cut is read cut: "K = " and 241 commas leave 10 of its letters.
-	const std::string cut = "[S]\r\nK = " + std::string(241, ',') + "abcdefghijklmnop\r\n";
-	TEST_EXPECT(pool_of(cut).values == 1 && pool_of(cut).string_bytes == 11);
-	// A key written with leading spaces does not match its own line: the walk reads the next line of the key, a
-	// number (no byte), where the entry holds a word [orig: ConfigFile_ReadKeyValue @ 0x75fdfd].
-	const configfile::DataStringsPool spaced = pool_of(std::string("[S]\r\n  K = word\r\nK = 1 2\r\n"));
-	TEST_EXPECT(spaced.values == 3 && spaced.string_bytes == 0);
-	// ... and where a '[' line comes first, nothing is read: the buffer as it was (empty here), one byte.
-	const configfile::DataStringsPool stopped = pool_of(std::string("[S]\r\n  K = word\r\n[T]\r\nK = 1\r\n"));
-	TEST_EXPECT(stopped.values == 2 && stopped.string_bytes == 1);
-	std::printf("reader: the CBIN form none; the 255-byte line, a cut token, a spaced key, the walk's stop\n");
-	return 0;
-}
 
 const Diagnostic *overrun_of(const std::vector<Diagnostic> &findings) {
 	if (findings.size() != 1 || findings[0].code() != "document.config_overrun" ||
@@ -456,9 +384,6 @@ int test_retail() {
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	int failures = 0;
-	failures += test_pool_arithmetic();
-	failures += test_fixtures_and_examples();
-	failures += test_reader_count();
 	failures += test_rule_charattr();
 	failures += test_rule_other_kinds();
 	failures += test_blanks();

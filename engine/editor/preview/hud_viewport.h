@@ -7,11 +7,11 @@
 #include <string>
 #include <vector>
 
-#include <editor/documents/hud_layout_type.h>
 #include <editor/preview/hud_layout_edit.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
+#include <formats/def/def_hudpos_text.h>
 #include <runtime/hud/hud_elements.h>
 #include <runtime/hud/hud_layout_from_hudpos.h>
 
@@ -242,7 +242,7 @@ private:
 	PreviewFollow picture_;
 	// The text the layout was read from (its document's identity, load and revision) and what it read.
 	uint64_t read_identity_ = 0, read_load_ = 0, read_revision_ = UINT64_MAX;
-	std::vector<HudLayoutLine> lines_;
+	std::vector<def::HudLayoutLine> lines_;
 	std::string text_;
 	std::shared_ptr<const HudLayoutModel> model_;
 	opennova::hud::HudLayoutAssets assets_;
