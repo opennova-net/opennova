@@ -8,10 +8,9 @@
 // historical TrnGen project under <dir> (Sample, Gradient, Checker64 and Perlin: `<case>/<Name>.tpj`
 // with its 8-bit `.raw` depth map and TrnGen's own `<case>.cpt`, the corpus retired from fixtures/
 // with the old builder; `git show d57608b3d^:fixtures/terrain/...` through `git lfs smudge`
-// restores it) and compares every byte. `editor_terrain_bake_test --reencode <dir>` reads every .cpt
-// directly under <dir> (the extracted retail tree) and writes it again through the CPT writer the bake
-// writes with, comparing every byte: the retail-corpus byte diff engine/CLAUDE.md asks of a change to
-// the CPT encoder. ctest runs the first part alone.
+// restores it) and compares every byte. ctest runs the first part alone; the retail-corpus byte diff of
+// the CPT writer the bake writes with is the re-encode leg of the gated cpt_jo_assets_sweep
+// (tests/terrain/cpt_jo_assets_sweep_test.cpp).
 #include <editor/terrain/terrain_bake.h>
 #include <formats/cpt/cpt_io.h>
 
@@ -210,38 +209,9 @@ void test_trngen_parity(const std::filesystem::path &root) {
 	}
 }
 
-// Every retail .cpt read and written again, byte for byte.
-void test_reencode(const std::filesystem::path &dir) {
-	int files = 0, same = 0;
-	for (const auto &entry : std::filesystem::directory_iterator(dir)) {
-		std::string ext = entry.path().extension().string();
-		for (char &c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-		if (!entry.is_regular_file() || ext != ".cpt") continue;
-		++files;
-		const std::vector<uint8_t> bytes = read_file(entry.path());
-		CptFile cpt;
-		std::string error;
-		std::vector<uint8_t> again;
-		if (load_cpt(bytes.data(), bytes.size(), cpt, error)) again = cpt.write_bytes();
-		size_t differ = 0, first = 0;
-		for (size_t i = 0; i < std::min(bytes.size(), again.size()); ++i)
-			if (bytes[i] != again[i] && differ++ == 0) first = i;
-		const bool equal = !again.empty() && again.size() == bytes.size() && differ == 0;
-		same += equal ? 1 : 0;
-		std::printf("%-16s %s (%zu bytes, written %zu, %zu differ from 0x%zx)\n", entry.path().filename().string().c_str(),
-		            equal ? "byte-identical" : "DIFFERS", bytes.size(), again.size(), differ, first);
-	}
-	std::printf("%d of %d retail .cpt files written again byte-identical\n", same, files);
-	expect(files > 0 && same == files, "every retail .cpt is written again byte-identical");
-}
-
 } // namespace
 
 int main(int argc, char **argv) {
-	if (argc > 2 && std::string(argv[1]) == "--reencode") {
-		test_reencode(argv[2]);
-		return failures == 0 ? 0 : 1;
-	}
 	test_bake_reads_back();
 	test_bake_16bit();
 	if (argc > 1) test_trngen_parity(argv[1]);
