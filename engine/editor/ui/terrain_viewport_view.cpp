@@ -9,6 +9,7 @@
 #include <imgui.h>
 
 #include <base/io/json.h>
+#include <base/io/os_path.h>
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
@@ -26,10 +27,6 @@ using io::JsonValue;
 
 void set_options(Workspace &workspace, const TerrainViewport &model, JsonValue options) {
 	workspace.request(request::set_viewport(model.path(), viewport_change(ViewportKind::Terrain, "options", std::move(options))));
-}
-
-std::string base_of(const std::string &path) {
-	return path.substr(path.find_last_of("/\\") + 1);
 }
 
 void legend(ViewportCanvas &ui, const TerrainViewport &model) {
@@ -62,10 +59,10 @@ void TerrainViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 	const float width = ImGui::GetFontSize() * 11.0f;
 	row.next(width);
 	ImGui::SetNextItemWidth(width);
-	const std::string shown = drawn ? base_of(drawn->mission) : std::string("No mission");
+	const std::string shown = drawn ? io::utf8_file_name(drawn->mission) : std::string("No mission");
 	if (ImGui::BeginCombo("##mission", shown.c_str())) {
 		for (const TerrainMissionUse &use : uses.missions) {
-			const std::string label = base_of(use.mission) + (use.title.empty() ? "" : " (" + use.title + ")");
+			const std::string label = io::utf8_file_name(use.mission) + (use.title.empty() ? "" : " (" + use.title + ")");
 			if (ImGui::Selectable(label.c_str(), drawn && use.mission == drawn->mission)) {
 				JsonValue change = JsonValue::make_object();
 				change.set("mission", io::json_string(use.mission));
@@ -79,7 +76,7 @@ void TerrainViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 		}
 		ImGui::EndCombo();
 	}
-	ui_kit::tooltip(drawn ? "Drawn under " + base_of(drawn->mission) + "'s environment (" +
+	ui_kit::tooltip(drawn ? "Drawn under " + io::utf8_file_name(drawn->mission) + "'s environment (" +
 	                                (drawn->environment.empty() ? std::string("none named") : drawn->environment) +
 	                                "), with its tile set and its tiles, at its start time, as its load reads them."
 	                      : std::string("Drawn under the engine's own environment, as a mission with no .env starts on "

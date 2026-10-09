@@ -44,7 +44,7 @@ JsonValue number(double value) { return JsonValue::make_number(value); }
 constexpr size_t kTextLongest = kWorkspaceText - 1;
 constexpr size_t kPathLongest = kWorkspacePath - 1;
 constexpr size_t kFileNameLongest = kWorkspaceFileName - 1;
-constexpr size_t kExpansionLongest = kWorkspaceExpansion - 1;
+constexpr size_t kExpansionLongest = kExpansionNameMax; // the longest name the game mounts (boot_policy.h)
 
 constexpr WorkspaceMember kCard[] = {
 	{ "path", J::String,

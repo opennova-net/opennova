@@ -104,7 +104,7 @@ void check_expansion_table(const ProjectPaths &paths, const AssetScan &scan, con
 		rtxt::File table;
 		std::string error;
 		if (!rtxt::parse_file(join_path(paths.root, asset.relative_path), table, error)) return;
-		const rtxt::Entry *name = table.find_in_section("exp_info", "EXP_NAME");
+		const rtxt::Entry *name = table.find_in_section(kExpansionInfoSection, kExpansionNameKey);
 		if (name && name->text.size() >= kExpansionRecordNameBytes)
 			out.push_back(make_finding(
 			        CoreFinding::BuildExpansionExpName, DiagnosticSeverity::Error,
@@ -112,7 +112,7 @@ void check_expansion_table(const ProjectPaths &paths, const AssetScan &scan, con
 			                " bytes: the game copies it over the expansion's folder name past 63, so choosing it there "
 			                "loads the base game. Shorten it to 63 bytes or fewer.",
 			        asset.relative_path));
-		const rtxt::Entry *description = table.find_in_section("exp_info", "EXP_DESC");
+		const rtxt::Entry *description = table.find_in_section(kExpansionInfoSection, kExpansionDescriptionKey);
 		if (description && description->text.size() >= kExpansionRecordDescriptionBytes)
 			out.push_back(make_finding(
 			        CoreFinding::BuildExpansionExpDesc, DiagnosticSeverity::Warning,

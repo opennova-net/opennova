@@ -61,10 +61,6 @@ target_link_libraries(threedi_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(threedi_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_roundtrip COMMAND threedi_roundtrip_test)
 
-# The property table an editor sets a model's fields through: every field set to
-# its own value leaves the bytes (synthetic models; retail models as a SKIP-LEG
-# leg), derived words follow their fields.
-
 # Every retail model through the reader and the writer the editor saves by:
 # byte-identical and a fixed point (OPENNOVA_JO_ASSETS).
 add_executable(threedi_retail_rewrite_test threedi/retail_rewrite_test.cpp)
@@ -5267,11 +5263,11 @@ target_link_libraries(editor_import_test PRIVATE opennova_editor)
 target_include_directories(editor_import_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_import COMMAND editor_import_test)
 
-# The font importer: a font set's glyph sheet made into a .fnt through our own FNT writer and read
-# back by fnt_parse (each advance mode, tracking, the space, the zero records, the header words, the
-# pages, the refusals), its run over an ImportContext, over a project (the set an import source, the
-# .fnt packed into localres, a changed sheet imported again), and an import of a set from the disk
-# bringing its sheet beside it.
+# The font importer: a font set's glyph sheet made into a .fnt (formats/fnt fnt_sheet, whose advance
+# modes, pages and refusals are the fnt_sheet ctest) and read back by fnt_parse: the set and the options,
+# its run over an ImportContext, over a project (the set an import source, the .fnt packed into
+# localres, a changed sheet imported again), and an import of a set from the disk bringing its sheet
+# beside it.
 add_executable(editor_font_import_test editor/font_import_test.cpp)
 target_link_libraries(editor_font_import_test PRIVATE opennova_editor)
 target_include_directories(editor_font_import_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -12,13 +12,6 @@ namespace opennova::editor {
 
 namespace {
 
-uint64_t mix(uint64_t value) {
-	value += 0x9E3779B97F4A7C15ull;
-	value = (value ^ (value >> 30)) * 0xBF58476D1CE4E5B9ull;
-	value = (value ^ (value >> 27)) * 0x94D049BB133111EBull;
-	return value ^ (value >> 31);
-}
-
 uint64_t text_hash(const std::string &text) {
 	return io::fnv1a64_bytes(io::kFnv1a64Offset, text.data(), text.size());
 }
@@ -118,9 +111,9 @@ uint64_t ProjectAssetSource::stamp(const std::string &name) const {
 	const auto open = open_.find(entry->relative);
 	if (open != open_.end()) {
 		const DocumentBase &document = *open->second.document;
-		return mix(mix(mix(document.identity()) ^ document.load_generation()) ^ document.revision()) | 1;
+		return io::splitmix64(io::splitmix64(io::splitmix64(document.identity()) ^ document.load_generation()) ^ document.revision()) | 1;
 	}
-	return mix(mix(entry->size ^ text_hash(entry->relative)) ^ static_cast<uint64_t>(entry->modified)) | 1;
+	return io::splitmix64(io::splitmix64(entry->size ^ text_hash(entry->relative)) ^ static_cast<uint64_t>(entry->modified)) | 1;
 }
 
 std::string ProjectAssetSource::path_of(const std::string &name) const {

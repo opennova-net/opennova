@@ -94,17 +94,6 @@ Diagnostic changed_while_packing(const std::string &name) {
 	                    "The file " + name + " changed while the build packed it: build again.", name);
 }
 
-std::string archive_write_error(int rc) {
-	switch (rc) {
-	case pff::PFF_WRITE_ERR_NAME_LEN: return "a name is too long for an archive";
-	case pff::PFF_WRITE_ERR_NAME_EMPTY: return "a name is blank";
-	case pff::PFF_WRITE_ERR_DUP_NAME: return "two files share a name";
-	case pff::PFF_WRITE_ERR_TOO_LARGE: return "the archive would exceed 4 GB";
-	case pff::PFF_WRITE_ERR_IO:
-	default: return "the archive could not be written";
-	}
-}
-
 struct LastGood {
 	std::string build_id;
 	std::string project;
@@ -1000,7 +989,7 @@ void BuildRun::pack(uint64_t budget) {
 				                             static_cast<uint32_t>(entries.size()), &Streams::read_chunk, &s);
 				if (rc != pff::PFF_WRITE_OK) {
 					return fail(make_finding(CoreFinding::BuildArchive, DiagnosticSeverity::Error,
-					                         archive.file_name + ": " + archive_write_error(rc)));
+					                         archive.file_name + ": " + pff::pff_write_error_string(rc)));
 				}
 				label_ = "Packing " + archive.file_name;
 			}
@@ -1040,7 +1029,7 @@ void BuildRun::pack(uint64_t budget) {
 			if (rc != pff::PFF_WRITE_OK) {
 				if (!s.failed_entry.empty()) return fail(changed_while_packing(s.failed_entry));
 				return fail(make_finding(CoreFinding::BuildArchive, DiagnosticSeverity::Error,
-				                         archive.file_name + ": " + archive_write_error(rc)));
+				                         archive.file_name + ": " + pff::pff_write_error_string(rc)));
 			}
 			if (finished) report_.archives_written.push_back(archive.file_name);
 		}

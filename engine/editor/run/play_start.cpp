@@ -1,7 +1,6 @@
 #include <editor/run/play_start.h>
 
 #include <cstdio>
-#include <cstring>
 #include <filesystem>
 #include <system_error>
 #include <vector>
@@ -17,36 +16,6 @@ namespace fs = std::filesystem;
 namespace opennova::editor {
 
 namespace {
-
-// The 16-byte entry name as a string (it may fill all sixteen, no NUL after it).
-std::string entry_name(const pff::PffEntry &entry) {
-	return std::string(entry.filename, strnlen(entry.filename, sizeof(entry.filename)));
-}
-
-pff::PffFormat format_of(uint32_t magic) {
-	if (magic == pff::PFF_MAGIC_PFF4) return pff::PFF_FORMAT_PFF4;
-	if (magic == pff::PFF_MAGIC_BHD) return pff::PFF_FORMAT_BHD;
-	return pff::PFF_FORMAT_PFF3;
-}
-
-// The archive written again: each entry's stored bytes as the source holds them (an encrypted one
-// still encrypted, its flags, time and checksum kept), the mission's entry (`replaced`) the new bytes,
-// stored plain.
-struct Rewrite {
-	const pff::PffArchive *source = nullptr;
-	uint32_t replaced = 0;
-	const std::vector<uint8_t> *bytes = nullptr;
-};
-
-int read_entry(void *ctx, uint32_t index, uint8_t *out, uint32_t size) {
-	const Rewrite &rewrite = *static_cast<const Rewrite *>(ctx);
-	if (index == rewrite.replaced) {
-		if (size != rewrite.bytes->size()) return 1;
-		if (size) std::memcpy(out, rewrite.bytes->data(), size);
-		return 0;
-	}
-	return pff::pff_extract_raw(rewrite.source, &rewrite.source->entries[index], out, size);
-}
 
 Diagnostic start_error(const std::string &words) {
 	return make_finding(CoreFinding::PlayStart, DiagnosticSeverity::Error, words);
@@ -95,23 +64,12 @@ bool stage_play_start(const std::string &run_dir, const std::string &expansion, 
 		                    (reason.empty() ? std::string(".") : ": " + reason));
 		return false;
 	}
-	// The archive again, beside its name, every entry as it held it but the mission's.
-	std::vector<pff::PffWriteStreamEntry> entries(archive.entry_count);
-	std::vector<std::string> names(archive.entry_count);
-	Rewrite rewrite{&archive, uint32_t(found - archive.entries), &bytes};
-	for (uint32_t i = 0; i < archive.entry_count; ++i) {
-		const pff::PffEntry &entry = archive.entries[i];
-		names[i] = entry_name(entry);
-		entries[i].name = names[i].c_str();
-		entries[i].size = i == rewrite.replaced ? uint32_t(bytes.size()) : entry.size;
-		entries[i].flags = i == rewrite.replaced ? 0u : entry.flags;
-		entries[i].timestamp = entry.timestamp;
-		entries[i].checksum = entry.checksum;
-	}
+	// The archive again, beside its name, every entry as it held it but the mission's (pff_rewrite_with_entry:
+	// each entry's stored bytes as the source holds them, the mission's the new bytes, stored plain).
 	const std::string target = join_path(run_dir, slot);
 	const std::string written = target + ".start";
-	const int wrote = pff::pff_write_archive_streamed(written.c_str(), format_of(archive.header.magic), entries.data(),
-	                                                  uint32_t(entries.size()), read_entry, &rewrite);
+	const int wrote = pff::pff_rewrite_with_entry(&archive, uint32_t(found - archive.entries), bytes.data(),
+	                                              uint32_t(bytes.size()), written.c_str());
 	pff::pff_close(&archive);
 	if (wrote != pff::PFF_WRITE_OK) {
 		fs::remove(system_path(written), ec);

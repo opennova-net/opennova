@@ -342,20 +342,8 @@ bool make_from(const BlankFactory &factory, const BlankRequest &request, std::ve
 	return false;
 }
 
-std::string blank_crlf(const std::string &text) {
-	std::string out;
-	out.reserve(text.size() + text.size() / 16);
-	for (size_t i = 0; i < text.size(); ++i) {
-		const char c = text[i];
-		if (c == '\r') continue; // normalize any authored CR first
-		if (c == '\n') out += "\r\n";
-		else out.push_back(c);
-	}
-	return out;
-}
-
 void blank_text_to_bytes(const std::string &text, std::vector<uint8_t> &out) {
-	const std::string crlf = blank_crlf(text);
+	const std::string crlf = strutil::normalized_crlf_line_ends(text);
 	out.assign(crlf.begin(), crlf.end());
 }
 

@@ -81,8 +81,8 @@ int test_assist() {
 	ScriptCompletions completions = script_completions(view, *script, 2, 7);
 	TEST_EXPECT(completions.column == 4 && same(completions.typed, "ssn") && completions.expected.find("trigger") != std::string::npos);
 	const ScriptCompletion *dead = item(completions, "SSNdead");
-	TEST_EXPECT(dead && dead->kind == "command" && same(dead->label, "SSNdead(SSN)") &&
-	            same(dead->detail, "SSNdead(SSN): a trigger (after IF). It takes an entity, by its SSN."));
+	TEST_EXPECT(dead && dead->kind == "command" && same(dead->label, "SSNdead (ssn)") &&
+	            same(dead->detail, "SSNdead (ssn): a trigger (after IF). It takes an entity, by its SSN."));
 	// After IF the triggers come before the actions.
 	size_t first_action = SIZE_MAX, last_trigger = 0;
 	for (size_t i = 0; i < completions.items.size(); ++i) {

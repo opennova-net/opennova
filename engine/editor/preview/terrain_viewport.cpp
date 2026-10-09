@@ -333,7 +333,7 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 			                             env::BmsEnvOverrides(), loaded);
 			const env::Config &defaults = loaded.config;
 			const env::FogParams fog =
-					env::compute_fog_params(defaults.fog_type, mission_settled_fog_level(defaults.fog_level), 0.0f);
+					env::compute_fog_params(defaults.fog_type, env::EnvScalarChannels::settled_fog_level(defaults.fog_level), 0.0f);
 			if (fog.enabled && fog.end > 0.0f) fog_reach_ = fog.end * 0.5f;
 		}
 	}

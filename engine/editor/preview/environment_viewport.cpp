@@ -344,25 +344,22 @@ bool EnvironmentViewport::read_(const SessionView &view, const DocumentBase &doc
 	}
 	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(path()) : nullptr;
 	file_name_ = entry ? entry->logical_name : base_of(path());
-	// As the drawn mission's load reads it (env::load_mission_env): its terrain's .trn, then overcast.def (the
+	// As the drawn mission's load reads it (env::read_mission_env): its terrain's .trn, then overcast.def (the
 	// overcast table, by the runtime's own name), then this file over them.
-	const auto read_text = [&](const std::string &name, std::string &text) {
+	bool overcast_read = false;
+	const env::EnvTextReader read_text = [&](const std::string &name, std::string &text) {
 		std::vector<uint8_t> bytes;
 		const bool found = files.read(name, bytes);
 		read_stamps_.note(name, files.stamp(name));
 		text.assign(bytes.begin(), bytes.end());
+		if (found && name == env::kOvercastFile) overcast_read = true;
 		return found;
 	};
-	std::string terrain_text, overcast_text, text;
-	env::MissionEnvTexts texts;
-	if (!header_.terrain.empty() && read_text(header_.terrain + ".trn", terrain_text)) texts.terrain = &terrain_text;
-	if (read_text(env::kOvercastFile, overcast_text)) texts.overcast = &overcast_text;
-	if (read_text(file_name_, text)) texts.environment = &text;
 	env::MissionEnv loaded;
-	env::load_mission_env(texts, loaded);
+	env::read_mission_env(read_text, header_.terrain.empty() ? std::string() : header_.terrain + ".trn", file_name_, loaded);
 	config_ = std::move(loaded.config);
 	overcast_ = std::move(loaded.overcast);
-	has_overcast_ = texts.overcast != nullptr || !overcast_.keyframes.empty();
+	has_overcast_ = overcast_read || !overcast_.keyframes.empty();
 	// What the home was seeded from moved: seeded again at the next step.
 	seeded_ = false;
 	return true;

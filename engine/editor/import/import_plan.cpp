@@ -102,7 +102,7 @@ bool ImportOrigin::read(const std::string &name, std::vector<uint8_t> &out) cons
 		const InstallFile *file = install_.find(name);
 		return file && install_.read(*file, out);
 	}
-	if (kind_ == Kind::Archive) return read_served(vfs_, name, out);
+	if (kind_ == Kind::Archive) return vfs_read_served(vfs_, name, out);
 	std::string error;
 	return io::read_file_bytes(join_path(path_, name), out, error);
 }
