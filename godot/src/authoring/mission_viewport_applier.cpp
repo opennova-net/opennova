@@ -307,7 +307,7 @@ bool MissionViewportApplier::mount_(const opennova::editor::SessionView &view) {
 	// moved); the layers that read none of what moved keep their files noted. Nothing the picture
 	// draws changes here: the layers that read what moved are built again by the build's units.
 	mounted_ = source;
-	stamped_ = std::make_shared<opennova::editor::StampedFiles>(source);
+	stamped_ = std::make_shared<opennova::StampedFiles>(source);
 	root_files_->mount_files(stamped_);
 	// A wave the Listen decoded may be one that moved: decoded again as it is next played.
 	listen_->forget();
@@ -317,7 +317,7 @@ bool MissionViewportApplier::mount_(const opennova::editor::SessionView &view) {
 			layer_missing_[layer].clear();
 			continue;
 		}
-		for (const opennova::editor::FileStamp &file : layer_files_[layer].files()) stamped_->stamp(file.name);
+		for (const opennova::FileStamp &file : layer_files_[layer].files()) stamped_->stamp(file.name);
 	}
 	if (stale[kEnvironment]) environment_built_ = false;
 	if (stale[kTerrain]) terrain_built_ = false;
@@ -335,7 +335,7 @@ size_t MissionViewportApplier::reads_() const {
 
 void MissionViewportApplier::note_reads_(int layer, size_t from) {
 	if (!stamped_ || layer >= kLayers) return;
-	const std::vector<opennova::editor::FileStamp> &files = stamped_->stamps().files();
+	const std::vector<opennova::FileStamp> &files = stamped_->stamps().files();
 	for (size_t i = from; i < files.size(); ++i) layer_files_[layer].note(files[i].name, files[i].stamp);
 }
 

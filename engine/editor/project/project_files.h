@@ -1,22 +1,18 @@
 #pragma once
 
-#include <cstddef>
-#include <cstdint>
-#include <cstdio>
 #include <filesystem>
-#include <functional>
 #include <string>
-#include <system_error>
-#include <vector>
 
+#include <base/io/file_io.h>
 #include <editor/assets/asset_kind.h>
 
 namespace opennova::editor {
 
-// The editor's plain file plumbing: whole-file reads and the atomic write every
-// editor save uses (write `<path>.tmp`, then rename over `path`, so a crash leaves
-// either the old file or the new one). `error` carries the OS reason on failure. Every
-// one of them calls the system through system_path, so none is bound by MAX_PATH.
+// The editor's path conversions and the rule for a name it writes into the project. The
+// whole-file reads and the atomic write every editor save uses (write `<path>.tmp`, then
+// rename over `path`, so a crash leaves either the old file or the new one) are
+// base/io/file_io.h's (io::read_file_bytes, io::write_file_atomic, ...), which reach the
+// system through io::os_path.
 
 // Every path the editor keeps is a UTF-8 string: what the Shell hands it (String.utf8()), what it
 // shows, stores and compares, and what the process seam widens for a child (CP_UTF8). On Windows
@@ -38,60 +34,6 @@ std::string join_path(const std::string &dir, const std::string &name);
 // does; elsewhere the path as it is. For the call alone: a path the editor keeps, compares or
 // shows stays as it was given.
 std::filesystem::path system_path(const std::string &path);
-
-bool read_file_bytes(const std::string &path, std::vector<uint8_t> &out, std::string &error);
-bool read_file_text(const std::string &path, std::string &out, std::string &error);
-bool write_file_atomic(const std::string &path, const void *data, size_t size, std::string &error);
-bool write_file_atomic(const std::string &path, const std::string &text, std::string &error);
-
-// The written file at `from` put in the place of `to`, replacing it (one rename, rename_with_retry);
-// false with the OS reason when it is refused (a write-protected `to`), `from` then left where it
-// is. The file replaced, its last write moves past the one it had, however soon after it the new
-// one was written (the stamps that tell a file changed are its size and last write).
-bool replace_file(const std::string &from, const std::string &to, std::string &error);
-
-// Whether a refused rename may go through when tried again a moment later: Windows' access denied
-// and sharing violation, the refusals a scanner or an indexer holding one of the files open for a
-// moment gives (S13 A3 measured 3 of 400 replace_file refusals clearing on a 2 ms retry).
-bool rename_refusal_passes(const std::error_code &ec);
-// std::filesystem::rename of the system paths, tried again a few times within some 30 ms while
-// its refusal may pass (rename_refusal_passes); false with the last refusal in `ec`. Every
-// rename that puts a file or a build in place takes it: replace_file, the build's publish.
-bool rename_with_retry(const std::filesystem::path &from, const std::filesystem::path &to, std::error_code &ec);
-
-// A file made at `path` and opened for writing, only when no file of that name is there: null,
-// and nothing touched, when one is (or it cannot be made). A build's copies are made through it,
-// so a copy never writes through a name another file may stand behind (a hard link to the last
-// good build's archive: S13 A8).
-std::FILE *create_new_file(const std::string &path);
-
-// The file's last write set to now: a file put in place by a copy or a rename that kept the last
-// write of the file it came from (a rename's copy, an import's publish) reads as written now to
-// every cache that keys a file's content by its size and last write (S13 A8).
-bool refresh_last_write(const std::string &path, std::string &error);
-using FileReplace = std::function<bool(const std::string &from, const std::string &to, std::string &error)>;
-
-// Several files written as one (a rename everywhere): every file's bytes read and every text
-// written beside its file (`<path>.tmp`) first, nothing replaced when one of these fails; then
-// each put in its file's place in turn (`replace`, replace_file but in a test). When one is not,
-// its text and the ones after it are removed and the files already replaced get the bytes they
-// held back: false, `problems` saying why (the refusal first, then a file whose bytes could
-// not be put back, which holds the new text).
-struct FileText {
-	std::string path;
-	std::string text;
-};
-bool write_files_together(const std::vector<FileText> &files, std::vector<std::string> &problems,
-                          const FileReplace &replace = replace_file);
-
-// mkdir -p; true when the directory exists afterwards.
-bool ensure_directory(const std::string &path, std::string &error);
-
-// The file at `from` given a second name, `to`: a hard link, one file under two names with no
-// byte copied (a build's archive its content left as the last build packed it, a run directory's
-// archives: S13 A8). False, with the OS reason, where the file system will not (another volume, a
-// file system without links, `to` taken): the caller copies the file instead.
-bool link_file(const std::string &from, const std::string &to, std::string &error);
 
 // A directory whose name starts with '.' (.opennova/, .git/): the walks over the
 // project tree (the scan, the import pass) never enter one.

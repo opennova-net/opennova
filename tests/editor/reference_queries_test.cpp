@@ -305,7 +305,7 @@ static int test_find_definition() {
 	const std::string style_file = view.project.root + "/" + style_path;
 	const std::string style_dir = style_file.substr(0, style_file.rfind('/'));
 	std::string text, problem;
-	TEST_EXPECT(read_file_text(style_file, text, problem));
+	TEST_EXPECT(opennova::io::read_file_text(style_file, text, problem));
 	TEST_EXPECT(editor_test::write_text(
 			style_file, text + "\r\nDEF_TEXT_FG FF00FF00\r\nTWICE 1\r\nTWICE 2\r\n"));
 	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "DEF_TEXT_FG FF102030\r\n"));

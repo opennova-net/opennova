@@ -467,7 +467,7 @@ static int test_utf8_project_path() {
 	TEST_EXPECT(v.project.scan->find(note) && v.project.scan->find(note)->relative_path == note);
 	TEST_EXPECT(v.project.scan->find("loose.txt") && v.project.scan->find("note.txt"));
 	std::string text, error;
-	TEST_EXPECT(read_file_text(root + "/note.txt", text, error) && text == "packed");
+	TEST_EXPECT(opennova::io::read_file_text(root + "/note.txt", text, error) && text == "packed");
 	TEST_EXPECT(fs::is_regular_file(io::os_path(root + "/loose.txt")));
 
 	// The build lands under the project, and Play stages and spawns there: every path the plan
@@ -561,8 +561,8 @@ static int test_import() {
 			session.view().project.scan->find("note.txt"));
 	TEST_EXPECT(!session.view().project.scan->find("unused.txt"));
 	std::string text, error;
-	TEST_EXPECT(read_file_text(dir.file("project/note.txt"), text, error) && text == "packed");
-	TEST_EXPECT(read_file_text(loose, text, error) && text == "loose file");
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("project/note.txt"), text, error) && text == "packed");
+	TEST_EXPECT(opennova::io::read_file_text(loose, text, error) && text == "loose file");
 
 	// Replacing is explicit and uses the existing project's path and spelling.
 	fs::create_directory(dir.file("project/custom"));
@@ -572,11 +572,11 @@ static int test_import() {
 	session.handle(importing);
 	session.run_operations();
 	TEST_EXPECT(session.view().findings.diagnostics.back().code() == "import.exists");
-	TEST_EXPECT(read_file_text(dir.file("project/custom/NOTE.TXT"), text, error) && text == "authored");
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("project/custom/NOTE.TXT"), text, error) && text == "authored");
 	importing.replace = true;
 	session.handle(importing);
 	session.run_operations();
-	TEST_EXPECT(read_file_text(dir.file("project/custom/NOTE.TXT"), text, error) && text == "packed");
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("project/custom/NOTE.TXT"), text, error) && text == "packed");
 	TEST_EXPECT(!fs::exists(dir.file("project/note.txt")));
 
 	// Import never writes over unsaved edits: replacing a catalog open with them waits on the
@@ -606,7 +606,7 @@ static int test_import() {
 	TEST_EXPECT(session.outcome().unsaved_prompt && prompt.open && prompt.action == EditorRequestKind::ImportFiles);
 	TEST_EXPECT(prompt.files == std::vector<std::string>({"defs/items.def"}) && !prompt.can_discard);
 	TEST_EXPECT(!has_code(session.view().findings.diagnostics, "import.unsaved"));
-	TEST_EXPECT(read_file_text(dir.file("project/defs/items.def"), text, error) && text.find("hp 10") != std::string::npos);
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("project/defs/items.def"), text, error) && text.find("hp 10") != std::string::npos);
 	EditorRequest cancel = request::resolve_unsaved(UnsavedChoice::Cancel);
 	session.handle(cancel);
 	TEST_EXPECT(!prompt.open && session.document_for("items.def") == held && held->dirty());
@@ -716,12 +716,12 @@ static int test_retail_play() {
 	TEST_EXPECT(platform.last_plan.args == std::vector<std::string>({"/w", "/d", "/FRISK"}));
 	TEST_EXPECT(platform.last_plan.mcp_port == 0 && platform.last_plan.log_file == run + "/_filelog.txt");
 	std::string copied;
-	TEST_EXPECT(read_file_text(run + "/binkw32.dll", copied, io_error) && copied == "real JOTAC Bink");
-	TEST_EXPECT(read_file_text(run + "/game.cfg", copied, io_error) && copied == "video settings");
+	TEST_EXPECT(opennova::io::read_file_text(run + "/binkw32.dll", copied, io_error) && copied == "real JOTAC Bink");
+	TEST_EXPECT(opennova::io::read_file_text(run + "/game.cfg", copied, io_error) && copied == "video settings");
 	for (const char *archive : {"language.pff", "localres.pff", "resource.pff"}) {
 		std::vector<uint8_t> in_build, in_run;
-		TEST_EXPECT(read_file_bytes(built + "/" + archive, in_build, io_error) &&
-		            read_file_bytes(run + "/" + archive, in_run, io_error) && in_build == in_run);
+		TEST_EXPECT(opennova::io::read_file_bytes(built + "/" + archive, in_build, io_error) &&
+		            opennova::io::read_file_bytes(run + "/" + archive, in_run, io_error) && in_build == in_run);
 	}
 	TEST_EXPECT(fs::is_regular_file(run + "/nw_cdata.coo") && !fs::exists(run + "/build.json"));
 	TEST_EXPECT(!fs::exists(fs::path(built) / "Jointops.exe") && !fs::exists(fs::path(built) / "binkw32.dll") &&
@@ -747,7 +747,7 @@ static int test_retail_play() {
 		Diagnostic finding;
 		std::string settings;
 		TEST_EXPECT(load_local_settings(ProjectPaths::for_root(project), local, finding) && local.play_mode == PlayMode::Install);
-		TEST_EXPECT(read_file_text(dir.file("settings.json"), settings, io_error) && settings.find("play_in_install") == std::string::npos && settings.find("play_mode") == std::string::npos);
+		TEST_EXPECT(opennova::io::read_file_text(dir.file("settings.json"), settings, io_error) && settings.find("play_in_install") == std::string::npos && settings.find("play_mode") == std::string::npos);
 	}
 	session.handle(request::build());
 	session.run_operations();
@@ -784,8 +784,8 @@ static int test_retail_play() {
 	for (const Diagnostic &d : session.view().activity.last_build->diagnostics)
 		left_out = left_out || (d.code() == "build.player_file" && d.asset == "game.cfg");
 	TEST_EXPECT(left_out && !fs::exists(rebuilt + "/game.cfg"));
-	TEST_EXPECT(read_file_text(run + "/binkw32.dll", copied, io_error) && copied == "ordinary Bink");
-	TEST_EXPECT(read_file_text(run + "/game.cfg", copied, io_error) && copied == "adjusted in the game");
+	TEST_EXPECT(opennova::io::read_file_text(run + "/binkw32.dll", copied, io_error) && copied == "ordinary Bink");
+	TEST_EXPECT(opennova::io::read_file_text(run + "/game.cfg", copied, io_error) && copied == "adjusted in the game");
 	TEST_EXPECT(!fs::exists(run + "/_filelog.txt"));
 	{
 		const opennova::io::JsonValue run_json = view_section_to_json(session.view(), ViewSection::Run);
@@ -802,7 +802,7 @@ static int test_retail_play() {
 	TEST_EXPECT(platform.spawns == 3 && platform.last_plan.working_dir == run && session.view().activity.play_fresh &&
 	            session.view().activity.play_kept.empty() &&
 	            view_section_to_json(session.view(), ViewSection::Run).get_bool("fresh", false));
-	TEST_EXPECT(read_file_text(run + "/game.cfg", copied, io_error) && copied == "video settings, played since");
+	TEST_EXPECT(opennova::io::read_file_text(run + "/game.cfg", copied, io_error) && copied == "video settings, played since");
 	TEST_EXPECT(output_has(session.view(), "A fresh run: the run directory was emptied"));
 	const std::string rebuilt_tree = editor_test::tree_digest(rebuilt);
 	session.handle(request::stop_play());
@@ -832,9 +832,9 @@ static int test_retail_play() {
 	TEST_EXPECT(!fs::exists(runtime_run + "/Jointops.exe") && !fs::exists(runtime_run + "/localres.pff") &&
 	            !fs::exists(runtime_run + "/game.cfg") && session.view().activity.play_kept.empty());
 	TEST_EXPECT(editor_test::tree_digest(run) == lenient_tree &&
-	            read_file_text(run + "/game.cfg", copied, io_error) && copied == "video settings, played since");
+	            opennova::io::read_file_text(run + "/game.cfg", copied, io_error) && copied == "video settings, played since");
 	TEST_EXPECT(editor_test::tree_digest(rebuilt) == rebuilt_tree);
-	TEST_EXPECT(read_file_text(install + "/game.cfg", copied, io_error) && copied == "video settings, played since");
+	TEST_EXPECT(opennova::io::read_file_text(install + "/game.cfg", copied, io_error) && copied == "video settings, played since");
 	session.handle(request::stop_play());
 	session.poll();
 
@@ -941,7 +941,7 @@ static int test_strict_play() {
 	            platform.last_plan.working_dir == run && fs::is_regular_file(run + "/run.json") &&
 	            !v.activity.play_file_log_read && view_section_to_json(v, ViewSection::Run).get_bool("started_again", false));
 	std::string text, io_error;
-	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "written by the game"); // kept
+	TEST_EXPECT(opennova::io::read_file_text(run + "/game.cfg", text, io_error) && text == "written by the game"); // kept
 	// The second run quitting the same way is not started again; its log (written anew) is reported, and
 	// is the run section's file_log.
 	const int64_t second = v.activity.play_pid;
@@ -975,9 +975,9 @@ static int test_strict_play() {
 	TEST_EXPECT(platform.spawns == 3 && v.activity.play_state == PlayState::Running && platform.last_plan.working_dir == run &&
 	            !v.activity.play_fresh && v.activity.play_run_mode == "strict");
 	TEST_EXPECT(v.activity.play_kept == std::vector<std::string>({"game.cfg", "ghw.txt", "player.sav"}));
-	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "written by the game");
-	TEST_EXPECT(read_file_text(run + "/player.sav", text, io_error) && text == "the game's player");
-	TEST_EXPECT(read_file_text(run + "/nw_cdata.coo", text, io_error) && text != "rewritten by the game");
+	TEST_EXPECT(opennova::io::read_file_text(run + "/game.cfg", text, io_error) && text == "written by the game");
+	TEST_EXPECT(opennova::io::read_file_text(run + "/player.sav", text, io_error) && text == "the game's player");
+	TEST_EXPECT(opennova::io::read_file_text(run + "/nw_cdata.coo", text, io_error) && text != "rewritten by the game");
 	TEST_EXPECT(fs::is_regular_file(run + "/Jointops.exe") && !fs::exists(run + "/_filelog.txt") &&
 	            !fs::exists(run + "/score.ini"));
 	// It quits on its own at once: it had a game.cfg, so it is no first run and is not started again.
@@ -1006,7 +1006,7 @@ static int test_strict_play() {
 	TEST_EXPECT(platform.spawns == 4 && v.activity.play_state == PlayState::Running && v.activity.play_run_mode == "runtime" &&
 	            platform.last_plan.executable == runtime && platform.last_plan.working_dir == runtime_run &&
 	            v.activity.play_kept.empty() && !fs::exists(runtime_run + "/game.cfg"));
-	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "written by the game");
+	TEST_EXPECT(opennova::io::read_file_text(run + "/game.cfg", text, io_error) && text == "written by the game");
 	TEST_EXPECT(editor_test::write_text(runtime_run + "/weapon.sav", "the runtime's weapons"));
 	session.handle(request::stop_play());
 	session.poll();
@@ -1017,8 +1017,8 @@ static int test_strict_play() {
 	TEST_EXPECT(platform.spawns == 5 && v.activity.play_state == PlayState::Running && v.activity.play_run_mode == "strict" &&
 	            platform.last_plan.working_dir == run && !v.activity.play_fresh);
 	TEST_EXPECT(v.activity.play_kept == std::vector<std::string>({"game.cfg", "ghw.txt", "player.sav"}));
-	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "written by the game");
-	TEST_EXPECT(read_file_text(runtime_run + "/weapon.sav", text, io_error) && text == "the runtime's weapons");
+	TEST_EXPECT(opennova::io::read_file_text(run + "/game.cfg", text, io_error) && text == "written by the game");
+	TEST_EXPECT(opennova::io::read_file_text(runtime_run + "/weapon.sav", text, io_error) && text == "the runtime's weapons");
 	platform.clock += 1000;
 	platform.codes[v.activity.play_pid] = 0;
 	platform.exit_child(v.activity.play_pid);
@@ -1181,7 +1181,7 @@ static int test_play_settings_per_project() {
 		TEST_EXPECT(another.project_open() && another.view().project.play_mode == PlayMode::Runtime);
 	}
 	std::string settings, io_error;
-	TEST_EXPECT(read_file_text(dir.file("settings.json"), settings, io_error) &&
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("settings.json"), settings, io_error) &&
 	            settings.find("play_in_install") == std::string::npos && settings.find("play_mode") == std::string::npos &&
 	            settings.find("save_before_play") == std::string::npos);
 	return 0;
@@ -1273,7 +1273,7 @@ static int test_outcomes_and_refusals() {
 	TEST_EXPECT(has_code(v.findings.diagnostics, "rename.exists"));
 	TEST_EXPECT(fs::exists(root + "/logo.tga"));
 	std::string text, error;
-	TEST_EXPECT(read_file_text(root + "/logo2.tga", text, error) && text == "late");
+	TEST_EXPECT(opennova::io::read_file_text(root + "/logo2.tga", text, error) && text == "late");
 
 	// A file of no kind the game knows is left out of the build (S13 A8; it packed all the same
 	// before, its long name refused): a new name past the archives' 16 characters is taken, and
@@ -1300,7 +1300,7 @@ static int test_outcomes_and_refusals() {
 	if (!table) return 1;
 	const std::string table_path = root + "/" + table->path();
 	std::vector<uint8_t> before, after;
-	TEST_EXPECT(read_file_bytes(table_path, before, error));
+	TEST_EXPECT(opennova::io::read_file_bytes(table_path, before, error));
 	EditorRequest add = request::edit_record(table->path(), Edit());
 	add.edits[0].operation = EditOperation::Add;
 	add.edits[0].address = {0, table->kind_from_name("section"), 0};
@@ -1316,7 +1316,7 @@ static int test_outcomes_and_refusals() {
 	TEST_EXPECT(
 			!v.dialogs.unsaved_prompt.open && !has_code(v.findings.diagnostics, "rename.unsaved"));
 	TEST_EXPECT(session.document_for("gametext.bin") == table && table->dirty());
-	TEST_EXPECT(read_file_bytes(table_path, after, error) && after == before);
+	TEST_EXPECT(opennova::io::read_file_bytes(table_path, after, error) && after == before);
 	TEST_EXPECT(!v.project.scan->find("gametxt2.bin") && !fs::exists(fs::path(table_path).parent_path() / "gametxt2.bin"));
 	// Closing it waits on the unsaved-changes prompt; cancel keeps it open.
 	session.handle(request::close_document(table->path()));
@@ -1895,7 +1895,7 @@ static int test_validation_cost() {
 	const std::string menu = menu_entry->relative_path;
 	std::vector<uint8_t> original;
 	std::string error;
-	TEST_EXPECT(read_file_bytes(root + "/" + menu, original, error));
+	TEST_EXPECT(opennova::io::read_file_bytes(root + "/" + menu, original, error));
 	// A UTF-16 byte-order mark and half a code unit: a menu that cannot be decoded.
 	TEST_EXPECT(editor_test::write_bytes(root + "/" + menu, {0xFF, 0xFE, 0x41}));
 	session.handle(request::rescan());
@@ -1940,7 +1940,7 @@ static int test_validation_cost() {
 	if (!held || held->rows().empty()) return 1;
 	const std::string items_file = root + "/" + held->path();
 	std::vector<uint8_t> items_bytes;
-	TEST_EXPECT(read_file_bytes(items_file, items_bytes, error));
+	TEST_EXPECT(opennova::io::read_file_bytes(items_file, items_bytes, error));
 	{
 		DefCatalogDocument outside;
 		Diagnostic outside_error;
@@ -2103,7 +2103,7 @@ static int test_save_contract() {
 	session.run_operations();
 	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.ignored_input"));
 	std::string text, error;
-	TEST_EXPECT(read_file_text(project.root + "/" + project.items_path, text, error));
+	TEST_EXPECT(opennova::io::read_file_text(project.root + "/" + project.items_path, text, error));
 	TEST_EXPECT(text.find("subtype Ruins") != std::string::npos && text.find("hp 10") != std::string::npos);
 	session.handle(request::redo(project.items_path));
 	TEST_EXPECT(project.items->dirty() && project.hp() == 20);
@@ -2267,7 +2267,7 @@ static int test_rewrite_closed_file() {
 	TEST_EXPECT(session.outcome().done() && output_has(v, "Saved " + menu) && v.activity.status == "Saved " + menu + ".");
 	session.run_operations(); // the validation the save left due
 	std::string text, error;
-	TEST_EXPECT(read_file_text(file, text, error) && text.find("SCREENX") == std::string::npos &&
+	TEST_EXPECT(opennova::io::read_file_text(file, text, error) && text.find("SCREENX") == std::string::npos &&
 	            text.find("POSITION") != std::string::npos);
 	TEST_EXPECT(!has_code(v.findings.diagnostics, "menu.ignored_input") && !session.document_for(menu));
 	session.handle(request::save("rewrite.mnu"));
@@ -2283,7 +2283,7 @@ static int test_rewrite_closed_file() {
 	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.ignored_input"));
 	session.handle(request::save(items));
 	TEST_EXPECT(session.outcome().done() && v.activity.status == items + " has no changes to save.");
-	TEST_EXPECT(read_file_text(v.project.root + "/" + items, text, error) && text == items_text);
+	TEST_EXPECT(opennova::io::read_file_text(v.project.root + "/" + items, text, error) && text == items_text);
 	session.handle(request::save("nowhere.def"));
 	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "document.missing"));
 
@@ -2302,14 +2302,14 @@ static int test_rewrite_closed_file() {
 	session.handle(request::save("menus/crash.mnu"));
 	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "document.unserializable"));
 	TEST_EXPECT(v.activity.status.find("no changes") == std::string::npos && !session.document_for("crash.mnu"));
-	TEST_EXPECT(read_file_text(crash, text, error) && text == crash_text);
+	TEST_EXPECT(opennova::io::read_file_text(crash, text, error) && text == crash_text);
 	session.handle(request::open_document("crash.mnu"));
 	const Document *blocked = session.document_for("crash.mnu");
 	TEST_EXPECT(blocked && !blocked->dirty());
 	session.handle(request::save("crash.mnu"));
 	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "document.unserializable"));
 	TEST_EXPECT(v.activity.status.find("no changes") == std::string::npos);
-	TEST_EXPECT(read_file_text(crash, text, error) && text == crash_text);
+	TEST_EXPECT(opennova::io::read_file_text(crash, text, error) && text == crash_text);
 	return 0;
 }
 
@@ -2400,7 +2400,7 @@ static int test_play_saves_first() {
 	TEST_EXPECT(session.outcome().done() && !prompt.open && !project.items->dirty() && !project.strings->dirty());
 	TEST_EXPECT(output_has(v, "Saved 2 files before Play") && v.activity.operation.running());
 	std::string text, error;
-	TEST_EXPECT(read_file_text(project.root + "/" + project.items_path, text, error) && text.find("hp 20") != std::string::npos);
+	TEST_EXPECT(opennova::io::read_file_text(project.root + "/" + project.items_path, text, error) && text.find("hp 20") != std::string::npos);
 	session.run_operations();
 	TEST_EXPECT(v.activity.has_build && project.platform.spawns == 1);
 	session.handle(request::stop_play());
@@ -2471,7 +2471,7 @@ static int test_prompt_saves_what_it_lists() {
 	TEST_EXPECT(session.outcome().done() && !session.document_for(project.items_path) && project.strings->dirty());
 	TEST_EXPECT(output_has(v, "Saved " + project.items_path) && !output_has(v, "Saved " + project.strings_path));
 	std::string text, error;
-	TEST_EXPECT(read_file_text(project.root + "/" + project.items_path, text, error) && text.find("hp 20") != std::string::npos);
+	TEST_EXPECT(opennova::io::read_file_text(project.root + "/" + project.items_path, text, error) && text.find("hp 20") != std::string::npos);
 	// Reopened and edited again: the string table's Reload writes the table alone.
 	session.handle(request::open_document(project.items_path));
 	project.items = session.document_for(project.items_path);
@@ -3011,7 +3011,7 @@ static int test_play_from_here() {
 	TEST_EXPECT(built.size() == 1 && built[0].x == bms::to_fixed_16_16(5.0));
 	std::vector<uint8_t> project_bytes;
 	std::string io_error;
-	TEST_EXPECT(read_file_bytes(root + "/missions/First.bms", project_bytes, io_error) && project_bytes == mission_bytes);
+	TEST_EXPECT(opennova::io::read_file_bytes(root + "/missions/First.bms", project_bytes, io_error) && project_bytes == mission_bytes);
 	{
 		const io::JsonValue section = view_section_to_json(v, ViewSection::Run);
 		const io::JsonValue *placed = section.get("start");
@@ -3119,11 +3119,11 @@ static int test_new_mission() {
 	std::vector<uint8_t> bytes;
 	std::string error;
 	opennova::bms::File file;
-	TEST_EXPECT(read_file_bytes(root + "/missions/first.bms", bytes, error) && opennova::bms::parse(bytes.data(), bytes.size(), file, error));
+	TEST_EXPECT(opennova::io::read_file_bytes(root + "/missions/first.bms", bytes, error) && opennova::bms::parse(bytes.data(), bytes.size(), file, error));
 	const opennova::mission::MissionInfo info = opennova::mission::mission_info(file);
 	TEST_EXPECT(info.mission_name == "The first" && info.terrain == "ISLAND" && info.environment == "day");
 	opennova::rtxt::File table;
-	TEST_EXPECT(read_file_bytes(root + "/strings/first.bin", bytes, error) && opennova::rtxt::parse(bytes.data(), bytes.size(), table, error) &&
+	TEST_EXPECT(opennova::io::read_file_bytes(root + "/strings/first.bin", bytes, error) && opennova::rtxt::parse(bytes.data(), bytes.size(), table, error) &&
 	            table.entries.size() == 2 && table.entries[0].key == "TITLE" && table.entries[0].text == "The first");
 	// Its terrain, its environment and its text table resolve: the mission names nothing the project
 	// lacks but a tile placement (S14: every shipped mission has one, a warning).
@@ -3137,8 +3137,8 @@ static int test_new_mission() {
 	session.handle(request::create_file("second.bms", "", Values{{"terrain", "island"}, {"environment", "day"}}));
 	session.run_operations();
 	std::string kept;
-	TEST_EXPECT(v.project.scan->find("second.bms") && read_file_text(root + "/strings/second.bin", kept, error) && kept == "mine");
-	TEST_EXPECT(read_file_bytes(root + "/missions/second.bms", bytes, error) && opennova::bms::parse(bytes.data(), bytes.size(), file, error) &&
+	TEST_EXPECT(v.project.scan->find("second.bms") && opennova::io::read_file_text(root + "/strings/second.bin", kept, error) && kept == "mine");
+	TEST_EXPECT(opennova::io::read_file_bytes(root + "/missions/second.bms", bytes, error) && opennova::bms::parse(bytes.data(), bytes.size(), file, error) &&
 	            opennova::mission::mission_info(file).mission_name == "second");
 
 	// A new script: made beside the missions and opened (the editor edits a script).
@@ -3279,14 +3279,14 @@ static int test_create_missing_roles() {
 	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "create_missing.exists"));
 	session.run_operations(); // the validation the scan it read left due
 	std::string io_error, text;
-	TEST_EXPECT(read_file_bytes(root + "/strings/keyhelp.bin", after, io_error) && after == table);
+	TEST_EXPECT(opennova::io::read_file_bytes(root + "/strings/keyhelp.bin", after, io_error) && after == table);
 	TEST_EXPECT(!finding_about(v.findings.diagnostics, "requirement.missing", "keyhelp.bin")); // the refresh after it sees the file
 	// A file of the wrong kind put in place since: refused, never overwritten.
 	TEST_EXPECT(editor_test::write_text(root + "/vmacros.bin", "raw bytes"));
 	EditorRequest vmacros = request::create_missing({"vmacros"});
 	session.handle(vmacros);
 	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "create_missing.wrong_kind"));
-	TEST_EXPECT(read_file_text(root + "/vmacros.bin", text, io_error) && text == "raw bytes");
+	TEST_EXPECT(opennova::io::read_file_text(root + "/vmacros.bin", text, io_error) && text == "raw bytes");
 	TEST_EXPECT(!fs::exists(root + "/strings/vmacros.bin"));
 	// A mission row with missions off: no such requirement of this project.
 	EditorRequest ammo = request::create_missing({"ammo_def"});
@@ -3450,7 +3450,7 @@ static int test_fixes_apply() {
 	std::string text, io_error;
 	TEST_EXPECT(
 			session.outcome().done() && !has_code(v.findings.diagnostics, "menu.ignored_input"));
-	TEST_EXPECT(read_file_text(ignored_file, text, io_error) && text.find("SCREENX") == std::string::npos);
+	TEST_EXPECT(opennova::io::read_file_text(ignored_file, text, io_error) && text.find("SCREENX") == std::string::npos);
 	// A font no file of the project is: Create makes it, and the startup menu's name resolves.
 	session.handle(request::open_document("main.mnu"));
 	const Document *menu = session.document_for("main.mnu");
@@ -3507,7 +3507,7 @@ static int test_fixes_apply() {
 	const std::string source = root + "/" + (*v.project.imports)[0].source;
 	const std::string output = root + "/" + (*v.project.imports)[0].outputs[0];
 	std::vector<uint8_t> good;
-	TEST_EXPECT(fs::exists(source + kImportSidecarSuffix) && fs::is_regular_file(output) && read_file_bytes(source, good, io_error));
+	TEST_EXPECT(fs::exists(source + kImportSidecarSuffix) && fs::is_regular_file(output) && opennova::io::read_file_bytes(source, good, io_error));
 	TEST_EXPECT(editor_test::write_text(source, "no longer a png"));
 	fs::remove(output);
 	session.handle(request::rescan());
@@ -3694,7 +3694,7 @@ static int test_menu_first_screen() {
 	session.run_operations();
 	TEST_EXPECT(session.document_for(menu_path) == menu && v.documents.selection.primary == title);
 	std::string text, io_error;
-	TEST_EXPECT(read_file_text(project.root + "/" + menu_path, text, io_error) &&
+	TEST_EXPECT(opennova::io::read_file_text(project.root + "/" + menu_path, text, io_error) &&
 	            editor_test::write_text(project.root + "/" + menu_path, text + "\r\n"));
 	const uint64_t was = menu->identity();
 	session.handle(request::rescan());
@@ -3737,7 +3737,7 @@ static int test_rescan_keeps_what_did_not_change() {
 	TEST_EXPECT(!items->dirty() && items->can_undo() && v.documents.selection.primary == project.marker());
 	// The menu changed on disk (a line end added by hand): read again, alone.
 	std::string text, error;
-	TEST_EXPECT(read_file_text(project.root + "/" + menu_path, text, error) &&
+	TEST_EXPECT(opennova::io::read_file_text(project.root + "/" + menu_path, text, error) &&
 	            editor_test::write_text(project.root + "/" + menu_path, text + "\r\n"));
 	session.handle(request::rescan());
 	session.run_operations();
@@ -3755,7 +3755,7 @@ static int test_rescan_keeps_what_did_not_change() {
 	// cannot be decoded): the document stays as it was, and why is an error on it, until the
 	// file reads again.
 	std::vector<uint8_t> menu_bytes;
-	TEST_EXPECT(read_file_bytes(project.root + "/" + menu_path, menu_bytes, error));
+	TEST_EXPECT(opennova::io::read_file_bytes(project.root + "/" + menu_path, menu_bytes, error));
 	TEST_EXPECT(editor_test::write_bytes(project.root + "/" + menu_path, {0xFF, 0xFE, 0x41}));
 	session.handle(request::rescan());
 	session.run_operations();
@@ -4172,7 +4172,7 @@ static int test_import_guard_past_the_cap() {
 	TEST_EXPECT(session.outcome().unsaved_prompt && v.dialogs.unsaved_prompt.action == EditorRequestKind::ImportFiles &&
 	            v.dialogs.unsaved_prompt.files == std::vector<std::string>({items->path()}));
 	std::string text, error;
-	TEST_EXPECT(read_file_text(root + "/defs/items.def", text, error) && text.find("hp 10") != std::string::npos);
+	TEST_EXPECT(opennova::io::read_file_text(root + "/defs/items.def", text, error) && text.find("hp 10") != std::string::npos);
 	TEST_EXPECT(!v.project.scan->find("t0000.txt") && items->dirty());
 	return 0;
 }
@@ -4284,13 +4284,13 @@ static int test_play_leases() {
 		executable = platform.last_plan.executable;
 		std::string text, error;
 		opennova::io::JsonValue record;
-		TEST_EXPECT(read_file_text(lease_of(played, 500), text, error) && opennova::io::json_parse(text, record, error));
+		TEST_EXPECT(opennova::io::read_file_text(lease_of(played, 500), text, error) && opennova::io::json_parse(text, record, error));
 		TEST_EXPECT(record.get_int("schema_version", -1) == kPlayLeaseSchemaVersion && record.get_int("pid", -1) == 500 &&
 		            record.get_string("image", "") == executable && record.get_string("created", "") == "created 500" &&
 		            record.get_string("build_id", "") == fs::path(played).filename().string());
 		// S13 A8: its run directory records it the same way.
 		TEST_EXPECT(platform.last_plan.working_dir == v.project.root + "/.opennova/run/runtime/1");
-		TEST_EXPECT(read_file_text(platform.last_plan.working_dir + "/run.json", text, error) &&
+		TEST_EXPECT(opennova::io::read_file_text(platform.last_plan.working_dir + "/run.json", text, error) &&
 		            opennova::io::json_parse(text, record, error) && record.get_int("pid", -1) == 500 &&
 		            record.get_string("created", "") == "created 500");
 		// The editor quits; the game runs on (its handle released, never the process).
@@ -4530,10 +4530,10 @@ static int test_save_picks_like_the_rest() {
 	session.handle(request::save("dup.mnu"));
 	TEST_EXPECT(session.outcome().done() && output_has(v, "Saved " + picked));
 	std::string text, error;
-	TEST_EXPECT(read_file_text(v.project.root + "/" + picked, text, error) && text.find("SCREENX") == std::string::npos);
-	TEST_EXPECT(read_file_text(v.project.root + "/" + other, text, error) && text == ignored);
+	TEST_EXPECT(opennova::io::read_file_text(v.project.root + "/" + picked, text, error) && text.find("SCREENX") == std::string::npos);
+	TEST_EXPECT(opennova::io::read_file_text(v.project.root + "/" + other, text, error) && text == ignored);
 	session.handle(request::save(other));
-	TEST_EXPECT(session.outcome().done() && read_file_text(v.project.root + "/" + other, text, error) &&
+	TEST_EXPECT(session.outcome().done() && opennova::io::read_file_text(v.project.root + "/" + other, text, error) &&
 	            text.find("SCREENX") == std::string::npos);
 	return 0;
 }

@@ -32,7 +32,7 @@ static int test_create_then_open() {
 	TEST_EXPECT(fs::is_directory(paths.cache_dir));
 	std::string ignore;
 	std::string io_error;
-	TEST_EXPECT(read_file_text((fs::path(paths.cache_dir) / ".gitignore").generic_string(), ignore, io_error));
+	TEST_EXPECT(opennova::io::read_file_text((fs::path(paths.cache_dir) / ".gitignore").generic_string(), ignore, io_error));
 	TEST_EXPECT(ignore == "*\n");
 
 	ProjectDocument opened;
@@ -193,7 +193,7 @@ static int test_export_dir_and_local_settings() {
 	TEST_EXPECT(!fs::exists(paths.cache_dir));
 	TEST_EXPECT(save_local_settings(paths, local, error));
 	std::string ignore, io_error;
-	TEST_EXPECT(read_file_text((fs::path(paths.cache_dir) / ".gitignore").generic_string(), ignore, io_error) &&
+	TEST_EXPECT(opennova::io::read_file_text((fs::path(paths.cache_dir) / ".gitignore").generic_string(), ignore, io_error) &&
 	            ignore == "*\n");
 	LocalSettings back;
 	TEST_EXPECT(load_local_settings(paths, back, error));
@@ -230,7 +230,7 @@ static int test_export_dir_and_local_settings() {
 			back.game_install == install &&
 			finding.code() == "local_settings.schema_version.unsupported");
 	std::string text;
-	TEST_EXPECT(read_file_text(paths.local_settings_file, text, io_error) &&
+	TEST_EXPECT(opennova::io::read_file_text(paths.local_settings_file, text, io_error) &&
 			text.find("\"schema_version\": 2") != std::string::npos &&
 			text.find("\"game_install\": \"" + install + "\"") != std::string::npos);
 	// The game install's key as S13 A4 named it, schema 2; the file an older editor wrote (schema
@@ -239,7 +239,7 @@ static int test_export_dir_and_local_settings() {
 	LocalSettings named;
 	named.game_install = install;
 	TEST_EXPECT(save_local_settings(paths, named, error));
-	TEST_EXPECT(read_file_text(paths.local_settings_file, text, io_error) &&
+	TEST_EXPECT(opennova::io::read_file_text(paths.local_settings_file, text, io_error) &&
 	            text.find("\"game_install\": \"" + install + "\"") != std::string::npos &&
 	            text.find("\"schema_version\": 2") != std::string::npos && text.find("retail") == std::string::npos);
 	const std::string older = "{\"retail_root\": \"" + install +
@@ -253,12 +253,12 @@ static int test_export_dir_and_local_settings() {
 			finding.message.find("retail_root \"" + install + "\"") != std::string::npos &&
 			finding.message.find("runtime_executable \"C:/games/opennova.exe\"") !=
 					std::string::npos);
-	TEST_EXPECT(read_file_text(paths.local_settings_file, text, io_error) && text == older);
+	TEST_EXPECT(opennova::io::read_file_text(paths.local_settings_file, text, io_error) && text == older);
 	finding = Diagnostic();
 	TEST_EXPECT(open_local_settings(paths, install, back, finding) &&
 			back.game_install == install && back.runtime_executable.empty() &&
 			finding.code() == "local_settings.schema_version.unsupported");
-	TEST_EXPECT(read_file_text(paths.local_settings_file, text, io_error) &&
+	TEST_EXPECT(opennova::io::read_file_text(paths.local_settings_file, text, io_error) &&
 			text.find("\"schema_version\": 2") != std::string::npos &&
 			text.find("retail") == std::string::npos);
 	return 0;
@@ -282,7 +282,7 @@ static int test_local_play_settings() {
 		local.save_before_play = mode != PlayMode::Strict;
 		TEST_EXPECT(save_local_settings(paths, local, error));
 		std::string text, io_error;
-		TEST_EXPECT(read_file_text(paths.local_settings_file, text, io_error) &&
+		TEST_EXPECT(opennova::io::read_file_text(paths.local_settings_file, text, io_error) &&
 		            text.find(std::string("\"play_mode\": \"") + play_mode_token(mode) + "\"") != std::string::npos &&
 		            text.find(std::string("\"save_before_play\": ") + (mode != PlayMode::Strict ? "true" : "false")) !=
 		                    std::string::npos);
