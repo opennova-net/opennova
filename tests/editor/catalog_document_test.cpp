@@ -653,10 +653,9 @@ static int duplicates_apart() {
 	TEST_EXPECT(gun.actions_count == 1 && std::string(gun.actions[0].name) == "FIRE");
 	TEST_EXPECT(copy_name("WPN_ABCDEFGHIJKLMNOPQRSTUVWXYZ0", CopyName::Token, 31, {}) == "WPN_ABCDEFGHIJKLMNOPQRSTUVWXY_2");
 	// A weapon's copy keeps the 32 characters the game's reader keeps in a block with no sameas, 31 in one with it
-	// (weapon_name_chars: the reader's 0x20-byte strncpy runs a 32-character name on into sameas).
+	// (weapon_name_chars over def::def_weapon_name_chars, whose count the def_weapon_name_cap ctest pins).
 	DefWeaponDef bare{}, based{};
 	std::snprintf(based.sameas, sizeof(based.sameas), "WPN_M16");
-	TEST_EXPECT(weapon_name_chars(&bare) == 32 && weapon_name_chars(&based) == 31);
 	const NodeKind weapon_kind = node_kind(DefRecordKind::Weapon);
 	const std::string weapon_name = "WPN_ABCDEFGHIJKLMNOPQRSTUVWXYZ01"; // 32 characters
 	TEST_EXPECT(catalog_copy_name(weapon_kind, weapon_name, {}, &bare) == "WPN_ABCDEFGHIJKLMNOPQRSTUVWXYZ_2");
