@@ -4,6 +4,7 @@
 #include <runtime/renderer/material_texture.h>
 #include <runtime/renderer/texture_filter.h>
 #include <runtime/renderer/texture_load_rules.h>
+#include <runtime/renderer/texture_registry.h>
 #include "util/texture_path_resolver.h"
 
 #include "util/data_format.h"
@@ -40,6 +41,15 @@ bool is_resource_dir(const godot::String &dir) {
 // separate entry.
 std::unordered_map<std::string, std::unordered_map<std::string, godot::String>> g_dir_index_cache;
 std::unordered_map<std::string, godot::Ref<godot::Texture2D>> g_texture_cache;
+// Each directory's material-row texture registry (renderer::TextureRegistry): what a
+// row's loader made, by the row's key, the first row of a key to load deciding it. The
+// decode caches stay beneath it, memos of what a file decodes to that never decide
+// which texture a row draws.
+std::unordered_map<std::string, renderer::TextureRegistry<godot::Ref<godot::Texture>>> g_dir_registries;
+
+bool texture_loaded(const godot::Ref<godot::Texture> &texture) {
+	return texture.is_valid();
+}
 
 // List an absolute/external directory into a lower-cased filename -> real filename
 // index. Called once per directory by get_lowercase_dir_index(), which caches it.
@@ -508,56 +518,63 @@ godot::Ref<godot::Texture> prepare_material_texture(
         const godot::String &name, uint8_t type) {
     using namespace opennova::renderer;
     const auto mode = material_texture_transform(type, name.utf8().get_data(), source.is_valid());
+    // The loader made nothing: the dispatcher's checkerboard is the caller's
+    // (missing_material_texture), never a texture this row's key keeps.
+    if (mode == MaterialTextureTransform::Checkerboard) return {};
     // A row whose texture loads with a side cap (the normal maps and the occlusion
     // producer: renderer::material_texture_side_cap) is halved to it.
     const uint32_t cap = material_texture_side_cap(type);
-    const bool over_cap = cap != 0 && source.is_valid() &&
+    const bool over_cap = cap != 0 &&
             (static_cast<uint32_t>(source->get_width()) > cap ||
              static_cast<uint32_t>(source->get_height()) > cap);
     if (mode == MaterialTextureTransform::Unchanged && !over_cap) return source;
-    const std::string key = mode == MaterialTextureTransform::Checkerboard ? "material:checkerboard"
-            : "material:" + std::to_string(type) + ":" + std::to_string(source->get_instance_id());
+    const std::string key = "material:" + std::to_string(type) + ":" + std::to_string(source->get_instance_id());
     const auto cached = g_material_cache.find(key);
     if (cached != g_material_cache.end()) return cached->second;
+    godot::Ref<godot::Image> image = source->get_image();
+    if (image.is_null()) return {};
+    if (image->is_compressed() && image->decompress() != godot::OK) return {};
+    if (image->has_mipmaps()) image->clear_mipmaps();
+    image->convert(godot::Image::FORMAT_RGBA8);
+    const godot::PackedByteArray rgba = image->get_data();
+    const uint32_t width = image->get_width(), height = image->get_height();
     MaterialTexturePixels pixels;
-    if (mode == MaterialTextureTransform::Checkerboard) {
-        pixels = {kMissingMaterialTextureSide, kMissingMaterialTextureSide, 1, missing_material_texture_rgba()};
-    } else {
-        godot::Ref<godot::Image> image = source->get_image();
-        if (image.is_null()) return prepare_material_texture({}, name, type);
-        if (image->is_compressed() && image->decompress() != godot::OK)
-            return prepare_material_texture({}, name, type);
-        if (image->has_mipmaps()) image->clear_mipmaps();
-        image->convert(godot::Image::FORMAT_RGBA8);
-        const godot::PackedByteArray rgba = image->get_data();
-        const uint32_t width = image->get_width(), height = image->get_height();
-        switch (mode) {
-            case MaterialTextureTransform::Unchanged:
-                pixels = {width, height, 1, std::vector<uint8_t>(rgba.ptr(), rgba.ptr() + rgba.size())};
-                break;
-            case MaterialTextureTransform::NormalFromAlpha:
-                pixels = {width, height, 1, normal_map_from_height_rgba(rgba.ptr(), width, height, 1.0f / 64.0f, 3, 2)};
-                break;
-            case MaterialTextureTransform::HorizonVolume:
-                pixels = horizon_volume_from_height(rgba.ptr(), width, height); break;
-            case MaterialTextureTransform::AmbientOcclusion:
-                pixels = ambient_occlusion_from_height(rgba.ptr(), width, height); break;
-            default: break;
-        }
-        if (cap != 0 && pixels && pixels.depth == 1)
-            halve_rgba_to_cap(pixels.rgba, pixels.width, pixels.height, cap);
+    switch (mode) {
+        case MaterialTextureTransform::Unchanged:
+            pixels = {width, height, 1, std::vector<uint8_t>(rgba.ptr(), rgba.ptr() + rgba.size())};
+            break;
+        case MaterialTextureTransform::NormalFromAlpha:
+            pixels = {width, height, 1, normal_map_from_height_rgba(rgba.ptr(), width, height, 1.0f / 64.0f, 3, 2)};
+            break;
+        case MaterialTextureTransform::HorizonVolume:
+            pixels = horizon_volume_from_height(rgba.ptr(), width, height); break;
+        case MaterialTextureTransform::AmbientOcclusion:
+            pixels = ambient_occlusion_from_height(rgba.ptr(), width, height); break;
+        default: break;
     }
-    if (!pixels) return prepare_material_texture({}, name, type);
+    if (cap != 0 && pixels && pixels.depth == 1)
+        halve_rgba_to_cap(pixels.rgba, pixels.width, pixels.height, cap);
+    if (!pixels) return {};
     const auto texture = upload_material_pixels(pixels, mode == MaterialTextureTransform::HorizonVolume);
-    if (texture.is_null()) return prepare_material_texture({}, name, type);
+    if (texture.is_null()) return {};
     g_material_cache.emplace(key, texture);
     return texture;
 }
 
 godot::Ref<godot::Texture> prepare_material_chunk(const godot::PackedByteArray &bytes, uint8_t type) {
     const auto pixels = renderer::load_material_chunk(bytes.ptr(), bytes.size(), type);
-    const auto texture = upload_material_pixels(pixels, type == 17);
-    return texture.is_valid() ? texture : prepare_material_texture({}, {}, 0);
+    return upload_material_pixels(pixels, type == 17);
+}
+
+godot::Ref<godot::Texture> missing_material_texture() {
+    const std::string key = "material:checkerboard";
+    const auto cached = g_material_cache.find(key);
+    if (cached != g_material_cache.end()) return cached->second;
+    const renderer::MaterialTexturePixels pixels = {renderer::kMissingMaterialTextureSide,
+            renderer::kMissingMaterialTextureSide, 1, renderer::missing_material_texture_rgba()};
+    const auto texture = upload_material_pixels(pixels, false);
+    if (texture.is_valid()) g_material_cache.emplace(key, texture);
+    return texture;
 }
 
 godot::String resolve_file_in_dir(const godot::String &dir, const godot::String &name) {
@@ -611,7 +628,11 @@ godot::String resolve_sidecar_path(const godot::String &dir, const godot::String
 	return godot::String();
 }
 
-godot::Ref<godot::Texture> load_material_texture_from_dir(
+namespace {
+
+// What one material row's own loader makes from `dir`, null when it makes nothing
+// (load_material_texture_from_dir's registry stands in front).
+godot::Ref<godot::Texture> material_texture_from_dir(
         const godot::String &dir, const godot::String &name, uint8_t type) {
     // The one file the row's loader opens and its reader (renderer::material_texture_source,
     // as a load: renderer::material_texture_load), that reader decoding the file's bytes in a
@@ -645,7 +666,18 @@ godot::Ref<godot::Texture> load_material_texture_from_dir(
     return prepare_material_texture(image, name, type);
 }
 
+} // namespace
+
+godot::Ref<godot::Texture> load_material_texture_from_dir(
+        const godot::String &dir, const godot::String &name, uint8_t type) {
+    const godot::Ref<godot::Texture> texture = g_dir_registries[to_std(dir)].find_or_load(
+            renderer::texture_registry_key(to_std(name), type),
+            [&] { return material_texture_from_dir(dir, name, type); }, texture_loaded);
+    return texture.is_valid() ? texture : missing_material_texture();
+}
+
 void clear_texture_resolver_caches() {
+	g_dir_registries.clear();
 	g_dir_index_cache.clear();
 	g_texture_cache.clear();
 	g_material_cache.clear();
