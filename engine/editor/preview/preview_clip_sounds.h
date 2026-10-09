@@ -25,7 +25,7 @@ class ProjectAssetSource;
 // feet picks (world::anim_event_sounds over audio::footstep_slot); each slot is the bound profile's
 // (audio::item_sound_profile: the item's sound_profile, its sound_profileFemale for a female player,
 // "default" where it names none), its set found in the game's bank order and played as the game plays a
-// body's slot sound, a 3D one-shot heard at the preview camera (PreviewHearing). The editor's own
+// body's slot sound, a 3D one-shot heard at the preview camera (audio::SetHearing). The editor's own
 // choices beside the game's: the Surface under the feet (the game reads it from the world), the body
 // (the paired item's move_function picks it, as the game's class table does), a female player, a
 // profile picked where no item pairs the clip, Mute.
@@ -38,7 +38,7 @@ const char *clip_sound_body_token(ClipSoundBody body); // "auto", "npc", "player
 // The model viewport's sound options (its options' `sound`).
 struct ClipSoundOptions {
 	bool mute = false; // the events fire and say what they play, and nothing is heard
-	FootSurface surface = FootSurface::Ground; // what is under the feet
+	audio::FootSurface surface = audio::FootSurface::Ground; // what is under the feet
 	ClipSoundBody body = ClipSoundBody::Auto;
 	bool female = false; // a female avatar: a player body plays its item's sound_profileFemale
 	std::string profile; // a SndProf.def profile picked ("" the paired item's)
@@ -204,7 +204,7 @@ void find_clip_sound_waves(ClipSoundFired &fired, const AssetScan &scan);
 // member picked through `selector` for the listener's view `view_flags`; on the clock's `tick`, its words led by the
 // tick and `what`; its state played, missing, out_of_range or silent. Its seq, path and waves are the caller's.
 ClipSoundFired plan_set_heard(const std::string &set, int32_t tick, const std::string &what,
-                              const ClipSoundSources &sources, const PreviewHearing &heard,
+                              const ClipSoundSources &sources, const audio::SetHearing &heard,
                               audio::SoundSelector &selector, uint8_t view_flags);
 
 // A set an item plays at its own place, once (a death's sound: the model preview's damage state, DI-10, and
