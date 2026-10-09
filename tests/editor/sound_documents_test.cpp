@@ -15,7 +15,6 @@
 #include <editor/import/import_context.h>
 #include <editor/import/import_plan.h>
 #include <editor/import/importer.h>
-#include <editor/import/wave_source.h>
 #include <editor/preview/sound_preview.h>
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
@@ -25,6 +24,7 @@
 #include <editor/session/view/session_view.h>
 #include <editor/session/workspace_parts.h>
 #include <formats/lwf/lwf.h>
+#include <formats/lwf/wav_source.h>
 #include <runtime/audio/sound_profile.h>
 #include <runtime/audio/sound_selector.h>
 
@@ -574,72 +574,17 @@ std::vector<uint8_t> wave_of(uint16_t channels, uint16_t bits, uint32_t rate, si
 	return out;
 }
 
-// What the game's loader takes, by its own walk: the minted mono 16-bit tone; not a stereo wave, a 24-bit
-// or float one, a LIST ahead of the data, an ADPCM wave with no fact chunk. A wave the game refuses
-// converts into one it takes, the samples kept; a card's facts: the format, the peak and the RMS of a
-// sine at 0.5, its picture.
+// The importer: a record's options make the wave the game plays, named by its option (the loader's walk,
+// the read, the conversion and the facts are the engine's, tests/lwf/wav_source_test).
 int test_waves() {
-	const std::vector<uint8_t> tone = test_io::read_file(repo() + "/fixtures/lwf/tone.wav");
-	TEST_EXPECT(wave_retail_check(tone).plays);
-	TEST_EXPECT(wave_retail_check(wave_of(1, 8, 11025, 100)).plays);
-	const WaveRetailCheck stereo = wave_retail_check(wave_of(2, 16, 44100, 100));
-	TEST_EXPECT(!stereo.plays && stereo.why.find("2 channels") != std::string::npos);
-	TEST_EXPECT(wave_retail_check(wave_of(1, 24, 48000, 100)).why.find("24-bit") != std::string::npos);
-	TEST_EXPECT(wave_retail_check(wave_of(1, 32, 48000, 100, false, true)).why.find("32-bit") != std::string::npos);
-	const WaveRetailCheck listed = wave_retail_check(wave_of(1, 16, 22050, 100, true));
-	TEST_EXPECT(!listed.plays && listed.why.find("LIST") != std::string::npos);
-	// A LIST after the data is never reached.
-	std::vector<uint8_t> after = wave_of(1, 16, 22050, 100);
-	const char tail[] = "LIST\x04\0\0\0INFO";
-	after.insert(after.end(), tail, tail + sizeof(tail) - 1);
-	TEST_EXPECT(wave_retail_check(after).plays);
-	std::vector<uint8_t> adpcm = wave_of(1, 16, 22050, 100);
-	adpcm[20] = 0x11;
-	adpcm[34] = 4;
-	TEST_EXPECT(wave_retail_check(adpcm).why.find("fact") != std::string::npos);
-	TEST_EXPECT(!wave_retail_check(text_bytes("not a wave")).plays);
-	// Converted: mono 16-bit, the rate kept, then resampled.
 	const std::vector<uint8_t> source = wave_of(2, 24, 48000, 4800, true);
-	std::vector<uint8_t> converted;
-	std::string error;
-	TEST_EXPECT(convert_wave(source, WaveConversion(), converted, error) && wave_retail_check(converted).plays);
-	WaveSamples back;
-	TEST_EXPECT(decode_wave_source(converted, back, error) && back.channels == 1 && back.rate == 48000 &&
-	            back.format.bits == 16 && back.frames() == 4800);
-	WaveConversion halved;
-	halved.rate = 24000;
-	halved.bits = "8";
-	TEST_EXPECT(convert_wave(source, halved, converted, error) && decode_wave_source(converted, back, error) &&
-	            back.frames() == 2400 && back.format.bits == 8 && back.rate == 24000);
-	// No sample: refused before the writer, which holds at least one (the loader steps over an empty data
-	// chunk and walks past the file's end [orig: Audio_LoadWavFileFromArchive @ 0x76659b..0x7665a5]).
-	TEST_EXPECT(!convert_wave(wave_of(1, 16, 22050, 0), WaveConversion(), converted, error) &&
-	            error == "it holds no sample");
-	TEST_EXPECT(!convert_wave(wave_of(2, 8, 22050, 0), halved, converted, error) && error == "it holds no sample");
-	// An IMA ADPCM source of rate 0 is refused as a PCM one is, kept or resampled (no division by its rate).
-	std::vector<uint8_t> rateless = wave_of(1, 16, 22050, 100);
-	rateless[20] = 0x11;
-	rateless[34] = 4;
-	rateless[32] = 36;
-	rateless[33] = 0;
-	for (size_t i = 24; i < 32; ++i) rateless[i] = 0;
-	TEST_EXPECT(!decode_wave_source(rateless, back, error) && error.find("IMA ADPCM, mono, 0 Hz") != std::string::npos);
-	TEST_EXPECT(!convert_wave(rateless, WaveConversion(), converted, error));
-	TEST_EXPECT(!convert_wave(rateless, halved, converted, error));
-	// The card's facts.
-	const WaveFacts facts = wave_facts(source, 16);
-	TEST_EXPECT(facts.read && !facts.retail.plays && facts.format.channels == 2 && facts.format.bits == 24 &&
-	            std::fabs(facts.seconds - 0.1) < 1e-6 && std::fabs(facts.peak - 0.5f) < 0.01f &&
-	            std::fabs(facts.rms - 0.3536f) < 0.01f && facts.envelope.size() == 16);
-	TEST_EXPECT(wave_format_words(facts.format) == "24-bit PCM, stereo, 48000 Hz");
-	// The importer: a record's options make the wave the game plays, named by its option.
 	ImportOptions options = {{"rate", "22050"}, {"name", "fs_dirt1.wav"}};
 	ImportContext context("fs_dirt1_src.wav", source, options, ".", ".");
 	ImportProduct product;
 	const Importer *importer = importer_for("fs_dirt1_src.wav");
 	TEST_EXPECT(importer && std::string(importer->id) == "wave" && !authored_importer_for("x.wav") &&
 	            importer->run(context, product) && product.outputs.size() == 1 && product.outputs[0].name == "fs_dirt1.wav" &&
-	            wave_retail_check(product.outputs[0].bytes).plays);
+	            lwf::wave_retail_check(product.outputs[0].bytes).plays);
 	TEST_EXPECT(import_option_row(importer->options, "rate") &&
 	            import_option_accepts(*import_option_row(importer->options, "rate"), "32000") &&
 	            !import_option_accepts(*import_option_row(importer->options, "rate"), "500"));
@@ -662,7 +607,7 @@ int test_wave_import() {
 	for (const Diagnostic &d : result.diagnostics) said = said || (d.code() == "import.wave" && d.severity == DiagnosticSeverity::Info);
 	TEST_EXPECT(said);
 	const std::vector<uint8_t> landed = test_io::read_file(view.project.root + "/" + result.imported[0]);
-	TEST_EXPECT(wave_retail_check(landed).plays);
+	TEST_EXPECT(lwf::wave_retail_check(landed).plays);
 	// A refused wave written over a project file: Problems says so.
 	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/sounds/fs_dirt1.wav", wave_of(2, 16, 44100, 441)));
 	editor_test::handle_to_end(project.session, request::rescan());
@@ -726,19 +671,6 @@ int test_retail_banks() {
 		++banks;
 	}
 	std::printf("retail: %zu banks through the document\n", banks);
-	// Every shipped wave the game's loader takes, by the check's own walk, but one: DSkid.wav, the 16-bit
-	// stereo wave game.lwf's IMP_TMBL_DSKID plays, which the loader's channel test refuses [orig:
-	// Audio_LoadWavFileFromArchive @ 0x7666db], so retail plays nothing for that set (D-SND-33).
-	size_t waves = 0;
-	std::vector<std::string> refused;
-	for (const auto &entry : std::filesystem::directory_iterator(opennova::io::os_path(assets), ec)) {
-		if (strutil::to_lower(entry.path().extension().string()) != ".wav") continue;
-		const WaveRetailCheck check = wave_retail_check(test_io::read_file(opennova::io::utf8_path(entry.path())));
-		++waves;
-		if (!check.plays) refused.push_back(strutil::to_lower(opennova::io::utf8_path(entry.path().filename())));
-	}
-	std::printf("retail: %zu waves, %zu the check refuses\n", waves, refused.size());
-	TEST_EXPECT(waves > 100 && refused == std::vector<std::string>({"dskid.wav"}));
 	TEST_EXPECT(banks >= 3);
 	const std::string sndprof = retail::asset_file("sndprof.def");
 	if (!sndprof.empty()) {

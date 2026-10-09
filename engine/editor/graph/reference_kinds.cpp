@@ -18,6 +18,7 @@
 #include <runtime/menu/menu_assets.h>
 #include <runtime/menu/menu_style.h>
 #include <runtime/renderer/material_texture.h>
+#include <runtime/renderer/shader_effect_info.h>
 #include <runtime/renderer/texture_load_rules.h>
 
 namespace opennova::editor {
@@ -362,7 +363,7 @@ std::string mission_strings_missing(const AssetGraph &graph, const GraphEdge &) 
 // all that entry holds no pass, and the draw draws nothing [orig: CRenderBatchQueue_FlushBatches @
 // 0x5DA220..0x5DA22B].
 std::string shader_missing(const AssetGraph &graph, const GraphEdge &) {
-	return graph.has_file(kFixedFunctionShaderFile)
+	return graph.has_file(renderer::kFixedFunctionShaderFile)
 	               ? ", which no shader of the project registers: the game draws the material with the first shader it "
 	                 "registered instead."
 	               : ", which no shader of the project registers, nor does the project have _ffp.fx, the renderer's "

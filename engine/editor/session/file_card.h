@@ -40,7 +40,7 @@ struct FileCard {
 		uint32_t rate = 0;
 		uint16_t channels = 0;
 		double seconds = 0.0;
-		// What the game's loader makes of it (the sound lane, import/wave_source.h wave_retail_check): whether
+		// What the game's loader makes of it (the sound lane, formats/lwf/wav_source.h wave_retail_check): whether
 		// it plays, and why not; its format in words ("16-bit PCM, mono, 22050 Hz"), its loudest sample and its
 		// RMS (each 0..1 of full scale) and its picture, each bin's loudest sample (kWaveCardBins of them).
 		bool plays = false;

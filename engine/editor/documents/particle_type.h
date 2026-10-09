@@ -39,9 +39,6 @@ FindingTable particle_finding_codes();
 // A particle document's text through the game's reader (its effects with their places, as
 // formats/particle records them); false, with where it stopped, for one it does not read.
 bool read_particle_text(const TextDocument &document, particle::ParticleFile &out, particle::ParseError &error);
-// The effect of `file` whose block holds `line` (its header to its closing brace), its index; npos
-// for a line in none.
-size_t particle_effect_at(const particle::ParticleFile &file, size_t line);
 
 // An effect a file names and no particle file defines, added to a particle file the reader reads whole (ADR 0046
 // DI-15, DocumentType::define_symbol): the [effectdef] block the engine's own effect writer makes of an effect of

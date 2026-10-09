@@ -4,7 +4,7 @@
 #include <string>
 
 #include <editor/assets/asset_registry.h>
-#include <editor/import/wave_source.h>
+#include <formats/lwf/wav_source.h>
 
 namespace opennova::editor {
 
@@ -26,7 +26,7 @@ public:
 				std::vector<uint8_t> bytes;
 				if (!input.files.read(entry.logical_name, bytes)) continue; // a file that does not read is the scan's
 				wave.stamp = stamp;
-				wave.check = wave_retail_check(bytes);
+				wave.check = lwf::wave_retail_check(bytes);
 			}
 			if (!wave.check.plays)
 				findings.push_back(make_finding(CoreFinding::AssetWaveUnplayable, DiagnosticSeverity::Warning,
@@ -50,7 +50,7 @@ public:
 private:
 	struct Kept {
 		uint64_t stamp = 0;
-		WaveRetailCheck check;
+		lwf::WaveRetailCheck check;
 	};
 	static bool same(const std::vector<Diagnostic> &a, const std::vector<Diagnostic> &b) {
 		if (a.size() != b.size()) return false;

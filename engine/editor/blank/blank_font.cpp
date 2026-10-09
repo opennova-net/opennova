@@ -1,7 +1,7 @@
 #include "blank_makers.h"
 
-#include <editor/blank/blank_font_art.h>
 #include <formats/fnt/fnt.h>
+#include <formats/fnt/fnt_stroke_font.h>
 
 namespace opennova::editor {
 
@@ -11,7 +11,7 @@ using namespace opennova::fnt;
 // decides where the bytes land.
 bool make_blank_font(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
 	fnt_font_t font{};
-	if (blank_font::build_font(&font) != FNT_OK || fnt_validate(&font) != FNT_OK) {
+	if (stroke_font::build_font(&font) != FNT_OK || fnt_validate(&font) != FNT_OK) {
 		fnt_free(&font);
 		error = make_finding(CoreFinding::BlankFont, DiagnosticSeverity::Error, "The built-in font could not be built.",
 		                     request.logical_name);
