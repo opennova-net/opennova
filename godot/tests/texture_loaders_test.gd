@@ -184,8 +184,12 @@ func test_type_one_upper_case_pcx_turns_white_with_its_blue_as_alpha() -> void:
 	assert_eq(_pixel(upper), Color8(255, 255, 255, 200),
 			"Texture_LoadAndRegister masks a name holding .PCX as written")
 	assert_eq(_pixel(lower), Color8(10, 20, 200, 255), "a lower-case .pcx stays opaque colour")
-	assert_eq(_pixel(root.load_material_texture("SKIN.PCX", 0)), Color8(10, 20, 200, 255),
-			"the stage loader (type 0) never masks")
+	# The stage and plain loaders keep a texture under one key, so a stage row of the
+	# name after the plain row draws the plain row's masked texture.
+	assert_true(root.load_material_texture("skin.pcx", 0) == upper,
+			"a stage row after it takes the plain row's texture")
+	assert_eq(_pixel(_loose(dir).load_material_texture("SKIN.PCX", 0)), Color8(10, 20, 200, 255),
+			"the stage loader (type 0) loading the name itself never masks")
 
 
 # --- 3. The TGA reader -----------------------------------------------------
@@ -432,8 +436,10 @@ func test_dds_reader_decodes_hdr_into_one_buffer() -> void:
 
 
 func test_names_differing_in_case_stay_apart() -> void:
-	# ".MDT" is tested as written, so "x.mdt" takes the .dds sibling and "x.MDT" the
-	# TGA reader: two textures, whichever loads first.
+	# A load by name keeps the decode its files and readers resolved: ".MDT" is tested
+	# as written, so "x.mdt" takes the .dds sibling and "x.MDT" the TGA reader. (Retail's
+	# stage loader keeps one texture under "x.mdt:1" for both; the material rows below
+	# share it, the loads by name do not yet.)
 	var dir := _root_dir("case_keys")
 	var root := _packed(dir, [
 		{"name": "x.dds", "bytes": _dds(Color.BLUE)},
@@ -443,6 +449,66 @@ func test_names_differing_in_case_stay_apart() -> void:
 	assert_eq(_pixel(root.load_texture("x.MDT", stage)), Color.RED, "x.MDT reads the MDT")
 	assert_eq(_pixel(root.load_texture("x.mdt", stage)), Color.BLUE, "x.mdt reads the .dds")
 	assert_eq(_pixel(root.load_texture("x.MDT", stage)), Color.RED, "and x.MDT stays the MDT")
+
+
+# The texture registry (renderer/texture_registry.h, ctest renderer_texture_registry): a
+# material row's loader keeps its texture under the row's name and its loader's suffix,
+# looked up without case before any file opens, so the first row of a key to load
+# decides the texture every later row of it draws.
+func test_material_rows_differing_in_case_share_the_first_load() -> void:
+	var entries := [
+		{"name": "x.dds", "bytes": _dds(Color.BLUE)},
+		{"name": "x.mdt", "bytes": TestFs.tga_bytes(Vector2i(2, 2), Color.RED)},
+	]
+	var upper_first := _packed(_root_dir("rows_case_upper"), entries)
+	var mdt := upper_first.load_material_texture("x.MDT", 0)
+	assert_eq(_pixel(mdt), Color.RED, "an x.MDT row first reads the MDT")
+	assert_true(upper_first.load_material_texture("x.mdt", 0) == mdt, "an x.mdt row after it takes that texture")
+	var lower_first := _packed(_root_dir("rows_case_lower"), entries)
+	var dds := lower_first.load_material_texture("x.mdt", 0)
+	assert_eq(_pixel(dds), Color.BLUE, "an x.mdt row first reads the .dds")
+	assert_true(lower_first.load_material_texture("x.MDT", 0) == dds, "an x.MDT row after it takes the .dds")
+
+
+func test_material_rows_of_one_name_share_the_first_load() -> void:
+	# A type-0 row (the stage loader: the .dds beside the name first) and a type-1 row
+	# (the plain loader: the named file) print one key, so the second row of a name
+	# draws the first row's texture, in either order and any case.
+	var entries := [
+		{"name": "wall.dds", "bytes": _dds(Color.BLUE)},
+		{"name": "wall.tga", "bytes": TestFs.tga_bytes(Vector2i(2, 2), Color.RED)},
+	]
+	var stage_first := _packed(_root_dir("rows_stage_first"), entries)
+	var stage := stage_first.load_material_texture("wall.tga", 0)
+	assert_eq(_pixel(stage), Color.BLUE, "the stage row loads the .dds")
+	assert_true(stage_first.load_material_texture("WALL.TGA", 1) == stage,
+			"a plain row of the name after it draws the stage row's .dds, never the TGA")
+	assert_true(stage_first.load_material_texture("wall.tga", 2) == stage, "so does a detail row")
+	var plain_first := _packed(_root_dir("rows_plain_first"), entries)
+	var plain := plain_first.load_material_texture("wall.tga", 1)
+	assert_eq(_pixel(plain), Color.RED, "the plain row loads the TGA")
+	assert_true(plain_first.load_material_texture("wall.tga", 0) == plain,
+			"the stage row after it draws the plain row's TGA, never the .dds")
+
+
+func test_material_rows_of_other_loaders_keep_their_own() -> void:
+	# A normal-map row's key is the name and ":BA:1": a stage row of the same file is
+	# another texture. A failed load keeps nothing, so a later row of the key loads by
+	# its own loader.
+	var root := _packed(_root_dir("rows_other_loaders"), [
+		{"name": "brick.tga", "bytes": TestFs.tga_bytes(Vector2i(4, 4), Color8(90, 70, 61, 128))},
+		{"name": "sign.tgaz", "bytes": TestFs.tga_bytes(Vector2i(2, 2), Color.GREEN)},
+	])
+	var diffuse := root.load_material_texture("brick.tga", 0)
+	var normal := root.load_material_texture("brick.tga", 4)
+	assert_false(diffuse == normal, "a stage row and a normal-map row of one file are two textures")
+	assert_true(root.load_material_texture("BRICK.TGA", 5) == normal, "a type-5 row shares the type-4 row's")
+	# The stage rule cuts "sign.tgaz" to "sign.tga", which is not there: the checkerboard,
+	# kept under no key. The plain rule opens the whole name.
+	assert_eq(root.load_material_texture("sign.tgaz", 0).get_width(), 128, "the stage row draws the checkerboard")
+	var plain := root.load_material_texture("sign.tgaz", 1)
+	assert_eq(_pixel(plain), Color.GREEN, "the plain row after it loads its own file")
+	assert_true(root.load_material_texture("sign.tgaz", 0) == plain, "and the stage row then draws that")
 
 
 func test_loose_mount_resolves_a_qualified_name_by_its_file() -> void:
