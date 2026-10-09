@@ -1,10 +1,13 @@
 #include <base/gameprofile/gameprofile.h>
 
 #include <base/io/strutil.h>
+#include <formats/pff/pff.h>
 
 #include <iterator>
 
 namespace opennova::gameprofile {
+
+static_assert(GAMEPROFILE_PFF_NEW_ARCHIVE_FORMAT == pff::PFF_FORMAT_PFF3, "a new archive is PFF3 (ADR 0008)");
 
 /* The PFF container key is universal across every NovaLogic title we have reversed (the ROL7
    keystream seeded 0x0312A4CE, verified vs Jointops.exe PFF_LoadFileToMemory @ 0x768920). The

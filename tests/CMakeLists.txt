@@ -722,6 +722,12 @@ add_executable(required_resources_test gameprofile/required_resources_test.cpp)
 target_link_libraries(required_resources_test PRIVATE opennova_base)
 add_test(NAME required_resources COMMAND required_resources_test)
 
+# The player's and this machine's own files, which an import never takes nor a build packs.
+add_executable(player_files_test gameprofile/player_files_test.cpp)
+target_link_libraries(player_files_test PRIVATE opennova_base)
+target_include_directories(player_files_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME player_files COMMAND player_files_test)
+
 # The game's graphics log (ghw.txt): the missions it began and finished loading.
 add_executable(graphics_log_test gameprofile/graphics_log_test.cpp)
 target_link_libraries(graphics_log_test PRIVATE opennova_base)

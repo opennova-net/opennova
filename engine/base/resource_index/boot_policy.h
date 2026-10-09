@@ -141,6 +141,21 @@ LanEndpoint launch_lan_join_endpoint(const LaunchFlags &flags, int default_port)
 // The bytes of an expansion name the game keeps: `g_ExpansionName @ 0xb4c584`
 // is 32 bytes and `/exp`/`/mod` fill it with `strncpy(.., 0x20)`.
 inline constexpr std::size_t kExpansionNameBytes = 32;
+// The longest name the game mounts: `/exp` copies its token into the 32-byte
+// g_ExpansionName with strncpy, so a longer one is left unterminated, and the
+// version.txt CRC written right after it then runs into every path made from
+// the name, which no longer opens [orig: Game_ParseCommandLineAndInit
+// @ 0x4a76ca; Expansion_LoadAssets @ 0x4a4885, the paths @ 0x4a48a6..0x4a49d4];
+// the join carries it in 32 bytes too [orig: UI_JoinSelectedSession
+// @ 0x569afa, @ 0x569dc4]. Nothing shorter fails (D-VFS-8's search-path spill
+// is read as one string, vfs-pff-mount-re.md § Expansions item 2).
+inline constexpr std::size_t kExpansionNameMax = kExpansionNameBytes - 1;
+// Whether the command line's tokenizer ends an `/exp` token at `c`: a space,
+// a tab or a comma splits it outside quotes, a '"' toggles quoting and is
+// never kept, a ';' ends the line [orig: Terrain_TokenizeConfigLine @ 0x53cb60
+// over GetCommandLineA, @ 0x4a73b2; ' ', '\t' and ',' @ 0x53cc44, '"'
+// @ 0x53cc51, ';' @ 0x53cc31]. A name holding one mounts only quoted.
+bool launch_token_breaks_at(char c);
 // A `/exp`/`/mod` token as the game holds it: stripped, then its first 32
 // bytes [orig: Game_ParseCommandLineAndInit @ 0x4a76cf]. A name of 32 or more
 // is left unterminated there and read on into the next global; the port stops

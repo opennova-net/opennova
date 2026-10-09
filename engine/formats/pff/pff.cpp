@@ -36,7 +36,7 @@ static int pff_count_sane(uint32_t num_entries)
 /* Normalize a PFF name into an uppercase, trailing-space-trimmed C string. Reads up to
    raw_cap bytes or until a NUL; result is capped to out_sz - 1 chars. Matches the engine's
    strupr + trailing-0x20 trim used for sort/lookup (PFF_SortEntries / PFF_FindEntry).
-   Declared in pff.h: the writer's sort and the editor's asset registry share it. */
+   Declared in pff.h: the writer's sort and normalized_logical_name share it. */
 void pff_norm_name(const char *raw, size_t raw_cap, char *out, size_t out_sz)
 {
     size_t n = 0, i;
@@ -47,6 +47,22 @@ void pff_norm_name(const char *raw, size_t raw_cap, char *out, size_t out_sz)
     }
     while (n > 0 && out[n - 1] == ' ') --n;
     out[n] = '\0';
+}
+
+std::string normalized_logical_name(std::string_view name)
+{
+    /* pff_norm_name's rule over a buffer of the name's own length plus its terminator, so nothing
+       past a fixed size is cut off. */
+    std::string out(name.size() + 1, '\0');
+    pff_norm_name(name.data(), name.size(), out.data(), out.size());
+    out.resize(std::char_traits<char>::length(out.c_str()));
+    return out;
+}
+
+bool logical_name_fits_archive(std::string_view name)
+{
+    if (name.size() > static_cast<size_t>(PFF_NAME_SIZE)) return false;
+    return !normalized_logical_name(name).empty();
 }
 
 /* qsort comparator: order entries by normalized (uppercased) name. */
