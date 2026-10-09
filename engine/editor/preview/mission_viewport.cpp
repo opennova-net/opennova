@@ -958,7 +958,7 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 			at[2] = ground - facts.anchor[2];
 	}
 	// Facing the way the camera looks (S15): its heading, a compass heading as a yaw is.
-	const int yaw = mission_wrapped_yaw(mission_camera_heading(camera_));
+	const int yaw = mission::wrapped_yaw(mission_camera_heading(camera_));
 	std::vector<Edit> edits;
 	if (path) {
 		if (!mission_stop_edits(mission, path, item, facts.pool, at, yaw, edits, error)) return false;
@@ -1037,7 +1037,7 @@ bool MissionViewport::play_from_here_(const ViewportContext &context, const View
 		error = path() + " is no mission of the project (a .bms the project holds): Play from here starts the game in one.";
 		return false;
 	}
-	PlayStart start;
+	mission::PlayerStart start;
 	start.set = true;
 	double target[3];
 	preview_to_mission(camera_.target, target);
@@ -1062,7 +1062,7 @@ bool MissionViewport::play_from_here_(const ViewportContext &context, const View
 			}
 	}
 	// Facing the way the camera looks, as a placed entity does (S15): its heading.
-	start.yaw = double(mission_wrapped_yaw(mission_camera_heading(camera_)));
+	start.yaw = double(mission::wrapped_yaw(mission_camera_heading(camera_)));
 	out.request(request::play_from(mission, start));
 	return true;
 }
