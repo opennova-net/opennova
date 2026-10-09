@@ -134,6 +134,12 @@ std::string launch_expansion_name(const std::string &token) {
     return name.size() > kExpansionNameBytes ? name.substr(0, kExpansionNameBytes) : name;
 }
 
+bool launch_token_breaks_at(char c) {
+    // [orig: Terrain_TokenizeConfigLine @ 0x53cb60: ' ', '\t' and ',' split outside quotes
+    //  @ 0x53cc44, '"' toggles quoting and is never kept @ 0x53cc51, ';' ends the line @ 0x53cc31]
+    return c == ' ' || c == '\t' || c == ',' || c == '"' || c == ';';
+}
+
 std::string launch_expansion(const LaunchFlags &flags, const std::string &fallback) {
     return flags.expansion.empty() ? fallback : flags.expansion;
 }

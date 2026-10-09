@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include <base/gameprofile/gameprofile.h>
+#include <formats/pff/pff.h>
 
 using namespace opennova::gameprofile;
 
@@ -53,6 +54,8 @@ static int test_universal_key_and_labels(void) {
         CHECK(p->display_name != NULL && p->display_name[0] != '\0', "display name non-empty");
         CHECK(p->code != NULL && p->code[0] != '\0', "code non-empty");
     }
+    /* A new archive of any profile is PFF3 (ADR 0008's default). */
+    CHECK(GAMEPROFILE_PFF_NEW_ARCHIVE_FORMAT == opennova::pff::PFF_FORMAT_PFF3, "a new archive is PFF3");
     /* codes are unique across the table */
     for (i = 0; i < gameprofile_count(); ++i) {
         int j;

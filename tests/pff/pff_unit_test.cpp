@@ -4,6 +4,8 @@
 #include <string.h>
 #include <stdint.h>
 
+#include <string>
+
 #include <formats/pff/pff.h>
 #include "pff/pff_test_writer.h"
 
@@ -406,6 +408,25 @@ static int test_write_rejects_duplicate_names(void) {
     return 1;
 }
 
+/* A logical name's identity as a string: pff_norm_name's rule (uppercase, trailing spaces trimmed)
+   over the whole name to its first NUL, and the names an archive entry can hold. */
+static int test_normalized_logical_name(void) {
+    CHECK(normalized_logical_name("main.mnu") == "MAIN.MNU", "uppercased");
+    CHECK(normalized_logical_name("Main.MNU  ") == "MAIN.MNU", "trailing spaces trimmed");
+    /* The whole text, however long: a filter compares a record's text by it, so a word past its
+       255th byte is found. */
+    const std::string long_text = std::string(300, 'x') + " needle";
+    CHECK(normalized_logical_name(long_text) == std::string(300, 'X') + " NEEDLE", "a long text whole");
+    CHECK(normalized_logical_name(long_text).find(normalized_logical_name("needle")) != std::string::npos,
+          "a word past the 255th byte found");
+    CHECK(normalized_logical_name(std::string("ab\0cd", 5)) == "AB", "to the first NUL");
+    CHECK(logical_name_fits_archive("sixteen_chars.pf"), "16 bytes fit");
+    CHECK(!logical_name_fits_archive("seventeen_char.pff"), "17 bytes do not");
+    CHECK(!logical_name_fits_archive("   "), "blank once normalized");
+    CHECK(!logical_name_fits_archive(""), "empty");
+    return 1;
+}
+
 /* F6d: original-case name is stored on disk; lookup is still case-insensitive. */
 static int test_write_preserves_name_case(void) {
     const uint8_t d[] = {1, 2, 3};
@@ -507,6 +528,7 @@ int main(void) {
     RUN_TEST(test_write_zero_entries);
     RUN_TEST(test_write_rejects_overlong_name);
     RUN_TEST(test_write_rejects_duplicate_names);
+    RUN_TEST(test_normalized_logical_name);
     RUN_TEST(test_write_preserves_name_case);
     RUN_TEST(test_write_progress_callback);
     RUN_TEST(test_write_rejects_offset_overflow);

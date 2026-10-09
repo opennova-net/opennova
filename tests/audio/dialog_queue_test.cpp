@@ -126,6 +126,12 @@ int test_a_number_plays_its_dialog_s_waves() {
 	// [orig: Dialog_PlayByIndex @0x527ae0: "dlg%03i", 0 none]
 	TEST_EXPECT(dialog_name_of(1) == "dlg001" && dialog_name_of(12) == "dlg012" && dialog_name_of(1234) == "dlg1234");
 	TEST_EXPECT(dialog_name_of(0).empty());
+	// Its inverse: the number whose "dlg%03i" is the name, matched exactly; none for a name no number
+	// forms.
+	TEST_EXPECT(dialog_index_of("dlg012") == 12 && dialog_index_of("dlg1234") == 1234 && dialog_index_of("dlg000") == 0 &&
+	            dialog_index_of("dlg12") == -1 && dialog_index_of("dlg0012") == -1 && dialog_index_of("DLG012") == -1 &&
+	            dialog_index_of("intro") == -1 && dialog_index_of("dlg01x") == -1);
+	for (const int32_t n : {1, 12, 999, 1000, 65535}) TEST_EXPECT(dialog_index_of(dialog_name_of(n)) == n);
 
 	// Every line of the first dialog of the name, in order, with its index for the wire; the
 	// wave is found without case, the line whose wave the sounds lack keeps its place without

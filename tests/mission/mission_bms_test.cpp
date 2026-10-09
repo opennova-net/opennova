@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "common/test_expect.h"
@@ -116,6 +117,72 @@ int chain_ranges() {
 	std::vector<uint8_t> bytes;
 	opennova::bms::File back;
 	TEST_EXPECT(write_document(file, bytes) && load_document(bytes, back) && chains_of(back) == after);
+	return 0;
+}
+
+// The sections a written mission lays out, in the loader's order (bms::first_differing_section): the
+// same bytes differ nowhere; a byte changed in a pool names the pool, one in the header the header,
+// but not the count and chunk length words the writer derives again; bytes cut short name the section
+// they end in, bytes added past the last the length. The player's route (the first PlayerRoute path,
+// its stops capped at 128, a count the signed compare reads negative walking none) and an event's
+// step timing (64 ticks a step, past 512 steps the countdown wraps).
+int sections_and_route() {
+	namespace bms = opennova::bms;
+	const std::vector<uint8_t> original = read_file(fixture_path());
+	bms::File file;
+	std::string error;
+	TEST_EXPECT(bms::parse(original.data(), original.size(), file, error));
+	TEST_EXPECT(bms::first_differing_section(file, original, original).empty());
+	std::vector<uint8_t> changed = original;
+	changed[576] ^= 1;
+	changed[583] ^= 1;
+	TEST_EXPECT(bms::first_differing_section(file, original, changed).empty());
+	changed[10] ^= 1;
+	TEST_EXPECT(bms::first_differing_section(file, original, changed) == "header");
+	// The first pool holding a record, past the header and the two chunks.
+	size_t at = bms::kHeaderSize + read_u16_le(original, 578) + read_u16_le(original, 582);
+	const std::pair<const char *, size_t> pools[] = {{"items", file.items.size()},
+			{"buildings", file.buildings.size()}, {"markers", file.markers.size()},
+			{"organics", file.organics.size()}};
+	const char *pool = nullptr;
+	for (const auto &[name, count] : pools) {
+		if (count) {
+			pool = name;
+			break;
+		}
+		at += count * bms::kEntitySize;
+	}
+	TEST_EXPECT(pool != nullptr);
+	changed = original;
+	changed[at + 3] ^= 1;
+	TEST_EXPECT(bms::first_differing_section(file, original, changed) == pool);
+	changed = original;
+	changed.resize(bms::kHeaderSize + 1);
+	TEST_EXPECT(bms::first_differing_section(file, original, changed) ==
+	            std::string(read_u16_le(original, 578) ? "loadout chunk" : read_u16_le(original, 582) ? "availability chunk" : pool));
+	changed = original;
+	changed.push_back(0);
+	TEST_EXPECT(bms::first_differing_section(file, original, changed) == "length");
+
+	bms::WaypointRecord route{};
+	TEST_EXPECT(!bms::is_player_route(route));
+	route.flags = bms::WaypointFlags::DoesNotLoop | bms::WaypointFlags::PlayerRoute;
+	route.marker_count = 5;
+	route.waypoint_numbers = {4, 1, 7};
+	TEST_EXPECT(bms::is_player_route(route) && bms::player_route_stop_count(route) == 3);
+	route.waypoint_numbers.assign(200, 0);
+	TEST_EXPECT(bms::player_route_stop_count(route) == 5);
+	route.marker_count = 1000;
+	TEST_EXPECT(bms::player_route_stop_count(route) == bms::kPlayerRouteMaxStops && bms::kPlayerRouteMaxStops == 128);
+	route.marker_count = 0x80000000u;
+	TEST_EXPECT(bms::player_route_stop_count(route) == 0);
+
+	TEST_EXPECT(bms::kEventStepTicks == 64 && (1 << bms::kEventStepShift) == bms::kEventStepTicks);
+	TEST_EXPECT(bms::event_steps_wrap(513) && !bms::event_steps_wrap(512) && !bms::event_steps_wrap(0));
+	// The first step count that wraps is the first whose reload reads negative as a signed 16-bit word
+	// after one decrement.
+	TEST_EXPECT(int16_t(uint16_t((bms::kEventStepsUnwrapped + 1) << bms::kEventStepShift) - bms::kEventStepTicks) < 0 &&
+	            int16_t(uint16_t(bms::kEventStepsUnwrapped << bms::kEventStepShift) - bms::kEventStepTicks) > 0);
 	return 0;
 }
 
@@ -1457,5 +1524,6 @@ int main() {
 	}
 
 	if (chain_ranges() != 0) return 1;
+	if (sections_and_route() != 0) return 1;
 	return 0;
 }

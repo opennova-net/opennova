@@ -6,6 +6,7 @@
 #include <formats/rtxt/rtxt.h>
 #include <net/npwire/entity_class.h>
 #include <runtime/environment/water_frame.h>
+#include <runtime/hud/game_text_lookup.h>
 #include <runtime/inmatch/server_log_recorder.h>
 #include <runtime/inmatch/session_status.h>
 
@@ -19,7 +20,7 @@ ServerTextTable read_host_server_text(const mission::BootFileSource &files) {
 	std::vector<uint8_t> bytes;
 	rtxt::File gametext;
 	std::string parse_error;
-	if (!files.valid() || !files.read_file("gametext.bin", bytes) ||
+	if (!files.valid() || !files.read_file(hud::kGameTextTable, bytes) ||
 			!rtxt::parse(bytes.data(), bytes.size(), gametext, parse_error))
 		return text;
 	text.medic_request_format = gametext.get_in_section("Server", "STRSRV_MEDREQ");

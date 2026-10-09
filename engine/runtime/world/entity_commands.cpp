@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include <formats/mission/mission_params.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/entity_spawn.h>
@@ -21,6 +22,11 @@
 #include <base/io/strutil.h>
 
 namespace opennova::world {
+
+// The relation matrices' SSN rows are the ones a trigger's SSN keys (the setters' bound
+// [orig: @0x452b60, @0x452bf0]): one rule, the mission format's.
+static_assert(TriggerRelations::kSingles == mission::kRelationSsnRows,
+              "the relation matrices hold the SSN rows mission::trigger_ssn_unrecorded reads");
 
 // ----------------------------------------------------------------------------
 // EntityCommands — the shared Entity_* primitive layer.
@@ -38,11 +44,11 @@ namespace opennova::world {
 // slot byte [orig: PlayerClass_InitEntity @0x4b1149..0x4b1173], the key
 // EntityPool_FindByNetId matches (low 16 bits; pools 0..3, no netId gate).
 // Our player entities carry net_id 0 (the wire is handle-based), so the
-// kLocalPlayerSsn alias below maps SSN 10000 to the local player in their
+// mission::kPlayerSsn alias below maps SSN 10000 to the local player in their
 // place; MP joiner SSNs (10001+) wait on the net track.
 // [orig: EntityPool_FindByNetId @0x4f0a20]
 EntityHandle EntityCommands::resolve_ssn(uint16_t ssn) const {
-    if (ssn == kLocalPlayerSsn && world_.cached.local_player.valid())
+    if (ssn == mission::kPlayerSsn && world_.cached.local_player.valid())
         return world_.cached.local_player;
     // No SSN-0 guard and pools 0..3, like the retail lookup this mirrors;
     // resolve_ssn_in_pools012 below is the OTHER retail walk (dcb != 0 gate,
@@ -71,7 +77,7 @@ bool EntityCommands::set_ssn_target_selector(int32_t ssn, AiTargetSelector field
 
 int EntityCommands::set_group_target_selector(int32_t group, AiTargetSelector field, int32_t value) {
     // [orig: 0x43D870/+334, 0x43D8F0/+332, 0x43D770/+338, 0x43D7F0/+336]
-    if (group == 0) return 0;
+    if (mission::group_names_none(group)) return 0;
     int changed = 0;
     for (int pool = 0; pool <= 1; ++pool) {
         for (size_t slot = 0; slot < world_.registry.pool_capacity(pool); ++slot) {
@@ -1030,7 +1036,7 @@ bool EntityCommands::ssn_in_area(int32_t ssn, int area_id) const {
             if (entity == nullptr) continue;
             // The SP listen-host model retains its existing script-player
             // alias: its socketless local body carries net_id 0 (D-NET-112).
-            const bool local_alias = !world_.rules.mp_session && ssn == kLocalPlayerSsn &&
+            const bool local_alias = !world_.rules.mp_session && ssn == mission::kPlayerSsn &&
                     handle == world_.cached.local_player && entity->net_id == 0;
             if ((entity->net_id == ssn || local_alias) && area->bounds.contains(entity->position))
                 return true;
@@ -1043,7 +1049,7 @@ bool EntityCommands::group_in_area(int32_t group, int area_id) const {
     // Only pool 0 checks Flags bit 0; a destroyed pool-1 item still counts.
     // [orig: Entity_IsTeamInTriggerBounds @ 0x43c730]
     const Area *area = world_.registry.area(area_id);
-    if (group == 0 || area == nullptr) return false;
+    if (mission::group_names_none(group) || area == nullptr) return false;
     for (int pool = 0; pool <= 1; ++pool) {
         for (size_t slot = 0; slot < world_.registry.pool_capacity(pool); ++slot) {
             const Entity *entity = world_.registry.get(EntityHandle::make(pool, static_cast<int>(slot)));
@@ -1148,7 +1154,7 @@ bool EntityCommands::bms_ref_alive(int32_t ssn) const {
             // 0 where retail stamps the player's DcbId 10000 + slot; the same
             // D-NET-112 alias ssn_in_area applies.
             // [orig: PlayerClass_InitEntity @0x4b1155..0x4b1173]
-            const bool local_alias = !world_.rules.mp_session && ssn == kLocalPlayerSsn &&
+            const bool local_alias = !world_.rules.mp_session && ssn == mission::kPlayerSsn &&
                     handle == world_.cached.local_player && entity->net_id == 0;
             if (static_cast<int32_t>(entity->net_id) != ssn && !local_alias) continue;
             return ((entity->flags | entity->engine_flags) & kEntityFlagDead) == 0;
@@ -1452,7 +1458,7 @@ int EntityCommands::kill_group(int group) {
     // row's attacker and staged death clip. Returns the rows visited.
     // [orig: Entity_KillAllByNetId @0x43C8E0 — group 0 exit @0x43C8F2, pool 2
     //  @0x43C8F8, pool 0 @0x43C946, pool 1 @0x43C996; per row @0x43C917..0x43C93F]
-    if (group == 0) return 0;
+    if (mission::group_names_none(group)) return 0;
     int n = 0;
     for (const int pool : {2, 0, 1}) {
         std::vector<EntityHandle> members;
@@ -1572,7 +1578,7 @@ EntityHandle resolve_ssn_in_pools012(const World &world, uint16_t ssn) {
     // The dcb != 0 gate and the 0..2 pool set are this walk's own; the
     // net-id lookup EntityCommands::resolve_ssn wraps has neither.
     if (ssn == 0) return EntityHandle{};
-    if (ssn == EntityCommands::kLocalPlayerSsn &&
+    if (ssn == mission::kPlayerSsn &&
         world.cached.local_player.valid())
         return world.cached.local_player;
     for (int pool : {0, 1, 2}) {
@@ -1597,7 +1603,7 @@ EntityHandle resolve_ssn_in_pools012(const World &world, uint16_t ssn) {
 //  (@0x43E0DD / @0x43E0E3), pool 2 @0x43E161 (@0x43E180 / @0x43E186)]
 EntityHandle resolve_teleport_target(const World &world, uint16_t ssn) {
     if (ssn == 0) return EntityHandle{};
-    if (ssn == EntityCommands::kLocalPlayerSsn) {
+    if (ssn == mission::kPlayerSsn) {
         const Entity *local = world.registry.get(world.cached.local_player);
         if (local != nullptr && local->item_type_index != 0) return local->handle;
     }
@@ -1686,7 +1692,7 @@ int EntityCommands::remove_group(int group) {
     //  authority gate @0x43d5dd; Server_RemoveEntityAndNotify per row
     //  @0x43d615 (pool 2), @0x43d646 (0), @0x43d677 (1), @0x43d6a8 (3)]
     static constexpr int pools[] = {2, 0, 1, 3};
-    if (group == 0 || !world_.rules.logic_authority) return 0;
+    if (mission::group_names_none(group) || !world_.rules.logic_authority) return 0;
     int removed = 0;
     for (int pool : pools) {
         const size_t capacity = world_.registry.pool_capacity(pool);
@@ -1745,7 +1751,7 @@ int EntityCommands::set_group_team(int group, int32_t team) {
     // test (the compare @0x43c6ad..0x43c6b8, the store @0x43c6ba); group 0
     // does nothing [orig: @0x43c685].
     static constexpr int pools[] = {2, 0, 1};
-    if (group == 0) return 0;
+    if (mission::group_names_none(group)) return 0;
     int changed = 0;
     for (int pool : pools) {
         const size_t capacity = world_.registry.pool_capacity(pool);
@@ -1770,7 +1776,7 @@ int EntityCommands::change_group(int old_group, int new_group) {
     // the item word. Then live counts are rebuilt. Old group 0 does nothing,
     // not even the recount [orig: @0x43c5b5].
     static constexpr int pools[] = {2, 0, 1};
-    if (old_group == 0) return 0;
+    if (mission::group_names_none(old_group)) return 0;
     int changed = 0;
     for (int pool : pools) {
         const size_t capacity = world_.registry.pool_capacity(pool);
@@ -2346,7 +2352,7 @@ int EntityCommands::apply_group_ai_command(int group, int sub_type, int32_t p2, 
     // [orig: Entity_HandleAlertCommand @0x43cf10 — sub 0 @0x43cf1e, group 0
     //  @0x43cf2c; pool 2 with the aiRuntime gate @0x43cf57/@0x43cf64, pool 0
     //  @0x43cf97, pool 1 @0x43cfcd]
-    if (sub_type == 0 || group == 0) return 0;
+    if (sub_type == 0 || mission::group_names_none(group)) return 0;
     int n = 0;
     for (int pool : {2, 0, 1}) {
         const size_t capacity = world_.registry.pool_capacity(pool);

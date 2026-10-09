@@ -1,5 +1,6 @@
 #include <runtime/world/epilog_cine.h>
 
+#include <runtime/hud/game_text_lookup.h>
 #include <runtime/hud/hud_math.h>
 #include <runtime/world/objectives_feed.h>
 #include <runtime/world/world.h>
@@ -416,8 +417,8 @@ void EpilogCine::build_lose_screen() {
 	// MISSION FAILED [orig: @0x574623 / @0x574639 — (line_start, 223200,
 	//  "CineText", Overlays/STROVER_MISSION_FAILED, 0, 120, -2, 100, 140,
 	//  1024, 100, 1, 0xFFFFFF)].
-	events.push_back(text_fade(line_start, CineTextSource::GameText, "Overlays",
-			"STROVER_MISSION_FAILED", 0, 120, -2, 100, 140, 1024, 100, 1, 0xFFFFFF));
+	events.push_back(text_fade(line_start, CineTextSource::GameText, hud::kGameTextMissionFailed.section,
+			hud::kGameTextMissionFailed.key, 0, 120, -2, 100, 140, 1024, 100, 1, 0xFFFFFF));
 	// The banner line, built only when the round stored one; the embedder
 	// holds the banner text and draws nothing for an empty one, so the node
 	// rides every build [orig: `cmp g_BannerText, 0` @0x574645; sub_572E30
@@ -429,8 +430,8 @@ void EpilogCine::build_lose_screen() {
 	// The key help: 124 frames past the line start, y 600 [orig: @0x57471C /
 	//  @0x574757 / @0x57476D]. Its second line (STREPILOG_KEYINFO2, y 632,
 	//  @0x5747B6) builds only over a saved game (D-SAVE-1).
-	events.push_back(text_fade(line_start + 124, CineTextSource::GameText, "Epilog",
-			"STREPILOG_KEYINFO", 0, 600, -2, 140, 140, 1024, 100, 1, 0xFFFFFF));
+	events.push_back(text_fade(line_start + 124, CineTextSource::GameText, hud::kGameTextEpilogKeyInfo.section,
+			hud::kGameTextEpilogKeyInfo.key, 0, 600, -2, 140, 140, 1024, 100, 1, 0xFFFFFF));
 }
 
 void EpilogCine::update_win(World &world) {
@@ -489,18 +490,18 @@ void EpilogCine::build_win_screen(const World &world) {
 	// [orig: @0x5765D0..0x576776 — y 160 / 208 / 256 / 304]
 	const hud::EndRoundStatisticsInput in = end_round_statistics_input(world);
 	const int32_t first = line_start + 124; // [orig: @0x5765E1]
-	events.push_back(epilog_counter(first, "STREPILOG_OBJECTIVEBONUS", 160, in.subgoals_won,
+	events.push_back(epilog_counter(first, hud::kGameTextEpilogObjectiveBonus.key, 160, in.subgoals_won,
 			in.subgoals_defined));
-	events.push_back(epilog_counter(first + 60, "STREPILOG_ENEMYUNITS", 208,
+	events.push_back(epilog_counter(first + 60, hud::kGameTextEpilogEnemyUnits.key, 208,
 			hud::end_round_enemy_units(in), in.enemy_unit_total)); // [orig: @0x576649]
-	events.push_back(epilog_counter(first + 120, "STREPILOG_TEAMUNITS", 256, in.team_unit_kills,
+	events.push_back(epilog_counter(first + 120, hud::kGameTextEpilogTeamUnits.key, 256, in.team_unit_kills,
 			-1)); // [orig: @0x5766C9]
-	events.push_back(epilog_counter(first + 180, "STREPILOG_FRIENDLYUNITS", 304,
+	events.push_back(epilog_counter(first + 180, hud::kGameTextEpilogFriendlyUnits.key, 304,
 			in.friendly_unit_kills, -1)); // [orig: @0x57672A]
 	// The key help, 120 frames past the last counter, y 700 [orig: @0x5767B9 /
 	//  @0x5767D2].
-	events.push_back(text_fade(first + 300, CineTextSource::GameText, "Epilog",
-			"STREPILOG_KEYINFO", 0, 700, -2, 140, 140, 1024, 100, 1, 0xFFFFFF));
+	events.push_back(text_fade(first + 300, CineTextSource::GameText, hud::kGameTextEpilogKeyInfo.section,
+			hud::kGameTextEpilogKeyInfo.key, 0, 700, -2, 140, 140, 1024, 100, 1, 0xFFFFFF));
 }
 
 void EpilogCine::render_pass() {

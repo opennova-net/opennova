@@ -34,6 +34,10 @@ namespace opennova::audio {
 // the PLYRDIALOG triggers form the same name from any number [orig:
 // Dialog_ExistsByIndex @ 0x44e170 "dlg%.3d" @ 0x44e190]. "" for 0.
 std::string dialog_name_of(int32_t dialog_index);
+// The number whose "dlg%03i" forms `name` (dlg012: 12, dlg1234: 1234), the
+// inverse of the formation above, matched exactly; -1 where no number forms the
+// name (dlg12, dlg0012, DLG012, intro), which no number's lookup finds.
+int64_t dialog_index_of(const std::string &name);
 // The dialog of `name` in the bank, matched exactly and the first in the
 // bank's order [orig: Dialog_PlayByName @ 0x44d9f0 strcmp @ 0x44da8b over the
 // load-ordered list]; null for none.
