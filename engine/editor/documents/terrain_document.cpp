@@ -8,20 +8,17 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
-#include <map>
 #include <sstream>
 #include <utility>
 
-#include <base/io/ascii_config.h>
 #include <base/io/cp1252.h>
-#include <base/io/crt_ftol.h>
-#include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/model/staged_rows.h>
-#include <formats/env/env.h>
 #include <formats/trn/trn_io.h>
+#include <formats/trn/trn_source_issue.h>
+#include <runtime/renderer/texture_roles.h>
 
 namespace opennova::editor {
 
@@ -195,31 +192,15 @@ LabelledField pair_field(const std::string &id, const char *label, const char *s
 	return field;
 }
 
-// The texture roles the terrain's maps are opened by (ADR 0046 S18, documents/texture_roles.h): what
-// PolyTrn_InitTextures does with each key's file [orig: PolyTrn_InitTextures @ 0x60AAA0]. Without its colour
-// map the game logs "colormap" @ 0x60B389; without its blend map, once the key names one at all (the key
-// alone sets the blend on [orig: Terrain_ParseConfigCallback @ 0x60F7D0], and every card with pixel shaders
-// takes it, PolyTrn_InitTextures @ 0x60B15D..0x60B176), "blendermap" @ 0x60B19A. Either error aborts the
-// mission [orig: sub_520AA0 @ 0x520B4E]: kTextureArgGates.
-struct MapRole {
-	const char *id;
-	renderer::TextureRoleId role;
-	int32_t flags;
-};
-constexpr MapRole kMapRoles[] = {
-	{"polytrn_colormap", renderer::TextureRoleId::TerrainColourMap, kTextureArgGates},
-	{"polytrn_detailmap", renderer::TextureRoleId::TerrainDetailCoefficient, 0},
-	{"polytrn_detailmap_c1", renderer::TextureRoleId::TerrainSplatDetail, 0},
-	{"polytrn_detailmap_c2", renderer::TextureRoleId::TerrainSplatDetail, 0},
-	{"polytrn_detailmap_c3", renderer::TextureRoleId::TerrainSplatDetail, 0},
-	{"polytrn_detailmap2", renderer::TextureRoleId::TerrainSecondDetail, 0},
-	{"polytrn_detailmapdist", renderer::TextureRoleId::TerrainFarDetail, 0},
-	{"polytrn_detailmapdist2", renderer::TextureRoleId::TerrainFarDetail, 0},
-	{"polytrn_detailblendmap", renderer::TextureRoleId::TerrainBlendMap, kTextureArgGates},
-	{"polytrn_tilestrip", renderer::TextureRoleId::TerrainTileAtlas, 0},
-	{"polytrn_charmap", renderer::TextureRoleId::TerrainCharMap, 0},
-	{"polytrn_foliagemap", renderer::TextureRoleId::TerrainFoliageMap, 0},
-};
+// The texture role a terrain key's map is opened by (ADR 0046 S18, documents/texture_roles.h), the engine's
+// [orig: PolyTrn_InitTextures @ 0x60AAA0] (renderer::trn_key_texture_role): a map whose loss aborts the mission (the
+// colour map, the blend map) gates its use (kTextureArgGates). -1 for a key that names no texture.
+int32_t map_loader_arg(const std::string &key) {
+	renderer::TextureRoleId role = renderer::TextureRoleId::kCount;
+	bool aborts = false;
+	if (!renderer::trn_key_texture_role(key, role, &aborts)) return -1;
+	return texture_role_arg(role, aborts ? kTextureArgGates : 0);
+}
 
 const char *const kRequiredWords = " An empty name refuses the mission [orig: Terrain_LoadEnvironmentConfig @ 0x610A2A..0x610A3E].";
 
@@ -628,13 +609,15 @@ ListOps sector_rows_list() {
 			return false;
 		}
 		index = std::min(index, size_t(rows));
-		// A new row is what the game's extension reads there: the row before it again (past the last, the
-		// last; with a north-south wrap, the grid's rows again from the first) [orig: Terrain_ShiftHeightmapRows
-		// @ 0x60F2A5..0x60F317].
+		// A new row is the row before it again; past the last, what the game's extension reads there (the last
+		// again; with a north-south wrap, the grid's rows again from the first: trn_grid_extension_source)
+		// [orig: Terrain_ShiftHeightmapRows @ 0x60F2A5..0x60F317].
 		std::array<int, kSide> made{};
 		if (record) made = *static_cast<const std::array<int, kSide> *>(record->data.get());
 		else if (rows > 0) {
-			const size_t from = index == size_t(rows) && config.wrap_y ? index % size_t(rows) : index > 0 ? index - 1 : 0;
+			const size_t from = index == size_t(rows) ? size_t(trn_grid_extension_source(rows, config.wrap_y, rows))
+			                    : index > 0           ? index - 1
+			                                          : 0;
 			std::copy(config.sector_grid[from], config.sector_grid[from] + kSide, made.begin());
 		}
 		for (int r = rows; r > int(index); --r)
@@ -709,198 +692,87 @@ RecordTable make_table() {
 
 // --- the source issues ------------------------------------------------------------------------------
 
-// The keys the terrain's reader reads out of a block (formats/trn trn_parser_key) [orig:
-// Terrain_ParseConfigCallback @ 0x60F330], with the two the record keeps for whoever edits the file
-// (terrain_name and terrain_creator: read by no arm, held by TrnConfig and written by save_trn; a
-// horizon line, which no reader has, is skipped and never written, D-TERRAIN-20).
-bool terrain_reader_key(const std::string &key) {
-	return trn_parser_key(key) || key == "terrain_name" || key == "terrain_creator";
-}
-
-// The environment's keywords the terrain's record holds (trn.h): its water.
-bool held_environment_key(const std::string &key) {
-	return key == "water_height" || key == "water_rgb" || key == "water_murk";
+// A reader's rule over a line (formats/trn trn_source_issues) in the editor's words: what the game reads, and what a
+// save writes or why the editor's terrain cannot keep it.
+std::string source_issue_words(const TrnSourceIssue &read) {
+	switch (read.rule) {
+	case TrnSourceRule::CutBlockEnd:
+		return "The file's last line has no line end, so the game's reader reads 'end' as 'en' and leaves the block open: "
+		       "it is still a definition, and a save writes its end.";
+	case TrnSourceRule::CutLastLine:
+		return "The file's last line has no line end, so the game's reader loses its last character ('" + read.token +
+		       "') and reads the line short: a save writes the line as the game read it, ended.";
+	case TrnSourceRule::EnvironmentKey:
+		return "'" + read.token +
+		       "' is an environment keyword: the game's environment reader reads the terrain's lines too and takes it for "
+		       "the mission's environment before the .env, which the editor's terrain cannot keep (it holds the water's "
+		       "keywords alone). Move it to the mission's .env.";
+	case TrnSourceRule::ShortColour:
+		return "This colour line has " + std::to_string(read.read) +
+		       " of its three values: the game reads the missing ones from where earlier, longer lines left them, and a "
+		       "save writes the three it read.";
+	case TrnSourceRule::ColourByte:
+		return "The game holds a colour's byte: it reads " + std::to_string(read.read) + " as " + std::to_string(read.kept) +
+		       ", and a save writes that.";
+	case TrnSourceRule::MurkClamp: return "The game reads a murk past 0.99 as 0.99: a save writes 0.99.";
+	case TrnSourceRule::MatchPastFour:
+		return "The game keeps up to seven codes and compares the first four: the rest are never used, and a save leaves "
+		       "them out.";
+	case TrnSourceRule::MatchByte:
+		return "The game keeps each code as a byte: it reads " + std::to_string(read.read) + " as " +
+		       std::to_string(read.kept) + ", and a save writes that.";
+	case TrnSourceRule::AttribWord:
+		return "The game reads nothing of '" + read.token + "' (forceon and shadow alone): a save leaves it out.";
+	case TrnSourceRule::ColourMode:
+		return "The editor holds a colour mode of 0 to 2, the shipped files' words; the game's generator writes over the "
+		       "colour before it draws, so a save writing " +
+		       std::to_string(read.kept) + " changes nothing drawn.";
+	case TrnSourceRule::BlockKeySkipped:
+		return "Inside a foliage block the game's terrain reader reads graphic, match, color_lower, color_upper, attrib and "
+		       "end alone: it skips '" +
+		       read.token + "', and a save leaves the line out.";
+	case TrnSourceRule::FifthBlock:
+		return "The game reads four foliage blocks: from this fifth one on, its terrain reader reads nothing more of the "
+		       "file, and a save leaves it all out.";
+	case TrnSourceRule::RowBeforeWidth:
+		return "This grid row comes before the grid's width (polytrn_sectorcount), so the game reads none of its sectors: "
+		       "a save writes the row as the game read it.";
+	case TrnSourceRule::RowShort:
+		return "This grid row has " + std::to_string(read.read) + " of the width's " + std::to_string(read.kept) +
+		       " sectors: the game reads the rest from where earlier, longer lines left them, and a save writes the " +
+		       std::to_string(read.kept) + " it read.";
+	case TrnSourceRule::RowWide:
+		return "This grid row has " + std::to_string(read.read) + " sectors past the width's " + std::to_string(read.kept) +
+		       ": the game reads none of the rest, and a save leaves them out.";
+	case TrnSourceRule::TooManyRows:
+		return "The grid has " + std::to_string(read.read) +
+		       " rows: the game refuses a terrain of more than 16, and a save writes the first 16.";
+	case TrnSourceRule::ScaleKey:
+		return "polytrn_scale feeds only the multiplayer file check, which the editor's terrain cannot keep: remove the "
+		       "line, or keep editing the file as a text.";
+	case TrnSourceRule::DepthmapKey:
+		return "The game's terrain reader reads polytrn_depthmap, which the editor's terrain cannot keep: remove the line, "
+		       "or keep editing the file as a text.";
+	case TrnSourceRule::Skipped: return "The game's readers skip '" + read.token + "': a save leaves the line out.";
+	case TrnSourceRule::ReadAgain:
+		return "'" + read.field + "' is written again on line " + std::to_string(read.again) +
+		       ": the game reads the last, and a save writes that one alone.";
+	}
+	return std::string();
 }
 
 } // namespace
 
 void terrain_source_issues(const std::string &text, std::vector<SourceIssue> &issues) {
-	bool in_foliage = false, swallowed = false;
-	int closed = 0, sector_count = 0, row_lines = 0;
-	size_t row_line_17 = 0;
-	std::map<std::string, size_t> first_line;
-	const auto issue = [&](bool blocks, size_t line, const std::string &field, const std::string &message) {
+	// What the readers read otherwise than the record holds (formats/trn trn_source_issues), each a source issue.
+	for (const TrnSourceIssue &read : trn_source_issues(text)) {
 		SourceIssue out;
-		out.blocks = blocks;
-		out.line = line;
-		out.field = field;
-		out.message = message;
+		out.blocks = read.blocks;
+		out.line = read.line;
+		out.field = read.field;
+		out.message = source_issue_words(read);
 		issues.push_back(std::move(out));
-	};
-	size_t line = 0;
-	// A last line no CR LF ends loses its final byte to the walk [orig: File_ParseASCIIFile @ 0x53D8C7..0x53D8F5]
-	// (shipped Dvxi4.trn and Dvxi4_c.trn end on such an "end").
-	const bool ends_cut = text.size() < 2 || text.compare(text.size() - 2, 2, "\r\n") != 0;
-	io::for_each_config_line_span(text.data(), text.size(), [&](io::ConfigTokens &tokens, const io::ConfigLineSpan &span) {
-		++line;
-		if (swallowed || tokens.count == 0 || tokens.tokens[0][0] == '/') return;
-		const std::string key = strutil::to_lower(tokens.tokens[0]);
-		const char *value = tokens.token(1);
-		if (ends_cut && !text.empty() && span.end + 1 >= text.size()) {
-			// A block's "end" read "en" leaves the block open; a block no end closes is still a definition, as
-			// the runtime takes every slot whose graphic is named [orig: Terrain_Init @ 0x60FD11..0x60FD16;
-			// Foliage_RemapPixelToDefMask @ 0x5FF4E0] (shipped Dvxi4.trn and Dvxi4_c.trn).
-			if (in_foliage && key == "en") {
-				issue(false, line, "end",
-				      "The file's last line has no line end, so the game's reader reads 'end' as 'en' and leaves the "
-				      "block open: it is still a definition, and a save writes its end.");
-				return;
-			}
-			issue(false, line, key,
-			      "The file's last line has no line end, so the game's reader loses its last character ('" +
-			              std::string(1, text.back()) + "') and reads the line short: a save writes the line as the "
-			              "game read it, ended.");
-		}
-		// The environment's reader reads every line of the terrain, inside a foliage block too (its walk has
-		// no block state): what it takes is the mission's environment until the .env's line [orig:
-		// Environment_LoadTimeOfDayConfig @ 0x57DB30, the .trn pass @ 0x57DBCC..0x57DBDE].
-		if (env::is_env_key(key) && key != "enviro_name" && key != "vertex_rgb") {
-			if (!held_environment_key(key)) {
-				issue(true, line, key,
-				      "'" + std::string(tokens.tokens[0]) +
-				              "' is an environment keyword: the game's environment reader reads the terrain's lines too and "
-				              "takes it for the mission's environment before the .env, which the editor's terrain cannot "
-				              "keep (it holds the water's keywords alone). Move it to the mission's .env.");
-				return;
-			}
-			if (key == "water_rgb") {
-				if (tokens.count < 4)
-					issue(false, line, key,
-					      "This colour line has " + std::to_string(tokens.count - 1) +
-					              " of its three values: the game reads the missing ones from where earlier, longer lines "
-					              "left them, and a save writes the three it read.");
-				for (int c = 1; c <= 3; ++c) {
-					const int read = io::retail_atol(tokens.token(c));
-					if (read < 0 || read > 255) {
-						issue(false, line, key,
-						      "The game holds a colour's byte: it reads " + std::to_string(read) + " as " +
-						              std::to_string(std::clamp(read, 0, 255)) + ", and a save writes that.");
-						break;
-					}
-				}
-			}
-			if (key == "water_murk" && static_cast<float>(io::retail_atof(value)) > 0.99f)
-				issue(false, line, key, "The game reads a murk past 0.99 as 0.99: a save writes 0.99.");
-			if (in_foliage) return;
-		}
-		if (in_foliage) {
-			if (key == "end") {
-				in_foliage = false;
-				++closed;
-			} else if (key == "match") {
-				if (tokens.count - 1 > FOLIAGE_MATCH_CODES)
-					issue(false, line, key,
-					      "The game keeps up to seven codes and compares the first four: the rest are never used, and a "
-					      "save leaves them out.");
-				for (int i = 1; i < tokens.count && i <= FOLIAGE_MATCH_CODES; ++i) {
-					const int read = io::retail_atol(tokens.tokens[i]);
-					if (read < 0 || read > 255) {
-						issue(false, line, key,
-						      "The game keeps each code as a byte: it reads " + std::to_string(read) + " as " +
-						              std::to_string(uint8_t(read)) + ", and a save writes that.");
-						break;
-					}
-				}
-			} else if (key == "attrib") {
-				for (int i = 1; i < tokens.count && i < 8; ++i)
-					if (!strutil::iequals(tokens.tokens[i], "forceon") && !strutil::iequals(tokens.tokens[i], "shadow")) {
-						issue(false, line, key,
-						      "The game reads nothing of '" + std::string(tokens.tokens[i]) +
-						              "' (forceon and shadow alone): a save leaves it out.");
-						break;
-					}
-			} else if (key == "color_lower" || key == "color_upper") {
-				const int read = io::retail_atol(value);
-				if (read < 0 || read > 2)
-					issue(false, line, key,
-					      "The editor holds a colour mode of 0 to 2, the shipped files' words; the game's generator writes "
-					      "over the colour before it draws, so a save writing " +
-					              std::to_string(std::clamp(read, 0, 2)) + " changes nothing drawn.");
-			} else if (key != "graphic") {
-				issue(false, line, key,
-				      "Inside a foliage block the game's terrain reader reads graphic, match, color_lower, color_upper, "
-				      "attrib and end alone: it skips '" +
-				              std::string(tokens.tokens[0]) + "', and a save leaves the line out.");
-			}
-			return;
-		}
-		if (key == "foliage") {
-			if (closed >= FOLIAGE_MAX_DEFS) {
-				swallowed = true;
-				issue(false, line, key,
-				      "The game reads four foliage blocks: from this fifth one on, its terrain reader reads nothing more "
-				      "of the file, and a save leaves it all out.");
-				return;
-			}
-			in_foliage = true;
-			return;
-		}
-		if (key == "polytrn_sectors") {
-			++row_lines;
-			if (row_lines == kSide + 1) row_line_17 = line;
-			const int columns = tokens.count - 1;
-			const int width = std::min(sector_count, kSide);
-			if (row_lines > kSide) return;
-			if (width <= 0 && columns > 0)
-				issue(false, line, "polytrn_sectors",
-				      "This grid row comes before the grid's width (polytrn_sectorcount), so the game reads none of its "
-				      "sectors: a save writes the row as the game read it.");
-			else if (columns < width)
-				issue(false, line, "polytrn_sectors",
-				      "This grid row has " + std::to_string(columns) + " of the width's " + std::to_string(width) +
-				              " sectors: the game reads the rest from where earlier, longer lines left them, and a save "
-				              "writes the " +
-				              std::to_string(width) + " it read.");
-			else if (columns > width && width > 0)
-				issue(false, line, "polytrn_sectors",
-				      "This grid row has " + std::to_string(columns) + " sectors past the width's " + std::to_string(width) +
-				              ": the game reads none of the rest, and a save leaves them out.");
-			return;
-		}
-		if (key == "polytrn_sectorcount") sector_count = io::retail_atol(value);
-		if (key == "polytrn_scale") {
-			// Read for the multiplayer check alone [orig: Terrain_LoadEnvironmentConfig @ 0x61096D, its default;
-			// @ 0x60C5FD feeds the CRC]: the record does not hold it.
-			issue(true, line, key,
-			      "polytrn_scale feeds only the multiplayer file check, which the editor's terrain cannot keep: remove the "
-			      "line, or keep editing the file as a text.");
-			return;
-		}
-		if (key == "polytrn_depthmap") {
-			// An arm reads it [orig: Terrain_ParseConfigCallback @ 0x60F81D]; the record (TrnConfig) does not hold it.
-			issue(true, line, key,
-			      "The game's terrain reader reads polytrn_depthmap, which the editor's terrain cannot keep: remove the "
-			      "line, or keep editing the file as a text.");
-			return;
-		}
-		if (!terrain_reader_key(key) && !held_environment_key(key)) {
-			issue(false, line, key,
-			      "The game's readers skip '" + std::string(tokens.tokens[0]) + "': a save leaves the line out.");
-			return;
-		}
-		// A key read again: the last line wins.
-		const auto first = first_line.emplace(key, line);
-		if (!first.second) {
-			issue(false, first.first->second, key,
-			      "'" + key + "' is written again on line " + std::to_string(line) +
-			              ": the game reads the last, and a save writes that one alone.");
-			first.first->second = line;
-		}
-	});
-	if (row_lines > kSide)
-		issue(false, row_line_17, "polytrn_sectors",
-		      "The grid has " + std::to_string(row_lines) +
-		              " rows: the game refuses a terrain of more than 16, and a save writes the first 16.");
+	}
 	std::stable_sort(issues.begin(), issues.end(), [](const SourceIssue &a, const SourceIssue &b) { return a.line < b.line; });
 }
 
@@ -931,9 +803,7 @@ const FieldSchema *terrain_key_field(const std::string &key, int32_t *loader_arg
 	for (const NodeKind kind : {kTerrain, kFoliage})
 		for (const FieldSchema &field : terrain_table().fields(kind)) {
 			if (field.id != key && field.token != key) continue;
-			if (loader_arg && field.reference == ReferenceKind::Texture)
-				for (const MapRole &map : kMapRoles)
-					if (field.id == map.id) *loader_arg = texture_role_arg(map.role, map.flags);
+			if (loader_arg && field.reference == ReferenceKind::Texture) *loader_arg = map_loader_arg(field.id);
 			return &field;
 		}
 	return nullptr;
@@ -995,11 +865,8 @@ std::string TerrainDocument::record_title(const NodeAddress &address) const {
 void TerrainDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
 	TableDocument::refine_field(address, use);
 	if (use.reference != ReferenceKind::Texture || !use.schema) return;
-	for (const MapRole &map : kMapRoles)
-		if (use.schema->id == map.id) {
-			use.loader_arg = texture_role_arg(map.role, map.flags);
-			return;
-		}
+	const int32_t loader = map_loader_arg(use.schema->id);
+	if (loader >= 0) use.loader_arg = loader;
 }
 
 bool TerrainDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
