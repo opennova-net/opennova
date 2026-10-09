@@ -6,7 +6,6 @@
 #include <utility>
 
 #include <base/io/strutil.h>
-#include <editor/documents/config_overrun.h>
 #include <editor/documents/text_types.h>
 #include <formats/configfile/config_file.h>
 #include <formats/def/reserved_items.h>
@@ -32,9 +31,9 @@ Diagnostic warning(CharAttrFinding code, std::string message, const TextDocument
 	return text_finding(finding_code(code), DiagnosticSeverity::Warning, std::move(message), document, offset);
 }
 
-// The camouflage keys, by the mission's camouflage they serve [orig: Entity_SpawnFromAnimSlotProperty
-// @ 0x43c399..0x43c3be: the BMS camouflage selector 1 JUNGLE_CAMMO (10), 2 ARCTIC_CAMMO (12), any other
-// DESERT_CAMMO (11)].
+// The camouflage keys, by the mission's camouflage they serve (charattr::cammo_property_for_camouflage:
+// the BMS camouflage selector 1 JUNGLE_CAMMO (10), 2 ARCTIC_CAMMO (12), any other DESERT_CAMMO (11)
+// [orig: Entity_SpawnFromAnimSlotProperty @ 0x43c399..0x43c3be]).
 struct Cammo {
 	charattr::Property property;
 	const char *key;
@@ -45,12 +44,6 @@ constexpr Cammo kCammo[] = {
 	{ charattr::kDesertCammo, "DESERT_CAMMO", "a desert mission (any camouflage but jungle and arctic)" },
 	{ charattr::kArcticCammo, "ARCTIC_CAMMO", "an arctic mission" },
 };
-
-int32_t cammo_of(const charattr::ClassRow &row, charattr::Property property) {
-	return property == charattr::kJungleCammo   ? row.jungle_cammo
-	       : property == charattr::kDesertCammo ? row.desert_cammo
-	                                            : row.arctic_cammo;
-}
 
 std::string class_label(size_t index) { return "CHARACTER" + std::to_string(index + 1); }
 
@@ -128,7 +121,7 @@ std::vector<Diagnostic> validate_charattr_file(const DocumentBase &document) {
 		// A camouflage with no item: type 0, which the item lookup finds as the item whose id is 100000, else the
 		// first items.def row [orig: ItemList_FindIndexByTypeId @ 0x49e100, its 0 for no match @ 0x49e12f].
 		for (const Cammo &cammo : kCammo) {
-			if (cammo_of(table.rows[index], cammo.property) != 0) continue;
+			if (charattr::cammo_of(table.rows[index], cammo.property) != 0) continue;
 			const charattr::ValueSource &value = source.values[cammo.property];
 			findings.push_back(warning(CharAttrFinding::NoCammo,
 					label + (value.read ? "'s " + std::string(cammo.key) + " is 0" : " has no " + std::string(cammo.key)) +
@@ -157,7 +150,7 @@ void charattr_idle_lines(const TextDocument &document, std::vector<size_t> &line
 	std::sort(read_at.begin(), read_at.end());
 	// The same table, byte for byte, with those lines commented out.
 	const auto same_without = [&](const std::vector<size_t> &lines) {
-		const std::string commented = config_commented(text, lines);
+		const std::string commented = configfile::config_commented(text, lines);
 		charattr::Table again;
 		charattr::read_table(reinterpret_cast<const uint8_t *>(commented.data()), commented.size(), again);
 		return charattr::same_rows(table, again);
@@ -197,7 +190,7 @@ void charattr_references(const TextDocument &document, std::vector<TextReference
 	for (size_t index = 0; index < reading.classes; ++index) {
 		for (const Cammo &cammo : kCammo) {
 			const charattr::ValueSource &value = reading.sources[index].values[cammo.property];
-			const int32_t type = cammo_of(table.rows[index], cammo.property);
+			const int32_t type = charattr::cammo_of(table.rows[index], cammo.property);
 			// 0 names none (NoCammo says what the game makes of it); a token that is no plain integer (a float
 			// the reader truncates) is no name a rename could write back.
 			if (!value.read || type == 0) continue;

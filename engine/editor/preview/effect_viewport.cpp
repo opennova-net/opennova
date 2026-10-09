@@ -256,7 +256,7 @@ ViewportAction EffectViewport::follow_(const ViewportInput &input, PreviewClock 
 	}
 	// A revealed place shows the effect whose block holds it (a Go to of its name, a Problems row).
 	if (revealed_line_ > 0) {
-		const size_t at = particle_effect_at(file, revealed_line_);
+		const size_t at = file.effect_at_line(revealed_line_);
 		revealed_line_ = 0;
 		if (at != std::string::npos && !file.effects[at].id.empty() &&
 				!strutil::iequals(file.effects[at].id, options_.effect)) {
