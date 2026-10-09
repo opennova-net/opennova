@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/classes/resource.hpp>
+#include <godot_cpp/classes/texture.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -20,6 +21,7 @@
 #include <base/vfs/file_source.h>
 #include <runtime/assets/asset_store.h>
 #include <runtime/renderer/texture_load_rules.h>
+#include <runtime/renderer/texture_registry.h>
 
 #include <vector>
 
@@ -77,11 +79,16 @@ private:
 	mutable uint64_t resolve_memo_epoch_ = 0;
 	mutable bool resolve_memo_built_ = false;
 
-	// Decoded-texture cache for VFS-backed load_texture. Both archive and loose winners
-	// resolve through the mounted index so the mount mode owns precedence. Negative
-	// results cache too, so a missing name is probed once. Same epoch self-clear as the
-	// memo above.
+	// Decoded-texture cache for VFS-backed load_texture, and the material rows' decode
+	// memo. Both archive and loose winners resolve through the mounted index so the mount
+	// mode owns precedence. Negative results cache too, so a missing name is probed once.
+	// Same epoch self-clear as the memo above.
 	mutable std::unordered_map<std::string, Ref<Texture2D>> texture_cache_;
+	// The game's texture registry over this mount's material rows
+	// (renderer/texture_registry.h): what a row's loader made, by the row's key, the first
+	// row of a key to load deciding the texture every later row of it draws. Only a loaded
+	// texture is kept. Cleared with texture_cache_.
+	mutable opennova::renderer::TextureRegistry<Ref<Texture>> texture_registry_;
 	mutable uint64_t texture_cache_epoch_ = 0;
 
 public:
@@ -109,6 +116,11 @@ private:
 			TextureLoader loader, LookupPolicy policy) const;
 	PackedByteArray read_texture_attempt_(const opennova::renderer::TextureLoad &load,
 			LookupPolicy policy) const;
+	// The texture caches (texture_cache_, texture_registry_) emptied when the global cache
+	// epoch moved since they filled.
+	void sync_texture_caches_() const;
+	// What one material row's own loader makes, null when it makes nothing.
+	Ref<Texture> material_row_texture_(const String &name, uint8_t type) const;
 
 	// mount_runtime's mount itself (the archives, the expansion that took).
 	Error mount_runtime_archives_(const String &path, const String &expansion,
@@ -225,9 +237,12 @@ public:
 	Ref<Image> load_texture_image(const String &name, TextureLoader loader,
 			LookupPolicy policy = LOOKUP_SESSION_DEFAULT, bool *r_alpha_only = nullptr,
 			opennova::renderer::TextureReader *r_reader = nullptr) const;
-	// One material row's texture of runtime `type`: the one file retail's loader
-	// opens for it, decoded by that loader's reader and prepared as the
-	// dispatcher does; the checkerboard when it does not load.
+	// One material row's texture of runtime `type`: the texture the registry keeps
+	// under the row's key (renderer::texture_registry_key: the name as written and
+	// its loader's suffix, without case), so the first row of a key to load decides
+	// it, file, reader and flags; else the one file retail's loader opens for it,
+	// decoded by that loader's reader, prepared as the dispatcher does and kept;
+	// the checkerboard when it does not load.
 	Ref<Texture> load_material_texture(const String &name, uint8_t type) const;
 	// C++ siblings only (not bound): whether that row's loader finds no file to open: the file it
 	// opens is not there, or it opens none and the name as written is not there either (a file of the
