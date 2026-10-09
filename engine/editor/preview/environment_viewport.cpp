@@ -213,8 +213,10 @@ const char *environment_clock_from_token(EnvironmentClockFrom from) {
 }
 
 std::string environment_clock_words(double hours) {
+	// The nearest minute, as the mission format's header_time_to_hhmm rounds one (a truncating 16.16 keyframe
+	// time reads as the minute it was written at), the day wrapped.
 	const double wrapped = std::fmod(std::max(hours, 0.0), 24.0);
-	const int minutes = std::min(int(std::floor(wrapped * 60.0 + 1e-6)), 24 * 60 - 1);
+	const int minutes = int(std::lround(wrapped * 60.0)) % (24 * 60);
 	char text[8];
 	std::snprintf(text, sizeof(text), "%02d:%02d", minutes / 60, minutes % 60);
 	return text;
@@ -426,7 +428,7 @@ void EnvironmentViewport::clock_() {
 		start_fixed24_ = uint32_t(env::tod_start_fixed24(use->start_time));
 		start_from_ = EnvironmentClockFrom::Mission;
 	} else {
-		start_fixed24_ = uint32_t(env::hhmm_to_hours_fp(float(config_.curtime))) << 8;
+		start_fixed24_ = env::tod_file_clock(config_).start_fixed24;
 		start_from_ = EnvironmentClockFrom::Environment;
 	}
 	// The rate: a day in the option's seconds (the editor's aid); else the mission's day length, 0 a clock
@@ -439,12 +441,10 @@ void EnvironmentViewport::clock_() {
 	} else if (from_mission) {
 		advance_ = uint32_t(env::tod_advance_per_tick(use->minutes_per_day));
 		rate_from_ = EnvironmentClockFrom::Mission;
-	} else if (config_.tod_rate_set) {
-		advance_ = uint32_t(env::tod_rate_advance_per_tick(config_.tod_rate));
-		rate_from_ = EnvironmentClockFrom::Environment;
 	} else {
-		advance_ = uint32_t(env::kTodDefaultAdvancePerTick);
-		rate_from_ = EnvironmentClockFrom::Default;
+		// The file's own clock (formats/env tod_file_clock): its tod_rate's advance, else the engine's default.
+		advance_ = env::tod_file_clock(config_).advance_per_tick;
+		rate_from_ = config_.tod_rate_set ? EnvironmentClockFrom::Environment : EnvironmentClockFrom::Default;
 	}
 }
 
@@ -669,23 +669,14 @@ std::vector<int> EnvironmentViewport::keyframe_times() const {
 
 EnvironmentViewport::Segment EnvironmentViewport::segment() const {
 	Segment out;
-	const std::vector<int> times = keyframe_times();
-	if (times.empty()) return out;
-	// In the game's 16.16 hours: the last keyframe at or before the time, below the first the last, toward
-	// the next (past the last the first), the fraction elapsed over the segment's length (0 for none).
-	const int64_t now = int64_t(weather_.tod_fixed24 >> 8);
-	constexpr int64_t kDay = int64_t(24) << 16;
-	int from = int(times.size()) - 1;
-	for (size_t i = 0; i < times.size(); ++i)
-		if (int64_t(env::hhmm_to_hours_fp(float(times[i]))) <= now) from = int(i);
-	const int to = (from + 1) % int(times.size());
-	const int64_t a = env::hhmm_to_hours_fp(float(times[size_t(from)]));
-	const int64_t b = env::hhmm_to_hours_fp(float(times[size_t(to)]));
-	const int64_t length = ((b - a) % kDay + kDay) % kDay;
-	const int64_t elapsed = ((now - a) % kDay + kDay) % kDay;
-	out.from = from;
-	out.to = to;
-	out.fraction = length > 0 ? double(elapsed) / double(length) : 0.0;
+	// The game's search in 16.16 hours (formats/env find_keyframe_segment), the fraction elapsed over the
+	// segment's length (0 for none).
+	std::vector<int> times = keyframe_times();
+	for (int &time : times) time = env::hhmm_to_hours_fp(float(time));
+	const env::KeyframeSegment at = env::find_keyframe_segment(times, int(weather_.tod_fixed24 >> 8));
+	out.from = at.lo;
+	out.to = at.hi;
+	out.fraction = at.length_fp > 0 ? double(at.elapsed_fp) / double(at.length_fp) : 0.0;
 	return out;
 }
 
@@ -805,11 +796,8 @@ io::JsonValue EnvironmentViewport::body_json(const ViewportInput &) const {
 		tod.set("to", json_string(environment_clock_words(double(env::hhmm_to_hours_fp(float(times[size_t(at.to)]))) / 65536.0)));
 		tod.set("fraction", json_number(at.fraction));
 		const float time = float(weather_.tod_hhmm());
-		env::TodState state = env::interpolate_tod(config_.keyframes, time, config_.envscale);
-		const env::TodState overcast =
-				has_overcast_ && !overcast_.keyframes.empty() ? env::interpolate_tod(overcast_.keyframes, time, overcast_.envscale)
-				                                               : env::TodState{};
-		state = env::blend_tod_states(state, overcast, weather_.overcast_for_tod_q16);
+		const env::TodState state =
+				env::tod_colors(config_, has_overcast_ ? &overcast_ : nullptr, time, weather_.overcast_for_tod_q16);
 		tod.set("colours", keyframe_colours(state, weather_.is_night_phase()));
 	}
 	tod.set("overcast_table", JsonValue::make_bool(has_overcast_ && !overcast_.keyframes.empty()));
