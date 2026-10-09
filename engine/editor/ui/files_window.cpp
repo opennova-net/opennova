@@ -262,7 +262,7 @@ void FilesWindow::refresh(const SessionView &view) {
 	}
 	for (Folder &folder : folders_)
 		std::sort(folder.folders.begin(), folder.folders.end(), [this](size_t a, size_t b) {
-			return normalized_logical_name(folders_[a].name) < normalized_logical_name(folders_[b].name);
+			return pff::normalized_logical_name(folders_[a].name) < pff::normalized_logical_name(folders_[b].name);
 		});
 	counts_.clear();
 	FindingMarks scratch;
@@ -810,7 +810,7 @@ void FilesWindow::draw_move_menu(const SessionView &view, const AssetEntry &entr
 	std::vector<std::string> folders;
 	for (size_t i = 1; i < folders_.size(); ++i) folders.push_back(folders_[i].path);
 	std::sort(folders.begin(), folders.end(), [](const std::string &a, const std::string &b) {
-		return normalized_logical_name(a) < normalized_logical_name(b);
+		return pff::normalized_logical_name(a) < pff::normalized_logical_name(b);
 	});
 	for (const std::string &folder : folders)
 		if (ImGui::MenuItem((folder + "/").c_str(), nullptr, false, folder != here)) move_to(folder);

@@ -52,13 +52,13 @@ constexpr const char *kUndoable = " Undo takes it back, and Save writes it.";
 // The game install's spelling of a file it has (view.project.retail_files is sorted by the
 // normalized name), or "" when it has none of that name.
 std::string retail_name(const SessionView &view, const std::string &name) {
-	const std::string wanted = normalized_logical_name(name);
+	const std::string wanted = pff::normalized_logical_name(name);
 	const auto found =
 			std::lower_bound(view.project.retail_files.begin(), view.project.retail_files.end(),
 					wanted, [](const std::string &file, const std::string &key) {
-						return normalized_logical_name(file) < key;
+						return pff::normalized_logical_name(file) < key;
 					});
-	return found != view.project.retail_files.end() && normalized_logical_name(*found) == wanted
+	return found != view.project.retail_files.end() && pff::normalized_logical_name(*found) == wanted
 			? *found
 			: std::string();
 }
@@ -121,7 +121,7 @@ void requirement_fixes(const RequirementSubject &subject, const SessionView &vie
 	// (it is renamed through its source) and no other requirement names (the rename would
 	// only move the problem).
 	const auto extension = [](const std::string &name) {
-		return normalized_logical_name(utf8_of(path_of(name).extension()));
+		return pff::normalized_logical_name(utf8_of(path_of(name).extension()));
 	};
 	size_t offered = 0;
 	for (const AssetEntry &file : view.project.scan->entries) {
@@ -129,7 +129,7 @@ void requirement_fixes(const RequirementSubject &subject, const SessionView &vie
 		    extension(file.logical_name) != extension(row->name))
 			continue;
 		const bool required = std::any_of(view.project.requirements->rows.begin(), view.project.requirements->rows.end(), [&file](const RequirementRow &other) {
-			return normalized_logical_name(other.name) == normalized_logical_name(file.logical_name);
+			return pff::normalized_logical_name(other.name) == pff::normalized_logical_name(file.logical_name);
 		});
 		if (required) continue;
 		if (offered++ == kUseFilesMax) break;
@@ -337,7 +337,7 @@ void create_there_fix(const ReferenceSubject &missing, const SessionView &view, 
 	// A file the game reads by name is made from its requirement's blank, named as the manifest spells it (a string
 	// id's scope names its table upper-case: GAMETEXT.BIN, gametext.bin).
 	for (const RequirementRow &row : view.project.requirements->rows)
-		if (row.expected_kind == kind && normalized_logical_name(row.name) == normalized_logical_name(name)) {
+		if (row.expected_kind == kind && pff::normalized_logical_name(row.name) == pff::normalized_logical_name(name)) {
 			blank.role = row.role;
 			name = blank.logical_name = row.name;
 		}
@@ -420,7 +420,7 @@ ProblemFix reset_row_fix(const std::string &path) {
 	        request::edit_record(path, std::move(add), true), false};
 }
 
-bool same_file(const std::string &a, const std::string &b) { return normalized_logical_name(a) == normalized_logical_name(b); }
+bool same_file(const std::string &a, const std::string &b) { return pff::normalized_logical_name(a) == pff::normalized_logical_name(b); }
 
 // The file a missing texture's placeholder takes: a name the reference's loader opens once the
 // project has that file (reference_file_candidates, asked as if it were there), of the names
@@ -522,7 +522,7 @@ void reference_fixes(const ReferenceSubject &missing, const SessionView &view, c
 	if (view.project.scan->find(name) || !check_file_name(name, kind, problem, message)) return;
 	const BlankFactory *factory = nullptr;
 	for (const RequirementRow &row : view.project.requirements->rows)
-		if (row.expected_kind == kind && normalized_logical_name(row.name) == normalized_logical_name(name))
+		if (row.expected_kind == kind && pff::normalized_logical_name(row.name) == pff::normalized_logical_name(name))
 			factory = find_blank_factory_for_role(row.role);
 	if (!factory) factory = find_blank_factory_for_kind(kind);
 	if (factory)
@@ -581,7 +581,7 @@ void import_fit_fix(const Diagnostic &d, const SessionView &view, std::vector<Pr
 	for (const std::string &reason : needs.reasons) reasons += (reasons.empty() ? "" : "; ") + reason;
 	// The file it makes then, by the format's extension and the name option.
 	const std::string made = image_import_output_name(state.source, renderer::image_import_settings(after));
-	const bool renamed = normalized_logical_name(made) != normalized_logical_name(file);
+	const bool renamed = pff::normalized_logical_name(made) != pff::normalized_logical_name(file);
 	out.push_back({"Make " + file + "'s import fit " + (needs.uses > 1 ? "its uses" : "this use"),
 	               "Sets the import of " + state.source + " to " + words + " (" + reasons + "), then imports it again, which makes " +
 	                       (renamed ? made + " in place of " + file + ": every use of it reads " + made + " from then on."

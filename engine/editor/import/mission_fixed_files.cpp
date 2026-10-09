@@ -23,7 +23,7 @@ std::vector<MissionFixedFile> collect() {
 	std::vector<MissionFixedFile> out;
 	std::set<std::string> seen;
 	const auto add = [&out, &seen](const std::string &name, const char *what) {
-		if (!name.empty() && seen.insert(normalized_logical_name(name)).second) out.push_back({ name, what });
+		if (!name.empty() && seen.insert(pff::normalized_logical_name(name)).second) out.push_back({ name, what });
 	};
 	for (const hud::HudFixedTexture &texture : hud::kHudFixedTextures) add(texture.name, "for the HUD");
 	add(hud::kHudCargoFlagTexture, "for the HUD's carried flag");

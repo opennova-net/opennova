@@ -32,7 +32,7 @@ bool index_current(const std::vector<AssetEntry> &entries, size_t indexed) {
 	if (indexed != entries.size()) return false;
 #ifndef NDEBUG
 	for (size_t i = 0; i < entries.size(); ++i) {
-		if (entries[i].key != normalized_logical_name(entries[i].logical_name)) return false;
+		if (entries[i].key != pff::normalized_logical_name(entries[i].logical_name)) return false;
 		if (i > 0 && entry_before(entries[i], entries[i - 1])) return false;
 	}
 #endif
@@ -86,20 +86,6 @@ bool listed(const std::vector<Diagnostic> &rows, const Diagnostic &d) {
 
 } // namespace
 
-std::string normalized_logical_name(std::string_view name) {
-	// pff_norm_name's rule over a buffer of the name's own length plus its terminator, so nothing
-	// past a fixed size is cut off.
-	std::string out(name.size() + 1, '\0');
-	pff::pff_norm_name(name.data(), name.size(), out.data(), out.size());
-	out.resize(std::char_traits<char>::length(out.c_str()));
-	return out;
-}
-
-bool logical_name_fits_archive(std::string_view name) {
-	if (name.size() > static_cast<size_t>(pff::PFF_NAME_SIZE)) return false;
-	return !normalized_logical_name(name).empty();
-}
-
 const AssetEntry *AssetScan::named(std::string_view file, bool *ambiguous) const {
 	if (ambiguous) *ambiguous = false;
 	if (const AssetEntry *exact = at_path(file)) return exact;
@@ -117,12 +103,12 @@ const AssetEntry *AssetScan::named(std::string_view file, bool *ambiguous) const
 }
 
 const AssetEntry *AssetScan::find(std::string_view logical_name) const {
-	const std::string key = normalized_logical_name(logical_name);
+	const std::string key = pff::normalized_logical_name(logical_name);
 	if (!index_current(entries, by_path_.size())) {
 		stale_index(entries.size(), by_path_.size());
 		const AssetEntry *first = nullptr;
 		for (const AssetEntry &entry : entries)
-			if (normalized_logical_name(entry.logical_name) == key &&
+			if (pff::normalized_logical_name(entry.logical_name) == key &&
 					(!first || entry.relative_path < first->relative_path))
 				first = &entry;
 		return first;
@@ -148,7 +134,7 @@ const AssetEntry *AssetScan::at_path(std::string_view relative_path) const {
 }
 
 void AssetScan::index() {
-	for (AssetEntry &entry : entries) entry.key = normalized_logical_name(entry.logical_name);
+	for (AssetEntry &entry : entries) entry.key = pff::normalized_logical_name(entry.logical_name);
 	std::sort(entries.begin(), entries.end(), entry_before);
 	by_path_.resize(entries.size());
 	std::iota(by_path_.begin(), by_path_.end(), size_t(0));
@@ -232,13 +218,13 @@ std::vector<size_t> match_files(const AssetScan &scan, const std::string &text, 
 	std::vector<size_t> out;
 	bool only = false;
 	const AssetKind named = asset_kind_named_by(text, &only);
-	const std::string wanted = normalized_logical_name(text);
+	const std::string wanted = pff::normalized_logical_name(text);
 	std::vector<bool> listed(scan.entries.size(), false);
 	if (!only)
 		for (size_t i = 0; i < scan.entries.size(); ++i) {
 			const AssetEntry &entry = scan.entries[i];
 			if (kind != AssetKind::kCount && entry.kind != kind) continue;
-			if (!wanted.empty() && normalized_logical_name(entry.relative_path).find(wanted) == std::string::npos) continue;
+			if (!wanted.empty() && pff::normalized_logical_name(entry.relative_path).find(wanted) == std::string::npos) continue;
 			out.push_back(i);
 			listed[i] = true;
 		}

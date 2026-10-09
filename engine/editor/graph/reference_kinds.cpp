@@ -940,12 +940,12 @@ bool diagnostics_block_build(const std::vector<Diagnostic> &items) {
 
 bool BaseNames::has(const std::string &name) const {
 	if (!sorted) return false;
-	const std::string wanted = normalized_logical_name(name);
+	const std::string wanted = pff::normalized_logical_name(name);
 	const auto found = std::lower_bound(sorted->begin(), sorted->end(), wanted,
 	                                    [](const std::string &listed, const std::string &key) {
-		                                    return normalized_logical_name(listed) < key;
+		                                    return pff::normalized_logical_name(listed) < key;
 	                                    });
-	return found != sorted->end() && normalized_logical_name(*found) == wanted;
+	return found != sorted->end() && pff::normalized_logical_name(*found) == wanted;
 }
 
 bool blocks_build(const Diagnostic &d, const BaseNames *base) {

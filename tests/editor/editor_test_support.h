@@ -336,7 +336,7 @@ inline opennova::editor::OriginalData originals_of(const std::vector<opennova::e
 	data.ready = true;
 	for (const opennova::editor::Diagnostic &d : rows)
 		if (std::find(paths.begin(), paths.end(), d.asset) != paths.end())
-			++data.findings[opennova::editor::normalized_logical_name(opennova::editor::basename_of(d.asset))]
+			++data.findings[opennova::pff::normalized_logical_name(opennova::editor::basename_of(d.asset))]
 			               [opennova::editor::original_finding_key(d)];
 	return data;
 }

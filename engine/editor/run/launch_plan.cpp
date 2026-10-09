@@ -358,7 +358,7 @@ bool prepare_expansion_run(const std::string &install, const std::string &build_
 		                     "The game install " + install + " has none of the game's archives for the expansion to play over.");
 		return false;
 	}
-	const std::string folder = expansion_folder(expansion);
+	const std::string folder = vfs_expansion_dir(std::string(), expansion);
 	const fs::path built = path_of(build_dir) / path_of(folder);
 	if (!fs::is_directory(system_path(utf8_of(built)), ec)) {
 		error = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
@@ -402,9 +402,9 @@ bool prepare_expansion_run(const std::string &install, const std::string &build_
 		pff::pff_close(&archive);
 	}
 	const auto packs = [&packed](const std::string &name) {
-		const std::string wanted = normalized_logical_name(name);
+		const std::string wanted = pff::normalized_logical_name(name);
 		return std::any_of(packed.begin(), packed.end(),
-		                   [&wanted](const std::string &held) { return normalized_logical_name(held) == wanted; });
+		                   [&wanted](const std::string &held) { return pff::normalized_logical_name(held) == wanted; });
 	};
 	// The install's base game: its archives and the loose files it ships beside them, but a file the
 	// expansion packs, staged; and the files it reads from its folder by name (kInstallRootReads), copied
@@ -665,7 +665,7 @@ bool prepare_strict_install_launch_plan(const std::string &install, const std::s
 		                             expansion + " to play over: export the base game's project first.");
 		return false;
 	}
-	const std::string folder = expansion.empty() ? std::string() : expansion_folder(expansion);
+	const std::string folder = expansion.empty() ? std::string() : vfs_expansion_dir(std::string(), expansion);
 	if (!expansion.empty() && !fs::is_directory(system_path(utf8_of(build / path_of(folder))), ec)) {
 		error = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
 		                     "The build " + build_dir + " holds no expansion " + expansion + ".");

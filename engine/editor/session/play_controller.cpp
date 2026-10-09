@@ -63,15 +63,15 @@ std::string play_mission_for(const SessionView &view) {
 	// cut a mission's name at its first dot ("op.v2.bms" opens "op.wac"), so the mission is any of the
 	// project's whose base name the file's is (the first in the scan's order), and a row read only
 	// beside another's file (the dialog's sounds, beside its .dbf) only when the project has that one.
-	const std::string wanted = normalized_logical_name(name);
-	const std::string base = normalized_logical_name(mission::mission_base_name(name));
+	const std::string wanted = pff::normalized_logical_name(name);
+	const std::string base = pff::normalized_logical_name(mission::mission_base_name(name));
 	const auto names_it = [&](const std::string &mission) {
 		for (const mission::Sidecar &sidecar : mission::sidecars()) {
 			if (const mission::Sidecar *needed = sidecar.needs ? mission::sidecar_for_role(sidecar.needs) : nullptr)
 				if (!scan.find(mission::sidecar_name(mission, *needed))) continue;
 			const std::string alternate = mission::sidecar_alternate_name(mission, sidecar);
-			if (normalized_logical_name(mission::sidecar_name(mission, sidecar)) == wanted ||
-			    (!alternate.empty() && normalized_logical_name(alternate) == wanted))
+			if (pff::normalized_logical_name(mission::sidecar_name(mission, sidecar)) == wanted ||
+			    (!alternate.empty() && pff::normalized_logical_name(alternate) == wanted))
 				return true;
 		}
 		return false;
@@ -79,7 +79,7 @@ std::string play_mission_for(const SessionView &view) {
 	if (!names_it(base + ".bms")) return std::string();
 	for (const AssetEntry &entry : scan.entries)
 		if (entry.kind == AssetKind::Mission && strutil::ends_with_icase(entry.logical_name, ".bms") &&
-		    normalized_logical_name(mission::mission_base_name(entry.logical_name)) == base && names_it(entry.logical_name))
+		    pff::normalized_logical_name(mission::mission_base_name(entry.logical_name)) == base && names_it(entry.logical_name))
 			return entry.logical_name;
 	return std::string();
 }
