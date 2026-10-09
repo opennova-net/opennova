@@ -14,6 +14,7 @@
 #include <editor/project/project_files.h>
 #include <editor/session/texture_use_index.h>
 #include <editor/session/view/session_view.h>
+#include <formats/pff/pff.h>
 
 namespace opennova::editor {
 
@@ -102,7 +103,7 @@ bool texture_import_state(const SessionView &view, const std::string &path, Text
 	}
 	// Whether the source holds an alpha, read from its header alone, where a use weighs it (a sky's clouds).
 	bool alpha = false;
-	if (std::any_of(uses.begin(), uses.end(), [](const TextureUse &use) { return use.role == TextureRoleId::SkyCloud; })) {
+	if (std::any_of(uses.begin(), uses.end(), [](const TextureUse &use) { return use.role == renderer::TextureRoleId::SkyCloud; })) {
 		std::vector<uint8_t> head(4096);
 		if (std::FILE *file = io::fopen_utf8(join_path(view.project.root, out.source).c_str(), "rb")) {
 			head.resize(std::fread(head.data(), 1, head.size(), file));
@@ -122,7 +123,8 @@ std::string free_texture_copy_name(const AssetScan &scan, const BaseNames &base,
 	const std::string stem = utf8_of(path_of(name).stem());
 	for (int n = 2; n < 100; ++n) {
 		const std::string suffix = "_" + std::to_string(n);
-		const size_t room = 16 - std::min<size_t>(16, suffix.size() + extension.size());
+		constexpr size_t kNameSize = size_t(pff::PFF_NAME_SIZE);
+		const size_t room = kNameSize - std::min<size_t>(kNameSize, suffix.size() + extension.size());
 		const std::string copy = stem.substr(0, std::min(stem.size(), room)) + suffix + extension;
 		if (!scan.find(copy) && !base.has(copy)) return copy;
 	}
@@ -151,12 +153,12 @@ TextureUseAsks texture_use_asks(const SessionView &view, const std::string &path
 	for (const TextureUse &use : uses) {
 		// A use that opens another file of the name asks nothing of this one (a missing name's uses read it).
 		if (!use.known() || (entry && !use.reads_file)) continue;
-		if ((use.role == TextureRoleId::TerrainFoliageMap || use.role == TextureRoleId::TerrainCharMap) && !out.indices) {
+		if ((use.role == renderer::TextureRoleId::TerrainFoliageMap || use.role == renderer::TextureRoleId::TerrainCharMap) && !out.indices) {
 			out.indices = true;
 			out.indices_why = use.words;
 		}
 		const TextureRoleRow &row = texture_role_row(use.role);
-		if (row.size == TextureSizeRule::Exact) {
+		if (row.size == renderer::TextureSizeRule::Exact) {
 			const std::string size = std::to_string(row.width) + "x" + std::to_string(row.height);
 			if (sizes.insert(size).second && out.size.empty()) out.size_why = use.words + " reads it at " + texture_size_words(row);
 			out.size = size;

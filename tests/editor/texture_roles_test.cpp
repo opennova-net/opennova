@@ -41,6 +41,7 @@
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
+namespace renderer = opennova::renderer;
 using opennova::io::JsonValue;
 
 namespace {
@@ -59,100 +60,86 @@ TextureNameTest files_of(std::set<std::string> names) {
 }
 
 int test_catalog() {
-	TEST_EXPECT(kTextureRoleCount == 46);
+	TEST_EXPECT(renderer::kTextureRoleCount == 46);
 	std::set<std::string> tokens;
-	for (size_t i = 0; i < kTextureRoleCount; ++i) {
-		const TextureRoleRow &row = texture_role_row(static_cast<TextureRoleId>(i));
+	for (size_t i = 0; i < renderer::kTextureRoleCount; ++i) {
+		const TextureRoleRow &row = texture_role_row(static_cast<renderer::TextureRoleId>(i));
 		TEST_EXPECT(static_cast<size_t>(row.id) == i && *row.token && *row.words && *row.witness);
 		TEST_EXPECT(tokens.insert(row.token).second);
-		TextureRoleId back = TextureRoleId::kCount;
+		renderer::TextureRoleId back = renderer::TextureRoleId::kCount;
 		TEST_EXPECT(texture_role_from_token(row.token, back) && back == row.id);
 		TEST_EXPECT(*texture_loader_token(row.loader) && *texture_role_group_words(row.group));
 	}
-	TextureRoleId none = TextureRoleId::kCount;
+	renderer::TextureRoleId none = renderer::TextureRoleId::kCount;
 	TEST_EXPECT(!texture_role_from_token("no_such_role", none));
-	// The rules the research witnessed, pinned.
-	const TextureRoleRow &colour = texture_role_row(TextureRoleId::TerrainColourMap);
-	TEST_EXPECT(colour.loader == TextureLoader::Tga && colour.size == TextureSizeRule::Exact && colour.width == 1024 &&
-	            colour.height == 1024 && texture_size_words(colour) == "1024 x 1024");
-	TEST_EXPECT(texture_role_takes(colour, ".TGA") && !texture_role_takes(colour, ".dds") && !texture_role_takes(colour, ".pcx"));
-	const TextureRoleRow &foliage = texture_role_row(TextureRoleId::TerrainFoliageMap);
-	TEST_EXPECT(foliage.size == TextureSizeRule::SquarePowerOfTwoAtMost && foliage.width == 1024 && !foliage.reads_alpha &&
-	            foliage.loader == TextureLoader::Pcx8);
-	TEST_EXPECT(texture_role_row(TextureRoleId::TerrainTileAtlas).size == TextureSizeRule::MultipleOf &&
-	            texture_role_row(TextureRoleId::TerrainTileAtlas).width == 64);
-	TEST_EXPECT(texture_role_row(TextureRoleId::ModelNormalMap).size == TextureSizeRule::AtMost &&
-	            texture_role_row(TextureRoleId::ModelNormalMap).width == 512 &&
-	            texture_role_takes(texture_role_row(TextureRoleId::ModelNormalMap), ".mdt") &&
-	            !texture_role_takes(texture_role_row(TextureRoleId::ModelNormalMap), ".pcx"));
-	TEST_EXPECT(texture_role_row(TextureRoleId::LoadingScreen).size == TextureSizeRule::Exact &&
-	            texture_role_row(TextureRoleId::LoadingScreen).width == 800 &&
-	            texture_role_row(TextureRoleId::LoadingScreen).height == 600);
-	TEST_EXPECT(texture_role_takes(texture_role_row(TextureRoleId::ParticleGraphic), ".tga") &&
-	            !texture_role_takes(texture_role_row(TextureRoleId::ParticleGraphic), ".dds"));
-	TEST_EXPECT(texture_role_takes(texture_role_row(TextureRoleId::MenuImage), ".png") &&
-	            !texture_role_takes(texture_role_row(TextureRoleId::ModelDiffuse), ".png"));
-	TEST_EXPECT(texture_role_row(TextureRoleId::HudMfd).size == TextureSizeRule::PowerOfTwo);
-	// The quadrant split's rule, and the particle atlas's pages by the graphic's mode.
-	TEST_EXPECT(texture_role_row(TextureRoleId::TerrainBlendMap).size == TextureSizeRule::QuadrantSplit);
-	const TextureRoleRow &particle = texture_role_row(TextureRoleId::ParticleGraphic);
-	TEST_EXPECT(particle.size == TextureSizeRule::AtlasPage && particle.width == 1024 && particle.height == 256 &&
-	            texture_size_words(particle).find("256 for a bump, mod, mod2x, bumpadd or distort graphic") != std::string::npos);
-	std::printf("catalog: %zu roles, each with a token, words, a loader, formats and a witness\n", kTextureRoleCount);
+	// Each row the engine's (renderer/texture_roles, whose rules renderer_texture_roles pins) with the words.
+	for (size_t i = 0; i < renderer::kTextureRoleCount; ++i) {
+		const renderer::TextureRoleId id = static_cast<renderer::TextureRoleId>(i);
+		const renderer::TextureRole &engine = renderer::texture_role(id);
+		const TextureRoleRow &row = texture_role_row(id);
+		TEST_EXPECT(row.loader == engine.loader && row.formats == engine.formats && row.size == engine.size &&
+		            row.width == engine.width && row.height == engine.height && row.reads_alpha == engine.reads_alpha);
+	}
+	TEST_EXPECT(texture_size_words(texture_role_row(renderer::TextureRoleId::TerrainColourMap)) == "1024 x 1024");
+	TEST_EXPECT(texture_size_words(texture_role_row(renderer::TextureRoleId::ParticleGraphic))
+	                    .find("256 for a bump, mod, mod2x, bumpadd or distort graphic") != std::string::npos);
+	TEST_EXPECT(std::string(texture_loader_token(texture_role_row(renderer::TextureRoleId::SkyCloud).loader)) == "archive" &&
+	            std::string(texture_loader_token(texture_role_row(renderer::TextureRoleId::HudAlphaOnly).loader)) == "hud" &&
+	            std::string(texture_loader_token(texture_role_row(renderer::TextureRoleId::ParticleGraphic).loader)) == "ptl");
+	std::printf("catalog: %zu roles, each with a token, words, a loader, formats and a witness\n", renderer::kTextureRoleCount);
 	return 0;
 }
 
 int test_names() {
 	// STAGE: the .dds sibling (cut 3 characters past the first '.') wins; else the TGA reader.
-	TextureLoad load = texture_load(TextureLoader::Stage, "body.tga", files_of({"body.tga", "body.dds"}));
+	TextureLoad load = texture_load(renderer::TextureLoader::Stage, "body.tga", files_of({"body.tga", "body.dds"}));
 	TEST_EXPECT(load.file == "body.dds" && load.reader == TextureFileReader::Dds);
-	load = texture_load(TextureLoader::Stage, "body.tga", files_of({"body.tga"}));
+	load = texture_load(renderer::TextureLoader::Stage, "body.tga", files_of({"body.tga"}));
 	TEST_EXPECT(load.file == "body.tga" && load.reader == TextureFileReader::Tga);
-	load = texture_load(TextureLoader::Stage, "sky.pcx", files_of({"sky.pcx"}));
+	load = texture_load(renderer::TextureLoader::Stage, "sky.pcx", files_of({"sky.pcx"}));
 	TEST_EXPECT(load.file == "sky.pcx" && load.reader == TextureFileReader::Pcx && load.transform == TextureLoadTransform::None);
 	// A normal map's .tga converted from its height; its .mdt as it is.
-	load = texture_load(TextureLoader::Normal, "skin.tga", files_of({"skin.tga"}), 4);
+	load = texture_load(renderer::TextureLoader::Normal, "skin.tga", files_of({"skin.tga"}), 4);
 	TEST_EXPECT(load.reader == TextureFileReader::Tga && load.transform == TextureLoadTransform::NormalFromHeight);
-	load = texture_load(TextureLoader::Normal, "skin.MDT", files_of({"skin.MDT"}), 4);
+	load = texture_load(renderer::TextureLoader::Normal, "skin.MDT", files_of({"skin.MDT"}), 4);
 	TEST_EXPECT(load.reader == TextureFileReader::Tga && load.transform == TextureLoadTransform::None);
 	// PLAIN's upper-case .PCX as written: white, alpha from blue; a lower-case one opaque colour.
-	load = texture_load(TextureLoader::Plain, "MASK.PCX", files_of({"MASK.PCX"}));
+	load = texture_load(renderer::TextureLoader::Plain, "MASK.PCX", files_of({"MASK.PCX"}));
 	TEST_EXPECT(load.reader == TextureFileReader::Pcx && load.transform == TextureLoadTransform::WhiteAlphaFromBlue);
-	load = texture_load(TextureLoader::Plain, "mask.pcx", files_of({"mask.pcx"}));
+	load = texture_load(renderer::TextureLoader::Plain, "mask.pcx", files_of({"mask.pcx"}));
 	TEST_EXPECT(load.reader == TextureFileReader::Pcx && load.transform == TextureLoadTransform::None);
 	// ARCHIVE (renderer::texture_load_attempts): the .dds sibling first; else a PCX, its luminance its alpha
 	// where the caller names it twice (a sky map's), else opaque (a scar's).
-	load = texture_load(TextureLoader::Archive, "cld.day.pcx", files_of({"cld.day.dds", "cld.day.pcx"}), 0, -1,
-	                    TextureRoleId::SkyCloud);
+	load = texture_load(renderer::TextureLoader::ArchiveSelfAlpha, "cld.day.pcx", files_of({"cld.day.dds", "cld.day.pcx"}));
 	TEST_EXPECT(load.file == "cld.day.dds" && load.reader == TextureFileReader::Dds);
-	load = texture_load(TextureLoader::Archive, "cloud01.pcx", files_of({"cloud01.pcx"}), 0, -1, TextureRoleId::SkyCloud);
+	load = texture_load(renderer::TextureLoader::ArchiveSelfAlpha, "cloud01.pcx", files_of({"cloud01.pcx"}));
 	TEST_EXPECT(load.file == "cloud01.pcx" && load.reader == TextureFileReader::Pcx &&
 	            load.transform == TextureLoadTransform::LuminanceAlpha && load.alpha_source == "cloud01.pcx");
-	load = texture_load(TextureLoader::Archive, "scorch1.pcx", files_of({"scorch1.pcx"}), 0, -1, TextureRoleId::ImpactScar);
+	load = texture_load(renderer::TextureLoader::Archive, "scorch1.pcx", files_of({"scorch1.pcx"}));
 	TEST_EXPECT(load.reader == TextureFileReader::Pcx && load.transform == TextureLoadTransform::None);
-	load = texture_load(TextureLoader::Archive, "cloud01.bmp", files_of({"cloud01.bmp"}));
+	load = texture_load(renderer::TextureLoader::Archive, "cloud01.bmp", files_of({"cloud01.bmp"}));
 	TEST_EXPECT(load.file.empty() && load.reader == TextureFileReader::None);
 	// HUD: the suffix decides the mode; a PCX white with alpha from blue; a file the project lacks, the name it
 	// would open.
-	load = texture_load(TextureLoader::Hud, "stance.tga.FULL", files_of({"stance.tga"}), 1);
+	load = texture_load(renderer::TextureLoader::HudColor, "stance.tga.FULL", files_of({"stance.tga"}));
 	TEST_EXPECT(load.file == "stance.tga" && load.reader == TextureFileReader::Tga && load.transform == TextureLoadTransform::None);
-	load = texture_load(TextureLoader::Hud, "frame.tga.alpha", files_of({"frame.tga"}), 0);
+	load = texture_load(renderer::TextureLoader::HudColor, "frame.tga.alpha", files_of({"frame.tga"}));
 	TEST_EXPECT(load.reader == TextureFileReader::Tga && load.transform == TextureLoadTransform::AlphaOnly);
-	load = texture_load(TextureLoader::Hud, "pip.pcx", files_of({"pip.pcx"}), 0);
+	load = texture_load(renderer::TextureLoader::HudColor, "pip.pcx", files_of({"pip.pcx"}));
 	TEST_EXPECT(load.reader == TextureFileReader::Pcx && load.transform == TextureLoadTransform::WhiteAlphaFromBlue);
 	// A PCX in the HUD's alpha mode: its blue the alpha, then that alpha alone.
-	load = texture_load(TextureLoader::Hud, "pip.pcx", files_of({"pip.pcx"}), 0, 1);
+	load = texture_load(renderer::TextureLoader::HudColor, "pip.pcx", files_of({"pip.pcx"}), 0, 1);
 	TEST_EXPECT(load.reader == TextureFileReader::Pcx && load.transform == TextureLoadTransform::BlueAlphaOnly);
-	load = texture_load(TextureLoader::Hud, "gone.tga", files_of({}), 0);
+	load = texture_load(renderer::TextureLoader::HudColor, "gone.tga", files_of({}));
 	TEST_EXPECT(load.reader == TextureFileReader::Tga && !files_of({})(load.file));
 	// FILE: .TGA through the TGA reader, any other name the PCX reader.
-	TEST_EXPECT(texture_load(TextureLoader::File, "TSDicon.tga", files_of({})).reader == TextureFileReader::Tga);
-	TEST_EXPECT(texture_load(TextureLoader::File, "NVGScale.bmp", files_of({})).reader == TextureFileReader::Pcx);
+	TEST_EXPECT(texture_load(renderer::TextureLoader::File, "TSDicon.tga", files_of({})).reader == TextureFileReader::Tga);
+	TEST_EXPECT(texture_load(renderer::TextureLoader::File, "NVGScale.bmp", files_of({})).reader == TextureFileReader::Pcx);
 	// MENU: by the last extension; a .tga the files lack loads its .dds.
-	load = texture_load(TextureLoader::Menu, "logo.tga", files_of({"logo.dds"}));
+	load = texture_load(renderer::TextureLoader::Menu, "logo.tga", files_of({"logo.dds"}));
 	TEST_EXPECT(load.file == "logo.dds" && load.reader == TextureFileReader::Dds);
-	TEST_EXPECT(texture_load(TextureLoader::Menu, "art.png", files_of({"art.png"})).reader == TextureFileReader::Png);
-	TEST_EXPECT(texture_load(TextureLoader::Menu, "art.bmp", files_of({"art.bmp"})).reader == TextureFileReader::None);
+	TEST_EXPECT(texture_load(renderer::TextureLoader::Menu, "art.png", files_of({"art.png"})).reader == TextureFileReader::Png);
+	TEST_EXPECT(texture_load(renderer::TextureLoader::Menu, "art.bmp", files_of({"art.bmp"})).reader == TextureFileReader::None);
 	std::printf("names: STAGE, NORMAL, PLAIN, ARCHIVE, HUD, FILE and MENU open the files their witnesses say\n");
 	return 0;
 }
@@ -221,11 +208,11 @@ int test_query() {
 	std::string error;
 	TEST_EXPECT(opennova::io::json_parse("{\"limit\":200}", args, error));
 	const JsonValue answer = session.query("texture_roles", args, error);
-	TEST_EXPECT(error.empty() && size_t(answer.get_number("count", 0)) == kTextureRoleCount);
+	TEST_EXPECT(error.empty() && size_t(answer.get_number("count", 0)) == renderer::kTextureRoleCount);
 	const JsonValue *roles = answer.get("roles");
-	TEST_EXPECT(roles && roles->is_array() && roles->array.size() == kTextureRoleCount);
-	if (!roles || roles->array.size() != kTextureRoleCount) return 1;
-	const JsonValue &colour = roles->array[size_t(TextureRoleId::TerrainColourMap)];
+	TEST_EXPECT(roles && roles->is_array() && roles->array.size() == renderer::kTextureRoleCount);
+	if (!roles || roles->array.size() != renderer::kTextureRoleCount) return 1;
+	const JsonValue &colour = roles->array[size_t(renderer::TextureRoleId::TerrainColourMap)];
 	TEST_EXPECT(colour.get_string("role", "") == "terrain_colour_map" && colour.get_string("loader", "") == "tga" &&
 	            colour.get_string("group", "") == "Terrain");
 	const JsonValue *formats = colour.get("formats");
@@ -234,14 +221,14 @@ int test_query() {
 	TEST_EXPECT(size && size->get_string("rule", "") == "exact" && size->get_number("width", 0) == 1024 &&
 	            size->get_string("words", "") == "1024 x 1024");
 	TEST_EXPECT(colour.get_string("witness", "").find("PolyTrn_InitTextures") != std::string::npos);
-	const JsonValue &foliage = roles->array[size_t(TextureRoleId::TerrainFoliageMap)];
+	const JsonValue &foliage = roles->array[size_t(renderer::TextureRoleId::TerrainFoliageMap)];
 	TEST_EXPECT(!foliage.get_bool("reads_alpha", true) && foliage.get_string("loader", "") == "pcx8");
 	// A page of it.
 	TEST_EXPECT(opennova::io::json_parse("{\"offset\":44,\"limit\":10}", args, error));
 	const JsonValue page = session.query("texture_roles", args, error);
 	TEST_EXPECT(page.get("roles") && page.get("roles")->array.size() == 2 &&
 	            page.get("roles")->array[1].get_string("role", "") == "cinematic_fade");
-	std::printf("query: texture_roles answers the %zu roles, a page at a time\n", kTextureRoleCount);
+	std::printf("query: texture_roles answers the %zu roles, a page at a time\n", renderer::kTextureRoleCount);
 	return 0;
 }
 
@@ -249,29 +236,29 @@ int test_reference_load() {
 	// The argument a reference gives its loader: a model row's type, a role (with what the referrer's
 	// content adds), or none.
 	TEST_EXPECT(texture_arg_is_row_type(0) && texture_arg_is_row_type(18) && !texture_arg_is_row_type(-1) &&
-	            !texture_arg_is_row_type(texture_role_arg(TextureRoleId::SkyCloud)));
-	TextureRoleId role = TextureRoleId::kCount;
-	const int32_t colour = texture_role_arg(TextureRoleId::TerrainColourMap, kTextureArgGates);
-	TEST_EXPECT(texture_arg_role(colour, role) && role == TextureRoleId::TerrainColourMap && texture_arg_gates(colour));
-	TEST_EXPECT(!texture_arg_gates(texture_role_arg(TextureRoleId::TerrainBlendMap)) && !texture_arg_role(4, role) &&
+	            !texture_arg_is_row_type(texture_role_arg(renderer::TextureRoleId::SkyCloud)));
+	renderer::TextureRoleId role = renderer::TextureRoleId::kCount;
+	const int32_t colour = texture_role_arg(renderer::TextureRoleId::TerrainColourMap, kTextureArgGates);
+	TEST_EXPECT(texture_arg_role(colour, role) && role == renderer::TextureRoleId::TerrainColourMap && texture_arg_gates(colour));
+	TEST_EXPECT(!texture_arg_gates(texture_role_arg(renderer::TextureRoleId::TerrainBlendMap)) && !texture_arg_role(4, role) &&
 	            !texture_arg_role(-1, role));
 	const TextureNameTest files = files_of({"body.tga", "body.dds", "cld.pcx", "cld.dds", "ground.tga", "ground.dds",
 	                                        "stance.tga", "trntile10.tga"});
 	// A model row by its type: the .dds beside the name.
 	TEST_EXPECT(texture_reference_load("body.tga", 0, files).file == "body.dds");
 	// A sky map through ARCHIVE: its .dds too; a colour map through the TGA reader: the name alone.
-	TEST_EXPECT(texture_reference_load("cld.pcx", texture_role_arg(TextureRoleId::SkyCloud), files).file == "cld.dds");
+	TEST_EXPECT(texture_reference_load("cld.pcx", texture_role_arg(renderer::TextureRoleId::SkyCloud), files).file == "cld.dds");
 	// A sky map's name made .pcx first, as the environment's parser stores it.
 	const TextureLoad haze =
-			texture_reference_load("haze.tga", texture_role_arg(TextureRoleId::SkyCloud, kTextureArgPcx), files_of({"haze.pcx"}));
+			texture_reference_load("haze.tga", texture_role_arg(renderer::TextureRoleId::SkyCloud, kTextureArgPcx), files_of({"haze.pcx"}));
 	TEST_EXPECT(haze.file == "haze.pcx" && haze.transform == TextureLoadTransform::LuminanceAlpha);
 	TextureLoad load = texture_reference_load("ground.tga", colour, files);
 	TEST_EXPECT(load.file == "ground.tga" && load.reader == TextureFileReader::Tga);
 	// A mission's tile set: TGA for its extension.
-	load = texture_reference_load("trntile10.bmp", texture_role_arg(TextureRoleId::TerrainTileAtlas, kTextureArgTileSet), files);
+	load = texture_reference_load("trntile10.bmp", texture_role_arg(renderer::TextureRoleId::TerrainTileAtlas, kTextureArgTileSet), files);
 	TEST_EXPECT(load.file == "trntile10.TGA" && load.reader == TextureFileReader::Tga);
 	// The HUD's alpha-only art: the suffix cut, alpha only.
-	load = texture_reference_load("stance.tga", texture_role_arg(TextureRoleId::HudAlphaOnly), files);
+	load = texture_reference_load("stance.tga", texture_role_arg(renderer::TextureRoleId::HudAlphaOnly), files);
 	TEST_EXPECT(load.file == "stance.tga" && load.transform == TextureLoadTransform::AlphaOnly);
 	// A use whose loader is not witnessed: the name as written, nothing else.
 	load = texture_reference_load("cross.bmp", -1, files);
@@ -446,7 +433,7 @@ int test_retail() {
 	size_t unwitnessed = 0;
 	graph->for_each_edge([&](const GraphEdge &edge) {
 		if (edge.kind != ReferenceKind::Texture) return;
-		TextureRoleId role = TextureRoleId::kCount;
+		renderer::TextureRoleId role = renderer::TextureRoleId::kCount;
 		const std::string token = texture_arg_role(edge.loader_arg, role) ? texture_role_row(role).token
 		                          : texture_arg_is_row_type(edge.loader_arg) ? "model_row"
 		                                                                     : "not_witnessed";

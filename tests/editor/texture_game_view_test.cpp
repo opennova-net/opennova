@@ -1,6 +1,6 @@
 // ADR 0046 S18, a texture as the game draws it: the chain the game builds of a texture made from pixels
 // (texture_game_chain), the halvings of the object texture detail (texture_halved), a normal map lit
-// (texture_lit_normals), and what a model row's alpha is to the game (texture_row_alpha_meaning); through a
+// (texture_lit_normals), and a model row's alpha in words (texture_alpha_meaning_words); through a
 // session the texture viewport's level, detail, normals and light options, and a Phong diffuse shown as its use
 // draws it, opaque, its alpha the specular brightness.
 #include <cmath>
@@ -27,6 +27,7 @@
 #include "editor/viewport_test_support.h"
 
 using namespace opennova::editor;
+namespace renderer = opennova::renderer;
 using opennova::io::JsonValue;
 
 namespace {
@@ -61,22 +62,12 @@ int test_pieces() {
 	const std::vector<uint8_t> right = {230, 128, 200, 255}, left = {26, 128, 200, 255};
 	TEST_EXPECT(texture_lit_normals(level_of(1, 1, right), 0.0f).rgba[0] > texture_lit_normals(level_of(1, 1, left), 0.0f).rgba[0]);
 	TEST_EXPECT(texture_lit_normals(level_of(1, 1, right), 0.0f).rgba[3] == 255);
-	// What a model row's alpha is: VS_PHONGT's diffuse the specular brightness; a blended material's the
-	// transparency; an opaque one's unused; an alpha-tested one's the cut-out; a detail row's multiplied in; a
-	// .tga normal row's the height.
-	using M = TextureAlphaMeaning;
-	TEST_EXPECT(texture_row_alpha_meaning("VS_PHONGT", 0, 0, 1, "body.tga") == M::Specular);
-	TEST_EXPECT(texture_row_alpha_meaning("FF_ST_AB", 0, 0, 1, "glass.tga") == M::Blend);
-	TEST_EXPECT(texture_row_alpha_meaning("FF_ST_OP", 0, 0, 1, "wall.tga") == M::Unused);
-	TEST_EXPECT(texture_row_alpha_meaning("FF_ST_OP", 1, 0, 1, "fence.tga") == M::CutOut);
-	TEST_EXPECT(texture_row_alpha_meaning("FF_MT_OP", 0, 0, 2, "grain.tga") == M::Detail);
-	TEST_EXPECT(texture_row_alpha_meaning("VS_PHONGT", 0, 4, 3, "bump.tga") == M::Height);
-	TEST_EXPECT(texture_row_alpha_meaning("VS_PHONGT", 0, 4, 3, "bump.mdt") == M::Unused);
-	TEST_EXPECT(!texture_alpha_is_transparency(M::Specular) && texture_alpha_is_transparency(M::CutOut));
+	// A model row's alpha in words (what it is, renderer::texture_row_alpha_meaning, renderer_texture_roles pins).
+	using M = renderer::TextureAlphaMeaning;
 	TEST_EXPECT(texture_alpha_meaning_words(M::Specular, "VS_PHONGT", 0, false) ==
 	            "the specular brightness VS_PHONGT reads, not transparency: the surface is opaque");
 	TEST_EXPECT(texture_alpha_meaning_words(M::CutOut, "FF_ST_OP", 128, false).find("above 128") != std::string::npos);
-	std::printf("pieces: the game's chain, a halving, normals lit, a model row's alpha by its technique\n");
+	std::printf("pieces: the game's chain, a halving, normals lit, a model row's alpha in words\n");
 	return 0;
 }
 
@@ -139,7 +130,7 @@ int test_session() {
 	if (!viewport) return 1;
 	// As its Phong use draws it: opaque, its alpha said the specular brightness.
 	TEST_EXPECT(rig.set_options(path, "{\"as_used\":0}"));
-	TEST_EXPECT(viewport->shown_use().model_row && viewport->shown_use().alpha == TextureAlphaMeaning::Specular &&
+	TEST_EXPECT(viewport->shown_use().model_row && viewport->shown_use().alpha == renderer::TextureAlphaMeaning::Specular &&
 	            viewport->image()->levels[0].rgba[3] == 255 && viewport->image()->levels[0].rgba[3 + 4 * 7] == 255);
 	JsonValue state = rig.state(path);
 	const JsonValue *body = state.get("body");
