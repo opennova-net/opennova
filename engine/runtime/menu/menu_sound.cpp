@@ -2,24 +2,74 @@
 
 #include <base/io/strutil.h>
 #include <formats/mnu/mnu.h>
+#include <runtime/audio/oneshot_play.h>
 
 namespace opennova::menu {
 
+const lwf::File *MenuBankCollection::bank(const std::string &name, const Open &open, int32_t *key) {
+	if (key) *key = 0;
+	if (name.empty()) return nullptr;
+	for (const Entry &entry : entries_) {
+		if (!strutil::iequals(entry.name, name)) continue;
+		if (key) *key = entry.key;
+		return entry.opened ? &entry.file : nullptr;
+	}
+	entries_.emplace_back();
+	Entry &entry = entries_.back();
+	entry.name = name;
+	entry.opened = open && open(name, entry.file);
+	if (!entry.opened) {
+		entry.file = lwf::File();
+		return nullptr;
+	}
+	entry.key = next_key_++;
+	if (key) *key = entry.key;
+	return &entry.file;
+}
+
+void MenuBankCollection::clear() {
+	entries_.clear();
+	next_key_ = 1;
+}
+
+std::vector<MenuSoundVoice> plan_menu_sound(const lwf::File &bank, int32_t bank_key,
+		const std::string &trigger, int master_volume, audio::SoundSelector &selector) {
+	std::vector<MenuSoundVoice> out;
+	const int32_t si = audio::find_bank_set(bank, trigger);
+	if (si < 0) return out;
+	const lwf::Multi &set = bank.multis[static_cast<size_t>(si)];
+	audio::SetLocation loc;
+	loc.bank = bank_key;
+	loc.set = si;
+	const std::vector<uint32_t> layers = audio::set_layers(bank, set);
+	for (size_t li = 0; li < layers.size(); ++li) {
+		const lwf::Playlist &layer = bank.playlists[layers[li]];
+		const int32_t pick = audio::pick_layer_member(bank, loc, static_cast<int32_t>(li), layers[li],
+				selector);
+		if (pick < 0) continue;
+		const std::vector<uint32_t> members = audio::layer_members(bank, layer);
+		const lwf::Sndparm &member = bank.sndparms[members[static_cast<size_t>(pick)]];
+		MenuSoundVoice voice;
+		if (member.single_index < bank.singles.size()) voice.path = bank.singles[member.single_index].path;
+		voice.volume = menu_channel_volume(master_volume, static_cast<int>(member.volume),
+				static_cast<int>(member.clamp_volume), static_cast<int>(layer.falloff_radius));
+		voice.pitch = menu_effective_pitch(lwf::pitch_from_q16(member.pitch_scaled),
+				lwf::pitch_from_q16(set.pitch_base));
+		out.push_back(std::move(voice));
+	}
+	return out;
+}
+
 int menu_sound_state_of(const std::string &token) {
-	// [orig: CUIElement_ParseXMLDefinition @ 0x648120, the SOUND arm's STATE compares]
-	if (strutil::iequals(token, "MOUSEIN")) return kSoundMouseIn;
-	if (strutil::iequals(token, "MOUSEOUT")) return kSoundMouseOut;
-	if (strutil::iequals(token, "SELECTED")) return kSoundSelected;
+	// [orig: CUIElement_ParseXMLDefinition @ 0x648120, the SOUND arm's STATE compares]: the parse's
+	// tokens in order, MOUSEIN 1, MOUSEOUT 2, SELECTED 3.
+	for (int i = 0; mnu::kSoundStates[i]; ++i)
+		if (strutil::iequals(token, mnu::kSoundStates[i])) return i + 1;
 	return kSoundNone;
 }
 
 const char *menu_sound_state_token(int state) {
-	switch (state) {
-	case kSoundMouseIn: return "MOUSEIN";
-	case kSoundMouseOut: return "MOUSEOUT";
-	case kSoundSelected: return "SELECTED";
-	default: return "";
-	}
+	return state >= kSoundMouseIn && state <= kSoundSelected ? mnu::kSoundStates[state - 1] : "";
 }
 
 const mnu::Sound *menu_window_sound(const mnu::Window &window, int state) {

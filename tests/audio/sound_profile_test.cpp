@@ -299,6 +299,50 @@ int main(int argc, char **argv) {
         TEST_EXPECT(std::strcmp(slot::sound_profile_slot_keyword(44), "FreeFall") == 0);
         TEST_EXPECT(std::strcmp(slot::sound_profile_slot_keyword(50), "tumble_skid") == 0);
         TEST_EXPECT(slot::sound_profile_slot_keyword(51) == nullptr);
+        // And back, without case, the parse's own lookup.
+        TEST_EXPECT(slot::sound_profile_slot_of("ssrfootgnd") == slot::kSlotFootRGround);
+        TEST_EXPECT(slot::sound_profile_slot_of("Soundloop_1") == slot::kSlotSoundLoop1);
+        TEST_EXPECT(slot::sound_profile_slot_of("TUMBLE_SKID") == slot::kSlotTumbleSkid);
+        TEST_EXPECT(slot::sound_profile_slot_of("nope") == -1);
+        TEST_EXPECT(slot::sound_profile_slot_of("") == -1);
+        TEST_EXPECT(slot::sound_profile_slot_of("medloopfadeinstart") == -1);
+    }
+
+    // The one profile pick every binder reads (the table's find / index_of,
+    // item_sound_profile, the editor's previews): the first of the name without
+    // case, a miss (or a null name) the first profile, nothing with none; the item
+    // binding reads "default" for an empty name [orig: SoundProfile_FindSlotByName
+    // @ 0x526e30; ItemDef_AllocateWithDefaults @0x49e3f5].
+    {
+        static const char kPick[] =
+            "begin \"first\"\r\nend\r\n"
+            "begin \"default\"\r\nend\r\n"
+            "begin \"Twice\"\r\nsounddeath A\r\nend\r\n"
+            "begin \"twice\"\r\nsounddeath B\r\nend\r\n";
+        SoundProfileTable t;
+        TEST_EXPECT(t.parse(kPick, sizeof(kPick) - 1) == 4);
+        const std::vector<SoundProfile> &all = t.entries();
+        TEST_EXPECT(slot::find_sound_profile(all, "TWICE") == &all[2]);
+        TEST_EXPECT(slot::find_sound_profile(all, "missing") == &all[0]);
+        TEST_EXPECT(slot::find_sound_profile(all, nullptr) == &all[0]);
+        TEST_EXPECT(slot::find_sound_profile(all, "") == &all[0]);
+        TEST_EXPECT(slot::find_sound_profile({}, "first") == nullptr);
+        TEST_EXPECT(t.index_of("twice") == 2 && t.find("twice") == &all[2]);
+        TEST_EXPECT(slot::item_sound_profile(all, "") == &all[1]);
+        TEST_EXPECT(slot::item_sound_profile(all, nullptr) == &all[1]);
+        TEST_EXPECT(slot::item_sound_profile(all, "twice") == &all[2]);
+        TEST_EXPECT(slot::item_sound_profile(all, "missing") == &all[0]);
+    }
+
+    // The name widths the parse cuts at and the writer refuses past: a profile's
+    // 64 bytes, a set's 24, each terminator among them.
+    {
+        TEST_EXPECT(slot::kSoundProfileNameBytes == 64 && slot::kSoundProfileSetNameBytes == 24);
+        const std::string text = "begin P\r\nsounddeath " + std::string(30, 'S') + "\r\nend\r\n";
+        SoundProfileTable t;
+        TEST_EXPECT(t.parse(text.data(), text.size()) == 1);
+        TEST_EXPECT(t.entries()[0].set_names[slot::kSlotDeath] ==
+                    std::string(slot::kSoundProfileSetNameBytes - 1, 'S'));
     }
 
     // Retail corpus (asset-gated): JO's sndprof.def parses to 49 profiles and the

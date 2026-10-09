@@ -46,7 +46,8 @@ struct CptFile {
 
 	static CptFile read(const std::string &path);
 	// The file's bytes (the CDEP/DPTH depth section, then the POLY tiles); write() puts them on disk.
-	// Throws std::runtime_error for a depth buffer or a tile the writer cannot encode.
+	// Throws std::runtime_error for a depth buffer or a tile the writer cannot encode; save_cpt
+	// (cpt_io.h) is the same writer returning its refusal instead.
 	std::vector<uint8_t> write_bytes() const;
 	void write(const std::string &path) const;
 };

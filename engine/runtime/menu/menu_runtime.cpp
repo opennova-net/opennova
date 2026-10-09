@@ -137,6 +137,7 @@ void MenuDocIndex::clear() {
 	doc_ = nullptr;
 	nodes_.clear();
 	screen_ids_.clear();
+	ids_.clear();
 }
 
 int MenuDocIndex::add_window_(const mnu::Window &w, int parent_id, int screen_index) {
@@ -147,6 +148,7 @@ int MenuDocIndex::add_window_(const mnu::Window &w, int parent_id, int screen_in
 	node.screen_index = screen_index;
 	node.window = &w;
 	nodes_.push_back(std::move(node));
+	ids_[&w] = id;
 	std::vector<int> children;
 	children.reserve(w.children.size());
 	for (const mnu::Window &child : w.children)
@@ -181,6 +183,11 @@ const MenuDocIndex::Node *MenuDocIndex::node(int id) const {
 const mnu::Window *MenuDocIndex::window(int id) const {
 	const Node *n = node(id);
 	return n != nullptr ? n->window : nullptr;
+}
+
+int MenuDocIndex::id_of(const mnu::Window *window) const {
+	const auto it = window != nullptr ? ids_.find(window) : ids_.end();
+	return it != ids_.end() ? it->second : -1;
 }
 
 const mnu::Screen *MenuDocIndex::screen(int screen_id) const {
@@ -414,12 +421,10 @@ int MenuRuntime::widget_id(const std::string &name) const {
 	const int here = find_control(std::string(), name);
 	if (here >= 0) return here;
 	for (int screen_id : index_.screen_ids()) {
-		const MenuDocIndex::Node *screen = index_.node(screen_id);
+		const mnu::Screen *screen = index_.screen(screen_id);
 		if (screen == nullptr) continue;
-		for (int root : screen->child_ids) {
-			const int found = find_child_by_name_(root, name);
-			if (found >= 0) return found;
-		}
+		const int found = index_.id_of(mnu::find_window(*screen, name));
+		if (found >= 0) return found;
 	}
 	return -1;
 }
@@ -428,24 +433,8 @@ int MenuRuntime::find_control(const std::string &screen, const std::string &name
 	if (name.empty()) return -1;
 	const auto it = screen_ids_.find(strutil::to_upper(screen.empty() ? current_screen_ : screen));
 	if (it == screen_ids_.end()) return -1;
-	const MenuDocIndex::Node *node = index_.node(it->second);
-	if (node == nullptr) return -1;
-	for (int root : node->child_ids) {
-		const int found = find_child_by_name_(root, name);
-		if (found >= 0) return found;
-	}
-	return -1;
-}
-
-int MenuRuntime::find_child_by_name_(int id, const std::string &name) const {
-	const MenuDocIndex::Node *node = index_.node(id);
-	if (node == nullptr || node->window == nullptr || node->window->name.empty()) return -1;
-	if (strutil::iequals(node->window->name, name)) return id;
-	for (int child : node->child_ids) {
-		const int found = find_child_by_name_(child, name);
-		if (found >= 0) return found;
-	}
-	return -1;
+	const mnu::Screen *section = index_.screen(it->second);
+	return section != nullptr ? index_.id_of(mnu::find_window(*section, name)) : -1;
 }
 
 int MenuRuntime::parent_window_(int id) const {
@@ -455,37 +444,13 @@ int MenuRuntime::parent_window_(int id) const {
 	return parent != nullptr && parent->window != nullptr ? parent->id : -1;
 }
 
-namespace {
-
-// [orig: CWnd_FindChildByName @0x646850 — no name, or a window without one, finds
-//  nothing (its children unsearched); a stricmp match is the window itself; else each
-//  child in order, recursively]
-int find_child_by_name(const MenuDocIndex &index, int id, const std::string &name) {
-	const MenuDocIndex::Node *node = index.node(id);
-	if (node == nullptr || node->window == nullptr || name.empty() || node->window->name.empty())
-		return -1;
-	if (strutil::iequals(name, node->window->name)) return id;
-	for (int child : node->child_ids) {
-		const int found = find_child_by_name(index, child, name);
-		if (found >= 0) return found;
-	}
-	return -1;
-}
-
-} // namespace
-
 int MenuRuntime::find_screen_control(const std::string &screen, const std::string &name) const {
 	// [orig: UI_FindScreenControl @0x63ae80 — the first section whose name stricmps
-	//  equal, then CWnd_FindChildByName over its root windows in order]
+	//  equal, then CWnd_FindChildByName over its root windows in order (mnu::find_window)]
 	for (int screen_id : index_.screen_ids()) {
 		const mnu::Screen *section = index_.screen(screen_id);
 		if (section == nullptr || !strutil::iequals(section->name, screen)) continue;
-		const MenuDocIndex::Node *node = index_.node(screen_id);
-		for (int root : node->child_ids) {
-			const int found = find_child_by_name(index_, root, name);
-			if (found >= 0) return found;
-		}
-		return -1;
+		return index_.id_of(mnu::find_window(*section, name));
 	}
 	return -1;
 }

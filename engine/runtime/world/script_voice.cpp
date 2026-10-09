@@ -17,7 +17,7 @@ bool ScriptVoiceChannel::start(World &world, const std::string &filename,
     state_.portrait = portrait;
     state_.max_distance = max_distance;
     state_.pitch_q16 = 0x10000u;
-    state_.volume = 210;
+    state_.volume = kScriptVoiceVolume;
     world.out.effects.push({"dialog_wav", 0, 0, 0, 0, filename});
     std::vector<uint8_t> bytes;
     auto decoded = std::make_shared<lwf::WavPcm>();

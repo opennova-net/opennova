@@ -126,7 +126,86 @@ void test_unreached() {
 
 } // namespace
 
+// The menu's bank collection: one entry per name without case, opened once; a name no bank
+// answers holds none for good (its trigger plays nothing, no other bank stands in); the keys
+// count the banks that opened [orig: SoundBank_CollectionAddOrRef @ 0x652b40].
+void test_bank_collection() {
+	int opens = 0;
+	const MenuBankCollection::Open open = [&opens](const std::string &name, lwf::File &out) {
+		++opens;
+		if (name == "missing.lwf") return false;
+		out = lwf::File();
+		lwf::Multi set;
+		set.name = name;
+		out.multis.push_back(set);
+		return true;
+	};
+	MenuBankCollection banks;
+	int32_t key = -1;
+	CHECK(banks.bank("", open, &key) == nullptr && key == 0 && opens == 0);
+	const lwf::File *menu = banks.bank("Menu.lwf", open, &key);
+	CHECK(menu != nullptr && key == 1 && opens == 1 && menu->multis[0].name == "Menu.lwf");
+	CHECK(banks.bank("MENU.LWF", open, &key) == menu && key == 1 && opens == 1);
+	CHECK(banks.bank("missing.lwf", open, &key) == nullptr && key == 0 && opens == 2);
+	CHECK(banks.bank("MISSING.lwf", open, &key) == nullptr && key == 0 && opens == 2);
+	CHECK(banks.bank("other.lwf", open, &key) != nullptr && key == 2 && opens == 3);
+	banks.clear();
+	CHECK(banks.bank("menu.lwf", open, &key) != nullptr && key == 1 && opens == 4);
+}
+
+// A SOUND row's play from its own bank: the first set of the trigger's name without case, each
+// layer with a member picking one by its flags (a sequential layer steps on from play to play),
+// at the menu's channel volume and the member's pitch times the set's; nothing for a set the bank
+// lacks; a member naming no single is a voice with no file.
+void test_plan_menu_sound() {
+	lwf::File bank;
+	for (const char *wave : { "one", "two" }) {
+		lwf::Single single;
+		single.name = wave;
+		single.path = std::string("SFX\\MENU\\") + wave + ".wav";
+		bank.singles.push_back(single);
+	}
+	for (uint32_t i = 0; i < 3; ++i) {
+		lwf::Sndparm member;
+		member.single_index = i; // 2 names no single
+		member.pitch_scaled = lwf::kPitchUnityQ16 / 2;
+		member.volume = 100;
+		member.clamp_volume = 255;
+		bank.sndparms.push_back(member);
+	}
+	lwf::Playlist step;
+	step.flags = lwf::kFlagSequential; // no view bits: the menu's play reads none
+	step.sndparm_indices = { 0, 1 };
+	lwf::Playlist far;
+	far.falloff_radius = 10;
+	far.sndparm_indices = { 2 };
+	lwf::Playlist empty;
+	bank.playlists = { step, far, empty };
+	lwf::Multi set;
+	set.name = "CLICK";
+	set.pitch_base = 2 * lwf::kPitchUnityQ16;
+	set.playlist_indices = { 0, 1, 2 };
+	bank.multis.push_back(set);
+
+	audio::SoundSelector selector;
+	const std::vector<MenuSoundVoice> first = plan_menu_sound(bank, 1, "click", kMenuMasterVolumeDefault, selector);
+	CHECK(first.size() == 2);
+	if (first.size() == 2) {
+		// No falloff: the master volume; the pitch 0.5 x 2.
+		CHECK(first[0].path == "SFX\\MENU\\one.wav" && first[0].volume == 255 && first[0].pitch == 1.0);
+		// A falloff layer scales the member's volume: (100 * 256) >> 8.
+		CHECK(first[1].path.empty() && first[1].volume == 100);
+	}
+	const std::vector<MenuSoundVoice> second = plan_menu_sound(bank, 1, "CLICK", 128, selector);
+	CHECK(second.size() == 2 && second[0].path == "SFX\\MENU\\two.wav" && second[0].volume == 128 &&
+	      second[1].volume == 50);
+	CHECK(plan_menu_sound(bank, 1, "NONE", 255, selector).empty());
+	CHECK(plan_menu_sound(bank, 1, "", 255, selector).empty());
+}
+
 int main() {
+	test_bank_collection();
+	test_plan_menu_sound();
 	test_window_sound();
 	test_hover();
 	test_click();

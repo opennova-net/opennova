@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -27,6 +28,16 @@ bool is_variable_reference(const std::string &value);
 std::string variable_name(const std::string &value);
 // Whether a reference stands anywhere in `text`.
 bool holds_variable_reference(const std::string &text);
+// The variables a menu's text names: every reference the game's expansion finds in it
+// (variable_reference_at, the scan the game runs over a menu's whole text before its
+// parse), its name upper case as the shell's list keys it (KeyValueList::sheet), sorted,
+// each once. Every value the frame compiler resolves through the list is one of them, and
+// so is a %NAME% inside a longer text, which the game expands too.
+std::vector<std::string> variables_named(const std::string &text);
+// The variables of two readings of the shell's list (both keyed as the list keys them,
+// upper case) that one has and the other lacks, or that hold another value, sorted.
+std::vector<std::string> changed_variables(const std::map<std::string, std::string> &before,
+                                           const std::map<std::string, std::string> &after);
 
 struct StyleSheet {
 	std::unordered_map<std::string, std::string> variables;  // uppercase keys
