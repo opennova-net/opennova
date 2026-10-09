@@ -654,6 +654,15 @@ typedef struct DefWeaponDef {
     uint64_t note;
 } DefWeaponDef;
 
+/* The characters of a weapon's name the reader keeps as that name: the name is copied 32 bytes
+   into def+0x14 [orig: WeaponDefs_ParseLineCallback, strncpy(def+0x14, tokens[2], 0x20)
+   @0x543737], right ahead of `sameas` at def+0x34 [orig: strncpy(def+0x34, value, 0x20)
+   @0x544056..0x544072], so a 32-character name keeps no terminator and reads back as itself only
+   while `sameas` is empty, running on into it otherwise (D-ITEMDEF-10): 32 in a block with no
+   `sameas`, 31 in one with it. The writer's cap (def_write_weapons) and the parser's run-on
+   finding read it. */
+inline size_t def_weapon_name_chars(const DefWeaponDef &weapon) { return weapon.sameas[0] ? 31 : 32; }
+
 /* One `ammoclass_max_carry <class> <n>` row: the class token and the carry cap,
    the absolute value of atol of the next token (both "" / 0 when the line
    lacks them). A table row wherever it stands in the file.

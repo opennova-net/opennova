@@ -172,11 +172,12 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
        @0x543737], so a read of it runs on into `sameas` at def+0x34 [orig:
        strncpy(def+0x34, value, 0x20) @0x544056..0x544072]: it reads as its 32
        characters while `sameas` is empty, and as more than the record holds
-       once one is set (D-ITEMDEF-10), which a save cannot give back. Checked
-       as the entry closes, the finding placed among its `weapon` line's. */
+       once one is set (D-ITEMDEF-10), which a save cannot give back
+       (def_weapon_name_chars: 32, 31 with `sameas`). Checked as the entry
+       closes, the finding placed among its `weapon` line's. */
     size_t name_findings = 0; // where the open entry's `weapon` line's findings end
     auto check_name_runs_on = [&] {
-        if (strlen(cw.weapon_name) < 32 || cw.sameas[0] == '\0') return;
+        if (strlen(cw.weapon_name) <= def_weapon_name_chars(cw)) return;
         DefParseReport finding;
         authoring_issue(cw.unmodeled_count, report ? &finding : nullptr, cw.open_line + 1, cw.weapon_name,
                         "weapon", 6, DefIssueCode::Unrepresentable);
