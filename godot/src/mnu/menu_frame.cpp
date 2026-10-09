@@ -855,9 +855,8 @@ std::vector<opennova::menu::MenuPumpWindow> MenuFrame::press_mouse(const Vector2
 		return {};
 	}
 	const Vector2 scale = design_scale_();
-	const std::vector<opennova::menu::MenuPumpWindow> reach =
-			compiler_.press_reach(state_, p_position.x, p_position.y, scale.x, scale.y);
-	click_.press(compiler_.press_capture(reach));
+	const std::vector<opennova::menu::MenuPumpWindow> reach = compiler_.press_mouse(
+			click_, state_, p_position.x, p_position.y, scale.x, scale.y);
 	for (const opennova::menu::MenuPumpWindow &window : reach) {
 		opennova::menu::MenuFrameCompiler::MouseClaim changed;
 		compiler_.press_scroll_window(state_, window, p_position.x, p_position.y, scale.x,
@@ -878,18 +877,11 @@ int MenuFrame::process_mouse(const Vector2 &p_position, bool p_button_down) {
 	// The claim honors a press's capture, which the release lets go first; then
 	// the click: the claim let go over that was held the sample before
 	// (engine menu_click.h, D-MNU-30), a scrollbar window's the scrollbar's own.
-	const opennova::menu::MenuPumpWindow capture = click_.capture_for(p_button_down);
-	opennova::menu::MenuFrameCompiler::MouseClaim claim =
-			compiler_.pump_mouse(state_, p_position.x, p_position.y,
-					p_button_down, scale.x, scale.y, capture);
-	state_.cursor_x = p_position.x;
-	state_.cursor_y = p_position.y;
+	opennova::menu::MenuFrameCompiler::MouseSample sample = compiler_.sample_mouse(
+			click_, state_, p_position.x, p_position.y, p_button_down, scale.x, scale.y);
+	opennova::menu::MenuFrameCompiler::MouseClaim &claim = sample.claim;
 	cursor_slot_ = claim.cursor;
-	const opennova::menu::MenuPumpWindow clicked = click_.sample(
-			compiler_.click_claim(claim, state_), p_button_down,
-			[this](const opennova::menu::MenuPumpWindow &p_window) {
-				return compiler_.pump_window_reached(p_window, state_);
-			});
+	const opennova::menu::MenuPumpWindow clicked = sample.clicked;
 	if (clicked.valid() && !compiler_.click_scroll_window(state_, clicked, &claim)) {
 		emit_signal("widget_clicked", clicked.index, clicked.part);
 	}
