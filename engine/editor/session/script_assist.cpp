@@ -26,6 +26,7 @@
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/wac/wac_lexis.h>
+#include <runtime/world/entity_registry.h>
 
 namespace opennova::editor {
 
@@ -178,20 +179,21 @@ std::string command_words(const wac::CommandDef &command) {
 	return out + ".";
 }
 
-// The seven default script groups [orig: Server_BuildEntitySlotLists @0x4F97A0; runtime/world
-// EntityRegistry::script_groups].
+// The seven default script groups (world::kDefaultScriptGroupNames, their members EntityRegistry::script_groups
+// rebuilds) in a modder's words.
 struct GroupRow {
 	const char *name, *words;
 };
 constexpr GroupRow kGroups[] = {
-	{"emptygroup", "no one"},
-	{"humans", "the soldiers people play"},
-	{"blueplayers", "the players of team 1"},
-	{"redplayers", "the players of team 2"},
-	{"ai", "the soldiers no one plays"},
-	{"blueai", "the soldiers no one plays, of team 1"},
-	{"redai", "the soldiers no one plays, of team 2"},
+	{world::kDefaultScriptGroupNames[0], "no one"},
+	{world::kDefaultScriptGroupNames[1], "the soldiers people play"},
+	{world::kDefaultScriptGroupNames[2], "the players of team 1"},
+	{world::kDefaultScriptGroupNames[3], "the players of team 2"},
+	{world::kDefaultScriptGroupNames[4], "the soldiers no one plays"},
+	{world::kDefaultScriptGroupNames[5], "the soldiers no one plays, of team 1"},
+	{world::kDefaultScriptGroupNames[6], "the soldiers no one plays, of team 2"},
 };
+static_assert(sizeof(kGroups) / sizeof(kGroups[0]) == world::kDefaultScriptGroupCount, "every default group worded");
 
 // --- the mission of the script's name --------------------------------------------------------------
 

@@ -12,6 +12,9 @@
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
+#include <runtime/renderer/object_lod.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/model_geometry.h>
 
 namespace opennova::editor {
 
@@ -195,9 +198,9 @@ bool collision_words(const ModelDocument &model, const NodeAddress &record) {
 	ImGui::SeparatorText("In the game");
 	if (record.kind == k(ModelKind::Section) && i < collision->sections.size()) {
 		const threedi::ThreediCollisionObject &s = collision->sections[i];
-		const bool person = row->base && model_section_is_person(*row->base, i);
+		const bool person = row->base && world::model_section_is_person_sphere(*row->base, i);
 		game_words(person ? kModelHitSphereWords : kModelSectionWords);
-		if (model_section_breaks(s)) game_words(kModelSectionBreaksWords);
+		if (world::collision_section_breaks(uint32_t(s.unk0))) game_words(kModelSectionBreaksWords);
 		return true;
 	}
 	if (record.kind == k(ModelKind::Volume) && i < collision->volumes.size()) {
@@ -208,7 +211,7 @@ bool collision_words(const ModelDocument &model, const NodeAddress &record) {
 	if (record.kind == k(ModelKind::Face)) {
 		bool person = false;
 		for (size_t o = 0; row->base && row->base->collision && o < row->base->collision->object_count && !person; ++o)
-			person = model_section_is_person(*row->base, o);
+			person = world::model_section_is_person_sphere(*row->base, o);
 		game_words(kModelBulletFaceWords,
 		           person ? "On a person a round meets the hit spheres instead: these faces serve the knife, the "
 		                    "laser and the other rays [orig: Physics_RaycastAgainstBoneSections @ 0x4e4670]."
@@ -284,7 +287,7 @@ bool draw_model_inspector(Workspace &workspace, const Document &document, const 
 		const ModelRow *row = model->model_row();
 		if (!row || !model->placement(record, at)) return false;
 		const std::string range = model_lod_range(*row, at.index);
-		if (model_lod_drawn(*row, at.index)) ImGui::TextColored(kMuted, "Drawn %s.", range.c_str());
+		if (renderer::object_lod_reachable(model_lod_thresholds(*row), at.index)) ImGui::TextColored(kMuted, "Drawn %s.", range.c_str());
 		else ImGui::TextColored(kMixed, "Drawn %s.", range.c_str());
 		ui_kit::tooltip("The game draws the first LOD whose threshold the model's projected radius is above, LOD 0 "
 		                "first, and stops at the first 0 [Model_SelectRlodLevel].");

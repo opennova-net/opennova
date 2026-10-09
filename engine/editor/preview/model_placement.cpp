@@ -113,9 +113,8 @@ bool plan_model_item(const SessionView &view, const AssetEntry &model, ModelItem
 		return false;
 	}
 	out.catalog = catalog->relative_path;
-	// The game keeps 15 characters of it: its ItemDef's graphic name is 16 bytes [orig: ItemDef_DumpToFile
-	// @ 0x49e250, graphicName +0x60 before huskName +0x70].
-	if (out.graphic.empty() || out.graphic.size() > 15) {
+	// The game keeps 15 characters of it: its ItemDef's graphic name is 16 bytes (def::DEF_ITEM_GRAPHIC_NAME_BYTES).
+	if (out.graphic.empty() || out.graphic.size() + 1 > def::DEF_ITEM_GRAPHIC_NAME_BYTES) {
 		error = "An item's graphic holds 15 characters: rename " + model.logical_name + " shorter to make its item.";
 		return false;
 	}

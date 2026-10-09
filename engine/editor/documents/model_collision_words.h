@@ -39,14 +39,8 @@ const char *model_volume_family_words(ModelVolumeFamily family);
 const char *model_occlusion_type_words(int64_t type);
 const char *model_occlusion_type_what(int64_t type);
 
-// Whether a section is a person's hit sphere: a bone section (no faces, no volumes) of a skinned model
-// whose whole-body row holds the face mesh, as every person model's does (docs/world/world-wac-ai-re.md
-// section 15.8b, person-model subobjects); a skinned model with no face at all (a first-person view's
-// arms) is no person's, and the game tests its bone spheres against no round.
-bool model_section_is_person(const threedi::Threedi3di3 &model, size_t section);
-// Whether a blast breaks the section off: its flags word carries 2 [orig: Entity_ApplyWeaponDamage @
-// 0x4e6c5e..0x4e6e6b, the bit @ 0x4e6cd0; runtime/world/collision.h CollisionSection::flags].
-bool model_section_breaks(const threedi::ThreediCollisionObject &section);
+// A person's hit sphere is world::model_section_is_person_sphere's (model_geometry.h), a section a blast
+// breaks off world::collision_section_breaks's (collision.h).
 
 // The sentences the Inspector and the picture's hover give each kind of collision record and bound.
 extern const char *const kModelCollisionWords;    // the collision row

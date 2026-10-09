@@ -8,6 +8,7 @@
 #include <editor/preview/model_preview_camera.h>
 #include <editor/preview/model_preview_rig.h>
 #include <editor/preview/sound_preview.h>
+#include <runtime/audio/oneshot_play.h>
 #include <runtime/anim/clip_timeline.h>
 #include <runtime/audio/sound_profile.h>
 #include <runtime/audio/sound_selector.h>
@@ -183,9 +184,9 @@ struct ClipSoundFired {
 };
 io::JsonValue clip_sound_fired_to_json(const ClipSoundFired &fired);
 
-// The listener's view flags of the preview camera: an outside view [the listener's view flags: 2 first
-// person, 4 the external modes; audio::layer_matches_listener_view], the preview orbiting the body.
-inline constexpr uint8_t kClipSoundListenerView = 4;
+// The listener's view flags of the preview camera: an outside view (audio::kListenerViewExternal), the
+// preview orbiting the body.
+inline constexpr uint8_t kClipSoundListenerView = audio::kListenerViewExternal;
 
 // The sounds `due` fires, each planned as the game plays the bound profile's slot (plan_slot_play heard
 // at `listener` from the body's origin, or from its feet `due.bottom` below it, in the preview's space),

@@ -4,6 +4,7 @@
 #include <cstdio>
 
 #include <base/io/strutil.h>
+#include <base/vfs/file_stamps.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/animation_slots.h>
@@ -20,8 +21,9 @@ namespace {
 
 std::string file_of(const std::string &path) { return path.substr(path.find_last_of("/\\") + 1); }
 
+// Two clip names open the same file: the .bad the game's load opens for each (anim::bad_file_name).
 bool same_clip(const std::string &a, const std::string &b) {
-	return assets::asset_file_name(a, ".bad") == assets::asset_file_name(b, ".bad");
+	return strutil::iequals(anim::bad_file_name(file_of(a)), anim::bad_file_name(file_of(b)));
 }
 
 // A model's file name as the scan lists it, from a graph target (its extension optional).
@@ -33,19 +35,7 @@ std::string model_file(const AssetScan &scan, const std::string &target) {
 
 } // namespace
 
-std::shared_ptr<const adm::AdmFile> PreviewRigFiles::animation_map(const std::string &name) const {
-	const std::string key = assets::asset_file_name(name, ".adm");
-	std::vector<uint8_t> bytes;
-	if (key.empty() || !files_ || !files_->read(key, bytes) || bytes.empty()) return {};
-	return assets::parse_animation_map(bytes.data(), bytes.size());
-}
-
-std::shared_ptr<const bad::BadFile> PreviewRigFiles::bone_animation(const std::string &name) const {
-	const std::string key = assets::asset_file_name(name, ".bad");
-	std::vector<uint8_t> bytes;
-	if (key.empty() || !files_ || !files_->read(key, bytes) || bytes.empty()) return {};
-	return assets::parse_bone_animation(bytes.data(), bytes.size());
-}
+PreviewRigFiles::PreviewRigFiles(std::shared_ptr<const StampedFiles> files) { index.mount_source(std::move(files)); }
 
 PreviewRig resolve_preview_rig(const AssetGraph &graph, const AssetScan &scan, const std::string &file, AssetKind kind,
                                const std::string &chosen) {
@@ -252,7 +242,7 @@ PreviewVec3 preview_joint_carry(const PreviewJoint &joint, const PreviewVec3 &po
 }
 
 const char *preview_event_letter(uint32_t trigger) {
-	if (trigger & (anim::kAnimEventFirePrimary | anim::kAnimEventFireSecondary | anim::kAnimEventFireMarker3)) return "F";
+	if (trigger & anim::kAnimEventFireMask) return "F";
 	if (trigger & anim::kAnimEventFootLeft) return "L";
 	if (trigger & anim::kAnimEventFootRight) return "R";
 	constexpr uint32_t kFoley = ((anim::kAnimEventFoley1 << anim::kAnimEventFoleyCount) - 1) & ~(anim::kAnimEventFoley1 - 1);
