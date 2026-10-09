@@ -365,6 +365,12 @@ add_executable(def_loadout_weight_test def/def_loadout_weight_test.cpp)
 target_link_libraries(def_loadout_weight_test PRIVATE opennova_formats)
 add_test(NAME def_loadout_weight COMMAND def_loadout_weight_test)
 
+# The weapon.def name cap: 32 characters only in a block with no `sameas`, which a 32-character
+# name runs on into otherwise (D-ITEMDEF-10): the writer's cap and the parser's finding.
+add_executable(def_weapon_name_cap_test def/def_weapon_name_cap_test.cpp)
+target_link_libraries(def_weapon_name_cap_test PRIVATE opennova_formats)
+add_test(NAME def_weapon_name_cap COMMAND def_weapon_name_cap_test)
+
 # The items.def ids and rows the engine fixes (docs/world/itemdef-re.md, "The ids and rows the
 # engine fixes"): the table, its lookups and rules, and the runtime's constants for the same ids.
 add_executable(def_reserved_items_test def/def_reserved_items_test.cpp)
