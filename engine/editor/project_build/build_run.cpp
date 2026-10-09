@@ -20,7 +20,7 @@
 #include <editor/project/project_files.h>
 #include <formats/pff/pff.h>
 #include <formats/pff/pff_stream_writer.h>
-#include <runtime/mission/mission_sidecars.h>
+#include <runtime/mission/mission_catalog.h>
 
 namespace fs = std::filesystem;
 
@@ -741,8 +741,8 @@ void BuildRun::drop_same_as_base() {
 	for (size_t a = 0; a < plan_.archives.size(); ++a)
 		for (size_t e = 0; e < plan_.archives[a].entries.size(); ++e) {
 			const BuildEntry &entry = plan_.archives[a].entries[e];
-			if (!same_[stamp_index(a, e)] && lists_as_mission(entry.logical_name))
-				kept_tables[pff::normalized_logical_name(mission::mission_base_name(entry.logical_name) + ".bin")] = true;
+			if (!same_[stamp_index(a, e)] && mission_catalog::lists_as_mission(entry.logical_name))
+				kept_tables[pff::normalized_logical_name(mission_catalog::text_table_name(entry.logical_name))] = true;
 		}
 	std::map<std::string, bool> tables; // the text tables the expansion's pair holds
 	for (size_t a = 0; a < plan_.archives.size(); ++a)
@@ -758,8 +758,8 @@ void BuildRun::drop_same_as_base() {
 	for (size_t a = 0; a < plan_.archives.size(); ++a)
 		for (size_t e = 0; e < plan_.archives[a].entries.size(); ++e) {
 			const BuildEntry &entry = plan_.archives[a].entries[e];
-			if (same_[stamp_index(a, e)] || !lists_as_mission(entry.logical_name)) continue;
-			const std::string table = mission::mission_base_name(entry.logical_name) + ".bin";
+			if (same_[stamp_index(a, e)] || !mission_catalog::lists_as_mission(entry.logical_name)) continue;
+			const std::string table = mission_catalog::text_table_name(entry.logical_name);
 			if (!tables.count(pff::normalized_logical_name(table)))
 				report_.diagnostics.push_back(make_finding(
 				        CoreFinding::BuildExpansionMissionUntitled, DiagnosticSeverity::Warning,
