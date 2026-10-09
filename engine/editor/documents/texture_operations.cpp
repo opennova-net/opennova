@@ -44,8 +44,8 @@ bool param(const TextureOperation &operation, const char *key, std::string &out)
 
 // The form the file is stored in, as the importer's settings write it: a .tga's depth, a .mdt's 32-bit TGA,
 // a .pcx's quantized colours, a .dds's format and whether it carries its chain, a .png.
-bool stored_settings(const std::string &name, const std::vector<uint8_t> &bytes, ImageImportSettings &out, std::string &why) {
-	out = image_import_settings({});
+bool stored_settings(const std::string &name, const std::vector<uint8_t> &bytes, renderer::ImageImportSettings &out, std::string &why) {
+	out = renderer::image_import_settings({});
 	const TextureHeader header = texture_header(name, bytes);
 	const std::string extension = extension_of(name);
 	if (extension == ".tga") {
@@ -84,11 +84,11 @@ bool stored_settings(const std::string &name, const std::vector<uint8_t> &bytes,
 	return false;
 }
 
-bool holds_alpha(const ImageImportSettings &settings) {
+bool holds_alpha(const renderer::ImageImportSettings &settings) {
 	return settings.format == "tga" || settings.format == "mdt" || settings.format == "png" || settings.format == "dds";
 }
 
-std::string format_words(const ImageImportSettings &settings) {
+std::string format_words(const renderer::ImageImportSettings &settings) {
 	if (settings.format == "tga") return "a 32-bit TGA";
 	if (settings.format == "tga24") return "a 24-bit TGA";
 	if (settings.format == "mdt") return "a 32-bit TGA under .mdt";
@@ -116,9 +116,9 @@ bool game_texels(const std::string &name, const std::vector<uint8_t> &bytes, Rgb
 	return true;
 }
 
-bool encode(const RgbaImage &image, const ImageImportSettings &settings, std::vector<uint8_t> &out, std::string &why) {
+bool encode(const RgbaImage &image, const renderer::ImageImportSettings &settings, std::vector<uint8_t> &out, std::string &why) {
 	std::string note;
-	return encode_image(image, settings, out, why, note);
+	return renderer::encode_image(image, settings, out, why, note);
 }
 
 // An 8-bit PCX's indices and palette as the game reads them (decode_pcx_menu_rgba): false, with why, for
@@ -159,7 +159,7 @@ bool resize(const std::string &name, const std::vector<uint8_t> &bytes, const Te
 	std::string ignored;
 	if (indexed_pcx(name, bytes, indices, ignored)) {
 		uint32_t width = 0, height = 0;
-		if (!image_target_size(size, uint32_t(indices.width), uint32_t(indices.height), width, height, why)) return false;
+		if (!renderer::image_target_size(size, uint32_t(indices.width), uint32_t(indices.height), width, height, why)) return false;
 		if (width == uint32_t(indices.width) && height == uint32_t(indices.height)) {
 			why = "it is " + std::to_string(width) + " x " + std::to_string(height) + " already";
 			return false;
@@ -178,18 +178,18 @@ bool resize(const std::string &name, const std::vector<uint8_t> &bytes, const Te
 		words = "Resized to " + std::to_string(width) + " x " + std::to_string(height) + ", its palette indices kept";
 		return encode_pcx_indexed(sized, out, why);
 	}
-	ImageImportSettings settings;
+	renderer::ImageImportSettings settings;
 	RgbaImage image;
 	uint32_t width = 0, height = 0;
 	if (!stored_settings(name, bytes, settings, why) || !game_texels(name, bytes, image, why) ||
-	    !image_target_size(size, uint32_t(image.width), uint32_t(image.height), width, height, why))
+	    !renderer::image_target_size(size, uint32_t(image.width), uint32_t(image.height), width, height, why))
 		return false;
 	if (width == uint32_t(image.width) && height == uint32_t(image.height)) {
 		why = "it is " + std::to_string(width) + " x " + std::to_string(height) + " already";
 		return false;
 	}
 	words = "Resized to " + std::to_string(width) + " x " + std::to_string(height);
-	return encode(resize_image(image, width, height), settings, out, why);
+	return encode(renderer::resize_image(image, width, height), settings, out, why);
 }
 
 bool alpha(const std::string &name, const std::vector<uint8_t> &bytes, const TextureOperation &operation,
@@ -199,7 +199,7 @@ bool alpha(const std::string &name, const std::vector<uint8_t> &bytes, const Tex
 		why = "an alpha edit takes an alpha (opaque, luminance, invert, threshold:<n> or key:#RRGGBB)";
 		return false;
 	}
-	ImageImportSettings settings;
+	renderer::ImageImportSettings settings;
 	RgbaImage image;
 	if (!stored_settings(name, bytes, settings, why) || !game_texels(name, bytes, image, why)) return false;
 	if (!holds_alpha(settings)) {
@@ -209,7 +209,7 @@ bool alpha(const std::string &name, const std::vector<uint8_t> &bytes, const Tex
 	}
 	if (value == "invert") {
 		for (size_t i = 3; i < image.pixels.size(); i += 4) image.pixels[i] = uint8_t(255 - image.pixels[i]);
-	} else if (!apply_image_alpha(image, value, why)) {
+	} else if (!renderer::apply_image_alpha(image, value, why)) {
 		return false;
 	}
 	words = value == "invert" ? "Alpha inverted" : "Alpha: " + value;
@@ -218,10 +218,10 @@ bool alpha(const std::string &name, const std::vector<uint8_t> &bytes, const Tex
 
 bool format(const std::string &name, const std::vector<uint8_t> &bytes, const TextureOperation &operation,
             std::vector<uint8_t> &out, std::string &words, std::string &why) {
-	ImageImportSettings settings;
+	renderer::ImageImportSettings settings;
 	RgbaImage image;
 	if (!stored_settings(name, bytes, settings, why) || !game_texels(name, bytes, image, why)) return false;
-	const ImageImportSettings was = settings;
+	const renderer::ImageImportSettings was = settings;
 	const std::string extension = extension_of(name);
 	std::string value;
 	// An 8-bit PCX's indices are data: storing it again from its colours would renumber them.
@@ -287,7 +287,7 @@ bool reorder_rows(const std::string &name, const std::vector<uint8_t> &bytes, st
 	for (int y = 0; y < image.height / 2; ++y)
 		std::swap_ranges(image.pixels.begin() + std::ptrdiff_t(size_t(y) * row), image.pixels.begin() + std::ptrdiff_t(size_t(y + 1) * row),
 		                 image.pixels.begin() + std::ptrdiff_t(size_t(image.height - 1 - y) * row));
-	ImageImportSettings settings = image_import_settings({});
+	renderer::ImageImportSettings settings = renderer::image_import_settings({});
 	settings.format = header.alpha ? "tga" : "tga24";
 	if (extension_of(name) == ".mdt") settings.format = "mdt";
 	words = "Rows saved bottom first";
