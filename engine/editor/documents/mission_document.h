@@ -236,9 +236,13 @@ private:
 bool is_mission_kind(AssetKind kind);
 
 // The SSN a new entity takes over `rows` (an Add, a Duplicate, a paste's copy told apart): one past
-// the largest the rows hold, never the player's 10000 [bms-event-runtime-re.md 7.3: the single-player
-// lookups take 10000 for the player].
+// the largest the rows hold, never the player's 10000 (mission::ssn_after) [bms-event-runtime-re.md
+// 7.3: the single-player lookups take 10000 for the player].
 int32_t next_free_ssn(const std::vector<std::shared_ptr<const Node>> &rows);
+// The pool an entity row's records load into, the game's pool index (mission::entity_pool: organics 0,
+// items 1, buildings 2, markers 3), the order its lookups by SSN scan them in [orig: Entity_KillByNetId
+// @0x43DBD0]; -1 for a kind no pool holds.
+int entity_pool_of(NodeKind kind);
 
 // The file a mission's rows make, as the writer takes it (MissionDocument::compose over any rows of
 // the mission's kinds: a batch's, a copied fragment's): the mission row's file with each band's

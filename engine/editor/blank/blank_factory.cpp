@@ -8,6 +8,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/project/project_files.h>
 #include <formats/configfile/config_file.h>
+#include <runtime/mission/mission_sidecars.h>
 
 namespace opennova::editor {
 
@@ -300,10 +301,11 @@ const BlankFactory *blank_companion(const BlankFactory &factory, const std::stri
 		name = blank_reset_clip_name(made);
 		return find_blank_factory_for_kind(AssetKind::Animation);
 	}
-	// A dialog bank's sounds are the sound bank of its name, which the game opens as it loads the dialog bank
-	// [orig: DialogManager_LoadFromFile @ 0x44e650, <base>.lwf @ 0x44e7d4..0x44e807]: made with it, empty.
+	// A dialog bank's sounds are the sound bank of its name (mission::dialog_sounds_name, the name cut at its first
+	// dot), which the game opens as it loads the dialog bank [orig: DialogManager_LoadFromFile @ 0x44e650, <base>.lwf
+	// @ 0x44e7d4..0x44e807]: made with it, empty.
 	if (factory.kind == AssetKind::DialogBank) {
-		name = utf8_of(path_of(made).stem()) + ".lwf";
+		name = mission::dialog_sounds_name(made);
 		return find_blank_factory_for_kind(AssetKind::SoundBank);
 	}
 	if (factory.kind != AssetKind::Menu || !doc.expansion.standalone()) return nullptr;

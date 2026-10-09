@@ -21,6 +21,7 @@
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_params.h>
+#include <runtime/audio/dialog_queue.h>
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/mission_text.h>
@@ -41,18 +42,6 @@ EntityKind pool_of(NodeKind kind) {
 	case K::Marker: return EntityKind::Marker;
 	case K::Organic: return EntityKind::Organic;
 	default: return EntityKind::Item;
-	}
-}
-
-// The order the game's lookups scan the pools in: organics, items, buildings, markers [orig:
-// Entity_KillByNetId @0x43DBD0, Entity_HandleAlertStateEvent @0x43DEE0: pools 0, 1, 2, 3].
-int lookup_order(NodeKind kind) {
-	switch (static_cast<K>(kind)) {
-	case K::Organic: return 0;
-	case K::Item: return 1;
-	case K::Building: return 2;
-	case K::Marker: return 3;
-	default: return 4;
 	}
 }
 
@@ -140,17 +129,25 @@ int32_t next_free_ssn(const std::vector<std::shared_ptr<const Node>> &rows) {
 	int32_t largest = 0;
 	for (const auto &row : rows)
 		if (is_entity_kind(row->kind)) largest = std::max(largest, static_cast<const EntityRow &>(*row).native.id);
-	const int32_t next = largest + 1;
-	return next == kPlayerSsn ? next + 1 : next;
+	return ssn_after(largest);
 }
+
+int entity_pool_of(NodeKind kind) { return is_entity_kind(kind) ? entity_pool(pool_of(kind)) : -1; }
 
 std::string mission_scope(const DocumentBase &document) { return strutil::to_upper(basename_of(document.path())); }
 
-std::string mission_dialog_bank(const MissionDocument &document) {
+namespace {
+
+// The header's dialog bank slot as read (its second terrain slot, the original editor's cnv_file; "" none).
+std::string dialog_slot_of(const MissionDocument &document) {
 	const MissionRow *header = document.mission_row();
-	const std::string slot =
-	        header ? strutil::fixed_string(header->native.header.terrain + 16, 16) : std::string();
-	return mission::dialog_bank_name(basename_of(document.path()), slot);
+	return header ? strutil::fixed_string(header->native.header.terrain + 16, 16) : std::string();
+}
+
+} // namespace
+
+std::string mission_dialog_bank(const MissionDocument &document) {
+	return mission::dialog_bank_name(basename_of(document.path()), dialog_slot_of(document));
 }
 
 // --- the document ------------------------------------------------------------------------------------
@@ -571,9 +568,10 @@ void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 	}
 	if (!address.child && address.kind == k(K::Mission) && id.compare(0, 15, "win_conditions[") == 0)
 		keyed(hud::kWinConditionKey, 1, 254);
-	// A Play dialog's or a Dialog trigger's number forms the dialog's name, dlg%03i, which the game finds in the
-	// mission's dialog bank (mission_references' Dialog edge): picked by the bank's dialogs, the number written; an
-	// action's dialog from 1 (0 plays none [orig: Dialog_PlayByIndex @ 0x527af4]), a trigger's any.
+	// A Play dialog's or a Dialog trigger's number forms the dialog's name (audio::dialog_name_of's dlg%03i, a
+	// trigger's audio::trigger_dialog_name), which the game finds in the mission's dialog bank (mission_references'
+	// Dialog edge): picked by the bank's dialogs, the number written; an action's dialog from 1 (0 plays none
+	// [orig: Dialog_PlayByIndex @ 0x527af4]), a trigger's any.
 	if (id == "param1" && (address.kind == k(K::Trigger) || address.kind == k(K::Action))) {
 		const Node *node = row(address.row);
 		const RecordHandle record = node ? record_in(*node, address) : RecordHandle();
@@ -669,7 +667,7 @@ const MissionDocument::Lookups &MissionDocument::lookups() const {
 		of_kind.push_back(row.get());
 		if (is_entity_kind(row->kind)) {
 			const bms::Entity &entity = static_cast<const EntityRow &>(*row).native;
-			const int mine = lookup_order(row->kind);
+			const int mine = entity_pool_of(row->kind);
 			const auto held = order.find(entity.id);
 			if (held == order.end() || mine < held->second) {
 				order[entity.id] = mine;
@@ -690,14 +688,13 @@ const MissionDocument::Lookups &MissionDocument::lookups() const {
 	const std::vector<int32_t> locations = mission::location_numbers(marker_records);
 	for (size_t i = 0; i < markers.size(); ++i)
 		if (locations[i]) made.locations.emplace(markers[i]->id, int(locations[i]));
-	// The player's route: the first path with the flag, its stops by their marker's index [orig:
-	// NetPacket_WriteWorldStateLoad0x0F @0x502e50, the count capped at 128 @0x502efc]. The count stays
-	// this document's own unsigned min: bms::player_route_stop_count keeps promotion's signed compare,
-	// which walks no stop for a count of 2^31 or more (left for the IDA pass).
+	// The player's route: the first path with the flag, its stops by their marker's index, as many as
+	// the game walks (bms::player_route_stop_count: its signed compare walks none for a count of 2^31
+	// or more) [orig: NetPacket_WriteWorldStateLoad0x0F @0x502e50, the count capped at 128 @0x502efc].
 	for (const Node *row : made.by_kind[size_t(K::WaypointPath)]) {
 		const bms::WaypointRecord &path = static_cast<const PathRow &>(*row).native.record;
 		if (!bms::is_player_route(path)) continue;
-		const size_t count = std::min<size_t>({size_t(path.marker_count), path.waypoint_numbers.size(), bms::kPlayerRouteMaxStops});
+		const size_t count = bms::player_route_stop_count(path);
 		for (size_t i = 0; i < count; ++i)
 			if (path.waypoint_numbers[i] < markers.size()) made.route.insert(markers[path.waypoint_numbers[i]]->id);
 		break;
@@ -971,33 +968,32 @@ void mission_references(const Document &document, Extracted &out) {
 	// takes next; an optional one makes no finding when the project lacks it.
 	const std::string &file = document.path();
 	// The dialog bank the mission loads: its own <base>.dbf, or the one its header names; its sounds beside it.
+	const std::string dialog_slot = dialog_slot_of(*mission);
 	const std::string bank = mission_dialog_bank(*mission);
 	for (const MissionFileSetRow &row : mission_file_set()) {
 		const mission::Sidecar *sidecar = mission::sidecar_for_role(row.role);
 		if (!sidecar) continue;
+		// What the row's reader opens (mission::sidecar_names): the dialog rows by the bank the header picks,
+		// a row read only beside another's file naming that file (the dialog's sounds, beside its .dbf).
+		const mission::SidecarNames names = mission::sidecar_names(file, *sidecar, dialog_slot);
 		GraphEdge edge;
 		edge.source = file;
 		edge.field = row.role;
 		edge.kind = row.kind;
-		edge.value = mission::sidecar_name(file, *sidecar);
-		edge.fallback = sidecar->fallback ? std::string(sidecar->fallback) : mission::sidecar_alternate_name(file, *sidecar);
+		edge.value = names.name;
+		edge.fallback = sidecar->fallback ? std::string(sidecar->fallback) : names.alternate;
 		edge.optional = row.optional;
-		if (row.role == std::string("dialog")) edge.value = bank;
-		if (row.role == std::string("dialog_sounds")) {
-			edge.value = mission::dialog_sounds_name(bank);
-			edge.fallback = mission::dialog_sounds_name(bank, true);
-		}
-		// A row the reader reads only beside another's file (the dialog's sounds, beside its .dbf).
-		if (const mission::Sidecar *needed = sidecar->needs ? mission::sidecar_for_role(sidecar->needs) : nullptr)
-			edge.needs = needed->role == std::string("dialog") ? bank : mission::sidecar_name(file, *needed);
+		edge.needs = names.needs;
 		out.edges.push_back(std::move(edge));
 	}
-	// The dialog a trigger or an action names (a Play dialog's, a Dialog trigger's), dlg%03i of its number, in the
-	// mission's dialog bank.
+	// The dialog a trigger or an action names, in the mission's dialog bank: a Dialog trigger's the readers'
+	// "dlg%.3d" of its number (audio::trigger_dialog_name), a Play dialog's "dlg%03i" (audio::dialog_name_of),
+	// 0 playing nothing [orig: Dialog_PlayByIndex @ 0x527af4].
 	for (const Node *row : mission->rows_of(K::Event)) {
 		const EventRow &event = static_cast<const EventRow &>(*row);
 		if (event.ids.lists.size() < 2) continue;
-		const auto plays = [&](NodeKind kind, size_t list, size_t i, int32_t number) {
+		const auto plays = [&](NodeKind kind, size_t list, size_t i, const std::string &name) {
+			if (name.empty()) return;
 			const NodeAddress address{row->id, kind, event.ids.lists[list][i].id};
 			GraphEdge edge;
 			edge.source = file;
@@ -1006,8 +1002,6 @@ void mission_references(const Document &document, Extracted &out) {
 			edge.address = address;
 			edge.field = "param1";
 			edge.kind = ReferenceKind::Dialog;
-			char name[32];
-			std::snprintf(name, sizeof(name), "dlg%03i", int(number));
 			edge.value = name;
 			edge.scope = strutil::to_upper(bank);
 			edge.rewritable = true;
@@ -1016,11 +1010,10 @@ void mission_references(const Document &document, Extracted &out) {
 		};
 		for (size_t i = 0; i < event.native.triggers.size() && i < event.ids.lists[0].size(); ++i)
 			if (trigger_param_kind(event.native.triggers[i], 0) == ParamKind::Dialog)
-				plays(k(K::Trigger), 0, i, event.native.triggers[i].param1);
-		// [orig: Dialog_PlayByIndex @ 0x527af4: a dialog of 0 plays nothing]
+				plays(k(K::Trigger), 0, i, audio::trigger_dialog_name(event.native.triggers[i].param1));
 		for (size_t i = 0; i < event.native.actions.size() && i < event.ids.lists[1].size(); ++i)
-			if (action_param_kind(event.native.actions[i], 0) == ParamKind::Dialog && event.native.actions[i].param1 != 0)
-				plays(k(K::Action), 1, i, event.native.actions[i].param1);
+			if (action_param_kind(event.native.actions[i], 0) == ParamKind::Dialog)
+				plays(k(K::Action), 1, i, audio::dialog_name_of(event.native.actions[i].param1));
 	}
 }
 

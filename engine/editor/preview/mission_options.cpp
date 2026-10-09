@@ -5,6 +5,7 @@
 #include <string>
 
 #include <editor/session/view/workspace_view.h>
+#include <formats/mission/mission_params.h>
 
 namespace opennova::editor {
 
@@ -65,8 +66,8 @@ bool read_flags(const JsonValue &json, const char *group, const Flag (&flags)[N]
 
 constexpr const char *kTools[] = { "select", "place", "path", "area", "shoot" };
 
-// The path numbers a stop is added to: 1 to 122 (0 and 123 to 127 name no route).
-constexpr int64_t kLastRoutePath = 122;
+// The path numbers a stop is added to: 1 to 122 (0 and 123 to 127, mission::kFirstPathCommand on, name no route).
+constexpr int64_t kLastRoutePath = mission::kFirstPathCommand - 1;
 
 } // namespace
 
