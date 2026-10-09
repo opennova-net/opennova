@@ -232,6 +232,12 @@ void serve_preview_install_import(SessionCore &core, const EditorRequest &reques
 void serve_new_terrain(SessionCore &core, const EditorRequest &request) {
 	core.imports().new_terrain(request);
 }
+void serve_new_font(SessionCore &core, const EditorRequest &request) {
+	core.imports().new_font(request);
+}
+void serve_wave_operation(SessionCore &core, const EditorRequest &request) {
+	core.documents().wave_operation(request);
+}
 void serve_clear_output(SessionCore &core, const EditorRequest &) {
 	core.clear_output();
 }
@@ -1247,6 +1253,34 @@ constexpr RequestKindRow kRows[] = {
 			"The file or folder path shown in the OS file manager.")
 			.served_by(ServedBy::Shell)
 			.takes(request_params({ F::Path }))
+			.row,
+	// A font made from a glyph sheet is an import of it (round S23 lane A): the set and its record written, then the
+	// refresh that imports it, as a terrain's.
+	Request(K::NewFont, "new_font", serve_new_font,
+			"A font named path (its stem; the font a name the archives hold, at most 12 characters and .fnt) made from a "
+			"glyph sheet (import/font_import.h): values names the sheet (sheet, required: a PNG, TGA or PCX on disk, "
+			"copied into fonts/ as <name>_sheet.<ext>, or a project file, named where it is), its grid (columns and rows, "
+			"1 to 256 each, 16 and 14 when left out; first, the byte of its first cell, 0 to 255 or 0x00 to 0xFF, 0x20 "
+			"when left out) and the importer's options (advance ink, left or cell; tracking 0..32; space 1..254; spacing "
+			"-16..16; design_width 1..4096; color white or sheet); fonts/<name>.fntset and its record written, then "
+			"imported, a refresh (the outcome names the operation), which makes <name>.fnt. Refused, nothing written "
+			"(import.font): a name taken or that does not fit, a value of no key it takes or out of its range, a sheet "
+			"that does not read, or that the grid does not divide.")
+			.takes(request_params({ F::Path, F::Values }))
+			.holds(kFiles, kFiles | kSlot)
+			.ends_edit_groups()
+			.row,
+	Request(K::WaveOperation, "wave_operation", serve_wave_operation,
+			"The wave document at path (left out, the active one) edited as a whole wave by operation, one undo step, its "
+			"params in values: trim (start and end, seconds from 0: the frames between them kept) or normalise (peak, more "
+			"than 0 and at most 1, 1 when left out: every sample scaled so the loudest is that); the file made anew in the "
+			"form the game's loader takes (one channel, the source's 8 bits kept and anything else 16, its rate kept, fmt "
+			"and data alone), which Save writes. open_first: the document opened first when it is not. Refused, nothing "
+			"changed (wave.operation): a file an import makes (its import's options make it), an operation it does not "
+			"take, a wave of no sample, a trim that keeps none, a silent wave normalised.")
+			.takes(request_params({ F::Operation }, { F::Path, F::Values, F::OpenFirst }))
+			.holds(kFiles, kDocuments)
+			.names_active()
 			.row,
 };
 

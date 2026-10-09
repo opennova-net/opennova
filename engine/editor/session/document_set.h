@@ -99,6 +99,11 @@ public:
 	// step whose words are the operation's. Refused, nothing changed (texture.operation): a file an import
 	// makes (its import's options make it), an operation no row names, one the file cannot take.
 	void texture_operation(const EditorRequest &request);
+	// WaveOperation (round S23 lane A): the wave document at path (opened first when open_first says so) made anew by
+	// the operation over the bytes it holds (documents/wave_document.h), applied as one step whose words are the
+	// operation's. Refused, nothing changed (wave.operation): a file an import makes, an operation it does not take,
+	// one the wave cannot take.
+	void wave_operation(const EditorRequest &request);
 	void revert_to_saved(const EditorRequest &request);
 	// The text of the string a field's string id names (SetStringText, the plain-words lane): the table
 	// that defines the id as the game's lookup reaches it (the graph's), opened in the background where it

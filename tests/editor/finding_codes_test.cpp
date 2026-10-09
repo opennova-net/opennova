@@ -87,8 +87,9 @@ static int test_tokens_unique() {
 	for (const Table &table : tables()) {
 		// Every table has rows but the text type's (S13 D9): the game reads its files through readers
 		// the editor does not model, so it makes no finding of its own; and the HUD layout's, whose line
-		// ends are the line-ends rule's (documents/line_ends.h), all it says of its file yet.
-		TEST_EXPECT(table.rows.count > 0 || table.owner == "text" || table.owner == "hud_layout");
+		// ends are the line-ends rule's (documents/line_ends.h), all it says of its file yet; and the wave's, whose one
+		// finding is the core's asset.wave_unplayable, the loader's verdict (round S23).
+		TEST_EXPECT(table.rows.count > 0 || table.owner == "text" || table.owner == "hud_layout" || table.owner == "wave");
 		for (const FindingCodeRow &row : table.rows) {
 			++rows;
 			const std::string token = row.token ? row.token : "";
@@ -300,7 +301,8 @@ static int test_columns() {
 	// (A catalog's input the game ignores has none: a save keeps it as the file has it, the demo round's bug 3.)
 	TEST_EXPECT(fixed_by(FindingFix::Rewrite) ==
 	            Tokens({ "animation_map.ignored_input", "dialog_bank.ignored_input", "environment.ignored_input",
-	                     "face_animation.ignored_input", "menu.ignored_input", "mission.event_order", "mission.rewrite_differs", "script.line_ending",
+	                     "face_animation.ignored_input", "font.ignored_input", "menu.ignored_input", "mission.event_order",
+	                     "mission.rewrite_differs", "music_bank.ignored_input", "script.line_ending",
 	                     "shader.form", "sound_bank.ignored_input", "strings.regrouped", "style.line_ending",
 	                     "terrain.ignored_input" }));
 	const std::map<std::string, std::string> rewrites = {
@@ -308,6 +310,8 @@ static int test_columns() {
 		{ "dialog_bank.ignored_input", "without the input the game ignores" },
 		{ "environment.ignored_input", "with each line as the game reads it" },
 		{ "face_animation.ignored_input", "without the input the game ignores" },
+		{ "font.ignored_input", "without the input the game ignores" },
+		{ "music_bank.ignored_input", "without the input the game ignores" },
 		{ "menu.ignored_input", "without the input the game ignores" },
 		{ "sound_bank.ignored_input", "without the input the game ignores" },
 		{ "mission.event_order", "with each event's triggers and actions where the event stands" },
@@ -326,8 +330,9 @@ static int test_columns() {
 	            Tokens({ "animation_map.invalid_input", "catalog.invalid_input", "catalog.unserializable",
 	                     "credits.invalid_input", "credits.unserializable", "dialog_bank.invalid_input", "document.unserializable",
 	                     "environment.invalid_input", "face_animation.invalid_input", "face_animation.unserializable",
+	                     "font.invalid_input", "font.unserializable",
 	                     "menu.invalid_input", "menu.unserializable", "mission.invalid_input",
-	                     "music_script.invalid_input", "music_script.unserializable", "sound_bank.invalid_input",
+	                     "music_bank.invalid_input", "music_script.invalid_input", "music_script.unserializable", "sound_bank.invalid_input",
 	                     "sound_bank.unserializable", "sound_profiles.unserializable", "strings.invalid_input",
 	                     "terrain.invalid_input" }));
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.place == FindingPlace::File; }) ==
@@ -352,8 +357,10 @@ static int test_columns() {
 	                     "export.cleanup", "export.replaced", "face_animation.eye_texture_alone",
 	                     "face_animation.gesture_repeated", "face_animation.gesture_unplayed",
 	                     "face_animation.parameter_repeated", "face_animation.parameter_unmatched",
+	                     "font.glyph_height", "font.glyph_outside",
 	                     "mission.event_missing",
 	                     "mission.group_range", "model.frame_missing", "model.light_part", "model.register_missing",
+	                     "music_bank.name_empty", "music_bank.name_repeated", "music_bank.stream_silent",
 	                     "particle.duplicate_effect", "particle.unreadable",
 	                     "project.base_project", "project.expansion.name_taken", "project.expansion.not_installed", "reference.missing", "reference.wrong_kind", "requirement.missing", "requirement.wrong_kind",
 	                     "shader.form", "sound_bank.layer_unheard", "sound_bank.set_name_repeated", "sound_bank.set_silent",

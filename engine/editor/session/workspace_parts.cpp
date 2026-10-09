@@ -991,6 +991,7 @@ JsonValue sound_json(const WorkspaceView::Sound &sound) {
 		item.set("volume", number(double(voice.volume)));
 		// A voice that starts after the play does (a dialog's later lines, DI-32): when, in seconds.
 		if (voice.start_ms > 0) item.set("at", number(double(voice.start_ms) / 1000.0));
+		if (voice.stream >= 0) item.set("stream", number(double(voice.stream)));
 		voices.push(std::move(item));
 	}
 	out.set("voices", std::move(voices));

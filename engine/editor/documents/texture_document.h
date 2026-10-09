@@ -57,7 +57,7 @@ public:
 	bool changes_since(uint64_t load_generation, uint64_t revision, ChangeSet &out) const override;
 	SerializeResult serialize() const override;
 	std::unique_ptr<DocumentBase> snapshot() const override;
-	bool holds_image() const override { return true; }
+	bool holds_bytes() const override { return true; }
 
 protected:
 	bool apply_edits(const std::vector<Edit> &edits, Diagnostic &error) override;

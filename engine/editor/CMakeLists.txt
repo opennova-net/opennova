@@ -96,7 +96,9 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/dialog_bank_document.cpp
     # round S23 lane A: the binary formats
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/face_animation_document.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/documents/wave_check.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/font_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/music_bank_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/wave_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/hud_layout_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/line_ends.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/config_overrun.cpp
@@ -237,6 +239,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_role_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_thumbnails.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_viewport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/font_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/hud_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/hud_layout_edit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/hud_viewport.cpp
@@ -408,6 +411,9 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/effect_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/environment_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/font_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/music_bank_inspector.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/wave_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/hud_layout_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/hud_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/catalog_inspector_view.cpp

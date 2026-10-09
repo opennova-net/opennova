@@ -251,10 +251,10 @@ static int test_what_a_validation_reads() {
 				{ project.paths, project.document, project.scan, open }, graph, cache);
 	};
 	const ValidationStats &stats = cache.stats();
-	// Three stylesheets, a menu, two item tables, a weapon table, an ammo table and a texture (S18: a
-	// texture's own findings are its file's).
+	// Three stylesheets, a menu, two item tables, a weapon table, an ammo table, a texture (S18: a
+	// texture's own findings are its file's) and a font (S23: a document).
 	const size_t files = validation_files(project.scan).size();
-	TEST_EXPECT(files == 9);
+	TEST_EXPECT(files == 10);
 	validate();
 	TEST_EXPECT(stats.passes == 1 && stats.files_validated == files &&
 			stats.files_loaded == files && stats.files_reused == 0 && stats.files_failed == 0);

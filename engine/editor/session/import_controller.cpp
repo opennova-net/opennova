@@ -14,6 +14,7 @@
 #include <base/io/file_time.h>
 #include <base/io/strutil.h>
 #include <editor/graph/texture_uses.h>
+#include <editor/import/font_import.h>
 #include <editor/import/import_context.h>
 #include <editor/import/import_plan.h>
 #include <editor/import/import_run.h>
@@ -39,6 +40,7 @@
 #include <editor/session/workspace_parts.h>
 #include <formats/cpt/trngen/heightmap_depth.h>
 #include <runtime/renderer/material_texture.h>
+#include <runtime/renderer/texture_authoring.h>
 #include <runtime/terrain/terrain_map_source.h>
 
 namespace fs = std::filesystem;
@@ -389,6 +391,111 @@ void ImportController::new_terrain(const EditorRequest &request) {
 	}
 	core_.note("Made the terrain set " + set_path + " (" + std::to_string(copies.size() - 1) + " image(s) copied in): importing it makes " +
 	           stem + ".trn, " + stem + ".cpt and their textures.");
+	reimport(set_path, true);
+}
+
+// A font made from a glyph sheet (round S23 lane A): every value checked, the sheet read and made into a font in
+// memory as the import will make it, before a byte is written; then the copy, the set and its record written (each
+// taken back should one fail), then the refresh that imports the set.
+void ImportController::new_font(const EditorRequest &request) {
+	if (!view_.project.open || !view_.project.scan) return;
+	const AssetScan &scan = *view_.project.scan;
+	std::string stem = basename_of(request.path);
+	for (const char *extension : {".fnt", kFontSetExtension})
+		if (strutil::ends_with_icase(stem, extension)) stem.resize(stem.size() - std::char_traits<char>::length(extension));
+	const auto refuse = [&](const std::string &why, const std::string &asset = std::string()) {
+		core_.refuse_now(CoreFinding::ImportFont, "No font made: " + why, asset);
+	};
+	FileNameProblem problem = FileNameProblem::None;
+	std::string message;
+	if (stem.empty() || !check_file_name(stem + ".fnt", AssetKind::Font, problem, message)) return refuse(message.empty() ? "it needs a name." : message);
+	const std::string folder = asset_kind_row(AssetKind::Font).folder;
+	const std::string set_path = folder + "/" + stem + kFontSetExtension;
+	for (const std::string &name : {stem + ".fnt", stem + kFontSetExtension})
+		if (const AssetEntry *taken = scan.find(name))
+			return refuse("the font " + stem + " makes " + name + ", and the project has " + taken->relative_path +
+			                      " of that name already. Choose another name.",
+			              taken->relative_path);
+	// The values: the sheet, its grid (the set's keys) and the importer's options.
+	std::string sheet_value;
+	std::string set_text;
+	ImportOptions options;
+	for (const auto &[key, value] : request.values) {
+		if (key == "sheet") sheet_value = value;
+		else if (key == "columns" || key == "rows" || key == "first") {
+			if (!value.empty()) set_text += key + " " + value + "\r\n";
+		} else if (import_option_row(font_import_option_rows(), key)) {
+			if (!value.empty()) options[key] = value;
+		} else {
+			return refuse("a new font takes sheet, columns, rows, first, advance, tracking, space, spacing, design_width and "
+			              "color; '" + key + "' is none of them.");
+		}
+	}
+	if (sheet_value.empty()) return refuse("a font is made from its glyph sheet; values names it (sheet).");
+	fnt::FontSheetSettings settings;
+	std::string why, field;
+	if (!font_import_settings(options, settings, why, field)) return refuse(why);
+	// The sheet read; a file of the project named where it is, any other copied in beside the set.
+	const std::string file = path_of(sheet_value).is_absolute() ? sheet_value : join_path(view_.project.root, sheet_value);
+	std::vector<uint8_t> bytes;
+	if (!io::read_file_bytes(file, bytes, message)) return refuse("the sheet " + sheet_value + " could not be read: " + message + ".");
+	std::string named, copy_to;
+	const fs::path root = path_of(view_.project.root).lexically_normal();
+	const fs::path within = path_of(file).lexically_normal().lexically_relative(root);
+	std::string inside, relative;
+	if (!within.empty() && ImportContext::resolve(view_.project.root, view_.project.root, utf8_of(within), inside, relative)) {
+		named = utf8_of(path_of(relative).lexically_relative(path_of(folder)));
+	} else {
+		const std::string extension = strutil::to_lower(utf8_of(path_of(sheet_value).extension()));
+		named = stem + "_sheet" + extension;
+		copy_to = folder + "/" + named;
+		std::error_code ec;
+		if (scan.at_path(copy_to) || fs::exists(system_path(join_path(view_.project.root, copy_to)), ec))
+			return refuse("the project has " + copy_to + " already.", copy_to);
+	}
+	set_text = "; " + stem + ".fnt, made from its glyph sheet\r\nsheet " + named + "\r\n" + set_text;
+	FontSet set;
+	if (!parse_font_set(std::vector<uint8_t>(set_text.begin(), set_text.end()), set, why)) return refuse(why + ".");
+	// The font made in memory, as the import makes it, so a sheet the grid does not divide is refused here.
+	renderer::ImageSource sheet;
+	if (!renderer::decode_image_source(sheet_value, bytes, sheet, why))
+		return refuse("the sheet " + sheet_value + ": " + why + " (a glyph sheet is a PNG, a TGA or a PCX).");
+	settings.columns = set.columns;
+	settings.rows = set.rows;
+	settings.first = set.first;
+	std::vector<uint8_t> font;
+	bool opaque = false;
+	if (!fnt::make_font_from_sheet(sheet.image, settings, font, opaque, why, field)) return refuse("the sheet " + sheet_value + ": " + why + ".");
+
+	// Written: the copy, the set, its record; what was written taken away again should one fail.
+	std::vector<std::string> written;
+	const auto put_back = [&] {
+		std::error_code ec;
+		for (const std::string &path : written) fs::remove(system_path(join_path(view_.project.root, path)), ec);
+	};
+	std::error_code ec;
+	fs::create_directories(system_path(join_path(view_.project.root, folder)), ec);
+	std::vector<std::pair<std::string, std::vector<uint8_t>>> files;
+	if (!copy_to.empty()) files.emplace_back(copy_to, bytes);
+	files.emplace_back(set_path, std::vector<uint8_t>(set_text.begin(), set_text.end()));
+	for (const auto &[to, data] : files) {
+		if (!io::write_file_atomic(join_path(view_.project.root, to), data.data(), data.size(), message)) {
+			put_back();
+			return refuse(to + " could not be written: " + message + ".", to);
+		}
+		written.push_back(to);
+	}
+	ImportSidecar record;
+	record.importer = "font";
+	record.version = kFontImporterVersion;
+	record.options = options;
+	Diagnostic error;
+	if (!save_import_sidecar(join_path(view_.project.root, set_path + kImportSidecarSuffix), record, error)) {
+		put_back();
+		return refuse(error.message, set_path);
+	}
+	core_.note("Made the font set " + set_path + (copy_to.empty() ? std::string() : " (its sheet copied in as " + copy_to + ")") +
+	           ": importing it makes " + stem + ".fnt.");
 	reimport(set_path, true);
 }
 

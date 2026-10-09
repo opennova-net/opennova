@@ -67,6 +67,9 @@ constexpr GroupRow kGroups[] = {
 	{ G::CharAttrs, "charattr", "Character attributes" },
 	{ G::FileChores, "file", "File chores" },
 	{ G::FaceAnimations, "face_animation", "Face animations" },
+	{ G::Fonts, "font", "Fonts" },
+	{ G::MusicBanks, "music_bank", "Music banks" },
+	{ G::Waves, "wave", "Waves" },
 };
 
 constexpr bool groups_well_formed() {

@@ -1,5 +1,7 @@
 #include <editor/session/sound_play.h>
 
+#include <cstdio>
+#include <memory>
 #include <optional>
 
 #include <base/io/os_path.h>
@@ -7,6 +9,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/sound_bank_document.h>
+#include <editor/documents/music_bank_document.h>
 #include <editor/preview/dialog_preview.h>
 #include <editor/assets/project_asset_source.h>
 #include <runtime/mission/mission_sidecars.h>
@@ -212,6 +215,43 @@ void play_dialog(SessionCore &core, const EditorRequest &request) {
 	      missing.empty() ? play.words : play.words + " (the project lacks " + missing + ")");
 }
 
+// values {stream}: a stream of the music bank `path` names, by its name or its place (round S23 lane A): the Shell
+// streams the bank's file as the game streams it [orig: Audio_StreamNextChunk @ 0x4ED7D0], so an open bank with
+// unsaved changes is refused.
+void play_stream(SessionCore &core, const EditorRequest &request) {
+	const SessionView &view = core.view();
+	const AssetEntry *entry = request.path.empty() ? nullptr : view.project.scan->named(request.path);
+	if (!entry || entry->kind != AssetKind::MusicBank)
+		return refuse(core, "A stream plays from the music bank path names: " +
+		                            (request.path.empty() ? std::string("none is named.") : request.path + " is none."));
+	const std::string &named = value_of(request, "stream");
+	std::unique_ptr<MusicBankDocument> loaded;
+	const auto *bank = dynamic_cast<const MusicBankDocument *>(open_at(view, entry->relative_path));
+	if (bank && bank->dirty())
+		return refuse(core, entry->logical_name + " has unsaved changes: the editor streams the bank's file as the game "
+		                                          "does, so save it to hear them.",
+		              entry->relative_path);
+	if (!bank && view.project.document) {
+		loaded = std::make_unique<MusicBankDocument>();
+		Diagnostic error;
+		if (loaded->load(join_path(view.project.root, entry->relative_path), entry->relative_path, entry->kind,
+		                 view.project.document->target_game, error))
+			bank = loaded.get();
+	}
+	if (!bank) return refuse(core, entry->logical_name + " could not be read.", entry->relative_path);
+	const int index = bank->stream_index(named);
+	if (index < 0) return refuse(core, entry->logical_name + " has no stream " + named + ".", entry->relative_path);
+	const MusicBankStream &stream = bank->bank_row()->streams[size_t(index)];
+	char seconds[32];
+	std::snprintf(seconds, sizeof(seconds), "%.1f", music_stream_seconds(stream));
+	WorkspaceView::Voice voice;
+	voice.path = entry->relative_path;
+	voice.stream = index;
+	start(core, {voice}, stream.name, entry->logical_name,
+	      "Stream " + std::to_string(index) + ", " + stream.name + ", of " + entry->logical_name + ": " + seconds +
+	              " s of byte-paired stereo at 22050 a second.");
+}
+
 // A slot by its keyword, without case, or its number; -1 for none.
 int slot_named(const std::string &text) {
 	if (const int slot = audio::sound_profile_slot_of(text); slot >= 0) return slot;
@@ -270,6 +310,7 @@ void serve_sound_play(SessionCore &core, const EditorRequest &request) {
 	if (has_value(request, "frame")) return play_clip_event(core, request);
 	if (has_value(request, "leg")) return play_action_leg(core, request);
 	if (has_value(request, "dialog")) return play_dialog(core, request);
+	if (has_value(request, "stream")) return play_stream(core, request);
 	const std::string &set = value_of(request, "set");
 	const bool slot_play = has_value(request, "slot") || has_value(request, "profile") || has_value(request, "surface");
 	if (!set.empty()) {

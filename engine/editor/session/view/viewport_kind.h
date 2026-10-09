@@ -48,6 +48,10 @@ enum class ViewportKind : uint8_t {
 	// environment under a mission that runs on it, or the engine's own; DI-29's overlays; DI-07's ground under the
 	// pointer), the Document tab's main view
 	Terrain,
+	// A font's text as the game draws it (round S23 lane A: laid out by the game's text engine, each page drawn
+	// MODULATE2X over the caller's halved colour; the Shell's font device), or a page of it with its glyphs' rects,
+	// the Document tab's main view
+	Font,
 	kCount,
 };
 

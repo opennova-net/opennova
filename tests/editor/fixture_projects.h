@@ -124,7 +124,8 @@ inline Files style_files() {
 								"<APPEARANCE STATE=\"DEFAULT\" "
 								"TYPE=\"COLOR\">%XML%</APPEARANCE>\r\n") +
 						"</SCREEN>\r\n" },
-		{ "fonts/arial.fnt", "fnt" },
+		// A font the menu names, the minted one (round S23: a font is a document, its file read).
+		{ "fonts/arial.fnt", text_of(test_io::read_file(repo() + "/fixtures/fnt/synth_1page.fnt")) },
 		{ "art/logo.tga", "tga" },
 	};
 }

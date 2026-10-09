@@ -480,10 +480,11 @@ static int test_retail_install_leg() {
 	return totals.failures == 0 ? 0 : 1;
 }
 
-// A composition the render check alone moves (S13 D4's second review): a font a menu reads is
-// replaced on disk, a file no graph extractor reads and no document type opens, so only the
-// check's dependency stamp moves. The menu renders again, its note goes, and the Problems rows
-// are composed again (Findings moves) though no file's own findings and nothing of the graph did.
+// A composition the render check moves with no graph change (S13 D4's second review): a font a menu
+// reads is replaced on disk, a file no graph extractor reads (round S23 made it a document whose glyphs
+// name nothing, so its own findings are read again, it alone), and the check's dependency stamp moves.
+// The menu renders again, its note goes, and the Problems rows are composed again once (Findings
+// moves) though nothing of the graph did.
 static int test_notes_alone_recompose() {
 	editor_test::TempProjectDir dir("opennova_menu_render_notes");
 	NoProcess platform;
@@ -532,7 +533,7 @@ static int test_notes_alone_recompose() {
 	TEST_EXPECT(editor_test::write_bytes(broken, readable));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(
-			session.validation_stats().files_validated == 0 && view.findings.graph->generation() == graph);
+			session.validation_stats().files_validated == 1 && view.findings.graph->generation() == graph);
 	TEST_EXPECT(check.rendered() == 1 && unreadable() == 0);
 	TEST_EXPECT(session.problems_compositions() == compositions + 1 &&
 			view.revisions.of(ViewConcern::Findings) != findings);

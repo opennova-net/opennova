@@ -41,6 +41,9 @@ std::string project_expansion(const SessionView &view);
 //   names, or in the bank the mission `path` loads (its own <base>.dbf, or the one its header names), its lines
 //   one after another as the game plays them (preview/dialog_preview), each the wave of its name in the bank's
 //   sounds at its dialog volume, the subtitle each shows in the words; `line` (0 the first) that line alone;
+// - `stream` (round S23 lane A): a stream of the music bank `path` names, by its name or its place, as the game
+//   streams it (its chunks decoded, byte-paired stereo at 22050 a second): the bank's file as saved, an open
+//   bank with unsaved changes refused (the Shell streams the file, as the game does);
 // - none: the project's wave `path`.
 // Refused, the status line saying why (workspace.refused): a name no file has, a set no bank the game
 // searches holds, an empty slot, waves the project lacks, a wave past what a card reads.

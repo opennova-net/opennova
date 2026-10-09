@@ -105,6 +105,9 @@ enum class FindingGroup {
 	CharAttrs, // charattr.def, through the game's loader (formats/charattr, DI-09's follow-up)
 	FileChores, // Files' delete, duplicate, new here and folders, and their undo (DI-25)
 	FaceAnimations, // a .grm, through the face's reader (round S23 lane A)
+	Fonts,          // a .fnt, through the font's reader (round S23 lane A)
+	MusicBanks,     // a .sbf, through the bank's reader (round S23 lane A)
+	Waves,          // a .wav's whole-wave operations (round S23 lane A)
 	kCount
 };
 inline constexpr size_t kFindingGroupCount = static_cast<size_t>(FindingGroup::kCount);
@@ -477,6 +480,7 @@ enum class CoreFinding {
 	UnsavedDiscard,
 	UnsavedNone,
 	ViewportRefused,
+	WaveOperation,
 	WorkspaceRefused,
 	kCount
 };

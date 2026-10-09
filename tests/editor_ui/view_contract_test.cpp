@@ -124,6 +124,10 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::HudPosDefs, "hudpos.def", text_bytes("// soldier panel\r\nHUDHEALTH 25,741,177,751\r\n")},
 	        // The character attributes (DI-09's charattr follow-up): its text in the script view.
 	        {AssetKind::CharAttrDefs, "charattr.def", text_bytes("// classes\r\n[CHARACTER1]\r\nJUNGLE_CAMMO = 5310\r\n")},
+	        // Round S23 lane A: a font beside its picture, a music bank's streams, a wave's picture and edits.
+	        {AssetKind::Font, "synth.fnt", file("fnt/synth_1page.fnt")},
+	        {AssetKind::MusicBank, "synth.sbf", file("sbf/synth_gamemus.sbf")},
+	        {AssetKind::Wave, "tone.wav", file("lwf/tone.wav")},
 	        // A face animation (round S23 lane A): its face, vertices, triangles and gestures a tree.
 	        {AssetKind::FaceAnimation, "person.grm", file("grm/person.grm")},
 	        // A texture (S18): a TGA our writer mints, its picture the tab's main view beside its facts.
@@ -194,8 +198,8 @@ void draw_frames(TestWorkspace &workspace, DocumentView &view, const DocumentBas
 // items, a stylesheet's variables rather than its comments): what its view shows first; a text's
 // first line that is not blank.
 std::string first_title(const DocumentBase &document) {
-	// An image (S18): its file's name, which heads its facts.
-	if (document.holds_image()) return document.path().substr(document.path().find_last_of('/') + 1);
+	// A file held whole (S18 a texture, S23 a wave): its file's name, which heads its facts.
+	if (document.holds_bytes()) return document.path().substr(document.path().find_last_of('/') + 1);
 	if (const TextDocument *text = text_of(document)) {
 		for (size_t line = 1; line <= text->line_count(); ++line)
 			if (text->line(line).find_first_not_of(" \t") != std::string_view::npos) return std::string(text->line(line));
@@ -270,7 +274,7 @@ void test_every_view() {
 			// frame: with no viewport kept for the document, its kind's message, raising nothing.
 			// An image's view (S18, a texture's) draws its viewport's view beside its facts alike.
 			const bool main_beside_outline =
-					row->role == DocumentViewRole::MainViewport && (row->outline || document->holds_image());
+					row->role == DocumentViewRole::MainViewport && (row->outline || document->holds_bytes());
 			ImGui::NewFrame();
 			CHECK(view->main_viewport(workspace, *document) == main_beside_outline,
 			      (where + (main_beside_outline ? ": the main viewport drawn beside the outline" : ": no main viewport drawn")).c_str());
@@ -307,10 +311,11 @@ void test_every_view() {
 		types += drawn > 0 ? 1 : 0;
 	}
 	CHECK(types == kDocumentTypeCount, "every document type's view drawn");
-	CHECK(main_rows == 12 && scripts == 8,
+	CHECK(main_rows == 13 && scripts == 8,
 	      "every text type's row the Main role's (a particle file's, the HUD layout's and the character attributes' among "
 	      "them), its view the "
-	      "script view, and the mission's, the texture's, the environment's and the terrain's rows the Main role's too");
+	      "script view, and the mission's, the texture's, the environment's, the terrain's and the font's rows the Main role's "
+	      "too");
 	std::printf("%zu document types, %zu views over their files, %zu frames drawn, %zu script views\n", types, views,
 	            frames, scripts);
 }

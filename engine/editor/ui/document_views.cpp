@@ -21,6 +21,8 @@
 #include <editor/ui/model_inspector_view.h>
 #include <editor/ui/outline_view.h>
 #include <editor/ui/script_view.h>
+#include <editor/ui/music_bank_inspector.h>
+#include <editor/ui/wave_inspector.h>
 #include <editor/ui/sound_inspector.h>
 #include <editor/ui/styles_view.h>
 #include <editor/ui/texture_view.h>
@@ -185,6 +187,15 @@ constexpr DocumentViewRow kViews[] = {
 	{DocumentTypeId::CharAttrs, DocumentViewRole::MainViewport, nullptr, make_script_view},
 	// A face animation's face as a tree: its vertices, triangles and gestures, each gesture its parameters (S23 A).
 	{DocumentTypeId::FaceAnimation, DocumentViewRole::Records, &kTreeOutline, nullptr},
+	// A font's glyphs as a tree beside its picture (S23 A: the Main role, ui/main_viewport_view over the Font viewport
+	// kind: its text drawn as the game draws it, or a page with its glyphs' rects).
+	{DocumentTypeId::Font, DocumentViewRole::MainViewport, &kTreeOutline, nullptr},
+	// A music bank's streams as a list under the bank; a stream heads the Inspector with a Play of it as the game
+	// streams it (S23 A, ui/music_bank_inspector).
+	{DocumentTypeId::MusicBank, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_music_bank_inspector},
+	// A wave's picture, its facts and whether the game plays it, a Play, a trim and a normalise (S23 A,
+	// ui/wave_inspector).
+	{DocumentTypeId::Wave, DocumentViewRole::Records, nullptr, make_wave_view},
 };
 
 // One view per DocumentTypeId past None, in its order, each an outline or a view its make makes.

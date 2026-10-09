@@ -66,11 +66,10 @@
 // replacements one step, a gesture's two batches one step whose change set holds both spans; and a
 // snapshot sharing its identity, load and revision, serializing its bytes and refusing an edit, a
 // save and a load. Every text type but the text one (whose files the game reads through readers the
-// editor does not model) makes a finding over its files. S18: an image type's make gives a DocumentBase
-// that holds an image (the texture's, over a minted TGA, PCX and DDS): it loads unblocked, serializes the
-// bytes it was read from, validates alike twice, refuses another's change and an edit naming a record,
-// says nothing changed since its load, and snapshots as a text's does; the texture type makes no
-// finding yet (what the game makes of a texture is its role's), its table empty.
+// editor does not model) makes a finding over its files. S18: a whole-file type's make gives a DocumentBase
+// that holds its file's bytes (the texture's, over a minted TGA, PCX and DDS; round S23 the wave's): it
+// loads unblocked, serializes the bytes it was read from, validates alike twice, refuses another's change
+// and an edit naming a record, says nothing changed since its load, and snapshots as a text's does.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -105,6 +104,8 @@
 #include <editor/documents/project_check.h>
 #include <editor/documents/dialog_bank_document.h>
 #include <editor/documents/face_animation_document.h>
+#include <editor/documents/font_document.h>
+#include <editor/documents/music_bank_document.h>
 #include <editor/documents/sound_bank_document.h>
 #include <editor/documents/sound_profile_document.h>
 #include <editor/documents/strings_document.h>
@@ -122,11 +123,13 @@
 #include <formats/dds/dds.h>
 #include <formats/dbf/dbf.h>
 #include <formats/def/def_schema.h>
+#include <formats/fnt/fnt.h>
 #include <formats/lwf/lwf.h>
 #include <formats/mission/bms.h>
 #include <formats/mus/mus.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/rtxt/rtxt.h>
+#include <formats/sbf/sbf.h>
 #include <formats/scr/scr.h>
 #include <formats/tga/tga.h>
 
@@ -168,6 +171,7 @@ struct TypeCounts {
 	size_t findings = 0; // what validate_file made over the type's files
 	size_t multi_rows = 0, mixed = 0, mixed_refused = 0; // S13 D7's batches over several rows
 	size_t grown = 0; // text fields whose longer text grew their row's footprint
+	size_t texts = 0; // the writable text fields asked to grow (none of a font's glyphs, round S23)
 	size_t check_findings = 0; // what the type's project check made over them
 	// S13 D8: the type's schema names a Record reference, and the references held across an Add.
 	bool declares_records = false;
@@ -192,6 +196,7 @@ const RowObject kRowObjects[] = {
         {&typeid(SoundBankRow), sizeof(SoundBankRow)}, {&typeid(SoundProfileRow), sizeof(SoundProfileRow)},
         {&typeid(DialogBankRow), sizeof(DialogBankRow)},
         {&typeid(FaceAnimationRow), sizeof(FaceAnimationRow)},
+        {&typeid(FontRow), sizeof(FontRow)}, {&typeid(MusicBankRow), sizeof(MusicBankRow)},
 };
 // The document types whose rows keep their text in fixed-length records (a model's 3DI records, a
 // clip's bone table, a def catalog's records, a mission's header and entity slots): a longer text
@@ -385,6 +390,10 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	                    "ARCTIC_CAMMO = 5310\r\nATTRIBUTES = AutoScope\r\n")},
 	        // The face animation (round S23 lane A): the authored face, four vertices, two triangles, three gestures.
 	        {AssetKind::FaceAnimation, "person.grm", file("grm/person.grm")},
+	        // The font, the music bank and the wave (round S23 lane A): the minted ones.
+	        {AssetKind::Font, "synth.fnt", file("fnt/synth_1page.fnt")},
+	        {AssetKind::MusicBank, "synth.sbf", file("sbf/synth_gamemus.sbf")},
+	        {AssetKind::Wave, "tone.wav", file("lwf/tone.wav")},
 	};
 }
 
@@ -432,6 +441,59 @@ std::vector<uint8_t> bank_with_a_wave_twice() {
 	std::vector<uint8_t> out;
 	std::string error;
 	if (!opennova::lwf::encode_lwf(bank, out, error)) out.clear();
+	return out;
+}
+
+// The minted one-page font with its 'A' reaching past its page (round S23: font.glyph_outside). Empty when the
+// font does not read or write.
+std::vector<uint8_t> font_with_a_glyph_outside(const std::vector<uint8_t> &minted) {
+	namespace fnt = opennova::fnt;
+	fnt::fnt_font_t font{};
+	std::vector<uint8_t> out;
+	if (minted.empty() || fnt::fnt_parse(minted.data(), minted.size(), &font) != fnt::FNT_OK) return out;
+	font.keep_page_rgb = 1;
+	font.glyphs['A' - fnt::FNT_FIRST_CHAR].uv.u1 = 1.25f;
+	out.resize(fnt::fnt_calculate_file_size(font.num_pages));
+	size_t written = 0;
+	if (fnt::fnt_write(&font, out.data(), out.size(), &written) != fnt::FNT_OK) written = 0;
+	out.resize(written);
+	fnt::fnt_free(&font);
+	return out;
+}
+
+// The minted music bank with its second stream named as its first (round S23: music_bank.name_repeated). Empty
+// when the bank does not read or write.
+std::vector<uint8_t> music_with_a_name_twice(const std::vector<uint8_t> &minted) {
+	opennova::sbf::SbfFile bank;
+	std::string error;
+	std::vector<uint8_t> out;
+	if (minted.empty() || !opennova::sbf::sbf_read_bank(minted.data(), minted.size(), bank, error) || bank.streams.empty())
+		return out;
+	if (bank.streams.size() < 2) bank.streams.push_back(bank.streams.front());
+	bank.streams[1].name = bank.streams[0].name;
+	if (!opennova::sbf::sbf_write_bank(bank, out, error)) out.clear();
+	return out;
+}
+
+// A stereo 16-bit wave of a few frames, which the game's loader refuses (round S23: asset.wave_unplayable, D-SND-33).
+std::vector<uint8_t> stereo_wave() {
+	const auto word = [](std::vector<uint8_t> &out, uint32_t value, int bytes) {
+		for (int i = 0; i < bytes; ++i) out.push_back(uint8_t(value >> (8 * i)));
+	};
+	const uint32_t frames = 64, data = frames * 4;
+	std::vector<uint8_t> out = {'R', 'I', 'F', 'F'};
+	word(out, 36 + data, 4);
+	for (const char c : std::string("WAVEfmt ")) out.push_back(uint8_t(c));
+	word(out, 16, 4);
+	word(out, 1, 2);
+	word(out, 2, 2);
+	word(out, 22050, 4);
+	word(out, 22050 * 4, 4);
+	word(out, 4, 2);
+	word(out, 16, 2);
+	for (const char c : std::string("data")) out.push_back(uint8_t(c));
+	word(out, data, 4);
+	for (uint32_t i = 0; i < frames * 2; ++i) word(out, uint32_t(int16_t(i * 97)), 2);
 	return out;
 }
 
@@ -542,6 +604,11 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	                    "ATTRIBUTES = Medick\r\n[CHARACTER3]\r\nATTRIBUTES = Medic\r\n")},
 	        // A face animation of a gesture no expression is named (face_animation.gesture_unplayed).
 	        {AssetKind::FaceAnimation, "blink.grm", text_bytes("basetexture face.tga\r\ngestures 1\r\ngesture 0 BLINK\r\n")},
+	        // A font whose 'A' reaches past its page (font.glyph_outside), a music bank naming a stream twice
+	        // (music_bank.name_repeated), a stereo wave the game does not play (asset.wave_unplayable): round S23.
+	        {AssetKind::Font, "outside.fnt", font_with_a_glyph_outside(file("fnt/synth_1page.fnt"))},
+	        {AssetKind::MusicBank, "twice.sbf", music_with_a_name_twice(file("sbf/synth_gamemus.sbf"))},
+	        {AssetKind::Wave, "stereo.wav", stereo_wave()},
 	};
 }
 
@@ -672,8 +739,10 @@ void check_symbols(const Fixture &fixture, const Document &document, const std::
 	scan.index();
 	slotted.update(ProjectPaths::for_root("."), ProjectDocument(), scan,
 			{ std::shared_ptr<const DocumentBase>(document.snapshot()) });
-	check(slotted.for_each_definition(document, [](const GraphSymbol &, bool) {}), fixture.name,
-	      "a graph holding the document's snapshot has a slot current for the document");
+	// A type whose records name and define nothing (round S23: a font's glyphs, a music bank's streams, a clip's
+	// bones) the graph does not read (graph_reads_kind): no slot, and every find answers as the document's alone.
+	check(slotted.for_each_definition(document, [](const GraphSymbol &, bool) {}) == graph_reads_kind(document.kind()),
+	      fixture.name, "a graph holding the document's snapshot has a slot current for the document, its kind read");
 	const auto find = [&](const std::string &where, const std::string &name, NodeAddress &found,
 	                      const std::string &scope) {
 		NodeAddress by_slot;
@@ -1162,23 +1231,13 @@ void check_validate_file(const DocumentType &type, const Fixture &fixture,
 // validated first (a check reads which files' own checks read their records): a second update
 // with nothing changed says nothing moved and keeps its findings, and clear() then an update makes
 // the same findings again.
-// A 16-bit stereo RIFF WAVE of a few silent frames, which the game's loader refuses for its channels.
-std::vector<uint8_t> stereo_wave() {
-	const char bytes[] = "RIFF\x2c\0\0\0WAVEfmt \x10\0\0\0\x01\0\x02\0\x44\xac\0\0\x10\xb1\x02\0\x04\0\x10\0"
-	                     "data\x08\0\0\0\0\0\0\0\0\0\0\0";
-	return std::vector<uint8_t>(bytes, bytes + sizeof(bytes) - 1);
-}
-
 void check_project_check(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
 	if (!type.project_check) return;
 	editor_test::TempProjectDir dir("opennova_editor_contract_project_check");
 	const std::string root = dir.file("project");
 	ProjectDocument project;
 	Diagnostic error;
-	// The sound bank type's check reads the project's waves (documents/wave_check.h): a stereo wave the
-	// game's loader refuses goes beside its bank.
-	bool companion = type.id != DocumentTypeId::SoundBank ||
-	                 editor_test::write_bytes(root + "/files/stereo.wav", stereo_wave());
+	bool companion = true;
 	// The mission type's (preview/mission_ground_check.h, DI-28) grounds a mission's entities on its terrain:
 	// the fixtures' terrain (Tmap, which the synth missions name), the test item table and the models its
 	// rows draw go beside it, the synth missions' entities at z 0 then under Tmap's ground.
@@ -1354,6 +1413,7 @@ void check_multi_row(const DocumentType &type, const Fixture &fixture, Document 
 			if (document.field_on(address, schema).read_only || !document.get(address, schema.id, before) ||
 			    !std::holds_alternative<std::string>(before))
 				continue;
+			++counts.texts;
 			const std::string longer(schema.width ? schema.width - 1 : 4096, 'W');
 			const size_t held = std::get<std::string>(before).size();
 			if (longer.size() <= held) continue;
@@ -1721,30 +1781,30 @@ void check_record_references(const DocumentType &type, const Fixture &fixture, D
 	}
 }
 
-// An image type over its file (S18, a texture): make gives a DocumentBase that holds an image and
-// neither records nor a text; the file loads unblocked and serializes the bytes it was read from (no
+// A whole-file type over its file (S18 a texture, S23 a wave): make gives a DocumentBase that holds its
+// file's bytes and neither records nor a text; the file loads unblocked and serializes the bytes it was read from (no
 // rewrite), parse, serialize, parse again the same bytes; its validate_file's findings on its file
 // alone, a second load validating to the same; a change of a kind the type did not make, or an edit
 // naming a record, refused (document.payload) with nothing committed; nothing changed since its load
 // (an empty change set of its own kind), another load's state not said; and a snapshot sharing its
 // identity, load and revision, serializing its bytes and refusing an edit, a save and a load.
-size_t g_image_files = 0;
+size_t g_bytes_files = 0;
 
-void check_image_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
+void check_bytes_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
 	std::unique_ptr<DocumentBase> made = type.make();
-	check(made && made->holds_image() && !records_of(*made) && !text_of(*made), fixture.name,
-	      "make gives a DocumentBase that holds an image, neither records nor a text");
-	if (!made || !made->holds_image()) return;
+	check(made && made->holds_bytes() && !records_of(*made) && !text_of(*made), fixture.name,
+	      "make gives a DocumentBase that holds its file's bytes, neither records nor a text");
+	if (!made || !made->holds_bytes()) return;
 	DocumentBase &document = *made;
 	Diagnostic error;
 	const bool loaded = document.load_bytes(fixture.bytes, fixture.name, fixture.kind, "jo", error);
 	check(loaded && !document.blocked(), fixture.name + " (" + error.message + ")", "the file loads unblocked");
 	if (!loaded || document.blocked()) return;
-	++g_image_files;
+	++g_bytes_files;
 	const std::string stored(fixture.bytes.begin(), fixture.bytes.end());
 	const SerializeResult first = document.serialize();
 	check(first.ok() && first.text == stored && document.rewrite_need() == DocumentBase::RewriteNeed::None, fixture.name,
-	      "an image document serializes the bytes it was read from");
+	      "a whole-file document serializes the bytes it was read from");
 	std::unique_ptr<DocumentBase> again = type.make();
 	check(again->load_bytes(text_bytes(first.text), fixture.name, fixture.kind, "jo", error) &&
 	              again->serialize().text == first.text,
@@ -1772,7 +1832,7 @@ void check_image_fixture(const DocumentType &type, const Fixture &fixture, TypeC
 	const std::unique_ptr<DocumentBase> snapshot = document.snapshot();
 	check(snapshot && snapshot->is_snapshot() && snapshot->identity() == document.identity() &&
 	              snapshot->load_generation() == document.load_generation() &&
-	              snapshot->revision() == document.revision() && snapshot->holds_image() &&
+	              snapshot->revision() == document.revision() && snapshot->holds_bytes() &&
 	              snapshot->serialize().text == stored,
 	      fixture.name, "a snapshot shares the document's identity, load generation and revision, and its bytes");
 	refused = Diagnostic();
@@ -1790,7 +1850,7 @@ void check_image_fixture(const DocumentType &type, const Fixture &fixture, TypeC
 
 void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
 	if (document_content(type) == DocumentContent::Text) return check_text_fixture(type, fixture, counts);
-	if (document_content(type) == DocumentContent::Image) return check_image_fixture(type, fixture, counts);
+	if (document_content(type) == DocumentContent::Bytes) return check_bytes_fixture(type, fixture, counts);
 	std::unique_ptr<DocumentBase> made = type.make();
 	check(made && made->as_records() == made.get() && records_of(*made) == made->as_records(),
 	      fixture.name, "make gives a DocumentBase whose record document (as_records) is itself");
@@ -1875,7 +1935,7 @@ int main() {
 		check(counts.optional == pinned.optional && counts.presences == pinned.presences, type->name,
 		      "a type's optional fields asked and left out and written again are the ones pinned");
 		check(fixed_text(*type) || document_content(*type) == DocumentContent::Text ||
-		              document_content(*type) == DocumentContent::Image || counts.grown > 0,
+		              document_content(*type) == DocumentContent::Bytes || counts.texts == 0 || counts.grown > 0,
 		      type->name, "a longer text grows a row of the type");
 		// S13 D8: a type whose schema names a Record reference renumbers one over its files.
 		check(!counts.declares_records || counts.records > 0, type->name,
@@ -1897,8 +1957,8 @@ int main() {
 	check(g_grown > 0, "the files", "a longer text grows its row's footprint");
 	check(g_record_moves > 0 && g_named_removes_refused > 0, "the files",
 	      "a collection other records name by index is renumbered, and a record named is never removed");
-	check(g_image_files > 0, "the files", "an image type's file keeps the contract");
-	std::printf("  %zu image documents' files\n", g_image_files);
+	check(g_bytes_files > 0, "the files", "a whole-file type's file keeps the contract");
+	std::printf("  %zu whole-file documents' files\n", g_bytes_files);
 	if (g_failures == 0)
 		std::printf("editor_document_contract: all %zu document types keep the contract (%zu files, %zu records, "
 		            "%zu fields set to their own value, %zu symbols, %zu lookups in another scope of the name, "

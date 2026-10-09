@@ -376,6 +376,8 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::UnsavedDiscard, code("unsaved.discard", G::UnsavedChanges) },
 	{ C::UnsavedNone, code("unsaved.none", G::UnsavedChanges) },
 	{ C::ViewportRefused, code("viewport.refused", G::Viewports) },
+	// A wave_operation the wave cannot take (round S23 lane A): no sample, a trim that keeps none, a silent normalise.
+	{ C::WaveOperation, code("wave.operation", G::Waves) },
 	// A set_workspace the session cannot take (the MCP gaps lane): a card of a file the project lacks.
 	{ C::WorkspaceRefused, code("workspace.refused", G::Workspace) },
 };

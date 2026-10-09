@@ -1404,8 +1404,9 @@ static int test_over_a_session() {
 	const JsonValue *places = targets.get("targets");
 	TEST_EXPECT(places && places->array.size() == 2 && targets.get_int("count", 0) == 2 &&
 	            font && targets.get_string("value", "") == font->get_string("value", ""));
+	// The variable at its line; the font file, a document since round S23, as a whole (no locator).
 	TEST_EXPECT(places && places->array.size() == 2 && places->array[0].get_bool("editable", false) &&
-	            !places->array[0].get_string("locator", "").empty() && !places->array[1].get_bool("editable", true) &&
+	            !places->array[0].get_string("locator", "").empty() && places->array[1].get_bool("editable", false) &&
 	            places->array[1].get("locator") == nullptr);
 	const JsonValue second = reference_targets_to_json(*document, main_address, "font.name", view, JsonPage{1, 5});
 	TEST_EXPECT(second.get("targets") && second.get("targets")->array.size() == 1 && second.get_int("count", 0) == 2 &&

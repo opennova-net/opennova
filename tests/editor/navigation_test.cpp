@@ -338,9 +338,10 @@ int test_session_closed_gone_renamed() {
 int test_session_panes() {
 	Navigated n("opennova_editor_navigation_panes");
 	const SessionView &v = n.view();
+	// A file of no editor: the NovaWorld string table (the fonts are documents since round S23).
 	std::string font, gametext;
 	for (const AssetEntry &entry : v.project.scan->entries) {
-		if (entry.kind == AssetKind::Font && font.empty()) font = entry.relative_path;
+		if (entry.kind == AssetKind::StringTableCoo && font.empty()) font = entry.relative_path;
 		if (basename_of(entry.relative_path) == "gametext.bin") gametext = entry.relative_path;
 	}
 	TEST_EXPECT(!font.empty() && !gametext.empty());
@@ -407,7 +408,7 @@ std::vector<std::string> marked_lines(const FilePage &page) {
 }
 
 // DI-17, a Go to always lands: a face animation (a record document since round S23) at its face's field, from the
-// texture it names; a wave's page, whose user is a sound bank,
+// texture it names; a wave (a document since round S23) whose user is a sound bank,
 // a document of its own (S22: the specific document wins), there opened at the single; a native text held as
 // a text (DI-06: an avatar table, whose parser keeps no places) at the line that writes the record's name (of
 // two records naming one model each its own line, a record named alone its first, the text already open),
@@ -452,9 +453,10 @@ int test_go_to_lands() {
 	uint64_t seq = 0;
 	std::vector<ViewEvent> shown;
 
-	// A wave's page, its Play; its user, the bank, is a document of its own: opened at the single.
-	TEST_EXPECT(n.go(request::open_document(wave)) && v.documents.page == wave && v.documents.page_locator.empty());
-	const FilePage wave_page = shown_file_page(v, wave);
+	// A wave, a document since round S23, its page's Play; its user, the bank, is a document of its own: opened at the
+	// single.
+	TEST_EXPECT(n.go(request::open_document(wave)) && v.documents.active == wave && v.documents.page.empty());
+	const FilePage wave_page = file_page(v, wave);
 	ReferenceTarget single;
 	for (const FilePageLine &line : wave_page.used_by)
 		if (line.target.file == bank) single = line.target;
@@ -464,7 +466,7 @@ int test_go_to_lands() {
 	const Document *bank_records = bank_document ? records_of(*bank_document) : nullptr;
 	TEST_EXPECT(bank_records && v.documents.selection.primary.row &&
 	            bank_records->locator(v.documents.selection.primary) == single.locator);
-	TEST_EXPECT(v.navigation.back.front().pane == Pane::Page && v.navigation.back.front().path == wave);
+	TEST_EXPECT(v.navigation.back.front().pane == Pane::Document && v.navigation.back.front().path == wave);
 
 	// A native text at the record's line: two heads name synth_boonie.3di, each Go to its own line.
 	seq = v.events.next_seq() - 1;
@@ -526,8 +528,8 @@ int test_go_to_lands() {
 	TEST_EXPECT(page.get_bool("wave", false) && to_bank && !page.get("at_field"));
 	const JsonValue state = n.session.query("state", parsed(R"({"sections": ["documents", "navigation"]})"), error);
 	const JsonValue *documents = state.get("documents");
-	// The page last shown, the wave's, at no line.
-	TEST_EXPECT(documents && documents->get_string("page", "") == wave && !documents->get("page_locator") &&
+	// No page shown: every Go to above opened a document.
+	TEST_EXPECT(documents && documents->get_string("page", "").empty() && !documents->get("page_locator") &&
 	            documents->get_string("page_field", "").empty());
 	return 0;
 }

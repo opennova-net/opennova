@@ -13,6 +13,7 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/texture_document.h>
+#include <editor/documents/wave_document.h>
 #include <editor/documents/texture_operations.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
@@ -812,6 +813,50 @@ void DocumentSet::texture_operation(const EditorRequest &request) {
 	const std::string words = image->words + " (" + file + ").";
 	if (!apply_edits(*document, {edit})) return;
 	// The step named with the operation's words, what Undo says it takes back.
+	view_.activity.status = words;
+	name_step(*document);
+}
+
+void DocumentSet::wave_operation(const EditorRequest &request) {
+	if (!document_for(request.path) && request.open_first && view_.project.open && !request.path.empty())
+		open_document(request::open_document(request.path));
+	DocumentBase *document = document_for(request.path);
+	auto *wave = dynamic_cast<WaveDocument *>(document);
+	if (!wave) {
+		if (view_.project.open)
+			core_.refuse_request(document ? CoreFinding::WaveOperation : CoreFinding::DocumentNotOpen,
+			                     document ? basename_of(document->path()) + " is no wave." : "Open the wave before editing it.",
+			                     request.path);
+		return;
+	}
+	const std::string &path = wave->path();
+	const std::string file = basename_of(path);
+	// A file an import makes is made by its import's options, never edited in place.
+	if (const AssetEntry *entry = core_.project_file(path); entry && !entry->imported_from.empty()) {
+		core_.refuse_now(CoreFinding::WaveOperation,
+		                 file + " is made from " + entry->imported_from + ": change how it is made (its import's options), "
+		                 "not the file, which the next import makes again.",
+		                 path);
+		return;
+	}
+	WaveOperation operation;
+	if (!wave_operation_kind(request.operation, operation.kind)) {
+		core_.refuse_now(CoreFinding::WaveOperation, "A wave takes no operation '" + request.operation + "': trim or normalise.", path);
+		return;
+	}
+	operation.params = request.values;
+	auto made = std::make_shared<WaveBytesEdit>();
+	std::string why;
+	if (!apply_wave_operation(wave->bytes(), operation, made->bytes, made->words, why)) {
+		core_.refuse_now(CoreFinding::WaveOperation,
+		                 "Cannot " + std::string(wave_operation_token(operation.kind)) + " " + file + ": " + why + ".", path);
+		return;
+	}
+	Edit edit;
+	edit.operation = EditOperation::Apply;
+	edit.payload = made;
+	const std::string words = made->words + " (" + file + ").";
+	if (!apply_edits(*document, {edit})) return;
 	view_.activity.status = words;
 	name_step(*document);
 }

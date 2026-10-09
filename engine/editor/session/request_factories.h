@@ -182,6 +182,28 @@ inline EditorRequest new_terrain(std::string name, std::vector<std::pair<std::st
 	request.values = std::move(values);
 	return request;
 }
+// The wave document at `path` edited whole (round S23 lane A: documents/wave_document.h): `operation` (trim: start and
+// end in seconds; normalise: peak, 0..1) with its `params`, one undo step; `open_first`: the document opened first.
+inline EditorRequest wave_operation(std::string path, std::string operation,
+                                    std::vector<std::pair<std::string, std::string>> params = {}, bool open_first = false) {
+	EditorRequest request = of(EditorRequestKind::WaveOperation);
+	request.path = std::move(path);
+	request.operation = std::move(operation);
+	std::sort(params.begin(), params.end());
+	request.values = std::move(params);
+	request.open_first = open_first;
+	return request;
+}
+// A font named `name` made from a glyph sheet (round S23 lane A: import/font_import.h): `values` names the sheet
+// (sheet), its grid (columns, rows, first) and the importer's options (advance, tracking, space, spacing,
+// design_width, color).
+inline EditorRequest new_font(std::string name, std::vector<std::pair<std::string, std::string>> values) {
+	EditorRequest request = of(EditorRequestKind::NewFont);
+	request.path = std::move(name);
+	std::sort(values.begin(), values.end());
+	request.values = std::move(values);
+	return request;
+}
 // The texture `path` copied as `new_name`, the uses in the project files `referrers` moved to the copy
 // (S18: graph/rename_transaction.h plan_split).
 inline EditorRequest split_texture(std::string path, std::string new_name, std::vector<std::string> referrers) {
@@ -402,6 +424,13 @@ inline EditorRequest play_action_leg(std::string path, bool end) {
 // A dialog played as the game plays it (DI-32, session/sound_play.h): `dialog` (its name, or a number: dlg%03i of
 // it) of the dialog bank `path` names, or of the bank the mission `path` loads; its line `line` alone where it is
 // 0 or more.
+// A stream of the music bank at `path`, by its name or its place (round S23 lane A), as the game streams it.
+inline EditorRequest play_stream(std::string path, std::string stream) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.path = std::move(path);
+	request.values = {{"stream", std::move(stream)}};
+	return request;
+}
 inline EditorRequest play_dialog(std::string dialog, std::string path, int line = -1) {
 	EditorRequest request = of(EditorRequestKind::PlaySound);
 	request.path = std::move(path);

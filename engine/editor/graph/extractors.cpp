@@ -13,6 +13,7 @@
 #include <editor/graph/asset_graph.h>
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <map>
 #include <sstream>
@@ -380,14 +381,41 @@ bool extract_native(NativeExtractor extract, const std::string &name, const std:
 	return read;
 }
 
-// Whether a type's documents are what the graph reads of their file: a record type's, or a text type's
-// whose text names references (DocumentType::references) or defines names (DocumentType::definitions,
-// a shader's tags). A text type whose text does neither (a native kind held as a text: DI-06's text
-// type over its kinds, the particle type of DI-14) leaves its file's reading to the kind's native
-// extractor.
+// Whether a record type's documents name or define anything the graph keeps: a field of one of its kinds
+// that references or defines a name (a Record reference among them, whose collection the record sets list),
+// or the type's references no field's value is (DocumentType::record_references). A type whose records name
+// nothing (a font's glyphs, a music bank's streams: round S23) is never read, as a texture is not. Asked of a
+// document the type makes, once per registered type.
+bool records_name_anything(const DocumentType &type) {
+	const auto asked = [](const DocumentType &of) {
+		if (of.record_references) return true;
+		const std::unique_ptr<DocumentBase> made = of.make();
+		const Document *records = made ? records_of(*made) : nullptr;
+		if (!records) return false;
+		for (const RecordKindRow &kind : records->kinds())
+			for (const FieldSchema &field : records->fields(kind.kind))
+				if (field.reference != ReferenceKind::None || field.defines != ReferenceKind::None) return true;
+		return false;
+	};
+	const size_t index = static_cast<size_t>(type.id);
+	if (index < 1 || index > kDocumentTypeCount || &type != registered_document_type(type.id)) return asked(type);
+	static const std::array<bool, kDocumentTypeCount> answers = [&] {
+		std::array<bool, kDocumentTypeCount> out{};
+		for (size_t i = 0; i < kDocumentTypeCount; ++i)
+			if (const DocumentType *each = registered_document_type(static_cast<DocumentTypeId>(i + 1))) out[i] = asked(*each);
+		return out;
+	}();
+	return answers[index - 1];
+}
+
+// Whether a type's documents are what the graph reads of their file: a record type's whose records name
+// anything (records_name_anything), or a text type's whose text names references (DocumentType::references)
+// or defines names (DocumentType::definitions, a shader's tags). A text type whose text does neither (a native
+// kind held as a text: DI-06's text type over its kinds, the particle type of DI-14) leaves its file's reading
+// to the kind's native extractor.
 bool read_through_document(const DocumentType &type) {
 	const DocumentContent content = document_content(type);
-	return content == DocumentContent::Records ||
+	return (content == DocumentContent::Records && records_name_anything(type)) ||
 	       (content == DocumentContent::Text && (type.references || type.definitions));
 }
 
@@ -536,11 +564,7 @@ bool graph_reads_kind(AssetKind kind) {
 	// references (S13 D9), or a native extractor; any other type's documents give the graph nothing
 	// (S13 D6).
 	const DocumentType *type = document_type_for(kind);
-	if (type) {
-		const DocumentContent content = document_content(*type);
-		if (content == DocumentContent::Records) return true;
-		if (content == DocumentContent::Text && (type->references || type->definitions)) return true;
-	}
+	if (type && read_through_document(*type)) return true;
 	return native_extractor(kind) != nullptr;
 }
 
