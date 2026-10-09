@@ -11,6 +11,7 @@
 #include <editor/run/play_state.h>
 #include <editor/session/output_log.h>
 #include <editor/session/session_operation.h>
+#include <formats/filelog/file_access_log.h>
 
 namespace opennova::editor {
 
@@ -97,7 +98,7 @@ struct ActivityView {
 	// log was there to read, and what it names (FileAccessLog: the archives, what they served, what was
 	// opened from disk). Cleared as a game starts; a game that loaded nothing leaves no log.
 	bool play_file_log_read = false;
-	FileAccessLog play_file_log;
+	filelog::FileAccessLog play_file_log;
 	bool play_exited_on_its_own = false;
 	// The code the last game exited with on its own (PlaySession::exit_code; -1: none, or it
 	// was stopped). Nonzero, it is a Problems row (play.crashed) until Play starts again or
