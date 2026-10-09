@@ -170,7 +170,7 @@ static int test_remembered_selections() {
 		const std::string path = menus.view().project.root + "/" + menu;
 		std::string bytes;
 		std::string error;
-		TEST_EXPECT(read_file_text(path, bytes, error));
+		TEST_EXPECT(opennova::io::read_file_text(path, bytes, error));
 		TEST_EXPECT(editor_test::write_text(path, bytes + "\r\n"));
 	}
 	const uint64_t before = menus.menu().identity();

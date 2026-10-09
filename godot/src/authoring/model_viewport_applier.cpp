@@ -96,7 +96,7 @@ void ModelViewportApplier::rebuild(const opennova::editor::ViewportModel &viewpo
 	auto build = std::make_unique<Build>();
 	// The textures read through the project's files, each name and stamp noted (a flipbook frame
 	// loads when first drawn: the files stay noting), so a changed one builds again.
-	auto files = std::make_shared<opennova::editor::StampedFiles>(view.findings.assets);
+	auto files = std::make_shared<opennova::StampedFiles>(view.findings.assets);
 	build->files = files;
 	build->data.instantiate();
 	build->data->open_from_model(model.model(), opennova::to_gd(model.path()), std::make_shared<opennova::TextureFiles>(files));

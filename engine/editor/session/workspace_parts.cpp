@@ -276,11 +276,6 @@ std::string parts_taken() {
 	return out + ", focus";
 }
 
-bool whole(const JsonValue &value) {
-	return value.is_number() && value.number >= 0.0 && value.number == std::floor(value.number) &&
-	       value.number <= 9007199254740992.0;
-}
-
 bool typed(const JsonValue &value, WorkspaceJson json) {
 	switch (json) {
 		case J::String:
@@ -288,7 +283,7 @@ bool typed(const JsonValue &value, WorkspaceJson json) {
 		case J::Boolean:
 			return value.is_bool();
 		case J::Integer:
-			return whole(value);
+			return io::json_exact_whole(value);
 		case J::Strings:
 			if (!value.is_array()) return false;
 			for (const JsonValue &item : value.array)
@@ -297,12 +292,12 @@ bool typed(const JsonValue &value, WorkspaceJson json) {
 		case J::Integers:
 			if (!value.is_array()) return false;
 			for (const JsonValue &item : value.array)
-				if (!whole(item)) return false;
+				if (!io::json_exact_whole(item)) return false;
 			return true;
 		case J::Object:
 			if (!value.is_object()) return false;
 			for (const io::JsonMember &member : value.object)
-				if (!member.value.is_string() && !whole(member.value)) return false;
+				if (!member.value.is_string() && !io::json_exact_whole(member.value)) return false;
 			return true;
 	}
 	return false;
@@ -814,7 +809,7 @@ bool set_problems(Change &change, const JsonValue &part) {
 		WorkspaceView::Problems::Confirm asked;
 		for (const io::JsonMember &member : confirm->object) {
 			if (member.key == "finding") {
-				if (!whole(member.value))
+				if (!io::json_exact_whole(member.value))
 					return change.refuse("problems.confirm.finding is the index of a finding (the problems query's index), a whole number.");
 				asked.finding = std::to_string(uint64_t(member.value.number));
 				continue;

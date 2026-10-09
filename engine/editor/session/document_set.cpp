@@ -377,8 +377,8 @@ void DocumentSet::create_file(const EditorRequest &request) {
 		for (std::string dir = folder; !dir.empty() && !fs::exists(system_path(join_path(paths_.root, dir)), ec);
 		     dir = utf8_of(path_of(dir).parent_path()))
 			folders_made.insert(folders_made.begin(), dir);
-		if (!ensure_directory(utf8_of(target.parent_path()), message) ||
-			!write_file_atomic(utf8_of(target), bytes.data(), bytes.size(), message)) {
+		if (!io::ensure_directory(utf8_of(target.parent_path()), message) ||
+			!io::write_file_atomic(utf8_of(target), bytes.data(), bytes.size(), message)) {
 			refuse(make_finding(CoreFinding::DocumentWrite, DiagnosticSeverity::Error, message, request.path));
 			return;
 		}
@@ -401,8 +401,8 @@ void DocumentSet::create_file(const EditorRequest &request) {
 				const auto text_target = path_of(paths_.root) / path_of(text_relative);
 				std::vector<uint8_t> text_bytes;
 				if (!fs::exists(system_path(utf8_of(text_target)), ec) && make_from(*text_factory, text_blank, text_bytes, error) &&
-				    ensure_directory(utf8_of(text_target.parent_path()), message) &&
-				    write_file_atomic(utf8_of(text_target), text_bytes.data(), text_bytes.size(), message)) {
+				    io::ensure_directory(utf8_of(text_target.parent_path()), message) &&
+				    io::write_file_atomic(utf8_of(text_target), text_bytes.data(), text_bytes.size(), message)) {
 					made.push_back(text_relative);
 					core_.note("Created " + text_relative);
 				} else {
@@ -433,8 +433,8 @@ void DocumentSet::create_file(const EditorRequest &request) {
 				Diagnostic beside_error;
 				std::string reason;
 				if (beside->make(beside_blank, beside_bytes, beside_error) &&
-				    ensure_directory(utf8_of(beside_target.parent_path()), reason) &&
-				    write_file_atomic(utf8_of(beside_target), beside_bytes.data(), beside_bytes.size(), reason)) {
+				    io::ensure_directory(utf8_of(beside_target.parent_path()), reason) &&
+				    io::write_file_atomic(utf8_of(beside_target), beside_bytes.data(), beside_bytes.size(), reason)) {
 					made.push_back(beside_relative);
 					core_.note("Created " + beside_relative);
 				} else {

@@ -1,11 +1,7 @@
 #include <editor/project/project_files.h>
 
-#include <chrono>
-#include <cstdio>
-#include <cstring>
 #include <filesystem>
 #include <system_error>
-#include <thread>
 
 #include <base/io/os_path.h>
 #include <editor/assets/asset_kinds.h>
@@ -16,45 +12,9 @@ namespace fs = std::filesystem;
 
 namespace opennova::editor {
 
-namespace {
-
-std::string os_error(const char *what, const std::string &path, const std::error_code &ec) {
-	return std::string(what) + " " + path + ": " + ec.message();
-}
-
-// The file at `path` opened for `mode` ("rb", "wb") through its system path.
-std::FILE *open_file(const std::string &path, const char *mode) {
-#ifdef _WIN32
-	const std::wstring wide(mode, mode + std::strlen(mode));
-	return _wfopen(system_path(path).c_str(), wide.c_str());
-#else
-	return std::fopen(path.c_str(), mode);
-#endif
-}
-
-// The whole of `data` written to `path` (created or truncated); a partial file is removed.
-bool write_whole(const std::string &path, const void *data, size_t size, std::string &error) {
-	std::FILE *f = open_file(path, "wb");
-	if (!f) {
-		error = "cannot create " + path;
-		return false;
-	}
-	const bool written = size == 0 || std::fwrite(data, 1, size, f) == size;
-	const bool closed = std::fclose(f) == 0;
-	if (!written || !closed) {
-		std::error_code ignored;
-		fs::remove(system_path(path), ignored);
-		error = "cannot write " + path;
-		return false;
-	}
-	return true;
-}
-
-} // namespace
-
 fs::path path_of(const std::string &utf8) {
 #ifdef _WIN32
-	return fs::path(io::os_path_detail::widen_utf8(utf8));
+	return fs::path(io::widen_utf8(utf8));
 #else
 	return fs::path(utf8);
 #endif
@@ -88,174 +48,6 @@ fs::path system_path(const std::string &path) {
 #else
 	return path_of(path);
 #endif
-}
-
-bool read_file_bytes(const std::string &path, std::vector<uint8_t> &out, std::string &error) {
-	out.clear();
-	std::FILE *f = open_file(path, "rb");
-	if (!f) {
-		error = "cannot open " + path;
-		return false;
-	}
-	uint8_t buf[64 * 1024];
-	size_t n;
-	while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
-		out.insert(out.end(), buf, buf + n);
-	}
-	const bool ok = std::ferror(f) == 0;
-	std::fclose(f);
-	if (!ok) {
-		error = "cannot read " + path;
-		out.clear();
-	}
-	return ok;
-}
-
-bool read_file_text(const std::string &path, std::string &out, std::string &error) {
-	std::vector<uint8_t> bytes;
-	if (!read_file_bytes(path, bytes, error)) return false;
-	out.assign(bytes.begin(), bytes.end());
-	return true;
-}
-
-bool write_file_atomic(const std::string &path, const void *data, size_t size, std::string &error) {
-	const std::string tmp = path + ".tmp";
-	if (!write_whole(tmp, data, size, error)) return false;
-	if (!replace_file(tmp, path, error)) {
-		std::error_code ignored;
-		fs::remove(system_path(tmp), ignored);
-		return false;
-	}
-	return true;
-}
-
-bool write_file_atomic(const std::string &path, const std::string &text, std::string &error) {
-	return write_file_atomic(path, text.data(), text.size(), error);
-}
-
-bool rename_refusal_passes(const std::error_code &ec) {
-#ifdef _WIN32
-	// ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION.
-	return ec.category() == std::system_category() && (ec.value() == 5 || ec.value() == 32 || ec.value() == 33);
-#else
-	return ec == std::errc::device_or_resource_busy || ec == std::errc::text_file_busy;
-#endif
-}
-
-bool rename_with_retry(const fs::path &from, const fs::path &to, std::error_code &ec) {
-	for (int attempt = 0;; ++attempt) {
-		ec.clear();
-		fs::rename(from, to, ec);
-		if (!ec) return true;
-		if (attempt == 4 || !rename_refusal_passes(ec)) return false;
-		std::this_thread::sleep_for(std::chrono::milliseconds(2 << attempt)); // 2, 4, 8, 16 ms
-	}
-}
-
-std::FILE *create_new_file(const std::string &path) {
-#ifdef _WIN32
-	return _wfopen(system_path(path).c_str(), L"wbx");
-#else
-	return std::fopen(path.c_str(), "wbx");
-#endif
-}
-
-bool refresh_last_write(const std::string &path, std::string &error) {
-	std::error_code ec;
-	fs::last_write_time(system_path(path), fs::file_time_type::clock::now(), ec);
-	if (ec) {
-		error = os_error("cannot date", path, ec);
-		return false;
-	}
-	return true;
-}
-
-bool replace_file(const std::string &from, const std::string &to, std::string &error) {
-	// The last write of the file it replaces, which the new one's must pass (below).
-	std::error_code ec;
-	const fs::path target = system_path(to);
-	const fs::file_time_type before = fs::last_write_time(target, ec);
-	const bool replacing = !ec;
-	// std::filesystem::rename replaces an existing target on every platform (unlike C
-	// rename on Windows), so the swap is one call.
-	if (!rename_with_retry(system_path(from), target, ec)) {
-		error = os_error("cannot replace", to, ec);
-		return false;
-	}
-	// The scan, the graph and the caches tell a file changed by its size and its last write
-	// (AssetEntry::modified_ticks), and a file system stamps a write with a clock that can stand
-	// still for milliseconds (Linux's file times step with the scheduler's tick, some 4 ms), so a
-	// rewrite of the same size that soon after the last would read as unchanged: its last write is
-	// set one tick past the one it replaced when the file system left it there (S13 A3).
-	if (replacing) {
-		const fs::file_time_type after = fs::last_write_time(target, ec);
-		if (!ec && after <= before) fs::last_write_time(target, before + fs::file_time_type::duration(1), ec);
-	}
-	return true;
-}
-
-bool write_files_together(const std::vector<FileText> &files, std::vector<std::string> &problems,
-                          const FileReplace &replace) {
-	std::vector<std::vector<uint8_t>> originals(files.size());
-	std::vector<std::string> staged;
-	const auto remove_staged = [&](size_t from) {
-		for (size_t i = from; i < staged.size(); ++i) {
-			std::error_code ignored;
-			fs::remove(system_path(staged[i]), ignored);
-		}
-	};
-	// What each file holds, to put back; then every text beside its file.
-	for (size_t i = 0; i < files.size(); ++i) {
-		std::string error;
-		if (!read_file_bytes(files[i].path, originals[i], error)) {
-			problems.push_back(error);
-			return false;
-		}
-	}
-	for (const FileText &file : files) {
-		std::string error;
-		const std::string tmp = file.path + ".tmp";
-		if (!write_whole(tmp, file.text.data(), file.text.size(), error)) {
-			remove_staged(0);
-			problems.push_back(error);
-			return false;
-		}
-		staged.push_back(tmp);
-	}
-	for (size_t i = 0; i < files.size(); ++i) {
-		std::string error;
-		if (replace(staged[i], files[i].path, error)) continue;
-		problems.push_back(error.empty() ? "cannot replace " + files[i].path : error);
-		remove_staged(i);
-		for (size_t j = 0; j < i; ++j) {
-			std::string restore;
-			if (!write_file_atomic(files[j].path, originals[j].data(), originals[j].size(), restore))
-				problems.push_back(files[j].path + " keeps the new text: " + restore);
-		}
-		return false;
-	}
-	return true;
-}
-
-bool ensure_directory(const std::string &path, std::string &error) {
-	std::error_code ec;
-	const fs::path directory = system_path(path);
-	fs::create_directories(directory, ec);
-	if (ec && !fs::is_directory(directory, ec)) {
-		error = os_error("cannot create directory", path, ec);
-		return false;
-	}
-	return true;
-}
-
-bool link_file(const std::string &from, const std::string &to, std::string &error) {
-	std::error_code ec;
-	fs::create_hard_link(system_path(from), system_path(to), ec);
-	if (ec) {
-		error = os_error("cannot link", to, ec);
-		return false;
-	}
-	return true;
 }
 
 bool is_dot_directory(const fs::path &path) {
@@ -304,16 +96,7 @@ bool check_project_file_name(const std::string &root, const std::string &dir, co
                              FileNameProblem &problem, std::string &message) {
 	if (!check_file_name(name, kind, problem, message)) return false;
 	// Where it lands, symbolic links resolved, must stay under the project.
-	std::error_code ec;
-	fs::path within;
-	if (!root.empty()) {
-		const fs::path base = fs::weakly_canonical(path_of(root), ec);
-		if (!ec) {
-			const fs::path resolved = fs::weakly_canonical(path_of(root) / path_of(dir) / path_of(name), ec);
-			if (!ec) within = resolved.lexically_relative(base);
-		}
-	}
-	if (within.empty() || within.is_absolute() || *within.begin() == "..") {
+	if (root.empty() || !io::path_within(path_of(root) / path_of(dir) / path_of(name), path_of(root))) {
 		problem = FileNameProblem::Path;
 		message = "'" + join_path(dir, name) + "' would land outside the project.";
 		return false;

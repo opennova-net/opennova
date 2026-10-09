@@ -41,8 +41,8 @@ CreateMissingResult create_missing_requirements(const ProjectPaths &paths, const
 			result.diagnostics.push_back(error);
 			return;
 		}
-		if (!ensure_directory(utf8_of(target.parent_path()), io_error) ||
-		    !write_file_atomic(utf8_of(target), bytes.data(), bytes.size(), io_error)) {
+		if (!io::ensure_directory(utf8_of(target.parent_path()), io_error) ||
+		    !io::write_file_atomic(utf8_of(target), bytes.data(), bytes.size(), io_error)) {
 			result.diagnostics.push_back(make_finding(CoreFinding::CreateMissingWrite, DiagnosticSeverity::Error,
 			                                          made + " names " + name + ", which was not made: " + io_error, name));
 			return;
@@ -99,8 +99,8 @@ CreateMissingResult create_missing_requirements(const ProjectPaths &paths, const
 			continue;
 		}
 		std::string io_error;
-		if (!ensure_directory(utf8_of(target.parent_path()), io_error) ||
-		    !write_file_atomic(utf8_of(target), bytes.data(), bytes.size(), io_error)) {
+		if (!io::ensure_directory(utf8_of(target.parent_path()), io_error) ||
+		    !io::write_file_atomic(utf8_of(target), bytes.data(), bytes.size(), io_error)) {
 			result.diagnostics.push_back(make_finding(CoreFinding::CreateMissingWrite, DiagnosticSeverity::Error,
 			                                          io_error, row.name));
 			continue;

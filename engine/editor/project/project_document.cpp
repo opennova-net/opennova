@@ -2,11 +2,11 @@
 
 #include <cstdio>
 #include <filesystem>
-#include <random>
 #include <system_error>
 
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
+#include <base/io/uuid.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/expansion_name.h>
 #include <editor/project/project_files.h>
@@ -59,11 +59,11 @@ std::string ProjectPaths::export_dir(const ProjectDocument &doc) const {
 }
 
 bool ensure_project_cache_dir(const ProjectPaths &paths, std::string &error) {
-	if (!ensure_directory(paths.cache_dir, error)) return false;
+	if (!io::ensure_directory(paths.cache_dir, error)) return false;
 	const std::string gitignore = join(paths.cache_dir, ".gitignore");
 	std::error_code ec;
 	if (fs::is_regular_file(system_path(gitignore), ec)) return true;
-	return write_file_atomic(gitignore, std::string("*\n"), error);
+	return io::write_file_atomic(gitignore, std::string("*\n"), error);
 }
 
 io::JsonValue project_document_to_json(const ProjectDocument &doc) {
@@ -162,7 +162,7 @@ bool project_document_from_json(const io::JsonValue &json, ProjectDocument &out,
 bool load_project_document(const std::string &project_file, ProjectDocument &out, Diagnostic &error) {
 	std::string text;
 	std::string io_error;
-	if (!read_file_text(project_file, text, io_error)) {
+	if (!io::read_file_text(project_file, text, io_error)) {
 		std::error_code ec;
 		if (!fs::exists(system_path(project_file), ec))
 			return fail(error, CoreFinding::ProjectFileMissing, "No project file at " + project_file + ".");
@@ -178,24 +178,9 @@ bool load_project_document(const std::string &project_file, ProjectDocument &out
 bool save_project_document(const std::string &project_file, const ProjectDocument &doc,
                            Diagnostic &error) {
 	std::string io_error;
-	if (!write_file_atomic(project_file, io::json_write(project_document_to_json(doc)), io_error))
+	if (!io::write_file_atomic(project_file, io::json_write(project_document_to_json(doc)), io_error))
 		return fail(error, CoreFinding::ProjectWrite, io_error);
 	return true;
-}
-
-std::string make_project_id() {
-	std::random_device device;
-	std::mt19937_64 rng(static_cast<uint64_t>(device()) << 32 ^ device());
-	uint64_t hi = rng();
-	uint64_t lo = rng();
-	hi = (hi & 0xFFFFFFFFFFFF0FFFull) | 0x0000000000004000ull; // version 4
-	lo = (lo & 0x3FFFFFFFFFFFFFFFull) | 0x8000000000000000ull; // variant 1
-	char buf[40];
-	std::snprintf(buf, sizeof(buf), "%08x-%04x-%04x-%04x-%012llx",
-	              static_cast<unsigned>(hi >> 32), static_cast<unsigned>((hi >> 16) & 0xFFFF),
-	              static_cast<unsigned>(hi & 0xFFFF), static_cast<unsigned>(lo >> 48),
-	              static_cast<unsigned long long>(lo & 0xFFFFFFFFFFFFull));
-	return buf;
 }
 
 bool can_create_project(const std::string &root, const std::string &target_game, Diagnostic &error,
@@ -217,10 +202,10 @@ bool create_project(const std::string &root, const std::string &title, const std
 	const std::string code = strutil::to_lower(target_game);
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	std::string io_error;
-	if (!ensure_directory(paths.root, io_error) || !ensure_project_cache_dir(paths, io_error))
+	if (!io::ensure_directory(paths.root, io_error) || !ensure_project_cache_dir(paths, io_error))
 		return fail(error, CoreFinding::ProjectWrite, io_error);
 	ProjectDocument doc;
-	doc.project_id = make_project_id();
+	doc.project_id = io::make_uuid_v4(); // a fresh random UUID, its version 4 text form
 	doc.title = title.empty() ? utf8_of(path_of(paths.root).filename()) : title;
 	doc.target_game = code;
 	doc.expansion = expansion;
