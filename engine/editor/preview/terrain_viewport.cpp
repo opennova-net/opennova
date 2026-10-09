@@ -16,6 +16,7 @@
 #include <editor/session/view/session_view.h>
 #include <formats/env/env.h>
 #include <formats/env/env_weather.h>
+#include <runtime/environment/environment_state.h>
 #include <runtime/terrain_query/coords.h>
 #include <runtime/terrain_query/height_field.h>
 
@@ -328,7 +329,8 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 		// under the terrain's own lines (env::load_mission_env).
 		if (fog_reach_ <= 0.0f && header_.environment.empty()) {
 			env::MissionEnv loaded;
-			mission_environment(*view.findings.assets, header_, loaded);
+			env::load_mission_env_config(*view.findings.assets, header_.terrain, header_.environment,
+			                             env::BmsEnvOverrides(), loaded);
 			const env::Config &defaults = loaded.config;
 			const env::FogParams fog =
 					env::compute_fog_params(defaults.fog_type, mission_settled_fog_level(defaults.fog_level), 0.0f);

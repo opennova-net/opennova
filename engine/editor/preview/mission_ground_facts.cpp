@@ -7,6 +7,7 @@
 
 #include <editor/preview/mission_scene.h>
 #include <formats/env/env.h>
+#include <formats/foliage/runtime.h>
 #include <formats/mission/bms.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/til/til_io.h>
@@ -15,6 +16,7 @@
 #include <formats/trn/trn.h>
 #include <runtime/audio/footstep_slot.h>
 #include <runtime/audio/sound_profile.h>
+#include <runtime/environment/environment_state.h>
 #include <runtime/environment/water_frame.h>
 #include <runtime/terrain_query/surface_tiles.h>
 #include <runtime/terrain_query/terrain_field_build.h>
@@ -214,15 +216,15 @@ void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const 
 	                                                 error_, &trn);
 	if (loaded) {
 		if (store_.surface_map().data != nullptr) surface_map_ = trn.charmap;
-		// The mission's placed tiles, read as the game reads <mission>.til [orig: Terrain_LoadTileInfoFile @
-		// 0x60a740], and the table their tile set's .tsd fills.
-		// Where the mission has none, the terrain's own: polytrn_tileinfo, its extension forced to TIL from the
-		// first '.' [orig: Terrain_Init @ 0x60FCFD; PolyTrn_LoadTerrainConfig @ 0x60E6C9, @ 0x60E6DC..0x60E6E5].
+		// The mission's placed tiles as the game's load takes them: <mission>.til, else the terrain's own
+		// polytrn_tileinfo, a missing, short or bad-magic file sending it on (terrain::read_placed_tile_bytes),
+		// and the table their tile set's .tsd fills.
 		std::vector<uint8_t> til;
-		const std::string own = trn.tileinfo.empty() ? std::string() : trn.tileinfo.substr(0, trn.tileinfo.find('.')) + ".til";
 		const std::string mission_til = key_.mission.empty() ? std::string() : key_.mission + ".til";
-		if (!mission_til.empty() && stamped->read(mission_til, til)) tiles_file_ = mission_til;
-		else if (!own.empty() && stamped->read(own, til)) tiles_file_ = own;
+		const terrain::TerrainFileReader read = [stamped](const std::string &name, std::vector<uint8_t> &out) {
+			return stamped->read(name, out);
+		};
+		tiles_file_ = terrain::read_placed_tile_bytes(read, read, mission_til, header.terrain, header.environment, til);
 		if (!tiles_file_.empty()) {
 			tiles_ = terrain::surface_tiles_from_til_bytes(til);
 			std::string til_error;
@@ -254,19 +256,16 @@ void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const 
 	}
 	// The water plane by the game's ladder: the mission's override, the environment's, the terrain's
 	// (water_frame.h; the device's Water resolves the same), the environment as the mission's load makes it
-	// (the terrain's .trn, overcast.def, then the .env over them).
-	env::MissionEnv mission_env;
-	const bool env_loaded = mission_environment(*stamped, header, mission_env);
-	const env::Config &config = mission_env.config;
-	env::EnvironmentState state;
-	if (env_loaded) state.set_config(&config, true);
+	// (env::load_mission_env_config: the terrain's .trn, overcast.def, then the .env over them).
 	const env::BmsEnvOverrides overrides = env::bms_env_overrides_from_header(header.attrib_flags, header.water_override,
 			header.fog_override, header.fog_color, header.water_color, header.water_murk);
-	env::WaterHeightRungs rungs;
-	rungs.has_mission_override = overrides.has_water_height;
-	rungs.mission_override = overrides.has_water_height ? overrides.water_height * 0.5f : 0.0f;
-	rungs.terrain_height = loaded ? float(trn.water_height) * 0.5f : 0.0f;
-	rungs.has_loaded_terrain = loaded;
+	env::MissionEnv mission_env;
+	const bool env_loaded =
+			env::load_mission_env_config(*stamped, header.terrain, header.environment, overrides, mission_env);
+	env::EnvironmentState state;
+	if (env_loaded) state.set_config(&mission_env.config, true);
+	const env::WaterHeightRungs rungs =
+			env::mission_water_rungs(overrides, loaded ? float(trn.water_height) * 0.5f : 0.0f, loaded);
 	const float height = env::resolve_water_height(rungs, env_loaded ? &state : nullptr, 0.0f);
 	// As the game's world takes it (Simulation::set_water_z): the plane in 16.16, 0 none.
 	water_z_ = static_cast<int32_t>(double(height) * 65536.0);
@@ -301,13 +300,14 @@ terrain::FoliageMaskMap MissionGround::foliage_sampler(bool codes) const {
 
 int MissionGround::foliage_kept_off(double x, double y, int mask) const {
 	if (mask == 0 || placed_.entries.empty()) return 0;
-	// The candidate's square, radius 2, against each tile's inclusive 16-unit square, the tile's z the mission
-	// y it starts at (til_world_z_from_fixed) [orig: Foliage_PathBlockedByPlacedTile @ 0x606490]; a definition
-	// with forceon skips the test [orig: Foliage_GenerateInstances_0 @ 0x5FFFB6].
-	if (!til_blocks_foliage(placed_, float(x), float(y), 2.0f)) return 0;
+	// The candidate's square, the generator's reach each way, against each tile's inclusive 16-unit square, the
+	// tile's z the mission y it starts at (til_world_z_from_fixed); a definition with forceon skips the test
+	// (formats/foliage kPlacedTileReach, placed_tiles_keep_off) [orig: Foliage_PathBlockedByPlacedTile @ 0x606490;
+	// Foliage_GenerateInstances_0 @ 0x5FFFB6].
+	if (!til_blocks_foliage(placed_, float(x), float(y), foliage::kPlacedTileReach)) return 0;
 	int kept = 0;
 	for (size_t slot = 0; slot < foliage_defs_.size() && slot < size_t(FOLIAGE_MAX_DEFS); ++slot)
-		if ((mask & (1 << slot)) && !(foliage_defs_[slot].attrib_flags & FOLIAGE_ATTRIB_FORCE_ON)) kept |= 1 << slot;
+		if ((mask & (1 << slot)) && foliage::placed_tiles_keep_off(foliage_defs_[slot].attrib_flags)) kept |= 1 << slot;
 	return kept;
 }
 
