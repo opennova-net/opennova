@@ -49,19 +49,44 @@ func _profile_with_set(set_name: String, wav: String) -> LwfData:
 func test_menu_audio_routes_its_pooled_players_to_sfx() -> void:
 	var samples := PackedByteArray()
 	samples.resize(32)
-	var root := _real_root({"click.wav": _build_wav(samples, 1, 22050, 16)})
+	var root := _real_root({
+		"click.wav": _build_wav(samples, 1, 22050, 16),
+		"menu.lwf": _profile_with_set("CLICK_SELECT", "click.wav").to_bytes(),
+	})
 	var audio := MenuAudio.new()
 	add_child_autofree(audio)
 	audio.set_resource_root(root)
-	audio.set_sound_profile(_profile_with_set("CLICK_SELECT", "click.wav"))
 
-	assert_true(audio.play_widget_sound("CLICK_SELECT", ""),
-			"the synthetic menu trigger creates a pooled voice")
+	assert_true(audio.play_widget_sound("CLICK_SELECT", "menu.lwf"),
+			"the element's bank plays its trigger on a pooled voice")
 	var player := audio.get_node_or_null("_MenuSound0") as AudioStreamPlayer
 	assert_not_null(player)
 	if player != null:
 		assert_eq(player.bus, StringName("SFX"),
 				"menu hover/click voices obey the shared sound-FX option")
+
+
+# A <SOUND> whose bank does not open, or that names none, plays nothing: the
+# game's parse leaves the row no bank and its play site consults no other
+# (engine/runtime/menu/menu_sound.h carries the witness).
+func test_menu_sound_without_its_bank_plays_nothing() -> void:
+	var samples := PackedByteArray()
+	samples.resize(32)
+	var root := _real_root({
+		"click.wav": _build_wav(samples, 1, 22050, 16),
+		"menu.lwf": _profile_with_set("CLICK_SELECT", "click.wav").to_bytes(),
+	})
+	var audio := MenuAudio.new()
+	add_child_autofree(audio)
+	audio.set_resource_root(root)
+
+	assert_false(audio.play_widget_sound("CLICK_SELECT", "missing.lwf"),
+			"a bank that does not open plays nothing, menu.lwf in the root or not")
+	assert_false(audio.play_widget_sound("CLICK_SELECT", ""),
+			"a file-less element plays nothing")
+	assert_null(audio.get_node_or_null("_MenuSound0"), "no voice was made")
+	assert_true(audio.play_widget_sound("CLICK_SELECT", "menu.lwf"),
+			"the bank the element names plays")
 
 
 func test_bank_indexing_case_insensitive() -> void:
