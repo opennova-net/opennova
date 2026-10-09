@@ -18,6 +18,7 @@
 #include <editor/project/project_files.h>
 #include <editor/session/view/session_view.h>
 #include <runtime/hud/hud_elements.h>
+#include <runtime/world/player_view.h>
 
 #include "authoring/preview_backdrop.h"
 #include "hud/hud_pos.h"
@@ -40,7 +41,7 @@ const Color kBackdrop(0.27f, 0.29f, 0.31f, 1.0f);
 constexpr int kBinocularRange = 250;
 constexpr int kNightVisionGain = 2;
 // The field of view the HUD's crosshair spread is drawn at: the infantry view's.
-constexpr float kFovDegrees = 80.0f;
+constexpr float kFovDegrees = opennova::world::kPlayerCameraFovHDeg;
 
 template <typename T>
 T *node(uint64_t id) {
@@ -142,16 +143,12 @@ void HudViewportApplier::apply_options_(const opennova::editor::HudViewport &mod
 		const int index = weapon && weapons_.is_valid() ? weapons_->find_weapon(String(name.c_str())) : -1;
 		const Ref<PlayerHudWeaponDef> slice =
 				index >= 0 ? PlayerHudWeaponDef::from_weapon_def(weapons_->get_weapon(index)) : Ref<PlayerHudWeaponDef>();
+		hud->install_weapon(slice, gametext_);
 		if (slice.is_valid()) {
 			armed_ = true;
 			weapon_capacity_ = slice->get_clipsize();
-			hud->set_weapon(slice->get_weapon_name(), HudPos::weapon_display_name(gametext_, slice->get_weapon_name()),
-					slice->get_clipsize(), slice->get_rounds_per_icon(), slice->get_clipgfx_texture(),
-					slice->get_clipgfx_offset(), slice->get_rndgfx_texture(), slice->get_rndgfx_offset(),
-					slice->get_rndgfx_step());
 			hud->set_weapon_icon(slice->get_weapon_name(), String(weapon->hudicon.c_str()));
 		} else {
-			hud->clear_weapon();
 			hud->set_weapon_icon(String(), String());
 		}
 	}
@@ -173,10 +170,11 @@ void HudViewportApplier::apply(const opennova::editor::ViewportModel &model, con
 	if (stamped_) report.files = stamped_->stamps();
 	if (!hud || !configured_) return;
 	apply_options_(hud_model);
-	// The weapon's state as the presenter feeds it each frame: a clip of -1 is a full one, and a
-	// capacity-1 weapon folds the chambered round into the reserve (hud_math folded_reserve).
-	// An infinite weapon's clip reads -1, as its clipsize does (the presenter's rule).
-	const int clip = weapon_capacity_ == -1 ? -1 : options.clip < 0 ? std::max(weapon_capacity_, 0) : options.clip;
+	// The weapon's state as the presenter feeds it each frame: a clip of -1 is a full one, an infinite
+	// weapon's clip reads -1 (hud_math displayed_clip), and a capacity-1 weapon folds the chambered round
+	// into the reserve (hud_math folded_reserve).
+	const int clip = HudPos::displayed_clip(options.clip < 0 ? std::max(weapon_capacity_, 0) : options.clip,
+			weapon_capacity_);
 	const int reserve = HudPos::folded_reserve(clip, options.reserve, weapon_capacity_);
 	hud->set_weapon_state(armed_, clip, reserve, 0, 0, false, false, false, 0);
 	// The view: the binoculars' state the HUD reads, the aim the first-person pin to the screen's middle.
