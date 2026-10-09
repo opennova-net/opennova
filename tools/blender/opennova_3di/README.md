@@ -301,8 +301,8 @@ that way: each diffuse and detail texture export writes or copies from a
 `.tga` (an image of the scene, or a `.tga` file an image was loaded from) is
 written as the `.dds` beside the `.3di`, DXT1 for an opaque image and DXT5
 for one with alpha, every level the 2 x 2 box filter of the source's level
-above it, through `opennova-3di texture` (the editor's own image import, its
-blocks rgbcx's). The row keeps naming `<stem>.tga`:
+above it, through `opennova-3di texture` (the image import the editor runs
+too, its blocks rgbcx's). The row keeps naming `<stem>.tga`:
 
 - the `.3di` is the same whichever form its textures take, so switching
   forms writes only the textures;

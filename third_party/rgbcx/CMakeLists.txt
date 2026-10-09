@@ -1,8 +1,8 @@
 # rgbcx (Rich Geldreich's BC1-5 block encoder, public domain or MIT, you choose: the
 # license block at the end of rgbcx.h), fetched from GitHub at configure time.
 #
-# The authoring encoder behind every DXT texture the tools write (the editor's image
-# import and `opennova-3di texture`, engine/editor/import/dxt_encode): a tooling choice,
+# The authoring encoder behind every DXT texture the tools write (the image import and
+# `opennova-3di texture`, engine/runtime/renderer/dxt_encode): a tooling choice,
 # not a port. The game's own DXT path (the terrain atlas made DXT at load) stays the
 # D3DX codec's port, engine/runtime/renderer/texture_dxt, which nothing here replaces.
 #

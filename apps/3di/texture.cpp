@@ -1,9 +1,9 @@
 // opennova-3di texture: an image (a PNG, a TGA, an .mdt or a PCX) written as the texture file a model's row loads:
 // a DXT `.dds` with its mip chain (the form of the game's own model textures: render-material-re, "The
-// install"), or a 32-bit `.tga` or `.mdt`. The reading, the halving and the writing are the editor's image
-// import's (editor/import/texture_import.h: decode_image_source, resize_image, encode_image; a DDS's blocks
-// and chain editor/import/dxt_encode.h), so a texture the Blender add-on writes is the one the editor's
-// import of the same image writes. Tooling, not a port.
+// install"), or a 32-bit `.tga` or `.mdt`. The reading, the halving and the writing are the image import's
+// (runtime/renderer/texture_authoring.h: decode_image_source, resize_image, encode_image; a DDS's blocks
+// and chain runtime/renderer/dxt_encode.h), so a texture the Blender add-on writes is the one an import of
+// the same image writes. Tooling, not a port.
 
 #include <algorithm>
 #include <cstdio>
@@ -13,8 +13,8 @@
 #include <vector>
 
 #include <base/io/strutil.h>
-#include <editor/import/texture_import.h>
 #include <formats/dds/dds.h>
+#include <runtime/renderer/texture_authoring.h>
 
 #include "threedi_cli.h"
 
@@ -52,12 +52,12 @@ int cmd_texture(const TextureCommand &command) {
 		return 1;
 	}
 	const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-	editor::ImageSource source;
+	renderer::ImageSource source;
 	std::string error;
 	// The source read as an image program reads it (its origin honoured, every depth), by its extension: an
 	// .mdt is a TGA under another name.
 	const std::string read_as = in_extension == ".mdt" ? in.substr(0, in.size() - 4) + ".tga" : in;
-	if (!editor::decode_image_source(read_as, bytes, source, error)) {
+	if (!renderer::decode_image_source(read_as, bytes, source, error)) {
 		std::fprintf(stderr, "opennova-3di: %s: %s\n", in.c_str(), error.c_str());
 		return 1;
 	}
@@ -65,17 +65,17 @@ int cmd_texture(const TextureCommand &command) {
 	const uint32_t source_width = uint32_t(image.width), source_height = uint32_t(image.height);
 	// Halved while a side exceeds the cap: each texel the 2 x 2 box's sum shifted down by two, as the game
 	// halves a texture past its cap (renderer::halve_rgba_to_cap [orig: GTexture_Downsample2x2_RGBA8 @
-	// 0x687000]), which editor::resize_image makes of an exact half.
+	// 0x687000]), which renderer::resize_image makes of an exact half.
 	if (command.max_size > 0)
 		while (uint32_t(image.width) > command.max_size || uint32_t(image.height) > command.max_size)
-			image = editor::resize_image(image, std::max(1u, uint32_t(image.width) / 2), std::max(1u, uint32_t(image.height) / 2));
+			image = renderer::resize_image(image, std::max(1u, uint32_t(image.width) / 2), std::max(1u, uint32_t(image.height) / 2));
 	const uint32_t width = uint32_t(image.width), height = uint32_t(image.height);
 	// Its alpha as the import makes it (an image whose stray alpha no shader reads written opaque: DXT1).
-	if (!command.alpha.empty() && !editor::apply_image_alpha(image, strutil::to_lower(command.alpha), error)) {
+	if (!command.alpha.empty() && !renderer::apply_image_alpha(image, strutil::to_lower(command.alpha), error)) {
 		std::fprintf(stderr, "opennova-3di: --alpha: %s\n", error.c_str());
 		return 2;
 	}
-	editor::ImageImportSettings settings = editor::image_import_settings({});
+	renderer::ImageImportSettings settings = renderer::image_import_settings({});
 	std::string form;
 	if (out_extension == ".dds") {
 		// A DDS-reader image is created at D3DX_DEFAULT sides, which D3DX rounds up to powers of two, the
@@ -120,7 +120,7 @@ int cmd_texture(const TextureCommand &command) {
 	}
 	std::vector<uint8_t> written;
 	std::string note;
-	if (!editor::encode_image(image, settings, written, error, note)) {
+	if (!renderer::encode_image(image, settings, written, error, note)) {
 		std::fprintf(stderr, "opennova-3di: cannot write %s: %s\n", out.c_str(), error.c_str());
 		return 1;
 	}

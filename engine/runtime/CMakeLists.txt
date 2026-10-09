@@ -168,6 +168,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/scar_draw_list.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_terrain_pass.cpp # the per-light terrain projected pass
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_dxt.cpp # the D3DX DXT texture codec
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/dxt_encode.cpp # the tools' authoring DXT encoder (rgbcx's blocks)
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_authoring.cpp # an image made into a texture file (the image import)
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_eval.cpp
     renderer/model_mesh_prepare.cpp
     renderer/model_controls.cpp
@@ -497,6 +499,9 @@ target_link_libraries(opennova_runtime PUBLIC opennova_net opennova_base opennov
 # platform thread library explicitly (pthread on a pre-2.34 glibc).
 find_package(Threads REQUIRED)
 target_link_libraries(opennova_runtime PUBLIC Threads::Threads)
+# The tools' DXT textures take rgbcx's blocks (renderer/dxt_encode): private, no
+# consumer of the runtime sees rgbcx.h.
+target_link_libraries(opennova_runtime PRIVATE opennova_rgbcx)
 
 target_compile_features(opennova_runtime PUBLIC cxx_std_17)
 

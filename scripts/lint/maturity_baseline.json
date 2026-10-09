@@ -32,7 +32,10 @@
     "formats/def/def_schema_properties.cpp",
     "formats/def/def_write.cpp",
     "formats/def/def_write_record.cpp",
-    "formats/def/def_compose.cpp"
+    "formats/def/def_compose.cpp",
+    "formats/png",
+    "formats/pcx/pcx_quantize.cpp",
+    "formats/tga/tga_source.cpp"
   ],
   "counters": {
     "cpp_binding_console_writes": 0,
