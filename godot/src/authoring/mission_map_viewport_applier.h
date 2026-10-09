@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/control.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
+#include <godot_cpp/variant/rid.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -30,8 +31,10 @@ namespace godot {
 // view centred on the map camera's centre at its zoom, the payload rect the whole picture); the shared map renderer
 // (hud/hud_map_pass_renderer, MapViewWindow's) draws it into the SubViewport's canvas. The terrain loads a file a unit
 // over the Shell's frames (TerrainData::begin_load_from_resource_root / load_step), the last picture drawn meanwhile.
-// It answers the ground under a point (ground_at, the terrain's heights) for a drag's stick. It reads none of the
-// process-wide render state a mission publishes.
+// Over the pass, the models' wireframes seen from above (the viewport's outline_lines, mission metres): one canvas item
+// of thin lines, made again when they move and carried by the camera's transform when only the camera does. It answers
+// the ground under a point (ground_at, the terrain's heights) for a drag's stick. It reads none of the process-wide
+// render state a mission publishes.
 class MissionMapViewportApplier final : public ViewportApplier {
 public:
 	explicit MissionMapViewportApplier(SubViewport &viewport);
@@ -60,15 +63,22 @@ public:
 	int pass_sprites() const { return pass_sprites_; }
 	int pass_labels() const { return pass_labels_; }
 	bool pass_visible() const { return pass_visible_; }
+	// The wireframes' edges drawn.
+	int outline_edges() const { return outline_edges_; }
 
 private:
 	// The terrain and its water mask given the overlay; the grid's origin.
 	void install_terrain_();
 	// The pass compiled at the map's camera and drawn, where what it shows moved.
 	void draw_(const opennova::editor::MissionMapViewport &map);
+	// The wireframes drawn again where they moved; their transform the camera's.
+	void draw_outlines_(const opennova::editor::MissionMapViewport &map);
 
 	uint64_t overlay_id_ = 0;
 	uint64_t canvas_id_ = 0;
+	RID outline_item_; // the wireframes', under the Outlines node's own item
+	uint64_t outline_serial_ = UINT64_MAX; // the viewport's outline serial drawn
+	int outline_edges_ = 0;
 	Ref<ResourceRoot> root_;
 	std::shared_ptr<opennova::StampedFiles> stamped_;
 	Ref<TerrainData> loading_; // the terrain a build loads

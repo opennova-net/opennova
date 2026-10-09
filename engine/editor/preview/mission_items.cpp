@@ -7,6 +7,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/preview/mission_map_outline.h>
 #include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
 #include <formats/mission/authoring.h>
@@ -114,6 +115,10 @@ const MissionItemCache::Model &MissionItemCache::model_(const SessionView &view,
 		// angles (mission_anchor_offset).
 		float anchor[3] = { 0.0f, 0.0f, 0.0f };
 		if (threedi::threedi_3di3_ground_anchor(&parsed, anchor)) mission_model_words(anchor, model.anchor);
+		if (outlines_) {
+			auto outline = std::make_shared<MissionModelOutline>();
+			if (mission_model_outline(parsed, *outline)) model.outline = std::move(outline);
+		}
 	}
 	threedi::threedi_3di3_free(&parsed);
 	return model;
@@ -194,6 +199,7 @@ bool MissionItemCache::facts(const SessionView &view, int64_t item, MissionItemF
 	const Model &model = model_(view, out.model);
 	if (!model.read) return true;
 	for (int i = 0; i < 3; ++i) out.anchor[i] = model.anchor[i];
+	out.outline = model.outline;
 	const Catalog &catalog = catalog_(view, symbol->file);
 	const auto scale = catalog.scale_q16.find(item);
 	out.scale_q16 = scale == catalog.scale_q16.end() ? 0 : scale->second;
@@ -216,6 +222,7 @@ bool MissionItemCache::model_facts(const SessionView &view, int64_t item, int ty
 	const Model &model = model_(view, file);
 	if (!model.read) return false;
 	for (int i = 0; i < 3; ++i) out.anchor[i] = model.anchor[i];
+	out.outline = model.outline;
 	if (model.collision) out.radius = mission_item_bound_radius(model.radius_q16, true, 0, false, 0);
 	return true;
 }

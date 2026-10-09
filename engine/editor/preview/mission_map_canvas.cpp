@@ -114,7 +114,7 @@ void MissionMapCanvas::input(const ViewportContext &context, const CanvasInput &
 	if (in.pressed && !in.middle && !in.panning && in.hovered) {
 		gesture_.press(subject, in.screen, out);
 		press_ = Press();
-		press_.mark = pick_mission_map_mark(marks_, in.mouse.x, in.mouse.y);
+		press_.mark = pick_mission_map_mark(marks_, view, in.mouse.x, in.mouse.y);
 		press_.box_from = in.mouse;
 		view.unproject(in.mouse.x, in.mouse.y, press_.from[0], press_.from[1]);
 		if (press_.mark >= 0 && current) {
@@ -135,7 +135,7 @@ void MissionMapCanvas::input(const ViewportContext &context, const CanvasInput &
 			else if (join == CanvasJoin::Replace && (primary_ >= 0 || !selected_.empty()))
 				out.request(request::select_record(path, NodeAddress()));
 		} else if (current && press_.mark < 0) {
-			std::vector<NodeAddress> boxed = mission_map_box_records(marks_, press_.box_from, in.mouse);
+			std::vector<NodeAddress> boxed = mission_map_box_records(marks_, view, press_.box_from, in.mouse);
 			if (!boxed.empty())
 				out.request(request::select_record(path, boxed.back(), select_mode(join), boxed));
 			else if (join == CanvasJoin::Replace && (primary_ >= 0 || !selected_.empty()))
@@ -217,9 +217,9 @@ OverlayList MissionMapCanvas::shapes(const ViewportContext &context, const Canva
 			list.line(b, CanvasPoint{ a.x, b.y }, kMissionAreaRgb, 1.0f);
 			list.line(CanvasPoint{ a.x, b.y }, a, kMissionAreaRgb, 1.0f);
 		}
-	// The pins.
+	// The pins (a model drawn as its wireframe, the device's, has none).
 	for (const MissionMapMark &mark : marks_) {
-		if (!mark.shown) continue;
+		if (!mark.shown || mark.outlined) continue;
 		const CanvasPoint point{ mark.px, mark.py };
 		if (mark.area >= 0) {
 			list.marker(point, OverlayGlyph::Square, 3.0f, OverlayRole::Normal, kMissionAreaRgb);
@@ -237,17 +237,34 @@ OverlayList MissionMapCanvas::shapes(const ViewportContext &context, const Canva
 		}
 		if (mark.team == 1 || mark.team == 2) list.ring(point, 6.0f, OverlayRole::Normal, 1.0f, mission_team_rgb(mark.team));
 	}
-	// The selected rings over a dark ring (they read on any ground), the primary's thicker; the hovered one.
+	// A wireframe's footprint outlined in `role` (over a dark outline where `dark`, so it reads on any ground).
+	const auto footprint = [&](const MissionMapFootprint &shape, OverlayRole role, float thickness, bool dark) {
+		const size_t n = shape.hull.size() / 2;
+		for (size_t i = 0; i < n; ++i) {
+			const size_t j = (i + 1) % n;
+			const CanvasPoint a = at(shape.hull[2 * i], shape.hull[2 * i + 1]), b = at(shape.hull[2 * j], shape.hull[2 * j + 1]);
+			if (dark) list.line(a, b, 0x000000, thickness + 2.0f, OverlayRole::Normal, 170);
+			list.line(a, b, 0xFFFFFF, thickness, role);
+		}
+	};
+	// The selected rings over a dark ring (they read on any ground), the primary's thicker; the hovered one. A
+	// wireframe's are its footprint's outline.
 	const auto ringed = [&](int index, float thickness) {
 		if (index < 0 || size_t(index) >= marks_.size()) return;
-		const CanvasPoint point{ marks_[size_t(index)].px, marks_[size_t(index)].py };
+		const MissionMapMark &mark = marks_[size_t(index)];
+		if (mark.outlined) return footprint(*mark.footprint, OverlayRole::Selected, thickness, true);
+		const CanvasPoint point{ mark.px, mark.py };
 		list.ring(point, 9.0f, OverlayRole::Normal, thickness + 2.0f, 0x000000, 170);
 		list.ring(point, 9.0f, OverlayRole::Selected, thickness);
 	};
 	for (const int index : selected_) ringed(index, 1.5f);
 	ringed(primary_, 2.5f);
-	const int hovered = in.hovered && !gesture_.dragging() ? pick_mission_map_mark(marks_, in.mouse.x, in.mouse.y) : -1;
-	if (hovered >= 0) list.ring(CanvasPoint{ marks_[size_t(hovered)].px, marks_[size_t(hovered)].py }, 11.0f, OverlayRole::Hover, 1.5f);
+	const int hovered = in.hovered && !gesture_.dragging() ? pick_mission_map_mark(marks_, view, in.mouse.x, in.mouse.y) : -1;
+	if (hovered >= 0) {
+		const MissionMapMark &mark = marks_[size_t(hovered)];
+		if (mark.outlined) footprint(*mark.footprint, OverlayRole::Hover, 1.5f, false);
+		else list.ring(CanvasPoint{ mark.px, mark.py }, 11.0f, OverlayRole::Hover, 1.5f);
+	}
 	// The labels: the hovered and the selected; every shown pin's with the labels option.
 	std::vector<int> labelled;
 	if (hovered >= 0) labelled.push_back(hovered);
@@ -275,13 +292,14 @@ OverlayList MissionMapCanvas::shapes(const ViewportContext &context, const Canva
 CanvasCursor MissionMapCanvas::cursor(const ViewportContext &, const CanvasInput &in) const {
 	if (!viewport_ || in.panning || panning_) return CanvasCursor::Default;
 	if (gesture_.pressed()) return press_.mark >= 0 && gesture_.dragging() ? CanvasCursor::Move : CanvasCursor::Default;
-	return in.hovered && pick_mission_map_mark(marks_, in.mouse.x, in.mouse.y) >= 0 ? CanvasCursor::Move
-	                                                                                  : CanvasCursor::Default;
+	const MissionMapView view = viewport_->view(in.width, in.height);
+	return in.hovered && pick_mission_map_mark(marks_, view, in.mouse.x, in.mouse.y) >= 0 ? CanvasCursor::Move
+	                                                                                        : CanvasCursor::Default;
 }
 
 std::string MissionMapCanvas::hover_tip(const ViewportContext &context, const CanvasInput &in) const {
 	if (!viewport_ || gesture_.dragging() || !in.hovered) return std::string();
-	const int index = pick_mission_map_mark(marks_, in.mouse.x, in.mouse.y);
+	const int index = pick_mission_map_mark(marks_, viewport_->view(in.width, in.height), in.mouse.x, in.mouse.y);
 	if (index < 0) return std::string();
 	const MissionMapMark &mark = marks_[size_t(index)];
 	char at[64];

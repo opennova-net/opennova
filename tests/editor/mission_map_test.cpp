@@ -15,6 +15,7 @@
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_map.h>
 #include <editor/preview/mission_map_canvas.h>
+#include <editor/preview/mission_map_outline.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/viewport_kinds.h>
 #include <editor/preview/viewport_model.h>
@@ -23,6 +24,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/threedi/threedi_3di3.h>
 #include <runtime/hud/hud_map_view.h>
 
 #include "common/file_io.h"
@@ -56,14 +58,27 @@ struct Rig {
 
 	explicit Rig(const char *name) : dir(name) {}
 
-	// `attach`: the rig's own (headless) devices given to every target.
-	bool open(bool attach = true) {
+	// `attach`: the rig's own (headless) devices given to every target. `models`: the item table the mission's items
+	// are in and the synth models their graphics draw (the pump's drawn by the synth crate, as the GUT device test
+	// mints them), written into the project too.
+	bool open(bool attach = true, bool models = false) {
 		session.handle(request::new_project(dir.file("project"), "Maps"));
 		session.run_operations();
 		editor_test::create_missing_files(session);
 		const SessionView &view = session.view();
 		if (!editor_test::write_bytes(view.project.root + "/" + kMission, test_io::read_file(fixture("bms/synth_logic.bms"))))
 			return false;
+		if (models) {
+			const std::vector<uint8_t> table = test_io::read_file(fixture("def/items.def"));
+			std::string items(table.begin(), table.end());
+			for (size_t at = items.find("graphic pump\r\n"); at != std::string::npos; at = items.find("graphic pump\r\n"))
+				items.replace(at, 12, "graphic crate");
+			if (!editor_test::write_text(view.project.root + "/defs/items.def", items)) return false;
+			for (const char *model : { "crate.3di", "armory.3di", "shed.3di" })
+				if (!editor_test::write_bytes(view.project.root + "/models/" + model,
+							test_io::read_file(fixture(std::string("threedi/synth/") + model))))
+					return false;
+		}
 		session.handle(request::rescan());
 		session.run_operations();
 		session.handle(request::open_document(kMission));
@@ -340,6 +355,137 @@ static int test_grid_origin() {
 	return 0;
 }
 
+// The synth crate (one box) seen from above: its LOD 0's edges the four sides of its plan (a face's diagonal lies in its
+// face's plane, an upright has no length from above, the top lands on the bottom), its hull the plan's four corners;
+// every point's words the vertex's (p2, -p0, p1), the words the device's model holds it at.
+static int test_outline_of_a_box() {
+	const std::vector<uint8_t> bytes = test_io::read_file(fixture("threedi/synth/crate.3di"));
+	opennova::threedi::Threedi3di3 parsed{};
+	TEST_EXPECT(opennova::threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), &parsed) == 0);
+	MissionModelOutline outline;
+	TEST_EXPECT(mission_model_outline(parsed, outline));
+	double lo[2] = { 1e9, 1e9 }, hi[2] = { -1e9, -1e9 };
+	const opennova::threedi::ThreediLod &lod = parsed.lods[0];
+	for (uint32_t i = 0; i < lod.vertices.count; ++i) {
+		double words[3];
+		mission_vertex_words(lod.vertices.items[i].position, words);
+		for (int axis = 0; axis < 2; ++axis) {
+			lo[axis] = std::min(lo[axis], words[axis]);
+			hi[axis] = std::max(hi[axis], words[axis]);
+		}
+	}
+	opennova::threedi::threedi_3di3_free(&parsed);
+	std::printf("crate: %zu edges, %zu hull corners, %zu triangles, %zu points\n", outline.edges.size() / 6,
+			outline.hull.size() / 2, outline.triangles.size() / 9, outline.points.size() / 3);
+	TEST_EXPECT(outline.edges.size() / 6 == 4 && outline.hull.size() / 2 == 4);
+	const auto on = [](double v, double a, double b) { return near(v, a, 1e-4) || near(v, b, 1e-4); };
+	for (size_t i = 0; i + 1 < outline.hull.size(); i += 2)
+		TEST_EXPECT(on(outline.hull[i], lo[0], hi[0]) && on(outline.hull[i + 1], lo[1], hi[1]));
+	for (size_t i = 0; i + 5 < outline.edges.size(); i += 6) {
+		// Each side of the plan: along one axis, at the other's edge.
+		const bool along_forward = near(outline.edges[i + 1], outline.edges[i + 4], 1e-4);
+		const bool along_left = near(outline.edges[i], outline.edges[i + 3], 1e-4);
+		TEST_EXPECT(along_forward != along_left);
+		TEST_EXPECT(along_forward ? on(outline.edges[i + 1], lo[1], hi[1]) : on(outline.edges[i], lo[0], hi[0]));
+	}
+	TEST_EXPECT(near(outline.reach, std::max(std::max(std::hypot(lo[0], lo[1]), std::hypot(hi[0], hi[1])),
+	                                         std::max(std::hypot(lo[0], hi[1]), std::hypot(hi[0], lo[1]))), 1e-4));
+	std::printf("test_outline_of_a_box passed\n");
+	return 0;
+}
+
+// The models on the map: each entity whose item draws a model of the project placed as the game places it (its
+// footprint's corners the model's carried by the placement matrix at its angles and SCALE, mission_anchor_offset),
+// its wireframe's edges the device's lines; close enough to read, picked by its footprint away from its anchor and
+// boxed by a box over a corner of it; far, a pin again; its kind hidden, its lines go.
+static int test_footprints() {
+	Rig rig("opennova_editor_mission_map_footprints");
+	TEST_EXPECT(rig.open(true, true));
+	if (!rig.map()) return 1;
+	for (int i = 0; i < 50 && rig.map()->outlines_pending() > 0; ++i) rig.pump();
+	TEST_EXPECT(rig.map()->outlines_pending() == 0 && rig.map()->outline_files_read() > 0);
+	const MissionScene &scene = rig.map()->scene();
+	const std::vector<MissionMapFootprint> &footprints = rig.map()->footprints();
+	TEST_EXPECT(footprints.size() == scene.entities().size());
+	// The crate (the pumps' items): four edges.
+	int crate = -1;
+	size_t outlined = 0;
+	for (size_t i = 0; i < footprints.size(); ++i) {
+		if (!footprints[i].outline) continue;
+		++outlined;
+		if (crate < 0 && footprints[i].outline->edges.size() == 24 && scene.entities()[i].pool == MissionPool::Item)
+			crate = int(i);
+	}
+	std::printf("footprints: %zu of %zu entities, %zu edges drawn\n", outlined, footprints.size(),
+			rig.map()->outline_rgb().size());
+	TEST_EXPECT(crate >= 0 && outlined > 1);
+	if (crate < 0) return 1;
+	const MissionEntityMark entity = scene.entities()[size_t(crate)];
+	const MissionMapFootprint &footprint = footprints[size_t(crate)];
+	for (size_t k = 0; k + 1 < footprint.outline->hull.size(); k += 2) {
+		const double words[3] = { footprint.outline->hull[k], footprint.outline->hull[k + 1], 0.0 };
+		double offset[3];
+		mission_anchor_offset(words, 0, double(entity.pitch), double(entity.yaw), double(entity.roll), offset);
+		bool found = false;
+		for (size_t h = 0; h + 1 < footprint.hull.size(); h += 2)
+			found = found || (near(footprint.hull[h], entity.x + offset[0], 1e-3) &&
+			                  near(footprint.hull[h + 1], entity.y + offset[1], 1e-3));
+		TEST_EXPECT(found);
+	}
+	const size_t edges = rig.map()->outline_rgb().size();
+	TEST_EXPECT(rig.map()->outline_lines().size() == edges * 4 && edges >= 4);
+	// The largest model close: 120 pixels across the picture.
+	size_t largest = 0;
+	for (size_t i = 0; i < footprints.size(); ++i)
+		if (footprints[i].outline && footprints[i].reach > footprints[largest].reach) largest = i;
+	const MissionEntityMark big = scene.entities()[largest];
+	const MissionMapFootprint shape = footprints[largest];
+	const ViewportState picture = rig.map()->size();
+	const double metres = shape.reach * 2.0 * double(picture.width) / 120.0;
+	char camera[200];
+	std::snprintf(camera, sizeof(camera), R"({"kind": "map", "camera": {"center": [%.6f, %.6f], "zoom": %.6f}})",
+			shape.centre[0], shape.centre[1], std::max(double(kMissionMapZoomMin), double(mission_map_zoom_for(metres, picture.width))));
+	rig.session.handle(request::set_viewport(kMission, camera));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	const ViewportContext context = rig.context();
+	const MissionMapView view = rig.map()->view(context.width, context.height);
+	const std::vector<MissionMapMark> marks = rig.map()->marks(context.width, context.height);
+	const MissionMapMark &mark = marks[largest];
+	TEST_EXPECT(mark.outlined && mark.footprint == &rig.map()->footprints()[largest] && mark.shown);
+	// A press on the model near its first corner, past the pin's slop from its anchor: the largest model's, or one on
+	// it (a smaller footprint over it takes the press first).
+	float cx = 0.0f, cy = 0.0f, ax = 0.0f, ay = 0.0f;
+	double px = shape.centre[0] + 0.9 * (shape.hull[0] - shape.centre[0]);
+	double py = shape.centre[1] + 0.9 * (shape.hull[1] - shape.centre[1]);
+	view.project(px, py, cx, cy);
+	view.project(big.x, big.y, ax, ay);
+	TEST_EXPECT(std::hypot(cx - ax, cy - ay) > kMissionPickSlop);
+	const ViewportHit hit = rig.map()->hit(context, cx, cy);
+	std::printf("press at %.1f,%.1f (anchor %.1f,%.1f): record %llu (the largest %llu)\n", cx, cy, ax, ay,
+			(unsigned long long)hit.id, (unsigned long long)big.row);
+	TEST_EXPECT(hit.id == big.row);
+	// Nothing near the model: no record.
+	TEST_EXPECT(rig.map()->hit(context, 2.0f, 2.0f).id == 0 || rig.map()->hit(context, 2.0f, 2.0f).id != big.row);
+	// A box over that corner alone, the anchor outside it.
+	float kx = 0.0f, ky = 0.0f;
+	view.project(shape.hull[0], shape.hull[1], kx, ky);
+	bool boxed = false;
+	for (const ViewportHit &each : rig.map()->box(context, kx - 4.0f, ky - 4.0f, kx + 4.0f, ky + 4.0f))
+		boxed = boxed || each.id == big.row;
+	TEST_EXPECT(boxed && !(ax >= kx - 4.0f && ax <= kx + 4.0f && ay >= ky - 4.0f && ay <= ky + 4.0f));
+	// Far: the crate a speck, a pin again.
+	rig.session.handle(request::set_viewport(kMission, R"({"kind": "map", "camera": {"zoom": 40}})"));
+	rig.pump();
+	TEST_EXPECT(!rig.map()->marks(context.width, context.height)[size_t(crate)].outlined);
+	// The items hidden: their lines go.
+	rig.session.handle(request::set_viewport(kMission, R"({"kind": "map", "options": {"marks": {"items": false}}})"));
+	rig.pump();
+	TEST_EXPECT(rig.map()->outline_rgb().size() < edges);
+	std::printf("test_footprints passed\n");
+	return 0;
+}
+
 int main() {
 	int failed = 0;
 	failed += test_kind_row();
@@ -349,5 +495,7 @@ int main() {
 	failed += test_drag();
 	failed += test_commands_and_wire();
 	failed += test_grid_origin();
+	failed += test_outline_of_a_box();
+	failed += test_footprints();
 	return failed == 0 ? 0 : 1;
 }

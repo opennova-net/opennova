@@ -1,8 +1,11 @@
 #include "authoring/mission_map_viewport_applier.h"
 
 #include <godot_cpp/classes/color_rect.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/packed_color_array.hpp>
+#include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/transform2d.hpp>
 
 #include <cmath>
@@ -60,12 +63,23 @@ MissionMapViewportApplier::MissionMapViewportApplier(SubViewport &viewport) {
 	canvas->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 	viewport.add_child(canvas);
 	canvas_id_ = canvas->get_instance_id();
+	// The wireframes over the pass, in a canvas item of their own under a node of their own (a redraw of the node
+	// clears the node's item, never a child item).
+	Control *outlines = memnew(Control);
+	outlines->set_name("Outlines");
+	outlines->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
+	outlines->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+	viewport.add_child(outlines);
+	RenderingServer *rs = RenderingServer::get_singleton();
+	outline_item_ = rs->canvas_item_create();
+	rs->canvas_item_set_parent(outline_item_, outlines->get_canvas_item());
 	root_.instantiate();
 	cmap_.on_load();
 }
 
 MissionMapViewportApplier::~MissionMapViewportApplier() {
 	renderer_.release();
+	if (outline_item_.is_valid()) RenderingServer::get_singleton()->free_rid(outline_item_);
 }
 
 HudOverlay *MissionMapViewportApplier::overlay() const {
@@ -158,6 +172,9 @@ void MissionMapViewportApplier::clear() {
 		hud->configure(Ref<HudPos>(), Ref<ResourceRoot>());
 	}
 	renderer_.clear();
+	RenderingServer::get_singleton()->canvas_item_clear(outline_item_);
+	outline_serial_ = UINT64_MAX;
+	outline_edges_ = 0;
 	stamped_.reset();
 	pass_visible_ = false;
 	pass_terrain_tris_ = pass_sprites_ = pass_labels_ = 0;
@@ -211,23 +228,60 @@ void MissionMapViewportApplier::draw_(const opennova::editor::MissionMapViewport
 	pass_labels_ = int(draw->pass.map.labels.size());
 }
 
+void MissionMapViewportApplier::draw_outlines_(const opennova::editor::MissionMapViewport &map) {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	// The camera's transform: a mission point (metres, x east, y north) to the picture's pixel (MissionMapView::project).
+	const opennova::editor::MissionMapView view = map.view(width_, height_);
+	const double inv = 1.0 / double(view.scale);
+	rs->canvas_item_set_transform(outline_item_,
+			Transform2D(Vector2(float(inv), 0.0f), Vector2(0.0f, float(-inv)),
+					Vector2(float(double(view.middle_x) - view.center[0] * inv),
+							float(double(view.middle_y) + view.center[1] * inv))));
+	if (map.outline_serial() == outline_serial_) return;
+	outline_serial_ = map.outline_serial();
+	rs->canvas_item_clear(outline_item_);
+	const std::vector<float> &lines = map.outline_lines();
+	const std::vector<uint32_t> &rgb = map.outline_rgb();
+	outline_edges_ = int(rgb.size());
+	if (rgb.empty()) return;
+	PackedVector2Array points;
+	points.resize(int64_t(rgb.size()) * 2);
+	PackedColorArray colours;
+	colours.resize(int64_t(rgb.size()));
+	Vector2 *to = points.ptrw();
+	Color *colour = colours.ptrw();
+	for (size_t i = 0; i < rgb.size(); ++i) {
+		to[2 * i] = Vector2(lines[4 * i], lines[4 * i + 1]);
+		to[2 * i + 1] = Vector2(lines[4 * i + 2], lines[4 * i + 3]);
+		colour[i] = Color(float((rgb[i] >> 16) & 0xFFu) / 255.0f, float((rgb[i] >> 8) & 0xFFu) / 255.0f,
+				float(rgb[i] & 0xFFu) / 255.0f);
+	}
+	// Thin lines (a negative width: a pixel whatever the transform), a colour an edge.
+	rs->canvas_item_add_multiline(outline_item_, points, colours, -1.0f);
+}
+
 void MissionMapViewportApplier::apply(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &,
 		opennova::editor::ViewportDeviceReport &report) {
 	if (stamped_) report.files = stamped_->stamps();
 	if (loading_.is_valid()) return;
 	report.surface = terrain_data_.is_valid();
 	draw_(map_of(model));
+	draw_outlines_(map_of(model));
 	opennova::io::JsonValue drawn = opennova::io::JsonValue::make_object();
 	drawn.set("visible", opennova::io::JsonValue::make_bool(pass_visible_));
 	drawn.set("terrain_tris", opennova::io::json_number(pass_terrain_tris_));
 	drawn.set("sprites", opennova::io::json_number(pass_sprites_));
 	drawn.set("labels", opennova::io::json_number(pass_labels_));
 	drawn.set("terrain", opennova::io::JsonValue::make_bool(terrain_data_.is_valid()));
+	drawn.set("outline_edges", opennova::io::json_number(outline_edges_));
 	report.drawn = std::move(drawn);
 }
 
 void MissionMapViewportApplier::tick(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &) {
-	if (loading_.is_null()) draw_(map_of(model));
+	if (loading_.is_null()) {
+		draw_(map_of(model));
+		draw_outlines_(map_of(model));
+	}
 }
 
 void MissionMapViewportApplier::resize(int width, int height) {

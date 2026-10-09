@@ -15,6 +15,7 @@
 namespace opennova::editor {
 
 struct SessionView;
+struct MissionModelOutline;
 
 // What a mission's drop reads of an item (ADR 0046 S14), through the project's asset graph and its
 // files: the item a catalog of the project defines by its id (its name, its TYPE: the item symbol's
@@ -51,6 +52,9 @@ struct MissionItemFacts {
 	int team = 0;
 	std::string ai_class, ai_script;
 	int32_t min_engagement = 16, max_engagement = 320, max_attack = 16, fire_timer = 10;
+	// Its model seen from above (preview/mission_map_outline.h), where the cache keeps outlines (the 2D map's); null
+	// otherwise, and for a model with no mesh.
+	std::shared_ptr<const MissionModelOutline> outline;
 };
 
 // The bound radius an entity of an item gets, metres, as the game's entity init stamps it at entity+0
@@ -70,6 +74,8 @@ double mission_item_bound_radius(int32_t model_q16, bool collision, int32_t scal
 // an item's radius is asked once while the graph's generation stands and while the files it read stand.
 class MissionItemCache {
 public:
+	// `outlines`: each model read keeps its outline seen from above too (the 2D map's cache, S23 C).
+	explicit MissionItemCache(bool outlines = false) : outlines_(outlines) {}
 	// The item `item` as the project defines it now; false, with why, when no catalog of the project
 	// does. A graphic that loads no model of the project leaves `model` empty, the anchor at the origin
 	// and no bound.
@@ -101,6 +107,7 @@ private:
 		bool collision = false;
 		int32_t radius_q16 = 0;
 		double anchor[3] = { 0.0, 0.0, 0.0 }; // its ground anchor in the model's own axes (mission_model_words)
+		std::shared_ptr<const MissionModelOutline> outline; // where the cache keeps outlines
 	};
 	struct Catalog {
 		uint64_t stamp = 0;
@@ -122,6 +129,7 @@ private:
 	// An item's radius from its files (none listed for none).
 	void ask_(const SessionView &view, int64_t item, const Reads &reads);
 
+	bool outlines_ = false;
 	uint64_t graph_generation_ = 0;
 	bool graph_ = false;
 	uint64_t files_generation_ = 0;

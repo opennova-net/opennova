@@ -8,6 +8,7 @@
 #include <base/io/json.h>
 #include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/mission_handle_edit.h>
+#include <editor/preview/mission_map_outline.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
@@ -18,8 +19,10 @@ class Document;
 
 // A mission's 2D map (ADR 0046 S23 C; ViewportKind::Map, token `map`, the Preview window's beside the mission's 3D
 // view): the mission seen from straight above, north up, its terrain's colour map as the game's commander map (CMAP)
-// draws it, its entities, areas, paths and the player's route over it as pins, picked, boxed and dragged as the 3D
-// view's marks are (the same SelectRecord, the same move batches, one undo step a drag).
+// draws it; over it each placed model as its wireframe seen from above (preview/mission_map_outline.h: its LOD 0
+// mesh's edges placed and turned as the entity stands, at its item's SCALE), and what has no geometry (a marker, an
+// area, a path, the player's route) as a pin or a line; picked, boxed and dragged as the 3D view's marks are (the same
+// SelectRecord, the same move batches, one undo step a drag), a model by its footprint.
 //
 // The projection is the CMAP's own [orig: CMapWindow_HandleEvent @0x5497f0 -> HUD_BuildMapOverlayView @0x5a7e10, mode
 // 4; hud::CommandMapView::render]: the map centred on a point of the mission (the player's place plus the pan in the
@@ -83,6 +86,14 @@ struct MissionMapOptions {
 io::JsonValue mission_map_options_to_json(const MissionMapOptions &options);
 bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions &held, std::string &error);
 
+// A footprint narrower than this many pixels across its middle is drawn as its pin (its wireframe a speck there), and
+// picked and boxed as one.
+inline constexpr float kMissionMapOutlinePx = 4.0f;
+
+// The colour the map draws an entity in, its pin and its wireframe: its team's map colour (team 1 the HUD's light blue,
+// team 2 its salmon: mission_overlay.h), else its pool's.
+uint32_t mission_map_rgb(MissionPool pool, int team);
+
 // A record as the map shows it: an entity at its position, an area at its middle (its box beside), a pixel each.
 struct MissionMapMark {
 	NodeAddress record;
@@ -94,14 +105,22 @@ struct MissionMapMark {
 	int area = -1; // into scene.areas()
 	int team = 0;
 	MissionPool pool = MissionPool::Item;
+	// The entity's model placed seen from above (null: no model, or one with no mesh, or not read yet), and whether
+	// the map draws it as its wireframe (the footprint kMissionMapOutlinePx across at least) rather than as a pin.
+	const MissionMapFootprint *footprint = nullptr;
+	bool outlined = false;
 };
-// Every entity (the scene's order) then every area, shown or not, so an index is stable within a frame.
+// Every entity (the scene's order) then every area, shown or not, so an index is stable within a frame; `footprints`
+// (the scene's entities' order, may be shorter) the entities' models placed.
 std::vector<MissionMapMark> mission_map_marks(const MissionScene &scene, const MissionMapOptions &options,
-		const MissionMapView &view);
-// The shown mark nearest (x, y) within kMissionPickSlop pixels, the later drawn first among equals (-1 none).
-int pick_mission_map_mark(const std::vector<MissionMapMark> &marks, float x, float y);
-// The records of the shown marks inside the box from `a` to `b`.
-std::vector<NodeAddress> mission_map_box_records(const std::vector<MissionMapMark> &marks, CanvasPoint a, CanvasPoint b);
+		const MissionMapView &view, const std::vector<MissionMapFootprint> *footprints = nullptr);
+// The shown mark a press at (x, y) takes: a pin within kMissionPickSlop pixels, the nearest (the later drawn first
+// among equals); else a wireframe whose model the point falls on seen from above, else whose footprint is within the
+// slop, the smaller footprint first (a crate on a building's floor before the building); -1 none.
+int pick_mission_map_mark(const std::vector<MissionMapMark> &marks, const MissionMapView &view, float x, float y);
+// The records of the shown marks a box from `a` to `b` takes: a pin inside it, a wireframe whose footprint meets it.
+std::vector<NodeAddress> mission_map_box_records(const std::vector<MissionMapMark> &marks, const MissionMapView &view,
+		CanvasPoint a, CanvasPoint b);
 
 // The player's route (the first path whose flags carry PlayerRoute, the route the game's single player follows:
 // documents' mission_reads), -1 for none.
@@ -127,6 +146,17 @@ public:
 	const MissionMapCamera &camera() const { return camera_; }
 	const MissionScene &scene() const { return scene_; }
 	const MissionMapGround &ground() const { return ground_; }
+	// The entities' models placed seen from above, by the scene's entities' order (an entity with no model, or one not
+	// read yet, has an empty footprint); and their wireframes as the device draws them: the edges of every shown
+	// entity's footprint, four mission metres (x0, y0, x1, y1) an edge, each edge's colour (0xRRGGBB, mission_map_rgb),
+	// and a serial that moves whenever they do.
+	const std::vector<MissionMapFootprint> &footprints() const { return footprints_; }
+	const std::vector<float> &outline_lines() const { return lines_; }
+	const std::vector<uint32_t> &outline_rgb() const { return line_rgb_; }
+	uint64_t outline_serial() const { return outline_serial_; }
+	// The items whose models are not read yet (they are read a few a frame), and how many model files it has read.
+	size_t outlines_pending() const { return outlines_.pending(); }
+	size_t outline_files_read() const { return outlines_.files_read(); }
 	MissionMapView view(int width, int height) const { return mission_map_view(camera_, width, height); }
 	std::vector<MissionMapMark> marks(int width, int height) const;
 	// A record as a press finds it (MissionViewport::pressed's).
@@ -182,6 +212,9 @@ private:
 	enum class Reason : uint8_t { NoProject, NoMission, Ready };
 	ViewportAction stop_(Reason reason);
 	void follow_ground_(const SessionView &view);
+	// The items' outlines read within `budget_us`, and the footprints and wireframes placed again where the outlines,
+	// the scene or the kinds shown moved; true when the wireframes moved.
+	bool follow_outlines_(const SessionView &view, int64_t budget_us);
 
 	Reason reason_ = Reason::NoProject;
 	std::string detail_;
@@ -193,6 +226,13 @@ private:
 	bool moved_ = false; // what the device draws moved since the last follow (an Update)
 	MissionGround reader_; // the terrain and water as the game reads them (DI-07)
 	MissionMapGround ground_;
+	MissionOutlineCache outlines_;
+	std::vector<MissionMapFootprint> footprints_;
+	std::vector<float> lines_;
+	std::vector<uint32_t> line_rgb_;
+	uint64_t outline_serial_ = 0;
+	uint64_t placed_scene_ = UINT64_MAX; // the scene's serial the footprints were placed at
+	MissionMapOptions placed_options_; // the kinds shown the wireframes were drawn with
 	bool surface_ = false; // the device read the terrain
 	io::JsonValue drawn_; // what the device's last pass drew (its report)
 };

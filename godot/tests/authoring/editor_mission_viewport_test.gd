@@ -1908,3 +1908,62 @@ func test_the_map_and_the_3d_view_share_a_selection_and_a_drag() -> void:
 	var refused: Dictionary = _ask({"kind": "edit_in_viewport",
 			"drag": {"id": id, "handle": "yaw", "by": [30, 0], "kind": "map"}})
 	assert_false(bool(refused.get("outcome", {}).get("done", true)), str(refused))
+
+
+## S23 C (the maintainer's ask): the map draws each placed model as its wireframe seen from above, on its device (the
+## Outlines node's lines, as many edges as the viewport draws), each footprint where the 3D view's device places the
+## model: the vertices of its LOD 0 mesh carried by the placement's transform, seen from above, span the footprint.
+func test_the_map_draws_the_models_from_above() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var mission := await _await_ready()
+	assert_eq(String(mission.get("status", "")), "ready", str(mission))
+	var state := await _await_map()
+	for _frame in 120:
+		if int(state.get("body", {}).get("outlines", {}).get("pending", 1)) == 0:
+			break
+		await get_tree().process_frame
+		_app.pump()
+		state = _map_state()
+	_app.pump()
+	state = _map_state()
+	var outlines: Dictionary = state.get("body", {}).get("outlines", {})
+	assert_eq(int(outlines.get("pending", -1)), 0, str(outlines))
+	assert_gt(int(outlines.get("edges", 0)), 0, str(outlines))
+	assert_eq(int(state.get("body", {}).get("drawn", {}).get("outline_edges", -1)), int(outlines.get("edges", 0)))
+	assert_not_null(_device(state).find_child("Outlines", true, false), "the wireframes' node")
+	var placer: MissionObjectPlacer = _mission_device().get("placer")
+	assert_not_null(placer)
+	if placer == null:
+		return
+	var compared := 0
+	for row: Variant in state.get("items", []):
+		var pin: Dictionary = row
+		if not pin.has("footprint"):
+			continue
+		var mark := _mark_of(mission, int(pin["id"]))
+		var data: ObjectData = placer.object_data_for(placer.graphic_for(int(mark.get("item", 0))))
+		if data == null:
+			continue
+		var at := _placed_transform(placer, mark)
+		var lo := Vector2(INF, INF)
+		var hi := Vector2(-INF, -INF)
+		for surface: Variant in data.build_lod_submeshes(0):
+			var mesh := (surface as Dictionary).get("mesh") as ArrayMesh
+			for index in mesh.get_surface_count():
+				for vertex: Vector3 in mesh.surface_get_arrays(index)[Mesh.ARRAY_VERTEX]:
+					var p := MissionObjectPlacer.godot_to_bms_position(at * vertex)
+					lo = lo.min(Vector2(p.x, p.y))
+					hi = hi.max(Vector2(p.x, p.y))
+		var flo := Vector2(INF, INF)
+		var fhi := Vector2(-INF, -INF)
+		for corner: Variant in pin["footprint"]:
+			flo = flo.min(Vector2(float(corner[0]), float(corner[1])))
+			fhi = fhi.max(Vector2(float(corner[0]), float(corner[1])))
+		assert_almost_eq(flo.x, lo.x, 0.01, "%s west" % pin.get("name"))
+		assert_almost_eq(flo.y, lo.y, 0.01, "%s south" % pin.get("name"))
+		assert_almost_eq(fhi.x, hi.x, 0.01, "%s east" % pin.get("name"))
+		assert_almost_eq(fhi.y, hi.y, 0.01, "%s north" % pin.get("name"))
+		compared += 1
+	assert_gt(compared, 1, "the placed models compared")

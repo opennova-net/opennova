@@ -15,11 +15,13 @@ namespace opennova::editor {
 // holds (one SelectRecord), a drag of a pin moves it and, when it is selected, the selection with it: the 3D view's
 // move (mission_move_edits from the records as the press found them, stick over the device's ground), each sample one
 // batch under one gesture, so a drag is one undo step. The right or the middle button pans, the wheel zooms by the
-// CMAP's step about the pointer, F frames the selection (else everything); each a SetViewport of the camera. Drawn:
-// each path's line through its stops (the player's route in the light blue the game's map colours team 1 with, its
-// stops numbered; a red team's route in the salmon), each area's box, each entity's pin by its pool ringed in its
-// team's map colour, the hovered and the selected rings, the labels (the hovered and the selected, every shown pin's
-// with the labels option), the box being dragged.
+// CMAP's step about the pointer, F frames the selection (else everything); each a SetViewport of the camera. Drawn
+// (over the device's picture, which draws the models' wireframes): each path's line through its stops (the player's
+// route in the light blue the game's map colours team 1 with, its stops numbered; a red team's route in the salmon),
+// each area's box, each entity with no wireframe its pin by its pool ringed in its team's map colour, the hovered and
+// the selected rings (a wireframe's: its footprint outlined), the labels (the hovered and the selected, every shown
+// mark's with the labels option), the box being dragged. A press takes a pin, else the model under it seen from above
+// (pick_mission_map_mark); a box the pins in it and the footprints it meets.
 class MissionMapCanvas final : public CanvasHalf {
 public:
 	const CanvasGesture &gesture() const override { return gesture_; }
