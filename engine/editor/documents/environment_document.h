@@ -21,7 +21,7 @@ namespace opennova::editor {
 // game runs on where no keyframe is; and its list of time-of-day keyframes, at most 16, each its
 // time and its twelve colours. The sky's cloud layers name textures and the sun, moon, glare and
 // star name models (the asset graph's edges, each a Go to). What the reader leaves out, or reads in
-// a way the record cannot hold, is a source finding of its line (environment_source_issues).
+// a way the record cannot hold, is a source finding of its line (formats/env env_source_issues).
 //
 // The file's terrain keys too: the terrain's parser reads every line of a mission's .env after its .trn's and
 // overcast.def's, so a terrain keyword there is the mission's terrain's, over theirs (D-TERRAIN-18) [orig:
@@ -57,21 +57,6 @@ struct EnvironmentRow : TableRow {
 // The environment's table (environment_document.cpp): the environment row's, a keyframe's and a terrain key's
 // kinds, their fields in the game's words and units, cited, and the keyframes' and the terrain keys' lists.
 const RecordTable &environment_table();
-
-// The lines of an environment's text the game's reader reads otherwise than the record holds
-// (each a SourceIssue on its line): a line it skips (a keyword neither it nor the terrain's reader
-// has an arm for; a terrain keyword is the row's terrain keys), a keyword written again (the last
-// line wins), a colour line short of its three values (the blue an earlier line's), a time that
-// reads as another, a tod_begin past the 16th, an envscale that follows a colour it does not scale
-// the way the record would (the record scales every colour by the last envscale: it blocks), and a
-// terrain key's line no line the editor writes reads back as (it blocks).
-void environment_source_issues(const std::string &text, std::vector<SourceIssue> &issues);
-
-// What the terrain's parser makes of each of an environment's terrain keys, from the file alone (the foliage
-// block its own lines open): "" where an arm reads the line as it is written, else why not, cited (a grid row adds
-// a row after the terrain's; a block's key with no block open in the file is read only inside one the terrain
-// leaves open; a line inside a block the file opens is the block's; from a fifth block on no arm reads a line).
-std::vector<std::string> terrain_key_readings(const std::vector<TrnKeyLine> &keys);
 
 // Where an environment's terrain key at `index` (its place among the file's terrain lines, formats/trn
 // read_trn_key_lines) sits in its document, as Document::locator writes it: what a Go to opens it at, the file
@@ -122,7 +107,7 @@ bool is_environment_kind(AssetKind kind);
 // its file: its source findings (environment.invalid_input, environment.ignored_input), a sky
 // height the file leaves out (environment.sky_height_default: the dome at the engine's default
 // height, 200/65536 m), and a terrain key the terrain's parser reads otherwise than its line says
-// (environment.terrain_key, on its record: terrain_key_readings).
+// (environment.terrain_key, on its record: formats/trn trn_key_readings).
 std::vector<Diagnostic> validate_environment_file(const DocumentBase &document);
 
 // The environment type's own finding codes (DocumentType::findings), in the order of its table

@@ -84,15 +84,13 @@ int next_power_of_two(int n) {
 }
 
 // A name as the writer writes it: unquoted (a map's, a model's), so no character the tokenizer cuts a token
-// or a line at (a space, a comma, a tab, a ';', "//", a '"') nor a control character [orig:
-// File_ParseASCIIFile @ 0x53D810, its delimiters @ 0x53CC33..0x53CC4C]; or quoted (the terrain's name and
-// its maker's), so no '"' and no control character.
+// or a line at (formats/trn trn_value_needs_quotes) nor a '"' or a control character (trn_value_writable)
+// [orig: File_ParseASCIIFile @ 0x53D810, its delimiters @ 0x53CC33..0x53CC4C]; or quoted (the terrain's name
+// and its maker's), so no '"' and no control character. Empty is the key left out.
 bool token_writable(const std::string &name, bool quoted) {
-	for (const unsigned char c : name) {
-		if (c < 0x20 || c == 0x7F || c == '"') return false;
-		if (!quoted && (c == ' ' || c == ',' || c == '\t' || c == ';')) return false;
-	}
-	return quoted || name.find("//") == std::string::npos;
+	std::string why;
+	if (!name.empty() && !trn_value_writable(name, why)) return false;
+	return quoted || !trn_value_needs_quotes(name);
 }
 
 bool text_of(const Value &value, bool quoted, std::string &stored, std::string &error) {
@@ -728,20 +726,11 @@ RecordTable make_table() {
 
 // --- the source issues ------------------------------------------------------------------------------
 
-// The keys the terrain's reader reads [orig: Terrain_ParseConfigCallback @ 0x60F330], with the two it keeps for
-// whoever edits the file (terrain_name, terrain_creator: read by no arm).
+// The keys the terrain's reader reads out of a block (formats/trn trn_parser_key) [orig:
+// Terrain_ParseConfigCallback @ 0x60F330], with the three the record keeps for whoever edits the file
+// (terrain_name, terrain_creator and horizon: read by no arm, held by TrnConfig and written by save_trn).
 bool terrain_reader_key(const std::string &key) {
-	static const char *const kKeys[] = {
-		"terrain_name", "terrain_creator", "horizon", "polytrn_colormap", "polytrn_detailmap_c1", "polytrn_detailmap_c2",
-		"polytrn_detailmap_c3", "polytrn_detailblendmap", "polytrn_polydata", "polytrn_detailmap", "polytrn_detailmap2",
-		"polytrn_detailmapdist", "polytrn_detailmapdist2", "polytrn_detaildensity", "polytrn_detaildensity2",
-		"polytrn_sectorcount", "polytrn_wrapx", "polytrn_wrapy", "lock_topleft", "lock_topright", "lock_bottomleft",
-		"lock_bottomright", "polytrn_origin", "polytrn_sectors", "polytrn_charmap", "polytrn_foliagemap",
-		"polytrn_tilestrip", "polytrn_tileinfo",
-	};
-	for (const char *known : kKeys)
-		if (key == known) return true;
-	return false;
+	return trn_parser_key(key) || key == "terrain_name" || key == "terrain_creator" || key == "horizon";
 }
 
 // The environment's keywords the terrain's record holds (trn.h): its water.
@@ -903,6 +892,13 @@ void terrain_source_issues(const std::string &text, std::vector<SourceIssue> &is
 			      "line, or keep editing the file as a text.");
 			return;
 		}
+		if (key == "polytrn_depthmap") {
+			// An arm reads it [orig: Terrain_ParseConfigCallback @ 0x60F81D]; the record (TrnConfig) does not hold it.
+			issue(true, line, key,
+			      "The game's terrain reader reads polytrn_depthmap, which the editor's terrain cannot keep: remove the "
+			      "line, or keep editing the file as a text.");
+			return;
+		}
 		if (!terrain_reader_key(key) && !held_environment_key(key)) {
 			issue(false, line, key,
 			      "The game's readers skip '" + std::string(tokens.tokens[0]) + "': a save leaves the line out.");
@@ -962,19 +958,20 @@ const FieldSchema *terrain_key_field(const std::string &key, int32_t *loader_arg
 bool is_terrain_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::Terrain; }
 
 std::string terrain_refusal(const TrnConfig &config) {
-	// [orig: Terrain_LoadEnvironmentConfig @ 0x610940, its tail: the colormap (+256), detailmap (+512) and polydata
-	// (+3072) names, then the row count (+5960) and the width (+5956), each at most 16 and a power of two]. The
-	// writer writes one row where the record holds none.
-	if (config.colormap.empty()) return "The colour map (polytrn_colormap) is not named: the game refuses the terrain.";
-	if (config.detailmap.empty()) return "The detail map (polytrn_detailmap) is not named: the game refuses the terrain.";
-	if (config.polydata.empty()) return "The height data (polytrn_polydata) is not named: the game refuses the terrain.";
+	// The gate (formats/trn trn_refusal) over the rows the writer writes: one where the record holds none.
 	const int rows = std::max(1, config.sector_rows);
-	if (rows > kSide || !power_of_two_or_zero(rows))
+	switch (trn_refusal(config, rows)) {
+	case TrnRefusal::None: break;
+	case TrnRefusal::NoColormap: return "The colour map (polytrn_colormap) is not named: the game refuses the terrain.";
+	case TrnRefusal::NoDetailmap: return "The detail map (polytrn_detailmap) is not named: the game refuses the terrain.";
+	case TrnRefusal::NoPolydata: return "The height data (polytrn_polydata) is not named: the game refuses the terrain.";
+	case TrnRefusal::SectorRows:
 		return "The grid has " + std::to_string(rows) + " rows: the game refuses a terrain whose rows are not a power of "
 		       "two of at most 16.";
-	if (config.sector_count > kSide || !power_of_two_or_zero(config.sector_count))
+	case TrnRefusal::SectorCount:
 		return "The grid's width is " + std::to_string(config.sector_count) +
 		       ": the game refuses a terrain whose width is not a power of two of at most 16.";
+	}
 	return std::string();
 }
 
@@ -1139,12 +1136,12 @@ std::vector<Diagnostic> validate_terrain_file(const DocumentBase &document) {
 	// The gate, in its order; its fixes where the game's own rule says what the value becomes.
 	const std::string refusal = terrain_refusal(config);
 	if (!refusal.empty()) {
-		const char *field = config.colormap.empty()    ? "polytrn_colormap"
-		                    : config.detailmap.empty() ? "polytrn_detailmap"
-		                    : config.polydata.empty()  ? "polytrn_polydata"
-		                    : (std::max(1, config.sector_rows) > kSide || !power_of_two_or_zero(std::max(1, config.sector_rows)))
-		                            ? ""
-		                            : "polytrn_sectorcount";
+		const TrnRefusal leg = trn_refusal(config, std::max(1, config.sector_rows));
+		const char *field = leg == TrnRefusal::NoColormap    ? "polytrn_colormap"
+		                    : leg == TrnRefusal::NoDetailmap ? "polytrn_detailmap"
+		                    : leg == TrnRefusal::NoPolydata  ? "polytrn_polydata"
+		                    : leg == TrnRefusal::SectorRows  ? ""
+		                                                     : "polytrn_sectorcount";
 		Diagnostic &d = add(TerrainFinding::Refused, DiagnosticSeverity::Error,
 		                    refusal + " A mission on it stops loading and returns to the menus.", field, at);
 		const int rows = std::max(1, config.sector_rows);
