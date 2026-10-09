@@ -31,7 +31,7 @@
 #include "cli_verbs.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
-#include "editor/png_test_support.h"
+#include "common/png_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -244,7 +244,7 @@ int test_move() {
 	// move alone; a file another source's import reads from its place does not move.
 	const AssetScan outputs = scan_of({entry(".opennova/imported/01/logo.pcx", AssetKind::Texture, "logo.png")});
 	TEST_EXPECT(has_code(plan_move(paths, doc, outputs, "logo.pcx", "art").refusals, "rename.imported"));
-	TEST_EXPECT(editor_test::write_bytes(join_path(project.root, "set.png"), editor_test::gradient_png(4, 4)));
+	TEST_EXPECT(editor_test::write_bytes(join_path(project.root, "set.png"), test_png::gradient_png(4, 4)));
 	ImportSidecar reads;
 	reads.importer = importer_for("set.png")->id;
 	reads.version = importer_for("set.png")->version;
@@ -310,7 +310,7 @@ int test_move_import_source() {
 	if (!project.made) return 1;
 	ProjectSession &session = project.session;
 	const SessionView &v = project.view();
-	TEST_EXPECT(editor_test::write_bytes(join_path(project.root, "art/logo.png"), editor_test::gradient_png(8, 8)));
+	TEST_EXPECT(editor_test::write_bytes(join_path(project.root, "art/logo.png"), test_png::gradient_png(8, 8)));
 	const Importer *importer = importer_for("logo.png");
 	TEST_EXPECT(importer != nullptr);
 	if (!importer) return 1;
