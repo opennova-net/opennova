@@ -72,8 +72,9 @@ using R = DefRecordKind;
 using N = CopyName;
 // The characters of a name the game keeps: an item's 46 [orig: ItemDef_ParseProperty @ 0x49eb00, the
 // begin arm's `cmp ecx, 2Eh` @0x49ebd9 and, for a longer name, `mov byte ptr [edx+2Eh], 0` @0x49ebfb
-// cutting it to 46], a weapon's 32 of its 0x20-byte strncpy, 31 in a block with `sameas` (weapon_name_chars)
-// [orig: WeaponDefs_ParseLineCallback @ 0x543680, @0x543737], an ammo's 31 [orig:
+// cutting it to 46], a weapon's 32 of its 0x20-byte strncpy, 31 in a block with `sameas`
+// (def::def_weapon_name_chars, through weapon_name_chars) [orig: WeaponDefs_ParseLineCallback @ 0x543680,
+// @0x543737], an ammo's 31 [orig:
 // AmmoDef_AllocateSlot @ 0x409a20, @0x409afc]; 0 for the field's own width.
 constexpr CatalogKindRow kKinds[] = {
 	{C::Item, R::Item, "item", "Item", "Add record", true, "display_name", made_item, attachment_slots, duplicated_item,
@@ -749,7 +750,7 @@ const CatalogFamily *catalog_family(AssetKind kind) {
 }
 
 size_t weapon_name_chars(const void *record) {
-	return static_cast<const DefWeaponDef *>(record)->sameas[0] ? 31 : 32;
+	return def_weapon_name_chars(*static_cast<const DefWeaponDef *>(record));
 }
 
 std::string catalog_copy_name(NodeKind kind, const std::string &name, const std::vector<std::string> &taken,
