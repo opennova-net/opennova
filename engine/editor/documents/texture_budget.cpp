@@ -9,16 +9,6 @@ namespace {
 using renderer::DeviceTexture;
 using renderer::DeviceTextureFormat;
 
-// A DDS header's format as the device texture takes it: the DXTs by their blocks (DXT2 and DXT4, the
-// premultiplied twins, by their DXT3 and DXT5 blocks), A8R8G8B8, any other by its bits a texel.
-DeviceTextureFormat dds_format(const TextureHeader &header) {
-	if (header.dds_format == "DXT1") return DeviceTextureFormat::Dxt1;
-	if (header.dds_format == "DXT2" || header.dds_format == "DXT3") return DeviceTextureFormat::Dxt3;
-	if (header.dds_format == "DXT4" || header.dds_format == "DXT5") return DeviceTextureFormat::Dxt5;
-	if (header.dds_format == "A8R8G8B8" || header.dds_format.empty()) return DeviceTextureFormat::A8R8G8B8;
-	return DeviceTextureFormat::Uncompressed;
-}
-
 io::JsonValue device_json(const DeviceTexture &texture, int level) {
 	using io::JsonValue;
 	JsonValue out = JsonValue::make_object();
@@ -37,59 +27,40 @@ io::JsonValue device_json(const DeviceTexture &texture, int level) {
 
 } // namespace
 
-const char *texture_budget_loader_token(TextureBudgetLoader loader) {
-	switch (loader) {
-	case TextureBudgetLoader::Stage: return "stage";
-	case TextureBudgetLoader::Plain: return "plain";
-	case TextureBudgetLoader::Normal: return "normal";
-	}
-	return "";
-}
-
-bool texture_role_budget_loader(TextureRoleId role, TextureBudgetLoader &out) {
+bool texture_role_budget_loader(renderer::TextureRoleId role, renderer::TextureLoader &out) {
 	switch (role) {
-	case TextureRoleId::ModelDiffuse:
-	case TextureRoleId::ModelDetail:
-	case TextureRoleId::ModelFlipFrame: out = TextureBudgetLoader::Stage; return true;
-	case TextureRoleId::ModelPlain: out = TextureBudgetLoader::Plain; return true;
-	case TextureRoleId::ModelNormalMap:
-	case TextureRoleId::ModelHeightNormal: out = TextureBudgetLoader::Normal; return true;
+	case renderer::TextureRoleId::ModelDiffuse:
+	case renderer::TextureRoleId::ModelDetail:
+	case renderer::TextureRoleId::ModelFlipFrame: out = renderer::TextureLoader::Stage; return true;
+	case renderer::TextureRoleId::ModelPlain: out = renderer::TextureLoader::Plain; return true;
+	case renderer::TextureRoleId::ModelNormalMap:
+	case renderer::TextureRoleId::ModelHeightNormal: out = renderer::TextureLoader::Normal; return true;
 	default: return false;
 	}
 }
 
-// The flags each loader makes its texture with: the stage and plain loaders the slot's detail word, the
-// normal-map loader that word and the 512 cap [orig: Material_LoadStageTexture @ 0x5B173E..0x5B1742 (stage),
-// @ 0x5B174F..0x5B1758 (plain), @ 0x5B1782..0x5B1790 (normal: or eax, 1000h)]. The stage loader reads a DDS
-// through D3DX [orig: Texture_LoadByNameWithChannel @ 0x58B616, GTexture_FindOrCreateByName over
-// GTexture_InitFromMemory], every other file as pixels [orig: @ 0x58B74D, GTexture_FindOrCreateFromData]; the
-// plain loader reads pixels alone [orig: Texture_LoadAndRegister @ 0x58B920]; the normal-map loader decodes a
-// DDS into pixels before it converts them [orig: Texture_LoadAsNormalMap @ 0x58C6CB,
-// Texture_DecompressDDSFromPFF32 @ 0x56E450], so its texture is always built from pixels.
-TextureBudget texture_budget(const TextureHeader &header, const std::string &file, TextureBudgetLoader loader, uint8_t slot) {
+// Each detail level's device texture as the row's loader makes it (renderer::model_row_device_texture: the
+// stage loader alone reads a DDS through D3DX).
+TextureBudget texture_budget(const TextureHeader &header, const std::string &file, renderer::TextureLoader loader, uint8_t slot) {
 	TextureBudget out;
 	if (!header.read || header.width == 0 || header.height == 0) return out;
 	out.known = true;
 	out.loader = loader;
 	out.slot = slot;
 	out.file = file;
-	const bool dds = header.reader == TextureReader::Dds && loader == TextureBudgetLoader::Stage;
+	const bool dds = header.reader == TextureReader::Dds;
 	renderer::DdsSource source;
+	source.width = header.width;
+	source.height = header.height;
 	if (dds) {
-		source.width = header.width;
-		source.height = header.height;
 		source.levels = header.dds_levels;
-		source.format = dds_format(header);
+		source.format = renderer::dds_device_format(header.dds_format);
 		source.bits = header.dds_bits ? header.dds_bits : 32;
 		source.dxt5_opaque = header.dds_dxt5_opaque;
 	}
-	for (int level = 0; level < renderer::kObjectTexDetailLevels; ++level) {
-		uint32_t flags = renderer::object_texdetail_flags(level, slot);
-		if (loader == TextureBudgetLoader::Normal) flags |= renderer::kTextureFlagCap512;
-		out.detail[level] = dds ? renderer::dds_device_texture(source, flags)
-		                        : renderer::pixel_device_texture(header.width, header.height, flags);
-	}
-	if (loader == TextureBudgetLoader::Stage && header.reader != TextureReader::Dds) {
+	for (int level = 0; level < renderer::kObjectTexDetailLevels; ++level)
+		out.detail[level] = renderer::model_row_device_texture(loader, slot, level, source, dds);
+	if (loader == renderer::TextureLoader::Stage && header.reader != TextureReader::Dds) {
 		renderer::DdsSource made;
 		made.width = header.width;
 		made.height = header.height;
@@ -130,7 +101,7 @@ std::string texture_budget_words(const TextureBudget &budget) {
 io::JsonValue texture_budget_json(const TextureBudget &budget) {
 	using io::JsonValue;
 	JsonValue out = JsonValue::make_object();
-	out.set("loader", JsonValue::make_string(texture_budget_loader_token(budget.loader)));
+	out.set("loader", JsonValue::make_string(texture_loader_token(budget.loader)));
 	out.set("slot", JsonValue::make_number(budget.slot));
 	out.set("file", JsonValue::make_string(budget.file));
 	JsonValue detail = JsonValue::make_array();
