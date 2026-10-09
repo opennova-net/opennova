@@ -452,23 +452,6 @@ void terrain_fields(TableKind &kind) {
 		};
 		kind.field(std::move(field));
 	}
-	{
-		LabelledField field;
-		field.schema = schema("horizon", FieldType::Real, "Horizon", "Terrain",
-		                      "Kept in its file: no reader of the game reads the line.");
-		field.schema.applies = Applicability::Ignored;
-		field.value.get = [](const RecordHandle &record, Value &out) {
-			out = config_of(record).horizon;
-			return true;
-		};
-		field.value.set = [](const RecordHandle &record, const Value &value, std::string &error) {
-			double real = 0.0;
-			if (!real_of(value, real, error)) return false;
-			config_of(record).horizon = real;
-			return true;
-		};
-		kind.field(std::move(field));
-	}
 }
 
 // A grid row's cells: the sector each places [orig: the polytrn_sectors arm of Terrain_ParseConfigCallback @
@@ -727,10 +710,11 @@ RecordTable make_table() {
 // --- the source issues ------------------------------------------------------------------------------
 
 // The keys the terrain's reader reads out of a block (formats/trn trn_parser_key) [orig:
-// Terrain_ParseConfigCallback @ 0x60F330], with the three the record keeps for whoever edits the file
-// (terrain_name, terrain_creator and horizon: read by no arm, held by TrnConfig and written by save_trn).
+// Terrain_ParseConfigCallback @ 0x60F330], with the two the record keeps for whoever edits the file
+// (terrain_name and terrain_creator: read by no arm, held by TrnConfig and written by save_trn; a
+// horizon line, which no reader has, is skipped and never written, D-TERRAIN-20).
 bool terrain_reader_key(const std::string &key) {
-	return trn_parser_key(key) || key == "terrain_name" || key == "terrain_creator" || key == "horizon";
+	return trn_parser_key(key) || key == "terrain_name" || key == "terrain_creator";
 }
 
 // The environment's keywords the terrain's record holds (trn.h): its water.
