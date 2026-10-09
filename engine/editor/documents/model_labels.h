@@ -37,10 +37,8 @@ bool model_part_exists(const ModelRow &row, int64_t part);
 // (a single LOD), "never (LOD 3 draws down to 0 px)".
 std::string model_lod_range(const ModelRow &row, size_t lod);
 std::string model_lod_range(const std::vector<int32_t> &thresholds, size_t lod);
-// Whether the game's walk can reach the LOD by distance.
-bool model_lod_drawn(const ModelRow &row, size_t lod);
-bool model_lod_drawn(const std::vector<int32_t> &thresholds, size_t lod);
-// The LODs' thresholds in order (RMDL's pixel counts).
+// The LODs' thresholds in order (RMDL's pixel counts); whether the game's walk can reach a LOD by
+// distance is renderer::object_lod_reachable over them.
 std::vector<int32_t> model_lod_thresholds(const ModelRow &row);
 
 // What a user point's name makes of it in the game, "" for a name the game looks up nowhere itself

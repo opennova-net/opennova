@@ -9,6 +9,7 @@
 #include <runtime/anim/anim_event_bits.h>
 #include <runtime/audio/bank_chain.h>
 #include <runtime/world/infantry_sound.h>
+#include <runtime/world/physics_class_table.h>
 
 namespace opennova::editor {
 
@@ -192,10 +193,10 @@ ClipSoundBinding clip_sound_binding(const std::vector<audio::SoundProfile> &prof
 		binding.body_words = std::string(rig.source == "chosen" ? "The model was chosen, so no item says the body"
 		                                                        : "No item pairs the clip, so none says the body") +
 		                     ": an NPC's (org1), which reads the clip's events on odd ticks.";
-	} else if (strutil::iequals(item.move_function, "org2")) {
+	} else if (world::physics_class_from_move_function(item.move_function) == world::PhysicsClass::Org2) {
 		binding.player = true;
 		binding.body_words = item.name + " runs move_function org2, a player's body: it reads the clip's events on even ticks.";
-	} else if (strutil::iequals(item.move_function, "org1")) {
+	} else if (world::physics_class_from_move_function(item.move_function) == world::PhysicsClass::Org1) {
 		binding.body_words = item.name + " runs move_function org1, an NPC's body: it reads the clip's events on odd ticks.";
 	} else {
 		binding.body_words = item.name + " runs move_function " +
