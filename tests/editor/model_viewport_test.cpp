@@ -37,6 +37,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/threedi/threedi_3di3.h>
+#include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_o3d_lower.h>
 #include <runtime/anim/adm_root_motion.h>
 #include <runtime/assets/asset_store.h>
@@ -410,7 +411,7 @@ static int test_handles() {
 	TEST_EXPECT(rig.set(R"({"clock": {"time_ms": 250}})"));
 	const ModelViewport *model = rig.viewport();
 	int32_t bus[96];
-	model_preview_ctrl_bus(model->options().ctrl, bus);
+	opennova::threedi::threedi_ctrl_bus_from_names(model->options().ctrl, bus);
 
 	// The place: where the drag puts it, the part's pose undone and applied again.
 	std::optional<ModelOverlay> point = find_overlay(model->overlays(rig.clock()), ModelOverlayKind::UserPoint, 0);
