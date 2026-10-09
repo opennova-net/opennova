@@ -88,6 +88,8 @@ private:
 	bool file_hash(const std::string &file, const std::string &relative, uint64_t &hash, uint64_t &spent);
 	static Cache load_cache(const std::string &path, std::string &text);
 	void save_cache() const;
+	// At the end of a pass over the whole project: the outputs' folders under the cache no source names.
+	void remove_stale_outputs() const;
 
 	ProjectPaths paths_;
 	ProjectDocument project_;
