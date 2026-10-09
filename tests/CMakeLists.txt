@@ -2236,6 +2236,14 @@ target_include_directories(ai_los_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(ai_los_test PRIVATE cxx_std_17)
 add_test(NAME ai_los COMMAND ai_los_test)
 
+# The ammo table's shared lookups: the entity-face material cost a round pays
+# to go on through a face (runtime/world/ammo_table.h).
+add_executable(ammo_table_test world/ammo_table_test.cpp)
+target_link_libraries(ammo_table_test PRIVATE opennova_runtime)
+target_include_directories(ammo_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ammo_table_test PRIVATE cxx_std_17)
+add_test(NAME ammo_table COMMAND ammo_table_test)
+
 # The global hit record and the script kills that read it: the BMS kills keep
 # the last recorded round, WAC killSSN zeroes it, items read its section and
 # a brained item's machine its owner word.
