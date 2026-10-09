@@ -277,11 +277,7 @@ void FirstPersonSources::read_weapon_(const FileSource &files, const std::shared
 		const auto on_map = [&](const def::DefWeaponDef &other) {
 			std::string a = other.animadm, b = row.animadm;
 			const auto fallback = [&](std::string &name) {
-				if (name.empty()) return;
-				std::string base = name;
-				const size_t dot = base.find_last_of('.');
-				if (dot != std::string::npos) base.resize(dot);
-				name = anim::adm_name_or_default(name, index.has_file(base + ".adm"));
+				name = anim::adm_load_name(name, [&](const std::string &file) { return index.has_file(file); });
 			};
 			fallback(a);
 			fallback(b);
