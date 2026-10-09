@@ -15,12 +15,11 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
+#include <formats/def/def_hudpos_write.h>
 
 namespace opennova::editor {
 
 namespace {
-
-constexpr const char *kAligns[] = { "left", "right", "center" };
 
 // A set of one of the picked element's fields: the viewport's command, one undo step.
 void set_field(Workspace &workspace, const HudViewport &model, const HudPreviewElement &element, const HudField &field,
@@ -95,9 +94,12 @@ void draw_hud_layout_inspector(Workspace &workspace, const DocumentBase &documen
 		}
 		case HudFieldKind::Align: {
 			if (ImGui::BeginCombo("##value", field.value.c_str())) {
-				for (const char *word : kAligns)
+				for (int align = 0; align < 3; ++align) {
+					// The alignment's words as hudpos.def's writer writes them.
+					const char *word = def::hudpos_align_word(align);
 					if (ImGui::Selectable(word, field.value == word) && field.value != word)
 						set_field(workspace, *model, *picked, field, word);
+				}
 				ImGui::EndCombo();
 			}
 			break;
