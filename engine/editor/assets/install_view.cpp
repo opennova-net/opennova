@@ -14,6 +14,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/asset_type_registry.h>
 #include <base/gameprofile/player_files.h>
+#include <base/gameprofile/required_resources.h>
 #include <editor/project/expansion_files.h>
 #include <editor/project/project_files.h>
 
@@ -44,15 +45,6 @@ std::map<std::string, std::string> renames_for(const std::string &installed, con
 		out[pff::normalized_logical_name(from)] = expansion_file_name(row, project);
 	}
 	return out;
-}
-
-// The base game's music pairs, which no stock launch under /exp reads.
-bool base_music(const std::string &name) {
-	for (size_t i = 0; i < kExpansionFileRoleCount; ++i) {
-		const ExpansionFileRow &row = expansion_file_row(static_cast<ExpansionFileRole>(i));
-		if (row.replaces() && strutil::iequals(row.replaces(), name)) return true;
-	}
-	return false;
 }
 
 } // namespace
@@ -90,8 +82,7 @@ bool InstallView::open(const InstallSpec &spec, std::string &error) {
 		vfs_.clear();
 		return false;
 	}
-	const std::string expansion_dir =
-			spec.expansion.empty() ? std::string() : join_path(join_path(spec.root, "expansion"), spec.expansion);
+	const std::string expansion_dir = spec.expansion.empty() ? std::string() : vfs_expansion_dir(spec.root, spec.expansion);
 	const std::map<std::string, std::string> renames = renames_for(spec.expansion, spec.project_expansion);
 	std::set<std::string> targets; // the names the renamed files take, which no other file of the view has
 	for (const auto &entry : renames) targets.insert(pff::normalized_logical_name(entry.second));
@@ -100,7 +91,8 @@ bool InstallView::open(const InstallSpec &spec, std::string &error) {
 		const auto renamed = renames.find(pff::normalized_logical_name(file.member));
 		if (renamed != renames.end()) file.name = renamed->second;
 		else if (targets.count(pff::normalized_logical_name(file.name))) return;
-		if (!spec.expansion.empty() && base_music(file.member)) return;
+		// The base game's music pairs, which no stock launch under /exp reads.
+		if (!spec.expansion.empty() && gameprofile::gameprofile_replaced_under_expansion(file.member)) return;
 		if (!by_name_.emplace(pff::normalized_logical_name(file.name), files_.size()).second) return;
 		files_.push_back(std::move(file));
 	};
@@ -124,8 +116,8 @@ bool InstallView::open(const InstallSpec &spec, std::string &error) {
 	// player's own files), each from the expansion's two archives or the base's.
 	const auto expansion_archive = [&spec](const std::string &path) {
 		const std::string archive = utf8_of(path_of(path).filename());
-		return !spec.expansion.empty() &&
-		       (strutil::iequals(archive, spec.expansion + ".pff") || strutil::iequals(archive, spec.expansion + "L.pff"));
+		return !spec.expansion.empty() && (strutil::iequals(archive, vfs_expansion_archive_name(spec.expansion, false)) ||
+		                                   strutil::iequals(archive, vfs_expansion_archive_name(spec.expansion, true)));
 	};
 	for (const VfsFileLocation &location : vfs_.list_files()) {
 		if (strutil::ends_with_icase(location.logical_name, ".pff") || gameprofile::is_player_file(location.logical_name)) continue;
@@ -149,7 +141,7 @@ const InstallFile *InstallView::find(const std::string &project_name) const {
 
 bool InstallView::read(const InstallFile &file, std::vector<uint8_t> &out) const {
 	if (!open_) return false;
-	if (file.loose_path.empty()) return read_served(vfs_, file.member, out);
+	if (file.loose_path.empty()) return vfs_read_served(vfs_, file.member, out);
 	std::string error;
 	return io::read_file_bytes(file.loose_path, out, error);
 }

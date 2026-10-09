@@ -211,9 +211,9 @@ namespace {
 
 // A record kind: a whole JSON number that fits a NodeKind; false for anything else.
 bool read_kind(const JsonValue &json, NodeKind &out) {
-	if (!json.is_number() || json.number != std::floor(json.number) ||
-	    json.number < -2147483648.0 || json.number > 2147483647.0) return false;
-	out = static_cast<NodeKind>(json.number);
+	int64_t kind = 0;
+	if (!io::json_exact_whole_in(json, -2147483648.0, 2147483647.0, kind)) return false;
+	out = static_cast<NodeKind>(kind);
 	return true;
 }
 
@@ -421,9 +421,8 @@ bool name_of(const JsonValue &json, const char *token, std::string &out, std::st
 		out = json.string;
 		return true;
 	}
-	if (json.is_number() && json.number == std::floor(json.number) &&
-			std::fabs(json.number) < 9007199254740992.0) {
-		out = std::to_string(static_cast<int64_t>(json.number));
+	if (int64_t whole = 0; io::json_exact_whole_in(json, -io::kJsonSafeWholeMax, io::kJsonSafeWholeMax, whole)) {
+		out = std::to_string(whole);
 		return true;
 	}
 	error = std::string("\"") + token + "\" must be a string or a whole number.";
@@ -765,9 +764,8 @@ bool command_from_json(const JsonValue &json, ViewportCommand &out, std::string 
 	if (const JsonValue *value = json.get("value")) {
 		if (value->is_string()) {
 			command.value = value->string;
-		} else if (value->is_number() && std::isfinite(value->number) && value->number == std::floor(value->number) &&
-				std::fabs(value->number) < 1e9) {
-			command.value = std::to_string(static_cast<long long>(value->number));
+		} else if (int64_t whole = 0; io::json_exact_whole_in(*value, -999999999.0, 999999999.0, whole)) {
+			command.value = std::to_string(static_cast<long long>(whole));
 		} else {
 			error = "\"command.value\" must be a text or a whole number.";
 			return false;
@@ -1013,8 +1011,8 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		return false;
 	case F::Report: return flag_of(json, token, request.report, error);
 	case F::Steps:
-		if (json.is_number() && json.number >= 1.0 && json.number == std::floor(json.number) && json.number <= 4294967295.0) {
-			request.steps = uint32_t(json.number);
+		if (int64_t steps = 0; io::json_exact_whole_in(json, 1.0, 4294967295.0, steps)) {
+			request.steps = uint32_t(steps);
 			return true;
 		}
 		error = std::string("\"") + token + "\" must be a whole number, 1 or more.";
@@ -1248,8 +1246,8 @@ JsonValue value_to_json(const Value &value) {
 bool value_from_json(const JsonValue &json, Value &out) {
 	switch (json.type) {
 	case JsonValue::Type::Number:
-		if (json.number == std::floor(json.number) && std::fabs(json.number) < 9007199254740992.0)
-			out = static_cast<int64_t>(json.number);
+		if (int64_t whole = 0; io::json_exact_whole_in(json, -io::kJsonSafeWholeMax, io::kJsonSafeWholeMax, whole))
+			out = whole;
 		else
 			out = json.number;
 		return true;

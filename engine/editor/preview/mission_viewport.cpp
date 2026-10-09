@@ -38,8 +38,6 @@
 
 namespace opennova::editor {
 
-float mission_settled_fog_level(float level) { return env::EnvScalarChannels::settled_fog_level(level); }
-
 float mission_fog_reach(const FileSource &files, const MissionSceneHeader &header) {
 	if (header.environment.empty()) return 0.0f;
 	// The environment as the mission's load makes it: the terrain's .trn, overcast.def, then the .env over them,
@@ -51,7 +49,7 @@ float mission_fog_reach(const FileSource &files, const MissionSceneHeader &heade
 	            loaded))
 		return 0.0f;
 	const env::Config &config = loaded.config;
-	const env::FogParams fog = env::compute_fog_params(config.fog_type, mission_settled_fog_level(config.fog_level), 0.0f);
+	const env::FogParams fog = env::compute_fog_params(config.fog_type, env::EnvScalarChannels::settled_fog_level(config.fog_level), 0.0f);
 	if (!fog.enabled || !(fog.end > 0.0f)) return 0.0f;
 	// Half its end: type 1's linear haze (from the eye) half thick there, type 2's start, type 3's past it.
 	return fog.end * 0.5f;
