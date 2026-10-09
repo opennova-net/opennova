@@ -1019,6 +1019,14 @@ target_link_libraries(resource_index_test PRIVATE opennova_base)
 target_include_directories(resource_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME resource_index COMMAND resource_index_test)
 
+# The typed kinds and their loader facts (base/resource_index/file_kind.h): every runtime format and
+# required file has a kind and a place, and the table agrees with master's other copies of its facts.
+add_executable(file_kind_test resource_index/file_kind_test.cpp)
+target_link_libraries(file_kind_test PRIVATE opennova_base)
+target_include_directories(file_kind_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(file_kind_test PRIVATE cxx_std_17)
+add_test(NAME file_kind COMMAND file_kind_test)
+
 # Launch flags + the boot resource-dir ladder (base/resource_index/boot_policy.h).
 add_executable(boot_policy_test resource_index/boot_policy_test.cpp)
 target_link_libraries(boot_policy_test PRIVATE opennova_base)
