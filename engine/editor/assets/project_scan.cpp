@@ -144,7 +144,7 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 			std::vector<uint8_t> bytes;
 			std::string io_error;
 			const bool peek = asset_classification_needs_bytes(output) &&
-					read_file_bytes(utf8_of(output_path), bytes, io_error);
+					io::read_file_bytes(utf8_of(output_path), bytes, io_error);
 			read += bytes.size();
 			produced.kind = peek ? classify_asset(output, &bytes) : classify_asset(output, nullptr);
 			out.entries.push_back(std::move(produced));
@@ -160,7 +160,7 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 	if (asset_classification_needs_bytes(filename)) {
 		std::vector<uint8_t> bytes;
 		std::string io_error;
-		if (read_file_bytes(utf8_of(path), bytes, io_error)) {
+		if (io::read_file_bytes(utf8_of(path), bytes, io_error)) {
 			read += bytes.size();
 			asset.kind = classify_asset(filename, &bytes);
 		} else {

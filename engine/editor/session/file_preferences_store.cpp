@@ -34,7 +34,7 @@ bool FilePreferencesStore::load(Preferences &out, Diagnostic &finding) {
 	}
 	std::string text;
 	std::string io_error;
-	if (!read_file_text(path, text, io_error)) {
+	if (!io::read_file_text(path, text, io_error)) {
 		finding =
 				make_finding(CoreFinding::EditorSettingsUnreadable, DiagnosticSeverity::Error, io_error);
 		return false;
@@ -111,8 +111,8 @@ bool FilePreferencesStore::save(const Preferences &settings, Diagnostic &error) 
 	}
 	json.set("recent_items_by_game", std::move(by_game));
 	std::string io_error;
-	if (!ensure_directory(utf8_of(path_of(path).parent_path()), io_error) ||
-	    !write_file_atomic(path, io::json_write(json), io_error)) {
+	if (!io::ensure_directory(utf8_of(path_of(path).parent_path()), io_error) ||
+	    !io::write_file_atomic(path, io::json_write(json), io_error)) {
 		error = make_finding(CoreFinding::EditorSettingsWrite, DiagnosticSeverity::Error, io_error);
 		return false;
 	}

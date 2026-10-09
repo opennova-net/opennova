@@ -89,7 +89,7 @@ LaunchPlan make_source_launch_plan(const std::string &godot_executable, const st
 using FileLink = std::function<bool(const std::string &from, const std::string &to, std::string &error)>;
 bool prepare_expansion_run(const std::string &install, const std::string &build_dir, const std::string &expansion,
                            const std::string &run_dir, const std::string &copy_cache, Diagnostic &error,
-                           const FileLink &link = link_file, std::vector<std::string> *staged = nullptr);
+                           const FileLink &link = io::link_file, std::vector<std::string> *staged = nullptr);
 
 // A standalone build staged in `run_dir` for the runtime to mount there (make_play_launch_plan's
 // `on_run_dir`): every file of the build but its record, one the game only reads linked (copied where
@@ -97,7 +97,7 @@ bool prepare_expansion_run(const std::string &install, const std::string &build_
 // name and added to `staged` (LaunchPlan::staged), as the game install's staging stages them. The
 // build is only read. False with `error` (play.install_copy).
 bool prepare_runtime_run(const std::string &build_dir, const std::string &run_dir, Diagnostic &error,
-                         std::vector<std::string> *staged, const FileLink &link = link_file);
+                         std::vector<std::string> *staged, const FileLink &link = io::link_file);
 
 // The game install's own program, which Play in the game install starts (and the install check looks for).
 inline constexpr const char *kInstallExecutable = "Jointops.exe";
@@ -175,7 +175,7 @@ FileAccessLog parse_file_access_log(const std::string &text);
 bool prepare_retail_launch_plan(const std::string &retail_directory, const std::string &build_dir,
                                 const std::string &run_dir, LaunchPlan &out, Diagnostic &error,
                                 const std::string &expansion = std::string(),
-                                const std::string &copy_cache = std::string(), const FileLink &link = link_file,
+                                const std::string &copy_cache = std::string(), const FileLink &link = io::link_file,
                                 const std::string &base_game = std::string());
 
 // Strict Play in the game install: the game as a player who dropped the install's Jointops.exe into
@@ -202,7 +202,7 @@ bool prepare_retail_launch_plan(const std::string &retail_directory, const std::
 // the game's archives is play.install_missing.
 bool prepare_strict_install_launch_plan(const std::string &install, const std::string &build_dir,
                                         const std::string &run_dir, const std::string &expansion, LaunchPlan &out,
-                                        Diagnostic &error, const FileLink &link = link_file,
+                                        Diagnostic &error, const FileLink &link = io::link_file,
                                         const std::string &base_game = std::string());
 
 // Why strict Play of the expansion `expansion` on the install's base game is refused (play.strict_expansion):

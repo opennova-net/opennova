@@ -58,7 +58,7 @@ ImportPass::Cache ImportPass::load_cache(const std::string &path, std::string &t
 	Cache cache;
 	std::string message;
 	std::error_code ec;
-	if (!fs::is_regular_file(system_path(path), ec) || !read_file_text(path, text, message)) return cache;
+	if (!fs::is_regular_file(system_path(path), ec) || !io::read_file_text(path, text, message)) return cache;
 	io::JsonValue json;
 	if (!io::json_parse(text, json, message) || !json.is_object() ||
 	    json.get_int("schema_version", -1) != kImportCacheSchemaVersion)
@@ -167,7 +167,7 @@ void ImportPass::save_cache() const {
 	const std::string text = io::json_write(json);
 	if (text == cache_text_) return;
 	std::string message;
-	if (ensure_project_cache_dir(paths_, message)) write_file_atomic(paths_.import_cache_file, text, message);
+	if (ensure_project_cache_dir(paths_, message)) io::write_file_atomic(paths_.import_cache_file, text, message);
 }
 
 bool ImportPass::step(uint64_t budget) {
@@ -254,7 +254,7 @@ bool ImportPass::file_hash(const std::string &file, const std::string &relative,
 	if (!vouched(seen_.files) && !vouched(cache_.files)) {
 		std::vector<uint8_t> bytes;
 		std::string message;
-		if (!read_file_bytes(file, bytes, message)) return false;
+		if (!io::read_file_bytes(file, bytes, message)) return false;
 		spent += bytes.size();
 		now.hash = io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size());
 	}
@@ -310,7 +310,7 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 	bool have_bytes = false;
 	const auto read_source = [&]() {
 		std::string message;
-		if (!read_file_bytes(utf8_of(path), bytes, message)) {
+		if (!io::read_file_bytes(utf8_of(path), bytes, message)) {
 			result_.diagnostics.push_back(make_finding(CoreFinding::ImportRead, DiagnosticSeverity::Error, message, source.source));
 			return false;
 		}
@@ -386,7 +386,7 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 		} else {
 			const fs::path out_dir = root_ / path_of(source.output_dir);
 			std::string dir_error;
-			if (!ensure_project_cache_dir(paths_, dir_error) || !ensure_directory(utf8_of(out_dir), dir_error)) {
+			if (!ensure_project_cache_dir(paths_, dir_error) || !io::ensure_directory(utf8_of(out_dir), dir_error)) {
 				result_.diagnostics.push_back(make_finding(CoreFinding::ImportWrite, DiagnosticSeverity::Error, dir_error, source.source));
 				source.ok = false;
 			} else {
@@ -399,7 +399,7 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 				sidecar.outputs.clear();
 				for (const ImportOutput &output : product.outputs) {
 					std::string write_error;
-					if (!write_file_atomic(utf8_of(out_dir / path_of(output.name)), output.bytes.data(), output.bytes.size(),
+					if (!io::write_file_atomic(utf8_of(out_dir / path_of(output.name)), output.bytes.data(), output.bytes.size(),
 					                       write_error)) {
 						result_.diagnostics.push_back(make_finding(CoreFinding::ImportWrite, DiagnosticSeverity::Error, write_error, source.source));
 						source.ok = false;

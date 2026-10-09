@@ -54,7 +54,7 @@ struct Project {
 	std::string read(const std::string &relative) const {
 		std::vector<uint8_t> bytes;
 		std::string error;
-		read_file_bytes(root + "/" + relative, bytes, error);
+		io::read_file_bytes(root + "/" + relative, bytes, error);
 		return std::string(bytes.begin(), bytes.end());
 	}
 	void rescan() { editor_test::handle_to_end(session, request::rescan()); }

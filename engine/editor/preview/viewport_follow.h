@@ -6,55 +6,14 @@
 #include <vector>
 
 #include <base/vfs/file_source.h>
+#include <base/vfs/file_stamps.h>
 
 namespace opennova::editor {
 
-// A file read, with its stamp when it was read.
-struct FileStamp {
-	std::string name;
-	uint64_t stamp = 0;
-};
-
-// The files a viewport's picture read, each once with the stamp it had then (ADR 0046 S13 V5): a
-// menu screen's stylesheets, string tables, fonts and textures, a model's textures, a rig's model,
-// table and clips. A picture is made again when one of them moves its stamp. The one record of
-// what a picture read, where the menu preview kept a dependency list, the model preview the read
-// list of its stamped files and its rig's model file and stamp apart.
-class FileStamps {
-public:
-	// `name` read at `stamp`; a name read before (in any case) keeps its first stamp. True when it
-	// was not read before.
-	bool note(const std::string &name, uint64_t stamp);
-	// Every file `other` read, as note() takes each; true when one was not read before.
-	bool add(const FileStamps &other);
-	// True when a file read has another stamp in `files` now; moved_but: a file other than those
-	// `except` names (in any case).
-	bool moved(const FileSource &files) const;
-	bool moved_but(const FileSource &files, const std::vector<std::string> &except) const;
-	// Each file read takes the stamp it has in `files` now (what moved leaves the picture as it is).
-	void restamp(const FileSource &files);
-	const std::vector<FileStamp> &files() const { return files_; }
-	bool empty() const { return files_.empty(); }
-	void clear() { files_.clear(); }
-
-private:
-	std::vector<FileStamp> files_;
-};
-
-// A file source that notes every name read through it (its stamp as it was read): what a device
-// read while it built a model (its textures, a flipbook frame loaded when first drawn), what a rig
-// read (its table and its clips).
-class StampedFiles : public FileSource {
-public:
-	explicit StampedFiles(std::shared_ptr<const FileSource> files) : files_(std::move(files)) {}
-	bool read(const std::string &name, std::vector<uint8_t> &out) const override;
-	uint64_t stamp(const std::string &name) const override;
-	const FileStamps &stamps() const { return stamps_; }
-
-private:
-	std::shared_ptr<const FileSource> files_;
-	mutable FileStamps stamps_;
-};
+// The files a viewport's picture read are a FileStamps (base/vfs/file_stamps.h), each once with the
+// stamp it had then (ADR 0046 S13 V5): a menu screen's stylesheets, string tables, fonts and
+// textures, a model's textures, a rig's model, table and clips; a picture is made again when one
+// of them moves its stamp. What a device read is noted through a StampedFiles.
 
 // What a viewport's device does after a follow (ADR 0046 S13 V5).
 enum class ViewportAction : uint8_t {
