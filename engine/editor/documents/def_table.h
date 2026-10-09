@@ -79,11 +79,9 @@ const CatalogKindRow &catalog_kind_row(NodeKind kind);
 // DI-11).
 std::string catalog_copy_name(NodeKind kind, const std::string &name, const std::vector<std::string> &taken,
                               const void *record);
-// The characters of a weapon's name the game keeps: its reader copies 32 bytes of the name into def+0x14,
-// right ahead of `sameas` at def+0x34, so a 32-character name keeps no terminator and reads back as itself
-// only while `sameas` is empty, running on into it otherwise: 32 in a block with no `sameas`, 31 in one
-// with it [orig: WeaponDefs_ParseLineCallback, strncpy(def+0x14, name, 0x20) @ 0x543737; strncpy(def+0x34,
-// value, 0x20) @ 0x544056..0x544072] (D-ITEMDEF-10; the def writer's rule, formats/def put_weapon).
+// The characters of a weapon's name the game keeps, of a weapon row's record (a def::DefWeaponDef): 32 in a
+// block with no `sameas`, 31 in one with it (def::def_weapon_name_chars, the reader's rule the def writer
+// caps a name by; D-ITEMDEF-10). The weapon row's name_chars_of.
 size_t weapon_name_chars(const void *record);
 // The first items.def id from 100000 on that `used` does not hold and the engine keeps for no use
 // (def::reserved_item_by_id: a start, a waypoint, a flag, a model it draws; itemdef-re.md, "The ids
