@@ -303,6 +303,32 @@ int main() {
         TEST_EXPECT(rig.load_from_files(&fs_assets, "idle.bad", {{"anim_idle", "idle.bad"}, {"anim_run", "absent.bad"}}));
         TEST_EXPECT(rig.find_clip("anim_run") == nullptr);
 
+        // A token's load opens its stem plus .bad, whatever extension it carries: "idle.txt"
+        // and "WALK.anim" open idle.bad and walk.bad in every .adm reader, not the failsafe.
+        // [orig: AnimMap_FindOrLoadBoneFile @0x40c030, the cut @0x40c08b..0x40c09d, ".bad"
+        //  appended @0x40c0a6..0x40c0c6; anim::bad_file_name]
+        TEST_EXPECT(opennova::anim::bad_file_name("") == "" &&
+                    opennova::anim::bad_file_name("idle") == "idle.bad" &&
+                    opennova::anim::bad_file_name("IDLE.BAD") == "IDLE.bad" &&
+                    opennova::anim::bad_file_name("idle.txt") == "idle.bad" &&
+                    opennova::anim::bad_file_name("a.b.c") == "a.b.bad");
+        std::ofstream((dir / "ext.adm").string(), std::ios::binary)
+                << "anim_reset \"idle.txt\"\r\nanim_idle \"idle.txt\"\r\nanim_walk_forward \"WALK.anim\"\r\n";
+        opennova::ResourceIndex ext_index;
+        opennova::assets::AssetStore ext_assets{&ext_index};
+        TEST_EXPECT(ext_index.scan(dir.string()));
+        TEST_EXPECT(ext_assets.bone_animation("idle.txt") == ext_assets.bone_animation("idle") &&
+                    ext_assets.bone_animation("idle.txt") != ext_assets.bone_animation("failsafe"));
+        AdmRootMotion ext_motion;
+        const int ext = ext_motion.register_adm(&ext_assets, "ext.adm");
+        TEST_EXPECT(ext >= 0 && ext_motion.clip_length_ticks(ext, kWalkForward, 0) ==
+                                        motion.clip_length_ticks(gap, kWalkForward, 0));
+        TEST_EXPECT(rig.load_from_adm(&ext_assets, "ext.adm", {}, {}));
+        const opennova::anim::SkeletalClips::ClipSource *walk_source = rig.find_clip_source("anim_walk_forward", 0);
+        TEST_EXPECT(walk_source && walk_source->file == "WALK.anim");
+        const opennova::anim::SkeletalClips::ClipSource *idle_source = rig.find_clip_source("anim_idle", 0);
+        TEST_EXPECT(idle_source && idle_source->file == "idle.txt");
+
         // Without failsafe.bad the token registers nothing and the ring closes up.
         TEST_EXPECT(fs::remove(dir / "failsafe.bad", ec));
         opennova::ResourceIndex bare_index;

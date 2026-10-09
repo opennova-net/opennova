@@ -64,4 +64,17 @@ const char *physics_class_row_name(PhysicsClass row);
 //  against each row and falls back to row 0 (@0x4a9272)]
 PhysicsClass physics_class_from_move_function(std::string_view move_function);
 
+// Whether the row's per-frame update keeps the entity's height as its record
+// placed it: the eight rows whose update writes no position of the entity's
+// own -- null (nullsub_2), envs (Entity_UpdateEnvSoundEmitter @0x4a8080), ewep
+// (Entity_UpdateTransformAndTurret @0x440ca0, which writes its turret's
+// transform, not its own), door (Entity_SetDefaultBoneCallbacks @0x4a91d0),
+// genx (Entity_UpdateParentTransform @0x4a88b0: it moves only with the entity
+// it stands on), upfx (Entity_UpdateWaterPhysicsAndEffects @0x4a92e0), org0
+// (nullsub_28) and chld (nullsub_82). Every other row moves it (the vehicles'
+// and aircraft's movers, the rounds', an elevator's fall and land, a toppling
+// tower, the infantry bodies' gravity).
+// [orig: g_EntityClassPhysicsTable @0x82abc8, each row's update as named]
+bool physics_class_keeps_height(PhysicsClass row);
+
 } // namespace opennova::world

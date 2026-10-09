@@ -63,6 +63,8 @@ enum class BlendMode : std::uint8_t {
 	Bumpadd = 6,
 	Distort = 7,
 };
+// The blend modes' count, Blend to Distort.
+inline constexpr int kBlendModeCount = static_cast<int>(BlendMode::Distort) + 1;
 
 const char *blend_mode_name(BlendMode mode) noexcept;
 BlendMode parse_blend_mode(std::string_view raw) noexcept;

@@ -29,19 +29,12 @@ int AdmRootMotion::parse_adm(const RigFiles *files, const std::string &adm_name,
 	const AdmFile &adm = *map;
 	out.adm_name = adm_name;
 
-	// .bad basename resolution, as in SkeletalAnim::load_from_resource_root.
-	auto resolve_bad = [](const std::string &value) -> std::string {
-		if (!strutil::ends_with_icase(value, ".bad")) {
-			return value + ".bad";
-		}
-		return value;
-	};
-
 	// Several states usually share one clip (walk_* dirs, idles): cache parsed tracks by
 	// resolved .bad name so each file is read + parsed once per .adm.
 	std::unordered_map<std::string, Track> by_file;
 	auto track_for = [&](const std::string &value) -> const Track * {
-		const std::string bad_name = resolve_bad(value);
+		// The file a table token's load opens: its stem plus .bad (bad_file_name).
+		const std::string bad_name = bad_file_name(value);
 		const std::string cache_key = strutil::to_lower(bad_name);
 		auto cached = by_file.find(cache_key);
 		if (cached != by_file.end()) {

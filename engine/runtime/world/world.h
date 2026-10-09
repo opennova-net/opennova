@@ -16,6 +16,7 @@
 #include <variant>
 
 #include <runtime/audio/dialog_queue.h>
+#include <runtime/audio/oneshot_play.h> // kListenerView*
 #include <runtime/audio/sound_profile.h>
 #include <base/io/crt_rand.h>
 #include <runtime/terrain_query/surface_type_map.h>
@@ -175,7 +176,8 @@ private:
 // Transient player identity and frame data. WAC refreshes local_health only
 // at bytecode entry [orig: WacScript_CacheLocalPlayerState @0x4F5780].
 struct CachedFrameState {
-    uint8_t sound_listener_view_flags = 6; // startup; camera 0 -> 2, other -> 4 [orig: @0x43924A]
+    // Startup both; camera 0 first person, any other external [orig: @0x43924A].
+    uint8_t sound_listener_view_flags = audio::kListenerViewStartup;
     EntityHandle local_player;
     int32_t local_health = 0;
     // The human count — the WAC 'humans' builtin, rebuilt by the host server

@@ -640,7 +640,7 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
             const int32_t radius = to_fixed(blast_radius);
             for (size_t i = 0; i < model->sections.size(); ++i) {
                 const CollisionSection &section = model->sections[i];
-                if ((section.flags & 2u) == 0) continue;
+                if (!collision_section_breaks(section.flags)) continue;
                 const int32_t local[3] = {
                     io::bam_add(section.min_x, section.max_x) >> 1,
                     io::bam_add(section.min_y, section.max_y) >> 1,
