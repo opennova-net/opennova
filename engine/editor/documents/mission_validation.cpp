@@ -84,26 +84,16 @@ DiagnosticSeverity source_severity(MissionFinding code) {
 // retail_pool_capacity: organics 0, items 1, buildings 2, markers 3).
 const size_t kMaxItems = world::retail_pool_capacity(1), kMaxBuildings = world::retail_pool_capacity(2),
              kMaxMarkers = world::retail_pool_capacity(3), kMaxOrganics = world::retail_pool_capacity(0);
-// The group tables hold 64 [orig: docs/mission/bms-event-runtime-re.md 7.2].
-constexpr int64_t kLastGroup = 63;
+// The group tables hold 64 (bms::kGroupRecordCount) [orig: docs/mission/bms-event-runtime-re.md 7.2].
+constexpr int64_t kLastGroup = bms::kGroupRecordCount - 1;
 // The zone ids the original editor offers [orig editor: dfx2med Med_AreaTriggerDialogProc @0x40f400].
 constexpr int32_t kFirstZoneId = 1, kLastZoneId = 99;
-// A waypoint number from 1 to 122 names a path; 0 none, 123..127 a command.
-constexpr int32_t kLastPathNumber = 122;
-// The trigger main types the evaluator has a case for [orig: EventTrigger_EvaluateCondition
-// @0x453620's jump table, 1..7].
-constexpr int32_t kFirstMainType = 1, kLastMainType = 7;
-// The order the game's lookups scan the pools in: organics, items, buildings, markers [orig:
-// Entity_KillByNetId @0x43DBD0].
-int lookup_order(NodeKind kind) {
-	switch (static_cast<K>(kind)) {
-	case K::Organic: return 0;
-	case K::Item: return 1;
-	case K::Building: return 2;
-	case K::Marker: return 3;
-	default: return 4;
-	}
-}
+// A waypoint number from 1 to 122 names a path; 0 none, 123..127 a command (kFirstPathCommand on).
+constexpr int32_t kLastPathNumber = kFirstPathCommand - 1;
+// The trigger main types the evaluator has a case for, bms::TriggerMainType's Group to Player [orig:
+// EventTrigger_EvaluateCondition @0x453620's jump table, 1..7].
+constexpr int32_t kFirstMainType = int32_t(bms::TriggerMainType::Group),
+                  kLastMainType = int32_t(bms::TriggerMainType::Player);
 
 struct Checker {
 	const MissionDocument &document;
@@ -192,7 +182,7 @@ struct Checker {
 			if (rows.size() < 2) continue;
 			const Node *found = rows[0];
 			for (const Node *row : rows)
-				if (lookup_order(row->kind) < lookup_order(found->kind)) found = row;
+				if (entity_pool_of(row->kind) < entity_pool_of(found->kind)) found = row;
 			// The lookups by SSN take the first row in pool order [orig: Entity_KillByNetId @0x43DBD0]; an
 			// area check tests every organic and item carrying it, not stopping at the first [orig:
 			// Entity_IsBmsRefInTriggerBounds @0x43e510; docs/mission/bms-event-runtime-re.md 7.2a].
@@ -209,8 +199,8 @@ struct Checker {
 				                                 : std::string(".")),
 				                   "id");
 				// Its fix (DI-11): an SSN of its own, which the lookups then find it by.
-				if (fresh == kPlayerSsn) ++fresh;
-				const int32_t own = fresh++;
+				const int32_t own = fresh;
+				fresh = ssn_after(own);
 				Edit set;
 				set.address = {row->id, row->kind, 0};
 				set.field = "id";
@@ -295,7 +285,7 @@ struct Checker {
 			} else {
 				first.emplace(area.id, row);
 			}
-			if (area.x_min == area.x_max || area.y_min == area.y_max)
+			if (zone_box_flat(area))
 				on(address, MissionFinding::ZoneDegenerate, DiagnosticSeverity::Warning,
 				   "The zone has no width on an axis: the game makes every trigger naming it read false and every "
 				   "action naming it do nothing [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000].");

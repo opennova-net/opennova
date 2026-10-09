@@ -33,6 +33,7 @@
 #include <formats/def/def.h>
 #include <formats/grm/grm.h>
 #include <formats/particle/parser.h>
+#include <runtime/hud/hud_layout_from_hudpos.h>
 #include <runtime/renderer/particle_atlas.h>
 #include <runtime/renderer/texture_load_rules.h>
 
@@ -190,29 +191,26 @@ bool extract_hudpos(const std::string &name, const std::vector<uint8_t> &bytes, 
 		out.edges.push_back(edge_of(name, record, field, kind, value, std::string(), true));
 		out.edges.back().loader_arg = loader_arg;
 	};
-	// A texture through the HUD's loader, in the mode its keyword loads it in (ADR 0046 S18): a stance's
-	// icon and the parachute and armour icons alpha only, the static frame and the loadout's two in
-	// colour [orig: HUD_LoadAllTextures @ 0x59DDA0, HUD_LoadImageAsTexture @ 0x591550; record
-	// interface/hud-re].
-	auto texture = [&](const std::string &record, const char *field, renderer::TextureRoleId role, const char *value) {
-		if (value && *value) out.edges.push_back(texture_edge(name, record, field, value, role));
+	// A texture through the HUD's loader, in the mode its keyword loads it in (ADR 0046 S18), each name and
+	// mode the engine's (hud::HudLayoutAssets; record interface/hud-re "The HUD texture loader").
+	auto texture = [&](const std::string &record, const char *field, renderer::TextureRoleId role, const std::string &value) {
+		if (!value.empty()) out.edges.push_back(texture_edge(name, record, field, value.c_str(), role));
 	};
-	edge(std::string(), "fonthud1_hi", ReferenceKind::Font, hud.font_hi);
-	edge(std::string(), "fonthud1_lo", ReferenceKind::Font, hud.font_lo);
-	// A stance's icon is its slot's (ids 0 to 5), the last record of an id the one read; the static
-	// frame is the last line authored (runtime/hud/hud_frame.h, hud_static_frame_index).
-	for (int id = 0; id < 6; ++id) {
-		const def::DefHudStance *read = nullptr;
-		for (size_t i = 0; i < hud.stances_count; ++i)
-			if (hud.stances[i].id == id) read = &hud.stances[i];
-		if (read) texture("HUDSTANCE " + std::to_string(id), "texture", renderer::TextureRoleId::HudAlphaOnly, read->texture);
-	}
-	if (hud.static_frames_count > 0)
-		texture("StaticFrame", "texture", renderer::TextureRoleId::HudColour, hud.static_frames[hud.static_frames_count - 1].texture);
-	texture(std::string(), "parachute_icon", renderer::TextureRoleId::HudAlphaOnly, hud.parachute_icon.texture);
-	texture(std::string(), "armor_icon", renderer::TextureRoleId::HudAlphaOnly, hud.armor_icon.texture);
-	texture(std::string(), "hudls_bracket", renderer::TextureRoleId::HudColour, hud.hudls_bracket);
-	texture(std::string(), "hudls_moreav", renderer::TextureRoleId::HudColour, hud.hudls_moreav);
+	// The names the HUD's layout fill hands its loaders: a stance's icon its slot's (ids 0 to 5, the last
+	// record of an id), the static frame the last line authored (hud_static_frame_index).
+	hud::HudLayout layout;
+	hud::HudLayoutAssets assets;
+	hud::hud_layout_from_hudpos(file, layout, assets);
+	using Assets = hud::HudLayoutAssets;
+	edge(std::string(), "fonthud1_hi", ReferenceKind::Font, assets.font_hi.c_str());
+	edge(std::string(), "fonthud1_lo", ReferenceKind::Font, assets.font_lo.c_str());
+	for (size_t id = 0; id < assets.stance_textures.size(); ++id)
+		texture("HUDSTANCE " + std::to_string(id), "texture", Assets::kStanceRole, assets.stance_textures[id]);
+	texture("StaticFrame", "texture", Assets::kStaticFrameRole, assets.static_frame);
+	texture(std::string(), "parachute_icon", Assets::kParachuteIconRole, assets.parachute_icon);
+	texture(std::string(), "armor_icon", Assets::kArmorIconRole, assets.armor_icon);
+	texture(std::string(), "hudls_bracket", Assets::kHudlsRole, assets.hudls_bracket);
+	texture(std::string(), "hudls_moreav", Assets::kHudlsRole, assets.hudls_moreav);
 	// A vehicle panel's interface art through the HUD loader in alpha mode (render-material-re.md "The
 	// game's texture loaders"); its icon and static texture: no load of either is witnessed, the name as
 	// written.
@@ -224,7 +222,7 @@ bool extract_hudpos(const std::string &name, const std::vector<uint8_t> &bytes, 
 		// rewrites (native_text_sites).
 		if (vehicle.sid[0]) out.edges.push_back(edge_of(name, record, "sid", ReferenceKind::ItemAlias, vehicle.sid));
 		edge(record, "icon", ReferenceKind::Texture, vehicle.icon);
-		texture(record, "interface", renderer::TextureRoleId::HudAlphaOnly, vehicle.interface_texture);
+		texture(record, "interface", hud::kVehicleHudInterfaceRole, vehicle.interface_texture);
 		edge(record, "statictexture", ReferenceKind::Texture, vehicle.static_texture);
 	}
 	def::def_free_hudpos(&file);
