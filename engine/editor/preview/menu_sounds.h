@@ -51,8 +51,9 @@ bool read_menu_sound_options(const io::JsonValue &json, MenuSoundOptions &held, 
 // game plays nothing from it.
 class MenuSoundBanks {
 public:
-	// The bank the name names, read now where its stamp moved; null for none.
-	const PreviewBank *bank(const ProjectAssetSource &files, const std::string &name);
+	// The bank the name names, read now where its stamp moved; null for none. `key` (optional) takes its
+	// selection key (menu::MenuBankCollection's: 1, 2, ... by its place, 0 for none).
+	const PreviewBank *bank(const ProjectAssetSource &files, const std::string &name, int32_t *key = nullptr);
 	// Every bank read, in the order first named (each keeps its place: a sequential layer's pick is keyed by
 	// it, as one bank's is in the game).
 	const std::vector<PreviewBank> &banks() const { return banks_; }
@@ -84,10 +85,12 @@ struct MenuSoundFired {
 // {seq, sound: MOUSEIN | MOUSEOUT | SELECTED, screen, window, name, set, bank, state, words, voices}.
 io::JsonValue menu_sound_fired_to_json(const MenuSoundFired &fired);
 
-// What a window's SOUND row plays, as the menu plays it (plan_set_play over the row's own bank, at the menu's
-// master volume, menu::kMenuMasterVolumeDefault), each layer's member picked through `selector` (the
-// session's one stream); `mute`, picked and said, nothing heard. Each voice's wave found as the project's file
-// the game loads by its name (`scan`, null: none looked for).
+// What a window's SOUND row plays, as the menu plays it: menu::plan_menu_sound, the game's own, over the row's
+// own bank at the menu's master volume (menu::kMenuMasterVolumeDefault), each layer's member picked through
+// `selector` (the session's one stream) [orig: Sound_CollectionPlayTrigger @ 0x652de0 ->
+// SoundBank_FindTriggerByName @ 0x75be90 -> SoundBank_PlayTriggerEntries @ 0x75ccd0]; `mute`, picked and said,
+// nothing heard. Each voice's wave found as the project's file the game loads by its name (`scan`, null: none
+// looked for).
 MenuSoundFired plan_menu_sound(const mnu::Sound &row, MenuSoundBanks &banks, const ProjectAssetSource &files,
                                const AssetScan *scan, audio::SoundSelector &selector, bool mute);
 
