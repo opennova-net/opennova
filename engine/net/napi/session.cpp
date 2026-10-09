@@ -450,28 +450,38 @@ struct VerbRow {
 	ServerCommandVerb verb;
 	const char *name;
 	bool prefix_match; // String_StartsWithNoCase (player-targeted) vs Napi_StrCaseEqual
+	uint8_t min_args;  // tokens the body needs after the verb; fewer is the no-op tail
 };
-// In the witnessed dispatch order.
+// In the witnessed dispatch order. min_args is the verb's token-count gate (`cmp edi, N; jle`
+// to the no-op tail @0x4d3365, edi = the token count, so N tokens after the verb are needed),
+// or 0 where every arg is optional or none is read.
 constexpr VerbRow kVerbs[] = {
-	{ServerCommandVerb::PuntPlayer, "PuntPlayer", true},
-	{ServerCommandVerb::TextChatServer, "TextChatServer", false},
-	{ServerCommandVerb::TextChatPlayer, "TextChatPlayer", true},
-	{ServerCommandVerb::CmdEchoPlayer, "CmdEchoPlayer", true},
-	{ServerCommandVerb::KillPlayer, "KillPlayer", true},
-	{ServerCommandVerb::ChangeTeam, "ChangeTeam", true},
-	{ServerCommandVerb::SwapTeam, "SwapTeam", true},
-	{ServerCommandVerb::Cycle, "Cycle", false},
-	{ServerCommandVerb::EndMission, "EndMission", false},
-	{ServerCommandVerb::GameOver, "GameOver", false},
-	{ServerCommandVerb::Earthquake, "Earthquake", false},
-	{ServerCommandVerb::Lightning, "Lightning", false},
-	{ServerCommandVerb::TimeOfDay, "TimeOfDay", false},
-	{ServerCommandVerb::SetServerName, "SetServerName", false},
-	{ServerCommandVerb::SetServerMsg, "SetServerMsg", false},
-	{ServerCommandVerb::SetMPReset, "SetMPReset", false},
-	{ServerCommandVerb::ReloadPlayer, "ReloadPlayer", true},
-	{ServerCommandVerb::DisarmPlayer, "DisarmPlayer", true},
+	{ServerCommandVerb::PuntPlayer, "PuntPlayer", true, 1},          // @0x4d23cc
+	{ServerCommandVerb::TextChatServer, "TextChatServer", false, 1}, // @0x4d2584
+	{ServerCommandVerb::TextChatPlayer, "TextChatPlayer", true, 2},  // @0x4d264a
+	{ServerCommandVerb::CmdEchoPlayer, "CmdEchoPlayer", true, 2},    // @0x4d2791
+	{ServerCommandVerb::KillPlayer, "KillPlayer", true, 1},          // @0x4d28d8
+	{ServerCommandVerb::ChangeTeam, "ChangeTeam", true, 1},          // loc_4D31EA @0x4d31f6
+	{ServerCommandVerb::SwapTeam, "SwapTeam", true, 1},              // loc_4D31EA @0x4d31f6
+	{ServerCommandVerb::Cycle, "Cycle", false, 0},                   // winner optional @0x4d30f8
+	{ServerCommandVerb::EndMission, "EndMission", false, 0},         // winner optional @0x4d30f8
+	{ServerCommandVerb::GameOver, "GameOver", false, 0},             // winner optional @0x4d30f8
+	{ServerCommandVerb::Earthquake, "Earthquake", false, 0},         // seconds optional @0x4d2ac2
+	{ServerCommandVerb::Lightning, "Lightning", false, 0},           // reads no arg @0x4d2b5d
+	{ServerCommandVerb::TimeOfDay, "TimeOfDay", false, 0},           // HHMM optional @0x4d2be3
+	{ServerCommandVerb::SetServerName, "SetServerName", false, 1},   // @0x4d2cd4
+	{ServerCommandVerb::SetServerMsg, "SetServerMsg", false, 1},     // @0x4d2d69
+	{ServerCommandVerb::SetMPReset, "SetMPReset", false, 1},         // @0x4d2e12
+	{ServerCommandVerb::ReloadPlayer, "ReloadPlayer", true, 1},      // @0x4d2e71
+	{ServerCommandVerb::DisarmPlayer, "DisarmPlayer", true, 1},      // @0x4d2fbb
 };
+
+const VerbRow *find_verb_row(ServerCommandVerb verb) {
+	for (const VerbRow &row : kVerbs) {
+		if (row.verb == verb) return &row;
+	}
+	return nullptr;
+}
 
 } // namespace
 
@@ -504,24 +514,32 @@ bool parse_server_command(const NapiMessage &container, ServerCommand &out) {
 // ---- The service side ---------------------------------------------------------
 
 bool server_command_verb_takes_target(ServerCommandVerb verb) {
-	for (const VerbRow &row : kVerbs) {
-		if (row.verb == verb) return row.prefix_match;
-	}
-	return false;
+	const VerbRow *row = find_verb_row(verb);
+	return row != nullptr && row->prefix_match;
 }
 
 // [orig: String_TokenizeQuotedToArray @0x616d60] — inverted: a quoted run is one token.
 std::string server_command_text(ServerCommandVerb verb, ServerCommandTarget target,
                                 const std::vector<std::string> &args) {
-	if (verb == ServerCommandVerb::None) return {};
+	const VerbRow *row = find_verb_row(verb);
+	if (row == nullptr) return {};
 	// A pairing the reader drops: no suffix on a player-targeted verb (@0x4d24e3), or one on a
 	// whole-token verb (Napi_StrCaseEqual, e.g. Cycle @0x4d2a46).
-	if ((target != ServerCommandTarget::None) != server_command_verb_takes_target(verb)) return {};
-	// The tokenizer's whitespace set (tokenize_quoted spells out the same six characters).
+	if ((target != ServerCommandTarget::None) != row->prefix_match) return {};
+	// Fewer args than the verb's token-count gate: the reader drops the line (kVerbs' min_args).
+	if (args.size() < row->min_args) return {};
+	// The tokenizer's isspace runs in the host's ANSI code page, not the C locale: WinMain's
+	// System_InitTimerAndLocale sets LC_ALL to ".ACP" and only LC_NUMERIC back to "C", so on a
+	// cp1252 host 0xA0 splits a token too. Quote an arg holding one of the six C-locale spaces or
+	// any byte >= 0x80; a quoted run's bytes are copied as they are, so a quote never changes the
+	// token. [orig: the tokenizer's isspace call @0x616da6 -> the locale-aware CRT isspace
+	// @0x76b964; System_InitTimerAndLocale @0x762a00 — setlocale(LC_ALL, ".ACP") @0x762a6e,
+	// setlocale(LC_NUMERIC, "C") @0x762a7a]
 	auto needs_quotes = [](const std::string &arg) {
 		if (arg.empty()) return true;
 		for (const char c : arg) {
 			if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f') return true;
+			if (static_cast<unsigned char>(c) >= 0x80) return true;
 		}
 		return false;
 	};

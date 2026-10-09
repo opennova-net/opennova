@@ -227,6 +227,21 @@ bool check_server_statement_builders() {
 			default: return false;
 		}
 	};
+	// The witnessed token-count gates, as args after the verb (`cmp edi, N; jle` to the no-op tail;
+	// 0 where every arg is optional or none is read).
+	auto min_args = [](ServerCommandVerb v) -> size_t {
+		switch (v) {
+			case ServerCommandVerb::TextChatPlayer:
+			case ServerCommandVerb::CmdEchoPlayer: return 2;
+			case ServerCommandVerb::Cycle:
+			case ServerCommandVerb::EndMission:
+			case ServerCommandVerb::GameOver:
+			case ServerCommandVerb::Earthquake:
+			case ServerCommandVerb::Lightning:
+			case ServerCommandVerb::TimeOfDay: return 0;
+			default: return 1;
+		}
+	};
 	auto round_trip = [&](ServerCommandVerb v, ServerCommandTarget t, const std::vector<std::string> &args) {
 		const std::string text = server_command_text(v, t, args);
 		ServerCommand parsed;
@@ -257,6 +272,15 @@ bool check_server_statement_builders() {
 			std::fprintf(stderr, "  verb %s\n", server_command_verb_name(v));
 			return false;
 		}
+		// The arity gate: exactly the verb's minimum composes and parses back; one short is refused.
+		const ServerCommandTarget t0 = player_targeted(v) ? ServerCommandTarget::ByName : ServerCommandTarget::None;
+		const size_t need = min_args(v);
+		if (!expect(round_trip(v, t0, std::vector<std::string>(need, "7")), "the verb's minimum args compose") ||
+		    !expect(need == 0 || server_command_text(v, t0, std::vector<std::string>(need - 1, "7")).empty(),
+		            "one arg short of the verb's token-count gate composes nothing")) {
+			std::fprintf(stderr, "  verb %s\n", server_command_verb_name(v));
+			return false;
+		}
 		++covered;
 	}
 	if (!expect(covered == 18, "all eighteen verbs walked")) return false;
@@ -274,15 +298,27 @@ bool check_server_statement_builders() {
 	if (!expect(server_command_text(ServerCommandVerb::PuntPlayer, ServerCommandTarget::ByIndex, {"42"}) ==
 	                    "PuntPlayerByIndex 42",
 	            "a plain arg is not quoted")) return false;
+	// A byte >= 0x80 is quoted: the host's tokenizer runs isspace in its ANSI code page (0xA0 is a
+	// space on cp1252), and a quoted run is copied as it is.
+	const std::vector<std::string> high = {"Some\xA0Guy", "caf\xE9"};
+	const std::string high_text =
+		server_command_text(ServerCommandVerb::TextChatPlayer, ServerCommandTarget::ByName, high);
+	if (!expect(high_text == "TextChatPlayerByName \"Some\xA0Guy\" \"caf\xE9\"",
+	            "a high-byte arg is quoted")) return false;
+	if (!expect(parse_server_command(make_server_command(high_text), out) && out.args == high,
+	            "the high-byte args parse back whole")) return false;
 
-	// Refusals: no verb, a pairing the reader drops, an unrepresentable quote or NUL, a text the
-	// reader would clip.
+	// Refusals: no verb, a pairing the reader drops, too few args, an unrepresentable quote or NUL,
+	// a text the reader would clip.
 	if (!expect(server_command_text(ServerCommandVerb::None, ServerCommandTarget::None, {}).empty(),
 	            "verb None composes nothing")) return false;
 	if (!expect(server_command_text(ServerCommandVerb::PuntPlayer, ServerCommandTarget::None, {"42"}).empty(),
 	            "a player-targeted verb with no suffix composes nothing")) return false;
 	if (!expect(server_command_text(ServerCommandVerb::Cycle, ServerCommandTarget::ByName, {}).empty(),
 	            "a whole-token verb with a suffix composes nothing")) return false;
+	if (!expect(server_command_text(ServerCommandVerb::TextChatPlayer, ServerCommandTarget::ByName, {"Some Guy"})
+	                    .empty(),
+	            "TextChatPlayer with no message composes nothing")) return false;
 	if (!expect(server_command_text(ServerCommandVerb::TextChatServer, ServerCommandTarget::None, {"say \"hi\""})
 	                    .empty(),
 	            "an arg holding a quote composes nothing")) return false;
