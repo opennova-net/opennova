@@ -4,9 +4,9 @@
 #include <cmath>
 
 #include <editor/assets/asset_registry.h>
-#include <editor/import/png_encode.h>
 #include <editor/project/project_files.h>
 #include <editor/session/view/session_view.h>
+#include <formats/png/png_encode.h>
 
 namespace opennova::editor {
 
@@ -185,7 +185,7 @@ void TextureThumbnails::clear() {
 
 std::vector<uint8_t> thumbnail_png(const TextureThumbnail &thumbnail) {
 	if (thumbnail.state != TextureThumbnail::State::Ready || thumbnail.rgba.empty()) return {};
-	return encode_png_rgba(thumbnail.rgba.data(), thumbnail.width, thumbnail.height);
+	return png::encode_png_rgba(thumbnail.rgba.data(), thumbnail.width, thumbnail.height);
 }
 
 namespace {

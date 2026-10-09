@@ -4762,9 +4762,9 @@ target_include_directories(editor_texture_compare_test PRIVATE ${CMAKE_CURRENT_S
 add_test(NAME editor_texture_compare COMMAND editor_texture_compare_test)
 
 # ADR 0046 S18, a texture's import (import/texture_import, graph/texture_import_needs,
-# session/texture_import_state): the image importer's option rows, its pieces, every format written and
-# read back by the reader the game picks, what a minted project's uses ask of an import, set_import_options
-# and the import_options query.
+# session/texture_import_state): the image importer's option rows and output name, its sources imported
+# (the pieces and formats are renderer_texture_authoring's), what a minted project's uses ask of an import,
+# set_import_options and the import_options query.
 add_executable(editor_texture_import_test editor/texture_import_test.cpp)
 target_link_libraries(editor_texture_import_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_import_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -4809,13 +4809,6 @@ add_executable(editor_texture_replace_test editor/texture_replace_test.cpp)
 target_link_libraries(editor_texture_replace_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_replace_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_texture_replace COMMAND editor_texture_replace_test)
-
-# ADR 0046 S18, the TGA an import source is read by (editor/import/tga_source.h), the format's own
-# decode: every origin, depth, colour map and run-length form decoded upright, and what it refuses.
-add_executable(editor_tga_source_test editor/tga_source_test.cpp)
-target_link_libraries(editor_tga_source_test PRIVATE opennova_editor)
-target_include_directories(editor_tga_source_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME editor_tga_source COMMAND editor_tga_source_test)
 
 # ADR 0046 S18, the external program round trip (edit_externally, refresh_changed_sources): a plain TGA
 # given a source once and opened, a change saved there imported and its document read again, nothing done
@@ -5115,8 +5108,8 @@ target_link_libraries(editor_menu_render_test PRIVATE opennova_editor)
 target_include_directories(editor_menu_render_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_menu_render COMMAND editor_menu_render_test)
 
-# The imports (S8): the PNG reader, the quantizer, the sidecars, the import pass, the
-# scan and the build over the outputs, and the game install as an import source; the plan
+# The imports (S8): the sidecars, the import pass, the scan and the build over the
+# outputs, and the game install as an import source; the plan
 # of an import with the files it needs (S11f, import_plan_test.cpp) and the session's
 # import of it, staged and published (S11g, import_apply_test.cpp: its retail leg imports a
 # packed install's menu with the files it needs, OPENNOVA_JO_DIR).
