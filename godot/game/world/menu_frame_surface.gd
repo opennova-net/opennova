@@ -139,18 +139,14 @@ static func fit_frame(frame: MenuFrame, layout_control: Control, ui_parent: Node
 
 ## The compiled frame is a passive surface — it draws and hit-tests but never
 ## pumps input itself; forward its gui input to the driver the way MenuShell
-## does (event positions are frame-local, the space process_mouse expects).
-## The caller gates on its own open state and driver before calling.
+## does: each mouse event as its message, as it arrives (event positions are
+## frame-local, the space the driver expects). The pump is the presenter's,
+## once a frame in its _process (MenuDriver.pump_mouse), as a match pumps its
+## menu after the frame's messages (engine/runtime/menu/menu_runtime.h). The
+## caller gates on its own open state and driver before calling.
 static func forward_gui_input(event: InputEvent, driver: MenuDriver, frame: MenuFrame) -> void:
-	if event is InputEventMouseMotion:
-		var motion := event as InputEventMouseMotion
-		driver.process_mouse(motion.position,
-				(motion.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0)
-	elif event is InputEventMouseButton:
-		var button := event as InputEventMouseButton
-		if button.button_index == MOUSE_BUTTON_LEFT:
-			driver.process_mouse(button.position, button.pressed)
-			frame.accept_event()
+	if driver.take_mouse_event(event):
+		frame.accept_event()
 
 
 ## Connect the resize source (the layout control's resized, else the ui

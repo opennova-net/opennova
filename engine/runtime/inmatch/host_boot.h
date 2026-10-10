@@ -138,6 +138,13 @@ struct HostBoot {
 	// The authority role the boot ran (null for a joiner): phase B ends its
 	// load (HostRole::finish_mission_load).
 	HostRole *host = nullptr;
+	// The bring-up's session create (server_session.h). ProcessExit: the
+	// session config's `mpreset` word was set, so the create refused and
+	// phase A returned false; the embedder ends its process with exit code 0,
+	// as retail's create does, and runs no phase B. A joiner's boot and a map
+	// change's create no session and keep Created.
+	// [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0 -> crt_exit(0)]
+	CreateSessionResult session_create = CreateSessionResult::Created;
 	// The tables the boot read, for the embedder to retain.
 	mission::MissionText mission_text;
 	std::vector<uint8_t> terrain_til;
@@ -167,8 +174,10 @@ struct HostBoot {
 // own bring-up (the game's in-memory loads) reads them here.
 ServerTextTable read_host_server_text(const mission::BootFileSource &files);
 
-// Phase A. False with `error` when the session cannot enter its load or the
-// kernel boot fails (the session is left Loading for the embedder to fail).
+// Phase A. False with `error` when the session cannot enter its load, the
+// kernel boot fails, or the host's session create asks for the process exit
+// (`boot.session_create`); the session is left Loading for the embedder to
+// fail.
 bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &error);
 
 // The embedder's weather device for phase B: its WeatherRuntime and the

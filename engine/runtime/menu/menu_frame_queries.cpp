@@ -155,6 +155,10 @@ bool MenuFrameCompiler::disabled_(const mnu::Window &w, const MenuWidgetState *w
 	return ws != nullptr && ws->has_disabled ? ws->disabled : w.disabled;
 }
 
+bool MenuFrameCompiler::arrow_disabled_(int arrow, const MenuFrameState &state) const {
+	return disabled_(*nodes_[static_cast<size_t>(arrow)].window, state_for(state, arrow));
+}
+
 bool MenuFrameCompiler::widget_edit_limits(int index, EditLimits *out) const {
 	if (out == nullptr || index < 0 ||
 			index >= static_cast<int>(nodes_.size())) {
@@ -344,13 +348,12 @@ int MenuFrameCompiler::combo_popup_row_at(int index,
 int MenuFrameCompiler::spin_arrow_hit_(const WidgetNode &node,
 		const mnu::RectEdges &rect, const MenuFrameState &state, float mx,
 		float my, float sx, float sy) const {
-	(void)state;
 	const auto arrow_hit = [&](int arrow) {
 		if (arrow < 0) {
 			return false;
 		}
 		const WidgetNode &part = nodes_[static_cast<size_t>(arrow)];
-		if (!node_shown(*part.window, nullptr)) {
+		if (!node_shown(*part.window, state_for(state, arrow))) {
 			return false;
 		}
 		const mnu::RectEdges abs = offset_rect(solve_rect(part), rect.left, rect.top);
@@ -442,7 +445,7 @@ void MenuFrameCompiler::capture_hit_(const MenuFrameState &state,
 	if (capture.part == 1 || capture.part == 2) {
 		const int arrow = capture.part == 1 ? node.spin_up : node.spin_down;
 		if (node.window->type == mnu::WindowType::SpinList && arrow >= 0 &&
-				!nodes_[static_cast<size_t>(arrow)].window->disabled &&
+				!arrow_disabled_(arrow, state) &&
 				spin_arrow_hit_(node, rect, state, mx, my, sx, sy) == capture.part) {
 			*io_hit = HitClaim{ capture.index, capture.part };
 		}
@@ -486,7 +489,7 @@ MenuClickLatch::Claim MenuFrameCompiler::click_claim(const MouseClaim &claim,
 		// The arrow is a CButtonWnd of its own: live while its list is and it is
 		// enabled [orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8b0].
 		const int arrow = claim.spin_part == 1 ? node.spin_up : node.spin_down;
-		out.live = out.live && arrow >= 0 && !nodes_[static_cast<size_t>(arrow)].window->disabled;
+		out.live = out.live && arrow >= 0 && !arrow_disabled_(arrow, state);
 	}
 	return out;
 }
@@ -572,7 +575,7 @@ void MenuFrameCompiler::press_walk_(int index, int origin_x, int origin_y,
 				continue;
 			}
 			self_hit = false;
-			if (!capture->valid() && !nodes_[static_cast<size_t>(arrow_node)].window->disabled) {
+			if (!capture->valid() && !arrow_disabled_(arrow_node, state)) {
 				handle(arrow);
 			}
 		}

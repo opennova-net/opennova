@@ -123,6 +123,12 @@ std::string MenuFlow::take_expansion_reload() {
 	return std::exchange(expansion_request_, {});
 }
 
+void enable_class_rows(MenuRuntime &menu, int spin, uint32_t class_allow_mask) {
+	if (spin < 0) return;
+	for (int row = 0; row < 5; ++row)
+		menu.set_item_enabled(spin, row, ((class_allow_mask >> (5 + row)) & 1u) != 0);
+}
+
 // The host population excludes stock Co-op and resets the rotation.
 // [orig: UI_InitHostSettingsDialog @0x558960, skip @0x558a70;
 // GAME_TYPE ALL=255 @0x558aee]
@@ -134,6 +140,25 @@ void HostDialog::seed(MenuRuntime &menu, const std::vector<MissionChoice> &rows)
 		if (game_type::host_list_visible(row.game_type)) pool_.push_back(row);
 	const int table = menu.widget_id("SELECTED_MISSIONS");
 	if (table >= 0) menu.table_clear_rows(table);
+	// Each GAME_TYPE row disabled, then enabled when it is ALL or some mission of the whole list
+	// (the stock Co-op rows the list leaves out among them) maps to its value; then ALL selected
+	// [orig: UI_InitHostSettingsDialog @ 0x558ac3..0x558c0e, CSpinListWnd_SetItemEnabled
+	// @ 0x558adc / 0x558c02, the 13-way map @ 0x558b16 (game_type::host_filter_category);
+	// SpinList_SelectItemByValue @ 0x558c1b].
+	const int spin = menu.widget_id("GAME_TYPE");
+	if (spin >= 0) {
+		const int count = menu.item_count(spin);
+		for (int i = 0; i < count; ++i) {
+			menu.set_item_enabled(spin, i, false);
+			// The row's VALUE as its parse read it [orig: CUISpinList_ParseXMLDefinition @ 0x64c144, wcstol].
+			const int item = static_cast<int>(std::strtol(menu.item_value(spin, i).c_str(), nullptr, 10));
+			bool used = item == game_type::kHostFilterAll;
+			for (size_t m = 0; !used && m < rows.size(); ++m)
+				used = game_type::host_filter_category(rows[m].game_type) == item;
+			if (used) menu.set_item_enabled(spin, i, true);
+		}
+		menu.select_row_by_value(spin, std::to_string(game_type::kHostFilterAll), false);
+	}
 	filter(menu);
 	sync_start(menu);
 }

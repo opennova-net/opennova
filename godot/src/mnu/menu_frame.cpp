@@ -605,6 +605,11 @@ void MenuFrame::set_widget_selected_set(int p_index,
 	queue_redraw();
 }
 
+void MenuFrame::set_widget_disabled_items(int p_index, const std::vector<uint8_t> &p_rows) {
+	opennova::menu::frame_set_disabled_items(state_, p_index, p_rows);
+	queue_redraw();
+}
+
 void MenuFrame::set_widget_table_rows(int p_index,
 		const std::vector<opennova::menu::MenuTableRow> &p_rows) {
 	opennova::menu::frame_set_table_rows(state_, p_index, p_rows);
@@ -893,15 +898,38 @@ int MenuFrame::process_mouse(const Vector2 &p_position, bool p_button_down) {
 	return claim.hovered;
 }
 
+void MenuFrame::release_mouse() {
+	click_.release();
+}
+
+bool MenuFrame::press_popup_mouse(int p_index, const Vector2 &p_position) {
+	if (!is_configured()) {
+		return false;
+	}
+	const Vector2 scale = design_scale_();
+	// The dropdown has the mouse: its press holds the capture until the release
+	// (engine MenuClickLatch::dropdown_press).
+	click_.dropdown_press(p_index);
+	const opennova::menu::MenuFrameCompiler::MouseClaim claim =
+			compiler_.press_popup_mouse(state_, p_index, p_position.x, p_position.y,
+					scale.x, scale.y);
+	if (claim.scroll_value_changed) {
+		emit_signal("scroll_value_changed", claim.scroll_index,
+				claim.scroll_value);
+	}
+	if (claim.scroll_index >= 0) {
+		queue_redraw();
+	}
+	return claim.scroll_index >= 0;
+}
+
 bool MenuFrame::process_popup_mouse(int p_index, const Vector2 &p_position,
 		bool p_button_down) {
 	if (!is_configured()) {
 		return false;
 	}
 	const Vector2 scale = design_scale_();
-	// The dropdown has the mouse: a press it takes holds the capture until the
-	// release (engine MenuClickLatch::dropdown_sample).
-	click_.dropdown_sample(p_index, p_button_down);
+	click_.dropdown_sample(p_button_down);
 	const opennova::menu::MenuFrameCompiler::MouseClaim claim =
 			compiler_.pump_popup_mouse(state_, p_index, p_position.x,
 					p_position.y, p_button_down, scale.x, scale.y);

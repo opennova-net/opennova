@@ -180,6 +180,11 @@ func _process(delta: float) -> void:
 ## tick the way the mode loop does.
 ## retail: Menu_UpdateFrame @ 0x5528a0 (the mode struct's update slot @ 0x83b404).
 func update_menu_frame(delta: float = 0.0) -> void:
+	# The pump, once a frame after the input events (each taken as its message
+	# in _gui_input): hover, the click and the window sounds of the mouse as the
+	# events left it (engine/runtime/menu/menu_runtime.h, pump_mouse).
+	if _driver != null and is_visible_in_tree():
+		_driver.pump_mouse()
 	# The blink/marquee clock rides the OS tick like the original's
 	# GetTickCount gate.
 	if _driver != null:
@@ -373,16 +378,13 @@ func _gui_input(event: InputEvent) -> void:
 	if _options_controller != null and _options_controller.consume_input(event):
 		accept_event()
 		return
-	if event is InputEventMouseMotion:
-		var motion := event as InputEventMouseMotion
-		_driver.process_mouse(motion.position,
-				(motion.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0)
+	# Each mouse event as its message, as it arrives (the left button's press and
+	# release reach the windows now); the pump is update_menu_frame's, once a frame.
+	if _driver.take_mouse_event(event):
+		accept_event()
 	elif event is InputEventMouseButton:
 		var button := event as InputEventMouseButton
-		if button.button_index == MOUSE_BUTTON_LEFT:
-			_driver.process_mouse(button.position, button.pressed)
-			accept_event()
-		elif button.pressed and (button.button_index == MOUSE_BUTTON_WHEEL_DOWN \
+		if button.pressed and (button.button_index == MOUSE_BUTTON_WHEEL_DOWN \
 				or button.button_index == MOUSE_BUTTON_WHEEL_UP):
 			# One notch = one row tick (D-MNU-18 deliberate divergence).
 			if _driver.process_wheel(button.position,

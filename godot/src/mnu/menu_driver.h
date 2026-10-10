@@ -316,13 +316,28 @@ public:
 	void activate(int p_id);
 	void spin_cycle(int p_id, int p_delta);
 	String spin_value_attr(int p_id) const;
+	// A spin list's row enabled or disabled (MenuRuntime::set_item_enabled), and the armory class
+	// spin's rows by the host's class mask (engine menu::enable_class_rows).
+	void set_item_enabled(int p_id, int p_row, bool p_enabled) { runtime_.set_item_enabled(p_id, p_row, p_enabled); }
+	bool is_item_enabled(int p_id, int p_row) const { return runtime_.is_item_enabled(p_id, p_row); }
+	void enable_class_rows(int p_id, int p_class_allow_mask);
 	// One ACTION row run as the current screen's (MenuRuntime::dispatch_action).
 	bool dispatch_action_row(const Ref<MnuActionRow> &p_action);
 	// Direct play seam (voice preview etc.); emits sound_requested always.
 	void play_widget_sound(const String &p_trigger, const String &p_file);
 
 	// --- input (the shell's _gui_input owners forward here) ---
+	// The mouse as the game takes it (engine MenuRuntime): each event as its message arrives
+	// (move_mouse, press_mouse, release_mouse; take_mouse_event samples one), the pump once a
+	// frame after them (pump_mouse). process_mouse is one whole sample (a scripted pump).
 	void process_mouse(const Vector2 &p_position, bool p_button_down);
+	void move_mouse(const Vector2 &p_position, bool p_button_down);
+	bool press_mouse(const Vector2 &p_position);
+	bool release_mouse(const Vector2 &p_position);
+	void pump_mouse();
+	// A mouse event as its message: a motion's point and left button, the left button's press or
+	// release. True for a left-button event (the caller accepts it).
+	bool take_mouse_event(const Ref<InputEvent> &p_event);
 	bool process_wheel(const Vector2 &p_position, int p_steps);
 	bool handle_key_input(const Ref<InputEventKey> &p_event);
 	void close_active_combo_popup();

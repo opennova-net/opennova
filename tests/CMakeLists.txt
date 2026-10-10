@@ -2223,6 +2223,19 @@ target_link_libraries(mnu_coverage_test PRIVATE opennova_formats)
 target_include_directories(mnu_coverage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_gated_test(mnu_coverage COMMAND mnu_coverage_test)
 
+# The modeled text layout (formats/mnu/mnu_text_layout, D-MNU-22): a menu read and
+# written again comes back byte-identical; a value edit changes only its own token; an
+# added or moved record goes beside the records of its own list; seeded rounds of list
+# edits read back as edited; a document made in code writes the canonical bytes. The
+# retail twin sweeps every .mnu the packed install serves (OPENNOVA_JO_DIR) and the
+# reference set's shipped menus (OPENNOVA_JO_ASSETS): 47 menus, 24 distinct files, each
+# byte-identical, the list rounds and the one-line check of one-token edits over each
+# distinct file.
+add_executable(mnu_text_layout_test mnu/mnu_text_layout_test.cpp)
+target_link_libraries(mnu_text_layout_test PRIVATE opennova_base opennova_formats)
+target_include_directories(mnu_text_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(mnu_text_layout COMMAND mnu_text_layout_test)
+
 # The format's rules a property table reads (formats/mnu/mnu_schema, ADR 0046 S9h): which
 # window type reads what, what an ACTION's verb reads, the material flag tokens. The table
 # itself is the editor's (editor_menu_table, ADR 0046 S13 D10).

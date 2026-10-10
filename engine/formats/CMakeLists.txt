@@ -126,6 +126,9 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu_layout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu_schema.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu_text_layout.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu_text_layout_write.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu_write.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu_xml.cpp
     # mus — music script bytecode
     ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_parse.cpp

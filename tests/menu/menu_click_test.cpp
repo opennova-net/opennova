@@ -141,13 +141,24 @@ void test_latch() {
 		// The open dropdown takes the press: the capture is its list's until the release, so the window
 		// under the mouse when it closes is never held [orig: list_wnd_on_command @ 0x643f19].
 		MenuClickLatch latch;
-		latch.dropdown_sample(7, false);
-		latch.dropdown_sample(7, true);
+		latch.dropdown_sample(false);
+		latch.dropdown_press(7);
+		latch.dropdown_sample(true);
 		CHECK(latch.captured() == (MenuPumpWindow{ 7, kMenuPumpPartDropdown }));
 		step(latch, at(2), true, false);
 		CHECK(!latch.held(MenuPumpWindow{ 2, 0 }));
 		CHECK(!step(latch, at(2), false).valid());
 		CHECK(!latch.captured().valid());
+	}
+	{
+		// The release lets the capture go as it arrives, ahead of any sample; a press after it takes its
+		// own [orig: CButtonWnd_HandleNamedEvent @ 0x6583ed].
+		MenuClickLatch latch;
+		latch.press(MenuPumpWindow{ 1, 0 });
+		latch.release();
+		CHECK(!latch.captured().valid());
+		latch.press(MenuPumpWindow{ 2, 0 });
+		CHECK(latch.captured() == (MenuPumpWindow{ 2, 0 }));
 	}
 	{
 		// Another screen: the holds and the capture go, the button as it was (no press edge after it).
@@ -262,6 +273,18 @@ const char *kMenu = R"(<SCREEN>
 		<WINDOW type="static" name="OVER">
 			<POSITION><LEFT>620</LEFT><TOP>440</TOP><RIGHT>670</RIGHT><BOTTOM>480</BOTTOM></POSITION>
 		</WINDOW>
+		<WINDOW type="combobox" name="NAT">
+			<POSITION><LEFT>650</LEFT><TOP>100</TOP><RIGHT>780</RIGHT><BOTTOM>120</BOTTOM></POSITION>
+			<ITEMS>
+				<ITEM value="0">US</ITEM>
+				<ITEM value="1">UK</ITEM>
+				<ITEM value="2">FR</ITEM>
+			</ITEMS>
+			<LIST_BOX>
+				<POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>130</RIGHT><BOTTOM>80</BOTTOM></POSITION>
+				<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+			</LIST_BOX>
+		</WINDOW>
 	</WINDOW>
 </SCREEN>
 )";
@@ -300,6 +323,16 @@ struct Run {
 			if (e.kind == MenuEvent::Kind::Sound && e.text2 == trigger) ++n;
 		return n;
 	}
+	int count(MenuEvent::Kind kind) const {
+		int n = 0;
+		for (const MenuEvent &e : events)
+			if (e.kind == kind) ++n;
+		return n;
+	}
+	// The messages as they arrive, then the frame's pump.
+	void press(float x, float y, uint32_t now = 1000) { rt.press_mouse(x, y, now); }
+	void release(float x, float y) { rt.release_mouse(x, y); }
+	void pump() { rt.pump_mouse(); }
 	const MenuWidgetState *row(const char *name) const {
 		return find_frame_widget(frame.state(), rt.frame_index(rt.widget_id(name)));
 	}
@@ -600,6 +633,89 @@ void test_press_reaches_under_a_static() {
 	CHECK(run.activated("E") == 1);
 }
 
+// The messages as they arrive, the pump once a frame after them over the last message's point and
+// button [orig: Menu_ShellMouseCallback @ 0x54b860 -> UI_DispatchMouseEvent @ 0x63ab00; Menu_UpdateFrame
+// @ 0x5528a0, Game_PumpWindowMessages @ 0x5528d3 then CUIScene_EndFrame @ 0x5528de].
+void test_messages_then_the_pump() {
+	Run run;
+	CHECK(run.open());
+	// A press and release inside one frame hold nothing and click nothing: the click is the pump's, the
+	// claim let go over that its sample before held with the button down [orig: CWnd_ProcessMouseEvent
+	// @ 0x647b14, the verdict 3].
+	run.move(kBX, kBY, false);
+	run.events.clear();
+	run.press(kBX, kBY);
+	run.release(kBX, kBY);
+	run.pump();
+	CHECK(run.activated("B") == 0 && run.sounds("CLICK_B") == 0);
+	// Across two frames, the click.
+	run.press(kBX, kBY);
+	run.pump();
+	CHECK(run.pressed("B"));
+	run.release(kBX, kBY);
+	run.pump();
+	CHECK(run.activated("B") == 1 && run.sounds("CLICK_B") == 1);
+	// Two moves across a window inside one frame: the pump samples the last, so B's MOUSEIN never
+	// plays.
+	run.move(kAX, kAY, false);
+	run.events.clear();
+	run.rt.move_mouse(kBX, kBY, false);
+	run.rt.move_mouse(kBackX, kBackY, false);
+	run.pump();
+	CHECK(run.sounds("OVER_B") == 0 && !run.hovered("B"));
+	// The release lets the capture go as it arrives [orig: CButtonWnd_HandleNamedEvent @ 0x6583ed]: A
+	// pressed, then inside one frame let go and pressed again on the backdrop (which captures nothing),
+	// slid onto B and let go there: B's click, as the capture A's press took is gone.
+	run.move(kAX, kAY, false);
+	run.events.clear();
+	run.press(kAX, kAY);
+	run.pump();
+	run.release(kAX, kAY);
+	run.press(kBackX, kBackY);
+	run.pump();
+	CHECK(run.activated("A") == 0);
+	run.rt.move_mouse(kBX, kBY, true);
+	run.pump();
+	run.release(kBX, kBY);
+	run.pump();
+	CHECK(run.activated("B") == 1 && run.activated("A") == 0);
+	// A double click inside one frame reaches a list twice, the second press its double click's
+	// [orig: list_wnd_on_command @ 0x643d0b picks on 0x1000002 / 0x1000004].
+	run.move(150, 330, false);
+	run.events.clear();
+	run.press(150, 330, 2000);
+	run.pump();
+	run.release(150, 330);
+	run.press(150, 330, 2100);
+	run.pump();
+	run.release(150, 330);
+	run.pump();
+	CHECK(run.count(MenuEvent::Kind::ListActivated) == 1);
+	// The open dropdown takes its press as it arrives [orig: CWnd_DispatchMouseEventToChildren
+	// @ 0x647917 hands every event to g_UIActiveComboWnd first]: a row's press and release inside one
+	// frame pick it; a press outside its cell and its list closes it [orig: CComboWnd_HandleEvent
+	// @ 0x65c261..0x65c2bc], the press consumed (D-MNU-11).
+	const int nat = run.rt.widget_id("NAT");
+	const auto open_nat = [&] {
+		run.move(715, 110, false);
+		run.move(715, 110, true);
+		run.move(715, 110, false);
+	};
+	open_nat();
+	CHECK(run.rt.is_combo_popup_open(nat));
+	run.press(715, 150);
+	run.release(715, 150);
+	run.pump();
+	CHECK(!run.rt.is_combo_popup_open(nat) && run.rt.selected_row(nat) == 1);
+	open_nat();
+	CHECK(run.rt.is_combo_popup_open(nat));
+	run.events.clear();
+	run.press(kBX, kBY);
+	run.release(kBX, kBY);
+	run.pump();
+	CHECK(!run.rt.is_combo_popup_open(nat) && run.activated("B") == 0 && run.rt.selected_row(nat) == 1);
+}
+
 } // namespace
 
 int main() {
@@ -615,6 +731,7 @@ int main() {
 	test_disabled_window_over_a_button();
 	test_glb_table_never_claims();
 	test_press_reaches_under_a_static();
+	test_messages_then_the_pump();
 	if (failures) {
 		std::printf("menu_click: %d failure(s)\n", failures);
 		return 1;

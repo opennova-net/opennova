@@ -837,7 +837,8 @@ struct BoundingBox {
     int32_t type;                      // BoundingBoxType (shipped: 1 and 5)
     int32_t ref_id;                    // the type's value (shipped: -2/-1 and positive locations)
     int32_t reserved0;                 // a Mission box's name's last four characters; else unread (zero
-                                       // in the shipped corpus)
+                                       // in the shipped corpus); read and written as it stands, as the
+                                       // load copies the box whole [orig: Mission_LoadBMSFile @0x40fcdc]
 };
 
 // One weapon-loadout chunk tuple, kept as the four raw chunk strings so unusual authored
