@@ -8,6 +8,8 @@
 // CEditWnd_HandleKeyEvent @ 0x6623a0. Field homes: caret at widget+764,
 // text at widget+732.]
 
+#include <base/io/crt_ftol.h>
+
 #include <cstdlib>
 #include <string>
 
@@ -90,7 +92,8 @@ inline bool edit_insert_char(EditField &f, const EditLimits &lim, char ch,
 		return false;
 	}
 	if (lim.numeric) {
-		const long value = std::strtol(f.text.c_str(), nullptr, 10);
+		// The CRT atol [orig: j__atol @0x661fed] (io::retail_atol; D-NET-384).
+		const long value = io::retail_atol(f.text.c_str());
 		if (value > lim.max_value || value < lim.min_value) {
 			f = before;  // the witnessed whole-insert rollback
 			return false;

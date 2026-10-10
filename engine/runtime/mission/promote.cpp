@@ -1,6 +1,7 @@
 // Mission -> world promotion. See mission/promote.h + docs/world/world-wac-ai-re.md.
 #include <runtime/mission/promote.h>
 
+#include <base/io/crt_ftol.h>
 #include <base/io/le.h>
 #include <formats/def/reserved_items.h>
 #include <formats/mission/mission_params.h>
@@ -1133,12 +1134,13 @@ void stash_mission_loadout_rules(
         if (row.name.empty()) continue;
         world::WeaponKitEntry entry;
         entry.name = row.name;
-        entry.ammo_primary = static_cast<int32_t>(
-                std::strtol(row.ammo_primary.c_str(), nullptr, 10));
-        entry.ammo_secondary = static_cast<int32_t>(
-                std::strtol(row.ammo_secondary.c_str(), nullptr, 10));
-        entry.flags = static_cast<int32_t>(
-                std::strtol(row.flags.c_str(), nullptr, 10));
+        // The kit row's three numbers are the CRT atol (io::retail_atol: the locale's
+        // white space, 0xA0 included, saturating at 32 bits; D-NET-384)
+        // [orig: PlayerSlot_InitWeaponsFromLoadout @0x515550 — j__atol @0x515647,
+        //  @0x51566f, @0x515697].
+        entry.ammo_primary = io::retail_atol(row.ammo_primary.c_str());
+        entry.ammo_secondary = io::retail_atol(row.ammo_secondary.c_str());
+        entry.flags = io::retail_atol(row.flags.c_str());
         r_kit_rows.push_back(std::move(entry));
     }
 }
