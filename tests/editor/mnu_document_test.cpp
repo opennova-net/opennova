@@ -1344,9 +1344,15 @@ int parse_notes() {
 	TEST_EXPECT(crash && crash->severity == DiagnosticSeverity::Error && crash->field.find("/ACTION@TYPE") != std::string::npos);
 	const Diagnostic *hang = finding("hang.mnu", "menu.invalid_input");
 	TEST_EXPECT(hang && hang->severity == DiagnosticSeverity::Error);
-	const Diagnostic *variable = finding("variable.mnu", "menu.invalid_input");
+	// A number holding a variable the game reads on, expanding it: its own code, listed (a closed menu packs as
+	// stored), the menu blocked all the same; the crash and the hang stay menu.invalid_input, gating.
+	TEST_EXPECT(!finding("variable.mnu", "menu.invalid_input"));
+	const Diagnostic *variable = finding("variable.mnu", "menu.variable_number");
 	TEST_EXPECT(variable && variable->severity == DiagnosticSeverity::Error &&
-	            variable->field.find("/POSITION/LEFT") != std::string::npos);
+	            variable->field.find("/POSITION/LEFT") != std::string::npos && !variable->row()->gates_build &&
+	            variable->message.find("a save, which would write the number in place of the variable, is refused") !=
+	                    std::string::npos);
+	TEST_EXPECT(crash->row()->gates_build && hang->row()->gates_build);
 	editor_test::handle_to_end(session, request::open_document("variable.mnu"));
 	const Document *held = session.document_for("variable.mnu");
 	TEST_EXPECT(held && held->blocked() && !held->serialize().ok());

@@ -90,12 +90,14 @@ private:
 	// defining it, its scope) or a file's (its new path), the names before and after, the sites it wrote as
 	// it left them (a text's columns as the new name's length moved them), and each file it wrote by its
 	// bytes' hash after the commit.
-	// A move's (`move`): `file` its new path, `from` and `to` the folders it left and went to.
+	// A move's (`move`): `file` its new path, `from` and `to` the folders it left and went to, `companions` the
+	// new paths of the files that went with it (a mission's), which its way back moves back, exactly those.
 	struct Done {
 		bool symbol = false;
 		bool move = false;
 		ReferenceKind kind = ReferenceKind::None;
 		std::string file, field, scope, from, to;
+		std::vector<std::string> companions;
 		std::vector<RenameSite> sites;
 		std::map<std::string, uint64_t> written;
 	};

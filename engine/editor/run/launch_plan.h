@@ -87,9 +87,12 @@ LaunchPlan make_source_launch_plan(const std::string &godot_executable, const st
 // folder, or a file not staged (play.install_copy). `link` gives a file a second name (link_file, but
 // in a test: one refusing what another volume's link would).
 using FileLink = std::function<bool(const std::string &from, const std::string &to, std::string &error)>;
+// `seed_root_reads` false leaves the files the game reads from its folder by name (score.ini, earlyerr.txt,
+// admin.cfg) unseeded, as strict Play stages none of them.
 bool prepare_expansion_run(const std::string &install, const std::string &build_dir, const std::string &expansion,
                            const std::string &run_dir, const std::string &copy_cache, Diagnostic &error,
-                           const FileLink &link = io::link_file, std::vector<std::string> *staged = nullptr);
+                           const FileLink &link = io::link_file, std::vector<std::string> *staged = nullptr,
+                           bool seed_root_reads = true);
 
 // A standalone build staged in `run_dir` for the runtime to mount there (make_play_launch_plan's
 // `on_run_dir`): every file of the build but its record, one the game only reads linked (copied where
@@ -156,18 +159,17 @@ bool prepare_retail_launch_plan(const std::string &retail_directory, const std::
 // player's folder holds it, every file of it but the export's and the build's records (staged as the build's
 // are), and the build's `expansion/<expansion>/` beside it as prepare_expansion_run stages it; the game
 // launched `/w /exp <expansion> /FRISK`, so the game mounts the expansion's two archives over the base's three
-// [orig: Game_ParseCommandLineAndInit @ 0x4a76ac (/exp, /mod), Expansion_LoadAssets @ 0x4a4730]. With no
-// base game's build (`base_game` "" or the install itself) it is refused (play.strict_expansion,
-// strict_expansion_refusal): it would play over the install's archives; a base game's export with none of
-// the game's archives is play.install_missing.
+// [orig: Game_ParseCommandLineAndInit @ 0x4a76ac (/exp, /mod), Expansion_LoadAssets @ 0x4a4730]. An expansion
+// on the install's own base game (`base_game` "" or the install itself) plays as the stock game plays `/exp`
+// from its install: the base game the install's (its archives and the loose files it ships beside them, as
+// prepare_expansion_run stages them, the files it reads by name and its saves and configuration left out),
+// the build's expansion folder beside it, `copy_cache` holding the install's files no link reaches. A base
+// game's export with none of the game's archives is play.install_missing.
 bool prepare_strict_install_launch_plan(const std::string &install, const std::string &build_dir,
                                         const std::string &run_dir, const std::string &expansion, LaunchPlan &out,
                                         Diagnostic &error, const FileLink &link = io::link_file,
-                                        const std::string &base_game = std::string());
-
-// Why strict Play of the expansion `expansion` on the install's base game is refused (play.strict_expansion):
-// the one finding Play's refusal before a build and the staging both give.
-Diagnostic strict_expansion_refusal(const std::string &expansion);
+                                        const std::string &base_game = std::string(),
+                                        const std::string &copy_cache = std::string());
 
 // Strict Play's first run. With no game.cfg beside it, the game's adapter name and GUID are empty, so it
 // opens its device dialog (VIDEO_TEST: the adapters, OK and Cancel), modal, waiting on the player, before

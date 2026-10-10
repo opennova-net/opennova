@@ -473,21 +473,33 @@ static int test_build_gate() {
 	session.run_operations();
 	gate = ask(session, "build_gate");
 	TEST_EXPECT(!gate.get_bool("blocked", true));
-	// An archive in the project: blocked by the build's own check, a Problems row before any build (the
-	// review's M3: the refusal's count, Problems' and Show them agree).
+	// An archive in the project: listed, the build leaving it out (the game never mounts one packed inside
+	// another), no refusal (the build's gate follows the game: a quality rule refuses nothing).
 	const uint8_t note[] = { 'x' };
 	const opennova::pff::PffWriteEntry entries[] = { { "note.txt", note, sizeof(note), 0, 0, 0 } };
 	TEST_EXPECT(opennova::pff::pff_write_archive(dir.file("project/extra.pff").c_str(),
 						opennova::pff::PFF_FORMAT_PFF3, entries, 1) == opennova::pff::PFF_WRITE_OK);
 	session.handle(request::rescan());
 	session.run_operations(); // the Rescan's refresh (S13 A3)
+	gate = ask(session, "build_gate");
+	size_t archives = 0;
+	for (const Diagnostic &d : session.view().findings.diagnostics)
+		archives += d.code() == "build.archive_in_project" && d.severity == DiagnosticSeverity::Warning ? 1 : 0;
+	TEST_EXPECT(!gate.get_bool("blocked", true) && archives == 1);
+	// A name no archive stores: refused by the build's own check, a Problems row before any build (the
+	// review's M3: the refusal's count, Problems' and Show them agree).
+	TEST_EXPECT(editor_test::write_text(dir.file("project/scripts/a_name_far_too_long.wac"), "// a script\r\n"));
+	session.handle(request::rescan());
+	session.run_operations();
+	// (The scan's name rule and the plan's word on the file say it each.)
 	gate = ask(session, "build_gate", R"({"limit": 1})");
-	TEST_EXPECT(gate.get_bool("blocked", false) && gate.get_number("count", 0.0) == 1.0 &&
+	TEST_EXPECT(gate.get_bool("blocked", false) && gate.get_number("count", 0.0) == 2.0 &&
 			gate.get("blocking")->array.size() == 1 &&
-			gate.get("blocking")->array[0].get_string("code", "") == "build.archive_in_project");
+			gate.get("blocking")->array[0].get_string("code", "") == "build.name_unstorable");
 	size_t rows = 0;
-	for (const Diagnostic &d : session.view().findings.diagnostics) rows += d.code() == "build.archive_in_project" ? 1 : 0;
-	TEST_EXPECT(rows == 1);
+	for (const Diagnostic &d : session.view().findings.diagnostics)
+		rows += d.code() == "asset.name.too_long" || d.code() == "build.name_unstorable" ? 1 : 0;
+	TEST_EXPECT(rows == 2);
 	session.handle(request::build());
 	session.run_operations();
 	TEST_EXPECT(session.view().activity.last_operation.end == OperationEnd::Failed);
@@ -495,17 +507,20 @@ static int test_build_gate() {
 }
 
 // ADR 0046 S16: a finding that a file does not serialize (a blocks_save row's) gates the build only
-// where the build must write the file. A fake install ships an items.def the catalog's reader refuses a
-// value of (catalog.invalid_input, a blocks_save error); the project holds it byte for byte, the game's
-// own data, which the build packs as stored: the row is listed and the gate is open. Changed by a byte
-// on disk, the file is the modder's and the row gates; as shipped again, it does not. The rule itself,
-// for a document with unsaved edits (whose Save the build asks first must write it): it gates.
+// where the build must write the file. A fake install ships a weapon.def whose reader stops at a weapon
+// opened inside an open one (catalog.reader_stops, a blocks_save error the game's own stop gates); the
+// project holds it byte for byte, the game's own data, which the build packs as stored: the row is listed
+// and the gate is open. Changed by a byte on disk, the file is the modder's and the row gates; as shipped
+// again, it does not. The rule itself, for a document with unsaved edits (whose Save the build asks
+// first must write it): it gates. S23: input the model cannot carry where the game reads on
+// (catalog.invalid_input, an items.def value that is no number) gates no closed file, the modder's
+// included; only an open one with unsaved edits.
 static int test_build_gate_shipped() {
 	editor_test::TempProjectDir dir("opennova_editor_query_build_gate_shipped");
-	const std::string shipped = "begin \"Shipped\"\r\nid 100001\r\nhp twelve\r\nend\r\n";
+	const std::string shipped = "weapon Shipped\r\nweapon Second\r\nend\r\n";
 	const std::string install = dir.file("install");
 	const opennova::pff::PffWriteEntry entries[] = {
-		{ "items.def", reinterpret_cast<const uint8_t *>(shipped.data()), uint32_t(shipped.size()), 0, 0, 0 },
+		{ "weapon.def", reinterpret_cast<const uint8_t *>(shipped.data()), uint32_t(shipped.size()), 0, 0, 0 },
 	};
 	TEST_EXPECT(editor_test::write_text(install + "/readme.txt", "an install"));
 	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3,
@@ -516,18 +531,18 @@ static int test_build_gate_shipped() {
 	session.handle(request::new_project(dir.file("project"), "Shipped"));
 	session.run_operations();
 	editor_test::create_missing_files(session);
-	const AssetEntry *items = session.view().project.scan->find("items.def");
-	TEST_EXPECT(items != nullptr);
-	if (!items) return 1;
-	const std::string relative = items->relative_path;
+	const AssetEntry *weapons = session.view().project.scan->find("weapon.def");
+	TEST_EXPECT(weapons != nullptr);
+	if (!weapons) return 1;
+	const std::string relative = weapons->relative_path;
 	const std::string file = dir.file("project") + "/" + relative;
 	TEST_EXPECT(editor_test::write_text(file, shipped));
 	editor_test::set_game_install(session, install);
 	editor_test::handle_to_end(session, request::rescan());
-	const auto invalid_rows = [&session, &relative] {
+	const auto invalid_rows = [&session, &relative](const char *code = "catalog.reader_stops") {
 		size_t rows = 0;
 		for (const Diagnostic &d : session.view().findings.diagnostics)
-			rows += d.code() == "catalog.invalid_input" && d.asset == relative && d.severity == DiagnosticSeverity::Error;
+			rows += d.code() == code && d.asset == relative && d.severity == DiagnosticSeverity::Error;
 		return rows;
 	};
 	JsonValue gate = ask(session, "build_gate");
@@ -542,7 +557,7 @@ static int test_build_gate_shipped() {
 	editor_test::handle_to_end(session, request::rescan());
 	gate = ask(session, "build_gate");
 	TEST_EXPECT(invalid_rows() == 1 && gate.get_bool("blocked", false) && gate.get_number("count", 0.0) == 1.0 &&
-			gate.get("blocking")->array[0].get_string("code", "") == "catalog.invalid_input");
+			gate.get("blocking")->array[0].get_string("code", "") == "catalog.reader_stops");
 	session.handle(request::build());
 	session.run_operations();
 	TEST_EXPECT(session.view().activity.last_operation.end == OperationEnd::Failed);
@@ -557,12 +572,35 @@ static int test_build_gate_shipped() {
 	// The same row over the same file held with unsaved edits, or with no shipped files known: it gates.
 	Diagnostic row;
 	for (const Diagnostic &d : session.view().findings.diagnostics)
-		if (d.code() == "catalog.invalid_input" && d.asset == relative) row = d;
+		if (d.code() == "catalog.reader_stops" && d.asset == relative) row = d;
 	ShippedFiles files;
 	files.original = original;
 	TEST_EXPECT(!blocks_build(row, nullptr, &files) && blocks_build(row, nullptr, nullptr));
 	files.unsaved.insert(relative);
 	TEST_EXPECT(blocks_build(row, nullptr, &files));
+
+	// S23: a value the reader reads on past (no number where one goes), the modder's file: listed, the build lands.
+	const AssetEntry *items = session.view().project.scan->find("items.def");
+	TEST_EXPECT(items != nullptr);
+	if (!items) return 1;
+	const std::string items_path = items->relative_path;
+	TEST_EXPECT(editor_test::write_text(file, "weapon Shipped\r\nend\r\n") &&
+	            editor_test::write_text(dir.file("project") + "/" + items_path,
+	                                    "begin \"Modded\"\r\nid 100001\r\nhp twelve\r\nend\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	Diagnostic unread;
+	for (const Diagnostic &d : session.view().findings.diagnostics)
+		if (d.code() == "catalog.invalid_input" && d.asset == items_path && d.severity == DiagnosticSeverity::Error) unread = d;
+	TEST_EXPECT(unread.code() == "catalog.invalid_input" && unread.message.find("The game reads on past it") != std::string::npos);
+	gate = ask(session, "build_gate");
+	TEST_EXPECT(!gate.get_bool("blocked", true));
+	session.handle(request::build());
+	session.run_operations();
+	TEST_EXPECT(session.view().activity.last_operation.end == OperationEnd::Done && session.view().activity.last_build->ok);
+	ShippedFiles none;
+	TEST_EXPECT(!blocks_build(unread, nullptr, &none) && !blocks_build(unread, nullptr, nullptr));
+	none.unsaved.insert(items_path);
+	TEST_EXPECT(blocks_build(unread, nullptr, &none));
 	return 0;
 }
 
@@ -1752,7 +1790,7 @@ static int test_viewport_query() {
 }
 
 // The plain-words lane (ADR 0046, the UX round): a file of a kind the editor has no editor for has a
-// page, what it is, who reads it and what names it (the file_page query; open_document shows it and
+// page, what it is, who reads it and what names it (the file_card query; open_document shows it and
 // close_document takes it away); a field's string id edited as the words the player sees
 // (set_string_text: the table that defines the id opened in the background, its string set there as one
 // undo step, the field's document still the active one); a finding titles its record and its field in
@@ -1777,8 +1815,9 @@ static int test_plain_words() {
 		}
 	TEST_EXPECT(!font.empty() && is_editable_kind(AssetKind::Font));
 	if (font.empty()) return 1;
-	const JsonValue page = ask(session, "file_page", R"({"path": ")" + font + R"("})");
-	TEST_EXPECT(page.get_string("path", "") == font && page.get_string("kind", "") == asset_kind_label(AssetKind::Font));
+	const JsonValue page = ask(session, "file_card", R"({"path": ")" + font + R"("})");
+	TEST_EXPECT(page.get_string("path", "") == font && page.get_string("kind", "") == asset_kind_token(AssetKind::Font) &&
+	            page.get_string("kind_label", "") == asset_kind_label(AssetKind::Font) && page.get_bool("opens", false));
 	TEST_EXPECT(page.get_string("what", "").find("bitmap font") != std::string::npos &&
 	            page.get_string("read_by", "").find("Loaded by name") != std::string::npos &&
 	            page.get_string("cite", "").find("[orig:") != std::string::npos &&
@@ -1790,18 +1829,21 @@ static int test_plain_words() {
 		for (const JsonValue &use : used_by->array)
 			worded |= !use.get_string("file", "").empty() && use.get_string("text", "").find(" - Font") != std::string::npos;
 	TEST_EXPECT(worded);
-	TEST_EXPECT(refusal(session, "file_page", "{}").find("no page shows") != std::string::npos);
+	TEST_EXPECT(refusal(session, "file_card", "{}").find("no page shows") != std::string::npos);
+	TEST_EXPECT(!ask(session, "file_card", R"({"path": "fonts/nowhere.fnt"})").get_bool("found", true));
 	// A file of no editor (the NovaWorld string table) opened: the page shows (no document opens); the query names
 	// it with no path; closed, it goes.
 	std::string coo;
 	for (const AssetEntry &entry : view.project.scan->entries)
 		if (entry.kind == AssetKind::StringTableCoo) coo = entry.relative_path;
 	TEST_EXPECT(!coo.empty() && !is_editable_kind(AssetKind::StringTableCoo));
-	TEST_EXPECT(ask(session, "file_page", R"({"path": ")" + coo + R"("})").get_string("editor", "").find("no editor") !=
-	            std::string::npos);
+	{
+		const JsonValue card = ask(session, "file_card", R"({"path": ")" + coo + R"("})");
+		TEST_EXPECT(card.get_string("editor", "").find("no editor") != std::string::npos && !card.get_bool("opens", true));
+	}
 	TEST_EXPECT(done(send(session, R"({"kind": "open_document", "path": ")" + coo + R"("})")));
 	TEST_EXPECT(view.documents.page == coo && session.document_for(coo) == nullptr);
-	TEST_EXPECT(ask(session, "file_page").get_string("path", "") == coo);
+	TEST_EXPECT(ask(session, "file_card").get_string("path", "") == coo);
 	TEST_EXPECT(done(send(session, R"({"kind": "close_document", "path": ")" + coo + R"("})")));
 	TEST_EXPECT(view.documents.page.empty());
 

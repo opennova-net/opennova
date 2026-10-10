@@ -48,7 +48,7 @@ constexpr FindingCodeRow code(const char *token, FindingFix fixes = FindingFix::
 
 constexpr FindingCodeEntry<F> kFindingEntries[] = {
 	{F::Unloadable, code("texture.unloadable")},
-	{F::TgaUnfilled, code("texture.tga_unfilled")},
+	{F::TgaUnfilled, listed_code("texture.tga_unfilled")},
 	{F::TgaZeroed, code("texture.tga_zeroed")},
 	{F::TgaUpsideDown, code("texture.tga_upside_down", FindingFix::TextureRows)},
 	{F::TgaColourMapSkipped, code("texture.tga_colour_map_skipped")},
@@ -188,10 +188,14 @@ std::vector<Diagnostic> validate_texture_file(const DocumentBase &document) {
 		const std::string form = "image type " + std::to_string(type) + " at " + std::to_string(bits) + " bits";
 		const tga::TgaRetailForm read = tga::tga_retail_form(tga_fields(header));
 		if (read == tga::TgaRetailForm::Unset) {
-			add(F::TgaUnfilled, DiagnosticSeverity::Error,
+			// The reader allocates the texels, has no case for the form, and returns the texture with its texels
+			// unset; the game goes on [orig: CTerrainTileData_LoadTGAFromArchive @ 0x56E570, the allocation
+			// @ 0x56E694, the switch @ 0x56E6D2 whose default @ 0x56E984 goes to the row flip @ 0x56E995]: it skips
+			// the image's contents, no file refused, so the finding refuses no build.
+			add(F::TgaUnfilled, DiagnosticSeverity::Warning,
 			    "The game's TGA reader has no case for " + form +
-			            ": it leaves the texels as the buffer held them, so the game draws whatever memory held. Save "
-			            "it as a 24- or 32-bit true-colour TGA.");
+			            ": it loads the texture with its texels left as memory held them and goes on, drawing whatever "
+			            "that memory was. Save it as a 24- or 32-bit true-colour TGA.");
 		} else if (read == tga::TgaRetailForm::Zeroed) {
 			add(F::TgaZeroed, DiagnosticSeverity::Warning,
 			    "The game's TGA reader zeroes " +

@@ -3,6 +3,7 @@
 // an install's, the files its name forms (expansion_files.h), and the install as the game serves it to
 // such a project (install_view.h) over a synthetic install written with the PFF writer, and a session's
 // expansion project over it: made, checked against the install, renamed with its files.
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -778,6 +779,15 @@ static int test_base_layer_session() {
 			            d.message.find("The game reads the base game's") != std::string::npos);
 		}
 	TEST_EXPECT(served == 1);
+	// The checklist counts it served, not missing: the game reads the base's, and Create all leaves it.
+	const RequirementReport &report = *view.project.requirements;
+	const RequirementRow *menu = nullptr;
+	for (const RequirementRow &row : report.rows)
+		if (row.name == "main.mnu") menu = &row;
+	TEST_EXPECT(menu && menu->state == RequirementState::Served && report.required_served >= 1);
+	const std::vector<std::string> unmet = unmet_required_roles(report);
+	TEST_EXPECT(menu && std::find(unmet.begin(), unmet.end(), menu->role) == unmet.end());
+	TEST_EXPECT(view_section_to_json(view, ViewSection::Requirements).get_number("served", 0) == double(report.required_served));
 	return 0;
 }
 
