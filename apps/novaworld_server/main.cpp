@@ -11,6 +11,7 @@
 #include "auth.h"
 #include "http_listener.h"
 #include "session_store.h"
+#include "web_session.h"
 #endif
 
 #include <net/novaworld/connection/manager.h>
@@ -164,6 +165,37 @@ int main() {
 
 	apply_seed(dbh, config.seed_dir, config.seed_dev_users);
 
+#ifdef OPENNOVA_HTTP_ENABLED
+	// The first website admin: ONNET_BOOTSTRAP_ADMIN names an existing account,
+	// promoted only while no account is an admin (bootstrap_admin).
+	if (!config.bootstrap_admin.empty()) {
+		const std::string name = loggable(config.bootstrap_admin);
+		try {
+			const auto result = bootstrap_admin(dbh, config.bootstrap_admin);
+			switch (result.outcome) {
+			case BootstrapAdminResult::Outcome::Promoted:
+				std::printf("[boot] bootstrap admin: '%s' is now the first admin; remove "
+				            "ONNET_BOOTSTRAP_ADMIN\n",
+				            name.c_str());
+				break;
+			case BootstrapAdminResult::Outcome::AdminExists:
+				std::fprintf(stderr,
+				             "[boot] WARN bootstrap admin: skipped '%s', an admin exists ('%s'); "
+				             "remove ONNET_BOOTSTRAP_ADMIN\n",
+				             name.c_str(), loggable(result.existing_admin).c_str());
+				break;
+			case BootstrapAdminResult::Outcome::NoSuchAccount:
+				std::fprintf(stderr,
+				             "[boot] WARN bootstrap admin: skipped, no account named '%s'\n",
+				             name.c_str());
+				break;
+			}
+		} catch (const db::SqliteError &e) {
+			std::fprintf(stderr, "[boot] WARN bootstrap admin: %s\n", e.what());
+		}
+	}
+#endif
+
 	// --- Connection manager (shared across listeners) ---------------------
 	ConnectionManager manager(config.heartbeat_timeout_ms);
 	manager.on_added([](const Connection &c) {
@@ -296,6 +328,20 @@ int main() {
 			} catch (const db::SqliteError &e) {
 				std::fprintf(stderr, "[sweep] WARN prune_stale_hosts: %s\n", e.what());
 			}
+#ifdef OPENNOVA_HTTP_ENABLED
+			// Website sessions past their (sliding) expiry, and login addresses
+			// not used for kLoginAddressDays.
+			try {
+				if (const auto pruned = prune_expired_web_sessions(dbh); pruned > 0) {
+					std::printf("[sweep] pruned %zu expired web session(s)\n", pruned);
+				}
+				if (const auto pruned = prune_login_addresses(dbh); pruned > 0) {
+					std::printf("[sweep] pruned %zu stale login address(es)\n", pruned);
+				}
+			} catch (const db::SqliteError &e) {
+				std::fprintf(stderr, "[sweep] WARN web session / login address prune: %s\n", e.what());
+			}
+#endif
 		}
 	}
 

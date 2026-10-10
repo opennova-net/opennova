@@ -2,10 +2,12 @@
 
 #include "auth.h"
 #include "catalog_repository.h"
+#include "http_cookies.h"
 #include "nw_udp_listener.h"
 #include "server_config.h"
 #include "session_store.h"
 #include "template_engine.h"
+#include "web_access.h"
 
 #include <net/napi/session.h>
 #include <net/novacrypto/pubcrypto.h>
@@ -66,37 +68,6 @@ std::string next_pcid() {
 	return pcid;
 }
 
-// A ServerCommand arg the admin route refuses: one holding a control byte (below 0x20, or 0x7F).
-// The stock reader carries such a byte faithfully inside quotes (String_TokenizeQuotedToArray
-// copies a quoted run as it is), so server_command_text, the reader's exact inverse, composes it.
-// The harm is on the host: SetServerName / SetServerMsg save the token into game.cfg unescaped
-// (Game_SaveConfig @0x54C490, `game_name = "%s"\n`; ours engine/formats/gamecfg/game_cfg_write.cpp),
-// so a CR or LF injects a line into a third party's config, and the chat verbs relay the byte to
-// every player. So it is the service's own input rule at its edge, not a reader rule.
-bool has_control_byte(std::string_view s) {
-	return std::any_of(s.begin(), s.end(), [](char c) {
-		const auto byte = static_cast<unsigned char>(c);
-		return byte < 0x20 || byte == 0x7F;
-	});
-}
-
-// `s` for a log line: a control byte as \xNN, so no admin input can forge a line.
-std::string loggable(std::string_view s) {
-	std::string out;
-	out.reserve(s.size());
-	for (const char c : s) {
-		const auto byte = static_cast<unsigned char>(c);
-		if (byte < 0x20 || byte == 0x7F) {
-			char escaped[8];
-			std::snprintf(escaped, sizeof(escaped), "\\x%02X", static_cast<unsigned>(byte));
-			out += escaped;
-		} else {
-			out.push_back(c);
-		}
-	}
-	return out;
-}
-
 std::string read_file_text(const std::filesystem::path &p) {
 	std::ifstream in(p, std::ios::binary);
 	std::ostringstream os;
@@ -104,53 +75,7 @@ std::string read_file_text(const std::filesystem::path &p) {
 	return os.str();
 }
 
-// ---- cookie + form helpers (Phase E.1) ---------------------------------
-
-std::map<std::string, std::string> parse_cookie_header(std::string_view header) {
-	std::map<std::string, std::string> out;
-	size_t pos = 0;
-	while (pos < header.size()) {
-		// Cookie pairs are separated by ';' OR ','. Retail's IB3 client uses
-		// commas (RFC 2965 style); splitting on ';' alone swallows every pair
-		// after the first into one value (e.g. NWHANDLE hidden inside the
-		// NWJOINSESSIONTAG value), so the joiner can't be identified at
-		// /NWJoin.dll -> empty PUBPCID -> "login information is absent (GDC024)".
-		// werkzeug (onnet) splits on both — match it.
-		while (pos < header.size() &&
-		       (header[pos] == ';' || header[pos] == ',' || header[pos] == ' ')) ++pos;
-		const auto eq = header.find('=', pos);
-		if (eq == std::string_view::npos) break;
-		const auto end = header.find_first_of(";,", eq + 1);
-		const auto val_end = (end == std::string_view::npos) ? header.size() : end;
-		std::string name(header.substr(pos, eq - pos));
-		std::string value(header.substr(eq + 1, val_end - eq - 1));
-		// Defensive: strip any leftover leading comma (onnet's lstrip(",")).
-		while (!name.empty() && name.front() == ',') name.erase(0, 1);
-		out.emplace(std::move(name), std::move(value));
-		pos = val_end + 1;
-	}
-	return out;
-}
-
-// Crow stores request headers in a case-INSENSITIVE multimap and
-// get_header_value() returns only the FIRST match. Retail's IB3 client sends
-// each cookie as its OWN "Cookie:" header, so reading a single header silently
-// drops every other cookie — at /NWJoin.dll that loses NWHANDLE, the joiner
-// can't be identified, PUBPCID comes out empty and the client reports "login
-// info invalid or expired" (host/login happen to work because the one cookie
-// Crow returns is the session tag they need). werkzeug (onnet) merges every
-// Cookie header into request.cookies; match it by concatenating them all here
-// before parsing. [verified: 3 separate Cookie: headers -> Crow exposes 1]
-std::string request_cookie_header(const crow::request &req) {
-	std::string combined;
-	const auto range = req.headers.equal_range("Cookie");
-	for (auto it = range.first; it != range.second; ++it) {
-		if (it->second.empty()) continue;
-		if (!combined.empty()) combined += "; ";
-		combined += it->second;
-	}
-	return combined;
-}
+// ---- cookie + form helpers (Phase E.1; cookie reading: http_cookies.h) ----
 
 std::string url_decode(std::string_view s) {
 	std::string out;
@@ -209,6 +134,11 @@ void add_standard_headers(crow::response &res) {
 	res.set_header("Pragma", "no-cache");
 	res.set_header("Cache-Control", "no-cache, must-revalidate");
 }
+
+// The message POST /NWLogin.dll's failure page carries when the login brake
+// refuses the attempt (see handle_login_post).
+constexpr const char *kLoginThrottledMessage =
+		"Too many failed logins. Please try again later.";
 
 std::string legacy_game_slug(const std::string &pfid,
                              const std::string &template_hint) {
@@ -324,13 +254,16 @@ crow::json::wvalue user_to_json(const UserRecord &u) {
 	e["nwh"]      = u.nwh;
 	e["nwhandle"] = u.nwhandle;
 	e["account_status"] = u.account_status;
+	e["role"]     = u.role;
 	return e;
 }
 
 } // namespace
 
 struct HttpListener::Impl {
-	crow::SimpleApp app;
+	explicit Impl(db::ConnectionPool &pool) : access(app, pool) {}
+
+	WebApp app;
 	// start()'s handshake with the Crow thread: Pending until Crow serves
 	// (Serving, with the port it bound) or until run() returns (Exited).
 	enum class Run { Pending, Serving, Exited };
@@ -340,11 +273,14 @@ struct HttpListener::Impl {
 	uint16_t port = 0;
 	// How often Crow runs the tick whose first call tells start() it serves.
 	static constexpr std::chrono::milliseconds kServingTick{50};
+	// Who each /api request comes from (web_access.h); declared after `app`,
+	// which it registers its routes on.
+	WebAccess access;
 };
 
 HttpListener::HttpListener(ConnectionManager &manager, db::ConnectionPool &db_pool,
                            SessionStore &sessions)
-	: impl_(std::make_unique<Impl>()), manager_(manager), db_pool_(db_pool),
+	: impl_(std::make_unique<Impl>(db_pool)), manager_(manager), db_pool_(db_pool),
 	  sessions_(sessions) {
 	// A bundle that did not converge stays the zero one, which every client
 	// refuses (the modexp gate), so the login leg fails rather than the service.
@@ -373,15 +309,12 @@ bool HttpListener::start(const ServerConfig &config) {
 	const std::filesystem::path web_dist = config.web_dist_dir;
 	const std::string templates_dir = config.templates_dir.string();
 	const std::string static_dir    = config.static_dir.string();
-	const std::string admin_token   = config.admin_api_token;
 	const std::string public_host   = config.public_host;
-	std::printf("[http] admin api %s\n",
-	            admin_token.empty() ? "DISABLED (set ADMIN_API_TOKEN to enable)"
-	                                : "ENABLED");
+	impl_->access.configure(config);
 
 	public_host_ = public_host; // host_url() / gsb_url(), with the port Crow binds
 
-	register_admin_api_routes(admin_token, public_host);
+	register_admin_api_routes(public_host);
 	register_public_api_routes();
 	register_legacy_login_routes(templates_dir);
 	register_legacy_host_join_routes(templates_dir);
@@ -446,6 +379,13 @@ bool HttpListener::start(const ServerConfig &config) {
 // The port is Crow's: its run() stores the port it bound (the OS's pick for
 // port 0) in the app before it accepts the first connection, so every handler
 // reads it settled, and with a nonzero port it is the configured one.
+void HttpListener::forget_persistent_pins(int64_t user_id) {
+	std::lock_guard<std::mutex> lock(persistent_user_mu_);
+	for (auto it = persistent_to_user_id_.begin(); it != persistent_to_user_id_.end();) {
+		it = it->second == user_id ? persistent_to_user_id_.erase(it) : std::next(it);
+	}
+}
+
 std::string HttpListener::host_url() const {
 	return "http://" + public_host_ + ":" + std::to_string(impl_->app.port()) + "/nwhost.dll";
 }
@@ -454,37 +394,17 @@ std::string HttpListener::gsb_url() const {
 	return "http://" + public_host_ + ":" + std::to_string(impl_->app.port()) + "/jop_2.gsb";
 }
 
-// Admin REST API (Bearer ADMIN_API_TOKEN): server status, dev host
-// injection, connection dump, user CRUD.
-void HttpListener::register_admin_api_routes(const std::string &admin_token,
-                                             const std::string &public_host) {
+// Admin REST API: server status, dev host injection, connection dump, user
+// CRUD. Every handler opens with WebAccess::require_admin: the Bearer
+// ADMIN_API_TOKEN, or an admin-role website session (with the CSRF header on a
+// state change).
+void HttpListener::register_admin_api_routes(const std::string &public_host) {
 	auto &app = impl_->app;
 
-	// Constant-time string compare (timing-safe). Returns false on length
-	// mismatch or any byte difference. Used by admin endpoints below.
-	auto admin_authorized = [admin_token](const crow::request &req) {
-		if (admin_token.empty()) return false;
-		std::string auth = req.get_header_value("Authorization");
-		// Expect "Bearer <token>"
-		if (auth.rfind("Bearer ", 0) != 0) return false;
-		const std::string presented = auth.substr(7);
-		if (presented.size() != admin_token.size()) return false;
-		unsigned diff = 0;
-		for (size_t i = 0; i < presented.size(); ++i) {
-			diff |= static_cast<unsigned>(presented[i])
-			      ^ static_cast<unsigned>(admin_token[i]);
-		}
-		return diff == 0;
-	};
-
 	CROW_ROUTE(app, "/api/admin/server-status").methods("GET"_method)(
-	    [this, admin_authorized](const crow::request &req) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
+	    [this](const crow::request &req) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
 		auto db_conn = db_pool_.acquire();
 		auto status = get_server_status(*db_conn);
 		crow::json::wvalue out;
@@ -497,26 +417,14 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 	});
 
 	CROW_ROUTE(app, "/api/admin/server-status").methods("PUT"_method)(
-	    [this, admin_authorized](const crow::request &req) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
-		auto body = crow::json::load(req.body);
-		if (!body) {
-			crow::response res(400);
-			res.body = "{\"error\":\"invalid_json\"}";
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
-		const bool maintenance = body.has("maintenance_enabled")
-			? static_cast<bool>(body["maintenance_enabled"].b())
-			: false;
-		const std::string message = body.has("message")
-			? std::string(body["message"].s())
-			: std::string();
+	    [this](const crow::request &req) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
+		auto body = JsonBody::parse(req.body);
+		if (!body) return json_error(400, "invalid_json");
+		const bool maintenance = body->flag("maintenance_enabled").value_or(false);
+		const std::string message = body->text_or("message", "");
+		if (body->wrong_type()) return json_error(400, "invalid_field");
 		auto db_conn = db_pool_.acquire();
 		auto result = update_server_status(*db_conn, maintenance, message);
 		crow::json::wvalue out;
@@ -538,26 +446,24 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 	});
 
 	// Dev/test helper: inject an active_hosts row so the GSB browser shows a
-	// joinable game without a live host process. Bearer-gated (CLOSED unless
-	// ADMIN_API_TOKEN is set), so prod is unaffected. Defaults point the host at
+	// joinable game without a live host process. Admin-gated like every route
+	// here, so prod's players never reach it. Defaults point the host at
 	// this server's own NW UDP port (127.0.0.1:64206) so a joining OpenNova
 	// client's JointOperations hello lands on our nw_udp_listener and routes to
 	// the game-runtime PN path. The row is wiped on the next boot (clear_all)
 	// and by the stale-host sweep; re-inject per run.
 	CROW_ROUTE(app, "/api/admin/hosts").methods("POST"_method)(
-	    [this, admin_authorized, public_host](const crow::request &req) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
-		auto body = crow::json::load(req.body);
-		auto str_or = [&](const char *k, const char *fallback) {
-			return (body && body.has(k)) ? std::string(body[k].s()) : std::string(fallback);
+	    [this, public_host](const crow::request &req) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
+		// An empty body takes every default; any other must be an object.
+		auto body = JsonBody::parse(req.body.empty() ? std::string("{}") : req.body);
+		if (!body) return json_error(400, "invalid_json");
+		auto str_or = [&body](const char *k, const char *fallback) {
+			return body->text_or(k, fallback);
 		};
-		auto int_or = [&](const char *k, int fallback) {
-			return (body && body.has(k)) ? static_cast<int>(body[k].i()) : fallback;
+		auto int_or = [&body](const char *k, int fallback) {
+			return static_cast<int>(body->integer(k).value_or(fallback));
 		};
 
 		hostdb::HostRow row;
@@ -582,6 +488,7 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 		row.exp_bits     = str_or("exp_bits", "3");
 		row.peer_ip      = row.host_ip;
 		row.peer_port    = row.host_port;
+		if (body->wrong_type()) return json_error(400, "invalid_field");
 
 		try {
 			auto db_conn = db_pool_.acquire();
@@ -614,21 +521,10 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 	// NovaWorld UDP session (NwUdpListener::push_server_command / push_stop_hosting;
 	// docs/net/novaworld-net-re.md "the service side"). 202 once queued for the
 	// receive thread, 404 for a RID no live connection holds, 409 for one whose
-	// connection is not hosting, 503 when no NW UDP listener is wired.
-	auto json_reply = [](int code, const crow::json::wvalue &out) {
-		crow::response res(code);
-		res.body = out.dump();
-		res.set_header("Content-Type", "application/json");
-		return res;
-	};
-	auto json_error = [json_reply](int code, const char *error, const std::string &message) {
-		crow::json::wvalue out;
-		out["error"] = error;
-		if (!message.empty()) out["message"] = message;
-		return json_reply(code, out);
-	};
-	auto push_reply = [json_reply, json_error](HostPushResult result, uint32_t rid,
-	                                           crow::json::wvalue out) {
+	// connection is not hosting, 503 when no NW UDP listener is wired. Admin-gated
+	// like every route here (require_admin: the Bearer token, or an admin session
+	// with the CSRF header).
+	auto push_reply = [](HostPushResult result, uint32_t rid, crow::json::wvalue out) {
 		switch (result) {
 		case HostPushResult::Queued:
 			out["rid"] = rid;
@@ -650,49 +546,46 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 	// composed through server_command_text, so a line the host's reader would
 	// drop (a verb/target pairing, too few args, a quote or NUL, past 511
 	// characters) is a 400 with its reason; so is an arg with a control byte
-	// (has_control_byte, the service's own input rule).
+	// (has_control_byte, auth.h). That is the service's own input rule at its
+	// edge, not a reader rule: the stock reader carries such a byte faithfully
+	// inside quotes (String_TokenizeQuotedToArray copies a quoted run as it is),
+	// so server_command_text, the reader's exact inverse, composes it. The harm
+	// is on the host: SetServerName / SetServerMsg save the token into game.cfg
+	// unescaped (Game_SaveConfig @0x54C490, `game_name = "%s"\n`; ours
+	// engine/formats/gamecfg/game_cfg_write.cpp), so a CR or LF injects a line
+	// into a third party's config, and the chat verbs relay the byte to every
+	// player.
 	CROW_ROUTE(app, "/api/admin/hosts/<uint>/command").methods("POST"_method)(
-	    [this, admin_authorized, json_error, push_reply](const crow::request &req, uint64_t rid) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
-		auto body = crow::json::load(req.body);
-		if (!body || body.t() != crow::json::type::Object) {
-			return json_error(400, "invalid_json", "");
-		}
-		if (!body.has("verb") || body["verb"].t() != crow::json::type::String) {
+	    [this, push_reply](const crow::request &req, uint64_t rid) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
+		auto body = JsonBody::parse(req.body);
+		if (!body) return json_error(400, "invalid_json", "");
+		const auto verb_name = body->text("verb");
+		if (!verb_name) {
 			return json_error(400, "invalid_command", "\"verb\" (a string) is required");
 		}
 		ServerCommandVerb verb = ServerCommandVerb::None;
-		if (!server_command_verb_from_name(std::string(body["verb"].s()), verb)) {
+		if (!server_command_verb_from_name(*verb_name, verb)) {
 			return json_error(400, "invalid_command", "\"verb\" names no ServerCommand verb");
 		}
 		ServerCommandTarget target = ServerCommandTarget::None;
-		if (body.has("target")) {
-			if (body["target"].t() != crow::json::type::String ||
-			    !server_command_target_from_name(std::string(body["target"].s()), target)) {
-				return json_error(400, "invalid_command",
-				                  "\"target\" is None, ByIndex, ByIpAndPort, ByName or ByPCID");
-			}
+		const auto target_name = body->text("target");
+		if (body->wrong_type() ||
+		    (target_name && !server_command_target_from_name(*target_name, target))) {
+			return json_error(400, "invalid_command",
+			                  "\"target\" is None, ByIndex, ByIpAndPort, ByName or ByPCID");
 		}
-		std::vector<std::string> args;
-		if (body.has("args")) {
-			if (body["args"].t() != crow::json::type::List) {
-				return json_error(400, "invalid_command", "\"args\" is a list of strings");
-			}
-			for (const auto &arg : body["args"]) {
-				if (arg.t() != crow::json::type::String) {
-					return json_error(400, "invalid_command", "\"args\" is a list of strings");
-				}
-				args.emplace_back(arg.s());
-				if (has_control_byte(args.back())) {
-					return json_error(400, "invalid_command",
-					                  "an arg holds a control byte (below 0x20, or 0x7F), which a "
-					                  "stock host would carry into its game.cfg or its chat");
-				}
+		const std::vector<std::string> args = body->text_list("args").value_or(
+				std::vector<std::string>{});
+		if (body->wrong_type()) {
+			return json_error(400, "invalid_command", "\"args\" is a list of strings");
+		}
+		for (const std::string &arg : args) {
+			if (has_control_byte(arg)) {
+				return json_error(400, "invalid_command",
+				                  "an arg holds a control byte (below 0x20, or 0x7F), which a "
+				                  "stock host would carry into its game.cfg or its chat");
 			}
 		}
 		const char *refusal = nullptr;
@@ -705,8 +598,9 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 		}
 		const uint32_t rid32 = rid <= UINT32_MAX ? static_cast<uint32_t>(rid) : 0u;
 		const HostPushResult result = nw_udp_->push_server_command(rid32, cmd);
+		// The whole line (server_command_text caps it at 511), control bytes escaped.
 		std::printf("[http] POST /api/admin/hosts/%llu/command '%s' -> %s\n",
-		            static_cast<unsigned long long>(rid), loggable(cmd).c_str(),
+		            static_cast<unsigned long long>(rid), loggable(cmd, cmd.size()).c_str(),
 		            host_push_result_name(result));
 		crow::json::wvalue out;
 		out["statement"] = "ServerCommand";
@@ -722,13 +616,9 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 	// (NwUdpListener::push_stop_hosting; the record's "The exit"); the server
 	// leaves the browser as the statement goes out. No body.
 	CROW_ROUTE(app, "/api/admin/hosts/<uint>/stop").methods("POST"_method)(
-	    [this, admin_authorized, json_error, push_reply](const crow::request &req, uint64_t rid) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
+	    [this, push_reply](const crow::request &req, uint64_t rid) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
 		if (nw_udp_ == nullptr) {
 			return json_error(503, "no_session_listener", "the NovaWorld UDP listener is not wired");
 		}
@@ -743,14 +633,10 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 		return push_reply(result, rid32, std::move(out));
 	});
 
-	// Connection-registry debug dump. Admin-token gated.
-	CROW_ROUTE(app, "/api/admin/connections")([this, admin_authorized](const crow::request &req) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
+	// Connection-registry debug dump.
+	CROW_ROUTE(app, "/api/admin/connections")([this](const crow::request &req) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
 		auto snapshot = manager_.registry().snapshot();
 		crow::json::wvalue out;
 		out["count"] = snapshot.size();
@@ -778,13 +664,9 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 	// ----- Phase J: admin user CRUD ------------------------------------
 	// GET /api/admin/users — list every player (no password_hash).
 	CROW_ROUTE(app, "/api/admin/users").methods("GET"_method)(
-	    [this, admin_authorized](const crow::request &req) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
+	    [this](const crow::request &req) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
 		auto db_conn = db_pool_.acquire();
 		std::vector<crow::json::wvalue> arr;
 		for (const auto &u : list_users(*db_conn)) arr.push_back(user_to_json(u));
@@ -799,30 +681,18 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 	// POST /api/admin/users — create. Body JSON:
 	//   {username, password, pcid, nwhandle, nwh? (default "1")}
 	CROW_ROUTE(app, "/api/admin/users").methods("POST"_method)(
-	    [this, admin_authorized](const crow::request &req) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
-		auto body = crow::json::load(req.body);
-		if (!body) {
-			crow::response res(400);
-			res.body = "{\"error\":\"invalid_json\"}";
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
-		auto js = [&](const char *k, const char *fallback) {
-			return body.has(k) ? std::string(body[k].s())
-			                   : std::string(fallback);
-		};
+	    [this](const crow::request &req) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
+		auto body = JsonBody::parse(req.body);
+		if (!body) return json_error(400, "invalid_json");
 		CreateUserParams p;
-		p.username = js("username", "");
-		p.password = js("password", "");
-		p.pcid     = js("pcid",     "");
-		p.nwh      = js("nwh",      "1");
-		p.nwhandle = js("nwhandle", "");
+		p.username = body->text_or("username", "");
+		p.password = body->text_or("password", "");
+		p.pcid     = body->text_or("pcid",     "");
+		p.nwh      = body->text_or("nwh",      "1");
+		p.nwhandle = body->text_or("nwhandle", "");
+		if (body->wrong_type()) return json_error(400, "invalid_field");
 		auto db_conn = db_pool_.acquire();
 		auto result = create_user(*db_conn, p);
 		crow::json::wvalue out;
@@ -844,15 +714,12 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 
 	// DELETE /api/admin/users/<id>
 	CROW_ROUTE(app, "/api/admin/users/<int>").methods("DELETE"_method)(
-	    [this, admin_authorized](const crow::request &req, int id) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
+	    [this](const crow::request &req, int id) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
 		auto db_conn = db_pool_.acquire();
 		auto result = delete_user(*db_conn, id);
+		if (result.ok) forget_persistent_pins(id);
 		crow::response res(result.ok ? 204 :
 		                   result.error_code == "not_found" ? 404 : 500);
 		if (!result.ok) {
@@ -866,31 +733,26 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 	});
 
 	// PUT /api/admin/users/<id> — partial update. Any field omitted is
-	// left untouched. password (plaintext) triggers a fresh bcrypt hash.
+	// left untouched. password (plaintext) triggers a fresh bcrypt hash; role
+	// takes "player" or "admin" (anything else is a 400 invalid_field).
 	CROW_ROUTE(app, "/api/admin/users/<int>").methods("PUT"_method)(
-	    [this, admin_authorized](const crow::request &req, int id) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
-		auto body = crow::json::load(req.body);
-		if (!body) {
-			crow::response res(400);
-			res.body = "{\"error\":\"invalid_json\"}";
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
+	    [this](const crow::request &req, int id) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
+		auto body = JsonBody::parse(req.body);
+		if (!body) return json_error(400, "invalid_json");
 		UpdateUserParams p;
-		if (body.has("username")) p.username           = std::string(body["username"].s());
-		if (body.has("password")) p.password_plaintext = std::string(body["password"].s());
-		if (body.has("pcid"))     p.pcid               = std::string(body["pcid"].s());
-		if (body.has("nwh"))      p.nwh                = std::string(body["nwh"].s());
-		if (body.has("nwhandle")) p.nwhandle           = std::string(body["nwhandle"].s());
-		if (body.has("account_status")) p.account_status = std::string(body["account_status"].s());
+		p.username           = body->text("username");
+		p.password_plaintext = body->text("password");
+		p.pcid               = body->text("pcid");
+		p.nwh                = body->text("nwh");
+		p.nwhandle           = body->text("nwhandle");
+		p.account_status     = body->text("account_status");
+		p.role               = body->text("role");
+		if (body->wrong_type()) return json_error(400, "invalid_field");
 		auto db_conn = db_pool_.acquire();
 		auto result = update_user(*db_conn, id, p);
+		if (result.ok && update_revokes_sessions(p)) forget_persistent_pins(id);
 		crow::json::wvalue out;
 		if (!result.ok) {
 			out["error"]   = result.error_code;
@@ -912,24 +774,16 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 
 	// PUT /api/admin/users/<id>/game-access — per-game expansion/access gate.
 	CROW_ROUTE(app, "/api/admin/users/<int>/game-access").methods("PUT"_method)(
-	    [this, admin_authorized](const crow::request &req, int id) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
-		auto body = crow::json::load(req.body);
-		if (!body) {
-			crow::response res(400);
-			res.body = "{\"error\":\"invalid_json\"}";
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
+	    [this](const crow::request &req, int id) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
+		auto body = JsonBody::parse(req.body);
+		if (!body) return json_error(400, "invalid_json");
 		UpdateGameAccessParams p;
-		p.game_slug = body.has("game_slug") ? std::string(body["game_slug"].s()) : "";
-		p.status    = body.has("status")    ? std::string(body["status"].s())    : "active";
-		p.exp_bits  = body.has("exp_bits")  ? std::string(body["exp_bits"].s())  : "";
+		p.game_slug = body->text_or("game_slug", "");
+		p.status    = body->text_or("status",    "active");
+		p.exp_bits  = body->text_or("exp_bits",  "");
+		if (body->wrong_type()) return json_error(400, "invalid_field");
 		auto db_conn = db_pool_.acquire();
 		auto result = update_game_access(*db_conn, id, p);
 		crow::json::wvalue out;
@@ -1023,26 +877,32 @@ void HttpListener::register_public_api_routes() {
 		return out;
 	});
 
+	// POST /api/login, POST /api/logout, GET /api/me (web_access.cpp).
+	impl_->access.register_routes();
+
 	// POST /api/register — public self-signup. No admin token needed.
 	// Server auto-generates a unique 8-hex-char PCID. nwhandle defaults
 	// to username when omitted. Returns the new user's public record on
 	// success; 400 on conflict / missing fields, 500 on DB error.
+	// The X-OpenNova-Request header is required, checked first: a cross-site
+	// text/plain form can carry a JSON body (the parse ignores Content-Type),
+	// so without it any page could make its visitors create accounts and drain
+	// their address's bucket. Then the per-address brake (429 + Retry-After),
+	// before the body is read.
 	CROW_ROUTE(app, "/api/register").methods("POST"_method)(
 	    [this](const crow::request &req) {
-		auto body = crow::json::load(req.body);
-		if (!body) {
-			crow::response res(400);
-			res.body = "{\"error\":\"invalid_json\"}";
-			res.set_header("Content-Type", "application/json");
-			return res;
+		if (!WebAccess::has_csrf_header(req)) return json_error(403, "csrf_header_required");
+		const std::string ip = impl_->access.client_ip(req);
+		if (const int64_t wait = impl_->access.take_register(ip)) {
+			std::printf("[http] /api/register rate-limited for %s\n", ip.c_str());
+			return too_many_requests(wait);
 		}
-		auto js = [&](const char *k, const char *fallback) {
-			return body.has(k) ? std::string(body[k].s())
-			                   : std::string(fallback);
-		};
-		const std::string username = js("username", "");
-		const std::string password = js("password", "");
-		const std::string nwhandle = js("nwhandle", username.c_str());
+		auto body = JsonBody::parse(req.body);
+		if (!body) return json_error(400, "invalid_json");
+		const std::string username = body->text_or("username", "");
+		const std::string password = body->text_or("password", "");
+		const std::string nwhandle = body->text_or("nwhandle", username);
+		if (body->wrong_type()) return json_error(400, "invalid_field");
 		if (username.empty() || password.empty()) {
 			crow::response res(400);
 			res.body = "{\"error\":\"missing_field\","
@@ -1076,7 +936,7 @@ void HttpListener::register_public_api_routes() {
 		auto created = get_user_by_id(*db_conn, result.id);
 		out["user"] = created ? user_to_json(*created) : crow::json::wvalue{};
 		std::printf("[http] /api/register -> created user '%s' (id=%lld)\n",
-		            username.c_str(), static_cast<long long>(result.id));
+		            loggable(username).c_str(), static_cast<long long>(result.id));
 		crow::response res(201);
 		res.body = out.dump();
 		res.set_header("Content-Type", "application/json");
@@ -1405,15 +1265,38 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		std::optional<UserRecord> user;
 		const char *resolution = nullptr;
 		if (!login_name.empty() && !login_password.empty()) {
+			// The login brake POST /api/login runs (WebAccess) on its retail
+			// buckets: the address's attempts, then one token from the
+			// username's failure buckets, handed back when the password is
+			// right. Keyed by the TCP peer: a stock client reaches this port
+			// directly (the gate's startupurl names ONNET_PUBLIC_HOST and the
+			// HTTP port, through no proxy), so no header names the client and
+			// nothing the website's brake sees can brake this one; only the
+			// per-username cap is shared, and it spares the account's known
+			// addresses. Its refusal is this route's own failure reply, the
+			// msgbase page with a message (as a bad password and maintenance
+			// get), which a stock client shows; no retail throttling reply is
+			// witnessed (service policy).
+			const std::string &peer = req.remote_ip_address;
+			LoginTicket ticket;
+			if (impl_->access.take_login_address(LoginRoute::Retail, peer) != 0 ||
+			    impl_->access.begin_password_check(LoginRoute::Retail, login_name, peer, ticket) !=
+			            0) {
+				std::fprintf(stderr,
+				             "[http] POST /NWLogin.dll rate-limited for user '%s' from %s\n",
+				             loggable(login_name).c_str(), peer.c_str());
+				return render_login_message(kLoginThrottledMessage);
+			}
 			user = authenticate_user(*db_conn, login_name, login_password);
 			if (user) {
 				resolution = "epask-auth";
+				impl_->access.password_accepted(ticket, user->id);
 			} else {
 				// Bad credentials → render the failure template (jop_2_main.htm
 				// per retail's form `failure` arg) with a "Invalid username or
 				// password" message and bail before storing a session.
 				std::fprintf(stderr, "[http] POST /NWLogin.dll auth failed for user '%s'\n",
-				             login_name.c_str());
+				             loggable(login_name).c_str());
 				return render_login_message("Invalid username or password");
 			}
 		}
@@ -1494,12 +1377,11 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			std::lock_guard<std::mutex> lk(persistent_user_mu_);
 			persistent_to_user_id_[persist_cookie] = user->id;
 		}
-		std::printf("[http]   user resolved (%s): id=%lld username=%s pcid=%s nwhandle=%s persist=%.16s%s\n",
+		std::printf("[http]   user resolved (%s): id=%lld username=%s pcid=%s nwhandle=%s persist=%s\n",
 		            resolution ? resolution : "?",
-		            static_cast<long long>(s.user_id), s.username.c_str(),
-		            s.pcid.c_str(), s.nwhandle.c_str(),
-		            persist_cookie.empty() ? "(none)" : persist_cookie.c_str(),
-		            persist_cookie.size() > 16 ? ".." : "");
+		            static_cast<long long>(s.user_id), loggable(s.username).c_str(),
+		            loggable(s.pcid).c_str(), loggable(s.nwhandle).c_str(),
+		            persist_cookie.empty() ? "(none)" : loggable(persist_cookie, 16).c_str());
 
 		// The relay template renders this response only; nothing reads it back
 		// from the stored session.
@@ -1529,7 +1411,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 
 		std::printf("[http] POST %s body=%zuB user=%s relay->%s success->%s -> tag %s\n",
 		            req.url.c_str(), req.body.size(),
-		            sessions_.get_login(tag).value().username.c_str(),
+		            loggable(sessions_.get_login(tag).value().username).c_str(),
 		            relay_template.c_str(),
 		            sessions_.get_login(tag).value().success.c_str(),
 		            tag.c_str());
@@ -1613,7 +1495,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 
 		std::printf("[http] GET %s tag=%s -> auth ok (user=%s pcid=%s)\n",
 		            req.url.c_str(), tag.c_str(),
-		            session->username.c_str(), session->pcid.c_str());
+		            loggable(session->username).c_str(), loggable(session->pcid).c_str());
 		if (session->user_id != 0) {
 			try { touch_active_user_session(*db_pool_.acquire(), session->user_id); }
 			catch (const std::exception &e) {
@@ -1779,7 +1661,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		std::printf("[http] %s -> %s%s user=%s\n",
 		            req.url.c_str(), tpl.c_str(),
 		            exists ? "" : " (MISSING — 404)",
-		            user ? user->username.c_str() : "(unknown)");
+		            user ? loggable(user->username).c_str() : "(unknown)");
 		if (!exists) {
 			crow::response res(404);
 			res.body = "template not found: " + tpl;
@@ -2127,8 +2009,8 @@ void HttpListener::register_legacy_host_join_routes(
 						             cookie_summary(request_cookie_header(req)).c_str());
 					}
 					std::printf("[http] /NWJoin.dll PUB* encoded for joiner=%s pcid=%s nwhandle=%s host_key=%zuB name=%zuB squad=%zuB\n",
-					            joiner_label.c_str(), joiner_pcid.c_str(),
-					            joiner_nwhandle.c_str(), host_pcid_key.size(),
+					            loggable(joiner_label).c_str(), loggable(joiner_pcid).c_str(),
+					            loggable(joiner_nwhandle).c_str(), host_pcid_key.size(),
 					            payloads.name_info.size(), payloads.squad_info.size());
 				}
 			}

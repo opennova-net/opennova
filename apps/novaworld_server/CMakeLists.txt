@@ -14,6 +14,9 @@ if(BUILD_NOVAWORLD_HTTP)
         session_store.cpp
         auth.cpp
         catalog_repository.cpp
+        rate_limiter.cpp
+        web_access.cpp
+        web_session.cpp
     )
 endif()
 

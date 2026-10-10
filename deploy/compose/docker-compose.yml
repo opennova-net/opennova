@@ -28,6 +28,12 @@ services:
       ONNET_PUBLIC_HOST: ${ONNET_PUBLIC_HOST:-127.0.0.1}
       DATABASE_PATH: /data/novaworld.db
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-}
+      # The website session (apps/novaworld_server/README.md): the cookie's
+      # Secure flag for an https site, the proxy whose X-Real-IP names the
+      # client, and the account made the first site admin at boot.
+      ONNET_COOKIE_SECURE: ${ONNET_COOKIE_SECURE:-}
+      ONNET_TRUSTED_PROXIES: ${ONNET_TRUSTED_PROXIES:-}
+      ONNET_BOOTSTRAP_ADMIN: ${ONNET_BOOTSTRAP_ADMIN:-}
 
   web:
     image: ${WEB_IMAGE:-opennova-web:local}
@@ -38,6 +44,9 @@ services:
     environment:
       ADMIN_BASIC_AUTH_USER: ${ADMIN_BASIC_AUTH_USER:-}
       ADMIN_BASIC_AUTH_PASSWORD: ${ADMIN_BASIC_AUTH_PASSWORD:-}
+      # Edge authentication (DEPLOY.md): unset, off. Set from the vault together
+      # with the Cloudflare Transform Rule that stamps the same secret.
+      EDGE_AUTH_SECRET: ${EDGE_AUTH_SECRET:-}
     depends_on:
       - novaworld
 
