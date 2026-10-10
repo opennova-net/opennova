@@ -111,10 +111,12 @@ def::DefPowerupFile shipped_and_synthetic() {
             "powerup \"NULLFN\"\r\n hp -1\r\n action \"pickup\"\r\n  function null\r\n end\r\nend\r\n"
             "powerup \"WPN\"\r\n hp 10\r\n weapon all\r\nend\r\n"
             "powerup \"MEDAMMO\"\r\n hp -1\r\n allammo\r\n respawn_time 5\r\nend\r\n"
-            // JOTAC's PU_* shape: a weapon, a respawn and a pickup sound.
+            // JOTAC's PU_* shape: a weapon, a respawn particle and a pickup
+            // sound and text token.
             "powerup \"PU_PISTOL\"\r\n respawn_time 120\r\n weapon WPN_PISTOL\r\n"
-            " action \"respawn\"\r\n  function powerup_respawn\r\n end\r\n"
-            " action \"pickup\"\r\n  soundset GF_45_ST\r\n  function powerup_pickup\r\n end\r\nend\r\n"
+            " action \"respawn\"\r\n  particle FX_Pickup_Green\r\n  function powerup_respawn\r\n end\r\n"
+            " action \"pickup\"\r\n  soundset GF_45_ST\r\n  function powerup_pickup\r\n"
+            "  texttoken PU_PISTOL\r\n end\r\nend\r\n"
             "powerup \"PU_PISTOLB\"\r\n respawn_time 120\r\n weapon WPN_PISTOL_B\r\nend\r\n"
             "powerup \"PU_LAUNCHER\"\r\n respawn_time 120\r\n weapon WPN_LAUNCHER\r\nend\r\n";
     def::DefPowerupFile f;
@@ -329,10 +331,13 @@ void test_remote_body_pickup_on_a_client() {
     CHECK(rig.world.out.powerup_grants.empty());
 }
 
-// FULLHP at full health: nothing happens, the row stays, no sound.
+// FULLHP at full health: nothing happens, the row stays, no sound and no
+// particle (the refusal returns ahead of both [orig: @0x4429A4, ahead of
+// @0x442AA6 / @0x442AB8]).
 void test_med_pack_refuses_when_full() {
     Rig rig;
     rig.get(rig.picker)->health = 100;
+    rig.world.tables.powerups.rows[0].pickup.particle = "FX_Pickup_Spark";
     const EntityHandle med = rig.spawn_powerup(1);
     powerup_bind_entities(rig.world, rig.items);
     powerup_pickup(rig.world, med, rig.picker, rig.ctx(true));
@@ -340,6 +345,7 @@ void test_med_pack_refuses_when_full() {
     CHECK(m != nullptr && !m->hidden && m->powerup_respawn_timer == -1);
     CHECK(rig.get(rig.picker)->health == 100);
     CHECK(rig.world.out.fire_sounds.drain().empty());
+    CHECK(rig.world.out.destruction.effects.empty());
 }
 
 // FULLHP_INF: the row hides and arms 30 s; the authority's countdown respawns
@@ -650,6 +656,58 @@ void test_weapon_grant_lands_local() {
     if (!sounds.empty()) CHECK(std::string(sounds[0].set_name) == "GF_45_ST");
 }
 
+// The action particle: the pickup row's at the PICKER, the respawn row's at
+// the row the countdown respawns, each unattached and undirected; a row that
+// authors none spawns nothing. No shipped pickup row authors one, so the
+// pickup leg runs on a row given one here.
+// [orig: PowerupAction_Pickup @0x442AAE..0x442ABD; PowerupAction_Respawn
+//  @0x442B76..0x442B80; ActionSlot_SpawnParticleAtEntity @0x442380 ->
+//  Effect_SubmitDescriptor(0, 0, entity+4, handle) @0x4423BD]
+void test_action_particles() {
+    Rig rig;
+    const int32_t pistol = rig.world.tables.powerups.index_of("PU_PISTOL");
+    CHECK(pistol >= 0);
+    if (pistol < 0) return;
+    PowerupDef &def = rig.world.tables.powerups.rows[static_cast<size_t>(pistol)];
+    CHECK(def.respawn.particle == "FX_Pickup_Green" && def.pickup.particle.empty());
+    def.pickup.particle = "FX_Pickup_Spark";
+    const EntityHandle row = rig.spawn_powerup(10);
+    rig.get(row)->position = {7.0f, 3.0f, 1.0f};
+    rig.get(rig.picker)->position = {6.0f, 2.0f, 0.5f};
+    powerup_bind_entities(rig.world, rig.items);
+    powerup_pickup(rig.world, row, rig.picker, rig.ctx(true));
+    const auto &effects = rig.world.out.destruction.effects;
+    CHECK(effects.size() == 1);
+    if (effects.size() == 1) {
+        CHECK(effects[0].effect == "FX_Pickup_Spark");
+        CHECK(effects[0].pos.x == 6.0f && effects[0].pos.y == 2.0f && effects[0].pos.z == 0.5f);
+        CHECK(effects[0].dir.x == 0.0f && effects[0].dir.y == 0.0f && effects[0].dir.z == 0.0f);
+        CHECK(effects[0].attach_net_id == 0 && effects[0].family == 0);
+    }
+    rig.world.out.destruction.effects.clear();
+    // The countdown's respawn runs the respawn row with the row as the entity.
+    Entity *r = rig.get(row);
+    CHECK(r != nullptr && r->hidden);
+    if (r != nullptr) r->powerup_respawn_timer = 0;
+    powerup_tick(rig.world, rig.ctx(true));
+    CHECK(rig.get(row) != nullptr && !rig.get(row)->hidden);
+    CHECK(effects.size() == 1);
+    if (effects.size() == 1) {
+        CHECK(effects[0].effect == "FX_Pickup_Green");
+        CHECK(effects[0].pos.x == 7.0f && effects[0].pos.y == 3.0f && effects[0].pos.z == 1.0f);
+    }
+    // The med pack's rows author no particle.
+    rig.world.out.destruction.effects.clear();
+    const EntityHandle med = rig.spawn_powerup(2);
+    powerup_bind_entities(rig.world, rig.items);
+    rig.get(rig.picker)->health = 10;
+    powerup_pickup(rig.world, med, rig.picker, rig.ctx(true));
+    CHECK(rig.get(rig.picker)->health == 100 && effects.empty());
+    rig.get(med)->powerup_respawn_timer = 0;
+    powerup_tick(rig.world, rig.ctx(true));
+    CHECK(!rig.get(med)->hidden && effects.empty());
+}
+
 // The authority refuses a picker already carrying the weapon full: the whole
 // pickup ends, the row unconsumed and no grant recorded. A joiner's own copy
 // never refuses (the walk returns 0 off the authority) and refills it.
@@ -892,6 +950,7 @@ int main() {
     test_weapon_all_skips_the_arm();
     test_weapon_grant_lands_local();
     test_weapon_grant_refused_when_full();
+    test_action_particles();
     test_weapon_grant_refills_held();
     test_weapon_grant_sameas();
     test_weapon_grant_subvariants();
