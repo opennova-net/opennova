@@ -14,6 +14,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_table.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/code_text_keys.h>
 #include <editor/graph/display_names.h>
 #include <editor/graph/jump_queries.h>
 #include <editor/model/field_text.h>
@@ -851,8 +852,11 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 			}
 			ui_kit::tooltip_lazy([&] {
 				const GraphSymbol *symbol = graph->symbol_at(document.path(), document.locator(line.address), defining->id);
-				if (!symbol || !count) return std::string("No file of the project names it.");
-				std::string tip = counted(count, "use") + " (a click lists them in the Inspector, each a Go to):";
+				if (!symbol || !count)
+					return std::string("No file of the project names it, nor does the game's code by a written key (a key "
+					                   "the code builds as it runs is not counted).");
+				const std::vector<const CodeTextKey *> code = code_reads_of(*graph, *symbol);
+				std::string tip = counted(count, "use") + " (a click lists the project's in the Inspector, each a Go to):";
 				size_t listed = 0;
 				for (const GraphEdge *edge : graph->users_of(*symbol)) {
 					if (++listed > 12) {
@@ -863,6 +867,10 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 					const std::string place = edge_place_words(*edge, source ? source->kind : AssetKind::Unknown);
 					tip += "\n" + (source ? source->logical_name : edge->source) + (place.empty() ? std::string() : ": " + place);
 				}
+				// The game's own code, which reads the string by its name: a rename or a removal changes what it shows.
+				if (!code.empty())
+					tip += "\nThe game itself, by name, in " + counted(code.size(), "place") + " (" + code.front()->reader +
+					       (code.size() > 1 ? " and others)" : ")");
 				return tip;
 			});
 		}

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <editor/assets/asset_registry.h>
+#include <editor/graph/graph_edge.h>
 #include <editor/model/finding_code_row.h>
 #include <editor/model/table_document.h>
 #include <formats/lwf/wav_pcm.h>
@@ -91,6 +92,11 @@ bool music_stream_pcm(const std::vector<uint8_t> &bytes, int place, lwf::WavPcm 
 // A stream's length in seconds, as the game streams it: its valid bytes, a left and a right sample a pair, at 22050
 // pairs a second [orig: Audio_StreamNextChunk @ 0x4ED7D0].
 double music_stream_seconds(const MusicBankStream &stream);
+
+// The streams a music script plays (DocumentType::record_references): each stream a symbol of its place ("0",
+// "1", ...), scoped to the bank's file name upper case ("GAMEMUS.SBF"), as the script's play names it [orig:
+// AudioVM_StartSound @ 0x671FF0 -> sub_671BC0 @ 0x671BC0, the bank's stream by that index].
+void music_bank_references(const Document &document, Extracted &out);
 
 // The music bank type's validator (DocumentType::validate_file): its source findings (a layout the writer lays out
 // otherwise) and a stream of no audio. A stream's name is no finding's: the game never reads one.

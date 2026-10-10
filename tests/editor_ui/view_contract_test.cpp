@@ -122,7 +122,7 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Config, "game.cfg", text_bytes("\r\n[Game]\r\nname = Views\r\n")},
 	        // A HUD layout (DI-20): its text in the script view, its HUD the Preview window's.
 	        {AssetKind::HudPosDefs, "hudpos.def", text_bytes("// soldier panel\r\nHUDHEALTH 25,741,177,751\r\n")},
-	        // The character attributes (DI-09's charattr follow-up): its text in the script view.
+	        // The character attributes (DI-09's charattr follow-up; S23 B): its classes as a tree.
 	        {AssetKind::CharAttrDefs, "charattr.def", text_bytes("// classes\r\n[CHARACTER1]\r\nJUNGLE_CAMMO = 5310\r\n")},
 	        // Round S23 lane A: a font beside its picture, a music bank's streams, a wave's picture and edits.
 	        {AssetKind::Font, "synth.fnt", file("fnt/synth_1page.fnt")},
@@ -130,6 +130,14 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Wave, "tone.wav", file("lwf/tone.wav")},
 	        // A face animation (round S23 lane A): its face, vertices, triangles and gestures a tree.
 	        {AssetKind::FaceAnimation, "person.grm", file("grm/person.grm")},
+	        // An AI profile and the HUD effects (S23 B): their rows as a tree.
+	        {AssetKind::AiProfile, "g_test.aip", text_bytes("type\tGROUND\r\nview_dist\t500\r\n")},
+	        {AssetKind::HudFxDefs, "hudfx.def", text_bytes("3DIPower2 p2.3di\r\n")},
+	        // The score table and the avatars table (S23 B): their rows as a tree, each block's or nationality's
+	        // records under it.
+	        {AssetKind::Score, "score.ini", text_bytes("VERSION 40\r\nGAMETYPE \"TDM\"\r\nVAR \"ENEMYKILL\" 5\r\n")},
+	        {AssetKind::AvatarDefs, "Avatars.def",
+	         text_bytes("define head HEAD_A\r\n{\r\n\tgraphic\thead_a.3di\r\n}\r\nnationality N00 AV_NAT\r\n{\r\n}\r\n")},
 	        // A texture (S18): a TGA our writer mints, its picture the tab's main view beside its facts.
 	        {AssetKind::Texture, "brick.tga", minted_tga()},
 	        // The sound lane: the minted bank, its sets and waves a tree with a Play heading the Inspector, and a
@@ -311,11 +319,10 @@ void test_every_view() {
 		types += drawn > 0 ? 1 : 0;
 	}
 	CHECK(types == kDocumentTypeCount, "every document type's view drawn");
-	CHECK(main_rows == 13 && scripts == 8,
-	      "every text type's row the Main role's (a particle file's, the HUD layout's and the character attributes' among "
-	      "them), its view the "
-	      "script view, and the mission's, the texture's, the environment's, the terrain's and the font's rows the Main role's "
-	      "too");
+	CHECK(main_rows == 12 && scripts == 7,
+	      "every text type's row the Main role's (a particle file's and the HUD layout's among them), its view the "
+	      "script view, and the mission's, the texture's, the environment's, the terrain's and the font's rows the Main "
+	      "role's too");
 	std::printf("%zu document types, %zu views over their files, %zu frames drawn, %zu script views\n", types, views,
 	            frames, scripts);
 }
