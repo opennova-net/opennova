@@ -54,6 +54,7 @@ void ObjectModel::rebuild_scene() {
 	level_bound_visuals_.clear();
 	applied_lod_ = -1;
 	skeletal_scene_ = false;
+	rest_rig_.unref();
 	skeleton_ = nullptr;
 	skeleton_skin_.unref();
 	skin_rest_binds_.clear();
@@ -106,10 +107,25 @@ void ObjectModel::rebuild_scene() {
 	refresh_live_panm_classification();
 	// A loaded .adm drives the model: build a Skeleton3D from its .bad
 	// skeleton — per-vertex skinned models AND rigid first-person weapons
-	// (fake skinning). Without a .adm the model renders static.
-	skeletal_scene_ = skeletal_.is_valid() && skeletal_->is_loaded();
+	// (fake skinning). Without a .adm the model renders static, unless it is
+	// per-vertex skinned with live part tracks: the game draws every model's
+	// parts through one bone array, its rows the entity's matrix with no clip,
+	// and composes each part's tracks over its row, the skinned strips' rows
+	// alike, so such a model draws through its bone table at rest and the
+	// tracks reach the vertices they weight (the BHD jaw's TALK; the witness
+	// is anim::SkeletalClips::load_rest's and threedi_panm_pose_parts_over's).
+	const bool clip_rig = skeletal_.is_valid() && skeletal_->is_loaded();
+	if (!clip_rig && has_live_panm_ && object_data_->is_skinned(active_lod_)) {
+		Ref<SkeletalAnim> rest;
+		rest.instantiate();
+		if (rest->load_rest(object_data_->get_bone_origins(0), object_data_->get_bone_parents(0))) {
+			rest_rig_ = rest;
+		}
+	}
+	const Ref<SkeletalAnim> &rig = clip_rig ? skeletal_ : rest_rig_;
+	skeletal_scene_ = rig.is_valid() && rig->is_loaded();
 	if (skeletal_scene_) {
-		build_skeleton();
+		build_skeleton(rig);
 		resolve_muzzle_userpoint();
 	}
 	const int bone_count =
@@ -512,9 +528,10 @@ void ObjectModel::harvest_level_surfaces(Vector<HarvestedSurface> &r_rows) {
 	}
 }
 
-// Build the Skeleton3D + rest-derived Skin from the loaded SkeletalAnim.
+// Build the Skeleton3D + rest-derived Skin from the loaded SkeletalAnim (the
+// clip's rig, or the bone table at rest).
 // [orig: BoneFile_Load @0x40fff0 builds the runtime skeleton.]
-void ObjectModel::build_skeleton() {
+void ObjectModel::build_skeleton(const Ref<SkeletalAnim> &p_rig) {
 	skeleton_ = memnew(Skeleton3D);
 	skeleton_->set_name("Skeleton3D");
 	// This model writes final bone poses directly; MANUAL removes Godot's
@@ -522,7 +539,7 @@ void ObjectModel::build_skeleton() {
 	skeleton_->set_modifier_callback_mode_process(
 			Skeleton3D::MODIFIER_CALLBACK_MODE_PROCESS_MANUAL);
 	add_child(skeleton_);
-	const Array bones = skeletal_->get_skeleton_bones();
+	const Array bones = p_rig->get_skeleton_bones();
 	// The rig is index-driven (row i is bone i; net-re §5.40). Godot refuses
 	// empty/duplicate/':'/'/' names; unique placeholders preserve row order.
 	HashMap<String, bool> used;
