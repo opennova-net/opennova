@@ -1320,6 +1320,25 @@ static int test_clip_preview() {
 	TEST_EXPECT(strutil_iequals(paired.model, "skinned.3di") && paired.source.find("Bent Enemy") != std::string::npos);
 	const std::vector<MapPlayer> enemies = map_players(*view.findings.graph, *view.project.scan, "anims/BEND.adm");
 	TEST_EXPECT(enemies.size() == 1 && strutil_iequals(enemies[0].model, "skinned.3di") && enemies[0].enemy_model.empty());
+
+	// S23 C: a clip two tables name, the first of them no item's (the base game's one1_s155.bad, which E_STAND.adm
+	// and one1.adm both name, E_STAND.adm no item's): it plays on the paired table's model, not on none.
+	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/anims/ASTAND.adm",
+	                                     test_io::read_file(view.project.root + "/anims/SKIN.adm")));
+	session.handle(request::rescan());
+	session.run_operations();
+	while (view.activity.validation.running) session.poll();
+	std::vector<std::string> naming;
+	for (const GraphEdge *edge : view.findings.graph->referrers_of_file("anims/walk.bad"))
+		if (edge->kind == ReferenceKind::Animation) naming.push_back(edge->source);
+	TEST_EXPECT(naming.size() >= 2 && strutil_iequals(naming.front(), "anims/ASTAND.adm"));
+	const PreviewRig shared =
+	        resolve_preview_rig(*view.findings.graph, *view.project.scan, "walk.bad", AssetKind::Animation, std::string());
+	TEST_EXPECT(strutil_iequals(shared.table, "SKIN.adm") && strutil_iequals(shared.model, "skinned.3di") &&
+	            shared.source.find("Skinned Thing") != std::string::npos);
+	const PreviewRig unpaired =
+	        resolve_preview_rig(*view.findings.graph, *view.project.scan, "ASTAND.adm", AssetKind::AnimationMap, std::string());
+	TEST_EXPECT(unpaired.model.empty() && strutil_iequals(unpaired.table, "ASTAND.adm"));
 	return 0;
 }
 

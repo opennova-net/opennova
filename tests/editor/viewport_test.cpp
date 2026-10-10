@@ -2236,8 +2236,9 @@ static int test_mission_devices() {
 	TEST_EXPECT(!document->dirty() && !document->can_undo() && viewport->scene().entity(item)->x == x);
 	TEST_EXPECT(device->last() == ViewportAction::Update && viewport->builds() == 1);
 	// The kind's limit of two: a model's device beside the missions', the third mission giving up
-	// the first's.
-	TEST_EXPECT(viewport_kind_row(ViewportKind::Mission).devices == 2);
+	// the first's; the map's (S23 C, the Preview window's target, every target pinned here) one, each
+	// mission's map giving up the one before.
+	TEST_EXPECT(viewport_kind_row(ViewportKind::Mission).devices == 2 && viewport_kind_row(ViewportKind::Map).devices == 1);
 	session.handle(request::open_document("models/armory.3di"));
 	devices.sync(session);
 	FakeDevice *model = devices.held("models/armory.3di", ViewportKind::Model);
@@ -2246,13 +2247,15 @@ static int test_mission_devices() {
 	devices.sync(session);
 	const std::string b = session.document_for("missions/b.bms")->path();
 	TEST_EXPECT(devices.held(a, ViewportKind::Mission) == device && devices.held(b, ViewportKind::Mission) != nullptr);
-	TEST_EXPECT(devices.cache.size() == 3);
+	TEST_EXPECT(devices.held(b, ViewportKind::Map) != nullptr && devices.held(a, ViewportKind::Map) == nullptr);
+	TEST_EXPECT(devices.cache.size() == 4);
 	session.handle(request::open_document("missions/c.bms"));
 	devices.sync(session);
 	const std::string c = session.document_for("missions/c.bms")->path();
 	TEST_EXPECT(devices.held(c, ViewportKind::Mission) != nullptr && devices.held(b, ViewportKind::Mission) != nullptr);
 	TEST_EXPECT(devices.held(a, ViewportKind::Mission) == nullptr && !session.viewports().find(a, ViewportKind::Mission)->attached());
-	TEST_EXPECT(devices.held("models/armory.3di", ViewportKind::Model) == model && devices.cache.size() == 3);
+	TEST_EXPECT(devices.held(c, ViewportKind::Map) != nullptr && devices.held(b, ViewportKind::Map) == nullptr);
+	TEST_EXPECT(devices.held("models/armory.3di", ViewportKind::Model) == model && devices.cache.size() == 4);
 	std::printf("test_mission_devices passed\n");
 	return 0;
 }
