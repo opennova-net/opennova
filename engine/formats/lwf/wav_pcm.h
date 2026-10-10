@@ -16,7 +16,7 @@ namespace lwf {
 
 struct WavPcm {
 	std::vector<uint8_t> pcm16;  // interleaved signed 16-bit LE frames
-	uint32_t sample_rate = 0;
+	uint32_t sample_rate = 0;  // the shell player's rate: a pitch of 0 the mixer's least step, 86
 	uint16_t channels = 0;  // 1 (2 only from wav_decode_pcm16_lenient)
 	// What the game's wave loader records for the wave, its AUD1 buffer's +4 and +8 (a dialog line's
 	// hold reads both, audio::dialog_clip_hold): the sample count, the data chunk's size as it says
@@ -92,6 +92,14 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 // AUD1 wave through, so a wave the game refuses can still be read and converted into one it takes.
 bool wav_decode_pcm16_lenient(const uint8_t *bytes, size_t size, WavPcm &r_out,
 		std::string &r_error);
+
+// The pitch scale a player of a decoded wave takes over the one its voice composes (`play_scale`,
+// the play factor): the mixer's step composes the play factor with the wave's own pitch,
+// (((play * factor) >> 16) * pitch + 0x400000) >> 23, so a wave of pitch 0 steps at 0 whatever the
+// play factor and is forced to the least step [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd4b0,
+// the pitch's mul @ 0x7bd603, the force @ 0x7bd619..0x7bd61d]: the rate its decode already hands the
+// player, so 1. Any other wave keeps `play_scale`.
+double wave_pitch_scale(uint32_t loader_pitch_q16, double play_scale);
 
 // The plain RIFF/WAVE the game's wave loader reads (docs/audio/lwf-dbf-sound-re.md, "The wave
 // loader's rules" [orig: Audio_LoadWavFileFromArchive @ 0x766480]): RIFF..WAVE, one 16-byte `fmt `

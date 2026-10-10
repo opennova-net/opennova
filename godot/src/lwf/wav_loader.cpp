@@ -1,4 +1,5 @@
 #include "lwf/wav_loader.h"
+#include "lwf/wave_stream.h"
 #include "util/string_convert.h"
 
 #include <godot_cpp/core/class_db.hpp>
@@ -13,6 +14,8 @@ namespace godot {
 
 void WavLoader::_bind_methods() {
 	ClassDB::bind_static_method("WavLoader", D_METHOD("from_bytes", "bytes"), &WavLoader::from_bytes);
+	ClassDB::bind_static_method("WavLoader", D_METHOD("pitch_scale_for", "stream", "pitch_scale"),
+			&WavLoader::pitch_scale_for);
 }
 
 Ref<AudioStreamWAV> WavLoader::from_bytes(const PackedByteArray &p_bytes) {
@@ -35,14 +38,23 @@ Ref<AudioStreamWAV> WavLoader::from_pcm(const opennova::lwf::WavPcm &decoded) {
 	if (!decoded.pcm16.empty()) {
 		std::memcpy(pcm.ptrw(), decoded.pcm16.data(), decoded.pcm16.size());
 	}
-	Ref<AudioStreamWAV> stream;
+	Ref<WaveStream> stream;
 	stream.instantiate();
 	stream->set_format(AudioStreamWAV::FORMAT_16_BITS); // always signed 16-bit out
 	stream->set_mix_rate(static_cast<int32_t>(decoded.sample_rate));
 	stream->set_stereo(decoded.channels == 2);
 	stream->set_loop_mode(AudioStreamWAV::LOOP_DISABLED);
 	stream->set_data(pcm);
+	stream->set_loader_pitch_q16(static_cast<int64_t>(decoded.loader_pitch_q16));
 	return stream;
+}
+
+double WavLoader::pitch_scale_for(const Ref<AudioStream> &p_stream, double p_pitch_scale) {
+	// A stream not decoded here carries no word and keeps the composed scale.
+	const WaveStream *wave = Object::cast_to<WaveStream>(p_stream.ptr());
+	if (wave == nullptr) return p_pitch_scale;
+	return opennova::lwf::wave_pitch_scale(static_cast<uint32_t>(wave->get_loader_pitch_q16()),
+			p_pitch_scale);
 }
 
 } // namespace godot

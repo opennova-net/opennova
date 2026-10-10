@@ -1,0 +1,28 @@
+#pragma once
+
+#include <godot_cpp/classes/audio_stream_wav.hpp>
+
+#include <cstdint>
+
+namespace godot {
+
+// A decoded wave's stream: an AudioStreamWAV that carries the game's wave loader pitch word
+// (opennova::lwf::WavPcm::loader_pitch_q16, Q16) its decode recorded. Every player of a decoded wave
+// sets the pitch scale WavLoader::pitch_scale_for gives over the one its voice composes, which reads
+// this word (opennova::lwf::wave_pitch_scale: a wave of pitch 0 keeps the mixer's least step whatever
+// the voice pitch). A stream that is not a WaveStream keeps the composed scale.
+class WaveStream : public AudioStreamWAV {
+	GDCLASS(WaveStream, AudioStreamWAV);
+
+protected:
+	static void _bind_methods();
+
+public:
+	void set_loader_pitch_q16(int64_t p_pitch_q16);
+	int64_t get_loader_pitch_q16() const;
+
+private:
+	int64_t loader_pitch_q16_ = 0x10000;
+};
+
+} // namespace godot

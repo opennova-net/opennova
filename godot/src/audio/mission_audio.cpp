@@ -862,8 +862,8 @@ void MissionAudio::tick(const Vector3 &p_camera_pos, double p_delta) {
 				(*binding)->get_bus());
 		player->set_position(Vector3(bind.row.pos[0], bind.row.pos[1], bind.row.pos[2]));
 		player->set_volume_db(static_cast<float>(SoundBank::volume_db_from_255(bind.row.vol)));
-		player->set_pitch_scale(static_cast<float>(
-				_pitch_scale((*binding)->get_descriptor(), bind.row.pitch_q16)));
+		player->set_pitch_scale(static_cast<float>(WavLoader::pitch_scale_for(*stream,
+				_pitch_scale((*binding)->get_descriptor(), bind.row.pitch_q16))));
 		player->set_process_mode(Node::PROCESS_MODE_INHERIT);
 		channel->set_candidate_id(bind.row.candidate_id);
 		player->play();
@@ -885,7 +885,8 @@ void MissionAudio::tick(const Vector3 &p_camera_pos, double p_delta) {
 			incumbent->set_volume_db(static_cast<float>(db));
 			changed = true;
 		}
-		const double pitch_scale = _pitch_scale((*binding)->get_descriptor(), update.row.pitch_q16);
+		const double pitch_scale = WavLoader::pitch_scale_for(incumbent->get_stream(),
+				_pitch_scale((*binding)->get_descriptor(), update.row.pitch_q16));
 		if (!Math::is_equal_approx(static_cast<double>(incumbent->get_pitch_scale()), pitch_scale)) {
 			incumbent->set_pitch_scale(static_cast<float>(pitch_scale));
 			changed = true;

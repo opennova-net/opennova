@@ -263,6 +263,7 @@ add_library(${TARGET_NAME} SHARED
     wac/wac_program.cpp
     lwf/lwf_data.cpp
     lwf/wav_loader.cpp
+    lwf/wave_stream.cpp
     audio/ambient_mixer.cpp
     audio/sound_selector.cpp
     audio/ambient_layer.cpp

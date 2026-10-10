@@ -54,6 +54,22 @@ uint32_t loader_pitch_q16(uint32_t rate) {
 	return static_cast<uint32_t>(((static_cast<uint64_t>(rate) << 16) + 22050u) / 44100u);
 }
 
+// The rate a pitch of 0 plays at. The mixer steps a channel each device frame by
+// (((play * factor) >> 16) * pitch + 0x400000) >> 23, the factor (44100 << 16) / device, and forces a
+// step of 0 to 1 [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd5f6..0x7bd60e, @ 0x7bd619..0x7bd61d;
+// AudioMixer_Init @ 0x7bd381..0x7bd393], a step counted in 1/512 of a sample: the position starts at
+// -(count << 9) - step [orig: sub_7BD671 @ 0x7bd684..0x7bd689], the mix loop adds the step to it each
+// device frame (channel 0's self-patched `add eax, step` @ 0x7bdd9e, the step stored through
+// off_79CBFC at 0x7bdd9f) and reads the sample at the position >> 9 (`sar eax, 9` @ 0x7bddc6). A
+// pitch of 0 plays 1/512 of a sample a device frame, whatever the play factor. The device runs at
+// the config's audio_rate, 44100 by default [orig: Config_SetDefaults @ 0x54d15b;
+// Game_InitSubsystems @ 0x4a727e] (the Options' WDM_RATE radio, which can pick 22050, is not
+// serviced, D-MNU-21): 44100 / 512, 86.13 Hz, truncated to the shell's whole mix rate. Every other
+// pitch hands the shell its own rate, not the step's 1/512 quantum (D-SND-50), and a rate past
+// INT32_MAX (an AUD1 pitch from 0xBE37C63A, a RIFF rate from 0x80000000) reaches the shell's player
+// as a negative mix rate (D-SND-52).
+constexpr uint32_t kPitchZeroRate = 44100u / 512u;
+
 // The loader's own form, an AUD1 buffer (bytes 41 55 44 31), which it copies as it is, unchecked
 // [orig: Audio_LoadWavFileFromArchive @ 0x766480, the magic @ 0x7664e2, the copy @ 0x7664e9..0x766511]:
 // the header its RIFF decodes write (@ 0x766603..0x76663c, @ 0x766708..0x766745,
@@ -100,8 +116,10 @@ bool decode_aud1(const uint8_t *bytes, size_t size, WavPcm &out, std::string &er
 	}
 	// The rate the ratio is nearest, for the shell's player (the mixer steps by the ratio itself): the
 	// inverse the dialog line's hold takes, (pitch * 44100 + 0x8000) >> 16 [orig: Dialog_LoadAudioClip
-	// @ 0x44dd8e..0x44dd9f, a signed imul; ours unsigned, the same below a pitch of 2^31].
-	out.sample_rate = static_cast<uint32_t>((uint64_t(pitch_q16) * 44100 + 0x8000) >> 16);
+	// @ 0x44dd8e..0x44dd9f, a signed imul; ours unsigned, the same below a pitch of 2^31]; a pitch of 0
+	// the mixer's least step [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd619..0x7bd61d].
+	out.sample_rate = pitch_q16 == 0 ? kPitchZeroRate
+	                                 : static_cast<uint32_t>((uint64_t(pitch_q16) * 44100 + 0x8000) >> 16);
 	out.channels = 1;
 	out.loader_samples = samples;
 	out.loader_pitch_q16 = pitch_q16;
@@ -387,9 +405,11 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 				walk.block_align);
 		r_out.loader_samples = count;
 	}
-	r_out.sample_rate = walk.rate;
 	r_out.channels = 1;
 	r_out.loader_pitch_q16 = loader_pitch_q16(walk.rate);
+	// The wave's own rate; a rate of 0, whose ratio is 0, the mixer's least step
+	// [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd619..0x7bd61d].
+	r_out.sample_rate = r_out.loader_pitch_q16 == 0 ? kPitchZeroRate : walk.rate;
 	return true;
 }
 
@@ -501,6 +521,10 @@ bool wav_decode_pcm16_lenient(const uint8_t *bytes, size_t size, WavPcm &r_out,
 	}
 	r_out.loader_pitch_q16 = loader_pitch_q16(sample_rate);
 	return true;
+}
+
+double wave_pitch_scale(uint32_t loader_pitch_q16, double play_scale) {
+	return loader_pitch_q16 == 0 ? 1.0 : play_scale;
 }
 
 bool wav_write_pcm_mono(const uint8_t *data, size_t size, uint32_t rate, uint16_t bits,

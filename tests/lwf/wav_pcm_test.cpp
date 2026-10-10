@@ -484,11 +484,36 @@ int main() {
 		aud[4] = 0; aud[5] = aud[6] = aud[7] = 0;
 		if (!expect(wav_decode_pcm16(aud.data(), aud.size(), out, error) && out.pcm16.empty() &&
 				out.loader_samples == 0, "AUD1 count 0 plays no sample")) return 1;
-		// A pitch of 0 is taken as it is, the rate it rounds to 0.
+		// A pitch of 0 is taken as it is and plays at the mixer's least step, 1/512 of a
+		// sample a frame of the 44100 Hz device (AudioChannel_ComputeMixCoefficients
+		// @ 0x7bd619..0x7bd61d): 86 Hz, not a rate of 0; the lenient decode alike.
 		aud[4] = 3;
 		aud[8] = aud[9] = aud[10] = aud[11] = 0;
 		if (!expect(wav_decode_pcm16(aud.data(), aud.size(), out, error) && out.loader_pitch_q16 == 0 &&
-				out.sample_rate == 0, "AUD1 pitch 0 is taken")) return 1;
+				out.sample_rate == 86 && out.pcm16.size() == 6, "AUD1 pitch 0 plays at the least step")) return 1;
+		if (!expect(opennova::lwf::wav_decode_pcm16_lenient(aud.data(), aud.size(), lenient, error) &&
+				lenient.sample_rate == 86, "the lenient decode plays AUD1 pitch 0 at the least step")) return 1;
+		// Whatever the voice's play factor: the step composes it with the wave's pitch, so a pitch
+		// of 0 keeps the least step and its player takes the scale 1 over any composed one; a wave
+		// of any other pitch keeps the composed scale (AudioChannel_ComputeMixCoefficients
+		// @ 0x7bd603, @ 0x7bd619..0x7bd61d).
+		if (!expect(opennova::lwf::wave_pitch_scale(out.loader_pitch_q16, 2.0) == 1.0 &&
+				opennova::lwf::wave_pitch_scale(out.loader_pitch_q16, 0.5) == 1.0 &&
+				opennova::lwf::wave_pitch_scale(0x8000, 2.0) == 2.0 &&
+				opennova::lwf::wave_pitch_scale(1, 0.5) == 0.5,
+				"a pitch-0 wave's player keeps the least step over any voice pitch")) return 1;
+	}
+	// A RIFF wave of rate 0, whose ratio ((0 << 16) + 22050) / 44100 is 0, plays at the
+	// least step too.
+	{
+		std::vector<uint8_t> data;
+		push_u16(data, 0x1234);
+		push_u16(data, 0xFEDC);
+		const std::vector<uint8_t> rateless = make_wav(1, 1, 0, 2, 16, data);
+		WavPcm out;
+		if (!expect(wav_decode_pcm16(rateless.data(), rateless.size(), out, error) &&
+				out.loader_pitch_q16 == 0 && out.sample_rate == 86 && out.pcm16.size() == 4,
+				"RIFF rate 0 plays at the least step")) return 1;
 	}
 	// The width byte: 2 is 16-bit, any other 8-bit [orig: sub_7BD671 @ 0x7bd692].
 	for (const uint8_t width : {uint8_t(0), uint8_t(3), uint8_t(0xFF)}) {
