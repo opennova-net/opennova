@@ -280,10 +280,17 @@ ViewportKind preview_kind(const DocumentsView &documents, ViewportKind last) {
 				documents.previews[files].path != documents.active)
 			return files;
 	}
+	// A kind that shows beside its document's own picture (a mission's map) shows only where it was asked for (the Map
+	// tool's ask, while that document stays active); the Windows menu's tick keeps the kind shown before (S15).
+	const auto asked = [&](ViewportKind kind) {
+		return !viewport_kind_beside_picture(kind) ||
+		       (!documents.beside.empty() && documents.beside == documents.active && documents.previews[kind].path == documents.active);
+	};
+	if (!asked(last)) last = ViewportKind::kCount;
 	ViewportKind kind = last;
 	if (const DocumentBase *active = open_at(documents, documents.active)) {
 		const ViewportKind fed = preview_kind_of(asset_kind_row(active->kind()).document);
-		if (fed != ViewportKind::kCount) kind = fed;
+		if (fed != ViewportKind::kCount && asked(fed)) kind = fed;
 	}
 	// A files kind the Preview window showed stays only while Files leads.
 	if (kind != ViewportKind::kCount && viewport_kind_row(kind).role != ViewportRole::Preview) kind = ViewportKind::kCount;
@@ -295,7 +302,7 @@ ViewportKind preview_kind(const DocumentsView &documents, ViewportKind last) {
 	    !documents.previews[last].path.empty())
 		return last;
 	for (const ViewportKindRow &row : kRows)
-		if (row.role == ViewportRole::Preview && !documents.previews[row.kind].path.empty()) return row.kind;
+		if (row.role == ViewportRole::Preview && !documents.previews[row.kind].path.empty() && asked(row.kind)) return row.kind;
 	return ViewportKind::kCount;
 }
 
@@ -305,6 +312,8 @@ void update_preview_targets(DocumentsView &documents) {
 		documents.files_lead = false;
 		documents.previews_active = documents.active;
 	}
+	// The Map tool's ask holds while its document stays active.
+	if (documents.beside != documents.active) documents.beside.clear();
 	const DocumentBase *shown = open_at(documents, documents.active);
 	for (size_t i = 0; i < kViewportKindCount; ++i) {
 		const auto kind = static_cast<ViewportKind>(i);

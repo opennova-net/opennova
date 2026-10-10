@@ -454,8 +454,16 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 	// The mission's 2D map (S23 C) in the Preview window beside the picture, which stands aside for a mission until asked.
 	if (ui_kit::tool(row, "Map", true, "Show the mission's 2D map beside the picture (the Preview window): from straight "
 										 "above, north up, the terrain as the game's commander map draws it, its records "
-										 "as pins you select and move as here."))
-		window_requests::focus(workspace, "preview");
+										 "as pins you select and move as here.")) {
+		// The map asked for (the Windows menu's tick shows the kind shown before), and the window brought forward.
+		io::JsonValue change = io::JsonValue::make_object();
+		io::JsonValue document = io::JsonValue::make_object();
+		document.set("path", io::JsonValue::make_string(mission.path()));
+		document.set("map", io::JsonValue::make_bool(true));
+		change.set("document", std::move(document));
+		change.set("focus", io::JsonValue::make_string("preview"));
+		workspace.request(request::set_workspace(io::json_write(change)));
+	}
 	// The mission's script (S15): the <stem>.wac the game compiles with it [orig: WacScript_InitAndLoad @
 	// 0x4F91F0], opened, or made beside the mission where the project has none.
 	const MissionScript script = mission_script(view, mission.path());

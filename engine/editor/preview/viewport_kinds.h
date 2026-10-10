@@ -114,8 +114,8 @@ ViewportKind preview_kind(const DocumentsView &documents, ViewportKind last);
 // type, a kind that shows a row of it the row the selection lands in, keeping the one it had while
 // none is selected; a target whose document closed, or whose row went, cleared; a Main-role kind's
 // empty but a files kind's, which is the file Files selects where the kind draws its type. Files
-// stops leading once another document is made active. Then the kind it shows
-// (DocumentsView::preview_shown, preview_kind over the one before).
+// stops leading once another document is made active, and the Map tool's ask (DocumentsView::beside) goes with
+// it. Then the kind it shows (DocumentsView::preview_shown, preview_kind over the one before).
 void update_preview_targets(DocumentsView &documents);
 
 } // namespace opennova::editor
