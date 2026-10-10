@@ -3,7 +3,8 @@
 // tone; not a stereo wave, a 24-bit or float one, a LIST ahead of the data, an ADPCM wave with no fact
 // chunk. A wave the game refuses converts into one it takes, the samples kept; a wave's facts: the
 // format, the peak and the RMS of a sine at 0.5, its picture. The retail leg (OPENNOVA_JO_ASSETS): every
-// shipped wave the loader takes but DSkid.wav (D-SND-33), by the check and by the runtime's decode.
+// shipped wave the loader takes but DSkid.wav (D-SND-33), by the check and by the runtime's decode, and
+// every IMA ADPCM one decoded to its fact count, as a reference decode written apart decodes it (D-SND-45).
 #include <formats/lwf/wav_source.h>
 
 #include <formats/bfc1/bfc1.h>
@@ -13,7 +14,9 @@
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -224,17 +227,72 @@ int test_waves() {
 	return 0;
 }
 
+// The loader's 4-bit decode written apart from the port, from the witnessed steps [orig:
+// Audio_LoadWavFileFromArchive @ 0x766480, @ 0x76678a..0x7668aa; Audio_AdpcmDecodeNibbleStep
+// @ 0x7bf250]: the fact count of samples (none for 0 or less); a block's predictor, then per byte its
+// low and its high nibble, block_align read signed less its 4-byte header; a nibble n moves the sample
+// by step * (2 (n & 7) + 1) / 8, floored, negative for n & 8, held to int16; the index moves by -1 for
+// n & 7 under 4 and by 2 ((n & 7) - 3) otherwise, held to 0..88. It reads on to the file's end, as the
+// port does. `outside` counts the blocks whose step index is outside 0..88 (D-SND-47).
+std::vector<int16_t> reference_ima(const std::vector<uint8_t> &b, const WaveLoaderWalk &walk, size_t &outside) {
+	static const int kStep[89] = {
+		7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97,
+		107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724, 796,
+		876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871,
+		5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623,
+		27086, 29794, 32767};
+	std::vector<int16_t> out;
+	long count = long(int32_t(io::read_u32_le(b.data() + walk.fact + 8)));
+	const int per_block = int(int16_t(walk.block_align)) - 4;
+	size_t p = walk.data;
+	while (count > 0 && p + 3 <= b.size()) {
+		int s = int16_t(io::read_u16_le(b.data() + p));
+		int index = int8_t(b[p + 2]);
+		if (index < 0 || index > 88) ++outside;
+		p += 4;
+		out.push_back(int16_t(s));
+		--count;
+		for (int k = 0; k < per_block && count > 0; ++k, ++p) {
+			if (p >= b.size()) {
+				count = 0;
+				break;
+			}
+			for (int half = 0; half < 2 && count > 0; ++half) {
+				const int n = (b[p] >> (4 * half)) & 15;
+				const long mag = long(kStep[std::clamp(index, 0, 88)]) * (2 * (n & 7) + 1);
+				const long diff = (n & 8) ? -((mag + 7) / 8) : mag / 8;
+				s = int(std::clamp<long>(s + diff, -32768, 32767));
+				index = std::clamp((n & 7) < 4 ? index - 1 : index + 2 * ((n & 7) - 3), 0, 88);
+				out.push_back(int16_t(s));
+				--count;
+			}
+		}
+	}
+	return out;
+}
+
+// FNV-1a over the samples' little-endian bytes.
+uint32_t fnv1a(const std::vector<uint8_t> &bytes) {
+	uint32_t h = 0x811C9DC5u;
+	for (const uint8_t c : bytes) h = (h ^ c) * 0x01000193u;
+	return h;
+}
+
 // Every shipped wave the game's loader takes, by the check's own walk, but one: DSkid.wav, the 16-bit
 // stereo wave game.lwf's IMP_TMBL_DSKID plays, which the loader's channel test refuses [orig:
 // Audio_LoadWavFileFromArchive @ 0x7666db], so retail plays nothing for that set (D-SND-33). The
-// runtime's decode, handed the bytes as the VFS reads them (BFC1 undone), refuses the same one.
+// runtime's decode, handed the bytes as the VFS reads them (BFC1 undone), refuses the same one. Every
+// IMA ADPCM wave decodes its fact count of samples, each the reference decode's (D-SND-45), none with a
+// block's step index outside 0..88; xpmid1.wav's 37648 samples hash as the reference computes them.
 int test_retail_waves() {
 	const std::string assets = retail::assets();
 	if (assets.empty()) {
 		retail::skip_leg("OPENNOVA_JO_ASSETS (every shipped wave through the loader's walk)");
 		return 0;
 	}
-	size_t waves = 0;
+	size_t waves = 0, ima = 0, ima_counted = 0, ima_matched = 0, outside = 0;
+	uint32_t xpmid1 = 0;
+	size_t xpmid1_samples = 0;
 	std::vector<std::string> refused, undecoded;
 	std::error_code ec;
 	for (const auto &entry : std::filesystem::directory_iterator(io::os_path(assets), ec)) {
@@ -246,13 +304,31 @@ int test_retail_waves() {
 		if (!check.plays) refused.push_back(name);
 		WavPcm pcm;
 		std::string error;
-		if (!bfc1::bfc1_unpack(bytes) || !wav_decode_pcm16(bytes.data(), bytes.size(), pcm, error))
+		if (!bfc1::bfc1_unpack(bytes) || !wav_decode_pcm16(bytes.data(), bytes.size(), pcm, error)) {
 			undecoded.push_back(name);
+			continue;
+		}
+		const WaveLoaderWalk walk = wave_loader_walk(bytes.data(), bytes.size());
+		if (walk.bits != 4) continue;
+		++ima;
+		const std::vector<int16_t> reference = reference_ima(bytes, walk, outside);
+		std::vector<uint8_t> reference_pcm;
+		for (const int16_t s : reference) io::append_u16_le(reference_pcm, uint16_t(s));
+		ima_counted += pcm.pcm16.size() / 2 == pcm.loader_samples ? 1 : 0;
+		ima_matched += pcm.pcm16 == reference_pcm ? 1 : 0;
+		if (name == "xpmid1.wav") {
+			xpmid1 = fnv1a(reference_pcm);
+			xpmid1_samples = reference.size();
+		}
 	}
-	std::printf("retail: %zu waves, %zu the check refuses, %zu the decode refuses\n", waves, refused.size(),
-	            undecoded.size());
+	std::printf("retail: %zu waves, %zu the check refuses, %zu the decode refuses; %zu IMA ADPCM, %zu of the fact "
+	            "count, %zu the reference's, %zu blocks indexed outside 0..88; xpmid1.wav %zu samples, %08X\n",
+	            waves, refused.size(), undecoded.size(), ima, ima_counted, ima_matched, outside, xpmid1_samples,
+	            unsigned(xpmid1));
 	TEST_EXPECT(waves > 100 && refused == std::vector<std::string>({"dskid.wav"}));
 	TEST_EXPECT(undecoded == std::vector<std::string>({"dskid.wav"}));
+	TEST_EXPECT(ima == 1907 && ima_counted == ima && ima_matched == ima && outside == 0);
+	TEST_EXPECT(xpmid1_samples == 37648 && xpmid1 == 0x44A6CE0Du);
 	return 0;
 }
 

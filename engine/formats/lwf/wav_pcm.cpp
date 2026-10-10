@@ -108,12 +108,12 @@ bool decode_aud1(const uint8_t *bytes, size_t size, WavPcm &out, std::string &er
 	return true;
 }
 
-// --- WAV IMA-ADPCM (audioFormat 0x11) decode to signed 16-bit PCM ---
-// NovaLogic stores voice/zone audio as 4-bit IMA-ADPCM (mono, block-based). This
-// is the standard Microsoft/IMA scheme: each block begins with a per-channel
-// header (int16 predictor + uint8 step index), then 4-bit nibbles decoded via the
-// step/index tables. Stereo (defensive) interleaves 4-byte (8-nibble) words per
-// channel after the headers.
+// --- WAV IMA ADPCM (audioFormat 0x11) decode to signed 16-bit PCM ---
+// NovaLogic stores voice/zone audio as 4-bit IMA ADPCM, mono, block by block: each block a header
+// (int16 predictor, step index byte, a byte unread), then 4-bit nibbles stepped through the tables.
+// The step at an index and the index's move by a nibble are the standard IMA tables, which the game's
+// loader holds as word_7BF300 and dword_7BF3B2 [orig: Audio_AdpcmDecodeNibbleStep @ 0x7bf250,
+// read @ 0x7bf256 and @ 0x7bf25e].
 const int IMA_STEP_TABLE[89] = {
 	7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
 	50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230,
@@ -123,7 +123,15 @@ const int IMA_STEP_TABLE[89] = {
 	12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767
 };
 const int IMA_INDEX_TABLE[16] = { -1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8 };
+// The loader's scale of a nibble's step, in Q16: 0x2000 * (2n + 1) for its low three bits n, negative
+// for its fourth (dword_7BF2C0) [orig: Audio_AdpcmDecodeNibbleStep @ 0x7bf265].
+const int32_t ADPCM_SCALE_TABLE[16] = {
+	0x2000, 0x6000, 0xA000, 0xE000, 0x12000, 0x16000, 0x1A000, 0x1E000,
+	-0x2000, -0x6000, -0xA000, -0xE000, -0x12000, -0x16000, -0x1A000, -0x1E000
+};
 
+// The tooling's nibble step (decode_ima_adpcm_standard), not the loader's: the standard IMA sum of
+// the step's shifts, each truncated.
 inline int16_t ima_decode_nibble(uint8_t nib, int &predictor, int &index) {
 	const int step = IMA_STEP_TABLE[index];
 	int diff = step >> 3;
@@ -155,8 +163,11 @@ inline int16_t ima_decode_nibble(uint8_t nib, int &predictor, int &index) {
 	return static_cast<int16_t>(predictor);
 }
 
-// Returns interleaved signed-16-bit-LE PCM, or empty on a malformed stream.
-std::vector<uint8_t> decode_ima_adpcm(const uint8_t *data, uint32_t size,
+// The tooling's IMA ADPCM read (wav_decode_pcm16_lenient), not the loader's: every block the data
+// holds whole or in part, each nibble by the standard steps above, mono or stereo (4-byte nibble words
+// round-robin per channel after the headers). Interleaved signed 16-bit LE PCM, or empty on a
+// malformed stream.
+std::vector<uint8_t> decode_ima_adpcm_standard(const uint8_t *data, uint32_t size,
 		int channels, uint32_t block_align) {
 	const uint32_t header_bytes = static_cast<uint32_t>(4 * channels);
 	if (block_align < header_bytes || channels < 1 || channels > 2) {
@@ -213,6 +224,62 @@ std::vector<uint8_t> decode_ima_adpcm(const uint8_t *data, uint32_t size,
 		}
 	}
 	return out;
+}
+
+// One nibble of the game's loader's IMA ADPCM decode [orig: Audio_AdpcmDecodeNibbleStep @ 0x7bf250]:
+// the nibble the low four bits (@ 0x7bf253), the step at the index as it stands (@ 0x7bf256), the
+// index moved by the nibble (@ 0x7bf25e), the sample moved by (step * scale) >> 16, floored (imul;
+// shrd 16 @ 0x7bf265..0x7bf272), and held to int16 (@ 0x7bf274..0x7bf289), the index to 0..88
+// (@ 0x7bf28e..0x7bf29a). The index comes in outside 0..88 only as a block's header byte, where the
+// loader reads the step past the table's ends in the image; ours reads it at the end it passed
+// (D-SND-47).
+void adpcm_nibble_step(uint32_t nibble, int32_t &sample, int32_t &index) {
+	nibble &= 0x0F;
+	const int32_t step = IMA_STEP_TABLE[index < 0 ? 0 : (index > 88 ? 88 : index)];
+	index += IMA_INDEX_TABLE[nibble];
+	// The 64-bit product shifted right, floored (an arithmetic shift, as shrd over imul's edx:eax).
+	sample += static_cast<int32_t>((static_cast<int64_t>(step) * ADPCM_SCALE_TABLE[nibble]) >> 16);
+	if (sample < INT16_MIN) sample = INT16_MIN;
+	if (sample > INT16_MAX) sample = INT16_MAX;
+	if (index < 0) index = 0;
+	if (index > 88) index = 88;
+}
+
+// The game's loader's IMA ADPCM decode [orig: Audio_LoadWavFileFromArchive @ 0x766480, the 4-bit leg
+// @ 0x766783..0x7668aa]: `count` samples, the fact chunk's (@ 0x76678a), none for a count of 0 or
+// less (@ 0x7667fb), from the data's first byte. Each block its 4-byte header, the predictor a sample
+// of its own and the step index a signed byte (@ 0x766801..0x76681e), then block_align - 4 bytes,
+// block_align read signed (@ 0x766786..0x76679e), each byte its low nibble and then its high one
+// (@ 0x766836..0x76688d); a block_align of 4 or under is a header alone (@ 0x766834). The decode stops
+// the moment the count is spent, mid-block too (@ 0x766823, @ 0x766866, @ 0x766896). The loader reads
+// on for the count, past the data chunk (its size unread) and past the file's end (unwitnessed):
+// ours reads to the end of the bytes and stops there. Signed 16-bit LE PCM.
+std::vector<uint8_t> decode_ima_adpcm_loader(const uint8_t *bytes, size_t size, size_t data,
+		int32_t count, uint16_t block_align) {
+	std::vector<uint8_t> out;
+	const int32_t block_bytes = static_cast<int32_t>(static_cast<int16_t>(block_align)) - 4;
+	if (count <= 0 || data > size) return out;
+	out.reserve(2 * std::min<size_t>(static_cast<size_t>(count), 2 * (size - data) + 1));
+	size_t at = data;
+	for (;;) {
+		if (at + 3 > size) return out;
+		int32_t sample = static_cast<int16_t>(io::read_u16_le(bytes + at));
+		int32_t index = static_cast<int8_t>(bytes[at + 2]);
+		at += 4;
+		io::append_u16_le(out, static_cast<uint16_t>(sample));
+		if (--count <= 0) return out;
+		for (int32_t n = 0; n < block_bytes; ++n) {
+			if (at >= size) return out;
+			// The byte sign-extended (movsx @ 0x766836); its high nibble shifted down (@ 0x76686f).
+			const uint32_t byte = static_cast<uint32_t>(static_cast<int8_t>(bytes[at++]));
+			adpcm_nibble_step(byte, sample, index);
+			io::append_u16_le(out, static_cast<uint16_t>(sample));
+			if (--count <= 0) return out;
+			adpcm_nibble_step(byte >> 4, sample, index);
+			io::append_u16_le(out, static_cast<uint16_t>(sample));
+			if (--count <= 0) return out;
+		}
+	}
 }
 
 }  // namespace
@@ -313,13 +380,12 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 		r_out.pcm16.assign(src, src + data_size);
 		r_out.loader_samples = walk.data_size >> 1;
 	} else {
-		r_out.pcm16 = decode_ima_adpcm(src, data_size, 1, walk.block_align);
-		if (r_out.pcm16.empty()) {
-			r_error = "failed to decode IMA-ADPCM (block_align " +
-					std::to_string(walk.block_align) + ")";
-			return false;
-		}
-		r_out.loader_samples = walk.fact + 12 <= size ? io::read_u32_le(bytes + walk.fact + 8) : 0;
+		// IMA ADPCM: the fact chunk's count of the loader's own nibble steps, read on from the data
+		// [orig: @ 0x76678a..0x7668aa], the count its record (@ 0x7667ba).
+		const uint32_t count = walk.fact + 12 <= size ? io::read_u32_le(bytes + walk.fact + 8) : 0;
+		r_out.pcm16 = decode_ima_adpcm_loader(bytes, size, walk.data, static_cast<int32_t>(count),
+				walk.block_align);
+		r_out.loader_samples = count;
 	}
 	r_out.sample_rate = walk.rate;
 	r_out.channels = 1;
@@ -411,7 +477,7 @@ bool wav_decode_pcm16_lenient(const uint8_t *bytes, size_t size, WavPcm &r_out,
 		}
 	} else if (audio_format == 0x11) {
 		// IMA-ADPCM (NovaLogic voice / zone audio) -> signed 16-bit PCM.
-		r_out.pcm16 = decode_ima_adpcm(src, data_size, channels, block_align);
+		r_out.pcm16 = decode_ima_adpcm_standard(src, data_size, channels, block_align);
 		if (r_out.pcm16.empty()) {
 			r_error = "failed to decode IMA-ADPCM (block_align " +
 					std::to_string(block_align) + ")";

@@ -53,8 +53,9 @@ std::string wave_format_words(const WaveFormat &format);
 
 // A wave's samples as an audio program reads them: interleaved, each -1..1, and the format they came in.
 // PCM of 8 (unsigned), 16, 24 or 32 bits, IEEE float of 32 or 64 bits, the extensible form of either, IMA
-// ADPCM and AUD1 (through the game's decode as tooling reads it, wav_decode_pcm16_lenient: stereo, or no
-// fact chunk, read too), BFC1 undone first. False, with `error`, for anything else.
+// ADPCM and AUD1 (through wav_decode_pcm16_lenient: IMA ADPCM by the standard decode, every block, stereo
+// or no fact chunk read too; AUD1 as the game reads it), BFC1 undone first. False, with `error`, for
+// anything else.
 struct WaveSamples {
 	WaveFormat format;
 	uint32_t rate = 0;

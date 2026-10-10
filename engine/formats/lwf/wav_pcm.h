@@ -75,19 +75,21 @@ WaveLoaderWalk wave_loader_walk(const uint8_t *bytes, size_t size);
 // mono signed samples, 16-bit where its width byte is 2 and 8-bit otherwise; the bytes past its count
 // excluded), copied unchecked, else a RIFF WAVE through wave_loader_walk, its samples by their width
 // alone: 8 bits PCM (unsigned, upconverted signed<<8), 16 bits PCM (passthrough), 4 bits mono block
-// IMA ADPCM. False with r_error set for an AUD1 buffer that ends inside its header and for every wave
-// the walk refuses (an AOA1 buffer among them), which the game plays nothing for. A data chunk, or an
-// AUD1 buffer's samples, running past the bytes plays the bytes there. One leg is not yet the
-// loader's: its IMA ADPCM decode is the fact chunk's count of its own nibble steps (D-SND-45).
+// IMA ADPCM by the loader's own decode, exactly the fact chunk's count of its own nibble steps, read
+// on from the data (none for a count of 0 or less). False with r_error set for an AUD1 buffer that
+// ends inside its header and for every wave the walk refuses (an AOA1 buffer among them), which the
+// game plays nothing for. A data chunk, an AUD1 buffer's samples or an IMA ADPCM count running past
+// the bytes plays the bytes there.
 bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 		std::string &r_error);
 
 // The tooling's read of the same forms, not a port: the RIFF chunks walked as the form lays them
 // (padded to an even size, every chunk read, the last data kept), the format by its tag (1 PCM8 or
 // PCM16, 0x11 IMA ADPCM: mono, or stereo interleaving 4-byte nibble words round-robin per channel),
-// one or two channels, IMA ADPCM with or without a fact chunk; an AUD1 buffer as wav_decode_pcm16
-// reads it. What lwf::decode_wave_source reads a modder's IMA ADPCM or AUD1 wave through, so a wave
-// the game refuses can still be read and converted into one it takes.
+// one or two channels, IMA ADPCM with or without a fact chunk, decoded as an audio program decodes
+// it (every block the data holds, each nibble by the standard IMA steps, not the loader's); an AUD1
+// buffer as wav_decode_pcm16 reads it. What lwf::decode_wave_source reads a modder's IMA ADPCM or
+// AUD1 wave through, so a wave the game refuses can still be read and converted into one it takes.
 bool wav_decode_pcm16_lenient(const uint8_t *bytes, size_t size, WavPcm &r_out,
 		std::string &r_error);
 
