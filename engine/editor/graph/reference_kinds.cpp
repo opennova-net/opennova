@@ -416,8 +416,16 @@ std::string item_missing(const AssetGraph &graph, const GraphEdge &edge) {
 	if (named_by_class_cammo(edge))
 		return " (type id " + written + "), which the project does not have: a player of the class spawns as items.def's "
 		       "first row instead.";
+	if (!edge.fallback.empty())
+		return " (type id " + written + "), which the project does not have, nor an item named as the ammo ('" +
+		       edge.fallback + "'), which the game takes next: it warns that it finds none and keeps no item.";
 	return " (type id " + written + "), which the project does not have: the game takes the item named as the record "
 	       "instead, else warns that it finds none.";
+}
+
+// An item by its primary name, only ever an edge's fallback (an ammo's tracer): its missing is the item edge's.
+std::string item_name_missing(const AssetGraph &, const GraphEdge &) {
+	return ", which no item of the project is named: the game warns that it finds none.";
 }
 
 // The game spawns the class's player as another item: a warning, the game runs on.
@@ -826,6 +834,13 @@ constexpr ReferenceKindRow kRows[] = {
 	        .scoped(true)
 	        .tolerated(stream_missing)
 	        .message_reads_files()
+	        .row,
+	// An item by its primary name, the first of it without case [orig: ItemList_FindIndexByPrimaryName @
+	// 0x49E010, stricmp over the items in order]: an ammo's tracer item, where its type id finds none, is the item
+	// named as the ammo (GraphEdge::fallback_kind).
+	Row(ReferenceKind::ItemName, "item_name", "the item", "item")
+	        .symbol(NameCase::NoCase, AssetKind::ItemDefs)
+	        .tolerated(item_name_missing)
 	        .row,
 };
 

@@ -176,11 +176,11 @@ static int test_blank_project() {
 	TEST_EXPECT(!font_file.empty() && !graph.referrers_of_file(font_file).empty());
 	TEST_EXPECT(graph.referrers_of_file("nothing.fnt").empty());
 	// The blank tables define nothing yet: the stylesheet's variables, the blank item
-	// table's null marker (its id and its alias), the blank menus' screens and windows, the blank SndProf.def's
-	// "default" profile and the blank _ffp.fx's fixed-function shader tags are the symbols.
+	// table's null marker (its id, its alias and its name), the blank menus' screens and windows, the blank
+	// SndProf.def's "default" profile and the blank _ffp.fx's fixed-function shader tags are the symbols.
 	for (const GraphSymbol &symbol : all_symbols(graph))
 		TEST_EXPECT(symbol.kind == ReferenceKind::StyleVar || symbol.kind == ReferenceKind::Item ||
-		            symbol.kind == ReferenceKind::ItemAlias ||
+		            symbol.kind == ReferenceKind::ItemAlias || symbol.kind == ReferenceKind::ItemName ||
 		            symbol.kind == ReferenceKind::MenuScreen || symbol.kind == ReferenceKind::MenuWindow ||
 		            symbol.kind == ReferenceKind::SoundProfile || symbol.kind == ReferenceKind::Shader);
 	TEST_EXPECT(graph.resolve(ReferenceKind::Shader, "FF_ST_OP") == ReferenceStatus::Present &&
@@ -1639,7 +1639,7 @@ static int test_reference_kind_rows() {
 		                       kind == ReferenceKind::SoundProfile || kind == ReferenceKind::Shader ||
 		                       kind == ReferenceKind::Particle || kind == ReferenceKind::AnimationKey ||
 		                       kind == ReferenceKind::ItemAlias || kind == ReferenceKind::AvatarPart ||
-		                       kind == ReferenceKind::Dialog || kind == ReferenceKind::MusicStream;
+		                       kind == ReferenceKind::Dialog || kind == ReferenceKind::MusicStream || kind == ReferenceKind::ItemName;
 		TEST_EXPECT(row.severity_when_missing == (tolerated ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error));
 	}
 	ReferenceKind kind = ReferenceKind::None;

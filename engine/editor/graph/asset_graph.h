@@ -251,6 +251,9 @@ public:
 	// The name of the two a symbol kind's edge reaches (its value, or its fallback where only that
 	// one is defined in the first scope either is found in); the value where neither is.
 	const std::string &reached_name(const GraphEdge &edge) const;
+	// The kind the name an edge reaches is a name of where it is its fallback's of another kind
+	// (GraphEdge::fallback_kind), else None (the edge's own).
+	ReferenceKind reached_kind(const GraphEdge &edge) const;
 	// The edges of `kind` with a fallback (GraphEdge::fallback) that name `name` as their value or
 	// their fallback, in the files' order: what a rename to `name` checks (a use it would take over).
 	std::vector<const GraphEdge *> edges_naming(ReferenceKind kind, const std::string &name) const;

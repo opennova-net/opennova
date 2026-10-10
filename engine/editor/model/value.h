@@ -92,6 +92,7 @@ enum class ReferenceKind {
 	FaceVertex,     // a face animation's vertex by its index in the file's vertices (a triangle's corner)
 	FaceAnimation,  // a person's face animation, the .grm its model's name makes (an item's graphic)
 	MusicStream,    // a music bank's stream by its place, in the bank the scope names (a music script's play)
+	ItemName,       // an item by its primary name, the first of it without case (an ammo's tracer, by the ammo's name)
 };
 
 // Whether the game reads a field on a particular record (Document::field_on). Ignored is

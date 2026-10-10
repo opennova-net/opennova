@@ -222,6 +222,11 @@ static int test_fields_are_references() {
 	const GraphEdge *foe = edge_of(graph, ammo, "foe_trcr_type_id", "100777");
 	TEST_EXPECT(foe && graph.resolve(*foe) == ReferenceStatus::Missing);
 	TEST_EXPECT(missing_message(view, ammo, "foe_trcr_type_id", "100777").find("(type id 777)") != std::string::npos);
+	// Where its type id finds no item, the tracer is the item named as the ammo (ItemName, the edge's fallback):
+	// none named AMMO_T yet, which the finding says.
+	TEST_EXPECT(foe && foe->fallback == "AMMO_T" && foe->fallback_kind == ReferenceKind::ItemName && !friendly->fallback.empty());
+	TEST_EXPECT(missing_message(view, ammo, "foe_trcr_type_id", "100777").find("nor an item named as the ammo ('AMMO_T')") !=
+	            std::string::npos);
 	// A missing effect is tolerated: the game plays stockeffect's copy.
 	const GraphEdge *victim = edge_of(graph, ammo, "secondary_effect", "Effect_gone");
 	TEST_EXPECT(victim && victim->kind == ReferenceKind::Particle);
@@ -341,6 +346,32 @@ static int test_complete_query() {
 	return 0;
 }
 
+// A tracer whose type id finds no item is the item named as the ammo, the first of the name without case [orig:
+// AmmoDef_ParseProperty @ 0x40A646..0x40A668 -> ItemList_FindIndexByPrimaryName @ 0x49E010]: the foe tracer 777
+// reaches the item "ammo_t", whose uses are the ammo's field; a later item of the name is inert.
+static int test_tracer_by_name() {
+	Project project;
+	TEST_EXPECT(setup(project));
+	TEST_EXPECT(project.write(project.path("items.def"), std::string(kItems) +
+	                                                         "begin \"ammo_t\"\nid 100900\ntype building\nend\n"
+	                                                         "begin \"AMMO_T\"\nid 100901\ntype building\nend\n"));
+	project.rescan();
+	const AssetGraph &graph = project.graph();
+	const std::string ammo = project.path("ammo.def");
+	const GraphEdge *foe = edge_of(graph, ammo, "foe_trcr_type_id", "100777");
+	TEST_EXPECT(foe && graph.resolve(*foe) == ReferenceStatus::Present);
+	const GraphSymbol *item = foe ? graph.symbol_reached(*foe) : nullptr;
+	TEST_EXPECT(item && item->kind == ReferenceKind::ItemName && item->display == "ammo_t");
+	if (item) {
+		const std::vector<const GraphEdge *> users = graph.users_of(*item);
+		TEST_EXPECT(users.size() == 1 && users[0] == foe);
+	}
+	TEST_EXPECT(missing_message(project.session.view(), ammo, "foe_trcr_type_id", "100777").empty());
+	const std::vector<const GraphSymbol *> named = graph.symbols_named(ReferenceKind::ItemName, "AMMO_T");
+	TEST_EXPECT(named.size() == 2 && named[0]->inert != named[1]->inert);
+	return 0;
+}
+
 // A vehicle panel names its items by their alias; a combination its parts by name, of their kind, in its file.
 static int test_aliases_and_parts() {
 	Project project;
@@ -397,6 +428,7 @@ int main() {
 	failures += test_type_ids();
 	failures += test_complete_query();
 	failures += test_aliases_and_parts();
+	failures += test_tracer_by_name();
 	failures += test_surface_choices();
 	return failures;
 }

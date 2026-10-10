@@ -3,6 +3,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/catalog_validation.h>
+#include <editor/graph/graph_names.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/model/diagnostic.h>
@@ -456,6 +457,41 @@ void catalog_references(const Document &document, Extracted &out) {
 			edge.rewritable = false;
 			edge.optional = true; // the game shows no face for a person whose face it lacks, and says nothing
 			out.edges.push_back(std::move(edge));
+		}
+		// Each item by its primary name, which an ammo's tracer takes where its type id finds none: the first item
+		// of a name, without case [orig: ItemList_FindIndexByPrimaryName @ 0x49E010, stricmp in the items' order].
+		std::set<std::string> named;
+		for (const auto &row : document.rows()) {
+			if (!row || def_kind(row->kind) != DefRecordKind::Item || row->name().empty()) continue;
+			const NodeAddress address{row->id, row->kind, 0};
+			GraphSymbol symbol;
+			symbol.kind = ReferenceKind::ItemName;
+			symbol.display = row->name();
+			symbol.name = graph_names::symbol_name(ReferenceKind::ItemName, symbol.display);
+			symbol.file = document.path();
+			symbol.record = document.record_path(address);
+			symbol.locator = document.locator(address);
+			symbol.address = address;
+			if (!named.insert(symbol.name).second) {
+				symbol.inert = true;
+				symbol.inert_reason = "an earlier item has the name, and a lookup by the name finds that one";
+			}
+			out.symbols.push_back(std::move(symbol));
+		}
+		return;
+	}
+	if (catalog->kind() == AssetKind::AmmoDefs) {
+		// A tracer item by its type id, then the item named as the ammo where the id finds none [orig:
+		// AmmoDef_ParseProperty @ 0x40A5DA..0x40A5FE (frndlyTrcrID), @ 0x40A646..0x40A668 (foeTrcrID):
+		// ItemList_FindIndexByTypeId, then ItemList_FindIndexByPrimaryName over the ammo's name].
+		for (GraphEdge &edge : out.edges) {
+			if (edge.source != document.path() || edge.kind != ReferenceKind::Item || !edge.name_offset ||
+			    (edge.field != "frndly_trcr_type_id" && edge.field != "foe_trcr_type_id"))
+				continue;
+			const Node *row = document.row(edge.address.row);
+			if (!row || row->name().empty()) continue;
+			edge.fallback = row->name();
+			edge.fallback_kind = ReferenceKind::ItemName;
 		}
 		return;
 	}
