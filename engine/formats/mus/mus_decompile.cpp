@@ -8,9 +8,9 @@
    stack-based expression reconstruction, recognises if/if_else/while
    control-flow patterns, decodes the embedded `tablexec` jump table, and
    synthesises `bind sound_N "sound_N"` aesthetic for the play opcodes
-   (since the runtime carries no bind table). Our C++ port preserves that output verbatim so
-   `tests/mus/mus_decompile_test.cpp` can compare byte-for-byte against the
-   committed golden in `fixtures/mus/golden_jo_gamemus.mus.txt`.
+   (since the runtime carries no bind table). The minted gamescript's text is
+   pinned byte for byte (`fixtures/mus/golden_synth_gamemus.mus.txt`), and every
+   shipped script's text compiles back to its own bytes (mus_encode_idempotence).
 
    The opcode table below was transcribed from the Python `OPCODES = {...}`
    dict at line 23. The IDA witness [orig: 65-entry dispatch table @ 0x84F220, see
@@ -38,6 +38,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <string>
+#include <vector>
 
 namespace opennova::mus {
 
@@ -242,16 +245,16 @@ static void resolve_global_into(char *out, size_t cap, int idx,
 struct FunctionView {
     char     name[MUS_SECTION_NAME_SIZE];
     uint32_t start = 0, end = 0;
-    int      params = 0;
-    char     param_names[16][MUS_SECTION_NAME_SIZE];
-    uint32_t param_offsets[16];
+    int      params = 0;                     /* its frame setup's count, up to 255 */
+    std::vector<std::string> param_names;    /* one per parameter */
+    std::vector<uint32_t>    param_offsets;
 };
 
 static void resolve_local_into(char *out, size_t cap, int idx, const FunctionView *fn = NULL) {
     if (fn) {
-        for (int k = 0; k < fn->params && k < 16; ++k)
-            if ((int)fn->param_offsets[k] == idx) {
-                snprintf(out, cap, "%s", fn->param_names[k]);
+        for (int k = 0; k < fn->params; ++k)
+            if ((int)fn->param_offsets[(size_t)k] == idx) {
+                snprintf(out, cap, "%s", fn->param_names[(size_t)k].c_str());
                 return;
             }
     }
@@ -767,7 +770,7 @@ static void decompile_block(Buf *out,
                 place(out, script, inst->offset);
                 buf_printf(out, "handler %s(", function->name);
                 for (int k = 0; k < function->params; ++k)
-                    buf_printf(out, "%s%s", k ? ", " : "", function->param_names[k]);
+                    buf_printf(out, "%s%s", k ? ", " : "", function->param_names[(size_t)k].c_str());
                 buf_puts(out, ")\n{\n");
                 int body_end = i + 1;
                 while (body_end < end_idx && insts[body_end].offset < function->end) ++body_end;
@@ -1312,26 +1315,29 @@ static int decompile_into_buf(const MusScript *script,
     /* The functions: the debug table's, else the chunk's MessageHandler entry where it is a frame setup at no
        section's start (a stripped file), its body to the next section. Each parameter by its debug name
        (`Function::name` at its frame offset), else argN. */
-    FunctionView functions[8];
-    int function_count = 0;
+    /* As many functions as the script has, each with as many parameters as its frame setup counts (a byte: up
+       to 255); a parameter its debug table names nothing (or an empty name) is argN. */
+    std::vector<FunctionView> function_list;
     const auto add_function = [&](const char *name, uint32_t start, uint32_t end) {
-        if (function_count >= 8 || start >= script->code_size || script->code[start] != MUS_OP_ENTER) return;
-        FunctionView &f = functions[function_count++];
+        if (start >= script->code_size || script->code[start] != MUS_OP_ENTER) return;
+        function_list.emplace_back();
+        FunctionView &f = function_list.back();
         snprintf(f.name, sizeof(f.name), "%s", name);
         f.start = start;
         f.end = end;
         f.params = start + 1 < script->code_size ? script->code[start + 1] : 0;
-        if (f.params > 16) f.params = 16;
         const uint32_t base = script->locals_frame_offset ? script->locals_frame_offset : MUS_DEFAULT_LOCALS_BASE;
         const size_t own = strlen(f.name);
         for (int k = 0; k < f.params; ++k) {
-            f.param_offsets[k] = base + 4u * (uint32_t)k;
-            snprintf(f.param_names[k], sizeof(f.param_names[k]), "arg%d", k + 1);
+            const uint32_t offset = base + 4u * (uint32_t)k;
+            std::string named = "arg" + std::to_string(k + 1);
             for (uint32_t l = 0; l < script->local_count; ++l)
-                if (script->locals[l].frame_offset == f.param_offsets[k] &&
+                if (script->locals[l].frame_offset == offset &&
                     strncmp(script->locals[l].name, f.name, own) == 0 && script->locals[l].name[own] == ':' &&
-                    script->locals[l].name[own + 1] == ':')
-                    snprintf(f.param_names[k], sizeof(f.param_names[k]), "%s", script->locals[l].name + own + 2);
+                    script->locals[l].name[own + 1] == ':' && script->locals[l].name[own + 2] != 0)
+                    named = script->locals[l].name + own + 2;
+            f.param_offsets.push_back(offset);
+            f.param_names.push_back(named);
         }
     };
     for (uint32_t k = 0; k < script->function_count; ++k)
@@ -1343,6 +1349,8 @@ static int decompile_into_buf(const MusScript *script,
                 end = script->sections[k].code_offset;
         add_function("MessageHandler", script->message_handler_offset, end);
     }
+    const FunctionView *functions = function_list.empty() ? NULL : function_list.data();
+    const int function_count = (int)function_list.size();
 
     /* ---- Section bodies ---- */
     CFMap cf{};

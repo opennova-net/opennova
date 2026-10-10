@@ -106,11 +106,19 @@ static int test_synth_menumus(void) { return roundtrip_file(MUS_FIXTURE_DIR "/sy
 static int test_reference_gamemus(void) { return roundtrip_file(g_retail_gamemus.c_str()); }
 static int test_reference_menumus(void) { return roundtrip_file(g_retail_menumus.c_str()); }
 
-/* Every SCR0 program the install's archives hold, base and each installed expansion's. */
+/* Every SCR0 program the install's archives hold, base and each installed expansion's: the game's own pair
+   (GAMEMUS.BIN, MENUMUS.BIN) and each expansion's G<name>.bin and M<name>.bin [orig: Expansion_LoadAssets @
+   0x4A4798, @ 0x4A4906..0x4A494A] each required by name, and a .bin of the SCR0 magic that does not validate a
+   failure, never passed over. */
 static int test_install_scripts(void) {
     const std::string install = retail::install();
     std::vector<std::string> mounts{std::string()};
-    for (const std::string &expansion : retail::expansions()) mounts.push_back(expansion);
+    std::vector<std::string> required{"gamemus.bin", "menumus.bin"};
+    for (const std::string &expansion : retail::expansions()) {
+        mounts.push_back(expansion);
+        required.push_back(retail::lower_ascii("g" + expansion + ".bin"));
+        required.push_back(retail::lower_ascii("m" + expansion + ".bin"));
+    }
     size_t programs = 0;
     std::vector<std::string> seen;
     for (const std::string &expansion : mounts) {
@@ -120,7 +128,14 @@ static int test_install_scripts(void) {
             const std::string &name = location.logical_name;
             if (name.size() < 4 || retail::lower_ascii(name.substr(name.size() - 4)) != ".bin") continue;
             std::vector<uint8_t> bytes;
-            if (!vfs.read_file(name, bytes) || mus_validate(bytes.data(), bytes.size()) != 0) continue;
+            if (!vfs.read_file(name, bytes) || bytes.size() < 4) continue;
+            const uint32_t magic = uint32_t(bytes[0]) | uint32_t(bytes[1]) << 8 | uint32_t(bytes[2]) << 16 |
+                                   uint32_t(bytes[3]) << 24;
+            if (magic != MUS_MAGIC_SCR0) continue;
+            if (mus_validate(bytes.data(), bytes.size()) != 0) {
+                fprintf(stderr, "  FAIL: %s holds the SCR0 magic and does not validate\n", name.c_str());
+                return 0;
+            }
             const std::string key = retail::lower_ascii(name);
             if (std::find(seen.begin(), seen.end(), key) != seen.end()) continue;
             seen.push_back(key);
@@ -129,7 +144,11 @@ static int test_install_scripts(void) {
             ++programs;
         }
     }
-    CHECK(programs >= 2, "the install holds its music scripts");
+    for (const std::string &name : required) {
+        if (std::find(seen.begin(), seen.end(), name) == seen.end())
+            fprintf(stderr, "  FAIL: the install's %s did not go through its text\n", name.c_str());
+        CHECK(std::find(seen.begin(), seen.end(), name) != seen.end(), "each music script the game opens");
+    }
     printf("\n  %zu shipped music scripts, each through its text byte for byte\n", programs);
     return 1;
 }

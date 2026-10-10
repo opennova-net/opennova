@@ -171,7 +171,8 @@ occlusion walk) run as `OPENNOVA_JO_ASSETS` legs of the same ctests.
   MDEdit source dialect through `mus_compile` + `mus_encode_file` (the gamescript
   in the shipped eight-section routing shape, the menuscript a Var02-dispatched
   state machine) and the decompiler's own golden over the gamescript. The shipped
-  programs and their decoded golden are the reference-tree legs of the mus ctests.
+  programs are the reference-tree legs of the mus ctests (their text compiled back to
+  their own bytes, mus_decompile's retail leg pinning where its lines fall).
 - `lwf/menu.lwf`, `lwf/tone.wav` — `tests/fixtures/minimal_lwf_gen.cpp`.
 - `avatars/synth_avatars.def` — `tests/fixtures/minimal_avatars_gen.cpp`: the avatar
   table through `avatars_write` (26 parts, eight nationalities of divisions and

@@ -5,8 +5,8 @@
 // mus_encode_file (the SCR0/MU01 container with the canonical eleven intrinsic
 // names and the editor debug export table, so section names and the source
 // path reload as authored). No retail program is carried: the shipped
-// jo_gamemus.bin / jo_menumus.bin and their decompile golden are the
-// reference-tree legs of the mus ctests (docs/asset-gated-tests.md).
+// jo_gamemus.bin / jo_menumus.bin are the reference-tree legs of the mus ctests
+// (docs/asset-gated-tests.md), their text pinned by mus_decompile's retail leg.
 //
 //  * gamescript has the shipped gamemus SHAPE: eight sections in the same
 //    order (Begin, Missionnull, Missionwin, Win000, Missionlose, Lose000,

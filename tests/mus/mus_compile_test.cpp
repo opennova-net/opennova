@@ -399,7 +399,89 @@ static int test_compile_minimal_single_section(void) {
     return 1;
 }
 
+/* What the text refuses, each where MDEdit's debug table or the game would not read it as written: a function's name
+   or a parameter's `Function::name` past the table's 31 characters (cut, it would match no parameter), a function or
+   a parameter twice, a function and a section of one name, an `enter` to a section no block defines (it would sit at
+   the code's leading nop), a function of no parameter and a `frame 0` (D-MUS-16). An error's line is the text's
+   own, whatever `#line` says. */
+static int test_function_rules(void) {
+    int line = 0;
+    const auto refused = [&line](const std::string &body) {
+        MusScript out = {};
+        int err_col = 0;
+        const char *err = NULL;
+        const std::string src = "script test\n" + body;
+        const int rc = mus_compile(src.c_str(), &out, &line, &err_col, &err);
+        mus_script_free(&out);
+        return rc != 0;
+    };
+    const std::string begin = "section Begin\n{\n  done\n}\n";
+    CHECK(!refused(begin + "handler H(a)\n{\n  a = 5\n}\n"), "a function of a parameter compiles");
+    CHECK(refused(begin + "handler " + std::string(32, 'F') + "(a)\n{\n}\n"), "a function's name past 31 characters");
+    CHECK(!refused(begin + "handler " + std::string(28, 'F') + "(a)\n{\n}\n"), "Function::a in 31 characters");
+    CHECK(refused(begin + "handler AVeryLongFunctionName(parameterName)\n{\n}\n"), "a Function::name past 31");
+    CHECK(refused(begin + "handler H(a)\n{\n}\nhandler H(b)\n{\n}\n"), "a function twice");
+    CHECK(refused(begin + "handler H(a, a)\n{\n}\n"), "a parameter twice");
+    CHECK(refused(begin + "handler Begin(a)\n{\n}\n"), "a function named like a section");
+    CHECK(refused("handler H(a)\n{\n}\nsection H\n{\n  done\n}\n"), "a section named like a function");
+    CHECK(refused("section Begin\n{\n  enter Nowhere\n}\n"), "an enter to a section defined nowhere");
+    CHECK(refused("section Begin\n{\n  on (Var01) enter Begin Nowhere\n}\n"), "a table's enter to one");
+    CHECK(refused("declsection Nowhere\nsection Begin\n{\n  done\n}\n"), "a declsection of a section defined nowhere");
+    CHECK(refused(begin + "handler H()\n{\n}\n"), "a function of no parameter");
+    CHECK(refused("section Begin\n{\n  frame 0\n  done\n}\n"), "a frame setup of none");
+    CHECK(!refused("section Begin\n{\n  frame 2\n  done\n}\n"), "a frame setup of two");
+    CHECK(refused("section Begin\n{\n#line 500\n  play nowhere\n}\n") && line == 5, "an error at its own line");
+    return 1;
+}
+
+/* The decompiler holds as many functions and parameters as the script has: a handler of 17 parameters and nine
+   handlers decompile and compile back to the same bytes; a parameter its debug table names nothing is argN. */
+static int test_function_limits(void) {
+    std::string params;
+    for (int i = 0; i < 17; ++i) params += (i ? ", p" : "p") + std::to_string(i);
+    std::string src = "script test\nsection Begin\n{\n  play sound_0\n}\nhandler Wide(" + params + ")\n{\n  p16 = 1\n}\n";
+    for (int i = 0; i < 9; ++i) src += "handler H" + std::to_string(i) + "(a)\n{\n  a = " + std::to_string(i) + "\n}\n";
+    const auto bytes_of = [](const char *text, std::vector<uint8_t> &out, MusScript *keep) {
+        MusScript script = {};
+        int line = 0, col = 0;
+        const char *err = NULL;
+        if (mus_compile(text, &script, &line, &col, &err) != 0) {
+            fprintf(stderr, "  compile: %s (line %d)\n", err ? err : "?", line);
+            return false;
+        }
+        const MusScript *one[] = {&script};
+        uint8_t *buf = NULL;
+        size_t size = 0;
+        const bool ok = mus_encode_file(one, 1, &buf, &size) == 0;
+        if (ok) out.assign(buf, buf + size);
+        mus_free(buf);
+        if (keep) *keep = script;
+        else mus_script_free(&script);
+        return ok;
+    };
+    std::vector<uint8_t> first, again;
+    MusScript script = {};
+    CHECK(bytes_of(src.c_str(), first, &script), "the wide script compiles");
+    CHECK(script.function_count == 10 && script.local_count == 26, "ten functions, 26 parameters");
+    const int needed = mus_decompile(&script, NULL, 0);
+    std::string text((size_t)(needed > 0 ? needed : 1), '\0');
+    CHECK(needed > 0 && mus_decompile(&script, &text[0], text.size()) == needed, "decompile");
+    text.resize(strlen(text.c_str()));
+    CHECK(bytes_of(text.c_str(), again, NULL) && again == first, "its text compiles back to its bytes");
+    /* A parameter of no debug name is argN. */
+    script.locals[0].name[strlen("Wide::")] = 0;
+    const int renamed = mus_decompile(&script, NULL, 0);
+    std::string unnamed((size_t)(renamed > 0 ? renamed : 1), '\0');
+    CHECK(renamed > 0 && mus_decompile(&script, &unnamed[0], unnamed.size()) == renamed &&
+              unnamed.find("handler Wide(arg1, p1,") != std::string::npos,
+          "an empty parameter name is argN");
+    mus_script_free(&script);
+    return 1;
+}
+
 int main(void) {
+    RUN_TEST(test_function_rules);
+    RUN_TEST(test_function_limits);
     RUN_TEST(test_compile_minimal_script);
     RUN_TEST(test_compile_minimal_single_section);
     RUN_TEST(test_encode_file_minimal);

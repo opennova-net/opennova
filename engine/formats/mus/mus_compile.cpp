@@ -16,8 +16,10 @@
    in reverse and cross-checking the engine's observed opcode dispatch.
 
    The text form is the tool's own authoring syntax (the game reads only the binary). The bytes it writes are
-   MDEdit's layout, witnessed in every shipped script (gamemus.bin, menumus.bin and jox01's GJox01.bin and
-   MJox01.bin): a nop at the code's start (the bytecode's first byte, where the chunk's main entry and, with no
+   MDEdit's layout as inferred from the bytes of the three distinct shipped scripts (gamemus.bin, menumus.bin and
+   jox01's MJox01.bin; its GJox01.bin is gamemus.bin byte for byte), not witnessed in MDEdit itself (no MDEdit
+   binary is at hand), so what the samples lack (a second function, a function of no parameter, the line table's
+   places for constructs none of them holds) is extrapolated: a nop at the code's start (the bytecode's first byte, where the chunk's main entry and, with no
    MessageHandler function, its +0x40 handler pointer both point), the code padded with nops to four bytes, and
    the editor debug section MDEdit writes beside it (the source path, the sections, the globals Var00..Var15 and
    the user's, the functions and their parameters, and a line table: each statement's first instruction, an
@@ -137,7 +139,8 @@ struct Lexer {
     Tok         cur_kind;
     char        cur_text[256];
     int32_t     cur_int;
-    int         cur_line = 1;   /* the line the current token is on */
+    int         cur_line = 1;   /* the line the current token is on (the line table's numbering) */
+    int         phys_line = 1;  /* the text's own line, which a `#line` does not move: an error's line */
 
     void advance();
 };
@@ -151,7 +154,7 @@ static bool skip_ws(Lexer *L) {
         if (c == ' ' || c == '\t' || c == '\r') {
             ++L->pos; ++L->col;
         } else if (c == '\n') {
-            ++L->pos; ++L->line; L->col = 1;
+            ++L->pos; ++L->line; ++L->phys_line; L->col = 1;
         } else if (c == '#' && L->len - L->pos >= 5 && strncmp(L->src + L->pos, "#line", 5) == 0) {
             size_t q = L->pos + 5;
             while (q < L->len && (L->src[q] == ' ' || L->src[q] == '\t')) ++q;
@@ -166,6 +169,7 @@ static bool skip_ws(Lexer *L) {
             if (L->pos < L->len) {
                 ++L->pos;
                 L->line = digits ? n : L->line + 1;
+                ++L->phys_line;
                 L->col = 1;
             }
         } else if (c == '/' && L->pos + 1 < L->len && L->src[L->pos + 1] == '/') {
@@ -357,6 +361,7 @@ static int resolve_intrinsic_index(const char *obj, const char *method) {
 struct SectionDef {
     char     name[MUS_SECTION_NAME_SIZE];
     uint32_t code_offset;       /* bytecode-relative; populated when emitted */
+    bool     defined;           /* a `section NAME { ... }` block wrote it (an `enter` only names it) */
 };
 
 /* ---- Bytecode emit buffer + label patching ---- */
@@ -574,6 +579,13 @@ struct Compiler {
         lines[line_count].code_offset = offset;
         lines[line_count].line = (uint32_t)(line > 0 ? line : 0);
         ++line_count;
+    }
+
+    /* Whether a function of the name is defined already. */
+    bool function_named(const char *name) const {
+        for (size_t i = 0; i < function_count; ++i)
+            if (strcmp(functions[i].name, name) == 0) return true;
+        return false;
     }
 
     /* Find/intern a section by name; returns its index in `sections`. */
@@ -939,7 +951,12 @@ int Compiler::parse_stmt_at(const char **err) {
     if (lex.cur_kind == Tok::KwFrame) {
         lex.advance();
         if (lex.cur_kind != Tok::Number || lex.cur_int > 255) {
-            *err = "expected an argument count (0..255) after 'frame'";
+            *err = "expected an argument count (1..255) after 'frame'";
+            return -1;
+        }
+        /* `frame 0`: the game moves a word all the same (D-MUS-16), refused as a function of none is. */
+        if (lex.cur_int == 0) {
+            *err = "a frame setup of no argument, which the game does not run as written (D-MUS-16)";
             return -1;
         }
         emit.byte((uint8_t)MUS_OP_ENTER);
@@ -1349,6 +1366,22 @@ int Compiler::parse_handler(const char **err) {
         *err = "expected a function name after 'handler'";
         return -1;
     }
+    /* The debug table holds a name in 32 bytes, its NUL among them (mus.h MusFunction): a longer one is refused,
+       never cut (a cut `NAME::param` would match no parameter, which then compiles as a global). */
+    if (strlen(lex.cur_text) >= (size_t)MUS_SECTION_NAME_SIZE) {
+        *err = "a function's name past 31 characters, which the debug table cannot hold";
+        return -1;
+    }
+    if (function_named(lex.cur_text)) {
+        *err = "a function of this name is defined already";
+        return -1;
+    }
+    for (size_t i = 0; i < section_count; ++i) {
+        if (strcmp(sections[i].name, lex.cur_text) == 0) {
+            *err = "a section has this name: a section and a function may not share one";
+            return -1;
+        }
+    }
     if (function_count >= function_cap) {
         function_cap = function_cap ? function_cap * 2 : 4;
         functions = (MusFunction *)realloc(functions, function_cap * sizeof(MusFunction));
@@ -1371,6 +1404,18 @@ int Compiler::parse_handler(const char **err) {
             local_cap = local_cap ? local_cap * 2 : 4;
             locals = (MusLocal *)realloc(locals, local_cap * sizeof(MusLocal));
         }
+        if (strlen(functions[current_function].name) + 2 + strlen(lex.cur_text) >= (size_t)MUS_SECTION_NAME_SIZE) {
+            *err = "a parameter whose debug name (Function::name) runs past 31 characters, which the table cannot hold";
+            return -1;
+        }
+        for (size_t i = current_locals_from; i < local_count; ++i) {
+            const char *full = locals[i].name;
+            const size_t own = strlen(functions[current_function].name);
+            if (strcmp(full + own + 2, lex.cur_text) == 0) {
+                *err = "a parameter of this name is in the list already";
+                return -1;
+            }
+        }
         MusLocal &local = locals[local_count++];
         memset(&local, 0, sizeof(local));
         snprintf(local.name, sizeof(local.name), "%s::%s", functions[current_function].name, lex.cur_text);
@@ -1381,6 +1426,13 @@ int Compiler::parse_handler(const char **err) {
     }
     if (lex.cur_kind != Tok::RParen || params > 255) {
         *err = "expected ')' to close the function's parameters";
+        return -1;
+    }
+    /* A frame setup of no argument: the game's copy loop still moves one word, into the word below the frame
+       base [orig: AudioVM_Op_Enter @ 0x672C3C..0x672C47], and MDEdit's form for a function of no parameter is
+       unwitnessed: refused (D-MUS-16). */
+    if (params == 0) {
+        *err = "a function of no parameter, which the game's frame setup does not run as written (D-MUS-16)";
         return -1;
     }
     lex.advance();
@@ -1473,8 +1525,13 @@ int Compiler::parse_top_decl(const char **err) {
             *err = "expected section name";
             return -1;
         }
+        if (function_named(lex.cur_text)) {
+            *err = "a function has this name: a section and a function may not share one";
+            return -1;
+        }
         int sidx = section_find_or_create(lex.cur_text);
         sections[sidx].code_offset = (uint32_t)emit.used;
+        sections[sidx].defined = true;
         lex.advance();
         if (lex.cur_kind != Tok::LBrace) {
             *err = "expected '{' after section name";
@@ -1491,6 +1548,14 @@ int Compiler::parse_top_decl(const char **err) {
 }
 
 int Compiler::finalize(const char **err) {
+    /* Every section a statement names is one a `section` block defines: one interned by an `enter` alone would
+       sit at the code's start (its leading nop), and its decompile would not compile. */
+    for (size_t s = 0; s < section_count; ++s) {
+        if (!sections[s].defined) {
+            *err = "a section an 'enter' or a 'declsection' names is defined nowhere";
+            return -1;
+        }
+    }
     /* Resolve all label patches. */
     for (size_t i = 0; i < emit.patch_count; ++i) {
         const LabelPatch &p = emit.patches[i];
@@ -1673,7 +1738,7 @@ int mus_compile(const char *text, MusScript *out_script,
     free(c.lines);
     if (rc != 0) {
         if (err_msg)  *err_msg  = local_err ? local_err : "compile error";
-        if (err_line) *err_line = c.lex.line;
+        if (err_line) *err_line = c.lex.phys_line;
         if (err_col)  *err_col  = c.lex.col;
         mus_script_free(&c.out);
         return rc;
@@ -1747,7 +1812,7 @@ static void debug_entry(uint8_t **buf, size_t *cap, size_t *used, uint32_t first
     buf_append(buf, cap, used, entry, sizeof(entry));
 }
 
-/* The SCR0 file in MDEdit's layout, witnessed in every shipped script: the 44-byte header and the chunk pointer
+/* The SCR0 file in MDEdit's layout, as read from the shipped scripts' bytes (above): the 44-byte header and the chunk pointer
    table; each MU01 chunk's 0x48-byte header and 0x20 bytes of zeros, its section table (chunk-relative entry PCs)
    and its code; zeros to 16, then the editor debug section: the 256-byte source path, a 0x50-byte header of the
    five tables' entry size, offsets and counts, the sections' (bytecode-relative entries), the globals', the

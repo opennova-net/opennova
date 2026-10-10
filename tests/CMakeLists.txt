@@ -873,7 +873,8 @@ opennova_add_gated_test(sbf_jo_install_sweep COMMAND sbf_jo_install_sweep_test)
 
 # MUS tests. fixtures/mus/synth_{gamemus,menumus}.bin and the decompile golden
 # golden_synth_gamemus.mus.txt: two authored programs through mus_compile +
-# mus_encode_file; the shipped jo_gamemus.bin / jo_menumus.bin and their golden
+# mus_encode_file; the shipped jo_gamemus.bin / jo_menumus.bin (their text pinned by
+# mus_decompile's retail leg and compiled back byte for byte, no golden of them)
 # are each fixture test's OPENNOVA_JO_ASSETS reference leg.
 add_executable(synth_mus_gen_test fixtures/synth_mus_gen.cpp)
 target_link_libraries(synth_mus_gen_test PRIVATE opennova_formats)
