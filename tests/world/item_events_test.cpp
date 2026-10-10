@@ -495,7 +495,7 @@ int test_tower_sections() {
 // and sway selectors never reach it, only the piece's own callbacks and models.
 int test_piece_spawn_clears_class_selectors() {
     const char definitions[] = "begin Tower\r\n id 105050\r\n type building\r\n ai_function door\r\n"
-            " move_function squib\r\n render_function sway\r\n num_doors 2\r\n first_door 1\r\n"
+            " move_function squib\r\n render_function tree\r\n num_doors 2\r\n first_door 1\r\n"
             " open_rate 2\r\n max_angle 90\r\n hp 100\r\n end\r\n";
     opennova::def::DefItemsFile items{};
     CHECK(opennova::def::def_parse_items_memory(

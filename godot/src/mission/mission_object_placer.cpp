@@ -743,9 +743,10 @@ bool MissionObjectPlacer::_needs_individual_node(int p_item_id) {
 	if (opennova::mission::uses_submodel_renderer(
 				item_db_->get_render_function(p_item_id).utf8().get_data()))
 		return true;
-    if (opennova::mission::uses_section_renderer(item_db_->get_ai_function(p_item_id).utf8().get_data()) ||
-            opennova::mission::uses_section_renderer(item_db_->get_move_function(p_item_id).utf8().get_data()) ||
-            opennova::mission::uses_section_renderer(item_db_->get_render_function(p_item_id).utf8().get_data()))
+    if (opennova::mission::uses_section_renderer(
+                item_db_->get_ai_function(p_item_id).utf8().get_data(),
+                item_db_->get_move_function(p_item_id).utf8().get_data(),
+                item_db_->get_render_function(p_item_id).utf8().get_data()))
         return true;
 	const bool has_anim_def = !item_db_->get_anim_def(p_item_id).is_empty();
 	if (opennova::mission::needs_individual_node(item_type, item_db_->get_attrib2(p_item_id),

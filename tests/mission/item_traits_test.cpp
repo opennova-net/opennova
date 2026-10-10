@@ -244,6 +244,25 @@ const char kItemsDef[] = "begin \"S5 Player\"\r\n"
     "  ai_function vmne\r\n"
     "  move_function vmne\r\n"
     "  hp 10\r\n"
+    "end\r\n"
+    "\r\n"
+    // The sway renderer is the bone table's `tree` row; the table has no
+    // `sway` row [orig: row 'tree' @0x82cf70 -> BoneCallback_Sway_World
+    // @0x4e2b10].
+    "begin \"S5 Sway Tree\"\r\n"
+    "  id 100547\r\n"
+    "  type decoration\r\n"
+    "  graphic swaytree\r\n"
+    "  sid s5swaytree\r\n"
+    "  render_function tree\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Sway Tag\"\r\n"
+    "  id 100548\r\n"
+    "  type decoration\r\n"
+    "  graphic swaytag\r\n"
+    "  sid s5swaytag\r\n"
+    "  render_function sway\r\n"
     "end\r\n";
 
 // The minimal SndProf shape ("default" first, so a real profile lands at
@@ -284,7 +303,7 @@ int main() {
     CHECK(def_parse_items_memory(
                   reinterpret_cast<const uint8_t *>(kItemsDef),
                   sizeof(kItemsDef) - 1, &file) == 0);
-    CHECK(file.count == 22);
+    CHECK(file.count == 24);
 
     // Stamp the fields whose authored-token spellings are the def parser's own
     // test surface: distinct sentinels per vehicle-physics slot so any
@@ -371,7 +390,7 @@ int main() {
     World w;
     w.registry.configure_pool(0, 8);  // organics
     w.registry.configure_pool(1, 10); // items/vehicles
-    w.registry.configure_pool(2, 16); // buildings (bunker, bush, unknown + the 7 class rows)
+    w.registry.configure_pool(2, 16); // buildings (bunker, bush, unknown, the 7 class rows + the 2 sway rows)
     const EntityHandle tank_h = spawn(w, 1, 500, EntityKind::Item);
     const EntityHandle apc_h = spawn(w, 1, 501, EntityKind::Item);
     const EntityHandle helo_h = spawn(w, 1, 502, EntityKind::Item);
@@ -402,6 +421,8 @@ int main() {
     // The ai_function class rows (one entity each; only the death-trait row
     // is read back).
     for (uint16_t id = 540; id <= 546; ++id) spawn(w, 2, id, EntityKind::Building);
+    const EntityHandle sway_tree_h = spawn(w, 2, 547, EntityKind::Building);
+    const EntityHandle sway_tag_h = spawn(w, 2, 548, EntityKind::Building);
 
     // The wire-class supplier stub: the fold must stamp the returned byte
     // verbatim and default a functor miss to 0 (Unknown, fail closed).
@@ -673,6 +694,17 @@ int main() {
 	(void)truck_h;
 	(void)bush_h;
 	(void)player_h;
+
+	// The sway renderer binds through the render_function's `tree` bone row;
+	// a `sway` tag finds no row and takes row 0's generic callbacks.
+	// [orig: BoneCallback_LookupByTag @0x4e32c6, row 'tree' @0x82cf70 ->
+	//  BoneCallback_Sway_World @0x4e2b10; the miss @0x4e32d4]
+	{
+		const Entity *sway_tree = w.registry.get(sway_tree_h);
+		const Entity *sway_tag = w.registry.get(sway_tag_h);
+		CHECK(sway_tree != nullptr && sway_tree->render_sway);
+		CHECK(sway_tag != nullptr && !sway_tag->render_sway);
+	}
 
 	// ---- the throwable class scan ----
     const ThrowableClassRow *frag = w.throwables.classes.get(600);

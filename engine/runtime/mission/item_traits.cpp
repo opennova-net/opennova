@@ -94,20 +94,6 @@ const DefItemDef *find_item(
     return it == by_id.end() ? nullptr : it->second;
 }
 
-// The render_function's bone-callback tag: its first four characters with
-// their case kept. The load packs those four bytes into one word and the
-// table compares the word exactly, so `EWEP` is not the ewep row and `ewepX`
-// is. (The ai_function's event row and the move_function's physics row are
-// whole-name, case-insensitive lookups instead.)
-// [orig: EntityDef_InitAllCallbacks packs def+0x13C..0x13F @0x4a5ace..0x4a5af1;
-//  BoneCallback_LookupByTag @0x4e32b0 compares `cmp [ecx], esi` @0x4e32c6]
-std::string render_tag(const char *render_function) {
-    std::string out;
-    for (int i = 0; i < 4 && render_function[i] != '\0'; ++i)
-        out.push_back(render_function[i]);
-    return out;
-}
-
 } // namespace
 
 world::ItemDeathTraits item_death_traits_from_def(const DefItemDef &def) {
@@ -278,7 +264,10 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 		//  BoneCallback_LookupByTag @0x4E32ED..0x4E3306, row 'ewep' @0x82CFA0]
 		e->emplaced_ctrl_publisher =
 				def != nullptr && render_tag(def->render_function) == "ewep";
-		e->render_sway = def != nullptr && render_tag(def->render_function) == "sway";
+		// The sway renderer is the world callback of the bone table's `tree`
+		// row; the table has no `sway` row.
+		// [orig: row 'tree' @0x82CF70 -> BoneCallback_Sway_World @0x4E2B10]
+		e->render_sway = def != nullptr && uses_sway_renderer(def->render_function);
 		e->light_transfer = def != nullptr ? def->light_transfer : 0.0f;
         e->reverb = def != nullptr ? int16_t(def->reverb) : 0;
 		e->uniform_scale_q16 = def != nullptr ? def->scale_q16 : 0;
@@ -418,7 +407,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // The ai_function palm row's callback is WeaponOverlay_HandleDamage and
         // the move_function psec row's update is Entity_UpdatePhysicsStep: the two
         // callbacks the load serializers test before streaming entity+0x270.
-        // [orig: class rows palm @0x813268 (callback @0x813278), psec @0x82AD4C
+        // [orig: class rows palm @0x813270 (callback @0x813278), psec @0x82AD54
         //  (update @0x82AD5C); the tests @0x503F4C..0x503F65, @0x504554..0x50456D]
         e->palm_state_streamed = def != nullptr &&
                 (strutil::iequals(def->ai_function, "palm") ||
@@ -582,7 +571,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                     // the cveh/ctrn dispatchers' push 0 @0x48efce/@0x48f06e].
                     vt.amphibian = move_row == PhysicsClass::Catv;
                 }
-				const std::string render = render_tag(def->render_function);
+				const std::string_view render = render_tag(def->render_function);
 				vt.render_family = render == "cveh" ? world::VehicleRenderFamily::Ground
 						: render == "tank"			? world::VehicleRenderFamily::Tank
 						: render == "chel"			? world::VehicleRenderFamily::Helicopter
@@ -798,7 +787,12 @@ void resolve_minefields(world::World &world, const def::DefItemsFile &items,
         const auto it = definitions.find(row.item_id + mission::kItemIdOffset);
         if (it == definitions.end()) return;
         const auto &def = *it->second;
-        const bool think = strutil::iequals(std::string_view(def.ai_function).substr(0, 4), "lndm");
+        // The think is the ai_function's lndm event row, bound by whole name
+        // ignoring case; the render is the lndm bone row, bound by the render
+        // tag. [orig: Entity_LookupRenderCallbacks stricmp @0x407DD8, row
+        // 'lndm' @0x813198 -> Entity_LandmineThink @0x441A40 /
+        // Entity_InitHardpoints @0x4417D0; row 'lndm' @0x82CFC0]
+        const bool think = strutil::iequals(def.ai_function, "lndm");
         const bool render = mission::uses_submodel_renderer(def.render_function);
         if (!think && !render) return;
         world::Entity *entity = world.registry.get(row.handle);

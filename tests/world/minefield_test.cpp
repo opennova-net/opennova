@@ -372,12 +372,54 @@ void authored_binding() {
     }
 }
 
+// The think binds the ai_function's lndm event row by whole name, ignoring
+// case; the render binds the render_function's lndm bone row by its first four
+// characters, case kept.
+// [orig: Entity_LookupRenderCallbacks stricmp @0x407dd8, row 'lndm' @0x813198;
+//  EntityDef_InitAllCallbacks @0x4a5ab8..0x4a5af1 -> BoneCallback_LookupByTag
+//  @0x4e32c6, row 'lndm' @0x82cfc0]
+void binding_names() {
+    struct Case {
+        const char *ai_function;
+        const char *render_function;
+        bool think;
+        bool render;
+    };
+    const Case cases[] = {
+        {"lndmX", "lndmX", false, true},
+        {"LNDM", "LNDM", true, false},
+        {"lnd", "lnd", false, false},
+    };
+    ResourceIndex index;
+    assets::AssetStore models{&index};
+    for (const Case &c : cases) {
+        def::DefItemDef definition{};
+        definition.id = 101896;
+        std::strcpy(definition.ai_function, c.ai_function);
+        std::strcpy(definition.render_function, c.render_function);
+        def::DefItemsFile definitions{};
+        definitions.entries = &definition;
+        definitions.count = 1;
+        auto rig = std::make_unique<Rig>();
+        auto &w = rig->world;
+        Entity field;
+        field.item_id = 1896;
+        const auto handle = w.registry.spawn(2, field);
+        mission::resolve_minefields(w, definitions, models);
+        const auto &bound = *w.registry.get(handle);
+        CHECK(bound.minefield.initialized == (c.think || c.render));
+        CHECK(bound.minefield.think == c.think);
+        CHECK(bound.minefield.render == c.render);
+    }
+}
+
 } // namespace
 
 int main() {
     vehicle_ground_query();
     buried_mine_blast();
     authored_binding();
+    binding_names();
     contact_boundary_and_stances();
     carried_and_vehicle();
     peer_and_ceasefire();
