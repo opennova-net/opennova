@@ -720,8 +720,11 @@ void destruction_notify_item_damage(World &world, Entity &target, int phase, Ite
 	// (apply_item_state_event). Organics run the person callbacks and AI-driven
 	// vehicles die through their state machine (rows 21/23), not here.
 	if (target.kind == EntityKind::Organic || target.is_ai_capable) return;
-    if (target.item_section_piece && !target.palm_sections) {
-        target.class_think_ticks = 0x1000000; // clone event callback is the Null row sub_406FF0 @0x440365
+    // A section clone's event callback is the null row whatever its def; a
+    // palm fragment runs item 900's own row [orig: Entity_SpawnSectionEntity
+    //  @0x440365 -> sub_406FF0; Projectile_SpawnFromTile @0x53C35D].
+    if (target.section_clone) {
+        target.class_think_ticks = 0x1000000;
         return;
     }
 	const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);

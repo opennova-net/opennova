@@ -36,6 +36,9 @@ void spawn_tower_section(World &world, Entity &entity, const ItemDeathTraits &tr
     seed.uniform_scale_q16 = entity.uniform_scale_q16;
     seed.health = 20; seed.engine_flags = 6; seed.alive = false;
     seed.item_section_piece = true;
+    // The template pins the null event and the floating physics
+    // [orig: @0x440365 / @0x440370].
+    seed.section_clone = true;
     seed.death_motion = DeathMotionMode::SectionFalling;
     seed.yaw = entity.yaw; seed.pitch = entity.pitch; seed.roll = entity.roll;
     int32_t pos[3];
@@ -232,6 +235,9 @@ void palm_transition(World &world, Entity &entity, int section) {
         seed.alive = false;
         seed.health = 20;
         seed.item_section_piece = true;
+        // The fragment draws the palm state whatever item 900's render tag
+        // (D-ITEMDEF-20); the flag survives the def resolve.
+        seed.palm_fragment = true;
         seed.palm_sections = true;
         seed.palm_state = type;
         seed.death_motion = DeathMotionMode::PalmPiece;
@@ -306,9 +312,10 @@ bool tower_item_event(World &world, Entity &entity, int phase, ItemHitContext hi
     return true;
 }
 
-// [orig: WeaponOverlay_HandleDamage @ 0x53C4C0]
+// [orig: WeaponOverlay_HandleDamage @ 0x53C4C0] It writes +0x270 through the
+// transition but never selects its draw: an item whose render tag binds no
+// section row keeps drawing every section (palm_sections is the trait's).
 void palm_item_event(World &world, Entity &entity, int phase, ItemHitContext hit) {
-    entity.palm_sections = true;
     if (!world.rules.logic_authority) {
         if (phase != 4) { entity.class_think_ticks = 1024; return; }
         world.out.scars.clear_entity(entity.handle);
@@ -362,7 +369,11 @@ uint32_t item_hidden_sections(const Entity &entity) {
     }
 }
 Vec3 item_section_render_position(const World &world, const Entity &entity) {
-    if (entity.item_section_piece && !entity.palm_sections && entity.spawned_piece_mask) {
+    // A section clone whose def's render tag is a section row draws through
+    // that row instead: the def's world callback overrides the model's, the
+    // husk model's too [orig: Render_SectorEntity @0x5C431B..0x5C4335;
+    // Entity_RenderWithLODCallback @0x5D6F39..0x5D6F4B].
+    if (entity.section_clone && !entity.palm_sections && entity.spawned_piece_mask) {
         // The death render callback pivots around the first surviving HUSK
         // section, not the intact-model pivot used by the spawn.
         // [orig: Entity_BuildDeathSectionTransforms @ 0x492AF0]

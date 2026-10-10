@@ -360,6 +360,7 @@ int test_palm_sections() {
     TestPieceSpawner spawner(w); w.item_piece_spawner = &spawner;
     const auto h = spawn(w, 2, 21, ItemDeathClass::kPalm);
     auto &e = *w.registry.get(h);
+    e.palm_sections = true; // the render tag's psec / cesp row (the trait)
     auto *t = w.tables.item_death_traits.get_mutable(21);
     t->model_pivots_q16 = {{{0, 0, 2*65536}}, {{0, 0, 4*65536}}};
     t->sound_death = "PalmBreak";
@@ -374,6 +375,9 @@ int test_palm_sections() {
     CHECK(item_hidden_sections(e) == 0x1C && e.health == 100);
     auto &leaf = *w.registry.get(spawner.pieces[0]);
     CHECK(leaf.palm_state == 17 && leaf.item_id == 900);
+    // A fragment, not a section clone: it runs item 900's own event row
+    // [orig: Projectile_SpawnFromTile @0x53C35D].
+    CHECK(leaf.item_section_piece && !leaf.section_clone);
     CHECK(leaf.position.z == 7 && leaf.engine_flags == kEntityFlagDead);
     CHECK(leaf.health == 20 && leaf.pitch == 0 && leaf.roll == 0);
     CHECK(item_hidden_sections(leaf) == 0x3B);
@@ -412,6 +416,10 @@ int test_palm_sections() {
     auto &client = *w.registry.get(client_h); client.position.z = 3;
     apply_item_state_event(w, client, 0);
     CHECK(client.palm_state == 1 && client.health == 0 && (client.engine_flags & 6) == 0);
+    // The event writes +0x270 but never selects its draw: under a render tag
+    // with no section row every section still draws.
+    // [orig: WeaponOverlay_HandleDamage @0x53C4C0; BoneCallback_gnrc_World @0x4E2860]
+    CHECK(!client.palm_sections && item_hidden_sections(client) == 0);
     CHECK(w.registry.get(spawner.pieces.back())->palm_state == 16);
     const auto count = spawner.pieces.size();
     apply_item_state_event(w, client, -1);
@@ -451,6 +459,9 @@ int test_tower_sections() {
     CHECK(e.class_think_ticks == 1024 && spawner.pieces.size() == 2);
     destruction_notify_item_damage(w, piece, 0);
     CHECK(piece.class_think_ticks == 0x1000000);
+    // The clone is marked as one; the palm fragment is not.
+    // [orig: Entity_SpawnSectionEntity @0x440365]
+    CHECK(piece.section_clone && piece.item_section_piece);
     piece.veh.slide_z = 65536;
     tick_item_death_motion(w, piece, nullptr, 0, w.out.destruction);
     CHECK(piece.position.z == 12 && piece.veh.slide_z == 32768);
@@ -524,6 +535,51 @@ int test_piece_spawn_clears_class_selectors() {
     CHECK(piece.death_motion == DeathMotionMode::SectionFalling);
     CHECK(!piece.door_event && !piece.door_motion && piece.door_count == 0);
     CHECK(!piece.squib.motor && !piece.render_sway);
+    opennova::def::def_free_items(&items);
+    return 0;
+}
+
+// A section clone runs the null event row whatever its def: a tower whose
+// render tag is the psec row (the clone draws the palm state through it,
+// palm_sections) takes no damage on its clones, where the tower row would
+// accumulate and spawn more sections.
+// [orig: Entity_SpawnSectionEntity @0x440365 -> sub_406FF0; the def's world
+//  callback overriding the husk's Render_SectorEntity @0x5C431B]
+int test_psec_tower_section_clone_stays_inert() {
+    const char definitions[] = "begin Tower\r\n id 105051\r\n type building\r\n ai_function towr\r\n"
+            " render_function psec\r\n husk_sub_parts 4\r\n hp 100\r\n end\r\n";
+    opennova::def::DefItemsFile items{};
+    CHECK(opennova::def::def_parse_items_memory(
+            reinterpret_cast<const unsigned char *>(definitions), sizeof(definitions)-1, &items) == 0);
+    opennova::mission::MissionKernel kernel;
+    kernel.open_document(opennova::bms::File{}, "piece", {});
+    kernel.set_items_table(&items);
+    opennova::mission::KernelBootOptions options;
+    options.playable = false;
+    options.wac = false;
+    options.collision = false;
+    options.seat_specs = false;
+    options.terrain = false;
+    std::string error;
+    CHECK(kernel.boot(options, error));
+    Entity seed;
+    seed.kind = EntityKind::Building; seed.item_id = 5051; seed.item_type = 5;
+    seed.health = 20; seed.engine_flags = 6; seed.alive = false;
+    seed.item_section_piece = true;
+    seed.section_clone = true; // as spawn_tower_section seeds it
+    seed.death_motion = DeathMotionMode::SectionFalling;
+    const auto handle = kernel.spawn_item_piece(seed);
+    CHECK(handle.valid());
+    Entity *piece = kernel.world.registry.get(handle);
+    CHECK(piece != nullptr && piece->section_clone && piece->palm_sections);
+    const ItemDeathTraits *traits = kernel.world.tables.item_death_traits.get(5051);
+    CHECK(traits != nullptr && traits->death_class == ItemDeathClass::kTower);
+    if (piece != nullptr) {
+        destruction_notify_item_damage(kernel.world, *piece, 1, {2, 20});
+        CHECK(piece->class_think_ticks == 0x1000000);
+        CHECK(piece->item_section_damage.read(2) == 0);
+        CHECK(kernel.world.out.entity_events.empty());
+    }
     opennova::def::def_free_items(&items);
     return 0;
 }
@@ -641,6 +697,7 @@ int main() {
     if (test_tower_sections() != 0) return 1;
     if (test_piece_spawn_clears_class_selectors() != 0) return 1;
     if (test_palm_sections() != 0) return 1;
+    if (test_psec_tower_section_clone_stays_inert() != 0) return 1;
     if (test_emitter_lifetime() != 0) return 1;
     if (test_crane_pair_and_fade() != 0) return 1;
     if (test_building_collapse() != 0) return 1;

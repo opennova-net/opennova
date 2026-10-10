@@ -802,7 +802,21 @@ struct Entity {
         FixedVec3 center, origin, step, direction;
     } squib;
     bool item_section_piece = false; // locally allocated class fragment
-    bool palm_sections = false; // palm/psec model callback @0x53BF10
+    // A tower's section clone: the template pins its event (+0x1C8) and
+    // update (+0x1C4) callbacks whatever its def, so damage runs the null
+    // row [orig: Entity_SpawnSectionEntity @0x440365 -> sub_406FF0,
+    //  @0x440370 -> Entity_InitFloatingPhysics]. A palm fragment is not one:
+    // it takes item 900's own callbacks [orig: Projectile_SpawnFromTile
+    //  @0x53C35D / @0x53C36F].
+    bool section_clone = false;
+    // The palm fragment (item 900) a palm transition seeds [orig:
+    // Projectile_SpawnFromTile @0x53C1C0]: its palm_sections is the seed's,
+    // kept through every def resolve (D-ITEMDEF-20).
+    bool palm_fragment = false;
+    // The palm-state (+0x270) section draw: the render tag's psec / cesp bone
+    // row [orig: BoneCallback_psec_World @0x53C130 -> @0x53BF10], recomputed
+    // on every def resolve; the palm fragment's seed forces it on (D-ITEMDEF-20).
+    bool palm_sections = false;
     int32_t palm_state = 0; // entity+0x270
     // The def's damage callback is the palm row's (WeaponOverlay_HandleDamage)
     // or its update is psec's physics step (Entity_UpdatePhysicsStep): the load

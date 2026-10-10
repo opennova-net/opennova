@@ -401,9 +401,20 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                     def->type == DEF_ITEM_TYPE_POWERUP)
                 e->engine_flags |= world::kEntityFlagMatrixBuilt;
         }
-        if (def && (strutil::iequals(def->ai_function, "palm") ||
-                strutil::iequals(def->ai_function, "psec")))
-            e->palm_sections = true;
+        // The palm-state (+0x270) section draw is the world callback of the
+        // bone table's `psec` and `cesp` rows, bound by the render tag. The
+        // palm event row writes +0x270 whatever the render tag, the generic
+        // world callback never reads it, and the ai_function's `psec` row is
+        // the null callback.
+        // [orig: rows 'psec' @0x82D010 / 'cesp' @0x82D020 ->
+        //  BoneCallback_psec_World @0x53C130 -> CTerrainMap_BuildSectorTransformMatrices
+        //  @0x53BF10 (switches on +0x270 @0x53BF31 / @0x53BFE0);
+        //  BoneCallback_gnrc_World @0x4E2860; event row 'psec' @0x813288 -> @0x406FF0]
+        // Recomputed both ways on every resolve, so a def edit that drops the
+        // tag drops the draw; the palm fragment keeps its seed's (D-ITEMDEF-20).
+        const std::string_view render =
+                def != nullptr ? render_tag(def->render_function) : std::string_view();
+        e->palm_sections = e->palm_fragment || render == "psec" || render == "cesp";
         // The ai_function palm row's callback is WeaponOverlay_HandleDamage and
         // the move_function psec row's update is Entity_UpdatePhysicsStep: the two
         // callbacks the load serializers test before streaming entity+0x270.
