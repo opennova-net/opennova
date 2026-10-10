@@ -2108,7 +2108,7 @@ add_test(NAME minimal_particle_gen COMMAND minimal_particle_gen_test)
 # Jointops.exe IDB).
 foreach(name smallest minimal_effect multi_section multi_layer table_handles
         smoke_all_fixtures enum_parse writer_roundtrip curve_lut
-        lenient_lines effect_places)
+        lenient_lines effect_places key_places)
     add_executable(particle_${name}_test particle/particle_${name}_test.cpp)
     target_link_libraries(particle_${name}_test PRIVATE opennova_formats)
     target_include_directories(particle_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -2119,6 +2119,8 @@ foreach(name smallest minimal_effect multi_section multi_layer table_handles
         add_test(NAME particle_${name} COMMAND particle_${name}_test)
     endif()
 endforeach()
+# The key places' retail leg reads every effect file the install serves through the VFS.
+target_link_libraries(particle_key_places_test PRIVATE opennova_base)
 # effect_pose pins the spawn poses every producer hands the scene; effect_closure
 # (mixed) one effect's closure and several folded, the retail leg every effect
 # of the install's catalog alike from its closure (OPENNOVA_JO_DIR).
@@ -4396,6 +4398,18 @@ target_include_directories(opennova_serve_novaworld_test
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
 add_test(NAME opennova_serve_novaworld COMMAND opennova_serve_novaworld_test)
 set_tests_properties(opennova_serve_novaworld PROPERTIES RUN_SERIAL TRUE)
+# The service's pushes to a listed opennova-serve over its NovaWorld session (the same setup):
+# a pushed SetServerName renames the match and saves game.cfg, a pushed Cycle changes the map,
+# a pushed ServerStopHosting ends the listing, an unknown RID is refused.
+add_executable(opennova_serve_server_command_push_test
+    serve/opennova_serve_server_command_push_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
+target_link_libraries(opennova_serve_server_command_push_test PRIVATE opennova_serve_core opennova_novaworld_service)
+target_include_directories(opennova_serve_server_command_push_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+add_test(NAME opennova_serve_server_command_push COMMAND opennova_serve_server_command_push_test)
+set_tests_properties(opennova_serve_server_command_push PROPERTIES RUN_SERIAL TRUE)
 # opennova-serve's remote-admin server (ADR 0051 PR5b) over real loopback TCP, with a LAN joiner
 # in a synthetic two-map rotation: the login, PLAYER LIST, the MISSION verbs (ADD ONESHOT at a
 # position, SETNEXT, CYCLE, the one-shot's removal), SET and game.cfg's save, CHAT SEND as S2C
