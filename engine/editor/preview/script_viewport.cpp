@@ -4,6 +4,8 @@
 #include <utility>
 
 #include <editor/documents/document_types.h>
+#include <editor/documents/script_type.h>
+#include <formats/configfile/config_file.h>
 #include <editor/model/document_base.h>
 #include <editor/preview/canvas_half.h>
 #include <editor/preview/text_burst.h>
@@ -137,6 +139,82 @@ std::string first_sentence(const std::string &message) {
 	return stop == std::string::npos ? message : message.substr(0, stop + 1);
 }
 
+namespace {
+
+// The ConfigFile reader's words over a text it reads (a credits file's, charattr.def's): each section's label
+// line from its '[' to its ']' (a keyword), each entry's key (a command), each value as written (an operand), at
+// the places the reader read them [orig: ConfigFile_ParseText @ 0x7608A0; ConfigFile_BuildSectionLabels
+// @ 0x75DF20; ini_parse_section_entries @ 0x75DB80; ConfigFile_ParseValues @ 0x7606F0]. The reader is handed
+// the text as Save writes it, an LF alone CR LF (the reader ends a line at CR LF alone: TextLineEnds::CrLf), each
+// place it read taken back to the document's.
+void config_file_highlights(const TextDocument &document, std::vector<TextHighlight> &out) {
+	const std::string &held = document.text();
+	std::string text;
+	std::vector<size_t> added; // the written text's offsets of each CR added, in order
+	text.reserve(held.size() + held.size() / 16);
+	for (size_t i = 0; i < held.size(); ++i) {
+		if (held[i] == '\n' && (i == 0 || held[i - 1] != '\r')) {
+			added.push_back(text.size());
+			text.push_back('\r');
+		}
+		text.push_back(held[i]);
+	}
+	const auto held_at = [&](size_t offset) {
+		return offset - size_t(std::lower_bound(added.begin(), added.end(), offset) - added.begin());
+	};
+	const std::vector<configfile::ConfigSection> sections =
+			configfile::parse_config_text(reinterpret_cast<const uint8_t *>(text.data()), text.size());
+	const auto add = [&](TextHighlightKind kind, size_t offset, size_t length) {
+		if (length == 0 || offset + length > text.size()) return;
+		const size_t from = held_at(offset), to = held_at(offset + length);
+		if (to <= from || to > held.size()) return;
+		TextHighlight highlight;
+		highlight.kind = kind;
+		highlight.span = document.span_at(from, to - from);
+		out.push_back(highlight);
+	};
+	for (const configfile::ConfigSection &section : sections) {
+		const size_t close = text.find(']', section.offset);
+		const size_t line_end = text.find_first_of("\r\n", section.offset);
+		if (close != std::string::npos && (line_end == std::string::npos || close < line_end))
+			add(TextHighlightKind::Keyword, section.offset, close - section.offset + 1);
+		for (const configfile::ConfigEntry &entry : section.entries) {
+			// The key: the line's text before its '=' with its spaces trimmed, as the reader keys it.
+			const size_t equals = text.find('=', entry.offset);
+			if (equals != std::string::npos) {
+				size_t from = entry.offset, to = equals;
+				while (from < to && (text[from] == ' ' || text[from] == '\t')) ++from;
+				while (to > from && (text[to - 1] == ' ' || text[to - 1] == '\t')) --to;
+				add(TextHighlightKind::Command, from, to - from);
+			}
+			for (const configfile::ConfigValue &value : entry.values)
+				add(TextHighlightKind::Operand, value.offset, value.text.size());
+		}
+	}
+	std::stable_sort(out.begin(), out.end(), [](const TextHighlight &a, const TextHighlight &b) {
+		return a.span.line != b.span.line ? a.span.line < b.span.line : a.span.column < b.span.column;
+	});
+}
+
+// Each text type whose reader's port says the words it read, and the highlighter that asks it.
+struct HighlighterRow {
+	DocumentTypeId type;
+	ScriptHighlighter highlights;
+};
+constexpr HighlighterRow kHighlighters[] = {
+	{ DocumentTypeId::Script, script_highlights },
+	{ DocumentTypeId::Credits, config_file_highlights },
+	{ DocumentTypeId::CharAttrs, config_file_highlights },
+};
+
+} // namespace
+
+ScriptHighlighter script_highlighter(DocumentTypeId type) {
+	for (const HighlighterRow &row : kHighlighters)
+		if (row.type == type) return row.highlights;
+	return nullptr;
+}
+
 ScriptViewport::ScriptViewport(std::string path) :
 		ViewportModel(ViewportKind::Script, std::move(path), kHeadlessSize) {}
 
@@ -163,7 +241,7 @@ void ScriptViewport::make_text_(const TextDocument &document) {
 	words_.clear();
 	const DocumentType *type = document_type_for(document.kind());
 	if (type && type->references) type->references(document, references_);
-	if (type && type->highlights) type->highlights(document, words_);
+	if (const ScriptHighlighter highlights = type ? script_highlighter(type->id) : nullptr) highlights(document, words_);
 	// The words in the control's places: its lines are the document's, its columns the characters it
 	// holds from the line's start.
 	highlights_.clear();
