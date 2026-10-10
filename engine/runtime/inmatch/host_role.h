@@ -118,17 +118,8 @@ public:
 	// The embedder's bring-up record for the next boot-hook bring_up(): staged
 	// right before the kernel boots (the text, tiles and config are final by
 	// then), consumed by the hook.
-	void stage_bringup(HostBringup bringup) {
-		staged_bringup_ = std::move(bringup);
-		session_create_ = CreateSessionResult::Created;
-	}
+	void stage_bringup(HostBringup bringup) { staged_bringup_ = std::move(bringup); }
 	bool bring_up() override;
-	// The last bring-up's session create: ProcessExit when the config's
-	// `mpreset` word refused it (server_session.h), which leaves the role with
-	// no session and the embedder to end its process with code 0; a map
-	// change's bring-up continues the session and creates none, so it is
-	// Created [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0].
-	CreateSessionResult session_create() const { return session_create_; }
 
 	// The C2S drain the host's own client feeds before the server tick.
 	void drain_host_client_gameplay_requests();
@@ -178,7 +169,6 @@ private:
 
 	RoleKind kind_ = RoleKind::ListenHost;
 	HostBringup staged_bringup_;
-	CreateSessionResult session_create_ = CreateSessionResult::Created;
 	opennova::IDatagramSocket *socket_ = nullptr;
 	HostRotation *rotation_ = nullptr;
 	std::shared_ptr<const replication::ItemReplicationCatalog> item_catalog_;

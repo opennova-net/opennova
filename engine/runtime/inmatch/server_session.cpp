@@ -108,28 +108,8 @@ void continue_session(NapiNPServerCtx &ctx, const GameConfig &config) {
 }
 
 // [orig: CNapiGameSession_CreateSession @0x4c97c0] — see header.
-CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &config,
-                                   const SessionStartup &startup,
-                                   replication::ISessionTransport *local_client) {
-	// The cfg block's mpreset word ends the process before anything of the
-	// session exists: retail tests the global after its two null-argument
-	// checks and calls crt_exit(0) when it is nonzero, at every session
-	// create (single player's mission start and a host's session start; a
-	// joiner creates none, and the map change continues the session,
-	// continue_session). The context stays as it was; the embedder ends the
-	// process with code 0. Retail's entry reset of a live session ahead of
-	// the test (@0x4C97C6..0x4C97CC, CNapiGameSession_ResetActiveSession) has
-	// no counterpart because it never acts on a reachable create: each create
-	// follows a reset of the previous session, the host's in PreMenu_HostSetup
-	// (@0x5691F5) and single player's in the mission teardown outside a
-	// session with the Post Menu pending (Game_TeardownMission @0x5227A2), so
-	// ctx+0x68 is clear by then.
-	// [orig: @0x4C97E7..0x4C97F0 `cmp dword_25509FC, 0` -> crt_exit(0); the
-	//  null checks @0x4C97D5 / @0x4C97DD; callers SinglePlayer_StartMission
-	//  @0x561E65 and CNapiGameSession_BuildAndCreateSession @0x56997D, which
-	//  the PreMenu's state 2 calls, MultiPlayer_JoinSessionStateMachine
-	//  @0x56A46A]
-	if (config.multiplayer_reset != 0) return CreateSessionResult::ProcessExit;
+void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
+                    const SessionStartup &startup, replication::ISessionTransport *local_client) {
 	// A new session owns a new connection table. Clear both remote server-side
 	// peers and any prior local client before installing this session's role set;
 	// no live-update API is allowed to mutate connection residency mid-match.
@@ -180,7 +160,6 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 		// its local-connection arm @0x4c8213].
 		++ctx.total_logins;
 	}
-	return CreateSessionResult::Created;
 }
 
 } // namespace opennova::inmatch

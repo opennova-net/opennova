@@ -9,9 +9,7 @@
 // server context, the NWU session's facts the authority's NovaWorld exit
 // reads, the round clock the TimeLeft column re-reads, and the service's
 // ServerCommands and ServerPlayerEnterResults run on the match; a changed
-// name, message or mpreset reaches the cfg block and game.cfg. A ServerCommand
-// that arrives before the match binds (the hosting wait) runs on a session-less
-// context, where only SetMPReset passes its gate (on_command).
+// name, message or mpreset reaches the cfg block and game.cfg.
 
 #include "listing_source.h"
 

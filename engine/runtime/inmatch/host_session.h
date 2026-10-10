@@ -30,7 +30,6 @@
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_protocol.h>  // HostAcceptEvent + the server protocol entry points
 #include <runtime/inmatch/napi_np_server_ctx.h>
-#include <runtime/inmatch/server_session.h> // CreateSessionResult
 #include <runtime/inmatch/server_tick.h> // Server_TickUpdate
 
 namespace opennova::inmatch {
@@ -169,9 +168,7 @@ struct HostConfig {
 // Stand `owner` up through the shared in-match host bring-up the Godot host uses. `serve_and_play` selects HostClient and registers the type-2 loopback; otherwise it selects
 // HostOnly and creates no local player. When serve-and-play also has a World, spawn the host player
 // and queue its initial-state burst before the first per-frame 0x0A.
-// ProcessExit when the session create refused on `cfg.config.multiplayer_reset`
-// (server_session.h): no session stands and nothing past the create ran.
-CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg);
+void start_host_session(HostOwner &owner, const HostConfig &cfg);
 
 // The map change's bring-up (net-re §5.70.6): the next mission inside the SAME
 // session. The owner keeps its context, its connections, their keys and

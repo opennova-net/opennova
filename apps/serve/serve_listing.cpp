@@ -7,10 +7,7 @@
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_admin_command.h>
-#include <runtime/inmatch/server_session.h> // set_connection_mode
 #include <runtime/inmatch/server_tick.h>
-
-#include <memory>
 
 namespace opennova::serve {
 
@@ -132,41 +129,25 @@ std::vector<HostPlayerSlot> ServeListing::wanted_roster(const std::map<int, Host
 // block keeps them; the changed columns read back through registration() and ride the next
 // refresh or the map change's republish. The executor already capped the strings to the block's
 // widths (31 / 127).
-// Before the match binds (the hosting wait, from the hosting request until the starting map
-// creates the session) the command runs on a session-less context, as retail's statement
-// dispatch hands every ServerCommand to the handler whatever the session's state: the connection
-// mode is the dead /HOST path's host-only one and ctx+0x68 is clear, so every verb's gate refuses
-// it but SetMPReset's token count, and a SetMPReset stores the word in the block and saves it,
-// which the starting map's session create then reads. The context's is_in_session, the
-// executor's stand-in for ctx+0x68, stays clear on purpose: retail's own +0x58 is already set
-// in the hosting wait (CNapiNetwork_SetNetworkType @0x4C4A85, from @0x4A6614), but no verb's
-// gate reads it.
 // [orig: CNapiGameSession_HandleServerCommand — PuntPlayer @0x4D2515..0x4D254D; SetServerName's
 //  block copy @0x4D2CFC, SetServerMsg's @0x4D2DAD, SetMPReset's @0x4D2E28; Game_SaveConfig
-//  @0x4D2DDF (SetServerName / SetServerMsg) and @0x4D2E2D (SetMPReset); the gates, SetServerName's
-//  ctx+0x68 test @0x4D2CE9 and SetMPReset's lone token count @0x4D2E12;
-//  CNapiGameSession_DispatchServerStatement @0x4D18A0 (no state test, the name table
-//  @0x82C0C8); Game_HostMultiplayerSession's SetConnectionMode(1) @0x4A661F ahead of its hosting
-//  wait @0x4A6725..0x4A6735]
+//  @0x4D2DDF (SetServerName / SetServerMsg) and @0x4D2E2D (SetMPReset)]
 void ServeListing::on_command(const ServerCommand &command) {
-	const bool bound = role_ != nullptr && kernel_ != nullptr;
-	std::unique_ptr<inmatch::NapiNPServerCtx> pre_session;
-	if (!bound) {
-		pre_session = std::make_unique<inmatch::NapiNPServerCtx>();
-		inmatch::set_connection_mode(*pre_session, inmatch::ConnectionMode::HostOnly);
+	if (role_ == nullptr || kernel_ == nullptr) {
+		io::logf(LogLevel::kInfo, "[host] ServerCommand %s before the match: ignored",
+		         server_command_verb_name(command.verb));
+		return;
 	}
-	inmatch::NapiNPServerCtx &ctx = bound ? role_->state.host_owner.ctx : *pre_session;
 	const inmatch::ServerCommandOutcome outcome = inmatch::Server_ExecuteServerCommand(
-			ctx, bound ? &kernel_->world : nullptr, server_command_verb_name(command.verb),
+			role_->state.host_owner.ctx, &kernel_->world, server_command_verb_name(command.verb),
 			server_command_target_name(command.target), command.args);
 	if (!outcome.handled) {
-		io::logf(LogLevel::kInfo, "[host] ServerCommand %s was not executed%s", command.command.c_str(),
-		         bound ? "" : " (no session yet)");
+		io::logf(LogLevel::kInfo, "[host] ServerCommand %s was not executed", command.command.c_str());
 		return;
 	}
 	io::logf(LogLevel::kInfo, "[host] ServerCommand %s", command.command.c_str());
 	if (outcome.config_changed) {
-		const inmatch::GameConfig &config = ctx.config;
+		const inmatch::GameConfig &config = role_->state.host_owner.ctx.config;
 		if (seams_.config_block != nullptr) {
 			gamecfg::GameCfg &block = *seams_.config_block;
 			switch (command.verb) {
