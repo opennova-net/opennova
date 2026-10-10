@@ -100,7 +100,7 @@ constexpr DocumentType kTypes[] = {
 	{ DocumentTypeId::AnimationMap, "animation_map", make_animation_map,
 			validate_animation_map_file, AnimationMapDocument::schema,
 			animation_map_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-			nullptr, nullptr, define_animation_slot },
+			nullptr, define_animation_slot },
 	// The mission (S14): its records' references no field's value is are its record_references (the
 	// text keys a record's number forms); its records and values in a modder's words, and briefly for a
 	// narrow column (S15); its project check, what the game grounds where (DI-28).
