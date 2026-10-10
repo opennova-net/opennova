@@ -1328,6 +1328,186 @@ void test_forced_scope_toggle_sees_the_same_tick_promotion() {
     }
 }
 
+// --- the body's water legs ---------------------------------------------------
+// The local body's water block records each scope toggle call with the Flags
+// word it saw; the view tick runs them after its promoter, in call order, for
+// a sight Player_IsEquippedWeaponScoped or Player_IsVehicleGunnerScoped
+// answers. Entering, the toggle precedes the 0x8000 latch (a body that jumped
+// in still carries 0x2000: refused); afloat, 0x8000 is masked off around it;
+// the eye leg follows both (afloat, the latch just written refuses it) and the
+// exit. [orig: Entity_UpdateInfantryPlayerBody @0x4b8304..0x4b83a3;
+//  Player_IsEquippedWeaponScoped @0x4dcc80; Player_IsVehicleGunnerScoped
+//  @0x4dcd30; Player_ToggleWeaponScope @0x4df0c0 -- the 0xA000 gate @0x4df0dc]
+void test_water_scope_legs() {
+    using opennova::hud::kTipEventScopeElevationOff;
+    const uint32_t elevation = DEF_WEAPON_FLAG_SCOPED | DEF_WEAPON_FLAG_SHOWELEVATION;
+    struct Rig {
+        LocalWorld lw;
+        AiEntity *body = nullptr;
+        LocalPlayerWeapon w;
+        PlayerViewState v;
+        LocalPlayerViewTracker t;
+        LocalViewSessionInputs s;
+        explicit Rig(uint32_t flags) {
+            lw.ai.attach(lw.local);
+            body = lw.ai.for_handle(lw.local);
+            lw.w.env.water_z = to_fixed(5.0);
+            w = scoped_weapon(flags);
+            local_player_view_tick(&lw.w, v, t, s, &w);
+            CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
+            settle_ease(v);
+            CHECK(player_view_scope_settled(v) && v.scope_engaged);
+            w.slot.current = weapon_action::kIdle;
+            w.slot.next = weapon_action::kIdle;
+            w.slot.phase = weapon_phase::kDone;
+            lw.w.out.tip_events.clear();
+        }
+        // One body water block, then the view tick that runs its legs.
+        void tick(int32_t z, int32_t eye) {
+            body->pos[2] = z;
+            body->inf.eye_offset_z = eye;
+            lw.ai.player_water_block(*body, lw.w, &lw.entity(), 0, true, lw.w.logic_tick);
+            local_player_view_tick(&lw.w, v, t, s, &w);
+        }
+        bool disengaged() const {
+            return !player_view_scope_settled(v) && !v.scope_engaged &&
+                   w.slot.next == weapon_action::kScopeDown &&
+                   lw.w.out.tip_events == std::vector<uint8_t>{kTipEventScopeElevationOff};
+        }
+        bool kept() const {
+            return player_view_scope_settled(v) && v.scope_engaged &&
+                   w.slot.next == weapon_action::kIdle && lw.w.out.tip_events.empty();
+        }
+    };
+    const int32_t deep = to_fixed(3.0);
+    using Kind = WaterScopeLeg::Kind;
+    // A waded entry toggles: 0x8000 is still clear at its call, though the
+    // latch is set by the time the view tick runs it.
+    {
+        Rig r(elevation);
+        r.body->pos[2] = deep;
+        r.lw.ai.player_water_block(*r.body, r.lw.w, &r.lw.entity(), 0, true, r.lw.w.logic_tick);
+        const WaterScopeLegs &legs = r.lw.w.out.water_scope_legs;
+        CHECK(legs.count == 2 && legs.legs[0].kind == Kind::Entry && legs.legs[1].kind == Kind::Eye);
+        CHECK((r.lw.entity().flags & kEntityFlagDrowning) != 0);
+        local_player_view_tick(&r.lw.w, r.v, r.t, r.s, &r.w);
+        CHECK(r.disengaged());
+        CHECK(legs.count == 0);
+    }
+    // A jumped-in entry is refused (0x2000 at its call), and so is the eye
+    // leg behind it, afloat by then: the sight stays.
+    {
+        Rig r(elevation);
+        r.lw.entity().flags |= kEntityFlagInAir;
+        r.body->inf.airborne = true;
+        r.tick(deep, 0);
+        CHECK(r.kept());
+        CHECK(!r.body->inf.airborne && (r.lw.entity().flags & kEntityFlagInAir) == 0);
+    }
+    // The swim leg toggles with 0x8000 masked off around its call.
+    {
+        Rig r(elevation);
+        r.lw.entity().flags |= kEntityFlagDrowning;
+        r.tick(deep, 0);
+        CHECK(r.disengaged());
+    }
+    // Afloat with the eye clear of the water: the swim leg alone.
+    {
+        Rig r(elevation);
+        r.lw.entity().flags |= kEntityFlagDrowning;
+        r.body->pos[2] = deep;
+        r.body->inf.eye_offset_z = to_fixed(4.0);
+        r.lw.ai.player_water_block(*r.body, r.lw.w, &r.lw.entity(), 0, true, r.lw.w.logic_tick);
+        CHECK(r.lw.w.out.water_scope_legs.count == 1);
+        CHECK(r.lw.w.out.water_scope_legs.legs[0].kind == Kind::Swim);
+    }
+    // A Sighted sight answers Player_IsVehicleGunnerScoped, except in SWITCHFROM.
+    for (const bool switching : {false, true}) {
+        Rig r(DEF_WEAPON_FLAG_SIGHTED);
+        r.lw.entity().flags |= kEntityFlagDrowning;
+        if (switching) r.w.slot.current = weapon_action::kSwitchFrom;
+        r.tick(deep, 0);
+        CHECK(player_view_scope_settled(r.v) == switching);
+        CHECK(r.v.scope_engaged == switching);
+    }
+    // Shallow water: the body leaves through the exit (its float bias keeps it
+    // above the plane), but its eye is under, so the eye leg toggles.
+    {
+        Rig r(elevation);
+        r.tick(to_fixed(4.7), to_fixed(0.2));
+        CHECK(r.disengaged());
+        CHECK((r.lw.entity().flags & kEntityFlagDrowning) == 0);
+    }
+    // The same exit with the eye above the water calls nothing.
+    {
+        Rig r(elevation);
+        r.tick(to_fixed(4.7), to_fixed(0.5));
+        CHECK(r.kept());
+    }
+    // A waded entry on the tick whose interp step promotes the sight still
+    // toggles: retail's promoter runs ahead of the entity update, so the view
+    // tick runs the legs after its own [orig: Game_ProcessMainFrame
+    // @0x526692 (Client_ProcessNetworkFrame -> Player_UpdatePerFrame
+    // @0x42c18e, the promoter @0x4de4c7..0x4de4f7) ahead of
+    // Entity_UpdateAllEntities @0x52674b].
+    {
+        LocalWorld lw;
+        lw.ai.attach(lw.local);
+        AiEntity &body = *lw.ai.for_handle(lw.local);
+        lw.w.env.water_z = to_fixed(5.0);
+        LocalPlayerWeapon w = scoped_weapon(elevation);
+        PlayerViewState v;
+        v.weapon_pose_bound = true;
+        for (int i = 0; i < 3; ++i) {
+            v.weapon_hip_pose.position_q16[i] = (256 + 64 * i) * 256;
+            v.weapon_ads_pose.position_q16[i] = (496 + 64 * i) * 256;
+        }
+        LocalPlayerViewTracker t;
+        LocalViewSessionInputs s;
+        local_player_view_tick(&lw.w, v, t, s, &w);
+        CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
+        int steps = 0;
+        {
+            PlayerViewState probe = v;
+            const float eye[3] = {0.0f, 0.0f, 0.0f};
+            while (!player_view_scope_settled(probe) && steps < 64) {
+                player_view_tick(probe, eye);
+                ++steps;
+            }
+        }
+        CHECK(steps > 1 && steps < 64);
+        for (int i = 0; i < steps - 1; ++i) local_player_view_tick(&lw.w, v, t, s, &w);
+        CHECK(!player_view_scope_settled(v) && player_view_scope_ease_active(v));
+        lw.w.out.tip_events.clear();
+        w.slot.phase = weapon_phase::kDone;
+        w.slot.next = weapon_action::kIdle;
+        body.pos[2] = deep;
+        lw.ai.player_water_block(body, lw.w, &lw.entity(), 0, true, lw.w.logic_tick);
+        local_player_view_tick(&lw.w, v, t, s, &w);
+        CHECK(!player_view_scope_settled(v) && !v.scope_engaged && v.scope_hipfire);
+        CHECK(w.slot.next == weapon_action::kScopeDown);
+        CHECK(lw.w.out.tip_events == std::vector<uint8_t>{kTipEventScopeElevationOff});
+    }
+    // The block's surface line reads this tick's eye restamp (+0x74), not the
+    // registry mirror published after it: an afloat body above the line clamps
+    // to water + base/2 - eye/2 with the motor's eye (a flat -1225 base off the
+    // local bob) [orig: `mov edx, [esi+74h]` @0x4b8146, the line
+    // @0x4b815b..0x4b8169, the clamp @0x4b8172..0x4b817d].
+    {
+        LocalWorld lw;
+        lw.ai.attach(lw.local);
+        AiEntity &body = *lw.ai.for_handle(lw.local);
+        body.inf.is_local_player = false;
+        lw.w.env.water_z = to_fixed(5.0);
+        lw.entity().flags |= kEntityFlagDrowning;
+        lw.entity().eye_offset_z = 0;
+        body.inf.eye_offset_z = to_fixed(1.6);
+        body.pos[2] = to_fixed(4.9);
+        lw.ai.player_water_block(body, lw.w, &lw.entity(), 0, true, lw.w.logic_tick);
+        CHECK(body.pos[2] == to_fixed(5.0) + (-1225 >> 1) - (to_fixed(1.6) >> 1));
+    }
+}
+
 // --- the tick: arbiter feed, the death stamp edge, the mode-4 entry --------
 
 void test_tick_stamps_the_death_camera_on_the_local_dead_edge() {
@@ -3541,6 +3721,7 @@ int main() {
     test_tick_stamps_the_death_camera_on_the_local_dead_edge();
     test_forced_scope_toggles_on_death_and_camera_switch();
     test_forced_scope_toggle_sees_the_same_tick_promotion();
+    test_water_scope_legs();
     test_tick_without_a_player_resolves_first_person();
     test_frame_reads_the_state_and_the_card_selector();
     test_frame_carries_the_framefx_dispatch_facts();

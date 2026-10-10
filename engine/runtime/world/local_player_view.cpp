@@ -31,6 +31,7 @@
 #include <runtime/world/world.h>
 #include <base/io/bam.h>
 #include <base/io/strutil.h>
+#include <runtime/hud/scope_circle_mask.h> // sighted_selector_from_def
 #include <runtime/hud/tip_system.h>
 
 using namespace opennova::def;
@@ -426,7 +427,8 @@ bool local_player_set_scope(World &world, const LocalPlayerWeapon &w, PlayerView
 // the weapon FSM's legs without one.
 // [orig: Player_ToggleWeaponScope @0x4df0c0]
 bool local_player_toggle_weapon_scope(World &world, const LocalPlayerWeapon &w,
-                                      PlayerViewState &v, WeaponSlotState &active_slot) {
+                                      PlayerViewState &v, WeaponSlotState &active_slot,
+                                      const ScopeToggleCallFlags *at_call) {
     // The local player and its equipped slot's def [orig: @0x4df0cf,
     //  @0x4df0eb..0x4df0f6].
     const Entity *player = world.registry.get(world.cached.local_player);
@@ -434,12 +436,13 @@ bool local_player_toggle_weapon_scope(World &world, const LocalPlayerWeapon &w,
     // An airborne or swimming (the deep-water 0x8000) body refuses either way
     // [orig: (Flags & 0xA000) == 0 @0x4df0dc]. The airborne bit shares retail
     // storage with the motor's mirror, which may not be published back yet
-    // this tick.
+    // this tick; a deferred call reads both as its caller saw them.
     const AiEntity *body = world.ai.for_handle(player->handle);
-    const uint32_t flags = player->flags | player->engine_flags;
-    if ((flags & (kEntityFlagInAir | kEntityFlagDrowning)) != 0 ||
-        (body != nullptr && body->inf.airborne))
-        return false;
+    const uint32_t flags =
+            at_call != nullptr ? at_call->flags : player->flags | player->engine_flags;
+    const bool airborne =
+            at_call != nullptr ? at_call->airborne : body != nullptr && body->inf.airborne;
+    if ((flags & (kEntityFlagInAir | kEntityFlagDrowning)) != 0 || airborne) return false;
     // The toggle branches on the PROMOTED byte, not the target: a promoted
     // sight disengages, anything else engages [orig: the g_WeaponScopeActive
     // branch @0x4df17f].
@@ -488,6 +491,32 @@ namespace {
 bool equipped_weapon_scoped(const LocalPlayerWeapon &w, const PlayerViewState &v) {
     return w.active && (w.def.flags & DEF_WEAPON_FLAG_SCOPED) != 0 &&
            player_view_scope_settled(v);
+}
+
+// Player_IsVehicleGunnerScoped: a promoted sight on a Sighted def whose slot
+// is not in SWITCHFROM, the def and slot half shared with the frame's sighted
+// selector [orig: @0x4dcd30 -- EquippedSlot and its Def @0x4dcd35..0x4dcd44,
+// Def+8 & 2 @0x4dcd49, slot+0x2C != 7 @0x4dcd55..0x4dcd5d, g_WeaponScopeActive
+// @0x4dcd5f].
+bool gunner_weapon_scoped(const LocalPlayerWeapon &w, const PlayerViewState &v,
+                          const WeaponSlotState &slot) {
+    return w.active && player_view_scope_settled(v) &&
+           hud::sighted_selector_from_def(static_cast<uint32_t>(w.def.flags),
+                                          slot.current == weapon_action::kSwitchFrom);
+}
+
+// The body's water legs, in call order, each running the toggle over a sight
+// either query answers with the Flags word its call saw; a toggle that
+// disengages clears the promoted byte, so a later leg's queries refuse
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b8316..0x4b8328 /
+//  @0x4b8342..0x4b835b / @0x4b8391..0x4b83a3; WaterScopeLegs in world.h].
+void run_water_scope_legs(World &world, LocalPlayerWeapon &w, PlayerViewState &v) {
+    const WaterScopeLegs &legs = world.out.water_scope_legs;
+    for (int i = 0; i < legs.count; ++i) {
+        WeaponSlotState &slot = *active_local_weapon_slot(world, w);
+        if (equipped_weapon_scoped(w, v) || gunner_weapon_scoped(w, v, slot))
+            local_player_toggle_weapon_scope(world, w, v, slot, &legs.legs[i].at_call);
+    }
 }
 
 } // namespace
@@ -622,10 +651,14 @@ void local_player_view_tick(World *world, PlayerViewState &v,
         player_view_update_effective_modes(v, false,
                                            world != nullptr && world->match.outcome().ended);
         v.tp_anchor_valid = false;
+        if (world != nullptr) world->out.water_scope_legs.count = 0; // consumed unrun
         return;
     }
     const Entity *e = world->registry.get(world->cached.local_player);
-    if (!e) return;
+    if (!e) {
+        world->out.water_scope_legs.count = 0; // consumed unrun
+        return;
+    }
     // The mounted camera's carrier read, refreshed every tick: only a CONTROL
     // seat (the retail parentSlot 2/5 test) takes the mounted leg, and the
     // carrier's pose/radius/class feed the chase target, the back-off and the
@@ -737,10 +770,15 @@ void local_player_view_tick(World *world, PlayerViewState &v,
     // @0x42ec15..0x42ec19], the body's death [orig: Entity_UpdateAllEntities
     // @0x52674b, after Client_ProcessNetworkFrame @0x526692; @0x4b4d1d..0x4b4d25]
     // and the render's camera switch. Each toggles only a promoted sight.
+    // The body's water legs follow its death in the entity update, ahead of
+    // the render's camera switch [orig: Entity_UpdateInfantryPlayerBody
+    // @0x4b4d25 before @0x4b8304..0x4b83a3]; they are consumed either way.
     if (weapon != nullptr) {
         if (death_edge) local_player_forced_scope_toggle(*world, *weapon, v);
+        run_water_scope_legs(*world, *weapon, v);
         if (camera_switch) local_player_forced_scope_toggle(*world, *weapon, v);
     }
+    world->out.water_scope_legs.count = 0;
 }
 
 bool local_view_draws_virtual_display(const World &world, const PlayerViewState &v,

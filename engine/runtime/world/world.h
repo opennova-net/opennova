@@ -699,6 +699,36 @@ struct HudRelay {
     std::string key;
 };
 
+// The body state a deferred scope toggle call saw: the entity Flags word and
+// the motor's airborne mirror (the 0x2000 bit's other half), read by the
+// toggle's 0xA000 gate in place of the live ones.
+struct ScopeToggleCallFlags {
+    uint32_t flags = 0;
+    bool airborne = false;
+};
+
+// The local body's water-block scope legs this tick, in call order. Each calls
+// Player_ToggleWeaponScope when Player_IsEquippedWeaponScoped or
+// Player_IsVehicleGunnerScoped answers; the local view tick runs them after its
+// settle promoter, as retail's entity update follows Player_UpdatePerFrame,
+// with the Flags word each call saw (world/local_player_view.h).
+// [orig: Entity_UpdateInfantryPlayerBody -- the entry @0x4b8316..0x4b8328, the
+//  swim @0x4b8342..0x4b8360, the eye @0x4b837b..0x4b83a3]
+struct WaterScopeLeg {
+    enum class Kind : uint8_t { Entry, Swim, Eye };
+    Kind kind = Kind::Entry;
+    ScopeToggleCallFlags at_call;
+};
+struct WaterScopeLegs {
+    // The entry or the swim leg, then the eye leg.
+    static constexpr int kCapacity = 2;
+    std::array<WaterScopeLeg, kCapacity> legs{};
+    int count = 0;
+    void push(WaterScopeLeg::Kind kind, uint32_t flags, bool airborne) {
+        if (count < kCapacity) legs[count++] = {kind, {flags, airborne}};
+    }
+};
+
 // What the sim produced this tick for someone else to drain: the wire (entity
 // removals, the round ring, water crossings) and the presentation (effects,
 // destruction, scars, scorches, the sound queues). Nothing in the sim reads
@@ -732,6 +762,9 @@ struct WorldOutbox {
 	// Water-surface crossings recorded this tick; the host fan drains them
 	// into S2C 0x34 and clears. Presentation only - nothing in the sim reads it.
 	WaterCrossQueue water_crossings;
+	// The local body's water-block scope legs (WaterScopeLegs above): the
+	// body's water block records them, the local view tick runs and clears them.
+	WaterScopeLegs water_scope_legs;
 	// The local player's tip events (hud/tip_system.h TipEvent) in the order
 	// they were raised — boarding and leaving a seat, the scope and NVG
 	// toggles, the binocular edge, and a client's spectator begin (the

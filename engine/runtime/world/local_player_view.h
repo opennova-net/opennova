@@ -25,6 +25,7 @@
 namespace opennova::world {
 
 struct World;
+struct ScopeToggleCallFlags;
 
 // The per-local-player view trackers the view cluster keeps beside the
 // PlayerViewState: the binocular aim displacement, the FP motion-lead sampler
@@ -168,11 +169,13 @@ bool local_player_scope_toggle(World &world, const LocalPlayerWeapon &w, PlayerV
 // The toggle itself, with no caller's gate in front: its entry gates, then the
 // leg the promoted byte picks, the SCOPEUP / SCOPEDOWN queue landing on
 // `active_slot`. The weapon FSM's legs run it inline (the reload stash, the
-// one-shot's last recoil, the rescope after a reload). Returns whether it
-// toggled. [orig: Player_ToggleWeaponScope @0x4df0c0; its FSM callers
-//  @0x543136 / @0x54305d / @0x5413a6]
+// one-shot's last recoil, the rescope after a reload). `at_call` (null: the
+// live entity) is the Flags word and airborne mirror a deferred call saw, the
+// body's water legs. Returns whether it toggled. [orig: Player_ToggleWeaponScope
+//  @0x4df0c0; its FSM callers @0x543136 / @0x54305d / @0x5413a6]
 bool local_player_toggle_weapon_scope(World &world, const LocalPlayerWeapon &w,
-                                      PlayerViewState &v, WeaponSlotState &active_slot);
+                                      PlayerViewState &v, WeaponSlotState &active_slot,
+                                      const ScopeToggleCallFlags *at_call = nullptr);
 
 // The forced toggle of the local death and the camera switch: each calls the
 // whole toggle while the sight is promoted, without the dispatcher's
@@ -337,7 +340,8 @@ bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w,
 // on the next tick [orig: call sites @0x42c18e / @0x526786; promoter
 // @0x4de4f7; ThirdPersonCamera_Update @0x437b70..76]. The quantum's camera
 // compose is LocalPlayer::tick_view's, after the aim acquisition. `weapon`
-// (null for none) is the local weapon the death edge and the camera switch
+// (null for none) is the local weapon the death edge, the body's water legs
+// (World::out.water_scope_legs, run and cleared here) and the camera switch
 // force the scope toggle on.
 void local_player_view_tick(World *world, PlayerViewState &v,
                             LocalPlayerViewTracker &t,
