@@ -33,6 +33,10 @@ enum class EntryType {
     Newline,   // Line break (<CR>)
     Image,     // Inline image (~F0|index|filename)
     Justify,   // Text alignment (~JL, ~JC, ~JR)
+    // A '~' code the marquee's loader has no case for (any but C, F, I and J, as BHD's ~BINK_LOGO): kept as
+    // written in `text` (its font in `font`), drawn as nothing and advancing nothing [orig:
+    // CMarqueeWnd_LoadCreditsFromIni @ 0x65c72a, the code switch's default: break].
+    Markup,
 };
 
 // Justify alignment
@@ -140,7 +144,7 @@ struct CreditsDisplayItem {
 
 // Collapse the entry stream into display items: Color/Justify entries update
 // the running state (seeded white/center) and emit nothing; Text items take
-// the current state; Newline/Image items pass through unstamped.
+// the current state; Newline, Image and Markup items pass through unstamped.
 std::vector<CreditsDisplayItem> credits_display_items(const Credits& credits);
 
 // The inverse: re-emit Color/Justify controls by diffing each TEXT item's

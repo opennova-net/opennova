@@ -209,6 +209,8 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
     struct LabelInfo {
         std::string name;
         uint32_t element_count;
+        // The name entries the label's block holds: its entries and their terminator, none for a label of none.
+        uint32_t walked() const { return element_count ? element_count + 1 : 0; }
     };
 
     std::vector<LabelInfo> labels;
@@ -239,7 +241,8 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
             error = "CBIN element count is too large";
             return false;
         }
-        total_elements += static_cast<size_t>(elem_count) + 1;
+        // A label of no entry has no terminator either [orig: ConfigFile_ParseBinary @ 0x75ea65].
+        total_elements += elem_count ? static_cast<size_t>(elem_count) + 1 : 0;
     }
 
     // Read element name entries (with type field)
@@ -319,7 +322,7 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
     for (auto& label : labels) {
         if (label.name == "env") {
             // ENV: process environment settings
-            for (uint32_t j = 0; j <= label.element_count && name_idx < name_entries.size(); j++, name_idx++) {
+            for (uint32_t j = 0; j < label.walked() && name_idx < name_entries.size(); j++, name_idx++) {
                 auto& entry = name_entries[name_idx];
                 if (entry.type == 0) continue;
 
@@ -340,7 +343,7 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
             // type=1: ONE value (control code or text without font)
             // type=2: TWO CONSECUTIVE values (text + font)
 
-            for (uint32_t j = 0; j <= label.element_count && name_idx < name_entries.size(); j++, name_idx++) {
+            for (uint32_t j = 0; j < label.walked() && name_idx < name_entries.size(); j++, name_idx++) {
                 auto& entry = name_entries[name_idx];
                 if (entry.type == 0) continue;
 
@@ -349,7 +352,8 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
                 if (!get_value_string(value_idx++, main_value)) {
                     return false;
                 }
-                if (main_value.empty()) continue;
+                // An empty value is a text line like any other: the game appends a node for it, which advances
+                // the roll [orig: CMarqueeWnd_LoadCreditsFromIni @ 0x65c8c6..0x65c90e].
 
                 // For type=2, also read the font value (stored consecutively)
                 std::string font_value;
@@ -415,6 +419,11 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
                     e.image_display_x = 0;
                     e.image_display_y = 0;
                     e.use_simple_image_format = true;
+                } else if (!main_value.empty() && main_value[0] == '~') {
+                    // A code the loader has no case for: markup that draws nothing (EntryType::Markup).
+                    e.type = EntryType::Markup;
+                    e.text = main_value;
+                    e.font = font_value;
                 } else {
                     // Plain text - font_value is the font name
                     e.type = EntryType::Text;
@@ -426,7 +435,7 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
             }
         } else {
             // Other labels: skip (advance value_idx based on type)
-            for (uint32_t j = 0; j <= label.element_count && name_idx < name_entries.size(); j++, name_idx++) {
+            for (uint32_t j = 0; j < label.walked() && name_idx < name_entries.size(); j++, name_idx++) {
                 auto& entry = name_entries[name_idx];
                 if (entry.type == 1) {
                     if (value_idx >= value_entries.size()) {
@@ -469,8 +478,9 @@ bool encode(const Credits& credits, std::vector<uint8_t>& out, std::string& erro
         }
     }
 
+    // An empty value is a string of the table like any other (a string value's word is its index; 0 names none,
+    // which no reader takes as a string).
     auto add_string = [&](const std::string& s) -> uint32_t {
-        if (s.empty()) return 0;
         auto it = string_map.find(s);
         if (it != string_map.end()) {
             return it->second;
@@ -553,12 +563,13 @@ bool encode(const Credits& credits, std::vector<uint8_t>& out, std::string& erro
         e.type = entry.binary_type;  // Preserve original binary type
 
         // For text entries with font, use type=2
-        if (entry.type == EntryType::Text && !entry.font.empty()) {
+        if ((entry.type == EntryType::Text || entry.type == EntryType::Markup) && !entry.font.empty()) {
             e.type = 2;
         }
 
         switch (entry.type) {
             case EntryType::Text:
+            case EntryType::Markup:
                 e.value_raw = add_string(entry.text);
                 if (e.type == 2) {
                     e.extra_value_raw = add_string(entry.font);
@@ -616,18 +627,22 @@ bool encode(const Credits& credits, std::vector<uint8_t>& out, std::string& erro
         write_u32(entry_table, e.name_idx);
         write_u32(entry_table, e.type);
     }
-    // ENV terminator (str_idx=0, type=0)
-    write_u32(entry_table, 0);
-    write_u32(entry_table, 0);
+    // ENV terminator (str_idx=0, type=0), none for a label of no entry [orig: the writer @ 0x75e429]
+    if (!env_elements.empty()) {
+        write_u32(entry_table, 0);
+        write_u32(entry_table, 0);
+    }
 
     // Name entries for TEXT
     for (const auto& e : text_elements) {
         write_u32(entry_table, e.name_idx);
         write_u32(entry_table, e.type);
     }
-    // TEXT terminator (str_idx=0, type=0)
-    write_u32(entry_table, 0);
-    write_u32(entry_table, 0);
+    // TEXT terminator (str_idx=0, type=0), none for a label of no entry
+    if (!text_elements.empty()) {
+        write_u32(entry_table, 0);
+        write_u32(entry_table, 0);
+    }
 
     // Value entries
     // ENV values (one per element)
@@ -731,6 +746,15 @@ std::vector<CreditsDisplayItem> credits_display_items(const Credits& credits) {
                 items.push_back(std::move(item));
                 break;
             }
+            case EntryType::Markup: {
+                // Markup the game draws nothing for: kept so a re-emit writes it back, never a credit line.
+                CreditsDisplayItem item;
+                item.type = EntryType::Markup;
+                item.text = src.text;
+                item.font = src.font;
+                items.push_back(std::move(item));
+                break;
+            }
             case EntryType::Image: {
                 CreditsDisplayItem item;
                 item.type = EntryType::Image;
@@ -769,6 +793,12 @@ std::vector<Entry> credits_entries_from_display(
             case EntryType::Newline:
                 entries.push_back(Entry::make_newline());
                 break;
+            case EntryType::Markup: {
+                Entry markup = Entry::make_text(item.text, item.font);
+                markup.type = EntryType::Markup;
+                entries.push_back(std::move(markup));
+                break;
+            }
             case EntryType::Image: {
                 Entry image = Entry::make_image(
                     item.image_path, item.image_display_x, item.image_display_y);

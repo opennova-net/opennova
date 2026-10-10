@@ -12,6 +12,10 @@
 #include <string>
 #include <vector>
 
+namespace opennova::configfile {
+struct ConfigSection;
+}
+
 namespace opennova::cbin {
 
 struct BinaryConfig {
@@ -50,12 +54,28 @@ void apply_cipher(uint8_t *data, size_t size, uint32_t key);
 
 // The bytes as the form lays them out: the 20-byte header, then under the cipher the label count,
 // each label's name and entry count, every label's name entries (name, type = its value count)
-// each list closed by a terminator (0, 0), every entry's values in the same order, and the string
-// table. False with the reason for bytes laid out otherwise (a value no entry reads, a label's
-// entries not closed by its terminator, an index past the table): those would not encode back.
+// each list closed by a terminator (0, 0), a label of no entry having neither [orig:
+// ConfigFile_ParseBinary @ 0x75ea65; the writer @ 0x75e424..0x75e429], every entry's values in the
+// same order, and the string table. False with the reason for bytes laid out otherwise (a value no
+// entry reads, a label's entries not closed by its terminator, an index past the table): those would
+// not encode back. Stricter than the game's reader (D-CBIN-3): a label or an entry named by string 0,
+// an entry of no value or of more than two, and a string value of index 0 are refused, where the
+// reader takes them (@ 0x75e9c4, @ 0x75ea7e, @ 0x75eb21, @ 0x75eb4e) and its writer writes index 0 for
+// a null name (@ 0x75e3ae, @ 0x75e45e, @ 0x75e54d); the accessors would then read a null name or text.
 bool decode_binary_config(const uint8_t *data, size_t size, BinaryConfig &out, std::string &error);
 // The same layout written from `config`, under its key: decode then encode gives the bytes back.
 // False with the reason for an entry of no value or of more than two, or an index past the table.
 bool encode_binary_config(const BinaryConfig &config, std::vector<uint8_t> &out, std::string &error);
+
+// The sections the engine's binary reader builds of `config`, which the ConfigFile's accessors read as they
+// read the text form's (formats/configfile/config_file.h) [orig: ConfigFile_ParseBinary @ 0x75e8a0, taken
+// on the "CBIN" magic by ConfigFile_LoadFromFile @ 0x760aa3]: each label a section in the file's order, each
+// entry its name and its values in theirs. A label's name is lowercased in the string table itself [orig:
+// strlwr @ 0x75e9d4], so an entry's name or a string value of the same string reads lowercased too. A
+// value of flags 1 is an integer, of flags 2 a float's bits, of any flags with 4 set a string [orig: @
+// 0x75eb42; effect_get_param_value_0 @ 0x75fb2e..0x75fb58]. False (out empty) for a value of other flags,
+// whose word the accessor would read as a string's address, or of a string past the table: none this
+// writer writes.
+bool binary_config_sections(const BinaryConfig &config, std::vector<configfile::ConfigSection> &out);
 
 } // namespace opennova::cbin

@@ -68,10 +68,9 @@ public:
 // routing — is the engine's opennova::menu::MenuRuntime
 // (engine/runtime/menu/menu_runtime.h carries the witnesses); this class is
 // its device half: it implements the frame seam over the MenuFrame node,
-// reads the marquee data through the resource root, mounts the credits
-// scrollers, plays the widget sound edges, pushes the screen MUSICVAR and
-// relays the runtime's events as signals. Widgets go by stable MnuDocument id,
-// valid across screens.
+// reads the marquee data through the resource root, plays the widget sound
+// edges, pushes the screen MUSICVAR and relays the runtime's events as
+// signals. Widgets go by stable MnuDocument id, valid across screens.
 class MenuDriver : public RefCounted {
 	GDCLASS(MenuDriver, RefCounted)
 
@@ -95,23 +94,12 @@ class MenuDriver : public RefCounted {
 	Ref<MnsStyleSheet> style_;
 	// The expansion's string table every menu lookup tries first.
 	Ref<RtxtStringFile> override_text_;
-	// CBIN credits scrollers mounted over marquee widgets of the current
-	// screen. The overlays are frame CHILDREN, outside the compiled draw walk,
-	// so the driver re-applies the walk's shown gate whenever widget
-	// visibility changes: a hidden tab hides its credits.
-	struct CreditsMount {
-		ObjectID player;
-		int id = -1;
-	};
-	std::vector<CreditsMount> credits_;
 
 	MenuFrame *frame_() const;
 	MenuAudio *audio_() const;
 	MusicDirector *music_director_() const;
 	void on_runtime_event_(const opennova::menu::MenuEvent &p_event);
 	void seed_marquee_widgets_();
-	void clear_credits_();
-	void sync_credits_();
 	void on_frame_widget_clicked_(int p_index, int p_part);
 	void on_frame_scroll_value_(int p_index, int p_value);
 

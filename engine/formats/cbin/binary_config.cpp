@@ -5,6 +5,9 @@
 
 #include <base/io/le.h>
 #include <formats/cbin/cbin.h>
+#include <formats/configfile/config_file.h>
+
+#include <cstring>
 
 namespace opennova::cbin {
 
@@ -76,8 +79,12 @@ bool decode_binary_config(const uint8_t *data, size_t size, BinaryConfig &out, s
 		out.labels.push_back(std::move(label));
 		entry_counts.push_back(count);
 	}
-	// Every label's name entries, each list closed by its terminator.
+	// Every label's name entries, each list closed by its terminator; a label of no entry has neither, the reader
+	// stepping over its block alone where it counts entries [orig: ConfigFile_ParseBinary @ 0x75ea65, the
+	// element block and its terminator read only for a count other than 0; the writer @ 0x75e424..0x75e429, its
+	// jz past them for a label of none].
 	for (size_t i = 0; i < out.labels.size(); ++i) {
+		if (entry_counts[i] == 0) continue;
 		for (uint32_t j = 0; j <= entry_counts[i]; ++j) {
 			uint32_t name = 0, type = 0;
 			if (!word(name) || !word(type)) return fail(error, "The CBIN name table is cut short.");
@@ -122,6 +129,8 @@ bool encode_binary_config(const BinaryConfig &config, std::vector<uint8_t> &out,
 			io::append_u32_le(plain, entry.name);
 			io::append_u32_le(plain, static_cast<uint32_t>(entry.values.size()));
 		}
+		// The terminator closes a label's entries; a label of none writes neither [orig: the writer @ 0x75e429].
+		if (label.entries.empty()) continue;
 		io::append_u32_le(plain, 0);
 		io::append_u32_le(plain, 0);
 	}
@@ -145,6 +154,54 @@ bool encode_binary_config(const BinaryConfig &config, std::vector<uint8_t> &out,
 	io::append_u32_le(out, static_cast<uint32_t>(config.strings.size()));
 	io::append_u32_le(out, config.xor_key);
 	out.insert(out.end(), plain.begin(), plain.end());
+	return true;
+}
+
+// [orig: ConfigFile_ParseBinary @ 0x75e8a0]
+bool binary_config_sections(const BinaryConfig &config, std::vector<configfile::ConfigSection> &out) {
+	out.clear();
+	// The string table the parse points into, each label's name lowercased in it [orig: strlwr @ 0x75e9d4].
+	std::vector<std::string> strings = config.strings;
+	for (const BinaryConfig::Label &label : config.labels) {
+		if (label.name < 1 || label.name > strings.size()) return false;
+		for (char &c : strings[label.name - 1])
+			if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+	}
+	const auto string_at = [&strings](uint32_t index) -> const std::string * {
+		return index >= 1 && index <= strings.size() ? &strings[index - 1] : nullptr;
+	};
+	for (const BinaryConfig::Label &label : config.labels) {
+		configfile::ConfigSection section;
+		section.label = *string_at(label.name);
+		for (const BinaryConfig::Entry &entry : label.entries) {
+			const std::string *name = string_at(entry.name);
+			if (name == nullptr) {
+				out.clear();
+				return false;
+			}
+			configfile::ConfigEntry read;
+			read.key = *name;
+			for (const BinaryConfig::Value &value : entry.values) {
+				configfile::ConfigValue v;
+				if (value.flags == BinaryConfig::kInteger) {
+					v.type = 1;
+					v.integer = static_cast<int32_t>(value.raw);
+				} else if (value.flags == BinaryConfig::kFloat) {
+					v.type = 2;
+					std::memcpy(&v.real, &value.raw, sizeof v.real);
+				} else if ((value.flags & BinaryConfig::kString) != 0 && string_at(value.raw) != nullptr) {
+					v.type = 4;
+					v.text = *string_at(value.raw);
+				} else {
+					out.clear();
+					return false;
+				}
+				read.values.push_back(std::move(v));
+			}
+			section.entries.push_back(std::move(read));
+		}
+		out.push_back(std::move(section));
+	}
 	return true;
 }
 

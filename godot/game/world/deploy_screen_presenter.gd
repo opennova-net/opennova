@@ -474,7 +474,7 @@ func _ensure_menu() -> bool:
 
 
 # Mount the MAP window host as a frame child over the authored MAP widget (the
-# credits/preview mount pattern; the frame's cursor overlay stays above it).
+# frame's cursor overlay stays above it).
 func _mount_map_window() -> void:
 	var id := _driver.widget_id(MAP_WIDGET)
 	if id < 0:
