@@ -108,6 +108,11 @@ enum class EditorRequestKind {
 	PickDirectory,
 	PickFile,
 	RevealPath,
+	// A font made from a glyph sheet (round S23 lane A): its font set written in fonts/ naming the sheet, then
+	// imported (import/font_import.h)
+	NewFont,
+	// A wave edited whole (round S23 lane A): a trim or a normalise, written as the game takes it
+	WaveOperation,
 	kCount,
 };
 

@@ -496,8 +496,9 @@ bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vect
 // A project file read, then extract_from_bytes.
 bool extract_from_asset(const ProjectPaths &paths, const ProjectDocument &project, const AssetEntry &asset,
                         Extracted &out, Diagnostic &error);
-// True when files of this kind carry references or symbols the graph reads: a record type's
-// (document_content), a text type's whose text names references (DocumentType::references), or
+// True when files of this kind carry references or symbols the graph reads: a record type's whose records
+// name or define anything (a font's or a music bank's name nothing, round S23), a text type's whose text
+// names references (DocumentType::references), or
 // a native extractor's kind. A file of another kind (a texture, a mission text) holds nothing the
 // graph reads: its row counts (the file set), what it names goes unchecked.
 bool graph_reads_kind(AssetKind kind);

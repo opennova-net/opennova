@@ -1578,7 +1578,7 @@ static int test_symbol_locators() {
 	TEST_EXPECT(symbol_json.get("line") && symbol_json.get("line")->number == double(last.line));
 	// Go to on MAIN's font, a style variable (S12 D3): the variable where the game reads it, a
 	// line of the stylesheet the editor opens at, its name shown; and the .fnt its value names,
-	// which the editor does not edit (Files shows it). A colour through a variable goes to the
+	// a document as a whole (round S23). A colour through a variable goes to the
 	// variable alone. The stylesheet's usages are the menus' uses of its variables.
 	editor_test::handle_to_end(session, request::open_document("main.mnu"));
 	Document *menu = session.document_for("main.mnu");
@@ -1590,7 +1590,7 @@ static int test_symbol_locators() {
 	if (font.size() != 2) return 1;
 	TEST_EXPECT(font[0].file == style_path && font[0].editable && font[0].field == "name" &&
 	            font[0].label.find("DEF_FONTNAME_LG") != std::string::npos);
-	TEST_EXPECT(font[1].locator.empty() && !font[1].editable && fs::path(font[1].file).extension() == ".fnt");
+	TEST_EXPECT(font[1].locator.empty() && font[1].editable && fs::path(font[1].file).extension() == ".fnt");
 	TEST_EXPECT(targets_of(*menu, main, "font.default_fg", view).size() == 1);
 	const std::vector<const GraphEdge *> style_uses = view.findings.graph->usages_of(style_path);
 	TEST_EXPECT(view.findings.graph->referrers_of_file(style_path).empty() && !style_uses.empty());
