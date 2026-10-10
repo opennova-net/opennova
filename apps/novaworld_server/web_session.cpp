@@ -37,6 +37,7 @@ std::string create_web_session(db::Database &db, int64_t user_id, const std::str
 	std::array<uint8_t, kWebSessionTokenBytes> raw{};
 	os_random_bytes(raw.data(), raw.size());
 	const std::string token = strutil::bytes_to_hex(raw.data(), raw.size());
+	db::Transaction tx(db);
 	db.exec(
 		"INSERT INTO web_sessions "
 		"(token_hash, user_id, created_at, expires_at, last_seen_at, ip, user_agent) "
@@ -44,6 +45,15 @@ std::string create_web_session(db::Database &db, int64_t user_id, const std::str
 		{db::BindValue(web_session_token_hash(token)), db::BindValue(user_id),
 		 db::BindValue(seconds_modifier(kWebSessionLifetimeSeconds)), db::BindValue(ip),
 		 db::BindValue(user_agent)});
+	// The account's newest kWebSessionsPerUser stay; the oldest beyond them go.
+	// rowid orders sessions minted within one second.
+	db.exec(
+		"DELETE FROM web_sessions WHERE user_id = ? AND rowid NOT IN ("
+		"SELECT rowid FROM web_sessions WHERE user_id = ? "
+		"ORDER BY created_at DESC, rowid DESC LIMIT ?);",
+		{db::BindValue(user_id), db::BindValue(user_id),
+		 db::BindValue(static_cast<int64_t>(kWebSessionsPerUser))});
+	tx.commit();
 	return token;
 }
 
@@ -59,8 +69,10 @@ std::optional<WebSessionLookup> resolve_web_session(db::Database &db, std::strin
 	if (rows.empty()) return std::nullopt;
 	const auto &row = rows.front();
 	// A banned or restricted account keeps no session: the game login refuses
-	// every status but 'active', and so does the site.
-	if (row.as_text(3).value_or("active") != "active") {
+	// every status but 'active', and so does the site. An empty status reads as
+	// 'active', as row_to_user (auth.cpp) and the game login read it.
+	const std::string status = row.as_text(3).value_or("");
+	if (!status.empty() && status != "active") {
 		db.exec("DELETE FROM web_sessions WHERE token_hash = ?;", {db::BindValue(hash)});
 		return std::nullopt;
 	}

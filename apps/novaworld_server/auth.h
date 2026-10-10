@@ -2,8 +2,10 @@
 
 #include <net/novaworld/db/sqlite.h>
 
+#include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace opennova::novaworld_server {
@@ -121,10 +123,26 @@ struct UpdateUserParams {
 MutationResult update_user(opennova::db::Database &db, int64_t id,
                            const UpdateUserParams &p);
 
-// ONNET_BOOTSTRAP_ADMIN: gives the account named `username` the admin role
-// (main() calls it at boot). False when no account has that username. Throws
-// db::SqliteError on a database failure.
-bool promote_to_admin(opennova::db::Database &db, const std::string &username);
+// ONNET_BOOTSTRAP_ADMIN (main() calls it at boot): gives the account named
+// `username` the admin role, once. While any account is an admin it does
+// nothing, so a later boot can neither re-promote a deliberately demoted
+// admin nor promote whoever registered the name after the first admin was
+// made. Throws db::SqliteError on a database failure.
+struct BootstrapAdminResult {
+	enum class Outcome { Promoted, AdminExists, NoSuchAccount };
+	Outcome outcome = Outcome::NoSuchAccount;
+	std::string existing_admin; // AdminExists: one admin's username
+};
+BootstrapAdminResult bootstrap_admin(opennova::db::Database &db, const std::string &username);
+
+// Every bcrypt password check authenticate_user has run in this process: the
+// test seam that pins the unknown-username path to one check like a wrong
+// password's.
+uint64_t password_verifications();
+
+// `text` as a log line may carry it: control bytes as '?', cut at 64 bytes.
+// For usernames and other client-supplied strings.
+std::string loggable(std::string_view text);
 
 struct UpdateGameAccessParams {
 	std::string game_slug;

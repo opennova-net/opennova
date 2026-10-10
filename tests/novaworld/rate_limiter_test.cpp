@@ -1,7 +1,8 @@
 // The NovaWorld service's credential-route brake (apps/novaworld_server/
 // rate_limiter.*): token buckets on a hand-stepped clock (the burst, the
 // refill, the Retry-After, independent keys, the table bound and its
-// eviction), and the client address a request is keyed by (resolve_client_ip:
+// eviction, the failure-charged wait/charge pair), and the client address a
+// request is keyed by (resolve_client_ip:
 // a proxy header counts only from a trusted peer). Crow-free, so it runs on
 // every build; the HTTP route harness drives the same limits over the wire.
 
@@ -87,6 +88,29 @@ int test_sweep_drops_full_buckets() {
 	return 0;
 }
 
+// The failure-charged pair: wait() reads without taking (an absent key is
+// full and stays absent), charge() drains one token per failure, never into
+// debt, and the bucket refills as take()'s does.
+int test_wait_and_charge() {
+	RateLimiter limiter({3, 0.5, 100}); // 3 failures, then one every 2 s
+	TEST_EXPECT(limiter.wait("user", kT0) == 0);
+	TEST_EXPECT(limiter.size() == 0);
+	limiter.charge("user", kT0);
+	limiter.charge("user", kT0);
+	TEST_EXPECT(limiter.wait("user", kT0) == 0); // one left
+	TEST_EXPECT(limiter.wait("user", kT0) == 0); // reading takes nothing
+	limiter.charge("user", kT0);
+	TEST_EXPECT(limiter.wait("user", kT0) == 2);
+	// Failures that all passed wait() at once drain to zero, not below: the
+	// wait stays one token's.
+	for (int i = 0; i < 5; ++i) limiter.charge("user", kT0);
+	TEST_EXPECT(limiter.wait("user", kT0) == 2);
+	TEST_EXPECT(limiter.wait("user", kT0 + seconds(2)) == 0);
+	TEST_EXPECT(limiter.wait("other", kT0) == 0);
+	TEST_EXPECT(limiter.size() == 1);
+	return 0;
+}
+
 // The client address: the peer, unless the peer is a trusted proxy, which
 // then names it in X-Real-IP or, failing that, the last X-Forwarded-For hop.
 int test_client_ip() {
@@ -119,6 +143,7 @@ int main() {
 		{"keys_are_independent", test_keys_are_independent},
 		{"table_is_bounded", test_table_is_bounded},
 		{"sweep_drops_full_buckets", test_sweep_drops_full_buckets},
+		{"wait_and_charge", test_wait_and_charge},
 		{"client_ip", test_client_ip},
 	};
 	for (const Case &c : cases) {

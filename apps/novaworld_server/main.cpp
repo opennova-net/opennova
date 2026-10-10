@@ -166,16 +166,29 @@ int main() {
 	apply_seed(dbh, config.seed_dir, config.seed_dev_users);
 
 #ifdef OPENNOVA_HTTP_ENABLED
-	// The first website admin: ONNET_BOOTSTRAP_ADMIN names an existing account.
+	// The first website admin: ONNET_BOOTSTRAP_ADMIN names an existing account,
+	// promoted only while no account is an admin (bootstrap_admin).
 	if (!config.bootstrap_admin.empty()) {
+		const std::string name = loggable(config.bootstrap_admin);
 		try {
-			if (promote_to_admin(dbh, config.bootstrap_admin)) {
-				std::printf("[boot] bootstrap admin: '%s' has the admin role\n",
-				            config.bootstrap_admin.c_str());
-			} else {
+			const auto result = bootstrap_admin(dbh, config.bootstrap_admin);
+			switch (result.outcome) {
+			case BootstrapAdminResult::Outcome::Promoted:
+				std::printf("[boot] bootstrap admin: '%s' is now the first admin; remove "
+				            "ONNET_BOOTSTRAP_ADMIN\n",
+				            name.c_str());
+				break;
+			case BootstrapAdminResult::Outcome::AdminExists:
 				std::fprintf(stderr,
-				             "[boot] WARN bootstrap admin: no account named '%s'; nobody promoted\n",
-				             config.bootstrap_admin.c_str());
+				             "[boot] WARN bootstrap admin: skipped '%s', an admin exists ('%s'); "
+				             "remove ONNET_BOOTSTRAP_ADMIN\n",
+				             name.c_str(), loggable(result.existing_admin).c_str());
+				break;
+			case BootstrapAdminResult::Outcome::NoSuchAccount:
+				std::fprintf(stderr,
+				             "[boot] WARN bootstrap admin: skipped, no account named '%s'\n",
+				             name.c_str());
+				break;
 			}
 		} catch (const db::SqliteError &e) {
 			std::fprintf(stderr, "[boot] WARN bootstrap admin: %s\n", e.what());

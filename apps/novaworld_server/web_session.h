@@ -22,8 +22,15 @@ namespace opennova::novaworld_server {
 // kWebSessionTouchSeconds after the last recorded one moves last_seen_at and
 // expires_at forward, so a busy session writes at most once a minute.
 
-// The cookie that carries the token.
+// The cookie that carries the token: on an http site, and with the __Host-
+// prefix wherever the cookie is Secure (ONNET_COOKIE_SECURE), so a sibling
+// subdomain cannot plant one (a __Host- cookie must be Secure, Path=/ and
+// carry no Domain; the browser refuses any other). The server reads only the
+// name its own config sets.
 inline constexpr const char *kWebSessionCookie = "opennova_session";
+inline constexpr const char *kWebSessionHostCookie = "__Host-opennova_session";
+// The live sessions one account keeps; a login past this ends the oldest.
+inline constexpr size_t kWebSessionsPerUser = 20;
 // 30 days, sliding.
 inline constexpr int64_t kWebSessionLifetimeSeconds = 30 * 24 * 60 * 60;
 inline constexpr int64_t kWebSessionTouchSeconds = 60;
@@ -51,8 +58,9 @@ bool is_web_session_token(std::string_view token);
 std::string web_session_token_hash(std::string_view token);
 
 // Mints a session for `user_id` and returns its token (the cookie value).
-// `ip` and `user_agent` are recorded for the account's session list. Throws
-// db::SqliteError when the insert fails.
+// `ip` and `user_agent` are recorded for the account's session list. The
+// account's sessions beyond the newest kWebSessionsPerUser are deleted in the
+// same transaction. Throws db::SqliteError when the insert fails.
 std::string create_web_session(db::Database &db, int64_t user_id, const std::string &ip,
                                const std::string &user_agent);
 

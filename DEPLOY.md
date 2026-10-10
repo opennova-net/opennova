@@ -123,9 +123,24 @@ The same file sets the website login's `ONNET_COOKIE_SECURE=1` and
 `ONNET_TRUSTED_PROXIES=127.0.0.1` (apps/novaworld_server/README.md). The Secure
 session cookie needs the site served over https only: keep the web records proxied
 (`cloudflare_web_proxied`, the default) and turn on Cloudflare's "Always Use HTTPS",
-or a visitor on plain http cannot stay logged in. To make the first site admin, add
-`ONNET_BOOTSTRAP_ADMIN=<username>` there once that account exists; it promotes the
-account at every boot, so drop it again after that deploy.
+or a visitor on plain http cannot stay logged in.
+
+Behind the proxied records every request reaches nginx from a Cloudflare edge, so the
+portal's nginx takes the visitor's address from `CF-Connecting-IP`, for a peer in
+Cloudflare's published ranges only (`web/cloudflare-realip.conf`); the server's login
+and registration rate limits key on that address. Refresh the ranges before a web-image
+release with `sh web/cloudflare-realip.sh` (it rewrites the file from
+https://www.cloudflare.com/ips-v4 and /ips-v6; review and commit the diff). Cloudflare
+announces range changes ahead of time.
+
+To make the first site admin, register the account, then add a `bootstrap_admin` field
+holding its username to the `app-prod` vault item and the line
+`ONNET_BOOTSTRAP_ADMIN=op://OpenNova-Deploy/app-prod/bootstrap_admin` to
+`deploy/env/app.prod.env.tpl`, and deploy. Never put the name in the committed
+`app.prod.env`: a name in a public file is one anybody can register first. The server
+promotes the account only while no account is an admin and logs what it did; remove
+both lines after that deploy (the server warns at every boot while the setting is
+present).
 
 `infra apply` also creates the `launcher_ci` IAM user (S3 upload to the
 downloads bucket; pending retirement with the launcher, ADR 0048) and outputs its keys. Store them in the vault so the GitHub

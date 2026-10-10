@@ -24,8 +24,7 @@ void RateLimiter::drop_full_locked(Clock::time_point now) {
 	last_sweep_ = now;
 }
 
-int64_t RateLimiter::take(const std::string &key, Clock::time_point now) {
-	std::lock_guard<std::mutex> lock(mu_);
+RateLimiter::Bucket &RateLimiter::bucket_locked(const std::string &key, Clock::time_point now) {
 	if (now - last_sweep_ >= kSweepInterval) drop_full_locked(now);
 
 	auto it = buckets_.find(key);
@@ -43,14 +42,38 @@ int64_t RateLimiter::take(const std::string &key, Clock::time_point now) {
 		it->second.tokens = refilled(it->second, now);
 		it->second.updated = now;
 	}
+	return it->second;
+}
 
-	Bucket &bucket = it->second;
+int64_t RateLimiter::retry_after(const Bucket &bucket) const {
+	const double wait = (1 - bucket.tokens) / params_.refill_per_second;
+	return std::max<int64_t>(1, static_cast<int64_t>(std::ceil(wait)));
+}
+
+int64_t RateLimiter::take(const std::string &key, Clock::time_point now) {
+	std::lock_guard<std::mutex> lock(mu_);
+	Bucket &bucket = bucket_locked(key, now);
 	if (bucket.tokens >= 1) {
 		bucket.tokens -= 1;
 		return 0;
 	}
-	const double wait = (1 - bucket.tokens) / params_.refill_per_second;
-	return std::max<int64_t>(1, static_cast<int64_t>(std::ceil(wait)));
+	return retry_after(bucket);
+}
+
+int64_t RateLimiter::wait(const std::string &key, Clock::time_point now) {
+	std::lock_guard<std::mutex> lock(mu_);
+	// An absent key is a full bucket: reading it adds no entry.
+	const auto it = buckets_.find(key);
+	if (it == buckets_.end()) return 0;
+	Bucket probe = it->second;
+	probe.tokens = refilled(probe, now);
+	return probe.tokens >= 1 ? 0 : retry_after(probe);
+}
+
+void RateLimiter::charge(const std::string &key, Clock::time_point now) {
+	std::lock_guard<std::mutex> lock(mu_);
+	Bucket &bucket = bucket_locked(key, now);
+	bucket.tokens = std::max(0.0, bucket.tokens - 1);
 }
 
 size_t RateLimiter::size() const {

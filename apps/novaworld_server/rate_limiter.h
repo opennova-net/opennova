@@ -42,6 +42,14 @@ public:
 	// request is answered with.
 	int64_t take(const std::string &key, Clock::time_point now);
 
+	// The failure-charged pair, for a bucket that only failed attempts drain:
+	// wait() reads whether `key` has a token (0, else the Retry-After seconds)
+	// without taking one, and charge() takes one after the attempt failed.
+	// Attempts that passed wait() at once and all failed can empty the bucket
+	// only to zero, never into debt, so a burst cannot extend the lockout.
+	int64_t wait(const std::string &key, Clock::time_point now);
+	void charge(const std::string &key, Clock::time_point now);
+
 	size_t size() const;
 
 private:
@@ -52,6 +60,10 @@ private:
 
 	double refilled(const Bucket &bucket, Clock::time_point now) const;
 	void drop_full_locked(Clock::time_point now);
+	// `key`'s bucket refilled to `now`, made (full) when absent, the table
+	// bound kept.
+	Bucket &bucket_locked(const std::string &key, Clock::time_point now);
+	int64_t retry_after(const Bucket &bucket) const;
 
 	const Params params_;
 	mutable std::mutex mu_;

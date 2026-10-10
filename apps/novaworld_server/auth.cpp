@@ -3,7 +3,9 @@
 #include <base/io/strutil.h>
 #include <base/os_random/os_random.h>
 
+#include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <optional>
@@ -27,6 +29,9 @@ namespace opennova::novaworld_server {
 
 namespace {
 
+// password_verifications(): every bcrypt check verify_password runs.
+std::atomic<uint64_t> g_password_verifications{0};
+
 // Verify a password against a bcrypt hash. The stored hash format is
 //     $2a$<cost>$<22-char-salt><31-char-hash>     (or $2b$ — same algo)
 // We hand `bcrypt_hashpass` the password + the stored hash (which doubles
@@ -42,6 +47,7 @@ bool verify_password(const std::string &plain, const std::string &stored) {
 	if (stored.size() >= 4 && stored[0] == '$' && stored[1] == '2' &&
 	    (stored[2] == 'a' || stored[2] == 'b' || stored[2] == 'y') &&
 	    stored[3] == '$') {
+		g_password_verifications.fetch_add(1, std::memory_order_relaxed);
 		char recomputed[64] = {0};
 		if (bcrypt_hashpass(plain.c_str(), stored.c_str(),
 		                    recomputed, sizeof(recomputed)) != 0) {
@@ -98,6 +104,22 @@ MutationResult err(const char *code, const char *msg) {
 
 } // namespace
 
+uint64_t password_verifications() {
+	return g_password_verifications.load(std::memory_order_relaxed);
+}
+
+std::string loggable(std::string_view text) {
+	constexpr size_t kMax = 64;
+	std::string out;
+	out.reserve(std::min(text.size(), kMax) + 2);
+	for (size_t i = 0; i < text.size() && i < kMax; ++i) {
+		const auto c = static_cast<unsigned char>(text[i]);
+		out.push_back(c < 0x20 || c == 0x7f ? '?' : static_cast<char>(c));
+	}
+	if (text.size() > kMax) out += "..";
+	return out;
+}
+
 std::optional<UserRecord> authenticate_user(opennova::db::Database &db,
                                             const std::string &username,
                                             const std::string &password) {
@@ -118,12 +140,12 @@ std::optional<UserRecord> authenticate_user(opennova::db::Database &db,
 		} catch (const std::exception &e) {
 			std::fprintf(stderr, "[auth] WARN unknown-user hash failed: %s\n", e.what());
 		}
-		std::fprintf(stderr, "[auth] user '%s' not found\n", username.c_str());
+		std::fprintf(stderr, "[auth] user '%s' not found\n", loggable(username).c_str());
 		return std::nullopt;
 	}
 	const auto stored_hash = rows.front().as_text(7).value_or("");
 	if (!verify_password(password, stored_hash)) {
-		std::fprintf(stderr, "[auth] bad password for user '%s'\n", username.c_str());
+		std::fprintf(stderr, "[auth] bad password for user '%s'\n", loggable(username).c_str());
 		return std::nullopt;
 	}
 	auto user = row_to_user(rows.front());
@@ -409,6 +431,17 @@ MutationResult update_user(opennova::db::Database &db, int64_t id,
 	if (p.role && *p.role != "player" && *p.role != "admin") {
 		return err("invalid_field", "role must be player or admin");
 	}
+	// '' would read back as 'active' (row_to_user) on one path and as no
+	// status on another; a status names itself.
+	if (p.account_status && p.account_status->empty()) {
+		return err("invalid_field", "account_status must not be empty");
+	}
+	// A new password or an inactive status ends the account's website
+	// sessions, in the same transaction as the update: a reset locks out
+	// whoever held the old one, and a ban lifted later revives no session.
+	const bool revoke_sessions =
+			(p.password_plaintext && !p.password_plaintext->empty()) ||
+			(p.account_status && *p.account_status != "active");
 
 	std::string sets;
 	std::vector<opennova::db::BindValue> binds;
@@ -446,7 +479,12 @@ MutationResult update_user(opennova::db::Database &db, int64_t id,
 	}
 	binds.emplace_back(id);
 	try {
+		opennova::db::Transaction tx(db);
 		db.exec("UPDATE players SET " + sets + " WHERE id = ?;", binds);
+		if (revoke_sessions) {
+			db.exec("DELETE FROM web_sessions WHERE user_id = ?;", {opennova::db::BindValue(id)});
+		}
+		tx.commit();
 	} catch (const opennova::db::SqliteError &e) {
 		return err("db_error", e.what());
 	}
@@ -456,11 +494,22 @@ MutationResult update_user(opennova::db::Database &db, int64_t id,
 	return m;
 }
 
-bool promote_to_admin(opennova::db::Database &db, const std::string &username) {
-	if (username.empty()) return false;
-	db.exec("UPDATE players SET role = 'admin' WHERE username = ?;",
+BootstrapAdminResult bootstrap_admin(opennova::db::Database &db, const std::string &username) {
+	BootstrapAdminResult out;
+	opennova::db::Transaction tx(db);
+	const auto admins = db.query("SELECT username FROM players WHERE role = 'admin' ORDER BY id LIMIT 1;");
+	if (!admins.empty()) {
+		out.outcome = BootstrapAdminResult::Outcome::AdminExists;
+		out.existing_admin = admins.front().as_text(0).value_or("");
+		return out;
+	}
+	db.exec("UPDATE players SET role = 'admin' WHERE username = ? AND "
+	        "NOT EXISTS (SELECT 1 FROM players WHERE role = 'admin');",
 	        {opennova::db::BindValue(username)});
-	return db.changes() > 0;
+	out.outcome = db.changes() > 0 ? BootstrapAdminResult::Outcome::Promoted
+	                               : BootstrapAdminResult::Outcome::NoSuchAccount;
+	tx.commit();
+	return out;
 }
 
 MutationResult update_game_access(opennova::db::Database &db, int64_t user_id,

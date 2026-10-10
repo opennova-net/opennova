@@ -133,6 +133,11 @@ void add_standard_headers(crow::response &res) {
 	res.set_header("Cache-Control", "no-cache, must-revalidate");
 }
 
+// The message POST /NWLogin.dll's failure page carries when the login brake
+// refuses the attempt (see handle_login_post).
+constexpr const char *kLoginThrottledMessage =
+		"Too many failed logins. Please try again later.";
+
 std::string legacy_game_slug(const std::string &pfid,
                              const std::string &template_hint) {
 	if (pfid == "38" || template_hint.rfind("dfx2_", 0) == 0) {
@@ -406,19 +411,11 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 	    [this](const crow::request &req) {
 		auto caller = impl_->access.require_admin(req);
 		if (caller.refusal) return std::move(*caller.refusal);
-		auto body = crow::json::load(req.body);
-		if (!body) {
-			crow::response res(400);
-			res.body = "{\"error\":\"invalid_json\"}";
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
-		const bool maintenance = body.has("maintenance_enabled")
-			? static_cast<bool>(body["maintenance_enabled"].b())
-			: false;
-		const std::string message = body.has("message")
-			? std::string(body["message"].s())
-			: std::string();
+		auto body = JsonBody::parse(req.body);
+		if (!body) return json_error(400, "invalid_json");
+		const bool maintenance = body->flag("maintenance_enabled").value_or(false);
+		const std::string message = body->text_or("message", "");
+		if (body->wrong_type()) return json_error(400, "invalid_field");
 		auto db_conn = db_pool_.acquire();
 		auto result = update_server_status(*db_conn, maintenance, message);
 		crow::json::wvalue out;
@@ -450,12 +447,14 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 	    [this, public_host](const crow::request &req) {
 		auto caller = impl_->access.require_admin(req);
 		if (caller.refusal) return std::move(*caller.refusal);
-		auto body = crow::json::load(req.body);
-		auto str_or = [&](const char *k, const char *fallback) {
-			return (body && body.has(k)) ? std::string(body[k].s()) : std::string(fallback);
+		// An empty body takes every default; any other must be an object.
+		auto body = JsonBody::parse(req.body.empty() ? std::string("{}") : req.body);
+		if (!body) return json_error(400, "invalid_json");
+		auto str_or = [&body](const char *k, const char *fallback) {
+			return body->text_or(k, fallback);
 		};
-		auto int_or = [&](const char *k, int fallback) {
-			return (body && body.has(k)) ? static_cast<int>(body[k].i()) : fallback;
+		auto int_or = [&body](const char *k, int fallback) {
+			return static_cast<int>(body->integer(k).value_or(fallback));
 		};
 
 		hostdb::HostRow row;
@@ -480,6 +479,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		row.exp_bits     = str_or("exp_bits", "3");
 		row.peer_ip      = row.host_ip;
 		row.peer_port    = row.host_port;
+		if (body->wrong_type()) return json_error(400, "invalid_field");
 
 		try {
 			auto db_conn = db_pool_.acquire();
@@ -559,23 +559,15 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 	    [this](const crow::request &req) {
 		auto caller = impl_->access.require_admin(req);
 		if (caller.refusal) return std::move(*caller.refusal);
-		auto body = crow::json::load(req.body);
-		if (!body) {
-			crow::response res(400);
-			res.body = "{\"error\":\"invalid_json\"}";
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
-		auto js = [&](const char *k, const char *fallback) {
-			return body.has(k) ? std::string(body[k].s())
-			                   : std::string(fallback);
-		};
+		auto body = JsonBody::parse(req.body);
+		if (!body) return json_error(400, "invalid_json");
 		CreateUserParams p;
-		p.username = js("username", "");
-		p.password = js("password", "");
-		p.pcid     = js("pcid",     "");
-		p.nwh      = js("nwh",      "1");
-		p.nwhandle = js("nwhandle", "");
+		p.username = body->text_or("username", "");
+		p.password = body->text_or("password", "");
+		p.pcid     = body->text_or("pcid",     "");
+		p.nwh      = body->text_or("nwh",      "1");
+		p.nwhandle = body->text_or("nwhandle", "");
+		if (body->wrong_type()) return json_error(400, "invalid_field");
 		auto db_conn = db_pool_.acquire();
 		auto result = create_user(*db_conn, p);
 		crow::json::wvalue out;
@@ -621,21 +613,17 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 	    [this](const crow::request &req, int id) {
 		auto caller = impl_->access.require_admin(req);
 		if (caller.refusal) return std::move(*caller.refusal);
-		auto body = crow::json::load(req.body);
-		if (!body) {
-			crow::response res(400);
-			res.body = "{\"error\":\"invalid_json\"}";
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
+		auto body = JsonBody::parse(req.body);
+		if (!body) return json_error(400, "invalid_json");
 		UpdateUserParams p;
-		if (body.has("username")) p.username           = std::string(body["username"].s());
-		if (body.has("password")) p.password_plaintext = std::string(body["password"].s());
-		if (body.has("pcid"))     p.pcid               = std::string(body["pcid"].s());
-		if (body.has("nwh"))      p.nwh                = std::string(body["nwh"].s());
-		if (body.has("nwhandle")) p.nwhandle           = std::string(body["nwhandle"].s());
-		if (body.has("account_status")) p.account_status = std::string(body["account_status"].s());
-		if (body.has("role"))     p.role               = std::string(body["role"].s());
+		p.username           = body->text("username");
+		p.password_plaintext = body->text("password");
+		p.pcid               = body->text("pcid");
+		p.nwh                = body->text("nwh");
+		p.nwhandle           = body->text("nwhandle");
+		p.account_status     = body->text("account_status");
+		p.role               = body->text("role");
+		if (body->wrong_type()) return json_error(400, "invalid_field");
 		auto db_conn = db_pool_.acquire();
 		auto result = update_user(*db_conn, id, p);
 		crow::json::wvalue out;
@@ -662,17 +650,13 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 	    [this](const crow::request &req, int id) {
 		auto caller = impl_->access.require_admin(req);
 		if (caller.refusal) return std::move(*caller.refusal);
-		auto body = crow::json::load(req.body);
-		if (!body) {
-			crow::response res(400);
-			res.body = "{\"error\":\"invalid_json\"}";
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
+		auto body = JsonBody::parse(req.body);
+		if (!body) return json_error(400, "invalid_json");
 		UpdateGameAccessParams p;
-		p.game_slug = body.has("game_slug") ? std::string(body["game_slug"].s()) : "";
-		p.status    = body.has("status")    ? std::string(body["status"].s())    : "active";
-		p.exp_bits  = body.has("exp_bits")  ? std::string(body["exp_bits"].s())  : "";
+		p.game_slug = body->text_or("game_slug", "");
+		p.status    = body->text_or("status",    "active");
+		p.exp_bits  = body->text_or("exp_bits",  "");
+		if (body->wrong_type()) return json_error(400, "invalid_field");
 		auto db_conn = db_pool_.acquire();
 		auto result = update_game_access(*db_conn, id, p);
 		crow::json::wvalue out;
@@ -773,31 +757,25 @@ void HttpListener::register_public_api_routes() {
 	// Server auto-generates a unique 8-hex-char PCID. nwhandle defaults
 	// to username when omitted. Returns the new user's public record on
 	// success; 400 on conflict / missing fields, 500 on DB error.
-	// Rate-limited per client address (429 + Retry-After), checked before the
-	// body is read. No X-OpenNova-Request header is required: no session
-	// authenticates it and it starts none, so a forged cross-site
-	// registration can neither act as the visitor nor sign them in.
+	// The X-OpenNova-Request header is required, checked first: a cross-site
+	// text/plain form can carry a JSON body (the parse ignores Content-Type),
+	// so without it any page could make its visitors create accounts and drain
+	// their address's bucket. Then the per-address brake (429 + Retry-After),
+	// before the body is read.
 	CROW_ROUTE(app, "/api/register").methods("POST"_method)(
 	    [this](const crow::request &req) {
+		if (!WebAccess::has_csrf_header(req)) return json_error(403, "csrf_header_required");
 		const std::string ip = impl_->access.client_ip(req);
 		if (const int64_t wait = impl_->access.take_register(ip)) {
 			std::printf("[http] /api/register rate-limited for %s\n", ip.c_str());
 			return too_many_requests(wait);
 		}
-		auto body = crow::json::load(req.body);
-		if (!body) {
-			crow::response res(400);
-			res.body = "{\"error\":\"invalid_json\"}";
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
-		auto js = [&](const char *k, const char *fallback) {
-			return body.has(k) ? std::string(body[k].s())
-			                   : std::string(fallback);
-		};
-		const std::string username = js("username", "");
-		const std::string password = js("password", "");
-		const std::string nwhandle = js("nwhandle", username.c_str());
+		auto body = JsonBody::parse(req.body);
+		if (!body) return json_error(400, "invalid_json");
+		const std::string username = body->text_or("username", "");
+		const std::string password = body->text_or("password", "");
+		const std::string nwhandle = body->text_or("nwhandle", username);
+		if (body->wrong_type()) return json_error(400, "invalid_field");
 		if (username.empty() || password.empty()) {
 			crow::response res(400);
 			res.body = "{\"error\":\"missing_field\","
@@ -831,7 +809,7 @@ void HttpListener::register_public_api_routes() {
 		auto created = get_user_by_id(*db_conn, result.id);
 		out["user"] = created ? user_to_json(*created) : crow::json::wvalue{};
 		std::printf("[http] /api/register -> created user '%s' (id=%lld)\n",
-		            username.c_str(), static_cast<long long>(result.id));
+		            loggable(username).c_str(), static_cast<long long>(result.id));
 		crow::response res(201);
 		res.body = out.dump();
 		res.set_header("Content-Type", "application/json");
@@ -1160,15 +1138,30 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		std::optional<UserRecord> user;
 		const char *resolution = nullptr;
 		if (!login_name.empty() && !login_password.empty()) {
+			// The login brake POST /api/login runs (WebAccess), on the same
+			// buckets: the address's attempts, then the username's failure
+			// buckets, which only a wrong password drains. Its refusal is this
+			// route's own failure reply, the msgbase page with a message (as a
+			// bad password and maintenance get), which a stock client shows;
+			// no retail throttling reply is witnessed (service policy).
+			const std::string ip = impl_->access.client_ip(req);
+			if (impl_->access.take_login_address(ip) != 0 ||
+			    impl_->access.login_wait(login_name, ip) != 0) {
+				std::fprintf(stderr,
+				             "[http] POST /NWLogin.dll rate-limited for user '%s' from %s\n",
+				             loggable(login_name).c_str(), ip.c_str());
+				return render_login_message(kLoginThrottledMessage);
+			}
 			user = authenticate_user(*db_conn, login_name, login_password);
 			if (user) {
 				resolution = "epask-auth";
 			} else {
+				impl_->access.login_failed(login_name, ip);
 				// Bad credentials → render the failure template (jop_2_main.htm
 				// per retail's form `failure` arg) with a "Invalid username or
 				// password" message and bail before storing a session.
 				std::fprintf(stderr, "[http] POST /NWLogin.dll auth failed for user '%s'\n",
-				             login_name.c_str());
+				             loggable(login_name).c_str());
 				return render_login_message("Invalid username or password");
 			}
 		}

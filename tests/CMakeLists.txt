@@ -3518,15 +3518,17 @@ target_compile_definitions(db_concurrency_test PRIVATE OPENNOVA_SOURCE_DIR="${CM
 add_test(NAME db_concurrency COMMAND db_concurrency_test)
 
 # The NovaWorld site's login sessions and roles (web_sessions, players.role):
-# the token kept as its SHA-256, the sliding expiry, the refusals, the prune and
-# the bootstrap promotion, on a migrated in-memory database. Compiles the
+# the token kept as its SHA-256, the per-account cap, the sliding expiry and
+# its race (threads on a WAL file), the refusals, the revocations, the prune and
+# the one-shot bootstrap promotion, on a migrated in-memory database. Compiles the
 # server's web_session.cpp and auth.cpp directly, as db_concurrency_test does,
 # so it runs on every build, not only under BUILD_NOVAWORLD_HTTP.
 add_executable(web_session_test
     novaworld/web_session_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/auth.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/web_session.cpp)
-target_link_libraries(web_session_test PRIVATE opennova_novaworld_service opennova_bcrypt)
+target_link_libraries(web_session_test
+    PRIVATE opennova_novaworld_service opennova_bcrypt Threads::Threads)
 target_include_directories(web_session_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server)

@@ -14,12 +14,20 @@ const fallbackBaseUrl =
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || fallbackBaseUrl;
 
+// The server's CSRF header: every state-changing /api request a session
+// cookie authenticates, and /api/register and /api/login, must carry it
+// (apps/novaworld_server/README.md, "Website sessions and roles"). A
+// cross-site page cannot send it, so it marks a request as the site's own.
+const CSRF_HEADERS = { 'X-OpenNova-Request': '1' };
+
 export const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
+  headers: CSRF_HEADERS,
 });
 
 export const adminClient: AxiosInstance = axios.create({
   baseURL: `${API_BASE_URL}/admin`,
+  headers: CSRF_HEADERS,
 });
 
 adminClient.interceptors.request.use((config) => {

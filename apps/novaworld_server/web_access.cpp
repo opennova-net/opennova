@@ -4,6 +4,7 @@
 #include "http_cookies.h"
 #include "server_config.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <utility>
 
@@ -11,9 +12,6 @@ namespace opennova::novaworld_server {
 
 namespace {
 
-// The longest username a per-username bucket key keeps, so a huge name in a
-// login body cannot grow the table's memory.
-constexpr size_t kRateKeyMaxBytes = 128;
 // The longest User-Agent a web session records.
 constexpr size_t kUserAgentMaxBytes = 512;
 
@@ -23,15 +21,9 @@ bool is_state_changing(const crow::request &req) {
 	       req.method != crow::HTTPMethod::Options;
 }
 
-bool has_csrf_header(const crow::request &req) {
-	return req.get_header_value(WebAccess::kCsrfHeader) == "1";
-}
-
-// The session token the request's cookie carries, "" when it carries none.
-std::string session_token(const crow::request &req) {
-	const auto cookies = parse_cookie_header(request_cookie_header(req));
-	const auto it = cookies.find(kWebSessionCookie);
-	return it == cookies.end() ? std::string() : it->second;
+// A per-(username, address) bucket key; the newline appears in neither half.
+std::string user_ip_key(const std::string &username, const std::string &ip) {
+	return username.substr(0, WebAccess::kUsernameMaxBytes) + "\n" + ip;
 }
 
 // What /api/me and /api/login answer with: the account a session acts as.
@@ -46,33 +38,25 @@ crow::json::wvalue session_user_json(int64_t id, const std::string &username,
 
 } // namespace
 
-crow::response json_reply(int code, const crow::json::wvalue &body) {
-	crow::response res(code);
-	res.body = body.dump();
-	res.set_header("Content-Type", "application/json");
-	return res;
-}
-
-crow::response json_error(int code, const char *error) {
-	crow::json::wvalue body;
-	body["error"] = error;
-	return json_reply(code, body);
-}
-
 crow::response too_many_requests(int64_t wait) {
 	crow::response res = json_error(429, "rate_limited");
 	res.set_header("Retry-After", std::to_string(wait));
 	return res;
 }
 
+bool WebAccess::has_csrf_header(const crow::request &req) {
+	return req.get_header_value(kCsrfHeader) == "1";
+}
+
 void WebAccess::configure(const ServerConfig &config) {
 	admin_token_ = config.admin_api_token;
 	cookie_secure_ = config.cookie_secure;
+	cookie_name_ = cookie_secure_ ? kWebSessionHostCookie : kWebSessionCookie;
 	trusted_proxies_ = config.trusted_proxies;
 	std::printf("[http] admin api: Bearer token %s; admin-role sessions accepted\n",
 	            admin_token_.empty() ? "DISABLED (set ADMIN_API_TOKEN to enable)" : "ENABLED");
-	std::printf("[http] session cookie %s; %zu trusted proxy address(es)\n",
-	            cookie_secure_ ? "Secure" : "not Secure (set ONNET_COOKIE_SECURE=1 for https)",
+	std::printf("[http] session cookie %s%s; %zu trusted proxy address(es)\n", cookie_name_.c_str(),
+	            cookie_secure_ ? " (Secure)" : " (not Secure: set ONNET_COOKIE_SECURE=1 for https)",
 	            trusted_proxies_.size());
 }
 
@@ -82,11 +66,16 @@ std::string WebAccess::client_ip(const crow::request &req) const {
 }
 
 std::string WebAccess::session_cookie(const std::string &token, int64_t max_age) const {
-	std::string cookie = std::string(kWebSessionCookie) + "=" + token +
-	                     "; Path=/; Max-Age=" + std::to_string(max_age) +
-	                     "; HttpOnly; SameSite=Lax";
+	std::string cookie = cookie_name_ + "=" + token + "; Path=/; Max-Age=" +
+	                     std::to_string(max_age) + "; HttpOnly; SameSite=Lax";
 	if (cookie_secure_) cookie += "; Secure";
 	return cookie;
+}
+
+std::string WebAccess::session_token(const crow::request &req) const {
+	const auto cookies = parse_cookie_header(request_cookie_header(req));
+	const auto it = cookies.find(cookie_name_);
+	return it == cookies.end() ? std::string() : it->second;
 }
 
 bool WebAccess::bearer_authorized(const crow::request &req) const {
@@ -135,19 +124,42 @@ RouteAccess WebAccess::require_user(const crow::request &req) {
 }
 
 RouteAccess WebAccess::require_admin(const crow::request &req) {
-	if (bearer_authorized(req)) return {};
-	RouteAccess access = require_user(req);
+	RouteAccess access = bearer_authorized(req) ? RouteAccess{} : require_user(req);
 	if (access.refusal) {
 		if (access.refusal->code == 401) {
 			access.refusal->set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
 		}
 		return access;
 	}
-	if (access.user->role != "admin") {
+	if (access.user && access.user->role != "admin") {
 		access.refusal = json_error(403, "forbidden");
 		access.user.reset();
+		return access;
+	}
+	if (is_state_changing(req)) {
+		const std::string actor =
+				access.user ? "session '" + loggable(access.user->username) + "'" : std::string("token");
+		const std::string method = crow::method_name(req.method);
+		std::printf("[http] admin %s %s by %s\n", method.c_str(), loggable(req.url).c_str(),
+		            actor.c_str());
 	}
 	return access;
+}
+
+int64_t WebAccess::take_login_address(const std::string &ip) {
+	return login_per_ip_.take(ip, RateLimiter::Clock::now());
+}
+
+int64_t WebAccess::login_wait(const std::string &username, const std::string &ip) {
+	const auto now = RateLimiter::Clock::now();
+	return std::max(login_failures_per_user_ip_.wait(user_ip_key(username, ip), now),
+	                login_failures_per_user_.wait(username.substr(0, kUsernameMaxBytes), now));
+}
+
+void WebAccess::login_failed(const std::string &username, const std::string &ip) {
+	const auto now = RateLimiter::Clock::now();
+	login_failures_per_user_ip_.charge(user_ip_key(username, ip), now);
+	login_failures_per_user_.charge(username.substr(0, kUsernameMaxBytes), now);
 }
 
 int64_t WebAccess::take_register(const std::string &ip) {
@@ -157,33 +169,32 @@ int64_t WebAccess::take_register(const std::string &ip) {
 // POST /api/login — the website's login. Body JSON {username, password}; the
 // X-OpenNova-Request header is required here too, against login CSRF (a
 // cross-site form posting the attacker's credentials would otherwise sign the
-// victim's browser into the attacker's account). Rate-limited per client
-// address and per username (429 + Retry-After). An unknown username and a
-// wrong password get the same 401 and cost the same bcrypt run; only the right
-// password learns that an account is banned or restricted (403, as the game
-// login's NWEC11 / NWEC12). Success mints a session (the opennova_session
-// cookie) and answers {id, username, role}; the session the browser held
-// before, if any, is ended.
+// victim's browser into the attacker's account), and is checked first, so a
+// forged request draws on no bucket. Then the login brake: the client
+// address's bucket, a username over kUsernameMaxBytes refused (400), and the
+// username's failure buckets (429 + Retry-After). An unknown username and a
+// wrong password get the same 401, cost the same bcrypt run and drain the same
+// buckets; only the right password learns that an account is banned or
+// restricted (403, as the game login's NWEC11 / NWEC12). Success mints a
+// session (the session cookie) and answers {id, username, role}; the session
+// the browser held before, if any, is ended.
 crow::response WebAccess::login(const crow::request &req) {
 	if (!has_csrf_header(req)) return json_error(403, "csrf_header_required");
 	const std::string ip = client_ip(req);
-	const auto now = RateLimiter::Clock::now();
-	if (const int64_t wait = login_per_ip_.take(ip, now)) {
+	if (const int64_t wait = take_login_address(ip)) {
 		std::printf("[http] /api/login rate-limited for %s\n", ip.c_str());
 		return too_many_requests(wait);
 	}
-	const auto body = crow::json::load(req.body);
+	auto body = JsonBody::parse(req.body);
 	if (!body) return json_error(400, "invalid_json");
-	auto text_field = [&body](const char *key) {
-		return body.has(key) && body[key].t() == crow::json::type::String
-		               ? std::string(body[key].s())
-		               : std::string();
-	};
-	const std::string username = text_field("username");
-	const std::string password = text_field("password");
+	const std::string username = body->text_or("username", "");
+	const std::string password = body->text_or("password", "");
+	if (body->wrong_type()) return json_error(400, "invalid_field");
 	if (username.empty() || password.empty()) return json_error(400, "missing_field");
-	if (const int64_t wait = login_per_user_.take(username.substr(0, kRateKeyMaxBytes), now)) {
-		std::printf("[http] /api/login rate-limited for user '%s'\n", username.c_str());
+	if (username.size() > kUsernameMaxBytes) return json_error(400, "invalid_field");
+	if (const int64_t wait = login_wait(username, ip)) {
+		std::printf("[http] /api/login rate-limited for user '%s' from %s\n",
+		            loggable(username).c_str(), ip.c_str());
 		return too_many_requests(wait);
 	}
 
@@ -191,12 +202,13 @@ crow::response WebAccess::login(const crow::request &req) {
 		auto db_conn = pool_.acquire();
 		const auto user = authenticate_user(*db_conn, username, password);
 		if (!user) {
+			login_failed(username, ip);
 			std::printf("[http] /api/login refused from %s: bad credentials\n", ip.c_str());
 			return json_error(401, "invalid_credentials");
 		}
 		if (user->account_status != "active") {
 			std::printf("[http] /api/login refused: user %lld status=%s\n",
-			            static_cast<long long>(user->id), user->account_status.c_str());
+			            static_cast<long long>(user->id), loggable(user->account_status).c_str());
 			return json_error(403, user->account_status == "banned" ? "account_banned"
 			                                                         : "account_restricted");
 		}
@@ -205,8 +217,8 @@ crow::response WebAccess::login(const crow::request &req) {
 				*db_conn, user->id, ip,
 				req.get_header_value("User-Agent").substr(0, kUserAgentMaxBytes));
 		std::printf("[http] /api/login -> session for user '%s' (id=%lld role=%s) from %s\n",
-		            user->username.c_str(), static_cast<long long>(user->id), user->role.c_str(),
-		            ip.c_str());
+		            loggable(user->username).c_str(), static_cast<long long>(user->id),
+		            user->role.c_str(), ip.c_str());
 		crow::response res =
 				json_reply(200, session_user_json(user->id, user->username, user->role));
 		res.add_header("Set-Cookie", session_cookie(token, kWebSessionLifetimeSeconds));

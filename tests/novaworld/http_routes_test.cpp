@@ -8,8 +8,9 @@
 // concurrent case runs last, since it adds accounts and a host). The listener
 // trusts 127.0.0.1 as its proxy, so the website-session cases each name their
 // own client address in X-Real-IP and keep their own rate-limit buckets; a
-// second listener on the same database sets the Secure cookie and trusts no
-// proxy.
+// second listener on the same database sets the Secure (__Host-) cookie and
+// trusts no proxy. The retail POST /NWLogin.dll cases post an EPASK-encrypted
+// form the way a stock client does.
 //
 // The listener and the test share one db::ConnectionPool, the way main() wires
 // the server: each Crow handler leases a connection for its request, and the
@@ -27,10 +28,12 @@
 #include "web_session.h"
 
 #include <base/io/sha256.h>
+#include <net/novacrypto/epask.h>
 #include <net/novaworld/connection/manager.h>
 #include <net/novaworld/db/sqlite.h>
 #include <net/novaworld/gsb.h>
 #include <net/novaworld/host_repository.h>
+#include <net/novaworld/http_login.h>
 
 #include <crow/json.h>
 
@@ -68,6 +71,8 @@ constexpr const char *kAdminToken = "harness-admin-token";
 constexpr const char *kUrlsTemplate = "urls.htm";
 constexpr const char *kBearer = "Authorization: Bearer harness-admin-token";
 constexpr const char *kJson = "Content-Type: application/json";
+// The CSRF header the site's own pages send (web/src/api/client.ts).
+constexpr const char *kCsrf = "X-OpenNova-Request: 1";
 
 struct Harness {
 	ConnectionPool &pool;
@@ -120,6 +125,10 @@ bool has_header(const net::HttpReply &reply, const std::string &name) {
 	}
 	return false;
 }
+
+// "X-Real-IP: <ip>". The harness listener trusts 127.0.0.1 as its proxy, so
+// each case names its own client address and draws on its own rate buckets.
+std::string from_ip(const std::string &ip) { return "X-Real-IP: " + ip; }
 
 bool is_lower_hex8(const std::string &s) {
 	return s.size() == 8 && std::all_of(s.begin(), s.end(), [](char c) {
@@ -211,7 +220,7 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 // POST /api/register: 201 with the public record (a fresh 8-hex PCID, never
 // the hash), and the account authenticates against its bcrypt hash.
 int test_register_ok(Harness &h) {
-	const auto reply = h.send("POST", "/api/register", {kJson},
+	const auto reply = h.send("POST", "/api/register", {kJson, kCsrf},
 	                          "{\"username\":\"harness\",\"password\":\"pw-harness\","
 	                          "\"nwhandle\":\"HarnessPlayer\"}");
 	TEST_EXPECT(reply.transport_ok && reply.code == 201);
@@ -239,24 +248,39 @@ int test_register_ok(Harness &h) {
 }
 
 // POST /api/register refusals: a taken username, a missing password, a body
-// that is not JSON. None of them adds an account.
+// that is not a JSON object, a field of the wrong type, and a request without
+// the CSRF header. None of them adds an account.
 int test_register_duplicate(Harness &h) {
-	auto reply = h.send("POST", "/api/register", {kJson},
+	auto reply = h.send("POST", "/api/register", {kJson, kCsrf},
 	                    "{\"username\":\"harness\",\"password\":\"pw-harness\","
 	                    "\"nwhandle\":\"HarnessPlayer\"}");
 	TEST_EXPECT(reply.transport_ok && reply.code == 400);
 	auto json = crow::json::load(body_text(reply));
 	TEST_EXPECT(json && str(json["error"]) == "username_exists");
 
-	reply = h.send("POST", "/api/register", {kJson}, "{\"username\":\"nopw\"}");
+	reply = h.send("POST", "/api/register", {kJson, kCsrf}, "{\"username\":\"nopw\"}");
 	TEST_EXPECT(reply.transport_ok && reply.code == 400);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(json && str(json["error"]) == "missing_field");
 
-	reply = h.send("POST", "/api/register", {kJson}, "not json");
+	reply = h.send("POST", "/api/register", {kJson, kCsrf}, "not json");
 	TEST_EXPECT(reply.transport_ok && reply.code == 400);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(json && str(json["error"]) == "invalid_json");
+
+	reply = h.send("POST", "/api/register", {kJson, kCsrf}, "[\"username\"]");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	TEST_EXPECT(body_text(reply) == "{\"error\":\"invalid_json\"}");
+	reply = h.send("POST", "/api/register", {kJson, kCsrf},
+	               "{\"username\":\"typed\",\"password\":12345}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	TEST_EXPECT(body_text(reply) == "{\"error\":\"invalid_field\"}");
+
+	// Without the CSRF header: refused before anything is read.
+	reply = h.send("POST", "/api/register", {kJson},
+	               "{\"username\":\"forged\",\"password\":\"pw\"}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 403);
+	TEST_EXPECT(body_text(reply) == "{\"error\":\"csrf_header_required\"}");
 
 	TEST_EXPECT(nws::list_users(*h.pool.acquire()).size() == 1);
 	return 0;
@@ -317,19 +341,19 @@ int test_admin_users_list(Harness &h) {
 
 // ---- website sessions -------------------------------------------------------
 
-constexpr const char *kCsrf = "X-OpenNova-Request: 1";
 // The cookie text the session routes set and clear, on the harness listener
-// (no Secure: its config leaves cookie_secure off).
+// (no Secure: its config leaves cookie_secure off); the Secure listener names
+// the cookie __Host-opennova_session.
 constexpr const char *kCookieTail = "; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax";
 constexpr const char *kCookieCleared =
 		"opennova_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax";
 
-// "X-Real-IP: <ip>". The harness listener trusts 127.0.0.1 as its proxy, so
-// each case names its own client address and draws on its own rate buckets.
-std::string from_ip(const std::string &ip) { return "X-Real-IP: " + ip; }
+std::string with_cookie(const char *name, const std::string &token) {
+	return std::string("Cookie: ") + name + "=" + token;
+}
 
 std::string with_session(const std::string &token) {
-	return std::string("Cookie: ") + nws::kWebSessionCookie + "=" + token;
+	return with_cookie(nws::kWebSessionCookie, token);
 }
 
 // Every value a reply's `name` header carries, in order.
@@ -392,6 +416,22 @@ int64_t make_account(Harness &h, const std::string &username, const std::string 
 	return result.ok ? result.id : 0;
 }
 
+// The site role an admin gives an account (PUT /api/admin/users/<id> with the
+// Bearer token): true on 200.
+bool set_role(Harness &h, int64_t id, const char *role) {
+	const auto reply = h.send("PUT", "/api/admin/users/" + std::to_string(id), {kJson, kBearer},
+	                          std::string("{\"role\":\"") + role + "\"}");
+	return reply.transport_ok && reply.code == 200;
+}
+
+int64_t admin_count(Harness &h) {
+	return h.pool.acquire()
+			->query("SELECT COUNT(*) FROM players WHERE role = 'admin';")
+			.front()
+			.as_int(0)
+			.value_or(-1);
+}
+
 // An integer the session row of `token` answers `select` with (-1: no row).
 int64_t session_scalar(Harness &h, const std::string &token, const std::string &select) {
 	const auto rows = h.pool.acquire()->query(
@@ -431,26 +471,42 @@ int test_login_sets_session_cookie(Harness &h) {
 	return 0;
 }
 
-// The Secure flag (ONNET_COOKIE_SECURE) on the second listener's login and
-// logout cookies.
+// ONNET_COOKIE_SECURE (the second listener): the cookie is
+// __Host-opennova_session, Secure, and the server reads only that name, so a
+// plain opennova_session cookie (one a sibling subdomain could plant) is no
+// session there. Logout clears the __Host- cookie.
 int test_cookie_secure_flag(Harness &h) {
 	TEST_EXPECT(make_account(h, "web_secure", "pw-secure") > 0);
 	auto reply = h.send_to(h.secure_port, "POST", "/api/login", {kJson, kCsrf},
 	                       credentials("web_secure", "pw-secure"));
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
-	const std::string token = set_cookie_value(reply, nws::kWebSessionCookie);
+	TEST_EXPECT(set_cookie_value(reply, nws::kWebSessionCookie).empty());
+	const std::string token = set_cookie_value(reply, nws::kWebSessionHostCookie);
 	TEST_EXPECT(nws::is_web_session_token(token));
 	TEST_EXPECT(header_value(reply, "Set-Cookie") ==
-	            std::string(nws::kWebSessionCookie) + "=" + token + kCookieTail + "; Secure");
+	            std::string(nws::kWebSessionHostCookie) + "=" + token + kCookieTail + "; Secure");
 
-	reply = h.send_to(h.secure_port, "POST", "/api/logout", {kCsrf, with_session(token)});
+	reply = h.send_to(h.secure_port, "GET", "/api/me", {with_cookie(nws::kWebSessionHostCookie, token)});
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	reply = h.send_to(h.secure_port, "GET", "/api/me", {with_session(token)});
+	TEST_EXPECT(reply.transport_ok && reply.code == 401);
+	// And the http listener reads only the plain name.
+	reply = h.send("GET", "/api/me", {with_cookie(nws::kWebSessionHostCookie, token)});
+	TEST_EXPECT(reply.transport_ok && reply.code == 401);
+
+	reply = h.send_to(h.secure_port, "POST", "/api/logout",
+	                  {kCsrf, with_cookie(nws::kWebSessionHostCookie, token)});
 	TEST_EXPECT(reply.transport_ok && reply.code == 204);
-	TEST_EXPECT(header_value(reply, "Set-Cookie") == std::string(kCookieCleared) + "; Secure");
+	TEST_EXPECT(header_value(reply, "Set-Cookie") ==
+	            std::string(nws::kWebSessionHostCookie) +
+	                    "=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax; Secure");
+	TEST_EXPECT(session_scalar(h, token, "1") == -1);
 	return 0;
 }
 
 // A wrong password and an unknown username get the same 401 body and no
-// cookie; a login without the CSRF header is refused before it is tried.
+// cookie; a login without the CSRF header is refused before it is tried;
+// malformed bodies are 400s, never a 500; no CORS grant is ever made.
 int test_login_failures_are_generic(Harness &h) {
 	const auto wrong = login(h, "10.2.0.1", "web_alice", "not-her-password");
 	const auto unknown = login(h, "10.2.0.1", "web_nobody", "not-her-password");
@@ -470,14 +526,27 @@ int test_login_failures_are_generic(Harness &h) {
 	               credentials("web_alice", "pw-alice"));
 	TEST_EXPECT(reply.transport_ok && reply.code == 403);
 
-	reply = h.send("POST", "/api/login", {kJson, kCsrf, from_ip("10.2.0.1")},
-	               "{\"username\":\"web_alice\"}");
+	struct Malformed { const char *body; const char *error; };
+	const Malformed malformed[] = {
+		{"{\"username\":\"web_alice\"}", "missing_field"},
+		{"{\"username\":\"web_alice\",\"password\":7}", "invalid_field"},
+		{"{\"username\":[\"web_alice\"],\"password\":\"pw-alice\"}", "invalid_field"},
+		{"not json", "invalid_json"},
+		{"[1,2]", "invalid_json"},
+		{"5", "invalid_json"},
+		{"\"web_alice\"", "invalid_json"},
+	};
+	for (const Malformed &m : malformed) {
+		reply = h.send("POST", "/api/login", {kJson, kCsrf, from_ip("10.2.0.2")}, m.body);
+		if (reply.code != 400) std::fprintf(stderr, "  body %s: %s\n", m.body, describe(reply).c_str());
+		TEST_EXPECT(reply.transport_ok && reply.code == 400);
+		TEST_EXPECT(body_text(reply) == std::string("{\"error\":\"") + m.error + "\"}");
+	}
+	// A username past 64 bytes is refused before any brake or lookup.
+	reply = h.send("POST", "/api/login", {kJson, kCsrf, from_ip("10.2.0.2")},
+	               credentials(std::string(65, 'u'), "pw"));
 	TEST_EXPECT(reply.transport_ok && reply.code == 400);
-	reply = h.send("POST", "/api/login", {kJson, kCsrf, from_ip("10.2.0.1")},
-	               "{\"username\":\"web_alice\",\"password\":7}");
-	TEST_EXPECT(reply.transport_ok && reply.code == 400);
-	reply = h.send("POST", "/api/login", {kJson, kCsrf, from_ip("10.2.0.1")}, "not json");
-	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	TEST_EXPECT(body_text(reply) == "{\"error\":\"invalid_field\"}");
 
 	// No CORS: another origin's preflight for the CSRF header is granted
 	// nothing, so its script can never send that header.
@@ -496,16 +565,17 @@ int test_login_failures_are_generic(Harness &h) {
 // The account status gates the site as it does the game login: the right
 // password on a banned account is 403 account_banned, on any other inactive
 // status 403 account_restricted; a wrong password stays the generic 401. A ban
-// also ends the account's live sessions.
+// through the admin route ends the account's sessions at once, before they
+// are used again.
 int test_login_refuses_inactive_accounts(Harness &h) {
 	const int64_t banned = make_account(h, "web_banned", "pw-banned");
 	const int64_t disabled = make_account(h, "web_disabled", "pw-disabled");
 	const int64_t later = make_account(h, "web_later", "pw-later");
 	TEST_EXPECT(banned > 0 && disabled > 0 && later > 0);
 	auto set_status = [&h](int64_t id, const char *status) {
-		nws::UpdateUserParams p;
-		p.account_status = status;
-		return nws::update_user(*h.pool.acquire(), id, p).ok;
+		const auto reply = h.send("PUT", "/api/admin/users/" + std::to_string(id), {kJson, kBearer},
+		                          std::string("{\"account_status\":\"") + status + "\"}");
+		return reply.transport_ok && reply.code == 200;
 	};
 	TEST_EXPECT(set_status(banned, "banned"));
 	TEST_EXPECT(set_status(disabled, "disabled"));
@@ -528,8 +598,18 @@ int test_login_refuses_inactive_accounts(Harness &h) {
 	TEST_EXPECT(!token.empty());
 	TEST_EXPECT(h.send("GET", "/api/me", {with_session(token)}).code == 200);
 	TEST_EXPECT(set_status(later, "banned"));
+	TEST_EXPECT(session_scalar(h, token, "1") == -1); // gone with the ban itself
+	TEST_EXPECT(set_status(later, "active"));
 	TEST_EXPECT(h.send("GET", "/api/me", {with_session(token)}).code == 401);
-	TEST_EXPECT(session_scalar(h, token, "1") == -1);
+
+	// A password reset ends the sessions too.
+	const std::string again = login_token(h, "10.3.0.2", "web_later", "pw-later");
+	TEST_EXPECT(!again.empty());
+	reply = h.send("PUT", "/api/admin/users/" + std::to_string(later), {kJson, kBearer},
+	               "{\"password\":\"pw-later-2\"}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	TEST_EXPECT(session_scalar(h, again, "1") == -1);
+	TEST_EXPECT(h.send("GET", "/api/me", {with_session(again)}).code == 401);
 	return 0;
 }
 
@@ -644,17 +724,18 @@ int test_logout_invalidates(Harness &h) {
 	return 0;
 }
 
-// The admin routes under each credential: none (401 + the Bearer challenge), a
-// player's session (403), an admin's session (200; a state change needs the
-// CSRF header, else 403), and the Bearer token (200, no CSRF header). The role
-// is read on every request, so demoting the admin closes the routes to its
-// live session; the role update takes only player or admin.
+// The admin routes under each credential, on one route: none (401 + the
+// Bearer challenge), a player's session (403), an admin's session (200; a
+// state change needs the CSRF header, else 403), and the Bearer token (200,
+// no CSRF header). The role is read on every request, so demoting the admin
+// closes the routes to its live session; the role update takes only player or
+// admin, as a string.
 int test_admin_routes_by_credential(Harness &h) {
 	TEST_EXPECT(make_account(h, "web_player", "pw-player") > 0);
 	const std::string player = login_token(h, "10.7.0.1", "web_player", "pw-player");
 	const int64_t admin_id = make_account(h, "web_admin", "pw-admin");
 	TEST_EXPECT(!player.empty() && admin_id > 0);
-	TEST_EXPECT(nws::promote_to_admin(*h.pool.acquire(), "web_admin"));
+	TEST_EXPECT(set_role(h, admin_id, "admin"));
 	auto reply = login(h, "10.7.0.2", "web_admin", "pw-admin");
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	TEST_EXPECT(str(crow::json::load(body_text(reply))["role"]) == "admin");
@@ -663,6 +744,7 @@ int test_admin_routes_by_credential(Harness &h) {
 
 	reply = h.send("GET", "/api/admin/users");
 	TEST_EXPECT(reply.transport_ok && reply.code == 401);
+	TEST_EXPECT(body_text(reply) == "{\"error\":\"unauthorized\"}");
 	TEST_EXPECT(has_header(reply, "WWW-Authenticate"));
 	reply = h.send("GET", "/api/admin/users", {with_session(player)});
 	TEST_EXPECT(reply.transport_ok && reply.code == 403);
@@ -684,10 +766,6 @@ int test_admin_routes_by_credential(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 403);
 	TEST_EXPECT(body_text(reply) == "{\"error\":\"csrf_header_required\"}");
 	TEST_EXPECT(nws::get_server_status(*h.pool.acquire()).message == "back soon");
-	reply = h.send("PUT", "/api/admin/server-status", {kJson, kCsrf, with_session(player)},
-	               status_body("player"));
-	TEST_EXPECT(reply.transport_ok && reply.code == 403);
-	TEST_EXPECT(body_text(reply) == "{\"error\":\"forbidden\"}");
 	reply = h.send("PUT", "/api/admin/server-status", {kJson, kCsrf, with_session(admin)},
 	               status_body("via session"));
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
@@ -700,34 +778,95 @@ int test_admin_routes_by_credential(Harness &h) {
 	reply = h.send("PUT", user_path, {kJson, kBearer}, "{\"role\":\"superuser\"}");
 	TEST_EXPECT(reply.transport_ok && reply.code == 400);
 	TEST_EXPECT(str(crow::json::load(body_text(reply))["error"]) == "invalid_field");
-	reply = h.send("PUT", user_path, {kJson, kBearer}, "{\"role\":\"player\"}");
-	TEST_EXPECT(reply.transport_ok && reply.code == 200);
-	TEST_EXPECT(str(crow::json::load(body_text(reply))["user"]["role"]) == "player");
+	reply = h.send("PUT", user_path, {kJson, kBearer}, "{\"role\":7}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	TEST_EXPECT(body_text(reply) == "{\"error\":\"invalid_field\"}");
+	reply = h.send("PUT", user_path, {kJson, kBearer}, "[\"role\"]");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	TEST_EXPECT(body_text(reply) == "{\"error\":\"invalid_json\"}");
+	reply = h.send("PUT", "/api/admin/server-status", {kJson, kBearer},
+	               "{\"maintenance_enabled\":\"yes\"}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	TEST_EXPECT(set_role(h, admin_id, "player"));
 	reply = h.send("GET", "/api/admin/users", {with_session(admin)});
 	TEST_EXPECT(reply.transport_ok && reply.code == 403);
 	return 0;
 }
 
-// ONNET_BOOTSTRAP_ADMIN's promotion (main() runs promote_to_admin at boot):
-// the named account's sessions act as an admin's, its own live one included;
-// a name no account has promotes nobody.
+// Every /api/admin/* route: no credential is 401, a player's session 403 (the
+// CSRF header sent, so the role is what refuses), and an admin's session
+// without the CSRF header 403 on a state change and 200 on a read. Nothing a
+// refused request names is touched (the user routes name no account).
+int test_admin_routes_table(Harness &h) {
+	const int64_t admin_id = make_account(h, "web_table_admin", "pw-table-admin");
+	TEST_EXPECT(admin_id > 0 && make_account(h, "web_table_player", "pw-table-player") > 0);
+	TEST_EXPECT(set_role(h, admin_id, "admin"));
+	const std::string admin = login_token(h, "10.8.1.1", "web_table_admin", "pw-table-admin");
+	const std::string player = login_token(h, "10.8.1.2", "web_table_player", "pw-table-player");
+	TEST_EXPECT(!admin.empty() && !player.empty());
+
+	struct Route { const char *method; const char *path; const char *body; };
+	const Route routes[] = {
+		{"GET", "/api/admin/server-status", ""},
+		{"PUT", "/api/admin/server-status", "{\"maintenance_enabled\":false,\"message\":\"x\"}"},
+		{"POST", "/api/admin/hosts", "{\"rid\":4242}"},
+		{"GET", "/api/admin/connections", ""},
+		{"GET", "/api/admin/users", ""},
+		{"POST", "/api/admin/users", "{\"username\":\"never\",\"password\":\"p\",\"pcid\":\"0badbad0\","
+		                             "\"nwhandle\":\"never\"}"},
+		{"DELETE", "/api/admin/users/999999", ""},
+		{"PUT", "/api/admin/users/999999", "{\"nwh\":\"1\"}"},
+		{"PUT", "/api/admin/users/999999/game-access",
+		 "{\"game_slug\":\"jop_2_consumer\",\"status\":\"active\",\"exp_bits\":\"3\"}"},
+	};
+	const auto users_before = nws::list_users(*h.pool.acquire()).size();
+	const auto status_before = nws::get_server_status(*h.pool.acquire());
+	for (const Route &r : routes) {
+		const bool changes = std::string(r.method) != "GET";
+		auto check = [&r](const net::HttpReply &reply, int code, const char *what) {
+			if (!reply.transport_ok || reply.code != code) {
+				std::fprintf(stderr, "  %s %s (%s): %s, want %d\n", r.method, r.path, what,
+				             describe(reply).c_str(), code);
+				return false;
+			}
+			return true;
+		};
+		TEST_EXPECT(check(h.send(r.method, r.path, {kJson}, r.body), 401, "no credential"));
+		TEST_EXPECT(check(h.send(r.method, r.path, {kJson, kCsrf, with_session(player)}, r.body), 403,
+		                  "player session"));
+		TEST_EXPECT(check(h.send(r.method, r.path, {kJson, with_session(admin)}, r.body),
+		                  changes ? 403 : 200, "admin session, no CSRF header"));
+	}
+	TEST_EXPECT(nws::list_users(*h.pool.acquire()).size() == users_before);
+	TEST_EXPECT(nws::get_server_status(*h.pool.acquire()).message == status_before.message);
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM active_hosts WHERE rid = 4242;").empty());
+	TEST_EXPECT(set_role(h, admin_id, "player"));
+	return 0;
+}
+
+// ONNET_BOOTSTRAP_ADMIN (main() runs bootstrap_admin at boot): with no admin,
+// the named account becomes one, its live session included; once any admin
+// exists, a later boot promotes nobody, whatever name it carries.
 int test_bootstrap_admin(Harness &h) {
+	using Outcome = nws::BootstrapAdminResult::Outcome;
+	TEST_EXPECT(admin_count(h) == 0); // the cases above demoted theirs
 	TEST_EXPECT(make_account(h, "web_boss", "pw-boss") > 0);
 	const std::string token = login_token(h, "10.8.0.1", "web_boss", "pw-boss");
 	TEST_EXPECT(!token.empty());
 	TEST_EXPECT(h.send("GET", "/api/admin/connections", {with_session(token)}).code == 403);
 
-	TEST_EXPECT(nws::promote_to_admin(*h.pool.acquire(), "web_boss"));
+	TEST_EXPECT(nws::bootstrap_admin(*h.pool.acquire(), "web_nobody").outcome ==
+	            Outcome::NoSuchAccount);
+	TEST_EXPECT(nws::bootstrap_admin(*h.pool.acquire(), "web_boss").outcome == Outcome::Promoted);
 	auto reply = h.send("GET", "/api/me", {with_session(token)});
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	TEST_EXPECT(str(crow::json::load(body_text(reply))["role"]) == "admin");
 	TEST_EXPECT(h.send("GET", "/api/admin/connections", {with_session(token)}).code == 200);
 
-	const auto before = nws::list_users(*h.pool.acquire());
-	TEST_EXPECT(!nws::promote_to_admin(*h.pool.acquire(), "web_nobody"));
-	const auto after = nws::list_users(*h.pool.acquire());
-	TEST_EXPECT(after.size() == before.size());
-	for (std::size_t i = 0; i < after.size(); ++i) TEST_EXPECT(after[i].role == before[i].role);
+	const auto again = nws::bootstrap_admin(*h.pool.acquire(), "web_player");
+	TEST_EXPECT(again.outcome == Outcome::AdminExists);
+	TEST_EXPECT(again.existing_admin == "web_boss");
+	TEST_EXPECT(admin_count(h) == 1);
 	return 0;
 }
 
@@ -756,10 +895,36 @@ bool is_retry_after(const net::HttpReply &reply) {
 	}) && std::stoi(value) >= 1;
 }
 
-// The brakes answer 429 {"error":"rate_limited"} with Retry-After: login per
-// client address (20 at once, counted before the body is read), login per
-// username (10, whatever the address), register per address (10).
-int test_rate_limits(Harness &h) {
+std::string address(const char *prefix, int i) { return prefix + std::to_string(i); }
+
+// The CSRF header is checked before any bucket: forged requests without it,
+// however many, leave the address's and the username's buckets whole.
+int test_csrf_before_buckets(Harness &h) {
+	TEST_EXPECT(make_account(h, "web_victim", "pw-victim") > 0);
+	for (int i = 0; i < 30; ++i) {
+		const auto reply = h.send("POST", "/api/login", {kJson, from_ip("10.11.0.1")},
+		                          credentials("web_victim", "wrong"));
+		TEST_EXPECT(reply.transport_ok && reply.code == 403);
+	}
+	for (int i = 0; i < 15; ++i) {
+		const auto reply = h.send("POST", "/api/register", {kJson, from_ip("10.11.0.1")}, "not json");
+		TEST_EXPECT(reply.transport_ok && reply.code == 403);
+		TEST_EXPECT(body_text(reply) == "{\"error\":\"csrf_header_required\"}");
+	}
+	auto reply = login(h, "10.11.0.1", "web_victim", "pw-victim");
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	reply = h.send("POST", "/api/register", {kJson, kCsrf, from_ip("10.11.0.1")}, "not json");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	return 0;
+}
+
+// The login brake. Every attempt draws on its address's bucket (20 at once,
+// counted before the body is read). Only failures drain the username's
+// buckets: 10 per (username, address), so a guesser's address is shut out
+// while the owner, elsewhere, still logs in; and 30 per username from any
+// address, which only failures spread over many addresses empty. A run of
+// right passwords drains nothing. Refusals are 429 with Retry-After.
+int test_login_brake(Harness &h) {
 	net::HttpReply refusal;
 	int accepted = accepted_before_429(
 			[&h](int) { return h.send("POST", "/api/login", {kJson, kCsrf, from_ip("10.9.0.1")}, "{}"); },
@@ -767,39 +932,138 @@ int test_rate_limits(Harness &h) {
 	TEST_EXPECT(accepted >= 20);
 	TEST_EXPECT(body_text(refusal) == "{\"error\":\"rate_limited\"}");
 	TEST_EXPECT(is_retry_after(refusal));
-	// Another address keeps its own bucket.
 	TEST_EXPECT(h.send("POST", "/api/login", {kJson, kCsrf, from_ip("10.9.0.2")}, "{}").code == 400);
 
-	// One username from many addresses: an unknown one is braked like a real one.
+	// One address guessing one account: 10 failures, then refused even with
+	// the right password; the owner at another address is not.
+	TEST_EXPECT(make_account(h, "web_target", "pw-target") > 0);
 	accepted = accepted_before_429(
-			[&h](int i) {
-				return login(h, "10.9.1." + std::to_string(i), "web_guessed", "guess" + std::to_string(i));
-			},
-			30, refusal);
-	TEST_EXPECT(accepted >= 10);
+			[&h](int i) { return login(h, "10.12.0.1", "web_target", address("guess", i)); }, 30,
+			refusal);
+	TEST_EXPECT(accepted == 10);
 	TEST_EXPECT(is_retry_after(refusal));
+	TEST_EXPECT(login(h, "10.12.0.1", "web_target", "pw-target").code == 429);
+	TEST_EXPECT(login(h, "10.12.0.2", "web_target", "pw-target").code == 200);
 
-	accepted = accepted_before_429(
-			[&h](int) { return h.send("POST", "/api/register", {kJson, from_ip("10.9.2.1")}, "not json"); },
+	// Right passwords drain nothing: twelve logins in a row from one address.
+	TEST_EXPECT(make_account(h, "web_regular", "pw-regular") > 0);
+	for (int i = 0; i < 12; ++i) {
+		TEST_EXPECT(login(h, "10.12.1.1", "web_regular", "pw-regular").code == 200);
+	}
+
+	// Failures spread over addresses, five each (half the per-address limit):
+	// once about 30 have landed, the per-username cap refuses an address that
+	// is nowhere near its own limit. (Whether the right password is refused
+	// then too is the per-address case above: the brake is read before any
+	// password is checked.)
+	TEST_EXPECT(make_account(h, "web_spread", "pw-spread") > 0);
+	int failures = 0;
+	bool capped = false;
+	for (int a = 0; a < 16 && !capped; ++a) {
+		for (int i = 0; i < 5 && !capped; ++i) {
+			const auto reply = login(h, address("10.12.2.", a), "web_spread", address("g", i));
+			TEST_EXPECT(reply.code == 401 || reply.code == 429);
+			if (reply.code == 401) ++failures;
+			capped = reply.code == 429;
+		}
+	}
+	TEST_EXPECT(capped);
+	TEST_EXPECT(failures >= 30);
+	return 0;
+}
+
+// POST /api/register's per-address brake: 10, then 429 with Retry-After.
+int test_register_brake(Harness &h) {
+	net::HttpReply refusal;
+	const int accepted = accepted_before_429(
+			[&h](int) {
+				return h.send("POST", "/api/register", {kJson, kCsrf, from_ip("10.9.2.1")}, "not json");
+			},
 			40, refusal);
-	TEST_EXPECT(accepted >= 10);
+	TEST_EXPECT(accepted == 10);
 	TEST_EXPECT(is_retry_after(refusal));
-	TEST_EXPECT(h.send("POST", "/api/register", {kJson, from_ip("10.9.2.2")}, "not json").code == 400);
+	TEST_EXPECT(h.send("POST", "/api/register", {kJson, kCsrf, from_ip("10.9.2.2")}, "not json").code ==
+	            400);
+	return 0;
+}
+
+// The retail POST /NWLogin.dll: an EPASK-encrypted NAME / PASSWORD form, the
+// way a stock client posts it, from client address `ip`.
+net::HttpReply nwlogin(Harness &h, const std::string &ip, const std::string &name,
+                       const std::string &password) {
+	const auto prepare = h.send("GET", std::string("/nwprepare.dll?url=") + kUrlsTemplate);
+	opennova::EpaskParams epask;
+	if (!opennova::epask_from_string(set_cookie_value(prepare, "EPASK"), epask)) return {};
+	std::string body;
+	if (!opennova::build_login_post_body(epask,
+	                                     {{"EPASK", opennova::epask_to_string(epask), false},
+	                                      {"NAME", name, true},
+	                                      {"PASSWORD", password, true},
+	                                      {"msgbase", "jop_2_msg.htm", true},
+	                                      {"failure", "jop_2_main.htm", true},
+	                                      {"pfid", "28", true}},
+	                                     body)) {
+		return {};
+	}
+	return h.send("POST", "/NWLogin.dll",
+	              {"Content-Type: application/x-www-form-urlencoded", from_ip(ip)}, body);
+}
+
+// The retail login runs the same brake on the same buckets, and its refusal
+// is a retail login failure: the msgbase page (jop_2_msg.htm, the template a
+// stock client already shows for a bad password) with its message, HTTP 200,
+// and no login session tag. Failures there close the site login to that
+// address too; the owner elsewhere still gets in on either route.
+int test_nwlogin_brake(Harness &h) {
+	// Maintenance would answer before any password is checked.
+	auto reply = h.send("PUT", "/api/admin/server-status", {kJson, kBearer},
+	                    "{\"maintenance_enabled\":false}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	TEST_EXPECT(make_account(h, "web_retail", "pw-retail") > 0);
+
+	const auto bad = nwlogin(h, "10.13.0.1", "web_retail", "guess0");
+	TEST_EXPECT(bad.transport_ok && bad.code == 200);
+	const std::string bad_page = body_text(bad);
+	TEST_EXPECT(bad_page.find("NovaWorld Message") != std::string::npos);
+	TEST_EXPECT(bad_page.find("Invalid username or password") != std::string::npos);
+	TEST_EXPECT(set_cookie_value(bad, "LOGINSESSIONTAG").empty());
+	for (int i = 1; i < 10; ++i) {
+		const auto r = nwlogin(h, "10.13.0.1", "web_retail", address("guess", i));
+		TEST_EXPECT(r.transport_ok && body_text(r) == bad_page);
+	}
+
+	const auto refused = nwlogin(h, "10.13.0.1", "web_retail", "pw-retail");
+	TEST_EXPECT(refused.transport_ok && refused.code == 200);
+	TEST_EXPECT(header_value(refused, "Content-Type") == header_value(bad, "Content-Type"));
+	TEST_EXPECT(set_cookie_value(refused, "LOGINSESSIONTAG").empty());
+	std::string expected = bad_page;
+	const std::string bad_message = "Invalid username or password";
+	expected.replace(expected.find(bad_message), bad_message.size(),
+	                 "Too many failed logins. Please try again later.");
+	TEST_EXPECT(body_text(refused) == expected);
+
+	// The site login shares the buckets...
+	TEST_EXPECT(login(h, "10.13.0.1", "web_retail", "pw-retail").code == 429);
+	// ...and the owner at another address gets in on either route.
+	TEST_EXPECT(login(h, "10.13.0.2", "web_retail", "pw-retail").code == 200);
+	const auto ok = nwlogin(h, "10.13.0.3", "web_retail", "pw-retail");
+	TEST_EXPECT(ok.transport_ok && ok.code == 200);
+	TEST_EXPECT(!set_cookie_value(ok, "LOGINSESSIONTAG").empty());
 	return 0;
 }
 
 // The second listener trusts no proxy: an X-Real-IP from its peer is the
-// client's own claim, so attempts that each name a fresh address all draw on
-// the peer's one bucket and are braked.
+// client's own claim, so registrations that each name a fresh address all
+// draw on the peer's one bucket: exactly 10, then 429.
 int test_untrusted_proxy_header_ignored(Harness &h) {
 	net::HttpReply refusal;
 	const int accepted = accepted_before_429(
 			[&h](int i) {
-				return h.send_to(h.secure_port, "POST", "/api/login",
-				                 {kJson, kCsrf, from_ip("10.10.0." + std::to_string(i))}, "{}");
+				return h.send_to(h.secure_port, "POST", "/api/register",
+				                 {kJson, kCsrf, from_ip(address("10.10.0.", i))}, "not json");
 			},
-			60, refusal);
-	TEST_EXPECT(accepted >= 0); // refused: one bucket, not sixty
+			40, refusal);
+	TEST_EXPECT(accepted == 10);
 	TEST_EXPECT(is_retry_after(refusal));
 	return 0;
 }
@@ -905,7 +1169,7 @@ int test_concurrent_requests(Harness &h) {
 			const std::string username = "conc" + std::to_string(i);
 			// Each from its own address, past /api/register's per-address brake.
 			const auto reply = h.send("POST", "/api/register",
-			                          {kJson, from_ip("10.20.0." + std::to_string(i))},
+			                          {kJson, kCsrf, from_ip("10.20.0." + std::to_string(i))},
 			                          "{\"username\":\"" + username + "\",\"password\":\"pw\"}",
 			                          kConcurrentTimeoutMs);
 			const auto json = crow::json::load(body_text(reply));
@@ -1054,8 +1318,12 @@ int run(Harness &h) {
 		{"session_slides", test_session_slides},
 		{"logout_invalidates", test_logout_invalidates},
 		{"admin_routes_by_credential", test_admin_routes_by_credential},
+		{"admin_routes_table", test_admin_routes_table},
 		{"bootstrap_admin", test_bootstrap_admin},
-		{"rate_limits", test_rate_limits},
+		{"csrf_before_buckets", test_csrf_before_buckets},
+		{"login_brake", test_login_brake},
+		{"register_brake", test_register_brake},
+		{"nwlogin_brake", test_nwlogin_brake},
 		{"untrusted_proxy_header_ignored", test_untrusted_proxy_header_ignored},
 		{"nwhost_first_call_mints_hostkey", test_nwhost_first_call_mints_hostkey},
 		{"menu_urls_name_bound_port", test_menu_urls_name_bound_port},
@@ -1100,7 +1368,8 @@ int main() {
 		// serves there, with that port in bound_port().
 		config.http_port = 0;
 		// Web roots that do not exist and a templates root holding only the URL
-		// page, so the catch-all family 404s deterministically.
+		// page and the retail message page (copied below), so the catch-all
+		// family 404s deterministically.
 		config.web_dist_dir = temp.path / "web_dist";
 		config.templates_dir = temp.path / "templates";
 		config.static_dir = temp.path / "static";
@@ -1108,6 +1377,10 @@ int main() {
 		const std::string urls_page = "{{HOST_URL}}|{{GSB_SERVER}}";
 		TEST_EXPECT(test_io::write_file((config.templates_dir / kUrlsTemplate).string(),
 		                                std::vector<uint8_t>(urls_page.begin(), urls_page.end())));
+		// The retail message page POST /NWLogin.dll's failures render.
+		std::filesystem::copy_file(
+				source_dir / "apps" / "novaworld_server" / "templates" / "jop_2_msg.htm",
+				config.templates_dir / "jop_2_msg.htm");
 
 		// The harness talks to the listener from 127.0.0.1 and names each
 		// case's client address in X-Real-IP, the way nginx forwards it.
