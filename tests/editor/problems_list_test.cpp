@@ -409,17 +409,17 @@ int test_proposals() {
 	SessionView rewrite;
 	rewrite.project.open = true;
 	rewrite.project.root = "C:/mods/Rewrite";
-	rewrite.findings.diagnostics = {finding(DiagnosticSeverity::Warning, "menu.ignored_input",
-	                               "Delta: a key the game ignores.", "menus/a.mnu"),
-	                       finding(DiagnosticSeverity::Error, "menu.unserializable",
-	                               "Echo: this cannot be written.", "menus/a.mnu"),
-	                       finding(DiagnosticSeverity::Warning, "menu.ignored_input",
-	                               "Foxtrot: a key the game ignores.", "menus/b.mnu")};
+	rewrite.findings.diagnostics = {finding(DiagnosticSeverity::Warning, "animation_map.ignored_input",
+	                               "Delta: a key the game ignores.", "anims/a.adm"),
+	                       finding(DiagnosticSeverity::Error, "animation_map.invalid_input",
+	                               "Echo: this cannot be written.", "anims/a.adm"),
+	                       finding(DiagnosticSeverity::Warning, "animation_map.ignored_input",
+	                               "Foxtrot: a key the game ignores.", "anims/b.adm")};
 	ProblemsList fixable;
 	fixable.query().grouping = ProblemGrouping::None;
 	fixable.refresh(rewrite);
 	TEST_EXPECT(fixable.fixes(rewrite, 0).empty() && fixable.fixes(rewrite, 2).size() == 1 &&
-	            fixable.fixes(rewrite, 2).front().label == "Rewrite b.mnu");
+	            fixable.fixes(rewrite, 2).front().label == "Rewrite b.adm");
 	fixable.query().fixable = true;
 	const ProblemAnswer &only = fixable.refresh(rewrite);
 	TEST_EXPECT(only.rows == std::vector<size_t>({2}) && only.total() == 3);
@@ -480,14 +480,15 @@ int test_fixes_lazy() {
 	v.project.open = true;
 	v.project.root = "C:/mods/Many";
 	for (int file = 0; file < 50; ++file) {
-		const std::string name = "f" + std::to_string(file) + ".mnu";
+		// (Animation maps: a menu keeps the input the game ignores with its look, D-MNU-22, no Rewrite.)
+		const std::string name = "f" + std::to_string(file) + ".adm";
 		editor_test::own(v.project.scan)
-				.entries.push_back(file_entry(name, "menus/" + name, AssetKind::Menu));
+				.entries.push_back(file_entry(name, "anims/" + name, AssetKind::AnimationMap));
 	}
 	for (size_t i = 0; i < 1000; ++i) {
 		const std::string message = "Finding " + std::to_string(i) + ": input the game ignores.";
 		const std::string &file = v.project.scan->entries[i / 20].relative_path;
-		Diagnostic d = finding(DiagnosticSeverity::Warning, "menu.ignored_input",
+		Diagnostic d = finding(DiagnosticSeverity::Warning, "animation_map.ignored_input",
 		                       message.c_str(), file.c_str(), "name");
 		d.row_id = i + 1;
 		d.record_kind = 2;
