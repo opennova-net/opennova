@@ -5,7 +5,6 @@
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/gate_response.h>
 
-#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -24,14 +23,11 @@ bool expect(bool condition, const char *message) {
 
 // Minimal gate responder matching the behavior of apps/novaworld/main.cpp.
 // Keeping this test a single file so the socket path is exercised without
-// spawning a subprocess.
-bool serve_one_probe(uint16_t bound_port, const std::string &response_body) {
-	opennova::net::ScopedSocket server(opennova::net::udp_bind(bound_port));
-	if (!server.is_valid()) return false;
-
+// spawning a subprocess. It answers on `server`, the socket main() bound.
+bool serve_one_probe(opennova::net::Socket &server, const std::string &response_body) {
 	uint8_t rx[1024];
 	opennova::net::Endpoint from{};
-	const int n = opennova::net::udp_recv_from(server.get(), rx, sizeof(rx), from, 1500);
+	const int n = opennova::net::udp_recv_from(server, rx, sizeof(rx), from, 1500);
 	if (n <= 0) return false;
 
 	// Strip the LSB-scatter CRC envelope the client wraps the probe in
@@ -57,7 +53,7 @@ bool serve_one_probe(uint16_t bound_port, const std::string &response_body) {
 		return false;
 	}
 	reply.resize(reply_size);
-	return opennova::net::udp_send_to(server.get(), from, reply.data(), reply.size()) > 0;
+	return opennova::net::udp_send_to(server, from, reply.data(), reply.size()) > 0;
 }
 
 } // namespace
@@ -65,13 +61,13 @@ bool serve_one_probe(uint16_t bound_port, const std::string &response_body) {
 int main() {
 	if (!expect(opennova::net::startup() == 0, "net startup")) return 1;
 
-	// Bind the server on an ephemeral port so the test doesn't collide
-	// with a real NovaWorld service running locally.
+	// Bind the server on the port the OS picks, so the test doesn't collide
+	// with a real NovaWorld service running locally, and keep that socket: the
+	// responder answers on it, so no other process can take the port between
+	// the bind and the probe.
 	uint16_t server_port = 0;
-	{
-		opennova::net::ScopedSocket probe(opennova::net::udp_bind(0, &server_port));
-		if (!expect(probe.is_valid() && server_port != 0, "ephemeral bind")) return 1;
-	}
+	opennova::net::ScopedSocket server(opennova::net::udp_bind(0, &server_port));
+	if (!expect(server.is_valid() && server_port != 0, "ephemeral bind")) return 1;
 
 	// Quote keys + values exactly as the real gate (and our own
 	// gate_listener.cpp) emit them — the parser must strip the quotes
@@ -83,11 +79,9 @@ int main() {
 			"VAR \"UDPNOVAWORLD\" \"127.0.0.1:64206\"\r\n"
 			"VAR \"STARTUPURL\" \"http://127.0.0.1:8080\"\r\n";
 
-	// Kick off the server in a background thread.
-	std::thread server_thread([&] { serve_one_probe(server_port, response_body); });
-
-	// Give the server a moment to bind.
-	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	// Kick off the server in a background thread. Its socket is bound already,
+	// so a probe sent before it reads waits in the socket's queue.
+	std::thread server_thread([&] { serve_one_probe(server.get(), response_body); });
 
 	// Client: build gate probe, send, receive response, decrypt+parse.
 	opennova::net::ScopedSocket client(opennova::net::udp_bind(0));

@@ -22,10 +22,12 @@ namespace opennova::novaworld_server {
 
 struct ServerConfig;
 class SessionStore;
+class NwUdpListener;
 
 // Crow-backed HTTP listener. start() registers five route families, each in
 // its own private registrar (bodies in http_listener.cpp):
-//   admin REST API      — Bearer ADMIN_API_TOKEN /api/admin/* + dev host inject
+//   admin REST API      — Bearer ADMIN_API_TOKEN /api/admin/* + dev host inject,
+//                         and the ServerCommand / ServerStopHosting pushes
 //   public JSON API     — /api/* for the web portal
 //   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
 //   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
@@ -46,6 +48,11 @@ public:
 	// records "http" sightings ("<METHOD> /<path>") and /api/unknowns serves
 	// the live snapshot. Null is safe (the routes degrade to empty / no-op).
 	void set_unknown_tracker(opennova::UnknownTracker *tracker) { tracker_ = tracker; }
+
+	// The NovaWorld UDP listener the admin host routes push statements through
+	// (/api/admin/hosts/<rid>/command and /stop). Set before start(); it must
+	// outlive the HTTP listener. Null answers those routes 503.
+	void set_nw_udp_listener(NwUdpListener *listener) { nw_udp_ = listener; }
 
 	HttpListener(const HttpListener &) = delete;
 	HttpListener &operator=(const HttpListener &) = delete;
@@ -74,6 +81,15 @@ private:
 	                            const std::string &static_dir,
 	                            const std::string &templates_dir);
 
+	// Client-facing URLs injected into the menu templates (@HOST_URL@ /
+	// @GSB_SERVER@): config.public_host and the port Crow serves, the
+	// configured one or the OS's pick for port 0. The retail client is REMOTE,
+	// so these must point at the public host, never 127.0.0.1 (else the client
+	// POSTs its host registration / fetches the server browser from its own
+	// localhost).
+	std::string host_url() const;
+	std::string gsb_url() const;
+
 	struct Impl;
 	std::unique_ptr<Impl> impl_;
 	ConnectionManager &manager_;
@@ -100,13 +116,12 @@ private:
 	// Optional unknown-message tracker (set via set_unknown_tracker). Read
 	// by /api/unknowns; written by the catch-all 404 path. Null in tests.
 	opennova::UnknownTracker *tracker_ = nullptr;
-	// Client-facing URLs injected into the menu templates (@HOST_URL@ /
-	// @GSB_SERVER@). Built once in start() from config.public_host +
-	// config.http_port — the retail client is REMOTE, so these must point at
-	// the public host, never 127.0.0.1 (else the client POSTs its host
-	// registration / fetches the server browser from its own localhost).
-	std::string host_url_;
-	std::string gsb_url_;
+	// The push channel to listed servers (set_nw_udp_listener); null in tests
+	// that do not wire one.
+	NwUdpListener *nw_udp_ = nullptr;
+	// config.public_host, set in start() before Crow runs (host_url() /
+	// gsb_url()).
+	std::string public_host_;
 };
 
 } // namespace opennova::novaworld_server

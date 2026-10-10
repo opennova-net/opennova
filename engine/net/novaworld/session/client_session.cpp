@@ -1,5 +1,6 @@
 #include <net/novaworld/client_session.h>
 
+#include <base/io/crt_ftol.h>
 #include <base/io/le.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
@@ -63,9 +64,11 @@ std::string copy_capped(const std::string &s, size_t n) {
 	return s.size() < n ? s : s.substr(0, n - 1);
 }
 
-// The retail atol over a param value: strtol base 10.
+// The retail atol over a param value (io::retail_atol: the locale's leading white space,
+// 0xA0 included, saturating at 32 bits; D-NET-384).
+// [orig: _atol @0x76AB0A from CNapiGameSession_HandlePlayEnterResponse @0x4D1940]
 int atol_field(const NapiField &f) {
-	return static_cast<int>(std::strtol(field_to_string(f).c_str(), nullptr, 10));
+	return io::retail_atol(field_to_string(f).c_str());
 }
 
 // CNapiVarList_SetOrCreate keyed on (VarFNum, name): update the match in place, else append.
@@ -943,9 +946,9 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 			else if (strutil::iequals(f.name, "SessIdString")) sess = field_to_string(f);
 		}
 		// Retail parses Success with atol() and treats ANY non-zero integer as
-		// success (leading-whitespace/sign tolerant), not an exact "1" match.
-		// [orig: CNapiGameSession_HandleConnectVerifyResponse @ 0x4d5800 (atol @ 0x76ab0a)]
-		if (std::strtol(success.c_str(), nullptr, 10) != 0) {
+		// success (leading-whitespace/sign tolerant, 0xA0 included), not an exact "1" match.
+		// [orig: CNapiGameSession_HandleConnectVerifyResponse @ 0x4d5800 (atol @ 0x4d585c)]
+		if (io::retail_atol(success.c_str()) != 0) {
 			sess_id_string_ = sess;
 			state_ = State::Verified;
 			set_lobby_state(4);
@@ -989,8 +992,10 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 			const auto host_commands = parse_host_commands(container);
 			host_requires_join_ticket_ = 0;
 			const auto ticket = host_commands.find("HostRequiresJoinTicket");
+			// [orig: CNapiVarList_GetIntValueByName @0x630CF0 (its atol) from
+			//  CNapiGameSession_HandleHostVerifyResponse @0x4D5BA7]
 			if (ticket != host_commands.end())
-				host_requires_join_ticket_ = static_cast<int>(std::strtol(ticket->second.c_str(), nullptr, 10));
+				host_requires_join_ticket_ = io::retail_atol(ticket->second.c_str());
 			const auto gsid = host_commands.find("GSID");
 			host_gsid_ = gsid != host_commands.end() ? copy_capped(gsid->second, 128) : std::string();
 			host_state_ = HostState::Established;

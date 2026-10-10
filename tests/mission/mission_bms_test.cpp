@@ -12,6 +12,7 @@
 #include "common/test_paths.h"
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
+#include <formats/def/reserved_items.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_field.h>
 #include <formats/mission/mission_mis.h>
@@ -206,6 +207,25 @@ int main() {
 	TEST_EXPECT(bms_file.group_records.size() == opennova::bms::kGroupRecordCount);
 	TEST_EXPECT(bms_file.layer_records.size() == opennova::bms::kLayerRecordCount);
 
+	// A Mission box's name over its two words, the second its last four characters: written and read back as
+	// it stands, as the game loads a box's 36 bytes whole and reads the word with ref_id [orig:
+	// Mission_LoadBMSFile @0x40fcdc; Entity_UpdateInfantryPlayerBody @0x4b60b6..0x4b60c4].
+	{
+		opennova::bms::File boxed = bms_file;
+		opennova::bms::BoundingBox box{};
+		box.type = int32_t(opennova::bms::BoundingBoxType::Mission);
+		const MissionField *name = find_mission_field(MissionRecord::BoundingBox, "mission");
+		TEST_EXPECT(name && name->set(&box, std::string("CP19NEXT"), error) && box.reserved0 != 0);
+		boxed.bounding_boxes.push_back(box);
+		sync_counts(boxed);
+		std::vector<uint8_t> bytes;
+		opennova::bms::File back;
+		MissionValue read;
+		TEST_EXPECT(opennova::bms::write(boxed, bytes, error) && opennova::bms::parse(bytes.data(), bytes.size(), back, error));
+		TEST_EXPECT(!back.bounding_boxes.empty() && back.bounding_boxes.back().reserved0 == box.reserved0 &&
+		            name && name->get(&back.bounding_boxes.back(), read) && std::get<std::string>(read) == "CP19NEXT");
+	}
+
 	std::vector<uint8_t> encoded;
 	TEST_EXPECT(opennova::bms::write(bms_file, encoded, error));
 	opennova::bms::File encoded_file;
@@ -293,8 +313,8 @@ int main() {
 	TEST_EXPECT(entity_count(document, EntityKind::Item) == original_item_count + 1);
 	TEST_EXPECT(entity_item_id(document.items[added]) == 101291);
 	TEST_EXPECT(document.items[added].type_id == 1291);
-	// A new record holds what the shipped records most often hold (new_entity; mission_corpus's
-	// retail leg holds each to the corpus), its SSN one past the file's largest.
+	// A new record holds what the original editor's initializer gives a placed item (new_entity, D-MIS-10;
+	// mission_corpus's retail leg holds each to the corpus), its SSN one past the file's largest.
 	{
 		const opennova::bms::Entity &made = document.items[added];
 		int largest = 0;
@@ -307,22 +327,23 @@ int main() {
 		            made.max_attack_distance == 16);
 		TEST_EXPECT(made.w_accuracy1 == 100 && made.w_accuracy2 == 100 && made.spawns == 0 && made.no_more_than == 0);
 		TEST_EXPECT(made.crouch_timer == 3 && made.unk15a == 0 && made.shoot_timer == 5 && made.wp_adv_trigger == -1);
-		TEST_EXPECT(made.attention == 30 && made.obliqueness == 15 && made.advancetimer == 10 && made.map_symbol == 255);
+		TEST_EXPECT(made.attention == 30 && made.obliqueness == 15 && made.advancetimer == 10 && made.map_symbol == 0);
 		TEST_EXPECT(std::string(made.gen_string) == "null" && made.name1[0] == 0 && made.name2[0] == 0);
 		TEST_EXPECT(made.mis_height_lock == 1 && made.get_x() == 1.0f && made.yaw == 90);
 		const opennova::bms::Entity marker = new_entity(EntityKind::Marker, 100001, 77);
 		TEST_EXPECT(marker.type == opennova::bms::ItemType::Marker && marker.id == 77 && marker.type_id == 1 &&
 		            marker.x == 0 && marker.attention == 30);
 	}
-	// A new entity never takes the player's SSN: past a largest of 9999 the next is 10001.
+	// A new entity never takes a player's net id: past a largest of 9999 the next is 10256, past the 256
+	// slots' 10000..10255.
 	{
 		opennova::bms::File below_player;
 		make_default(below_player);
 		below_player.organics.push_back(new_entity(EntityKind::Organic, 100001, 9999));
 		sync_counts(below_player);
-		TEST_EXPECT(next_entity_ssn(below_player) == 10001);
+		TEST_EXPECT(next_entity_ssn(below_player) == 10256);
 		const size_t at = add_entity(below_player, EntityKind::Item, 101291, placed);
-		TEST_EXPECT(below_player.items[at].id == 10001 && next_entity_ssn(below_player) == 10002);
+		TEST_EXPECT(below_player.items[at].id == 10256 && next_entity_ssn(below_player) == 10257);
 	}
 	// A blank mission: named, on its terrain and under its environment, the header values the shipped
 	// missions hold in common, no record of any pool; a name past its slot is refused, the file as it was.
@@ -396,7 +417,8 @@ int main() {
 	waypoint_transform.z = 42.0f;
 	size_t first_marker_index = 0;
 	WaypointPath edited_path;
-	TEST_EXPECT(add_waypoint_marker(reparsed, 1, 100001, waypoint_transform, -1, error, &first_marker_index));
+	const int waypoint_item = opennova::mission::kItemIdOffset + opennova::def::DEF_TYPE_WAYPOINT;
+	TEST_EXPECT(add_waypoint_marker(reparsed, 1, waypoint_item, waypoint_transform, -1, error, &first_marker_index));
 	TEST_EXPECT(waypoint_path(reparsed, 1, edited_path));
 	TEST_EXPECT(entity_count(reparsed, EntityKind::Marker) == original_marker_count + 1);
 	TEST_EXPECT(reparsed.markers[first_marker_index].type == opennova::bms::ItemType::Marker);
@@ -416,7 +438,7 @@ int main() {
 	inserted_transform.y = 51.0f;
 	inserted_transform.z = 52.0f;
 	size_t inserted_marker_index = 0;
-	TEST_EXPECT(add_waypoint_marker(reparsed, 1, 100001, inserted_transform, 0, error, &inserted_marker_index));
+	TEST_EXPECT(add_waypoint_marker(reparsed, 1, waypoint_item, inserted_transform, 0, error, &inserted_marker_index));
 	TEST_EXPECT(waypoint_path(reparsed, 1, edited_path));
 	TEST_EXPECT(entity_count(reparsed, EntityKind::Marker) == original_marker_count + 2);
 	TEST_EXPECT(edited_path.marker_indices.size() == 2);
@@ -1116,25 +1138,76 @@ int main() {
 		opennova::bms::File f;
 		make_default(f);
 		TEST_EXPECT(!f.waypoint_records.empty());
-		// 32 real markers so a full 32-index path validates.
-		f.markers.assign(kMaxWaypointPathMarkers, opennova::bms::Entity{});
-		// Saturate path 0 at 32 slots and stamp the shipped over-count.
-		f.waypoint_records[0].waypoint_numbers.assign(kMaxWaypointPathMarkers, 0u);
-		f.waypoint_records[0].marker_count = 39;
+		// 32 waypoint markers so a full 32-index path validates.
+		opennova::bms::Entity waypoint{};
+		waypoint.type = opennova::bms::ItemType::Marker;
+		waypoint.type_id = opennova::def::DEF_TYPE_WAYPOINT;
+		f.markers.assign(kMaxWaypointPathMarkers, waypoint);
+		// Saturate path 1 at 32 slots and stamp the shipped over-count.
+		f.waypoint_records[1].waypoint_numbers.assign(kMaxWaypointPathMarkers, 0u);
+		f.waypoint_records[1].marker_count = 39;
 		// An authored edit re-applies a (still 32-marker) list, e.g. a flag-only change.
 		std::vector<int> indices;
 		for (int i = 0; i < static_cast<int>(kMaxWaypointPathMarkers); ++i) {
 			indices.push_back(i);
 		}
-		TEST_EXPECT(set_waypoint_path(f, 0, indices, 1, error));
-		// Resynced in memory immediately, and it stays resynced through save/reparse (no over-count revival).
-		TEST_EXPECT(f.waypoint_records[0].marker_count == kMaxWaypointPathMarkers);
+		TEST_EXPECT(set_waypoint_path(f, 1, indices, 1, error));
+		// Laid out from its markers at once, and it stays so through save/reparse (no over-count revival).
+		TEST_EXPECT(f.waypoint_records[1].marker_count == kMaxWaypointPathMarkers);
 		std::vector<uint8_t> wbytes;
 		TEST_EXPECT(write_document(f, wbytes));
 		opennova::bms::File wreparsed;
 		std::string werr;
 		TEST_EXPECT(opennova::bms::parse(wbytes.data(), wbytes.size(), wreparsed, werr));
-		TEST_EXPECT(wreparsed.waypoint_records[0].marker_count == kMaxWaypointPathMarkers);
+		TEST_EXPECT(wreparsed.waypoint_records[1].marker_count == kMaxWaypointPathMarkers);
+	}
+
+	// --- D-MIS-6: a path's stops are its markers' (the original editor's model): an edit sets each marker's
+	// waypoint_id and wp_number and lays the path out from them, its count the markers that carry it, its 32
+	// slots the first of them [orig: JOTACmed.exe sub_44CFD0 @ 0x44cfd0, sub_44F920 @ 0x44f920]. ---
+	{
+		opennova::bms::File f;
+		make_default(f);
+		opennova::bms::Entity waypoint{};
+		waypoint.type = opennova::bms::ItemType::Marker;
+		waypoint.type_id = opennova::def::DEF_TYPE_WAYPOINT;
+		f.markers.assign(40, waypoint);
+		std::vector<int> stops;
+		for (int i = 39; i >= 0; --i) stops.push_back(i); // 40 stops, the last marker first
+		TEST_EXPECT(set_waypoint_path(f, 5, stops, 0, error));
+		TEST_EXPECT(f.waypoint_records[5].marker_count == 40 && f.waypoint_records[5].waypoint_numbers.size() == 32);
+		TEST_EXPECT(f.waypoint_records[5].waypoint_numbers[0] == 39 && f.waypoint_records[5].waypoint_numbers[31] == 8);
+		TEST_EXPECT(f.markers[39].waypoint_id == 5 && f.markers[39].wp_number == 0 && f.markers[0].wp_number == 39);
+		WaypointPath forty;
+		TEST_EXPECT(waypoint_path(f, 5, forty) && forty.marker_indices == stops);
+		// A stop taken off: its marker carries no path; the path counts 39.
+		TEST_EXPECT(erase_waypoint_stop(f, 5, 0, error));
+		TEST_EXPECT(f.markers[39].waypoint_id == 0 && f.markers[39].wp_number == 0 && f.waypoint_records[5].marker_count == 39);
+		TEST_EXPECT(f.markers[38].wp_number == 0 && f.waypoint_records[5].waypoint_numbers[0] == 38);
+		// A marker put on another path leaves this one, both laid out again.
+		TEST_EXPECT(insert_waypoint_stop(f, 7, 0, 38, error));
+		TEST_EXPECT(f.markers[38].waypoint_id == 7 && f.waypoint_records[7].marker_count == 1 &&
+		            f.waypoint_records[7].waypoint_numbers == std::vector<uint32_t>({38u}));
+		TEST_EXPECT(f.waypoint_records[5].marker_count == 38 && f.waypoint_records[5].waypoint_numbers[0] == 37);
+		// A marker one of the path's stops already, or named twice, no waypoint marker, or on path 0, is refused.
+		TEST_EXPECT(!insert_waypoint_stop(f, 7, 1, 38, error));
+		TEST_EXPECT(!set_waypoint_path(f, 7, {1, 1}, 0, error));
+		TEST_EXPECT(!set_waypoint_path(f, 0, {1}, 0, error));
+		f.markers[1].type_id = 6001;
+		TEST_EXPECT(!insert_waypoint_stop(f, 7, 1, 1, error));
+		f.markers[1].type_id = opennova::def::DEF_TYPE_WAYPOINT;
+		// A marker removed: the markers past it move down one, every path laid out again from its markers.
+		TEST_EXPECT(remove_entity(f, EntityKind::Marker, 0, error));
+		TEST_EXPECT(f.waypoint_records[7].waypoint_numbers == std::vector<uint32_t>({37u}));
+		TEST_EXPECT(f.waypoint_records[5].marker_count == 37 && f.waypoint_records[5].waypoint_numbers[0] == 36);
+		// Written and read again, the markers still carry the paths their records hold.
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(write_document(f, bytes));
+		opennova::bms::File back;
+		std::string err;
+		TEST_EXPECT(opennova::bms::parse(bytes.data(), bytes.size(), back, err));
+		TEST_EXPECT(back.waypoint_records[5].marker_count == 37 && waypoint_path_markers(back, 5).size() == 37 &&
+		            waypoint_path_markers(back, 7) == std::vector<int>({37}));
 	}
 
 	// --- Regression (review): set_event / add_event clamp reset_after & delay to 0..1023 (their packed

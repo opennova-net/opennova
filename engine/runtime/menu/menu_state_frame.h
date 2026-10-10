@@ -41,6 +41,7 @@ void frame_set_scroll_range(MenuFrameState &state, int index, int minimum, int m
 void frame_set_popup_open(MenuFrameState &state, int index, bool open);
 void frame_set_items(MenuFrameState &state, int index, const std::vector<std::string> &items);
 void frame_set_selected_set(MenuFrameState &state, int index, const std::vector<int> &rows);
+void frame_set_disabled_items(MenuFrameState &state, int index, const std::vector<uint8_t> &rows);
 void frame_set_table_rows(MenuFrameState &state, int index, const std::vector<MenuTableRow> &rows);
 // CWnd_SetClipRect, absolute design edges (`enabled` false removes it).
 void frame_set_clip_rect(MenuFrameState &state, int index, bool enabled, int left, int top, int right,
@@ -99,6 +100,7 @@ public:
 	void set_widget_selection(int index, int selected, int hover, int scroll_row) override;
 	void set_widget_scroll_range(int index, int minimum, int maximum, int page, int value) override;
 	void set_widget_selected_set(int index, const std::vector<int> &rows) override;
+	void set_widget_disabled_items(int index, const std::vector<uint8_t> &rows) override;
 	void set_widget_table_rows(int index, const std::vector<MenuTableRow> &rows) override;
 	void set_widget_table_columns(int index, bool installed, const std::vector<MenuTableColumn> &columns,
 			int sort_column) override;
@@ -119,6 +121,8 @@ public:
 
 	std::vector<MenuPumpWindow> press_mouse(float x, float y) override;
 	int process_mouse(float x, float y, bool button_down) override;
+	void release_mouse() override { click_.release(); }
+	bool press_popup_mouse(int index, float x, float y) override;
 	bool process_popup_mouse(int index, float x, float y, bool button_down) override;
 	bool process_mouse_wheel(float x, float y, int steps) override;
 	void set_cursor_state(bool visible, float x, float y) override;

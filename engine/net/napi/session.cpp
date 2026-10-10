@@ -1,6 +1,7 @@
 #include <net/napi/session.h>
 
 #include <base/io/cp1252.h> // cp1252_isspace
+#include <base/io/crt_ftol.h> // retail_atol
 #include <base/io/strutil.h>
 
 #include <cstdlib>
@@ -149,10 +150,12 @@ constexpr ServerMsgCodeRow kServerMsgCodeTable[] = {
 static_assert(sizeof(kServerMsgCodeTable) / sizeof(kServerMsgCodeTable[0]) == 0x34,
               "the witnessed 52-row table");
 
-// The retail atol over a param value: strtol base 10 (leading whitespace and sign tolerant,
-// trailing garbage ignored, non-numeric text reads as 0).
+// The retail atol over a param value (io::retail_atol: the locale's leading white space,
+// 0xA0 included, a sign, trailing garbage ignored, non-numeric text reading 0, saturating at
+// 32 bits; D-NET-384). [orig: _atol @0x76AB0A from CNapiGameSession_HandleVerifyResponse
+//  @0x4D1E00, HandleHostVerifyResponse @0x4D59D0 and HandlePuntNotification @0x4D20B0]
 int atol_field(const NapiField &f) {
-	return static_cast<int>(std::strtol(field_to_string(f).c_str(), nullptr, 10));
+	return io::retail_atol(field_to_string(f).c_str());
 }
 
 NapiField str_field(const char *name, const std::string &value) {
@@ -522,16 +525,48 @@ bool server_command_verb_takes_target(ServerCommandVerb verb) {
 	return row != nullptr && row->prefix_match;
 }
 
+bool server_command_verb_from_name(std::string_view name, ServerCommandVerb &out) {
+	for (const VerbRow &row : kVerbs) {
+		if (!strutil::iequals(name, row.name)) continue;
+		out = row.verb;
+		return true;
+	}
+	return false;
+}
+
+bool server_command_target_from_name(std::string_view name, ServerCommandTarget &out) {
+	if (name.empty() || strutil::iequals(name, "None")) {
+		out = ServerCommandTarget::None;
+		return true;
+	}
+	for (const ServerCommandTarget target :
+	     {ServerCommandTarget::ByIndex, ServerCommandTarget::ByIpAndPort, ServerCommandTarget::ByName,
+	      ServerCommandTarget::ByPCID}) {
+		if (!strutil::iequals(name, server_command_target_name(target))) continue;
+		out = target;
+		return true;
+	}
+	return false;
+}
+
 // [orig: String_TokenizeQuotedToArray @0x616d60] — inverted: a quoted run is one token.
 std::string server_command_text(ServerCommandVerb verb, ServerCommandTarget target,
-                                const std::vector<std::string> &args) {
+                                const std::vector<std::string> &args, const char **refusal) {
+	auto refuse = [refusal](const char *why) {
+		if (refusal != nullptr) *refusal = why;
+		return std::string();
+	};
 	const VerbRow *row = find_verb_row(verb);
-	if (row == nullptr) return {};
+	if (row == nullptr) return refuse("no verb");
 	// A pairing the reader drops: no suffix on a player-targeted verb (@0x4d24e3), or one on a
 	// whole-token verb (Napi_StrCaseEqual, e.g. Cycle @0x4d2a46).
-	if ((target != ServerCommandTarget::None) != row->prefix_match) return {};
+	if ((target != ServerCommandTarget::None) != row->prefix_match) {
+		return refuse(row->prefix_match
+				? "the verb needs a target suffix (ByIndex, ByIpAndPort, ByName or ByPCID)"
+				: "the verb takes no target suffix");
+	}
 	// Fewer args than the verb's token-count gate: the reader drops the line (kVerbs' min_args).
-	if (args.size() < row->min_args) return {};
+	if (args.size() < row->min_args) return refuse("fewer args than the verb's token-count gate");
 	// The tokenizer's isspace runs in the host's ANSI code page, not the C locale: WinMain's
 	// System_InitTimerAndLocale sets LC_ALL to ".ACP" and only LC_NUMERIC back to "C", so on a
 	// cp1252 host 0xA0 splits a token too, as tokenize_quoted does. Quote an arg holding one of
@@ -551,7 +586,8 @@ std::string server_command_text(ServerCommandVerb verb, ServerCommandTarget targ
 	std::string text = server_command_verb_name(verb);
 	text += server_command_target_name(target);
 	for (const std::string &arg : args) {
-		if (arg.find_first_of(std::string_view("\"\0", 2)) != std::string::npos) return {};
+		if (arg.find_first_of(std::string_view("\"\0", 2)) != std::string::npos)
+			return refuse("an arg holds a double quote or a NUL, which the reader cannot carry");
 		text.push_back(' ');
 		if (needs_quotes(arg)) {
 			text.push_back('"');
@@ -561,7 +597,8 @@ std::string server_command_text(ServerCommandVerb verb, ServerCommandTarget targ
 			text += arg;
 		}
 	}
-	if (text.size() >= SERVER_COMMAND_CMD_CAP) return {};
+	if (text.size() >= SERVER_COMMAND_CMD_CAP)
+		return refuse("the line exceeds the reader's 511-character Cmd buffer");
 	return text;
 }
 

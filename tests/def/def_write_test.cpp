@@ -17,6 +17,7 @@
 // 0046 S12 D5) read as the saved line's arguments, and a set of what one shows leaves its
 // record byte for byte as it was, directly and after another number went through the line,
 // over the inline catalogs, the items fixture and the three retail catalogs.
+#include <formats/def/def_notes.h>
 #include <formats/def/def_scan.h>
 #include <formats/def/def_write.h>
 #include <formats/def/def_write_record.h>
@@ -328,14 +329,85 @@ int review_def_lines() {
 	return failures;
 }
 
+// The mission editor's AI keys and side words (D-MIS-10): the game knows the four keys and keeps nothing of
+// them [orig: ItemDef_ParseProperty @0x4a1a7b..0x4a1ac6 -> @0x4a1ca6], nor of Good and Evil [orig: @0x4a06c3,
+// @0x4a06db], while the original mission editor reads them all [orig: JOTACmed.exe ItemsDef_ParseToken
+// @0x4310d0]: read into the model with no finding, written back, the editor's seeds (16, 320, 16, 10) where a
+// record has none, which a record made from nothing does not write.
+int mission_editor_keys() {
+	int failures = 0;
+	const char *text = "begin \"Rifleman\"\r\nid 100300\r\ntype person\r\nmax_attack_dist 30\r\n"
+	                   "max_engagement_dist 400\r\nmin_engagement_dist 20\r\nfire_timer 5\r\nattrib: AIData Evil Good\r\nend\r\n"
+	                   "begin \"Crate\"\r\nid 100301\r\ntype building\r\nend\r\n";
+	failures += clean("items.def", text);
+	DefItemsFile file{};
+	def_parse_items_memory(reinterpret_cast<const uint8_t *>(text), std::strlen(text), &file, nullptr);
+	const DefItemDef *rifleman = file.count == 2 ? &file.entries[0] : nullptr;
+	const DefItemDef *crate = file.count == 2 ? &file.entries[1] : nullptr;
+	if (!rifleman || rifleman->max_attack_dist != 30 || rifleman->max_engagement_dist != 400 ||
+	    rifleman->min_engagement_dist != 20 || rifleman->fire_timer != 5 || !rifleman->attrib_good || !rifleman->attrib_evil ||
+	    rifleman->attrib != DEF_ITEM_ATTRIB_AIDATA || rifleman->attrib2 != 0) {
+		std::printf("FAIL mission editor keys read\n");
+		++failures;
+	}
+	if (!crate || crate->max_attack_dist != 16 || crate->max_engagement_dist != 320 || crate->min_engagement_dist != 16 ||
+	    crate->fire_timer != 10 || crate->attrib_good || crate->attrib_evil) {
+		std::printf("FAIL mission editor seeds\n");
+		++failures;
+	}
+	// The file written again over its modeled layout as it was, byte for byte, a value changed on its own line;
+	// and from nothing: each key and word where the record holds one, none where it holds the seed.
+	{
+		DefItemsFile noted{};
+		DefTextNotes notes;
+		DefParseReport report;
+		def_parse_items_memory(reinterpret_cast<const uint8_t *>(text), std::strlen(text), &noted, &report, notes);
+		const DefWriteResult kept = def_write_items(noted, &notes);
+		if (!kept.ok() || kept.text != text) {
+			std::printf("FAIL mission editor keys kept:\n%s\n", kept.text.c_str());
+			++failures;
+		}
+		if (noted.count == 2) noted.entries[0].max_engagement_dist = 450;
+		const DefWriteResult edited = def_write_items(noted, &notes);
+		std::string expected = text;
+		expected.replace(expected.find("max_engagement_dist 400"), 23, "max_engagement_dist 450");
+		if (!edited.ok() || edited.text != expected) {
+			std::printf("FAIL mission editor keys edited:\n%s\n", edited.text.c_str());
+			++failures;
+		}
+		def_free_items(&noted);
+	}
+	const DefWriteResult made = def_write_items(file);
+	const size_t crate_at = made.text.find("Crate");
+	if (!made.ok() || made.text.find("max_attack_dist 30") == std::string::npos ||
+	    made.text.find("max_engagement_dist 400") == std::string::npos || made.text.find("min_engagement_dist 20") == std::string::npos ||
+	    made.text.find("fire_timer 5") == std::string::npos || made.text.find("evil") == std::string::npos ||
+	    made.text.find("good") == std::string::npos || crate_at == std::string::npos ||
+	    made.text.find("_dist", crate_at) != std::string::npos || made.text.find("fire_timer", crate_at) != std::string::npos) {
+		std::printf("FAIL mission editor keys written:\n%s\n", made.text.c_str());
+		++failures;
+	}
+	DefItemsFile again{};
+	def_parse_items_memory(reinterpret_cast<const uint8_t *>(made.text.data()), made.text.size(), &again, nullptr);
+	if (again.count != 2 || again.entries[0].max_engagement_dist != 400 || !again.entries[0].attrib_evil ||
+	    !again.entries[0].attrib_good || again.entries[1].fire_timer != 10) {
+		std::printf("FAIL mission editor keys reparse\n");
+		++failures;
+	}
+	def_free_items(&again);
+	def_free_items(&file);
+	return failures;
+}
+
 int ignored_input() {
 	int failures = 0;
-	// An unknown key, two attrib: tokens outside the chain and a husk token without a
-	// slot are what the game skips: reported, not blocking, absent from the output.
+	// An unknown key, an attrib: token outside the chain and a husk token without a slot are
+	// what the game skips: reported, not blocking, absent from the output. `good`, the mission
+	// editor's side word the game keeps nothing of, is the model's and stays (mission_editor_keys).
 	const Outcome items = run("items.def",
 		"begin \"Dune Buggy\"\r\nid 100001\r\ntype vehicle\r\nsubtype Ruins\r\n"
 		"attrib: AIData good exp1 nodie\r\nhusk_sub_part_types 01_HULL 02_WHEEL 03_CHUNK_M plain\r\nend\r\n");
-	if (items.blocking() || items.ignored() != 4 || !items.written.ok()) {
+	if (items.blocking() || items.ignored() != 3 || !items.written.ok()) {
 		std::printf("FAIL ignored items: blocking=%d ignored=%zu write=%s\n", int(items.blocking()), items.ignored(),
 		            items.written.ok() ? "ok" : "refused");
 		for (const auto &d : items.diagnostics)
@@ -344,7 +416,7 @@ int ignored_input() {
 	}
 	const std::string &text = items.written.text;
 	if (text.find("subtype") != std::string::npos || text.find("exp1") != std::string::npos ||
-	    text.find("good") != std::string::npos || text.find("plain") != std::string::npos ||
+	    text.find("good") == std::string::npos || text.find("plain") != std::string::npos ||
 	    text.find("nodie") == std::string::npos || text.find("aidata") == std::string::npos) {
 		std::printf("FAIL ignored items output:\n%s\n", text.c_str());
 		++failures;
@@ -1277,6 +1349,7 @@ int main(int argc, char **argv) {
 		}
 	}
 	failures += ignored_input();
+	failures += mission_editor_keys();
 	failures += expansion_catalog_lines();
 	failures += review_def_lines();
 	failures += powerup_table();

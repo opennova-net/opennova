@@ -7,6 +7,8 @@
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/world.h>
 
+#include <base/io/crt_ftol.h>
+
 #include <cstdio>
 #include <cstdlib>
 
@@ -55,7 +57,10 @@ std::string server_log_file_name(ServerFileSink &files, const std::string &profi
 		if (dot == std::string::npos) dot = path.size();
 		size_t digits = dot;
 		while (digits > 0 && path[digits - 1] >= '0' && path[digits - 1] <= '9') --digits;
-		int next = std::atoi(path.substr(digits, dot - digits).c_str()) + 1; // atol + 1
+		// The CRT atol + 1 [orig: _atol @0x4e1f75] (io::retail_atol; D-NET-384), the add
+		// wrapping in 32 bits.
+		int next = static_cast<int32_t>(static_cast<uint32_t>(
+				io::retail_atol(path.substr(digits, dot - digits).c_str())) + 1u);
 		if (next > 10) {
 			next = 1;
 			wrapped = true;

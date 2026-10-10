@@ -60,6 +60,10 @@ public:
 		int screen_index = -1;
 		const mnu::Window *window = nullptr; // null for the screen container
 		std::vector<int> child_ids;
+		// The window's parts (mnu::part_windows), in the order they attach; a part's fixed NAME,
+		// the one a by-name lookup compares (null for a window that is no part).
+		std::vector<int> part_ids;
+		const char *part_name = nullptr;
 	};
 
 	void build(const mnu::Document &doc);
@@ -69,8 +73,8 @@ public:
 	int node_count() const { return static_cast<int>(nodes_.size()); }
 	const Node *node(int id) const;
 	const mnu::Window *window(int id) const;
-	// The id of one of the document's windows (what mnu::find_window finds); -1 for null or
-	// a window the walk did not number (a part's).
+	// The id of one of the document's windows (what mnu::find_window finds, a part's window and
+	// the windows a part holds among them); -1 for null or a window of no document.
 	int id_of(const mnu::Window *window) const;
 	// The screen container ids, in document order.
 	const std::vector<int> &screen_ids() const { return screen_ids_; }
@@ -120,6 +124,9 @@ public:
 	virtual void set_widget_scroll_range(int index, int minimum, int maximum, int page,
 			int value) = 0;
 	virtual void set_widget_selected_set(int index, const std::vector<int> &rows) = 0;
+	// A spin list's rows the game disabled, by row (nonzero: disabled) [orig:
+	// CSpinListWnd_SetItemEnabled @ 0x64bbd0] (MenuWidgetState::disabled_items).
+	virtual void set_widget_disabled_items(int index, const std::vector<uint8_t> &rows) = 0;
 	virtual void set_widget_table_rows(int index, const std::vector<MenuTableRow> &rows) = 0;
 	// The column records code set up (none: the XML ones; menu_table.h
 	// MenuTableColumn: a record a count kept, one it started over, an init over
@@ -154,6 +161,14 @@ public:
 	// The per-sample pump: returns the claimed widget index (-1 none: nothing, or a scrollbar's
 	// window).
 	virtual int process_mouse(float x, float y, bool button_down) = 0;
+	// The release, as its message arrives: the capture let go (MenuClickLatch::release).
+	virtual void release_mouse() = 0;
+	// The press while the open dropdown `index` has the mouse, as its message arrives: the dropdown
+	// takes the capture (MenuClickLatch::dropdown_press) and its scrollbar's windows their own press
+	// (MenuFrameCompiler::press_popup_mouse); true when a scrollbar window took it (no row picks).
+	virtual bool press_popup_mouse(int index, float x, float y) = 0;
+	// The open dropdown's pump sample (MenuFrameCompiler::pump_popup_mouse); true when the window its
+	// press holds took it (no row hovers).
 	virtual bool process_popup_mouse(int index, float x, float y, bool button_down) = 0;
 	virtual bool process_mouse_wheel(float x, float y, int steps) = 0;
 	virtual void set_cursor_state(bool visible, float x, float y) = 0;
@@ -276,6 +291,9 @@ struct MenuWidgetRuntimeState {
 	MenuScrollRangeState scroll_range;
 	bool has_selected_set = false;
 	std::vector<int> selected_set;
+	// A spin list's rows the game disabled, by row (nonzero: disabled; past the end: enabled).
+	bool has_disabled_items = false;
+	std::vector<uint8_t> disabled_items;
 	bool has_table_rows = false;
 	std::vector<MenuTableRow> table_rows;
 	// The columns code installed [orig: init_table_row @ 0x63f9c0 from the shell],
@@ -297,7 +315,7 @@ struct MenuWidgetRuntimeState {
 	bool empty() const {
 		return !(has_shown || has_disabled || has_checked || has_text || has_items ||
 				has_selected_item || has_scroll_row || has_scroll_range || has_selected_set ||
-				has_table_rows || has_table_columns || has_rect || has_clip);
+				has_table_rows || has_table_columns || has_rect || has_clip || has_disabled_items);
 	}
 };
 
@@ -396,10 +414,12 @@ public:
 	//  windows); CWnd_FindChildByName @0x646850 (`!name || !window->name` returns 0
 	//  before the children are searched)]
 	int find_screen_control(const std::string &screen, const std::string &name) const;
-	// The current screen's pre-order index of a doc id; -1 off-screen or frameless.
+	// The current screen's pre-order index of a doc id, a spin list's arrow (and what it holds)
+	// past the screen's windows as the frame builds them; -1 off-screen, frameless, or a part the
+	// frame draws as its owner's (a combo's LIST_BOX, a SCROLLBAR).
 	int frame_index(int id) const;
 	int id_at_index(int index) const;
-	// Every doc id on the current screen, in pre-order.
+	// Every doc id on the current screen, in pre-order (its windows; no part).
 	const std::vector<int> &current_screen_ids() const { return id_of_index_; }
 
 	// ---- state ----
@@ -438,6 +458,12 @@ public:
 	// nothing when the widget has no item list.
 	void select_row_by_value(int id, const std::string &value, bool emit);
 	void select_row(int id, int row, bool emit);
+	// A spin list's row enabled or disabled [orig: CSpinListWnd_SetItemEnabled @ 0x64bbd0]: a row
+	// out of range changes nothing (@ 0x64bbde). The spin steps past a disabled row (spin_cycle), and
+	// as the current row it draws nothing; fresh rows (set_widget_items) are all enabled, as
+	// CSpinListWnd_InsertItem writes each one's flags anew (@ 0x64b84c).
+	void set_item_enabled(int id, int row, bool enabled);
+	bool is_item_enabled(int id, int row) const;
 	int selected_row(int id) const;
 	std::vector<int> selected_rows(int id) const;
 	std::vector<int> selected_set(int id) const;
@@ -526,8 +552,8 @@ public:
 	// Check a radio and uncheck the radios beside it (the same parent) of the
 	// same nonzero GROUP [orig: radio_button_on_click @ 0x656cd0].
 	void select_radio(int id);
-	// The spin list's step: +1 SelectNext, -1 SelectPrevious, wrapping; emits
-	// the value change [orig: CSpinListWnd_SelectNext @ 0x64b910,
+	// The spin list's step: +1 SelectNext, -1 SelectPrevious, wrapping past every
+	// disabled row; emits the value change [orig: CSpinListWnd_SelectNext @ 0x64b910,
 	// CSpinListWnd_SelectPrevious @ 0x64b9a0].
 	void spin_cycle(int id, int delta);
 	// One parsed ACTION row, run as the current screen's [orig:
@@ -541,10 +567,34 @@ public:
 	void emit_edit_changed(int id);
 
 	// ---- input ----
-	// One raw-mouse sample in frame-local coordinates. The press edge is the
-	// widget's WM_LBUTTONDOWN event [orig: UI_DispatchMouseEvent @ 0x63ab00]:
-	// an edit takes the focus; a list, a table and a spin list's body are
-	// activated and then pick (a row, or the spin's next value).
+	// The mouse as the game takes it, in frame-local coordinates: each message reaches the windows as
+	// it arrives (move_mouse, press_mouse, release_mouse) [orig: Menu_ShellMouseCallback @ 0x54b860,
+	// its dispatch @ 0x54b8f0; in a match and on the join screen Menu_InGameMouseCallback @ 0x568760;
+	// UI_DispatchMouseEvent @ 0x63ab00], and the pump (hover, the click, the window sounds) runs once
+	// a frame after them over the last message's point and button (pump_mouse) [orig:
+	// Menu_UpdateFrame @ 0x5528a0, Game_PumpWindowMessages @ 0x5528d3 then CUIScene_EndFrame
+	// @ 0x5528de; in a match Game_ProcessMainFrame @ 0x526608 then UI_TeardownScene @ 0x54e668; the
+	// join screen's MultiPlayer_JoinSessionStateMachine @ 0x56a342].
+	//
+	// A move: the point and the left button the pump reads [orig: g_MouseState, and input_mask, the
+	// last message's wParam, which CWnd_ProcessMouseEvent reads @ 0x647b04].
+	void move_mouse(float x, float y, bool button_down);
+	// The press, as its message arrives. An open dropdown takes it first [orig:
+	// CWnd_DispatchMouseEventToChildren @ 0x647917 hands every event to g_UIActiveComboWnd]: a row
+	// picks, a press outside its cell and its list closes it [orig: CComboWnd_HandleEvent
+	// @ 0x65c261..0x65c2bc], the press consumed (D-MNU-11); else the windows under the point take it,
+	// front to back: an edit takes the focus; a list, a table and a spin list's body are activated and
+	// then pick (a row, or the spin's next value). False when no frame is configured.
+	bool press_mouse(float x, float y, uint32_t now_ms);
+	// The release, as its message arrives: it lets the capture go [orig:
+	// CWnd_DispatchMouseEventToChildren @ 0x64793f; CButtonWnd_HandleNamedEvent @ 0x6583ed], so a
+	// press after it inside the same frame is a press of its own; the click is the pump's. False when
+	// no frame is configured.
+	bool release_mouse(float x, float y);
+	// The frame's pump, over the last message's point and button (nothing before the first message).
+	void pump_mouse();
+	// One raw-mouse sample (a scripted pump, the tests): the button's edge as its message (press_mouse,
+	// release_mouse), then the move and the pump at the point.
 	void process_mouse(float x, float y, bool button_down, uint32_t now_ms);
 	// One wheel tick (+1 rows-down, -1 rows-up); true when a target claimed it.
 	bool process_wheel(float x, float y, int steps);
@@ -581,7 +631,7 @@ private:
 	void index_document_();
 	void index_widget_subtree_(const std::string &screen_name, int id);
 	void rebuild_index_maps_();
-	void map_widget_subtree_(int id);
+	void map_widget_subtree_(int id, std::vector<int> &out);
 	void configure_frame_();
 	void replay_state_();
 	void on_screen_shown_();
@@ -626,6 +676,10 @@ private:
 	// CUIScene_EndFrame @ 0x63e600 pumps the popup alone].
 	void sample_sounds_(int claim, bool button_down);
 	bool sound_reached_(int id) const;
+	// The press's reach at (x, y): the windows its message reaches, front to back.
+	void press_reach_(float x, float y, uint32_t now_ms);
+	// The open dropdown's press (press_mouse); false when no dropdown is open.
+	bool dropdown_press_(float x, float y);
 	// The press (WM_LBUTTONDOWN) of the widget at `index`.
 	// A widget's own press; `again` the captured window's press a root behind its own hands it
 	// (MenuFrameCompiler::press_reach), the same message: a double click's form is the first's.
@@ -680,6 +734,8 @@ private:
 	std::unordered_map<int, MenuWidgetRuntimeState> id_state_;
 	MenuWidgetRuntimeState scratch_state_;
 	std::vector<int> id_of_index_;
+	// The frame's indices past the screen's windows: the spin lists' arrows.
+	std::vector<int> part_id_of_index_;
 	std::unordered_map<int, int> index_of_id_;
 
 	// keyboard focus [orig: g_UIFocusWnd @0x31C16D4]
@@ -692,7 +748,11 @@ private:
 	int last_claim_ = -1;
 	// The windows' sound states and verdicts (menu_sound.h), by widget id.
 	MenuSoundPump sound_pump_;
+	// The last mouse message's point and left button, which the pump reads (move_mouse).
 	bool mouse_down_ = false;
+	bool mouse_seen_ = false;
+	float mouse_x_ = 0.0f;
+	float mouse_y_ = 0.0f;
 	int last_click_id_ = -1;
 	int last_click_row_ = -1;
 	uint32_t last_click_ms_ = 0;

@@ -46,9 +46,20 @@ session handshake, the browser/host/play container services, and the legacy
   also with port 0 (the OS's pick). The HTTP listener's `start()` returns once Crow
   serves (Crow's first tick tells it, with the port Crow bound). A bind that fails
   stops the boot.
+- **The listeners start HTTP first, then NW UDP, then the gate,** so each one starts
+  knowing the ports its siblings serve and advertises those: the NW UDP SessionInit's
+  web domain names the HTTP port, the gate's `UDPNOVAWORLD` and `STARTUPURL` the NW UDP
+  and HTTP ports, and the HTTP menus' `HOST_URL` / `GSB_SERVER` the HTTP listener's own.
+  With nonzero ports these are the configured ports, byte for byte; with port 0, the
+  OS's picks. The gate, a client's first contact, answers only once what it names
+  serves.
 - **`main()` owns SIGINT and SIGTERM** (Ctrl+C; `docker stop` sends SIGTERM). The
   handler only raises the shutdown flag and puts the signal's default action back,
-  so a second signal ends a shutdown that is stuck. The tick loop sees the flag
+  so the same signal again ends a shutdown that is stuck. Not when the server is a
+  container's PID 1: the kernel drops a default-action SIGINT or SIGTERM sent to a
+  PID namespace's init (pid_namespaces(7)), so the compose files run it under
+  Docker's init (`init: true`), which is PID 1 and forwards both signals; a bare
+  `docker run` of the image needs `--init` for the same. The tick loop sees the flag
   within one tick and stops in order: the HTTP listener (Crow's threads joined, a
   held-open request included), then the gate and NW UDP receive threads (each
   returns its lease), then the connections (`Shutdown`). As `main()` returns, its
@@ -80,6 +91,38 @@ it prunes `active_hosts` rows whose `updated_at` (refreshed by every
 This only catches rows the normal teardown somehow missed; `host_players` rows
 cascade. At boot the table is wiped entirely (previous-run cleanup).
 
+## Pushing statements to a listed server
+
+The service can send a hosting connection retail's two administrative statements over
+its own NovaWorld session: `ServerCommand` (one `Cmd` verb line; the host runs it, so
+the service can punt a player, rename the server, change its message, cycle the map
+and so on) and `ServerStopHosting` (`MsgCode` / `MsgParam1` / `MsgParam2`).
+`NwUdpListener::push_server_command` / `push_stop_hosting` resolve the RID to the
+hosting connection under `lobby_states_mu_` and queue the statement; the receive
+thread, which owns the socket, frames it on its next pass exactly as a reply (one
+reliable record on the connection's sequencing, retained until the client's ACK
+covers it) and answers a 0x44 for it from those records. Between receive batches the
+thread also runs the ACTIVE send-interval leg the NAPI server role runs (CS field 5,
+1000 ms): a connection with records still unACKed gets one header-only packet per
+interval for as long as they stay unACKed, whose fresh sequence shows the client a gap
+if the push was lost. A header-only packet draws no ACK from a stock client, so if the
+client's ACK itself is lost that is about one packet a second until the client's next
+packet carries the ACK (its 60 s keepalive) or the connection is reaped (240 s). The
+server role's own 60 s keepalive is not run (D-NET-393: the service already answers
+every packet the client sends).
+
+`ServerStopHosting` is the sysop punt. A stock host drops back to verified and, if it
+is running a NovaWorld match, ends that match for everyone within 62 frames, goes to
+the main menu and resets its NovaWorld session (the RE record's "The exit"); the
+service also takes the server out of the browser as the statement goes out, since the
+host answers it with no `ClientStopHosting`. The admin routes (Bearer
+`ADMIN_API_TOKEN`):
+
+| Route | Body | Replies |
+| --- | --- | --- |
+| `POST /api/admin/hosts/<rid>/command` | `{"verb": "SetServerName", "target": "None", "args": ["New Name"]}` (`target` one of `None`, `ByIndex`, `ByIpAndPort`, `ByName`, `ByPCID`) | 202 queued (with the composed `cmd`); 400 when `server_command_text` refuses the line or an arg holds a control byte (below 0x20, or 0x7F, which a host would save into its `game.cfg` or relay in chat), with the reason; 404 unknown RID; 409 not hosting |
+| `POST /api/admin/hosts/<rid>/stop` | none | 202 queued (MsgCode 7, `NWUSERVERMSGCODE_NOVAWORLDSYSOPPUNT`): ends a stock host's running NovaWorld match for everyone and drops the host from NovaWorld (the browser row at once, its session reset with the match's exit); 404; 409 |
+
 ## Configuration
 
 All via environment (`server_config.cpp`): `ONNET_PUBLIC_HOST`,
@@ -110,7 +153,8 @@ Every source but `main.cpp` builds as the static library
 `opennova_novaworld_server_http_routes`
 ([`tests/novaworld/http_routes_test.cpp`](../../tests/novaworld/http_routes_test.cpp)),
 drives the Crow listener in-process on port 0 (the port it reads back from
-`bound_port()`) over a `db::ConnectionPool`
+`bound_port()`, and the port a rendered page's `HOST_URL` / `GSB_SERVER` carry)
+over a `db::ConnectionPool`
 on a SQLite file under `backend/migrations`, with `apps/common`'s `http_exchange`. It exists only
 with `BUILD_NOVAWORLD_HTTP=ON` and runs in `net-linux.yml` and `ci.yml`'s
 test-linux. The ctest `opennova_novaworld_server_signal_shutdown`
@@ -120,7 +164,11 @@ SIGINT and then SIGTERM to a fresh run, and expects exit 0, the shutdown legs
 logged in order and no WAL file left; with the HTTP layer it reads the HTTP port
 from the `[http] listening on :<port>` line and holds a half-sent request open
 across the signal. On Linux a third run checks that the first signal puts the
-default action back and a second one ends a shutdown still pending. The ctest
+default action back and the same signal again ends a shutdown still pending. A
+last run probes the gate and opens a NovaWorld session: `UDPNOVAWORLD` names the
+NW UDP listener's logged port and, with the HTTP layer, `STARTUPURL` and the
+SessionInit's web domain the HTTP listener's. The ctest
 `gate_listener` ([`tests/novaworld/gate_listener_test.cpp`](../../tests/novaworld/gate_listener_test.cpp))
 starts the real `GateListener` on port 0 and checks that its reported port answers
-a probe and comes back as POSTIPPORT.
+a probe and comes back as POSTIPPORT, and that `UDPNOVAWORLD` and `STARTUPURL`
+carry the sibling ports its config names.

@@ -18,15 +18,6 @@ namespace opennova::configfile {
 
 namespace {
 
-// strtol over retail's 32-bit long, saturating at its range whatever this platform's long is (a
-// 64-bit long would let a value past it wrap in the cast).
-int32_t strtol32(const char *text) {
-	const long long v = std::strtoll(text, nullptr, 10);
-	if (v > INT32_MAX) return INT32_MAX;
-	if (v < INT32_MIN) return INT32_MIN;
-	return static_cast<int32_t>(v);
-}
-
 // sscanf "%[^<stop>]": one or more characters not in `stop`.
 size_t scan_run(const std::string &line, size_t at, const char *stop) {
 	size_t end = at;
@@ -153,7 +144,9 @@ std::vector<ConfigSection> parse_config_text(const uint8_t *data, size_t size) {
 			v.offset = line_offset + value_start + start;
 			v.type = classify_numeric(v.text);
 			if (v.type == 1) {
-				v.integer = strtol32(v.text.c_str());
+				// The CRT atol on retail's 32-bit long, saturating whatever this platform's
+				// long is [orig: ConfigFile_ParseValues — j__atol @0x7607F4].
+				v.integer = io::retail_atol(v.text.c_str());
 			} else if (v.type == 2) {
 				v.real = static_cast<float>(io::retail_atof(v.text.c_str()));
 			} else {
@@ -388,6 +381,52 @@ std::string config_commented(const std::string &text, std::vector<size_t> line_s
 		from = at;
 	}
 	out.append(text, from, std::string::npos);
+	return out;
+}
+
+textlayout::Line cut_config_line(const char *text, size_t length) {
+	textlayout::Line out;
+	size_t end = length;
+	if (end >= 2 && text[end - 2] == '\r' && text[end - 1] == '\n') end -= 2;
+	out.eol.assign(text + end, length - end);
+	const auto blank = [](char c) { return c == ' ' || c == '\t'; };
+	const auto separator = [](char c) { return c == ' ' || c == '\t' || c == '=' || c == ','; };
+	size_t at = 0;
+	while (at < end && blank(text[at])) ++at;
+	out.indent.assign(text, at);
+	size_t comment = end;
+	for (size_t i = at; i < end; ++i)
+		if (text[i] == ';') {
+			comment = i;
+			break;
+		}
+	size_t word = SIZE_MAX;
+	std::string gap;
+	for (size_t i = at; i < comment; ++i) {
+		if (separator(text[i])) {
+			if (word != SIZE_MAX) {
+				out.words.emplace_back(text + word, i - word);
+				word = SIZE_MAX;
+			}
+			gap += text[i];
+			continue;
+		}
+		if (word == SIZE_MAX) {
+			if (!out.words.empty()) out.gaps.push_back(gap);
+			else out.indent += gap;
+			gap.clear();
+			word = i;
+		}
+	}
+	if (word != SIZE_MAX) {
+		out.words.emplace_back(text + word, comment - word);
+		gap.clear();
+	}
+	if (out.words.empty()) {
+		out.indent += gap;
+		gap.clear();
+	}
+	out.tail = gap + std::string(text + comment, end - comment);
 	return out;
 }
 

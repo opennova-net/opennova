@@ -3,11 +3,12 @@
 #include <net/napi/literal.h>
 #include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
 
-#include <cctype>
-#include <cstdlib>
+#include <cstdint>
 #include <string>
 #include <vector>
 
+#include <base/io/cp1252.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 
 namespace opennova {
@@ -19,54 +20,53 @@ constexpr const char *LINE_TAG = "VAR";
 bool ieq(std::string_view a, std::string_view b) { return opennova::strutil::iequals(a, b); }
 
 bool is_line_break(char c) { return c == '\n' || c == '\r'; }
-bool is_ws(char c) { return std::isspace(static_cast<unsigned char>(c)) != 0; }
 
-bool parse_ipv4(std::string_view s, std::array<uint8_t, 4> &out) {
-	std::array<uint8_t, 4> parts{0, 0, 0, 0};
-	size_t pos = 0;
-	for (size_t part = 0; part < 4; ++part) {
-		while (pos < s.size() && is_ws(s[pos])) ++pos;
-		int sign = 1;
-		if (pos < s.size() && (s[pos] == '+' || s[pos] == '-')) {
-			if (s[pos] == '-') sign = -1;
-			++pos;
-		}
-		uint64_t v = 0;
-		bool any = false;
-		while (pos < s.size() && s[pos] >= '0' && s[pos] <= '9') {
-			any = true;
-			v = v * 10u + static_cast<uint64_t>(s[pos] - '0');
-			++pos;
-		}
-		if (!any) return false;
-		const int64_t signed_v = sign < 0 ? -static_cast<int64_t>(v) : static_cast<int64_t>(v);
-		parts[part] = static_cast<uint8_t>(signed_v);
-		if (part < 3) {
-			while (pos < s.size() && s[pos] != '.') ++pos;
-			if (pos >= s.size()) return false;
-			++pos;
-		}
-	}
-	out = parts;
+// One octet: a digit at once (no white space, no sign), then digits to the first
+// non-digit, accumulated as `value * 10 + (byte - '0')` in a 32-bit int that wraps.
+// The test is the CRT isdigit on the SIGN-EXTENDED byte under the game's ".ACP"
+// LC_CTYPE, pinned to cp1252 (cp1252_isdigit, D-NET-388), so the superscripts 0xB2,
+// 0xB3 and 0xB9 count as digits whose value is the signed byte less '0' (-126, -125,
+// -119). True with `value` and `end` (the first non-digit) set; false, writing
+// nothing, when the first byte is no digit. The string is NUL-terminated.
+// [orig: parse_simple_decimal @0x62DB90 — the first test @0x62DBAB..0x62DBBB (movsx,
+//  _isdigit), the loop @0x62DBC0..0x62DBDC (`lea esi, [edx+ecx*2-30h]` over the movsx
+//  byte), the stores @0x62DBE0 / @0x62DBE5, return 1 @0x62DBEA or 0 @0x62DC06]
+bool parse_simple_decimal(const char *s, int32_t &value, const char *&end) {
+	if (!cp1252_isdigit(static_cast<uint8_t>(*s))) return false;
+	uint32_t accumulated = 0;
+	do {
+		const int32_t digit = static_cast<int32_t>(static_cast<int8_t>(*s)) - '0';
+		accumulated = accumulated * 10u + static_cast<uint32_t>(digit);
+		++s;
+	} while (cp1252_isdigit(static_cast<uint8_t>(*s)));
+	value = static_cast<int32_t>(accumulated);
+	end = s;
 	return true;
 }
 
-// Loose atoi matching the original's atol() semantics (stops at the first
-// non-digit, ignores trailing garbage).
-int atoi_loose(std::string_view s) {
-	int sign = 1;
-	size_t i = 0;
-	while (i < s.size() && is_ws(s[i])) ++i;
-	if (i < s.size() && (s[i] == '+' || s[i] == '-')) {
-		if (s[i] == '-') sign = -1;
-		++i;
+// The dotted quad: four parse_simple_decimal octets, the first three each followed
+// DIRECTLY by '.', so white space, a sign or any other byte before an octet or its dot
+// fails the parse; nothing is required after the fourth (the gate's caller passes no
+// end pointer, so "1.2.3.4xyz" and "1.2.3.4.5" read 1.2.3.4). Each octet keeps its low
+// byte (256 reads 0, 300 reads 44), packed octet 1 first. On failure `out` is not
+// written, so the field keeps what an earlier line stored.
+// [orig: Network_ParseIPv4AddressOctets @0x62DC10 — the octets @0x62DC26 / @0x62DC53 /
+//  @0x62DC7A / @0x62DCA1, the dots @0x62DC3C / @0x62DC63 / @0x62DC8A, the failure return
+//  @0x62DC32, the pack @0x62DCAD..0x62DCD2 (three movzx bytes and the fourth shifted out
+//  past bit 31); called from CNapiGateManager_ProcessResponse @0x4CF159 (POSTIPADDRESS,
+//  the store @0x4CF16D on success only) and @0x4CF395 (REFLECTEDIPADDRESS, @0x4CF3A9)]
+bool parse_ipv4_octets(const std::string &text, std::array<uint8_t, 4> &out) {
+	int32_t octets[4] = {0, 0, 0, 0};
+	const char *p = text.c_str();
+	for (int i = 0; i < 4; ++i) {
+		if (i > 0) {
+			if (*p != '.') return false;
+			++p;
+		}
+		if (!parse_simple_decimal(p, octets[i], p)) return false;
 	}
-	long long acc = 0;
-	for (; i < s.size(); ++i) {
-		if (s[i] < '0' || s[i] > '9') break;
-		acc = acc * 10 + (s[i] - '0');
-	}
-	return static_cast<int>(sign * acc);
+	for (int i = 0; i < 4; ++i) out[static_cast<size_t>(i)] = static_cast<uint8_t>(octets[i]);
+	return true;
 }
 
 } // namespace
@@ -110,9 +110,13 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 		// whitespace preserved), so there is no rest-of-line splice.
 		const std::string &value = tokens[2];
 
+		// The numeric keys are the CRT atol (io::retail_atol: the locale's white space,
+		// 0xA0 included, a sign, saturating at 32 bits; D-NET-384).
+		// [orig: _atol for METPING @0x4CF292, METEXT @0x4CF2BC, USEJUNCTION @0x4CF40F,
+		//  CLEARJUNCTION @0x4CF439, GLSVSSRIMS @0x4CF487, GLSVSSAGRMS @0x4CF4AE]
 		bool matched = true;
 		if (ieq(key, "POSTIPADDRESS")) {
-			parse_ipv4(value, out.post_ip);
+			parse_ipv4_octets(value, out.post_ip);
 		} else if (ieq(key, "POSTIPPORT")) {
 			uint32_t parsed = 0;
 			if (napi_parse_literal_value(value, parsed)) out.post_port = parsed;
@@ -126,9 +130,9 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 		} else if (ieq(key, "METLABEL")) {
 			out.met_label = std::string(value);
 		} else if (ieq(key, "METPING")) {
-			out.met_ping = atoi_loose(value);
+			out.met_ping = io::retail_atol(value.c_str());
 		} else if (ieq(key, "METEXT")) {
-			out.met_ext = atoi_loose(value);
+			out.met_ext = io::retail_atol(value.c_str());
 		} else if (ieq(key, "STARTUPURL")) {
 			out.startup_url = std::string(value);
 		} else if (ieq(key, "UDPNOVAWORLD")) {
@@ -138,20 +142,20 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 		} else if (ieq(key, "UDPCODE2")) {
 			out.udp_code2 = std::string(value);
 		} else if (ieq(key, "REFLECTEDIPADDRESS")) {
-			parse_ipv4(value, out.reflected_ip);
+			parse_ipv4_octets(value, out.reflected_ip);
 		} else if (ieq(key, "REFLECTEDPORTNUMBER")) {
 			uint32_t parsed = 0;
 			if (napi_parse_literal_value(value, parsed)) out.reflected_port = parsed;
 		} else if (ieq(key, "USEJUNCTION")) {
-			out.use_junction = atoi_loose(value);
+			out.use_junction = io::retail_atol(value.c_str());
 		} else if (ieq(key, "CLEARJUNCTION")) {
-			out.clear_junction = atoi_loose(value);
+			out.clear_junction = io::retail_atol(value.c_str());
 		} else if (ieq(key, "GLSVSSREQUEST")) {
 			out.glsvss_request = std::string(value);
 		} else if (ieq(key, "GLSVSSRIMS")) {
-			out.glsvss_rims = atoi_loose(value);
+			out.glsvss_rims = io::retail_atol(value.c_str());
 		} else if (ieq(key, "GLSVSSAGRMS")) {
-			out.glsvss_agrms = atoi_loose(value);
+			out.glsvss_agrms = io::retail_atol(value.c_str());
 		} else if (ieq(key, "CUS")) {
 			// Phantom key: counted for read-result parity but not retained.
 		} else if (ieq(key, "PVT")) {

@@ -21,6 +21,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -35,6 +36,10 @@ struct Attribute {
 	Text value;             // raw, as retail stores it: a quoted value keeps its closing quote
 	bool has_value = false; // false for a bare attribute (retail's NULL value)
 	mutable bool read = false; // set when the typed layer consumes it (mnu::parse's notes)
+	// Where the reader found it in the text: the blanks before it begin at `at`, its name at
+	// `name_at`, and it ends at `end` (past its value and whatever the reader skipped after it).
+	// The text layout model reads these (mnu_text_layout.h); nothing else does.
+	size_t at = 0, name_at = 0, end = 0;
 
 	// wcstok(value, L"\"") [orig: every attribute consumer, the wcstok @ 0x76e883
 	// with the one-character delimiter @ 0x7e0728]: the first run of characters that
@@ -67,9 +72,23 @@ struct Note {
 	std::string message;
 };
 
+// One run of the text as the reader cut it: a tag (from its '<' to past its '>'), a comment, a
+// RAW_TEXT block, or the text between two of them. The spans cover the text up to the end the
+// reader reached, in order, with no gap; the text layout model (mnu_text_layout.h) reads them.
+struct Span {
+	enum class Kind : uint8_t { Text, Open, Close, Comment, RawText };
+	Kind kind = Kind::Text;
+	size_t begin = 0, end = 0;
+	// Open: the element the tag created. Close: the element it closed. Text, RawText and
+	// Comment: the element the reader stood in (null outside every element).
+	const Node *node = nullptr;
+};
+
 struct Document {
 	std::vector<std::unique_ptr<Node>> roots;
 	std::vector<Note> notes;
+	std::vector<Span> spans;
+	size_t end = 0; // where the reader's text ends: its first NUL, or its length
 };
 
 // Read wide text (the loader's decode; the first NUL ends it, as the loader's

@@ -105,6 +105,10 @@ void frame_set_selected_set(MenuFrameState &state, int index, const std::vector<
 	row.selected_items.assign(rows.begin(), rows.end());
 }
 
+void frame_set_disabled_items(MenuFrameState &state, int index, const std::vector<uint8_t> &rows) {
+	frame_widget(state, index).disabled_items = rows;
+}
+
 void frame_set_table_rows(MenuFrameState &state, int index, const std::vector<MenuTableRow> &rows) {
 	frame_widget(state, index).table_rows = rows;
 }
@@ -227,6 +231,10 @@ void MenuStateFrame::set_widget_selected_set(int index, const std::vector<int> &
 	frame_set_selected_set(state_, index, rows);
 	++serial_;
 }
+void MenuStateFrame::set_widget_disabled_items(int index, const std::vector<uint8_t> &rows) {
+	frame_set_disabled_items(state_, index, rows);
+	++serial_;
+}
 void MenuStateFrame::set_widget_table_rows(int index, const std::vector<MenuTableRow> &rows) {
 	frame_set_table_rows(state_, index, rows);
 	++serial_;
@@ -343,10 +351,23 @@ int MenuStateFrame::process_mouse(float x, float y, bool button_down) {
 	return claim.hovered;
 }
 
+bool MenuStateFrame::press_popup_mouse(int index, float x, float y) {
+	if (!configured_) return false;
+	// The dropdown has the mouse: its press holds the capture until the release, as the game's frame
+	// takes it (MenuFrame::press_popup_mouse).
+	click_.dropdown_press(index);
+	const MenuFrameCompiler::MouseClaim claim = compiler_.press_popup_mouse(state_, index, x, y, 1.0f, 1.0f);
+	if (claim.scroll_value_changed) {
+		++serial_;
+		if (scrolled_) scrolled_(claim.scroll_index, claim.scroll_value);
+	}
+	if (claim.scroll_index >= 0) ++serial_;
+	return claim.scroll_index >= 0;
+}
+
 bool MenuStateFrame::process_popup_mouse(int index, float x, float y, bool button_down) {
 	if (!configured_) return false;
-	// The dropdown has the mouse: a press it takes holds the capture until the release.
-	click_.dropdown_sample(index, button_down);
+	click_.dropdown_sample(button_down);
 	const MenuFrameCompiler::MouseClaim claim =
 			compiler_.pump_popup_mouse(state_, index, x, y, button_down, 1.0f, 1.0f);
 	state_.cursor_x = x;

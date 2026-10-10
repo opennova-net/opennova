@@ -87,6 +87,74 @@ func test_cancel_reports_the_abandoned_join() -> void:
 	assert_false(presenter.is_open(), "close takes the screen down")
 
 
+# The join screen takes each mouse event as its message and pumps its menu once
+# a frame after them, as every in-game menu surface does (MenuFrameSurface;
+# engine/runtime/menu/menu_runtime.h): a press and release on Cancel inside one
+# frame click nothing, and across two frames Cancel's click reports the
+# abandoned join, a failure's panel included.
+func test_cancel_clicks_once_a_frame_after_the_events() -> void:
+	var w := MenuDriverFixture.wnd
+	var body: String = (
+			w.call("window", "ERROR_WRAPPER", 200,
+					w.call("multiline_edit", "MESSAGES", 5, "", " READONLY"), " HIDDEN")
+			+ w.call("window", "ABORT_WRAPPER", 300, w.call("button", "ABORT_CANCEL", 0), " HIDDEN"))
+	_write(ProjectSettings.globalize_path(TMP_DIR).path_join("pre.mnu"),
+			MenuDriverFixture.screen_xml("PRE_GAME_MENU", body).to_utf8_buffer())
+	# The join screen fits its frame to the window, and the GUT runner's own
+	# panel covers a headless run's 64x64 window: an 800x600 one puts Cancel
+	# where a click reaches it.
+	var window := get_window()
+	var size0 := window.size
+	window.size = Vector2i(800, 600)
+	var presenter := PreGameMenuPresenter.new()
+	add_child_autofree(presenter)
+	var owner := Node.new()
+	add_child_autofree(owner)
+	assert_true(presenter.open(PresenterFixture.root_over(self, TMP_DIR), owner))
+	presenter.show_failure("Your game is incompatible with this server. (NCC007)")
+	assert_true(presenter.is_window_shown("ABORT_WRAPPER"), "Cancel shows")
+	var frame := owner.get_node("PreGameMenuLayer/PreGameMenu") as MenuFrame
+	assert_not_null(frame, "the join screen's frame")
+	if frame == null:
+		window.size = size0
+		return
+	var at := Vector2.ZERO
+	for i in frame.widget_count():
+		if frame.widget_name(i) == "ABORT_CANCEL":
+			var center := frame.widget_rect(i).get_center()
+			at = frame.get_global_transform_with_canvas() * Vector2(
+					center.x * frame.size.x / MenuFrame.DESIGN_WIDTH,
+					center.y * frame.size.y / MenuFrame.DESIGN_HEIGHT)
+	watch_signals(presenter)
+	_send_left(at, true)
+	_send_left(at, false)
+	await _frames(2)
+	assert_signal_not_emitted(presenter, "cancelled",
+			"a press and release inside one frame click nothing")
+	_send_left(at, true)
+	await _frames(2)
+	_send_left(at, false)
+	await _frames(2)
+	assert_signal_emitted(presenter, "cancelled", "Cancel's click, the press held over a frame")
+	window.size = size0
+
+
+func _frames(count: int) -> void:
+	for i in count:
+		await get_tree().process_frame
+
+
+func _send_left(at: Vector2, pressed: bool) -> void:
+	var event := InputEventMouseButton.new()
+	event.button_index = MOUSE_BUTTON_LEFT
+	event.pressed = pressed
+	event.position = at
+	event.global_position = at
+	if pressed:
+		event.button_mask = MOUSE_BUTTON_MASK_LEFT
+	Input.parse_input_event(event)
+
+
 func test_the_panel_table_matches_the_engine() -> void:
 	var names := []
 	for i in JoinScreenStatus.window_count():

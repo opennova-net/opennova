@@ -178,6 +178,14 @@ public:
 	                             const std::string &remote_ip,
 	                             uint16_t remote_port);
 
+	// The connection's hosting ends: it leaves the browser (hosting cleared, its
+	// roster and player count dropped, its active_hosts row removed) and keeps
+	// its RID / GSID for a later re-host. The host's own ClientStopHosting runs
+	// it, and so does the service's ServerStopHosting, which leaves a stock host
+	// verified (state 4) with no statement back [orig:
+	// CNapiGameSession_HandleServerMessage @0x4d1c50]. `reason` is the log tag.
+	void end_hosting(LobbyState &state, const char *reason);
+
 	// Allow tests to inject deterministic id generation.
 	using IdGenerator = std::function<std::string()>;
 	void set_sess_id_generator(IdGenerator g) { sess_id_gen_ = std::move(g); }

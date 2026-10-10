@@ -416,6 +416,13 @@ endforeach()
 # The powerup retail leg reads powerup.def off the packed install through the Vfs.
 target_link_libraries(def_parse_powerup_test PRIVATE opennova_base)
 
+# hudfx.def (docs/interface/hud-re.md "hudfx.def"): the tagged lines, the one the game reads, the slots'
+# names, the writer's form and an authored file written again over its layout. JO ships none.
+add_executable(def_hudfx_test def/def_hudfx_test.cpp)
+target_link_libraries(def_hudfx_test PRIVATE opennova_formats)
+target_include_directories(def_hudfx_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME def_hudfx COMMAND def_hudfx_test)
+
 # PLAYER_INFO loadout weight + encumbrance math (D-PLAYERINFO-11 weight readout).
 add_executable(def_loadout_weight_test def/def_loadout_weight_test.cpp)
 target_link_libraries(def_loadout_weight_test PRIVATE opennova_formats)
@@ -446,7 +453,7 @@ foreach(test parse roundtrip)
     # The minted fixtures/avatars/synth_avatars.def carries the shape; the shipped
     # table is each test's OPENNOVA_JO_ASSETS reference leg.
     add_executable(avatars_${test}_test avatars/avatars_${test}_test.cpp)
-    target_link_libraries(avatars_${test}_test PRIVATE opennova_formats)
+    target_link_libraries(avatars_${test}_test PRIVATE opennova_base opennova_formats)
     target_include_directories(avatars_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_features(avatars_${test}_test PRIVATE cxx_std_17)
     opennova_add_mixed_test(avatars_${test} COMMAND avatars_${test}_test)
@@ -611,7 +618,8 @@ set_tests_properties(teammate_spawn PROPERTIES SKIP_RETURN_CODE 77 LABELS retail
 
 add_executable(infantry_spawn_test world/infantry_spawn_test.cpp)
 target_link_libraries(infantry_spawn_test PRIVATE opennova_runtime)
-add_test(NAME infantry_spawn COMMAND infantry_spawn_test)
+target_include_directories(infantry_spawn_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(infantry_spawn COMMAND infantry_spawn_test)
 
 add_executable(teammate_operations_test world/teammate_operations_test.cpp)
 target_link_libraries(teammate_operations_test PRIVATE opennova_runtime)
@@ -632,6 +640,21 @@ add_executable(score_roundtrip_test score/score_roundtrip_test.cpp)
 target_link_libraries(score_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(score_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(score_roundtrip COMMAND score_roundtrip_test)
+
+# The modeled layout of a line-oriented text file (formats/textlayout): a line's parts, a file generated
+# over its notes (a value, a set, a key anew, records swapped, gone and added), the writer's form without.
+add_executable(text_layout_test textlayout/text_layout_test.cpp)
+target_link_libraries(text_layout_test PRIVATE opennova_formats)
+target_include_directories(text_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME text_layout COMMAND text_layout_test)
+
+# The AI profiles' writer over the file's modeled layout (formats/aip, textlayout): a minted profile in
+# the writer's form, an authored file written again as it was, one value one line; --retail: every
+# shipped profile byte for byte.
+add_executable(aip_noted_test aip/aip_noted_test.cpp)
+target_link_libraries(aip_noted_test PRIVATE opennova_base opennova_formats)
+target_include_directories(aip_noted_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(aip_noted COMMAND aip_noted_test)
 
 # game.cfg: the minted fixtures/gamecfg/synth_game.cfg (Game_SaveConfig's
 # layout through gamecfg::write), its byte-exact load/write round trip, and the
@@ -1065,10 +1088,10 @@ add_test(NAME resource_index COMMAND resource_index_test)
 # The typed kinds and their loader facts (base/resource_index/file_kind.h): every runtime format and
 # required file has a kind and a place, and the table agrees with master's other copies of its facts.
 add_executable(file_kind_test resource_index/file_kind_test.cpp)
-target_link_libraries(file_kind_test PRIVATE opennova_base)
+target_link_libraries(file_kind_test PRIVATE opennova_formats opennova_base)
 target_include_directories(file_kind_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(file_kind_test PRIVATE cxx_std_17)
-add_test(NAME file_kind COMMAND file_kind_test)
+opennova_add_mixed_test(file_kind COMMAND file_kind_test)
 
 # Launch flags + the boot resource-dir ladder (base/resource_index/boot_policy.h).
 add_executable(boot_policy_test resource_index/boot_policy_test.cpp)
@@ -2191,6 +2214,19 @@ add_executable(mnu_coverage_test mnu/mnu_coverage_test.cpp)
 target_link_libraries(mnu_coverage_test PRIVATE opennova_formats)
 target_include_directories(mnu_coverage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_gated_test(mnu_coverage COMMAND mnu_coverage_test)
+
+# The modeled text layout (formats/mnu/mnu_text_layout, D-MNU-22): a menu read and
+# written again comes back byte-identical; a value edit changes only its own token; an
+# added or moved record goes beside the records of its own list; seeded rounds of list
+# edits read back as edited; a document made in code writes the canonical bytes. The
+# retail twin sweeps every .mnu the packed install serves (OPENNOVA_JO_DIR) and the
+# reference set's shipped menus (OPENNOVA_JO_ASSETS): 47 menus, 24 distinct files, each
+# byte-identical, the list rounds and the one-line check of one-token edits over each
+# distinct file.
+add_executable(mnu_text_layout_test mnu/mnu_text_layout_test.cpp)
+target_link_libraries(mnu_text_layout_test PRIVATE opennova_base opennova_formats)
+target_include_directories(mnu_text_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(mnu_text_layout COMMAND mnu_text_layout_test)
 
 # The format's rules a property table reads (formats/mnu/mnu_schema, ADR 0046 S9h): which
 # window type reads what, what an ACTION's verb reads, the material flag tokens. The table
@@ -3561,6 +3597,25 @@ target_include_directories(nw_lobby_resend_e2e_test PRIVATE
 add_test(NAME nw_lobby_resend_e2e COMMAND nw_lobby_resend_e2e_test)
 set_tests_properties(nw_lobby_resend_e2e PROPERTIES RUN_SERIAL TRUE)
 
+# The service's ServerCommand / ServerStopHosting pushes to a listed host, through
+# the real listener over loopback UDP (same listener-source recipe as above): the
+# RID resolves once hosting, the pushes land as the host session's notices, a
+# lost push comes back after the send-interval leg's gap and the client's 0x44,
+# and the stop takes the row out of the browser. Its one-second recovery window
+# is a protocol assertion, so it runs serially.
+add_executable(nw_server_command_push_e2e_test
+    novaworld/nw_server_command_push_e2e_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
+target_link_libraries(nw_server_command_push_e2e_test
+    PRIVATE opennova_novaworld_service opennova_runtime opennova_app_common)
+target_include_directories(nw_server_command_push_e2e_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server
+    ${CMAKE_SOURCE_DIR}/apps/common)
+add_test(NAME nw_server_command_push_e2e COMMAND nw_server_command_push_e2e_test)
+set_tests_properties(nw_server_command_push_e2e PROPERTIES RUN_SERIAL TRUE)
+
 # ADR 0010 Phase 3 — EPASK account-login wire format. Builds the NWLogin.dll
 # credential POST body with the login helpers and decodes it through a copy of
 # the server's parse_form_body + EPASK path, then checks the cookie jar carries
@@ -3777,8 +3832,10 @@ endif()
 
 # The server binary's signal shutdown: SIGINT and SIGTERM each run main()'s
 # orderly stop (exit 0, listeners in order, the WAL closed) with the HTTP layer
-# on or off; with it on, past Crow and a held-open request. POSIX only (fork,
-# kill); TIMEOUT bounds it should the child hang, and the child dies with it.
+# on or off; with it on, past Crow and a held-open request. A last run checks
+# that on every port 0 the gate (and the NW UDP SessionInit) advertise the
+# ports the sibling listeners bound. POSIX only (fork, kill); TIMEOUT bounds it
+# should the child hang, and the child dies with it.
 if(UNIX)
     add_executable(opennova_novaworld_server_signal_shutdown_test
         novaworld/server_signal_shutdown_test.cpp)
@@ -4330,6 +4387,18 @@ target_include_directories(opennova_serve_novaworld_test
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
 add_test(NAME opennova_serve_novaworld COMMAND opennova_serve_novaworld_test)
 set_tests_properties(opennova_serve_novaworld PROPERTIES RUN_SERIAL TRUE)
+# The service's pushes to a listed opennova-serve over its NovaWorld session (the same setup):
+# a pushed SetServerName renames the match and saves game.cfg, a pushed Cycle changes the map,
+# a pushed ServerStopHosting ends the listing, an unknown RID is refused.
+add_executable(opennova_serve_server_command_push_test
+    serve/opennova_serve_server_command_push_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
+target_link_libraries(opennova_serve_server_command_push_test PRIVATE opennova_serve_core opennova_novaworld_service)
+target_include_directories(opennova_serve_server_command_push_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+add_test(NAME opennova_serve_server_command_push COMMAND opennova_serve_server_command_push_test)
+set_tests_properties(opennova_serve_server_command_push PROPERTIES RUN_SERIAL TRUE)
 # opennova-serve's remote-admin server (ADR 0051 PR5b) over real loopback TCP, with a LAN joiner
 # in a synthetic two-map rotation: the login, PLAYER LIST, the MISSION verbs (ADD ONESHOT at a
 # position, SETNEXT, CYCLE, the one-shot's removal), SET and game.cfg's save, CHAT SEND as S2C
