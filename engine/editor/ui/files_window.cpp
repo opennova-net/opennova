@@ -1028,7 +1028,7 @@ void FilesWindow::draw_card(const SessionView &view) {
 	ImGui::Text("%s, %s", card.kind_label.c_str(), strutil::byte_size_text(card.size).c_str());
 	ImGui::TextDisabled("%s", card.path.c_str());
 	ImGui::Spacing();
-	ImGui::TextWrapped("%s", card.about.c_str());
+	ImGui::TextWrapped("%s", card.what.c_str());
 	ImGui::TextWrapped("%s", card.build.c_str());
 	if (!card.imported_from.empty()) ImGui::TextWrapped("Made from %s by its import.", card.imported_from.c_str());
 	ImGui::PopTextWrapPos();
@@ -1150,16 +1150,16 @@ void FilesWindow::draw_card(const SessionView &view) {
 		}
 	}
 	// Who names it, or what it defines: a click goes to the use.
-	const std::string users = "Named by (" + count(card.named_by.size()) + ")###users";
-	if (ImGui::CollapsingHeader(users.c_str(), card.named_by.size() <= 200 ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
-		if (card.named_by.empty())
+	const std::string users = "Named by (" + count(card.used_by.size()) + ")###users";
+	if (ImGui::CollapsingHeader(users.c_str(), card.used_by.size() <= 200 ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
+		if (card.used_by.empty())
 			ui_kit::empty_state(card.reading ? "The project's references are still being read."
 			                                 : "No file of the project names it or what it defines.");
 		ImGuiListClipper clipper;
-		clipper.Begin(static_cast<int>(card.named_by.size()));
+		clipper.Begin(static_cast<int>(card.used_by.size()));
 		while (clipper.Step())
 			for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
-				const FileCard::User &user = card.named_by[size_t(i)];
+				const FileCard::User &user = card.used_by[size_t(i)];
 				ImGui::PushID(i);
 				const std::string line = user.file + ": " + (user.record.empty() ? "" : user.record + " - ") + user.field;
 				if (ImGui::Selectable((ui_kit::fit(line, ImGui::GetContentRegionAvail().x) + "###use").c_str()))

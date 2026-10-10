@@ -14,6 +14,7 @@
 
 #include <base/io/os_path.h>
 #include <editor/assets/asset_import.h>
+#include <editor/assets/asset_kind_words.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/install_check.h>
@@ -83,8 +84,11 @@ int test_kind_named_by() {
 	TEST_EXPECT(asset_kind_named_by("Particle effects") == AssetKind::Particles);
 	TEST_EXPECT(asset_kind_named_by("dbuggy") == AssetKind::kCount);
 	TEST_EXPECT(asset_kind_named_by("") == AssetKind::kCount);
-	// Every kind says what it is to the game.
-	for (size_t i = 0; i < kAssetKindCount; ++i) TEST_EXPECT(*asset_kind_row(static_cast<AssetKind>(i)).about);
+	// Every kind says what it is to the game and what in the game reads it (the one kind-word table).
+	for (size_t i = 0; i < kAssetKindCount; ++i) {
+		const AssetKindWords &words = asset_kind_words(static_cast<AssetKind>(i));
+		TEST_EXPECT(words.kind == static_cast<AssetKind>(i) && *words.what && *words.read_by && *words.cite);
+	}
 	return 0;
 }
 
@@ -164,7 +168,8 @@ int test_file_card() {
 	const SessionView &v = session.view();
 	const FileCard bank = file_card(v, "menu.lwf");
 	TEST_EXPECT(bank.found && bank.kind == AssetKind::SoundBank && bank.path == "sounds/menu.lwf");
-	TEST_EXPECT(bank.build == "Packed into language.pff." && !bank.about.empty() && bank.opens);
+	TEST_EXPECT(bank.build == "Packed into language.pff." && bank.what.find("sound bank") != std::string::npos && bank.opens &&
+	            bank.editor == "The editor opens it as a document.");
 	bool tone = false, missing = false;
 	for (const FileCard::Named &named : bank.names) {
 		if (named.file == "sounds/tone.wav") tone = named.wave && named.status == ReferenceStatus::Present;
@@ -177,7 +182,7 @@ int test_file_card() {
 	            wave.sound.seconds > 0.0);
 	TEST_EXPECT(wave.build == "Packed into localres.pff.");
 	bool named_by_bank = false;
-	for (const FileCard::User &user : wave.named_by) named_by_bank = named_by_bank || user.file == "sounds/menu.lwf";
+	for (const FileCard::User &user : wave.used_by) named_by_bank = named_by_bank || user.file == "sounds/menu.lwf";
 	TEST_EXPECT(named_by_bank);
 	// A wave the game cannot decode says why.
 	const FileCard broken = file_card(v, "bad.wav");
@@ -186,7 +191,8 @@ int test_file_card() {
 	// The wire's card.
 	const JsonValue card = ask(session, "file_card", object_of({{"path", JsonValue::make_string("tone.wav")}}));
 	TEST_EXPECT(card.get_bool("found", false) && card.get("sound") && card.get("sound")->get_bool("decoded", false));
-	TEST_EXPECT(card.get("named_by") && !card.get("named_by")->array.empty());
+	TEST_EXPECT(card.get("used_by") && !card.get("used_by")->array.empty() && card.get_bool("wave", false) &&
+	            card.get_string("kind", "") == asset_kind_token(AssetKind::Wave) && !card.get_string("what", "").empty());
 	// about_file: Files selects the file, and its card opens, the workspace's (the MCP gaps lane).
 	TEST_EXPECT(session.handle(request::about_file("tone.wav")));
 	const std::vector<ViewEvent> held(v.events.held().begin(), v.events.held().end());

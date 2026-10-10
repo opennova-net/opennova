@@ -173,7 +173,7 @@ JsonValue requirements_section(const SessionView &view) {
 JsonValue documents_section(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
 	out.set("active", json_string(view.documents.active));
-	// The file whose page shows beside the documents (the file_page query reads it), where one does, and
+	// The file whose page shows beside the documents (the file_card query reads it), where one does, and
 	// what the Go to that showed it named on it (DI-17: the record's line it marks).
 	if (!view.documents.page.empty()) {
 		out.set("page", json_string(view.documents.page));
@@ -547,7 +547,7 @@ constexpr ViewSectionRow kSections[] = {
 			documents_section,
 			"The open documents in short (path, kind, dirty, revision, can_undo, can_redo; the "
 			"documents query answers each whole) and the active one; page, the file whose page shows "
-			"(file_page answers it), with page_locator and page_field, the record and field the Go to "
+			"(file_card answers it), with page_locator and page_field, the record and field the Go to "
 			"that showed it marked there." },
 	{ S::Selection, "selection", concern_set({ C::Selection }), selection_section,
 			"The selection in the active document, over any of its rows: its primary record and "

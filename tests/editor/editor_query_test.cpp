@@ -1752,7 +1752,7 @@ static int test_viewport_query() {
 }
 
 // The plain-words lane (ADR 0046, the UX round): a file of a kind the editor has no editor for has a
-// page, what it is, who reads it and what names it (the file_page query; open_document shows it and
+// page, what it is, who reads it and what names it (the file_card query; open_document shows it and
 // close_document takes it away); a field's string id edited as the words the player sees
 // (set_string_text: the table that defines the id opened in the background, its string set there as one
 // undo step, the field's document still the active one); a finding titles its record and its field in
@@ -1777,8 +1777,9 @@ static int test_plain_words() {
 		}
 	TEST_EXPECT(!font.empty() && is_editable_kind(AssetKind::Font));
 	if (font.empty()) return 1;
-	const JsonValue page = ask(session, "file_page", R"({"path": ")" + font + R"("})");
-	TEST_EXPECT(page.get_string("path", "") == font && page.get_string("kind", "") == asset_kind_label(AssetKind::Font));
+	const JsonValue page = ask(session, "file_card", R"({"path": ")" + font + R"("})");
+	TEST_EXPECT(page.get_string("path", "") == font && page.get_string("kind", "") == asset_kind_token(AssetKind::Font) &&
+	            page.get_string("kind_label", "") == asset_kind_label(AssetKind::Font) && page.get_bool("opens", false));
 	TEST_EXPECT(page.get_string("what", "").find("bitmap font") != std::string::npos &&
 	            page.get_string("read_by", "").find("Loaded by name") != std::string::npos &&
 	            page.get_string("cite", "").find("[orig:") != std::string::npos &&
@@ -1790,18 +1791,21 @@ static int test_plain_words() {
 		for (const JsonValue &use : used_by->array)
 			worded |= !use.get_string("file", "").empty() && use.get_string("text", "").find(" - Font") != std::string::npos;
 	TEST_EXPECT(worded);
-	TEST_EXPECT(refusal(session, "file_page", "{}").find("no page shows") != std::string::npos);
+	TEST_EXPECT(refusal(session, "file_card", "{}").find("no page shows") != std::string::npos);
+	TEST_EXPECT(!ask(session, "file_card", R"({"path": "fonts/nowhere.fnt"})").get_bool("found", true));
 	// A file of no editor (the NovaWorld string table) opened: the page shows (no document opens); the query names
 	// it with no path; closed, it goes.
 	std::string coo;
 	for (const AssetEntry &entry : view.project.scan->entries)
 		if (entry.kind == AssetKind::StringTableCoo) coo = entry.relative_path;
 	TEST_EXPECT(!coo.empty() && !is_editable_kind(AssetKind::StringTableCoo));
-	TEST_EXPECT(ask(session, "file_page", R"({"path": ")" + coo + R"("})").get_string("editor", "").find("no editor") !=
-	            std::string::npos);
+	{
+		const JsonValue card = ask(session, "file_card", R"({"path": ")" + coo + R"("})");
+		TEST_EXPECT(card.get_string("editor", "").find("no editor") != std::string::npos && !card.get_bool("opens", true));
+	}
 	TEST_EXPECT(done(send(session, R"({"kind": "open_document", "path": ")" + coo + R"("})")));
 	TEST_EXPECT(view.documents.page == coo && session.document_for(coo) == nullptr);
-	TEST_EXPECT(ask(session, "file_page").get_string("path", "") == coo);
+	TEST_EXPECT(ask(session, "file_card").get_string("path", "") == coo);
 	TEST_EXPECT(done(send(session, R"({"kind": "close_document", "path": ")" + coo + R"("})")));
 	TEST_EXPECT(view.documents.page.empty());
 

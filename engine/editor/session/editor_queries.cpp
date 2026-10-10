@@ -42,7 +42,6 @@
 #include <editor/session/environment_uses.h>
 #include <editor/session/terrain_uses.h>
 #include <editor/session/file_card.h>
-#include <editor/session/file_page.h>
 #include <editor/session/finding_codes.h>
 #include <editor/session/mission_logic_json.h>
 #include <editor/session/model_json.h>
@@ -173,11 +172,6 @@ constexpr QueryParam kProblemsParams[] = {
 	{ "limit", J::Integer, false, "100", kLimitDoc },
 };
 
-constexpr QueryParam kFilePageParams[] = {
-	{ "path", J::String, false, nullptr,
-			"A project file, as references takes it; left out, the file whose page the Document window "
-			"shows." },
-};
 constexpr QueryParam kReferencesParams[] = {
 	{ "path", J::String, true, nullptr,
 			"A project file: the file at that project-relative path, else, for a name with no "
@@ -632,62 +626,6 @@ JsonValue answer_references(const QueryContext &context, const QueryArgs &args, 
 			graph ? graph->references_of(path) : std::vector<const GraphEdge *>();
 	JsonValue out = edges_page(graph, edges, page_of(args), edges.size());
 	out.set("path", json_string(path));
-	return out;
-}
-
-// A file's page (session/file_page.h): what it is, what reads it, where a build puts it, who names it and
-// what it names, in words.
-JsonValue answer_file_page(const QueryContext &context, const QueryArgs &args, std::string &error) {
-	const SessionView &view = context.core.view();
-	const std::string path = args.text("path").empty() ? view.documents.page : args.text("path");
-	const FilePage page = shown_file_page(view, path);
-	if (!page.found) {
-		error = path.empty() ? std::string("name the file with \"path\" (no page shows).") : "no project file " + path + ".";
-		return JsonValue::make_null();
-	}
-	JsonValue out = JsonValue::make_object();
-	out.set("path", json_string(page.path));
-	out.set("name", json_string(page.name));
-	out.set("kind", json_string(page.kind));
-	out.set("size", json_number(double(page.size)));
-	out.set("what", json_string(page.what));
-	out.set("read_by", json_string(page.read_by));
-	out.set("cite", json_string(page.cite));
-	out.set("build", json_string(page.build));
-	out.set("editor", json_string(page.editor));
-	out.set("errors", json_number(double(page.errors)));
-	out.set("warnings", json_number(double(page.warnings)));
-	if (page.wave) out.set("wave", JsonValue::make_bool(true));
-	// Where the Go to that showed it landed (DI-17).
-	if (!page.at_locator.empty()) out.set("at_locator", json_string(page.at_locator));
-	if (!page.at_field.empty()) out.set("at_field", json_string(page.at_field));
-	const auto lines = [](const std::vector<FilePageLine> &from) {
-		JsonValue list = JsonValue::make_array();
-		for (const FilePageLine &line : from) {
-			JsonValue entry = JsonValue::make_object();
-			entry.set("text", json_string(line.text));
-			if (line.missing) entry.set("missing", JsonValue::make_bool(true));
-			if (line.at) entry.set("at", JsonValue::make_bool(true));
-			if (!line.target.file.empty()) entry.set("file", json_string(line.target.file));
-			if (!line.target.locator.empty()) entry.set("locator", json_string(line.target.locator));
-			if (!line.target.field.empty()) entry.set("field", json_string(line.target.field));
-			list.push(std::move(entry));
-		}
-		return list;
-	};
-	JsonValue defines = JsonValue::make_array();
-	for (const FilePageDefinition &defined : page.defines) {
-		JsonValue entry = JsonValue::make_object();
-		entry.set("text", json_string(defined.text));
-		entry.set("read", JsonValue::make_bool(defined.read));
-		if (!defined.unread.empty()) entry.set("unread", json_string(defined.unread));
-		if (defined.at) entry.set("at", JsonValue::make_bool(true));
-		entry.set("used_by", lines(defined.users));
-		defines.push(std::move(entry));
-	}
-	out.set("defines", std::move(defines));
-	out.set("used_by", lines(page.used_by));
-	out.set("names", lines(page.names));
 	return out;
 }
 
@@ -1520,12 +1458,21 @@ JsonValue answer_import_options(const QueryContext &context, const QueryArgs &ar
 JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::string &);
 
 constexpr QueryParam kFileCardParams[] = {
-	{ "path", J::String, true, nullptr,
-			"A project file: its project-relative path, or its name alone (the file the name resolves to)." },
+	{ "path", J::String, false, nullptr,
+			"A project file: its project-relative path, or its name alone (the file the name resolves to); "
+			"left out, the file whose page the Document window shows." },
 };
 
-JsonValue answer_file_card(const QueryContext &context, const QueryArgs &args, std::string &) {
-	return file_card_json(file_card(context.core.view(), args.text("path")));
+// A file's card (session/file_card.h): what it is, what reads it, where a build puts it, what it defines, who
+// names it and what it names, in words; the page showing with the record its Go to marked.
+JsonValue answer_file_card(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const SessionView &view = context.core.view();
+	const std::string path = args.text("path").empty() ? view.documents.page : args.text("path");
+	if (path.empty()) {
+		error = "name the file with \"path\" (no page shows).";
+		return JsonValue::make_null();
+	}
+	return file_card_json(shown_file_card(view, path));
 }
 
 // Who names a file, in one look (the deep-integration plan's DI-05): the Inspector's Used by.
@@ -1649,9 +1596,11 @@ constexpr ConcernSet kMenuReads =
 constexpr ConcernSet kProblemsReads = concern_set({ C::Findings, C::ActiveDocument, C::DocumentSet,
 		C::Project, C::Files, C::Graph, C::Preferences });
 constexpr ConcernSet kGraphReads = concern_set({ C::Graph });
-// A file's page: the graph (who names it, what it names), the files (its kind and size), the findings (its
-// rows) and the page showing (the active document's concern).
-constexpr ConcernSet kFilePageReads = concern_set({ C::Graph, C::Files, C::Findings, C::ActiveDocument });
+// A file's card: the graph (what it defines, who names it, what it names), the files (its kind and size), the
+// findings (its rows), the page showing (the active document's concern), the project (where a build puts it)
+// and the operation (whether the project's references are being read).
+constexpr ConcernSet kFileCardReads =
+		concern_set({ C::Graph, C::Files, C::Findings, C::ActiveDocument, C::Project, C::Operation });
 // A viewport's answer: its state and the clock, its document and the selection in it, the documents
 // open and the active one (a pathless read's), the files its picture read, the graph (a rig's model),
 // the project, and the render check's findings (render's screen).
@@ -1769,17 +1718,6 @@ constexpr EditorQueryRow kRows[] = {
 			"A page of the files whose names and the symbols whose names hold the text, without "
 			"case, files first, each with its usages; an item also by its catalog's name (its words).")
 			.pages("hits")
-			.row,
-	// The plain-words lane (the audit's 4.6).
-	Query(K::FilePage, "file_page", answer_file_page, kFilePageParams, kFilePageReads,
-			"A file's page as the Document window shows it for a kind the editor has no editor for (path "
-			"left out: the page showing, the documents section's page): its name, kind and size, what it "
-			"holds and what in the game reads it (cite: the witness), where a build puts it, what the "
-			"editor does with it, its Problems rows' errors and warnings, wave (true for a wave, which "
-			"play_sound plays), what it defines (defines, each {text, read, unread?: why no lookup of the "
-			"game finds it, at?, used_by}), who names it (used_by) and what it names (names), each line "
-			"{text, missing?, at?, file?, locator?, field?: where a Go to on it goes, an open_document of "
-			"them}; the page showing, at_locator and at_field: the record a Go to landed on, its lines at.")
 			.row,
 	Query(K::MenuTree, "menu_tree", answer_menu_tree, kMenuTreeParams, kMenuReads,
 			"A menu's screens (id, name, the render check's status and whether it is current) and "
@@ -2031,15 +1969,20 @@ constexpr EditorQueryRow kRows[] = {
 			"how many of the findings held now carry it (count); a row a held finding carries that "
 			"no table lists comes last, as table none.")
 			.row,
-	Query(K::FileCard, "file_card", answer_file_card, kFileCardParams,
-			concern_set({ C::Files, C::Graph, C::Project, C::Operation }),
-			"A project file as Files' card shows it (the UX round's project lane): found, its path, name, "
-			"kind and kind_label, about (what a file of its kind is to the game), size, build (where a build "
-			"puts it, in words), imported_from, opens (the editor opens a document of it), a wave's sound "
-			"as the game decodes it {decoded, error, rate, channels, seconds}, names (what it names: field, "
-			"record, value, status in words, the file it resolves to, whether that file is a wave), "
-			"named_by (file, record, field), and reading: true while the project's references are being read "
-			"(names and named_by then as far as the graph has read).")
+	Query(K::FileCard, "file_card", answer_file_card, kFileCardParams, kFileCardReads,
+			"A project file as Files' card and the Document window's page of a file the editor has no editor "
+			"for show it (path left out: the page showing, the documents section's page, with the record its "
+			"Go to marked): found, and with one its path, name, kind and kind_label, size, what it holds and "
+			"what in the game reads it (what, read_by; cite: the witness), build (where a build puts it, in "
+			"words), editor (what the editor does with it), imported_from, opens (the editor opens a document "
+			"of it), its Problems rows' errors and warnings, wave (true for a wave, which play_sound plays) "
+			"with its sound as the game decodes it {decoded, error, rate, channels, seconds, plays, refusal, "
+			"format, peak, rms, envelope}, at_locator and at_field (where the Go to that showed the page "
+			"landed), what it defines (defines, each {text, read, unread?: why no lookup of the game finds "
+			"it, at?, used_by}), what it names (names, each {text, value, status in words, wave?, missing?, "
+			"at?}) and who names it (used_by), each line's file, locator and field where a click goes "
+			"(open_document's); reading: true while the project's references are being read (names and "
+			"used_by then as far as the graph has read).")
 			.row,
 	Query(K::UsedBy, "used_by", answer_used_by, kUsedByParams,
 			concern_set({ C::Files, C::Graph, C::Project, C::Operation, C::ActiveDocument }),

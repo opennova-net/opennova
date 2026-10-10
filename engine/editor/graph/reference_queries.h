@@ -23,7 +23,7 @@ namespace opennova::editor {
 // Where "Go to" goes (reference_targets, usage_target): a project file, and the record there that
 // defines the name or makes the use (its locator and the field to show), or the file itself. A Go to
 // always lands (the deep-integration plan's DI-17): a file the editor opens as a document opened at the
-// record, one it has no editor for on its page with the record's line marked (session/file_page.h).
+// record, one it has no editor for on its page with the record's line marked (session/file_card.h).
 struct ReferenceTarget {
 	std::string label;   // what a choice among several says ("style variable X in menu_style.mns")
 	std::string file;    // project-relative
