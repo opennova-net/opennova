@@ -104,11 +104,6 @@ void NewFilePrompt::draw(Workspace &workspace) {
 	// A terrain is made from images (S20, the new_terrain request): its name the terrain's, its values the
 	// images and the importer's numbers; any other kind is its blank's.
 	const bool terrain = kind == AssetKind::Terrain;
-	// A font is made from a glyph sheet where the prompt names one (round S23 lane A, the new_font request), else it
-	// is the built-in font, the font's blank.
-	bool sheet_font = false;
-	if (kind == AssetKind::Font)
-		for (const auto &[token, value] : held.values) sheet_font = sheet_font || (token == "sheet" && !value.empty());
 	size_t params = 0;
 	const BlankParam *taken = kind == AssetKind::kCount ? nullptr : new_file_params(kind, params);
 	// The fields take the session's values when they moved (the prompt opened on another kind, a value set
@@ -195,6 +190,12 @@ void NewFilePrompt::draw(Workspace &workspace) {
 		given = given && (!param.required || !values_[i].empty());
 	}
 	if (changed) window_requests::set_workspace(workspace, "new_file", "values", values_json(taken, params, values_));
+	// A font is made from a glyph sheet where the prompt names one (round S23 lane A, the new_font request), else it
+	// is the built-in font, the font's blank: read from the prompt's own values, which the session's follow a frame
+	// later.
+	bool sheet_font = false;
+	if (kind == AssetKind::Font)
+		for (size_t i = 0; i < params; ++i) sheet_font = sheet_font || (std::string(taken[i].token) == "sheet" && !values_[i].empty());
 	const bool ready = fits && !in_use && given &&
 	                   v.allows(terrain ? EditorRequestKind::NewTerrain
 	                                    : sheet_font ? EditorRequestKind::NewFont : EditorRequestKind::CreateFile);
@@ -207,8 +208,11 @@ void NewFilePrompt::draw(Workspace &workspace) {
 			if (!values_[i].empty()) values.emplace_back(taken[i].token, values_[i]);
 		// The session closes the prompt as it takes the file it names (create_file alone, over the wire); the
 		// prompt's Create closes it too, as Cancel does.
+		// A font's sheet values are new_font's alone (its blank takes none); New here's folder goes with either.
 		if (terrain) workspace.request(request::new_terrain(name, std::move(values)));
-		else if (sheet_font) workspace.request(request::new_font(name, std::move(values)));
+		else if (sheet_font) workspace.request(request::new_font(name, std::move(values), held.folder));
+		else if (kind == AssetKind::Font && !held.folder.empty())
+			workspace.request(request::create_file_in(held.folder, name, asset_kind_token(kind)));
 		else if (kind == AssetKind::Font) workspace.request(request::create_file(name, asset_kind_token(kind)));
 		else if (!held.folder.empty()) workspace.request(request::create_file_in(held.folder, name, asset_kind_token(kind), std::move(values)));
 		else workspace.request(request::create_file(name, asset_kind_token(kind), std::move(values)));

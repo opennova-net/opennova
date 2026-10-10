@@ -13,6 +13,7 @@
 
 #include <base/io/file_time.h>
 #include <base/io/strutil.h>
+#include <editor/graph/file_plans.h>
 #include <editor/graph/texture_uses.h>
 #include <editor/import/font_import.h>
 #include <editor/import/import_context.h>
@@ -409,8 +410,13 @@ void ImportController::new_font(const EditorRequest &request) {
 	FileNameProblem problem = FileNameProblem::None;
 	std::string message;
 	if (stem.empty() || !check_file_name(stem + ".fnt", AssetKind::Font, problem, message)) return refuse(message.empty() ? "it needs a name." : message);
-	const std::string folder = asset_kind_row(AssetKind::Font).folder;
-	const std::string set_path = folder + "/" + stem + kFontSetExtension;
+	// The folder the set (and a sheet copied in) goes in: Files' New here's (DI-25: "/" the top level), else fonts/.
+	std::string folder = asset_kind_row(AssetKind::Font).folder;
+	if (!request.folder.empty() && view_.project.document &&
+	    !project_folder_of(paths_, *view_.project.document, request.folder, folder, message))
+		return refuse(message);
+	const auto in_folder = [&](const std::string &name) { return folder.empty() ? name : folder + "/" + name; };
+	const std::string set_path = in_folder(stem + kFontSetExtension);
 	for (const std::string &name : {stem + ".fnt", stem + kFontSetExtension})
 		if (const AssetEntry *taken = scan.find(name))
 			return refuse("the font " + stem + " makes " + name + ", and the project has " + taken->relative_path +
@@ -421,6 +427,11 @@ void ImportController::new_font(const EditorRequest &request) {
 	std::string set_text;
 	ImportOptions options;
 	for (const auto &[key, value] : request.values) {
+		// Each value is a line's of the set or a file's name: a line break or a control character in one is refused
+		// before anything is written.
+		for (const unsigned char c : value)
+			if (c < 0x20 || c == 0x7F)
+				return refuse("'" + key + "' holds a line break or a control character, which a font set's line cannot hold.");
 		if (key == "sheet") sheet_value = value;
 		else if (key == "columns" || key == "rows" || key == "first") {
 			if (!value.empty()) set_text += key + " " + value + "\r\n";
@@ -444,15 +455,18 @@ void ImportController::new_font(const EditorRequest &request) {
 	const fs::path within = path_of(file).lexically_normal().lexically_relative(root);
 	std::string inside, relative;
 	if (!within.empty() && ImportContext::resolve(view_.project.root, view_.project.root, utf8_of(within), inside, relative)) {
-		named = utf8_of(path_of(relative).lexically_relative(path_of(folder)));
+		named = utf8_of(folder.empty() ? path_of(relative) : path_of(relative).lexically_relative(path_of(folder)));
 	} else {
 		const std::string extension = strutil::to_lower(utf8_of(path_of(sheet_value).extension()));
 		named = stem + "_sheet" + extension;
-		copy_to = folder + "/" + named;
+		copy_to = in_folder(named);
 		std::error_code ec;
 		if (scan.at_path(copy_to) || fs::exists(system_path(join_path(view_.project.root, copy_to)), ec))
 			return refuse("the project has " + copy_to + " already.", copy_to);
 	}
+	// A set's ';' starts a comment: a sheet whose name holds one cannot be named in a set.
+	if (named.find(';') != std::string::npos)
+		return refuse("the sheet " + named + " holds a ';', which starts a comment in a font set: rename it first.");
 	set_text = "; " + stem + ".fnt, made from its glyph sheet\r\nsheet " + named + "\r\n" + set_text;
 	FontSet set;
 	if (!parse_font_set(std::vector<uint8_t>(set_text.begin(), set_text.end()), set, why)) return refuse(why + ".");
@@ -474,7 +488,7 @@ void ImportController::new_font(const EditorRequest &request) {
 		for (const std::string &path : written) fs::remove(system_path(join_path(view_.project.root, path)), ec);
 	};
 	std::error_code ec;
-	fs::create_directories(system_path(join_path(view_.project.root, folder)), ec);
+	if (!folder.empty()) fs::create_directories(system_path(join_path(view_.project.root, folder)), ec);
 	std::vector<std::pair<std::string, std::vector<uint8_t>>> files;
 	if (!copy_to.empty()) files.emplace_back(copy_to, bytes);
 	files.emplace_back(set_path, std::vector<uint8_t>(set_text.begin(), set_text.end()));

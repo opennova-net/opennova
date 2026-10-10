@@ -360,7 +360,7 @@ static int test_columns() {
 	                     "font.glyph_height", "font.glyph_outside",
 	                     "mission.event_missing",
 	                     "mission.group_range", "model.frame_missing", "model.light_part", "model.register_missing",
-	                     "music_bank.name_empty", "music_bank.name_repeated", "music_bank.stream_silent",
+	                     "music_bank.stream_silent",
 	                     "particle.duplicate_effect", "particle.unreadable",
 	                     "project.base_project", "project.expansion.name_taken", "project.expansion.not_installed", "reference.missing", "reference.wrong_kind", "requirement.missing", "requirement.wrong_kind",
 	                     "shader.form", "sound_bank.layer_unheard", "sound_bank.set_name_repeated", "sound_bank.set_silent",

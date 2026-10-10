@@ -94,11 +94,6 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_profile_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/charattr_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/dialog_bank_document.cpp
-    # round S23 lane A: the binary formats
-    ${CMAKE_CURRENT_SOURCE_DIR}/documents/face_animation_document.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/documents/font_document.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/documents/music_bank_document.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/documents/wave_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/hud_layout_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/line_ends.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/config_overrun.cpp
@@ -239,7 +234,6 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_role_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_thumbnails.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_viewport.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/preview/font_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/hud_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/hud_layout_edit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/hud_viewport.cpp
@@ -353,6 +347,12 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/view_events.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/viewport_kind.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/workspace_view.cpp
+    # round S23 lane A: the binary formats' documents and the font's viewport
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/face_animation_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/font_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/music_bank_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/wave_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/font_viewport.cpp
 )
 
 # ui — the Dear ImGui windows on the engine's ImGui pass (ADR 0046 d11). Built when the
@@ -411,9 +411,6 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/effect_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/environment_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_viewport_view.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/font_viewport_view.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/music_bank_inspector.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/wave_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/hud_layout_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/hud_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/catalog_inspector_view.cpp
@@ -422,6 +419,9 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_views.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/welcome_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/font_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/music_bank_inspector.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/wave_inspector.cpp
     )
     target_link_libraries(opennova_editor PRIVATE opennova_imgui)
     target_compile_definitions(opennova_editor PUBLIC OPENNOVA_EDITOR_UI=1)

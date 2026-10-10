@@ -20,6 +20,7 @@
 #include <base/io/json.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/documents/document_types.h>
 #include <editor/model/document.h>
 #include <editor/model/text_document.h>
 #include <editor/project/project_files.h>
@@ -408,13 +409,15 @@ std::vector<std::string> marked_lines(const FilePage &page) {
 }
 
 // DI-17, a Go to always lands: a face animation (a record document since round S23) at its face's field, from the
-// texture it names; a wave (a document since round S23) whose user is a sound bank,
+// texture it names; a file the editor has no editor for on its page at the field named (the NovaWorld string table),
+// another field of the same page a step, Back and Forward landing at each again; a wave (a document since round S23)
+// whose user is a sound bank,
 // a document of its own (S22: the specific document wins), there opened at the single; a native text held as
 // a text (DI-06: an avatar table, whose parser keeps no places) at the line that writes the record's name (of
 // two records naming one model each its own line, a record named alone its first, the text already open),
 // again on Back; a name nothing resolves where it belongs (a string id in its table, a style variable in a
-// stylesheet), a file the project lacks nowhere; the page's wire: what it names with its mark, a wave's Play,
-// where its lines go.
+// stylesheet), a file the project lacks nowhere; the page's wire: what it names, the field its Go to named, a
+// wave's Play, where its lines go.
 int test_go_to_lands() {
 	Navigated n("opennova_editor_navigation_lands");
 	const SessionView &v = n.view();
@@ -450,12 +453,32 @@ int test_go_to_lands() {
 	TEST_EXPECT(marked_lines(file_page(v, face)).empty());
 	TEST_EXPECT(n.back() && v.documents.active == n.extra);
 	TEST_EXPECT(n.forward() && v.documents.active == face);
-	uint64_t seq = 0;
-	std::vector<ViewEvent> shown;
+
+	// A file the editor has no editor for (the NovaWorld string table) lands on its page at the field a Go to names,
+	// the page's tab forward; another field of the same page a step of its own, Back and Forward each landing at its
+	// field again. (A .coo names nothing the graph reads, so no line of its page is marked.)
+	std::string coo;
+	for (const AssetEntry &entry : v.project.scan->entries)
+		if (entry.kind == AssetKind::StringTableCoo) coo = entry.relative_path;
+	TEST_EXPECT(!coo.empty() && !is_editable_kind(AssetKind::StringTableCoo));
+	uint64_t seq = v.events.next_seq() - 1;
+	TEST_EXPECT(n.go(request::open_document(coo, "", "strings")) && v.documents.page == coo &&
+	            v.documents.page_locator.empty() && v.documents.page_field == "strings");
+	std::vector<ViewEvent> shown = editor_test::events_after(v, seq, ViewEventKind::ShowDocument);
+	TEST_EXPECT(shown.size() == 1 && shown[0].path == coo && shown[0].flag);
+	TEST_EXPECT(v.navigation.back.front().pane == Pane::Document && v.navigation.back.front().path == face);
+	TEST_EXPECT(marked_lines(shown_file_page(v, coo)).empty());
+	TEST_EXPECT(n.go(request::open_document(coo, "", "names")) && v.documents.page_field == "names");
+	TEST_EXPECT(v.navigation.back.front().pane == Pane::Page && v.navigation.back.front().path == coo &&
+	            v.navigation.back.front().locator.empty() && v.navigation.back.front().field == "strings" &&
+	            v.navigation.back.front().label == "About " + basename_of(coo) + ": strings");
+	TEST_EXPECT(n.back() && v.documents.page == coo && v.documents.page_field == "strings");
+	TEST_EXPECT(n.back() && v.documents.active == face);
+	TEST_EXPECT(n.forward(2) && v.documents.page == coo && v.documents.page_field == "names");
 
 	// A wave, a document since round S23, its page's Play; its user, the bank, is a document of its own: opened at the
 	// single.
-	TEST_EXPECT(n.go(request::open_document(wave)) && v.documents.active == wave && v.documents.page.empty());
+	TEST_EXPECT(n.go(request::open_document(wave)) && v.documents.active == wave);
 	const FilePage wave_page = file_page(v, wave);
 	ReferenceTarget single;
 	for (const FilePageLine &line : wave_page.used_by)
@@ -526,11 +549,14 @@ int test_go_to_lands() {
 		for (const JsonValue &line : users->array)
 			to_bank |= line.get_string("file", "") == bank && line.get_string("locator", "") == single.locator;
 	TEST_EXPECT(page.get_bool("wave", false) && to_bank && !page.get("at_field"));
+	// The page showing with the field its Go to named, on the wire.
+	TEST_EXPECT(n.go(request::open_document(coo, "", "strings")));
+	page = n.session.query("file_page", JsonValue(), error);
+	TEST_EXPECT(page.get_string("path", "") == coo && !page.get("at_locator") && page.get_string("at_field", "") == "strings");
 	const JsonValue state = n.session.query("state", parsed(R"({"sections": ["documents", "navigation"]})"), error);
 	const JsonValue *documents = state.get("documents");
-	// No page shown: every Go to above opened a document.
-	TEST_EXPECT(documents && documents->get_string("page", "").empty() && !documents->get("page_locator") &&
-	            documents->get_string("page_field", "").empty());
+	TEST_EXPECT(documents && documents->get_string("page", "") == coo && !documents->get("page_locator") &&
+	            documents->get_string("page_field", "") == "strings");
 	return 0;
 }
 

@@ -39,6 +39,10 @@ struct MusicBankRow : TableRow {
 	uint32_t version = sbf::SBF_VERSION_DEFAULT;
 	uint32_t flags = sbf::SBF_FLAGS_BYTE_PAIRED_STEREO;
 	uint32_t reserved = 0;
+	// The bank's one reserved pair and tail rule (sbf::SbfFile's), which every chunk is written under.
+	uint8_t chunk_reserved_a = 0xFA;
+	uint8_t chunk_reserved_b = 0x00;
+	sbf::SbfTail tail = sbf::SbfTail::Residue;
 	std::vector<MusicBankStream> streams;
 
 	MusicBankRow();
@@ -63,8 +67,9 @@ public:
 	const MusicBankRow *bank_row() const;
 	// The bank as the engine holds it, made from the row (what serialize() writes).
 	sbf::SbfFile bank() const;
-	// The stream at `index` (its place), its name matched without case where `name` is given: -1 for none.
-	int stream_index(const std::string &name_or_index) const;
+	// The stream at the place `place` writes (a whole number, as the music script names a stream: the game plays a
+	// stream by its place, never its name): -1 for none.
+	int stream_index(const std::string &place) const;
 
 protected:
 	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
@@ -88,11 +93,10 @@ bool music_stream_pcm(const std::vector<uint8_t> &bytes, int place, lwf::WavPcm 
 double music_stream_seconds(const MusicBankStream &stream);
 
 // The music bank type's validator (DocumentType::validate_file): its source findings (a layout the writer lays out
-// otherwise), two streams of one name (a lookup by name finds the first), a stream with no name, a stream of no
-// audio.
+// otherwise) and a stream of no audio. A stream's name is no finding's: the game never reads one.
 std::vector<Diagnostic> validate_music_bank_file(const DocumentBase &document);
 
-enum class MusicBankFinding { InvalidInput, IgnoredInput, NameRepeated, NameEmpty, StreamSilent, kCount };
+enum class MusicBankFinding { InvalidInput, IgnoredInput, StreamSilent, kCount };
 const FindingCodeRow &finding_code(MusicBankFinding code);
 FindingTable music_bank_finding_codes();
 

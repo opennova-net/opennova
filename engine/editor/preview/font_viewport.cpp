@@ -12,6 +12,7 @@
 #include <base/io/cp1252.h>
 #include <editor/documents/font_document.h>
 #include <editor/preview/canvas_half.h>
+#include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 
@@ -313,7 +314,18 @@ JsonValue FontViewport::body_json(const ViewportInput &) const {
 	measured.set("height", json_number(double(measured_h_)));
 	out.set("measured", std::move(measured));
 	out.set("quads", json_number(double(run_.quads.size())));
+	out.set("drawn", drawn_);
 	return out;
+}
+
+bool FontViewport::report_(const ViewportDeviceReport &report) {
+	const auto quads = [](const JsonValue &drawn) {
+		const JsonValue *member = drawn.get("quads");
+		return member ? member->number : -1.0;
+	};
+	const bool moved = quads(drawn_) != quads(report.drawn);
+	drawn_ = report.drawn;
+	return moved;
 }
 
 JsonValue FontViewport::items_json(const ViewportInput &) const {

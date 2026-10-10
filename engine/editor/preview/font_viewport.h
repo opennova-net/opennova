@@ -116,7 +116,7 @@ public:
 	                 std::string &error) const override;
 	io::JsonValue options_json() const override;
 	// The font's facts (its pages, design width and scale, spacing, line height), the page shown, the text's
-	// measured size as the game measures it.
+	// measured size as the game measures it, and what its device drew last (`drawn`: its glyph quads and pages).
 	io::JsonValue body_json(const ViewportInput &input) const override;
 	// The glyphs drawn: each {glyph, byte, character, rect [x0, y0, x1, y1] in picture pixels}.
 	io::JsonValue items_json(const ViewportInput &input) const override;
@@ -126,6 +126,7 @@ protected:
 	bool takes_(const std::string &member) const override;
 	bool check_(const io::JsonValue &json, std::string &error) const override;
 	void apply_(const io::JsonValue &json, PreviewClock &clock) override;
+	bool report_(const ViewportDeviceReport &report) override;
 
 private:
 	// The text laid out again, or the page's glyphs listed, over the font drawn.
@@ -144,6 +145,7 @@ private:
 	// The texels the device holds (a Rebuild when they change; the glyph table's and the options' changes an Update).
 	std::shared_ptr<const std::vector<uint8_t>> built_texels_;
 	uint32_t built_pages_ = 0;
+	io::JsonValue drawn_; // the device's last report of what it drew
 };
 
 } // namespace opennova::editor

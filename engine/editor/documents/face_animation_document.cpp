@@ -484,6 +484,13 @@ SerializeResult FaceAnimationDocument::serialize() const {
 		result.issues.push_back({true, 0, std::string(), std::string(), "The face animation holds no face."});
 		return result;
 	}
+	// The second eye texture alone would be written as a line the reader refuses (face_animation.unserializable).
+	if (face->file.eye_textures[0].empty() && !face->file.eye_textures[1].empty()) {
+		result.issues.push_back({true, 0, std::string(), std::string(),
+		                         "The face names its second eye texture alone, a line the game reads otherwise: name the "
+		                         "first too, or neither."});
+		return result;
+	}
 	std::vector<uint8_t> bytes;
 	std::string error;
 	if (!grm::write(face->file, bytes, error)) {
@@ -583,8 +590,8 @@ namespace {
 constexpr FindingCodeEntry<FaceAnimationFinding> kFindingEntries[] = {
 	{ FaceAnimationFinding::InvalidInput, { "face_animation.invalid_input", FindingFix::None, nullptr, true } },
 	{ FaceAnimationFinding::IgnoredInput, { "face_animation.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput } },
-	// The game reads the line as naming neither eye, or the second as the first [orig: sub_587F20 @ 0x587F20]; it
-	// refuses nothing: listed.
+	// The first eye texture named alone: the game reads the line as naming neither eye [orig: sub_587F20 @ 0x587F20];
+	// it refuses nothing: listed. (The second named alone is face_animation.unserializable.)
 	{ FaceAnimationFinding::EyeTextureAlone, listed_code("face_animation.eye_texture_alone") },
 	{ FaceAnimationFinding::Unserializable, { "face_animation.unserializable", FindingFix::None, nullptr, true } },
 	{ FaceAnimationFinding::GestureUnplayed, listed_code("face_animation.gesture_unplayed") },
@@ -631,15 +638,19 @@ std::vector<Diagnostic> validate_face_animation_file(const DocumentBase &documen
 		return NodeAddress{face->id, kind, id};
 	};
 	const NodeAddress at_face{face->id, kFace, 0};
-	if (file.eye_textures[0].empty() != file.eye_textures[1].empty())
-		add(at_face, DiagnosticSeverity::Warning, FaceAnimationFinding::EyeTextureAlone,
-		    file.eye_textures[0].empty() ? "eye_texture_1" : "eye_texture_2",
-		    file.eye_textures[0].empty()
-		            ? "The face names its second eye texture alone: the game reads it as the first and the second from "
-		              "the last line it read [orig: sub_587F20 @ 0x587F20; FaceAnimConfig_TokenizeConfigLine @ "
-		              "0x588AD0]. Name both, or neither."
-		            : "The face names its first eye texture alone: the game reads the line as naming neither eye [orig: "
-		              "sub_587F20 @ 0x587F20]. Name both, or neither.");
+	// The second eye texture named alone is written as the line's one name: the tokenizer collapses the separators
+	// before it, so the game reads it as the first and the second from a token an earlier line left [orig:
+	// FaceAnimConfig_TokenizeConfigLine @ 0x588AD0; sub_587F20 @ 0x587F20] (D-GRM-1's class), and the format's
+	// reader refuses the line: the face is not saved so.
+	if (file.eye_textures[0].empty() && !file.eye_textures[1].empty())
+		add(at_face, DiagnosticSeverity::Error, FaceAnimationFinding::Unserializable, "eye_texture_1",
+		    "The face names its second eye texture alone: the line is written with that one name, which the game reads "
+		    "as the first eye's and the second from a token an earlier line left [orig: FaceAnimConfig_TokenizeConfigLine "
+		    "@ 0x588AD0; sub_587F20 @ 0x587F20], so the face is not saved until it names the first too, or neither.");
+	else if (!file.eye_textures[0].empty() && file.eye_textures[1].empty())
+		add(at_face, DiagnosticSeverity::Warning, FaceAnimationFinding::EyeTextureAlone, "eye_texture_2",
+		    "The face names its first eye texture alone: the game reads the line as naming neither eye [orig: "
+		    "sub_587F20 @ 0x587F20]. Name both, or neither.");
 	for (size_t t = 0; t < file.triangles.size(); ++t)
 		for (int corner = 0; corner < 3; ++corner) {
 			const int32_t index = file.triangles[t][size_t(corner)];

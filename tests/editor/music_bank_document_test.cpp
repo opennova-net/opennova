@@ -80,8 +80,9 @@ int test_reads_and_writes_back() {
 	TEST_EXPECT(bank.get(stream_at(bank, 0), "seconds", value) && std::fabs(std::get<double>(value) - 2216.0 / 2.0 / 22050.0) < 1e-9);
 	TEST_EXPECT(bank.get(stream_at(bank, 1), "chunks", value) && std::get<int64_t>(value) == 3);
 	TEST_EXPECT(bank.record_title(stream_at(bank, 1)) == "1: TONE01");
-	TEST_EXPECT(bank.stream_index("tone02") == 2 && bank.stream_index("12") == 12 && bank.stream_index("13") == -1 &&
-	            bank.stream_index("NOPE") == -1);
+	// A stream by its place alone, as the game names one: a name is no place.
+	TEST_EXPECT(bank.stream_index("2") == 2 && bank.stream_index("12") == 12 && bank.stream_index("13") == -1 &&
+	            bank.stream_index("TONE02") == -1 && bank.stream_index("02") == -1 && bank.stream_index("-1") == -1);
 	// A stream as the preview player sounds it: TONE01's 9192 samples, 4596 stereo pairs at 22050 a second.
 	lwf::WavPcm pcm;
 	std::string message;
@@ -117,8 +118,13 @@ int test_edits() {
 	TEST_EXPECT(!bytes.empty() && sbf::sbf_read_bank(bytes.data(), bytes.size(), read, message));
 	TEST_EXPECT(read.streams.size() == 13 && read.streams[0].name == "NEWSTREAM" && read.streams[3].name == "RENAMED" &&
 	            read.streams[12].name == "TONE11" && read.streams[0].chunks.size() == 1);
-	// Refused: a name past 15 characters, one of a byte past plain ASCII; the read-only fields; the bank keeps its row.
-	TEST_EXPECT(!bank.apply(set_edit(stream_at(bank, 1), "name", std::string(16, 'N')), error));
+	// A name of 16 characters fills the index's slot; refused: one past 16, one of a byte past plain ASCII; the
+	// read-only fields; the bank keeps its row.
+	TEST_EXPECT(bank.apply(set_edit(stream_at(bank, 1), "name", std::string(16, 'N')), error));
+	const std::vector<uint8_t> sixteen = saved(bank);
+	TEST_EXPECT(!sixteen.empty() && sbf::sbf_read_bank(sixteen.data(), sixteen.size(), read, message) &&
+	            read.streams[1].name == std::string(16, 'N'));
+	TEST_EXPECT(!bank.apply(set_edit(stream_at(bank, 1), "name", std::string(17, 'N')), error));
 	TEST_EXPECT(!bank.apply(set_edit(stream_at(bank, 1), "name", std::string("caf\xC3\xA9")), error));
 	TEST_EXPECT(!bank.apply(set_edit(stream_at(bank, 1), "chunks", int64_t(2)), error));
 	TEST_EXPECT(!bank.apply(set_edit(row, "flags", int64_t(2)), error));
@@ -136,15 +142,20 @@ int test_findings() {
 	Edit add;
 	add.operation = EditOperation::Add;
 	add.address = {bank.bank_row()->id, kStream, 0};
+	// Two streams of one name and a stream of none: no finding (the game never reads a name); a stream of no audio.
 	TEST_EXPECT(bank.apply({set_edit(stream_at(bank, 2), "name", std::string("TONE01")), set_edit(stream_at(bank, 3), "name", std::string("")),
 	                        add},
 	                       error));
 	const std::vector<Diagnostic> findings = validate_music_bank_file(bank);
-	TEST_EXPECT(has_code(findings, "music_bank.name_repeated") && has_code(findings, "music_bank.name_empty") &&
-	            has_code(findings, "music_bank.stream_silent"));
-	TEST_EXPECT(findings.size() == 3);
-	// Bytes past the last stream: listed, a save leaves them out.
+	TEST_EXPECT(has_code(findings, "music_bank.stream_silent") && findings.size() == 1);
+	// A name filling its 16 bytes with no terminator, as an encoder may write one: read, written back as it stands,
+	// no finding (the game plays the bank).
 	std::vector<uint8_t> bytes = synth();
+	std::fill(bytes.begin() + 24, bytes.begin() + 40, uint8_t('Q'));
+	MusicBankDocument full_name;
+	TEST_EXPECT(load(full_name, bytes, error) && validate_music_bank_file(full_name).empty() && saved(full_name) == bytes);
+	// Bytes past the last stream: listed, a save leaves them out.
+	bytes = synth();
 	bytes.push_back(0);
 	MusicBankDocument trailing;
 	TEST_EXPECT(load(trailing, bytes, error) && has_code(validate_music_bank_file(trailing), "music_bank.ignored_input"));
@@ -169,21 +180,25 @@ int test_session_play() {
 	const std::string path = "music/synth.sbf";
 	TEST_EXPECT(editor_test::write_bytes(root + "/" + path, synth()));
 	editor_test::handle_to_end(session, request::rescan());
-	ActionOutcome played = editor_test::handle_to_end(session, request::play_stream(path, "TONE02"));
+	ActionOutcome played = editor_test::handle_to_end(session, request::play_stream(path, 2));
 	TEST_EXPECT(played.done());
 	const WorkspaceView::Sound &sound = session.view().workspace.sound;
 	TEST_EXPECT(sound.voices.size() == 1 && sound.voices[0].path == path && sound.voices[0].stream == 2 &&
 	            sound.words.find("TONE02") != std::string::npos);
-	TEST_EXPECT(!editor_test::handle_to_end(session, request::play_stream(path, "NOPE")).done());
+	// A stream it has not, and a name (a stream is named by its place alone).
+	TEST_EXPECT(!editor_test::handle_to_end(session, request::play_stream(path, 13)).done());
+	EditorRequest by_name = request::play_stream(path, 0);
+	by_name.values = {{"stream", "TONE02"}};
+	TEST_EXPECT(!editor_test::handle_to_end(session, by_name).done());
 	// Open and edited: refused until saved.
 	editor_test::handle_to_end(session, request::open_document(path));
 	const auto *bank = dynamic_cast<const MusicBankDocument *>(session.document_base_for(path));
 	TEST_EXPECT(bank != nullptr);
 	if (!bank) return 1;
 	editor_test::handle_to_end(session, request::edit_record(path, {set_edit(stream_at(*bank, 2), "name", std::string("LOUDER"))}));
-	TEST_EXPECT(!editor_test::handle_to_end(session, request::play_stream(path, "2")).done());
+	TEST_EXPECT(!editor_test::handle_to_end(session, request::play_stream(path, 2)).done());
 	editor_test::handle_to_end(session, request::save(path));
-	played = editor_test::handle_to_end(session, request::play_stream(path, "LOUDER"));
+	played = editor_test::handle_to_end(session, request::play_stream(path, 2));
 	TEST_EXPECT(played.done() && session.view().workspace.sound.voices[0].stream == 2);
 	// The blank of the shell's music bank: no stream, opened clean.
 	BlankRequest request;

@@ -53,7 +53,7 @@ bool draw_music_bank_inspector(Workspace &workspace, const Document &document, c
 	                 saved ? "Streams " + stream.name + " from the bank's file as the game streams it."
 	                       : std::string("Save the bank first: the editor streams the bank's file, as the game does."),
 	                 true))
-		workspace.request(request::play_stream(document.path(), std::to_string(place)));
+		workspace.request(request::play_stream(document.path(), int(place)));
 	if (ui_kit::tool(tools, "Stop", true, "Stops the sound the editor plays.", true)) workspace.request(request::stop_sound());
 	const WorkspaceView::Sound &sound = workspace.view().workspace.sound;
 	if (!sound.voices.empty() && sound.voices.front().stream == place && sound.voices.front().path == document.path() &&

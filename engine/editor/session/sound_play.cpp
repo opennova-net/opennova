@@ -215,16 +215,16 @@ void play_dialog(SessionCore &core, const EditorRequest &request) {
 	      missing.empty() ? play.words : play.words + " (the project lacks " + missing + ")");
 }
 
-// values {stream}: a stream of the music bank `path` names, by its name or its place (round S23 lane A): the Shell
-// streams the bank's file as the game streams it [orig: Audio_StreamNextChunk @ 0x4ED7D0], so an open bank with
-// unsaved changes is refused.
+// values {stream}: a stream of the music bank `path` names, by its place in the index (round S23 lane A: the game
+// plays a stream by its place, never its name [orig: AudioVM_Op_Play @ 0x672CB0]): the Shell streams the bank's file
+// as the game streams it [orig: Audio_StreamNextChunk @ 0x4ED7D0], so an open bank with unsaved changes is refused.
 void play_stream(SessionCore &core, const EditorRequest &request) {
 	const SessionView &view = core.view();
 	const AssetEntry *entry = request.path.empty() ? nullptr : view.project.scan->named(request.path);
 	if (!entry || entry->kind != AssetKind::MusicBank)
 		return refuse(core, "A stream plays from the music bank path names: " +
 		                            (request.path.empty() ? std::string("none is named.") : request.path + " is none."));
-	const std::string &named = value_of(request, "stream");
+	const std::string &place = value_of(request, "stream");
 	std::unique_ptr<MusicBankDocument> loaded;
 	const auto *bank = dynamic_cast<const MusicBankDocument *>(open_at(view, entry->relative_path));
 	if (bank && bank->dirty())
@@ -239,8 +239,11 @@ void play_stream(SessionCore &core, const EditorRequest &request) {
 			bank = loaded.get();
 	}
 	if (!bank) return refuse(core, entry->logical_name + " could not be read.", entry->relative_path);
-	const int index = bank->stream_index(named);
-	if (index < 0) return refuse(core, entry->logical_name + " has no stream " + named + ".", entry->relative_path);
+	const int index = bank->stream_index(place);
+	if (index < 0)
+		return refuse(core, entry->logical_name + " has no stream at " + place + ": a stream is named by its place, 0 to " +
+		                            std::to_string(int(bank->bank_row() ? bank->bank_row()->streams.size() : 0) - 1) + ".",
+		              entry->relative_path);
 	const MusicBankStream &stream = bank->bank_row()->streams[size_t(index)];
 	char seconds[32];
 	std::snprintf(seconds, sizeof(seconds), "%.1f", music_stream_seconds(stream));
@@ -344,7 +347,15 @@ void serve_sound_play(SessionCore &core, const EditorRequest &request) {
 		return start_play(core, plan_slot_play(profiles, profile, slot, project_banks(view), project_expansion(view),
 		                                       core.sound_selector()));
 	}
-	// A wave of the project, as recorded (workspace_parts.h's play_sound).
+	// A wave of the project, as recorded (workspace_parts.h's play_sound): the Shell plays the file, so an open wave
+	// with unsaved edits is refused, as a bank is (round S23 lane A).
+	if (const AssetEntry *entry = request.path.empty() ? nullptr : view.project.scan->named(request.path)) {
+		const DocumentBase *open = open_at(view, entry->relative_path);
+		if (open && open->dirty())
+			return refuse(core, entry->logical_name + " has unsaved changes: the editor plays the wave's file as the game "
+			                                          "loads it, so save it to hear them.",
+			              entry->relative_path);
+	}
 	play_sound(core, request.path);
 }
 

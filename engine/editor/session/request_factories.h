@@ -197,11 +197,13 @@ inline EditorRequest wave_operation(std::string path, std::string operation,
 // A font named `name` made from a glyph sheet (round S23 lane A: import/font_import.h): `values` names the sheet
 // (sheet), its grid (columns, rows, first) and the importer's options (advance, tracking, space, spacing,
 // design_width, color).
-inline EditorRequest new_font(std::string name, std::vector<std::pair<std::string, std::string>> values) {
+inline EditorRequest new_font(std::string name, std::vector<std::pair<std::string, std::string>> values,
+		std::string folder = std::string()) {
 	EditorRequest request = of(EditorRequestKind::NewFont);
 	request.path = std::move(name);
 	std::sort(values.begin(), values.end());
 	request.values = std::move(values);
+	request.folder = std::move(folder);
 	return request;
 }
 // The texture `path` copied as `new_name`, the uses in the project files `referrers` moved to the copy
@@ -424,18 +426,19 @@ inline EditorRequest play_action_leg(std::string path, bool end) {
 // A dialog played as the game plays it (DI-32, session/sound_play.h): `dialog` (its name, or a number: dlg%03i of
 // it) of the dialog bank `path` names, or of the bank the mission `path` loads; its line `line` alone where it is
 // 0 or more.
-// A stream of the music bank at `path`, by its name or its place (round S23 lane A), as the game streams it.
-inline EditorRequest play_stream(std::string path, std::string stream) {
-	EditorRequest request = of(EditorRequestKind::PlaySound);
-	request.path = std::move(path);
-	request.values = {{"stream", std::move(stream)}};
-	return request;
-}
 inline EditorRequest play_dialog(std::string dialog, std::string path, int line = -1) {
 	EditorRequest request = of(EditorRequestKind::PlaySound);
 	request.path = std::move(path);
 	request.values = {{"dialog", std::move(dialog)}};
 	if (line >= 0) request.values.push_back({"line", std::to_string(line)});
+	return request;
+}
+// A stream of the music bank at `path`, by its place in the index (round S23 lane A: the game plays a stream by its
+// place, never its name), as the game streams it.
+inline EditorRequest play_stream(std::string path, int place) {
+	EditorRequest request = of(EditorRequestKind::PlaySound);
+	request.path = std::move(path);
+	request.values = {{"stream", std::to_string(place)}};
 	return request;
 }
 inline EditorRequest stop_sound() {

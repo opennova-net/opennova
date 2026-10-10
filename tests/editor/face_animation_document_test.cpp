@@ -3,8 +3,7 @@
 // byte; every field edited through the table and written; a triangle's corners following their vertices (a Record
 // reference: a vertex moved, added before them or removed); the type's findings; the references (each texture name
 // made .TGA by the stage loader, the base's .MDT twin derived) and the blank. JO ships no face animation (a scan of
-// every PFF of the install found none, docs/world/world-wac-ai-re.md section 33.30): the retail leg
-// (OPENNOVA_JO_DIR) scans the install's archives again and reads any .grm it finds through the document.
+// every PFF of the install found none, docs/world/world-wac-ai-re.md section 33.30), so the row has no retail twin.
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/face_animation_document.h>
@@ -14,19 +13,15 @@
 #include <editor/graph/graph_edge.h>
 #include <editor/graph/reference_kinds.h>
 #include <formats/grm/grm.h>
-#include <formats/pff/pff.h>
 
 #include <base/io/strutil.h>
 
 #include <algorithm>
-#include <cctype>
 #include <cstdio>
-#include <filesystem>
 #include <string>
 #include <vector>
 
 #include "common/file_io.h"
-#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 
@@ -240,6 +235,25 @@ int test_findings() {
 	TEST_EXPECT(has_code(findings, "face_animation.parameter_repeated"));
 	TEST_EXPECT(count_code(findings, "face_animation.parameter_unmatched") == 1);
 	TEST_EXPECT(!face.serialize().ok());
+	// The second eye texture alone: blocking (written as the line's one name, the game reads it as the first's and the
+	// second from a stale token), and nothing is written; the first alone a warning, written and read back as neither.
+	FaceAnimationDocument eyes;
+	TEST_EXPECT(load(eyes, person(), error));
+	const NodeAddress eyes_row{face_of(eyes).id, kFace, 0};
+	TEST_EXPECT(eyes.apply({set_edit(eyes_row, "eye_texture_1", std::string(""))}, error));
+	std::vector<Diagnostic> second_alone = validate_face_animation_file(eyes);
+	TEST_EXPECT(has_code(second_alone, "face_animation.unserializable") &&
+	            !has_code(second_alone, "face_animation.eye_texture_alone") && !eyes.serialize().ok());
+	TEST_EXPECT(eyes.apply({set_edit(eyes_row, "eye_texture_1", std::string("iris.tga")),
+	                        set_edit(eyes_row, "eye_texture_2", std::string(""))},
+	                       error));
+	const SerializeResult first_alone = eyes.serialize();
+	grm::File reread;
+	std::string message;
+	TEST_EXPECT(has_code(validate_face_animation_file(eyes), "face_animation.eye_texture_alone") && first_alone.ok() &&
+	            grm::parse(reinterpret_cast<const uint8_t *>(first_alone.text.data()), first_alone.text.size(), reread,
+	                       message) &&
+	            reread.eye_textures[0].empty() && reread.eye_textures[1].empty());
 	// A layout the writer writes otherwise (a comment, three decimals): listed, a save writes it the tool's way.
 	const std::string text = "// a hand-written face\r\nbasetexture face.tga\r\nvertices 1\r\nvertex 0 0.5 0.5 xxx\r\n";
 	FaceAnimationDocument hand;
@@ -303,47 +317,9 @@ int test_blank() {
 	return 0;
 }
 
-// The retail leg: JO ships no face animation; the install's archives are scanned again, and any .grm they hold
-// (an expansion's) is read through the document and written back.
-int test_retail() {
-	if (!retail::selected()) return 0;
-	const std::string install = retail::install();
-	if (install.empty()) {
-		retail::skip_leg("OPENNOVA_JO_DIR (the install's archives, scanned for .grm files)");
-		return 0;
-	}
-	size_t archives = 0, entries = 0, faces = 0;
-	std::error_code ec;
-	for (const auto &entry : std::filesystem::recursive_directory_iterator(std::filesystem::u8path(install), ec)) {
-		std::string ext = entry.path().extension().u8string();
-		for (char &c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
-		if (ext != ".pff") continue;
-		pff::PffArchive archive{};
-		if (pff::pff_open(&archive, entry.path().u8string().c_str()) != 0) continue;
-		++archives;
-		for (uint32_t i = 0; i < archive.entry_count; ++i) {
-			++entries;
-			const pff::PffEntry &stored = archive.entries[i];
-			const std::string name = pff::pff_entry_stored_name(stored);
-			if (name.size() < 4 || !strutil::iequals(name.substr(name.size() - 4), ".grm")) continue;
-			++faces;
-			std::vector<uint8_t> bytes(stored.size);
-			TEST_EXPECT(pff::pff_extract(&archive, &stored, bytes.data(), bytes.size()) == 0);
-			FaceAnimationDocument face;
-			Diagnostic error;
-			TEST_EXPECT(face.load_bytes(bytes, name, AssetKind::FaceAnimation, "jo", error) && face.serialize().ok());
-		}
-		pff::pff_close(&archive);
-	}
-	TEST_EXPECT(archives >= 3 && entries > 1000);
-	std::printf("retail: %zu archives, %zu entries, %zu face animations (JO ships none)\n", archives, entries, faces);
-	return 0;
-}
-
 } // namespace
 
-int main(int argc, char **argv) {
-	retail::configure_mixed(argc, argv);
+int main() {
 	int failed = 0;
 	failed += test_reads_and_writes_back();
 	failed += test_edits();
@@ -351,7 +327,6 @@ int main(int argc, char **argv) {
 	failed += test_findings();
 	failed += test_references();
 	failed += test_blank();
-	failed += test_retail();
 	if (failed == 0) std::printf("editor face animation: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }

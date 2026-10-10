@@ -407,8 +407,23 @@ static int test_new_font() {
 	TEST_EXPECT(!refused.done());
 	refused = editor_test::handle_to_end(session, request::new_font("Other", {{"sheet", outside}}));
 	TEST_EXPECT(!refused.done() && !refused.findings.empty() && refused.findings[0].message.find("14 rows") != std::string::npos);
+	// A value holding a line break (a second sheet line spliced into the set): refused before anything is written.
+	refused = editor_test::handle_to_end(session,
+	                                     request::new_font("Other", {{"sheet", outside}, {"rows", "6\r\nsheet ../x.png"}}));
+	TEST_EXPECT(!refused.done() && !refused.findings.empty() &&
+	            refused.findings[0].message.find("line break") != std::string::npos);
+	// A folder outside the project: refused.
+	refused = editor_test::handle_to_end(session, request::new_font("Other", {{"sheet", outside}, {"rows", "6"}}, "../away"));
+	TEST_EXPECT(!refused.done());
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(!view.project.scan->find("Other.fntset") && !view.project.scan->find("Other_sheet.png"));
+	// Files' New here: the set and its sheet's copy in the folder it names.
+	const ActionOutcome in_art = editor_test::handle_to_end(session, request::new_font("Boxed", {{"sheet", outside}, {"rows", "6"}}, "art"));
+	TEST_EXPECT(in_art.done());
+	const AssetEntry *art_set = view.project.scan->find("Boxed.fntset");
+	const AssetEntry *art_copy = view.project.scan->find("Boxed_sheet.png");
+	TEST_EXPECT(art_set && art_set->relative_path == "art/Boxed.fntset" && art_copy &&
+	            art_copy->relative_path == "art/Boxed_sheet.png" && view.project.scan->find("Boxed.fnt"));
 	return 0;
 }
 

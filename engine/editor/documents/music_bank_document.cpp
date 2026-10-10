@@ -3,7 +3,6 @@
 #include "music_bank_document.h"
 
 #include <cmath>
-#include <unordered_map>
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
@@ -34,8 +33,7 @@ FieldSchema schema_of(const char *id, FieldType type, const char *label, const c
 size_t valid_bytes(const MusicBankStream &stream) {
 	size_t bytes = 0;
 	if (stream.chunks)
-		for (const SbfChunk &chunk : *stream.chunks)
-			bytes += chunk.audio.size();
+		for (const SbfChunk &chunk : *stream.chunks) bytes += chunk.audio.size();
 	return bytes;
 }
 
@@ -87,15 +85,15 @@ RecordTable make_table() {
 	TableKind stream(RecordKindRow{kStream, "stream", "Stream", "", false});
 	{
 		FieldSchema name = schema_of("name", FieldType::Text, "Name",
-				"The stream's name, 15 characters at the most: what a lookup by name finds (the first of a name, "
-				"without case); the music script plays a stream by its place, not its name.");
+				"The stream's name in the index, 16 characters at the most. The game never reads it: the music script "
+				"plays a stream by its place [orig: AudioVM_Op_Play @ 0x672CB0].");
 		name.width = SBF_NAME_SIZE;
 		stream.field(RF{name,
 		                {[](const RecordHandle &r, Value &out) { return out = stream_of(r).name, true; },
 		                 [](const RecordHandle &r, const Value &v, std::string &e) {
 			                 const auto *text = std::get_if<std::string>(&v);
 			                 if (!text || text->size() > SBF_STREAM_NAME_MAX) {
-				                 e = "A stream's name is a text of 15 characters at the most.";
+				                 e = "A stream's name is a text of 16 characters at the most.";
 				                 return false;
 			                 }
 			                 for (const unsigned char c : *text)
@@ -218,6 +216,9 @@ SbfFile MusicBankDocument::bank() const {
 	out.version = row->version;
 	out.flags = row->flags;
 	out.reserved = row->reserved;
+	out.chunk_reserved_a = row->chunk_reserved_a;
+	out.chunk_reserved_b = row->chunk_reserved_b;
+	out.tail = row->tail;
 	for (const MusicBankStream &stream : row->streams) {
 		SbfStream made;
 		made.name = stream.name;
@@ -229,13 +230,11 @@ SbfFile MusicBankDocument::bank() const {
 	return out;
 }
 
-int MusicBankDocument::stream_index(const std::string &name_or_index) const {
+int MusicBankDocument::stream_index(const std::string &place) const {
 	const MusicBankRow *row = bank_row();
 	if (!row) return -1;
-	for (size_t i = 0; i < row->streams.size(); ++i)
-		if (strutil::iequals(row->streams[i].name, name_or_index)) return int(i);
-	const std::optional<int> number = strutil::parse_int(name_or_index);
-	if (number && *number >= 0 && size_t(*number) < row->streams.size() && std::to_string(*number) == name_or_index) return *number;
+	const std::optional<int> number = strutil::parse_int(place);
+	if (number && *number >= 0 && size_t(*number) < row->streams.size() && std::to_string(*number) == place) return *number;
 	return -1;
 }
 
@@ -257,6 +256,9 @@ bool MusicBankDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std
 	row->version = read.version;
 	row->flags = read.flags;
 	row->reserved = read.reserved;
+	row->chunk_reserved_a = read.chunk_reserved_a;
+	row->chunk_reserved_b = read.chunk_reserved_b;
+	row->tail = read.tail;
 	for (SbfStream &stream : read.streams) {
 		MusicBankStream held;
 		held.name = std::move(stream.name);
@@ -266,7 +268,7 @@ bool MusicBankDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std
 		row->streams.push_back(std::move(held));
 	}
 	// What a save lays out otherwise: the streams one after another in the index's order, nothing past the last, the
-	// names zero-padded.
+	// names zero-padded, every chunk a whole block under the bank's reserved pair and tail rule.
 	if (!layout.packed)
 		issues.push_back({false, 0, std::string(), std::string(),
 		                  "The streams are not laid out one after another in the index's order: a save writes them so."});
@@ -278,6 +280,21 @@ bool MusicBankDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std
 		issues.push_back({false, 0, std::string(), std::string(),
 		                  std::to_string(layout.names_with_tails) +
 		                          " names hold bytes after their terminator, which the game never reads: a save writes zeros."});
+	if (layout.reserved_other)
+		issues.push_back({false, 0, std::string(), std::string(),
+		                  std::to_string(layout.reserved_other) +
+		                          " chunks carry another pair of never-read header bytes than the bank's first: a save writes "
+		                          "the bank's one pair."});
+	if (layout.tails_other)
+		issues.push_back({false, 0, std::string(), std::string(),
+		                  std::to_string(layout.tails_other) +
+		                          " chunks hold never-read bytes past their audio that the bank's encoder rule does not make: "
+		                          "a save makes them by the rule."});
+	if (layout.short_chunks)
+		issues.push_back({false, 0, std::string(), std::string(),
+		                  std::to_string(layout.short_chunks) +
+		                          " chunks are shorter than their block, or count more audio than it holds: a save writes each "
+		                          "a whole block of the audio it holds."});
 	shape(*row);
 	rows.push_back(std::move(row));
 	return true;
@@ -297,7 +314,8 @@ SerializeResult MusicBankDocument::serialize() const {
 }
 
 std::string MusicBankDocument::save_words() const {
-	return "A save writes the bank from its header and its streams, one after another in their order, each chunk as held.";
+	return "A save writes the bank from its header and its streams, one after another in their order, each chunk a whole "
+	       "block: its audio, then the bytes the bank's encoder rule makes.";
 }
 
 std::shared_ptr<Node> MusicBankDocument::make_node(NodeKind, NodeId, const std::vector<std::shared_ptr<const Node>> &,
@@ -319,9 +337,8 @@ namespace {
 constexpr FindingCodeEntry<MusicBankFinding> kFindingEntries[] = {
 	{ MusicBankFinding::InvalidInput, { "music_bank.invalid_input", FindingFix::None, nullptr, true } },
 	{ MusicBankFinding::IgnoredInput, { "music_bank.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput } },
-	// A lookup by name finds the first [sbf_find_by_name]; the music script plays by place: listed.
-	{ MusicBankFinding::NameRepeated, listed_code("music_bank.name_repeated") },
-	{ MusicBankFinding::NameEmpty, listed_code("music_bank.name_empty") },
+	// A stream of no audio: the game streams its block and plays nothing [orig: Audio_StreamNextChunk @ 0x4ED7D0]; it
+	// refuses nothing: listed.
 	{ MusicBankFinding::StreamSilent, listed_code("music_bank.stream_silent") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(MusicBankFinding::kCount),
@@ -356,20 +373,12 @@ std::vector<Diagnostic> validate_music_bank_file(const DocumentBase &document) {
 		d.record = place < bank->streams.size() ? bank->streams[place].name : std::string();
 		findings.push_back(std::move(d));
 	};
-	std::unordered_map<std::string, size_t> names;
 	for (size_t i = 0; i < bank->streams.size(); ++i) {
 		const MusicBankStream &stream = bank->streams[i];
-		const std::string at = "Stream " + std::to_string(i);
-		if (stream.name.empty())
-			add(i, DiagnosticSeverity::Info, MusicBankFinding::NameEmpty, "name", at + " has no name: no lookup by name finds it.");
-		else if (const auto earlier = names.find(strutil::to_lower(stream.name)); earlier != names.end())
-			add(i, DiagnosticSeverity::Warning, MusicBankFinding::NameRepeated, "name",
-			    at + " is named " + stream.name + " as stream " + std::to_string(earlier->second) +
-			            " is: a lookup by name finds the first.");
-		else
-			names.emplace(strutil::to_lower(stream.name), i);
 		if (valid_bytes(stream) == 0)
-			add(i, DiagnosticSeverity::Info, MusicBankFinding::StreamSilent, "seconds", at + " holds no audio: playing it plays nothing.");
+			add(i, DiagnosticSeverity::Info, MusicBankFinding::StreamSilent, "seconds",
+			    "Stream " + std::to_string(i) + " holds no audio: playing it plays nothing [orig: Audio_StreamNextChunk @ "
+			    "0x4ED7D0].");
 	}
 	return findings;
 }

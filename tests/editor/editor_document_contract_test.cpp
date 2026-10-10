@@ -461,16 +461,14 @@ std::vector<uint8_t> font_with_a_glyph_outside(const std::vector<uint8_t> &minte
 	return out;
 }
 
-// The minted music bank with its second stream named as its first (round S23: music_bank.name_repeated). Empty
-// when the bank does not read or write.
-std::vector<uint8_t> music_with_a_name_twice(const std::vector<uint8_t> &minted) {
+// The minted music bank with a stream of no audio added (round S23: music_bank.stream_silent). Empty when the bank
+// does not read or write.
+std::vector<uint8_t> music_with_a_silent_stream(const std::vector<uint8_t> &minted) {
 	opennova::sbf::SbfFile bank;
 	std::string error;
 	std::vector<uint8_t> out;
-	if (minted.empty() || !opennova::sbf::sbf_read_bank(minted.data(), minted.size(), bank, error) || bank.streams.empty())
-		return out;
-	if (bank.streams.size() < 2) bank.streams.push_back(bank.streams.front());
-	bank.streams[1].name = bank.streams[0].name;
+	if (minted.empty() || !opennova::sbf::sbf_read_bank(minted.data(), minted.size(), bank, error)) return out;
+	bank.streams.push_back(opennova::sbf::sbf_encode_stream("EMPTY", nullptr, 0));
 	if (!opennova::sbf::sbf_write_bank(bank, out, error)) out.clear();
 	return out;
 }
@@ -604,10 +602,10 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	                    "ATTRIBUTES = Medick\r\n[CHARACTER3]\r\nATTRIBUTES = Medic\r\n")},
 	        // A face animation of a gesture no expression is named (face_animation.gesture_unplayed).
 	        {AssetKind::FaceAnimation, "blink.grm", text_bytes("basetexture face.tga\r\ngestures 1\r\ngesture 0 BLINK\r\n")},
-	        // A font whose 'A' reaches past its page (font.glyph_outside), a music bank naming a stream twice
-	        // (music_bank.name_repeated), a stereo wave the game does not play (asset.wave_unplayable): round S23.
+	        // A font whose 'A' reaches past its page (font.glyph_outside), a music bank with a stream of no audio
+	        // (music_bank.stream_silent), a stereo wave the game does not play (asset.wave_unplayable): round S23.
 	        {AssetKind::Font, "outside.fnt", font_with_a_glyph_outside(file("fnt/synth_1page.fnt"))},
-	        {AssetKind::MusicBank, "twice.sbf", music_with_a_name_twice(file("sbf/synth_gamemus.sbf"))},
+	        {AssetKind::MusicBank, "silent.sbf", music_with_a_silent_stream(file("sbf/synth_gamemus.sbf"))},
 	        {AssetKind::Wave, "stereo.wav", stereo_wave()},
 	};
 }

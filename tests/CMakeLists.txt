@@ -5539,37 +5539,6 @@ target_link_libraries(editor_dialog_bank_test PRIVATE opennova_editor)
 target_include_directories(editor_dialog_bank_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_dialog_bank COMMAND editor_dialog_bank_test)
 
-# Face animations (ADR 0046, round S23 lane A): a .grm as a document over the engine's reader and writer, its
-# triangles' corners following their vertices, its findings, its references and its blank; a SKIP-LEG without
-# OPENNOVA_JO_DIR (the install's archives scanned for .grm files: JO ships none).
-add_executable(editor_face_animation_test editor/face_animation_document_test.cpp)
-target_link_libraries(editor_face_animation_test PRIVATE opennova_editor)
-target_include_directories(editor_face_animation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(editor_face_animation COMMAND editor_face_animation_test)
-
-# Fonts (ADR 0046, round S23 lane A): a .fnt as a document over the engine's reader and writer, its header and
-# glyphs edited, its findings, its blank; a SKIP-LEG without OPENNOVA_JO_ASSETS (every shipped .fnt byte for byte).
-add_executable(editor_font_document_test editor/font_document_test.cpp)
-target_link_libraries(editor_font_document_test PRIVATE opennova_editor)
-target_include_directories(editor_font_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(editor_font_document COMMAND editor_font_document_test)
-
-# Music banks (ADR 0046, round S23 lane A): a .sbf as a document over the engine's reader and writer, its streams
-# edited, its findings, a stream played through a session; a SKIP-LEG without OPENNOVA_JO_DIR (every bank the
-# install streams, byte for byte).
-add_executable(editor_music_bank_test editor/music_bank_document_test.cpp)
-target_link_libraries(editor_music_bank_test PRIVATE opennova_editor)
-target_include_directories(editor_music_bank_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(editor_music_bank COMMAND editor_music_bank_test)
-
-# Waves (ADR 0046, round S23 lane A): a .wav as a document read as the game's loader reads it, its one finding, a
-# trim and a normalise through a session; a SKIP-LEG without OPENNOVA_JO_ASSETS (every shipped wave byte for byte,
-# DSkid.wav alone refused).
-add_executable(editor_wave_document_test editor/wave_document_test.cpp)
-target_link_libraries(editor_wave_document_test PRIVATE opennova_editor)
-target_include_directories(editor_wave_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(editor_wave_document COMMAND editor_wave_document_test)
-
 add_executable(editor_strings_test editor/strings_document_test.cpp)
 target_link_libraries(editor_strings_test PRIVATE opennova_editor)
 target_include_directories(editor_strings_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -5728,3 +5697,34 @@ add_executable(editor_environment_viewport_test editor/environment_viewport_test
 target_link_libraries(editor_environment_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_environment_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_environment_viewport COMMAND editor_environment_viewport_test)
+
+# Face animations (ADR 0046, round S23 lane A): a .grm as a document over the engine's reader and writer, its
+# triangles' corners following their vertices, its findings, its references and its blank, over the authored
+# fixture (JO ships no .grm, so the row has no retail twin).
+add_executable(editor_face_animation_test editor/face_animation_document_test.cpp)
+target_link_libraries(editor_face_animation_test PRIVATE opennova_editor)
+target_include_directories(editor_face_animation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_face_animation COMMAND editor_face_animation_test)
+
+# Fonts (ADR 0046, round S23 lane A): a .fnt as a document over the engine's reader and writer, its header and
+# glyphs edited, its findings, its blank; a SKIP-LEG without OPENNOVA_JO_ASSETS (every shipped .fnt byte for byte).
+add_executable(editor_font_document_test editor/font_document_test.cpp)
+target_link_libraries(editor_font_document_test PRIVATE opennova_editor)
+target_include_directories(editor_font_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_font_document COMMAND editor_font_document_test)
+
+# Music banks (ADR 0046, round S23 lane A): a .sbf as a document over the engine's reader and writer, its streams
+# edited, its findings, a stream played through a session; a SKIP-LEG without OPENNOVA_JO_DIR (every bank the
+# install streams, byte for byte).
+add_executable(editor_music_bank_test editor/music_bank_document_test.cpp)
+target_link_libraries(editor_music_bank_test PRIVATE opennova_editor)
+target_include_directories(editor_music_bank_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_music_bank COMMAND editor_music_bank_test)
+
+# Waves (ADR 0046, round S23 lane A): a .wav as a document read as the game's loader reads it, its one finding, a
+# trim and a normalise through a session; a SKIP-LEG without OPENNOVA_JO_ASSETS (every shipped wave byte for byte,
+# DSkid.wav alone refused).
+add_executable(editor_wave_document_test editor/wave_document_test.cpp)
+target_link_libraries(editor_wave_document_test PRIVATE opennova_editor)
+target_include_directories(editor_wave_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_wave_document COMMAND editor_wave_document_test)

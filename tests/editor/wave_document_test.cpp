@@ -154,7 +154,12 @@ int test_session() {
 	TEST_EXPECT(done.done() && std::fabs(wave->facts().peak - 1.0f) < 0.01f);
 	editor_test::handle_to_end(session, request::undo(path));
 	TEST_EXPECT(wave->facts().frames == 11025 && std::fabs(wave->facts().peak - 0.25f) < 0.01f);
+	// The Shell plays the wave's file: a wave with unsaved edits is refused until it is saved.
+	ActionOutcome played = editor_test::handle_to_end(session, request::play_sound(path));
+	TEST_EXPECT(!played.done() && session.view().workspace.sound.path.empty());
 	editor_test::handle_to_end(session, request::save(path));
+	played = editor_test::handle_to_end(session, request::play_sound(path));
+	TEST_EXPECT(played.done() && session.view().workspace.sound.path == path);
 	std::vector<uint8_t> saved;
 	std::string message;
 	TEST_EXPECT(io::read_file_bytes(root + "/" + path, saved, message) && lwf::wave_facts(saved).frames == 11025);

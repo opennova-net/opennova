@@ -73,7 +73,12 @@ void FontViewportApplier::rebuild(const opennova::editor::ViewportModel &model, 
 	drawn_ = false;
 }
 
-void FontViewportApplier::update(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &) {
+// An Update: the font's glyph table, header or the options moved, its texels and pages not (a Rebuild takes those
+// anew). The picture is the viewport's new one over the same texels: held, so the draw follows it.
+void FontViewportApplier::update(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &) {
+	const auto &font = static_cast<const opennova::editor::FontViewport &>(model);
+	const std::shared_ptr<const opennova::editor::FontPicture> &now = font.picture();
+	if (now && picture_ && now->texels == picture_->texels && now->font.num_pages == picture_->font.num_pages) picture_ = now;
 	drawn_ = false;
 }
 
@@ -100,7 +105,9 @@ void FontViewportApplier::draw(const opennova::editor::ViewportModel &model) {
 	quads_drawn_ = 0;
 	drawn_serial_ = font.layout_serial();
 	drawn_ = true;
-	if (!picture_ || font.picture() != picture_) return;
+	// The pages held are the picture's: its texels and its page count (a picture over others waits for its Rebuild).
+	const std::shared_ptr<const opennova::editor::FontPicture> &now = font.picture();
+	if (!picture_ || !now || now->texels != picture_->texels || now->font.num_pages != picture_->font.num_pages) return;
 	const float zoom = float(std::max(font.options().zoom, 1));
 	const int page = font.shown_page();
 	if (page >= 0) {
@@ -144,9 +151,13 @@ void FontViewportApplier::draw(const opennova::editor::ViewportModel &model) {
 }
 
 void FontViewportApplier::apply(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &,
-		opennova::editor::ViewportDeviceReport &) {
+		opennova::editor::ViewportDeviceReport &report) {
 	const auto &font = static_cast<const opennova::editor::FontViewport &>(model);
 	if (!drawn_ || font.layout_serial() != drawn_serial_) draw(model);
+	// What it drew, for the viewport's body (a GUT device test reads it): the glyph quads and the pages it holds.
+	report.drawn = opennova::io::JsonValue::make_object();
+	report.drawn.set("quads", opennova::io::JsonValue::make_number(double(quads_drawn_)));
+	report.drawn.set("pages", opennova::io::JsonValue::make_number(double(pages_.size())));
 }
 
 void FontViewportApplier::tick(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &) {}
