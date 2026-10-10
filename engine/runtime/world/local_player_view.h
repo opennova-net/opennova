@@ -13,7 +13,6 @@
 #pragma once
 
 #include <cstdint>
-#include <functional>
 #include <string>
 #include <vector>
 
@@ -119,11 +118,13 @@ struct LocalViewSessionInputs {
 // request, the UseGun attach staging and the session-level view reset: the
 // interp reset (player_view_weapon_switch_reset), the equipped-slot rebind
 // (iff its def is optical, Flags & 3), the fov target back to 80 degrees, and
-// the two binocular clears. `world` may be null (no fov channel to write).
+// the two binocular clears, and the NVG scope restore latch cleared (a switch
+// request drops it; its completion clears nothing). `world` may be null (no
+// fov channel to write).
 // [orig: Player_ResetCameraAndMovementState @0x4DE1F0: fov @0x4de202, the
 //  rebind @0x4de287..0x4de2a7, g_BinocularsViewActive = 0 @0x4de2ad,
-//  g_BinocularsToggle = 0 @0x4de2b3]
-void local_player_camera_reset(World *world, const LocalPlayerWeapon &w, PlayerViewState &v);
+//  g_BinocularsToggle = 0 @0x4de2b3, dword_B76554 = 0 @0x4de2b9]
+void local_player_camera_reset(World *world, LocalPlayerWeapon &w, PlayerViewState &v);
 
 void local_player_view_reset(World *world, LocalPlayerWeapon &w,
                              PlayerViewState &v, LocalPlayerViewTracker &t);
@@ -180,8 +181,9 @@ bool local_player_forced_scope_toggle(World &world, LocalPlayerWeapon &w, Player
 bool local_player_scope_view_visible(World &world, LocalPlayerWeapon &w,
                                       const PlayerViewState &v);
 
-// The shared pose/FOV transition after a caller's refusal gates. The weapon
-// pump and movement unscope use the same transition as the input toggle.
+// The pose/FOV transition after a caller's refusal gates, a no-op when the
+// target is already reached (the movement unscope's; the toggle runs its leg
+// whatever the target).
 bool local_player_set_scope(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
                             WeaponSlotState &slot, bool engaged);
 // The current slot zoom, lazily initialized and clamped by the retail getter.
@@ -304,15 +306,17 @@ void local_player_binocular_sway_latch(World &world, const PlayerViewState &v,
 inline constexpr const char *kNvgOnSoundset = "NV_ON";
 inline constexpr const char *kNvgOffSoundset = "NV_OFF";
 
-// Action 41: toggle NVG. Raising NVG over a settled Inset scope first drops the
-// scope through `scope_toggle` and latches a one-shot restore; clearing NVG
-// consumes the latch and re-raises the scope after the Inset refusal no
-// longer applies. Each way then plays its interface set (NV_ON / NV_OFF) and
-// raises its tip. `scope_toggle` is the full scope request (it may route to
-// the wire). Returns the new NVG state.
+// Action 41: toggle NVG. Raising NVG over a promoted Scoped Inset sight first
+// runs the scope toggle itself (no dispatcher gate in front: its own gates
+// may refuse the drop) and latches the one-shot restore whatever it did;
+// clearing NVG runs the toggle again for a set latch, once the Inset refusal
+// no longer applies, whatever the sight's state, and clears it. Each way then
+// plays its interface set (NV_ON / NV_OFF) and raises its tip. Returns the
+// new NVG state.
+// [orig: Input_HandleActionBinding_0 case 41 @0x4e066e -- on: @0x4e06b3..0x4e06ec;
+//  off: @0x4e0670..0x4e06a7]
 bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w,
-                             PlayerViewState &v,
-                             const std::function<bool()> &scope_toggle);
+                             PlayerViewState &v);
 
 // One 62.5 Hz tick of the view state, before the weapon pump: the mounted
 // carrier read, the arbiter inputs, the mode resolve with the mode-4 lerp

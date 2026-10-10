@@ -667,6 +667,12 @@ bool player_view_scope_request_pending(const PlayerViewState &v, bool engaged);
 // when refused mid-ease; true for a no-op request. [orig: Player_ToggleWeaponScope
 // @0x4df177; disengage @0x4df1b3..0x4df212; engage @0x4df31d..0x4df373]
 bool player_view_set_engaged(PlayerViewState &v, bool engaged, bool inset_weapon);
+// The toggle's leg itself, with no "already there" test and no ease gate (the
+// toggle's own gates precede it): retail's legs run whatever the target, so a
+// promoted sight whose target a camera reset cleared still disengages.
+// [orig: Player_ToggleWeaponScope -- disengage @0x4df185..0x4df212, engage
+//  @0x4df2a2..0x4df373; no early-out between @0x4df17f and either Setup]
+void player_view_run_scope_leg(PlayerViewState &v, bool engaged, bool inset_weapon);
 
 // A DERIVED hip (0) .. tpos (1) progress readout for probes and tests; retail
 // has no such scalar (its consumers read the promoted byte and the published

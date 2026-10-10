@@ -109,13 +109,14 @@ bool suppress_view_bias(const LocalPlayerWeapon &w, const WeaponSlotState *slot,
 
 } // namespace
 
-void local_player_camera_reset(World *world, const LocalPlayerWeapon &w, PlayerViewState &v) {
+void local_player_camera_reset(World *world, LocalPlayerWeapon &w, PlayerViewState &v) {
     // [orig: Player_ResetCameraAndMovementState @0x4DE1F0]
     player_view_weapon_switch_reset(v);
     v.weapon_pose_bound = w.active && (w.def.flags & 3) != 0; // @0x4de287..0x4de2a7
     if (world != nullptr) world->weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
     v.binoculars_view_active = false; // @0x4de2ad
     v.binoculars_requested = false;   // @0x4de2b3
+    w.nvg_scope_restore = false;      // dword_B76554 = 0 @0x4de2b9
 }
 
 void local_player_view_reset(World *world, LocalPlayerWeapon &w, PlayerViewState &v,
@@ -132,7 +133,6 @@ void local_player_view_reset(World *world, LocalPlayerWeapon &w, PlayerViewState
     v.nvg_active = world != nullptr &&
                    (world->tables.mission_attrib_flags &
                     static_cast<uint32_t>(bms::AttribFlags::StartWithNVGOn)) != 0;
-    w.nvg_scope_restore = false;
     local_player_view_refresh(world, v);
 }
 
@@ -394,17 +394,29 @@ void raise_scope_tips(World &world, const LocalPlayerWeapon &w, bool engaged) {
 
 } // namespace
 
-bool local_player_set_scope(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
-                            WeaponSlotState &slot, bool engaged) {
-    if (!player_view_scope_request_pending(v, engaged)) return true;
-    if (!player_view_set_engaged(v, engaged, (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0))
-        return false;
+namespace {
+
+// One toggle leg with its fov write and its tips, whatever the target.
+// [orig: Player_ToggleWeaponScope @0x4df185..0x4df282 / @0x4df2a2..0x4df3de,
+//  the Sighted fov @0x4df3ea..0x4df430]
+void run_scope_leg(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
+                   WeaponSlotState &slot, bool engaged) {
+    player_view_run_scope_leg(v, engaged, (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0);
     auto &target = world.weather.core.scalar_channels.camera_fov_target_fp;
     if (!engaged) target = 80 << 16; // [orig: @0x4DF218]
     if ((w.def.flags & DEF_WEAPON_FLAG_SIGHTED) != 0)
         target = engaged && v.camera_mode == 0
             ? sighted_fov_target(local_player_scope_zoom(w, slot)) : 80 << 16;
     raise_scope_tips(world, w, engaged);
+}
+
+} // namespace
+
+bool local_player_set_scope(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
+                            WeaponSlotState &slot, bool engaged) {
+    if (!player_view_scope_request_pending(v, engaged)) return true;
+    if (player_view_scope_ease_active(v)) return false; // [orig: @0x4df177]
+    run_scope_leg(world, w, v, slot, engaged);
     return true;
 }
 
@@ -449,10 +461,12 @@ bool toggle_weapon_scope(World &world, const LocalPlayerWeapon &w, PlayerViewSta
     // Scope-UP is refused while a movement key is held on a Scoped weapon
     // [orig: the engage branch's g_MovementKeyHeld && (flags & 1) -> return @0x4df29c].
     if (!promoted && player_view_scope_up_blocked(v, w.def.flags)) return false;
-    // The toggle latches this ease's step count (7 for Inset weapons, else 15;
-    // 1 on the hipfire-return leg) [orig: Setup @0x4df1b3..0x4df36e].
-    if (!local_player_set_scope(world, w, v, active_slot, !promoted))
-        return false;
+    // The leg the promoted byte picks runs whatever the target: a camera reset
+    // clears the target and keeps the promoted byte, and the disengage leg
+    // still lowers that sight. It latches this ease's step count (7 for Inset
+    // weapons, else 15; 1 on the hipfire-return leg) [orig: the branch
+    // @0x4df17f, no early-out before Setup @0x4df1b3..0x4df36e].
+    run_scope_leg(world, w, v, active_slot, !promoted);
     // The engage leg forces the promoted byte to 1 around its seat-flag
     // queries, so an OnlyScoped AbsorbPitch weapon levels the body pitch as
     // the sight comes up; the tube elevation then rides the offset alone.
@@ -465,6 +479,14 @@ bool toggle_weapon_scope(World &world, const LocalPlayerWeapon &w, PlayerViewSta
     else
         weapon_fsm_queue_scope_down(active_slot);
     return true;
+}
+
+// Player_IsEquippedWeaponScoped: a promoted sight on a Scoped def
+// [orig: @0x4dcc80 -- EquippedSlot and its Def @0x4dcc85..0x4dcc94, Def+8 & 1
+//  @0x4dcc99, g_WeaponScopeActive @0x4dcca5].
+bool equipped_weapon_scoped(const LocalPlayerWeapon &w, const PlayerViewState &v) {
+    return w.active && (w.def.flags & DEF_WEAPON_FLAG_SCOPED) != 0 &&
+           player_view_scope_settled(v);
 }
 
 } // namespace
@@ -540,14 +562,20 @@ void play_nvg_interface_set(World &world, const char *set) {
 }
 } // namespace
 
-bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState &v,
-                             const std::function<bool()> &scope_toggle) {
+bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState &v) {
     if (world.registry.get(world.cached.local_player) == nullptr) return false;
+    WeaponSlotState &active_slot = *active_local_weapon_slot(world, w);
     if (!v.nvg_active) {
-        w.nvg_scope_restore = false;
-        if (w.active && player_view_scope_settled(v) &&
-            (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0) {
-            w.nvg_scope_restore = scope_toggle();
+        // A promoted Scoped Inset sight runs the toggle itself, NVG still off,
+        // and the restore latches whatever the toggle did [orig: case 41 --
+        //  the Player_IsEquippedWeaponScoped call @0x4e06b3, the
+        //  Player_IsVehicleHasAutoAim call (the def's Inset bit, flags2 0x200,
+        //  Player_IsVehicleHasAutoAim @0x4dccb0) @0x4e06bc, the
+        //  Player_ToggleWeaponScope call @0x4e06c5, dword_B76554 = 1 @0x4e06ca,
+        //  g_NVGActive = 1 @0x4e06d7].
+        if (equipped_weapon_scoped(w, v) && (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0) {
+            toggle_weapon_scope(world, w, v, active_slot);
+            w.nvg_scope_restore = true;
         }
         const bool on = player_view_toggle_nvg(v);
         // NV_ON after the scope drop [orig: case 41's on branch — `mov edx,
@@ -558,12 +586,16 @@ bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState
         world.out.tip_events.push_back(static_cast<uint8_t>(hud::kTipEventNvgOn));
         return on;
     }
-    // Clear NVG before the normal scope-up request so the Inset refusal no
-    // longer applies, then consume the one-shot restore latch.
+    // NVG clears first, so the toggle's Inset refusal no longer applies; then
+    // a latched restore runs the toggle whatever the sight's state, and the
+    // latch clears [orig: g_NVGActive = 0 @0x4e067e; the latch test @0x4e0678 /
+    // @0x4e0684; the Player_ToggleWeaponScope call @0x4e0686; dword_B76554 = 0
+    // @0x4e068b].
     player_view_toggle_nvg(v);
-    const bool restore_scope = w.nvg_scope_restore;
-    w.nvg_scope_restore = false;
-    if (restore_scope && !v.scope_engaged) scope_toggle();
+    if (w.nvg_scope_restore) {
+        toggle_weapon_scope(world, w, v, active_slot);
+        w.nvg_scope_restore = false;
+    }
     // NV_OFF after the scope restore [orig: case 41's off branch — `mov ecx,
     // g_SndNvOff` @0x4e0691, Sound_PlayInterfaceTriggerSet @0x4e0698].
     play_nvg_interface_set(world, kNvgOffSoundset);

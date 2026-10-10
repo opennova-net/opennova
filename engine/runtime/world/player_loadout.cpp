@@ -140,6 +140,11 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     // the spawn rebuild (the motor/presentation bind after load), so the spawn
     // equips exactly the selected slot and plays no switch actions. The gate's
     // init-time value is an open question (D-WPN-21, docs/divergence-ledger.md).
+    // The select cleared the NVG scope restore latch [orig:
+    // Player_SelectWeaponSlot @0x4dd730 / @0x4dd7fe, every successful select;
+    // called @0x4e1995 (Player_InitPlayer), @0x566285
+    // (WeaponLoadout_ApplyFromBuffer), @0x4296e3 (the 0x5A apply)].
+    weapon.nvg_scope_restore = false;
     inventory.pending_combo = inventory.equipped_combo;
     commit_pending_weapon_switch(world, weapon, &inventory);
     weapon.start_in_switchto = false;

@@ -29,6 +29,7 @@
 #include <runtime/world/player_present.h>
 #include <runtime/world/player_view.h>
 #include <runtime/world/player_weapon.h>
+#include <runtime/world/vehicle_attach.h>
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/world.h>
@@ -613,28 +614,21 @@ void test_binoculars_refused_scoped_in_gunner_seat() {
 
 void test_nvg_drops_a_settled_inset_scope_and_restores_it() {
     LocalWorld lw;
-    LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED, DEF_WEAPON_FLAG2_INSET);
+    LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SCOPED, DEF_WEAPON_FLAG2_INSET);
     PlayerViewState v;
-    WeaponSlotState slot;
-    CHECK(local_player_scope_toggle(lw.w, w, v, slot));
+    CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
     settle_ease(v);
     CHECK(v.scope_engaged && !player_view_scope_ease_active(v));
-    int toggles = 0;
-    const auto scope_toggle = [&]() -> bool {
-        ++toggles;
-        return local_player_scope_toggle(lw.w, w, v, slot);
-    };
-    // NVG on over a settled Inset scope: the scope drops, the restore latches.
-    CHECK(local_player_nvg_toggle(lw.w, w, v, scope_toggle));
+    // NVG on over a promoted Scoped Inset sight: the sight drops, the restore
+    // latches.
+    CHECK(local_player_nvg_toggle(lw.w, w, v));
     CHECK(v.nvg_active);
-    CHECK(toggles == 1);
-    CHECK(!v.scope_engaged);
+    CHECK(!v.scope_engaged && !player_view_scope_settled(v));
     CHECK(w.nvg_scope_restore);
     settle_ease(v);
-    // NVG off: the latch is consumed and the scope comes back up.
-    CHECK(!local_player_nvg_toggle(lw.w, w, v, scope_toggle));
+    // NVG off: the latch is consumed and the sight comes back up.
+    CHECK(!local_player_nvg_toggle(lw.w, w, v));
     CHECK(!v.nvg_active);
-    CHECK(toggles == 2);
     CHECK(v.scope_engaged);
     CHECK(!w.nvg_scope_restore);
 }
@@ -643,14 +637,11 @@ void test_nvg_over_a_non_inset_scope_leaves_it_alone() {
     LocalWorld lw;
     LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SCOPED);
     PlayerViewState v;
-    WeaponSlotState slot;
-    CHECK(local_player_scope_toggle(lw.w, w, v, slot));
+    CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
     settle_ease(v);
-    int toggles = 0;
-    const auto scope_toggle = [&]() -> bool { ++toggles; return false; };
-    CHECK(local_player_nvg_toggle(lw.w, w, v, scope_toggle));
-    CHECK(toggles == 0);
-    CHECK(v.scope_engaged);
+    CHECK(local_player_nvg_toggle(lw.w, w, v));
+    CHECK(v.scope_engaged && player_view_scope_settled(v));
+    CHECK(!player_view_scope_ease_active(v));
     CHECK(!w.nvg_scope_restore);
 }
 
@@ -658,22 +649,25 @@ void test_nvg_over_a_non_inset_scope_leaves_it_alone() {
 // NV_OFF turning off, after the Inset scope's drop or restore [orig:
 // Input_HandleActionBinding_0 case 41 — Player_ToggleWeaponScope @0x4e0686 /
 // @0x4e06c5 ahead of g_SndNvOff @0x4e0691 / g_SndNvOn @0x4e06d0 ->
-// Sound_PlayInterfaceTriggerSet @0x527be0].
+// Sound_PlayInterfaceTriggerSet @0x527be0]. The toggle's own tip comes
+// ahead of the NVG tip, which follows the set.
 void test_nvg_toggle_plays_its_interface_sets() {
+    using opennova::hud::kTipEventNvgOff;
+    using opennova::hud::kTipEventNvgOn;
+    using opennova::hud::kTipEventScopeElevationOff;
+    using opennova::hud::kTipEventScopeElevationOn;
     LocalWorld lw;
-    LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED, DEF_WEAPON_FLAG2_INSET);
+    LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SCOPED | DEF_WEAPON_FLAG_SHOWELEVATION,
+                                        DEF_WEAPON_FLAG2_INSET);
     PlayerViewState v;
-    WeaponSlotState slot;
-    CHECK(local_player_scope_toggle(lw.w, w, v, slot));
+    CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
     settle_ease(v);
     lw.w.out.script_sounds.clear();
-    size_t sounds_at_scope_toggle = 0;
-    const auto scope_toggle = [&]() -> bool {
-        sounds_at_scope_toggle = lw.w.out.script_sounds.size();
-        return local_player_scope_toggle(lw.w, w, v, slot);
-    };
-    CHECK(local_player_nvg_toggle(lw.w, w, v, scope_toggle));
-    CHECK(sounds_at_scope_toggle == 0); // the scope drops before the set plays
+    lw.w.out.tip_events.clear();
+    CHECK(local_player_nvg_toggle(lw.w, w, v));
+    // the scope drops before the set plays
+    CHECK(lw.w.out.tip_events ==
+          (std::vector<uint8_t>{kTipEventScopeElevationOff, kTipEventNvgOn}));
     CHECK(lw.w.out.script_sounds.size() == 1);
     if (lw.w.out.script_sounds.size() == 1) {
         CHECK(lw.w.out.script_sounds[0].name == kNvgOnSoundset);
@@ -682,9 +676,11 @@ void test_nvg_toggle_plays_its_interface_sets() {
     }
     settle_ease(v);
     lw.w.out.script_sounds.clear();
-    sounds_at_scope_toggle = 99;
-    CHECK(!local_player_nvg_toggle(lw.w, w, v, scope_toggle));
-    CHECK(sounds_at_scope_toggle == 0); // the scope restores before the set plays
+    lw.w.out.tip_events.clear();
+    CHECK(!local_player_nvg_toggle(lw.w, w, v));
+    // the scope restores before the set plays
+    CHECK(lw.w.out.tip_events ==
+          (std::vector<uint8_t>{kTipEventScopeElevationOn, kTipEventNvgOff}));
     CHECK(lw.w.out.script_sounds.size() == 1);
     if (lw.w.out.script_sounds.size() == 1) {
         CHECK(lw.w.out.script_sounds[0].name == kNvgOffSoundset);
@@ -695,8 +691,371 @@ void test_nvg_toggle_plays_its_interface_sets() {
     World bare;
     LocalPlayerWeapon none;
     PlayerViewState idle;
-    CHECK(!local_player_nvg_toggle(bare, none, idle, []() { return false; }));
+    CHECK(!local_player_nvg_toggle(bare, none, idle));
     CHECK(bare.out.script_sounds.empty());
+}
+
+// Case 41 calls the toggle itself, with no dispatcher gate in front: the on
+// branch for a promoted Scoped Inset sight, then the restore latch whatever
+// the toggle did; the off branch for a set latch whatever the sight's state.
+// [orig: Input_HandleActionBinding_0 case 41 -- the Player_IsEquippedWeaponScoped
+//  call @0x4e06b3 (Def+8 & 1 and the promoted byte, Player_IsEquippedWeaponScoped
+//  @0x4dcc80), the Inset query @0x4e06bc, the toggle call @0x4e06c5,
+//  dword_B76554 = 1 @0x4e06ca; g_NVGActive = 0 @0x4e067e, the latch @0x4e0684,
+//  the toggle call @0x4e0686, the clear @0x4e068b]
+void test_nvg_runs_the_toggle_itself() {
+    using opennova::hud::kTipEventNvgOff;
+    using opennova::hud::kTipEventNvgOn;
+    using opennova::hud::kTipEventScopeElevationOff;
+    const auto raise = [](LocalWorld &lw, LocalPlayerWeapon &w, PlayerViewState &v) {
+        CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
+        settle_ease(v);
+        CHECK(player_view_scope_settled(v) && v.scope_engaged);
+        w.slot.phase = weapon_phase::kDone;
+        w.slot.next = weapon_action::kIdle;
+        lw.w.out.tip_events.clear();
+    };
+    // A promoted Inset sight that is Sighted but not Scoped is not dropped.
+    {
+        LocalWorld lw;
+        LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED, DEF_WEAPON_FLAG2_INSET);
+        PlayerViewState v;
+        raise(lw, w, v);
+        CHECK(local_player_nvg_toggle(lw.w, w, v));
+        CHECK(player_view_scope_settled(v) && v.scope_engaged && !w.nvg_scope_restore);
+        CHECK(!local_player_nvg_toggle(lw.w, w, v));
+        CHECK(player_view_scope_settled(v) && v.scope_engaged);
+        CHECK(!player_view_scope_ease_active(v));
+    }
+    // No dispatcher gate in front: a RELOAD current still drops the sight.
+    {
+        LocalWorld lw;
+        LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SCOPED, DEF_WEAPON_FLAG2_INSET);
+        PlayerViewState v;
+        raise(lw, w, v);
+        w.slot.current = weapon_action::kReload;
+        CHECK(local_player_nvg_toggle(lw.w, w, v));
+        CHECK(!player_view_scope_settled(v) && !v.scope_engaged && w.nvg_scope_restore);
+    }
+    // The latch is set whatever the toggle did: an airborne body refuses the
+    // drop and keeps the sight; once landed, the off branch runs the toggle
+    // over the raised sight, which takes its disengage leg.
+    {
+        LocalWorld lw;
+        LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SCOPED | DEF_WEAPON_FLAG_SHOWELEVATION,
+                                            DEF_WEAPON_FLAG2_INSET);
+        PlayerViewState v;
+        raise(lw, w, v);
+        lw.entity().flags |= kEntityFlagInAir;
+        CHECK(local_player_nvg_toggle(lw.w, w, v));
+        CHECK(player_view_scope_settled(v) && v.scope_engaged);
+        CHECK(w.nvg_scope_restore);
+        CHECK(lw.w.out.tip_events == std::vector<uint8_t>{kTipEventNvgOn});
+        lw.entity().flags &= ~kEntityFlagInAir;
+        lw.w.out.tip_events.clear();
+        CHECK(!local_player_nvg_toggle(lw.w, w, v));
+        CHECK(!player_view_scope_settled(v) && !v.scope_engaged && v.scope_hipfire);
+        CHECK(w.slot.next == weapon_action::kScopeDown);
+        CHECK(!w.nvg_scope_restore);
+        CHECK(lw.w.out.tip_events ==
+              (std::vector<uint8_t>{kTipEventScopeElevationOff, kTipEventNvgOff}));
+    }
+}
+
+// The NVG restore latch belongs to the switch REQUEST: the camera reset, the
+// mount and the select clear it as the switch is asked for, and the
+// SWITCHFROM / SWITCHRANK completion (and the install that follows it) leaves
+// it. NVG off during the outgoing SWITCHFROM therefore finds it clear and
+// leaves the dropped sight down.
+// [orig: Player_ResetCameraAndMovementState @0x4de2b9; Player_MountWeaponSlot
+//  @0x4dfb75 past @0x4dfa4d..0x4dfa74; Player_SelectWeaponSlot @0x4dd730 /
+//  @0x4dd7fe; WeaponAction_SwitchFrom @0x5433b0 / WeaponAction_SwitchRank
+//  @0x543500 call none of them; case 41's latch test @0x4e0684]
+void test_nvg_restore_latch_is_the_requests() {
+    using opennova::hud::kTipEventNvgOff;
+    struct Rig {
+        LocalWorld lw;
+        WeaponInventory inventory;
+        LocalPlayerWeapon w;
+        PlayerViewState v;
+        Rig() {
+            lw.w.tables.weapons.entries.resize(4);
+            const int32_t categories[4] = {0, 1, 1, 2};
+            for (int i = 1; i <= 3; ++i) {
+                auto &row = lw.w.tables.weapons.entries[i];
+                row.valid = true;
+                row.name = "LATCH_" + std::to_string(i);
+                row.category = categories[i];
+                row.rank = i == 2 ? 1 : 0;
+                row.weapon_class_slot = 1;
+            }
+            inventory.reset(lw.w.tables.weapons);
+            inventory.equipped_combo = 65;
+            inventory.slots[65].adm_index = 1;
+            inventory.slots[66].adm_index = 2;
+            inventory.slots[130].adm_index = 3;
+            inventory.slots[65].clip = inventory.slots[66].clip = inventory.slots[130].clip = 1;
+            WeaponInstallData data;
+            data.name = "LATCH_1";
+            data.flags = DEF_WEAPON_FLAG_SCOPED;
+            data.flags2 = DEF_WEAPON_FLAG2_INSET;
+            local_weapon_install(lw.w, w, data, false, false, &inventory, v);
+            CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
+            settle_ease(v);
+            CHECK(player_view_scope_settled(v));
+            w.slot.current = weapon_action::kIdle;
+            w.slot.next = weapon_action::kIdle;
+            w.slot.phase = weapon_phase::kDone;
+            // NVG on drops the promoted Scoped Inset sight and latches the restore.
+            CHECK(local_player_nvg_toggle(lw.w, w, v));
+            CHECK(!v.scope_engaged && w.nvg_scope_restore);
+            settle_ease(v);
+            w.slot.next = weapon_action::kIdle;
+            lw.w.out.tip_events.clear();
+        }
+        // NVG off with the latch clear: the sight stays down, no toggle runs.
+        void nvg_off_leaves_the_sight_down() {
+            const int32_t next = w.slot.next;
+            CHECK(!local_player_nvg_toggle(lw.w, w, v));
+            CHECK(!v.scope_engaged && !player_view_scope_settled(v));
+            CHECK(!player_view_scope_ease_active(v) && w.slot.next == next);
+            CHECK(lw.w.out.tip_events == std::vector<uint8_t>{kTipEventNvgOff});
+        }
+    };
+    // A cross-category request's mount (a cycle: no reset) clears the latch;
+    // NVG off during the outgoing SWITCHFROM runs no toggle.
+    {
+        Rig r;
+        r.inventory.pending_combo = 130;
+        WeaponSwitchOutcome mount;
+        mount.kind = WeaponSwitchOutcome::kMount;
+        mount.combo = 130;
+        handle_weapon_switch_outcome(r.lw.w, r.w, &r.inventory, mount, r.v);
+        CHECK(r.w.switch_in_flight && r.w.slot.next == weapon_action::kSwitchFrom);
+        CHECK(!r.w.nvg_scope_restore);
+        r.w.slot.current = weapon_action::kSwitchFrom;
+        r.w.slot.phase = weapon_phase::kActive;
+        r.nvg_off_leaves_the_sight_down();
+    }
+    // A category key's walk resets the camera first, which clears it too.
+    {
+        Rig r;
+        const auto category = weapon_switch_to_handle(r.lw.w.tables.weapons, r.inventory, 2 * 65,
+                                                      local_weapon_switch_gates(r.lw.w, r.w, &r.inventory));
+        CHECK(category.kind == WeaponSwitchOutcome::kMount && category.reset_view);
+        handle_weapon_switch_outcome(r.lw.w, r.w, &r.inventory, category, r.v);
+        CHECK(!r.w.nvg_scope_restore);
+        r.nvg_off_leaves_the_sight_down();
+    }
+    // A latch set after the request survives the completion and the install of
+    // the committed weapon.
+    {
+        Rig r;
+        r.inventory.pending_combo = 66;
+        commit_pending_weapon_switch(r.lw.w, r.w, &r.inventory);
+        CHECK(r.inventory.equipped_combo == 66 && r.w.nvg_scope_restore);
+        WeaponInstallData data;
+        data.name = "LATCH_2";
+        data.flags = DEF_WEAPON_FLAG_SCOPED;
+        data.flags2 = DEF_WEAPON_FLAG2_INSET;
+        local_weapon_install(r.lw.w, r.w, data, false, false, &r.inventory, r.v);
+        CHECK(r.w.def_name == "LATCH_2" && r.w.nvg_scope_restore);
+    }
+}
+
+// The vehicle seats' share of the latch: a control seat's attach resets the
+// local camera first (ctrlx, EWeap or not, and drvrx), a sitex attach does
+// not; a ctrlx or UseGun detach mounts the personal slot, which clears it, a
+// drvrx or sitex detach does not. Driving off with NVG on and switching it off
+// on foot leaves the dropped sight down.
+// [orig: Entity_AttachToVehicleSlot @0x4947ae / @0x4948b4 ->
+//  Player_ResetCameraAndMovementState @0x4de2b9; Entity_DetachFromVehicle
+//  @0x43562a..0x43565f -> Player_MountWeaponSlot @0x4dfb75]
+void test_vehicle_seats_clear_the_nvg_restore_latch() {
+    struct Rig {
+        LocalWorld lw;
+        LocalPlayer player;
+        SeatType seat;
+        EntityHandle vehicle;
+        explicit Rig(SeatType type) : player(lw.w), seat(type) {
+            lw.w.local_player_state = &player;
+            lw.w.registry.configure_pool(1, 4);
+            Entity carrier;
+            carrier.kind = EntityKind::Item;
+            carrier.health = 100;
+            carrier.alive = true;
+            Seat s;
+            s.type = seat;
+            s.bone_index = 2;
+            carrier.seats.push_back(s);
+            vehicle = lw.w.registry.spawn(1, carrier);
+            player.weapon = scoped_weapon(DEF_WEAPON_FLAG_SCOPED | DEF_WEAPON_FLAG_SHOWELEVATION,
+                                          DEF_WEAPON_FLAG2_INSET);
+            LocalPlayerWeapon &w = player.weapon;
+            PlayerViewState &v = player.view;
+            CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
+            settle_ease(v);
+            w.slot.phase = weapon_phase::kDone;
+            w.slot.next = weapon_action::kIdle;
+            // NVG on drops the sight and latches the restore.
+            CHECK(local_player_nvg_toggle(lw.w, w, v));
+            CHECK(!v.scope_engaged && w.nvg_scope_restore);
+            settle_ease(v);
+            w.slot.next = weapon_action::kIdle;
+        }
+        bool attach() {
+            VehicleSeatSelection selection;
+            selection.vehicle = vehicle;
+            selection.seat_index = 0;
+            selection.type = seat;
+            return lw.w.vehicles.attach_to_seat(lw.local, selection);
+        }
+    };
+    for (const SeatType seat : {SeatType::Controller, SeatType::Driver, SeatType::Passenger}) {
+        const bool control = seat != SeatType::Passenger;
+        Rig r(seat);
+        r.player.view.binoculars_requested = true;
+        r.lw.w.weather.core.scalar_channels.camera_fov_target_fp = 20 << 16;
+        CHECK(r.attach());
+        CHECK(r.player.weapon.nvg_scope_restore == !control);
+        CHECK(r.player.view.binoculars_requested == !control);
+        CHECK((r.lw.w.weather.core.scalar_channels.camera_fov_target_fp == (80 << 16)) == control);
+        CHECK(r.lw.w.vehicles.detach(r.lw.local));
+        r.lw.w.out.tip_events.clear();
+        // On foot, NVG off: after a control seat the sight stays down; after a
+        // passenger seat the kept latch restores it.
+        CHECK(!local_player_nvg_toggle(r.lw.w, r.player.weapon, r.player.view));
+        CHECK(r.player.view.scope_engaged == !control);
+        CHECK(!r.player.weapon.nvg_scope_restore);
+    }
+    // The detach's mount: a ctrlx or UseGun detach clears a latch set while
+    // seated, a drvrx or a sitex keeps it.
+    for (const SeatType seat : {SeatType::Controller, SeatType::Gunner, SeatType::Driver,
+                                SeatType::Passenger}) {
+        Rig r(seat);
+        CHECK(r.attach());
+        r.player.weapon.nvg_scope_restore = true;
+        CHECK(r.lw.w.vehicles.detach(r.lw.local));
+        CHECK(r.player.weapon.nvg_scope_restore ==
+              (seat != SeatType::Controller && seat != SeatType::Gunner));
+    }
+}
+
+// The detach mount's target on a borrowed seat: the personal slot the attach
+// saved, or the current slot when that has no def of category < 11; the latch
+// clears only with a target def (and an equipped weapon). An unborrowed seat's
+// target is not modelled: an active weapon clears it.
+// [orig: Entity_DetachFromVehicle @0x43563a..0x43565f, the fallback
+//  @0x43564e..0x435658; Player_MountWeaponSlot @0x4dfa4d..0x4dfa74, @0x4dfb75]
+void test_detach_mount_latch_target() {
+    World world;
+    world.tables.weapons.entries.resize(3);
+    const int32_t categories[3] = {0, 3, 11};
+    for (int i = 1; i <= 2; ++i) {
+        auto &row = world.tables.weapons.entries[i];
+        row.valid = true;
+        row.name = "DETACH_" + std::to_string(i);
+        row.category = categories[i];
+    }
+    struct Case {
+        uint8_t saved;
+        bool current;
+        bool clears;
+    };
+    const Case cases[] = {
+        {0xFF, false, false}, // no saved def, no current slot: the mount bails
+        {0xFF, true, true},   // no saved def: the current slot
+        {2, false, false},    // a saved def of category 11, no current slot
+        {2, true, true},      // a saved def of category 11: the current slot
+        {1, false, true},     // a saved def of category 3 is the target
+    };
+    for (const Case &c : cases) {
+        WeaponInventory inventory;
+        inventory.reset(world.tables.weapons);
+        inventory.equipped_combo = 3 * 65;
+        inventory.slots[3 * 65].adm_index = c.current ? 1 : -1;
+        LocalPlayerWeapon w;
+        w.active = true;
+        w.usegun_slot_active = true;
+        w.usegun_saved_adm = c.saved;
+        w.nvg_scope_restore = true;
+        local_weapon_detach_mount(world, w, &inventory);
+        CHECK(w.nvg_scope_restore == !c.clears);
+    }
+    // Unborrowed: the active weapon clears it; no equipped weapon bails.
+    for (const bool active : {true, false}) {
+        LocalPlayerWeapon w;
+        w.active = active;
+        w.nvg_scope_restore = true;
+        local_weapon_detach_mount(world, w, nullptr);
+        CHECK(w.nvg_scope_restore == !active);
+    }
+}
+
+// A camera reset clears the scope target and keeps the promoted byte, and the
+// toggle's legs have no "already there" early-out: after a drvrx ride the
+// scope press lowers a Sighted sight (the promoted byte cleared, the optical
+// view down), and after the bare promoted clear it raises the sight again.
+// [orig: Player_ResetCameraAndMovementState @0x4DE1F0 (g_WeaponScopeActive
+//  untouched); Player_ToggleWeaponScope -- the branch @0x4df17f, disengage
+//  @0x4df185..0x4df212, engage @0x4df2a2..0x4df373]
+void test_scope_press_after_a_reset_runs_its_leg() {
+    {
+        LocalWorld lw;
+        LocalPlayer player(lw.w);
+        lw.w.local_player_state = &player;
+        lw.w.registry.configure_pool(1, 4);
+        Entity carrier;
+        carrier.kind = EntityKind::Item;
+        carrier.health = 100;
+        carrier.alive = true;
+        Seat driver;
+        driver.type = SeatType::Driver;
+        driver.bone_index = 2;
+        carrier.seats.push_back(driver);
+        const EntityHandle vehicle = lw.w.registry.spawn(1, carrier);
+        player.weapon = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED);
+        LocalPlayerWeapon &w = player.weapon;
+        PlayerViewState &v = player.view;
+        CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
+        settle_ease(v);
+        w.slot.current = weapon_action::kIdle;
+        w.slot.next = weapon_action::kIdle;
+        w.slot.phase = weapon_phase::kDone;
+        CHECK(local_player_scope_view_visible(lw.w, w, v));
+        VehicleSeatSelection selection;
+        selection.vehicle = vehicle;
+        selection.seat_index = 0;
+        selection.type = SeatType::Driver;
+        CHECK(lw.w.vehicles.attach_to_seat(lw.local, selection));
+        CHECK(!v.scope_engaged && player_view_scope_settled(v));
+        CHECK(lw.w.vehicles.detach(lw.local));
+        CHECK(local_player_scope_view_visible(lw.w, w, v)); // the promoted byte still shows it
+        lw.w.weather.core.scalar_channels.camera_fov_target_fp = 20 << 16;
+        CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
+        CHECK(lw.w.weather.core.scalar_channels.camera_fov_target_fp == (80 << 16));
+        CHECK(!player_view_scope_settled(v) && !v.scope_engaged && v.scope_hipfire);
+        CHECK(w.slot.next == weapon_action::kScopeDown);
+        CHECK(!local_player_scope_view_visible(lw.w, w, v));
+    }
+    // The engage direction: the promoted byte cleared under a set target.
+    {
+        LocalWorld lw;
+        LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED);
+        PlayerViewState v;
+        CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
+        settle_ease(v);
+        w.slot.current = weapon_action::kIdle;
+        w.slot.next = weapon_action::kIdle;
+        w.slot.phase = weapon_phase::kDone;
+        player_view_clear_scope_promoted(v);
+        CHECK(v.scope_engaged && !player_view_scope_settled(v) && !player_view_scope_ease_active(v));
+        CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
+        CHECK(v.scope_engaged && !v.scope_hipfire && player_view_scope_ease_active(v));
+        CHECK(w.slot.next == weapon_action::kScopeUp);
+        settle_ease(v);
+        CHECK(player_view_scope_settled(v));
+    }
 }
 
 // --- the tip producers: the scope toggle, NVG and the binocular edge -------
@@ -745,10 +1104,9 @@ void test_tip_events_from_scope_nvg_and_binoculars() {
         LocalWorld lw;
         LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SCOPED);
         PlayerViewState v;
-        const auto no_scope = []() -> bool { return false; };
-        CHECK(local_player_nvg_toggle(lw.w, w, v, no_scope));
+        CHECK(local_player_nvg_toggle(lw.w, w, v));
         CHECK(events(lw.w) == std::vector<uint8_t>{opennova::hud::kTipEventNvgOn});
-        CHECK(!local_player_nvg_toggle(lw.w, w, v, no_scope));
+        CHECK(!local_player_nvg_toggle(lw.w, w, v));
         CHECK(events(lw.w) == std::vector<uint8_t>{opennova::hud::kTipEventNvgOff});
     }
     {
@@ -2992,6 +3350,11 @@ int main() {
     test_nvg_drops_a_settled_inset_scope_and_restores_it();
     test_nvg_over_a_non_inset_scope_leaves_it_alone();
     test_nvg_toggle_plays_its_interface_sets();
+    test_nvg_runs_the_toggle_itself();
+    test_nvg_restore_latch_is_the_requests();
+    test_vehicle_seats_clear_the_nvg_restore_latch();
+    test_detach_mount_latch_target();
+    test_scope_press_after_a_reset_runs_its_leg();
     test_tip_events_from_scope_nvg_and_binoculars();
     test_tick_stamps_the_death_camera_on_the_local_dead_edge();
     test_forced_scope_toggles_on_death_and_camera_switch();

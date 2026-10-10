@@ -12,7 +12,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/entity_spawn.h> // max_health_with_difficulty
-#include <runtime/world/local_player.h> // the local player's stance latch clears
+#include <runtime/world/local_player.h> // the local player: stance latches, camera reset, detach mount
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/vehicle_panel_feed.h>
 #include <runtime/world/world.h>
@@ -112,6 +112,17 @@ bool candidate_relevant_for_mode(const Entity &candidate, bool armory_mode) {
 // Shared host attach write block. Retail splits UseGun from ordinary vehicle slots at
 // the flags write; the remaining relationship fields are common.
 void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t bone) {
+    // The local player's control-seat attach resets its camera first, EWeap
+    // carrier or not, ahead of the +368 claim test: the scope target and
+    // ease, the fov, the binoculars and the NVG restore latch. (The function's
+    // type-3 reset @0x494959 is unreachable: its one caller sends UseGun seats
+    // to Entity_AttachToUseGunSlot @0x435c9f / @0x435caa.)
+    // [orig: Entity_AttachToVehicleSlot -- ctrlx @0x4947ac..0x4947ae ahead of
+    //  @0x4947bf, drvrx @0x4948b2..0x4948b4 ahead of @0x4948d2]
+    if (is_vehicle_control_seat(veh.seats[seat_idx].type) &&
+            occ.handle == world.cached.local_player && world.local_player_state != nullptr)
+        local_player_camera_reset(&world, world.local_player_state->weapon,
+                                  world.local_player_state->view);
     world.vehicles.presnap_attach_heading(occ, veh, veh.seats[seat_idx]);
     veh.seats[seat_idx].occupant = occ.handle; // [orig: mountHandles[idx] = handle @0x494746]
     occ.mount_type = veh.seats[seat_idx].type; // [orig: parentSlot(0x168) = slotType]
@@ -523,9 +534,15 @@ bool VehicleSystem::detach(EntityHandle player) {
     // detach stop and the +0x1CC smoke release) rides
     // release_primary_occupant. [orig: @0x4356EF..0x435759]
     occ->net_stance_bits = 0;
-    // The local player's prone/crouch latches clear with it [orig: @0x43561e / @0x435624].
-    if (player == world.cached.local_player && world.local_player_state != nullptr)
-        world.local_player_state->clear_stance_latches();
+    // The local player's prone/crouch latches clear with it [orig: @0x43561e / @0x435624],
+    // then a seat-2 / seat-3 detach mounts the personal slot [orig: @0x43562a..0x43565f].
+    if (player == world.cached.local_player && world.local_player_state != nullptr) {
+        LocalPlayer &local = *world.local_player_state;
+        local.clear_stance_latches();
+        if (occ->mount_type == SeatType::Gunner || occ->mount_type == SeatType::Controller)
+            local_weapon_detach_mount(world, local.weapon,
+                                      local.inventory_valid ? &local.inventory : nullptr);
+    }
     if (veh != nullptr) {
         for (Seat &s : veh->seats) {
             if (s.occupant == player) s.occupant = EntityHandle{}; // [orig: -> 0xFFFF]
