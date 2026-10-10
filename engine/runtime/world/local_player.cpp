@@ -718,6 +718,15 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 	p->heading = p->inf.target_heading;
 	p->pitch = p->inf.look_pitch;
 	world.ai.mirror_wire_anim(*p, world);
+	stamp_body_view();
+}
+
+void LocalPlayer::stamp_body_view() {
+	World &world = world_;
+	if (!world.cached.local_player.valid()) return;
+	w::AiEntity *p = world.ai.for_handle(world.cached.local_player);
+	if (p == nullptr) return;
+	// [orig: Player_PackInputStateToEntity @0x4DF450 -- the body's view and weapon facts]
 	const bool scope_promoted = weapon.active && w::player_view_scope_settled(view);
 	p->inf.aimed_shot_available = false;
 	if (p->inf.active) {

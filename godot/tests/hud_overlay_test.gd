@@ -981,8 +981,8 @@ func test_player_view_effects_damage_feedback_quads() -> void:
 
 # The mounted-vehicle panel: the rider's VEHICLE_HUD block lands the interface
 # silhouette at the HUDVEHSTANCEPOS anchor (plus the stance offset), loaded per
-# sid through the real VFS path. With no Simulation the seat rows stay empty
-# (the set_scoreboard shape); the silhouette is the panel's one witnessed gate
+# sid through the real VFS path. With no Simulation the seat rows stay empty;
+# the silhouette is the panel's one witnessed gate
 # [orig: HUD_DrawVehicleHealthBars @0x5a5038 — no interface texture, no panel].
 func test_vehicle_panel_draws_the_block_silhouette() -> void:
 	var fixture := _load_temp_layout(PackedStringArray([
@@ -1226,3 +1226,60 @@ func test_sights_viewport_aspect_preserves_square_reticle() -> void:
 	assert_eq(HudPos.sight_scale_rect(square, Vector2(1024, 768)), square)
 	assert_eq(HudPos.sight_scale_rect(square, Vector2(1920, 1080)),
 			Rect2(720, 300, 480, 480), "widescreen reticle stays square and centered")
+
+
+# The Tab board through the game's entry: shown over a Simulation it draws its
+# strings (the engine composes them, hud::scoreboard_header_strings, which the
+# ctest scoreboard_format pins); shown over none, or hidden, it draws nothing.
+func test_the_scoreboard_draws_over_a_simulation() -> void:
+	var fixture := _load_temp_layout(PackedStringArray(["fonthud1_hi Gunpl22b.fnt"]), PackedStringArray())
+	_copy_font_into(fixture.dir)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture.dir), OK)
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, root)
+	var bare := hud.get_draw_list_stats().glyphs
+	var gametext := RtxtStringFile.new()
+	var overlays := gametext.add_section("Overlays")
+	gametext.add_entry("STROVER_KILLLIST", "Player List", overlays, Vector2i.ZERO)
+	var client := gametext.add_section("Client")
+	gametext.add_entry("STRCLI04", "Players:", client, Vector2i.ZERO)
+	hud.set_scoreboard(true, 0, Simulation.new(), gametext)
+	assert_gt(hud.get_draw_list_stats().glyphs, bare, "over a Simulation: its title, rungs and hint draw")
+	hud.set_scoreboard(true, 0, null, gametext)
+	assert_eq(hud.get_draw_list_stats().glyphs, bare, "over none: a blank board")
+	hud.set_scoreboard(false, 0, null, null)
+	assert_eq(hud.get_draw_list_stats().glyphs, bare, "hidden, the board draws nothing")
+	# The two inputs the entry hands the engine's composer, read back as the header the board draws: whether a
+	# gametext is loaded (p_gametext.is_valid()) and keyhelp's raw lookup (its marker kept, as the drawer reads it).
+	# With a gametext the paging hint is keyhelp's CHANGE_SCREEN as written, or keyhelp's raw fallback where the
+	# table has none; with no gametext it is the fallback, keyhelp never asked; the title and the count line are the
+	# gametext's, else their fallbacks.
+	var keyhelp := RtxtStringFile.new()
+	keyhelp.add_entry("CHANGE_SCREEN", "!Turn the pages", keyhelp.add_section("Text"), Vector2i.ZERO)
+	keyhelp.install_key_strings()
+	hud.set_scoreboard(true, 0, Simulation.new(), gametext)
+	var loaded: PackedStringArray = hud.get_scoreboard_header_text()
+	assert_eq(loaded.size(), 5)
+	if loaded.size() == 5:
+		assert_eq(loaded[0], "Player List", "the title, gametext's STROVER_KILLLIST")
+		assert_eq(loaded[2], "Players: 0", "the players' line, gametext's STRCLI04 and the count")
+		assert_eq(loaded[3], "", "no spectators, no line")
+		assert_eq(loaded[4], "!Turn the pages", "the paging hint, keyhelp's raw CHANGE_SCREEN")
+	hud.set_scoreboard(true, 0, Simulation.new(), null)
+	var bare_strings: PackedStringArray = hud.get_scoreboard_header_text()
+	assert_eq(bare_strings.size(), 5)
+	if bare_strings.size() == 5:
+		assert_eq(bare_strings[0], "!Kill List", "no gametext: the title's fallback")
+		assert_eq(bare_strings[2], " 0", "no gametext: the count alone")
+		assert_eq(bare_strings[4], "!PgUp and PgDn to change pages", "no gametext: keyhelp never asked, the fallback")
+	assert_gt(hud.get_draw_list_stats().glyphs, bare, "with no gametext the board still draws its fallbacks")
+	# A gametext and no keyhelp table: keyhelp asked, its raw fallback with the marker kept (the stripped lookup's
+	# would drop it).
+	RtxtStringFile.clear_key_strings()
+	hud.set_scoreboard(true, 0, Simulation.new(), gametext)
+	var unkeyed: PackedStringArray = hud.get_scoreboard_header_text()
+	assert_eq(unkeyed.size(), 5)
+	if unkeyed.size() == 5:
+		assert_eq(unkeyed[4], "!PgUp and PgDn to change pages", "no keyhelp table: the raw fallback")
+	hud.set_scoreboard(false, 0, null, null)

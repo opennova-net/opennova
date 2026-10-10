@@ -8,14 +8,12 @@ extends RefCounted
 ## @0x4993ae; the drawer gate HUD_DrawKillListIfVisible @0x424300]). This
 ## lane shows or hides the board for that flag.
 ##
-## The shell owns the strings because it owns the string tables: the title
-## from gametext Overlays (with retail's literal fallback), the game-type
-## label from the witnessed Overlays row map, the two count lines from
-## Client, and the paging hint from keyhelp's Text section. Server name and
-## mission title ride the session decode through get_scoreboard.
-
-# The paging hint's literal fallback (the KeyHelp lookup's default string).
-const PAGE_HINT_FALLBACK := "!PgUp and PgDn to change pages"
+## The shell owns the gametext table; the board composes its strings from it
+## natively as the game's drawer does (the engine's
+## hud::scoreboard_header_strings: the title, the game type's rung, the count
+## lines, keyhelp's paging hint through the process's keyhelp table), its
+## server and mission rungs and counts from the session decode
+## (Simulation.get_scoreboard).
 
 var _pushed := false      # so the board clears exactly once on close
 
@@ -29,52 +27,17 @@ func update(hud: HudOverlay, world: GameWorld, open: bool, frame_counter: int) -
 		return
 	if not open:
 		if _pushed:
-			hud.set_scoreboard(false, 0, 0, {}, null, null)
+			hud.set_scoreboard(false, 0, null, null)
 			_pushed = false
 		return
 	var sim: Simulation = world.get_sim()
 	if sim == null:
 		return
-	var board := sim.get_scoreboard()
 	_pushed = true
-	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
-	var strings := {
-		# [orig: GameText_GetStringWithFallback(Strings.SECTION_OVERLAYS,
-		#  "STROVER_KILLLIST", "!Kill List") @0x423a75]
-		"title": "!Kill List",
-		# [orig: KeyHelp_GetStringWithFallback("Text", "CHANGE_SCREEN",
-		#  "!PgUp and PgDn to change pages") @0x424272]
-		"footer": PAGE_HINT_FALLBACK,
-		"server": board.server,
-		"mission": board.mission,
-	}
-	var game_type := board.game_type
-	if table != null:
-		if table.has_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_KILLLIST"):
-			strings["title"] = table.get_string_in_section(Strings.SECTION_OVERLAYS, "STROVER_KILLLIST")
-		# The key map is retail's own, engine-owned (base/gameprofile game_type.h
-		# overlay_label_key via NetProtocol) — this lane only looks it up.
-		var label_key := NetProtocol.game_type_overlay_label_key(game_type)
-		if label_key != "" and table.has_string_in_section(Strings.SECTION_OVERLAYS, label_key):
-			strings["game_type"] = table.get_string_in_section(Strings.SECTION_OVERLAYS, label_key)
-		# "<label> <count>": the counts are engine-computed — the players
-		# count is replication's witnessed rows-minus-spectators header arithmetic
-		# (scoreboard_header); this lane only pairs them with the strings.
-		var spectators := board.spectators
-		if table.has_string_in_section(Strings.SECTION_CLIENT, "STRCLI04"):
-			strings["players"] = "%s %d" % [
-					table.get_string_in_section(Strings.SECTION_CLIENT, "STRCLI04"),
-					board.players]
-		if spectators > 0 and table.has_string_in_section(Strings.SECTION_CLIENT, "STRCLI23"):
-			strings["spectators"] = "%s %d" % [
-					table.get_string_in_section(Strings.SECTION_CLIENT, "STRCLI23"), spectators]
-		# The paging hint is a keyhelp lookup (the KeyHelp fallback getter reads
-		# g_TextKeyHelp), which answers only once gametext is loaded: this gate.
-		strings["footer"] = Strings.lookup_or(Strings.TABLE_KEYHELP, "Text", "CHANGE_SCREEN",
-				PAGE_HINT_FALLBACK)
-	# The rows never round-trip through script: the overlay pulls them (and the
-	# team count the 4-team page reads) natively from the sim
-	# (HudOverlay.set_scoreboard -> fill_scoreboard), with the drawers' own
-	# gametext lookups resolved natively off the table; the frame counter is
-	# the HUD tick the engine's page alternates on (hud_scoreboard.h).
-	hud.set_scoreboard(true, game_type, frame_counter, strings, sim, table)
+	# Nothing round-trips through script: the overlay pulls the session header,
+	# the rows and the team count the 4-team page reads natively from the sim
+	# (HudOverlay.set_scoreboard -> get_scoreboard, fill_scoreboard), with the
+	# strings and the drawers' own gametext lookups resolved natively off the
+	# table; the frame counter is the HUD tick the engine's page alternates on
+	# (hud_scoreboard.h).
+	hud.set_scoreboard(true, frame_counter, sim, Strings.get_table(Strings.TABLE_GAMETEXT))
