@@ -295,8 +295,11 @@
   `Threedi3di3` (engine/formats/threedi/threedi_3di3.h) and that parsed struct IS
   the model every runtime consumer walks; the native parity writer accepts the same
   struct. There is no
-  intermediate model representation, and the GP-era (GPM/GPS/GPP) reader/writer is gone —
-  the format knowledge lives in docs/threedi/3di-gp-format-re.md. Shared derivations are
+  intermediate model representation. A BHD-era GP model (GPM/GPS/GPP) is read only to be
+  migrated to 3DI3 (`engine/formats/threedi_gp`: `threedi_gp.h` the reader,
+  `threedi_gp_migrate.h` the one-way migration `opennova-3di migrate` and the editor's
+  import run; nothing writes GP, nothing at runtime walks it; ADR 0027 as amended,
+  docs/threedi/3di-gp-format-re.md §5). Shared derivations are
   3DI3-native helpers in that header (userpoint decode, collision run prefix sums +
   runtime-safety validation, `threedi_3di3_ground_anchor`); load-time fixups (the CFAC
   normal-run resolve) happen at the consumer, where retail's loader performs them.

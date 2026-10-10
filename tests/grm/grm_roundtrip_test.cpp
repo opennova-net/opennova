@@ -1,8 +1,13 @@
 // AUTHORED: fixtures/grm/person.grm is a four-vertex facial texture mesh
 // written for these tests, with no retail bytes. Its layout follows the
 // witnessed writer @0x588320. Canonical roundtrip compares the complete bytes.
+// The retail leg reads the faces Black Hawk Down ships (JO ships none), which
+// the reference tree mirrors under fixtures/bhd/grm: BHD's loader is JO's
+// (docs/world/world-wac-ai-re.md, the BHD faces), so each parses and writes
+// back byte for byte.
 #include <formats/grm/grm.h>
 #include "common/file_io.h"
+#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 
@@ -17,9 +22,42 @@ bool parse_text(const std::string &text, grm::File &file, std::string &error) {
 	return grm::parse(reinterpret_cast<const uint8_t *>(text.data()), text.size(), file, error);
 }
 
+// Every face BHD ships parses and writes back byte for byte; Delta01's counts pin the parse.
+int retail_bhd_faces() {
+	const std::vector<std::string> files = retail::reference_fixture_files("bhd/grm", ".grm");
+	if (files.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/bhd/grm (the faces BHD ships)");
+	int delta01 = 0;
+	for (const std::string &path : files) {
+		const std::vector<uint8_t> bytes = test_io::read_file(path);
+		grm::File file;
+		std::string error;
+		if (!grm::parse(bytes.data(), bytes.size(), file, error)) {
+			std::fprintf(stderr, "%s: %s\n", path.c_str(), error.c_str());
+			return 1;
+		}
+		std::vector<uint8_t> encoded;
+		TEST_EXPECT(grm::write(file, encoded, error));
+		if (encoded != bytes) {
+			std::fprintf(stderr, "%s: the rewrite differs from the shipped bytes\n", path.c_str());
+			return 1;
+		}
+		if (path.size() >= 11 && path.compare(path.size() - 11, 11, "Delta01.grm") == 0) {
+			TEST_EXPECT(file.vertices.size() == 108 && file.triangles.size() == 143);
+			TEST_EXPECT(file.gestures.size() == 9 && file.gestures[0].name == "Sad");
+			TEST_EXPECT(file.gestures[0].parameters.size() == 22);
+			TEST_EXPECT(file.saved.author == "rod" && file.saved.year == 2002);
+			++delta01;
+		}
+	}
+	TEST_EXPECT(delta01 == 1);
+	std::printf("grm_roundtrip: %zu BHD faces rewrite byte for byte\n", files.size());
+	return 0;
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	retail::configure_mixed(argc, argv);
 	const auto path = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/grm/person.grm";
 	const std::vector<uint8_t> bytes = test_io::read_file(path);
 	TEST_EXPECT(!bytes.empty());
@@ -89,5 +127,5 @@ int main() {
 	TEST_EXPECT(grm::texture_load_name("eye1", grm::kTextureExtension) == "eye1.TGA");
 	// A person's model's face: the model's name made .GRM.
 	TEST_EXPECT(grm::face_file_name("chars\\soldier.3di") == "soldier.GRM" && grm::face_file_name("Boonie") == "Boonie.GRM");
-	return 0;
+	return retail_bhd_faces();
 }

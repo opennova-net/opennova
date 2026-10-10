@@ -11,6 +11,7 @@
 #include <editor/graph/reference_kinds.h>
 #include <editor/project/project_files.h>
 #include <formats/threedi/threedi_build.h>
+#include <formats/threedi_gp/threedi_gp.h>
 #include <runtime/renderer/material_descriptor.h>
 
 #include "model_document_internal.h"
@@ -346,7 +347,14 @@ bool ModelDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::sh
 	}
 	const assets::Model base = assets::parse_model(bytes.data(), bytes.size());
 	if (!base) {
-		error = make_finding(CoreFinding::DocumentParse, DiagnosticSeverity::Error, "The model could not be read.", path());
+		// A Black Hawk Down GP model: the game reads 3DI3 only, so it is migrated as it comes in
+		// (an import of the file from the disk, import/converter.h).
+		const bool gp = threedi_gp::detect(bytes.data(), bytes.size()) != threedi_gp::Kind::None;
+		error = make_finding(CoreFinding::DocumentParse, DiagnosticSeverity::Error,
+		                     gp ? "This is a Black Hawk Down (GP) model, which the game does not load: import the file "
+		                          "from the disk again, replacing this one, to migrate it to 3DI3."
+		                        : "The model could not be read.",
+		                     path());
 		return false;
 	}
 	auto row = std::make_shared<ModelRow>();

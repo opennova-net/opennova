@@ -394,6 +394,8 @@ enum class CoreFinding {
 	ImportInput,
 	ImportInstall,
 	ImportKind,
+	ImportMigrate,
+	ImportMigrateNote,
 	ImportName,
 	ImportNotPlanned,
 	ImportNotPublished,
