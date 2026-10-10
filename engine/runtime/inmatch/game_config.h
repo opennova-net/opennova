@@ -288,15 +288,10 @@ struct GameConfig {
 	int32_t do_max_ping_check = 0;
 	uint32_t max_ping = 0;
 	// game.cfg `mpreset`: the NovaWorld ServerCommand SetMPReset stores its
-	// argument here, and the host writes it into its process's cfg block and
-	// saves it (host_config.h store_server_command_config,
-	// game_config_block.h); each session create takes the block's word here.
-	// Its reader is the session create: nonzero, the create refuses and the process ends
-	// with code 0 (create_session's ProcessExit); the map change creates no
-	// session and reads nothing.
+	// argument here and saves the config; the shell persists it. Its reader is
+	// the between-round reset policy, not modeled on this host.
 	// [orig: g_GameConfigState.multiplayerReset_344; the SetMPReset arm of the
-	//  ServerCommand handler @0x4D2E28 -> Game_SaveConfig @0x4D2E2D;
-	//  CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0 -> crt_exit(0)]
+	//  ServerCommand handler @0x4D2E28 -> Game_SaveConfig @0x4D2E2D]
 	int32_t multiplayer_reset = 0;
 	// game.cfg `mpmaxpacketsize`: the datagram ceiling of both connection
 	// templates, CS field 13 (the SIGNED ladder of cs_max_packet_bytes: 0 ->
