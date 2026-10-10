@@ -69,6 +69,10 @@ public:
 	// a document view's) have ended their gestures.
 	void begin_frame();
 	void end_frame();
+	// A test's undock (the windowed GUT's, S23 C): the window titled `title` taken off its dock at the next frames'
+	// begin and set at (`x`, `y`) on the desktop, an OS window of its own where the pass has platform windows; at
+	// (x, y) inside the main window, floated there.
+	void float_window(const std::string &title, float x, float y);
 
 	// The oldest pending request; false when none.
 	bool take_request(EditorRequest &out);
@@ -129,6 +133,11 @@ public:
 	void draw_menu_bar_trailing(devtools::ImGuiPass &pass) override;
 
 private:
+	struct Floating {
+		std::string title;
+		float x = 0.0f, y = 0.0f;
+	};
+	Floating floating_; // float_window's, until done
 	// Back and Forward, the menu bar's first items (the navigation history).
 	void draw_navigation(const SessionView &v);
 	void draw_file_menu(const SessionView &v);

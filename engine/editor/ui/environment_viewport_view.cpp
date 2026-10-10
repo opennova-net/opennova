@@ -278,6 +278,35 @@ void EnvironmentViewportView::draw_ready(Workspace &workspace, const ViewportMod
 	if (ui_kit::tool(weather, "Clear", true, "rain(0, 0) and overcast(0, 0): the sky clear at the next tick."))
 		workspace.request(request::set_viewport(model.path(),
 				R"({"kind": "environment", "options": {"rain": {"percent": 0, "seconds": 0}, "overcast": {"percent": 0, "seconds": 0}}})"));
+	// Listen (S23 C): the rain's loops and the lightning's thunder heard at the camera, as the game plays them.
+	const MissionListenOptions &listen = options.listen;
+	if (listen.on) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+	const bool toggled = ui_kit::tool(weather, "Listen", true,
+			listen.on ? std::string("Stop listening.")
+			          : std::string("Hear the weather where the camera stands, as the game plays it: the rain's two loops "
+			                        "beside the listener while it rains, the thunder of the lightning."));
+	if (listen.on) ImGui::PopStyleColor();
+	if (toggled) {
+		MissionListenOptions next = listen;
+		next.on = !next.on;
+		JsonValue change = JsonValue::make_object();
+		change.set("listen", mission_listen_options_to_json(next));
+		set_viewport(workspace, model, "options", std::move(change));
+	}
+	if (listen.on) {
+		const float width = ImGui::GetFontSize() * 5.0f;
+		weather.next(ui_kit::field_width(width, "Volume"));
+		ImGui::SetNextItemWidth(width);
+		float volume = listen.volume;
+		if (ImGui::SliderFloat("Volume", &volume, 0.0f, 1.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp) && volume != listen.volume) {
+			MissionListenOptions next = listen;
+			next.volume = volume;
+			JsonValue change = JsonValue::make_object();
+			change.set("listen", mission_listen_options_to_json(next));
+			set_viewport(workspace, model, "options", std::move(change));
+		}
+		ui_kit::tooltip("The master volume of everything Listen plays (the editor's, not the game's).");
+	}
 	if (model.weather().raining()) {
 		char drops[48];
 		std::snprintf(drops, sizeof(drops), "%d drops", env::PrecipitationField::active_count(channels.rain_pct_fp));
