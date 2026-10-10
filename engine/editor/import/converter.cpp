@@ -2,9 +2,6 @@
 
 #include <sstream>
 
-#include <filesystem>
-#include <system_error>
-
 #include <base/io/strutil.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
@@ -101,16 +98,7 @@ bool run_gp(const std::string &source_name, const std::string &source_path, cons
 	ImportOutput model;
 	model.name = source_name;
 	threedi_gp::MigrateOptions options;
-	if (!source_path.empty()) {
-		std::filesystem::path folder = path_of(source_path).parent_path();
-		if (folder.empty()) folder = ".";
-		options.texture_exists = [folder](const std::string &name) {
-			std::error_code ec;
-			for (const auto &entry : std::filesystem::directory_iterator(folder, ec))
-				if (strutil::iequals(utf8_of(entry.path().filename()), name)) return true;
-			return false;
-		};
-	}
+	if (!source_path.empty()) options.texture_exists = threedi_gp::names_beside(source_path);
 	std::vector<threedi_gp::MigrateNote> notes;
 	if (!threedi_gp::parse(bytes.data(), bytes.size(), file, error) ||
 	    !threedi_gp::migrate(file, model.bytes, notes, error, options)) {

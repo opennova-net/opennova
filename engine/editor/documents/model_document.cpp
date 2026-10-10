@@ -352,7 +352,7 @@ bool ModelDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::sh
 		const bool gp = threedi_gp::detect(bytes.data(), bytes.size()) != threedi_gp::Kind::None;
 		error = make_finding(CoreFinding::DocumentParse, DiagnosticSeverity::Error,
 		                     gp ? "This is a Black Hawk Down (GP) model, which the game does not load: import the file "
-		                          "from the disk to migrate it to 3DI3."
+		                          "from the disk again, replacing this one, to migrate it to 3DI3."
 		                        : "The model could not be read.",
 		                     path());
 		return false;

@@ -395,8 +395,9 @@ private:
 			}
 			loaded = true;
 			cost_ += bytes.size();
-			// A loose file's bytes choose its converter too (a GP model is migrated).
-			converter = converter_for(name, &bytes);
+			// An author's file's bytes choose its converter too (a GP model is migrated), as the
+			// import's do; one a source marks native is copied as the game reads it.
+			if (!source.native) converter = converter_for(name, &bytes);
 			// The folder it sits in (a bare name's is the working folder): where the files it
 			// names are looked for first.
 			std::string folder = utf8_of(path_of(source.path).parent_path());
@@ -420,7 +421,7 @@ private:
 		if (converter) {
 			ImportProduct product;
 			const bool loose = !source.install && source.entry.empty();
-			converter->run(name, loose ? source.path : std::string(), bytes, product);
+			converter->run(name, loose && !source.native ? source.path : std::string(), bytes, product);
 			bool broken = false;
 			for (Diagnostic &d : product.diagnostics) {
 				broken = broken || d.severity == DiagnosticSeverity::Error;

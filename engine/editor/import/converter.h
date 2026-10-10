@@ -33,8 +33,9 @@ struct Converter {
 const std::vector<Converter> &converters();
 // The converter for a source file name, by extension; null when the file is native. A row
 // that claims by bytes takes the source only when `bytes` are given and it claims them: the
-// callers give a loose file's (an author's file from the disk), so a GP model is migrated
-// when imported as a file, never from the game's archives.
+// callers give an author's file's (one chosen from the disk, not a file an import brings as the
+// game's own), in the import and its plan alike, so a GP model is migrated when imported as a
+// file, never from the game's archives or as another file's dependency.
 const Converter *converter_for(const std::string &source_name, const std::vector<uint8_t> *bytes = nullptr);
 
 } // namespace opennova::editor

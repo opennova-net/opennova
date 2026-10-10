@@ -1038,6 +1038,17 @@ static int test_gp_import() {
 	TEST_EXPECT(r.imported.size() == 1 && io::read_file_bytes(root + "/models/native.3di", copied, message));
 	TEST_EXPECT(copied == model);
 
+	// A GP model an import brings as the game's own (native, as a dependency is): copied as it is,
+	// as its plan shows it, never migrated.
+	ImportChoice native_choice;
+	native_choice.path = source + "/crate.3di";
+	native_choice.native = true;
+	native_choice.as = "dependency.3di";
+	r = import_assets({native_choice}, paths, document, false);
+	std::vector<uint8_t> raw;
+	TEST_EXPECT(r.imported.size() == 1 && io::read_file_bytes(root + "/models/dependency.3di", raw, message));
+	TEST_EXPECT(raw == gp);
+
 	// A GP model the reader refuses: nothing written, the reason given.
 	const std::vector<uint8_t> broken(gp.begin(), gp.begin() + 0x100);
 	TEST_EXPECT(editor_test::write_bytes(source + "/broken.3di", broken));
