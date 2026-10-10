@@ -1017,6 +1017,12 @@ void field_cell(Workspace &workspace, Controls &controls, const Document &docume
 			set(workspace, document, {address}, schema.id, picked_value(picking, picked), false);
 	} else {
 		value_control(workspace, controls.typed, document, {address}, field, value, true);
+		// A text reference completes as it is typed, as a field row's box does (DI-09): the names its text
+		// begins, under its cell.
+		std::string picked;
+		if (picks_reference(field) && present &&
+		    controls.picker.draw_completions(workspace, document, address, field, value, picked))
+			set(workspace, document, {address}, schema.id, picked_value(field, picked), false);
 	}
 	if (present) drop_target(workspace, document, {address}, field, value);
 	if (jumps) reference_jumps(workspace, field, value);

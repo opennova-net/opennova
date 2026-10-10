@@ -835,17 +835,6 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 			if (!text_edit::cell(workspace, document, line.address, *field, line.lines)) continue;
 			if (ImGui::IsItemActivated()) select(workspace, document, line.address);
 			if (ImGui::IsItemActive()) editing = line.address;
-			// A text reference completes as it is typed, as a field row's box does (DI-09): the names its text
-			// begins, under its cell.
-			const FieldUse use = document.field_on(line.address, *field);
-			Value value;
-			std::string picked;
-			if (use.reference != ReferenceKind::None && field->type == FieldType::Text &&
-			    document.get(line.address, field->id, value) &&
-			    picker_.draw_completions(workspace, document, line.address, use, value, picked)) {
-				window_requests::set(workspace, document, line.address, field->id, picked, false);
-				window_requests::end_edit(workspace, document.path());
-			}
 		}
 		if (uses) {
 			// How many references of the project's files name it, each listed in the tooltip.
