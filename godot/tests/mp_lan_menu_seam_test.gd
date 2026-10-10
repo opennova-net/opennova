@@ -471,6 +471,27 @@ func test_host_rule_controls_reach_native_session_configuration() -> void:
 	assert_eq(live.mp_attributes, options.mp_attributes)
 
 
+# The hosted session's create clamps the cap into 1..65 before the apply, so
+# a blank MAX_PLAYERS publishes 1 (2 with the dedicated slot) and a dedicated
+# 65+ publishes 66, as opennova-serve's host_session_settings does
+# [orig: CNapiGameSession_BuildAndCreateSession @0x569554 (is_in_session),
+# @0x56955D..0x56955F, @0x56956A..0x56956C; then the apply
+# Game_ApplySessionSettingsToGlobals @0x551b26..0x551b48] (D-NET-335).
+func test_host_session_clamps_the_cap_in_session() -> void:
+	for case in [[0, true, 1, 1], [0, false, 1, 2], [-3, true, 1, 1], [99, false, 65, 66],
+			[66, true, 65, 65], [64, false, 64, 65]]:
+		var options := HostSessionOptions.new()
+		options.max_players = case[0]
+		options.serve_and_play = case[1]
+		var sim := Simulation.new()
+		sim.configure_host_session(options)
+		var live := sim.get_host_session_config()
+		assert_eq(live.max_players, case[2], "cap %d (%s) clamps to %d"
+				% [case[0], "listen" if case[1] else "dedicated", case[2]])
+		assert_eq(live.player_slot_limit, case[3], "cap %d (%s) publishes %d"
+				% [case[0], "listen" if case[1] else "dedicated", case[3]])
+
+
 func test_lan_join_emits_selected_server() -> void:
 	var mp := MpMenuCompanion.new()
 	watch_signals(mp)

@@ -44,12 +44,8 @@ gamecfg::DefaultTexts game_cfg_default_texts(const rtxt::File *gametext) {
 
 HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	// In session, the cap goes into 1..65 before the apply, written back into
-	// the block [orig: CNapiGameSession_BuildAndCreateSession @0x569554
-	// (is_in_session), @0x56955D..0x56955F (below 1 -> 1), @0x56956A..0x56956C
-	// (above 65 -> 65)].
-	constexpr int32_t kSessionCap = static_cast<int32_t>(kMaxPlayersCap);
-	if (cfg.mp_max_players < 1) cfg.mp_max_players = 1;
-	else if (cfg.mp_max_players > kSessionCap) cfg.mp_max_players = kSessionCap;
+	// the block (session_player_cap carries the witness).
+	cfg.mp_max_players = session_player_cap(cfg.mp_max_players);
 
 	HostScreenState host;
 	GameConfig &config = host.config;

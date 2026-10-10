@@ -29,6 +29,13 @@ bool apply_host_dialog_number(GameConfig& config, int32_t& player_limit,
 std::string host_dialog_value(const GameConfig& config, int32_t player_limit,
                               bool serve_and_play, std::string_view control);
 uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play);
+// The session create's cap: in session the cap goes into 1..65 before the apply
+// (host_player_slot_limit), so a blank cap publishes 1 (2 dedicated) and a
+// dedicated 65 the ceiling's 66. Both hosts run it: inmatch::host_session_settings
+// over the cfg block and the game's host request.
+// [orig: CNapiGameSession_BuildAndCreateSession @0x569554 (is_in_session),
+//  @0x56955D..0x56955F (below 1 -> 1), @0x56956A..0x56956C (above 65 -> 65)]
+int32_t session_player_cap(int32_t player_limit);
 // The session apply's two limit substitutions, one rule for the host screen's
 // read and for the game.cfg apply (host_config.h): a cfg point limit of 500
 // is the 65000 no-limit sentinel, and a nonpositive KOTH limit is 0x2222222

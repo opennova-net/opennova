@@ -445,11 +445,13 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 		}
 	}
 	// Server type + player cap (UI host config): serve_and_play gates the host's own-player spawn +
-	// loopback fold at bring-up; max_players is the session-list-advertised cap as the engine's
-	// host_player_slot_limit publishes it (the dedicated slot added, the 65 ceiling, no lower clamp).
+	// loopback fold at bring-up; max_players is the session-list-advertised cap: the session
+	// create's 1..65 clamp (this host is in session), then the engine's host_player_slot_limit
+	// apply (the dedicated slot added).
 	net_.host_serve_and_play = p_options->get_serve_and_play();
 	net_.host_max_players = opennova::inmatch::host_player_slot_limit(
-			p_options->get_max_players(), net_.host_serve_and_play);
+			opennova::inmatch::session_player_cap(p_options->get_max_players()),
+			net_.host_serve_and_play);
 	config.max_players = net_.host_max_players;
 	net_.host_session_config = std::move(config);
 	if (kernel_ && is_host_listening()) {
