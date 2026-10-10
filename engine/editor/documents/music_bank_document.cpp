@@ -383,4 +383,29 @@ std::vector<Diagnostic> validate_music_bank_file(const DocumentBase &document) {
 	return findings;
 }
 
+void music_bank_references(const Document &document, Extracted &out) {
+	const auto *bank_document = dynamic_cast<const MusicBankDocument *>(&document);
+	const MusicBankRow *bank = bank_document ? bank_document->bank_row() : nullptr;
+	if (!bank || bank->ids.lists.empty()) return;
+	std::string scope = document.path();
+	const size_t slash = scope.find_last_of("/\\");
+	if (slash != std::string::npos) scope.erase(0, slash + 1);
+	scope = strutil::to_upper(scope);
+	const std::vector<RecordIds> &ids = bank->ids.lists[0];
+	for (size_t place = 0; place < bank->streams.size() && place < ids.size(); ++place) {
+		const NodeAddress address{bank->id, kStream, ids[place].id};
+		GraphSymbol symbol;
+		symbol.kind = ReferenceKind::MusicStream;
+		symbol.display = std::to_string(place);
+		symbol.name = symbol.display; // NameCase::Exact
+		symbol.value = bank->streams[place].name;
+		symbol.file = document.path();
+		symbol.record = document.record_path(address);
+		symbol.locator = document.locator(address);
+		symbol.address = address;
+		symbol.scope = scope;
+		out.symbols.push_back(std::move(symbol));
+	}
+}
+
 } // namespace opennova::editor

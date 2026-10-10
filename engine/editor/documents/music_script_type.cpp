@@ -143,6 +143,25 @@ std::vector<Diagnostic> validate_music_script_file(const DocumentBase &document)
 	return findings;
 }
 
+void music_script_references(const TextDocument &document, std::vector<TextReference> &out) {
+	mus::MusScript script{};
+	std::vector<mus::MusPlayUse> plays;
+	int line = 0, column = 0;
+	const char *message = nullptr;
+	if (mus::mus_compile_plays(document.text().c_str(), &script, &plays, &line, &column, &message) != 0) return;
+	mus::mus_script_free(&script);
+	const std::string bank = mus::mus_bank_name(document.path());
+	for (const mus::MusPlayUse &play : plays) {
+		TextReference reference;
+		reference.kind = ReferenceKind::MusicStream;
+		reference.value = std::to_string(play.index);
+		reference.scope = bank;
+		reference.span = document.span_at(play.offset, play.length);
+		reference.rewritable = false;
+		out.push_back(std::move(reference));
+	}
+}
+
 const FindingCodeRow &finding_code(MusicScriptFinding code) {
 	return kFindingRows[static_cast<size_t>(code)];
 }
