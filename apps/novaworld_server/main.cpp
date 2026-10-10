@@ -47,8 +47,9 @@ void on_signal(int sig) {
 }
 
 // main() alone owns SIGINT and SIGTERM (Ctrl+C; `docker stop` sends SIGTERM):
-// the handler only raises g_shutdown, and the tick loop then runs the orderly
-// shutdown. The HTTP listener keeps Crow's own signal handling off both.
+// the handler raises g_shutdown (and restores the default action, above), and
+// the tick loop then runs the orderly shutdown. The HTTP listener keeps Crow's
+// own signal handling off both.
 void install_signal_handlers() {
 	std::signal(SIGINT,  on_signal);
 	std::signal(SIGTERM, on_signal);
