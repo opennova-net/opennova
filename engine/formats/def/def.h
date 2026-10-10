@@ -1162,6 +1162,27 @@ typedef struct DefItemDef {
        change carries it along (def_sync_derived), as the game would derive it again. 0 for an
        alias the file names. Appended (layout stability). */
     unsigned char sid_derived;
+    /* The original mission editor's AI keys: the game takes each line as a key it knows and stores
+       nothing [orig: ItemDef_ParseProperty @0x4a1a7b max_attack_dist, @0x4a1a94 max_engagement_dist,
+       @0x4a1aad min_engagement_dist, @0x4a1ac6 fire_timer, each -> the plain return @0x4a1ca6], while the
+       mission editor reads each value with atol into its own item record [orig: JOTACmed.exe
+       ItemsDef_ParseToken @0x4310d0, @0x431a58 -> +0x494, @0x431a89 -> +0x498, @0x431aba -> +0x49C,
+       @0x431aeb -> +0x4A0], seeded 16, 320, 16 and 10 at each `begin` [orig: JOTACmed.exe
+       @0x431159..0x431179], and a record placed of the item takes them [orig: JOTACmed.exe
+       MissionItem_InitFromDefinition @0x44dc46..0x44dcc2; docs/mission/mis-format-re.md]. Appended
+       (layout stability). */
+    int max_attack_dist;
+    int max_engagement_dist;
+    int min_engagement_dist;
+    int fire_timer;
+    /* The mission editor's side words on an item's `attrib:` lines, `Good` and `Evil`: its parse sets bits 1
+       and 2 of its own flags [orig: JOTACmed.exe ItemsDef_ParseToken @0x431682 good, @0x43169f evil] and a
+       record placed of the item takes team 1 for Good, 2 for Evil, Evil over Good [orig: JOTACmed.exe
+       MissionItem_InitFromDefinition @0x44dd51..0x44dd86]. The game's attrib chain matches each word and
+       stores nothing for it [orig: ItemDef_ParseProperty @0x4a06c3 good, @0x4a06db evil -> @0x4a0cea, the
+       next token]. Bytes, as `attrib_parent`. Appended (layout stability). */
+    unsigned char attrib_good;
+    unsigned char attrib_evil;
 } DefItemDef;
 
 /* The file-wide vehicle spawn registry's slots: 'pcvehicle_spawnlist' ids take them in

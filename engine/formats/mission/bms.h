@@ -809,12 +809,35 @@ struct Action {
     int32_t reserved1;
 };
 
+// What a bounding box is to the game: its type, read by the player body's walk over the boxes (the
+// last box holding the body, strictly inside on every axis, sets the value of its type) [orig:
+// Entity_UpdateInfantryPlayerBody @0x4b6024..0x4b614f, the switch @0x4b607e..0x4b608d] and by the WAC's
+// SSNloc (the last type-5 box holding the entity) [orig: WacCmd_SsnLoc @0x4f0efc]. A type outside 1..6
+// is read by neither (the switch's default @0x4b6087): the box does nothing. Shipped: 1 twenty times,
+// 5 twelve.
+enum class BoundingBoxType : int32_t {
+    Health = 1,    // the body's health per tick: ref_id's low word, signed (a drain below 0) [@0x4b6094]
+    Mana = 2,      // the body's mana (+0x120) per tick: ref_id's low word, signed [@0x4b609d]
+    Mission = 3,   // the local player inside leaves for the mission the box's words name: ref_id and
+                   // reserved0 hold its name, eight characters at most, the load adding ".bms"
+                   // [@0x4b60aa..0x4b611e: g_MapFileName, g_MissionExitReason 8; Game_ProcessMainFrame
+                   // @0x526806 pushes the game loop again]
+    Reverb = 4,    // the reverb preset ref_id names, over the header's and an indoor building's [@0x4b612a;
+                   // the select @0x4b633f]
+    Location = 5,  // the location ref_id names: the music's variable 3, the location an indoor building's
+                   // music word overrides, and what SSNloc compares [@0x4b6133, @0x4b62e4, @0x4b634b..
+                   // 0x4b6353; WacCmd_SsnLoc @0x4f0f24]
+    Music4 = 6,    // the music's variable 4 [@0x4b613c, @0x4b62f0]
+};
+inline constexpr int32_t kBoundingBoxMissionNameChars = 8;
+
 struct BoundingBox {
     int32_t min_x, min_y, min_z;       // Fixed-point 16.16
     int32_t max_x, max_y, max_z;
-    int32_t type;                      // shipped values: 1 or 5
-    int32_t ref_id;                    // shipped values: -2/-1 or a positive marker/entity id
-    int32_t reserved0;                 // always zero in the shipped corpus
+    int32_t type;                      // BoundingBoxType (shipped: 1 and 5)
+    int32_t ref_id;                    // the type's value (shipped: -2/-1 and positive locations)
+    int32_t reserved0;                 // a Mission box's name's last four characters; else unread (zero
+                                       // in the shipped corpus)
 };
 
 // One weapon-loadout chunk tuple, kept as the four raw chunk strings so unusual authored

@@ -256,6 +256,13 @@ constexpr MissionChoice kActionTypes[] = {
 
 // Each choice the value of its enum in bms.h, so the names here are those of the values the format
 // reads (bms.h stays the one place the values are).
+// A bounding box's types, by what the player body's walk does with a box of each (bms::BoundingBoxType);
+// None, a type no reader reads (the walk's default and SSNloc's test pass a box of any other).
+constexpr MissionChoice kBoundingBoxTypes[] = {
+	{"None", 0}, {"Health", 1}, {"Mana", 2}, {"Mission", 3}, {"Reverb", 4}, {"Location", 5}, {"Music4", 6}};
+static_assert(kBoundingBoxTypes[3].value == int64_t(bms::BoundingBoxType::Mission) &&
+              kBoundingBoxTypes[6].value == int64_t(bms::BoundingBoxType::Music4));
+
 static_assert(kClimates[2].value == int64_t(bms::ClimateType::Snow) && kWeathers[1].value == int64_t(bms::WeatherType::Rainy));
 static_assert(kMissionTypes[2].value == int64_t(bms::MissionType::TenthMountain));
 static_assert(kAttribFlags[19].value == int64_t(uint32_t(bms::AttribFlags::SearchAndDestroy)) &&
@@ -614,8 +621,8 @@ const MissionField kEntityFields[] = {
 
 using W = bms::WaypointRecord;
 
-// A path's flags, and the count it stores, which a stop put in or taken out writes as its slots
-// (bms_edit's insert_waypoint_stop, D-MIS-6); a flags edit leaves the count as it was read (CP19.bms
+// A path's flags, and the count it stores, which an edit of its stops lays out from its waypoint markers
+// (bms_edit's lay_out_waypoint_path, D-MIS-6); a flags edit leaves the count as it was read (CP19.bms
 // ships one of 39 over its 32 slots, which the runtime walks into the next record's words [orig:
 // AIWaypoint_UpdateTarget @0x457476]).
 const MissionField kWaypointPathFields[] = {
@@ -858,8 +865,35 @@ const MissionField kAvailabilityFields[] = {
 
 using B = bms::BoundingBox;
 
+// A Mission box's name: the eight bytes of its ref_id and reserved0 words, to the first NUL, which the
+// player body copies with a NUL after them before it adds ".bms" [orig: Entity_UpdateInfantryPlayerBody
+// @0x4b60b6..0x4b60ca, the length walk @0x4b60d0..0x4b60df]. A Set writes the name's bytes over both words,
+// zero-padded; a name past eight characters is refused (the game would read eight of it).
+bool get_box_mission(const void *record, MissionValue &out) {
+	const B &box = as<B>(record);
+	char bytes[bms::kBoundingBoxMissionNameChars] = {};
+	std::memcpy(bytes, &box.ref_id, 4);
+	std::memcpy(bytes + 4, &box.reserved0, 4);
+	out = fixed_string(bytes, sizeof(bytes));
+	return true;
+}
+bool set_box_mission(void *record, const MissionValue &value, std::string &error) {
+	const std::string *text = text_of(value, error);
+	if (!text) return false;
+	if (text->size() > size_t(bms::kBoundingBoxMissionNameChars)) {
+		error = "A mission box names a mission of eight characters at most: the game reads its two words alone.";
+		return false;
+	}
+	char bytes[bms::kBoundingBoxMissionNameChars] = {};
+	std::memcpy(bytes, text->data(), text->size());
+	B &box = as<B>(record);
+	std::memcpy(&box.ref_id, bytes, 4);
+	std::memcpy(&box.reserved0, bytes + 4, 4);
+	return true;
+}
+
 // [orig: Mission_LoadBMSFile's bounding-box block @0x40fcf4: the min / max corners in natural axis order,
-// a type and the id it refers to]
+// a type and its value; the readers bms::BoundingBoxType's]
 const MissionField kBoundingBoxFields[] = {
 	{MissionRecord::BoundingBox, "min_x", MissionFieldType::Fixed, 0, 0, 0, nullptr, 0, false,
 	 get_fixed<B, &B::min_x>, set_fixed<B, &B::min_x>},
@@ -873,10 +907,14 @@ const MissionField kBoundingBoxFields[] = {
 	 get_fixed<B, &B::max_y>, set_fixed<B, &B::max_y>},
 	{MissionRecord::BoundingBox, "max_z", MissionFieldType::Fixed, 0, 0, 0, nullptr, 0, false,
 	 get_fixed<B, &B::max_z>, set_fixed<B, &B::max_z>},
-	{MissionRecord::BoundingBox, "type", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
-	 get_number<B, int32_t, &B::type>, set_cast<B, int32_t, &B::type>},
+	{MissionRecord::BoundingBox, "type", MissionFieldType::Integer, 0, kI32Min, kI32Max, MISSION_CHOICES(kBoundingBoxTypes),
+	 false, get_number<B, int32_t, &B::type>, set_cast<B, int32_t, &B::type>, true},
 	{MissionRecord::BoundingBox, "ref_id", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
 	 get_number<B, int32_t, &B::ref_id>, set_cast<B, int32_t, &B::ref_id>},
+	{MissionRecord::BoundingBox, "mission", MissionFieldType::Text, size_t(bms::kBoundingBoxMissionNameChars), 0, 0,
+	 nullptr, 0, false, get_box_mission, set_box_mission},
+	{MissionRecord::BoundingBox, "reserved0", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
+	 get_number<B, int32_t, &B::reserved0>, set_cast<B, int32_t, &B::reserved0>},
 };
 
 #undef MISSION_CHOICES

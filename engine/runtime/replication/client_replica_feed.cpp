@@ -27,6 +27,7 @@
 #include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
 #include <runtime/world/entity.h> // retail_pool_capacity (the SPECTATORTARGET gate)
 
+#include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 #include <base/io/byte_reader.h>
 #include <algorithm>
@@ -50,8 +51,10 @@ void ClientReplicaPipeline::apply_text_command(const std::vector<uint8_t> &body)
     const std::vector<std::string> tokens = tokenize_quoted(text);
     if (tokens.empty()) return;
     const std::string &command = tokens[0];
+    // Each argument is the CRT atol (io::retail_atol: the locale's white space, 0xA0
+    // included, saturating at 32 bits; D-NET-384) [orig: _atol @0x429ee5 .. @0x42a004].
     const auto atol_arg = [&tokens](std::size_t i) {
-        return static_cast<int32_t>(std::strtol(tokens[i].c_str(), nullptr, 10));
+        return io::retail_atol(tokens[i].c_str());
     };
     if (strutil::iequals(command, "SETFLASH1")) {
         // Timer A = atol(n), or 16 with no argument [orig: @0x429ee5 /

@@ -618,7 +618,8 @@ set_tests_properties(teammate_spawn PROPERTIES SKIP_RETURN_CODE 77 LABELS retail
 
 add_executable(infantry_spawn_test world/infantry_spawn_test.cpp)
 target_link_libraries(infantry_spawn_test PRIVATE opennova_runtime)
-add_test(NAME infantry_spawn COMMAND infantry_spawn_test)
+target_include_directories(infantry_spawn_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(infantry_spawn COMMAND infantry_spawn_test)
 
 add_executable(teammate_operations_test world/teammate_operations_test.cpp)
 target_link_libraries(teammate_operations_test PRIVATE opennova_runtime)
@@ -3800,8 +3801,10 @@ endif()
 
 # The server binary's signal shutdown: SIGINT and SIGTERM each run main()'s
 # orderly stop (exit 0, listeners in order, the WAL closed) with the HTTP layer
-# on or off; with it on, past Crow and a held-open request. POSIX only (fork,
-# kill); TIMEOUT bounds it should the child hang, and the child dies with it.
+# on or off; with it on, past Crow and a held-open request. A last run checks
+# that on every port 0 the gate (and the NW UDP SessionInit) advertise the
+# ports the sibling listeners bound. POSIX only (fork, kill); TIMEOUT bounds it
+# should the child hang, and the child dies with it.
 if(UNIX)
     add_executable(opennova_novaworld_server_signal_shutdown_test
         novaworld/server_signal_shutdown_test.cpp)

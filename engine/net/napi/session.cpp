@@ -1,6 +1,7 @@
 #include <net/napi/session.h>
 
 #include <base/io/cp1252.h> // cp1252_isspace
+#include <base/io/crt_ftol.h> // retail_atol
 #include <base/io/strutil.h>
 
 #include <cstdlib>
@@ -149,10 +150,12 @@ constexpr ServerMsgCodeRow kServerMsgCodeTable[] = {
 static_assert(sizeof(kServerMsgCodeTable) / sizeof(kServerMsgCodeTable[0]) == 0x34,
               "the witnessed 52-row table");
 
-// The retail atol over a param value: strtol base 10 (leading whitespace and sign tolerant,
-// trailing garbage ignored, non-numeric text reads as 0).
+// The retail atol over a param value (io::retail_atol: the locale's leading white space,
+// 0xA0 included, a sign, trailing garbage ignored, non-numeric text reading 0, saturating at
+// 32 bits; D-NET-384). [orig: _atol @0x76AB0A from CNapiGameSession_HandleVerifyResponse
+//  @0x4D1E00, HandleHostVerifyResponse @0x4D59D0 and HandlePuntNotification @0x4D20B0]
 int atol_field(const NapiField &f) {
-	return static_cast<int>(std::strtol(field_to_string(f).c_str(), nullptr, 10));
+	return io::retail_atol(field_to_string(f).c_str());
 }
 
 NapiField str_field(const char *name, const std::string &value) {
