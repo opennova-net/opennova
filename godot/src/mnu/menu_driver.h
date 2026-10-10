@@ -328,6 +328,11 @@ public:
 	void activate(int p_id);
 	void spin_cycle(int p_id, int p_delta);
 	String spin_value_attr(int p_id) const;
+	// A spin list's row enabled or disabled (MenuRuntime::set_item_enabled), and the armory class
+	// spin's rows by the host's class mask (engine menu::enable_class_rows).
+	void set_item_enabled(int p_id, int p_row, bool p_enabled) { runtime_.set_item_enabled(p_id, p_row, p_enabled); }
+	bool is_item_enabled(int p_id, int p_row) const { return runtime_.is_item_enabled(p_id, p_row); }
+	void enable_class_rows(int p_id, int p_class_allow_mask);
 	// One ACTION row run as the current screen's (MenuRuntime::dispatch_action).
 	bool dispatch_action_row(const Ref<MnuActionRow> &p_action);
 	// Direct play seam (voice preview etc.); emits sound_requested always.

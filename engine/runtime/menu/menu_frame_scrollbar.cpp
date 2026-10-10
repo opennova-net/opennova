@@ -806,24 +806,26 @@ MenuFrameCompiler::MouseClaim MenuFrameCompiler::pump_popup_mouse(
 }
 
 // [orig: CComboWnd_Render @ 0x65c05b..0x65c083 — this[183] = row_text(list,
-// selected_row(list)); CStaticWnd_DrawLabel; restore. Text-only: image/color
-// rows contribute their stored text (possibly empty).]
+// selected_row(list)); CStaticWnd_DrawLabel; restore.] The row shown is the list's selected one, else
+// its first [orig: sub_644590 @ 0x644590, the first row of style 3, else 0; sub_6447C0 @ 0x6447c0
+// reads its text]; every row is text (a list's rows draw no image or colour, build_items).
 std::string MenuFrameCompiler::combo_face_text(const WidgetNode &node,
 		const MenuWidgetState *ws) const {
 	const int selected = ws != nullptr ? ws->selected_item : 0;
+	const auto shown = [selected](int count) { return selected >= 0 && selected < count ? selected : 0; };
 	if (ws != nullptr && ws->has_items) {
-		if (selected < 0 || selected >= static_cast<int>(ws->items.size())) {
+		if (ws->items.empty()) {
 			return std::string();
 		}
-		return ws->items[static_cast<size_t>(selected)];
+		return ws->items[static_cast<size_t>(shown(static_cast<int>(ws->items.size())))];
 	}
 	const mnu::Window &w = *node.window;
 	const std::vector<WidgetNode::ItemVisual> &rows =
 			(w.list_box && w.list_box->items.present) ? node.popup_items : node.items;
-	if (selected < 0 || selected >= static_cast<int>(rows.size())) {
+	if (rows.empty()) {
 		return std::string();
 	}
-	return rows[static_cast<size_t>(selected)].text;
+	return rows[static_cast<size_t>(shown(static_cast<int>(rows.size())))].text;
 }
 
 // A list-like widget's row as it displays: the runtime rows when seeded, else

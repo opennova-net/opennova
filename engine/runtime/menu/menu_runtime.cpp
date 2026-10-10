@@ -174,6 +174,21 @@ void MenuDocIndex::build(const mnu::Document &doc) {
 			roots.push_back(add_window_(root, screen_id, static_cast<int>(i)));
 		nodes_[static_cast<size_t>(screen_id - 1)].child_ids = std::move(roots);
 	}
+	// The parts after every window the screens hold, so no window's id moves: each part a window
+	// of its owner's, and what it holds, its children and its own parts (mnu::part_windows), which a
+	// by-name lookup reaches through the part [orig: CWnd_FindChildByName @ 0x646850]. A part is no
+	// child the frame walks (its owner draws it), so no child_ids lists it.
+	for (size_t at = 0; at < nodes_.size(); ++at) {
+		const mnu::Window *owner = nodes_[at].window;
+		if (owner == nullptr) continue;
+		const int owner_id = nodes_[at].id;
+		const int screen_index = nodes_[at].screen_index;
+		for (const mnu::PartWindow &part : mnu::part_windows(*owner)) {
+			const int part_id = add_window_(*part.window, owner_id, screen_index);
+			nodes_[static_cast<size_t>(part_id - 1)].part_name = part.name;
+			nodes_[at].part_ids.push_back(part_id);
+		}
+	}
 }
 
 const MenuDocIndex::Node *MenuDocIndex::node(int id) const {
@@ -250,15 +265,18 @@ void MenuRuntime::index_document_() {
 	}
 }
 
+// A window and what it holds: its children, then its parts, each a window of the screen under the
+// NAME a lookup finds it by (a part's fixed one) [orig: CWnd_FindChildByName @ 0x646850].
 void MenuRuntime::index_widget_subtree_(const std::string &screen_name, int id) {
 	const MenuDocIndex::Node *node = index_.node(id);
 	if (node == nullptr || node->window == nullptr) return;
 	WidgetInfo info;
 	info.screen = screen_name;
-	info.name = node->window->name;
+	info.name = node->part_name != nullptr ? std::string(node->part_name) : node->window->name;
 	info.kind = static_cast<int>(node->window->type);
 	id_info_[id] = std::move(info);
 	for (int child : node->child_ids) index_widget_subtree_(screen_name, child);
+	for (int part : node->part_ids) index_widget_subtree_(screen_name, part);
 }
 
 int MenuRuntime::current_screen_id() const {
@@ -369,26 +387,38 @@ void MenuRuntime::configure_frame_() {
 // authored order) — the documented seam contract on the frame compiler.
 void MenuRuntime::rebuild_index_maps_() {
 	id_of_index_.clear();
+	part_id_of_index_.clear();
 	index_of_id_.clear();
 	const int screen_id = current_screen_id();
 	if (screen_id < 0) return;
 	// Every root window of the screen, in document order (the frame's roots).
 	if (const MenuDocIndex::Node *screen = index_.node(screen_id))
-		for (int root : screen->child_ids) map_widget_subtree_(root);
+		for (int root : screen->child_ids) map_widget_subtree_(root, id_of_index_);
+	// Then the spin lists' arrows, as the frame builds them past the screen's windows: each spin
+	// list in the walk's order, its SPINUP and what it holds, then its SPINDOWN (MenuFrameCompiler::
+	// configure); so a window a lookup finds in an arrow is acted on as retail acts on it. A
+	// combo's LIST_BOX and a SCROLLBAR the frame draws as their owner's, with no index of their own.
+	for (int id : id_of_index_) {
+		const MenuDocIndex::Node *node = index_.node(id);
+		if (node == nullptr || node->window == nullptr || node->window->type != mnu::WindowType::SpinList)
+			continue;
+		for (int part : node->part_ids) map_widget_subtree_(part, part_id_of_index_);
+	}
 }
 
-void MenuRuntime::map_widget_subtree_(int id) {
+void MenuRuntime::map_widget_subtree_(int id, std::vector<int> &out) {
 	const MenuDocIndex::Node *node = index_.node(id);
 	if (node == nullptr) return;
-	index_of_id_[id] = static_cast<int>(id_of_index_.size());
-	id_of_index_.push_back(id);
-	for (int child : node->child_ids) map_widget_subtree_(child);
+	index_of_id_[id] = static_cast<int>(id_of_index_.size() + part_id_of_index_.size());
+	out.push_back(id);
+	for (int child : node->child_ids) map_widget_subtree_(child, out);
 }
 
 // Replay the document-id state onto the fresh compile's index map.
 void MenuRuntime::replay_state_() {
-	for (size_t i = 0; i < id_of_index_.size(); ++i) {
-		const MenuWidgetRuntimeState *state = saved_state_(id_of_index_[i]);
+	const size_t count = id_of_index_.size() + part_id_of_index_.size();
+	for (size_t i = 0; i < count; ++i) {
+		const MenuWidgetRuntimeState *state = saved_state_(id_at_index(static_cast<int>(i)));
 		if (state == nullptr || state->empty()) continue;
 		const int index = static_cast<int>(i);
 		if (state->has_shown) frame_->set_widget_shown_override(index, state->shown);
@@ -403,6 +433,7 @@ void MenuRuntime::replay_state_() {
 					state->scroll_range.maximum, state->scroll_range.page,
 					state->scroll_range.value);
 		if (state->has_selected_set) frame_->set_widget_selected_set(index, state->selected_set);
+		if (state->has_disabled_items) frame_->set_widget_disabled_items(index, state->disabled_items);
 		if (state->has_table_columns)
 			frame_->set_widget_table_columns(index, true, state->table_columns,
 					state->table_sort_column);
@@ -480,8 +511,11 @@ int MenuRuntime::frame_index(int id) const {
 }
 
 int MenuRuntime::id_at_index(int index) const {
-	if (index < 0 || index >= static_cast<int>(id_of_index_.size())) return -1;
-	return id_of_index_[static_cast<size_t>(index)];
+	if (index < 0) return -1;
+	const size_t at = static_cast<size_t>(index);
+	if (at < id_of_index_.size()) return id_of_index_[at];
+	if (at - id_of_index_.size() < part_id_of_index_.size()) return part_id_of_index_[at - id_of_index_.size()];
+	return -1;
 }
 
 MenuWidgetRuntimeState &MenuRuntime::state_of_(int id) {
@@ -614,11 +648,17 @@ void MenuRuntime::set_widget_items(int id, const std::vector<std::string> &items
 	const bool had_set = state.has_selected_set;
 	state.selected_set.clear();
 	state.has_selected_set = false;
+	// Every row is new, its flags written anew: none disabled [orig: CSpinListWnd_InsertItem
+	// @ 0x64b84c].
+	const bool had_disabled = state.has_disabled_items;
+	state.disabled_items.clear();
+	state.has_disabled_items = false;
 	const int index = frame_index(id);
 	if (index >= 0) {
 		frame_->set_widget_items(index, items);
 		frame_->set_widget_selection(index, state.selected_item, -1, 0);
 		if (had_set) frame_->set_widget_selected_set(index, std::vector<int>());
+		if (had_disabled) frame_->set_widget_disabled_items(index, std::vector<uint8_t>());
 	}
 }
 
@@ -684,6 +724,27 @@ void MenuRuntime::select_row(int id, int row, bool emit) {
 	const int index = frame_index(id);
 	if (index >= 0) frame_->set_widget_selection(index, row, -1, scroll_row);
 	if (emit) emit_value_changed_for_(id, row);
+}
+
+// [orig: CSpinListWnd_SetItemEnabled @ 0x64bbd0: a row in [0, count) (@ 0x64bbde) has bit 2 of its
+// flags cleared to enable it (@ 0x64bc14), set to disable it (@ 0x64bc26)]
+void MenuRuntime::set_item_enabled(int id, int row, bool enabled) {
+	if (row < 0 || row >= item_count(id)) return;
+	MenuWidgetRuntimeState &state = state_of_(id);
+	if (state.disabled_items.size() <= static_cast<size_t>(row)) {
+		if (enabled) return;
+		state.disabled_items.resize(static_cast<size_t>(row) + 1, 0);
+	}
+	state.disabled_items[static_cast<size_t>(row)] = enabled ? 0 : 1;
+	state.has_disabled_items = true;
+	const int index = frame_index(id);
+	if (index >= 0) frame_->set_widget_disabled_items(index, state.disabled_items);
+}
+
+bool MenuRuntime::is_item_enabled(int id, int row) const {
+	const MenuWidgetRuntimeState *state = saved_state_(id);
+	if (state == nullptr || row < 0 || static_cast<size_t>(row) >= state->disabled_items.size()) return true;
+	return state->disabled_items[static_cast<size_t>(row)] == 0;
 }
 
 int MenuRuntime::selected_row(int id) const {
@@ -1271,10 +1332,22 @@ void MenuRuntime::emit_edit_changed(int id) {
 	emit_(e);
 }
 
+// Each step moves one row, wrapping, and on while the row it reaches is disabled [orig:
+// CSpinListWnd_SelectNext @ 0x64b910, the loop @ 0x64b92d..0x64b957; CSpinListWnd_SelectPrevious
+// @ 0x64b9a0, its wrap to the last row], then the value change (@ 0x64b993). With every row disabled
+// retail's loop never ends; this one stops after a whole turn and changes nothing.
 void MenuRuntime::spin_cycle(int id, int delta) {
 	const int count = item_count(id);
 	if (count <= 0 || delta == 0) return;
-	const int row = ((selected_row(id) + delta) % count + count) % count;
+	const int step = delta > 0 ? 1 : -1;
+	int row = selected_row(id);
+	for (int n = delta > 0 ? delta : -delta; n > 0; --n) {
+		int turn = 0;
+		do {
+			row = ((row + step) % count + count) % count;
+		} while (!is_item_enabled(id, row) && ++turn < count);
+		if (turn == count) return;
+	}
 	select_row(id, row, true);
 }
 
@@ -1598,7 +1671,8 @@ void MenuRuntime::arrow_click_(int id, int arrow) {
 	const mnu::Window *w = index_.window(id);
 	if (w == nullptr) return;
 	const mnu::WindowPart &part = arrow == 1 ? w->spinup : w->spindown;
-	if (!part.present() || part->disabled) return;
+	// The arrow's own enabled flag, the authored one or what code or an ACTION wrote on it.
+	if (!part.present() || is_widget_disabled(index_.id_of(part.get()))) return;
 	const uint32_t generation = open_generation_;
 	pending_requests_.clear();
 	// The arrow's own pump and rows (its NAME is SPINLISTWND_UP / _DOWN [orig:

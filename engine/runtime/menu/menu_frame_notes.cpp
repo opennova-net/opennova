@@ -35,8 +35,7 @@ const CodeRow kCodes[kMenuFrameNoteCodeCount] = {
 	{ Code::ColorTransparent, "color_transparent", Basis::Witnessed },
 	{ Code::StyleVarUnresolved, "style_var_unresolved", Basis::Witnessed },
 	{ Code::TypeUnknown, "type_unknown", Basis::Witnessed },
-	{ Code::TypeInteriorDeferred, "type_interior_deferred", Basis::Deferred },
-	{ Code::ItemKindNotDrawn, "item_kind_not_drawn", Basis::Deferred },
+	{ Code::ItemKindAsText, "item_kind_as_text", Basis::Witnessed },
 	{ Code::TableCellsDeferred, "table_cells_deferred", Basis::Deferred },
 	{ Code::TableCellsCustom, "table_cells_custom", Basis::Witnessed },
 	{ Code::ScrollExtentDefault, "scroll_extent_default", Basis::Witnessed },
@@ -225,9 +224,6 @@ void MenuFrameCompiler::note_window_(const mnu::Window &w) const {
 	if (w.type == mnu::WindowType::Window && !w.type_token.empty() && !iequals(w.type_token, "window")) {
 		note_(Code::TypeUnknown, w.type_token, nullptr, -1, "type");
 	}
-	if (w.type == mnu::WindowType::RadioEdit) {
-		note_(Code::TypeInteriorDeferred, mnu::window_type_name(w.type), nullptr, -1, "type");
-	}
 	note_var_(w.font.name, nullptr, -1, "font.name");
 	note_color_(w.font.default_fg, true, nullptr, -1, "font.default_fg");
 	note_color_(w.font.mouseover_fg, true, nullptr, -1, "font.mouseover_fg");
@@ -242,18 +238,20 @@ void MenuFrameCompiler::note_window_(const mnu::Window &w) const {
 	if (w.type == mnu::WindowType::Scroll && !w.has_scroll_extent) {
 		note_(Code::ScrollExtentDefault, "20", nullptr, -1, "scroll_extent");
 	}
-	// A list's and a combo's rows draw their text only (D-MNU-5).
+	// A list's and a combo's rows of TYPE IMAGE or COLOR are the text written for them, which the row
+	// draws as its label [orig: CListWnd_ParseXMLDefinition @ 0x645b0f..0x645b26, the literal row
+	// @ 0x645c1b..0x645c6f; CListWnd_DrawItems @ 0x643f30] (MenuFrameCompiler::configure, build_items).
 	if (w.type == mnu::WindowType::List || w.type == mnu::WindowType::LanList) {
 		for (size_t i = 0; i < w.items.items.size(); ++i) {
 			if (is_image_or_color_item(w.items.items[i])) {
-				note_(Code::ItemKindNotDrawn, w.items.items[i].type, "items.item", static_cast<int>(i), "type");
+				note_(Code::ItemKindAsText, w.items.items[i].type, "items.item", static_cast<int>(i), "type");
 			}
 		}
 	}
 	if (w.type == mnu::WindowType::Combo && w.list_box) {
 		for (const mnu::Item &item : w.list_box->items.items) {
 			if (is_image_or_color_item(item)) {
-				note_(Code::ItemKindNotDrawn, item.type, "list_box", 0, "");
+				note_(Code::ItemKindAsText, item.type, "list_box", 0, "");
 				break;
 			}
 		}

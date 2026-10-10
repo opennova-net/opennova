@@ -178,6 +178,8 @@ public:
 	// add_row_values / marquee content, now engine state).
 	void set_widget_items(int p_index, const PackedStringArray &p_items);
 	void set_widget_selected_set(int p_index, const PackedInt32Array &p_rows);
+	// A spin list's rows the game disabled (MenuWidgetState::disabled_items), C++ only.
+	void set_widget_disabled_items(int p_index, const std::vector<uint8_t> &p_rows);
 	// TABLE rows (menu_table_row.h) and the table's custom-draw handler (the
 	// CUSTOM_DRAW cells' control callback), C++ only.
 	void set_widget_table_rows(int p_index,

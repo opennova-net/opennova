@@ -116,6 +116,11 @@ struct FakeFrame : MenuFrameSeam {
 		for (int r : rows) s += " " + std::to_string(r);
 		note(s);
 	}
+	void set_widget_disabled_items(int i, const std::vector<uint8_t> &rows) override {
+		std::string s = "disabled_items " + std::to_string(i);
+		for (uint8_t r : rows) s += r ? " 1" : " 0";
+		note(s);
+	}
 	void set_widget_table_rows(int i, const std::vector<MenuTableRow> &rows) override {
 		note("rows " + std::to_string(i) + " " + std::to_string(rows.size()));
 		table_rows[i] = rows;
@@ -351,7 +356,8 @@ void test_index_and_frameless() {
 	CHECK(!rt.open_document(nullptr, "main.mnu", ""));
 	CHECK(rt.open_document(&doc, "main.mnu", "nope"));
 	CHECK(rt.current_screen() == "MAIN");
-	CHECK(rt.index().node_count() == 20);
+	// The 20 windows and screens, then the three parts (the combo's LIST_BOX, the spin list's arrows).
+	CHECK(rt.index().node_count() == 23);
 	CHECK(rt.index().screen_ids() == (std::vector<int>{ 1, 17 }));
 	CHECK(rt.index().screen_root_id(17) == 18);
 	// The tree the document binding reads through: a screen container has no
@@ -363,7 +369,14 @@ void test_index_and_frameless() {
 			rt.index().node(2)->child_ids.size() == 14 && rt.index().node(2)->child_ids[1] == 4);
 	CHECK(rt.index().screen(1) != nullptr && rt.index().screen(2) == nullptr &&
 			rt.index().screen_root_id(2) == -1 && rt.index().node(0) == nullptr &&
-			rt.index().node(21) == nullptr);
+			rt.index().node(24) == nullptr);
+	// A part is numbered after every window, its owner's and no child the frame walks, found by its
+	// fixed NAME [orig: CWnd_FindChildByName @ 0x646850; sub_65BF60 @ 0x65bf8f;
+	// CSpinListWnd_CreateUpDownChildren @ 0x64b8fe].
+	CHECK(rt.index().node(21)->parent_id == 8 && rt.index().window(21) == rt.index().window(8)->list_box.get() &&
+			rt.index().node(8)->child_ids.empty());
+	CHECK(rt.find_control("", "listbox_wnd") == 21 && rt.find_control("", "SPINLISTWND_DOWN") == 23 &&
+			rt.index().node(23)->parent_id == 9);
 	// The name seam: the current screen's control first (case-insensitive), else
 	// the first screen holding one.
 	CHECK(rt.widget_id("play") == 3 && rt.widget_id("PLAY") == 3);
@@ -1414,6 +1427,120 @@ void test_host_dialog() {
 	CHECK(!host.can_start() && host.selected_missions().empty());
 }
 
+// A spin list's rows the game enables and disables [orig: CSpinListWnd_SetItemEnabled @ 0x64bbd0]: a
+// row out of range changes nothing, the spin steps past a disabled row both ways [orig:
+// CSpinListWnd_SelectNext @ 0x64b910, CSpinListWnd_SelectPrevious @ 0x64b9a0], fresh rows are all
+// enabled [orig: CSpinListWnd_InsertItem @ 0x64b84c]; and a window a lookup finds in a part is a
+// window of its screen the runtime acts on [orig: CWnd_FindChildByName @ 0x646850]: any part by its
+// fixed NAME and screen, a spin arrow by a frame index past the screen's windows, as the frame builds
+// the arrows (MenuFrameCompiler::configure).
+void test_spin_rows_enabled_and_parts() {
+	auto doc = make_document();
+	FakeFrame frame;
+	seed_counts(frame);
+	MenuRuntime rt;
+	Recorder rec;
+	rt.set_frame(&frame);
+	rt.set_sink([&rec](const MenuEvent &e) { rec.events.push_back(e); });
+	CHECK(rt.open_document(&doc, "MAIN.MNU", "main"));
+	const int spin = 9;
+	frame.log.clear();
+	rt.set_item_enabled(spin, 1, false);
+	CHECK(frame.saw("disabled_items 7 0 1"));
+	CHECK(!rt.is_item_enabled(spin, 1) && rt.is_item_enabled(spin, 0) && rt.is_item_enabled(spin, 2));
+	frame.log.clear();
+	rt.set_item_enabled(spin, 3, false);
+	rt.set_item_enabled(spin, -1, false);
+	CHECK(frame.log.empty() && rt.is_item_enabled(spin, 3));
+	rt.select_row(spin, 0, false);
+	rec.events.clear();
+	rt.spin_cycle(spin, 1);
+	CHECK(rt.selected_row(spin) == 2 && rec.count(MenuEvent::Kind::ValueChanged) == 1);
+	rt.spin_cycle(spin, -1);
+	CHECK(rt.selected_row(spin) == 0);
+	rt.spin_cycle(spin, -1);
+	CHECK(rt.selected_row(spin) == 2);
+	// Every row disabled: retail's loop never ends; this one changes nothing and emits nothing.
+	rt.set_item_enabled(spin, 0, false);
+	rt.set_item_enabled(spin, 2, false);
+	rec.events.clear();
+	rt.spin_cycle(spin, 1);
+	CHECK(rt.selected_row(spin) == 2 && rec.count(MenuEvent::Kind::ValueChanged) == 0);
+	// The state replays onto a fresh compile of the screen.
+	rt.set_item_enabled(spin, 0, true);
+	rt.navigate_to_screen("OPTIONS");
+	frame.log.clear();
+	rt.pop_screen();
+	CHECK(frame.saw("disabled_items 7 0 1 1"));
+	// Fresh rows: every one enabled.
+	frame.log.clear();
+	rt.set_widget_items(spin, { "a", "b", "c" });
+	CHECK(frame.saw("disabled_items 7") && rt.is_item_enabled(spin, 1) && rt.is_item_enabled(spin, 2));
+
+	// The parts: by their fixed NAMEs, on the screen of their owner.
+	const int list_box = rt.find_control("", "LISTBOX_WND");
+	const int up = rt.find_control("", "SPINLISTWND_UP");
+	const int down = rt.find_control("", "spinlistwnd_down");
+	CHECK(list_box == 21 && up == 22 && down == 23);
+	CHECK(rt.widget_screen_of(list_box) == "MAIN" && rt.widget_screen_of(up) == "MAIN");
+	CHECK(rt.widget_name_of(up) == "SPINLISTWND_UP" && rt.widget_name_of(list_box) == "LISTBOX_WND");
+	// The arrows past the screen's fifteen windows; the LIST_BOX, drawn as its combo's, has none.
+	CHECK(rt.current_screen_ids().size() == 15);
+	CHECK(rt.frame_index(up) == 15 && rt.frame_index(down) == 16 && rt.id_at_index(16) == down);
+	CHECK(rt.frame_index(list_box) == -1 && rt.id_at_index(17) == -1);
+	frame.log.clear();
+	CHECK(rt.dispatch_action(action("WINDOW", "SPINLISTWND_UP", "HIDE")));
+	CHECK(frame.saw("shown 15 0") && !rt.is_widget_shown(up));
+	// A disabled arrow's click steps nothing; enabled again, it steps.
+	rt.select_row(spin, 1, false);
+	rt.set_widget_disabled(down, true);
+	CHECK(frame.saw("disabled 16 1"));
+	rt.on_widget_clicked(7, 2);
+	CHECK(rt.selected_row(spin) == 1);
+	rt.set_widget_disabled(down, false);
+	rt.on_widget_clicked(7, 2);
+	CHECK(rt.selected_row(spin) == 0);
+}
+
+// The callers of the row switch: the host dialog's GAME_TYPE rows, each disabled, then enabled when
+// it is ALL or a mission of the whole list maps to it, then ALL selected [orig:
+// UI_InitHostSettingsDialog @ 0x558ac3..0x558c1b]; the armory's class rows by the host's class mask,
+// bits 5..9 [orig: UI_InitTeamClassSelection @ 0x56739e..0x5673f4].
+void test_row_switch_callers() {
+	auto doc = flow_document();
+	MenuRuntime menu;
+	menu.open_document(&doc, "mp.mnu", "");
+	const int game_type = menu.widget_id("GAME_TYPE");
+	menu.select_row(game_type, 1, false);
+	HostDialog host;
+	host.seed(menu, { { "dm.bms", "Deathmatch", "", game_type::kDeathmatch },
+			{ "sp.bms", "Training", "", game_type::kCoop } });
+	CHECK(menu.is_item_enabled(game_type, 0) && !menu.is_item_enabled(game_type, 1));
+	CHECK(menu.selected_row(game_type) == 0);
+	host.seed(menu, { { "team.bms", "Team", "", game_type::kTeamDeathmatch } });
+	CHECK(menu.is_item_enabled(game_type, 0) && menu.is_item_enabled(game_type, 1));
+
+	mnu::Document armory;
+	mnu::Screen screen;
+	screen.name = "WEAPON";
+	mnu::Window root = widget("ROOT", mnu::WindowType::Window);
+	mnu::Window classes = widget("PLAYER_CLASS", mnu::WindowType::SpinList);
+	classes.items.items = { item("medic", "5"), item("sniper", "6"), item("gunner", "7"),
+		item("rifleman", "8"), item("engineer", "9") };
+	root.children = { classes };
+	screen.roots.push_back(root);
+	armory.screens.push_back(screen);
+	MenuRuntime weapon;
+	weapon.open_document(&armory, "weapon.mnu", "");
+	const int spin = weapon.widget_id("PLAYER_CLASS");
+	enable_class_rows(weapon, spin, (1u << 5) | (1u << 8));
+	CHECK(weapon.is_item_enabled(spin, 0) && !weapon.is_item_enabled(spin, 1) &&
+			!weapon.is_item_enabled(spin, 2) && weapon.is_item_enabled(spin, 3) &&
+			!weapon.is_item_enabled(spin, 4));
+	enable_class_rows(weapon, spin, 0xFFFFu);
+	for (int row = 0; row < 5; ++row) CHECK(weapon.is_item_enabled(spin, row));
+}
+
 // The shipped MISSION_LIST is a LIST whose ITEMS are MULTISELECT: a click keeps a
 // selection set, ADD takes the picked mission, and the rebuilt rows drop the set (its
 // indexes named the old rows), so a second ADD adds nothing and no row stays
@@ -1920,6 +2047,8 @@ int main() {
 	test_shell_flow();
 	test_host_dialog();
 	test_host_dialog_multiselect();
+	test_spin_rows_enabled_and_parts();
+	test_row_switch_callers();
 	test_multiple_roots();
 	test_options_screen();
 	test_options_profile();

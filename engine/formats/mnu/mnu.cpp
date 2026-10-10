@@ -1382,14 +1382,43 @@ const Screen *Document::first_screen() const {
   return screens.empty() ? nullptr : &screens[0];
 }
 
-const Window *find_window(const Window &window, const std::string &name) {
-  // `!name || !window->name` returns before the children are searched; a stricmp match is
-  // the window; else each child in order [orig: CWnd_FindChildByName @ 0x646850].
-  if (name.empty() || window.name.empty()) return nullptr;
-  if (iequals(name, window.name)) return &window;
+std::vector<PartWindow> part_windows(const Window &window) {
+  std::vector<PartWindow> out;
+  const auto add = [&out](const WindowPart &part, const char *name) {
+    if (part.present()) out.push_back({part.get(), name});
+  };
+  switch (window.type) {
+  case WindowType::Combo: add(window.list_box, "LISTBOX_WND"); break;
+  case WindowType::SpinList:
+    add(window.spinup, "SPINLISTWND_UP");
+    add(window.spindown, "SPINLISTWND_DOWN");
+    break;
+  case WindowType::List: add(window.scrollbar, "LISTWND_SCROLL"); break;
+  case WindowType::Table: add(window.scrollbar, "TABLEWND_SCROLL"); break;
+  case WindowType::MultilineEdit: add(window.scrollbar, "MEDITWND_SCROLL"); break;
+  default: break;
+  }
+  return out;
+}
+
+namespace {
+
+// The walk under a window whose NAME, as the search compares it, is `own`: the part's fixed one
+// for a part [orig: CWnd_FindChildByName @ 0x646850].
+const Window *find_window_named(const Window &window, const std::string &own, const std::string &name) {
+  if (name.empty() || own.empty()) return nullptr;
+  if (iequals(name, own)) return &window;
   for (const Window &child : window.children)
-    if (const Window *found = find_window(child, name)) return found;
+    if (const Window *found = find_window_named(child, child.name, name)) return found;
+  for (const PartWindow &part : part_windows(window))
+    if (const Window *found = find_window_named(*part.window, part.name, name)) return found;
   return nullptr;
+}
+
+} // namespace
+
+const Window *find_window(const Window &window, const std::string &name) {
+  return find_window_named(window, window.name, name);
 }
 
 const Window *find_window(const Screen &screen, const std::string &name) {
