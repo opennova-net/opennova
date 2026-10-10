@@ -229,7 +229,7 @@ void DefinitionViewportApplier::apply_weapon_(const opennova::editor::ViewportMo
 	model_->object()->set_visible(!card);
 	arms_->object()->set_visible(!card);
 	// The gun and the arms posed by the first-person channel as the weapon's pump left it, both parts by the one
-	// latch [orig: AnimMap_PlayAnimBySlot @0x40bda0], at its gated ticks (nothing free-runs the playhead).
+	// latch (the original's AnimMap_PlayAnimBySlot @0x40bda0, cited in engine/), at its gated ticks (nothing free-runs the playhead).
 	if (weapon && fire.first() && model.skeleton()) {
 		const opennova::editor::DefinitionWeaponClip clip = fire.clip();
 		for (PreviewModel *part : {model_.get(), arms_.get()}) {

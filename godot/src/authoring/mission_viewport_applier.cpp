@@ -1101,8 +1101,8 @@ void MissionViewportApplier::relight_() {
 	}
 	lights_->set_scene(models, environment_, weather_);
 	lights_dirty_ = true;
-	// Each LGHT record spawned as the mission's start spawns it [orig: Game_StartMission @ 0x525d19 ->
-	// Game_SpawnAllEntityGlowEffects @ 0x5227b0 -> Entity_SpawnGlowEffects @ 0x56c7c0]; none with the layer
+	// Each LGHT record spawned as the mission's start spawns it (the original's Game_StartMission @ 0x525d19 ->
+	// Game_SpawnAllEntityGlowEffects @ 0x5227b0 -> Entity_SpawnGlowEffects @ 0x56c7c0, cited in engine/); none with the layer
 	// off (the statics' atlas lanes are published either way).
 	if (shown_lights_ && placed_) lights_->reattach();
 	else lights_->reset();
@@ -1307,7 +1307,7 @@ void MissionViewportApplier::tick(const opennova::editor::ViewportModel &viewpor
 	water_->set_mirror_enabled(false);
 	// The weather's wave on the preview clock (DI-31): the oscillator alone, its PRNG from the mission
 	// start's seed through the start's 255-tick settle, then a tick per game tick (a seek back holds it)
-	// [orig: Environment_UpdateWeatherTick @ 0x57e9b0, the oscillator legs @ 0x57e9fc..0x57eaed].
+	// (the original's Environment_UpdateWeatherTick @ 0x57e9b0, the oscillator legs @ 0x57e9fc..0x57eaed, cited in engine/).
 	opennova::env::WeatherOscillator &wave = weather_->runtime().core().oscillator;
 	if (wave_tick_ < 0) {
 		for (int i = 0; i < opennova::env::WeatherRuntime::kMissionStartPrewarmTicks; ++i) wave.tick();
