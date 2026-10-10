@@ -133,22 +133,26 @@ private:
 };
 
 // Where a finding takes Problems: a project file the scan lists. One the editor opens is
-// opened, the record the finding names selected and its field shown; one the editor does not
-// open (a font, an environment, an archive), or a finding about the file itself rather than
-// what it holds (its row's place: its name, asset.name.* and build.name_unstorable; its place,
-// build.archive_in_project), is shown in Files (`in_files`). Empty when the finding names no
-// file of the project (a required file the project lacks): Problems then only selects its row.
+// opened, the record the finding names selected and its field shown; one the editor has no editor
+// for (a font, a terrain, a wave) lands on its page as every Go to does (`page`, ADR 0046 DI-17: one
+// OpenDocument, always), the record the finding names marked there by its path as the graph names it
+// and its field; a finding about the file itself rather than what it holds (its row's place: its
+// name, asset.name.* and build.name_unstorable; its place, build.archive_in_project) is shown in
+// Files (`in_files`), whose Rename... sets it right. Empty when the finding names no file of the
+// project (a required file the project lacks): Problems then only selects its row.
 struct ProblemLocation {
 	std::string path;
 	NodeAddress record;
 	std::string field;
 	// In a text document (ADR 0046 S13 D9), the finding's place: "line:column" (its column 1 where
-	// the finding names its line alone).
+	// the finding names its line alone); on a file's page, the record the finding names (its path as
+	// the graph names it, Diagnostic::record; "" for the file alone).
 	std::string locator;
+	bool page = false;
 	bool in_files = false;
 	bool empty() const { return path.empty(); }
 	// The request that goes there: OpenDocument with the record and field (a text's place by its
-	// locator), or ShowInFiles.
+	// locator, a page's record by its path), or ShowInFiles.
 	EditorRequest request() const;
 };
 ProblemLocation problem_location(const Diagnostic &diagnostic, const SessionView &view);

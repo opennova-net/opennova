@@ -590,9 +590,10 @@ static int test_merge() {
 }
 
 // Where a finding takes Problems: a file of the project the editor opens, at the record and
-// field the finding names; Files for a file of a kind with no editor and for a file's name or
-// place (S12); nowhere for a required file the project lacks, or a name the scan does not
-// list as a path.
+// field the finding names; a file of a kind with no editor on its page, the record (by its path as
+// the graph names it) and field marked (DI-17: one OpenDocument, always); Files for a file's name
+// or place (S12); nowhere for a required file the project lacks, or a name the scan does not list
+// as a path.
 static int test_location() {
 	SessionView view;
 	view.project.open = true;
@@ -623,14 +624,24 @@ static int test_location() {
 	                                                                      "An unknown key.", "defs/items.def", "subtype"),
 	                                              view);
 	TEST_EXPECT(file.path == "defs/items.def" && file.record == NodeAddress() && file.field.empty());
-	// S12: a file of a kind the editor does not open is shown in Files (ShowInFiles), as is a
-	// file whose name or place is the finding, one the editor opens too; a name the scan does
-	// not list as a path goes nowhere.
+	// DI-17: a file of a kind the editor does not open (the NovaWorld string table; a font is a document since
+	// round S23) lands on its page (an OpenDocument, as every Go to), the record and field the finding names marked
+	// there; a file whose name or place is the finding is shown in Files, one the editor opens too; a name the scan
+	// does not list as a path goes nowhere.
 	for (const char *asset : {"nw_cdata.coo", "art/logo.png"}) {
 		const ProblemLocation shown = problem_location(editor_test::finding_of(DiagnosticSeverity::Warning, "graph.unreadable", "A finding.", asset), view);
-		TEST_EXPECT(shown.path == asset && shown.in_files && shown.request().kind == EditorRequestKind::ShowInFiles &&
-		            shown.request().path == asset && !shown.request().ask_name);
+		const EditorRequest open_page = shown.request();
+		TEST_EXPECT(shown.path == asset && shown.page && !shown.in_files && open_page.kind == EditorRequestKind::OpenDocument &&
+		            open_page.path == asset && open_page.locator.empty() && open_page.field.empty() && !open_page.address.row);
 	}
+	Diagnostic text = editor_test::finding_of(DiagnosticSeverity::Warning, "reference.missing", "A name.", "nw_cdata.coo", "text");
+	text.record = "strings/0";
+	text.row_id = 3;
+	const ProblemLocation marked = problem_location(text, view);
+	const EditorRequest at_record = marked.request();
+	TEST_EXPECT(marked.page && marked.record == NodeAddress() && at_record.kind == EditorRequestKind::OpenDocument &&
+	            at_record.path == "nw_cdata.coo" && at_record.locator == "strings/0" && at_record.field == "text" &&
+	            !at_record.address.row);
 	// The rows about the file as a whole (FindingPlace::File: S13 A6, the four the location named
 	// before; S16 a root-only file an expansion's build leaves out, a file its expansion setting leaves
 	// unread, a mission the game's list shows untitled or twice, a NovaWorld screen the game never reads).
@@ -1116,6 +1127,20 @@ static int test_locations_and_fixes() {
 	TEST_EXPECT(labels_of(fixes_for(text_id, v)) == std::vector<std::string>({"Add NO_ID to ungrouped.bin", "Open ungrouped.bin"}));
 	editor_test::own_reference(text_id).scope = "/menu";
 	TEST_EXPECT(fixes_for(text_id, v).empty());
+	// A file where it belongs that the editor has no editor for (the NovaWorld string table a scope names): its
+	// page opened, as every Go to lands (DI-17), never Files.
+	TEST_EXPECT(editor_test::write_text(root + "/nw_cdata.coo", "coo"));
+	editor_test::handle_to_end(session, request::rescan());
+	const AssetEntry *coo = v.project.scan->find("nw_cdata.coo");
+	TEST_EXPECT(coo && !is_editable_kind(coo->kind));
+	if (!coo) return 1;
+	const std::string coo_path = coo->relative_path, coo_name = coo->logical_name;
+	Diagnostic on_page = style;
+	on_page.subject = ReferenceSubject{ReferenceKind::MenuScreen, "B", coo_name};
+	fixes = fixes_for(on_page, v);
+	TEST_EXPECT(labels_of(fixes) == std::vector<std::string>({"Open the page of " + coo_name}));
+	TEST_EXPECT(fixes.size() == 1 && fixes[0].request.kind == EditorRequestKind::OpenDocument &&
+	            fixes[0].request.path == coo_path && fixes[0].request.locator.empty() && !fixes[0].bulk);
 	// A table of its kind that defines nothing yet: the one the game reads (a weapon table and
 	// a stylesheet emptied).
 	const AssetEntry *weapons = v.project.scan->find("weapon.def");

@@ -28,6 +28,7 @@
 #include <editor/session/navigation_history.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_fixes.h>
+#include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>

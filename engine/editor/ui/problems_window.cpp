@@ -502,6 +502,8 @@ void ProblemsWindow::finding_menu(const SessionView &view, size_t finding) {
 	if (ImGui::MenuItem("Go to", nullptr, false, goes) && goes) workspace_.request(location.request());
 	ui_kit::tooltip(location.empty()   ? std::string("It names no place.")
 	                : location.in_files ? "Show " + location.path + " in Files."
+	                : location.page     ? "Open the page of " + location.path +
+	                                          ", what it is about marked (the editor has no editor for its kind; a click on its row goes too)."
 	                                    : "Open " + location.path + " at what it is about (a click on its row goes too).");
 	const AssetEntry *asset = view.project.scan && !d.asset.empty() ? view.project.scan->at_path(d.asset) : nullptr;
 	const bool reveals = asset && view.allows(EditorRequestKind::ShowInFiles);
