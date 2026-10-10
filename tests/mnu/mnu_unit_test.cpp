@@ -50,10 +50,19 @@ bool noted(const std::vector<mnu::ParseNote> &notes, const std::string &suffix) 
 
 const mnu::Window &root(const mnu::Document &doc) { return doc.screens.at(0).roots.at(0); }
 
-// serialize -> parse -> serialize reproduces the bytes (the writer writes what the
-// reader reads back).
+// The writer's own layout of a document: its text layout set aside, as for a document made in
+// code (a document read with its text layout comes back in its own look; mnu_text_layout_test
+// pins that).
+std::string own_layout(const mnu::Document &doc) {
+  mnu::Document copy = doc;
+  copy.text_layout.reset();
+  return mnu::serialize(copy);
+}
+
+// serialize -> parse -> serialize in the writer's own layout reproduces the bytes (the
+// writer writes what the reader reads back).
 bool fixed_point(const mnu::Document &doc) {
-  const std::string first = mnu::serialize(doc);
+  const std::string first = own_layout(doc);
   mnu::Document again;
   std::vector<mnu::ParseNote> notes;
   if (!parse(first, again, &notes)) return false;
@@ -61,8 +70,8 @@ bool fixed_point(const mnu::Document &doc) {
     std::cerr << "  the written menu reads with a note: " << notes[0].key << " " << notes[0].message << "\n";
     return false;
   }
-  if (mnu::serialize(again) != first) {
-    std::cerr << "  not a fixed point:\n" << first << "\n---\n" << mnu::serialize(again) << "\n";
+  if (own_layout(again) != first) {
+    std::cerr << "  not a fixed point:\n" << first << "\n---\n" << own_layout(again) << "\n";
     return false;
   }
   return true;
@@ -221,7 +230,7 @@ bool test_position_rules() {
   CHECK(p.left == 10 && p.right == 100, "WIDTH adds to the left as it stood (0)");
   CHECK(p.top == 30 && p.bottom == 60, "a second POSITION reads into the same fields");
   CHECK(noted(notes, "/POSITION@LEFT"), "POSITION attributes are noted");
-  const std::string out = mnu::serialize(doc);
+  const std::string out = own_layout(doc);
   CHECK(out.find("<RIGHT>100</RIGHT>") != std::string::npos && out.find("WIDTH") == std::string::npos,
         "written as LEFT/TOP/RIGHT/BOTTOM");
   return true;
@@ -406,7 +415,7 @@ bool test_table_rules() {
   ok.screens[0].roots[0].table_data.min_item_height = 20;
   ok.screens[0].roots[0].table_data.column.headers.pop_back(); // the one past COUNT reads with its note
   CHECK(fixed_point(ok), "fixed point");
-  CHECK(mnu::serialize(ok).find("column=\"1\" PRIMARY_SORT") != std::string::npos,
+  CHECK(own_layout(ok).find("column=\"1\" PRIMARY_SORT") != std::string::npos,
         "the key is written after COLUMN, where it reads the index before it");
   return true;
 }
