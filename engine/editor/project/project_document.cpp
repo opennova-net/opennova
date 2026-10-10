@@ -7,7 +7,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
-#include <base/io/uuid.h>
+#include <base/os_random/os_random.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/expansion_name.h>
 #include <editor/project/project_files.h>
@@ -200,7 +200,7 @@ bool create_project(const std::string &root, const std::string &title, const std
 	if (!io::ensure_directory(paths.root, io_error) || !ensure_project_cache_dir(paths, io_error))
 		return fail(error, CoreFinding::ProjectWrite, io_error);
 	ProjectDocument doc;
-	doc.project_id = io::make_uuid_v4(); // a fresh random UUID, its version 4 text form
+	doc.project_id = opennova::make_uuid_v4(); // a fresh random UUID from the OS CSPRNG, its version 4 text form
 	doc.title = title.empty() ? utf8_of(path_of(paths.root).filename()) : title;
 	doc.target_game = code;
 	doc.expansion = expansion;
