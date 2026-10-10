@@ -1,15 +1,20 @@
 #include <editor/preview/mission_palette.h>
 
 #include <algorithm>
+#include <chrono>
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
 
 #include <base/io/strutil.h>
+#include <editor/assets/project_asset_source.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/preview/mission_items.h>
+#include <editor/preview/mission_map_outline.h>
 #include <editor/session/session_json.h>
+#include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
+#include <formats/threedi/threedi_3di3.h>
 
 namespace opennova::editor {
 
@@ -183,6 +188,80 @@ io::JsonValue mission_palette_to_json(const MissionPalette &palette, const JsonP
 	out.set("items", std::move(items));
 	set_page(out, page, order.size());
 	return out;
+}
+
+// --- the pictures ---------------------------------------------------------------------------------
+
+namespace {
+
+// A project file by the name the asset source serves it by (a path's file name).
+std::string served_file(const std::string &file) {
+	const size_t slash = file.find_last_of('/');
+	return slash == std::string::npos ? file : file.substr(slash + 1);
+}
+
+uint64_t stamp_of(const SessionView &view, const std::string &model) {
+	return view.findings.assets ? view.findings.assets->stamp(served_file(model)) : 0;
+}
+
+} // namespace
+
+std::shared_ptr<const MissionPalettePicture> MissionPalettePictures::get(const SessionView &view,
+		const std::string &model) const {
+	if (model.empty() || !view.findings.assets) return nullptr;
+	const auto found = pictures_.find(model);
+	const bool current = found != pictures_.end() && found->second->stamp == stamp_of(view, model);
+	if (!current && std::find(queue_.begin(), queue_.end(), model) == queue_.end()) queue_.push_back(model);
+	return found == pictures_.end() ? nullptr : found->second;
+}
+
+bool MissionPalettePictures::step(const SessionView &view, int64_t budget_us) {
+	if (queue_.empty() || !view.findings.assets) return false;
+	const auto start = std::chrono::steady_clock::now();
+	bool made = false;
+	while (!queue_.empty()) {
+		if (made && std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count() >=
+				budget_us)
+			break;
+		const std::string model = queue_.front();
+		queue_.erase(queue_.begin());
+		auto picture = std::make_shared<MissionPalettePicture>();
+		picture->model = model;
+		picture->stamp = stamp_of(view, model);
+		std::vector<uint8_t> bytes;
+		if (view.findings.assets->read(served_file(model), bytes) && !bytes.empty()) {
+			threedi::Threedi3di3 parsed{};
+			MissionModelOutline outline;
+			if (threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), &parsed) == 0 &&
+					mission_model_outline(parsed, outline, MissionOutlineView::Side)) {
+				picture->read = true;
+				bool any = false;
+				for (size_t i = 0; i + 5 < outline.edges.size(); i += 6) {
+					// Seen from the side: forward across, up up.
+					const float line[4] = { outline.edges[i], outline.edges[i + 2], outline.edges[i + 3],
+						outline.edges[i + 5] };
+					for (int end = 0; end < 2; ++end)
+						for (int axis = 0; axis < 2; ++axis) {
+							const float v = line[2 * end + axis];
+							picture->lo[axis] = any ? std::min(picture->lo[axis], v) : v;
+							picture->hi[axis] = any ? std::max(picture->hi[axis], v) : v;
+							any = any || axis == 1;
+						}
+					picture->lines.insert(picture->lines.end(), line, line + 4);
+				}
+			}
+			threedi::threedi_3di3_free(&parsed);
+		}
+		pictures_[model] = std::move(picture);
+		++made_;
+		made = true;
+	}
+	return made;
+}
+
+void MissionPalettePictures::clear() {
+	pictures_.clear();
+	queue_.clear();
 }
 
 } // namespace opennova::editor

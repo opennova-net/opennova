@@ -9,6 +9,7 @@
 #include <editor/ui/terrain_viewport_view.h>
 #include <editor/ui/hud_viewport_view.h>
 #include <editor/ui/menu_viewport_view.h>
+#include <editor/ui/mission_map_view.h>
 #include <editor/ui/mission_viewport_view.h>
 #include <editor/ui/model_viewport_view.h>
 #include <editor/ui/script_viewport_view.h>
@@ -29,6 +30,7 @@ std::unique_ptr<ViewportView> make_definition_view() { return std::make_unique<D
 std::unique_ptr<ViewportView> make_environment_view() { return std::make_unique<EnvironmentViewportView>(); }
 std::unique_ptr<ViewportView> make_terrain_view() { return std::make_unique<TerrainViewportView>(); }
 std::unique_ptr<ViewportView> make_font_view() { return std::make_unique<FontViewportView>(); }
+std::unique_ptr<ViewportView> make_map_view() { return std::make_unique<MissionMapViewportView>(); }
 
 constexpr ViewportViewRow kViews[] = {
 	{ ViewportKind::Menu, make_menu_view },
@@ -42,6 +44,7 @@ constexpr ViewportViewRow kViews[] = {
 	{ ViewportKind::Environment, make_environment_view },
 	{ ViewportKind::Terrain, make_terrain_view },
 	{ ViewportKind::Font, make_font_view },
+	{ ViewportKind::Map, make_map_view },
 };
 
 constexpr bool views_in_order() {
