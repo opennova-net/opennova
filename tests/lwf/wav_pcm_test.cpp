@@ -556,6 +556,45 @@ int main() {
 					"AUD1 width 0: a first word of 0x800 or more in size leaves them")) return 1;
 		}
 	}
+	// The byte at +13 shifts the channel's mix coefficients right, arithmetically (psraw
+	// [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd5e6..0x7bd5f3]): each unit halves the
+	// volume, floored, and 15 or more leaves every coefficient of 0 or more (each at most 0x7FFF)
+	// at 0, a silent channel of the buffer's length; the lenient decode alike.
+	{
+		const auto shifted = [&](uint8_t shift, uint8_t width, std::vector<int16_t> &r) {
+			std::vector<uint8_t> aud;
+			push_tag(aud, "AUD1"); push_u32(aud, 5); push_u32(aud, 32768);
+			aud.insert(aud.end(), {width, shift, 0, 0});
+			if (width == 2) {
+				for (const uint16_t s : {uint16_t(0x7FFF), uint16_t(0x8000), uint16_t(1000), uint16_t(0xFC18), uint16_t(0xFFFF)})
+					push_u16(aud, s);
+			} else {
+				aud.insert(aud.end(), {0x7F, 0x80, 0x10, 0xF0, 0xFF});
+			}
+			WavPcm out, lenient;
+			if (!wav_decode_pcm16(aud.data(), aud.size(), out, error) ||
+					!opennova::lwf::wav_decode_pcm16_lenient(aud.data(), aud.size(), lenient, error) ||
+					lenient.pcm16 != out.pcm16 || out.loader_samples != 5 || out.sample_rate != 22050)
+				return false;
+			r = samples_of(out);
+			return true;
+		};
+		std::vector<int16_t> got;
+		if (!expect(shifted(1, 2, got) && got == std::vector<int16_t>({16383, -16384, 500, -500, -1}),
+				"AUD1 +13 of 1 halves a 16-bit buffer, floored")) return 1;
+		if (!expect(shifted(1, 1, got) && got == std::vector<int16_t>({16256, -16384, 2048, -2048, -128}),
+				"AUD1 +13 of 1 halves an 8-bit buffer")) return 1;
+		if (!expect(shifted(14, 2, got) && got == std::vector<int16_t>({1, -2, 0, -1, -1}),
+				"AUD1 +13 of 14 keeps the top bits")) return 1;
+		if (!expect(shifted(14, 1, got) && got == std::vector<int16_t>({1, -2, 0, -1, -1}),
+				"AUD1 +13 of 14 keeps the top bits of an 8-bit buffer")) return 1;
+		for (const uint8_t silent : {uint8_t(15), uint8_t(16), uint8_t(255)}) {
+			for (const uint8_t width : {uint8_t(1), uint8_t(2)}) {
+				if (!expect(shifted(silent, width, got) && got == std::vector<int16_t>(5, 0),
+						"AUD1 +13 of 15 or more is a silent buffer of its length")) return 1;
+			}
+		}
+	}
 
 	// Malformed streams report errors.
 	{

@@ -72,9 +72,10 @@ WaveLoaderWalk wave_loader_walk(const uint8_t *bytes, size_t size);
 
 // Decode a wave as the game's loader takes it [orig: Audio_LoadWavFileFromArchive @ 0x766480] to
 // 16-bit PCM: the loader's own AUD1 buffer (a sample count, a Q16 pitch ratio to the 44100 Hz device,
-// mono signed samples, 16-bit where its width byte is 2 and 8-bit otherwise; the bytes past its count
-// excluded), copied unchecked, else a RIFF WAVE through wave_loader_walk, its samples by their width
-// alone: 8 bits PCM (unsigned, upconverted signed<<8), 16 bits PCM (passthrough), 4 bits mono block
+// mono signed samples, 16-bit where its width byte is 2 and 8-bit otherwise, shifted down by its byte
+// at +13; the bytes past its count excluded), copied unchecked, else a RIFF WAVE through
+// wave_loader_walk, its samples by their width alone: 8 bits PCM (unsigned, upconverted signed<<8),
+// 16 bits PCM (passthrough), 4 bits mono block
 // IMA ADPCM by the loader's own decode, exactly the fact chunk's count of its own nibble steps, read
 // on from the data (none for a count of 0 or less). False with r_error set for an AUD1 buffer that
 // ends inside its header and for every wave the walk refuses (an AOA1 buffer among them), which the

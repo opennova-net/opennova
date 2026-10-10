@@ -77,8 +77,8 @@ constexpr uint32_t kPitchZeroRate = 44100u / 512u;
 // [orig: sub_7BD671 @ 0x7bd67f], the pitch ratio to the 44100 Hz device in Q16 at +8
 // [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd603] and the samples from +16, signed (the
 // RIFF form's 8-bit bias already taken off), 16-bit where the byte at +12 is 2 and 8-bit for any
-// other byte there [orig: sub_7BD671 @ 0x7bd692]. The byte at +13, which the mixer shifts the
-// channel's volume by, is not read (D-SND-46). The copy is the bytes' own size; where they end inside
+// other byte there [orig: sub_7BD671 @ 0x7bd692], their volume shifted down by the byte at +13 [orig:
+// AudioChannel_ComputeMixCoefficients @ 0x7bd5e6]. The copy is the bytes' own size; where they end inside
 // the header or before the count's samples the loader's pad and the mixer read on past them
 // (unwitnessed): ours refuses the first and plays the samples present of the second, the count
 // recorded as it says.
@@ -113,6 +113,25 @@ bool decode_aud1(const uint8_t *bytes, size_t size, WavPcm &out, std::string &er
 		const int16_t first = static_cast<int16_t>(io::read_u16_le(bytes + 16));
 		if (first > -0x800 && first < 0x800)
 			std::fill(out.pcm16.begin(), out.pcm16.begin() + std::min<size_t>(8, present) * 2, uint8_t(0));
+	}
+	// The byte at +13: the mixer shifts the channel's three mix coefficient quadwords right by it,
+	// arithmetically (movzx ecx, byte [edi+0Dh]; movd mm4, ecx; psraw mm5 / mm6 / mm7, mm4 [orig:
+	// AudioChannel_ComputeMixCoefficients @ 0x7bd5e6..0x7bd5f3]), each unit halving the channel's
+	// volume; a count of 15 or more leaves no coefficient above 0 (each at most 0x7FFF; psraw past 15
+	// fills a word with its sign), so the channel plays silent for its length. Ours shifts the samples
+	// alike, s >> n, silence from 15 on. Retail scales each sample by the shifted coefficient,
+	// (s * (c >> n)) >> 16, where the shell's mixer scales by its volume (D-SND-8), so the low bits
+	// round apart, and mm6's negative words (the 2-channel blend table's +/-(80 * w) >> 7 pair and
+	// its 0xD500 constant, channels 1 and 2's fixed quadwords in the 4- to 8-channel modes) shifted
+	// 15 or more stay -1, a delayed tap of -1 for each sample above 0 (D-SND-51).
+	const uint8_t shift = bytes[13];
+	if (shift != 0) {
+		for (size_t i = 0; i < present; ++i) {
+			const int16_t s = static_cast<int16_t>(io::read_u16_le(out.pcm16.data() + 2 * i));
+			const int16_t shifted = shift >= 15 ? int16_t(0) : static_cast<int16_t>(s >> shift);
+			out.pcm16[2 * i] = static_cast<uint8_t>(uint16_t(shifted) & 0xFF);
+			out.pcm16[2 * i + 1] = static_cast<uint8_t>(uint16_t(shifted) >> 8);
+		}
 	}
 	// The rate the ratio is nearest, for the shell's player (the mixer steps by the ratio itself): the
 	// inverse the dialog line's hold takes, (pitch * 44100 + 0x8000) >> 16 [orig: Dialog_LoadAudioClip
